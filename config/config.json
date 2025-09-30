@@ -48,8 +48,8 @@
     "memory_type": "summary",
     "memory": {
       "size": 10,
-      "max_show_round": 4,
-      "max_store_round": 8,
+      "max_show_round": 8,
+      "max_store_round": 20,
       "summary_length": 200,
       "summary_llm": {
         "provider": "siliconflow",

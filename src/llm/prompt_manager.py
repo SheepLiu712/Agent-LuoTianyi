@@ -87,6 +87,8 @@ class PromptManager:
                     
                     name = template_data.get("name", file_path.stem)
                     template_str = template_data.get("template", "")
+                    if isinstance(template_str, list):
+                        template_str = "\n\n".join(template_str)
                     
                     if template_str:
                         self.templates[name] = PromptTemplate(template_str, name)

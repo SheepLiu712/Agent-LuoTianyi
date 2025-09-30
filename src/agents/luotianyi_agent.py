@@ -9,7 +9,6 @@ from abc import ABC, abstractmethod
 import threading
 import os
 
-import yaml
 from jinja2 import Template
 from datetime import datetime
 
@@ -229,14 +228,14 @@ class LuoTianyiAgent(BaseAgent):
             # 3. 检索对话历史
             history = self.get_conversation_history(type="short")
 
-            # 4. 生成回复（增加history参数）
+            # 4. 生成回复
             response = self._generate_response(message, intent_result, retrieved_knowledge, history)
 
             # 5. 更新对话历史（异步线程）
             self._history_thread = threading.Thread(target=self._update_conversation_history, args=(message, response))
             self._history_thread.start()
 
-            response = response.replace("\n", "")
+            # response = response.replace("\n", "")
             return response
 
         except Exception as e:
