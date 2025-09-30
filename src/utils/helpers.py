@@ -30,6 +30,7 @@ def load_config(config_path: str, default_config: Optional[Dict] = None) -> Dict
     
     config_file = Path(config_path)
     if not config_file.exists():
+        print(f"配置文件不存在: {config_path}")
         return config
     
     try:
@@ -43,7 +44,7 @@ def load_config(config_path: str, default_config: Optional[Dict] = None) -> Dict
         config = merge_dict(config, file_config or {})
         
         # 处理环境变量替换
-        config = replace_env_variables(config)
+        config = apply_env_variables(config)
         
     except Exception as e:
         print(f"加载配置文件失败 {config_path}: {e}")
@@ -72,28 +73,35 @@ def merge_dict(base: Dict, update: Dict) -> Dict:
     return result
 
 
-def replace_env_variables(config: Union[Dict, List, str, Any]) -> Union[Dict, List, str, Any]:
-    """替换配置中的环境变量
-    
+def apply_env_variables(config: Any, parent_key: str = "") -> Any:
+    """递归应用环境变量替换配置中的变量，支持多层嵌套
     Args:
-        config: 配置值
-        
+        config: 配置字典或列表或值
+        parent_key: 当前递归的父键路径
     Returns:
-        替换后的配置值
+        替换后的配置
     """
     if isinstance(config, dict):
-        return {key: replace_env_variables(value) for key, value in config.items()}
+        for key, value in config.items():
+            full_key = f"{parent_key}.{key}" if parent_key else key
+            config[key] = apply_env_variables(value, full_key)
+        return config
     elif isinstance(config, list):
-        return [replace_env_variables(item) for item in config]
-    elif isinstance(config, str):
-        # 替换 ${VAR_NAME} 格式的环境变量
-        pattern = r'\$\{([^}]+)\}'
-        
-        def replace_var(match):
-            var_name = match.group(1)
-            return os.environ.get(var_name, match.group(0))
-        
-        return re.sub(pattern, replace_var, config)
+        return [
+            apply_env_variables(item, f"{parent_key}[{i}]")
+            for i, item in enumerate(config)
+        ]
+    elif isinstance(config, str) and config.startswith("$"):
+        env_var = config[1:]
+        if env_var.startswith("{") and env_var.endswith("}"):
+            env_var = env_var[1:-1]
+        env_value = os.environ.get(env_var)
+        if env_value is not None:
+            print(f"环境变量替换: {parent_key} -> {env_var} = {env_value}")
+            return env_value
+        else:
+            print(f"环境变量未设置: {env_var} (路径: {parent_key})")
+            return config
     else:
         return config
 

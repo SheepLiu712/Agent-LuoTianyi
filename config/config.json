@@ -12,7 +12,8 @@
     "vector_store": {
       "type": "chroma",
       "persist_directory": "./data/embeddings",
-      "collection_name": "luotianyi_knowledge"
+      "collection_name": "luotianyi_knowledge",
+      "api_key": "$SILICONFLOW_API_KEY"
     },
     "graph_store": {
       "type": "neo4j",

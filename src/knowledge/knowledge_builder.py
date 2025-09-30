@@ -104,16 +104,20 @@ class KnowledgeBuilder:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # 根据文件名或内容确定类别
-            category = self._infer_category(file_path, data)
-            
-            if isinstance(data, list):
-                # 处理文档列表
-                for item in data:
-                    self._add_knowledge_item(item, category, str(file_path))
-            elif isinstance(data, dict):
-                # 处理单个文档
-                self._add_knowledge_item(data, category, str(file_path))
+            assert isinstance(data,dict), "data should be a dict"
+            for category, content in data.items():
+                assert isinstance(content,(list,dict)), "content should be a list or dict"
+                if isinstance(content, list):
+                    # 处理文档列表
+                    for item in content:
+                        if isinstance(item, list):
+                            item = {
+                                "content": " ".join(item),
+                                "subject": item[0],
+                                'relation': item[1],
+                                "object": item[2]
+                            }
+                        self._add_knowledge_item(item, category, str(file_path))
                 
         except Exception as e:
             self.logger.error(f"处理JSON文件失败 {file_path}: {e}")

@@ -35,7 +35,7 @@ def main():
     
     try:
         # 加载配置
-        config_path = project_root / "config" / "config.yaml"
+        config_path = project_root / "config" / "config.json"
         config = load_config(str(config_path))
         
         # 初始化向量存储
@@ -44,15 +44,15 @@ def main():
         
         # 初始化图检索器（可选）
         graph_retriever = None
-        if "graph_store" in config.get("knowledge", {}):
-            graph_config = config["knowledge"]["graph_store"]
-            try:
-                graph_retriever = GraphRetrieverFactory.create_retriever(
-                    graph_config.get("type", "memory"), 
-                    graph_config
-                )
-            except Exception as e:
-                logger.warning(f"图检索器初始化失败，将跳过: {e}")
+        # if "graph_store" in config.get("knowledge", {}):
+        #     graph_config = config["knowledge"]["graph_store"]
+        #     try:
+        #         graph_retriever = GraphRetrieverFactory.create_retriever(
+        #             graph_config.get("type", "memory"), 
+        #             graph_config
+        #         )
+        #     except Exception as e:
+        #         logger.warning(f"图检索器初始化失败，将跳过: {e}")
         
         # 创建知识库构建器
         builder = KnowledgeBuilder(vector_store, graph_retriever, config)

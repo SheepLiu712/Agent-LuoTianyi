@@ -8,39 +8,67 @@ from typing import Dict, List, Optional, Any, Tuple
 from abc import ABC, abstractmethod
 import numpy as np
 from pathlib import Path
+from langchain_core.embeddings import Embeddings
+import requests
 
 from ..utils.logger import get_logger
 
 
-class Document:
-    """文档类"""
+class SiliconFlowEmbeddings(Embeddings):
+    def __init__(self, model="BAAI/bge-m3", api_key=None, base_url="https://api.siliconflow.cn/v1"):
+        self.model = model
+        self.api_key = api_key
+        self.base_url = base_url
+
+    def embed_documents(self, texts):
+        return [self._embed(text) for text in texts]
+
+    def embed_query(self, text):
+        return self._embed(text)
+
+    def _embed(self, text):
+        url = f"{self.base_url}/embeddings"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        payload = {"model": self.model, "input": text}
+        resp = requests.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        return resp.json()["data"][0]["embedding"]
     
-    def __init__(
-        self,
-        content: str,
-        metadata: Optional[Dict[str, Any]] = None,
-        doc_id: Optional[str] = None
-    ):
-        """初始化文档
-        
-        Args:
-            content: 文档内容
-            metadata: 文档元数据
-            doc_id: 文档ID
-        """
-        self.content = content
-        self.metadata = metadata or {}
-        self.doc_id = doc_id or self._generate_id()
-        self.embedding: Optional[List[float]] = None
+    @staticmethod
+    def name() -> str:
+        return "default"
+
+from langchain_core.documents import Document
+
+# class Document:
+#     """文档类"""
     
-    def _generate_id(self) -> str:
-        """生成文档ID"""
-        import hashlib
-        import time
+#     def __init__(
+#         self,
+#         content: str,
+#         metadata: Optional[Dict[str, Any]] = None,
+#         doc_id: Optional[str] = None
+#     ):
+#         """初始化文档
         
-        content_hash = hashlib.md5(self.content.encode()).hexdigest()[:8]
-        timestamp = str(int(time.time()))[-6:]
-        return f"doc_{content_hash}_{timestamp}"
+#         Args:
+#             content: 文档内容
+#             metadata: 文档元数据
+#             doc_id: 文档ID
+#         """
+#         self.content = content
+#         self.metadata = metadata or {}
+#         self.doc_id = doc_id or self._generate_id()
+#         self.embedding: Optional[List[float]] = None
+    
+#     def _generate_id(self) -> str:
+#         """生成文档ID"""
+#         import hashlib
+#         import time
+        
+#         content_hash = hashlib.md5(self.content.encode()).hexdigest()[:8]
+#         timestamp = str(int(time.time()))[-6:]
+#         return f"doc_{content_hash}_{timestamp}"
 
 
 class VectorStore(ABC):
@@ -82,7 +110,8 @@ class ChromaVectorStore(VectorStore):
         # 配置参数
         self.persist_directory = config.get("persist_directory", "./data/embeddings")
         self.collection_name = config.get("collection_name", "luotianyi_knowledge")
-        self.embedding_model = config.get("embedding_model", "text-embedding-3-small")
+        self.embedding_model = config.get("embedding_model", "BAAI/bge-m3")
+        self.api_key = config.get("api_key", None)
         
         # 初始化Chroma客户端
         self.client = None
@@ -93,24 +122,31 @@ class ChromaVectorStore(VectorStore):
     
     def _init_chroma(self) -> None:
         """初始化Chroma客户端和集合"""
-        # TODO: 实现Chroma初始化
-        # - 创建Chroma客户端
-        # - 获取或创建集合
-        # - 配置嵌入函数
         try:
+            embeddings = SiliconFlowEmbeddings(
+                model=self.embedding_model,
+                base_url="https://api.siliconflow.cn/v1",
+                api_key=self.api_key
+            )
+            # 创建客户端
             import chromadb
             from chromadb.config import Settings
-            
-            # 创建客户端
             self.client = chromadb.PersistentClient(
                 path=self.persist_directory,
                 settings=Settings(anonymized_telemetry=False)
             )
-            
             # 获取或创建集合
-            self.collection = self.client.get_or_create_collection(
-                name=self.collection_name,
-                metadata={"description": "洛天依知识库"}
+            # self.collection = self.client.get_or_create_collection(
+            #     name=self.collection_name,
+            #     embedding_function=embeddings,
+            #     metadata={"description": "洛天依知识库"}
+            # )
+            from langchain_chroma import Chroma
+            self.collection = Chroma(
+                collection_name=self.collection_name,
+                embedding_function=embeddings,
+                persist_directory=self.persist_directory,
+                client=self.client
             )
             
         except ImportError:
@@ -135,20 +171,10 @@ class ChromaVectorStore(VectorStore):
         # - 处理重复文档
         
         try:
-            doc_ids = []
-            contents = []
-            metadatas = []
-            
-            for doc in documents:
-                doc_ids.append(doc.doc_id)
-                contents.append(doc.content)
-                metadatas.append(doc.metadata)
             
             # 添加到集合
-            self.collection.add(
-                ids=doc_ids,
-                documents=contents,
-                metadatas=metadatas
+            doc_ids = self.collection.add_documents(
+                documents
             )
             
             self.logger.info(f"成功添加 {len(documents)} 个文档")
@@ -176,12 +202,12 @@ class ChromaVectorStore(VectorStore):
         
         try:
             # 执行查询
-            results = self.collection.query(
-                query_texts=[query],
-                n_results=k,
+            results = self.collection.similarity_search_with_score(
+                query=query,
+                k=k,
                 **kwargs
             )
-            
+            return results
             # 构建返回结果
             search_results = []
             
@@ -317,7 +343,7 @@ class KnowledgeDocument:
         self.content = content
         self.category = category
         self.title = title or ""
-        self.tags = tags or []
+        self.tags = tags or ""
         self.source = source or ""
         
         # 构建元数据
@@ -330,7 +356,7 @@ class KnowledgeDocument:
         }
         
         # 创建底层Document对象
-        self.document = Document(content=content, metadata=metadata)
+        self.document = Document(page_content=content, metadata=metadata)
     
     def to_document(self) -> Document:
         """转换为Document对象
@@ -351,7 +377,7 @@ class KnowledgeDocument:
             知识文档实例
         """
         return cls(
-            content=data["content"],
+            page_content=data["content"],
             category=data["category"],
             title=data.get("title"),
             tags=data.get("tags"),
