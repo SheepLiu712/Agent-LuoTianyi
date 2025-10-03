@@ -97,7 +97,7 @@ def apply_env_variables(config: Any, parent_key: str = "") -> Any:
             env_var = env_var[1:-1]
         env_value = os.environ.get(env_var)
         if env_value is not None:
-            print(f"环境变量替换: {parent_key} -> {env_var} = {env_value}")
+            # print(f"环境变量替换: {parent_key} -> {env_var} = {env_value}")
             return env_value
         else:
             print(f"环境变量未设置: {env_var} (路径: {parent_key})")

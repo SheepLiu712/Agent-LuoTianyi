@@ -42,8 +42,10 @@ def main():
             ret = vector_store.search(query, k=5)
 
             print(f"查询：{query}")
+            idx = 0
             for doc, distance in ret:
-                print(f"相似度: {1.0 - distance:.4f},  内容: {doc.page_content}")
+                print(f"[{idx}] 相似度: {1.0 - distance:.4f},  内容: {doc.page_content}")
+                idx += 1
     except Exception as e:
         logger.error(f"知识库初始化失败: {e}", exc_info=True)
         sys.exit(1)

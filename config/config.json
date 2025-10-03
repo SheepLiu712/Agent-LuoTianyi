@@ -11,7 +11,8 @@
   "knowledge": {
     "vector_store": {
       "type": "chroma",
-      "persist_directory": "./data/embeddings",
+      "embedding_model": "BAAI/bge-m3",
+      "persist_directory": "./data/custom_vector_store",
       "collection_name": "luotianyi_knowledge",
       "api_key": "$SILICONFLOW_API_KEY"
     },
