@@ -1,0 +1,67 @@
+{
+    "prompt_manager": {
+        "template_dir": "res/agent/prompts"
+    },
+
+    "main_chat": {
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "Pro/deepseek-ai/DeepSeek-V3",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "temperature": 0.7,
+                "max_tokens": 16384,
+                "top_p": 0.9
+            },
+            "prompt_name": "daily_chat_prompt"
+        },
+        "static_variables_file": "res/agent/persona/static_variables.json"
+    },
+
+    "tts":{
+        "character_name":"LuoTianyi",
+        "onnx_model_dir":"res/tts/lty_custom_onnx_model",
+        "language":"zh",
+        "reference_audio_dir":"res/tts/reference_audio",
+        "reference_audio_lyrics" : "res/tts/reference_audio/lrc.json",
+        "save_dir":"data/tts_output",
+
+        "tone_ref_audio_projection": {
+            "normal": "可爱的参考音频2",
+            "happy": "可爱的参考音频2",
+            "gentle": "深情的参考音频",
+            "sad": "难过的参考音频"
+        }
+    },
+
+    "live2d":{
+        "model":{
+            "model_version": "v3",
+            "model_path": "res/live2d/models/luo/model.model3.json",
+            "default_expression": "normal",
+            "offset": [0, -0.2]
+        },
+        "expression_projection":{
+                "微笑脸":"normal",
+                "生气脸":"angry",
+                "呆呆脸":"dumb",
+                "害怕脸":"fear",
+                "难过脸":"sad",
+                "温柔脸":"ease",
+                "喜欢脸":"like"
+        }
+    },
+
+    "gui":{
+        "chat_window":{
+            "font_size": 16
+        },
+        "live2d_container":{
+            "live2d_background":{
+                "type": "image",
+                "image_path": "res/live2d/backgrounds/bg2.jpg"
+            }
+        }
+    }
+}

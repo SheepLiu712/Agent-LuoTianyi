@@ -10,7 +10,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.agents.luotianyi_agent import LuoTianyiAgent
+from src.agent.old_luotianyi_agent import LuoTianyiAgent
 from src.utils.logger import setup_logging
 
 

@@ -19,7 +19,7 @@ _DEFAULT_CONFIG = {
     "level": "DEBUG",
     "format": "{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}",
     "file": "./logs/agent.log",
-    "rotation": "100 MB",
+    "rotation": "20 MB",
     "retention": "30 days",
     "console_output": True,
     "file_output": True
@@ -57,6 +57,7 @@ def get_logger(name: str) -> logging.Logger:
     # 创建新的日志记录器
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, _DEFAULT_CONFIG["level"]))
+    logger.propagate = False
     
     # 避免重复添加处理器
     if not logger.handlers:
@@ -109,7 +110,7 @@ def _create_file_handler() -> logging.Handler:
         文件日志处理器
     """
     # 解析轮转大小
-    rotation_size = _parse_size(_DEFAULT_CONFIG.get("rotation", "100 MB"))
+    rotation_size = _parse_size(_DEFAULT_CONFIG.get("rotation", "20 MB"))
     
     # 文件日志格式
     file_formatter = logging.Formatter(

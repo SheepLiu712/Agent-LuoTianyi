@@ -1,21 +1,24 @@
-from src.agents.luotianyi_agent import LuoTianyiAgent
-import re
-agent = LuoTianyiAgent("config/config.json")
+import sys
+import os
+import json
 
-try:
-    while True:
-        query = input()
-        response = agent.chat(query)
+cwd = os.getcwd()
+if cwd not in sys.path:
+    sys.path.append(cwd)
 
-        # 按照中文标点符号和emoji将回复文本分割成多个部分
-        # segments = re.split(r'(?<=[。！？])|(?=[\U0001F600-\U0001F64F])', response)
-        segments = re.split(r'\n\n', response)
-        # 逐个输出
-        import time
-        for segment in segments:
-            # 删除所有回车
-            length = len(segment)
-            time.sleep(0.1 * length)  # 根据文本长度调整延迟时间
-            print(f"[{time.strftime('%H:%M')}] {segment}")
-except KeyboardInterrupt:
-    pass
+from src.agent.luotianyi_agent import LuoTianyiAgent
+from src.utils.helpers import load_config
+from src.gui import ui_init
+from src.live2d import live2d
+
+if __name__ == "__main__":
+    main_config_path = os.path.join("config", "test_config.json")
+    # main_config = load_config(main_config_path)
+
+    app = ui_init()
+    agent = LuoTianyiAgent(main_config_path)
+    agent.window.show()
+
+    ret = app.exec()
+    live2d.dispose()
+    sys.exit(ret)

@@ -64,11 +64,12 @@ ehthumbs.db
 Thumbs.db
 
 # 项目特定
-config/config.yaml
 logs/
 data/knowledge/
 data/models/
 *.log
+res/
+data/
 
 # Jupyter Notebook
 .ipynb_checkpoints
