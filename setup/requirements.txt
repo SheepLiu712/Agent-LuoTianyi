@@ -1,0 +1,4 @@
+requests
+colorlog
+openai
+jinja2

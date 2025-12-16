@@ -154,7 +154,7 @@ class TTSModule:
             character_name=self.character_name,
             text=text,
             play = False,
-            split_sentence= True,
+            split_sentence= False,
             save_path=save_path,
             )
         genie.wait_for_playback_done()

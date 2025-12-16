@@ -49,6 +49,9 @@ class MainChat:
             if len(parts) != 3:
                 continue
             expression, tone, content = parts
+            content = content.strip()
+            if content.endswith("。") or content.endswith("？") or content.endswith("！") or content.endswith("!") or content.endswith("?"): # delete punctuation at the end
+                content = content[:-1].strip()
             result.append(OneSentenceChat(expression.strip(), tone.strip(), content.strip()))
 
         return result

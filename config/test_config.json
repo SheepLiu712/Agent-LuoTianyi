@@ -28,8 +28,8 @@
         "save_dir":"data/tts_output",
 
         "tone_ref_audio_projection": {
-            "normal": "可爱的参考音频2",
-            "happy": "可爱的参考音频2",
+            "normal": "深情的参考音频",
+            "happy": "深情的参考音频",
             "gentle": "深情的参考音频",
             "sad": "难过的参考音频"
         }

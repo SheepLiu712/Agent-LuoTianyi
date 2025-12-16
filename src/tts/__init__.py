@@ -1,1 +1,1 @@
-from .tts_module import TTSModule
+from .tts_module_gsv import TTSModule

@@ -18,15 +18,16 @@ genie.load_character(
 
 genie.set_reference_audio(
     character_name='LuoTianyi',  # Must match loaded character name
-    audio_path=r"res/tts/reference_audio/可爱的参考音频2.wav",  # Path to reference audio
-    audio_text="前段时间的拜师学艺、埋头苦学，今天看起来，好像是颇见成效啦！",  # Corresponding text
+    audio_path=r"res/tts/reference_audio/深情的参考音频.wav",  # Path to reference audio
+    audio_text="今天和你们度过的每一秒都超级幸福的！期待下一次再见啦",  # Corresponding text
 )
 
 genie.tts(
     character_name='LuoTianyi',  # Must match loaded character
-    text="你好呀！今天过得怎么样呀？",  # Text to synthesize
+    text="能和你聊天真的很开心~",  # Text to synthesize
     play=True,  # Play audio directly
-    save_path=None,  # Output audio file path
+    save_path="output.wav",  # Output audio file path
+    split_sentence=True,  # Whether to split long sentences
 )
 
 genie.wait_for_playback_done()

@@ -67,6 +67,13 @@ class SiliconFlowAPIInterface(
         self.logger = get_logger(__name__)
         self._init_parameters()
         self.response_time_queue = deque(maxlen=20)  # 存储最近的响应时间
+        
+        # 检查 SSL_CERT_FILE 环境变量，如果指向的文件不存在，则移除该环境变量，防止 httpx/ssl 报错
+        ssl_cert_file = os.environ.get("SSL_CERT_FILE")
+        if ssl_cert_file and not os.path.exists(ssl_cert_file):
+            self.logger.warning(f"检测到 SSL_CERT_FILE 环境变量指向不存在的文件: {ssl_cert_file}。正在移除该环境变量以避免错误。")
+            del os.environ["SSL_CERT_FILE"]
+
         try:
             self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
             self.logger.info(f"硅基流动客户端初始化完成，模型: {self.model}")

@@ -66,7 +66,7 @@ class LuoTianyiAgent:
 
         task_list: List[tuple[str, OneSentenceChat]] = []
         for idx,resp in enumerate(responses):
-            print(resp)
+            
             task_id = self.tts_engine.add_task(resp.content, resp.tone,idx)
             task_list.append((task_id, resp))
 
