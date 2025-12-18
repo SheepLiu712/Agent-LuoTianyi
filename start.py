@@ -12,7 +12,7 @@ from src.gui import ui_init
 from src.live2d import live2d
 
 if __name__ == "__main__":
-    main_config_path = os.path.join("config", "test_config.json")
+    main_config_path = os.path.join("config", "config.json")
     # main_config = load_config(main_config_path)
 
     app = ui_init()

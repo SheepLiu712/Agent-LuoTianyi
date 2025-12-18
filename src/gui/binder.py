@@ -9,13 +9,16 @@ class AgentBinder(QObject):
     update_signal = Signal(str)
     delete_signal = Signal()
     free_signal = Signal(bool)
+    history_signal = Signal(list, int)  # history_list, current_top_index
 
-    def __init__(self, hear_callback):
+    def __init__(self, hear_callback, history_callback=None):
         super().__init__()
         if hear_callback:
             self.recv_callback = hear_callback
         else:
             raise ValueError("hear_callback must be provided")
+        
+        self.history_callback = history_callback
     
         self.thinking_thread: threading.Thread | None = None
         self.thinking: bool = False
@@ -29,6 +32,22 @@ class AgentBinder(QObject):
         thread = threading.Thread(target=self.recv_callback, args=(text,))
         thread.daemon = True
         thread.start()
+
+    def load_history(self, count: int, end_index: int = -1):
+        """
+        请求加载历史记录
+        :param count: 加载的数量
+        :param end_index: 结束索引（不包含），-1表示从最新开始
+        """
+        if self.history_callback:
+            thread = threading.Thread(target=self._fetch_history, args=(count, end_index))
+            thread.daemon = True
+            thread.start()
+
+    def _fetch_history(self, count, end_index):
+        if self.history_callback:
+            history_data, start_index = self.history_callback(count, end_index)
+            self.history_signal.emit(history_data, start_index)
 
     def update_bubble(self) -> None:
         '''

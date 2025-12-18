@@ -1,320 +1,289 @@
-"""
-对话管理模块
-
-管理对话历史、上下文状态和会话记忆
-"""
-
-from typing import Dict, List, Optional, Any
+import os
+import json
 from datetime import datetime
-from abc import ABC, abstractmethod
-
+from typing import List, Dict, Any
+from dataclasses import dataclass, asdict
 from ..utils.logger import get_logger
-from ..llm.siliconflow_client import SiliconFlowClient
+from ..llm.llm_module import LLMModule
+from ..llm.prompt_manager import PromptManager
+from threading import Thread
+from ..utils.enum_type import ContextType, ConversationSource
 
-
-class ConversationMemory(ABC):
-    """对话记忆基类"""
-
-    @abstractmethod
-    def add_message(self, role: str, content: str, metadata: Optional[Dict] = None) -> None:
-        """添加消息到记忆中"""
-        pass
-
-    @abstractmethod
-    def get_messages(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """获取消息历史"""
-        pass
-
-    @abstractmethod
-    def clear(self) -> None:
-        """清空记忆"""
-        pass
-
-
-class BufferMemory(ConversationMemory):
-    """缓冲区记忆
-
-    保存最近N轮对话的简单记忆实现
-    """
-
-    def __init__(self, max_size: int = 10):
-        """初始化缓冲区记忆
-
-        Args:
-            max_size: 最大保存的对话轮数
-        """
-        self.max_size = max_size
-        self.messages: List[Dict[str, Any]] = []
-        self.logger = get_logger(__name__)
-
-    def add_message(self, role: str, content: str, metadata: Optional[Dict] = None) -> None:
-        """添加消息到缓冲区
-
-        Args:
-            role: 消息角色 (user/assistant)
-            content: 消息内容
-            metadata: 额外元数据
-        """
-        # TODO: 实现消息添加逻辑
-        # - 创建消息对象
-        # - 添加时间戳
-        # - 维护缓冲区大小限制
-        pass
-
-    def get_messages(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """获取消息历史
-
-        Args:
-            limit: 限制返回的消息数量
-
-        Returns:
-            消息历史列表
-        """
-        # TODO: 实现消息获取逻辑
-        pass
-
-    def clear(self) -> None:
-        """清空缓冲区"""
-        # TODO: 清空消息列表
-        pass
-
-
-class SummaryMemory(ConversationMemory):
-    """摘要记忆
-
-    对历史对话进行摘要压缩的记忆实现
-    """
-
-    def __init__(
-        self,
-        config: Dict[str, Any]
-    ):
-        """初始化摘要记忆
-
-        Args:
-            config: 配置字典
-        """
-        self.max_tokens = config.get("max_tokens", 1000)
-        self.max_show_round = config.get("max_show_round", 20)
-        self.max_store_round = config.get("max_store_round", 40)
-        self.round_counter = 0
-        self.summary: str = "没有更早的消息"
-        self.recent_messages: List[Dict[str, Any]] = []
-        self.logger = get_logger(__name__)
-        self.summary_llm_config = config.get("summary_llm", None)
-        self.summary_llm = self._get_summary_llm(self.summary_llm_config)
-        self.summary_prompt = self._get_summary_prompt(config.get("summary_prompt", ""))
-        self.logger.info("摘要记忆初始化完成")
-
-    def add_message(self, role: str, content: str, metadata: Optional[Dict] = None) -> None:
-        """添加消息并更新摘要
-
-        Args:
-            role: 消息角色
-            content: 消息内容
-            metadata: 额外元数据
-        """
-        self.recent_messages.append({"role": role, "content": content, "metadata": metadata})
-        if len(self.recent_messages) > self.max_store_round:
-            self.recent_messages.pop(0)
-        self.round_counter += 1
-        if self.round_counter % self.max_show_round == 0: # 每次进来一批完全新的，不被主要回答LLM看到的对话
-            self._generate_summary()
-
-
-    def get_messages(self, limit: Optional[int] = None) -> Dict[str, Any]:
-        message = {
-            "摘要": self.summary,
-            "最近消息": self.recent_messages[-limit:] if limit else self.recent_messages[-self.max_show_round:]
-        }
-        self.logger.debug(f"获取消息：{message}")
-        return message
-
-    def clear(self) -> None:
-        """清空摘要和消息"""
-        self.summary = "没有更早的消息"
-        self.recent_messages.clear()
-
-    def _generate_summary(self) -> str:
-        """生成对话摘要
-
-        Returns:
-            对话摘要文本
-        """
-        query = self.summary_prompt + f"\n现有总结：{self.summary}\n最近对话：\n{self.recent_messages}"
-        self.summary = self.summary_llm.chat(query)
-        self.logger.debug(f"生成摘要：{self.summary}")
-
-    def _get_summary_llm(self, summary_llm_config: Dict[str, Any]) -> Optional[SiliconFlowClient]:
-        if summary_llm_config is None:
-            raise ValueError("summary_llm_config不能为空")
-        if summary_llm_config.get("provider") == "siliconflow":
-            return SiliconFlowClient(summary_llm_config)
-        else:
-            raise ValueError(f"不支持的LLM提供商: {summary_llm_config.get('provider')}")
-    
-    def _get_summary_prompt(self, prompt: str) -> str:
-        '''从json模板中获取摘要模板
-
-        Args:
-            prompt: prompt模板位置
-        
-        Return:
-            摘要模板
-        
-        '''
-        # 读取json文件
-        with open(prompt, 'r', encoding='utf-8') as f:
-            import json
-            template = json.load(f)
-        template = template.get("template", "")
-        # self.logger.debug(f"使用摘要模板: {template}")
-        return template
-
+@dataclass
+class ConversationItem:
+    timestamp: str
+    source: str
+    type: str
+    content: str
+    def __repr__(self) -> str:
+        return f"[{self.timestamp}] {self.source} ({self.type}): {self.content}"
+    def __str__(self):
+        return self.__repr__()
 
 class ConversationManager:
-    """对话管理器
-
-    管理对话状态、上下文和记忆
     """
-
-    def __init__(self, memory_type: str = "buffer", memory_config: Optional[Dict] = None):
-        """初始化对话管理器
-
-        Args:
-            memory_type: 记忆类型 (buffer/summary/kg)
-            memory_config: 记忆配置参数
-        """
+    对话管理器
+    负责管理对话历史，包括存储、读取和上下文生成
+    支持文件轮转和索引管理
+    """
+    def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager) -> None:
         self.logger = get_logger(__name__)
-        self.memory = self._create_memory(memory_type, memory_config or {})
-        self.context: Dict[str, Any] = {}
-        self.session_id: Optional[str] = None
-        self.start_time: Optional[datetime] = None
+        self.config = config
+        self.llm = LLMModule(config["llm_module"], prompt_manager)
+        self.history_dir = self.config.get("history_dir", "data/memory/conversation_history")
+        self.max_file_lines = self.config.get("max_file_lines", 2500)
+        self.recent_limit = self.config.get("recent_history_limit", 100)
+        
+        self._ensure_directory()
+        self.index_file = os.path.join(self.history_dir, "index.json")
 
-    def _create_memory(self, memory_type: str, config: Dict) -> ConversationMemory:
-        """创建记忆实例
+        
+        self.index_data = self._load_index()
+        
+        # 内存缓存（仅存储最近的对话）
+        self.recent_history: List[ConversationItem] = []
+        self._load_recent_history()
 
-        Args:
-            memory_type: 记忆类型
-            config: 配置参数
+        # 上下文管理相关
+        self.context_file = self.config.get("context_file", "data/memory/context/context.json")
+        self.raw_conversation_context_limit = self.config.get("raw_conversation_context_limit", 100)
+        self.forget_conversation_days = self.config.get("forget_conversation_days", 10)
+        self.not_zip_conversation_count = self.config.get("not_zip_conversation_count", 20)
+        self._load_context()
+        self.update_context_thread: Thread | None = None
 
-        Returns:
-            记忆实例
+    def add_conversation(self, source: ConversationSource, content: str, type: ContextType = ContextType.TEXT):
         """
-        if memory_type == "buffer":
-            raise NotImplementedError("BufferMemory尚未实现")
-            return BufferMemory(max_size=config.get("max_size", 10))
-        elif memory_type == "summary":
-            return SummaryMemory(
-                config
-            )
+        添加对话
+        """
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item = ConversationItem(
+            timestamp=timestamp,
+            source=source.value,
+            type=type.value,
+            content=content
+        )
+        
+        # 1. 获取当前文件信息
+        file_info = self._get_current_file_info()
+        file_path = os.path.join(self.history_dir, file_info["filename"])
+        
+        # 2. 写入文件
+        with open(file_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(asdict(item), ensure_ascii=False) + "\n")
+        
+        # 3. 更新索引
+        file_info["count"] += 1
+        file_info["end_index"] += 1
+        self.index_data["total_count"] += 1
+        self._save_index()
+        
+        # 4. 更新内存缓存
+        self.recent_history.append(item)
+        if len(self.recent_history) > self.recent_limit:
+            self.recent_history.pop(0)
+        
+        self.context.append(item)
+        if len(self.context) > self.raw_conversation_context_limit:
+            self.update_context_thread = Thread(target=self._update_context)
+            self.update_context_thread.daemon = True
+            self.update_context_thread.start()
         else:
-            raise ValueError(f"不支持的记忆类型: {memory_type}")
+            # 直接保存上下文
+            self._save_context()
 
-    def start_session(self, session_id: Optional[str] = None) -> str:
-        """开始新的对话会话
-
-        Args:
-            session_id: 会话ID，如果为None则自动生成
-
-        Returns:
-            会话ID
+    def get_history(self, start: int, end: int) -> List[ConversationItem]:
         """
-        # TODO: 实现会话启动逻辑
-        # - 生成或设置会话ID
-        # - 记录开始时间
-        # - 初始化上下文
-        pass
-
-    def end_session(self) -> None:
-        """结束当前会话"""
-        # TODO: 实现会话结束逻辑
-        # - 保存会话信息
-        # - 清理临时状态
-        pass
-
-    def add_user_message(self, content: str, metadata: Optional[Dict] = None) -> None:
-        """添加用户消息
-
-        Args:
-            content: 消息内容
-            metadata: 消息元数据
+        调用历史对话
+        :param start: 开始编号 (包含)
+        :param end: 结束编号 (不包含)
+        :return: 对话对象列表
         """
-        # TODO: 添加用户消息到记忆
-        self.memory.add_message("user", content, metadata)
+        total = self.index_data["total_count"]
+        if start < 0: start = 0
+        if end > total: end = total
+        if start >= end: return []
 
-    def add_assistant_message(self, content: str, metadata: Optional[Dict] = None) -> None:
-        """添加助手消息
+        # 检查是否完全在最近缓存中
+        # 缓存范围: [total - len(recent), total)
+        cache_start_idx = total - len(self.recent_history)
+        if start >= cache_start_idx:
+            # 计算在缓存中的相对位置
+            rel_start = start - cache_start_idx
+            rel_end = end - cache_start_idx
+            return self.recent_history[rel_start:rel_end]
 
-        Args:
-            content: 消息内容
-            metadata: 消息元数据
+        # 如果不在缓存中，或者跨越了缓存，则从文件读取
+        # 为了简单起见，只要请求范围不完全在缓存中，就去查文件
+        # (也可以优化为部分查文件+部分查缓存，但这里直接查文件逻辑更统一)
+        
+        result = []
+        # 找到涉及的文件
+        for file_info in self.index_data["files"]:
+            f_start = file_info["start_index"]
+            f_end = file_info["end_index"] # exclusive for the file range logic usually, but let's check logic
+            # index logic: start_index is inclusive, end_index is exclusive (start + count)
+            
+            # 检查区间重叠
+            # 请求区间 [start, end)
+            # 文件区间 [f_start, f_end)
+            
+            if start < f_end and end > f_start:
+                # 计算重叠部分
+                read_start = max(start, f_start)
+                read_end = min(end, f_end)
+                
+                # 计算文件内的行号偏移
+                # 文件第一行对应 f_start
+                skip_lines = read_start - f_start
+                count_lines = read_end - read_start
+                
+                file_items = self._read_lines_from_file(file_info["filename"], skip_lines, count_lines)
+                result.extend(file_items)
+                
+        return result
+    
+    def get_context(self) -> str:
         """
-        # TODO: 添加助手消息到记忆
-        self.memory.add_message("Luo Tianyi", content, metadata)
-
-    def get_conversation_history(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """获取对话历史
-
-        Args:
-            limit: 限制返回的消息数量
-
-        Returns:
-            对话历史
+        调用上下文 
+        返回一个长度的上下文，包含最近对话中的部分原文和更远对话的总结
         """
-        return self.memory.get_messages(limit)
+        if self.update_context_thread is not None and self.update_context_thread.is_alive(): # 等待上下文更新线程完成
+            self.update_context_thread.join()
+        return "更早对话总结：" + self.summary + \
+              "\n 最近对话：\n" + "\n".join([f"[{item.timestamp}]{item.source}: {item.content}" for item in self.context])
 
-    def update_context(self, key: str, value: Any) -> None:
-        """更新上下文信息
+    def _ensure_directory(self):
+        if not os.path.exists(self.history_dir):
+            os.makedirs(self.history_dir)
 
-        Args:
-            key: 上下文键
-            value: 上下文值
-        """
-        # TODO: 更新上下文字典
-        self.context[key] = value
-
-    def get_context(self, key: Optional[str] = None) -> Any:
-        """获取上下文信息
-
-        Args:
-            key: 上下文键，如果为None则返回整个上下文
-
-        Returns:
-            上下文值或整个上下文字典
-        """
-        # TODO: 返回指定的上下文信息
-        if key is None:
-            return self.context
-        return self.context.get(key)
-
-    def clear_context(self) -> None:
-        """清空上下文"""
-        # TODO: 清空上下文字典
-        self.context.clear()
-
-    def reset(self) -> None:
-        """重置对话管理器"""
-        # TODO: 重置所有状态
-        # - 清空记忆
-        # - 清空上下文
-        # - 重置会话信息
-        self.memory.clear()
-        self.clear_context()
-        self.session_id = None
-        self.start_time = None
-        self.logger.info("对话管理器已重置")
-
-    def get_session_info(self) -> Dict[str, Any]:
-        """获取会话信息
-
-        Returns:
-            会话信息字典
-        """
-        # TODO: 返回当前会话的详细信息
-        return {
-            "session_id": self.session_id,
-            "start_time": self.start_time,
-            "message_count": len(self.memory.get_messages()),
-            "context_keys": list(self.context.keys()),
+    def _load_index(self) -> Dict[str, Any]:
+        """加载或初始化索引文件"""
+        if os.path.exists(self.index_file):
+            try:
+                with open(self.index_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        
+        # 初始化默认索引
+        default_index = {
+            "total_count": 0,
+            "files": []
         }
+        return default_index
+
+    def _save_index(self):
+        """保存索引文件"""
+        with open(self.index_file, 'w', encoding='utf-8') as f:
+            json.dump(self.index_data, f, ensure_ascii=False, indent=4)
+
+    def _get_current_file_info(self) -> Dict[str, Any]:
+        """获取当前正在写入的文件信息，如果不存在则创建"""
+        if not self.index_data["files"]:
+            # 创建第一个文件
+            new_file = {
+                "filename": "history_0.jsonl",
+                "count": 0,
+                "start_index": 0,
+                "end_index": 0
+            }
+            self.index_data["files"].append(new_file)
+            return new_file
+        
+        current = self.index_data["files"][-1]
+        if current["count"] >= self.max_file_lines:
+            # 需要轮转到新文件
+            next_idx = len(self.index_data["files"])
+            new_file = {
+                "filename": f"history_{next_idx}.jsonl",
+                "count": 0,
+                "start_index": self.index_data["total_count"],
+                "end_index": self.index_data["total_count"]
+            }
+            self.index_data["files"].append(new_file)
+            return new_file
+        
+        return current
+
+    def _load_recent_history(self):
+        """加载最近的N条历史对话"""
+        self.recent_history = []
+        total = self.index_data["total_count"]
+        if total == 0:
+            return
+
+        start_idx = max(0, total - self.recent_limit)
+        self.recent_history = self.get_history(start_idx, total)
+    
+    def _load_context(self):
+        if not os.path.exists(self.context_file):
+            self.context = []
+            self.summary = ""
+            return
+        try:
+            with open(self.context_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                raw_context = data.get("context", [])
+                self.context = [ConversationItem(**item) for item in raw_context]
+                self.summary = data.get("summary", "")
+        except Exception:
+            self.context = []
+            self.summary = ""
+    
+    def _save_context(self):
+        data = {
+            "summary": self.summary,
+            "context": [asdict(item) for item in self.context],
+        }
+        with open(self.context_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+            
+    
+    def _update_context(self):
+        '''
+        更新上下文，将较早的对话进行总结
+        通过调用LLM生成新的总结
+        这一过程会在后台线程中进行，但是如果要调用上下文时会等待完成
+        生成新的summary后，更新self.summary和self.context
+        '''
+        self.logger.debug("Updating conversation context summary...")
+        new_summary = self.llm.generate_response(
+            forget_conversation_days = self.forget_conversation_days,
+            current_summary = self.summary,
+            recent_conversation = "\n".join([f"[{item.timestamp}]{item.source}: {item.content}" for item in self.context])
+        )
+        print(new_summary)
+        self.summary = new_summary.strip()
+        self.context = self.context[-self.not_zip_conversation_count:]
+        self._save_context()
+
+    def _read_lines_from_file(self, filename: str, skip: int, count: int) -> List[ConversationItem]:
+        """从指定文件读取指定行"""
+        items = []
+        file_path = os.path.join(self.history_dir, filename)
+        if not os.path.exists(file_path):
+            return items
+            
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                # 跳过前 skip 行
+                for _ in range(skip):
+                    next(f, None)
+                
+                # 读取 count 行
+                for _ in range(count):
+                    line = next(f, None)
+                    if line is None:
+                        break
+                    if line.strip():
+                        try:
+                            data = json.loads(line)
+                            items.append(ConversationItem(**data))
+                        except Exception:
+                            continue
+        except Exception:
+            pass
+        return items
+
+

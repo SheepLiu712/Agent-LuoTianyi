@@ -19,6 +19,28 @@
         "static_variables_file": "res/agent/persona/static_variables.json"
     },
 
+    "conversation_manager": {
+        "history_dir": "data/memory/conversation_history",
+        "max_file_lines": 1000,
+        "recent_history_limit": 100,
+        "context_file": "data/memory/context/context.json",
+        "raw_conversation_context_limit": 80,
+        "not_zip_conversation_count": 16,
+        "forget_conversation_days": 10,
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "Qwen/Qwen3-32B",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "temperature": 0.7,
+                "max_tokens": 16384,
+                "top_p": 0.9
+            },
+            "prompt_name": "summary_prompt"
+        }
+    },
+
     "tts":{
         "character_name":"LuoTianyi",
         "onnx_model_dir":"res/tts/lty_custom_onnx_model",
@@ -55,7 +77,8 @@
 
     "gui":{
         "chat_window":{
-            "font_size": 16
+            "font_size": 16,
+            "load_history_num": 20
         },
         "live2d_container":{
             "live2d_background":{

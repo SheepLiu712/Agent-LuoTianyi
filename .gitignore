@@ -68,8 +68,8 @@ logs/
 data/knowledge/
 data/models/
 *.log
-res/
-data/
+res/*
+data/*
 
 # Jupyter Notebook
 .ipynb_checkpoints

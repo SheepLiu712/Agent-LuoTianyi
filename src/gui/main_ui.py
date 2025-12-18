@@ -2,7 +2,7 @@
 import sys
 import os
 import json
-from PySide6.QtCore import Qt, QTimerEvent, QSize, QRect, QEvent
+from PySide6.QtCore import Qt, QTimerEvent, QSize, QRect, QEvent, QTimer
 from PySide6.QtGui import QMouseEvent, QPainter, QColor, QImage, QPixmap, QResizeEvent, QSurfaceFormat, QFont, QFontMetrics, QTextOption, QIcon
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
                                QTextEdit, QLineEdit, QScrollArea, QLabel, 
@@ -213,14 +213,26 @@ class ChatBubble(QWidget):
         self.setFixedHeight(final_height + 10)
 
 class ChatWidget(QWidget):
-    def __init__(self, parent=None, agent_binder: AgentBinder = None):
+    def __init__(self, parent=None, config: Dict = None, agent_binder: AgentBinder = None):
         super().__init__(parent)
+        self.config = config if config is not None else {}
         self.agent = agent_binder if agent_binder is not None else AgentBinder()
         self.agent.response_signal.connect(self.on_agent_response)
         self.agent.update_signal.connect(self.on_agent_update)
         self.agent.delete_signal.connect(self.on_agent_delete)
         self.agent.free_signal.connect(self.on_agent_free_status_changed)
+        
+        # History loading
+        self.agent.history_signal.connect(self.on_history_loaded)
+        self.load_history_num = self.config.get("load_history_num", 20)
+        self.current_history_index = -1
+        self.is_loading_history = False
+        self.first_load = True
+
         self.init_ui()
+
+        # Initial load
+        QTimer.singleShot(100, lambda: self.agent.load_history(self.load_history_num, -1))
 
     def init_ui(self):
         # Right side background color
@@ -271,6 +283,7 @@ class ChatWidget(QWidget):
         self.history_layout.addStretch() # Push messages to bottom
         
         self.scroll_area.setWidget(self.history_container)
+        self.scroll_area.verticalScrollBar().valueChanged.connect(self.on_scroll_value_changed)
         
         # Horizontal Line
         self.h_line = QFrame()
@@ -319,6 +332,42 @@ class ChatWidget(QWidget):
         
         self.setLayout(layout)
         self.temp_is_user = True
+
+    def on_scroll_value_changed(self, value):
+        if value == 0 and not self.is_loading_history and self.current_history_index > 0:
+            self.is_loading_history = True
+            self.agent.load_history(self.load_history_num, self.current_history_index)
+
+    def on_history_loaded(self, history_list, start_index):
+        self.is_loading_history = False
+        if not history_list:
+            return
+            
+        self.current_history_index = start_index
+        
+        # Save scroll position
+        scrollbar = self.scroll_area.verticalScrollBar()
+        old_max = scrollbar.maximum()
+        old_value = scrollbar.value()
+        
+        # Prepend messages
+        for item in reversed(history_list):
+            is_user = (item["source"] == "user")
+            bubble = ChatBubble(item["content"], is_user)
+            self.history_layout.insertWidget(0, bubble)
+            
+        # Restore scroll position
+        QApplication.processEvents()
+        new_max = scrollbar.maximum()
+        
+        if self.first_load:
+            # Use QTimer to ensure layout is updated and scrollbar max is correct
+            QTimer.singleShot(50, lambda: scrollbar.setValue(scrollbar.maximum()))
+            self.first_load = False
+        elif old_max != new_max:
+             QTimer.singleShot(50, lambda: scrollbar.setValue(old_value + scrollbar.maximum() - old_max))
+        else:
+            QTimer.singleShot(50, lambda: scrollbar.setValue(scrollbar.maximum() - old_max))
 
     def on_text_changed(self):
         self.can_send = bool(self.input_box.toPlainText().strip()) and self.agent_free
@@ -441,7 +490,7 @@ class MainWindow(QWidget):
         self.v_line.setFixedWidth(2)
 
         # Right Side (Chat)
-        self.chat_widget = ChatWidget(agent_binder=ui_binder)
+        self.chat_widget = ChatWidget(config=gui_config["chat_window"], agent_binder=ui_binder)
         self.layout.addWidget(self.live2d_container)
         self.layout.addWidget(self.v_line)
         self.layout.addWidget(self.chat_widget)
