@@ -2,3 +2,5 @@ requests
 colorlog
 openai
 jinja2
+chromadb
+networkx

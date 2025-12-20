@@ -13,10 +13,14 @@ import os
 
 from typing import Dict, List, Optional, Any, Tuple
 from abc import ABC, abstractmethod
-from langchain_core.documents import Document
 
 class BaseDocument(ABC):
     """文档基类"""
+    def __init__(self):
+        self.content: str = ""
+        self.id: Optional[str] = None
+        self.timestamp: Optional[str] = None
+        self.metadata: Dict[str, Any] = {}
     
     @abstractmethod
     def get_content(self) -> str:
@@ -27,6 +31,18 @@ class BaseDocument(ABC):
     def get_metadata(self) -> Dict[str, Any]:
         """获取文档元数据"""
         pass
+
+class Document(BaseDocument):
+    def __init__(self, content: str, metadata: Dict, id: Optional[str] = None):
+        self.content = content
+        self.metadata = metadata
+        self.id = id
+    
+    def get_content(self) -> str:
+        return self.content
+    
+    def get_metadata(self) -> Dict[str, Any]:
+        return self.metadata
 
 
 class VectorStore(ABC):
@@ -52,10 +68,20 @@ class VectorStore(ABC):
         """更新文档"""
         pass
 
+    @abstractmethod
+    def get_document_by_id(self, doc_ids: List[str]) -> List[BaseDocument]:
+        """通过ID获取文档"""
+        pass
 
+
+
+import uuid
+import chromadb
+from chromadb.config import Settings
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 class ChromaVectorStore(VectorStore):
-    """Chroma向量数据库实现"""
+    """Chroma向量数据库实现 (Native Client)"""
     
     def __init__(self, config: Dict[str, Any]):
         """初始化Chroma向量存储
@@ -67,10 +93,13 @@ class ChromaVectorStore(VectorStore):
         self.config = config
         
         # 配置参数
-        self.persist_directory = config.get("persist_directory", "./data/embeddings")
-        self.collection_name = config.get("collection_name", "luotianyi_knowledge")
-        self.embedding_model = config.get("embedding_model", "BAAI/bge-m3")
-        self.api_key = config.get("api_key", None)
+        self.persist_directory = config.get("vector_store_path", "./data/vector_store")
+        if not os.path.exists(self.persist_directory):
+            os.makedirs(self.persist_directory, exist_ok=True)
+        self.collection_name = config.get("collection_name", "luotianyi_memory")
+        self.embedding_model_config = config.get("embedding_model", {})
+        self.embedding_model_name = self.embedding_model_config.get("model", "BAAI/bge-large-zh-v1.5")
+        self.api_key = self.embedding_model_config.get("api_key", None)
         
         # 初始化Chroma客户端
         self.client = None
@@ -82,122 +111,95 @@ class ChromaVectorStore(VectorStore):
     def _init_chroma(self) -> None:
         """初始化Chroma客户端和集合"""
         try:
-            embeddings = SiliconFlowEmbeddings(
-                model=self.embedding_model,
+            # 初始化 Embedding 模型
+            embedding_function = SiliconFlowEmbeddings(
+                model=self.embedding_model_name,
                 base_url="https://api.siliconflow.cn/v1",
                 api_key=self.api_key
             )
+            
             # 创建客户端
-            import chromadb
-            from chromadb.config import Settings
             self.client = chromadb.PersistentClient(
                 path=self.persist_directory,
                 settings=Settings(anonymized_telemetry=False)
             )
+            
             # 获取或创建集合
-            # self.collection = self.client.get_or_create_collection(
-            #     name=self.collection_name,
-            #     embedding_function=embeddings,
-            #     metadata={"description": "洛天依知识库"}
-            # )
-            from langchain_chroma import Chroma
-            self.collection = Chroma(
-                collection_name=self.collection_name,
-                embedding_function=embeddings,
-                persist_directory=self.persist_directory,
-                client=self.client
+            self.collection = self.client.get_or_create_collection(
+                name=self.collection_name,
+                embedding_function=embedding_function,
+                metadata={"description": "LuoTianyi Knowledge Base"}
             )
             
-        except ImportError:
-            self.logger.error("Chroma未安装，请安装: pip install chromadb")
-            raise
         except Exception as e:
             self.logger.error(f"Chroma初始化失败: {e}")
             raise
 
     def add_documents(self, documents: List[BaseDocument]) -> List[str]:
-        """添加文档到向量库
-        
-        Args:
-            documents: 文档列表
-            
-        Returns:
-            添加的文档ID列表
-        """
-        # TODO: 实现文档添加逻辑
-        # - 生成文档嵌入
-        # - 添加到Chroma集合
-        # - 处理重复文档
-        
+        """添加文档到向量库"""
         try:
+            ids = [str(uuid.uuid4()) for _ in documents]
+            contents = [doc.get_content() for doc in documents]
+            metadatas = [doc.get_metadata() for doc in documents]
             
-            # 添加到集合
-            doc_ids = self.collection.add_documents(
-                documents
+            self.collection.add(
+                documents=contents,
+                metadatas=metadatas,
+                ids=ids
             )
             
             self.logger.info(f"成功添加 {len(documents)} 个文档")
-            return doc_ids
+            return ids
             
         except Exception as e:
             self.logger.error(f"添加文档失败: {e}")
             raise
 
     def search(self, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
-        """搜索相似文档
-        
-        Args:
-            query: 查询文本
-            k: 返回文档数量
-            **kwargs: 额外参数
-            
-        Returns:
-            (文档, 相似度分数) 的列表
-        """
-        # TODO: 实现文档搜索逻辑
-        # - 生成查询嵌入
-        # - 执行向量搜索
-        # - 过滤和排序结果
-        
+        """搜索相似文档"""
         try:
             # 执行查询
-            results = self.collection.similarity_search_with_score(
-                query=query,
-                k=k,
-                **kwargs
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=k,
+                where=kwargs.get("where", None) # 支持元数据过滤
             )
-            return results
-            # 构建返回结果
+            
             search_results = []
             
-            if results["documents"] and results["documents"][0]:
+            if results["ids"]:
+                # Chroma 返回的是列表的列表 (因为可以批量查询)
+                ids = results["ids"][0]
                 documents = results["documents"][0]
-                metadatas = results["metadatas"][0] if results["metadatas"] else [{}] * len(documents)
-                distances = results["distances"][0] if results["distances"] else [0.0] * len(documents)
-                ids = results["ids"][0] if results["ids"] else [f"doc_{i}" for i in range(len(documents))]
+                metadatas = results["metadatas"][0]
+                distances = results["distances"][0]
                 
-                for i, (content, metadata, distance, doc_id) in enumerate(zip(documents, metadatas, distances, ids)):
-                    doc = Document(content=content, metadata=metadata, doc_id=doc_id)
-                    similarity_score = 1.0 - distance  # 转换距离为相似度
-                    search_results.append((doc, similarity_score))
+                for i in range(len(ids)):
+                    # 构造 Document 对象 (这里假设使用 LangChain Document 或自定义 BaseDocument 子类)
+                    # 为了兼容性，我们返回一个简单的对象或字典，或者复用 BaseDocument 的实现
+                    # 这里我们动态创建一个简单的对象
+
+                    doc = Document(documents[i], metadatas[i])
+                    
+                    # Chroma 默认返回距离 (L2, Cosine 等)，需要根据 distance metric 转换
+                    # 默认是 L2 (Squared L2)，越小越相似。
+                    # 如果是 Cosine distance，也是越小越相似 (1 - cosine_similarity)。
+                    # 这里直接返回 distance，由上层处理，或者简单转换为 score
+                    score = 1.0 / (1.0 + distances[i]) # 简单的转换示例
+                    
+                    search_results.append((doc, score))
             
             self.logger.info(f"搜索到 {len(search_results)} 个相关文档")
             return search_results
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self.logger.error(f"文档搜索失败: {e}")
             return []
     
     def delete_documents(self, doc_ids: List[str]) -> bool:
-        """删除文档
-        
-        Args:
-            doc_ids: 文档ID列表
-            
-        Returns:
-            是否删除成功
-        """
-        # TODO: 实现文档删除逻辑
+        """删除文档"""
         try:
             self.collection.delete(ids=doc_ids)
             self.logger.info(f"成功删除 {len(doc_ids)} 个文档")
@@ -246,7 +248,21 @@ class ChromaVectorStore(VectorStore):
         except Exception as e:
             self.logger.error(f"获取集合信息失败: {e}")
             return {}
-
+        
+    def get_document_by_id(self, doc_ids: List[str]) -> List[BaseDocument]:
+        """通过ID获取文档"""
+        try:
+            docs = []
+            for doc_id in doc_ids:
+                results = self.collection.get(ids=[doc_id])
+                if results:
+                    documents = results["documents"]
+                    metadatas = results["metadatas"]
+                    docs.append(Document(documents[0], metadatas[0], id=doc_id))
+            return docs
+        except Exception as e:
+            self.logger.error(f"获取文档失败: {e}")
+            return []
 
 
 ################################################################
@@ -701,10 +717,8 @@ class VectorStoreFactory:
         elif store_type.lower() == "custom":
             return CustomVectorStore(config)
         elif store_type.lower() == "faiss":
-            # TODO: 实现FAISS向量存储
             raise NotImplementedError("FAISS向量存储尚未实现")
         elif store_type.lower() == "pinecone":
-            # TODO: 实现Pinecone向量存储
             raise NotImplementedError("Pinecone向量存储尚未实现")
         else:
             raise ValueError(f"不支持的向量存储类型: {store_type}")

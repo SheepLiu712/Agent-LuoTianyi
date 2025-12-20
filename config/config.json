@@ -30,7 +30,7 @@
         "llm_module": {
             "llm": {
                 "api_type": "siliconflow",
-                "model": "Qwen/Qwen3-32B",
+                "model": "Pro/Qwen/Qwen3-32B",
                 "api_key": "$SILICONFLOW_API_KEY",
                 "base_url": "https://api.siliconflow.cn/v1",
                 "temperature": 0.7,
@@ -50,10 +50,11 @@
         "save_dir":"data/tts_output",
 
         "tone_ref_audio_projection": {
-            "normal": "深情的参考音频",
-            "happy": "深情的参考音频",
-            "gentle": "深情的参考音频",
-            "sad": "难过的参考音频"
+            "normal": "叙述的参考音频",
+            "happy": "可爱的参考音频2",
+            "tender": "深情的参考音频",
+            "sad": "难过的参考音频",
+            "angry": "活力的参考音频"
         }
     },
 
@@ -84,6 +85,78 @@
             "live2d_background":{
                 "type": "image",
                 "image_path": "res/live2d/backgrounds/bg2.jpg"
+            }
+        }
+    },
+
+    "crawler": {
+        "vcpedia": {
+            "base_url": "https://vcpedia.cn",
+            "crawl_delay_range": [1.0, 2.0],
+            "output_dir": "data/crawled_data/person",
+            "max_pages": 1000
+        },
+        "use_llm": false,
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "Qwen/Qwen3-32B",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "temperature": 0.7,
+                "max_tokens": 16384,
+                "top_p": 0.9
+            },
+            "prompt_name": "crawl_prompt"
+        }
+    },
+
+    "memory_manager":{
+        "graph_retriever": {
+            "retriever_type": "memory",
+            "graph_data_dir": "res/knowledge",
+            "graph_data_path": "knowledge_graph.json",
+            "graph_alias_path": "alias.json"
+        },
+        "vector_store": {
+            "store_type": "chroma",
+            "embedding_model": {
+                "api_type": "siliconflow",
+                "model": "BAAI/bge-large-zh-v1.5",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1"
+            },
+            "vector_store_path": "data/memory/vector_store",
+            "collection_name": "luotianyi_memory"
+        },
+        "memory_searcher": {
+            "max_k_graph_entities": 3,
+            "max_k_vector_entities": 5,
+            "llm_module": {
+                "llm": {
+                    "api_type": "siliconflow",
+                    "model": "Pro/deepseek-ai/DeepSeek-V3",
+                    "api_key": "$SILICONFLOW_API_KEY",
+                    "base_url": "https://api.siliconflow.cn/v1",
+                    "temperature": 0.7,
+                    "max_tokens": 16384,
+                    "top_p": 0.9
+                },
+            "prompt_name": "memory_search_prompt"
+            }
+        },
+        "memory_writer": {
+            "llm_module": {
+                "llm": {
+                    "api_type": "siliconflow",
+                    "model": "Pro/deepseek-ai/DeepSeek-V3",
+                    "api_key": "$SILICONFLOW_API_KEY",
+                    "base_url": "https://api.siliconflow.cn/v1",
+                    "temperature": 0.7,
+                    "max_tokens": 16384,
+                    "top_p": 0.9
+                },
+                "prompt_name": "memory_write_prompt"
             }
         }
     }

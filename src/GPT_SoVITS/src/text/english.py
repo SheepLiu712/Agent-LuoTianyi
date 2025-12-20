@@ -16,7 +16,7 @@ word_tokenize = TweetTokenizer().tokenize
 from nltk import pos_tag
 
 cwd = os.getcwd()
-dict_root_path = os.path.join(cwd, "res", "GPT_SoVITS", "eng_dict")
+dict_root_path = os.path.join(cwd, "res", "tts","GPT_SoVITS", "eng_dict")
 CMU_DICT_PATH = os.path.join(dict_root_path, "cmudict.rep")
 CMU_DICT_FAST_PATH = os.path.join(dict_root_path, "cmudict-fast.rep")
 CMU_DICT_HOT_PATH = os.path.join(dict_root_path, "engdict-hot.rep")

@@ -46,6 +46,8 @@ class ConversationManager:
 
         # 上下文管理相关
         self.context_file = self.config.get("context_file", "data/memory/context/context.json")
+        if not os.path.exists(os.path.dirname(self.context_file)):
+            os.makedirs(os.path.dirname(self.context_file), exist_ok=True)
         self.raw_conversation_context_limit = self.config.get("raw_conversation_context_limit", 100)
         self.forget_conversation_days = self.config.get("forget_conversation_days", 10)
         self.not_zip_conversation_count = self.config.get("not_zip_conversation_count", 20)
@@ -91,6 +93,14 @@ class ConversationManager:
         else:
             # 直接保存上下文
             self._save_context()
+
+    def get_nearset_history(self, n: int) -> List[ConversationItem]:
+        """
+        获取最近的n条对话
+        """
+        total_cnt = self.index_data["total_count"]
+        start = max(0, total_cnt - n)
+        return self.get_history(start, total_cnt)
 
     def get_history(self, start: int, end: int) -> List[ConversationItem]:
         """

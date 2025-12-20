@@ -11,9 +11,9 @@ from pathlib import Path
 import pandas as pd
 
 from .vector_store import VectorStore, KnowledgeDocument
-from .graph_retriever import GraphRetriever, Entity, Relation, KnowledgeGraph
+from .graph_retriever import GraphRetriever, KnowledgeGraph
 from ..utils.logger import get_logger
-
+from .memory_type import Entity, Relation, GraphEntityType, GraphRelationType, entity_name_back_dict, relation_name_back_dict, point_to_entity_type
 
 class KnowledgeBuilder:
     """知识库构建器
@@ -23,7 +23,7 @@ class KnowledgeBuilder:
     
     def __init__(
         self,
-        vector_store: VectorStore,
+        vector_store: VectorStore = None,
         graph_retriever: Optional[GraphRetriever] = None,
         config: Optional[Dict[str, Any]] = None
     ):
@@ -36,21 +36,43 @@ class KnowledgeBuilder:
         """
         self.logger = get_logger(__name__)
         self.vector_store = vector_store
-        self.graph_retriever = graph_retriever
+        self.graph_retriever: GraphRetriever = graph_retriever
         self.config = config or {}
         
         # 数据分类
-        self.knowledge_categories = {
-            "persona": "人设信息",
-            "songs": "歌曲信息", 
-            "events": "活动演出",
-            "collaborations": "合作信息",
-            "social": "社交媒体",
-            "fanart": "粉丝创作",
-            "interviews": "访谈资料"
-        }
+        self.knowledge_categories = {}
+        
+        # 加载实体别名映射
+        self.entity_aliases = self._load_entity_aliases()
         
         self.logger.info("知识库构建器初始化完成")
+    
+    def _load_entity_aliases(self) -> Dict[str, str]:
+        """加载实体别名映射"""
+        try:
+            # 尝试查找配置文件
+            paths_to_try = [
+                Path("config/entity_aliases.json"),
+                Path(__file__).parent.parent.parent / "config" / "entity_aliases.json"
+            ]
+            
+            for alias_path in paths_to_try:
+                if alias_path.exists():
+                    self.logger.info(f"加载实体别名映射: {alias_path}")
+                    with open(alias_path, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+            
+            return {}
+        except Exception as e:
+            self.logger.warning(f"加载实体别名映射失败: {e}")
+            return {}
+
+    def _resolve_entity_name(self, name: str) -> str:
+        """解析实体名称，处理别名"""
+        if not name:
+            return name
+        return self.entity_aliases.get(name, name)
+
     
     def build_from_directory(self, data_dir: str) -> None:
         """从目录构建知识库
@@ -69,7 +91,9 @@ class KnowledgeBuilder:
         for file_path in data_path.rglob("*"):
             if file_path.is_file():
                 self._process_file(file_path)
+                # break
         
+        self.graph_retriever.save_graph_data()
         self.logger.info("知识库构建完成")
     
     def _process_file(self, file_path: Path) -> None:
@@ -83,10 +107,6 @@ class KnowledgeBuilder:
             
             if suffix == ".json":
                 self._process_json_file(file_path)
-            elif suffix == ".csv":
-                self._process_csv_file(file_path)
-            elif suffix == ".txt" or suffix == ".md":
-                self._process_text_file(file_path)
             else:
                 self.logger.debug(f"跳过不支持的文件: {file_path}")
                 
@@ -99,114 +119,155 @@ class KnowledgeBuilder:
         Args:
             file_path: JSON文件路径
         """
-        # TODO: 实现JSON文件处理逻辑
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            assert isinstance(data,dict), "data should be a dict"
-            for category, content in data.items():
-                assert isinstance(content,(list,dict)), "content should be a list or dict"
-                if isinstance(content, list):
-                    # 处理文档列表
-                    for item in content:
-                        if isinstance(item, list):
-                            item = {
-                                "content": " ".join(item),
-                                "subject": item[0],
-                                'relation': item[1],
-                                "object": item[2]
-                            }
-                        self._add_knowledge_item(item, category, str(file_path))
+            # 1. 优先尝试 VCPedia 格式 (高效建图)
+            # 单个条目
+            if isinstance(data, dict):
+                self._build_from_vcpedia_item(data)
+                return
+            # 条目列表
+            elif isinstance(data, list):
+                is_vcpedia_list = False
+                for item in data:
+                    if isinstance(item, dict) and "infobox" in item and "title" in item:
+                        self._build_from_vcpedia_item(item)
+                        is_vcpedia_list = True
+                if is_vcpedia_list:
+                    return
+            
+        except Exception as e:
+            self.logger.error(f"解析JSON文件失败 {file_path}: {e}")
+
+    def _build_from_vcpedia_item(self, item: Dict[str, Any]) -> None:
+        """
+        高效建图核心逻辑：基于VCPedia Infobox构建图谱
+        
+        策略：
+        1. 实体创建：以词条名(title)作为核心实体。
+        2. 属性存储：将'summary'(简介)直接作为实体的文本属性，解决"只查简介"的需求。
+        3. 关系抽取：仅从infobox中提取强关系（如P主、演唱者），忽略非结构化文本。
+        """
+        if not self.graph_retriever:
+            return
+
+        # 1. 创建核心实体
+        main_entity_name = self._resolve_entity_name(item.get("name"))
+        if not main_entity_name:
+            return
+
+        # 将简介作为属性存入，这样检索实体时可以直接获取简介，无需再次爬取
+        properties = {
+            "summary": item.get("description", ""),
+        }
+        
+        # 将Infobox中的其他简单键值对也作为属性（如发布时间、BPM等）
+        attributes: Dict[str, Any] = item.get("attributes", {})
+        for k, v in attributes.items():
+            if isinstance(v, str) and len(v) < 100: # 简单属性
+                properties[k] = v
+
+        main_entity = Entity(
+            id=main_entity_name, # 简单起见使用名称作为ID
+            name=main_entity_name,
+            entity_type=entity_name_back_dict.get(item.get("type", "song").lower(), GraphEntityType.SONG),
+            properties=properties
+        )
+        
+        # 添加到图谱（内存或数据库）
+        if hasattr(self.graph_retriever, "knowledge_graph"):
+            self.graph_retriever.knowledge_graph.add_entity(main_entity)
+        
+        # 2. 关系抽取 (基于Infobox的规则)
+
+        for key, value in attributes.items():
+            # 清洗Key（去掉冒号等）
+            clean_key = key.replace(":", "").strip()
+
+            if clean_key in ["是否为传说曲", "是否为殿堂曲", "是否为神话曲"]:
+                if value == "True":
+                    target = clean_key[-3:] # 传说曲、殿堂曲、神话曲
+                    relation_type = GraphRelationType.WIN_AWARD
+                    target_type = GraphEntityType.GLORY
+                    if not self.graph_retriever.knowledge_graph.has_entity(target):
+                        target_entity = Entity(
+                            id=target,
+                            name=target,
+                            entity_type=target_type,
+                            properties={}
+                        )
+                        self.graph_retriever.knowledge_graph.add_entity(target_entity)
+                    relation = Relation(
+                        id=f"{main_entity.id}_{relation_type.value}_{target}",
+                        source_id=main_entity.id,
+                        target_id=target,
+                        relation_type=relation_type,
+                        properties={},
+                        weight=1.0
+                    )
+                    self.graph_retriever.knowledge_graph.add_relation(relation)
+            
+            if clean_key == "发布时间":
+                if isinstance(value,list):
+                    value = value[0]
+                target = str(value).strip()[:4] # 只取年份
+                relation_type = GraphRelationType.RELEASED_IN
+                target_type = GraphEntityType.YEAR
+                if not self.graph_retriever.knowledge_graph.has_entity(target):
+                    target_entity = Entity(
+                        id=target,
+                        name=target,
+                        entity_type=target_type,
+                        properties={}
+                    )
+                    self.graph_retriever.knowledge_graph.add_entity(target_entity)
+                relation = Relation(
+                    id=f"{main_entity.id}_{relation_type.value}_{target}",
+                    source_id=main_entity.id,
+                    target_id=target,
+                    relation_type=relation_type,
+                    properties={},
+                    weight=1.0
+                )
+            
+            if clean_key in relation_name_back_dict:
+                if value == "" or value is None:
+                    continue
+                relation_type: GraphRelationType = relation_name_back_dict[clean_key]
+                target_type: GraphEntityType = point_to_entity_type.get(relation_type, GraphEntityType.PERSON)
+                targets = []
+                if isinstance(value, list):
+                    targets = value
+                elif isinstance(value, str):
+                    # 简单分割，实际可能需要更复杂的清洗
+                    targets = value.replace("、", ",").split(",")
                 
-        except Exception as e:
-            self.logger.error(f"处理JSON文件失败 {file_path}: {e}")
+                for target in targets:
+                    target_name = target.strip()
+                    target_name = target_name.replace("《", "").replace("》", "").strip()
+                    target_name = self._resolve_entity_name(target_name)
+                    if not target_name:
+                        continue
+                    if not self.graph_retriever.knowledge_graph.has_entity(target_name):
+                        target_entity = Entity(
+                            id=target_name,
+                            name=target_name,
+                            entity_type=target_type,
+                            properties={}
+                        )
+                        self.graph_retriever.knowledge_graph.add_entity(target_entity)
+                    relation = Relation(
+                        id=f"{main_entity.id}_{relation_type.value}_{target_name}",
+                        source_id=main_entity.id,
+                        target_id=target_name,
+                        relation_type=relation_type,
+                        properties={},
+                        weight=1.0
+                    )
+                    self.graph_retriever.knowledge_graph.add_relation(relation)
     
-    # YAML文件处理已移除，仅支持JSON/CSV/TXT/MD
-    
-    def _process_csv_file(self, file_path: Path) -> None:
-        """处理CSV文件
-        
-        Args:
-            file_path: CSV文件路径
-        """
-        # TODO: 实现CSV文件处理逻辑
-        try:
-            df = pd.read_csv(file_path, encoding='utf-8')
-            category = self._infer_category(file_path, {})
-            
-            for _, row in df.iterrows():
-                item_data = row.to_dict()
-                self._add_knowledge_item(item_data, category, str(file_path))
-                
-        except Exception as e:
-            self.logger.error(f"处理CSV文件失败 {file_path}: {e}")
-    
-    def _process_text_file(self, file_path: Path) -> None:
-        """处理文本文件
-        
-        Args:
-            file_path: 文本文件路径
-        """
-        # TODO: 实现文本文件处理逻辑
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            category = self._infer_category(file_path, {"content": content})
-            
-            # 将整个文本作为一个知识项
-            item_data = {
-                "content": content,
-                "title": file_path.stem,
-                "source": str(file_path)
-            }
-            
-            self._add_knowledge_item(item_data, category, str(file_path))
-            
-        except Exception as e:
-            self.logger.error(f"处理文本文件失败 {file_path}: {e}")
-    
-    def _infer_category(self, file_path: Path, data: Dict[str, Any]) -> str:
-        """推断知识类别
-        
-        Args:
-            file_path: 文件路径
-            data: 数据内容
-            
-        Returns:
-            知识类别
-        """
-        # TODO: 实现智能类别推断
-        
-        # 基于文件名推断
-        file_name = file_path.name.lower()
-        
-        if "song" in file_name or "music" in file_name:
-            return "songs"
-        elif "event" in file_name or "concert" in file_name:
-            return "events"
-        elif "persona" in file_name or "character" in file_name:
-            return "persona"
-        elif "collab" in file_name:
-            return "collaborations"
-        elif "social" in file_name or "weibo" in file_name:
-            return "social"
-        elif "interview" in file_name:
-            return "interviews"
-        
-        # 基于内容推断
-        if isinstance(data, dict):
-            content = str(data).lower()
-            if "歌曲" in content or "音乐" in content:
-                return "songs"
-            elif "演出" in content or "演唱会" in content:
-                return "events"
-            elif "性格" in content or "设定" in content:
-                return "persona"
-        
-        # 默认类别
-        return "general"
     
     def _add_knowledge_item(self, item_data: Dict[str, Any], category: str, source: str) -> None:
         """添加知识项到存储系统

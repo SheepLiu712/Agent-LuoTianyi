@@ -19,6 +19,7 @@ from ..utils.helpers import load_config
 from ..tts import TTSModule
 from ..gui import MainWindow
 from ..utils.enum_type import ContextType, ConversationSource
+from ..memory.memory_manager import MemoryManager
 
 
 class LuoTianyiAgent:
@@ -44,7 +45,7 @@ class LuoTianyiAgent:
             history_callback=self.handle_history_request
         )  # UI绑定器
 
-        self.memory_manager = None  # TODO: 记忆管理器
+        self.memory_manager = MemoryManager(self.config.get("memory_manager", {}), self.prompt_manager)  # 记忆管理器
 
         self.tts_engine = TTSModule(self.config.get("tts", {}))
         self.window = MainWindow(self.config["gui"], self.config["live2d"], self.ui_binder)
@@ -68,16 +69,24 @@ class LuoTianyiAgent:
         self.ui_binder.start_thinking()
 
         conversation_history = self.conversation_manager.get_context()
+        recent_history = self.conversation_manager.get_nearset_history(10)
+        # 记忆检索
+        retrieved_knowledge = self.memory_manager.get_knowledge(user_input, recent_history)
         self.conversation_manager.add_conversation(ConversationSource.USER, user_input, type=ContextType.TEXT)
-        responses = self.main_chat.generate_response(user_input, conversation_history)
+        responses = self.main_chat.generate_response(user_input, conversation_history, retrieved_knowledge)
 
-
+        # 逐条处理响应，创建tts任务，并添加对话
         task_list: List[tuple[str, OneSentenceChat]] = []
         for idx,resp in enumerate(responses):
-            
+            self.conversation_manager.add_conversation(ConversationSource.AGENT, resp.content, type=ContextType.TEXT)
             task_id = self.tts_engine.add_task(resp.content, resp.tone,idx)
             task_list.append((task_id, resp))
+        
+        # 记忆写入（异步）
+        used_uuid = self.memory_manager.memory_searcher.used_uuid
+        self.memory_manager.post_process_interaction(self.conversation_manager.get_nearset_history(15), used_uuid)
 
+        # 等待所有TTS任务完成
         for task_id, resp in task_list:
             while True:
                 output_path = self.tts_engine.get_task_result(task_id)

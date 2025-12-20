@@ -14,9 +14,9 @@ from typing import Dict, List, Any
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.knowledge.knowledge_builder import KnowledgeBuilder
-from src.knowledge.vector_store import VectorStoreFactory
-from src.knowledge.graph_retriever import GraphRetrieverFactory
+from src.memory.knowledge_builder import KnowledgeBuilder
+from src.memory.vector_store import VectorStoreFactory
+from src.memory.graph_retriever import GraphRetrieverFactory
 from src.utils.logger import setup_logging, get_logger
 from src.utils.helpers import load_config
 
