@@ -2,7 +2,7 @@ import time
 import threading
 from PySide6.QtCore import QObject, Signal
 from ..live2d import Live2dModel, live2d
-
+from ..utils.audio_processor import extract_audio_amplitude
 
 class AgentBinder(QObject):
     response_signal = Signal(str)
@@ -87,3 +87,28 @@ class AgentBinder(QObject):
         if self.thinking_thread:
             self.thinking_thread.join()
             self.thinking_thread = None
+
+    def start_mouth_move(self, wav_path: str):
+        """
+        开始口型同步
+        """
+        if self.model:
+            mouth_move_thread = threading.Thread(target=self._mouth_move, args=(wav_path,), daemon=True)
+            mouth_move_thread.start()
+
+    def _mouth_move(self, wav_path: str, fps: int = 60):
+        if not self.model:
+            return
+        st_time = time.time()
+        init_value = self.model.GetParameterValue("ParamMouthOpenY")
+        amp = extract_audio_amplitude(wav_path=wav_path, fps=fps)
+        while True:
+            elapsed = time.time() - st_time
+            frame_index = int(elapsed * fps)
+            if frame_index >= len(amp):
+                break
+            target_value = amp[frame_index] * 1.5  # 调整放大倍数以适应模型
+            self.model.SetParameterValue("ParamMouthOpenY", target_value, weight=0.8)
+            time.sleep(1 / fps)
+        # 恢复初始值
+        self.model.SetParameterValue("ParamMouthOpenY", init_value, weight=1)

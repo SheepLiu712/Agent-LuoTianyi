@@ -126,6 +126,20 @@ class Live2dModel():
         if self.model:
             self.model.StartMotion(group, no, priority, onStartMotionHandler, onFinishMotionHandler)
 
+    def SetParameterValue(self, paramId: str, value: float, weight: float = 1.0) -> None:
+        if self.model:
+            self.model.SetParameterValue(paramId, value, weight)
+
+    def GetParameterValue(self, paramId: str | int) -> float:
+        if self.model:
+            if isinstance(paramId, int):
+                return self.model.GetParameterValue(paramId)
+            ids = self.model.GetParamIds()
+            if paramId in ids:
+                index = ids.index(paramId)
+                return self.model.GetParameterValue(index)
+        return 0.0
+
     def get_available_expressions(self) -> List[str]:
         """
         获取模型可用的表情列表

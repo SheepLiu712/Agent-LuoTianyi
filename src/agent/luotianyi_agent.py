@@ -100,6 +100,7 @@ class LuoTianyiAgent:
             self.ui_binder.response_signal.emit(resp.content)
 
             # 播放语音
+            self.ui_binder.start_mouth_move(wav_path=output_path)
             self.tts_engine.play_audio(output_path)
 
     def handle_history_request(self, count: int, end_index: int):

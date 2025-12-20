@@ -2,7 +2,7 @@
 set "ENV_NAME="
 echo Please enter a conda environment name (default: lty_agent):
 set /p ENV_NAME=
-if not defined ENV_NAME set "ENV_NAME=lty_agent"
+if not defined ENV_NAME set "ENV_NAME=lty"
 
 echo Creating environment: %ENV_NAME%
 call conda create -n %ENV_NAME% python=3.10 -y
