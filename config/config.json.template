@@ -1,85 +1,181 @@
 {
-  "llm": {
-    "provider": "siliconflow",
-    "model": "deepseek-ai/DeepSeek-V2.5",
-    "api_key": "$SILICONFLOW_API_KEY",
-    "base_url": "https://api.siliconflow.cn/v1",
-    "temperature": 0.7,
-    "max_tokens": 1000,
-    "top_p": 0.9
-  },
-  "knowledge": {
-    "vector_store": {
-      "type": "chroma",
-      "persist_directory": "./data/embeddings",
-      "collection_name": "luotianyi_knowledge"
+    "prompt_manager": {
+        "template_dir": "res/agent/prompts"
     },
-    "graph_store": {
-      "type": "neo4j",
-      "uri": "bolt://localhost:7687",
-      "username": "neo4j",
-      "password": "$NEO4J_PASSWORD"
+
+    "main_chat": {
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "Pro/deepseek-ai/DeepSeek-V3",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "temperature": 0.7,
+                "max_tokens": 16384,
+                "top_p": 0.9
+            },
+            "prompt_name": "daily_chat_prompt"
+        },
+        "static_variables_file": "res/agent/persona/static_variables.json"
     },
-    "embedding": {
-      "model": "text-embedding-3-small",
-      "batch_size": 32,
-      "max_length": 512
+
+    "conversation_manager": {
+        "history_dir": "data/memory/conversation_history",
+        "max_file_lines": 1000,
+        "recent_history_limit": 100,
+        "context_file": "data/memory/context/context.json",
+        "raw_conversation_context_limit": 80,
+        "not_zip_conversation_count": 16,
+        "forget_conversation_days": 10,
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "Pro/Qwen/Qwen3-32B",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "temperature": 0.7,
+                "max_tokens": 16384,
+                "top_p": 0.9
+            },
+            "prompt_name": "summary_prompt"
+        }
+    },
+
+    "tts":{
+        "character_name":"LuoTianyi",
+        "onnx_model_dir":"res/tts/lty_custom_onnx_model",
+        "language":"zh",
+        "reference_audio_dir":"res/tts/reference_audio",
+        "reference_audio_lyrics" : "res/tts/reference_audio/lrc.json",
+        "save_dir":"data/tts_output",
+
+        "tone_ref_audio_projection": {
+            "normal": "叙述的参考音频",
+            "happy": "可爱的参考音频2",
+            "tender": "深情的参考音频",
+            "sad": "难过的参考音频",
+            "angry": "活力的参考音频"
+        }
+    },
+
+    "live2d":{
+        "model":{
+            "model_version": "v3",
+            "model_path": "res/live2d/models/luo/model.model3.json",
+            "default_expression": "normal",
+            "offset": [0, -0.2]
+        },
+        "expression_projection":{
+                "微笑脸":"normal",
+                "生气脸":"angry",
+                "呆呆脸":"dumb",
+                "害怕脸":"fear",
+                "难过脸":"sad",
+                "温柔脸":"ease",
+                "喜欢脸":"like"
+        }
+    },
+
+    "gui":{
+        "chat_window":{
+            "font_size": 16,
+            "load_history_num": 20
+        },
+        "live2d_container":{
+            "live2d_background":{
+                "type": "image",
+                "image_path": "res/live2d/backgrounds/bg2.jpg"
+            }
+        }
+    },
+
+    "crawler": {
+        "vcpedia": {
+            "base_url": "https://vcpedia.cn",
+            "crawl_delay_range": [1.0, 2.0],
+            "output_dir": "data/crawled_data/person",
+            "max_pages": 1000
+        },
+        "use_llm": false,
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "Qwen/Qwen3-32B",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "temperature": 0.7,
+                "max_tokens": 16384,
+                "top_p": 0.9
+            },
+            "prompt_name": "crawl_prompt"
+        }
+    },
+
+    "memory_manager":{
+        "graph_retriever": {
+            "retriever_type": "memory",
+            "graph_data_dir": "res/knowledge",
+            "graph_data_path": "knowledge_graph.json",
+            "graph_alias_path": "alias.json"
+        },
+        "vector_store": {
+            "store_type": "chroma",
+            "embedding_model": {
+                "api_type": "siliconflow",
+                "model": "BAAI/bge-large-zh-v1.5",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1"
+            },
+            "vector_store_path": "data/memory/vector_store",
+            "collection_name": "luotianyi_memory"
+        },
+        "user_profile":{
+            "profile_file": "data/memory/user_profile/user_profile.json",
+            "max_profile_length": 300,
+            "profile_update_freq":50,
+            "llm_module": {
+                "llm": {
+                    "api_type": "siliconflow",
+                    "model": "Pro/deepseek-ai/DeepSeek-V3",
+                    "api_key": "$SILICONFLOW_API_KEY",
+                    "base_url": "https://api.siliconflow.cn/v1",
+                    "temperature": 0.7,
+                    "max_tokens": 16384,
+                    "top_p": 0.9
+                },
+                "prompt_name": "user_profile_update_prompt"
+            }
+        },
+        "memory_searcher": {
+            "max_k_graph_entities": 3,
+            "max_k_vector_entities": 5,
+            "llm_module": {
+                "llm": {
+                    "api_type": "siliconflow",
+                    "model": "Pro/deepseek-ai/DeepSeek-V3",
+                    "api_key": "$SILICONFLOW_API_KEY",
+                    "base_url": "https://api.siliconflow.cn/v1",
+                    "temperature": 0.7,
+                    "max_tokens": 16384,
+                    "top_p": 0.9
+                },
+            "prompt_name": "memory_search_prompt"
+            }
+        },
+        "memory_writer": {
+            "recent_update_path": "data/memory/context/recent_update.json",
+            "llm_module": {
+                "llm": {
+                    "api_type": "siliconflow",
+                    "model": "Pro/deepseek-ai/DeepSeek-V3",
+                    "api_key": "$SILICONFLOW_API_KEY",
+                    "base_url": "https://api.siliconflow.cn/v1",
+                    "temperature": 0.7,
+                    "max_tokens": 16384,
+                    "top_p": 0.9
+                },
+                "prompt_name": "memory_write_prompt"
+            }
+        }
     }
-  },
-  "agent": {
-    "persona_file": "config/persona.json",
-    "memory": {
-      "type": "buffer",
-      "size": 10
-    },
-    "response": {
-      "max_tokens": 500,
-      "stream": true
-    },
-    "retrieval": {
-      "top_k": 5,
-      "similarity_threshold": 0.7
-    }
-  },
-  "prompt": {
-    "template_dir": "prompts"
-  },
-  "conversation": {
-    "memory_type": "buffer",
-    "memory": {
-      "size": 10,
-      "summary_length": 200
-    }
-  },
-  "multimodal": {
-    "tts": {
-      "enabled": false,
-      "engine": "mock",
-      "model_path": "./models/luotianyi_voice"
-    },
-    "live2d": {
-      "enabled": false,
-      "controller": "mock",
-      "model_path": "./models/luotianyi_live2d"
-    }
-  },
-  "server": {
-    "host": "0.0.0.0",
-    "port": 8000,
-    "workers": 1,
-    "cors_origins": ["*"]
-  },
-  "logging": {
-    "level": "INFO",
-    "console_output": true,
-    "file_output": true,
-    "file": "./logs/agent.log",
-    "rotation": "100 MB",
-    "retention": "30 days"
-  },
-  "development": {
-    "debug": false,
-    "reload": false,
-    "profile": false
-  }
 }
