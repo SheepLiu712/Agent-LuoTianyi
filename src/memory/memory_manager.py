@@ -11,6 +11,7 @@ from .memory_search import MemorySearcher
 from .memory_write import MemoryWriter
 from .vector_store import VectorStoreFactory, VectorStore
 from .graph_retriever import GraphRetrieverFactory, GraphRetriever
+from .user_profile import UserProfile
 from ..llm.llm_module import LLMModule
 from ..llm.prompt_manager import PromptManager
 from ..agent.conversation_manager import ConversationItem
@@ -37,9 +38,19 @@ class MemoryManager:
             config["graph_retriever"]["retriever_type"], config["graph_retriever"]
         )
         self.vector_store: VectorStore = VectorStoreFactory.create_vector_store(config["vector_store"]["store_type"],config["vector_store"])
+        self.user_profile = UserProfile(config["user_profile"], prompt_manager)
         self.memory_searcher = MemorySearcher(config["memory_searcher"], self.vector_store, self.graph_retriever, prompt_manager)
-        self.memory_writer = MemoryWriter(config["memory_writer"], self.vector_store, prompt_manager)
+        self.memory_writer = MemoryWriter(config["memory_writer"], self.vector_store, self.user_profile,prompt_manager)
         self.post_process_thread: Optional[Thread] = None
+
+    def get_username(self) -> str:
+        """
+        获取用户名称
+
+        Returns:
+            用户名称字符串
+        """
+        return self.user_profile.get_username()
 
     def get_knowledge(self, user_input: str, history: List[ConversationItem]) -> List[str]:
         """
@@ -57,7 +68,7 @@ class MemoryManager:
         history_texts = [item.__repr__() for item in history]
         return self.memory_searcher.search(user_input, history_texts)
     
-    def post_process_interaction(self, history: List[ConversationItem], used_uuid: Optional[set] = None):
+    def post_process_interaction(self, history: List[ConversationItem]):
         """
         根据最新的交互内容，生成并写入新的记忆
 
@@ -65,6 +76,7 @@ class MemoryManager:
             history: 包含最近交互内容的列表
             used_uuid: 在检索过程中使用过的记忆UUID集合
         """
+        used_uuid = self.memory_searcher.used_uuid
         self.post_process_thread = Thread(target=self.memory_writer.process_interaction, args=(history, used_uuid or set()))
         self.post_process_thread.daemon = True
         self.post_process_thread.start()

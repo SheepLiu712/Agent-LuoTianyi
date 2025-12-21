@@ -8,15 +8,16 @@ Memory Write Module
 from typing import List, Dict, Any, Optional, Set
 from ..utils.logger import get_logger
 from .vector_store import VectorStore, Document
-from .graph_retriever import GraphRetriever
+from .user_profile import UserProfile
 from ..llm.prompt_manager import PromptManager
 from ..llm.llm_module import LLMModule
 from ..agent.conversation_manager import ConversationItem
 import json
 import datetime
 import time
+import os
 from collections import deque
-from  dataclasses import dataclass
+from  dataclasses import dataclass, asdict
 
 logger = get_logger("MemoryWriter")
 
@@ -32,11 +33,34 @@ class MemoryUpdateCommand:
             return f"{self.type}(document='{self.content}')" 
 
 class MemoryWriter:
-    def __init__(self, config: Dict[str, Any], vector_store: VectorStore, prompt_manager: PromptManager):
+    def __init__(self, config: Dict[str, Any], vector_store: VectorStore, user_profile: UserProfile, prompt_manager: PromptManager):
         self.config = config
         self.vector_store = vector_store
+        self.user_profile = user_profile
         self.llm = LLMModule(config["llm_module"], prompt_manager)
-        self.recent_update = deque(maxlen=5)  # 记录最近写入的记忆，防止重复写入
+        self.recent_update = deque(maxlen=10)  # 记录最近写入的记忆，防止重复写入
+        self.recent_update_path = config.get("recent_update_path", "data/memory/context/recent_update.json")
+        os.makedirs(os.path.dirname(self.recent_update_path), exist_ok=True)
+        self.load_recent_update()
+
+    def load_recent_update(self):
+        if os.path.exists(self.recent_update_path):
+            try:
+                with open(self.recent_update_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    for item in data:
+                        self.recent_update.append(MemoryUpdateCommand(**item))
+            except Exception as e:
+                logger.error(f"Failed to load recent updates: {e}")
+
+    def save_recent_update(self):
+        try:
+            os.makedirs(os.path.dirname(self.recent_update_path), exist_ok=True)
+            with open(self.recent_update_path, "w", encoding="utf-8") as f:
+                data = [asdict(cmd) for cmd in self.recent_update]
+                json.dump(data, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            logger.error(f"Failed to save recent updates: {e}")
 
     def process_interaction(self, history: List[ConversationItem], used_uuid: Set[str]):
         """
@@ -48,6 +72,9 @@ class MemoryWriter:
             if "add" in funcname.lower():
                 content = kwargs.get("document", "")
                 self.v_add(content)
+            elif "username" in funcname.lower():
+                new_name = kwargs.get("new_name", "")
+                self.update_username(new_name)
             elif "update" in funcname.lower():
                 uuid_short = kwargs.get("uuid", "")
                 for uuid in used_uuid:
@@ -96,8 +123,9 @@ class MemoryWriter:
         向向量存储中添加新的记忆片段
         """
         doc = Document(content=document, metadata={"source": "memory_writer", "timestamp": time.strftime("%Y-%m-%d")})
-        self.vector_store.add_documents([doc])
-        self.recent_update.append(MemoryUpdateCommand(type="v_add", content=document))
+        ids = self.vector_store.add_documents([doc])
+        self.recent_update.append(MemoryUpdateCommand(type="v_add", content=document, uuid=ids[0] if ids else None))
+        self.save_recent_update()
 
     def v_update(self, uuid: str, new_document: str):
         """
@@ -106,3 +134,10 @@ class MemoryWriter:
         doc = Document(content=new_document, metadata={"source": "memory_writer", "timestamp": time.strftime("%Y-%m-%d")}, id=uuid)
         self.vector_store.update_document(doc_id=uuid, document=doc)
         self.recent_update.append(MemoryUpdateCommand(type="v_update", content=new_document, uuid=uuid))
+        self.save_recent_update()
+
+    def update_username(self, new_name: str):
+        """
+        更新用户名称
+        """
+        self.user_profile.update_username(new_name)

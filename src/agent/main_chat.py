@@ -24,7 +24,7 @@ class MainChat:
 
         self.init_static_variables(available_tone, available_expression)
 
-    def generate_response(self, user_input: str, conversation_history: str = "", retrieved_knowledge: List[str] = "") -> list[OneSentenceChat]:
+    def generate_response(self, user_input: str, conversation_history: str = "", retrieved_knowledge: List[str] = "", username: str = "") -> list[OneSentenceChat]:
         current_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         persona = self.persona
         response_requirements = self.response_requirements
@@ -38,6 +38,7 @@ class MainChat:
             response_format=response_format,
             conversation_history=conversation_history,
             knowledge="\n".join(retrieved_knowledge),
+            username=username
         )
 
         sentences = response.split("\n\n")

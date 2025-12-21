@@ -254,6 +254,8 @@ class ChromaVectorStore(VectorStore):
         try:
             docs = []
             for doc_id in doc_ids:
+                if not isinstance(doc_id, str):
+                    continue
                 results = self.collection.get(ids=[doc_id])
                 if results:
                     documents = results["documents"]

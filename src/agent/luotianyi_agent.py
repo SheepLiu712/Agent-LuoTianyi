@@ -71,9 +71,10 @@ class LuoTianyiAgent:
         conversation_history = self.conversation_manager.get_context()
         recent_history = self.conversation_manager.get_nearset_history(10)
         # 记忆检索
+        username = self.memory_manager.get_username()
         retrieved_knowledge = self.memory_manager.get_knowledge(user_input, recent_history)
         self.conversation_manager.add_conversation(ConversationSource.USER, user_input, type=ContextType.TEXT)
-        responses = self.main_chat.generate_response(user_input, conversation_history, retrieved_knowledge)
+        responses = self.main_chat.generate_response(user_input, conversation_history, retrieved_knowledge, username=username)
 
         # 逐条处理响应，创建tts任务，并添加对话
         task_list: List[tuple[str, OneSentenceChat]] = []
@@ -83,8 +84,7 @@ class LuoTianyiAgent:
             task_list.append((task_id, resp))
         
         # 记忆写入（异步）
-        used_uuid = self.memory_manager.memory_searcher.used_uuid
-        self.memory_manager.post_process_interaction(self.conversation_manager.get_nearset_history(15), used_uuid)
+        self.memory_manager.post_process_interaction(self.conversation_manager.get_nearset_history(15))
 
         # 等待所有TTS任务完成
         for task_id, resp in task_list:

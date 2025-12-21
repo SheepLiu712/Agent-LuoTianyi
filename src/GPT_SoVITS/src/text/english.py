@@ -10,6 +10,8 @@ from .symbols2 import symbols
 
 from builtins import str as unicode
 from .en_normalization.expend import normalize
+import nltk
+nltk.data.path.append('./res/tts/GPT_SoVITS/nltk_data')
 from nltk.tokenize import TweetTokenizer
 
 word_tokenize = TweetTokenizer().tokenize

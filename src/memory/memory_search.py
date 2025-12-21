@@ -136,5 +136,5 @@ class MemorySearcher:
         """
         查找两个实体之间的连接路径
         """
-        connections = self.graph_retriever.find_connections(entity_name1, entity_name2, max_paths=3, needed_path_num=self.max_k_graph_entities)
+        connections = self.graph_retriever.find_connections(entity_name1, entity_name2, needed_path_num=self.max_k_graph_entities)
         return connections
