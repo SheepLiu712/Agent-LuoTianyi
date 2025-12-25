@@ -12,7 +12,7 @@ from ..llm.prompt_manager import PromptManager
 from ..llm.llm_module import LLMModule
 from ..utils.vcpedia_fetcher import VCPediaFetcher
 from typing import Tuple, Dict, List, Any, Set
-
+from .memory_type import GraphEntityType
 
 class MemorySearcher:
     def __init__(
@@ -116,8 +116,12 @@ class MemorySearcher:
         """
         entity_name = entity_name.strip("\'\"《》").strip()
         entity = self.graph_retriever.retrieve_one_entity(entity_name)
+        print(entity_name, entity.entity_type)
         if entity and entity.properties.get("summary", ""):
-            return entity.properties.get("summary", "")
+            if entity.entity_type == GraphEntityType.SONG and entity.properties.get("lyrics", ""):
+                return f"{entity.name}: {entity.properties.get('summary', '')}\nLyrics: {entity.properties.get('lyrics', '')}"
+            elif entity.entity_type != GraphEntityType.SONG:
+                return entity.properties.get("summary", "")
         
         # 尝试从vcpedia抓取内容
         vcpedia_content = self.vcpedia_fetcher.fetch_entity_description(entity_name)

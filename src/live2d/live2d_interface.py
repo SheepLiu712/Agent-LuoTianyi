@@ -78,6 +78,8 @@ class Live2dModel():
     def SetExpression(self, expression_id: str) -> None:
         if self.model:
             self.model.SetExpression(expression_id)
+            mouth_value = self.mouth_value_projection.get(expression_id, -1)
+            self.SetMouthOpenValue(mouth_value, weight=1.0)  # 单独设置口型参数
 
     def HitTest(self, area_name: str, x: float, y: float) -> bool:
         if self.model:
@@ -154,7 +156,7 @@ class Live2dModel():
         获取模型可用的表情列表
         :return: 表情ID列表
         """
-        return list(self.config["expression_projection"].keys())
+        return list(self.expression_projection.keys())
     
     def set_expression_by_cmd(self, cmd_name: str) -> None:
         """
@@ -167,5 +169,3 @@ class Live2dModel():
         if expression_name not in self.expression_list:
             raise ValueError(f"表情名称 {cmd_name} 未映射到具体表情ID")
         self.SetExpression(expression_name)
-        mouth_value = self.mouth_value_projection.get(cmd_name, -1)
-        self.SetMouthOpenValue(mouth_value, weight=1.0)  # 单独设置口型参数

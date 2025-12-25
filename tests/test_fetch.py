@@ -16,5 +16,5 @@ crawler_config = config.get("crawler", {})
 
 fetcher = VCPediaFetcher(crawler_config)
 
-ret = fetcher.fetch_entity_description("夏风")
+ret = fetcher.fetch_entity_description("三月雨")
 print(ret)

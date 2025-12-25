@@ -374,7 +374,7 @@ class InMemoryGraphRetriever(GraphRetriever):
         best_match = None
         for standard_name in self.knowledge_graph.entities.keys():
             common_length = get_maximum_common_substring_length(entity_id, standard_name)
-            if common_length > max_common_length and common_length >= entity_id_len / 2:
+            if common_length > max_common_length and common_length >= max(entity_id_len / 2, 2):
                 max_common_length = common_length
                 best_match = standard_name
         

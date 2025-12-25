@@ -92,6 +92,7 @@ class MemoryWriter:
                         uuid_to_update = uuid
                         break
                 else:
+                    uuid_to_update = None
                     logger.warning(f"No matching UUID found for short UUID: {uuid_short}")
                     
                 content = kwargs.get("new_document", "")
@@ -153,9 +154,10 @@ class MemoryWriter:
             logger.warning("UUID is required for updating a document.")
             return
         doc = Document(content=new_document, metadata={"source": "memory_writer", "timestamp": time.strftime("%Y-%m-%d")}, id=uuid)
-        self.vector_store.update_document(doc_id=uuid, document=doc)
-        self.recent_update.append(MemoryUpdateCommand(type="v_update", content=new_document, uuid=uuid))
-        self.save_recent_update()
+        ret = self.vector_store.update_document(doc_id=uuid, document=doc)
+        if ret:
+            self.recent_update.append(MemoryUpdateCommand(type="v_update", content=new_document, uuid=uuid))
+            self.save_recent_update()
 
     def update_username(self, new_name: str):
         """

@@ -151,6 +151,7 @@ class VCPediaFetcher:
                 # 截至现在已有--次观看，--人收藏 这句话是没有意义的，尝试删除
                 text = text.replace("截至现在已有--次观看，--人收藏", "").strip()
                 text = text.replace("截至目前已有--次观看，--人收藏", "").strip()
+                text = text.replace("截至现在bilibili已有--次观看，--次收藏", "").strip()
                 if summary_parts and (last_was_a or name == 'a'):
                     summary_parts[-1] += text
                 else:
@@ -188,9 +189,19 @@ class VCPediaFetcher:
         lyrics = ""
         if lyc_header:
             poem = None
+            new_table = None
             for sibling in lyc_header.next_siblings:
-                if sibling.name == "div":
-                    print( sibling.get('class', []))
+                if sibling.name == 'table':
+                    if sibling.get('class', []) == ['navbox']:
+                        break
+                    new_table = sibling
+                    break
+                if sibling.name ==  "div":
+                    nt = sibling.find('table')
+                    if nt and nt.get('class', []) != ['navbox']:
+                        new_table = nt
+                        break
+            for sibling in lyc_header.next_siblings:
                 if sibling.name == 'div' and 'poem' in sibling.get('class', []):
                     poem = sibling
                     break
@@ -201,10 +212,18 @@ class VCPediaFetcher:
             if poem:
                 p_tag = poem.find('p')
                 if p_tag:
-                    span_tag = p_tag.find('span')
-                    if span_tag:
-                        lyrics = span_tag.get_text()
+                    span_tags = p_tag.find_all('span')
+                    if span_tags:
+                        for span in span_tags:
+                            if span is None:
+                                continue
+                            lyrics += span.get_text() + " "
+                        # lyrics = "".join([span.get_text() for span in span_tags])
                         lyrics = lyrics.replace('\u3000', ' ').strip()
+            if new_table:
+                print("find lyrics table")
+                new_infobox_data = self._get_data_from_infobox(new_table, single_col=False)
+                infobox_data.update(new_infobox_data)
 
         return {
             "name": title,

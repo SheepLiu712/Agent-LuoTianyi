@@ -102,7 +102,6 @@ class AgentBinder(QObject):
             return
         st_time = time.time()
         init_value = self.model.GetParameterValue("ParamMouthOpenY")
-        print(f"init mouth param value: {init_value}")
         amp = extract_audio_amplitude(wav_path=wav_path, fps=fps)
         correct_factor = (init_value + 4)
         amp = np.clip(amp * correct_factor - 1, -1.0, 1.0) # 调整放大倍数以适应模型, 范围[-1, 1]
