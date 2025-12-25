@@ -8,17 +8,17 @@ class SiliconFlowEmbeddings(EmbeddingFunction):
     def __init__(self, model="BAAI/bge-m3", api_key=None, base_url="https://api.siliconflow.cn/v1"):
         self.model = model
         self.api_key = api_key
-        if self.api_key is None:
+        if not self.api_key:
             raise ValueError("API key for SiliconFlowEmbeddings cannot be None.")
         self.base_url = base_url
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Documents) -> Embeddings: # not used?
         return self.embed_documents(input)
 
-    def embed_documents(self, texts):
+    def embed_documents(self, texts): # not used?
         return [self._embed(text) for text in texts]
 
-    def embed_query(self, *args, **kwargs):
+    def embed_query(self, *args, **kwargs): 
         input_val = kwargs.get('input')
         if input_val is None and args:
             input_val = args[0]

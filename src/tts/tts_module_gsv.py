@@ -46,6 +46,7 @@ class TTSModule:
         self.character_name = tts_config.get("character_name", "LuoTianyi")
         self.language = tts_config.get("language", "zh")
         self.save_dir = tts_config.get("save_dir", "data/tts_output")
+        self.config = tts_config
         
         # Ensure save directory exists
         os.makedirs(self.save_dir, exist_ok=True)
@@ -97,12 +98,16 @@ class TTSModule:
 
     def _start_server(self):
         """Start the GPT-SoVITS API server in a subprocess."""
-        api_script = os.path.join("src", "GPT_SoVITS", "api_v2.py")
-        config_path = os.path.join("config", "tts_infer.yaml")
+        api_script = self.config.get("api_script_path", os.path.join("src", "GPT_SoVITS", "api_v2.py"))
+        config_path = self.config.get("server_config_path", os.path.join("config", "tts_infer.yaml"))
         
         if not os.path.exists(api_script):
             self.logger.error(f"API script not found at {api_script}")
-            return
+            raise FileNotFoundError(f"API script not found at {api_script}")
+        
+        if not os.path.exists(config_path):
+            self.logger.error(f"Config file not found at {config_path}")
+            raise FileNotFoundError(f"Config file not found at {config_path}")
 
         cmd = [
             sys.executable, 

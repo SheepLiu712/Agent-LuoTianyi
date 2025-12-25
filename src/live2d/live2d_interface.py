@@ -6,7 +6,12 @@ class Live2dModel():
     def __init__(self, live2d_config: Dict[str, Any]) -> None:
         self.config = live2d_config
         self.model_config: Dict[str, Any] = self.config["model"]
-        self.expression_projection: Dict[str, str] = self.config.get("expression_projection", {})
+        interface_config_path = self.model_config.get("interface_config_path", "config/live2d_interface_config.json")
+        with open(interface_config_path, "r", encoding="utf-8") as f:
+            import json
+            self.interface_config: Dict[str, Any] = json.load(f)
+        self.expression_projection: Dict[str, str] = self.interface_config.get("expression_projection", {})
+        self.mouth_value_projection: Dict[str, float] = self.interface_config.get("mouth_value_projection", {})
 
     
     def model_init(self) -> None:
@@ -129,6 +134,10 @@ class Live2dModel():
     def SetParameterValue(self, paramId: str, value: float, weight: float = 1.0) -> None:
         if self.model:
             self.model.SetParameterValue(paramId, value, weight)
+    
+    def SetMouthOpenValue(self, value: float, weight: float = 1.0) -> None:
+        if self.model:
+            self.model.SetParameterValue("ParamMouthOpenY", value, weight)
 
     def GetParameterValue(self, paramId: str | int) -> float:
         if self.model:
@@ -158,3 +167,5 @@ class Live2dModel():
         if expression_name not in self.expression_list:
             raise ValueError(f"表情名称 {cmd_name} 未映射到具体表情ID")
         self.SetExpression(expression_name)
+        mouth_value = self.mouth_value_projection.get(cmd_name, -1)
+        self.SetMouthOpenValue(mouth_value, weight=1.0)  # 单独设置口型参数

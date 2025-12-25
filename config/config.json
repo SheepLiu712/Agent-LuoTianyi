@@ -48,6 +48,8 @@
         "reference_audio_dir":"res/tts/reference_audio",
         "reference_audio_lyrics" : "res/tts/reference_audio/lrc.json",
         "save_dir":"data/tts_output",
+        "api_script_path":"res/tts/gsv_tts_api.py",
+        "server_config_path":"config/gsv_tts_config.json",
 
         "tone_ref_audio_projection": {
             "normal": "叙述的参考音频",
@@ -65,15 +67,7 @@
             "default_expression": "normal",
             "offset": [0, -0.2]
         },
-        "expression_projection":{
-                "微笑脸":"normal",
-                "生气脸":"angry",
-                "呆呆脸":"dumb",
-                "害怕脸":"fear",
-                "难过脸":"sad",
-                "温柔脸":"ease",
-                "喜欢脸":"like"
-        }
+        "interface_config_path":"config/live2d_interface_config.json"
     },
 
     "gui":{
