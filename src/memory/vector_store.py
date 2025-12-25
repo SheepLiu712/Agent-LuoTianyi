@@ -179,7 +179,7 @@ class ChromaVectorStore(VectorStore):
                     # 为了兼容性，我们返回一个简单的对象或字典，或者复用 BaseDocument 的实现
                     # 这里我们动态创建一个简单的对象
 
-                    doc = Document(documents[i], metadatas[i])
+                    doc = Document(documents[i], metadatas[i], id=ids[i])
                     
                     # Chroma 默认返回距离 (L2, Cosine 等)，需要根据 distance metric 转换
                     # 默认是 L2 (Squared L2)，越小越相似。

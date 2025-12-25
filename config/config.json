@@ -90,10 +90,11 @@
     },
 
     "crawler": {
+        "data_dir": "data/crawled_data",
         "vcpedia": {
             "base_url": "https://vcpedia.cn",
             "crawl_delay_range": [1.0, 2.0],
-            "output_dir": "data/crawled_data/person",
+            "output_dir": "data/crawled_data",
             "max_pages": 1000
         },
         "use_llm": false,

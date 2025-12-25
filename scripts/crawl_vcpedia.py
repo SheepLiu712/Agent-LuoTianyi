@@ -65,7 +65,29 @@ class VCPediaCrawler:
             print("Extracting Infobox data")
             infobox_data = {}
             rows = infobox_table.find_all('tr')
-            
+            preserved_title = None
+
+            def get_title(text: str) -> str | None:
+                # 简单清洗标题
+                text = text.strip()
+                if "演唱" in text:
+                    return "演唱"
+                if "作词" in text:
+                    return "作词"
+                if "作曲" in text:
+                    return "作曲"
+                if "编曲" in text:
+                    return "编曲"
+                if "作编曲" in text:
+                    return "作编曲"
+                if "PV" in text:
+                    return "PV"
+                if "UP主" in text:
+                    return "UP主"
+                if "曲绘" in text:
+                    return "曲绘"
+                return None
+
             for row in rows:
                 # 跳过隐藏行
                 if 'display:none' in row.get('style', ''):
@@ -93,8 +115,16 @@ class VCPediaCrawler:
                     text = col.get_text(strip=True)
                     if not text:
                         continue
-                    infobox_data["infobox_data"] = infobox_data.get("infobox_data", "") + text + " "
+                    if preserved_title is None:
+                        preserved_title = get_title(text)
+                    else:
+                        key = preserved_title
+                        value = text
+                        preserved_title = None
+                        infobox_data[key] = value
+                    
             return infobox_data
+
         
     def parse_page(self, html: str, title: str) -> Dict[str, Any]:
         """解析页面内容"""
@@ -125,8 +155,6 @@ class VCPediaCrawler:
         if intro_header is None:
             # 获取第一个h2作为简介
             intro_header = soup.find('h2')
-            if intro_header is None:
-                raise Exception("未找到任何h2标题，认为页面不存在或格式异常")
         
         if intro_header:
             # 遍历后续兄弟节点，直到遇到下一个 h2
@@ -149,25 +177,38 @@ class VCPediaCrawler:
                         new_infobox_data = self._get_data_from_infobox(table, single_col=True)
                         infobox_data.update(new_infobox_data)
 
-        if lyc_header :
-            for sibling in lyc_header.next_siblings:
-                if sibling.name == "div":
-                    table = sibling.find('table')
-                    if table:
-                        new_infobox_data = self._get_data_from_infobox(table, single_col=True)
-                        infobox_data.update(new_infobox_data)
-                        break
-                if sibling.name == 'table' or sibling.name == 'h2':
-                    break
-        
         summary = "\n".join(summary_parts)
+
+        if lyc_header :
+            type = "Song"
+        else:
+            type = "Person"
+        
+        # 3. 提取歌词 (如果有)
+        poem = None
+        if lyc_header:
+            for sibling in lyc_header.next_siblings:
+                if sibling.name == 'div' and 'poem' in sibling.get('class', []):
+                    poem = sibling
+                    print("Poem div found")
+                    break
+        if poem:
+            p_tag = poem.find('p')
+            
+            if p_tag:
+                span_tag = p_tag.find('span')
+                if span_tag:
+                        lyrics = span_tag.get_text()
+                        lyrics = lyrics.replace('\u3000', ' ').strip()
+        else:
+            lyrics = ""
 
         return {
             "name": title,
-            "url": f"{self.base_url}/{title}",
-            "last_updated": time.strftime("%Y-%m-%d"),
+            "type": type,
             "infobox": infobox_data,
             "summary": summary,
+            "lyrics": lyrics
         }
 
     def save_data(self, data: Dict[str, Any]):
@@ -188,11 +229,12 @@ class VCPediaCrawler:
             if html:
                 try:
                     data = self.parse_page(html, page)
+                    print(data)
                 except Exception as e:
                     print(f"Failed to parse page {page}: {e}")
                     continue
 
-                if self.use_llm:
+                if False:
                     # data to str
                     data_str = json.dumps(data, ensure_ascii=False)
                     try:
@@ -228,240 +270,7 @@ if __name__ == "__main__":
     
     # 待爬取的词条列表
     pages_to_crawl = [
-    "杉田朗",
-    "阿元",
-    "皓月",
-    "ilem",
-    "洛天依官方账号",
-    "冥凰",
-    "人形兎",
-    "Bitman",
-    "贰__柒",
-    "COP",
-    "高原守",
-    "JUSF周存",
-    "阿良良木健",
-    "苍十三",
-    "Sya",
-    "伊野奏",
-    "雨狸",
-    "Ddickky",
-    "星尘Official",
-    "浓缩排骨",
-    "芹菜猪肉大馄饨",
-    "鸟爷ToriSama",
-    "白奇",
-    "先代",
-    "LS",
-    "BK小鹿",
-    "杏花包子",
-    "DELA",
-    "崩坏",
-    "ChiliChill",
-    "litterzy",
-    "Vagary",
-    "非人哉工作室",
-    "林铭",
-    "紫吉",
-    "大河内航太",
-    "康师傅の海鲜面",
-    "邪叫教主",
-    "希望索任合资",
-    "Wing翼",
-    "圣月樱泪",
-    "景辉",
-    "昆吾",
-    "papaw泡泡",
-    "Z新豪",
-    "豆腐P",
-    "纯白",
-    "薇采之依",
-    "卦者灵风",
-    "忘川风华录",
-    "酷丘",
-    "何天程",
-    "慕清明",
-    "Mzf小慕",
-    "冉语优",
-    "小海咸鱼",
-    "CヰEL文",
-    "OQQ",
-    "鸣泣的紫蝶",
-    "正弦函数P",
-    "黒白P",
-    "沉年旧诗",
-    "时光代理人官方账号",
-    "月色君",
-    "许棉花",
-    "KUSEMONO",
-    "Shawn Ji",
-    "Kusemono",
-    "Natspone",
-    "海辰家的猫",
-    "大玉proD",
-    "乌龟Sui",
-    "果汁凉菜",
-    "花儿不哭",
-    "举烛",
-    "石井伸昂",
-    "墨大筝",
-    "唐乐林",
-    "FromInt",
-    "平安夜的噩梦",
-    "H.K.君",
-    "VO大自然",
-    "向涵",
-    "ナツノセ",
-    "iKz",
-    "蔫小坏",
-    "小欧Ω",
-    "动点P",
-    "星葵",
-    "suya",
-    "石页",
-    "共青团中央",
-    "小玖州",
-    "五味酥",
-    "为止成",
-    "琉璃夭",
-    "丝齐",
-    "璃诗音",
-    "微醉港",
-    "空山客",
-    "火火",
-    "浮澜",
-    "祁言",
-    "宣霖",
-    "李星月",
-    "洛劫",
-    "怀袖",
-    "潮汐-tide",
-    "1AN孙毅然",
-    "择荇",
-    "灰原穷",
-    "哈米伦的弄笛者",
-    "非桥段",
-    "胡多多",
-    "包达",
-    "纳兰寻风",
-    "小田音乐社",
-    "LOMML",
-    "KBShinya",
-    "骆栖淮",
-    "向往",
-    "闫光宇",
-    "kikuo",
-    "悠悠酱",
-    "DECO*27",
-    "T2o",
-    "纪粹希",
-    "无比",
-    "宏宇",
-    "Lanber",
-    "PoKeR",
-    "姆QB",
-    "孤簧",
-    "水琴",
-    "烂兔子P",
-    "盖盖Nyan",
-    "Key-光玉",
-    "HoneyWorks",
-    "乜",
-    "元和令",
-    "付茂华",
-    "刘兆伦",
-    "丁嘉昱",
-    "俞佳乐",
-    "蔡成钰",
-    "WOVOP",
-    "Yu H.",
-    "闹闹",
-    "St",
-    "Tino.S3",
-    "南语",
-    "崔博源",
-    "东方千月",
-    "郭丰琳",
-    "汐音社",
-    "睡狸",
-    "萌蛇",
-    "星夜",
-    "Yoshi",
-    "银临",
-    "Kide",
-    "CDY",
-    "LunaSafari",
-    "李建衡",
-    "苏逸",
-    "和田野",
-    "滑行浣熊",
-    "St色太",
-    "初繁言",
-    "青萝子",
-    "西门振",
-    "古洛",
-    "乐仔",
-    "徐肖",
-    "绛栖轩／WOVOP",
-    "胧汐Louisa",
-    "随手",
-    "一碗热汤",
-    "TS映画",
-    "米库喵",
-    "玄天",
-    "大九_LN",
-    "尘嚣",
-    "温莨",
-    "路明熹",
-    "温瞳瞳",
-    "瞿子千",
-    "秦欲坠",
-    "4st",
-    "乐正绫官方账号",
-    "超想吃番茄",
-    "黄三夏xixi",
-    "黑铱BlackIris",
-    "陈亦洺",
-    "音阙诗听",
-    "荒唐客",
-    "朱鸽",
-    "胡雨潇",
-    "Minsou",
-    "纪远",
-    "绛舞乱丸",
-    "沧弦落尘",
-    "青色P",
-    "渔樵渡",
-    "李遇",
-    "京阿九",
-    "sugar",
-    "QGRay",
-    "HsuRY",
-    "溱绫西陌",
-    "黄然",
-    "何诗蒙",
-    "阿萨",
-    "四不像",
-    "清风疾行",
-    "墨白茜兔",
-    "Rabbiii",
-    "易家扬",
-    "林迈可",
-    "四界",
-    "Saikuro",
-    "笔小小丶",
-    "东方骏",
-    "薛涛",
-    "ToneToneT",
-    "巫兔菌",
-    "霍霍霍祸尾氏",
-    "上官于尧",
-    "曹文佳",
-    "徐博",
-    "刘亦心",
-    "苗库里Owo",
-    "迁梦狸",
-    "络绎",
+        "Ilem"
     ]
     
     crawler.run(pages_to_crawl)

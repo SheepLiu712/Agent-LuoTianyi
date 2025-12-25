@@ -28,7 +28,7 @@ class MemoryUpdateCommand:
     uuid: Optional[str] = None
     def __repr__(self):
         if self.uuid:
-            return f"{self.type}(uuid='{self.uuid}', new_document='{self.content}')"
+            return f"{self.type}(uuid='{self.uuid[:6]}', new_document='{self.content}')"
         else:
             return f"{self.type}(document='{self.content}')" 
 
@@ -38,7 +38,7 @@ class MemoryWriter:
         self.vector_store = vector_store
         self.user_profile = user_profile
         self.llm = LLMModule(config["llm_module"], prompt_manager)
-        self.recent_update = deque(maxlen=10)  # 记录最近写入的记忆，防止重复写入
+        self.recent_update : deque[MemoryUpdateCommand] = deque(maxlen=10)  # 记录最近写入的记忆，防止重复写入
         self.recent_update_path = config.get("recent_update_path", "data/memory/context/recent_update.json")
         os.makedirs(os.path.dirname(self.recent_update_path), exist_ok=True)
         self.load_recent_update()
@@ -62,12 +62,20 @@ class MemoryWriter:
         except Exception as e:
             logger.error(f"Failed to save recent updates: {e}")
 
-    def process_interaction(self, history: List[ConversationItem], used_uuid: Set[str]):
+    def process_interaction(self, user_input: str, history: List[ConversationItem], used_uuid: Set[str]):
         """
         分析最近的交互，提取有价值的信息存入记忆库。
         """
         # 1. 提取关键信息
-        update_cmd = self._extract_knowledge(history, used_uuid)
+        update_cmd = self._extract_knowledge(user_input, history, used_uuid)
+
+        # 2. 准备可能被更新的文档的UUID列表
+        uuid_can_be_used = used_uuid.copy()
+        for update in self.recent_update:
+            if update.uuid:
+                uuid_can_be_used.add(update.uuid)
+
+
         for funcname, kwargs in update_cmd:
             if "add" in funcname.lower():
                 content = kwargs.get("document", "")
@@ -78,16 +86,21 @@ class MemoryWriter:
             elif "update" in funcname.lower():
                 uuid_short = kwargs.get("uuid", "")
                 for uuid in used_uuid:
+                    if uuid is None:
+                        continue
                     if uuid.startswith(uuid_short):
                         uuid_to_update = uuid
                         break
+                else:
+                    logger.warning(f"No matching UUID found for short UUID: {uuid_short}")
+                    
                 content = kwargs.get("new_document", "")
                 if content == "":
                     content = kwargs.get("document", "")
                 self.v_update(uuid_to_update, content)
 
 
-    def _extract_knowledge(self, history: List[ConversationItem], used_uuid: Set[str]) -> Dict[str, Any]:
+    def _extract_knowledge(self, user_input: str, history: List[ConversationItem], used_uuid: Set[str]) -> Dict[str, Any]:
         """
         使用LLM从对话历史中提取有价值的记忆内容。
         Args:
@@ -100,12 +113,17 @@ class MemoryWriter:
         
         cmd = []
         try:
-            response = self.llm.generate_response(history=history_str, recent_updates=recent_update_str, related_memories=related_doc_str)
+            response = self.llm.generate_response(user_input=user_input, history=history_str, recent_updates=recent_update_str, related_memories=related_doc_str)
             response = response.split("\n")
             logger.debug(f"Memory extraction response: {response}")
             for line in response:
                 if line.startswith("##"):
                     break
+                if line == "":
+                    continue
+                if not "(" in line or ")" not in line:
+                    logger.warning(f"Unrecognized command format: {line}")
+                    continue
                 funcname, args_str = line.split("(", 1)
                 args_str = args_str.rstrip(")")
                 kwargs = {}
@@ -114,7 +132,7 @@ class MemoryWriter:
                     kwargs[key.strip()] = value.strip().strip("\'").strip('\"')  
                 cmd.append((funcname.strip(), kwargs))
         except Exception as e:
-            logger.error(f"Error generating memory update commands: {e}")
+            logger.warning(f"Error generating memory update commands: {e}")
         finally:
             return cmd
 
@@ -131,6 +149,9 @@ class MemoryWriter:
         """
         更新向量存储中的记忆片段
         """
+        if uuid is None:
+            logger.warning("UUID is required for updating a document.")
+            return
         doc = Document(content=new_document, metadata={"source": "memory_writer", "timestamp": time.strftime("%Y-%m-%d")}, id=uuid)
         self.vector_store.update_document(doc_id=uuid, document=doc)
         self.recent_update.append(MemoryUpdateCommand(type="v_update", content=new_document, uuid=uuid))

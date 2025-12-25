@@ -45,7 +45,12 @@ class LuoTianyiAgent:
             history_callback=self.handle_history_request
         )  # UI绑定器
 
-        self.memory_manager = MemoryManager(self.config.get("memory_manager", {}), self.prompt_manager)  # 记忆管理器
+        memory_config = self.config.get("memory_manager", {})
+        # Inject crawler config into memory_searcher config for VCPediaFetcher
+        if "memory_searcher" in memory_config:
+            memory_config["memory_searcher"]["crawler"] = self.config.get("crawler", {})
+            
+        self.memory_manager = MemoryManager(memory_config, self.prompt_manager)  # 记忆管理器
 
         self.tts_engine = TTSModule(self.config.get("tts", {}))
         self.window = MainWindow(self.config["gui"], self.config["live2d"], self.ui_binder)
@@ -84,7 +89,7 @@ class LuoTianyiAgent:
             task_list.append((task_id, resp))
         
         # 记忆写入（异步）
-        self.memory_manager.post_process_interaction(self.conversation_manager.get_nearset_history(15))
+        self.memory_manager.post_process_interaction(user_input, recent_history)
 
         # 等待所有TTS任务完成
         for task_id, resp in task_list:

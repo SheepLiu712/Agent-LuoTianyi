@@ -10,6 +10,7 @@ from .vector_store import VectorStore
 from .graph_retriever import GraphRetriever
 from ..llm.prompt_manager import PromptManager
 from ..llm.llm_module import LLMModule
+from ..utils.vcpedia_fetcher import VCPediaFetcher
 from typing import Tuple, Dict, List, Any, Set
 
 
@@ -25,6 +26,7 @@ class MemorySearcher:
         self.max_k_vector_entities = config.get("max_k_vector_entities", 3)
         self.max_k_graph_entities = config.get("max_k_graph_entities", 3)
         self.used_uuid: Set[str] = set()
+        self.vcpedia_fetcher = VCPediaFetcher(config.get("crawler", {}))
 
     def search(self, user_input: str, history: List[str]) -> List[str]:
         """
@@ -63,7 +65,7 @@ class MemorySearcher:
         使用LLM分析用户意图，生成搜索查询。
         这是提高召回率的关键步骤：将"记得那首歌吗"转换为"用户上次提到的歌曲"。
         """
-        self.used_uuid = set()
+        self.used_uuid.clear()
         cmd: List[Tuple[str, Dict[str, str]]] = []
         try:
             response = self.llm.generate_response(
@@ -78,6 +80,11 @@ class MemorySearcher:
             for line in response:
                 if line.startswith("##"):
                     break
+                if line == "":
+                    continue
+                if "(" not in line or ")" not in line:
+                    self.logger.warning(f"Unrecognized command format: {line}")
+                    continue
                 funcname, args_str = line.split("(", 1)
                 args_str = args_str.rstrip(")")
                 kwargs = {}
@@ -107,8 +114,14 @@ class MemorySearcher:
         """
         根据实体名称检索单个实体
         """
+        entity_name = entity_name.strip("\'\"《》").strip()
         entity = self.graph_retriever.retrieve_one_entity(entity_name)
-        return entity.properties.get("summary", "") if entity else ""
+        if entity and entity.properties.get("summary", ""):
+            return entity.properties.get("summary", "")
+        
+        # 尝试从vcpedia抓取内容
+        vcpedia_content = self.vcpedia_fetcher.fetch_entity_description(entity_name)
+        return vcpedia_content or f"未找到关于{entity_name}的相关信息。"
     
     def _get_neighbors(self, entity_name: str, neighbor_type: str) -> List[str]:
         """

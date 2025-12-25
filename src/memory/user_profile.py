@@ -22,6 +22,8 @@ class UserProfile:
                 "name": "你",
                 "profile": ""
             }
+            self.username = self.user_profile["name"]
+            self.description = self.user_profile["profile"]
             self._save_user_profile()
         self.username = self.user_profile.get("name", "你")
         self.description = self.user_profile.get("profile", "")

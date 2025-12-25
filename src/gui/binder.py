@@ -107,7 +107,7 @@ class AgentBinder(QObject):
             frame_index = int(elapsed * fps)
             if frame_index >= len(amp):
                 break
-            target_value = amp[frame_index] * 1.5  # 调整放大倍数以适应模型
+            target_value = amp[frame_index]  # 调整放大倍数以适应模型
             self.model.SetParameterValue("ParamMouthOpenY", target_value, weight=0.8)
             time.sleep(1 / fps)
         # 恢复初始值
