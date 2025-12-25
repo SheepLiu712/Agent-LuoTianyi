@@ -4,3 +4,4 @@ openai
 jinja2
 chromadb
 networkx
+beautifulsoup4

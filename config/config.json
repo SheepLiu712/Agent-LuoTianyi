@@ -90,6 +90,7 @@
     },
 
     "crawler": {
+        "activated": true,
         "data_dir": "data/crawled_data",
         "vcpedia": {
             "base_url": "https://vcpedia.cn",

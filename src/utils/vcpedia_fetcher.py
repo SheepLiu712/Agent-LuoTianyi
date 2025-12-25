@@ -10,6 +10,7 @@ class VCPediaFetcher:
     def __init__(self, config: Dict[str, Any]):
         self.logger = get_logger(__name__)
         self.config = config
+        self.activated = config.get("activated", False)
         crawler_config = config.get("vcpedia", {})
         self.base_url = crawler_config.get("base_url", "https://vcpedia.cn")
         
@@ -28,6 +29,8 @@ class VCPediaFetcher:
         Fetch entity description from cache or VCPedia.
         Returns a JSON string of the entity data or empty string if not found.
         """
+        if not self.activated:
+            return ""
         # 1. Check local cache
         cached_data = self._check_cache(entity_name)
         if cached_data:
