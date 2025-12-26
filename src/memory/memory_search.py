@@ -104,6 +104,8 @@ class MemorySearcher:
         results = self.vector_store.search(query, k=self.max_k_vector_entities)
         combined_result = []
         for doc, score in results:
+            if score < 0.50:
+                break
             if doc.id not in self.used_uuid:
                 timestamp = doc.metadata.get("timestamp", "unknown time")
                 combined_result.append(f" ({timestamp}) {doc.get_content()}")

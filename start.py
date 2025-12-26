@@ -13,6 +13,9 @@ from src.live2d import live2d
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
+
     main_config_path = os.path.join("config", "config.json")
 
     app = ui_init()

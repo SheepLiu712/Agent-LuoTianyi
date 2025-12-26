@@ -117,7 +117,10 @@ def _create_file_handler() -> logging.Handler:
         fmt='%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    
+    if not os.path.exists(_DEFAULT_CONFIG["file"]):
+        if not os.path.exists(os.path.dirname(_DEFAULT_CONFIG["file"])):
+            os.makedirs(os.path.dirname(_DEFAULT_CONFIG["file"]))
+        open(_DEFAULT_CONFIG["file"], 'a').close()
     file_handler = RotatingFileHandler(
         filename=_DEFAULT_CONFIG["file"],
         maxBytes=rotation_size,

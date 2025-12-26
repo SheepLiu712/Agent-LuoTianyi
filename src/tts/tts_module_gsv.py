@@ -1,5 +1,4 @@
 import os
-import pathlib
 import json
 import datetime
 from typing import Dict, Any, Optional
@@ -8,9 +7,19 @@ from queue import PriorityQueue
 import time
 import threading
 import sys
-import subprocess
 import requests
 import atexit
+
+def run_server_silent(config_path, host, port):
+    """Wrapper to run the server with stdout/stderr redirected to devnull."""
+    import sys
+    import os
+    # # Redirect stdout and stderr to devnull to suppress output
+    sys.stdout = open(os.devnull, 'w')
+    sys.stderr = open(os.devnull, 'w')
+    
+    from src.GPT_SoVITS.api_v2 import run_server
+    run_server(config_path, host, port)
 
 class TTSTask:
     def __init__(self, task_id: str, text: str, tone: str) -> None:
@@ -97,38 +106,32 @@ class TTSModule:
         return reference_audio
 
     def _start_server(self):
-        """Start the GPT-SoVITS API server in a subprocess."""
-        api_script = self.config.get("api_script_path", os.path.join("src", "GPT_SoVITS", "api_v2.py"))
+        """Start the GPT-SoVITS API server in a separate process."""
         config_path = self.config.get("server_config_path", os.path.join("config", "tts_infer.yaml"))
-        
-        if not os.path.exists(api_script):
-            self.logger.error(f"API script not found at {api_script}")
-            raise FileNotFoundError(f"API script not found at {api_script}")
-        
+
         if not os.path.exists(config_path):
             self.logger.error(f"Config file not found at {config_path}")
             raise FileNotFoundError(f"Config file not found at {config_path}")
-
-        cmd = [
-            sys.executable, 
-            api_script, 
-            "-p", str(self.api_port),
-            "-c", config_path
-        ]
         
-        self.logger.info(f"Starting GPT-SoVITS server: {' '.join(cmd)}")
-        self.server_process = subprocess.Popen(
-            cmd, 
-            cwd=os.getcwd(),
-            stdout=subprocess.DEVNULL, # Redirect stdout/stderr to avoid cluttering console
-            stderr=subprocess.DEVNULL  # Or capture if needed for debugging
+        self.logger.info("Starting GPT-SoVITS server in a separate process...")
+        
+        # Import here to avoid top-level dependency issues
+        # from src.GPT_SoVITS.api_v2 import run_server # No longer needed here
+        import multiprocessing
+
+        self.server_process = multiprocessing.Process(
+            target=run_server_silent,
+            args=(config_path, "127.0.0.1", self.api_port),
+            daemon=True
         )
+        self.server_process.start()
         
         if not self._wait_for_server():
             self.logger.error("Failed to start GPT-SoVITS server.")
-            # Handle failure appropriately, maybe raise exception
+            if self.server_process.is_alive():
+                self.server_process.terminate()
         else:
-            self.logger.info("GPT-SoVITS server is ready.")
+            self.logger.info("GPT-SoVITS server started successfully.")
 
     def _wait_for_server(self, timeout=60) -> bool:
         start_time = time.time()
@@ -142,6 +145,10 @@ class TTSModule:
             except Exception as e:
                 self.logger.debug(f"Polling error: {e}")
             
+            if self.server_process and not self.server_process.is_alive():
+                self.logger.error("Server process died unexpectedly.")
+                return False
+
             time.sleep(1)
         return False
 
@@ -153,12 +160,13 @@ class TTSModule:
             except:
                 pass
             
-            if self.server_process.poll() is None:
-                self.server_process.terminate()
-                try:
-                    self.server_process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    self.server_process.kill()
+            if hasattr(self.server_process, 'join'):
+                self.server_process.join(timeout=5)
+                if self.server_process.is_alive():
+                    self.logger.warning("GPT-SoVITS server did not exit gracefully, terminating...")
+                    self.server_process.terminate()
+                    self.server_process.join()
+            
             self.server_process = None
 
     def spin(self):

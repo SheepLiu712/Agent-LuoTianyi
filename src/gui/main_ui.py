@@ -28,7 +28,10 @@ class Live2DWidget(QOpenGLWidget):
         self.model.model_init()
 
         # Set clear color to transparent
-        glClearColor(0, 0, 0, 0)
+        try:
+            glClearColor(0, 0, 0, 0)
+        except Exception as e:
+            print(f"initializeGL glClearColor error: {e}")
         
         # Start update timer (approx 60 FPS)
         self.startTimer(int(1000 / 60))
@@ -40,8 +43,12 @@ class Live2DWidget(QOpenGLWidget):
 
     def paintGL(self) -> None:
         # Clear with transparency
-        glClearColor(0, 0, 0, 0)
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        try:
+            glClearColor(0, 0, 0, 0)
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+        except Exception as e:
+            print(f"paintGL error: {e}")
+            pass
         
         if self.model:
             self.model.Update()

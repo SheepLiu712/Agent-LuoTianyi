@@ -20,6 +20,19 @@
 
 Comming soon...
 
+## 🚀🚀更快速的开始
+
+### 一、环境要求
+- 内存：至少 4GB RAM
+- 存储：至少 7GB 可用空间
+- 网络连接：需要访问外部API服务
+- 运算能力：最消耗算力的部分是GPT-SoVITS的语音合成模块，其余均使用外部API，请访问GPT-SoVITS的[官方仓库](https://github.com/RVC-Boss/GPT-SoVITS/)了解配置要求。
+
+### 二、安装流程
+- 下载可执行的便携版压缩包：[ChatWithLuotianyi_Portable](https://cloud.tsinghua.edu.cn/d/493593830d864f07ab4a/)
+- 解压到任意目录，双击运行 `点我启动.bat` 即可启动洛天依对话Agent。
+
+
 ## 🚀 快速开始
 
 ### 一、环境要求

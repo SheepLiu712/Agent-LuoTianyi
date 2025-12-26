@@ -117,34 +117,51 @@ from fastapi import FastAPI, Response
 from fastapi.responses import StreamingResponse, JSONResponse
 import uvicorn
 from io import BytesIO
-from src.tools.i18n.i18n import I18nAuto
-from src.TTS_infer_pack.TTS import TTS, TTS_Config
-from src.TTS_infer_pack.text_segmentation_method import get_method_names as get_cut_method_names
+from .src.tools.i18n.i18n import I18nAuto
+from .src.TTS_infer_pack.TTS import TTS, TTS_Config
+from .src.TTS_infer_pack.text_segmentation_method import get_method_names as get_cut_method_names
 from pydantic import BaseModel
 
 # print(sys.path)
 i18n = I18nAuto()
 cut_method_names = get_cut_method_names()
 
-parser = argparse.ArgumentParser(description="GPT-SoVITS api")
-parser.add_argument("-c", "--tts_config", type=str, default=None, help="tts_infer路径")
-parser.add_argument("-a", "--bind_addr", type=str, default="127.0.0.1", help="default: 127.0.0.1")
-parser.add_argument("-p", "--port", type=int, default="9880", help="default: 9880")
-args = parser.parse_args()
-config_path = args.tts_config
-# device = args.device
-port = args.port
-host = args.bind_addr
-argv = sys.argv
-
-if config_path in [None, ""]:
-    config_path = "config/tts_infer.yaml"
-
-tts_config = TTS_Config(config_path)
-print(tts_config)
-tts_pipeline = TTS(tts_config)
-
+tts_pipeline = None
 APP = FastAPI()
+
+def init_tts_pipeline(config_path):
+    global tts_pipeline, tts_config
+    if config_path in [None, ""]:
+        config_path = "config/tts_infer.yaml"
+    tts_config = TTS_Config(config_path)
+    print(tts_config)
+    tts_pipeline = TTS(tts_config)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="GPT-SoVITS api")
+    parser.add_argument("-c", "--tts_config", type=str, default=None, help="tts_infer路径")
+    parser.add_argument("-a", "--bind_addr", type=str, default="127.0.0.1", help="default: 127.0.0.1")
+    parser.add_argument("-p", "--port", type=int, default="9880", help="default: 9880")
+    args = parser.parse_args()
+    config_path = args.tts_config
+    # device = args.device
+    port = args.port
+    host = args.bind_addr
+    argv = sys.argv
+
+    # init_tts_pipeline(config_path) # Called inside run_server
+    # We need to call run_server, but run_server is defined at the end of the file.
+    # In Python, functions must be defined before use if called at top level, 
+    # but inside `if __name__ == "__main__":` it's fine IF the function is defined before this block runs?
+    # No, the block runs top to bottom. run_server is defined at the bottom.
+    # So I should move run_server to the top or call it at the bottom.
+    
+    # I will just leave this block here but NOT call run_server yet.
+    # I will add a call to run_server at the very end of the file, inside an `if __name__ == "__main__":` block.
+    pass
+else:
+    # When imported, we don't parse args, but we need to ensure tts_pipeline can be initialized later.
+    pass
 
 
 class TTS_Request(BaseModel):
@@ -258,6 +275,7 @@ def handle_control(command: str):
 
 
 def check_params(req: dict):
+    global tts_config
     text: str = req.get("text", "")
     text_lang: str = req.get("text_lang", "")
     ref_audio_path: str = req.get("ref_audio_path", "")
@@ -491,12 +509,16 @@ async def set_sovits_weights(weights_path: str = None):
     return JSONResponse(status_code=200, content={"message": "success"})
 
 
-if __name__ == "__main__":
+def run_server(config_path, bind_addr, port):
+    init_tts_pipeline(config_path)
     try:
-        if host == "None":  # 在调用时使用 -a None 参数，可以让api监听双栈
-            host = None
-        uvicorn.run(app=APP, host=host, port=port, workers=1)
+        if bind_addr == "None":
+            bind_addr = None
+        uvicorn.run(app=APP, host=bind_addr, port=port, workers=1)
     except Exception:
         traceback.print_exc()
         os.kill(os.getpid(), signal.SIGTERM)
         exit(0)
+
+if __name__ == "__main__":
+    run_server(config_path, host, port)

@@ -68,7 +68,7 @@ class MemoryManager:
         history_texts = [item.__repr__() for item in history]
         return self.memory_searcher.search(user_input, history_texts)
     
-    def post_process_interaction(self, user_input: str, history: List[ConversationItem]):
+    def post_process_interaction(self, user_input: str, agent_response_content: List[str], history: List[ConversationItem]):
         """
         根据最新的交互内容，生成并写入新的记忆
 
@@ -77,6 +77,6 @@ class MemoryManager:
             history: 包含最近交互内容的列表
         """
         used_uuid = self.memory_searcher.used_uuid
-        self.post_process_thread = Thread(target=self.memory_writer.process_interaction, args=(user_input, history, used_uuid or set()))
+        self.post_process_thread = Thread(target=self.memory_writer.process_interaction, args=(user_input, agent_response_content, history, used_uuid or set()))
         self.post_process_thread.daemon = True
         self.post_process_thread.start()

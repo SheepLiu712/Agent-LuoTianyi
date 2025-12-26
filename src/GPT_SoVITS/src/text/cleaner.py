@@ -32,7 +32,7 @@ def clean_text(text, language, version=None):
     import importlib
     try:
         # 尝试使用相对导入 (例如 from . import chinese2)
-        language_module = importlib.import_module("src.text." + language_module_map[language], package=__package__)
+        language_module = importlib.import_module("src.GPT_SoVITS.src.text." + language_module_map[language], package=__package__)
     except (ImportError, ValueError):
         # 如果失败，回退到绝对导入
         language_module = __import__(language_module_map[language], fromlist=[language_module_map[language]])
@@ -74,7 +74,7 @@ def clean_special(text, language, special_s, target_symbol, version=None):
     import importlib
     try:
         # 尝试使用相对导入 (例如 from . import chinese2)
-        language_module = importlib.import_module("src.text." + language_module_map[language], package=__package__)
+        language_module = importlib.import_module("src.GPT_SoVITS.src.text." + language_module_map[language], package=__package__)
     except (ImportError, ValueError):
         # 如果失败，回退到绝对导入
         language_module = __import__(language_module_map[language], fromlist=[language_module_map[language]])

@@ -550,9 +550,11 @@ class TTS:
         self.is_v2pro = model_version in {"v2Pro", "v2ProPlus"}
 
         if if_lora_v3 == False:
+            
             print(
-                f"Loading VITS weights from {weights_path}. {vits_model.load_state_dict(dict_s2['weight'], strict=False)}"
+                f"Loading VITS weights from {weights_path}. "
             )
+            vits_model.load_state_dict(dict_s2['weight'], strict=False)
         else:
             print(
                 f"Loading VITS pretrained weights from {weights_path}. {vits_model.load_state_dict(load_sovits_new(path_sovits)['weight'], strict=False)}"
