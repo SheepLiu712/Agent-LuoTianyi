@@ -73,7 +73,10 @@ res/*
 data/*
 build_script.sh
 log.txt
-ChatWithLuotianyi_Portable
+ChatWithLuotianyi_Portable_126/*
+ChatWithLuotianyi_Portable_cpu/*
+ChatWithLuotianyi_Portable_126.zip
+ChatWithLuotianyi_Portable_cpu.zip
 
 # Jupyter Notebook
 .ipynb_checkpoints

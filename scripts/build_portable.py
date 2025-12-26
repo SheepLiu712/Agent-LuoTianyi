@@ -19,17 +19,17 @@ def ignore_patterns(path, names):
         '*.spec',
         'build_script.sh',
         'log.txt',
-        'ChatWithLuotianyi_Portable' # 防止递归复制自己
+        'ChatWithLuotianyi_Portable_cpu' # 防止递归复制自己
     ]
     return set(ignore_list)
 
 def build_portable():
     # 1. 配置路径
     project_root = Path(os.getcwd())
-    dist_dir = project_root / "ChatWithLuotianyi_Portable"
+    dist_dir = project_root / "ChatWithLuotianyi_Portable_cpu"
     
     # 你的 Conda 环境路径 (根据之前的 log 推断)
-    conda_env_path = Path("D:/Anaconda/envs/lty") 
+    conda_env_path = Path("D:/Anaconda/envs/lty_cpu") 
     
     print(f"=== 开始构建便携版 ===")
     print(f"项目根目录: {project_root}")
@@ -72,24 +72,24 @@ def build_portable():
         else:
             shutil.copy2(src_path, dst_path)
 
-    # # 4. 复制 Conda 环境
-    # print("正在复制 Python 环境 (这可能需要几分钟，请耐心等待)...")
-    # dest_env_path = dist_dir / "python"
+    # 4. 复制 Conda 环境
+    print("正在复制 Python 环境 (这可能需要几分钟，请耐心等待)...")
+    dest_env_path = dist_dir / "python"
     
-    # try:
-    #     # 使用 shutil.copytree 复制整个环境
-    #     # 忽略一些不必要的缓存目录以减小体积
-    #     shutil.copytree(conda_env_path, dest_env_path, ignore=shutil.ignore_patterns(
-    #         'pkgs', # conda 的包缓存，运行时不需要
-    #         'conda-meta', # conda 的元数据
-    #         '__pycache__',
-    #         'pip-cache'
-    #     ))
-    #     print("Python 环境复制完成。")
-    # except Exception as e:
-    #     print(f"复制环境失败: {e}")
-    #     print("请检查路径是否正确，或者手动将 conda 环境复制到 ChatWithLuotianyi_Portable/python")
-    #     return
+    try:
+        # 使用 shutil.copytree 复制整个环境
+        # 忽略一些不必要的缓存目录以减小体积
+        shutil.copytree(conda_env_path, dest_env_path, ignore=shutil.ignore_patterns(
+            'pkgs', # conda 的包缓存，运行时不需要
+            'conda-meta', # conda 的元数据
+            '__pycache__',
+            'pip-cache'
+        ))
+        print("Python 环境复制完成。")
+    except Exception as e:
+        print(f"复制环境失败: {e}")
+        print("请检查路径是否正确，或者手动将 conda 环境复制到 ChatWithLuotianyi_Portable/python")
+        return
 
     # 5. 创建启动脚本 (run.bat)
     print("正在生成启动脚本...")
