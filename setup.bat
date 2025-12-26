@@ -15,7 +15,7 @@ if not defined INSTALL_CUDA set "INSTALL_CUDA=n"
 
 if /I "%INSTALL_CUDA%"=="y" (
     echo Installing PyTorch with CUDA support...
-    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu126
 ) else (
     echo Not installing PyTorch with CUDA support, Pytorch will be installed later.
 )

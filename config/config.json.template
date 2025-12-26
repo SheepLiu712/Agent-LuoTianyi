@@ -30,7 +30,7 @@
         "llm_module": {
             "llm": {
                 "api_type": "siliconflow",
-                "model": "Pro/Qwen/Qwen3-32B",
+                "model": "Pro/deepseek-ai/DeepSeek-V3",
                 "api_key": "$SILICONFLOW_API_KEY",
                 "base_url": "https://api.siliconflow.cn/v1",
                 "temperature": 0.7,
@@ -48,8 +48,8 @@
         "reference_audio_dir":"res/tts/reference_audio",
         "reference_audio_lyrics" : "res/tts/reference_audio/lrc.json",
         "save_dir":"data/tts_output",
-        "api_script_path":"res/tts/gsv_tts_api.py",
-        "server_config_path":"config/gsv_tts_config.json",
+        "api_script_path":"src/GPT_SoVITS/api_v2.py",
+        "server_config_path":"config/tts_infer.yaml",
 
         "tone_ref_audio_projection": {
             "normal": "叙述的参考音频",

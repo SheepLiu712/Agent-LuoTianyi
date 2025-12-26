@@ -15,8 +15,8 @@ def run_server_silent(config_path, host, port):
     import sys
     import os
     # # Redirect stdout and stderr to devnull to suppress output
-    sys.stdout = open(os.devnull, 'w')
-    sys.stderr = open(os.devnull, 'w')
+    # sys.stdout = open(os.devnull, 'w')
+    # sys.stderr = open(os.devnull, 'w')
     
     from src.GPT_SoVITS.api_v2 import run_server
     run_server(config_path, host, port)

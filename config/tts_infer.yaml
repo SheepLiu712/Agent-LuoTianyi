@@ -1,8 +1,8 @@
 custom:
   bert_base_path: res/tts/GPT_SoVITS/pretrained_models/chinese-roberta-wwm-ext-large
   cnhuhbert_base_path: res/tts/GPT_SoVITS/pretrained_models/chinese-hubert-base
-  device: cpu
-  is_half: false
+  device: cuda
+  is_half: true
   t2s_weights_path: res/tts/GPT_SoVITS/custom_models/lty-tts_gpt_model.ckpt
   version: v2ProPlus
   vits_weights_path: res/tts/GPT_SoVITS/custom_models/lty-tts_sovits_model.pth
