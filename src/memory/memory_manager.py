@@ -52,7 +52,7 @@ class MemoryManager:
         """
         return self.user_profile.get_username()
 
-    def get_knowledge(self, user_input: str, history: List[ConversationItem]) -> List[str]:
+    def get_knowledge(self, user_input: str, history: str) -> List[str]:
         """
         根据用户输入检索相关记忆
 
@@ -65,10 +65,10 @@ class MemoryManager:
         if self.post_process_thread and self.post_process_thread.is_alive():
             self.logger.info("Waiting for previous memory write to complete...")
             self.post_process_thread.join()
-        history_texts = [item.__repr__() for item in history]
+        history_texts = history
         return self.memory_searcher.search(user_input, history_texts)
     
-    def post_process_interaction(self, user_input: str, agent_response_content: List[str], history: List[ConversationItem]):
+    def post_process_interaction(self, user_input: str, agent_response_content: List[str], history: str):
         """
         根据最新的交互内容，生成并写入新的记忆
 

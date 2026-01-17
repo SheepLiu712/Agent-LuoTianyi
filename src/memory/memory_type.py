@@ -13,6 +13,18 @@ class GraphEntityType(str, Enum):
     YEAR = "Year",
     GLORY = "Glory",
 
+en_zh_type_dict = {
+    "Singer": "歌手",
+    "Person": "人物",
+    "Song": "歌曲",
+    "Album": "专辑",
+    "Event": "活动",
+    "Location": "地点",
+    "Organization": "组织",
+    "Year": "年份",
+    "Glory": "荣誉",
+}
+
 class GraphRelationType(str, Enum):
     PRODUCED_BY = "produced_by"
     LYRICS_BY = "lyrics_by"

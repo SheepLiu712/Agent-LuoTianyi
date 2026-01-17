@@ -74,10 +74,9 @@ class LuoTianyiAgent:
         self.ui_binder.start_thinking()
 
         conversation_history = self.conversation_manager.get_context()
-        recent_history = self.conversation_manager.get_nearset_history(10)
         # 记忆检索
         username = self.memory_manager.get_username()
-        retrieved_knowledge = self.memory_manager.get_knowledge(user_input, recent_history)
+        retrieved_knowledge = self.memory_manager.get_knowledge(user_input, conversation_history)
         self.conversation_manager.add_conversation(ConversationSource.USER, user_input, type=ContextType.TEXT)
         responses = self.main_chat.generate_response(user_input, conversation_history, retrieved_knowledge, username=username)
 
@@ -90,7 +89,7 @@ class LuoTianyiAgent:
         
         # 记忆写入（异步）
         agent_response_contents = [resp.content for resp in responses]
-        self.memory_manager.post_process_interaction(user_input, agent_response_contents, recent_history)
+        self.memory_manager.post_process_interaction(user_input, agent_response_contents, conversation_history)
 
         # 等待所有TTS任务完成
         for task_id, resp in task_list:

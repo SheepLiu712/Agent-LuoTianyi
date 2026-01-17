@@ -26,23 +26,37 @@ class MemorySearcher:
         self.max_k_vector_entities = config.get("max_k_vector_entities", 3)
         self.max_k_graph_entities = config.get("max_k_graph_entities", 3)
         self.used_uuid: Set[str] = set()
+        self.last_search_results: List[str] = []
         self.vcpedia_fetcher = VCPediaFetcher(config.get("crawler", {}))
 
-    def search(self, user_input: str, history: List[str]) -> List[str]:
+    def search(self, user_input: str, history: str) -> List[str]:
         """
         执行混合检索策略
         """
         # 1. 查询理解与扩展 (Query Expansion)
         # 利用LLM将用户的自然语言转换为具体的搜索意图
-        search_queries = self._generate_search_queries(user_input, history)
+        search_queries = self._generate_search_queries(user_input, history, self.last_search_results)
 
         funcname_project_dict = {
+            "inherit_memory": self._inherit_memory,
             "v_search": self._vector_search,
             "g_search_entity": self._retrieve_one_entity,
+            "g_search_song_lyrics": self._get_song_lyrics,
             "get_neighbors": self._get_neighbors,
             "get_shared_neighbors": self._get_shared_neighbors,
-            "find_connections": self._find_connections,
         }
+
+        def duplicate_removal(seq: List[str]) -> List[str]:
+            """移除列表中的重复项，保持顺序不变"""
+            seen = set()
+            result = []
+            for item in seq:
+                item_repr = item.strip()[:50]  # 只考虑前50个字符以判断重复
+                if item_repr not in seen:
+                    seen.add(item_repr)
+                    result.append(item)
+            return result
+        
         returned_results = []
         for funcname, kwargs in search_queries:
             if funcname not in funcname_project_dict:
@@ -58,19 +72,24 @@ class MemorySearcher:
             except Exception as e:
                 self.logger.error(f"Error executing {funcname} with args {kwargs}: {e}")
 
+        returned_results = duplicate_removal(returned_results)
+        self.last_search_results = returned_results
         return returned_results
 
-    def _generate_search_queries(self, user_input: str, history: List[str]) -> List[Tuple[str, Dict[str, str]]]:
+    def _generate_search_queries(self, user_input: str, history: str, last_search_results: List[str]) -> List[Tuple[str, Dict[str, str]]]:
         """
         使用LLM分析用户意图，生成搜索查询。
         这是提高召回率的关键步骤：将"记得那首歌吗"转换为"用户上次提到的歌曲"。
         """
+        
         self.used_uuid.clear()
         cmd: List[Tuple[str, Dict[str, str]]] = []
+        last_search_results_str = "\n".join([f"{idx}. {content[:100]}" for idx, content in enumerate(last_search_results)])
         try:
             response = self.llm.generate_response(
                 user_input=user_input,
                 history=history,
+                last_search_results=last_search_results_str,
                 max_k_graph_entities=self.max_k_graph_entities,
                 max_k_vector_entities=self.max_k_vector_entities,
             )
@@ -88,14 +107,39 @@ class MemorySearcher:
                 funcname, args_str = line.split("(", 1)
                 args_str = args_str.rstrip(")")
                 kwargs = {}
-                for arg in args_str.split(","):
-                    key, value = arg.split("=", 1)
-                    kwargs[key.strip()] = value.strip().strip("\'").strip('\"')  
+                args = args_str.split(",")
+
+                for arg in args:
+                    if "=" in arg and "[" in arg and "]" not in arg: # list argument split by comma
+                        key, value = arg.split("=", 1)
+                        list_values = value.strip().lstrip('[')
+                        for next_arg in args[args.index(arg)+1:]:
+                            if "]" in next_arg:
+                                list_values += "," + next_arg.strip().rstrip("]")
+                                break
+                            else:
+                                list_values += "," + next_arg.strip()
+                        kwargs[key.strip()] = list_values
+                    elif "=" in arg:
+                        key, value = arg.split("=", 1)
+                        kwargs[key.strip()] = value.strip().strip('\'\"[]')
+                
                 cmd.append((funcname.strip(), kwargs))
         except Exception as e:
             self.logger.error(f"Error generating search queries: {e}")
         finally:
             return cmd
+        
+    def _inherit_memory(self, content_ids: str) -> List[str]:
+        """
+        继承之前检索到的记忆内容
+        """
+        ids = [int(cid.strip()) for cid in content_ids.split(",")]
+        results = []
+        for idx in ids:
+            if 0 <= idx < len(self.last_search_results):
+                results.append(self.last_search_results[idx])
+        return results
     
     def _vector_search(self, query: str) -> List[str]:
         """
@@ -108,26 +152,48 @@ class MemorySearcher:
                 break
             if doc.id not in self.used_uuid:
                 timestamp = doc.metadata.get("timestamp", "unknown time")
-                combined_result.append(f" ({timestamp}) {doc.get_content()}")
+                combined_result.append(f"在{timestamp}, {doc.get_content()}")
                 self.used_uuid.add(doc.id)
         return combined_result
+    
+    def _get_song_lyrics(self, song_name: str) -> str:
+        """
+        根据歌曲名称检索歌词
+        """
+        song_name = song_name.strip("\'\"《》").strip()
+        entity = self.graph_retriever.retrieve_one_entity(song_name)
+        if entity and entity.entity_type == GraphEntityType.SONG and entity.properties.get("lyrics", ""):
+            return f"{song_name}的歌词:\n{entity.properties.get('lyrics', '')}"
+        elif entity and entity.entity_type != GraphEntityType.SONG:
+            return f"找到名为《{song_name}》的实体，但它不是一首歌曲。"
+        
+        vcpedia_content: Dict[str, Any] | None = self.vcpedia_fetcher.fetch_entity_description(song_name)
+        if vcpedia_content and vcpedia_content.get("lyrics", ""):
+            return f"{song_name}的歌词:\n{vcpedia_content.get('lyrics', '')}"
+        return f"未找到《{song_name}》的歌词信息。"
 
     def _retrieve_one_entity(self, entity_name: str) -> str:
         """
         根据实体名称检索单个实体
         """
         entity_name = entity_name.strip("\'\"《》").strip()
+        if entity_name == "洛天依":
+            return ""             # 不要检索自己啊
+        
         entity = self.graph_retriever.retrieve_one_entity(entity_name)
-        print(entity_name, entity.entity_type)
         if entity and entity.properties.get("summary", ""):
             if entity.entity_type == GraphEntityType.SONG and entity.properties.get("lyrics", ""):
-                return f"{entity.name}: {entity.properties.get('summary', '')}\nLyrics: {entity.properties.get('lyrics', '')}"
+                return [f"{entity.name}的简介: {entity.properties.get('summary', '')}", f"{entity.name}的歌词:\n{entity.properties.get('lyrics', '')}"]
             elif entity.entity_type != GraphEntityType.SONG:
-                return entity.properties.get("summary", "")
+                return f"{entity.name}的简介: {entity.properties.get('summary', '')}"
         
         # 尝试从vcpedia抓取内容
-        vcpedia_content = self.vcpedia_fetcher.fetch_entity_description(entity_name)
-        return vcpedia_content or f"未找到关于{entity_name}的相关信息。"
+        vcpedia_content: Dict[str, Any] | None = self.vcpedia_fetcher.fetch_entity_description(entity_name)
+        if short_summary := vcpedia_content.get("short_summary", ""):
+            if lyrics := vcpedia_content.get("lyrics", ""):
+                return [f"{entity_name}的简介: {short_summary}", f"{entity_name}的歌词:\n{lyrics}"]
+            return f"{entity_name}的简介: {short_summary}"
+        return f"未找到关于{entity_name}的相关信息。"
     
     def _get_neighbors(self, entity_name: str, neighbor_type: str) -> List[str]:
         """

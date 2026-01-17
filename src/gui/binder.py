@@ -118,7 +118,6 @@ class AgentBinder(QObject):
                 break
             weight = np.clip(frame_index / len(amp) - 0.95, 0, 1) * 20
             target_value = amp[frame_index] * (1-weight) + init_value * weight  # 最后一段平滑回到初始值
-            print(amp[frame_index], target_value, weight)
             self.model.SetParameterValue("ParamMouthOpenY", target_value, weight=0.3)
             time.sleep(1 / fps)
 

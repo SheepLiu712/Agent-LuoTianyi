@@ -24,7 +24,7 @@ class VCPediaFetcher:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
         })
 
-    def fetch_entity_description(self, entity_name: str, short_summary: bool = True) -> str:
+    def fetch_entity_description(self, entity_name: str, short_summary: bool = True) -> Dict[str, Any]:
         """
         Fetch entity description from cache or VCPedia.
         Returns a JSON string of the entity data or empty string if not found.
@@ -35,7 +35,7 @@ class VCPediaFetcher:
         cached_data = self._check_cache(entity_name)
         if cached_data:
             self.logger.info(f"Found {entity_name} in cache.")
-            return self._format_data(cached_data, short_summary=short_summary)
+            return cached_data
 
         # 2. Crawl
         self.logger.info(f"Trying to crawl {entity_name} from VCPedia...")
@@ -45,11 +45,11 @@ class VCPediaFetcher:
                 data = self._parse_page(html, entity_name)
                 if data:
                     self._save_data(data)
-                    return self._format_data(data, short_summary=short_summary)
+                    return data
             except Exception as e:
                 self.logger.error(f"Error parsing {entity_name}: {e}")
         
-        return ""
+        return None
 
     def _check_cache(self, entity_name: str) -> Optional[Dict[str, Any]]:
         # Normalize name for filename

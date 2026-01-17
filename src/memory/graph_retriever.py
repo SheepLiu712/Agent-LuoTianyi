@@ -10,6 +10,7 @@ from .memory_type import Entity, Relation
 import json
 import networkx as nx
 from .memory_type import GraphEntityType, GraphRelationType
+import random
 
 from ..utils.logger import get_logger
 
@@ -513,6 +514,9 @@ class InMemoryGraphRetriever(GraphRetriever):
         """获取实体的邻居"""
         neighbors = self.knowledge_graph.get_neighbors(entity_name, direction, relation_type, neighbor_type)
         if needed_neighbors > 0:
+            # 限制返回数量
+            # 随机打乱
+            random.shuffle(neighbors)
             neighbors = neighbors[:needed_neighbors]
         return neighbors
 
@@ -524,7 +528,6 @@ class InMemoryGraphRetriever(GraphRetriever):
         neighbor_type: Optional[Union[str, GraphEntityType]] = None,
         needed_neighbors=-1,
     ) -> List[Entity]:
-        print(f"查找 '{entity_a}' 和 '{entity_b}' 的共享邻居...")
         neighbors_a = self.knowledge_graph.get_neighbors(entity_a, direction, neighbor_type=neighbor_type)
         neighbors_b = self.knowledge_graph.get_neighbors(entity_b, direction, neighbor_type=neighbor_type)
         set_a: Set[str] = set([n.id for n, _ in neighbors_a])
@@ -535,6 +538,7 @@ class InMemoryGraphRetriever(GraphRetriever):
             neighbor_entity = self.knowledge_graph.entities[n_id]
             shared_neighbors.append(neighbor_entity)  # 关系类型未知
         if needed_neighbors > 0:
+            random.shuffle(shared_neighbors)
             shared_neighbors = shared_neighbors[:needed_neighbors]
         return shared_neighbors
 
@@ -571,6 +575,7 @@ class InMemoryGraphRetriever(GraphRetriever):
         readable_paths.sort(key=lambda x: x[1])
         readable_paths = [p[0] for p in readable_paths]
         if needed_path_num > 0:
+            random.shuffle(readable_paths)
             readable_paths = readable_paths[:needed_path_num]
         return readable_paths
 

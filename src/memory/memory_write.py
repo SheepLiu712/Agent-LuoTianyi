@@ -68,7 +68,7 @@ class MemoryWriter:
             logger.error(f"Failed to save recent updates: {e}")
 
     def process_interaction(
-        self, user_input: str, agent_response_content: List[str], history: List[ConversationItem], used_uuid: Set[str]
+        self, user_input: str, agent_response_content: List[str], history: str, used_uuid: Set[str]
     ):
         """
         分析最近的交互，提取有价值的信息存入记忆库。
@@ -107,14 +107,14 @@ class MemoryWriter:
                 self.v_update(uuid_to_update, content)
 
     def _extract_knowledge(
-        self, user_input: str, agent_response_content: List[str], history: List[ConversationItem], used_uuid: Set[str]
+        self, user_input: str, agent_response_content: List[str], history: str, used_uuid: Set[str]
     ) -> Dict[str, Any]:
         """
         使用LLM从对话历史中提取有价值的记忆内容。
         Args:
             history: 最近的对话历史
         """
-        history_str = [f"{item.source}: {item.content}" for item in history]
+        history_str = history
         recent_update_str = [str(cmd) for cmd in self.recent_update]
         related_docs = self.vector_store.get_document_by_id(list(used_uuid))
         related_doc_str = [f"ID: {doc.id[:6]}, Content: {doc.content}" for doc in related_docs if doc]
