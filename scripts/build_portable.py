@@ -108,6 +108,10 @@ set "PATH=%PYTHON_HOME%;%PYTHON_HOME%\Library\bin;%PYTHON_HOME%\Scripts;%PATH%"
 :: Set PYTHONPATH to ensure src is found
 set "PYTHONPATH=%CURRENT_DIR%"
 
+:: Set Qt Plugin Path
+set "QT_PLUGIN_PATH=%PYTHON_HOME%\Library\lib\qt6\plugins"
+set "QT_QPA_PLATFORM_PLUGIN_PATH=%PYTHON_HOME%\Library\lib\qt6\plugins\platforms"
+
 :: Set HF_HOME and other cache paths to local data directory
 set "HF_HOME=%CURRENT_DIR%data\huggingface"
 set "MPLCONFIGDIR=%CURRENT_DIR%data\matplotlib"
@@ -135,12 +139,12 @@ if %ERRORLEVEL% NEQ 0 (
 endlocal
 """
     
-    with open(dist_dir / "run.bat", "w", encoding="utf-8") as f:
+    with open(dist_dir / "点我启动.bat", "w", encoding="utf-8") as f:
         f.write(bat_content)
 
     print(f"=== 构建完成！ ===")
     print(f"请将文件夹 '{dist_dir}' 发送给用户。")
-    print(f"用户只需双击 'run.bat' 即可运行。")
+    print(f"用户只需双击 '点我启动.bat' 即可运行。")
 
 if __name__ == "__main__":
     build_portable()

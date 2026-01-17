@@ -1,8 +1,13 @@
 import pickle
 import os
+from pathlib import Path
 import re
 import wordsegment
-from g2p_en import G2p
+
+import nltk
+new_nltk_data_path: Path = Path.cwd() / 'res' / 'tts' / 'GPT_SoVITS' / 'nltk_data'
+if new_nltk_data_path not in nltk.data.path:    
+    nltk.data.path.append(str(new_nltk_data_path))
 
 from .symbols import punctuation
 
@@ -10,10 +15,9 @@ from .symbols2 import symbols
 
 from builtins import str as unicode
 from .en_normalization.expend import normalize
-import nltk
-nltk.data.path.append('./res/tts/GPT_SoVITS/nltk_data')
-from nltk.tokenize import TweetTokenizer
 
+from g2p_en import G2p
+from nltk.tokenize import TweetTokenizer
 word_tokenize = TweetTokenizer().tokenize
 from nltk import pos_tag
 

@@ -6,7 +6,8 @@
                 "害怕脸":"fear",
                 "难过脸":"sad",
                 "温柔脸":"ease",
-                "喜欢脸":"like"
+                "喜欢脸":"like",
+                "卖萌":"moemoe"
     },
     "mouth_value_projection":{
         "normal":-1,
@@ -15,6 +16,7 @@
         "fear":0.732,
         "sad":-1,
         "ease":-1,
-        "like":1        
+        "like":1,
+        "moemoe":1
     }
 }

@@ -105,8 +105,26 @@ class TTSModule:
         self.logger.info(f"Loaded {len(reference_audio)} reference audio files.")
         return reference_audio
 
+    def _kill_process_on_port(self, port):
+        """Kill any process listening on the specified port."""
+        try:
+            import psutil
+            for proc in psutil.process_iter():
+                try:
+                    for conn in proc.net_connections():
+                        if conn.laddr.port == port:
+                            self.logger.warning(f"Port {port} is in use by process {proc.pid} ({proc.name()}). Killing it...")
+                            proc.kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+        except ImportError:
+            self.logger.error("psutil not installed, cannot kill process on port.")
+        except Exception as e:
+            self.logger.error(f"Error killing process on port {port}: {e}")
+
     def _start_server(self):
         """Start the GPT-SoVITS API server in a separate process."""
+        self._kill_process_on_port(self.api_port)
         config_path = self.config.get("server_config_path", os.path.join("config", "tts_infer.yaml"))
 
         if not os.path.exists(config_path):

@@ -173,6 +173,7 @@ Agent-LuoTianyi/
 
 3.  **Memory (`src/memory`)**:
     *   实现了混合记忆系统：基于向量数据库 (ChromaDB) 的语义检索和基于图数据库 (NetworkX) 的知识检索。
+    *   实现了在线抓取知识的功能：利用beautifulsoup4从VCPedia抓取洛天依相关知识并缓存到本地。
     *   `memory_manager.py`: 记忆系统的统一接口。
 
 4.  **TTS (`src/tts`)**:

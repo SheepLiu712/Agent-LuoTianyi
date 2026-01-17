@@ -94,17 +94,22 @@ class AgentBinder(QObject):
         开始口型同步
         """
         if self.model:
+            self.ready = False
             mouth_move_thread = threading.Thread(target=self._mouth_move, args=(wav_path,), daemon=True)
             mouth_move_thread.start()
+            while not self.ready:
+                time.sleep(0.01)
 
     def _mouth_move(self, wav_path: str, fps: int = 60):
         if not self.model:
             return
-        st_time = time.time()
+        
         init_value = self.model.GetParameterValue("ParamMouthOpenY")
         amp = extract_audio_amplitude(wav_path=wav_path, fps=fps)
-        correct_factor = (init_value + 4)
+        correct_factor = (init_value + 6)
         amp = np.clip(amp * correct_factor - 1, -1.0, 1.0) # 调整放大倍数以适应模型, 范围[-1, 1]
+        self.ready = True
+        st_time = time.time()
         while True:
 
             elapsed = time.time() - st_time
@@ -113,6 +118,7 @@ class AgentBinder(QObject):
                 break
             weight = np.clip(frame_index / len(amp) - 0.95, 0, 1) * 20
             target_value = amp[frame_index] * (1-weight) + init_value * weight  # 最后一段平滑回到初始值
+            print(amp[frame_index], target_value, weight)
             self.model.SetParameterValue("ParamMouthOpenY", target_value, weight=0.3)
             time.sleep(1 / fps)
 
