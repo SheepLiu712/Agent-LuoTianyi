@@ -1,0 +1,186 @@
+{
+    "database": {
+        "sql_db_folder": "data/database",
+        "sql_db_file": "luotianyi.db",
+        "vector_store": {
+            "store_type": "chroma",
+            "embedding_model": {
+                "api_type": "siliconflow",
+                "model": "BAAI/bge-large-zh-v1.5",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1"
+            },
+            "vector_store_path": "data/database/vector_store",
+            "collection_name": "luotianyi_memory"
+        },
+        "knowledge_graph": {
+            "retriever_type": "memory",
+            "graph_data_dir": "res/knowledge",
+            "graph_data_path": "knowledge_graph.json",
+            "graph_alias_path": "alias.json"
+        }
+    },
+    "knowledge": {
+        "song_database": {
+            "db_folder": "res/knowledge",
+            "db_file": "knowledge_db.db"
+        }
+    },
+    "tts": {
+        "character_name": "LuoTianyi",
+        "onnx_model_dir": "res/tts/lty_custom_onnx_model",
+        "language": "zh",
+        "reference_audio_dir": "res/tts/reference_audio",
+        "reference_audio_lyrics": "res/tts/reference_audio/lrc.json",
+        "api_script_path": "src/GPT_SoVITS/api_v2.py",
+        "server_config_path": "config/tts_infer.yaml",
+        "interface_config_path": "config/tts_interface_config.json"
+    },
+    "prompt_manager": {
+        "template_dir": "res/agent/prompts"
+    },
+    "main_chat": {
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "deepseek-chat",
+                "api_key": "$DEEPSEEK_API_KEY",
+                "base_url": "https://api.deepseek.com/v1",
+                "temperature": 0.7,
+                "max_tokens": 8192,
+                "top_p": 0.9
+            },
+            "prompt_name": "daily_chat_prompt"
+        },
+        "static_variables_file": "res/agent/persona/static_variables.json"
+    },
+    "planner": {
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "deepseek-chat",
+                "api_key": "$DEEPSEEK_API_KEY",
+                "base_url": "https://api.deepseek.com/v1",
+                "temperature": 0.7,
+                "max_tokens": 8192,
+                "top_p": 0.9
+            },
+            "prompt_name": "planner_prompt"
+        },
+        "static_variables_file": "res/agent/persona/static_variables.json"
+    },
+    "vision_module": {
+        "vlm_module": {
+            "vlm": {
+                "api_type": "siliconflow",
+                "model": "qwen3-vl-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "temperature": 0.7,
+                "max_tokens": 8192,
+                "top_p": 0.9
+            },
+            "prompt_name": "vision_interaction_prompt"
+        }
+    },
+    "conversation_manager": {
+        "history_dir": "data/memory/conversation_history",
+        "max_file_lines": 1000,
+        "recent_history_limit": 100,
+        "context_file": "data/memory/context/context.json",
+        "raw_conversation_context_limit": 240,
+        "not_zip_conversation_count": 20,
+        "forget_conversation_days": 10,
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "deepseek-chat",
+                "api_key": "$DEEPSEEK_API_KEY",
+                "base_url": "https://api.deepseek.com/v1",
+                "temperature": 0.7,
+                "max_tokens": 8192,
+                "top_p": 0.9
+            },
+            "prompt_name": "summary_prompt"
+        }
+    },
+    "crawler": {
+        "activated": true,
+        "data_dir": "data/crawled_data",
+        "vcpedia": {
+            "base_url": "https://vcpedia.cn",
+            "crawl_delay_range": [
+                1.0,
+                2.0
+            ],
+            "output_dir": "data/crawled_data",
+            "max_pages": 1000
+        },
+        "use_llm": false,
+        "llm_module": {
+            "llm": {
+                "api_type": "siliconflow",
+                "model": "Qwen/Qwen3-32B",
+                "api_key": "$SILICONFLOW_API_KEY",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "temperature": 0.7,
+                "max_tokens": 8192,
+                "top_p": 0.9
+            },
+            "prompt_name": "crawl_prompt"
+        }
+    },
+    "memory_manager": {
+        "graph_retriever": {
+            "retriever_type": "memory"
+        },
+        "user_profile": {
+            "profile_file": "data/memory/user_profile/user_profile.json",
+            "max_profile_length": 300,
+            "profile_update_freq": 50,
+            "llm_module": {
+                "llm": {
+                    "api_type": "siliconflow",
+                    "model": "deepseek-chat",
+                    "api_key": "$DEEPSEEK_API_KEY",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "temperature": 0.7,
+                    "max_tokens": 8192,
+                    "top_p": 0.9
+                },
+                "prompt_name": "user_profile_update_prompt"
+            }
+        },
+        "memory_searcher": {
+            "max_k_graph_entities": 3,
+            "max_k_vector_entities": 5,
+            "llm_module": {
+                "llm": {
+                    "api_type": "siliconflow",
+                    "model": "deepseek-chat",
+                    "api_key": "$DEEPSEEK_API_KEY",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "temperature": 0.7,
+                    "max_tokens": 8192,
+                    "top_p": 0.9
+                },
+                "prompt_name": "memory_search_prompt"
+            }
+        },
+        "memory_writer": {
+            "recent_update_path": "data/memory/context/recent_update.json",
+            "llm_module": {
+                "llm": {
+                    "api_type": "siliconflow",
+                    "model": "deepseek-chat",
+                    "api_key": "$DEEPSEEK_API_KEY",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "temperature": 0.7,
+                    "max_tokens": 8192,
+                    "top_p": 0.9
+                },
+                "prompt_name": "memory_write_prompt"
+            }
+        }
+    }
+}

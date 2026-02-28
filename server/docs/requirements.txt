@@ -1,0 +1,17 @@
+sqlalchemy
+fastapi
+uvicorn
+pydantic
+requests
+redis
+python-jose
+pydub
+colorlog
+openai
+jinja2
+chromadb
+networkx
+beautifulsoup4
+cryptography
+Pillow
+pyhton-multipart

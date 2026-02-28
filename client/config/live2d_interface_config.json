@@ -1,0 +1,23 @@
+{
+    "expression_projection":{
+                "微笑脸":"normal",
+                "生气脸":"angry",
+                "呆呆脸":"dumb",
+                "害怕脸":"fear",
+                "难过脸":"sad",
+                "温柔脸":"ease",
+                "喜欢脸":"like",
+                "卖萌":"moemoe",
+                "唱歌":"sing"
+    },
+    "mouth_value_projection":{
+        "normal":-1,
+        "angry":-1,
+        "dumb":1,
+        "fear":0.732,
+        "sad":-1,
+        "ease":-1,
+        "like":1,
+        "moemoe":1
+    }
+}

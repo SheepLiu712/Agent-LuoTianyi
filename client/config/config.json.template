@@ -1,0 +1,24 @@
+{
+    "live2d":{
+        "model":{
+            "model_version": "v3",
+            "model_path": "res/live2d/models/luo/model.model3.json",
+            "default_expression": "normal",
+            "offset": [0, -0.0]
+        },
+        "interface_config_path":"config/live2d_interface_config.json"
+    },
+
+    "gui":{
+        "chat_window":{
+            "font_size": 16,
+            "load_history_num": 20
+        },
+        "live2d_container":{
+            "live2d_background":{
+                "type": "image",
+                "image_path": "res/live2d/backgrounds/bg2.jpg"
+            }
+        }
+    }
+}

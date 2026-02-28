@@ -1,0 +1,56 @@
+{
+  "expo": {
+    "name": "小洛聊天室",
+    "slug": "ChatLuo",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon_whitebg.png",
+    "scheme": "agentluotianyiapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "**/*",
+      "public/**/*"
+    ],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/images/icon_whitebg.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "softwareKeyboardLayoutMode": "resize",
+      "package": "com.sheepliu712.agentluotianyiapp",
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/icon_whitebg.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#000000"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

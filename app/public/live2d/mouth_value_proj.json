@@ -1,0 +1,12 @@
+{
+    "mouth_value_projection":{
+        "normal":-1,
+        "angry":-1,
+        "dumb":1,
+        "fear":0.732,
+        "sad":-1,
+        "ease":-1,
+        "like":1,
+        "moemoe":1
+    }
+}

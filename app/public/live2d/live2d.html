@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Live2D Tianyi</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+      touch-action: none; /* 阻止移动端默认的滚动缩放，优化触摸体验 */
+    }
+    #live2d {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+  </style>
+    <!-- 1. PixiJS -->
+  <script src="./js/pixi.min.js"></script>
+  <!-- 2. Live2D Cubism Core (Cubism 3/4) -->
+  <script src="./js/live2dcubismcore.min.js"></script>
+  <!-- 3. pixi-live2d-display (仅 Cubism4) -->
+  <script src="./js/cubism4.min.js"></script>
+</head>
+<body>
+  <canvas id="live2d"></canvas>
+
+  <script>
+    // === 调试工具函数 ===
+
+    // 将 PIXI 挂载到全局供 pixi-live2d-display 读取
+    window.PIXI = PIXI;
+
+    window.addEventListener('error', (event) => {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'modelLoaded',
+          success: false,
+          error: `${event.message || 'unknown error'} at ${event.filename || ''}:${event.lineno || 0}:${event.colno || 0}`,
+        }));
+      }
+    });
+
+    let model;
+    let app;
+
+    // 加载mouth_value_projection.json中预设的嘴部张开程度，供后续 setMouthOpenY 调用
+    let mouthValueProjection = {};
+    fetch('./mouth_value_proj.json')
+      .then(response => {
+        console.log('mouth_value_proj.json response status:', response.status);
+        if (!response.ok) throw new Error('Network response was not ok');
+        return response.json();
+      })
+      .then(data => {
+        mouthValueProjection = data.mouth_value_projection;
+        console.log('mouth_value_projection loaded:', JSON.stringify(mouthValueProjection));
+      })
+      .catch(error => {
+        console.error('Failed to load mouth_value_proj.json:', error);
+      });
+
+    const init = async () => {
+      try {
+        if (!window.PIXI) {
+          throw new Error('PIXI is not loaded');
+        }
+        if (!window.PIXI.live2d || !window.PIXI.live2d.Live2DModel) {
+          throw new Error('pixi-live2d-display is not loaded');
+        }
+        const Live2DModel = window.PIXI.live2d.Live2DModel;
+
+        console.log('===== Live2D 初始化开始 =====');
+        console.log('Checking PIXI:', !!window.PIXI);
+        console.log('Checking Live2DModel:', !!Live2DModel);
+
+        const canvas = document.getElementById('live2d');
+        
+        // 初始化 PIXI 应用
+        app = new PIXI.Application({
+          view: canvas,
+          resizeTo: window,
+          transparent: true,
+          backgroundAlpha: 0,
+          resolution: window.devicePixelRatio || 1,
+          autoDensity: true,
+          antialias: true,
+        });
+        model = await Live2DModel.from('./models/luo/model.model3.json', {
+            autoInteract: false, // 关闭自带的交互，我们手动接管以获得更高控制权
+            onError: (err) => { console.error('Model load internal error:', err); }
+        });
+        
+        app.stage.addChild(model);
+
+        // 响应式缩放与居中
+        const resizeModel = () => {
+          const scaleX = (window.innerWidth * 1.2) / model.width;
+          const scaleY = (window.innerHeight * 1.2) / model.height;
+          model.scale.set(Math.min(scaleX, scaleY));
+          model.x = window.innerWidth * 0.5 - (model.width / 2);
+          model.y = window.innerHeight * 0.5 - (model.height / 2) ;
+        };
+        resizeModel();
+        model.expression('normal')
+        window.addEventListener('resize', resizeModel);
+
+        // ① 触摸与鼠标交互：利用 model.focus() 实现拖拽视线跟随
+        const onPointerMove = (event) => {
+          if (model) {
+            // 将屏幕坐标传入，模型会自动计算视线偏移量
+            model.focus(event.clientX || event.touches[0].clientX, event.clientY || event.touches[0].clientY);
+          }
+        };
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('touchmove', onPointerMove);
+
+        // 监听点击命中区域
+        model.on('hit', (hitAreas) => {
+          if (hitAreas.length > 0) {
+            console.log('hit', hitAreas[0]);
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'hit',
+                hitAreaName: hitAreas[0]
+              }));
+            }
+          }
+        });
+
+        // 通知加载完成
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'modelLoaded',
+            success: true,
+          }));
+        }
+        console.log('===== Live2D 初始化完成 =====');
+
+      } catch (error) {
+        console.error('Live2D 初始化失败:', error);
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'modelLoaded',
+            success: false,
+            error: error.message,
+          }));
+        }
+      }
+    };
+
+    // ======= 暴露给客户端 injectJavaScript 调用的核心方法 =======
+    window.setMouthOpenY = (value, weight = 1) => {
+      if (model && model.internalModel && model.internalModel.coreModel) {
+        model.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', value, weight);
+      } else {
+        console.warn('模型未加载，无法设置 ParamMouthOpenY');
+      }
+    };
+
+    window.setExpression = (expressionId) => {
+      if (model) {
+        model.expression(expressionId);
+        window.setMouthOpenY(mouthValueProjection[expressionId] || -1); // 根据预设值调整嘴部张开程度
+      }
+    };
+
+    init();
+
+    // ======= 处理音频和口型同步 =======
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.connect(audioCtx.destination);
+    
+    // 初始化 dataArray
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    // 维护当前音频流的状态（从第一个包提取，作用于后续包）
+    let streamState = {
+      sampleRate: 44100,
+      channels: 1,
+    };
+
+    let nextStartTime = 0;
+    let isWaitingForEnd = false;
+    let isPlaying = false;
+
+    window.feedAudioChunk = async (base64Audio, isFinal) => {
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      
+      if (base64Audio) {
+        // 1. Base64 转 Uint8Array
+        const binary = atob(base64Audio);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        
+        let offset = 0;
+
+        // 2. 检测并解析 WAV (RIFF) 文件头
+        if (bytes.length >= 44 && 
+            String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) === 'RIFF') {
+          const view = new DataView(bytes.buffer);
+          streamState.channels = view.getUint16(22, true);
+          streamState.sampleRate = view.getUint32(24, true);
+          
+          // 寻找 'data' 块，跳过不固定长度的文件头
+          let scan = 12;
+          while (scan < bytes.length - 8) {
+            const id = String.fromCharCode(bytes[scan], bytes[scan+1], bytes[scan+2], bytes[scan+3]);
+            const size = view.getUint32(scan + 4, true);
+            if (id === 'data') {
+              offset = scan + 8;
+              break;
+            }
+            scan += 8 + size;
+          }
+          if (offset === 0) offset = 44; // 兜底标准长度
+        }
+
+        // 3. 提取纯 PCM 数据 (使用 slice 保证内存对齐)
+        const pcmBytes = bytes.slice(offset);
+        const pcm16 = new Int16Array(pcmBytes.buffer);
+        
+        // 4. 将 16-bit PCM 转换为 WebAudio 需要的 Float32 [-1.0, 1.0]
+        const numSamples = pcm16.length / streamState.channels;
+        const audioBuffer = audioCtx.createBuffer(streamState.channels, numSamples, streamState.sampleRate);
+        
+        for (let channel = 0; channel < streamState.channels; channel++) {
+          const channelData = audioBuffer.getChannelData(channel);
+          for (let i = 0; i < numSamples; i++) {
+            // 解码交错的 PCM 数据
+            channelData[i] = pcm16[i * streamState.channels + channel] / 32768.0;
+          }
+        }
+
+        // 5. 排队播放
+        isPlaying = true;
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(analyser);
+        
+        const currentTime = audioCtx.currentTime;
+        // 留 50ms 缓冲，防止高频小包导致破音/队列下溢
+        if (nextStartTime < currentTime) {
+          nextStartTime = currentTime + 0.05; 
+        }
+        
+        source.start(nextStartTime);
+        nextStartTime += audioBuffer.duration;
+      }
+
+      // 6. 处理结束标志
+      if (isFinal) {
+        isWaitingForEnd = true;
+        checkFinished();
+      }
+    };
+
+    // 轮询检测是否播放完毕
+    function checkFinished() {
+      if (!isWaitingForEnd) return;
+      // 当音频上下文的时间超过了最后一个包的结束时间，说明播放完毕
+      if (audioCtx.currentTime >= nextStartTime) {
+        isWaitingForEnd = false;
+        isPlaying = false;
+        console.log('Audio playback finished');
+        // 重置时间轴，防止下一次对话错乱
+        nextStartTime = 0; 
+        // 通知 RN 播放完成
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'audio_finished' }));
+        }
+      } else {
+        requestAnimationFrame(checkFinished);
+      }
+    }
+    // 浏览器原生的 60FPS 渲染循环
+    const renderLoop = () => {
+      requestAnimationFrame(renderLoop);
+      if (isPlaying === false) return; // 只有在有音频播放时才计算嘴型
+
+      // 3. 实时提取幅值 (RMS / 响度)
+      analyser.getByteTimeDomainData(dataArray);
+      let sumSquares = 0.0;
+      for (let i = 0; i < dataArray.length; i++) {
+        const norm = (dataArray[i] / 128.0) - 1.0;
+        sumSquares += norm * norm;
+      }
+      const rms = Math.sqrt(sumSquares / dataArray.length);
+      // 4. 将幅值映射并写入底层模型，加上一点平滑系数防止高频抖动
+      const targetMouthY = Math.max(Math.min(1.0, rms * 25 - 1), -1); // 简单线性映射，调整系数以适配嘴部张开程度
+      if (window.setMouthOpenY) {
+        window.setMouthOpenY(targetMouthY, 0.3);
+      }
+    };
+
+    renderLoop();
+  </script>
+</body>
+</html>

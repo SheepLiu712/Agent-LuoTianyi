@@ -1,0 +1,319 @@
+{
+    "Version": 3,
+    "Type": 0,
+    "FileReferences": {
+        "Moc": "Moc.moc3",
+        "Textures": [
+            "Textures_.png"
+        ],
+        "Physics": "Physics.json",
+        "PhysicsV2": {
+            "File": "Physics.json"
+        },
+        "Motions": {
+            "Tap辫子": [
+                {
+                    "File": "Motions_Tap辫子_0.json"
+                }
+            ],
+            "Tap左腿": [
+                {
+                    "File": "Motions_Tap左腿_0.json"
+                }
+            ],
+            "Tap袖": [
+                {
+                    "File": "Motions_Tap袖_0.json"
+                }
+            ],
+            "Tap耳机": [
+                {
+                    "File": "Motions_Tap耳机_0.json"
+                }
+            ],
+            "Tap8": [
+                {
+                    "File": "Motions_Tap8_0.json"
+                }
+            ],
+            "Tap头": [
+                {
+                    "File": "Motions_Tap头_0.json"
+                }
+            ],
+            "test": [
+                {
+                    "File": "luo.motion3.json"
+                }
+            ]
+        }
+    },
+    "Controllers": {
+        "ParamHit": {},
+        "ParamLoop": {},
+        "KeyTrigger": {},
+        "ParamTrigger": {},
+        "AreaTrigger": {},
+        "HandTrigger": {},
+        "EyeBlink": {
+            "MinInterval": 50,
+            "MaxInterval": 60,
+            "Items": [
+                {
+                    "Id": "ParamEyeLOpen",
+                    "Min": 0.0,
+                    "Max": 1.0,
+                    "BlendMode": 2,
+                    "Input": 0
+                },
+                {
+                    "Id": "ParamEyeROpen",
+                    "Min": 0.0,
+                    "Max": 1.0,
+                    "BlendMode": 2,
+                    "Input": 0
+                }
+            ],
+            "Enabled": true
+        },
+        "LipSync": {
+            "Gain": 5.0
+        },
+        "MouseTracking": {
+            "SmoothTime": 0.15,
+            "Items": [
+                {
+                    "Id": "ParamEyeBallX",
+                    "Min": -1.0,
+                    "Max": 1.0,
+                    "DefaultValue": 0.0,
+                    "BlendMode": 1,
+                    "Input": 1
+                },
+                {
+                    "Id": "ParamAngleZ",
+                    "Min": -30.0,
+                    "Max": 30.0,
+                    "DefaultValue": 0.0,
+                    "BlendMode": 1,
+                    "Input": 1
+                },
+                {
+                    "Id": "ParamBodyAngleZ",
+                    "Min": -10.0,
+                    "Max": 10.0,
+                    "DefaultValue": 0.0,
+                    "BlendMode": 1,
+                    "Input": 1
+                },
+                {
+                    "Id": "ParamAngleY",
+                    "Min": -30.0,
+                    "Max": 30.0,
+                    "DefaultValue": 0.0,
+                    "BlendMode": 1,
+                    "Input": 2
+                },
+                {
+                    "Id": "ParamBodyAngleY",
+                    "Min": -10.0,
+                    "Max": 10.0,
+                    "DefaultValue": 0.0,
+                    "BlendMode": 1,
+                    "Input": 2
+                },
+                {
+                    "Id": "ParamEyeBallY",
+                    "Min": -1.0,
+                    "Max": 1.0,
+                    "DefaultValue": 0.0,
+                    "BlendMode": 1,
+                    "Input": 2
+                }
+            ],
+            "Enabled": true
+        },
+        "AutoBreath": {
+            "Enabled": true
+        },
+        "ExtraMotion": {
+            "Enabled": true
+        },
+        "Accelerometer": {
+            "Enabled": true
+        },
+        "Microphone": {},
+        "Transform": {},
+        "FaceTracking": {
+            "Enabled": true
+        },
+        "HandTracking": {},
+        "ParamValue": {
+            "Items": [
+                {
+                    "Name": "天钿",
+                    "Ids": [
+                        "Param53"
+                    ]
+                },
+                {
+                    "Name": "话筒",
+                    "Ids": [
+                        "Param54"
+                    ]
+                },
+                {
+                    "Name": "话筒动作",
+                    "Ids": [
+                        "Param55"
+                    ],
+                    "KeyValues": [
+                        {
+                            "Key": "放下",
+                            "Value": -30.0
+                        },
+                        {
+                            "Key": "抬手",
+                            "Value": 30.0
+                        }
+                    ]
+                },
+                {
+                    "Name": "哭哭",
+                    "Ids": [
+                        "Param67"
+                    ]
+                },
+                {
+                    "Name": "0.0",
+                    "Ids": [
+                        "Param68"
+                    ]
+                },
+                {
+                    "Name": ". .",
+                    "Ids": [
+                        "Param70"
+                    ]
+                },
+                {
+                    "Name": "> <",
+                    "Ids": [
+                        "Param69"
+                    ]
+                },
+                {
+                    "Name": "生气",
+                    "Ids": [
+                        "Param60"
+                    ]
+                },
+                {
+                    "Name": "黑脸",
+                    "Ids": [
+                        "Param87"
+                    ]
+                },
+                {
+                    "Name": "眉毛",
+                    "Ids": [
+                        "Param89"
+                    ]
+                },
+                {
+                    "Name": "问号",
+                    "Ids": [
+                        "Param61"
+                    ]
+                },
+                {
+                    "Name": "瞳孔",
+                    "Ids": [
+                        "Param77"
+                    ]
+                },
+                {
+                    "Name": "吃吃嘴",
+                    "Ids": [
+                        "58",
+                        "Param58"
+                    ]
+                },
+                {
+                    "Name": "嚼嚼嚼",
+                    "Ids": [
+                        "Param59"
+                    ]
+                },
+                {
+                    "Name": "口水",
+                    "Ids": [
+                        "Param57"
+                    ]
+                },
+                {
+                    "Name": "嘴巴开心",
+                    "Ids": [
+                        "ParamMouthForm"
+                    ]
+                },
+                {
+                    "Name": "嘴巴张大",
+                    "Ids": [
+                        "ParamMouthOpenY"
+                    ]
+                },
+                {
+                    "Name": "大嘴笑",
+                    "Ids": [
+                        "Param56"
+                    ]
+                },
+                {
+                    "Name": "开心",
+                    "Ids": [
+                        "Param88"
+                    ]
+                }
+            ],
+            "Enabled": true
+        },
+        "PartOpacity": {},
+        "ArtmeshOpacity": {},
+        "ArtmeshColor": {},
+        "ArtmeshCulling": {
+            "DefaultMode": 0
+        },
+        "IntimacySystem": {}
+    },
+    "HitAreas": [
+        {
+            "Name": "辫子",
+            "Id": "ArtMesh130"
+        },
+        {
+            "Name": "左腿",
+            "Id": "ArtMesh97"
+        },
+        {
+            "Name": "袖",
+            "Id": "ArtMesh85"
+        },
+        {
+            "Name": "耳机",
+            "Id": "ArtMesh50"
+        },
+        {
+            "Name": "8",
+            "Id": "ArtMesh105"
+        },
+        {
+            "Name": "头",
+            "Id": "ArtMesh35"
+        }
+    ],
+    "Options": {
+        "TexFixed": true,
+        "TexType": 0
+    }
+}

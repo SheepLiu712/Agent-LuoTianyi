@@ -1,0 +1,323 @@
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Body, HTTPException, Depends, BackgroundTasks, File, Form
+from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+import uvicorn
+import os
+import sys
+import base64
+import asyncio
+from typing import Dict
+import redis
+
+# Ensure src is importable
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+    
+import src.database as database
+from src.service import account
+from src.service.types import (RegisterRequest, LoginRequest, AutoLoginRequest, ChatRequest, ChatResponse, HistoryRequest, PictureChatRequest, ImageRequest)
+from src.music.song_database import get_song_session, init_song_db
+from src.tts import TTSModule, init_tts_module
+from src.agent.luotianyi_agent import LuoTianyiAgent, init_luotianyi_agent, get_luotianyi_agent
+from src.utils.helpers import load_config
+from src.utils.logger import get_logger
+from functools import lru_cache
+
+
+logger = get_logger("server_main")
+config = load_config("config/config.json")
+
+@asynccontextmanager
+async def startup_event(app: FastAPI):
+    # 数据库初始化
+    database_config: Dict = config.get("database", {})
+    database.init_all_databases(database_config)
+    song_db_config: Dict = config.get("knowledge", {}).get("song_database", {})
+    init_song_db(song_db_config)
+    # TTS 模块初始化，启动TTS服务器进程
+    tts_config = config.get("tts", {})
+    tts_module: TTSModule = init_tts_module(tts_config)
+
+    # 初始化Agent
+    init_luotianyi_agent(config, tts_module)
+
+    # 账号系统初始化
+    account.generate_keys()
+    yield
+    # Any shutdown logic can go here
+
+@lru_cache()
+def get_agent_service():
+    return get_luotianyi_agent()
+
+
+app = FastAPI(lifespan=startup_event)
+
+@app.get("/auth/public_key")
+async def get_public_key():
+    return {"public_key": account.get_public_key_pem()}
+
+
+@app.post("/auth/auto_login")
+async def auto_login(req: AutoLoginRequest, background_tasks: BackgroundTasks, db: Session = Depends(database.get_sql_db), redis: redis.Redis = Depends(database.get_redis_buffer)):
+    '''
+    自动登录：用户提供用户名和上一次分配的自动登录 token，验证通过后发放新的 token。
+
+    请求参数：
+    - req.username: 用户名
+    - req.token: 上一次分配的自动登录 token
+    返回值：
+    - 成功：{"message": "登录成功", "user_id": req.username, "token": new_token}
+    - 失败：HTTP 401 错误，{"detail": "登录失败，自动登录验证未通过"}
+    '''
+    logger.info(f"Auto login request: {req.username}")
+    if account.check_auth_token(db, req.username, req.token):
+        new_token = account.update_auth_token(db, req.username)
+        message_token = account.generate_message_token(db, req.username)
+        # 将上下文预先加载到 Redis 中
+        user = db.query(database.User).filter_by(username=req.username).first()
+        background_tasks.add_task(database.prefill_buffer, db, redis, user.uuid)
+        return {"message": "登录成功", "user_id": req.username, "login_token": new_token, "message_token": message_token}
+    raise HTTPException(status_code=401, detail="登录失败，自动登录验证未通过")
+
+
+@app.post("/auth/register")
+async def register(req: RegisterRequest, db: Session = Depends(database.get_sql_db)):
+    '''
+    用户注册接口。用户提供用户名、密码和邀请码进行注册。
+
+    请求参数：
+    - req.username: 用户名
+    - req.password: 加密后的密码（Base64 编码）
+    - req.invite_code: 邀请码
+    返回值：
+    - 成功：{"message": "注册成功", "user_id": req.username}
+    - 失败：HTTP 400 错误，{"detail": "注册失败，失败原因"}
+    '''
+    logger.info(f"Register request: {req.username} with code {req.invite_code}") 
+    decrypted_password = account.decrypt_password(req.password)
+    
+    success, msg = account.register_user(db, req.username, decrypted_password, req.invite_code)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": "注册成功", "user_id": req.username}
+
+
+@app.post("/auth/login")
+async def login(req: LoginRequest, background_tasks: BackgroundTasks, db: Session = Depends(database.get_sql_db), redis: redis.Redis = Depends(database.get_redis_buffer)):
+    '''
+    用户登录接口。用户提供用户名和密码进行登录。
+
+    请求参数：
+    - req.username: 用户名
+    - req.password: 加密后的密码（Base64 编码）
+    返回值：
+    - 成功：{"login_token": auth_token, "message_token": message_token, "user_id": req.username}
+    - 失败：HTTP 401 错误，{"detail": "用户名或密码错误"}
+    '''
+    logger.info(f"Login request: {req.username}")
+    decrypted_password = account.decrypt_password(req.password)
+    
+    if account.verify_user(db, req.username, decrypted_password):
+        token = account.update_auth_token(db, req.username)
+        message_token = account.generate_message_token(db, req.username)
+        
+        # 将上下文预先加载到 Redis 中
+        user = db.query(database.User).filter_by(username=req.username).first()
+        background_tasks.add_task(database.prefill_buffer, db, redis, user.uuid)
+        return {"login_token": token, "message_token": message_token, "user_id": req.username}
+    raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+
+@app.post("/chat")
+async def chat(request: ChatRequest, 
+               db: Session = Depends(database.get_sql_db),
+               redis: redis.Redis = Depends(database.get_redis_buffer),
+               vector_store: database.VectorStore = Depends(database.get_vector_store),
+               knowledge_db: Session = Depends(get_song_session),
+               agent: LuoTianyiAgent = Depends(get_agent_service)):
+    '''
+    聊天接口，支持流式响应。用户发送消息，服务器返回分段的回复。
+
+    请求参数：
+    - request.user_id: 用户 ID
+    - request.token: 认证 token
+    - request.text: 用户消息文本
+    返回值：
+    - 流式响应，每个数据块为 ChatResponse 的 JSON 序列化形式
+    '''
+    logger.info(f"Server received: {request.text} from {request.username}")
+    message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+    
+    try:
+        # 定义异步生成器用于流式响应
+        async def event_generator():
+            # 调用 Agent 的无状态处理方法
+            async for response in agent.mock_handle_user_input(
+                user_id=user_uuid,
+                text=request.text,
+                db=db,
+                redis=redis,
+                vector_store=vector_store,
+                knowledge_db=knowledge_db
+            ):
+                # 将 ChatResponse 对象序列化为 JSON
+                data = response.model_dump_json() if hasattr(response, "model_dump_json") else response.json()
+                yield f"data: {data}\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+    except Exception as e:
+        logger.error(f"Error in chat endpoint: {e}")
+        raise HTTPException(status_code=500, detail="服务器内部错误")
+
+@app.post("/picture_chat")
+async def picture_chat(
+    request: PictureChatRequest = Depends(),
+    db: Session = Depends(database.get_sql_db),
+    redis: redis.Redis = Depends(database.get_redis_buffer),
+    vector_store: database.VectorStore = Depends(database.get_vector_store),
+    knowledge_db: Session = Depends(get_song_session),
+    agent: LuoTianyiAgent = Depends(get_agent_service)
+):
+    '''
+    图片聊天接口，支持流式响应。用户发送图片和认证信息，服务器返回回复。
+    目前仅为占位符，不处理图片内容。
+    '''
+    logger.info(f"Server received image from {request.username}")
+    message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+
+    try:
+        async def event_generator():
+            
+            # 调用 Agent 的图片处理方法
+            async for response in agent.handle_user_pic_input(
+                user_id=user_uuid,
+                image=request.image,
+                image_client_path=request.image_client_path,
+                db=db,
+                redis=redis,
+                vector_store=vector_store,
+                knowledge_db=knowledge_db
+            ):
+                data = response.model_dump_json() if hasattr(response, "model_dump_json") else response.json()
+                yield f"data: {data}\n\n"
+
+        return StreamingResponse(event_generator(), media_type="text/event-stream")
+    except Exception as e:
+        logger.error(f"Error in picture_chat endpoint: {e}")
+        raise HTTPException(status_code=500, detail="服务器内部错误")
+
+
+@app.get("/history")
+async def get_history(
+    request: HistoryRequest = Depends(),
+    db: Session = Depends(database.get_sql_db),
+    agent: LuoTianyiAgent = Depends(get_agent_service)
+):
+    logger.info(f"Server received: Get history request from {request.username}")
+    message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+    return await agent.handle_history_request(user_uuid, request.count, request.end_index, db)
+
+@app.post("/get_image")
+async def get_image(request: ImageRequest, db: Session = Depends(database.get_sql_db)):
+    '''
+    获取图片接口。用户提供图片的服务器路径，服务器返回图片二进制数据。
+
+    请求参数：
+    - request.username: 用户名
+    - request.token: 认证 token
+    - request.uuid: 图片在服务器上的uuid
+    返回值：
+    - 成功：图片的二进制数据，Content-Type 根据图片类型设置
+    - 失败：HTTP 400 错误，{"detail": "获取图片失败，失败原因"}
+    '''
+    logger.info(f"Get image request from {request.username} for {request.uuid}")
+    message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        
+    # 获取图片服务器路径
+    image_server_path = database.database_service.get_image_server_path(db, user_uuid, request.uuid)
+    if not image_server_path:
+        raise HTTPException(status_code=400, detail="获取图片失败，图片不存在或无权限访问")
+
+    if not os.path.isfile(image_server_path):
+        raise HTTPException(status_code=400, detail="获取图片失败，文件不存在")
+    
+    # 读取图片二进制数据
+    try:
+        with open(image_server_path, "rb") as f:
+            image_data = f.read()
+        
+        # 根据文件扩展名设置 Content-Type
+        ext = os.path.splitext(image_server_path)[1].lower()
+        content_type = "image/png"
+        if ext in [".jpg", ".jpeg"]:
+            content_type = "image/jpeg"
+        elif ext == ".gif":
+            content_type = "image/gif"
+        
+        return StreamingResponse(iter([image_data]), media_type=content_type)
+    except Exception as e:
+        logger.error(f"Error reading image file: {e}")
+        raise HTTPException(status_code=400, detail="获取图片失败，读取文件出错")
+    
+@app.post("/update_image_client_path")
+async def update_image_client_path(request: ImageRequest, db: Session = Depends(database.get_sql_db)):
+    '''
+    更新图片的客户端路径。用户提供图片的 UUID 和新的客户端路径，服务器更新数据库记录。
+
+    请求参数：
+    - request.username: 用户名
+    - request.token: 认证 token
+    - request.uuid: 图片对应的对话记录 UUID
+    - request.image_client_path: 图片在客户端的路径
+    返回值：
+    - 成功：{"message": "更新成功"}
+    - 失败：HTTP 400 错误，{"detail": "更新失败，失败原因"}
+    '''
+    logger.info(f"Update image client path request from {request.username} for {request.uuid}")
+    message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+    
+    success = database.database_service.update_image_client_path(db, user_uuid, request.uuid, request.image_client_path)
+    if not success:
+        raise HTTPException(status_code=400, detail="更新失败，记录不存在或无权限访问")
+    
+    return {"message": "更新成功"}
+
+if __name__ == "__main__":
+    # 使用 127.0.0.1 配合内网穿透，或使用 0.0.0.0 直接公网访问
+    # 通过 SakuraFrp 等内网穿透服务时，保持 127.0.0.1 即可
+    
+    will_use_https = False
+    # HTTPS 配置（用于 SakuraFrp TCP 隧道）
+    cert_file = os.path.join(current_dir, "certs", "cert.pem")
+    key_file = os.path.join(current_dir, "certs", "key.pem")
+    
+    # 检查是否存在 SSL 证书
+    if will_use_https and os.path.exists(cert_file) and os.path.exists(key_file):
+        logger.info("启用 HTTPS 模式")
+        uvicorn.run(
+            app, 
+            host="127.0.0.1", 
+            port=60030,
+            ssl_keyfile=key_file,
+            ssl_certfile=cert_file
+        )
+    else:
+        if will_use_https: # 想要用HTTPS但没有证书
+            logger.warning("未找到 SSL 证书，使用 HTTP 模式")
+            logger.warning(f"如需启用 HTTPS，请运行: python scripts/generate_cert.py")
+        else:
+            logger.info("启用 HTTP 模式")
+        uvicorn.run(app, host="127.0.0.1", port=60030)

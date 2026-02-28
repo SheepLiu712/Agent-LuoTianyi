@@ -1,0 +1,9 @@
+{
+    "tone_ref_audio_projection": {
+            "normal": "叙述的参考音频",
+            "happy": "可爱的参考音频2",
+            "tender": "深情的参考音频",
+            "sad": "难过的参考音频",
+            "angry": "活力的参考音频"
+        }
+}
