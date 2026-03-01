@@ -48,9 +48,11 @@ class AgentBinder(QObject):
     delete_signal = Signal()
     free_signal = Signal(bool)
     history_signal = Signal(list, int)  # history_list, current_top_index
+    start_thinking_timer_signal = Signal()
 
     def __init__(self, hear_callback: Callable[[str], Dict], hear_picture_callback: Callable[[str], Dict] = None, history_callback: Callable[[int, int], tuple] = None):
         super().__init__()
+        self.start_thinking_timer_signal.connect(self._scheduled_start_thinking)
         self.logger = get_logger(self.__class__.__name__)
         if hear_callback:
             self.recv_callback = hear_callback
@@ -74,6 +76,10 @@ class AgentBinder(QObject):
             daemon=True
         )
         self.audio_process.start()
+
+    def _scheduled_start_thinking(self):
+        """Specifically for cross-thread calls to start thinking with a delay"""
+        QTimer.singleShot(100, self.start_thinking)
 
     def _mouth_move_stream(self, init_value, mouth_queue: queue.Queue, stop_event: threading.Event, fps=60):
         while not stop_event.is_set():
@@ -171,11 +177,11 @@ class AgentBinder(QObject):
                         is_first_audio = True
                         local_samplerate = 0
                         
-                        QTimer.singleShot(100, self.start_thinking)  # 短暂延迟后恢复思考状态，允许UI更新
+                        self.start_thinking_timer_signal.emit()  # 短暂延迟后恢复思考状态，允许UI更新
                 else:
                     # Allow UI updates for text-only frames
                     time.sleep(0.01)
-                    QTimer.singleShot(100, self.start_thinking)
+                    self.start_thinking_timer_signal.emit()
                 self.waiting_package = True    
             self.waiting_package = False
 
