@@ -35,7 +35,7 @@ export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
           audioFinishedResolver.current(); // 唤醒 processAgentResponse
           audioFinishedResolver.current = null;
         }
-      } else{
+      } else {
         console.log('收到 WebView 消息:', data);
       }
     } catch (e) {
@@ -64,11 +64,11 @@ export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
         setMessages(prev => {
           // 避免重复添加
           if (prev.some(msg => msg.type === 'loading')) return prev;
-          
+
           const loadingMessage: ChatMessage = {
             uuid: 'loading-indicator',
             type: 'loading',
-            content: '.', 
+            content: '.',
             isUser: false,
             timestamp: Date.now()
           };
@@ -83,37 +83,59 @@ export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
     return () => clearTimeout(timeout);
   }, [thinking]);
 
-  const processAgentResponse = useCallback(async (stream: AsyncGenerator<AgentResponse>) => {
-    setThinking(true);
-    try {
-      for await (const response of stream) {
-        setThinking(false);
-        if (response.text)
-          addAgentMessage(response.text);
-        if (response.expression)
-          setExpression(response.expression, webviewRef!);
-        if (response.audio) {
-          // 发送音频数据块
-          webviewRef!.current?.injectJavaScript(`window.feedAudioChunk('${response.audio}', false); true;`);
+  const processAgentResponse = useCallback(async (createStream: () => AsyncGenerator<AgentResponse>) => {
+    let retryCount = 0;
+    const maxRetries = 2;
+
+    while (retryCount <= maxRetries) {
+      const stream = createStream();
+      let canRestart = true; // 如果还没有收到任何数据包，允许在错误发生后重试一次
+      let isSuccessful = true; // 标记是否没有发生错误
+      setThinking(true);
+      setProcessing(true);
+
+      try {
+        for await (const response of stream) {
+          setThinking(false);
+          canRestart = false; // 已经收到数据包了，错误发生后不允许重试了
+          if (response.text)
+            addAgentMessage(response.text);
+          if (response.expression)
+            setExpression(response.expression, webviewRef!);
+          if (response.audio) {
+            // 发送音频数据块
+            webviewRef!.current?.injectJavaScript(`window.feedAudioChunk('${response.audio}', false); true;`);
+          }
+
+          if (response.is_final_package) {
+            // 发送结束标志
+            webviewRef!.current?.injectJavaScript(`window.feedAudioChunk('', true); true;`);
+            await new Promise<void>((resolve) => {
+              audioFinishedResolver.current = resolve;
+            });
+          }
+        }
+      } catch (e: any) {
+        isSuccessful = false;
+        console.error("Error processing agent response:", e);
+      } finally {
+        const willRetry = !isSuccessful && canRestart && retryCount < maxRetries;
+        if (!willRetry) {
+          setThinking(false);
+          if(!isSuccessful) {
+            addAgentMessage("哎呀，信号被吃掉了！试着重新说一遍吧。");
+            setExpression('呆呆脸', webviewRef!);
+          }
+          setProcessing(false);
+          break; // 不需要重试了，退出循环
         }
 
-        if (response.is_final_package) {
-          // 发送结束标志
-          webviewRef!.current?.injectJavaScript(`window.feedAudioChunk('', true); true;`);
-          await new Promise<void>((resolve) => {
-            audioFinishedResolver.current = resolve;
-          });
-          // 音频播放完，不需要再 setThinking(true) 了，任务结束
-        }
+        retryCount++;
+        console.log(`Retry processing agent response... (${retryCount}/${maxRetries})`);
+        await new Promise(resolve => setTimeout(resolve, 500)); // 等待 0.5 秒重试
       }
-    } catch (e) {
-      console.error("Error processing agent response:", e);
-      addAgentMessage("Error: " + e);
-    } finally {
-      setThinking(false);
-      setProcessing(false);
     }
-    }, [addAgentMessage, webviewRef]);
+  }, [addAgentMessage, webviewRef]);
 
   // 发送文本消息
   const handleSendText = async () => {
@@ -132,12 +154,9 @@ export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
     setInputText('');
     Keyboard.dismiss();
 
-    // 设置为处理中
-    setProcessing(true);
 
     // 调用流式聊天接口
-    const stream = textChatStream(inputText);
-    processAgentResponse(stream);
+    processAgentResponse(() => textChatStream(inputText));
   };
 
   // 发送图片消息
@@ -145,11 +164,11 @@ export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
     if (!canSendImage) {
       return;
     }
-    
+
     // 1. 调用图片选择器
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: "images",
-      allowsEditing: false, 
+      allowsEditing: false,
       quality: 1,
     });
 
@@ -159,7 +178,7 @@ export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
 
     const asset = result.assets[0];
     const imageUri = asset.uri;
-    const mimeType = asset.mimeType || 'image/jpeg'; 
+    const mimeType = asset.mimeType || 'image/jpeg';
 
     // 2. 增加 ChatMessage
     const newMessage: ChatMessage = {
@@ -170,20 +189,15 @@ export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
       timestamp: Date.now()
     };
     setMessages(prev => [newMessage, ...prev]);
-    
-    // 设置为处理中
-    setProcessing(true);
 
     // 3. 调用流式聊天接口
     try {
-        // cast stream to any because Generator yield types might mismatch if define strict
-        const stream = imageChatStream(imageUri, mimeType);
-        // 4. 调用 processAgentResponse
-        await processAgentResponse(stream);
+      // 4. 调用 processAgentResponse
+      await processAgentResponse(() => imageChatStream(imageUri, mimeType));
     } catch (error) {
-        console.error("Image chat failed", error);
-        addAgentMessage("Image upload failed: " + error);
-        setProcessing(false);
+      console.error("Image chat failed", error);
+      addAgentMessage("Image upload failed: " + error);
+      setProcessing(false);
     }
   };
 

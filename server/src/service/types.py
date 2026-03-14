@@ -52,3 +52,24 @@ class ImageRequest(BaseModel):
     token: str
     uuid: str
     image_client_path: str = None
+
+
+#### WebSocket Event Types
+from enum import Enum
+from dataclasses import dataclass
+from typing import Dict
+
+
+class EventType(str, Enum):
+    SYSTEM_READY = "system_ready"
+    AUTH_SUCCESS = "auth_success"
+    AUTH_FAILURE = "auth_failure"
+    SERVER_ERROR = "error"
+    AUTH_ERROR = "auth_error"
+    AUTH_OK = "auth_ok"
+
+@dataclass
+class ClientMessage:
+    event_type: str
+    payload: Dict
+    client_msg_id: str | None = None

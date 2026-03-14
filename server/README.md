@@ -1,4 +1,4 @@
-# AgentLuo-Client 洛天依对话Agent的客户端
+# AgentLuo-Server 洛天依对话Agent的服务端
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/)
 
