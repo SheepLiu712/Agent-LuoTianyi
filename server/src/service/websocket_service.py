@@ -4,7 +4,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
 from sqlalchemy.orm import Session
 from ..database.sql_database import get_sql_session
-from .types import EventType, ClientMessage
+from .types import WSEventType, WSMessage
 from .account import check_message_token
 
 
@@ -12,7 +12,7 @@ class WebSocketService:
     def __init__(self):
         pass
 
-    async def try_recv_client_msg(self, websocket_connection: "WebSocketConnection") -> ClientMessage | None:
+    async def try_recv_client_msg(self, websocket_connection: "WebSocketConnection") -> WSMessage | None:
         '''
         尝试接收一条WebSocket消息并解析为JSON对象。
         如果解析失败，返回None。
@@ -51,20 +51,20 @@ class WebSocketService:
                     },
                 )
             return None
-        return ClientMessage(
+        return WSMessage(
             event_type=event.get("type"),
             payload=event.get("payload", {}),
             client_msg_id=event.get("client_msg_id")
         )
     
-    async def handle_auth_event(self, ws_connection: "WebSocketConnection", db: Session, event: ClientMessage) -> bool:
+    async def handle_auth_event(self, ws_connection: "WebSocketConnection", db: Session, event: WSMessage) -> bool:
         websocket = ws_connection.websocket
         username = event.payload.get("username", "")
         token = event.payload.get("token", "")
         if not username or not token:
             await websocket.send_json(
                 self._make_event(
-                    EventType.AUTH_ERROR,
+                    WSEventType.AUTH_ERROR,
                     {
                         "code": "MISSING_AUTH_FIELDS",
                         "message": "username and token are required in auth payload",
@@ -79,7 +79,7 @@ class WebSocketService:
         if not is_valid:
             await websocket.send_json(
                 self._make_event(
-                    EventType.AUTH_ERROR,
+                    WSEventType.AUTH_ERROR,
                     {
                         "code": "INVALID_TOKEN",
                         "message": "invalid or expired message token",
@@ -93,19 +93,43 @@ class WebSocketService:
         authed_username = username
         await websocket.send_json(
             self._make_event(
-                EventType.AUTH_OK,
+                WSEventType.AUTH_OK,
                 {"message": "authentication successful for user " + authed_username},
                 reply_to=event.client_msg_id,
             )
         )
         ws_connection.set_user(authed_user_uuid, authed_username)
         return True
+    
+    async def handle_ping_event(self, ws_connection: "WebSocketConnection", event: WSMessage) -> None:
+        websocket = ws_connection.websocket
+        event_ping_id = event.payload.get("ping_id")
+        if event_ping_id is None:
+            await self.send_error_event(
+                websocket=websocket,
+                payload={
+                    "code": "MISSING_PING_ID",
+                    "message": "ping event must have a ping_id in payload",
+                },)
+            return
+        
+        if ws_connection.last_ping_id is None or ws_connection.last_ping_id < event_ping_id:
+            ws_connection.last_ping_id = event_ping_id
+            ws_connection.last_ping_time = int(time.time() * 1000)
+            await websocket.send_json(
+                self._make_event(
+                    WSEventType.HB_PONG,
+                    {"ping_id": event_ping_id,"server_ts": ws_connection.last_ping_time},
+                    reply_to=event.client_msg_id,
+                )
+            )
+            
 
     async def send_system_ready_event(self, websocket: WebSocket) -> None:
         '''
         发送系统就绪事件，提示客户端进行认证
         '''
-        event =  self._make_event(EventType.SYSTEM_READY, {
+        event =  self._make_event(WSEventType.SYSTEM_READY, {
             "message": "WebSocket connected. Please send auth first.",
             "require_auth_before_chat": True
         })
@@ -113,12 +137,19 @@ class WebSocketService:
 
     async def send_error_event(self, websocket: WebSocket, payload: Dict) -> None:
         event = self._make_event(
-            EventType.SERVER_ERROR,
+            WSEventType.SERVER_ERROR,
             payload
         )
         await websocket.send_json(event)
 
-    def _make_event(self, event_type: EventType, payload: Dict, reply_to: str = None) -> Dict:
+    async def send_agent_state_event(self, websocket: WebSocket, state: str) -> None:
+        event = self._make_event(
+            WSEventType.AGENT_STATE_CHANGED,
+            {"state": state},
+        )
+        await websocket.send_json(event)
+
+    def _make_event(self, event_type: WSEventType, payload: Dict, reply_to: str = None) -> Dict:
         event = {
             "type": event_type.value,
             "ts": int(time.time() * 1000),
@@ -143,7 +174,8 @@ class WebSocketConnection:
         self.websocket = websocket
         self.user_uuid = user_uuid
         self.user_name = user_name
-        self.is_ws_alive = True
+        self.last_ping_id: int | None = None
+        self.last_ping_time: int | None = None
 
     def set_user(self, user_uuid: str, user_name: str):
         self.user_uuid = user_uuid
@@ -154,7 +186,7 @@ class WebSocketConnection:
         进行认证流程，成功返回True，失败返回False
         '''
         while True:
-            client_event: ClientMessage | None = await websocket_service.try_recv_client_msg(self)
+            client_event: WSMessage | None = await websocket_service.try_recv_client_msg(self)
             if client_event is None:
                 await asyncio.sleep(0.1)  # 避免空循环占用过多CPU
                 continue

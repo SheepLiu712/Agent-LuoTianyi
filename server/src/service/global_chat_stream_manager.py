@@ -22,6 +22,7 @@ class GlobalChatStreamManager:
         if user_uuid is None:
             raise ValueError("WebSocketConnection must have a user_uuid for chat stream management.")
         
+        # 新用户：创建新的聊天流实例并注册
         if user_uuid not in self.user_streams:
             chat_stream = ChatStream(ws_connection)
             if service_hub is not None:
@@ -59,6 +60,16 @@ class GlobalChatStreamManager:
         """
         while True:
             current_time = time.time()
+            current_time_ms = int(current_time * 1000)
+            # 检查ws 心跳包是否过期，如果过期执行清理逻辑
+            for user_uuid in list(self.user_streams.keys()):
+                if self.user_streams[user_uuid].ws_connection \
+                and self.user_streams[user_uuid].ws_connection.last_ping_time \
+                and (current_time_ms - self.user_streams[user_uuid].ws_connection.last_ping_time > 60 * 1000): # 这里以60秒为例，实际可以根据需求调整
+                    await self.user_streams[user_uuid].ws_connection.websocket.close()  # 关闭WebSocket连接
+                    self.ws_lost_connection(self.user_streams[user_uuid].ws_connection)
+
+            # 找出所有过期的用户UUID
             expired_user_uuids = []
             for user_uuid, chat_stream in list(self.user_streams.items()):
                 if chat_stream.connection_lost_time and (current_time - chat_stream.connection_lost_time > expiration_seconds):

@@ -104,8 +104,8 @@ app = FastAPI(lifespan=startup_event)
 async def chat_ws(websocket: WebSocket, 
                   service_hub: ServiceHub = Depends(get_service_hub),
                   ):
-    websocket_service = service_hub.websocket_service
-    gcsm = service_hub.gcsm
+    websocket_service = service_hub.websocket_service # WebSocketService 实例
+    gcsm = service_hub.gcsm # 全局聊天流管理器实例
     await websocket.accept()
     logger.info("WebSocket client connected to /chat_ws")
     await websocket_service.send_system_ready_event(websocket)

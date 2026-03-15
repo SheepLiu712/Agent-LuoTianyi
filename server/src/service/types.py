@@ -60,16 +60,25 @@ from dataclasses import dataclass
 from typing import Dict
 
 
-class EventType(str, Enum):
+class WSEventType(str, Enum):
     SYSTEM_READY = "system_ready"
     AUTH_SUCCESS = "auth_success"
     AUTH_FAILURE = "auth_failure"
     SERVER_ERROR = "error"
     AUTH_ERROR = "auth_error"
     AUTH_OK = "auth_ok"
+    HB_PING = "hb_ping"
+    HB_PONG = "hb_pong"
+    USER_MESSAGE = "user_message"
+    USER_IMAGE = "user_image"
+    USER_TEXT = "user_text"
+    USER_TYPING = "user_typing"
+    AGENT_STATE_CHANGED = "agent_state_changed"
 
 @dataclass
-class ClientMessage:
+class WSMessage:
     event_type: str
     payload: Dict
     client_msg_id: str | None = None
+    ts: int | None = None
+    reply_to: str | None = None
