@@ -5,6 +5,7 @@ import asyncio
 from sqlalchemy.orm import Session
 from ..database.sql_database import get_sql_session
 from .types import WSEventType, WSMessage
+from ..agent.chat_events import ChatInputEvent, ChatInputEventType
 from .account import check_message_token
 
 
@@ -148,6 +149,54 @@ class WebSocketService:
             {"state": state},
         )
         await websocket.send_json(event)
+
+    def is_chat_related_event(self, event: WSMessage) -> bool:
+        return event.event_type in {
+            WSEventType.USER_MESSAGE.value,
+            WSEventType.USER_TEXT.value,
+            WSEventType.USER_IMAGE.value,
+            WSEventType.USER_TYPING.value,
+            "message",
+            "chat_message",
+            "chat",
+        }
+
+    def convert_to_chat_input_event(self, event: WSMessage) -> ChatInputEvent | None:
+        if not self.is_chat_related_event(event):
+            return None
+
+        if event.event_type == WSEventType.USER_TYPING.value:
+            return ChatInputEvent(
+                event_type=ChatInputEventType.USER_TYPING,
+                payload=event.payload if isinstance(event.payload, dict) else {},
+                client_msg_id=event.client_msg_id,
+                ts=event.ts,
+            )
+
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if event.event_type == WSEventType.USER_IMAGE.value:
+            return ChatInputEvent(
+                event_type=ChatInputEventType.USER_IMAGE,
+                image_hint="[用户发送了一张图片]",
+                payload=payload,
+                client_msg_id=event.client_msg_id,
+                ts=event.ts,
+            )
+
+        text = ""
+        for key in ("message", "text", "content"):
+            value = payload.get(key)
+            if isinstance(value, str) and value.strip():
+                text = value.strip()
+                break
+
+        return ChatInputEvent(
+            event_type=ChatInputEventType.USER_TEXT,
+            text=text,
+            payload=payload,
+            client_msg_id=event.client_msg_id,
+            ts=event.ts,
+        )
 
     def _make_event(self, event_type: WSEventType, payload: Dict, reply_to: str = None) -> Dict:
         event = {

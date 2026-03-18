@@ -16,7 +16,7 @@ import re
 import base64
 
 from ..llm.prompt_manager import PromptManager
-from .main_chat import MainChat, OneSentenceChat, SongSegmentChat, OneResponseLine
+from .main_chat import MainChat, OneSentenceChat, SongSegmentChat
 from .planner import Planner
 from .conversation_manager import ConversationManager
 from ..types.conversation_type import ConversationItem
@@ -29,6 +29,9 @@ from ..music.singing_manager import SingingManager
 from ..vision.vision_module import VisionModule
 from ..vision.image_process import get_image_bytes_and_base64, get_postfix, save_image
 from ..database.sql_database import get_sql_session
+from ..service.service_hub import ServiceHub
+from .chat_events import ChatInputEvent
+from .global_speaking_worker import SpeakingJob
 
 
 def get_available_expression(config_path: str = "config/live2d_interface_config.json") -> List[str]:
@@ -73,6 +76,62 @@ class LuoTianyiAgent:
         )
         self.planner = Planner(config["planner"], self.prompt_manager, self.singing_manager)
         self.vision_module = VisionModule(config["vision_module"], self.prompt_manager)
+        self.user_unread_msgs: Dict[str, List[str]] = {}  # 存储用户未读消息的缓冲区，key为user_id，value为消息列表，注意，这个东西不应该实装进Agent里，应该放在ChatStream里，但为了实现上的便利暂时放在这里
+
+    async def feed_user_messages(self, service_hub: "ServiceHub", user_id: str, messages: List[ChatInputEvent]):
+        """接收来自 ChatStream 的用户消息，触发处理流程
+
+        Args:
+            user_id: 用户ID
+            messages: 用户消息列表
+            service_hub: ServiceHub实例，用于调用Agent的处理方法
+        """
+        self.logger.debug(f"Received {len(messages)} new messages for user {user_id}")
+        if user_id not in self.user_unread_msgs:
+            self.user_unread_msgs[user_id] = []
+        for msg in messages:
+            if msg.text:
+                self.user_unread_msgs[user_id].append(msg.text)
+
+    async def do_think_for_chat_stream(self, service_hub: "ServiceHub", user_id: str):
+        """为 ChatStream 执行思考流程，处理用户输入并生成回复
+
+        Args:
+            service_hub: ServiceHub实例，用于调用Agent的处理方法
+            user_id: 用户ID
+        """
+
+        # 目前我们将用户输入按照原样发回。
+        unread_msgs = self.user_unread_msgs.pop(user_id, [])
+        chat_stream = service_hub.gcsm.get_stream_by_user_uuid(user_id)
+        if chat_stream is None:
+            self.logger.warning(f"chat_stream not found for user {user_id}, skip speaking jobs")
+            return
+
+        await service_hub.global_speaking_worker.enqueue(
+            SpeakingJob(
+                chat_stream=chat_stream,
+                job_content=OneSentenceChat(
+                    content=f"用户输入了 {len(unread_msgs)} 条消息",
+                    expression="微笑脸",
+                    tone="normal",
+                ),
+            )
+        )
+        for msg in unread_msgs:
+            await service_hub.global_speaking_worker.enqueue(
+                SpeakingJob(
+                    chat_stream=chat_stream,
+                    job_content=OneSentenceChat(
+                        content=f"用户输入：{msg}",
+                        expression="微笑脸",
+                        tone="normal",
+                    ),
+                )
+            )
+        
+        
+            
 
     async def mock_handle_user_input(
         self, 

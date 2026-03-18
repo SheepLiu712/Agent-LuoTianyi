@@ -26,9 +26,11 @@ from src.service.types import (
     HistoryRequest,
     PictureChatRequest,
     ImageRequest,
+    WSEventType,
 )
 from src.service.websocket_service import WebSocketConnection, get_websocket_service
-from src.service.global_chat_stream_manager import get_GCSM
+from src.agent.global_chat_stream_manager import get_GCSM
+from src.agent.global_speaking_worker import get_global_speaking_worker
 from src.service.service_hub import ServiceHub
 from src.music.song_database import get_song_session, init_song_db
 from src.database.sql_database import get_sql_session
@@ -43,7 +45,7 @@ from functools import lru_cache
 logger = get_logger("server_main")
 config = load_config("config/config.json")
 
-
+service_hub = None  # 全局 ServiceHub 实例，在 startup_event 中初始化
 @asynccontextmanager
 async def startup_event(app: FastAPI):
     # 数据库初始化
@@ -59,37 +61,36 @@ async def startup_event(app: FastAPI):
     init_luotianyi_agent(config, tts_module)
 
     # 初始化 WebSocket 依赖容器（长生命周期对象）
+
+    global service_hub
     service_hub = ServiceHub(
         websocket_service=get_websocket_service(),
         gcsm=get_GCSM(),
+        global_speaking_worker=get_global_speaking_worker(),
         agent=get_luotianyi_agent(),
         redis_client=database.get_redis_buffer(),
         vector_store=database.get_vector_store(),
         sql_session_factory=get_sql_session,
         song_session_factory=get_song_session,
     )
-    app.state.service_hub = service_hub
 
     # 启动聊天流过期清理后台任务
-    gcsm = service_hub.gcsm
     cleanup_expiration_seconds = config.get("websocket", {}).get("cleanup_expiration_seconds", 360)
-    cleanup_task = asyncio.create_task(gcsm.cleanup_expired_streams(expiration_seconds=cleanup_expiration_seconds))
+    service_hub.gcsm.start_cleanup_task(expiration_seconds=cleanup_expiration_seconds)
+    service_hub.global_speaking_worker.start_if_needed()
 
     # 账号系统初始化
     account.generate_keys()
     try:
         yield
     finally:
-        # 服务关闭时优雅停止后台清理任务
-        cleanup_task.cancel()
-        try:
-            await cleanup_task
-        except asyncio.CancelledError:
-            logger.info("Chat stream cleanup task cancelled")
+        await service_hub.gcsm.stop_cleanup_task()
+        await service_hub.global_speaking_worker.stop() 
 
 
-def get_service_hub(request: Request) -> ServiceHub:
-    return request.app.state.service_hub
+def get_service_hub() -> ServiceHub:
+    global service_hub
+    return service_hub
 
 
 @lru_cache()
@@ -113,7 +114,21 @@ async def chat_ws(websocket: WebSocket,
     try:
         await ws_connection.auth(websocket_service) # 等待认证，认证成功之后将ws和用户信息绑定
         chat_stream = gcsm.get_or_register_chat_stream(ws_connection, service_hub=service_hub) # 根据ws连接获取对应的聊天流实例，内部会根据用户UUID进行管理
-        await chat_stream.listen_connection(websocket_service) # 仅处理当前连接的收包，主处理协程由 GCSM 管理
+        while True:
+            event = await websocket_service.try_recv_client_msg(ws_connection)
+            if event is None:
+                continue
+
+            if event.event_type == WSEventType.HB_PING.value:
+                await websocket_service.handle_ping_event(ws_connection, event)
+                continue
+
+            chat_event = websocket_service.convert_to_chat_input_event(event)
+            if chat_event is None:
+                # 非聊天事件在 service 层终止，不进入 chat_stream。
+                continue
+
+            await chat_stream.feed_event(chat_event)
     except WebSocketDisconnect:
         gcsm.ws_lost_connection(ws_connection)
         logger.info("WebSocket client disconnected from /chat_ws")
@@ -379,6 +394,11 @@ if __name__ == "__main__":
     # 通过 SakuraFrp 等内网穿透服务时，保持 127.0.0.1 即可
 
     will_use_https = False
+    is_debug = config.get("is_debug", False)
+    if is_debug:
+        logger.info("服务器正在以调试模式运行")
+    will_use_https = True  # 调试模式下默认不使用 HTTPS，避免证书问题
+    
     # HTTPS 配置（用于 SakuraFrp TCP 隧道）
     cert_file = os.path.join(current_dir, "certs", "cert.pem")
     key_file = os.path.join(current_dir, "certs", "key.pem")

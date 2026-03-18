@@ -65,3 +65,10 @@ class KnowledgeItem:
         self.uuid = uuid
         self.content = content
         self.metadata = metadata
+
+@dataclass
+class SpeakingCommand:
+    type: str # 'sentence' | 'song'
+    text: str # 当type为'sentence'时是要说的文本
+    song_name: str = "" # 仅当type为'song'时有效
+    song_segment: str = "" # 仅当type为'song'时有效

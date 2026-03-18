@@ -74,6 +74,8 @@ class WSEventType(str, Enum):
     USER_TEXT = "user_text"
     USER_TYPING = "user_typing"
     AGENT_STATE_CHANGED = "agent_state_changed"
+    AGENT_MESSAGE = "agent_message"
+    SERVER_ACK = "server_ack"
 
 @dataclass
 class WSMessage:

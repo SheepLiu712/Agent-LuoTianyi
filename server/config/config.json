@@ -1,4 +1,5 @@
 {
+    "is_debug": true,
     "database": {
         "sql_db_folder": "data/database",
         "sql_db_file": "luotianyi.db",

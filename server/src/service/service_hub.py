@@ -9,7 +9,8 @@ from ..database import VectorStore
 
 if TYPE_CHECKING:
     from ..agent.luotianyi_agent import LuoTianyiAgent
-    from .global_chat_stream_manager import GlobalChatStreamManager
+    from ..agent.global_chat_stream_manager import GlobalChatStreamManager
+    from ..agent.global_speaking_worker import GlobalSpeakingWorker
     from .websocket_service import WebSocketService
 
 
@@ -24,6 +25,7 @@ class ServiceHub:
 
     websocket_service: "WebSocketService"
     gcsm: "GlobalChatStreamManager"
+    global_speaking_worker: "GlobalSpeakingWorker"
     agent: "LuoTianyiAgent"
     redis_client: redis.Redis
     vector_store: VectorStore
@@ -35,3 +37,4 @@ class ServiceHub:
 
     def open_song_session(self) -> Session:
         return self.song_session_factory()
+    
