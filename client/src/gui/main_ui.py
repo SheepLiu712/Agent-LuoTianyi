@@ -2,18 +2,19 @@
 import sys
 import os
 import json
-from PySide6.QtCore import Qt, QTimerEvent, QSize, QRect, QEvent, QTimer, QPoint
-from PySide6.QtGui import QMouseEvent, QPainter, QColor, QImage, QPixmap, QResizeEvent, QSurfaceFormat, QFont, QFontMetrics, QTextOption, QIcon
+from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint
+from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
-                               QTextEdit, QLineEdit, QScrollArea, QLabel, 
-                               QSizePolicy, QFrame, QPushButton, QFileDialog, QMenu)
+                               QTextEdit, QScrollArea, QLabel, 
+                                QFrame, QPushButton, QFileDialog, )
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
-from ..live2d import Live2dModel, live2d
+from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
+from .chat_bubble import ChatBubble, ChatImageBubble
 
 class Live2DWidget(QOpenGLWidget):
     def __init__(self, live2d_config: Dict[str, Any], agent_binder: AgentBinder, parent=None):
@@ -21,7 +22,7 @@ class Live2DWidget(QOpenGLWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
         self.model: Live2dModel = Live2dModel(live2d_config)
-        agent_binder.model = self.model
+        agent_binder.on_set_model(self.model)
         self.setMouseTracking(True)
 
     def initializeGL(self) -> None:
@@ -136,155 +137,6 @@ class Live2DContainer(QWidget):
         else:
             painter.fillRect(self.rect(), Qt.GlobalColor.black)
 
-class ChatImageBubble(QWidget):
-    def __init__(self, image_path, is_user=False, parent=None):
-        super().__init__(parent)
-        self.is_user = is_user
-        self.image_path = image_path
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QHBoxLayout()
-        layout.setContentsMargins(10, 5, 10, 5)
-        
-        self.image_label = QLabel()
-        self.image_label.setStyleSheet("background-color: transparent;")
-        
-        # Load and scale image
-        pixmap = QPixmap(self.image_path)
-        if not pixmap.isNull():
-            max_width = 250
-            max_height = 250
-            
-            w = pixmap.width()
-            h = pixmap.height()
-            
-            if w > max_width or h > max_height:
-                pixmap = pixmap.scaled(max_width, max_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            
-            self.image_label.setPixmap(pixmap)
-        else:
-            self.image_label.setText("Image not found")
-        
-        # Alignment
-        if self.is_user:
-            layout.addStretch()
-            layout.addWidget(self.image_label)
-        else:
-            layout.addWidget(self.image_label)
-            layout.addStretch()
-            
-        self.setLayout(layout)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
-
-class CustomTextEdit(QTextEdit):
-    def contextMenuEvent(self, event):
-        # 创建自定义菜单
-        menu = QMenu(self)
-        
-        # 设置菜单样式（也可以在全局设置）
-        menu.setStyleSheet("""
-            QMenu { background-color: white; border: 1px solid #88EDFF; }
-            QMenu::item { color: black; padding: 5px 20px; }
-            QMenu::item:selected { background-color: #88EDFF; }
-        """)
-
-        # 添加自定义行为
-        copy_action = menu.addAction("复制 (Copy)")
-        select_all_action = menu.addAction("全选 (Select All)")
-        
-        # 执行菜单并获取用户点击的动作
-        action = menu.exec(event.globalPos())
-        
-        if action == copy_action:
-            self.copy()
-        elif action == select_all_action:
-            self.selectAll()
-
-class ChatBubble(QWidget):
-    def __init__(self, text, is_user=False, parent=None):
-        super().__init__(parent)
-        self.is_user = is_user
-        self.text = text
-        self.init_ui()
-
-    def init_ui(self):
-        layout = QHBoxLayout()
-        layout.setContentsMargins(10, 5, 10, 5)
-        
-        self.text_edit = CustomTextEdit()
-        self.text_edit.setReadOnly(True)
-        self.text_edit.setText(self.text)
-        self.text_edit.setFrameShape(QFrame.Shape.NoFrame)
-        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.text_edit.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
-        self.text_edit.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.text_edit.document().setDocumentMargin(0)
-        
-        # Style
-        bg_color = "#FFFFFF" if self.is_user else "#88EDFF"
-        text_color = "#000000"
-        
-        style = f"""
-            QTextEdit {{
-                background-color: {bg_color};
-                color: {text_color};
-                border-radius: 10px;
-                padding: 10px;
-                font-size: 16px;
-            }}
-        """
-        self.text_edit.setStyleSheet(style)
-        
-        # Alignment
-        if self.is_user:
-            layout.addStretch()
-            layout.addWidget(self.text_edit)
-        else:
-            layout.addWidget(self.text_edit)
-            layout.addStretch()
-            
-        self.setLayout(layout)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
-
-    def set_text(self, text):
-        self.text = text
-        self.text_edit.setText(text)
-        self.update_bubble_size()
-
-    def resizeEvent(self, event):
-        self.update_bubble_size()
-        super().resizeEvent(event)
-
-    def update_bubble_size(self):
-        max_w = int(self.width() * 0.6)
-        if max_w <= 0: return
-
-        font = self.text_edit.font()
-        font.setPixelSize(16)
-        fm = QFontMetrics(font)
-        
-        lines = self.text.split('\n')
-        text_width = max([fm.horizontalAdvance(line) for line in lines]) if lines else 0
-        
-        target_width = text_width + 22 # Padding buffer
-        
-        final_width = min(target_width, max_w)
-        final_width = max(final_width, 50) # Minimum width
-        
-        self.text_edit.setFixedWidth(final_width)
-        
-        # Adjust height
-        doc = self.text_edit.document()
-        doc.setTextWidth(final_width - 20) # Subtract padding
-        
-        doc_h = doc.size().height()
-        final_height = int(doc_h + 20) 
-        
-        self.text_edit.setFixedHeight(final_height)
-        self.setFixedHeight(final_height + 10)
-
 class CustomToolTip(QLabel):
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
@@ -342,7 +194,6 @@ class ChatWidget(QWidget):
         self.agent.response_signal.connect(self.on_agent_response)
         self.agent.update_signal.connect(self.on_agent_update)
         self.agent.delete_signal.connect(self.on_agent_delete)
-        self.agent.free_signal.connect(self.on_agent_free_status_changed)
         
         # History loading
         self.agent.history_signal.connect(self.on_history_loaded)
@@ -350,6 +201,7 @@ class ChatWidget(QWidget):
         self.current_history_index = -1
         self.is_loading_history = False
         self.first_load = True
+        self.agent_bubbles: dict[str, ChatBubble] = {}
 
         self.init_ui()
 
@@ -465,7 +317,6 @@ class ChatWidget(QWidget):
         self.send_button.clicked.connect(self.on_send_clicked)
         
         self.can_send = False
-        self.can_send_pic = True
         self.agent_free = True
         self.update_send_button_state()
         
@@ -481,15 +332,15 @@ class ChatWidget(QWidget):
     def on_scroll_value_changed(self, value):
         if value == 0 and not self.is_loading_history and self.current_history_index > 0:
             self.is_loading_history = True
-            print("Loading history...")
-            self.agent.load_history(self.load_history_num, self.current_history_index)
+            self.agent.on_load_history(self.load_history_num, self.current_history_index)
 
     def on_history_loaded(self, history_list: List[ConversationItem], start_index):
         self.is_loading_history = False
         if not history_list:
             return
-            
-        self.current_history_index = start_index
+        
+        if start_index >=0:
+            self.current_history_index = start_index
         
         # Save scroll position
         scrollbar = self.scroll_area.verticalScrollBar()
@@ -521,14 +372,7 @@ class ChatWidget(QWidget):
             QTimer.singleShot(5, lambda: scrollbar.setValue(scrollbar.maximum() - old_max))
 
     def on_text_changed(self):
-        self.can_send = bool(self.input_box.toPlainText().strip()) and self.agent_free
-        self.update_send_button_state()
-
-    def on_agent_free_status_changed(self, is_free: bool):
-        self.agent_free = is_free
-        self.can_send = bool(self.input_box.toPlainText().strip()) and self.agent_free
-        self.can_send_pic = self.agent_free
-        self.update_send_pic_button_state()
+        self.can_send = bool(self.input_box.toPlainText().strip())
         self.update_send_button_state()
 
     def update_send_button_state(self):
@@ -566,11 +410,9 @@ class ChatWidget(QWidget):
             self.picture_btn.setIcon(QIcon("res/gui/picture_icon_un.png"))
 
     def on_send_clicked(self):
-        self.handle_input()
+        self.handle_text_input()
 
     def on_picture_clicked(self):
-        if not self.can_send_pic:
-            return
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
             "Select Image", 
@@ -579,29 +421,33 @@ class ChatWidget(QWidget):
         )
         if file_path:
             self.can_send_pic = False
-            self.can_send = False
-            self.update_send_button_state()
-            self.update_send_pic_button_state()
-            self.add_image_message(file_path, is_user=True)
-            self.agent.hear_picture(file_path)
-            
+            self.add_message("image", file_path, is_user=True)
+            self.agent.on_send_image(file_path)
+
+
+    def add_message(self, type: str, content: str, is_user: bool):
+        if type == "image":
+            bubble = ChatImageBubble(content, is_user)
+        elif type == "text":
+            bubble = ChatBubble(content, is_user)
+
+        self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
+        QApplication.processEvents() # Ensure layout updates
+        QTimer.singleShot(10, lambda: self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum()))
+
 
     def add_image_message(self, image_path, is_user):
-        bubble = ChatImageBubble(image_path, is_user)
-        # Insert before the stretch item (which is the last item)
-        self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
-        
-        # Scroll to bottom
-        QApplication.processEvents() # Ensure layout updates
-        # Use singleShot to scroll after layout ensures the new height is calculated
-        QTimer.singleShot(50, lambda: self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum()))
+        self.add_message("image", image_path, is_user)
+
+    def add_text_message(self, text, is_user):
+        self.add_message("text", text, is_user)
 
     def eventFilter(self, obj, event):
         if obj == self.input_box:
             if event.type() == QEvent.Type.KeyPress:
                 if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
                     if not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
-                        self.handle_input()
+                        self.handle_text_input()
                         return True
             elif event.type() == QEvent.Type.Resize:
                 s = self.send_button.size()
@@ -609,33 +455,40 @@ class ChatWidget(QWidget):
                                       self.input_box.height() - s.height() - 10)
         return super().eventFilter(obj, event)
 
-    def handle_input(self):
+    def handle_text_input(self):
         if self.can_send == False:
             return
         text = self.input_box.toPlainText().strip()
         if not text:
             return
         
-        self.add_message(text, is_user=True)
+        self.add_message("text", text, is_user=True)
         self.input_box.clear()
         
-        self.agent.hear(text)
+        self.agent.on_send_text(text)
 
-    def on_agent_response(self, text):
-        self.add_message(text, is_user=False)
+    def on_agent_response(self, request_id, text):
+        bubble = self.agent_bubbles.get(request_id)
+        if bubble is None:
+            bubble = ChatBubble(text, is_user=False)
+            self.agent_bubbles[request_id] = bubble
+            self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
+        else:
+            bubble.set_text(text)
 
-        QApplication.processEvents() # Ensure layout updates
+        QApplication.processEvents()
         self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
 
-    def on_agent_update(self, text):
-        count = self.history_layout.count()
-        if count > 1:
-            item = self.history_layout.itemAt(count - 2)
-            widget = item.widget()
-            if isinstance(widget, ChatBubble):
-                widget.set_text(text)
-                QApplication.processEvents()
-                self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+    def on_agent_update(self, request_id, text):
+        bubble = self.agent_bubbles.get(request_id)
+        if bubble is None:
+            bubble = ChatBubble(text, is_user=False)
+            self.agent_bubbles[request_id] = bubble
+            self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
+        else:
+            bubble.set_text(text)
+        QApplication.processEvents()
+        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
     
     def on_agent_delete(self):
         count = self.history_layout.count()
@@ -648,14 +501,7 @@ class ChatWidget(QWidget):
                 QApplication.processEvents()
                 self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
 
-    def add_message(self, text, is_user):
-        bubble = ChatBubble(text, is_user)
-        # Insert before the stretch item (which is the last item)
-        self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
-        
-        # Scroll to bottom
-        QApplication.processEvents() # Ensure layout updates
-        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+
 
 class MainWindow(QWidget):
     def __init__(self, gui_config, live2d_config, ui_binder: AgentBinder):

@@ -239,7 +239,7 @@ class WebSocketConnection:
             if client_event is None:
                 await asyncio.sleep(0.1)  # 避免空循环占用过多CPU
                 continue
-            if client_event.event_type == "auth":
+            if client_event.event_type == WSEventType.USER_AUTH.value:
                 db = get_sql_session()
                 try:
                     ret = await websocket_service.handle_auth_event(self, db, client_event)

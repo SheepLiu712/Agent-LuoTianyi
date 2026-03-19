@@ -65,17 +65,22 @@ class WSEventType(str, Enum):
     AUTH_SUCCESS = "auth_success"
     AUTH_FAILURE = "auth_failure"
     SERVER_ERROR = "error"
+    SERVER_ACK = "server_ack"
     AUTH_ERROR = "auth_error"
     AUTH_OK = "auth_ok"
-    HB_PING = "hb_ping"
-    HB_PONG = "hb_pong"
+
+    AGENT_STATE_CHANGED = "agent_state_changed"
+    AGENT_MESSAGE = "agent_message"
+
     USER_MESSAGE = "user_message"
     USER_IMAGE = "user_image"
     USER_TEXT = "user_text"
     USER_TYPING = "user_typing"
-    AGENT_STATE_CHANGED = "agent_state_changed"
-    AGENT_MESSAGE = "agent_message"
-    SERVER_ACK = "server_ack"
+    USER_AUTH = "user_auth"
+
+
+    HB_PING = "hb_ping"
+    HB_PONG = "hb_pong"
 
 @dataclass
 class WSMessage:

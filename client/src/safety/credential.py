@@ -18,19 +18,19 @@ def load_credentials() -> Tuple[str, str, bool]:
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                user_id = data.get("username", None)
+                username = data.get("username", None)
                 token = data.get("token", None)
                 do_auto_login = data.get("auto_login", False)
-                return user_id, token, do_auto_login
+                return username, token, do_auto_login
     except Exception as e:
         logger.error(f"Error loading credentials: {e}")
 
-def save_credentials(user_id: str, token: str, do_auto_login: bool) -> None:
+def save_credentials(username: str, token: str, do_auto_login: bool) -> None:
     try:
         path = get_credential_path()
         with open(path, "w", encoding="utf-8") as f:
             json.dump({
-                "username": user_id,
+                "username": username,
                 "token": token,
                 "auto_login": do_auto_login
             }, f)
