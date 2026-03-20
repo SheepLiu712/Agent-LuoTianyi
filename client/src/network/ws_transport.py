@@ -249,7 +249,6 @@ class WsTransport:
 
             if event_type == WSEventType.HB_PONG:
                 ping_id = msg.payload.get("ping_id")
-                self.logger.debug(f"WebSocket heartbeat received: ping_id={ping_id}")
 
             if event_type in (WSEventType.SERVER_ERROR, WSEventType.AUTH_ERROR):
                 error_msg = normalize_error_message(msg)
@@ -278,7 +277,6 @@ class WsTransport:
                 ping_id += 1
                 hb_event = build_event(WSEventType.HB_PING, payload={"ping_id": ping_id})
                 await ws.send(json.dumps(hb_event.__dict__(), ensure_ascii=False))
-                self.logger.debug(f"WebSocket heartbeat sent: ping_id={ping_id}")
             await asyncio.sleep(self.heartbeat_interval)
         self.logger.debug("WebSocket heartbeat loop exited")
 

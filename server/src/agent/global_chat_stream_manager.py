@@ -83,6 +83,7 @@ class GlobalChatStreamManager:
                 chat_stream = self.user_streams[user_uuid]
                 chat_stream.clean_up()
                 del self.user_streams[user_uuid]
+                self.logger.info(f"Cleaned up expired chat stream for user_uuid={user_uuid}")
 
             await asyncio.sleep(60)
 

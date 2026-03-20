@@ -106,6 +106,16 @@ class ChatImageBubble(ChatBubble):
         return self.image_label
 
 class CustomTextEdit(QTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.document().setDocumentMargin(0)
+
     def contextMenuEvent(self, event):
         # 创建自定义菜单
         menu = QMenu(self)
@@ -138,14 +148,7 @@ class ChatTextBubble(ChatBubble):
 
     def build_content_widget(self) -> QWidget:
         self.text_edit = CustomTextEdit()
-        self.text_edit.setReadOnly(True)
         self.text_edit.setText(self.text)
-        self.text_edit.setFrameShape(QFrame.Shape.NoFrame)
-        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.text_edit.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
-        self.text_edit.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.text_edit.document().setDocumentMargin(0)
         
         # Style
         bg_color = "#FFFFFF" if self.is_user else "#88EDFF"

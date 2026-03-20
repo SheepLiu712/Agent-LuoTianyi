@@ -51,14 +51,16 @@ class AgentBinder(QObject):
         if msg_id not in self.msg_to_bubble:
             return
         bubble = self.msg_to_bubble[msg_id]
-        if text in ["failed"]:
+        if text == "failed":
             bubble.set_status(text)
-            self.msg_to_bubble.pop(msg_id, None)  # 提交成功后移除映射关系
+            self.msg_to_bubble.pop(msg_id, None)  # 确认失败后移除映射关系
             return
         elif text == "waiting":
             bubble.set_status("waiting")
             return
-        self.update_signal.emit(msg_id, text)
+        elif text == "submitted":
+            self.msg_to_bubble.pop(msg_id, None)  # 提交成功后移除映射关系
+            return
 
     def on_auto_login(self, username: str, token: str) -> bool:
         if self.auto_login_callback:
