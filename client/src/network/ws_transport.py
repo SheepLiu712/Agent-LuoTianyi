@@ -90,6 +90,7 @@ class WsTransport:
                 "ok": False,
                 "request_id": request_id,
                 "error": "WebSocket auth timeout",
+                "drop": True,
             }
 
         with self._submit_lock:

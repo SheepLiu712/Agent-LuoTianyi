@@ -141,7 +141,7 @@ class MessageProcessor:
 
             error_text = str(ack.get("error") or "")
             self.logger.error(f"Failed to send message (local_id={item.local_id}): {error_text}")
-            if self._is_terminal_send_error(error_text):
+            if self._is_terminal_send_error(error_text) or ack.get("drop", False):
                 with self._send_cond:
                     if self._send_queue and self._send_queue[0] is item:
                         self._send_queue.popleft()
@@ -189,7 +189,7 @@ class MessageProcessor:
             )
         if item.kind == "typing":
             return self.send_typing_func(ack_timeout=1.0)
-        return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}"}
+        return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}", "drop": True}
 
     def _prepare_image_payload(self, image_path: str) -> dict:
         try:
@@ -198,7 +198,7 @@ class MessageProcessor:
             postfix = os.path.splitext(image_path)[1]
             new_file_path = self._save_image_to_temp(image_data, postfix)
         except Exception as exc:
-            return {"ok": False, "error": f"Failed to read image file: {exc}"}
+            return {"ok": False, "error": f"Failed to read image file: {exc}", "drop": True}
 
         mime_type = "image/png"
         if postfix.lower() in [".jpg", ".jpeg"]:

@@ -76,13 +76,13 @@ class NetworkClient:
 
     def send_chat(self, text: str, ack_timeout: float = 10.0):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in"}
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
 
         return self.ws_transport.submit_user_text(text, ack_timeout=ack_timeout)
 
     def send_image(self, image_base64: str, mime_type: str, image_client_path: str | None = None, ack_timeout: float = 10.0):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in"}
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
 
         try:
             return self.ws_transport.submit_user_image(
@@ -97,7 +97,7 @@ class NetworkClient:
         
     def send_typing(self, ack_timeout: float = 10.0):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in"}
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
 
         try:
             return self.ws_transport.submit_typing_event(ack_timeout=ack_timeout)
