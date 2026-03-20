@@ -46,7 +46,29 @@ async def get_image_bytes_and_base64(upload_file: UploadFile):
         # 如果转换失败，降级处理：尝试直接传原图 Base64（虽然大概率还是报错）
         return original_bytes, f"data:image/jpeg;base64,{base64.b64encode(original_bytes).decode('utf-8')}"
     
-async def save_image(user_id: str, image_bytes: bytes, postfix: str) -> str:
+
+def get_image_bytes_from_base64(image_base64: str) -> bytes:
+    '''
+    从Base64字符串中获取图片字节数据。
+    :param image_base64: 包含Base64编码的图片字符串，格式为 "data:image/jpeg;base64,...."
+    :type image_base64: str
+    :return: 图片的字节数据
+    :rtype: bytes
+    '''
+    try:
+        # 提取Base64部分（去掉前缀）
+        if "," in image_base64:
+            base64_data = image_base64.split(",")[1]
+        else:
+            base64_data = image_base64
+        
+        # 解码Base64字符串为字节数据
+        return base64.b64decode(base64_data)
+    except Exception as e:
+        print(f"从Base64获取图片字节失败: {e}")
+        return b""
+    
+def save_image(user_id: str, image_bytes: bytes, postfix: str) -> str:
     '''
     将图片保存到本地，并返回文件路径。    
     :param user_id: 用户ID，用于生成唯一文件名
@@ -79,3 +101,20 @@ def get_postfix(file_name: str) -> str:
     :rtype: str
     '''
     return os.path.splitext(file_name)[1]
+
+def get_postfix_by_mime(mime_type: str) -> str:
+    '''
+    根据 MIME 类型获取文件后缀名
+    :param mime_type: MIME 类型，例如 "image/jpeg"
+    :type mime_type: str
+    :return: 文件后缀名，例如 "jpg"
+    :rtype: str
+    '''
+    mapping = {
+        "image/jpeg": "jpg",
+        "image/png": "png",
+        "image/gif": "gif",
+        "image/bmp": "bmp",
+        "image/webp": "webp",
+    }
+    return mapping.get(mime_type, "jpg")

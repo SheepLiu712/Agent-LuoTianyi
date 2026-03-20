@@ -5,7 +5,7 @@ import asyncio
 from sqlalchemy.orm import Session
 from ..database.sql_database import get_sql_session
 from .types import WSEventType, WSMessage
-from ..agent.chat_events import ChatInputEvent, ChatInputEventType
+from ..pipeline.chat_events import ChatInputEvent, ChatInputEventType
 from .account import check_message_token
 
 
@@ -150,6 +150,16 @@ class WebSocketService:
         )
         await websocket.send_json(event)
 
+    async def send_ack_event(self, websocket_connection: "WebSocketConnection", event: WSMessage) -> None:
+        if event.client_msg_id is None:
+            return
+        ack_event = self._make_event(
+            WSEventType.SERVER_ACK,
+            {"received_event_type": event.event_type},
+            reply_to=event.client_msg_id,
+        )
+        await websocket_connection.websocket.send_json(ack_event)
+
     def is_chat_related_event(self, event: WSMessage) -> bool:
         return event.event_type in {
             WSEventType.USER_MESSAGE.value,
@@ -177,7 +187,7 @@ class WebSocketService:
         if event.event_type == WSEventType.USER_IMAGE.value:
             return ChatInputEvent(
                 event_type=ChatInputEventType.USER_IMAGE,
-                image_hint="[用户发送了一张图片]",
+                text="[用户发送了一张图片]",
                 payload=payload,
                 client_msg_id=event.client_msg_id,
                 ts=event.ts,

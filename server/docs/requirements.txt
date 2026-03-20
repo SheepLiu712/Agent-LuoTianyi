@@ -14,4 +14,4 @@ networkx
 beautifulsoup4
 cryptography
 Pillow
-pyhton-multipart
+flashtext

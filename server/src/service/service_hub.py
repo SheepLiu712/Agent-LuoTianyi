@@ -9,8 +9,8 @@ from ..database import VectorStore
 
 if TYPE_CHECKING:
     from ..agent.luotianyi_agent import LuoTianyiAgent
-    from ..agent.global_chat_stream_manager import GlobalChatStreamManager
-    from ..agent.global_speaking_worker import GlobalSpeakingWorker
+    from ..pipeline.global_chat_stream_manager import GlobalChatStreamManager
+    from ..pipeline.global_speaking_worker import GlobalSpeakingWorker
     from .websocket_service import WebSocketService
 
 

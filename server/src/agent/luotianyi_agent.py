@@ -14,6 +14,7 @@ import json
 from fastapi import UploadFile
 import re
 import base64
+from typing import TYPE_CHECKING
 
 from ..llm.prompt_manager import PromptManager
 from .main_chat import MainChat, OneSentenceChat, SongSegmentChat
@@ -29,9 +30,11 @@ from ..music.singing_manager import SingingManager
 from ..vision.vision_module import VisionModule
 from ..vision.image_process import get_image_bytes_and_base64, get_postfix, save_image
 from ..database.sql_database import get_sql_session
-from ..service.service_hub import ServiceHub
-from .chat_events import ChatInputEvent
-from .global_speaking_worker import SpeakingJob
+
+from ..pipeline.chat_events import ChatInputEvent, ChatInputEventType
+from ..pipeline.global_speaking_worker import SpeakingJob
+if TYPE_CHECKING:
+    from ..service.service_hub import ServiceHub
 
 
 def get_available_expression(config_path: str = "config/live2d_interface_config.json") -> List[str]:
@@ -77,6 +80,57 @@ class LuoTianyiAgent:
         self.planner = Planner(config["planner"], self.prompt_manager, self.singing_manager)
         self.vision_module = VisionModule(config["vision_module"], self.prompt_manager)
         self.user_unread_msgs: Dict[str, List[str]] = {}  # 存储用户未读消息的缓冲区，key为user_id，value为消息列表，注意，这个东西不应该实装进Agent里，应该放在ChatStream里，但为了实现上的便利暂时放在这里
+
+    async def describe_image(self, image_base64: str) -> str:
+        """调用视觉模块对图片进行描述
+
+        Args:
+            image_base64: 图片的Base64字符串
+
+        Returns:
+            图片描述文本
+        """
+        return await self.vision_module.describe_image(image_base64)
+    
+    async def add_conversation(self, service_hub: "ServiceHub", user_uuid: Optional[str], event: ChatInputEvent):
+        """将事件转换为对话记录，并添加到数据库中
+
+        Args:
+            service_hub: ServiceHub实例，用于调用Agent的处理方法
+            user_uuid: 用户UUID，用于区分不同用户的上下文
+            event: ChatInputEvent事件对象，包含用户输入的文本和其他相关信息
+        """
+        if user_uuid is None:
+            self.logger.warning("user_uuid is None in add_conversation, skipping")
+            return
+        if event.event_type not in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}:
+            self.logger.warning(f"Unsupported event type {event.event_type} in add_conversation, skipping")
+            return
+        
+        content = event.text
+        if event.event_type == ChatInputEventType.USER_IMAGE:
+            conversation_type = ContextType.IMAGE
+            payload = {
+                "image_client_path": event.payload.get("image_client_path"),
+                "image_server_path": event.payload.get("image_server_path"),
+                "mime_type": event.payload.get("mime_type"),
+                "terms": event.payload.get("terms", []),
+            }
+        elif event.event_type == ChatInputEventType.USER_TEXT:
+            conversation_type = ContextType.TEXT
+            payload = {
+                "terms": event.payload.get("terms", []),
+                }
+
+        await self.conversation_manager.add_conversation(
+            db=service_hub.open_sql_session(), 
+            redis=service_hub.redis_client, 
+            user_id=user_uuid,
+            source=ConversationSource.USER,
+            content=content,
+            type=conversation_type, 
+            data=payload,  
+        )
 
     async def feed_user_messages(self, service_hub: "ServiceHub", user_id: str, messages: List[ChatInputEvent]):
         """接收来自 ChatStream 的用户消息，触发处理流程
@@ -222,10 +276,10 @@ class LuoTianyiAgent:
         # 1. 获取图片字节和Base64字符串，并保存图片到服务器
         image_bytes, image_base64 = await get_image_bytes_and_base64(image)
         postfix = get_postfix(image.filename)
-        image_server_path = await save_image(user_id, image_bytes, postfix)
+        image_server_path = save_image(user_id, image_bytes, postfix)
 
         # 将图片通过vlm模块转换为描述文本，并添加到对话中
-        image_description = await self.vision_module.describe_image(image_base64)
+        image_description = await self.describe_image(image_base64)
         image_description = f"（用户发送了一张图片）：{image_description}"
         await self.conversation_manager.add_conversation(
             db,

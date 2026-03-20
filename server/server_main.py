@@ -29,8 +29,8 @@ from src.service.types import (
     WSEventType,
 )
 from src.service.websocket_service import WebSocketConnection, get_websocket_service
-from src.agent.global_chat_stream_manager import get_GCSM
-from src.agent.global_speaking_worker import get_global_speaking_worker
+from src.pipeline.global_chat_stream_manager import get_GCSM
+from src.pipeline.global_speaking_worker import get_global_speaking_worker
 from src.service.service_hub import ServiceHub
 from src.music.song_database import get_song_session, init_song_db
 from src.database.sql_database import get_sql_session
@@ -127,7 +127,7 @@ async def chat_ws(websocket: WebSocket,
             if chat_event is None:
                 # 非聊天事件在 service 层终止，不进入 chat_stream。
                 continue
-
+            await websocket_service.send_ack_event(ws_connection, event) # 收到消息后先发送 ACK 确认收到，再进入聊天流处理，避免客户端等待超时
             await chat_stream.feed_event(chat_event)
     except WebSocketDisconnect:
         gcsm.ws_lost_connection(ws_connection)
