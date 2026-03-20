@@ -83,6 +83,7 @@ class MessageProcessor:
         with self._send_cond:
             self._send_queue.append(item)
             self._send_cond.notify()
+        return local_id
 
     def send_image(self, image_path: str):
         prepared = self._prepare_image_payload(image_path)
@@ -103,6 +104,7 @@ class MessageProcessor:
         with self._send_cond:
             self._send_queue.append(item)
             self._send_cond.notify()
+        return local_id
 
     def process_transport_message(self, response: AgentMessage): # 真正处理消息的函数
 
@@ -117,6 +119,38 @@ class MessageProcessor:
 
         if response.is_final_package:
             self.multimedia_stream.finish_one_sentense()
+
+    def _send_loop(self):
+        while self._running:
+            with self._send_cond:
+                while self._running and not self._send_queue:
+                    self._send_cond.wait(timeout=0.5)
+                if not self._running:
+                    return
+                item = self._send_queue[0]
+
+            ack = self._send_one(item)
+            if ack.get("ok", False):
+                with self._send_cond:
+                    if self._send_queue and self._send_queue[0] is item:
+                        self._send_queue.popleft()
+                item.result = ack
+                item.done_event.set()
+                self.update_bubble_signal(item.local_id, "submitted")
+                continue
+
+            error_text = str(ack.get("error") or "")
+            if self._is_terminal_send_error(error_text):
+                with self._send_cond:
+                    if self._send_queue and self._send_queue[0] is item:
+                        self._send_queue.popleft()
+                item.result = ack
+                item.done_event.set()
+                self.update_bubble_signal(item.local_id, "failed")
+                continue
+            self.update_bubble_signal(item.local_id, "waiting")
+            # Retransmit head item after 1s when ack timeout/disconnect occurs.
+            time.sleep(1.0)
 
     def feed_agent_msg(self, payload: AgentMessage): # 接收WS传来的消息，放入队列等待处理
         self._event_queue.put(payload)
@@ -140,35 +174,7 @@ class MessageProcessor:
         self._reply_counter += 1
         return f"{prefix}_{int(time.time() * 1000)}_{self._reply_counter}"
 
-    def _send_loop(self):
-        while self._running:
-            with self._send_cond:
-                while self._running and not self._send_queue:
-                    self._send_cond.wait(timeout=0.5)
-                if not self._running:
-                    return
-                item = self._send_queue[0]
 
-            ack = self._send_one(item)
-            if ack.get("ok", False):
-                with self._send_cond:
-                    if self._send_queue and self._send_queue[0] is item:
-                        self._send_queue.popleft()
-                item.result = ack
-                item.done_event.set()
-                continue
-
-            error_text = str(ack.get("error") or "")
-            if self._is_terminal_send_error(error_text):
-                with self._send_cond:
-                    if self._send_queue and self._send_queue[0] is item:
-                        self._send_queue.popleft()
-                item.result = ack
-                item.done_event.set()
-                continue
-
-            # Retransmit head item after 1s when ack timeout/disconnect occurs.
-            time.sleep(1.0)
 
     def _send_one(self, item: OutgoingMessage) -> dict:
         if item.kind == "text":

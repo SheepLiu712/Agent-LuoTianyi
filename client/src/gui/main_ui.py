@@ -14,7 +14,7 @@ from typing import Dict, Any, List
 from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
-from .chat_bubble import ChatBubble, ChatImageBubble
+from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble
 
 class Live2DWidget(QOpenGLWidget):
     def __init__(self, live2d_config: Dict[str, Any], agent_binder: AgentBinder, parent=None):
@@ -355,7 +355,7 @@ class ChatWidget(QWidget):
                 image_path = item.content
                 bubble = ChatImageBubble(image_path, is_user)
             else:
-                bubble = ChatBubble(item.content, is_user)
+                bubble = ChatTextBubble(item.content, is_user)
             self.history_layout.insertWidget(0, bubble)
             
         # Restore scroll position
@@ -422,26 +422,20 @@ class ChatWidget(QWidget):
         )
         if file_path:
             self.can_send_pic = False
-            self.add_message("image", file_path, is_user=True)
-            self.agent.on_send_image(file_path)
+            bubble = self.add_message("image", file_path, is_user=True)
+            self.agent.on_send_image(file_path, bubble)
 
 
-    def add_message(self, type: str, content: str, is_user: bool):
+    def add_message(self, type: str, content: str, is_user: bool) -> ChatBubble | ChatImageBubble:
         if type == "image":
             bubble = ChatImageBubble(content, is_user)
         elif type == "text":
-            bubble = ChatBubble(content, is_user)
+            bubble = ChatTextBubble(content, is_user)
 
         self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
         QApplication.processEvents() # Ensure layout updates
         QTimer.singleShot(10, lambda: self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum()))
-
-
-    def add_image_message(self, image_path, is_user):
-        self.add_message("image", image_path, is_user)
-
-    def add_text_message(self, text, is_user):
-        self.add_message("text", text, is_user)
+        return bubble
 
     def eventFilter(self, obj, event):
         if obj == self.input_box:
@@ -463,10 +457,10 @@ class ChatWidget(QWidget):
         if not text:
             return
         
-        self.add_message("text", text, is_user=True)
+        bubble = self.add_message("text", text, is_user=True)
         self.input_box.clear()
         
-        self.agent.on_send_text(text)
+        self.agent.on_send_text(text, bubble)
 
     def on_agent_response(self, text):
         self.add_message("text", text, is_user=False)
@@ -474,7 +468,7 @@ class ChatWidget(QWidget):
     def on_agent_update(self, request_id, text):
         bubble = self.agent_bubbles.get(request_id)
         if bubble is None:
-            bubble = ChatBubble(text, is_user=False)
+            bubble = ChatTextBubble(text, is_user=False)
             self.agent_bubbles[request_id] = bubble
             self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
         else:

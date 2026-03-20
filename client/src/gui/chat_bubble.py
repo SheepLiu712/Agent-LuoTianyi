@@ -4,46 +4,106 @@ from PySide6.QtWidgets import ( QWidget, QHBoxLayout,
                                QTextEdit, QLabel, 
                                QSizePolicy, QFrame, QMenu)
 
-class ChatImageBubble(QWidget):
-    def __init__(self, image_path, is_user=False, parent=None):
+
+agent_play_icon_path = "res/gui/play_agent_msg.png"
+agent_play_icon = None
+class ChatBubble(QWidget):
+    def __init__(self, is_user: bool = False, parent=None):
         super().__init__(parent)
         self.is_user = is_user
-        self.image_path = image_path
+        self._label: QLabel | None = None
+        self.content_widget: QWidget | None = None
         self.init_ui()
 
+    def build_content_widget(self) -> QWidget:
+        raise NotImplementedError()
+
     def init_ui(self):
+        global agent_play_icon
+        if agent_play_icon is None:
+            agent_play_icon = QPixmap(agent_play_icon_path).scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         layout = QHBoxLayout()
         layout.setContentsMargins(10, 5, 10, 5)
-        
+
+        self.content_widget = self.build_content_widget()
+
+        if self.is_user:
+            self._label = QLabel()
+            self._label.setFixedSize(24, 24)
+            self._label.setStyleSheet("background-color: transparent;")
+            self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            layout.addStretch()
+            layout.addWidget(self._label)
+            layout.addSpacing(0)
+            layout.addWidget(self.content_widget)
+        else: # agent
+            self._label = QLabel()
+            self._label.setFixedSize(24, 24)
+            self._label.setStyleSheet("background-color: transparent;")
+            self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._label.setPixmap(agent_play_icon)
+            layout.addWidget(self.content_widget)
+            layout.addSpacing(0)
+            layout.addWidget(self._label)
+            layout.addStretch()
+
+        self.setLayout(layout)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+
+    def set_status(self, status: str):
+        if not self._label:
+            return
+
+        icon_path = None
+        if status == "submitted":
+            icon_path = "res/gui/submitted_msg.png"
+        elif status == "failed":
+            icon_path = "res/gui/failed_msg.png"
+        elif status == "waiting":
+            icon_path = "res/gui/waiting_msg.png"
+
+        if not icon_path:
+            self._label.clear()
+            return
+
+        pixmap = QPixmap(icon_path)
+        if pixmap.isNull():
+            self._label.clear()
+            return
+
+        self._label.setPixmap(
+            pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        )
+
+
+class ChatImageBubble(ChatBubble):
+    def __init__(self, image_path, is_user=False, parent=None):
+        self.image_label: QLabel | None = None
+        self.image_path = image_path
+        super().__init__(is_user=is_user, parent=parent)
+
+    def build_content_widget(self) -> QWidget:
         self.image_label = QLabel()
         self.image_label.setStyleSheet("background-color: transparent;")
-        
+
         # Load and scale image
         pixmap = QPixmap(self.image_path)
         if not pixmap.isNull():
             max_width = 250
             max_height = 250
-            
+
             w = pixmap.width()
             h = pixmap.height()
-            
+
             if w > max_width or h > max_height:
                 pixmap = pixmap.scaled(max_width, max_height, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            
+
             self.image_label.setPixmap(pixmap)
         else:
             self.image_label.setText("Image not found")
-        
-        # Alignment
-        if self.is_user:
-            layout.addStretch()
-            layout.addWidget(self.image_label)
-        else:
-            layout.addWidget(self.image_label)
-            layout.addStretch()
-            
-        self.setLayout(layout)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+
+        return self.image_label
 
 class CustomTextEdit(QTextEdit):
     def contextMenuEvent(self, event):
@@ -69,17 +129,14 @@ class CustomTextEdit(QTextEdit):
         elif action == select_all_action:
             self.selectAll()
 
-class ChatBubble(QWidget):
+class ChatTextBubble(ChatBubble):
     def __init__(self, text, is_user=False, parent=None):
-        super().__init__(parent)
-        self.is_user = is_user
         self.text = text
-        self.init_ui()
+        self.text_edit: CustomTextEdit | None = None
+        super().__init__(is_user=is_user, parent=parent)
+        self.update_bubble_size()
 
-    def init_ui(self):
-        layout = QHBoxLayout()
-        layout.setContentsMargins(10, 5, 10, 5)
-        
+    def build_content_widget(self) -> QWidget:
         self.text_edit = CustomTextEdit()
         self.text_edit.setReadOnly(True)
         self.text_edit.setText(self.text)
@@ -104,17 +161,8 @@ class ChatBubble(QWidget):
             }}
         """
         self.text_edit.setStyleSheet(style)
-        
-        # Alignment
-        if self.is_user:
-            layout.addStretch()
-            layout.addWidget(self.text_edit)
-        else:
-            layout.addWidget(self.text_edit)
-            layout.addStretch()
-            
-        self.setLayout(layout)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+
+        return self.text_edit
 
     def set_text(self, text):
         self.text = text

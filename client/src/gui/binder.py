@@ -2,7 +2,11 @@ import threading
 from PySide6.QtCore import QObject, Signal
 from ..live2d import Live2dModel
 from ..utils.logger import get_logger
-from typing import Callable, Tuple
+from typing import Callable, Tuple, TYPE_CHECKING, Dict
+
+if TYPE_CHECKING:
+    from .chat_bubble import ChatBubble
+
 
 class AgentBinder(QObject):
     response_signal = Signal(str)
@@ -13,9 +17,9 @@ class AgentBinder(QObject):
 
     def __init__(
         self,
-        send_text_callback: Callable[[str], dict],
-        send_image_callback: Callable[[str], dict],
-        send_typing_callback: Callable[[], dict],
+        send_text_callback: Callable[[str], str],
+        send_image_callback: Callable[[str], str],
+        send_typing_callback: Callable[[], None],
         fetch_history_callback: Callable[[int, int], tuple],
         set_model_callback: Callable[[Live2dModel], None],
         auto_login_callback: Callable[[str, str], bool],
@@ -34,12 +38,27 @@ class AgentBinder(QObject):
         self.login_callback = login_callback
         self.register_callback = register_callback
 
+        self.msg_to_bubble: Dict[str, ChatBubble] = {}  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
+
     def emit_response_signal(self, text: str):
         # 让QT框架外的成员能触发信号
         self.response_signal.emit(text)
 
-    def emit_update_signal(self, request_id: str, text: str):
-        self.update_signal.emit(request_id, text)
+    def emit_update_signal(self, msg_id: str, text: str):
+        '''
+        根据发来的消息ID和状态，更新对应气泡的状态，具体而言是在气泡旁边显示一个状态图标。
+        '''
+        if msg_id not in self.msg_to_bubble:
+            return
+        bubble = self.msg_to_bubble[msg_id]
+        if text in ["failed"]:
+            bubble.set_status(text)
+            self.msg_to_bubble.pop(msg_id, None)  # 提交成功后移除映射关系
+            return
+        elif text == "waiting":
+            bubble.set_status("waiting")
+            return
+        self.update_signal.emit(msg_id, text)
 
     def on_auto_login(self, username: str, token: str) -> bool:
         if self.auto_login_callback:
@@ -62,14 +81,16 @@ class AgentBinder(QObject):
     def on_set_model(self, model: Live2dModel):
         self.set_model_callback(model)
 
-    def on_send_text(self, text: str):
+    def on_send_text(self, text: str, bubble):
         """
         接收用户输入的文本，并在后台处理
         """
-        self.send_text_callback(text)
+        msg_id = self.send_text_callback(text)
+        self.msg_to_bubble[msg_id] = bubble
 
-    def on_send_image(self, image_path: str):
-        self.send_image_callback(image_path)
+    def on_send_image(self, image_path: str, bubble):
+        msg_id = self.send_image_callback(image_path)
+        self.msg_to_bubble[msg_id] = bubble
 
     def on_send_typing(self):
         self.send_typing_callback()
