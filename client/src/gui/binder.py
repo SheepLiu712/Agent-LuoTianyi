@@ -5,7 +5,7 @@ from ..utils.logger import get_logger
 from typing import Callable, Tuple
 
 class AgentBinder(QObject):
-    response_signal = Signal(str, str)
+    response_signal = Signal(str)
     update_signal = Signal(str, str)
     delete_signal = Signal()
     free_signal = Signal(bool)
@@ -15,6 +15,7 @@ class AgentBinder(QObject):
         self,
         send_text_callback: Callable[[str], dict],
         send_image_callback: Callable[[str], dict],
+        send_typing_callback: Callable[[], dict],
         fetch_history_callback: Callable[[int, int], tuple],
         set_model_callback: Callable[[Live2dModel], None],
         auto_login_callback: Callable[[str, str], bool],
@@ -26,15 +27,16 @@ class AgentBinder(QObject):
 
         self.send_text_callback = send_text_callback
         self.send_image_callback = send_image_callback
+        self.send_typing_callback = send_typing_callback
         self.fetch_history_callback = fetch_history_callback
         self.set_model_callback = set_model_callback
         self.auto_login_callback = auto_login_callback
         self.login_callback = login_callback
         self.register_callback = register_callback
 
-    def emit_response_signal(self, request_id: str, text: str):
+    def emit_response_signal(self, text: str):
         # 让QT框架外的成员能触发信号
-        self.response_signal.emit(request_id, text)
+        self.response_signal.emit(text)
 
     def emit_update_signal(self, request_id: str, text: str):
         self.update_signal.emit(request_id, text)
@@ -68,6 +70,9 @@ class AgentBinder(QObject):
 
     def on_send_image(self, image_path: str):
         self.send_image_callback(image_path)
+
+    def on_send_typing(self):
+        self.send_typing_callback()
 
 
     def on_load_history(self, count: int, end_index: int = -1):

@@ -23,33 +23,55 @@ class MessageProcessor:
     def __init__(self,
                 send_text_func: Callable[[str], dict],
                 send_image_func: Callable[..., dict],
+                send_typing_func: Callable[[], dict],
                 message_listener_setter: Callable[[Callable[[AgentMessage], None] | None], None]):
         self._event_queue: queue.Queue = queue.Queue()
-        self._send_queue = deque()
+        self._send_queue: deque[OutgoingMessage] = deque()
         self._send_cond = threading.Condition()
         self._listener_thread = threading.Thread(target=self._listen_ws_events, daemon=True)
         self._sender_thread = threading.Thread(target=self._send_loop, daemon=True)
         self.model: Live2dModel | None = None
-        self.response_signal: Callable[[str, str], None] | None = None # 为ui增加一条回复信息
+        self.response_signal: Callable[[str], None] | None = None # 为ui增加一条回复信息
         self.update_bubble_signal: Callable[[str, str], None] | None = None # 更新气泡信息
 
-        self._active_reply_id: str | None = None
-        self._reply_buffer: str = ""
         self._reply_counter = 0
         self._running = True
+        self._last_typing_time = None
 
         self.multimedia_stream: MultiMediaStream | None = MultiMediaStream()
 
-        message_listener_setter(self.feed)
+        message_listener_setter(self.feed_agent_msg)
         self.send_text_func = send_text_func
         self.send_image_func = send_image_func
+        self.send_typing_func = send_typing_func
         self.start()
 
     def start(self):
         self._listener_thread.start()
         self._sender_thread.start()
         self.multimedia_stream.start()
-    
+
+    def send_typing_event(self):
+        # 1. 如果队列中有未发送的消息，不发送输入状态事件，避免过于频繁
+        with self._send_cond:
+            if self._send_queue:
+                return
+        # 2. 如果上次发送输入状态事件的时间距离现在不足0.5秒，也不发送，避免过于频繁
+        if self._last_typing_time and time.time() - self._last_typing_time < 0.5:
+            return
+        # 3. 发送输入状态事件
+        self._last_typing_time = time.time()
+        local_id = self._next_local_id("typing")
+        item = OutgoingMessage(
+            local_id=local_id,
+            kind="typing",
+            payload={},
+            done_event=threading.Event(),
+        )
+        with self._send_cond:
+            self._send_queue.append(item)
+            self._send_cond.notify()
+
     def send_text(self, text: str):
         local_id = self._next_local_id("txt")
         item = OutgoingMessage(
@@ -83,11 +105,6 @@ class MessageProcessor:
             self._send_cond.notify()
 
     def process_transport_message(self, response: AgentMessage): # 真正处理消息的函数
-        if self._active_reply_id is None:
-            self._active_reply_id = self._next_local_id("srv")
-            self._reply_buffer = ""
-            if self.response_signal:
-                self.response_signal(self._active_reply_id, " ")
 
         if response.text:
             self.response_signal(response.text)
@@ -101,10 +118,10 @@ class MessageProcessor:
         if response.is_final_package:
             self.multimedia_stream.finish_one_sentense()
 
-    def feed(self, payload: AgentMessage): # 接收WS传来的消息，放入队列等待处理
+    def feed_agent_msg(self, payload: AgentMessage): # 接收WS传来的消息，放入队列等待处理
         self._event_queue.put(payload)
 
-    def set_signals(self, response_signal: Callable[[str, str], None], update_bubble_signal: Callable[[str, str], None]):
+    def set_signals(self, response_signal: Callable[[str], None], update_bubble_signal: Callable[[str, str], None]):
         self.response_signal = response_signal
         self.update_bubble_signal = update_bubble_signal
 
@@ -163,6 +180,8 @@ class MessageProcessor:
                 image_client_path=item.payload["image_client_path"],
                 ack_timeout=1.0,
             )
+        if item.kind == "typing":
+            return self.send_typing_func(ack_timeout=1.0)
         return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}"}
 
     def _prepare_image_payload(self, image_path: str) -> dict:

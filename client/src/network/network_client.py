@@ -94,6 +94,16 @@ class NetworkClient:
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+        
+    def send_typing(self, ack_timeout: float = 10.0):
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in"}
+
+        try:
+            return self.ws_transport.submit_typing_event(ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
 
     def set_agent_message_listener(self, listener: Callable[[dict], None] | None):
         self.ws_transport.set_agent_message_listener(listener)

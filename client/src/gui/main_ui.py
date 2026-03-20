@@ -372,6 +372,7 @@ class ChatWidget(QWidget):
             QTimer.singleShot(5, lambda: scrollbar.setValue(scrollbar.maximum() - old_max))
 
     def on_text_changed(self):
+        self.agent.on_send_typing()
         self.can_send = bool(self.input_box.toPlainText().strip())
         self.update_send_button_state()
 
@@ -467,17 +468,8 @@ class ChatWidget(QWidget):
         
         self.agent.on_send_text(text)
 
-    def on_agent_response(self, request_id, text):
-        bubble = self.agent_bubbles.get(request_id)
-        if bubble is None:
-            bubble = ChatBubble(text, is_user=False)
-            self.agent_bubbles[request_id] = bubble
-            self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
-        else:
-            bubble.set_text(text)
-
-        QApplication.processEvents()
-        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+    def on_agent_response(self, text):
+        self.add_message("text", text, is_user=False)
 
     def on_agent_update(self, request_id, text):
         bubble = self.agent_bubbles.get(request_id)

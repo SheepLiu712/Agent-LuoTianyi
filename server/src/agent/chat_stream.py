@@ -78,9 +78,9 @@ class ChatStream:
 
                 # 进入 listening 状态，等待用户输入结束的信号（超时或符合结束条件）
                 await self._transition_to(self.STATE_LISTENING)
-                self.listening_deadline = time.monotonic() + self.listening_timeout_seconds
                 username = self.user_name
                 while self.current_state == self.STATE_LISTENING:
+                    self.listening_deadline = time.monotonic() + self.listening_timeout_seconds
                     self.logger.debug(f"{username}进入 listening 状态，等待用户继续输入（已收到消息数={len(unread_user_messages)}）")
                     timeout = max(0.0, self.listening_deadline - time.monotonic())
                     try:
@@ -96,6 +96,7 @@ class ChatStream:
                         continue
 
                     await self.service_hub.agent.feed_user_messages(self.service_hub, self.user_uuid, [next_event])
+                    unread_user_messages.append(next_event)
 
                 if self.current_state != self.STATE_THINKING:
                     await self._transition_to(self.STATE_THINKING)

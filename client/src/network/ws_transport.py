@@ -76,6 +76,9 @@ class WsTransport:
         if image_client_path:
             payload["image_client_path"] = image_client_path
         return self._submit_user_event(WSEventType.USER_IMAGE, payload=payload, ack_timeout=ack_timeout)
+    
+    def submit_typing_event(self, ack_timeout: float = 10.0) -> dict:
+        return self._submit_user_event(WSEventType.USER_TYPING, payload={"is_typing": True}, ack_timeout=ack_timeout)
 
     def _submit_user_event(self, event_type: WSEventType, payload: dict, ack_timeout: float) -> dict:
         event = build_event(event_type, payload=payload)
@@ -151,6 +154,7 @@ class WsTransport:
         asyncio.run(self._run())
 
     async def _run(self) -> None:
+        reconnect_delay = 2
         while not self._stop_event.is_set():
             self._loop = asyncio.get_running_loop()
             ws_url = self._build_ws_url(self.base_url)
@@ -164,43 +168,50 @@ class WsTransport:
                     await self._authenticate(ws)
                     recv_task = asyncio.create_task(self._recv_loop(ws))
                     hb_task = asyncio.create_task(self._heartbeat_loop(ws))
-
+                    reconnect_delay = 2
                     done, pending = await asyncio.wait(
                         [recv_task, hb_task],
                         return_when=asyncio.FIRST_COMPLETED,
                     )
+                    self.logger.debug("WebSocket connection task completed, cancelling pending tasks...")
                     for task in pending:
                         task.cancel()
                     for task in done:
-                        _ = task.exception()
-            except Exception:
-                self._connected_event.clear()
-                self._ready_event.clear()
+                        exc = task.exception()
+                        if exc:
+                            self.logger.error(f"WebSocket inner task exited with error: {exc}")
+            except Exception as e:
+                self.logger.error(f"WebSocket connection error: {e}")
                 self._notify_ack_failure("WebSocket disconnected")
                 self.logger.debug("WebSocket connection closed, retrying...")
-                await asyncio.sleep(2)
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(reconnect_delay * 2, 30) # 指数退避，最大30秒
             finally:
                 self._ws = None
-                
+                self._connected_event.clear()
+                self._ready_event.clear()
 
     async def _authenticate(self, ws) -> None:
         # 服务端首次会发 system_ready；如未发也继续鉴权流程
+        self.logger.debug("Waiting for WebSocket auth response...")
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=5)
             msg = parse_server_message(raw)
             if msg and msg.event_type == WSEventType.AUTH_OK:
                 self._ready_event.set()
                 return
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"Error occurred while waiting for auth response: {e}")
             pass
 
         username = self.username_getter()
         token = self.token_getter()
         if not username or not token:
+            self.logger.error("WebSocket auth failed: missing username or token")
             return
 
         auth_event = build_event(WSEventType.USER_AUTH, payload={"username": username, "token": token})
-        await ws.send(json.dumps(auth_event, ensure_ascii=False))
+        await ws.send(json.dumps(auth_event.__dict__(), ensure_ascii=False))
 
         # 等待 auth_ok
         for _ in range(10):
@@ -209,9 +220,11 @@ class WsTransport:
             if not msg:
                 continue
             if msg.event_type == WSEventType.AUTH_OK:
+                self.logger.debug("WebSocket auth successful")
                 self._ready_event.set()
                 return
             if msg.event_type in (WSEventType.AUTH_ERROR, WSEventType.SERVER_ERROR):
+                self.logger.error(f"WebSocket auth failed: {msg.payload.get('message')}")
                 return
 
     async def _recv_loop(self, ws) -> None:
@@ -234,6 +247,10 @@ class WsTransport:
                 self._emit_agent_message(agent_msg)
                 continue
 
+            if event_type == WSEventType.HB_PONG:
+                ping_id = msg.payload.get("ping_id")
+                self.logger.debug(f"WebSocket heartbeat received: ping_id={ping_id}")
+
             if event_type in (WSEventType.SERVER_ERROR, WSEventType.AUTH_ERROR):
                 error_msg = normalize_error_message(msg)
                 consumed = self._complete_ack_waiter(
@@ -252,6 +269,7 @@ class WsTransport:
                             reply_to=error_msg.reply_to,
                         )
                     )
+        self.logger.debug("WebSocket receive loop exited")
 
     async def _heartbeat_loop(self, ws) -> None:
         ping_id = 0
@@ -259,8 +277,10 @@ class WsTransport:
             if self._ready_event.is_set():
                 ping_id += 1
                 hb_event = build_event(WSEventType.HB_PING, payload={"ping_id": ping_id})
-                await ws.send(json.dumps(hb_event, ensure_ascii=False))
+                await ws.send(json.dumps(hb_event.__dict__(), ensure_ascii=False))
+                self.logger.debug(f"WebSocket heartbeat sent: ping_id={ping_id}")
             await asyncio.sleep(self.heartbeat_interval)
+        self.logger.debug("WebSocket heartbeat loop exited")
 
     def _complete_ack_waiter(self, ok: bool, error: str | None, reply_to: str | None) -> bool:
         with self._lock:

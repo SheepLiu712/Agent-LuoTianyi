@@ -50,12 +50,14 @@ if __name__ == "__main__":
     message_processor = MessageProcessor(
         send_text_func = network_client.send_chat,
         send_image_func = network_client.send_image,
+        send_typing_func = network_client.send_typing,
         message_listener_setter=network_client.network_set_message_listener
         ) 
     # 创建Binder实例，用于连接UI和网络层，传入网络客户端的相关回调方法
     binder = AgentBinder(
         send_text_callback = message_processor.send_text,
         send_image_callback = message_processor.send_image,
+        send_typing_callback = message_processor.send_typing_event,
         fetch_history_callback = network_client.get_history,
         set_model_callback = message_processor.set_model,
         auto_login_callback = network_client.auto_login,
