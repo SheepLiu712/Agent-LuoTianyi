@@ -8,8 +8,8 @@ from redis import Redis
 import uuid
 
 from ..utils.logger import get_logger
-from ..llm.llm_module import LLMModule
-from ..llm.prompt_manager import PromptManager
+from ..utils.llm.llm_module import LLMModule
+from ..utils.llm.prompt_manager import PromptManager
 from ..utils.enum_type import ContextType, ConversationSource
 from ..types import ConversationItem
 from ..database import database_service

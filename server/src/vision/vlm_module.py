@@ -1,5 +1,5 @@
 from .vlm_api_interface import VLMAPIInterface, VLMAPIFactory
-from ..llm.prompt_manager import PromptTemplate, PromptManager
+from ..utils.llm.prompt_manager import PromptTemplate, PromptManager
 
 class VLMModule:
     def __init__(self, module_config:dict, prompt_manager: PromptManager) -> None:

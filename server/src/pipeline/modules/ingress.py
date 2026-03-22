@@ -1,10 +1,10 @@
 from typing import TYPE_CHECKING
 from ...utils.logger import get_logger
-from ...vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
+from ...plugins.vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
 from ...agent.jargon_retriver import extract_song_entities
 if TYPE_CHECKING:
     from ..chat_events import ChatInputEvent, ChatInputEventType
-    from ...service.service_hub import ServiceHub
+    from ...interface.service_hub import ServiceHub
 
 logger = get_logger("Ingress")
 async def ingress_message(service_hub: ServiceHub, user_id: str, message: ChatInputEvent):

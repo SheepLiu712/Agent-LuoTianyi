@@ -10,7 +10,7 @@ from .chat_events import ChatInputEvent, ChatInputEventType
 from ..utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from ..service.service_hub import ServiceHub
+    from ..interface.service_hub import ServiceHub
 
 
 @dataclass

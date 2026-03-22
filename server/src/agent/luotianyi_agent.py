@@ -17,7 +17,7 @@ import re
 import base64
 from typing import TYPE_CHECKING
 
-from ..llm.prompt_manager import PromptManager
+from ..utils.llm.prompt_manager import PromptManager
 from .main_chat import MainChat, OneSentenceChat, SongSegmentChat
 from .main_chat_v2 import MainChatV2, TopicReplyResult
 from .planner import Planner
@@ -28,7 +28,7 @@ from ..utils.logger import get_logger
 from ..tts import TTSModule
 from ..utils.enum_type import ContextType, ConversationSource
 from ..memory.memory_manager import MemoryManager
-from ..service.types import ChatResponse
+from ..interface.types import ChatResponse
 from ..music.singing_manager import SingingManager
 from ..music.knowledge_service import get_song_introduction, get_song_lyrics
 from ..vision.vision_module import VisionModule
@@ -40,7 +40,7 @@ from ..pipeline.chat_events import ChatInputEvent, ChatInputEventType
 from ..pipeline.global_speaking_worker import SpeakingJob
 from ..database.vector_store import BaseDocument
 if TYPE_CHECKING:
-    from ..service.service_hub import ServiceHub
+    from ..interface.service_hub import ServiceHub
     from ..pipeline.modules.unread_store import UnreadMessageSnapshot, UnreadMessage
     from ..pipeline.topic_planner import ExtractedTopic
     from ..database.vector_store import VectorStore
@@ -103,22 +103,13 @@ class LuoTianyiAgent:
             available_tone=tts_module.get_available_tones(),
             available_expression=get_available_expression(),
         )
-        main_chat_v2_config = self.config.get("main_chat_v2")
-        if main_chat_v2_config is None:
-            main_chat_v2_config = {
-                **self.config.get("main_chat", {}),
-                "llm_module": {
-                    **self.config.get("main_chat", {}).get("llm_module", {}),
-                    "prompt_name": "topic_reply_prompt",
-                },
-            }
-        self.main_chat_v2 = MainChatV2(main_chat_v2_config, self.prompt_manager)
+        self.main_chat_v2 = MainChatV2(self.config["main_chat_v2"], self.prompt_manager)
         self.topic_extractor = TopicExtractor(
             self.config.get("topic_extractor", {}),
             self.prompt_manager,
         )
-        self.planner = Planner(config["planner"], self.prompt_manager, self.singing_manager)
-        self.vision_module = VisionModule(config["vision_module"], self.prompt_manager)
+        self.planner = Planner(self.config["planner"], self.prompt_manager, self.singing_manager)
+        self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
 
     async def extract_topics_for_pipeline(
         self,
@@ -259,6 +250,97 @@ class LuoTianyiAgent:
             memory_hits=memory_hits or [],
             sing_song=sing_song,
         )
+
+    async def write_topic_memories_for_pipeline(
+        self,
+        user_id: str,
+        topic_content: str,
+        current_dialogue: str,
+        agent_response_content: List[str],
+        related_memories: Optional[List[str]] = None,
+    ) -> None:
+        """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
+        db = self._runtime_hub.open_sql_session()
+        redis_client = self._runtime_hub.redis_client
+        vector_store = self._runtime_hub.vector_store
+        try:
+            history = await self.conversation_manager.get_context(db, redis_client, user_id)
+            await self.memory_manager.post_process_interaction(
+                db=db,
+                redis=redis_client,
+                vector_store=vector_store,
+                user_id=user_id,
+                user_input=topic_content,
+                agent_response_content=agent_response_content,
+                history=history,
+                current_dialogue=current_dialogue,
+                related_memories=related_memories or [],
+                commit=True,
+            )
+        finally:
+            db.close()
+
+    async def persist_topic_replies_for_pipeline(
+        self,
+        user_id: str,
+        reply_items: List[TopicReplyResult],
+        sing_plan: Tuple[Optional[str], Optional[str]],
+    ) -> None:
+        """将 topic 回复落库，并触发上下文压缩检查。"""
+        if not user_id:
+            return
+
+        conversation_items: List[ConversationItem] = []
+        song_from_plan, segment_from_plan = sing_plan
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        for item in reply_items:
+            if item.reply_type == "text":
+                text = (item.reply_text or "").strip()
+                if not text:
+                    continue
+                conversation_items.append(
+                    ConversationItem(
+                        uuid="",
+                        timestamp=now,
+                        source=ConversationSource.AGENT.value,
+                        type=ContextType.TEXT.value,
+                        content=text,
+                        data=None,
+                    )
+                )
+            elif item.reply_type == "sing":
+                song_name = (item.reply_text or "").strip() or (song_from_plan or "")
+                if not song_name:
+                    continue
+                segment = segment_from_plan or self.singing_manager.pick_segment_for_song(song_name) or ""
+                content = f"（唱了{song_name}）"
+                conversation_items.append(
+                    ConversationItem(
+                        uuid="",
+                        timestamp=now,
+                        source=ConversationSource.AGENT.value,
+                        type=ContextType.SING.value,
+                        content=content,
+                        data={"song": song_name, "segment": segment} if segment else {"song": song_name},
+                    )
+                )
+
+        if not conversation_items:
+            return
+
+        db = self._runtime_hub.open_sql_session()
+        redis_client = self._runtime_hub.redis_client
+        try:
+            await self.conversation_manager.add_conversation_list_to_db(
+                db=db,
+                redis=redis_client,
+                user_id=user_id,
+                conversation_list=conversation_items,
+                commit=True,
+            )
+        finally:
+            db.close()
 
     def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """供 TopicReplier 调用的唱歌计划接口。返回 song|segment。"""
@@ -683,7 +765,7 @@ class LuoTianyiAgent:
                         sentence_buffer = ""
         return split_responses
 
-    async def handle_history_request(self, user_id: str, count: int, end_index: int, db: Session) -> Dict[str, Any]:
+    async def handle_history_request(self, user_id: str, count: int, end_index: int) -> Dict[str, Any]:
         """处理历史记录请求
 
         Args:
@@ -693,35 +775,38 @@ class LuoTianyiAgent:
         Returns:
             (history_list, start_index)
         """
+        db = self._runtime_hub.open_sql_session()
+        try:
+            total_count = await self.conversation_manager.get_total_conversation_count(db, user_id)
 
-        total_count = await self.conversation_manager.get_total_conversation_count(db, user_id)
+            if end_index == -1 or end_index > total_count:
+                end_index = total_count
 
-        if end_index == -1 or end_index > total_count:
-            end_index = total_count
+            start_index = max(0, end_index - count)
 
-        start_index = max(0, end_index - count)
+            # 如果请求范围无效（例如已经到了最开始），返回空列表
+            if start_index >= end_index:
+                return {"history": [], "start_index": 0}
 
-        # 如果请求范围无效（例如已经到了最开始），返回空列表
-        if start_index >= end_index:
-            return {"history": [], "start_index": 0}
+            history_items = await self.conversation_manager.get_history(db, user_id, start_index, end_index)
 
-        history_items = await self.conversation_manager.get_history(db, user_id, start_index, end_index)
+            # 转换为UI需要的格式
+            ret = {"history": [], "start_index": start_index}
 
-        # 转换为UI需要的格式
-        ret = {"history": [], "start_index": start_index}
+            for item in history_items:
+                if item.type == ContextType.IMAGE.value and item.data:
+                    # 图片消息，返回图片路径
+                    image_client_path = item.data.get("image_client_path")
+                    content = image_client_path
+                else:
+                    content = item.content
+                ret["history"].append(
+                    {"uuid": item.uuid, "content": content, "source": item.source, "timestamp": item.timestamp, "type": item.type}
+                )
 
-        for item in history_items:
-            if item.type == ContextType.IMAGE.value and item.data:
-                # 图片消息，返回图片路径
-                image_client_path = item.data.get("image_client_path")
-                content = image_client_path
-            else:
-                content = item.content
-            ret["history"].append(
-                {"uuid": item.uuid, "content": content, "source": item.source, "timestamp": item.timestamp, "type": item.type}
-            )
-
-        return ret
+            return ret
+        finally:            
+            db.close()
 
 
 agent = None

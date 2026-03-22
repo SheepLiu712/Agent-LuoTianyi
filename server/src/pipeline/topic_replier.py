@@ -5,7 +5,7 @@ from .global_speaking_worker import SpeakingJob
 from ..agent.main_chat import SongSegmentChat
 from ..agent.main_chat_v2 import TopicReplyResult
 if TYPE_CHECKING:
-    from ..service.service_hub import ServiceHub
+    from ..interface.service_hub import ServiceHub
     from .topic_planner import ExtractedTopic
 
 
@@ -79,6 +79,14 @@ class TopicReplier:
 
         for item in reply_items:
             await self._dispatch_reply_item(self.parent_chat_stream, item, sing_plan)
+
+        await self.service_hub.agent.persist_topic_replies_for_pipeline(
+            user_id=self.user_id,
+            reply_items=reply_items,
+            sing_plan=sing_plan,
+        )
+
+        await self._schedule_memory_write(topic, reply_items, memory_hits)
 
     async def _dispatch_reply_item(
         self,
@@ -158,4 +166,63 @@ class TopicReplier:
             return None, None
 
         return self.service_hub.agent.build_sing_plan_for_topic(sing_attempts)
+
+    async def _schedule_memory_write(
+        self,
+        topic: "ExtractedTopic",
+        reply_items: List[TopicReplyResult],
+        memory_hits: List[str],
+    ) -> None:
+        if self.service_hub is None or self.service_hub.agent is None:
+            return
+
+        current_dialogue = self._build_current_dialogue(topic, reply_items)
+        agent_response_content = self._extract_agent_response_content(reply_items)
+
+        async def _task():
+            try:
+                await self.service_hub.agent.write_topic_memories_for_pipeline(
+                    user_id=self.user_id,
+                    topic_content=topic.topic_content,
+                    current_dialogue=current_dialogue,
+                    agent_response_content=agent_response_content,
+                    related_memories=memory_hits,
+                )
+            except Exception as e:
+                self.logger.warning(f"Topic memory write task failed: {e}")
+
+        asyncio.create_task(_task())
+
+    def _build_current_dialogue(self, topic: "ExtractedTopic", reply_items: List[TopicReplyResult]) -> str:
+        lines: List[str] = []
+
+        for msg in getattr(topic, "source_messages", []) or []:
+            content = (getattr(msg, "content", "") or "").strip()
+            if content:
+                lines.append(f"user: {content}")
+
+        for item in reply_items:
+            if item.reply_type == "text":
+                text = (item.reply_text or "").strip()
+                if text:
+                    lines.append(f"agent: {text}")
+            elif item.reply_type == "sing":
+                song = (item.reply_text or "").strip()
+                if song:
+                    lines.append(f"agent: （唱了{song}）")
+
+        return "\n".join(lines)
+
+    def _extract_agent_response_content(self, reply_items: List[TopicReplyResult]) -> List[str]:
+        contents: List[str] = []
+        for item in reply_items:
+            if item.reply_type == "text":
+                text = (item.reply_text or "").strip()
+                if text:
+                    contents.append(text)
+            elif item.reply_type == "sing":
+                song = (item.reply_text or "").strip()
+                if song:
+                    contents.append(f"（唱了{song}）")
+        return contents
     

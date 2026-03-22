@@ -2,8 +2,8 @@ import asyncio
 import time
 from typing import Dict
 
-from ..service.websocket_service import WebSocketConnection
-from ..service.service_hub import ServiceHub
+from ..interface.websocket_service import WebSocketConnection
+from ..interface.service_hub import ServiceHub
 from .chat_stream import ChatStream
 from ..utils.logger import get_logger
 

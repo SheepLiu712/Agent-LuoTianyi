@@ -8,14 +8,14 @@ Memory Manager Module
 from typing import List, Dict, Any
 import asyncio
 from sqlalchemy.orm import Session
-from redis import Redis
+from ..database.memory_storage import MemoryStorage
 
 from ..utils.logger import get_logger
 from .memory_search import MemorySearcher
 from .memory_write import MemoryWriter
 from ..music.singing_manager import SingingManager
 from .graph_retriever import GraphRetrieverFactory, GraphRetriever
-from ..llm.prompt_manager import PromptManager
+from ..utils.llm.prompt_manager import PromptManager
 from ..database import VectorStore, KnowledgeGraph
 from ..database.database_service import get_user_nickname
 
@@ -45,7 +45,7 @@ class MemoryManager:
     async def get_knowledge(
         self,
         db: Session,
-        redis: Redis,
+        redis: MemoryStorage,
         vector_store: VectorStore,
         knowledge_db: Session,
         user_id: str,
@@ -74,12 +74,14 @@ class MemoryManager:
     async def post_process_interaction(
         self,
         db: Session,
-        redis: Redis,
+        redis: MemoryStorage,
         vector_store: VectorStore,
         user_id: str,
         user_input: str,
         agent_response_content: List[str],
         history: str,
+        current_dialogue: str = "",
+        related_memories: List[str] | None = None,
         commit: bool = True
     ):
         """
@@ -97,10 +99,48 @@ class MemoryManager:
             user_input,
             agent_response_content,
             history,
+            current_dialogue=current_dialogue,
+            related_memories=related_memories or [],
             commit=commit
         )
 
-    async def get_username(self,  db: Session, redis: Redis, user_id: str) -> str:
+    async def write_user_memory(
+        self,
+        db: Session,
+        redis: MemoryStorage,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        commit: bool = True,
+    ) -> bool:
+        return await self.memory_writer.write_user_memory(
+            db=db,
+            redis=redis,
+            vector_store=vector_store,
+            user_id=user_id,
+            content=content,
+            commit=commit,
+        )
+
+    async def write_event_memory(
+        self,
+        db: Session,
+        redis: MemoryStorage,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        commit: bool = True,
+    ) -> bool:
+        return await self.memory_writer.write_event_memory(
+            db=db,
+            redis=redis,
+            vector_store=vector_store,
+            user_id=user_id,
+            content=content,
+            commit=commit,
+        )
+
+    async def get_username(self,  db: Session, redis: MemoryStorage, user_id: str) -> str:
         """
         获取用户的名称
         """

@@ -4,7 +4,7 @@ import json
 import os
 from typing import Dict, Any, Optional, List
 from pathlib import Path
-from ..utils.logger import get_logger
+from .logger import get_logger
 
 class VCPediaFetcher:
     def __init__(self, config: Dict[str, Any]):

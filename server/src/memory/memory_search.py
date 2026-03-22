@@ -7,12 +7,11 @@ Memory Search Module
 
 from ..utils.logger import get_logger
 from ..music.knowledge_service import get_song_introduction, get_song_lyrics, search_songs_by_lyrics
-from ..llm.prompt_manager import PromptManager
-from ..llm.llm_module import LLMModule
+from ..utils.llm.prompt_manager import PromptManager
+from ..utils.llm.llm_module import LLMModule
 from typing import Tuple, Dict, List, Any
-from ..types import KnowledgeItem, GraphEntityType
 from ..types.tool_type import MyTool, ToolFunction, ToolOneParameter
-from ..database.database_service import get_knowledge_from_buffer, VectorStore, KnowledgeGraph, write_knowledge_buffers, write_used_memory_uuid
+from ..database.database_service import VectorStore, KnowledgeGraph, write_knowledge_buffers
 import asyncio 
 import json
 import re
@@ -20,7 +19,7 @@ import random
 from ..music.singing_manager import SingingManager
 
 from sqlalchemy.orm import Session
-from redis import Redis
+from ..database.memory_storage import MemoryStorage
 
 
 
@@ -30,19 +29,73 @@ class MemorySearcher:
         self.logger = get_logger(__name__)
         self.config = config
         self.llm = LLMModule(config["llm_module"], prompt_manager)
-        self.max_k_vector_entities = config.get("max_k_vector_entities", 3)
+        self.max_k_vector_entities = config.get("max_k_vector_entities", 5)
+        self.default_threshold = float(config.get("vector_score_threshold", 0.46))
         self.max_k_graph_entities = config.get("max_k_graph_entities", 3)
         self.singing_manager = singing_manager
 
         # 设置工具列表
         self.tools: List[MyTool] = []
         self.tool_map: Dict[str, MyTool] = {}
-        self.set_up_tools()
+        # self.set_up_tools()
 
+    async def search_topic_memories(
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        queries: List[str],
+        k: int = 5,
+        score_threshold: float = 0.46,
+    ) -> List[str]:
+        """面向 TopicReplier 的直接检索接口：混合检索并按分数截断。"""
+        if not queries:
+            return []
+
+        scored_hits: List[Tuple[float, str, str]] = []
+        for query in queries:
+            q = (query or "").strip()
+            if not q:
+                continue
+
+            results = await vector_store.search(user_id, q, k=max(1, k))
+            for doc, score in results:
+                if score < score_threshold:
+                    continue
+                timestamp = ""
+                if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
+                    timestamp = str(doc.metadata.get("timestamp") or "").strip()
+                content = doc.get_content().strip() if hasattr(doc, "get_content") else ""
+                if not content:
+                    continue
+                rendered = f"在{timestamp}, {content}" if timestamp else content
+                doc_id = str(getattr(doc, "id", "") or rendered)
+                scored_hits.append((score, doc_id, rendered))
+
+        if not scored_hits:
+            return []
+
+        # 先按分数降序，再按 doc_id 去重。
+        scored_hits.sort(key=lambda x: x[0], reverse=True)
+        dedup: List[str] = []
+        seen_doc_ids = set()
+        seen_text = set()
+        for _, doc_id, text in scored_hits:
+            if doc_id in seen_doc_ids or text in seen_text:
+                continue
+            seen_doc_ids.add(doc_id)
+            seen_text.add(text)
+            dedup.append(text)
+            if len(dedup) >= k:
+                break
+
+        return dedup
+    
+    ################## 以下是旧的函数实现 ##################
+    
     async def search(
         self,
         db: Session,
-        redis: Redis,
+        redis: MemoryStorage,
         vector_store: VectorStore,
         knowledge_db: Session,
         user_id: str,
@@ -52,22 +105,13 @@ class MemorySearcher:
         """
         执行混合检索策略
         """
-        # 1. 查询理解与扩展 (Query Expansion)
-        # 利用LLM将用户的自然语言转换为具体的搜索意图
-        # 获取暂存的上次搜索结果
-        last_search_results: List[str] = await asyncio.to_thread(get_knowledge_from_buffer, db, redis, user_id)
-        search_queries = await self._generate_search_queries(user_input, history, last_search_results)
-        used_uuid = set()
+        search_queries = await self._generate_search_queries(user_input, history)
 
-        # 构建工具映射
-
-        # 构建上下文映射,用于注入 additional_required_params
-        context_map = {}
-        context_map["last_search_results"] = last_search_results
-        context_map["vector_store"] = vector_store
-        context_map["used_uuid"] = used_uuid
-        context_map["user_id"] = user_id
-        context_map["knowledge_db"] = knowledge_db
+        context_map = {
+            "vector_store": vector_store,
+            "user_id": user_id,
+            "knowledge_db": knowledge_db,
+        }
 
         def duplicate_removal(seq: List[str]) -> List[str]:
             """移除列表中的重复项，保持顺序不变"""
@@ -112,24 +156,20 @@ class MemorySearcher:
                 traceback.print_exc()
 
         returned_results = duplicate_removal(returned_results)
-        await asyncio.to_thread(write_knowledge_buffers, db, redis, user_id, returned_results) # 将本次提取的记忆保存到redis和db
-        await asyncio.to_thread(write_used_memory_uuid, redis, user_id, used_uuid) # 将本次读记忆的uuid保存到redis，马上会在写记忆用到
+        await asyncio.to_thread(write_knowledge_buffers, db, redis, user_id, returned_results)
         return returned_results
 
-    async def _generate_search_queries(self, user_input: str, history: str, last_search_results: List[str]) -> List[Tuple[str, Dict[str, Any]]]:
+    async def _generate_search_queries(self, user_input: str, history: str) -> List[Tuple[str, Dict[str, Any]]]:
         """
         使用LLM分析用户意图，生成搜索查询。
         """
         cmd: List[Tuple[str, Dict[str, Any]]] = []
-        last_search_results_str = "\n".join([f"{idx}. {content[:100]}" for idx, content in enumerate(last_search_results)])
-        
         tools_str = self.tool_to_str()
         
         try:
             response_str: str = await self.llm.generate_response(
                     user_input=user_input,
                     history=history,
-                    last_search_results=last_search_results_str,
                     tools=tools_str,
                     use_json=True
                 )
@@ -177,35 +217,29 @@ class MemorySearcher:
         for name, tool in tools.items():
             self.tool_map[name] = tool
 
-    async def _inherit_memory(self,last_search_results: List[str], content_ids: List[int]) -> List[str]:
-        """
-        继承之前检索到的记忆内容
-        """
-        results = []
-        try:
-            for idx in content_ids:
-                if 0 <= idx < len(last_search_results):
-                    results.append(last_search_results[idx])
-        except Exception as e:
-            self.logger.error(f"Error in inherit_memory with content_ids {content_ids}: {e}")
-        finally:
-            return results
-
-    async def _vector_search(self,vector_store: VectorStore, used_uuid: set, user_id: str, query: List[str]) -> List[str]:
+    async def _vector_search(self, vector_store: VectorStore, user_id: str, query: List[str], score_threshold: float = 0.46) -> List[str]:
         """
         基于向量检索的记忆搜索
         """
-        combined_result = []
+        combined_result: List[str] = []
+        seen_doc_ids = set()
         for q in query:
-            results = await vector_store.search(user_id, q, k=self.max_k_vector_entities) # 这个一定要异步，因为需要网络请求嵌入
+            results = await vector_store.search(user_id, q, k=self.max_k_vector_entities)
 
             for doc, score in results:
-                if score < 0.46:
-                    break
-                if doc.id not in used_uuid:
-                    used_uuid.add(doc.id)
+                if score < score_threshold:
+                    continue
+
+                doc_id = str(getattr(doc, "id", "") or "")
+                if doc_id and doc_id in seen_doc_ids:
+                    continue
+                if doc_id:
+                    seen_doc_ids.add(doc_id)
+
+                timestamp = "unknown time"
+                if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
                     timestamp = doc.metadata.get("timestamp", "unknown time")
-                    combined_result.append(f"在{timestamp}, {doc.get_content()}")
+                combined_result.append(f"在{timestamp}, {doc.get_content()}")
         return combined_result
 
     async def _search_song_intro(self, knowledge_db: Session, song_name: str) -> str:
@@ -291,26 +325,6 @@ class MemorySearcher:
 
 
     def set_up_tools(self):
-
-        inherit_memory_tool = MyTool(
-            name="inherit_memory",
-            description="继承之前检索到的记忆内容",
-            tool_func=self._inherit_memory,
-            tool_interface= ToolFunction(
-                name="inherit_memory",
-                description="继承之前检索到的记忆内容",
-                parameters=[
-                    ToolOneParameter(
-                        name="content_ids",
-                        type="List[int]",
-                        description="之前检索到的记忆内容的编号列表，格式如 [0,1,2]，对应上次搜索结果中的索引",
-                    ),
-                ],
-            ),
-            additional_required_params=["last_search_results"]
-        )
-        self.tool_map[inherit_memory_tool.name] = inherit_memory_tool
-
         memory_search = MyTool(
             name="memory_search",
             description="检索长期记忆",
@@ -324,9 +338,14 @@ class MemorySearcher:
                         type="List[str]",
                         description="用于检索的查询语句列表，每一个元素是一次独立的查询",
                     ),
+                    ToolOneParameter(
+                        name="score_threshold",
+                        type="float",
+                        description="相似度分数阈值，仅保留高于阈值的结果",
+                    ),
                 ],
             ),
-            additional_required_params=["vector_store", "used_uuid", "user_id"]
+            additional_required_params=["vector_store", "user_id"]
         )
         self.tool_map[memory_search.name] = memory_search
 

@@ -1,5 +1,5 @@
-from ..llm.llm_module import LLMModule
-from ..llm.prompt_manager import PromptManager
+from ..utils.llm.llm_module import LLMModule
+from ..utils.llm.prompt_manager import PromptManager
 from ..music.singing_manager import SingingManager
 from typing import Dict, Any, List, Optional
 import time

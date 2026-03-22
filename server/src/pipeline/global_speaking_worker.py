@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from ..utils.logger import get_logger
 import uuid
 from ..agent.main_chat import OneSentenceChat, SongSegmentChat
-from ..service.types import ChatResponse
+from ..interface.types import ChatResponse
 
 if TYPE_CHECKING:
     from .chat_stream import ChatStream

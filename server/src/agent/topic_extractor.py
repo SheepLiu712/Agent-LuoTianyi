@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Tuple
-from ..llm.llm_module import LLMModule
-from ..llm.prompt_manager import PromptManager
+from ..utils.llm.llm_module import LLMModule
+from ..utils.llm.prompt_manager import PromptManager
 from ..utils.logger import get_logger
 import json
 from uuid import uuid4

@@ -2,12 +2,12 @@ import asyncio
 import time
 from typing import List, Optional, Tuple
 
-from ..service.types import ChatResponse
-from ..service.websocket_service import WebSocketConnection
+from ..interface.types import ChatResponse
+from ..interface.websocket_service import WebSocketConnection
 from ..utils.logger import get_logger
 from .chat_events import ChatInputEvent, ChatInputEventType
-from ..service.service_hub import ServiceHub
-from ..service.types import WSEventType
+from ..interface.service_hub import ServiceHub
+from ..interface.types import WSEventType
 
 from .modules.ingress import ingress_message
 from .topic_planner import TopicPlanner

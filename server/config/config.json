@@ -52,6 +52,18 @@
             "prompt_name": "topic_extraction_prompt"
         }
     },
+    "main_chat_v2": {
+        "llm_module": {
+            "llm": {
+                "api_type": "openai",
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            },
+            "prompt_name": "topic_reply_prompt"
+        },
+        "static_variables_file": "res/agent/persona/luotianyi_persona.json"
+    },
     "main_chat": {
         "llm_module": {
             "llm": {

@@ -17,8 +17,8 @@ if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 import src.database as database
-from src.service import account
-from src.service.types import (
+from src.interface import account
+from src.interface.types import (
     RegisterRequest,
     LoginRequest,
     AutoLoginRequest,
@@ -28,10 +28,10 @@ from src.service.types import (
     ImageRequest,
     WSEventType,
 )
-from src.service.websocket_service import WebSocketConnection, get_websocket_service
+from src.interface.websocket_service import WebSocketConnection, get_websocket_service
 from src.pipeline.global_chat_stream_manager import get_GCSM
 from src.pipeline.global_speaking_worker import get_global_speaking_worker
-from src.service.service_hub import ServiceHub
+from src.interface.service_hub import ServiceHub
 from src.music.song_database import get_song_session, init_song_db
 from src.database.sql_database import get_sql_session
 from src.tts import TTSModule, init_tts_module
