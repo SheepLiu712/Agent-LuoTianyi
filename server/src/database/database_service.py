@@ -114,27 +114,6 @@ def prefill_buffer(db: Session, redis: MemoryStorage, user_id: str, types: List[
             redis.setex(description_key, 3600, description)  # 1小时过期
             logger.info(f"Prefilled description for user {user_id} in Redis.")
 
-        # 4. 加载最近的记忆更新命令
-        if "all" in types or "recent_memory_update" in types:
-            recent_update = (
-                db.query(MemoryUpdateRecord)
-                .filter(MemoryUpdateRecord.user_id == user_id)
-                .order_by(MemoryUpdateRecord.created_at.desc())
-                .limit(10)
-                .all()
-            )
-            recent_updates_list = []
-            for record in reversed(recent_update):
-                try:
-                    cmd = json.loads(record.update_command)
-                    recent_updates_list.append(cmd)
-                except json.JSONDecodeError:
-                    logger.warning(f"Failed to decode MemoryUpdateCommand for user {user_id}, record {record.update_cmd_uuid}")
-                    continue
-            recent_update_key = f"user_recent_memory_update:{user_id}"
-            redis.setex(recent_update_key, 3600, json.dumps(recent_updates_list, ensure_ascii=False))  # 1小时过期
-            logger.info(f"Prefilled recent memory update for user {user_id} in Redis.")
-
         return True
         
 
@@ -238,49 +217,6 @@ def add_conversations(db: Session, redis: MemoryStorage, user_id: str, conversat
         return []
 
 
-def write_knowledge_buffers(db: Session, redis: MemoryStorage, user_id: str, knowledge_contents: List[str], commit: bool = True) -> None:
-    """
-    更新用户的知识缓存：清空数据库和Redis中该用户旧的知识缓存，并写入新的内容。
-
-    :param db: 数据库会话
-    :type db: Session
-    :param redis: Redis
-    :type redis: Redis
-    :param user_id: 用户 uuid
-    :type user_id: str
-    :param knowledge_contents: 新的知识内容列表
-    :type knowledge_contents: List[KnowledgeItem]
-    """
-    try:
-        def _write() -> List[str]:
-            db.query(KnowledgeBuffer).filter(KnowledgeBuffer.user_id == user_id).delete(synchronize_session=False)
-
-            redis_update_list_local = []
-            for content in knowledge_contents:
-                kb = KnowledgeBuffer(
-                    user_id=user_id,
-                    content=content,
-                    created_at=datetime.now(),
-                )
-                db.add(kb)
-                redis_update_list_local.append(content)
-
-            if commit:
-                db.commit()
-            return redis_update_list_local
-
-        redis_update_list = run_sql_write(_write)
-
-        # 2. Redis 操作：直接覆盖
-        key = f"user_knowledge:{user_id}"
-        new_val = json.dumps(redis_update_list, ensure_ascii=False)
-        redis.setex(key, 3600, new_val) # 覆盖并重置过期时间
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        logger.error(f"write_knowledge_buffers error: {e}")
-        db.rollback()
 
 def write_memory_update(db: Session, redis: MemoryStorage, user_id: str, memory_update: MemoryUpdateCommand, commit: bool = True) -> None:
     # 向数据库中添加记忆更新命令记录
@@ -319,16 +255,6 @@ def write_memory_update(db: Session, redis: MemoryStorage, user_id: str, memory_
     except Exception as e:
         logger.error(f"write_recent_memory_update error: {e}")
         db.rollback()
-        
-
-def write_used_memory_uuid(redis: MemoryStorage, user_id:str, used_uuid: set) -> None:
-    try:
-        # 直接覆盖
-        k = f"user_used_uuid:{user_id}"
-        new_val = json.dumps(list(used_uuid), ensure_ascii=False)
-        redis.setex(k, 3600, new_val)
-    except Exception as e:
-        logger.error(f"write_used_memory_uuid error: {e}")
 
 
 def update_user_nickname(db: Session, redis: MemoryStorage, user_id: str, new_nickname: str, commit: bool = True) -> None:
@@ -389,51 +315,6 @@ def update_user_description(db: Session, redis: MemoryStorage, user_id: str, new
         logger.error(f"update_user_description error: {e}")
         db.rollback()
 
-
-def preserve_knowledge_buffers(db: Session, redis: MemoryStorage, user_id: str, knowledge_uuids: List[str], commit: bool = True):
-    """
-    在数据库中删除知识缓存记录，只保留给定uuid的知识缓存。同时在 Redis 中相应更新。
-
-    :param db: 数据库会话
-    :type db: Session
-    :param redis: Redis
-    :type redis: Redis
-    :param user_id: 用户 uuid
-    :type user_id: str
-    :param knowledge_uuids: 多条知识内容对应的 uuid 列表
-    :type knowledge_uuids: List[str]
-    """
-    raise NotImplementedError("preserve_knowledge_buffers is not implemented yet.")
-    try:
-
-        db.query(KnowledgeBuffer).filter(
-            KnowledgeBuffer.user_id == user_id,
-            KnowledgeBuffer.uuid.in_(knowledge_uuids)
-        ).delete(synchronize_session=False)
-        db.commit()
-
-        key = f"user_knowledge:{user_id}"
-        with redis.pipeline() as pipe:
-            for _ in range(3):
-                try:
-                    pipe.watch(key)
-                    raw = pipe.get(key)
-                    if raw:
-                        current_list = json.loads(raw)
-                        new_list = [x for x in current_list if x in knowledge_uuids]
-                        new_val = json.dumps(new_list, ensure_ascii=False)
-                        
-                        pipe.multi()
-                        pipe.setex(key, 3600, new_val)
-                        pipe.execute()
-                    else:
-                        pipe.unwatch()
-                    break
-                except WatchError:
-                    continue
-    except Exception as e:
-        logger.error(f"preserve_knowledge_buffers error: {e}")
-        db.rollback()
 
 
 def update_context_summary(db: Session, redis: MemoryStorage, user_id: str, new_summary: str, new_context_memory_count: int, commit: bool = True):
@@ -514,26 +395,6 @@ def get_context_from_buffer(db: Session, redis: MemoryStorage, user_id: str) -> 
         raw_data = redis.get(redis_key)
         if raw_data:
             return json.loads(raw_data)
-    
-    return []
-
-def get_knowledge_from_buffer(db: Session, redis: MemoryStorage, user_id: str) -> List[str]:
-    """
-    优先从 Redis 获取知识缓存，如果不存在则调用 prefill_buffer 加载
-    """
-    redis_key = f"user_knowledge:{user_id}"
-    raw_data = redis.get(redis_key)
-    
-    if raw_data:
-        raw_list = json.loads(raw_data)
-        return raw_list
-    
-    # 尝试预加载
-    if prefill_buffer(db, redis, user_id):
-        raw_data = redis.get(redis_key)
-        if raw_data:
-            raw_list = json.loads(raw_data)
-            return raw_list
     
     return []
 
@@ -635,14 +496,6 @@ def get_recent_memory_update_from_buffer(db:Session, redis: MemoryStorage, user_
         return result
     return []
 
-def get_used_memory_uuid(db:Session, redis: MemoryStorage, user_id: str) -> List[str]:
-    redis_key = f"user_used_uuid:{user_id}"
-    raw_data = redis.get(redis_key)
-
-    if raw_data:
-        used_uuid = json.loads(raw_data)
-        return used_uuid
-    return []
 
 def get_image_server_path(db: Session, user_id: str, uuid: str) -> Optional[str]:
     conv = db.query(Conversation).filter(

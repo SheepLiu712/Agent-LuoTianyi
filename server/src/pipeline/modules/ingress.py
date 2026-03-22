@@ -1,13 +1,14 @@
 from typing import TYPE_CHECKING
 from ...utils.logger import get_logger
-from ...plugins.vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
+from ...vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
 from ...agent.jargon_retriver import extract_song_entities
+from ..chat_events import ChatInputEventType
 if TYPE_CHECKING:
-    from ..chat_events import ChatInputEvent, ChatInputEventType
+    from ..chat_events import ChatInputEvent
     from ...interface.service_hub import ServiceHub
 
 logger = get_logger("Ingress")
-async def ingress_message(service_hub: ServiceHub, user_id: str, message: ChatInputEvent):
+async def ingress_message(service_hub: "ServiceHub", user_id: str, message: "ChatInputEvent"):
     '''
     原地对message进行转换，添加必要的字段。
     '''
@@ -24,7 +25,7 @@ async def ingress_message(service_hub: ServiceHub, user_id: str, message: ChatIn
         message.payload["terms"] = song_entities
 
 
-async def _process_image_message(service_hub: ServiceHub, user_id: str, message: ChatInputEvent):
+async def _process_image_message(service_hub: "ServiceHub", user_id: str, message: "ChatInputEvent"):
     '''
     对图片消息进行处理，调用图片描述服务获取描述文本，并将其添加到message的payload中。
     '''

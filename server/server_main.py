@@ -5,9 +5,6 @@ from sqlalchemy.orm import Session
 import uvicorn
 import os
 import sys
-import base64
-import asyncio
-import time
 from typing import Dict
 import redis
 
@@ -22,9 +19,7 @@ from src.interface.types import (
     RegisterRequest,
     LoginRequest,
     AutoLoginRequest,
-    ChatRequest,
     HistoryRequest,
-    PictureChatRequest,
     ImageRequest,
     WSEventType,
 )
@@ -221,88 +216,6 @@ async def login(
         background_tasks.add_task(database.prefill_buffer, db, redis, user.uuid)
         return {"login_token": token, "message_token": message_token, "user_id": req.username}
     raise HTTPException(status_code=401, detail="用户名或密码错误")
-
-
-@app.post("/chat")
-async def chat(
-    request: ChatRequest,
-    db: Session = Depends(database.get_sql_db),
-    redis: redis.Redis = Depends(database.get_redis_buffer),
-    vector_store: database.VectorStore = Depends(database.get_vector_store),
-    knowledge_db: Session = Depends(get_song_session),
-    agent: LuoTianyiAgent = Depends(get_agent_service),
-):
-    """
-    聊天接口，支持流式响应。用户发送消息，服务器返回分段的回复。
-
-    请求参数：
-    - request.user_id: 用户 ID
-    - request.token: 认证 token
-    - request.text: 用户消息文本
-    返回值：
-    - 流式响应，每个数据块为 ChatResponse 的 JSON 序列化形式
-    """
-    logger.info(f"Server received: {request.text} from {request.username}")
-    message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
-    if not message_token_valid:
-        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-
-    try:
-        # 定义异步生成器用于流式响应
-        async def event_generator():
-            # 调用 Agent 的无状态处理方法
-            async for response in agent.mock_handle_user_input(
-                user_id=user_uuid, text=request.text, db=db, redis=redis, vector_store=vector_store, knowledge_db=knowledge_db
-            ):
-                # 将 ChatResponse 对象序列化为 JSON
-                data = response.model_dump_json() if hasattr(response, "model_dump_json") else response.json()
-                yield f"data: {data}\n\n"
-
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
-    except Exception as e:
-        logger.error(f"Error in chat endpoint: {e}")
-        raise HTTPException(status_code=500, detail="服务器内部错误")
-
-
-@app.post("/picture_chat")
-async def picture_chat(
-    request: PictureChatRequest = Depends(),
-    db: Session = Depends(database.get_sql_db),
-    redis: redis.Redis = Depends(database.get_redis_buffer),
-    vector_store: database.VectorStore = Depends(database.get_vector_store),
-    knowledge_db: Session = Depends(get_song_session),
-    agent: LuoTianyiAgent = Depends(get_agent_service),
-):
-    """
-    图片聊天接口，支持流式响应。用户发送图片和认证信息，服务器返回回复。
-    目前仅为占位符，不处理图片内容。
-    """
-    logger.info(f"Server received image from {request.username}")
-    message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
-    if not message_token_valid:
-        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-
-    try:
-
-        async def event_generator():
-
-            # 调用 Agent 的图片处理方法
-            async for response in agent.handle_user_pic_input(
-                user_id=user_uuid,
-                image=request.image,
-                image_client_path=request.image_client_path,
-                db=db,
-                redis=redis,
-                vector_store=vector_store,
-                knowledge_db=knowledge_db,
-            ):
-                data = response.model_dump_json() if hasattr(response, "model_dump_json") else response.json()
-                yield f"data: {data}\n\n"
-
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
-    except Exception as e:
-        logger.error(f"Error in picture_chat endpoint: {e}")
-        raise HTTPException(status_code=500, detail="服务器内部错误")
 
 
 @app.get("/history")

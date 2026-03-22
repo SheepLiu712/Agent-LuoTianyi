@@ -15,7 +15,6 @@ from .memory_search import MemorySearcher
 from .memory_write import MemoryWriter
 from .user_profile_updater import UserProfileUpdater
 from ..music.singing_manager import SingingManager
-from .graph_retriever import GraphRetrieverFactory, GraphRetriever
 from ..utils.llm.prompt_manager import PromptManager
 from ..database import VectorStore, KnowledgeGraph
 from ..database.database_service import get_user_nickname, get_user_description, update_user_description
@@ -37,9 +36,6 @@ class MemoryManager:
         """
         self.logger = get_logger(__name__)
         self.config = config
-        self.graph_retriever: GraphRetriever = GraphRetrieverFactory.create_retriever(
-            config["graph_retriever"]["retriever_type"], config["graph_retriever"]
-        )
         self.memory_searcher = MemorySearcher(config["memory_searcher"], prompt_manager, singing_manager)
         self.memory_writer = MemoryWriter(config["memory_writer"], prompt_manager)
         self.user_profile_updater = UserProfileUpdater(config["user_profile"], prompt_manager)
@@ -71,6 +67,34 @@ class MemoryManager:
             user_id,
             user_input,
             history,
+        )
+
+    async def search_memories_for_topic(
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        queries: List[str],
+        similarity_threshold: float = 0.8,
+        k: int = 3,
+    ) -> List[str]:
+        """面向 topic 流水线的记忆检索接口。"""
+        return await self.memory_searcher.search_memories_for_topic(
+            vector_store=vector_store,
+            user_id=user_id,
+            queries=queries,
+            k=k,
+            score_threshold=similarity_threshold,
+        )
+
+    async def search_song_facts_for_topic(
+        self,
+        knowledge_db: Session,
+        constraints: List[str],
+    ) -> List[str]:
+        """面向 topic 流水线的歌曲事实检索接口。"""
+        return await self.memory_searcher.search_song_facts_for_topic(
+            knowledge_db=knowledge_db,
+            constraints=constraints,
         )
 
     async def post_process_interaction(
