@@ -6,7 +6,7 @@
         "vector_store": {
             "store_type": "chroma",
             "embedding_model": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "BAAI/bge-large-zh-v1.5",
                 "api_key": "$SILICONFLOW_API_KEY",
                 "base_url": "https://api.siliconflow.cn/v1"
@@ -40,10 +40,22 @@
     "prompt_manager": {
         "template_dir": "res/agent/prompts"
     },
+    "topic_extractor": {
+        "llm_module": {
+            "llm": {
+                "api_type": "openai",
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "enable_thinking": false
+            },
+            "prompt_name": "topic_extraction_prompt"
+        }
+    },
     "main_chat": {
         "llm_module": {
             "llm": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "deepseek-chat",
                 "api_key": "$DEEPSEEK_API_KEY",
                 "base_url": "https://api.deepseek.com/v1",
@@ -58,7 +70,7 @@
     "planner": {
         "llm_module": {
             "llm": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "deepseek-chat",
                 "api_key": "$DEEPSEEK_API_KEY",
                 "base_url": "https://api.deepseek.com/v1",
@@ -73,7 +85,7 @@
     "vision_module": {
         "vlm_module": {
             "vlm": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "qwen3-vl-plus",
                 "api_key": "$QWEN_API_KEY",
                 "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -94,7 +106,7 @@
         "forget_conversation_days": 10,
         "llm_module": {
             "llm": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "deepseek-chat",
                 "api_key": "$DEEPSEEK_API_KEY",
                 "base_url": "https://api.deepseek.com/v1",
@@ -120,7 +132,7 @@
         "use_llm": false,
         "llm_module": {
             "llm": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "Qwen/Qwen3-32B",
                 "api_key": "$SILICONFLOW_API_KEY",
                 "base_url": "https://api.siliconflow.cn/v1",
@@ -141,7 +153,7 @@
             "profile_update_freq": 50,
             "llm_module": {
                 "llm": {
-                    "api_type": "siliconflow",
+                    "api_type": "openai",
                     "model": "deepseek-chat",
                     "api_key": "$DEEPSEEK_API_KEY",
                     "base_url": "https://api.deepseek.com/v1",
@@ -157,7 +169,7 @@
             "max_k_vector_entities": 5,
             "llm_module": {
                 "llm": {
-                    "api_type": "siliconflow",
+                    "api_type": "openai",
                     "model": "deepseek-chat",
                     "api_key": "$DEEPSEEK_API_KEY",
                     "base_url": "https://api.deepseek.com/v1",
@@ -172,7 +184,7 @@
             "recent_update_path": "data/memory/context/recent_update.json",
             "llm_module": {
                 "llm": {
-                    "api_type": "siliconflow",
+                    "api_type": "openai",
                     "model": "deepseek-chat",
                     "api_key": "$DEEPSEEK_API_KEY",
                     "base_url": "https://api.deepseek.com/v1",

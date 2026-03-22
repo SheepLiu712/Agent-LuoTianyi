@@ -75,7 +75,7 @@ import time
 import random
 
 
-class SiliconFlowAPIInterface(
+class OpenAIAPIInterface(
     LLMAPIInterface
 ):  # 这个东西本质上调用的是openai的接口，如果之后需要使用openai的其他模型，可以直接用这个类（原样继承）
     def __init__(self, config: Dict[str, Any]):
@@ -93,10 +93,10 @@ class SiliconFlowAPIInterface(
         try:
             # 兼容同步和异步调用：如果需要异步，应使用 AsyncOpenAI
             self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
-            self.logger.info(f"硅基流动客户端初始化完成，模型: {self.model}")
+            self.logger.info(f"OpenAI客户端初始化完成，模型: {self.model}")
         except Exception as e:
-            self.logger.error(f"初始化硅基流动客户端失败: {e}")
-            raise Exception(f"无法初始化硅基流动客户端: {e}")
+            self.logger.error(f"初始化OpenAI客户端失败: {e}")
+            raise Exception(f"无法初始化OpenAI客户端: {e}")
 
     async def generate_response(self, prompt: str, use_json: bool, **kwargs) -> str:
         """
@@ -118,6 +118,7 @@ class SiliconFlowAPIInterface(
                             max_tokens=self.max_tokens,
                             temperature=self.temperature,
                             top_p=self.top_p,
+                            extra_body={"enable_thinking": self.enable_thinking},
                             response_format={"type": "json_object"},
                             **kwargs,
                         )
@@ -128,11 +129,12 @@ class SiliconFlowAPIInterface(
                             max_tokens=self.max_tokens,
                             temperature=self.temperature,
                             top_p=self.top_p,
+                            extra_body={"enable_thinking": self.enable_thinking},
                             **kwargs,
                         )
                 
                 # 放入线程池执行
-                ret = await asyncio.to_thread(_do_request, [{"role": "user", "content": prompt}], use_json)
+                ret = await asyncio.to_thread(_do_request, [{"role": "system", "content": prompt}], use_json)
                 
                 response = self._extract_content(ret)
                 self.response_time_queue.append(time.time() - st_time)
@@ -152,7 +154,7 @@ class SiliconFlowAPIInterface(
         raise last_exception if last_exception else Exception("Unknown error")
     
     async def generate_response_with_tools(self, prompt: str, tools: Dict[str, MyTool], use_json: bool, **kwargs) -> str:
-        print("Using SiliconFlowAPIInterface.generate_response_with_tools")
+        print("Using OpenAIAPIInterface.generate_response_with_tools")
         def _do_request(messages: List, tool_interfaces: List):
             if use_json:
                 return self.client.chat.completions.create(
@@ -248,6 +250,7 @@ class SiliconFlowAPIInterface(
 
         self.max_retries = self.config.get("max_retries", 3)
         self.retry_delay = self.config.get("retry_delay", 0.5)
+        self.enable_thinking = self.config.get("enable_thinking", False)
 
     
     def _extract_content(self, response) -> str:
@@ -303,7 +306,7 @@ class SiliconFlowAPIInterface(
 
     def get_interface_info(self) -> Dict[str, Any]:
         return {
-            "name": "SiliconFlowAPIInterface",
+            "name": "OpenAIAPIInterface",
             "model": self.model,
             "base_url": self.base_url,
             "temperature": self.temperature,
@@ -463,9 +466,9 @@ LLM API接口工厂
 class LLMAPIFactory:
     @staticmethod
     def create_interface(config: Dict[str, Any]) -> LLMAPIInterface:
-        api_type = config.get("api_type", "siliconflow").lower()
-        if api_type == "siliconflow":
-            return SiliconFlowAPIInterface(config)
+        api_type = config.get("api_type", "openai").lower()
+        if api_type == "openai":
+            return OpenAIAPIInterface(config)
         elif api_type == "requests":
             return RequestsAPIInterface(config)
         else:

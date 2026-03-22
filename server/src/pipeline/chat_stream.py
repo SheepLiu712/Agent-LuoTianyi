@@ -10,7 +10,8 @@ from ..service.service_hub import ServiceHub
 from ..service.types import WSEventType
 
 from .modules.ingress import ingress_message
-from .modules.topic_planner import TopicPlanner
+from .topic_planner import TopicPlanner
+from .topic_replier import TopicReplier
 
 
 class ChatStream:
@@ -26,18 +27,21 @@ class ChatStream:
         self.logger = get_logger(f"{self.user_name}ChatStream")
         self.service_hub: ServiceHub | None = None
         self.connection_lost_time = None
-        self.thinking_task: asyncio.Task | None = None
         self.topic_planner = TopicPlanner(username=self.user_name, user_id=self.user_uuid)
+        self.topic_replier = TopicReplier(username=self.user_name, user_id=self.user_uuid)
+        self.topic_planner.set_topic_consumer(self.topic_replier.add_topic)
 
         self.state_lock = asyncio.Lock()
 
     def set_service_hub(self, service_hub: ServiceHub):
         self.service_hub = service_hub
         self.topic_planner.set_service_hub(service_hub)
+        self.topic_replier.set_service_hub(service_hub)
 
     def start_if_needed(self):
         """启动常驻消息处理协程（仅启动一次）。"""
         self.topic_planner.start_processing()
+        self.topic_replier.start_processing()
 
     async def feed_event(self, event: ChatInputEvent):
         """接收 service 层转换后的聊天事件。"""
@@ -45,81 +49,6 @@ class ChatStream:
             await ingress_message(self.service_hub, self.user_name, event)
             await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event)
         await self.topic_planner.feed_unread_message(event)
-
-    # async def message_processor(self):
-    #     """持续运行的状态机逻辑层，仅处理 ChatInputEvent。"""
-    #     while True:
-    #         unread_user_messages: List[ChatInputEvent] = []
-
-    #         first_event = await self.message_queue.get()
-    #         try:
-    #             # 获取积压的信息，同时处理用户输入事件和用户输入中事件（重置超时）
-    #             if self._is_user_typing_event(first_event):
-    #                 self._handle_user_typing(first_event)
-    #                 self.message_queue.task_done()
-    #                 continue
-
-    #             unread_user_messages.append(first_event)
-    #             while True:
-    #                 try:
-    #                     event = self.message_queue.get_nowait()
-    #                 except asyncio.QueueEmpty:
-    #                     break
-
-    #                 if self._is_user_typing_event(event):
-    #                     self._handle_user_typing(event)
-    #                     self.message_queue.task_done()
-    #                     continue
-    #                 unread_user_messages.append(event)
-
-    #             await self.service_hub.agent.feed_user_messages(self.service_hub, self.user_uuid, unread_user_messages)
-
-    #             # 进入 listening 状态，等待用户输入结束的信号（超时或符合结束条件）
-    #             await self._transition_to(self.STATE_LISTENING)
-    #             username = self.user_name
-    #             while self.current_state == self.STATE_LISTENING:
-    #                 self.listening_deadline = time.monotonic() + self.listening_timeout_seconds
-    #                 self.logger.debug(f"{username}进入 listening 状态，等待用户继续输入（已收到消息数={len(unread_user_messages)}）")
-    #                 timeout = max(0.0, self.listening_deadline - time.monotonic())
-    #                 try:
-    #                     next_event = await asyncio.wait_for(self.message_queue.get(), timeout=timeout)
-    #                 except asyncio.TimeoutError:
-    #                     await self._transition_to(self.STATE_THINKING)
-    #                     self.logger.debug(f"{username} listening 超时，进入 thinking 状态")
-    #                     break
-
-    #                 if self._is_user_typing_event(next_event):
-    #                     self._handle_user_typing(next_event)
-    #                     self.message_queue.task_done()
-    #                     continue
-
-    #                 await self.service_hub.agent.feed_user_messages(self.service_hub, self.user_uuid, [next_event])
-    #                 unread_user_messages.append(next_event)
-
-    #             if self.current_state != self.STATE_THINKING:
-    #                 await self._transition_to(self.STATE_THINKING)
-
-    #             self.thinking_task = asyncio.create_task(self.service_hub.agent.do_think_for_chat_stream(self.service_hub, self.user_uuid))
-    #             interrupted = False
-    #             try:
-    #                 await self.thinking_task
-    #             except asyncio.CancelledError:
-    #                 interrupted = True
-    #             finally:
-    #                 self.thinking_task = None
-
-    #             if interrupted:
-    #                 await self._transition_to(self.STATE_LISTENING)
-    #                 self.listening_deadline = time.monotonic() + self.listening_timeout_seconds
-    #                 username = self.user_name
-    #                 self.logger.debug(f"{username} thinking 阶段被打断，进入 listening 状态")
-    #                 continue
-
-    #             await self._transition_to(self.STATE_REFLECTION)
-    #             await self._transition_to(self.STATE_WAITING)
-    #         finally:
-    #             for _ in unread_user_messages:
-    #                 self.message_queue.task_done()
 
     async def send_response(self, response: ChatResponse):
         if self.ws_connection is None or self.ws_connection.websocket is None:
@@ -132,33 +61,9 @@ class ChatStream:
         await self.ws_connection.websocket.send_json(event)
 
 
-    def _handle_user_typing(self, event: ChatInputEvent):
-        """处理用户输入事件：listening 阶段重置超时。"""
-        _ = event
-        if self.current_state == self.STATE_LISTENING:
-            self.listening_deadline = time.monotonic() + self.listening_timeout_seconds
-
-    async def _transition_to(self, new_state: str):
-        async with self.state_lock:
-            if self.current_state == new_state:
-                return
-            old_state = self.current_state
-            self.current_state = new_state
-
-        self.logger.info(f"state transition: {old_state} -> {new_state}")
-        if self.service_hub is None or self.ws_connection is None or self.ws_connection.websocket is None:
-            return
-        try:
-            await self.service_hub.websocket_service.send_agent_state_event(self.ws_connection.websocket, new_state)
-        except Exception as e:
-            self.logger.warning(f"failed to send state event: {e}")
-
-
     def _is_user_message_event(self, event: ChatInputEvent) -> bool:
         return event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}
 
-    def _is_user_typing_event(self, event: ChatInputEvent) -> bool:
-        return event.event_type == ChatInputEventType.USER_TYPING
 
     ####### 下方为连接管理相关方法 #######
 
@@ -182,12 +87,7 @@ class ChatStream:
 
     def clean_up(self):
         """清理资源的逻辑，比如关闭文件、数据库连接等"""
-        if self.thinking_task and not self.thinking_task.done():
-            self.thinking_task.cancel()
-        if self.processor_task and not self.processor_task.done():
-            self.processor_task.cancel()
-        self.listening_deadline = None
-        self.current_state = self.STATE_WAITING
-
-        # 丢弃旧队列，避免断连后遗留消息影响重连流程。
-        self.message_queue = asyncio.Queue(maxsize=256)
+        if self.topic_planner.processor_task and not self.topic_planner.processor_task.done():
+            self.topic_planner.processor_task.cancel()
+        if self.topic_replier.processor_task and not self.topic_replier.processor_task.done():
+            self.topic_replier.processor_task.cancel()

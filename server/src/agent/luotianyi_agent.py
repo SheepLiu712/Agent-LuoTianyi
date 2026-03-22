@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from ..llm.prompt_manager import PromptManager
 from .main_chat import MainChat, OneSentenceChat, SongSegmentChat
 from .planner import Planner
+from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
 from ..types.conversation_type import ConversationItem
 from ..utils.logger import get_logger
@@ -35,6 +36,8 @@ from ..pipeline.chat_events import ChatInputEvent, ChatInputEventType
 from ..pipeline.global_speaking_worker import SpeakingJob
 if TYPE_CHECKING:
     from ..service.service_hub import ServiceHub
+    from ..pipeline.modules.unread_store import UnreadMessageSnapshot, UnreadMessage
+    from ..pipeline.topic_planner import ExtractedTopic
 
 
 def get_available_expression(config_path: str = "config/live2d_interface_config.json") -> List[str]:
@@ -77,9 +80,43 @@ class LuoTianyiAgent:
             available_tone=tts_module.get_available_tones(),
             available_expression=get_available_expression(),
         )
+        self.topic_extractor = TopicExtractor(
+            self.config.get("topic_extractor", {}),
+            self.prompt_manager,
+        )
         self.planner = Planner(config["planner"], self.prompt_manager, self.singing_manager)
         self.vision_module = VisionModule(config["vision_module"], self.prompt_manager)
-        self.user_unread_msgs: Dict[str, List[str]] = {}  # 存储用户未读消息的缓冲区，key为user_id，value为消息列表，注意，这个东西不应该实装进Agent里，应该放在ChatStream里，但为了实现上的便利暂时放在这里
+
+    async def extract_topics_for_pipeline(
+        self,
+        service_hub: "ServiceHub",
+        user_id: str,
+        unread_snapshot: "UnreadMessageSnapshot",
+        force_complete: bool = False,
+    ) -> tuple[List["ExtractedTopic"], List["UnreadMessage"]]:
+        """Pipeline 话题提取入口：内部负责获取 conversation_history。"""
+        if unread_snapshot is None or not unread_snapshot.messages:
+            return [], []
+
+        db = service_hub.open_sql_session()
+        try:
+            conversation_history = await self.conversation_manager.get_context(
+                db=db,
+                redis=service_hub.redis_client,
+                user_id=user_id,
+            )
+        except Exception as e:
+            self.logger.warning(f"Failed to get conversation_history for topic extraction: {e}")
+            conversation_history = ""
+        finally:
+            db.close()
+
+        topics, remaining = await self.topic_extractor.extract_topics(
+            unread_snapshot=unread_snapshot,
+            conversation_history=conversation_history,
+            force_complete=force_complete,
+        )
+        return topics, remaining
 
     async def describe_image(self, image_base64: str) -> str:
         """调用视觉模块对图片进行描述
@@ -131,61 +168,9 @@ class LuoTianyiAgent:
             type=conversation_type, 
             data=payload,  
         )
-
-    async def feed_user_messages(self, service_hub: "ServiceHub", user_id: str, messages: List[ChatInputEvent]):
-        """接收来自 ChatStream 的用户消息，触发处理流程
-
-        Args:
-            user_id: 用户ID
-            messages: 用户消息列表
-            service_hub: ServiceHub实例，用于调用Agent的处理方法
-        """
-        self.logger.debug(f"Received {len(messages)} new messages for user {user_id}")
-        if user_id not in self.user_unread_msgs:
-            self.user_unread_msgs[user_id] = []
-        for msg in messages:
-            if msg.text:
-                self.user_unread_msgs[user_id].append(msg.text)
-
-    async def do_think_for_chat_stream(self, service_hub: "ServiceHub", user_id: str):
-        """为 ChatStream 执行思考流程，处理用户输入并生成回复
-
-        Args:
-            service_hub: ServiceHub实例，用于调用Agent的处理方法
-            user_id: 用户ID
-        """
-
-        # 目前我们将用户输入按照原样发回。
-        unread_msgs = self.user_unread_msgs.pop(user_id, [])
-        chat_stream = service_hub.gcsm.get_stream_by_user_uuid(user_id)
-        if chat_stream is None:
-            self.logger.warning(f"chat_stream not found for user {user_id}, skip speaking jobs")
-            return
-
-        await service_hub.global_speaking_worker.enqueue(
-            SpeakingJob(
-                chat_stream=chat_stream,
-                job_content=OneSentenceChat(
-                    content=f"用户输入了 {len(unread_msgs)} 条消息",
-                    expression="微笑脸",
-                    tone="normal",
-                ),
-            )
-        )
-        for msg in unread_msgs:
-            await service_hub.global_speaking_worker.enqueue(
-                SpeakingJob(
-                    chat_stream=chat_stream,
-                    job_content=OneSentenceChat(
-                        content=f"用户输入：{msg}",
-                        expression="微笑脸",
-                        tone="normal",
-                    ),
-                )
-            )
         
         
-            
+    ############下方为旧的接口############
 
     async def mock_handle_user_input(
         self, 
