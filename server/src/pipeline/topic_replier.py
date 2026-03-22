@@ -3,7 +3,7 @@ import asyncio
 from ..utils.logger import get_logger
 from .global_speaking_worker import SpeakingJob
 from ..agent.main_chat import SongSegmentChat
-from ..agent.main_chat_v2 import TopicReplyResult
+from ..agent.main_chat import TopicReplyResult
 if TYPE_CHECKING:
     from ..interface.service_hub import ServiceHub
     from .topic_planner import ExtractedTopic
@@ -85,6 +85,8 @@ class TopicReplier:
             reply_items=reply_items,
             sing_plan=sing_plan,
         )
+
+        await self._schedule_user_profile_update(topic, reply_items)
 
         await self._schedule_memory_write(topic, reply_items, memory_hits)
 
@@ -190,6 +192,27 @@ class TopicReplier:
                 )
             except Exception as e:
                 self.logger.warning(f"Topic memory write task failed: {e}")
+
+        asyncio.create_task(_task())
+
+    async def _schedule_user_profile_update(
+        self,
+        topic: "ExtractedTopic",
+        reply_items: List[TopicReplyResult],
+    ) -> None:
+        if self.service_hub is None or self.service_hub.agent is None:
+            return
+
+        current_dialogue = self._build_current_dialogue(topic, reply_items)
+
+        async def _task():
+            try:
+                await self.service_hub.agent.update_user_profile_for_topic_pipeline(
+                    user_id=self.user_id,
+                    current_dialogue=current_dialogue,
+                )
+            except Exception as e:
+                self.logger.warning(f"Topic user profile update task failed: {e}")
 
         asyncio.create_task(_task())
 

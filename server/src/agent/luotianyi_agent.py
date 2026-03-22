@@ -18,9 +18,7 @@ import base64
 from typing import TYPE_CHECKING
 
 from ..utils.llm.prompt_manager import PromptManager
-from .main_chat import MainChat, OneSentenceChat, SongSegmentChat
-from .main_chat_v2 import MainChatV2, TopicReplyResult
-from .planner import Planner
+from .main_chat import MainChat, OneSentenceChat, SongSegmentChat, TopicReplyResult
 from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
 from ..types.conversation_type import ConversationItem
@@ -96,19 +94,11 @@ class LuoTianyiAgent:
         self.memory_manager.memory_searcher.register_tools(self.singing_manager.get_tools())  # 注册唱歌工具
 
         self.tts_engine = tts_module  # TTS模块
-
-        self.main_chat = MainChat(
-            self.config["main_chat"],
-            self.prompt_manager,
-            available_tone=tts_module.get_available_tones(),
-            available_expression=get_available_expression(),
-        )
-        self.main_chat_v2 = MainChatV2(self.config["main_chat_v2"], self.prompt_manager)
+        self.main_chat_v2 = MainChat(self.config["main_chat_v2"], self.prompt_manager)
         self.topic_extractor = TopicExtractor(
             self.config.get("topic_extractor", {}),
             self.prompt_manager,
         )
-        self.planner = Planner(self.config["planner"], self.prompt_manager, self.singing_manager)
         self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
 
     async def extract_topics_for_pipeline(
@@ -275,6 +265,27 @@ class LuoTianyiAgent:
                 history=history,
                 current_dialogue=current_dialogue,
                 related_memories=related_memories or [],
+                commit=True,
+            )
+        finally:
+            db.close()
+
+    async def update_user_profile_for_topic_pipeline(
+        self,
+        user_id: str,
+        current_dialogue: str,
+    ) -> str:
+        """供 TopicReplier 调用：基于单个话题对话更新用户画像。"""
+        db = self._runtime_hub.open_sql_session()
+        redis_client = self._runtime_hub.redis_client
+        try:
+            history = await self.conversation_manager.get_context(db, redis_client, user_id)
+            return await self.memory_manager.update_user_profile_by_topic(
+                db=db,
+                redis=redis_client,
+                user_id=user_id,
+                history=history,
+                current_dialogue=current_dialogue,
                 commit=True,
             )
         finally:

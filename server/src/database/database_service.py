@@ -107,6 +107,13 @@ def prefill_buffer(db: Session, redis: MemoryStorage, user_id: str, types: List[
             redis.setex(nickname_key, 3600, nickname)  # 1小时过期
             logger.info(f"Prefilled nickname for user {user_id} in Redis.")
 
+        # 3.1 加载用户画像描述
+        if "all" in types or "description" in types:
+            description = user.description or ""
+            description_key = f"user_description:{user_id}"
+            redis.setex(description_key, 3600, description)  # 1小时过期
+            logger.info(f"Prefilled description for user {user_id} in Redis.")
+
         # 4. 加载最近的记忆更新命令
         if "all" in types or "recent_memory_update" in types:
             recent_update = (
@@ -358,6 +365,31 @@ def update_user_nickname(db: Session, redis: MemoryStorage, user_id: str, new_ni
         db.rollback()
 
 
+def update_user_description(db: Session, redis: MemoryStorage, user_id: str, new_description: str, commit: bool = True) -> None:
+    """
+    更新用户画像描述，同时在 Redis 中相应更新。
+    """
+    try:
+        def _write() -> bool:
+            user = db.query(User).filter(User.uuid == user_id).first()
+            if not user:
+                return False
+
+            user.description = new_description
+            if commit:
+                db.commit()
+            return True
+
+        updated = run_sql_write(_write)
+
+        if updated:
+            redis_key = f"user_description:{user_id}"
+            redis.setex(redis_key, 3600, new_description)
+    except Exception as e:
+        logger.error(f"update_user_description error: {e}")
+        db.rollback()
+
+
 def preserve_knowledge_buffers(db: Session, redis: MemoryStorage, user_id: str, knowledge_uuids: List[str], commit: bool = True):
     """
     在数据库中删除知识缓存记录，只保留给定uuid的知识缓存。同时在 Redis 中相应更新。
@@ -565,6 +597,22 @@ def get_user_nickname(db: Session, redis: MemoryStorage, user_id: str) -> Option
         nickname = redis.get(redis_key)
         if nickname:
             return nickname
+    return None
+
+
+def get_user_description(db: Session, redis: MemoryStorage, user_id: str) -> Optional[str]:
+    """
+    获取用户画像描述。
+    """
+    redis_key = f"user_description:{user_id}"
+    description = redis.get(redis_key)
+    if description is not None:
+        return description
+
+    if prefill_buffer(db, redis, user_id, types=["description"]):
+        description = redis.get(redis_key)
+        if description is not None:
+            return description
     return None
 
 def get_recent_memory_update_from_buffer(db:Session, redis: MemoryStorage, user_id: str) -> List[MemoryUpdateCommand]:

@@ -52,7 +52,20 @@
             "prompt_name": "topic_extraction_prompt"
         }
     },
-    "main_chat_v2": {
+    "main_chat": {
+        "llm_module": {
+            "llm": {
+                "api_type": "openai",
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "enable_thinking": false
+            },
+            "prompt_name": "topic_reply_prompt"
+        },
+        "static_variables_file": "res/agent/persona/luotianyi_persona.json"
+    },
+    "user_profile": {
         "llm_module": {
             "llm": {
                 "api_type": "openai",
@@ -60,24 +73,8 @@
                 "api_key": "$QWEN_API_KEY",
                 "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
             },
-            "prompt_name": "topic_reply_prompt"
-        },
-        "static_variables_file": "res/agent/persona/luotianyi_persona.json"
-    },
-    "main_chat": {
-        "llm_module": {
-            "llm": {
-                "api_type": "openai",
-                "model": "deepseek-chat",
-                "api_key": "$DEEPSEEK_API_KEY",
-                "base_url": "https://api.deepseek.com/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
-            },
-            "prompt_name": "daily_chat_prompt"
-        },
-        "static_variables_file": "res/agent/persona/static_variables.json"
+            "prompt_name": "user_profile_update_prompt"
+        }
     },
     "planner": {
         "llm_module": {
