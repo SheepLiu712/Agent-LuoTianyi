@@ -6,7 +6,7 @@
 
 import numpy as np
 from pathlib import Path
-from ..llm.embedding import SiliconFlowEmbeddings
+from ..utils.llm.embedding import SiliconFlowEmbeddings
 from ..utils.logger import get_logger
 import os
 
