@@ -31,7 +31,7 @@ class ConversationManager:
         self.forget_conversation_days = self.config.get("forget_conversation_days", 10)
         self.not_zip_conversation_count = self.config.get("not_zip_conversation_count", 20)
         # Old config for compatibility
-        self.recent_limit = self.config.get("recent_history_limit", 100)
+        self.recent_limit = self.config.get("recent_history_limit", 50)
 
     async def add_conversation(self, db: Session, redis: Redis, user_id: str, 
                              source: ConversationSource, content: str, type: ContextType = ContextType.TEXT, data: Any = None) -> str:

@@ -1,11 +1,5 @@
 from dataclasses import dataclass
-from typing import Callable
 from typing import TYPE_CHECKING
-
-import redis
-from sqlalchemy.orm import Session
-
-from ..database import VectorStore
 
 if TYPE_CHECKING:
     from ..agent.luotianyi_agent import LuoTianyiAgent
@@ -27,14 +21,5 @@ class ServiceHub:
     gcsm: "GlobalChatStreamManager"
     global_speaking_worker: "GlobalSpeakingWorker"
     agent: "LuoTianyiAgent"
-    redis_client: redis.Redis
-    vector_store: VectorStore
-    sql_session_factory: Callable[[], Session]
-    song_session_factory: Callable[[], Session]
 
-    def open_sql_session(self) -> Session:
-        return self.sql_session_factory()
-
-    def open_song_session(self) -> Session:
-        return self.song_session_factory()
     

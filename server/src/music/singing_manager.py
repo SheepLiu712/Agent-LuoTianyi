@@ -7,7 +7,8 @@ import base64
 import traceback
 from ..types.music_type import SongSegment, SongMetadata, OneLyricLine
 from ..types.tool_type import  MyTool, ToolFunction, ToolOneParameter
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
+import random
 
 
 class SingingManager:
@@ -31,14 +32,14 @@ class SingingManager:
             song_dir = music_lib / song
             if not song_dir.is_dir():  # 安全名字即歌夹名称
                 continue
-            # 一首歌的文件包括：歌词文件 .lrc，音频文件 .mp3 或 .wav 以及配置文件 .json
+            # 一首歌的文件包括：歌词文件 .lrc，音频文件 .mp3 以及配置文件 .json
             lyrics_file = song_dir / f"{song}.lrc"
-            audio_file_wav = song_dir / f"{song}.mp3"
+            audio_file_mp3 = song_dir / f"{song}.mp3"
             config_file = song_dir / f"{song}.json"
             if not lyrics_file.exists():
                 self.logger.warning(f"Lyrics file missing for song {song}")
                 continue
-            if not audio_file_wav.exists():
+            if not audio_file_mp3.exists():
                 self.logger.warning(f"Audio file missing for song {song}")
                 continue
             if not config_file.exists():
@@ -66,7 +67,7 @@ class SingingManager:
                 song_metadata = SongMetadata(
                     title=title,
                     description=description,
-                    song_path=str(audio_file_wav),
+                    song_path=str(audio_file_mp3),
                     lrc_path=str(lyrics_file),
                     lrc_offset=lrc_offset,
                     segments=segment_objs,
@@ -84,6 +85,26 @@ class SingingManager:
             return None
         return self.all_songs.get(song_name, None)
 
+    def pick_segment_for_song(self, song_name: str) -> Optional[str]:
+        """为指定歌曲随机选择一个可唱唱段描述。"""
+        segments = self.can_i_sing_song(song_name)
+        if not segments:
+            return None
+        return random.choice(segments)
+
+    def pick_random_song_and_segment(self) -> Optional[Tuple[str, str]]:
+        """从可唱曲库中随机选择一首歌及其可唱唱段。"""
+        if not self.all_songs:
+            return None
+
+        song_names = list(self.all_songs.keys())
+        random.shuffle(song_names)
+        for song_name in song_names:
+            segment = self.pick_segment_for_song(song_name)
+            if segment:
+                return song_name, segment
+        return None
+
     def can_i_sing_song(self, song_name: str) -> List[str]:
         """
         检查是否可以演唱指定歌曲，如果可以，返回能够唱的唱段列表，否则返回空列表
@@ -99,7 +120,6 @@ class SingingManager:
     def get_songs_can_sing(self, max_song_num: int = 5) -> Dict[str, Any]:
         song_and_desc = {}
         # shuffle and get max_song_num songs
-        import random
         selected_songs = random.sample(list(self.all_songs.items()), min(max_song_num, len(self.all_songs)))
         for song_name, metadata in selected_songs:
             song_and_desc[song_name] = metadata.description

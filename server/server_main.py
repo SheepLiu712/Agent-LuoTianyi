@@ -57,10 +57,15 @@ async def startup_event(app: FastAPI):
     tts_config = config.get("tts", {})
     tts_module: TTSModule = init_tts_module(tts_config)
 
-    # 初始化Agent
-    init_luotianyi_agent(config, tts_module)
-
-    # 初始化 WebSocket 依赖容器（长生命周期对象）
+    # 初始化Agent（内部同时初始化仅供Agent使用的运行时依赖）
+    init_luotianyi_agent(
+        config,
+        tts_module,
+        redis_client=database.get_redis_buffer(),
+        vector_store=database.get_vector_store(),
+        sql_session_factory=get_sql_session,
+        song_session_factory=get_song_session,
+    )
 
     global service_hub
     service_hub = ServiceHub(
@@ -68,15 +73,10 @@ async def startup_event(app: FastAPI):
         gcsm=get_GCSM(),
         global_speaking_worker=get_global_speaking_worker(),
         agent=get_luotianyi_agent(),
-        redis_client=database.get_redis_buffer(),
-        vector_store=database.get_vector_store(),
-        sql_session_factory=get_sql_session,
-        song_session_factory=get_song_session,
     )
 
     # 启动聊天流过期清理后台任务
-    cleanup_expiration_seconds = config.get("websocket", {}).get("cleanup_expiration_seconds", 360)
-    service_hub.gcsm.start_cleanup_task(expiration_seconds=cleanup_expiration_seconds)
+    service_hub.gcsm.start_cleanup_task(expiration_seconds=360)
     service_hub.global_speaking_worker.start_if_needed()
 
     # 账号系统初始化

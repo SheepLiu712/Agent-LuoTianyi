@@ -4,7 +4,8 @@
 实现洛天依角色扮演对话Agent的核心逻辑
 """
 
-from typing import AsyncGenerator, List, Dict, Any, Optional
+from typing import AsyncGenerator, List, Dict, Any, Optional, Callable, Tuple
+from dataclasses import dataclass
 from abc import ABC, abstractmethod
 import time
 from sqlalchemy.orm import Session
@@ -18,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from ..llm.prompt_manager import PromptManager
 from .main_chat import MainChat, OneSentenceChat, SongSegmentChat
+from .main_chat_v2 import MainChatV2, TopicReplyResult
 from .planner import Planner
 from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
@@ -28,16 +30,20 @@ from ..utils.enum_type import ContextType, ConversationSource
 from ..memory.memory_manager import MemoryManager
 from ..service.types import ChatResponse
 from ..music.singing_manager import SingingManager
+from ..music.knowledge_service import get_song_introduction, get_song_lyrics
 from ..vision.vision_module import VisionModule
 from ..vision.image_process import get_image_bytes_and_base64, get_postfix, save_image
 from ..database.sql_database import get_sql_session
+from ..database.sql_database import User
 
 from ..pipeline.chat_events import ChatInputEvent, ChatInputEventType
 from ..pipeline.global_speaking_worker import SpeakingJob
+from ..database.vector_store import BaseDocument
 if TYPE_CHECKING:
     from ..service.service_hub import ServiceHub
     from ..pipeline.modules.unread_store import UnreadMessageSnapshot, UnreadMessage
     from ..pipeline.topic_planner import ExtractedTopic
+    from ..database.vector_store import VectorStore
 
 
 def get_available_expression(config_path: str = "config/live2d_interface_config.json") -> List[str]:
@@ -47,13 +53,29 @@ def get_available_expression(config_path: str = "config/live2d_interface_config.
     return list(expressions.keys())
 
 
+@dataclass
+class _AgentRuntimeHub:
+    """仅供 LuoTianyiAgent 内部使用的运行时依赖。"""
+
+    redis_client: redis.Redis
+    vector_store: VectorStore
+    sql_session_factory: Callable[[], Session]
+    song_session_factory: Callable[[], Session]
+
+    def open_sql_session(self) -> Session:
+        return self.sql_session_factory()
+
+    def open_song_session(self) -> Session:
+        return self.song_session_factory()
+
+
 class LuoTianyiAgent:
     """洛天依Agent类
 
     实现洛天依角色扮演对话Agent的核心逻辑
     """
 
-    def __init__(self, config: Dict[str, Any], tts_module: TTSModule) -> None:
+    def __init__(self, config: Dict[str, Any], tts_module: TTSModule, runtime_hub: "_AgentRuntimeHub") -> None:
         """初始化洛天依Agent
 
         Args:
@@ -61,6 +83,7 @@ class LuoTianyiAgent:
         """
         self.config = config
         self.logger = get_logger("LuoTianyiAgent")
+        self._runtime_hub = runtime_hub
         self.prompt_manager = PromptManager(self.config.get("prompt_manager", {}))  # 提示管理器
 
         # 各种模块初始化
@@ -80,6 +103,16 @@ class LuoTianyiAgent:
             available_tone=tts_module.get_available_tones(),
             available_expression=get_available_expression(),
         )
+        main_chat_v2_config = self.config.get("main_chat_v2")
+        if main_chat_v2_config is None:
+            main_chat_v2_config = {
+                **self.config.get("main_chat", {}),
+                "llm_module": {
+                    **self.config.get("main_chat", {}).get("llm_module", {}),
+                    "prompt_name": "topic_reply_prompt",
+                },
+            }
+        self.main_chat_v2 = MainChatV2(main_chat_v2_config, self.prompt_manager)
         self.topic_extractor = TopicExtractor(
             self.config.get("topic_extractor", {}),
             self.prompt_manager,
@@ -98,11 +131,11 @@ class LuoTianyiAgent:
         if unread_snapshot is None or not unread_snapshot.messages:
             return [], []
 
-        db = service_hub.open_sql_session()
+        db = self._runtime_hub.open_sql_session()
         try:
             conversation_history = await self.conversation_manager.get_context(
                 db=db,
-                redis=service_hub.redis_client,
+                redis=self._runtime_hub.redis_client,
                 user_id=user_id,
             )
         except Exception as e:
@@ -128,6 +161,152 @@ class LuoTianyiAgent:
             图片描述文本
         """
         return await self.vision_module.describe_image(image_base64)
+
+    async def search_memories_for_topic(
+        self,
+        user_id: str,
+        queries: List[str],
+        similarity_threshold: float = 0.8,
+        k: int = 3,
+    ) -> List[str]:
+        """供 TopicReplier 调用的记忆检索接口。"""
+        vector_store = self._runtime_hub.vector_store
+        if vector_store is None or not queries:
+            return []
+
+        async def _search_one(query: str) -> List[str]:
+            q = (query or "").strip()
+            if not q:
+                return []
+
+            results = await vector_store.search(user_id, q, k=max(1, k))
+            texts: List[str] = []
+            for doc, score in results:
+                if score < similarity_threshold:
+                    continue
+                content = self._format_memory_hit(doc)
+                if content:
+                    texts.append(content)
+            return texts
+
+        batches = await asyncio.gather(*[_search_one(q) for q in queries], return_exceptions=True)
+        dedup: List[str] = []
+        seen = set()
+        for item in batches:
+            if isinstance(item, Exception):
+                self.logger.warning(f"Topic memory search failed: {item}")
+                continue
+            for text in item:
+                if text not in seen:
+                    seen.add(text)
+                    dedup.append(text)
+        return dedup
+
+    async def search_song_facts_for_topic(self, constraints: List[str]) -> List[str]:
+        """供 TopicReplier 调用的歌曲事实检索接口。"""
+        if not constraints:
+            return []
+
+        db = self._runtime_hub.open_song_session()
+        try:
+            dedup: List[str] = []
+            seen = set()
+            for raw in constraints:
+                song_name = self._extract_song_name(raw)
+                if not song_name:
+                    continue
+                intro = await asyncio.to_thread(get_song_introduction, db, song_name)
+                lyrics = await asyncio.to_thread(get_song_lyrics, db, song_name)
+                if intro:
+                    text = f"《{song_name}》的介绍:\n{intro}"
+                    if text not in seen:
+                        seen.add(text)
+                        dedup.append(text)
+                if lyrics:
+                    text = f"《{song_name}》的歌词:\n{lyrics}"
+                    if text not in seen:
+                        seen.add(text)
+                        dedup.append(text)
+            return dedup
+        finally:
+            db.close()
+
+    async def generate_topic_reply_for_pipeline(
+        self,
+        user_id: str,
+        topic_content: str,
+        memory_hits: Optional[List[str]] = None,
+        fact_hits: Optional[List[str]] = None,
+        sing_song: Optional[str] = None,
+    ) -> List[TopicReplyResult]:
+        """供 TopicReplier 调用：按话题生成分段回复。"""
+        db = self._runtime_hub.open_sql_session()
+        redis_client = self._runtime_hub.redis_client
+        try:
+            conversation_history = await self.conversation_manager.get_context(db, redis_client, user_id)
+            user = db.query(User).filter(User.uuid == user_id).first()
+            user_nickname = user.nickname if user and user.nickname else "你"
+            user_description = user.description if user and user.description else ""
+        finally:
+            db.close()
+
+        return await self.main_chat_v2.generate_response(
+            reply_topic=topic_content,
+            user_nickname=user_nickname,
+            user_description=user_description,
+            conversation_history=conversation_history,
+            fact_hits=fact_hits or [],
+            memory_hits=memory_hits or [],
+            sing_song=sing_song,
+        )
+
+    def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
+        """供 TopicReplier 调用的唱歌计划接口。返回 song|segment。"""
+        if not sing_attempts:
+            return None, None
+
+        for attempt in sing_attempts:
+            candidate = (attempt or "").strip()
+            if not candidate:
+                continue
+            if candidate == "random_song":
+                pair = self.singing_manager.pick_random_song_and_segment()
+                return pair if pair else (None, None)
+
+            song_name = self._extract_song_name(candidate)
+            if not song_name:
+                continue
+
+            segment = self.singing_manager.pick_segment_for_song(song_name)
+            if segment:
+                return song_name, segment
+
+        return None, None
+
+    def _extract_song_name(self, text: str) -> str:
+        content = (text or "").strip()
+        if not content:
+            return ""
+
+        m = re.search(r"《([^》]+)》", content)
+        if m:
+            return m.group(1).strip()
+
+        if "是一首歌" in content:
+            return content.split("是一首歌", 1)[0].strip().strip("《》")
+
+        return content.strip("\"'“”‘’《》")
+
+    def _format_memory_hit(self, doc: BaseDocument) -> str:
+        timestamp = ""
+        if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
+            timestamp = str(doc.metadata.get("timestamp") or "").strip()
+        content = doc.get_content().strip() if hasattr(doc, "get_content") else ""
+        if not content:
+            return ""
+        if timestamp:
+            return f"在{timestamp}, {content}"
+        return content
     
     async def add_conversation(self, service_hub: "ServiceHub", user_uuid: Optional[str], event: ChatInputEvent):
         """将事件转换为对话记录，并添加到数据库中
@@ -160,8 +339,8 @@ class LuoTianyiAgent:
                 }
 
         await self.conversation_manager.add_conversation(
-            db=service_hub.open_sql_session(), 
-            redis=service_hub.redis_client, 
+            db=self._runtime_hub.open_sql_session(), 
+            redis=self._runtime_hub.redis_client, 
             user_id=user_uuid,
             source=ConversationSource.USER,
             content=content,
@@ -548,7 +727,14 @@ class LuoTianyiAgent:
 agent = None
 
 
-def init_luotianyi_agent(config: Dict[str, Any], tts_module: TTSModule):
+def init_luotianyi_agent(
+    config: Dict[str, Any],
+    tts_module: TTSModule,
+    redis_client: redis.Redis,
+    vector_store: Any,
+    sql_session_factory: Callable[[], Session],
+    song_session_factory: Callable[[], Session],
+):
     """初始化洛天依Agent实例
 
     Args:
@@ -557,7 +743,13 @@ def init_luotianyi_agent(config: Dict[str, Any], tts_module: TTSModule):
         LuoTianyiAgent实例
     """
     global agent
-    agent = LuoTianyiAgent(config, tts_module)
+    runtime_hub = _AgentRuntimeHub(
+        redis_client=redis_client,
+        vector_store=vector_store,
+        sql_session_factory=sql_session_factory,
+        song_session_factory=song_session_factory,
+    )
+    agent = LuoTianyiAgent(config, tts_module, runtime_hub)
 
 
 def get_luotianyi_agent() -> LuoTianyiAgent:

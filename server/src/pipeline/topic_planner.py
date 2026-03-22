@@ -183,7 +183,7 @@ class TopicPlanner:
 
         topic = ExtractedTopic(
             topic_id=str(uuid4()),
-            source_message_ids=[m.message_id for m in messages if m.message_id],
+            source_messages=messages,
             topic_content="\n".join(m.content for m in messages if m.content),
             memory_attempts=[],
             fact_constraints=[],
@@ -197,4 +197,5 @@ class TopicPlanner:
             self.logger.debug(f"No topic_consumer set, skip {len(topics)} extracted topics")
             return
 
-        await self.topic_consumer(topics)
+        for topic in topics:
+            await self.topic_consumer(topic)
