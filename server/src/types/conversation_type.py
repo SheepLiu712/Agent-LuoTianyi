@@ -29,6 +29,14 @@ def timestamp_to_elapsed_time(timestamp: str) -> str:
             return past_time.strftime("%Y-%m-%d")
     except:
         return timestamp
+    
+def timestamp_to_date(timestamp: str) -> str:
+    try:
+        time_format = "%Y-%m-%d %H:%M:%S"
+        past_time = datetime.strptime(timestamp, time_format)
+        return past_time.strftime("%Y-%m-%d")
+    except:
+        return timestamp
 
 @dataclass
 class ConversationItem:

@@ -72,6 +72,7 @@ async def startup_event(app: FastAPI):
 
     # 启动聊天流过期清理后台任务
     service_hub.gcsm.start_cleanup_task(expiration_seconds=360)
+    service_hub.global_speaking_worker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
     service_hub.global_speaking_worker.start_if_needed()
 
     # 账号系统初始化

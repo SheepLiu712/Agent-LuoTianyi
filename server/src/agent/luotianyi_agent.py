@@ -219,32 +219,11 @@ class LuoTianyiAgent:
         finally:
             db.close()
 
-    async def update_user_profile_for_topic_pipeline(
-        self,
-        user_id: str,
-        current_dialogue: str,
-    ) -> str:
-        """供 TopicReplier 调用：基于单个话题对话更新用户画像。"""
-        db = self._runtime_hub.open_sql_session()
-        redis_client = self._runtime_hub.redis_client
-        try:
-            history = await self.conversation_manager.get_context(db, redis_client, user_id)
-            return await self.memory_manager.update_user_profile_by_topic(
-                db=db,
-                redis=redis_client,
-                user_id=user_id,
-                history=history,
-                current_dialogue=current_dialogue,
-                commit=True,
-            )
-        finally:
-            db.close()
-
     async def persist_topic_replies_for_pipeline(
         self,
         user_id: str,
         reply_items: List[OneResponseLine],
-    ) -> None:
+    ) -> List[str]:
         """将 topic 回复落库，并触发上下文压缩检查。"""
         if not user_id:
             return
@@ -272,7 +251,7 @@ class LuoTianyiAgent:
                 if not song_name:
                     continue
                 lyrics = item.lyrics
-                content = f"（唱了{song_name}）{lyrics}"
+                content = f"（唱了《{song_name}》）{lyrics}"
                 conversation_items.append(
                     ConversationItem(
                         uuid="",
@@ -285,12 +264,12 @@ class LuoTianyiAgent:
                 )
 
         if not conversation_items:
-            return
+            return []
 
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
         try:
-            await self.conversation_manager.add_conversation_list_to_db(
+            uuid_list = await self.conversation_manager.add_conversation_list_to_db(
                 db=db,
                 redis=redis_client,
                 user_id=user_id,
@@ -299,6 +278,7 @@ class LuoTianyiAgent:
             )
         finally:
             db.close()
+        return uuid_list
 
     async def update_profile_context_for_pipeline(self, user_id: str) -> None:
         """供 TopicReplier 调用：触发用户画像的上下文更新检查。"""
@@ -310,7 +290,8 @@ class LuoTianyiAgent:
         
         # 需要进行更新，包括两部分，①更新用户画像，②更新上下文摘要
         try:
-            context: Dict[str, Any] = await self.conversation_manager.get_context(db, self._runtime_hub.redis_client, user_id, type="json")
+            context: Dict[str, Any] = await self.conversation_manager.get_context(db, self._runtime_hub.redis_client, user_id, ret_type="json", ts_type="date")
+            print(context)
             update_context_task = asyncio.create_task(self.conversation_manager._update_context(db, self._runtime_hub.redis_client, user_id, context, commit=True))
             update_profile_task = asyncio.create_task(self.memory_manager.update_user_profile_by_context(db, self._runtime_hub.redis_client, user_id, context))
             await asyncio.gather(update_context_task, update_profile_task)
@@ -325,6 +306,7 @@ class LuoTianyiAgent:
         if not sing_attempts:
             return None, None
 
+        song_name = None
         for attempt in sing_attempts:
             candidate = (attempt or "").strip()
             if not candidate:
@@ -341,7 +323,14 @@ class LuoTianyiAgent:
             if segment:
                 return song_name, segment
 
-        return None, None
+        return song_name, None # 如果有明确歌名但无法满足唱歌需求，返回歌名和None表示用户想听这首歌但还不会唱
+    
+    def sing(self, song_name: str, segment: str) -> Optional[str]:
+        """调用唱歌管理器生成歌曲片段的音频，并返回音频的Base64字符串"""
+        if not song_name or not segment:
+            return None
+        _, audio_bytes = self.singing_manager.get_song_segment(song_name, segment)
+        return audio_bytes
 
     def _extract_song_name(self, text: str) -> str:
         content = (text or "").strip()

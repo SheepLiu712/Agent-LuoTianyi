@@ -8,6 +8,26 @@ if TYPE_CHECKING:
     from ...interface.service_hub import ServiceHub
 
 logger = get_logger("Ingress")
+
+
+def _ensure_data_uri_header(image_base64: str, postfix: str) -> str:
+    if not image_base64:
+        return image_base64
+    if image_base64.startswith("data:image/"):
+        return image_base64
+
+    postfix_to_mime = {
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "webp": "image/webp",
+        "gif": "image/gif",
+        "bmp": "image/bmp",
+    }
+    mime = postfix_to_mime.get((postfix or "").lower(), "image/jpeg")
+    return f"data:{mime};base64,{image_base64}"
+
+
 async def ingress_message(service_hub: "ServiceHub", user_id: str, message: "ChatInputEvent"):
     '''
     原地对message进行转换，添加必要的字段。
@@ -46,7 +66,8 @@ async def _process_image_message(service_hub: "ServiceHub", user_id: str, messag
     image_server_path = save_image(user_id, image_bytes, postfix)
 
     # 2. 将图片通过vlm模块转换为描述文本，并添加到对话中
-    image_description = await service_hub.agent.vision_module.describe_image(image_base64)
+    image_with_header = _ensure_data_uri_header(image_base64, postfix)
+    image_description = await service_hub.agent.vision_module.describe_image(image_with_header)
     image_description = f"[一张图片]:{image_description}"
     message.text = image_description  # 将描述文本放入message.text，供后续处理使用
     payload["image_server_path"] = image_server_path

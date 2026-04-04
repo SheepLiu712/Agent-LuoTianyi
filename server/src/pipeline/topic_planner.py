@@ -53,7 +53,7 @@ class TopicPlanner:
 
         unread_msg = UnreadStore.trans_ChatInputEvent_to_UnreadMessage(message)
         await self.unread_store.append(unread_msg)
-        await self.listen_timer.set_deadline(timeout=1.0)  # 新消息来了，取消之前的等待超时
+        await self.listen_timer.set_deadline(timeout=0.5)  # 新消息来了，取消之前的等待超时
         self._wake_event.set()
     
     def start_processing(self):
@@ -131,7 +131,7 @@ class TopicPlanner:
 
         if has_new_message:
             self._wake_event.set()
-            await self.listen_timer.set_deadline(timeout=1.0)  # 已经有新消息了，不需要等待补全，直接进入下一轮提取
+            await self.listen_timer.set_deadline(timeout=0.5)  # 已经有新消息了，不需要等待补全，直接进入下一轮提取
         else:
             if remaining_unread:
                 await self.listen_timer.set_deadline()  # 没有新消息，但还有剩余未读，继续等待补全
@@ -145,7 +145,7 @@ class TopicPlanner:
         
         # 启发式：如果全都是图片信息，认为用户会补一句话，即所有消息都是不完整话题消息
         for msg in unread_snapshot.messages:
-            if msg.message_type != "image":
+            if msg.message_type != "image" or force_complete:
                 break
         else:
             return [], unread_snapshot.messages

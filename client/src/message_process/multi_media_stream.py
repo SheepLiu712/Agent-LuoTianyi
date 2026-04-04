@@ -151,7 +151,7 @@ class MultiMediaStream:
                 fps=60,
             )
 
-        if amps and self._mouth_queue:
+        if amps is not None and self._mouth_queue is not None:
             self._mouth_queue.put(amps)
 
         self.audio_queue_in.put({"cmd": "append", "data": audio_data})

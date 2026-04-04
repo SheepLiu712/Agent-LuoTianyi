@@ -14,7 +14,7 @@ from ..utils.enum_type import ContextType, ConversationSource
 from ..types import ConversationItem
 from ..database import database_service
 from ..database.sql_database import get_sql_session
-from ..types.conversation_type import timestamp_to_elapsed_time
+from ..types.conversation_type import timestamp_to_elapsed_time, timestamp_to_date
 
 class ConversationManager:
     """
@@ -120,7 +120,7 @@ class ConversationManager:
             database_service.get_history_from_db, db, user_id, start, end
         )
     
-    async def get_context(self, db: Session, redis: Redis, user_id: str, type: str = "str") -> str | Dict[str, Any]:
+    async def get_context(self, db: Session, redis: Redis, user_id: str, ret_type: str = "str", ts_type: str = "elapsed") -> str | Dict[str, Any]:
         """
         获取上下文用于LLM提示词
         """
@@ -139,55 +139,29 @@ class ConversationManager:
             conv_list = []
             for c in conversations:
                 ts = c.get("timestamp", "")
-                ts = timestamp_to_elapsed_time(ts)
+                if ts_type == "elapsed":
+                    ts = timestamp_to_elapsed_time(ts)
+                else:
+                    ts = timestamp_to_date(ts)
                 src = c.get("source", "")
                 cnt = c.get("content", "")
                 conv_list.append(f"[{ts}]{src}: {cnt}")
 
-            if type == "str":
+            if ret_type == "str":
                 return "更早对话总结：" + summary + \
                     "\n 最近对话：\n" + "\n".join(conv_list)
             else:
                 return {
                     "summary": summary,
-                    "recent_conversations": conv_list
+                    "recent_conversation": conv_list
                 }
         except Exception as e:
             self.logger.error(f"Error in get_context: {e}")
             return ""
         
-    async def get_in_context_conversations(self, db: Session, redis: Redis, user_id: str) -> List[ConversationItem]:
-        """
-        获取用于上下文的对话列表，包含未压缩的最近对话和摘要中的对话
-        """
-        try:
-            context_data = await asyncio.to_thread(
-                database_service.get_context_from_buffer, db, redis, user_id
-            )
-            
-            if not context_data:
-                return []
-                
-            conversations = context_data.get("conversations", [])
-            conv_items = []
-            for c in conversations:
-                item = ConversationItem(
-                    timestamp=c.get("timestamp", ""),
-                    source=c.get("source", ""),
-                    type=c.get("type", ""),
-                    content=c.get("content", ""),
-                    data=c.get("data", None),
-                    uuid=c.get("uuid", "")
-                )
-                conv_items.append(item)
-            return conv_items
-        except Exception as e:
-            self.logger.error(f"Error in get_in_context_conversations: {e}")
-            return []
-        
 
 
-    async def _update_context(self, db: Session, redis: Redis, user_id: str, commit: bool = True, context_data: Optional[Dict[str, Any]] = None):
+    async def _update_context(self, db: Session, redis: Redis, user_id: str, context_data: Optional[Dict[str, Any]] = None, commit: bool = True):
         """
         后台任务：更新上下文摘要
         """
@@ -199,7 +173,6 @@ class ConversationManager:
                 context_data = await asyncio.to_thread(
                     database_service.get_context_from_buffer, db, redis, user_id
                 )
-                context_data["recent_conversation"] = context_data.get("conversations", [])[-self.not_zip_conversation_count:]
                 conversations = context_data.get("conversations", [])
             
                 context_data["recent_conversation"]= [f"[{c['timestamp']}]{c['source']}: {c['content']}" for c in conversations]
@@ -208,14 +181,15 @@ class ConversationManager:
             if not context_data:
                 return
 
-            current_summary:str = context_data.get("summary", "")
-            recent_conversation: List[str] = context_data.get("recent_conversation", "")
+            current_summary:str = context_data["summary"]
+            recent_conversation: List[str] = context_data["recent_conversation"]
             recent_conversation_str = "\n".join(recent_conversation)
             
             
             # 2. 调用 LLM 生成新摘要
             new_summary = await self.llm.generate_response(
                 forget_conversation_days=self.forget_conversation_days,
+                current_date = datetime.now().strftime("%Y-%m-%d"),
                 current_summary=current_summary,
                 recent_conversation=recent_conversation_str
                 )

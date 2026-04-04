@@ -77,14 +77,21 @@ class TopicReplier:
             fact_hits=fact_hits,
             sing_plan=sing_plan,
         )
-
         for item in reply_items:
-            await self._submit_speaking_job(self.send_reply_callback, item)
+            if isinstance(item, SongSegmentChat):
+                lyrics = self.service_hub.agent.singing_manager.get_segment_lyrics(item.song, item.segment)
+                item.lyrics = lyrics
 
-        await self.service_hub.agent.persist_topic_replies_for_pipeline(
+        uuid_list = await self.service_hub.agent.persist_topic_replies_for_pipeline(
             user_id=self.user_id,
             reply_items=reply_items,
         )
+
+        for item, uuid in zip(reply_items, uuid_list or []):
+            item.uuid = uuid # 给每个回复项分配一个UUID，供前端关联文本和TTS音频使用
+            await self._submit_speaking_job(self.send_reply_callback, item)
+
+        
 
         memory_write_task = asyncio.create_task(self._schedule_memory_write(topic, reply_items, memory_hits))
         huge_update_task = asyncio.create_task(self._schedule_profile_context_update()) # 我们考虑，当上下文需要压缩时，进行一次用户画像的更新。
@@ -101,10 +108,6 @@ class TopicReplier:
             self.logger.warning(f"Unsupported topic reply type: {item.type}")
             return
 
-        # 把唱歌计划的歌词补全推后到此时
-        if isinstance(item, SongSegmentChat):
-            lyrics = self.service_hub.agent.singing_manager.get_segment_lyrics(item.song, item.segment)
-            item.lyrics = lyrics
         
         await self.service_hub.global_speaking_worker.enqueue(
             SpeakingJob(send_reply_callback=send_reply_callback, job_content=item)

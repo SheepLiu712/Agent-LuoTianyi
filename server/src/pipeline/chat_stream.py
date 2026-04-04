@@ -54,7 +54,7 @@ class ChatStream:
     async def feed_event(self, event: ChatInputEvent):
         """接收 service 层转换后的聊天事件。"""
         if self._is_user_message_event(event):
-            await ingress_message(self.service_hub, self.user_name, event) # 预处理
+            await ingress_message(self.service_hub, self.user_uuid, event) # 预处理
             await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event) # 入库
         await self.topic_planner.feed_unread_message(event)
 

@@ -15,7 +15,7 @@ from abc import ABC, abstractmethod
 @dataclasses.dataclass
 class OneResponseLine(ABC):
     type: ContextType  # 'say' 或 'sing'
-
+    uuid: str = ""  # 可选的唯一标识符，供前端关联 TTS 音频和文本使用
     @abstractmethod
     def get_content(self) -> str:
         raise NotImplementedError("Subclasses of OneResponseLine must implement get_content()")
@@ -27,9 +27,10 @@ class SongSegmentChat(OneResponseLine):
     lyrics: str = ""
     song: str = ""
     segment: str = ""
+    uuid: str = ""
 
     def get_content(self) -> str:
-        return f"唱了{self.song}"
+        return f"唱了《{self.song}》"
 
 
 @dataclasses.dataclass
@@ -39,6 +40,7 @@ class OneSentenceChat(OneResponseLine):
     expression: str = ""
     tone: str = ""
     content: str = ""
+    uuid: str = ""
 
     def get_content(self) -> str:
         return self.content
@@ -68,7 +70,7 @@ class MainChat:
     ) -> List[OneResponseLine]:
         """根据 topic_reply_prompt 生成自然语言回复。"""
         user_persona = self._build_user_persona(user_nickname, user_description)
-        sing_requirement = self._build_sing_requirement(sing_plan[0] if sing_plan else None)
+        sing_requirement = self._build_sing_requirement(sing_plan)
         extra_knowledge = self._build_extra_knowledge(fact_hits or [], memory_hits or [])
 
         response = await self._call_llm(
@@ -202,7 +204,12 @@ class MainChat:
         #     return f"昵称：{nickname}。描述：{description}"
         # return f"昵称：{nickname}。"
 
-    def _build_sing_requirement(self, sing_song: Optional[str]) -> str:
+    def _build_sing_requirement(self, sing_plan: Optional[Tuple[str, str]]) -> str:
+        if not sing_plan or not sing_plan[0]:
+            return "在回复中你不需要为用户唱歌"
+        if sing_plan[0] is not None and sing_plan[1] is None:
+            return f"用户想要听《{sing_plan[0]}》，但是你还不会唱。"
+        sing_song = sing_plan[0]
         normalized_song = self._normalize_sing_song(sing_song)
         if normalized_song:
             return f"你要为用户唱一段《{normalized_song}》"
