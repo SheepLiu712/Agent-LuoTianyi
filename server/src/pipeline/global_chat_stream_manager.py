@@ -34,15 +34,13 @@ class GlobalChatStreamManager:
 
         if user_uuid not in self.user_streams:
             chat_stream = ChatStream(ws_connection)
-            if service_hub is not None:
-                chat_stream.set_service_hub(service_hub)
+            chat_stream.set_service_hub(service_hub)
             chat_stream.start_if_needed()
             self.user_streams[user_uuid] = chat_stream
             return chat_stream
 
         chat_stream = self.user_streams[user_uuid]
-        if service_hub is not None:
-            chat_stream.set_service_hub(service_hub)
+        chat_stream.set_service_hub(service_hub)
         chat_stream.reconnect(ws_connection)
         return chat_stream
 

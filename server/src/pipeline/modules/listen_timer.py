@@ -8,9 +8,13 @@ class ListenTimer:
         self.listening_deadline: Optional[float] = None
         self._timer_lock = asyncio.Lock()
 
-    async def set_deadline(self):
+    async def set_deadline(self, timeout: Optional[float] = None):
         async with self._timer_lock:
-            self.listening_deadline = time.monotonic() + self.listening_timeout_seconds
+            if timeout is not None:
+                this_time_timeout = timeout
+            else:
+                this_time_timeout = self.listening_timeout_seconds
+            self.listening_deadline = time.monotonic() + this_time_timeout
 
     async def remove_deadline(self):
         async with self._timer_lock:

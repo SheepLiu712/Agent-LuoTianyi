@@ -40,7 +40,7 @@ class TopicExtractor:
 
         message_lines = []
         for idx, msg in enumerate(unread_snapshot.messages):
-            message_lines.append(f"{idx}: {msg.content}")
+            message_lines.append(f"{[idx]}: {msg.content}")
         message_content = "\n".join(message_lines)
 
         terms = []

@@ -63,33 +63,8 @@
             },
             "prompt_name": "topic_reply_prompt"
         },
-        "static_variables_file": "res/agent/persona/luotianyi_persona.json"
-    },
-    "user_profile": {
-        "llm_module": {
-            "llm": {
-                "api_type": "openai",
-                "model": "qwen3.5-plus",
-                "api_key": "$QWEN_API_KEY",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            },
-            "prompt_name": "user_profile_update_prompt"
-        }
-    },
-    "planner": {
-        "llm_module": {
-            "llm": {
-                "api_type": "openai",
-                "model": "deepseek-chat",
-                "api_key": "$DEEPSEEK_API_KEY",
-                "base_url": "https://api.deepseek.com/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
-            },
-            "prompt_name": "planner_prompt"
-        },
-        "static_variables_file": "res/agent/persona/static_variables.json"
+        "static_variables_file": "res/agent/persona/luotianyi_persona.json",
+        "llm_tone_mapping_file": "config/llm_tones_mapping.json"
     },
     "vision_module": {
         "vlm_module": {
@@ -110,8 +85,8 @@
         "max_file_lines": 1000,
         "recent_history_limit": 100,
         "context_file": "data/memory/context/context.json",
-        "raw_conversation_context_limit": 240,
-        "not_zip_conversation_count": 20,
+        "raw_conversation_context_limit": 60,
+        "not_zip_conversation_count": 30,
         "forget_conversation_days": 10,
         "llm_module": {
             "llm": {
@@ -157,22 +132,16 @@
             "retriever_type": "memory"
         },
         "user_profile": {
-            "profile_file": "data/memory/user_profile/user_profile.json",
-            "max_profile_length": 300,
-            "profile_update_freq": 50,
-            "llm_module": {
-                "llm": {
-                    "api_type": "openai",
-                    "model": "deepseek-chat",
-                    "api_key": "$DEEPSEEK_API_KEY",
-                    "base_url": "https://api.deepseek.com/v1",
-                    "temperature": 0.7,
-                    "max_tokens": 8192,
-                    "top_p": 0.9
-                },
-                "prompt_name": "user_profile_update_prompt"
-            }
-        },
+        "llm_module": {
+            "llm": {
+                "api_type": "openai",
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            },
+            "prompt_name": "user_profile_update_prompt"
+        }
+    },
         "memory_searcher": {
             "max_k_graph_entities": 3,
             "max_k_vector_entities": 5,
@@ -194,12 +163,9 @@
             "llm_module": {
                 "llm": {
                     "api_type": "openai",
-                    "model": "deepseek-chat",
-                    "api_key": "$DEEPSEEK_API_KEY",
-                    "base_url": "https://api.deepseek.com/v1",
-                    "temperature": 0.7,
-                    "max_tokens": 8192,
-                    "top_p": 0.9
+                    "model": "qwen3.5-plus",
+                    "api_key": "$QWEN_API_KEY",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
                 },
                 "prompt_name": "memory_write_prompt"
             }

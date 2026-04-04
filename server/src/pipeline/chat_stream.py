@@ -28,12 +28,19 @@ class ChatStream:
         self.service_hub: ServiceHub | None = None
         self.connection_lost_time = None
         self.topic_planner = TopicPlanner(username=self.user_name, user_id=self.user_uuid)
-        self.topic_replier = TopicReplier(username=self.user_name, user_id=self.user_uuid)
+        self.topic_replier = TopicReplier(username=self.user_name, user_id=self.user_uuid, send_reply_callback=self.feed_response)
         self.topic_planner.set_topic_consumer(self.topic_replier.add_topic)
+        self.response_queue: asyncio.Queue[ChatResponse] = asyncio.Queue()
+        self.response_sender_task: asyncio.Task | None = None
 
         self.state_lock = asyncio.Lock()
 
     def set_service_hub(self, service_hub: ServiceHub):
+        if service_hub is None:
+            self.logger.warning("Setting service hub to None, chat stream cannot function properly")
+            return
+        if self.service_hub is not None and self.service_hub != service_hub:
+            self.logger.warning("Service hub is already set, overwriting with new value")
         self.service_hub = service_hub
         self.topic_planner.set_service_hub(service_hub)
         self.topic_replier.set_service_hub(service_hub)
@@ -42,24 +49,61 @@ class ChatStream:
         """启动常驻消息处理协程（仅启动一次）。"""
         self.topic_planner.start_processing()
         self.topic_replier.start_processing()
+        self._start_response_sender()
 
     async def feed_event(self, event: ChatInputEvent):
         """接收 service 层转换后的聊天事件。"""
         if self._is_user_message_event(event):
-            await ingress_message(self.service_hub, self.user_name, event)
-            await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event)
+            await ingress_message(self.service_hub, self.user_name, event) # 预处理
+            await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event) # 入库
         await self.topic_planner.feed_unread_message(event)
 
-    async def send_response(self, response: ChatResponse):
+    async def feed_response(self, response: ChatResponse):
+        """接收 topic replier 生成的回复，并发送给用户。"""
+        await self.response_queue.put(response)
+
+    async def response_sender_loop(self):
+        while True:
+            response = None
+            try:
+                response = await self.response_queue.get()
+                while True:
+                    sent = await self._send_response(response)
+                    if sent:
+                        break
+                    await asyncio.sleep(1)
+            except asyncio.CancelledError:
+                self.logger.info("Response sender task cancelled")
+                break
+            except Exception as e:
+                self.logger.error(f"Error in response sender loop: {e}")
+                await asyncio.sleep(1)
+            finally:
+                if response is not None:
+                    self.response_queue.task_done()
+
+    async def _send_response(self, response: ChatResponse) -> bool:
         if self.ws_connection is None or self.ws_connection.websocket is None:
-            return
+            return False
         ws_service = self.service_hub.websocket_service if self.service_hub else None
         if ws_service is None:
             self.logger.warning("WebSocket service is not available, cannot send response")
-            return
-        event = ws_service._make_event(WSEventType.AGENT_MESSAGE, response.model_dump() if hasattr(response, "model_dump") else response.dict())
-        await self.ws_connection.websocket.send_json(event)
+            return False
+        try:
+            event = ws_service._make_event(
+                WSEventType.AGENT_MESSAGE,
+                response.model_dump() if hasattr(response, "model_dump") else response.dict(),
+            )
+            await self.ws_connection.websocket.send_json(event)
+            return True
+        except Exception as e:
+            self.logger.warning(f"Send response failed, will retry: {e}")
+            return False
 
+    def _start_response_sender(self):
+        if self.response_sender_task is None or self.response_sender_task.done():
+            self.response_sender_task = asyncio.create_task(self.response_sender_loop())
+            self.logger.info("Started response sender task")
 
     def _is_user_message_event(self, event: ChatInputEvent) -> bool:
         return event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}
@@ -91,3 +135,5 @@ class ChatStream:
             self.topic_planner.processor_task.cancel()
         if self.topic_replier.processor_task and not self.topic_replier.processor_task.done():
             self.topic_replier.processor_task.cancel()
+        if self.response_sender_task and not self.response_sender_task.done():
+            self.response_sender_task.cancel()

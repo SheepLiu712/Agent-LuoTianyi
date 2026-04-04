@@ -24,8 +24,7 @@ class UserProfileUpdater:
 
     async def update_profile(
         self,
-        history: str,
-        current_dialogue: str,
+        history: Dict[str, Any],
         current_profile: str,
     ) -> str:
         """
@@ -34,9 +33,9 @@ class UserProfileUpdater:
         - 非空字符串：新的完整用户画像描述。
         """
         try:
+            history_str = "更早对话总结" + history.get("summary", "") + "\n最近对话：\n" + "\n".join(history.get("recent_conversation", []))
             response = await self.llm.generate_response(
-                history=history or "",
-                current_dialogue=current_dialogue or "",
+                history=history_str or "无",
                 current_profile=current_profile or "",
             )
         except Exception as e:
@@ -71,6 +70,7 @@ class UserProfileUpdater:
             "保持不变",
         }
         if lowered in no_update_tokens:
+            logger.debug(f"User profile update response indicates no update needed: '{response}'")
             return ""
 
         # 去掉可能的 markdown 包装

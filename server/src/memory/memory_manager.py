@@ -103,8 +103,6 @@ class MemoryManager:
         redis: MemoryStorage,
         vector_store: VectorStore,
         user_id: str,
-        user_input: str,
-        agent_response_content: List[str],
         history: str,
         current_dialogue: str = "",
         related_memories: List[str] | None = None,
@@ -122,8 +120,6 @@ class MemoryManager:
             redis,
             vector_store,
             user_id,
-            user_input,
-            agent_response_content,
             history,
             current_dialogue=current_dialogue,
             related_memories=related_memories or [],
@@ -203,5 +199,28 @@ class MemoryManager:
             user_id,
             new_profile,
             commit,
+        )
+        return new_profile
+
+    async def update_user_profile_by_context(self, db: Session, redis: MemoryStorage, user_id: str, context: Dict[str, Any], commit: bool = True):
+        """
+        基于用户的长期上下文信息，判断并更新用户画像。
+        该方法适用于定时任务或特定触发条件下的画像更新，不依赖于单次对话内容。
+        """
+        current_profile = await asyncio.to_thread(get_user_description, db, redis, user_id) or ""
+        new_profile = await self.user_profile_updater.update_profile(
+            history=context,
+            current_profile=current_profile,
+        )
+        if not new_profile:
+            return
+        
+        await asyncio.to_thread(
+            update_user_description,
+            db,
+            redis,
+            user_id,
+            new_profile,
+            commit=commit,
         )
         return new_profile

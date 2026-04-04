@@ -2,42 +2,46 @@ from dataclasses import dataclass
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..utils.llm.llm_module import LLMModule
 from ..utils.llm.prompt_manager import PromptManager
 from ..utils.logger import get_logger
 from ..utils.enum_type import ContextType
 import dataclasses
+from abc import ABC, abstractmethod
 
 
 @dataclasses.dataclass
-class OneResponseLine:
+class OneResponseLine(ABC):
     type: ContextType  # 'say' 或 'sing'
-    parameters: Any # SongSegment 或 OneSentenceChat
+
+    @abstractmethod
     def get_content(self) -> str:
-        if self.type == ContextType.TEXT:
-            return self.parameters.content
-        else:
-            return f"唱了{self.parameters.song}的选段{self.parameters.segment}"
+        raise NotImplementedError("Subclasses of OneResponseLine must implement get_content()")
+
 
 @dataclasses.dataclass
-class SongSegmentChat:
-    song: str
-    segment: str
+class SongSegmentChat(OneResponseLine):
+    type: ContextType = ContextType.SING
     lyrics: str = ""
+    song: str = ""
+    segment: str = ""
+
+    def get_content(self) -> str:
+        return f"唱了{self.song}"
+
 
 @dataclasses.dataclass
-class OneSentenceChat:
-    expression: str
-    tone: str
-    content: str
+class OneSentenceChat(OneResponseLine):
+    type: ContextType = ContextType.TEXT
     sound_content: str = ""
+    expression: str = ""
+    tone: str = ""
+    content: str = ""
 
-@dataclass
-class TopicReplyResult:
-    reply_type: str  # "text" or "sing"
-    reply_text: str  # 当reply_type为"text"时是回复文本；为"sing"时是歌曲名
+    def get_content(self) -> str:
+        return self.content
 
 
 class MainChat:
@@ -46,9 +50,11 @@ class MainChat:
     def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager):
         self.logger = get_logger(__name__)
         self.config = config
+
         self.llm = LLMModule(config["llm_module"], prompt_manager)
         self.variables: List[str] = self.llm.prompt_template.get_variables()
         self._init_static_variables_sync()
+        self._init_llm_tone_mapping()
 
     async def generate_response(
         self,
@@ -58,11 +64,11 @@ class MainChat:
         conversation_history: str = "",
         fact_hits: Optional[List[str]] = None,
         memory_hits: Optional[List[str]] = None,
-        sing_song: Optional[str] = None,
-    ) -> List[TopicReplyResult]:
+        sing_plan: Optional[Tuple[str, str]] = None,
+    ) -> List[OneResponseLine]:
         """根据 topic_reply_prompt 生成自然语言回复。"""
         user_persona = self._build_user_persona(user_nickname, user_description)
-        sing_requirement = self._build_sing_requirement(sing_song)
+        sing_requirement = self._build_sing_requirement(sing_plan[0] if sing_plan else None)
         extra_knowledge = self._build_extra_knowledge(fact_hits or [], memory_hits or [])
 
         response = await self._call_llm(
@@ -75,7 +81,7 @@ class MainChat:
             sing_requirement=sing_requirement,
             extra_knowledge=extra_knowledge,
         )
-        return self._parse_response(response)
+        return self._parse_response(response, sing_plan)
 
     async def _call_llm(self, **kwargs) -> str:
         try:
@@ -86,45 +92,61 @@ class MainChat:
             self.logger.error(f"Error during topic reply generation: {e}\n{traceback.format_exc()}")
             return ""
 
-    def _parse_response(self, response: str) -> List[TopicReplyResult]:
+    def _parse_response(self, response: str, sing_plan: Optional[Tuple[str, str]]) -> List[OneResponseLine]:
         if not response:
-            return [TopicReplyResult(reply_type="text", reply_text="")]
+            return [self.default_response]
 
         text = response.strip()
-        if text.startswith("```"):
-            text = text.strip("`")
-            if text.lower().startswith("text"):
-                text = text[4:]
-            text = text.strip()
+        if text.startswith("```") and text.endswith("```"):
+            lines = text.splitlines()
+            if len(lines) >= 2:
+                text = "\n".join(lines[1:-1]).strip()
 
-        pattern = re.compile(r"\[sing\s+([^\]]+)\]", flags=re.IGNORECASE)
-        match = pattern.search(text)
-        if not match:
-            sentences = self._split_text_to_short_sentences(text.strip())
-            if not sentences:
-                return [TopicReplyResult(reply_type="text", reply_text="")]
-            return [TopicReplyResult(reply_type="text", reply_text=s) for s in sentences]
+        tone_pattern = re.compile(r"^\[(中性|欣喜|温柔|伤心|生气|惊讶|害怕)\](.*)$", flags=re.IGNORECASE)
+        sing_pattern = re.compile(r"^\[sing\]\s*(.+)$", flags=re.IGNORECASE)
 
-        before = text[:match.start()].strip()
-        song = match.group(1).strip().strip("'\"“”《》")
-        after = text[match.end():].strip()
+        results: List[OneResponseLine] = []
+        structured_found = False
 
-        results: List[TopicReplyResult] = []
-        before_sentences = self._split_text_to_short_sentences(before)
-        if before_sentences:
-            results.extend([TopicReplyResult(reply_type="text", reply_text=s) for s in before_sentences])
-        else:
-            results.append(TopicReplyResult(reply_type="text", reply_text=""))
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
 
-        results.append(TopicReplyResult(reply_type="sing", reply_text=song))
+            # 先尝试匹配唱歌指令
+            sing_match = sing_pattern.match(line)
+            if sing_match and sing_plan:
+                song = sing_match.group(1).strip().strip("<>").strip().strip("'\"“”《》")
+                sing_plan_song = sing_plan[0].strip().strip("<>").strip().strip("'\"“”《》")
+                if song and song == sing_plan_song:
+                    results.append(SongSegmentChat(song=sing_plan_song, segment=sing_plan[1], lyrics=""))
+                    structured_found = True
+                continue
 
-        after_sentences = self._split_text_to_short_sentences(after)
-        if after_sentences:
-            results.extend([TopicReplyResult(reply_type="text", reply_text=s) for s in after_sentences])
-        else:
-            results.append(TopicReplyResult(reply_type="text", reply_text=""))
+            # 再尝试匹配语气标记
+            tone_match = tone_pattern.match(line)
+            if tone_match:
+                tone = tone_match.group(1).lower().strip()
+                content = tone_match.group(2).strip()
+                if content:
+                    sentences = self._split_text_to_short_sentences(content)
+                    if not sentences:
+                        sentences = [content]
+                    for sentence in sentences:
+                        normalized = sentence.strip()
+                        if not normalized:
+                            continue
+                        expression, tts_tone = self._get_expressions_and_tts_tone(tone)
+                        results.append(OneSentenceChat(expression=expression, tone=tts_tone, content=normalized))
+                    structured_found = True
+                continue
 
-        return results
+        if structured_found:
+            return results or [self.default_response]
+
+        self.logger.warning("No structured format detected in LLM response, returning an empty text.")
+
+        return [self.default_response]
 
     def _split_text_to_short_sentences(self, text: str) -> List[str]:
         """复用 _split_responses 的拆句策略：按标点切分并聚合为短句。"""
@@ -152,7 +174,7 @@ class MainChat:
             paren_content = None
             if match:
                 paren_content = match.group(1)
-                sentence = sentence[len(paren_content):]
+                sentence = sentence[len(paren_content) :]
 
             if paren_content:
                 if sentence_buffer.strip():
@@ -173,11 +195,12 @@ class MainChat:
         return split_sentences
 
     def _build_user_persona(self, user_nickname: str, user_description: str) -> str:
-        nickname = (user_nickname or "你").strip() or "你"
-        description = (user_description or "").strip()
-        if description:
-            return f"昵称：{nickname}。描述：{description}"
-        return f"昵称：{nickname}。"
+        return user_description.strip()
+        # nickname = (user_nickname or "你").strip() or "你"
+        # description = (user_description or "").strip()
+        # if description:
+        #     return f"昵称：{nickname}。描述：{description}"
+        # return f"昵称：{nickname}。"
 
     def _build_sing_requirement(self, sing_song: Optional[str]) -> str:
         normalized_song = self._normalize_sing_song(sing_song)
@@ -209,12 +232,10 @@ class MainChat:
         return value.strip("'\"“”《》")
 
     def _init_static_variables_sync(self) -> None:
-        self.character_name = str(self.config.get("character_name", "洛天依")).strip() or "洛天依"
-        self.character_persona = str(self.config.get("character_persona", "")).strip()
-        self.speaking_style = str(self.config.get("speaking_style", "亲切、自然、口语化")).strip() or "亲切、自然、口语化"
 
         static_variables_file = self.config.get("static_variables_file", None)
         if not static_variables_file:
+            self.logger.error("No static_variables_file configured for MainChatV2, skip loading static variables")
             return
 
         path = Path(static_variables_file)
@@ -228,11 +249,15 @@ class MainChat:
         except Exception as e:
             self.logger.warning(f"Failed to load MainChatV2 static variables: {e}")
             return
+        
+        character_name = static_vars.get("character_name", "").strip()
+        if character_name:
+            self.character_name = character_name
 
-        persona = static_vars.get("persona", "")
+        persona = static_vars.get("character_persona", "")
         if isinstance(persona, list):
             persona = "\n".join(str(x) for x in persona if str(x).strip())
-        if persona and not self.character_persona:
+        if persona:
             self.character_persona = str(persona).strip()
 
         style = static_vars.get("speaking_style", "")
@@ -244,3 +269,42 @@ class MainChat:
                 style = "；".join(str(x).lstrip("- ").strip() for x in requirements[:3] if str(x).strip())
         if style:
             self.speaking_style = str(style).strip()
+
+        assert hasattr(self, "character_name"), "character_name is required in static variables"
+        assert hasattr(self, "character_persona"), "character_persona is required in static variables"
+        assert hasattr(self, "speaking_style"), "speaking_style is required in static variables"
+
+    def _init_llm_tone_mapping(self) -> None:
+        self.llm_tone_mapping_file = self.config.get("llm_tone_mapping_file", None)
+        self.llm_tone_to_tts_tone: Dict[str, str] = {}
+        self.llm_tone_to_l2d_expression: Dict[str, str] = {}
+        if not self.llm_tone_mapping_file:
+            return
+        path = Path(self.llm_tone_mapping_file)
+        if not path.exists():
+            self.logger.warning(f"LLM tone mapping file not found: {self.llm_tone_mapping_file}")
+            return
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                mapping = json.load(f)
+                if isinstance(mapping, dict):
+                    self.llm_tone_to_tts_tone = {
+                        str(k).strip().lower(): str(v).strip() for k, v in mapping.get("llm_tone_to_tts_tone", {}).items()
+                    }
+                    self.llm_tone_to_l2d_expression = {
+                        str(k).strip().lower(): str(v).strip() for k, v in mapping.get("llm_tone_to_l2d_expression", {}).items()
+                    }
+        except Exception as e:
+            self.logger.warning(f"Failed to load LLM tone mapping: {e}")
+
+        self.default_response = OneSentenceChat(
+                expression=self.llm_tone_to_l2d_expression.get("中性", ""),
+                tone=self.llm_tone_to_tts_tone.get("中性", ""),
+                content="",
+        )
+
+    def _get_expressions_and_tts_tone(self, tone: str) -> Tuple[str, str]:
+        normalized_tone = tone.lower().strip()
+        tts_tone = self.llm_tone_to_tts_tone.get(normalized_tone, "")
+        expression = self.llm_tone_to_l2d_expression.get(normalized_tone, "")
+        return expression, tts_tone

@@ -100,10 +100,10 @@ app = FastAPI(lifespan=startup_event)
 async def chat_ws(websocket: WebSocket, 
                   service_hub: ServiceHub = Depends(get_service_hub),
                   ):
-    websocket_service = service_hub.websocket_service # WebSocketService 实例
-    gcsm = service_hub.gcsm # 全局聊天流管理器实例
     await websocket.accept()
     logger.info("WebSocket client connected to /chat_ws")
+    websocket_service = service_hub.websocket_service # WebSocketService 实例
+    gcsm = service_hub.gcsm # 全局聊天流管理器实例
     await websocket_service.send_system_ready_event(websocket)
     ws_connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
     try:
@@ -122,7 +122,7 @@ async def chat_ws(websocket: WebSocket,
             if chat_event is None:
                 # 非聊天事件在 service 层终止，不进入 chat_stream。
                 continue
-            await websocket_service.send_ack_event(ws_connection, event) # 收到消息后先发送 ACK 确认收到，再进入聊天流处理，避免客户端等待超时
+            await websocket_service.send_ack_event(ws_connection, event) # 收到消息后发送 ACK 确认收到，之后进处理流程
             await chat_stream.feed_event(chat_event)
     except WebSocketDisconnect:
         gcsm.ws_lost_connection(ws_connection)
@@ -228,7 +228,7 @@ async def get_history(
     message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
     if not message_token_valid:
         raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-    return await agent.handle_history_request(user_uuid, request.count, request.end_index, db)
+    return await agent.handle_history_request(user_uuid, request.count, request.end_index)
 
 
 @app.post("/get_image")
@@ -306,7 +306,6 @@ if __name__ == "__main__":
     # 使用 127.0.0.1 配合内网穿透，或使用 0.0.0.0 直接公网访问
     # 通过 SakuraFrp 等内网穿透服务时，保持 127.0.0.1 即可
 
-    will_use_https = False
     is_debug = config.get("is_debug", False)
     if is_debug:
         logger.info("服务器正在以调试模式运行")

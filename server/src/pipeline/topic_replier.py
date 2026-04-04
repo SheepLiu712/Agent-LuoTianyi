@@ -2,11 +2,13 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 import asyncio
 from ..utils.logger import get_logger
 from .global_speaking_worker import SpeakingJob
-from ..agent.main_chat import SongSegmentChat
-from ..agent.main_chat import TopicReplyResult
+from ..agent.main_chat import OneResponseLine, SongSegmentChat, ContextType
+from typing import Callable, Awaitable
+from ..interface.types import ChatResponse
 if TYPE_CHECKING:
     from ..interface.service_hub import ServiceHub
     from .topic_planner import ExtractedTopic
+
 
 
 # class ExtractedTopic:
@@ -20,10 +22,10 @@ if TYPE_CHECKING:
 #     is_forced_from_incomplete: bool = False
 
 class TopicReplier:
-    def __init__(self, username: str, user_id: str, parent_chat_stream):
+    def __init__(self, username: str, user_id: str, send_reply_callback: Callable[[ChatResponse], Awaitable[None]]):
         self.username = username
         self.user_id = user_id
-        self.parent_chat_stream = parent_chat_stream
+        self.send_reply_callback = send_reply_callback
         self.logger = get_logger(f"{username}TopicReplier")
         self.topic_queue = asyncio.Queue()
         self.processor_task: asyncio.Task | None = None
@@ -59,7 +61,7 @@ class TopicReplier:
 
     async def _reply_one_topic(self, topic: "ExtractedTopic") -> None:
         if self.service_hub is None or self.service_hub.agent is None:
-            self.logger.warning("ServiceHub or agent is not ready, skip replying topic")
+            self.logger.error("ServiceHub or agent is not ready, skip replying topic")
             return
 
 
@@ -68,64 +70,44 @@ class TopicReplier:
         sing_task = asyncio.create_task(self._sing_plan(topic.sing_attempts or []))
         memory_hits, fact_hits, sing_plan = await asyncio.gather(memory_task, fact_task, sing_task)
 
-        planned_song = sing_plan[0] if sing_plan and sing_plan[0] else None
         reply_items = await self.service_hub.agent.generate_topic_reply_for_pipeline(
             user_id=self.user_id,
             topic_content=topic.topic_content,
             memory_hits=memory_hits,
             fact_hits=fact_hits,
-            sing_song=planned_song,
+            sing_plan=sing_plan,
         )
 
         for item in reply_items:
-            await self._dispatch_reply_item(self.parent_chat_stream, item, sing_plan)
+            await self._submit_speaking_job(self.send_reply_callback, item)
 
         await self.service_hub.agent.persist_topic_replies_for_pipeline(
             user_id=self.user_id,
             reply_items=reply_items,
-            sing_plan=sing_plan,
         )
 
-        await self._schedule_user_profile_update(topic, reply_items)
+        memory_write_task = asyncio.create_task(self._schedule_memory_write(topic, reply_items, memory_hits))
+        huge_update_task = asyncio.create_task(self._schedule_profile_context_update()) # 我们考虑，当上下文需要压缩时，进行一次用户画像的更新。
 
-        await self._schedule_memory_write(topic, reply_items, memory_hits)
+        # 等上面两个任务都完成后再进行下一轮回复，确保用户画像和记忆的更新能够尽可能快地反映在后续的回复中
+        await asyncio.gather(memory_write_task, huge_update_task)
 
-    async def _dispatch_reply_item(
+    async def _submit_speaking_job(
         self,
-        chat_stream,
-        item: TopicReplyResult,
-        sing_plan: Tuple[Optional[str], Optional[str]],
+        send_reply_callback: Callable[[ChatResponse], Awaitable[None]],
+        item: OneResponseLine,
     ) -> None:
-        if item.reply_type not in {"text", "sing"}:
-            self.logger.warning(f"Unsupported topic reply type: {item.reply_type}")
+        if item.type not in {ContextType.TEXT, ContextType.SING}:
+            self.logger.warning(f"Unsupported topic reply type: {item.type}")
             return
 
-        if item.reply_type == "text" and item.reply_text.strip():
-            # 当文本非空时加入回复流。如果文本为空则不加入。
-            await self.service_hub.global_speaking_worker.enqueue(
-                SpeakingJob(chat_stream=chat_stream, job_content=item.reply_text)
-            )
-            return
-
-        plan_song, plan_segment = sing_plan
-        target_song = (item.reply_text or "").strip() or (plan_song or "")
-        if not target_song:
-            self.logger.warning("Skip sing item because song name is empty")
-            return
-
-        target_segment = plan_segment
-        if not target_segment:
-            target_segment = self.service_hub.agent.singing_manager.pick_segment_for_song(target_song)
-        if not target_segment:
-            self.logger.warning(f"Skip sing item because no available segment for song: {target_song}")
-            return
-
-        lyrics = self.service_hub.agent.singing_manager.get_segment_lyrics(target_song, target_segment)
+        # 把唱歌计划的歌词补全推后到此时
+        if isinstance(item, SongSegmentChat):
+            lyrics = self.service_hub.agent.singing_manager.get_segment_lyrics(item.song, item.segment)
+            item.lyrics = lyrics
+        
         await self.service_hub.global_speaking_worker.enqueue(
-            SpeakingJob(
-                chat_stream=self.parent_chat_stream,
-                job_content=SongSegmentChat(song=target_song, segment=target_segment, lyrics=lyrics),
-            )
+            SpeakingJob(send_reply_callback=send_reply_callback, job_content=item)
         )
 
 
@@ -172,22 +154,20 @@ class TopicReplier:
     async def _schedule_memory_write(
         self,
         topic: "ExtractedTopic",
-        reply_items: List[TopicReplyResult],
+        reply_items: List[OneResponseLine],
         memory_hits: List[str],
     ) -> None:
         if self.service_hub is None or self.service_hub.agent is None:
+            self.logger.error("ServiceHub or agent is not ready, skip scheduling memory write")
             return
 
         current_dialogue = self._build_current_dialogue(topic, reply_items)
-        agent_response_content = self._extract_agent_response_content(reply_items)
 
         async def _task():
             try:
                 await self.service_hub.agent.write_topic_memories_for_pipeline(
                     user_id=self.user_id,
-                    topic_content=topic.topic_content,
                     current_dialogue=current_dialogue,
-                    agent_response_content=agent_response_content,
                     related_memories=memory_hits,
                 )
             except Exception as e:
@@ -195,28 +175,16 @@ class TopicReplier:
 
         asyncio.create_task(_task())
 
-    async def _schedule_user_profile_update(
-        self,
-        topic: "ExtractedTopic",
-        reply_items: List[TopicReplyResult],
+    async def _schedule_profile_context_update(
+        self
     ) -> None:
         if self.service_hub is None or self.service_hub.agent is None:
+            self.logger.error("ServiceHub or agent is not ready, skip scheduling profile/context update")
             return
+        
+        await self.service_hub.agent.update_profile_context_for_pipeline(user_id=self.user_id)
 
-        current_dialogue = self._build_current_dialogue(topic, reply_items)
-
-        async def _task():
-            try:
-                await self.service_hub.agent.update_user_profile_for_topic_pipeline(
-                    user_id=self.user_id,
-                    current_dialogue=current_dialogue,
-                )
-            except Exception as e:
-                self.logger.warning(f"Topic user profile update task failed: {e}")
-
-        asyncio.create_task(_task())
-
-    def _build_current_dialogue(self, topic: "ExtractedTopic", reply_items: List[TopicReplyResult]) -> str:
+    def _build_current_dialogue(self, topic: "ExtractedTopic", reply_items: List[OneResponseLine]) -> str:
         lines: List[str] = []
 
         for msg in getattr(topic, "source_messages", []) or []:
@@ -225,27 +193,7 @@ class TopicReplier:
                 lines.append(f"user: {content}")
 
         for item in reply_items:
-            if item.reply_type == "text":
-                text = (item.reply_text or "").strip()
-                if text:
-                    lines.append(f"agent: {text}")
-            elif item.reply_type == "sing":
-                song = (item.reply_text or "").strip()
-                if song:
-                    lines.append(f"agent: （唱了{song}）")
+            lines.append(f"agent: {item.get_content()}")
 
         return "\n".join(lines)
 
-    def _extract_agent_response_content(self, reply_items: List[TopicReplyResult]) -> List[str]:
-        contents: List[str] = []
-        for item in reply_items:
-            if item.reply_type == "text":
-                text = (item.reply_text or "").strip()
-                if text:
-                    contents.append(text)
-            elif item.reply_type == "sing":
-                song = (item.reply_text or "").strip()
-                if song:
-                    contents.append(f"（唱了{song}）")
-        return contents
-    

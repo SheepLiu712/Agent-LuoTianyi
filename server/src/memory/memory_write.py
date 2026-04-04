@@ -33,8 +33,6 @@ class MemoryWriter:
         redis: MemoryStorage,
         vector_store: VectorStore,
         user_id: str,
-        user_input: str,
-        agent_response_content: List[str],
         history: str,
         current_dialogue: str = "",
         related_memories: List[str] | None = None,
@@ -44,8 +42,6 @@ class MemoryWriter:
         分析最近的交互，提取有价值的信息存入记忆库。
         """
         update_cmd = await self._extract_knowledge(
-            user_input,
-            agent_response_content,
             history,
             current_dialogue=current_dialogue,
             related_memories=related_memories or [],
@@ -73,8 +69,6 @@ class MemoryWriter:
 
     async def _extract_knowledge(
         self,
-        user_input: str,
-        agent_response_content: List[str],
         history: str,
         current_dialogue: str,
         related_memories: List[str],
@@ -89,8 +83,6 @@ class MemoryWriter:
         cmd = []
         try:
             response = await self.llm.generate_response(
-                user_input=user_input,
-                agent_response=agent_response_content,
                 history=history_str,
                 current_dialogue=current_dialogue,
                 related_memories=related_memories,

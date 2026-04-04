@@ -53,7 +53,7 @@ class TopicPlanner:
 
         unread_msg = UnreadStore.trans_ChatInputEvent_to_UnreadMessage(message)
         await self.unread_store.append(unread_msg)
-        await self.listen_timer.remove_deadline()  # 新消息来了，取消之前的等待超时
+        await self.listen_timer.set_deadline(timeout=1.0)  # 新消息来了，取消之前的等待超时
         self._wake_event.set()
     
     def start_processing(self):
@@ -78,8 +78,7 @@ class TopicPlanner:
                         continue
                     except asyncio.TimeoutError:
                         should_force_extract = True
-                elif has_unread and deadline is None:
-                    # 有未读且无需等待：直接提取。
+                elif has_unread and deadline is None: # 有未读且无需等待：直接提取。
                     pass
                 else: # 没有未读：等待唤醒。
                     await self._wake_event.wait()
@@ -132,7 +131,7 @@ class TopicPlanner:
 
         if has_new_message:
             self._wake_event.set()
-            await self.listen_timer.remove_deadline()  # 已经有新消息了，不需要等待补全，直接进入下一轮提取
+            await self.listen_timer.set_deadline(timeout=1.0)  # 已经有新消息了，不需要等待补全，直接进入下一轮提取
         else:
             if remaining_unread:
                 await self.listen_timer.set_deadline()  # 没有新消息，但还有剩余未读，继续等待补全
@@ -144,7 +143,7 @@ class TopicPlanner:
         if unread_snapshot is None or not unread_snapshot.messages:
             return [], []
         
-        # 如果全都是图片信息，认为用户会补一句话，即所有消息都是不完整话题消息
+        # 启发式：如果全都是图片信息，认为用户会补一句话，即所有消息都是不完整话题消息
         for msg in unread_snapshot.messages:
             if msg.message_type != "image":
                 break
@@ -153,7 +152,6 @@ class TopicPlanner:
 
         try:
             topics, remaining = await self.service_hub.agent.extract_topics_for_pipeline(
-                service_hub=self.service_hub,
                 user_id=self.user_id,
                 unread_snapshot=unread_snapshot,
                 force_complete=force_complete,
@@ -194,7 +192,7 @@ class TopicPlanner:
     
     async def _consume_topics(self, topics: List[ExtractedTopic]):
         if self.topic_consumer is None:
-            self.logger.debug(f"No topic_consumer set, skip {len(topics)} extracted topics")
+            self.logger.error(f"No topic_consumer set, skip {len(topics)} extracted topics")
             return
 
         for topic in topics:

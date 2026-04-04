@@ -36,7 +36,7 @@ class MemorySearcher:
         user_id: str,
         queries: List[str],
         k: int = 5,
-        score_threshold: float = 0.46,
+        score_threshold: float = 0.8,
     ) -> List[str]:
         """面向 TopicReplier 的直接检索接口：混合检索并按分数截断。"""
         if not queries:
@@ -49,6 +49,8 @@ class MemorySearcher:
                 continue
 
             results = await vector_store.search(user_id, q, k=max(1, k))
+            docs = [f"[{score:.3f}] {doc.get_content()}" for doc, score in results]
+            self.logger.debug(f"Vector search for query '{q}' got {len(results)} results: {docs}")
             for doc, score in results:
                 if score < score_threshold:
                     continue

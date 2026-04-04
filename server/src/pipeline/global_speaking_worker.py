@@ -6,16 +6,13 @@ from ..utils.logger import get_logger
 import uuid
 from ..agent.main_chat import OneSentenceChat, SongSegmentChat
 from ..interface.types import ChatResponse
-
-if TYPE_CHECKING:
-    from .chat_stream import ChatStream
+from typing import Callable, Awaitable
 
 
 @dataclass
 class SpeakingJob:
     """全局 speaking 队列中的任务。"""
-
-    chat_stream: "ChatStream"
+    send_reply_callback: Callable[[ChatResponse], Awaitable[None]]
     job_content: "OneSentenceChat | SongSegmentChat | str" 
 
 
@@ -36,6 +33,7 @@ class GlobalSpeakingWorker:
         self.start_if_needed()
         await self.queue.put(job)
 
+
     async def _run(self):
         while True:
             job = await self.queue.get()
@@ -48,14 +46,14 @@ class GlobalSpeakingWorker:
                     text = job.job_content.content
                     expression = job.job_content.expression
                 elif isinstance(job.job_content, SongSegmentChat):
-                    text = job.job_content.lyrics
+                    text = f"(唱了{job.job_content.song}){job.job_content.lyrics}"
                     expression = "唱歌"
                 else:
                     self.logger.warning(f"Unsupported speaking job type: {type(job.job_content)}")
                     continue
                 
                 resp = ChatResponse(uuid=str(uuid.uuid4()), audio="", is_final_package=True, text=text, expression=expression)
-                await job.chat_stream.send_response(resp)
+                await job.send_reply_callback(resp)
             except Exception as e:
                 self.logger.error(f"Error processing speaking job: {e}")
                 continue

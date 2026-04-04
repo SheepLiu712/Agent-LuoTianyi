@@ -9,6 +9,7 @@ if cwd not in sys.path:
 
 from src.database import database_service
 from src.database.sql_database import User, Conversation, get_sql_session
+from src.database.vector_store import get_vector_store, VectorStore
 from src.database.redis_buffer import get_redis_buffer
 from src.utils.helpers import load_config
 
@@ -84,12 +85,58 @@ def _delete_all_conversations(session, redis_client, user: User) -> None:
     redis_client.delete(f"user_context:{user.uuid}")
     print(f"已删除 {deleted} 条历史对话，并重置上下文计数与总结。")
 
+def _delete_all_vector_records(vector_store: VectorStore, user: User) -> None:
+    confirm = input("确认删除该用户的所有向量数据库记录？输入 YES 确认：").strip()
+    if confirm != "YES":
+        print("已取消删除。")
+        return
+
+    deleted_count = vector_store.delete_user_records(user.uuid)
+    print(f"已删除 {deleted_count} 条向量数据库记录。")
+
+def _reset_user_profile(session, redis_client, user: User) -> None:
+    confirm = input("确认重置用户画像为默认值？输入 YES 确认：").strip()
+    if confirm != "YES":
+        print("已取消重置。")
+        return
+
+    user.description = "新认识的朋友，还需要了解。"
+    session.commit()
+
+def _reset_user(session, redis_client, vector_store, user: User) -> None:
+    confirm = input("确认完全重置用户（删除所有对话、向量记录，并重置画像）？输入 YES 确认：").strip()
+    if confirm != "YES":
+        print("已取消重置。")
+        return
+
+    # 删除历史对话
+    deleted_conversations = session.query(Conversation).filter(Conversation.user_id == user.uuid).delete(synchronize_session=False)
+
+    # 删除向量数据库记录
+    deleted_vector_records = vector_store.delete_user_records(user.uuid)
+
+    # 重置用户画像
+    user.description = "新认识的朋友，还需要了解。"
+    user.context_memory_count = 0
+    user.all_memory_count = 0
+    user.context_summary = ""
+
+    session.commit()
+
+    # 清理内存缓存中的上下文
+    redis_client.delete(f"user_context:{user.uuid}")
+
+    print(f"已完全重置用户：删除 {deleted_conversations} 条历史对话，{deleted_vector_records} 条向量记录，并重置用户画像。")
+
 
 def _print_menu() -> None:
     print("\n请选择操作：")
     print("1. 修改用户昵称")
     print("2. 修改用户画像")
     print("3. 删除所有历史对话")
+    print("4. 删除所有向量数据库记录")
+    print("5. 重置用户画像为默认值")
+    print("6. 完全重置用户（删除所有对话、向量记录，并重置画像）")
     print("0. 退出")
 
 
@@ -98,6 +145,7 @@ def main() -> None:
 
     session = get_sql_session()
     redis_client = get_redis_buffer()
+    vector_store = get_vector_store()
     try:
         username = input("请输入用户名：").strip()
         password = getpass("请输入密码：").strip()
@@ -119,6 +167,12 @@ def main() -> None:
                 _update_description(session, redis_client, user)
             elif choice == "3":
                 _delete_all_conversations(session, redis_client, user)
+            elif choice == "4":
+                _delete_all_vector_records(vector_store, user)
+            elif choice == "5":
+                _reset_user_profile(session, redis_client, user)
+            elif choice == "6":
+                _reset_user(session, redis_client, vector_store, user)
             elif choice == "0":
                 print("已退出。")
                 return

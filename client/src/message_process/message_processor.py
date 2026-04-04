@@ -57,7 +57,7 @@ class MessageProcessor:
             if self._send_queue:
                 return
         # 2. 如果上次发送输入状态事件的时间距离现在不足0.5秒，也不发送，避免过于频繁
-        if self._last_typing_time and time.time() - self._last_typing_time < 0.5:
+        if self._last_typing_time and time.time() - self._last_typing_time < 0.25:
             return
         # 3. 发送输入状态事件
         self._last_typing_time = time.time()

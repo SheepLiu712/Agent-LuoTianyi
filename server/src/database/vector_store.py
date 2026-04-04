@@ -75,6 +75,10 @@ class VectorStore(ABC):
         """通过ID获取文档"""
         pass
 
+    @abstractmethod
+    def delete_user_records(self, user_id: str) -> int:
+        """删除指定用户的所有记录，返回删除的记录数"""
+        pass
 
 
 import uuid
@@ -224,6 +228,31 @@ class ChromaVectorStore(VectorStore):
         except Exception as e:
             self.logger.error(f"删除文档失败: {e}")
             return False
+        
+    def delete_user_records(self, user_id: str) -> int:
+        """删除指定用户的所有记录，返回删除的记录数"""
+        try:
+            # 先查询出该用户的所有文档ID
+            results = self.collection.query(
+                query_texts=[" "],  # 空查询，获取所有文档
+                where={"user_id": user_id},
+                n_results=10000  # 假设单用户不会超过1万条记录
+            )
+            if results["ids"]:
+                doc_ids = results["ids"][0]
+                if len(doc_ids) > 0:
+                    self.collection.delete(ids=doc_ids)
+                deleted_count = len(doc_ids)
+                self.logger.info(f"成功删除用户 {user_id} 的 {deleted_count} 条记录")
+                return deleted_count
+            else:
+                self.logger.info(f"用户 {user_id} 没有记录需要删除")
+                return 0
+        except Exception as e:
+            import traceback
+            print(traceback.format_exc())
+            self.logger.error(f"删除用户记录失败: {e}")
+            return 0
     
     def update_document(self, doc_id: str, document: Document) -> bool:
         """更新文档

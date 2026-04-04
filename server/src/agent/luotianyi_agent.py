@@ -4,20 +4,17 @@
 实现洛天依角色扮演对话Agent的核心逻辑
 """
 
-from typing import AsyncGenerator, List, Dict, Any, Optional, Callable, Tuple
+from typing import  List, Dict, Any, Optional, Callable, Tuple
 from dataclasses import dataclass
-from abc import ABC, abstractmethod
 import time
 from sqlalchemy.orm import Session
 import asyncio
 import json
-from fastapi import UploadFile
 import re
-import base64
 from typing import TYPE_CHECKING
 
 from ..utils.llm.prompt_manager import PromptManager
-from .main_chat import MainChat, OneSentenceChat, SongSegmentChat, TopicReplyResult
+from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentChat
 from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
 from ..types.conversation_type import ConversationItem
@@ -25,11 +22,8 @@ from ..utils.logger import get_logger
 from ..tts import TTSModule
 from ..utils.enum_type import ContextType, ConversationSource
 from ..memory.memory_manager import MemoryManager
-from ..interface.types import ChatResponse
 from ..music.singing_manager import SingingManager
 from ..vision.vision_module import VisionModule
-from ..vision.image_process import get_image_bytes_and_base64, get_postfix, save_image
-from ..database.sql_database import get_sql_session
 from ..database.sql_database import User
 from ..database.memory_storage import MemoryStorage
 
@@ -89,7 +83,6 @@ class LuoTianyiAgent:
         self.singing_manager = SingingManager(config={})  # 唱歌管理器
         memory_config = self.config.get("memory_manager", {})
         self.memory_manager = MemoryManager(memory_config, self.prompt_manager, self.singing_manager)  # 记忆管理器
-        self.memory_manager.memory_searcher.register_tools(self.singing_manager.get_tools())  # 注册唱歌工具
 
         self.tts_engine = tts_module  # TTS模块
         self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
@@ -101,7 +94,6 @@ class LuoTianyiAgent:
 
     async def extract_topics_for_pipeline(
         self,
-        service_hub: "ServiceHub",
         user_id: str,
         unread_snapshot: "UnreadMessageSnapshot",
         force_complete: bool = False,
@@ -179,8 +171,8 @@ class LuoTianyiAgent:
         topic_content: str,
         memory_hits: Optional[List[str]] = None,
         fact_hits: Optional[List[str]] = None,
-        sing_song: Optional[str] = None,
-    ) -> List[TopicReplyResult]:
+        sing_plan: Optional[Tuple[str, str]] = None,
+    ) -> List[OneResponseLine]:
         """供 TopicReplier 调用：按话题生成分段回复。"""
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
@@ -199,15 +191,13 @@ class LuoTianyiAgent:
             conversation_history=conversation_history,
             fact_hits=fact_hits or [],
             memory_hits=memory_hits or [],
-            sing_song=sing_song,
+            sing_plan=sing_plan,
         )
 
     async def write_topic_memories_for_pipeline(
         self,
         user_id: str,
-        topic_content: str,
         current_dialogue: str,
-        agent_response_content: List[str],
         related_memories: Optional[List[str]] = None,
     ) -> None:
         """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
@@ -221,8 +211,6 @@ class LuoTianyiAgent:
                 redis=redis_client,
                 vector_store=vector_store,
                 user_id=user_id,
-                user_input=topic_content,
-                agent_response_content=agent_response_content,
                 history=history,
                 current_dialogue=current_dialogue,
                 related_memories=related_memories or [],
@@ -255,20 +243,18 @@ class LuoTianyiAgent:
     async def persist_topic_replies_for_pipeline(
         self,
         user_id: str,
-        reply_items: List[TopicReplyResult],
-        sing_plan: Tuple[Optional[str], Optional[str]],
+        reply_items: List[OneResponseLine],
     ) -> None:
         """将 topic 回复落库，并触发上下文压缩检查。"""
         if not user_id:
             return
 
         conversation_items: List[ConversationItem] = []
-        song_from_plan, segment_from_plan = sing_plan
         now = time.strftime("%Y-%m-%d %H:%M:%S")
 
         for item in reply_items:
-            if item.reply_type == "text":
-                text = (item.reply_text or "").strip()
+            if isinstance(item, OneSentenceChat):
+                text = item.get_content()
                 if not text:
                     continue
                 conversation_items.append(
@@ -281,12 +267,12 @@ class LuoTianyiAgent:
                         data=None,
                     )
                 )
-            elif item.reply_type == "sing":
-                song_name = (item.reply_text or "").strip() or (song_from_plan or "")
+            elif isinstance(item, SongSegmentChat):
+                song_name = item.song or None
                 if not song_name:
                     continue
-                segment = segment_from_plan or self.singing_manager.pick_segment_for_song(song_name) or ""
-                content = f"（唱了{song_name}）"
+                lyrics = item.lyrics
+                content = f"（唱了{song_name}）{lyrics}"
                 conversation_items.append(
                     ConversationItem(
                         uuid="",
@@ -294,7 +280,7 @@ class LuoTianyiAgent:
                         source=ConversationSource.AGENT.value,
                         type=ContextType.SING.value,
                         content=content,
-                        data={"song": song_name, "segment": segment} if segment else {"song": song_name},
+                        data={"song": song_name, "segment": item.segment},
                     )
                 )
 
@@ -313,6 +299,26 @@ class LuoTianyiAgent:
             )
         finally:
             db.close()
+
+    async def update_profile_context_for_pipeline(self, user_id: str) -> None:
+        """供 TopicReplier 调用：触发用户画像的上下文更新检查。"""
+        db = self._runtime_hub.open_sql_session()
+        is_conversation_too_long = await self.conversation_manager.is_conversation_too_long(db, user_id)
+        if not is_conversation_too_long:
+            db.close()
+            return
+        
+        # 需要进行更新，包括两部分，①更新用户画像，②更新上下文摘要
+        try:
+            context: Dict[str, Any] = await self.conversation_manager.get_context(db, self._runtime_hub.redis_client, user_id, type="json")
+            update_context_task = asyncio.create_task(self.conversation_manager._update_context(db, self._runtime_hub.redis_client, user_id, context, commit=True))
+            update_profile_task = asyncio.create_task(self.memory_manager.update_user_profile_by_context(db, self._runtime_hub.redis_client, user_id, context))
+            await asyncio.gather(update_context_task, update_profile_task)
+        except Exception as e:
+            self.logger.error(f"Error in update_profile_context_for_pipeline: {e}")
+        finally:
+            db.close()
+        
 
     def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """供 TopicReplier 调用的唱歌计划接口。返回 song|segment。"""
@@ -377,7 +383,7 @@ class LuoTianyiAgent:
             self.logger.warning(f"Unsupported event type {event.event_type} in add_conversation, skipping")
             return
         
-        content = event.text
+        content = event.text # 对文字信息，它是文本内容；对图片信息，它是图片描述（由视觉模块生成）
         if event.event_type == ChatInputEventType.USER_IMAGE:
             conversation_type = ContextType.IMAGE
             payload = {
@@ -392,7 +398,7 @@ class LuoTianyiAgent:
                 "terms": event.payload.get("terms", []),
                 }
 
-        await self.conversation_manager.add_conversation(
+        await self.conversation_manager.add_conversation( # 等待入库
             db=self._runtime_hub.open_sql_session(), 
             redis=self._runtime_hub.redis_client, 
             user_id=user_uuid,

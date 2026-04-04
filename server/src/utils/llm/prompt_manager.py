@@ -99,7 +99,7 @@ class PromptManager:
                 name = template_data.get("name", file_path.stem)
                 template_str = template_data.get("template", "")
                 if isinstance(template_str, list):
-                    template_str = "\n\n".join(template_str)
+                    template_str = "\n".join(template_str)
 
                 if template_str:
                     var_list = self._extract_template_variables(template_str)

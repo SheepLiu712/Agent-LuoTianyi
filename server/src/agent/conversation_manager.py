@@ -27,9 +27,9 @@ class ConversationManager:
         self.llm = LLMModule(config["llm_module"], prompt_manager)
         
         # 配置参数
-        self.raw_conversation_context_limit = self.config.get("raw_conversation_context_limit", 100)
+        self.raw_conversation_context_limit = self.config.get("raw_conversation_context_limit", 60)  # 原始对话上下文限制，超过这个数量就触发摘要更新
         self.forget_conversation_days = self.config.get("forget_conversation_days", 10)
-        self.not_zip_conversation_count = self.config.get("not_zip_conversation_count", 20)
+        self.not_zip_conversation_count = self.config.get("not_zip_conversation_count", 30) # 摘要更新之后，保留多少条不压缩的对话在上下文中
         # Old config for compatibility
         self.recent_limit = self.config.get("recent_history_limit", 50)
 
@@ -49,13 +49,9 @@ class ConversationManager:
             uuid=str(uuid.uuid4())
         )
         
-        # 1. 写入数据库并更新 Redis Buffer
-        # 使用 asyncio.to_thread 运行阻塞的数据库操作
         uuid_list = await asyncio.to_thread(
             database_service.add_conversations, db, redis, user_id, [item]
         )
-        # 2. 检查是否需要更新上下文摘要
-        await self.check_and_update_context(db, redis, user_id)
         return uuid_list[0] if uuid_list else "" # 总只有一条记录，所以取第一个返回  
     
     def add_conversation_wo_db(self, user_id: str, source: ConversationSource, content: str, type: ContextType = ContextType.TEXT, data: Any = None) -> ConversationItem:
@@ -82,7 +78,6 @@ class ConversationManager:
         uuid_list = await asyncio.to_thread(
             database_service.add_conversations, db, redis, user_id, conversation_list, commit=commit
         )
-        await self.check_and_update_context(db, redis, user_id, commit=commit)
         return uuid_list
 
     async def get_total_conversation_count(self, db: Session, user_id: str) -> int:
@@ -103,6 +98,12 @@ class ConversationManager:
              # 在后台任务中更新摘要，使用新的 DB 会话
              asyncio.create_task(self._update_context(db, redis, user_id, commit=commit))
 
+    async def is_conversation_too_long(self, db: Session, user_id: str) -> bool:
+        current_count = await asyncio.to_thread(database_service.get_context_count, db, user_id)
+        if current_count > self.raw_conversation_context_limit:
+            return True
+        return False
+
     async def get_nearset_history(self, db: Session, redis: Redis, user_id: str, n: int) -> List[ConversationItem]:
         """
         获取最近的n条对话
@@ -119,7 +120,7 @@ class ConversationManager:
             database_service.get_history_from_db, db, user_id, start, end
         )
     
-    async def get_context(self, db: Session, redis: Redis, user_id: str) -> str:
+    async def get_context(self, db: Session, redis: Redis, user_id: str, type: str = "str") -> str | Dict[str, Any]:
         """
         获取上下文用于LLM提示词
         """
@@ -143,13 +144,50 @@ class ConversationManager:
                 cnt = c.get("content", "")
                 conv_list.append(f"[{ts}]{src}: {cnt}")
 
-            return "更早对话总结：" + summary + \
-                "\n 最近对话：\n" + "\n".join(conv_list)
+            if type == "str":
+                return "更早对话总结：" + summary + \
+                    "\n 最近对话：\n" + "\n".join(conv_list)
+            else:
+                return {
+                    "summary": summary,
+                    "recent_conversations": conv_list
+                }
         except Exception as e:
             self.logger.error(f"Error in get_context: {e}")
             return ""
+        
+    async def get_in_context_conversations(self, db: Session, redis: Redis, user_id: str) -> List[ConversationItem]:
+        """
+        获取用于上下文的对话列表，包含未压缩的最近对话和摘要中的对话
+        """
+        try:
+            context_data = await asyncio.to_thread(
+                database_service.get_context_from_buffer, db, redis, user_id
+            )
+            
+            if not context_data:
+                return []
+                
+            conversations = context_data.get("conversations", [])
+            conv_items = []
+            for c in conversations:
+                item = ConversationItem(
+                    timestamp=c.get("timestamp", ""),
+                    source=c.get("source", ""),
+                    type=c.get("type", ""),
+                    content=c.get("content", ""),
+                    data=c.get("data", None),
+                    uuid=c.get("uuid", "")
+                )
+                conv_items.append(item)
+            return conv_items
+        except Exception as e:
+            self.logger.error(f"Error in get_in_context_conversations: {e}")
+            return []
+        
 
-    async def _update_context(self, db: Session, redis: Redis, user_id: str, commit: bool = True):
+
+    async def _update_context(self, db: Session, redis: Redis, user_id: str, commit: bool = True, context_data: Optional[Dict[str, Any]] = None):
         """
         后台任务：更新上下文摘要
         """
@@ -157,25 +195,29 @@ class ConversationManager:
         
         try:
             # 1. 获取当前上下文内容
-            context_data = await asyncio.to_thread(
-                database_service.get_context_from_buffer, db, redis, user_id
-            )
+            if context_data is None:
+                context_data = await asyncio.to_thread(
+                    database_service.get_context_from_buffer, db, redis, user_id
+                )
+                context_data["recent_conversation"] = context_data.get("conversations", [])[-self.not_zip_conversation_count:]
+                conversations = context_data.get("conversations", [])
             
+                context_data["recent_conversation"]= [f"[{c['timestamp']}]{c['source']}: {c['content']}" for c in conversations]
+    
+
             if not context_data:
                 return
 
-            current_summary = context_data.get("summary", "")
-            conversations = context_data.get("conversations", [])
+            current_summary:str = context_data.get("summary", "")
+            recent_conversation: List[str] = context_data.get("recent_conversation", "")
+            recent_conversation_str = "\n".join(recent_conversation)
             
-            recent_conversation = "\n".join(
-                [f"[{c['timestamp']}]{c['source']}: {c['content']}" for c in conversations]
-            )
             
             # 2. 调用 LLM 生成新摘要
             new_summary = await self.llm.generate_response(
                 forget_conversation_days=self.forget_conversation_days,
                 current_summary=current_summary,
-                recent_conversation=recent_conversation
+                recent_conversation=recent_conversation_str
                 )
 
             
@@ -192,6 +234,5 @@ class ConversationManager:
             self.logger.error(f"Error in _update_context: {e}")
         finally:
             pass
-            # db.close()
 
 
