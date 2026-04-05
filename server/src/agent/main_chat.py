@@ -131,15 +131,18 @@ class MainChat:
                 tone = tone_match.group(1).lower().strip()
                 content = tone_match.group(2).strip()
                 if content:
-                    sentences = self._split_text_to_short_sentences(content)
-                    if not sentences:
-                        sentences = [content]
-                    for sentence in sentences:
-                        normalized = sentence.strip()
-                        if not normalized:
-                            continue
-                        expression, tts_tone = self._get_expressions_and_tts_tone(tone)
-                        results.append(OneSentenceChat(expression=expression, tone=tts_tone, content=normalized))
+                    content = content.strip()
+                    expression, tts_tone = self._get_expressions_and_tts_tone(tone)
+                    results.append(OneSentenceChat(expression=expression, tone=tts_tone, content=content))
+                    # sentences = self._split_text_to_short_sentences(content)
+                    # if not sentences:
+                    #     sentences = [content]
+                    # for sentence in sentences:
+                    #     normalized = sentence.strip()
+                    #     if not normalized:
+                    #         continue
+                    #     expression, tts_tone = self._get_expressions_and_tts_tone(tone)
+                    #     results.append(OneSentenceChat(expression=expression, tone=tts_tone, content=normalized))
                     structured_found = True
                 continue
 

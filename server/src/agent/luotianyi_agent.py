@@ -4,7 +4,7 @@
 实现洛天依角色扮演对话Agent的核心逻辑
 """
 
-from typing import  List, Dict, Any, Optional, Callable, Tuple
+from typing import  List, Dict, Any, Optional, Callable, Tuple, AsyncGenerator
 from dataclasses import dataclass
 import time
 from sqlalchemy.orm import Session
@@ -226,7 +226,7 @@ class LuoTianyiAgent:
     ) -> List[str]:
         """将 topic 回复落库，并触发上下文压缩检查。"""
         if not user_id:
-            return
+            return []
 
         conversation_items: List[ConversationItem] = []
         now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -329,12 +329,16 @@ class LuoTianyiAgent:
         """调用唱歌管理器生成歌曲片段的音频，并返回音频的Base64字符串"""
         if not song_name or not segment:
             return None
-        _, audio_bytes = self.singing_manager.get_song_segment(song_name, segment)
+        _, audio_bytes = self.singing_manager.get_song_segment(song_name, segment) # 已经是base64字符串了
         return audio_bytes
     
     async def tts_say(self, text: str, tone: str) -> str:
-        bytes = await self.tts_engine.synthesize_speech_with_tone(text, tone)
-        return self.tts_engine.encode_audio_to_base64(bytes)
+        audio_bytes = await self.tts_engine.synthesize_speech_with_tone(text, tone)
+        return self.tts_engine.encode_audio_to_base64(audio_bytes)
+    
+    async def tts_say_stream(self, text: str, tone: str) -> AsyncGenerator[str, None]:
+        for chunk in self.tts_engine.stream_synthesize_speech_with_tone(text, tone):
+            yield self.tts_engine.encode_audio_to_base64(chunk)
 
     def _extract_song_name(self, text: str) -> str:
         content = (text or "").strip()

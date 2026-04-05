@@ -1,8 +1,7 @@
 import os
 import json
 import asyncio
-import requests
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Generator
 from ..utils.logger import get_logger
 from .tts_server import TTSServer
 
@@ -22,10 +21,10 @@ class TTSModule:
     Client module for interacting with the running GPT-SoVITS server.
     Handles reference audio management and speech synthesis requests.
     """
-    def __init__(self, tts_config: Dict[str, Any], api_url: str) -> None:
+    def __init__(self, tts_config: Dict[str, Any], tts_server: TTSServer) -> None:
         self.logger = get_logger("TTSModule")
         self.config = tts_config
-        self.api_url = api_url
+        self.tts_server = tts_server
         
         self.character_name = tts_config.get("character_name", "LuoTianyi")
         self.language = tts_config.get("language", "zh")
@@ -36,7 +35,7 @@ class TTSModule:
         self.reference_audio: Dict[str, ReferenceAudio] = self._prepare_reference_audio(
             tts_config.get("reference_audio_dir", ""), tts_config.get("reference_audio_lyrics", "")
         )
-        self.logger.info(f"TTSModule initialized with API URL: {self.api_url}")
+        self.logger.info("TTSModule initialized with gsv_tts worker backend")
 
     def _prepare_reference_audio(self, reference_audio_dir: str, reference_audio_lyrics: str) -> Dict[str, ReferenceAudio]:
         if not os.path.exists(reference_audio_lyrics):
@@ -123,29 +122,61 @@ class TTSModule:
             "ref_audio_path": ref_audio_obj.audio_path,
             "prompt_lang": self.language, 
             "prompt_text": ref_audio_obj.lyrics,
-            "text_split_method": "cut5",
-            "batch_size": 1,
-            "media_type": "wav",
-            "streaming_mode": False
         }
 
         self.logger.debug(f"Sending TTS request for text: {text[:20]}...")
         
         try:
-            # Use asyncio.to_thread to make the blocking requests.post non-blocking
-            def _do_request():
-                return requests.post(f"{self.api_url}/tts", json=payload, timeout=600)
-
-            response = await asyncio.to_thread(_do_request)
-            
-            if response.status_code == 200:
-                self.logger.info(f"TTS synthesis successful for text: {text[:20]}...")
-                return response.content
-            else:
-                self.logger.error(f"TTS API Error: {response.status_code} - {response.text}")
-                raise Exception(f"TTS API failed with status {response.status_code}")
+            # Use asyncio.to_thread to keep this method async-friendly.
+            audio_bytes = await asyncio.to_thread(
+                self.tts_server.synthesize,
+                payload["text"],
+                payload["ref_audio_path"],
+                payload["ref_audio_path"],
+                payload["prompt_text"],
+            )
+            self.logger.debug(f"TTS synthesis successful for text: {text[:20]}...")
+            return audio_bytes
         except Exception as e:
             self.logger.error(f"TTS Request failed: {e}")
+            raise
+
+    def stream_synthesize_speech_with_tone(self, text: str, tone: str) -> Generator[bytes, None, None]:
+        """
+        根据指定语气流式合成语音，返回可直接拼接写入文件的 bytes 片段生成器。
+        """
+        ref_audio_name = self.tone_reference_audio_projection.get(tone)
+        if not ref_audio_name:
+            self.logger.warning(f"Tone '{tone}' not found, falling back to default or first available.")
+            if self.tone_reference_audio_projection:
+                ref_audio_name = next(iter(self.tone_reference_audio_projection.values()))
+            else:
+                raise ValueError("No reference audio available.")
+
+        return self.stream_synthesize_speech(text, ref_audio_name)
+
+    def stream_synthesize_speech(self, text: str, ref_audio_key: str) -> Generator[bytes, None, None]:
+        """
+        流式合成语音的核心方法，返回 bytes 片段生成器。
+        """
+        ref_audio_obj = self.reference_audio.get(ref_audio_key)
+        if ref_audio_obj is None:
+            raise ValueError(f"Reference audio '{ref_audio_key}' not found.")
+
+        self.logger.debug(f"Sending streaming TTS request for text: {text[:20]}...")
+
+        try:
+            for chunk in self.tts_server.stream_synthesize(
+                text=text,
+                spk_audio_path=ref_audio_obj.audio_path,
+                prompt_audio_path=ref_audio_obj.audio_path,
+                prompt_audio_text=ref_audio_obj.lyrics,
+            ):
+                if chunk:
+                    yield chunk
+            self.logger.debug(f"Streaming TTS synthesis successful for text: {text[:20]}...")
+        except Exception as e:
+            self.logger.error(f"Streaming TTS Request failed: {e}")
             raise
 
     def encode_audio_to_base64(self, audio_bytes: bytes) -> str:
@@ -163,7 +194,5 @@ def init_tts_module(tts_config: Dict[str, Any]) -> TTSModule:
     server_config_path = tts_config.get("server_config_path", "config/tts_infer.yaml")
     tts_server = TTSServer(config_path=server_config_path)
     tts_server.start()
-    api_url = tts_server.get_api_url()
-    # api_url = "http://127.0.0.1:50021"
-    tts_module = TTSModule(tts_config=tts_config, api_url=api_url)
+    tts_module = TTSModule(tts_config=tts_config, tts_server=tts_server)
     return tts_module

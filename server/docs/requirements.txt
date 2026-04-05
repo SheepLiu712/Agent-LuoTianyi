@@ -15,3 +15,4 @@ beautifulsoup4
 cryptography
 Pillow
 flashtext
+gsv-tts-lite==0.3.9

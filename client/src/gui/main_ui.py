@@ -79,7 +79,7 @@ class Live2DContainer(QWidget):
         self.gui_config = gui_config
         self.live2d_config: Dict[str, Any] = live2d_config
         self.background_image = None
-        self.thinking_visible = True
+        self.thinking_visible = False
         self.thinking_bubble_pixmap = QPixmap("res/gui/thinking_bubble.png")
         self.thinking_bubble_label = QLabel(self.live2d_widget)
         self.thinking_bubble_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -461,11 +461,11 @@ class ChatWidget(QWidget):
             self.agent.on_send_image(file_path, bubble)
 
 
-    def add_message(self, type: str, content: str, is_user: bool) -> ChatBubble | ChatImageBubble:
+    def add_message(self, type: str, content: str, conv_uuid: str = "", is_user: bool = False) -> ChatBubble | ChatImageBubble:
         if type == "image":
-            bubble = ChatImageBubble(content, conv_uuid="", is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
+            bubble = ChatImageBubble(content, conv_uuid=conv_uuid, is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
         elif type == "text":
-            bubble = ChatTextBubble(content, conv_uuid="", is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
+            bubble = ChatTextBubble(content, conv_uuid=conv_uuid, is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
 
         self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
         QApplication.processEvents() # Ensure layout updates
@@ -492,13 +492,13 @@ class ChatWidget(QWidget):
         if not text:
             return
         
-        bubble = self.add_message("text", text, is_user=True)
+        bubble = self.add_message("text", text, conv_uuid="", is_user=True)
         self.input_box.clear()
         
         self.agent.on_send_text(text, bubble)
 
-    def on_agent_response(self, text):
-        self.add_message("text", text, is_user=False)
+    def on_agent_response(self, uuid: str, text: str):
+        self.add_message("text", text, conv_uuid=uuid, is_user=False)
 
     def on_agent_thinking(self, is_thinking: bool):
         self.thinking_changed.emit(is_thinking)

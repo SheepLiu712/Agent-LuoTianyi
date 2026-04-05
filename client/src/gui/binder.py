@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 
 
 class AgentBinder(QObject):
-    response_signal = Signal(str)
+    response_signal = Signal(str, str)  # uuid, text
     delete_signal = Signal()
     free_signal = Signal(bool)
     history_signal = Signal(list, int)  # history_list, current_top_index
@@ -42,9 +42,9 @@ class AgentBinder(QObject):
 
         self.msg_to_bubble: Dict[str, ChatBubble] = {}  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
 
-    def emit_response_signal(self, text: str):
+    def emit_response_signal(self, uuid: str, text: str):
         # 让QT框架外的成员能触发信号
-        self.response_signal.emit(text)
+        self.response_signal.emit(uuid, text)
 
     def emit_update_signal(self, msg_id: str, text: str):
         '''

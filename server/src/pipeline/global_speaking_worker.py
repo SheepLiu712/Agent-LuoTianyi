@@ -51,9 +51,21 @@ class GlobalSpeakingWorker:
                 if isinstance(job.job_content, OneSentenceChat):
                     text = job.job_content.content
                     expression = job.job_content.expression
-                    audio = await self.agent.tts_say(text, job.job_content.tone)
-                    resp = ChatResponse(uuid=job.job_content.uuid, audio=audio, is_final_package=True, text=text, expression=expression)
-                    await job.send_reply_callback(resp)
+                    generator = self.agent.tts_say_stream(text, job.job_content.tone)
+                    is_first = True
+                    async for audio_chunk in generator:
+                        chunk_text = text if is_first else ""  # 只有第一个chunk携带文字，后续chunk的text字段置空
+                        is_first = False
+                        resp = ChatResponse(uuid=job.job_content.uuid, audio=audio_chunk, is_final_package=False, text=chunk_text, expression=expression)
+                        await job.send_reply_callback(resp)
+                    final_resp = ChatResponse(
+                        uuid=job.job_content.uuid,
+                        audio="",
+                        is_final_package=True,
+                        text="",
+                        expression="",
+                    )  # 发送一个空的 final package，通知前端本轮说话结束
+                    await job.send_reply_callback(final_resp)
                 elif isinstance(job.job_content, SongSegmentChat):
                     text = f"(唱了《{job.job_content.song}》){job.job_content.lyrics}"
                     expression = "唱歌"
