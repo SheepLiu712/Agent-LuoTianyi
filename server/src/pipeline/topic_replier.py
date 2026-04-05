@@ -30,9 +30,14 @@ class TopicReplier:
         self.topic_queue = asyncio.Queue()
         self.processor_task: asyncio.Task | None = None
         self.service_hub: "ServiceHub" | None = None
+        self.is_processing: bool = False
+        self.change_state_callback : Optional[Callable[[bool, bool], Awaitable[None]]] = None # thinking, speaking
 
     def set_service_hub(self, service_hub: "ServiceHub"):
         self.service_hub = service_hub
+
+    def set_change_state_callback(self, change_state_callback: Callable[[bool, bool], Awaitable[None]]):
+        self.change_state_callback = change_state_callback
 
     def start_processing(self):
         if self.processor_task is None or self.processor_task.done():
@@ -47,6 +52,9 @@ class TopicReplier:
             topic = None
             try:
                 topic = await self.topic_queue.get()
+                self.is_processing = True
+                if self.change_state_callback is not None:
+                    await self.change_state_callback(thinking = True) # 进入思考状态
                 await self._reply_one_topic(topic)
 
             except asyncio.CancelledError:
@@ -58,6 +66,7 @@ class TopicReplier:
             finally:
                 if topic is not None:
                     self.topic_queue.task_done()
+                self.is_processing = False
 
     async def _reply_one_topic(self, topic: "ExtractedTopic") -> None:
         if self.service_hub is None or self.service_hub.agent is None:

@@ -51,6 +51,7 @@ class GlobalSpeakingWorker:
                 if isinstance(job.job_content, OneSentenceChat):
                     text = job.job_content.content
                     expression = job.job_content.expression
+                    audio = await self.agent.tts_say(text, job.job_content.tone)
                     resp = ChatResponse(uuid=job.job_content.uuid, audio=audio, is_final_package=True, text=text, expression=expression)
                     await job.send_reply_callback(resp)
                 elif isinstance(job.job_content, SongSegmentChat):

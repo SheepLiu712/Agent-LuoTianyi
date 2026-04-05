@@ -54,6 +54,11 @@ class AgentMessage:
     reply_to: str | None
 
 @dataclass
+class AgentStateMessage:
+    state: str
+    reply_to: str | None
+
+@dataclass
 class ErrorMessage:
     code: str
     message: str

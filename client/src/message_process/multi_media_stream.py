@@ -4,14 +4,10 @@ import io
 import queue
 import threading
 import time
+import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable
-
 from ..utils.logger import get_logger
 from ..utils.audio_processor import extract_audio_amplitude, decode_from_base64, AudioPlayerStream, calculate_amplitude_from_chunk
-
-if TYPE_CHECKING:
-    from ..live2d import Live2dModel
 
 @dataclass
 class AudioProperties:
@@ -74,6 +70,8 @@ class MultiMediaStream:
         self._stop_mouth_event: threading.Event | None = None # 停止嘴型线程的事件
         
         self.local_audio_properties: AudioProperties | None = None
+        self._local_play_thread: threading.Thread | None = None
+        self._state_lock = threading.Lock()
 
     def start(self):
         self.audio_process.start()
@@ -81,6 +79,43 @@ class MultiMediaStream:
     def feed(self, audio_data_base64: str):
         audio_data = decode_from_base64(audio_data_base64)
         self._append_audio_stream(audio_data)
+
+    def feed_local_wav(self, wav_path: str) -> bool:
+        if not wav_path or not os.path.exists(wav_path):
+            return False
+
+        with self._state_lock:
+            if self.is_busy():
+                return False
+            self._local_play_thread = threading.Thread(
+                target=self._play_local_wav_worker,
+                args=(wav_path,),
+                daemon=True,
+            )
+            self._local_play_thread.start()
+            return True
+
+    def is_busy(self) -> bool:
+        if self._mouth_thread and self._mouth_thread.is_alive():
+            return True
+        if self._local_play_thread and self._local_play_thread.is_alive():
+            return True
+        return False
+
+    def _play_local_wav_worker(self, wav_path: str):
+        try:
+            with open(wav_path, "rb") as f:
+                audio_data = f.read()
+            if not audio_data:
+                return
+
+            self._append_audio_stream(audio_data)
+            self._close_audio_stream(wait_audio_finish=True)
+        except Exception as exc:
+            self.logger.error(f"Failed to play local wav file {wav_path}: {exc}")
+        finally:
+            with self._state_lock:
+                self._local_play_thread = None
 
     def finish_one_sentense(self):
         self._close_audio_stream(wait_audio_finish=True)

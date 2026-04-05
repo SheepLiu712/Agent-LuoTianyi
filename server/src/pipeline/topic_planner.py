@@ -35,7 +35,6 @@ class TopicPlanner:
         self.processor_task: Optional[asyncio.Task] = None
         self.topic_consumer = None  # 由外部设置的回调函数，用于接收提取的话题
         self._wake_event = asyncio.Event()
-        self._state_lock = asyncio.Lock()
         self._unread_version: int = 0
         self.logger.info(f"TopicPlanner initialized for user_id={user_id}")
 
@@ -53,7 +52,7 @@ class TopicPlanner:
 
         unread_msg = UnreadStore.trans_ChatInputEvent_to_UnreadMessage(message)
         await self.unread_store.append(unread_msg)
-        await self.listen_timer.set_deadline(timeout=0.5)  # 新消息来了，取消之前的等待超时
+        await self.listen_timer.set_deadline(timeout=1)  # 新消息来了，取消之前的等待超时
         self._wake_event.set()
     
     def start_processing(self):
@@ -78,7 +77,7 @@ class TopicPlanner:
                         continue
                     except asyncio.TimeoutError:
                         should_force_extract = True
-                elif has_unread and deadline is None: # 有未读且无需等待：直接提取。
+                elif has_unread and deadline is None: # 有未读且无需等待：直接提取。目前这个状态不会进入，之后可能有用。
                     pass
                 else: # 没有未读：等待唤醒。
                     await self._wake_event.wait()
@@ -131,7 +130,7 @@ class TopicPlanner:
 
         if has_new_message:
             self._wake_event.set()
-            await self.listen_timer.set_deadline(timeout=0.5)  # 已经有新消息了，不需要等待补全，直接进入下一轮提取
+            await self.listen_timer.set_deadline(timeout=1)  # 已经有新消息了，不需要等待补全，直接进入下一轮提取
         else:
             if remaining_unread:
                 await self.listen_timer.set_deadline()  # 没有新消息，但还有剩余未读，继续等待补全

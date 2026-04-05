@@ -76,7 +76,7 @@ class TopicExtractor:
             selected_messages = [unread_snapshot.messages[i] for i in source_indexes]
             topic_type = str(item.get("topic_types") or item.get("topic_type") or "chat").lower()
 
-            if topic_type == "incomplete" and not force_complete:
+            if topic_type == "incomplete" and (not force_complete or len(topics) >= 1): # 如果已经有完整话题了，对于不完整话题就再等一等，放入剩余未读里，等待补全；如果没有完整话题了，不管怎样都放入话题里，强制完成这个不完整话题
                 remaining.extend(selected_messages)
                 continue
 

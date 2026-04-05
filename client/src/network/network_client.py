@@ -104,9 +104,7 @@ class NetworkClient:
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
-
-    def set_agent_message_listener(self, listener: Callable[[dict], None] | None):
-        self.ws_transport.set_agent_message_listener(listener)
+        
 
     def get_history(self, count: int, end_index: int) -> Tuple[List[ConversationItem], int]:
         if not self.user_id:
@@ -135,9 +133,9 @@ class NetworkClient:
             return [], -1
 
 
-    def network_set_message_listener(self, listener: Callable[[dict], None] | None):
-        self.set_agent_message_listener(listener)
-    
+    def network_set_message_listener(self, listener: Callable[[dict], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
+        self.ws_transport.set_agent_message_listener(listener, agent_state_listener)
+
     ###### Internal methods ######
 
     def _clean_history(self, history_items: List[ConversationItem]) -> List[ConversationItem]:

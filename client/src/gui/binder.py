@@ -10,16 +10,17 @@ if TYPE_CHECKING:
 
 class AgentBinder(QObject):
     response_signal = Signal(str)
-    update_signal = Signal(str, str)
     delete_signal = Signal()
     free_signal = Signal(bool)
     history_signal = Signal(list, int)  # history_list, current_top_index
+    agent_thinking_signal = Signal(bool) # 是否正在思考中
 
     def __init__(
         self,
         send_text_callback: Callable[[str], str],
         send_image_callback: Callable[[str], str],
         send_typing_callback: Callable[[], None],
+        play_local_tts_callback: Callable[[str], bool],
         fetch_history_callback: Callable[[int, int], tuple],
         set_model_callback: Callable[[Live2dModel], None],
         auto_login_callback: Callable[[str, str], bool],
@@ -32,6 +33,7 @@ class AgentBinder(QObject):
         self.send_text_callback = send_text_callback
         self.send_image_callback = send_image_callback
         self.send_typing_callback = send_typing_callback
+        self.play_local_tts_callback = play_local_tts_callback
         self.fetch_history_callback = fetch_history_callback
         self.set_model_callback = set_model_callback
         self.auto_login_callback = auto_login_callback
@@ -61,6 +63,11 @@ class AgentBinder(QObject):
         elif text == "submitted":
             self.msg_to_bubble.pop(msg_id, None)  # 提交成功后移除映射关系
             return
+        
+    def emit_agent_thinking_signal(self, state: str):
+        print(state)
+        is_thinking = (state == "thinking")
+        self.agent_thinking_signal.emit(is_thinking)
 
     def on_auto_login(self, username: str, token: str) -> bool:
         if self.auto_login_callback:
@@ -96,6 +103,11 @@ class AgentBinder(QObject):
 
     def on_send_typing(self):
         self.send_typing_callback()
+
+    def on_play_local_tts(self, conv_uuid: str) -> bool:
+        if self.play_local_tts_callback:
+            return self.play_local_tts_callback(conv_uuid)
+        return False
 
 
     def on_load_history(self, count: int, end_index: int = -1):

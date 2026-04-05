@@ -24,7 +24,7 @@ class MessageProcessor:
                 send_text_func: Callable[[str], dict],
                 send_image_func: Callable[..., dict],
                 send_typing_func: Callable[[], dict],
-                message_listener_setter: Callable[[Callable[[AgentMessage], None] | None], None]):
+                message_listener_setter: Callable[[Callable[[AgentMessage], None] | None, Callable[[bool], None] | None], None]):
         self._event_queue: queue.Queue = queue.Queue()
         self._send_queue: deque[OutgoingMessage] = deque()
         self._send_cond = threading.Condition()
@@ -33,6 +33,7 @@ class MessageProcessor:
         self.model: Live2dModel | None = None
         self.response_signal: Callable[[str], None] | None = None # 为ui增加一条回复信息
         self.update_bubble_signal: Callable[[str, str], None] | None = None # 更新气泡信息
+        self.agent_thinking_signal: Callable[[bool], None] | None = None # 显示agent正在思考的状态
 
         self._reply_counter = 0
         self._running = True
@@ -40,11 +41,14 @@ class MessageProcessor:
 
         self.multimedia_stream: MultiMediaStream | None = MultiMediaStream()
 
-        message_listener_setter(self.feed_agent_msg)
+        message_listener_setter(self.feed_agent_msg, self.change_agent_state)
         self.send_text_func = send_text_func
         self.send_image_func = send_image_func
         self.send_typing_func = send_typing_func
         self.start()
+
+        self.processing_uuid = None
+        self.processing_audio: str = ""
 
     def start(self):
         self._listener_thread.start()
@@ -106,7 +110,22 @@ class MessageProcessor:
             self._send_cond.notify()
         return local_id
 
+    def play_local_tts_by_uuid(self, conv_uuid: str) -> bool:
+        if not conv_uuid or not self.multimedia_stream:
+            return False
+
+        wav_path = os.path.join(os.getcwd(), "temp", "tts_output", f"{conv_uuid}.wav")
+        if not os.path.exists(wav_path):
+            return False
+        return self.multimedia_stream.feed_local_wav(wav_path)
+
     def process_transport_message(self, response: AgentMessage): # 真正处理消息的函数
+        if self.processing_uuid is None:
+            self.processing_uuid = response.uuid
+            self.processing_audio = ""
+        elif self.processing_uuid != response.uuid: # 如果uuid不同，说明是新的消息了，重置状态
+            self.processing_uuid = response.uuid
+            self.processing_audio = ""
 
         if response.text:
             self.response_signal(response.text)
@@ -116,9 +135,31 @@ class MessageProcessor:
 
         if response.audio:
             self.multimedia_stream.feed(response.audio)
+            self.processing_audio += response.audio
 
         if response.is_final_package:
             self.multimedia_stream.finish_one_sentense()
+            # 将最终的音频结果保存到本地
+            self._save_audio_to_temp(self.processing_audio, self.processing_uuid, ".wav")
+            self.processing_audio = ""
+            self.processing_uuid = None
+    
+    def _save_audio_to_temp(self, audio_data_base64: str, uuid: str, postfix: str) -> str:
+        try:
+            audio_data = base64.b64decode(audio_data_base64)
+            cwd = os.getcwd()
+            new_file_path = os.path.join(
+                cwd,
+                "temp",
+                "tts_output",
+                uuid + postfix,
+            )
+            os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
+            with open(new_file_path, "wb") as f:
+                f.write(audio_data)
+            return new_file_path
+        except Exception as exc:
+            return ""
 
     def _send_loop(self):
         while self._running:
@@ -155,10 +196,15 @@ class MessageProcessor:
 
     def feed_agent_msg(self, payload: AgentMessage): # 接收WS传来的消息，放入队列等待处理
         self._event_queue.put(payload)
+    
+    def change_agent_state(self, state: str):
+        if self.agent_thinking_signal:
+            self.agent_thinking_signal(state)
 
-    def set_signals(self, response_signal: Callable[[str], None], update_bubble_signal: Callable[[str, str], None]):
+    def set_signals(self, response_signal: Callable[[str], None], update_bubble_signal: Callable[[str, str], None], agent_thinking_signal: Callable[[str], None]):
         self.response_signal = response_signal
         self.update_bubble_signal = update_bubble_signal
+        self.agent_thinking_signal = agent_thinking_signal
 
     def set_model(self, model: Live2dModel):
         self.model = model

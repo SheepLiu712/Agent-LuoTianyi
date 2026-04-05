@@ -2,8 +2,8 @@
 import sys
 import os
 import json
-from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint
-from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon
+from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, Signal
+from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
                                QTextEdit, QScrollArea, QLabel, 
                                 QFrame, QPushButton, QFileDialog, )
@@ -79,7 +79,39 @@ class Live2DContainer(QWidget):
         self.gui_config = gui_config
         self.live2d_config: Dict[str, Any] = live2d_config
         self.background_image = None
+        self.thinking_visible = True
+        self.thinking_bubble_pixmap = QPixmap("res/gui/thinking_bubble.png")
+        self.thinking_bubble_label = QLabel(self.live2d_widget)
+        self.thinking_bubble_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.thinking_bubble_label.setStyleSheet("background: transparent;")
         self.load_background()
+        self.update_thinking_bubble()
+
+    def update_thinking_bubble(self):
+        if self.thinking_bubble_pixmap.isNull():
+            self.thinking_bubble_label.hide()
+            return
+
+        bubble_width = max(1, int(self.width() / 4))
+        scaled = self.thinking_bubble_pixmap.scaledToWidth(
+            bubble_width,
+            Qt.TransformationMode.SmoothTransformation
+        )
+        self.thinking_bubble_label.setPixmap(scaled)
+        self.thinking_bubble_label.resize(scaled.size())
+
+        x = int((self.width() - self.thinking_bubble_label.width()) * 0.94)
+        y = int(self.height() * 0.25)
+        self.thinking_bubble_label.move(x, y)
+        self.thinking_bubble_label.raise_()
+        self.thinking_bubble_label.setVisible(self.thinking_visible)
+
+    def set_thinking_visible(self, visible: bool):
+        self.thinking_visible = visible
+        if self.thinking_bubble_pixmap.isNull():
+            self.thinking_bubble_label.hide()
+            return
+        self.thinking_bubble_label.setVisible(visible)
         
     def load_background(self):
         bg_path = self.gui_config["live2d_background"]["image_path"]
@@ -102,6 +134,7 @@ class Live2DContainer(QWidget):
         # For now, let's make the Live2D widget fill this container, 
         # and we will handle the aspect ratio in the parent layout or by enforcing size constraints.
         self.live2d_widget.resize(self.size())
+        self.update_thinking_bubble()
         super().resizeEvent(event)
 
     def paintEvent(self, event):
@@ -187,13 +220,15 @@ class HoverButton(QPushButton):
         super().leaveEvent(event)
 
 class ChatWidget(QWidget):
+    thinking_changed = Signal(bool)
+
     def __init__(self, parent=None, config: Dict = None, agent_binder: AgentBinder = None):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.agent = agent_binder if agent_binder is not None else AgentBinder()
         self.agent.response_signal.connect(self.on_agent_response)
-        self.agent.update_signal.connect(self.on_agent_update)
         self.agent.delete_signal.connect(self.on_agent_delete)
+        self.agent.agent_thinking_signal.connect(self.on_agent_thinking)
         
         # History loading
         self.agent.history_signal.connect(self.on_history_loaded)
@@ -353,9 +388,9 @@ class ChatWidget(QWidget):
             is_user = (item.source == "user")
             if item_type == "image":
                 image_path = item.content
-                bubble = ChatImageBubble(image_path, is_user)
+                bubble = ChatImageBubble(image_path, conv_uuid=item.uuid, is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
             else:
-                bubble = ChatTextBubble(item.content, is_user)
+                bubble = ChatTextBubble(item.content, conv_uuid=item.uuid, is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
             self.history_layout.insertWidget(0, bubble)
             
         # Restore scroll position
@@ -428,9 +463,9 @@ class ChatWidget(QWidget):
 
     def add_message(self, type: str, content: str, is_user: bool) -> ChatBubble | ChatImageBubble:
         if type == "image":
-            bubble = ChatImageBubble(content, is_user)
+            bubble = ChatImageBubble(content, conv_uuid="", is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
         elif type == "text":
-            bubble = ChatTextBubble(content, is_user)
+            bubble = ChatTextBubble(content, conv_uuid="", is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
 
         self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
         QApplication.processEvents() # Ensure layout updates
@@ -465,16 +500,8 @@ class ChatWidget(QWidget):
     def on_agent_response(self, text):
         self.add_message("text", text, is_user=False)
 
-    def on_agent_update(self, request_id, text):
-        bubble = self.agent_bubbles.get(request_id)
-        if bubble is None:
-            bubble = ChatTextBubble(text, is_user=False)
-            self.agent_bubbles[request_id] = bubble
-            self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
-        else:
-            bubble.set_text(text)
-        QApplication.processEvents()
-        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+    def on_agent_thinking(self, is_thinking: bool):
+        self.thinking_changed.emit(is_thinking)
     
     def on_agent_delete(self):
         count = self.history_layout.count()
@@ -512,6 +539,7 @@ class MainWindow(QWidget):
 
         # Right Side (Chat)
         self.chat_widget = ChatWidget(config=gui_config["chat_window"], agent_binder=ui_binder)
+        self.chat_widget.thinking_changed.connect(self.live2d_container.set_thinking_visible)
         self.layout.addWidget(self.live2d_container)
         self.layout.addWidget(self.v_line)
         self.layout.addWidget(self.chat_widget)

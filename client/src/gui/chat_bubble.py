@@ -1,4 +1,6 @@
-from PySide6.QtCore import Qt
+from typing import Callable
+
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QFontMetrics, QTextOption
 from PySide6.QtWidgets import ( QWidget, QHBoxLayout,
                                QTextEdit, QLabel, 
@@ -7,12 +9,31 @@ from PySide6.QtWidgets import ( QWidget, QHBoxLayout,
 
 agent_play_icon_path = "res/gui/play_agent_msg.png"
 agent_play_icon = None
+
+
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
 class ChatBubble(QWidget):
-    def __init__(self, is_user: bool = False, parent=None):
+    def __init__(
+        self,
+        conv_uuid: str = "",
+        is_user: bool = False,
+        parent=None,
+        play_audio_callback: Callable[[str], bool] | None = None,
+    ):
         super().__init__(parent)
         self.is_user = is_user
         self._label: QLabel | None = None
         self.content_widget: QWidget | None = None
+        self.conv_uuid = conv_uuid
+        self.play_audio_callback = play_audio_callback
         self.init_ui()
 
     def build_content_widget(self) -> QWidget:
@@ -28,7 +49,7 @@ class ChatBubble(QWidget):
         self.content_widget = self.build_content_widget()
 
         if self.is_user:
-            self._label = QLabel()
+            self._label = ClickableLabel()
             self._label.setFixedSize(24, 24)
             self._label.setStyleSheet("background-color: transparent;")
             self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -38,11 +59,13 @@ class ChatBubble(QWidget):
             layout.addSpacing(0)
             layout.addWidget(self.content_widget)
         else: # agent
-            self._label = QLabel()
+            self._label = ClickableLabel()
             self._label.setFixedSize(24, 24)
             self._label.setStyleSheet("background-color: transparent;")
             self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._label.setPixmap(agent_play_icon)
+            self._label.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._label.clicked.connect(self._on_agent_label_clicked)
             layout.addWidget(self.content_widget)
             layout.addSpacing(0)
             layout.addWidget(self._label)
@@ -50,6 +73,15 @@ class ChatBubble(QWidget):
 
         self.setLayout(layout)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+
+    def _on_agent_label_clicked(self):
+        if self.is_user:
+            return
+        if not self.conv_uuid:
+            return
+        if not self.play_audio_callback:
+            return
+        self.play_audio_callback(self.conv_uuid)
 
     def set_status(self, status: str):
         if not self._label:
@@ -78,10 +110,11 @@ class ChatBubble(QWidget):
 
 
 class ChatImageBubble(ChatBubble):
-    def __init__(self, image_path, is_user=False, parent=None):
+    def __init__(self, image_path, conv_uuid="", is_user=False, parent=None, play_audio_callback: Callable[[str], bool] | None = None):
         self.image_label: QLabel | None = None
         self.image_path = image_path
-        super().__init__(is_user=is_user, parent=parent)
+        self.conv_uuid = conv_uuid
+        super().__init__(conv_uuid=conv_uuid, is_user=is_user, parent=parent, play_audio_callback=play_audio_callback)
 
     def build_content_widget(self) -> QWidget:
         self.image_label = QLabel()
@@ -140,10 +173,11 @@ class CustomTextEdit(QTextEdit):
             self.selectAll()
 
 class ChatTextBubble(ChatBubble):
-    def __init__(self, text, is_user=False, parent=None):
+    def __init__(self, text, conv_uuid="", is_user=False, parent=None, play_audio_callback: Callable[[str], bool] | None = None):
         self.text = text
+        self.conv_uuid = conv_uuid
         self.text_edit: CustomTextEdit | None = None
-        super().__init__(is_user=is_user, parent=parent)
+        super().__init__(conv_uuid=conv_uuid, is_user=is_user, parent=parent, play_audio_callback=play_audio_callback)
         self.update_bubble_size()
 
     def build_content_widget(self) -> QWidget:

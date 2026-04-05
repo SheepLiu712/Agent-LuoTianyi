@@ -161,9 +161,9 @@ tts_module = None
 def init_tts_module(tts_config: Dict[str, Any]) -> TTSModule:
     global tts_server, tts_module
     server_config_path = tts_config.get("server_config_path", "config/tts_infer.yaml")
-    # tts_server = TTSServer(config_path=server_config_path)
-    # tts_server.start()
-    # api_url = tts_server.get_api_url()
-    api_url = "http://127.0.0.1:50021"
+    tts_server = TTSServer(config_path=server_config_path)
+    tts_server.start()
+    api_url = tts_server.get_api_url()
+    # api_url = "http://127.0.0.1:50021"
     tts_module = TTSModule(tts_config=tts_config, api_url=api_url)
     return tts_module

@@ -6,7 +6,7 @@ from typing import Callable
 
 import websockets
 
-from .event_types import build_event, normalize_agent_message, normalize_error_message, parse_server_message, WSEventType, WSMessage, AgentMessage
+from .event_types import build_event, normalize_agent_message, normalize_error_message, parse_server_message, WSEventType, WSMessage, AgentMessage, AgentStateMessage
 from ..utils.logger import get_logger
 
 class WsTransport:
@@ -28,6 +28,7 @@ class WsTransport:
         self._submit_lock = threading.Lock()
         self._ack_waiter: dict | None = None
         self._agent_message_listener: Callable[[AgentMessage], None] | None = None # 收到的消息发送到哪里
+        self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -61,9 +62,10 @@ class WsTransport:
             except Exception:
                 pass
 
-    def set_agent_message_listener(self, listener: Callable[[AgentMessage], None] | None) -> None:
+    def set_agent_message_listener(self, agent_message_listener: Callable[[AgentMessage], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
         with self._lock:
-            self._agent_message_listener = listener
+            self._agent_message_listener = agent_message_listener
+            self._agent_state_listener = agent_state_listener
 
     def submit_user_text(self, text: str, ack_timeout: float = 10.0) -> dict:
         return self._submit_user_event(WSEventType.USER_TEXT, payload={"message": text}, ack_timeout=ack_timeout)
@@ -240,9 +242,6 @@ class WsTransport:
                 self._complete_ack_waiter(ok=True, error=None, reply_to=msg.reply_to)
                 continue
 
-            if event_type == WSEventType.AGENT_STATE_CHANGED:
-                continue
-
             if event_type == WSEventType.AGENT_MESSAGE:
                 agent_msg = normalize_agent_message(msg)
                 self._emit_agent_message(agent_msg)
@@ -250,6 +249,12 @@ class WsTransport:
 
             if event_type == WSEventType.HB_PONG:
                 ping_id = msg.payload.get("ping_id")
+                continue
+
+            if event_type == WSEventType.AGENT_STATE_CHANGED:
+                state = msg.payload.get("state", "waiting")
+                self._emit_agent_state(state)
+                continue
 
             if event_type in (WSEventType.SERVER_ERROR, WSEventType.AUTH_ERROR):
                 error_msg = normalize_error_message(msg)
@@ -316,6 +321,14 @@ class WsTransport:
             return
         try:
             self._agent_message_listener(agent_msg)
+        except Exception:
+            pass
+
+    def _emit_agent_state(self, state_msg: str) -> None:
+        if not self._agent_state_listener:
+            return
+        try:
+            self._agent_state_listener(state_msg)
         except Exception:
             pass
 

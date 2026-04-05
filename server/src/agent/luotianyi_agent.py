@@ -331,6 +331,10 @@ class LuoTianyiAgent:
             return None
         _, audio_bytes = self.singing_manager.get_song_segment(song_name, segment)
         return audio_bytes
+    
+    async def tts_say(self, text: str, tone: str) -> str:
+        bytes = await self.tts_engine.synthesize_speech_with_tone(text, tone)
+        return self.tts_engine.encode_audio_to_base64(bytes)
 
     def _extract_song_name(self, text: str) -> str:
         content = (text or "").strip()

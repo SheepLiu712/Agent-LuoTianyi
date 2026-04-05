@@ -30,9 +30,11 @@ class ChatStream:
         self.topic_planner = TopicPlanner(username=self.user_name, user_id=self.user_uuid)
         self.topic_replier = TopicReplier(username=self.user_name, user_id=self.user_uuid, send_reply_callback=self.feed_response)
         self.topic_planner.set_topic_consumer(self.topic_replier.add_topic)
+        self.topic_replier.set_change_state_callback(self.change_state)
         self.response_queue: asyncio.Queue[ChatResponse] = asyncio.Queue()
         self.response_sender_task: asyncio.Task | None = None
 
+        self.state = self.STATE_WAITING
         self.state_lock = asyncio.Lock()
 
     def set_service_hub(self, service_hub: ServiceHub):
@@ -82,6 +84,18 @@ class ChatStream:
                 if response is not None:
                     self.response_queue.task_done()
 
+    async def change_state(self, thinking: Optional[bool] = None, speaking: Optional[bool] = None):
+        async with self.state_lock:
+            if thinking and self.state != self.STATE_THINKING: # 由replier调用，进入思考状态时必然更新状态
+                self.state = self.STATE_THINKING
+                await self._send_agent_state(self.STATE_THINKING)
+                return
+            if speaking: # 由chat_stream的_send_response调用，此时如果不在思考，则认为进入WAITING状态
+                if not self.topic_replier.is_processing and self.state != self.STATE_WAITING:
+                    self.state = self.STATE_WAITING
+                    await self._send_agent_state(self.STATE_WAITING)
+                return
+
     async def _send_response(self, response: ChatResponse) -> bool:
         if self.ws_connection is None or self.ws_connection.websocket is None:
             return False
@@ -90,6 +104,7 @@ class ChatStream:
             self.logger.warning("WebSocket service is not available, cannot send response")
             return False
         try:
+            await self.change_state(speaking=True) # 发送回复前更新状态
             event = ws_service._make_event(
                 WSEventType.AGENT_MESSAGE,
                 response.model_dump() if hasattr(response, "model_dump") else response.dict(),
@@ -98,6 +113,25 @@ class ChatStream:
             return True
         except Exception as e:
             self.logger.warning(f"Send response failed, will retry: {e}")
+            return False
+        
+    async def _send_agent_state(self, state: str) -> bool:
+        if self.ws_connection is None or self.ws_connection.websocket is None:
+            return False
+        ws_service = self.service_hub.websocket_service if self.service_hub else None
+        if ws_service is None:
+            self.logger.warning("WebSocket service is not available, cannot send agent state")
+            return False
+        try:
+            self.logger.info(f"Sending agent state change event: {state}")
+            event = ws_service._make_event(
+                WSEventType.AGENT_STATE_CHANGED,
+                {"state": state},
+            )
+            await self.ws_connection.websocket.send_json(event)
+            return True
+        except Exception as e:
+            self.logger.warning(f"Send agent state failed, will retry: {e}")
             return False
 
     def _start_response_sender(self):
