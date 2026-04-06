@@ -27,7 +27,6 @@ if "%INSTALL_CUDA%"=="1" (
     echo Not installing PyTorch with CUDA support, PyTorch will be installed later.
 )
 
-pip install -r doc/gsv_requirements.txt
 call conda install ffmpeg -y
 pip install -r doc/requirements.txt
 pause

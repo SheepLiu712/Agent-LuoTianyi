@@ -170,5 +170,32 @@
                 "prompt_name": "memory_write_prompt"
             }
         }
+    },
+    "activity_maker": {
+        "return_user_threshold_seconds": 432000,
+        "silence_threshold_seconds": 180,
+        "activity_trigger_threshold": 5,
+        "inactivity_decay_interval_seconds": 180,
+        "silence_check_interval_seconds": 5,
+        "silence_trigger_cooldown_seconds": 180,
+        "activity_res": {
+            "first_login": {
+                "text": ["你好呀，我是洛天依！","欢迎来到这里！今天想聊点什么呢？"],
+                "audio_path": ["res/tts/static_audio/first_greet_1.wav","res/tts/static_audio/first_greet_2.wav"]
+            },
+            "return_login": {
+                "prompt": "return_login_activity_prompt"
+            },
+            "user_silence": {
+                "prompt": "user_silence_activity_prompt"
+            }
+        },
+        "llm": {
+            "api_type": "openai",
+            "model": "qwen3.5-plus",
+            "api_key": "$QWEN_API_KEY",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "enable_thinking": false
+        }
     }
 }

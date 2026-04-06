@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..agent.luotianyi_agent import LuoTianyiAgent
+    from ..agent.activity_maker import ActivityMaker
     from ..pipeline.global_chat_stream_manager import GlobalChatStreamManager
     from ..pipeline.global_speaking_worker import GlobalSpeakingWorker
     from .websocket_service import WebSocketService
@@ -21,5 +22,6 @@ class ServiceHub:
     gcsm: "GlobalChatStreamManager"
     global_speaking_worker: "GlobalSpeakingWorker"
     agent: "LuoTianyiAgent"
+    activity_maker: "ActivityMaker"
 
     

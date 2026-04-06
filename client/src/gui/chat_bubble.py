@@ -89,7 +89,8 @@ class ChatBubble(QWidget):
 
         icon_path = None
         if status == "submitted":
-            icon_path = "res/gui/submitted_msg.png"
+            # icon_path = "res/gui/submitted_msg.png"
+            icon_path = None # 提交成功后不显示任何状态
         elif status == "failed":
             icon_path = "res/gui/failed_msg.png"
         elif status == "waiting":

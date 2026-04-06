@@ -7,6 +7,10 @@ from ..interface.service_hub import ServiceHub
 from .chat_stream import ChatStream
 from ..utils.logger import get_logger
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..agent.activity_maker import ActivityMaker
+
 
 class GlobalChatStreamManager:
     """
@@ -17,6 +21,7 @@ class GlobalChatStreamManager:
     def __init__(self):
         self.user_streams: Dict[str, ChatStream] = {}
         self.cleanup_task: asyncio.Task | None = None
+        self.activity_maker: "ActivityMaker" | None = None  # 在 ActivityMaker 初始化后会被注册进来，方便 GCSM 调用它的接口
         self.logger = get_logger("GlobalChatStreamManager")
 
     def get_or_register_chat_stream(
@@ -32,20 +37,30 @@ class GlobalChatStreamManager:
         if user_uuid is None:
             raise ValueError("WebSocketConnection must have a user_uuid for chat stream management.")
 
-        if user_uuid not in self.user_streams:
+        if user_uuid not in self.user_streams: # 创建新的聊天流实例并注册
             chat_stream = ChatStream(ws_connection)
             chat_stream.set_service_hub(service_hub)
             chat_stream.start_if_needed()
             self.user_streams[user_uuid] = chat_stream
+            if self.activity_maker is not None:
+                asyncio.create_task(self.activity_maker.add_user(user_uuid, chat_stream, service_hub))
+                asyncio.create_task(self.activity_maker.flush_login_activities(user_uuid, chat_stream, service_hub))
             return chat_stream
 
         chat_stream = self.user_streams[user_uuid]
         chat_stream.set_service_hub(service_hub)
         chat_stream.reconnect(ws_connection)
+        if self.activity_maker is not None:
+            asyncio.create_task(self.activity_maker.add_user(user_uuid, chat_stream, service_hub))
+            asyncio.create_task(self.activity_maker.flush_login_activities(user_uuid, chat_stream, service_hub))
         return chat_stream
 
     def get_stream_by_user_uuid(self, user_uuid: str) -> ChatStream | None:
         return self.user_streams.get(user_uuid)
+    
+    def register_activity_maker(self, activity_maker: "ActivityMaker"):
+        """将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口"""
+        self.activity_maker = activity_maker
 
     def ws_lost_connection(self, ws_connection: WebSocketConnection):
         """
@@ -80,6 +95,8 @@ class GlobalChatStreamManager:
             for user_uuid in expired_user_uuids:
                 chat_stream = self.user_streams[user_uuid]
                 chat_stream.clean_up()
+                if self.activity_maker is not None:
+                    await self.activity_maker.remove_user(user_uuid)
                 del self.user_streams[user_uuid]
                 self.logger.info(f"Cleaned up expired chat stream for user_uuid={user_uuid}")
 

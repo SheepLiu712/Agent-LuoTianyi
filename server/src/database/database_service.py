@@ -123,6 +123,31 @@ def prefill_buffer(db: Session, redis: MemoryStorage, user_id: str, types: List[
         tb.print_exc()
         logger.error(f"Error in prefill_buffer for user {user_id}: {e}")
         return False
+    
+def update_login_time(db: Session, user_id: str) -> float | None:
+    '''
+    将用户的最新登录时间更新为当前时间，并返回距离上次登录的时间差（秒）。如果是第一次登录，则返回 None。
+    '''
+    try:
+        user = db.query(User).filter(User.uuid == user_id).first()
+        if not user:
+            logger.error(f"User {user_id} not found for update_login_time.")
+            return None
+
+        now = datetime.now()
+        last_login_time = user.last_login
+        user.last_login = now
+        db.commit()
+
+        if last_login_time:
+            time_diff = (now - last_login_time).total_seconds()
+            return time_diff
+        else:
+            return None
+    except Exception as e:
+        logger.error(f"Error updating login time for user {user_id}: {e}")
+        db.rollback()
+        return None
 
 
 def add_conversations(db: Session, redis: MemoryStorage, user_id: str, conversation_data: List[ConversationItem], commit=True) -> List[str]:

@@ -117,6 +117,7 @@ def _reset_user(session, redis_client, vector_store, user: User) -> None:
 
     # 重置用户画像
     user.description = "新认识的朋友，还需要了解。"
+    user.last_login = None
     user.context_memory_count = 0
     user.all_memory_count = 0
     user.context_summary = ""

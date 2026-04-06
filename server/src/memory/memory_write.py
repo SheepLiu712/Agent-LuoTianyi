@@ -5,6 +5,7 @@ Memory Write Module
 核心在于将非结构化的对话流转化为结构化、易于检索的知识片段。
 """
 
+import json
 from typing import List, Dict, Any
 from ..utils.logger import get_logger
 from ..database.vector_store import VectorStore, Document
@@ -14,7 +15,7 @@ import time
 import asyncio
 from sqlalchemy.orm import Session
 from ..database.memory_storage import MemoryStorage
-from ..database.database_service import update_user_nickname, write_memory_update
+from ..database.database_service import write_memory_update
 
 from ..types.memory_type import MemoryUpdateCommand
 
@@ -41,31 +42,18 @@ class MemoryWriter:
         """
         分析最近的交互，提取有价值的信息存入记忆库。
         """
-        update_cmd = await self._extract_knowledge(
+        memory_payload = await self._extract_knowledge(
             history,
             current_dialogue=current_dialogue,
             related_memories=related_memories or [],
         )
 
-        # 执行更新命令
-        for funcname, kwargs in update_cmd:
-            lowered = funcname.lower()
-            if lowered == "write_user_memory":
-                content = kwargs.get("content", "")
-                await self.write_user_memory(db, redis, vector_store, user_id, content, commit=commit)
+        # 按新的 JSON 协议写入记忆。
+        for content in memory_payload.get("user_memory", []):
+            await self.write_user_memory(db, redis, vector_store, user_id, content, commit=commit)
 
-            elif lowered == "write_event_memory":
-                content = kwargs.get("content", "")
-                await self.write_event_memory(db, redis, vector_store, user_id, content, commit=commit)
-
-            elif "username" in lowered:
-                new_name = kwargs.get("new_name", "")
-                await asyncio.to_thread(update_user_nickname, db, redis, user_id, new_name, commit=commit)
-
-            elif lowered == "v_add":
-                # 兼容旧 prompt 的命令，默认按 user_memory 处理。
-                content = kwargs.get("document", "")
-                await self.write_user_memory(db, redis, vector_store, user_id, content, commit=commit)
+        for content in memory_payload.get("event_memory", []):
+            await self.write_event_memory(db, redis, vector_store, user_id, content, commit=commit)
 
     async def _extract_knowledge(
         self,
@@ -74,42 +62,67 @@ class MemoryWriter:
         related_memories: List[str],
     ) -> Dict[str, Any]:
         """
-        使用LLM从对话历史中提取有价值的记忆内容。
+        使用 LLM 从对话历史中提取有价值的记忆内容。
+
+        返回格式：
+        {
+            "user_memory": [str, ...],
+            "event_memory": [str, ...],
+        }
+
         Args:
             history: 最近的对话历史
         """
         history_str = history
-
-        cmd = []
+        empty_payload = {"user_memory": [], "event_memory": []}
         try:
             response = await self.llm.generate_response(
+                use_json=True,
                 history=history_str,
                 current_dialogue=current_dialogue,
                 related_memories=related_memories,
             )
-            response = response.split("\n")
-            logger.debug(f"Memory extraction response: {response}")
-            for line in response:
-                if line.startswith("##"):
-                    break
-                if line == "":
-                    continue
-                if not "(" in line or ")" not in line:
-                    logger.warning(f"Unrecognized command format: {line}")
-                    continue
-                funcname, args_str = line.split("(", 1)
-                args_str = args_str.rstrip(")")
-                kwargs = {}
-                for arg in args_str.split(","):
-                    if "=" not in arg:
-                        continue
-                    key, value = arg.split("=", 1)
-                    kwargs[key.strip()] = value.strip().strip("'").strip('"')
-                cmd.append((funcname.strip(), kwargs))
+            payload = self._parse_memory_json_response(response)
+            logger.debug(f"Memory extraction payload: {payload}")
+            return payload
         except Exception as e:
-            logger.warning(f"Error generating memory update commands: {e}")
-        finally:
-            return cmd
+            logger.warning(f"Error generating memory payload: {e}")
+            return empty_payload
+
+    def _parse_memory_json_response(self, response: str) -> Dict[str, List[str]]:
+        """解析 LLM 返回的 JSON，兼容 ```json 代码块包装。"""
+        raw = (response or "").strip()
+
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            raw = "\n".join(lines).strip()
+
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("memory payload must be a JSON object")
+
+        user_memory = data.get("user_memory", [])
+        event_memory = data.get("event_memory", [])
+
+        if not isinstance(user_memory, list) or not isinstance(event_memory, list):
+            raise ValueError("user_memory/event_memory must be lists")
+
+        def _clean_items(items: List[Any]) -> List[str]:
+            cleaned: List[str] = []
+            for item in items:
+                text = str(item or "").strip()
+                if text:
+                    cleaned.append(text)
+            return cleaned
+
+        return {
+            "user_memory": _clean_items(user_memory),
+            "event_memory": _clean_items(event_memory),
+        }
 
     async def write_user_memory(
         self,

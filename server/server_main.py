@@ -30,6 +30,7 @@ from src.interface.service_hub import ServiceHub
 from src.music.song_database import get_song_session, init_song_db
 from src.database.sql_database import get_sql_session
 from src.tts import TTSModule, init_tts_module
+from src.agent.activity_maker import init_activity_maker, get_activity_maker
 from src.agent.luotianyi_agent import LuoTianyiAgent, init_luotianyi_agent, get_luotianyi_agent
 
 from src.utils.helpers import load_config
@@ -68,11 +69,15 @@ async def startup_event(app: FastAPI):
         gcsm=get_GCSM(),
         global_speaking_worker=get_global_speaking_worker(),
         agent=get_luotianyi_agent(),
+        activity_maker=init_activity_maker(config.get("activity_maker", {})),
     )
+
+    service_hub.activity_maker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
+    service_hub.gcsm.register_activity_maker(service_hub.activity_maker) # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
+    service_hub.global_speaking_worker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
 
     # 启动聊天流过期清理后台任务
     service_hub.gcsm.start_cleanup_task(expiration_seconds=360)
-    service_hub.global_speaking_worker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
     service_hub.global_speaking_worker.start_if_needed()
 
     # 账号系统初始化
@@ -121,7 +126,6 @@ async def chat_ws(websocket: WebSocket,
 
             chat_event = websocket_service.convert_to_chat_input_event(event)
             if chat_event is None:
-                # 非聊天事件在 service 层终止，不进入 chat_stream。
                 continue
             await websocket_service.send_ack_event(ws_connection, event) # 收到消息后发送 ACK 确认收到，之后进处理流程
             await chat_stream.feed_event(chat_event)
@@ -144,6 +148,7 @@ async def auto_login(
     background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_sql_db),
     redis: redis.Redis = Depends(database.get_redis_buffer),
+    service_hub: ServiceHub = Depends(get_service_hub),
 ):
     """
     自动登录：用户提供用户名和上一次分配的自动登录 token，验证通过后发放新的 token。
@@ -161,6 +166,9 @@ async def auto_login(
         message_token = account.generate_message_token(db, req.username)
         # 将上下文预先加载到 Redis 中
         user = db.query(database.User).filter_by(username=req.username).first()
+        elapsed_from_last_login = database.database_service.update_login_time(db, user.uuid) if user else None
+        if user is not None:
+            await service_hub.activity_maker.add_user_login_activity(user.uuid, elapsed_from_last_login)
         background_tasks.add_task(database.prefill_buffer, db, redis, user.uuid)
         return {"message": "登录成功", "user_id": req.username, "login_token": new_token, "message_token": message_token}
     raise HTTPException(status_code=401, detail="登录失败，自动登录验证未通过")
@@ -194,6 +202,7 @@ async def login(
     background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_sql_db),
     redis: redis.Redis = Depends(database.get_redis_buffer),
+    service_hub: ServiceHub = Depends(get_service_hub),
 ):
     """
     用户登录接口。用户提供用户名和密码进行登录。
@@ -215,6 +224,9 @@ async def login(
         # 将上下文预先加载到 Redis 中
         user = db.query(database.User).filter_by(username=req.username).first()
         background_tasks.add_task(database.prefill_buffer, db, redis, user.uuid)
+        elapsed_from_last_login = database.database_service.update_login_time(db, user.uuid) if user else None
+        if user is not None:
+            await service_hub.activity_maker.add_user_login_activity(user.uuid, elapsed_from_last_login)
         return {"login_token": token, "message_token": message_token, "user_id": req.username}
     raise HTTPException(status_code=401, detail="用户名或密码错误")
 

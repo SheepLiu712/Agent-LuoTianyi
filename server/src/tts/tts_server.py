@@ -142,6 +142,13 @@ def _run_gsv_worker(
                 message = request_queue.get(timeout=0.2)
             except Empty:
                 continue
+            except (EOFError, OSError):
+                # Parent process closed queue handle (common during Ctrl+C shutdown on Windows).
+                logger.info("gsv_tts worker request queue closed, exiting worker loop")
+                break
+            except KeyboardInterrupt:
+                logger.info("gsv_tts worker interrupted, exiting worker loop")
+                break
 
             command = message.get("command")
             request_id = message.get("request_id")
@@ -243,15 +250,20 @@ def _run_gsv_worker(
                         "traceback": traceback.format_exc(),
                     }
                 )
-    except Exception:
-        response_queue.put(
-            {
-                "request_id": "__boot__",
-                "ok": False,
-                "error": "Failed to boot gsv_tts worker",
-                "traceback": traceback.format_exc(),
-            }
-        )
+    except KeyboardInterrupt:
+        logger.info("gsv_tts worker received KeyboardInterrupt, shutting down")
+    except BaseException:
+        try:
+            response_queue.put(
+                {
+                    "request_id": "__boot__",
+                    "ok": False,
+                    "error": "Failed to boot gsv_tts worker",
+                    "traceback": traceback.format_exc(),
+                }
+            )
+        except Exception:
+            pass
         ready_event.set()
     finally:
         stop_event.set()
@@ -318,6 +330,8 @@ class TTSServer:
             return
 
         self.logger.info("Stopping gsv_tts worker...")
+        if self.stop_event:
+            self.stop_event.set()
         try:
             if self.request_queue and not force:
                 self.request_queue.put({"command": "shutdown", "request_id": "__shutdown__"})
@@ -332,6 +346,20 @@ class TTSServer:
                 self.server_process.join(timeout=5)
 
         self.server_process = None
+
+        if self.request_queue is not None:
+            try:
+                self.request_queue.close()
+                self.request_queue.cancel_join_thread()
+            except Exception:
+                pass
+        if self.response_queue is not None:
+            try:
+                self.response_queue.close()
+                self.response_queue.cancel_join_thread()
+            except Exception:
+                pass
+
         self.request_queue = None
         self.response_queue = None
         self.ready_event = None

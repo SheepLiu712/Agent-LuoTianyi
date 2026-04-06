@@ -12,9 +12,11 @@ import asyncio
 import json
 import re
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from ..utils.llm.prompt_manager import PromptManager
 from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentChat
+from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
 from ..types.conversation_type import ConversationItem
@@ -34,6 +36,8 @@ if TYPE_CHECKING:
     from ..pipeline.modules.unread_store import UnreadMessageSnapshot, UnreadMessage
     from ..pipeline.topic_planner import ExtractedTopic
     from ..database.vector_store import VectorStore
+    from ..utils.llm.llm_module import LLMAPIInterface
+    
 
 
 def get_available_expression(config_path: str = "config/live2d_interface_config.json") -> List[str]:
@@ -121,6 +125,15 @@ class LuoTianyiAgent:
             force_complete=force_complete,
         )
         return topics, remaining
+    
+    async def generate_topic_from_activity(self, activity_type: ActivityType, user_uuid: str, llm_client: "LLMAPIInterface", **kwargs) -> "ExtractedTopic":
+        """根据用户活动生成话题，供 ActivityMaker 调用"""
+        prompt = self.prompt_manager.get_template(activity_type.value)
+        if not prompt:
+            self.logger.error(f"No prompt template found for activity type {activity_type}")
+            raise ValueError(f"No prompt template found for activity type {activity_type}")
+        prompt = prompt.render(**kwargs)
+
 
     async def describe_image(self, image_base64: str) -> str:
         """调用视觉模块对图片进行描述

@@ -63,7 +63,7 @@ class MessageProcessor:
         with self._send_cond:
             if self._send_queue:
                 return
-        # 2. 如果上次发送输入状态事件的时间距离现在不足0.5秒，也不发送，避免过于频繁
+        # 2. 如果上次发送输入状态事件的时间距离现在不足0.25秒，也不发送，避免过于频繁
         if self._last_typing_time and time.time() - self._last_typing_time < 0.25:
             return
         # 3. 发送输入状态事件
@@ -127,6 +127,7 @@ class MessageProcessor:
             self.processing_uuid = response.uuid
             self.processing_audio = bytearray()
         elif self.processing_uuid != response.uuid: # 如果uuid不同，说明是新的消息了，重置状态
+            self.logger.warning(f"Received message with new uuid (old={self.processing_uuid}, new={response.uuid}), resetting processing state.")
             self.processing_uuid = response.uuid
             self.processing_audio = bytearray()
 
@@ -150,24 +151,6 @@ class MessageProcessor:
             self._save_audio_to_temp(self.processing_audio, self.processing_uuid, ".wav")
             self.processing_audio = bytearray()
             self.processing_uuid = None
-    
-    def _save_audio_to_temp(self, audio_data: bytes, uuid: str | None, postfix: str) -> str:
-        try:
-            cwd = os.getcwd()
-            safe_uuid = uuid or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-            new_file_path = os.path.join(
-                cwd,
-                "temp",
-                "tts_output",
-                safe_uuid + postfix,
-            )
-            os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
-            with open(new_file_path, "wb") as f:
-                f.write(audio_data)
-            return new_file_path
-        except Exception as exc:
-            self.logger.error(f"Failed to save audio to temp: {exc}")
-            return ""
 
     def _send_loop(self):
         while self._running:
@@ -266,6 +249,24 @@ class MessageProcessor:
             "mime_type": mime_type,
             "image_client_path": new_file_path,
         }
+    
+    def _save_audio_to_temp(self, audio_data: bytes, uuid: str | None, postfix: str) -> str:
+        try:
+            cwd = os.getcwd()
+            safe_uuid = uuid or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            new_file_path = os.path.join(
+                cwd,
+                "temp",
+                "tts_output",
+                safe_uuid + postfix,
+            )
+            os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
+            with open(new_file_path, "wb") as f:
+                f.write(audio_data)
+            return new_file_path
+        except Exception as exc:
+            self.logger.error(f"Failed to save audio to temp: {exc}")
+            return ""
 
     @staticmethod
     def _save_image_to_temp(image_data: bytes, postfix: str) -> str:

@@ -172,6 +172,9 @@ class TopicReplier:
         if self.service_hub is None or self.service_hub.agent is None:
             self.logger.error("ServiceHub or agent is not ready, skip scheduling memory write")
             return
+        if len(topic.source_messages or []) == 0:
+            self.logger.info("No source messages for topic, skip scheduling memory write")
+            return
 
         current_dialogue = self._build_current_dialogue(topic, reply_items)
 

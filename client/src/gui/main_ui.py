@@ -80,20 +80,34 @@ class Live2DContainer(QWidget):
         self.live2d_config: Dict[str, Any] = live2d_config
         self.background_image = None
         self.thinking_visible = False
-        self.thinking_bubble_pixmap = QPixmap("res/gui/thinking_bubble.png")
-        self.thinking_bubble_label = QLabel(self.live2d_widget)
+        self.thinking_bubble_frames = [
+            QPixmap("res/gui/thinking_bubble1.png"),
+            QPixmap("res/gui/thinking_bubble2.png"),
+            QPixmap("res/gui/thinking_bubble3.png"),
+        ]
+        self._thinking_frame_index = 0
+        self._thinking_timer = QTimer(self)
+        self._thinking_timer.setInterval(500)
+        self._thinking_timer.timeout.connect(self._advance_thinking_frame)
+
+        self.thinking_bubble_label = QLabel(self)
         self.thinking_bubble_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.thinking_bubble_label.setStyleSheet("background: transparent;")
         self.load_background()
         self.update_thinking_bubble()
 
     def update_thinking_bubble(self):
-        if self.thinking_bubble_pixmap.isNull():
+        if not self.thinking_bubble_frames:
+            self.thinking_bubble_label.hide()
+            return
+
+        frame = self.thinking_bubble_frames[self._thinking_frame_index]
+        if frame.isNull():
             self.thinking_bubble_label.hide()
             return
 
         bubble_width = max(1, int(self.width() / 4))
-        scaled = self.thinking_bubble_pixmap.scaledToWidth(
+        scaled = frame.scaledToWidth(
             bubble_width,
             Qt.TransformationMode.SmoothTransformation
         )
@@ -108,10 +122,27 @@ class Live2DContainer(QWidget):
 
     def set_thinking_visible(self, visible: bool):
         self.thinking_visible = visible
-        if self.thinking_bubble_pixmap.isNull():
+        if not self.thinking_bubble_frames or all(frame.isNull() for frame in self.thinking_bubble_frames):
+            self._thinking_timer.stop()
             self.thinking_bubble_label.hide()
             return
-        self.thinking_bubble_label.setVisible(visible)
+
+        if visible:
+            self._thinking_frame_index = 0
+            self.update_thinking_bubble()
+            if not self._thinking_timer.isActive():
+                self._thinking_timer.start()
+        else:
+            self._thinking_timer.stop()
+            self.thinking_bubble_label.hide()
+
+    def _advance_thinking_frame(self):
+        if not self.thinking_visible:
+            self._thinking_timer.stop()
+            self.thinking_bubble_label.hide()
+            return
+        self._thinking_frame_index = (self._thinking_frame_index + 1) % len(self.thinking_bubble_frames)
+        self.update_thinking_bubble()
         
     def load_background(self):
         bg_path = self.gui_config["live2d_background"]["image_path"]

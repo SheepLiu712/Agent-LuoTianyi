@@ -61,6 +61,7 @@ class AgentBinder(QObject):
             bubble.set_status("waiting")
             return
         elif text == "submitted":
+            bubble.set_status(text)
             self.msg_to_bubble.pop(msg_id, None)  # 提交成功后移除映射关系
             return
         
