@@ -3,6 +3,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime
 
 from ..utils.llm.llm_module import LLMModule
 from ..utils.llm.prompt_manager import PromptManager
@@ -72,6 +73,7 @@ class MainChat:
         user_persona = self._build_user_persona(user_nickname, user_description)
         sing_requirement = self._build_sing_requirement(sing_plan)
         extra_knowledge = self._build_extra_knowledge(fact_hits or [], memory_hits or [])
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         response = await self._call_llm(
             character_name=self.character_name,
@@ -79,6 +81,7 @@ class MainChat:
             speaking_style=self.speaking_style,
             user_persona=user_persona,
             conversation_history=conversation_history or "无",
+            current_time=current_time,
             reply_topic=reply_topic or "",
             sing_requirement=sing_requirement,
             extra_knowledge=extra_knowledge,

@@ -16,11 +16,12 @@ class LoginDialog(QDialog):
         self.saved_token = None
         
         self.setWindowTitle("ChatWithLuoTianyi - 登录/注册")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(400, 350)
         
         layout = QVBoxLayout()
         
         self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("QTabBar::tab { font-size: 16px; min-height: 28px; }")
         self.login_tab = QWidget()
         self.register_tab = QWidget()
         
@@ -103,6 +104,11 @@ class LoginDialog(QDialog):
         self.r_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.r_password.setStyleSheet(style)
 
+        self.r_confirm_password = QLineEdit()
+        self.r_confirm_password.setPlaceholderText("确认密码")
+        self.r_confirm_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.r_confirm_password.setStyleSheet(style)
+
         self.r_invite = QLineEdit()
         self.r_invite.setPlaceholderText("邀请码")
         self.r_invite.setStyleSheet(style)
@@ -114,6 +120,8 @@ class LoginDialog(QDialog):
         layout.addWidget(self.r_username)
         layout.addSpacing(20)
         layout.addWidget(self.r_password)
+        layout.addSpacing(20)
+        layout.addWidget(self.r_confirm_password)
         layout.addSpacing(20)
         layout.addWidget(self.r_invite)
         layout.addStretch()
@@ -139,10 +147,15 @@ class LoginDialog(QDialog):
     def do_register(self):
         username = self.r_username.text()
         password = self.r_password.text()
+        confirm_password = self.r_confirm_password.text()
         invite = self.r_invite.text()
         
-        if not username or not password or not invite:
+        if not username or not password or not confirm_password or not invite:
             QMessageBox.warning(self, "错误", "请填写所有信息")
+            return
+
+        if password != confirm_password:
+            QMessageBox.warning(self, "错误", "两次输入的密码不一致")
             return
             
         success, msg = self.binder.on_register(username, password, invite)

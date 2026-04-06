@@ -35,12 +35,14 @@ class MessageProcessor:
         self.response_signal: Callable[[str, str], None] | None = None # 为ui增加一条回复信息
         self.update_bubble_signal: Callable[[str, str], None] | None = None # 更新气泡信息
         self.agent_thinking_signal: Callable[[bool], None] | None = None # 显示agent正在思考的状态
+        self.local_tts_state_signal: Callable[[str, str], None] | None = None
 
         self._reply_counter = 0
         self._running = True
         self._last_typing_time = None
 
         self.multimedia_stream: MultiMediaStream | None = MultiMediaStream()
+        self.multimedia_stream.set_local_playback_state_callback(self._on_local_tts_state)
 
         self.logger = get_logger("MessageProcessor")
 
@@ -120,7 +122,20 @@ class MessageProcessor:
         wav_path = os.path.join(os.getcwd(), "temp", "tts_output", f"{conv_uuid}.wav")
         if not os.path.exists(wav_path):
             return False
-        return self.multimedia_stream.feed_local_wav(wav_path)
+        # WAV header is typically 44 bytes; smaller/equal indicates no usable audio payload.
+        if os.path.getsize(wav_path) <= 44:
+            return False
+        return self.multimedia_stream.feed_local_wav(wav_path, conv_uuid=conv_uuid)
+
+    def stop_local_tts(self) -> bool:
+        if not self.multimedia_stream:
+            return False
+        return self.multimedia_stream.stop_local_wav()
+
+    def set_playback_volume(self, percent: int):
+        if not self.multimedia_stream:
+            return
+        self.multimedia_stream.set_volume_percent(percent)
 
     def process_transport_message(self, response: AgentMessage): # 真正处理消息的函数
         if self.processing_uuid is None:
@@ -192,10 +207,21 @@ class MessageProcessor:
         if self.agent_thinking_signal:
             self.agent_thinking_signal(state)
 
-    def set_signals(self, response_signal: Callable[[str, str], None], update_bubble_signal: Callable[[str, str], None], agent_thinking_signal: Callable[[str], None]):
+    def set_signals(
+        self,
+        response_signal: Callable[[str, str], None],
+        update_bubble_signal: Callable[[str, str], None],
+        agent_thinking_signal: Callable[[str], None],
+        local_tts_state_signal: Callable[[str, str], None] | None = None,
+    ):
         self.response_signal = response_signal
         self.update_bubble_signal = update_bubble_signal
         self.agent_thinking_signal = agent_thinking_signal
+        self.local_tts_state_signal = local_tts_state_signal
+
+    def _on_local_tts_state(self, event: str, conv_uuid: str):
+        if self.local_tts_state_signal:
+            self.local_tts_state_signal(event, conv_uuid)
 
     def set_model(self, model: Live2dModel):
         self.model = model

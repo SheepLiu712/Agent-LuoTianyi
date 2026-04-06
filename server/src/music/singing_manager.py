@@ -144,7 +144,7 @@ class SingingManager:
         if not lyrics:
             return ""
         # 拼接歌词内容
-        lyrics_content = " ".join([line.content for line in lyrics])
+        lyrics_content = "\n".join([line.content for line in lyrics])
         return lyrics_content
 
     def get_song_segment(self, song_name: str, segment_description: str, require_audio: bool = True) -> Tuple[List[OneLyricLine], str]:

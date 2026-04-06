@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, Signa
 from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
                                QTextEdit, QScrollArea, QLabel, 
-                                QFrame, QPushButton, QFileDialog, )
+                                QFrame, QPushButton, QFileDialog, QSlider, )
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
 from typing import Dict, Any, List
@@ -14,7 +14,7 @@ from typing import Dict, Any, List
 from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
-from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble
+from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, BubblePlaybackManager
 
 class Live2DWidget(QOpenGLWidget):
     def __init__(self, live2d_config: Dict[str, Any], agent_binder: AgentBinder, parent=None):
@@ -244,11 +244,14 @@ class HoverButton(QPushButton):
         super().enterEvent(event)
 
     def leaveEvent(self, event):
+        self.hide_tooltip()
+        super().leaveEvent(event)
+
+    def hide_tooltip(self):
         if self.tooltip_widget:
             self.tooltip_widget.hide()
             self.tooltip_widget.deleteLater()
             self.tooltip_widget = None
-        super().leaveEvent(event)
 
 class ChatWidget(QWidget):
     thinking_changed = Signal(bool)
@@ -260,6 +263,11 @@ class ChatWidget(QWidget):
         self.agent.response_signal.connect(self.on_agent_response)
         self.agent.delete_signal.connect(self.on_agent_delete)
         self.agent.agent_thinking_signal.connect(self.on_agent_thinking)
+        self.playback_manager = BubblePlaybackManager(
+            play_audio_callback=self.agent.on_play_local_tts,
+            stop_audio_callback=self.agent.on_stop_local_tts,
+        )
+        self.agent.local_tts_state_signal.connect(self.playback_manager.on_local_tts_state_changed)
         
         # History loading
         self.agent.history_signal.connect(self.on_history_loaded)
@@ -358,8 +366,55 @@ class ChatWidget(QWidget):
 
         self.picture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.picture_btn.clicked.connect(self.on_picture_clicked)
+
+        self.volume_btn = HoverButton(tooltip_text="音量")
+        self.volume_btn.setIcon(QIcon("res/gui/volume.png"))
+        self.volume_btn.setFixedSize(24, 24)
+        self.volume_btn.setStyleSheet("QPushButton { border: none; background-color: transparent; } QPushButton:hover { background-color: #E0E0E0; border-radius: 4px; }")
+        self.volume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.volume_btn.pressed.connect(self.on_volume_button_clicked)
+
+        self.volume_popup = QFrame(
+            None,
+            Qt.WindowType.Popup
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint,
+        )
+        self.volume_popup.setStyleSheet("background-color: #F6F6F6; border: 1px solid #B8B8B8; border-radius: 6px;")
+        self.volume_popup.setFixedSize(32, 150)
+        volume_layout = QVBoxLayout(self.volume_popup)
+        volume_layout.setContentsMargins(4, 10, 4, 6)
+        self.volume_slider = QSlider(Qt.Orientation.Vertical, self.volume_popup)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(70)
+        self.volume_slider.setTickPosition(QSlider.TickPosition.NoTicks)
+        self.volume_slider.setStyleSheet("""
+            QSlider::groove:vertical {
+                background: #D8D8D8;
+                width: 8px;
+                border-radius: 4px;
+            }
+            QSlider::sub-page:vertical {
+                background: #D8D8D8;
+                border-radius: 4px;
+            }
+            QSlider::add-page:vertical {
+                background: #66ccff;
+                border-radius: 4px;
+            }
+            QSlider::handle:vertical {
+                background: #FFFFFF;
+                border: 1px solid #9A9A9A;
+                height: 14px;
+                margin: -2px -4px;
+                border-radius: 7px;
+            }
+        """)
+        self.volume_slider.valueChanged.connect(self.on_volume_changed)
+        volume_layout.addWidget(self.volume_slider)
         
         self.toolbar_layout.addWidget(self.picture_btn)
+        self.toolbar_layout.addWidget(self.volume_btn)
         self.toolbar_layout.addStretch()
 
         # Horizontal Line 2
@@ -385,6 +440,7 @@ class ChatWidget(QWidget):
         self.can_send = False
         self.agent_free = True
         self.update_send_button_state()
+        self.on_volume_changed(self.volume_slider.value())
         
         layout.addWidget(self.scroll_area)
         layout.addWidget(self.h_line)
@@ -419,9 +475,19 @@ class ChatWidget(QWidget):
             is_user = (item.source == "user")
             if item_type == "image":
                 image_path = item.content
-                bubble = ChatImageBubble(image_path, conv_uuid=item.uuid, is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
+                bubble = ChatImageBubble(
+                    image_path,
+                    conv_uuid=item.uuid,
+                    is_user=is_user,
+                    playback_manager=self.playback_manager,
+                )
             else:
-                bubble = ChatTextBubble(item.content, conv_uuid=item.uuid, is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
+                bubble = ChatTextBubble(
+                    item.content,
+                    conv_uuid=item.uuid,
+                    is_user=is_user,
+                    playback_manager=self.playback_manager,
+                )
             self.history_layout.insertWidget(0, bubble)
             
         # Restore scroll position
@@ -491,12 +557,40 @@ class ChatWidget(QWidget):
             bubble = self.add_message("image", file_path, is_user=True)
             self.agent.on_send_image(file_path, bubble)
 
+    def on_volume_button_clicked(self):
+        if self.volume_popup.isVisible():
+            self.volume_popup.hide()
+            return
+
+        # Avoid tooltip staying over the popup.
+        self.volume_btn.hide_tooltip()
+
+        popup_pos = self.volume_btn.mapToGlobal(QPoint(0, 0))
+        x = popup_pos.x() + (self.volume_btn.width() - self.volume_popup.width()) // 2
+        y = popup_pos.y() - self.volume_popup.height() - 6
+        self.volume_popup.move(x, y)
+        self.volume_popup.show()
+
+    def on_volume_changed(self, value: int):
+        # Backend treats 70% as baseline for server-streamed audio level.
+        self.agent.on_set_volume(value)
+
 
     def add_message(self, type: str, content: str, conv_uuid: str = "", is_user: bool = False) -> ChatBubble | ChatImageBubble:
         if type == "image":
-            bubble = ChatImageBubble(content, conv_uuid=conv_uuid, is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
+            bubble = ChatImageBubble(
+                content,
+                conv_uuid=conv_uuid,
+                is_user=is_user,
+                playback_manager=self.playback_manager,
+            )
         elif type == "text":
-            bubble = ChatTextBubble(content, conv_uuid=conv_uuid, is_user=is_user, play_audio_callback=self.agent.on_play_local_tts)
+            bubble = ChatTextBubble(
+                content,
+                conv_uuid=conv_uuid,
+                is_user=is_user,
+                playback_manager=self.playback_manager,
+            )
 
         self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
         QApplication.processEvents() # Ensure layout updates

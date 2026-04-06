@@ -10,6 +10,76 @@ import time
 
 logger = get_logger("audio_processor")
 
+
+def apply_volume_to_pcm_bytes(
+    data: bytes,
+    gain: float,
+    sample_width: int | None = None,
+    subtype: str | None = None,
+) -> bytes:
+    if not data:
+        return data
+    if gain == 1.0:
+        return data
+
+    gain = max(0.0, float(gain))
+    if sample_width is None:
+        if subtype == "PCM_U8":
+            sample_width = 1
+        elif subtype == "PCM_24":
+            sample_width = 3
+        elif subtype in ("PCM_16", None):
+            sample_width = 2
+        else:
+            sample_width = 4
+
+    try:
+        if subtype == "FLOAT":
+            arr = np.frombuffer(data, dtype=np.float32)
+            arr = np.clip(arr * gain, -1.0, 1.0)
+            return arr.astype(np.float32).tobytes()
+
+        if sample_width == 1:
+            # 8-bit PCM is unsigned in WAV.
+            arr = np.frombuffer(data, dtype=np.uint8).astype(np.float32)
+            arr = (arr - 128.0) * gain + 128.0
+            arr = np.clip(arr, 0.0, 255.0)
+            return arr.astype(np.uint8).tobytes()
+
+        if sample_width == 2:
+            arr = np.frombuffer(data, dtype=np.int16).astype(np.float32)
+            arr = np.clip(arr * gain, -32768.0, 32767.0)
+            return arr.astype(np.int16).tobytes()
+
+        if sample_width == 3:
+            raw = np.frombuffer(data, dtype=np.uint8)
+            if len(raw) % 3 != 0:
+                return data
+            n = len(raw) // 3
+            b = raw.reshape(n, 3)
+            vals = (
+                b[:, 0].astype(np.int32)
+                | (b[:, 1].astype(np.int32) << 8)
+                | (b[:, 2].astype(np.int32) << 16)
+            )
+            sign = vals & 0x800000
+            vals = vals - (sign << 1)
+            vals = np.clip(vals.astype(np.float32) * gain, -8388608.0, 8388607.0).astype(np.int32)
+            out = np.empty((n, 3), dtype=np.uint8)
+            out[:, 0] = vals & 0xFF
+            out[:, 1] = (vals >> 8) & 0xFF
+            out[:, 2] = (vals >> 16) & 0xFF
+            return out.tobytes()
+
+        if sample_width == 4:
+            arr = np.frombuffer(data, dtype=np.int32).astype(np.float64)
+            arr = np.clip(arr * gain, -2147483648.0, 2147483647.0)
+            return arr.astype(np.int32).tobytes()
+    except Exception as e:
+        logger.error(f"Failed to apply volume: {e}")
+
+    return data
+
 def extract_audio_amplitude(wav: str | bytes, fps: int = 30) -> np.ndarray:
     """
     从音频文件中提取振幅（音量）信息，用于口型同步。
@@ -130,6 +200,10 @@ class AudioPlayerStream:
         self.channels = 0
         self.subtype = None # e.g. 'PCM_16'
         self.buffer = io.BytesIO() # buffer for first chunk if needed
+        self.volume_gain = 1.0
+
+    def set_volume_gain(self, gain: float):
+        self.volume_gain = max(0.0, float(gain))
 
     def append_buffer(self, data: bytes):
         if not self.has_pyaudio:
@@ -153,14 +227,24 @@ class AudioPlayerStream:
                                               output=True)
                 
                     
-                    raw_bytes = initial_audio.tobytes()
+                    raw_bytes = apply_volume_to_pcm_bytes(
+                        initial_audio.tobytes(),
+                        gain=self.volume_gain,
+                        subtype=self.subtype,
+                    )
                     self.stream.write(raw_bytes)
                     self.header_parsed = True
             except Exception as e:
                 logger.error(f"Failed to parse header from first chunk: {e}")
                 pass
         else:
-            self.stream.write(data)
+            self.stream.write(
+                apply_volume_to_pcm_bytes(
+                    data,
+                    gain=self.volume_gain,
+                    subtype=self.subtype,
+                )
+            )
 
     def wait_until_empty(self):
         # PyAudio 的 write 是阻塞的，但数据写入后到声音从扬声器出来有延迟 (Latency)。

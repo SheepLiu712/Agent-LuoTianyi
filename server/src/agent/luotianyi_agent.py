@@ -264,7 +264,7 @@ class LuoTianyiAgent:
                 if not song_name:
                     continue
                 lyrics = item.lyrics
-                content = f"（唱了《{song_name}》）{lyrics}"
+                content = f"（唱了《{song_name}》）\n{lyrics}"
                 conversation_items.append(
                     ConversationItem(
                         uuid="",

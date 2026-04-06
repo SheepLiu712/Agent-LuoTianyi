@@ -322,7 +322,7 @@ if __name__ == "__main__":
     is_debug = config.get("is_debug", False)
     if is_debug:
         logger.info("服务器正在以调试模式运行")
-    will_use_https = True  # 调试模式下默认不使用 HTTPS，避免证书问题
+    will_use_https = False  # 调试模式下默认不使用 HTTPS，避免证书问题
     
     # HTTPS 配置（用于 SakuraFrp TCP 隧道）
     cert_file = os.path.join(current_dir, "certs", "cert.pem")

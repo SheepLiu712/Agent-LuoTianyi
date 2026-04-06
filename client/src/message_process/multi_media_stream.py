@@ -5,9 +5,17 @@ import queue
 import threading
 import time
 import os
+import wave
 from dataclasses import dataclass
+from typing import Callable
 from ..utils.logger import get_logger
-from ..utils.audio_processor import extract_audio_amplitude, decode_from_base64, AudioPlayerStream, calculate_amplitude_from_chunk
+from ..utils.audio_processor import (
+    extract_audio_amplitude,
+    decode_from_base64,
+    AudioPlayerStream,
+    calculate_amplitude_from_chunk,
+    apply_volume_to_pcm_bytes,
+)
 
 @dataclass
 class AudioProperties:
@@ -45,6 +53,9 @@ def run_audio_player_worker(queue_in: multiprocessing.Queue, queue_out: multipro
                 player.header_parsed = False # Reset for new stream
                 if queue_out:
                     queue_out.put("finished")
+            elif cmd == "set_volume":
+                gain = float(task.get("gain", 1.0))
+                player.set_volume_gain(gain)
                     
         except Exception as e:
             # print(f"Audio worker error: {e}") 
@@ -71,28 +82,73 @@ class MultiMediaStream:
         
         self.local_audio_properties: AudioProperties | None = None
         self._local_play_thread: threading.Thread | None = None
+        self._local_stop_event: threading.Event | None = None
+        self._local_play_request_id = 0
+        self._local_state_callback: Callable[[str, str], None] | None = None
+        self._volume_percent = 70
+        self._volume_gain = self._percent_to_gain(self._volume_percent)
         self._state_lock = threading.Lock()
+
+    @staticmethod
+    def _percent_to_gain(percent: int) -> float:
+        p = max(0, min(100, int(percent)))
+        # 70% is treated as baseline level for server audio.
+        return p / 70.0 if p > 0 else 0.0
+
+    def _emit_local_playback_state(self, event: str, conv_uuid: str):
+        if not self._local_state_callback:
+            return
+        try:
+            self._local_state_callback(event, conv_uuid)
+        except Exception as exc:
+            self.logger.error(f"Local playback callback error: {exc}")
 
     def start(self):
         self.audio_process.start()
+        self.audio_queue_in.put({"cmd": "set_volume", "gain": self._volume_gain})
+
+    def set_volume_percent(self, percent: int):
+        with self._state_lock:
+            self._volume_percent = max(0, min(100, int(percent)))
+            self._volume_gain = self._percent_to_gain(self._volume_percent)
+            gain = self._volume_gain
+        self.audio_queue_in.put({"cmd": "set_volume", "gain": gain})
+
+    def set_local_playback_state_callback(self, callback: Callable[[str, str], None] | None):
+        self._local_state_callback = callback
 
     def feed(self, audio_data_base64: str):
         audio_data = decode_from_base64(audio_data_base64)
+        if not audio_data:
+            return
+        # Server audio has higher priority than local replay.
+        self._interrupt_local_playback()
         self._append_audio_stream(audio_data)
 
-    def feed_local_wav(self, wav_path: str) -> bool:
+    def feed_local_wav(self, wav_path: str, conv_uuid: str = "") -> bool:
+        if self._mouth_thread is not None:
+            return False
         if not wav_path or not os.path.exists(wav_path):
             return False
 
         with self._state_lock:
-            if self.is_busy():
-                return False
+            self._local_play_request_id += 1
+            request_id = self._local_play_request_id
+            self._stop_local_playback_locked(join_timeout=0.4)
+
+            self._local_stop_event = threading.Event()
             self._local_play_thread = threading.Thread(
                 target=self._play_local_wav_worker,
-                args=(wav_path,),
+                args=(wav_path, conv_uuid, request_id, self._local_stop_event),
                 daemon=True,
             )
             self._local_play_thread.start()
+            return True
+
+    def stop_local_wav(self) -> bool:
+        with self._state_lock:
+            self._local_play_request_id += 1
+            self._stop_local_playback_locked(join_timeout=0.4)
             return True
 
     def is_busy(self) -> bool:
@@ -102,20 +158,85 @@ class MultiMediaStream:
             return True
         return False
 
-    def _play_local_wav_worker(self, wav_path: str):
+    def _play_local_wav_worker(self, wav_path: str, conv_uuid: str, request_id: int, stop_event: threading.Event):
+        pa = None
+        stream = None
         try:
-            with open(wav_path, "rb") as f:
-                audio_data = f.read()
-            if not audio_data:
-                return
+            with wave.open(wav_path, "rb") as wf:
+                channels = wf.getnchannels()
+                sample_width = wf.getsampwidth()
+                framerate = wf.getframerate()
+                if wf.getnframes() <= 0:
+                    return
 
-            self._append_audio_stream(audio_data)
-            self._close_audio_stream(wait_audio_finish=True)
+                import pyaudio
+
+                pa = pyaudio.PyAudio()
+                stream = pa.open(
+                    format=pa.get_format_from_width(sample_width),
+                    channels=channels,
+                    rate=framerate,
+                    output=True,
+                )
+
+                frames_per_chunk = 1024
+                while not stop_event.is_set():
+                    chunk = wf.readframes(frames_per_chunk)
+                    if not chunk:
+                        break
+                    with self._state_lock:
+                        local_gain = self._volume_gain
+                    stream.write(
+                        apply_volume_to_pcm_bytes(
+                            chunk,
+                            gain=local_gain,
+                            sample_width=sample_width,
+                        )
+                    )
+        except ImportError:
+            self.logger.error("PyAudio not installed. Cannot play local wav.")
+        except wave.Error as exc:
+            self.logger.error(f"Invalid wav file {wav_path}: {exc}")
         except Exception as exc:
             self.logger.error(f"Failed to play local wav file {wav_path}: {exc}")
         finally:
+            if stream:
+                try:
+                    stream.stop_stream()
+                    stream.close()
+                except Exception:
+                    pass
+            if pa:
+                try:
+                    pa.terminate()
+                except Exception:
+                    pass
+
             with self._state_lock:
-                self._local_play_thread = None
+                # Only clear state when this is still the latest request.
+                if request_id == self._local_play_request_id:
+                    self._local_play_thread = None
+                    self._local_stop_event = None
+
+            state = "stopped" if stop_event.is_set() else "finished"
+            self._emit_local_playback_state(state, conv_uuid)
+
+    def _interrupt_local_playback(self):
+        with self._state_lock:
+            self._stop_local_playback_locked(join_timeout=0.2)
+
+    def _stop_local_playback_locked(self, join_timeout: float):
+        if self._local_stop_event:
+            self._local_stop_event.set()
+
+        current_thread = threading.current_thread()
+        thread = self._local_play_thread
+        if thread and thread.is_alive() and thread is not current_thread:
+            thread.join(timeout=join_timeout)
+
+        if thread and not thread.is_alive():
+            self._local_play_thread = None
+            self._local_stop_event = None
 
     def finish_one_sentense(self):
         self._close_audio_stream(wait_audio_finish=True)
@@ -123,7 +244,7 @@ class MultiMediaStream:
 
     def _open_audio_stream_if_needed(self):
         if self._mouth_thread and self._mouth_thread.is_alive():
-            return
+                return
 
         self.local_audio_properties = AudioProperties()
         self._mouth_queue = queue.Queue()

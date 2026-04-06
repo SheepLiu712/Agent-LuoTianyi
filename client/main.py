@@ -59,6 +59,8 @@ if __name__ == "__main__":
         send_image_callback = message_processor.send_image,
         send_typing_callback = message_processor.send_typing_event,
         play_local_tts_callback = message_processor.play_local_tts_by_uuid,
+        stop_local_tts_callback = message_processor.stop_local_tts,
+        set_volume_callback = message_processor.set_playback_volume,
         fetch_history_callback = network_client.get_history,
         set_model_callback = message_processor.set_model,
         auto_login_callback = network_client.auto_login,
@@ -70,6 +72,7 @@ if __name__ == "__main__":
         response_signal=binder.emit_response_signal,
         update_bubble_signal=binder.emit_update_signal,
         agent_thinking_signal=binder.emit_agent_thinking_signal,
+        local_tts_state_signal=binder.emit_local_tts_state_signal,
     ) 
 
 

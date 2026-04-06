@@ -1,4 +1,5 @@
 from typing import Callable
+import weakref
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap, QFontMetrics, QTextOption
@@ -8,7 +9,70 @@ from PySide6.QtWidgets import ( QWidget, QHBoxLayout,
 
 
 agent_play_icon_path = "res/gui/play_agent_msg.png"
+agent_stop_icon_path = "res/gui/stop_agent_msg.png"
 agent_play_icon = None
+agent_stop_icon = None
+
+
+class BubblePlaybackManager:
+    def __init__(
+        self,
+        play_audio_callback: Callable[[str], bool],
+        stop_audio_callback: Callable[[], bool],
+    ):
+        self.play_audio_callback = play_audio_callback
+        self.stop_audio_callback = stop_audio_callback
+        self._active_bubble_ref: weakref.ReferenceType[ChatBubble] | None = None
+
+    def register_bubble(self, bubble: "ChatBubble"):
+        # Keep cleanup automatic when bubble is deleted.
+        bubble.destroyed.connect(lambda *_: self._on_bubble_destroyed(bubble))
+
+    def _on_bubble_destroyed(self, bubble: "ChatBubble"):
+        active = self.get_active_bubble()
+        if active is bubble:
+            self._active_bubble_ref = None
+
+    def get_active_bubble(self) -> "ChatBubble | None":
+        if not self._active_bubble_ref:
+            return None
+        return self._active_bubble_ref()
+
+    def _set_active_bubble(self, bubble: "ChatBubble | None"):
+        self._active_bubble_ref = weakref.ref(bubble) if bubble else None
+
+    def on_bubble_clicked(self, bubble: "ChatBubble"):
+        active = self.get_active_bubble()
+        if active is bubble:
+            if self.stop_audio_callback:
+                self.stop_audio_callback()
+            bubble.set_play_icon()
+            self._set_active_bubble(None)
+            return
+
+        if not self.play_audio_callback:
+            return
+
+        started = self.play_audio_callback(bubble.conv_uuid)
+        if not started:
+            return
+
+        if active and active is not bubble:
+            active.set_play_icon()
+        bubble.set_stop_icon()
+        self._set_active_bubble(bubble)
+
+    def on_local_tts_state_changed(self, event: str, conv_uuid: str):
+        # event can be: finished / stopped
+        if event not in {"finished", "stopped"}:
+            return
+        active = self.get_active_bubble()
+        if not active:
+            return
+        if conv_uuid and active.conv_uuid != conv_uuid:
+            return
+        active.set_play_icon()
+        self._set_active_bubble(None)
 
 
 class ClickableLabel(QLabel):
@@ -26,23 +90,29 @@ class ChatBubble(QWidget):
         conv_uuid: str = "",
         is_user: bool = False,
         parent=None,
-        play_audio_callback: Callable[[str], bool] | None = None,
+        playback_manager: BubblePlaybackManager | None = None,
     ):
         super().__init__(parent)
         self.is_user = is_user
         self._label: QLabel | None = None
         self.content_widget: QWidget | None = None
         self.conv_uuid = conv_uuid
-        self.play_audio_callback = play_audio_callback
+        self.playback_manager = playback_manager
         self.init_ui()
+        if self.playback_manager and not self.is_user:
+            self.playback_manager.register_bubble(self)
 
     def build_content_widget(self) -> QWidget:
         raise NotImplementedError()
 
     def init_ui(self):
-        global agent_play_icon
+        global agent_play_icon, agent_stop_icon
         if agent_play_icon is None:
             agent_play_icon = QPixmap(agent_play_icon_path).scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        if agent_stop_icon is None:
+            stop_pm = QPixmap(agent_stop_icon_path)
+            if not stop_pm.isNull():
+                agent_stop_icon = stop_pm.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         layout = QHBoxLayout()
         layout.setContentsMargins(10, 5, 10, 5)
 
@@ -79,9 +149,22 @@ class ChatBubble(QWidget):
             return
         if not self.conv_uuid:
             return
-        if not self.play_audio_callback:
+        if not self.playback_manager:
             return
-        self.play_audio_callback(self.conv_uuid)
+
+        self.playback_manager.on_bubble_clicked(self)
+
+    def set_play_icon(self):
+        if self._label and agent_play_icon is not None:
+            self._label.setPixmap(agent_play_icon)
+
+    def set_stop_icon(self):
+        if not self._label:
+            return
+        if agent_stop_icon is not None:
+            self._label.setPixmap(agent_stop_icon)
+        elif agent_play_icon is not None:
+            self._label.setPixmap(agent_play_icon)
 
     def set_status(self, status: str):
         if not self._label:
@@ -111,11 +194,16 @@ class ChatBubble(QWidget):
 
 
 class ChatImageBubble(ChatBubble):
-    def __init__(self, image_path, conv_uuid="", is_user=False, parent=None, play_audio_callback: Callable[[str], bool] | None = None):
+    def __init__(self, image_path, conv_uuid="", is_user=False, parent=None, playback_manager: BubblePlaybackManager | None = None):
         self.image_label: QLabel | None = None
         self.image_path = image_path
         self.conv_uuid = conv_uuid
-        super().__init__(conv_uuid=conv_uuid, is_user=is_user, parent=parent, play_audio_callback=play_audio_callback)
+        super().__init__(
+            conv_uuid=conv_uuid,
+            is_user=is_user,
+            parent=parent,
+            playback_manager=playback_manager,
+        )
 
     def build_content_widget(self) -> QWidget:
         self.image_label = QLabel()
@@ -174,11 +262,16 @@ class CustomTextEdit(QTextEdit):
             self.selectAll()
 
 class ChatTextBubble(ChatBubble):
-    def __init__(self, text, conv_uuid="", is_user=False, parent=None, play_audio_callback: Callable[[str], bool] | None = None):
+    def __init__(self, text, conv_uuid="", is_user=False, parent=None, playback_manager: BubblePlaybackManager | None = None):
         self.text = text
         self.conv_uuid = conv_uuid
         self.text_edit: CustomTextEdit | None = None
-        super().__init__(conv_uuid=conv_uuid, is_user=is_user, parent=parent, play_audio_callback=play_audio_callback)
+        super().__init__(
+            conv_uuid=conv_uuid,
+            is_user=is_user,
+            parent=parent,
+            playback_manager=playback_manager,
+        )
         self.update_bubble_size()
 
     def build_content_widget(self) -> QWidget:

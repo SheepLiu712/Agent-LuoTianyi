@@ -144,7 +144,7 @@ class ActivityMaker:
             if not self.first_login_res:
                 self.logger.warning("No first-login resources configured, skipping activity dispatch")
                 return
-            await asyncio.sleep(0.5)  # 错开用户拉取历史消息的时机。等用户拉完历史消息后再派发登录活动，避免登录活动消息和历史消息混在一起导致展示异常。
+            await asyncio.sleep(1)  # 错开用户拉取历史消息的时机。等用户拉完历史消息后再派发登录活动，避免登录活动消息和历史消息混在一起导致展示异常。
             uuid_list = await service_hub.agent.persist_topic_replies_for_pipeline(
                 user_id=user_uuid, reply_items=[item["response_line"] for item in self.first_login_res])
             for item, item_uuid in zip(self.first_login_res, uuid_list or []):

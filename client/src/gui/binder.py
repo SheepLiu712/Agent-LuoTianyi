@@ -14,6 +14,7 @@ class AgentBinder(QObject):
     free_signal = Signal(bool)
     history_signal = Signal(list, int)  # history_list, current_top_index
     agent_thinking_signal = Signal(bool) # 是否正在思考中
+    local_tts_state_signal = Signal(str, str) # event, conv_uuid
 
     def __init__(
         self,
@@ -21,6 +22,8 @@ class AgentBinder(QObject):
         send_image_callback: Callable[[str], str],
         send_typing_callback: Callable[[], None],
         play_local_tts_callback: Callable[[str], bool],
+        stop_local_tts_callback: Callable[[], bool],
+        set_volume_callback: Callable[[int], None],
         fetch_history_callback: Callable[[int, int], tuple],
         set_model_callback: Callable[[Live2dModel], None],
         auto_login_callback: Callable[[str, str], bool],
@@ -34,6 +37,8 @@ class AgentBinder(QObject):
         self.send_image_callback = send_image_callback
         self.send_typing_callback = send_typing_callback
         self.play_local_tts_callback = play_local_tts_callback
+        self.stop_local_tts_callback = stop_local_tts_callback
+        self.set_volume_callback = set_volume_callback
         self.fetch_history_callback = fetch_history_callback
         self.set_model_callback = set_model_callback
         self.auto_login_callback = auto_login_callback
@@ -69,6 +74,9 @@ class AgentBinder(QObject):
         print(state)
         is_thinking = (state == "thinking")
         self.agent_thinking_signal.emit(is_thinking)
+
+    def emit_local_tts_state_signal(self, event: str, conv_uuid: str):
+        self.local_tts_state_signal.emit(event, conv_uuid)
 
     def on_auto_login(self, username: str, token: str) -> bool:
         if self.auto_login_callback:
@@ -109,6 +117,15 @@ class AgentBinder(QObject):
         if self.play_local_tts_callback:
             return self.play_local_tts_callback(conv_uuid)
         return False
+
+    def on_stop_local_tts(self) -> bool:
+        if self.stop_local_tts_callback:
+            return self.stop_local_tts_callback()
+        return False
+
+    def on_set_volume(self, percent: int):
+        if self.set_volume_callback:
+            self.set_volume_callback(percent)
 
 
     def on_load_history(self, count: int, end_index: int = -1):
