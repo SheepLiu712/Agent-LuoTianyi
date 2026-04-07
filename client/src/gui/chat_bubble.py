@@ -1,3 +1,9 @@
+'''
+Author: Dpon
+Date: 2026-04-07
+聊天UI中每一条信息的承载气泡，包括文本气泡和图片气泡。
+每个气泡旁边可能有一个状态图标（如提交中、失败、等待等），对于agent消息还可能有一个播放/停止图标用于控制文本转语音的播放。
+'''
 from typing import Callable
 import weakref
 
@@ -12,9 +18,15 @@ agent_play_icon_path = "res/gui/play_agent_msg.png"
 agent_stop_icon_path = "res/gui/stop_agent_msg.png"
 agent_play_icon = None
 agent_stop_icon = None
+from ..utils.logger import get_logger
 
 
 class BubblePlaybackManager:
+    '''
+    Agent消息气泡的播放管理器，负责协调同一时间只能有一个agent消息在播放文本转语音。
+     - play_audio_callback: 当用户点击agent消息的播放图标时调用，参数为消息对应的conv_uuid，返回值表示是否成功开始播放。
+     - stop_audio_callback: 当用户点击正在播放的agent消息的停止图标时调用，无参数，返回值表示是否成功停止播放。
+    '''
     def __init__(
         self,
         play_audio_callback: Callable[[str], bool],
@@ -23,9 +35,10 @@ class BubblePlaybackManager:
         self.play_audio_callback = play_audio_callback
         self.stop_audio_callback = stop_audio_callback
         self._active_bubble_ref: weakref.ReferenceType[ChatBubble] | None = None
+        self.logger = get_logger("BubblePlaybackManager")
 
     def register_bubble(self, bubble: "ChatBubble"):
-        # Keep cleanup automatic when bubble is deleted.
+        # 注册一个agent消息气泡，监听其销毁信号以便清理播放状态
         bubble.destroyed.connect(lambda *_: self._on_bubble_destroyed(bubble))
 
     def _on_bubble_destroyed(self, bubble: "ChatBubble"):
@@ -34,6 +47,9 @@ class BubblePlaybackManager:
             self._active_bubble_ref = None
 
     def get_active_bubble(self) -> "ChatBubble | None":
+        '''
+        获得当前正在播放文本转语音的agent消息气泡实例，如果没有则返回None
+        '''
         if not self._active_bubble_ref:
             return None
         return self._active_bubble_ref()
@@ -42,8 +58,12 @@ class BubblePlaybackManager:
         self._active_bubble_ref = weakref.ref(bubble) if bubble else None
 
     def on_bubble_clicked(self, bubble: "ChatBubble"):
+        '''
+        用户点击agent消息气泡的播放/停止图标时调用，负责协调播放状态切换
+        '''
         active = self.get_active_bubble()
         if active is bubble:
+            # 点击了正在播放的气泡，应该停止播放
             if self.stop_audio_callback:
                 self.stop_audio_callback()
             bubble.set_play_icon()
@@ -51,25 +71,31 @@ class BubblePlaybackManager:
             return
 
         if not self.play_audio_callback:
+            self.logger.warning("No play_audio_callback defined in BubblePlaybackManager")
             return
 
+        # 尝试启动新气泡的播放，如果成功则更新状态，否则保持原状态。这个同时会停止之前的播放（如果有）。
         started = self.play_audio_callback(bubble.conv_uuid)
         if not started:
             return
 
+        # 成功开始播放后，如果之前有其他气泡在播放，应该切换它们的图标到播放状态
         if active and active is not bubble:
             active.set_play_icon()
         bubble.set_stop_icon()
         self._set_active_bubble(bubble)
 
     def on_local_tts_state_changed(self, event: str, conv_uuid: str):
+        # 如果音频播放被打断或者正常结束，应该切换对应气泡的图标回播放状态
         # event can be: finished / stopped
         if event not in {"finished", "stopped"}:
+            self.logger.warning(f"Unexpected event received: {event}")
             return
         active = self.get_active_bubble()
         if not active:
             return
         if conv_uuid and active.conv_uuid != conv_uuid:
+            self.logger.warning(f"Event conv_uuid {conv_uuid} does not match active bubble conv_uuid {active.conv_uuid}")
             return
         active.set_play_icon()
         self._set_active_bubble(None)
@@ -155,6 +181,7 @@ class ChatBubble(QWidget):
         self.playback_manager.on_bubble_clicked(self)
 
     def set_play_icon(self):
+        # 设置Agent消息的播放图标，表示当前可以点击播放文本转语音
         if self._label and agent_play_icon is not None:
             self._label.setPixmap(agent_play_icon)
 
@@ -167,6 +194,7 @@ class ChatBubble(QWidget):
             self._label.setPixmap(agent_play_icon)
 
     def set_status(self, status: str):
+        # 设置user消息的状态图标，在发送失败（和正在重试）时提示。
         if not self._label:
             return
 
@@ -194,6 +222,9 @@ class ChatBubble(QWidget):
 
 
 class ChatImageBubble(ChatBubble):
+    '''
+    图片类型的消息气泡，content_widget是一个QLabel用于显示图片，目前限制最大宽高为250px以适应聊天界面。
+    '''
     def __init__(self, image_path, conv_uuid="", is_user=False, parent=None, playback_manager: BubblePlaybackManager | None = None):
         self.image_label: QLabel | None = None
         self.image_path = image_path
@@ -262,6 +293,9 @@ class CustomTextEdit(QTextEdit):
             self.selectAll()
 
 class ChatTextBubble(ChatBubble):
+    '''
+    文本类型的消息气泡，text_edit用于显示文本内容，容器为自定义类型，方便控制行为。
+    '''
     def __init__(self, text, conv_uuid="", is_user=False, parent=None, playback_manager: BubblePlaybackManager | None = None):
         self.text = text
         self.conv_uuid = conv_uuid

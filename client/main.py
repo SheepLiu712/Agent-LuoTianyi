@@ -47,12 +47,7 @@ if __name__ == "__main__":
         verify_ssl=bool(config.get("verify_ssl", True)),
     ) 
     # 创建消息处理器实例，并将网络客户端的消息监听器设置方法传入，以便消息处理器能接收网络消息
-    message_processor = MessageProcessor(
-        send_text_func = network_client.send_chat,
-        send_image_func = network_client.send_image,
-        send_typing_func = network_client.send_typing,
-        message_listener_setter=network_client.network_set_message_listener
-        ) 
+    message_processor = MessageProcessor(network_client) 
     # 创建Binder实例，用于连接UI和网络层，传入网络客户端的相关回调方法
     binder = AgentBinder(
         send_text_callback = message_processor.send_text,

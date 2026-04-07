@@ -8,9 +8,12 @@ import base64
 import datetime
 from dataclasses import dataclass
 from collections import deque
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 from ..network.event_types import AgentMessage
 from ..utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from ..network.network_client import NetworkClient
 
 @dataclass
 class OutgoingMessage:
@@ -22,20 +25,18 @@ class OutgoingMessage:
 
 class MessageProcessor:
     def __init__(self,
-                send_text_func: Callable[[str], dict],
-                send_image_func: Callable[..., dict],
-                send_typing_func: Callable[[], dict],
-                message_listener_setter: Callable[[Callable[[AgentMessage], None] | None, Callable[[bool], None] | None], None]):
-        self._event_queue: queue.Queue = queue.Queue()
-        self._send_queue: deque[OutgoingMessage] = deque()
-        self._send_cond = threading.Condition()
-        self._listener_thread = threading.Thread(target=self._listen_ws_events, daemon=True)
-        self._sender_thread = threading.Thread(target=self._send_loop, daemon=True)
-        self.model: Live2dModel | None = None
+                network_client: "NetworkClient",
+                ):
+        self._event_queue: queue.Queue = queue.Queue() # 收到的WS消息会被放入这个队列，等待处理线程处理
+        self._send_queue: deque[OutgoingMessage] = deque() # 需要发送的消息会被放入这个队列
+        self._send_cond = threading.Condition() # 发送线程会等待这个条件变量，直到有消息需要发送
+        self._listener_thread = threading.Thread(target=self._listen_ws_events, daemon=True) # 处理WS消息的线程
+        self._sender_thread = threading.Thread(target=self._send_loop, daemon=True) # 处理发送消息的线程
+        self.model: Live2dModel | None = None # Live2D模型实例，用于根据消息中的表情指令更新模型表情
         self.response_signal: Callable[[str, str], None] | None = None # 为ui增加一条回复信息
         self.update_bubble_signal: Callable[[str, str], None] | None = None # 更新气泡信息
         self.agent_thinking_signal: Callable[[bool], None] | None = None # 显示agent正在思考的状态
-        self.local_tts_state_signal: Callable[[str, str], None] | None = None
+        self.local_tts_state_signal: Callable[[str, str], None] | None = None # 本地TTS状态变化的回调信号，参数为事件类型（start/finish）和对应的conv_uuid
 
         self._reply_counter = 0
         self._running = True
@@ -46,10 +47,11 @@ class MessageProcessor:
 
         self.logger = get_logger("MessageProcessor")
 
-        message_listener_setter(self.feed_agent_msg, self.change_agent_state)
-        self.send_text_func = send_text_func
-        self.send_image_func = send_image_func
-        self.send_typing_func = send_typing_func
+        # 设置消息处理器发送消息的网络客户端接口，以及将消息处理器接收消息的函数传入网络客户端，以便网络客户端能将WS消息传入消息处理器
+        network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state)
+        self.send_text_func:Callable[[str], dict] = network_client.send_chat
+        self.send_image_func:Callable[..., dict] = network_client.send_image
+        self.send_typing_func:Callable[[], dict] = network_client.send_typing
         self.start()
 
         self.processing_uuid = None

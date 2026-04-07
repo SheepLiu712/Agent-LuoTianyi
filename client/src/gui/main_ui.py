@@ -1,7 +1,9 @@
-
-import sys
+'''
+Author: Dpon
+Data: 2026-04-07
+Description: 主界面UI实现，包含Live2D显示和聊天窗口两部分，以及它们的交互逻辑。通过Binder与后端处理逻辑连接。
+'''
 import os
-import json
 from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, Signal
 from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
@@ -17,12 +19,15 @@ from ..types import ConversationItem
 from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, BubblePlaybackManager
 
 class Live2DWidget(QOpenGLWidget):
+    '''
+    live2d的显示组件，负责加载模型、渲染模型、处理与模型的交互（如点击和拖动）。
+    '''
     def __init__(self, live2d_config: Dict[str, Any], agent_binder: AgentBinder, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
         self.model: Live2dModel = Live2dModel(live2d_config)
-        agent_binder.on_set_model(self.model)
+        agent_binder.on_set_model(self.model) # 有些参数需要在创建模型之后才能设置，所以通过binder传递模型实例给agent_binder，由它来调用相关回调设置参数。
         self.setMouseTracking(True)
 
     def initializeGL(self) -> None:
@@ -57,6 +62,9 @@ class Live2DWidget(QOpenGLWidget):
             self.model.Draw()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        '''
+        处理鼠标点击事件，判断是否点击在模型的特定区域（如头部），如果是则触发模型表情变化。
+        '''
         if not self.model:
             return
         x, y = event.position().x(), event.position().y()
@@ -64,6 +72,9 @@ class Live2DWidget(QOpenGLWidget):
             self.model.set_next_expression()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        '''
+        处理鼠标拖动事件，目前的功能是模型目光跟随鼠标指针。
+        '''
         if not self.model:
             return
         x, y = event.position().x() - self.x(), event.position().y() - self.y()
@@ -73,10 +84,16 @@ class Live2DWidget(QOpenGLWidget):
         self.update()
 
 class Live2DContainer(QWidget):
+    '''
+    Live2D部分的容器组件，负责显示Live2DWidget和思考气泡，并根据Agent的状态控制思考气泡的显示和动画。
+    '''
+
     def __init__(self, gui_config, live2d_config, agent_binder: AgentBinder, parent=None):
         super().__init__(parent)
         self.live2d_widget = Live2DWidget(live2d_config, agent_binder = agent_binder, parent=self)
         self.gui_config = gui_config
+        self.agent_binder = agent_binder
+        self.agent_binder.agent_thinking_signal.connect(self.on_agent_thinking)
         self.live2d_config: Dict[str, Any] = live2d_config
         self.background_image = None
         self.thinking_visible = False
@@ -87,7 +104,7 @@ class Live2DContainer(QWidget):
         ]
         self._thinking_frame_index = 0
         self._thinking_timer = QTimer(self)
-        self._thinking_timer.setInterval(500)
+        self._thinking_timer.setInterval(500) # 每500ms切换一帧动画
         self._thinking_timer.timeout.connect(self._advance_thinking_frame)
 
         self.thinking_bubble_label = QLabel(self)
@@ -114,11 +131,14 @@ class Live2DContainer(QWidget):
         self.thinking_bubble_label.setPixmap(scaled)
         self.thinking_bubble_label.resize(scaled.size())
 
-        x = int((self.width() - self.thinking_bubble_label.width()) * 0.94)
+        x = int((self.width() - self.thinking_bubble_label.width()) * 0.94) # 一些超参数，反正这样就是可以
         y = int(self.height() * 0.25)
         self.thinking_bubble_label.move(x, y)
         self.thinking_bubble_label.raise_()
         self.thinking_bubble_label.setVisible(self.thinking_visible)
+
+    def on_agent_thinking(self, is_thinking: bool):
+        self.set_thinking_visible(is_thinking)
 
     def set_thinking_visible(self, visible: bool):
         self.thinking_visible = visible
@@ -144,7 +164,7 @@ class Live2DContainer(QWidget):
         self._thinking_frame_index = (self._thinking_frame_index + 1) % len(self.thinking_bubble_frames)
         self.update_thinking_bubble()
         
-    def load_background(self):
+    def load_background(self): # 加载背景图片
         bg_path = self.gui_config["live2d_background"]["image_path"]
         if os.path.exists(bg_path):
             self.background_image = QImage(bg_path)
@@ -152,18 +172,6 @@ class Live2DContainer(QWidget):
             print(f"Warning: Background not found at {bg_path}")
 
     def resizeEvent(self, event: QResizeEvent):
-        # Maintain 3:4 aspect ratio for the content area
-        # But this widget is the container, it might be resized by the layout.
-        # We want to draw the background and place the Live2D widget to fill this container.
-        # The constraint "Live2d界面的比例保持为3:4不变" might mean the container itself should be 3:4
-        # OR the content inside should be 3:4.
-        # If the user resizes the window, we should try to keep this widget at 3:4?
-        # Or just let it fill the left side?
-        # Let's assume the user wants the VISIBLE area to be 3:4.
-        # If we force the widget to be 3:4, we might have empty space around it.
-        
-        # For now, let's make the Live2D widget fill this container, 
-        # and we will handle the aspect ratio in the parent layout or by enforcing size constraints.
         self.live2d_widget.resize(self.size())
         self.update_thinking_bubble()
         super().resizeEvent(event)
@@ -202,6 +210,9 @@ class Live2DContainer(QWidget):
             painter.fillRect(self.rect(), Qt.GlobalColor.black)
 
 class CustomToolTip(QLabel):
+    '''
+    自定义的工具提示Label，提供更美观的样式和半透明背景，用于HoverButton的提示显示。
+    '''
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
         self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
@@ -223,12 +234,16 @@ class CustomToolTip(QLabel):
         self.adjustSize()
 
 class HoverButton(QPushButton):
+    '''
+    工具栏的按钮，支持显示自定义工具提示。
+    '''
     def __init__(self, tooltip_text="", parent=None):
         super().__init__(parent)
         self.tooltip_text = tooltip_text
         self.tooltip_widget = None
 
     def enterEvent(self, event):
+        # 绘制工具提示
         if self.tooltip_text and self.isEnabled():
             if not self.tooltip_widget:
                 self.tooltip_widget = CustomToolTip(self.tooltip_text, None) 
@@ -254,15 +269,17 @@ class HoverButton(QPushButton):
             self.tooltip_widget = None
 
 class ChatWidget(QWidget):
-    thinking_changed = Signal(bool)
+    '''
+    位于界面右侧的聊天窗口组件，包含消息显示区、输入区和工具栏。负责处理用户输入、显示聊天消息，并通过Binder与Agent进行交互。
+    我不太会写UI，这部分主要是AI写的。关键的回调逻辑是我看过的，也比较trivial，不详细解释了。
+    '''
 
-    def __init__(self, parent=None, config: Dict = None, agent_binder: AgentBinder = None):
+    def __init__(self, config: Dict, agent_binder: AgentBinder, parent=None):
         super().__init__(parent)
         self.config = config if config is not None else {}
-        self.agent = agent_binder if agent_binder is not None else AgentBinder()
+        self.agent = agent_binder
         self.agent.response_signal.connect(self.on_agent_response)
         self.agent.delete_signal.connect(self.on_agent_delete)
-        self.agent.agent_thinking_signal.connect(self.on_agent_thinking)
         self.playback_manager = BubblePlaybackManager(
             play_audio_callback=self.agent.on_play_local_tts,
             stop_audio_callback=self.agent.on_stop_local_tts,
@@ -542,10 +559,10 @@ class ChatWidget(QWidget):
             self.picture_btn.setEnabled(False)
             self.picture_btn.setIcon(QIcon("res/gui/picture_icon_un.png"))
 
-    def on_send_clicked(self):
+    def on_send_clicked(self): # 按发送按钮
         self.handle_text_input()
 
-    def on_picture_clicked(self):
+    def on_picture_clicked(self): # 按工具栏的图片按钮
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
             "Select Image", 
@@ -557,7 +574,7 @@ class ChatWidget(QWidget):
             bubble = self.add_message("image", file_path, is_user=True)
             self.agent.on_send_image(file_path, bubble)
 
-    def on_volume_button_clicked(self):
+    def on_volume_button_clicked(self): # 按工具栏的音量按钮
         if self.volume_popup.isVisible():
             self.volume_popup.hide()
             return
@@ -574,7 +591,6 @@ class ChatWidget(QWidget):
     def on_volume_changed(self, value: int):
         # Backend treats 70% as baseline for server-streamed audio level.
         self.agent.on_set_volume(value)
-
 
     def add_message(self, type: str, content: str, conv_uuid: str = "", is_user: bool = False) -> ChatBubble | ChatImageBubble:
         if type == "image":
@@ -624,9 +640,6 @@ class ChatWidget(QWidget):
 
     def on_agent_response(self, uuid: str, text: str):
         self.add_message("text", text, conv_uuid=uuid, is_user=False)
-
-    def on_agent_thinking(self, is_thinking: bool):
-        self.thinking_changed.emit(is_thinking)
     
     def on_agent_delete(self):
         count = self.history_layout.count()
@@ -664,7 +677,6 @@ class MainWindow(QWidget):
 
         # Right Side (Chat)
         self.chat_widget = ChatWidget(config=gui_config["chat_window"], agent_binder=ui_binder)
-        self.chat_widget.thinking_changed.connect(self.live2d_container.set_thinking_visible)
         self.layout.addWidget(self.live2d_container)
         self.layout.addWidget(self.v_line)
         self.layout.addWidget(self.chat_widget)
@@ -672,7 +684,7 @@ class MainWindow(QWidget):
         self.setLayout(self.layout)
 
     def resizeEvent(self, event: QResizeEvent):
-        # Calculate desired width for Live2D container based on window height
+        # 我们保证左侧界面的宽高比为4:3，右侧聊天界面占满剩余空间
         h = self.height()
         w_live2d = int(h * 3 / 4)
         
