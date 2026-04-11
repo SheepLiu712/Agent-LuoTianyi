@@ -194,7 +194,7 @@ class MainChat:
 
             sentence_buffer += sentence
 
-            if len(sentence_buffer) >= 6 or i == len(sentences_with_punct) - 1:
+            if len(sentence_buffer) >= 8 or i == len(sentences_with_punct) - 1:
                 final_content = sentence_buffer.strip()
                 if final_content:
                     split_sentences.append(final_content)

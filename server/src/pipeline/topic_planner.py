@@ -52,7 +52,7 @@ class TopicPlanner:
 
         unread_msg = UnreadStore.trans_ChatInputEvent_to_UnreadMessage(message)
         await self.unread_store.append(unread_msg)
-        await self.listen_timer.set_deadline(timeout=1)  # 新消息来了，取消之前的等待超时
+        await self.listen_timer.set_deadline()  # 新消息来了，重置等待超时
         self._wake_event.set()
     
     def start_processing(self):
@@ -92,8 +92,10 @@ class TopicPlanner:
                     force_complete=should_force_extract,
                 )
 
-                await self._commit_extraction_result(
+                # 提取结果提交后，可能会被新消息打断，导致提取结果无效；也可能没有新消息，提取结果有效。根据是否有新消息来决定保留提取结果还是丢弃。
+                extracted_topics = await self._commit_extraction_result(
                     snapshot=unread_message_snapshot,
+                    extracted_topics=extracted_topics,
                     remaining_unread=remaining_unread,
                 )
 
@@ -110,32 +112,43 @@ class TopicPlanner:
 
     async def _handle_user_typing(self, event: "ChatInputEvent"):
         """处理用户输入中的事件，重置超时等待。"""
-        _ = event
+        text_length = event.payload["text_length"]
         if not await self.unread_store.has_unread():  
             return # 没有未读消息，不需要重置等待。
-        await self.listen_timer.set_deadline()  # 用户正在输入，重置等待超时
+        if text_length > 0:
+            await self.listen_timer.set_deadline(timeout=10)  # 认为用户明确地有话要说，设置一个更长的等待时间
+        else:
+            await self.listen_timer.set_deadline() # 用户开始输入了，重置等待时间，给用户更多时间输入。
         self._wake_event.set()  # 唤醒处理循环，重新评估状态
 
     async def _commit_extraction_result(
         self,
         snapshot: UnreadMessageSnapshot,
+        extracted_topics: List[ExtractedTopic],
         remaining_unread: List[UnreadMessage],
-    ) -> None:
+    ) -> List[ExtractedTopic]:
         if self.unread_store is None:
             self.logger.error("UnreadStore is not initialized, cannot commit extraction result")
-            return
+            return []
 
         has_new_message = await self.unread_store.has_unread()
+        if has_new_message:
+            remaining_unread = snapshot.messages.copy()  # 已经有新消息了，丢弃提取时的剩余未读，保留新消息继续等待补全
+            new_extracted_topics = []  # 已经有新消息了，丢弃提取结果，保留新消息继续等待补全
+        else:
+            new_extracted_topics = extracted_topics  # 没有新消息，提取结果有效
+        
         await self.unread_store.update_unread_message(snapshot, remaining_unread) # 将剩余的信息加入未读消息中
 
         if has_new_message:
             self._wake_event.set()
-            await self.listen_timer.set_deadline(timeout=1)  # 已经有新消息了，不需要等待补全，直接进入下一轮提取
+            await self.listen_timer.set_deadline()  # 已经有新消息了，不需要等待补全，直接进入下一轮提取
         else:
             if remaining_unread:
                 await self.listen_timer.set_deadline()  # 没有新消息，但还有剩余未读，继续等待补全
             else:
                 await self.listen_timer.remove_deadline()  # 没有新消息且没有剩余未读，清除等待状态
+        return new_extracted_topics
 
     async def _extract_topics(self, unread_snapshot: UnreadMessageSnapshot, force_complete: bool) -> tuple[List[ExtractedTopic], List[UnreadMessage]]:
         """调用 agent 话题提取接口；失败时降级为简单规则提取。"""

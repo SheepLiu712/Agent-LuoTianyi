@@ -3,7 +3,7 @@ import asyncio
 import time
 
 class ListenTimer:
-    def __init__(self, username: str, user_id: str, timeout: float = 2.0):
+    def __init__(self, username: str, user_id: str, timeout: float = 2.5):
         self.listening_timeout_seconds: float = timeout
         self.listening_deadline: Optional[float] = None
         self._timer_lock = asyncio.Lock()
