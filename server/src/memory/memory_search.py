@@ -6,14 +6,14 @@ Memory Search Module
 """
 
 from ..utils.logger import get_logger
-from ..music.knowledge_service import get_song_introduction, get_song_lyrics
+from ..plugins.music.knowledge_service import get_song_introduction, get_song_lyrics
 from ..utils.llm.prompt_manager import PromptManager
 from ..utils.llm.llm_module import LLMModule
 from typing import Tuple, Dict, List, Any
 from ..database.database_service import VectorStore
 import asyncio 
 import re
-from ..music.singing_manager import SingingManager
+from ..plugins.music.singing_manager import SingingManager
 
 from sqlalchemy.orm import Session
 

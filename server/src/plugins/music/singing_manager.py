@@ -1,12 +1,12 @@
-from ..utils.logger import get_logger
+from ...utils.logger import get_logger
 import pathlib
 import os
 import json
 import io
 import base64
 import traceback
-from ..types.music_type import SongSegment, SongMetadata, OneLyricLine
-from ..types.tool_type import  MyTool, ToolFunction, ToolOneParameter
+from ...types.music_type import SongSegment, SongMetadata, OneLyricLine
+from ...types.tool_type import  MyTool, ToolFunction, ToolOneParameter
 from typing import List, Tuple, Dict, Any, Optional
 import random
 

@@ -24,7 +24,7 @@ from ..utils.logger import get_logger
 from ..tts import TTSModule
 from ..utils.enum_type import ContextType, ConversationSource
 from ..memory.memory_manager import MemoryManager
-from ..music.singing_manager import SingingManager
+from ..plugins.music.singing_manager import SingingManager
 from ..vision.vision_module import VisionModule
 from ..database.sql_database import User
 from ..database.memory_storage import MemoryStorage

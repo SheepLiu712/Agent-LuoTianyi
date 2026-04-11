@@ -14,7 +14,7 @@ from ..utils.logger import get_logger
 from .memory_search import MemorySearcher
 from .memory_write import MemoryWriter
 from .user_profile_updater import UserProfileUpdater
-from ..music.singing_manager import SingingManager
+from ..plugins.music.singing_manager import SingingManager
 from ..utils.llm.prompt_manager import PromptManager
 from ..database import VectorStore, KnowledgeGraph
 from ..database.database_service import get_user_nickname, get_user_description, update_user_description

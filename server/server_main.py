@@ -27,7 +27,7 @@ from src.interface.websocket_service import WebSocketConnection, get_websocket_s
 from src.pipeline.global_chat_stream_manager import get_GCSM
 from src.pipeline.global_speaking_worker import get_global_speaking_worker
 from src.interface.service_hub import ServiceHub
-from src.music.song_database import get_song_session, init_song_db
+from src.plugins.music.song_database import get_song_session, init_song_db
 from src.database.sql_database import get_sql_session
 from src.tts import TTSModule, init_tts_module
 from src.agent.activity_maker import init_activity_maker, get_activity_maker

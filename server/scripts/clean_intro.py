@@ -6,7 +6,7 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.append(cwd)
 
-from src.music.song_database import get_song_session, Song
+from src.plugins.music.song_database import get_song_session, Song
 
 def clean_text(text: str) -> str:
     """Remove all whitespace characters"""
