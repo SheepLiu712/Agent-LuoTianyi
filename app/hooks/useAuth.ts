@@ -136,11 +136,17 @@ export function useAuth() {
     }
   }, []);
 
-  const register = useCallback(async (username: string, password: string, inviteCode: string): Promise<{ success: boolean; message: string }> => {
+  const register = useCallback(async (
+    username: string,
+    password: string,
+    confirmPassword: string,
+    inviteCode: string,
+  ): Promise<{ success: boolean; message: string }> => {
     try {
       // TODO: 替换为实际的服务器注册请求
       if (!username.trim()) return { success: false, message: '用户名不能为空' };
       if (!password.trim()) return { success: false, message: '密码不能为空' };
+      if (password !== confirmPassword) return { success: false, message: '两次密码不一致' };
       if (!inviteCode.trim()) return { success: false, message: '邀请码不能为空' };
 
       // 加密密码

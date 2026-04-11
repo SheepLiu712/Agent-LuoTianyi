@@ -35,6 +35,7 @@ def _extract_model_paths_from_yaml(config_path: str) -> Dict[str, Any]:
         "sovits_model_path": sovits_path,
         "device": custom.get("device"),
         "is_half": custom.get("is_half"),
+        "pretrained_models_path": custom.get("pretrained_models_path"),
     }
 
 
@@ -108,12 +109,12 @@ def _run_gsv_worker(
     logger = get_logger("TTSServerWorker")
     try:
         from gsv_tts import TTS
-
+        import pathlib
         model_config = _extract_model_paths_from_yaml(config_path)
         tts = TTS(
             device=model_config.get("device"),
             is_half=model_config.get("is_half"),
-            models_dir=model_config.get("pretrained_models_path"),
+            models_dir= pathlib.Path.cwd() / model_config.get("pretrained_models_path"),
             use_bert=True,
         )
 

@@ -521,8 +521,10 @@ class ChatWidget(QWidget):
             QTimer.singleShot(5, lambda: scrollbar.setValue(scrollbar.maximum() - old_max))
 
     def on_text_changed(self):
-        self.agent.on_send_typing()
-        self.can_send = bool(self.input_box.toPlainText().strip())
+        text = self.input_box.toPlainText()
+        text_length = len(text)
+        self.agent.on_send_typing(text_length)
+        self.can_send = bool(text.strip())
         self.update_send_button_state()
 
     def update_send_button_state(self):

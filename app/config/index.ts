@@ -3,7 +3,7 @@
 
 export const server_config = {
   // 服务器基础URL - 根据实际部署环境修改
-  BASE_URL: 'https://www-api.u3493359.nyat.app:11664',
+  BASE_URL: 'https://www-dev.u3493359.nyat.app:31065',
   
   // 可以添加其他配置项
   API_TIMEOUT: 10000, // 10秒超时

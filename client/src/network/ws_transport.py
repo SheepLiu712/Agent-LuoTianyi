@@ -79,8 +79,8 @@ class WsTransport:
             payload["image_client_path"] = image_client_path
         return self._submit_user_event(WSEventType.USER_IMAGE, payload=payload, ack_timeout=ack_timeout)
     
-    def submit_typing_event(self, ack_timeout: float = 10.0) -> dict:
-        return self._submit_user_event(WSEventType.USER_TYPING, payload={"is_typing": True}, ack_timeout=ack_timeout)
+    def submit_typing_event(self, text_length: int, ack_timeout: float = 10.0) -> dict:
+        return self._submit_user_event(WSEventType.USER_TYPING, payload={"text_length": text_length}, ack_timeout=ack_timeout)
 
     def _submit_user_event(self, event_type: WSEventType, payload: dict, ack_timeout: float) -> dict:
         event = build_event(event_type, payload=payload)

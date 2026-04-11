@@ -1,22 +1,37 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, ImageSourcePropType, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CachedImage } from './CachedImage';
+import { ChatMessage } from '../types/chat';
 
-// 消息类型定义
-export interface ChatMessage {
-  uuid: string;
-  type: 'text' | 'image' | 'loading';
-  content: string; // 对于文本是文字内容，对于图片是图片路径
-  isUser: boolean;
-  timestamp?: number;
+interface MessageItemProps {
+  message: ChatMessage;
+  onToggleAgentAudio?: (uuid: string) => void;
+}
+
+function userStatusIcon(status?: ChatMessage['sendStatus']): ImageSourcePropType | null {
+  if (status === 'failed') return require('../assets/images/failed_msg.png');
+  if (status === 'waiting') return require('../assets/images/waiting_msg.png');
+  return null;
+}
+
+function agentAudioIcon(playState?: ChatMessage['audioPlayState']): ImageSourcePropType {
+  if (playState === 'playing') return require('../assets/images/stop_agent_msg.png');
+  return require('../assets/images/play_agent_msg.png');
 }
 
 // 文本气泡组件
-export const ChatBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
-  const { content, isUser } = message;
-
+export const ChatBubble: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio }) => {
+  const { content, isUser, sendStatus, audioPlayState, uuid } = message;
+  const statusIcon = userStatusIcon(sendStatus);
+  const showPlayButton = !isUser && message.audioAvailable; // 只有机器人消息且有音频时才显示播放按钮
   return (
-    <View style={styles.bubbleContainer}>
+    <View style={[styles.rowContainer, isUser ? styles.rowUser : styles.rowBot]}>
+      {isUser ? (
+        <View style={[styles.statusSlot, styles.userStatusSlot]}>
+          {!!statusIcon && <Image source={statusIcon} style={styles.statusIcon} resizeMode="contain" />}
+        </View>
+      ) : null}
+
       <View
         style={[
           styles.bubble,
@@ -25,16 +40,36 @@ export const ChatBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
       >
         <Text style={styles.bubbleText}>{content}</Text>
       </View>
+
+      {!isUser ? (
+        <View style={[styles.statusSlot, styles.agentControlSlot]}>
+          {showPlayButton ? (
+            <TouchableOpacity
+              style={styles.playButton}
+              onPress={() => onToggleAgentAudio?.(uuid)}
+            >
+              <Image source={agentAudioIcon(audioPlayState)} style={styles.playButtonIcon} resizeMode="contain" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 };
 
 // 图片气泡组件
-export const ChatImageBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
-  const { content, isUser, uuid } = message;
+export const ChatImageBubble: React.FC<MessageItemProps> = ({ message }) => {
+  const { content, isUser, uuid, sendStatus } = message;
+  const statusIcon = userStatusIcon(sendStatus);
 
   return (
-    <View style={styles.imageBubbleContainer}>
+    <View style={[styles.rowContainer, isUser ? styles.rowUser : styles.rowBot]}>
+      {isUser ? (
+        <View style={[styles.statusSlot, styles.userStatusSlot]}>
+          {!!statusIcon && <Image source={statusIcon} style={styles.statusIcon} resizeMode="contain" />}
+        </View>
+      ) : null}
+
       <View style={isUser ? styles.imageWrapperUser : styles.imageWrapperBot}>
         <CachedImage
           message_id={uuid}
@@ -42,53 +77,49 @@ export const ChatImageBubble: React.FC<{ message: ChatMessage }> = ({ message })
           style={styles.chatImage}
           maxHeight={200}
           maxWidth={200}
-          
         />
       </View>
     </View>
   );
 };
 
-
-// 加载中气泡组件
-export const ChatLoadingBubble: React.FC<{ message: ChatMessage }> = ({ message }) => {
-  const [dots, setDots] = React.useState('.');
-
-  React.useEffect(() => {
-    const interval = setInterval(() => {
-      setDots(prev => {
-        if (prev.length >= 3) return '.';
-        return prev + '.';
-      });
-    }, 1000); // 每秒增加一个点
-    return () => clearInterval(interval);
-  }, []);
-
-  return (
-    <View style={styles.bubbleContainer}>
-        <View style={[styles.bubble, styles.botBubble]}>
-            <Text style={styles.bubbleText}>{dots}</Text>
-        </View>
-    </View>
-  );
-};
-
 // 统一的消息渲染组件
-export const MessageItem: React.FC<{ message: ChatMessage }> = ({ message }) => {
-  if (message.type === 'loading') { // 如果是加载中状态，显示加载气泡
-      return <ChatLoadingBubble message={message} />; 
-  }
+export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio }) => {
   if (message.type === 'image') {
-    return <ChatImageBubble message={message} />;
+    return <ChatImageBubble message={message} onToggleAgentAudio={onToggleAgentAudio} />;
   }
-  return <ChatBubble message={message} />;
+  return <ChatBubble message={message} onToggleAgentAudio={onToggleAgentAudio} />;
 };
 
 const styles = StyleSheet.create({
-  // 文本气泡样式
-  bubbleContainer: {
-    paddingHorizontal: 10,
+  rowContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
     paddingVertical: 5,
+  },
+  rowUser: {
+    justifyContent: 'flex-end',
+  },
+  rowBot: {
+    justifyContent: 'flex-start',
+  },
+  statusSlot: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+  },
+  userStatusSlot: {
+    alignItems: 'flex-end',
+    marginRight: 4,
+  },
+  agentControlSlot: {
+    alignItems: 'flex-start',
+    marginLeft: 4,
+  },
+  statusIcon: {
+    width: 32,
+    height: 32,
   },
   bubble: {
     maxWidth: '80%',
@@ -109,12 +140,7 @@ const styles = StyleSheet.create({
   bubbleText: {
     fontSize: 16,
     color: '#000000',
-  },
-
-  // 图片气泡样式
-  imageBubbleContainer: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    includeFontPadding: false,
   },
   imageWrapperUser: {
     alignSelf: 'flex-end',
@@ -126,5 +152,15 @@ const styles = StyleSheet.create({
   },
   chatImage: {
     borderRadius: 10,
+  },
+  playButton: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  playButtonIcon: {
+    width: 32,
+    height: 32,
   },
 });

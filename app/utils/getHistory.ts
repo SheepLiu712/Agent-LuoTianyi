@@ -1,5 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import { ChatMessage } from '../components/ChatBubbles';
+import { ChatMessage } from '../types/chat';
 import { server_config } from '../config';
 
 export interface HistoryResponse {
@@ -11,6 +11,30 @@ export interface ImageResponse {
     success: boolean;
     error?: string;
     newClientPath?: string; // 确定的新的缓存路径，实际上是URI，包含了文件协议头
+}
+
+async function attachLocalAudioIfExists(msg: any, baseMessage: ChatMessage): Promise<ChatMessage> {
+    // 历史音频使用固定本地缓存路径，重启后按 uuid 回连。
+    if (baseMessage.isUser || baseMessage.type !== 'text' || !baseMessage.uuid || baseMessage.uuid === 'unknown_id') {
+        return baseMessage;
+    }
+
+    const localAudioUri = `${FileSystem.documentDirectory}tts_output/${baseMessage.uuid}.wav`;
+    try {
+        const info = await FileSystem.getInfoAsync(localAudioUri);
+        if (info.exists) {
+            return {
+                ...baseMessage,
+                audioAvailable: true,
+                audioLocalUri: localAudioUri,
+                audioPlayState: 'idle',
+            };
+        }
+    } catch {
+        // ignore relink errors and keep text message available
+    }
+
+    return baseMessage;
 }
 
 export async function getHistory(username: string, token: string, count: number, end_index: number): Promise<HistoryResponse> {
@@ -37,12 +61,16 @@ export async function getHistory(username: string, token: string, count: number,
 
         // 尝试把history中的消息转换为ChatMessage格式
         
-        const messages: ChatMessage[] = data.history.map((msg: any) => ({
-            uuid: msg.uuid || "unknown_id",
-            content: msg.content,
-            isUser: msg.source === 'user',
-            type: msg.type,
-            timestamp: msg.timestamp,
+        const messages: ChatMessage[] = await Promise.all(data.history.map(async (msg: any) => {
+            const baseMessage: ChatMessage = {
+                uuid: msg.uuid || "unknown_id",
+                content: msg.content,
+                isUser: msg.source === 'user',
+                type: msg.type,
+                timestamp: msg.timestamp,
+            };
+
+            return attachLocalAudioIfExists(msg, baseMessage);
         }));
         return {
             messages: messages,

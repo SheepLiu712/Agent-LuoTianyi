@@ -51,7 +51,7 @@ class MessageProcessor:
         network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state)
         self.send_text_func:Callable[[str], dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
-        self.send_typing_func:Callable[[], dict] = network_client.send_typing
+        self.send_typing_func:Callable[[int], dict] = network_client.send_typing
         self.start()
 
         self.processing_uuid = None
@@ -62,7 +62,7 @@ class MessageProcessor:
         self._sender_thread.start()
         self.multimedia_stream.start()
 
-    def send_typing_event(self):
+    def send_typing_event(self, text_length):
         # 1. 如果队列中有未发送的消息，不发送输入状态事件，避免过于频繁
         with self._send_cond:
             if self._send_queue:
@@ -76,7 +76,7 @@ class MessageProcessor:
         item = OutgoingMessage(
             local_id=local_id,
             kind="typing",
-            payload={},
+            payload={"text_length": text_length},
             done_event=threading.Event(),
         )
         with self._send_cond:
@@ -253,7 +253,7 @@ class MessageProcessor:
                 ack_timeout=1.0,
             )
         if item.kind == "typing":
-            return self.send_typing_func(ack_timeout=1.0)
+            return self.send_typing_func(text_length=item.payload["text_length"], ack_timeout=1.0)
         return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}", "drop": True}
 
     def _prepare_image_payload(self, image_path: str) -> dict:

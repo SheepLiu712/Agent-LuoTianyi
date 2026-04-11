@@ -110,8 +110,8 @@ class AgentBinder(QObject):
         msg_id = self.send_image_callback(image_path)
         self.msg_to_bubble[msg_id] = bubble
 
-    def on_send_typing(self):
-        self.send_typing_callback()
+    def on_send_typing(self, text_length: int):
+        self.send_typing_callback(text_length=text_length)
 
     def on_play_local_tts(self, conv_uuid: str) -> bool:
         if self.play_local_tts_callback:
