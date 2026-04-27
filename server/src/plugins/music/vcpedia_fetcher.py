@@ -1,10 +1,20 @@
+import os
+import sys
+
+cwd = os.getcwd()
+sys.path.insert(0, str(cwd))
+
 import requests
 from bs4 import BeautifulSoup
 import json
 import os
+import re
+import asyncio
 from typing import Dict, Any, Optional, List
 from pathlib import Path
-from .logger import get_logger
+from src.utils.logger import get_logger
+from src.utils.helpers import load_config
+from src.utils.llm.llm_api_interface import LLMAPIFactory
 
 class VCPediaFetcher:
     def __init__(self, config: Dict[str, Any]):
@@ -13,7 +23,12 @@ class VCPediaFetcher:
         self.activated = config.get("activated", False)
         crawler_config = config.get("vcpedia", {})
         self.base_url = crawler_config.get("base_url", "https://vcpedia.cn")
-        
+
+        cfg = load_config("config/config.json", default_config={})
+        self.llm_cfg = cfg.get("knowledge", {}).get("llm", {})
+        llm_client = LLMAPIFactory.create_interface(self.llm_cfg)
+        self.llm_client = llm_client
+
         # Define directories to search
         self.data_dir = Path(config.get("data_dir", "data/crawled_data"))
         # Default save directory
@@ -44,12 +59,42 @@ class VCPediaFetcher:
             try:
                 data = self._parse_page(html, entity_name)
                 if data:
-                    self._save_data(data)
+                    if data["type"] == "Song":
+                        data["short_summary"] = self._llm_summarize(data)
                     return data
             except Exception as e:
                 self.logger.error(f"Error parsing {entity_name}: {e}")
         
         return None
+    
+    def _llm_summarize(self, data: Dict[str, Any]) -> str:
+        summary_raw = "\n".join([str(x) for x in data.get("summary", []) if x])
+        fallback = summary_raw[:100].strip() if summary_raw else ""
+        if not data:
+            return fallback
+
+        try:
+            if not self.llm_cfg:
+                self.logger.error("knowledge.llm 配置缺失，使用回退摘要")
+                return fallback
+
+            
+            data_payload = json.dumps(data, ensure_ascii=False, default=str)
+            prompt = (
+                "请基于以下歌曲数据(JSON)总结为不超过120字的中文，且仅保留三类信息："
+                "1) 发布者(UP主)/演唱者/作词作曲等核心制作信息；"
+                "2) 歌曲意义(如所属系列、重要演出或传播节点)；"
+                "3) 歌曲主旨与大意。"
+                "不要输出无关统计信息，不要编造。\n\n"
+                f"歌曲数据：{data_payload}\n\n"
+                "请直接输出摘要正文。"
+            )
+            result = asyncio.run(self.llm_client.generate_response(prompt, use_json=False))
+            result = (result or "").strip()
+            return result if result else fallback
+        except Exception as e:
+            self.logger.error(f"LLM summarize failed: {e}")
+            return fallback
 
     def _check_cache(self, entity_name: str) -> Optional[Dict[str, Any]]:
         # Normalize name for filename
@@ -148,10 +193,8 @@ class VCPediaFetcher:
             def process_text(name: str, text: str, summary_parts: List[str], last_was_a: bool) -> bool:
                 if not text:
                     return last_was_a
-                # 截至现在已有--次观看，--人收藏 这句话是没有意义的，尝试删除
-                text = text.replace("截至现在已有--次观看，--人收藏", "").strip()
-                text = text.replace("截至目前已有--次观看，--人收藏", "").strip()
-                text = text.replace("截至现在bilibili已有--次观看，--次收藏", "").strip()
+                # 删除以“截至”开头、以“收藏”结尾的统计句段
+                text = re.sub(r"截至[^。！？\n]*?收藏", "", text).strip()
                 if summary_parts and (last_was_a or name == 'a'):
                     summary_parts[-1] += text
                 else:
@@ -230,7 +273,6 @@ class VCPediaFetcher:
             "type": type,
             "infobox": infobox_data,
             "summary": summary,
-            "short_summary": short_summary,
             "lyrics": lyrics
         }
 
@@ -255,3 +297,18 @@ class VCPediaFetcher:
         else:
             data.pop("short_summary", None)
         return json.dumps(data, ensure_ascii=False)
+
+if __name__ == "__main__":
+    # Example usage
+    config = {
+        "activated": True,
+        "vcpedia": {
+            "base_url": "https://vcpedia.cn",
+            "output_dir": "data/crawled_data"
+        },
+        "data_dir": "data/crawled_data"
+    }
+    fetcher = VCPediaFetcher(config)
+    entity_name = "洛天依"  # Example entity
+    description = fetcher.fetch_entity_description("煌")
+    print(description)

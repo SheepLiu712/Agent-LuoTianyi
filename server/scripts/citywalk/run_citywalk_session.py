@@ -13,8 +13,9 @@ from src.plugins.citywalk.session_runner import CitywalkSessionRunner
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run one citywalk session and generate markdown report")
-    parser.add_argument("--city", default="北京", help="城市名")
-    parser.add_argument("--location", default="116.397428,39.90923", help="起点经纬度，lng,lat")
+    parser.add_argument("--city", default=None, help="城市名")
+    parser.add_argument("--location", default="", help="起点经纬度，lng,lat；为空时可用--district-code")
+    parser.add_argument("--district-code", default="", help="城市区代码，若提供则在该区中心随机取起点")
     parser.add_argument("--api-key", default="", help="可选，直接指定高德key，优先级高于环境变量")
     args = parser.parse_args()
 
@@ -24,7 +25,9 @@ def main() -> int:
     client = AMapClient(cfg)
     runner = CitywalkSessionRunner(cfg, client)
 
-    result = runner.run(city=args.city, start_location=args.location)
+    start_location = args.location or cfg.get("session", {}).get("start_location", "")
+    district_code = args.district_code or cfg.get("session", {}).get("start_district_code", "")
+    result = runner.run(city=args.city, district_code=district_code, start_location=start_location)
 
     generator = CitywalkReportGenerator(title_prefix=cfg["report"].get("title_prefix", "逛街小洛"))
     output_path = generator.save(result, cfg["report"].get("output_dir", "data/citywalk_reports"))

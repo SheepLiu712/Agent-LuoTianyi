@@ -8,3 +8,11 @@ class AMapRequestError(CitywalkError):
 
 class AMapResponseError(CitywalkError):
     """AMap API returned business error."""
+
+
+class LLMDecisionError(CitywalkError):
+    """Citywalk decision LLM failed or returned invalid output."""
+
+
+class LLMEnvironmentError(CitywalkError):
+    """Citywalk environment LLM failed or returned invalid output."""

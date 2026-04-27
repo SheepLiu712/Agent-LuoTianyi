@@ -1,9 +1,9 @@
-from sqlalchemy import create_engine, Column, String, Integer, Text
+from sqlalchemy import create_engine, Column, String, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
 import uuid
 import os
 import json
-from typing import Dict, Generator
+from typing import Dict
 from sqlalchemy.orm import Session
 
 Base = declarative_base()
@@ -16,7 +16,7 @@ class Song(Base):
     safe_name = Column(String, nullable=False)
     uploader = Column(String, nullable=True) # UP主
     singers = Column(String, nullable=True) # 演唱
-    introduction = Column(Text, nullable=False) # summary
+    introduction = Column(Text, nullable=False) # short_summary
     lyrics = Column(Text, nullable=False) # lyrics (cleaned)
 
 SessionLocal = None

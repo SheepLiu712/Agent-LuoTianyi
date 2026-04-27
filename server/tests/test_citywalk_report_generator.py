@@ -1,3 +1,11 @@
+import os
+import sys
+
+# Setup paths
+current_dir = os.getcwd()
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
 from datetime import datetime
 
 from src.plugins.citywalk.report_generator import CitywalkReportGenerator
@@ -15,6 +23,13 @@ def test_report_render_contains_cards():
         thought="今天状态不错",
         energy_before=90,
         energy_after=82,
+        keyword="咖啡",
+        activity_duration_min=30,
+        search_result="测试咖啡店(500m,餐饮)",
+        environment_feedback="附近有一家评价不错的咖啡店，步行可达。",
+        available_actions=["go_to_poi:0", "return"],
+        llm_action="go_to_poi:0",
+        llm_reason="mock_llm",
     )
     result = CitywalkSessionResult(
         city="北京",
@@ -31,3 +46,5 @@ def test_report_render_contains_cards():
     assert "第1站" in text
     assert "测试咖啡店" in text
     assert "体力变化: 90 -> 82" in text
+    assert "LLM选择: go_to_poi:0" in text
+    assert "高德候选" in text

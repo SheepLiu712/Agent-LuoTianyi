@@ -1,4 +1,5 @@
 import time
+import random
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -90,6 +91,31 @@ class AMapClient:
             )
         return pois
 
+    def geocode_place(self, address: str, city: str = "") -> Dict[str, str]:
+        payload = self._request(
+            "/geocode/geo",
+            {
+                "address": address,
+                "city": city,
+            },
+        )
+        geocodes = payload.get("geocodes", [])
+        if not geocodes:
+            raise AMapResponseError(f"No geocode found for address={address}, city={city}")
+
+        row = geocodes[0]
+        location = str(row.get("location", "")).strip()
+        if not location or "," not in location:
+            raise AMapResponseError(f"Invalid geocode location for address={address}, city={city}")
+
+        return {
+            "location": location, # 经纬度
+            "formatted_address": str(row.get("formatted_address", "")).strip(),
+            "province": str(row.get("province", "")).strip(),
+            "city": str(row.get("city", "")).strip(),
+            "district": str(row.get("district", "")).strip(),
+        }
+
     def get_poi_detail(self, poi_id: str) -> POIDetail:
         payload = self._request(
             "/place/detail",
@@ -119,13 +145,47 @@ class AMapClient:
         except (ValueError, TypeError):
             rating = None
 
+        tag_value = row.get("tag", "") or ""
+        tags = [x.strip() for x in str(tag_value).replace("|", ";").split(";") if x.strip()]
+        photos_raw = row.get("photos", []) or []
+        photo_urls: List[str] = []
+        for p in photos_raw:
+            if isinstance(p, dict) and p.get("url"):
+                photo_urls.append(str(p.get("url")))
+
         return POIDetail(
             poi=poi,
             tel=row.get("tel", ""),
             rating=rating,
             business_hours=row.get("business_hours", ""),
-            intro=row.get("tag", ""),
+            intro=tag_value,
+            tags=tags,
+            photos=photo_urls,
         )
+
+    def resolve_random_start_by_district_code(self, district_code: str, jitter: float = 0.015) -> str:
+        payload = self._request(
+            "/config/district",
+            {
+                "keywords": district_code,
+                "subdistrict": 0,
+                "extensions": "base",
+            },
+        )
+        districts = payload.get("districts", [])
+        if not districts:
+            raise AMapResponseError(f"No district found for code {district_code}")
+
+        center = str(districts[0].get("center", "")).strip()
+        if not center or "," not in center:
+            raise AMapResponseError(f"District center missing for code {district_code}")
+
+        lng_s, lat_s = center.split(",", 1)
+        lng = float(lng_s)
+        lat = float(lat_s)
+        lng += random.uniform(-jitter, jitter)
+        lat += random.uniform(-jitter, jitter)
+        return f"{lng:.6f},{lat:.6f}"
 
     def plan_walking_route(self, origin: str, destination: str) -> RouteResult:
         payload = self._request(
