@@ -641,7 +641,12 @@ class ChatWidget(QWidget):
         self.agent.on_send_text(text, bubble)
 
     def on_agent_response(self, uuid: str, text: str):
-        self.add_message("text", text, conv_uuid=uuid, is_user=False)
+        bubble = self.add_message("text", text, conv_uuid=uuid, is_user=False)
+        # register mapping so Binder can update this bubble later (e.g., when audio saved)
+        try:
+            self.agent.msg_to_bubble[uuid] = bubble
+        except Exception:
+            pass
     
     def on_agent_delete(self):
         count = self.history_layout.count()

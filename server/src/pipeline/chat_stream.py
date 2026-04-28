@@ -88,12 +88,17 @@ class ChatStream:
 
     async def change_state(self, thinking: Optional[bool] = None, speaking: Optional[bool] = None):
         async with self.state_lock:
-            if thinking and self.state != self.STATE_THINKING: # 由replier调用，进入思考状态时必然更新状态
+            if thinking == True: # 由replier调用，进入思考状态时必然更新状态
                 self.state = self.STATE_THINKING
                 await self._send_agent_state(self.STATE_THINKING)
                 return
-            if speaking: # 由chat_stream的_send_response调用，此时如果不在思考，则认为进入WAITING状态
+            if speaking == True: # 由chat_stream的_send_response调用，此时如果不在思考，则认为进入WAITING状态
                 if not self.topic_replier.is_processing and self.state != self.STATE_WAITING:
+                    self.state = self.STATE_WAITING
+                    await self._send_agent_state(self.STATE_WAITING)
+                return
+            if thinking == False:
+                if self.state != self.STATE_WAITING:
                     self.state = self.STATE_WAITING
                     await self._send_agent_state(self.STATE_WAITING)
                 return

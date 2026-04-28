@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -19,6 +19,7 @@ import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
 import { clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+
 
 export default function Index() {
   const { username, message_token } = auth;

@@ -73,7 +73,7 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
     >
       <View style={[styles.container, { paddingTop: insets.top + 40, paddingBottom: insets.bottom }]}>
         {/* 标题 */}
-        <Text style={styles.title}>小洛聊天室</Text>
+        <Text style={styles.title}>AI小洛</Text>
         <Text style={styles.subtitle}>Chat with LuoTianyi</Text>
 
         {/* Tab 切换 */}

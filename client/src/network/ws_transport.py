@@ -325,6 +325,7 @@ class WsTransport:
             pass
 
     def _emit_agent_state(self, state_msg: str) -> None:
+        self.logger.debug(f"Agent state changed: {state_msg}")
         if not self._agent_state_listener:
             return
         try:

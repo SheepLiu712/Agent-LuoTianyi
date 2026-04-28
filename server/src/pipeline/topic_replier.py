@@ -67,6 +67,8 @@ class TopicReplier:
                 if topic is not None:
                     self.topic_queue.task_done()
                 self.is_processing = False
+                if self.topic_queue.empty() and self.change_state_callback is not None:
+                    await self.change_state_callback(thinking = False) # 进入思考状态
 
     async def _reply_one_topic(self, topic: "ExtractedTopic") -> None:
         if self.service_hub is None or self.service_hub.agent is None:

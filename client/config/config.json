@@ -7,7 +7,7 @@
     },
     "release_config":
     {
-    "base_url": "https://www-dev.u3493359.nyat.app:31065",
+    "base_url": "https://www-api.u3493359.nyat.app:11664",
     "verify_ssl": true
     },  
     "live2d":{

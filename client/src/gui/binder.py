@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 class AgentBinder(QObject):
     response_signal = Signal(str, str)  # uuid, text
+    update_signal = Signal(str, str)
     delete_signal = Signal()
     free_signal = Signal(bool)
     history_signal = Signal(list, int)  # history_list, current_top_index
@@ -46,6 +47,8 @@ class AgentBinder(QObject):
         self.register_callback = register_callback
 
         self.msg_to_bubble: Dict[str, ChatBubble] = {}  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
+        # 将跨线程的更新请求通过 Qt 信号转发到主线程执行
+        self.update_signal.connect(self._handle_update_signal)
 
     def emit_response_signal(self, uuid: str, text: str):
         # 让QT框架外的成员能触发信号
@@ -55,6 +58,11 @@ class AgentBinder(QObject):
         '''
         根据发来的消息ID和状态，更新对应气泡的状态，具体而言是在气泡旁边显示一个状态图标。
         '''
+        # Emit a Qt signal so the actual widget operations run in the UI thread.
+        self.update_signal.emit(msg_id, text)
+
+    def _handle_update_signal(self, msg_id: str, text: str):
+        # This runs in the QObject's thread (UI thread). Perform the actual widget updates here.
         if msg_id not in self.msg_to_bubble:
             return
         bubble = self.msg_to_bubble[msg_id]
@@ -69,9 +77,19 @@ class AgentBinder(QObject):
             bubble.set_status(text)
             self.msg_to_bubble.pop(msg_id, None)  # 提交成功后移除映射关系
             return
+        elif text == "has_audio":
+            # 当后端保存了本地音频文件，通知气泡添加播放图标
+            try:
+                if hasattr(bubble, 'add_audio_label'):
+                    bubble.add_audio_label()
+                else:
+                    bubble.set_play_icon()
+            except Exception:
+                pass
+            finally:
+                self.msg_to_bubble.pop(msg_id, None)  # 无论成功与否都移除映射关系，避免内存泄漏
         
     def emit_agent_thinking_signal(self, state: str):
-        print(state)
         is_thinking = (state == "thinking")
         self.agent_thinking_signal.emit(is_thinking)
 

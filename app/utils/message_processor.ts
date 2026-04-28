@@ -1,10 +1,10 @@
+import { Buffer } from 'buffer';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Buffer } from 'buffer';
-import { AgentBinder } from './binder';
-import { NetworkClient } from './network_client';
 import { AgentMessagePayload } from '../types/chat';
+import { AgentBinder } from './binder';
 import { addDebugTrace } from './debug_trace';
+import { NetworkClient } from './network_client';
 
 type SendItem =
   | { kind: 'text'; uuid: string; text: string }
@@ -86,6 +86,8 @@ export class MessageProcessor {
   private readonly audioChunksByUuid = new Map<string, string[]>();
   private readonly audioPathByUuid = new Map<string, string>();
   private lastTypingSentAt = 0;
+  private readonly serverAudioFinishWaiters: (() => void)[] = [];
+  private incomingMessageChain: Promise<void> = Promise.resolve();
 
   constructor(
     networkClient: NetworkClient,
@@ -264,6 +266,16 @@ export class MessageProcessor {
   }
 
   onAgentMessage(payload: AgentMessagePayload) {
+    this.incomingMessageChain = this.incomingMessageChain
+      .then(() => this.handleAgentMessage(payload))
+      .catch((error) => {
+        addDebugTrace('agent', 'handleAgentMessage failed', {
+          error: getErrorMessage(error),
+        });
+      });
+  }
+
+  private async handleAgentMessage(payload: AgentMessagePayload) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
 
     if (this.localPlayingUuid) {
@@ -296,12 +308,43 @@ export class MessageProcessor {
 
     if (payload.is_final_package) {
       this.feedServerAudioChunk('', true);
-      void this.saveAudioToLocal(convUuid);
+      await this.waitForServerAudioFinished();
+      await this.saveAudioToLocal(convUuid);
     }
   }
 
   onServerAudioFinished() {
     this.serverAudioPlaying = false;
+    const waiters = this.serverAudioFinishWaiters.splice(0);
+    for (const resolve of waiters) {
+      resolve();
+    }
+  }
+
+  private waitForServerAudioFinished(timeoutMs = 30000) {
+    if (!this.serverAudioPlaying) {
+      return Promise.resolve();
+    }
+
+    return new Promise<void>((resolve) => {
+      const onFinished = () => {
+        clearTimeout(timeoutId);
+        const idx = this.serverAudioFinishWaiters.indexOf(onFinished);
+        if (idx >= 0) {
+          this.serverAudioFinishWaiters.splice(idx, 1);
+        }
+        resolve();
+      };
+
+      const timeoutId = setTimeout(() => {
+        addDebugTrace('audio', 'waitForServerAudioFinished timeout', {
+          timeoutMs,
+        });
+        onFinished();
+      }, timeoutMs);
+
+      this.serverAudioFinishWaiters.push(onFinished);
+    });
   }
 
   private startSendLoop() {

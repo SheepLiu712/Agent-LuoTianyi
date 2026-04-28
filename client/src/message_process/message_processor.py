@@ -116,6 +116,7 @@ class MessageProcessor:
             self._send_queue.append(item)
             self._send_cond.notify()
         return local_id
+    
 
     def play_local_tts_by_uuid(self, conv_uuid: str) -> bool:
         if not conv_uuid or not self.multimedia_stream:
@@ -165,9 +166,16 @@ class MessageProcessor:
         if response.is_final_package:
             self.multimedia_stream.finish_one_sentense()
             # 将最终的音频结果保存到本地
-            self._save_audio_to_temp(self.processing_audio, self.processing_uuid, ".wav")
+            saved_uuid = self.processing_uuid
+            ret = self._save_audio_to_temp(self.processing_audio, saved_uuid, ".wav")
             self.processing_audio = bytearray()
             self.processing_uuid = None
+            if ret and self.update_bubble_signal:
+                # 通知UI对应的气泡有本地音频可播放
+                try:
+                    self.update_bubble_signal(saved_uuid, "has_audio")
+                except Exception as exc:
+                    self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={saved_uuid}): {exc}")
 
     def _send_loop(self):
         while self._running:

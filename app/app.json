@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "小洛聊天室",
-    "slug": "ChatLuo",
-    "version": "1.0.0",
+    "name": "ai小洛",
+    "slug": "ChatwithAILuo",
+    "version": "0.1.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon_whitebg.png",
-    "scheme": "agentluotianyiapp",
+    "scheme": "ailuotianyi",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "assetBundlePatterns": [
@@ -23,7 +23,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
-      "package": "com.sheepliu712.agentluotianyiapp",
+      "package": "com.sheepliu712.ailuotianyi",
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE"
@@ -46,7 +46,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -20,6 +20,17 @@ agent_play_icon = None
 agent_stop_icon = None
 from ..utils.logger import get_logger
 
+def has_wav_file(conv_uuid: str) -> bool:
+    import os
+    if not conv_uuid:
+            return False
+    wav_path = os.path.join(os.getcwd(), "temp", "tts_output", f"{conv_uuid}.wav")
+    if not os.path.exists(wav_path):
+        return False
+    # WAV header is typically 44 bytes; smaller/equal indicates no usable audio payload.
+    if os.path.getsize(wav_path) <= 44:
+        return False
+    return True
 
 class BubblePlaybackManager:
     '''
@@ -141,6 +152,8 @@ class ChatBubble(QWidget):
                 agent_stop_icon = stop_pm.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         layout = QHBoxLayout()
         layout.setContentsMargins(10, 5, 10, 5)
+        # keep reference for dynamic label insertion
+        self._layout = layout
 
         self.content_widget = self.build_content_widget()
 
@@ -155,17 +168,23 @@ class ChatBubble(QWidget):
             layout.addSpacing(0)
             layout.addWidget(self.content_widget)
         else: # agent
-            self._label = ClickableLabel()
-            self._label.setFixedSize(24, 24)
-            self._label.setStyleSheet("background-color: transparent;")
-            self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            self._label.setPixmap(agent_play_icon)
-            self._label.setCursor(Qt.CursorShape.PointingHandCursor)
-            self._label.clicked.connect(self._on_agent_label_clicked)
-            layout.addWidget(self.content_widget)
-            layout.addSpacing(0)
-            layout.addWidget(self._label)
-            layout.addStretch()
+            # 如果有本地音频：
+            if has_wav_file(self.conv_uuid):
+                self._label = ClickableLabel()
+                self._label.setFixedSize(24, 24)
+                self._label.setStyleSheet("background-color: transparent;")
+                self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._label.setPixmap(agent_play_icon)
+                self._label.setCursor(Qt.CursorShape.PointingHandCursor)
+                self._label.clicked.connect(self._on_agent_label_clicked)
+            
+                layout.addWidget(self.content_widget)
+                layout.addSpacing(0)
+                layout.addWidget(self._label)
+                layout.addStretch()
+            else:
+                layout.addWidget(self.content_widget)
+                layout.addStretch()
 
         self.setLayout(layout)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
@@ -219,6 +238,40 @@ class ChatBubble(QWidget):
         self._label.setPixmap(
             pixmap.scaled(24, 24, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         )
+
+    def add_audio_label(self):
+        """
+        动态为agent消息添加播放图标（在接收到本地TTS文件后调用）。
+        如果_label已存在则什么也不做。
+        """
+        if self._label:
+            # already has a label
+            return
+        if self.is_user:
+            return
+        # create clickable label
+        self._label = ClickableLabel()
+        self._label.setFixedSize(24, 24)
+        self._label.setStyleSheet("background-color: transparent;")
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if agent_play_icon is not None:
+            self._label.setPixmap(agent_play_icon)
+        self._label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._label.clicked.connect(self._on_agent_label_clicked)
+
+        # insert into layout after content_widget if possible
+        try:
+            idx = self._layout.indexOf(self.content_widget)
+            if idx >= 0:
+                self._layout.insertWidget(idx + 1, self._label)
+                self._layout.addStretch()
+            else:
+                # fallback: append at end
+                self._layout.addWidget(self._label)
+                self._layout.addStretch()
+        except Exception:
+            # silent fallback
+            pass
 
 
 class ChatImageBubble(ChatBubble):
