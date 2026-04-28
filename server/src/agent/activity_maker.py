@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
-from ..database.sql_database import User
 from ..utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
 from ..utils.logger import get_logger
 from ..pipeline.topic_planner import ExtractedTopic
@@ -258,10 +257,16 @@ class ActivityMaker:
                 pass
 
     async def add_user_login_activity(self, user_uuid: str, time_since_last_login: Optional[float]) -> None:
+        
         state = self.user_states.get(user_uuid)
         if state is None:
             state = _UserActivityState()
             self.user_states[user_uuid] = state
+
+        if time_since_last_login is not None:
+            self.logger.debug(f"user {user_uuid} 登录，距离上次登录 {time_since_last_login/86400:.2f} 天")
+        else:
+            self.logger.debug(f"user {user_uuid} 初次登录")
 
         if time_since_last_login is None:
             state.pending_actions.append(
@@ -273,6 +278,7 @@ class ActivityMaker:
             return
 
         if time_since_last_login >= self.return_user_threshold_seconds:
+            self.logger.debug(f"超过距离上次登录阈值 {self.return_user_threshold_seconds/86400:.2f} 天")
             state.pending_actions.append(
                 ActionActivity(
                     activity_type=ActivityType.RETURN_LOGIN,

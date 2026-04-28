@@ -41,50 +41,82 @@ class MemorySearcher:
         """面向 TopicReplier 的直接检索接口：混合检索并按分数截断。"""
         if not queries:
             return []
-
-        scored_hits: List[Tuple[float, str, str]] = []
-        for query in queries:
-            q = (query or "").strip()
-            if not q:
-                continue
-            results = await vector_store.search(user_id, q, k=max(1, k))
-            docs = [f"[{score:.3f}] {doc.get_content()}" for doc, score in results]
-            self.logger.debug(f"Vector search for query '{q}' got {len(results)} results: {docs}")
+        
+        async def search_with_thres(
+            user_id: str,
+            q: str,
+            k: int,
+            score_threshold: float,
+            prefix: str = None,
+            timestamp_keys: List[str] = None,
+        ) -> List[Tuple[float, str, str]]:
+            results = await vector_store.search(user_id, q, k=k)
+            hits = []
             for doc, score in results:
                 if score < score_threshold:
                     continue
                 timestamp = ""
                 if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
-                    timestamp = str(doc.metadata.get("timestamp") or "").strip()
+                    for key in timestamp_keys or ["timestamp"]:
+                        timestamp = str(doc.metadata.get(key) or "").strip()
+                        if timestamp:
+                            break
                 content = doc.get_content().strip() if hasattr(doc, "get_content") else ""
                 if not content:
                     continue
                 rendered = f"在{timestamp}, {content}" if timestamp else content
+                if prefix:
+                    rendered = f"{prefix} {rendered}"
                 doc_id = str(getattr(doc, "id", "") or rendered)
-                scored_hits.append((score, doc_id, rendered))
+                hits.append((score, doc_id, rendered))
+            return hits
 
-            # 其次，检索 citywalk 专用记忆（存储时 user_id 默认为 __citywalk__ 或 metadata 指明）
+        scored_hits: List[Tuple[float, str, str]] = []
+
+        async def search_task(
+            q: str,
+            source: str,
+            user_id_for_search: str,
+            threshold: float,
+            prefix: str = None,
+            timestamp_keys: List[str] = None,
+        ) -> Tuple[str, str, List[Tuple[float, str, str]]]:
+            hits = await search_with_thres(
+                user_id_for_search,
+                q,
+                max(1, k),
+                threshold,
+                prefix=prefix,
+                timestamp_keys=timestamp_keys,
+            )
+            return q, source, hits
+
+        pending_tasks: List[asyncio.Task] = []
+        for query in queries:
+            q = (query or "").strip()
+            if not q:
+                continue
+            pending_tasks.append(asyncio.create_task(search_task(q, "user", user_id, score_threshold)))
+            pending_tasks.append(
+                asyncio.create_task(
+                    search_task(
+                        q,
+                        "citywalk",
+                        "__citywalk__",
+                        min(score_threshold + 0.2, 0.88),
+                        prefix="城市漫步记忆",
+                        timestamp_keys=["citywalk_date", "timestamp"],
+                    )
+                )
+            )
+
+        for finished_task in asyncio.as_completed(pending_tasks):
             try:
-                citywalk_user = "__citywalk__"
-                # citywalk 要求使用更高的阈值，避免过度引用城市漫步记忆
-                citywalk_threshold = min(score_threshold + 0.2, 0.88)
-                cw_results = await vector_store.search(citywalk_user, q, k=max(1, k))
-                cw_docs = [f"[{s:.3f}] {d.get_content()}" for d, s in cw_results]
-                self.logger.debug(f"Citywalk vector search for query '{q}' got {len(cw_results)} results: {cw_docs}")
-                for doc, score in cw_results:
-                    if score < citywalk_threshold:
-                        continue
-                    timestamp = ""
-                    if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
-                        timestamp = str(doc.metadata.get("citywalk_date") or doc.metadata.get("timestamp") or "").strip()
-                    content = doc.get_content().strip() if hasattr(doc, "get_content") else ""
-                    if not content:
-                        continue
-                    rendered = f"城市漫步记忆[{timestamp}]: {content}" if timestamp else f"城市漫步记忆: {content}"
-                    doc_id = str(getattr(doc, "id", "") or rendered)
-                    scored_hits.append((score, doc_id, rendered))
+                q, source, hits = await finished_task
+                self.logger.debug(f"{source} vector search for query '{q}' completed with {len(hits)} hits")
+                scored_hits.extend(hits)
             except Exception as exc:
-                self.logger.debug(f"Citywalk memory search skipped/failed: {exc}")
+                self.logger.debug(f"Memory search task failed: {exc}")
 
         if not scored_hits:
             return []

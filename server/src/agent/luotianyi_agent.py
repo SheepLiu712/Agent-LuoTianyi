@@ -416,7 +416,7 @@ class LuoTianyiAgent:
             segment = self.singing_manager.pick_segment_for_song(song_name)
             if segment:
                 return song_name, segment
-
+        self.singing_manager.add_wished_song(song_name)
         return song_name, None # 如果有明确歌名但无法满足唱歌需求，返回歌名和None表示用户想听这首歌但还不会唱
     
     def sing(self, song_name: str, segment: str) -> Optional[str]:

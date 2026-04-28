@@ -127,6 +127,20 @@ class SingingManager:
         # to json string
         return song_and_desc
     
+    def add_wished_song(self, song_name:str) -> bool:
+        meta_data_path = self.resource_path + "/metadata.json"
+        with open(meta_data_path, "r") as f:
+            meta_data = json.load(f)
+
+        wished_song = meta_data.get("wished_songs",[])
+        if song_name in wished_song:
+            return False
+        wished_song.append(song_name)
+        meta_data["wished_songs"] = wished_song
+        with open(meta_data_path, "w") as f:
+            json.dump(meta_data, f, ensure_ascii=False, indent=4)
+        return True
+    
     async def get_songs_can_sing_llm(self, max_song_num: int = 5) -> str:
         song_and_desc = self.get_songs_can_sing(max_song_num)
         return json.dumps(song_and_desc, ensure_ascii=False)

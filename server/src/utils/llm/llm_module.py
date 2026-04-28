@@ -12,7 +12,7 @@ class LLMModule:
 
     async def generate_response(self, use_json: bool = False, **kwargs) -> str:
         prompt = self.prompt_template.render(**kwargs)
-        print(f"LLMModule generated prompt: {prompt}")
+        # print(f"LLMModule generated prompt: {prompt}")
         response = await self.llm_client.generate_response(prompt, use_json=use_json)
-        print(f"LLMModule generated response: {response}")
+        # print(f"LLMModule generated response: {response}")
         return response 
