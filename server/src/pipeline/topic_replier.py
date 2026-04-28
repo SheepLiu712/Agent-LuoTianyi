@@ -142,13 +142,34 @@ class TopicReplier:
 
     async def _fact_search(self, fact_constraints: List[str]) -> List[str]:
         # 利用music/knowledge_service.py，获取歌曲的简介和歌词并返回
+        # 特殊处理：如果 fact_constraints 包含 "/SongsCanSing"，调用 SingingManager 获取可唱歌曲列表
         if self.service_hub is None or self.service_hub.agent is None:
             self.logger.warning("ServiceHub or agent is not ready for fact search")
             return []
         if not fact_constraints:
             return []
 
-        return await self.service_hub.agent.search_song_facts_for_topic(fact_constraints)
+        # 处理 /SongsCanSing 特殊指令
+        special_hits = []
+        regular_constraints = []
+        
+        for constraint in fact_constraints:
+            if constraint == "/SongsCanSing":
+                try:
+                    singing_manager = self.service_hub.agent.singing_manager
+                    songs_json = await singing_manager.get_songs_can_sing_llm(max_song_num=15)
+                    special_hits.append(f"可唱歌曲推荐：{songs_json}")
+                except Exception as e:
+                    self.logger.error(f"Failed to get songs can sing: {e}")
+            else:
+                regular_constraints.append(constraint)
+        
+        # 获取常规的歌曲事实
+        regular_hits = []
+        if regular_constraints:
+            regular_hits = await self.service_hub.agent.search_song_facts_for_topic(regular_constraints)
+        
+        return special_hits + regular_hits
 
     async def _sing_plan(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
         # 利用并修改singing_manager，判断sing_attempts中所给出的用户的唱歌指令能否满足，如果能满足则返回准备唱的歌曲名称和唱段，如果不能满足则返回None
