@@ -133,12 +133,29 @@ class TopicReplier:
             return []
         if not memory_attempts:
             return []
+        
+        special_hits = []
+        regular_hits = []
+        regular_attempts = []
+        for attempt in memory_attempts:
+            if attempt == "/YesterdayCityWalk":
+                try:
+                    # get yesterday's date in YYYY-MM-DD
+                    from datetime import datetime, timedelta
+                    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+                    diary = await self.service_hub.agent.get_citywalk_diary_by_date(yesterday)
+                    if diary:
+                        special_hits.append(f"昨天的城市漫步日记:\n{diary}")
+                except Exception as e:
+                    self.logger.error(f"Failed to get YesterdayCityWalk: {e}")
+            regular_attempts.append(attempt)
 
-        return await self.service_hub.agent.search_memories_for_topic(
+        regular_hits = await self.service_hub.agent.search_memories_for_topic(
             user_id=self.user_id,
-            queries=memory_attempts,
+            queries=regular_attempts,
             similarity_threshold=approximity_threshold,
         )
+        return special_hits + regular_hits
 
     async def _fact_search(self, fact_constraints: List[str]) -> List[str]:
         # 利用music/knowledge_service.py，获取歌曲的简介和歌词并返回
@@ -161,6 +178,7 @@ class TopicReplier:
                     special_hits.append(f"可唱歌曲推荐：{songs_json}")
                 except Exception as e:
                     self.logger.error(f"Failed to get songs can sing: {e}")
+
             else:
                 regular_constraints.append(constraint)
         

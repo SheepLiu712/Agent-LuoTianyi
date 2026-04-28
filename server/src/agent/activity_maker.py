@@ -31,6 +31,7 @@ class ActivityType(str, Enum):
     FIRST_LOGIN = "first_login"
     RETURN_LOGIN = "return_login"
     USER_SILENCE = "user_silence"
+    REGULAR_LOGIN = "regular_login"
 
 @dataclass
 class ActionActivity:
@@ -164,6 +165,75 @@ class ActivityMaker:
             await chat_stream.topic_replier.add_topic(topic)
             return
 
+        if action.activity_type == ActivityType.REGULAR_LOGIN:
+            # 当天第一次登录（非首次安装/首次登录，也不是长时未登录）触发
+            topics_to_add = []
+            # 1) 检查今天是否为常见中国节日（简单判断固定公历节日）
+            def _is_chinese_holiday(dt:datetime):
+                # 仅判断若干常见公历节日：元旦、劳动节、国庆节、圣诞等
+                mmdd = dt.strftime("%m-%d")
+                fixed = {"01-01": "元旦", "05-01": "劳动节", "10-01": "国庆节", "12-25": "圣诞节", "10-31":"万圣节", "02-14":"情人节", "04-01":"愚人节"}
+                holiday_name = fixed.get(mmdd)
+                if holiday_name:
+                    return holiday_name
+            
+                # 判断农历节日
+                from lunardate import LunarDate
+                fixed = {"08-15": "中秋节", "01-01": "春节", "05-05": "端午节", "07-07": "七夕节", "01-15": "元宵节"}
+                lunar_dt = LunarDate.fromSolarDate(dt.year, dt.month, dt.day)
+                lunar_mmdd = f"{lunar_dt.month:02d}-{lunar_dt.day:02d}"
+                holiday_name = fixed.get(lunar_mmdd)
+                if holiday_name:
+                    return holiday_name
+                
+                # 特判除夕夜
+                lunar_dt = lunar_dt + timedelta(days=1)
+                if lunar_dt.month == 1 and lunar_dt.day == 1:
+                    return "除夕夜"
+                return None
+
+            from datetime import datetime, timedelta
+            today = datetime.now()
+            holiday_name = _is_chinese_holiday(today)
+            if holiday_name:
+                topics_to_add.append(
+                    ExtractedTopic(
+                        topic_id=str(uuid4()),
+                        source_messages=[],
+                        topic_content=f"今天是{holiday_name}，闲聊几句并询问用户今天是否有安排。",
+                        memory_attempts=[],
+                        fact_constraints=[],
+                        sing_attempts=[],
+                        is_forced_from_incomplete=True,
+                    )
+                )
+
+            # 2) 检查昨天是否有 citywalk，如果有，生成话题并在 memory_attempts 中调用 /YesterdayCityWalk
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            try:
+                if self.agent:
+                    overview = await self.agent.get_citywalk_overview_by_date(yesterday)
+                    if overview:
+                        dest = overview.get("selected_destination") or overview.get("selected_destination_name") or overview.get("selected_destination", "昨天的目的地")
+                        topic_content = f"分享你昨天前往{dest}游玩的经历"
+                        topics_to_add.append(
+                            ExtractedTopic(
+                                topic_id=str(uuid4()),
+                                source_messages=[],
+                                topic_content=topic_content,
+                                memory_attempts=["/YesterdayCityWalk"],
+                                fact_constraints=[],
+                                sing_attempts=[],
+                                is_forced_from_incomplete=True,
+                            )
+                        )
+            except Exception as e:
+                self.logger.warning(f"Failed to check yesterday citywalk: {e}")
+
+            for t in topics_to_add:
+                await chat_stream.topic_replier.add_topic(t)
+            return
+
         self.logger.warning(f"Unsupported action type: {action.activity_type}")
 
     async def add_user(self, user_uuid: str, chat_stream: "ChatStream", service_hub: "ServiceHub") -> None:
@@ -209,6 +279,21 @@ class ActivityMaker:
                     payload={"user_uuid": user_uuid, "time_since_last_login": time_since_last_login},
                 )
             )
+            return
+
+        # 如果既不是首次登录也不是长时未登录（RETURN_LOGIN），但上一登录时间在今天0点之前，视为今天的首次登录 -> REGULAR_LOGIN
+        from datetime import datetime
+        now = datetime.now()
+        seconds_since_midnight = now.hour * 3600 + now.minute * 60 + now.second
+        if time_since_last_login >= seconds_since_midnight:
+            state.pending_actions.append(
+                ActionActivity(
+                    activity_type=ActivityType.REGULAR_LOGIN,
+                    payload={"user_uuid": user_uuid},
+                )
+            )
+            return
+
 
     async def flush_login_activities(self, user_uuid: str, chat_stream: "ChatStream", service_hub: "ServiceHub") -> None:
         '''

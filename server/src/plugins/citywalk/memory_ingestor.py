@@ -100,7 +100,9 @@ class CitywalkMemoryIngestor:
         if not lines:
             return 0
 
-        event_date = result.created_at.strftime("%Y-%m-%d") if isinstance(result.created_at, datetime) else datetime.now().strftime("%Y-%m-%d")
+        event_time = result.created_at if isinstance(result.created_at, datetime) else datetime.now()
+        # 减去18小时，让时间更接近漫步的实际日期（通常是当天早上或前一天）
+        event_date = datetime.fromtimestamp(event_time.timestamp() - 18 * 3600).strftime("%Y-%m-%d")
         docs: List[Document] = []
         for line in lines:
             docs.append(

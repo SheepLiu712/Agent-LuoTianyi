@@ -36,7 +36,7 @@ class MemorySearcher:
         user_id: str,
         queries: List[str],
         k: int = 5,
-        score_threshold: float = 0.8,
+        score_threshold: float = 0.62,
     ) -> List[str]:
         """面向 TopicReplier 的直接检索接口：混合检索并按分数截断。"""
         if not queries:
@@ -47,7 +47,6 @@ class MemorySearcher:
             q = (query or "").strip()
             if not q:
                 continue
-
             results = await vector_store.search(user_id, q, k=max(1, k))
             docs = [f"[{score:.3f}] {doc.get_content()}" for doc, score in results]
             self.logger.debug(f"Vector search for query '{q}' got {len(results)} results: {docs}")
@@ -63,6 +62,29 @@ class MemorySearcher:
                 rendered = f"在{timestamp}, {content}" if timestamp else content
                 doc_id = str(getattr(doc, "id", "") or rendered)
                 scored_hits.append((score, doc_id, rendered))
+
+            # 其次，检索 citywalk 专用记忆（存储时 user_id 默认为 __citywalk__ 或 metadata 指明）
+            try:
+                citywalk_user = "__citywalk__"
+                # citywalk 要求使用更高的阈值，避免过度引用城市漫步记忆
+                citywalk_threshold = min(score_threshold + 0.2, 0.88)
+                cw_results = await vector_store.search(citywalk_user, q, k=max(1, k))
+                cw_docs = [f"[{s:.3f}] {d.get_content()}" for d, s in cw_results]
+                self.logger.debug(f"Citywalk vector search for query '{q}' got {len(cw_results)} results: {cw_docs}")
+                for doc, score in cw_results:
+                    if score < citywalk_threshold:
+                        continue
+                    timestamp = ""
+                    if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
+                        timestamp = str(doc.metadata.get("citywalk_date") or doc.metadata.get("timestamp") or "").strip()
+                    content = doc.get_content().strip() if hasattr(doc, "get_content") else ""
+                    if not content:
+                        continue
+                    rendered = f"城市漫步记忆[{timestamp}]: {content}" if timestamp else f"城市漫步记忆: {content}"
+                    doc_id = str(getattr(doc, "id", "") or rendered)
+                    scored_hits.append((score, doc_id, rendered))
+            except Exception as exc:
+                self.logger.debug(f"Citywalk memory search skipped/failed: {exc}")
 
         if not scored_hits:
             return []

@@ -178,6 +178,87 @@ class LuoTianyiAgent:
         finally:
             db.close()
 
+    async def get_citywalk_diary_by_date(self, date_str: str) -> str | None:
+        """按日期检索 citywalk 报告并返回 diary_text 字段。
+        如果同一天有多条记录，返回 created_at 最新的那一条的 diary_text。
+        date_str 格式为 YYYY-MM-DD
+        """
+        try:
+            from pathlib import Path
+            import json
+
+            reports_dir = Path("data/citywalk_reports")
+            if not reports_dir.exists():
+                return None
+
+            best_dt = None
+            best_diary = None
+            for p in reports_dir.glob("citywalk_*.json"):
+                try:
+                    text = p.read_text(encoding="utf-8")
+                    data = json.loads(text)
+                    created = data.get("created_at") or data.get("overview", {}).get("created_at")
+                    diary = data.get("diary_text") or data.get("diary") or ""
+                    if not created:
+                        continue
+                    # ISO datetime
+                    from datetime import datetime
+                    try:
+                        dt = datetime.fromisoformat(created)
+                    except Exception:
+                        # try fallback parse
+                        dt = datetime.strptime(created.split("+")[0], "%Y-%m-%dT%H:%M:%S")
+                    if dt.strftime("%Y-%m-%d") != date_str:
+                        continue
+                    if best_dt is None or dt > best_dt:
+                        best_dt = dt
+                        best_diary = diary
+                except Exception:
+                    continue
+
+            return best_diary
+        except Exception as e:
+            self.logger.error(f"get_citywalk_diary_by_date failed: {e}")
+            return None
+
+    async def get_citywalk_overview_by_date(self, date_str: str) -> dict | None:
+        """返回指定日期的 citywalk overview（包含 city 和 selected_destination）"""
+        try:
+            from pathlib import Path
+            import json
+
+            reports_dir = Path("data/citywalk_reports")
+            if not reports_dir.exists():
+                return None
+
+            best_dt = None
+            best_overview = None
+            for p in reports_dir.glob("citywalk_*.json"):
+                try:
+                    text = p.read_text(encoding="utf-8")
+                    data = json.loads(text)
+                    created = data.get("created_at")
+                    overview = data.get("overview") or {}
+                    if not created:
+                        continue
+                    from datetime import datetime
+                    try:
+                        dt = datetime.fromisoformat(created)
+                    except Exception:
+                        dt = datetime.strptime(created.split("+")[0], "%Y-%m-%dT%H:%M:%S")
+                    if dt.strftime("%Y-%m-%d") != date_str:
+                        continue
+                    if best_dt is None or dt > best_dt:
+                        best_dt = dt
+                        best_overview = overview
+                except Exception:
+                    continue
+
+            return best_overview
+        except Exception as e:
+            self.logger.error(f"get_citywalk_overview_by_date failed: {e}")
+            return None
+
     async def generate_topic_reply_for_pipeline(
         self,
         user_id: str,
