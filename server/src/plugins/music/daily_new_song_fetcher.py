@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 import json
 import logging
+import re
 import time
 import subprocess
 import shutil
@@ -23,6 +24,9 @@ from src.plugins.music.song_database import init_song_db, get_song_session, Song
 logger = get_logger("DailyNewSongFetcher")
 CURRENT_YEAR = datetime.datetime.now().year
 TEMPLATE_URL = f"https://vcpedia.cn/Template:%E6%B4%9B%E5%A4%A9%E4%BE%9D/{CURRENT_YEAR}"
+KNOWLEDGE_DIR = Path("res/knowledge")
+SONG_NAME_KEYWORDS_FILE = KNOWLEDGE_DIR / "song_name_keywords.txt"
+SONG_LYRIC_KEYWORDS_FILE = KNOWLEDGE_DIR / "song_lyric_keywords.txt"
 
 
 def _is_bot_challenge(status_code: int, html: str) -> bool:
@@ -166,14 +170,82 @@ def _extract_song_fields(data: Dict[str, Any]) -> Dict[str, str]:
             short_summary = str(summary).strip()[:200]
 
     lyrics = str(data.get("lyrics") or "").strip()
+    spaced_lyrics = str(data.get("spaced_lyrics") or "")
 
     return {
         "uploader": uploader,
         "singers": singers,
         "introduction": short_summary,
         "lyrics": lyrics,
+        "spaced_lyrics": spaced_lyrics
     }
 
+
+def _split_spaced_lyrics(spaced_lyrics: str) -> List[str]:
+    parts = re.split(r"[\n\r\s]+", spaced_lyrics or "")
+    ret = []
+    for part in parts:
+        cleaned = part.strip()
+        if len(cleaned) >=6 and len(cleaned) <= 50:
+            ret.append(cleaned)
+    return ret
+
+
+def _append_keywords_to_files(song_name: str, spaced_lyrics: str) -> None:
+    KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
+
+    lyric_lines = _split_spaced_lyrics(spaced_lyrics)
+    lyric_keywords = [f"{lyric}=>{lyric}是《{song_name}》的歌词" for lyric in lyric_lines]
+
+    with open(SONG_NAME_KEYWORDS_FILE, "a", encoding="utf-8") as name_file:
+        name_file.write(f"{song_name}\n")
+
+    if lyric_keywords:
+        with open(SONG_LYRIC_KEYWORDS_FILE, "a", encoding="utf-8") as lyric_file:
+            for line in lyric_keywords:
+                lyric_file.write(f"{line}\n")
+
+def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False) -> None:
+    if db and _song_exists(db, song_name) and not update:
+        logger.info(f"已存在，跳过: {song_name}")
+        return
+
+    logger.info(f"开始抓取并入库: {song_name}")
+    data = fetcher.fetch_entity_description(song_name)
+    if not data:
+        return
+
+    fields = _extract_song_fields(data)
+    if not fields["introduction"]:
+        return
+
+    if db is not None:
+        try:
+            if _song_exists(db, song_name):
+                logger.info(f"已存在（更新模式），先删除: {song_name}")
+                db.query(Song).filter(
+                    (Song.name == song_name) |
+                    (Song.safe_name == _safe_song_name(song_name))
+                ).delete()
+                db.commit()
+            db_song = Song(
+                name=song_name,
+                safe_name=_safe_song_name(song_name),
+                uploader=fields["uploader"],
+                singers=fields["singers"],
+                introduction=fields["introduction"],
+                lyrics=fields["lyrics"],
+            )
+            db.add(db_song)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            logger.error(f"入库失败 {song_name}: {e}")
+
+    try:
+        _append_keywords_to_files(song_name, fields["spaced_lyrics"])
+    except Exception as e:
+        logger.error(f"写入失败 {song_name}: {e}")
 
 def sync_daily_new_songs(config_path: str = "config/config.json") -> Dict[str, List[str]]:
     cfg = load_config(config_path, default_config={})
@@ -183,7 +255,6 @@ def sync_daily_new_songs(config_path: str = "config/config.json") -> Dict[str, L
         raise ValueError("缺少 knowledge.song_database 配置")
 
     crawler_cfg = cfg.get("crawler", {})
-    crawler_cfg["activated"] = True
 
     init_song_db(song_db_cfg)
     db = get_song_session()
@@ -195,43 +266,21 @@ def sync_daily_new_songs(config_path: str = "config/config.json") -> Dict[str, L
         fetcher = VCPediaFetcher(crawler_cfg)
 
         for i, song_name in enumerate(songs, start=1):
-            if _song_exists(db, song_name):
-                logger.info(f"[{i}/{len(songs)}] 已存在，跳过: {song_name}")
-                continue
-
-            logger.info(f"[{i}/{len(songs)}] 开始抓取并入库: {song_name}")
-            data = fetcher.fetch_entity_description(song_name)
-            if not data:
-                failed.append(f"{song_name}（抓取失败）")
-                continue
-
-            fields = _extract_song_fields(data)
-            if not fields["introduction"]:
-                failed.append(f"{song_name}（缺少 short_summary）")
-                continue
-
-            try:
-                db_song = Song(
-                    name=song_name,
-                    safe_name=_safe_song_name(song_name),
-                    uploader=fields["uploader"],
-                    singers=fields["singers"],
-                    introduction=fields["introduction"],
-                    lyrics=fields["lyrics"],
-                )
-                db.add(db_song)
-                db.commit()
-                added.append(song_name)
-            except Exception as e:
-                db.rollback()
-                logger.error(f"入库失败 {song_name}: {e}")
-                failed.append(f"{song_name}（入库失败）")
+            do_one_song(db, fetcher, song_name)
 
             time.sleep(0.8)
 
         return {"added": added, "failed": failed}
     finally:
         db.close()
+
+# if __name__ == "__main__":
+    
+#     cfg = load_config("config/config.json", default_config={})
+#     init_song_db(cfg.get("knowledge", {}).get("song_database", {}))
+#     db = get_song_session()
+#     do_one_song(db, VCPediaFetcher(cfg.get("crawler", {})), "告死鸟", update=True)
+#     db.close()
 
 if __name__ == "__main__":
     result = sync_daily_new_songs()

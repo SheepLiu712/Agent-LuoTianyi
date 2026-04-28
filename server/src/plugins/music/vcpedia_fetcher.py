@@ -262,7 +262,13 @@ class VCPediaFetcher:
                                 continue
                             lyrics += span.get_text() + " "
                         # lyrics = "".join([span.get_text() for span in span_tags])
-                        lyrics = lyrics.replace('\u3000', ' ').strip()
+                    else:
+                        lyrics = p_tag.get_text()
+                    lyrics = lyrics.replace('\u3000', ' ')
+                    # remove bracketed content like [注 1], (副歌), （示例） and 【示例】
+                    lyrics = re.sub(r'\[.*?\]|\(.*?\)|（.*?）|【.*?】', '', lyrics, flags=re.S)
+                    # collapse whitespace
+                    lyrics = re.sub(r'\s+', ' ', lyrics).strip()
             if new_table:
                 print("find lyrics table")
                 new_infobox_data = self._get_data_from_infobox(new_table, single_col=False)
@@ -273,7 +279,8 @@ class VCPediaFetcher:
             "type": type,
             "infobox": infobox_data,
             "summary": summary,
-            "lyrics": lyrics
+            "lyrics": lyrics.strip(),
+            "spaced_lyrics": lyrics
         }
 
     def _save_data(self, data: Dict[str, Any]):

@@ -1,5 +1,5 @@
 from src.plugins.citywalk.session_runner import CitywalkSessionRunner
-from src.plugins.citywalk.types import POI, POIDetail, RouteResult
+from src.plugins.citywalk.types import POI, POIDetail, RouteResult, POIFeedBack
 
 
 class FakeClient:
@@ -42,16 +42,14 @@ class FakeDecision:
 
 
 class FakeEnvironment:
-    def generate(self, **kwargs):
-        class E:
-            activity = "在测试公园慢跑后拍了两张街景。"
-            event = "遇到街头艺人演奏。"
-            feeling_update = "心情轻快了不少。"
-            delta_energy = -3
-            delta_minutes = 10
-            next_actions = ["go_to_poi", "custom_action", "return"]
-
-        return E()
+    def build_arrival_feedback(self, **kwargs):
+        return POIFeedBack(
+            environment_feedback="环境事件: 遇到街头艺人演奏。",
+            mood_change=6,
+            energy_change=-3,
+            fullness_change=-1,
+            stay_minutes=10,
+        )
 
 
 def test_session_runner_generates_events():
@@ -84,4 +82,43 @@ def test_session_runner_generates_events():
     assert result.energy_left < 100
     assert result.events[0].llm_action.startswith("relax_walk@poi")
     assert "环境事件" in result.events[0].environment_feedback
-    assert "慢跑" in result.events[0].activity
+    assert "环境事件" in result.events[0].activity
+
+
+def test_select_initial_destination_includes_recent_history():
+    cfg = {
+        "session": {},
+        "search": {
+            "types": "110000",
+            "radius_m": 2000,
+            "offset": 5,
+            "keywords": ["公园"],
+        },
+    }
+    runner = CitywalkSessionRunner(cfg, FakeClient(), environment_engine=FakeEnvironment())
+    runner.llm_client = object()
+
+    captured = {"prompt": ""}
+
+    def _fake_call_llm_json(system_prompt, user_prompt):
+        captured["prompt"] = user_prompt
+        return {
+            "destination_name": "成都宽窄巷子",
+            "city": "成都",
+            "category": "景点",
+            "reason": "想换个城市感受烟火气",
+        }
+
+    runner._call_llm_json = _fake_call_llm_json
+    result = runner._select_initial_destination(
+        preferred_destination="",
+        recent_history=[
+            {"city": "北京", "places": ["南锣鼓巷", "鼓楼"]},
+            {"city": "上海", "places": ["外滩"]},
+        ],
+    )
+
+    assert result["destination_city"] == "成都"
+    assert "最近10次逛街历史" in captured["prompt"]
+    assert "城市=北京" in captured["prompt"]
+    assert "南锣鼓巷" in captured["prompt"]

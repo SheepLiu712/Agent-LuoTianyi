@@ -32,6 +32,8 @@ from src.database.sql_database import get_sql_session
 from src.tts import TTSModule, init_tts_module
 from src.agent.activity_maker import init_activity_maker, get_activity_maker
 from src.agent.luotianyi_agent import LuoTianyiAgent, init_luotianyi_agent, get_luotianyi_agent
+from src.plugins import DailyScheduler
+from src.plugins.citywalk import CitywalkRuntimeService
 
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger
@@ -42,6 +44,7 @@ logger = get_logger("server_main")
 config = load_config("config/config.json")
 
 service_hub = None  # 全局 ServiceHub 实例，在 startup_event 中初始化
+daily_scheduler: DailyScheduler | None = None
 @asynccontextmanager
 async def startup_event(app: FastAPI):
     # 数据库初始化
@@ -80,11 +83,19 @@ async def startup_event(app: FastAPI):
     service_hub.gcsm.start_cleanup_task(expiration_seconds=360)
     service_hub.global_speaking_worker.start_if_needed()
 
+    # 启动城市漫步日程任务：每天凌晨1点，20%概率执行一次逛街；每3天同步一次新歌。
+    global daily_scheduler
+    citywalk_runtime = CitywalkRuntimeService(config_path="config/config.json", vector_store=database.get_vector_store())
+    daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime)
+    daily_scheduler.start()
+
     # 账号系统初始化
     account.generate_keys()
     try:
         yield
     finally:
+        if daily_scheduler is not None:
+            daily_scheduler.stop()
         await service_hub.gcsm.stop_cleanup_task()
         await service_hub.global_speaking_worker.stop() 
 

@@ -31,6 +31,7 @@ DEFAULT_CITYWALK_CONFIG: Dict[str, Any] = {
     "report": {
         "output_dir": "data/citywalk_reports",
         "title_prefix": "逛街小洛",
+        "history_file": "data/citywalk_reports/citywalk_history.json",
     },
     "decision": {
         "enabled": True,

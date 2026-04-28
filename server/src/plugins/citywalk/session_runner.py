@@ -1,15 +1,16 @@
 import json
 import os
 import random
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from datetime import timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 
 from .amap_client import AMapClient
 from .environment_engine import CitywalkEnvironmentEngine
+from .history_store import get_recent_citywalk_history
 from .state_manager import CitywalkStateManager
-from .types import  CitywalkSessionResult, POI, POIDetail, CitywalkSessionData, POIFeedBack, CitywalkEvent, RouteResult
+from .types import CitywalkSessionResult, POI, POIDetail, CitywalkSessionData, POIFeedBack, CitywalkEvent, RouteResult
 
 
 class CitywalkSessionRunner:
@@ -52,6 +53,8 @@ class CitywalkSessionRunner:
         self.allowed_types = str(self.search_cfg.get("types", "050000|060000|110000|120000"))
         self.radius_m = int(self.search_cfg.get("radius_m", 2000))
         self.offset = int(self.search_cfg.get("offset", 10))
+        report_cfg = config.get("report", {})
+        self.history_file = str(report_cfg.get("history_file", "data/citywalk_reports/citywalk_history.json"))
 
         api_key = self._resolve_api_key(str(llm_cfg.get("api_key", "")).strip())
         self.llm_client = OpenAI(base_url=self.base_url, api_key=api_key) if api_key else None
@@ -64,11 +67,14 @@ class CitywalkSessionRunner:
         start_location: str = "",
     ) -> CitywalkSessionResult:
         city_walk_data = CitywalkSessionData()
-        
 
         # 1. 选定目的地和起点
         preferred_destination = destination or city or ""
-        destination_data: Dict[str, str] = self._select_initial_destination(preferred_destination=preferred_destination)
+        recent_history = get_recent_citywalk_history(self.history_file, limit=10) if not preferred_destination else []
+        destination_data: Dict[str, str] = self._select_initial_destination(
+            preferred_destination=preferred_destination,
+            recent_history=recent_history,
+        )
         selected_destination = destination_data["destination_name"]
         city_walk_data.city = destination_data["destination_city"]
         destination_reason = destination_data["reason"]
@@ -393,25 +399,36 @@ class CitywalkSessionRunner:
         return any(x in text for x in ["公园", "景区", "商场", "广场", "博物馆", "乐园", "步行街"])
 
 
-    def _select_initial_destination(self, preferred_destination: Optional[str] = None) -> Dict[str, str]:
+    def _select_initial_destination(
+        self,
+        preferred_destination: Optional[str] = None,
+        recent_history: Optional[List[Dict[str, Any]]] = None,
+    ) -> Dict[str, str]:
         print("[citywalk][阶段1] 让LLM在全国范围挑选今日目的地")
-        if self.llm_client is None:
-            fallback_name = (preferred_destination or "北京").strip() or "北京"
-            return {
-                "destination_name": fallback_name,
-                "destination_city": fallback_name,
-                "category": "城市",
-                "reason": "先从这个目的地开始慢慢逛。",
-            }
+        history_rows = recent_history or []
+
+        history_text = "无"
+        if history_rows:
+            chunks = []
+            for idx, row in enumerate(history_rows[-10:], start=1):
+                city_name = str(row.get("city", "")).strip() or "未知城市"
+                places = row.get("places", [])
+                if not isinstance(places, list):
+                    places = []
+                places_text = "、".join([str(x).strip() for x in places if str(x).strip()]) or "无"
+                chunks.append(f"第{idx}次: 城市={city_name}; 经过={places_text}")
+            history_text = "\n".join(chunks)
 
         prompt = (
             f"角色设定: {self.persona}\n"
             "任务: 在中国范围挑选一个今天要去玩的目的地。"
-            "目的地可以是城市、景点、商圈、美食地标。如“成都”“九寨沟”“上海外滩”\n"
+            "目的地可以是景点、商圈、美食地标。如“九寨沟”“上海外滩”\n"
+            "请参考最近逛街历史，尽量避免与最近路线高度重复。\n"
+            f"最近逛街历史:\n{history_text}\n"
             "只输出JSON，字段:\n"
             "- destination_name: 目的地名称\n"
-            "- city: 所在城市(不知道则为空字符串)\n"
-            "- category: 城市|景点|美食|商圈\n"
+            "- city: 所在城市\n"
+            "- category: 景点|美食|商圈\n"
             "- reason: 50字内理由，像洛天依会说的话\n"
             f"用户偏好目的地提示: {preferred_destination or '无'}"
         )
