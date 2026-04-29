@@ -36,7 +36,7 @@ class MemorySearcher:
         user_id: str,
         queries: List[str],
         k: int = 5,
-        score_threshold: float = 0.62,
+        score_threshold: float = 0.60,
     ) -> List[str]:
         """面向 TopicReplier 的直接检索接口：混合检索并按分数截断。"""
         if not queries:
@@ -103,7 +103,7 @@ class MemorySearcher:
                         q,
                         "citywalk",
                         "__citywalk__",
-                        min(score_threshold + 0.2, 0.88),
+                        min(score_threshold + 0.1, 0.88),
                         prefix="城市漫步记忆",
                         timestamp_keys=["citywalk_date", "timestamp"],
                     )

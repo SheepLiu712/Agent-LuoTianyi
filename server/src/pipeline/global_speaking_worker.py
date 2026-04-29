@@ -66,8 +66,9 @@ class GlobalSpeakingWorker:
                         expression="",
                     )  # 发送一个空的 final package，通知前端本轮说话结束
                     await job.send_reply_callback(final_resp)
+
                 elif isinstance(job.job_content, SongSegmentChat):
-                    text = f"(唱了《{job.job_content.song}》){job.job_content.lyrics}"
+                    text = f"(唱了《{job.job_content.song}》)\n{job.job_content.lyrics}"
                     expression = "唱歌"
                     audio = self.agent.sing(job.job_content.song, job.job_content.segment) # bytes
                     CHUNK_SIZE = 48 * 1024 # 48KB
