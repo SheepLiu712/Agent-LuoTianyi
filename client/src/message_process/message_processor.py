@@ -186,6 +186,7 @@ class MessageProcessor:
                     return
                 item = self._send_queue[0]
 
+            self.update_bubble_signal(item.local_id, "waiting")
             ack = self._send_one(item)
             if ack.get("ok", False):
                 with self._send_cond:
@@ -258,7 +259,7 @@ class MessageProcessor:
                 image_base64=item.payload["image_base64"],
                 mime_type=item.payload["mime_type"],
                 image_client_path=item.payload["image_client_path"],
-                ack_timeout=1.0,
+                ack_timeout=5.0,
             )
         if item.kind == "typing":
             return self.send_typing_func(text_length=item.payload["text_length"], ack_timeout=1.0)

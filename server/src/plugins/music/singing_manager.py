@@ -161,7 +161,7 @@ class SingingManager:
         lyrics_content = "\n".join([line.content for line in lyrics])
         return lyrics_content
 
-    def get_song_segment(self, song_name: str, segment_description: str, require_audio: bool = True) -> Tuple[List[OneLyricLine], str]:
+    def get_song_segment(self, song_name: str, segment_description: str, require_audio: bool = True) -> Tuple[List[OneLyricLine], bytes | None]:
         """
         根据歌曲名称和唱段描述，获取对应唱段的歌词对象列表，并返回音频数据的base64编码
         """
@@ -232,10 +232,8 @@ class SingingManager:
             segment_audio.export(wav_io, format="wav")
             wav_bytes = wav_io.getvalue()
 
-            # Base64 编码
-            b64_encoded = base64.b64encode(wav_bytes).decode("utf-8")
 
-            return real_lyrics, b64_encoded
+            return real_lyrics, wav_bytes
 
         except Exception as e:
             self.logger.error(f"Failed to process audio for {song_name}: {e}\n{traceback.format_exc()}")

@@ -418,7 +418,7 @@ class LuoTianyiAgent:
         self.singing_manager.add_wished_song(song_name)
         return song_name, None # 如果有明确歌名但无法满足唱歌需求，返回歌名和None表示用户想听这首歌但还不会唱
     
-    def sing(self, song_name: str, segment: str) -> Optional[str]:
+    def sing(self, song_name: str, segment: str) -> Optional[bytes]:
         """调用唱歌管理器生成歌曲片段的音频，并返回音频的Base64字符串"""
         if not song_name or not segment:
             return None

@@ -31,6 +31,8 @@ class ChatStream:
         self.topic_replier = TopicReplier(username=self.user_name, user_id=self.user_uuid, send_reply_callback=self.feed_response)
         self.topic_planner.set_topic_consumer(self.topic_replier.add_topic)
         self.topic_replier.set_change_state_callback(self.change_state)
+        self.ingress_queue: asyncio.Queue[ChatInputEvent] = asyncio.Queue()
+        self.ingress_worker_task: asyncio.Task | None = None
         self.response_queue: asyncio.Queue[ChatResponse] = asyncio.Queue()
         self.response_sender_task: asyncio.Task | None = None
 
@@ -49,17 +51,40 @@ class ChatStream:
 
     def start_if_needed(self):
         """启动常驻消息处理协程（仅启动一次）。"""
+        self._start_ingress_worker()
         self.topic_planner.start_processing()
         self.topic_replier.start_processing()
         self._start_response_sender()
 
     async def feed_event(self, event: ChatInputEvent):
-        """接收 service 层转换后的聊天事件。"""
+        """接收 service 层转换后的聊天事件，并交给 ingress worker。"""
+        await self.ingress_queue.put(event)
+
+    async def ingress_worker_loop(self):
+        while True:
+            event: ChatInputEvent | None = None
+            try:
+                event = await self.ingress_queue.get()
+                await self._process_ingress_event(event)
+            except asyncio.CancelledError:
+                self.logger.info("Ingress worker task cancelled")
+                break
+            except Exception as e:
+                self.logger.exception(f"Error in ingress worker loop: {e}")
+                await asyncio.sleep(0.1)
+            finally:
+                if event is not None:
+                    self.ingress_queue.task_done()
+
+    async def _process_ingress_event(self, event: ChatInputEvent):
         if self._is_user_message_event(event):
             if self.service_hub is not None and self.user_uuid is not None:
                 await self.service_hub.activity_maker.on_user_message(self.user_uuid)
-            await ingress_message(self.service_hub, self.user_uuid, event) # 预处理
-            await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event) # 入库
+                await ingress_message(self.service_hub, self.user_uuid, event)  # 预处理
+                await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event)  # 入库
+            else:
+                self.logger.warning("Service hub or user uuid is missing, skip user message preprocessing")
+
         await self.topic_planner.feed_unread_message(event)
 
     async def feed_response(self, response: ChatResponse):
@@ -146,6 +171,11 @@ class ChatStream:
             self.response_sender_task = asyncio.create_task(self.response_sender_loop())
             self.logger.info("Started response sender task")
 
+    def _start_ingress_worker(self):
+        if self.ingress_worker_task is None or self.ingress_worker_task.done():
+            self.ingress_worker_task = asyncio.create_task(self.ingress_worker_loop())
+            self.logger.info("Started ingress worker task")
+
     def _is_user_message_event(self, event: ChatInputEvent) -> bool:
         return event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}
 
@@ -172,6 +202,8 @@ class ChatStream:
 
     def clean_up(self):
         """清理资源的逻辑，比如关闭文件、数据库连接等"""
+        if self.ingress_worker_task and not self.ingress_worker_task.done():
+            self.ingress_worker_task.cancel()
         if self.topic_planner.processor_task and not self.topic_planner.processor_task.done():
             self.topic_planner.processor_task.cancel()
         if self.topic_replier.processor_task and not self.topic_replier.processor_task.done():
