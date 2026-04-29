@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..utils.logger import get_logger
-import uuid
+import base64
 from ..agent.main_chat import OneSentenceChat, SongSegmentChat
 from ..interface.types import ChatResponse
 from typing import Callable, Awaitable
@@ -69,13 +69,14 @@ class GlobalSpeakingWorker:
                 elif isinstance(job.job_content, SongSegmentChat):
                     text = f"(唱了《{job.job_content.song}》){job.job_content.lyrics}"
                     expression = "唱歌"
-                    audio = self.agent.sing(job.job_content.song, job.job_content.segment)
-                    CHUNK_SIZE = 64 * 1024 # 64KB
+                    audio = self.agent.sing(job.job_content.song, job.job_content.segment) # bytes
+                    CHUNK_SIZE = 48 * 1024 # 48KB
                     for i in range(0, len(audio), CHUNK_SIZE):
                         chunk = audio[i:i+CHUNK_SIZE]
-                        text = "" if i > 0 else text # 只有第一个chunk携带文字，后续chunk的text字段置空
+                        chunk_base64 = base64.b64encode(chunk).decode("utf-8")
+                        chunk_text = "" if i > 0 else text # 只有第一个chunk携带文字，后续chunk的text字段置空
                         is_final_package = (i + CHUNK_SIZE) >= len(audio)
-                        chunk_resp = ChatResponse(uuid=job.job_content.uuid, audio=chunk, is_final_package=is_final_package, text=text, expression=expression)
+                        chunk_resp = ChatResponse(uuid=job.job_content.uuid, audio=chunk_base64, is_final_package=is_final_package, text=chunk_text, expression=expression)
                         await job.send_reply_callback(chunk_resp)
                 else:
                     self.logger.warning(f"Unsupported speaking job type: {type(job.job_content)}")

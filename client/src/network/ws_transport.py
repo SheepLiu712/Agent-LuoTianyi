@@ -112,22 +112,26 @@ class WsTransport:
                     "ok": False,
                     "request_id": request_id,
                     "error": "Send failed",
+                    "drop": True,
                 }
 
             if not waiter["event"].wait(timeout=max(0.1, ack_timeout)):
                 with self._lock:
                     if self._ack_waiter is waiter:
                         self._ack_waiter = None
+                self.logger.error(f"ACK timeout for request_id {request_id} after {ack_timeout}s")
                 return {
                     "ok": False,
                     "request_id": request_id,
                     "error": "Wait server ack timeout",
+                    "drop": True,
                 }
 
             result = waiter["result"] or {
                 "ok": False,
                 "request_id": request_id,
                 "error": "Unknown ack state",
+                "drop": True,
             }
             with self._lock:
                 if self._ack_waiter is waiter:
@@ -249,7 +253,6 @@ class WsTransport:
                 continue
 
             if event_type == WSEventType.HB_PONG:
-                self.logger.debug(f"Received heartbeat pong with ping_id {msg.payload.get('ping_id')}")
                 ping_id = msg.payload.get("ping_id")
                 continue
 
@@ -284,7 +287,6 @@ class WsTransport:
             if self._ready_event.is_set():
                 ping_id += 1
                 hb_event = build_event(WSEventType.HB_PING, payload={"ping_id": ping_id})
-                self.logger.debug(f"Sending heartbeat ping with ping_id {ping_id}")
                 await ws.send(json.dumps(hb_event.__dict__(), ensure_ascii=False))
             await asyncio.sleep(self.heartbeat_interval)
         self.logger.debug("WebSocket heartbeat loop exited")
@@ -293,10 +295,12 @@ class WsTransport:
         with self._lock:
             waiter = self._ack_waiter
             if not waiter:
+                self.logger.debug(f"ACK arrived but no waiter found. reply_to={reply_to}, error={error}")
                 return False
 
             expected = waiter.get("request_id")
             if reply_to and expected and reply_to != expected:
+                self.logger.warning(f"ACK request_id mismatch: reply_to={reply_to}, expected={expected}")
                 return False
 
             waiter["result"] = {
@@ -305,6 +309,7 @@ class WsTransport:
                 "error": error,
             }
             waiter["event"].set()
+            self.logger.debug(f"ACK waiter completed for request_id {expected}")
             return True
 
     def _notify_ack_failure(self, error_text: str) -> None:
