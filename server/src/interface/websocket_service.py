@@ -152,6 +152,7 @@ class WebSocketService:
 
     async def send_ack_event(self, websocket_connection: "WebSocketConnection", event: WSMessage) -> None:
         if event.client_msg_id is None:
+            self.logger.warning("Received event without client_msg_id, cannot send ACK")
             return
         ack_event = self._make_event(
             WSEventType.SERVER_ACK,

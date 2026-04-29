@@ -1,7 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
-import { WebSocketTransport } from './ws_transport';
 import { addDebugTrace } from './debug_trace';
+import { WebSocketTransport } from './ws_transport';
 
 interface SendResult {
   ok: boolean;
@@ -50,7 +50,7 @@ export class NetworkClient {
       });
     }
     addDebugTrace('network', 'sendChat', { textLength: text.length });
-    return this.transport.submitUserText(text, 1000);
+    return this.transport.submitUserText(text, 10000);
   }
 
   async sendImage(imageUri: string, mimeType: string): Promise<SendResult> {
@@ -74,7 +74,7 @@ export class NetworkClient {
         sanitizeBase64(imageBase64),
         mimeType,
         imageUri,
-        1000,
+        10000,
       );
     } catch {
       addDebugTrace('network', 'sendImage failed: read file error', { imageUri });
@@ -98,6 +98,6 @@ export class NetworkClient {
       });
     }
     addDebugTrace('network', 'sendTyping', { textLength });
-    return this.transport.submitUserTyping(textLength, 1000);
+    return this.transport.submitUserTyping(textLength, 10000);
   }
 }

@@ -103,7 +103,7 @@ class WsTransport:
             }
             with self._lock:
                 self._ack_waiter = waiter
-
+            self.logger.debug(f"Submitting event {event_type} with request_id {request_id}")
             if not self._send_event(event):
                 with self._lock:
                     if self._ack_waiter is waiter:
@@ -239,6 +239,7 @@ class WsTransport:
             event_type = msg.event_type
 
             if event_type == WSEventType.SERVER_ACK:
+                self.logger.debug(f"Received ack for request_id {msg.reply_to}")
                 self._complete_ack_waiter(ok=True, error=None, reply_to=msg.reply_to)
                 continue
 
@@ -248,6 +249,7 @@ class WsTransport:
                 continue
 
             if event_type == WSEventType.HB_PONG:
+                self.logger.debug(f"Received heartbeat pong with ping_id {msg.payload.get('ping_id')}")
                 ping_id = msg.payload.get("ping_id")
                 continue
 
@@ -282,6 +284,7 @@ class WsTransport:
             if self._ready_event.is_set():
                 ping_id += 1
                 hb_event = build_event(WSEventType.HB_PING, payload={"ping_id": ping_id})
+                self.logger.debug(f"Sending heartbeat ping with ping_id {ping_id}")
                 await ws.send(json.dumps(hb_event.__dict__(), ensure_ascii=False))
             await asyncio.sleep(self.heartbeat_interval)
         self.logger.debug("WebSocket heartbeat loop exited")

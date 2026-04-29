@@ -270,7 +270,6 @@ export class WebSocketTransport {
       const envelope = JSON.parse(String(raw)) as ServerEnvelope;
       const eventType = envelope.type || '';
       const payload = envelope.payload || {};
-
       if (eventType === 'system_ready') {
         addDebugTrace('ws', 'recv system_ready');
         this.sendAuth();
