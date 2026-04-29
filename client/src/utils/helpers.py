@@ -42,13 +42,39 @@ def load_config(config_path: str, default_config: Optional[Dict] = None) -> Dict
         
         # 递归合并配置
         config = merge_dict(config, file_config or {})
-        
+
         # 处理环境变量替换
         config = apply_env_variables(config)
+
+        # 处理运行模式配置：is_debug + debug_config/release_config
+        config = resolve_runtime_config(config)
         
     except Exception as e:
         print(f"加载配置文件失败 {config_path}: {e}")
     
+    return config
+
+
+def resolve_runtime_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """根据 is_debug 选择运行时网络配置，并提升为顶层字段。"""
+    if not isinstance(config, dict):
+        return config
+
+    is_debug = bool(config.get("is_debug", False))
+    debug_cfg = config.get("debug_config") if isinstance(config.get("debug_config"), dict) else {}
+    release_cfg = config.get("release_config") if isinstance(config.get("release_config"), dict) else {}
+
+    selected = debug_cfg if is_debug else release_cfg
+    if selected:
+        config = merge_dict(config, selected)
+
+    # 为网络参数提供安全默认值
+    if "verify_ssl" not in config:
+        config["verify_ssl"] = True
+
+    if not config.get("base_url"):
+        print("配置缺少 base_url，请检查 config/config.json")
+
     return config
 
 

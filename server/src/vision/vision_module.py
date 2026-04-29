@@ -1,5 +1,5 @@
 from typing import Dict, Any
-from ..llm.prompt_manager import PromptManager
+from ..utils.llm.prompt_manager import PromptManager
 from ..utils.logger import get_logger
 from .vlm_module import VLMModule
 

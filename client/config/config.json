@@ -1,5 +1,15 @@
 {
+    "is_debug": false,
+    "debug_config":
+    {
+        "base_url": "https://127.0.0.1:60030",
+        "verify_ssl": false
+    },
+    "release_config":
+    {
     "base_url": "https://www-api.u3493359.nyat.app:11664",
+    "verify_ssl": true
+    },  
     "live2d":{
         "model":{
             "model_version": "v3",

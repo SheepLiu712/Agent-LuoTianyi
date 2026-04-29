@@ -2,25 +2,26 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit,
                                QPushButton, QMessageBox, QTabWidget, QWidget, QCheckBox)
 from PySide6.QtCore import Qt
 
-from src.network_client import NetworkClient
+from .binder import AgentBinder
 from ..safety import credential
 from ..utils.logger import get_logger
 
 
 class LoginDialog(QDialog):
-    def __init__(self, network_client: NetworkClient):
+    def __init__(self, binder: AgentBinder):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
-        self.network_client = network_client
+        self.binder = binder
         self.user_id = None
         self.saved_token = None
         
         self.setWindowTitle("ChatWithLuoTianyi - 登录/注册")
-        self.setFixedSize(400, 300)
+        self.setFixedSize(400, 350)
         
         layout = QVBoxLayout()
         
         self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("QTabBar::tab { font-size: 16px; min-height: 28px; }")
         self.login_tab = QWidget()
         self.register_tab = QWidget()
         
@@ -35,16 +36,17 @@ class LoginDialog(QDialog):
         
         cred = credential.load_credentials()
         if cred:
-            user_id, token, do_auto_login = cred
+            username, token, do_auto_login = cred
             self.l_auto_login.setChecked(do_auto_login)
-            self.l_username.setText(user_id or "")
+            self.l_username.setText(username or "")
             self.saved_token = token
 
     def try_auto_login(self) -> bool:
         try:
             if self.l_auto_login.isChecked() and self.saved_token and self.l_username.text():
                 self.logger.info("Attempting auto login...")
-                if self.network_client.auto_login(self.l_username.text(), self.saved_token):
+                ret = self.binder.on_auto_login(self.l_username.text(), self.saved_token)
+                if ret:
                     self.logger.info("Auto login successful")
                     return True
                 else:
@@ -102,6 +104,11 @@ class LoginDialog(QDialog):
         self.r_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.r_password.setStyleSheet(style)
 
+        self.r_confirm_password = QLineEdit()
+        self.r_confirm_password.setPlaceholderText("确认密码")
+        self.r_confirm_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.r_confirm_password.setStyleSheet(style)
+
         self.r_invite = QLineEdit()
         self.r_invite.setPlaceholderText("邀请码")
         self.r_invite.setStyleSheet(style)
@@ -114,6 +121,8 @@ class LoginDialog(QDialog):
         layout.addSpacing(20)
         layout.addWidget(self.r_password)
         layout.addSpacing(20)
+        layout.addWidget(self.r_confirm_password)
+        layout.addSpacing(20)
         layout.addWidget(self.r_invite)
         layout.addStretch()
         layout.setContentsMargins(20, 20, 20, 20)
@@ -123,13 +132,13 @@ class LoginDialog(QDialog):
     def do_login(self):
         username = self.l_username.text()
         password = self.l_password.text()
-        request_token = self.l_auto_login.isChecked()
+        do_auto_login = self.l_auto_login.isChecked()
         
         if not username or not password:
             QMessageBox.warning(self, "错误", "请输入用户名和密码")
             return
             
-        success, msg = self.network_client.login(username, password, request_token=request_token)
+        success, msg = self.binder.on_login(username, password, do_auto_login=do_auto_login)
         if success:
             self.accept()
         else:
@@ -138,13 +147,18 @@ class LoginDialog(QDialog):
     def do_register(self):
         username = self.r_username.text()
         password = self.r_password.text()
+        confirm_password = self.r_confirm_password.text()
         invite = self.r_invite.text()
         
-        if not username or not password or not invite:
+        if not username or not password or not confirm_password or not invite:
             QMessageBox.warning(self, "错误", "请填写所有信息")
             return
+
+        if password != confirm_password:
+            QMessageBox.warning(self, "错误", "两次输入的密码不一致")
+            return
             
-        success, msg = self.network_client.register(username, password, invite)
+        success, msg = self.binder.on_register(username, password, invite)
         if success:
             QMessageBox.information(self, "成功", "注册成功，请登录")
             self.tabs.setCurrentIndex(0)

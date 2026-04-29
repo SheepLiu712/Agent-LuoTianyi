@@ -1,11 +1,12 @@
 {
+    "is_debug": true,
     "database": {
         "sql_db_folder": "data/database",
         "sql_db_file": "luotianyi.db",
         "vector_store": {
             "store_type": "chroma",
             "embedding_model": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "BAAI/bge-large-zh-v1.5",
                 "api_key": "$SILICONFLOW_API_KEY",
                 "base_url": "https://api.siliconflow.cn/v1"
@@ -24,7 +25,14 @@
         "song_database": {
             "db_folder": "res/knowledge",
             "db_file": "knowledge_db.db"
-        }
+        },
+        "llm":{
+                "api_type": "openai",
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "enable_thinking": false
+            }
     },
     "tts": {
         "character_name": "LuoTianyi",
@@ -39,40 +47,36 @@
     "prompt_manager": {
         "template_dir": "res/agent/prompts"
     },
+    "topic_extractor": {
+        "llm_module": {
+            "llm": {
+                "api_type": "openai",
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "enable_thinking": false
+            },
+            "prompt_name": "topic_extraction_prompt"
+        }
+    },
     "main_chat": {
         "llm_module": {
             "llm": {
-                "api_type": "siliconflow",
-                "model": "deepseek-chat",
-                "api_key": "$DEEPSEEK_API_KEY",
-                "base_url": "https://api.deepseek.com/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
+                "api_type": "openai",
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "enable_thinking": false
             },
-            "prompt_name": "daily_chat_prompt"
+            "prompt_name": "topic_reply_prompt"
         },
-        "static_variables_file": "res/agent/persona/static_variables.json"
-    },
-    "planner": {
-        "llm_module": {
-            "llm": {
-                "api_type": "siliconflow",
-                "model": "deepseek-chat",
-                "api_key": "$DEEPSEEK_API_KEY",
-                "base_url": "https://api.deepseek.com/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
-            },
-            "prompt_name": "planner_prompt"
-        },
-        "static_variables_file": "res/agent/persona/static_variables.json"
+        "static_variables_file": "res/agent/persona/luotianyi_persona.json",
+        "llm_tone_mapping_file": "config/llm_tones_mapping.json"
     },
     "vision_module": {
         "vlm_module": {
             "vlm": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "qwen3-vl-plus",
                 "api_key": "$QWEN_API_KEY",
                 "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -88,12 +92,12 @@
         "max_file_lines": 1000,
         "recent_history_limit": 100,
         "context_file": "data/memory/context/context.json",
-        "raw_conversation_context_limit": 240,
-        "not_zip_conversation_count": 20,
+        "raw_conversation_context_limit": 60,
+        "not_zip_conversation_count": 30,
         "forget_conversation_days": 10,
         "llm_module": {
             "llm": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "deepseek-chat",
                 "api_key": "$DEEPSEEK_API_KEY",
                 "base_url": "https://api.deepseek.com/v1",
@@ -119,7 +123,7 @@
         "use_llm": false,
         "llm_module": {
             "llm": {
-                "api_type": "siliconflow",
+                "api_type": "openai",
                 "model": "Qwen/Qwen3-32B",
                 "api_key": "$SILICONFLOW_API_KEY",
                 "base_url": "https://api.siliconflow.cn/v1",
@@ -135,28 +139,22 @@
             "retriever_type": "memory"
         },
         "user_profile": {
-            "profile_file": "data/memory/user_profile/user_profile.json",
-            "max_profile_length": 300,
-            "profile_update_freq": 50,
-            "llm_module": {
-                "llm": {
-                    "api_type": "siliconflow",
-                    "model": "deepseek-chat",
-                    "api_key": "$DEEPSEEK_API_KEY",
-                    "base_url": "https://api.deepseek.com/v1",
-                    "temperature": 0.7,
-                    "max_tokens": 8192,
-                    "top_p": 0.9
-                },
-                "prompt_name": "user_profile_update_prompt"
-            }
-        },
+        "llm_module": {
+            "llm": {
+                "api_type": "openai",
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            },
+            "prompt_name": "user_profile_update_prompt"
+        }
+    },
         "memory_searcher": {
             "max_k_graph_entities": 3,
             "max_k_vector_entities": 5,
             "llm_module": {
                 "llm": {
-                    "api_type": "siliconflow",
+                    "api_type": "openai",
                     "model": "deepseek-chat",
                     "api_key": "$DEEPSEEK_API_KEY",
                     "base_url": "https://api.deepseek.com/v1",
@@ -171,16 +169,103 @@
             "recent_update_path": "data/memory/context/recent_update.json",
             "llm_module": {
                 "llm": {
-                    "api_type": "siliconflow",
-                    "model": "deepseek-chat",
-                    "api_key": "$DEEPSEEK_API_KEY",
-                    "base_url": "https://api.deepseek.com/v1",
-                    "temperature": 0.7,
-                    "max_tokens": 8192,
-                    "top_p": 0.9
+                    "api_type": "openai",
+                    "model": "qwen3.5-plus",
+                    "api_key": "$QWEN_API_KEY",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
                 },
                 "prompt_name": "memory_write_prompt"
             }
+        }
+    },
+    "citywalk": {
+        "amap": {
+            "api_key": "$AMAP_KEY",
+            "base_url": "https://restapi.amap.com/v3",
+            "timeout_seconds": 10,
+            "max_retries": 1
+        },
+        "session": {
+            "initial_energy": 100,
+            "initial_fullness": 70,
+            "initial_mood": 70,
+            "max_minutes": 240,
+            "max_stops": 4,
+            "move_energy_per_km": 5,
+            "activity_energy_per_30min": 8,
+            "activity_duration_min": [20, 60],
+            "start_district_code": ""
+        },
+        "search": {
+            "radius_m": 3000,
+            "offset": 10,
+            "max_action_rounds": 20,
+            "types": "050000|060000|110000|120000",
+            "keywords": ["餐厅", "咖啡", "公园", "商场", "书店"]
+        },
+        "report": {
+            "output_dir": "data/citywalk_reports",
+            "title_prefix": "逛街小洛"
+        },
+        "decision": {
+            "enabled": true,
+            "persona_path": "res/agent/persona/luotianyi_persona.json",
+            "max_poi_candidates": 5,
+            "constrained_rounds": 2,
+            "use_llm_environment_feedback": false,
+            "fail_on_error": true,
+            "llm": {
+                "api_type": "openai",
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "temperature": 0.4,
+                "max_tokens": 512,
+                "max_retries": 2,
+                "request_timeout_seconds": 45
+            },
+            "environment": {
+                "enabled": true,
+                "fail_on_error": true,
+                "llm": {
+                    "api_type": "openai",
+                    "model": "qwen3.5-plus",
+                    "api_key": "$QWEN_API_KEY",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "temperature": 0.7,
+                    "max_tokens": 512,
+                    "max_retries": 2,
+                    "request_timeout_seconds": 45,
+                    "vlm_model": "qwen3-vl-plus"
+                }
+            }
+        }
+    },
+    "activity_maker": {
+        "return_user_threshold_seconds": 432000,
+        "silence_threshold_seconds": 180,
+        "activity_trigger_threshold": 5,
+        "inactivity_decay_interval_seconds": 180,
+        "silence_check_interval_seconds": 5,
+        "silence_trigger_cooldown_seconds": 180,
+        "activity_res": {
+            "first_login": {
+                "text": ["你好呀，我是洛天依！","欢迎来到这里！今天想聊点什么呢？"],
+                "audio_path": ["res/tts/static_audio/first_greet_1.wav","res/tts/static_audio/first_greet_2.wav"]
+            },
+            "return_login": {
+                "prompt": "return_login_activity_prompt"
+            },
+            "user_silence": {
+                "prompt": "user_silence_activity_prompt"
+            }
+        },
+        "llm": {
+            "api_type": "openai",
+            "model": "qwen3.5-plus",
+            "api_key": "$QWEN_API_KEY",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "enable_thinking": false
         }
     }
 }

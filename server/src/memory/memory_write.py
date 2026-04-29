@@ -5,19 +5,17 @@ Memory Write Module
 核心在于将非结构化的对话流转化为结构化、易于检索的知识片段。
 """
 
-from typing import List, Dict, Any, Optional, Set
+import json
+from typing import List, Dict, Any
 from ..utils.logger import get_logger
 from ..database.vector_store import VectorStore, Document
-from ..llm.prompt_manager import PromptManager
-from ..llm.llm_module import LLMModule
+from ..utils.llm.prompt_manager import PromptManager
+from ..utils.llm.llm_module import LLMModule
 import time
-import os
 import asyncio
-from dataclasses import dataclass, asdict
 from sqlalchemy.orm import Session
-from redis import Redis
-from ..database import User
-from ..database.database_service import get_used_memory_uuid, get_recent_memory_update_from_buffer, update_user_nickname, write_memory_update
+from ..database.memory_storage import MemoryStorage
+from ..database.database_service import write_memory_update
 
 from ..types.memory_type import MemoryUpdateCommand
 
@@ -33,135 +31,204 @@ class MemoryWriter:
     async def process_interaction(
         self,
         db: Session,
-        redis: Redis,
+        redis: MemoryStorage,
         vector_store: VectorStore,
         user_id: str,
-        user_input: str,
-        agent_response_content: List[str],
         history: str,
+        current_dialogue: str = "",
+        related_memories: List[str] | None = None,
         commit: bool = True
     ):
         """
         分析最近的交互，提取有价值的信息存入记忆库。
         """
-        used_uuid_task = asyncio.to_thread(get_used_memory_uuid, db, redis, user_id)
-        recent_update_task = asyncio.to_thread(get_recent_memory_update_from_buffer, db, redis, user_id)
-        used_uuid, recent_update = await asyncio.gather(used_uuid_task, recent_update_task)
-        update_cmd = await self._extract_knowledge(
-            vector_store, user_id, user_input, agent_response_content, history, used_uuid, recent_update
+        memory_payload = await self._extract_knowledge(
+            history,
+            current_dialogue=current_dialogue,
+            related_memories=related_memories or [],
         )
 
-        # 2. 准备可能被更新的文档的UUID列表
-        uuid_can_be_used = used_uuid.copy()
-        for update in recent_update:
-            if update.uuid:
-                uuid_can_be_used.append(update.uuid)
+        # 按新的 JSON 协议写入记忆。
+        for content in memory_payload.get("user_memory", []):
+            await self.write_user_memory(db, redis, vector_store, user_id, content, commit=commit)
 
-        # 3. 执行更新命令
-        for funcname, kwargs in update_cmd:
-            if "add" in funcname.lower():
-                content = kwargs.get("document", "")
-                await self.v_add(db, redis, vector_store, recent_update, user_id, content, commit=commit)
-
-            elif "username" in funcname.lower():
-                new_name = kwargs.get("new_name", "")
-                await asyncio.to_thread(update_user_nickname, db, redis, user_id, new_name, commit=commit)
-
-            elif "update" in funcname.lower():
-                uuid_short = kwargs.get("uuid", "")
-                for uuid in uuid_can_be_used:
-                    if uuid is None:
-                        continue
-                    if uuid.startswith(uuid_short):
-                        uuid_to_update = uuid
-                        break
-                else:
-                    uuid_to_update = None
-                    logger.warning(f"No matching UUID found for short UUID: {uuid_short}")
-
-                content = kwargs.get("new_document", "")
-                if content == "":
-                    content = kwargs.get("document", "")
-                await self.v_update(db, redis,  vector_store, recent_update, user_id, uuid_to_update, content, commit=commit)
+        for content in memory_payload.get("event_memory", []):
+            await self.write_event_memory(db, redis, vector_store, user_id, content, commit=commit)
 
     async def _extract_knowledge(
         self,
-        vector_store: VectorStore,
-        user_id: str,
-        user_input: str,
-        agent_response_content: List[str],
         history: str,
-        used_uuid: List[str],
-        recent_update: List[MemoryUpdateCommand],
+        current_dialogue: str,
+        related_memories: List[str],
     ) -> Dict[str, Any]:
         """
-        使用LLM从对话历史中提取有价值的记忆内容。
+        使用 LLM 从对话历史中提取有价值的记忆内容。
+
+        返回格式：
+        {
+            "user_memory": [str, ...],
+            "event_memory": [str, ...],
+        }
+
         Args:
             history: 最近的对话历史
         """
         history_str = history
-        recent_update_str = [str(cmd) for cmd in recent_update]
-        related_docs = vector_store.get_document_by_id(list(used_uuid))
-        related_doc_str = [f"ID: {doc.id[:6]}, Content: {doc.content}" for doc in related_docs if doc]
-
-        cmd = []
+        empty_payload = {"user_memory": [], "event_memory": []}
         try:
             response = await self.llm.generate_response(
-                user_input=user_input,
-                agent_response=agent_response_content,
+                use_json=True,
                 history=history_str,
-                recent_updates=recent_update_str,
-                related_memories=related_doc_str,
+                current_dialogue=current_dialogue,
+                related_memories=related_memories,
             )
-            response = response.split("\n")
-            logger.debug(f"Memory extraction response: {response}")
-            for line in response:
-                if line.startswith("##"):
-                    break
-                if line == "":
-                    continue
-                if not "(" in line or ")" not in line:
-                    logger.warning(f"Unrecognized command format: {line}")
-                    continue
-                funcname, args_str = line.split("(", 1)
-                args_str = args_str.rstrip(")")
-                kwargs = {}
-                for arg in args_str.split(","):
-                    key, value = arg.split("=", 1)
-                    kwargs[key.strip()] = value.strip().strip("'").strip('"')
-                cmd.append((funcname.strip(), kwargs))
+            payload = self._parse_memory_json_response(response)
+            logger.debug(f"Memory extraction payload: {payload}")
+            return payload
         except Exception as e:
-            logger.warning(f"Error generating memory update commands: {e}")
-        finally:
-            return cmd
+            logger.warning(f"Error generating memory payload: {e}")
+            return empty_payload
 
-    async def v_add(self, db: Session, redis: Redis, vector_store: VectorStore, recent_update: List[MemoryUpdateCommand], user_id: str, document: str, commit: bool = True):
-        """
-        向向量存储中添加新的记忆片段
-        """
-        doc = Document(content=document, metadata={"source": "memory_writer", "timestamp": time.strftime("%Y-%m-%d"), "user_id": user_id})
-        ids = await asyncio.to_thread(vector_store.add_documents, [doc])
-        # logger.debug(f"Successfully added document with UUIDs: {ids} for user {user_id}")
-        update_cmd = MemoryUpdateCommand(type="v_add", content=document, uuid=ids[0] if ids else None)
-        recent_update.append(update_cmd)
-        await asyncio.to_thread(write_memory_update, db, redis, user_id, update_cmd, commit=commit)
+    def _parse_memory_json_response(self, response: str) -> Dict[str, List[str]]:
+        """解析 LLM 返回的 JSON，兼容 ```json 代码块包装。"""
+        raw = (response or "").strip()
 
+        if raw.startswith("```"):
+            lines = raw.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            raw = "\n".join(lines).strip()
 
-    async def v_update(self, db: Session, redis: Redis, vector_store: VectorStore, recent_update: List[MemoryUpdateCommand], user_id: str, uuid: str, new_document: str, commit: bool = True):
-        """
-        更新向量存储中的记忆片段
-        """
-        if uuid is None:
-            logger.warning("UUID is required for updating a document.")
-            return
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise ValueError("memory payload must be a JSON object")
+
+        user_memory = data.get("user_memory", [])
+        event_memory = data.get("event_memory", [])
+
+        if not isinstance(user_memory, list) or not isinstance(event_memory, list):
+            raise ValueError("user_memory/event_memory must be lists")
+
+        def _clean_items(items: List[Any]) -> List[str]:
+            cleaned: List[str] = []
+            for item in items:
+                text = str(item or "").strip()
+                if text:
+                    cleaned.append(text)
+            return cleaned
+
+        return {
+            "user_memory": _clean_items(user_memory),
+            "event_memory": _clean_items(event_memory),
+        }
+
+    async def write_user_memory(
+        self,
+        db: Session,
+        redis: MemoryStorage,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        commit: bool = True,
+    ) -> bool:
+        """写入用户长期记忆：若存在相似记忆则跳过。"""
+        text = (content or "").strip()
+        if not text:
+            return False
+
+        threshold = float(self.config.get("user_memory_dedup_threshold", 0.82))
+        is_dup = await self._has_similar_user_memory(vector_store, user_id, text, threshold)
+        if is_dup:
+            logger.debug(f"Skip duplicate user_memory for user {user_id}: {text[:50]}")
+            return False
+
+        today = time.strftime("%Y-%m-%d")
         doc = Document(
-            content=new_document, metadata={"source": "memory_writer", "timestamp": time.strftime("%Y-%m-%d"), "user_id": user_id}, id=uuid
+            content=text,
+            metadata={
+                "source": "memory_writer",
+                "timestamp": today,
+                "event_date": today,
+                "memory_type": "user_memory",
+                "user_id": user_id,
+            },
         )
-        ret = await asyncio.to_thread(vector_store.update_document, doc_id=uuid, document=doc)
-        if ret:
-            logger.debug(f"Successfully updated document with UUID: {uuid} for user {user_id}")
-            update_cmd = MemoryUpdateCommand(type="v_update", content=new_document, uuid=uuid)
-            recent_update.append(update_cmd)
-            await asyncio.to_thread(write_memory_update, db, redis, user_id, update_cmd, commit=commit)
-        else:
-            logger.warning(f"Failed to update document with UUID: {uuid} for user {user_id}")
+        ids = await asyncio.to_thread(vector_store.add_documents, [doc])
+        update_cmd = MemoryUpdateCommand(type="write_user_memory", content=text, uuid=ids[0] if ids else None)
+        await asyncio.to_thread(write_memory_update, db, redis, user_id, update_cmd, commit=commit)
+        return True
+
+    async def write_event_memory(
+        self,
+        db: Session,
+        redis: MemoryStorage,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        commit: bool = True,
+    ) -> bool:
+        """写入事件记忆：日期不同直接写入；同日期且内容完全一致则跳过。"""
+        text = (content or "").strip()
+        if not text:
+            return False
+
+        today = time.strftime("%Y-%m-%d")
+        if await self._is_same_day_duplicate_event_memory(vector_store, user_id, text, today):
+            logger.debug(f"Skip same-day duplicate event_memory for user {user_id}: {text[:50]}")
+            return False
+
+        doc = Document(
+            content=text,
+            metadata={
+                "source": "memory_writer",
+                "timestamp": today,
+                "event_date": today,
+                "memory_type": "event_memory",
+                "user_id": user_id,
+            },
+        )
+        ids = await asyncio.to_thread(vector_store.add_documents, [doc])
+        update_cmd = MemoryUpdateCommand(type="write_event_memory", content=text, uuid=ids[0] if ids else None)
+        await asyncio.to_thread(write_memory_update, db, redis, user_id, update_cmd, commit=commit)
+        return True
+
+    async def _has_similar_user_memory(
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        threshold: float,
+    ) -> bool:
+        results = await vector_store.search(user_id, content, k=5)
+        for doc, score in results:
+            metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
+            if metadata.get("memory_type") != "user_memory":
+                continue
+            if score >= threshold:
+                return True
+        return False
+
+    async def _is_same_day_duplicate_event_memory(
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        event_date: str,
+    ) -> bool:
+        results = await vector_store.search(user_id, content, k=10)
+        target = self._normalize_text(content)
+        for doc, _ in results:
+            metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
+            if metadata.get("memory_type") != "event_memory":
+                continue
+            if str(metadata.get("event_date") or metadata.get("timestamp") or "") != event_date:
+                continue
+            existing = self._normalize_text(doc.get_content() if hasattr(doc, "get_content") else "")
+            if existing and existing == target:
+                return True
+        return False
+
+    def _normalize_text(self, text: str) -> str:
+        return " ".join((text or "").strip().split())

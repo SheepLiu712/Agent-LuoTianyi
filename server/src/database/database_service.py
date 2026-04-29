@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from .vector_store import VectorStore, init_vector_store, get_vector_store
 from .sql_database import User, KnowledgeBuffer, Conversation, Base, MemoryRecord, MemoryUpdateRecord
 from .redis_buffer import init_redis_buffer, get_redis_buffer
+from .memory_storage import MemoryStorage, WatchError
+from .sql_writer import run_sql_write
 from .knowledge_graph import KnowledgeGraph, init_knowledge_graph, get_knowledge_graph
-from redis import Redis
 import os
 import base64
 
@@ -12,7 +13,6 @@ import json
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 import uuid
-from redis import WatchError
 
 from ..utils.logger import get_logger
 from ..types import ConversationItem, KnowledgeItem, MemoryUpdateCommand
@@ -34,7 +34,7 @@ def init_all_databases(config: Dict[str, Any]) -> None:
         raise
 
 
-def prefill_buffer(db: Session, redis: Redis, user_id: str, types: List[str] = ["all"]) -> bool:
+def prefill_buffer(db: Session, redis: MemoryStorage, user_id: str, types: List[str] = ["all"]) -> bool:
     """
     将用户的上下文信息预加载到 Redis 中，提升响应速度。
     需要载入的包括两部分：①上下文，由总结summary和多个最近的对话组成；②上下文对应的知识库内容。
@@ -107,26 +107,12 @@ def prefill_buffer(db: Session, redis: Redis, user_id: str, types: List[str] = [
             redis.setex(nickname_key, 3600, nickname)  # 1小时过期
             logger.info(f"Prefilled nickname for user {user_id} in Redis.")
 
-        # 4. 加载最近的记忆更新命令
-        if "all" in types or "recent_memory_update" in types:
-            recent_update = (
-                db.query(MemoryUpdateRecord)
-                .filter(MemoryUpdateRecord.user_id == user_id)
-                .order_by(MemoryUpdateRecord.created_at.desc())
-                .limit(10)
-                .all()
-            )
-            recent_updates_list = []
-            for record in reversed(recent_update):
-                try:
-                    cmd = json.loads(record.update_command)
-                    recent_updates_list.append(cmd)
-                except json.JSONDecodeError:
-                    logger.warning(f"Failed to decode MemoryUpdateCommand for user {user_id}, record {record.update_cmd_uuid}")
-                    continue
-            recent_update_key = f"user_recent_memory_update:{user_id}"
-            redis.setex(recent_update_key, 3600, json.dumps(recent_updates_list, ensure_ascii=False))  # 1小时过期
-            logger.info(f"Prefilled recent memory update for user {user_id} in Redis.")
+        # 3.1 加载用户画像描述
+        if "all" in types or "description" in types:
+            description = user.description or ""
+            description_key = f"user_description:{user_id}"
+            redis.setex(description_key, 3600, description)  # 1小时过期
+            logger.info(f"Prefilled description for user {user_id} in Redis.")
 
         return True
         
@@ -137,9 +123,34 @@ def prefill_buffer(db: Session, redis: Redis, user_id: str, types: List[str] = [
         tb.print_exc()
         logger.error(f"Error in prefill_buffer for user {user_id}: {e}")
         return False
+    
+def update_login_time(db: Session, user_id: str) -> float | None:
+    '''
+    将用户的最新登录时间更新为当前时间，并返回距离上次登录的时间差（秒）。如果是第一次登录，则返回 None。
+    '''
+    try:
+        user = db.query(User).filter(User.uuid == user_id).first()
+        if not user:
+            logger.error(f"User {user_id} not found for update_login_time.")
+            return None
+
+        now = datetime.now()
+        last_login_time = user.last_login
+        user.last_login = now
+        db.commit()
+
+        if last_login_time:
+            time_diff = (now - last_login_time).total_seconds()
+            return time_diff
+        else:
+            return None
+    except Exception as e:
+        logger.error(f"Error updating login time for user {user_id}: {e}")
+        db.rollback()
+        return None
 
 
-def add_conversations(db: Session, redis: Redis, user_id: str, conversation_data: List[ConversationItem], commit=True) -> List[str]:
+def add_conversations(db: Session, redis: MemoryStorage, user_id: str, conversation_data: List[ConversationItem], commit=True) -> List[str]:
     """
     在数据库中增加一条对话记录，同时user的对话总数all_memory_count加一。context_memory_count加一。
     在 Redis 中相应更新。
@@ -157,55 +168,57 @@ def add_conversations(db: Session, redis: Redis, user_id: str, conversation_data
     :rtype: List[str]
     """
     try:
-        user = db.query(User).filter(User.uuid == user_id).first()
-        if not user:
-            return []
+        def _write() -> List[Dict[str, Any]]:
+            user = db.query(User).filter(User.uuid == user_id).first()
+            if not user:
+                return []
 
-        new_convs = []
-        for item in conversation_data:
-            # item.timestamp is str, ensure it matches DB requirements
-            try:
-                ts = datetime.strptime(item.timestamp, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                ts = datetime.now()
-            
-            meta_data_str = None
-            if item.type == 'image':
+            new_convs_local: List[Dict[str, Any]] = []
+            for item in conversation_data:
                 try:
-                    # Store file path in meta_data as JSON
-                    meta_data_str = json.dumps(item.data, ensure_ascii=False)
-                except Exception as e:
-                    logger.error(f"Failed to serialize meta_data for user {user_id}: {e}")
+                    ts = datetime.strptime(item.timestamp, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    ts = datetime.now()
 
-            conv = Conversation(
-                user_id=user_id,
-                timestamp=ts,
-                source=item.source,
-                content=item.content,
-                type=item.type,
-                meta_data=meta_data_str,
-                uuid=item.uuid or str(uuid.uuid4()) # 如果外部没有提供 uuid，则生成一个新的
-            )
-            db.add(conv)
-            new_convs.append({
-                "uuid": conv.uuid,
-                "timestamp": item.timestamp,
-                "source": item.source,
-                "content": item.content,
-                "type": item.type,
-                "meta_data": meta_data_str
-            })
-        
-        user.all_memory_count = (user.all_memory_count or 0) + len(conversation_data)
-        user.context_memory_count = (user.context_memory_count or 0) + len(conversation_data)
-        
-        if commit:
-            db.commit()
+                meta_data_str = None
+                if item.type == "image":
+                    try:
+                        meta_data_str = json.dumps(item.data, ensure_ascii=False)
+                    except Exception as e:
+                        logger.error(f"Failed to serialize meta_data for user {user_id}: {e}")
 
-        # Redis update with Optimistic Locking
+                conv = Conversation(
+                    user_id=user_id,
+                    timestamp=ts,
+                    source=item.source,
+                    content=item.content,
+                    type=item.type,
+                    meta_data=meta_data_str,
+                    uuid=item.uuid or str(uuid.uuid4()),
+                )
+                db.add(conv)
+                new_convs_local.append(
+                    {
+                        "uuid": conv.uuid,
+                        "timestamp": item.timestamp,
+                        "source": item.source,
+                        "content": item.content,
+                        "type": item.type,
+                        "meta_data": meta_data_str,
+                    }
+                )
+
+            user.all_memory_count = (user.all_memory_count or 0) + len(conversation_data)
+            user.context_memory_count = (user.context_memory_count or 0) + len(conversation_data)
+            if commit:
+                db.commit()
+            return new_convs_local
+
+        new_convs = run_sql_write(_write)
+
         redis_key = f"user_context:{user_id}"
         with redis.pipeline() as pipe:
-            for _ in range(3): # Retry up to 3 times
+            for _ in range(3):
                 try:
                     pipe.watch(redis_key)
                     raw_data = pipe.get(redis_key)
@@ -213,7 +226,6 @@ def add_conversations(db: Session, redis: Redis, user_id: str, conversation_data
                         data = json.loads(raw_data)
                         data["conversations"].extend(new_convs)
                         new_val = json.dumps(data, ensure_ascii=False)
-                        
                         pipe.multi()
                         pipe.setex(redis_key, 3600, new_val)
                         pipe.execute()
@@ -222,7 +234,7 @@ def add_conversations(db: Session, redis: Redis, user_id: str, conversation_data
                     break
                 except WatchError:
                     continue
-        
+
         return [conv["uuid"] for conv in new_convs]
     except Exception as e:
         logger.error(f"add_conversations error: {e}")
@@ -230,53 +242,8 @@ def add_conversations(db: Session, redis: Redis, user_id: str, conversation_data
         return []
 
 
-def write_knowledge_buffers(db: Session, redis: Redis, user_id: str, knowledge_contents: List[str], commit: bool = True) -> None:
-    """
-    更新用户的知识缓存：清空数据库和Redis中该用户旧的知识缓存，并写入新的内容。
 
-    :param db: 数据库会话
-    :type db: Session
-    :param redis: Redis
-    :type redis: Redis
-    :param user_id: 用户 uuid
-    :type user_id: str
-    :param knowledge_contents: 新的知识内容列表
-    :type knowledge_contents: List[KnowledgeItem]
-    """
-    try:
-        # 1. 数据库操作：删除旧的，写入新的
-        # 删除该用户所有旧的知识缓存
-        db.query(KnowledgeBuffer).filter(KnowledgeBuffer.user_id == user_id).delete(synchronize_session=False)
-
-        new_kbs = []
-        redis_update_list = []
-        
-        used_uuid = set()
-        for idx, content in enumerate(knowledge_contents):
-            kb = KnowledgeBuffer(
-                user_id=user_id,
-                content=content,
-                created_at=datetime.now()
-            )
-            db.add(kb)
-            new_kbs.append(kb)
-            redis_update_list.append(content)
-        
-        if commit:
-            db.commit()
-
-        # 2. Redis 操作：直接覆盖
-        key = f"user_knowledge:{user_id}"
-        new_val = json.dumps(redis_update_list, ensure_ascii=False)
-        redis.setex(key, 3600, new_val) # 覆盖并重置过期时间
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        logger.error(f"write_knowledge_buffers error: {e}")
-        db.rollback()
-
-def write_memory_update(db: Session, redis: Redis, user_id: str, memory_update: MemoryUpdateCommand, commit: bool = True) -> None:
+def write_memory_update(db: Session, redis: MemoryStorage, user_id: str, memory_update: MemoryUpdateCommand, commit: bool = True) -> None:
     # 向数据库中添加记忆更新命令记录
     try:
         cmd_to_dict = {
@@ -284,14 +251,18 @@ def write_memory_update(db: Session, redis: Redis, user_id: str, memory_update: 
             "content": memory_update.content,
             "type": memory_update.type,
         }
-        record = MemoryUpdateRecord(
-            user_id=user_id,
-            update_command=json.dumps(cmd_to_dict, ensure_ascii=False),
-            created_at=datetime.now()
-        )
-        db.add(record)
-        if commit:
-            db.commit()
+
+        def _write() -> None:
+            record = MemoryUpdateRecord(
+                user_id=user_id,
+                update_command=json.dumps(cmd_to_dict, ensure_ascii=False),
+                created_at=datetime.now(),
+            )
+            db.add(record)
+            if commit:
+                db.commit()
+
+        run_sql_write(_write)
 
         # 更新 Redis 中的最近记忆更新缓存
         recent_update_key = f"user_recent_memory_update:{user_id}"
@@ -309,19 +280,9 @@ def write_memory_update(db: Session, redis: Redis, user_id: str, memory_update: 
     except Exception as e:
         logger.error(f"write_recent_memory_update error: {e}")
         db.rollback()
-        
-
-def write_used_memory_uuid(redis: Redis, user_id:str, used_uuid: set) -> None:
-    try:
-        # 直接覆盖
-        k = f"user_used_uuid:{user_id}"
-        new_val = json.dumps(list(used_uuid), ensure_ascii=False)
-        redis.setex(k, 3600, new_val)
-    except Exception as e:
-        logger.error(f"write_used_memory_uuid error: {e}")
 
 
-def update_user_nickname(db: Session, redis: Redis, user_id: str, new_nickname: str, commit: bool = True) -> None:
+def update_user_nickname(db: Session, redis: MemoryStorage, user_id: str, new_nickname: str, commit: bool = True) -> None:
     """
     更新用户昵称，同时在 Redis 中相应更新。
 
@@ -335,13 +296,19 @@ def update_user_nickname(db: Session, redis: Redis, user_id: str, new_nickname: 
     :type new_nickname: str
     """
     try:
-        user = db.query(User).filter(User.uuid == user_id).first()
-        if user:
+        def _write() -> bool:
+            user = db.query(User).filter(User.uuid == user_id).first()
+            if not user:
+                return False
+
             user.nickname = new_nickname
             if commit:
                 db.commit()
+            return True
 
-            # 更新 Redis 中的昵称缓存（如果有的话）
+        updated = run_sql_write(_write)
+
+        if updated:
             redis_key = f"user_nickname:{user_id}"
             redis.setex(redis_key, 3600, new_nickname)
     except Exception as e:
@@ -349,53 +316,33 @@ def update_user_nickname(db: Session, redis: Redis, user_id: str, new_nickname: 
         db.rollback()
 
 
-def preserve_knowledge_buffers(db: Session, redis: Redis, user_id: str, knowledge_uuids: List[str], commit: bool = True):
+def update_user_description(db: Session, redis: MemoryStorage, user_id: str, new_description: str, commit: bool = True) -> None:
     """
-    在数据库中删除知识缓存记录，只保留给定uuid的知识缓存。同时在 Redis 中相应更新。
-
-    :param db: 数据库会话
-    :type db: Session
-    :param redis: Redis
-    :type redis: Redis
-    :param user_id: 用户 uuid
-    :type user_id: str
-    :param knowledge_uuids: 多条知识内容对应的 uuid 列表
-    :type knowledge_uuids: List[str]
+    更新用户画像描述，同时在 Redis 中相应更新。
     """
-    raise NotImplementedError("preserve_knowledge_buffers is not implemented yet.")
     try:
+        def _write() -> bool:
+            user = db.query(User).filter(User.uuid == user_id).first()
+            if not user:
+                return False
 
-        db.query(KnowledgeBuffer).filter(
-            KnowledgeBuffer.user_id == user_id,
-            KnowledgeBuffer.uuid.in_(knowledge_uuids)
-        ).delete(synchronize_session=False)
-        db.commit()
+            user.description = new_description
+            if commit:
+                db.commit()
+            return True
 
-        key = f"user_knowledge:{user_id}"
-        with redis.pipeline() as pipe:
-            for _ in range(3):
-                try:
-                    pipe.watch(key)
-                    raw = pipe.get(key)
-                    if raw:
-                        current_list = json.loads(raw)
-                        new_list = [x for x in current_list if x in knowledge_uuids]
-                        new_val = json.dumps(new_list, ensure_ascii=False)
-                        
-                        pipe.multi()
-                        pipe.setex(key, 3600, new_val)
-                        pipe.execute()
-                    else:
-                        pipe.unwatch()
-                    break
-                except WatchError:
-                    continue
+        updated = run_sql_write(_write)
+
+        if updated:
+            redis_key = f"user_description:{user_id}"
+            redis.setex(redis_key, 3600, new_description)
     except Exception as e:
-        logger.error(f"preserve_knowledge_buffers error: {e}")
+        logger.error(f"update_user_description error: {e}")
         db.rollback()
 
 
-def update_context_summary(db: Session, redis: Redis, user_id: str, new_summary: str, new_context_memory_count: int, commit: bool = True):
+
+def update_context_summary(db: Session, redis: MemoryStorage, user_id: str, new_summary: str, new_context_memory_count: int, commit: bool = True):
     """
     更新用户的上下文总结 summary，同时重置 context_memory_count。
     在 Redis 中相应更新。
@@ -412,13 +359,20 @@ def update_context_summary(db: Session, redis: Redis, user_id: str, new_summary:
     :type new_context_memory_count: int
     """
     try:
-        user = db.query(User).filter(User.uuid == user_id).first()
-        if user:
+        def _write() -> bool:
+            user = db.query(User).filter(User.uuid == user_id).first()
+            if not user:
+                return False
+
             user.context_summary = new_summary
             user.context_memory_count = new_context_memory_count
             if commit:
                 db.commit()
+            return True
 
+        updated = run_sql_write(_write)
+
+        if updated:
             redis_key = f"user_context:{user_id}"
             with redis.pipeline() as pipe:
                 for _ in range(3):
@@ -451,7 +405,7 @@ def update_context_summary(db: Session, redis: Redis, user_id: str, new_summary:
         db.rollback()
 
 
-def get_context_from_buffer(db: Session, redis: Redis, user_id: str) -> List[Dict[str, Any]]:
+def get_context_from_buffer(db: Session, redis: MemoryStorage, user_id: str) -> List[Dict[str, Any]]:
     """
     优先从 Redis 获取上下文，如果不存在则调用 prefill_buffer 加载
     """
@@ -466,26 +420,6 @@ def get_context_from_buffer(db: Session, redis: Redis, user_id: str) -> List[Dic
         raw_data = redis.get(redis_key)
         if raw_data:
             return json.loads(raw_data)
-    
-    return []
-
-def get_knowledge_from_buffer(db: Session, redis: Redis, user_id: str) -> List[str]:
-    """
-    优先从 Redis 获取知识缓存，如果不存在则调用 prefill_buffer 加载
-    """
-    redis_key = f"user_knowledge:{user_id}"
-    raw_data = redis.get(redis_key)
-    
-    if raw_data:
-        raw_list = json.loads(raw_data)
-        return raw_list
-    
-    # 尝试预加载
-    if prefill_buffer(db, redis, user_id):
-        raw_data = redis.get(redis_key)
-        if raw_data:
-            raw_list = json.loads(raw_data)
-            return raw_list
     
     return []
 
@@ -534,7 +468,7 @@ def get_context_count(db: Session, user_id: str) -> int:
         return user.context_memory_count
     return 0
 
-def get_user_nickname(db: Session, redis: Redis, user_id: str) -> Optional[str]:
+def get_user_nickname(db: Session, redis: MemoryStorage, user_id: str) -> Optional[str]:
     """
     获取用户昵称
     """
@@ -551,7 +485,23 @@ def get_user_nickname(db: Session, redis: Redis, user_id: str) -> Optional[str]:
             return nickname
     return None
 
-def get_recent_memory_update_from_buffer(db:Session, redis: Redis, user_id: str) -> List[MemoryUpdateCommand]:
+
+def get_user_description(db: Session, redis: MemoryStorage, user_id: str) -> Optional[str]:
+    """
+    获取用户画像描述。
+    """
+    redis_key = f"user_description:{user_id}"
+    description = redis.get(redis_key)
+    if description is not None:
+        return description
+
+    if prefill_buffer(db, redis, user_id, types=["description"]):
+        description = redis.get(redis_key)
+        if description is not None:
+            return description
+    return None
+
+def get_recent_memory_update_from_buffer(db:Session, redis: MemoryStorage, user_id: str) -> List[MemoryUpdateCommand]:
     redis_key = f"user_recent_memory_update:{user_id}"
     raw_data = redis.get(redis_key)
     if not raw_data:
@@ -571,14 +521,6 @@ def get_recent_memory_update_from_buffer(db:Session, redis: Redis, user_id: str)
         return result
     return []
 
-def get_used_memory_uuid(db:Session, redis: Redis, user_id: str) -> List[str]:
-    redis_key = f"user_used_uuid:{user_id}"
-    raw_data = redis.get(redis_key)
-
-    if raw_data:
-        used_uuid = json.loads(raw_data)
-        return used_uuid
-    return []
 
 def get_image_server_path(db: Session, user_id: str, uuid: str) -> Optional[str]:
     conv = db.query(Conversation).filter(
@@ -597,22 +539,27 @@ def get_image_server_path(db: Session, user_id: str, uuid: str) -> Optional[str]
     return None
 
 def update_image_client_path(db: Session, user_id: str, uuid: str, new_client_path: str) -> bool:
-    conv = db.query(Conversation).filter(
-        Conversation.user_id == user_id,
-        Conversation.uuid == uuid,
-        Conversation.type == "image"
-    ).first()
+    try:
+        def _write() -> bool:
+            conv = db.query(Conversation).filter(
+                Conversation.user_id == user_id,
+                Conversation.uuid == uuid,
+                Conversation.type == "image",
+            ).first()
 
-    if conv and conv.meta_data:
-        try:
-            meta_data = json.loads(conv.meta_data)
-            meta_data["image_client_path"] = new_client_path
-            conv.meta_data = json.dumps(meta_data, ensure_ascii=False)
-            db.commit()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to update image client path for conversation {uuid} of user {user_id}: {e}")
-            db.rollback()
+            if conv and conv.meta_data:
+                meta_data = json.loads(conv.meta_data)
+                meta_data["image_client_path"] = new_client_path
+                conv.meta_data = json.dumps(meta_data, ensure_ascii=False)
+                db.commit()
+                return True
             return False
-    logger.warning(f"Conversation with uuid {uuid} not found for user {user_id} when updating image client path.")
-    return False
+
+        success = run_sql_write(_write)
+        if not success:
+            logger.warning(f"Conversation with uuid {uuid} not found for user {user_id} when updating image client path.")
+        return success
+    except Exception as e:
+        logger.error(f"Failed to update image client path for conversation {uuid} of user {user_id}: {e}")
+        db.rollback()
+        return False

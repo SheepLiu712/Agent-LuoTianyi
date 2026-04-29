@@ -8,16 +8,16 @@ Memory Manager Module
 from typing import List, Dict, Any
 import asyncio
 from sqlalchemy.orm import Session
-from redis import Redis
+from ..database.memory_storage import MemoryStorage
 
 from ..utils.logger import get_logger
 from .memory_search import MemorySearcher
 from .memory_write import MemoryWriter
-from ..music.singing_manager import SingingManager
-from .graph_retriever import GraphRetrieverFactory, GraphRetriever
-from ..llm.prompt_manager import PromptManager
+from .user_profile_updater import UserProfileUpdater
+from ..plugins.music.singing_manager import SingingManager
+from ..utils.llm.prompt_manager import PromptManager
 from ..database import VectorStore, KnowledgeGraph
-from ..database.database_service import get_user_nickname
+from ..database.database_service import get_user_nickname, get_user_description, update_user_description
 
 class MemoryManager:
     def __init__(
@@ -36,16 +36,14 @@ class MemoryManager:
         """
         self.logger = get_logger(__name__)
         self.config = config
-        self.graph_retriever: GraphRetriever = GraphRetrieverFactory.create_retriever(
-            config["graph_retriever"]["retriever_type"], config["graph_retriever"]
-        )
         self.memory_searcher = MemorySearcher(config["memory_searcher"], prompt_manager, singing_manager)
         self.memory_writer = MemoryWriter(config["memory_writer"], prompt_manager)
+        self.user_profile_updater = UserProfileUpdater(config["user_profile"], prompt_manager)
 
     async def get_knowledge(
         self,
         db: Session,
-        redis: Redis,
+        redis: MemoryStorage,
         vector_store: VectorStore,
         knowledge_db: Session,
         user_id: str,
@@ -71,15 +69,43 @@ class MemoryManager:
             history,
         )
 
+    async def search_memories_for_topic(
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        queries: List[str],
+        similarity_threshold: float = 0.8,
+        k: int = 3,
+    ) -> List[str]:
+        """面向 topic 流水线的记忆检索接口。"""
+        return await self.memory_searcher.search_memories_for_topic(
+            vector_store=vector_store,
+            user_id=user_id,
+            queries=queries,
+            k=k,
+            score_threshold=similarity_threshold,
+        )
+
+    async def search_song_facts_for_topic(
+        self,
+        knowledge_db: Session,
+        constraints: List[str],
+    ) -> List[str]:
+        """面向 topic 流水线的歌曲事实检索接口。"""
+        return await self.memory_searcher.search_song_facts_for_topic(
+            knowledge_db=knowledge_db,
+            constraints=constraints,
+        )
+
     async def post_process_interaction(
         self,
         db: Session,
-        redis: Redis,
+        redis: MemoryStorage,
         vector_store: VectorStore,
         user_id: str,
-        user_input: str,
-        agent_response_content: List[str],
         history: str,
+        current_dialogue: str = "",
+        related_memories: List[str] | None = None,
         commit: bool = True
     ):
         """
@@ -94,14 +120,107 @@ class MemoryManager:
             redis,
             vector_store,
             user_id,
-            user_input,
-            agent_response_content,
             history,
+            current_dialogue=current_dialogue,
+            related_memories=related_memories or [],
             commit=commit
         )
 
-    async def get_username(self,  db: Session, redis: Redis, user_id: str) -> str:
+    async def write_user_memory(
+        self,
+        db: Session,
+        redis: MemoryStorage,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        commit: bool = True,
+    ) -> bool:
+        return await self.memory_writer.write_user_memory(
+            db=db,
+            redis=redis,
+            vector_store=vector_store,
+            user_id=user_id,
+            content=content,
+            commit=commit,
+        )
+
+    async def write_event_memory(
+        self,
+        db: Session,
+        redis: MemoryStorage,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        commit: bool = True,
+    ) -> bool:
+        return await self.memory_writer.write_event_memory(
+            db=db,
+            redis=redis,
+            vector_store=vector_store,
+            user_id=user_id,
+            content=content,
+            commit=commit,
+        )
+
+    async def get_username(self,  db: Session, redis: MemoryStorage, user_id: str) -> str:
         """
         获取用户的名称
         """
         return await asyncio.to_thread(get_user_nickname, db, redis, user_id)
+
+    async def update_user_profile_by_topic(
+        self,
+        db: Session,
+        redis: MemoryStorage,
+        user_id: str,
+        history: str,
+        current_dialogue: str,
+        commit: bool = True,
+    ) -> str:
+        """
+        基于单个话题涉及对话，判断并更新用户画像。
+
+        Returns:
+            更新后的画像文本；如果不需要更新则返回空字符串。
+        """
+        current_profile = await asyncio.to_thread(get_user_description, db, redis, user_id) or ""
+        new_profile = await self.user_profile_updater.update_profile(
+            history=history,
+            current_dialogue=current_dialogue,
+            current_profile=current_profile,
+        )
+        if not new_profile:
+            return ""
+
+        await asyncio.to_thread(
+            update_user_description,
+            db,
+            redis,
+            user_id,
+            new_profile,
+            commit,
+        )
+        return new_profile
+
+    async def update_user_profile_by_context(self, db: Session, redis: MemoryStorage, user_id: str, context: Dict[str, Any], commit: bool = True):
+        """
+        基于用户的长期上下文信息，判断并更新用户画像。
+        该方法适用于定时任务或特定触发条件下的画像更新，不依赖于单次对话内容。
+        """
+        current_profile = await asyncio.to_thread(get_user_description, db, redis, user_id) or ""
+        new_profile = await self.user_profile_updater.update_profile(
+            history=context,
+            current_profile=current_profile,
+        )
+        if not new_profile:
+            return
+        
+        await asyncio.to_thread(
+            update_user_description,
+            db,
+            redis,
+            user_id,
+            new_profile,
+            commit=commit,
+        )
+        return new_profile

@@ -1,11 +1,13 @@
 import Constants from 'expo-constants';
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
   Image,
   Keyboard,
+  ScrollView,
   StyleSheet,
+  Text,
   TextInput, TouchableOpacity,
   useWindowDimensions,
   View
@@ -16,6 +18,8 @@ import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
+import { clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+
 
 export default function Index() {
   const { username, message_token } = auth;
@@ -23,6 +27,9 @@ export default function Index() {
   const { height: screenHeight } = useWindowDimensions();
   const live2dHeight = screenHeight * 0.4;
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [thinkingFrame, setThinkingFrame] = useState(0);
+  const [debugOpen, setDebugOpen] = useState(false);
+  const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
   const webviewRef = useRef<WebView>(null);
 
 
@@ -41,15 +48,41 @@ export default function Index() {
     flatListRef,
     canSend,
     canSendImage,
+    thinking,
     setInputText,
     addHistoryMessage,
     handleSendText,
     handleSendImage,
     handleWebViewMessage,
-  } = useChatLogic(webviewRef);
+    handleToggleAgentAudio,
+  } = useChatLogic(webviewRef, username, message_token);
 
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
+
+  useEffect(() => {
+    const unsubscribe = subscribeDebugTrace((entries) => {
+      setDebugEntries(entries);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (!thinking) {
+      setThinkingFrame(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setThinkingFrame((prev) => (prev + 1) % 3);
+    }, 500);
+    return () => clearInterval(timer);
+  }, [thinking]);
+
+  const thinkingBubbleFrames = [
+    require('../assets/images/thinking_bubble1.png'),
+    require('../assets/images/thinking_bubble2.png'),
+    require('../assets/images/thinking_bubble3.png'),
+  ];
 
   useEffect(() => {
     const showSubscription = Keyboard.addListener('keyboardDidShow', (e) => {
@@ -89,6 +122,15 @@ export default function Index() {
     </View>
   );
 };
+
+  const visibleDebugEntries = debugEntries.slice(-50).reverse();
+
+  const formatDebugTs = (ts: number) => {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(
+      d.getSeconds(),
+    ).padStart(2, '0')}.${String(d.getMilliseconds()).padStart(3, '0')}`;
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: 'white' }}>
@@ -130,6 +172,42 @@ export default function Index() {
             console.error('WebView onHttpError:', event.nativeEvent);
           }}
         />
+
+        {thinking ? (
+          <View style={styles.thinkingBubble}>
+            <Image
+              source={thinkingBubbleFrames[thinkingFrame]}
+              style={styles.thinkingBubbleImage}
+              resizeMode="contain"
+            />
+          </View>
+        ) : null}
+
+        <TouchableOpacity
+          style={styles.debugToggleBtn}
+          onPress={() => setDebugOpen((prev) => !prev)}
+        >
+          <Text style={styles.debugToggleText}>{debugOpen ? '收起调试' : '调试'}</Text>
+        </TouchableOpacity>
+
+        {debugOpen ? (
+          <View style={styles.debugPanel}>
+            <View style={styles.debugHeaderRow}>
+              <Text style={styles.debugHeaderText}>发送调试日志（最近 {visibleDebugEntries.length} 条）</Text>
+              <TouchableOpacity onPress={clearDebugTrace}>
+                <Text style={styles.debugClearText}>清空</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.debugScroll} contentContainerStyle={styles.debugScrollContent}>
+              {visibleDebugEntries.map((entry) => (
+                <Text key={entry.id} style={styles.debugLine}>
+                  [{formatDebugTs(entry.ts)}] [{entry.scope}] {entry.message}
+                  {entry.detail ? ` | ${entry.detail}` : ''}
+                </Text>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
       </View>
 
       {/* 【可压缩区域：聊天历史 + 输入框】- 使用 flex 布局，会被键盘压缩 */}
@@ -140,7 +218,9 @@ export default function Index() {
             ref={flatListRef}
             data={messages}
             inverted={true} // 反转列表，使最新消息为0位置。
-            renderItem={({ item }) => <MessageItem message={item} />}
+            renderItem={({ item }) => (
+              <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} />
+            )}
             keyExtractor={(item) => item.uuid}
             onEndReached={() => {
               // 只有当有用户信息且当前没在加载时才触发
@@ -192,6 +272,7 @@ export default function Index() {
               style={styles.iconImage}
             />
           </TouchableOpacity>
+
         </View>
       </View>
     </View>
@@ -216,6 +297,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     zIndex: 10,
     overflow: 'hidden',
+  },
+  thinkingBubble: {
+    position: 'absolute',
+    right: '6%',
+    top: '25%',
+    width: 92,
+    aspectRatio: 1,
+  },
+  thinkingBubbleImage: {
+    width: '100%',
+    height: '100%',
   },
   webview: {
     flex: 1,
@@ -253,5 +345,68 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     resizeMode: 'stretch',
+  },
+  debugToggleBtn: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    paddingHorizontal: 10,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#4f81bd',
+    zIndex: 60,
+    elevation: 12,
+  },
+  debugToggleText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  debugPanel: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    top: 8,
+    bottom: 48,
+    borderWidth: 1,
+    borderColor: '#203244',
+    borderRadius: 10,
+    backgroundColor: '#0f1720',
+    zIndex: 70,
+    elevation: 14,
+    overflow: 'hidden',
+  },
+  debugHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 6,
+  },
+  debugHeaderText: {
+    color: '#b9d7ff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  debugClearText: {
+    color: '#79ffa8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  debugScroll: {
+    flex: 1,
+  },
+  debugScrollContent: {
+    paddingHorizontal: 10,
+    paddingBottom: 10,
+  },
+  debugLine: {
+    color: '#d9e4f0',
+    fontSize: 11,
+    lineHeight: 15,
+    marginBottom: 2,
   },
 });

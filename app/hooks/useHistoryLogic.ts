@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { ChatMessage } from "../components/ChatBubbles";
+import { ChatMessage } from "../types/chat";
 import { server_config } from "../config/index";
 import { getHistory } from "../utils/getHistory";
 

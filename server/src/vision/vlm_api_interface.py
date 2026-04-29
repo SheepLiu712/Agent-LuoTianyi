@@ -64,7 +64,7 @@ import time
 import random
 
 
-class SiliconFlowAPIInterface(
+class OpenAIAPIInterface(
     VLMAPIInterface
 ):  # 这个东西本质上调用的是openai的接口，如果之后需要使用openai的其他模型，可以直接用这个类（原样继承）
     def __init__(self, config: Dict[str, Any]):
@@ -82,10 +82,10 @@ class SiliconFlowAPIInterface(
         try:
             # 兼容同步和异步调用：如果需要异步，应使用 AsyncOpenAI
             self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
-            self.logger.info(f"硅基流动客户端初始化完成，模型: {self.model}")
+            self.logger.info(f"OpenAI客户端初始化完成，模型: {self.model}")
         except Exception as e:
-            self.logger.error(f"初始化硅基流动客户端失败: {e}")
-            raise Exception(f"无法初始化硅基流动客户端: {e}")
+            self.logger.error(f"初始化OpenAI客户端失败: {e}")
+            raise Exception(f"无法初始化OpenAI客户端: {e}")
 
     async def generate_response(self, prompt: str, image_base64: str, **kwargs) -> str:
         """
@@ -224,7 +224,7 @@ class SiliconFlowAPIInterface(
 
     def get_interface_info(self) -> Dict[str, Any]:
         return {
-            "name": "SiliconFlowAPIInterface",
+            "name": "OpenAIAPIInterface",
             "model": self.model,
             "base_url": self.base_url,
             "temperature": self.temperature,
@@ -252,8 +252,8 @@ VLM API接口工厂
 class VLMAPIFactory:
     @staticmethod
     def create_interface(config: Dict[str, Any]) -> VLMAPIInterface:
-        api_type = config.get("api_type", "siliconflow").lower()
-        if api_type == "siliconflow":
-            return SiliconFlowAPIInterface(config)
+        api_type = config.get("api_type", "openai").lower()
+        if api_type == "openai":
+            return OpenAIAPIInterface(config)
         else:
             raise ValueError(f"未知的VLM API类型: {api_type}")

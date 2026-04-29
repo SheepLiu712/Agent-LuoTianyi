@@ -14,4 +14,6 @@ networkx
 beautifulsoup4
 cryptography
 Pillow
-pyhton-multipart
+flashtext
+gsv-tts-lite==0.3.9
+lunardate

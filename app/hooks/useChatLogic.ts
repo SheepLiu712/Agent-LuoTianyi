@@ -1,155 +1,214 @@
 import * as ImagePicker from 'expo-image-picker';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { FlatList, Keyboard } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { ChatMessage } from '../components/ChatBubbles';
-import { imageChatStream, textChatStream } from '../utils/chat_stream';
 import { setExpression } from '../utils/live2d_helper';
+import { AgentBinder } from '../utils/binder';
+import { MessageProcessor } from '../utils/message_processor';
+import { NetworkClient } from '../utils/network_client';
+import { AgentMessagePayload, ChatMessage } from '../types/chat';
+import { addDebugTrace } from '../utils/debug_trace';
 
-
-interface AgentResponse {
-  text: string;
-  audio: any;
-  expression: string;
-  is_final_package: boolean;
+function createUuid(prefix: string) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
+export const useChatLogic = (
+  webviewRef: React.RefObject<WebView | null>,
+  username: string,
+  messageToken: string,
+) => {
   const [inputText, setInputText] = useState('');
-  const [thinking, setThinking] = useState(false); // 表示是否AI正在生成回复，用于表明系统没有卡死
-  const [processing, setProcessing] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-  ]);
+  const [thinking, setThinking] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [currentPlayingUuid, setCurrentPlayingUuid] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
-  const audioFinishedResolver = useRef<(() => void) | null>(null);
 
-  // 计算是否可以发送
-  const canSend = inputText.trim().length > 0 && !processing;
-  const canSendImage = !processing;
+  const networkClientRef = useRef<NetworkClient | null>(null);
+  const binderRef = useRef<AgentBinder | null>(null);
+  const messageProcessorRef = useRef<MessageProcessor | null>(null);
+
+  const updateMessageByUuid = useCallback((uuid: string, updater: (msg: ChatMessage) => ChatMessage) => {
+    setMessages((prev) => prev.map((msg) => (msg.uuid === uuid ? updater(msg) : msg)));
+  }, []);
+
+  const appendOrMergeAgentMessage = useCallback(
+    (payload: AgentMessagePayload) => {
+      const convUuid = payload.uuid || createUuid('agent');
+
+      setMessages((prev) => {
+        const index = prev.findIndex((msg) => msg.uuid === convUuid && !msg.isUser);
+        const expression = payload.expression;
+        if (expression) {
+          setExpression(expression, webviewRef);
+        }
+
+        // Some packets only carry state/expression updates; do not render empty bubbles.
+        if (!payload.text && !payload.audio && index < 0) {
+          return prev;
+        }
+
+        if (index >= 0) {
+          const target = prev[index];
+          const merged: ChatMessage = {
+            ...target,
+            content: payload.text ? `${target.content}${payload.text}` : target.content,
+            audioAvailable: payload.audio ? true : target.audioAvailable,
+            audioLocalUri: payload.audio || target.audioLocalUri,
+          };
+          const next = [...prev];
+          next[index] = merged;
+          return next;
+        }
+
+        const newMsg: ChatMessage = {
+          uuid: convUuid,
+          type: 'text',
+          content: payload.text || '',
+          isUser: false,
+          timestamp: Date.now(),
+          audioAvailable: !!payload.audio,
+          audioLocalUri: payload.audio || undefined,
+          audioPlayState: 'idle',
+        };
+
+        return [newMsg, ...prev];
+      });
+    },
+    [webviewRef],
+  );
+
+  useEffect(() => {
+    if (!username || !messageToken) {
+      return;
+    }
+
+    const networkClient = new NetworkClient();
+    networkClientRef.current = networkClient;
+
+    const binder = new AgentBinder(
+      {
+        sendText: async (uuid, text) => {
+          await messageProcessorRef.current?.sendText(uuid, text);
+        },
+        sendImage: async (uuid, imageUri, mimeType) => {
+          await messageProcessorRef.current?.sendImage(uuid, imageUri, mimeType);
+        },
+        sendTyping: async (textLength) => {
+          await messageProcessorRef.current?.sendTypingEvent(textLength);
+        },
+        playLocalTts: async (convUuid) => {
+          addDebugTrace('audio-ui', 'binder playLocalTts called', { convUuid });
+          return (await messageProcessorRef.current?.playLocalTtsByUuid(convUuid)) || false;
+        },
+        stopLocalTts: async () => {
+          addDebugTrace('audio-ui', 'binder stopLocalTts called');
+          await messageProcessorRef.current?.stopLocalTts();
+        },
+      },
+      {
+        onAgentMessage: (payload) => {
+          appendOrMergeAgentMessage(payload);
+        },
+        onMessageStatus: (uuid, status) => {
+          addDebugTrace('ui', 'message status update', { uuid, status });
+          updateMessageByUuid(uuid, (msg) => ({ ...msg, sendStatus: status }));
+        },
+        onAgentThinking: (isThinking) => {
+          setThinking(isThinking);
+        },
+        onLocalTtsState: (_event, convUuid) => {
+          updateMessageByUuid(convUuid, (msg) => ({ ...msg, audioPlayState: 'idle' }));
+          setCurrentPlayingUuid((prev) => (prev === convUuid ? null : prev));
+        },
+        onErrorText: (text) => {
+          addDebugTrace('ui', 'error text', { text });
+          appendOrMergeAgentMessage({ uuid: createUuid('error'), text });
+        },
+      },
+    );
+
+    binderRef.current = binder;
+
+    const processor = new MessageProcessor(networkClient, binder, (base64Audio, isFinal) => {
+      const jsCode = `window.feedAudioChunk(${JSON.stringify(base64Audio)}, ${isFinal ? 'true' : 'false'}); true;`;
+      webviewRef.current?.injectJavaScript(jsCode);
+    });
+
+    messageProcessorRef.current = processor;
+
+    networkClient.connectWs(username, messageToken, {
+      onAgentMessage: (payload) => {
+        processor.onAgentMessage(payload);
+      },
+      onAgentStateChanged: (state) => {
+        processor.onAgentStateChanged(state);
+      },
+      onError: (errorText) => {
+        binder.emitErrorText(errorText);
+      },
+    });
+
+    return () => {
+      processor.stop();
+      networkClient.disconnectWs();
+      messageProcessorRef.current = null;
+      binderRef.current = null;
+      networkClientRef.current = null;
+    };
+  }, [appendOrMergeAgentMessage, messageToken, updateMessageByUuid, username, webviewRef]);
+
+  const canSend = useMemo(() => inputText.trim().length > 0, [inputText]);
+  const canSendImage = true;
 
   const handleWebViewMessage = useCallback((event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'audio_finished') {
-        if (audioFinishedResolver.current) {
-          audioFinishedResolver.current(); // 唤醒 processAgentResponse
-          audioFinishedResolver.current = null;
-        }
-      } else{
-        console.log('收到 WebView 消息:', data);
+        messageProcessorRef.current?.onServerAudioFinished();
       }
-    } catch (e) {
-      console.error("WebView message parse error", e);
+    } catch {
+      // ignore malformed WebView messages
     }
   }, []);
 
-  const addAgentMessage = useCallback((text: string) => {
-    const agentMessage: ChatMessage = {
-      uuid: Date.now().toString() + Math.random().toString(36).substring(2), // 确保唯一
-      type: 'text',
-      content: text,
-      isUser: false,
-      timestamp: Date.now()
-    };
-    setMessages(prev => [agentMessage, ...prev]);
-    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  const handleInputChange = useCallback((text: string) => {
+    setInputText(text);
+    const trimmedLength = text.trim().length;
+    if (trimmedLength > 0) {
+      void binderRef.current?.sendTyping(trimmedLength);
+    }
   }, []);
 
-  // 处理 thinking 状态
-  useEffect(() => {
-    let timeout: ReturnType<typeof setTimeout>;
-    if (thinking) {
-      // 延迟 150ms 显示加载动画
-      timeout = setTimeout(() => {
-        setMessages(prev => {
-          // 避免重复添加
-          if (prev.some(msg => msg.type === 'loading')) return prev;
-          
-          const loadingMessage: ChatMessage = {
-            uuid: 'loading-indicator',
-            type: 'loading',
-            content: '.', 
-            isUser: false,
-            timestamp: Date.now()
-          };
-          return [loadingMessage, ...prev];
-        });
-      }, 150);
-    } else {
-      // 立即移除加载动画
-      setMessages(prev => prev.filter(msg => msg.type !== 'loading'));
-    }
-
-    return () => clearTimeout(timeout);
-  }, [thinking]);
-
-  const processAgentResponse = useCallback(async (stream: AsyncGenerator<AgentResponse>) => {
-    setThinking(true);
-    try {
-      for await (const response of stream) {
-        setThinking(false);
-        if (response.text)
-          addAgentMessage(response.text);
-        if (response.expression)
-          setExpression(response.expression, webviewRef!);
-        if (response.audio) {
-          // 发送音频数据块
-          webviewRef!.current?.injectJavaScript(`window.feedAudioChunk('${response.audio}', false); true;`);
-        }
-
-        if (response.is_final_package) {
-          // 发送结束标志
-          webviewRef!.current?.injectJavaScript(`window.feedAudioChunk('', true); true;`);
-          await new Promise<void>((resolve) => {
-            audioFinishedResolver.current = resolve;
-          });
-          // 音频播放完，不需要再 setThinking(true) 了，任务结束
-        }
-      }
-    } catch (e) {
-      console.error("Error processing agent response:", e);
-      addAgentMessage("Error: " + e);
-    } finally {
-      setThinking(false);
-      setProcessing(false);
-    }
-    }, [addAgentMessage, webviewRef]);
-
-  // 发送文本消息
-  const handleSendText = async () => {
+  const handleSendText = useCallback(async () => {
     if (!canSend) {
       return;
     }
 
-    const newMessage: ChatMessage = {
-      uuid: Date.now().toString(),
-      type: 'text',
-      content: inputText,
-      isUser: true,
-      timestamp: Date.now()
-    };
-    setMessages([newMessage, ...messages]);
+    const uuid = createUuid('user');
+    const text = inputText;
     setInputText('');
-    Keyboard.dismiss();
+    addDebugTrace('ui', 'send text tapped', { uuid, textLength: text.length });
 
-    // 设置为处理中
-    setProcessing(true);
+    setMessages((prev) => [
+      {
+        uuid,
+        type: 'text',
+        content: text,
+        isUser: true,
+        timestamp: Date.now(),
+        sendStatus: 'waiting',
+      },
+      ...prev,
+    ]);
 
-    // 调用流式聊天接口
-    const stream = textChatStream(inputText);
-    processAgentResponse(stream);
-  };
+    await binderRef.current?.sendText(uuid, text);
+  }, [canSend, inputText]);
 
-  // 发送图片消息
-  const handleSendImage = async () => {
-    if (!canSendImage) {
-      return;
-    }
-    
-    // 1. 调用图片选择器
+  const handleSendImage = useCallback(async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: "images",
-      allowsEditing: false, 
+      mediaTypes: ['images'],
+      allowsEditing: false,
       quality: 1,
     });
 
@@ -159,47 +218,90 @@ export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
 
     const asset = result.assets[0];
     const imageUri = asset.uri;
-    const mimeType = asset.mimeType || 'image/jpeg'; 
+    const mimeType = asset.mimeType || 'image/jpeg';
+    const uuid = createUuid('user-img');
+    addDebugTrace('ui', 'send image selected', { uuid, imageUri, mimeType });
 
-    // 2. 增加 ChatMessage
-    const newMessage: ChatMessage = {
-      uuid: Date.now().toString(),
-      type: 'image',
-      content: imageUri,
-      isUser: true,
-      timestamp: Date.now()
-    };
-    setMessages(prev => [newMessage, ...prev]);
-    
-    // 设置为处理中
-    setProcessing(true);
+    setMessages((prev) => [
+      {
+        uuid,
+        type: 'image',
+        content: imageUri,
+        isUser: true,
+        timestamp: Date.now(),
+        sendStatus: 'waiting',
+      },
+      ...prev,
+    ]);
 
-    // 3. 调用流式聊天接口
-    try {
-        // cast stream to any because Generator yield types might mismatch if define strict
-        const stream = imageChatStream(imageUri, mimeType);
-        // 4. 调用 processAgentResponse
-        await processAgentResponse(stream);
-    } catch (error) {
-        console.error("Image chat failed", error);
-        addAgentMessage("Image upload failed: " + error);
-        setProcessing(false);
-    }
-  };
+    await binderRef.current?.sendImage(uuid, imageUri, mimeType);
+  }, []);
+
+  const handleToggleAgentAudio = useCallback(
+    async (uuid: string) => {
+      addDebugTrace('audio-ui', 'tap audio button', { uuid, currentPlayingUuid });
+      const target = messages.find((msg) => msg.uuid === uuid && !msg.isUser);
+      if (!target || !target.audioAvailable) {
+        addDebugTrace('audio-ui', 'tap ignored: target missing or audio unavailable', {
+          uuid,
+          found: !!target,
+          audioAvailable: target?.audioAvailable,
+        });
+        return;
+      }
+
+      addDebugTrace('audio-ui', 'audio target resolved', {
+        uuid,
+        audioLocalUri: target.audioLocalUri,
+        audioAvailable: target.audioAvailable,
+      });
+
+      if (target.audioLocalUri) {
+        messageProcessorRef.current?.setLocalAudioPath(uuid, target.audioLocalUri);
+      }
+
+      if (currentPlayingUuid === uuid) {
+        await binderRef.current?.stopLocalTts();
+        return;
+      }
+
+      const ok = await binderRef.current?.playLocalTts(uuid);
+      if (!ok) {
+        addDebugTrace('audio-ui', 'playLocalTts returned false', { uuid });
+        return;
+      }
+
+      if (currentPlayingUuid) {
+        updateMessageByUuid(currentPlayingUuid, (msg) => ({ ...msg, audioPlayState: 'idle' }));
+      }
+
+      updateMessageByUuid(uuid, (msg) => ({ ...msg, audioPlayState: 'playing' }));
+      setCurrentPlayingUuid(uuid);
+    },
+    [currentPlayingUuid, messages, updateMessageByUuid],
+  );
 
   const addHistoryMessage = useCallback((newMessages: ChatMessage[]) => {
-    setMessages(prev => {
-      const nowScrollIndex = prev.length - 1; // 当前最新消息的索引
-      // 将newMessages倒序添加到前面，这样FlatList才能正确显示历史消息
+    for (const msg of newMessages) {
+      if (!msg.isUser && msg.audioAvailable && msg.audioLocalUri) {
+        messageProcessorRef.current?.setLocalAudioPath(msg.uuid, msg.audioLocalUri);
+      }
+    }
 
-      const next = [...prev, ...newMessages.reverse()]; // inverted order
-      // 恢复之前的滚动位置
+    setMessages((prev) => {
+      const nowScrollIndex = prev.length - 1;
+      const normalized = newMessages.map((msg) => ({
+        ...msg,
+        sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
+        audioPlayState: msg.audioPlayState || 'idle',
+      }));
+      const next = [...prev, ...normalized.reverse()];
+
       if (nowScrollIndex >= 0) {
         setTimeout(() => {
           flatListRef.current?.scrollToIndex({ index: nowScrollIndex, animated: false });
         }, 10);
       } else {
-        // 如果之前没有消息了，直接滚动到最后
         setTimeout(() => {
           flatListRef.current?.scrollToOffset({ offset: 0, animated: false });
         }, 10);
@@ -209,19 +311,17 @@ export const useChatLogic = (webviewRef?: React.RefObject<WebView | null>) => {
   }, []);
 
   return {
-    // 状态
     inputText,
-    processing,
     messages,
     flatListRef,
     canSend,
     canSendImage,
-
-    // 方法
-    setInputText,
+    thinking,
+    setInputText: handleInputChange,
     addHistoryMessage,
     handleSendText,
     handleSendImage,
-    handleWebViewMessage
+    handleWebViewMessage,
+    handleToggleAgentAudio,
   };
 };

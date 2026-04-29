@@ -11,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface LoginScreenProps {
   onLogin: (username: string, password: string, autoLogin: boolean) => Promise<{ success: boolean; message: string }>;
-  onRegister: (username: string, password: string, inviteCode: string) => Promise<{ success: boolean; message: string }>;
+  onRegister: (username: string, password: string, confirmPassword: string, inviteCode: string) => Promise<{ success: boolean; message: string }>;
 }
 
 type TabType = 'login' | 'register';
@@ -29,6 +29,7 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
   // 注册表单
   const [regUsername, setRegUsername] = useState('');
   const [regPassword, setRegPassword] = useState('');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
 
   const handleLogin = async () => {
@@ -43,8 +44,12 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
 
   const handleRegister = async () => {
     Keyboard.dismiss();
+    if (regPassword !== regConfirmPassword) {
+      Alert.alert('注册失败', '两次输入的密码不一致');
+      return;
+    }
     setLoading(true);
-    const result = await onRegister(regUsername, regPassword, inviteCode);
+    const result = await onRegister(regUsername, regPassword, regConfirmPassword, inviteCode);
     setLoading(false);
     if (result.success) {
       Alert.alert('注册成功', result.message, [
@@ -68,7 +73,7 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
     >
       <View style={[styles.container, { paddingTop: insets.top + 40, paddingBottom: insets.bottom }]}>
         {/* 标题 */}
-        <Text style={styles.title}>小洛聊天室</Text>
+        <Text style={styles.title}>AI小洛</Text>
         <Text style={styles.subtitle}>Chat with LuoTianyi</Text>
 
         {/* Tab 切换 */}
@@ -162,6 +167,16 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
                 placeholderTextColor="#aaa"
                 value={regPassword}
                 onChangeText={setRegPassword}
+                secureTextEntry
+              />
+
+              <Text style={styles.label}>确认密码</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="请再次输入密码"
+                placeholderTextColor="#aaa"
+                value={regConfirmPassword}
+                onChangeText={setRegConfirmPassword}
                 secureTextEntry
               />
 

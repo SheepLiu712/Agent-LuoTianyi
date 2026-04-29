@@ -29,6 +29,14 @@ def timestamp_to_elapsed_time(timestamp: str) -> str:
             return past_time.strftime("%Y-%m-%d")
     except:
         return timestamp
+    
+def timestamp_to_date(timestamp: str) -> str:
+    try:
+        time_format = "%Y-%m-%d %H:%M:%S"
+        past_time = datetime.strptime(timestamp, time_format)
+        return past_time.strftime("%Y-%m-%d")
+    except:
+        return timestamp
 
 @dataclass
 class ConversationItem:
@@ -65,3 +73,10 @@ class KnowledgeItem:
         self.uuid = uuid
         self.content = content
         self.metadata = metadata
+
+@dataclass
+class SpeakingCommand:
+    type: str # 'sentence' | 'song'
+    text: str # 当type为'sentence'时是要说的文本
+    song_name: str = "" # 仅当type为'song'时有效
+    song_segment: str = "" # 仅当type为'song'时有效
