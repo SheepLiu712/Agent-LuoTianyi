@@ -115,6 +115,9 @@ class SingingManager:
         if not safe_song_name in self.all_songs:
             return []
         song_metadata: SongMetadata = self.all_songs[safe_song_name]
+        if not song_metadata.segments:
+            self.add_wished_song(safe_song_name)
+            return []
         return [segment.description for segment in song_metadata.segments]
 
     def get_songs_can_sing(self, max_song_num: int = 5) -> Dict[str, Any]:
@@ -129,7 +132,7 @@ class SingingManager:
     
     def add_wished_song(self, song_name:str) -> bool:
         meta_data_path = self.resource_path + "/metadata.json"
-        with open(meta_data_path, "r") as f:
+        with open(meta_data_path, "r", encoding="utf-8") as f:
             meta_data = json.load(f)
 
         wished_song = meta_data.get("wished_songs",[])
@@ -137,7 +140,7 @@ class SingingManager:
             return False
         wished_song.append(song_name)
         meta_data["wished_songs"] = wished_song
-        with open(meta_data_path, "w") as f:
+        with open(meta_data_path, "w", encoding="utf-8") as f:
             json.dump(meta_data, f, ensure_ascii=False, indent=4)
         return True
     

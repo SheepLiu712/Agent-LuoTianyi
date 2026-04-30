@@ -180,6 +180,15 @@ class TopicReplier:
                     special_hits.append(f"可唱歌曲推荐：{songs_json}")
                 except Exception as e:
                     self.logger.error(f"Failed to get songs can sing: {e}")
+            elif constraint.startswith("/CanISing"):
+                try:
+                    song_name = constraint[len("/CanISing"):].strip()
+                    if song_name:
+                        singing_manager = self.service_hub.agent.singing_manager
+                        can_sing = await singing_manager.can_i_sing_song_llm(song_name)
+                        special_hits.append(can_sing)
+                except Exception as e:
+                    self.logger.error(f"Failed to get can I sing for {song_name}: {e}")
 
             else:
                 regular_constraints.append(constraint)
