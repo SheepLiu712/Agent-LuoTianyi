@@ -1,3 +1,4 @@
+import { AppState } from 'react-native';
 import { server_config } from '../config';
 import { AgentMessagePayload } from '../types/chat';
 import { addDebugTrace } from './debug_trace';
@@ -37,6 +38,10 @@ export class WebSocketTransport {
   private pingId = 0;
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectDueAt: number | null = null;
+  private reconnectDelayMs: number | null = null;
+  private reconnectPausedForBackground = false;
+  private appStateSubscription: { remove: () => void } | null = null;
   private isStopped = true;
   private isConnected = false;
   private isAuthed = false;
@@ -47,9 +52,56 @@ export class WebSocketTransport {
     this.callbacks = callbacks;
   }
 
+  private isBackgrounded() {
+    return AppState.currentState !== 'active';
+  }
+
+  private describeWebSocketEvent(event: unknown) {
+    if (!event || typeof event !== 'object') {
+      return { rawType: typeof event, rawValue: String(event) };
+    }
+
+    const eventRecord = event as Record<string, unknown>;
+    const target = eventRecord.target as Record<string, unknown> | undefined;
+    const currentTarget = eventRecord.currentTarget as Record<string, unknown> | undefined;
+
+    return {
+      eventType: typeof eventRecord.type === 'string' ? eventRecord.type : undefined,
+      message: typeof eventRecord.message === 'string' ? eventRecord.message : undefined,
+      code: typeof eventRecord.code === 'number' ? eventRecord.code : undefined,
+      reason: typeof eventRecord.reason === 'string' ? eventRecord.reason : undefined,
+      wasClean: typeof eventRecord.wasClean === 'boolean' ? eventRecord.wasClean : undefined,
+      readyState: typeof target?.readyState === 'number' ? target.readyState : undefined,
+      targetUrl: typeof target?.url === 'string' ? target.url : undefined,
+      currentTargetUrl: typeof currentTarget?.url === 'string' ? currentTarget.url : undefined,
+      keys: Object.keys(eventRecord),
+    };
+  }
+
+  private handleAppStateChange = (nextAppState: string) => {
+    addDebugTrace('ws', 'app state change', {
+      nextAppState,
+      isConnected: this.isConnected,
+      isAuthed: this.isAuthed,
+      hasReconnectTimer: !!this.reconnectTimer,
+      reconnectPausedForBackground: this.reconnectPausedForBackground,
+      reconnectDueAt: this.reconnectDueAt,
+    });
+
+    if (nextAppState === 'active') {
+      this.resumeReconnectIfNeeded();
+      return;
+    }
+
+    this.pauseReconnectIfNeeded();
+  };
+
   start() {
     this.isStopped = false;
     addDebugTrace('ws', 'start transport', { username: this.username });
+    if (!this.appStateSubscription) {
+      this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
+    }
     this.connect();
   }
 
@@ -58,12 +110,16 @@ export class WebSocketTransport {
     this.isConnected = false;
     this.isAuthed = false;
     addDebugTrace('ws', 'stop transport');
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.clearReconnectTimer();
     this.stopHeartbeat();
     this.rejectAllWaiters('websocket stopped');
+    this.reconnectPausedForBackground = false;
+    this.reconnectDueAt = null;
+    this.reconnectDelayMs = null;
+    if (this.appStateSubscription) {
+      this.appStateSubscription.remove();
+      this.appStateSubscription = null;
+    }
     if (this.ws) {
       this.ws.onopen = null;
       this.ws.onclose = null;
@@ -118,28 +174,104 @@ export class WebSocketTransport {
       this.handleServerMessage(event.data);
     };
 
-    this.ws.onerror = () => {
-      addDebugTrace('ws', 'onerror');
+    this.ws.onerror = (event) => {
+      const detail = this.describeWebSocketEvent(event);
+      addDebugTrace('ws', 'onerror', detail);
+      if (this.isBackgrounded()) {
+        addDebugTrace('ws', 'onerror suppressed while backgrounded', detail);
+        return;
+      }
       this.callbacks.onError('WebSocket 连接发生错误。');
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
+      const detail = this.describeWebSocketEvent(event);
+      addDebugTrace('ws', 'onclose', detail);
       this.isConnected = false;
       this.isAuthed = false;
       this.stopHeartbeat();
-      if (!this.isStopped) {
-        this.scheduleReconnect();
+      if (this.isStopped) {
+        return;
       }
+
+      if (this.isBackgrounded()) {
+        this.deferReconnectWhileBackgrounded();
+        return;
+      }
+
+      this.scheduleReconnect();
     };
+  }
+
+  private deferReconnectWhileBackgrounded() {
+    const delay = Math.min(2 ** Math.max(this.reconnectAttempts, 1), 30) * 1000;
+    this.reconnectAttempts += 1;
+    this.reconnectPausedForBackground = true;
+    this.reconnectDelayMs = delay;
+    this.reconnectDueAt = Date.now() + delay;
+    addDebugTrace('ws', 'defer reconnect while backgrounded', {
+      delayMs: delay,
+      reconnectAttempts: this.reconnectAttempts,
+      reconnectDueAt: this.reconnectDueAt,
+    });
+  }
+
+  private clearReconnectTimer() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+  }
+
+  private armReconnectTimer(delayMs: number) {
+    this.clearReconnectTimer();
+    this.reconnectPausedForBackground = false;
+    this.reconnectDelayMs = delayMs;
+    this.reconnectDueAt = Date.now() + delayMs;
+    addDebugTrace('ws', 'arm reconnect timer', {
+      delayMs,
+      reconnectAttempts: this.reconnectAttempts,
+      reconnectDueAt: this.reconnectDueAt,
+    });
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.reconnectDueAt = null;
+      this.reconnectDelayMs = null;
+      this.connect();
+    }, delayMs);
   }
 
   private scheduleReconnect() {
     const delay = Math.min(2 ** Math.max(this.reconnectAttempts, 1), 30) * 1000;
     this.reconnectAttempts += 1;
-    addDebugTrace('ws', 'schedule reconnect', { delayMs: delay, reconnectAttempts: this.reconnectAttempts });
-    this.reconnectTimer = setTimeout(() => {
-      this.connect();
-    }, delay);
+    this.armReconnectTimer(delay);
+  }
+
+  private pauseReconnectIfNeeded() {
+    if (!this.reconnectTimer) {
+      return;
+    }
+
+    const remainingMs = Math.max((this.reconnectDueAt || Date.now()) - Date.now(), 0);
+    this.clearReconnectTimer();
+    this.reconnectPausedForBackground = true;
+    this.reconnectDelayMs = remainingMs;
+    this.reconnectDueAt = Date.now() + remainingMs;
+    addDebugTrace('ws', 'pause reconnect while backgrounded', {
+      remainingMs,
+      reconnectAttempts: this.reconnectAttempts,
+    });
+  }
+
+  private resumeReconnectIfNeeded() {
+    if (!this.isStopped && this.reconnectPausedForBackground && !this.reconnectTimer) {
+      const delayMs = Math.max(this.reconnectDelayMs ?? 0, 0);
+      addDebugTrace('ws', 'resume reconnect on foreground', {
+        delayMs,
+        reconnectAttempts: this.reconnectAttempts,
+      });
+      this.armReconnectTimer(delayMs);
+    }
   }
 
   private buildWsUrl(baseUrl: string) {

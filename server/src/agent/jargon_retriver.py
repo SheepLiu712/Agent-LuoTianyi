@@ -17,7 +17,7 @@ class SongEntityLinker:
         self._load_keywords_from_file()
         
         # 2. 定义触发动词（激活信号）
-        self.trigger_verbs = {"听", "唱", "点", "循环", "安利", "写", "作曲", "调教"}
+        self.trigger_verbs = {"听", "唱", "点", "循环", "安利", "写", "作曲", "调教", "歌"}
 
     def extract_and_verify(self, user_input: str) -> List[str]:
         '''

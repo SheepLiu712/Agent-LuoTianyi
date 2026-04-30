@@ -321,7 +321,7 @@ export class MessageProcessor {
     }
   }
 
-  private waitForServerAudioFinished(timeoutMs = 30000) {
+  private waitForServerAudioFinished(timeoutMs = 90000) {
     if (!this.serverAudioPlaying) {
       return Promise.resolve();
     }

@@ -24,7 +24,10 @@ def main() -> None:
         users = session.query(User).order_by(User.username.asc()).all()
         print(f"Found {len(users)} users.")
         for index, user in enumerate(users, start=1):
+            # if not user.username == "Dpon":
+            #     continue
             print(f"\n[{index}] username: {user.username}")
+            print(f"nickname: {user.nickname}")
             print(f"last_login: {_format_datetime(user.last_login)}")
             print(f"description: {user.description or ''}")
             print(f"all_memory_count: {user.all_memory_count if user.all_memory_count is not None else 0}")
