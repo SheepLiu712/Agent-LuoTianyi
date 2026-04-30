@@ -5,7 +5,7 @@ import Index from './index';
 import LoginScreen from './login';
 
 export default function RootLayout() {
-  const { isLoggedIn, isLoading, login, register } = useAuth();
+  const { isLoggedIn, isLoading, login, register, logout } = useAuth();
 
   // 正在检查自动登录状态时，显示加载画面
   if (isLoading) {
@@ -30,7 +30,7 @@ export default function RootLayout() {
   // 已登录 → 显示主界面
   return (
     <SafeAreaProvider>
-      <Index />
+      <Index onLogout={logout} />
     </SafeAreaProvider>
   );
 }

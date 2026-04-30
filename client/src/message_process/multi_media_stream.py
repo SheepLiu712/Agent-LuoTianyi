@@ -68,7 +68,7 @@ class MultiMediaStream:
         self.logger = get_logger(__class__.__name__)
         self.model = None
         self.audio_queue_in = multiprocessing.Queue()
-        self.audio_queue_out = multiprocessing.Queue()
+        self.audio_queue_out = multiprocessing.Queue(maxsize=1)
         self.audio_process = multiprocessing.Process(
             target=run_audio_player_worker, 
             args=(self.audio_queue_in, self.audio_queue_out),
@@ -313,12 +313,19 @@ class MultiMediaStream:
         self.audio_queue_in.put({"cmd": "append", "data": audio_data})
 
     def _close_audio_stream(self, wait_audio_finish: bool):
-        if wait_audio_finish and self._mouth_thread and self._mouth_thread.is_alive():
+        if wait_audio_finish:
+            # 先保证audio_queue_out为空：
+            while not self.audio_queue_out.empty():
+                try:
+                    self.audio_queue_out.get_nowait()
+                except Exception:
+                    break
+            # 再发结束指令，并等待响应，确保之前的音频数据已经播放完成
             self.audio_queue_in.put({"cmd": "wait_finish"})
             try:
-                _ = self.audio_queue_out.get(timeout=15)
+                _ = self.audio_queue_out.get(timeout=120)  # 等待播放完成的信号
             except Exception:
-                pass
+                self.logger.warning("Timeout waiting for audio to finish, forcing stop.")
 
         if self._stop_mouth_event:
             self._stop_mouth_event.set()

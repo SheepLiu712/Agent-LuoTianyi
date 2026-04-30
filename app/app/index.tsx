@@ -21,7 +21,7 @@ import { useHistoryLogic } from "../hooks/useHistoryLogic";
 import { clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
 
 
-export default function Index() {
+export default function Index({ onLogout }: { onLogout?: () => void }) {
   const { username, message_token } = auth;
   const insets = useSafeAreaInsets();
   const { height: screenHeight } = useWindowDimensions();
@@ -173,6 +173,19 @@ export default function Index() {
           }}
         />
 
+        {/* 登出按钮 */}
+        {onLogout && (
+          <TouchableOpacity 
+            style={styles.logoutButton} 
+            onPress={onLogout}
+          >
+            <Image 
+              source={require('../assets/images/logout.png')} 
+              style={styles.logoutImage} 
+            />
+          </TouchableOpacity>
+        )}
+
         {thinking ? (
           <View style={styles.thinkingBubble}>
             <Image
@@ -297,6 +310,23 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     zIndex: 10,
     overflow: 'hidden',
+  },
+  logoutButton: {
+    position: 'absolute',
+    left: 10,
+    top: 10,
+    width: 32,
+    height: 32,
+    zIndex: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 16,
+  },
+  logoutImage: {
+    width: 20,
+    height: 20,
+    resizeMode: 'contain',
   },
   thinkingBubble: {
     position: 'absolute',

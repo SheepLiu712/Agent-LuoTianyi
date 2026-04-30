@@ -180,12 +180,16 @@ export function useAuth() {
   }, []);
 
   const logout = useCallback(async () => {
-    setAuthState(prev => ({
-      ...prev,
-      isLoggedIn: false,
-    }));
-    auth.username = "";
-    auth.message_token = "";
+    try {
+      await AsyncStorage.removeItem(AUTO_LOGIN_KEY);
+      await AsyncStorage.removeItem(USERNAME_KEY);
+      await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
+      auth.username = '';
+      auth.message_token = '';
+      setAuthState(prev => ({ ...prev, isLoggedIn: false }));
+    } catch (e) {
+      console.error('退出登录失败:', e);
+    }
   }, []);
 
   return {

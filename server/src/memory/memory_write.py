@@ -138,7 +138,7 @@ class MemoryWriter:
         if not text:
             return False
 
-        threshold = float(self.config.get("user_memory_dedup_threshold", 0.82))
+        threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
         is_dup = await self._has_similar_user_memory(vector_store, user_id, text, threshold)
         if is_dup:
             logger.debug(f"Skip duplicate user_memory for user {user_id}: {text[:50]}")

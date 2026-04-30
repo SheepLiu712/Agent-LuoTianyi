@@ -150,7 +150,7 @@ class LuoTianyiAgent:
         self,
         user_id: str,
         queries: List[str],
-        similarity_threshold: float = 0.62,
+        similarity_threshold: float = 0.60,
         k: int = 3,
     ) -> List[str]:
         """供 TopicReplier 调用的记忆检索接口。"""
