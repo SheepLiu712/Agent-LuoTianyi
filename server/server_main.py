@@ -264,7 +264,9 @@ async def get_history(
     message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
     if not message_token_valid:
         raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-    return await agent.handle_history_request(user_uuid, request.count, request.end_index)
+    # Cap count to prevent excessive reads
+    capped_count = min(max(1, request.count), 200)
+    return await agent.handle_history_request(user_uuid, capped_count, request.end_index)
 
 
 @app.post("/get_image")

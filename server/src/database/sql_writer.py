@@ -1,5 +1,9 @@
-import threading
-from contextlib import contextmanager
+"""
+SQLite WAL mode handles concurrent reads + serialized writes internally.
+The Python-level serialization via RLock was redundant and caused
+unnecessary contention between users. Removed.
+"""
+
 from typing import Callable, TypeVar
 
 
@@ -7,19 +11,10 @@ T = TypeVar("T")
 
 
 class SQLWriter:
-    """Single-writer coordinator for SQL writes inside process."""
-
-    def __init__(self):
-        self._lock = threading.RLock()
-
-    @contextmanager
-    def guard(self):
-        with self._lock:
-            yield
+    """No-op coordinator. SQLite's own WAL locking is sufficient."""
 
     def run(self, fn: Callable[[], T]) -> T:
-        with self._lock:
-            return fn()
+        return fn()
 
 
 _sql_writer = SQLWriter()

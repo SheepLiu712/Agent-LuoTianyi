@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, AsyncGenerator
 
 from ..utils.logger import get_logger
 import base64
@@ -10,6 +10,19 @@ from typing import Callable, Awaitable
 
 if TYPE_CHECKING:
     from ..agent.luotianyi_agent import LuoTianyiAgent
+
+
+_sentinel = object()
+
+
+async def _iter_sync_gen_in_executor(gen, executor=None):
+    """Wrap a sync generator as an async generator by driving it in a thread."""
+    loop = asyncio.get_event_loop()
+    while True:
+        chunk = await loop.run_in_executor(executor, next, gen, _sentinel)
+        if chunk is _sentinel:
+            break
+        yield chunk
 
 
 @dataclass
@@ -45,45 +58,50 @@ class GlobalSpeakingWorker:
         while True:
             job = await self.queue.get()
             try:
-                audio = None
-                # 生成ChatResponse并通过ChatStream发送给前端
-                
                 if isinstance(job.job_content, OneSentenceChat):
                     text = job.job_content.content
                     expression = job.job_content.expression
-                    generator = self.agent.tts_say_stream(text, job.job_content.tone)
+                    # Drive the sync TTS generator in a thread so the event loop
+                    # can service other tasks between chunks.
+                    sync_gen = self.agent.tts_say_stream(text, job.job_content.tone)
                     is_first = True
-                    async for audio_chunk in generator:
-                        chunk_text = text if is_first else ""  # 只有第一个chunk携带文字，后续chunk的text字段置空
+                    async for audio_chunk in _iter_sync_gen_in_executor(sync_gen):
+                        chunk_text = text if is_first else ""
                         is_first = False
-                        resp = ChatResponse(uuid=job.job_content.uuid, audio=audio_chunk, is_final_package=False, text=chunk_text, expression=expression)
+                        resp = ChatResponse(
+                            uuid=job.job_content.uuid, audio=audio_chunk,
+                            is_final_package=False, text=chunk_text, expression=expression,
+                        )
                         await job.send_reply_callback(resp)
                     final_resp = ChatResponse(
                         uuid=job.job_content.uuid,
-                        audio="",
-                        is_final_package=True,
-                        text="",
-                        expression="",
-                    )  # 发送一个空的 final package，通知前端本轮说话结束
+                        audio="", is_final_package=True,
+                        text="", expression="",
+                    )
                     await job.send_reply_callback(final_resp)
 
                 elif isinstance(job.job_content, SongSegmentChat):
                     text = f"(唱了《{job.job_content.song}》)\n{job.job_content.lyrics}"
                     expression = "唱歌"
-                    audio = self.agent.sing(job.job_content.song, job.job_content.segment) # bytes
-                    CHUNK_SIZE = 48 * 1024 # 48KB
+                    audio = await asyncio.to_thread(
+                        self.agent.sing, job.job_content.song, job.job_content.segment
+                    )
+                    CHUNK_SIZE = 48 * 1024
                     for i in range(0, len(audio), CHUNK_SIZE):
                         chunk = audio[i:i+CHUNK_SIZE]
                         chunk_base64 = base64.b64encode(chunk).decode("utf-8")
-                        chunk_text = "" if i > 0 else text # 只有第一个chunk携带文字，后续chunk的text字段置空
+                        chunk_text = "" if i > 0 else text
                         is_final_package = (i + CHUNK_SIZE) >= len(audio)
-                        chunk_resp = ChatResponse(uuid=job.job_content.uuid, audio=chunk_base64, is_final_package=is_final_package, text=chunk_text, expression=expression)
+                        chunk_resp = ChatResponse(
+                            uuid=job.job_content.uuid, audio=chunk_base64,
+                            is_final_package=is_final_package, text=chunk_text,
+                            expression=expression,
+                        )
                         await job.send_reply_callback(chunk_resp)
                 else:
                     self.logger.warning(f"Unsupported speaking job type: {type(job.job_content)}")
                     continue
-                
-                
+
             except Exception as e:
                 self.logger.error(f"Error processing speaking job: {e}")
                 continue

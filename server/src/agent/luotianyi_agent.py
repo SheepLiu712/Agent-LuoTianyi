@@ -40,11 +40,17 @@ if TYPE_CHECKING:
     
 
 
+_expression_cache: Dict[str, List[str]] = {}
+
 def get_available_expression(config_path: str = "config/live2d_interface_config.json") -> List[str]:
+    if config_path in _expression_cache:
+        return _expression_cache[config_path]
     with open(config_path, "r", encoding="utf-8") as f:
         config: Dict = json.load(f)
     expressions: Dict = config.get("expression_projection", {})
-    return list(expressions.keys())
+    result = list(expressions.keys())
+    _expression_cache[config_path] = result
+    return result
 
 
 @dataclass
@@ -266,12 +272,14 @@ class LuoTianyiAgent:
         memory_hits: Optional[List[str]] = None,
         fact_hits: Optional[List[str]] = None,
         sing_plan: Optional[Tuple[str, str]] = None,
+        conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
     ) -> List[OneResponseLine]:
         """供 TopicReplier 调用：按话题生成分段回复。"""
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
         try:
-            conversation_history = await self.conversation_manager.get_context(db, redis_client, user_id)
+            if conversation_history is None:
+                conversation_history = await self.conversation_manager.get_context(db, redis_client, user_id)
             user = db.query(User).filter(User.uuid == user_id).first()
             user_nickname = user.nickname if user and user.nickname else "你"
             user_description = user.description if user and user.description else ""
@@ -293,13 +301,14 @@ class LuoTianyiAgent:
         user_id: str,
         current_dialogue: str,
         related_memories: Optional[List[str]] = None,
+        conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
     ) -> None:
         """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
         vector_store = self._runtime_hub.vector_store
         try:
-            history = await self.conversation_manager.get_context(db, redis_client, user_id)
+            history = conversation_history or await self.conversation_manager.get_context(db, redis_client, user_id)
             await self.memory_manager.post_process_interaction(
                 db=db,
                 redis=redis_client,
