@@ -675,25 +675,53 @@ class ChatWidget(QWidget):
         print("Preferences manager set in ChatWidget")
     
     def check_important_dates(self):
-        """检查今天是否有重要日期，如果有则主动发送消息"""
+        """检查今天是否有重要日期，如果有则让AI自然地提及"""
         if not self.preferences_manager:
             return
         
         try:
+            # 如果是新的一天，清空已提醒记录
+            import datetime
+            today = datetime.datetime.now().date()
+            if hasattr(self, '_last_check_date') and self._last_check_date != today:
+                if hasattr(self, '_reminded_today'):
+                    self._reminded_today.clear()
+            self._last_check_date = today
+            
+            if not hasattr(self, '_reminded_today'):
+                self._reminded_today = set()
+            
             # 检查今天是否有重要日期
             matched_dates = self.preferences_manager.check_today_dates()
             
             if matched_dates:
                 for date_info in matched_dates:
-                    name = date_info.get("name", "重要日期")
-                    message = date_info.get("message", f"今天是{name}！")
+                    date_id = date_info.get("id")
+                    # 避免同一天重复提醒
+                    if date_id in self._reminded_today:
+                        continue
                     
-                    # 显示AI主动发送的消息
-                    import time
-                    fake_uuid = f"reminder_{int(time.time())}"
-                    self.on_agent_response(fake_uuid, message)
-                    print(f"Triggered reminder for: {name}")
-        
+                    name = date_info.get("name", "重要日期")
+                    date_type = date_info.get("type", "其他")
+                    
+                    # 构造更自然的提示，让LLM生成自然的回复
+                    if date_type == "生日":
+                        prompt = f"今天是{name}的{date_type}，请你自然地提起这个话题，表达你的祝福或关心。不要生硬地说'今天是XXX'，而是以聊天的方式自然地提及。"
+                    elif date_type == "纪念日":
+                        prompt = f"今天是{name}，这是一个特别的日子。请你以自然的方式提及这个日子，表达你的想法或回忆。"
+                    elif date_type == "节日":
+                        prompt = f"今天是{name}，请你以轻松自然的方式提及这个节日，可以聊聊相关的习俗、庆祝方式等。"
+                    else:
+                        prompt = f"今天是{name}。请你在回复中自然地提及这个日子，但不要生硬地直接说'今天是XXX'。"
+                    
+                    # 发送消息到后端，让AI生成自然回复
+                    if hasattr(self.agent, 'send_text_proactive'):
+                        self.agent.send_text_proactive(prompt)
+                        self._reminded_today.add(date_id)
+                        print(f"已触发AI自然提及: {name}")
+                    else:
+                        print(f"警告: agent 没有 send_text_proactive 方法")
+                    
         except Exception as e:
             print(f"检查重要日期失败: {e}")
     

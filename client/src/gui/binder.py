@@ -156,6 +156,19 @@ class AgentBinder(QObject):
             thread = threading.Thread(target=self._fetch_history, args=(count, end_index))
             thread.daemon = True
             thread.start()
+    
+    def send_text_proactive(self, text: str) -> str:
+        """
+        程序化地发送文本消息（用于主动提醒等场景）
+        不需要 UI 气泡，只发送消息并让 AI 响应
+        :param text: 要发送的文本
+        :return: 消息 ID
+        """
+        if self.send_text_callback:
+            msg_id = self.send_text_callback(text)
+            # 不添加到 msg_to_bubble，因为这是程序化发送的消息
+            return msg_id
+        return None
 
     def _scheduled_start_thinking(self):
         """Legacy hook kept for compatibility; thinking bubble is no longer auto-driven."""
