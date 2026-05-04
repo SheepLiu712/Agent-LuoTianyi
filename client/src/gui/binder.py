@@ -16,6 +16,7 @@ class AgentBinder(QObject):
     history_signal = Signal(list, int)  # history_list, current_top_index
     agent_thinking_signal = Signal(bool) # 是否正在思考中
     local_tts_state_signal = Signal(str, str) # event, conv_uuid
+    date_detected_signal = Signal(dict) # 检测到重要日期
 
     def __init__(
         self,
@@ -95,6 +96,11 @@ class AgentBinder(QObject):
 
     def emit_local_tts_state_signal(self, event: str, conv_uuid: str):
         self.local_tts_state_signal.emit(event, conv_uuid)
+
+    def emit_date_detected_signal(self, date_info: dict):
+        """转发日期检测信号到UI层"""
+        self.logger.info(f"转发日期检测信号: {date_info}")
+        self.date_detected_signal.emit(date_info)
 
     def on_auto_login(self, username: str, token: str) -> bool:
         if self.auto_login_callback:

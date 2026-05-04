@@ -82,6 +82,21 @@ class ChatStream:
                 await self.service_hub.activity_maker.on_user_message(self.user_uuid)
                 await ingress_message(self.service_hub, self.user_uuid, event)  # 预处理
                 await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event)  # 入库
+                
+                # 检查是否检测到重要日期，如果是则通知前端
+                detected_date = event.payload.get("detected_date")
+                if detected_date and self.ws_connection:
+                    try:
+                        import time
+                        notification = {
+                            "type": WSEventType.DATE_DETECTED.value,
+                            "ts": int(time.time() * 1000),
+                            "payload": detected_date
+                        }
+                        await self.ws_connection.websocket.send_json(notification)
+                        self.logger.info(f"已通知前端检测到重要日期: {detected_date}")
+                    except Exception as e:
+                        self.logger.error(f"发送日期检测通知失败: {e}")
             else:
                 self.logger.warning("Service hub or user uuid is missing, skip user message preprocessing")
 

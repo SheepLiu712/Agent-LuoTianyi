@@ -49,7 +49,7 @@ class MessageProcessor:
         self.logger = get_logger("MessageProcessor")
 
         # 设置消息处理器发送消息的网络客户端接口，以及将消息处理器接收消息的函数传入网络客户端，以便网络客户端能将WS消息传入消息处理器
-        network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state)
+        network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state, self.on_date_detected)
         self.send_text_func:Callable[[str], dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
         self.send_typing_func:Callable[[int], dict] = network_client.send_typing
@@ -57,6 +57,7 @@ class MessageProcessor:
 
         self.processing_uuid = None
         self.processing_audio: bytearray = bytearray()
+        self.date_detected_signal: Callable[[dict], None] | None = None  # 检测到重要日期的信号
 
     def start(self):
         self._listener_thread.start()
@@ -225,15 +226,28 @@ class MessageProcessor:
         update_bubble_signal: Callable[[str, str], None],
         agent_thinking_signal: Callable[[str], None],
         local_tts_state_signal: Callable[[str, str], None] | None = None,
+        date_detected_signal: Callable[[dict], None] | None = None,
     ):
         self.response_signal = response_signal
         self.update_bubble_signal = update_bubble_signal
         self.agent_thinking_signal = agent_thinking_signal
         self.local_tts_state_signal = local_tts_state_signal
+        self.date_detected_signal = date_detected_signal
 
     def _on_local_tts_state(self, event: str, conv_uuid: str):
         if self.local_tts_state_signal:
             self.local_tts_state_signal(event, conv_uuid)
+
+    def on_date_detected(self, payload: dict) -> None:
+        """处理后端检测到重要日期的事件"""
+        self.logger.info(f"收到日期检测事件: {payload}")
+        if self.date_detected_signal:
+            try:
+                self.date_detected_signal(payload)
+            except Exception as e:
+                self.logger.error(f"触发日期检测信号失败: {e}")
+        else:
+            self.logger.warning("date_detected_signal 未设置，无法通知UI层")
 
     def set_model(self, model: Live2dModel):
         self.model = model

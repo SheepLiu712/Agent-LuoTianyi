@@ -72,6 +72,7 @@ if __name__ == "__main__":
         update_bubble_signal=binder.emit_update_signal,
         agent_thinking_signal=binder.emit_agent_thinking_signal,
         local_tts_state_signal=binder.emit_local_tts_state_signal,
+        date_detected_signal=binder.emit_date_detected_signal,
     ) 
 
     
@@ -84,9 +85,12 @@ if __name__ == "__main__":
                 raise SystemExit("Login cancelled")
         print(f"Logged in as {network_client.user_id}")
         window = MainWindow(config["gui"], config["live2d"], binder)
-        # 设置用户偏好管理器
+        # 设置用户偏好管理器和binder
         if hasattr(window.chat_widget, 'set_preferences_manager'):
             window.chat_widget.set_preferences_manager(preferences_manager)
+        # 连接日期检测信号
+        if hasattr(window.chat_widget, 'on_date_detected'):
+            binder.date_detected_signal.connect(window.chat_widget.on_date_detected)
         window.show()
         ret = app.exec()
     except SystemExit as e:

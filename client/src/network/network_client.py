@@ -133,8 +133,8 @@ class NetworkClient:
             return [], -1
 
 
-    def network_set_message_listener(self, listener: Callable[[dict], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
-        self.ws_transport.set_agent_message_listener(listener, agent_state_listener)
+    def network_set_message_listener(self, listener: Callable[[dict], None] | None, agent_state_listener: Callable[[bool], None] | None, date_detected_listener: Callable[[dict], None] | None = None) -> None:
+        self.ws_transport.set_agent_message_listener(listener, agent_state_listener, date_detected_listener)
 
     ###### Internal methods ######
 

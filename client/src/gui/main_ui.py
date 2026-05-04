@@ -8,7 +8,8 @@ from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, Signa
 from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon, QPixmap
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
                                QTextEdit, QScrollArea, QLabel, 
-                                QFrame, QPushButton, QFileDialog, QSlider, )
+                                QFrame, QPushButton, QFileDialog, QSlider, 
+                                QMessageBox)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
 from typing import Dict, Any, List
@@ -673,6 +674,58 @@ class ChatWidget(QWidget):
         """设置用户偏好管理器"""
         self.preferences_manager = preferences_manager
         print("Preferences manager set in ChatWidget")
+    
+    def on_date_detected(self, date_info: dict):
+        """处理后端检测到重要日期的事件"""
+        if not self.preferences_manager:
+            print("Preferences manager not set, cannot save date")
+            return
+        
+        try:
+            name = date_info.get("name", "重要日期")
+            date_type_cn = date_info.get("type", "其他")
+            date = date_info.get("date", "")
+            description = date_info.get("description", "")
+            
+            # 转换日期类型：中文 → 英文
+            type_mapping = {
+                "生日": "birthday",
+                "纪念日": "anniversary",
+                "节日": "other",
+                "其他": "other"
+            }
+            date_type_en = type_mapping.get(date_type_cn, "other")
+            
+            # 弹出确认对话框
+            msg_box = QMessageBox()
+            msg_box.setWindowTitle("检测到重要日期")
+            msg_box.setText(f"我注意到你提到了「{name}」\n\n是否要将其添加到重要日期提醒中？")
+            msg_box.setInformativeText(f"日期类型：{date_type_cn}\n日期：{date if date else '每年此日'}")
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
+            
+            if msg_box.exec() == QMessageBox.StandardButton.Yes:
+                # 用户确认，保存到配置
+                success = self.preferences_manager.add_important_date(
+                    name=name,
+                    date=date,
+                    date_type=date_type_en,
+                    message=f"今天是{name}！",
+                    enabled=True
+                )
+                if success:
+                    QMessageBox.information(self, "保存成功", f"已成功添加「{name}」到重要日期列表！")
+                    print(f"已保存重要日期: {name}")
+                else:
+                    QMessageBox.warning(self, "保存失败", "保存重要日期失败，请查看日志。")
+            else:
+                print(f"用户取消保存重要日期: {name}")
+        
+        except Exception as e:
+            print(f"处理日期检测事件失败: {e}")
+            import traceback
+            traceback.print_exc()
+
     
     def check_important_dates(self):
         """检查今天是否有重要日期，如果有则让AI自然地提及"""

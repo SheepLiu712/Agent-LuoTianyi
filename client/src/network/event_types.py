@@ -26,6 +26,7 @@ class WSEventType(str, Enum):
 
     HB_PING = "hb_ping"
     HB_PONG = "hb_pong"
+    DATE_DETECTED = "date_detected"
 
 @dataclass
 class WSMessage:
