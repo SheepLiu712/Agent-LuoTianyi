@@ -192,7 +192,7 @@ class ChatStream:
             self.logger.info("Started ingress worker task")
 
     def _is_user_message_event(self, event: ChatInputEvent) -> bool:
-        return event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}
+        return event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE, ChatInputEventType.USER_TOUCH}
 
 
     ####### 下方为连接管理相关方法 #######

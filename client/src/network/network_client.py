@@ -104,7 +104,15 @@ class NetworkClient:
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
-        
+
+    def send_touch(self, touch_area: str, ack_timeout: float = 10.0):
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_user_touch(touch_area=touch_area, ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
 
     def get_history(self, count: int, end_index: int) -> Tuple[List[ConversationItem], int]:
         if not self.user_id:

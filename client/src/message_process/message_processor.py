@@ -53,6 +53,7 @@ class MessageProcessor:
         self.send_text_func:Callable[[str], dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
         self.send_typing_func:Callable[[int], dict] = network_client.send_typing
+        self.send_touch_func:Callable[[str], dict] = network_client.send_touch
         self.start()
 
         self.processing_uuid = None
@@ -112,6 +113,19 @@ class MessageProcessor:
                 "mime_type": prepared["mime_type"],
                 "image_client_path": prepared["image_client_path"],
             },
+            done_event=threading.Event(),
+        )
+        with self._send_cond:
+            self._send_queue.append(item)
+            self._send_cond.notify()
+        return local_id
+
+    def send_touch(self, touch_area: str):
+        local_id = self._next_local_id("touch")
+        item = OutgoingMessage(
+            local_id=local_id,
+            kind="touch",
+            payload={"touch_area": touch_area},
             done_event=threading.Event(),
         )
         with self._send_cond:
@@ -278,6 +292,8 @@ class MessageProcessor:
             )
         if item.kind == "typing":
             return self.send_typing_func(text_length=item.payload["text_length"], ack_timeout=1.0)
+        if item.kind == "touch":
+            return self.send_touch_func(touch_area=item.payload["touch_area"], ack_timeout=1.0)
         return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}", "drop": True}
 
     def _prepare_image_payload(self, image_path: str) -> dict:

@@ -158,16 +158,18 @@ class ActivityMaker:
             uuid_list = await service_hub.agent.persist_topic_replies_for_pipeline(
                 user_id=user_uuid, reply_items=[item["response_line"] for item in self.first_login_res])
             for item, item_uuid in zip(self.first_login_res, uuid_list or []):
+                # Lazy-load audio at dispatch time
+                audio = self._load_audio_b64(item.get("audio_path", ""))
                 await chat_stream.feed_response(
                     ChatResponse(
                         uuid=item_uuid,
                         text=item["text"],
-                        audio=item["audio"],
+                        audio=audio,
                         expression="normal",
                         is_final_package=True,
                     )
                 )
-            return 
+            return
 
         if action.activity_type in {ActivityType.RETURN_LOGIN}:
             topic = await self._build_topic(action, user_uuid)
@@ -349,8 +351,8 @@ class ActivityMaker:
         state.meter.on_user_activity(now_ts, self.inactivity_decay_interval_seconds)
 
     def _load_first_login_res(self) -> None:
-        """加载首次登录欢迎资源（文本 + 音频 base64）。"""
-        self.first_login_res: List[Dict[str, str]] = []
+        """加载首次登录欢迎资源配置（懒加载音频）。"""
+        self.first_login_res: List[Dict[str, Any]] = []
 
         activity_res = self.config.get("activity_res", {})
         first_login_cfg = activity_res.get(ActivityType.FIRST_LOGIN.value, {})
@@ -376,20 +378,26 @@ class ActivityMaker:
 
         for idx in range(max(len(texts), len(audio_paths))):
             text = texts[idx] if idx < len(texts) else ""
-            audio_b64 = ""
+            audio_path = audio_paths[idx] if idx < len(audio_paths) else ""
+            # Store path only; read file lazily when dispatched
+            self.first_login_res.append({
+                "text": text,
+                "audio_path": audio_path,
+                "response_line": OneSentenceChat(content=text, tone="neutral", expression="normal"),
+            })
 
-            if idx < len(audio_paths) and audio_paths[idx]:
-                audio_path = Path(audio_paths[idx])
-                try:
-                    if not audio_path.is_absolute():
-                        audio_path = Path.cwd() / audio_path
-                    audio_b64 = base64.b64encode(audio_path.read_bytes()).decode("utf-8")
-                except Exception as e:
-                    self.logger.warning(
-                        f"Failed to load first-login audio at index={idx}, path={audio_paths[idx]}: {e}"
-                    )
-
-            self.first_login_res.append({"text": text, "audio": audio_b64, "response_line": OneSentenceChat(content=text, tone="neutral", expression="normal")})
+    def _load_audio_b64(self, audio_path: str) -> str:
+        """Lazy-load audio file as base64."""
+        if not audio_path:
+            return ""
+        try:
+            p = Path(audio_path)
+            if not p.is_absolute():
+                p = Path.cwd() / p
+            return base64.b64encode(p.read_bytes()).decode("utf-8")
+        except Exception as e:
+            self.logger.warning(f"Failed to load audio: {audio_path}: {e}")
+            return ""
 
     def _check_other_activity_res(self) -> None:
         '''通过agent的prompt manager获得其他活动类型的资源文本模板。'''

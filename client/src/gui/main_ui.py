@@ -28,6 +28,7 @@ class Live2DWidget(QOpenGLWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
         self.model: Live2dModel = Live2dModel(live2d_config)
+        self.agent_binder = agent_binder
         agent_binder.on_set_model(self.model) # 有些参数需要在创建模型之后才能设置，所以通过binder传递模型实例给agent_binder，由它来调用相关回调设置参数。
         self.setMouseTracking(True)
 
@@ -64,13 +65,23 @@ class Live2DWidget(QOpenGLWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         '''
-        处理鼠标点击事件，判断是否点击在模型的特定区域（如头部），如果是则触发模型表情变化。
+        处理鼠标点击事件，判断是否点击在模型的特定区域（头部、脸颊、手、身体等），
+        触发对应的动作动画并向服务端发送触摸事件，由LLM生成上下文相关的回应。
         '''
         if not self.model:
             return
         x, y = event.position().x(), event.position().y()
-        if self.model.HitTest("头", x, y):
-            self.model.set_next_expression()
+
+        # 遍历 HitAreas，按优先级从高到低检测
+        hit_areas = ["头", "辫子", "耳机", "袖", "左腿", "8"]
+        for area in hit_areas:
+            if self.model.HitTest(area, x, y):
+                # 播放对应的 Tap 动画
+                motion_group = f"Tap{area}"
+                self.model.StartMotion(motion_group, 0, 3)
+                # 向服务端发送触摸事件，由LLM生成回应
+                self.agent_binder.on_send_touch(area)
+                return
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         '''

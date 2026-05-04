@@ -22,6 +22,7 @@ class WSEventType(str, Enum):
     USER_TEXT = "user_text"
     USER_TYPING = "user_typing"
     USER_AUTH = "user_auth"
+    USER_TOUCH = "user_touch"
 
 
     HB_PING = "hb_ping"

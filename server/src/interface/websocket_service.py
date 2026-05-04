@@ -167,6 +167,7 @@ class WebSocketService:
             WSEventType.USER_TEXT.value,
             WSEventType.USER_IMAGE.value,
             WSEventType.USER_TYPING.value,
+            WSEventType.USER_TOUCH.value,
             "message",
             "chat_message",
             "chat",
@@ -180,6 +181,26 @@ class WebSocketService:
             return ChatInputEvent(
                 event_type=ChatInputEventType.USER_TYPING,
                 payload=event.payload if isinstance(event.payload, dict) else {},
+                client_msg_id=event.client_msg_id,
+                ts=event.ts,
+            )
+
+        if event.event_type == WSEventType.USER_TOUCH.value:
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            touch_area = payload.get("touch_area", "天依")
+            area_to_description = {
+                "头": "用户轻轻摸了摸天依的头",
+                "辫子": "用户轻轻拉了拉天依的辫子",
+                "耳机": "用户碰了碰天依的耳机",
+                "袖": "用户扯了扯天依的袖子",
+                "左腿": "用户戳了戳天依",
+                "8": "用户戳了戳天依",
+            }
+            text = area_to_description.get(touch_area, f"用户碰了碰天依的{touch_area}")
+            return ChatInputEvent(
+                event_type=ChatInputEventType.USER_TOUCH,
+                text=f"[{text}]",
+                payload=payload,
                 client_msg_id=event.client_msg_id,
                 ts=event.ts,
             )
