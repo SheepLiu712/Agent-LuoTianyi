@@ -11,11 +11,17 @@ from ..utils.llm.prompt_manager import PromptManager
 from ..utils.llm.llm_module import LLMModule
 from typing import Tuple, Dict, List, Any
 from ..database.database_service import VectorStore
-import asyncio 
+import asyncio
+import time
 import re
 from ..plugins.music.singing_manager import SingingManager
 
 from sqlalchemy.orm import Session
+
+# Citywalk search cache: data changes at most daily, 1h TTL is safe
+_citywalk_cache_ts: float = 0.0
+_citywalk_cache_data: list = []  # List[Tuple[float, str, str]]
+_CITYWALK_CACHE_TTL: float = 3600.0
 
 
 class MemorySearcher:
@@ -97,18 +103,24 @@ class MemorySearcher:
             if not q:
                 continue
             pending_tasks.append(asyncio.create_task(search_task(q, "user", user_id, score_threshold)))
-            pending_tasks.append(
-                asyncio.create_task(
-                    search_task(
-                        q,
-                        "citywalk",
-                        "__citywalk__",
-                        min(score_threshold + 0.1, 0.88),
-                        prefix="城市漫步记忆",
-                        timestamp_keys=["citywalk_date", "timestamp"],
-                    )
+
+        # Citywalk: single cached search per call, not N per-query searches
+        global _citywalk_cache_ts, _citywalk_cache_data
+        now = time.monotonic()
+        if now - _citywalk_cache_ts >= _CITYWALK_CACHE_TTL:
+            citywalk_q = next((q.strip() for q in queries if q and q.strip()), "")
+            if citywalk_q:
+                _citywalk_cache_data = await search_with_thres(
+                    "__citywalk__",
+                    citywalk_q,
+                    max(1, k),
+                    min(score_threshold + 0.1, 0.88),
+                    prefix="城市漫步记忆",
+                    timestamp_keys=["citywalk_date", "timestamp"],
                 )
-            )
+                self.logger.debug(f"Citywalk cache refreshed, got {len(_citywalk_cache_data)} hits")
+            _citywalk_cache_ts = now
+        scored_hits.extend(_citywalk_cache_data)
 
         for finished_task in asyncio.as_completed(pending_tasks):
             try:
