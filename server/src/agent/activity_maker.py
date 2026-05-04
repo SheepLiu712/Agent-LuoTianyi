@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -238,6 +239,21 @@ class ActivityMaker:
             except Exception as e:
                 self.logger.warning(f"Failed to check yesterday citywalk: {e}")
 
+            # 3) 检查是否有新学会的歌曲可以告知用户
+            learned_announcement = self._get_learned_song_announcement()
+            if learned_announcement:
+                topics_to_add.append(
+                    ExtractedTopic(
+                        topic_id=str(uuid4()),
+                        source_messages=[],
+                        topic_content=learned_announcement.lstrip("，"),
+                        memory_attempts=[],
+                        fact_constraints=[],
+                        sing_attempts=[],
+                        is_forced_from_incomplete=True,
+                    )
+                )
+
             for t in topics_to_add:
                 await chat_stream.topic_replier.add_topic(t)
             return
@@ -436,9 +452,37 @@ class ActivityMaker:
         if action.activity_type == ActivityType.RETURN_LOGIN:
             seconds = float(action.payload.get("time_since_last_login", 0))
             days = max(1, int(seconds // 86400))
-            fallback_topic.topic_content = f"用户已{days}天未登录，请你先热情欢迎TA回来，再询问他的近况或追问上次没聊完的话题。"
+
+            # 检查是否有新学会的歌曲可以告知用户
+            learned_announcement = self._get_learned_song_announcement()
+
+            fallback_topic.topic_content = (
+                f"用户已{days}天未登录，请你先热情欢迎TA回来，"
+                f"再询问他的近况或追问上次没聊完的话题。"
+                f"{learned_announcement}"
+            )
             return fallback_topic
 
+    @staticmethod
+    def _get_learned_song_announcement() -> str:
+        """Read newly_learned_songs.json and build an announcement string."""
+        notify_path = Path("data/plugin_scheduler/newly_learned_songs.json")
+        if not notify_path.exists():
+            return ""
+        try:
+            learned = json.loads(notify_path.read_text("utf-8"))
+            if not learned:
+                return ""
+            song_names = "、".join(f"《{s}》" for s in learned[:5])
+            notify_path.unlink(missing_ok=True)
+            return f"，另外，你不在的时候我学会了{song_names}，想听的话可以让我唱哦！"
+        except Exception as e:
+            get_logger("ActivityMaker").warning(f"Failed to read learned songs notification: {e}")
+            try:
+                notify_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return ""
 
 
 _activity_maker = None

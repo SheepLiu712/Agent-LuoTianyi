@@ -84,7 +84,7 @@ class LuoTianyiAgent:
         self.conversation_manager = ConversationManager(
             self.config.get("conversation_manager", {}), self.prompt_manager
         )  # 对话管理器
-        self.singing_manager = SingingManager(config={})  # 唱歌管理器
+        self.singing_manager = SingingManager(config={"resource_path": self.config.get("resource_path", "res/music")})  # 唱歌管理器
         memory_config = self.config.get("memory_manager", {})
         self.memory_manager = MemoryManager(memory_config, self.prompt_manager, self.singing_manager)  # 记忆管理器
 

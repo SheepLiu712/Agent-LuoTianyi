@@ -5,10 +5,11 @@ import json
 import io
 import base64
 import traceback
-from ...types.music_type import SongSegment, SongMetadata, OneLyricLine
+from ...types.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntry
 from ...types.tool_type import  MyTool, ToolFunction, ToolOneParameter
 from typing import List, Tuple, Dict, Any, Optional
 import random
+from .auto_song_learner import WishlistManager
 
 
 class SingingManager:
@@ -18,7 +19,12 @@ class SingingManager:
         self.resource_path = config.get("resource_path", "res/music")
         self.all_songs: dict[str, SongMetadata] = {}
         self.tools: Dict[str, MyTool] = {}
+        self.wishlist = WishlistManager(
+            str(pathlib.Path(self.resource_path) / "metadata.json"),
+            self.logger,
+        )
         self.get_music_data()
+        self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
         self.init_llm_tools()
 
     def get_music_data(self):
@@ -130,19 +136,23 @@ class SingingManager:
         # to json string
         return song_and_desc
     
-    def add_wished_song(self, song_name:str) -> bool:
-        meta_data_path = self.resource_path + "/metadata.json"
-        with open(meta_data_path, "r", encoding="utf-8") as f:
-            meta_data = json.load(f)
+    def add_wished_song(self, song_name: str) -> bool:
+        return self.wishlist.add(song_name)
 
-        wished_song = meta_data.get("wished_songs",[])
-        if song_name in wished_song:
-            return False
-        wished_song.append(song_name)
-        meta_data["wished_songs"] = wished_song
-        with open(meta_data_path, "w", encoding="utf-8") as f:
-            json.dump(meta_data, f, ensure_ascii=False, indent=4)
-        return True
+    def get_wished_songs(self) -> Dict[str, WishEntry]:
+        """Return all wished songs with their status."""
+        return self.wishlist.get_all()
+
+    def get_recently_learned(self) -> List[str]:
+        """Return and clear the recently-learned notification list."""
+        return self.wishlist.get_recently_learned()
+
+    def reload_songs(self) -> None:
+        """Re-scan songs/ directory to pick up newly learned songs."""
+        old_count = len(self.all_songs)
+        self.get_music_data()
+        self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
+        self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
     
     async def get_songs_can_sing_llm(self, max_song_num: int = 5) -> str:
         song_and_desc = self.get_songs_can_sing(max_song_num)
