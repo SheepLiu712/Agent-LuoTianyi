@@ -75,6 +75,16 @@ class TopicReplier:
             self.logger.error("ServiceHub or agent is not ready, skip replying topic")
             return
 
+        # 注入活动上下文（近期演唱会/联动等信息）
+        topic_content = topic.topic_content
+        if self.service_hub.schedule_manager:
+            try:
+                activity_ctx = self.service_hub.schedule_manager.get_active_context(self.user_id)
+                if activity_ctx:
+                    topic_content = f"{topic_content}\n\n{activity_ctx}"
+                    self.logger.info(f"Injected activity context for user {self.user_id}")
+            except Exception as e:
+                self.logger.warning(f"Failed to get activity context: {e}")
 
         memory_task = asyncio.create_task(self._memory_search(topic.memory_attempts or []))
         fact_task = asyncio.create_task(self._fact_search(topic.fact_constraints or []))
@@ -83,7 +93,7 @@ class TopicReplier:
 
         reply_items = await self.service_hub.agent.generate_topic_reply_for_pipeline(
             user_id=self.user_id,
-            topic_content=topic.topic_content,
+            topic_content=topic_content,
             memory_hits=memory_hits,
             fact_hits=fact_hits,
             sing_plan=sing_plan,
