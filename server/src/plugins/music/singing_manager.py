@@ -5,6 +5,7 @@ import json
 import io
 import base64
 import traceback
+import re
 from ...types.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntry
 from ...types.tool_type import  MyTool, ToolFunction, ToolOneParameter
 from typing import List, Tuple, Dict, Any, Optional
@@ -27,6 +28,42 @@ class SingingManager:
         self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
         self.init_llm_tools()
 
+    @staticmethod
+    def get_unified_song_name(song_name: str) -> str:
+        '''
+        去除所有的空格，标点符号（？！?1~，,、·），书名号
+        去除括号（尖括号，小括号，中括号，中英文两种）内的内容
+        '''
+        if not song_name:
+            return ""
+
+        unified = str(song_name)
+
+        # 去除中英文括号内的内容（支持多段，尽量兼容嵌套）
+        bracket_patterns = [
+            r"\([^()]*\)",
+            r"（[^（）]*）",
+            r"\[[^\[\]]*\]",
+            r"【[^【】]*】",
+            r"<[^<>]*>",
+            r"〈[^〈〉]*〉",
+            r"「[^「」]*」",
+            r"『[^『』]*』",
+        ]
+        for pattern in bracket_patterns:
+            while True:
+                updated = re.sub(pattern, "", unified)
+                if updated == unified:
+                    break
+                unified = updated
+
+        # 去除空白和常见干扰标点
+        unified = re.sub(r"\s+", "", unified)
+        unified = re.sub(r"[？！!?~，,、·《》]", "", unified)
+
+        return unified.strip().lower()
+
+
     def get_music_data(self):
         self.logger.info(f"Loading music data from {self.resource_path}")
         music_lib = pathlib.Path(self.resource_path) / "songs"
@@ -40,14 +77,16 @@ class SingingManager:
                 continue
             # 一首歌的文件包括：歌词文件 .lrc，音频文件 .mp3 以及配置文件 .json
             lyrics_file = song_dir / f"{song}.lrc"
-            audio_file_mp3 = song_dir / f"{song}.mp3"
+            audio_file_mp3 = song_dir / f"{song}.cleaned.mp3"
             config_file = song_dir / f"{song}.json"
             if not lyrics_file.exists():
                 self.logger.warning(f"Lyrics file missing for song {song}")
                 continue
             if not audio_file_mp3.exists():
-                self.logger.warning(f"Audio file missing for song {song}")
-                continue
+                audio_file_mp3 = song_dir / f"{song}.mp3"
+                if not audio_file_mp3.exists():
+                    self.logger.warning(f"Old audio file also missing for song {song}")
+                    continue
             if not config_file.exists():
                 self.logger.warning(f"Config file missing for song {song}")
                 continue
@@ -71,6 +110,7 @@ class SingingManager:
                         )
                     )
                 song_metadata = SongMetadata(
+                    song_name=song,
                     title=title,
                     description=description,
                     song_path=str(audio_file_mp3),
@@ -78,7 +118,8 @@ class SingingManager:
                     lrc_offset=lrc_offset,
                     segments=segment_objs,
                 )
-                self.all_songs[song] = song_metadata
+                unified_song_name = SingingManager.get_unified_song_name(title)
+                self.all_songs[unified_song_name] = song_metadata
 
             except Exception as e:
                 import traceback
@@ -89,53 +130,54 @@ class SingingManager:
     def get_song_metadata(self, song_name: str) -> SongMetadata | None:
         if not song_name:
             return None
-        return self.all_songs.get(song_name, None)
+        safe_song_name = SingingManager.get_unified_song_name(song_name)
+        return self.all_songs.get(safe_song_name, None)
 
-    def pick_segment_for_song(self, song_name: str) -> Optional[str]:
+    def pick_segment_for_song(self, song_name: str) -> Tuple[str, str]:
         """为指定歌曲随机选择一个可唱唱段描述。"""
-        segments = self.can_i_sing_song(song_name)
+        correct_song_name, segments = self.can_i_sing_song(song_name)
         if not segments:
-            return None
-        return random.choice(segments)
+            return "", ""
+        return correct_song_name, random.choice(segments)
 
     def pick_random_song_and_segment(self) -> Optional[Tuple[str, str]]:
         """从可唱曲库中随机选择一首歌及其可唱唱段。"""
         if not self.all_songs:
-            return None
+            return None, None
 
-        song_names = list(self.all_songs.keys())
-        random.shuffle(song_names)
-        for song_name in song_names:
-            segment = self.pick_segment_for_song(song_name)
+        unified_song_names = list(self.all_songs.keys())
+        random.shuffle(unified_song_names)
+        for unified_song_name in unified_song_names:
+            correct_song_name, segment = self.pick_segment_for_song(unified_song_name)
             if segment:
-                return song_name, segment
-        return None
+                return correct_song_name, segment
+        return None, None
 
-    def can_i_sing_song(self, song_name: str) -> List[str]:
+    def can_i_sing_song(self, song_name: str) -> Tuple[str, List[str]]:
         """
         检查是否可以演唱指定歌曲，如果可以，返回能够唱的唱段列表，否则返回空列表
         """
         if not song_name:
-            return []
-        safe_song_name = song_name.strip("").strip("《》")
+            return "", []
+        safe_song_name = SingingManager.get_unified_song_name(song_name)
         if not safe_song_name in self.all_songs:
-            return []
+            return "", []
         song_metadata: SongMetadata = self.all_songs[safe_song_name]
         if not song_metadata.segments:
             self.add_wished_song(safe_song_name)
-            return []
-        return [segment.description for segment in song_metadata.segments]
+            return "", []
+        return song_metadata.song_name, [segment.description for segment in song_metadata.segments]
 
     def get_songs_can_sing(self, max_song_num: int = 5) -> Dict[str, Any]:
         song_and_desc = {}
         # shuffle and get max_song_num songs
         selected_songs = random.sample(list(self.all_songs.items()), min(max_song_num, len(self.all_songs)))
         for song_name, metadata in selected_songs:
-            song_and_desc[song_name] = metadata.description
+            song_and_desc[metadata.song_name] = metadata.description
 
         # to json string
         return song_and_desc
-    
+
     def add_wished_song(self, song_name: str) -> bool:
         return self.wishlist.add(song_name)
 
@@ -153,19 +195,19 @@ class SingingManager:
         self.get_music_data()
         self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
         self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
-    
+
     async def get_songs_can_sing_llm(self, max_song_num: int = 5) -> str:
         song_and_desc = self.get_songs_can_sing(max_song_num)
         return json.dumps(song_and_desc, ensure_ascii=False)
-    
+
     async def can_i_sing_song_llm(self, song_name: str) -> str:
         if not song_name:
             return "没有指定歌曲名称。"
-        segments = self.can_i_sing_song(song_name)
+        correct_song_name, segments = self.can_i_sing_song(song_name)
         if not segments:
             return f"洛天依目前无法演唱{song_name}。"
-        return f"洛天依可以演唱{song_name}，可以唱的唱段有：{', '.join(segments)}。"
-    
+        return f"洛天依可以演唱{correct_song_name}，可以唱的唱段有：{', '.join(segments)}。"
+
     def get_segment_lyrics(self, song_name: str, segment_description: str) -> str:
         lyrics, _ = self.get_song_segment(song_name, segment_description, require_audio=False)
         if not lyrics:
@@ -181,8 +223,7 @@ class SingingManager:
         if not song_name or not segment_description:
             return None, None
 
-        # 移除书名号等干扰字符
-        safe_song_name = song_name.strip().strip("《》")
+        safe_song_name = SingingManager.get_unified_song_name(song_name)
         song_metadata = self.get_song_metadata(safe_song_name)
 
         if not song_metadata:
@@ -198,7 +239,7 @@ class SingingManager:
         if not target_segment:
             self.logger.warning(f"Segment '{segment_description}' not found in song '{song_name}'")
             return None, None
-        
+
 
         # 转换 lyrics (如果是 dict 则转换为 OneLyricLine)
         real_lyrics = []
@@ -291,6 +332,6 @@ class SingingManager:
 
     def get_tool_names(self) -> List[str]:
         return list(self.tools.keys())
-    
+
     def get_tools(self) -> Dict[str, MyTool]:
         return self.tools
