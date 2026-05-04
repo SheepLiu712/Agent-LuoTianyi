@@ -34,6 +34,7 @@ from src.agent.activity_maker import init_activity_maker, get_activity_maker
 from src.agent.luotianyi_agent import LuoTianyiAgent, init_luotianyi_agent, get_luotianyi_agent
 from src.plugins import DailyScheduler
 from src.plugins.citywalk import CitywalkRuntimeService
+from src.plugins.schedule import ScheduleManager
 
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger
@@ -75,7 +76,16 @@ async def startup_event(app: FastAPI):
         activity_maker=init_activity_maker(config.get("activity_maker", {})),
     )
 
+    # 初始化日程管理器
+    schedule_mgr = ScheduleManager(
+        config=config.get("schedule", {}),
+        service_hub_ref=service_hub,
+    )
+    service_hub.schedule_manager = schedule_mgr
+    schedule_mgr.start()
+
     service_hub.activity_maker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
+    service_hub.activity_maker.set_service_hub(service_hub) # 将ServiceHub引用传递给ActivityMaker，用于演唱会静默期检查
     service_hub.gcsm.register_activity_maker(service_hub.activity_maker) # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
     service_hub.global_speaking_worker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
 
@@ -96,6 +106,8 @@ async def startup_event(app: FastAPI):
     finally:
         if daily_scheduler is not None:
             daily_scheduler.stop()
+        if service_hub and service_hub.schedule_manager:
+            service_hub.schedule_manager.stop()
         await service_hub.gcsm.stop_cleanup_task()
         await service_hub.global_speaking_worker.stop() 
 

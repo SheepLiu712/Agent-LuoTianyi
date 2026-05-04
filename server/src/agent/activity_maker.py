@@ -128,10 +128,14 @@ class ActivityMaker:
 
         self.user_states: Dict[str, _UserActivityState] = {}
         self._lock = asyncio.Lock()
+        self.service_hub: Optional["ServiceHub"] = None
 
     def set_agent(self, agent: "LuoTianyiAgent") -> None:
         self.agent = agent
         # self._check_other_activity_res()
+
+    def set_service_hub(self, service_hub: "ServiceHub") -> None:
+        self.service_hub = service_hub
 
     async def dispatch_action(
         self,
@@ -140,6 +144,11 @@ class ActivityMaker:
         chat_stream: "ChatStream",
         service_hub: "ServiceHub",
     ) -> None:
+        # 演唱会静默期间跳过主动发言（保留首次登录欢迎）
+        if action.activity_type != ActivityType.FIRST_LOGIN:
+            if service_hub and service_hub.schedule_manager and service_hub.schedule_manager.is_silence_period():
+                self.logger.info(f"Silence period active, skipping action {action.activity_type}")
+                return
         if action.activity_type == ActivityType.FIRST_LOGIN:
             if not self.first_login_res:
                 self.logger.warning("No first-login resources configured, skipping activity dispatch")
