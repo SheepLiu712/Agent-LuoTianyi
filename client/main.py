@@ -53,6 +53,7 @@ if __name__ == "__main__":
         send_text_callback = message_processor.send_text,
         send_image_callback = message_processor.send_image,
         send_typing_callback = message_processor.send_typing_event,
+        send_touch_callback = message_processor.send_touch,
         play_local_tts_callback = message_processor.play_local_tts_by_uuid,
         stop_local_tts_callback = message_processor.stop_local_tts,
         set_volume_callback = message_processor.set_playback_volume,

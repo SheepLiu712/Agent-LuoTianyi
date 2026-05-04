@@ -82,6 +82,9 @@ class WsTransport:
     def submit_typing_event(self, text_length: int, ack_timeout: float = 10.0) -> dict:
         return self._submit_user_event(WSEventType.USER_TYPING, payload={"text_length": text_length}, ack_timeout=ack_timeout)
 
+    def submit_user_touch(self, touch_area: str, ack_timeout: float = 10.0) -> dict:
+        return self._submit_user_event(WSEventType.USER_TOUCH, payload={"touch_area": touch_area}, ack_timeout=ack_timeout)
+
     def _submit_user_event(self, event_type: WSEventType, payload: dict, ack_timeout: float) -> dict:
         event = build_event(event_type, payload=payload)
         request_id = event.client_msg_id
