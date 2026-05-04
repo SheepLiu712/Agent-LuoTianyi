@@ -1,140 +1,266 @@
-# AgentLuo-Client 洛天依对话Agent的客户端
+# AgentLuo — 洛天依对话Agent
+
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/)
 
-## 🎵 项目介绍
-AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天依（Luo Tianyi）智能对话Agent。该Agent整合了Live2D模型功能和GPT-SoVITS提供的语音合成（TTS）功能，并实现了基于嵌入（Embedding）的向量记忆检索和洛天依歌曲的知识库。
+## 项目介绍
 
-本项目旨在为用户提供沉浸式的洛天依互动体验。本项目包含三个部分：
-- server：服务端，负责处理用户请求，管理对话状态，调用LLM生成回复，调用TTS生成语音，以及管理知识库和记忆。
-- client：PC客户端，提供用户界面，展示Live2D模型，播放语音，并与服务端进行通信。
-- app：实际上是安卓客户端，提供和PC客户端类似的功能，但界面和交互方式适配移动设备。
+AgentLuo 旨在设计并实现一个具备角色扮演能力的虚拟歌手 **洛天依（Luo Tianyi）** 智能对话 Agent。
 
+该系统整合了 Live2D 模型交互、GPT-SoVITS 语音合成、基于 Embedding 的向量记忆检索、以及洛天依歌曲知识库，为用户提供沉浸式的互动体验。
 
-### ☀️功能特色
-- **角色扮演**：基于洛天依的官方设定和现有作品，塑造符合其性格和背景的对话风格。
-- **多模态交互**：集成Live2D模型，实现动态表情和口型同步。
-- **语音合成**：利用GPT-SoVITS技术，实现自然流畅的语音输出。
-- **歌曲演唱**：支持少量洛天依歌曲的演唱功能。
-- **图片识别**：通过集成图像识别技术，能够识别用户上传的图片内容，并进行相关对话。
-- **无限上下文管理**：支持长时间对话的上下文记忆，提升交互连贯性。
-- **知识库集成**：结合向量数据库和图数据库，实现基于知识的智能回答，使得天依能够记住用户信息和偏好，并且对圈子内的知识有较好的理解。
-- **可拓展性**：模块化设计，原则上通过替换资源文件可以将该项目用于其他虚拟角色的构建。
-
-### 🚀 技术栈
-注意，服务端的配置难度要远高于客户端。下面简要介绍服务端的技术栈：
-- **编程语言**：Python 3.10
-- **Web框架**：FastAPI
-- **数据库**：sqlite（使用 SQLAlchemy 进行 ORM 操作）
-- **缓存**：Redis
-- **向量数据库**：ChromaDB
-- **TTS合成**：GPT-SoVITS
-- **异步任务**：使用 asyncio 和 FastAPI 的 BackgroundTasks 实现异步
-- **公网访问**：使用 sakurafrpp 实现内网穿透，支持公网访问
-
-### 🎞️展示视频
+### 展示视频
 
 [这是独属于你的洛天依](https://www.bilibili.com/video/BV15LZ7BJE3e)
 
-## 🚀 Client快速开始
-### 普通方式
-在Releases页面下载最新版本的安装包，解压后运行`Chat with Luotianyi.exe`。
+---
 
-第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要通过QQ与作者联系获取。
+## 项目结构
 
-注册成功之后即可登录。勾选自动登录后，下一次运行将直接进入主界面。
+本项目包含三个子项目：
 
-### 开发者方式
-1. 克隆仓库：
-```bash
-git clone https://github.com/SheepLiu712/Agent-Luotianyi
+| 子项目 | 技术栈 | 说明 |
+|--------|--------|------|
+| **server/** | Python 3.10, FastAPI | 服务端：WebSocket + REST，对话管道、记忆系统、TTS、插件 |
+| **client/** | PySide6 | PC 客户端：Live2D 渲染、聊天界面、音频播放 |
+| **app/** | React Native / Expo | 移动端客户端（Android） |
+
+---
+
+## 功能特色
+
+- **角色扮演** — 基于洛天依官方设定和作品，塑造符合其性格的对话风格
+- **Live2D 交互** — 点击模型不同部位（头、辫子、耳机等）触发 Tap 动画 + LLM 回应
+- **语音合成** — GPT-SoVITS 情感语音，支持喜悦、温柔、悲伤、愤怒等多种语气
+- **歌曲演唱** — 支持曲库中已配置歌曲的演唱，自动切片和分段播放
+- **自动学歌** — 记录用户想听但不会唱的歌，凌晨自动检测 staging 目录并处理
+- **图片识别** — 集成视觉语言模型（VLM）识别用户上传的图片
+- **无限上下文** — 长对话自动压缩和摘要，保持交互连贯性
+- **记忆系统** — 向量数据库存储用户记忆和偏好，支持语义检索
+- **日程系统** — 自动爬取 B 站官方动态，解析演唱会/联动等活动，注入对话上下文
+- **城市漫步** — Agent 每日独立探索中国城市（高德地图 API + LLM 决策），生成游记并存入记忆
+- **公网访问** — 通过内网穿透（SakuraFrp）支持公网 WebSocket 连接
+
+---
+
+## 服务端架构
+
 ```
-2. 进入项目目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
-3. 运行`main.py`启动客户端。
-
-## 🚀 App快速开始
-### 普通方式
-在Releases页面下载最新版本的apk文件，安装之。由于现在这个版本没有上架应用商店（没有任何鉴权），所以需要允许安装未知来源的应用。
-
-第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要通过QQ与作者联系获取。
-
-注册成功之后即可登录。勾选自动登录后，下一次运行将直接进入主界面。
-
-### 开发者方式
-1. 克隆仓库：
-```bash
-git clone https://github.com/SheepLiu712/Agent-Luotianyi
+server_main.py  — FastAPI 入口
 ```
-后面我也不会了，开摆。
 
-## 🔧服务端架设
-### 一、环境要求
-- 内存：至少 4GB RAM
-- 存储：至少 7GB 可用空间
-- 网络连接：需要访问外部API服务
-- 运算能力：最消耗算力的部分是GPT-SoVITS的语音合成模块，其余均使用外部API，请访问GPT-SoVITS的[官方仓库](https://github.com/RVC-Boss/GPT-SoVITS/)了解配置要求。
+### 分层架构
 
-### 二、安装流程
-1. 克隆项目仓库：
-   ```bash
-   git clone https://github.com/SheepLiu712/Agent-LuoTianyi-server.git
-   cd Agent-LuoTianyi-server
-   ```
+| 层 | 路径 | 职责 |
+|----|------|------|
+| **接口层** | `server/src/interface/` | WebSocket 消息帧（鉴权、心跳）、REST API、ServiceHub 依赖注入容器 |
+| **对话管道** | `server/src/pipeline/` | 每用户异步管道：消息预处理 → 话题规划 → 回复生成 → TTS 说话 |
+| **Agent 层** | `server/src/agent/` | 核心 Agent：LLM 调用、记忆读写、话题提取、主动发言（ActivityMaker） |
+| **记忆系统** | `server/src/memory/` | 多源记忆检索（向量 + 图）+ 记忆写入和摘要 |
+| **数据库** | `server/src/database/` | SQLite（SQLAlchemy）、ChromaDB（向量）、Redis 缓冲区 |
+| **插件** | `server/src/plugins/` | 城市漫步、曲库管理、日程系统、自动学歌 |
+| **TTS** | `server/src/tts/` | GPT-SoVITS 语音合成（流式 + 非流式） |
+| **视觉** | `server/src/vision/` | VLM 图片描述 |
 
-2. 确保conda已安装，随后运行安装脚本（在命令行中运行，或者双击运行快速启动脚本）
-    ```bash
-    setup.bat
-    ```
-    注意，该脚本运行过程需要进行两次输入。第一次输入是确定conda环境的名称，第二次输入是确认是否安装GPU版本的pytorch（如果你的电脑没有NVIDIA显卡，请选择否）
+### 对话管道流程
 
-3. 设置环境变量：
-    - 根据config中所需要的api_key，配置对应的api密钥为环境变量。
-    - 在Windows上，可以通过“系统属性”->“高级”->“环境变量”进行设置，或者在命令行中运行：
-      ```bash
-      setx SILICONFLOW_API_KEY "your_api_key_here"
-      ```
-    - 所配置的环境变量需要和config.json中的占位符一致，并不局限于硅基流动的api_key，如果你使用了其他需要密钥的服务（如OpenAI、Azure等），也需要按照同样的方式配置环境变量。
+```
+用户消息 → WebSocket → ChatStream (per user)
+  → ingress (图片保存/视觉/实体提取)
+  → unread_store (消息缓冲)
+  → topic_planner (LLM话题提取)
+  → topic_replier (记忆/歌曲检索 + LLM回复 + TTS生成)
+  → global_speaking_worker (串行TTS队列)
+  → WebSocket → 客户端
+```
 
-4. 下载资源：
-  - 联系开发者获取资源文件和数据文件。
-  - 将res文件解压到根目录
-  - 将data文件解压到根目录
+### 关键设计模式
 
-### 三、启动服务
-- 运行redis服务（如果你已经安装了redis，并且将其添加到了环境变量中，可以直接在命令行中运行 `redis-server` 来启动服务）
-- 在命令行中启动对应conda环境，运行以下命令启动服务：
-  ```bash
-  python server_main.py
-  ```
-- 打开sakurafrp的隧道接入公网（如果需要公网访问的话）
+- **每用户异步管道**：每个用户独立 ChatStream，task 在首次消息创建、断开时取消
+- **ServiceHub 依赖注入**：所有单例服务在启动时注册到 ServiceHub，贯穿管道传递
+- **Speaking Worker 串行化**：全局单队列串行化 TTS 任务，避免 GPU OOM
+- **Agent 作为管道后端**：管道只负责流程控制，LLM/记忆/TTS 全部委托给 LuoTianyiAgent
 
-## 📜 许可证和版权
+### 启动流程
+
+```
+startup_event:
+  init_databases → TTS → Agent → ServiceHub
+  → ScheduleManager (B站日程)
+  → ActivityMaker (主动发言)
+  → GlobalSpeakingWorker (TTS队列)
+  → DailyScheduler (4AM定时任务)
+
+WebSocket /chat_ws:
+  accept → system_ready → auth → get_or_register_chat_stream → message_loop
+```
+
+---
+
+## 客户端架构
+
+```
+main.py  — PySide6 入口
+```
+
+### 五层结构
+
+| 层 | 路径 | 职责 |
+|----|------|------|
+| **UI 层** | `src/gui/` | MainWindow、聊天气泡、登录/注册、设置界面、Live2D 渲染 |
+| **Binder 层** | `src/gui/binder.py` | UI 与逻辑层之间的信号/槽桥梁 |
+| **消息处理层** | `src/message_process/` | 发送/接收队列、多媒体流处理（音频、表情） |
+| **通信管理层** | `src/network/` | REST API 调用、WS 消息收发、历史消息 |
+| **WebSocket 层** | `src/network/ws_transport.py` | 连接维护、心跳、断线重连、SSL 兼容 |
+
+### 关键组件
+
+- **Live2DWidget** — Cubism SDK 渲染，支持面部追踪、Tap 动画、表情切换
+- **MultiMediaStream** — 服务端音频片段 FIFO 播放，支持本地 TTS 打断、音量控制
+- **MessageProcessor** — 双线程（监听 + 发送），事件队列驱动
+- **WebSocketTransport** — 自动重连、10s 心跳、消息 ACK 确认
+
+---
+
+## 快速开始
+
+### 客户端（普通用户）
+
+1. 从 [Releases](https://github.com/SheepLiu712/Agent-LuoTianyi/releases) 下载最新客户端
+2. 解压后运行 `Chat with Luotianyi.exe`
+3. 向作者获取邀请码，注册后登录
+
+### 客户端（开发者）
+
+```bash
+git clone https://github.com/SheepLiu712/Agent-LuoTianyi
+cd Agent-LuoTianyi/client
+setup.bat          # 创建 conda 环境并安装依赖
+python main.py     # 启动客户端
+```
+
+### 服务端架设
+
+#### 环境要求
+
+- 内存 ≥ 4GB（推荐 8GB+）
+- 存储 ≥ 7GB 可用空间（含模型文件和数据）
+- NVIDIA GPU 推荐（GPT-SoVITS 推理）
+- 需要访问外部 API（SiliconFlow、DashScope、DeepSeek 等）
+
+#### 安装流程
+
+```bash
+git clone https://github.com/SheepLiu712/Agent-LuoTianyi
+cd Agent-LuoTianyi/server
+setup.bat          # 创建 conda 环境并安装依赖
+```
+
+配置环境变量（在 `config/config.json` 中引用）：
+
+```bash
+setx SILICONFLOW_API_KEY "your_key"
+setx QWEN_API_KEY "your_key"
+setx DEEPSEEK_API_KEY "your_key"
+setx AMAP_KEY "your_key"       # 高德地图，可选（城市漫步用）
+```
+
+联系作者获取资源文件和模型文件，解压到项目根目录。
+
+#### 启动服务
+
+```bash
+python server_main.py          # http://127.0.0.1:60030
+python scripts/generate_cert.py  # （可选）生成 SSL 证书
+```
+
+### 移动端 App
+
+```bash
+cd app
+npx expo start                 # 启动 Expo 开发服务器
+```
+
+---
+
+## 技术栈
+
+### 服务端
+
+| 技术 | 用途 |
+|------|------|
+| Python 3.10 | 运行时 |
+| FastAPI | Web 框架 + WebSocket |
+| SQLite / SQLAlchemy | 关系数据库 |
+| ChromaDB | 向量数据库 |
+| Redis / MemoryStorage | 缓存 / 上下文存储 |
+| GPT-SoVITS | 语音合成 |
+| Qwen-VL | 图片识别 |
+| SiliconFlow / DashScope / DeepSeek | LLM API |
+
+### 客户端
+
+| 技术 | 用途 |
+|------|------|
+| PySide6 | 桌面 UI 框架 |
+| Cubism SDK (Live2D) | 模型渲染 |
+| VLC / pydub | 音频播放 |
+| RSA-OAEP | 密码加密传输 |
+
+---
+
+## 环境变量
+
+| 变量名 | 用途 | 必需 |
+|--------|------|------|
+| `SILICONFLOW_API_KEY` | Embedding、备用 LLM | 是 |
+| `QWEN_API_KEY` | 主聊天 LLM、视觉 | 是 |
+| `DEEPSEEK_API_KEY` | 记忆搜索、对话摘要 | 是 |
+| `AMAP_KEY` | 高德地图（城市漫步） | 否 |
+
+---
+
+## 开发命令
+
+```bash
+# 服务端
+cd server
+python server_main.py                              # 启动服务
+python -m pytest tests/                            # 运行全部测试
+python -m pytest tests/test_xxx.py                 # 单文件测试
+python -m pytest tests/ -k "test_name"             # 指定测试
+python scripts/generate_cert.py                    # 生成 SSL 证书
+
+# 客户端
+cd client
+python main.py                                     # 启动客户端
+
+# 移动端
+cd app
+npx expo start                                     # 启动 Expo
+```
+
+---
+
+## 许可证和版权
 
 本项目基于 [MIT 许可证](LICENSE) 开源。
 
-本项目的知识库内容来源于 VCPedia，遵循其版权声明和使用条款。该站全部内容禁止商业使用。文本内容除另有声明外，均在[知识共享 署名-非商业性使用-相同方式共享 3.0中国大陆 (CC BY-NC-SA 3.0 CN) 许可协议](https://creativecommons.org/licenses/by-nc-sa/3.0/cn/)下提供。其余开发者确保在使用和分发时遵守相关规定。
-> 根据规定，本项目需要标明是否（对原始作品）作了修改。本项目在使用VCPedia内容时，大部分为直接引用，对歌曲的爬取使用了自动化脚本，并使用LLM进行了结构化，因此绝大部分均为原文引用。在此基础上
+知识库内容来源于 VCPedia，遵循其版权声明。文本内容除另有声明外，均在 [CC BY-NC-SA 3.0 CN](https://creativecommons.org/licenses/by-nc-sa/3.0/cn/) 许可协议下提供。
 
-## 🧠 关于AI生成内容的声明
-关于AI生成内容。我们认识到VC社区对AI生成内容的关注和担忧。为了透明起见，我们在此声明：
-1. 本项目大量使用了LLM，场景包括：
-   - 对爬取的文本内容进行结构化处理
-   - 生成对话回复
-   - 生成语音合成的情感标签
-   - 生成Live2D模型的表情标签
-   - 压缩对话上下文
-   - 生成记忆检索和写入的指令
-2. 本项目使用的语音合成技术为GPT-SoVITS，该项目基于AI技术，我们对公开的语音合成模型进行了微调；此外，生成的语音内容为AI生成。
-3. 在美术资源上，本项目使用了火爆鸡王发布的洛天依Live2D模型，该模型为非商业用途免费使用，感谢火爆鸡王的分享。在其他的美术资源（目前仅包括背景图和Logo）上，我们使用了网络上公开的免费资源，并且保证这些资源不是由AI生成的。
-4. 本项目在编写过程中使用了AI辅助编程工具（如GitHub Copilot），以提高开发效率。但核心逻辑和设计均由开发者完成。
-5. 我们力求确保AI生成内容的准确性和合规性，但由于技术限制，可能会存在错误或偏差。如果发现AI生成内容存在明显错误或不当之处，欢迎反馈。
+## AI 生成内容声明
 
-## 🙏 致谢
+1. 本项目大量使用 LLM 的场景包括：文本结构化、对话回复生成、情感/表情标签生成、上下文压缩、记忆检索和写入指令
+2. GPT-SoVITS 语音合成基于 AI 技术，生成的语音内容为 AI 合成
+3. Live2D 模型由火爆鸡王发布，非商业用途免费使用
+4. 其他美术资源（背景图、Logo）来自网络公开免费资源
+5. 本项目编写过程中使用了 AI 辅助编程工具
 
-- 感谢洛天依官方提供的角色设定
-- 感谢VCPedia项目组提供的丰富知识库
-- 感谢[GPT-SoVITS项目](https://github.com/RVC-Boss/GPT-SoVITS/)提供的开源语音合成技术
-- 感谢[火爆鸡王](https://space.bilibili.com/5033594)发布的Live2D模型
-- 感谢硅基流动平台提供的API服务
-- 感谢Gemini3，这是我大爹，我的代码基本都是它写的。
-- 感谢所有贡献者的努力和支持！
+## 致谢
+
+- 洛天依官方提供的角色设定
+- [VCPedia](https://vcpedia.cn) 项目组提供的丰富知识库
+- [GPT-SoVITS 项目](https://github.com/RVC-Boss/GPT-SoVITS/) 提供的开源语音合成技术
+- [火爆鸡王](https://space.bilibili.com/5033594) 发布的 Live2D 模型
+- 硅基流动平台提供的 API 服务
+- 所有贡献者的努力和支持
