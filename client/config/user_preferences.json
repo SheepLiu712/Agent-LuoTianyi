@@ -1,0 +1,22 @@
+{
+  "important_dates": [
+    {
+      "name": "用户生日",
+      "date": "YYYY-MM-DD",
+      "type": "birthday",
+      "enabled": true,
+      "message": "生日快乐！"
+    }
+  ],
+  "relationship_mode": {
+    "relationship": "朋友",
+    "speaking_style": "友好温和",
+    "personality_traits": ["温柔", "耐心"],
+    "custom_context": "我们是很好的朋友关系，互相尊重和理解。"
+  },
+  "reminder_settings": {
+    "enable_reminders": true,
+    "reminder_time": "09:00",
+    "check_interval_hours": 1
+  }
+}

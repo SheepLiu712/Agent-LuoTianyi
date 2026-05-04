@@ -27,6 +27,7 @@ from src.gui.binder import AgentBinder
 from src.live2d import live2d
 from src.network.network_client import NetworkClient
 from src.message_process import MessageProcessor
+from src.user_preferences_manager import UserPreferencesManager
 from src.gui.login_dialog import LoginDialog
 
 
@@ -41,6 +42,9 @@ if __name__ == "__main__":
 
     app = ui_init()
 
+    # 创建用户偏好管理器
+    preferences_manager = UserPreferencesManager()
+    
     # 创建网络客户端实例
     network_client = NetworkClient(
         base_url=config.get("base_url"),
@@ -70,7 +74,7 @@ if __name__ == "__main__":
         local_tts_state_signal=binder.emit_local_tts_state_signal,
     ) 
 
-
+    
     # 主运行逻辑
     ret = 0
     try:
@@ -80,6 +84,9 @@ if __name__ == "__main__":
                 raise SystemExit("Login cancelled")
         print(f"Logged in as {network_client.user_id}")
         window = MainWindow(config["gui"], config["live2d"], binder)
+        # 设置用户偏好管理器
+        if hasattr(window.chat_widget, 'set_preferences_manager'):
+            window.chat_widget.set_preferences_manager(preferences_manager)
         window.show()
         ret = app.exec()
     except SystemExit as e:

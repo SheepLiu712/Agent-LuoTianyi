@@ -278,6 +278,7 @@ class ChatWidget(QWidget):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.agent = agent_binder
+        self.preferences_manager = None  # Will be set from main.py
         self.agent.response_signal.connect(self.on_agent_response)
         self.agent.delete_signal.connect(self.on_agent_delete)
         self.playback_manager = BubblePlaybackManager(
@@ -293,9 +294,20 @@ class ChatWidget(QWidget):
         self.is_loading_history = False
         self.first_load = True
         self.agent_bubbles: dict[str, ChatBubble] = {}
-
+        
+        # Connect settings button
+        if hasattr(self, 'settings_btn'):
+            self.settings_btn.clicked.connect(self.open_settings)
+        
         self.init_ui()
-
+        
+        # 初始化定时检查重要日期的定时器
+        self.date_check_timer = QTimer(self)
+        self.date_check_timer.timeout.connect(self.check_important_dates)
+        # 默认1小时检查一次，可以从设置中读取
+        self.date_check_interval = 60 * 60 * 1000  # 1 hour in milliseconds
+        self.date_check_timer.start(self.date_check_interval)
+        
         # Initial load
         QTimer.singleShot(100, lambda: self.agent.load_history(self.load_history_num, -1))
 
@@ -432,6 +444,25 @@ class ChatWidget(QWidget):
         
         self.toolbar_layout.addWidget(self.picture_btn)
         self.toolbar_layout.addWidget(self.volume_btn)
+        
+        # Settings Button
+        self.settings_btn = HoverButton(tooltip_text="用户设置")
+        self.settings_btn.setText("⚙设置")
+        self.settings_btn.setFixedSize(60, 24)
+        self.settings_btn.setStyleSheet("""
+            QPushButton { 
+                border: none; 
+                background-color: transparent; 
+                font-size: 12px;
+            } 
+            QPushButton:hover { 
+                background-color: #E0E0E0; 
+                border-radius: 4px; 
+            }
+        """)
+        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toolbar_layout.addWidget(self.settings_btn)
+        
         self.toolbar_layout.addStretch()
 
         # Horizontal Line 2
@@ -468,6 +499,16 @@ class ChatWidget(QWidget):
         self.setLayout(layout)
         self.temp_is_user = True
 
+    def open_settings(self):
+        """打开用户设置对话框"""
+        if self.preferences_manager is None:
+            from ..user_preferences_manager import UserPreferencesManager
+            self.preferences_manager = UserPreferencesManager()
+        
+        from .preferences_dialog import UserPreferencesDialog
+        dialog = UserPreferencesDialog(self.preferences_manager, self)
+        dialog.exec()
+    
     def on_scroll_value_changed(self, value):
         if value == 0 and not self.is_loading_history and self.current_history_index > 0:
             self.is_loading_history = True
@@ -628,12 +669,55 @@ class ChatWidget(QWidget):
                                       self.input_box.height() - s.height() - 10)
         return super().eventFilter(obj, event)
 
+    def set_preferences_manager(self, preferences_manager):
+        """设置用户偏好管理器"""
+        self.preferences_manager = preferences_manager
+        print("Preferences manager set in ChatWidget")
+    
+    def check_important_dates(self):
+        """检查今天是否有重要日期，如果有则主动发送消息"""
+        if not self.preferences_manager:
+            return
+        
+        try:
+            # 检查今天是否有重要日期
+            matched_dates = self.preferences_manager.check_today_dates()
+            
+            if matched_dates:
+                for date_info in matched_dates:
+                    name = date_info.get("name", "重要日期")
+                    message = date_info.get("message", f"今天是{name}！")
+                    
+                    # 显示AI主动发送的消息
+                    import time
+                    fake_uuid = f"reminder_{int(time.time())}"
+                    self.on_agent_response(fake_uuid, message)
+                    print(f"Triggered reminder for: {name}")
+        
+        except Exception as e:
+            print(f"检查重要日期失败: {e}")
+    
     def handle_text_input(self):
         if self.can_send == False:
             return
         text = self.input_box.toPlainText().strip()
         if not text:
             return
+        
+        # 如果有偏好管理器，添加上下文到消息
+        if self.preferences_manager:
+            try:
+                context = self.preferences_manager.get_relationship_context()
+                if context:
+                    # 在消息前添加上下文提示（简洁版本）
+                    mode = self.preferences_manager.get_relationship_mode()
+                    relationship = mode.get("relationship", "")
+                    style = mode.get("speaking_style", "")
+                    if relationship or style:
+                        context_hint = f"[关系：{relationship}，风格：{style}] "
+                        text = context_hint + text
+            except Exception as e:
+                print(f"Failed to add context: {e}")
         
         bubble = self.add_message("text", text, conv_uuid="", is_user=True)
         self.input_box.clear()
