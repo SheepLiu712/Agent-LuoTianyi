@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { ChatMessage } from "../types/chat";
 import { server_config } from "../config/index";
 import { getHistory } from "../utils/getHistory";
+import { addDebugTrace } from "../utils/debug_trace";
 
 export function useHistoryLogic(addHistoryMessage: (messages: ChatMessage[]) => void) {
     const [history_start_index, setHistoryStartIndex] = useState(-1); 
@@ -28,7 +29,7 @@ export function useHistoryLogic(addHistoryMessage: (messages: ChatMessage[]) => 
                 addHistoryMessage(result.messages);
             }
         } catch (error) {
-            console.error('加载历史记录流程出错:', error);
+            addDebugTrace('history', 'load error', { error: String(error) });
         } finally {
             setHistoryLoading(false); 
         }

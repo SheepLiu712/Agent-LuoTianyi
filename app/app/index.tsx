@@ -19,7 +19,7 @@ import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
 import { useAffection } from "../hooks/useAffection";
-import { clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
 
 
 export default function Index({ onLogout }: { onLogout?: () => void }) {
@@ -103,16 +103,12 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const historyLoadedRef = useRef(false);
   useEffect(() => {
     if (historyLoadedRef.current) {
-      return; // 防止 loadHistory 引用变化导致重复触发
+      return;
     }
     // 在组件加载时，自动加载一次历史记录
     if (username && message_token) {
       historyLoadedRef.current = true;
-      console.log('Loading history with:', { username, message_token });
       loadHistory(username, message_token);
-    }
-    else {
-      console.warn('无法加载历史记录，缺少认证信息');
     }
   }, [username, message_token, loadHistory]);
 
@@ -168,10 +164,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           startInLoadingState={true}
           onMessage={handleWebViewMessage}
           onError={(event) => {
-            console.error('WebView onError:', event.nativeEvent);
+            addDebugTrace('webview', 'error', { detail: JSON.stringify(event.nativeEvent) });
           }}
           onHttpError={(event) => {
-            console.error('WebView onHttpError:', event.nativeEvent);
+            addDebugTrace('webview', 'http error', { detail: JSON.stringify(event.nativeEvent) });
           }}
         />
 

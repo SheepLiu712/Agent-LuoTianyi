@@ -1,4 +1,5 @@
 import { server_config } from '../config';
+import { addDebugTrace } from './debug_trace';
 
 export interface AffectionInfo {
   score: number;
@@ -22,13 +23,13 @@ export async function getAffectionInfo(
     const url = `${server_config.BASE_URL}/affection/info?${params.toString()}`;
     const response = await fetch(url, { method: 'GET' });
     if (!response.ok) {
-      console.error('获取好感度信息失败:', response.statusText);
+      addDebugTrace('affection', 'fetch failed', { status: response.statusText });
       return null;
     }
     const data = await response.json();
     return data as AffectionInfo;
   } catch (error) {
-    console.error('获取好感度信息失败:', error);
+    addDebugTrace('affection', 'fetch error', { error: String(error) });
     return null;
   }
 }

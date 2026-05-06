@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { ChatMessage } from '../types/chat';
 import { server_config } from '../config';
+import { addDebugTrace } from './debug_trace';
 
 export interface HistoryResponse {
     messages: ChatMessage[];
@@ -52,9 +53,9 @@ export async function getHistory(username: string, token: string, count: number,
         });
         const data = await response.json();
         if (!response.ok) {
-            console.error('获取历史记录失败:', data.detail || '未知错误');
+            addDebugTrace('history', 'fetch failed', { detail: data.detail || '未知错误' });
             return {
-                messages: [], 
+                messages: [],
                 startIndex: 0,
             };
         }
@@ -78,7 +79,7 @@ export async function getHistory(username: string, token: string, count: number,
         };
         
     } catch (error) {
-        console.error('获取历史记录失败:', error);
+        addDebugTrace('history', 'getHistory error', { error: String(error) });
         return {
             messages: [],
             startIndex: 0,
@@ -162,7 +163,7 @@ export async function getImage(username: string, token: string, message_id: stri
             newClientPath,
         };
     } catch (error) {
-        console.error('获取图片失败:', error);
+        addDebugTrace('history', 'getImage error', { error: String(error) });
         return {
             success: false,
             error: error instanceof Error ? error.message : '获取图片失败',
@@ -184,12 +185,12 @@ export async function updateImagePath(username: string, token: string, message_i
             }),
         });
         if (!response.ok) {
-            console.error('更新图片路径失败:', response.statusText);
+            addDebugTrace('history', 'updateImagePath failed', { status: response.statusText });
             return false;
         }
         return true;
     } catch(error) {
-        console.error('更新图片路径失败:', error);
+        addDebugTrace('history', 'updateImagePath error', { error: String(error) });
         return false;
     }
 }

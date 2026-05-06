@@ -3,6 +3,9 @@ import { AgentMessagePayload, SendStatus } from '../types/chat';
 export interface BinderSendCallbacks {
   sendText: (uuid: string, text: string) => Promise<void>;
   sendImage: (uuid: string, imageUri: string, mimeType: string) => Promise<void>;
+  sendProactiveText: (uuid: string, text: string) => Promise<void>;
+  sendTouch: (touchArea: string, clickFrequency?: Record<string, number>) => Promise<void>;
+  sendPreferences: (preferences: Record<string, unknown>) => Promise<void>;
   sendTyping: (textLength: number) => Promise<void>;
   playLocalTts: (convUuid: string) => Promise<boolean>;
   stopLocalTts: () => Promise<void>;
@@ -43,6 +46,18 @@ export class AgentBinder {
 
   stopLocalTts() {
     return this.sendCallbacks.stopLocalTts();
+  }
+
+  sendProactiveText(uuid: string, text: string) {
+    return this.sendCallbacks.sendProactiveText(uuid, text);
+  }
+
+  sendTouch(touchArea: string, clickFrequency?: Record<string, number>) {
+    return this.sendCallbacks.sendTouch(touchArea, clickFrequency);
+  }
+
+  sendPreferences(preferences: Record<string, unknown>) {
+    return this.sendCallbacks.sendPreferences(preferences);
   }
 
   emitAgentMessage(payload: AgentMessagePayload) {
