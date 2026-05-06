@@ -39,7 +39,7 @@ export class NetworkClient {
     }
   }
 
-  sendChat(text: string): Promise<SendResult> {
+  sendChat(text: string, isProactive = false): Promise<SendResult> {
     if (!this.transport) {
       addDebugTrace('network', 'sendChat blocked: no transport');
       return Promise.resolve({
@@ -50,7 +50,7 @@ export class NetworkClient {
       });
     }
     addDebugTrace('network', 'sendChat', { textLength: text.length });
-    return this.transport.submitUserText(text, 10000);
+    return this.transport.submitUserText(text, isProactive, 10000);
   }
 
   async sendImage(imageUri: string, mimeType: string): Promise<SendResult> {
@@ -85,6 +85,34 @@ export class NetworkClient {
         drop: true,
       };
     }
+  }
+
+  sendTouch(touchArea: string, clickFrequency?: Record<string, number>): Promise<SendResult> {
+    if (!this.transport) {
+      addDebugTrace('network', 'sendTouch blocked: no transport');
+      return Promise.resolve({
+        ok: false,
+        request_id: `local-${Date.now()}`,
+        error: 'not logged in',
+        drop: true,
+      });
+    }
+    addDebugTrace('network', 'sendTouch', { touchArea });
+    return this.transport.submitUserTouch(touchArea, clickFrequency, 10000);
+  }
+
+  sendPreferences(preferences: Record<string, unknown>): Promise<SendResult> {
+    if (!this.transport) {
+      addDebugTrace('network', 'sendPreferences blocked: no transport');
+      return Promise.resolve({
+        ok: false,
+        request_id: `local-${Date.now()}`,
+        error: 'not logged in',
+        drop: true,
+      });
+    }
+    addDebugTrace('network', 'sendPreferences');
+    return this.transport.submitUserPreferences(preferences, 10000);
   }
 
   sendTypingEvent(textLength: number): Promise<SendResult> {

@@ -130,8 +130,12 @@ export class WebSocketTransport {
     }
   }
 
-  async submitUserText(message: string, ackTimeout = 10000): Promise<AckResult> {
-    return this.sendWithAck('user_text', { message }, ackTimeout);
+  async submitUserText(message: string, isProactive = false, ackTimeout = 10000): Promise<AckResult> {
+    const payload: Record<string, unknown> = { message };
+    if (isProactive) {
+      payload.is_proactive = true;
+    }
+    return this.sendWithAck('user_text', payload, ackTimeout);
   }
 
   async submitUserImage(
@@ -153,6 +157,18 @@ export class WebSocketTransport {
 
   async submitUserTyping(textLength: number, ackTimeout = 5000): Promise<AckResult> {
     return this.sendWithAck('user_typing', { is_typing: true, text_length: textLength }, ackTimeout);
+  }
+
+  async submitUserTouch(touchArea: string, clickFrequency?: Record<string, number>, ackTimeout = 5000): Promise<AckResult> {
+    const payload: Record<string, unknown> = { touch_area: touchArea };
+    if (clickFrequency) {
+      payload.click_frequency = clickFrequency;
+    }
+    return this.sendWithAck('user_touch', payload, ackTimeout);
+  }
+
+  async submitUserPreferences(preferences: Record<string, unknown>, ackTimeout = 5000): Promise<AckResult> {
+    return this.sendWithAck('user_preference_sync', preferences, ackTimeout);
   }
 
   private connect() {
