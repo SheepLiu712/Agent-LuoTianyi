@@ -283,6 +283,25 @@ class LuoTianyiAgent:
             user = db.query(User).filter(User.uuid == user_id).first()
             user_nickname = user.nickname if user and user.nickname else "你"
             user_description = user.description if user and user.description else ""
+            # 注入用户偏好（关系类型、表达风格等）
+            if user and user.preferences:
+                try:
+                    prefs = json.loads(user.preferences) if isinstance(user.preferences, str) else user.preferences
+                    pref_parts = []
+                    if prefs.get("relationship"):
+                        pref_parts.append(f"用户希望和你的关系是：{prefs['relationship']}")
+                    if prefs.get("speaking_style"):
+                        pref_parts.append(f"用户希望你的表达风格偏向：{prefs['speaking_style']}")
+                    if prefs.get("personality_traits"):
+                        traits = "、".join(prefs["personality_traits"])
+                        pref_parts.append(f"用户希望你的性格特点：{traits}")
+                    if prefs.get("custom_context"):
+                        pref_parts.append(f"用户补充的上下文：{prefs['custom_context']}")
+                    if pref_parts:
+                        pref_context = "（用户偏好设置：" + "；".join(pref_parts) + "）"
+                        user_description = (user_description + "\n" + pref_context).strip()
+                except Exception as e:
+                    self.logger.warning(f"Failed to parse preferences: {e}")
         finally:
             db.close()
 
@@ -480,6 +499,11 @@ class LuoTianyiAgent:
             return
         if event.event_type not in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}:
             self.logger.warning(f"Unsupported event type {event.event_type} in add_conversation, skipping")
+            return
+
+        # 程序化发送的主动消息（如日期提醒）不保存到数据库
+        if event.payload and event.payload.get("is_proactive"):
+            self.logger.info(f"Skipping DB save for proactive message: {event.text[:50]}...")
             return
         
         content = event.text # 对文字信息，它是文本内容；对图片信息，它是图片描述（由视觉模块生成）

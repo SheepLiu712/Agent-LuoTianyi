@@ -69,8 +69,11 @@ class WsTransport:
             self._agent_state_listener = agent_state_listener
             self._date_detected_listener = date_detected_listener
 
-    def submit_user_text(self, text: str, ack_timeout: float = 10.0) -> dict:
-        return self._submit_user_event(WSEventType.USER_TEXT, payload={"message": text}, ack_timeout=ack_timeout)
+    def submit_user_text(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0) -> dict:
+        payload = {"message": text}
+        if is_proactive:
+            payload["is_proactive"] = True
+        return self._submit_user_event(WSEventType.USER_TEXT, payload=payload, ack_timeout=ack_timeout)
 
     def submit_user_image(self, image_base64: str, mime_type: str, image_client_path: str | None = None, ack_timeout: float = 10.0) -> dict:
         payload = {
@@ -84,8 +87,14 @@ class WsTransport:
     def submit_typing_event(self, text_length: int, ack_timeout: float = 10.0) -> dict:
         return self._submit_user_event(WSEventType.USER_TYPING, payload={"text_length": text_length}, ack_timeout=ack_timeout)
 
-    def submit_user_touch(self, touch_area: str, ack_timeout: float = 10.0) -> dict:
-        return self._submit_user_event(WSEventType.USER_TOUCH, payload={"touch_area": touch_area}, ack_timeout=ack_timeout)
+    def submit_user_touch(self, touch_area: str, click_frequency: dict = None, ack_timeout: float = 10.0) -> dict:
+        payload = {"touch_area": touch_area}
+        if click_frequency:
+            payload["click_frequency"] = click_frequency
+        return self._submit_user_event(WSEventType.USER_TOUCH, payload=payload, ack_timeout=ack_timeout)
+
+    def submit_user_preferences(self, preferences: dict, ack_timeout: float = 10.0) -> dict:
+        return self._submit_user_event(WSEventType.USER_PREFERENCE_SYNC, payload=preferences, ack_timeout=ack_timeout)
 
     def _submit_user_event(self, event_type: WSEventType, payload: dict, ack_timeout: float) -> dict:
         event = build_event(event_type, payload=payload)

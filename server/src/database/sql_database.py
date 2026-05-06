@@ -20,6 +20,7 @@ class User(Base):
     context_memory_count = Column(Integer, default=0)
     all_memory_count = Column(Integer, default=0)
     auth_token = Column(String, nullable=True)
+    preferences = Column(Text, default="{}")
 
     # Relationships
     invite_code = relationship("InviteCode", uselist=False, back_populates="user")
@@ -113,6 +114,15 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
+    # 迁移：为已存在的数据库添加 preferences 列
+    try:
+        with engine.connect() as conn:
+            conn.execute(
+                "ALTER TABLE users ADD COLUMN preferences Text DEFAULT '{}'"
+            )
+            conn.commit()
+    except Exception:
+        pass  # 列已存在，无需迁移
 
 def get_sql_db(): # Generator for FastAPI
     db = SessionLocal()

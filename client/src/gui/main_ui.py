@@ -4,11 +4,13 @@ Data: 2026-04-07
 Description: 主界面UI实现，包含Live2D显示和聊天窗口两部分，以及它们的交互逻辑。通过Binder与后端处理逻辑连接。
 '''
 import os
+import time
+from collections import deque
 from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, Signal
 from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon, QPixmap
-from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
-                               QTextEdit, QScrollArea, QLabel, 
-                                QFrame, QPushButton, QFileDialog, QSlider, 
+from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
+                               QTextEdit, QScrollArea, QLabel,
+                                QFrame, QPushButton, QFileDialog, QSlider,
                                 QMessageBox)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
@@ -31,6 +33,11 @@ class Live2DWidget(QOpenGLWidget):
         self.agent_binder = agent_binder
         agent_binder.on_set_model(self.model) # 有些参数需要在创建模型之后才能设置，所以通过binder传递模型实例给agent_binder，由它来调用相关回调设置参数。
         self.setMouseTracking(True)
+        # 点击间隔控制（防止服务端过载）
+        self._click_interval = 0.3  # 300ms
+        self._last_click_time = 0.0
+        # 点击频率统计（供LLM分析）
+        self._click_timestamps: deque = deque(maxlen=50)
 
     def initializeGL(self) -> None:
         # Load model config
@@ -65,23 +72,39 @@ class Live2DWidget(QOpenGLWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         '''
-        处理鼠标点击事件，判断是否点击在模型的特定区域（头部、脸颊、手、身体等），
-        触发对应的动作动画并向服务端发送触摸事件，由LLM生成上下文相关的回应。
+        处理鼠标点击事件，只检测头部点击区域，设置点击间隔防止服务端过载，
+        并统计点击频率供LLM分析用户行为。
         '''
         if not self.model:
             return
+
+        # 点击间隔控制
+        now = time.time()
+        if now - self._last_click_time < self._click_interval:
+            return
+        self._last_click_time = now
+
         x, y = event.position().x(), event.position().y()
 
-        # 遍历 HitAreas，按优先级从高到低检测
-        hit_areas = ["头", "辫子", "耳机", "袖", "左腿", "8"]
-        for area in hit_areas:
-            if self.model.HitTest(area, x, y):
-                # 播放对应的 Tap 动画
-                motion_group = f"Tap{area}"
-                self.model.StartMotion(motion_group, 0, 3)
-                # 向服务端发送触摸事件，由LLM生成回应
-                self.agent_binder.on_send_touch(area)
-                return
+        # 只保留头部点击区域
+        if self.model.HitTest("头", x, y):
+            # 记录点击时间戳
+            self._click_timestamps.append(now)
+
+            # 计算点击频率（最近N秒内的点击次数）
+            cutoff_10s = now - 10
+            cutoff_30s = now - 30
+            count_10s = sum(1 for t in self._click_timestamps if t > cutoff_10s)
+            count_30s = sum(1 for t in self._click_timestamps if t > cutoff_30s)
+            click_frequency = {
+                "count_10s": count_10s,
+                "count_30s": count_30s,
+            }
+
+            # 播放对应的 Tap 动画
+            self.model.StartMotion("Tap头", 0, 3)
+            # 向服务端发送触摸事件及频率数据，由LLM生成回应
+            self.agent_binder.on_send_touch("头", click_frequency=click_frequency)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         '''
@@ -516,9 +539,9 @@ class ChatWidget(QWidget):
         if self.preferences_manager is None:
             from ..user_preferences_manager import UserPreferencesManager
             self.preferences_manager = UserPreferencesManager()
-        
+
         from .preferences_dialog import UserPreferencesDialog
-        dialog = UserPreferencesDialog(self.preferences_manager, self)
+        dialog = UserPreferencesDialog(self.preferences_manager, self, agent_binder=self.agent)
         dialog.exec()
     
     def on_scroll_value_changed(self, value):
@@ -795,22 +818,7 @@ class ChatWidget(QWidget):
         text = self.input_box.toPlainText().strip()
         if not text:
             return
-        
-        # 如果有偏好管理器，添加上下文到消息
-        if self.preferences_manager:
-            try:
-                context = self.preferences_manager.get_relationship_context()
-                if context:
-                    # 在消息前添加上下文提示（简洁版本）
-                    mode = self.preferences_manager.get_relationship_mode()
-                    relationship = mode.get("relationship", "")
-                    style = mode.get("speaking_style", "")
-                    if relationship or style:
-                        context_hint = f"[关系：{relationship}，风格：{style}] "
-                        text = context_hint + text
-            except Exception as e:
-                print(f"Failed to add context: {e}")
-        
+
         bubble = self.add_message("text", text, conv_uuid="", is_user=True)
         self.input_box.clear()
         

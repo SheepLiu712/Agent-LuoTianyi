@@ -13,9 +13,10 @@ from .user_preferences_manager import UserPreferencesManager
 class UserPreferencesDialog(QDialog):
     """用户偏好设置对话框"""
     
-    def __init__(self, preferences_manager: UserPreferencesManager, parent=None):
+    def __init__(self, preferences_manager: UserPreferencesManager, parent=None, agent_binder=None):
         super().__init__(parent)
         self.preferences_manager = preferences_manager
+        self.agent_binder = agent_binder
         self.setWindowTitle("用户自定义设置")
         self.setMinimumSize(600, 500)
         self.setModal(True)
@@ -164,7 +165,7 @@ class UserPreferencesDialog(QDialog):
         rel_layout = QHBoxLayout()
         rel_layout.addWidget(QLabel("关系类型:"))
         self.relationship_combo = QComboBox()
-        self.relationship_combo.addItems(["朋友", "亲密朋友", "恋人", "家人", "导师", "学生", "其他"])
+        self.relationship_combo.addItems(["朋友", "知己", "粉丝", "搭档", "家人", "其他"])
         self.relationship_combo.setEditable(True)
         rel_layout.addWidget(self.relationship_combo)
         rel_layout.addStretch()
@@ -174,7 +175,7 @@ class UserPreferencesDialog(QDialog):
         style_layout = QHBoxLayout()
         style_layout.addWidget(QLabel("表达风格:"))
         self.style_combo = QComboBox()
-        self.style_combo.addItems(["友好温和", "活泼可爱", "成熟稳重", "幽默风趣", "专业严谨", "随意自然"])
+        self.style_combo.addItems(["活泼可爱", "温柔可人", "俏皮调皮", "诗意文艺", "热情洋溢", "文静恬淡", "随意自然"])
         self.style_combo.setEditable(True)
         style_layout.addWidget(self.style_combo)
         style_layout.addStretch()
@@ -244,7 +245,7 @@ class UserPreferencesDialog(QDialog):
         # 加载相处模式
         mode = self.preferences_manager.get_relationship_mode()
         relationship = mode.get("relationship", "朋友")
-        speaking_style = mode.get("speaking_style", "友好温和")
+        speaking_style = mode.get("speaking_style", "活泼可爱")
         personality_traits = mode.get("personality_traits", [])
         custom_context = mode.get("custom_context", "")
         
@@ -320,27 +321,37 @@ class UserPreferencesDialog(QDialog):
             speaking_style = self.style_combo.currentText()
             personality_traits = [t.strip() for t in self.personality_input.text().split("、") if t.strip()]
             custom_context = self.custom_context_input.toPlainText().strip()
-            
+
             self.preferences_manager.set_relationship_mode(
                 relationship=relationship,
                 speaking_style=speaking_style,
                 personality_traits=personality_traits,
                 custom_context=custom_context
             )
-            
+
             # 保存提醒设置
             enable_reminders = self.enable_reminder_check.isChecked()
             reminder_time = self.reminder_time_edit.time().toString("HH:mm")
             check_interval = self.interval_spin.value()
-            
+
             self.preferences_manager.set_reminder_settings(
                 enable_reminders=enable_reminders,
                 reminder_time=reminder_time,
                 check_interval_hours=check_interval
             )
-            
+
+            # 同步偏好到服务端
+            if self.agent_binder and hasattr(self.agent_binder, 'on_send_preferences'):
+                preferences_data = {
+                    "relationship": relationship,
+                    "speaking_style": speaking_style,
+                    "personality_traits": personality_traits,
+                    "custom_context": custom_context,
+                }
+                self.agent_binder.on_send_preferences(preferences_data)
+
             QMessageBox.information(self, "成功", "设置已保存！")
             self.accept()
-        
+
         except Exception as e:
             QMessageBox.warning(self, "错误", f"保存设置失败: {e}")

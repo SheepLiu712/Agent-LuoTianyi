@@ -32,6 +32,8 @@ class AgentBinder(QObject):
         auto_login_callback: Callable[[str, str], bool],
         login_callback: Callable[[str, str, bool], Tuple[bool, str]],
         register_callback: Callable[[str, str, str], Tuple[bool, str]],
+        send_proactive_text_callback: Callable[[str], str] | None = None,
+        send_preferences_callback: Callable[[dict], None] | None = None,
     ):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
@@ -40,6 +42,8 @@ class AgentBinder(QObject):
         self.send_image_callback = send_image_callback
         self.send_typing_callback = send_typing_callback
         self.send_touch_callback = send_touch_callback
+        self.send_proactive_text_callback = send_proactive_text_callback
+        self.send_preferences_callback = send_preferences_callback
         self.play_local_tts_callback = play_local_tts_callback
         self.stop_local_tts_callback = stop_local_tts_callback
         self.set_volume_callback = set_volume_callback
@@ -139,9 +143,12 @@ class AgentBinder(QObject):
     def on_send_typing(self, text_length: int):
         self.send_typing_callback(text_length=text_length)
 
-    def on_send_touch(self, touch_area: str):
+    def on_send_touch(self, touch_area: str, click_frequency: dict = None):
         if self.send_touch_callback:
-            self.send_touch_callback(touch_area)
+            if click_frequency:
+                self.send_touch_callback(touch_area, click_frequency=click_frequency)
+            else:
+                self.send_touch_callback(touch_area)
 
     def on_play_local_tts(self, conv_uuid: str) -> bool:
         if self.play_local_tts_callback:
@@ -172,16 +179,23 @@ class AgentBinder(QObject):
     def send_text_proactive(self, text: str) -> str:
         """
         程序化地发送文本消息（用于主动提醒等场景）
-        不需要 UI 气泡，只发送消息并让 AI 响应
+        不需要 UI 气泡，只发送消息并让 AI 响应，且不会被保存到数据库作为用户发言。
         :param text: 要发送的文本
         :return: 消息 ID
         """
+        if self.send_proactive_text_callback:
+            msg_id = self.send_proactive_text_callback(text)
+            return msg_id
+        self.logger.warning("send_proactive_text_callback not set, falling back to send_text")
         if self.send_text_callback:
             msg_id = self.send_text_callback(text)
-            # 不添加到 msg_to_bubble，因为这是程序化发送的消息
             return msg_id
         return None
 
+    def on_send_preferences(self, preferences: dict):
+        """将用户偏好设置发送到服务端保存。"""
+        if self.send_preferences_callback:
+            self.send_preferences_callback(preferences)
     def _scheduled_start_thinking(self):
         """Legacy hook kept for compatibility; thinking bubble is no longer auto-driven."""
         return

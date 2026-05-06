@@ -197,6 +197,12 @@ class WebSocketService:
                 "8": "用户戳了戳天依",
             }
             text = area_to_description.get(touch_area, f"用户碰了碰天依的{touch_area}")
+            # 如果包含点击频率数据，附加到文本中供LLM分析
+            click_frequency = payload.get("click_frequency")
+            if click_frequency:
+                count_10s = click_frequency.get("count_10s", 0)
+                count_30s = click_frequency.get("count_30s", 0)
+                text += f"（点击频率：最近10秒{count_10s}次，最近30秒{count_30s}次）"
             return ChatInputEvent(
                 event_type=ChatInputEventType.USER_TOUCH,
                 text=f"[{text}]",
