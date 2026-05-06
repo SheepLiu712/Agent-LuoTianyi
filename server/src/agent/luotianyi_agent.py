@@ -19,6 +19,7 @@ from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentCh
 from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
+from .affection_manager import AffectionManager
 from ..types.conversation_type import ConversationItem
 from ..utils.logger import get_logger
 from ..tts import TTSModule
@@ -95,6 +96,10 @@ class LuoTianyiAgent:
         self.memory_manager = MemoryManager(memory_config, self.prompt_manager, self.singing_manager)  # 记忆管理器
 
         self.tts_engine = tts_module  # TTS模块
+        affection_llm_config = self.config.get("affection_manager", {}).get("llm") or (
+            self.config.get("main_chat", {}).get("llm_module", {}).get("llm", {})
+        )
+        self.affection_manager = AffectionManager(affection_llm_config)
         self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
         self.topic_extractor = TopicExtractor(
             self.config.get("topic_extractor", {}),
@@ -302,6 +307,13 @@ class LuoTianyiAgent:
                         user_description = (user_description + "\n" + pref_context).strip()
                 except Exception as e:
                     self.logger.warning(f"Failed to parse preferences: {e}")
+            # 注入好感度上下文
+            try:
+                affection_ctx = self.affection_manager.get_affection_context(db, user_id)
+                if affection_ctx:
+                    user_description = (user_description + "\n" + affection_ctx).strip()
+            except Exception as e:
+                self.logger.warning(f"Failed to get affection context: {e}")
         finally:
             db.close()
 
@@ -522,14 +534,31 @@ class LuoTianyiAgent:
                 }
 
         await self.conversation_manager.add_conversation( # 等待入库
-            db=self._runtime_hub.open_sql_session(), 
-            redis=self._runtime_hub.redis_client, 
+            db=self._runtime_hub.open_sql_session(),
+            redis=self._runtime_hub.redis_client,
             user_id=user_uuid,
             source=ConversationSource.USER,
             content=content,
-            type=conversation_type, 
-            data=payload,  
+            type=conversation_type,
+            data=payload,
         )
+
+        # 由 LLM 分析用户消息并调整好感度
+        try:
+            db = self._runtime_hub.open_sql_session()
+            try:
+                current_score = self.affection_manager.get_score(db, user_uuid)
+                delta, reason = await self.affection_manager.analyze_affection(
+                    content, current_score
+                )
+                if delta != 0:
+                    self.affection_manager.add_affection(
+                        db, user_uuid, delta, f"LLM分析: {reason}"
+                    )
+            finally:
+                db.close()
+        except Exception as e:
+            self.logger.warning(f"Failed to analyze affection: {e}")
 
     async def handle_history_request(self, user_id: str, count: int, end_index: int) -> Dict[str, Any]:
         """处理历史记录请求

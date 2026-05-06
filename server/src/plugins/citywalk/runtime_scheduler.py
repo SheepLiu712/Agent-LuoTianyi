@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+from ...database.sql_database import get_sql_session
 from ...utils.logger import get_logger
 from .amap_client import AMapClient
 from .config import load_citywalk_config
