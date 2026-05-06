@@ -107,7 +107,7 @@ class EventParser:
             content=content[:1500],  # 控制长度
         )
         try:
-            result = await self.llm_client.generate_response(prompt, use_json=False)
+            result = await self.llm_client.generate_response(prompt, use_json=True)
             result = (result or "").strip()
 
             # 提取 JSON 数组（容错处理）

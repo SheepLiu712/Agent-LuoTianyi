@@ -182,8 +182,7 @@ class OfficialFeedFetcher:
             if dyn_type in (2, 8):  # 视频投稿
                 card = item.get("card", {})
                 if isinstance(card, str):
-                    import json as _json
-                    card = _json.loads(card)
+                    card = json.loads(card)
                 title = card.get("title", "")
                 desc_text = card.get("desc", "")
                 content_parts.append(f"[投稿视频] 标题：{title}")
@@ -208,9 +207,8 @@ class OfficialFeedFetcher:
             elif dyn_type == 64:  # 专栏
                 card = item.get("card", {})
                 if isinstance(card, str):
-                    import json as _json
                     try:
-                        card = _json.loads(card)
+                        card = json.loads(card)
                     except Exception:
                         card = {}
                 title = card.get("title", "")

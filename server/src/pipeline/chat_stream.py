@@ -22,7 +22,7 @@ class ChatStream:
 
     def __init__(self, ws_connection: WebSocketConnection):
         self.ws_connection = ws_connection
-        self.user_name: str = ws_connection.user_name if ws_connection else "unknown"
+        self.user_name: str = ws_connection.user_name
         self.user_uuid: Optional[str] = ws_connection.user_uuid if ws_connection else None
         self.logger = get_logger(f"{self.user_name}ChatStream")
         self.service_hub: ServiceHub | None = None
@@ -212,7 +212,7 @@ class ChatStream:
         self.ws_connection = new_ws_connection
         self.user_name = new_ws_connection.user_name if new_ws_connection else self.user_name
         self.connection_lost_time = None
-        self.current_state = self.STATE_WAITING
+        self.state = self.STATE_WAITING
         self.start_if_needed()
 
     def clean_up(self):

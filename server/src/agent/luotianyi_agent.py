@@ -139,11 +139,22 @@ class LuoTianyiAgent:
     
     async def generate_topic_from_activity(self, activity_type: ActivityType, user_uuid: str, llm_client: "LLMAPIInterface", **kwargs) -> "ExtractedTopic":
         """根据用户活动生成话题，供 ActivityMaker 调用"""
+        from ..pipeline.topic_planner import ExtractedTopic
+        from ..pipeline.modules.unread_store import UnreadMessage
         prompt = self.prompt_manager.get_template(activity_type.value)
         if not prompt:
             self.logger.error(f"No prompt template found for activity type {activity_type}")
             raise ValueError(f"No prompt template found for activity type {activity_type}")
         prompt = prompt.render(**kwargs)
+
+        content = await llm_client.generate_response(prompt, use_json=False)
+        return ExtractedTopic(
+            topic_id=str(uuid4()),
+            source_messages=[],
+            topic_content=content or prompt,
+            summary="",
+            is_activity=True,
+        )
 
 
     async def describe_image(self, image_base64: str) -> str:

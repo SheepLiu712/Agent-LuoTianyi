@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from src.utils.logger import get_logger
@@ -107,7 +108,6 @@ class ActivityContextProvider:
 
     def _load_mention_log(self) -> None:
         try:
-            from pathlib import Path
             p = Path(self._log_file)
             if p.exists():
                 self._mention_log = json.loads(p.read_text(encoding="utf-8"))
@@ -117,7 +117,6 @@ class ActivityContextProvider:
 
     def _save_mention_log(self) -> None:
         try:
-            from pathlib import Path
             p = Path(self._log_file)
             p.parent.mkdir(parents=True, exist_ok=True)
             # 只保留最近 100 条记录

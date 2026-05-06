@@ -7,11 +7,12 @@ from ..database.sql_database import get_sql_session
 from .types import WSEventType, WSMessage
 from ..pipeline.chat_events import ChatInputEvent, ChatInputEventType
 from .account import check_message_token
+from ..utils.logger import get_logger
 
 
 class WebSocketService:
     def __init__(self):
-        pass
+        self.logger = get_logger(__name__)
 
     async def try_recv_client_msg(self, websocket_connection: "WebSocketConnection") -> WSMessage | None:
         '''

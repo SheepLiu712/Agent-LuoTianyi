@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, List, Optional, Tuple
 import asyncio
+import traceback
 from ..utils.logger import get_logger
 from .global_speaking_worker import SpeakingJob
 from ..agent.main_chat import OneResponseLine, SongSegmentChat, ContextType
@@ -9,17 +10,6 @@ if TYPE_CHECKING:
     from ..interface.service_hub import ServiceHub
     from .topic_planner import ExtractedTopic
 
-
-
-# class ExtractedTopic:
-#     topic_id: str
-#     source_messages: list[str]
-#     topic_content: str
-#     memory_attempts: list[str]
-#     fact_constraints: list[str]
-#     sing_attempts: list[str]
-    
-#     is_forced_from_incomplete: bool = False
 
 class TopicReplier:
     def __init__(self, username: str, user_id: str, send_reply_callback: Callable[[ChatResponse], Awaitable[None]]):
@@ -61,7 +51,6 @@ class TopicReplier:
                 self.logger.info("TopicReplier processor task cancelled")
                 break
             except Exception as e:
-                import traceback
                 self.logger.error(f"Error in topic_processor: {e} \n{traceback.format_exc()}")
             finally:
                 if topic is not None:

@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from src.plugins.citywalk.decision_engine import CitywalkDecisionEngine
 from src.plugins.citywalk.errors import LLMDecisionError
 from src.plugins.citywalk.types import CitywalkState, POI
@@ -123,7 +125,7 @@ def test_decide_raises_when_llm_output_invalid():
     engine = CitywalkDecisionEngine(_build_cfg(), llm_client=BadClient())
     pois = [POI(poi_id="1", name="书店", location="1,1", distance_m=500)]
 
-    try:
+    with pytest.raises(LLMDecisionError) as exc_info:
         engine.decide(
             city="北京",
             current_location="116.3,39.9",
@@ -132,7 +134,4 @@ def test_decide_raises_when_llm_output_invalid():
             state=CitywalkState(energy=88, elapsed_minutes=40),
             history_events=[],
         )
-    except LLMDecisionError as exc:
-        assert "决策LLM多次失败" in str(exc)
-    else:
-        raise AssertionError("Expected LLMDecisionError")
+    assert "决策LLM多次失败" in str(exc_info.value)

@@ -1,5 +1,6 @@
+import json
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import uvicorn
@@ -97,7 +98,7 @@ async def startup_event(app: FastAPI):
     # 启动城市漫步日程任务：每天凌晨1点，20%概率执行一次逛街；每3天同步一次新歌。
     global daily_scheduler
     citywalk_runtime = CitywalkRuntimeService(config_path="config/config.json", vector_store=database.get_vector_store())
-    song_learner = AutoSongLearner(config={"resource_path": "res/music"})
+    song_learner = AutoSongLearner(config={"resource_path": "res/music", "songlearner_dir": "songlearner"})
     daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime, song_learner=song_learner)
     daily_scheduler.start()
 

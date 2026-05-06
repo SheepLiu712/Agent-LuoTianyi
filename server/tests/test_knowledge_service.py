@@ -19,19 +19,34 @@ from src.plugins.music.knowledge_service import (
 class TestKnowledgeService(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        # 初始化数据库连接 (假设数据库已存在并包含数据，基于之前的操作)
-        # 这里直接使用 production DB 的路径，因为我们只是读取测试
-        # 如果需要完全隔离的测试环境，应该创建一个临时DB并populate数据
-        # 但既然用户指定用《千年食谱颂》《光与影的对白》测试，暗示用现有数据
-        project_root = os.getcwd()
-        db_folder = os.path.join(project_root, "res", "knowledge")
-        db_file = "knowledge_db.db"
-        config = {
-            "db_folder": db_folder,
-            "db_file": db_file
-        }
-        init_song_db(config)
-        cls.db = get_song_session()
+        # 使用内存数据库，隔离测试数据
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from src.plugins.music.song_database import Base, Song
+
+        engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+        Base.metadata.create_all(bind=engine)
+        session_factory = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+        cls.db = session_factory()
+
+        # 种子测试数据
+        test_songs = [
+            Song(
+                name="纯蓝", safe_name="chun_lan",
+                uploader="H.K.君", singers="洛天依",
+                introduction="《纯蓝》是Vsinger（洛天依）演唱的歌曲，由H.K.君创作。",
+                lyrics="也许某天 你终想起我 纯蓝的 回忆中 那片天空"
+            ),
+            Song(
+                name="光与影的对白", safe_name="guang_yu_ying_de_dui_bai",
+                uploader="OQQ", singers="洛天依",
+                introduction="《光与影的对白》是洛天依演唱的歌曲。",
+                lyrics="光与影的对白 诉说着我们的存在"
+            ),
+        ]
+        for song in test_songs:
+            cls.db.add(song)
+        cls.db.commit()
 
     @classmethod
     def tearDownClass(cls):

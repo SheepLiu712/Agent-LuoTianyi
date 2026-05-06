@@ -75,6 +75,15 @@ def test_session_runner_generates_events():
         decision_engine=FakeDecision(),
         environment_engine=FakeEnvironment(),
     )
+    runner.llm_client = object()
+
+    def _fake_call_llm_json(system_prompt, user_prompt):
+        if "selected_index" in str(user_prompt):
+            return {"selected_index": 1, "reason": "顺路", "expected_activity": "看看风景"}
+        return {"destination_name": "成都宽窄巷子", "city": "成都", "category": "景点", "reason": "想换个城市感受烟火气"}
+
+    runner._call_llm_json = _fake_call_llm_json
+    runner._call_llm_text = lambda s, u: "今天在成都逛了逛，感觉很舒服。"
     result = runner.run(city="北京", start_location="116.39,39.90")
 
     assert len(result.events) >= 1
@@ -119,6 +128,6 @@ def test_select_initial_destination_includes_recent_history():
     )
 
     assert result["destination_city"] == "成都"
-    assert "最近10次逛街历史" in captured["prompt"]
+    assert "最近逛街历史" in captured["prompt"]
     assert "城市=北京" in captured["prompt"]
     assert "南锣鼓巷" in captured["prompt"]

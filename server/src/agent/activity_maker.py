@@ -415,38 +415,6 @@ class ActivityMaker:
                 self.logger.warning(f"Prompt '{prompt_name}' for activity type '{activity_type}' not found in prompt manager, skipping")
                 continue
 
-    async def _silence_monitor_loop(self, user_uuid: str, chat_stream: "ChatStream") -> None:
-        self.logger.info(f"Activity monitor started for user_uuid={user_uuid}")
-        try:
-            while True:
-                await asyncio.sleep(self.silence_check_interval_seconds)
-                state = self.user_states.get(user_uuid)
-                if state is None:
-                    return
-
-                now_ts = time.monotonic()
-                if not state.meter.should_trigger(
-                    now_ts=now_ts,
-                    trigger_threshold=self.activity_trigger_threshold,
-                    silence_threshold_seconds=self.silence_threshold_seconds,
-                    cooldown_seconds=self.silence_trigger_cooldown_seconds,
-                    decay_interval_seconds=self.inactivity_decay_interval_seconds,
-                ):
-                    continue
-
-                state.meter.on_triggered(now_ts)
-                action = ActionActivity(
-                    activity_type=ActivityType.USER_SILENCE,
-                    payload={"user_uuid": user_uuid, "silence_seconds": self.silence_threshold_seconds},
-                )
-                await self.dispatch_action(action, user_uuid, chat_stream)
-        except asyncio.CancelledError:
-            self.logger.info(f"Activity monitor cancelled for user_uuid={user_uuid}")
-            raise
-        except Exception as e:
-            self.logger.error(f"Activity monitor loop failed for user_uuid={user_uuid}: {e}")
-
-
     async def _build_topic(self, action: ActionActivity, user_uuid: str) -> ExtractedTopic:
         fallback_topic = ExtractedTopic(
                 topic_id=str(uuid4()),

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -109,7 +109,6 @@ class EventStore:
             # 模糊匹配：标题包含关系 且 时间相近
             if (title in event.title or event.title in title) and event.start_time:
                 try:
-                    from datetime import date
                     d1 = datetime.fromisoformat(event.start_time).date()
                     d2 = datetime.fromisoformat(start_time).date()
                     if abs((d1 - d2).days) <= threshold_days:
@@ -121,7 +120,7 @@ class EventStore:
     def get_active_events(self, lookahead_days: int = 7) -> List[ScheduleEvent]:
         """获取未来 N 天内的活跃事件（upcoming/ongoing）。"""
         now = datetime.now()
-        cutoff = now + __import__("datetime").timedelta(days=lookahead_days)
+        cutoff = now + timedelta(days=lookahead_days)
         result = []
         for e in self._list_events():
             if e.status not in {EventStatus.UPCOMING, EventStatus.ONGOING}:

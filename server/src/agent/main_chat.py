@@ -156,51 +156,6 @@ class MainChat:
 
         return [self.default_response]
 
-    def _split_text_to_short_sentences(self, text: str) -> List[str]:
-        """复用 _split_responses 的拆句策略：按标点切分并聚合为短句。"""
-        raw = (text or "").strip()
-        if not raw:
-            return []
-
-        punct_pattern = re.compile(r"^(?:\.{3}|[。，！？~,])+$")
-        parts = re.split(r"((?:\.{3}|[。，！？~,]))", raw)
-
-        sentences_with_punct: List[str] = []
-        for s in parts:
-            if not s:
-                continue
-            if punct_pattern.match(s) and sentences_with_punct:
-                sentences_with_punct[-1] += s
-            else:
-                sentences_with_punct.append(s)
-
-        sentence_buffer = ""
-        split_sentences: List[str] = []
-
-        for i, sentence in enumerate(sentences_with_punct):
-            match = re.match(r"^(\（.*?\）|\(.*?\))", sentence)
-            paren_content = None
-            if match:
-                paren_content = match.group(1)
-                sentence = sentence[len(paren_content) :]
-
-            if paren_content:
-                if sentence_buffer.strip():
-                    sentence_buffer += paren_content
-                elif split_sentences:
-                    split_sentences[-1] += paren_content
-                else:
-                    sentence = paren_content + sentence
-
-            sentence_buffer += sentence
-
-            if len(sentence_buffer) >= 8 or i == len(sentences_with_punct) - 1:
-                final_content = sentence_buffer.strip()
-                if final_content:
-                    split_sentences.append(final_content)
-                sentence_buffer = ""
-
-        return split_sentences
 
     def _build_user_persona(self, user_nickname: str, user_description: str) -> str:
         return user_description.strip()

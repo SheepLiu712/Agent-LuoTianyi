@@ -1,26 +1,40 @@
-from openai import OpenAI
+"""
+LLM tool test — validates OpenAI-compatible client configuration.
+Skips if QWEN_API_KEY is not set (CI/debug environments).
+"""
+
+import json
 import os
 import sys
-import json
+
 cwd = os.getcwd()
 sys.path.insert(0, str(cwd))
 
+import pytest
 
-api_key = os.environ.get("QWEN_API_KEY", "您的 APIKEY"), # 从https://cloud.siliconflow.cn/account/ak获取
-print(api_key)
-client = OpenAI(
-    api_key=os.environ.get("QWEN_API_KEY", "您的 APIKEY"), # 从https://cloud.siliconflow.cn/account/ak获取
-    base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+@pytest.mark.skipif(
+    not os.getenv("QWEN_API_KEY") or os.getenv("QWEN_API_KEY", "").startswith("$"),
+    reason="QWEN_API_KEY not configured",
 )
+def test_llm_client_creates_response():
+    from openai import OpenAI
 
-response = client.chat.completions.create(
-        model="qwen3-max",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant designed to output JSON."},
-            {"role": "user", "content": "? 2020 年世界奥运会乒乓球男子和女子单打冠军分别是谁? "
-             "Please respond in the format {\"男子冠军\": ..., \"女子冠军\": ...}"}
-        ],
-        response_format={"type": "json_object"}
+    api_key = os.environ["QWEN_API_KEY"]
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
     )
 
-print(response.choices[0].message.content)
+    response = client.chat.completions.create(
+        model="qwen3-plus",
+        messages=[
+            {"role": "system", "content": "Output JSON."},
+            {"role": "user", "content": 'Say {"hello": "world"} in JSON.'},
+        ],
+        response_format={"type": "json_object"},
+    )
+
+    content = response.choices[0].message.content
+    data = json.loads(content)
+    assert "hello" in data
