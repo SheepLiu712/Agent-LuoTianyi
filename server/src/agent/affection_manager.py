@@ -197,6 +197,6 @@ class AffectionManager:
         parts = [f"当前好感度：{score}（{level_cn}）"]
         if next_level:
             parts.append(
-                f"距离下一等级（{next_level[0]}）还差 {next_level[1]} 好感度"
+                f"距离下一等级（{next_level[0]}）还差 {next_level[2]} 好感度"
             )
         return "（" + "，".join(parts) + "）"
