@@ -1,46 +1,33 @@
-# AgentLuo-Client 洛天依对话Agent的客户端
+# AgentLuo 洛天依对话Agent
 [![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/)
 
 ## 🎵 项目介绍
-AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天依（Luo Tianyi）智能对话Agent。该Agent整合了Live2D模型功能和GPT-SoVITS提供的语音合成（TTS）功能，并实现了基于嵌入（Embedding）的向量记忆检索和洛天依歌曲的知识库。
+AgentLuo期望构建具有真实感的虚拟歌手洛天依的数字生命，并以多种模态与用户交流，提供沉浸式的交流体验和温暖的情感支撑。
 
-本项目旨在为用户提供沉浸式的洛天依互动体验。本项目包含三个部分：
+AgentLuo具有以下功能：
+- **角色扮演**：基于洛天依的官方设定和现有作品，塑造符合其性格和背景的对话风格。
+- **多模态交互**：支持图片和文字输入。集成Live2D模型，实现动态表情和口型同步；利用TTS技术，实现自然流畅的语音输出，并支持少量洛天依歌曲的演唱功能。
+- **无限上下文管理**：支持长时间对话的上下文记忆，并支持不同用户的人物侧写和相处方式记忆。
+- **知识库集成**：结合向量数据库和图数据库，实现基于知识的智能回答，使得天依能够记住用户信息和偏好，并且对中V歌曲有较好的理解。
+- **可拓展性**：模块化设计，原则上通过替换资源文件可以将该项目用于其他虚拟角色的构建。
+
+本项目包含三个部分：
 - server：服务端，负责处理用户请求，管理对话状态，调用LLM生成回复，调用TTS生成语音，以及管理知识库和记忆。
 - client：PC客户端，提供用户界面，展示Live2D模型，播放语音，并与服务端进行通信。
 - app：实际上是安卓客户端，提供和PC客户端类似的功能，但界面和交互方式适配移动设备。
 
-
-### ☀️功能特色
-- **角色扮演**：基于洛天依的官方设定和现有作品，塑造符合其性格和背景的对话风格。
-- **多模态交互**：集成Live2D模型，实现动态表情和口型同步。
-- **语音合成**：利用GPT-SoVITS技术，实现自然流畅的语音输出。
-- **歌曲演唱**：支持少量洛天依歌曲的演唱功能。
-- **图片识别**：通过集成图像识别技术，能够识别用户上传的图片内容，并进行相关对话。
-- **无限上下文管理**：支持长时间对话的上下文记忆，提升交互连贯性。
-- **知识库集成**：结合向量数据库和图数据库，实现基于知识的智能回答，使得天依能够记住用户信息和偏好，并且对圈子内的知识有较好的理解。
-- **可拓展性**：模块化设计，原则上通过替换资源文件可以将该项目用于其他虚拟角色的构建。
-
-### 🚀 技术栈
-注意，服务端的配置难度要远高于客户端。下面简要介绍服务端的技术栈：
-- **编程语言**：Python 3.10
-- **Web框架**：FastAPI
-- **数据库**：sqlite（使用 SQLAlchemy 进行 ORM 操作）
-- **缓存**：Redis
-- **向量数据库**：ChromaDB
-- **TTS合成**：GPT-SoVITS
-- **异步任务**：使用 asyncio 和 FastAPI 的 BackgroundTasks 实现异步
-- **公网访问**：使用 sakurafrpp 实现内网穿透，支持公网访问
+Server承担了绝大多数的数据处理、管理和计算任务。client和app均需要通过向server请求服务，才能实现与洛天依的互动。
 
 ### 🎞️展示视频
 
 [这是独属于你的洛天依](https://www.bilibili.com/video/BV15LZ7BJE3e)
 
-## 🚀 Client快速开始
+## 🚀 PC客户端快速开始
 ### 普通方式
-在Releases页面下载最新版本的安装包，解压后运行`Chat with Luotianyi.exe`。
+在Releases页面下载最新版本的安装包（以`.zip`或`.7z`结尾的文件），解压后运行`Chat with Luotianyi.exe`。
 
-第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要通过QQ与作者联系获取。
+第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要私信服务器管理者（现在即作者）获取。
 
 注册成功之后即可登录。勾选自动登录后，下一次运行将直接进入主界面。
 
@@ -49,14 +36,14 @@ AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天
 ```bash
 git clone https://github.com/SheepLiu712/Agent-Luotianyi
 ```
-2. 进入项目目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
+2. 进入项目的client目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
 3. 运行`main.py`启动客户端。
 
 ## 🚀 App快速开始
 ### 普通方式
-在Releases页面下载最新版本的apk文件，安装之。由于现在这个版本没有上架应用商店（没有任何鉴权），所以需要允许安装未知来源的应用。
+在Releases页面下载最新版本的apk文件，安装之。由于现在这个版本没有上架应用商店，所以需要允许安装未知来源的应用。
 
-第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要通过QQ与作者联系获取。
+第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要私信服务器管理者（现在即作者）获取。
 
 注册成功之后即可登录。勾选自动登录后，下一次运行将直接进入主界面。
 
@@ -65,7 +52,12 @@ git clone https://github.com/SheepLiu712/Agent-Luotianyi
 ```bash
 git clone https://github.com/SheepLiu712/Agent-Luotianyi
 ```
-后面我也不会了，开摆。
+进入app目录。项目基于Expo开发，因此依次执行以下指令，可以在expo环境中运行：
+```
+npx expo install
+npx expo start
+```
+你也可以将expo项目构建为标准的安卓项目。
 
 ## 🔧服务端架设
 ### 一、环境要求
@@ -77,8 +69,8 @@ git clone https://github.com/SheepLiu712/Agent-Luotianyi
 ### 二、安装流程
 1. 克隆项目仓库：
    ```bash
-   git clone https://github.com/SheepLiu712/Agent-LuoTianyi-server.git
-   cd Agent-LuoTianyi-server
+   git clone https://github.com/SheepLiu712/Agent-LuoTianyi.git
+   cd Agent-LuoTianyi/server
    ```
 
 2. 确保conda已安装，随后运行安装脚本（在命令行中运行，或者双击运行快速启动脚本）
@@ -92,21 +84,22 @@ git clone https://github.com/SheepLiu712/Agent-Luotianyi
     - 在Windows上，可以通过“系统属性”->“高级”->“环境变量”进行设置，或者在命令行中运行：
       ```bash
       setx SILICONFLOW_API_KEY "your_api_key_here"
+      setx QWEN_API_KEY "your_api_key_here"
       ```
-    - 所配置的环境变量需要和config.json中的占位符一致，并不局限于硅基流动的api_key，如果你使用了其他需要密钥的服务（如OpenAI、Azure等），也需要按照同样的方式配置环境变量。
+    - 所配置的环境变量需要和config.json中的占位符一致，并不局限于硅基流动的api_key，如果你使用了其他需要密钥的服务，建议也按照同样的方式配置环境变量。
 
 4. 下载资源：
-  - 联系开发者获取资源文件和数据文件。
+  - 联系开发者获取资源文件和数据文件（只有需要迁移数据库时需要）。
   - 将res文件解压到根目录
-  - 将data文件解压到根目录
+  - 将data文件解压到根目录（如需要迁移数据库）
 
 ### 三、启动服务
-- 运行redis服务（如果你已经安装了redis，并且将其添加到了环境变量中，可以直接在命令行中运行 `redis-server` 来启动服务）
 - 在命令行中启动对应conda环境，运行以下命令启动服务：
   ```bash
   python server_main.py
   ```
 - 打开sakurafrp的隧道接入公网（如果需要公网访问的话）
+- 在运行中如果遇到任何依赖缺失的问题，可以私信作者，或者提issue
 
 ## 📜 许可证和版权
 
@@ -136,5 +129,79 @@ git clone https://github.com/SheepLiu712/Agent-Luotianyi
 - 感谢[GPT-SoVITS项目](https://github.com/RVC-Boss/GPT-SoVITS/)提供的开源语音合成技术
 - 感谢[火爆鸡王](https://space.bilibili.com/5033594)发布的Live2D模型
 - 感谢硅基流动平台提供的API服务
-- 感谢Gemini3，这是我大爹，我的代码基本都是它写的。
+- 感谢Copilot，这是我大爹，我的代码基本都是它写的。
 - 感谢所有贡献者的努力和支持！
+
+## 开发
+### 🚀 技术栈
+注意，服务端的配置难度要远高于客户端。下面简要介绍服务端的技术栈：
+- **编程语言**：Python 3.10 与Typescripts
+- **Web框架**：FastAPI
+- **client UI框架**：PySide6
+- **app 框架**：Expo + React
+- **数据库**：sqlite（使用 SQLAlchemy 进行 ORM 操作）
+- **向量数据库**：ChromaDB
+- **TTS合成**：GPT-SoVITS(轻量化：gsv-tts-lite)
+- **公网访问**：使用 sakurafrp 实现内网穿透，支持公网访问
+
+### TODO List
+等待有缘人帮我做完
+- [ ] 自动学歌功能；
+- [ ] 同步官方日程功能；
+- [ ] 更口语化的对话；
+- [ ] Live2d互动和反应功能；
+- [ ] 纪念日记忆和反应功能；
+- [ ] 用户与洛天依关系保存和演变功能；
+- [ ] 更好的记忆检索和保存，提升命中率；
+- [ ] 上下文注意力机制，规划关系、心情、日程、记忆、前文对回复的影响。
+
+### 项目架构
+#### 客户端架构
+客户端采用以下五层架构：
+1. WebSocket层：建立并维护web socket连接，处理web socket发送和接收任务。
+2. NetworkClient层：处理具体的网络服务，包括登录、注册、拉取历史等。对话消息通过调用WebSocket暴露的接口实现。
+3. MessageProcessor：实际处理用户操作和服务器发包的部分。其中包括MultiMediaProcessor，用于处理音频播放和口型同步。
+4. Binder：连接前端UI和MessageProcessor的中间层。
+5. GUI：实际绘制前端，将用户输入发回中层，并显示服务器发来的数据。
+
+#### 服务端架构
+服务器为每一个登录的用户创建一个ChatStream，每个ChatStream会绑定一个WebSocket连接。ChatStream会在用户登陆时创建，在WebSocket长时间未绑定WebSocket时被回收。
+
+按照消息流动的过程，ChatStream会经过以下生产者-消费者结构：
+- Ingress：预处理。WebSocket收到消息后，先送个预处理，完成消息的落库、术语（歌词和歌名）提取、以及图片信息的识别。然后将处理之后的消息送往下一层。
+- TopicExtractor：提取话题。根据积压的消息，当用户不再输入时，用LLM总结用户这一轮输入所对应的话题，同时，生成以下3类信息，得到完整的Topic输入下一层：
+  - 事实约束(fact constraint)：包括歌曲的信息，天依能唱的歌。
+  - 记忆检索(memory attempt)：用于向量记忆检索的关键词（key）。
+  - 唱歌计划(sing plan)：如果用户要求天依唱歌，则进行唱歌尝试。
+- TopicReplier：回复话题。根据所需要的信息，组装上下文，由LLM生成风格化的回复。随后异步地进行回复的落库、记忆的更新以及上下文压缩。生成的回复会在生成完成后即可进入下一层：
+- GlobalSpeakingManager：生成带音频的回复。这一部分不在ChatStream内，而是所有用户共用的。所有回复任务依次排队进行TTS合成或者唱歌音频获取。模块将流式地生成音频，并将最后的回复包发回对应ChatStream的发送队列。
+- send_reply：发送回复包。将队列中的回复包利用WebSocket发回客户端。
+
+此外，DailyScheduler模块会在每天凌晨进行尝试
+- 每3天从VCPedia拉去洛天依的当年的歌曲，如果有新的就加入知识库；
+- 每天有20%的概率进行一次城市漫步，并生成相应的记忆。
+
+### 如何为项目出一份力？
+目前项目非常缺人！欢迎所有朋友为项目出一份力，只要你：
+- 熟悉Python/Typescript编程，或者有其它一技之长；
+- 认可本项目理念；
+- 希望为项目做出贡献/锻炼自己的能力。
+
+你就可以尝试为项目贡献代码！
+
+你可以用常用的方式贡献代码：
+1. 将项目fork到你自己的目录；
+2. 创建feat分支或bugfix分支；
+3. 实现功能；
+4. 提交Pull request，等待作者和协作者审核
+5. 完成贡献！
+
+由于作者本身的代码规范也是一坨，所以我们对代码的要求比较简单：
+- 在贡献代码时，详细说明你的代码是要实现什么功能；
+- 在贡献代码时，详细说明你使用了什么方案实现这一功能；
+- 实现代码时，遵循项目架构；
+- 实现代码时，按照PEP8标准进行编写（大差不差就行，对于函数，注意命名规范，以及参数和返回值的类型提示）；你可以使用black进行格式化；
+- 实现代码时，在必要的地方写注释。
+- 为你的功能写单元测试，即在整个项目之外，独立验证你的功能模块是可以用的。
+
+联系作者：QQ 229817494

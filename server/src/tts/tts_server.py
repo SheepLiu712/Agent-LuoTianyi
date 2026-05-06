@@ -113,7 +113,7 @@ def _run_gsv_worker(
         model_config = _extract_model_paths_from_yaml(config_path)
         tts = TTS(
             device=model_config.get("device"),
-            is_half=model_config.get("is_half"),
+            dtype= "float16" if model_config.get("is_half") else "float32",
             models_dir= pathlib.Path.cwd() / model_config.get("pretrained_models_path"),
             use_bert=True,
         )
