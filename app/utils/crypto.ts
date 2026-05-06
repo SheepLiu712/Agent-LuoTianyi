@@ -1,5 +1,6 @@
 import forge from 'node-forge';
 import { server_config } from '../config';
+import { addDebugTrace } from './debug_trace';
 
 // 缓存公钥对象（forge 格式）
 let cachedForgeKey: forge.pki.rsa.PublicKey | null = null;
@@ -19,7 +20,7 @@ export async function getPublicKey(): Promise<forge.pki.rsa.PublicKey | null> {
     cachedForgeKey = forge.pki.publicKeyFromPem(pem);
     return cachedForgeKey;
   } catch (error) {
-    console.error('获取公钥失败:', error);
+    addDebugTrace('crypto', 'getPublicKey failed', { error: String(error) });
     return null;
   }
 }
@@ -49,7 +50,7 @@ export async function encryptPassword(
     // 3. 将加密后的二进制转为 Base64 字符串
     return forge.util.encode64(encrypted);
   } catch (error) {
-    console.error('Forge 加密失败:', error);
+    addDebugTrace('crypto', 'encrypt failed', { error: String(error) });
     return null;
   }
 }

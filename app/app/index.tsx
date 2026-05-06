@@ -19,7 +19,7 @@ import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
 import { useAffection } from "../hooks/useAffection";
-import { clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
 
 
 export default function Index({ onLogout }: { onLogout?: () => void }) {
@@ -164,10 +164,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           startInLoadingState={true}
           onMessage={handleWebViewMessage}
           onError={(event) => {
-            console.error('WebView onError:', event.nativeEvent);
+            addDebugTrace('webview', 'error', { detail: JSON.stringify(event.nativeEvent) });
           }}
           onHttpError={(event) => {
-            console.error('WebView onHttpError:', event.nativeEvent);
+            addDebugTrace('webview', 'http error', { detail: JSON.stringify(event.nativeEvent) });
           }}
         />
 
