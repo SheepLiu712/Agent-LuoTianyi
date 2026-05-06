@@ -103,16 +103,12 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const historyLoadedRef = useRef(false);
   useEffect(() => {
     if (historyLoadedRef.current) {
-      return; // 防止 loadHistory 引用变化导致重复触发
+      return;
     }
     // 在组件加载时，自动加载一次历史记录
     if (username && message_token) {
       historyLoadedRef.current = true;
-      console.log('Loading history with:', { username, message_token });
       loadHistory(username, message_token);
-    }
-    else {
-      console.warn('无法加载历史记录，缺少认证信息');
     }
   }, [username, message_token, loadHistory]);
 

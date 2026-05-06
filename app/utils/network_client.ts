@@ -128,4 +128,5 @@ export class NetworkClient {
     addDebugTrace('network', 'sendTyping', { textLength });
     return this.transport.submitUserTyping(textLength, 10000);
   }
+
 }

@@ -1,6 +1,7 @@
 import { AppState } from 'react-native';
 import { server_config } from '../config';
 import { AgentMessagePayload } from '../types/chat';
+import { WSEventType } from '../types/ws_events';
 import { addDebugTrace } from './debug_trace';
 
 interface AckResult {
@@ -135,7 +136,7 @@ export class WebSocketTransport {
     if (isProactive) {
       payload.is_proactive = true;
     }
-    return this.sendWithAck('user_text', payload, ackTimeout);
+    return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout);
   }
 
   async submitUserImage(
@@ -145,7 +146,7 @@ export class WebSocketTransport {
     ackTimeout = 10000,
   ): Promise<AckResult> {
     return this.sendWithAck(
-      'user_image',
+      WSEventType.USER_IMAGE,
       {
         image_base64: imageBase64,
         mime_type: mimeType,
@@ -156,7 +157,7 @@ export class WebSocketTransport {
   }
 
   async submitUserTyping(textLength: number, ackTimeout = 5000): Promise<AckResult> {
-    return this.sendWithAck('user_typing', { is_typing: true, text_length: textLength }, ackTimeout);
+    return this.sendWithAck(WSEventType.USER_TYPING, { is_typing: true, text_length: textLength }, ackTimeout);
   }
 
   async submitUserTouch(touchArea: string, clickFrequency?: Record<string, number>, ackTimeout = 5000): Promise<AckResult> {
@@ -164,11 +165,11 @@ export class WebSocketTransport {
     if (clickFrequency) {
       payload.click_frequency = clickFrequency;
     }
-    return this.sendWithAck('user_touch', payload, ackTimeout);
+    return this.sendWithAck(WSEventType.USER_TOUCH, payload, ackTimeout);
   }
 
   async submitUserPreferences(preferences: Record<string, unknown>, ackTimeout = 5000): Promise<AckResult> {
-    return this.sendWithAck('user_preference_sync', preferences, ackTimeout);
+    return this.sendWithAck(WSEventType.USER_PREFERENCE_SYNC, preferences, ackTimeout);
   }
 
   private connect() {
@@ -302,7 +303,7 @@ export class WebSocketTransport {
 
   private sendAuth() {
     this.sendRaw({
-      type: 'user_auth',
+      type: WSEventType.USER_AUTH,
       client_msg_id: `auth-${Date.now()}`,
       ts: Date.now(),
       payload: {
@@ -320,7 +321,7 @@ export class WebSocketTransport {
       }
       this.pingId += 1;
       this.sendRaw({
-        type: 'hb_ping',
+        type: WSEventType.HB_PING,
         client_msg_id: `ping-${this.pingId}`,
         ts: Date.now(),
         payload: { ping_id: this.pingId },
@@ -418,25 +419,25 @@ export class WebSocketTransport {
       const envelope = JSON.parse(String(raw)) as ServerEnvelope;
       const eventType = envelope.type || '';
       const payload = envelope.payload || {};
-      if (eventType === 'system_ready') {
+      if (eventType === WSEventType.SYSTEM_READY) {
         addDebugTrace('ws', 'recv system_ready');
         this.sendAuth();
         return;
       }
 
-      if (eventType === 'auth_ok') {
+      if (eventType === WSEventType.AUTH_OK) {
         this.isAuthed = true;
         return;
       }
 
-      if (eventType === 'auth_error') {
+      if (eventType === WSEventType.AUTH_ERROR) {
         this.isAuthed = false;
         addDebugTrace('ws', 'recv auth_error', { message: String(payload.message || '鉴权失败') });
         this.callbacks.onError(String(payload.message || '鉴权失败'));
         return;
       }
 
-      if (eventType === 'server_ack') {
+      if (eventType === WSEventType.SERVER_ACK) {
         const replyTo = envelope.reply_to;
         if (replyTo && this.ackWaiters.has(replyTo)) {
           const waiter = this.ackWaiters.get(replyTo)!;
@@ -448,17 +449,17 @@ export class WebSocketTransport {
         return;
       }
 
-      if (eventType === 'agent_state_changed') {
+      if (eventType === WSEventType.AGENT_STATE_CHANGED) {
         this.callbacks.onAgentStateChanged(String(payload.state || 'waiting'));
         return;
       }
 
-      if (eventType === 'agent_message') {
+      if (eventType === WSEventType.AGENT_MESSAGE) {
         this.callbacks.onAgentMessage(payload as AgentMessagePayload);
         return;
       }
 
-      if (eventType === 'error') {
+      if (eventType === WSEventType.SERVER_ERROR) {
         addDebugTrace('ws', 'recv protocol error', { message: String(payload.message || '协议错误') });
         this.callbacks.onError(String(payload.message || '协议错误'));
       }
