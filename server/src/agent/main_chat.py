@@ -11,6 +11,7 @@ from ..utils.logger import get_logger
 from ..utils.enum_type import ContextType
 import dataclasses
 from abc import ABC, abstractmethod
+from ..plugins.music.singing_manager import SingingManager
 
 
 @dataclasses.dataclass
@@ -120,12 +121,16 @@ class MainChat:
 
             # 先尝试匹配唱歌指令
             sing_match = sing_pattern.match(line)
+            self.logger.debug(f"Parsing line: '{line}'")
+            print(sing_plan)
             if sing_match and sing_plan:
                 song = sing_match.group(1).strip().strip("<>").strip().strip("'\"“”《》")
                 sing_plan_song = sing_plan[0].strip().strip("<>").strip().strip("'\"“”《》")
-                if song and song == sing_plan_song:
+                if song and SingingManager.get_unified_song_name(song) == SingingManager.get_unified_song_name(sing_plan_song):
                     results.append(SongSegmentChat(song=sing_plan_song, segment=sing_plan[1], lyrics=""))
                     structured_found = True
+                else:
+                    self.logger.warning(f"LLM requested to sing '{song}', but it does not match the sing plan song '{sing_plan_song}'. Ignoring this sing instruction.")
                 continue
 
             # 再尝试匹配语气标记
