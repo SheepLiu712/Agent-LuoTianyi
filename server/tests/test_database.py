@@ -1,6 +1,7 @@
 import unittest
 import os
 import sys
+import tempfile
 from datetime import datetime
 
 # Setup paths
@@ -12,11 +13,10 @@ from src.database.sql_database import get_sql_session, User, InviteCode, Convers
 
 class TestDatabaseCRUD(unittest.TestCase):
     def setUp(self):
-        # Patch the database file for testing
-        import src.database.sql_database as db_module
-        db_module.init_sql_db(db_folder=os.path.join(current_dir, "data","database"), db_file="test_luotianyi.db")
+        self._tmp_dir = tempfile.mkdtemp()
+        init_sql_db(db_folder=self._tmp_dir, db_file="test.db")
         
-        self.session = db_module.get_sql_session()
+        self.session = get_sql_session()
         # Clean slate: drop all and recreate
         Base.metadata.drop_all(bind=self.session.get_bind())
         Base.metadata.create_all(bind=self.session.get_bind())

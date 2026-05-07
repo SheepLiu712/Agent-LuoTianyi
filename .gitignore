@@ -1,0 +1,21 @@
+# IDE / project config
+.workbuddy/
+.claude/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+
+# Songlearner pretrained models (large files, downloaded separately)
+server/songlearner/res/msst/pretrain/
+server/songlearner/outputs/
+
+# OS
+Thumbs.db
+.DS_Store
+
+songlearner/

@@ -8,8 +8,10 @@ import { NetworkClient } from './network_client';
 
 type SendItem =
   | { kind: 'text'; uuid: string; text: string }
+  | { kind: 'proactive'; uuid: string; text: string }
   | { kind: 'image'; uuid: string; imageUri: string; mimeType: string }
-  | { kind: 'typing'; textLength: number };
+  | { kind: 'typing'; textLength: number }
+  | { kind: 'touch'; touchArea: string; clickFrequency?: Record<string, number> };
 
 interface SendResult {
   ok: boolean;
@@ -120,11 +122,31 @@ export class MessageProcessor {
     this.startSendLoop();
   }
 
+  async sendProactiveText(uuid: string, text: string) {
+    this.sendQueue.push({ kind: 'proactive', uuid, text });
+    addDebugTrace('send', 'enqueue proactive text', { uuid, queueLength: this.sendQueue.length, textLength: text.length });
+    this.startSendLoop();
+  }
+
   async sendImage(uuid: string, imageUri: string, mimeType: string) {
     this.sendQueue.push({ kind: 'image', uuid, imageUri, mimeType });
     addDebugTrace('send', 'enqueue image', { uuid, queueLength: this.sendQueue.length, mimeType });
     this.binder.emitMessageStatus(uuid, 'waiting');
     this.startSendLoop();
+  }
+
+  async sendTouch(touchArea: string, clickFrequency?: Record<string, number>) {
+    addDebugTrace('send', 'enqueue touch', { touchArea, queueLength: this.sendQueue.length });
+    this.sendQueue.push({ kind: 'touch', touchArea, clickFrequency });
+    this.startSendLoop();
+  }
+
+  async sendPreferences(preferences: Record<string, unknown>) {
+    addDebugTrace('send', 'send preferences direct');
+    const result = await this.networkClient.sendPreferences(preferences);
+    if (!result.ok) {
+      addDebugTrace('send', 'send preferences failed', { error: result.error });
+    }
   }
 
   async sendTypingEvent(textLength: number) {
@@ -367,8 +389,8 @@ export class MessageProcessor {
       const item = this.sendQueue[0];
       const result = await this.sendOne(item);
 
-      if (item.kind === 'typing') {
-        addDebugTrace('send', 'typing sent', { ok: result.ok, error: result.error });
+      if (item.kind === 'typing' || item.kind === 'proactive' || item.kind === 'touch') {
+        addDebugTrace('send', `${item.kind} sent`, { ok: result.ok, error: result.error });
         this.sendQueue.shift();
         continue;
       }
@@ -407,14 +429,20 @@ export class MessageProcessor {
   private async sendOne(item: SendItem): Promise<SendResult> {
     addDebugTrace('send', 'sendOne begin', {
       kind: item.kind,
-      uuid: item.kind === 'typing' ? undefined : item.uuid,
+      uuid: item.kind === 'typing' || item.kind === 'touch' ? undefined : item.uuid,
       queueLength: this.sendQueue.length,
     });
     if (item.kind === 'text') {
       return this.networkClient.sendChat(item.text);
     }
+    if (item.kind === 'proactive') {
+      return this.networkClient.sendChat(item.text, true);
+    }
     if (item.kind === 'image') {
       return this.networkClient.sendImage(item.imageUri, item.mimeType);
+    }
+    if (item.kind === 'touch') {
+      return this.networkClient.sendTouch(item.touchArea, item.clickFrequency);
     }
     return this.networkClient.sendTypingEvent(item.textLength);
   }

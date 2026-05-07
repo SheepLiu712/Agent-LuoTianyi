@@ -154,13 +154,6 @@ class TopicPlanner:
         """调用 agent 话题提取接口；失败时降级为简单规则提取。"""
         if unread_snapshot is None or not unread_snapshot.messages:
             return [], []
-        
-        # # 启发式：如果全都是图片信息，认为用户会补一句话，即所有消息都是不完整话题消息
-        # for msg in unread_snapshot.messages:
-        #     if msg.message_type != "image" or force_complete:
-        #         break
-        # else:
-        #     return [], unread_snapshot.messages
 
         try:
             topics, remaining = await self.service_hub.agent.extract_topics_for_pipeline(

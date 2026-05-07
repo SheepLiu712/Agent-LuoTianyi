@@ -125,6 +125,7 @@ class CitywalkStateManager:
             energy=energy_after,
             fullness=fullness_after,
             mood=mood_after,
+            elapsed_minutes=self.state.elapsed_minutes + duration_min,
         )
         return self.state
 

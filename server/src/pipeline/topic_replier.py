@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, List, Optional, Tuple
 import asyncio
+import traceback
 from ..utils.logger import get_logger
 from .global_speaking_worker import SpeakingJob
 from ..agent.main_chat import OneResponseLine, SongSegmentChat, ContextType
@@ -9,17 +10,6 @@ if TYPE_CHECKING:
     from ..interface.service_hub import ServiceHub
     from .topic_planner import ExtractedTopic
 
-
-
-# class ExtractedTopic:
-#     topic_id: str
-#     source_messages: list[str]
-#     topic_content: str
-#     memory_attempts: list[str]
-#     fact_constraints: list[str]
-#     sing_attempts: list[str]
-    
-#     is_forced_from_incomplete: bool = False
 
 class TopicReplier:
     def __init__(self, username: str, user_id: str, send_reply_callback: Callable[[ChatResponse], Awaitable[None]]):
@@ -61,7 +51,6 @@ class TopicReplier:
                 self.logger.info("TopicReplier processor task cancelled")
                 break
             except Exception as e:
-                import traceback
                 self.logger.error(f"Error in topic_processor: {e} \n{traceback.format_exc()}")
             finally:
                 if topic is not None:
@@ -75,6 +64,26 @@ class TopicReplier:
             self.logger.error("ServiceHub or agent is not ready, skip replying topic")
             return
 
+        # Read context once and reuse across the entire pipeline turn
+        db = self.service_hub.agent._runtime_hub.open_sql_session()
+        redis_client = self.service_hub.agent._runtime_hub.redis_client
+        try:
+            conversation_history = await self.service_hub.agent.conversation_manager.get_context(
+                db, redis_client, self.user_id
+            )
+        finally:
+            db.close()
+
+        # 注入活动上下文（近期演唱会/联动等信息）
+        topic_content = topic.topic_content
+        if self.service_hub.schedule_manager:
+            try:
+                activity_ctx = self.service_hub.schedule_manager.get_active_context(self.user_id)
+                if activity_ctx:
+                    topic_content = f"{topic_content}\n\n{activity_ctx}"
+                    self.logger.info(f"Injected activity context for user {self.user_id}")
+            except Exception as e:
+                self.logger.warning(f"Failed to get activity context: {e}")
 
         memory_task = asyncio.create_task(self._memory_search(topic.memory_attempts or []))
         fact_task = asyncio.create_task(self._fact_search(topic.fact_constraints or []))
@@ -83,10 +92,11 @@ class TopicReplier:
 
         reply_items = await self.service_hub.agent.generate_topic_reply_for_pipeline(
             user_id=self.user_id,
-            topic_content=topic.topic_content,
+            topic_content=topic_content,
             memory_hits=memory_hits,
             fact_hits=fact_hits,
             sing_plan=sing_plan,
+            conversation_history=conversation_history,
         )
         for item in reply_items:
             if isinstance(item, SongSegmentChat):
@@ -99,16 +109,15 @@ class TopicReplier:
         )
 
         for item, uuid in zip(reply_items, uuid_list or []):
-            item.uuid = uuid # 给每个回复项分配一个UUID，供前端关联文本和TTS音频使用
+            item.uuid = uuid
             await self._submit_speaking_job(self.send_reply_callback, item)
 
-        
-
-        memory_write_task = asyncio.create_task(self._schedule_memory_write(topic, reply_items, memory_hits))
-        huge_update_task = asyncio.create_task(self._schedule_profile_context_update()) # 我们考虑，当上下文需要压缩时，进行一次用户画像的更新。
-
-        # 等上面两个任务都完成后再进行下一轮回复，确保用户画像和记忆的更新能够尽可能快地反映在后续的回复中
-        await asyncio.gather(memory_write_task, huge_update_task)
+        # Fire-and-forget: memory write and profile update run in background,
+        # don't block the next topic.
+        asyncio.create_task(self._schedule_memory_write(
+            topic, reply_items, memory_hits, conversation_history=conversation_history
+        ))
+        asyncio.create_task(self._schedule_profile_context_update())
 
     async def _submit_speaking_job(
         self,
@@ -218,6 +227,7 @@ class TopicReplier:
         topic: "ExtractedTopic",
         reply_items: List[OneResponseLine],
         memory_hits: List[str],
+        conversation_history: Optional[str] = None,
     ) -> None:
         if self.service_hub is None or self.service_hub.agent is None:
             self.logger.error("ServiceHub or agent is not ready, skip scheduling memory write")
@@ -228,17 +238,15 @@ class TopicReplier:
 
         current_dialogue = self._build_current_dialogue(topic, reply_items)
 
-        async def _task():
-            try:
-                await self.service_hub.agent.write_topic_memories_for_pipeline(
-                    user_id=self.user_id,
-                    current_dialogue=current_dialogue,
-                    related_memories=memory_hits,
-                )
-            except Exception as e:
-                self.logger.warning(f"Topic memory write task failed: {e}")
-
-        asyncio.create_task(_task())
+        try:
+            await self.service_hub.agent.write_topic_memories_for_pipeline(
+                user_id=self.user_id,
+                current_dialogue=current_dialogue,
+                related_memories=memory_hits,
+                conversation_history=conversation_history,
+            )
+        except Exception as e:
+            self.logger.warning(f"Topic memory write task failed: {e}")
 
     async def _schedule_profile_context_update(
         self

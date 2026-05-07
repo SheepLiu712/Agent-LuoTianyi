@@ -19,6 +19,7 @@ from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentCh
 from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
+from .affection_manager import AffectionManager
 from ..types.conversation_type import ConversationItem
 from ..utils.logger import get_logger
 from ..tts import TTSModule
@@ -40,11 +41,17 @@ if TYPE_CHECKING:
     
 
 
+_expression_cache: Dict[str, List[str]] = {}
+
 def get_available_expression(config_path: str = "config/live2d_interface_config.json") -> List[str]:
+    if config_path in _expression_cache:
+        return _expression_cache[config_path]
     with open(config_path, "r", encoding="utf-8") as f:
         config: Dict = json.load(f)
     expressions: Dict = config.get("expression_projection", {})
-    return list(expressions.keys())
+    result = list(expressions.keys())
+    _expression_cache[config_path] = result
+    return result
 
 
 @dataclass
@@ -84,11 +91,15 @@ class LuoTianyiAgent:
         self.conversation_manager = ConversationManager(
             self.config.get("conversation_manager", {}), self.prompt_manager
         )  # 对话管理器
-        self.singing_manager = SingingManager(config={})  # 唱歌管理器
+        self.singing_manager = SingingManager(config={"resource_path": self.config.get("resource_path", "res/music")})  # 唱歌管理器
         memory_config = self.config.get("memory_manager", {})
         self.memory_manager = MemoryManager(memory_config, self.prompt_manager, self.singing_manager)  # 记忆管理器
 
         self.tts_engine = tts_module  # TTS模块
+        affection_llm_config = self.config.get("affection_manager", {}).get("llm") or (
+            self.config.get("main_chat", {}).get("llm_module", {}).get("llm", {})
+        )
+        self.affection_manager = AffectionManager(affection_llm_config)
         self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
         self.topic_extractor = TopicExtractor(
             self.config.get("topic_extractor", {}),
@@ -128,11 +139,22 @@ class LuoTianyiAgent:
     
     async def generate_topic_from_activity(self, activity_type: ActivityType, user_uuid: str, llm_client: "LLMAPIInterface", **kwargs) -> "ExtractedTopic":
         """根据用户活动生成话题，供 ActivityMaker 调用"""
+        from ..pipeline.topic_planner import ExtractedTopic
+        from ..pipeline.modules.unread_store import UnreadMessage
         prompt = self.prompt_manager.get_template(activity_type.value)
         if not prompt:
             self.logger.error(f"No prompt template found for activity type {activity_type}")
             raise ValueError(f"No prompt template found for activity type {activity_type}")
         prompt = prompt.render(**kwargs)
+
+        content = await llm_client.generate_response(prompt, use_json=False)
+        return ExtractedTopic(
+            topic_id=str(uuid4()),
+            source_messages=[],
+            topic_content=content or prompt,
+            summary="",
+            is_activity=True,
+        )
 
 
     async def describe_image(self, image_base64: str) -> str:
@@ -266,15 +288,43 @@ class LuoTianyiAgent:
         memory_hits: Optional[List[str]] = None,
         fact_hits: Optional[List[str]] = None,
         sing_plan: Optional[Tuple[str, str]] = None,
+        conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
     ) -> List[OneResponseLine]:
         """供 TopicReplier 调用：按话题生成分段回复。"""
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
         try:
-            conversation_history = await self.conversation_manager.get_context(db, redis_client, user_id)
+            if conversation_history is None:
+                conversation_history = await self.conversation_manager.get_context(db, redis_client, user_id)
             user = db.query(User).filter(User.uuid == user_id).first()
             user_nickname = user.nickname if user and user.nickname else "你"
             user_description = user.description if user and user.description else ""
+            # 注入用户偏好（关系类型、表达风格等）
+            if user and user.preferences:
+                try:
+                    prefs = json.loads(user.preferences) if isinstance(user.preferences, str) else user.preferences
+                    pref_parts = []
+                    if prefs.get("relationship"):
+                        pref_parts.append(f"用户希望和你的关系是：{prefs['relationship']}")
+                    if prefs.get("speaking_style"):
+                        pref_parts.append(f"用户希望你的表达风格偏向：{prefs['speaking_style']}")
+                    if prefs.get("personality_traits"):
+                        traits = "、".join(prefs["personality_traits"])
+                        pref_parts.append(f"用户希望你的性格特点：{traits}")
+                    if prefs.get("custom_context"):
+                        pref_parts.append(f"用户补充的上下文：{prefs['custom_context']}")
+                    if pref_parts:
+                        pref_context = "（用户偏好设置：" + "；".join(pref_parts) + "）"
+                        user_description = (user_description + "\n" + pref_context).strip()
+                except Exception as e:
+                    self.logger.warning(f"Failed to parse preferences: {e}")
+            # 注入好感度上下文
+            try:
+                affection_ctx = self.affection_manager.get_affection_context(db, user_id)
+                if affection_ctx:
+                    user_description = (user_description + "\n" + affection_ctx).strip()
+            except Exception as e:
+                self.logger.warning(f"Failed to get affection context: {e}")
         finally:
             db.close()
 
@@ -293,13 +343,14 @@ class LuoTianyiAgent:
         user_id: str,
         current_dialogue: str,
         related_memories: Optional[List[str]] = None,
+        conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
     ) -> None:
         """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
         vector_store = self._runtime_hub.vector_store
         try:
-            history = await self.conversation_manager.get_context(db, redis_client, user_id)
+            history = conversation_history or await self.conversation_manager.get_context(db, redis_client, user_id)
             await self.memory_manager.post_process_interaction(
                 db=db,
                 redis=redis_client,
@@ -472,6 +523,11 @@ class LuoTianyiAgent:
         if event.event_type not in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}:
             self.logger.warning(f"Unsupported event type {event.event_type} in add_conversation, skipping")
             return
+
+        # 程序化发送的主动消息（如日期提醒）不保存到数据库
+        if event.payload and event.payload.get("is_proactive"):
+            self.logger.info(f"Skipping DB save for proactive message: {event.text[:50]}...")
+            return
         
         content = event.text # 对文字信息，它是文本内容；对图片信息，它是图片描述（由视觉模块生成）
         if event.event_type == ChatInputEventType.USER_IMAGE:
@@ -489,14 +545,31 @@ class LuoTianyiAgent:
                 }
 
         await self.conversation_manager.add_conversation( # 等待入库
-            db=self._runtime_hub.open_sql_session(), 
-            redis=self._runtime_hub.redis_client, 
+            db=self._runtime_hub.open_sql_session(),
+            redis=self._runtime_hub.redis_client,
             user_id=user_uuid,
             source=ConversationSource.USER,
             content=content,
-            type=conversation_type, 
-            data=payload,  
+            type=conversation_type,
+            data=payload,
         )
+
+        # 由 LLM 分析用户消息并调整好感度
+        try:
+            db = self._runtime_hub.open_sql_session()
+            try:
+                current_score = self.affection_manager.get_score(db, user_uuid)
+                delta, reason = await self.affection_manager.analyze_affection(
+                    content, current_score
+                )
+                if delta != 0:
+                    self.affection_manager.add_affection(
+                        db, user_uuid, delta, f"LLM分析: {reason}"
+                    )
+            finally:
+                db.close()
+        except Exception as e:
+            self.logger.warning(f"Failed to analyze affection: {e}")
 
     async def handle_history_request(self, user_id: str, count: int, end_index: int) -> Dict[str, Any]:
         """处理历史记录请求

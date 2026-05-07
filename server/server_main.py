@@ -1,5 +1,6 @@
+import json
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Request
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import uvicorn
@@ -34,6 +35,8 @@ from src.agent.activity_maker import init_activity_maker, get_activity_maker
 from src.agent.luotianyi_agent import LuoTianyiAgent, init_luotianyi_agent, get_luotianyi_agent
 from src.plugins import DailyScheduler
 from src.plugins.citywalk import CitywalkRuntimeService
+from src.plugins.schedule import ScheduleManager
+from src.plugins.music.auto_song_learner import AutoSongLearner
 
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger
@@ -75,7 +78,16 @@ async def startup_event(app: FastAPI):
         activity_maker=init_activity_maker(config.get("activity_maker", {})),
     )
 
+    # 初始化日程管理器
+    schedule_mgr = ScheduleManager(
+        config=config.get("schedule", {}),
+        service_hub_ref=service_hub,
+    )
+    service_hub.schedule_manager = schedule_mgr
+    schedule_mgr.start()
+
     service_hub.activity_maker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
+    service_hub.activity_maker.set_service_hub(service_hub) # 将ServiceHub引用传递给ActivityMaker，用于演唱会静默期检查
     service_hub.gcsm.register_activity_maker(service_hub.activity_maker) # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
     service_hub.global_speaking_worker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
 
@@ -86,7 +98,8 @@ async def startup_event(app: FastAPI):
     # 启动城市漫步日程任务：每天凌晨1点，20%概率执行一次逛街；每3天同步一次新歌。
     global daily_scheduler
     citywalk_runtime = CitywalkRuntimeService(config_path="config/config.json", vector_store=database.get_vector_store())
-    daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime)
+    song_learner = AutoSongLearner(config={"resource_path": "res/music", "songlearner_dir": "songlearner"})
+    daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime, song_learner=song_learner)
     daily_scheduler.start()
 
     # 账号系统初始化
@@ -96,6 +109,8 @@ async def startup_event(app: FastAPI):
     finally:
         if daily_scheduler is not None:
             daily_scheduler.stop()
+        if service_hub and service_hub.schedule_manager:
+            service_hub.schedule_manager.stop()
         await service_hub.gcsm.stop_cleanup_task()
         await service_hub.global_speaking_worker.stop() 
 
@@ -133,6 +148,25 @@ async def chat_ws(websocket: WebSocket,
 
             if event.event_type == WSEventType.HB_PING.value:
                 await websocket_service.handle_ping_event(ws_connection, event)
+                continue
+
+            # 处理用户偏好同步事件
+            if event.event_type == WSEventType.USER_PREFERENCE_SYNC.value:
+                await websocket_service.send_ack_event(ws_connection, event)
+                preferences = event.payload if isinstance(event.payload, dict) else {}
+                if ws_connection.user_uuid:
+                    try:
+                        db = get_sql_session()
+                        try:
+                            user = db.query(database.User).filter(database.User.uuid == ws_connection.user_uuid).first()
+                            if user:
+                                user.preferences = json.dumps(preferences, ensure_ascii=False)
+                                db.commit()
+                                logger.info(f"Saved preferences for user {ws_connection.user_name}: {preferences}")
+                        finally:
+                            db.close()
+                    except Exception as e:
+                        logger.error(f"Failed to save preferences: {e}")
                 continue
 
             chat_event = websocket_service.convert_to_chat_input_event(event)
@@ -252,7 +286,40 @@ async def get_history(
     message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
     if not message_token_valid:
         raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-    return await agent.handle_history_request(user_uuid, request.count, request.end_index)
+    # Cap count to prevent excessive reads
+    capped_count = min(max(1, request.count), 200)
+    return await agent.handle_history_request(user_uuid, capped_count, request.end_index)
+
+
+@app.get("/affection/info")
+async def get_affection_info(
+    username: str,
+    token: str,
+    db: Session = Depends(database.get_sql_db),
+    agent: LuoTianyiAgent = Depends(get_agent_service),
+):
+    """获取用户好感度信息"""
+    message_token_valid, user_uuid = account.check_message_token(db, username, token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+
+    score = agent.affection_manager.get_score(db, user_uuid)
+    level_cn, level_en = agent.affection_manager.get_level(score)
+    next_level = agent.affection_manager.get_next_level_info(score)
+    today_net = agent.affection_manager.get_today_net(db, user_uuid)
+
+    result = {
+        "score": score,
+        "level_cn": level_cn,
+        "level_en": level_en,
+        "today_net": today_net,
+    }
+    if next_level:
+        result["next_level_cn"] = next_level[0]
+        result["next_level_en"] = next_level[1]
+        result["next_level_remaining"] = next_level[2]
+
+    return result
 
 
 @app.post("/get_image")

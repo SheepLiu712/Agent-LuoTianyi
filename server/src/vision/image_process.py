@@ -30,7 +30,9 @@ async def get_image_bytes_and_base64(upload_file: UploadFile):
         elif origin_height <= origin_width and origin_height > target_short_side:
             new_height = target_short_side
             new_width = int(origin_width * (target_short_side / origin_height)) // 28 * 28
-        
+        else:
+            new_width, new_height = origin_width, origin_height
+
         img = img.resize((new_width, new_height))
         
         # 将图片保存到内存缓冲区，格式设为 JPEG

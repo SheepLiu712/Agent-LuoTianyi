@@ -23,41 +23,38 @@ Server承担了绝大多数的数据处理、管理和计算任务。client和ap
 
 [这是独属于你的洛天依](https://www.bilibili.com/video/BV15LZ7BJE3e)
 
-## 🚀 PC客户端快速开始
-### 普通方式
-在Releases页面下载最新版本的安装包（以`.zip`或`.7z`结尾的文件），解压后运行`Chat with Luotianyi.exe`。
+## 🚀快速开始
+### PC客户端
+#### 普通用户
 
-第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要私信服务器管理者（现在即作者）获取。
+1. 从 [Releases](https://github.com/SheepLiu712/Agent-LuoTianyi/releases) 下载最新客户端
+2. 解压后运行 `Chat with Luotianyi.exe`
+3. 向作者获取邀请码，注册后登录
 
-注册成功之后即可登录。勾选自动登录后，下一次运行将直接进入主界面。
-
-### 开发者方式
-1. 克隆仓库：
+#### 开发者
 ```bash
-git clone https://github.com/SheepLiu712/Agent-Luotianyi
+git clone https://github.com/SheepLiu712/Agent-LuoTianyi
+cd Agent-LuoTianyi/client
+setup.bat          # 创建 conda 环境并安装依赖
+python main.py     # 启动客户端
 ```
-2. 进入项目的client目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
-3. 运行`main.py`启动客户端。
 
-## 🚀 App快速开始
-### 普通方式
+### 移动端 App
+#### 普通用户
 在Releases页面下载最新版本的apk文件，安装之。由于现在这个版本没有上架应用商店，所以需要允许安装未知来源的应用。
 
 第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要私信服务器管理者（现在即作者）获取。
 
-注册成功之后即可登录。勾选自动登录后，下一次运行将直接进入主界面。
-
-### 开发者方式
-1. 克隆仓库：
+#### 开发者
 ```bash
-git clone https://github.com/SheepLiu712/Agent-Luotianyi
+git clone https://github.com/SheepLiu712/Agent-LuoTianyi
+cd Agent-LuoTianyi/app
+npx expo start                 # 启动 Expo 开发服务器
 ```
-进入app目录。项目基于Expo开发，因此依次执行以下指令，可以在expo环境中运行：
-```
-npx expo install
-npx expo start
-```
-你也可以将expo项目构建为标准的安卓项目。
+2. 进入项目的client目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
+3. 运行`main.py`启动客户端。
+
+---
 
 ## 🔧服务端架设
 ### 一、环境要求
@@ -85,6 +82,8 @@ npx expo start
       ```bash
       setx SILICONFLOW_API_KEY "your_api_key_here"
       setx QWEN_API_KEY "your_api_key_here"
+      setx DEEPSEEK_API_KEY "your_key"
+      setx AMAP_KEY "your_key"       # 高德地图，可选（城市漫步用）
       ```
     - 所配置的环境变量需要和config.json中的占位符一致，并不局限于硅基流动的api_key，如果你使用了其他需要密钥的服务，建议也按照同样的方式配置环境变量。
 
@@ -145,7 +144,7 @@ npx expo start
 - **公网访问**：使用 sakurafrp 实现内网穿透，支持公网访问
 
 ### TODO List
-等待有缘人帮我做完
+等待有缘人帮我做完（其实做完了，正在测）
 - [ ] 自动学歌功能；
 - [ ] 同步官方日程功能；
 - [ ] 更口语化的对话；

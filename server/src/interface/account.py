@@ -130,7 +130,5 @@ def register_user(db_session: Session, username: str, password: str, invite_code
 def verify_user(db_session: Session, username: str, password: str) -> bool:
     user = db_session.query(User).filter_by(username=username, password=password).first()
     if user:
-        # Update last login time
-        db_session.commit()
         return True
     return False

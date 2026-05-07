@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, ImageStyle, StyleProp, View } from 'react-native';
 import { getImage, ImageResponse, updateImagePath } from '../utils/getHistory';
 import { auth } from './auth';
+import { addDebugTrace } from '../utils/debug_trace';
 
 const ERROR_IMAGE_URI = Image.resolveAssetSource(local_config.ERROR_IMAGE).uri;
 
@@ -55,8 +56,8 @@ export const CachedImage: React.FC<CachedImageProps> = ({ message_id, localUri, 
                     if (isMounted) setImgSource(fileInfo.uri);
                     Image.getSize(fileInfo.uri, (width, height) => {
                         if (isMounted) calculateImageSize(width, height);
-                    }, (error) => {
-                        console.warn("获取图片尺寸失败:", error);
+                    }, (_error) => {
+                        addDebugTrace('image', 'getSize failed (local)', { message_id });
                         if (isMounted) calculateImageSize(maxWidth, maxHeight);
                     });
                 }
@@ -64,7 +65,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ message_id, localUri, 
                     throw new Error('本地文件不存在');
                 }
             } catch (e) {
-                console.warn("CachedImage 加载失败，尝试从服务器获取:", e);
+                addDebugTrace('image', 'cache miss, fetch from server', { message_id, error: String(e) });
                 try {
                     const result: ImageResponse = await getImage(auth.username, auth.message_token, message_id);
                     if (result.success && result.newClientPath) {
@@ -73,8 +74,8 @@ export const CachedImage: React.FC<CachedImageProps> = ({ message_id, localUri, 
                         if (isMounted) setImgSource(result.newClientPath);
                         Image.getSize(result.newClientPath, (width, height) => {
                             if (isMounted) calculateImageSize(width, height);
-                        }, (error) => {
-                            console.warn("获取图片尺寸失败:", error);
+                        }, (_error) => {
+                            addDebugTrace('image', 'getSize failed (server)', { message_id });
                             if (isMounted) calculateImageSize(maxWidth, maxHeight);
                         });
                     }
@@ -82,7 +83,7 @@ export const CachedImage: React.FC<CachedImageProps> = ({ message_id, localUri, 
                         throw new Error('图片获取失败');
                     }
                 } catch (e) {
-                    console.error("CachedImage 从服务器获取失败:", e);
+                    addDebugTrace('image', 'server fetch failed', { message_id, error: String(e) });
                     if (isMounted) setImgSource(ERROR_IMAGE_URI);
                 }
             } finally {

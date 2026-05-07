@@ -20,6 +20,9 @@ class User(Base):
     context_memory_count = Column(Integer, default=0)
     all_memory_count = Column(Integer, default=0)
     auth_token = Column(String, nullable=True)
+    preferences = Column(Text, default="{}")
+    affection_score = Column(Integer, default=0)
+    affection_total_gained = Column(Integer, default=0)
 
     # Relationships
     invite_code = relationship("InviteCode", uselist=False, back_populates="user")
@@ -27,6 +30,7 @@ class User(Base):
     knowledge_buffers = relationship("KnowledgeBuffer", back_populates="user", cascade="all, delete-orphan")
     memory_records = relationship("MemoryRecord", back_populates="user", cascade="all, delete-orphan")
     memory_update_records = relationship("MemoryUpdateRecord", back_populates="user", cascade="all, delete-orphan")
+    affection_logs = relationship("AffectionLog", back_populates="user", cascade="all, delete-orphan")
 
 class InviteCode(Base):
     __tablename__ = "invite_codes"
@@ -75,13 +79,26 @@ class MemoryUpdateRecord(Base):
 
 class KnowledgeBuffer(Base):
     __tablename__ = "knowledge_buffers"
-    
+
     uuid = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.now)
 
     user = relationship("User", back_populates="knowledge_buffers")
+
+
+class AffectionLog(Base):
+    __tablename__ = "affection_logs"
+
+    uuid = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
+    delta = Column(Integer, nullable=False)
+    score_after = Column(Integer, nullable=False)
+    reason = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    user = relationship("User", back_populates="affection_logs")
 
 
 # Database URL
@@ -113,6 +130,18 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
+    # 迁移：为已存在的数据库添加新列
+    for migration in [
+        "ALTER TABLE users ADD COLUMN preferences Text DEFAULT '{}'",
+        "ALTER TABLE users ADD COLUMN affection_score Integer DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN affection_total_gained Integer DEFAULT 0",
+    ]:
+        try:
+            with engine.connect() as conn:
+                conn.execute(migration)
+                conn.commit()
+        except Exception:
+            pass  # 列已存在，无需迁移
 
 def get_sql_db(): # Generator for FastAPI
     db = SessionLocal()

@@ -87,19 +87,20 @@ from chromadb.config import Settings
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 class ChromaVectorStore(VectorStore):
     """Chroma向量数据库实现 (Native Client)"""
     
     def __init__(self, config: Dict[str, Any]):
         """初始化Chroma向量存储
-        
+
         Args:
             config: 配置字典
         """
         self.logger = get_logger(__name__)
         self.config = config
-        
+
         # 配置参数
         self.persist_directory = config.get("vector_store_path", "./data/vector_store")
         if not os.path.exists(self.persist_directory):
@@ -108,7 +109,11 @@ class ChromaVectorStore(VectorStore):
         self.embedding_model_config = config.get("embedding_model", {})
         self.embedding_model_name = self.embedding_model_config.get("model", "BAAI/bge-large-zh-v1.5")
         self.api_key = self.embedding_model_config.get("api_key", None)
-        
+
+        # 专用线程池，避免 Chroma 的同步 HTTP 调用耗尽 asyncio 默认线程池
+        max_workers = config.get("vector_store_threads", 4)
+        self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="chroma")
+
         # 初始化Chroma客户端
         self.client = None
         self.collection = None
@@ -143,40 +148,30 @@ class ChromaVectorStore(VectorStore):
             self.logger.error(f"Chroma初始化失败: {e}")
             raise
 
-    def add_documents(self,  documents: List[BaseDocument]) -> List[str]:
+    def add_documents(self, documents: List[BaseDocument]) -> List[str]:
         """
         添加文档到向量库
         要求documents的metadata中包含"user_id"字段
         """
-        try:
-            for doc in documents:
-                if "user_id" not in doc.get_metadata():
-                    raise ValueError("文档的metadata中必须包含'user_id'字段")
-            ids = [str(uuid.uuid4()) for _ in documents]
-            contents = [doc.get_content() for doc in documents]
-            metadatas = [doc.get_metadata() for doc in documents]
-            
-            self.collection.add(
-                documents=contents,
-                metadatas=metadatas,
-                ids=ids
-            )
-            
-            self.logger.info(f"成功添加 {len(documents)} 个文档")
-            return ids
-            
-        except Exception as e:
-            self.logger.error(f"添加文档失败: {e}")
-            raise
+        for doc in documents:
+            if "user_id" not in doc.get_metadata():
+                raise ValueError("文档的metadata中必须包含'user_id'字段")
+        ids = [str(uuid.uuid4()) for _ in documents]
+        contents = [doc.get_content() for doc in documents]
+        metadatas = [doc.get_metadata() for doc in documents]
+
+        self.collection.add(
+            documents=contents,
+            metadatas=metadatas,
+            ids=ids
+        )
+
+        self.logger.info(f"成功添加 {len(documents)} 个文档")
+        return ids
 
     async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
         """搜索相似文档 (异步)"""
         try:
-            # 执行查询
-            # self.collection.query 内部会调用 embedding_function 进行 embedding，
-            # 而 SiliconFlowEmbeddings._embed 使用了 requests.post 是同步阻塞的。
-            # 所以我们需要用 run_in_executor 或 to_thread 将整个 query 过程放入线程池执行
-            
             def _do_query():
                 return self.collection.query(
                     query_texts=[query],
@@ -184,7 +179,7 @@ class ChromaVectorStore(VectorStore):
                     where={"user_id": user_id} if "where" not in kwargs else kwargs.get("where")
                 )
 
-            results = await asyncio.to_thread(_do_query)
+            results = await asyncio.get_event_loop().run_in_executor(self._executor, _do_query)
             
             search_results = []
             

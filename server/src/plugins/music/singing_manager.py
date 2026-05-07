@@ -6,10 +6,11 @@ import io
 import base64
 import traceback
 import re
-from ...types.music_type import SongSegment, SongMetadata, OneLyricLine
+from ...types.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntry
 from ...types.tool_type import  MyTool, ToolFunction, ToolOneParameter
 from typing import List, Tuple, Dict, Any, Optional
 import random
+from .auto_song_learner import WishlistManager
 
 
 class SingingManager:
@@ -19,7 +20,12 @@ class SingingManager:
         self.resource_path = config.get("resource_path", "res/music")
         self.all_songs: dict[str, SongMetadata] = {}
         self.tools: Dict[str, MyTool] = {}
+        self.wishlist = WishlistManager(
+            str(pathlib.Path(self.resource_path) / "metadata.json"),
+            self.logger,
+        )
         self.get_music_data()
+        self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
         self.init_llm_tools()
 
     @staticmethod
@@ -171,25 +177,29 @@ class SingingManager:
 
         # to json string
         return song_and_desc
-    
-    def add_wished_song(self, song_name:str) -> bool:
-        meta_data_path = self.resource_path + "/metadata.json"
-        with open(meta_data_path, "r", encoding="utf-8") as f:
-            meta_data = json.load(f)
 
-        wished_song: List[str] = meta_data.get("wished_songs",[])
-        if song_name in wished_song:
-            return False
-        wished_song.append(song_name)
-        meta_data["wished_songs"] = wished_song
-        with open(meta_data_path, "w", encoding="utf-8") as f:
-            json.dump(meta_data, f, ensure_ascii=False, indent=4)
-        return True
-    
+    def add_wished_song(self, song_name: str) -> bool:
+        return self.wishlist.add(song_name)
+
+    def get_wished_songs(self) -> Dict[str, WishEntry]:
+        """Return all wished songs with their status."""
+        return self.wishlist.get_all()
+
+    def get_recently_learned(self) -> List[str]:
+        """Return and clear the recently-learned notification list."""
+        return self.wishlist.get_recently_learned()
+
+    def reload_songs(self) -> None:
+        """Re-scan songs/ directory to pick up newly learned songs."""
+        old_count = len(self.all_songs)
+        self.get_music_data()
+        self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
+        self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
+
     async def get_songs_can_sing_llm(self, max_song_num: int = 5) -> str:
         song_and_desc = self.get_songs_can_sing(max_song_num)
         return json.dumps(song_and_desc, ensure_ascii=False)
-    
+
     async def can_i_sing_song_llm(self, song_name: str) -> str:
         if not song_name:
             return "没有指定歌曲名称。"
@@ -197,7 +207,7 @@ class SingingManager:
         if not segments:
             return f"洛天依目前无法演唱{song_name}。"
         return f"洛天依可以演唱{correct_song_name}，可以唱的唱段有：{', '.join(segments)}。"
-    
+
     def get_segment_lyrics(self, song_name: str, segment_description: str) -> str:
         lyrics, _ = self.get_song_segment(song_name, segment_description, require_audio=False)
         if not lyrics:
@@ -229,7 +239,7 @@ class SingingManager:
         if not target_segment:
             self.logger.warning(f"Segment '{segment_description}' not found in song '{song_name}'")
             return None, None
-        
+
 
         # 转换 lyrics (如果是 dict 则转换为 OneLyricLine)
         real_lyrics = []
@@ -322,6 +332,6 @@ class SingingManager:
 
     def get_tool_names(self) -> List[str]:
         return list(self.tools.keys())
-    
+
     def get_tools(self) -> Dict[str, MyTool]:
         return self.tools

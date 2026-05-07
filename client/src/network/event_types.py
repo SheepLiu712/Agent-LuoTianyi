@@ -22,10 +22,14 @@ class WSEventType(str, Enum):
     USER_TEXT = "user_text"
     USER_TYPING = "user_typing"
     USER_AUTH = "user_auth"
+    USER_TOUCH = "user_touch"
+
+    USER_PREFERENCE_SYNC = "user_preference_sync"
 
 
     HB_PING = "hb_ping"
     HB_PONG = "hb_pong"
+    DATE_DETECTED = "date_detected"
 
 @dataclass
 class WSMessage:

@@ -4,11 +4,14 @@ Data: 2026-04-07
 Description: 主界面UI实现，包含Live2D显示和聊天窗口两部分，以及它们的交互逻辑。通过Binder与后端处理逻辑连接。
 '''
 import os
+import time
+from collections import deque
 from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, Signal
 from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon, QPixmap
-from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
-                               QTextEdit, QScrollArea, QLabel, 
-                                QFrame, QPushButton, QFileDialog, QSlider, )
+from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
+                               QTextEdit, QScrollArea, QLabel,
+                                QFrame, QPushButton, QFileDialog, QSlider,
+                                QMessageBox)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
 from typing import Dict, Any, List
@@ -27,8 +30,14 @@ class Live2DWidget(QOpenGLWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
         self.model: Live2dModel = Live2dModel(live2d_config)
+        self.agent_binder = agent_binder
         agent_binder.on_set_model(self.model) # 有些参数需要在创建模型之后才能设置，所以通过binder传递模型实例给agent_binder，由它来调用相关回调设置参数。
         self.setMouseTracking(True)
+        # 点击间隔控制（防止服务端过载）
+        self._click_interval = 0.3  # 300ms
+        self._last_click_time = 0.0
+        # 点击频率统计（供LLM分析）
+        self._click_timestamps: deque = deque(maxlen=50)
 
     def initializeGL(self) -> None:
         # Load model config
@@ -63,13 +72,39 @@ class Live2DWidget(QOpenGLWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         '''
-        处理鼠标点击事件，判断是否点击在模型的特定区域（如头部），如果是则触发模型表情变化。
+        处理鼠标点击事件，只检测头部点击区域，设置点击间隔防止服务端过载，
+        并统计点击频率供LLM分析用户行为。
         '''
         if not self.model:
             return
+
+        # 点击间隔控制
+        now = time.time()
+        if now - self._last_click_time < self._click_interval:
+            return
+        self._last_click_time = now
+
         x, y = event.position().x(), event.position().y()
+
+        # 只保留头部点击区域
         if self.model.HitTest("头", x, y):
-            self.model.set_next_expression()
+            # 记录点击时间戳
+            self._click_timestamps.append(now)
+
+            # 计算点击频率（最近N秒内的点击次数）
+            cutoff_10s = now - 10
+            cutoff_30s = now - 30
+            count_10s = sum(1 for t in self._click_timestamps if t > cutoff_10s)
+            count_30s = sum(1 for t in self._click_timestamps if t > cutoff_30s)
+            click_frequency = {
+                "count_10s": count_10s,
+                "count_30s": count_30s,
+            }
+
+            # 播放对应的 Tap 动画
+            self.model.StartMotion("Tap头", 0, 3)
+            # 向服务端发送触摸事件及频率数据，由LLM生成回应
+            self.agent_binder.on_send_touch("头", click_frequency=click_frequency)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         '''
@@ -278,6 +313,7 @@ class ChatWidget(QWidget):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.agent = agent_binder
+        self.preferences_manager = None  # Will be set from main.py
         self.agent.response_signal.connect(self.on_agent_response)
         self.agent.delete_signal.connect(self.on_agent_delete)
         self.playback_manager = BubblePlaybackManager(
@@ -293,9 +329,20 @@ class ChatWidget(QWidget):
         self.is_loading_history = False
         self.first_load = True
         self.agent_bubbles: dict[str, ChatBubble] = {}
-
+        
+        # Connect settings button
+        if hasattr(self, 'settings_btn'):
+            self.settings_btn.clicked.connect(self.open_settings)
+        
         self.init_ui()
-
+        
+        # 初始化定时检查重要日期的定时器
+        self.date_check_timer = QTimer(self)
+        self.date_check_timer.timeout.connect(self.check_important_dates)
+        # 默认1小时检查一次，可以从设置中读取
+        self.date_check_interval = 60 * 60 * 1000  # 1 hour in milliseconds
+        self.date_check_timer.start(self.date_check_interval)
+        
         # Initial load
         QTimer.singleShot(100, lambda: self.agent.load_history(self.load_history_num, -1))
 
@@ -432,6 +479,25 @@ class ChatWidget(QWidget):
         
         self.toolbar_layout.addWidget(self.picture_btn)
         self.toolbar_layout.addWidget(self.volume_btn)
+        
+        # Settings Button
+        self.settings_btn = HoverButton(tooltip_text="用户设置")
+        self.settings_btn.setText("⚙设置")
+        self.settings_btn.setFixedSize(60, 24)
+        self.settings_btn.setStyleSheet("""
+            QPushButton { 
+                border: none; 
+                background-color: transparent; 
+                font-size: 12px;
+            } 
+            QPushButton:hover { 
+                background-color: #E0E0E0; 
+                border-radius: 4px; 
+            }
+        """)
+        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toolbar_layout.addWidget(self.settings_btn)
+        
         self.toolbar_layout.addStretch()
 
         # Horizontal Line 2
@@ -468,6 +534,16 @@ class ChatWidget(QWidget):
         self.setLayout(layout)
         self.temp_is_user = True
 
+    def open_settings(self):
+        """打开用户设置对话框"""
+        if self.preferences_manager is None:
+            from ..user_preferences_manager import UserPreferencesManager
+            self.preferences_manager = UserPreferencesManager()
+
+        from .preferences_dialog import UserPreferencesDialog
+        dialog = UserPreferencesDialog(self.preferences_manager, self, agent_binder=self.agent)
+        dialog.exec()
+    
     def on_scroll_value_changed(self, value):
         if value == 0 and not self.is_loading_history and self.current_history_index > 0:
             self.is_loading_history = True
@@ -628,13 +704,121 @@ class ChatWidget(QWidget):
                                       self.input_box.height() - s.height() - 10)
         return super().eventFilter(obj, event)
 
+    def set_preferences_manager(self, preferences_manager):
+        """设置用户偏好管理器"""
+        self.preferences_manager = preferences_manager
+        print("Preferences manager set in ChatWidget")
+    
+    def on_date_detected(self, date_info: dict):
+        """处理后端检测到重要日期的事件"""
+        if not self.preferences_manager:
+            print("Preferences manager not set, cannot save date")
+            return
+        
+        try:
+            name = date_info.get("name", "重要日期")
+            date_type_cn = date_info.get("type", "其他")
+            date = date_info.get("date", "")
+            description = date_info.get("description", "")
+            
+            # 转换日期类型：中文 → 英文
+            type_mapping = {
+                "生日": "birthday",
+                "纪念日": "anniversary",
+                "节日": "other",
+                "其他": "other"
+            }
+            date_type_en = type_mapping.get(date_type_cn, "other")
+            
+            # 弹出确认对话框
+            msg_box = QMessageBox()
+            msg_box.setWindowTitle("检测到重要日期")
+            msg_box.setText(f"我注意到你提到了「{name}」\n\n是否要将其添加到重要日期提醒中？")
+            msg_box.setInformativeText(f"日期类型：{date_type_cn}\n日期：{date if date else '每年此日'}")
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
+            
+            if msg_box.exec() == QMessageBox.StandardButton.Yes:
+                # 用户确认，保存到配置
+                success = self.preferences_manager.add_important_date(
+                    name=name,
+                    date=date,
+                    date_type=date_type_en,
+                    message=f"今天是{name}！",
+                    enabled=True
+                )
+                if success:
+                    QMessageBox.information(self, "保存成功", f"已成功添加「{name}」到重要日期列表！")
+                    print(f"已保存重要日期: {name}")
+                else:
+                    QMessageBox.warning(self, "保存失败", "保存重要日期失败，请查看日志。")
+            else:
+                print(f"用户取消保存重要日期: {name}")
+        
+        except Exception as e:
+            print(f"处理日期检测事件失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    
+    def check_important_dates(self):
+        """检查今天是否有重要日期，如果有则让AI自然地提及"""
+        if not self.preferences_manager:
+            return
+        
+        try:
+            # 如果是新的一天，清空已提醒记录
+            import datetime
+            today = datetime.datetime.now().date()
+            if hasattr(self, '_last_check_date') and self._last_check_date != today:
+                if hasattr(self, '_reminded_today'):
+                    self._reminded_today.clear()
+            self._last_check_date = today
+            
+            if not hasattr(self, '_reminded_today'):
+                self._reminded_today = set()
+            
+            # 检查今天是否有重要日期
+            matched_dates = self.preferences_manager.check_today_dates()
+            
+            if matched_dates:
+                for date_info in matched_dates:
+                    date_id = date_info.get("id")
+                    # 避免同一天重复提醒
+                    if date_id in self._reminded_today:
+                        continue
+                    
+                    name = date_info.get("name", "重要日期")
+                    date_type = date_info.get("type", "其他")
+                    
+                    # 构造更自然的提示，让LLM生成自然的回复
+                    if date_type == "生日":
+                        prompt = f"今天是{name}的{date_type}，请你自然地提起这个话题，表达你的祝福或关心。不要生硬地说'今天是XXX'，而是以聊天的方式自然地提及。"
+                    elif date_type == "纪念日":
+                        prompt = f"今天是{name}，这是一个特别的日子。请你以自然的方式提及这个日子，表达你的想法或回忆。"
+                    elif date_type == "节日":
+                        prompt = f"今天是{name}，请你以轻松自然的方式提及这个节日，可以聊聊相关的习俗、庆祝方式等。"
+                    else:
+                        prompt = f"今天是{name}。请你在回复中自然地提及这个日子，但不要生硬地直接说'今天是XXX'。"
+                    
+                    # 发送消息到后端，让AI生成自然回复
+                    if hasattr(self.agent, 'send_text_proactive'):
+                        self.agent.send_text_proactive(prompt)
+                        self._reminded_today.add(date_id)
+                        print(f"已触发AI自然提及: {name}")
+                    else:
+                        print(f"警告: agent 没有 send_text_proactive 方法")
+                    
+        except Exception as e:
+            print(f"检查重要日期失败: {e}")
+    
     def handle_text_input(self):
         if self.can_send == False:
             return
         text = self.input_box.toPlainText().strip()
         if not text:
             return
-        
+
         bubble = self.add_message("text", text, conv_uuid="", is_user=True)
         self.input_box.clear()
         

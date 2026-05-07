@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from ..agent.luotianyi_agent import LuoTianyiAgent
@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from ..pipeline.global_chat_stream_manager import GlobalChatStreamManager
     from ..pipeline.global_speaking_worker import GlobalSpeakingWorker
     from .websocket_service import WebSocketService
+    from ..plugins.schedule.schedule_manager import ScheduleManager
 
 
 @dataclass
@@ -23,5 +24,4 @@ class ServiceHub:
     global_speaking_worker: "GlobalSpeakingWorker"
     agent: "LuoTianyiAgent"
     activity_maker: "ActivityMaker"
-
-    
+    schedule_manager: Optional["ScheduleManager"] = None

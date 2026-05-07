@@ -74,11 +74,11 @@ class NetworkClient:
         except Exception as exc:
             return False, str(exc)
 
-    def send_chat(self, text: str, ack_timeout: float = 10.0):
+    def send_chat(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0):
         if not self.user_id or not self.message_token:
             return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
 
-        return self.ws_transport.submit_user_text(text, ack_timeout=ack_timeout)
+        return self.ws_transport.submit_user_text(text, is_proactive=is_proactive, ack_timeout=ack_timeout)
 
     def send_image(self, image_base64: str, mime_type: str, image_client_path: str | None = None, ack_timeout: float = 10.0):
         if not self.user_id or not self.message_token:
@@ -104,7 +104,24 @@ class NetworkClient:
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
-        
+
+    def send_touch(self, touch_area: str, click_frequency: dict = None, ack_timeout: float = 10.0):
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_user_touch(touch_area=touch_area, click_frequency=click_frequency, ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+
+    def send_preferences(self, preferences: dict, ack_timeout: float = 10.0):
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_user_preferences(preferences=preferences, ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
 
     def get_history(self, count: int, end_index: int) -> Tuple[List[ConversationItem], int]:
         if not self.user_id:
@@ -133,8 +150,8 @@ class NetworkClient:
             return [], -1
 
 
-    def network_set_message_listener(self, listener: Callable[[dict], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
-        self.ws_transport.set_agent_message_listener(listener, agent_state_listener)
+    def network_set_message_listener(self, listener: Callable[[dict], None] | None, agent_state_listener: Callable[[bool], None] | None, date_detected_listener: Callable[[dict], None] | None = None) -> None:
+        self.ws_transport.set_agent_message_listener(listener, agent_state_listener, date_detected_listener)
 
     ###### Internal methods ######
 
