@@ -21,19 +21,6 @@
             "graph_alias_path": "alias.json"
         }
     },
-    "knowledge": {
-        "song_database": {
-            "db_folder": "res/knowledge",
-            "db_file": "knowledge_db.db"
-        },
-        "llm": {
-            "api_type": "openai",
-            "model": "qwen3.5-plus",
-            "api_key": "$QWEN_API_KEY",
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "enable_thinking": false
-        }
-    },
     "tts": {
         "character_name": "LuoTianyi",
         "onnx_model_dir": "res/tts/lty_custom_onnx_model",
@@ -106,32 +93,6 @@
                 "top_p": 0.9
             },
             "prompt_name": "summary_prompt"
-        }
-    },
-    "crawler": {
-        "activated": true,
-        "data_dir": "data/crawled_data",
-        "vcpedia": {
-            "base_url": "https://vcpedia.cn",
-            "crawl_delay_range": [
-                1.0,
-                2.0
-            ],
-            "output_dir": "data/crawled_data",
-            "max_pages": 1000
-        },
-        "use_llm": false,
-        "llm_module": {
-            "llm": {
-                "api_type": "openai",
-                "model": "Qwen/Qwen3-32B",
-                "api_key": "$SILICONFLOW_API_KEY",
-                "base_url": "https://api.siliconflow.cn/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
-            },
-            "prompt_name": "crawl_prompt"
         }
     },
     "memory_manager": {
@@ -246,6 +207,44 @@
                     "max_retries": 2,
                     "request_timeout_seconds": 45,
                     "vlm_model": "qwen3-vl-plus"
+                }
+            }
+        }
+    },
+    "music": {
+        "resource_path": "res/music",
+        "auto_song_learner": {
+            "resource_path": "res/music",
+            "songlearner_dir": "src/plugins/music/song_learner",
+            "songlearner_resource_dir": "res/song_learner"
+        },
+        "singing_manager": {
+            "resource_path": "res/music"
+        },
+        "song_knowledge": {
+            "song_database": {
+                "db_folder": "res/knowledge",
+                "db_file": "knowledge_db.db"
+            },
+            "crawler": {
+                "activated": true,
+                "data_dir": "data/crawled_data",
+                "vcpedia": {
+                    "base_url": "https://vcpedia.cn",
+                    "crawl_delay_range": [
+                        1.0,
+                        2.0
+                    ],
+                    "output_dir": "data/crawled_data",
+                    "max_pages": 1000
+                },
+                "use_llm": false,
+                "llm": {
+                    "api_type": "openai",
+                    "model": "qwen3.5-plus",
+                    "api_key": "$QWEN_API_KEY",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "enable_thinking": false
                 }
             }
         }

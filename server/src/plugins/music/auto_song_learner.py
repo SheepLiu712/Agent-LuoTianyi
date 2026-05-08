@@ -185,21 +185,21 @@ class AutoSongLearner:
     Primary path: Songlearner pipeline (download -> clean -> segment -> JSON).
     """
 
-    MAX_ATTEMPTS = 1
+    MAX_ATTEMPTS = 3
     SONGELEARNER_TIMEOUT = 1200  # 20 minutes max for the full pipeline
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Dict[str, Any], wishlist: WishlistManager):
         self.logger = get_logger("AutoSongLearner")
         config = config or {}
-        self.resource_path = Path(config.get("resource_path", "res/music"))
+        self.resource_path = os.getcwd() / Path(config.get("resource_path", "res/music"))
         self.songs_dir = self.resource_path / "songs"
         self.metadata_path = self.resource_path / "metadata.json"
-        self.wishlist = WishlistManager(str(self.metadata_path), self.logger)
+        self.wishlist = wishlist
         self._ensure_directories()
 
         # Songlearner integration
-        self.songlearner_dir = Path(config.get("songlearner_dir", "src/plugins/music/song_learner"))
-        self.songlearner_resource_dir = Path(config.get("songlearner_resource_dir", "res/song_learner"))
+        self.songlearner_dir = os.getcwd() / Path(config.get("songlearner_dir", "src/plugins/music/song_learner"))
+        self.songlearner_resource_dir = os.getcwd() / Path(config.get("songlearner_resource_dir", "res/song_learner"))
         self.songlearner_available = self._check_songlearner_models()
         if self.songlearner_available:
             self.logger.info("Songlearner 模型已就绪，将使用完整学歌流水线（QQ音乐下载->清洗->MSAF->LLM分段）")
@@ -208,23 +208,7 @@ class AutoSongLearner:
                 "Songlearner 模型未就绪（需下载 MSST 预训练权重），"
                 "无法执行自动学歌"
             )
-
-    # -- model check ---------------------------------------------------------
-
-    def _check_songlearner_models(self) -> bool:
-        """Check if Songlearner resources are downloaded under res/song_learner/."""
-        required_models = [
-            "msst/configs/model_bs_roformer_ep_317_sdr_12.9755.yaml",
-            "msst/pretrain/model_bs_roformer_ep_317_sdr_12.9755.ckpt",
-            "msst/configs/model_mel_band_roformer_denoise.yaml",
-            "msst/pretrain/dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt",
-            "re_segment_prompt.json",
-        ]
-        for rel_path in required_models:
-            if not (self.songlearner_resource_dir / rel_path).exists():
-                self.logger.warning(f"Songlearner 模型缺失: {rel_path}")
-                return False
-        return True
+            raise RuntimeError("Songlearner 模型未就绪，无法执行自动学歌")
 
     # -- directory setup -----------------------------------------------------
 
@@ -427,16 +411,19 @@ class AutoSongLearner:
     def recently_learned(self) -> List[str]:
         return self.wishlist.get_recently_learned()
 
+        # -- model check ---------------------------------------------------------
 
-def _segment_labels(count: int) -> List[str]:
-    """Generate human-readable labels for N segments."""
-    if count <= 1:
-        return ["完整版"]
-    if count == 2:
-        return ["前段", "后段"]
-    if count == 3:
-        return ["前段", "中段", "后段"]
-    if count == 4:
-        return ["前奏", "主歌", "副歌", "尾声"]
-    # 5+
-    return [f"第{i+1}段" for i in range(count - 1)] + ["尾声"]
+    def _check_songlearner_models(self) -> bool:
+        """Check if Songlearner resources are downloaded under res/song_learner/."""
+        required_models = [
+            "msst/configs/model_bs_roformer_ep_317_sdr_12.9755.yaml",
+            "msst/pretrain/model_bs_roformer_ep_317_sdr_12.9755.ckpt",
+            "msst/configs/model_mel_band_roformer_denoise.yaml",
+            "msst/pretrain/dereverb_mel_band_roformer_anvuew_sdr_19.1729.ckpt",
+            "re_segment_prompt.json",
+        ]
+        for rel_path in required_models:
+            if not (self.songlearner_resource_dir / rel_path).exists():
+                self.logger.warning(f"Songlearner 模型缺失: {rel_path}")
+                return False
+        return True

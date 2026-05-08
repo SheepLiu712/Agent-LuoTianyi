@@ -24,8 +24,7 @@ class VCPediaFetcher:
         crawler_config = config.get("vcpedia", {})
         self.base_url = crawler_config.get("base_url", "https://vcpedia.cn")
 
-        cfg = load_config(str(Path(__file__).resolve().parent.parent.parent / "config" / "config.json"), default_config={})
-        self.llm_cfg = cfg.get("knowledge", {}).get("llm", {})
+        self.llm_cfg = config.get("llm", {})
         llm_client = LLMAPIFactory.create_interface(self.llm_cfg)
         self.llm_client = llm_client
 
