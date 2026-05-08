@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
@@ -24,6 +24,20 @@ class EventStatus(str, Enum):
     ONGOING = "ongoing"               # 进行中
     ENDED = "ended"                   # 已结束
     CANCELLED = "cancelled"           # 已取消
+
+
+@dataclass
+class OfficialDynamic:
+    uid: str
+    account_name: str
+    platform: str
+    dynamic_id: str
+    dynamic_type: str
+    content: str
+    raw_content: str
+    pics: List[str]
+    publish_time: str
+    source_url: str
 
 
 @dataclass
@@ -151,8 +165,11 @@ class ScheduleEvent:
 
         if start and now < start:
             self.status = EventStatus.UPCOMING
-        elif end and now > end:
-            self.status = EventStatus.ENDED
         elif start and now >= start:
-            self.status = EventStatus.ONGOING
+            # 无结束时间时默认 start + 24 小时为结束时间
+            effective_end = end if end else start + timedelta(hours=24)
+            if effective_end and now > effective_end:
+                self.status = EventStatus.ENDED
+            else:
+                self.status = EventStatus.ONGOING
         self.updated_at = now.isoformat()

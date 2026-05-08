@@ -76,24 +76,22 @@ async def startup_event(app: FastAPI):
         global_speaking_worker=get_global_speaking_worker(),
         agent=get_luotianyi_agent(),
         activity_maker=init_activity_maker(config.get("activity_maker", {})),
+        schedule_manager=ScheduleManager(
+            config=config.get("schedule", {}),
+        )
     )
 
-    # 初始化日程管理器
-    schedule_mgr = ScheduleManager(
-        config=config.get("schedule", {}),
-        service_hub_ref=service_hub,
-    )
-    service_hub.schedule_manager = schedule_mgr
-    schedule_mgr.start()
-
+    # 在service_hub内相互传递依赖实例
     service_hub.activity_maker.set_agent(get_luotianyi_agent())  # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
     service_hub.activity_maker.set_service_hub(service_hub)  # 将ServiceHub引用传递给ActivityMaker，用于演唱会静默期检查
     service_hub.gcsm.register_activity_maker(service_hub.activity_maker)  # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
     service_hub.global_speaking_worker.set_agent(get_luotianyi_agent())  # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
+    service_hub.schedule_manager.set_gcsm_ref(service_hub.gcsm)  # 将 ServiceHub 的引用传递给 ScheduleManager，方便它在需要时调用其他服务的接口
 
     # 启动聊天流过期清理后台任务
     service_hub.gcsm.start_cleanup_task(expiration_seconds=360)
     service_hub.global_speaking_worker.start_if_needed()
+    service_hub.schedule_manager.start()
 
     
     # 构建日常调度器

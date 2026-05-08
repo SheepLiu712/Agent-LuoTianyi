@@ -85,12 +85,10 @@
         "llm_module": {
             "llm": {
                 "api_type": "openai",
-                "model": "deepseek-chat",
-                "api_key": "$DEEPSEEK_API_KEY",
-                "base_url": "https://api.deepseek.com/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "enable_thinking": false
             },
             "prompt_name": "summary_prompt"
         }
@@ -112,19 +110,7 @@
         },
         "memory_searcher": {
             "max_k_graph_entities": 3,
-            "max_k_vector_entities": 5,
-            "llm_module": {
-                "llm": {
-                    "api_type": "openai",
-                    "model": "deepseek-chat",
-                    "api_key": "$DEEPSEEK_API_KEY",
-                    "base_url": "https://api.deepseek.com/v1",
-                    "temperature": 0.7,
-                    "max_tokens": 8192,
-                    "top_p": 0.9
-                },
-                "prompt_name": "memory_search_prompt"
-            }
+            "max_k_vector_entities": 5
         },
         "memory_writer": {
             "recent_update_path": "data/memory/context/recent_update.json",
@@ -297,6 +283,15 @@
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
             "enable_thinking": false
         },
+        "vlm": {
+                "api_type": "openai",
+                "model": "qwen3-vl-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "temperature": 0.7,
+                "max_tokens": 8192,
+                "top_p": 0.9
+        },
         "reminder": {
             "advance_days_concert": [
                 3,
@@ -313,8 +308,10 @@
             "mention_cooldown_hours": 6
         },
         "silence": {
-            "concert_pre_start_minutes": 30,
-            "concert_post_end_minutes": 60
-        }
+            "concert_pre_start_minutes": 60,
+            "concert_post_end_minutes": 30
+        },
+        "official_accounts": {}
+        
     }
 }
