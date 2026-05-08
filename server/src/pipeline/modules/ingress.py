@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, List, Optional
 from ...utils.logger import get_logger
-from ...vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
+from ...utils.vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
 from ...agent.jargon_retriver import extract_song_entities
 from ..chat_events import ChatInputEvent, ChatInputEventType
 from ...utils.llm.llm_module import LLMModule

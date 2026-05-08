@@ -6,8 +6,8 @@ src.llm.llm_api_interface.py
 
 from typing import Dict, List, Optional, Any, Tuple
 from abc import ABC, abstractmethod
-from ..utils.logger import get_logger
-from ..types.tool_type import MyTool
+from ..logger import get_logger
+from ...types.tool_type import MyTool
 from typing import List, Dict, Any
 import json
 import os
