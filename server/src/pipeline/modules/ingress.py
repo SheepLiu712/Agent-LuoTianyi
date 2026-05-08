@@ -87,6 +87,7 @@ async def _process_image_message(service_hub: "ServiceHub", user_id: str, messag
     image_description = f"[一张图片]:{image_description}"
     message.text = image_description  # 将描述文本放入message.text，供后续处理使用
     payload["image_server_path"] = image_server_path
+    
 async def extract_date_entities(user_input: str, llm_module) -> Optional[dict]:
     """
     使用LLM从用户输入中提取重要日期信息。

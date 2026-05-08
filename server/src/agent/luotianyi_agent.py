@@ -104,6 +104,24 @@ class LuoTianyiAgent:
         )
         self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
 
+    def save_preferences(self, user_uuid: str, preferences: dict) -> bool:
+        """保存用户偏好设置到数据库。"""
+        db = self._runtime_hub.open_sql_session()
+        try:
+            user = db.query(User).filter(User.uuid == user_uuid).first()
+            if user:
+                user.preferences = json.dumps(preferences, ensure_ascii=False)
+                db.commit()
+                self.logger.info(f"Saved preferences for user {user_uuid}: {preferences}")
+                return True
+            self.logger.warning(f"User {user_uuid} not found")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to save preferences for {user_uuid}: {e}")
+            return False
+        finally:
+            db.close()
+
     async def extract_topics_for_pipeline(
         self,
         user_id: str,
@@ -189,7 +207,7 @@ class LuoTianyiAgent:
 
     async def get_citywalk_diary_by_date(self, date_str: str) -> str | None:
         """按日期检索 citywalk 报告并返回 diary_text 字段。
-        如果同一天有多条记录，返回 created_at 最新的那一条的 diary_text。
+        如果同一天有多条记录，返回 created_at 最最新的那一条的 diary_text。
         date_str 格式为 YYYY-MM-DD
         """
         try:

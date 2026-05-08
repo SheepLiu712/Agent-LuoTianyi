@@ -158,19 +158,8 @@ async def chat_ws(
             if event.event_type == WSEventType.USER_PREFERENCE_SYNC.value:
                 await websocket_service.send_ack_event(ws_connection, event)
                 preferences = event.payload if isinstance(event.payload, dict) else {}
-                if ws_connection.user_uuid:
-                    try:
-                        db = get_sql_session()
-                        try:
-                            user = db.query(database.User).filter(database.User.uuid == ws_connection.user_uuid).first()
-                            if user:
-                                user.preferences = json.dumps(preferences, ensure_ascii=False)
-                                db.commit()
-                                logger.info(f"Saved preferences for user {ws_connection.user_name}: {preferences}")
-                        finally:
-                            db.close()
-                    except Exception as e:
-                        logger.error(f"Failed to save preferences: {e}")
+                if ws_connection.user_uuid and preferences:
+                    service_hub.agent.save_preferences(ws_connection.user_uuid, preferences)
                 continue
 
             chat_event = websocket_service.convert_to_chat_input_event(event)
