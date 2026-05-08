@@ -2,27 +2,45 @@
 # coding: utf-8
 
 import argparse
+from importlib import import_module
 import shutil
 import sys
 from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-SERVER_ROOT = PROJECT_ROOT.parents[4]
+# `run_song_workflow.py` 位于
+#   server/src/plugins/music/song_learner/run_song_workflow.py
+# 需要把 SERVER_ROOT 指向仓库内的 `server` 目录（上溯 3 级），
+# 之前使用 parents[4] 多退了一层，导致 ROOT 指向了上一级目录。
+SERVER_ROOT = PROJECT_ROOT.parents[3]
 SRC_DIR = PROJECT_ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 OUTPUTS_DIR = SERVER_ROOT / "res" / "music" / "songs"
 RESOURCE_ROOT = SERVER_ROOT / "res" / "song_learner"
 
-from .src.pipeline.clean_music_workflow import clean_audio_file
-from .src.pipeline.download_qq_song import download_song_and_lyric
-from .src.pipeline.make_clear_lrc import generate_clear_lrc
-from .src.pipeline.make_llm_lrc import generate_llm_lrc
-from .src.pipeline.make_song_json import generate_song_json
-from .src.pipeline.msaf_segment_boundaries import generate_boundary_inst
-from .src.pipeline.workflow_status import WorkflowStatus
+clean_music_workflow = import_module("pipeline.clean_music_workflow")
+download_qq_song = import_module("pipeline.download_qq_song")
+make_clear_lrc = import_module("pipeline.make_clear_lrc")
+make_llm_lrc = import_module("pipeline.make_llm_lrc")
+make_song_json = import_module("pipeline.make_song_json")
+msaf_segment_boundaries = import_module("pipeline.msaf_segment_boundaries")
+workflow_status = import_module("pipeline.workflow_status")
+
+clean_audio_file = clean_music_workflow.clean_audio_file
+download_song_and_lyric = download_qq_song.download_song_and_lyric
+generate_clear_lrc = make_clear_lrc.generate_clear_lrc
+generate_llm_lrc = make_llm_lrc.generate_llm_lrc
+generate_song_json = make_song_json.generate_song_json
+generate_boundary_inst = msaf_segment_boundaries.generate_boundary_inst
+WorkflowStatus = workflow_status.WorkflowStatus
 
 
 def safe_name(name: str) -> str:
@@ -105,6 +123,8 @@ def main() -> None:
     if status.is_completed("download_song"):
         print("[SKIP] 步骤 download_song 已完成，跳过")
         safe_song_name = song_name
+        downloaded_mp3 = find_first(target_song_dir, "*.mp3")
+        downloaded_lrc = find_first(target_song_dir, "*.lrc")
     else:
         print("[PROCESS] 正在执行步骤: download_song - 下载歌曲和歌词")
         safe_song_name, downloaded_mp3, downloaded_lrc = download_song_and_lyric(
@@ -113,7 +133,6 @@ def main() -> None:
             output_dir=outputs_dir,
             credential_file=RESOURCE_ROOT / ".qq_music_credential.json",
         )
-        status.mark_completed("download_song")
 
     if song_name != safe_song_name:
         # 重命名文件夹以匹配安全的文件名（如果下载的文件名与输入的歌曲名不同）。
@@ -133,6 +152,8 @@ def main() -> None:
             pass
         target_song_dir = new_target_song_dir
         status = WorkflowStatus(target_song_dir)
+
+    status.mark_completed("download_song")
 
     # 统一整理到 outputs/<歌名>/ 并固定命名。
     target_cleaned = target_song_dir / f"{safe_song_name}.cleaned.mp3"

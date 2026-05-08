@@ -185,15 +185,14 @@ class AutoSongLearner:
     Primary path: Songlearner pipeline (download -> clean -> segment -> JSON).
     """
 
-    MAX_ATTEMPTS = 3
-    SONGELEARNER_TIMEOUT = 600  # 10 minutes max for the full pipeline
+    MAX_ATTEMPTS = 1
+    SONGELEARNER_TIMEOUT = 1200  # 20 minutes max for the full pipeline
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.logger = get_logger("AutoSongLearner")
         config = config or {}
         self.resource_path = Path(config.get("resource_path", "res/music"))
         self.songs_dir = self.resource_path / "songs"
-        self.staging_dir = self.resource_path / "staging"
         self.metadata_path = self.resource_path / "metadata.json"
         self.wishlist = WishlistManager(str(self.metadata_path), self.logger)
         self._ensure_directories()
@@ -231,7 +230,7 @@ class AutoSongLearner:
 
     def _ensure_directories(self) -> None:
         self.songs_dir.mkdir(parents=True, exist_ok=True)
-        self.staging_dir.mkdir(parents=True, exist_ok=True)
+        # self.staging_dir.mkdir(parents=True, exist_ok=True)
 
     # -- main entry ----------------------------------------------------------
 
@@ -298,16 +297,19 @@ class AutoSongLearner:
             proc = subprocess.run(
                 [sys.executable, str(runner), safe_name],
                 cwd=str(self.songlearner_dir),
-                capture_output=True, text=True,
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=self.SONGELEARNER_TIMEOUT,
                 env={
                     **os.environ,
                     "QWEN_API_KEY": os.environ.get("QWEN_API_KEY", ""),
                     "SILICONFLOW_API_KEY": os.environ.get("SILICONFLOW_API_KEY", ""),
+                    "PYTHONUTF8": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                    "TEST_SONGS_DIR": str(self.songs_dir),
                 },
             )
         except subprocess.TimeoutExpired:
-            self._handle_failure(safe_name, "Songlearner 流水线执行超时（>10分钟）")
+            self._handle_failure(safe_name, "Songlearner 流水线执行超时（>20分钟）")
             return False
 
         if proc.returncode != 0:
@@ -320,6 +322,7 @@ class AutoSongLearner:
 
         # Locate the final output directory under the music library.
         sl_output = self.songs_dir / safe_name
+        print(f"Looking for Songlearner output at: {sl_output}")
         if not sl_output.exists():
             # The workflow may have normalized the folder name.
             outputs_root = self.songs_dir

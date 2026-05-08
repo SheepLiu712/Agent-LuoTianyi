@@ -80,6 +80,19 @@ def parse_args() -> argparse.Namespace:
 def safe_name(name: str) -> str:
     bad_chars = '<>:"/\\|?*\n\r\t'
     cleaned = "".join("_" if c in bad_chars else c for c in name).strip(" .")
+    import re
+    bracket_patterns = [
+        r"\([^()]*\)",
+        r"（[^（）]*）",
+    ]
+    
+    for pattern in bracket_patterns:
+        while True:
+            updated = re.sub(pattern, "", cleaned)
+            if updated == cleaned:
+                break
+            cleaned = updated
+
     return cleaned or f"song_{int(time.time())}"
 
 
