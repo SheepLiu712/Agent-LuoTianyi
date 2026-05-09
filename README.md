@@ -131,7 +131,6 @@ main.py  — PySide6 入口
 3. 向作者获取邀请码，注册后登录
 
 ### 客户端（开发者）
-
 ```bash
 git clone https://github.com/SheepLiu712/Agent-LuoTianyi
 cd Agent-LuoTianyi/client
@@ -140,7 +139,6 @@ python main.py     # 启动客户端
 ```
 
 ### 服务端架设
-
 #### 环境要求
 
 - 内存 ≥ 4GB（推荐 8GB+）
@@ -173,7 +171,6 @@ setx AMAP_KEY "your_key"       # 高德地图，可选（城市漫步用）
 python server_main.py          # http://127.0.0.1:60030
 python scripts/generate_cert.py  # （可选）生成 SSL 证书
 ```
-
 ### 移动端 App
 
 ```bash
@@ -184,7 +181,6 @@ npx expo start                 # 启动 Expo 开发服务器
 ---
 
 ## 技术栈
-
 ### 服务端
 
 | 技术 | 用途 |

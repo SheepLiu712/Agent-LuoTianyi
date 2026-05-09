@@ -54,7 +54,6 @@ class MemoryWriter:
         user_items = memory_payload.get("user_memory", [])
         event_items = memory_payload.get("event_memory", [])
         written: List[str] = []
-
         if user_items:
             # Single de-dup pass for all user memory items
             seen_texts = await self._batch_check_user_memory_dups(
@@ -67,7 +66,6 @@ class MemoryWriter:
                 seen_texts.add(text)
                 await self.write_user_memory(db, redis, vector_store, user_id, content, commit=commit)
                 written.append(text)
-
         if event_items:
             today = time.strftime("%Y-%m-%d")
             seen_texts = await self._batch_check_event_memory_dups(
@@ -82,7 +80,6 @@ class MemoryWriter:
                 written.append(text)
 
         return written
-
     async def _extract_knowledge(
         self,
         history: str,

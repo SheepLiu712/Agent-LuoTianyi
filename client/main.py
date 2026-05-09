@@ -44,7 +44,6 @@ if __name__ == "__main__":
 
     # 创建用户偏好管理器（需在 LoginDialog 之前创建，用于注册引导）
     preferences_manager = UserPreferencesManager()
-
     # 创建网络客户端实例
     network_client = NetworkClient(
         base_url=config.get("base_url"),

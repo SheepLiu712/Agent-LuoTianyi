@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
-from enum import Enum
+from datetime import datetimefrom enum import Enum
 from typing import Any, Dict, List, Optional
 
 
@@ -154,5 +153,4 @@ class ScheduleEvent:
         elif end and now > end:
             self.status = EventStatus.ENDED
         elif start and now >= start:
-            self.status = EventStatus.ONGOING
-        self.updated_at = now.isoformat()
+            self.status = EventStatus.ONGOING        self.updated_at = now.isoformat()

@@ -2,7 +2,6 @@
 事件解析器：使用 LLM 从原始动态文本中提取结构化事件信息。
 """
 from __future__ import annotations
-
 import json
 import re
 from datetime import datetime
@@ -11,7 +10,6 @@ from typing import Any, Dict, List, Optional
 from src.utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
 from src.utils.logger import get_logger
 from .event_models import EventType, ScheduleEvent
-
 logger = get_logger(__name__)
 
 # 构建 LLM prompt 的模板
@@ -31,13 +29,11 @@ EVENT_PARSE_PROMPT = """\
 2. 如果动态是日常闲聊、感谢、无明确活动时间的公告，归类为 "general"，且不需要设置活动时间。
 3. 时间尽量精确到分钟；如果只有日期，默认设为当天 19:00。
 4. 如果提到结束时间，同样提取；否则留空。
-
 【输出格式】
 如果动态中包含可提醒的活动事件，输出一个 JSON 数组，每个元素包含：
 - "event_type": 上述类型之一
 - "title": 活动标题（简洁，20字以内）
-- "description": 活动描述（100字以内）
-- "start_time": 开始时间（ISO 8601，如 2025-05-20T19:00:00）
+- "description": 活动描述（100字以内）- "start_time": 开始时间（ISO 8601，如 2025-05-20T19:00:00）
 - "end_time": 结束时间（ISO 8601，无则留 ""）
 - "location": 地点（无则留 ""）
 
@@ -56,8 +52,7 @@ class EventParser:
     """使用 LLM 从原始动态文本中解析出结构化事件。"""
 
     def __init__(self, llm_config: Optional[Dict[str, Any]] = None):
-        self.llm_client: Optional[LLMAPIInterface] = None
-        if llm_config:
+        self.llm_client: Optional[LLMAPIInterface] = None        if llm_config:
             try:
                 self.llm_client = LLMAPIFactory.create_interface(llm_config)
                 logger.info("EventParser LLM client initialized")
@@ -65,8 +60,7 @@ class EventParser:
                 logger.warning(f"Failed to init EventParser LLM client: {e}")
 
     async def parse_dynamics(
-        self, raw_items: List[Dict[str, Any]]
-    ) -> List[ScheduleEvent]:
+        self, raw_items: List[Dict[str, Any]]    ) -> List[ScheduleEvent]:
         """
         批量解析多条原始动态，返回结构化事件列表。
         每条动态可能产生 0～N 个事件。
@@ -88,12 +82,10 @@ class EventParser:
         raw_content = raw_item.get("raw_content", content)
         platform = raw_item.get("platform", "bilibili")
         source_url = raw_item.get("source_url", "")
-
         if not content:
             return []
 
-        # 先做简单规则过滤：标题党/日常关键词 → 直接跳过（减少 LLM 调用）
-        if self._is_likely_daily_chat(content):
+        # 先做简单规则过滤：标题党/日常关键词 → 直接跳过（减少 LLM 调用）        if self._is_likely_daily_chat(content):
             logger.debug(f"Skipping daily chat: {content[:50]}...")
             return []
 
@@ -114,7 +106,6 @@ class EventParser:
             result = self._extract_json_array(result)
             if not result:
                 return []
-
             parsed_list = json.loads(result)
             if not isinstance(parsed_list, list):
                 return []
@@ -151,13 +142,11 @@ class EventParser:
             logger.warning(f"LLM returned invalid JSON: {result[:200]}")
             return []
         except Exception as e:
-            logger.error(f"LLM parse error: {e}")
-            return self._rule_based_parse(raw_item, content, raw_content, platform, source_url)
+            logger.error(f"LLM parse error: {e}")            return self._rule_based_parse(raw_item, content, raw_content, platform, source_url)
 
     def _rule_based_parse(
         self,
-        raw_item: Dict[str, Any],
-        content: str,
+        raw_item: Dict[str, Any],        content: str,
         raw_content: str,
         platform: str,
         source_url: str,

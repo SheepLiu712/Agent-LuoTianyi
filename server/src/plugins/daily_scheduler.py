@@ -11,6 +11,12 @@ from typing import Any, Callable, Dict, Optional
 
 from ..utils.logger import get_logger
 from .music.daily_new_song_fetcher import sync_daily_new_songs
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .citywalk.runtime_scheduler import CitywalkRuntimeService
+    from .music.auto_song_learner import AutoSongLearner
+
 
 
 class DailyScheduler:
@@ -22,7 +28,9 @@ class DailyScheduler:
 
     def __init__(
         self,
-        runtime_service: Any,
+        song_knowledge_config: Dict[str, Any],
+        citywalk_service: 'CitywalkRuntimeService',
+        song_learner: 'AutoSongLearner',
         state_file: str = "data/plugin_scheduler/scheduler_state.json",
         citywalk_probability: float = 0.2,
         song_interval_days: int = 3,
@@ -30,13 +38,13 @@ class DailyScheduler:
         song_learner: Optional[Any] = None,
     ):
         self.logger = get_logger(__name__)
-        self.runtime_service = runtime_service
+        self.song_knowledge_config = song_knowledge_config
+        self.citywalk_service = citywalk_service
         self.state_file = Path(state_file)
         self.citywalk_probability = citywalk_probability
         self.song_interval_days = song_interval_days
         self.random_func = random_func or random.random
-        self.song_learner = song_learner
-        self._stop_event = threading.Event()
+        self.song_learner = song_learner        self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
     def start(self) -> None:
@@ -52,6 +60,74 @@ class DailyScheduler:
         if self._thread:
             self._thread.join(timeout=5)
         self.logger.info("日程调度器已停止")
+
+    def _run_citywalk_async(self) -> None:
+        def _target():
+            try:
+                self.citywalk_service.run_once()
+            except Exception as exc:
+                self.logger.error("凌晨城市漫步任务失败: %s", exc)
+
+        threading.Thread(target=_target, name="citywalk-runner", daemon=True).start()
+
+    def _run_song_fetch_async(self) -> None:
+        def _target():
+            try:
+                result = sync_daily_new_songs(self.song_knowledge_config)
+                self.logger.info("凌晨歌曲同步完成: 新增=%s, 失败=%s", len(result.get("added", [])), len(result.get("failed", [])))
+            except Exception as exc:
+                self.logger.error("凌晨歌曲同步失败: %s", exc)
+
+        threading.Thread(target=_target, name="daily-song-fetcher", daemon=True).start()
+
+    def _run_song_learner_async(self) -> None:
+        if self.song_learner is None:
+            return
+        def _target():
+            try:
+                result = self.song_learner.try_learn_pending()
+                self.logger.info(
+                    "凌晨歌曲学习完成: 习得=%s, 放弃=%s, 等待=%s",
+                    len(result.learned), len(result.abandoned), len(result.awaiting),
+                )
+                if result.learned:
+                    self.logger.info("新学会的歌曲: %s", result.learned)
+            except Exception as exc:
+                self.logger.error("凌晨歌曲学习失败: %s", exc)
+        threading.Thread(target=_target, name="song-learner-runner", daemon=True).start()
+
+    def _run_once_for_day(self, now: datetime) -> None:
+        '''
+        每天4am执行一次，包含：
+        - 城市漫步（20%概率）
+        - 歌曲同步（每3天一次）
+        - 歌曲学习（每天一次，检查是否有待学歌曲）
+        '''
+        today = now.strftime("%Y-%m-%d")
+        state = self._load_state()
+        if state.get("last_daily_check") == today:
+            return
+
+        if self.random_func() < self.citywalk_probability:
+            self._run_citywalk_async()
+
+        if self.should_run_song_fetch(state.get("last_song_fetch_date", ""), now, self.song_interval_days):
+            self._run_song_fetch_async()
+            state["last_song_fetch_date"] = today
+
+        # Song learner: runs every day at 4AM (cheap — mostly checks staging)
+        self._run_song_learner_async()
+
+        state["last_daily_check"] = today
+        self._save_state(state)
+
+    def _run_loop(self) -> None:
+        while not self._stop_event.is_set():
+            now = datetime.now()
+            wait_seconds = self._seconds_until_next_4am(now)
+            if self._stop_event.wait(timeout=wait_seconds):
+                break
+            self._run_once_for_day(datetime.now())
 
     @staticmethod
     def should_run_song_fetch(last_run_date: str, current_date: datetime, interval_days: int) -> bool:

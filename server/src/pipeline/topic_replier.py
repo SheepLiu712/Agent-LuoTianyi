@@ -79,8 +79,7 @@ class TopicReplier:
 
         # 注入活动上下文（近期演唱会/联动等信息）
         topic_content = topic.topic_content
-        if self.service_hub.schedule_manager:
-            try:
+        if self.service_hub.schedule_manager:            try:
                 activity_ctx = self.service_hub.schedule_manager.get_active_context(self.user_id)
                 if activity_ctx:
                     topic_content = f"{topic_content}\n\n{activity_ctx}"
@@ -100,11 +99,10 @@ class TopicReplier:
             fact_hits=fact_hits,
             sing_plan=sing_plan,
             conversation_history=conversation_history,
-            memory_pool=self.memory_pool,
-        )
+            memory_pool=self.memory_pool,        )
         for item in reply_items:
             if isinstance(item, SongSegmentChat):
-                lyrics = self.service_hub.agent.singing_manager.get_segment_lyrics(item.song, item.segment)
+                lyrics = self.service_hub.agent.music_manager.get_segment_lyrics(item.song, item.segment)
                 item.lyrics = lyrics
 
         uuid_list = await self.service_hub.agent.persist_topic_replies_for_pipeline(
@@ -188,8 +186,8 @@ class TopicReplier:
         for constraint in fact_constraints:
             if constraint == "/SongsCanSing":
                 try:
-                    singing_manager = self.service_hub.agent.singing_manager
-                    songs_json = await singing_manager.get_songs_can_sing_llm(max_song_num=15)
+                    music_manager = self.service_hub.agent.music_manager
+                    songs_json = await music_manager.get_songs_can_sing_llm(max_song_num=15)
                     special_hits.append(f"可唱歌曲推荐：{songs_json}")
                 except Exception as e:
                     self.logger.error(f"Failed to get songs can sing: {e}")
@@ -197,8 +195,8 @@ class TopicReplier:
                 try:
                     song_name = constraint[len("/CanISing"):].strip()
                     if song_name:
-                        singing_manager = self.service_hub.agent.singing_manager
-                        can_sing = await singing_manager.can_i_sing_song_llm(song_name)
+                        music_manager = self.service_hub.agent.music_manager
+                        can_sing = await music_manager.can_i_sing_song_llm(song_name)
                         special_hits.append(can_sing)
                 except Exception as e:
                     self.logger.error(f"Failed to get can I sing for {song_name}: {e}")
@@ -209,12 +207,12 @@ class TopicReplier:
         # 获取常规的歌曲事实
         regular_hits = []
         if regular_constraints:
-            regular_hits = await self.service_hub.agent.search_song_facts_for_topic(regular_constraints)
+            regular_hits = await self.service_hub.agent.music_manager.search_song_facts_for_topic(regular_constraints)
         
         return special_hits + regular_hits
 
     async def _sing_plan(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
-        # 利用并修改singing_manager，判断sing_attempts中所给出的用户的唱歌指令能否满足，如果能满足则返回准备唱的歌曲名称和唱段，如果不能满足则返回None
+        # 利用 music_manager 判断 sing_attempts 中所给出的用户唱歌指令能否满足。
         # 如果有明确歌名，查询这首歌能不能唱，能唱的话随机选择一段
         # 如果没有明确歌名(歌名为random_song)，则从歌曲数据库中随机选择一首歌，并随机选择一个唱段
         # 如果为空则直接返回
@@ -243,8 +241,7 @@ class TopicReplier:
         current_dialogue = self._build_current_dialogue(topic, reply_items)
 
         try:
-            written_memories = await self.service_hub.agent.write_topic_memories_for_pipeline(
-                user_id=self.user_id,
+            written_memories = await self.service_hub.agent.write_topic_memories_for_pipeline(                user_id=self.user_id,
                 current_dialogue=current_dialogue,
                 related_memories=memory_hits,
                 conversation_history=conversation_history,
@@ -253,7 +250,6 @@ class TopicReplier:
                 self.memory_pool_add_callback(written_memories)
         except Exception as e:
             self.logger.warning(f"Topic memory write task failed: {e}")
-
     async def _schedule_profile_context_update(
         self
     ) -> None:
