@@ -69,6 +69,7 @@ class MainChat:
         memory_hits: Optional[List[str]] = None,
         sing_plan: Optional[Tuple[str, str]] = None,
         memory_pool: Optional[List[str]] = None,
+        user_preferences: str = "",
     ) -> List[OneResponseLine]:
         """根据 topic_reply_prompt 生成自然语言回复。"""
         user_persona = self._build_user_persona(user_nickname, user_description)
@@ -86,6 +87,7 @@ class MainChat:
             reply_topic=reply_topic or "",
             sing_requirement=sing_requirement,
             extra_knowledge=extra_knowledge,
+            user_preferences=user_preferences or "无",
         )
         return self._parse_response(response, sing_plan)
 

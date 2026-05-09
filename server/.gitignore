@@ -69,7 +69,13 @@ logs
 temp
 mobile_project
 setup
-res
 data
 .VSCodeCounter
 Redis-x64-*
+
+# 资源文件（大文件/生成内容不跟踪）
+res/tts
+res/music
+res/knowledge
+res/agent/persona
+res/songlearner

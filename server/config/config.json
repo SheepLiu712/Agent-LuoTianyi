@@ -45,7 +45,7 @@
         "interface_config_path": "config/tts_interface_config.json"
     },
     "prompt_manager": {
-        "template_dir": "res/agent/prompts"
+        "template_dir": "res/prompts"
     },
     "topic_extractor": {
         "llm_module": {

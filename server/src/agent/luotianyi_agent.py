@@ -300,7 +300,8 @@ class LuoTianyiAgent:
             user = db.query(User).filter(User.uuid == user_id).first()
             user_nickname = user.nickname if user and user.nickname else "你"
             user_description = user.description if user and user.description else ""
-            # 注入用户偏好（关系类型、表达风格等）
+            user_preferences = ""
+            # 用独立的 user_preferences 字段注入偏好，不混入 user_description
             if user and user.preferences:
                 try:
                     prefs = json.loads(user.preferences) if isinstance(user.preferences, str) else user.preferences
@@ -315,8 +316,7 @@ class LuoTianyiAgent:
                     if prefs.get("custom_context"):
                         pref_parts.append(f"用户补充的上下文：{prefs['custom_context']}")
                     if pref_parts:
-                        pref_context = "（用户偏好设置：" + "；".join(pref_parts) + "）"
-                        user_description = (user_description + "\n" + pref_context).strip()
+                        user_preferences = "；".join(pref_parts)
                 except Exception as e:
                     self.logger.warning(f"Failed to parse preferences: {e}")
             # 注入好感度上下文
@@ -338,6 +338,7 @@ class LuoTianyiAgent:
             memory_hits=memory_hits or [],
             sing_plan=sing_plan,
             memory_pool=memory_pool or [],
+            user_preferences=user_preferences,
         )
 
     async def write_topic_memories_for_pipeline(

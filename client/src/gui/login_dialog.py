@@ -1,5 +1,6 @@
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit, 
-                               QPushButton, QMessageBox, QTabWidget, QWidget, QCheckBox)
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit,
+                               QPushButton, QMessageBox, QTabWidget, QWidget, QCheckBox,
+                               QComboBox, QHBoxLayout)
 from PySide6.QtCore import Qt
 
 from .binder import AgentBinder
@@ -7,11 +8,87 @@ from ..safety import credential
 from ..utils.logger import get_logger
 
 
+class PreferenceGuideDialog(QDialog):
+    """注册后的快速偏好设置引导"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("设置你的相处偏好")
+        self.setFixedSize(420, 320)
+        self.result_data = {}
+
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(25, 25, 25, 25)
+
+        title = QLabel("欢迎！在开始聊天前，可以简单设置一下天依和你的相处方式~")
+        title.setWordWrap(True)
+        title.setStyleSheet("font-size: 14px; color: #555;")
+        layout.addWidget(title)
+
+        # 关系类型
+        rel_layout = QHBoxLayout()
+        rel_layout.addWidget(QLabel("你和天依的关系："))
+        self.relationship_combo = QComboBox()
+        self.relationship_combo.addItems(["朋友", "知己", "粉丝", "搭档", "家人", "其他"])
+        self.relationship_combo.setCurrentText("朋友")
+        self.relationship_combo.setStyleSheet("font-size: 14px; padding: 4px;")
+        rel_layout.addWidget(self.relationship_combo)
+        rel_layout.addStretch()
+        layout.addLayout(rel_layout)
+
+        # 表达风格
+        style_layout = QHBoxLayout()
+        style_layout.addWidget(QLabel("希望天依的风格：（可留空）"))
+        self.style_combo = QComboBox()
+        self.style_combo.addItems(["", "活泼可爱", "温柔可人", "俏皮调皮", "诗意文艺", "热情洋溢", "文静恬淡"])
+        self.style_combo.setCurrentText("")
+        self.style_combo.setStyleSheet("font-size: 14px; padding: 4px;")
+        style_layout.addWidget(self.style_combo)
+        style_layout.addStretch()
+        layout.addLayout(style_layout)
+
+        # 提示文字
+        hint = QLabel("这些设置后续可以在「设置」中随时修改~")
+        hint.setStyleSheet("font-size: 12px; color: #999;")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(hint)
+
+        layout.addStretch()
+
+        # 按钮
+        btn_layout = QHBoxLayout()
+        skip_btn = QPushButton("先试试看")
+        skip_btn.setStyleSheet("font-size: 14px; padding: 8px 20px; background-color: #E0E0E0; border-radius: 5px;")
+        skip_btn.clicked.connect(self.reject)
+
+        confirm_btn = QPushButton("确认")
+        confirm_btn.setStyleSheet("font-size: 14px; padding: 8px 20px; background-color: #66ccff; color: white; border-radius: 5px;")
+        confirm_btn.clicked.connect(self.accept)
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(skip_btn)
+        btn_layout.addSpacing(15)
+        btn_layout.addWidget(confirm_btn)
+        layout.addLayout(btn_layout)
+
+        self.setLayout(layout)
+
+    def get_preferences(self) -> dict:
+        relationship = self.relationship_combo.currentText()
+        speaking_style = self.style_combo.currentText()
+        prefs = {"relationship": relationship}
+        if speaking_style:
+            prefs["speaking_style"] = speaking_style
+        return prefs
+
+
 class LoginDialog(QDialog):
-    def __init__(self, binder: AgentBinder):
+    def __init__(self, binder: AgentBinder, preferences_manager=None):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
         self.binder = binder
+        self.preferences_manager = preferences_manager
         self.user_id = None
         self.saved_token = None
         
@@ -149,7 +226,7 @@ class LoginDialog(QDialog):
         password = self.r_password.text()
         confirm_password = self.r_confirm_password.text()
         invite = self.r_invite.text()
-        
+
         if not username or not password or not confirm_password or not invite:
             QMessageBox.warning(self, "错误", "请填写所有信息")
             return
@@ -157,9 +234,18 @@ class LoginDialog(QDialog):
         if password != confirm_password:
             QMessageBox.warning(self, "错误", "两次输入的密码不一致")
             return
-            
+
         success, msg = self.binder.on_register(username, password, invite)
         if success:
+            # 注册成功后显示偏好引导
+            if self.preferences_manager:
+                guide = PreferenceGuideDialog(self)
+                if guide.exec() == QDialog.DialogCode.Accepted:
+                    prefs = guide.get_preferences()
+                    self.preferences_manager.set_relationship_mode(
+                        relationship=prefs.get("relationship", "朋友"),
+                        speaking_style=prefs.get("speaking_style", ""),
+                    )
             QMessageBox.information(self, "成功", "注册成功，请登录")
             self.tabs.setCurrentIndex(0)
         else:
