@@ -6,8 +6,7 @@ import io
 import base64
 import traceback
 import re
-from ...types.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntry
-from ...types.tool_type import  MyTool, ToolFunction, ToolOneParameter
+from ...types.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntryfrom ...types.tool_type import  MyTool, ToolFunction, ToolOneParameter
 from typing import List, Tuple, Dict, Any, Optional
 import random
 from .auto_song_learner import WishlistManager
@@ -195,7 +194,6 @@ class SingingManager:
         self.get_music_data()
         self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
         self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
-
     async def get_songs_can_sing_llm(self, max_song_num: int = 5) -> str:
         song_and_desc = self.get_songs_can_sing(max_song_num)
         return json.dumps(song_and_desc, ensure_ascii=False)
@@ -207,7 +205,6 @@ class SingingManager:
         if not segments:
             return f"洛天依目前无法演唱{song_name}。"
         return f"洛天依可以演唱{correct_song_name}，可以唱的唱段有：{', '.join(segments)}。"
-
     def get_segment_lyrics(self, song_name: str, segment_description: str) -> str:
         lyrics, _ = self.get_song_segment(song_name, segment_description, require_audio=False)
         if not lyrics:

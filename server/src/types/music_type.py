@@ -29,6 +29,7 @@ class SongSegment:
 
 @dataclass
 class SongMetadata:
+    song_name: str
     title: str
     description: str
     song_path: str
