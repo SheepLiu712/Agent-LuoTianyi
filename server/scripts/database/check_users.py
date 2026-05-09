@@ -24,9 +24,10 @@ def main() -> None:
         users = session.query(User).order_by(User.username.asc()).all()
         print(f"Found {len(users)} users.")
         for index, user in enumerate(users, start=1):
-            # if not user.username == "Dpon":
-            #     continue
+            if not user.uuid.startswith("43c4153a"):
+                continue
             print(f"\n[{index}] username: {user.username}")
+            print(f"uuid: {user.password}")
             print(f"nickname: {user.nickname}")
             print(f"last_login: {_format_datetime(user.last_login)}")
             print(f"description: {user.description or ''}")
