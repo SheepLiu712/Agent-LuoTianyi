@@ -207,7 +207,6 @@ class SingingManager:
         if not segments:
             return f"洛天依目前无法演唱{song_name}。"
         return f"洛天依可以演唱{correct_song_name}，可以唱的唱段有：{', '.join(segments)}。"
-
     def get_segment_lyrics(self, song_name: str, segment_description: str) -> str:
         lyrics, _ = self.get_song_segment(song_name, segment_description, require_audio=False)
         if not lyrics:
