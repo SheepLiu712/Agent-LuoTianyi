@@ -53,6 +53,15 @@ async def startup_event(app: FastAPI):
     # 数据库初始化
     database_config: Dict = config.get("database", {})
     database.init_all_databases(database_config)
+    # 预写入常见节假日
+    try:
+        sql_db = database.get_sql_session()
+        try:
+            database.seed_holidays(sql_db)
+        finally:
+            sql_db.close()
+    except Exception as e:
+        logger.warning(f"写入节假日失败: {e}")
     song_db_config: Dict = config.get("knowledge", {}).get("song_database", {})
     init_song_db(song_db_config)
     # TTS 模块初始化，启动TTS服务器进程
@@ -274,6 +283,32 @@ async def login(
             await service_hub.activity_maker.add_user_login_activity(user.uuid, elapsed_from_last_login)
         return {"login_token": token, "message_token": message_token, "user_id": req.username}
     raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+
+@app.get("/important_dates/today")
+async def get_today_important_dates(
+    username: str,
+    token: str,
+    db: Session = Depends(database.get_sql_db),
+):
+    """获取用户今天的重要日期列表（生日、节假日等）。"""
+    message_token_valid, user_uuid = account.check_message_token(db, username, token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+
+    dates = database.get_today_important_dates(db, user_uuid)
+    return {
+        "dates": [
+            {
+                "id": d.id,
+                "name": d.name,
+                "date_type": d.date_type,
+                "description": d.description,
+                "is_recurring": d.is_recurring,
+            }
+            for d in dates
+        ]
+    }
 
 
 @app.get("/history")
