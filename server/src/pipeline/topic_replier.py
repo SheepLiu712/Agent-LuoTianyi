@@ -12,7 +12,8 @@ if TYPE_CHECKING:
 
 
 class TopicReplier:
-    def __init__(self, username: str, user_id: str, send_reply_callback: Callable[[ChatResponse], Awaitable[None]]):
+    def __init__(self, username: str, user_id: str, send_reply_callback: Callable[[ChatResponse], Awaitable[None]],
+                 memory_pool_add_callback: Optional[Callable[[List[str]], None]] = None):
         self.username = username
         self.user_id = user_id
         self.send_reply_callback = send_reply_callback
@@ -22,6 +23,8 @@ class TopicReplier:
         self.service_hub: "ServiceHub" | None = None
         self.is_processing: bool = False
         self.change_state_callback : Optional[Callable[[bool, bool], Awaitable[None]]] = None # thinking, speaking
+        self.memory_pool: List[str] = []
+        self.memory_pool_add_callback = memory_pool_add_callback
 
     def set_service_hub(self, service_hub: "ServiceHub"):
         self.service_hub = service_hub
@@ -97,6 +100,7 @@ class TopicReplier:
             fact_hits=fact_hits,
             sing_plan=sing_plan,
             conversation_history=conversation_history,
+            memory_pool=self.memory_pool,
         )
         for item in reply_items:
             if isinstance(item, SongSegmentChat):
@@ -239,12 +243,14 @@ class TopicReplier:
         current_dialogue = self._build_current_dialogue(topic, reply_items)
 
         try:
-            await self.service_hub.agent.write_topic_memories_for_pipeline(
+            written_memories = await self.service_hub.agent.write_topic_memories_for_pipeline(
                 user_id=self.user_id,
                 current_dialogue=current_dialogue,
                 related_memories=memory_hits,
                 conversation_history=conversation_history,
             )
+            if written_memories and self.memory_pool_add_callback:
+                self.memory_pool_add_callback(written_memories)
         except Exception as e:
             self.logger.warning(f"Topic memory write task failed: {e}")
 

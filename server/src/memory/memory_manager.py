@@ -107,15 +107,12 @@ class MemoryManager:
         current_dialogue: str = "",
         related_memories: List[str] | None = None,
         commit: bool = True
-    ):
+    ) -> List[str]:
         """
-        根据最新的交互内容，生成并写入新的记忆
-
-        Args:
-            user_input: 用户的输入文本
-            history: 包含最近交互内容的列表
+        根据最新的交互内容，生成并写入新的记忆。
+        返回实际写入的记忆文本列表。
         """
-        await self.memory_writer.process_interaction(
+        return await self.memory_writer.process_interaction(
             db,
             redis,
             vector_store,

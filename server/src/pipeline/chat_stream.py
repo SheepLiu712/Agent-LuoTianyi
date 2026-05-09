@@ -27,8 +27,16 @@ class ChatStream:
         self.logger = get_logger(f"{self.user_name}ChatStream")
         self.service_hub: ServiceHub | None = None
         self.connection_lost_time = None
+        self.memory_pool: List[str] = []
+        self.memory_pool_max_size = 10
         self.topic_planner = TopicPlanner(username=self.user_name, user_id=self.user_uuid)
-        self.topic_replier = TopicReplier(username=self.user_name, user_id=self.user_uuid, send_reply_callback=self.feed_response)
+        self.topic_replier = TopicReplier(
+            username=self.user_name,
+            user_id=self.user_uuid,
+            send_reply_callback=self.feed_response,
+            memory_pool_add_callback=self.add_to_memory_pool,
+        )
+        self.topic_replier.memory_pool = self.memory_pool  # 共享 memory_pool 引用
         self.topic_planner.set_topic_consumer(self.topic_replier.add_topic)
         self.topic_replier.set_change_state_callback(self.change_state)
         self.ingress_queue: asyncio.Queue[ChatInputEvent] = asyncio.Queue()
@@ -38,6 +46,17 @@ class ChatStream:
 
         self.state = self.STATE_WAITING
         self.state_lock = asyncio.Lock()
+
+    def add_to_memory_pool(self, items: List[str]):
+        """将新写入的记忆添加到 memory_pool，超出容量时丢弃最旧的。"""
+        if not items:
+            return
+        for item in items:
+            text = (item or "").strip()
+            if text and text not in self.memory_pool:
+                self.memory_pool.append(text)
+        if len(self.memory_pool) > self.memory_pool_max_size:
+            self.memory_pool = self.memory_pool[-self.memory_pool_max_size:]
 
     def set_service_hub(self, service_hub: ServiceHub):
         if service_hub is None:

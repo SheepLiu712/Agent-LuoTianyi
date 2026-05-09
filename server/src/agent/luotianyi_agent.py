@@ -289,6 +289,7 @@ class LuoTianyiAgent:
         fact_hits: Optional[List[str]] = None,
         sing_plan: Optional[Tuple[str, str]] = None,
         conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
+        memory_pool: Optional[List[str]] = None,  # 近期记忆池，用于提供上下文记忆
     ) -> List[OneResponseLine]:
         """供 TopicReplier 调用：按话题生成分段回复。"""
         db = self._runtime_hub.open_sql_session()
@@ -336,6 +337,7 @@ class LuoTianyiAgent:
             fact_hits=fact_hits or [],
             memory_hits=memory_hits or [],
             sing_plan=sing_plan,
+            memory_pool=memory_pool or [],
         )
 
     async def write_topic_memories_for_pipeline(
@@ -344,14 +346,15 @@ class LuoTianyiAgent:
         current_dialogue: str,
         related_memories: Optional[List[str]] = None,
         conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
-    ) -> None:
-        """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
+    ) -> List[str]:
+        """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。
+        返回实际写入的记忆文本列表。"""
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
         vector_store = self._runtime_hub.vector_store
         try:
             history = conversation_history or await self.conversation_manager.get_context(db, redis_client, user_id)
-            await self.memory_manager.post_process_interaction(
+            written = await self.memory_manager.post_process_interaction(
                 db=db,
                 redis=redis_client,
                 vector_store=vector_store,
@@ -361,6 +364,7 @@ class LuoTianyiAgent:
                 related_memories=related_memories or [],
                 commit=True,
             )
+            return written or []
         finally:
             db.close()
 

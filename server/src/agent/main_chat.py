@@ -68,11 +68,12 @@ class MainChat:
         fact_hits: Optional[List[str]] = None,
         memory_hits: Optional[List[str]] = None,
         sing_plan: Optional[Tuple[str, str]] = None,
+        memory_pool: Optional[List[str]] = None,
     ) -> List[OneResponseLine]:
         """根据 topic_reply_prompt 生成自然语言回复。"""
         user_persona = self._build_user_persona(user_nickname, user_description)
         sing_requirement = self._build_sing_requirement(sing_plan)
-        extra_knowledge = self._build_extra_knowledge(fact_hits or [], memory_hits or [])
+        extra_knowledge = self._build_extra_knowledge(fact_hits or [], memory_hits or [], memory_pool or [])
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         response = await self._call_llm(
@@ -176,7 +177,7 @@ class MainChat:
             return f"你要为用户唱一段《{normalized_song}》"
         return "在回复中你不需要为用户唱歌"
 
-    def _build_extra_knowledge(self, fact_hits: List[str], memory_hits: List[str]) -> str:
+    def _build_extra_knowledge(self, fact_hits: List[str], memory_hits: List[str], memory_pool: List[str] = None) -> str:
         merged: List[str] = []
         seen = set()
         for item in fact_hits + memory_hits:
@@ -185,6 +186,9 @@ class MainChat:
                 continue
             seen.add(text)
             merged.append(text)
+        if memory_pool:
+            pool_items = [f"[近期记忆] {item}" for item in memory_pool if (item or "").strip() and item not in seen]
+            merged.extend(pool_items)
         if not merged:
             return "无"
         return "\n".join(merged)
