@@ -1,6 +1,6 @@
 from .sql_database import init_sql_db, get_sql_db
 from .vector_store import VectorStore, init_vector_store, get_vector_store
-from .sql_database import User, InviteCode, Conversation, Base, AffectionLog
+from .sql_database import User, InviteCode, Conversation, Base  # AffectionLog 已弃用
 from .redis_buffer import init_redis_buffer, get_redis_buffer
 from .memory_storage import MemoryStorage
 from .sql_writer import get_sql_writer, run_sql_write

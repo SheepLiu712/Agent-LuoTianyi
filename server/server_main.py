@@ -291,37 +291,6 @@ async def get_history(
     return await agent.handle_history_request(user_uuid, capped_count, request.end_index)
 
 
-@app.get("/affection/info")
-async def get_affection_info(
-    username: str,
-    token: str,
-    db: Session = Depends(database.get_sql_db),
-    agent: LuoTianyiAgent = Depends(get_agent_service),
-):
-    """获取用户好感度信息"""
-    message_token_valid, user_uuid = account.check_message_token(db, username, token)
-    if not message_token_valid:
-        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-
-    score = agent.affection_manager.get_score(db, user_uuid)
-    level_cn, level_en = agent.affection_manager.get_level(score)
-    next_level = agent.affection_manager.get_next_level_info(score)
-    today_net = agent.affection_manager.get_today_net(db, user_uuid)
-
-    result = {
-        "score": score,
-        "level_cn": level_cn,
-        "level_en": level_en,
-        "today_net": today_net,
-    }
-    if next_level:
-        result["next_level_cn"] = next_level[0]
-        result["next_level_en"] = next_level[1]
-        result["next_level_remaining"] = next_level[2]
-
-    return result
-
-
 @app.post("/get_image")
 async def get_image(request: ImageRequest, db: Session = Depends(database.get_sql_db)):
     """
