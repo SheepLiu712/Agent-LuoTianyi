@@ -73,9 +73,7 @@ data
 .VSCodeCounter
 Redis-x64-*
 
-# 资源文件（大文件/生成内容不跟踪）
-res/tts
-res/music
-res/knowledge
-res/agent/persona
-res/songlearner
+# 资源文件（默认忽略，仅跟踪 prompt 和人设代码）
+res/*
+!res/prompts/
+!res/persona/
