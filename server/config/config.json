@@ -34,6 +34,19 @@
     "prompt_manager": {
         "template_dir": "res/agent/prompts"
     },
+    "date_detector": {
+        "llm_module": {
+            "llm": {
+            "api_type": "openai",
+            "model": "qwen3.5-plus",
+            "api_key": "$QWEN_API_KEY",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "enable_thinking": false
+            },
+            "prompt_name": "date_detection_prompt"
+        }
+        
+    },
     "topic_extractor": {
         "llm_module": {
             "llm": {

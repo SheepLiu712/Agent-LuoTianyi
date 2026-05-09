@@ -74,9 +74,12 @@ class TopicReplier:
         finally:
             db.close()
 
-        # 注入活动上下文（近期演唱会/联动等信息）
+        # 它不用等到回复完成就能检测日期，因此把日期检测放在这里，和回复workflow并行
+        asyncio.create_task(self._process_date_detection(topic, conversation_history=conversation_history))
+
         topic_content = topic.topic_content
         if self.service_hub.schedule_manager:
+            raise RuntimeError("Schedule manager should not be set for topic replier, check the initialization logic")
             try:
                 activity_ctx = self.service_hub.schedule_manager.get_active_context(self.user_id)
                 if activity_ctx:
@@ -247,6 +250,56 @@ class TopicReplier:
             )
         except Exception as e:
             self.logger.warning(f"Topic memory write task failed: {e}")
+
+        
+
+    async def _process_date_detection(self, topic: "ExtractedTopic", conversation_history: Optional[str] = None) -> None:
+        """从话题的源消息中检测重要日期，按置信度处理。"""
+        if self.service_hub is None or self.service_hub.agent is None:
+            return
+
+        # 获取 source_messages 中的最新用户文本
+        user_texts = []
+        for msg in getattr(topic, "source_messages", []) or []:
+            content = getattr(msg, "content", "") or ""
+            if content.strip():
+                user_texts.append(content.strip())
+        if not user_texts:
+            return
+
+        # 检查 agent 是否已初始化 date_detector
+        agent = self.service_hub.agent
+        if not hasattr(agent, 'date_detector') or agent.date_detector is None:
+            return
+
+        date_info = await agent.date_detector.detect('\n'.join(user_texts), conversation_history=conversation_history or "")
+        if date_info is None:
+            return
+
+        self.logger.debug(f"DateDetector: {date_info}")
+
+        # 按置信度处理
+        from ..agent.date_processor import process_detected_date
+        result = await process_detected_date(
+            date_info=date_info,
+            user_id=self.user_id,
+            open_sql_session=agent._runtime_hub.open_sql_session,
+            reply_topic_callback=lambda t: self._safe_add_topic(t),
+        )
+
+        if result is True:
+            self.logger.info(f"Date auto-saved from topic {topic.topic_id}")
+        elif result is False:
+            self.logger.debug(f"Date discarded from topic {topic.topic_id}")
+        else:
+            self.logger.info(f"Date confirmation topic created from topic {topic.topic_id}")
+
+    def _safe_add_topic(self, topic: "ExtractedTopic") -> None:
+        """线程安全地添加话题到队列。"""
+        try:
+            asyncio.create_task(self.add_topic(topic))
+        except Exception as e:
+            self.logger.warning(f"Failed to add confirmation topic: {e}")
 
     async def _schedule_profile_context_update(
         self

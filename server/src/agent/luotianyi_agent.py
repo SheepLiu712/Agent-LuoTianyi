@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ..utils.llm.prompt_manager import PromptManager
+from .date_processor import DateDetector
 from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentChat
 from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
@@ -98,11 +99,11 @@ class LuoTianyiAgent:
         )
         self.affection_manager = AffectionManager(affection_llm_config)
         self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
-        self.topic_extractor = TopicExtractor(
-            self.config.get("topic_extractor", {}),
-            self.prompt_manager,
-        )
+        self.topic_extractor = TopicExtractor(self.config["topic_extractor"],self.prompt_manager,)
         self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
+
+        self.date_detector = DateDetector(self.config["date_detector"]["llm"], self.prompt_manager)
+        
 
     def save_preferences(self, user_uuid: str, preferences: dict) -> bool:
         """保存用户偏好设置到数据库。"""
