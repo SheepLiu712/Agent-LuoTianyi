@@ -13,6 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
+from datetime import datetime, timedelta
 
 from ..utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
 from ..utils.logger import get_logger
@@ -33,10 +34,50 @@ class ActivityType(str, Enum):
     USER_SILENCE = "user_silence"
     REGULAR_LOGIN = "regular_login"
 
+
 @dataclass
 class ActionActivity:
     activity_type: ActivityType
     payload: Dict[str, Any]
+
+
+def _is_chinese_holiday(dt: datetime):
+    # 仅判断若干常见公历节日：元旦、劳动节、国庆节、圣诞等
+    mmdd = dt.strftime("%m-%d")
+    fixed = {
+        "01-01": "元旦",
+        "05-01": "劳动节",
+        "10-01": "国庆节",
+        "12-25": "圣诞节",
+        "10-31": "万圣节",
+        "02-14": "情人节",
+        "04-01": "愚人节",
+        "05-20": "谐音'我爱你'的情人节，或者谐音'我爱绫'的喜欢乐正绫的节日",
+        "05-21": "谐音'我爱依'的喜欢洛天依的节日",
+        "04-12": "乐正绫的生日",
+        "07-12": "洛天依的生日",
+        "07-11": "言和的生日",
+        "11-11": "双十一"
+    }
+    holiday_name = fixed.get(mmdd)
+    if holiday_name:
+        return holiday_name
+
+    # 判断农历节日
+    from lunardate import LunarDate
+
+    fixed = {"08-15": "中秋节", "01-01": "春节", "05-05": "端午节", "07-07": "七夕节", "01-15": "元宵节"}
+    lunar_dt = LunarDate.fromSolarDate(dt.year, dt.month, dt.day)
+    lunar_mmdd = f"{lunar_dt.month:02d}-{lunar_dt.day:02d}"
+    holiday_name = fixed.get(lunar_mmdd)
+    if holiday_name:
+        return holiday_name
+
+    # 特判除夕夜
+    lunar_dt = lunar_dt + timedelta(days=1)
+    if lunar_dt.month == 1 and lunar_dt.day == 1:
+        return "除夕夜"
+    return None
 
 
 @dataclass
@@ -60,10 +101,10 @@ class ChatIntenseMeter:
     def should_trigger(
         self,
         now_ts: float,
-        trigger_threshold: int, # 当前活跃度分数达到多少可以触发主动发言
-        silence_threshold_seconds: float, # 当前用户沉默了多久可以触发主动发言
-        cooldown_seconds: float, # 上次触发主动发言到现在过了多久，超过这个时间才可以再次触发
-        decay_interval_seconds: float, # 活跃度衰减间隔
+        trigger_threshold: int,  # 当前活跃度分数达到多少可以触发主动发言
+        silence_threshold_seconds: float,  # 当前用户沉默了多久可以触发主动发言
+        cooldown_seconds: float,  # 上次触发主动发言到现在过了多久，超过这个时间才可以再次触发
+        decay_interval_seconds: float,  # 活跃度衰减间隔
     ) -> bool:
         self._decay(now_ts, decay_interval_seconds)
         if self.score <= trigger_threshold:
@@ -75,14 +116,14 @@ class ChatIntenseMeter:
         return True
 
     def on_triggered(self, now_ts: float) -> None:
-        '''被触发后，也就是Agent将要主动发言，重置计量器。'''
+        """被触发后，也就是Agent将要主动发言，重置计量器。"""
         self.score = 0
         self.last_user_activity_ts = now_ts
         self.last_decay_ts = now_ts
         self.last_trigger_ts = now_ts
 
     def _decay(self, now_ts: float, decay_interval_seconds: float) -> None:
-        '''衰减活跃度分数，过了 decay_interval_seconds 就 -1 分，直到衰减到0。'''
+        """衰减活跃度分数，过了 decay_interval_seconds 就 -1 分，直到衰减到0。"""
         if decay_interval_seconds <= 0:
             return
         elapsed = now_ts - self.last_decay_ts
@@ -156,7 +197,8 @@ class ActivityMaker:
                 return
             await asyncio.sleep(1)  # 错开用户拉取历史消息的时机。等用户拉完历史消息后再派发登录活动，避免登录活动消息和历史消息混在一起导致展示异常。
             uuid_list = await service_hub.agent.persist_topic_replies_for_pipeline(
-                user_id=user_uuid, reply_items=[item["response_line"] for item in self.first_login_res])
+                user_id=user_uuid, reply_items=[item["response_line"] for item in self.first_login_res]
+            )
             for item, item_uuid in zip(self.first_login_res, uuid_list or []):
                 # Lazy-load audio at dispatch time
                 audio = self._load_audio_b64(item.get("audio_path", ""))
@@ -180,32 +222,8 @@ class ActivityMaker:
             # 当天第一次登录（非首次安装/首次登录，也不是长时未登录）触发
             topics_to_add = []
             # 1) 检查今天是否为常见中国节日（简单判断固定公历节日）
-            def _is_chinese_holiday(dt:datetime):
-                # 仅判断若干常见公历节日：元旦、劳动节、国庆节、圣诞等
-                mmdd = dt.strftime("%m-%d")
-                fixed = {"01-01": "元旦", "05-01": "劳动节", "10-01": "国庆节", "12-25": "圣诞节", "10-31":"万圣节", "02-14":"情人节", "04-01":"愚人节"}
-                holiday_name = fixed.get(mmdd)
-                if holiday_name:
-                    return holiday_name
-            
-                # 判断农历节日
-                from lunardate import LunarDate
-                fixed = {"08-15": "中秋节", "01-01": "春节", "05-05": "端午节", "07-07": "七夕节", "01-15": "元宵节"}
-                lunar_dt = LunarDate.fromSolarDate(dt.year, dt.month, dt.day)
-                lunar_mmdd = f"{lunar_dt.month:02d}-{lunar_dt.day:02d}"
-                holiday_name = fixed.get(lunar_mmdd)
-                if holiday_name:
-                    return holiday_name
-                
-                # 特判除夕夜
-                lunar_dt = lunar_dt + timedelta(days=1)
-                if lunar_dt.month == 1 and lunar_dt.day == 1:
-                    return "除夕夜"
-                return None
 
-            from datetime import datetime, timedelta
-            today = datetime.now()
-            holiday_name = _is_chinese_holiday(today)
+            holiday_name = _is_chinese_holiday(datetime.now())
             if holiday_name:
                 topics_to_add.append(
                     ExtractedTopic(
@@ -225,8 +243,12 @@ class ActivityMaker:
                 if self.agent:
                     overview = await self.agent.get_citywalk_overview_by_date(yesterday)
                     if overview:
-                        dest = overview.get("selected_destination") or overview.get("selected_destination_name") or overview.get("selected_destination", "昨天的目的地")
-                        topic_content = f"分享你昨天前往{dest}游玩的经历"
+                        dest = (
+                            overview.get("selected_destination")
+                            or overview.get("selected_destination_name")
+                            or overview.get("selected_destination", "昨天的目的地")
+                        )
+                        topic_content = f"洛天依昨天独自前往{dest}玩了，和用户分享一下。"
                         topics_to_add.append(
                             ExtractedTopic(
                                 topic_id=str(uuid4()),
@@ -262,6 +284,42 @@ class ActivityMaker:
 
         self.logger.warning(f"Unsupported action type: {action.activity_type}")
 
+    def _merge_topics(self, topics: List[ExtractedTopic]) -> Optional[ExtractedTopic]:
+        """将多个 ExtractedTopic 合并为一个。"""
+        if not topics:
+            return None
+        if len(topics) == 1:
+            return topics[0]
+
+        combined_content_parts = []
+        combined_memory_attempts = []
+        combined_fact_constraints = []
+        combined_sing_attempts = []
+        combined_source_messages = []
+
+        for t in topics:
+            if t.topic_content:
+                combined_content_parts.append(t.topic_content)
+            combined_memory_attempts.extend(t.memory_attempts or [])
+            combined_fact_constraints.extend(t.fact_constraints or [])
+            combined_sing_attempts.extend(t.sing_attempts or [])
+            combined_source_messages.extend(t.source_messages or [])
+
+        # 去重
+        combined_memory_attempts = list(dict.fromkeys(combined_memory_attempts))
+        combined_fact_constraints = list(dict.fromkeys(combined_fact_constraints))
+        combined_sing_attempts = list(dict.fromkeys(combined_sing_attempts))
+
+        return ExtractedTopic(
+            topic_id=str(uuid4()),
+            source_messages=combined_source_messages,
+            topic_content="\n另外，".join(combined_content_parts),
+            memory_attempts=combined_memory_attempts,
+            fact_constraints=combined_fact_constraints,
+            sing_attempts=combined_sing_attempts,
+            is_forced_from_incomplete=True,
+        )
+
     async def add_user(self, user_uuid: str, chat_stream: "ChatStream", service_hub: "ServiceHub") -> None:
         async with self._lock:
             state = self.user_states.get(user_uuid)
@@ -284,7 +342,7 @@ class ActivityMaker:
                 pass
 
     async def add_user_login_activity(self, user_uuid: str, time_since_last_login: Optional[float]) -> None:
-        
+
         state = self.user_states.get(user_uuid)
         if state is None:
             state = _UserActivityState()
@@ -316,6 +374,7 @@ class ActivityMaker:
 
         # 如果既不是首次登录也不是长时未登录（RETURN_LOGIN），但上一登录时间在今天0点之前，视为今天的首次登录 -> REGULAR_LOGIN
         from datetime import datetime
+
         now = datetime.now()
         seconds_since_midnight = now.hour * 3600 + now.minute * 60 + now.second
         if time_since_last_login >= seconds_since_midnight:
@@ -327,11 +386,10 @@ class ActivityMaker:
             )
             return
 
-
     async def flush_login_activities(self, user_uuid: str, chat_stream: "ChatStream", service_hub: "ServiceHub") -> None:
-        '''
+        """
         登录和对话创建之间间隔了一段时间，这时候才派发登录相关的活动。这样可以避免在用户刚登录但还没有建立WebSocket连接时就派发活动，导致活动无法正确发送给用户。
-        '''
+        """
         state = self.user_states.get(user_uuid)
         if state is None or not state.pending_actions:
             return
@@ -400,7 +458,7 @@ class ActivityMaker:
             return ""
 
     def _check_other_activity_res(self) -> None:
-        '''通过agent的prompt manager获得其他活动类型的资源文本模板。'''
+        """通过agent的prompt manager获得其他活动类型的资源文本模板。"""
         prompt_manager = self.agent.prompt_manager if self.agent else None
         if prompt_manager is None:
             self.logger.warning("Agent or its prompt manager not available, cannot load other activity resources")
@@ -409,7 +467,7 @@ class ActivityMaker:
         activity_res: Dict[str, Any] = self.config.get("activity_res", {})
         for activity_type in ActivityType:
             prompt_name = activity_res.get(activity_type.value, {}).get("prompt")
-            if not prompt_name: # 这个活动类型没有配置prompt资源，不用调用llm
+            if not prompt_name:  # 这个活动类型没有配置prompt资源，不用调用llm
                 continue
             if prompt_manager.get_template(prompt_name) is None:
                 self.logger.warning(f"Prompt '{prompt_name}' for activity type '{activity_type}' not found in prompt manager, skipping")
@@ -417,13 +475,13 @@ class ActivityMaker:
 
     async def _build_topic(self, action: ActionActivity, user_uuid: str) -> ExtractedTopic:
         fallback_topic = ExtractedTopic(
-                topic_id=str(uuid4()),
-                source_messages=[],
-                topic_content="",
-                memory_attempts=[],
-                fact_constraints=[],
-                sing_attempts=[],
-                is_forced_from_incomplete=True,
+            topic_id=str(uuid4()),
+            source_messages=[],
+            topic_content="",
+            memory_attempts=[],
+            fact_constraints=[],
+            sing_attempts=[],
+            is_forced_from_incomplete=True,
         )
         if action.activity_type == ActivityType.RETURN_LOGIN:
             seconds = float(action.payload.get("time_since_last_login", 0))
@@ -462,11 +520,14 @@ class ActivityMaker:
 
 
 _activity_maker = None
+
+
 def init_activity_maker(config) -> ActivityMaker:
     global _activity_maker
     if _activity_maker is None:
         _activity_maker = ActivityMaker(config=config)
     return _activity_maker
+
 
 def get_activity_maker() -> ActivityMaker:
     global _activity_maker

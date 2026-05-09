@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ..utils.llm.prompt_manager import PromptManager
+from .date_processor import DateDetector
 from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentChat
 from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
@@ -25,8 +26,8 @@ from ..utils.logger import get_logger
 from ..tts import TTSModule
 from ..utils.enum_type import ContextType, ConversationSource
 from ..memory.memory_manager import MemoryManager
-from ..plugins.music.singing_manager import SingingManager
-from ..vision.vision_module import VisionModule
+
+from ..utils.vision.vision_module import VisionModule
 from ..database.sql_database import User
 from ..database.memory_storage import MemoryStorage
 
@@ -38,6 +39,7 @@ if TYPE_CHECKING:
     from ..pipeline.topic_planner import ExtractedTopic
     from ..database.vector_store import VectorStore
     from ..utils.llm.llm_module import LLMAPIInterface
+    from ..plugins.music.music_manager import MusicManager
     
 
 
@@ -61,13 +63,10 @@ class _AgentRuntimeHub:
     redis_client: MemoryStorage
     vector_store: "VectorStore"
     sql_session_factory: Callable[[], Session]
-    song_session_factory: Callable[[], Session]
+    music_manager: "MusicManager"
 
     def open_sql_session(self) -> Session:
         return self.sql_session_factory()
-
-    def open_song_session(self) -> Session:
-        return self.song_session_factory()
 
 
 class LuoTianyiAgent:
@@ -85,6 +84,7 @@ class LuoTianyiAgent:
         self.config = config
         self.logger = get_logger("LuoTianyiAgent")
         self._runtime_hub = runtime_hub
+        self.music_manager = runtime_hub.music_manager
         self.prompt_manager = PromptManager(self.config.get("prompt_manager", {}))  # 提示管理器
 
         # 各种模块初始化
@@ -102,7 +102,31 @@ class LuoTianyiAgent:
             self.config.get("topic_extractor", {}),
             self.prompt_manager,
         )
+        self.affection_manager = AffectionManager(affection_llm_config)
+        self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
+        self.topic_extractor = TopicExtractor(self.config["topic_extractor"],self.prompt_manager,)
         self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
+
+        self.date_detector = DateDetector(self.config["date_detector"]["llm"], self.prompt_manager)
+        
+
+    def save_preferences(self, user_uuid: str, preferences: dict) -> bool:
+        """保存用户偏好设置到数据库。"""
+        db = self._runtime_hub.open_sql_session()
+        try:
+            user = db.query(User).filter(User.uuid == user_uuid).first()
+            if user:
+                user.preferences = json.dumps(preferences, ensure_ascii=False)
+                db.commit()
+                self.logger.info(f"Saved preferences for user {user_uuid}: {preferences}")
+                return True
+            self.logger.warning(f"User {user_uuid} not found")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to save preferences for {user_uuid}: {e}")
+            return False
+        finally:
+            db.close()
 
     async def extract_topics_for_pipeline(
         self,
@@ -184,22 +208,12 @@ class LuoTianyiAgent:
         )
 
     async def search_song_facts_for_topic(self, constraints: List[str]) -> List[str]:
-        """供 TopicReplier 调用的歌曲事实检索接口。"""
-        if not constraints:
-            return []
-
-        db = self._runtime_hub.open_song_session()
-        try:
-            return await self.memory_manager.search_song_facts_for_topic(
-                knowledge_db=db,
-                constraints=constraints,
-            )
-        finally:
-            db.close()
+        """供 TopicReplier (或其他组件) 查找歌曲信息的代理方法"""
+        return await self._runtime_hub.music_manager.search_song_facts_for_topic(constraints)
 
     async def get_citywalk_diary_by_date(self, date_str: str) -> str | None:
         """按日期检索 citywalk 报告并返回 diary_text 字段。
-        如果同一天有多条记录，返回 created_at 最新的那一条的 diary_text。
+        如果同一天有多条记录，返回 created_at 最最新的那一条的 diary_text。
         date_str 格式为 YYYY-MM-DD
         """
         try:
@@ -447,24 +461,24 @@ class LuoTianyiAgent:
             if not candidate:
                 continue
             if candidate == "random_song":
-                pair = self.singing_manager.pick_random_song_and_segment()
+                pair = self.music_manager.pick_random_song_and_segment()
                 return pair if pair else (None, None)
 
             song_name = self._extract_song_name(candidate)
             if not song_name:
                 continue
 
-            correct_song_name, segment = self.singing_manager.pick_segment_for_song(song_name)
+            correct_song_name, segment = self.music_manager.pick_segment_for_song(song_name)
             if segment:
                 return correct_song_name, segment
-        self.singing_manager.add_wished_song(song_name)
+        self.music_manager.add_wished_song(song_name)
         return song_name, None # 如果有明确歌名但无法满足唱歌需求，返回歌名和None表示用户想听这首歌但还不会唱
     
     def sing(self, song_name: str, segment: str) -> Optional[bytes]:
         """调用唱歌管理器生成歌曲片段的音频，并返回音频的Base64字符串"""
         if not song_name or not segment:
             return None
-        _, audio_bytes = self.singing_manager.get_song_segment(song_name, segment) # 已经是base64字符串了
+        _, audio_bytes = self.music_manager.get_song_segment(song_name, segment) # 已经是base64字符串了
         return audio_bytes
     
     async def tts_say(self, text: str, tone: str) -> str:
@@ -600,7 +614,7 @@ def init_luotianyi_agent(
     redis_client: MemoryStorage,
     vector_store: Any,
     sql_session_factory: Callable[[], Session],
-    song_session_factory: Callable[[], Session],
+    music_manager: MusicManager,
 ):
     """初始化洛天依Agent实例
 
@@ -614,7 +628,7 @@ def init_luotianyi_agent(
         redis_client=redis_client,
         vector_store=vector_store,
         sql_session_factory=sql_session_factory,
-        song_session_factory=song_session_factory,
+        music_manager=music_manager,
     )
     agent = LuoTianyiAgent(config, tts_module, runtime_hub)
 
