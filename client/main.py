@@ -66,6 +66,7 @@ if __name__ == "__main__":
         auto_login_callback = network_client.auto_login,
         login_callback = network_client.login,
         register_callback = network_client.register,
+        reset_account_callback = network_client.reset_account,
         send_proactive_text_callback = message_processor.send_proactive_text,
         send_preferences_callback = message_processor.send_preferences,
     ) 

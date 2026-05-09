@@ -74,6 +74,12 @@ class NetworkClient:
         except Exception as exc:
             return False, str(exc)
 
+    def reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
+        try:
+            return self.auth_api.reset_account(invite_code, new_username, new_password)
+        except Exception as exc:
+            return False, str(exc)
+
     def send_chat(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0):
         if not self.user_id or not self.message_token:
             return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}

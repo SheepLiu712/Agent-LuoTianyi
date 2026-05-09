@@ -32,6 +32,11 @@ class AutoLoginRequest(BaseModel):
     username: str
     token: str
 
+class ResetAccountRequest(BaseModel):
+    invite_code: str
+    new_username: str
+    new_password: str
+
 from fastapi import Form, File, UploadFile
 class PictureChatRequest:
     def __init__(

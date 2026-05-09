@@ -20,6 +20,7 @@ from src.interface.types import (
     RegisterRequest,
     LoginRequest,
     AutoLoginRequest,
+    ResetAccountRequest,
     HistoryRequest,
     ImageRequest,
     WSEventType,
@@ -274,6 +275,24 @@ async def login(
             await service_hub.activity_maker.add_user_login_activity(user.uuid, elapsed_from_last_login)
         return {"login_token": token, "message_token": message_token, "user_id": req.username}
     raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+
+@app.post("/auth/reset_account")
+async def reset_account(
+    req: ResetAccountRequest,
+    db: Session = Depends(database.get_sql_db),
+):
+    """
+    以邀请码重置账号。输入邀请码、新用户名、新密码。
+    如果邀请码已被使用，覆写对应用户的用户名和密码。
+    """
+    logger.info(f"Reset account request with invite code: {req.invite_code}")
+    decrypted_password = account.decrypt_password(req.new_password)
+
+    success, msg = account.reset_account(db, req.invite_code, req.new_username, decrypted_password)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": "重置成功", "user_id": req.new_username}
 
 
 @app.get("/history")
