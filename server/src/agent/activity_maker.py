@@ -256,6 +256,37 @@ class ActivityMaker:
                     )
                 )
 
+            # 4) 查询 ImportantDate 中用户个人的生日/纪念日
+            if self.service_hub and self.service_hub.important_date_session_factory:
+                try:
+                    from src.database import get_today_important_dates
+                    db = self.service_hub.important_date_session_factory()
+                    try:
+                        today_dates = get_today_important_dates(db, user_uuid)
+                        for d in today_dates:
+                            if d.user_id != user_uuid:
+                                continue
+                            if d.date_type not in ('生日', '纪念日'):
+                                continue
+                            # 跳过当天创建的事件（防止旅游/学歌等刚创建就触发）
+                            if d.created_at and d.created_at.date() == datetime.now().date():
+                                continue
+                            topics_to_add.append(
+                                ExtractedTopic(
+                                    topic_id=str(uuid4()),
+                                    source_messages=[],
+                                    topic_content=f"今天是{d.name}，分享一些温馨的祝福或回忆",
+                                    memory_attempts=[],
+                                    fact_constraints=[],
+                                    sing_attempts=[],
+                                    is_forced_from_incomplete=True,
+                                )
+                            )
+                    finally:
+                        db.close()
+                except Exception as e:
+                    self.logger.warning(f"ImportantDate query failed in REGULAR_LOGIN: {e}")
+
             for t in topics_to_add:
                 await chat_stream.topic_replier.add_topic(t)
             return

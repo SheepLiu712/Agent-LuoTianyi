@@ -85,6 +85,36 @@ class TopicReplier:
             except Exception as e:
                 self.logger.warning(f"Failed to get activity context: {e}")
 
+        # 注入 ImportantDate 周年回忆（旅游/学歌等）
+        if self.service_hub.important_date_session_factory:
+            try:
+                from src.database import get_today_important_dates
+                from datetime import date
+                db = self.service_hub.important_date_session_factory()
+                try:
+                    today_dates = get_today_important_dates(db, self.user_id)
+                    if today_dates:
+                        lines = []
+                        for d in today_dates:
+                            if d.date_type not in ('旅游', '学歌'):
+                                continue
+                            # 跳过当天创建的事件
+                            created_date = d.created_at.date() if d.created_at else None
+                            if created_date and created_date == date.today():
+                                continue
+                            if d.date_type == '旅游':
+                                lines.append(f"去年的今天，{d.name}")
+                            elif d.date_type == '学歌':
+                                lines.append(f"去年的今天，{d.name}")
+                        if lines:
+                            anniversary_ctx = "[回忆参考]\n" + "\n".join(lines)
+                            topic_content = f"{topic_content}\n\n{anniversary_ctx}"
+                            self.logger.info(f"Injected anniversary context for user {self.user_id}")
+                finally:
+                    db.close()
+            except Exception as e:
+                self.logger.warning(f"Failed to get important date context: {e}")
+
         memory_task = asyncio.create_task(self._memory_search(topic.memory_attempts or []))
         fact_task = asyncio.create_task(self._fact_search(topic.fact_constraints or []))
         sing_task = asyncio.create_task(self._sing_plan(topic.sing_attempts or []))

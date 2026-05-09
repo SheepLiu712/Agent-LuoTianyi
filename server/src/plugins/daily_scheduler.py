@@ -28,6 +28,7 @@ class DailyScheduler:
         song_interval_days: int = 3,
         random_func: Optional[Callable[[], float]] = None,
         song_learner: Optional[Any] = None,
+        important_date_callback: Optional[Callable[[dict], None]] = None,
     ):
         self.logger = get_logger(__name__)
         self.runtime_service = runtime_service
@@ -36,6 +37,7 @@ class DailyScheduler:
         self.song_interval_days = song_interval_days
         self.random_func = random_func or random.random
         self.song_learner = song_learner
+        self.important_date_callback = important_date_callback
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -84,7 +86,16 @@ class DailyScheduler:
     def _run_citywalk_async(self) -> None:
         def _target():
             try:
-                self.runtime_service.run_once()
+                result_tuple = self.runtime_service.run_once()
+                if result_tuple and self.important_date_callback:
+                    _report_path, city, destination = result_tuple
+                    dest_display = destination or city
+                    self.important_date_callback({
+                        "date_type": "旅游",
+                        "name": f"在{city}的街头漫步",
+                        "description": f"洛天依在{city}{'的'+dest_display+'附近' if dest_display else ''}漫步",
+                        "user_id": None,
+                    })
             except Exception as exc:
                 self.logger.error("凌晨城市漫步任务失败: %s", exc)
 
@@ -112,6 +123,14 @@ class DailyScheduler:
                 )
                 if result.learned:
                     self.logger.info("新学会的歌曲: %s", result.learned)
+                    if self.important_date_callback:
+                        for song_name in result.learned:
+                            self.important_date_callback({
+                                "date_type": "学歌",
+                                "name": f"学会了新歌《{song_name}》",
+                                "description": f"洛天依学会了演唱《{song_name}》",
+                                "user_id": None,
+                            })
             except Exception as exc:
                 self.logger.error("凌晨歌曲学习失败: %s", exc)
         threading.Thread(target=_target, name="song-learner-runner", daemon=True).start()

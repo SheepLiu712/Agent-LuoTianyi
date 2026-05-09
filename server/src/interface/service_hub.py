@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
     from ..agent.luotianyi_agent import LuoTianyiAgent
@@ -25,3 +25,4 @@ class ServiceHub:
     agent: "LuoTianyiAgent"
     activity_maker: "ActivityMaker"
     schedule_manager: Optional["ScheduleManager"] = None
+    important_date_session_factory: Optional[Callable] = None

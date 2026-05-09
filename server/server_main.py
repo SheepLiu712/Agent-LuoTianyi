@@ -85,6 +85,7 @@ async def startup_event(app: FastAPI):
         global_speaking_worker=get_global_speaking_worker(),
         agent=get_luotianyi_agent(),
         activity_maker=init_activity_maker(config.get("activity_maker", {})),
+        important_date_session_factory=get_sql_session,
     )
 
     # 初始化日程管理器
@@ -108,7 +109,27 @@ async def startup_event(app: FastAPI):
     global daily_scheduler
     citywalk_runtime = CitywalkRuntimeService(config_path="config/config.json", vector_store=database.get_vector_store())
     song_learner = AutoSongLearner(config={"resource_path": "res/music", "songlearner_dir": "songlearner"})
-    daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime, song_learner=song_learner)
+
+    # 创建 ImportantDate 回调：将旅游/学歌事件写入数据库（MM-DD 格式，每年周年匹配）
+    def _important_date_callback(info: dict) -> None:
+        from datetime import date
+        try:
+            db = database.get_sql_session()
+            try:
+                today_str = date.today().strftime("%m-%d")
+                database.add_or_update_date(
+                    db=db, user_id=info.get("user_id"),
+                    name=info["name"], date_type=info["date_type"],
+                    date_str=today_str, is_lunar=False, is_recurring=True,
+                    description=info.get("description", ""),
+                )
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"创建 ImportantDate 失败: {e}")
+
+    daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime, song_learner=song_learner,
+                                      important_date_callback=_important_date_callback)
     daily_scheduler.start()
 
     # 账号系统初始化
