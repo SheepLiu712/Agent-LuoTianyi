@@ -51,7 +51,6 @@ AgentLuo 具有以下功能：
 ```
 server_main.py  — FastAPI 入口
 ```
-
 ### 分层架构
 
 | 层 | 路径 | 职责 |
@@ -73,6 +72,8 @@ server_main.py  — FastAPI 入口
       ```bash
       setx SILICONFLOW_API_KEY "your_api_key_here"
       setx QWEN_API_KEY "your_api_key_here"
+      setx DEEPSEEK_API_KEY "your_key"
+      setx AMAP_KEY "your_key"       # 高德地图，可选（城市漫步用）
       ```
     - 所配置的环境变量需要和config.json中的占位符一致，并不局限于硅基流动的api_key，如果你使用了其他需要密钥的服务，建议也按照同样的方式配置环境变量。
 
@@ -274,8 +275,7 @@ npx expo start                                     # 启动 Expo
 - 所有贡献者的努力和支持
 - 感谢 Copilot：代码基本都是它写的
 
-## 如何为项目出一份力？
-目前项目非常缺人！欢迎所有朋友为项目出一份力，只要你：
+## 如何为项目出一份力？目前项目非常缺人！欢迎所有朋友为项目出一份力，只要你：
 - 熟悉 Python/Typescript 编程，或者有其它一技之长；
 - 认可本项目理念；
 - 希望为项目做出贡献/锻炼自己的能力。

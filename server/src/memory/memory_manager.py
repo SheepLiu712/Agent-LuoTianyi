@@ -14,7 +14,6 @@ from ..utils.logger import get_logger
 from .memory_search import MemorySearcher
 from .memory_write import MemoryWriter
 from .user_profile_updater import UserProfileUpdater
-from ..plugins.music.singing_manager import SingingManager
 from ..utils.llm.prompt_manager import PromptManager
 from ..database import VectorStore, KnowledgeGraph
 from ..database.database_service import get_user_nickname, get_user_description, update_user_description
@@ -25,7 +24,6 @@ class MemoryManager:
         self,
         config: Dict[str, Any],
         prompt_manager: PromptManager,
-        singing_manager: SingingManager,
     ):
         """
         初始化记忆管理器
@@ -37,7 +35,7 @@ class MemoryManager:
         """
         self.logger = get_logger(__name__)
         self.config = config
-        self.memory_searcher = MemorySearcher(config["memory_searcher"], prompt_manager, singing_manager)
+        self.memory_searcher = MemorySearcher(config["memory_searcher"], prompt_manager)
         self.memory_writer = MemoryWriter(config["memory_writer"], prompt_manager)
         self.user_profile_updater = UserProfileUpdater(config["user_profile"], prompt_manager)
         auto_dreamer_config = config.get("auto_dreamer")
@@ -89,17 +87,6 @@ class MemoryManager:
             queries=queries,
             k=k,
             score_threshold=similarity_threshold,
-        )
-
-    async def search_song_facts_for_topic(
-        self,
-        knowledge_db: Session,
-        constraints: List[str],
-    ) -> List[str]:
-        """面向 topic 流水线的歌曲事实检索接口。"""
-        return await self.memory_searcher.search_song_facts_for_topic(
-            knowledge_db=knowledge_db,
-            constraints=constraints,
         )
 
     async def post_process_interaction(

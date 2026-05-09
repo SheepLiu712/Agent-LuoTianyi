@@ -51,8 +51,7 @@ class OfficialFeedFetcher:
                 "Chrome/120.0.6099.71 Safari/537.36"
             ),
             "Referer": "https://space.bilibili.com/",
-        })
-        # 缓存最近处理过的动态 ID，避免重复处理
+        })        # 缓存最近处理过的动态 ID，避免重复处理
         self.seen_ids: Dict[str, List[str]] = self._load_cache()
 
     def _load_cache(self) -> Dict[str, List[str]]:
@@ -89,8 +88,7 @@ class OfficialFeedFetcher:
             - raw: 原始 API 返回
             - fetched_at: 拉取时间
         """
-        all_items: List[Dict[str, Any]] = []
-        for uid in self.bili_accounts:
+        all_items: List[Dict[str, Any]] = []        for uid in self.bili_accounts:
             try:
                 items = self._fetch_bili_space(uid)
                 all_items.extend(items)
@@ -101,13 +99,11 @@ class OfficialFeedFetcher:
         self._save_cache()
         return all_items
 
-    def _fetch_bili_space(self, uid: str, max_pages: int = 3) -> List[Dict[str, Any]]:
-        """
+    def _fetch_bili_space(self, uid: str, max_pages: int = 3) -> List[Dict[str, Any]]:        """
         拉取 B站 用户空间动态，返回新动态列表。
         使用 offset 翻页，每次比较 dynamic_id 是否已处理过。
         """
-        results: List[Dict[str, Any]] = []
-        seen = set(self.seen_ids.get(uid, []))
+        results: List[Dict[str, Any]] = []        seen = set(self.seen_ids.get(uid, []))
         offset: Optional[str] = None
 
         for page in range(max_pages):
@@ -128,7 +124,6 @@ class OfficialFeedFetcher:
                 items = data.get("data", {}).get("items", [])
                 if not items:
                     break
-
                 for item in items:
                     dyn_id = str(item.get("id_str") or item.get("id", ""))
                     if not dyn_id:
@@ -251,8 +246,7 @@ class OfficialFeedFetcher:
             self.logger.error(f"Error parsing B站 dynamic item: {e}")
             return None
 
-    def fetch_weibo(self, uid: str) -> List[Dict[str, Any]]:
-        """
+    def fetch_weibo(self, uid: str) -> List[Dict[str, Any]]:        """
         微博动态爬取（占位实现，需要配合 RSSHub 或微博 API）。
         暂时返回空列表。
         """

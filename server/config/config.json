@@ -33,8 +33,7 @@
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
             "enable_thinking": false
         }
-    },
-    "tts": {
+    },    "tts": {
         "character_name": "LuoTianyi",
         "onnx_model_dir": "res/tts/lty_custom_onnx_model",
         "language": "zh",
@@ -46,6 +45,19 @@
     },
     "prompt_manager": {
         "template_dir": "res/agent/prompts"
+    },
+    "date_detector": {
+        "llm_module": {
+            "llm": {
+            "api_type": "openai",
+            "model": "qwen3.5-plus",
+            "api_key": "$QWEN_API_KEY",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "enable_thinking": false
+            },
+            "prompt_name": "date_detection_prompt"
+        }
+        
     },
     "topic_extractor": {
         "llm_module": {
@@ -98,40 +110,12 @@
         "llm_module": {
             "llm": {
                 "api_type": "openai",
-                "model": "deepseek-chat",
-                "api_key": "$DEEPSEEK_API_KEY",
-                "base_url": "https://api.deepseek.com/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "enable_thinking": false
             },
             "prompt_name": "summary_prompt"
-        }
-    },
-    "crawler": {
-        "activated": true,
-        "data_dir": "data/crawled_data",
-        "vcpedia": {
-            "base_url": "https://vcpedia.cn",
-            "crawl_delay_range": [
-                1.0,
-                2.0
-            ],
-            "output_dir": "data/crawled_data",
-            "max_pages": 1000
-        },
-        "use_llm": false,
-        "llm_module": {
-            "llm": {
-                "api_type": "openai",
-                "model": "Qwen/Qwen3-32B",
-                "api_key": "$SILICONFLOW_API_KEY",
-                "base_url": "https://api.siliconflow.cn/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
-            },
-            "prompt_name": "crawl_prompt"
         }
     },
     "memory_manager": {
@@ -151,19 +135,19 @@
         },
         "memory_searcher": {
             "max_k_graph_entities": 3,
-            "max_k_vector_entities": 5,
-            "llm_module": {
+            "max_k_vector_entities": 5,            "llm_module": {
                 "llm": {
                     "api_type": "openai",
-                    "model": "deepseek-chat",
-                    "api_key": "$DEEPSEEK_API_KEY",
-                    "base_url": "https://api.deepseek.com/v1",
-                    "temperature": 0.7,
-                    "max_tokens": 8192,
-                    "top_p": 0.9
+                    "model": "qwen3.5-plus",
+                    "api_key": "$QWEN_API_KEY",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
                 },
-                "prompt_name": "memory_search_prompt"
+                "prompt_name": "user_profile_update_prompt"
             }
+        },
+        "memory_searcher": {
+            "max_k_graph_entities": 3,
+            "max_k_vector_entities": 5
         },
         "memory_writer": {
             "recent_update_path": "data/memory/context/recent_update.json",
@@ -264,6 +248,44 @@
             }
         }
     },
+    "music": {
+        "resource_path": "res/music",
+        "auto_song_learner": {
+            "resource_path": "res/music",
+            "songlearner_dir": "src/plugins/music/song_learner",
+            "songlearner_resource_dir": "res/song_learner"
+        },
+        "singing_manager": {
+            "resource_path": "res/music"
+        },
+        "song_knowledge": {
+            "song_database": {
+                "db_folder": "res/knowledge",
+                "db_file": "knowledge_db.db"
+            },
+            "crawler": {
+                "activated": true,
+                "data_dir": "data/crawled_data",
+                "vcpedia": {
+                    "base_url": "https://vcpedia.cn",
+                    "crawl_delay_range": [
+                        1.0,
+                        2.0
+                    ],
+                    "output_dir": "data/crawled_data",
+                    "max_pages": 1000
+                },
+                "use_llm": false,
+                "llm": {
+                    "api_type": "openai",
+                    "model": "qwen3.5-plus",
+                    "api_key": "$QWEN_API_KEY",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "enable_thinking": false
+                }
+            }
+        }
+    },
     "activity_maker": {
         "return_user_threshold_seconds": 432000,
         "silence_threshold_seconds": 180,
@@ -330,6 +352,5 @@
         "silence": {
             "concert_pre_start_minutes": 30,
             "concert_post_end_minutes": 60
-        }
-    }
+        }    }
 }

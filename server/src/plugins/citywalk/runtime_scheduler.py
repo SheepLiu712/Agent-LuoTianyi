@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Optional, Dict
 
 from ...database.sql_database import get_sql_session
 from ...utils.logger import get_logger
@@ -10,14 +10,13 @@ from .session_runner import CitywalkSessionRunner
 
 
 class CitywalkRuntimeService:
-    def __init__(self, config_path: str, vector_store: Any):
+    def __init__(self, config: Dict[str, Any], vector_store: Any):
         self.logger = get_logger(__name__)
-        self.config_path = config_path
+        self.config = config
         self.vector_store = vector_store
 
     def run_once(self) -> Optional[tuple[str, str, str]]:
-        cfg = load_citywalk_config(self.config_path)
-        client = AMapClient(cfg)
+        cfg = load_citywalk_config(self.config_path)        client = AMapClient(cfg)
         runner = CitywalkSessionRunner(cfg, client)
 
         result = runner.run()

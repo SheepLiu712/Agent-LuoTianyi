@@ -8,8 +8,7 @@ Two learning paths:
      Download from QQ Music -> vocal separation + denoising -> MSAF segmentation
      -> LLM fine segmentation -> aligned JSON -> songs/
   B) Staging fallback (original):
-     User places .mp3 + .lrc in staging/ -> naive time-based segmentation -> songs/
-"""
+     User places .mp3 + .lrc in staging/ -> naive time-based segmentation -> songs/"""
 
 from __future__ import annotations
 
@@ -26,7 +25,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ...types.music_type import WishEntry
 from ...utils.logger import get_logger
-
 
 @dataclass
 class LearnResult:
@@ -58,8 +56,7 @@ class WishlistManager:
             self.logger.warning(f"Failed to parse metadata.json: {e}, starting fresh")
             return
 
-        # v1 -> v2 migration: flat list -> dict of entries
-        wished_raw = raw.get("wished_songs", {})
+        # v1 -> v2 migration: flat list -> dict of entries        wished_raw = raw.get("wished_songs", {})
         if isinstance(wished_raw, list):
             self.logger.info("Migrating v1 wishlist (flat list) to v2 (dict)")
             for name in wished_raw:
@@ -109,8 +106,7 @@ class WishlistManager:
             self._save()
             return False
         self.wished_songs[safe_name] = WishEntry(
-            safe_name=safe_name,
-            first_requested=time.strftime("%Y-%m-%d"),
+            safe_name=safe_name,            first_requested=time.strftime("%Y-%m-%d"),
         )
         self._save()
         return True
@@ -124,8 +120,7 @@ class WishlistManager:
         ]
 
     def mark_learned(self, safe_name: str) -> None:
-        entry = self.wished_songs.get(safe_name)
-        if entry is None:
+        entry = self.wished_songs.get(safe_name)        if entry is None:
             return
         entry.status = "learned"
         entry.learned_date = time.strftime("%Y-%m-%d")
@@ -133,8 +128,7 @@ class WishlistManager:
         self._save()
 
     def mark_awaiting_audio(self, safe_name: str, reason: str = "") -> None:
-        entry = self.wished_songs.get(safe_name)
-        if entry is None:
+        entry = self.wished_songs.get(safe_name)        if entry is None:
             return
         entry.status = "awaiting_audio"
         entry.last_attempt = time.strftime("%Y-%m-%d")
@@ -143,8 +137,7 @@ class WishlistManager:
         self._save()
 
     def mark_abandoned(self, safe_name: str, reason: str = "") -> None:
-        entry = self.wished_songs.get(safe_name)
-        if entry is None:
+        entry = self.wished_songs.get(safe_name)        if entry is None:
             return
         entry.status = "abandoned"
         entry.last_attempt = time.strftime("%Y-%m-%d")
@@ -167,8 +160,7 @@ class WishlistManager:
         """Mark any wished songs that now exist in the library as learned."""
         changed = False
         for safe_name in all_safe_names:
-            entry = self.wished_songs.get(safe_name)
-            if entry and entry.status not in ("learned", "abandoned"):
+            entry = self.wished_songs.get(safe_name)            if entry and entry.status not in ("learned", "abandoned"):
                 entry.status = "learned"
                 entry.learned_date = time.strftime("%Y-%m-%d")
                 changed = True
@@ -197,8 +189,7 @@ class AutoSongLearner:
         self._ensure_directories()
 
         # Songlearner integration
-        self.songlearner_dir = Path(config.get("songlearner_dir", "songlearner"))
-        self.songlearner_available = self._check_songlearner_models()
+        self.songlearner_dir = Path(config.get("songlearner_dir", "songlearner"))        self.songlearner_available = self._check_songlearner_models()
         if self.songlearner_available:
             self.logger.info("Songlearner 模型已就绪，将使用完整学歌流水线（QQ音乐下载->清洗->MSAF->LLM分段）")
         else:
@@ -220,13 +211,11 @@ class AutoSongLearner:
                 self.logger.warning(f"Songlearner 模型缺失: {rel_path}")
                 return False
         return True
-
     # -- directory setup -----------------------------------------------------
 
     def _ensure_directories(self) -> None:
         self.songs_dir.mkdir(parents=True, exist_ok=True)
         self.staging_dir.mkdir(parents=True, exist_ok=True)
-
     # -- main entry ----------------------------------------------------------
 
     def try_learn_pending(self) -> LearnResult:
@@ -247,8 +236,7 @@ class AutoSongLearner:
                     result.learned.append(safe_name)
                     self.logger.info(f"  ✓ Learned: {safe_name}")
                 else:
-                    entry_after = self.wishlist.wished_songs.get(safe_name)
-                    if entry_after and entry_after.status == "abandoned":
+                    entry_after = self.wishlist.wished_songs.get(safe_name)                    if entry_after and entry_after.status == "abandoned":
                         result.abandoned.append(safe_name)
                         self.logger.info(f"  ✗ Abandoned: {safe_name}")
                     else:
@@ -274,7 +262,6 @@ class AutoSongLearner:
             return self._learn_via_songlearner(safe_name)
         else:
             return self._learn_via_staging(safe_name)
-
     # -- Songlearner pipeline ------------------------------------------------
 
     def _learn_via_songlearner(self, safe_name: str) -> bool:
@@ -283,15 +270,13 @@ class AutoSongLearner:
         if not runner.exists():
             self.logger.error(f"Songlearner 启动脚本不存在: {runner}")
             return self._learn_via_staging(safe_name)
-
         self.logger.info(f"[Songlearner] 开始学习: {safe_name}")
 
         try:
             proc = subprocess.run(
                 [sys.executable, str(runner), safe_name],
                 cwd=str(self.songlearner_dir),
-                capture_output=True, text=True,
-                timeout=self.SONGELEARNER_TIMEOUT,
+                capture_output=True, text=True,                timeout=self.SONGELEARNER_TIMEOUT,
                 env={
                     **os.environ,
                     "QWEN_API_KEY": os.environ.get("QWEN_API_KEY", ""),
@@ -316,8 +301,7 @@ class AutoSongLearner:
         if not sl_output.exists():
             # The download step may have renamed the directory to a different safe_name
             # Try to find the most recent output dir
-            outputs_root = self.songlearner_dir / "outputs"
-            if outputs_root.exists():
+            outputs_root = self.songlearner_dir / "outputs"            if outputs_root.exists():
                 candidates = sorted(outputs_root.iterdir(), key=os.path.getmtime, reverse=True)
                 for c in candidates:
                     if c.is_dir() and (c / f"{c.name}.json").exists():
@@ -329,8 +313,7 @@ class AutoSongLearner:
                     self._handle_failure(safe_name, "Songlearner 未生成任何有效输出目录")
                     return False
             else:
-                self._handle_failure(safe_name, "Songlearner 输出目录不存在")
-                return False
+                self._handle_failure(safe_name, "Songlearner 输出目录不存在")                return False
 
         return self._finalize_song(safe_name, sl_output)
 
@@ -366,8 +349,7 @@ class AutoSongLearner:
                 copied.append(f"{safe_name}.cleaned.mp3")
 
         # Fix JSON: singing manager expects a 'description' field.
-        json_path = target_dir / f"{safe_name}.json"
-        if json_path.exists():
+        json_path = target_dir / f"{safe_name}.json"        if json_path.exists():
             try:
                 data = json.loads(json_path.read_text("utf-8"))
                 if "description" not in data:
@@ -555,7 +537,6 @@ class AutoSongLearner:
             })
 
         return segments
-
     # -- failure handling ----------------------------------------------------
 
     def _handle_failure(self, safe_name: str, reason: str) -> None:

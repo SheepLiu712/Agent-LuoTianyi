@@ -124,7 +124,6 @@ class ImportantDate(Base):
 
     user = relationship("User", backref="important_dates")
 
-
 # Database URL
 SessionLocal = None
 engine = None

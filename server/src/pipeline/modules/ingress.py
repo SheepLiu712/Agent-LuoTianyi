@@ -1,12 +1,11 @@
 from typing import TYPE_CHECKING, List, Optional
 from ...utils.logger import get_logger
-from ...vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
+from ...utils.vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
 from ...agent.jargon_retriver import extract_song_entities
 from ..chat_events import ChatInputEvent, ChatInputEventType
 from ...utils.llm.llm_module import LLMModule
 from ...utils.llm.prompt_manager import PromptManager
-from ...database import add_or_update_date, get_sql_session
-import json
+from ...database import add_or_update_date, get_sql_sessionimport json
 import asyncio
 
 if TYPE_CHECKING:

@@ -10,7 +10,6 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 from src.utils.logger import get_logger
 from .event_models import EventStatus, EventType, ScheduleEvent
 from .event_store import EventStore
@@ -36,8 +35,7 @@ class ScheduleManager:
         service_hub_ref: Optional[Any] = None,
     ):
         self.config = config or {}
-        self.service_hub_ref = service_hub_ref  # 延迟注入，避免循环引用
-        self.logger = get_logger(__name__)
+        self.service_hub_ref = service_hub_ref  # 延迟注入，避免循环引用        self.logger = get_logger(__name__)
 
         # 子模块
         self.event_store = EventStore(
@@ -51,7 +49,6 @@ class ScheduleManager:
             cfg = load_config("config/config.json", default_config={})
             llm_cfg = cfg.get("knowledge", {}).get("llm", {})
         self.parser = EventParser(llm_config=llm_cfg)
-
         # 运行时状态
         self._stop_event = asyncio.Event()
         self._thread: Optional[Any] = None
@@ -62,8 +59,7 @@ class ScheduleManager:
         self.fetch_interval = self.config.get("fetch_interval_hours", 6) * 3600
         self.check_interval = self.config.get("check_interval_seconds", 60)
         reminder_cfg = self.config.get("reminder", {})
-        self.advance_days_concert = reminder_cfg.get("advance_days_concert", [3, 1, 0])
-        self.advance_days_general = reminder_cfg.get("advance_days_general", [0])
+        self.advance_days_concert = reminder_cfg.get("advance_days_concert", [3, 1, 0])        self.advance_days_general = reminder_cfg.get("advance_days_general", [0])
         self.context_lookahead_days = self.config.get("context", {}).get("lookahead_days", 7)
         self.context_max_events = self.config.get("context", {}).get("max_context_events", 5)
         self.mention_cooldown_hours = self.config.get("context", {}).get("mention_cooldown_hours", 6)
@@ -96,7 +92,6 @@ class ScheduleManager:
     def set_service_hub_ref(self, ref: Any) -> None:
         """注入 service_hub 引用（启动后调用）。"""
         self.service_hub_ref = ref
-
     # ── 主循环 ─────────────────────────────────────────────
 
     def _run_loop(self) -> None:
@@ -121,13 +116,11 @@ class ScheduleManager:
             now = time.time()
 
             # 定期拉取新动态
-            if now - last_fetch_time >= self.fetch_interval:
-                await self._fetch_and_process()
+            if now - last_fetch_time >= self.fetch_interval:                await self._fetch_and_process()
                 last_fetch_time = now
 
             # 检查需要发送提醒的事件
             await self._check_and_dispatch_reminders()
-
             # 自动更新事件状态
             self.event_store.refresh_statuses()
 
@@ -256,7 +249,6 @@ class ScheduleManager:
 
         except Exception as e:
             self.logger.error(f"Failed to dispatch reminder to {user_id}: {e}")
-
     # ── 静默判断 ─────────────────────────────────────────────
 
     def is_silence_period(self) -> bool:

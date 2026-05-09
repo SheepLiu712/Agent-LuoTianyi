@@ -80,7 +80,6 @@ class MemoryWriter:
                 await self.write_event_memory(db, redis, vector_store, user_id,
                                                value=value, keys=entry.get("keys", [value]),
                                                commit=commit)
-
     async def _extract_knowledge(
         self,
         history: str,
@@ -319,16 +318,14 @@ class MemoryWriter:
         first = items[0]
         search_text = (first.get("keys", [first.get("value", "")]) or [first.get("value", "")])[0]
         threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
-        results = await vector_store.search(user_id, search_text, k=20)
-        for doc, score in results:
+        results = await vector_store.search(user_id, search_text, k=20)        for doc, score in results:
             metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
             if metadata.get("memory_type") != "user_memory":
                 continue
             if score >= threshold:
                 existing = metadata.get("value") or (doc.get_content() if hasattr(doc, "get_content") else "")
                 if existing:
-                    seen.add(existing.strip())
-        return seen
+                    seen.add(existing.strip())        return seen
 
     async def _batch_check_event_memory_dups(
         self,
@@ -343,16 +340,14 @@ class MemoryWriter:
             return seen
         first = items[0]
         search_text = (first.get("keys", [first.get("value", "")]) or [first.get("value", "")])[0]
-        results = await vector_store.search(user_id, search_text, k=20)
-        for doc, _ in results:
+        results = await vector_store.search(user_id, search_text, k=20)        for doc, _ in results:
             metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
             if metadata.get("memory_type") != "event_memory":
                 continue
             doc_date = str(metadata.get("event_date") or metadata.get("timestamp") or "")
             if doc_date != event_date:
                 continue
-            existing = metadata.get("value") or (doc.get_content() if hasattr(doc, "get_content") else "")
-            if existing:
+            existing = metadata.get("value") or (doc.get_content() if hasattr(doc, "get_content") else "")            if existing:
                 seen.add(self._normalize_text(existing))
         return seen
 

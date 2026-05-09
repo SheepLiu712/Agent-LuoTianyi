@@ -97,8 +97,7 @@ class ChatStream:
                         self.logger.info(f"已通知前端检测到重要日期: {detected_date}")
                     except Exception as e:
                         self.logger.error(f"发送日期检测通知失败: {e}")
-            else:
-                self.logger.warning("Service hub or user uuid is missing, skip user message preprocessing")
+            else:                self.logger.warning("Service hub or user uuid is missing, skip user message preprocessing")
 
         await self.topic_planner.feed_unread_message(event)
 

@@ -1,6 +1,5 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable, Optional
-
 if TYPE_CHECKING:
     from ..agent.luotianyi_agent import LuoTianyiAgent
     from ..agent.activity_maker import ActivityMaker
