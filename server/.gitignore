@@ -69,7 +69,9 @@ logs
 temp
 mobile_project
 setup
-res
+/res/*
+!/res/agent/
+!/res/agent/**
 data
 .VSCodeCounter
 Redis-x64-*

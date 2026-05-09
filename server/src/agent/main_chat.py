@@ -228,17 +228,17 @@ class MainChat:
 
         persona = static_vars.get("character_persona", "")
         if isinstance(persona, list):
-            persona = "\n".join(str(x) for x in persona if str(x).strip())
+            persona = "".join(str(x) for x in persona if str(x).strip())
         if persona:
             self.character_persona = str(persona).strip()
 
         style = static_vars.get("speaking_style", "")
         if isinstance(style, list):
-            style = "；".join(str(x) for x in style if str(x).strip())
+            style = "".join(str(x) for x in style if str(x).strip())
         if not style:
             requirements = static_vars.get("response_requirements", [])
             if isinstance(requirements, list):
-                style = "；".join(str(x).lstrip("- ").strip() for x in requirements[:3] if str(x).strip())
+                style = "".join(str(x).lstrip("- ").strip() for x in requirements[:3] if str(x).strip())
         if style:
             self.speaking_style = str(style).strip()
 
