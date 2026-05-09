@@ -41,6 +41,7 @@ def init_song_db(config: Dict):
 
 def get_song_db():
     """Generator for database session"""
+    global SessionLocal
     if SessionLocal is None:
          # Fallback default path if not initialized explicitly
         init_song_db(
@@ -55,6 +56,7 @@ def get_song_db():
 
 def get_song_session() -> Session:
     """Direct session"""
+    global SessionLocal
     if SessionLocal is None:
          # Fallback default path if not initialized explicitly
         init_song_db(

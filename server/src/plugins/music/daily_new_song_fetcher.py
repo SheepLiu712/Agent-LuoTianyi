@@ -253,11 +253,14 @@ def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False) -> bool:
 def sync_daily_new_songs(config_path: str = "config/config.json") -> Dict[str, List[str]]:
     cfg = load_config(config_path, default_config={})
 
-    song_db_cfg = cfg.get("knowledge", {}).get("song_database", {})
+def sync_daily_new_songs(song_knowledge_config: Dict[str, Any]) -> Dict[str, List[str]]:
+    song_db_cfg = song_knowledge_config.get("song_database", {})
     if not song_db_cfg:
         raise ValueError("缺少 knowledge.song_database 配置")
 
-    crawler_cfg = cfg.get("crawler", {})
+    crawler_cfg = song_knowledge_config.get("crawler", {})
+    if not crawler_cfg:
+        raise ValueError("缺少 knowledge.crawler 配置")
 
     init_song_db(song_db_cfg)
     db = get_song_session()
@@ -289,7 +292,8 @@ def sync_daily_new_songs(config_path: str = "config/config.json") -> Dict[str, L
 #     db.close()
 
 if __name__ == "__main__":
-    result = sync_daily_new_songs()
+    # This would typically be called with the actual song knowledge config
+    result = sync_daily_new_songs(song_knowledge_config={})
     added = result.get("added", [])
     failed = result.get("failed", [])
 
