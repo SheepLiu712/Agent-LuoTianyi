@@ -176,6 +176,20 @@
                 },
                 "prompt_name": "memory_write_prompt"
             }
+        },
+        "auto_dreamer": {
+            "llm_module": {
+                "llm": {
+                    "api_type": "openai",
+                    "model": "deepseek-chat",
+                    "api_key": "$DEEPSEEK_API_KEY",
+                    "base_url": "https://api.deepseek.com/v1",
+                    "temperature": 0.5,
+                    "max_tokens": 4096,
+                    "top_p": 0.9
+                },
+                "prompt_name": "auto_dreamer_prompt"
+            }
         }
     },
     "citywalk": {

@@ -29,6 +29,7 @@ class DailyScheduler:
         random_func: Optional[Callable[[], float]] = None,
         song_learner: Optional[Any] = None,
         important_date_callback: Optional[Callable[[dict], None]] = None,
+        auto_dreamer: Optional[Any] = None,
     ):
         self.logger = get_logger(__name__)
         self.runtime_service = runtime_service
@@ -38,6 +39,7 @@ class DailyScheduler:
         self.random_func = random_func or random.random
         self.song_learner = song_learner
         self.important_date_callback = important_date_callback
+        self.auto_dreamer = auto_dreamer
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -135,6 +137,17 @@ class DailyScheduler:
                 self.logger.error("凌晨歌曲学习失败: %s", exc)
         threading.Thread(target=_target, name="song-learner-runner", daemon=True).start()
 
+    def _run_auto_dreamer_async(self) -> None:
+        if self.auto_dreamer is None:
+            return
+        def _target():
+            try:
+                import asyncio
+                asyncio.run(self.auto_dreamer.run_auto_dreamer())
+            except Exception as exc:
+                self.logger.error("Auto dreamer 失败: %s", exc)
+        threading.Thread(target=_target, name="auto-dreamer-runner", daemon=True).start()
+
     def _run_once_for_day(self, now: datetime) -> None:
         today = now.strftime("%Y-%m-%d")
         state = self._load_state()
@@ -150,6 +163,11 @@ class DailyScheduler:
 
         # Song learner: runs every day at 4AM (cheap — mostly checks staging)
         self._run_song_learner_async()
+
+        # Auto dreamer: runs on the same interval as song fetch
+        if self.should_run_song_fetch(state.get("last_auto_dreamer_date", ""), now, self.song_interval_days):
+            self._run_auto_dreamer_async()
+            state["last_auto_dreamer_date"] = today
 
         state["last_daily_check"] = today
         self._save_state(state)

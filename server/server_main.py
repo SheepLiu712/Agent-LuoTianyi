@@ -128,8 +128,11 @@ async def startup_event(app: FastAPI):
         except Exception as e:
             logger.error(f"创建 ImportantDate 失败: {e}")
 
+    auto_dreamer_ref = get_luotianyi_agent()
+
     daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime, song_learner=song_learner,
-                                      important_date_callback=_important_date_callback)
+                                      important_date_callback=_important_date_callback,
+                                      auto_dreamer=auto_dreamer_ref)
     daily_scheduler.start()
 
     # 账号系统初始化

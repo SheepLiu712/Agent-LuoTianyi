@@ -443,7 +443,12 @@ class LuoTianyiAgent:
             self.logger.error(f"Error in update_profile_context_for_pipeline: {e}")
         finally:
             db.close()
-        
+
+    async def run_auto_dreamer(self) -> None:
+        """触发 Auto Dreamer 整理所有活跃用户的今日记忆。"""
+        await self.memory_manager.run_auto_dreamer(
+            vector_store=self._runtime_hub.vector_store,
+        )
 
     def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """供 TopicReplier 调用的唱歌计划接口。返回 song|segment。"""

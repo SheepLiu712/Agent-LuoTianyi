@@ -4,7 +4,7 @@
 - [x] 考虑表达风格偏好的向对话注入方式；（PR #9 feat/memory-pool）
 - [ ] 更天真活泼的人设，和更口语化的说话方式；（待更新 prompt）
 - [x] 结构化的记忆组织和检索方式（记忆池 + 上下文记忆）；（PR #9 feat/memory-pool）
-- [ ] 结构化的记忆组织和检索方式（多Key + auto dreamer）；（最后再做）
+- [x] 结构化的记忆组织和检索方式（多Key + auto dreamer）；（PR #? 待创建）
 - [x] 新的客户端接口（重置账号 + 服务器地址配置）；（PR #7 feat/reset-and-server-config）
 
 ## 说明
