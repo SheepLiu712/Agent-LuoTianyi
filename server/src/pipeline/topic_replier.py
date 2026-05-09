@@ -74,9 +74,12 @@ class TopicReplier:
         finally:
             db.close()
 
-        # 注入活动上下文（近期演唱会/联动等信息）
+        # 它不用等到回复完成就能检测日期，因此把日期检测放在这里，和回复workflow并行
+        asyncio.create_task(self._process_date_detection(topic, conversation_history=conversation_history))
+
         topic_content = topic.topic_content
         if self.service_hub.schedule_manager:
+            raise RuntimeError("Schedule manager should not be set for topic replier, check the initialization logic")
             try:
                 activity_ctx = self.service_hub.schedule_manager.get_active_context(self.user_id)
                 if activity_ctx:
@@ -100,7 +103,7 @@ class TopicReplier:
         )
         for item in reply_items:
             if isinstance(item, SongSegmentChat):
-                lyrics = self.service_hub.agent.singing_manager.get_segment_lyrics(item.song, item.segment)
+                lyrics = self.service_hub.agent.music_manager.get_segment_lyrics(item.song, item.segment)
                 item.lyrics = lyrics
 
         uuid_list = await self.service_hub.agent.persist_topic_replies_for_pipeline(
@@ -184,8 +187,8 @@ class TopicReplier:
         for constraint in fact_constraints:
             if constraint == "/SongsCanSing":
                 try:
-                    singing_manager = self.service_hub.agent.singing_manager
-                    songs_json = await singing_manager.get_songs_can_sing_llm(max_song_num=15)
+                    music_manager = self.service_hub.agent.music_manager
+                    songs_json = await music_manager.get_songs_can_sing_llm(max_song_num=15)
                     special_hits.append(f"可唱歌曲推荐：{songs_json}")
                 except Exception as e:
                     self.logger.error(f"Failed to get songs can sing: {e}")
@@ -193,8 +196,8 @@ class TopicReplier:
                 try:
                     song_name = constraint[len("/CanISing"):].strip()
                     if song_name:
-                        singing_manager = self.service_hub.agent.singing_manager
-                        can_sing = await singing_manager.can_i_sing_song_llm(song_name)
+                        music_manager = self.service_hub.agent.music_manager
+                        can_sing = await music_manager.can_i_sing_song_llm(song_name)
                         special_hits.append(can_sing)
                 except Exception as e:
                     self.logger.error(f"Failed to get can I sing for {song_name}: {e}")
@@ -205,12 +208,12 @@ class TopicReplier:
         # 获取常规的歌曲事实
         regular_hits = []
         if regular_constraints:
-            regular_hits = await self.service_hub.agent.search_song_facts_for_topic(regular_constraints)
+            regular_hits = await self.service_hub.agent.music_manager.search_song_facts_for_topic(regular_constraints)
         
         return special_hits + regular_hits
 
     async def _sing_plan(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
-        # 利用并修改singing_manager，判断sing_attempts中所给出的用户的唱歌指令能否满足，如果能满足则返回准备唱的歌曲名称和唱段，如果不能满足则返回None
+        # 利用 music_manager 判断 sing_attempts 中所给出的用户唱歌指令能否满足。
         # 如果有明确歌名，查询这首歌能不能唱，能唱的话随机选择一段
         # 如果没有明确歌名(歌名为random_song)，则从歌曲数据库中随机选择一首歌，并随机选择一个唱段
         # 如果为空则直接返回
@@ -247,6 +250,56 @@ class TopicReplier:
             )
         except Exception as e:
             self.logger.warning(f"Topic memory write task failed: {e}")
+
+        
+
+    async def _process_date_detection(self, topic: "ExtractedTopic", conversation_history: Optional[str] = None) -> None:
+        """从话题的源消息中检测重要日期，按置信度处理。"""
+        if self.service_hub is None or self.service_hub.agent is None:
+            return
+
+        # 获取 source_messages 中的最新用户文本
+        user_texts = []
+        for msg in getattr(topic, "source_messages", []) or []:
+            content = getattr(msg, "content", "") or ""
+            if content.strip():
+                user_texts.append(content.strip())
+        if not user_texts:
+            return
+
+        # 检查 agent 是否已初始化 date_detector
+        agent = self.service_hub.agent
+        if not hasattr(agent, 'date_detector') or agent.date_detector is None:
+            return
+
+        date_info = await agent.date_detector.detect('\n'.join(user_texts), conversation_history=conversation_history or "")
+        if date_info is None:
+            return
+
+        self.logger.debug(f"DateDetector: {date_info}")
+
+        # 按置信度处理
+        from ..agent.date_processor import process_detected_date
+        result = await process_detected_date(
+            date_info=date_info,
+            user_id=self.user_id,
+            open_sql_session=agent._runtime_hub.open_sql_session,
+            reply_topic_callback=lambda t: self._safe_add_topic(t),
+        )
+
+        if result is True:
+            self.logger.info(f"Date auto-saved from topic {topic.topic_id}")
+        elif result is False:
+            self.logger.debug(f"Date discarded from topic {topic.topic_id}")
+        else:
+            self.logger.info(f"Date confirmation topic created from topic {topic.topic_id}")
+
+    def _safe_add_topic(self, topic: "ExtractedTopic") -> None:
+        """线程安全地添加话题到队列。"""
+        try:
+            asyncio.create_task(self.add_topic(topic))
+        except Exception as e:
+            self.logger.warning(f"Failed to add confirmation topic: {e}")
 
     async def _schedule_profile_context_update(
         self

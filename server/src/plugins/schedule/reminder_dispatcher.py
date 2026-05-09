@@ -18,7 +18,9 @@ from .event_models import EventStatus, EventType, ScheduleEvent
 from .event_store import EventStore
 
 logger = get_logger(__name__)
-
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.pipeline.global_chat_stream_manager import GlobalChatStreamManager
 
 class ReminderDispatcher:
     """将到期事件提醒推送给在线用户。"""
@@ -26,12 +28,11 @@ class ReminderDispatcher:
     def __init__(
         self,
         event_store: EventStore,
-        service_hub_ref: Any,  # callable / obj with .gcsm
         advance_days_concert: List[int] = None,
         advance_days_general: List[int] = None,
     ):
         self.event_store = event_store
-        self.service_hub_ref = service_hub_ref
+        self.gcsm: Optional["GlobalChatStreamManager"] = None  # 延迟获取 GCSM 引用，避免循环依赖
         self.advance_days_concert = advance_days_concert or [3, 1, 0]
         self.advance_days_general = advance_days_general or [0]
         self.logger = get_logger(__name__)
@@ -97,11 +98,11 @@ class ReminderDispatcher:
             self.logger.warning(f"Failed to get online users: {e}")
             return []
 
-    def _get_gcsm(self) -> Optional[Any]:
-        if self.service_hub_ref is None:
+    def _get_gcsm(self) -> Optional["GlobalChatStreamManager"]:
+        if self.gcsm is None:
             return None
         try:
-            return self.service_hub_ref.gcsm
+            return self.gcsm
         except Exception:
             return None
 
@@ -125,7 +126,7 @@ class ReminderDispatcher:
             elif days_diff == 1:
                 time_desc = "明天"
             else:
-                time_desc = f"{days_diff} 天后"
+                time_desc = f"{days_diff} 天后" if days_diff > 0 else f"{-days_diff} 天前"
 
             type_names_cn = {
                 EventType.CONCERT: "演唱会",
@@ -140,7 +141,7 @@ class ReminderDispatcher:
             content = f"{time_desc}有{type_name}「{event.title}」"
             if event.location:
                 content += f"，地点在{event.location}"
-            content += "，记得关注哦~"
+            content += "聊聊心情，或问用户是否感兴趣。"
 
             # 构造 ExtractedTopic 送入 topic_replier
             from src.pipeline.topic_planner import ExtractedTopic

@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 import requests
 
 from src.utils.logger import get_logger
+from src.plugins.schedule.event_models import OfficialDynamic
 
 logger = get_logger(__name__)
 
@@ -45,13 +46,33 @@ class OfficialFeedFetcher:
         self.data_file = Path(data_file)
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.6099.71 Safari/537.36"
-            ),
-            "Referer": "https://space.bilibili.com/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
+            "Referer": "https://space.bilibili.com/36081646/dynamic",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6,ja;q=0.5",
+            "Sec-Ch-Ua": '"Microsoft Edge";v="147", "Not.A/Brand";v="8", "Chromium";v="147"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1"
         })
+        
+
+        cookie_file = Path("config/bili_cookie.txt")
+        if cookie_file.exists():
+            try:
+                bili_cookie = cookie_file.read_text(encoding="utf-8").strip()
+                self.logger.info(f"Loaded B站 cookie from {cookie_file}")
+            except Exception as e:
+                raise RuntimeError(f"Failed to read B站 cookie from {cookie_file}: {e}")
+                self.logger.warning(f"Failed to read {cookie_file}: {e}")
+
+        if bili_cookie:
+            self.session.headers.update({"Cookie": bili_cookie})
+            
         # 缓存最近处理过的动态 ID，避免重复处理
         self.seen_ids: Dict[str, List[str]] = self._load_cache()
 
@@ -77,19 +98,12 @@ class OfficialFeedFetcher:
         except Exception as e:
             self.logger.warning(f"Failed to save feed cache: {e}")
 
-    def fetch_all_new(self) -> List[Dict[str, Any]]:
+    def fetch_all_new(self) -> List[OfficialDynamic]:
         """
         拉取所有配置账号的新动态（去重后）。
-        返回原始动态字典列表，每个字典包含：
-            - uid: 账号 UID
-            - account_name: 账号名称
-            - dynamic_id: 动态 ID
-            - dynamic_type: 动态类型
-            - content: 文本内容
-            - raw: 原始 API 返回
-            - fetched_at: 拉取时间
+        返回原始动态 OfficialDynamic 列表
         """
-        all_items: List[Dict[str, Any]] = []
+        all_items: List[OfficialDynamic] = []
         for uid in self.bili_accounts:
             try:
                 items = self._fetch_bili_space(uid)
@@ -101,12 +115,12 @@ class OfficialFeedFetcher:
         self._save_cache()
         return all_items
 
-    def _fetch_bili_space(self, uid: str, max_pages: int = 3) -> List[Dict[str, Any]]:
+    def _fetch_bili_space(self, uid: str, max_pages: int = 3) -> List[OfficialDynamic]:
         """
         拉取 B站 用户空间动态，返回新动态列表。
         使用 offset 翻页，每次比较 dynamic_id 是否已处理过。
         """
-        results: List[Dict[str, Any]] = []
+        results: List[OfficialDynamic] = []
         seen = set(self.seen_ids.get(uid, []))
         offset: Optional[str] = None
 
@@ -128,7 +142,7 @@ class OfficialFeedFetcher:
                 items = data.get("data", {}).get("items", [])
                 if not items:
                     break
-
+                print(len(items))
                 for item in items:
                     dyn_id = str(item.get("id_str") or item.get("id", ""))
                     if not dyn_id:
@@ -156,102 +170,129 @@ class OfficialFeedFetcher:
         self.logger.info(f"Fetched {len(results)} new dynamics from B站 UID={uid}")
         return results
 
-    def _parse_bili_item(self, uid: str, item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _parse_bili_item(self, uid: str, item: Dict[str, Any]) -> Optional[OfficialDynamic]:
         """
-        从 B站 动态 item 中提取文本内容。
-        支持类型：
-            - 2/8: 投稿视频动态（标题 + 描述）
-            - 4: 纯文字动态（快讯）
-            - 1: 转发动态
-            - 64: 专栏
+        从 B站 Web V1 Feed/Space 动态 item 中提取文本内容。
         """
         try:
-            dyn_id = str(item.get("id_str") or item.get("id", ""))
-            dyn_type = item.get("type", 0)
-            desc = item.get("desc", "") or ""  # 转发动态的文本
+            dyn_id = str(item.get("id_str") or "")
+            dyn_type = item.get("type", "")
+            
+            modules = item.get("modules", {})
+            if not modules:
+                return None
 
-            # 获取账号名
+            # ①跳过置顶动态
+            module_tag = modules.get("module_tag")
+            if module_tag and isinstance(module_tag, dict):
+                tag_text = module_tag.get("text", "")
+                if "置顶" in tag_text:
+                    return None
+
             account_name = ""
-            for u in self.bili_accounts:
-                if u == uid:
-                    # 从配置里找名字
-                    pass  # 用 UID 代替即可
+            author_module = modules.get("module_author", {})
+            if author_module:
+                account_name = author_module.get("name", "")
+            
+            if not account_name:
+                for u, name in self.bili_accounts:
+                    if u == uid:
+                        account_name = name
+                        break
 
-            content_parts: List[str] = []
+            # 内部辅助函数，用来提取动态本身或者原动态（orig）的内容
+            def extract_from_dynamic(dyn: Dict[str, Any], is_orig: bool = False) -> Dict[str, Any]:
+                content_parts = []
+                pics = []
+                dyn_modules = dyn.get("modules", {})
+                name = dyn_modules.get("module_author", {}).get("name", "") or account_name
+                if is_orig:
+                    name = f"(转发自 {name}的动态)"
+                module_dynamic = dyn_modules.get("module_dynamic", {})
+                if not module_dynamic:
+                    return {"text": "", "pics": [], "name": name}
+                
+                # ③ modules/module_dynamic/desc 可能包含 text
+                desc_obj = module_dynamic.get("desc", {})
+                if desc_obj and isinstance(desc_obj, dict) and desc_obj.get("text"):
+                    text = desc_obj.get("text", "")
+                    if is_orig:
+                        content_parts.append(f"【原动态】动态文本：{text}")
+                    else:
+                        content_parts.append(f"动态文本：{text}")
+                
+                # ② modules/module_dynamic/major 包含核心信息
+                major_obj = module_dynamic.get("major", {})
+                if major_obj and isinstance(major_obj, dict):
+                    major_type = major_obj.get("type", "")
+                    
+                    if major_type == "MAJOR_TYPE_ARCHIVE":
+                        archive = major_obj.get("archive", {})
+                        if archive and isinstance(archive, dict):
+                            title = archive.get("title", "")
+                            desc = archive.get("desc", "")
+                            content_parts.append(f"[视频] 标题：{title}")
+                            if desc:
+                                content_parts.append(f"简介：{desc}")
+                                
+                    elif major_type == "MAJOR_TYPE_DRAW":
+                        draw = major_obj.get("draw", {})
+                        if draw and isinstance(draw, dict):
+                            items = draw.get("items", [])
+                            for p in items:
+                                src = p.get("src")
+                                if src:
+                                    pics.append(src)
+                                    
+                    elif major_type == "MAJOR_TYPE_ARTICLE":
+                        article = major_obj.get("article", {})
+                        if article and isinstance(article, dict):
+                            title = article.get("title", "")
+                            desc = article.get("desc", "")
+                            content_parts.append(f"[专栏] 标题：{title}")
+                            if desc:
+                                content_parts.append(f"简介：{desc}")
+                                
+                return {"text": "\n".join(content_parts), "pics": pics, "name": name}
+            
+            extracted = extract_from_dynamic(item, is_orig=False)
+            content_parts = [extracted["text"]]
+            pics = extracted["pics"]
+            
+            # ④ orig 表示转发的原始来源
+            orig = item.get("orig")
+            if orig and isinstance(orig, dict):
+                extracted_orig = extract_from_dynamic(orig, is_orig=True)
+                if extracted_orig["text"]:
+                    content_parts.append(extracted_orig["text"])
+                pics.extend(extracted_orig["pics"])
 
-            if dyn_type in (2, 8):  # 视频投稿
-                card = item.get("card", {})
-                if isinstance(card, str):
-                    card = json.loads(card)
-                title = card.get("title", "")
-                desc_text = card.get("desc", "")
-                content_parts.append(f"[投稿视频] 标题：{title}")
-                if desc_text:
-                    content_parts.append(f"简介：{desc_text}")
-
-            elif dyn_type == 4:  # 文字动态
-                item_data = item.get("item", {})
-                text = item_data.get("description", "") or item_data.get("content", "")
-                content_parts.append(f"[文字动态] {text}")
-
-            elif dyn_type == 1:  # 转发
-                item_data = item.get("item", {})
-                text = item_data.get("content", "") or desc
-                content_parts.append(f"[转发动态] {text}")
-                # 附带原动态信息
-                origin = item.get("origin", {})
-                if origin:
-                    orig_desc = origin.get("desc", "") or ""
-                    content_parts.append(f"原动态：{orig_desc[:200]}")
-
-            elif dyn_type == 64:  # 专栏
-                card = item.get("card", {})
-                if isinstance(card, str):
-                    try:
-                        card = json.loads(card)
-                    except Exception:
-                        card = {}
-                title = card.get("title", "")
-                summary = card.get("summary", "")
-                content_parts.append(f"[专栏] 标题：{title} {summary}")
-
+            content = "\n".join(filter(None, content_parts))
+            
+            pub_ts = author_module.get("pub_ts", 0)
+            if pub_ts:
+                dt_str = datetime.fromtimestamp(int(pub_ts)).isoformat()
             else:
-                # 其他类型，尝试提取 item.description
-                item_data = item.get("item", {})
-                text = item_data.get("description", "") if isinstance(item_data, dict) else ""
-                if text:
-                    content_parts.append(f"[动态类型{dyn_type}] {text}")
+                dt_str = datetime.now().isoformat()
 
-            # 提取图片链接（如有）
-            pics = []
-            item_data = item.get("item", {})
-            if isinstance(item_data, dict):
-                pic_list = item_data.get("pictures", []) or []
-                for p in pic_list[:3]:
-                    if isinstance(p, dict) and p.get("url"):
-                        pics.append(p["url"])
-
-            timestamp = item.get("timestamp", 0)
-            dt_str = datetime.fromtimestamp(timestamp).isoformat() if timestamp else datetime.now().isoformat()
-
-            return {
-                "uid": uid,
-                "account_name": account_name or f"bili_{uid}",
-                "platform": "bilibili",
-                "dynamic_id": dyn_id,
-                "dynamic_type": dyn_type,
-                "content": "\n".join(content_parts),
-                "raw_content": "\n".join(content_parts)[:2000],
-                "pics": pics,
-                "publish_time": dt_str,
-                "source_url": f"https://t.bilibili.com/{dyn_id}",
-            }
+            return OfficialDynamic(
+                uid=uid,
+                account_name=account_name or f"bili_{uid}",
+                platform="bilibili",
+                dynamic_id=dyn_id,
+                dynamic_type=dyn_type,
+                content=content,
+                raw_content=content[:2000],
+                pics=pics,
+                publish_time=dt_str,
+                source_url=f"https://t.bilibili.com/{dyn_id}",
+            )
 
         except Exception as e:
-            self.logger.error(f"Error parsing B站 dynamic item: {e}")
+            self.logger.error(f"Error parsing B站 dynamic item: {e}", exc_info=True)
             return None
 
-    def fetch_weibo(self, uid: str) -> List[Dict[str, Any]]:
+    def fetch_weibo(self, uid: str) -> List[OfficialDynamic]:
         """
         微博动态爬取（占位实现，需要配合 RSSHub 或微博 API）。
         暂时返回空列表。
