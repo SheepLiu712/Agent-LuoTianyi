@@ -114,8 +114,8 @@ class TestConfigEncryption:
         decrypted = decrypt_sensitive_fields(encrypted)
         assert decrypted == config
 
-    def test_encrypt_is_deterministic(self):
-        """Fernet 的每次加密结果不同（IV），但解密后应一致。"""
+    def test_encrypt_is_non_deterministic(self):
+        """AES-256-GCM 使用随机 nonce，每次加密结果不同，但解密后应一致。"""
         from src.utils.config_encryption import encrypt_value, decrypt_value
 
         plaintext = "sk-consistent-test"
