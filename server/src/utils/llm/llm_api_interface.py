@@ -469,6 +469,96 @@ class RequestsAPIInterface(LLMAPIInterface):
 
 
 """
+自定义LLM API接口
+支持任意 OpenAI 兼容的 API endpoint，并支持自定义请求头、超时、代理等高级选项
+"""
+
+
+class CustomEndpointInterface(OpenAIAPIInterface):
+    """
+    自定义 LLM API 端点接口
+
+    继承 OpenAIAPIInterface，额外支持：
+    - default_headers: 自定义请求头
+    - timeout: 请求超时时间
+    - proxy: HTTP/HTTPS 代理
+    - allow_retry_on_connection: 连接失败时是否重试
+    """
+    def __init__(self, config: Dict[str, Any]):
+        # 保存自定义配置，在 _init_parameters 中使用
+        self.config = config
+        self.logger = get_logger(__name__)
+        self._init_parameters()
+        self.response_time_queue = deque(maxlen=20)
+
+        # 检查 SSL_CERT_FILE 环境变量
+        self._ssl_cert_file = os.environ.get("SSL_CERT_FILE")
+        self._ssl_cert_file_removed = False
+        if self._ssl_cert_file and not os.path.exists(self._ssl_cert_file):
+            self.logger.warning(f"SSL_CERT_FILE 指向不存在的文件: {self._ssl_cert_file}，暂时移除。")
+            del os.environ["SSL_CERT_FILE"]
+            self._ssl_cert_file_removed = True
+
+        try:
+            client_kwargs = {
+                "base_url": self.base_url,
+                "api_key": self.api_key,
+                "timeout": self.timeout,
+            }
+            if self.default_headers:
+                client_kwargs["default_headers"] = self.default_headers
+
+            self.client = OpenAI(**client_kwargs)
+            self.logger.info(
+                f"自定义端点客户端初始化完成，端点: {self.base_url}，模型: {self.model}"
+            )
+        except Exception as e:
+            self.logger.error(f"初始化自定义端点客户端失败: {e}")
+            raise Exception(f"无法初始化自定义端点客户端: {e}")
+        finally:
+            if self._ssl_cert_file_removed:
+                os.environ["SSL_CERT_FILE"] = self._ssl_cert_file
+
+    def _init_parameters(self):
+        # 从配置读取基础参数，优先使用配置值，否则使用默认值
+        self.base_url = self.config.get("base_url", "").rstrip("/")
+        if not self.base_url:
+            raise ValueError("自定义端点必须提供 base_url")
+
+        self.api_key = self.config.get("api_key") or os.environ.get(
+            self.config.get("api_key_env", "CUSTOM_LLM_API_KEY")
+        )
+        if not self.api_key:
+            self.logger.warning("未提供 API key，自定义端点可能无法正常工作。")
+
+        self.model = self.config.get("model", "default")
+        self.temperature = self.config.get("temperature", 0.7)
+        self.max_tokens = self.config.get("max_tokens", 4096)
+        self.top_p = self.config.get("top_p", 0.9)
+        self.max_retries = self.config.get("max_retries", 3)
+        self.retry_delay = self.config.get("retry_delay", 0.5)
+        self.enable_thinking = self.config.get("enable_thinking", False)
+
+        # 自定义端点特有参数
+        self.timeout = self.config.get("timeout", 30)
+        self.default_headers = self.config.get("default_headers", None)
+
+    def get_interface_info(self) -> Dict[str, Any]:
+        return {
+            "name": "CustomEndpointInterface",
+            "model": self.model,
+            "base_url": self.base_url,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "top_p": self.top_p,
+            "max_retries": self.max_retries,
+            "retry_delay": self.retry_delay,
+            "timeout": self.timeout,
+            "has_custom_headers": self.default_headers is not None,
+        }
+
+
+"""
 LLM API接口工厂
 根据配置创建对应的LLM API接口实例
 """
@@ -482,5 +572,7 @@ class LLMAPIFactory:
             return OpenAIAPIInterface(config)
         elif api_type == "requests":
             return RequestsAPIInterface(config)
+        elif api_type == "custom":
+            return CustomEndpointInterface(config)
         else:
             raise ValueError(f"未知的LLM API类型: {api_type}")

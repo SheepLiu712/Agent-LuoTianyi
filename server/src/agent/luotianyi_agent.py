@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ..utils.llm.prompt_manager import PromptManager
+from ..utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
 from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentChat
 from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
@@ -293,13 +294,14 @@ class LuoTianyiAgent:
         """供 TopicReplier 调用：按话题生成分段回复。"""
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
+        llm_client_override: Optional[LLMAPIInterface] = None
         try:
             if conversation_history is None:
                 conversation_history = await self.conversation_manager.get_context(db, redis_client, user_id)
             user = db.query(User).filter(User.uuid == user_id).first()
             user_nickname = user.nickname if user and user.nickname else "你"
             user_description = user.description if user and user.description else ""
-            # 注入用户偏好（关系类型、表达风格等）
+            # 注入用户偏好（关系类型、表达风格等）+ 自定义 LLM 端点
             if user and user.preferences:
                 try:
                     prefs = json.loads(user.preferences) if isinstance(user.preferences, str) else user.preferences
@@ -316,6 +318,21 @@ class LuoTianyiAgent:
                     if pref_parts:
                         pref_context = "（用户偏好设置：" + "；".join(pref_parts) + "）"
                         user_description = (user_description + "\n" + pref_context).strip()
+
+                    # 读取用户自定义 LLM 端点配置，按用户隔离
+                    llm_endpoint = prefs.get("llm_endpoint")
+                    if llm_endpoint and isinstance(llm_endpoint, dict) and llm_endpoint.get("base_url"):
+                        try:
+                            llm_endpoint["api_type"] = llm_endpoint.get("api_type", "custom")
+                            llm_client_override = LLMAPIFactory.create_interface(llm_endpoint)
+                            self.logger.info(
+                                f"用户 {user_id} 使用自定义 LLM 端点: "
+                                f"{llm_endpoint.get('base_url')} / {llm_endpoint.get('model', 'default')}"
+                            )
+                        except Exception as e:
+                            self.logger.warning(
+                                f"用户 {user_id} 自定义 LLM 端点创建失败，将使用服务端默认配置: {e}"
+                            )
                 except Exception as e:
                     self.logger.warning(f"Failed to parse preferences: {e}")
             # 注入好感度上下文
@@ -336,6 +353,7 @@ class LuoTianyiAgent:
             fact_hits=fact_hits or [],
             memory_hits=memory_hits or [],
             sing_plan=sing_plan,
+            llm_client_override=llm_client_override,
         )
 
     async def write_topic_memories_for_pipeline(
