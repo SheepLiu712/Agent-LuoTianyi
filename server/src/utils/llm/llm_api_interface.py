@@ -481,43 +481,30 @@ class CustomEndpointInterface(OpenAIAPIInterface):
     继承 OpenAIAPIInterface，额外支持：
     - default_headers: 自定义请求头
     - timeout: 请求超时时间
-    - proxy: HTTP/HTTPS 代理
-    - allow_retry_on_connection: 连接失败时是否重试
     """
     def __init__(self, config: Dict[str, Any]):
-        # 保存自定义配置，在 _init_parameters 中使用
-        self.config = config
-        self.logger = get_logger(__name__)
-        self._init_parameters()
-        self.response_time_queue = deque(maxlen=20)
-
-        # 检查 SSL_CERT_FILE 环境变量
-        self._ssl_cert_file = os.environ.get("SSL_CERT_FILE")
-        self._ssl_cert_file_removed = False
-        if self._ssl_cert_file and not os.path.exists(self._ssl_cert_file):
-            self.logger.warning(f"SSL_CERT_FILE 指向不存在的文件: {self._ssl_cert_file}，暂时移除。")
-            del os.environ["SSL_CERT_FILE"]
-            self._ssl_cert_file_removed = True
-
-        try:
-            client_kwargs = {
-                "base_url": self.base_url,
-                "api_key": self.api_key,
-                "timeout": self.timeout,
-            }
-            if self.default_headers:
-                client_kwargs["default_headers"] = self.default_headers
-
-            self.client = OpenAI(**client_kwargs)
-            self.logger.info(
-                f"自定义端点客户端初始化完成，端点: {self.base_url}，模型: {self.model}"
-            )
-        except Exception as e:
-            self.logger.error(f"初始化自定义端点客户端失败: {e}")
-            raise Exception(f"无法初始化自定义端点客户端: {e}")
-        finally:
-            if self._ssl_cert_file_removed:
-                os.environ["SSL_CERT_FILE"] = self._ssl_cert_file
+        # 用占位 key 调用父类初始化（SSL 检查、logger、response_time_queue、参数初始化）
+        # 避免父类内 OpenAI() 因 api_key=None 而抛出 Missing credentials
+        placeholder = {**config}
+        if not placeholder.get("api_key"):
+            placeholder["api_key"] = "__placeholder__"
+        super().__init__(placeholder)
+        # 恢复真实的 api_key 值（可能为 None）
+        self.api_key = config.get("api_key") or os.environ.get(
+            config.get("api_key_env", "CUSTOM_LLM_API_KEY")
+        )
+        # 用自定义参数重新创建客户端（父类只传了 base_url + api_key，缺少 timeout/headers）
+        client_kwargs = {
+            "base_url": self.base_url,
+            "api_key": self.api_key or "__placeholder__",
+            "timeout": self.timeout,
+        }
+        if self.default_headers:
+            client_kwargs["default_headers"] = self.default_headers
+        self.client = OpenAI(**client_kwargs)
+        self.logger.info(
+            f"自定义端点客户端初始化完成，端点: {self.base_url}，模型: {self.model}"
+        )
 
     def _init_parameters(self):
         # 从配置读取基础参数，优先使用配置值，否则使用默认值

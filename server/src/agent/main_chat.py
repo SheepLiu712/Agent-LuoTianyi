@@ -99,9 +99,8 @@ class MainChat:
     async def _call_llm(self, llm_client_override: Optional[LLMAPIInterface] = None, **kwargs) -> str:
         try:
             prompt = self.llm.prompt_template.render(**kwargs)
-            if llm_client_override is not None:
-                return await llm_client_override.generate_response(prompt, use_json=False)
-            return await self.llm.generate_response(**kwargs)
+            client = llm_client_override or self.llm.llm_client
+            return await client.generate_response(prompt, use_json=False)
         except Exception as e:
             import traceback
 

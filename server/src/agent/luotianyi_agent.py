@@ -16,6 +16,7 @@ from uuid import uuid4
 
 from ..utils.llm.prompt_manager import PromptManager
 from ..utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
+from ..utils.config_encryption import decrypt_sensitive_fields
 from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentChat
 from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
@@ -87,6 +88,10 @@ class LuoTianyiAgent:
         self.logger = get_logger("LuoTianyiAgent")
         self._runtime_hub = runtime_hub
         self.prompt_manager = PromptManager(self.config.get("prompt_manager", {}))  # 提示管理器
+
+        # LLM 客户端缓存：user_id -> (config_hash, LLMAPIInterface)
+        # 用于按用户隔离自定义端点时的客户端复用，避免每次回复都重新创建
+        self._llm_client_cache: Dict[str, Tuple[str, LLMAPIInterface]] = {}
 
         # 各种模块初始化
         self.conversation_manager = ConversationManager(
@@ -323,12 +328,27 @@ class LuoTianyiAgent:
                     llm_endpoint = prefs.get("llm_endpoint")
                     if llm_endpoint and isinstance(llm_endpoint, dict) and llm_endpoint.get("base_url"):
                         try:
+                            # 解密敏感字段
+                            llm_endpoint = decrypt_sensitive_fields(llm_endpoint)
                             llm_endpoint["api_type"] = llm_endpoint.get("api_type", "custom")
-                            llm_client_override = LLMAPIFactory.create_interface(llm_endpoint)
-                            self.logger.info(
-                                f"用户 {user_id} 使用自定义 LLM 端点: "
-                                f"{llm_endpoint.get('base_url')} / {llm_endpoint.get('model', 'default')}"
-                            )
+
+                            # 计算配置哈希，用于缓存比较
+                            import hashlib
+                            config_json = json.dumps(llm_endpoint, sort_keys=True, ensure_ascii=False)
+                            config_hash = hashlib.sha256(config_json.encode()).hexdigest()
+
+                            # 检查缓存：同一用户且配置未变则复用已有客户端
+                            cached = self._llm_client_cache.get(user_id)
+                            if cached and cached[0] == config_hash:
+                                llm_client_override = cached[1]
+                                self.logger.debug(f"用户 {user_id} 复用缓存的 LLM 客户端")
+                            else:
+                                llm_client_override = LLMAPIFactory.create_interface(llm_endpoint)
+                                self._llm_client_cache[user_id] = (config_hash, llm_client_override)
+                                self.logger.info(
+                                    f"用户 {user_id} 使用自定义 LLM 端点: "
+                                    f"{llm_endpoint.get('base_url')} / {llm_endpoint.get('model', 'default')}"
+                                )
                         except Exception as e:
                             self.logger.warning(
                                 f"用户 {user_id} 自定义 LLM 端点创建失败，将使用服务端默认配置: {e}"

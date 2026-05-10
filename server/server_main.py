@@ -16,6 +16,7 @@ if current_dir not in sys.path:
 
 import src.database as database
 from src.interface import account
+from src.utils.config_encryption import encrypt_sensitive_fields
 from src.interface.types import (
     RegisterRequest,
     LoginRequest,
@@ -160,9 +161,13 @@ async def chat_ws(websocket: WebSocket,
                         try:
                             user = db.query(database.User).filter(database.User.uuid == ws_connection.user_uuid).first()
                             if user:
-                                user.preferences = json.dumps(preferences, ensure_ascii=False)
+                                # 加密偏好中的敏感字段（api_key, default_headers）后再存储
+                                encrypted = preferences.copy()
+                                if "llm_endpoint" in encrypted and isinstance(encrypted["llm_endpoint"], dict):
+                                    encrypted["llm_endpoint"] = encrypt_sensitive_fields(encrypted["llm_endpoint"])
+                                user.preferences = json.dumps(encrypted, ensure_ascii=False)
                                 db.commit()
-                                logger.info(f"Saved preferences for user {ws_connection.user_name}: {preferences}")
+                                logger.info(f"Saved preferences for user {ws_connection.user_name}")
                         finally:
                             db.close()
                     except Exception as e:
