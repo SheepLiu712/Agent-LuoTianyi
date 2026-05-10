@@ -20,6 +20,7 @@ import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
 import { useAffection } from "../hooks/useAffection";
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import LlmSettingsScreen from './llm_settings';
 
 
 export default function Index({ onLogout }: { onLogout?: () => void }) {
@@ -30,6 +31,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [llmSettingsOpen, setLlmSettingsOpen] = useState(false);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
   const webviewRef = useRef<WebView>(null);
 
@@ -50,6 +52,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     canSend,
     canSendImage,
     thinking,
+    sendPreferences,
     setInputText,
     addHistoryMessage,
     handleSendText,
@@ -184,6 +187,14 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </TouchableOpacity>
         )}
 
+        {/* 设置按钮 */}
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => setLlmSettingsOpen(true)}
+        >
+          <Text style={styles.settingsButtonText}>⚙</Text>
+        </TouchableOpacity>
+
         {/* 好感度显示 */}
         {affection && (
           <View style={styles.affectionBadge}>
@@ -294,6 +305,16 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
         </View>
       </View>
+
+      {/* LLM 端点设置页 - 全屏覆盖 */}
+      {llmSettingsOpen && (
+        <View style={styles.settingsOverlay}>
+          <LlmSettingsScreen
+            onClose={() => setLlmSettingsOpen(false)}
+            onSave={(preferences) => sendPreferences(preferences)}
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -333,6 +354,26 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     resizeMode: 'contain',
+  },
+  settingsButton: {
+    position: 'absolute',
+    left: 50,
+    top: 10,
+    width: 32,
+    height: 32,
+    zIndex: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 16,
+  },
+  settingsButtonText: {
+    fontSize: 18,
+  },
+  settingsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 200,
+    backgroundColor: '#f5f5f5',
   },
   thinkingBubble: {
     position: 'absolute',

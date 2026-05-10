@@ -310,6 +310,10 @@ export const useChatLogic = (
     [currentPlayingUuid, messages, updateMessageByUuid],
   );
 
+  const sendPreferences = useCallback(async (preferences: Record<string, unknown>) => {
+    await binderRef.current?.sendPreferences(preferences);
+  }, []);
+
   const addHistoryMessage = useCallback((newMessages: ChatMessage[]) => {
     for (const msg of newMessages) {
       if (!msg.isUser && msg.audioAvailable && msg.audioLocalUri) {
@@ -346,6 +350,7 @@ export const useChatLogic = (
     canSend,
     canSendImage,
     thinking,
+    sendPreferences,
     setInputText: handleInputChange,
     addHistoryMessage,
     handleSendText,
