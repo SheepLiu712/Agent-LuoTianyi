@@ -136,14 +136,21 @@ function Sync-Repo {
     Write-Header "仓库操作"
 
     # 如果已在仓库中
-    if (Test-Path ".git") -and (git remote -v 2>$null | Select-String "Agent-LuoTianyi") {
+    if ((Test-Path ".git") -and (git remote -v 2>$null | Select-String "Agent-LuoTianyi")) {
         Write-Info "已在仓库 $(Split-Path -Leaf $PWD) 中"
         $branch = git rev-parse --abbrev-ref HEAD 2>$null
         Write-Info "当前分支: $branch"
         $ans = Read-Input "是否拉取最新代码？" "Y"
         if ($ans -eq "Y") {
             git pull 2>$null | Out-Host
-            if ($LASTEXITCODE -ne 0) { Write-Warn "拉取失败，使用本地代码" }
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warn "拉取失败，尝试添加镜像 remote..."
+                $mirrorUrl = $REPO_URL -replace 'https://github.com/', 'https://kkgithub.com/'
+                git remote add mirror $mirrorUrl 2>$null
+                git pull mirror $branch 2>$null | Out-Host
+                if ($LASTEXITCODE -eq 0) { Write-Warn "已通过镜像更新代码" }
+                else { Write-Warn "拉取失败，使用本地代码" }
+            }
         }
         $script:PROJECT_DIR = $PWD
     } else {
@@ -155,11 +162,17 @@ function Sync-Repo {
         }
         if (-not (Test-Path $target)) {
             Write-Info "克隆仓库: $REPO_URL"
-            git clone --branch $BRANCH $REPO_URL $target 2>&1 | Out-Host
+            git clone --branch $BRANCH $REPO_URL $target 2>$null
             if ($LASTEXITCODE -ne 0) {
-                Write-Warn "分支 $BRANCH 不可用，克隆默认分支..."
+                Write-Warn "GitHub 直连失败，尝试镜像 kkgithub.com..."
+                $mirrorUrl = $REPO_URL -replace 'https://github.com/', 'https://kkgithub.com/'
                 Remove-Item -Recurse -Force $target -ErrorAction SilentlyContinue
-                git clone $REPO_URL $target
+                git clone --branch $BRANCH $mirrorUrl $target 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warn "镜像也失败，尝试默认分支..."
+                    Remove-Item -Recurse -Force $target -ErrorAction SilentlyContinue
+                    git clone $REPO_URL $target 2>$null
+                }
             }
         }
         $script:PROJECT_DIR = (Get-Item $target).FullName

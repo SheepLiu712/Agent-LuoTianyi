@@ -94,7 +94,11 @@ clone_or_pull_repo() {
         info "当前分支: $current_branch"
         input "是否拉取最新代码？(Y/n): " ; pull_ans=${REPLY:-Y}
         if [[ "$pull_ans" =~ ^[Yy] ]]; then
-            git pull || warn "拉取失败，将继续使用本地代码"
+            git pull 2>/dev/null || {
+                warn "拉取失败，尝试添加镜像 remote..."
+                MIRROR_URL="https://kkgithub.com/${REPO_URL#https://github.com/}"
+                git remote add mirror "$MIRROR_URL" 2>/dev/null && git pull mirror "$current_branch" 2>/dev/null && warn "已通过镜像更新代码" || warn "拉取失败，将继续使用本地代码"
+            }
         fi
         PROJECT_DIR="$PWD"
     else
@@ -116,10 +120,14 @@ clone_or_pull_repo() {
                 fi
             fi
             info "克隆仓库: $REPO_URL"
-            git clone --branch "$BRANCH" "$REPO_URL" "$target_dir" 2>/dev/null || {
-                warn "无法从 $BRANCH 克隆，尝试默认分支..."
-                git clone "$REPO_URL" "$target_dir"
-            }
+            if ! git clone --branch "$BRANCH" "$REPO_URL" "$target_dir" 2>/dev/null; then
+                warn "GitHub 直连失败，尝试镜像 kkgithub.com..."
+                MIRROR_URL="https://kkgithub.com/${REPO_URL#https://github.com/}"
+                if ! git clone --branch "$BRANCH" "$MIRROR_URL" "$target_dir" 2>/dev/null; then
+                    warn "镜像也失败，尝试默认分支..."
+                    git clone "$REPO_URL" "$target_dir" 2>/dev/null || error "克隆失败，请检查网络连接或手动克隆: $REPO_URL"
+                fi
+            fi
             PROJECT_DIR="$target_dir"
         fi
     fi
