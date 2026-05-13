@@ -31,6 +31,8 @@ Server承担了绝大多数的数据处理、管理和计算任务。client和ap
 
 注册成功之后即可登录。勾选自动登录后，下一次运行将直接进入主界面。
 
+登录界面提供「服务器设置」按钮，可配置自定义服务器地址（支持 HTTP/HTTPS），方便连接到自建服务端或内网穿透地址。
+
 ### 开发者方式
 1. 克隆仓库：
 ```bash
@@ -60,46 +62,120 @@ npx expo start
 你也可以将expo项目构建为标准的安卓项目。
 
 ## 🔧服务端架设
+
+> **💡 推荐使用一键脚本**：自动完成仓库拉取 → 环境安装 → 配置向导 → 放行端口 → 启动服务，全程交互式引导。
+
 ### 一、环境要求
 - 内存：至少 4GB RAM
 - 存储：至少 7GB 可用空间
 - 网络连接：需要访问外部API服务
 - 运算能力：最消耗算力的部分是GPT-SoVITS的语音合成模块，其余均使用外部API，请访问GPT-SoVITS的[官方仓库](https://github.com/RVC-Boss/GPT-SoVITS/)了解配置要求。
 
-### 二、安装流程
-1. 克隆项目仓库：
-   ```bash
-   git clone https://github.com/SheepLiu712/Agent-LuoTianyi.git
-   cd Agent-LuoTianyi/server
-   ```
+### 二、一键安装（推荐）
 
-2. 确保conda已安装，随后运行安装脚本（在命令行中运行，或者双击运行快速启动脚本）
-    ```bash
-    setup.bat
-    ```
-    注意，该脚本运行过程需要进行两次输入。第一次输入是确定conda环境的名称，第二次输入是确认是否安装GPU版本的pytorch（如果你的电脑没有NVIDIA显卡，请选择否）
+#### Windows (PowerShell)
+以普通用户身份打开 PowerShell，运行：
+```powershell
+# 在线运行（无需克隆仓库）：
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+irm https://lty.mywifeluotianyi.com/setup_server.ps1 | iex
 
-3. 设置环境变量：
-    - 根据config中所需要的api_key，配置对应的api密钥为环境变量。
-    - 在Windows上，可以通过“系统属性”->“高级”->“环境变量”进行设置，或者在命令行中运行：
-      ```bash
-      setx SILICONFLOW_API_KEY "your_api_key_here"
-      setx QWEN_API_KEY "your_api_key_here"
-      ```
-    - 所配置的环境变量需要和config.json中的占位符一致，并不局限于硅基流动的api_key，如果你使用了其他需要密钥的服务，建议也按照同样的方式配置环境变量。
+# 或者下载后本地运行：
+Invoke-WebRequest -Uri “https://lty.mywifeluotianyi.com/setup_server.ps1” -OutFile setup_server.ps1
+.\setup_server.ps1
+```
 
-4. 下载资源：
-  - 联系开发者获取资源文件和数据文件（只有需要迁移数据库时需要）。
-  - 将res文件解压到根目录
-  - 将data文件解压到根目录（如需要迁移数据库）
+脚本将引导你完成：仓库拉取 → 虚拟环境安装 → API密钥配置 → 防火墙放行 → 启动服务。
 
-### 三、启动服务
-- 在命令行中启动对应conda环境，运行以下命令启动服务：
+支持参数：
+```powershell
+.\setup_server.ps1 -Quick          # 仅安装环境 + 模板配置，跳过向导
+.\setup_server.ps1 -ConfigOnly     # 仅运行配置向导
+.\setup_server.ps1 -NoEnv          # 跳过环境安装
+```
+
+#### Linux (bash)
+```bash
+# 在线运行（无需克隆仓库）：
+bash <(curl -fsSL https://lty.mywifeluotianyi.com/setup_server.sh)
+
+# 或者下载后本地运行：
+wget https://lty.mywifeluotianyi.com/setup_server.sh
+bash setup_server.sh
+```
+
+支持参数：
+```bash
+bash setup_server.sh --quick        # 仅安装环境 + 模板配置
+bash setup_server.sh --config-only  # 仅运行配置向导
+bash setup_server.sh --no-env       # 跳过环境安装
+```
+
+#### Python (跨平台通用)
+```bash
+# 下载后运行：
+wget https://lty.mywifeluotianyi.com/setup_server.py
+python setup_server.py
+
+# 或者在已克隆的仓库中运行：
+python server/scripts/setup_server.py --quick
+```
+
+#### 一键脚本功能说明
+| 功能 | 说明 |
+|------|------|
+| 仓库拉取 | 自动 `git clone` 或 `git pull` 更新 |
+| 环境安装 | 自动创建 conda/venv + pip 安装依赖，可选 GPU 版 PyTorch |
+| 智能配置向导 | 交互式填写 API 密钥（SiliconFlow / Qwen / DeepSeek / AMAP），端口、HTTPS、TTS 等；自动检测公网 IP，智能决策域名绑定和内网穿透方案 |
+| 防火墙放行 | 自动检测并开放端口（Linux: ufw/firewalld/iptables；Windows: netsh advfirewall） |
+| 最低权限 | 仅防火墙和 systemd 服务安装需要提权，服务本身以普通用户运行 |
+| SSL 证书 | 可选自动生成自签名 HTTPS 证书 |
+| SakuraFrp 隧道 | 自动创建内网穿透隧道并配置 frpc 客户端 |
+| 域名绑定 | 有域名时自动配置 Caddy 反向代理 + Let's Encrypt HTTPS |
+| Systemd 服务 | Linux 下可选创建开机自启服务 |
+
+### 三、手动安装
+
+#### 1. 克隆项目仓库
+```bash
+git clone https://github.com/SheepLiu712/Agent-LuoTianyi.git
+cd Agent-LuoTianyi/server
+```
+
+#### 2. 安装虚拟环境与依赖
+确保conda已安装，随后运行安装脚本：
+```bash
+setup.bat
+```
+> 注意：该脚本运行过程需要进行两次输入。第一次输入是确定conda环境的名称，第二次输入是确认是否安装GPU版本的pytorch（如果你的电脑没有NVIDIA显卡，请选择否）
+
+#### 3. 设置环境变量
+根据 `config/config.json` 中所需要的 API Key，配置对应的 API 密钥为环境变量：
+```bash
+setx SILICONFLOW_API_KEY “your_api_key_here”
+setx QWEN_API_KEY “your_api_key_here”
+setx DEEPSEEK_API_KEY “your_api_key_here”
+```
+或者在 Linux 上：
+```bash
+export SILICONFLOW_API_KEY=”your_api_key_here”
+export QWEN_API_KEY=”your_api_key_here”
+export DEEPSEEK_API_KEY=”your_api_key_here”
+```
+所配置的环境变量需要和 config.json 中的占位符一致。
+
+#### 4. 下载资源
+- 联系开发者获取资源文件和数据文件（只有需要迁移数据库时需要）。
+- 将 `res` 文件解压到根目录
+- 将 `data` 文件解压到根目录（如需要迁移数据库）
+
+### 四、启动服务
+- 进入 server 目录，激活对应环境，运行：
   ```bash
   python server_main.py
   ```
-- 打开sakurafrp的隧道接入公网（如果需要公网访问的话）
-- 在运行中如果遇到任何依赖缺失的问题，可以私信作者，或者提issue
+- 打开 SakuraFrp 的隧道接入公网（如果需要公网访问的话）
+- 在运行中如果遇到任何依赖缺失的问题，可以私信作者，或者提 issue
 
 ## 📜 许可证和版权
 
