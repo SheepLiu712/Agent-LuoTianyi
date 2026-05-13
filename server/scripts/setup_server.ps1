@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     洛天依 Agent 服务端 — 一键安装 & 配置向导 (Windows / PowerShell)
 .DESCRIPTION
