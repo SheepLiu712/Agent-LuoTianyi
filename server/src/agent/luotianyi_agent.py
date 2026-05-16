@@ -20,7 +20,6 @@ from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentCh
 from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
-from .affection_manager import AffectionManager
 from ..types.conversation_type import ConversationItem
 from ..utils.logger import get_logger
 from ..tts import TTSModule
@@ -29,7 +28,6 @@ from ..memory.memory_manager import MemoryManager
 
 from ..utils.vision.vision_module import VisionModule
 from ..database.sql_database import User
-from ..database.memory_storage import MemoryStorage
 
 from ..pipeline.chat_events import ChatInputEvent, ChatInputEventType
 from ..database.vector_store import BaseDocument
@@ -40,6 +38,7 @@ if TYPE_CHECKING:
     from ..database.vector_store import VectorStore
     from ..utils.llm.llm_module import LLMAPIInterface
     from ..plugins.music.music_manager import MusicManager
+    from ..database.memory_storage import MemoryStorage
     
 
 
@@ -60,7 +59,7 @@ def get_available_expression(config_path: str = "config/live2d_interface_config.
 class _AgentRuntimeHub:
     """仅供 LuoTianyiAgent 内部使用的运行时依赖。"""
 
-    redis_client: MemoryStorage
+    redis_client: "MemoryStorage"
     vector_store: "VectorStore"
     sql_session_factory: Callable[[], Session]
     music_manager: "MusicManager"
@@ -94,15 +93,11 @@ class LuoTianyiAgent:
         self.memory_manager = MemoryManager(self.config["memory_manager"], self.prompt_manager)  # 记忆管理器
 
         self.tts_engine = tts_module  # TTS模块
-        affection_llm_config = self.config.get("affection_manager", {}).get("llm") or (
-            self.config.get("main_chat", {}).get("llm_module", {}).get("llm", {})
-        )
-        self.affection_manager = AffectionManager(affection_llm_config)
         self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
         self.topic_extractor = TopicExtractor(self.config["topic_extractor"],self.prompt_manager,)
         self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
 
-        self.date_detector = DateDetector(self.config["date_detector"]["llm"], self.prompt_manager)
+        self.date_detector = DateDetector(self.config["date_detector"]["llm_module"], self.prompt_manager)
         
 
     def save_preferences(self, user_uuid: str, preferences: dict) -> bool:
@@ -305,7 +300,8 @@ class LuoTianyiAgent:
             user = db.query(User).filter(User.uuid == user_id).first()
             user_nickname = user.nickname if user and user.nickname else "你"
             user_description = user.description if user and user.description else ""
-            # 注入用户偏好（关系类型、表达风格等）
+            # 注入表达风格偏好（独立段，不混入 user_description）
+            pref_context = ""
             if user and user.preferences:
                 try:
                     prefs = json.loads(user.preferences) if isinstance(user.preferences, str) else user.preferences
@@ -320,17 +316,9 @@ class LuoTianyiAgent:
                     if prefs.get("custom_context"):
                         pref_parts.append(f"用户补充的上下文：{prefs['custom_context']}")
                     if pref_parts:
-                        pref_context = "（用户偏好设置：" + "；".join(pref_parts) + "）"
-                        user_description = (user_description + "\n" + pref_context).strip()
+                        pref_context = "用户偏好设置：" + "；".join(pref_parts)
                 except Exception as e:
                     self.logger.warning(f"Failed to parse preferences: {e}")
-            # 注入好感度上下文
-            try:
-                affection_ctx = self.affection_manager.get_affection_context(db, user_id)
-                if affection_ctx:
-                    user_description = (user_description + "\n" + affection_ctx).strip()
-            except Exception as e:
-                self.logger.warning(f"Failed to get affection context: {e}")
         finally:
             db.close()
 
@@ -338,6 +326,7 @@ class LuoTianyiAgent:
             reply_topic=topic_content,
             user_nickname=user_nickname,
             user_description=user_description,
+            preference_context=pref_context,
             conversation_history=conversation_history,
             fact_hits=fact_hits or [],
             memory_hits=memory_hits or [],
@@ -560,23 +549,6 @@ class LuoTianyiAgent:
             data=payload,
         )
 
-        # 由 LLM 分析用户消息并调整好感度
-        try:
-            db = self._runtime_hub.open_sql_session()
-            try:
-                current_score = self.affection_manager.get_score(db, user_uuid)
-                delta, reason = await self.affection_manager.analyze_affection(
-                    content, current_score
-                )
-                if delta != 0:
-                    self.affection_manager.add_affection(
-                        db, user_uuid, delta, f"LLM分析: {reason}"
-                    )
-            finally:
-                db.close()
-        except Exception as e:
-            self.logger.warning(f"Failed to analyze affection: {e}")
-
     async def handle_history_request(self, user_id: str, count: int, end_index: int) -> Dict[str, Any]:
         """处理历史记录请求
 
@@ -627,10 +599,10 @@ agent = None
 def init_luotianyi_agent(
     config: Dict[str, Any],
     tts_module: TTSModule,
-    redis_client: MemoryStorage,
+    redis_client: "MemoryStorage",
     vector_store: Any,
     sql_session_factory: Callable[[], Session],
-    music_manager: MusicManager,
+    music_manager: "MusicManager",
 ):
     """初始化洛天依Agent实例
 

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, Text, Engine, event
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, Text, Engine, event, text
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from datetime import datetime
 import uuid
@@ -152,9 +152,11 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
     ]:
         try:
             with engine.connect() as conn:
-                conn.execute(migration)
+                conn.execute(text(migration))
                 conn.commit()
-        except Exception:
+        except Exception as e:
+            print(f"列已存在或迁移失败，跳过: {migration}")
+            print(f"错误详情: {e}")
             pass  # 列已存在，无需迁移
 
 def get_sql_db(): # Generator for FastAPI

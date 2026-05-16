@@ -27,7 +27,6 @@ from src.gui.binder import AgentBinder
 from src.live2d import live2d
 from src.network.network_client import NetworkClient
 from src.message_process import MessageProcessor
-from src.user_preferences_manager import UserPreferencesManager
 from src.gui.login_dialog import LoginDialog
 
 
@@ -42,8 +41,6 @@ if __name__ == "__main__":
 
     app = ui_init()
 
-    # 创建用户偏好管理器
-    preferences_manager = UserPreferencesManager()
     
     # 创建网络客户端实例
     network_client = NetworkClient(
@@ -66,8 +63,10 @@ if __name__ == "__main__":
         auto_login_callback = network_client.auto_login,
         login_callback = network_client.login,
         register_callback = network_client.register,
+        reset_account_callback = network_client.reset_account,
         send_proactive_text_callback = message_processor.send_proactive_text,
         send_preferences_callback = message_processor.send_preferences,
+        set_base_url_callback = network_client.set_base_url,
     ) 
     # 将Binder的信号传入消息处理器，以便消息处理器能通过信号与UI交互
     message_processor.set_signals(
@@ -87,13 +86,7 @@ if __name__ == "__main__":
             if login_dialog.exec() != QDialog.DialogCode.Accepted:
                 raise SystemExit("Login cancelled")
         print(f"Logged in as {network_client.user_id}")
-        window = MainWindow(config["gui"], config["live2d"], binder)
-        # 设置用户偏好管理器和binder
-        if hasattr(window.chat_widget, 'set_preferences_manager'):
-            window.chat_widget.set_preferences_manager(preferences_manager)
-        # 连接日期检测信号
-        if hasattr(window.chat_widget, 'on_date_detected'):
-            binder.date_detected_signal.connect(window.chat_widget.on_date_detected)
+        window = MainWindow(config["gui"], config["live2d"], binder, network_client=network_client)
         window.show()
         ret = app.exec()
     except SystemExit as e:

@@ -27,7 +27,7 @@ class MemorySearcher:
         
         self.logger = get_logger(__name__)
         self.config = config
-        self.llm = LLMModule(config["llm_module"], prompt_manager)
+        # self.llm = LLMModule(config["llm_module"], prompt_manager)
         self.max_k_vector_entities = config.get("max_k_vector_entities", 5)
         self.default_threshold = float(config.get("vector_score_threshold", 0.46))
         self.max_k_graph_entities = config.get("max_k_graph_entities", 3)

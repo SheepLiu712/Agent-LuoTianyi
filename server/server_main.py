@@ -22,7 +22,10 @@ from src.interface.types import (
     AutoLoginRequest,
     HistoryRequest,
     ImageRequest,
+    ResetAccountRequest,
     WSEventType,
+    PreferenceGetRequest,
+    PreferenceOverwriteRequest,
 )
 from src.interface.websocket_service import WebSocketConnection, get_websocket_service
 from src.pipeline.global_chat_stream_manager import get_GCSM
@@ -234,6 +237,30 @@ async def register(req: RegisterRequest, db: Session = Depends(database.get_sql_
     return {"message": "注册成功", "user_id": req.username}
 
 
+@app.post("/auth/reset_account")
+async def reset_account(
+    req: ResetAccountRequest,
+    db: Session = Depends(database.get_sql_db),
+):
+    """以邀请码重置账号的用户名和密码。
+
+    请求参数：
+    - req.invite_code: 已使用过的邀请码（关联到要重置的用户）
+    - req.new_username: 新的用户名
+    - req.new_password: 新的密码（Base64 加密后）
+    返回值：
+    - 成功：{"message": "重置成功"}
+    - 失败：HTTP 400 错误，{"detail": "失败原因"}
+    """
+    logger.info(f"Reset account request for invite_code: {req.invite_code[:4]}****")
+    decrypted_password = account.decrypt_password(req.new_password)
+
+    success, msg = account.reset_account(db, req.invite_code, req.new_username, decrypted_password)
+    if not success:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"message": "重置成功", "username": req.new_username}
+
+
 @app.post("/auth/login")
 async def login(
     req: LoginRequest,
@@ -269,6 +296,40 @@ async def login(
     raise HTTPException(status_code=401, detail="用户名或密码错误")
 
 
+@app.post("/preference/get")
+async def get_preference(
+    req: PreferenceGetRequest,
+    db: Session = Depends(database.get_sql_db)
+):
+    message_token_valid, user_uuid = account.check_message_token(db, req.username, req.token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+    user = db.query(database.User).filter_by(uuid=user_uuid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="未找到该用户")
+    preferences = json.loads(user.preferences) if user.preferences else {}
+    return {"preferences": preferences}
+
+
+@app.post("/preference/overwrite")
+async def overwrite_preference(
+    req: PreferenceOverwriteRequest,
+    db: Session = Depends(database.get_sql_db)
+):
+    message_token_valid, user_uuid = account.check_message_token(db, req.username, req.token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+    
+    user = db.query(database.User).filter_by(uuid=user_uuid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="未找到该用户")
+    
+    user.preferences = json.dumps(req.preferences, ensure_ascii=False)
+    db.commit()
+    return {"status": "success", "message": "Preferences overwritten successfully"}
+    
+
+
 @app.get("/history")
 async def get_history(
     request: HistoryRequest = Depends(),
@@ -284,35 +345,7 @@ async def get_history(
     return await agent.handle_history_request(user_uuid, capped_count, request.end_index)
 
 
-@app.get("/affection/info")
-async def get_affection_info(
-    username: str,
-    token: str,
-    db: Session = Depends(database.get_sql_db),
-    agent: LuoTianyiAgent = Depends(get_agent_service),
-):
-    """获取用户好感度信息"""
-    message_token_valid, user_uuid = account.check_message_token(db, username, token)
-    if not message_token_valid:
-        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
 
-    score = agent.affection_manager.get_score(db, user_uuid)
-    level_cn, level_en = agent.affection_manager.get_level(score)
-    next_level = agent.affection_manager.get_next_level_info(score)
-    today_net = agent.affection_manager.get_today_net(db, user_uuid)
-
-    result = {
-        "score": score,
-        "level_cn": level_cn,
-        "level_en": level_en,
-        "today_net": today_net,
-    }
-    if next_level:
-        result["next_level_cn"] = next_level[0]
-        result["next_level_en"] = next_level[1]
-        result["next_level_remaining"] = next_level[2]
-
-    return result
 
 
 @app.post("/get_image")

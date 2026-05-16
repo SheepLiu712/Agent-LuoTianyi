@@ -41,6 +41,13 @@ class WsTransport:
         self._ready_event = threading.Event()
         self._connected_event = threading.Event()
 
+    def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
+        """更新服务器地址，断开当前连接以便自动重连到新地址。"""
+        self.base_url = base_url.rstrip("/")
+        self.verify_ssl = verify_ssl
+        # 断开当前 WS，_run() 循环会自动用新 base_url 重连
+        self.stop()
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -63,11 +70,10 @@ class WsTransport:
             except Exception:
                 pass
 
-    def set_agent_message_listener(self, agent_message_listener: Callable[[AgentMessage], None] | None, agent_state_listener: Callable[[bool], None] | None, date_detected_listener: Callable[[dict], None] | None = None) -> None:
+    def set_agent_message_listener(self, agent_message_listener: Callable[[AgentMessage], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
         with self._lock:
             self._agent_message_listener = agent_message_listener
             self._agent_state_listener = agent_state_listener
-            self._date_detected_listener = date_detected_listener
 
     def submit_user_text(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0) -> dict:
         payload = {"message": text}
@@ -275,10 +281,6 @@ class WsTransport:
                 self._emit_agent_state(state)
                 continue
 
-            if event_type == WSEventType.DATE_DETECTED:
-                self._emit_date_detected(msg.payload)
-                continue
-
             if event_type in (WSEventType.SERVER_ERROR, WSEventType.AUTH_ERROR):
                 error_msg = normalize_error_message(msg)
                 consumed = self._complete_ack_waiter(
@@ -359,14 +361,6 @@ class WsTransport:
         except Exception:
             pass
 
-    def _emit_date_detected(self, payload: dict) -> None:
-        self.logger.info(f"Date detected: {payload}")
-        if not self._date_detected_listener:
-            return
-        try:
-            self._date_detected_listener(payload)
-        except Exception as e:
-            self.logger.error(f"Error in date detected listener: {e}")
 
     @staticmethod
     def _build_ws_url(base_url: str) -> str:

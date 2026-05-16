@@ -40,7 +40,7 @@ class DateDetector:
         prompt_manager: PromptManager,
     ):
         self.prompt_manager = prompt_manager
-        self.llm_client = LLMModule(llm_config["llm_module"], prompt_manager)
+        self.llm_client = LLMModule(llm_config, prompt_manager)
 
     async def detect(self, user_input: str, conversation_history: str = "") -> Optional[Dict[str, Any]]:
         if not user_input or not self.llm_client:

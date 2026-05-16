@@ -28,9 +28,24 @@ class RegisterRequest(BaseModel):
     password: str
     invite_code: str
 
+class ResetAccountRequest(BaseModel):
+    """通过邀请码重置用户名和密码"""
+    invite_code: str
+    new_username: str
+    new_password: str
+
 class AutoLoginRequest(BaseModel):
     username: str
     token: str
+
+class PreferenceGetRequest(BaseModel):
+    username: str
+    token: str
+
+class PreferenceOverwriteRequest(BaseModel):
+    username: str
+    token: str
+    preferences: dict
 
 from fastapi import Form, File, UploadFile
 class PictureChatRequest:

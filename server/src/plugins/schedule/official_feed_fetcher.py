@@ -62,12 +62,14 @@ class OfficialFeedFetcher:
         
 
         cookie_file = Path("config/bili_cookie.txt")
+        bili_cookie = ""
         if cookie_file.exists():
             try:
-                bili_cookie = cookie_file.read_text(encoding="utf-8").strip()
+                raw = cookie_file.read_text(encoding="utf-8-sig").strip()
+                # 去除 BOM (\\ufeff) 和其他不可见控制字符，防止 HTTP 头 latin-1 编码失败
+                bili_cookie = raw.encode("utf-8", errors="ignore").decode("utf-8")
                 self.logger.info(f"Loaded B站 cookie from {cookie_file}")
             except Exception as e:
-                raise RuntimeError(f"Failed to read B站 cookie from {cookie_file}: {e}")
                 self.logger.warning(f"Failed to read {cookie_file}: {e}")
 
         if bili_cookie:
