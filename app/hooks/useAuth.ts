@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useState } from 'react';
 import { auth } from '../components/auth';
-import { server_config } from '../config/index';
+import { loadSavedServerUrl, server_config } from '../config/index';
 import { encryptPassword, getPublicKey } from '../utils/crypto';
 import { addDebugTrace } from '../utils/debug_trace';
 
@@ -62,7 +62,10 @@ export function useAuth() {
   }, []);
 
   const initializeAuth = useCallback(async () => {
-    // 首先尝试获取公钥
+    // 加载保存的自定义服务器地址
+    await loadSavedServerUrl();
+
+    // 然后尝试获取公钥
     try {
       addDebugTrace('auth', 'fetching public key');
       const publicKey = await getPublicKey();
