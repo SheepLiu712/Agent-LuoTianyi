@@ -335,6 +335,18 @@ class ChatWidget(QWidget):
         
         self.init_ui()
         
+        # Connect settings button
+        if hasattr(self, 'settings_btn'):
+            self.settings_btn.clicked.connect(self.open_settings)
+        
+        self.init_ui()
+        
+        # 初始化定时检查重要日期的定时器
+        self.date_check_timer = QTimer(self)
+        self.date_check_timer.timeout.connect(self.check_important_dates)
+        # 默认1小时检查一次，可以从设置中读取
+        self.date_check_interval = 60 * 60 * 1000  # 1 hour in milliseconds
+        self.date_check_timer.start(self.date_check_interval)
         
         # Initial load
         QTimer.singleShot(100, lambda: self.agent.load_history(self.load_history_num, -1))
@@ -478,10 +490,14 @@ class ChatWidget(QWidget):
         icon_path = os.path.join("res", "gui", "setting.png")
         self.settings_btn.setIcon(QIcon(icon_path))
         self.settings_btn.setFixedSize(24, 24)
+        self.settings_btn = HoverButton(tooltip_text="用户设置")
+        self.settings_btn.setText("⚙设置")
+        self.settings_btn.setFixedSize(60, 24)
         self.settings_btn.setStyleSheet("""
             QPushButton { 
                 border: none; 
                 background-color: transparent; 
+                font-size: 12px;
             } 
             QPushButton:hover { 
                 background-color: #E0E0E0; 
@@ -535,6 +551,14 @@ class ChatWidget(QWidget):
             dialog.exec()
         else:
             QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开偏好设置")
+        """打开用户设置对话框"""
+        if self.preferences_manager is None:
+            from ..user_preferences_manager import UserPreferencesManager
+            self.preferences_manager = UserPreferencesManager()
+
+        from .preferences_dialog import UserPreferencesDialog
+        dialog = UserPreferencesDialog(self.preferences_manager, self, agent_binder=self.agent)
+        dialog.exec()
     
     def on_scroll_value_changed(self, value):
         if value == 0 and not self.is_loading_history and self.current_history_index > 0:
@@ -697,6 +721,114 @@ class ChatWidget(QWidget):
         return super().eventFilter(obj, event)
 
 
+    
+    def set_preferences_manager(self, preferences_manager):
+        """设置用户偏好管理器"""
+        self.preferences_manager = preferences_manager
+        print("Preferences manager set in ChatWidget")
+    
+    def on_date_detected(self, date_info: dict):
+        """处理后端检测到重要日期的事件"""
+        if not self.preferences_manager:
+            print("Preferences manager not set, cannot save date")
+            return
+        
+        try:
+            name = date_info.get("name", "重要日期")
+            date_type_cn = date_info.get("type", "其他")
+            date = date_info.get("date", "")
+            description = date_info.get("description", "")
+            
+            # 转换日期类型：中文 → 英文
+            type_mapping = {
+                "生日": "birthday",
+                "纪念日": "anniversary",
+                "节日": "other",
+                "其他": "other"
+            }
+            date_type_en = type_mapping.get(date_type_cn, "other")
+            
+            # 弹出确认对话框
+            msg_box = QMessageBox()
+            msg_box.setWindowTitle("检测到重要日期")
+            msg_box.setText(f"我注意到你提到了「{name}」\n\n是否要将其添加到重要日期提醒中？")
+            msg_box.setInformativeText(f"日期类型：{date_type_cn}\n日期：{date if date else '每年此日'}")
+            msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            msg_box.setDefaultButton(QMessageBox.StandardButton.Yes)
+            
+            if msg_box.exec() == QMessageBox.StandardButton.Yes:
+                # 用户确认，保存到配置
+                success = self.preferences_manager.add_important_date(
+                    name=name,
+                    date=date,
+                    date_type=date_type_en,
+                    message=f"今天是{name}！",
+                    enabled=True
+                )
+                if success:
+                    QMessageBox.information(self, "保存成功", f"已成功添加「{name}」到重要日期列表！")
+                    print(f"已保存重要日期: {name}")
+                else:
+                    QMessageBox.warning(self, "保存失败", "保存重要日期失败，请查看日志。")
+            else:
+                print(f"用户取消保存重要日期: {name}")
+        
+        except Exception as e:
+            print(f"处理日期检测事件失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    
+    def check_important_dates(self):
+        """检查今天是否有重要日期，如果有则让AI自然地提及"""
+        if not self.preferences_manager:
+            return
+        
+        try:
+            # 如果是新的一天，清空已提醒记录
+            import datetime
+            today = datetime.datetime.now().date()
+            if hasattr(self, '_last_check_date') and self._last_check_date != today:
+                if hasattr(self, '_reminded_today'):
+                    self._reminded_today.clear()
+            self._last_check_date = today
+            
+            if not hasattr(self, '_reminded_today'):
+                self._reminded_today = set()
+            
+            # 检查今天是否有重要日期
+            matched_dates = self.preferences_manager.check_today_dates()
+            
+            if matched_dates:
+                for date_info in matched_dates:
+                    date_id = date_info.get("id")
+                    # 避免同一天重复提醒
+                    if date_id in self._reminded_today:
+                        continue
+                    
+                    name = date_info.get("name", "重要日期")
+                    date_type = date_info.get("type", "其他")
+                    
+                    # 构造更自然的提示，让LLM生成自然的回复
+                    if date_type == "生日":
+                        prompt = f"今天是{name}的{date_type}，请你自然地提起这个话题，表达你的祝福或关心。不要生硬地说'今天是XXX'，而是以聊天的方式自然地提及。"
+                    elif date_type == "纪念日":
+                        prompt = f"今天是{name}，这是一个特别的日子。请你以自然的方式提及这个日子，表达你的想法或回忆。"
+                    elif date_type == "节日":
+                        prompt = f"今天是{name}，请你以轻松自然的方式提及这个节日，可以聊聊相关的习俗、庆祝方式等。"
+                    else:
+                        prompt = f"今天是{name}。请你在回复中自然地提及这个日子，但不要生硬地直接说'今天是XXX'。"
+                    
+                    # 发送消息到后端，让AI生成自然回复
+                    if hasattr(self.agent, 'send_text_proactive'):
+                        self.agent.send_text_proactive(prompt)
+                        self._reminded_today.add(date_id)
+                        print(f"已触发AI自然提及: {name}")
+                    else:
+                        print(f"警告: agent 没有 send_text_proactive 方法")
+                    
+        except Exception as e:
+            print(f"检查重要日期失败: {e}")
     
     def handle_text_input(self):
         if self.can_send == False:

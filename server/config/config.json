@@ -21,6 +21,19 @@
             "graph_alias_path": "alias.json"
         }
     },
+    "knowledge": {
+        "song_database": {
+            "db_folder": "res/knowledge",
+            "db_file": "knowledge_db.db"
+        },
+        "llm": {
+            "api_type": "openai",
+            "model": "qwen3.5-plus",
+            "api_key": "$QWEN_API_KEY",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "enable_thinking": false
+        }
+    },
     "tts": {
         "character_name": "LuoTianyi",
         "onnx_model_dir": "res/tts/lty_custom_onnx_model",
@@ -111,6 +124,19 @@
             "retriever_type": "memory"
         },
         "user_profile": {
+            "llm_module": {
+                "llm": {
+                    "api_type": "openai",
+                    "model": "qwen3.5-plus",
+                    "api_key": "$QWEN_API_KEY",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+                },
+                "prompt_name": "user_profile_update_prompt"
+            }
+        },
+        "memory_searcher": {
+            "max_k_graph_entities": 3,
+            "max_k_vector_entities": 5,
             "llm_module": {
                 "llm": {
                     "api_type": "openai",
@@ -326,5 +352,8 @@
         },
         "official_accounts": {}
         
+            "concert_pre_start_minutes": 30,
+            "concert_post_end_minutes": 60
+        }
     }
 }

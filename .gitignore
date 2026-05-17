@@ -14,6 +14,9 @@ venv/
 server/songlearner/res/msst/pretrain/
 server/songlearner/outputs/
 
+# Encryption key (auto-generated per instance)
+server/config/encryption.key
+
 # OS
 Thumbs.db
 .DS_Store

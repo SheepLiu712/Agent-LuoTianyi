@@ -3,6 +3,8 @@
 **日期**: 2026-05-15 (更新)
 **原审日期**: 2026-05-05
 **范围**: 全代码库（server + client + app）
+**日期**: 2026-05-05
+**范围**: 全代码库（server + client）
 **方法**: 静态代码审查
 
 ---
@@ -155,3 +157,5 @@ logger.info(f"Register request: {req.username} with code {req.invite_code}")
 | XSS/前端注入 | 纯桌面 Qt 应用/React Native，无渲染用户 HTML 的场景 |
 | 速率限制缺失 | 已排除（DoS/速率限制不在本次审计范围内） |
 | 重置账号越权 | `/auth/reset_account` 需要 invite_code 且仅能重置其关联的账号，无法越权访问其他用户的账号 |
+| XSS/前端注入 | 纯桌面 Qt 应用，无渲染用户 HTML 的场景 |
+| 速率限制缺失 | 已排除（DoS/速率限制不在本次审计范围内） |

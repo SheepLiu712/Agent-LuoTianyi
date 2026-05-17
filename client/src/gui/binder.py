@@ -36,6 +36,8 @@ class AgentBinder(QObject):
         send_proactive_text_callback: Callable[[str], str] | None = None,
         send_preferences_callback: Callable[[dict], None] | None = None,
         set_base_url_callback: Callable[[str, bool], None] | None = None,
+        send_proactive_text_callback: Callable[[str], str] | None = None,
+        send_preferences_callback: Callable[[dict], None] | None = None,
     ):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
@@ -214,6 +216,10 @@ class AgentBinder(QObject):
         self.logger.error("Reset account callback not set")
         return False, "重置账号回调未设置"
 
+    def on_send_preferences(self, preferences: dict):
+        """将用户偏好设置发送到服务端保存。"""
+        if self.send_preferences_callback:
+            self.send_preferences_callback(preferences)
     def _scheduled_start_thinking(self):
         """Legacy hook kept for compatibility; thinking bubble is no longer auto-driven."""
         return

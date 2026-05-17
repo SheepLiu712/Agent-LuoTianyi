@@ -16,6 +16,7 @@ if current_dir not in sys.path:
 
 import src.database as database
 from src.interface import account
+from src.utils.config_encryption import encrypt_sensitive_fields
 from src.interface.types import (
     RegisterRequest,
     LoginRequest,
@@ -90,6 +91,18 @@ async def startup_event(app: FastAPI):
     service_hub.gcsm.register_activity_maker(service_hub.activity_maker)  # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
     service_hub.global_speaking_worker.set_agent(get_luotianyi_agent())  # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
     service_hub.schedule_manager.set_gcsm_ref(service_hub.gcsm)  # 将 ServiceHub 的引用传递给 ScheduleManager，方便它在需要时调用其他服务的接口
+    # 初始化日程管理器
+    schedule_mgr = ScheduleManager(
+        config=config.get("schedule", {}),
+        service_hub_ref=service_hub,
+    )
+    service_hub.schedule_manager = schedule_mgr
+    schedule_mgr.start()
+
+    service_hub.activity_maker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
+    service_hub.activity_maker.set_service_hub(service_hub) # 将ServiceHub引用传递给ActivityMaker，用于演唱会静默期检查
+    service_hub.gcsm.register_activity_maker(service_hub.activity_maker) # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
+    service_hub.global_speaking_worker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
 
     # 启动聊天流过期清理后台任务
     service_hub.gcsm.start_cleanup_task(expiration_seconds=360)
@@ -104,6 +117,9 @@ async def startup_event(app: FastAPI):
         citywalk_service = CitywalkRuntimeService(config["citywalk"], vector_store=database.get_vector_store()),
         song_learner = service_hub.agent.music_manager.auto_song_learner,
     )
+    citywalk_runtime = CitywalkRuntimeService(config_path="config/config.json", vector_store=database.get_vector_store())
+    song_learner = AutoSongLearner(config={"resource_path": "res/music", "songlearner_dir": "songlearner"})
+    daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime, song_learner=song_learner)
     daily_scheduler.start()
 
     # 账号系统初始化
@@ -163,6 +179,23 @@ async def chat_ws(
                 preferences = event.payload if isinstance(event.payload, dict) else {}
                 if ws_connection.user_uuid and preferences:
                     service_hub.agent.save_preferences(ws_connection.user_uuid, preferences)
+                if ws_connection.user_uuid:
+                    try:
+                        db = get_sql_session()
+                        try:
+                            user = db.query(database.User).filter(database.User.uuid == ws_connection.user_uuid).first()
+                            if user:
+                                # 加密偏好中的敏感字段（api_key, default_headers）后再存储
+                                encrypted = preferences.copy()
+                                if "llm_endpoint" in encrypted and isinstance(encrypted["llm_endpoint"], dict):
+                                    encrypted["llm_endpoint"] = encrypt_sensitive_fields(encrypted["llm_endpoint"])
+                                user.preferences = json.dumps(encrypted, ensure_ascii=False)
+                                db.commit()
+                                logger.info(f"Saved preferences for user {ws_connection.user_name}")
+                        finally:
+                            db.close()
+                    except Exception as e:
+                        logger.error(f"Failed to save preferences: {e}")
                 continue
 
             chat_event = websocket_service.convert_to_chat_input_event(event)
@@ -346,6 +379,35 @@ async def get_history(
 
 
 
+@app.get("/affection/info")
+async def get_affection_info(
+    username: str,
+    token: str,
+    db: Session = Depends(database.get_sql_db),
+    agent: LuoTianyiAgent = Depends(get_agent_service),
+):
+    """获取用户好感度信息"""
+    message_token_valid, user_uuid = account.check_message_token(db, username, token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+
+    score = agent.affection_manager.get_score(db, user_uuid)
+    level_cn, level_en = agent.affection_manager.get_level(score)
+    next_level = agent.affection_manager.get_next_level_info(score)
+    today_net = agent.affection_manager.get_today_net(db, user_uuid)
+
+    result = {
+        "score": score,
+        "level_cn": level_cn,
+        "level_en": level_en,
+        "today_net": today_net,
+    }
+    if next_level:
+        result["next_level_cn"] = next_level[0]
+        result["next_level_en"] = next_level[1]
+        result["next_level_remaining"] = next_level[2]
+
+    return result
 
 
 @app.post("/get_image")

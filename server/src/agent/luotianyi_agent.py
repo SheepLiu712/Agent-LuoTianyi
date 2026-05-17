@@ -16,10 +16,13 @@ from uuid import uuid4
 
 from ..utils.llm.prompt_manager import PromptManager
 from .date_processor import DateDetector
+from ..utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
+from ..utils.config_encryption import decrypt_sensitive_fields
 from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentChat
 from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
+from .affection_manager import AffectionManager
 from ..types.conversation_type import ConversationItem
 from ..utils.logger import get_logger
 from ..tts import TTSModule
@@ -86,13 +89,24 @@ class LuoTianyiAgent:
         self.music_manager = runtime_hub.music_manager
         self.prompt_manager = PromptManager(self.config.get("prompt_manager", {}))  # 提示管理器
 
+        # LLM 客户端缓存：user_id -> (config_hash, LLMAPIInterface)
+        # 用于按用户隔离自定义端点时的客户端复用，避免每次回复都重新创建
+        self._llm_client_cache: Dict[str, Tuple[str, LLMAPIInterface]] = {}
+
         # 各种模块初始化
         self.conversation_manager = ConversationManager(
             self.config.get("conversation_manager", {}), self.prompt_manager
         )  # 对话管理器
         self.memory_manager = MemoryManager(self.config["memory_manager"], self.prompt_manager)  # 记忆管理器
+        self.singing_manager = SingingManager(config={"resource_path": self.config.get("resource_path", "res/music")})  # 唱歌管理器
+        memory_config = self.config.get("memory_manager", {})
+        self.memory_manager = MemoryManager(memory_config, self.prompt_manager, self.singing_manager)  # 记忆管理器
 
         self.tts_engine = tts_module  # TTS模块
+        affection_llm_config = self.config.get("affection_manager", {}).get("llm") or (
+            self.config.get("main_chat", {}).get("llm_module", {}).get("llm", {})
+        )
+        self.affection_manager = AffectionManager(affection_llm_config)
         self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
         self.topic_extractor = TopicExtractor(self.config["topic_extractor"],self.prompt_manager,)
         self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
@@ -294,6 +308,7 @@ class LuoTianyiAgent:
         """供 TopicReplier 调用：按话题生成分段回复。"""
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
+        llm_client_override: Optional[LLMAPIInterface] = None
         try:
             if conversation_history is None:
                 conversation_history = await self.conversation_manager.get_context(db, redis_client, user_id)
@@ -302,6 +317,7 @@ class LuoTianyiAgent:
             user_description = user.description if user and user.description else ""
             # 注入表达风格偏好（独立段，不混入 user_description）
             pref_context = ""
+            # 注入用户偏好（关系类型、表达风格等）+ 自定义 LLM 端点
             if user and user.preferences:
                 try:
                     prefs = json.loads(user.preferences) if isinstance(user.preferences, str) else user.preferences
@@ -319,6 +335,47 @@ class LuoTianyiAgent:
                         pref_context = "用户偏好设置：" + "；".join(pref_parts)
                 except Exception as e:
                     self.logger.warning(f"Failed to parse preferences: {e}")
+                        pref_context = "（用户偏好设置：" + "；".join(pref_parts) + "）"
+                        user_description = (user_description + "\n" + pref_context).strip()
+
+                    # 读取用户自定义 LLM 端点配置，按用户隔离
+                    llm_endpoint = prefs.get("llm_endpoint")
+                    if llm_endpoint and isinstance(llm_endpoint, dict) and llm_endpoint.get("base_url"):
+                        try:
+                            # 解密敏感字段
+                            llm_endpoint = decrypt_sensitive_fields(llm_endpoint)
+                            llm_endpoint["api_type"] = llm_endpoint.get("api_type", "custom")
+
+                            # 计算配置哈希，用于缓存比较
+                            import hashlib
+                            config_json = json.dumps(llm_endpoint, sort_keys=True, ensure_ascii=False)
+                            config_hash = hashlib.sha256(config_json.encode()).hexdigest()
+
+                            # 检查缓存：同一用户且配置未变则复用已有客户端
+                            cached = self._llm_client_cache.get(user_id)
+                            if cached and cached[0] == config_hash:
+                                llm_client_override = cached[1]
+                                self.logger.debug(f"用户 {user_id} 复用缓存的 LLM 客户端")
+                            else:
+                                llm_client_override = LLMAPIFactory.create_interface(llm_endpoint)
+                                self._llm_client_cache[user_id] = (config_hash, llm_client_override)
+                                self.logger.info(
+                                    f"用户 {user_id} 使用自定义 LLM 端点: "
+                                    f"{llm_endpoint.get('base_url')} / {llm_endpoint.get('model', 'default')}"
+                                )
+                        except Exception as e:
+                            self.logger.warning(
+                                f"用户 {user_id} 自定义 LLM 端点创建失败，将使用服务端默认配置: {e}"
+                            )
+                except Exception as e:
+                    self.logger.warning(f"Failed to parse preferences: {e}")
+            # 注入好感度上下文
+            try:
+                affection_ctx = self.affection_manager.get_affection_context(db, user_id)
+                if affection_ctx:
+                    user_description = (user_description + "\n" + affection_ctx).strip()
+            except Exception as e:
+                self.logger.warning(f"Failed to get affection context: {e}")
         finally:
             db.close()
 
@@ -331,6 +388,7 @@ class LuoTianyiAgent:
             fact_hits=fact_hits or [],
             memory_hits=memory_hits or [],
             sing_plan=sing_plan,
+            llm_client_override=llm_client_override,
         )
 
     async def write_topic_memories_for_pipeline(
@@ -548,6 +606,23 @@ class LuoTianyiAgent:
             type=conversation_type,
             data=payload,
         )
+
+        # 由 LLM 分析用户消息并调整好感度
+        try:
+            db = self._runtime_hub.open_sql_session()
+            try:
+                current_score = self.affection_manager.get_score(db, user_uuid)
+                delta, reason = await self.affection_manager.analyze_affection(
+                    content, current_score
+                )
+                if delta != 0:
+                    self.affection_manager.add_affection(
+                        db, user_uuid, delta, f"LLM分析: {reason}"
+                    )
+            finally:
+                db.close()
+        except Exception as e:
+            self.logger.warning(f"Failed to analyze affection: {e}")
 
     async def handle_history_request(self, user_id: str, count: int, end_index: int) -> Dict[str, Any]:
         """处理历史记录请求

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import React from 'react';
 import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';

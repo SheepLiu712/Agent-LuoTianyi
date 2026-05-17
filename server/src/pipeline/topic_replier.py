@@ -80,6 +80,9 @@ class TopicReplier:
         topic_content = topic.topic_content
         if self.service_hub.schedule_manager:
             raise RuntimeError("Schedule manager should not be set for topic replier, check the initialization logic")
+        # 注入活动上下文（近期演唱会/联动等信息）
+        topic_content = topic.topic_content
+        if self.service_hub.schedule_manager:
             try:
                 activity_ctx = self.service_hub.schedule_manager.get_active_context(self.user_id)
                 if activity_ctx:

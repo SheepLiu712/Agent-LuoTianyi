@@ -48,6 +48,17 @@ async def ingress_message(service_hub: "ServiceHub", user_id: str, message: "Cha
     if song_entities:
         logger.debug(f"Extracted song entities from user input: {song_entities}")
         message.payload["terms"] = song_entities
+    
+    # 检测重要日期
+    try:
+        if service_hub.agent and hasattr(service_hub.agent, 'main_chat') and service_hub.agent.main_chat:
+            llm_module = service_hub.agent.main_chat.llm
+            date_info = await extract_date_entities(message.text, llm_module)
+            if date_info:
+                logger.info(f"检测到重要日期: {date_info}")
+                message.payload["detected_date"] = date_info
+    except Exception as e:
+        logger.error(f"日期检测失败: {e}")
 
 
 async def _process_image_message(service_hub: "ServiceHub", user_id: str, message: "ChatInputEvent"):
