@@ -57,8 +57,17 @@ async def startup_event(app: FastAPI):
     # 数据库初始化
     database_config: Dict = config.get("database", {})
     database.init_all_databases(database_config)
-
-    # TTS 模块初始化，启动TTS服务器进程
+    # 预写入常见节假日
+    try:
+        sql_db = database.get_sql_session()
+        try:
+            database.seed_holidays(sql_db)
+        finally:
+            sql_db.close()
+    except Exception as e:
+        logger.warning(f"写入节假日失败: {e}")
+    song_db_config: Dict = config.get("knowledge", {}).get("song_database", {})
+    init_song_db(song_db_config)    # TTS 模块初始化，启动TTS服务器进程
     tts_config = config.get("tts", {})
     tts_module: TTSModule = init_tts_module(tts_config)
 
@@ -79,18 +88,21 @@ async def startup_event(app: FastAPI):
         global_speaking_worker=get_global_speaking_worker(),
         agent=get_luotianyi_agent(),
         activity_maker=init_activity_maker(config.get("activity_maker", {})),
-        schedule_manager=ScheduleManager(
-            config=config.get("schedule", {}),
-        )
+        important_date_session_factory=get_sql_session,
     )
 
-    # 在service_hub内相互传递依赖实例
-    service_hub.activity_maker.set_agent(get_luotianyi_agent())  # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
-    service_hub.activity_maker.set_service_hub(service_hub)  # 将ServiceHub引用传递给ActivityMaker，用于演唱会静默期检查
-    service_hub.gcsm.register_activity_maker(service_hub.activity_maker)  # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
-    service_hub.global_speaking_worker.set_agent(get_luotianyi_agent())  # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
-    service_hub.schedule_manager.set_gcsm_ref(service_hub.gcsm)  # 将 ServiceHub 的引用传递给 ScheduleManager，方便它在需要时调用其他服务的接口
+    # 初始化日程管理器
+    schedule_mgr = ScheduleManager(
+        config=config.get("schedule", {}),
+        service_hub_ref=service_hub,
+    )
+    service_hub.schedule_manager = schedule_mgr
+    schedule_mgr.start()
 
+    service_hub.activity_maker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
+    service_hub.activity_maker.set_service_hub(service_hub) # 将ServiceHub引用传递给ActivityMaker，用于演唱会静默期检查
+    service_hub.gcsm.register_activity_maker(service_hub.activity_maker) # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
+    service_hub.global_speaking_worker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
     # 启动聊天流过期清理后台任务
     service_hub.gcsm.start_cleanup_task(expiration_seconds=360)
     service_hub.global_speaking_worker.start_if_needed()
@@ -99,12 +111,32 @@ async def startup_event(app: FastAPI):
     
     # 构建日常调度器
     global daily_scheduler
-    daily_scheduler = DailyScheduler(
-        song_knowledge_config = config["music"]["song_knowledge"],
-        citywalk_service = CitywalkRuntimeService(config["citywalk"], vector_store=database.get_vector_store()),
-        song_learner = service_hub.agent.music_manager.auto_song_learner,
-    )
-    daily_scheduler.start()
+    citywalk_runtime = CitywalkRuntimeService(config_path="config/config.json", vector_store=database.get_vector_store())
+    song_learner = AutoSongLearner(config={"resource_path": "res/music", "songlearner_dir": "songlearner"})
+
+    # 创建 ImportantDate 回调：将旅游/学歌事件写入数据库（MM-DD 格式，每年周年匹配）
+    def _important_date_callback(info: dict) -> None:
+        from datetime import date
+        try:
+            db = database.get_sql_session()
+            try:
+                today_str = date.today().strftime("%m-%d")
+                database.add_or_update_date(
+                    db=db, user_id=info.get("user_id"),
+                    name=info["name"], date_type=info["date_type"],
+                    date_str=today_str, is_lunar=False, is_recurring=True,
+                    description=info.get("description", ""),
+                )
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"创建 ImportantDate 失败: {e}")
+
+    auto_dreamer_ref = get_luotianyi_agent()
+
+    daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime, song_learner=song_learner,
+                                      important_date_callback=_important_date_callback,
+                                      auto_dreamer=auto_dreamer_ref)    daily_scheduler.start()
 
     # 账号系统初始化
     account.generate_keys()
@@ -161,9 +193,19 @@ async def chat_ws(
             if event.event_type == WSEventType.USER_PREFERENCE_SYNC.value:
                 await websocket_service.send_ack_event(ws_connection, event)
                 preferences = event.payload if isinstance(event.payload, dict) else {}
-                if ws_connection.user_uuid and preferences:
-                    service_hub.agent.save_preferences(ws_connection.user_uuid, preferences)
-                continue
+                if ws_connection.user_uuid:
+                    try:
+                        db = get_sql_session()
+                        try:
+                            user = db.query(database.User).filter(database.User.uuid == ws_connection.user_uuid).first()
+                            if user:
+                                user.preferences = json.dumps(preferences, ensure_ascii=False)
+                                db.commit()
+                                logger.info(f"Saved preferences for user {ws_connection.user_name}: {preferences}")
+                        finally:
+                            db.close()
+                    except Exception as e:
+                        logger.error(f"Failed to save preferences: {e}")                continue
 
             chat_event = websocket_service.convert_to_chat_input_event(event)
             if chat_event is None:
@@ -319,15 +361,40 @@ async def overwrite_preference(
     message_token_valid, user_uuid = account.check_message_token(db, req.username, req.token)
     if not message_token_valid:
         raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-    
+
     user = db.query(database.User).filter_by(uuid=user_uuid).first()
     if not user:
         raise HTTPException(status_code=404, detail="未找到该用户")
-    
+
     user.preferences = json.dumps(req.preferences, ensure_ascii=False)
     db.commit()
     return {"status": "success", "message": "Preferences overwritten successfully"}
-    
+
+
+@app.get("/important_dates/today")
+async def get_today_important_dates(
+    username: str,
+    token: str,
+    db: Session = Depends(database.get_sql_db),
+):
+    """获取用户今天的重要日期列表（生日、节假日等）。"""
+    message_token_valid, user_uuid = account.check_message_token(db, username, token)
+    if not message_token_valid:
+        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+
+    dates = database.get_today_important_dates(db, user_uuid)
+    return {
+        "dates": [
+            {
+                "id": d.id,
+                "name": d.name,
+                "date_type": d.date_type,
+                "description": d.description,
+                "is_recurring": d.is_recurring,
+            }
+            for d in dates
+        ]
+    }
 
 
 @app.get("/history")

@@ -12,7 +12,8 @@ from typing import Tuple, Dict, List, Any
 from ..database.database_service import VectorStore
 import asyncio
 import time
-
+import re
+from ..plugins.music.singing_manager import SingingManager
 from sqlalchemy.orm import Session
 
 # Citywalk search cache: data changes at most daily, 1h TTL is safe
@@ -58,19 +59,26 @@ class MemorySearcher:
                 if score < score_threshold:
                     continue
                 timestamp = ""
-                if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
+                meta = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
+                if isinstance(meta, dict):
                     for key in timestamp_keys or ["timestamp"]:
-                        timestamp = str(doc.metadata.get(key) or "").strip()
+                        timestamp = str(meta.get(key) or "").strip()
                         if timestamp:
                             break
-                content = doc.get_content().strip() if hasattr(doc, "get_content") else ""
+                # Multi-key: use metadata.value (actual memory fact) rather than content (search key)
+                content = (meta.get("value", "") if isinstance(meta, dict) else "").strip()
+                if not content:
+                    content = doc.get_content().strip() if hasattr(doc, "get_content") else ""
                 if not content:
                     continue
                 rendered = f"在{timestamp}, {content}" if timestamp else content
                 if prefix:
                     rendered = f"{prefix} {rendered}"
-                doc_id = str(getattr(doc, "id", "") or rendered)
-                hits.append((score, doc_id, rendered))
+                # Dedup by value_id so multiple key-docs for same memory collapse to one
+                value_id = str(meta.get("value_id", "") if isinstance(meta, dict) else "").strip()
+                if not value_id:
+                    value_id = str(getattr(doc, "id", "") or rendered)
+                hits.append((score, value_id, rendered))
             return hits
 
         scored_hits: List[Tuple[float, str, str]] = []
@@ -132,16 +140,14 @@ class MemorySearcher:
         if not scored_hits:
             return []
 
-        # 先按分数降序，再按 doc_id 去重。
+        # 先按分数降序，再按 value_id 去重（多Key共享同一 value_id）。
         scored_hits.sort(key=lambda x: x[0], reverse=True)
         dedup: List[str] = []
-        seen_doc_ids = set()
-        seen_text = set()
-        for _, doc_id, text in scored_hits:
-            if doc_id in seen_doc_ids or text in seen_text:
+        seen_value_ids = set()
+        for _, value_id, text in scored_hits:
+            if value_id in seen_value_ids:
                 continue
-            seen_doc_ids.add(doc_id)
-            seen_text.add(text)
+            seen_value_ids.add(value_id)
             dedup.append(text)
             if len(dedup) >= k:
                 break

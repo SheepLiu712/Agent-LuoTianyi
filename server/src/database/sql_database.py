@@ -102,18 +102,27 @@ class AffectionLog(Base):
 
 
 class ImportantDate(Base):
-    """用户重要日期记录"""
+    """统一事件数据库表
+
+    保存所有事件：用户生日/纪念日、节假日、洛天依活动/动态、旅游、学歌等。
+    user_id 为 None 表示全局事件（如节假日、洛天依官方活动）。
+    """
     __tablename__ = "important_dates"
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(String, nullable=False, index=True)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.uuid"), nullable=True, index=True)
     name = Column(String, nullable=False)
-    date_type = Column(String, nullable=False)       # 生日/纪念日/节日/其他
-    date_mmdd = Column(String, nullable=False)        # MM-DD
+    date_type = Column(String, nullable=False)  # 生日、纪念日、节日、活动、学歌、旅游、其他
+    date_str = Column(String, nullable=False, index=True)  # 格式: YYYY-MM-DD 或 MM-DD（周期性）
+    is_lunar = Column(Boolean, default=False)  # True=农历, False=公历
+    is_recurring = Column(Boolean, default=False)  # 是否每年重复
+    duration_minutes = Column(Integer, nullable=True)  # 持续时间（分钟），null=瞬间
     description = Column(Text, default="")
+    reminder_advance = Column(String, default="0")  # 触发提前量，如 "1d" "1h" "3d"
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
+    user = relationship("User", backref="important_dates")
 
 # Database URL
 SessionLocal = None

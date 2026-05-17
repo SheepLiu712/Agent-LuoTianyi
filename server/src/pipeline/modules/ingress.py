@@ -5,7 +5,7 @@ from ...agent.jargon_retriver import extract_song_entities
 from ..chat_events import ChatInputEvent, ChatInputEventType
 from ...utils.llm.llm_module import LLMModule
 from ...utils.llm.prompt_manager import PromptManager
-import json
+from ...database import add_or_update_date, get_sql_sessionimport json
 import asyncio
 
 if TYPE_CHECKING:
@@ -48,6 +48,19 @@ async def ingress_message(service_hub: "ServiceHub", user_id: str, message: "Cha
     if song_entities:
         logger.debug(f"Extracted song entities from user input: {song_entities}")
         message.payload["terms"] = song_entities
+    
+    # 检测重要日期
+    try:
+        if service_hub.agent and hasattr(service_hub.agent, 'main_chat') and service_hub.agent.main_chat:
+            llm_module = service_hub.agent.main_chat.llm
+            date_info = await extract_date_entities(message.text, llm_module)
+            if date_info:
+                logger.info(f"检测到重要日期: {date_info}")
+                message.payload["detected_date"] = date_info
+                # 将检测到的日期保存到数据库
+                await _save_detected_date(service_hub, user_id, date_info)
+    except Exception as e:
+        logger.error(f"日期检测失败: {e}")
 
 
 async def _process_image_message(service_hub: "ServiceHub", user_id: str, message: "ChatInputEvent"):
@@ -76,7 +89,6 @@ async def _process_image_message(service_hub: "ServiceHub", user_id: str, messag
     image_description = f"[一张图片]:{image_description}"
     message.text = image_description  # 将描述文本放入message.text，供后续处理使用
     payload["image_server_path"] = image_server_path
-    
 async def extract_date_entities(user_input: str, llm_module) -> Optional[dict]:
     """
     使用LLM从用户输入中提取重要日期信息。
@@ -133,3 +145,37 @@ async def extract_date_entities(user_input: str, llm_module) -> Optional[dict]:
     except Exception as e:
         logger.error(f"提取日期实体时出错: {e}")
         return None
+
+
+async def _save_detected_date(service_hub: "ServiceHub", user_id: str, date_info: dict):
+    """将检测到的重要日期保存到数据库。"""
+    name = date_info.get("name", "").strip()
+    date_type = date_info.get("type", "其他")
+    date_str = date_info.get("date", "").strip()
+
+    if not name or not date_str:
+        return
+
+    is_recurring = len(date_str) <= 5
+    if is_recurring and date_type in ("生日", "纪念日"):
+        from datetime import date
+        date_str = f"{date.today().year}-{date_str}"
+
+    try:
+        db = get_sql_session()
+        try:
+            add_or_update_date(
+                db=db,
+                user_id=user_id,
+                name=name,
+                date_type=date_type,
+                date_str=date_str,
+                is_lunar=False,
+                is_recurring=is_recurring,
+                description=date_info.get("description", ""),
+            )
+            logger.info(f"已保存重要日期到数据库: {name} ({date_type}) -> {date_str}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"保存重要日期到数据库失败: {e}")

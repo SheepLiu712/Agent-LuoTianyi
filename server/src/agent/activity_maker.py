@@ -278,31 +278,39 @@ class ActivityMaker:
                     )
                 )
 
-            # 4) 检查用户今天的重要日期
-            try:
-                from .date_processor import get_today_important_dates
+            # 4) 查询 ImportantDate 中用户个人的生日/纪念日
+            if self.service_hub and self.service_hub.important_date_session_factory:
+                try:
+                    from src.database import get_today_important_dates
+                    db = self.service_hub.important_date_session_factory()
+                    try:
+                        today_dates = get_today_important_dates(db, user_uuid)
+                        for d in today_dates:
+                            if d.user_id != user_uuid:
+                                continue
+                            if d.date_type not in ('生日', '纪念日'):
+                                continue
+                            # 跳过当天创建的事件（防止旅游/学歌等刚创建就触发）
+                            if d.created_at and d.created_at.date() == datetime.now().date():
+                                continue
+                            topics_to_add.append(
+                                ExtractedTopic(
+                                    topic_id=str(uuid4()),
+                                    source_messages=[],
+                                    topic_content=f"今天是{d.name}，分享一些温馨的祝福或回忆",
+                                    memory_attempts=[],
+                                    fact_constraints=[],
+                                    sing_attempts=[],
+                                    is_forced_from_incomplete=True,
+                                )
+                            )
+                    finally:
+                        db.close()
+                except Exception as e:
+                    self.logger.warning(f"ImportantDate query failed in REGULAR_LOGIN: {e}")
 
-                upcoming_dates = get_today_important_dates(self.agent._runtime_hub.open_sql_session, user_uuid)
-                for d in upcoming_dates:
-                    topics_to_add.append(
-                        ExtractedTopic(
-                            topic_id=str(uuid4()),
-                            source_messages=[],
-                            topic_content=(f"今天是{d['name']}！问用户有没有什么安排或计划，并送上祝福。"),
-                            memory_attempts=[],
-                            fact_constraints=[],
-                            sing_attempts=[],
-                            is_forced_from_incomplete=True,
-                        )
-                    )
-            except Exception as e:
-                self.logger.warning(f"Failed to check upcoming important dates: {e}")
-
-            # 合并所有话题为单一 ExtractedTopic
-            merged = self._merge_topics(topics_to_add)
-            if merged:
-                await chat_stream.topic_replier.add_topic(merged)
-            return
+            for t in topics_to_add:
+                await chat_stream.topic_replier.add_topic(t)            return
 
         self.logger.warning(f"Unsupported action type: {action.activity_type}")
 
@@ -460,14 +468,11 @@ class ActivityMaker:
             text = texts[idx] if idx < len(texts) else ""
             audio_path = audio_paths[idx] if idx < len(audio_paths) else ""
             # Store path only; read file lazily when dispatched
-            self.first_login_res.append(
-                {
-                    "text": text,
-                    "audio_path": audio_path,
-                    "response_line": OneSentenceChat(content=text, tone="neutral", expression="normal"),
-                }
-            )
-
+            self.first_login_res.append({
+                "text": text,
+                "audio_path": audio_path,
+                "response_line": OneSentenceChat(content=text, tone="neutral", expression="normal"),
+            })
     def _load_audio_b64(self, audio_path: str) -> str:
         """Lazy-load audio file as base64."""
         if not audio_path:
@@ -494,10 +499,7 @@ class ActivityMaker:
             if not prompt_name:  # 这个活动类型没有配置prompt资源，不用调用llm
                 continue
             if prompt_manager.get_template(prompt_name) is None:
-                self.logger.warning(
-                    f"Prompt '{prompt_name}' for activity type '{activity_type}' not found in prompt manager, skipping"
-                )
-                continue
+                self.logger.warning(f"Prompt '{prompt_name}' for activity type '{activity_type}' not found in prompt manager, skipping")                continue
 
     async def _build_topic(self, action: ActionActivity, user_uuid: str) -> ExtractedTopic:
         fallback_topic = ExtractedTopic(

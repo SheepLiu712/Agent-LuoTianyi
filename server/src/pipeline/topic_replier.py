@@ -74,13 +74,9 @@ class TopicReplier:
         finally:
             db.close()
 
-        # 它不用等到回复完成就能检测日期，因此把日期检测放在这里，和回复workflow并行
-        asyncio.create_task(self._process_date_detection(topic, conversation_history=conversation_history))
-
+        # 注入活动上下文（近期演唱会/联动等信息）
         topic_content = topic.topic_content
-        if self.service_hub.schedule_manager:
-            raise RuntimeError("Schedule manager should not be set for topic replier, check the initialization logic")
-            try:
+        if self.service_hub.schedule_manager:            try:
                 activity_ctx = self.service_hub.schedule_manager.get_active_context(self.user_id)
                 if activity_ctx:
                     topic_content = f"{topic_content}\n\n{activity_ctx}"
@@ -88,6 +84,35 @@ class TopicReplier:
             except Exception as e:
                 self.logger.warning(f"Failed to get activity context: {e}")
 
+        # 注入 ImportantDate 周年回忆（旅游/学歌等）
+        if self.service_hub.important_date_session_factory:
+            try:
+                from src.database import get_today_important_dates
+                from datetime import date
+                db = self.service_hub.important_date_session_factory()
+                try:
+                    today_dates = get_today_important_dates(db, self.user_id)
+                    if today_dates:
+                        lines = []
+                        for d in today_dates:
+                            if d.date_type not in ('旅游', '学歌'):
+                                continue
+                            # 跳过当天创建的事件
+                            created_date = d.created_at.date() if d.created_at else None
+                            if created_date and created_date == date.today():
+                                continue
+                            if d.date_type == '旅游':
+                                lines.append(f"去年的今天，{d.name}")
+                            elif d.date_type == '学歌':
+                                lines.append(f"去年的今天，{d.name}")
+                        if lines:
+                            anniversary_ctx = "[回忆参考]\n" + "\n".join(lines)
+                            topic_content = f"{topic_content}\n\n{anniversary_ctx}"
+                            self.logger.info(f"Injected anniversary context for user {self.user_id}")
+                finally:
+                    db.close()
+            except Exception as e:
+                self.logger.warning(f"Failed to get important date context: {e}")
         memory_task = asyncio.create_task(self._memory_search(topic.memory_attempts or []))
         fact_task = asyncio.create_task(self._fact_search(topic.fact_constraints or []))
         sing_task = asyncio.create_task(self._sing_plan(topic.sing_attempts or []))
@@ -250,56 +275,6 @@ class TopicReplier:
             )
         except Exception as e:
             self.logger.warning(f"Topic memory write task failed: {e}")
-
-        
-
-    async def _process_date_detection(self, topic: "ExtractedTopic", conversation_history: Optional[str] = None) -> None:
-        """从话题的源消息中检测重要日期，按置信度处理。"""
-        if self.service_hub is None or self.service_hub.agent is None:
-            return
-
-        # 获取 source_messages 中的最新用户文本
-        user_texts = []
-        for msg in getattr(topic, "source_messages", []) or []:
-            content = getattr(msg, "content", "") or ""
-            if content.strip():
-                user_texts.append(content.strip())
-        if not user_texts:
-            return
-
-        # 检查 agent 是否已初始化 date_detector
-        agent = self.service_hub.agent
-        if not hasattr(agent, 'date_detector') or agent.date_detector is None:
-            return
-
-        date_info = await agent.date_detector.detect('\n'.join(user_texts), conversation_history=conversation_history or "")
-        if date_info is None:
-            return
-
-        self.logger.debug(f"DateDetector: {date_info}")
-
-        # 按置信度处理
-        from ..agent.date_processor import process_detected_date
-        result = await process_detected_date(
-            date_info=date_info,
-            user_id=self.user_id,
-            open_sql_session=agent._runtime_hub.open_sql_session,
-            reply_topic_callback=lambda t: self._safe_add_topic(t),
-        )
-
-        if result is True:
-            self.logger.info(f"Date auto-saved from topic {topic.topic_id}")
-        elif result is False:
-            self.logger.debug(f"Date discarded from topic {topic.topic_id}")
-        else:
-            self.logger.info(f"Date confirmation topic created from topic {topic.topic_id}")
-
-    def _safe_add_topic(self, topic: "ExtractedTopic") -> None:
-        """线程安全地添加话题到队列。"""
-        try:
-            asyncio.create_task(self.add_topic(topic))
-        except Exception as e:
-            self.logger.warning(f"Failed to add confirmation topic: {e}")
 
     async def _schedule_profile_context_update(
         self

@@ -15,9 +15,8 @@ class CitywalkRuntimeService:
         self.config = config
         self.vector_store = vector_store
 
-    def run_once(self) -> Optional[str]:
-        cfg = load_citywalk_config(self.config)
-        client = AMapClient(cfg)
+    def run_once(self) -> Optional[tuple[str, str, str]]:
+        cfg = load_citywalk_config(self.config_path)        client = AMapClient(cfg)
         runner = CitywalkSessionRunner(cfg, client)
 
         result = runner.run()
@@ -31,4 +30,4 @@ class CitywalkRuntimeService:
         ingestor = CitywalkMemoryIngestor(cfg, self.vector_store)
         count = ingestor.ingest_session(result)
         self.logger.info("城市漫步完成, 事件数=%s, 记忆写入=%s, 报告=%s", len(result.events), count, output_path)
-        return output_path
+        return (output_path, result.city, result.selected_destination)

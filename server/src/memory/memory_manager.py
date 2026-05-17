@@ -17,6 +17,7 @@ from .user_profile_updater import UserProfileUpdater
 from ..utils.llm.prompt_manager import PromptManager
 from ..database import VectorStore, KnowledgeGraph
 from ..database.database_service import get_user_nickname, get_user_description, update_user_description
+from .auto_dreamer import AutoDreamer
 
 class MemoryManager:
     def __init__(
@@ -37,6 +38,10 @@ class MemoryManager:
         self.memory_searcher = MemorySearcher(config["memory_searcher"], prompt_manager)
         self.memory_writer = MemoryWriter(config["memory_writer"], prompt_manager)
         self.user_profile_updater = UserProfileUpdater(config["user_profile"], prompt_manager)
+        auto_dreamer_config = config.get("auto_dreamer")
+        self.auto_dreamer = (
+            AutoDreamer(auto_dreamer_config, prompt_manager) if auto_dreamer_config else None
+        )
 
     async def get_knowledge(
         self,
@@ -211,3 +216,10 @@ class MemoryManager:
             commit=commit,
         )
         return new_profile
+
+    async def run_auto_dreamer(self, vector_store: VectorStore) -> None:
+        """触发 Auto Dreamer 整理所有活跃用户的今日记忆。"""
+        if self.auto_dreamer is None:
+            self.logger.warning("AutoDreamer not configured, skipping")
+            return
+        await self.auto_dreamer.run_for_all_active_users(vector_store)

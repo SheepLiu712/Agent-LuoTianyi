@@ -80,6 +80,11 @@ class VectorStore(ABC):
         """删除指定用户的所有记录，返回删除的记录数"""
         pass
 
+    @abstractmethod
+    def get_documents(self, where: Dict[str, Any]) -> List[BaseDocument]:
+        """按 metadata 条件查询文档（不依赖向量相似度），用于 AutoDreamer 等批量操作。"""
+        pass
+
 
 import uuid
 import chromadb
@@ -289,7 +294,31 @@ class ChromaVectorStore(VectorStore):
         except Exception as e:
             self.logger.error(f"获取集合信息失败: {e}")
             return {}
-        
+
+    def get_documents(self, where: Dict[str, Any]) -> List[BaseDocument]:
+        """按 metadata 条件查询文档（不依赖向量相似度），用于 AutoDreamer 等批量操作。
+
+        Args:
+            where: ChromaDB where 过滤器，例如 {"user_id": "...", "timestamp": "2026-05-09"}
+
+        Returns:
+            匹配的文档列表
+        """
+        try:
+            results = self.collection.get(where=where)
+            docs = []
+            ids = results.get("ids", []) or []
+            documents = results.get("documents", []) or []
+            metadatas = results.get("metadatas", []) or []
+            for i in range(len(ids)):
+                if i < len(documents) and i < len(metadatas):
+                    doc = Document(documents[i], metadatas[i], id=ids[i])
+                    docs.append(doc)
+            return docs
+        except Exception as e:
+            self.logger.error(f"按条件查询文档失败: {e}")
+            return []
+
     def get_document_by_id(self, doc_ids: List[str]) -> List[BaseDocument]:
         """通过ID获取文档"""
         try:

@@ -6,6 +6,7 @@ from .memory_storage import MemoryStorage
 from .sql_writer import get_sql_writer, run_sql_write
 from .knowledge_graph import KnowledgeGraph, init_knowledge_graph, get_knowledge_graph
 from .database_service import init_all_databases, prefill_buffer
+from .important_date_service import add_or_update_date, get_user_dates, get_today_important_dates, get_upcoming_dates, delete_date, seed_holidays
 from ..utils.logger import get_logger
 from sqlalchemy.orm import Session
 

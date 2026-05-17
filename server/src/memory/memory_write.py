@@ -7,6 +7,7 @@ Memory Write Module
 
 import json
 from typing import List, Dict, Any
+from uuid import uuid4
 from ..utils.logger import get_logger
 from ..database.vector_store import VectorStore, Document
 from ..utils.llm.prompt_manager import PromptManager
@@ -54,29 +55,31 @@ class MemoryWriter:
         event_items = memory_payload.get("event_memory", [])
 
         if user_items:
-            # Single de-dup pass for all user memory items
-            seen_texts = await self._batch_check_user_memory_dups(
+            seen_values = await self._batch_check_user_memory_dups(
                 vector_store, user_id, user_items
             )
-            for content in user_items:
-                text = (content or "").strip()
-                if not text or text in seen_texts:
+            for entry in user_items:
+                value = (entry.get("value") or "").strip()
+                if not value or value in seen_values:
                     continue
-                seen_texts.add(text)
-                await self.write_user_memory(db, redis, vector_store, user_id, content, commit=commit)
+                seen_values.add(value)
+                await self.write_user_memory(db, redis, vector_store, user_id,
+                                              value=value, keys=entry.get("keys", [value]),
+                                              commit=commit)
 
         if event_items:
             today = time.strftime("%Y-%m-%d")
-            seen_texts = await self._batch_check_event_memory_dups(
+            seen_values = await self._batch_check_event_memory_dups(
                 vector_store, user_id, event_items, today
             )
-            for content in event_items:
-                text = (content or "").strip()
-                if not text or text in seen_texts:
+            for entry in event_items:
+                value = (entry.get("value") or "").strip()
+                if not value or value in seen_values:
                     continue
-                seen_texts.add(text)
-                await self.write_event_memory(db, redis, vector_store, user_id, content, commit=commit)
-
+                seen_values.add(value)
+                await self.write_event_memory(db, redis, vector_store, user_id,
+                                               value=value, keys=entry.get("keys", [value]),
+                                               commit=commit)
     async def _extract_knowledge(
         self,
         history: str,
@@ -111,8 +114,12 @@ class MemoryWriter:
             logger.warning(f"Error generating memory payload: {e}")
             return empty_payload
 
-    def _parse_memory_json_response(self, response: str) -> Dict[str, List[str]]:
-        """解析 LLM 返回的 JSON，兼容 ```json 代码块包装。"""
+    def _parse_memory_json_response(self, response: str) -> Dict[str, List[Dict[str, Any]]]:
+        """解析 LLM 返回的 JSON，兼容 ```json 代码块包装。
+
+        新格式：{"user_memory": [{"keys":[...], "value":"..."}], "event_memory": [...]}
+        旧格式（向后兼容）：{"user_memory": ["str", ...], "event_memory": ["str", ...]}
+        """
         raw = (response or "").strip()
 
         if raw.startswith("```"):
@@ -133,12 +140,33 @@ class MemoryWriter:
         if not isinstance(user_memory, list) or not isinstance(event_memory, list):
             raise ValueError("user_memory/event_memory must be lists")
 
-        def _clean_items(items: List[Any]) -> List[str]:
-            cleaned: List[str] = []
+        def _to_keys_value(item: Any) -> Dict[str, Any] | None:
+            """Normalise item to {keys: [...], value: "..."} dict."""
+            if isinstance(item, str):
+                text = item.strip()
+                return {"keys": [text], "value": text} if text else None
+            if isinstance(item, dict):
+                value = str(item.get("value", "")).strip()
+                if not value:
+                    return None
+                keys = item.get("keys", [])
+                if isinstance(keys, str):
+                    keys = [keys]
+                if not isinstance(keys, list) or len(keys) == 0:
+                    keys = [value]
+                # Normalise all keys to strings
+                keys = [str(k).strip() for k in keys if str(k).strip()]
+                if not keys:
+                    keys = [value]
+                return {"keys": keys, "value": value}
+            return None
+
+        def _clean_items(items: List[Any]) -> List[Dict[str, Any]]:
+            cleaned: List[Dict[str, Any]] = []
             for item in items:
-                text = str(item or "").strip()
-                if text:
-                    cleaned.append(text)
+                entry = _to_keys_value(item)
+                if entry:
+                    cleaned.append(entry)
             return cleaned
 
         return {
@@ -152,33 +180,45 @@ class MemoryWriter:
         redis: MemoryStorage,
         vector_store: VectorStore,
         user_id: str,
-        content: str,
+        value: str,
+        keys: List[str] | None = None,
         commit: bool = True,
     ) -> bool:
-        """写入用户长期记忆：若存在相似记忆则跳过。"""
-        text = (content or "").strip()
-        if not text:
+        """写入用户长期记忆：每个 key 作为独立 ChromaDB 文档，共享同一 value_id。"""
+        value_text = (value or "").strip()
+        if not value_text:
             return False
+
+        keys = keys or [value_text]
+        keys = [str(k).strip() for k in keys if str(k).strip()]
+        if not keys:
+            keys = [value_text]
 
         threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
-        is_dup = await self._has_similar_user_memory(vector_store, user_id, text, threshold)
+        is_dup = await self._has_similar_user_memory(vector_store, user_id, value_text, threshold)
         if is_dup:
-            logger.debug(f"Skip duplicate user_memory for user {user_id}: {text[:50]}")
+            logger.debug(f"Skip duplicate user_memory for user {user_id}: {value_text[:50]}")
             return False
 
+        value_id = str(uuid4())
         today = time.strftime("%Y-%m-%d")
-        doc = Document(
-            content=text,
-            metadata={
-                "source": "memory_writer",
-                "timestamp": today,
-                "event_date": today,
-                "memory_type": "user_memory",
-                "user_id": user_id,
-            },
-        )
-        ids = await asyncio.to_thread(vector_store.add_documents, [doc])
-        update_cmd = MemoryUpdateCommand(type="write_user_memory", content=text, uuid=ids[0] if ids else None)
+        docs = []
+        for key in keys:
+            docs.append(Document(
+                content=key,
+                metadata={
+                    "source": "memory_writer",
+                    "timestamp": today,
+                    "event_date": today,
+                    "memory_type": "user_memory",
+                    "user_id": user_id,
+                    "value": value_text,
+                    "value_id": value_id,
+                    "keys": keys,
+                },
+            ))
+        ids = await asyncio.to_thread(vector_store.add_documents, docs)
+        update_cmd = MemoryUpdateCommand(type="write_user_memory", content=value_text, uuid=value_id)
         await asyncio.to_thread(write_memory_update, db, redis, user_id, update_cmd, commit=commit)
         return True
 
@@ -188,31 +228,43 @@ class MemoryWriter:
         redis: MemoryStorage,
         vector_store: VectorStore,
         user_id: str,
-        content: str,
+        value: str,
+        keys: List[str] | None = None,
         commit: bool = True,
     ) -> bool:
-        """写入事件记忆：日期不同直接写入；同日期且内容完全一致则跳过。"""
-        text = (content or "").strip()
-        if not text:
+        """写入事件记忆：每个 key 作为独立 ChromaDB 文档，共享同一 value_id。"""
+        value_text = (value or "").strip()
+        if not value_text:
             return False
+
+        keys = keys or [value_text]
+        keys = [str(k).strip() for k in keys if str(k).strip()]
+        if not keys:
+            keys = [value_text]
 
         today = time.strftime("%Y-%m-%d")
-        if await self._is_same_day_duplicate_event_memory(vector_store, user_id, text, today):
-            logger.debug(f"Skip same-day duplicate event_memory for user {user_id}: {text[:50]}")
+        if await self._is_same_day_duplicate_event_memory(vector_store, user_id, value_text, today):
+            logger.debug(f"Skip same-day duplicate event_memory for user {user_id}: {value_text[:50]}")
             return False
 
-        doc = Document(
-            content=text,
-            metadata={
-                "source": "memory_writer",
-                "timestamp": today,
-                "event_date": today,
-                "memory_type": "event_memory",
-                "user_id": user_id,
-            },
-        )
-        ids = await asyncio.to_thread(vector_store.add_documents, [doc])
-        update_cmd = MemoryUpdateCommand(type="write_event_memory", content=text, uuid=ids[0] if ids else None)
+        value_id = str(uuid4())
+        docs = []
+        for key in keys:
+            docs.append(Document(
+                content=key,
+                metadata={
+                    "source": "memory_writer",
+                    "timestamp": today,
+                    "event_date": today,
+                    "memory_type": "event_memory",
+                    "user_id": user_id,
+                    "value": value_text,
+                    "value_id": value_id,
+                    "keys": keys,
+                },
+            ))
+        ids = await asyncio.to_thread(vector_store.add_documents, docs)
+        update_cmd = MemoryUpdateCommand(type="write_event_memory", content=value_text, uuid=value_id)
         await asyncio.to_thread(write_memory_update, db, redis, user_id, update_cmd, commit=commit)
         return True
 
@@ -256,47 +308,46 @@ class MemoryWriter:
         self,
         vector_store: VectorStore,
         user_id: str,
-        items: List[str],
+        items: List[Dict[str, Any]],
     ) -> set:
-        """Batch check: collect all existing user_memory text in one search pass."""
+        """Batch check: collect all existing user_memory value texts in one search pass."""
         seen = set()
         if not items:
             return seen
-        # Search with the first item — it's representative enough to catch most duplicates.
+        # Search with the first item's first key (or value as fallback)
+        first = items[0]
+        search_text = (first.get("keys", [first.get("value", "")]) or [first.get("value", "")])[0]
         threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
-        results = await vector_store.search(user_id, items[0], k=20)
-        for doc, score in results:
+        results = await vector_store.search(user_id, search_text, k=20)        for doc, score in results:
             metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
             if metadata.get("memory_type") != "user_memory":
                 continue
             if score >= threshold:
-                content = doc.get_content() if hasattr(doc, "get_content") else ""
-                if content:
-                    seen.add(content.strip())
-        return seen
+                existing = metadata.get("value") or (doc.get_content() if hasattr(doc, "get_content") else "")
+                if existing:
+                    seen.add(existing.strip())        return seen
 
     async def _batch_check_event_memory_dups(
         self,
         vector_store: VectorStore,
         user_id: str,
-        items: List[str],
+        items: List[Dict[str, Any]],
         event_date: str,
     ) -> set:
-        """Batch check: collect all same-day event_memory text in one search pass."""
+        """Batch check: collect all same-day event_memory value texts in one search pass."""
         seen = set()
         if not items:
             return seen
-        results = await vector_store.search(user_id, items[0], k=20)
-        target_norm = None
-        for doc, _ in results:
+        first = items[0]
+        search_text = (first.get("keys", [first.get("value", "")]) or [first.get("value", "")])[0]
+        results = await vector_store.search(user_id, search_text, k=20)        for doc, _ in results:
             metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
             if metadata.get("memory_type") != "event_memory":
                 continue
             doc_date = str(metadata.get("event_date") or metadata.get("timestamp") or "")
             if doc_date != event_date:
                 continue
-            existing = doc.get_content() if hasattr(doc, "get_content") else ""
-            if existing:
+            existing = metadata.get("value") or (doc.get_content() if hasattr(doc, "get_content") else "")            if existing:
                 seen.add(self._normalize_text(existing))
         return seen
 
