@@ -302,6 +302,8 @@ class ActivityMaker:
             merged = self._merge_topics(topics_to_add)
             if merged:
                 await chat_stream.topic_replier.add_topic(merged)
+            for t in topics_to_add:
+                await chat_stream.topic_replier.add_topic(t)
             return
 
         self.logger.warning(f"Unsupported action type: {action.activity_type}")
@@ -467,6 +469,11 @@ class ActivityMaker:
                     "response_line": OneSentenceChat(content=text, tone="neutral", expression="normal"),
                 }
             )
+            self.first_login_res.append({
+                "text": text,
+                "audio_path": audio_path,
+                "response_line": OneSentenceChat(content=text, tone="neutral", expression="normal"),
+            })
 
     def _load_audio_b64(self, audio_path: str) -> str:
         """Lazy-load audio file as base64."""
@@ -497,6 +504,7 @@ class ActivityMaker:
                 self.logger.warning(
                     f"Prompt '{prompt_name}' for activity type '{activity_type}' not found in prompt manager, skipping"
                 )
+                self.logger.warning(f"Prompt '{prompt_name}' for activity type '{activity_type}' not found in prompt manager, skipping")
                 continue
 
     async def _build_topic(self, action: ActionActivity, user_uuid: str) -> ExtractedTopic:

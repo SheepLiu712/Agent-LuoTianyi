@@ -19,6 +19,9 @@ import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import { useAffection } from "../hooks/useAffection";
+import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import LlmSettingsScreen from './llm_settings';
 
 
 export default function Index({ onLogout }: { onLogout?: () => void }) {
@@ -29,6 +32,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [llmSettingsOpen, setLlmSettingsOpen] = useState(false);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
   const webviewRef = useRef<WebView>(null);
 
@@ -49,6 +53,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     canSend,
     canSendImage,
     thinking,
+    sendPreferences,
     setInputText,
     addHistoryMessage,
     handleSendText,
@@ -59,6 +64,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
+  const { affection } = useAffection(username, message_token);
 
   useEffect(() => {
     const unsubscribe = subscribeDebugTrace((entries) => {
@@ -182,6 +188,22 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </TouchableOpacity>
         )}
 
+        {/* 设置按钮 */}
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => setLlmSettingsOpen(true)}
+        >
+          <Text style={styles.settingsButtonText}>⚙</Text>
+        </TouchableOpacity>
+
+        {/* 好感度显示 */}
+        {affection && (
+          <View style={styles.affectionBadge}>
+            <Text style={styles.affectionLevelText}>{affection.level_cn}</Text>
+            <Text style={styles.affectionScoreText}>{affection.score}</Text>
+          </View>
+        )}
+
         {thinking ? (
           <View style={styles.thinkingBubble}>
             <Image
@@ -284,6 +306,16 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
         </View>
       </View>
+
+      {/* LLM 端点设置页 - 全屏覆盖 */}
+      {llmSettingsOpen && (
+        <View style={styles.settingsOverlay}>
+          <LlmSettingsScreen
+            onClose={() => setLlmSettingsOpen(false)}
+            onSave={(preferences) => sendPreferences(preferences)}
+          />
+        </View>
+      )}
     </View>
   );
 }
@@ -323,6 +355,26 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     resizeMode: 'contain',
+  },
+  settingsButton: {
+    position: 'absolute',
+    left: 50,
+    top: 10,
+    width: 32,
+    height: 32,
+    zIndex: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 16,
+  },
+  settingsButtonText: {
+    fontSize: 18,
+  },
+  settingsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 200,
+    backgroundColor: '#f5f5f5',
   },
   thinkingBubble: {
     position: 'absolute',
@@ -434,5 +486,31 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     marginBottom: 2,
+  },
+  affectionBadge: {
+    position: 'absolute',
+    right: 10,
+    top: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 182, 193, 0.85)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    zIndex: 100,
+    elevation: 12,
+    flexDirection: 'row',
+  },
+  affectionLevelText: {
+    color: '#8B0040',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  affectionScoreText: {
+    color: '#8B0040',
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 4,
+    opacity: 0.8,
   },
 });

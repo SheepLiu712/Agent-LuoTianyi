@@ -157,6 +157,9 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
         except Exception as e:
             print(f"列已存在或迁移失败，跳过: {migration}")
             print(f"错误详情: {e}")
+                conn.execute(migration)
+                conn.commit()
+        except Exception:
             pass  # 列已存在，无需迁移
 
 def get_sql_db(): # Generator for FastAPI

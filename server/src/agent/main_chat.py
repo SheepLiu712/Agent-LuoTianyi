@@ -7,6 +7,7 @@ from datetime import datetime
 
 from ..utils.llm.llm_module import LLMModule
 from ..utils.llm.prompt_manager import PromptManager
+from ..utils.llm.llm_api_interface import LLMAPIInterface
 from ..utils.logger import get_logger
 from ..utils.enum_type import ContextType
 import dataclasses
@@ -70,8 +71,13 @@ class MainChat:
         fact_hits: Optional[List[str]] = None,
         memory_hits: Optional[List[str]] = None,
         sing_plan: Optional[Tuple[str, str]] = None,
+        llm_client_override: Optional[LLMAPIInterface] = None,
     ) -> List[OneResponseLine]:
-        """根据 topic_reply_prompt 生成自然语言回复。"""
+        """根据 topic_reply_prompt 生成自然语言回复。
+
+        Args:
+            llm_client_override: 可选的 LLM 客户端覆盖，用于实现按用户自定义端点隔离
+        """
         user_persona = self._build_user_persona(user_nickname, user_description)
         sing_requirement = self._build_sing_requirement(sing_plan)
         extra_knowledge = self._build_extra_knowledge(fact_hits or [], memory_hits or [])
@@ -88,12 +94,15 @@ class MainChat:
             reply_topic=reply_topic or "",
             sing_requirement=sing_requirement,
             extra_knowledge=extra_knowledge,
+            llm_client_override=llm_client_override,
         )
         return self._parse_response(response, sing_plan)
 
-    async def _call_llm(self, **kwargs) -> str:
+    async def _call_llm(self, llm_client_override: Optional[LLMAPIInterface] = None, **kwargs) -> str:
         try:
-            return await self.llm.generate_response(**kwargs)
+            prompt = self.llm.prompt_template.render(**kwargs)
+            client = llm_client_override or self.llm.llm_client
+            return await client.generate_response(prompt, use_json=False)
         except Exception as e:
             import traceback
 

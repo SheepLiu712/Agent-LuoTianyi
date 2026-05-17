@@ -14,6 +14,7 @@ from ..utils.logger import get_logger
 
 if TYPE_CHECKING:
     from ..network.network_client import NetworkClient
+    from ..user_preferences_manager import UserPreferencesManager
 
 @dataclass
 class OutgoingMessage:
@@ -49,6 +50,7 @@ class MessageProcessor:
 
         # 设置消息处理器发送消息的网络客户端接口，以及将消息处理器接收消息的函数传入网络客户端，以便网络客户端能将WS消息传入消息处理器
         network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state)
+        network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state, self.on_date_detected)
         self.send_text_func:Callable[..., dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
         self.send_typing_func:Callable[[int], dict] = network_client.send_typing
@@ -272,6 +274,17 @@ class MessageProcessor:
     def _on_local_tts_state(self, event: str, conv_uuid: str):
         if self.local_tts_state_signal:
             self.local_tts_state_signal(event, conv_uuid)
+
+    def on_date_detected(self, payload: dict) -> None:
+        """处理后端检测到重要日期的事件"""
+        self.logger.info(f"收到日期检测事件: {payload}")
+        if self.date_detected_signal:
+            try:
+                self.date_detected_signal(payload)
+            except Exception as e:
+                self.logger.error(f"触发日期检测信号失败: {e}")
+        else:
+            self.logger.warning("date_detected_signal 未设置，无法通知UI层")
 
     def set_model(self, model: Live2dModel):
         self.model = model
