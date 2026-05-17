@@ -529,12 +529,18 @@ class ChatWidget(QWidget):
         self.temp_is_user = True
 
     def open_settings(self):
-        print("Opening preferences dialog...")
-        if self.network_client:
-            dialog = PreferencesDialog(self.network_client, self)
-            dialog.exec()
-        else:
-            QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开偏好设置")
+        """打开用户设置对话框"""
+        if self.preferences_manager is None:
+            from ..user_preferences_manager import UserPreferencesManager
+            self.preferences_manager = UserPreferencesManager()
+
+        from .preferences_dialog import UserPreferencesDialog
+        dialog = UserPreferencesDialog(
+            self.preferences_manager, self,
+            agent_binder=self.agent,
+            network_client=self.network_client,
+        )
+        dialog.exec()
     
     def on_scroll_value_changed(self, value):
         if value == 0 and not self.is_loading_history and self.current_history_index > 0:

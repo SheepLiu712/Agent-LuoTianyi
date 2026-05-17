@@ -45,7 +45,7 @@
             },
             "prompt_name": "date_detection_prompt"
         }
-        
+
     },
     "topic_extractor": {
         "llm_module": {
@@ -321,10 +321,14 @@
             "mention_cooldown_hours": 6
         },
         "silence": {
-            "concert_pre_start_minutes": 60,
-            "concert_post_end_minutes": 30
-        },
-        "official_accounts": {}
-        
+            "concert_pre_start_minutes": 30,
+            "concert_post_end_minutes": 60
+        }
+    },
+    "bilibili_cookie": {
+        "sessdata_refresh_threshold_days": 7,
+        "ticket_refresh_threshold_hours": 2,
+        "check_interval_seconds": 3600,
+        "qrcode_image_path": "data/bilibili/qrcode.png"
     }
 }

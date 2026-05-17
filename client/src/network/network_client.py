@@ -266,7 +266,7 @@ class NetworkClient:
                 f.write(resp.content)
 
             item.content = new_file_path
-            
+
 
             payload.update({"image_client_path": item.content})
             update_resp = self.session.post(
@@ -283,3 +283,63 @@ class NetworkClient:
             self.logger.error(f"Failed to retrieve image for history item {item.uuid}: {exc}")
         finally:
             return item
+
+    # ── Bilibili Cookie API ─────────────────────────────────
+
+    def get_bilibili_cookie_status(self) -> dict:
+        """查询 Bilibili cookie 当前状态。"""
+        try:
+            resp = self.session.get(
+                f"{self.base_url}/api/bilibili/cookie/status",
+                verify=self.verify_ssl,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            return {"error": f"HTTP {resp.status_code}"}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def set_bilibili_cookies(self, cookies: dict) -> dict:
+        """手动设置 Bilibili cookies 到服务端。"""
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/api/bilibili/cookie/set",
+                json=cookies,
+                verify=self.verify_ssl,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            return {"error": f"HTTP {resp.status_code}"}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def generate_bilibili_qrcode(self) -> dict:
+        """让服务端生成 B站 登录二维码，返回 {'url': ..., 'qrcode_key': ...}"""
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/api/bilibili/cookie/qrcode/generate",
+                verify=self.verify_ssl,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            return {"error": f"HTTP {resp.status_code}"}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    def poll_bilibili_qrcode(self, qrcode_key: str) -> dict:
+        """轮询 QR 码扫码结果。"""
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/api/bilibili/cookie/qrcode/poll",
+                json={"qrcode_key": qrcode_key},
+                verify=self.verify_ssl,
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            return {"status": "error", "message": f"HTTP {resp.status_code}"}
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}

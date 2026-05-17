@@ -40,6 +40,7 @@ from src.plugins import DailyScheduler
 from src.plugins.citywalk import CitywalkRuntimeService
 from src.plugins.schedule import ScheduleManager
 from src.plugins.music.auto_song_learner import AutoSongLearner
+from src.plugins.bilibili_cookie_manager import BilibiliCookieManager
 
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger
@@ -50,7 +51,7 @@ config = load_config("config/config.json")
 
 service_hub = None  # 全局 ServiceHub 实例，在 startup_event 中初始化
 daily_scheduler: DailyScheduler | None = None
-
+bili_cookie_manager: BilibiliCookieManager | None = None
 
 @asynccontextmanager
 async def startup_event(app: FastAPI):
@@ -106,6 +107,17 @@ async def startup_event(app: FastAPI):
     )
     daily_scheduler.start()
 
+    # 初始化 Bilibili Cookie 管理器（后台监控）
+    global bili_cookie_manager
+    bili_cookie_cfg = config.get("bilibili_cookie", {})
+    bili_cookie_manager = BilibiliCookieManager(
+        sessdata_threshold_days=bili_cookie_cfg.get("sessdata_refresh_threshold_days", 7),
+        ticket_threshold_hours=bili_cookie_cfg.get("ticket_refresh_threshold_hours", 2),
+        check_interval_seconds=bili_cookie_cfg.get("check_interval_seconds", 3600),
+        qrcode_image_path=bili_cookie_cfg.get("qrcode_image_path", "data/bilibili/qrcode.png"),
+    )
+    # 不启动后台监控，由客户端主动检查状态、决定何时刷新
+
     # 账号系统初始化
     account.generate_keys()
     try:
@@ -113,6 +125,8 @@ async def startup_event(app: FastAPI):
     finally:
         if daily_scheduler is not None:
             daily_scheduler.stop()
+        if bili_cookie_manager is not None:
+            pass  # 由客户端管理刷新时机
         if service_hub and service_hub.schedule_manager:
             service_hub.schedule_manager.stop()
         await service_hub.gcsm.stop_cleanup_task()
@@ -417,6 +431,127 @@ async def update_image_client_path(request: ImageRequest, db: Session = Depends(
         raise HTTPException(status_code=400, detail="更新失败，记录不存在或无权限访问")
 
     return {"message": "更新成功"}
+
+
+# ── Bilibili Cookie 管理 API ─────────────────────────────────
+
+
+@app.post("/api/bilibili/cookie/refresh")
+async def bili_cookie_refresh():
+    """手动触发 Bilibili cookie 刷新（自动尝试 API 续期 → QR 码登录）。"""
+    global bili_cookie_manager
+    if bili_cookie_manager is None:
+        raise HTTPException(status_code=503, detail="Cookie manager not initialized")
+    result = await bili_cookie_manager.manual_refresh()
+    return result
+
+
+@app.get("/api/bilibili/cookie/status")
+async def bili_cookie_status():
+    """查看 Bilibili cookie 当前状态。"""
+    global bili_cookie_manager
+    if bili_cookie_manager is None:
+        raise HTTPException(status_code=503, detail="Cookie manager not initialized")
+    return bili_cookie_manager.get_status()
+
+
+@app.post("/api/bilibili/cookie/qrcode/generate")
+async def bili_cookie_qrcode_generate():
+    """生成 B站 登录二维码，返回 url 和 qrcode_key（客户端自行显示二维码）。"""
+    global bili_cookie_manager
+    if bili_cookie_manager is None:
+        raise HTTPException(status_code=503, detail="Cookie manager not initialized")
+    result = bili_cookie_manager.generate_qrcode_for_client()
+    if not result:
+        raise HTTPException(status_code=500, detail="Failed to generate QR code")
+    return result
+
+
+@app.post("/api/bilibili/cookie/qrcode/poll")
+async def bili_cookie_qrcode_poll(body: Dict[str, str]):
+    """轮询 QR 码扫码结果。请求体: {"qrcode_key": "xxx"}"""
+    global bili_cookie_manager
+    if bili_cookie_manager is None:
+        raise HTTPException(status_code=503, detail="Cookie manager not initialized")
+    qrcode_key = body.get("qrcode_key", "")
+    if not qrcode_key:
+        raise HTTPException(status_code=400, detail="Missing qrcode_key")
+    return bili_cookie_manager.poll_qrcode_for_client(qrcode_key)
+
+
+@app.get("/api/bilibili/cookie/login/key")
+async def bili_cookie_login_key():
+    """获取 Bilibili RSA 公钥（客户端本地加密用）。"""
+    global bili_cookie_manager
+    if bili_cookie_manager is None:
+        raise HTTPException(status_code=503, detail="Cookie manager not initialized")
+    result = bili_cookie_manager.get_login_key()
+    if not result:
+        raise HTTPException(status_code=502, detail="Failed to fetch key from Bilibili")
+    return result
+
+
+@app.post("/api/bilibili/cookie/login/password")
+async def bili_cookie_login_password(body: Dict[str, str]):
+    """使用 B站 账号密码登录（密码需由客户端用 RSA 公钥加密）。
+
+    请求体: {"username": "...", "encrypted_password": "..."}
+    """
+    global bili_cookie_manager
+    if bili_cookie_manager is None:
+        raise HTTPException(status_code=503, detail="Cookie manager not initialized")
+    username = body.get("username", "")
+    encrypted_password = body.get("encrypted_password", "")
+    if not username or not encrypted_password:
+        raise HTTPException(status_code=400, detail="Missing username or encrypted_password")
+    result = bili_cookie_manager.login_with_encrypted_password(username, encrypted_password)
+    return result
+
+
+@app.post("/api/bilibili/cookie/login/sms/send")
+async def bili_cookie_sms_send(body: Dict[str, str]):
+    """发送 B站 短信验证码。请求体: {"phone": "138xxxx", "country_code": "86"}"""
+    global bili_cookie_manager
+    if bili_cookie_manager is None:
+        raise HTTPException(status_code=503, detail="Cookie manager not initialized")
+    phone = body.get("phone", "")
+    country_code = body.get("country_code", "86")
+    if not phone:
+        raise HTTPException(status_code=400, detail="Missing phone")
+    return bili_cookie_manager.send_sms_code(phone, country_code)
+
+
+@app.post("/api/bilibili/cookie/login/sms")
+async def bili_cookie_sms_login(body: Dict[str, str]):
+    """使用短信验证码登录 B站。请求体: {"phone": "138xxxx", "code": "123456", "country_code": "86"}"""
+    global bili_cookie_manager
+    if bili_cookie_manager is None:
+        raise HTTPException(status_code=503, detail="Cookie manager not initialized")
+    phone = body.get("phone", "")
+    code = body.get("code", "")
+    country_code = body.get("country_code", "86")
+    if not phone or not code:
+        raise HTTPException(status_code=400, detail="Missing phone or code")
+    return bili_cookie_manager.login_with_sms(phone, code, country_code)
+
+
+@app.post("/api/bilibili/cookie/set")
+async def bili_cookie_set(body: Dict[str, str]):
+    """手动设置 Bilibili cookies。
+
+    请求体示例:
+    {
+        "SESSDATA": "xxx",
+        "bili_jct": "xxx",
+        "refresh_token": "xxx",
+        "bili_ticket": "xxx"
+    }
+    """
+    global bili_cookie_manager
+    if bili_cookie_manager is None:
+        raise HTTPException(status_code=503, detail="Cookie manager not initialized")
+    bili_cookie_manager.set_cookies(body)
+    return {"status": "ok", "message": "Cookies saved"}
 
 
 if __name__ == "__main__":

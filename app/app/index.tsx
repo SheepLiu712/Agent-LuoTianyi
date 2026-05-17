@@ -19,6 +19,8 @@ import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import LlmSettingsScreen from './llm_settings';
+import BilibiliLoginScreen from './bilibili_login';
 
 
 export default function Index({ onLogout }: { onLogout?: () => void }) {
@@ -29,6 +31,9 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
+  const [llmSettingsOpen, setLlmSettingsOpen] = useState(false);
+  const [bilibiliLoginOpen, setBilibiliLoginOpen] = useState(false);
+  const [affection, setAffection] = useState(null);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
   const webviewRef = useRef<WebView>(null);
 
@@ -182,6 +187,29 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </TouchableOpacity>
         )}
 
+        {/* 设置按钮 */}
+        <TouchableOpacity
+          style={styles.settingsButton}
+          onPress={() => setLlmSettingsOpen(true)}
+        >
+          <Text style={styles.settingsButtonText}>⚙</Text>
+        </TouchableOpacity>
+
+        {/* Bilibili Cookie 按钮 */}
+        <TouchableOpacity
+          style={styles.biliButton}
+          onPress={() => setBilibiliLoginOpen(true)}
+        >
+          <Text style={styles.biliButtonText}>B</Text>
+        </TouchableOpacity>
+
+        {/* 好感度显示 */}
+        {affection && (
+          <View style={styles.affectionBadge}>
+            <Text style={styles.affectionLevelText}>{affection.level_cn}</Text>
+            <Text style={styles.affectionScoreText}>{affection.score}</Text>
+          </View>
+        )}
         {thinking ? (
           <View style={styles.thinkingBubble}>
             <Image
@@ -284,6 +312,23 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
         </View>
       </View>
+
+      {/* LLM 端点设置页 - 全屏覆盖 */}
+      {llmSettingsOpen && (
+        <View style={styles.settingsOverlay}>
+          <LlmSettingsScreen
+            onClose={() => setLlmSettingsOpen(false)}
+            onSave={(preferences) => sendPreferences(preferences)}
+          />
+        </View>
+      )}
+
+      {/* Bilibili 登录页 - 全屏覆盖 */}
+      {bilibiliLoginOpen && (
+        <View style={styles.settingsOverlay}>
+          <BilibiliLoginScreen onClose={() => setBilibiliLoginOpen(false)} />
+        </View>
+      )}
     </View>
   );
 }
@@ -323,6 +368,65 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     resizeMode: 'contain',
+  },
+  settingsButton: {
+    position: 'absolute',
+    left: 50,
+    top: 10,
+    width: 32,
+    height: 32,
+    zIndex: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    borderRadius: 16,
+  },
+  settingsButtonText: {
+    fontSize: 18,
+  },
+  biliButton: {
+    position: 'absolute',
+    left: 90,
+    top: 10,
+    width: 32,
+    height: 32,
+    zIndex: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(251, 114, 153, 0.8)',
+    borderRadius: 16,
+  },
+  biliButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  settingsOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 200,
+    backgroundColor: '#f5f5f5',
+  },
+  affectionBadge: {
+    position: 'absolute',
+    left: 130,
+    top: 10,
+    zIndex: 100,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  affectionLevelText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FB7299',
+    marginRight: 4,
+  },
+  affectionScoreText: {
+    fontSize: 12,
+    color: '#666',
   },
   thinkingBubble: {
     position: 'absolute',
