@@ -99,6 +99,11 @@ class AuthApi:
                 "new_username": new_username,
                 "new_password": encrypted_password,
             },
+            return False, "密码加密失败，请检查服务器连接"
+
+        resp = self.session.post(
+            f"{self.base_url}/auth/reset_account",
+            json={"invite_code": invite_code, "new_username": new_username, "new_password": encrypted_password},
             verify=self.verify_ssl,
             timeout=15,
         )
@@ -108,4 +113,9 @@ class AuthApi:
             detail = resp.json().get("detail", "Reset Failed")
         except Exception:
             detail = "Reset Failed"
+            return True, "重置成功"
+        try:
+            detail = resp.json().get("detail", "重置失败")
+        except Exception:
+            detail = "重置失败"
         return False, detail

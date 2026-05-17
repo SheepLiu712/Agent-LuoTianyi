@@ -6,7 +6,6 @@ from typing import List
 class WishEntry:
     """A song a user wanted but the system couldn't sing at the time."""
     safe_name: str
-    unified_name: str = ""
     request_count: int = 1
     first_requested: str = ""       # ISO date, e.g. "2026-05-05"
     last_attempt: str = ""

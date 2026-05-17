@@ -56,6 +56,7 @@ class AgentBinder(QObject):
         self.login_callback = login_callback
         self.register_callback = register_callback
         self.set_base_url_callback = set_base_url_callback
+        self.reset_account_callback = reset_account_callback
 
         self.msg_to_bubble: Dict[str, ChatBubble] = {}  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
         # 将跨线程的更新请求通过 Qt 信号转发到主线程执行
@@ -129,6 +130,12 @@ class AgentBinder(QObject):
             return self.register_callback(username, password, invite_code)
         self.logger.error("Register callback not set")
         return False, "Register callback not set"
+
+    def on_reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
+        if self.reset_account_callback:
+            return self.reset_account_callback(invite_code, new_username, new_password)
+        self.logger.error("Reset account callback not set")
+        return False, "重置回调未设置"
 
     def on_set_model(self, model: Live2dModel):
         self.set_model_callback(model)

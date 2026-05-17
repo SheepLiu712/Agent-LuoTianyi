@@ -141,6 +141,9 @@ def reset_account(
 
     邀请码必须已被使用（关联到一个已注册用户）。
     成功后将该用户的 username 和 password 更新为新的值。
+def reset_account(db_session: Session, invite_code_str: str, new_username: str, new_password: str):
+    """
+    以邀请码重置账号。如果邀请码已被使用，覆写对应用户的用户名和密码。
     """
     code = db_session.query(InviteCode).filter_by(code=invite_code_str).first()
     if not code:
@@ -172,4 +175,22 @@ def reset_account(
         f"Account reset: invite_code={invite_code_str}, "
         f"old_username={old_username}, new_username={new_username}"
     )
+
+    if not code.is_used or not code.user_id:
+        return False, "该邀请码尚未被使用，无法重置"
+
+    # 检查新用户名是否已被其他用户使用
+    existing = db_session.query(User).filter_by(username=new_username).first()
+    if existing and existing.uuid != code.user_id:
+        return False, "该用户名已被其他用户使用"
+
+    user = db_session.query(User).filter(User.uuid == code.user_id).first()
+    if not user:
+        return False, "邀请码关联的用户不存在"
+
+    # 覆写用户名和密码
+    user.username = new_username
+    user.password = new_password
+    user.auth_token = None  # 清除自动登录 token
+    db_session.commit()
     return True, "重置成功"

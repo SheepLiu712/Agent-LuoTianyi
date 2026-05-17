@@ -17,7 +17,7 @@ from ..utils.logger import get_logger
 
 # 好感度等级定义: (最低分数, 中文名称, 英文名称)
 AFFECTION_LEVELS: List[Tuple[int, str, str]] = [
-    (0, "偶像和关注者", "Stranger"),
+    (0, "萍水相逢", "Stranger"),
     (100, "相识", "Acquaintance"),
     (300, "朋友", "Friend"),
     (600, "挚友", "Close Friend"),
