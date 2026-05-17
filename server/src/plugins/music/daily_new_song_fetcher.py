@@ -250,6 +250,9 @@ def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False) -> bool:
 
     return True
 
+def sync_daily_new_songs(config_path: str = "config/config.json") -> Dict[str, List[str]]:
+    cfg = load_config(config_path, default_config={})
+
 def sync_daily_new_songs(song_knowledge_config: Dict[str, Any]) -> Dict[str, List[str]]:
     song_db_cfg = song_knowledge_config.get("song_database", {})
     if not song_db_cfg:

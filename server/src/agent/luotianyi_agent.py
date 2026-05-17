@@ -20,6 +20,7 @@ from .main_chat import MainChat, OneResponseLine, OneSentenceChat, SongSegmentCh
 from .activity_maker import ActivityType
 from .topic_extractor import TopicExtractor
 from .conversation_manager import ConversationManager
+# from .affection_manager import AffectionManager  # 保留代码，已弃用
 from ..types.conversation_type import ConversationItem
 from ..utils.logger import get_logger
 from ..tts import TTSModule
@@ -90,9 +91,18 @@ class LuoTianyiAgent:
         self.conversation_manager = ConversationManager(
             self.config.get("conversation_manager", {}), self.prompt_manager
         )  # 对话管理器
-        self.memory_manager = MemoryManager(self.config["memory_manager"], self.prompt_manager)  # 记忆管理器
+        self.singing_manager = SingingManager(config={"resource_path": self.config.get("resource_path", "res/music")})  # 唱歌管理器
+        memory_config = self.config.get("memory_manager", {})
+        self.memory_manager = MemoryManager(memory_config, self.prompt_manager, self.singing_manager)  # 记忆管理器
 
         self.tts_engine = tts_module  # TTS模块
+        # self.affection_manager = AffectionManager(...)  # 已弃用
+        self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
+        self.topic_extractor = TopicExtractor(
+            self.config.get("topic_extractor", {}),
+            self.prompt_manager,
+        )
+        self.affection_manager = AffectionManager(affection_llm_config)
         self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
         self.topic_extractor = TopicExtractor(self.config["topic_extractor"],self.prompt_manager,)
         self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
@@ -319,6 +329,7 @@ class LuoTianyiAgent:
                         pref_context = "用户偏好设置：" + "；".join(pref_parts)
                 except Exception as e:
                     self.logger.warning(f"Failed to parse preferences: {e}")
+            # 好感度上下文注入已弃用
         finally:
             db.close()
 
@@ -549,6 +560,7 @@ class LuoTianyiAgent:
             data=payload,
         )
 
+        # 好感度 LLM 分析已弃用
     async def handle_history_request(self, user_id: str, count: int, end_index: int) -> Dict[str, Any]:
         """处理历史记录请求
 

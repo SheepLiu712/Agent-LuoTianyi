@@ -101,20 +101,6 @@ class AffectionLog(Base):
     user = relationship("User", back_populates="affection_logs")
 
 
-class ImportantDate(Base):
-    """用户重要日期记录"""
-    __tablename__ = "important_dates"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(String, nullable=False, index=True)
-    name = Column(String, nullable=False)
-    date_type = Column(String, nullable=False)       # 生日/纪念日/节日/其他
-    date_mmdd = Column(String, nullable=False)        # MM-DD
-    description = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-
 # Database URL
 SessionLocal = None
 engine = None

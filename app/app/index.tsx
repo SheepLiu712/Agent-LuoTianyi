@@ -18,6 +18,7 @@ import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
+// import { useAffection } from "../hooks/useAffection";  // 已弃用
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
 
 
@@ -59,6 +60,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
+  // const { affection } = useAffection(username, message_token);  // 已弃用
 
   useEffect(() => {
     const unsubscribe = subscribeDebugTrace((entries) => {
@@ -182,6 +184,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </TouchableOpacity>
         )}
 
+        {/* 好感度显示已弃用 */}
         {thinking ? (
           <View style={styles.thinkingBubble}>
             <Image

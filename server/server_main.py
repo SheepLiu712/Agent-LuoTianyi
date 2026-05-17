@@ -84,12 +84,18 @@ async def startup_event(app: FastAPI):
         )
     )
 
-    # 在service_hub内相互传递依赖实例
-    service_hub.activity_maker.set_agent(get_luotianyi_agent())  # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
-    service_hub.activity_maker.set_service_hub(service_hub)  # 将ServiceHub引用传递给ActivityMaker，用于演唱会静默期检查
-    service_hub.gcsm.register_activity_maker(service_hub.activity_maker)  # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
-    service_hub.global_speaking_worker.set_agent(get_luotianyi_agent())  # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
-    service_hub.schedule_manager.set_gcsm_ref(service_hub.gcsm)  # 将 ServiceHub 的引用传递给 ScheduleManager，方便它在需要时调用其他服务的接口
+    # 初始化日程管理器
+    schedule_mgr = ScheduleManager(
+        config=config.get("schedule", {}),
+        service_hub_ref=service_hub,
+    )
+    service_hub.schedule_manager = schedule_mgr
+    schedule_mgr.start()
+
+    service_hub.activity_maker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
+    service_hub.activity_maker.set_service_hub(service_hub) # 将ServiceHub引用传递给ActivityMaker，用于演唱会静默期检查
+    service_hub.gcsm.register_activity_maker(service_hub.activity_maker) # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
+    service_hub.global_speaking_worker.set_agent(get_luotianyi_agent()) # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
 
     # 启动聊天流过期清理后台任务
     service_hub.gcsm.start_cleanup_task(expiration_seconds=360)
@@ -99,11 +105,9 @@ async def startup_event(app: FastAPI):
     
     # 构建日常调度器
     global daily_scheduler
-    daily_scheduler = DailyScheduler(
-        song_knowledge_config = config["music"]["song_knowledge"],
-        citywalk_service = CitywalkRuntimeService(config["citywalk"], vector_store=database.get_vector_store()),
-        song_learner = service_hub.agent.music_manager.auto_song_learner,
-    )
+    citywalk_runtime = CitywalkRuntimeService(config_path="config/config.json", vector_store=database.get_vector_store())
+    song_learner = AutoSongLearner(config={"resource_path": "res/music", "songlearner_dir": "songlearner"})
+    daily_scheduler = DailyScheduler(runtime_service=citywalk_runtime, song_learner=song_learner)
     daily_scheduler.start()
 
     # 账号系统初始化
@@ -161,8 +165,19 @@ async def chat_ws(
             if event.event_type == WSEventType.USER_PREFERENCE_SYNC.value:
                 await websocket_service.send_ack_event(ws_connection, event)
                 preferences = event.payload if isinstance(event.payload, dict) else {}
-                if ws_connection.user_uuid and preferences:
-                    service_hub.agent.save_preferences(ws_connection.user_uuid, preferences)
+                if ws_connection.user_uuid:
+                    try:
+                        db = get_sql_session()
+                        try:
+                            user = db.query(database.User).filter(database.User.uuid == ws_connection.user_uuid).first()
+                            if user:
+                                user.preferences = json.dumps(preferences, ensure_ascii=False)
+                                db.commit()
+                                logger.info(f"Saved preferences for user {ws_connection.user_name}: {preferences}")
+                        finally:
+                            db.close()
+                    except Exception as e:
+                        logger.error(f"Failed to save preferences: {e}")
                 continue
 
             chat_event = websocket_service.convert_to_chat_input_event(event)
@@ -343,9 +358,6 @@ async def get_history(
     # Cap count to prevent excessive reads
     capped_count = min(max(1, request.count), 200)
     return await agent.handle_history_request(user_uuid, capped_count, request.end_index)
-
-
-
 
 
 @app.post("/get_image")
