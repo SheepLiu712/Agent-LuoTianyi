@@ -12,7 +12,8 @@ from typing import Tuple, Dict, List, Any
 from ..database.database_service import VectorStore
 import asyncio
 import time
-
+import re
+from ..plugins.music.singing_manager import SingingManager
 from sqlalchemy.orm import Session
 
 # Citywalk search cache: data changes at most daily, 1h TTL is safe

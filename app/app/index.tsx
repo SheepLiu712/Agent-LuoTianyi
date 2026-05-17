@@ -13,6 +13,7 @@ import {
   View
 } from "react-native";
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { WebView } from 'react-native-webview';
 import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
@@ -55,6 +56,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     handleSendImage,
     handleWebViewMessage,
     handleToggleAgentAudio,
+    sendPreferences,
   } = useChatLogic(webviewRef, username, message_token);
 
 
@@ -97,6 +99,24 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       hideSubscription.remove();
     };
   }, []);
+
+  // 注册引导保存的偏好同步
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem('user_preferences');
+        if (raw) {
+          const prefs = JSON.parse(raw);
+          if (prefs.relationship && sendPreferences) {
+            await sendPreferences(prefs);
+            await AsyncStorage.removeItem('user_preferences');
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, [sendPreferences]);
 
   const historyLoadedRef = useRef(false);
   useEffect(() => {

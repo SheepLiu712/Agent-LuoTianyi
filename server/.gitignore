@@ -69,12 +69,11 @@ logs
 temp
 mobile_project
 setup
-/res/*
-!/res/agent/
-!/res/agent/**
 data
 .VSCodeCounter
 Redis-x64-*
 
-# B站 Cookie（敏感信息，勿提交）
-config/bili_cookie.txt
+# 资源文件（默认忽略，仅跟踪 prompt 和人设代码）
+res/*
+!res/prompts/
+!res/persona/

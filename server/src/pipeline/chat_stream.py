@@ -27,8 +27,16 @@ class ChatStream:
         self.logger = get_logger(f"{self.user_name}ChatStream")
         self.service_hub: ServiceHub | None = None
         self.connection_lost_time = None
+        self.memory_pool: List[str] = []
+        self.memory_pool_max_size = 10
         self.topic_planner = TopicPlanner(username=self.user_name, user_id=self.user_uuid)
-        self.topic_replier = TopicReplier(username=self.user_name, user_id=self.user_uuid, send_reply_callback=self.feed_response)
+        self.topic_replier = TopicReplier(
+            username=self.user_name,
+            user_id=self.user_uuid,
+            send_reply_callback=self.feed_response,
+            memory_pool_add_callback=self.add_to_memory_pool,
+        )
+        self.topic_replier.memory_pool = self.memory_pool  # 共享 memory_pool 引用
         self.topic_planner.set_topic_consumer(self.topic_replier.add_topic)
         self.topic_replier.set_change_state_callback(self.change_state)
         self.ingress_queue: asyncio.Queue[ChatInputEvent] = asyncio.Queue()
@@ -38,6 +46,17 @@ class ChatStream:
 
         self.state = self.STATE_WAITING
         self.state_lock = asyncio.Lock()
+
+    def add_to_memory_pool(self, items: List[str]):
+        """将新写入的记忆添加到 memory_pool，超出容量时丢弃最旧的。"""
+        if not items:
+            return
+        for item in items:
+            text = (item or "").strip()
+            if text and text not in self.memory_pool:
+                self.memory_pool.append(text)
+        if len(self.memory_pool) > self.memory_pool_max_size:
+            self.memory_pool = self.memory_pool[-self.memory_pool_max_size:]
 
     def set_service_hub(self, service_hub: ServiceHub):
         if service_hub is None:
@@ -82,7 +101,22 @@ class ChatStream:
                 await self.service_hub.activity_maker.on_user_message(self.user_uuid)
                 await ingress_message(self.service_hub, self.user_uuid, event)  # 预处理
                 await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event)  # 入库
-                self.logger.warning("Service hub or user uuid is missing, skip user message preprocessing")
+                
+                # 检查是否检测到重要日期，如果是则通知前端
+                detected_date = event.payload.get("detected_date")
+                if detected_date and self.ws_connection:
+                    try:
+                        import time
+                        notification = {
+                            "type": WSEventType.DATE_DETECTED.value,
+                            "ts": int(time.time() * 1000),
+                            "payload": detected_date
+                        }
+                        await self.ws_connection.websocket.send_json(notification)
+                        self.logger.info(f"已通知前端检测到重要日期: {detected_date}")
+                    except Exception as e:
+                        self.logger.error(f"发送日期检测通知失败: {e}")
+            else:                self.logger.warning("Service hub or user uuid is missing, skip user message preprocessing")
 
         await self.topic_planner.feed_unread_message(event)
 

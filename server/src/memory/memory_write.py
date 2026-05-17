@@ -38,9 +38,10 @@ class MemoryWriter:
         current_dialogue: str = "",
         related_memories: List[str] | None = None,
         commit: bool = True
-    ):
+    ) -> List[str]:
         """
         分析最近的交互，提取有价值的信息存入记忆库。
+        返回实际写入的记忆文本列表（用于更新 ChatStream 的 memory_pool）。
         """
         memory_payload = await self._extract_knowledge(
             history,
@@ -52,7 +53,7 @@ class MemoryWriter:
         # then write only non-duplicate items.
         user_items = memory_payload.get("user_memory", [])
         event_items = memory_payload.get("event_memory", [])
-
+        written: List[str] = []
         if user_items:
             # Single de-dup pass for all user memory items
             seen_texts = await self._batch_check_user_memory_dups(
@@ -64,7 +65,7 @@ class MemoryWriter:
                     continue
                 seen_texts.add(text)
                 await self.write_user_memory(db, redis, vector_store, user_id, content, commit=commit)
-
+                written.append(text)
         if event_items:
             today = time.strftime("%Y-%m-%d")
             seen_texts = await self._batch_check_event_memory_dups(
@@ -76,7 +77,9 @@ class MemoryWriter:
                     continue
                 seen_texts.add(text)
                 await self.write_event_memory(db, redis, vector_store, user_id, content, commit=commit)
+                written.append(text)
 
+        return written
     async def _extract_knowledge(
         self,
         history: str,

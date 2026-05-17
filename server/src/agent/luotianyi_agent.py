@@ -90,9 +90,15 @@ class LuoTianyiAgent:
         self.conversation_manager = ConversationManager(
             self.config.get("conversation_manager", {}), self.prompt_manager
         )  # 对话管理器
-        self.memory_manager = MemoryManager(self.config["memory_manager"], self.prompt_manager)  # 记忆管理器
-
+        self.singing_manager = SingingManager(config={"resource_path": self.config.get("resource_path", "res/music")})  # 唱歌管理器
+        memory_config = self.config.get("memory_manager", {})
+        self.memory_manager = MemoryManager(memory_config, self.prompt_manager, self.singing_manager)  # 记忆管理器
         self.tts_engine = tts_module  # TTS模块
+        self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
+        self.topic_extractor = TopicExtractor(
+            self.config.get("topic_extractor", {}),
+            self.prompt_manager,        )
+        self.affection_manager = AffectionManager(affection_llm_config)
         self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
         self.topic_extractor = TopicExtractor(self.config["topic_extractor"],self.prompt_manager,)
         self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
@@ -290,7 +296,7 @@ class LuoTianyiAgent:
         fact_hits: Optional[List[str]] = None,
         sing_plan: Optional[Tuple[str, str]] = None,
         conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
-    ) -> List[OneResponseLine]:
+        memory_pool: Optional[List[str]] = None,  # 近期记忆池，用于提供上下文记忆    ) -> List[OneResponseLine]:
         """供 TopicReplier 调用：按话题生成分段回复。"""
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
@@ -303,6 +309,8 @@ class LuoTianyiAgent:
             # 注入表达风格偏好（独立段，不混入 user_description）
             pref_context = ""
             if user and user.preferences:
+            user_preferences = ""
+            # 用独立的 user_preferences 字段注入偏好，不混入 user_description            if user and user.preferences:
                 try:
                     prefs = json.loads(user.preferences) if isinstance(user.preferences, str) else user.preferences
                     pref_parts = []
@@ -318,6 +326,7 @@ class LuoTianyiAgent:
                     if pref_parts:
                         pref_context = "用户偏好设置：" + "；".join(pref_parts)
                 except Exception as e:
+                        user_preferences = "；".join(pref_parts)                except Exception as e:
                     self.logger.warning(f"Failed to parse preferences: {e}")
         finally:
             db.close()
@@ -331,6 +340,8 @@ class LuoTianyiAgent:
             fact_hits=fact_hits or [],
             memory_hits=memory_hits or [],
             sing_plan=sing_plan,
+            memory_pool=memory_pool or [],
+            user_preferences=user_preferences,
         )
 
     async def write_topic_memories_for_pipeline(
@@ -339,15 +350,14 @@ class LuoTianyiAgent:
         current_dialogue: str,
         related_memories: Optional[List[str]] = None,
         conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
-    ) -> None:
-        """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
-        db = self._runtime_hub.open_sql_session()
+    ) -> List[str]:
+        """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。
+        返回实际写入的记忆文本列表。"""        db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
         vector_store = self._runtime_hub.vector_store
         try:
             history = conversation_history or await self.conversation_manager.get_context(db, redis_client, user_id)
-            await self.memory_manager.post_process_interaction(
-                db=db,
+            written = await self.memory_manager.post_process_interaction(                db=db,
                 redis=redis_client,
                 vector_store=vector_store,
                 user_id=user_id,
@@ -356,6 +366,7 @@ class LuoTianyiAgent:
                 related_memories=related_memories or [],
                 commit=True,
             )
+            return written or []
         finally:
             db.close()
 

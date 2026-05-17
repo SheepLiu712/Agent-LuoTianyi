@@ -42,6 +42,8 @@ if __name__ == "__main__":
     app = ui_init()
 
     
+    # 创建用户偏好管理器（需在 LoginDialog 之前创建，用于注册引导）
+    preferences_manager = UserPreferencesManager()
     # 创建网络客户端实例
     network_client = NetworkClient(
         base_url=config.get("base_url"),
@@ -81,7 +83,7 @@ if __name__ == "__main__":
     # 主运行逻辑
     ret = 0
     try:
-        login_dialog = LoginDialog(binder)
+        login_dialog = LoginDialog(binder, preferences_manager=preferences_manager)
         if not login_dialog.try_auto_login():
             if login_dialog.exec() != QDialog.DialogCode.Accepted:
                 raise SystemExit("Login cancelled")
