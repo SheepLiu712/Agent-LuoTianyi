@@ -123,10 +123,11 @@ class LuoTianyiAgent:
         user_id: str,
         unread_snapshot: "UnreadMessageSnapshot",
         force_complete: bool = False,
-    ) -> tuple[List["ExtractedTopic"], List["UnreadMessage"]]:
-        """Pipeline 话题提取入口：内部负责获取 conversation_history。"""
+    ) -> tuple[Optional["ExtractedTopic"], List["UnreadMessage"]]:
+        """Pipeline 话题提取入口：内部负责获取 conversation_history。
+        返回 (topic_or_None, remaining_unread)。"""
         if unread_snapshot is None or not unread_snapshot.messages:
-            return [], []
+            return None, []
 
         db = self._runtime_hub.open_sql_session()
         try:
@@ -141,12 +142,12 @@ class LuoTianyiAgent:
         finally:
             db.close()
 
-        topics, remaining = await self.topic_extractor.extract_topics(
+        topic, remaining = await self.topic_extractor.extract_topics(
             unread_snapshot=unread_snapshot,
             conversation_history=conversation_history,
             force_complete=force_complete,
         )
-        return topics, remaining
+        return topic, remaining
     
     async def generate_topic_from_activity(self, activity_type: ActivityType, user_uuid: str, llm_client: "LLMAPIInterface", **kwargs) -> "ExtractedTopic":
         """根据用户活动生成话题，供 ActivityMaker 调用"""

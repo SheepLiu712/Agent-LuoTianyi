@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, Optional
 
 from ..utils.logger import get_logger
 from .music.daily_new_song_fetcher import sync_daily_new_songs
+from .schedule.cookie_manager import check_and_refresh_cookie
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -99,6 +100,7 @@ class DailyScheduler:
     def _run_once_for_day(self, now: datetime) -> None:
         '''
         每天4am执行一次，包含：
+        - B站 Cookie 刷新（检查过期，接近过期时自动更新）
         - 城市漫步（20%概率）
         - 歌曲同步（每3天一次）
         - 歌曲学习（每天一次，检查是否有待学歌曲）
@@ -107,6 +109,9 @@ class DailyScheduler:
         state = self._load_state()
         if state.get("last_daily_check") == today:
             return
+
+        # Cookie 刷新：每天检查一次，接近过期时自动用无头浏览器更新
+        self._run_cookie_refresh()
 
         if self.random_func() < self.citywalk_probability:
             self._run_citywalk_async()
@@ -120,6 +125,13 @@ class DailyScheduler:
 
         state["last_daily_check"] = today
         self._save_state(state)
+
+    def _run_cookie_refresh(self) -> None:
+        """检查 B站 Cookie 有效期，接近过期时自动刷新。"""
+        try:
+            check_and_refresh_cookie(force=False)
+        except Exception as e:
+            self.logger.warning(f"Cookie 刷新任务失败: {e}")
 
     def _run_loop(self) -> None:
         while not self._stop_event.is_set():

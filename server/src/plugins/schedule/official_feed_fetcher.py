@@ -74,7 +74,7 @@ class OfficialFeedFetcher:
 
         if bili_cookie:
             self.session.headers.update({"Cookie": bili_cookie})
-            
+
         # 缓存最近处理过的动态 ID，避免重复处理
         self.seen_ids: Dict[str, List[str]] = self._load_cache()
 
@@ -117,7 +117,7 @@ class OfficialFeedFetcher:
         self._save_cache()
         return all_items
 
-    def _fetch_bili_space(self, uid: str, max_pages: int = 3) -> List[OfficialDynamic]:
+    def _fetch_bili_space(self, uid: str, max_pages: int = 1) -> List[OfficialDynamic]:
         """
         拉取 B站 用户空间动态，返回新动态列表。
         使用 offset 翻页，每次比较 dynamic_id 是否已处理过。

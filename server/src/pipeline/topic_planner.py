@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Optional, Any
+from typing import TYPE_CHECKING, List, Optional, Any, Tuple
 from .modules.unread_store import UnreadMessage, UnreadStore, UnreadMessageSnapshot
 from .modules.listen_timer import ListenTimer
 import asyncio
@@ -87,7 +87,7 @@ class TopicPlanner:
                 # 开始提取
                 unread_message_snapshot = await self.unread_store.snapshot()
 
-                extracted_topics, remaining_unread = await self._extract_topics(
+                extracted_topic, remaining_unread = await self._extract_topics(
                     unread_message_snapshot,
                     force_complete=should_force_extract,
                 )
@@ -95,7 +95,7 @@ class TopicPlanner:
                 # 提取结果提交后，可能会被新消息打断，导致提取结果无效；也可能没有新消息，提取结果有效。根据是否有新消息来决定保留提取结果还是丢弃。
                 extracted_topics = await self._commit_extraction_result(
                     snapshot=unread_message_snapshot,
-                    extracted_topics=extracted_topics,
+                    extracted_topics=[extracted_topic] if extracted_topic else [],
                     remaining_unread=remaining_unread,
                 )
 
@@ -150,27 +150,27 @@ class TopicPlanner:
                 await self.listen_timer.remove_deadline()  # 没有新消息且没有剩余未读，清除等待状态
         return new_extracted_topics
 
-    async def _extract_topics(self, unread_snapshot: UnreadMessageSnapshot, force_complete: bool) -> tuple[List[ExtractedTopic], List[UnreadMessage]]:
+    async def _extract_topics(self, unread_snapshot: UnreadMessageSnapshot, force_complete: bool) -> tuple[Optional[ExtractedTopic], List[UnreadMessage]]:
         """调用 agent 话题提取接口；失败时降级为简单规则提取。"""
         if unread_snapshot is None or not unread_snapshot.messages:
-            return [], []
+            return None, []
 
         try:
-            topics, remaining = await self.service_hub.agent.extract_topics_for_pipeline(
+            topic, remaining = await self.service_hub.agent.extract_topics_for_pipeline(
                 user_id=self.user_id,
                 unread_snapshot=unread_snapshot,
                 force_complete=force_complete,
             )
-            return topics or [], remaining or []
+            return topic, remaining or []
         except Exception as e:
             self.logger.exception(f"Topic extraction failed: {e}")
             return self._fallback_extract(unread_snapshot, force_complete)
 
-    def _fallback_extract(self, unread_snapshot: UnreadMessageSnapshot, force_complete: bool) -> tuple[List[ExtractedTopic], List[UnreadMessage]]:
+    def _fallback_extract(self, unread_snapshot: UnreadMessageSnapshot, force_complete: bool) -> tuple[Optional[ExtractedTopic], List[UnreadMessage]]:
         """最小兜底策略：整批消息作为一个话题，或继续保留等待补全。"""
         messages = unread_snapshot.messages
         if not messages:
-            return [], []
+            return None, []
 
         latest_content = (messages[-1].content or "").strip()
         terminal_tokens = ("。", "！", "？", ".", "!", "?", "~")
@@ -182,7 +182,7 @@ class TopicPlanner:
         )
 
         if not force_complete and not likely_complete:
-            return [], messages
+            return None, messages
 
         topic = ExtractedTopic(
             topic_id=str(uuid4()),
@@ -193,7 +193,7 @@ class TopicPlanner:
             sing_attempts=[],
             is_forced_from_incomplete=force_complete,
         )
-        return [topic], []
+        return topic, []
     
     async def _consume_topics(self, topics: List[ExtractedTopic]):
         if self.topic_consumer is None:

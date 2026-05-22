@@ -34,9 +34,10 @@ class TopicExtractor:
                                 unread_snapshot: Optional["UnreadMessageSnapshot"],
                                 conversation_history: str = "", 
                                 force_complete: bool = False,
-                                ) -> Tuple[List["ExtractedTopic"], List["UnreadMessage"]]:
+                                ) -> Tuple[Optional[ExtractedTopic], List["UnreadMessage"]]:
+        """返回 (topic_or_None, remaining_unread)。"""
         if unread_snapshot is None or not unread_snapshot.messages:
-            return [], []
+            return None, []
 
         message_lines = []
         for idx, msg in enumerate(unread_snapshot.messages):
@@ -56,50 +57,51 @@ class TopicExtractor:
             terms=terms_str
         )
         if not response:
-            return [], unread_snapshot.messages
+            return None, unread_snapshot.messages
 
-        payload = self._parse_response_to_list(response)
-        if payload is None:
-            return [], unread_snapshot.messages
+        item = self._parse_response(response)
+        if item is None or not isinstance(item, dict):
+            return None, unread_snapshot.messages
 
-        topics: List[ExtractedTopic] = []
-        remaining: List[UnreadMessage] = []
+        source_indexes = self._resolve_source_indexes(item.get("source_message_ids", []), unread_snapshot.messages)
+        if not source_indexes:
+            return None, unread_snapshot.messages
 
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
+        selected_messages = [unread_snapshot.messages[i] for i in source_indexes]
+        topic_type = str(item.get("topic_type") or item.get("topic_types") or "chat").lower()
 
-            source_indexes = self._resolve_source_indexes(item.get("source_message_ids", []), unread_snapshot.messages)
-            if not source_indexes:
-                continue
+        if topic_type == "incomplete" and not force_complete:
+            # 不完整话题 → 全都是剩余未读
+            return None, unread_snapshot.messages
 
-            selected_messages = [unread_snapshot.messages[i] for i in source_indexes]
-            topic_type = str(item.get("topic_types") or item.get("topic_type") or "chat").lower()
+        topic_content = str(item.get("topic_content") or "").strip()
+        if not topic_content:
+            topic_content = "\n".join(msg.content for msg in selected_messages if msg.content)
 
-            if topic_type == "incomplete" and (not force_complete or len(topics) >= 1): # 如果已经有完整话题了，对于不完整话题就再等一等，放入剩余未读里，等待补全；如果没有完整话题了，不管怎样都放入话题里，强制完成这个不完整话题
-                remaining.extend(selected_messages)
-                continue
-
-            topic_content = str(item.get("topic_content") or "").strip()
-            if not topic_content:
-                topic_content = "\n".join(msg.content for msg in selected_messages if msg.content)
-
-            topics.append(
-                ExtractedTopic(
-                    topic_id=str(uuid4()),
-                    source_messages=selected_messages,
-                    topic_content=topic_content,
-                    memory_attempts=self._normalize_str_list(item.get("memory_attempts")),
-                    fact_constraints=self._normalize_str_list(item.get("fact_constraints")),
-                    sing_attempts=self._normalize_str_list(item.get("sing_attempts")),
-                    is_forced_from_incomplete=(topic_type == "incomplete" and force_complete),
-                )
+        if topic_type == "incomplete" and force_complete:
+            # 不完整但强制完成
+            topic = ExtractedTopic(
+                topic_id=str(uuid4()),
+                source_messages=selected_messages,
+                topic_content=topic_content,
+                memory_attempts=[],
+                fact_constraints=[],
+                sing_attempts=[],
+                is_forced_from_incomplete=True,
             )
-
-        if not topics: # 没有成功提取出话题，全部保留为剩余未读，等待补全
-            remaining = unread_snapshot.messages
-
-        return topics, remaining
+        else:
+            topic = ExtractedTopic(
+                topic_id=str(uuid4()),
+                source_messages=selected_messages,
+                topic_content=topic_content,
+                memory_attempts=self._normalize_str_list(item.get("memory_attempts")),
+                fact_constraints=self._normalize_str_list(item.get("fact_constraints")),
+                sing_attempts=self._normalize_str_list(item.get("sing_attempts")),
+                is_forced_from_incomplete=False,
+            )
+        max_index = max(source_indexes)
+        remaining_unread = unread_snapshot.messages[max_index + 1 :] if max_index + 1 < len(unread_snapshot.messages) else []
+        return topic, remaining_unread
 
     async def _call_llm(self, **kwargs) -> Optional[str]:
         try:
@@ -113,7 +115,8 @@ class TopicExtractor:
             response = None
         return response
 
-    def _parse_response_to_list(self, response: str) -> Optional[List[Dict[str, Any]]]:
+    def _parse_response(self, response: str) -> Optional[Dict[str, Any]]:
+        """解析 LLM 返回的 JSON 对象（单个话题）。"""
         if not response:
             return None
         json_str = response.strip()
@@ -129,12 +132,8 @@ class TopicExtractor:
             self.logger.debug(f"Raw response: {response}")
             return None
 
-        if isinstance(data, list):
-            return data
         if isinstance(data, dict):
-            topics = data.get("topics")
-            if isinstance(topics, list):
-                return topics
+            return data
         return None
 
     def _resolve_source_indexes(self, source_ids: Any, messages: List["UnreadMessage"]) -> List[int]:

@@ -47,3 +47,4 @@ moises-light
 jams >= 0.3.0
 cvxopt
 vmo >= 0.3.3
+playwright
