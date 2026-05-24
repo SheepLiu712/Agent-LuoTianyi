@@ -393,11 +393,12 @@ class LuoTianyiAgent:
             return
         
         # 需要进行更新，包括两部分，①更新用户画像，②更新上下文摘要
+        # 注意：串行执行而非 concurrent，因为两个任务内部通过 asyncio.to_thread
+        # 操作同一个 SQLAlchemy Session（非线程安全）
         try:
             context: Dict[str, Any] = await self.conversation_manager.get_context(db, self._runtime_hub.redis_client, user_id, ret_type="json", ts_type="date")
-            update_context_task = asyncio.create_task(self.conversation_manager._update_context(db, self._runtime_hub.redis_client, user_id, context, commit=True))
-            update_profile_task = asyncio.create_task(self.memory_manager.update_user_profile_by_context(db, self._runtime_hub.redis_client, user_id, context))
-            await asyncio.gather(update_context_task, update_profile_task)
+            await self.conversation_manager._update_context(db, self._runtime_hub.redis_client, user_id, context, commit=True)
+            await self.memory_manager.update_user_profile_by_context(db, self._runtime_hub.redis_client, user_id, context)
         except Exception as e:
             self.logger.error(f"Error in update_profile_context_for_pipeline: {e}")
         finally:
