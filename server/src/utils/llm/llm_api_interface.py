@@ -318,7 +318,7 @@ class OpenAIAPIInterface(
 
     def get_response_time(self, last_k: int = 1) -> List[float]:
         if not self.response_time_queue:
-            return 0.0
+            return []
         k = min(last_k, len(self.response_time_queue))
         return list(self.response_time_queue)[-k:]
 
@@ -452,7 +452,7 @@ class RequestsAPIInterface(LLMAPIInterface):
 
     def get_response_time(self, last_k: int = 1) -> List[float]:
         if not self.response_time_queue:
-            return 0.0
+            return []
         k = min(last_k, len(self.response_time_queue))
         return list(self.response_time_queue)[-k:]
 
