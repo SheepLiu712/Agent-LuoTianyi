@@ -317,15 +317,19 @@ class LuoTianyiAgent:
         self,
         user_id: str,
         reply_items: List[OneResponseLine],
-    ) -> List[str]:
-        """将 topic 回复落库，并触发上下文压缩检查。"""
+    ) -> List[Optional[str]]:
+        """将 topic 回复落库，并触发上下文压缩检查。
+
+        返回值与 reply_items 长度一致，未入库的项对应位置为 None。
+        """
         if not user_id:
             return []
 
         conversation_items: List[ConversationItem] = []
+        persisted_indices: List[int] = []
         now = time.strftime("%Y-%m-%d %H:%M:%S")
 
-        for item in reply_items:
+        for i, item in enumerate(reply_items):
             if isinstance(item, OneSentenceChat):
                 text = item.get_content()
                 if not text:
@@ -340,6 +344,7 @@ class LuoTianyiAgent:
                         data=None,
                     )
                 )
+                persisted_indices.append(i)
             elif isinstance(item, SongSegmentChat):
                 song_name = item.song or None
                 if not song_name:
@@ -356,9 +361,10 @@ class LuoTianyiAgent:
                         data={"song": song_name, "segment": item.segment},
                     )
                 )
+                persisted_indices.append(i)
 
         if not conversation_items:
-            return []
+            return [None] * len(reply_items)
 
         db = self._runtime_hub.open_sql_session()
         redis_client = self._runtime_hub.redis_client
@@ -372,7 +378,11 @@ class LuoTianyiAgent:
             )
         finally:
             db.close()
-        return uuid_list
+
+        result: List[Optional[str]] = [None] * len(reply_items)
+        for idx, uuid in zip(persisted_indices, uuid_list):
+            result[idx] = uuid
+        return result
 
     async def update_profile_context_for_pipeline(self, user_id: str) -> None:
         """供 TopicReplier 调用：触发用户画像的上下文更新检查。"""
