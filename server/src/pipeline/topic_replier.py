@@ -98,7 +98,9 @@ class TopicReplier:
             reply_items=reply_items,
         )
 
-        for item, uuid in zip(reply_items, uuid_list or []):
+        for item, uuid in zip(reply_items, uuid_list):
+            if uuid is None:
+                continue
             item.uuid = uuid # 给每个回复项分配一个UUID，供前端关联文本和TTS音频使用
             await self._submit_speaking_job(self.send_reply_callback, item)
 
