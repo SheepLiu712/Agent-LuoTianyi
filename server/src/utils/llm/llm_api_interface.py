@@ -84,11 +84,14 @@ class OpenAIAPIInterface(
         self._init_parameters()
         self.response_time_queue = deque(maxlen=20)  # 存储最近的响应时间
         
-        # 检查 SSL_CERT_FILE 环境变量，如果指向的文件不存在，则移除该环境变量，防止 httpx/ssl 报错
-        ssl_cert_file = os.environ.get("SSL_CERT_FILE")
-        if ssl_cert_file and not os.path.exists(ssl_cert_file):
-            self.logger.warning(f"检测到 SSL_CERT_FILE 环境变量指向不存在的文件: {ssl_cert_file}。正在移除该环境变量以避免错误。")
+        # 检查 SSL_CERT_FILE 环境变量，如果指向的文件不存在，暂移除该环境变量
+        # 避免 httpx/ssl 报错。临时操作不影响其他模块。
+        self._ssl_cert_file = os.environ.get("SSL_CERT_FILE")
+        self._ssl_cert_file_removed = False
+        if self._ssl_cert_file and not os.path.exists(self._ssl_cert_file):
+            self.logger.warning(f"SSL_CERT_FILE 指向不存在的文件: {self._ssl_cert_file}，暂时移除。")
             del os.environ["SSL_CERT_FILE"]
+            self._ssl_cert_file_removed = True
 
         try:
             # 兼容同步和异步调用：如果需要异步，应使用 AsyncOpenAI
@@ -97,6 +100,9 @@ class OpenAIAPIInterface(
         except Exception as e:
             self.logger.error(f"初始化OpenAI客户端失败: {e}")
             raise Exception(f"无法初始化OpenAI客户端: {e}")
+        finally:
+            if self._ssl_cert_file_removed:
+                os.environ["SSL_CERT_FILE"] = self._ssl_cert_file
 
     async def generate_response(self, prompt: str, use_json: bool, **kwargs) -> str:
         """
@@ -336,16 +342,22 @@ class RequestsAPIInterface(LLMAPIInterface):
         self._init_parameters()
         self.response_time_queue = deque(maxlen=20)  # 存储最近的响应时间
 
-    def generate_response(self, prompt: str, **kwargs) -> str:
+    async def generate_response(self, prompt: str, use_json: bool = False, **kwargs) -> str:
         # 实现调用SiliconFlow API生成响应的逻辑
         last_exception = None
         self.payload["messages"] = [{"role": "user", "content": prompt}]
+        if use_json:
+            self.payload["response_format"] = {"type": "json_object"}
         for attempt in range(self.max_retries):
             try:
                 st_time = time.time()
-                ret: requests.Response = requests.post(
-                    self.url, headers=self.headers, json=self.payload, timeout=10
-                )
+
+                def _do_request():
+                    return requests.post(
+                        self.url, headers=self.headers, json=self.payload, timeout=10
+                    )
+
+                ret = await asyncio.to_thread(_do_request)
                 response = self._extract_content(ret)
                 self.response_time_queue.append(time.time() - st_time)
                 return response
@@ -355,9 +367,8 @@ class RequestsAPIInterface(LLMAPIInterface):
                 self.logger.warning(f"请求失败 (尝试 {attempt + 1}/{self.max_retries}): {e}")
 
                 if attempt < self.max_retries - 1:
-                    # 指数退避
                     delay = self.retry_delay * (2**attempt) + random.uniform(0, 1)
-                    time.sleep(delay)
+                    await asyncio.sleep(delay)
 
         # 所有重试都失败
         raise last_exception

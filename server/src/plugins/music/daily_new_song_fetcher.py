@@ -205,19 +205,19 @@ def _append_keywords_to_files(song_name: str, spaced_lyrics: str) -> None:
             for line in lyric_keywords:
                 lyric_file.write(f"{line}\n")
 
-def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False) -> None:
+def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False) -> bool:
     if db and _song_exists(db, song_name) and not update:
         logger.info(f"已存在，跳过: {song_name}")
-        return
+        return False
 
     logger.info(f"开始抓取并入库: {song_name}")
     data = fetcher.fetch_entity_description(song_name)
     if not data:
-        return
+        return False
 
     fields = _extract_song_fields(data)
     if not fields["introduction"]:
-        return
+        return False
 
     if db is not None:
         try:
@@ -241,20 +241,23 @@ def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False) -> None:
         except Exception as e:
             db.rollback()
             logger.error(f"入库失败 {song_name}: {e}")
+            return False
 
     try:
         _append_keywords_to_files(song_name, fields["spaced_lyrics"])
     except Exception as e:
         logger.error(f"写入失败 {song_name}: {e}")
 
-def sync_daily_new_songs(config_path: str = "config/config.json") -> Dict[str, List[str]]:
-    cfg = load_config(config_path, default_config={})
+    return True
 
-    song_db_cfg = cfg.get("knowledge", {}).get("song_database", {})
+def sync_daily_new_songs(song_knowledge_config: Dict[str, Any]) -> Dict[str, List[str]]:
+    song_db_cfg = song_knowledge_config.get("song_database", {})
     if not song_db_cfg:
         raise ValueError("缺少 knowledge.song_database 配置")
 
-    crawler_cfg = cfg.get("crawler", {})
+    crawler_cfg = song_knowledge_config.get("crawler", {})
+    if not crawler_cfg:
+        raise ValueError("缺少 knowledge.crawler 配置")
 
     init_song_db(song_db_cfg)
     db = get_song_session()
@@ -266,7 +269,10 @@ def sync_daily_new_songs(config_path: str = "config/config.json") -> Dict[str, L
         fetcher = VCPediaFetcher(crawler_cfg)
 
         for i, song_name in enumerate(songs, start=1):
-            do_one_song(db, fetcher, song_name)
+            if do_one_song(db, fetcher, song_name):
+                added.append(song_name)
+            else:
+                failed.append(song_name)
 
             time.sleep(0.8)
 
@@ -283,7 +289,8 @@ def sync_daily_new_songs(config_path: str = "config/config.json") -> Dict[str, L
 #     db.close()
 
 if __name__ == "__main__":
-    result = sync_daily_new_songs()
+    # This would typically be called with the actual song knowledge config
+    result = sync_daily_new_songs(song_knowledge_config={})
     added = result.get("added", [])
     failed = result.get("failed", [])
 

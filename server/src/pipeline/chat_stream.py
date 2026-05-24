@@ -22,7 +22,7 @@ class ChatStream:
 
     def __init__(self, ws_connection: WebSocketConnection):
         self.ws_connection = ws_connection
-        self.user_name: str = ws_connection.user_name if ws_connection else "unknown"
+        self.user_name: str = ws_connection.user_name
         self.user_uuid: Optional[str] = ws_connection.user_uuid if ws_connection else None
         self.logger = get_logger(f"{self.user_name}ChatStream")
         self.service_hub: ServiceHub | None = None
@@ -82,7 +82,6 @@ class ChatStream:
                 await self.service_hub.activity_maker.on_user_message(self.user_uuid)
                 await ingress_message(self.service_hub, self.user_uuid, event)  # 预处理
                 await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event)  # 入库
-            else:
                 self.logger.warning("Service hub or user uuid is missing, skip user message preprocessing")
 
         await self.topic_planner.feed_unread_message(event)
@@ -177,7 +176,7 @@ class ChatStream:
             self.logger.info("Started ingress worker task")
 
     def _is_user_message_event(self, event: ChatInputEvent) -> bool:
-        return event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}
+        return event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE, ChatInputEventType.USER_TOUCH}
 
 
     ####### 下方为连接管理相关方法 #######
@@ -197,7 +196,7 @@ class ChatStream:
         self.ws_connection = new_ws_connection
         self.user_name = new_ws_connection.user_name if new_ws_connection else self.user_name
         self.connection_lost_time = None
-        self.current_state = self.STATE_WAITING
+        self.state = self.STATE_WAITING
         self.start_if_needed()
 
     def clean_up(self):

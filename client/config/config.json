@@ -15,7 +15,8 @@
             "model_version": "v3",
             "model_path": "res/live2d/models/luo/model.model3.json",
             "default_expression": "normal",
-            "offset": [0, -0.2]
+            "offset": [0, 0],
+            "scale": 1.5
         },
         "interface_config_path":"config/live2d_interface_config.json"
     },

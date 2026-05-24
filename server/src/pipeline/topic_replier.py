@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, List, Optional, Tuple
 import asyncio
+import traceback
 from ..utils.logger import get_logger
 from .global_speaking_worker import SpeakingJob
 from ..agent.main_chat import OneResponseLine, SongSegmentChat, ContextType
@@ -9,17 +10,6 @@ if TYPE_CHECKING:
     from ..interface.service_hub import ServiceHub
     from .topic_planner import ExtractedTopic
 
-
-
-# class ExtractedTopic:
-#     topic_id: str
-#     source_messages: list[str]
-#     topic_content: str
-#     memory_attempts: list[str]
-#     fact_constraints: list[str]
-#     sing_attempts: list[str]
-    
-#     is_forced_from_incomplete: bool = False
 
 class TopicReplier:
     def __init__(self, username: str, user_id: str, send_reply_callback: Callable[[ChatResponse], Awaitable[None]]):
@@ -61,7 +51,6 @@ class TopicReplier:
                 self.logger.info("TopicReplier processor task cancelled")
                 break
             except Exception as e:
-                import traceback
                 self.logger.error(f"Error in topic_processor: {e} \n{traceback.format_exc()}")
             finally:
                 if topic is not None:
@@ -75,6 +64,29 @@ class TopicReplier:
             self.logger.error("ServiceHub or agent is not ready, skip replying topic")
             return
 
+        # Read context once and reuse across the entire pipeline turn
+        db = self.service_hub.agent._runtime_hub.open_sql_session()
+        redis_client = self.service_hub.agent._runtime_hub.redis_client
+        try:
+            conversation_history = await self.service_hub.agent.conversation_manager.get_context(
+                db, redis_client, self.user_id
+            )
+        finally:
+            db.close()
+
+        # 它不用等到回复完成就能检测日期，因此把日期检测放在这里，和回复workflow并行
+        asyncio.create_task(self._process_date_detection(topic, conversation_history=conversation_history))
+
+        topic_content = topic.topic_content
+        if self.service_hub.schedule_manager:
+            raise RuntimeError("Schedule manager should not be set for topic replier, check the initialization logic")
+            try:
+                activity_ctx = self.service_hub.schedule_manager.get_active_context(self.user_id)
+                if activity_ctx:
+                    topic_content = f"{topic_content}\n\n{activity_ctx}"
+                    self.logger.info(f"Injected activity context for user {self.user_id}")
+            except Exception as e:
+                self.logger.warning(f"Failed to get activity context: {e}")
 
         memory_task = asyncio.create_task(self._memory_search(topic.memory_attempts or []))
         fact_task = asyncio.create_task(self._fact_search(topic.fact_constraints or []))
@@ -83,14 +95,15 @@ class TopicReplier:
 
         reply_items = await self.service_hub.agent.generate_topic_reply_for_pipeline(
             user_id=self.user_id,
-            topic_content=topic.topic_content,
+            topic_content=topic_content,
             memory_hits=memory_hits,
             fact_hits=fact_hits,
             sing_plan=sing_plan,
+            conversation_history=conversation_history,
         )
         for item in reply_items:
             if isinstance(item, SongSegmentChat):
-                lyrics = self.service_hub.agent.singing_manager.get_segment_lyrics(item.song, item.segment)
+                lyrics = self.service_hub.agent.music_manager.get_segment_lyrics(item.song, item.segment)
                 item.lyrics = lyrics
 
         uuid_list = await self.service_hub.agent.persist_topic_replies_for_pipeline(
@@ -104,13 +117,12 @@ class TopicReplier:
             item.uuid = uuid # 给每个回复项分配一个UUID，供前端关联文本和TTS音频使用
             await self._submit_speaking_job(self.send_reply_callback, item)
 
-        
-
-        memory_write_task = asyncio.create_task(self._schedule_memory_write(topic, reply_items, memory_hits))
-        huge_update_task = asyncio.create_task(self._schedule_profile_context_update()) # 我们考虑，当上下文需要压缩时，进行一次用户画像的更新。
-
-        # 等上面两个任务都完成后再进行下一轮回复，确保用户画像和记忆的更新能够尽可能快地反映在后续的回复中
-        await asyncio.gather(memory_write_task, huge_update_task)
+        # Fire-and-forget: memory write and profile update run in background,
+        # don't block the next topic.
+        asyncio.create_task(self._schedule_memory_write(
+            topic, reply_items, memory_hits, conversation_history=conversation_history
+        ))
+        asyncio.create_task(self._schedule_profile_context_update())
 
     async def _submit_speaking_job(
         self,
@@ -177,8 +189,8 @@ class TopicReplier:
         for constraint in fact_constraints:
             if constraint == "/SongsCanSing":
                 try:
-                    singing_manager = self.service_hub.agent.singing_manager
-                    songs_json = await singing_manager.get_songs_can_sing_llm(max_song_num=15)
+                    music_manager = self.service_hub.agent.music_manager
+                    songs_json = await music_manager.get_songs_can_sing_llm(max_song_num=15)
                     special_hits.append(f"可唱歌曲推荐：{songs_json}")
                 except Exception as e:
                     self.logger.error(f"Failed to get songs can sing: {e}")
@@ -186,8 +198,8 @@ class TopicReplier:
                 try:
                     song_name = constraint[len("/CanISing"):].strip()
                     if song_name:
-                        singing_manager = self.service_hub.agent.singing_manager
-                        can_sing = await singing_manager.can_i_sing_song_llm(song_name)
+                        music_manager = self.service_hub.agent.music_manager
+                        can_sing = await music_manager.can_i_sing_song_llm(song_name)
                         special_hits.append(can_sing)
                 except Exception as e:
                     self.logger.error(f"Failed to get can I sing for {song_name}: {e}")
@@ -198,12 +210,12 @@ class TopicReplier:
         # 获取常规的歌曲事实
         regular_hits = []
         if regular_constraints:
-            regular_hits = await self.service_hub.agent.search_song_facts_for_topic(regular_constraints)
+            regular_hits = await self.service_hub.agent.music_manager.search_song_facts_for_topic(regular_constraints)
         
         return special_hits + regular_hits
 
     async def _sing_plan(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
-        # 利用并修改singing_manager，判断sing_attempts中所给出的用户的唱歌指令能否满足，如果能满足则返回准备唱的歌曲名称和唱段，如果不能满足则返回None
+        # 利用 music_manager 判断 sing_attempts 中所给出的用户唱歌指令能否满足。
         # 如果有明确歌名，查询这首歌能不能唱，能唱的话随机选择一段
         # 如果没有明确歌名(歌名为random_song)，则从歌曲数据库中随机选择一首歌，并随机选择一个唱段
         # 如果为空则直接返回
@@ -220,6 +232,7 @@ class TopicReplier:
         topic: "ExtractedTopic",
         reply_items: List[OneResponseLine],
         memory_hits: List[str],
+        conversation_history: Optional[str] = None,
     ) -> None:
         if self.service_hub is None or self.service_hub.agent is None:
             self.logger.error("ServiceHub or agent is not ready, skip scheduling memory write")
@@ -230,17 +243,65 @@ class TopicReplier:
 
         current_dialogue = self._build_current_dialogue(topic, reply_items)
 
-        async def _task():
-            try:
-                await self.service_hub.agent.write_topic_memories_for_pipeline(
-                    user_id=self.user_id,
-                    current_dialogue=current_dialogue,
-                    related_memories=memory_hits,
-                )
-            except Exception as e:
-                self.logger.warning(f"Topic memory write task failed: {e}")
+        try:
+            await self.service_hub.agent.write_topic_memories_for_pipeline(
+                user_id=self.user_id,
+                current_dialogue=current_dialogue,
+                related_memories=memory_hits,
+                conversation_history=conversation_history,
+            )
+        except Exception as e:
+            self.logger.warning(f"Topic memory write task failed: {e}")
 
-        asyncio.create_task(_task())
+        
+
+    async def _process_date_detection(self, topic: "ExtractedTopic", conversation_history: Optional[str] = None) -> None:
+        """从话题的源消息中检测重要日期，按置信度处理。"""
+        if self.service_hub is None or self.service_hub.agent is None:
+            return
+
+        # 获取 source_messages 中的最新用户文本
+        user_texts = []
+        for msg in getattr(topic, "source_messages", []) or []:
+            content = getattr(msg, "content", "") or ""
+            if content.strip():
+                user_texts.append(content.strip())
+        if not user_texts:
+            return
+
+        # 检查 agent 是否已初始化 date_detector
+        agent = self.service_hub.agent
+        if not hasattr(agent, 'date_detector') or agent.date_detector is None:
+            return
+
+        date_info = await agent.date_detector.detect('\n'.join(user_texts), conversation_history=conversation_history or "")
+        if date_info is None:
+            return
+
+        self.logger.debug(f"DateDetector: {date_info}")
+
+        # 按置信度处理
+        from ..agent.date_processor import process_detected_date
+        result = await process_detected_date(
+            date_info=date_info,
+            user_id=self.user_id,
+            open_sql_session=agent._runtime_hub.open_sql_session,
+            reply_topic_callback=lambda t: self._safe_add_topic(t),
+        )
+
+        if result is True:
+            self.logger.info(f"Date auto-saved from topic {topic.topic_id}")
+        elif result is False:
+            self.logger.debug(f"Date discarded from topic {topic.topic_id}")
+        else:
+            self.logger.info(f"Date confirmation topic created from topic {topic.topic_id}")
+
+    def _safe_add_topic(self, topic: "ExtractedTopic") -> None:
+        """线程安全地添加话题到队列。"""
+        try:
+            asyncio.create_task(self.add_topic(topic))
+        except Exception as e:
+            self.logger.warning(f"Failed to add confirmation topic: {e}")
 
     async def _schedule_profile_context_update(
         self

@@ -6,29 +6,31 @@ Memory Search Module
 """
 
 from ..utils.logger import get_logger
-from ..plugins.music.knowledge_service import get_song_introduction, get_song_lyrics
 from ..utils.llm.prompt_manager import PromptManager
 from ..utils.llm.llm_module import LLMModule
 from typing import Tuple, Dict, List, Any
 from ..database.database_service import VectorStore
-import asyncio 
-import re
-from ..plugins.music.singing_manager import SingingManager
+import asyncio
+import time
 
 from sqlalchemy.orm import Session
 
+# Citywalk search cache: data changes at most daily, 1h TTL is safe
+_citywalk_cache_lock = asyncio.Lock()
+_citywalk_cache_ts: float = 0.0
+_citywalk_cache_data: list = []  # List[Tuple[float, str, str]]
+_CITYWALK_CACHE_TTL: float = 3600.0
+
 
 class MemorySearcher:
-    def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager, singing_manager: SingingManager):
+    def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager):
         
         self.logger = get_logger(__name__)
         self.config = config
-        self.llm = LLMModule(config["llm_module"], prompt_manager)
+        # self.llm = LLMModule(config["llm_module"], prompt_manager)
         self.max_k_vector_entities = config.get("max_k_vector_entities", 5)
         self.default_threshold = float(config.get("vector_score_threshold", 0.46))
         self.max_k_graph_entities = config.get("max_k_graph_entities", 3)
-        self.singing_manager = singing_manager
-
 
     async def search_memories_for_topic(
         self,
@@ -97,18 +99,27 @@ class MemorySearcher:
             if not q:
                 continue
             pending_tasks.append(asyncio.create_task(search_task(q, "user", user_id, score_threshold)))
-            pending_tasks.append(
-                asyncio.create_task(
-                    search_task(
-                        q,
-                        "citywalk",
-                        "__citywalk__",
-                        min(score_threshold + 0.1, 0.88),
-                        prefix="城市漫步记忆",
-                        timestamp_keys=["citywalk_date", "timestamp"],
-                    )
-                )
-            )
+
+        # Citywalk: single cached search per call, not N per-query searches
+        global _citywalk_cache_ts, _citywalk_cache_data
+        now = time.monotonic()
+        if now - _citywalk_cache_ts >= _CITYWALK_CACHE_TTL:
+            async with _citywalk_cache_lock:
+                # double-check after acquiring lock
+                if now - _citywalk_cache_ts >= _CITYWALK_CACHE_TTL:
+                    citywalk_q = next((q.strip() for q in queries if q and q.strip()), "")
+                    if citywalk_q:
+                        _citywalk_cache_data = await search_with_thres(
+                            "__citywalk__",
+                            citywalk_q,
+                            max(1, k),
+                            min(score_threshold + 0.1, 0.88),
+                            prefix="城市漫步记忆",
+                            timestamp_keys=["citywalk_date", "timestamp"],
+                        )
+                        self.logger.debug(f"Citywalk cache refreshed, got {len(_citywalk_cache_data)} hits")
+                    _citywalk_cache_ts = now
+        scored_hits.extend(_citywalk_cache_data)
 
         for finished_task in asyncio.as_completed(pending_tasks):
             try:
@@ -137,50 +148,3 @@ class MemorySearcher:
 
         return dedup
 
-    async def search_song_facts_for_topic(
-        self,
-        knowledge_db: Session,
-        constraints: List[str],
-    ) -> List[str]:
-        """面向 TopicReplier 的歌曲事实检索接口。"""
-        if not constraints:
-            return []
-
-        dedup: List[str] = []
-        seen = set()
-        for raw in constraints:
-            song_name = self._extract_song_name(raw)
-            if not song_name:
-                continue
-
-            intro = await asyncio.to_thread(get_song_introduction, knowledge_db, song_name)
-            lyrics = await asyncio.to_thread(get_song_lyrics, knowledge_db, song_name)
-
-            if intro:
-                text = f"《{song_name}》的介绍:\n{intro}"
-                if text not in seen:
-                    seen.add(text)
-                    dedup.append(text)
-
-            if lyrics:
-                text = f"《{song_name}》的歌词:\n{lyrics}"
-                if text not in seen:
-                    seen.add(text)
-                    dedup.append(text)
-
-        return dedup
-
-    def _extract_song_name(self, text: str) -> str:
-        content = (text or "").strip()
-        if not content:
-            return ""
-
-        m = re.search(r"《([^》]+)》", content)
-        if m:
-            return m.group(1).strip()
-
-        if "是一首歌" in content:
-            return content.split("是一首歌", 1)[0].strip().strip("《》")
-
-        return content.strip("\"'“”‘’《》")
-    

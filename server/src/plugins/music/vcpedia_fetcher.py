@@ -24,8 +24,7 @@ class VCPediaFetcher:
         crawler_config = config.get("vcpedia", {})
         self.base_url = crawler_config.get("base_url", "https://vcpedia.cn")
 
-        cfg = load_config("config/config.json", default_config={})
-        self.llm_cfg = cfg.get("knowledge", {}).get("llm", {})
+        self.llm_cfg = config.get("llm", {})
         llm_client = LLMAPIFactory.create_interface(self.llm_cfg)
         self.llm_client = llm_client
 
@@ -270,7 +269,6 @@ class VCPediaFetcher:
                     # collapse whitespace
                     lyrics = re.sub(r'\s+', ' ', lyrics).strip()
             if new_table:
-                print("find lyrics table")
                 new_infobox_data = self._get_data_from_infobox(new_table, single_col=False)
                 infobox_data.update(new_infobox_data)
 

@@ -27,6 +27,7 @@ export const useChatLogic = (
   const networkClientRef = useRef<NetworkClient | null>(null);
   const binderRef = useRef<AgentBinder | null>(null);
   const messageProcessorRef = useRef<MessageProcessor | null>(null);
+  const clickTimestampsRef = useRef<number[]>([]);
 
   const updateMessageByUuid = useCallback((uuid: string, updater: (msg: ChatMessage) => ChatMessage) => {
     setMessages((prev) => prev.map((msg) => (msg.uuid === uuid ? updater(msg) : msg)));
@@ -93,6 +94,15 @@ export const useChatLogic = (
         },
         sendImage: async (uuid, imageUri, mimeType) => {
           await messageProcessorRef.current?.sendImage(uuid, imageUri, mimeType);
+        },
+        sendProactiveText: async (uuid, text) => {
+          await messageProcessorRef.current?.sendProactiveText(uuid, text);
+        },
+        sendTouch: async (touchArea, clickFrequency) => {
+          await messageProcessorRef.current?.sendTouch(touchArea, clickFrequency);
+        },
+        sendPreferences: async (preferences) => {
+          await messageProcessorRef.current?.sendPreferences(preferences);
         },
         sendTyping: async (textLength) => {
           await messageProcessorRef.current?.sendTypingEvent(textLength);
@@ -166,6 +176,25 @@ export const useChatLogic = (
       const data = JSON.parse(event.nativeEvent.data);
       if (data.type === 'audio_finished') {
         messageProcessorRef.current?.onServerAudioFinished();
+        return;
+      }
+      if (data.type === 'touch') {
+        const now = Date.now();
+        const timestamps = clickTimestampsRef.current;
+        timestamps.push(now);
+        // Keep only last 30s of clicks
+        const cutoff = now - 30000;
+        while (timestamps.length > 0 && timestamps[0] < cutoff) {
+          timestamps.shift();
+        }
+        const count10s = timestamps.filter((t) => t > now - 10000).length;
+        const count30s = timestamps.length;
+        clickTimestampsRef.current = timestamps;
+        void binderRef.current?.sendTouch(
+          data.touchArea || '头',
+          { count_10s: count10s, count_30s: count30s },
+        );
+        return;
       }
     } catch {
       // ignore malformed WebView messages

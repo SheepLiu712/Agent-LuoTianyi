@@ -12,6 +12,12 @@ class AuthApi:
         self.verify_ssl = verify_ssl
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
 
+    def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
+        """更新服务器地址，同时重新创建 HTTP 会话。"""
+        self.base_url = base_url.rstrip("/")
+        self.verify_ssl = verify_ssl
+        self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
+
     def login(self, username: str, password: str, request_token: bool = False) -> Tuple[bool, str, dict]:
         encrypted_password = encrypt_pwd.encrypt_password(
             password,
@@ -74,4 +80,32 @@ class AuthApi:
             detail = resp.json().get("detail", "Registration Failed")
         except Exception:
             detail = "Registration Failed"
+        return False, detail
+
+    def reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
+        """通过邀请码重置账号的用户名和密码。"""
+        encrypted_password = encrypt_pwd.encrypt_password(
+            new_password,
+            base_url=self.base_url,
+            verify_ssl=self.verify_ssl,
+        )
+        if not encrypted_password:
+            return False, "Failed to encrypt password. Check server connection."
+
+        resp = self.session.post(
+            f"{self.base_url}/auth/reset_account",
+            json={
+                "invite_code": invite_code,
+                "new_username": new_username,
+                "new_password": encrypted_password,
+            },
+            verify=self.verify_ssl,
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            return True, "Reset Successful"
+        try:
+            detail = resp.json().get("detail", "Reset Failed")
+        except Exception:
+            detail = "Reset Failed"
         return False, detail

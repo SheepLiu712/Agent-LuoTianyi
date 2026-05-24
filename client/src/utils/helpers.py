@@ -56,7 +56,9 @@ def load_config(config_path: str, default_config: Optional[Dict] = None) -> Dict
 
 
 def resolve_runtime_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    """根据 is_debug 选择运行时网络配置，并提升为顶层字段。"""
+    """根据 is_debug 选择运行时网络配置，并提升为顶层字段。
+    随后尝试从凭据文件 (temp/user.json) 中读取自定义服务器地址覆盖 base_url。
+    """
     if not isinstance(config, dict):
         return config
 
@@ -71,6 +73,16 @@ def resolve_runtime_config(config: Dict[str, Any]) -> Dict[str, Any]:
     # 为网络参数提供安全默认值
     if "verify_ssl" not in config:
         config["verify_ssl"] = True
+
+    # 尝试从凭据文件读取自定义服务器地址及 SSL 设置覆盖 base_url
+    try:
+        from ..safety.credential import get_server_url, get_server_verify_ssl
+        saved_url = get_server_url()
+        if saved_url:
+            config["base_url"] = saved_url
+            config["verify_ssl"] = get_server_verify_ssl()
+    except Exception:
+        pass
 
     if not config.get("base_url"):
         print("配置缺少 base_url，请检查 config/config.json")

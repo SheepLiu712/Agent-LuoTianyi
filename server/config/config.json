@@ -21,19 +21,6 @@
             "graph_alias_path": "alias.json"
         }
     },
-    "knowledge": {
-        "song_database": {
-            "db_folder": "res/knowledge",
-            "db_file": "knowledge_db.db"
-        },
-        "llm":{
-                "api_type": "openai",
-                "model": "qwen3.5-plus",
-                "api_key": "$QWEN_API_KEY",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "enable_thinking": false
-            }
-    },
     "tts": {
         "character_name": "LuoTianyi",
         "onnx_model_dir": "res/tts/lty_custom_onnx_model",
@@ -46,6 +33,19 @@
     },
     "prompt_manager": {
         "template_dir": "res/agent/prompts"
+    },
+    "date_detector": {
+        "llm_module": {
+            "llm": {
+            "api_type": "openai",
+            "model": "qwen3.5-plus",
+            "api_key": "$QWEN_API_KEY",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "enable_thinking": false
+            },
+            "prompt_name": "date_detection_prompt"
+        }
+        
     },
     "topic_extractor": {
         "llm_module": {
@@ -98,40 +98,12 @@
         "llm_module": {
             "llm": {
                 "api_type": "openai",
-                "model": "deepseek-chat",
-                "api_key": "$DEEPSEEK_API_KEY",
-                "base_url": "https://api.deepseek.com/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
+                "model": "qwen3.5-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "enable_thinking": false
             },
             "prompt_name": "summary_prompt"
-        }
-    },
-    "crawler": {
-        "activated": true,
-        "data_dir": "data/crawled_data",
-        "vcpedia": {
-            "base_url": "https://vcpedia.cn",
-            "crawl_delay_range": [
-                1.0,
-                2.0
-            ],
-            "output_dir": "data/crawled_data",
-            "max_pages": 1000
-        },
-        "use_llm": false,
-        "llm_module": {
-            "llm": {
-                "api_type": "openai",
-                "model": "Qwen/Qwen3-32B",
-                "api_key": "$SILICONFLOW_API_KEY",
-                "base_url": "https://api.siliconflow.cn/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
-            },
-            "prompt_name": "crawl_prompt"
         }
     },
     "memory_manager": {
@@ -139,31 +111,19 @@
             "retriever_type": "memory"
         },
         "user_profile": {
-        "llm_module": {
-            "llm": {
-                "api_type": "openai",
-                "model": "qwen3.5-plus",
-                "api_key": "$QWEN_API_KEY",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            },
-            "prompt_name": "user_profile_update_prompt"
-        }
-    },
-        "memory_searcher": {
-            "max_k_graph_entities": 3,
-            "max_k_vector_entities": 5,
             "llm_module": {
                 "llm": {
                     "api_type": "openai",
-                    "model": "deepseek-chat",
-                    "api_key": "$DEEPSEEK_API_KEY",
-                    "base_url": "https://api.deepseek.com/v1",
-                    "temperature": 0.7,
-                    "max_tokens": 8192,
-                    "top_p": 0.9
+                    "model": "qwen3.5-plus",
+                    "api_key": "$QWEN_API_KEY",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
                 },
-                "prompt_name": "memory_search_prompt"
+                "prompt_name": "user_profile_update_prompt"
             }
+        },
+        "memory_searcher": {
+            "max_k_graph_entities": 3,
+            "max_k_vector_entities": 5
         },
         "memory_writer": {
             "recent_update_path": "data/memory/context/recent_update.json",
@@ -193,7 +153,10 @@
             "max_stops": 4,
             "move_energy_per_km": 5,
             "activity_energy_per_30min": 8,
-            "activity_duration_min": [20, 60],
+            "activity_duration_min": [
+                20,
+                60
+            ],
             "start_district_code": ""
         },
         "search": {
@@ -201,7 +164,13 @@
             "offset": 10,
             "max_action_rounds": 20,
             "types": "050000|060000|110000|120000",
-            "keywords": ["餐厅", "咖啡", "公园", "商场", "书店"]
+            "keywords": [
+                "餐厅",
+                "咖啡",
+                "公园",
+                "商场",
+                "书店"
+            ]
         },
         "report": {
             "output_dir": "data/citywalk_reports",
@@ -241,6 +210,44 @@
             }
         }
     },
+    "music": {
+        "resource_path": "res/music",
+        "auto_song_learner": {
+            "resource_path": "res/music",
+            "songlearner_dir": "src/plugins/music/song_learner",
+            "songlearner_resource_dir": "res/song_learner"
+        },
+        "singing_manager": {
+            "resource_path": "res/music"
+        },
+        "song_knowledge": {
+            "song_database": {
+                "db_folder": "res/knowledge",
+                "db_file": "knowledge_db.db"
+            },
+            "crawler": {
+                "activated": true,
+                "data_dir": "data/crawled_data",
+                "vcpedia": {
+                    "base_url": "https://vcpedia.cn",
+                    "crawl_delay_range": [
+                        1.0,
+                        2.0
+                    ],
+                    "output_dir": "data/crawled_data",
+                    "max_pages": 1000
+                },
+                "use_llm": false,
+                "llm": {
+                    "api_type": "openai",
+                    "model": "qwen3.5-plus",
+                    "api_key": "$QWEN_API_KEY",
+                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "enable_thinking": false
+                }
+            }
+        }
+    },
     "activity_maker": {
         "return_user_threshold_seconds": 432000,
         "silence_threshold_seconds": 180,
@@ -250,8 +257,14 @@
         "silence_trigger_cooldown_seconds": 180,
         "activity_res": {
             "first_login": {
-                "text": ["你好呀，我是洛天依！","欢迎来到这里！今天想聊点什么呢？"],
-                "audio_path": ["res/tts/static_audio/first_greet_1.wav","res/tts/static_audio/first_greet_2.wav"]
+                "text": [
+                    "你好呀，我是洛天依！",
+                    "欢迎来到这里！今天想聊点什么呢？"
+                ],
+                "audio_path": [
+                    "res/tts/static_audio/first_greet_1.wav",
+                    "res/tts/static_audio/first_greet_2.wav"
+                ]
             },
             "return_login": {
                 "prompt": "return_login_activity_prompt"
@@ -267,5 +280,51 @@
             "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
             "enable_thinking": false
         }
+    },
+    "schedule": {
+        "data_file": "data/schedule/events.json",
+        "fetch_interval_hours": 6,
+        "check_interval_seconds": 60,
+        "bilibili_uids": [
+            "387636363",
+            "1149997800"
+        ],
+        "llm": {
+            "api_type": "openai",
+            "model": "qwen3.5-plus",
+            "api_key": "$QWEN_API_KEY",
+            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "enable_thinking": false
+        },
+        "vlm": {
+                "api_type": "openai",
+                "model": "qwen3-vl-plus",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "temperature": 0.7,
+                "max_tokens": 8192,
+                "top_p": 0.9
+        },
+        "reminder": {
+            "advance_days_concert": [
+                3,
+                1,
+                0
+            ],
+            "advance_days_general": [
+                0
+            ]
+        },
+        "context": {
+            "lookahead_days": 7,
+            "max_context_events": 5,
+            "mention_cooldown_hours": 6
+        },
+        "silence": {
+            "concert_pre_start_minutes": 60,
+            "concert_post_end_minutes": 30
+        },
+        "official_accounts": {}
+        
     }
 }

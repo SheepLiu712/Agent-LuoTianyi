@@ -4,11 +4,14 @@ Data: 2026-04-07
 Description: 主界面UI实现，包含Live2D显示和聊天窗口两部分，以及它们的交互逻辑。通过Binder与后端处理逻辑连接。
 '''
 import os
+import time
+from collections import deque
 from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, Signal
 from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon, QPixmap
-from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
-                               QTextEdit, QScrollArea, QLabel, 
-                                QFrame, QPushButton, QFileDialog, QSlider, )
+from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
+                               QTextEdit, QScrollArea, QLabel,
+                                QFrame, QPushButton, QFileDialog, QSlider,
+                                QMessageBox)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
 from typing import Dict, Any, List
@@ -17,6 +20,7 @@ from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
 from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, BubblePlaybackManager
+from .preferences_dialog import PreferencesDialog
 
 class Live2DWidget(QOpenGLWidget):
     '''
@@ -27,8 +31,14 @@ class Live2DWidget(QOpenGLWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
         self.model: Live2dModel = Live2dModel(live2d_config)
+        self.agent_binder = agent_binder
         agent_binder.on_set_model(self.model) # 有些参数需要在创建模型之后才能设置，所以通过binder传递模型实例给agent_binder，由它来调用相关回调设置参数。
         self.setMouseTracking(True)
+        # 点击间隔控制（防止服务端过载）
+        self._click_interval = 0.3  # 300ms
+        self._last_click_time = 0.0
+        # 点击频率统计（供LLM分析）
+        self._click_timestamps: deque = deque(maxlen=50)
 
     def initializeGL(self) -> None:
         # Load model config
@@ -63,13 +73,39 @@ class Live2DWidget(QOpenGLWidget):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         '''
-        处理鼠标点击事件，判断是否点击在模型的特定区域（如头部），如果是则触发模型表情变化。
+        处理鼠标点击事件，只检测头部点击区域，设置点击间隔防止服务端过载，
+        并统计点击频率供LLM分析用户行为。
         '''
         if not self.model:
             return
+
+        # 点击间隔控制
+        now = time.time()
+        if now - self._last_click_time < self._click_interval:
+            return
+        self._last_click_time = now
+
         x, y = event.position().x(), event.position().y()
+
+        # 只保留头部点击区域
         if self.model.HitTest("头", x, y):
-            self.model.set_next_expression()
+            # 记录点击时间戳
+            self._click_timestamps.append(now)
+
+            # 计算点击频率（最近N秒内的点击次数）
+            cutoff_10s = now - 10
+            cutoff_30s = now - 30
+            count_10s = sum(1 for t in self._click_timestamps if t > cutoff_10s)
+            count_30s = sum(1 for t in self._click_timestamps if t > cutoff_30s)
+            click_frequency = {
+                "count_10s": count_10s,
+                "count_30s": count_30s,
+            }
+
+            # 播放对应的 Tap 动画
+            self.model.StartMotion("Tap头", 0, 3)
+            # 向服务端发送触摸事件及频率数据，由LLM生成回应
+            self.agent_binder.on_send_touch("头", click_frequency=click_frequency)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         '''
@@ -274,10 +310,12 @@ class ChatWidget(QWidget):
     我不太会写UI，这部分主要是AI写的。关键的回调逻辑是我看过的，也比较trivial，不详细解释了。
     '''
 
-    def __init__(self, config: Dict, agent_binder: AgentBinder, parent=None):
+    def __init__(self, config: Dict, agent_binder: AgentBinder, network_client=None, parent=None):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.agent = agent_binder
+        self.network_client = network_client
+        self.preferences_manager = None  # Will be set from main.py
         self.agent.response_signal.connect(self.on_agent_response)
         self.agent.delete_signal.connect(self.on_agent_delete)
         self.playback_manager = BubblePlaybackManager(
@@ -293,9 +331,11 @@ class ChatWidget(QWidget):
         self.is_loading_history = False
         self.first_load = True
         self.agent_bubbles: dict[str, ChatBubble] = {}
-
+        
+        
         self.init_ui()
-
+        
+        
         # Initial load
         QTimer.singleShot(100, lambda: self.agent.load_history(self.load_history_num, -1))
 
@@ -432,6 +472,26 @@ class ChatWidget(QWidget):
         
         self.toolbar_layout.addWidget(self.picture_btn)
         self.toolbar_layout.addWidget(self.volume_btn)
+        
+        # Settings Button
+        self.settings_btn = HoverButton(tooltip_text="偏好设置")
+        icon_path = os.path.join("res", "gui", "setting.png")
+        self.settings_btn.setIcon(QIcon(icon_path))
+        self.settings_btn.setFixedSize(24, 24)
+        self.settings_btn.setStyleSheet("""
+            QPushButton { 
+                border: none; 
+                background-color: transparent; 
+            } 
+            QPushButton:hover { 
+                background-color: #E0E0E0; 
+                border-radius: 4px; 
+            }
+        """)
+        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_btn.clicked.connect(self.open_settings)
+        self.toolbar_layout.addWidget(self.settings_btn)
+        
         self.toolbar_layout.addStretch()
 
         # Horizontal Line 2
@@ -468,6 +528,14 @@ class ChatWidget(QWidget):
         self.setLayout(layout)
         self.temp_is_user = True
 
+    def open_settings(self):
+        print("Opening preferences dialog...")
+        if self.network_client:
+            dialog = PreferencesDialog(self.network_client, self)
+            dialog.exec()
+        else:
+            QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开偏好设置")
+    
     def on_scroll_value_changed(self, value):
         if value == 0 and not self.is_loading_history and self.current_history_index > 0:
             self.is_loading_history = True
@@ -628,13 +696,15 @@ class ChatWidget(QWidget):
                                       self.input_box.height() - s.height() - 10)
         return super().eventFilter(obj, event)
 
+
+    
     def handle_text_input(self):
         if self.can_send == False:
             return
         text = self.input_box.toPlainText().strip()
         if not text:
             return
-        
+
         bubble = self.add_message("text", text, conv_uuid="", is_user=True)
         self.input_box.clear()
         
@@ -662,7 +732,7 @@ class ChatWidget(QWidget):
 
 
 class MainWindow(QWidget):
-    def __init__(self, gui_config, live2d_config, ui_binder: AgentBinder):
+    def __init__(self, gui_config, live2d_config, ui_binder: AgentBinder, network_client=None):
         super().__init__()
         self.setWindowTitle("Chat with Luo Tianyi")
         self.resize(1100, 800)
@@ -683,7 +753,7 @@ class MainWindow(QWidget):
         self.v_line.setFixedWidth(2)
 
         # Right Side (Chat)
-        self.chat_widget = ChatWidget(config=gui_config["chat_window"], agent_binder=ui_binder)
+        self.chat_widget = ChatWidget(config=gui_config["chat_window"], agent_binder=ui_binder, network_client=network_client)
         self.layout.addWidget(self.live2d_container)
         self.layout.addWidget(self.v_line)
         self.layout.addWidget(self.chat_widget)

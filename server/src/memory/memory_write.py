@@ -48,12 +48,34 @@ class MemoryWriter:
             related_memories=related_memories or [],
         )
 
-        # 按新的 JSON 协议写入记忆。
-        for content in memory_payload.get("user_memory", []):
-            await self.write_user_memory(db, redis, vector_store, user_id, content, commit=commit)
+        # Batch dedup: do one search per memory type for all items,
+        # then write only non-duplicate items.
+        user_items = memory_payload.get("user_memory", [])
+        event_items = memory_payload.get("event_memory", [])
 
-        for content in memory_payload.get("event_memory", []):
-            await self.write_event_memory(db, redis, vector_store, user_id, content, commit=commit)
+        if user_items:
+            # Single de-dup pass for all user memory items
+            seen_texts = await self._batch_check_user_memory_dups(
+                vector_store, user_id, user_items
+            )
+            for content in user_items:
+                text = (content or "").strip()
+                if not text or text in seen_texts:
+                    continue
+                seen_texts.add(text)
+                await self.write_user_memory(db, redis, vector_store, user_id, content, commit=commit)
+
+        if event_items:
+            today = time.strftime("%Y-%m-%d")
+            seen_texts = await self._batch_check_event_memory_dups(
+                vector_store, user_id, event_items, today
+            )
+            for content in event_items:
+                text = (content or "").strip()
+                if not text or text in seen_texts:
+                    continue
+                seen_texts.add(text)
+                await self.write_event_memory(db, redis, vector_store, user_id, content, commit=commit)
 
     async def _extract_knowledge(
         self,
@@ -229,6 +251,54 @@ class MemoryWriter:
             if existing and existing == target:
                 return True
         return False
+
+    async def _batch_check_user_memory_dups(
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        items: List[str],
+    ) -> set:
+        """Batch check: collect all existing user_memory text in one search pass."""
+        seen = set()
+        if not items:
+            return seen
+        # Search with the first item — it's representative enough to catch most duplicates.
+        threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
+        results = await vector_store.search(user_id, items[0], k=20)
+        for doc, score in results:
+            metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
+            if metadata.get("memory_type") != "user_memory":
+                continue
+            if score >= threshold:
+                content = doc.get_content() if hasattr(doc, "get_content") else ""
+                if content:
+                    seen.add(content.strip())
+        return seen
+
+    async def _batch_check_event_memory_dups(
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        items: List[str],
+        event_date: str,
+    ) -> set:
+        """Batch check: collect all same-day event_memory text in one search pass."""
+        seen = set()
+        if not items:
+            return seen
+        results = await vector_store.search(user_id, items[0], k=20)
+        target_norm = None
+        for doc, _ in results:
+            metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
+            if metadata.get("memory_type") != "event_memory":
+                continue
+            doc_date = str(metadata.get("event_date") or metadata.get("timestamp") or "")
+            if doc_date != event_date:
+                continue
+            existing = doc.get_content() if hasattr(doc, "get_content") else ""
+            if existing:
+                seen.add(self._normalize_text(existing))
+        return seen
 
     def _normalize_text(self, text: str) -> str:
         return " ".join((text or "").strip().split())

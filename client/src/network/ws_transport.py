@@ -29,6 +29,7 @@ class WsTransport:
         self._ack_waiter: dict | None = None
         self._agent_message_listener: Callable[[AgentMessage], None] | None = None # 收到的消息发送到哪里
         self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
+        self._date_detected_listener: Callable[[dict], None] | None = None # 检测到重要日期的监听器
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -39,6 +40,13 @@ class WsTransport:
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
         self._connected_event = threading.Event()
+
+    def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
+        """更新服务器地址，断开当前连接以便自动重连到新地址。"""
+        self.base_url = base_url.rstrip("/")
+        self.verify_ssl = verify_ssl
+        # 断开当前 WS，_run() 循环会自动用新 base_url 重连
+        self.stop()
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -67,8 +75,11 @@ class WsTransport:
             self._agent_message_listener = agent_message_listener
             self._agent_state_listener = agent_state_listener
 
-    def submit_user_text(self, text: str, ack_timeout: float = 10.0) -> dict:
-        return self._submit_user_event(WSEventType.USER_TEXT, payload={"message": text}, ack_timeout=ack_timeout)
+    def submit_user_text(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0) -> dict:
+        payload = {"message": text}
+        if is_proactive:
+            payload["is_proactive"] = True
+        return self._submit_user_event(WSEventType.USER_TEXT, payload=payload, ack_timeout=ack_timeout)
 
     def submit_user_image(self, image_base64: str, mime_type: str, image_client_path: str | None = None, ack_timeout: float = 10.0) -> dict:
         payload = {
@@ -81,6 +92,15 @@ class WsTransport:
     
     def submit_typing_event(self, text_length: int, ack_timeout: float = 10.0) -> dict:
         return self._submit_user_event(WSEventType.USER_TYPING, payload={"text_length": text_length}, ack_timeout=ack_timeout)
+
+    def submit_user_touch(self, touch_area: str, click_frequency: dict = None, ack_timeout: float = 10.0) -> dict:
+        payload = {"touch_area": touch_area}
+        if click_frequency:
+            payload["click_frequency"] = click_frequency
+        return self._submit_user_event(WSEventType.USER_TOUCH, payload=payload, ack_timeout=ack_timeout)
+
+    def submit_user_preferences(self, preferences: dict, ack_timeout: float = 10.0) -> dict:
+        return self._submit_user_event(WSEventType.USER_PREFERENCE_SYNC, payload=preferences, ack_timeout=ack_timeout)
 
     def _submit_user_event(self, event_type: WSEventType, payload: dict, ack_timeout: float) -> dict:
         event = build_event(event_type, payload=payload)
@@ -340,6 +360,7 @@ class WsTransport:
             self._agent_state_listener(state_msg)
         except Exception:
             pass
+
 
     @staticmethod
     def _build_ws_url(base_url: str) -> str:

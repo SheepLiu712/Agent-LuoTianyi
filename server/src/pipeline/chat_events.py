@@ -7,6 +7,7 @@ class ChatInputEventType(str, Enum):
     USER_TEXT = "user_text"
     USER_IMAGE = "user_image"
     USER_TYPING = "user_typing"
+    USER_TOUCH = "user_touch"
     SYSTEM_EVENT = "system_event" # 预留的系统事件类型，当前未使用
 
 

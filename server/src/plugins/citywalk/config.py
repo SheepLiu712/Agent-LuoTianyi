@@ -69,9 +69,8 @@ DEFAULT_CITYWALK_CONFIG: Dict[str, Any] = {
 }
 
 
-def load_citywalk_config(config_path: str = "config/config.json") -> Dict[str, Any]:
-    all_config = load_config(config_path, default_config={})
-    citywalk = all_config.get("citywalk", {})
+def load_citywalk_config(citywalk: Dict[str,Any]) -> Dict[str, Any]:
+
 
     # Merge defaults manually to avoid side effects.
     merged = {

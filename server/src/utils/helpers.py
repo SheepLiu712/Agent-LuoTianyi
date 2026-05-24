@@ -403,7 +403,7 @@ def get_system_info() -> Dict[str, Any]:
         "cpu_count": psutil.cpu_count(),
         "memory_total": psutil.virtual_memory().total,
         "memory_available": psutil.virtual_memory().available,
-        "disk_usage": dict(psutil.disk_usage('/'))
+        "disk_usage": dict(psutil.disk_usage('/' if sys.platform != 'win32' else 'C:\\'))
     }
 
 

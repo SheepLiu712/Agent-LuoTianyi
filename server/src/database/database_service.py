@@ -405,7 +405,7 @@ def update_context_summary(db: Session, redis: MemoryStorage, user_id: str, new_
         db.rollback()
 
 
-def get_context_from_buffer(db: Session, redis: MemoryStorage, user_id: str) -> List[Dict[str, Any]]:
+def get_context_from_buffer(db: Session, redis: MemoryStorage, user_id: str) -> Any:
     """
     优先从 Redis 获取上下文，如果不存在则调用 prefill_buffer 加载
     """
@@ -474,7 +474,6 @@ def get_user_nickname(db: Session, redis: MemoryStorage, user_id: str) -> Option
     """
     redis_key = f"user_nickname:{user_id}"
     nickname = redis.get(redis_key)
-    print(nickname)
     if nickname:
         return nickname
     

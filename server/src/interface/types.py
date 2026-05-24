@@ -28,9 +28,24 @@ class RegisterRequest(BaseModel):
     password: str
     invite_code: str
 
+class ResetAccountRequest(BaseModel):
+    """通过邀请码重置用户名和密码"""
+    invite_code: str
+    new_username: str
+    new_password: str
+
 class AutoLoginRequest(BaseModel):
     username: str
     token: str
+
+class PreferenceGetRequest(BaseModel):
+    username: str
+    token: str
+
+class PreferenceOverwriteRequest(BaseModel):
+    username: str
+    token: str
+    preferences: dict
 
 from fastapi import Form, File, UploadFile
 class PictureChatRequest:
@@ -77,10 +92,14 @@ class WSEventType(str, Enum):
     USER_TEXT = "user_text"
     USER_TYPING = "user_typing"
     USER_AUTH = "user_auth"
+    USER_TOUCH = "user_touch"
+
+    USER_PREFERENCE_SYNC = "user_preference_sync"
 
 
     HB_PING = "hb_ping"
     HB_PONG = "hb_pong"
+    DATE_DETECTED = "date_detected"
 
 @dataclass
 class WSMessage:

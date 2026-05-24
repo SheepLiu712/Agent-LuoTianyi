@@ -49,13 +49,16 @@ class MessageProcessor:
 
         # 设置消息处理器发送消息的网络客户端接口，以及将消息处理器接收消息的函数传入网络客户端，以便网络客户端能将WS消息传入消息处理器
         network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state)
-        self.send_text_func:Callable[[str], dict] = network_client.send_chat
+        self.send_text_func:Callable[..., dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
         self.send_typing_func:Callable[[int], dict] = network_client.send_typing
+        self.send_touch_func:Callable[..., dict] = network_client.send_touch
+        self.send_preferences_func:Callable[[dict], dict] = network_client.send_preferences
         self.start()
 
         self.processing_uuid = None
         self.processing_audio: bytearray = bytearray()
+        self.date_detected_signal: Callable[[dict], None] | None = None  # 检测到重要日期的信号
 
     def start(self):
         self._listener_thread.start()
@@ -96,6 +99,20 @@ class MessageProcessor:
             self._send_cond.notify()
         return local_id
 
+    def send_proactive_text(self, text: str):
+        """发送不会被保存到数据库的系统主动消息（如日期提醒），由AI响应但不记录为用户发言。"""
+        local_id = self._next_local_id("proactive")
+        item = OutgoingMessage(
+            local_id=local_id,
+            kind="proactive",
+            payload={"text": text},
+            done_event=threading.Event(),
+        )
+        with self._send_cond:
+            self._send_queue.append(item)
+            self._send_cond.notify()
+        return local_id
+
     def send_image(self, image_path: str):
         prepared = self._prepare_image_payload(image_path)
         if not prepared.get("ok", False):
@@ -110,6 +127,26 @@ class MessageProcessor:
                 "mime_type": prepared["mime_type"],
                 "image_client_path": prepared["image_client_path"],
             },
+            done_event=threading.Event(),
+        )
+        with self._send_cond:
+            self._send_queue.append(item)
+            self._send_cond.notify()
+        return local_id
+
+    def send_preferences(self, preferences: dict):
+        """将用户偏好设置发送到服务端保存，不经过消息队列。"""
+        self.send_preferences_func(preferences)
+
+    def send_touch(self, touch_area: str, click_frequency: dict = None):
+        local_id = self._next_local_id("touch")
+        payload = {"touch_area": touch_area}
+        if click_frequency:
+            payload["click_frequency"] = click_frequency
+        item = OutgoingMessage(
+            local_id=local_id,
+            kind="touch",
+            payload=payload,
             done_event=threading.Event(),
         )
         with self._send_cond:
@@ -224,11 +261,13 @@ class MessageProcessor:
         update_bubble_signal: Callable[[str, str], None],
         agent_thinking_signal: Callable[[str], None],
         local_tts_state_signal: Callable[[str, str], None] | None = None,
+        date_detected_signal: Callable[[dict], None] | None = None,
     ):
         self.response_signal = response_signal
         self.update_bubble_signal = update_bubble_signal
         self.agent_thinking_signal = agent_thinking_signal
         self.local_tts_state_signal = local_tts_state_signal
+        self.date_detected_signal = date_detected_signal
 
     def _on_local_tts_state(self, event: str, conv_uuid: str):
         if self.local_tts_state_signal:
@@ -254,6 +293,8 @@ class MessageProcessor:
     def _send_one(self, item: OutgoingMessage) -> dict:
         if item.kind == "text":
             return self.send_text_func(item.payload["text"], ack_timeout=1.0)
+        if item.kind == "proactive":
+            return self.send_text_func(item.payload["text"], is_proactive=True, ack_timeout=1.0)
         if item.kind == "image":
             return self.send_image_func(
                 image_base64=item.payload["image_base64"],
@@ -263,6 +304,11 @@ class MessageProcessor:
             )
         if item.kind == "typing":
             return self.send_typing_func(text_length=item.payload["text_length"], ack_timeout=1.0)
+        if item.kind == "touch":
+            kwargs = {"touch_area": item.payload["touch_area"], "ack_timeout": 1.0}
+            if "click_frequency" in item.payload:
+                kwargs["click_frequency"] = item.payload["click_frequency"]
+            return self.send_touch_func(**kwargs)
         return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}", "drop": True}
 
     def _prepare_image_payload(self, image_path: str) -> dict:

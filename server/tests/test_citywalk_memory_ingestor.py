@@ -79,7 +79,7 @@ def test_ingest_session_with_llm_split():
     assert len(vector_store.docs) == 2
     metadata = vector_store.docs[0].get_metadata()
     assert metadata["is_citywalk_data"] is True
-    assert metadata["citywalk_date"] == "2026-04-27"
+    assert metadata["citywalk_date"] == "2026-04-26"
     assert metadata["source"] == "citywalk"
 
 

@@ -32,6 +32,15 @@ class NetworkClient:
             verify_ssl=self.verify_ssl,
         )
 
+    def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
+        """更新服务器地址，同步更新 AuthApi、WsTransport 和 HTTP 会话。"""
+        self.base_url = base_url.rstrip("/")
+        self.verify_ssl = verify_ssl
+        self.auth_api.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
+        self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
+        self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
+        self.logger.info(f"Base URL updated to: {self.base_url}")
+
     def login(self, username: str, password: str, request_token: bool = False) -> Tuple[bool, str]:
         try:
             success, msg, data = self.auth_api.login(username, password, request_token=request_token)
@@ -74,11 +83,18 @@ class NetworkClient:
         except Exception as exc:
             return False, str(exc)
 
-    def send_chat(self, text: str, ack_timeout: float = 10.0):
+    def reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
+        """通过邀请码重置账号的用户名和密码。"""
+        try:
+            return self.auth_api.reset_account(invite_code, new_username, new_password)
+        except Exception as exc:
+            return False, str(exc)
+
+    def send_chat(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0):
         if not self.user_id or not self.message_token:
             return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
 
-        return self.ws_transport.submit_user_text(text, ack_timeout=ack_timeout)
+        return self.ws_transport.submit_user_text(text, is_proactive=is_proactive, ack_timeout=ack_timeout)
 
     def send_image(self, image_base64: str, mime_type: str, image_client_path: str | None = None, ack_timeout: float = 10.0):
         if not self.user_id or not self.message_token:
@@ -104,7 +120,73 @@ class NetworkClient:
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
-        
+
+    def send_touch(self, touch_area: str, click_frequency: dict = None, ack_timeout: float = 10.0):
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_user_touch(touch_area=touch_area, click_frequency=click_frequency, ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+
+    def send_preferences(self, preferences: dict, ack_timeout: float = 10.0):
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_user_preferences(preferences=preferences, ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+
+    def get_preferences(self) -> dict:
+        """从服务器获取偏好设置。"""
+        if not self.user_id:
+            return {}
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/preference/get",
+                json={"username": self.user_id, "token": self.message_token},
+                verify=self.verify_ssl,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("preferences", data)
+            elif resp.status_code == 401:
+                self.logger.warning("获取偏好设置失败: 未授权")
+                return {}
+            else:
+                self.logger.warning(f"获取偏好设置失败: HTTP {resp.status_code}")
+                return {}
+        except Exception as exc:
+            self.logger.error(f"获取偏好设置失败: {exc}")
+            return {}
+
+    def overwrite_preferences(self, preferences: dict) -> dict:
+        """覆盖保存偏好设置到服务器。"""
+        if not self.user_id:
+            return {"status": "error", "message": "Not logged in"}
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/preference/overwrite",
+                json={
+                    "username": self.user_id,
+                    "token": self.message_token,
+                    "preferences": preferences,
+                },
+                verify=self.verify_ssl,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            elif resp.status_code == 401:
+                return {"status": "error", "message": "Unauthorized"}
+            else:
+                return {"status": "error", "message": f"HTTP {resp.status_code}"}
+        except Exception as exc:
+            self.logger.error(f"保存偏好设置失败: {exc}")
+            return {"status": "error", "message": str(exc)}
 
     def get_history(self, count: int, end_index: int) -> Tuple[List[ConversationItem], int]:
         if not self.user_id:

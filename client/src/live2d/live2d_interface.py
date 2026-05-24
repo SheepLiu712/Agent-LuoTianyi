@@ -30,6 +30,7 @@ class Live2dModel():
         self.model.SetAutoBlinkEnable(True)
         self.model.SetAutoBreathEnable(True)
         self.model.SetOffset(self.offset[0], self.offset[1])
+        self.model.SetScale(self.model_config.get("scale", 1.5))
 
     # Belows are init functions
     def _init_expression(self) -> None:
