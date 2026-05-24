@@ -146,7 +146,7 @@ class PromptManager:
             name: 模板名称
             template_str: 模板字符串
         """
-        self.templates[name] = PromptTemplate(template_str, name)
+        self.templates[name] = PromptTemplate(template_str, name=name)
         self.logger.info(f"添加模板: {name}")
 
     def remove_template(self, name: str) -> bool:
