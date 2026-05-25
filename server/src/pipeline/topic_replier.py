@@ -79,7 +79,6 @@ class TopicReplier:
 
         topic_content = topic.topic_content
         if self.service_hub.schedule_manager:
-            raise RuntimeError("Schedule manager should not be set for topic replier, check the initialization logic")
             try:
                 activity_ctx = self.service_hub.schedule_manager.get_active_context(self.user_id)
                 if activity_ctx:

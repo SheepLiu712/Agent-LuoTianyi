@@ -42,42 +42,9 @@ class ActionActivity:
 
 
 def _is_chinese_holiday(dt: datetime):
-    # 仅判断若干常见公历节日：元旦、劳动节、国庆节、圣诞等
-    mmdd = dt.strftime("%m-%d")
-    fixed = {
-        "01-01": "元旦",
-        "05-01": "劳动节",
-        "10-01": "国庆节",
-        "12-25": "圣诞节",
-        "10-31": "万圣节",
-        "02-14": "情人节",
-        "04-01": "愚人节",
-        "05-20": "谐音'我爱你'的情人节，或者谐音'我爱绫'的喜欢乐正绫的节日",
-        "05-21": "谐音'我爱依'的喜欢洛天依的节日",
-        "04-12": "乐正绫的生日",
-        "07-12": "洛天依的生日",
-        "07-11": "言和的生日",
-        "11-11": "双十一"
-    }
-    holiday_name = fixed.get(mmdd)
-    if holiday_name:
-        return holiday_name
-
-    # 判断农历节日
-    from lunardate import LunarDate
-
-    fixed = {"08-15": "中秋节", "01-01": "春节", "05-05": "端午节", "07-07": "七夕节", "01-15": "元宵节"}
-    lunar_dt = LunarDate.fromSolarDate(dt.year, dt.month, dt.day)
-    lunar_mmdd = f"{lunar_dt.month:02d}-{lunar_dt.day:02d}"
-    holiday_name = fixed.get(lunar_mmdd)
-    if holiday_name:
-        return holiday_name
-
-    # 特判除夕夜
-    lunar_dt = lunar_dt + timedelta(days=1)
-    if lunar_dt.month == 1 and lunar_dt.day == 1:
-        return "除夕夜"
-    return None
+    """已废弃：节日检索已统一走 EventStore.get_events_due_for_trigger()。保留此函数供参考。"""
+    from src.utils.lunar_date import get_holiday_name as _get_holiday_name
+    return _get_holiday_name(dt.year, dt.month, dt.day)
 
 
 @dataclass
@@ -220,35 +187,33 @@ class ActivityMaker:
 
         if action.activity_type == ActivityType.REGULAR_LOGIN:
             # 当天第一次登录（非首次安装/首次登录，也不是长时未登录）触发
-            topics_to_add = []
-            # 1) 检查今天是否为常见中国节日（简单判断固定公历节日）
+            topics_to_add: List[ExtractedTopic] = []
 
-            holiday_name = _is_chinese_holiday(datetime.now())
-            if holiday_name:
-                topics_to_add.append(
-                    ExtractedTopic(
-                        topic_id=str(uuid4()),
-                        source_messages=[],
-                        topic_content=f"今天是{holiday_name}，闲聊几句并询问用户今天是否有安排。",
-                        memory_attempts=[],
-                        fact_constraints=[],
-                        sing_attempts=[],
-                        is_forced_from_incomplete=True,
-                    )
-                )
-
-            # 2) 检查昨天是否有 citywalk，如果有，生成话题并在 memory_attempts 中调用 /YesterdayCityWalk
-            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+            # 1-4) 统一通过 schedule 模块检索：节日 / citywalk / new_song / 用户重要日期
+            #      如果已在 schedule 中提醒过，则 login 时不再重复提示
             try:
-                if self.agent:
-                    overview = await self.agent.get_citywalk_overview_by_date(yesterday)
-                    if overview:
-                        dest = (
-                            overview.get("selected_destination")
-                            or overview.get("selected_destination_name")
-                            or overview.get("selected_destination", "昨天的目的地")
+                store = self.service_hub.schedule_manager.event_store
+                due = store.get_events_due_for_trigger()
+                for event_dict, trigger_key in due:
+                    evt_type = event_dict.get("event_type", "")
+
+                    if evt_type == "holiday":
+                        holiday_name = event_dict.get("title", "节日")
+                        topics_to_add.append(
+                            ExtractedTopic(
+                                topic_id=str(uuid4()),
+                                source_messages=[],
+                                topic_content=f"今天是{holiday_name}，闲聊几句并询问用户今天是否有安排。",
+                                memory_attempts=[],
+                                fact_constraints=[],
+                                sing_attempts=[],
+                                is_forced_from_incomplete=True,
+                            )
                         )
-                        topic_content = f"洛天依昨天独自前往{dest}玩了，和用户分享一下。"
+
+                    elif evt_type == "travel":
+                        dest_name = event_dict.get("title", "某个地方")
+                        topic_content = f"洛天依昨天独自前往{dest_name}游玩了，和用户分享一下。"
                         topics_to_add.append(
                             ExtractedTopic(
                                 topic_id=str(uuid4()),
@@ -260,43 +225,49 @@ class ActivityMaker:
                                 is_forced_from_incomplete=True,
                             )
                         )
-            except Exception as e:
-                self.logger.warning(f"Failed to check yesterday citywalk: {e}")
 
-            # 3) 检查是否有新学会的歌曲可以告知用户
-            learned_announcement = self._get_learned_song_announcement()
-            if learned_announcement:
-                topics_to_add.append(
-                    ExtractedTopic(
-                        topic_id=str(uuid4()),
-                        source_messages=[],
-                        topic_content=learned_announcement.lstrip("，"),
-                        memory_attempts=[],
-                        fact_constraints=[],
-                        sing_attempts=[],
-                        is_forced_from_incomplete=True,
-                    )
-                )
-
-            # 4) 检查用户今天的重要日期
-            try:
-                from .date_processor import get_today_important_dates
-
-                upcoming_dates = get_today_important_dates(self.agent._runtime_hub.open_sql_session, user_uuid)
-                for d in upcoming_dates:
-                    topics_to_add.append(
-                        ExtractedTopic(
-                            topic_id=str(uuid4()),
-                            source_messages=[],
-                            topic_content=(f"今天是{d['name']}！问用户有没有什么安排或计划，并送上祝福。"),
-                            memory_attempts=[],
-                            fact_constraints=[],
-                            sing_attempts=[],
-                            is_forced_from_incomplete=True,
+                    elif evt_type == "new_song":
+                        song_title = event_dict.get("title", "洛天依学了一首新歌")
+                        topic_content = f"{song_title}！"
+                        topics_to_add.append(
+                            ExtractedTopic(
+                                topic_id=str(uuid4()),
+                                source_messages=[],
+                                topic_content=topic_content,
+                                memory_attempts=[],
+                                fact_constraints=[],
+                                sing_attempts=[],
+                                is_forced_from_incomplete=True,
+                            )
                         )
-                    )
+
+                    elif evt_type in ("birthday", "anniversary"):
+                        # 个人事件：仅当 target_user_id 匹配当前用户时才派发
+                        is_personal = event_dict.get("is_personal", False)
+                        target = event_dict.get("target_user_id", "")
+                        if is_personal and target and target != user_uuid:
+                            continue  # 不是当前用户的，跳过
+                        name = event_dict.get("title", "重要日子")
+                        topic_content = f"今天是{name}！问用户有没有什么安排或计划，并送上祝福。"
+                        topics_to_add.append(
+                            ExtractedTopic(
+                                topic_id=str(uuid4()),
+                                source_messages=[],
+                                topic_content=topic_content,
+                                memory_attempts=[],
+                                fact_constraints=[],
+                                sing_attempts=[],
+                                is_forced_from_incomplete=True,
+                            )
+                        )
+
+                    # 标记已通知，防止 ReminderDispatcher 再次发送
+                    if not store.is_notified(event_dict["id"], user_uuid, trigger_key):
+                        store.mark_notified(event_dict["id"], user_uuid, trigger_key)
             except Exception as e:
-                self.logger.warning(f"Failed to check upcoming important dates: {e}")
+                import traceback
+                traceback.print_exc()
+                self.logger.warning(f"Failed to query schedule events for login: {e}")
 
             # 合并所有话题为单一 ExtractedTopic
             merged = self._merge_topics(topics_to_add)
@@ -535,7 +506,7 @@ class ActivityMaker:
                 return ""
             song_names = "、".join(f"《{s}》" for s in learned[:5])
             notify_path.unlink(missing_ok=True)
-            return f"，另外，你不在的时候我学会了{song_names}，想听的话可以让我唱哦！"
+            return f"，用户不在的时候洛天依学会了{song_names}！"
         except Exception as e:
             get_logger("ActivityMaker").warning(f"Failed to read learned songs notification: {e}")
             try:

@@ -15,7 +15,7 @@ import requests
 from src.utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
 from src.utils.vision.vlm_api_interface import VLMAPIFactory, VLMAPIInterface
 from src.utils.logger import get_logger
-from .event_models import EventType, ScheduleEvent, OfficialDynamic
+from .event_models import UnifiedEventType, OfficialDynamic
 
 logger = get_logger(__name__)
 
@@ -84,9 +84,17 @@ class EventParser:
         B站图片通常是 http:// 协议，VLM API 可能无法直接访问，需要本地下载转码。
         """
         try:
-            resp = requests.get(url, timeout=30)
+            # 确保 URL 有 scheme；B站可能返回无 scheme 的协议相对 URL
+            if url.startswith("//"):
+                url = "https:" + url
+            elif not url.startswith(("http://", "https://")):
+                url = "https://" + url
+            resp = requests.get(url, timeout=15)
             resp.raise_for_status()
             img_bytes = resp.content
+            if not img_bytes:
+                logger.warning(f"Empty image content from {url[:60]}")
+                return None
             # 用 PIL 统一转 JPEG
             from PIL import Image
             import io
@@ -139,12 +147,13 @@ class EventParser:
 
     async def parse_dynamics(
         self, raw_items: List[OfficialDynamic]
-    ) -> List[ScheduleEvent]:
+    ) -> List[Dict[str, Any]]:
         """
-        批量解析多条原始动态，返回结构化事件列表。
+        批量解析多条原始动态，返回结构化事件 dict 列表。
         每条动态可能产生 0～N 个事件。
+        返回的 dict 包含 title, description, event_type, start_datetime, end_datetime, source_url, source_platform。
         """
-        events: List[ScheduleEvent] = []
+        events: List[Dict[str, Any]] = []
         for item in raw_items:
             try:
                 parsed = await self.parse_one(item)
@@ -155,8 +164,8 @@ class EventParser:
 
     async def parse_one(
         self, raw_item: OfficialDynamic
-    ) -> List[ScheduleEvent]:
-        """解析单条动态，返回事件列表。"""
+    ) -> List[Dict[str, Any]]:
+        """解析单条动态，返回事件 dict 列表。"""
         content = raw_item.content.strip()
         raw_content = raw_item.raw_content if raw_item.raw_content else content
         platform = raw_item.platform if hasattr(raw_item, 'platform') else "bilibili"
@@ -219,30 +228,40 @@ class EventParser:
             if not isinstance(parsed_list, list):
                 return []
 
-            events: List[ScheduleEvent] = []
+            events: List[Dict[str, Any]] = []
             for p in parsed_list:
                 if not isinstance(p, dict):
                     continue
                 evt_type_str = p.get("event_type", "general")
                 try:
-                    evt_type = EventType(evt_type_str)
+                    evt_type = UnifiedEventType(evt_type_str)
                 except ValueError:
-                    evt_type = EventType.GENERAL
+                    evt_type = UnifiedEventType.GENERAL
 
-                event = ScheduleEvent(
-                    id="",
-                    event_type=evt_type,
-                    title=p.get("title", "")[:100],
-                    description=p.get("description", "")[:500],
-                    start_time=p.get("start_time", ""),
-                    end_time=p.get("end_time", "") or None,
-                    location=p.get("location", "")[:200],
-                    source_url=source_url,
-                    source_platform=platform,
-                    raw_content=raw_content[:2000],
-                    status=ScheduleEvent.__dataclass_fields__["status"].default,
-                )
-                events.append(event)
+                start_time_str = p.get("start_time", "")
+                end_time_str = p.get("end_time", "")
+                start_dt = None
+                end_dt = None
+                try:
+                    if start_time_str:
+                        start_dt = datetime.fromisoformat(start_time_str)
+                except Exception:
+                    pass
+                try:
+                    if end_time_str:
+                        end_dt = datetime.fromisoformat(end_time_str)
+                except Exception:
+                    pass
+
+                events.append({
+                    "title": p.get("title", "")[:100],
+                    "description": p.get("description", "")[:500],
+                    "event_type": evt_type.value,
+                    "start_datetime": start_dt,
+                    "end_datetime": end_dt,
+                    "source_url": source_url,
+                    "source_platform": platform,
+                })
 
             logger.info(f"VLM/LLM parsed {len(events)} event(s) from dynamic {raw_item.dynamic_id}")
             return events
@@ -261,51 +280,48 @@ class EventParser:
         raw_content: str,
         platform: str,
         source_url: str,
-    ) -> List[ScheduleEvent]:
+    ) -> List[Dict[str, Any]]:
         """
         规则降级解析：从文本中匹配关键词提取简单事件。
         仅处理明显包含时间词的活动公告。
         """
-        # 演唱会/演出关键词
         concert_kws = ["演唱会", "演出", "专场", "live", "巡演"]
         release_kws = ["新歌", "新曲", "发布", "上线", "首发", "专辑"]
         collab_kws = ["联动", "合作", "联名", "x", "×", "×"]
         livestream_kws = ["直播", "线上", "b 站直播", "直播预告"]
 
         text = content + raw_content
-        evt_type = EventType.GENERAL
+        evt_type_str = UnifiedEventType.GENERAL.value
 
         if any(kw in text for kw in concert_kws):
-            evt_type = EventType.CONCERT
+            evt_type_str = UnifiedEventType.CONCERT.value
         elif any(kw in text for kw in release_kws):
-            evt_type = EventType.RELEASE
+            evt_type_str = UnifiedEventType.GENERAL.value
         elif any(kw in text for kw in collab_kws):
-            evt_type = EventType.COLLABORATION
+            evt_type_str = UnifiedEventType.GENERAL.value
         elif any(kw in text for kw in livestream_kws):
-            evt_type = EventType.LIVESTREAM
+            evt_type_str = UnifiedEventType.LIVESTREAM.value
 
-        # 尝试提取时间
         start_time = self._extract_time(text)
 
-        if evt_type == EventType.GENERAL or not start_time:
+        if evt_type_str == UnifiedEventType.GENERAL.value or not start_time:
             return []
 
-        title = self._extract_title(text, evt_type)
-        return [
-            ScheduleEvent(
-                id="",
-                event_type=evt_type,
-                title=title,
-                description=text[:200],
-                start_time=start_time,
-                end_time=None,
-                location="",
-                source_url=source_url,
-                source_platform=platform,
-                raw_content=raw_content[:2000],
-                status=ScheduleEvent.__dataclass_fields__["status"].default,
-            )
-        ]
+        try:
+            start_dt = datetime.fromisoformat(start_time)
+        except Exception:
+            start_dt = None
+
+        title = self._extract_title(text, evt_type_str)
+        return [{
+            "title": title,
+            "description": text[:200],
+            "event_type": evt_type_str,
+            "start_datetime": start_dt,
+            "end_datetime": None,
+            "source_url": source_url,
+            "source_platform": platform,
+        }]
 
     def _is_likely_daily_chat(self, text: str) -> bool:
         """快速判断是否为日常闲聊动态（不需要 LLM 解析）。"""
@@ -373,16 +389,13 @@ class EventParser:
                     pass
         return ""
 
-    def _extract_title(self, text: str, evt_type: EventType) -> str:
+    def _extract_title(self, text: str, evt_type_str: str) -> str:
         """从文本中提取标题。"""
         type_prefix = {
-            EventType.CONCERT: "演唱会",
-            EventType.LIVESTREAM: "直播",
-            EventType.COLLABORATION: "联动",
-            EventType.RELEASE: "新歌发布",
-            EventType.ANNIVERSARY: "纪念日",
-            EventType.GENERAL: "活动",
-        }.get(evt_type, "活动")
+            UnifiedEventType.CONCERT.value: "演唱会",
+            UnifiedEventType.LIVESTREAM.value: "直播",
+            UnifiedEventType.GENERAL.value: "活动",
+        }.get(evt_type_str, "活动")
 
         # 取第一句话作为标题
         sentences = re.split(r"[。！？!?]", text.strip())

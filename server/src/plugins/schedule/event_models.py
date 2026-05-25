@@ -1,29 +1,33 @@
 """
-数据模型：ScheduleEvent 及相关枚举。
+数据模型：统一事件类型、触发条件定义，以及与数据库 Event 模型的转换。
 """
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import  date 
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from src.utils.logger import get_logger
+from src.utils.lunar_date import get_lunar_mmdd, get_holiday_name
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.database.sql_database import Event
+
+logger = get_logger(__name__)
 
 
-class EventType(str, Enum):
-    COLLABORATION = "collaboration"   # 品牌联动/合作
-    CONCERT = "concert"                # 演唱会/线下演出
-    LIVESTREAM = "livestream"         # 直播/线上活动
-    RELEASE = "release"                # 新歌/专辑发布
-    ANNIVERSARY = "anniversary"        # 周年庆/纪念日
-    GENERAL = "general"               # 一般公告
-
-
-class EventStatus(str, Enum):
-    UPCOMING = "upcoming"             # 即将开始
-    ONGOING = "ongoing"               # 进行中
-    ENDED = "ended"                   # 已结束
-    CANCELLED = "cancelled"           # 已取消
+class UnifiedEventType(str, Enum):
+    """统一事件类型（覆盖 TODO.md 中的所有事件类型）。"""
+    CONCERT = "concert"               # 洛天依演唱会/线下演出
+    LIVESTREAM = "livestream"         # 洛天依直播
+    DYNAMIC = "dynamic"               # 洛天依 B站/微博 动态
+    TRAVEL = "travel"                 # 洛天依旅游（citywalk）
+    NEW_SONG = "new_song"             # 洛天依学会新歌
+    HOLIDAY = "holiday"               # 节假日（通用）
+    BIRTHDAY = "birthday"             # 用户生日
+    ANNIVERSARY = "anniversary"       # 用户纪念日
+    GENERAL = "general"               # 其他一般事件
 
 
 @dataclass
@@ -40,136 +44,186 @@ class OfficialDynamic:
     source_url: str
 
 
-@dataclass
-class ScheduleEvent:
-    id: str                           # UUID
-    event_type: EventType              # 事件类型
-    title: str                        # 事件标题
-    description: str                  # 详细描述
-    start_time: str                   # ISO 8601 时间字符串
-    end_time: Optional[str]           # ISO 8601 时间字符串，可为空
-    location: str = ""                # 活动地点
-    source_url: str = ""              # 来源链接
-    source_platform: str = ""          # bilibili / weibo
-    raw_content: str = ""             # 原始动态内容
-    status: EventStatus = EventStatus.UPCOMING
-    reminder_sent: bool = False       # 是否已发送主提醒
-    reminder_details: Dict[str, Any] = field(default_factory=dict)  # per-user 提醒记录
-    created_at: str = ""             # ISO 8601
-    updated_at: str = ""             # ISO 8601
+# ── 触发条件定义 ──────────────────────────────────────
+# 每个事件类型对应的触发条件（触发时间点）
 
-    def __post_init__(self):
-        now = datetime.now().isoformat()
-        if not self.created_at:
-            self.created_at = now
-        if not self.updated_at:
-            self.updated_at = now
+TRIGGER_CONDITIONS: Dict[UnifiedEventType, List[str]] = {
+    UnifiedEventType.CONCERT: [
+        "7_days_before",     # 提前7天
+        "1_day_before",      # 提前1天
+        "day_of_event",      # 当天
+        "1_day_after",       # 第二天（回顾）
+    ],
+    UnifiedEventType.LIVESTREAM: [
+        "1_hour_before",     # 提前1小时
+        "day_of_event",      # 当天
+    ],
+    UnifiedEventType.DYNAMIC: [
+        "day_of_event",      # 动态发布当天
+    ],
+    UnifiedEventType.TRAVEL: [
+        "1_day_after",       # 第二天
+    ],
+    UnifiedEventType.NEW_SONG: [
+        "1_day_after",       # 第二天
+    ],
+    UnifiedEventType.HOLIDAY: [
+        "day_of_event",      # 当天
+    ],
+    UnifiedEventType.BIRTHDAY: [
+        "day_of_event",      # 当天
+    ],
+    UnifiedEventType.ANNIVERSARY: [
+        "day_of_event",      # 当天
+    ],
+    UnifiedEventType.GENERAL: [
+        "day_of_event",
+    ],
+}
 
-    def to_dict(self) -> Dict[str, Any]:
-        d = asdict(self)
-        d["event_type"] = self.event_type.value
-        d["status"] = self.status.value
-        return d
 
-    @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ScheduleEvent":
-        d = dict(d)
-        d["event_type"] = EventType(d.get("event_type", "general"))
-        d["status"] = EventStatus(d.get("status", "upcoming"))
-        d.setdefault("reminder_sent", False)
-        d.setdefault("reminder_details", {})
-        d.setdefault("location", "")
-        d.setdefault("source_url", "")
-        d.setdefault("source_platform", "")
-        d.setdefault("raw_content", "")
-        return cls(**d)
+def get_default_trigger_conditions(event_type: UnifiedEventType) -> List[str]:
+    """获取事件类型对应的默认触发条件列表。"""
+    return TRIGGER_CONDITIONS.get(event_type, ["day_of_event"])
 
-    @property
-    def start_datetime(self) -> Optional[datetime]:
-        try:
-            return datetime.fromisoformat(self.start_time)
-        except Exception:
-            return None
 
-    @property
-    def end_datetime(self) -> Optional[datetime]:
-        if not self.end_time:
-            return None
-        try:
-            return datetime.fromisoformat(self.end_time)
-        except Exception:
-            return None
+def parse_trigger_conditions(raw: str) -> List[str]:
+    """从数据库 JSON 字符串解析触发条件列表。"""
+    try:
+        return json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        return []
 
-    def is_concert(self) -> bool:
-        return self.event_type == EventType.CONCERT
 
-    def is_silence_period(self, pre_minutes: int = 30, post_minutes: int = 60) -> bool:
-        """判断当前是否处于演唱会的静默时段内。"""
-        if not self.is_concert():
-            return False
-        start = self.start_datetime
-        end = self.end_datetime
-        if start is None:
-            return False
-        now = datetime.now()
-        pre = start - __import__("datetime").timedelta(minutes=pre_minutes)
-        if end:
-            post = end + __import__("datetime").timedelta(minutes=post_minutes)
-        else:
-            post = start + __import__("datetime").timedelta(hours=4)
-        return pre <= now <= post
+def serialize_trigger_conditions(conditions: List[str]) -> str:
+    """将触发条件列表序列化为 JSON 字符串。"""
+    return json.dumps(conditions, ensure_ascii=False)
 
-    def should_send_reminder(self, advance_days: List[int], user_id: str = "") -> bool:
-        """
-        判断是否应该发送提醒：
-        - advance_days: 提前天数列表，如 [3, 1, 0]
-        - user_id: 如果提供，检查 per-user 是否已提醒过
-        """
-        start = self.start_datetime
-        if start is None:
-            return False
-        now = datetime.now().date()
-        start_date = start.date()
-        days_diff = (start_date - now).days
 
-        if days_diff not in advance_days:
-            return False
+# ── 触发条件检查 ──────────────────────────────────────
 
-        if user_id:
-            key = f"user_{user_id}"
-            sent_days = self.reminder_details.get(key, [])
-            if days_diff in sent_days:
+def _parse_mmdd(mmdd_str: str) -> Optional[Tuple[int, int]]:
+    """解析 MM-DD 格式的日期字符串。"""
+    try:
+        parts = mmdd_str.split("-")
+        return int(parts[0]), int(parts[1])
+    except (IndexError, ValueError):
+        return None
+
+
+def check_trigger_condition(
+    condition_key: str,
+    event_start_date: Optional[date],
+    event_end_date: Optional[date],
+    event_date_mmdd: Optional[str],
+    event_is_lunar: bool,
+    event_is_recurring: bool,
+    today: Optional[date] = None,
+) -> bool:
+    """
+    检查某个触发条件在今天是否应被触发。
+    根据的事件类型和触发条件，检查今天是否满足触发条件。
+    """
+    today = today or date.today()
+
+    if event_is_lunar:
+        # 农历日期：检查今天农历日期是否匹配
+        if event_date_mmdd:
+            lunar_today_mmdd = get_lunar_mmdd(today.year, today.month, today.day)
+            if lunar_today_mmdd is None:
                 return False
-        else:
-            if self.reminder_sent and days_diff == advance_days[0]:
-                return False
+            target_mm = int(event_date_mmdd.split("-")[0])
+            target_dd = int(event_date_mmdd.split("-")[1])
+            today_lunar_mm = int(lunar_today_mmdd.split("-")[0])
+            today_lunar_dd = int(lunar_today_mmdd.split("-")[1])
 
-        return True
+            if condition_key == "day_of_event":
+                return target_mm == today_lunar_mm and target_dd == today_lunar_dd
+            # 对农历日期，提前/延后检查较复杂，仅精确匹配当天
+            return False
+        return False
 
-    def mark_reminder_sent(self, advance_day: int, user_id: str = "") -> None:
-        if user_id:
-            key = f"user_{user_id}"
-            if key not in self.reminder_details:
-                self.reminder_details[key] = []
-            if advance_day not in self.reminder_details[key]:
-                self.reminder_details[key].append(advance_day)
-        else:
-            self.reminder_sent = True
-        self.updated_at = datetime.now().isoformat()
+    if event_date_mmdd and event_is_recurring:
+        # 周期性事件（基于 MM-DD）
+        parsed = _parse_mmdd(event_date_mmdd)
+        if parsed is None:
+            return False
+        target_mm, target_dd = parsed
+        try:
+            target_date = date(today.year, target_mm, target_dd)
+        except ValueError:
+            return False
+        return _check_days_offset_condition(condition_key, target_date, today)
 
-    def update_status_by_time(self) -> None:
-        """根据当前时间自动更新状态。"""
-        now = datetime.now()
-        start = self.start_datetime
-        end = self.end_datetime
+    # 非周期性事件（基于具体日期）
+    return _check_days_offset_condition(condition_key, event_start_date, today)
 
-        if start and now < start:
-            self.status = EventStatus.UPCOMING
-        elif start and now >= start:
-            # 无结束时间时默认 start + 24 小时为结束时间
-            effective_end = end if end else start + timedelta(hours=24)
-            if effective_end and now > effective_end:
-                self.status = EventStatus.ENDED
-            else:
-                self.status = EventStatus.ONGOING
-        self.updated_at = now.isoformat()
+
+def _check_days_offset_condition(
+    condition_key: str,
+    target_date: Optional[date],
+    today: date,
+) -> bool:
+    """检查日期偏移条件。"""
+    if target_date is None:
+        return False
+
+    days_diff = (target_date - today).days
+
+    condition_map = {
+        "7_days_before": (days_diff == 7),
+        "3_days_before": (days_diff == 3),
+        "1_day_before": (days_diff == 1),
+        "day_of_event": (days_diff == 0),
+        "1_day_after": (days_diff == -1),
+        "1_hour_before": (days_diff == 0),  # 当天，精确时间由调度频率保障
+    }
+
+    return condition_map.get(condition_key, False)
+
+
+# ── 事件类型中文名 ──────────────────────────────────────
+
+EVENT_TYPE_CN_MAP = {
+    UnifiedEventType.CONCERT: "演唱会",
+    UnifiedEventType.LIVESTREAM: "直播",
+    UnifiedEventType.DYNAMIC: "动态",
+    UnifiedEventType.TRAVEL: "旅游",
+    UnifiedEventType.NEW_SONG: "新歌",
+    UnifiedEventType.HOLIDAY: "节日",
+    UnifiedEventType.BIRTHDAY: "生日",
+    UnifiedEventType.ANNIVERSARY: "纪念日",
+    UnifiedEventType.GENERAL: "活动",
+}
+
+
+def get_event_type_cn(event_type: UnifiedEventType) -> str:
+    return EVENT_TYPE_CN_MAP.get(event_type, "活动")
+
+
+# ── 数据库模型与业务模型的转换 ──────────────────────
+
+def db_event_to_dict(event_row: "Event") -> Dict[str, Any]:
+    """将数据库 Event 行转换为字典。"""
+
+    return {
+        "id": event_row.id,
+        "event_type": event_row.event_type,
+        "title": event_row.title,
+        "description": event_row.description or "",
+        "date_type": event_row.date_type or "solar",
+        "date_mmdd": event_row.date_mmdd or "",
+        "start_datetime": event_row.start_datetime,
+        "end_datetime": event_row.end_datetime,
+        "duration_minutes": event_row.duration_minutes,
+        "trigger_conditions": parse_trigger_conditions(event_row.trigger_conditions or "[]"),
+        "is_recurring": event_row.is_recurring or False,
+        "is_personal": event_row.is_personal or False,
+        "target_user_id": event_row.target_user_id or "",
+        "source": event_row.source or "",
+        "source_url": event_row.source_url or "",
+        "source_platform": event_row.source_platform or "",
+        "is_active": event_row.is_active or True,
+        "created_at": event_row.created_at,
+        "updated_at": event_row.updated_at,
+    }

@@ -169,6 +169,18 @@ class AgentBinder(QObject):
             self.set_volume_callback(percent)
 
 
+    def on_reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
+        """通过邀请码重置账号。"""
+        if self.reset_account_callback:
+            return self.reset_account_callback(invite_code, new_username, new_password)
+        self.logger.error("Reset account callback not set")
+        return False, "重置账号功能不可用"
+
+    def on_set_base_url(self, url: str, verify_ssl: bool = True) -> None:
+        """设置自定义服务器地址。"""
+        if self.set_base_url_callback:
+            self.set_base_url_callback(url, verify_ssl)
+
     def on_load_history(self, count: int, end_index: int = -1):
         """
         请求加载历史记录

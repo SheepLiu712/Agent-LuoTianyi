@@ -80,6 +80,7 @@ async def startup_event(app: FastAPI):
         agent=get_luotianyi_agent(),
         activity_maker=init_activity_maker(config.get("activity_maker", {})),
         schedule_manager=ScheduleManager(
+            sql_session_factory=get_sql_session,
             config=config.get("schedule", {}),
         )
     )
@@ -103,6 +104,7 @@ async def startup_event(app: FastAPI):
         song_knowledge_config = config["music"]["song_knowledge"],
         citywalk_service = CitywalkRuntimeService(config["citywalk"], vector_store=database.get_vector_store()),
         song_learner = service_hub.agent.music_manager.auto_song_learner,
+        schedule_manager = service_hub.schedule_manager,
     )
     daily_scheduler.start()
 
@@ -324,7 +326,12 @@ async def overwrite_preference(
     if not user:
         raise HTTPException(status_code=404, detail="未找到该用户")
     
+    if req.preferences.get("relationship"):
+        req.preferences["relationship"] = req.preferences["relationship"].replace("我","用户") # 将“我”替换为“用户”，避免Agent在使用时误认为是自己，导致关系链构建错误
+    if req.preferences.get("custom_context"):
+        req.preferences["custom_context"] = req.preferences["custom_context"].replace("我","用户") # 将“我”替换为“用户”，避免Agent在使用时误认为是自己，导致关系链构建错误
     user.preferences = json.dumps(req.preferences, ensure_ascii=False)
+
     db.commit()
     return {"status": "success", "message": "Preferences overwritten successfully"}
     

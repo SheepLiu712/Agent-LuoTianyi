@@ -18,8 +18,8 @@ from src.plugins.schedule.event_models import OfficialDynamic
 logger = get_logger(__name__)
 
 # 洛天依相关官方账号（可配置）
-DEFAULT_BILI_ACCOUNTS = [
-    ("36081646", "洛天依"),          # 官方主账号
+DEFAULT_BILI_ACCOUNTS: List[str] = [
+    "36081646",  # 洛天依官方主账号
 ]
 
 DEFAULT_WEIBO_ACCOUNTS: List[str] = []
@@ -40,7 +40,7 @@ class OfficialFeedFetcher:
         self.config = config or {}
         bili_accounts = self.config.get("official_accounts", {}).get("bilibili", [])
         weibo_accounts = self.config.get("official_accounts", {}).get("weibo", [])
-        self.bili_accounts: List[str] = [str(a) for a in bili_accounts] if bili_accounts else [uid for uid, _ in DEFAULT_BILI_ACCOUNTS]
+        self.bili_accounts: List[str] = [str(a) for a in bili_accounts] if bili_accounts else list(DEFAULT_BILI_ACCOUNTS)
         self.weibo_accounts: List[str] = [str(a) for a in weibo_accounts] if weibo_accounts else DEFAULT_WEIBO_ACCOUNTS
 
         self.data_file = Path(data_file)
@@ -66,8 +66,10 @@ class OfficialFeedFetcher:
         if cookie_file.exists():
             try:
                 raw = cookie_file.read_text(encoding="utf-8-sig").strip()
-                # 去除 BOM (\\ufeff) 和其他不可见控制字符，防止 HTTP 头 latin-1 编码失败
+                # 去除 BOM (\ufeff) 和其他不可见控制字符，防止 HTTP 头 latin-1 编码失败
                 bili_cookie = raw.encode("utf-8", errors="ignore").decode("utf-8")
+                # 显式去除可能残留的 \ufeff BOM（某些环境下 utf-8-sig 也可能没去掉）
+                bili_cookie = bili_cookie.replace('\ufeff', '').strip()
                 self.logger.info(f"Loaded B站 cookie from {cookie_file}")
             except Exception as e:
                 self.logger.warning(f"Failed to read {cookie_file}: {e}")
@@ -197,10 +199,9 @@ class OfficialFeedFetcher:
                 account_name = author_module.get("name", "")
             
             if not account_name:
-                for u, name in self.bili_accounts:
-                    if u == uid:
-                        account_name = name
-                        break
+                # 尝试从默认账号中查找名称
+                _default_names = {"36081646": "洛天依"}
+                account_name = _default_names.get(uid, f"bili_{uid}")
 
             # 内部辅助函数，用来提取动态本身或者原动态（orig）的内容
             def extract_from_dynamic(dyn: Dict[str, Any], is_orig: bool = False) -> Dict[str, Any]:
