@@ -20,3 +20,15 @@ Thumbs.db
 .DS_Store
 
 songlearner/
+
+# Logs
+logs/
+*.log
+
+# Submodules / embedded repos
+mineflayer/
+
+# Secrets
+server/config/encryption.key
+bili_cookie.txt
+config/bili_cookie.txt
