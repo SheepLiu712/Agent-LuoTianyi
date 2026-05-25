@@ -188,17 +188,34 @@ class WebSocketService:
 
         if event.event_type == WSEventType.USER_TOUCH.value:
             payload = event.payload if isinstance(event.payload, dict) else {}
-            touch_area = payload.get("touch_area", "天依")
+            # 兼容新旧两种 payload 格式
+            touch_areas = payload.get("touchArea")  # 新格式：["head", "body"]
+            if touch_areas is None:
+                touch_area = payload.get("touch_area", "天依")  # 旧格式："头"
+                touch_areas = [touch_area]
+            if not isinstance(touch_areas, list):
+                touch_areas = [touch_areas]
             area_to_description = {
-                "头": "用户轻轻摸了摸天依的头",
-                "辫子": "用户轻轻拉了拉天依的辫子",
-                "耳机": "用户碰了碰天依的耳机",
-                "袖": "用户扯了扯天依的袖子",
-                "左腿": "用户戳了戳天依",
-                "8": "用户戳了戳天依",
+                "head": "用户摸了摸天依的头", "body": "用户碰了碰天依的身体",
+                "legs": "用户戳了戳天依的腿", "hands": "用户握了握天依的手",
+                "头": "用户轻轻摸了摸天依的头", "辫子": "用户轻轻拉了拉天依的辫子",
+                "耳机": "用户碰了碰天依的耳机", "袖": "用户扯了扯天依的袖子",
+                "左腿": "用户戳了戳天依的腿", "右腿": "用户戳了戳天依的腿",
+                "身体": "用户碰了碰天依的身体", "裙子": "用户扯了扯天依的裙子",
+                "8": "用户戳了戳天依", "左手": "用户握了握天依的左手",
+                "右手": "用户握了握天依的右手",
             }
-            text = area_to_description.get(touch_area, f"用户碰了碰天依的{touch_area}")
-            # 如果包含点击频率数据，附加到文本中供LLM分析
+            descriptions = []
+            for a in touch_areas:
+                desc = area_to_description.get(a, f"用户碰了碰天依的{a}")
+                descriptions.append(desc)
+            text = "；".join(descriptions)
+            # 附带触摸间隔和次数信息
+            time_since = payload.get("timeSinceLastSentTouch", 0)
+            touch_count = payload.get("touchCount", 1)
+            if time_since > 0 or touch_count > 1:
+                text += f"（距上次触摸{time_since:.1f}秒，本次触摸次数：{touch_count}）"
+            # 旧格式的点击频率数据
             click_frequency = payload.get("click_frequency")
             if click_frequency:
                 count_10s = click_frequency.get("count_10s", 0)

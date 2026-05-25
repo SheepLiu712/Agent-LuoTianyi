@@ -23,7 +23,7 @@ class AgentBinder(QObject):
         send_text_callback: Callable[[str], str],
         send_image_callback: Callable[[str], str],
         send_typing_callback: Callable[[], None],
-        send_touch_callback: Callable[[str], str],
+        send_touch_callback: Callable[[str | list, dict | None], str],
         play_local_tts_callback: Callable[[str], bool],
         stop_local_tts_callback: Callable[[], bool],
         set_volume_callback: Callable[[int], None],
@@ -143,12 +143,9 @@ class AgentBinder(QObject):
     def on_send_typing(self, text_length: int):
         self.send_typing_callback(text_length=text_length)
 
-    def on_send_touch(self, touch_area: str, click_frequency: dict = None):
+    def on_send_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None):
         if self.send_touch_callback:
-            if click_frequency:
-                self.send_touch_callback(touch_area, click_frequency=click_frequency)
-            else:
-                self.send_touch_callback(touch_area)
+            self.send_touch_callback(touch_area, click_frequency=click_frequency, touch_meta=touch_meta)
 
     def on_play_local_tts(self, conv_uuid: str) -> bool:
         if self.play_local_tts_callback:

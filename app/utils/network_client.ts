@@ -87,7 +87,7 @@ export class NetworkClient {
     }
   }
 
-  sendTouch(touchArea: string, clickFrequency?: Record<string, number>): Promise<SendResult> {
+  sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>): Promise<SendResult> {
     if (!this.transport) {
       addDebugTrace('network', 'sendTouch blocked: no transport');
       return Promise.resolve({
@@ -98,7 +98,7 @@ export class NetworkClient {
       });
     }
     addDebugTrace('network', 'sendTouch', { touchArea });
-    return this.transport.submitUserTouch(touchArea, clickFrequency, 10000);
+    return this.transport.submitUserTouch(touchArea, clickFrequency, touchMeta, 10000);
   }
 
   sendPreferences(preferences: Record<string, unknown>): Promise<SendResult> {

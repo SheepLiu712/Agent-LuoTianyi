@@ -6,7 +6,8 @@ import io
 import base64
 import traceback
 import re
-from ...types.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntryfrom ...types.tool_type import  MyTool, ToolFunction, ToolOneParameter
+from ...types.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntry
+from ...types.tool_type import MyTool, ToolFunction, ToolOneParameter
 from typing import List, Tuple, Dict, Any, Optional
 import random
 from .auto_song_learner import WishlistManager

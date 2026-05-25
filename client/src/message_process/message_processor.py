@@ -139,11 +139,16 @@ class MessageProcessor:
         """将用户偏好设置发送到服务端保存，不经过消息队列。"""
         self.send_preferences_func(preferences)
 
-    def send_touch(self, touch_area: str, click_frequency: dict = None):
+    def send_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None):
         local_id = self._next_local_id("touch")
-        payload = {"touch_area": touch_area}
+        if isinstance(touch_area, str):
+            payload = {"touch_area": touch_area}
+        else:
+            payload = {"touchArea": touch_area}
         if click_frequency:
             payload["click_frequency"] = click_frequency
+        if touch_meta:
+            payload.update(touch_meta)
         item = OutgoingMessage(
             local_id=local_id,
             kind="touch",
@@ -317,9 +322,16 @@ class MessageProcessor:
         if item.kind == "typing":
             return self.send_typing_func(text_length=item.payload["text_length"], ack_timeout=1.0)
         if item.kind == "touch":
-            kwargs = {"touch_area": item.payload["touch_area"], "ack_timeout": 1.0}
-            if "click_frequency" in item.payload:
-                kwargs["click_frequency"] = item.payload["click_frequency"]
+            payload = item.payload
+            touch_area = payload.get("touchArea") or payload.get("touch_area", "")
+            kwargs = {"touch_area": touch_area, "ack_timeout": 1.0}
+            if "click_frequency" in payload:
+                kwargs["click_frequency"] = payload["click_frequency"]
+            if "timeSinceLastSentTouch" in payload:
+                kwargs["touch_meta"] = {
+                    "timeSinceLastSentTouch": payload["timeSinceLastSentTouch"],
+                    "touchCount": payload.get("touchCount", 1),
+                }
             return self.send_touch_func(**kwargs)
         return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}", "drop": True}
 

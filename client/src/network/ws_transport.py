@@ -87,10 +87,15 @@ class WsTransport:
     def submit_typing_event(self, text_length: int, ack_timeout: float = 10.0) -> dict:
         return self._submit_user_event(WSEventType.USER_TYPING, payload={"text_length": text_length}, ack_timeout=ack_timeout)
 
-    def submit_user_touch(self, touch_area: str, click_frequency: dict = None, ack_timeout: float = 10.0) -> dict:
-        payload = {"touch_area": touch_area}
+    def submit_user_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None, ack_timeout: float = 10.0) -> dict:
+        if isinstance(touch_area, str):
+            payload = {"touch_area": touch_area}
+        else:
+            payload = {"touchArea": touch_area}
         if click_frequency:
             payload["click_frequency"] = click_frequency
+        if touch_meta:
+            payload.update(touch_meta)
         return self._submit_user_event(WSEventType.USER_TOUCH, payload=payload, ack_timeout=ack_timeout)
 
     def submit_user_preferences(self, preferences: dict, ack_timeout: float = 10.0) -> dict:

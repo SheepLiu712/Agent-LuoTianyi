@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple, Any
 import asyncio
 import traceback
 from ..utils.logger import get_logger
@@ -23,6 +23,11 @@ class TopicReplier:
         self.is_processing: bool = False
         self.change_state_callback : Optional[Callable[[bool, bool], Awaitable[None]]] = None # thinking, speaking
 
+        # 触摸事件指针机制
+        self._touch_pending: Optional["ExtractedTopic"] = None  # 队列中待处理的触摸 Topic 引用
+        self._touch_processing: bool = False  # 正在处理触摸 Topic
+        self._touch_lock = asyncio.Lock()  # 触摸指针并发锁
+
     def set_service_hub(self, service_hub: "ServiceHub"):
         self.service_hub = service_hub
 
@@ -34,8 +39,29 @@ class TopicReplier:
             self.processor_task = asyncio.create_task(self.topic_processor())
             self.logger.info("TopicPlanner processor task started")
 
+    def _is_touch_topic(self, topic: "ExtractedTopic") -> bool:
+        """判断一个 ExtractedTopic 是否来自触摸事件"""
+        content = topic.topic_content or ""
+        return content.startswith("[") and ("触摸" in content or "摸了摸" in content or "碰了碰" in content or "戳了戳" in content or "握了握" in content)
+
     async def add_topic(self, topic: "ExtractedTopic"):
-        await self.topic_queue.put(topic)
+        if self._is_touch_topic(topic):
+            async with self._touch_lock:
+                if self._touch_processing:
+                    self.logger.info("Touch event ignored: touch topic is currently being processed")
+                    return
+                if self._touch_pending is not None:
+                    # 更新队列中已有的触摸 Topic 内容
+                    self._touch_pending.topic_content = topic.topic_content
+                    self._touch_pending.source_messages = topic.source_messages
+                    self.logger.info("Touch topic updated (was queued, not yet processed)")
+                    return
+                # 新的触摸 Topic，入队并记录指针
+                self._touch_pending = topic
+                await self.topic_queue.put(topic)
+                self.logger.info("Touch topic enqueued")
+        else:
+            await self.topic_queue.put(topic)
 
     async def topic_processor(self):
         while True:
@@ -43,6 +69,9 @@ class TopicReplier:
             try:
                 topic = await self.topic_queue.get()
                 self.is_processing = True
+                if self._is_touch_topic(topic):
+                    async with self._touch_lock:
+                        self._touch_processing = True
                 if self.change_state_callback is not None:
                     await self.change_state_callback(thinking = True) # 进入思考状态
                 await self._reply_one_topic(topic)
@@ -55,6 +84,10 @@ class TopicReplier:
             finally:
                 if topic is not None:
                     self.topic_queue.task_done()
+                    if self._is_touch_topic(topic):
+                        async with self._touch_lock:
+                            self._touch_pending = None
+                            self._touch_processing = False
                 self.is_processing = False
                 if self.topic_queue.empty() and self.change_state_callback is not None:
                     await self.change_state_callback(thinking = False) # 进入思考状态
