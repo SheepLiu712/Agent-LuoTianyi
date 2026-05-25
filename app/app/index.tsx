@@ -19,6 +19,7 @@ import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import PreferencesScreen from './preferences';
 
 
 export default function Index({ onLogout }: { onLogout?: () => void }) {
@@ -30,6 +31,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
+  const [showPreferences, setShowPreferences] = useState(false);
   const webviewRef = useRef<WebView>(null);
 
 
@@ -192,6 +194,17 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </View>
         ) : null}
 
+        {/* 偏好设置按钮（调试按钮左侧） */}
+        <TouchableOpacity
+          style={styles.settingsBtn}
+          onPress={() => setShowPreferences(true)}
+        >
+          <Image
+            source={require('../assets/images/setting.png')}
+            style={styles.settingsIcon}
+          />
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={styles.debugToggleBtn}
           onPress={() => setDebugOpen((prev) => !prev)}
@@ -218,6 +231,13 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </View>
         ) : null}
       </View>
+
+      {/* 偏好设置弹窗 */}
+      {showPreferences && (
+        <PreferencesScreen
+          onClose={() => setShowPreferences(false)}
+        />
+      )}
 
       {/* 【可压缩区域：聊天历史 + 输入框】- 使用 flex 布局，会被键盘压缩 */}
       <View style={{ flex: 1, marginTop: live2dHeight, marginBottom: keyboardHeight }}>
@@ -371,6 +391,25 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     resizeMode: 'stretch',
+  },
+  settingsBtn: {
+    position: 'absolute',
+    right: 56,
+    bottom: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.9)',
+    zIndex: 60,
+    elevation: 12,
+  },
+  settingsIcon: {
+    width: 20,
+    height: 20,
+    resizeMode: 'contain',
+    tintColor: '#ffffff',
   },
   debugToggleBtn: {
     position: 'absolute',

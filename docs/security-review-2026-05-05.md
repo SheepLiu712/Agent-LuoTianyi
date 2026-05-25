@@ -98,6 +98,35 @@ logger.info(f"Register request: {req.username} with code {req.invite_code}")
 ### 修复建议
 
 - 增加重置请求的频次限制（建议每小时最多 3 次尝试）
+- 考虑在邀请码之外增加二次验证（如旧密码验证）
+
+---
+
+## 新增功能安全评估
+
+### 表达风格偏好接口
+
+**文件**: `server/server_main.py` (`/preference/get`, `/preference/overwrite`)
+**类别**: 数据安全
+**置信度**: 6/10
+
+偏好设置接口使用 `message_token` 进行身份验证，但 token 本身存在硬编码密钥问题（见高危漏洞）。偏好数据本身不敏感，但仍需注意：
+
+1. 偏好数据不会泄露敏感信息
+2. 不恰当的偏好注入可能导致 AI 回复风格偏移
+3. 建议对 `preference_context` 的长度和内容做基本校验
+
+### 重置账号频次限制
+
+**文件**: `server/server_main.py` (`/auth/reset_account`)
+**类别**: 安全加固
+**置信度**: 7/10
+
+当前 `/auth/reset_account` 端点未实现频次限制，建议补充：
+
+- 每 IP 每小时最多 3 次请求
+- 每个邀请码仅允许成功重置 1 次
+- 记录重置历史日志便于审计
 - 记录重置请求的 IP 和 User-Agent 以辅助事后追溯
 - 重置成功后通过旧用户名推送通知（如果有通知渠道的话）
 - 考虑新增更安全的验证方式（如短信验证码、邮箱验证）

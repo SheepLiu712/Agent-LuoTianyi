@@ -66,8 +66,7 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
     const result = await onRegister(regUsername, regPassword, regConfirmPassword, inviteCode);
     setLoading(false);
     if (result.success) {
-      // 偏好设置在 _layout 中处理
-      Alert.alert('注册成功', '注册成功！接下来可以设置你与天依的相处模式~');
+      Alert.alert('注册成功', '注册成功，请使用新账号登录！');
       // 自动切换到登录页
       setActiveTab('login');
       setLoginUsername(regUsername);

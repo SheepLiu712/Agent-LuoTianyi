@@ -175,7 +175,6 @@ export function useAuth() {
         return { success: false, message: result.detail || '注册失败' };
       }
 
-
       return { success: true, message: '注册成功，请登录' };
     } catch (e) {
       addDebugTrace('auth', 'register error', { error: String(e) });

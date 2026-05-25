@@ -1,6 +1,7 @@
 # IDE / project config
 .workbuddy/
 .claude/
+.vscode
 
 # Python
 __pycache__/
