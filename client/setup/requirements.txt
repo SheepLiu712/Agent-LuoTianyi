@@ -1,0 +1,7 @@
+cryptography
+requests
+websockets
+colorlog
+soundfile
+numpy
+PyAudio
