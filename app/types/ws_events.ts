@@ -20,6 +20,8 @@ export const WSEventType = {
   USER_TYPING: "user_typing",
   USER_AUTH: "user_auth",
   USER_TOUCH: "user_touch",
+  USER_IMAGE_SELECTING: "user_image_selecting",
+  USER_IMAGE_SELECTING_CANCEL: "user_image_selecting_cancel",
   USER_PREFERENCE_SYNC: "user_preference_sync",
 
   // 心跳

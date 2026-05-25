@@ -99,6 +99,14 @@ class WsTransport:
             payload["click_frequency"] = click_frequency
         return self._submit_user_event(WSEventType.USER_TOUCH, payload=payload, ack_timeout=ack_timeout)
 
+    def submit_image_selecting(self, ack_timeout: float = 5.0) -> dict:
+        """发送图片选择中的事件，服务端会延长等待时间。"""
+        return self._submit_user_event(WSEventType.USER_IMAGE_SELECTING, payload={}, ack_timeout=ack_timeout)
+
+    def submit_image_selecting_cancel(self, ack_timeout: float = 5.0) -> dict:
+        """发送图片选择取消的事件，服务端重置等待时间。"""
+        return self._submit_user_event(WSEventType.USER_IMAGE_SELECTING_CANCEL, payload={}, ack_timeout=ack_timeout)
+
     def submit_user_preferences(self, preferences: dict, ack_timeout: float = 10.0) -> dict:
         return self._submit_user_event(WSEventType.USER_PREFERENCE_SYNC, payload=preferences, ack_timeout=ack_timeout)
 

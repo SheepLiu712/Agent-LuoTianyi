@@ -633,6 +633,8 @@ class ChatWidget(QWidget):
         self.handle_text_input()
 
     def on_picture_clicked(self): # 按工具栏的图片按钮
+        # 先发送图片选择中事件，让服务端进入等待状态
+        self.agent.on_image_selecting_start()
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
             "Select Image", 
@@ -643,6 +645,9 @@ class ChatWidget(QWidget):
             self.can_send_pic = False
             bubble = self.add_message("image", file_path, is_user=True)
             self.agent.on_send_image(file_path, bubble)
+        else:
+            # 用户取消了选择：通知服务端重置等待时间
+            self.agent.on_image_selecting_cancel()
 
     def on_volume_button_clicked(self): # 按工具栏的音量按钮
         if self.volume_popup.isVisible():

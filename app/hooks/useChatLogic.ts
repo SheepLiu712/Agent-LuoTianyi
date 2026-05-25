@@ -107,6 +107,12 @@ export const useChatLogic = (
         sendTyping: async (textLength) => {
           await messageProcessorRef.current?.sendTypingEvent(textLength);
         },
+        sendImageSelecting: async () => {
+          await messageProcessorRef.current?.sendImageSelecting();
+        },
+        sendImageSelectingCancel: async () => {
+          await messageProcessorRef.current?.sendImageSelectingCancel();
+        },
         playLocalTts: async (convUuid) => {
           addDebugTrace('audio-ui', 'binder playLocalTts called', { convUuid });
           return (await messageProcessorRef.current?.playLocalTtsByUuid(convUuid)) || false;
@@ -235,6 +241,9 @@ export const useChatLogic = (
   }, [canSend, inputText]);
 
   const handleSendImage = useCallback(async () => {
+    // 通知服务端用户开始选择图片，延长等待时间
+    await binderRef.current?.sendImageSelecting();
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: false,
@@ -242,6 +251,8 @@ export const useChatLogic = (
     });
 
     if (result.canceled || !result.assets || result.assets.length === 0) {
+      // 用户取消选择：通知服务端重置等待时间
+      await binderRef.current?.sendImageSelectingCancel();
       return;
     }
 

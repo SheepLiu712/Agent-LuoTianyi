@@ -42,6 +42,10 @@ class TopicPlanner:
         self.service_hub = service_hub
 
     async def feed_unread_message(self, message: ChatInputEvent):
+        if message.event_type in [ChatInputEventType.USER_IMAGE_SELECTING, ChatInputEventType.USER_IMAGE_SELECTING_CANCEL]:
+            await self._handle_user_image_selecting(message)
+            return
+
         if message.event_type == ChatInputEventType.USER_TYPING:
             await self._handle_user_typing(message)
             return
@@ -120,6 +124,20 @@ class TopicPlanner:
         else:
             await self.listen_timer.set_deadline() # 用户开始输入了，重置等待时间，给用户更多时间输入。
         self._wake_event.set()  # 唤醒处理循环，重新评估状态
+
+    async def _handle_user_image_selecting(self, event: "ChatInputEvent"):
+        if event.event_type == ChatInputEventType.USER_IMAGE_SELECTING:
+            # 用户正在选择图片：设置 30 秒等待，给用户足够时间
+            if await self.unread_store.has_unread():
+                await self.listen_timer.set_deadline(timeout=30.0)
+                self._wake_event.set()
+
+        if event.event_type == ChatInputEventType.USER_IMAGE_SELECTING_CANCEL:
+            if not await self.unread_store.has_unread():
+                await self.listen_timer.remove_deadline()
+            else:
+                await self.listen_timer.set_deadline()  # 用户取消了选择，但还有未读消息，重置等待时间，继续等待补全
+                self._wake_event.set()
 
     async def _commit_extraction_result(
         self,

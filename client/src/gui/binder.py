@@ -36,6 +36,8 @@ class AgentBinder(QObject):
         send_proactive_text_callback: Callable[[str], str] | None = None,
         send_preferences_callback: Callable[[dict], None] | None = None,
         set_base_url_callback: Callable[[str, bool], None] | None = None,
+        send_image_selecting_callback: Callable[[], None] | None = None,
+        send_image_selecting_cancel_callback: Callable[[], None] | None = None,
     ):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
@@ -56,6 +58,8 @@ class AgentBinder(QObject):
         self.login_callback = login_callback
         self.register_callback = register_callback
         self.set_base_url_callback = set_base_url_callback
+        self.send_image_selecting_callback = send_image_selecting_callback
+        self.send_image_selecting_cancel_callback = send_image_selecting_cancel_callback
 
         self.msg_to_bubble: Dict[str, ChatBubble] = {}  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
         # 将跨线程的更新请求通过 Qt 信号转发到主线程执行
@@ -168,6 +172,15 @@ class AgentBinder(QObject):
         if self.set_volume_callback:
             self.set_volume_callback(percent)
 
+    def on_image_selecting_start(self):
+        """通知服务端用户开始选择图片。"""
+        if self.send_image_selecting_callback:
+            self.send_image_selecting_callback()
+
+    def on_image_selecting_cancel(self):
+        """通知服务端用户取消了图片选择。"""
+        if self.send_image_selecting_cancel_callback:
+            self.send_image_selecting_cancel_callback()
 
     def on_reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
         """通过邀请码重置账号。"""
@@ -212,19 +225,6 @@ class AgentBinder(QObject):
         """将用户偏好设置发送到服务端保存。"""
         if self.send_preferences_callback:
             self.send_preferences_callback(preferences)
-
-    def on_set_base_url(self, base_url: str, verify_ssl: bool = False) -> None:
-        """更新 NetworkClient 的服务器地址（AuthApi + WsTransport 同步更新）。"""
-        if self.set_base_url_callback:
-            self.set_base_url_callback(base_url, verify_ssl)
-            self.logger.info(f"Base URL updated to: {base_url}")
-
-    def on_reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
-        """通过邀请码重置账号的用户名和密码。"""
-        if self.reset_account_callback:
-            return self.reset_account_callback(invite_code, new_username, new_password)
-        self.logger.error("Reset account callback not set")
-        return False, "重置账号回调未设置"
 
     def _scheduled_start_thinking(self):
         """Legacy hook kept for compatibility; thinking bubble is no longer auto-driven."""

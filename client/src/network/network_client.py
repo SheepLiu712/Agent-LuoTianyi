@@ -130,6 +130,26 @@ class NetworkClient:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
 
+    def send_image_selecting(self, ack_timeout: float = 5.0):
+        """通知服务端用户开始选择图片。"""
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_image_selecting(ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+
+    def send_image_selecting_cancel(self, ack_timeout: float = 5.0):
+        """通知服务端用户取消了图片选择。"""
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_image_selecting_cancel(ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+
     def send_preferences(self, preferences: dict, ack_timeout: float = 10.0):
         if not self.user_id or not self.message_token:
             return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}

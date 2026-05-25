@@ -168,6 +168,8 @@ class WebSocketService:
             WSEventType.USER_TEXT.value,
             WSEventType.USER_IMAGE.value,
             WSEventType.USER_TYPING.value,
+            WSEventType.USER_IMAGE_SELECTING.value,
+            WSEventType.USER_IMAGE_SELECTING_CANCEL.value,
             WSEventType.USER_TOUCH.value,
             "message",
             "chat_message",
@@ -181,6 +183,22 @@ class WebSocketService:
         if event.event_type == WSEventType.USER_TYPING.value:
             return ChatInputEvent(
                 event_type=ChatInputEventType.USER_TYPING,
+                payload=event.payload if isinstance(event.payload, dict) else {},
+                client_msg_id=event.client_msg_id,
+                ts=event.ts,
+            )
+
+        if event.event_type == WSEventType.USER_IMAGE_SELECTING.value:
+            return ChatInputEvent(
+                event_type=ChatInputEventType.USER_IMAGE_SELECTING,
+                payload=event.payload if isinstance(event.payload, dict) else {},
+                client_msg_id=event.client_msg_id,
+                ts=event.ts,
+            )
+
+        if event.event_type == WSEventType.USER_IMAGE_SELECTING_CANCEL.value:
+            return ChatInputEvent(
+                event_type=ChatInputEventType.USER_IMAGE_SELECTING_CANCEL,
                 payload=event.payload if isinstance(event.payload, dict) else {},
                 client_msg_id=event.client_msg_id,
                 ts=event.ts,

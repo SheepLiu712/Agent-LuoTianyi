@@ -11,7 +11,9 @@ type SendItem =
   | { kind: 'proactive'; uuid: string; text: string }
   | { kind: 'image'; uuid: string; imageUri: string; mimeType: string }
   | { kind: 'typing'; textLength: number }
-  | { kind: 'touch'; touchArea: string; clickFrequency?: Record<string, number> };
+  | { kind: 'touch'; touchArea: string; clickFrequency?: Record<string, number> }
+  | { kind: 'image_selecting' }
+  | { kind: 'image_selecting_cancel' };
 
 interface SendResult {
   ok: boolean;
@@ -160,6 +162,18 @@ export class MessageProcessor {
     this.lastTypingSentAt = now;
     this.sendQueue.push({ kind: 'typing', textLength });
     addDebugTrace('send', 'enqueue typing', { queueLength: this.sendQueue.length, textLength });
+    this.startSendLoop();
+  }
+
+  async sendImageSelecting() {
+    addDebugTrace('send', 'enqueue image_selecting');
+    this.sendQueue.push({ kind: 'image_selecting' });
+    this.startSendLoop();
+  }
+
+  async sendImageSelectingCancel() {
+    addDebugTrace('send', 'enqueue image_selecting_cancel');
+    this.sendQueue.push({ kind: 'image_selecting_cancel' });
     this.startSendLoop();
   }
 
@@ -389,7 +403,7 @@ export class MessageProcessor {
       const item = this.sendQueue[0];
       const result = await this.sendOne(item);
 
-      if (item.kind === 'typing' || item.kind === 'proactive' || item.kind === 'touch') {
+      if (item.kind === 'typing' || item.kind === 'proactive' || item.kind === 'touch' || item.kind === 'image_selecting' || item.kind === 'image_selecting_cancel') {
         addDebugTrace('send', `${item.kind} sent`, { ok: result.ok, error: result.error });
         this.sendQueue.shift();
         continue;
@@ -429,7 +443,7 @@ export class MessageProcessor {
   private async sendOne(item: SendItem): Promise<SendResult> {
     addDebugTrace('send', 'sendOne begin', {
       kind: item.kind,
-      uuid: item.kind === 'typing' || item.kind === 'touch' ? undefined : item.uuid,
+      uuid: item.kind === 'typing' || item.kind === 'touch' ? undefined : ('uuid' in item ? item.uuid : undefined),
       queueLength: this.sendQueue.length,
     });
     if (item.kind === 'text') {
@@ -443,6 +457,12 @@ export class MessageProcessor {
     }
     if (item.kind === 'touch') {
       return this.networkClient.sendTouch(item.touchArea, item.clickFrequency);
+    }
+    if (item.kind === 'image_selecting') {
+      return this.networkClient.sendImageSelecting();
+    }
+    if (item.kind === 'image_selecting_cancel') {
+      return this.networkClient.sendImageSelectingCancel();
     }
     return this.networkClient.sendTypingEvent(item.textLength);
   }
