@@ -7,10 +7,11 @@ import base64
 import traceback
 import re
 from ...types.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntry
-from ...types.tool_type import MyTool, ToolFunction, ToolOneParameter
+from ...types.tool_type import  MyTool, ToolFunction, ToolOneParameter
 from typing import List, Tuple, Dict, Any, Optional
 import random
 from .auto_song_learner import WishlistManager
+from .utils import get_unified_song_name
 
 
 class SingingManager:
@@ -30,38 +31,7 @@ class SingingManager:
 
     @staticmethod
     def get_unified_song_name(song_name: str) -> str:
-        '''
-        去除所有的空格，标点符号（？！?1~，,、·），书名号
-        去除括号（尖括号，小括号，中括号，中英文两种）内的内容
-        '''
-        if not song_name:
-            return ""
-
-        unified = str(song_name)
-
-        # 去除中英文括号内的内容（支持多段，尽量兼容嵌套）
-        bracket_patterns = [
-            r"\([^()]*\)",
-            r"（[^（）]*）",
-            r"\[[^\[\]]*\]",
-            r"【[^【】]*】",
-            r"<[^<>]*>",
-            r"〈[^〈〉]*〉",
-            r"「[^「」]*」",
-            r"『[^『』]*』",
-        ]
-        for pattern in bracket_patterns:
-            while True:
-                updated = re.sub(pattern, "", unified)
-                if updated == unified:
-                    break
-                unified = updated
-
-        # 去除空白和常见干扰标点
-        unified = re.sub(r"\s+", "", unified)
-        unified = re.sub(r"[？！!?~，,、·《》]", "", unified)
-
-        return unified.strip().lower()
+        return get_unified_song_name(song_name)
 
 
     def get_music_data(self):
@@ -195,6 +165,7 @@ class SingingManager:
         self.get_music_data()
         self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
         self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
+
     async def get_songs_can_sing_llm(self, max_song_num: int = 5) -> str:
         song_and_desc = self.get_songs_can_sing(max_song_num)
         return json.dumps(song_and_desc, ensure_ascii=False)
@@ -206,6 +177,7 @@ class SingingManager:
         if not segments:
             return f"洛天依目前无法演唱{song_name}。"
         return f"洛天依可以演唱{correct_song_name}，可以唱的唱段有：{', '.join(segments)}。"
+
     def get_segment_lyrics(self, song_name: str, segment_description: str) -> str:
         lyrics, _ = self.get_song_segment(song_name, segment_description, require_audio=False)
         if not lyrics:

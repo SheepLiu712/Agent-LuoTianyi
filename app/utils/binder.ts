@@ -7,6 +7,8 @@ export interface BinderSendCallbacks {
   sendTouch: (touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) => Promise<void>;
   sendPreferences: (preferences: Record<string, unknown>) => Promise<void>;
   sendTyping: (textLength: number) => Promise<void>;
+  sendImageSelecting: () => Promise<void>;
+  sendImageSelectingCancel: () => Promise<void>;
   playLocalTts: (convUuid: string) => Promise<boolean>;
   stopLocalTts: () => Promise<void>;
 }
@@ -38,6 +40,14 @@ export class AgentBinder {
 
   sendTyping(textLength: number) {
     return this.sendCallbacks.sendTyping(textLength);
+  }
+
+  sendImageSelecting() {
+    return this.sendCallbacks.sendImageSelecting();
+  }
+
+  sendImageSelectingCancel() {
+    return this.sendCallbacks.sendImageSelectingCancel();
   }
 
   playLocalTts(convUuid: string) {

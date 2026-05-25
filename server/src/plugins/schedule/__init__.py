@@ -1,6 +1,6 @@
 """
-Schedule 插件包：真实日程系统。
-提供洛天依官方动态拉取、事件解析、提醒派发、上下文注入等功能。
+Schedule 插件包：统一日程管理系统。
+提供事件定义、数据库存储、官方动态抓取、解析、触发派发、上下文注入等功能。
 """
 
 from .schedule_manager import ScheduleManager
@@ -9,6 +9,7 @@ from .official_feed_fetcher import OfficialFeedFetcher
 from .event_parser import EventParser
 from .reminder_dispatcher import ReminderDispatcher
 from .activity_context_provider import ActivityContextProvider
+from .event_models import UnifiedEventType, get_event_type_cn, check_trigger_condition
 
 __all__ = [
     "ScheduleManager",
@@ -17,4 +18,7 @@ __all__ = [
     "EventParser",
     "ReminderDispatcher",
     "ActivityContextProvider",
+    "UnifiedEventType",
+    "get_event_type_cn",
+    "check_trigger_condition",
 ]

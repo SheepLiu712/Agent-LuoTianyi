@@ -129,4 +129,33 @@ export class NetworkClient {
     return this.transport.submitUserTyping(textLength, 10000);
   }
 
+  sendImageSelecting(): Promise<SendResult> {
+    if (!this.transport) {
+      addDebugTrace('network', 'sendImageSelecting blocked: no transport');
+      return Promise.resolve({
+        ok: false,
+        request_id: `local-${Date.now()}`,
+        error: 'not logged in',
+        drop: true,
+      });
+    }
+    addDebugTrace('network', 'sendImageSelecting');
+    return this.transport.submitUserImageSelecting(5000);
+  }
+
+  sendImageSelectingCancel(): Promise<SendResult> {
+    if (!this.transport) {
+      addDebugTrace('network', 'sendImageSelectingCancel blocked: no transport');
+      return Promise.resolve({
+        ok: false,
+        request_id: `local-${Date.now()}`,
+        error: 'not logged in',
+        drop: true,
+      });
+    }
+    addDebugTrace('network', 'sendImageSelectingCancel');
+    return this.transport.submitUserImageSelectingCancel(5000);
+  }
+
+
 }

@@ -55,6 +55,8 @@ class MessageProcessor:
         self.send_typing_func:Callable[[int], dict] = network_client.send_typing
         self.send_touch_func:Callable[..., dict] = network_client.send_touch
         self.send_preferences_func:Callable[[dict], dict] = network_client.send_preferences
+        self.send_image_selecting_func:Callable = network_client.send_image_selecting
+        self.send_image_selecting_cancel_func:Callable = network_client.send_image_selecting_cancel
         self.start()
 
         self.processing_uuid = None
@@ -159,7 +161,14 @@ class MessageProcessor:
             self._send_queue.append(item)
             self._send_cond.notify()
         return local_id
-    
+
+    def send_image_selecting_start(self):
+        """发送图片选择开始事件。"""
+        self.send_image_selecting_func()
+
+    def send_image_selecting_cancel(self):
+        """发送图片选择取消事件。"""
+        self.send_image_selecting_cancel_func()
 
     def play_local_tts_by_uuid(self, conv_uuid: str) -> bool:
         if not conv_uuid or not self.multimedia_stream:

@@ -41,6 +41,13 @@ class WsTransport:
         self._ready_event = threading.Event()
         self._connected_event = threading.Event()
 
+    def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
+        """更新服务器地址，断开当前连接以便自动重连到新地址。"""
+        self.base_url = base_url.rstrip("/")
+        self.verify_ssl = verify_ssl
+        # 断开当前 WS，_run() 循环会自动用新 base_url 重连
+        self.stop()
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -98,6 +105,13 @@ class WsTransport:
             payload.update(touch_meta)
         return self._submit_user_event(WSEventType.USER_TOUCH, payload=payload, ack_timeout=ack_timeout)
 
+    def submit_image_selecting(self, ack_timeout: float = 5.0) -> dict:
+        """发送图片选择中的事件，服务端会延长等待时间。"""
+        return self._submit_user_event(WSEventType.USER_IMAGE_SELECTING, payload={}, ack_timeout=ack_timeout)
+
+    def submit_image_selecting_cancel(self, ack_timeout: float = 5.0) -> dict:
+        """发送图片选择取消的事件，服务端重置等待时间。"""
+        return self._submit_user_event(WSEventType.USER_IMAGE_SELECTING_CANCEL, payload={}, ack_timeout=ack_timeout)
     def submit_user_preferences(self, preferences: dict, ack_timeout: float = 10.0) -> dict:
         return self._submit_user_event(WSEventType.USER_PREFERENCE_SYNC, payload=preferences, ack_timeout=ack_timeout)
 

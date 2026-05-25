@@ -18,8 +18,8 @@ import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from "../hooks/useHistoryLogic";
-import { useAffection } from "../hooks/useAffection";
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import PreferencesScreen from './preferences';
 
 
 export default function Index({ onLogout }: { onLogout?: () => void }) {
@@ -31,6 +31,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
+  const [showPreferences, setShowPreferences] = useState(false);
   const webviewRef = useRef<WebView>(null);
 
 
@@ -60,7 +61,6 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
-  const { affection } = useAffection(username, message_token);
 
   useEffect(() => {
     const unsubscribe = subscribeDebugTrace((entries) => {
@@ -184,14 +184,6 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </TouchableOpacity>
         )}
 
-        {/* 好感度显示 */}
-        {affection && (
-          <View style={styles.affectionBadge}>
-            <Text style={styles.affectionLevelText}>{affection.level_cn}</Text>
-            <Text style={styles.affectionScoreText}>{affection.score}</Text>
-          </View>
-        )}
-
         {thinking ? (
           <View style={styles.thinkingBubble}>
             <Image
@@ -201,6 +193,17 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             />
           </View>
         ) : null}
+
+        {/* 偏好设置按钮（调试按钮左侧） */}
+        <TouchableOpacity
+          style={styles.settingsBtn}
+          onPress={() => setShowPreferences(true)}
+        >
+          <Image
+            source={require('../assets/images/setting.png')}
+            style={styles.settingsIcon}
+          />
+        </TouchableOpacity>
 
         <TouchableOpacity
           style={styles.debugToggleBtn}
@@ -228,6 +231,13 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           </View>
         ) : null}
       </View>
+
+      {/* 偏好设置弹窗 */}
+      {showPreferences && (
+        <PreferencesScreen
+          onClose={() => setShowPreferences(false)}
+        />
+      )}
 
       {/* 【可压缩区域：聊天历史 + 输入框】- 使用 flex 布局，会被键盘压缩 */}
       <View style={{ flex: 1, marginTop: live2dHeight, marginBottom: keyboardHeight }}>
@@ -382,6 +392,25 @@ const styles = StyleSheet.create({
     height: 30,
     resizeMode: 'stretch',
   },
+  settingsBtn: {
+    position: 'absolute',
+    right: 56,
+    bottom: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(76, 175, 80, 0.9)',
+    zIndex: 60,
+    elevation: 12,
+  },
+  settingsIcon: {
+    width: 20,
+    height: 20,
+    resizeMode: 'contain',
+    tintColor: '#ffffff',
+  },
   debugToggleBtn: {
     position: 'absolute',
     right: 10,
@@ -444,31 +473,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     marginBottom: 2,
-  },
-  affectionBadge: {
-    position: 'absolute',
-    right: 10,
-    top: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 182, 193, 0.85)',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    zIndex: 100,
-    elevation: 12,
-    flexDirection: 'row',
-  },
-  affectionLevelText: {
-    color: '#8B0040',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  affectionScoreText: {
-    color: '#8B0040',
-    fontSize: 11,
-    fontWeight: '600',
-    marginLeft: 4,
-    opacity: 0.8,
   },
 });

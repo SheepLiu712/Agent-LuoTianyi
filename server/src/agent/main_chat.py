@@ -11,7 +11,7 @@ from ..utils.logger import get_logger
 from ..utils.enum_type import ContextType
 import dataclasses
 from abc import ABC, abstractmethod
-from ..plugins.music.singing_manager import SingingManager
+from ..plugins.music.utils import get_unified_song_name
 
 
 @dataclasses.dataclass
@@ -65,6 +65,7 @@ class MainChat:
         reply_topic: str,
         user_nickname: str,
         user_description: str,
+        preference_context: str = "",
         conversation_history: str = "",
         fact_hits: Optional[List[str]] = None,
         memory_hits: Optional[List[str]] = None,
@@ -81,6 +82,7 @@ class MainChat:
             character_persona=self.character_persona,
             speaking_style=self.speaking_style,
             user_persona=user_persona,
+            preference_context=preference_context,
             conversation_history=conversation_history or "无",
             current_time=current_time,
             reply_topic=reply_topic or "",
@@ -122,11 +124,10 @@ class MainChat:
             # 先尝试匹配唱歌指令
             sing_match = sing_pattern.match(line)
             self.logger.debug(f"Parsing line: '{line}'")
-            print(sing_plan)
             if sing_match and sing_plan:
                 song = sing_match.group(1).strip().strip("<>").strip().strip("'\"“”《》")
                 sing_plan_song = sing_plan[0].strip().strip("<>").strip().strip("'\"“”《》")
-                if song and SingingManager.get_unified_song_name(song) == SingingManager.get_unified_song_name(sing_plan_song):
+                if song and get_unified_song_name(song) == get_unified_song_name(sing_plan_song):
                     results.append(SongSegmentChat(song=sing_plan_song, segment=sing_plan[1], lyrics=""))
                     structured_found = True
                 else:
@@ -229,17 +230,17 @@ class MainChat:
 
         persona = static_vars.get("character_persona", "")
         if isinstance(persona, list):
-            persona = "\n".join(str(x) for x in persona if str(x).strip())
+            persona = "".join(str(x) for x in persona if str(x).strip())
         if persona:
             self.character_persona = str(persona).strip()
 
         style = static_vars.get("speaking_style", "")
         if isinstance(style, list):
-            style = "；".join(str(x) for x in style if str(x).strip())
+            style = "".join(str(x) for x in style if str(x).strip())
         if not style:
             requirements = static_vars.get("response_requirements", [])
             if isinstance(requirements, list):
-                style = "；".join(str(x).lstrip("- ").strip() for x in requirements[:3] if str(x).strip())
+                style = "".join(str(x).lstrip("- ").strip() for x in requirements[:3] if str(x).strip())
         if style:
             self.speaking_style = str(style).strip()
 

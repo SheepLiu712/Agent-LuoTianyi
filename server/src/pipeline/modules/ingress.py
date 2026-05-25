@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, List, Optional
 from ...utils.logger import get_logger
-from ...vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
+from ...utils.vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
 from ...agent.jargon_retriver import extract_song_entities
 from ..chat_events import ChatInputEvent, ChatInputEventType
 from ...utils.llm.llm_module import LLMModule
@@ -48,17 +48,6 @@ async def ingress_message(service_hub: "ServiceHub", user_id: str, message: "Cha
     if song_entities:
         logger.debug(f"Extracted song entities from user input: {song_entities}")
         message.payload["terms"] = song_entities
-    
-    # 检测重要日期
-    try:
-        if service_hub.agent and hasattr(service_hub.agent, 'main_chat') and service_hub.agent.main_chat:
-            llm_module = service_hub.agent.main_chat.llm
-            date_info = await extract_date_entities(message.text, llm_module)
-            if date_info:
-                logger.info(f"检测到重要日期: {date_info}")
-                message.payload["detected_date"] = date_info
-    except Exception as e:
-        logger.error(f"日期检测失败: {e}")
 
 
 async def _process_image_message(service_hub: "ServiceHub", user_id: str, message: "ChatInputEvent"):
@@ -87,6 +76,7 @@ async def _process_image_message(service_hub: "ServiceHub", user_id: str, messag
     image_description = f"[一张图片]:{image_description}"
     message.text = image_description  # 将描述文本放入message.text，供后续处理使用
     payload["image_server_path"] = image_server_path
+    
 async def extract_date_entities(user_input: str, llm_module) -> Optional[dict]:
     """
     使用LLM从用户输入中提取重要日期信息。

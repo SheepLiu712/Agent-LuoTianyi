@@ -8,6 +8,17 @@ import LoginScreen from './login';
 export default function RootLayout() {
   const { isLoggedIn, isLoading, login, register, logout } = useAuth();
 
+  // 注册成功后的回调：不再弹出偏好设置，用户可以在主界面右上角自行设置
+  const handleRegister = async (
+    username: string,
+    password: string,
+    confirmPassword: string,
+    inviteCode: string,
+  ): Promise<{ success: boolean; message: string }> => {
+    const result = await register(username, password, confirmPassword, inviteCode);
+    return result;
+  };
+
   // 正在检查自动登录状态时，显示加载画面
   if (isLoading) {
     return (
@@ -23,7 +34,7 @@ export default function RootLayout() {
   if (!isLoggedIn) {
     return (
       <SafeAreaProvider>
-        <LoginScreen onLogin={login} onRegister={register} />
+        <LoginScreen onLogin={login} onRegister={handleRegister} />
       </SafeAreaProvider>
     );
   }

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, Text, Engine, event
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, Text, Engine, event, text, UniqueConstraint
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from datetime import datetime
 import uuid
@@ -101,6 +101,58 @@ class AffectionLog(Base):
     user = relationship("User", back_populates="affection_logs")
 
 
+class Event(Base):
+    """统一事件管理系统：存储所有类型的事件（包括用户生日/纪念日）。"""
+    __tablename__ = "events"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    event_type = Column(String, nullable=False, index=True)        # concert / livestream / holiday / birthday / anniversary / travel / new_song / dynamic / general
+    title = Column(String, nullable=False)                          # 事件标题
+    description = Column(Text, default="")                          # 事件描述
+
+    # 用户关联（针对 birthday / anniversary 等个人事件）
+    user_id = Column(String, nullable=True, index=True)             # 关联的用户 UUID
+
+    # 日期相关
+    date_type = Column(String, default="solar")                     # solar / lunar
+    date_mmdd = Column(String, nullable=True)                       # MM-DD（用于周期性事件）
+    start_datetime = Column(DateTime, nullable=True)                # 开始日期时间（非周期性事件）
+    end_datetime = Column(DateTime, nullable=True)                  # 结束日期时间
+    duration_minutes = Column(Integer, nullable=True)               # 持续时间（分钟）
+
+    # 触发条件
+    trigger_conditions = Column(Text, default="[]")                # JSON list of trigger strings
+    is_recurring = Column(Boolean, default=False)                   # 是否周期性（每年重复）
+    is_personal = Column(Boolean, default=False)                    # 是否仅对特定用户有意义
+    target_user_id = Column(String, nullable=True, index=True)      # 如果 is_personal，关联的用户 UUID
+
+    # 来源信息
+    source = Column(String, default="")                              # bilibili / system / user / citywalk / song_learner
+    source_url = Column(String, default="")
+    source_platform = Column(String, default="")
+
+    # 状态
+    is_active = Column(Boolean, default=True)                       # 是否活跃
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class EventNotification(Base):
+    """事件通知记录：记录哪些事件已经通知过哪些用户。"""
+    __tablename__ = "event_notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(String, ForeignKey("events.id"), nullable=False, index=True)
+    user_id = Column(String, nullable=False, index=True)
+    trigger_key = Column(String, nullable=False)                    # 触发的条件名称，如 "day_of_event", "1_day_before"
+    notified_at = Column(DateTime, default=datetime.now)
+
+    __table_args__ = (
+        # 同一事件同一用户的同一触发条件不重复通知
+        UniqueConstraint("event_id", "user_id", "trigger_key", name="uq_event_notification"),
+    )
+
+
 # Database URL
 SessionLocal = None
 engine = None
@@ -131,17 +183,7 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
     # 迁移：为已存在的数据库添加新列
-    for migration in [
-        "ALTER TABLE users ADD COLUMN preferences Text DEFAULT '{}'",
-        "ALTER TABLE users ADD COLUMN affection_score Integer DEFAULT 0",
-        "ALTER TABLE users ADD COLUMN affection_total_gained Integer DEFAULT 0",
-    ]:
-        try:
-            with engine.connect() as conn:
-                conn.execute(migration)
-                conn.commit()
-        except Exception:
-            pass  # 列已存在，无需迁移
+
 
 def get_sql_db(): # Generator for FastAPI
     db = SessionLocal()

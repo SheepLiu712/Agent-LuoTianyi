@@ -176,6 +176,14 @@ export class WebSocketTransport {
     return this.sendWithAck(WSEventType.USER_TOUCH, payload, ackTimeout);
   }
 
+  async submitUserImageSelecting(ackTimeout = 5000): Promise<AckResult> {
+    return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING, {}, ackTimeout);
+  }
+
+  async submitUserImageSelectingCancel(ackTimeout = 5000): Promise<AckResult> {
+    return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING_CANCEL, {}, ackTimeout);
+  }
+
   async submitUserPreferences(preferences: Record<string, unknown>, ackTimeout = 5000): Promise<AckResult> {
     return this.sendWithAck(WSEventType.USER_PREFERENCE_SYNC, preferences, ackTimeout);
   }

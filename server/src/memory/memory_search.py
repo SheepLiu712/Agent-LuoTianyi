@@ -6,15 +6,12 @@ Memory Search Module
 """
 
 from ..utils.logger import get_logger
-from ..plugins.music.knowledge_service import get_song_introduction, get_song_lyrics
 from ..utils.llm.prompt_manager import PromptManager
 from ..utils.llm.llm_module import LLMModule
 from typing import Tuple, Dict, List, Any
 from ..database.database_service import VectorStore
 import asyncio
 import time
-import re
-from ..plugins.music.singing_manager import SingingManager
 
 from sqlalchemy.orm import Session
 
@@ -26,16 +23,14 @@ _CITYWALK_CACHE_TTL: float = 3600.0
 
 
 class MemorySearcher:
-    def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager, singing_manager: SingingManager):
+    def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager):
         
         self.logger = get_logger(__name__)
         self.config = config
-        self.llm = LLMModule(config["llm_module"], prompt_manager)
+        # self.llm = LLMModule(config["llm_module"], prompt_manager)
         self.max_k_vector_entities = config.get("max_k_vector_entities", 5)
         self.default_threshold = float(config.get("vector_score_threshold", 0.46))
         self.max_k_graph_entities = config.get("max_k_graph_entities", 3)
-        self.singing_manager = singing_manager
-
 
     async def search_memories_for_topic(
         self,
@@ -153,50 +148,3 @@ class MemorySearcher:
 
         return dedup
 
-    async def search_song_facts_for_topic(
-        self,
-        knowledge_db: Session,
-        constraints: List[str],
-    ) -> List[str]:
-        """面向 TopicReplier 的歌曲事实检索接口。"""
-        if not constraints:
-            return []
-
-        dedup: List[str] = []
-        seen = set()
-        for raw in constraints:
-            song_name = self._extract_song_name(raw)
-            if not song_name:
-                continue
-
-            intro = await asyncio.to_thread(get_song_introduction, knowledge_db, song_name)
-            lyrics = await asyncio.to_thread(get_song_lyrics, knowledge_db, song_name)
-
-            if intro:
-                text = f"《{song_name}》的介绍:\n{intro}"
-                if text not in seen:
-                    seen.add(text)
-                    dedup.append(text)
-
-            if lyrics:
-                text = f"《{song_name}》的歌词:\n{lyrics}"
-                if text not in seen:
-                    seen.add(text)
-                    dedup.append(text)
-
-        return dedup
-
-    def _extract_song_name(self, text: str) -> str:
-        content = (text or "").strip()
-        if not content:
-            return ""
-
-        m = re.search(r"《([^》]+)》", content)
-        if m:
-            return m.group(1).strip()
-
-        if "是一首歌" in content:
-            return content.split("是一首歌", 1)[0].strip().strip("《》")
-
-        return content.strip("\"'“”‘’《》")
-    
