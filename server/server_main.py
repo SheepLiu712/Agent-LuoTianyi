@@ -326,10 +326,6 @@ async def overwrite_preference(
     if not user:
         raise HTTPException(status_code=404, detail="未找到该用户")
     
-    if req.preferences.get("relationship"):
-        req.preferences["relationship"] = req.preferences["relationship"].replace("我","用户") # 将“我”替换为“用户”，避免Agent在使用时误认为是自己，导致关系链构建错误
-    if req.preferences.get("custom_context"):
-        req.preferences["custom_context"] = req.preferences["custom_context"].replace("我","用户") # 将“我”替换为“用户”，避免Agent在使用时误认为是自己，导致关系链构建错误
     user.preferences = json.dumps(req.preferences, ensure_ascii=False)
 
     db.commit()

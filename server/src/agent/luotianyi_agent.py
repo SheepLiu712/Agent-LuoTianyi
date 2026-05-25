@@ -315,7 +315,7 @@ class LuoTianyiAgent:
                         traits = "、".join(prefs["personality_traits"])
                         pref_parts.append(f"用户希望你的性格特点：{traits}")
                     if prefs.get("custom_context"):
-                        pref_parts.append(f"用户补充的上下文：{prefs['custom_context']}")
+                        pref_parts.append(f"用户补充的上下文：{prefs['custom_context'].replace("我", "我（用户）")}")
                     if pref_parts:
                         pref_context = "用户偏好设置：" + "；".join(pref_parts)
                 except Exception as e:
