@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple, Any
 import asyncio
 import traceback
 from ..utils.logger import get_logger
@@ -23,6 +23,11 @@ class TopicReplier:
         self.is_processing: bool = False
         self.change_state_callback : Optional[Callable[[bool, bool], Awaitable[None]]] = None # thinking, speaking
 
+        # 触摸事件指针机制
+        self._touch_pending: Optional["ExtractedTopic"] = None  # 队列中待处理的触摸 Topic 引用
+        self._touch_processing: bool = False  # 正在处理触摸 Topic
+        self._touch_lock = asyncio.Lock()  # 触摸指针并发锁
+
     def set_service_hub(self, service_hub: "ServiceHub"):
         self.service_hub = service_hub
 
@@ -34,8 +39,29 @@ class TopicReplier:
             self.processor_task = asyncio.create_task(self.topic_processor())
             self.logger.info("TopicPlanner processor task started")
 
+    def _is_touch_topic(self, topic: "ExtractedTopic") -> bool:
+        """判断一个 ExtractedTopic 是否来自触摸事件"""
+        content = topic.topic_content or ""
+        return content.startswith("[") and ("触摸" in content or "摸了摸" in content or "碰了碰" in content or "戳了戳" in content or "握了握" in content)
+
     async def add_topic(self, topic: "ExtractedTopic"):
-        await self.topic_queue.put(topic)
+        if self._is_touch_topic(topic):
+            async with self._touch_lock:
+                if self._touch_processing:
+                    self.logger.info("Touch event ignored: touch topic is currently being processed")
+                    return
+                if self._touch_pending is not None:
+                    # 更新队列中已有的触摸 Topic 内容
+                    self._touch_pending.topic_content = topic.topic_content
+                    self._touch_pending.source_messages = topic.source_messages
+                    self.logger.info("Touch topic updated (was queued, not yet processed)")
+                    return
+                # 新的触摸 Topic，入队并记录指针
+                self._touch_pending = topic
+                await self.topic_queue.put(topic)
+                self.logger.info("Touch topic enqueued")
+        else:
+            await self.topic_queue.put(topic)
 
     async def topic_processor(self):
         while True:
@@ -43,6 +69,9 @@ class TopicReplier:
             try:
                 topic = await self.topic_queue.get()
                 self.is_processing = True
+                if self._is_touch_topic(topic):
+                    async with self._touch_lock:
+                        self._touch_processing = True
                 if self.change_state_callback is not None:
                     await self.change_state_callback(thinking = True) # 进入思考状态
                 await self._reply_one_topic(topic)
@@ -55,6 +84,10 @@ class TopicReplier:
             finally:
                 if topic is not None:
                     self.topic_queue.task_done()
+                    if self._is_touch_topic(topic):
+                        async with self._touch_lock:
+                            self._touch_pending = None
+                            self._touch_processing = False
                 self.is_processing = False
                 if self.topic_queue.empty() and self.change_state_callback is not None:
                     await self.change_state_callback(thinking = False) # 进入思考状态
@@ -110,10 +143,10 @@ class TopicReplier:
             reply_items=reply_items,
         )
 
-        for item, uuid in zip(reply_items, uuid_list):
+        for item, uuid in zip(reply_items, uuid_list or []):
             if uuid is None:
                 continue
-            item.uuid = uuid # 给每个回复项分配一个UUID，供前端关联文本和TTS音频使用
+            item.uuid = uuid
             await self._submit_speaking_job(self.send_reply_callback, item)
 
         # Fire-and-forget: memory write and profile update run in background,
@@ -252,14 +285,11 @@ class TopicReplier:
         except Exception as e:
             self.logger.warning(f"Topic memory write task failed: {e}")
 
-        
-
     async def _process_date_detection(self, topic: "ExtractedTopic", conversation_history: Optional[str] = None) -> None:
         """从话题的源消息中检测重要日期，按置信度处理。"""
         if self.service_hub is None or self.service_hub.agent is None:
             return
 
-        # 获取 source_messages 中的最新用户文本
         user_texts = []
         for msg in getattr(topic, "source_messages", []) or []:
             content = getattr(msg, "content", "") or ""
@@ -268,7 +298,6 @@ class TopicReplier:
         if not user_texts:
             return
 
-        # 检查 agent 是否已初始化 date_detector
         agent = self.service_hub.agent
         if not hasattr(agent, 'date_detector') or agent.date_detector is None:
             return
@@ -279,7 +308,6 @@ class TopicReplier:
 
         self.logger.debug(f"DateDetector: {date_info}")
 
-        # 按置信度处理
         from ..agent.date_processor import process_detected_date
         result = await process_detected_date(
             date_info=date_info,
@@ -296,7 +324,6 @@ class TopicReplier:
             self.logger.info(f"Date confirmation topic created from topic {topic.topic_id}")
 
     def _safe_add_topic(self, topic: "ExtractedTopic") -> None:
-        """线程安全地添加话题到队列。"""
         try:
             asyncio.create_task(self.add_topic(topic))
         except Exception as e:

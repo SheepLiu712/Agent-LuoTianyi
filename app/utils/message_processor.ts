@@ -11,7 +11,7 @@ type SendItem =
   | { kind: 'proactive'; uuid: string; text: string }
   | { kind: 'image'; uuid: string; imageUri: string; mimeType: string }
   | { kind: 'typing'; textLength: number }
-  | { kind: 'touch'; touchArea: string; clickFrequency?: Record<string, number> }
+  | { kind: 'touch'; touchArea: string | string[]; clickFrequency?: Record<string, number>; touchMeta?: Record<string, unknown> }
   | { kind: 'image_selecting' }
   | { kind: 'image_selecting_cancel' };
 
@@ -137,9 +137,9 @@ export class MessageProcessor {
     this.startSendLoop();
   }
 
-  async sendTouch(touchArea: string, clickFrequency?: Record<string, number>) {
+  async sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) {
     addDebugTrace('send', 'enqueue touch', { touchArea, queueLength: this.sendQueue.length });
-    this.sendQueue.push({ kind: 'touch', touchArea, clickFrequency });
+    this.sendQueue.push({ kind: 'touch', touchArea, clickFrequency, touchMeta });
     this.startSendLoop();
   }
 
@@ -456,7 +456,7 @@ export class MessageProcessor {
       return this.networkClient.sendImage(item.imageUri, item.mimeType);
     }
     if (item.kind === 'touch') {
-      return this.networkClient.sendTouch(item.touchArea, item.clickFrequency);
+      return this.networkClient.sendTouch(item.touchArea, item.clickFrequency, item.touchMeta);
     }
     if (item.kind === 'image_selecting') {
       return this.networkClient.sendImageSelecting();

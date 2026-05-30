@@ -114,6 +114,26 @@
 		{
 			"Name": "头",
 			"Id": "ArtMesh35"
+		},
+		{
+			"Name": "身体",
+			"Id": "ArtMesh88"
+		},
+		{
+			"Name": "裙子",
+			"Id": "ArtMesh91"
+		},
+		{
+			"Name": "右腿",
+			"Id": "ArtMesh98"
+		},
+		{
+			"Name": "左手",
+			"Id": "ArtMesh116"
+		},
+		{
+			"Name": "右手",
+			"Id": "ArtMesh127"
 		}
 	]
 }

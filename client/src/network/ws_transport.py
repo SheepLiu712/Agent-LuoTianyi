@@ -70,10 +70,11 @@ class WsTransport:
             except Exception:
                 pass
 
-    def set_agent_message_listener(self, agent_message_listener: Callable[[AgentMessage], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
+    def set_agent_message_listener(self, agent_message_listener: Callable[[AgentMessage], None] | None, agent_state_listener: Callable[[bool], None] | None, date_detected_listener: Callable[[dict], None] | None = None) -> None:
         with self._lock:
             self._agent_message_listener = agent_message_listener
             self._agent_state_listener = agent_state_listener
+            self._date_detected_listener = date_detected_listener
 
     def submit_user_text(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0) -> dict:
         payload = {"message": text}
@@ -93,10 +94,15 @@ class WsTransport:
     def submit_typing_event(self, text_length: int, ack_timeout: float = 10.0) -> dict:
         return self._submit_user_event(WSEventType.USER_TYPING, payload={"text_length": text_length}, ack_timeout=ack_timeout)
 
-    def submit_user_touch(self, touch_area: str, click_frequency: dict = None, ack_timeout: float = 10.0) -> dict:
-        payload = {"touch_area": touch_area}
+    def submit_user_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None, ack_timeout: float = 10.0) -> dict:
+        if isinstance(touch_area, str):
+            payload = {"touch_area": touch_area}
+        else:
+            payload = {"touchArea": touch_area}
         if click_frequency:
             payload["click_frequency"] = click_frequency
+        if touch_meta:
+            payload.update(touch_meta)
         return self._submit_user_event(WSEventType.USER_TOUCH, payload=payload, ack_timeout=ack_timeout)
 
     def submit_image_selecting(self, ack_timeout: float = 5.0) -> dict:
@@ -106,7 +112,6 @@ class WsTransport:
     def submit_image_selecting_cancel(self, ack_timeout: float = 5.0) -> dict:
         """发送图片选择取消的事件，服务端重置等待时间。"""
         return self._submit_user_event(WSEventType.USER_IMAGE_SELECTING_CANCEL, payload={}, ack_timeout=ack_timeout)
-
     def submit_user_preferences(self, preferences: dict, ack_timeout: float = 10.0) -> dict:
         return self._submit_user_event(WSEventType.USER_PREFERENCE_SYNC, payload=preferences, ack_timeout=ack_timeout)
 
@@ -289,6 +294,10 @@ class WsTransport:
                 self._emit_agent_state(state)
                 continue
 
+            if event_type == WSEventType.DATE_DETECTED:
+                self._emit_date_detected(msg.payload)
+                continue
+
             if event_type in (WSEventType.SERVER_ERROR, WSEventType.AUTH_ERROR):
                 error_msg = normalize_error_message(msg)
                 consumed = self._complete_ack_waiter(
@@ -369,6 +378,14 @@ class WsTransport:
         except Exception:
             pass
 
+    def _emit_date_detected(self, payload: dict) -> None:
+        self.logger.info(f"Date detected: {payload}")
+        if not self._date_detected_listener:
+            return
+        try:
+            self._date_detected_listener(payload)
+        except Exception as e:
+            self.logger.error(f"Error in date detected listener: {e}")
 
     @staticmethod
     def _build_ws_url(base_url: str) -> str:

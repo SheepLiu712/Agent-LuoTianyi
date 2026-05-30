@@ -18,6 +18,8 @@ describe('AgentBinder', () => {
       sendTouch: jest.fn(),
       sendPreferences: jest.fn(),
       sendTyping: jest.fn(),
+      sendImageSelecting: jest.fn(),
+      sendImageSelectingCancel: jest.fn(),
       playLocalTts: jest.fn().mockResolvedValue(true),
       stopLocalTts: jest.fn().mockResolvedValue(undefined),
     };

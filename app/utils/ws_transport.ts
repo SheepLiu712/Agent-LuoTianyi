@@ -160,20 +160,28 @@ export class WebSocketTransport {
     return this.sendWithAck(WSEventType.USER_TYPING, { is_typing: true, text_length: textLength }, ackTimeout);
   }
 
+  async submitUserTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>, ackTimeout = 5000): Promise<AckResult> {
+    const payload: Record<string, unknown> = {};
+    if (typeof touchArea === 'string') {
+      payload.touch_area = touchArea;
+    } else {
+      payload.touchArea = touchArea;
+    }
+    if (clickFrequency) {
+      payload.click_frequency = clickFrequency;
+    }
+    if (touchMeta) {
+      Object.assign(payload, touchMeta);
+    }
+    return this.sendWithAck(WSEventType.USER_TOUCH, payload, ackTimeout);
+  }
+
   async submitUserImageSelecting(ackTimeout = 5000): Promise<AckResult> {
     return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING, {}, ackTimeout);
   }
 
   async submitUserImageSelectingCancel(ackTimeout = 5000): Promise<AckResult> {
     return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING_CANCEL, {}, ackTimeout);
-  }
-
-  async submitUserTouch(touchArea: string, clickFrequency?: Record<string, number>, ackTimeout = 5000): Promise<AckResult> {
-    const payload: Record<string, unknown> = { touch_area: touchArea };
-    if (clickFrequency) {
-      payload.click_frequency = clickFrequency;
-    }
-    return this.sendWithAck(WSEventType.USER_TOUCH, payload, ackTimeout);
   }
 
   async submitUserPreferences(preferences: Record<string, unknown>, ackTimeout = 5000): Promise<AckResult> {

@@ -206,17 +206,28 @@ class WebSocketService:
 
         if event.event_type == WSEventType.USER_TOUCH.value:
             payload = event.payload if isinstance(event.payload, dict) else {}
-            touch_area = payload.get("touch_area", "天依")
+            # 兼容新旧两种 payload 格式
+            touch_areas = payload.get("touchArea")
+            if touch_areas is None:
+                touch_area = payload.get("touch_area", "天依")
+                touch_areas = [touch_area]
+            if not isinstance(touch_areas, list):
+                touch_areas = [touch_areas]
             area_to_description = {
-                "头": "用户轻轻摸了摸天依的头",
-                "辫子": "用户轻轻拉了拉天依的辫子",
-                "耳机": "用户碰了碰天依的耳机",
-                "袖": "用户扯了扯天依的袖子",
-                "左腿": "用户戳了戳天依",
-                "8": "用户戳了戳天依",
+                "head": "用户摸了摸天依的头", "body": "用户碰了碰天依的身体",
+                "legs": "用户戳了戳天依的腿", "hands": "用户握了握天依的手",
+                "头": "用户轻轻摸了摸天依的头", "辫子": "用户轻轻拉了拉天依的辫子",
+                "耳机": "用户碰了碰天依的耳机", "袖": "用户扯了扯天依的袖子",
+                "左腿": "用户戳了戳天依的腿", "右腿": "用户戳了戳天依的腿",
+                "身体": "用户碰了碰天依的身体", "裙子": "用户扯了扯天依的裙子",
+                "8": "用户戳了戳天依", "左手": "用户握了握天依的左手",
+                "右手": "用户握了握天依的右手",
             }
-            text = area_to_description.get(touch_area, f"用户碰了碰天依的{touch_area}")
-            # 如果包含点击频率数据，附加到文本中供LLM分析
+            descriptions = []
+            for a in touch_areas:
+                desc = area_to_description.get(a, f"用户碰了碰天依的{a}")
+                descriptions.append(desc)
+            text = "；".join(descriptions)
             click_frequency = payload.get("click_frequency")
             if click_frequency:
                 count_10s = click_frequency.get("count_10s", 0)

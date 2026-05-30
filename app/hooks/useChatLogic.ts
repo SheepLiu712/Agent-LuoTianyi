@@ -98,8 +98,8 @@ export const useChatLogic = (
         sendProactiveText: async (uuid, text) => {
           await messageProcessorRef.current?.sendProactiveText(uuid, text);
         },
-        sendTouch: async (touchArea, clickFrequency) => {
-          await messageProcessorRef.current?.sendTouch(touchArea, clickFrequency);
+        sendTouch: async (touchArea, clickFrequency, touchMeta) => {
+          await messageProcessorRef.current?.sendTouch(touchArea, clickFrequency, touchMeta);
         },
         sendPreferences: async (preferences) => {
           await messageProcessorRef.current?.sendPreferences(preferences);
@@ -196,9 +196,15 @@ export const useChatLogic = (
         const count10s = timestamps.filter((t) => t > now - 10000).length;
         const count30s = timestamps.length;
         clickTimestampsRef.current = timestamps;
+        // 新格式：touchArea 是字符串数组，附加 timeSinceLastSentTouch 和 touchCount
+        const touchArea = data.touchArea || ['头'];
         void binderRef.current?.sendTouch(
-          data.touchArea || '头',
+          touchArea,
           { count_10s: count10s, count_30s: count30s },
+          {
+            timeSinceLastSentTouch: data.timeSinceLastSentTouch || 0,
+            touchCount: data.touchCount || 1,
+          },
         );
         return;
       }

@@ -50,6 +50,11 @@ class TopicPlanner:
             await self._handle_user_typing(message)
             return
 
+        # 触摸事件：绕过未读缓冲，直接生成 ExtractedTopic 送入 replier
+        if message.event_type == ChatInputEventType.USER_TOUCH:
+            await self._handle_touch_event(message)
+            return
+
         if self.unread_store is None:
             self.logger.warning("UnreadStore is not initialized, skip incoming message")
             return
@@ -114,6 +119,21 @@ class TopicPlanner:
                 self.logger.exception(f"TopicPlanner processor error: {e}")
                 await asyncio.sleep(0.1)
 
+    async def _handle_touch_event(self, event: "ChatInputEvent"):
+        """处理触摸事件：直接生成 ExtractedTopic 送入 replier"""
+        text = event.text or "[用户触摸了天依]"
+        unread_msg = UnreadStore.trans_ChatInputEvent_to_UnreadMessage(event)
+        touch_topic = ExtractedTopic(
+            topic_id=str(uuid4()),
+            source_messages=[unread_msg],
+            topic_content=text,
+            memory_attempts=[],
+            fact_constraints=[],
+            sing_attempts=[],
+        )
+        self.logger.info(f"Touch event -> ExtractedTopic: {text}")
+        await self._consume_topics([touch_topic])
+
     async def _handle_user_typing(self, event: "ChatInputEvent"):
         """处理用户输入中的事件，重置超时等待。"""
         text_length = event.payload["text_length"]
@@ -171,7 +191,7 @@ class TopicPlanner:
     async def _extract_topics(self, unread_snapshot: UnreadMessageSnapshot, force_complete: bool) -> tuple[Optional[ExtractedTopic], List[UnreadMessage]]:
         """调用 agent 话题提取接口；失败时降级为简单规则提取。"""
         if unread_snapshot is None or not unread_snapshot.messages:
-            return None, []
+            return [], []
 
         try:
             topic, remaining = await self.service_hub.agent.extract_topics_for_pipeline(
