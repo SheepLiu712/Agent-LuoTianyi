@@ -42,14 +42,16 @@ export async function getHistory(username: string, token: string, count: number,
     try {
         const params = new URLSearchParams({
             username: username,
-            token: token,
             count: count.toString(),
             end_index: end_index.toString()
         });
         const url = `${server_config.BASE_URL}/history?${params.toString()}`;
         const response = await fetch(url, {
             method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+            },
         });
         const data = await response.json();
         if (!response.ok) {

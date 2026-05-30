@@ -4,6 +4,7 @@ import threading
 from ..live2d import Live2dModel
 import time
 import os
+import re
 import base64
 import datetime
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ class MessageProcessor:
         self.update_bubble_signal: Callable[[str, str], None] | None = None # 更新气泡信息
         self.agent_thinking_signal: Callable[[bool], None] | None = None # 显示agent正在思考的状态
         self.local_tts_state_signal: Callable[[str, str], None] | None = None # 本地TTS状态变化的回调信号，参数为事件类型（start/finish）和对应的conv_uuid
+        self.expression_signal: Callable[[str], None] | None = None # Live2D表情更新信号
 
         self._reply_counter = 0
         self._running = True
@@ -173,6 +175,9 @@ class MessageProcessor:
     def play_local_tts_by_uuid(self, conv_uuid: str) -> bool:
         if not conv_uuid or not self.multimedia_stream:
             return False
+        if not self._is_safe_uuid(conv_uuid):
+            self.logger.error(f"Unsafe uuid for local tts: {conv_uuid}")
+            return False
 
         wav_path = os.path.join(os.getcwd(), "temp", "tts_output", f"{conv_uuid}.wav")
         if not os.path.exists(wav_path):
@@ -204,8 +209,8 @@ class MessageProcessor:
         if response.text:
             self.response_signal(response.uuid, response.text)
 
-        if response.expression and self.model:
-            self.model.set_expression_by_cmd(response.expression)
+        if response.expression and self.expression_signal:
+            self.expression_signal(response.expression)
 
         if response.audio:
             self.multimedia_stream.feed(response.audio)
@@ -276,11 +281,13 @@ class MessageProcessor:
         update_bubble_signal: Callable[[str, str], None],
         agent_thinking_signal: Callable[[str], None],
         local_tts_state_signal: Callable[[str, str], None] | None = None,
+        expression_signal: Callable[[str], None] | None = None,
     ):
         self.response_signal = response_signal
         self.update_bubble_signal = update_bubble_signal
         self.agent_thinking_signal = agent_thinking_signal
         self.local_tts_state_signal = local_tts_state_signal
+        self.expression_signal = expression_signal
 
     def _on_local_tts_state(self, event: str, conv_uuid: str):
         if self.local_tts_state_signal:
@@ -356,6 +363,9 @@ class MessageProcessor:
     def _save_audio_to_temp(self, audio_data: bytes, uuid: str | None, postfix: str) -> str:
         try:
             cwd = os.getcwd()
+            if uuid and not self._is_safe_uuid(uuid):
+                self.logger.error(f"Unsafe uuid for audio file: {uuid}")
+                return ""
             safe_uuid = uuid or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             new_file_path = os.path.join(
                 cwd,
@@ -393,6 +403,12 @@ class MessageProcessor:
         if "failed to read image file" in text:
             return True
         return False
+
+    @staticmethod
+    def _is_safe_uuid(value: str | None) -> bool:
+        if not value:
+            return False
+        return re.fullmatch(r"[A-Za-z0-9_-]+", value) is not None
 
 
     

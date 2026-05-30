@@ -73,6 +73,7 @@ from openai import OpenAI
 from collections import deque
 import time
 import random
+from threading import Lock
 
 
 class OpenAIAPIInterface(
@@ -475,12 +476,35 @@ LLM API接口工厂
 
 
 class LLMAPIFactory:
+    _client_cache: Dict[str, LLMAPIInterface] = {}
+    _cache_lock = Lock()
+
+    @staticmethod
+    def _make_cache_key(config: Dict[str, Any]) -> str:
+        try:
+            return json.dumps(config, sort_keys=True, default=str)
+        except Exception:
+            return repr(sorted(config.items(), key=lambda item: item[0]))
+
     @staticmethod
     def create_interface(config: Dict[str, Any]) -> LLMAPIInterface:
+        if config.get("cache_client", True):
+            key = LLMAPIFactory._make_cache_key(config)
+            with LLMAPIFactory._cache_lock:
+                cached = LLMAPIFactory._client_cache.get(key)
+                if cached is not None:
+                    return cached
+                client = LLMAPIFactory._create_interface_uncached(config)
+                LLMAPIFactory._client_cache[key] = client
+                return client
+
+        return LLMAPIFactory._create_interface_uncached(config)
+
+    @staticmethod
+    def _create_interface_uncached(config: Dict[str, Any]) -> LLMAPIInterface:
         api_type = config.get("api_type", "openai").lower()
         if api_type == "openai":
             return OpenAIAPIInterface(config)
-        elif api_type == "requests":
+        if api_type == "requests":
             return RequestsAPIInterface(config)
-        else:
-            raise ValueError(f"未知的LLM API类型: {api_type}")
+        raise ValueError(f"未知的LLM API类型: {api_type}")

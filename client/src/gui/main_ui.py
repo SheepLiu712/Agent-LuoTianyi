@@ -35,6 +35,7 @@ class Live2DWidget(QOpenGLWidget):
         self.model: Live2dModel = Live2dModel(live2d_config)
         self.agent_binder = agent_binder
         agent_binder.on_set_model(self.model)
+        self.agent_binder.expression_signal.connect(self.on_expression_changed)
         self.setMouseTracking(True)
         # 点击间隔控制（防止服务端过载）
         self._click_interval = 0.3  # 300ms
@@ -78,6 +79,10 @@ class Live2DWidget(QOpenGLWidget):
         
         # Start update timer (approx 60 FPS)
         self.startTimer(int(1000 / 60))
+
+    def on_expression_changed(self, expression: str) -> None:
+        if self.model:
+            self.model.set_expression_by_cmd(expression)
 
     def resizeGL(self, w: int, h: int) -> None:
         glViewport(0, 0, w, h)

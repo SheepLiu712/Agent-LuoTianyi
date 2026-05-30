@@ -18,10 +18,14 @@ export async function getAffectionInfo(
   try {
     const params = new URLSearchParams({
       username,
-      token,
     });
     const url = `${server_config.BASE_URL}/affection/info?${params.toString()}`;
-    const response = await fetch(url, { method: 'GET' });
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
     if (!response.ok) {
       addDebugTrace('affection', 'fetch failed', { status: response.statusText });
       return null;

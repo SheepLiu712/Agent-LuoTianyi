@@ -11,7 +11,7 @@ class User(Base):
     
     uuid = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     username = Column(String, unique=True, index=True, nullable=False)
-    password = Column(String, nullable=False) # Plain text as per requirements
+    password = Column(String, nullable=False) # bcrypt hash
     created_at = Column(DateTime, default=datetime.now)
     last_login = Column(DateTime, nullable=True)
     nickname = Column(String, default="你")
@@ -166,7 +166,11 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
     if not os.path.exists(db_folder):
         os.makedirs(db_folder, exist_ok=True)
 
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False, "timeout": 30},
+        isolation_level="AUTOCOMMIT",
+    )
 
     # 2. 注册监听器：在每个连接建立时执行 WAL 开启指令
     @event.listens_for(engine, "connect")
@@ -177,7 +181,7 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
         # 建议同时开启：同步模式设为 NORMAL，能显著提升写入速度且保证断电安全
         cursor.execute("PRAGMA synchronous=NORMAL")
         # 建议同时设置：忙等待超时时间（毫秒），防止并发写入时立刻报错
-        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA busy_timeout=15000")
         cursor.close()
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

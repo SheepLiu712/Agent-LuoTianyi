@@ -39,9 +39,15 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   // Expo 开发模式下，public 目录的文件可以通过开发服务器直接访问
   // 在生产环境（APK）中，我们将手动把 public 文件夹复制到 android/app/src/main/assets/public
   const debuggerHost = Constants.expoConfig?.hostUri || 'localhost:8081';
-  const live2dUrl = __DEV__ 
-    ? `http://${debuggerHost}/live2d/live2d.html` 
-    : 'file:///android_asset/public/live2d/live2d.html';
+  const live2dAssetRoot = 'file:///android_asset/public/';
+  const live2dRoot = __DEV__
+    ? `http://${debuggerHost}/`
+    : live2dAssetRoot;
+  const live2dUrl = `${live2dRoot}live2d/live2d.html`;
+
+  const isAllowedWebviewUrl = (url: string) => {
+    return __DEV__ ? url.startsWith(live2dRoot) : url.startsWith(live2dAssetRoot);
+  };
 
   // 使用自定义 Hook 管理聊天逻辑
   const {
@@ -151,17 +157,19 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           ref={webviewRef}
           source={{ uri: live2dUrl }}
           style={styles.webview}
-          originWhitelist={["*"]}
+          originWhitelist={[live2dRoot]}
           scrollEnabled={false}
           bounces={false}
           allowFileAccess={true}
           allowFileAccessFromFileURLs={true}
-          allowUniversalAccessFromFileURLs={true}
+          allowUniversalAccessFromFileURLs={false}
           allowsInlineMediaPlayback={true}
           mediaPlaybackRequiresUserAction={false}
           javaScriptEnabled={true}
           domStorageEnabled={true}
           startInLoadingState={true}
+          mixedContentMode="never"
+          onShouldStartLoadWithRequest={(request) => isAllowedWebviewUrl(request.url)}
           onMessage={handleWebViewMessage}
           onError={(event) => {
             addDebugTrace('webview', 'error', { detail: JSON.stringify(event.nativeEvent) });

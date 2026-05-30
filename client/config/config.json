@@ -3,7 +3,7 @@
     "debug_config":
     {
         "base_url": "https://127.0.0.1:60030",
-        "verify_ssl": false
+        "verify_ssl": true
     },
     "release_config":
     {

@@ -1,6 +1,6 @@
 import json
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Header, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import uvicorn
@@ -8,6 +8,9 @@ import os
 import sys
 from typing import Dict
 import redis
+import time
+from collections import deque
+from threading import Lock
 
 # Ensure src is importable
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -50,6 +53,37 @@ config = load_config("config/config.json")
 
 service_hub = None  # 全局 ServiceHub 实例，在 startup_event 中初始化
 daily_scheduler: DailyScheduler | None = None
+
+
+_RATE_LIMITS = {
+    "auth_login": (10, 60),
+    "auth_register": (5, 60),
+    "auth_auto_login": (10, 60),
+    "auth_reset": (3, 300),
+}
+_rate_limit_lock = Lock()
+_rate_limit_store: Dict[str, deque] = {}
+
+
+def _get_client_key(request: Request, username: str | None) -> str:
+    client_ip = request.client.host if request.client else "unknown"
+    user = username or "unknown"
+    return f"{client_ip}:{user}"
+
+
+def _enforce_rate_limit(request: Request, bucket: str, username: str | None) -> None:
+    if bucket not in _RATE_LIMITS:
+        return
+    limit, window_sec = _RATE_LIMITS[bucket]
+    key = f"{bucket}:{_get_client_key(request, username)}"
+    now = time.monotonic()
+    with _rate_limit_lock:
+        timestamps = _rate_limit_store.setdefault(key, deque())
+        while timestamps and now - timestamps[0] > window_sec:
+            timestamps.popleft()
+        if len(timestamps) >= limit:
+            raise HTTPException(status_code=429, detail="请求过于频繁，请稍后再试")
+        timestamps.append(now)
 
 
 @asynccontextmanager
@@ -192,6 +226,7 @@ async def auto_login(
     db: Session = Depends(database.get_sql_db),
     redis: redis.Redis = Depends(database.get_redis_buffer),
     service_hub: ServiceHub = Depends(get_service_hub),
+    request: Request = None,
 ):
     """
     自动登录：用户提供用户名和上一次分配的自动登录 token，验证通过后发放新的 token。
@@ -204,6 +239,8 @@ async def auto_login(
     - 失败：HTTP 401 错误，{"detail": "登录失败，自动登录验证未通过"}
     """
     logger.info(f"Auto login request: {req.username}")
+    if request is not None:
+        _enforce_rate_limit(request, "auth_auto_login", req.username)
     if account.check_auth_token(db, req.username, req.token):
         new_token = account.update_auth_token(db, req.username)
         message_token = account.generate_message_token(db, req.username)
@@ -218,7 +255,11 @@ async def auto_login(
 
 
 @app.post("/auth/register")
-async def register(req: RegisterRequest, db: Session = Depends(database.get_sql_db)):
+async def register(
+    req: RegisterRequest,
+    db: Session = Depends(database.get_sql_db),
+    request: Request = None,
+):
     """
     用户注册接口。用户提供用户名、密码和邀请码进行注册。
 
@@ -231,6 +272,8 @@ async def register(req: RegisterRequest, db: Session = Depends(database.get_sql_
     - 失败：HTTP 400 错误，{"detail": "注册失败，失败原因"}
     """
     logger.info(f"Register request: {req.username} with code {req.invite_code}")
+    if request is not None:
+        _enforce_rate_limit(request, "auth_register", req.username)
     decrypted_password = account.decrypt_password(req.password)
 
     success, msg = account.register_user(db, req.username, decrypted_password, req.invite_code)
@@ -243,6 +286,7 @@ async def register(req: RegisterRequest, db: Session = Depends(database.get_sql_
 async def reset_account(
     req: ResetAccountRequest,
     db: Session = Depends(database.get_sql_db),
+    request: Request = None,
 ):
     """以邀请码重置账号的用户名和密码。
 
@@ -255,6 +299,8 @@ async def reset_account(
     - 失败：HTTP 400 错误，{"detail": "失败原因"}
     """
     logger.info(f"Reset account request for invite_code: {req.invite_code[:4]}****")
+    if request is not None:
+        _enforce_rate_limit(request, "auth_reset", req.new_username)
     decrypted_password = account.decrypt_password(req.new_password)
 
     success, msg = account.reset_account(db, req.invite_code, req.new_username, decrypted_password)
@@ -270,6 +316,7 @@ async def login(
     db: Session = Depends(database.get_sql_db),
     redis: redis.Redis = Depends(database.get_redis_buffer),
     service_hub: ServiceHub = Depends(get_service_hub),
+    request: Request = None,
 ):
     """
     用户登录接口。用户提供用户名和密码进行登录。
@@ -282,6 +329,8 @@ async def login(
     - 失败：HTTP 401 错误，{"detail": "用户名或密码错误"}
     """
     logger.info(f"Login request: {req.username}")
+    if request is not None:
+        _enforce_rate_limit(request, "auth_login", req.username)
     decrypted_password = account.decrypt_password(req.password)
 
     if account.verify_user(db, req.username, decrypted_password):
@@ -336,11 +385,19 @@ async def overwrite_preference(
 @app.get("/history")
 async def get_history(
     request: HistoryRequest = Depends(),
+    authorization: str | None = Header(default=None),
     db: Session = Depends(database.get_sql_db),
     agent: LuoTianyiAgent = Depends(get_agent_service),
 ):
     logger.info(f"Server received: Get history request from {request.username}")
-    message_token_valid, user_uuid = account.check_message_token(db, request.username, request.token)
+    token = request.token
+    if not token and authorization:
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1]
+    if not token:
+        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    message_token_valid, user_uuid = account.check_message_token(db, request.username, token)
     if not message_token_valid:
         raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
     # Cap count to prevent excessive reads

@@ -16,6 +16,7 @@ class AgentBinder(QObject):
     history_signal = Signal(list, int)  # history_list, current_top_index
     agent_thinking_signal = Signal(bool) # 是否正在思考中
     local_tts_state_signal = Signal(str, str) # event, conv_uuid
+    expression_signal = Signal(str) # Live2D expression command
 
     def __init__(
         self,
@@ -67,6 +68,9 @@ class AgentBinder(QObject):
     def emit_response_signal(self, uuid: str, text: str):
         # 让QT框架外的成员能触发信号
         self.response_signal.emit(uuid, text)
+
+    def emit_expression_signal(self, expression: str):
+        self.expression_signal.emit(expression)
 
     def emit_update_signal(self, msg_id: str, text: str):
         '''

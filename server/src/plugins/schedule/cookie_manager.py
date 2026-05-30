@@ -3,6 +3,7 @@ Cookie 自动管理模块：检测 B站 Cookie 过期状态，使用无头浏览
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -10,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
 from src.utils.logger import get_logger
 
@@ -142,7 +143,7 @@ def _merge_cookies(old_cookie: str, new_jar: dict[str, str]) -> str:
     return _jar_to_cookie_string(old_jar)
 
 
-def check_and_refresh_cookie(force: bool = False) -> bool:
+async def check_and_refresh_cookie_async(force: bool = False) -> bool:
     """
     检查 cookie 是否需要刷新，如果需要则用无头浏览器访问 B站 更新。
 
@@ -168,7 +169,7 @@ def check_and_refresh_cookie(force: bool = False) -> bool:
     # ── 用无头浏览器访问 B站 首页 ──────────────────────
     logger.info("正在使用无头浏览器访问 B站 首页以刷新 Cookie...")
     try:
-        new_cookies = _visit_bilibili_with_browser(old_cookie)
+        new_cookies = await _visit_bilibili_with_browser(old_cookie)
     except Exception as e:
         logger.error(f"浏览器访问 B站 失败: {e}")
         return False
@@ -194,7 +195,15 @@ def check_and_refresh_cookie(force: bool = False) -> bool:
     return True
 
 
-def _visit_bilibili_with_browser(cookie_str: str) -> list[dict]:
+def check_and_refresh_cookie(force: bool = False) -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(check_and_refresh_cookie_async(force=force))
+    raise RuntimeError("check_and_refresh_cookie must be awaited; use check_and_refresh_cookie_async")
+
+
+async def _visit_bilibili_with_browser(cookie_str: str) -> list[dict]:
     """
     使用 Playwright 无头浏览器访问 B站 首页，等待一段时间后获取更新后的 Cookie。
 
@@ -207,57 +216,48 @@ def _visit_bilibili_with_browser(cookie_str: str) -> list[dict]:
     Returns:
         Playwright cookie 对象列表。
     """
-    cookies_after: list[dict] = []
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+            ],
+        )
+        context = await browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
+            ),
+            locale="zh-CN",
+        )
 
-    def _run():
-        nonlocal cookies_after
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    "--disable-blink-features=AutomationControlled",
-                    "--no-sandbox",
-                ],
-            )
-            context = browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0"
-                ),
-                locale="zh-CN",
-            )
+        cookies = []
+        for kv in cookie_str.split(";"):
+            kv = kv.strip()
+            if "=" in kv:
+                name, value = kv.split("=", 1)
+                cookies.append({
+                    "name": name.strip(),
+                    "value": value.strip(),
+                    "domain": ".bilibili.com",
+                    "path": "/",
+                })
+        if cookies:
+            await context.add_cookies(cookies)
 
-            # 设置已有 cookie
-            for kv in cookie_str.split(";"):
-                kv = kv.strip()
-                if "=" in kv:
-                    name, value = kv.split("=", 1)
-                    context.add_cookies([
-                        {
-                            "name": name.strip(),
-                            "value": value.strip(),
-                            "domain": ".bilibili.com",
-                            "path": "/",
-                        }
-                    ])
+        page = await context.new_page()
+        try:
+            await page.goto("https://www.bilibili.com", wait_until="load", timeout=30000)
+            logger.info("B站 首页加载完成，等待 Cookie 更新...")
+        except Exception as e:
+            logger.warning(f"页面加载存在问题（可能已部分完成）: {e}")
 
-            page = context.new_page()
-            try:
-                # 用 "load" 而非 "networkidle" — B站 动态内容多，networkidle 容易超时
-                page.goto("https://www.bilibili.com", wait_until="load", timeout=30000)
-                logger.info("B站 首页加载完成，等待 Cookie 更新...")
-            except Exception as e:
-                logger.warning(f"页面加载存在问题（可能已部分完成）: {e}")
-
-            # 等待 10 秒，让 B站 的 JS 刷新 ticket / SESSDATA
-            page.wait_for_timeout(10000)
-
-            cookies_after = context.cookies()
-            browser.close()
-
-    _run()
-    return cookies_after
+        await page.wait_for_timeout(10000)
+        cookies_after = await context.cookies()
+        await browser.close()
+        return cookies_after
 
 
 def get_cookie_status() -> dict:

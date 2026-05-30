@@ -70,17 +70,15 @@ def resolve_runtime_config(config: Dict[str, Any]) -> Dict[str, Any]:
     if selected:
         config = merge_dict(config, selected)
 
-    # 为网络参数提供安全默认值
-    if "verify_ssl" not in config:
-        config["verify_ssl"] = True
+    # 始终强制开启 TLS 校验
+    config["verify_ssl"] = True
 
     # 尝试从凭据文件读取自定义服务器地址及 SSL 设置覆盖 base_url
     try:
-        from ..safety.credential import get_server_url, get_server_verify_ssl
+        from ..safety.credential import get_server_url
         saved_url = get_server_url()
         if saved_url:
             config["base_url"] = saved_url
-            config["verify_ssl"] = get_server_verify_ssl()
     except Exception:
         pass
 

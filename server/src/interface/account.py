@@ -1,6 +1,9 @@
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import serialization, hashes
 import base64
+import os
+import hmac
+import bcrypt
 from fastapi import HTTPException
 from jose import jwt
 import uuid
@@ -70,7 +73,11 @@ def check_auth_token(db_session: Session, username: str, token: str) -> bool:
 
 # 发送消息时使用的token，编码用户的UUID
 
-PRIVATE_KEY = "LUOTIANYI_PRIVATE_KEY_73991"
+JWT_SECRET_ENV = "JWT_SECRET"
+JWT_SECRET = os.environ.get(JWT_SECRET_ENV)
+if not JWT_SECRET:
+    logger.error("JWT_SECRET is not set. Refusing to start.")
+    raise RuntimeError("JWT_SECRET is not set")
 ALGORITHM = "HS256"
 def generate_message_token(db_session: Session, username: str) -> str:
     user: User = db_session.query(User).filter_by(username=username).first()
@@ -80,12 +87,12 @@ def generate_message_token(db_session: Session, username: str) -> str:
     payload = {
         "user_uuid": user_uuid,
     }
-    token = jwt.encode(payload, PRIVATE_KEY, algorithm=ALGORITHM)
+    token = jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)
     return token
 
 def decode_message_token(token: str) -> str:
     try:
-        payload = jwt.decode(token, PRIVATE_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
         return payload.get("user_uuid")
     except jwt.JWTError:
         return None
@@ -101,21 +108,45 @@ def check_message_token(db_session: Session, username: str, token: str) -> Tuple
     return False, None
 
 
+_BCRYPT_PREFIXES = ("$2a$", "$2b$", "$2y$")
+_BCRYPT_ROUNDS = 12
+
+
+def _is_bcrypt_hash(value: str | None) -> bool:
+    return bool(value and value.startswith(_BCRYPT_PREFIXES))
+
+
+def _hash_password(password: str) -> str:
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS))
+    return hashed.decode("utf-8")
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+    except ValueError:
+        return False
+
+
 def register_user(db_session: Session, username: str, password: str, invite_code_str: str):
     # 1. Check Invite Code
     code = db_session.query(InviteCode).filter_by(code=invite_code_str).first()
     if not code:
-        return False, "邀请码无效"
+        logger.info(f"Register failed: invalid invite code for username={username}")
+        return False, "注册失败，请检查邀请码或用户名"
     if code.is_used:
-        return False, "邀请码已被使用"
+        logger.info(f"Register failed: invite code already used for username={username}")
+        return False, "注册失败，请检查邀请码或用户名"
         
     # 2. Check Username
     existing_user = db_session.query(User).filter_by(username=username).first()
     if existing_user:
-        return False, "用户名已存在"
+        logger.info(f"Register failed: username already exists: {username}")
+        return False, "注册失败，请检查邀请码或用户名"
         
     # 3. Create User
-    new_user = User(username=username, password=password)
+    password_hash = _hash_password(password)
+    new_user = User(username=username, password=password_hash)
     db_session.add(new_user)
     db_session.flush() # Populate defaults like uuid
     
@@ -128,8 +159,17 @@ def register_user(db_session: Session, username: str, password: str, invite_code
     return True, "注册成功"
 
 def verify_user(db_session: Session, username: str, password: str) -> bool:
-    user = db_session.query(User).filter_by(username=username, password=password).first()
-    if user:
+    user = db_session.query(User).filter_by(username=username).first()
+    if not user or not user.password:
+        return False
+
+    stored = user.password
+    if _is_bcrypt_hash(stored):
+        return _verify_password(password, stored)
+
+    if hmac.compare_digest(stored, password):
+        user.password = _hash_password(password)
+        db_session.commit()
         return True
     return False
 
@@ -163,7 +203,7 @@ def reset_account(
 
     old_username = user.username
     user.username = new_username
-    user.password = new_password
+    user.password = _hash_password(new_password)
     # 清除旧的 auth_token，强制重新登录
     user.auth_token = None
     db_session.commit()

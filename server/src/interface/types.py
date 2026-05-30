@@ -7,7 +7,7 @@ class ChatRequest(BaseModel):
 
 class HistoryRequest(BaseModel):
     username: str
-    token: str
+    token: str | None = None
     count: int = 10
     end_index: int = -1
 

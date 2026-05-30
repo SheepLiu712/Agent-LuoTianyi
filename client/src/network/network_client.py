@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Callable, List, Tuple
 
 import requests
@@ -10,6 +11,13 @@ from ..utils.http_client import HttpClientFactory
 from ..safety import credential
 
 
+_SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _is_safe_uuid(value: str | None) -> bool:
+    return bool(value and _SAFE_UUID_RE.fullmatch(value))
+
+
 class NetworkClient:
     def __init__(self, base_url: str | None = None, verify_ssl: bool = True):
         self.logger = get_logger(self.__class__.__name__)
@@ -17,7 +25,7 @@ class NetworkClient:
             raise ValueError("Base URL is required. Please check config/config.json")
 
         self.base_url = base_url.rstrip("/")
-        self.verify_ssl = verify_ssl
+        self.verify_ssl = True
 
         self.user_id: str | None = None
         self.message_token: str | None = None
@@ -35,7 +43,7 @@ class NetworkClient:
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
         """更新服务器地址，同步更新 AuthApi、WsTransport 和 HTTP 会话。"""
         self.base_url = base_url.rstrip("/")
-        self.verify_ssl = verify_ssl
+        self.verify_ssl = True
         self.auth_api.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
         self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
@@ -216,11 +224,19 @@ class NetworkClient:
         try:
             params = {
                 "username": self.user_id,
-                "token": self.message_token,
                 "count": count,
                 "end_index": end_index,
             }
-            resp = self.session.get(f"{self.base_url}/history", params=params, verify=self.verify_ssl, timeout=20)
+            headers = {}
+            if self.message_token:
+                headers["Authorization"] = f"Bearer {self.message_token}"
+            resp = self.session.get(
+                f"{self.base_url}/history",
+                params=params,
+                headers=headers,
+                verify=self.verify_ssl,
+                timeout=20,
+            )
             if resp.status_code != 200:
                 return [], -1
 
@@ -259,6 +275,9 @@ class NetworkClient:
     
     def _get_image_from_server(self, item: ConversationItem) -> ConversationItem:
         try:
+            if not _is_safe_uuid(item.uuid):
+                self.logger.error(f"Unsafe uuid from server: {item.uuid}")
+                return item
             payload = {"username": self.user_id, "token": self.message_token, "uuid": item.uuid}
             resp = self.session.post(
                 f"{self.base_url}/get_image",

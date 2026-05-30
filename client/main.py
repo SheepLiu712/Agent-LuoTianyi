@@ -76,6 +76,7 @@ if __name__ == "__main__":
         update_bubble_signal=binder.emit_update_signal,
         agent_thinking_signal=binder.emit_agent_thinking_signal,
         local_tts_state_signal=binder.emit_local_tts_state_signal,
+        expression_signal=binder.emit_expression_signal,
     ) 
 
     

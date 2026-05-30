@@ -385,11 +385,7 @@ class WsTransport:
     def _build_ssl_context(self, base_url: str):
         if not base_url.startswith("https://"):
             return None
-        if self.verify_ssl:
-            ctx = ssl.create_default_context()
-        else:
-            ctx = ssl._create_unverified_context()
-
+        ctx = ssl.create_default_context()
         # Improve compatibility with some tunneling endpoints in this project runtime.
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         return ctx

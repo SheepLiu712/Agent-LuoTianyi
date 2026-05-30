@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from 'react';
 import { auth } from '../components/auth';
 import { loadSavedServerUrl, server_config } from '../config/index';
@@ -27,7 +28,15 @@ export function useAuth() {
       const autoLogin = await AsyncStorage.getItem(AUTO_LOGIN_KEY);
       if (autoLogin === 'true') {
         const savedUsername = await AsyncStorage.getItem(USERNAME_KEY);
-        const autoLoginToken = await AsyncStorage.getItem(AUTOLOGIN_TOKEN_KEY);
+        let autoLoginToken = await SecureStore.getItemAsync(AUTOLOGIN_TOKEN_KEY);
+        if (!autoLoginToken) {
+          const legacyToken = await AsyncStorage.getItem(AUTOLOGIN_TOKEN_KEY);
+          if (legacyToken) {
+            await SecureStore.setItemAsync(AUTOLOGIN_TOKEN_KEY, legacyToken);
+            await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
+            autoLoginToken = legacyToken;
+          }
+        }
         if (savedUsername && autoLoginToken) { // 此时可以尝试自动登录
           const response = await fetch(`${server_config.BASE_URL}/auth/auto_login`, {
             method: 'POST',
@@ -42,7 +51,7 @@ export function useAuth() {
             addDebugTrace('auth', 'auto login ok');
             const result = await response.json();
             // 获取到新的token后可以更新存储的token
-            await AsyncStorage.setItem(AUTOLOGIN_TOKEN_KEY, result.login_token);
+            await SecureStore.setItemAsync(AUTOLOGIN_TOKEN_KEY, result.login_token);
             await AsyncStorage.setItem(USERNAME_KEY, result.user_id);
             setAuthState(prev => ({
               ...prev,
@@ -119,10 +128,12 @@ export function useAuth() {
       if (autoLogin) {
         await AsyncStorage.setItem(AUTO_LOGIN_KEY, 'true');
         await AsyncStorage.setItem(USERNAME_KEY, username);
-        await AsyncStorage.setItem(AUTOLOGIN_TOKEN_KEY, result.login_token); // 存储登录后从服务器获取的token
+        await SecureStore.setItemAsync(AUTOLOGIN_TOKEN_KEY, result.login_token); // 存储登录后从服务器获取的token
+        await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
       } else {
         await AsyncStorage.removeItem(AUTO_LOGIN_KEY);
         await AsyncStorage.removeItem(USERNAME_KEY);
+        await SecureStore.deleteItemAsync(AUTOLOGIN_TOKEN_KEY);
         await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
       }
       addDebugTrace('auth', 'login ok', { username });
@@ -186,6 +197,7 @@ export function useAuth() {
     try {
       await AsyncStorage.removeItem(AUTO_LOGIN_KEY);
       await AsyncStorage.removeItem(USERNAME_KEY);
+      await SecureStore.deleteItemAsync(AUTOLOGIN_TOKEN_KEY);
       await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
       auth.username = '';
       auth.message_token = '';
