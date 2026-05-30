@@ -139,6 +139,9 @@
         });
         
         app.stage.addChild(model);
+        model.eventMode = 'none';
+        model.interactive = false;
+        model.interactiveChildren = false;
 
         // 响应式缩放与居中
         const resizeModel = () => {
@@ -162,18 +165,82 @@
         window.addEventListener('pointermove', onPointerMove);
         window.addEventListener('touchmove', onPointerMove);
 
-        // 监听点击命中区域
-        model.on('hit', (hitAreas) => {
-          if (hitAreas.length > 0) {
-            console.log('hit', hitAreas[0]);
+        const areaToTouch = {
+          '头': '头',
+          '辫子': '头',
+          '耳机': '头',
+          '身体': '身体',
+          '裙子': '裙子',
+          '8': '身体',
+          '左腿': '腿',
+          '右腿': '腿',
+          '左手': '手',
+          '右手': '手',
+        };
+
+        const mapHitAreas = (hitAreas) => {
+          const mapped = [];
+          for (const area of hitAreas) {
+            const touchName = areaToTouch[area];
+            if (touchName && !mapped.includes(touchName)) {
+              mapped.push(touchName);
+            }
+          }
+          return mapped;
+        };
+
+        let lastTouchSentTime = 0;
+        let touchCountSinceLastSent = 0;
+        let pendingTouchAreas = [];
+        const touchSendInterval = 1.0;
+
+        const handleTouch = (clientX, clientY) => {
+          if (!model) return;
+          const rect = canvas.getBoundingClientRect();
+          const x = clientX - rect.left;
+          const y = clientY - rect.top;
+          const hitAreas = model.hitTest(x, y);
+          const touchAreas = mapHitAreas(hitAreas);
+          if (touchAreas.length === 0) {
+            return;
+          }
+
+          const now = performance.now() / 1000;
+          pendingTouchAreas.push(...touchAreas);
+          touchCountSinceLastSent += 1;
+
+          const timeSinceLast = now - lastTouchSentTime;
+          if (timeSinceLast >= touchSendInterval) {
+            const areas = [...new Set(pendingTouchAreas)];
+            pendingTouchAreas = [];
+            const count = touchCountSinceLastSent;
+            touchCountSinceLastSent = 0;
+            lastTouchSentTime = now;
             if (window.ReactNativeWebView) {
               window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'hit',
-                hitAreaName: hitAreas[0]
+                type: 'touch',
+                touchArea: areas,
+                timeSinceLastSentTouch: timeSinceLast,
+                touchCount: count,
               }));
             }
           }
-        });
+        };
+
+        const onPointerDown = (event) => {
+          if (event.clientX !== undefined && event.clientY !== undefined) {
+            handleTouch(event.clientX, event.clientY);
+          }
+        };
+
+        const onTouchStart = (event) => {
+          if (event.touches && event.touches[0]) {
+            handleTouch(event.touches[0].clientX, event.touches[0].clientY);
+          }
+        };
+
+        canvas.addEventListener('pointerdown', onPointerDown);
+        canvas.addEventListener('touchstart', onTouchStart, { passive: true });
 
         // 通知加载完成
         if (window.ReactNativeWebView) {

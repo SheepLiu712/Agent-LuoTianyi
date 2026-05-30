@@ -59,12 +59,18 @@ class Live2DWidget(QOpenGLWidget):
         # 触摸反馈圆环动画状态（由 paintGL 绘制）
         self._ripples: list[dict] = []
 
-        # 触摸区域名称映射（HitArea -> 分组）
-        self._area_to_group = {
-            "头": "head", "辫子": "head", "耳机": "head",
-            "身体": "body", "裙子": "body", "袖": "body", "8": "body",
-            "左腿": "legs", "右腿": "legs",
-            "左手": "hands", "右手": "hands",
+        # 触摸区域名称映射（HitArea -> 发送给服务端的标准区域）
+        self._area_to_touch = {
+            "头": "头",
+            "辫子": "头",
+            "耳机": "头",
+            "身体": "身体",
+            "裙子": "裙子",
+            "8": "头",
+            "左手": "手",
+            "右手": "手",
+            "左腿": "腿",
+            "右腿": "腿",
         }
 
     def initializeGL(self) -> None:
@@ -125,16 +131,13 @@ class Live2DWidget(QOpenGLWidget):
         now = time.time()
         x, y = event.position().x(), event.position().y()
 
-        # 检测所有 HitArea，按分组归类
-        hit_groups: set[str] = set()
-        hit_area_names: list[str] = []
-        for area_name in ("头", "辫子", "耳机", "身体", "裙子", "袖", "8", "左腿", "右腿", "左手", "右手"):
+        # 检测所有 HitArea，并映射为标准触摸区域
+        hit_area_names: set[str] = set()
+        for area_name, touch_name in self._area_to_touch.items():
             if self.model.HitTest(area_name, x, y):
-                hit_area_names.append(area_name)
-                group = self._area_to_group.get(area_name, "body")
-                hit_groups.add(group)
+                hit_area_names.add(touch_name)
 
-        if not hit_groups:
+        if not hit_area_names:
             return  # 没有点击到模型的可触摸区域
 
         # 生成视觉反馈圆环
