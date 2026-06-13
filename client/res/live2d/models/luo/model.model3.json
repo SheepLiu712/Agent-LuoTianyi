@@ -104,20 +104,28 @@
 			"Id": "ArtMesh85"
 		},
 		{
-			"Name": "耳机",
-			"Id": "ArtMesh50"
+			"Name": "头发1",
+			"Id": "ArtMesh69"
+		},
+		{
+			"Name": "头发2",
+			"Id": "ArtMesh173"
+		},
+		{
+			"Name": "头发3",
+			"Id": "ArtMesh32"
 		},
 		{
 			"Name": "8",
-			"Id": "ArtMesh105"
+			"Id": "ArtMesh84"
 		},
 		{
 			"Name": "头",
-			"Id": "ArtMesh35"
+			"Id": "ArtMesh52"
 		},
 		{
 			"Name": "身体",
-			"Id": "ArtMesh88"
+			"Id": "ArtMesh89"
 		},
 		{
 			"Name": "裙子",
@@ -129,11 +137,19 @@
 		},
 		{
 			"Name": "左手",
-			"Id": "ArtMesh116"
+			"Id": "Part21"
 		},
 		{
 			"Name": "右手",
 			"Id": "ArtMesh127"
+		},
+		{
+			"Name": "右手2",
+			"Id": "ArtMesh126"
+		},
+		{
+			"Name": "右手3",
+			"Id": "ArtMesh128"
 		}
 	]
 }

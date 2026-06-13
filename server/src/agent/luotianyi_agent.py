@@ -4,7 +4,7 @@
 实现洛天依角色扮演对话Agent的核心逻辑
 """
 
-from typing import  List, Dict, Any, Optional, Callable, Tuple, AsyncGenerator
+from typing import  List, Dict, Any, Optional, Callable, Tuple, Generator
 from dataclasses import dataclass
 import time
 from sqlalchemy.orm import Session
@@ -308,14 +308,15 @@ class LuoTianyiAgent:
                     prefs = json.loads(user.preferences) if isinstance(user.preferences, str) else user.preferences
                     pref_parts = []
                     if prefs.get("relationship"):
-                        pref_parts.append(f"用户希望和你的关系是：{prefs['relationship']}")
+                        pref_parts.append(f"用户希望你是他的：{prefs['relationship']}")
                     if prefs.get("speaking_style"):
                         pref_parts.append(f"用户希望你的表达风格偏向：{prefs['speaking_style']}")
                     if prefs.get("personality_traits"):
                         traits = "、".join(prefs["personality_traits"])
                         pref_parts.append(f"用户希望你的性格特点：{traits}")
                     if prefs.get("custom_context"):
-                        pref_parts.append(f"用户补充的上下文：{prefs['custom_context'].replace("我", "我（用户）")}")
+                        prefs['custom_context'] = prefs['custom_context'].replace("我", "用户")
+                        pref_parts.append(f"用户补充的上下文：{prefs['custom_context']}")
                     if pref_parts:
                         pref_context = "用户偏好设置：" + "；".join(pref_parts)
                 except Exception as e:
@@ -488,7 +489,7 @@ class LuoTianyiAgent:
         audio_bytes = await self.tts_engine.synthesize_speech_with_tone(text, tone)
         return self.tts_engine.encode_audio_to_base64(audio_bytes)
     
-    async def tts_say_stream(self, text: str, tone: str) -> AsyncGenerator[str, None]:
+    def tts_say_stream(self, text: str, tone: str) -> Generator[str, None, None]:
         for chunk in self.tts_engine.stream_synthesize_speech_with_tone(text, tone):
             yield self.tts_engine.encode_audio_to_base64(chunk)
 

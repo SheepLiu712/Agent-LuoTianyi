@@ -15,7 +15,6 @@ from ..utils.logger import get_logger
 
 if TYPE_CHECKING:
     from ..network.network_client import NetworkClient
-    from ..user_preferences_manager import UserPreferencesManager
 
 @dataclass
 class OutgoingMessage:

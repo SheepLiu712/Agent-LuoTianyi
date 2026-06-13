@@ -186,13 +186,14 @@
         let touchCountSinceLastSent = 0;
         let pendingTouchAreas = [];
         const touchSendInterval = 1.0; // 最大每秒一次
-        const areaToTouch = {
+        // hitTest 返回 HitArea 名称（来自 model JSON 的 HitAreas[].Name），映射为标准触摸区域
+        const _hitarea_to_touch = {
           '头': '头',
           '辫子': '头',
           '耳机': '头',
-          '身体': '身体',
-          '裙子': '裙子',
           '8': '头',
+          '身体': '身体',
+          '袖': '身体',
           '左腿': '腿',
           '右腿': '腿',
           '左手': '手',
@@ -202,7 +203,7 @@
         const mapHitAreas = (hitAreas) => {
           const mapped = [];
           for (const area of hitAreas) {
-            const touchName = areaToTouch[area];
+            const touchName = _hitarea_to_touch[area];
             if (touchName && !mapped.includes(touchName)) {
               mapped.push(touchName);
             }

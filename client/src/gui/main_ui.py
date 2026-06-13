@@ -60,17 +60,15 @@ class Live2DWidget(QOpenGLWidget):
         self._ripples: list[dict] = []
 
         # 触摸区域名称映射（HitArea -> 发送给服务端的标准区域）
-        self._area_to_touch = {
-            "头": "头",
-            "辫子": "头",
-            "耳机": "头",
-            "身体": "身体",
-            "裙子": "裙子",
-            "8": "头",
-            "左手": "手",
-            "右手": "手",
-            "左腿": "腿",
-            "右腿": "腿",
+        self._part_to_touch = {
+            "Part24": "头",
+            "Part8": "头",
+            "Part11": "头",
+            "Part21": "手",
+            "ArtMesh129_Skinning": "手",
+            "ArtMesh48_Skinning": "手",
+            "Part18": "身体",
+            "Part17": "身体"
         }
 
     def initializeGL(self) -> None:
@@ -82,7 +80,10 @@ class Live2DWidget(QOpenGLWidget):
             glClearColor(0, 0, 0, 0)
         except Exception as e:
             print(f"initializeGL glClearColor error: {e}")
-        
+
+        self._gaze_target_x = self.width() / 2
+        self._gaze_target_y = self.height() / 2
+
         # Start update timer (approx 60 FPS)
         self.startTimer(int(1000 / 60))
 
@@ -130,12 +131,14 @@ class Live2DWidget(QOpenGLWidget):
 
         now = time.time()
         x, y = event.position().x(), event.position().y()
+        hitparts : List[str] = self.model.model.HitPart(x,y, True)
 
         # 检测所有 HitArea，并映射为标准触摸区域
         hit_area_names: set[str] = set()
-        for area_name, touch_name in self._area_to_touch.items():
-            if self.model.HitTest(area_name, x, y):
-                hit_area_names.add(touch_name)
+        for hitpart in hitparts:
+            area_name = self._part_to_touch.get(hitpart)
+            if area_name:
+                hit_area_names.add(area_name)            
 
         if not hit_area_names:
             return  # 没有点击到模型的可触摸区域
@@ -147,7 +150,6 @@ class Live2DWidget(QOpenGLWidget):
             "opacity": 1.0,
             "max_radius": 60,
         })
-
         # 触摸次数统计（用于发送）
         self._touch_count_since_last_sent += 1
         self._pending_touch_areas.extend(hit_area_names)
@@ -274,7 +276,7 @@ class Live2DContainer(QWidget):
         self.thinking_bubble_label.resize(scaled.size())
 
         x = int((self.width() - self.thinking_bubble_label.width()) * 0.94) # 一些超参数，反正这样就是可以
-        y = int(self.height() * 0.25)
+        y = int(self.height() * 0.15)
         self.thinking_bubble_label.move(x, y)
         self.thinking_bubble_label.raise_()
         self.thinking_bubble_label.setVisible(self.thinking_visible)

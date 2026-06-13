@@ -20,8 +20,8 @@ interface PreferencesScreenProps {
   onClose: () => void;
 }
 
-const RELATIONSHIP_OPTIONS = ['朋友', '知己', '粉丝', '搭档', '家人', '其他'];
-const STYLE_OPTIONS = ['活泼可爱', '温柔可人', '俏皮调皮', '诗意文艺', '热情洋溢', '文静恬淡', '随意自然'];
+const RELATIONSHIP_OPTIONS = ['朋友', '知己', '偶像', '搭档', '家人'];
+const STYLE_OPTIONS = ['活泼可爱', '温柔可人', '文静恬淡'];
 
 export default function PreferencesScreen({ onClose }: PreferencesScreenProps) {
   const insets = useSafeAreaInsets();
@@ -127,7 +127,7 @@ export default function PreferencesScreen({ onClose }: PreferencesScreenProps) {
           keyboardShouldPersistTaps="handled"
         >
           {/* 关系类型 */}
-          <Text style={styles.label}>你希望和天依的关系是：</Text>
+          <Text style={styles.label}>你希望天依是你的：</Text>
           <View style={styles.optionRow}>
             {RELATIONSHIP_OPTIONS.map(opt => (
               <TouchableOpacity
