@@ -142,6 +142,27 @@ def validate_credential(credential_dict: Dict[str, Any]) -> bool:
         return False
 
 
+async def generate_qr_only(qr_image_path: Path) -> bool:
+    """生成 QQ 登录二维码并保存到文件，不等待扫码。返回是否成功。"""
+    if not QQ_SDK_AVAILABLE:
+        return False
+    try:
+        async with QQ_SDK["Client"](verify=False) as client:
+            session = QQ_SDK["QRCodeLoginSession"](
+                api=client.login,
+                login_type=QQ_SDK["QRLoginType"].QQ,
+                timeout_seconds=1.0,  # 不关心超时，只为获取二维码
+            )
+            qr = await session.get_qrcode()
+            qr_image_path.parent.mkdir(parents=True, exist_ok=True)
+            qr_image_path.write_bytes(qr.data)
+            print(f"[INFO] 登录二维码已保存: {qr_image_path}")
+            return True
+    except Exception as exc:
+        print(f"[WARN] 生成 QQ 登录二维码失败: {exc}")
+        return False
+
+
 def try_load_and_inject_credential(credential_file: Path) -> bool:
     saved = load_saved_credential(credential_file)
     if not saved:

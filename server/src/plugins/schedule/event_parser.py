@@ -19,6 +19,9 @@ from .event_models import UnifiedEventType, OfficialDynamic
 
 logger = get_logger(__name__)
 
+# VLM image handling limits.
+VLM_MAX_IMAGE_PIXELS = 6_000_000  # e.g. 3000x2000
+
 # 构建 LLM prompt 的模板
 EVENT_PARSE_PROMPT = """\
 你是一个专业的信息提取助手。我会给你一段洛天依官方账号发布的动态内容，请你判断其中是否包含值得提醒的官方活动信息。
@@ -33,7 +36,7 @@ EVENT_PARSE_PROMPT = """\
 2. 如果动态是日常闲聊、感谢，或者歌曲分享，认为不是活动，输出 []。
 3. 时间尽量精确到分钟；如果直播、演唱会只有开始时间没有结束时间，结束时间默认为开始时间后两小时；如果有明确结束时间则按实际提取。
 5. 如果有多场活动（如巡回演唱会），则每个单独成一个事件输出；
-6. general类型
+6. general类型的开始和结束时间可以留空（""），因为它们不需要提醒。
 
 【输出格式】
 如果动态中包含可提醒的活动事件，输出一个 JSON 数组，每个元素包含：
@@ -96,9 +99,24 @@ class EventParser:
                 logger.warning(f"Empty image content from {url[:60]}")
                 return None
             # 用 PIL 统一转 JPEG
-            from PIL import Image
+            from PIL import Image, ImageOps
             import io
-            img = Image.open(io.BytesIO(img_bytes))
+            # Allow large images, then downscale for VLM to avoid huge payloads.
+            original_max_pixels = Image.MAX_IMAGE_PIXELS
+            Image.MAX_IMAGE_PIXELS = None
+            try:
+                img = Image.open(io.BytesIO(img_bytes))
+            finally:
+                Image.MAX_IMAGE_PIXELS = original_max_pixels
+            img = ImageOps.exif_transpose(img)
+            width, height = img.size
+            if width > 0 and height > 0:
+                pixel_count = width * height
+                scale_by_pixels = (VLM_MAX_IMAGE_PIXELS / float(pixel_count)) ** 0.5
+                scale = min(1.0, scale_by_pixels)
+                if scale < 1.0:
+                    new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+                    img = img.resize(new_size, Image.LANCZOS)
             if img.mode in ("RGBA", "P"):
                 img = img.convert("RGB")
             output = io.BytesIO()
@@ -166,18 +184,19 @@ class EventParser:
         self, raw_item: OfficialDynamic
     ) -> List[Dict[str, Any]]:
         """解析单条动态，返回事件 dict 列表。"""
+        print(f"Parsing dynamic {raw_item.dynamic_id} with content: {raw_item.content[:50]}...")
         content = raw_item.content.strip()
         raw_content = raw_item.raw_content if raw_item.raw_content else content
         platform = raw_item.platform if hasattr(raw_item, 'platform') else "bilibili"
         source_url = raw_item.source_url if hasattr(raw_item, 'source_url') else ""
 
-        if not content:
+        if not content and not raw_item.pics:
             return []
 
-        # 先做简单规则过滤：标题党/日常关键词 → 直接跳过（减少模型调用）
-        if self._is_likely_daily_chat(content):
-            logger.debug(f"Skipping daily chat: {content[:50]}...")
-            return []
+        # # 先做简单规则过滤：标题党/日常关键词 → 直接跳过（减少模型调用）
+        # if self._is_likely_daily_chat(content):
+        #     logger.debug(f"Skipping daily chat: {content[:50]}...")
+        #     return []
 
         # 优先使用 VLM（图文理解），特别是当有图片时
         prefer_vlm = self.vlm_client is not None

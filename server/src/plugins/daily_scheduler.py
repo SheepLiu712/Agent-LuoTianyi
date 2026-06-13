@@ -8,7 +8,7 @@ import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
-
+import asyncio
 from ..utils.logger import get_logger
 from .music.daily_new_song_fetcher import sync_daily_new_songs
 from .schedule.cookie_manager import check_and_refresh_cookie
@@ -119,7 +119,7 @@ class DailyScheduler:
                 start_date = date(int(parts[0]), int(parts[1]), int(parts[2]))
             else:
                 start_date = date.today()
-            self.schedule_manager.event_store.add_event({
+            asyncio.run(self.schedule_manager.event_store.add_event({
                 "title": title,
                 "description": f"洛天依独自前往{dest}游玩",
                 "event_type": "travel",
@@ -127,7 +127,7 @@ class DailyScheduler:
                 "is_recurring": False,
                 "is_personal": False,
                 "source": "citywalk",
-            })
+            }))
         except Exception as e:
             self.logger.warning(f"Failed to write citywalk event: {e}")
 
@@ -140,7 +140,8 @@ class DailyScheduler:
             song_name_str = []
             for song_name in song_names:
                 song_name_str.append(f"《{song_name}》")
-            self.schedule_manager.event_store.add_event({
+            asyncio.run(
+                self.schedule_manager.event_store.add_event({
                 "title": f"洛天依学会了{', '.join(song_name_str)}",
                 "description": f"洛天依学会了一首新歌{', '.join(song_name_str)}",
                 "event_type": "new_song",
@@ -148,7 +149,7 @@ class DailyScheduler:
                 "is_recurring": False,
                 "is_personal": False,
                 "source": "song_learner",
-            })
+            }))
         except Exception as e:
             self.logger.warning(f"Failed to write new song event: {e}")
 
@@ -183,6 +184,9 @@ class DailyScheduler:
         # Song learner: runs every day at 4AM
         self._run_song_learner_async()
 
+        # QQ 音乐凭证检查：每天凌晨复核，无效时生成二维码
+        self._check_qq_music_credential()
+
         state["last_daily_check"] = today
         self._save_state(state)
 
@@ -192,6 +196,21 @@ class DailyScheduler:
             check_and_refresh_cookie(force=False)
         except Exception as e:
             self.logger.warning(f"Cookie 刷新任务失败: {e}")
+
+    def _check_qq_music_credential(self) -> None:
+        """检查 QQ 音乐凭证有效性，无效时生成登录二维码。"""
+        if self.song_learner is None:
+            return
+        try:
+            valid = self.song_learner.check_qq_credential()
+            if valid:
+                self.logger.info("QQ 音乐凭证有效")
+            else:
+                self.logger.warning(
+                    "QQ 音乐凭证无效，二维码已生成，请手动扫码登录"
+                )
+        except Exception as e:
+            self.logger.warning(f"QQ 音乐凭证检查失败: {e}")
 
     def _run_event_purge(self) -> None:
         """清理过期的非周期事件。"""

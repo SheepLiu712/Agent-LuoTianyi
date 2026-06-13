@@ -43,6 +43,9 @@ class OfficialDynamic:
     publish_time: str
     source_url: str
 
+    def __repr__(self):
+        return f"OfficialDynamic(uid={self.uid}, platform={self.platform}, dynamic_id={self.dynamic_id}, content={self.content[:30]}...)"
+
 
 # ── 触发条件定义 ──────────────────────────────────────
 # 每个事件类型对应的触发条件（触发时间点）

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from src.utils.logger import get_logger
 from src.utils.lunar_date import get_holiday_name, get_lunar_mmdd, lunar_to_solar, FIXED_SOLAR_HOLIDAYS, LUNAR_HOLIDAYS_MMDD, is_lunar_new_year_eve
 from src.database.sql_database import Event, EventNotification
+from src.utils.llm.llm_api_interface import LLMAPIInterface
 from .event_models import (
     UnifiedEventType,
     get_default_trigger_conditions,
@@ -38,8 +39,13 @@ class EventStore:
     - 任何写操作（add / update / remove / mark_notified）会立即清空缓存。
     """
 
-    def __init__(self, sql_session_factory: Callable[[], Session]):
+    def __init__(
+        self,
+        sql_session_factory: Callable[[], Session],
+        llm_client: Optional[LLMAPIInterface] = None,
+    ):
         self.sql_session_factory = sql_session_factory
+        self.llm_client = llm_client
         self.logger = get_logger(__name__)
         # 日级缓存
         self._cache_lock = threading.Lock()
@@ -117,14 +123,16 @@ class EventStore:
         finally:
             db.close()
 
-    def find_matching_event(
+    # ── 去重匹配（精确 + LLM 双路径）────────────────────────
+
+    def _find_matching_event_exact(
         self,
         title: str,
         start_datetime: Optional[datetime] = None,
         date_mmdd: Optional[str] = None,
         threshold_days: int = 2,
     ) -> Optional[Dict[str, Any]]:
-        """查找匹配的事件（去重用）。"""
+        """精确标题匹配（LLM 不可用或 system 事件时的回退路径）。"""
         db = self._get_session()
         try:
             rows = (
@@ -142,6 +150,176 @@ class EventStore:
             return None
         finally:
             db.close()
+
+    async def _find_matching_event_with_llm(
+        self,
+        title: str,
+        description: str,
+        event_type: str,
+        start_datetime: Optional[datetime],
+        date_mmdd: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        LLM 驱动的模糊匹配：缩小候选集后用 LLM 判断是否同一事件。
+        返回匹配的 event_dict（附带 _merged_description 字段），或 None。
+        """
+        if self.llm_client is None:
+            return None
+
+        # 1. 候选集缩小：同类型 + 同月 ±7 天
+        db = self._get_session()
+        try:
+            candidates: List[Event] = []
+            base_rows = (
+                db.query(Event)
+                .filter(
+                    Event.event_type == event_type,
+                    Event.is_active == True,
+                )
+                .all()
+            )
+
+            ref_date: Optional[date] = None
+            if start_datetime:
+                ref_date = start_datetime.date() if isinstance(start_datetime, datetime) else start_datetime
+            elif date_mmdd:
+                # 用 MM-DD 在当前年构造参考日期
+                import datetime as _dt
+                parts = date_mmdd.split("-")
+                try:
+                    ref_date = _dt.date(_dt.date.today().year, int(parts[0]), int(parts[1]))
+                except (IndexError, ValueError):
+                    pass
+
+            window_start = ref_date - __import__("datetime").timedelta(days=7) if ref_date else None
+            window_end = ref_date + __import__("datetime").timedelta(days=7) if ref_date else None
+
+            for row in base_rows:
+                row_date: Optional[date] = None
+                if row.start_datetime:
+                    row_date = row.start_datetime.date() if isinstance(row.start_datetime, datetime) else row.start_datetime
+                elif row.date_mmdd and ref_date:
+                    parts2 = row.date_mmdd.split("-")
+                    try:
+                        row_date = __import__("datetime").date(ref_date.year, int(parts2[0]), int(parts2[1]))
+                    except (IndexError, ValueError):
+                        pass
+                if row_date and window_start and window_end and window_start <= row_date <= window_end:
+                    candidates.append(row)
+
+            if not candidates:
+                self.logger.debug(f"LLM dedup: empty candidate set for '{title}', skipping LLM call")
+                return None
+
+            # 2. 构建 prompt
+            candidate_lines: List[str] = []
+            for c in candidates:
+                c_start = c.start_datetime.isoformat() if c.start_datetime else ""
+                candidate_lines.append(
+                    f"  id={c.id} | {c.title} | {c.description or ''} | {c_start} | mmdd={c.date_mmdd or ''}"
+                )
+            candidates_text = "\n".join(candidate_lines)
+
+            type_cn = {
+                "concert": "演唱会", "livestream": "直播", "dynamic": "动态",
+                "travel": "旅游", "new_song": "新歌", "holiday": "节日",
+                "birthday": "生日", "anniversary": "纪念日", "general": "活动",
+            }.get(event_type, event_type)
+
+            prompt = (
+                f"你是一个活动去重助手。判断以下新事件是否与任何已有事件指向同一场真实活动。\n\n"
+                f"【新事件】\n"
+                f"- 标题: {title}\n"
+                f"- 描述: {description}\n"
+                f"- 类型: {type_cn}\n"
+                f"- 时间: {start_datetime.isoformat() if start_datetime else '无'}\n"
+                f"- 日期(MM-DD): {date_mmdd or '无'}\n\n"
+                f"【已有事件列表】\n{candidates_text}\n\n"
+                f"判断标准：\n"
+                f"1. 同一场演唱会/直播/活动的不同宣传帖为重复\n"
+                f"2. 不同场次/不同活动为不重复\n"
+                f"3. 若重复，将新旧描述合并压缩为一句话（30字以内）\n\n"
+                f"输出 JSON（严格格式）：\n"
+                f'{{"match": true/false, "matched_id": "事件ID或空字符串", "merged_description": "合并描述或空字符串"}}'
+            )
+
+            # 3. 调用 LLM
+            try:
+                result = await self.llm_client.generate_response(prompt, use_json=True)
+                if not result:
+                    self.logger.warning("LLM dedup returned empty response, falling back to exact match")
+                    return None
+                result = result.strip()
+            except Exception as e:
+                self.logger.warning(f"LLM dedup call failed ({e}), falling back to exact match")
+                return None
+
+            # 4. 解析结果
+            try:
+                import json as _json
+                parsed = _json.loads(result)
+                if not isinstance(parsed, dict):
+                    return None
+                if not parsed.get("match"):
+                    self.logger.debug(f"LLM dedup: no match for '{title}'")
+                    return None
+                matched_id = parsed.get("matched_id", "")
+                merged_desc = parsed.get("merged_description", "")
+                if not matched_id:
+                    return None
+
+                # 5. 确认匹配事件确实存在
+                matched_row = db.query(Event).filter(Event.id == matched_id, Event.is_active == True).first()
+                if matched_row is None:
+                    self.logger.warning(f"LLM matched non-existent event id={matched_id}")
+                    return None
+
+                matched_dict = db_event_to_dict(matched_row)
+                matched_dict["_merged_description"] = merged_desc if merged_desc else description
+                self.logger.info(
+                    f"LLM dedup matched: '{title}' → existing '{matched_row.title}' (id={matched_id})"
+                )
+                self.logger.debug(f"Description merged: '{matched_row.description}' + '{description}' → '{merged_desc}'")
+                return matched_dict
+
+            except (ValueError, _json.JSONDecodeError) as e:
+                self.logger.warning(f"LLM dedup returned invalid JSON ({e}), falling back to exact match")
+                return None
+        finally:
+            db.close()
+
+    async def find_matching_event(
+        self,
+        title: str,
+        start_datetime: Optional[datetime] = None,
+        date_mmdd: Optional[str] = None,
+        description: str = "",
+        event_type: str = "general",
+        source: str = "",
+        threshold_days: int = 2,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        查找匹配的事件（去重用）。
+        - source 为 "system" 时直接走精确匹配（节假日去重）
+        - LLM 可用时走 LLM 模糊匹配；不可用时降级精确匹配
+        """
+        # system 事件（节假日等）走精确匹配，避免不必要的 LLM 调用
+        if source == "system" or self.llm_client is None:
+            return self._find_matching_event_exact(title, start_datetime, date_mmdd, threshold_days)
+
+        # LLM 路径
+        result = await self._find_matching_event_with_llm(
+            title=title,
+            description=description,
+            event_type=event_type,
+            start_datetime=start_datetime,
+            date_mmdd=date_mmdd,
+        )
+        if result is not None:
+            return result
+
+        # LLM 无匹配或降级 → 精确匹配兜底
+        return self._find_matching_event_exact(title, start_datetime, date_mmdd, threshold_days)
 
     def get_events_due_for_trigger(
         self,
@@ -187,16 +365,27 @@ class EventStore:
 
     # ── 事件写入 ─────────────────────────────────────────────
 
-    def add_event(self, event_data: Dict[str, Any]) -> Optional[str]:
+    async def add_event(self, event_data: Dict[str, Any]) -> Optional[str]:
         """添加新事件到数据库。如果已存在匹配事件则更新。"""
         title = event_data.get("title", "")
         start_datetime = event_data.get("start_datetime")
         date_mmdd = event_data.get("date_mmdd")
+        description = event_data.get("description", "")
+        event_type = event_data.get("event_type", UnifiedEventType.GENERAL.value)
+        source = event_data.get("source", "")
 
-        existing = self.find_matching_event(title, start_datetime, date_mmdd)
+        existing = await self.find_matching_event(
+            title=title,
+            start_datetime=start_datetime,
+            date_mmdd=date_mmdd,
+            description=description,
+            event_type=event_type,
+            source=source,
+        )
         if existing:
+            merged_desc = existing.pop("_merged_description", None)
             self.logger.info(f"Event already exists, updating: {title} (id={existing['id']})")
-            self._update_event(existing["id"], event_data)
+            self._update_event(existing["id"], event_data, merged_description=merged_desc)
             self._invalidate_cache()
             return existing["id"]
 
@@ -249,18 +438,32 @@ class EventStore:
         finally:
             db.close()
 
-    def _update_event(self, event_id: str, event_data: Dict[str, Any]) -> None:
-        """更新已有事件。"""
+    def _update_event(
+        self,
+        event_id: str,
+        event_data: Dict[str, Any],
+        merged_description: Optional[str] = None,
+    ) -> None:
+        """
+        更新已有事件。
+        - 时间字段（start_datetime / end_datetime）始终以新值为准直接覆盖
+        - 若提供 merged_description（LLM 合并结果），覆盖 description
+        - 其他字段：新值覆盖
+        """
         db = self._get_session()
         try:
             row = db.query(Event).filter(Event.id == event_id).first()
             if row is None:
                 return
+            # 先处理 description：优先使用 LLM 合并结果
+            if merged_description:
+                row.description = merged_description
             for key, value in event_data.items():
                 if hasattr(row, key) and value is not None:
                     if key == "trigger_conditions" and isinstance(value, list):
                         setattr(row, key, serialize_trigger_conditions(value))
-                    elif key == "id":
+                    elif key in ("id", "description"):
+                        # id 不可改；description 已在 merged_description 分支处理
                         continue
                     else:
                         setattr(row, key, value)
@@ -348,7 +551,7 @@ class EventStore:
 
     # ── 预先写入固定节假日 ────────────────────────────────
 
-    def ensure_holidays(self, years: Optional[List[int]] = None) -> int:
+    async def ensure_holidays(self, years: Optional[List[int]] = None) -> int:
         """
         确保指定年份的常见节假日已被写入数据库。
         返回新增的节假日数量。
@@ -366,10 +569,10 @@ class EventStore:
                     d = date(year, month, day)
                 except ValueError:
                     continue
-                existing = self.find_matching_event(name, date_mmdd=f"{month:02d}-{day:02d}")
+                existing = await self.find_matching_event(name, date_mmdd=f"{month:02d}-{day:02d}", source="system")
                 if existing:
-                    continue
-                self.add_event({
+                    break # 所有的节日都是统一加进去的，一个有重复，说明所有的都加过了
+                await self.add_event({
                     "title": name,
                     "description": desc,
                     "event_type": UnifiedEventType.HOLIDAY.value,
@@ -387,10 +590,10 @@ class EventStore:
                 if solar is None:
                     continue
                 sol_year, sol_month, sol_day = solar
-                existing = self.find_matching_event(name, date_mmdd=f"{l_month:02d}-{l_day:02d}")
+                existing = await self.find_matching_event(name, date_mmdd=f"{l_month:02d}-{l_day:02d}", source="system")
                 if existing:
                     continue
-                self.add_event({
+                await self.add_event({
                     "title": name,
                     "description": desc,
                     "event_type": UnifiedEventType.HOLIDAY.value,
@@ -411,10 +614,10 @@ class EventStore:
                     if is_lunar_new_year_eve(year, month, day):
                         lunar_mmdd = get_lunar_mmdd(year, month, day)
                         if lunar_mmdd:
-                            existing = self.find_matching_event("除夕夜", date_mmdd=lunar_mmdd)
+                            existing = await self.find_matching_event("除夕夜", date_mmdd=lunar_mmdd, source="system")
                             if existing:
                                 continue
-                            self.add_event({
+                            await self.add_event({
                                 "title": "除夕夜",
                                 "description": "除夕夜",
                                 "event_type": UnifiedEventType.HOLIDAY.value,

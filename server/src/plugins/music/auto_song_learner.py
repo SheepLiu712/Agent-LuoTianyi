@@ -10,6 +10,8 @@ Songlearner pipeline only:
 
 from __future__ import annotations
 
+import asyncio
+import importlib
 import json
 import os
 import re
@@ -24,6 +26,20 @@ from typing import Any, Dict, List, Optional
 from ...types.music_type import WishEntry
 from ...utils.logger import get_logger
 from .utils import get_unified_song_name
+
+
+_SONGLEARNER_PATH_ADDED = False
+
+
+def _add_songlearner_to_path() -> None:
+    """将 song_learner/src 添加到 Python path（幂等）。"""
+    global _SONGLEARNER_PATH_ADDED
+    if _SONGLEARNER_PATH_ADDED:
+        return
+    songlearner_src = Path(__file__).resolve().parent / "song_learner" / "src"
+    if str(songlearner_src) not in sys.path:
+        sys.path.insert(0, str(songlearner_src))
+    _SONGLEARNER_PATH_ADDED = True
 
 
 @dataclass
@@ -210,11 +226,71 @@ class AutoSongLearner:
             )
             raise RuntimeError("Songlearner 模型未就绪，无法执行自动学歌")
 
+        # QQ 音乐凭证检测（启动时）
+        self._credential_file = self.songlearner_resource_dir / ".qq_music_credential.json"
+        self.qq_credential_valid = self._validate_qq_credential()
+        if not self.qq_credential_valid:
+            self.logger.warning(
+                "QQ 音乐凭证无效或不存在，正在生成登录二维码..."
+            )
+            self._generate_login_qr()
+            self.logger.warning(
+                f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}"
+            )
+
     # -- directory setup -----------------------------------------------------
 
     def _ensure_directories(self) -> None:
         self.songs_dir.mkdir(parents=True, exist_ok=True)
-        # self.staging_dir.mkdir(parents=True, exist_ok=True)
+
+    # -- QQ 凭证管理 ---------------------------------------------------------
+
+    def _validate_qq_credential(self) -> bool:
+        """加载并验证本地 QQ 音乐凭证。"""
+        try:
+            # song_learner/src 需要在 Python path 中
+            _add_songlearner_to_path()
+            download_qq_song = importlib.import_module("pipeline.download_qq_song")
+            saved = download_qq_song.load_saved_credential(self._credential_file)
+            if saved and download_qq_song.validate_credential(saved):
+                self.logger.info(f"QQ 音乐凭证有效: {self._credential_file}")
+                return True
+        except Exception as e:
+            self.logger.warning(f"QQ 音乐凭证检测异常: {e}")
+        return False
+
+    def _generate_login_qr(self) -> None:
+        """生成 QQ 登录二维码并保存到文件（不等待扫码）。"""
+        try:
+            _add_songlearner_to_path()
+            download_qq_song = importlib.import_module("pipeline.download_qq_song")
+            qr_path = self._credential_file.parent / "qq_login_qr.png"
+            success = asyncio.run(download_qq_song.generate_qr_only(qr_path))
+            if success:
+                self.logger.info(f"QQ 登录二维码已生成: {qr_path}")
+            else:
+                self.logger.warning("生成 QQ 登录二维码失败（qqmusic-api 可能未安装）")
+        except Exception as e:
+            self.logger.warning(f"生成 QQ 登录二维码异常: {e}")
+
+    def check_qq_credential(self) -> bool:
+        """
+        公开方法：重新检查 QQ 音乐凭证有效性。
+        供 DailyScheduler 凌晨调用。无效时重新生成二维码。
+        """
+        if not self.songlearner_available:
+            return False
+        valid = self._validate_qq_credential()
+        self.qq_credential_valid = valid
+        if not valid:
+            self.logger.warning(
+                "QQ 音乐凭证仍然无效，重新生成登录二维码..."
+            )
+            self._generate_login_qr()
+            self.logger.warning(
+                f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}"
+            )
+        return valid
 
     # -- main entry ----------------------------------------------------------
 

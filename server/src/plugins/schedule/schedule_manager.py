@@ -43,11 +43,15 @@ class ScheduleManager:
         self.logger = get_logger(__name__)
 
         # 子模块
-        self.event_store = EventStore(sql_session_factory=sql_session_factory)
+
         self.fetcher = OfficialFeedFetcher(config=self.config)
         llm_cfg = self.config.get("llm") or {}
         vlm_cfg = self.config.get("vlm") or {}
         self.parser = EventParser(llm_config=llm_cfg, vlm_config=vlm_cfg)
+        self.event_store = EventStore(
+            sql_session_factory=sql_session_factory,
+            llm_client=self.parser.llm_client,
+        )
 
         # 上下文提供者
         self.context_provider = ActivityContextProvider(
@@ -128,7 +132,7 @@ class ScheduleManager:
     async def _async_main(self) -> None:
         """异步主循环。"""
         try:
-            self.event_store.ensure_holidays()
+            await self.event_store.ensure_holidays()
         except Exception as e:
             self.logger.warning(f"Failed to ensure holidays: {e}")
 
@@ -168,7 +172,7 @@ class ScheduleManager:
                 evt.setdefault("source", "bilibili")
                 evt.setdefault("is_recurring", False)
                 evt.setdefault("is_personal", False)
-                self.event_store.add_event(evt)
+                await self.event_store.add_event(evt)
 
             self.logger.info(f"Processed {len(parsed_events)} new event(s) from dynamics")
         except Exception as e:
