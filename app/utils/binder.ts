@@ -63,6 +63,9 @@ export class AgentBinder {
   }
 
   sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) {
+    if (touchMeta === undefined) {
+      return this.sendCallbacks.sendTouch(touchArea, clickFrequency);
+    }
     return this.sendCallbacks.sendTouch(touchArea, clickFrequency, touchMeta);
   }
 

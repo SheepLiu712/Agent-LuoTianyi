@@ -44,6 +44,10 @@ export const useChatLogic = (
           setExpression(expression, webviewRef);
         }
 
+        if (payload.display_in_chat === false) {
+          return prev;
+        }
+
         // Some packets only carry state/expression updates; do not render empty bubbles.
         if (!payload.text && !payload.audio && index < 0) {
           return prev;

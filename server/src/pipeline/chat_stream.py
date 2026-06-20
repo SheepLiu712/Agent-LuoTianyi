@@ -81,7 +81,9 @@ class ChatStream:
             if self.service_hub is not None and self.user_uuid is not None:
                 await self.service_hub.activity_maker.on_user_message(self.user_uuid)
                 await ingress_message(self.service_hub, self.user_uuid, event)  # 预处理
-                await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event)  # 入库
+                if event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}:
+                    await self.service_hub.agent.add_conversation(self.service_hub, self.user_uuid, event)  # 入库
+            else:
                 self.logger.warning("Service hub or user uuid is missing, skip user message preprocessing")
 
         await self.topic_planner.feed_unread_message(event)

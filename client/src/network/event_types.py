@@ -58,6 +58,8 @@ class AgentMessage:
     is_final_package: bool
     uuid: str | None
     reply_to: str | None
+    display_in_chat: bool = True
+    is_ephemeral: bool = False
 
 @dataclass
 class AgentStateMessage:
@@ -115,6 +117,8 @@ def normalize_agent_message(message: WSMessage) -> AgentMessage:
         is_final_package=bool(payload.get("is_final_package", True)),
         uuid=payload.get("uuid"),
         reply_to=message.reply_to,
+        display_in_chat=bool(payload.get("display_in_chat", True)),
+        is_ephemeral=bool(payload.get("is_ephemeral", False)),
     )
 
 

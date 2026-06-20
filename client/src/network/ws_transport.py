@@ -309,6 +309,8 @@ class WsTransport:
                             is_final_package=True,
                             uuid=None,
                             reply_to=error_msg.reply_to,
+                            display_in_chat=True,
+                            is_ephemeral=False,
                         )
                     )
         self.logger.debug("WebSocket receive loop exited")

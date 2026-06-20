@@ -89,6 +89,7 @@ export class MessageProcessor {
   private serverAudioPlaying = false;
   private readonly audioChunksByUuid = new Map<string, string[]>();
   private readonly audioPathByUuid = new Map<string, string>();
+  private readonly transientMessageUuids = new Set<string>();
   private lastTypingSentAt = 0;
   private readonly serverAudioFinishWaiters: (() => void)[] = [];
   private incomingMessageChain: Promise<void> = Promise.resolve();
@@ -313,23 +314,32 @@ export class MessageProcessor {
 
   private async handleAgentMessage(payload: AgentMessagePayload) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
+    const displayInChat = payload.display_in_chat !== false;
+
+    if (!displayInChat) {
+      this.transientMessageUuids.add(convUuid);
+    }
 
     if (this.localPlayingUuid) {
       void this.stopLocalTts();
     }
 
-    if (payload.text && payload.text.trim().length > 0) {
+    if (displayInChat && payload.text && payload.text.trim().length > 0) {
       this.binder.emitAgentMessage({
         uuid: convUuid,
         text: payload.text,
         expression: payload.expression || undefined,
         is_final_package: payload.is_final_package,
+        display_in_chat: payload.display_in_chat,
+        is_ephemeral: payload.is_ephemeral,
       });
     } else {
       this.binder.emitAgentMessage({
         uuid: convUuid,
         expression: payload.expression || undefined,
         is_final_package: payload.is_final_package,
+        display_in_chat: payload.display_in_chat,
+        is_ephemeral: payload.is_ephemeral,
       });
     }
 
@@ -483,10 +493,12 @@ export class MessageProcessor {
         encoding: FileSystem.EncodingType.Base64,
       });
       this.audioPathByUuid.set(convUuid, fileUri);
-      this.binder.emitAgentMessage({
-        uuid: convUuid,
-        audio: fileUri,
-      });
+      if (!this.transientMessageUuids.has(convUuid)) {
+        this.binder.emitAgentMessage({
+          uuid: convUuid,
+          audio: fileUri,
+        });
+      }
     } catch (error) {
       const errorMessage = getErrorMessage(error);
       addDebugTrace('audio', 'save local audio failed', {
@@ -500,6 +512,7 @@ export class MessageProcessor {
       this.binder.emitErrorText(`本地音频保存失败: ${errorMessage}`);
     } finally {
       this.audioChunksByUuid.delete(convUuid);
+      this.transientMessageUuids.delete(convUuid);
     }
   }
 }

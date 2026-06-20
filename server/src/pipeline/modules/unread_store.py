@@ -34,7 +34,12 @@ class UnreadStore:
 
     @staticmethod
     def trans_ChatInputEvent_to_UnreadMessage(event: ChatInputEvent) -> UnreadMessage:
-        message_type = "text" if event.event_type == ChatInputEventType.USER_TEXT else "image"
+        if event.event_type == ChatInputEventType.USER_IMAGE:
+            message_type = "image"
+        elif event.event_type == ChatInputEventType.USER_TOUCH:
+            message_type = "touch"
+        else:
+            message_type = "text"
         return UnreadMessage(
             message_id=event.client_msg_id,
             message_type=message_type,

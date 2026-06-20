@@ -17,6 +17,8 @@ class ChatResponse(BaseModel):
     audio: str | None = None
     expression: str | None = None
     is_final_package: bool = True
+    display_in_chat: bool = True
+    is_ephemeral: bool = False
 
 class LoginRequest(BaseModel):
     username: str

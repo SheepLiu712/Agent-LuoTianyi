@@ -21,6 +21,7 @@ class ExtractedTopic:
     memory_attempts: list[str]
     fact_constraints: list[str]
     sing_attempts: list[str]
+    source_event_type: str | None = None
     
     is_forced_from_incomplete: bool = False
 
@@ -130,6 +131,7 @@ class TopicPlanner:
             memory_attempts=[],
             fact_constraints=[],
             sing_attempts=[],
+            source_event_type=ChatInputEventType.USER_TOUCH.value,
         )
         self.logger.info(f"Touch event -> ExtractedTopic: {text}")
         await self._consume_topics([touch_topic])

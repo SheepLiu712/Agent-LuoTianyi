@@ -71,6 +71,16 @@ class Live2DWidget(QOpenGLWidget):
             "Part17": "身体"
         }
 
+        # 思考气泡动画状态（由 paintGL 叠加绘制）
+        self._thinking_visible = False
+        self._thinking_frame_index = 0
+        self._thinking_frame_counter = 0  # 帧计数，用于 500ms 切换
+        self._thinking_bubble_frames: list[QImage] = [
+            QImage("res/gui/thinking_bubble1.png").convertToFormat(QImage.Format.Format_ARGB32_Premultiplied),
+            QImage("res/gui/thinking_bubble2.png").convertToFormat(QImage.Format.Format_ARGB32_Premultiplied),
+            QImage("res/gui/thinking_bubble3.png").convertToFormat(QImage.Format.Format_ARGB32_Premultiplied),
+        ]
+
     def initializeGL(self) -> None:
         # Load model config
         self.model.model_init()
@@ -109,17 +119,33 @@ class Live2DWidget(QOpenGLWidget):
             self.model.Update()
             self.model.Draw()
 
-        # 在GL渲染之上绘制触摸反馈圆环
+        # ---- QPainter 叠加绘制 ----
+        painter = QPainter(self)
+
+        # 思考气泡（在模型上方、圆环之前）
+        if self._thinking_visible and self._thinking_bubble_frames:
+            frame = self._thinking_bubble_frames[self._thinking_frame_index % len(self._thinking_bubble_frames)]
+            if not frame.isNull():
+                w = self.width()
+                h = self.height()
+                bubble_width = max(1, int(w / 4))
+                scaled = frame.scaledToWidth(bubble_width, Qt.TransformationMode.SmoothTransformation)
+                x = int((w - scaled.width()) * 0.94)
+                y = int(h * 0.15)
+                # 直接用 OpenGL 纹理绘制，彻底避开 QPainter on OpenGL 的 Alpha 兼容问题
+                self._draw_image_as_texture(scaled, x, y)
+
+        # 触摸反馈圆环
         if self._ripples:
-            painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             for r in self._ripples:
-                pen = QPen(QColor(173, 216, 230, int(r["opacity"] * 255)))
-                pen.setWidth(3)
+                pen = QPen(QColor(133, 136, 230, int(r["opacity"] * 255)))
+                pen.setWidth(10)
                 painter.setPen(pen)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawEllipse(QPointF(r["x"], r["y"]), r["radius"], r["radius"])
-            painter.end()
+
+        painter.end()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         '''
@@ -198,6 +224,67 @@ class Live2DWidget(QOpenGLWidget):
         self._gaze_target_y = self.height() / 2
         super().leaveEvent(event)
 
+    def set_thinking_visible(self, visible: bool) -> None:
+        """由 Live2DContainer 调用，控制思考气泡的显示与隐藏。"""
+        if not self._thinking_bubble_frames or all(f.isNull() for f in self._thinking_bubble_frames):
+            self._thinking_visible = False
+            return
+        if visible:
+            self._thinking_frame_index = 0
+            self._thinking_frame_counter = 0
+            self._thinking_visible = True
+        else:
+            self._thinking_visible = False
+
+    def _draw_image_as_texture(self, image: QImage, x: int, y: int) -> None:
+        """用 OpenGL 纹理直接绘制 QImage，避开 QPainter on OpenGL 的 Alpha 兼容问题。"""
+        img = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        tw, th = img.width(), img.height()
+        bits = img.bits()
+        if bits is None:
+            return
+
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glEnable(GL_TEXTURE_2D)
+
+        texture = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, texture)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        # 告诉 GL QImage 的实际行宽（像素数），消除 stride 偏移
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, img.bytesPerLine() // 4)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, bits)
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0)
+
+        vw, vh = self.width(), self.height()
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        glOrtho(0, vw, vh, 0, -1, 1)
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        x2, y2 = x + tw, y + th
+        glBegin(GL_QUADS)
+        glTexCoord2f(0, 0); glVertex2f(x, y)
+        glTexCoord2f(1, 0); glVertex2f(x2, y)
+        glTexCoord2f(1, 1); glVertex2f(x2, y2)
+        glTexCoord2f(0, 1); glVertex2f(x, y2)
+        glEnd()
+
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+
+        glDeleteTextures(1, [texture])
+        glDisable(GL_TEXTURE_2D)
+        glDisable(GL_BLEND)
+
     def timerEvent(self, event: QTimerEvent) -> None:
         # 目光跟随插值
         if self.model:
@@ -217,6 +304,13 @@ class Live2DWidget(QOpenGLWidget):
                 drag_y = self._gaze_current_y - self.y()
                 self.model.Drag(drag_x, drag_y)
 
+        # 思考气泡帧动画（每 ~500ms 切换一帧，约 30 个 timer tick）
+        if self._thinking_visible and self._thinking_bubble_frames:
+            self._thinking_frame_counter += 1
+            if self._thinking_frame_counter >= 30:
+                self._thinking_frame_counter = 0
+                self._thinking_frame_index = (self._thinking_frame_index + 1) % len(self._thinking_bubble_frames)
+
         # 触摸反馈圆环动画
         self._ripples = [r for r in self._ripples if r["opacity"] > 0.01]
         dt = 0.016
@@ -229,7 +323,8 @@ class Live2DWidget(QOpenGLWidget):
 
 class Live2DContainer(QWidget):
     '''
-    Live2D部分的容器组件，负责显示Live2DWidget和思考气泡，并根据Agent的状态控制思考气泡的显示和动画。
+    Live2D部分的容器组件，负责显示Live2DWidget（含思考气泡叠加绘制）和背景，
+    并根据Agent的状态控制思考气泡的显示和动画。
     '''
 
     def __init__(self, gui_config, live2d_config, agent_binder: AgentBinder, parent=None):
@@ -240,73 +335,10 @@ class Live2DContainer(QWidget):
         self.agent_binder.agent_thinking_signal.connect(self.on_agent_thinking)
         self.live2d_config: Dict[str, Any] = live2d_config
         self.background_image = None
-        self.thinking_visible = False
-        self.thinking_bubble_frames = [
-            QPixmap("res/gui/thinking_bubble1.png"),
-            QPixmap("res/gui/thinking_bubble2.png"),
-            QPixmap("res/gui/thinking_bubble3.png"),
-        ]
-        self._thinking_frame_index = 0
-        self._thinking_timer = QTimer(self)
-        self._thinking_timer.setInterval(500) # 每500ms切换一帧动画
-        self._thinking_timer.timeout.connect(self._advance_thinking_frame)
-
-        self.thinking_bubble_label = QLabel(self)
-        self.thinking_bubble_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.thinking_bubble_label.setStyleSheet("background: transparent;")
         self.load_background()
-        self.update_thinking_bubble()
-
-    def update_thinking_bubble(self):
-        if not self.thinking_bubble_frames:
-            self.thinking_bubble_label.hide()
-            return
-
-        frame = self.thinking_bubble_frames[self._thinking_frame_index]
-        if frame.isNull():
-            self.thinking_bubble_label.hide()
-            return
-
-        bubble_width = max(1, int(self.width() / 4))
-        scaled = frame.scaledToWidth(
-            bubble_width,
-            Qt.TransformationMode.SmoothTransformation
-        )
-        self.thinking_bubble_label.setPixmap(scaled)
-        self.thinking_bubble_label.resize(scaled.size())
-
-        x = int((self.width() - self.thinking_bubble_label.width()) * 0.94) # 一些超参数，反正这样就是可以
-        y = int(self.height() * 0.15)
-        self.thinking_bubble_label.move(x, y)
-        self.thinking_bubble_label.raise_()
-        self.thinking_bubble_label.setVisible(self.thinking_visible)
 
     def on_agent_thinking(self, is_thinking: bool):
-        self.set_thinking_visible(is_thinking)
-
-    def set_thinking_visible(self, visible: bool):
-        self.thinking_visible = visible
-        if not self.thinking_bubble_frames or all(frame.isNull() for frame in self.thinking_bubble_frames):
-            self._thinking_timer.stop()
-            self.thinking_bubble_label.hide()
-            return
-
-        if visible:
-            self._thinking_frame_index = 0
-            self.update_thinking_bubble()
-            if not self._thinking_timer.isActive():
-                self._thinking_timer.start()
-        else:
-            self._thinking_timer.stop()
-            self.thinking_bubble_label.hide()
-
-    def _advance_thinking_frame(self):
-        if not self.thinking_visible:
-            self._thinking_timer.stop()
-            self.thinking_bubble_label.hide()
-            return
-        self._thinking_frame_index = (self._thinking_frame_index + 1) % len(self.thinking_bubble_frames)
-        self.update_thinking_bubble()
+        self.live2d_widget.set_thinking_visible(is_thinking)
         
     def load_background(self): # 加载背景图片
         bg_path = self.gui_config["live2d_background"]["image_path"]
@@ -317,7 +349,6 @@ class Live2DContainer(QWidget):
 
     def resizeEvent(self, event: QResizeEvent):
         self.live2d_widget.resize(self.size())
-        self.update_thinking_bubble()
         super().resizeEvent(event)
 
     def paintEvent(self, event):

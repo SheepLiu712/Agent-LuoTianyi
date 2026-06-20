@@ -6,6 +6,8 @@ from .global_speaking_worker import SpeakingJob
 from ..agent.main_chat import OneResponseLine, SongSegmentChat, ContextType
 from typing import Callable, Awaitable
 from ..interface.types import ChatResponse
+from .chat_events import ChatInputEventType
+from .modules.touch_fast_reply import TouchFastReplyBuilder
 if TYPE_CHECKING:
     from ..interface.service_hub import ServiceHub
     from .topic_planner import ExtractedTopic
@@ -27,6 +29,7 @@ class TopicReplier:
         self._touch_pending: Optional["ExtractedTopic"] = None  # 队列中待处理的触摸 Topic 引用
         self._touch_processing: bool = False  # 正在处理触摸 Topic
         self._touch_lock = asyncio.Lock()  # 触摸指针并发锁
+        self.touch_fast_reply_builder = TouchFastReplyBuilder()
 
     def set_service_hub(self, service_hub: "ServiceHub"):
         self.service_hub = service_hub
@@ -41,6 +44,8 @@ class TopicReplier:
 
     def _is_touch_topic(self, topic: "ExtractedTopic") -> bool:
         """判断一个 ExtractedTopic 是否来自触摸事件"""
+        if getattr(topic, "source_event_type", None) == ChatInputEventType.USER_TOUCH.value:
+            return True
         content = topic.topic_content or ""
         return content.startswith("[") and ("触摸" in content or "摸了摸" in content or "碰了碰" in content or "戳了戳" in content or "握了握" in content)
 
@@ -72,8 +77,7 @@ class TopicReplier:
                 if self._is_touch_topic(topic):
                     async with self._touch_lock:
                         self._touch_processing = True
-                if self.change_state_callback is not None:
-                    await self.change_state_callback(thinking = True) # 进入思考状态
+
                 await self._reply_one_topic(topic)
 
             except asyncio.CancelledError:
@@ -96,6 +100,12 @@ class TopicReplier:
         if self.service_hub is None or self.service_hub.agent is None:
             self.logger.error("ServiceHub or agent is not ready, skip replying topic")
             return
+
+        if self._is_touch_topic(topic) and await self._try_touch_fast_reply():
+            return
+
+        if self.change_state_callback is not None:
+            await self.change_state_callback(thinking = True) # 进入思考状态
 
         # Read context once and reuse across the entire pipeline turn
         db = self.service_hub.agent._runtime_hub.open_sql_session()
@@ -155,6 +165,24 @@ class TopicReplier:
             topic, reply_items, memory_hits, conversation_history=conversation_history
         ))
         asyncio.create_task(self._schedule_profile_context_update())
+
+    async def _try_touch_fast_reply(self) -> bool:
+        if not self.touch_fast_reply_builder.should_use_fast_path():
+            return False
+
+        response = self.touch_fast_reply_builder.build_response()
+        if response is None:
+            self.logger.warning("Touch fast reply unavailable; falling back to normal pipeline")
+            return False
+
+        if isinstance(response, ChatResponse):
+            await self.send_reply_callback(response)
+        elif isinstance(response, list):
+            for item in response:
+                if isinstance(item, ChatResponse):
+                    await self.send_reply_callback(item)
+        self.logger.info("Touch topic resolved by transient fast reply")
+        return True
 
     async def _submit_speaking_job(
         self,

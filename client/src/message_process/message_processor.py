@@ -197,6 +197,8 @@ class MessageProcessor:
         self.multimedia_stream.set_volume_percent(percent)
 
     def process_transport_message(self, response: AgentMessage): # 真正处理消息的函数
+        display_in_chat = getattr(response, "display_in_chat", True)
+
         if self.processing_uuid is None:
             self.processing_uuid = response.uuid
             self.processing_audio = bytearray()
@@ -205,7 +207,7 @@ class MessageProcessor:
             self.processing_uuid = response.uuid
             self.processing_audio = bytearray()
 
-        if response.text:
+        if display_in_chat and response.text:
             self.response_signal(response.uuid, response.text)
 
         if response.expression and self.expression_signal:
@@ -226,7 +228,7 @@ class MessageProcessor:
             ret = self._save_audio_to_temp(self.processing_audio, saved_uuid, ".wav")
             self.processing_audio = bytearray()
             self.processing_uuid = None
-            if ret and self.update_bubble_signal:
+            if display_in_chat and ret and self.update_bubble_signal:
                 # 通知UI对应的气泡有本地音频可播放
                 try:
                     self.update_bubble_signal(saved_uuid, "has_audio")
@@ -306,7 +308,6 @@ class MessageProcessor:
     def _next_local_id(self, prefix: str) -> str:
         self._reply_counter += 1
         return f"{prefix}_{int(time.time() * 1000)}_{self._reply_counter}"
-
 
 
     def _send_one(self, item: OutgoingMessage) -> dict:
@@ -408,6 +409,3 @@ class MessageProcessor:
         if not value:
             return False
         return re.fullmatch(r"[A-Za-z0-9_-]+", value) is not None
-
-
-    
