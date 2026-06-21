@@ -8,7 +8,7 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.append(cwd)
 
-from src.database.sql_database import User, get_sql_session, init_sql_db
+from src.system.database.sql_database import User, get_sql_session, init_sql_db
 
 
 def _format_datetime(value: datetime | None) -> str:

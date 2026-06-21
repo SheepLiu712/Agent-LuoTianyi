@@ -17,9 +17,9 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-import src.database as database
-from src.interface import account
-from src.interface.types import (
+import src.system.database as database
+from src.system.user_interface import account
+from src.system.user_interface.types import (
     RegisterRequest,
     LoginRequest,
     AutoLoginRequest,
@@ -30,29 +30,19 @@ from src.interface.types import (
     PreferenceGetRequest,
     PreferenceOverwriteRequest,
 )
-from src.interface.websocket_service import WebSocketConnection, get_websocket_service
-from src.pipeline.global_chat_stream_manager import get_GCSM
-from src.pipeline.global_speaking_worker import get_global_speaking_worker
-from src.interface.service_hub import ServiceHub
-from src.plugins.music import MusicManager
-from src.database.sql_database import get_sql_session
-from src.tts import TTSModule, init_tts_module
-from src.agent.activity_maker import init_activity_maker, get_activity_maker
-from src.agent.luotianyi_agent import LuoTianyiAgent, init_luotianyi_agent, get_luotianyi_agent
-from src.plugins import DailyScheduler
-from src.plugins.citywalk import CitywalkRuntimeService
-from src.plugins.schedule import ScheduleManager
-from src.plugins.music.auto_song_learner import AutoSongLearner
+from src.system.user_interface.websocket_service import WebSocketConnection
+from src.system.system_runtime import (
+    SystemRuntime,
+    get_system_runtime,
+    init_system_runtime,
+    shutdown_system_runtime,
+)
 
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger
-from functools import lru_cache
 
 logger = get_logger("server_main")
 config = load_config("config/config.json")
-
-service_hub = None  # 全局 ServiceHub 实例，在 startup_event 中初始化
-daily_scheduler: DailyScheduler | None = None
 
 
 _RATE_LIMITS = {
@@ -88,81 +78,15 @@ def _enforce_rate_limit(request: Request, bucket: str, username: str | None) -> 
 
 @asynccontextmanager
 async def startup_event(app: FastAPI):
-    # 数据库初始化
-    database_config: Dict = config.get("database", {})
-    database.init_all_databases(database_config)
-
-    # TTS 模块初始化，启动TTS服务器进程
-    tts_config = config.get("tts", {})
-    tts_module: TTSModule = init_tts_module(tts_config)
-
-    # 初始化Agent（内部同时初始化仅供Agent使用的运行时依赖）
-    init_luotianyi_agent(
-        config,
-        tts_module,
-        redis_client=database.get_redis_buffer(),
-        vector_store=database.get_vector_store(),
-        sql_session_factory=get_sql_session,
-        music_manager=MusicManager(config=config["music"]),
-    )
-
-    global service_hub
-    service_hub = ServiceHub(
-        websocket_service=get_websocket_service(),
-        gcsm=get_GCSM(),
-        global_speaking_worker=get_global_speaking_worker(),
-        agent=get_luotianyi_agent(),
-        activity_maker=init_activity_maker(config.get("activity_maker", {})),
-        schedule_manager=ScheduleManager(
-            sql_session_factory=get_sql_session,
-            config=config.get("schedule", {}),
-        )
-    )
-
-    # 在service_hub内相互传递依赖实例
-    service_hub.activity_maker.set_agent(get_luotianyi_agent())  # 将Agent实例传递给ActivityMaker，方便它在构建活动内容时调用Agent的接口
-    service_hub.activity_maker.set_service_hub(service_hub)  # 将ServiceHub引用传递给ActivityMaker，用于演唱会静默期检查
-    service_hub.gcsm.register_activity_maker(service_hub.activity_maker)  # 将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口
-    service_hub.global_speaking_worker.set_agent(get_luotianyi_agent())  # 将Agent实例传递给全局speaking worker，方便它在处理说话任务时调用Agent的接口
-    service_hub.schedule_manager.set_gcsm_ref(service_hub.gcsm)  # 将 ServiceHub 的引用传递给 ScheduleManager，方便它在需要时调用其他服务的接口
-
-    # 启动聊天流过期清理后台任务
-    service_hub.gcsm.start_cleanup_task(expiration_seconds=360)
-    service_hub.global_speaking_worker.start_if_needed()
-    service_hub.schedule_manager.start()
-
-    
-    # 构建日常调度器
-    global daily_scheduler
-    daily_scheduler = DailyScheduler(
-        song_knowledge_config = config["music"]["song_knowledge"],
-        citywalk_service = CitywalkRuntimeService(config["citywalk"], vector_store=database.get_vector_store()),
-        song_learner = service_hub.agent.music_manager.auto_song_learner,
-        schedule_manager = service_hub.schedule_manager,
-    )
-    daily_scheduler.start()
-
-    # 账号系统初始化
-    account.generate_keys()
+    await init_system_runtime(config)
     try:
         yield
     finally:
-        if daily_scheduler is not None:
-            daily_scheduler.stop()
-        if service_hub and service_hub.schedule_manager:
-            service_hub.schedule_manager.stop()
-        await service_hub.gcsm.stop_cleanup_task()
-        await service_hub.global_speaking_worker.stop()
+        await shutdown_system_runtime()
 
 
-def get_service_hub() -> ServiceHub:
-    global service_hub
-    return service_hub
-
-
-@lru_cache()
-def get_agent_service():
-    return get_luotianyi_agent()
+def get_runtime() -> SystemRuntime:
+    return get_system_runtime()
 
 
 app = FastAPI(lifespan=startup_event)
@@ -171,18 +95,18 @@ app = FastAPI(lifespan=startup_event)
 @app.websocket("/chat_ws")
 async def chat_ws(
     websocket: WebSocket,
-    service_hub: ServiceHub = Depends(get_service_hub),
+    system_runtime: SystemRuntime = Depends(get_runtime),
 ):
     await websocket.accept()
     logger.info("WebSocket client connected to /chat_ws")
-    websocket_service = service_hub.websocket_service  # WebSocketService 实例
-    gcsm = service_hub.gcsm  # 全局聊天流管理器实例
+    websocket_service = system_runtime.websocket_service  # WebSocketService 实例
+    gcsm = system_runtime.gcsm  # 全局聊天流管理器实例
     await websocket_service.send_system_ready_event(websocket)
     ws_connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
     try:
         await ws_connection.auth(websocket_service)  # 等待认证，认证成功之后将ws和用户信息绑定
         chat_stream = gcsm.get_or_register_chat_stream(
-            ws_connection, service_hub=service_hub
+            ws_connection, system_runtime=system_runtime
         )  # 根据ws连接获取对应的聊天流实例，内部会根据用户UUID进行管理
         while True:
             event = await websocket_service.try_recv_client_msg(ws_connection)
@@ -198,10 +122,13 @@ async def chat_ws(
                 await websocket_service.send_ack_event(ws_connection, event)
                 preferences = event.payload if isinstance(event.payload, dict) else {}
                 if ws_connection.user_uuid and preferences:
-                    service_hub.agent.save_preferences(ws_connection.user_uuid, preferences)
+                    system_runtime.agent.save_preferences(ws_connection.user_uuid, preferences)
                 continue
 
-            chat_event = websocket_service.convert_to_chat_input_event(event)
+            chat_event = websocket_service.convert_to_chat_input_event(
+                event,
+                sender_user_id=ws_connection.user_uuid,
+            )
             if chat_event is None:
                 continue
             await websocket_service.send_ack_event(ws_connection, event)  # 收到消息后发送 ACK 确认收到，之后进处理流程
@@ -225,7 +152,7 @@ async def auto_login(
     background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_sql_db),
     redis: redis.Redis = Depends(database.get_redis_buffer),
-    service_hub: ServiceHub = Depends(get_service_hub),
+    system_runtime: SystemRuntime = Depends(get_runtime),
     request: Request = None,
 ):
     """
@@ -248,7 +175,7 @@ async def auto_login(
         user = db.query(database.User).filter_by(username=req.username).first()
         elapsed_from_last_login = database.database_service.update_login_time(db, user.uuid) if user else None
         if user is not None:
-            await service_hub.activity_maker.add_user_login_activity(user.uuid, elapsed_from_last_login)
+            await system_runtime.activity_maker.add_user_login_activity(user.uuid, elapsed_from_last_login)
         background_tasks.add_task(database.prefill_buffer, db, redis, user.uuid)
         return {"message": "登录成功", "user_id": req.username, "login_token": new_token, "message_token": message_token}
     raise HTTPException(status_code=401, detail="登录失败，自动登录验证未通过")
@@ -315,7 +242,7 @@ async def login(
     background_tasks: BackgroundTasks,
     db: Session = Depends(database.get_sql_db),
     redis: redis.Redis = Depends(database.get_redis_buffer),
-    service_hub: ServiceHub = Depends(get_service_hub),
+    system_runtime: SystemRuntime = Depends(get_runtime),
     request: Request = None,
 ):
     """
@@ -342,7 +269,7 @@ async def login(
         background_tasks.add_task(database.prefill_buffer, db, redis, user.uuid)
         elapsed_from_last_login = database.database_service.update_login_time(db, user.uuid) if user else None
         if user is not None:
-            await service_hub.activity_maker.add_user_login_activity(user.uuid, elapsed_from_last_login)
+            await system_runtime.activity_maker.add_user_login_activity(user.uuid, elapsed_from_last_login)
         return {"login_token": token, "message_token": message_token, "user_id": req.username}
     raise HTTPException(status_code=401, detail="用户名或密码错误")
 
@@ -387,7 +314,7 @@ async def get_history(
     request: HistoryRequest = Depends(),
     authorization: str | None = Header(default=None),
     db: Session = Depends(database.get_sql_db),
-    agent: LuoTianyiAgent = Depends(get_agent_service),
+    system_runtime: SystemRuntime = Depends(get_runtime),
 ):
     logger.info(f"Server received: Get history request from {request.username}")
     token = request.token
@@ -402,7 +329,9 @@ async def get_history(
         raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
     # Cap count to prevent excessive reads
     capped_count = min(max(1, request.count), 200)
-    return await agent.handle_history_request(user_uuid, capped_count, request.end_index)
+    return await system_runtime.conversation_service.handle_history_request(
+        user_uuid, capped_count, request.end_index
+    )
 
 
 

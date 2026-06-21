@@ -5,8 +5,8 @@ import sys
 cwd = os.getcwd()
 sys.path.insert(0, str(cwd))
 
-from src.plugins.citywalk.amap_client import AMapClient
-from src.plugins.citywalk.config import load_citywalk_config
+from src.world.citywalk.amap_client import AMapClient
+from src.world.citywalk.config import load_citywalk_config
 
 
 def main() -> int:

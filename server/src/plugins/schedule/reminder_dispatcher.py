@@ -13,18 +13,18 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from src.utils.logger import get_logger
 from src.utils.lunar_date import get_holiday_name
-from .event_models import (
+from src.plugins.schedule.event_models import (
     UnifiedEventType,
     get_event_type_cn,
     parse_trigger_conditions,
     check_trigger_condition,
     db_event_to_dict,
 )
-from .event_store import EventStore
-from .activity_context_provider import ActivityContextProvider
+from src.plugins.schedule.event_store import EventStore
+from src.plugins.schedule.activity_context_provider import ActivityContextProvider
 
 if TYPE_CHECKING:
-    from src.pipeline.global_chat_stream_manager import GlobalChatStreamManager
+    from src.system.chat_session.global_chat_stream_manager import GlobalChatStreamManager
 
 logger = get_logger(__name__)
 
@@ -143,7 +143,7 @@ class ReminderDispatcher:
                 content += f"，{description}"
             content += "。聊聊心情，或问用户是否感兴趣。"
 
-            from src.pipeline.topic_planner import ExtractedTopic
+            from src.agent.chat.topic_planner import ExtractedTopic
             import uuid
 
             topic = ExtractedTopic(

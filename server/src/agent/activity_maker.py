@@ -15,17 +15,17 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 from datetime import datetime, timedelta
 
-from ..utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
-from ..utils.logger import get_logger
-from ..pipeline.topic_planner import ExtractedTopic
-from ..interface.types import ChatResponse
-from .main_chat import OneSentenceChat
+from src.utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
+from src.utils.logger import get_logger
+from src.agent.chat.topic_planner import ExtractedTopic
+from src.system.user_interface.types import ChatResponse
+from src.agent.main_chat import OneSentenceChat
 
 if TYPE_CHECKING:
-    from ..pipeline.chat_stream import ChatStream
-    from ..interface.service_hub import ServiceHub
+    from src.system.chat_session.chat_stream import ChatStream
+    from src.system.system_runtime import SystemRuntime
     from sqlalchemy.orm import Session
-    from .luotianyi_agent import LuoTianyiAgent
+    from src.agent.luotianyi_agent import LuoTianyiAgent
 
 
 class ActivityType(str, Enum):
@@ -137,25 +137,25 @@ class ActivityMaker:
 
         self.user_states: Dict[str, _UserActivityState] = {}
         self._lock = asyncio.Lock()
-        self.service_hub: Optional["ServiceHub"] = None
+        self.system_runtime: Optional["SystemRuntime"] = None
 
     def set_agent(self, agent: "LuoTianyiAgent") -> None:
         self.agent = agent
         # self._check_other_activity_res()
 
-    def set_service_hub(self, service_hub: "ServiceHub") -> None:
-        self.service_hub = service_hub
+    def set_system_runtime(self, system_runtime: "SystemRuntime") -> None:
+        self.system_runtime = system_runtime
 
     async def dispatch_action(
         self,
         action: ActionActivity,
         user_uuid: str,
         chat_stream: "ChatStream",
-        service_hub: "ServiceHub",
+        system_runtime: "SystemRuntime",
     ) -> None:
         # 演唱会静默期间跳过主动发言（保留首次登录欢迎）
         if action.activity_type != ActivityType.FIRST_LOGIN:
-            if service_hub and service_hub.schedule_manager and service_hub.schedule_manager.is_silence_period():
+            if system_runtime and system_runtime.schedule_manager and system_runtime.schedule_manager.is_silence_period():
                 self.logger.info(f"Silence period active, skipping action {action.activity_type}")
                 return
         if action.activity_type == ActivityType.FIRST_LOGIN:
@@ -163,7 +163,7 @@ class ActivityMaker:
                 self.logger.warning("No first-login resources configured, skipping activity dispatch")
                 return
             await asyncio.sleep(1)  # 错开用户拉取历史消息的时机。等用户拉完历史消息后再派发登录活动，避免登录活动消息和历史消息混在一起导致展示异常。
-            uuid_list = await service_hub.agent.persist_topic_replies_for_pipeline(
+            uuid_list = await system_runtime.conversation_service.persist_agent_replies(
                 user_id=user_uuid, reply_items=[item["response_line"] for item in self.first_login_res]
             )
             for item, item_uuid in zip(self.first_login_res, uuid_list or []):
@@ -192,7 +192,7 @@ class ActivityMaker:
             # 1-4) 统一通过 schedule 模块检索：节日 / citywalk / new_song / 用户重要日期
             #      如果已在 schedule 中提醒过，则 login 时不再重复提示
             try:
-                store = self.service_hub.schedule_manager.event_store
+                store = self.system_runtime.schedule_manager.event_store
                 due = store.get_events_due_for_trigger()
                 for event_dict, trigger_key in due:
                     evt_type = event_dict.get("event_type", "")
@@ -313,7 +313,7 @@ class ActivityMaker:
             is_forced_from_incomplete=True,
         )
 
-    async def add_user(self, user_uuid: str, chat_stream: "ChatStream", service_hub: "ServiceHub") -> None:
+    async def add_user(self, user_uuid: str, chat_stream: "ChatStream", system_runtime: "SystemRuntime") -> None:
         async with self._lock:
             state = self.user_states.get(user_uuid)
             if state is None:
@@ -322,7 +322,7 @@ class ActivityMaker:
 
             # 主动发言控制器，当前版本不实装
             # if state.monitor_task is None or state.monitor_task.done():
-            #     state.monitor_task = asyncio.create_task(self._silence_monitor_loop(user_uuid, chat_stream, service_hub))
+            #     state.monitor_task = asyncio.create_task(self._silence_monitor_loop(user_uuid, chat_stream, system_runtime))
 
     async def remove_user(self, user_uuid: str) -> None:
         async with self._lock:
@@ -379,7 +379,7 @@ class ActivityMaker:
             )
             return
 
-    async def flush_login_activities(self, user_uuid: str, chat_stream: "ChatStream", service_hub: "ServiceHub") -> None:
+    async def flush_login_activities(self, user_uuid: str, chat_stream: "ChatStream", system_runtime: "SystemRuntime") -> None:
         """
         登录和对话创建之间间隔了一段时间，这时候才派发登录相关的活动。这样可以避免在用户刚登录但还没有建立WebSocket连接时就派发活动，导致活动无法正确发送给用户。
         """
@@ -390,7 +390,7 @@ class ActivityMaker:
         to_dispatch = list(state.pending_actions)
         state.pending_actions.clear()
         for action in to_dispatch:
-            await self.dispatch_action(action, user_uuid, chat_stream, service_hub)
+            await self.dispatch_action(action, user_uuid, chat_stream, system_runtime)
 
     async def on_user_message(self, user_uuid: str) -> None:
         state = self.user_states.get(user_uuid)

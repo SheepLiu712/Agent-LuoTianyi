@@ -11,13 +11,13 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
-from ..utils.llm.llm_module import LLMModule
-from ..utils.llm.prompt_manager import PromptManager
-from ..utils.logger import get_logger
-from ..database import Event
+from src.utils.llm.llm_module import LLMModule
+from src.utils.llm.prompt_manager import PromptManager
+from src.utils.logger import get_logger
+from src.system.database import Event
 
 if TYPE_CHECKING:
-    from ..pipeline.topic_planner import ExtractedTopic
+    from src.agent.chat.topic_planner import ExtractedTopic
     from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
@@ -224,7 +224,7 @@ def _save_user_date_event(
 
 
 def _make_topic(topic_content: str):
-    from ..pipeline.topic_planner import ExtractedTopic
+    from src.agent.chat.topic_planner import ExtractedTopic
 
     return ExtractedTopic(
         topic_id=str(uuid4()),

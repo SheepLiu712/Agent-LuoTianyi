@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session
 
 from src.utils.logger import get_logger
 from src.utils.lunar_date import get_holiday_name, get_lunar_mmdd, lunar_to_solar, FIXED_SOLAR_HOLIDAYS, LUNAR_HOLIDAYS_MMDD, is_lunar_new_year_eve
-from src.database.sql_database import Event, EventNotification
+from src.system.database.sql_database import Event, EventNotification
 from src.utils.llm.llm_api_interface import LLMAPIInterface
-from .event_models import (
+from src.plugins.schedule.event_models import (
     UnifiedEventType,
     get_default_trigger_conditions,
     parse_trigger_conditions,

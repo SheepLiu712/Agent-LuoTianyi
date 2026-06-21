@@ -8,12 +8,12 @@ current_dir = os.getcwd()
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-from src.database.sql_database import get_sql_session, User, InviteCode, Base
+from src.system.database.sql_database import get_sql_session, User, InviteCode, Base
 
 class TestRegistration(unittest.TestCase):
     def setUp(self):
         # Patch the database file for testing
-        import src.database.sql_database as db_module
+        import src.system.database.sql_database as db_module
         db_module.init_sql_db(db_folder=os.path.join(current_dir, "data","database"), db_file="test_registration.db")
         
         self.session = db_module.get_sql_session()

@@ -7,8 +7,8 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.append(cwd)
 
-from src.plugins.music.song_database import init_song_db, get_song_session, Song
-from src.plugins.music.knowledge_service import (
+from src.subconscious.music_knowledge.song_database import init_song_db, get_song_session, Song
+from src.subconscious.music_knowledge.knowledge_service import (
     get_song_introduction, 
     get_song_lyrics, 
     get_songs_by_uploader, 
@@ -22,7 +22,7 @@ class TestKnowledgeService(unittest.TestCase):
         # 使用内存数据库，隔离测试数据
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
-        from src.plugins.music.song_database import Base, Song
+        from src.subconscious.music_knowledge.song_database import Base, Song
 
         engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
         Base.metadata.create_all(bind=engine)

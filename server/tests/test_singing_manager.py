@@ -6,7 +6,7 @@ current_dir = os.getcwd()
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-from src.plugins.music.singing_manager import SingingManager
+from src.capabilities.singing import SingingManager
 
 singing_manager = SingingManager(config={})
 

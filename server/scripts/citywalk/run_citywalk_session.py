@@ -5,10 +5,10 @@ import sys
 cwd = os.getcwd()
 sys.path.insert(0, str(cwd))
 
-from src.plugins.citywalk.amap_client import AMapClient
-from src.plugins.citywalk.config import load_citywalk_config
-from src.plugins.citywalk.report_generator import CitywalkReportGenerator
-from src.plugins.citywalk.session_runner import CitywalkSessionRunner
+from src.world.citywalk.amap_client import AMapClient
+from src.world.citywalk.config import load_citywalk_config
+from src.world.citywalk.report_generator import CitywalkReportGenerator
+from src.world.citywalk.session_runner import CitywalkSessionRunner
 
 
 def main() -> int:

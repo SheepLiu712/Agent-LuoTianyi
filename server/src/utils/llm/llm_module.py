@@ -1,5 +1,5 @@
-from .llm_api_interface import LLMAPIInterface, LLMAPIFactory
-from .prompt_manager import PromptTemplate, PromptManager
+from src.utils.llm.llm_api_interface import LLMAPIInterface, LLMAPIFactory
+from src.utils.llm.prompt_manager import PromptTemplate, PromptManager
 
 class LLMModule:
     def __init__(self, module_config:dict, prompt_manager: PromptManager) -> None:

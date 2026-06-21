@@ -2,8 +2,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from src.plugins.citywalk.report_generator import CitywalkReportGenerator
-from src.plugins.citywalk.types import CitywalkEvent, CitywalkSessionResult, POI, RouteResult
+from src.world.citywalk.report_generator import CitywalkReportGenerator
+from src.world.citywalk.types import CitywalkEvent, CitywalkSessionResult, POI, RouteResult
 
 
 def _build_result() -> CitywalkSessionResult:

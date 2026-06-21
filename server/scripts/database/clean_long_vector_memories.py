@@ -9,7 +9,7 @@ os.chdir(REPO_ROOT)
 if str(REPO_ROOT) not in sys.path:
     sys.path.append(str(REPO_ROOT))
 
-from src.database.vector_store import get_vector_store, init_vector_store
+from src.system.database.vector_store import get_vector_store, init_vector_store
 from src.utils.helpers import load_config
 
 

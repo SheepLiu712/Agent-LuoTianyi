@@ -1,5 +1,5 @@
-from src.plugins.citywalk.session_runner import CitywalkSessionRunner
-from src.plugins.citywalk.types import POI, POIDetail, RouteResult, POIFeedBack
+from src.world.citywalk.session_runner import CitywalkSessionRunner
+from src.world.citywalk.types import POI, POIDetail, RouteResult, POIFeedBack
 
 
 class FakeClient:

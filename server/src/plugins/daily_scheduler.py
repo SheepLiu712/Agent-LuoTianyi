@@ -9,15 +9,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 import asyncio
-from ..utils.logger import get_logger
-from .music.daily_new_song_fetcher import sync_daily_new_songs
-from .schedule.cookie_manager import check_and_refresh_cookie
+from src.utils.logger import get_logger
+from src.world.get_new_songs.daily_new_song_fetcher import sync_daily_new_songs
+from src.plugins.schedule.cookie_manager import check_and_refresh_cookie
 from typing import TYPE_CHECKING, List
 
 if TYPE_CHECKING:
-    from .citywalk.runtime_scheduler import CitywalkRuntimeService
-    from .music.auto_song_learner import AutoSongLearner
-    from .schedule.schedule_manager import ScheduleManager
+    from src.world.citywalk.runtime_scheduler import CitywalkRuntimeService
+    from src.world.get_new_songs.auto_song_learner import AutoSongLearner
+    from src.plugins.schedule.schedule_manager import ScheduleManager
 
 
 

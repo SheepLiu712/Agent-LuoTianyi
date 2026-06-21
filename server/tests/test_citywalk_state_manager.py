@@ -1,4 +1,4 @@
-from src.plugins.citywalk.state_manager import CitywalkStateManager
+from src.world.citywalk.state_manager import CitywalkStateManager
 
 
 def test_state_move_and_activity():

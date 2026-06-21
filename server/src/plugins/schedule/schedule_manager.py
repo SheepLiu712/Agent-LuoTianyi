@@ -10,15 +10,15 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from src.utils.logger import get_logger
-from .event_models import UnifiedEventType
-from .event_store import EventStore
-from .official_feed_fetcher import OfficialFeedFetcher
-from .event_parser import EventParser
-from .reminder_dispatcher import ReminderDispatcher
-from .activity_context_provider import ActivityContextProvider
+from src.plugins.schedule.event_models import UnifiedEventType
+from src.plugins.schedule.event_store import EventStore
+from src.plugins.schedule.official_feed_fetcher import OfficialFeedFetcher
+from src.plugins.schedule.event_parser import EventParser
+from src.plugins.schedule.reminder_dispatcher import ReminderDispatcher
+from src.plugins.schedule.activity_context_provider import ActivityContextProvider
 
 if TYPE_CHECKING:
-    from src.pipeline.global_chat_stream_manager import GlobalChatStreamManager
+    from src.system.chat_session.global_chat_stream_manager import GlobalChatStreamManager
     from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)

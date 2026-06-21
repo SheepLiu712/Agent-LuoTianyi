@@ -4,7 +4,7 @@ import sys
 cwd = os.getcwd()
 sys.path.insert(0, str(cwd))
 
-from src.plugins.music.singing_manager import SingingManager
+from src.capabilities.singing import SingingManager
 
 
 def test_get_songs_can_sing():

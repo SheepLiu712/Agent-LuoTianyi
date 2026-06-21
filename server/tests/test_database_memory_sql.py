@@ -10,12 +10,12 @@ current_dir = os.getcwd()
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-from src.database.memory_storage import MemoryStorage
-from src.database.redis_buffer import init_redis_buffer, get_redis_buffer
-from src.database.sql_database import init_sql_db, get_sql_session, Base, User, Conversation
-from src.database.database_service import add_conversations
-from src.database.sql_writer import run_sql_write
-from src.types import ConversationItem
+from src.system.database.memory_storage import MemoryStorage
+from src.system.database.redis_buffer import init_redis_buffer, get_redis_buffer
+from src.system.database.sql_database import init_sql_db, get_sql_session, Base, User, Conversation
+from src.system.database.database_service import add_conversations
+from src.system.database.sql_writer import run_sql_write
+from src.domain import ConversationItem
 
 
 class TestMemoryStorage(unittest.TestCase):

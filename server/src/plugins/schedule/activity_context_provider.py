@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional
 
 from src.utils.logger import get_logger
 from src.utils.lunar_date import get_holiday_name
-from .event_models import UnifiedEventType, get_event_type_cn, db_event_to_dict
-from .event_store import EventStore
+from src.plugins.schedule.event_models import UnifiedEventType, get_event_type_cn, db_event_to_dict
+from src.plugins.schedule.event_store import EventStore
 
 logger = get_logger(__name__)
 

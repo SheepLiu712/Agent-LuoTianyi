@@ -1,6 +1,6 @@
-from src.plugins.citywalk.environment_engine import CitywalkEnvironmentEngine
-from src.plugins.citywalk.errors import LLMEnvironmentError
-from src.plugins.citywalk.types import POI, POIDetail
+from src.world.citywalk.environment_engine import CitywalkEnvironmentEngine
+from src.world.citywalk.errors import LLMEnvironmentError
+from src.world.citywalk.types import POI, POIDetail
 
 
 def _build_cfg():

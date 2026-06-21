@@ -11,9 +11,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from ..database.sql_database import AffectionLog, User
-from ..utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
-from ..utils.logger import get_logger
+from src.system.database.sql_database import AffectionLog, User
+from src.utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
+from src.utils.logger import get_logger
 
 # 好感度等级定义: (最低分数, 中文名称, 英文名称)
 AFFECTION_LEVELS: List[Tuple[int, str, str]] = [

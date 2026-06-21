@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from src.plugins.citywalk.memory_ingestor import CitywalkMemoryIngestor
-from src.plugins.citywalk.types import CitywalkEvent, CitywalkSessionResult, POI, RouteResult
+from src.world.citywalk.memory_ingestor import CitywalkMemoryIngestor
+from src.world.citywalk.types import CitywalkEvent, CitywalkSessionResult, POI, RouteResult
 
 
 class FakeVectorStore:

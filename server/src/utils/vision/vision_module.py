@@ -1,7 +1,7 @@
 from typing import Dict, Any
-from ..llm.prompt_manager import PromptManager
-from ..logger import get_logger
-from .vlm_module import VLMModule
+from src.utils.llm.prompt_manager import PromptManager
+from src.utils.logger import get_logger
+from src.utils.vision.vlm_module import VLMModule
 
 class VisionModule:
     def __init__(self, config: Dict, prompt_manager: PromptManager) -> None:

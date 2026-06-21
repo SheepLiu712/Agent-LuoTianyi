@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from src.plugins.citywalk.decision_engine import CitywalkDecisionEngine
-from src.plugins.citywalk.errors import LLMDecisionError
-from src.plugins.citywalk.types import CitywalkState, POI
+from src.world.citywalk.decision_engine import CitywalkDecisionEngine
+from src.world.citywalk.errors import LLMDecisionError
+from src.world.citywalk.types import CitywalkState, POI
 
 
 class FakeCompletions:

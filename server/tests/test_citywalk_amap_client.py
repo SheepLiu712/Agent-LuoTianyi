@@ -3,9 +3,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from src.plugins.citywalk.amap_client import AMapClient
-from src.plugins.citywalk.config import load_citywalk_config
-from src.plugins.citywalk.errors import AMapRequestError
+from src.world.citywalk.amap_client import AMapClient
+from src.world.citywalk.config import load_citywalk_config
+from src.world.citywalk.errors import AMapRequestError
 
 
 def _build_client():

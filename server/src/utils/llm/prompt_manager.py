@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from jinja2 import Template, Environment, FileSystemLoader
 
-from ..logger import get_logger
+from src.utils.logger import get_logger
 
 
 class PromptTemplate:

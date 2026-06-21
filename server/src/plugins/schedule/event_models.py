@@ -12,7 +12,7 @@ from src.utils.logger import get_logger
 from src.utils.lunar_date import get_lunar_mmdd, get_holiday_name
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from src.database.sql_database import Event
+    from src.system.database.sql_database import Event
 
 logger = get_logger(__name__)
 

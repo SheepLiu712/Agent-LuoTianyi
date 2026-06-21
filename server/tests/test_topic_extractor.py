@@ -17,7 +17,7 @@ import pytest
 
 from src.agent.topic_extractor import TopicExtractor
 from src.utils.llm.prompt_manager import PromptManager
-from src.pipeline.modules.unread_store import UnreadMessage, UnreadMessageSnapshot
+from src.agent.chat.unread_store import UnreadMessage, UnreadMessageSnapshot
 from src.utils.helpers import load_config
 
 

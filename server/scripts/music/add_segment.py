@@ -7,7 +7,7 @@ cwd = os.getcwd()
 sys.path.insert(0, str(cwd))
 
 try:
-    from src.types.music_type import SongSegment, OneLyricLine
+    from src.domain.music_type import SongSegment, OneLyricLine
 except ImportError:
     # Fallback/Mock for standalone testing if src not found
     from dataclasses import dataclass
@@ -151,7 +151,7 @@ if __name__ == "__main__":
         # Convert to dict for JSON serialization
         # SongSegment is likely not a Pydantic model but a dataclass or normal class based on previous check
         # Assuming dataclass from my mock or imports.
-        # But if it is a class from src.types, it might not have asdict.
+        # But if it is a class from src.domain, it might not have asdict.
         # Let's check if it has __dict__ or is a dataclass.
         # From previous read, it WAS a dataclass in `music_type.py` wrapper but `SongSegment` itself didn't have @dataclass decorator?
         # Wait, looked at `music_type.py`:

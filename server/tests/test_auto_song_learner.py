@@ -8,7 +8,7 @@ from pathlib import Path
 cwd = os.getcwd()
 sys.path.insert(0, str(cwd))
 
-from src.plugins.music import auto_song_learner as asl
+from src.world.get_new_songs import auto_song_learner as asl
 
 
 class DummyLogger:
