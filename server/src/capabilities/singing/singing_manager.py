@@ -3,9 +3,7 @@ import pathlib
 import os
 import json
 import io
-import base64
 import traceback
-import re
 from src.domain.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntry
 from src.domain.tool_type import  MyTool, ToolFunction, ToolOneParameter
 from typing import List, Tuple, Dict, Any, Optional
@@ -15,7 +13,7 @@ from src.utils.helpers import get_unified_song_name
 
 
 class SingingManager:
-    def __init__(self, config):
+    def __init__(self, config: Dict[str, Any]):
         self.logger = get_logger(__name__)
         self.config = config
         self.resource_path = config.get("resource_path", "res/music")
@@ -27,7 +25,6 @@ class SingingManager:
         )
         self.get_music_data()
         self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
-        self.init_llm_tools()
 
     @staticmethod
     def get_unified_song_name(song_name: str) -> str:
@@ -263,45 +260,3 @@ class SingingManager:
             self.logger.error(f"Failed to process audio for {song_name}: {e}\n{traceback.format_exc()}")
             return None, None
 
-    def init_llm_tools(self) -> None:
-        get_songs_can_sing = MyTool(
-            name="get_songs_can_sing",
-            description="获取现在的洛天依可以演唱的几首歌曲名称和描述。",
-            tool_func=self.get_songs_can_sing_llm,
-            tool_interface= ToolFunction(
-                name="get_songs_can_sing",
-                description="获取现在的洛天依可以演唱的几首歌曲名称和描述。",
-                parameters=[
-                    ToolOneParameter(
-                        name="max_song_num",
-                        type="int",
-                        description="最多返回的歌曲数量",
-                    ),
-                ],
-            ),
-        )
-
-        can_i_sing_tool = MyTool(
-            name="can_i_sing_song",
-            description="检查洛天依是否可以演唱指定的歌曲，如果可以，返回能够唱的唱段列表，否则返回空列表。",
-            tool_func=self.can_i_sing_song_llm,
-            tool_interface=ToolFunction(
-                name="can_i_sing_song",
-                description="检查洛天依是否可以演唱指定的歌曲，如果可以，返回能够唱的唱段列表，否则返回空列表。",
-                parameters=[
-                    ToolOneParameter(
-                        name="song_name",
-                        type="string",
-                        description="歌曲名称",
-                    ),
-                ],
-            ),
-        )
-        self.tools[get_songs_can_sing.name] = get_songs_can_sing
-        self.tools[can_i_sing_tool.name] = can_i_sing_tool
-
-    def get_tool_names(self) -> List[str]:
-        return list(self.tools.keys())
-
-    def get_tools(self) -> Dict[str, MyTool]:
-        return self.tools

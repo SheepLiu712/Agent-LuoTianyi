@@ -9,7 +9,7 @@ from src.utils.logger import get_logger
 from src.utils.llm.prompt_manager import PromptManager
 from src.utils.llm.llm_module import LLMModule
 from typing import Tuple, Dict, List, Any
-from src.system.database.database_service import VectorStore
+from src.system.database.vector_store import VectorStore
 import asyncio
 import time
 

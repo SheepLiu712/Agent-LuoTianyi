@@ -245,7 +245,8 @@ class EventStore:
 
             # 3. 调用 LLM
             try:
-                result = await self.llm_client.generate_response(prompt, use_json=True)
+                resp = await self.llm_client.generate_response(prompt, use_json=True)
+                result = (resp or {}).get("content", "") if isinstance(resp, dict) else str(resp)
                 if not result:
                     self.logger.warning("LLM dedup returned empty response, falling back to exact match")
                     return None

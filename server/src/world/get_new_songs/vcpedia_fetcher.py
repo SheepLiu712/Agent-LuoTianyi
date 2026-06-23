@@ -89,7 +89,7 @@ class VCPediaFetcher:
                 "请直接输出摘要正文。"
             )
             result = asyncio.run(self.llm_client.generate_response(prompt, use_json=False))
-            result = (result or "").strip()
+            result = ((result or {}).get("content", "") if isinstance(result, dict) else str(result)).strip()
             return result if result else fallback
         except Exception as e:
             self.logger.error(f"LLM summarize failed: {e}")

@@ -1,8 +1,13 @@
+# ——————————————————————————————————————————————————————
+# 内存存储实现，提供 Redis-like API，支持 per-user 锁和过期机制。
+# ——————————————————————————————————————————————————————
+
 import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from src.utils.logger import get_logger
 
 
 class WatchError(Exception):
@@ -11,7 +16,7 @@ class WatchError(Exception):
 
 @dataclass
 class _Entry:
-    value: str
+    value: Any # The stored value, can be of any type for better flexibility.
     expire_at: Optional[float]
 
 
@@ -21,6 +26,7 @@ class MemoryStorage:
     Key format keeps compatibility with existing code, e.g.:
     - user_context:{user_id}
     - user_knowledge:{user_id}
+    - user_id:{user_name} (which is special, but useful)
     """
 
     def __init__(self):
@@ -29,13 +35,13 @@ class MemoryStorage:
         self._locks_guard = threading.Lock()
         self._global_lock = threading.RLock()
 
-    def setex(self, key: str, seconds: int, value: str) -> None:
+    def setex(self, key: str, seconds: int, value: Any) -> None:
         lock = self._resolve_lock(key)
         with lock:
             expire_at = time.time() + max(0, int(seconds)) if seconds is not None else None
-            self._store[key] = _Entry(value=str(value), expire_at=expire_at)
+            self._store[key] = _Entry(value=value, expire_at=expire_at)
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> Optional[Any]:
         lock = self._resolve_lock(key)
         with lock:
             entry = self._store.get(key)
@@ -104,7 +110,7 @@ class _MemoryPipeline:
     def __init__(self, storage: MemoryStorage):
         self._storage = storage
         self._locked_users: List[Tuple[str, threading.RLock]] = []
-        self._commands: List[Tuple[str, int, str]] = []
+        self._commands: List[Tuple[str, int, Any]] = []
         self._closed = False
 
     def __enter__(self):
@@ -135,10 +141,10 @@ class _MemoryPipeline:
         # No-op for compatibility.
         return
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> Optional[Any]:
         return self._storage.get(key)
 
-    def setex(self, key: str, seconds: int, value: str):
+    def setex(self, key: str, seconds: int, value: Any):
         self._commands.append((key, seconds, value))
 
     def execute(self) -> List[Any]:
@@ -151,3 +157,24 @@ class _MemoryPipeline:
         finally:
             self._commands.clear()
             self.unwatch()
+
+
+
+
+
+r: MemoryStorage | None = None
+logger = get_logger(__name__)
+
+
+def init_redis_buffer(redis_config: Dict[str, Any]):
+    global r
+    _ = redis_config
+    r = MemoryStorage()
+    logger.info("Memory buffer initialized (Redis compatibility mode)")
+
+
+def get_redis_buffer() -> MemoryStorage:
+    global r
+    if r is None:
+        raise Exception("Memory buffer not initialized")
+    return r

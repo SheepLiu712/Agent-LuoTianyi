@@ -1,8 +1,8 @@
 """
-知识图谱数据结构
+知识图谱数据结构，暂时没有使用
 """
 
-from typing import Dict, List, Optional, Any, Tuple, Set, Union
+from typing import Dict, List, Optional, Any, Tuple, Union
 import json
 import networkx as nx
 from src.domain.memory_type import Entity, Relation, GraphEntityType, GraphRelationType

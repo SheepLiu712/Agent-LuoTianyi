@@ -24,7 +24,7 @@ from src.plugins.schedule.event_store import EventStore
 from src.plugins.schedule.activity_context_provider import ActivityContextProvider
 
 if TYPE_CHECKING:
-    from src.system.chat_session.global_chat_stream_manager import GlobalChatStreamManager
+    from src.chat_session.global_chat_stream_manager import GlobalChatStreamManager
 
 logger = get_logger(__name__)
 

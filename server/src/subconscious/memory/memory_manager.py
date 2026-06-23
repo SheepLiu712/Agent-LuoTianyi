@@ -15,7 +15,8 @@ from src.subconscious.memory.memory_search import MemorySearcher
 from src.subconscious.memory.memory_write import MemoryWriter
 from src.subconscious.memory.user_profile_updater import UserProfileUpdater
 from src.utils.llm.prompt_manager import PromptManager
-from src.system.database import VectorStore, KnowledgeGraph
+from src.system.database.knowledge_graph import KnowledgeGraph
+from src.system.database.vector_store import VectorStore
 from src.system.database.database_service import get_user_nickname, get_user_description, update_user_description
 
 class MemoryManager:

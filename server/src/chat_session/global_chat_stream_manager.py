@@ -1,13 +1,13 @@
 import asyncio
 import time
-from typing import Dict, Optional, TYPE_CHECKING
+from typing import Dict, Optional, TYPE_CHECKING, Any
 
 from src.system.user_interface.websocket_service import WebSocketConnection
-from src.system.chat_session.chat_stream import ChatStream
+from src.chat_session.chat_stream import ChatStream
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.agent.activity_maker import ActivityMaker
+    from src.chat_session.proactive_topic_maker import ProactiveTopicMaker
     from src.system.system_runtime import SystemRuntime
 
 
@@ -17,11 +17,14 @@ class GlobalChatStreamManager:
     负责维护用户与聊天流之间的映射关系，以及提供全局访问接口。
     """
 
-    def __init__(self):
+    def __init__(self, config: Dict[str, Any]):
         self.user_streams: Dict[str, ChatStream] = {}
         self.cleanup_task: asyncio.Task | None = None
-        self.activity_maker: "ActivityMaker" | None = None  # 在 ActivityMaker 初始化后会被注册进来，方便 GCSM 调用它的接口
+        self.activity_maker: "ProactiveTopicMaker" | None = None  # 在 ProactiveTopicMaker 初始化后会被注册进来，方便 GCSM 调用它的接口
         self.logger = get_logger("GlobalChatStreamManager")
+
+        self.default_expiration_seconds = config.get("default_expiration_seconds", 3600)
+        self.heartbeat_timeout_seconds = config.get("heartbeat_timeout_seconds", 60)
 
     def get_or_register_chat_stream(
         self,
@@ -57,8 +60,8 @@ class GlobalChatStreamManager:
     def get_stream_by_user_uuid(self, user_uuid: str) -> ChatStream | None:
         return self.user_streams.get(user_uuid)
     
-    def register_activity_maker(self, activity_maker: "ActivityMaker"):
-        """将 ActivityMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口"""
+    def register_activity_maker(self, activity_maker: "ProactiveTopicMaker"):
+        """将 ProactiveTopicMaker 实例注册到全局聊天流管理器，方便它在需要时调用聊天流相关接口"""
         self.activity_maker = activity_maker
 
     def ws_lost_connection(self, ws_connection: WebSocketConnection):
@@ -82,7 +85,7 @@ class GlobalChatStreamManager:
             for user_uuid in list(self.user_streams.keys()):
                 stream = self.user_streams[user_uuid]
                 ws_connection = stream.ws_connection
-                if ws_connection and ws_connection.last_ping_time and (current_time_ms - ws_connection.last_ping_time > 60 * 1000):
+                if ws_connection and ws_connection.last_ping_time and (current_time_ms - ws_connection.last_ping_time > self.heartbeat_timeout_seconds * 1000):
                     await ws_connection.websocket.close()
                     self.ws_lost_connection(ws_connection)
 
@@ -101,7 +104,9 @@ class GlobalChatStreamManager:
 
             await asyncio.sleep(60)
 
-    def start_cleanup_task(self, expiration_seconds: int = 3600):
+    def start_cleanup_task(self, expiration_seconds: Optional[int] = None):
+        if expiration_seconds is None:
+            expiration_seconds = self.default_expiration_seconds
         self.cleanup_task = asyncio.create_task(self.cleanup_expired_streams(expiration_seconds))
     
     async def stop_cleanup_task(self):

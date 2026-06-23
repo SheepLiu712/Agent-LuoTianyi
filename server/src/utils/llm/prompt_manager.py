@@ -188,7 +188,7 @@ class PromptManager:
         return {
             "name": template.name,
             "template": template.template_str,
-            "variables": self._extract_template_variables(template.template_str),
+            "variables": template.var_list
         }
 
     def _extract_template_variables(self, template_str: str) -> List[str]:

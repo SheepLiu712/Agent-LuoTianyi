@@ -12,12 +12,14 @@ from src.subconscious.memory.memory_write import MemoryWriter
 from src.subconscious.memory.song_knowledge import SongKnowledgeMemory
 from src.subconscious.memory.update_service import MemoryUpdateService
 from src.subconscious.memory.user_profile_updater import UserProfileUpdater
+from src.subconscious.memory.vector_index import MemoryVectorIndex
 
 __all__ = [
     "GraphRetriever",
     "MemoryManager",
     "MemorySearcher",
     "MemoryUpdateService",
+    "MemoryVectorIndex",
     "MemoryWriter",
     "SongKnowledgeMemory",
     "SubconsciousMemory",

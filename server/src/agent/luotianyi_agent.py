@@ -16,7 +16,7 @@ from uuid import uuid4
 from src.utils.llm.prompt_manager import PromptManager
 from src.agent.date_processor import DateDetector
 from src.agent.main_chat import MainChat, OneResponseLine
-from src.agent.activity_maker import ActivityType
+from src.chat_session.proactive_topic_maker import ActivityType
 from src.agent.topic_extractor import TopicExtractor
 from src.system import ConversationManager
 from src.utils.logger import get_logger
@@ -28,7 +28,6 @@ from src.agent.response_realizer import ResponseRealizer, UserExpressionContext
 from src.domain import CharacterProfile
 
 from src.utils.vision.vision_module import VisionModule
-from src.system.database.sql_database import User
 
 from src.system.database.vector_store import BaseDocument
 if TYPE_CHECKING:
@@ -62,6 +61,7 @@ class _AgentRuntimeHub:
     redis_client: "MemoryStorage"
     vector_store: "VectorStore"
     sql_session_factory: Callable[[], Session]
+    database: Any
     music_manager: "MusicManager"
     capabilities: Any | None = None
 
@@ -98,7 +98,7 @@ class LuoTianyiAgent:
 
         # 各种模块初始化
         self.conversation_manager = ConversationManager(
-            self.config.get("conversation_manager", {}), self.prompt_manager
+            self.config.get("conversation_manager", {}), self.prompt_manager, db_manager=runtime_hub.database
         )  # 对话管理器
         self.subconscious_memory = SubconsciousMemory(
             self.config["memory_manager"],
@@ -123,21 +123,12 @@ class LuoTianyiAgent:
 
     def save_preferences(self, user_uuid: str, preferences: dict) -> bool:
         """保存用户偏好设置到数据库。"""
-        db = self._runtime_hub.open_sql_session()
-        try:
-            user = db.query(User).filter(User.uuid == user_uuid).first()
-            if user:
-                user.preferences = json.dumps(preferences, ensure_ascii=False)
-                db.commit()
-                self.logger.info(f"Saved preferences for user {user_uuid}: {preferences}")
-                return True
+        saved = self._runtime_hub.database.save_user_preferences(user_uuid, preferences)
+        if saved:
+            self.logger.info(f"Saved preferences for user {user_uuid}: {preferences}")
+        else:
             self.logger.warning(f"User {user_uuid} not found")
-            return False
-        except Exception as e:
-            self.logger.error(f"Failed to save preferences for {user_uuid}: {e}")
-            return False
-        finally:
-            db.close()
+        return saved
 
     async def extract_topics_for_pipeline(
         self,
@@ -155,18 +146,15 @@ class LuoTianyiAgent:
             return None, []
 
         if conversation_history is None:
-            db = self._runtime_hub.open_sql_session()
             try:
                 conversation_history = await self.conversation_manager.get_context(
-                    db=db,
-                    redis=self._runtime_hub.redis_client,
+                    db=None,
+                    redis=None,
                     user_id=user_id,
                 )
             except Exception as e:
                 self.logger.warning(f"Failed to get conversation_history for topic extraction: {e}")
                 conversation_history = ""
-            finally:
-                db.close()
 
         topic, remaining = await self.topic_extractor.extract_topics(
             unread_snapshot=unread_snapshot,
@@ -176,7 +164,7 @@ class LuoTianyiAgent:
         return topic, remaining
     
     async def generate_topic_from_activity(self, activity_type: ActivityType, user_uuid: str, llm_client: "LLMAPIInterface", **kwargs) -> "ExtractedTopic":
-        """根据用户活动生成话题，供 ActivityMaker 调用"""
+        """根据用户活动生成话题，供 ProactiveTopicMaker 调用"""
         from src.agent.chat.topic_planner import ExtractedTopic
         from src.agent.chat.unread_store import UnreadMessage
         prompt = self.prompt_manager.get_template(activity_type.value)
@@ -186,6 +174,7 @@ class LuoTianyiAgent:
         prompt = prompt.render(**kwargs)
 
         content = await llm_client.generate_response(prompt, use_json=False)
+        content = (content or {}).get("content", "") if isinstance(content, dict) else str(content)
         return ExtractedTopic(
             topic_id=str(uuid4()),
             source_messages=[],
@@ -325,19 +314,12 @@ class LuoTianyiAgent:
         return self.build_sing_plan_for_topic(sing_attempts)
 
     def _load_user_expression_context(self, user_id: str) -> UserExpressionContext:
-        db = self._runtime_hub.open_sql_session()
-        try:
-            user = db.query(User).filter(User.uuid == user_id).first()
-            user_nickname = user.nickname if user and user.nickname else "你"
-            user_description = user.description if user and user.description else ""
-            pref_context = self._build_preference_context(user.preferences if user else None)
-            return UserExpressionContext(
-                nickname=user_nickname,
-                description=user_description,
-                preference_context=pref_context,
-            )
-        finally:
-            db.close()
+        data = self._runtime_hub.database.get_user_expression_context_data(user_id)
+        return UserExpressionContext(
+            nickname=data["nickname"],
+            description=data["description"],
+            preference_context=self._build_preference_context(data["preferences"]),
+        )
 
     def _build_preference_context(self, preferences: Any) -> str:
         if not preferences:
@@ -452,42 +434,15 @@ class LuoTianyiAgent:
         conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
     ) -> List[OneResponseLine]:
         """供 TopicReplier 调用：按话题生成分段回复。"""
-        db = self._runtime_hub.open_sql_session()
-        redis_client = self._runtime_hub.redis_client
-        try:
-            if conversation_history is None:
-                conversation_history = await self.conversation_manager.get_context(db, redis_client, user_id)
-            user = db.query(User).filter(User.uuid == user_id).first()
-            user_nickname = user.nickname if user and user.nickname else "你"
-            user_description = user.description if user and user.description else ""
-            # 注入表达风格偏好（独立段，不混入 user_description）
-            pref_context = ""
-            if user and user.preferences:
-                try:
-                    prefs = json.loads(user.preferences) if isinstance(user.preferences, str) else user.preferences
-                    pref_parts = []
-                    if prefs.get("relationship"):
-                        pref_parts.append(f"用户希望你是他的：{prefs['relationship']}")
-                    if prefs.get("speaking_style"):
-                        pref_parts.append(f"用户希望你的表达风格偏向：{prefs['speaking_style']}")
-                    if prefs.get("personality_traits"):
-                        traits = "、".join(prefs["personality_traits"])
-                        pref_parts.append(f"用户希望你的性格特点：{traits}")
-                    if prefs.get("custom_context"):
-                        prefs['custom_context'] = prefs['custom_context'].replace("我", "用户")
-                        pref_parts.append(f"用户补充的上下文：{prefs['custom_context']}")
-                    if pref_parts:
-                        pref_context = "用户偏好设置：" + "；".join(pref_parts)
-                except Exception as e:
-                    self.logger.warning(f"Failed to parse preferences: {e}")
-        finally:
-            db.close()
+        if conversation_history is None:
+            conversation_history = await self.conversation_manager.get_context(None, None, user_id)
+        user_context = self._load_user_expression_context(user_id)
 
         return await self.main_chat.generate_response(
             reply_topic=topic_content,
-            user_nickname=user_nickname,
-            user_description=user_description,
-            preference_context=pref_context,
+            user_nickname=user_context.nickname,
+            user_description=user_context.description,
+            preference_context=user_context.preference_context,
             conversation_history=conversation_history,
             fact_hits=fact_hits or [],
             memory_hits=memory_hits or [],

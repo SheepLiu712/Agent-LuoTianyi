@@ -468,7 +468,7 @@ class AutoSongLearner:
     # -- notification --------------------------------------------------------
 
     def _notify_new_songs(self, learned: List[str]) -> None:
-        """Write learned songs so ActivityMaker can announce them on next login."""
+        """Write learned songs so ProactiveTopicMaker can announce them on next login."""
         notify_dir = Path("data/plugin_scheduler")
         notify_dir.mkdir(parents=True, exist_ok=True)
         notify_path = notify_dir / "newly_learned_songs.json"

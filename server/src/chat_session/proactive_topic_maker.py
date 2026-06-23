@@ -13,7 +13,6 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
-from datetime import datetime, timedelta
 
 from src.utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
 from src.utils.logger import get_logger
@@ -22,9 +21,8 @@ from src.system.user_interface.types import ChatResponse
 from src.agent.main_chat import OneSentenceChat
 
 if TYPE_CHECKING:
-    from src.system.chat_session.chat_stream import ChatStream
+    from src.chat_session.chat_stream import ChatStream
     from src.system.system_runtime import SystemRuntime
-    from sqlalchemy.orm import Session
     from src.agent.luotianyi_agent import LuoTianyiAgent
 
 
@@ -39,13 +37,6 @@ class ActivityType(str, Enum):
 class ActionActivity:
     activity_type: ActivityType
     payload: Dict[str, Any]
-
-
-def _is_chinese_holiday(dt: datetime):
-    """已废弃：节日检索已统一走 EventStore.get_events_due_for_trigger()。保留此函数供参考。"""
-    from src.utils.lunar_date import get_holiday_name as _get_holiday_name
-    return _get_holiday_name(dt.year, dt.month, dt.day)
-
 
 @dataclass
 class ChatIntenseMeter:
@@ -108,11 +99,11 @@ class _UserActivityState:
     monitor_task: Optional[asyncio.Task] = None
 
 
-class ActivityMaker:
+class ProactiveTopicMaker:
     """根据用户行为创建 Agent 主动发言动作，并派发到 chat_stream。"""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
-        self.logger = get_logger("ActivityMaker")
+        self.logger = get_logger("ProactiveTopicMaker")
         self.config = config or {}
 
         self.return_user_threshold_seconds = float(self.config.get("return_user_threshold_seconds", 5 * 24 * 3600))
@@ -141,7 +132,6 @@ class ActivityMaker:
 
     def set_agent(self, agent: "LuoTianyiAgent") -> None:
         self.agent = agent
-        # self._check_other_activity_res()
 
     def set_system_runtime(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
@@ -452,24 +442,6 @@ class ActivityMaker:
             self.logger.warning(f"Failed to load audio: {audio_path}: {e}")
             return ""
 
-    def _check_other_activity_res(self) -> None:
-        """通过agent的prompt manager获得其他活动类型的资源文本模板。"""
-        prompt_manager = self.agent.prompt_manager if self.agent else None
-        if prompt_manager is None:
-            self.logger.warning("Agent or its prompt manager not available, cannot load other activity resources")
-            return
-        self.activity_llm_prompts: Dict[ActivityType, str] = {}
-        activity_res: Dict[str, Any] = self.config.get("activity_res", {})
-        for activity_type in ActivityType:
-            prompt_name = activity_res.get(activity_type.value, {}).get("prompt")
-            if not prompt_name:  # 这个活动类型没有配置prompt资源，不用调用llm
-                continue
-            if prompt_manager.get_template(prompt_name) is None:
-                self.logger.warning(
-                    f"Prompt '{prompt_name}' for activity type '{activity_type}' not found in prompt manager, skipping"
-                )
-                continue
-
     async def _build_topic(self, action: ActionActivity, user_uuid: str) -> ExtractedTopic:
         fallback_topic = ExtractedTopic(
             topic_id=str(uuid4()),
@@ -508,26 +480,10 @@ class ActivityMaker:
             notify_path.unlink(missing_ok=True)
             return f"，用户不在的时候洛天依学会了{song_names}！"
         except Exception as e:
-            get_logger("ActivityMaker").warning(f"Failed to read learned songs notification: {e}")
+            get_logger("ProactiveTopicMaker").warning(f"Failed to read learned songs notification: {e}")
             try:
                 notify_path.unlink(missing_ok=True)
             except Exception:
                 pass
             return ""
 
-
-_activity_maker = None
-
-
-def init_activity_maker(config) -> ActivityMaker:
-    global _activity_maker
-    if _activity_maker is None:
-        _activity_maker = ActivityMaker(config=config)
-    return _activity_maker
-
-
-def get_activity_maker() -> ActivityMaker:
-    global _activity_maker
-    if _activity_maker is None:
-        raise ValueError("ActivityMaker has not been initialized")
-    return _activity_maker

@@ -140,7 +140,8 @@ class EventParser:
             return None
         try:
             if image_base64:
-                return await self.vlm_client.generate_response(prompt, image_base64)
+                resp = await self.vlm_client.generate_response(prompt, image_base64)
+                return (resp or {}).get("content", "") if isinstance(resp, dict) else str(resp)
             else:
                 # VLM 无图片时的纯文本调用
                 vlm = self.vlm_client
@@ -223,7 +224,8 @@ class EventParser:
             # --- LLM 降级 ---
             logger.info(f"Using LLM for dynamic {raw_item.dynamic_id}")
             try:
-                result = await self.llm_client.generate_response(prompt, use_json=True)
+                resp = await self.llm_client.generate_response(prompt, use_json=True)
+                result = (resp or {}).get("content", "") if isinstance(resp, dict) else str(resp)
             except Exception as e:
                 logger.warning(f"LLM call failed for {raw_item.dynamic_id}: {e}")
                 result = None

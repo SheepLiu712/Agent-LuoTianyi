@@ -10,6 +10,7 @@ from src.agent.prompt_assembly import RealizationPromptAssembler
 from src.agent.response_parser import StructuredResponseParser
 from src.utils.enum_type import ContextType
 from src.utils.llm.llm_module import LLMModule
+from src.utils.llm.llm_api_interface import LLMAPIFactory
 from src.utils.llm.prompt_manager import PromptManager
 from src.utils.logger import get_logger
 
@@ -56,7 +57,22 @@ class MainChat:
         self.logger = get_logger(__name__)
         self.config = config
 
-        self.llm = LLMModule(config["llm_module"], prompt_manager)
+        llm_module_cfg = config.get("llm_module", {})
+        llm_cfg = llm_module_cfg.get("llm", {})
+        prompt_name = llm_module_cfg.get("prompt_name")
+        if not prompt_name:
+            raise ValueError("llm_module 配置中缺少 prompt_name")
+        prompt_template = prompt_manager.get_template(prompt_name)
+        if not prompt_template:
+            raise ValueError(f"Prompt 模板未找到: {prompt_name}")
+        llm_interface = LLMAPIFactory.create_interface(llm_cfg)
+
+        self.llm = LLMModule(
+            module_name="main_chat",
+            module_config=llm_module_cfg,
+            prompt_template=prompt_template,
+            interface=llm_interface,
+        )
         self.variables: List[str] = self.llm.prompt_template.get_variables()
         self._init_static_variables_sync()
         self._init_llm_tone_mapping()

@@ -131,9 +131,10 @@ class OpenAIAPIInterface(
                 # 放入线程池执行
                 ret = await asyncio.to_thread(_do_request, messages)
                 
-                response = self._extract_content(ret)
-                self.response_time_queue.append(time.time() - st_time)
-                return response
+                elapsed = time.time() - st_time
+                extracted = self._extract_content(ret, elapsed=elapsed)
+                self.response_time_queue.append(elapsed)
+                return extracted
 
             except Exception as e:
                 last_exception = e
@@ -171,43 +172,75 @@ class OpenAIAPIInterface(
         self.retry_delay = self.config.get("retry_delay", 0.5)
 
     
-    def _extract_content(self, response) -> str:
-        """提取响应内容
+    def _extract_content(self, response, elapsed: float = 0.0) -> Dict[str, Any]:
+        """提取响应内容、token 用量和响应用时
 
         Args:
-            response: API响应
+            response: API 响应（OpenAI SDK 返回的对象）
+            elapsed: 从发起请求到收到响应所经过的时间（秒），由调用方传入
 
         Returns:
-            回复文本，在无法提取内容时返回空字符串并记录错误日志
-
+            {"content": str, "usage": Optional[dict], "response_time_s": float}
         """
+        # 尝试从响应对象中提取服务器侧用时（毫秒）
+        server_time_s: Optional[float] = None
+        for attr in ("response_ms", "response_time", "timing"):
+            val = getattr(response, attr, None)
+            if val is not None:
+                try:
+                    server_time_s = float(val)
+                    break
+                except (TypeError, ValueError):
+                    pass
+
+        usage_dict: Optional[Dict[str, int]] = None
         try:
             if hasattr(response, "usage") and response.usage:
-                usage = response.usage
-                prompt_tokens = usage.prompt_tokens
-                completion_tokens = usage.completion_tokens
-                total_tokens = usage.total_tokens
+                usage_obj = response.usage
+                prompt_tokens = getattr(usage_obj, "prompt_tokens", 0)
+                completion_tokens = getattr(usage_obj, "completion_tokens", 0)
+                total_tokens = getattr(usage_obj, "total_tokens", 0)
+                usage_dict = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                }
                 self.logger.debug(
                     f"Token usage - Prompt: {prompt_tokens}, Completion: {completion_tokens}, Total: {total_tokens}"
                 )
+                if server_time_s is None:
+                    server_time_s = getattr(usage_obj, "completion_time", None) or getattr(usage_obj, "total_time", None)
             else:
                 self.logger.warning("无法获取token usage信息")
+        except Exception:
+            self.logger.error("无法获取token usage信息", exc_info=True)
 
-        except:
-            self.logger.error("无法获取token usage信息")
+        if server_time_s is not None:
+            try:
+                response_time_s = float(server_time_s)
+                if response_time_s > 1000:
+                    response_time_s = response_time_s / 1000.0
+            except (TypeError, ValueError):
+                response_time_s = elapsed
+        else:
+            response_time_s = elapsed
 
+        content = ""
         try:
             if hasattr(response, "choices") and response.choices:
                 choice = response.choices[0]
                 if hasattr(choice, "message") and hasattr(choice.message, "content"):
-                    return choice.message.content or ""
-
-            self.logger.warning("无法从响应中提取内容")
-            return ""
-
+                    content = choice.message.content or ""
+            else:
+                self.logger.warning("无法从响应中提取内容")
         except Exception as e:
             self.logger.error(f"提取响应内容失败: {e}")
-            return ""
+
+        return {
+            "content": content,
+            "usage": usage_dict,
+            "response_time_s": response_time_s,
+        }
         
     def _extract_tool_calls(self, response) -> List:
         try:

@@ -6,7 +6,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from src.agent.luotianyi_agent import LuoTianyiAgent
-from src.runtime.character_registry import CharacterRegistry, get_default_character_registry
+from src.agent_runtime.character_registry import CharacterRegistry, get_default_character_registry
 
 
 @dataclass
@@ -15,19 +15,21 @@ class AgentRuntimeDependencies:
     vector_store: Any
     sql_session_factory: Callable[[], Session]
     music_manager: Any
+    database: Any | None = None
     capabilities: Any | None = None
 
     def open_sql_session(self) -> Session:
         return self.sql_session_factory()
 
 
-@dataclass
 class AgentRuntime:
     """Owns conscious agents and character lookup for the server runtime."""
 
+    def __init__(self,config):
     character_registry: CharacterRegistry
     conscious_agents: dict[str, LuoTianyiAgent]
     default_character_id: str = "luotianyi"
+
 
     def get_agent(self, character_id: str | None = None) -> LuoTianyiAgent:
         profile = self.character_registry.get(character_id or self.default_character_id)
@@ -47,6 +49,7 @@ def init_agent_runtime(
     vector_store: Any,
     sql_session_factory: Callable[[], Session],
     music_manager: Any,
+    database: Any | None = None,
     capabilities: Any | None = None,
     character_registry: CharacterRegistry | None = None,
 ) -> AgentRuntime:
@@ -57,6 +60,7 @@ def init_agent_runtime(
         redis_client=redis_client,
         vector_store=vector_store,
         sql_session_factory=sql_session_factory,
+        database=database,
         music_manager=music_manager,
         capabilities=capabilities,
     )

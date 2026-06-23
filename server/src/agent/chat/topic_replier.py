@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, List, Optional
 import asyncio
 import traceback
 from src.utils.logger import get_logger
-from src.system.workers.global_speaking_worker import SpeakingJob
+from src.chat_session.global_speaking_worker import SpeakingJob
 from src.agent.main_chat import OneResponseLine, SongSegmentChat, ContextType
 from typing import Callable, Awaitable
 from src.system.user_interface.types import ChatResponse

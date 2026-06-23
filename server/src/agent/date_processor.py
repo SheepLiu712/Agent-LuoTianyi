@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
 from src.utils.llm.llm_module import LLMModule
+from src.utils.llm.llm_api_interface import LLMAPIFactory
 from src.utils.llm.prompt_manager import PromptManager
 from src.utils.logger import get_logger
 from src.system.database import Event
@@ -47,7 +48,22 @@ class DateDetector:
         prompt_manager: PromptManager,
     ):
         self.prompt_manager = prompt_manager
-        self.llm_client = LLMModule(llm_config, prompt_manager)
+
+        llm_cfg = llm_config.get("llm", {})
+        prompt_name = llm_config.get("prompt_name")
+        if not prompt_name:
+            raise ValueError("llm_config 中缺少 prompt_name")
+        prompt_template = prompt_manager.get_template(prompt_name)
+        if not prompt_template:
+            raise ValueError(f"Prompt 模板未找到: {prompt_name}")
+        llm_interface = LLMAPIFactory.create_interface(llm_cfg)
+
+        self.llm_client = LLMModule(
+            module_name="date_detector",
+            module_config=llm_config,
+            prompt_template=prompt_template,
+            interface=llm_interface,
+        )
 
     async def detect(self, user_input: str, conversation_history: str = "") -> Optional[Dict[str, Any]]:
         if not user_input or not self.llm_client:

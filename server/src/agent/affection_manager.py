@@ -94,7 +94,8 @@ class AffectionManager:
             response = await self._llm_client.generate_response(
                 f"{prompt}\n\n{user_prompt}", use_json=True
             )
-            result = json.loads(response)
+            response_text = (response or {}).get("content", "") if isinstance(response, dict) else str(response)
+            result = json.loads(response_text)
             delta = int(result.get("delta", 0))
             delta = max(-3, min(3, delta))  # 限制在 -3 到 +3
             reason = str(result.get("reason", "LLM分析"))[:50]

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional, Tuple
+from typing import Any, List, Optional, Tuple, Dict
+from .singing_manager import SingingManager
 
 
 class SingingCapability:
     """Action capability for choosing and rendering sing actions."""
 
-    def __init__(self, music_manager: Any) -> None:
-        self.music_manager = music_manager
+    def __init__(self, config: Dict[str, Any]) -> None:
+        self._config: Dict[str, Any] = config
+        self.music_manager = SingingManager(config)
 
     def build_sing_plan(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
         if not sing_attempts:

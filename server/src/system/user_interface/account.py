@@ -53,8 +53,9 @@ def decrypt_password(encrypted_b64: str) -> str:
         logger.error(f"Decryption error: {e}")
         raise HTTPException(status_code=400, detail="Encryption error")
     
-
-# 账号服务：注册与登录逻辑
+# ————————————————————————————————————————————————————————————————
+# 下面的方法已经整合进DatabaseManager中，保留在这里是为了兼容旧代码
+# ————————————————————————————————————————————————————————————————
 
 # 自动登录使用的 token 管理
 def update_auth_token(db_session: Session, username: str) -> str:

@@ -873,3 +873,28 @@ shutdown_system_runtime()
 This makes `system` the owner of application software services, while agent,
 subconscious, capabilities, and world remain runtime dependencies used by the
 system.
+
+## 18. 2026-06-22 DatabaseManager Boundary Update
+
+`DatabaseManager` is the canonical facade for the main application database.
+Callers should not open SQL sessions directly for users, auth tokens,
+preferences, conversation history, image metadata, or canonical memory SQL
+records. `SystemRuntime` owns one `DatabaseManager` instance and passes it to
+services that need main database access.
+
+Out of scope for `DatabaseManager`:
+
+1. Vector database and embedding indexes. These are memory retrieval indexes
+   owned by `subconscious.memory` through `MemoryVectorIndex`.
+2. Song knowledge database. This belongs to subconscious music knowledge.
+3. Learned song artifacts and singing indexes. These belong to capabilities or
+   world-side song learning workflows, depending on whether they are used for
+   action rendering or background acquisition.
+
+Current transitional rule:
+
+`src.system.database.vector_store` and related low-level files may still exist
+as infrastructure modules, but they should not be exported through
+`src.system.database` or initialized by `DatabaseManager`. New code should treat
+the vector store as a dependency of the subconscious memory module, not as part
+of the main application database manager.

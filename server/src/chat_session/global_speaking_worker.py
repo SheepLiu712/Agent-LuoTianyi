@@ -6,10 +6,10 @@ from src.utils.logger import get_logger
 import base64
 from src.agent.main_chat import OneSentenceChat, SongSegmentChat
 from src.system.user_interface.types import ChatResponse
-from typing import Callable, Awaitable
+from typing import Callable, Awaitable, Dict, Any
 
 if TYPE_CHECKING:
-    from src.capabilities import CapabilityRegistry
+    from src.capabilities import CapabilityManager
 
 
 _sentinel = object()
@@ -35,7 +35,8 @@ class SpeakingJob:
 class GlobalSpeakingWorker:
     """全局唯一 speaking consumer：串行处理 TTS/多媒体生成任务。"""
 
-    def __init__(self):
+    def __init__(self, config: Dict):
+        self.config = config
         self.logger = get_logger("GlobalSpeakingWorker")
         self.queue: asyncio.Queue[SpeakingJob] = asyncio.Queue(maxsize=512)
         self.worker_task: asyncio.Task | None = None
@@ -45,7 +46,7 @@ class GlobalSpeakingWorker:
             self.worker_task = asyncio.create_task(self._run())
             self.logger.info("Global speaking worker started")
 
-    def set_capabilities(self, capabilities: "CapabilityRegistry"):
+    def set_capabilities(self, capabilities: "CapabilityManager"):
         """Inject action capabilities used by the speaking worker."""
         self.capabilities = capabilities
 

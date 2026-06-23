@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Tuple
 
 from sqlalchemy.orm import Session
 
-from src.system.database import VectorStore
+from src.system.database.vector_store import VectorStore
 from src.system.database.database_service import get_agent_memory_record_by_embedding_id
 from src.system.database.memory_storage import MemoryStorage
 from src.domain import MemoryContext, MemoryHit

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Generator
+from typing import Generator, Dict
 
-from src.capabilities.speech.tts_module import TTSModule
+from src.capabilities.speech.tts_module import TTSModule, init_tts_module
 
 
 class SpeechCapability:
     """Action capability for saying text through TTS."""
 
-    def __init__(self, tts_module: TTSModule) -> None:
-        self.tts_module = tts_module
+    def __init__(self, config: Dict) -> None:
+        self._tts_config = config
+        self.tts_module = init_tts_module(self._tts_config)
 
     async def say(self, text: str, tone: str) -> str:
         audio_bytes = await self.tts_module.synthesize_speech_with_tone(text, tone)

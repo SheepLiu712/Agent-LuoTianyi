@@ -5,7 +5,7 @@ from typing import Any
 from src.domain.stimulus import PersistPolicy, SourceChannel, Stimulus, StimulusModality
 from src.system.user_interface.types import WSEventType, WSMessage
 from src.agent.chat.chat_events import ChatInputEvent, ChatInputEventType
-from src.runtime.character_registry import DEFAULT_CHARACTER_ID
+from src.agent_runtime.character_registry import DEFAULT_CHARACTER_ID
 
 
 CHAT_RELATED_EVENT_TYPES = {

@@ -1,9 +1,7 @@
-from typing import Dict, Tuple
+from typing import TYPE_CHECKING, Dict
 import time
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
-from sqlalchemy.orm import Session
-from src.system.database.sql_database import get_sql_session
 from src.system.user_interface.types import WSEventType, WSMessage
 from src.domain.stimulus import Stimulus
 from src.legacy.chat_input_adapter import (
@@ -12,8 +10,10 @@ from src.legacy.chat_input_adapter import (
     ws_message_to_stimulus,
 )
 from src.agent.chat.chat_events import ChatInputEvent
-from src.system.user_interface.account import check_message_token
 from src.utils.logger import get_logger
+
+if TYPE_CHECKING:
+    from src.system.database.database_service import DatabaseManager
 
 
 class WebSocketService:
@@ -65,7 +65,12 @@ class WebSocketService:
             client_msg_id=event.get("client_msg_id")
         )
     
-    async def handle_auth_event(self, ws_connection: "WebSocketConnection", db: Session, event: WSMessage) -> bool:
+    async def handle_auth_event(
+        self,
+        ws_connection: "WebSocketConnection",
+        database: "DatabaseManager",
+        event: WSMessage,
+    ) -> bool:
         websocket = ws_connection.websocket
         username = event.payload.get("username", "")
         token = event.payload.get("token", "")
@@ -82,7 +87,7 @@ class WebSocketService:
             )
             return False
 
-        is_valid, user_uuid = check_message_token(db, username, token)
+        is_valid, user_uuid = database.check_message_token(username, token)
 
         if not is_valid:
             await websocket.send_json(
@@ -198,14 +203,6 @@ class WebSocketService:
             event["reply_to"] = reply_to
         return event
 
-    
-
-_websocket_service = None
-def get_websocket_service() -> WebSocketService:
-    global _websocket_service
-    if _websocket_service is None:
-        _websocket_service = WebSocketService()
-    return _websocket_service
 
 
 class WebSocketConnection:
@@ -220,7 +217,7 @@ class WebSocketConnection:
         self.user_uuid = user_uuid
         self.user_name = user_name
         
-    async def auth(self, websocket_service: "WebSocketService") -> bool:
+    async def auth(self, websocket_service: "WebSocketService", database: "DatabaseManager") -> bool:
         '''
         进行认证流程，成功返回True，失败返回False
         '''
@@ -230,11 +227,7 @@ class WebSocketConnection:
                 await asyncio.sleep(0.1)  # 避免空循环占用过多CPU
                 continue
             if client_event.event_type == WSEventType.USER_AUTH.value:
-                db = get_sql_session()
-                try:
-                    ret = await websocket_service.handle_auth_event(self, db, client_event)
-                finally:
-                    db.close()
+                ret = await websocket_service.handle_auth_event(self, database, client_event)
                 if ret:  # 验证成功
                     
                     break  # 认证成功后跳出循环，进入正常的消息处理流程

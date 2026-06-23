@@ -3,23 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-import src.system.database as database
-from src.agent.activity_maker import ActivityMaker, init_activity_maker
-from src.agent.luotianyi_agent import LuoTianyiAgent
-from src.capabilities import CapabilityRegistry, SingingCapability, SpeechCapability
-from src.capabilities.speech import TTSModule, init_tts_module
-from src.plugins import DailyScheduler
-from src.world.citywalk import CitywalkRuntimeService
-from src.plugins.music import MusicManager
-from src.plugins.schedule import ScheduleManager
-from src.runtime.agent_runtime import AgentRuntime, get_default_agent, init_agent_runtime
-from src.system.chat_session.global_chat_stream_manager import GlobalChatStreamManager, get_GCSM
-from src.system.conversation import ConversationManager, ConversationService
-from src.system.database.sql_database import get_sql_session
-from src.system.user_interface import account
-from src.system.user_interface.websocket_service import WebSocketService, get_websocket_service
-from src.system.workers.global_speaking_worker import GlobalSpeakingWorker, get_global_speaking_worker
-from src.world import CitywalkDiaryProvider, ScheduleWorldProvider
+
+from src.system.user_interface import UserInterface
+from src.world import WorldRuntime
+from src.system.database import DatabaseManager
+from src.agent_runtime import AgentRuntime
+from src.capabilities import CapabilityManager
+from src.chat_session import ChatSessionManager
+from src.utils.llm_service import LLMService
 
 
 @dataclass
@@ -30,80 +21,48 @@ class SystemRuntime:
     use it as a dependency container, while startup/shutdown details remain
     inside this module.
     """
-
-    websocket_service: WebSocketService
-    gcsm: GlobalChatStreamManager
-    global_speaking_worker: GlobalSpeakingWorker
-    agent: LuoTianyiAgent
+    user_interface: UserInterface
+    world: WorldRuntime
+    database_manager: DatabaseManager
     agent_runtime: AgentRuntime
-    capabilities: CapabilityRegistry
-    conversation_service: ConversationService
-    activity_maker: ActivityMaker
-    schedule_manager: Optional[ScheduleManager] = None
-    world_event_provider: Optional[ScheduleWorldProvider] = None
-    public_diary_provider: Optional[CitywalkDiaryProvider] = None
-    daily_scheduler: Optional[DailyScheduler] = None
+    capability_manager: CapabilityManager
+    chat_session_manager: ChatSessionManager
+    llm_service: LLMService
 
     @classmethod
     async def initialize(cls, config: Dict) -> "SystemRuntime":
-        database_config: Dict = config.get("database", {})
-        database.init_all_databases(database_config)
+        # llm服务初始化
+        llm_service = LLMService(config.get("llm_service", {}))
 
-        tts_config = config.get("tts", {})
-        tts_module: TTSModule = init_tts_module(tts_config)
+        # 数据库初始化
+        database_manager = DatabaseManager(config.get("database", {}))
+        database_manager.init_all_databases()
 
-        music_manager = MusicManager(config=config["music"])
-        capabilities = CapabilityRegistry(
-            speech=SpeechCapability(tts_module),
-            singing=SingingCapability(music_manager),
-        )
-        agent_runtime = init_agent_runtime(
-            config,
-            tts_module,
-            redis_client=database.get_redis_buffer(),
-            vector_store=database.get_vector_store(),
-            sql_session_factory=get_sql_session,
-            music_manager=music_manager,
-            capabilities=capabilities,
-        )
-        agent = get_default_agent()
+        # 能力模块初始化
+        capability_manager = CapabilityManager(config.get("capabilities", {}), llm_service)
 
-        conversation_service = ConversationService(
-            conversation_manager=ConversationManager(
-                config.get("conversation_manager", {}),
-                agent.prompt_manager,
-            ),
-            sql_session_factory=get_sql_session,
-            redis_client=database.get_redis_buffer(),
-        )
+        # 会话管理器初始化
+        chat_session_manager = ChatSessionManager(config.get("chat_sessions", {}), llm_service)
 
-        schedule_manager = ScheduleManager(
-            sql_session_factory=get_sql_session,
-            config=config.get("schedule", {}),
-        )
-        citywalk_report_dir = (
-            config.get("citywalk", {})
-            .get("report", {})
-            .get("output_dir", "data/citywalk_reports")
-        )
+        # 箱庭世界初始化
+        world = WorldRuntime(config.get("world", {}), llm_service)
+
+        # Agent运行时初始化
+        agent_runtime = AgentRuntime(config.get("agent_runtime", {}), llm_service, capability_manager, database_manager)
 
         runtime = cls(
-            websocket_service=get_websocket_service(),
-            gcsm=get_GCSM(),
-            global_speaking_worker=get_global_speaking_worker(),
-            agent=agent,
+            user_interface=UserInterface(database_manager),
+            capability_manager = capability_manager,
+            chat_session_manager = chat_session_manager,
+            world=world,
+            database_manager=database_manager,
             agent_runtime=agent_runtime,
-            capabilities=capabilities,
-            conversation_service=conversation_service,
-            activity_maker=init_activity_maker(config.get("activity_maker", {})),
-            schedule_manager=schedule_manager,
-            world_event_provider=ScheduleWorldProvider(schedule_manager),
-            public_diary_provider=CitywalkDiaryProvider(citywalk_report_dir),
+            llm_service=llm_service,
         )
 
-        runtime._wire_dependencies()
-        runtime._start_background_services(config)
-        account.generate_keys()
+        # runtime._wire_dependencies()
+        runtime._start_background_services()
+        runtime.user_interface.generate_rsa_keys()
         return runtime
 
     def _wire_dependencies(self) -> None:
@@ -114,31 +73,27 @@ class SystemRuntime:
         if self.schedule_manager is not None:
             self.schedule_manager.set_gcsm_ref(self.gcsm)
 
-    def _start_background_services(self, config: Dict) -> None:
-        self.gcsm.start_cleanup_task(expiration_seconds=360)
-        self.global_speaking_worker.start_if_needed()
-        if self.schedule_manager is not None:
-            self.schedule_manager.start()
-
-        self.daily_scheduler = DailyScheduler(
-            song_knowledge_config=config["music"]["song_knowledge"],
-            citywalk_service=CitywalkRuntimeService(
-                config["citywalk"],
-                vector_store=database.get_vector_store(),
-            ),
-            song_learner=self.agent.music_manager.auto_song_learner,
-            schedule_manager=self.schedule_manager,
-        )
-        self.daily_scheduler.start()
+    def _start_background_services(self) -> None:
+        # 启动chat session相关的后台服务
+        self.chat_session_manager.start_background_services()
+        self.world.start_background_services()
 
     async def shutdown(self) -> None:
-        if self.daily_scheduler is not None:
-            self.daily_scheduler.stop()
-            self.daily_scheduler = None
-        if self.schedule_manager is not None:
-            self.schedule_manager.stop()
-        await self.gcsm.stop_cleanup_task()
-        await self.global_speaking_worker.stop()
+        await self.world.stop_background_services()
+        await self.chat_session_manager.stop_background_services()
+
+    # 各种属性访问器，方便外部使用
+    @property
+    def agent(self):
+        return self.agent_runtime.get_agent()
+    
+    @property
+    def websocket_service(self):
+        return self.user_interface.websocket_service
+
+    @property
+    def gcsm(self):
+        return self.chat_session_manager.global_chat_stream_manager
 
 
 _system_runtime: SystemRuntime | None = None

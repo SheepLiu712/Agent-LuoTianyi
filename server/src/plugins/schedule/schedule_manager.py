@@ -18,7 +18,7 @@ from src.plugins.schedule.reminder_dispatcher import ReminderDispatcher
 from src.plugins.schedule.activity_context_provider import ActivityContextProvider
 
 if TYPE_CHECKING:
-    from src.system.chat_session.global_chat_stream_manager import GlobalChatStreamManager
+    from src.chat_session.global_chat_stream_manager import GlobalChatStreamManager
     from sqlalchemy.orm import Session
 
 logger = get_logger(__name__)
@@ -45,8 +45,20 @@ class ScheduleManager:
         # 子模块
 
         self.fetcher = OfficialFeedFetcher(config=self.config)
-        llm_cfg = self.config.get("llm") or {}
-        vlm_cfg = self.config.get("vlm") or {}
+
+        # 读取 LLM/VLM 配置，支持直接传入或从 config.json fallback
+        llm_cfg = (self.config.get("llm") or {})
+        vlm_cfg = (self.config.get("vlm") or {})
+        if not llm_cfg or not vlm_cfg:
+            try:
+                from src.utils.helpers import load_config
+                cfg = load_config("config/config.json", default_config={})
+                if not llm_cfg:
+                    llm_cfg = cfg.get("knowledge", {}).get("llm", {})
+                if not vlm_cfg:
+                    vlm_cfg = (cfg.get("vision_module", {}).get("vlm_module", {}).get("vlm", {}))
+            except Exception:
+                pass
         self.parser = EventParser(llm_config=llm_cfg, vlm_config=vlm_cfg)
         self.event_store = EventStore(
             sql_session_factory=sql_session_factory,

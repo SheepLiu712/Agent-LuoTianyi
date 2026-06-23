@@ -9,6 +9,7 @@ import re
 
 from src.utils.logger import get_logger
 from src.utils.llm.llm_module import LLMModule
+from src.utils.llm.llm_api_interface import LLMAPIFactory
 
 
 logger = get_logger("UserProfileUpdater")
@@ -17,10 +18,25 @@ logger = get_logger("UserProfileUpdater")
 class UserProfileUpdater:
     def __init__(self, config: Dict[str, Any], prompt_manager):
         self.config = config or {}
-        llm_cfg = self.config.get("llm_module")
-        if not llm_cfg:
+        llm_module_cfg = self.config.get("llm_module")
+        if not llm_module_cfg:
             raise ValueError("memory_manager.user_profile.llm_module is required")
-        self.llm = LLMModule(llm_cfg, prompt_manager)
+
+        llm_cfg = llm_module_cfg.get("llm", {})
+        prompt_name = llm_module_cfg.get("prompt_name")
+        if not prompt_name:
+            raise ValueError("llm_module 配置中缺少 prompt_name")
+        prompt_template = prompt_manager.get_template(prompt_name)
+        if not prompt_template:
+            raise ValueError(f"Prompt 模板未找到: {prompt_name}")
+        llm_interface = LLMAPIFactory.create_interface(llm_cfg)
+
+        self.llm = LLMModule(
+            module_name="user_profile_updater",
+            module_config=llm_module_cfg,
+            prompt_template=prompt_template,
+            interface=llm_interface,
+        )
 
     async def update_profile(
         self,
