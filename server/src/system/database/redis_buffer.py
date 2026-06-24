@@ -20,7 +20,7 @@ class _Entry:
     expire_at: Optional[float]
 
 
-class MemoryStorage:
+class RedisBuffer:
     """In-memory Redis replacement with per-user isolation and locks.
 
     Key format keeps compatibility with existing code, e.g.:
@@ -107,7 +107,7 @@ class MemoryStorage:
 class _MemoryPipeline:
     """Very small Redis pipeline compatibility layer."""
 
-    def __init__(self, storage: MemoryStorage):
+    def __init__(self, storage: RedisBuffer):
         self._storage = storage
         self._locked_users: List[Tuple[str, threading.RLock]] = []
         self._commands: List[Tuple[str, int, Any]] = []
@@ -162,18 +162,18 @@ class _MemoryPipeline:
 
 
 
-r: MemoryStorage | None = None
+r: RedisBuffer | None = None
 logger = get_logger(__name__)
 
 
 def init_redis_buffer(redis_config: Dict[str, Any]):
     global r
     _ = redis_config
-    r = MemoryStorage()
+    r = RedisBuffer()
     logger.info("Memory buffer initialized (Redis compatibility mode)")
 
 
-def get_redis_buffer() -> MemoryStorage:
+def get_redis_buffer() -> RedisBuffer:
     global r
     if r is None:
         raise Exception("Memory buffer not initialized")

@@ -10,7 +10,7 @@ if cwd not in sys.path:
 from src.system.database import database_service
 from src.system.database.sql_database import User, Conversation, get_sql_session
 from src.system.database.vector_store import get_vector_store, VectorStore
-from src.system.database.memory_storage import get_redis_buffer
+from src.system.database.redis_buffer import get_redis_buffer
 from src.utils.helpers import load_config
 
 

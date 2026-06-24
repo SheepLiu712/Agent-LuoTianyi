@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
-from src.plugins.schedule.event_models import OfficialDynamic
+from src.system.database.event_models import OfficialDynamic
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)

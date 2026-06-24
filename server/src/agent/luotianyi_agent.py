@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from src.system.database.vector_store import VectorStore
     from src.utils.llm.llm_module import LLMAPIInterface
     from src.subconscious.music_knowledge.music_manager import MusicManager
-    from src.system.database.memory_storage import MemoryStorage
+    from src.system.database.redis_buffer import RedisBuffer
     
 
 
@@ -58,7 +58,7 @@ def get_available_expression(config_path: str = "config/live2d_interface_config.
 class _AgentRuntimeHub:
     """仅供 LuoTianyiAgent 内部使用的运行时依赖。"""
 
-    redis_client: "MemoryStorage"
+    redis_client: "RedisBuffer"
     vector_store: "VectorStore"
     sql_session_factory: Callable[[], Session]
     database: Any

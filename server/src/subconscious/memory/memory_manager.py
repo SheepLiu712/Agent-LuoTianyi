@@ -8,7 +8,7 @@ Memory Manager Module
 from typing import List, Dict, Any
 import asyncio
 from sqlalchemy.orm import Session
-from src.system.database.memory_storage import MemoryStorage
+from src.system.database.redis_buffer import RedisBuffer
 
 from src.utils.logger import get_logger
 from src.subconscious.memory.memory_search import MemorySearcher
@@ -42,7 +42,7 @@ class MemoryManager:
     async def get_knowledge(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         knowledge_db: Session,
         user_id: str,
@@ -88,7 +88,7 @@ class MemoryManager:
     async def post_process_interaction(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         user_id: str,
         history: str,
@@ -119,7 +119,7 @@ class MemoryManager:
     async def write_user_memory(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         user_id: str,
         content: str,
@@ -139,7 +139,7 @@ class MemoryManager:
     async def write_event_memory(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         user_id: str,
         content: str,
@@ -156,7 +156,7 @@ class MemoryManager:
             commit=commit,
         )
 
-    async def get_username(self,  db: Session, redis: MemoryStorage, user_id: str) -> str:
+    async def get_username(self,  db: Session, redis: RedisBuffer, user_id: str) -> str:
         """
         获取用户的名称
         """
@@ -165,7 +165,7 @@ class MemoryManager:
     async def update_user_profile_by_topic(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         user_id: str,
         history: str,
         current_dialogue: str,
@@ -196,7 +196,7 @@ class MemoryManager:
         )
         return new_profile
 
-    async def update_user_profile_by_context(self, db: Session, redis: MemoryStorage, user_id: str, context: Dict[str, Any], commit: bool = True):
+    async def update_user_profile_by_context(self, db: Session, redis: RedisBuffer, user_id: str, context: Dict[str, Any], commit: bool = True):
         """
         基于用户的长期上下文信息，判断并更新用户画像。
         该方法适用于定时任务或特定触发条件下的画像更新，不依赖于单次对话内容。

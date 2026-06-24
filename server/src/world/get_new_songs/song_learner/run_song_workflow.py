@@ -10,7 +10,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 # `run_song_workflow.py` 位于
-#   server/src/plugins/music/song_learner/run_song_workflow.py
+#   server/src/world/get_new_songs/song_learner/run_song_workflow.py
 # 需要把 SERVER_ROOT 指向仓库内的 `server` 目录（上溯 3 级），
 # 之前使用 parents[4] 多退了一层，导致 ROOT 指向了上一级目录。
 SERVER_ROOT = PROJECT_ROOT.parents[3]

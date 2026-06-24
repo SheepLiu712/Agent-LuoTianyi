@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Dict, TYPE_CHECKING
 from .global_chat_stream_manager import GlobalChatStreamManager
 from .global_speaking_worker import GlobalSpeakingWorker

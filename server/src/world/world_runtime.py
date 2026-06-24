@@ -1,16 +1,235 @@
-from typing import Dict, TYPE_CHECKING
+from __future__ import annotations
+
+import asyncio
+import time
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+from src.system.database.event_models import UnifiedEventType
+from src.utils.logger import get_logger
+from src.world.activity_context_provider import ActivityContextProvider
+from src.world.bili_event_updater import BiliEventUpdater
+from src.world.daily_tasks import WorldDailyTasks
+from src.world.world_clock import WorldClock
+
 if TYPE_CHECKING:
+    from src.capabilities import CapabilityManager
+    from src.system.database.event_store import EventStore
+    from src.system.database import DatabaseManager
+    from src.system.system_runtime import SystemRuntime
     from src.utils.llm_service import LLMService
 
+
 class WorldRuntime:
-    def __init__(self, config: Dict, llm_service: "LLMService"):
-        self.config = config
+    """Owns world-facing services and the world clock."""
+
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        llm_service: "LLMService",
+        database_manager: "DatabaseManager | None" = None,
+        capability_manager: "CapabilityManager | None" = None,
+        root_config: Dict[str, Any] | None = None,
+    ) -> None:
+        self.config = config or {}
+        self.root_config = root_config or {}
         self.llm_service = llm_service
+        self.database_manager = database_manager
+        self.capability_manager = capability_manager
+        self.system_runtime: "SystemRuntime | None" = None
+        self.logger = get_logger(__name__)
 
-    def start_background_services(self):
-        # 启动世界相关的后台服务
-        pass  # 如果有需要启动的后台服务，可以在这里实现
+        bili_cfg = self._build_bili_event_config()
+        self.event_store: "EventStore | None" = getattr(database_manager, "event_store", None)
+        self.bili_event_updater = BiliEventUpdater(config=bili_cfg, event_store=self.event_store)
+        if database_manager is not None:
+            database_manager.set_event_store_llm_client(self.bili_event_updater.llm_client)
 
-    async def stop_background_services(self):
-        # 停止世界相关的后台服务
-        pass  # 如果有需要停止的后台服务，可以在这里实现
+        self.context_provider: ActivityContextProvider | None = None
+        if self.event_store is not None:
+            self.context_provider = ActivityContextProvider(
+                event_store=self.event_store,
+                mention_cooldown_hours=bili_cfg.get("context", {}).get("mention_cooldown_hours", 6),
+                lookahead_days=bili_cfg.get("context", {}).get("lookahead_days", 7),
+                max_context_events=bili_cfg.get("context", {}).get("max_context_events", 5),
+            )
+
+        silence_cfg = bili_cfg.get("silence", {})
+        self.silence_pre_minutes = silence_cfg.get("concert_pre_start_minutes", 60)
+        self.silence_post_minutes = silence_cfg.get("concert_post_end_minutes", 30)
+        self._silence_cache: Optional[Dict[str, Any]] = None
+        self._silence_cache_ts: float = 0.0
+        self._silence_cache_ttl: float = 60 * 60
+
+        self.world_clock = WorldClock()
+        self._daily_tasks: WorldDailyTasks | None = None
+        self._startup_event_task: asyncio.Task | None = None
+        self._clock_actions_registered = False
+
+    def set_system_runtime(self, system_runtime: "SystemRuntime") -> None:
+        self.system_runtime = system_runtime
+        self._daily_tasks = self._build_daily_tasks()
+        self._register_clock_actions()
+
+    def start_background_services(self) -> None:
+        if self._startup_event_task is None or self._startup_event_task.done():
+            self._startup_event_task = asyncio.create_task(self._initialize_event_store())
+        self.world_clock.start()
+
+    async def stop_background_services(self) -> None:
+        await self.world_clock.stop()
+        if self._startup_event_task is not None:
+            self._startup_event_task.cancel()
+            try:
+                await self._startup_event_task
+            except asyncio.CancelledError:
+                pass
+        self._startup_event_task = None
+
+    async def _initialize_event_store(self) -> None:
+        if self.event_store is None:
+            return
+        try:
+            await self.event_store.ensure_holidays()
+        except Exception as e:
+            self.logger.warning(f"Failed to ensure holidays: {e}")
+
+    def _register_clock_actions(self) -> None:
+        if self._clock_actions_registered:
+            return
+        self._register_daily_4am_actions()
+        if self.event_store is not None:
+            self.world_clock.register_interval_action(
+                "bili_event_update",
+                interval_seconds=self.bili_event_updater.fetch_interval_seconds,
+                action=self.bili_event_updater.fetch_and_update_events,
+                run_immediately=True,
+            )
+        self.world_clock.register_interval_action(
+            "proactive_topic_check",
+            interval_seconds=10 * 60,
+            action=self._run_proactive_topic_check,
+        )
+        self._clock_actions_registered = True
+
+    def _register_daily_4am_actions(self) -> None:
+        tasks = self._daily_tasks
+        if tasks is None:
+            self.logger.info("World daily tasks are not configured; skipping 4am task registration")
+            return
+        self.world_clock.register_daily_action("purge_expired_events", 4, 0, tasks.purge_expired_events)
+        self.world_clock.register_daily_action("refresh_bili_cookie", 4, 0, tasks.refresh_bili_cookie)
+        self.world_clock.register_daily_action("try_citywalk", 4, 0, tasks.try_citywalk)
+        self.world_clock.register_daily_action("sync_new_song_knowledge", 4, 0, tasks.sync_new_song_knowledge)
+        self.world_clock.register_daily_action("check_qq_music_credential", 4, 0, tasks.check_qq_music_credential)
+        self.world_clock.register_daily_action("learn_new_songs", 4, 0, tasks.learn_new_songs)
+
+
+    async def _run_proactive_topic_check(self) -> None:
+        if self.system_runtime is None:
+            return
+        await self.system_runtime.chat_session_manager.proactive_topic_maker.run_periodic_checks(
+            self.system_runtime
+        )
+
+    def _build_bili_event_config(self) -> Dict[str, Any]:
+        cfg: Dict[str, Any] = {}
+        cfg.update(self.root_config.get("bili_dynamic_fetcher", {}))
+        cfg.update(self.config.get("bili_event_updater", {}))
+        proactive_cfg = self.root_config.get("chat_sessions", {}).get("proactive_topic_maker", {})
+        for key in ("context", "silence"):
+            if key in proactive_cfg and key not in cfg:
+                cfg[key] = proactive_cfg[key]
+        return cfg
+
+    def _build_daily_tasks(self) -> WorldDailyTasks | None:
+        if self.system_runtime is None or self.event_store is None:
+            return None
+
+        citywalk_service = self._build_citywalk_service()
+        song_learner = self._get_auto_song_learner()
+        song_knowledge_config = self.root_config.get("music", {}).get("song_knowledge", {})
+        if citywalk_service is None and song_learner is None:
+            self.logger.warning("World daily tasks have neither citywalk nor song learner service")
+
+        return WorldDailyTasks(
+            song_knowledge_config=song_knowledge_config,
+            citywalk_service=citywalk_service,
+            song_learner=song_learner,
+            event_store=self.event_store,
+        )
+
+    def _build_citywalk_service(self) -> Any | None:
+        try:
+            from src.world.citywalk.runtime_scheduler import CitywalkRuntimeService
+
+            vector_store = None
+            if self.system_runtime is not None:
+                try:
+                    vector_store = getattr(self.system_runtime.agent._runtime_hub, "vector_store", None)
+                except Exception:
+                    vector_store = None
+            if vector_store is None:
+                self.logger.warning("Citywalk service skipped: vector store is not available")
+                return None
+            return CitywalkRuntimeService(self.config.get("citywalk", {}), vector_store)
+        except Exception as e:
+            self.logger.warning(f"Citywalk service skipped: {e}")
+            return None
+
+    def _get_auto_song_learner(self) -> Any | None:
+        try:
+            return self.capability_manager.singing.music_manager.auto_song_learner
+        except Exception:
+            return None
+
+    def is_silence_period(self) -> bool:
+        return self.get_silence_event() is not None
+
+    def get_silence_event(self) -> Optional[Dict[str, Any]]:
+        if self.event_store is None:
+            return None
+
+        now_ts = time.monotonic()
+        if self._silence_cache is not None and (now_ts - self._silence_cache_ts) < self._silence_cache_ttl:
+            start_dt = self._silence_cache.get("start_datetime")
+            end_dt = self._silence_cache.get("end_datetime")
+            now = datetime.now()
+            if start_dt and self._in_silence_range(start_dt, end_dt, now):
+                return self._silence_cache
+            self._silence_cache = None
+
+        now = datetime.now()
+        for event_dict in self.event_store.get_events_by_type(UnifiedEventType.CONCERT.value):
+            start_dt = event_dict.get("start_datetime")
+            if not start_dt:
+                continue
+            if self._in_silence_range(start_dt, event_dict.get("end_datetime"), now):
+                self._silence_cache = event_dict
+                self._silence_cache_ts = now_ts
+                return event_dict
+
+        self._silence_cache = None
+        return None
+
+    def _in_silence_range(
+        self,
+        start_dt: datetime,
+        end_dt: Optional[datetime],
+        now: datetime,
+    ) -> bool:
+        pre = start_dt - timedelta(minutes=self.silence_pre_minutes)
+        post = end_dt + timedelta(minutes=self.silence_post_minutes) if end_dt else start_dt + timedelta(hours=4)
+        return pre <= now <= post
+
+    def get_active_context(self, user_id: str = "") -> str:
+        if self.context_provider is None:
+            return ""
+        return self.context_provider.get_context(user_id=user_id)
+
+    def get_events(self, event_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        if self.event_store is None:
+            return []
+        if event_type:
+            return self.event_store.get_events_by_type(event_type)
+        return self.event_store.get_all_events()

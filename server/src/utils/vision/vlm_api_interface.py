@@ -45,14 +45,6 @@ class VLMAPIInterface(ABC):
         """
         pass
 
-    @abstractmethod
-    def get_response_time(self, last_k: int) -> List[float]:
-        """
-        获取最近请求的响应时间
-
-        :return: 响应时间，单位为秒
-        """
-        pass
 
 
 """
@@ -71,7 +63,6 @@ class OpenAIAPIInterface(
         self.config = config
         self.logger = get_logger(__name__)
         self._init_parameters()
-        self.response_time_queue = deque(maxlen=20)  # 存储最近的响应时间
         
         # 检查 SSL_CERT_FILE 环境变量，如果指向的文件不存在，则移除该环境变量，防止 httpx/ssl 报错
         ssl_cert_file = os.environ.get("SSL_CERT_FILE")
@@ -133,7 +124,6 @@ class OpenAIAPIInterface(
                 
                 elapsed = time.time() - st_time
                 extracted = self._extract_content(ret, elapsed=elapsed)
-                self.response_time_queue.append(elapsed)
                 return extracted
 
             except Exception as e:
@@ -257,7 +247,7 @@ class OpenAIAPIInterface(
 
     def get_interface_info(self) -> Dict[str, Any]:
         return {
-            "name": "OpenAIAPIInterface",
+            "type": "OpenAIAPIInterface",
             "model": self.model,
             "base_url": self.base_url,
             "temperature": self.temperature,
@@ -267,11 +257,6 @@ class OpenAIAPIInterface(
             "retry_delay": self.retry_delay,
         }
 
-    def get_response_time(self, last_k: int = 1) -> List[float]:
-        if not self.response_time_queue:
-            return 0.0
-        k = min(last_k, len(self.response_time_queue))
-        return list(self.response_time_queue)[-k:]
 
 
 

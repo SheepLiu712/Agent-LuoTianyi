@@ -214,7 +214,7 @@ class AutoSongLearner:
         self._ensure_directories()
 
         # Songlearner integration
-        self.songlearner_dir = os.getcwd() / Path(config.get("songlearner_dir", "src/plugins/music/song_learner"))
+        self.songlearner_dir = os.getcwd() / Path(config.get("songlearner_dir", "src/world/get_new_songs/song_learner"))
         self.songlearner_resource_dir = os.getcwd() / Path(config.get("songlearner_resource_dir", "res/song_learner"))
         self.songlearner_available = self._check_songlearner_models()
         if self.songlearner_available:
@@ -276,7 +276,7 @@ class AutoSongLearner:
     def check_qq_credential(self) -> bool:
         """
         公开方法：重新检查 QQ 音乐凭证有效性。
-        供 DailyScheduler 凌晨调用。无效时重新生成二维码。
+        供 WorldDailyTasks 凌晨调用。无效时重新生成二维码。
         """
         if not self.songlearner_available:
             return False
@@ -295,7 +295,7 @@ class AutoSongLearner:
     # -- main entry ----------------------------------------------------------
 
     def try_learn_pending(self) -> LearnResult:
-        """Try to learn all pending wished songs. Called by DailyScheduler."""
+        """Try to learn all pending wished songs. Called by WorldDailyTasks."""
         result = LearnResult()
         pending = self.wishlist.get_pending()
         if not pending:

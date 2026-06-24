@@ -6,6 +6,9 @@ import os
 
 Base = declarative_base()
 
+# ————————————
+# 基本表：用户、注册码和对话记录
+# ————————————
 class User(Base):
     __tablename__ = "users"
     
@@ -56,7 +59,15 @@ class Conversation(Base):
     
     user = relationship("User", back_populates="conversations")
 
+
+# ————————————
+# 记忆表
+# ————————————
+
 class MemoryRecord(Base):
+    '''
+    不使用
+    '''
     __tablename__ = "memory_records"
     
     uuid = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -69,6 +80,9 @@ class MemoryRecord(Base):
     user = relationship("User", back_populates="memory_records")
 
 class MemoryUpdateRecord(Base):
+    '''
+    不使用
+    '''
     __tablename__ = "memory_update_records"
     update_cmd_uuid = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
@@ -183,6 +197,10 @@ class AffectionLog(Base):
 
     user = relationship("User", back_populates="affection_logs")
 
+
+# ————————————
+# 事件表
+# ————————————
 
 class Event(Base):
     """统一事件管理系统：存储所有类型的事件（包括用户生日/纪念日）。"""

@@ -1,4 +1,4 @@
-"""DatabaseManager 单元测试"""
+"""DatabaseManager 单元测试(不包含Event Store和Memory Store)"""
 import sys
 import os
 from pathlib import Path
@@ -9,16 +9,13 @@ if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 import pytest
-import tempfile
-import json
-from datetime import datetime
 
 from src.system.database.sql_database import (
-    init_sql_db, Base, User, InviteCode, Conversation
+    init_sql_db, Base, User, InviteCode
 )
-from src.system.database.memory_storage import init_redis_buffer, get_redis_buffer, MemoryStorage
+from src.system.database.redis_buffer import init_redis_buffer
 from src.system.database.database_service import DatabaseManager, _hash_password
-from src.domain import ConversationItem, MemoryUpdateCommand
+from src.domain import ConversationItem
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -31,22 +28,11 @@ def db_manager(tmp_path):
     # 1. 设置 JWT_SECRET（message token 需要）
     os.environ["JWT_SECRET"] = "test-secret"
 
-    # 2. 初始化临时 SQLite 数据库（每次测试独立）
-    db_folder = str(tmp_path / "db")
-    init_sql_db(db_folder=db_folder, db_file="test.db")
 
-    # 3. 创建所有表
-    from src.system.database.sql_database import get_sql_session
-    session = get_sql_session()
-    Base.metadata.create_all(bind=session.get_bind())
-    session.close()
-
-    # 4. 初始化内存 Redis
-    init_redis_buffer({})
-
-    # 5. 创建 DatabaseManager 实例
+    # 2. 创建 DatabaseManager 实例
     manager = DatabaseManager({
-
+        "sql_db_folder": str(tmp_path / "db"),
+        "sql_db_file": "test.db",
     })
     yield manager
 
@@ -57,8 +43,7 @@ def db_manager(tmp_path):
 @pytest.fixture
 def sample_user(db_manager: "DatabaseManager") -> str:
     """预置一个测试用户"""
-    from src.system.database.sql_database import get_sql_session
-    session = get_sql_session()
+    session = db_manager.open_sql_session()
     user = User(
         uuid="test-uuid-001",
         username="testuser",
@@ -72,8 +57,7 @@ def sample_user(db_manager: "DatabaseManager") -> str:
 @pytest.fixture
 def sample_invite_code(db_manager: "DatabaseManager") -> str:
     """预置一个测试邀请码"""
-    from src.system.database.sql_database import get_sql_session
-    session = get_sql_session()
+    session = db_manager.open_sql_session()
     code = InviteCode(code="TESTCODE123", is_used=False)
     session.add(code)
     session.commit()
@@ -83,8 +67,7 @@ def sample_invite_code(db_manager: "DatabaseManager") -> str:
 @pytest.fixture
 def sample_invite_code_2(db_manager: "DatabaseManager") -> str:
     """预置另一个测试邀请码"""
-    from src.system.database.sql_database import get_sql_session
-    session = get_sql_session()
+    session = db_manager.open_sql_session()
     code = InviteCode(code="TESTCODE456", is_used=False)
     session.add(code)
     session.commit()

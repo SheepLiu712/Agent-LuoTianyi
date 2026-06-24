@@ -15,7 +15,7 @@ import requests
 from src.utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
 from src.utils.vision.vlm_api_interface import VLMAPIFactory, VLMAPIInterface
 from src.utils.logger import get_logger
-from src.plugins.schedule.event_models import UnifiedEventType, OfficialDynamic
+from src.system.database.event_models import UnifiedEventType, OfficialDynamic
 
 logger = get_logger(__name__)
 

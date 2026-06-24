@@ -109,20 +109,11 @@ class TopicReplier:
         # 它不用等到回复完成就能检测日期，因此把日期检测放在这里，和回复workflow并行
         asyncio.create_task(self._process_date_detection(topic, conversation_history=conversation_history))
 
-        external_context = None
-        if self.system_runtime.schedule_manager:
-            try:
-                external_context = self.system_runtime.schedule_manager.get_active_context(self.user_id)
-                if external_context:
-                    self.logger.info(f"Injected activity context for user {self.user_id}")
-            except Exception as e:
-                self.logger.warning(f"Failed to get activity context: {e}")
-
         attention_plan = await agent.plan_topic_turn_for_pipeline(
             user_id=self.user_id,
             topic=topic,
             conversation_history=conversation_history,
-            external_context=external_context,
+            external_context=None,
         )
 
         reply_items = await agent.realize_topic_plan_for_pipeline(

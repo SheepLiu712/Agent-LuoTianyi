@@ -114,7 +114,6 @@ class ProactiveTopicMaker:
         self.silence_trigger_cooldown_seconds = float(
             self.config.get("silence_trigger_cooldown_seconds", self.silence_threshold_seconds)
         )
-
         self._load_first_login_res()
         self.agent: Optional["LuoTianyiAgent"] = None
 
@@ -145,7 +144,8 @@ class ProactiveTopicMaker:
     ) -> None:
         # 演唱会静默期间跳过主动发言（保留首次登录欢迎）
         if action.activity_type != ActivityType.FIRST_LOGIN:
-            if system_runtime and system_runtime.schedule_manager and system_runtime.schedule_manager.is_silence_period():
+            world = self._get_world(system_runtime)
+            if world and world.is_silence_period():
                 self.logger.info(f"Silence period active, skipping action {action.activity_type}")
                 return
         if action.activity_type == ActivityType.FIRST_LOGIN:
@@ -182,7 +182,10 @@ class ProactiveTopicMaker:
             # 1-4) 统一通过 schedule 模块检索：节日 / citywalk / new_song / 用户重要日期
             #      如果已在 schedule 中提醒过，则 login 时不再重复提示
             try:
-                store = self.system_runtime.schedule_manager.event_store
+                world = self._get_world(self.system_runtime)
+                if world is None or world.event_store is None:
+                    return
+                store = world.event_store
                 due = store.get_events_due_for_trigger()
                 for event_dict, trigger_key in due:
                     evt_type = event_dict.get("event_type", "")
@@ -251,7 +254,7 @@ class ProactiveTopicMaker:
                             )
                         )
 
-                    # 标记已通知，防止 ReminderDispatcher 再次发送
+                    # Mark notified so the periodic reminder loop does not repeat it.
                     if not store.is_notified(event_dict["id"], user_uuid, trigger_key):
                         store.mark_notified(event_dict["id"], user_uuid, trigger_key)
             except Exception as e:
@@ -266,6 +269,85 @@ class ProactiveTopicMaker:
             return
 
         self.logger.warning(f"Unsupported action type: {action.activity_type}")
+
+    async def run_periodic_checks(self, system_runtime: "SystemRuntime") -> int:
+        return await self.dispatch_due_reminders(system_runtime)
+
+    async def dispatch_due_reminders(self, system_runtime: "SystemRuntime") -> int:
+        world = self._get_world(system_runtime)
+        if world is None or world.event_store is None:
+            return 0
+
+        store = world.event_store
+        try:
+            due_events = store.get_events_due_for_trigger()
+        except Exception as e:
+            self.logger.warning(f"Failed to query due reminders: {e}")
+            return 0
+
+        sent = 0
+        for event_dict, trigger_key in due_events:
+            for user_id, chat_stream in self._iter_target_streams(system_runtime, event_dict):
+                event_id = event_dict.get("id")
+                if not event_id:
+                    continue
+                if store.is_notified(event_id, user_id, trigger_key):
+                    continue
+                topic = self._build_reminder_topic(event_dict, trigger_key)
+                await chat_stream.topic_replier.add_topic(topic)
+                store.mark_notified(event_id, user_id, trigger_key)
+                sent += 1
+
+        if sent:
+            self.logger.info(f"Dispatched {sent} proactive reminder topic(s)")
+        return sent
+
+    def _iter_target_streams(self, system_runtime: "SystemRuntime", event_dict: Dict[str, Any]):
+        gcsm = getattr(system_runtime, "gcsm", None)
+        if gcsm is None:
+            return
+
+        is_personal = event_dict.get("is_personal", False)
+        target_user_id = event_dict.get("target_user_id")
+        for user_id, chat_stream in list(getattr(gcsm, "user_streams", {}).items()):
+            if chat_stream is None or chat_stream.is_connection_lost():
+                continue
+            if is_personal and target_user_id and target_user_id != user_id:
+                continue
+            yield user_id, chat_stream
+
+    def _build_reminder_topic(self, event_dict: Dict[str, Any], trigger_key: str) -> ExtractedTopic:
+        event_type = event_dict.get("event_type", "event")
+        title = event_dict.get("title", "")
+        description = event_dict.get("description", "")
+        trigger_desc = {
+            "7_days_before": "in seven days",
+            "3_days_before": "in three days",
+            "1_day_before": "tomorrow",
+            "day_of_event": "today",
+            "1_day_after": "yesterday",
+            "1_hour_before": "in about one hour",
+        }.get(trigger_key, "soon")
+
+        content = f"Proactively remind the user that a {event_type} event, {title}, is {trigger_desc}."
+        if description:
+            content += f" Event details: {description}."
+
+        return ExtractedTopic(
+            topic_id=str(uuid4()),
+            source_messages=[],
+            topic_content=content,
+            memory_attempts=[],
+            fact_constraints=[],
+            sing_attempts=[],
+            is_forced_from_incomplete=True,
+        )
+
+    @staticmethod
+    def _get_world(system_runtime: Optional["SystemRuntime"]):
+        if system_runtime is None:
+            return None
+        return getattr(system_runtime, "world", None)
 
     def _merge_topics(self, topics: List[ExtractedTopic]) -> Optional[ExtractedTopic]:
         """将多个 ExtractedTopic 合并为一个。"""

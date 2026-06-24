@@ -4,7 +4,7 @@ from typing import Any, List, TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
-from src.system.database.memory_storage import MemoryStorage
+from src.system.database.redis_buffer import RedisBuffer
 
 if TYPE_CHECKING:
     from src.system.database.vector_store import VectorStore
@@ -20,7 +20,7 @@ class MemoryUpdateService:
     async def post_process_interaction(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: "VectorStore",
         user_id: str,
         history: str,
@@ -42,7 +42,7 @@ class MemoryUpdateService:
     async def write_user_memory(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: "VectorStore",
         user_id: str,
         content: str,
@@ -60,7 +60,7 @@ class MemoryUpdateService:
     async def write_event_memory(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: "VectorStore",
         user_id: str,
         content: str,
@@ -78,7 +78,7 @@ class MemoryUpdateService:
     async def update_user_profile_by_context(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         user_id: str,
         context: dict[str, Any],
         commit: bool = True,

@@ -15,7 +15,7 @@ from src.utils.llm.llm_api_interface import LLMAPIFactory
 import time
 import asyncio
 from sqlalchemy.orm import Session
-from src.system.database.memory_storage import MemoryStorage
+from src.system.database.redis_buffer import RedisBuffer
 from src.system.database.database_service import write_agent_memory_record, write_memory_update
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
@@ -50,7 +50,7 @@ class MemoryWriter:
     async def process_interaction(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         user_id: str,
         history: str,
@@ -185,7 +185,7 @@ class MemoryWriter:
     async def write_user_memory(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         user_id: str,
         content: str,
@@ -240,7 +240,7 @@ class MemoryWriter:
     async def write_event_memory(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         user_id: str,
         content: str,

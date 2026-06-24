@@ -1,30 +1,23 @@
-from sqlalchemy.orm import Session
-from src.system.database.sql_database import init_sql_db, get_sql_db, get_sql_session, SessionLocal
-from src.system.database.sql_database import (
-    AgentMemoryRecord,
-    MemoryChunkRecord,
-    User,
-    InviteCode,
-    KnowledgeBuffer,
-    Conversation,
-    Base,
-    MemoryUpdateRecord,
-)
-from src.system.database.memory_storage import MemoryStorage, WatchError, init_redis_buffer, get_redis_buffer
-from src.system.database.sql_writer import run_sql_write
 import os
 import hmac
 import bcrypt
 from jose import jwt
-
 import json
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from datetime import datetime
 import uuid
-
 from src.utils.logger import get_logger
-from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
-from src.domain import ConversationItem, MemoryUpdateCommand
+
+from src.domain import ConversationItem
+from src.system.database.sql_database import init_sql_db, get_sql_session, SessionLocal
+from src.system.database.sql_database import (User,InviteCode,Conversation)
+from src.system.database.redis_buffer import RedisBuffer, WatchError, init_redis_buffer, get_redis_buffer
+from src.system.database.sql_writer import run_sql_write
+from src.system.database.event_store import EventStore
+from src.system.database.memory_store import MemoryStore
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 
 logger = get_logger("database")
@@ -61,31 +54,41 @@ class DatabaseManager:
     """
     数据库管理器，封装所有数据库操作。
 
-    - 内部持有 MemoryStorage (redis) 实例
+    - 内部持有 RedisBuffer (redis) 实例
     - 每个方法自行创建 SessionLocal() 并通过 try/finally 确保关闭
     - 不再要求调用者传入 db 和 redis 参数
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
-        self._config = config or {}
-        self._redis: Optional[MemoryStorage] = None
+    def __init__(self, config: Optional[Dict[str, Any]]) -> None:
+        self.config = config or {}
+        self._redis: Optional[RedisBuffer] = None
+        self.event_store: Optional[Any] = None
+        self.memory_store: Optional[MemoryStore] = None
+        self.init_all_databases()
 
     def init_all_databases(self) -> None:
         """初始化所有数据库组件（SQL/Redis 缓存）。"""
         try:
             init_sql_db(
-                self._config.get("sql_db_folder", "data/database"),
-                self._config.get("sql_db_file", "luotianyi.db"),
+                self.config.get("sql_db_folder", "data/database"),
+                self.config.get("sql_db_file", "luotianyi.db"),
             )
-            init_redis_buffer(self._config.get("redis", {}))
+            init_redis_buffer(self.config.get("redis", {}))
+
+            self.event_store = EventStore(config = self.config.get("event_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis)
+            self.memory_store = MemoryStore(config = self.config.get("memory_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis)
             logger.info("Main database initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing databases: {e}")
             raise
 
+    def set_event_store_llm_client(self, llm_client: Any | None) -> None:
+        if self.event_store is not None:
+            self.event_store.llm_client = llm_client
+
     # ── 内部工具 ─────────────────────────────────────────────
 
-    def _ensure_redis(self) -> MemoryStorage:
+    def _ensure_redis(self) -> RedisBuffer:
         if self._redis is None:
             # 自动从 get_redis_buffer 获取已初始化的实例
             self._redis = get_redis_buffer()
@@ -782,172 +785,7 @@ class DatabaseManager:
         finally:
             db.close()
 
-    # ────────────────────────────────────────────
-    # 记忆更新命令记录管理
-    # ────────────────────────────────────────────
-
-    def write_memory_update(self, user_id: str, memory_update: MemoryUpdateCommand, commit: bool = True) -> None:
-        """向数据库中添加记忆更新命令记录，并更新 Redis 缓存。"""
-        redis = self._ensure_redis()
-        db = self._new_session()
-        try:
-            cmd_to_dict = {
-                "uuid": memory_update.uuid,
-                "content": memory_update.content,
-                "type": memory_update.type,
-            }
-
-            def _write() -> None:
-                record = MemoryUpdateRecord(
-                    user_id=user_id,
-                    update_command=json.dumps(cmd_to_dict, ensure_ascii=False),
-                    created_at=datetime.now(),
-                )
-                db.add(record)
-                if commit:
-                    db.commit()
-
-            run_sql_write(_write)
-
-            # 更新 Redis 最近记忆更新缓存
-            recent_update_key = f"user_recent_memory_update:{user_id}"
-            raw_data = redis.get(recent_update_key)
-            updates_list = json.loads(raw_data) if raw_data else []
-            updates_list.append(cmd_to_dict)
-            updates_list = updates_list[-10:]
-            redis.setex(recent_update_key, 3600, json.dumps(updates_list, ensure_ascii=False))
-
-        except Exception as e:
-            logger.error(f"write_memory_update error: {e}")
-            db.rollback()
-        finally:
-            db.close()
-
-    def write_agent_memory_record(
-        self,
-        memory_record: DomainMemoryRecord,
-        *,
-        chunk_texts: Optional[List[str]] = None,
-        embedding_ids: Optional[List[str]] = None,
-        commit: bool = True,
-    ) -> str:
-        """持久化一条规范的记忆记录及其可选的向量 chunk。"""
-        chunk_texts = chunk_texts or [memory_record.content]
-        embedding_ids = embedding_ids or []
-
-        db = self._new_session()
-        try:
-            def _write() -> str:
-                row = AgentMemoryRecord(
-                    id=memory_record.id,
-                    owner_character_id=memory_record.owner_character_id,
-                    subject_user_id=memory_record.subject_user_id,
-                    memory_type=memory_record.memory_type.value,
-                    visibility=memory_record.visibility.value,
-                    source=memory_record.source,
-                    content=memory_record.content,
-                    summary=memory_record.summary,
-                    importance=memory_record.importance,
-                    confidence=memory_record.confidence,
-                    emotional_valence=memory_record.emotional_valence,
-                    happened_at=memory_record.happened_at,
-                    created_at=memory_record.created_at,
-                    last_accessed_at=memory_record.last_accessed_at,
-                    meta_data=json.dumps(dict(memory_record.metadata or {}), ensure_ascii=False),
-                )
-                db.add(row)
-
-                for index, chunk_text in enumerate(chunk_texts):
-                    text = (chunk_text or "").strip()
-                    if not text:
-                        continue
-                    db.add(MemoryChunkRecord(
-                        memory_record_id=row.id,
-                        chunk_text=text,
-                        chunk_type="content",
-                        embedding_id=embedding_ids[index] if index < len(embedding_ids) else None,
-                    ))
-
-                if commit:
-                    db.commit()
-                return row.id
-
-            return run_sql_write(_write)
-        except Exception as e:
-            logger.error(f"write_agent_memory_record error: {e}")
-            db.rollback()
-            return ""
-        finally:
-            db.close()
-
-    def get_agent_memory_record(self, memory_record_id: str) -> Optional[DomainMemoryRecord]:
-        """根据 ID 读取一条记忆记录。"""
-        db = self._new_session()
-        try:
-            row = db.query(AgentMemoryRecord).filter(AgentMemoryRecord.id == memory_record_id).first()
-            if row is None:
-                return None
-
-            from src.domain.memory_record import MemoryType, MemoryVisibility
-
-            try:
-                metadata = json.loads(row.meta_data or "{}")
-            except Exception:
-                metadata = {}
-
-            return DomainMemoryRecord(
-                id=row.id,
-                owner_character_id=row.owner_character_id,
-                subject_user_id=row.subject_user_id,
-                memory_type=MemoryType(row.memory_type),
-                visibility=MemoryVisibility(row.visibility),
-                source=row.source,
-                content=row.content,
-                summary=row.summary,
-                importance=row.importance if row.importance is not None else 0.5,
-                confidence=row.confidence if row.confidence is not None else 1.0,
-                emotional_valence=row.emotional_valence,
-                happened_at=row.happened_at,
-                created_at=row.created_at,
-                last_accessed_at=row.last_accessed_at,
-                metadata=metadata,
-            )
-        finally:
-            db.close()
-
-    def get_agent_memory_record_by_embedding_id(self, embedding_id: str) -> Optional[DomainMemoryRecord]:
-        """根据向量索引 embedding_id 反查规范记忆记录。"""
-        db = self._new_session()
-        try:
-            chunk = db.query(MemoryChunkRecord).filter(MemoryChunkRecord.embedding_id == embedding_id).first()
-            if chunk is None:
-                return None
-            return self.get_agent_memory_record(chunk.memory_record_id)
-        finally:
-            db.close()
-
-
-
-    def get_recent_memory_update_from_buffer(self, user_id: str) -> List[MemoryUpdateCommand]:
-        """从 Redis 获取最近记忆更新列表。"""
-        redis = self._ensure_redis()
-        redis_key = f"user_recent_memory_update:{user_id}"
-        raw_data = redis.get(redis_key)
-        if not raw_data:
-            self.prefill_buffer(user_id)
-            raw_data = redis.get(redis_key)
-
-        if raw_data:
-            updates_list = json.loads(raw_data)
-            return [
-                MemoryUpdateCommand(
-                    uuid=item.get("uuid"),
-                    content=item.get("content"),
-                    type=item.get("type"),
-                )
-                for item in updates_list
-            ]
-        return []
+    
     
     # ————————
     # 图片管理
@@ -1005,9 +843,13 @@ class DatabaseManager:
             db.close()
 
     @property
-    def redis(self) -> MemoryStorage:
+    def redis(self) -> RedisBuffer:
         """便捷属性：直接访问 Redis 实例。"""
         return self._ensure_redis()
+    
+    def get_sql_session(self) -> Session:
+        """便捷属性：直接获取 SQLAlchemy Session 实例。"""
+        return self._new_session()
 
 
 # ============================================================================
@@ -1022,94 +864,3 @@ def get_database_manager() -> DatabaseManager:
     if _db_manager is None:
         _db_manager = DatabaseManager()
     return _db_manager
-
-
-def init_all_databases(config: Dict[str, Any]) -> None:
-    global _db_manager
-    _db_manager = DatabaseManager(config)
-    _db_manager.init_all(config)
-
-
-def prefill_buffer(db: Session, redis: MemoryStorage, user_id: str, types: List[str] = ["all"]) -> bool:
-    return get_database_manager().prefill_buffer(user_id, types)
-
-
-def update_login_time(db: Session, user_id: str) -> Optional[float]:
-    return get_database_manager().update_login_time(user_id)
-
-
-def add_conversations(db: Session, redis: MemoryStorage, user_id: str, conversation_data: List[ConversationItem], commit=True) -> List[str]:
-    return get_database_manager().add_conversations(user_id, conversation_data, commit)
-
-
-def write_memory_update(db: Session, redis: MemoryStorage, user_id: str, memory_update: MemoryUpdateCommand, commit: bool = True) -> None:
-    get_database_manager().write_memory_update(user_id, memory_update, commit)
-
-
-def write_agent_memory_record(
-    db: Session,
-    memory_record: DomainMemoryRecord,
-    *,
-    chunk_texts: Optional[List[str]] = None,
-    embedding_ids: Optional[List[str]] = None,
-    commit: bool = True,
-) -> str:
-    return get_database_manager().write_agent_memory_record(
-        memory_record, chunk_texts=chunk_texts, embedding_ids=embedding_ids, commit=commit,
-    )
-
-
-def get_agent_memory_record(db: Session, memory_record_id: str) -> Optional[DomainMemoryRecord]:
-    return get_database_manager().get_agent_memory_record(memory_record_id)
-
-
-def get_agent_memory_record_by_embedding_id(db: Session, embedding_id: str) -> Optional[DomainMemoryRecord]:
-    return get_database_manager().get_agent_memory_record_by_embedding_id(embedding_id)
-
-
-def update_user_nickname(db: Session, redis: MemoryStorage, user_id: str, new_nickname: str, commit: bool = True) -> None:
-    get_database_manager().update_user_nickname(user_id, new_nickname, commit)
-
-
-def update_user_description(db: Session, redis: MemoryStorage, user_id: str, new_description: str, commit: bool = True) -> None:
-    get_database_manager().update_user_description(user_id, new_description, commit)
-
-
-def update_context_summary(db: Session, redis: MemoryStorage, user_id: str, new_summary: str, new_context_memory_count: int, commit: bool = True) -> None:
-    get_database_manager().update_context_summary(user_id, new_summary, new_context_memory_count, commit)
-
-
-def get_context_from_buffer(db: Session, redis: MemoryStorage, user_id: str) -> Any:
-    return get_database_manager().get_context_from_buffer(user_id)
-
-
-def get_history_from_db(db: Session, user_id: str, start: int, end: int) -> List[ConversationItem]:
-    return get_database_manager().get_history_from_db(user_id, start, end)
-
-
-def get_total_conversation_count(db: Session, user_id: str) -> int:
-    return get_database_manager().get_total_conversation_count(user_id)
-
-
-def get_context_count(db: Session, user_id: str) -> int:
-    return get_database_manager().get_context_count(user_id)
-
-
-def get_user_nickname(db: Session, redis: MemoryStorage, user_id: str) -> Optional[str]:
-    return get_database_manager().get_user_nickname(user_id)
-
-
-def get_user_description(db: Session, redis: MemoryStorage, user_id: str) -> Optional[str]:
-    return get_database_manager().get_user_description(user_id)
-
-
-def get_recent_memory_update_from_buffer(db: Session, redis: MemoryStorage, user_id: str) -> List[MemoryUpdateCommand]:
-    return get_database_manager().get_recent_memory_update_from_buffer(user_id)
-
-
-def get_image_server_path(db: Session, user_id: str, uuid: str) -> Optional[str]:
-    return get_database_manager().get_image_server_path(user_id, uuid)
-
-
-def update_image_client_path(db: Session, user_id: str, uuid: str, new_client_path: str) -> bool:
-    return get_database_manager().update_image_client_path(user_id, uuid, new_client_path)

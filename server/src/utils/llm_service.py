@@ -35,7 +35,7 @@ class LLMService:
         if not prompt_template:
             raise ValueError(f"Prompt模板未找到: {prompt_name}, 无法注册模块: {module_name}")
         
-        module = LLMModule(module_name, module_config, prompt_template, llm_interface)
+        module = LLMModule(module_name, llm_config, prompt_template, llm_interface)
         self.llm_modules[module_name] = module
         return module
 
@@ -56,6 +56,20 @@ class LLMService:
         module = VLMModule(module_name, module_config, prompt_template, vlm_interface)
         self.vlm_modules[module_name] = module
         return module
+    
+    def get_llm_interface_info(self) -> Dict[str, Dict]:
+        """获取所有已注册的LLM接口信息"""
+        return {
+            name: interface.get_interface_info()
+            for name, interface in self.llm_interfaces.items()
+        }
+
+    def get_vlm_interface_info(self) -> Dict[str, Dict]:
+        """获取所有已注册的VLM接口信息"""
+        return {
+            name: interface.get_interface_info()
+            for name, interface in self.vlm_interfaces.items()
+        }
 
     def _create_llm_interfaces(self) -> Dict[str, LLMAPIInterface]:
         llm_interfaces = {}
@@ -65,6 +79,7 @@ class LLMService:
                 self.logger.info(f"成功创建LLM接口: {llm_name}")
             except Exception as e:
                 self.logger.error(f"创建LLM接口失败: {llm_name}, 错误: {e}")
+        
         return llm_interfaces
     
     def _create_vlm_interfaces(self) -> Dict[str, VLMAPIInterface]:

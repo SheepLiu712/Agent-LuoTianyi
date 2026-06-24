@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.system.database.vector_store import VectorStore
 from src.system.database.database_service import get_agent_memory_record_by_embedding_id
-from src.system.database.memory_storage import MemoryStorage
+from src.system.database.redis_buffer import RedisBuffer
 from src.domain import MemoryContext, MemoryHit
 from src.utils.llm.prompt_manager import PromptManager
 from src.subconscious.memory.memory_manager import MemoryManager
@@ -46,7 +46,7 @@ class SubconsciousMemory:
     async def get_knowledge(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         knowledge_db: Session,
         user_id: str,
@@ -162,7 +162,7 @@ class SubconsciousMemory:
     async def post_process_interaction(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         user_id: str,
         history: str,
@@ -185,7 +185,7 @@ class SubconsciousMemory:
     async def write_user_memory(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         user_id: str,
         content: str,
@@ -204,7 +204,7 @@ class SubconsciousMemory:
     async def write_event_memory(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         vector_store: VectorStore,
         user_id: str,
         content: str,
@@ -220,13 +220,13 @@ class SubconsciousMemory:
             commit=commit,
         )
 
-    async def get_username(self, db: Session, redis: MemoryStorage, user_id: str) -> str:
+    async def get_username(self, db: Session, redis: RedisBuffer, user_id: str) -> str:
         return await self.legacy_manager.get_username(db=db, redis=redis, user_id=user_id)
 
     async def update_user_profile_by_topic(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         user_id: str,
         history: str,
         current_dialogue: str,
@@ -244,7 +244,7 @@ class SubconsciousMemory:
     async def update_user_profile_by_context(
         self,
         db: Session,
-        redis: MemoryStorage,
+        redis: RedisBuffer,
         user_id: str,
         context: Dict[str, Any],
         commit: bool = True,

@@ -1,10 +1,6 @@
-"""World and sandbox-facing adapters.
-
-The first refactor phase keeps existing plugin implementations in place and
-exposes them through world-facing facades. Later phases can move the concrete
-providers behind these boundaries.
-"""
+"""World runtime, clocks, and world-facing services."""
 
 from .world_runtime import WorldRuntime
+from .world_clock import WorldClock
 
-__all__ = ["WorldRuntime"]
+__all__ = ["WorldRuntime", "WorldClock"]

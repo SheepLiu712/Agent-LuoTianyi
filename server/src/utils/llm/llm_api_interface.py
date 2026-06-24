@@ -47,15 +47,6 @@ class LLMAPIInterface(ABC):
         """
         pass
 
-    @abstractmethod
-    def get_response_time(self, last_k: int) -> List[float]:
-        """
-        获取最近请求的响应时间
-
-        :return: 响应时间，单位为秒
-        """
-        pass
-
 
 """
 硅基流动API接口实现
@@ -104,8 +95,8 @@ class OpenAIAPIInterface(LLMAPIInterface):
         last_exception = None
         kwargs = kwargs or {}
         params = params or {}
-        if enable_thinking and self.can_enable_thinking:
-            kwargs["extra_body"] = {"enable_thinking": True}
+        if self.can_enable_thinking:
+            kwargs["extra_body"] = {"enable_thinking": enable_thinking}
         if use_json and self.can_use_json:
             kwargs["response_format"] = {"type": "json_object"}
 
@@ -129,7 +120,6 @@ class OpenAIAPIInterface(LLMAPIInterface):
                 
                 elapsed = time.time() - st_time
                 extracted = self._extract_content(ret, elapsed=elapsed)
-                self.response_time_queue.append(elapsed)
                 return extracted
 
             except Exception as e:
@@ -260,7 +250,7 @@ class OpenAIAPIInterface(LLMAPIInterface):
 
     def get_interface_info(self) -> Dict[str, Any]:
         return {
-            "name": "OpenAIAPIInterface",
+            "type": "OpenAIAPIInterface",
             "model": self.model,
             "base_url": self.base_url,
             "temperature": self.default_parameters.get("temperature"),
@@ -283,7 +273,6 @@ class RequestsAPIInterface(LLMAPIInterface):
         self.config = config
         self.logger = get_logger(__name__)
         self._init_parameters()
-        self.response_time_queue = deque(maxlen=20)  # 存储最近的响应时间
 
     async def generate_response(self, prompt: str, use_json: bool = False, **kwargs) -> str:
         # 实现调用SiliconFlow API生成响应的逻辑
@@ -303,7 +292,6 @@ class RequestsAPIInterface(LLMAPIInterface):
                 ret = await asyncio.to_thread(_do_request)
                 elapsed = time.time() - st_time
                 extracted = self._extract_content(ret, elapsed=elapsed)
-                self.response_time_queue.append(elapsed)
                 return extracted
 
             except Exception as e:
@@ -429,11 +417,6 @@ class RequestsAPIInterface(LLMAPIInterface):
             "retry_delay": self.retry_delay,
         }
 
-    def get_response_time(self, last_k: int = 1) -> List[float]:
-        if not self.response_time_queue:
-            return []
-        k = min(last_k, len(self.response_time_queue))
-        return list(self.response_time_queue)[-k:]
 
 
 """

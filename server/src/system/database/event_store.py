@@ -8,15 +8,16 @@ import json
 import threading
 import uuid
 from datetime import datetime, date
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
 from src.utils.logger import get_logger
-from src.utils.lunar_date import get_holiday_name, get_lunar_mmdd, lunar_to_solar, FIXED_SOLAR_HOLIDAYS, LUNAR_HOLIDAYS_MMDD, is_lunar_new_year_eve
+from src.utils.lunar_date import get_lunar_mmdd, lunar_to_solar, FIXED_SOLAR_HOLIDAYS, LUNAR_HOLIDAYS_MMDD, is_lunar_new_year_eve
 from src.system.database.sql_database import Event, EventNotification
-from src.utils.llm.llm_api_interface import LLMAPIInterface
-from src.plugins.schedule.event_models import (
+from src.system.database.redis_buffer import RedisBuffer
+from src.utils.llm.llm_module import LLMModule
+from src.system.database.event_models import (
     UnifiedEventType,
     get_default_trigger_conditions,
     parse_trigger_conditions,
@@ -25,7 +26,9 @@ from src.plugins.schedule.event_models import (
     db_event_to_dict,
 )
 
-logger = get_logger(__name__)
+if TYPE_CHECKING:
+    from src.utils.llm_service import LLMService
+    from sqlalchemy.orm import Session
 
 
 class EventStore:
@@ -41,17 +44,26 @@ class EventStore:
 
     def __init__(
         self,
+        config: Dict[str, Any],
         sql_session_factory: Callable[[], Session],
-        llm_client: Optional[LLMAPIInterface] = None,
+        redis_buffer: RedisBuffer,
+        llm_module: Optional[LLMModule] = None,
     ):
-        self.sql_session_factory = sql_session_factory
-        self.llm_client = llm_client
+        self.config = config
         self.logger = get_logger(__name__)
+        self.sql_session_factory = sql_session_factory
+        _ = redis_buffer # not used now, but kept for future use
+        self.llm_module = llm_module
+
         # 日级缓存
         self._cache_lock = threading.Lock()
         self._all_events_cache: Optional[List[Dict[str, Any]]] = None
         self._due_events_cache: Optional[List[Tuple[Dict[str, Any], str]]] = None
         self._cache_date: Optional[date] = None
+
+    def create_llm_module(self, llm_service: "LLMService"):
+        llm_module_config = self.config["llm_module"]
+        self.llm_module = llm_service.register_llm_module("FindMatchingEvent", llm_module_config)
 
     # ── 缓存工具 ─────────────────────────────────────────────
 
@@ -163,7 +175,7 @@ class EventStore:
         LLM 驱动的模糊匹配：缩小候选集后用 LLM 判断是否同一事件。
         返回匹配的 event_dict（附带 _merged_description 字段），或 None。
         """
-        if self.llm_client is None:
+        if self.llm_module is None:
             return None
 
         # 1. 候选集缩小：同类型 + 同月 ±7 天

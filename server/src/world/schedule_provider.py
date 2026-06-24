@@ -6,20 +6,19 @@ from src.world.events import WorldEvent
 
 
 class ScheduleWorldProvider:
-    """World facade over the existing schedule plugin.
+    """World facade over a source that exposes event/context methods.
 
-    This is deliberately thin. It lets new runtime code depend on `world`
-    contracts while the mature schedule implementation remains in place.
+    Kept for compatibility while callers move to WorldRuntime directly.
     """
 
-    def __init__(self, schedule_manager: Any):
-        self.schedule_manager = schedule_manager
+    def __init__(self, event_source: Any):
+        self.event_source = event_source
 
     def list_active_events(self, user_id: str | None = None) -> list[WorldEvent]:
-        if self.schedule_manager is None:
+        if self.event_source is None:
             return []
         try:
-            raw_events = self.schedule_manager.get_events()
+            raw_events = self.event_source.get_events()
         except Exception:
             return []
 
@@ -31,10 +30,10 @@ class ScheduleWorldProvider:
         return result
 
     def get_context_for_runtime(self, user_id: str | None = None) -> str:
-        if self.schedule_manager is None:
+        if self.event_source is None:
             return ""
         try:
-            return self.schedule_manager.get_active_context(user_id or "")
+            return self.event_source.get_active_context(user_id or "")
         except Exception:
             return ""
 
