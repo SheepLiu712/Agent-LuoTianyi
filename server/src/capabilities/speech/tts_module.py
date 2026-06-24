@@ -30,7 +30,7 @@ class TTSModule:
         self.language = tts_config.get("language", "zh")
 
         self.tone_reference_audio_projection: Dict[str, str] = self._prepare_tone_reference_audio_projection(
-            tts_config.get("interface_config_path", "config/tts_interface_config.json")
+            tts_config.get("interface_config_path", "res/tts/luotianyi/tts_interface_config.json")
         )
         self.reference_audio: Dict[str, ReferenceAudio] = self._prepare_reference_audio(
             tts_config.get("reference_audio_dir", ""), tts_config.get("reference_audio_lyrics", "")
@@ -180,18 +180,17 @@ class TTSModule:
             raise
 
     def encode_audio_to_base64(self, audio_bytes: bytes) -> str:
-        """将音频 bytes 编码为 base64 字符串"""
+        """
+        将音频 bytes 编码为 base64 字符串
+        """
         if not audio_bytes:
             return ""
         import base64
         return base64.b64encode(audio_bytes).decode("utf-8")
 
-tts_server = None
-tts_module = None
 
 def init_tts_module(tts_config: Dict[str, Any]) -> TTSModule:
-    global tts_server, tts_module
-    server_config_path = tts_config.get("server_config_path", "config/tts_infer.yaml")
+    server_config_path = tts_config.get("server_config_path", "res/tts/luotianyi/tts_infer.yaml")
     tts_server = TTSServer(config_path=server_config_path)
     tts_server.start()
     tts_module = TTSModule(tts_config=tts_config, tts_server=tts_server)

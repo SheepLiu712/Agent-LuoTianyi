@@ -3,10 +3,7 @@ from src.utils.logger import get_logger
 from src.utils.vision.image_process import save_image, get_image_bytes_from_base64, get_postfix_by_mime
 from src.subconscious.music_knowledge.jargon import extract_song_entities
 from src.agent.chat.chat_events import ChatInputEvent, ChatInputEventType
-from src.utils.llm.llm_module import LLMModule
-from src.utils.llm.prompt_manager import PromptManager
 import json
-import asyncio
 
 if TYPE_CHECKING:
     from src.agent.chat.chat_events import ChatInputEvent
@@ -72,8 +69,7 @@ async def _process_image_message(system_runtime: "SystemRuntime", user_id: str, 
 
     # 2. 将图片通过vlm模块转换为描述文本，并添加到对话中
     image_with_header = _ensure_data_uri_header(image_base64, postfix)
-    image_description = await system_runtime.agent.vision_module.describe_image(image_with_header)
-    image_description = f"[一张图片]:{image_description}"
+    image_description = await system_runtime.capabilities.image_understanding.describe_image(image_with_header)
     message.text = image_description  # 将描述文本放入message.text，供后续处理使用
     payload["image_server_path"] = image_server_path
     
@@ -86,17 +82,17 @@ async def extract_date_entities(user_input: str, llm_module) -> Optional[dict]:
         return None
     
     prompt = f"""请分析以下用户消息，判断其中是否提到了重要日期（如生日、纪念日、节日等）。
-如果提到了，请提取以下信息并以JSON格式返回：
-- name: 日期的名称（如"我的生日"、"结婚纪念日"）
-- type: 日期类型，必须是以下之一：生日、纪念日、节日、其他
-- date: 具体的日期（格式：MM-DD 或 YYYY-MM-DD，如果知道具体日期的话）
-- description: 简短描述（可选）
+            如果提到了，请提取以下信息并以JSON格式返回：
+            - name: 日期的名称（如"我的生日"、"结婚纪念日"）
+            - type: 日期类型，必须是以下之一：生日、纪念日、节日、其他
+            - date: 具体的日期（格式：MM-DD 或 YYYY-MM-DD，如果知道具体日期的话）
+            - description: 简短描述（可选）
 
-如果用户消息中没有提到重要日期，请返回 null。
+            如果用户消息中没有提到重要日期，请返回 null。
 
-用户消息：{user_input}
+            用户消息：{user_input}
 
-只返回JSON或null，不要有其他内容。"""
+            只返回JSON或null，不要有其他内容。"""
 
     try:
         response = await llm_module.generate_response(

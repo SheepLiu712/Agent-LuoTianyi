@@ -10,9 +10,21 @@ class SingingCapability:
 
     def __init__(self, config: Dict[str, Any]) -> None:
         self._config: Dict[str, Any] = config
-        self.music_manager = SingingManager(config)
+        self.singing_manager : Dict[str, SingingManager] = {}
+        for character_id, character_config in config.get("characters", {}).items():
+            self.singing_manager[character_id] = SingingManager(character_config)
 
-    def build_sing_plan(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    def build_sing_plan(self, character_id: str, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
+        """
+        根据用户的唱歌尝试，构建一个唱歌计划。
+
+        :param character_id: 角色ID
+        :param sing_attempts: 用户的唱歌尝试列表
+        :return: 一个元组，包含选定的歌曲名称和段落，如果没有选定的歌曲，则返回(None, None)
+        """
+        if character_id not in self.singing_manager:
+            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
+
         if not sing_attempts:
             return None, None
 
@@ -22,28 +34,32 @@ class SingingCapability:
             if not candidate:
                 continue
             if candidate == "random_song":
-                pair = self.music_manager.pick_random_song_and_segment()
+                pair = self.singing_manager[character_id].pick_random_song_and_segment()
                 return pair if pair else (None, None)
 
             song_name = self._extract_song_name(candidate)
             if not song_name:
                 continue
 
-            correct_song_name, segment = self.music_manager.pick_segment_for_song(song_name)
+            correct_song_name, segment = self.singing_manager[character_id].pick_segment_for_song(song_name)
             if segment:
                 return correct_song_name, segment
         if song_name:
-            self.music_manager.add_wished_song(song_name)
+            self.singing_manager[character_id].add_wished_song(song_name)
         return song_name, None
 
-    def sing(self, song_name: str, segment: str) -> Optional[bytes]:
+    def sing(self, character_id: str, song_name: str, segment: str) -> Optional[bytes]:
+        if character_id not in self.singing_manager:
+            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
         if not song_name or not segment:
             return None
-        _, audio_bytes = self.music_manager.get_song_segment(song_name, segment)
+        _, audio_bytes = self.singing_manager[character_id].get_song_segment(song_name, segment)
         return audio_bytes
 
-    def get_segment_lyrics(self, song_name: str, segment: str) -> str:
-        return self.music_manager.get_segment_lyrics(song_name, segment)
+    def get_segment_lyrics(self, character_id: str, song_name: str, segment: str) -> str:
+        if character_id not in self.singing_manager:
+            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
+        return self.singing_manager[character_id].get_segment_lyrics(song_name, segment)
 
     def _extract_song_name(self, text: str) -> str:
         content = (text or "").strip()

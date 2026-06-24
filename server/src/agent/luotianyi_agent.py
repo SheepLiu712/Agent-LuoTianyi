@@ -27,7 +27,6 @@ from src.agent.attention_planner import AttentionPlanner, TopicAttentionPlan
 from src.agent.response_realizer import ResponseRealizer, UserExpressionContext
 from src.domain import CharacterProfile
 
-from src.utils.vision.vision_module import VisionModule
 
 from src.system.database.vector_store import BaseDocument
 if TYPE_CHECKING:
@@ -116,9 +115,6 @@ class LuoTianyiAgent:
         self.attention_planner = AttentionPlanner(target_character_id=self.character_id)
         self.response_realizer = ResponseRealizer(self.main_chat)
         self.topic_extractor = TopicExtractor(self.config["topic_extractor"],self.prompt_manager,)
-        self.vision_module = VisionModule(self.config["vision_module"], self.prompt_manager)
-
-        self.date_detector = DateDetector(self.config["date_detector"]["llm_module"], self.prompt_manager)
         
 
     def save_preferences(self, user_uuid: str, preferences: dict) -> bool:
@@ -182,18 +178,6 @@ class LuoTianyiAgent:
             summary="",
             is_activity=True,
         )
-
-
-    async def describe_image(self, image_base64: str) -> str:
-        """调用视觉模块对图片进行描述
-
-        Args:
-            image_base64: 图片的Base64字符串
-
-        Returns:
-            图片描述文本
-        """
-        return await self.vision_module.describe_image(image_base64)
 
     async def search_memories_for_topic(
         self,

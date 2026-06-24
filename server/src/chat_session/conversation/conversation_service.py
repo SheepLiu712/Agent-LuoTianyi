@@ -10,7 +10,7 @@ from src.agent.chat.chat_events import ChatInputEvent, ChatInputEventType
 from src.domain.conversation_type import ConversationItem
 from src.utils.enum_type import ContextType, ConversationSource
 from src.utils.logger import get_logger
-from src.system.conversation.conversation_manager import ConversationManager
+from src.chat_session.conversation.conversation_manager import ConversationManager
 
 if TYPE_CHECKING:
     from src.system.database.database_service import DatabaseManager

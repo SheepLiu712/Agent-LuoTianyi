@@ -26,6 +26,7 @@
                 "api_key": "$QWEN_API_KEY",
                 "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "can_enable_thinking": false,
+                "can_use_json": false,
                 "default_params": {
                     "temperature": 0.7,
                     "max_tokens": 8192,
@@ -41,29 +42,29 @@
     },
     "capabilities": {
         "tts": {
-            "character_name": "LuoTianyi",
-            "onnx_model_dir": "res/tts/lty_custom_onnx_model",
-            "language": "zh",
-            "reference_audio_dir": "res/tts/reference_audio",
-            "reference_audio_lyrics": "res/tts/reference_audio/lrc.json",
-            "api_script_path": "src/GPT_SoVITS/api_v2.py",
-            "server_config_path": "config/tts_infer.yaml",
-            "interface_config_path": "config/tts_interface_config.json"
+            "luotianyi": {
+                "character_name": "luotianyi",
+                "language": "zh",
+                "onnx_model_dir": "res/tts/lty_custom_onnx_model",
+                "reference_audio_dir": "res/tts/luotianyi/reference_audio",
+                "reference_audio_lyrics": "res/tts/luotianyi/reference_audio/lrc.json",
+                "server_config_path": "res/tts/luotianyi/tts_infer.yaml",
+                "interface_config_path": "res/tts/luotianyi/tts_interface_config.json"
+            }
         },
         "sing": {
-            "resource_path": "res/music",
-            "auto_song_learner": {
-                "resource_path": "res/music",
-                "songlearner_dir": "src/plugins/music/song_learner",
-                "songlearner_resource_dir": "res/song_learner"
-            },
-            "singing_manager": {
-                "resource_path": "res/music"
+            "luotianyi": {
+                "resource_path": "res/sing_song/luotianyi",
+                "singing_manager": {
+                    "resource_path": "res/sing_song/luotianyi"
+                }
             }
         },
         "image_understanding": {
             "vlm_module": {
-                "name": "qwen3-vl-plus",
+                "vlm": {
+                    "name": "qwen3-vl-plus"
+                },
                 "prompt_name": "vision_interaction_prompt"
             }
         }
@@ -321,6 +322,11 @@
                     "prompt_name": "song_knowledge_crawler_prompt"
                 }
             }
+        },
+        "auto_song_learner": {
+                "resource_path": "res/music",
+                "songlearner_dir": "src/plugins/music/song_learner",
+                "songlearner_resource_dir": "res/song_learner"
         }
     },
     "bili_dynamic_fetcher": {

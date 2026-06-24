@@ -16,7 +16,7 @@ class SingingManager:
     def __init__(self, config: Dict[str, Any]):
         self.logger = get_logger(__name__)
         self.config = config
-        self.resource_path = config.get("resource_path", "res/music")
+        self.resource_path = config.get("resource_path", "res/sing_song/luotianyi")
         self.all_songs: dict[str, SongMetadata] = {}
         self.tools: Dict[str, MyTool] = {}
         self.wishlist = WishlistManager(
@@ -30,6 +30,7 @@ class SingingManager:
     def get_unified_song_name(song_name: str) -> str:
         return get_unified_song_name(song_name)
 
+    # —————初始化获得所有歌曲数据————
 
     def get_music_data(self):
         self.logger.info(f"Loading music data from {self.resource_path}")
@@ -94,11 +95,14 @@ class SingingManager:
                 self.logger.error(f"Failed to load song {song} config: {e}\n{traceback.format_exc()}")
         self.logger.info(f"Loaded {len(self.all_songs)} songs into music manager.")
 
-    def get_song_metadata(self, song_name: str) -> SongMetadata | None:
-        if not song_name:
-            return None
-        safe_song_name = SingingManager.get_unified_song_name(song_name)
-        return self.all_songs.get(safe_song_name, None)
+    def reload_songs(self) -> None:
+        """Re-scan songs/ directory to pick up newly learned songs."""
+        old_count = len(self.all_songs)
+        self.get_music_data()
+        self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
+        self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
+
+    # ————歌曲选择相关————
 
     def pick_segment_for_song(self, song_name: str) -> Tuple[str, str]:
         """为指定歌曲随机选择一个可唱唱段描述。"""
@@ -144,25 +148,7 @@ class SingingManager:
 
         # to json string
         return song_and_desc
-
-    def add_wished_song(self, song_name: str) -> bool:
-        return self.wishlist.add(song_name)
-
-    def get_wished_songs(self) -> Dict[str, WishEntry]:
-        """Return all wished songs with their status."""
-        return self.wishlist.get_all()
-
-    def get_recently_learned(self) -> List[str]:
-        """Return and clear the recently-learned notification list."""
-        return self.wishlist.get_recently_learned()
-
-    def reload_songs(self) -> None:
-        """Re-scan songs/ directory to pick up newly learned songs."""
-        old_count = len(self.all_songs)
-        self.get_music_data()
-        self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
-        self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
-
+    
     async def get_songs_can_sing_llm(self, max_song_num: int = 5) -> str:
         song_and_desc = self.get_songs_can_sing(max_song_num)
         return json.dumps(song_and_desc, ensure_ascii=False)
@@ -174,6 +160,21 @@ class SingingManager:
         if not segments:
             return f"洛天依目前无法演唱{song_name}。"
         return f"洛天依可以演唱{correct_song_name}，可以唱的唱段有：{', '.join(segments)}。"
+    
+    # ————愿望清单相关————
+
+    def add_wished_song(self, song_name: str) -> bool:
+        return self.wishlist.add(song_name)
+
+    def get_wished_songs(self) -> Dict[str, WishEntry]:
+        """Return all wished songs with their status."""
+        return self.wishlist.get_all()
+
+    def get_recently_learned(self) -> List[str]:
+        """Return and clear the recently-learned notification list."""
+        return self.wishlist.get_recently_learned()
+    
+    # ————获取唱段歌词和音频数据————
 
     def get_segment_lyrics(self, song_name: str, segment_description: str) -> str:
         lyrics, _ = self.get_song_segment(song_name, segment_description, require_audio=False)
@@ -259,4 +260,10 @@ class SingingManager:
         except Exception as e:
             self.logger.error(f"Failed to process audio for {song_name}: {e}\n{traceback.format_exc()}")
             return None, None
+        
+    def get_song_metadata(self, song_name: str) -> SongMetadata | None:
+        if not song_name:
+            return None
+        safe_song_name = SingingManager.get_unified_song_name(song_name)
+        return self.all_songs.get(safe_song_name, None)
 

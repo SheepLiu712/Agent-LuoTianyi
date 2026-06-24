@@ -18,6 +18,7 @@ from src.system.database.memory_store import MemoryStore
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+    from src.utils.llm_service import LLMService
 
 
 logger = get_logger("database")
@@ -62,7 +63,7 @@ class DatabaseManager:
     def __init__(self, config: Optional[Dict[str, Any]]) -> None:
         self.config = config or {}
         self._redis: Optional[RedisBuffer] = None
-        self.event_store: Optional[Any] = None
+        self.event_store: Optional[EventStore] = None
         self.memory_store: Optional[MemoryStore] = None
         self.init_all_databases()
 
@@ -82,9 +83,11 @@ class DatabaseManager:
             logger.error(f"Error initializing databases: {e}")
             raise
 
-    def set_event_store_llm_client(self, llm_client: Any | None) -> None:
+    def create_llm_modules(self, llm_service: "LLMService") -> None:
         if self.event_store is not None:
-            self.event_store.llm_client = llm_client
+            self.event_store.create_llm_module(llm_service)
+        if self.memory_store is not None:
+            self.memory_store.create_llm_module(llm_service)
 
     # ── 内部工具 ─────────────────────────────────────────────
 
