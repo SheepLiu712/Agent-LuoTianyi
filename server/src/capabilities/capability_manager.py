@@ -15,7 +15,6 @@ class CapabilityManager:
     """Container for action capabilities exposed to agents and workers."""
     def __init__(self, config: Dict, llm_service: LLMService):
         self.config: Dict[str, Any] = config
-        self.llm_service: LLMService = llm_service
         self.logger = get_logger(__name__)
 
         # TTS合成能力
@@ -29,4 +28,4 @@ class CapabilityManager:
         # 图像理解能力
         self.logger.info("Start initializing Image Understanding Capability...")
         self.image_understanding: ImageUnderstanding = ImageUnderstanding(self.config.get("image_understanding", {}))
-        self.image_understanding.create_vlm_module(self.llm_service)
+        self.image_understanding.create_vlm_module(llm_service)

@@ -10,7 +10,7 @@ class SpeechCapability:
 
     def __init__(self, config: Dict) -> None:
         self.tts_config = config
-        self.tts_module = Dict[str, TTSModule] = {}
+        self.tts_module: Dict[str, TTSModule] = {}
         for character, tts_config in self.tts_config.items():
             self.tts_module[character] = init_tts_module(tts_config)
 

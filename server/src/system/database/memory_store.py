@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any,  List, Callable, Dict, Optional, TYPE_CHECKING
 from datetime import datetime
 import json

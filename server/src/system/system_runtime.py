@@ -35,7 +35,7 @@ class SystemRuntime:
         database_manager.create_llm_modules(llm_service)
 
         # 3. 初始化能力管理器
-        capability_manager = CapabilityManager(config.get("capabilities", {}))
+        capability_manager = CapabilityManager(config.get("capabilities", {}), llm_service)
 
         # 4. 初始化聊天会话管理器
         chat_session_manager = ChatSessionManager(config.get("chat_sessions", {}), llm_service)

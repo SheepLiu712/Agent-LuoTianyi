@@ -16,6 +16,7 @@ class SingingManager:
     def __init__(self, config: Dict[str, Any]):
         self.logger = get_logger(__name__)
         self.config = config
+        self.character_name = config.get("character_name", "洛天依")
         self.resource_path = config.get("resource_path", "res/sing_song/luotianyi")
         self.all_songs: dict[str, SongMetadata] = {}
         self.tools: Dict[str, MyTool] = {}
@@ -158,9 +159,9 @@ class SingingManager:
             return "没有指定歌曲名称。"
         correct_song_name, segments = self.can_i_sing_song(song_name)
         if not segments:
-            return f"洛天依目前无法演唱{song_name}。"
-        return f"洛天依可以演唱{correct_song_name}，可以唱的唱段有：{', '.join(segments)}。"
-    
+            return f"{self.character_name}目前无法演唱{song_name}。"
+        return f"{self.character_name}可以演唱{correct_song_name}，可以唱的唱段有：{', '.join(segments)}。"
+
     # ————愿望清单相关————
 
     def add_wished_song(self, song_name: str) -> bool:

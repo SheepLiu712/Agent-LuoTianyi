@@ -11,6 +11,16 @@ if server_root not in sys.path:
 from src.utils.llm_service import LLMService
 from src.utils.helpers import load_config
 
+
+@pytest.fixture(scope="module", autouse=True)
+def server_cwd():
+    old_cwd = os.getcwd()
+    os.chdir(server_root)
+    try:
+        yield
+    finally:
+        os.chdir(old_cwd)
+
 @pytest.fixture(scope="function")
 def llm_service():
     config = load_config("config/config.json")

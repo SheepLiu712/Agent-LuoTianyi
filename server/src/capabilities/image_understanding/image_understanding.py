@@ -17,9 +17,12 @@ class ImageUnderstanding:
 
         :param llm_service: LLMService 实例，用于提供语言模型服务
         """
-        self.vlm_module = llm_service.register_vlm_module(self.config.get("vlm_module", {}))
+        self.vlm_module = llm_service.register_vlm_module(
+            "image_understanding",
+            self.config.get("vlm_module", {}),
+        )
 
-    def describe_image(self, image_base64: str, **kwargs) -> str:
+    async def describe_image(self, image_base64: str, **kwargs) -> str:
         """
         使用视觉语言模型描述图像内容。
 
@@ -30,7 +33,7 @@ class ImageUnderstanding:
         if not self.vlm_module:
             raise RuntimeError("VLMModule is not initialized. Call create_vlm_module first.")
         
-        response = self.vlm_module.generate_response(image_base64=image_base64, **kwargs)
+        response = await self.vlm_module.generate_response(image_base64=image_base64, **kwargs)
         description = response["content"]
         description = f"[一张图片]:{description}"
         return description

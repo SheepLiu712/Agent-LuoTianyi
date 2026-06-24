@@ -97,7 +97,7 @@ class DatabaseManager:
             self._redis = get_redis_buffer()
         return self._redis
 
-    def _new_session(self) -> Session:
+    def _new_session(self) -> "Session":
         """创建一个新的 SQL 会话。调用者负责关闭。"""
         try:
             return get_sql_session()
@@ -107,7 +107,7 @@ class DatabaseManager:
                 return SessionLocal()
             raise
 
-    def open_sql_session(self) -> Session:
+    def open_sql_session(self) -> "Session":
         """Compatibility factory for legacy components not yet using manager methods."""
         return self._new_session()
 
@@ -850,7 +850,7 @@ class DatabaseManager:
         """便捷属性：直接访问 Redis 实例。"""
         return self._ensure_redis()
     
-    def get_sql_session(self) -> Session:
+    def get_sql_session(self) -> "Session":
         """便捷属性：直接获取 SQLAlchemy Session 实例。"""
         return self._new_session()
 

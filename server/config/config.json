@@ -54,6 +54,7 @@
         },
         "sing": {
             "luotianyi": {
+                "character_name": "洛天依",
                 "resource_path": "res/sing_song/luotianyi",
                 "singing_manager": {
                     "resource_path": "res/sing_song/luotianyi"
@@ -325,7 +326,7 @@
         },
         "auto_song_learner": {
                 "resource_path": "res/music",
-                "songlearner_dir": "src/plugins/music/song_learner",
+                "songlearner_dir": "src/world/get_new_songs/song_learner",
                 "songlearner_resource_dir": "res/song_learner"
         }
     },
