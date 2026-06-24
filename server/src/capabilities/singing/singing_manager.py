@@ -8,7 +8,7 @@ from src.domain.music_type import SongSegment, SongMetadata, OneLyricLine, WishE
 from src.domain.tool_type import  MyTool, ToolFunction, ToolOneParameter
 from typing import List, Tuple, Dict, Any, Optional
 import random
-from src.world.get_new_songs.auto_song_learner import WishlistManager
+from src.world.learn_sing_songs.auto_song_learner import WishlistManager
 from src.utils.helpers import get_unified_song_name
 
 

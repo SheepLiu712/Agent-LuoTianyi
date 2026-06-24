@@ -68,7 +68,9 @@ class WorldRuntime:
 
     def set_system_runtime(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
-        self._daily_tasks = self._build_daily_tasks()
+
+
+    def register_clock_actions(self) -> None:
         self._register_clock_actions()
 
     def start_background_services(self) -> None:
@@ -113,7 +115,7 @@ class WorldRuntime:
         self._clock_actions_registered = True
 
     def _register_daily_4am_actions(self) -> None:
-        tasks = self._daily_tasks
+        tasks = self._build_daily_tasks()
         if tasks is None:
             self.logger.info("World daily tasks are not configured; skipping 4am task registration")
             return
@@ -182,54 +184,3 @@ class WorldRuntime:
             return self.capability_manager.singing.music_manager.auto_song_learner
         except Exception:
             return None
-
-    def is_silence_period(self) -> bool:
-        return self.get_silence_event() is not None
-
-    def get_silence_event(self) -> Optional[Dict[str, Any]]:
-        if self.event_store is None:
-            return None
-
-        now_ts = time.monotonic()
-        if self._silence_cache is not None and (now_ts - self._silence_cache_ts) < self._silence_cache_ttl:
-            start_dt = self._silence_cache.get("start_datetime")
-            end_dt = self._silence_cache.get("end_datetime")
-            now = datetime.now()
-            if start_dt and self._in_silence_range(start_dt, end_dt, now):
-                return self._silence_cache
-            self._silence_cache = None
-
-        now = datetime.now()
-        for event_dict in self.event_store.get_events_by_type(UnifiedEventType.CONCERT.value):
-            start_dt = event_dict.get("start_datetime")
-            if not start_dt:
-                continue
-            if self._in_silence_range(start_dt, event_dict.get("end_datetime"), now):
-                self._silence_cache = event_dict
-                self._silence_cache_ts = now_ts
-                return event_dict
-
-        self._silence_cache = None
-        return None
-
-    def _in_silence_range(
-        self,
-        start_dt: datetime,
-        end_dt: Optional[datetime],
-        now: datetime,
-    ) -> bool:
-        pre = start_dt - timedelta(minutes=self.silence_pre_minutes)
-        post = end_dt + timedelta(minutes=self.silence_post_minutes) if end_dt else start_dt + timedelta(hours=4)
-        return pre <= now <= post
-
-    def get_active_context(self, user_id: str = "") -> str:
-        if self.context_provider is None:
-            return ""
-        return self.context_provider.get_context(user_id=user_id)
-
-    def get_events(self, event_type: Optional[str] = None) -> List[Dict[str, Any]]:
-        if self.event_store is None:
-            return []
-        if event_type:
-            return self.event_store.get_events_by_type(event_type)
-        return self.event_store.get_all_events()

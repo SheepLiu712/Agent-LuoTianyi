@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.utils.logger import get_logger
 from src.capabilities.singing import SingingManager
-from src.world.get_new_songs.auto_song_learner import AutoSongLearner
+from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
 from src.subconscious.music_knowledge.knowledge_service import get_song_introduction, get_song_lyrics
 from src.subconscious.music_knowledge.song_database import get_song_session, init_song_db
 

@@ -101,6 +101,7 @@ class WorldClock:
         task_key = f"interval:{action.name}"
         old_task = self._tasks.get(task_key)
         if old_task is not None and not old_task.done():
+            self.logger.info(f"Cancelling existing task for interval action {action.name}.")
             old_task.cancel()
         self._tasks[task_key] = asyncio.create_task(self._run_interval_action(action))
 
@@ -108,6 +109,7 @@ class WorldClock:
         task_key = f"daily:{action.name}"
         old_task = self._tasks.get(task_key)
         if old_task is not None and not old_task.done():
+            self.logger.info(f"Cancelling existing task for daily action {action.name}.")
             old_task.cancel()
         self._tasks[task_key] = asyncio.create_task(self._run_daily_action(action))
 

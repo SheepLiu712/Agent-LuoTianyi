@@ -15,7 +15,7 @@ from src.world.get_new_songs.daily_new_song_fetcher import sync_daily_new_songs
 if TYPE_CHECKING:
     from src.system.database.event_store import EventStore
     from src.world.citywalk.runtime_scheduler import CitywalkRuntimeService
-    from src.world.get_new_songs.auto_song_learner import AutoSongLearner
+    from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
 
 
 class WorldDailyTasks:
