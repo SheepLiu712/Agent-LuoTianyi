@@ -197,6 +197,7 @@ def db_event_to_dict(event_row: "Event") -> Dict[str, Any]:
 
     return {
         "id": event_row.id,
+        "character": getattr(event_row, "character", None) or "luotianyi",
         "event_type": event_row.event_type,
         "title": event_row.title,
         "description": event_row.description or "",

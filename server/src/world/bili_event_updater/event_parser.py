@@ -146,6 +146,8 @@ class EventParser:
             if event["start_datetime"] is None:
                 event["start_datetime"] = self._parse_iso_datetime(raw_item.publish_time)
                 event["end_datetime"] = event["start_datetime"] + timedelta(hours=2)
+            if event["end_datetime"] is None:
+                event["end_datetime"] = event["start_datetime"] + timedelta(days=1)
             events.append(event)
         return events
 

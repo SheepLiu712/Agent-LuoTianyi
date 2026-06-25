@@ -144,6 +144,7 @@ class EventStore:
         title: str,
         start_datetime: Optional[datetime] = None,
         date_mmdd: Optional[str] = None,
+        character: str = "luotianyi",
         threshold_days: int = 2,
     ) -> Optional[Dict[str, Any]]:
         """精确标题匹配（LLM 不可用或 system 事件时的回退路径）。"""
@@ -151,7 +152,11 @@ class EventStore:
         try:
             rows = (
                 db.query(Event)
-                .filter(Event.title == title, Event.is_active == True)
+                .filter(
+                    Event.title == title,
+                    Event.character == character,
+                    Event.is_active == True,
+                )
                 .all()
             )
             for row in rows:
@@ -172,6 +177,7 @@ class EventStore:
         event_type: str,
         start_datetime: Optional[datetime],
         date_mmdd: Optional[str],
+        character: str = "luotianyi",
     ) -> Optional[Dict[str, Any]]:
         """
         LLM 驱动的模糊匹配：缩小候选集后用 LLM 判断是否同一事件。
@@ -185,7 +191,11 @@ class EventStore:
         try:
             rows = (
                 db.query(Event)
-                .filter(Event.event_type == event_type, Event.is_active == True)
+                .filter(
+                    Event.event_type == event_type,
+                    Event.character == character,
+                    Event.is_active == True,
+                )
                 .all()
             )
 
@@ -225,6 +235,7 @@ class EventStore:
                 [
                     {
                         "id": row.id,
+                        "character": row.character or "luotianyi",
                         "title": row.title,
                         "description": row.description or "",
                         "event_type": row.event_type,
@@ -281,7 +292,11 @@ class EventStore:
 
             matched_row = (
                 db.query(Event)
-                .filter(Event.id == matched_id, Event.is_active == True)
+                .filter(
+                    Event.id == matched_id,
+                    Event.character == character,
+                    Event.is_active == True,
+                )
                 .first()
             )
             if matched_row is None:
@@ -303,6 +318,7 @@ class EventStore:
         description: str = "",
         event_type: str = "general",
         source: str = "",
+        character: str = "luotianyi",
         threshold_days: int = 2,
     ) -> Optional[Dict[str, Any]]:
         """
@@ -312,7 +328,13 @@ class EventStore:
         """
         # system 事件（节假日等）走精确匹配，避免不必要的 LLM 调用
         if source == "system" or self.llm_module is None:
-            return self._find_matching_event_exact(title, start_datetime, date_mmdd, threshold_days)
+            return self._find_matching_event_exact(
+                title=title,
+                start_datetime=start_datetime,
+                date_mmdd=date_mmdd,
+                character=character,
+                threshold_days=threshold_days,
+            )
 
         # LLM 路径
         result = await self._find_matching_event_with_llm(
@@ -321,12 +343,19 @@ class EventStore:
             event_type=event_type,
             start_datetime=start_datetime,
             date_mmdd=date_mmdd,
+            character=character,
         )
         if result is not None:
             return result
 
         # LLM 无匹配或降级 → 精确匹配兜底
-        return self._find_matching_event_exact(title, start_datetime, date_mmdd, threshold_days)
+        return self._find_matching_event_exact(
+            title=title,
+            start_datetime=start_datetime,
+            date_mmdd=date_mmdd,
+            character=character,
+            threshold_days=threshold_days,
+        )
 
     def get_events_due_for_trigger(
         self,
@@ -380,6 +409,7 @@ class EventStore:
         description = event_data.get("description", "")
         event_type = event_data.get("event_type", UnifiedEventType.GENERAL.value)
         source = event_data.get("source", "")
+        character = event_data.get("character", "luotianyi")
 
         existing = await self.find_matching_event(
             title=title,
@@ -388,6 +418,7 @@ class EventStore:
             description=description,
             event_type=event_type,
             source=source,
+            character=character,
         )
         if existing:
             merged_desc = existing.pop("_merged_description", None)
@@ -411,6 +442,7 @@ class EventStore:
 
             new_event = Event(
                 id=event_data.get("id", str(uuid.uuid4())),
+                character=character,
                 event_type=event_type,
                 title=title,
                 description=event_data.get("description", ""),

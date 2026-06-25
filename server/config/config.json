@@ -400,7 +400,7 @@
                     "run_immediately": true
                 }
             },
-            "data_file": "data/schedule/events.json",
+            "data_file": "data/schedule/feed_cache.json",
             "bilibili_uids": {
                 "luotianyi": "36081646"
             },

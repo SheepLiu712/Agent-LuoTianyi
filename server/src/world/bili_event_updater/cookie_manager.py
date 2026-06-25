@@ -189,7 +189,7 @@ async def check_and_refresh_cookie_async(cookie_file: Path, force: bool = False)
     if updated_info["all_good"]:
         logger.info("✅ Cookie 刷新后所有关键字段均有效")
     else:
-        logger.warning("⚠️ Cookie 已保存，但仍有字段接近过期（可能服务器未完全更新）")
+        logger.warning("Cookie 已保存，但仍有字段接近过期（可能服务器未完全更新）")
 
     return True
 

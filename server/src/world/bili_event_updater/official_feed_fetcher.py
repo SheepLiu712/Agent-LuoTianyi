@@ -35,14 +35,13 @@ class OfficialFeedFetcher:
     def __init__(
         self,
         config: Optional[Dict[str, Any]] = None,
-        data_file: str = "data/schedule/feed_cache.json",
     ):
         self.logger = get_logger(__name__)
         self.config = config or {}
         self.bili_accounts: Dict[str, str] = self.config.get("bilibili_uids", {"luotianyi": "36081646"})
         self.cookie_file = Path(self.config.get("bili_cookie_file", "config/bili_cookie.txt"))
 
-        self.data_file = Path(data_file)
+        self.data_file = Path(self.config.get("data_file", "data/schedule/feed_cache.json"))
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -127,7 +126,7 @@ class OfficialFeedFetcher:
         """
         self._update_cookie_to_headers()
         all_items: List[OfficialDynamic] = []
-        for character, uid in self.bili_accounts.values():
+        for character, uid in self.bili_accounts.items():
             try:
                 items = self._fetch_bili_space(uid, character)
                 all_items.extend(items)
@@ -185,9 +184,8 @@ class OfficialFeedFetcher:
                         break
 
                     seen.add(dyn_id)
-                    parsed = self._parse_bili_item(uid, item)
+                    parsed = self._parse_bili_item(uid, item, character=character)
                     if parsed:
-                        parsed.character = character
                         results.append(parsed)
 
                 offset = data.get("data", {}).get("offset")
@@ -264,7 +262,12 @@ class OfficialFeedFetcher:
                 dst.append(value)
                 seen.add(value)
 
-    def _parse_bili_item(self, uid: str, item: Dict[str, Any]) -> Optional[OfficialDynamic]:
+    def _parse_bili_item(
+        self,
+        uid: str,
+        item: Dict[str, Any],
+        character: str = "luotianyi",
+    ) -> Optional[OfficialDynamic]:
         """
         从 B 站 Web v1 feed/space item 中提取文本内容。
         """
@@ -339,7 +342,8 @@ class OfficialFeedFetcher:
                 ret = {"text": "\n".join(content_parts), "pics": pics, "name": name}
 
                 # 递归式地处理转发动态，防止多层转发导致内容丢失
-                if orig := dyn.get("orig") and isinstance(orig, dict):
+                orig = dyn.get("orig")
+                if isinstance(orig, dict):
                     # 是转发动态
                     extended_ret = extract_from_dynamic(orig, is_orig=True)
                     if extended_ret["text"]:
@@ -361,6 +365,7 @@ class OfficialFeedFetcher:
             return OfficialDynamic(
                 uid=uid,
                 account_name=account_name or f"bili_{uid}",
+                character=character,
                 platform="bilibili",
                 dynamic_id=dyn_id,
                 dynamic_type=dyn_type,

@@ -207,6 +207,7 @@ class Event(Base):
     __tablename__ = "events"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    character = Column(String, nullable=False, default="luotianyi", server_default="luotianyi", index=True)
     event_type = Column(String, nullable=False, index=True)        # concert / livestream / holiday / birthday / anniversary / travel / new_song / dynamic / general
     title = Column(String, nullable=False)                          # 事件标题
     description = Column(Text, default="")                          # 事件描述
@@ -287,7 +288,23 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
 
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
+    _migrate_sqlite_schema(engine)
     # 迁移：为已存在的数据库添加新列
+
+def _migrate_sqlite_schema(db_engine: Engine) -> None:
+    """Apply additive migrations for existing SQLite databases."""
+    with db_engine.begin() as connection:
+        event_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(events)").fetchall()
+        }
+        if "character" not in event_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE events ADD COLUMN character VARCHAR NOT NULL DEFAULT 'luotianyi'"
+            )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_events_character ON events (character)"
+        )
 
 
 def get_sql_db(): # Generator for FastAPI
