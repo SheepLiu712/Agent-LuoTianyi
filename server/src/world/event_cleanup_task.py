@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
+
+if TYPE_CHECKING:
+    from src.system.system_runtime import SystemRuntime
+    from src.system.database.event_store import EventStore
 
 
 class ExpiredEventCleanupTask(WorldTask):
@@ -11,9 +15,9 @@ class ExpiredEventCleanupTask(WorldTask):
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         super().__init__(self.task_name, config)
-        self.event_store: Any | None = None
+        self.event_store: "EventStore" | None = None
 
-    def initialize(self, system_runtime: Any) -> None:
+    def initialize(self, system_runtime: "SystemRuntime") -> None:
         database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
 

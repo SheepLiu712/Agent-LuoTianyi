@@ -176,10 +176,7 @@ class ProactiveTopicMaker:
             # 1-4) 统一通过 schedule 模块检索：节日 / citywalk / new_song / 用户重要日期
             #      如果已在 schedule 中提醒过，则 login 时不再重复提示
             try:
-                world = self._get_world(self.system_runtime)
-                if world is None or world.event_store is None:
-                    return
-                store = world.event_store
+                store = system_runtime.database_manager.event_store
                 due = store.get_events_due_for_trigger()
                 for event_dict, trigger_key in due:
                     evt_type = event_dict.get("event_type", "")
@@ -265,14 +262,7 @@ class ProactiveTopicMaker:
         self.logger.warning(f"Unsupported action type: {action.activity_type}")
 
     async def run_periodic_checks(self, system_runtime: "SystemRuntime") -> int:
-        return await self.dispatch_due_reminders(system_runtime)
-
-    async def dispatch_due_reminders(self, system_runtime: "SystemRuntime") -> int:
-        world = self._get_world(system_runtime)
-        if world is None or world.event_store is None:
-            return 0
-
-        store = world.event_store
+        store = system_runtime.database_manager.event_store
         try:
             due_events = store.get_events_due_for_trigger()
         except Exception as e:
@@ -337,11 +327,6 @@ class ProactiveTopicMaker:
             is_forced_from_incomplete=True,
         )
 
-    @staticmethod
-    def _get_world(system_runtime: Optional["SystemRuntime"]):
-        if system_runtime is None:
-            return None
-        return getattr(system_runtime, "world", None)
 
     def _merge_topics(self, topics: List[ExtractedTopic]) -> Optional[ExtractedTopic]:
         """将多个 ExtractedTopic 合并为一个。"""

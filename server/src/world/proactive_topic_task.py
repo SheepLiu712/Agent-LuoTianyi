@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
+
+if TYPE_CHECKING:
+    from src.system.system_runtime import SystemRuntime
 
 
 class ProactiveTopicCheckTask(WorldTask):
@@ -11,9 +14,9 @@ class ProactiveTopicCheckTask(WorldTask):
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         super().__init__(self.task_name, config)
-        self.system_runtime: Any | None = None
+        self.system_runtime: "SystemRuntime" | None = None
 
-    def initialize(self, system_runtime: Any) -> None:
+    def initialize(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
 
     async def run_once(self) -> WorldTaskResult:

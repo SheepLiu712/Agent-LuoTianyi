@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 from src.system.database.event_models import UnifiedEventType
 from src.utils.logger import get_logger
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
+
+if TYPE_CHECKING:
+    from src.system.system_runtime import SystemRuntime
+    from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
+    from src.system.database.event_store import EventStore
 
 
 class LearnSingSongsTask(WorldTask):
@@ -17,12 +22,12 @@ class LearnSingSongsTask(WorldTask):
         super().__init__(self.task_name, config)
         self.character_id = character_id
         self.logger = get_logger(__name__)
-        self.system_runtime: Any | None = None
-        self.event_store: Any | None = None
-        self.auto_song_learner: Any | None = None
+        self.system_runtime: "SystemRuntime" | None = None
+        self.event_store: "EventStore" | None = None
+        self.auto_song_learner: "AutoSongLearner" | None = None
         self._init_error: str = ""
 
-    def initialize(self, system_runtime: Any) -> None:
+    def initialize(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
         database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
@@ -53,7 +58,7 @@ class LearnSingSongsTask(WorldTask):
             awaiting=awaiting,
         )
 
-    def _build_auto_song_learner(self, system_runtime: Any) -> Any | None:
+    def _build_auto_song_learner(self, system_runtime: "SystemRuntime") -> "AutoSongLearner" | None:
         try:
             from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
 
