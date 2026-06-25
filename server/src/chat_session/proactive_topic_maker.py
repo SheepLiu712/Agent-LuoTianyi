@@ -142,12 +142,6 @@ class ProactiveTopicMaker:
         chat_stream: "ChatStream",
         system_runtime: "SystemRuntime",
     ) -> None:
-        # 演唱会静默期间跳过主动发言（保留首次登录欢迎）
-        if action.activity_type != ActivityType.FIRST_LOGIN:
-            world = self._get_world(system_runtime)
-            if world and world.is_silence_period():
-                self.logger.info(f"Silence period active, skipping action {action.activity_type}")
-                return
         if action.activity_type == ActivityType.FIRST_LOGIN:
             if not self.first_login_res:
                 self.logger.warning("No first-login resources configured, skipping activity dispatch")

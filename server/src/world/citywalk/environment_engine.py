@@ -3,8 +3,6 @@ import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
-
 from src.utils.logger import get_logger
 from src.world.citywalk.errors import LLMEnvironmentError
 from src.world.citywalk.types import POI, POIDetail, CitywalkSessionData, POIFeedBack
@@ -26,7 +24,7 @@ class CitywalkEnvironmentEngine:
     def __init__(self, config: Dict[str, Any], llm_client: Optional[Any] = None):
         self.logger = get_logger(__name__)
         decision_cfg = config.get("decision", {})
-        env_cfg = decision_cfg.get("environment", {})
+        env_cfg = config.get("environment", {}) or decision_cfg.get("environment", {})
         llm_cfg = env_cfg.get("llm", {})
 
         self.enabled = bool(env_cfg.get("enabled", True))
@@ -41,8 +39,6 @@ class CitywalkEnvironmentEngine:
 
         api_key = str(llm_cfg.get("api_key", "")).strip()
         self.client = llm_client
-        if self.client is None and self.enabled and api_key and not api_key.startswith("$"):
-            self.client = OpenAI(base_url=self.base_url, api_key=api_key)
         if self.enabled and self.client is None and self.fail_on_error:
             raise LLMEnvironmentError(
                 "CitywalkEnvironmentEngine未初始化LLM客户端，请检查decision.environment.llm.api_key是否已由load_config替换。"

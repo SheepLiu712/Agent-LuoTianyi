@@ -37,6 +37,7 @@ class WorldClock:
         self._daily_actions: Dict[str, _DailyAction] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
         self._stop_event: Optional[asyncio.Event] = None
+        self.last_results: Dict[str, Any] = {}
 
     def register_interval_action(
         self,
@@ -140,7 +141,9 @@ class WorldClock:
             else:
                 result = await asyncio.to_thread(action)
             if inspect.isawaitable(result):
-                await result
+                result = await result
+            self.last_results[name] = result
+            self.logger.info(f"World clock action {name} completed: {result}")
         except asyncio.CancelledError:
             raise
         except Exception as e:

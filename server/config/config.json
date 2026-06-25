@@ -38,7 +38,27 @@
     "database": {
         "sql_db_folder": "data/database",
         "sql_db_file": "luotianyi.db",
-        "redis": {}
+        "redis": {},
+        "event_store": {
+            "llm_module": {
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true
+                },
+                "prompt_name": "event_store_prompt"
+            }
+        },
+        "memory_store": {
+            "llm_module": {
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true
+                },
+                "prompt_name": "memory_store_prompt"
+            }
+        }
     },
     "capabilities": {
         "tts": {
@@ -228,6 +248,13 @@
     },
     "world": {
         "citywalk": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 4,
+                    "minute": 0
+                }
+            },
             "amap": {
                 "api_key": "$AMAP_KEY",
                 "base_url": "https://restapi.amap.com/v3",
@@ -277,6 +304,30 @@
                     "enable_thinking": true
                 }
             },
+            "llm_modules": {
+                "json": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": true
+                    },
+                    "prompt_name": "citywalk_llm_prompt"
+                },
+                "text": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false
+                    },
+                    "prompt_name": "citywalk_llm_prompt"
+                },
+                "vlm": {
+                    "vlm": {
+                        "name": "qwen3-vl-plus"
+                    },
+                    "prompt_name": "citywalk_vlm_prompt"
+                }
+            },
             "environment": {
                 "enabled": true,
                 "fail_on_error": true,
@@ -285,19 +336,24 @@
                         "name": "qwen3.5-plus",
                         "enable_thinking": false
                     },
-                    "prompt_name": "environment_feedback_prompt"
+                    "prompt_name": "citywalk_llm_prompt"
                 },
                 "vlm_module": {
                     "vlm": {
                         "name": "qwen3-vl-plus"
                     },
-                    "prompt_name": "environment_feedback_prompt"
+                    "prompt_name": "citywalk_vlm_prompt"
                 }
             }
-        }
-    },
-    "music": {
+        },
         "song_knowledge": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 4,
+                    "minute": 0
+                }
+            },
             "song_database": {
                 "db_folder": "res/knowledge",
                 "db_file": "knowledge_db.db"
@@ -325,31 +381,63 @@
             }
         },
         "auto_song_learner": {
-                "resource_path": "res/music",
-                "songlearner_dir": "src/world/get_new_songs/song_learner",
-                "songlearner_resource_dir": "res/song_learner"
-        }
-    },
-    "bili_dynamic_fetcher": {
-        "data_file": "data/schedule/events.json",
-        "fetch_interval_hours": 6,
-        "check_interval_seconds": 60,
-        "bilibili_uids": [
-            "387636363",
-            "1149997800"
-        ],
-        "llm_module": {
-            "llm": {
-                "name": "qwen3.5-plus",
-                "enable_thinking": false
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 4,
+                    "minute": 0
+                }
             },
-            "prompt_name": "bili_dynamic_fetcher_prompt"
+            "resource_path": "res/music",
+            "songlearner_dir": "src/world/learn_sing_songs/song_learner",
+            "songlearner_resource_dir": "res/song_learner"
         },
-        "vlm_module": {
-            "vlm": {
-                "name": "qwen3-vl-plus"
+        "bili_dynamic_fetcher": {
+            "clock_config": {
+                "type": "interval",
+                "params": {
+                    "interval_seconds": 21600,
+                    "run_immediately": true
+                }
             },
-            "prompt_name": "bili_dynamic_fetcher_prompt"
+            "data_file": "data/schedule/events.json",
+            "bilibili_uids": {
+                "luotianyi": "36081646"
+            },
+            "bili_cookie_file": "config/bili_cookie.txt",
+            "llm_module": {
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true
+                },
+                "prompt_name": "bili_dynamic_fetcher_prompt"
+            },
+            "vlm_module": {
+                "vlm": {
+                    "name": "qwen3-vl-plus",
+                    "use_json": true
+                },
+                "prompt_name": "bili_dynamic_fetcher_prompt"
+            }
+        },
+        "proactive_topic_check": {
+            "clock_config": {
+                "type": "interval",
+                "params": {
+                    "interval_seconds": 600,
+                    "run_immediately": false
+                }
+            }
+        },
+        "expired_event_cleanup": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 0,
+                    "minute": 0
+                }
+            }
         }
     }
 }

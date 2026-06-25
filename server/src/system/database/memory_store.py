@@ -38,7 +38,9 @@ class MemoryStore:
         self.llm_module = llm_module
 
     def create_llm_module(self, llm_service: LLMService):
-        llm_module_config = self.config.get("llm_module", {})
+        llm_module_config = self.config.get("llm_module")
+        if not llm_module_config:
+            raise ValueError("Missing 'llm_module' configuration for MemoryStore.")
         self.llm_module = llm_service.register_llm_module("MemoryStore", llm_module_config)
 
     # ——————————————————————————————————
@@ -93,7 +95,7 @@ class MemoryStore:
             redis.setex(recent_update_key, 3600, json.dumps(updates_list, ensure_ascii=False))
 
         except Exception as e:
-            self.sql_session_factorylogger.error(f"write_memory_update error: {e}")
+            self.logger.error(f"write_memory_update error: {e}")
             db.rollback()
         finally:
             db.close()

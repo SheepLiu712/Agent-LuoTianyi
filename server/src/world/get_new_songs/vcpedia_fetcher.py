@@ -14,10 +14,9 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 from src.utils.logger import get_logger
 from src.utils.helpers import load_config
-from src.utils.llm.llm_api_interface import LLMAPIFactory
 
 class VCPediaFetcher:
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], llm_module: Any | None = None):
         self.logger = get_logger(__name__)
         self.config = config
         self.activated = config.get("activated", False)
@@ -25,8 +24,9 @@ class VCPediaFetcher:
         self.base_url = crawler_config.get("base_url", "https://vcpedia.cn")
 
         self.llm_cfg = config.get("llm", {})
-        llm_client = LLMAPIFactory.create_interface(self.llm_cfg)
-        self.llm_client = llm_client
+        self.use_llm = config.get("use_llm", False)
+        self.llm_module = llm_module
+        self.llm_client = None
 
         # Define directories to search
         self.data_dir = Path(config.get("data_dir", "data/crawled_data"))
@@ -72,8 +72,20 @@ class VCPediaFetcher:
         if not data:
             return fallback
 
+        if self.use_llm and self.llm_module is not None:
+            try:
+                data_payload = json.dumps(data, ensure_ascii=False, default=str)
+                result = asyncio.run(self.llm_module.generate_response(song_data=data_payload))
+                result = str(result or "").strip()
+                return result if result else fallback
+            except Exception as e:
+                self.logger.error(f"LLM summarize failed: {e}")
+                return fallback
+
+        return fallback
+
         try:
-            if not self.llm_cfg:
+            if not self.use_llm or self.llm_client is None:
                 self.logger.error("knowledge.llm 配置缺失，使用回退摘要")
                 return fallback
 
@@ -88,7 +100,7 @@ class VCPediaFetcher:
                 f"歌曲数据：{data_payload}\n\n"
                 "请直接输出摘要正文。"
             )
-            result = asyncio.run(self.llm_client.generate_response(prompt, use_json=False))
+            return fallback
             result = ((result or {}).get("content", "") if isinstance(result, dict) else str(result)).strip()
             return result if result else fallback
         except Exception as e:

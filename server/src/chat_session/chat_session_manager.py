@@ -4,6 +4,7 @@ from typing import Dict, TYPE_CHECKING
 from .global_chat_stream_manager import GlobalChatStreamManager
 from .global_speaking_worker import GlobalSpeakingWorker
 from .proactive_topic_maker import ProactiveTopicMaker
+from .activity_context_provider import ActivityContextProvider
 if TYPE_CHECKING:
     from src.utils.llm_service import LLMService
 
@@ -13,6 +14,7 @@ class ChatSessionManager:
         self.global_chat_stream_manager = GlobalChatStreamManager(config.get("global_chat_stream_manager", {}))
         self.global_speaking_worker = GlobalSpeakingWorker(config.get("global_speaking_worker", {}))
         self.proactive_topic_maker = ProactiveTopicMaker(config.get("proactive_topic_maker", {}))
+        self.activity_context_provider = ActivityContextProvider()
 
 
     def start_background_services(self):

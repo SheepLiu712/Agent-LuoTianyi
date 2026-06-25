@@ -2,8 +2,6 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
-
 from src.system.database.vector_store import Document, VectorStore
 from src.utils.logger import get_logger
 from src.world.citywalk.types import CitywalkSessionResult
@@ -29,9 +27,6 @@ class CitywalkMemoryIngestor:
         self.memory_user_id = str(citywalk_config.get("memory_user_id", "__citywalk__"))
 
         self.client = llm_client
-        api_key = str(llm_cfg.get("api_key", "")).strip()
-        if self.client is None and api_key:
-            self.client = OpenAI(base_url=self.base_url, api_key=api_key)
 
     def _parse_json_response(self, raw_response: str) -> Dict[str, Any]:
         text = (raw_response or "").strip()

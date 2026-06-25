@@ -60,7 +60,7 @@ class DatabaseManager:
     - 不再要求调用者传入 db 和 redis 参数
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]]) -> None:
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         self.config = config or {}
         self._redis: Optional[RedisBuffer] = None
         self.event_store: Optional[EventStore] = None
@@ -76,8 +76,8 @@ class DatabaseManager:
             )
             init_redis_buffer(self.config.get("redis", {}))
 
-            self.event_store = EventStore(config = self.config.get("event_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis)
-            self.memory_store = MemoryStore(config = self.config.get("memory_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis)
+            self.event_store = EventStore(config = self.config.get("event_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis())
+            self.memory_store = MemoryStore(config = self.config.get("memory_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis())
             logger.info("Main database initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing databases: {e}")
@@ -867,3 +867,116 @@ def get_database_manager() -> DatabaseManager:
     if _db_manager is None:
         _db_manager = DatabaseManager()
     return _db_manager
+
+def set_default_database_manager(manager: DatabaseManager) -> None:
+    global _db_manager
+    _db_manager = manager
+
+
+class _BorrowedSession:
+    def __init__(self, session: "Session") -> None:
+        self._session = session
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._session, name)
+
+    def close(self) -> None:
+        pass
+
+
+class _NoopRedis:
+    def get(self, key: str) -> Any:
+        _ = key
+        return None
+
+    def setex(self, key: str, ttl: int, value: Any) -> None:
+        _ = key, ttl, value
+
+
+def _memory_store_for_legacy(db: Optional["Session"] = None, redis: Optional[RedisBuffer] = None) -> MemoryStore:
+    if db is not None:
+        return MemoryStore(
+            config={},
+            sql_session_factory=lambda: _BorrowedSession(db),
+            redis_buffer=redis or _NoopRedis(),
+        )
+
+    manager = get_database_manager()
+    if manager.memory_store is None:
+        raise RuntimeError("MemoryStore has not been initialized.")
+    return manager.memory_store
+
+
+def write_memory_update(
+    db: "Session",
+    redis: RedisBuffer,
+    user_id: str,
+    memory_update: Any,
+    commit: bool = True,
+) -> None:
+    _memory_store_for_legacy(db, redis).write_memory_update(user_id, memory_update, commit=commit)
+
+
+def write_agent_memory_record(
+    db: "Session",
+    memory_record: Any,
+    *,
+    chunk_texts: Optional[List[str]] = None,
+    embedding_ids: Optional[List[str]] = None,
+    commit: bool = True,
+) -> str:
+    return _memory_store_for_legacy(db).write_agent_memory_record(
+        memory_record,
+        chunk_texts=chunk_texts,
+        embedding_ids=embedding_ids,
+        commit=commit,
+    )
+
+
+def get_agent_memory_record_by_embedding_id(
+    db: "Session",
+    embedding_id: str,
+) -> Any:
+    return _memory_store_for_legacy(db).get_agent_memory_record_by_embedding_id(embedding_id)
+
+
+def get_user_description(db: "Session", redis: RedisBuffer, user_id: str) -> Optional[str]:
+    redis_key = f"user_description:{user_id}"
+    description = redis.get(redis_key)
+    if description is not None:
+        return description
+    user = db.query(User).filter(User.uuid == user_id).first()
+    if user is None:
+        return None
+    description = user.description or ""
+    redis.setex(redis_key, 3600, description)
+    return description
+
+
+def update_user_description(
+    db: "Session",
+    redis: RedisBuffer,
+    user_id: str,
+    new_description: str,
+    commit: bool = True,
+) -> None:
+    user = db.query(User).filter(User.uuid == user_id).first()
+    if user is None:
+        return
+    user.description = new_description
+    if commit:
+        db.commit()
+    redis.setex(f"user_description:{user_id}", 3600, new_description)
+
+
+def get_user_nickname(db: "Session", redis: RedisBuffer, user_id: str) -> Optional[str]:
+    redis_key = f"user_nickname:{user_id}"
+    nickname = redis.get(redis_key)
+    if nickname is not None:
+        return nickname
+    user = db.query(User).filter(User.uuid == user_id).first()
+    if user is None:
+        return None
+    nickname = user.nickname or ""
+    redis.setex(redis_key, 3600, nickname)
+    return nickname

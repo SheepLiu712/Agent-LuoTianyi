@@ -12,5 +12,6 @@ from src.system.database.sql_database import (
 )
 from src.system.database.database_service import (
     DatabaseManager,
+    set_default_database_manager,
 )
 

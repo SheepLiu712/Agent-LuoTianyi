@@ -41,6 +41,7 @@ def singing_capability(capability_config):
 
 def test_singing_config_is_valid(capability_config):
     sing_cfg = capability_config.get("sing", {})
+    assert "characters" not in sing_cfg
     assert CHARACTER_ID in sing_cfg
 
     character_cfg = sing_cfg[CHARACTER_ID]
@@ -71,6 +72,21 @@ def test_singing_known_song_interfaces_return_usable_results(singing_capability:
     audio = singing_capability.sing(CHARACTER_ID, correct_song, segments[0])
     assert isinstance(audio, bytes)
     assert len(audio) > 1024
+    assert audio[:4] == b"RIFF"
+
+
+def test_singing_default_character_interfaces_work(singing_capability: "SingingCapability"):
+    correct_song, segments = singing_capability.can_i_sing_song(CHARACTER_ID, KNOWN_SONG)
+
+    planned_song, planned_segment = singing_capability.build_sing_plan([KNOWN_SONG])
+    assert planned_song == KNOWN_SONG
+    assert planned_segment in segments
+
+    lyrics = singing_capability.get_segment_lyrics(correct_song, segments[0])
+    assert lyrics.strip()
+
+    audio = singing_capability.sing(correct_song, segments[0])
+    assert isinstance(audio, bytes)
     assert audio[:4] == b"RIFF"
 
 

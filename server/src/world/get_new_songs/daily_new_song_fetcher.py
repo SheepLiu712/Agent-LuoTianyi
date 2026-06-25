@@ -250,7 +250,7 @@ def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False) -> bool:
 
     return True
 
-def sync_daily_new_songs(song_knowledge_config: Dict[str, Any]) -> Dict[str, List[str]]:
+def sync_daily_new_songs(song_knowledge_config: Dict[str, Any], llm_module: Any | None = None) -> Dict[str, List[str]]:
     song_db_cfg = song_knowledge_config.get("song_database", {})
     if not song_db_cfg:
         raise ValueError("缺少 knowledge.song_database 配置")
@@ -266,7 +266,7 @@ def sync_daily_new_songs(song_knowledge_config: Dict[str, Any]) -> Dict[str, Lis
     failed: List[str] = []
     try:
         songs = fetch_song_list_from_template(TEMPLATE_URL)
-        fetcher = VCPediaFetcher(crawler_cfg)
+        fetcher = VCPediaFetcher(crawler_cfg, llm_module=llm_module)
 
         for i, song_name in enumerate(songs, start=1):
             if do_one_song(db, fetcher, song_name):

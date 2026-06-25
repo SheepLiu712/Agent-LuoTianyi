@@ -11,10 +11,30 @@ class SingingCapability:
     def __init__(self, config: Dict[str, Any]) -> None:
         self._config: Dict[str, Any] = config
         self.singing_manager : Dict[str, SingingManager] = {}
+        if "characters" in config:
+            raise ValueError("capabilities.sing no longer supports a 'characters' layer; use sing.<character_id> directly.")
         for character_id, character_config in config.items():
             self.singing_manager[character_id] = SingingManager(character_config)
+        self.default_character_id = "luotianyi" if "luotianyi" in self.singing_manager else next(
+            iter(self.singing_manager),
+            None,
+        )
+        self.music_manager = self.singing_manager.get("luotianyi") or next(
+            iter(self.singing_manager.values()),
+            None,
+        )
 
-    def build_sing_plan(self, character_id: str, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    def _get_manager(self, character_id: Optional[str] = None) -> SingingManager:
+        resolved_id = character_id or self.default_character_id
+        if resolved_id not in self.singing_manager:
+            raise ValueError(f"Character ID '{resolved_id}' not found in singing manager.")
+        return self.singing_manager[resolved_id]
+
+    def build_sing_plan(
+        self,
+        character_id: str | List[str],
+        sing_attempts: Optional[List[str]] = None,
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
         根据用户的唱歌尝试，构建一个唱歌计划。
 
@@ -22,8 +42,11 @@ class SingingCapability:
         :param sing_attempts: 用户的唱歌尝试列表
         :return: 一个元组，包含选定的歌曲名称和段落，如果没有选定的歌曲，则返回(None, None)
         """
-        if character_id not in self.singing_manager:
-            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
+        if sing_attempts is None:
+            sing_attempts = character_id if isinstance(character_id, list) else []
+            character_id = self.default_character_id
+
+        manager = self._get_manager(character_id if isinstance(character_id, str) else None)
 
         if not sing_attempts:
             return None, None
@@ -34,18 +57,18 @@ class SingingCapability:
             if not candidate:
                 continue
             if candidate == "random_song":
-                pair = self.singing_manager[character_id].pick_random_song_and_segment()
+                pair = manager.pick_random_song_and_segment()
                 return pair if pair else (None, None)
 
             song_name = self._extract_song_name(candidate)
             if not song_name:
                 continue
 
-            correct_song_name, segment = self.singing_manager[character_id].pick_segment_for_song(song_name)
+            correct_song_name, segment = manager.pick_segment_for_song(song_name)
             if segment:
                 return correct_song_name, segment
         if song_name:
-            self.singing_manager[character_id].add_wished_song(song_name)
+            manager.add_wished_song(song_name)
         return song_name, None
     
     def can_i_sing_song(self, character_id: str, song_name: str) -> Tuple[str, List[str]]:
@@ -56,9 +79,7 @@ class SingingCapability:
         :param song_name: 歌曲名称
         :return: 一个元组，第一个元素是歌曲的正确名称，第二个元素是该歌曲的可演唱段落列表。如果不能唱，则返回空歌名和空列表。
         '''
-        if character_id not in self.singing_manager:
-            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
-        return self.singing_manager[character_id].can_i_sing_song(song_name)
+        return self._get_manager(character_id).can_i_sing_song(song_name)
     
     def get_songs_can_sing(self, character_id: str) -> Dict[str, str]:
         '''
@@ -67,9 +88,7 @@ class SingingCapability:
         :param character_id: 角色ID
         :return: 一个字典，键为歌曲名称，值为歌曲的描述
         '''
-        if character_id not in self.singing_manager:
-            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
-        return self.singing_manager[character_id].get_songs_can_sing()
+        return self._get_manager(character_id).get_songs_can_sing()
     
     async def get_songs_can_sing_llm(self, character_id: str, max_song_num: int = 5) -> str:
         '''
@@ -79,9 +98,7 @@ class SingingCapability:
         :param max_song_num: 最大返回歌曲数量
         :return: 一个字符串，包含角色可以演唱的歌曲列表以及其描述，格式化为适合llm上下文的文本。
         '''
-        if character_id not in self.singing_manager:
-            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
-        return await self.singing_manager[character_id].get_songs_can_sing_llm(max_song_num)
+        return await self._get_manager(character_id).get_songs_can_sing_llm(max_song_num)
     
     async def can_i_sing_song_llm(self, character_id: str, song_name: str) -> str:
         '''
@@ -91,11 +108,14 @@ class SingingCapability:
         :param song_name: 歌曲名称
         :return: 一个字符串，包含角色是否可以演唱指定歌曲的结果，格式化为适合llm上下文的文本。
         '''
-        if character_id not in self.singing_manager:
-            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
-        return await self.singing_manager[character_id].can_i_sing_song_llm(song_name)
+        return await self._get_manager(character_id).can_i_sing_song_llm(song_name)
 
-    def sing(self, character_id: str, song_name: str, segment: str) -> Optional[bytes]:
+    def sing(
+        self,
+        character_id: str,
+        song_name: Optional[str] = None,
+        segment: Optional[str] = None,
+    ) -> Optional[bytes]:
         '''
         演唱指定歌曲的指定段落。
 
@@ -104,14 +124,21 @@ class SingingCapability:
         :param segment: 歌曲段落
         :return: 音频数据的字节流，如果无法演唱，则返回None
         '''
-        if character_id not in self.singing_manager:
-            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
+        if segment is None:
+            segment = song_name
+            song_name = character_id
+            character_id = self.default_character_id
         if not song_name or not segment:
             return None
-        _, audio_bytes = self.singing_manager[character_id].get_song_segment(song_name, segment)
+        _, audio_bytes = self._get_manager(character_id).get_song_segment(song_name, segment)
         return audio_bytes
 
-    def get_segment_lyrics(self, character_id: str, song_name: str, segment: str) -> str:
+    def get_segment_lyrics(
+        self,
+        character_id: str,
+        song_name: Optional[str] = None,
+        segment: Optional[str] = None,
+    ) -> str:
         '''
         获取指定歌曲的指定段落的歌词。
 
@@ -120,9 +147,13 @@ class SingingCapability:
         :param segment: 歌曲段落
         :return: 歌词文本，如果无法获取，则返回空字符串
         '''
-        if character_id not in self.singing_manager:
-            raise ValueError(f"Character ID '{character_id}' not found in singing manager.")
-        return self.singing_manager[character_id].get_segment_lyrics(song_name, segment)
+        if segment is None:
+            segment = song_name
+            song_name = character_id
+            character_id = self.default_character_id
+        if not song_name or not segment:
+            return ""
+        return self._get_manager(character_id).get_segment_lyrics(song_name, segment)
 
     def _extract_song_name(self, text: str) -> str:
         content = (text or "").strip()

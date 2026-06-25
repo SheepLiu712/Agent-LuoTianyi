@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from sqlalchemy.orm import Session
@@ -62,7 +62,9 @@ class EventStore:
         self._cache_date: Optional[date] = None
 
     def create_llm_module(self, llm_service: "LLMService"):
-        llm_module_config = self.config["llm_module"]
+        llm_module_config = self.config.get("llm_module")
+        if not llm_module_config:
+            return
         self.llm_module = llm_service.register_llm_module("FindMatchingEvent", llm_module_config)
 
     # ── 缓存工具 ─────────────────────────────────────────────
@@ -175,129 +177,121 @@ class EventStore:
         LLM 驱动的模糊匹配：缩小候选集后用 LLM 判断是否同一事件。
         返回匹配的 event_dict（附带 _merged_description 字段），或 None。
         """
+
         if self.llm_module is None:
             return None
 
-        # 1. 候选集缩小：同类型 + 同月 ±7 天
         db = self._get_session()
         try:
-            candidates: List[Event] = []
-            base_rows = (
+            rows = (
                 db.query(Event)
-                .filter(
-                    Event.event_type == event_type,
-                    Event.is_active == True,
-                )
+                .filter(Event.event_type == event_type, Event.is_active == True)
                 .all()
             )
 
             ref_date: Optional[date] = None
-            if start_datetime:
-                ref_date = start_datetime.date() if isinstance(start_datetime, datetime) else start_datetime
+            if start_datetime is not None:
+                ref_date = start_datetime.date()
             elif date_mmdd:
-                # 用 MM-DD 在当前年构造参考日期
-                import datetime as _dt
-                parts = date_mmdd.split("-")
                 try:
-                    ref_date = _dt.date(_dt.date.today().year, int(parts[0]), int(parts[1]))
-                except (IndexError, ValueError):
-                    pass
+                    month, day = [int(part) for part in date_mmdd.split("-", 1)]
+                    ref_date = date(date.today().year, month, day)
+                except (TypeError, ValueError):
+                    ref_date = None
 
-            window_start = ref_date - __import__("datetime").timedelta(days=7) if ref_date else None
-            window_end = ref_date + __import__("datetime").timedelta(days=7) if ref_date else None
-
-            for row in base_rows:
-                row_date: Optional[date] = None
-                if row.start_datetime:
-                    row_date = row.start_datetime.date() if isinstance(row.start_datetime, datetime) else row.start_datetime
-                elif row.date_mmdd and ref_date:
-                    parts2 = row.date_mmdd.split("-")
-                    try:
-                        row_date = __import__("datetime").date(ref_date.year, int(parts2[0]), int(parts2[1]))
-                    except (IndexError, ValueError):
-                        pass
-                if row_date and window_start and window_end and window_start <= row_date <= window_end:
-                    candidates.append(row)
+            candidates: List[Event] = []
+            if ref_date is None:
+                candidates = rows
+            else:
+                window_start = ref_date - timedelta(days=7)
+                window_end = ref_date + timedelta(days=7)
+                for row in rows:
+                    row_date: Optional[date] = None
+                    if row.start_datetime is not None:
+                        row_date = row.start_datetime.date()
+                    elif row.date_mmdd:
+                        try:
+                            month, day = [int(part) for part in row.date_mmdd.split("-", 1)]
+                            row_date = date(ref_date.year, month, day)
+                        except (TypeError, ValueError):
+                            row_date = None
+                    if row_date is not None and window_start <= row_date <= window_end:
+                        candidates.append(row)
 
             if not candidates:
-                self.logger.debug(f"LLM dedup: empty candidate set for '{title}', skipping LLM call")
                 return None
 
-            # 2. 构建 prompt
-            candidate_lines: List[str] = []
-            for c in candidates:
-                c_start = c.start_datetime.isoformat() if c.start_datetime else ""
-                candidate_lines.append(
-                    f"  id={c.id} | {c.title} | {c.description or ''} | {c_start} | mmdd={c.date_mmdd or ''}"
-                )
-            candidates_text = "\n".join(candidate_lines)
-
-            type_cn = {
-                "concert": "演唱会", "livestream": "直播", "dynamic": "动态",
-                "travel": "旅游", "new_song": "新歌", "holiday": "节日",
-                "birthday": "生日", "anniversary": "纪念日", "general": "活动",
-            }.get(event_type, event_type)
-
-            prompt = (
-                f"你是一个活动去重助手。判断以下新事件是否与任何已有事件指向同一场真实活动。\n\n"
-                f"【新事件】\n"
-                f"- 标题: {title}\n"
-                f"- 描述: {description}\n"
-                f"- 类型: {type_cn}\n"
-                f"- 时间: {start_datetime.isoformat() if start_datetime else '无'}\n"
-                f"- 日期(MM-DD): {date_mmdd or '无'}\n\n"
-                f"【已有事件列表】\n{candidates_text}\n\n"
-                f"判断标准：\n"
-                f"1. 同一场演唱会/直播/活动的不同宣传帖为重复\n"
-                f"2. 不同场次/不同活动为不重复\n"
-                f"3. 若重复，将新旧描述合并压缩为一句话（30字以内）\n\n"
-                f"输出 JSON（严格格式）：\n"
-                f'{{"match": true/false, "matched_id": "事件ID或空字符串", "merged_description": "合并描述或空字符串"}}'
+            candidates_json = json.dumps(
+                [
+                    {
+                        "id": row.id,
+                        "title": row.title,
+                        "description": row.description or "",
+                        "event_type": row.event_type,
+                        "start_datetime": row.start_datetime.isoformat() if row.start_datetime else "",
+                        "end_datetime": row.end_datetime.isoformat() if row.end_datetime else "",
+                        "date_mmdd": row.date_mmdd or "",
+                        "source": row.source or "",
+                    }
+                    for row in candidates
+                ],
+                ensure_ascii=False,
             )
 
-            # 3. 调用 LLM
             try:
-                resp = await self.llm_client.generate_response(prompt, use_json=True)
-                result = (resp or {}).get("content", "") if isinstance(resp, dict) else str(resp)
-                if not result:
-                    self.logger.warning("LLM dedup returned empty response, falling back to exact match")
-                    return None
-                result = result.strip()
-            except Exception as e:
-                self.logger.warning(f"LLM dedup call failed ({e}), falling back to exact match")
-                return None
-
-            # 4. 解析结果
-            try:
-                import json as _json
-                parsed = _json.loads(result)
-                if not isinstance(parsed, dict):
-                    return None
-                if not parsed.get("match"):
-                    self.logger.debug(f"LLM dedup: no match for '{title}'")
-                    return None
-                matched_id = parsed.get("matched_id", "")
-                merged_desc = parsed.get("merged_description", "")
-                if not matched_id:
-                    return None
-
-                # 5. 确认匹配事件确实存在
-                matched_row = db.query(Event).filter(Event.id == matched_id, Event.is_active == True).first()
-                if matched_row is None:
-                    self.logger.warning(f"LLM matched non-existent event id={matched_id}")
-                    return None
-
-                matched_dict = db_event_to_dict(matched_row)
-                matched_dict["_merged_description"] = merged_desc if merged_desc else description
-                self.logger.info(
-                    f"LLM dedup matched: '{title}' → existing '{matched_row.title}' (id={matched_id})"
+                raw_result = await self.llm_module.generate_response(
+                    title=title,
+                    description=description or "",
+                    event_type=event_type,
+                    start_time=start_datetime.isoformat() if start_datetime else "",
+                    date_mmdd=date_mmdd or "",
+                    candidates=candidates_json,
                 )
-                self.logger.debug(f"Description merged: '{matched_row.description}' + '{description}' → '{merged_desc}'")
-                return matched_dict
+            except TypeError:
+                raw_result = await self.llm_module.generate_response(
+                    {
+                        "title": title,
+                        "description": description or "",
+                        "event_type": event_type,
+                        "start_time": start_datetime.isoformat() if start_datetime else "",
+                        "date_mmdd": date_mmdd or "",
+                        "candidates": candidates_json,
+                    }
+                )
 
-            except (ValueError, _json.JSONDecodeError) as e:
-                self.logger.warning(f"LLM dedup returned invalid JSON ({e}), falling back to exact match")
+            if isinstance(raw_result, dict):
+                raw_text = raw_result.get("content") or raw_result.get("text") or json.dumps(raw_result, ensure_ascii=False)
+            else:
+                raw_text = str(raw_result or "")
+            raw_text = raw_text.strip()
+            if not raw_text:
                 return None
+
+            try:
+                parsed = json.loads(raw_text)
+            except json.JSONDecodeError:
+                self.logger.warning(f"LLM dedup returned invalid JSON: {raw_text[:200]}")
+                return None
+
+            if not isinstance(parsed, dict) or not parsed.get("match"):
+                return None
+            matched_id = str(parsed.get("matched_id") or "").strip()
+            if not matched_id:
+                return None
+
+            matched_row = (
+                db.query(Event)
+                .filter(Event.id == matched_id, Event.is_active == True)
+                .first()
+            )
+            if matched_row is None:
+                self.logger.warning(f"LLM matched non-existent event id={matched_id}")
+                return None
+
+            matched_dict = db_event_to_dict(matched_row)
+            merged_description = str(parsed.get("merged_description") or "").strip()
+            matched_dict["_merged_description"] = merged_description or description
+            return matched_dict
         finally:
             db.close()
 
@@ -317,7 +311,7 @@ class EventStore:
         - LLM 可用时走 LLM 模糊匹配；不可用时降级精确匹配
         """
         # system 事件（节假日等）走精确匹配，避免不必要的 LLM 调用
-        if source == "system" or self.llm_client is None:
+        if source == "system" or self.llm_module is None:
             return self._find_matching_event_exact(title, start_datetime, date_mmdd, threshold_days)
 
         # LLM 路径
@@ -400,7 +394,7 @@ class EventStore:
             self.logger.info(f"Event already exists, updating: {title} (id={existing['id']})")
             self._update_event(existing["id"], event_data, merged_description=merged_desc)
             self._invalidate_cache()
-            return existing["id"]
+            return None
 
         db = self._get_session()
         try:

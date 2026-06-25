@@ -6,8 +6,7 @@ from typing import Dict
 from src.agent_runtime import AgentRuntime
 from src.capabilities import CapabilityManager
 from src.chat_session import ChatSessionManager
-from src.chat_session.conversation import ConversationService
-from src.system.database import DatabaseManager
+from src.system.database import DatabaseManager, set_default_database_manager
 from src.system.user_interface import UserInterface
 from src.utils.llm_service import LLMService
 from src.world import WorldRuntime
@@ -33,6 +32,7 @@ class SystemRuntime:
         # 2. 初始化数据库管理器
         database_manager = DatabaseManager(config.get("database", {}))
         database_manager.create_llm_modules(llm_service)
+        set_default_database_manager(database_manager)
 
         # 3. 初始化能力管理器
         capability_manager = CapabilityManager(config.get("capabilities", {}), llm_service)
@@ -43,10 +43,6 @@ class SystemRuntime:
         # 5. 初始化箱庭世界运行时
         world = WorldRuntime(
             config.get("world", {}),
-            llm_service,
-            database_manager=database_manager,
-            capability_manager=capability_manager,
-            root_config=config,
         )
 
         # 6. 初始化 Agent 运行时
@@ -75,6 +71,7 @@ class SystemRuntime:
 
     def _wire_dependencies(self) -> None:
         self.world.set_system_runtime(self)
+        self.world.initialize_modules()
         self.chat_session_manager.proactive_topic_maker.set_agent(self.agent)
         self.chat_session_manager.proactive_topic_maker.set_system_runtime(self)
         self.gcsm.register_activity_maker(self.chat_session_manager.proactive_topic_maker)

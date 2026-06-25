@@ -4,8 +4,6 @@ import random
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
-from openai import OpenAI
-
 from src.world.citywalk.amap_client import AMapClient
 from src.world.citywalk.environment_engine import CitywalkEnvironmentEngine
 from src.world.citywalk.history_store import get_recent_citywalk_history
@@ -20,6 +18,7 @@ class CitywalkSessionRunner:
         client: AMapClient,
         decision_engine: Optional[Any] = None,
         environment_engine: Optional[CitywalkEnvironmentEngine] = None,
+        llm_client: Optional[Any] = None,
     ):
         self.config = config
         self.client = client
@@ -56,8 +55,7 @@ class CitywalkSessionRunner:
         report_cfg = config.get("report", {})
         self.history_file = str(report_cfg.get("history_file", "data/citywalk_reports/citywalk_history.json"))
 
-        api_key = self._resolve_api_key(str(llm_cfg.get("api_key", "")).strip())
-        self.llm_client = OpenAI(base_url=self.base_url, api_key=api_key) if api_key else None
+        self.llm_client = llm_client
 
     def run(
         self,
@@ -548,4 +546,3 @@ class CitywalkSessionRunner:
         )
         return self._call_llm_text("你是洛天依，擅长写有画面感的一日见闻。", prompt)
 
-    

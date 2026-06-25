@@ -12,7 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import requests
 
-from src.system.database.event_models import OfficialDynamic
+from .types import OfficialDynamic
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -21,7 +21,6 @@ DEFAULT_BILI_ACCOUNTS: List[str] = [
     "36081646",  # 洛天依官方主账号
 ]
 
-DEFAULT_WEIBO_ACCOUNTS: List[str] = []
 
 BILI_DYNAMIC_FEATURES = "itemOpusStyle"
 BILI_DYNAMIC_WEB_LOCATION = "333.1365"
@@ -40,14 +39,8 @@ class OfficialFeedFetcher:
     ):
         self.logger = get_logger(__name__)
         self.config = config or {}
-        bili_accounts = self.config.get("official_accounts", {}).get("bilibili", [])
-        weibo_accounts = self.config.get("official_accounts", {}).get("weibo", [])
-        self.bili_accounts: List[str] = (
-            [str(a) for a in bili_accounts] if bili_accounts else list(DEFAULT_BILI_ACCOUNTS)
-        )
-        self.weibo_accounts: List[str] = (
-            [str(a) for a in weibo_accounts] if weibo_accounts else DEFAULT_WEIBO_ACCOUNTS
-        )
+        self.bili_accounts: Dict[str, str] = self.config.get("bilibili_uids", {"luotianyi": "36081646"})
+        self.cookie_file = Path(self.config.get("bili_cookie_file", "config/bili_cookie.txt"))
 
         self.data_file = Path(data_file)
         self.session = requests.Session()
@@ -75,21 +68,24 @@ class OfficialFeedFetcher:
             }
         )
 
-        cookie_file = Path("config/bili_cookie.txt")
-        bili_cookie = ""
-        if cookie_file.exists():
-            try:
-                raw = cookie_file.read_text(encoding="utf-8-sig").strip()
-                bili_cookie = raw.encode("utf-8", errors="ignore").decode("utf-8")
-                bili_cookie = bili_cookie.replace("\ufeff", "").strip()
-                self.logger.info(f"Loaded B站 cookie from {cookie_file}")
-            except Exception as e:
-                self.logger.warning(f"Failed to read {cookie_file}: {e}")
+        self.bili_cookie = ""
 
-        if bili_cookie:
-            self.session.headers.update({"Cookie": bili_cookie})
 
+        self._update_cookie_to_headers()
         self.seen_ids: Dict[str, List[str]] = self._load_cache()
+
+    def _update_cookie_to_headers(self) -> None:
+        if self.cookie_file.exists():
+            try:
+                raw = self.cookie_file.read_text(encoding="utf-8-sig").strip()
+                self.bili_cookie = raw.encode("utf-8", errors="ignore").decode("utf-8")
+                self.bili_cookie = self.bili_cookie.replace("\ufeff", "").strip()
+                self.logger.info(f"Loaded Bilibili cookie from {self.cookie_file}")
+            except Exception as e:
+                self.logger.warning(f"Failed to read {self.cookie_file}: {e}")
+
+        if self.bili_cookie:
+            self.session.headers.update({"Cookie": self.bili_cookie})
 
     def _load_cache(self) -> Dict[str, List[str]]:
         if not self.data_file.exists():
@@ -112,15 +108,28 @@ class OfficialFeedFetcher:
         except Exception as e:
             self.logger.warning(f"Failed to save feed cache: {e}")
 
+    async def check_and_update_cookie_validity(self) -> bool:
+        """
+        检查当前 B站 cookie 是否有效，如果无效则尝试刷新。
+        """
+        if not self.cookie_file.exists():
+            self.logger.warning("No Bilibili cookie found; some dynamics may be inaccessible.")
+            return False
+
+        from .cookie_manager import check_and_refresh_cookie_async
+        return await check_and_refresh_cookie_async(cookie_file=self.cookie_file, force=False)
+        
+
     def fetch_all_new(self) -> List[OfficialDynamic]:
         """
         拉取所有配置账号的新动态（去重后）。
         返回原始动态 OfficialDynamic 列表。
         """
+        self._update_cookie_to_headers()
         all_items: List[OfficialDynamic] = []
-        for uid in self.bili_accounts:
+        for character, uid in self.bili_accounts.values():
             try:
-                items = self._fetch_bili_space(uid)
+                items = self._fetch_bili_space(uid, character)
                 all_items.extend(items)
                 time.sleep(0.5)
             except Exception as e:
@@ -141,7 +150,7 @@ class OfficialFeedFetcher:
             params.append(f"offset={offset}")
         return "https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?" + "&".join(params)
 
-    def _fetch_bili_space(self, uid: str, max_pages: int = 1) -> List[OfficialDynamic]:
+    def _fetch_bili_space(self, uid: str, character: str = "luotianyi", max_pages: int = 1) -> List[OfficialDynamic]:
         """
         拉取 B 站用户空间动态，返回新动态列表。
         使用新版参数请求 opus 风格动态，避免图文正文缺失。
@@ -178,6 +187,7 @@ class OfficialFeedFetcher:
                     seen.add(dyn_id)
                     parsed = self._parse_bili_item(uid, item)
                     if parsed:
+                        parsed.character = character
                         results.append(parsed)
 
                 offset = data.get("data", {}).get("offset")
@@ -326,18 +336,20 @@ class OfficialFeedFetcher:
                             if desc:
                                 content_parts.append(f"简介：{desc}")
 
-                return {"text": "\n".join(content_parts), "pics": pics, "name": name}
+                ret = {"text": "\n".join(content_parts), "pics": pics, "name": name}
+
+                # 递归式地处理转发动态，防止多层转发导致内容丢失
+                if orig := dyn.get("orig") and isinstance(orig, dict):
+                    # 是转发动态
+                    extended_ret = extract_from_dynamic(orig, is_orig=True)
+                    if extended_ret["text"]:
+                        ret["text"] += f"\n{extended_ret['text']}"
+                    self._extend_unique(ret["pics"], extended_ret["pics"])
+                return ret
 
             extracted = extract_from_dynamic(item, is_orig=False)
             content_parts = [extracted["text"]]
             pics = extracted["pics"]
-
-            orig = item.get("orig")
-            if orig and isinstance(orig, dict):
-                extracted_orig = extract_from_dynamic(orig, is_orig=True)
-                if extracted_orig["text"]:
-                    content_parts.append(extracted_orig["text"])
-                self._extend_unique(pics, extracted_orig["pics"])
 
             content = "\n".join(filter(None, content_parts))
             pub_ts = author_module.get("pub_ts", 0)

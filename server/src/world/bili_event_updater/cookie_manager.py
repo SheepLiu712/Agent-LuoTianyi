@@ -17,8 +17,6 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-COOKIE_FILE = Path("config/bili_cookie.txt")
-
 # 过期阈值（秒）：距离过期小于此值时触发刷新
 SESSDATA_EXPIRE_THRESHOLD = 7 * 24 * 3600      # SESSDATA 还剩 7 天过期时刷新
 BILL_TICKET_EXPIRE_THRESHOLD = 3 * 24 * 3600   # bili_ticket 还剩 3 天过期时刷新
@@ -143,22 +141,23 @@ def _merge_cookies(old_cookie: str, new_jar: dict[str, str]) -> str:
     return _jar_to_cookie_string(old_jar)
 
 
-async def check_and_refresh_cookie_async(force: bool = False) -> bool:
+async def check_and_refresh_cookie_async(cookie_file: Path, force: bool = False) -> bool:
     """
     检查 cookie 是否需要刷新，如果需要则用无头浏览器访问 B站 更新。
 
     Args:
-        force: 如果 True，无论过期状态都强制刷新。
+        cookie_file: cookie 文件路径
+        force: 如果 True，无论过期状态都强制刷新.
 
     Returns:
         True 表示 cookie 已更新（或无需更新），
         False 表示更新失败。
     """
-    if not COOKIE_FILE.exists():
-        logger.warning(f"Cookie 文件不存在: {COOKIE_FILE}")
+    if not cookie_file.exists():
+        logger.warning(f"Cookie 文件不存在: {cookie_file}")
         return False
 
-    old_cookie = COOKIE_FILE.read_text(encoding="utf-8-sig").strip()
+    old_cookie = cookie_file.read_text(encoding="utf-8-sig").strip()
 
     # ── 检查过期状态 ────────────────────────────────────
     info = _parse_cookie_expiry(old_cookie)
@@ -182,8 +181,8 @@ async def check_and_refresh_cookie_async(force: bool = False) -> bool:
     new_jar = _parse_set_cookie_to_jar(new_cookies)
     merged = _merge_cookies(old_cookie, new_jar)
 
-    COOKIE_FILE.write_text(merged, encoding="utf-8")
-    logger.info(f"Cookie 已更新并保存至 {COOKIE_FILE}")
+    cookie_file.write_text(merged, encoding="utf-8")
+    logger.info(f"Cookie 已更新并保存至 {cookie_file}")
 
     # 再次解析验证
     updated_info = _parse_cookie_expiry(merged)
@@ -195,11 +194,11 @@ async def check_and_refresh_cookie_async(force: bool = False) -> bool:
     return True
 
 
-def check_and_refresh_cookie(force: bool = False) -> bool:
+def check_and_refresh_cookie(cookie_file: Path, force: bool = False) -> bool:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(check_and_refresh_cookie_async(force=force))
+        return asyncio.run(check_and_refresh_cookie_async(cookie_file=cookie_file, force=force))
     raise RuntimeError("check_and_refresh_cookie must be awaited; use check_and_refresh_cookie_async")
 
 
@@ -260,14 +259,14 @@ async def _visit_bilibili_with_browser(cookie_str: str) -> list[dict]:
         return cookies_after
 
 
-def get_cookie_status() -> dict:
+def get_cookie_status(cookie_file: Path) -> dict:
     """
     获取当前 cookie 的过期状态摘要（用于日志/调试）。
     """
-    if not COOKIE_FILE.exists():
+    if not cookie_file.exists():
         return {"exists": False, "message": "Cookie 文件不存在"}
 
-    raw = COOKIE_FILE.read_text(encoding="utf-8-sig").strip()
+    raw = cookie_file.read_text(encoding="utf-8-sig").strip()
     info = _parse_cookie_expiry(raw)
 
     lines = ["--- B站 Cookie 状态 ---"]

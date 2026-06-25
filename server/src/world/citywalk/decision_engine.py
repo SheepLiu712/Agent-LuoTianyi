@@ -3,8 +3,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from openai import OpenAI
-
 from src.utils.logger import get_logger
 from src.world.citywalk.errors import LLMDecisionError
 from src.world.citywalk.types import CitywalkEvent, CitywalkState, POI
@@ -75,9 +73,6 @@ class CitywalkDecisionEngine:
                 "检测到未替换的QWEN API占位符，请使用helpers.load_config加载配置后再初始化CitywalkDecisionEngine。"
             )
             api_key = ""
-
-        if self.client is None and self.enabled and api_key:
-            self.client = OpenAI(base_url=self.base_url, api_key=api_key)
 
         if self.enabled and self.client is None:
             message = (

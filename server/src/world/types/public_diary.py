@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
-from src.world.events import WorldEvent
+from src.world.types.events import WorldEvent
 
 
 @dataclass(frozen=True)

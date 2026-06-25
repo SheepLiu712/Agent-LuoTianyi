@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.world.events import WorldEvent
+from src.world.types.events import WorldEvent
 
 
 class ScheduleWorldProvider:

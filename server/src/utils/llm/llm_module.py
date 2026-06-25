@@ -14,7 +14,8 @@ class LLMModule:
         self.llm_client : LLMAPIInterface = interface
         self.prompt_template : PromptTemplate = prompt_template
 
-        self.params = self.llm_client.default_parameters.copy().update(llm_config.get("params", {}))
+        self.params = self.llm_client.default_parameters.copy()
+        self.params.update(llm_config.get("params", {}))
 
         self._recent_response = None  # 存储最近一次的响应结果
 
