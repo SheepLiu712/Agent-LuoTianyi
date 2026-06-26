@@ -78,14 +78,14 @@ class InMemoryGraphRetriever(GraphRetriever):
     用于小规模知识图谱的内存检索
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Dict[str, Any]):
         """初始化内存图检索器
 
         Args:
             config: 配置字典
         """
         self.logger = get_logger(__name__)
-        self.config = config or {}
+        self.config = config
         # 注意: 这里不再持有 KnowledgeGraph 实例，也不负责加载数据
 
     def retrieve(self, graph: KnowledgeGraph, query: str, entities: List[str], **kwargs) -> List[Dict[str, Any]]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, List, Optional, Tuple, Dict
 from .singing_manager import SingingManager
+from src.domain.character import CharacterName
 
 
 class SingingCapability:
@@ -15,11 +16,11 @@ class SingingCapability:
             raise ValueError("capabilities.sing no longer supports a 'characters' layer; use sing.<character_id> directly.")
         for character_id, character_config in config.items():
             self.singing_manager[character_id] = SingingManager(character_config)
-        self.default_character_id = "luotianyi" if "luotianyi" in self.singing_manager else next(
+        self.default_character_id = CharacterName.LUOTIANYI.value if CharacterName.LUOTIANYI.value in self.singing_manager else next(
             iter(self.singing_manager),
             None,
         )
-        self.music_manager = self.singing_manager.get("luotianyi") or next(
+        self.music_manager = self.singing_manager.get(CharacterName.LUOTIANYI.value) or next(
             iter(self.singing_manager.values()),
             None,
         )

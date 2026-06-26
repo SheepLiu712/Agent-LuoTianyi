@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncGenerator
@@ -5,11 +7,11 @@ from typing import TYPE_CHECKING, AsyncGenerator
 from src.utils.logger import get_logger
 import base64
 from src.agent.main_chat import OneSentenceChat, SongSegmentChat
-from src.system.user_interface.types import ChatResponse
 from typing import Callable, Awaitable, Dict, Any
 
 if TYPE_CHECKING:
     from src.capabilities import CapabilityManager
+    from src.system.user_interface.types import ChatResponse
 
 
 _sentinel = object()
@@ -30,6 +32,7 @@ class SpeakingJob:
     """全局 speaking 队列中的任务。"""
     send_reply_callback: Callable[[ChatResponse], Awaitable[None]]
     job_content: "OneSentenceChat | SongSegmentChat | str" 
+    character_id: str = "luotianyi"
 
 
 class GlobalSpeakingWorker:
@@ -56,6 +59,8 @@ class GlobalSpeakingWorker:
 
 
     async def _run(self):
+        from src.system.user_interface.types import ChatResponse
+
         while True:
             job = await self.queue.get()
             try:
@@ -64,7 +69,9 @@ class GlobalSpeakingWorker:
                     expression = job.job_content.expression
                     # Drive the sync TTS generator in a thread so the event loop
                     # can service other tasks between chunks.
-                    sync_gen = self.capabilities.speech.say_stream(text, job.job_content.tone)
+                    sync_gen = self.capabilities.speech.say_stream(
+                        job.character_id, text, job.job_content.tone
+                    )
                     is_first = True
                     async for audio_chunk in _iter_sync_gen_in_executor(sync_gen):
                         chunk_text = text if is_first else ""
@@ -85,7 +92,10 @@ class GlobalSpeakingWorker:
                     text = f"(唱了《{job.job_content.song}》)\n{job.job_content.lyrics}"
                     expression = "唱歌"
                     audio = await asyncio.to_thread(
-                        self.capabilities.singing.sing, job.job_content.song, job.job_content.segment
+                        self.capabilities.singing.sing,
+                        job.character_id,
+                        job.job_content.song,
+                        job.job_content.segment,
                     )
                     if not audio:
                         self.logger.warning(f"No audio generated for song: {job.job_content.song}")
@@ -127,5 +137,5 @@ _global_speaking_worker: GlobalSpeakingWorker | None = None
 def get_global_speaking_worker() -> GlobalSpeakingWorker:
     global _global_speaking_worker
     if _global_speaking_worker is None:
-        _global_speaking_worker = GlobalSpeakingWorker()
+        _global_speaking_worker = GlobalSpeakingWorker({})
     return _global_speaking_worker

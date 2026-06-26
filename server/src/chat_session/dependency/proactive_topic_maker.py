@@ -14,16 +14,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
-from src.utils.llm.llm_api_interface import LLMAPIFactory, LLMAPIInterface
 from src.utils.logger import get_logger
-from src.agent.chat.topic_planner import ExtractedTopic
-from src.system.user_interface.types import ChatResponse
+from src.domain.chat import ExtractedTopic
 from src.agent.main_chat import OneSentenceChat
 
 if TYPE_CHECKING:
-    from src.chat_session.chat_stream import ChatStream
+    from src.chat_session.chat_pipeline.chat_stream import ChatStream
     from src.system.system_runtime import SystemRuntime
-    from src.agent.luotianyi_agent import LuoTianyiAgent
 
 
 class ActivityType(str, Enum):
@@ -102,9 +99,9 @@ class _UserActivityState:
 class ProactiveTopicMaker:
     """根据用户行为创建 Agent 主动发言动作，并派发到 chat_stream。"""
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Dict[str, Any]):
         self.logger = get_logger("ProactiveTopicMaker")
-        self.config = config or {}
+        self.config = config
 
         self.return_user_threshold_seconds = float(self.config.get("return_user_threshold_seconds", 5 * 24 * 3600))
         self.silence_threshold_seconds = float(self.config.get("silence_threshold_seconds", 180))
@@ -115,22 +112,11 @@ class ProactiveTopicMaker:
             self.config.get("silence_trigger_cooldown_seconds", self.silence_threshold_seconds)
         )
         self._load_first_login_res()
-        self.agent: Optional["LuoTianyiAgent"] = None
-
-        llm_cfg = self.config.get("llm", {})
-        self.llm_client: Optional[LLMAPIInterface] = None
-        if llm_cfg:
-            try:
-                self.llm_client = LLMAPIFactory.create_interface(llm_cfg)
-            except Exception as e:
-                self.logger.warning(f"Failed to init activity maker llm client, fallback to template topics: {e}")
 
         self.user_states: Dict[str, _UserActivityState] = {}
         self._lock = asyncio.Lock()
         self.system_runtime: Optional["SystemRuntime"] = None
 
-    def set_agent(self, agent: "LuoTianyiAgent") -> None:
-        self.agent = agent
 
     def set_system_runtime(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
@@ -151,6 +137,8 @@ class ProactiveTopicMaker:
                 user_id=user_uuid, reply_items=[item["response_line"] for item in self.first_login_res]
             )
             for item, item_uuid in zip(self.first_login_res, uuid_list or []):
+                from src.system.user_interface.types import ChatResponse
+
                 # Lazy-load audio at dispatch time
                 audio = self._load_audio_b64(item.get("audio_path", ""))
                 await chat_stream.feed_response(

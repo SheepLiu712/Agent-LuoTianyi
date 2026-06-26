@@ -14,7 +14,8 @@ if TYPE_CHECKING:
 class MemoryUpdateService:
     """Single entry point for memory mutations in the subconscious layer."""
 
-    def __init__(self, memory: "SubconsciousMemory"):
+    def __init__(self, config: dict[str, Any], memory: "SubconsciousMemory"):
+        self.config = config
         self.memory = memory
 
     async def post_process_interaction(

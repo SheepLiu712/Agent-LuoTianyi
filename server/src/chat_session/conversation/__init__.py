@@ -6,6 +6,6 @@ not own persistence workflows.
 """
 
 from .conversation_manager import ConversationManager
-from .conversation_service import ConversationService
+from ..dependency.conversation_service import ConversationService
 
 __all__ = ["ConversationManager", "ConversationService"]

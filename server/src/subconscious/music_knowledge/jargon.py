@@ -13,13 +13,16 @@ class SongEntityLinker:
     later planning/reply generation rather than a surface-level response.
     """
 
-    def __init__(self, songname_file: str | None = None, lyric_file: str | None = None):
+    def __init__(self, config: dict, songname_file: str | None = None, lyric_file: str | None = None):
+        self.config = config
         self.songname_retriver = KeywordProcessor()
         self.lyric_retriver = KeywordProcessor()
-        self.songname_file = songname_file or str(
+        configured_songname_file = config.get("songname_file")
+        configured_lyric_file = config.get("lyric_file")
+        self.songname_file = songname_file or configured_songname_file or str(
             Path(__file__).resolve().parents[2] / "res" / "knowledge" / "song_name_keywords.txt"
         )
-        self.lyric_file = lyric_file or str(
+        self.lyric_file = lyric_file or configured_lyric_file or str(
             Path(__file__).resolve().parents[2] / "res" / "knowledge" / "song_lyric_keywords.txt"
         )
         self._load_keywords_from_file()
@@ -56,7 +59,7 @@ class SongEntityLinker:
         self.lyric_retriver.add_keyword_from_file(str(lyric_path))
 
 
-song_entity_linker = SongEntityLinker()
+song_entity_linker = SongEntityLinker({})
 
 
 def extract_song_entities(user_input: str | None) -> List[str]:

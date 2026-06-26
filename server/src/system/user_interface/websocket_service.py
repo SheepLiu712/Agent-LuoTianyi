@@ -9,7 +9,7 @@ from src.legacy.chat_input_adapter import (
     stimulus_to_chat_input_event,
     ws_message_to_stimulus,
 )
-from src.agent.chat.chat_events import ChatInputEvent
+from src.domain.chat import ChatInputEvent
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:

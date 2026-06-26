@@ -1,20 +1,22 @@
+from __future__ import annotations
+
 import asyncio
 import time
-from typing import List, Optional, Tuple, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING
 
-from src.system.user_interface.types import ChatResponse
-from src.system.user_interface.websocket_service import WebSocketConnection
+
 from src.utils.logger import get_logger
-from src.agent.chat.chat_events import ChatInputEvent, ChatInputEventType
+from src.domain.chat import ChatInputEvent, ChatInputEventType
 from src.system.user_interface.types import WSEventType
 
-from src.agent.chat.ingress import ingress_message
-from src.agent.chat.topic_planner import TopicPlanner
-from src.agent.chat.topic_replier import TopicReplier
-from src.agent.reflex import TouchReflexResponder
+from src.chat_session.chat_pipeline.topic_planner import TopicPlanner
+from src.chat_session.chat_pipeline.topic_replier import TopicReplier
+from src.chat_session.chat_pipeline.ingress_helper import IngressHelper
 
 if TYPE_CHECKING:
     from src.system.system_runtime import SystemRuntime
+    from src.system.user_interface.types import ChatResponse
+    from src.system.user_interface.websocket_service import WebSocketConnection
 
 
 class ChatStream:
@@ -23,20 +25,27 @@ class ChatStream:
     STATE_LISTENING = "listening"
     STATE_THINKING = "thinking"
 
-    def __init__(self, ws_connection: WebSocketConnection):
+    def __init__(self, config: dict, ws_connection: "WebSocketConnection"):
+        self.config = config
         self.ws_connection = ws_connection
         self.user_name: str = ws_connection.user_name
-        self.user_uuid: Optional[str] = ws_connection.user_uuid if ws_connection else None
+        self.user_uuid: str = ws_connection.user_uuid
         self.logger = get_logger(f"{self.user_name}ChatStream")
+
         self.system_runtime: Optional["SystemRuntime"] = None
         self.connection_lost_time = None
-        self.topic_planner = TopicPlanner(username=self.user_name, user_id=self.user_uuid)
-        self.topic_replier = TopicReplier(username=self.user_name, user_id=self.user_uuid, send_reply_callback=self.feed_response)
-        self.touch_reflex = TouchReflexResponder()
+        self.ingress_helper = IngressHelper(config.get("ingress_helper", {}), username=self.user_name, user_id=self.user_uuid)
+        self.topic_planner = TopicPlanner(config.get("topic_planner", {}), username=self.user_name, user_id=self.user_uuid)
+        self.topic_replier = TopicReplier(
+            config.get("topic_replier", {}),
+            username=self.user_name,
+            user_id=self.user_uuid,
+        )
+        self.ingress_helper.set_msg_consumer(self.topic_planner.feed_unread_message)
         self.topic_planner.set_topic_consumer(self.topic_replier.add_topic)
         self.topic_replier.set_change_state_callback(self.change_state)
-        self.ingress_queue: asyncio.Queue[ChatInputEvent] = asyncio.Queue()
-        self.ingress_worker_task: asyncio.Task | None = None
+        self.topic_replier.set_send_reply_callback(self.feed_response)
+
         self.response_queue: asyncio.Queue[ChatResponse] = asyncio.Queue()
         self.response_sender_task: asyncio.Task | None = None
 
@@ -50,53 +59,21 @@ class ChatStream:
         if self.system_runtime is not None and self.system_runtime != system_runtime:
             self.logger.warning("System runtime is already set, overwriting with new value")
         self.system_runtime = system_runtime
+        self.ingress_helper.set_system_runtime(system_runtime)
         self.topic_planner.set_system_runtime(system_runtime)
         self.topic_replier.set_system_runtime(system_runtime)
 
     def start_if_needed(self):
         """启动常驻消息处理协程（仅启动一次）。"""
-        self._start_ingress_worker()
+        self.ingress_helper.start_processing()
         self.topic_planner.start_processing()
         self.topic_replier.start_processing()
         self._start_response_sender()
 
     async def feed_event(self, event: ChatInputEvent):
         """接收 service 层转换后的聊天事件，并交给 ingress worker。"""
-        await self.ingress_queue.put(event)
-
-    async def ingress_worker_loop(self):
-        while True:
-            event: ChatInputEvent | None = None
-            try:
-                event = await self.ingress_queue.get()
-                await self._process_ingress_event(event)
-            except asyncio.CancelledError:
-                self.logger.info("Ingress worker task cancelled")
-                break
-            except Exception as e:
-                self.logger.exception(f"Error in ingress worker loop: {e}")
-                await asyncio.sleep(0.1)
-            finally:
-                if event is not None:
-                    self.ingress_queue.task_done()
-
-    async def _process_ingress_event(self, event: ChatInputEvent):
-        if event.event_type == ChatInputEventType.USER_TOUCH:
-            handled = await self.touch_reflex.try_reply(event, self.feed_response)
-            if handled:
-                return
-
-        if self._is_user_message_event(event):
-            if self.system_runtime is not None and self.user_uuid is not None:
-                await self.system_runtime.activity_maker.on_user_message(self.user_uuid)
-                await ingress_message(self.system_runtime, self.user_uuid, event)  # 预处理
-                if event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}:
-                    await self.system_runtime.conversation_service.persist_user_event(self.user_uuid, event)
-            else:
-                self.logger.warning("System runtime or user uuid is missing, skip user message preprocessing")
-
-        await self.topic_planner.feed_unread_message(event)
-
+        await self.ingress_helper.put(event)
+    
     async def feed_response(self, response: ChatResponse):
         """接收 topic replier 生成的回复，并发送给用户。"""
         await self.response_queue.put(response)
@@ -123,11 +100,11 @@ class ChatStream:
 
     async def change_state(self, thinking: Optional[bool] = None, speaking: Optional[bool] = None):
         async with self.state_lock:
-            if thinking == True: # 由replier调用，进入思考状态时必然更新状态
+            if thinking == True:  # 由replier调用，进入思考状态时必然更新状态
                 self.state = self.STATE_THINKING
                 await self._send_agent_state(self.STATE_THINKING)
                 return
-            if speaking == True: # 由chat_stream的_send_response调用，此时如果不在思考，则认为进入WAITING状态
+            if speaking == True:  # 由chat_stream的_send_response调用，此时如果不在思考，则认为进入WAITING状态
                 if not self.topic_replier.is_processing and self.state != self.STATE_WAITING:
                     self.state = self.STATE_WAITING
                     await self._send_agent_state(self.STATE_WAITING)
@@ -146,7 +123,7 @@ class ChatStream:
             self.logger.warning("WebSocket service is not available, cannot send response")
             return False
         try:
-            await self.change_state(speaking=True) # 发送回复前更新状态
+            await self.change_state(speaking=True)  # 发送回复前更新状态
             event = ws_service._make_event(
                 WSEventType.AGENT_MESSAGE,
                 response.model_dump() if hasattr(response, "model_dump") else response.dict(),
@@ -156,7 +133,7 @@ class ChatStream:
         except Exception as e:
             self.logger.warning(f"Send response failed, will retry: {e}")
             return False
-        
+
     async def _send_agent_state(self, state: str) -> bool:
         if self.ws_connection is None or self.ws_connection.websocket is None:
             return False
@@ -181,14 +158,6 @@ class ChatStream:
             self.response_sender_task = asyncio.create_task(self.response_sender_loop())
             self.logger.info("Started response sender task")
 
-    def _start_ingress_worker(self):
-        if self.ingress_worker_task is None or self.ingress_worker_task.done():
-            self.ingress_worker_task = asyncio.create_task(self.ingress_worker_loop())
-            self.logger.info("Started ingress worker task")
-
-    def _is_user_message_event(self, event: ChatInputEvent) -> bool:
-        return event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE, ChatInputEventType.USER_TOUCH}
-
 
     ####### 下方为连接管理相关方法 #######
 
@@ -201,7 +170,7 @@ class ChatStream:
         """检查连接是否丢失"""
         return self.ws_connection is None
 
-    def reconnect(self, new_ws_connection: WebSocketConnection):
+    def reconnect(self, new_ws_connection: "WebSocketConnection"):
         """用户重连时调用，更新 WebSocket 连接"""
         self.logger.info(f"User {self.user_name} reconnected")
         self.ws_connection = new_ws_connection
@@ -212,8 +181,8 @@ class ChatStream:
 
     def clean_up(self):
         """清理资源的逻辑，比如关闭文件、数据库连接等"""
-        if self.ingress_worker_task and not self.ingress_worker_task.done():
-            self.ingress_worker_task.cancel()
+        if self.ingress_helper.ingress_worker_task and not self.ingress_helper.ingress_worker_task.done():
+            self.ingress_helper.ingress_worker_task.cancel()
         if self.topic_planner.processor_task and not self.topic_planner.processor_task.done():
             self.topic_planner.processor_task.cancel()
         if self.topic_replier.processor_task and not self.topic_replier.processor_task.done():

@@ -6,7 +6,14 @@ chat pipeline to change all at once.
 
 from src.domain.action import ActionPlan, ActionType, PlannedAction, ResponseEnvelope
 from src.domain.agent_state import AgentState
-from src.domain.character import CharacterProfile
+from src.domain.character import CharacterProfile, CharacterName
+from src.domain.chat import (
+    ChatInputEvent,
+    ChatInputEventType,
+    ExtractedTopic,
+    UnreadMessage,
+    UnreadMessageSnapshot,
+)
 from src.domain.conversation_type import ConversationItem, KnowledgeItem, SpeakingCommand
 from src.domain.memory_context import MemoryContext, MemoryHit
 from src.domain.memory_record import MemoryRecord, MemoryType, MemoryVisibility
@@ -33,8 +40,11 @@ __all__ = [
     "ActionType",
     "AgentState",
     "CharacterProfile",
+    "ChatInputEvent",
+    "ChatInputEventType",
     "ConversationItem",
     "Entity",
+    "ExtractedTopic",
     "GraphEntityType",
     "GraphNode",
     "GraphRelationType",
@@ -62,5 +72,8 @@ __all__ = [
     "StimulusModality",
     "ToolFunction",
     "ToolOneParameter",
+    "UnreadMessage",
+    "UnreadMessageSnapshot",
     "WishEntry",
+    "CharacterName",
 ]

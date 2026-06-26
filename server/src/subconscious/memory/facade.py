@@ -29,7 +29,7 @@ class SubconsciousMemory:
     ):
         self.owner_character_id = owner_character_id
         self.legacy_manager = MemoryManager(config, prompt_manager)
-        self.updates = MemoryUpdateService(self)
+        self.updates = MemoryUpdateService(config.get("updates", {}), self)
 
     @property
     def memory_searcher(self):

@@ -3,40 +3,24 @@
 
 实现洛天依角色扮演对话Agent的核心逻辑
 """
+from __future__ import annotations
 
-from typing import  List, Dict, Any, Optional, Callable, Tuple, Generator
-from dataclasses import dataclass
-from sqlalchemy.orm import Session
-import asyncio
+from typing import  List, Dict, Any, Optional, Tuple, Generator
 import json
 import re
 from typing import TYPE_CHECKING
-from uuid import uuid4
 
-from src.utils.llm.prompt_manager import PromptManager
-from src.agent.date_processor import DateDetector
 from src.agent.main_chat import MainChat, OneResponseLine
-from src.chat_session.proactive_topic_maker import ActivityType
-from src.agent.topic_extractor import TopicExtractor
-from src.system import ConversationManager
 from src.utils.logger import get_logger
-from src.capabilities.speech import TTSModule
-from src.subconscious.memory import SongKnowledgeMemory, SubconsciousMemory
-from src.subconscious.state import SubconsciousState
-from src.agent.attention_planner import AttentionPlanner, TopicAttentionPlan
+from src.subconscious.attention import TopicAttentionPlan
 from src.agent.response_realizer import ResponseRealizer, UserExpressionContext
-from src.domain import CharacterProfile
+from src.domain import CharacterProfile, CharacterName
 
 
-from src.system.database.vector_store import BaseDocument
 if TYPE_CHECKING:
-    from src.system.system_runtime import SystemRuntime
-    from src.agent.chat.unread_store import UnreadMessageSnapshot, UnreadMessage
-    from src.agent.chat.topic_planner import ExtractedTopic
-    from src.system.database.vector_store import VectorStore
-    from src.utils.llm.llm_module import LLMAPIInterface
-    from src.subconscious.music_knowledge.music_manager import MusicManager
-    from src.system.database.redis_buffer import RedisBuffer
+    from src.capabilities.speech import TTSModule
+    from src.agent_runtime.runtime_hub import AgentRuntimeHub
+    from src.subconscious.character_mind import CharacterSubconscious
     
 
 
@@ -53,21 +37,6 @@ def get_available_expression(config_path: str = "config/live2d_interface_config.
     return result
 
 
-@dataclass
-class _AgentRuntimeHub:
-    """仅供 LuoTianyiAgent 内部使用的运行时依赖。"""
-
-    redis_client: "RedisBuffer"
-    vector_store: "VectorStore"
-    sql_session_factory: Callable[[], Session]
-    database: Any
-    music_manager: "MusicManager"
-    capabilities: Any | None = None
-
-    def open_sql_session(self) -> Session:
-        return self.sql_session_factory()
-
-
 class LuoTianyiAgent:
     """洛天依Agent类
 
@@ -78,8 +47,9 @@ class LuoTianyiAgent:
         self,
         config: Dict[str, Any],
         tts_module: TTSModule,
-        runtime_hub: "_AgentRuntimeHub",
+        runtime_hub: "AgentRuntimeHub",
         character_profile: CharacterProfile | None = None,
+        subconscious: "CharacterSubconscious | None" = None,
     ) -> None:
         """初始化洛天依Agent
 
@@ -90,32 +60,17 @@ class LuoTianyiAgent:
         self.logger = get_logger("LuoTianyiAgent")
         self._runtime_hub = runtime_hub
         self.character_profile = character_profile
-        self.character_id = character_profile.character_id if character_profile else "luotianyi"
+        self.character_id = character_profile.character_id if character_profile else CharacterName.LUOTIANYI.value
         self.music_manager = runtime_hub.music_manager
         self.capabilities = runtime_hub.capabilities
-        self.prompt_manager = PromptManager(self.config.get("prompt_manager", {}))  # 提示管理器
-
-        # 各种模块初始化
-        self.conversation_manager = ConversationManager(
-            self.config.get("conversation_manager", {}), self.prompt_manager, db_manager=runtime_hub.database
-        )  # 对话管理器
-        self.subconscious_memory = SubconsciousMemory(
-            self.config["memory_manager"],
-            self.prompt_manager,
-            owner_character_id=self.character_id,
-        )
-        self.subconscious_state = SubconsciousState(owner_character_id=self.character_id)
-        self.song_knowledge_memory = SongKnowledgeMemory(runtime_hub.music_manager)
-        self.memory_updates = self.subconscious_memory.updates
-        # Compatibility alias for legacy callers while dependencies migrate.
-        self.memory_manager = self.subconscious_memory
+        if subconscious is None:
+            raise ValueError("LuoTianyiAgent requires a CharacterSubconscious instance.")
+        self.subconscious = subconscious
+        self.prompt_manager = subconscious.prompt_manager
 
         self.tts_engine = tts_module  # TTS模块
         self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
-        self.attention_planner = AttentionPlanner(target_character_id=self.character_id)
         self.response_realizer = ResponseRealizer(self.main_chat)
-        self.topic_extractor = TopicExtractor(self.config["topic_extractor"],self.prompt_manager,)
-        
 
     def save_preferences(self, user_uuid: str, preferences: dict) -> bool:
         """保存用户偏好设置到数据库。"""
@@ -141,44 +96,13 @@ class LuoTianyiAgent:
         if unread_snapshot is None or not unread_snapshot.messages:
             return None, []
 
-        if conversation_history is None:
-            try:
-                conversation_history = await self.conversation_manager.get_context(
-                    db=None,
-                    redis=None,
-                    user_id=user_id,
-                )
-            except Exception as e:
-                self.logger.warning(f"Failed to get conversation_history for topic extraction: {e}")
-                conversation_history = ""
-
-        topic, remaining = await self.topic_extractor.extract_topics(
+        return await self.subconscious.extract_topics(
+            user_id=user_id,
             unread_snapshot=unread_snapshot,
-            conversation_history=conversation_history,
             force_complete=force_complete,
+            conversation_history=conversation_history,
         )
-        return topic, remaining
     
-    async def generate_topic_from_activity(self, activity_type: ActivityType, user_uuid: str, llm_client: "LLMAPIInterface", **kwargs) -> "ExtractedTopic":
-        """根据用户活动生成话题，供 ProactiveTopicMaker 调用"""
-        from src.agent.chat.topic_planner import ExtractedTopic
-        from src.agent.chat.unread_store import UnreadMessage
-        prompt = self.prompt_manager.get_template(activity_type.value)
-        if not prompt:
-            self.logger.error(f"No prompt template found for activity type {activity_type}")
-            raise ValueError(f"No prompt template found for activity type {activity_type}")
-        prompt = prompt.render(**kwargs)
-
-        content = await llm_client.generate_response(prompt, use_json=False)
-        content = (content or {}).get("content", "") if isinstance(content, dict) else str(content)
-        return ExtractedTopic(
-            topic_id=str(uuid4()),
-            source_messages=[],
-            topic_content=content or prompt,
-            summary="",
-            is_activity=True,
-        )
-
     async def search_memories_for_topic(
         self,
         user_id: str,
@@ -187,10 +111,7 @@ class LuoTianyiAgent:
         k: int = 3,
     ) -> List[str]:
         """供 TopicReplier 调用的记忆检索接口。"""
-        if not queries:
-            return []
-        return await self.subconscious_memory.search_memories_for_topic(
-            vector_store=self._runtime_hub.vector_store,
+        return await self.subconscious.search_memories_for_topic(
             user_id=user_id,
             queries=queries,
             similarity_threshold=similarity_threshold,
@@ -199,7 +120,7 @@ class LuoTianyiAgent:
 
     async def search_song_facts_for_topic(self, constraints: List[str]) -> List[str]:
         """供 TopicReplier (或其他组件) 查找歌曲信息的代理方法"""
-        return await self.song_knowledge_memory.search_song_facts_for_topic(constraints)
+        return await self.subconscious.search_song_facts_for_topic(constraints)
 
     async def plan_topic_turn_for_pipeline(
         self,
@@ -209,19 +130,11 @@ class LuoTianyiAgent:
         external_context: Optional[str] = None,
     ) -> TopicAttentionPlan:
         """Build a conscious attention plan for one legacy chat topic."""
-        return await self.attention_planner.plan_topic_turn(
+        return await self.subconscious.plan_topic_turn(
             user_id=user_id,
             topic=topic,
             conversation_history=conversation_history,
-            memory_search=lambda queries: self.search_memory_context_for_topic(
-                user_id=user_id,
-                queries=queries,
-                similarity_threshold=0.8,
-            ),
-            fact_search=self._search_fact_constraints_for_topic,
-            sing_planner=self._plan_sing_attempts_for_topic,
             external_context=external_context,
-            agent_state=self.subconscious_state.get_snapshot(),
         )
 
     async def search_memory_context_for_topic(
@@ -231,23 +144,12 @@ class LuoTianyiAgent:
         similarity_threshold: float = 0.8,
         k: int = 3,
     ):
-        if not queries:
-            from src.domain import MemoryContext
-
-            return MemoryContext()
-
-        db = self._runtime_hub.open_sql_session()
-        try:
-            return await self.subconscious_memory.search_memory_context_for_topic(
-                db=db,
-                vector_store=self._runtime_hub.vector_store,
-                user_id=user_id,
-                queries=queries,
-                similarity_threshold=similarity_threshold,
-                k=k,
-            )
-        finally:
-            db.close()
+        return await self.subconscious.search_memory_context_for_topic(
+            user_id=user_id,
+            queries=queries,
+            similarity_threshold=similarity_threshold,
+            k=k,
+        )
 
     async def realize_topic_plan_for_pipeline(
         self,
@@ -262,34 +164,7 @@ class LuoTianyiAgent:
         )
 
     async def _search_fact_constraints_for_topic(self, fact_constraints: List[str]) -> List[str]:
-        if not fact_constraints:
-            return []
-
-        special_hits: List[str] = []
-        regular_constraints: List[str] = []
-        for constraint in fact_constraints:
-            if constraint == "/SongsCanSing":
-                try:
-                    songs_json = await self.music_manager.get_songs_can_sing_llm(max_song_num=15)
-                    special_hits.append(f"可演唱歌曲推荐：{songs_json}")
-                except Exception as e:
-                    self.logger.error(f"Failed to get songs can sing: {e}")
-                continue
-
-            if constraint.startswith("/CanISing"):
-                song_name = constraint[len("/CanISing"):].strip()
-                if not song_name:
-                    continue
-                try:
-                    special_hits.append(await self.music_manager.can_i_sing_song_llm(song_name))
-                except Exception as e:
-                    self.logger.error(f"Failed to get can I sing for {song_name}: {e}")
-                continue
-
-            regular_constraints.append(constraint)
-
-        regular_hits = await self.search_song_facts_for_topic(regular_constraints) if regular_constraints else []
-        return special_hits + regular_hits
+        return await self.subconscious.search_fact_constraints_for_topic(fact_constraints)
 
     async def _plan_sing_attempts_for_topic(
         self,
@@ -419,7 +294,7 @@ class LuoTianyiAgent:
     ) -> List[OneResponseLine]:
         """供 TopicReplier 调用：按话题生成分段回复。"""
         if conversation_history is None:
-            conversation_history = await self.conversation_manager.get_context(None, None, user_id)
+            conversation_history = ""
         user_context = self._load_user_expression_context(user_id)
 
         return await self.main_chat.generate_response(
@@ -441,55 +316,21 @@ class LuoTianyiAgent:
         conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
     ) -> None:
         """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
-        db = self._runtime_hub.open_sql_session()
-        redis_client = self._runtime_hub.redis_client
-        vector_store = self._runtime_hub.vector_store
-        try:
-            history = conversation_history or await self.conversation_manager.get_context(db, redis_client, user_id)
-            await self.memory_updates.post_process_interaction(
-                db=db,
-                redis=redis_client,
-                vector_store=vector_store,
-                user_id=user_id,
-                history=history,
-                current_dialogue=current_dialogue,
-                related_memories=related_memories or [],
-                commit=True,
-            )
-        finally:
-            db.close()
+        await self.subconscious.write_topic_memories(
+            user_id=user_id,
+            current_dialogue=current_dialogue,
+            related_memories=related_memories,
+            conversation_history=conversation_history,
+        )
 
     def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """供 TopicReplier 调用的唱歌计划接口。返回 song|segment。"""
-        if self.capabilities is not None:
-            return self.capabilities.singing.build_sing_plan(sing_attempts)
-        if not sing_attempts:
-            return None, None
-
-        song_name = None
-        for attempt in sing_attempts:
-            candidate = (attempt or "").strip()
-            if not candidate:
-                continue
-            if candidate == "random_song":
-                pair = self.music_manager.pick_random_song_and_segment()
-                return pair if pair else (None, None)
-
-            song_name = self._extract_song_name(candidate)
-            if not song_name:
-                continue
-
-            correct_song_name, segment = self.music_manager.pick_segment_for_song(song_name)
-            if segment:
-                return correct_song_name, segment
-        if song_name:
-            self.music_manager.add_wished_song(song_name)
-        return song_name, None # 如果有明确歌名但无法满足唱歌需求，返回歌名和None表示用户想听这首歌但还不会唱
+        return self.subconscious.build_sing_plan_for_topic(sing_attempts)
     
     def sing(self, song_name: str, segment: str) -> Optional[bytes]:
         """调用唱歌管理器生成歌曲片段的音频，并返回音频的Base64字符串"""
         if self.capabilities is not None:
-            return self.capabilities.singing.sing(song_name, segment)
+            return self.capabilities.singing.sing(self.character_id, song_name, segment)
         if not song_name or not segment:
             return None
         _, audio_bytes = self.music_manager.get_song_segment(song_name, segment) # 已经是base64字符串了
@@ -497,13 +338,13 @@ class LuoTianyiAgent:
     
     async def tts_say(self, text: str, tone: str) -> str:
         if self.capabilities is not None:
-            return await self.capabilities.speech.say(text, tone)
+            return await self.capabilities.speech.say(self.character_id, text, tone)
         audio_bytes = await self.tts_engine.synthesize_speech_with_tone(text, tone)
         return self.tts_engine.encode_audio_to_base64(audio_bytes)
     
     def tts_say_stream(self, text: str, tone: str) -> Generator[str, None, None]:
         if self.capabilities is not None:
-            yield from self.capabilities.speech.say_stream(text, tone)
+            yield from self.capabilities.speech.say_stream(self.character_id, text, tone)
             return
         for chunk in self.tts_engine.stream_synthesize_speech_with_tone(text, tone):
             yield self.tts_engine.encode_audio_to_base64(chunk)
@@ -522,7 +363,7 @@ class LuoTianyiAgent:
 
         return content.strip("\"'“”‘’《》")
 
-    def _format_memory_hit(self, doc: BaseDocument) -> str:
+    def _format_memory_hit(self, doc: Any) -> str:
         timestamp = ""
         if hasattr(doc, "metadata") and isinstance(doc.metadata, dict):
             timestamp = str(doc.metadata.get("timestamp") or "").strip()

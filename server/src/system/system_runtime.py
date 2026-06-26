@@ -38,7 +38,11 @@ class SystemRuntime:
         capability_manager = CapabilityManager(config.get("capabilities", {}), llm_service)
 
         # 4. 初始化聊天会话管理器
-        chat_session_manager = ChatSessionManager(config.get("chat_sessions", {}), llm_service)
+        chat_session_manager = ChatSessionManager(
+            config.get("chat_session_manager", {}),
+            llm_service,
+            database_manager,
+        )
         
         # 5. 初始化箱庭世界运行时
         world = WorldRuntime(
@@ -85,6 +89,7 @@ class SystemRuntime:
         await self.world.stop_background_services()
         await self.chat_session_manager.stop_background_services()
 
+    # Properties for convenient access to subsystems
     @property
     def agent(self):
         return self.agent_runtime.get_agent()
@@ -95,7 +100,19 @@ class SystemRuntime:
 
     @property
     def gcsm(self):
-        return self.chat_session_manager.global_chat_stream_manager
+        return self.chat_session_manager.chat_stream_manager
+
+    @property
+    def chat_stream_manager(self):
+        return self.chat_session_manager.chat_stream_manager
+
+    @property
+    def conversation_service(self):
+        return self.chat_session_manager.conversation_service
+
+    @property
+    def activity_maker(self):
+        return self.chat_session_manager.proactive_topic_maker
 
     @property
     def global_speaking_worker(self):

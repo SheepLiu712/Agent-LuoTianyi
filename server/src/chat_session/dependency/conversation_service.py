@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable, List, Optional
 
 from src.agent.main_chat import ContextType as ResponseLineType
 from src.agent.main_chat import OneResponseLine, OneSentenceChat, SongSegmentChat
-from src.agent.chat.chat_events import ChatInputEvent, ChatInputEventType
+from src.domain.chat import ChatInputEvent, ChatInputEventType
 from src.domain.conversation_type import ConversationItem
 from src.utils.enum_type import ContextType, ConversationSource
 from src.utils.logger import get_logger
@@ -21,15 +21,13 @@ class ConversationService:
 
     def __init__(
         self,
-        conversation_manager: ConversationManager,
+        config: dict[str, Any],
         database: "DatabaseManager | None" = None,
-        sql_session_factory: Callable[[], Any] | None = None,
-        redis_client: Any | None = None,
+        llm_service: Any = None,
     ) -> None:
-        self.conversation_manager = conversation_manager
+        self.config = config
+        self.conversation_manager = ConversationManager()
         self.database = database
-        self.sql_session_factory = sql_session_factory
-        self.redis_client = redis_client
         self.logger = get_logger("ConversationService")
         if self.database is not None and getattr(self.conversation_manager, "db", None) is None:
             self.conversation_manager.db = self.database
@@ -38,7 +36,7 @@ class ConversationService:
         if self.database is not None:
             return nullcontext((None, None))
         if self.sql_session_factory is not None:
-            return _LegacyConversationScope(self.sql_session_factory, self.redis_client)
+            return _LegacyConversationScope({}, self.sql_session_factory, self.redis_client)
         return nullcontext((None, None))
 
     async def persist_user_event(self, user_id: Optional[str], event: ChatInputEvent) -> Optional[str]:
@@ -194,7 +192,8 @@ class ConversationService:
 
 
 class _LegacyConversationScope:
-    def __init__(self, sql_session_factory: Callable[[], Any], redis_client: Any | None) -> None:
+    def __init__(self, config: dict[str, Any], sql_session_factory: Callable[[], Any], redis_client: Any | None) -> None:
+        self.config = config
         self.sql_session_factory = sql_session_factory
         self.redis_client = redis_client
         self.db = None

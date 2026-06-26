@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.agent.main_chat import MainChat, OneResponseLine
-    from src.agent.attention_planner import TopicAttentionPlan
+    from src.subconscious.attention import TopicAttentionPlan
 
 
 @dataclass(frozen=True)

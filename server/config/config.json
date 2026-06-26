@@ -90,14 +90,31 @@
             }
         }
     },
-    "chat_sessions": {
-        "global_chat_stream_manager": {
+    "chat_session_manager": {
+        "chat_stream_manager": {
             "default_expiration_seconds": 3600,
             "heartbeat_timeout_seconds": 60
         },
         "global_speaking_worker": {
             "tts_job_timeout_seconds": 120,
             "max_retries": 2
+        },
+        "conversation_service": {
+            "raw_conversation_context_limit": 60,
+            "not_zip_conversation_count": 30,
+            "forget_conversation_days": 10,
+            "llm_module": {
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true
+                },
+                "prompt_name": "summary_prompt"
+            },
+            "history_dir": "data/memory/conversation_history",
+            "max_file_lines": 1000,
+            "recent_history_limit": 100,
+            "context_file": "data/memory/context/context.json"
         },
         "proactive_topic_maker": {
             "return_user_threshold_seconds": 432000,
@@ -146,6 +163,9 @@
         }
     },
     "agent_runtime": {
+        "character_registry": {
+
+        },
         "subconscious": {
             "memory": {
                 "vector_store": {
@@ -211,23 +231,6 @@
                         "use_json": true
                     },
                     "prompt_name": "topic_extraction_prompt"
-                }
-            },
-            "conversation_manager": {
-                "history_dir": "data/memory/conversation_history",
-                "max_file_lines": 1000,
-                "recent_history_limit": 100,
-                "context_file": "data/memory/context/context.json",
-                "raw_conversation_context_limit": 60,
-                "not_zip_conversation_count": 30,
-                "forget_conversation_days": 10,
-                "llm_module": {
-                    "llm": {
-                        "name": "qwen3.5-plus",
-                        "enable_thinking": false,
-                        "use_json": true
-                    },
-                    "prompt_name": "summary_prompt"
                 }
             }
         },

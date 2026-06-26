@@ -1,92 +1,101 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable
-
-from sqlalchemy.orm import Session
+from typing import Any, Dict
 
 from src.agent.luotianyi_agent import LuoTianyiAgent
+from src.agent_runtime.agent_registry import AgentRegistry
 from src.agent_runtime.character_registry import CharacterRegistry, get_default_character_registry
+from src.agent_runtime.runtime_hub import AgentRuntimeHub
+from src.agent_runtime.subconscious import Subconscious
+from src.subconscious.character_mind import CharacterSubconscious
 from src.system.database.vector_store import get_vector_store, init_vector_store
-
-
-@dataclass
-class AgentRuntimeDependencies:
-    redis_client: Any
-    vector_store: Any
-    sql_session_factory: Callable[[], Session]
-    music_manager: Any
-    database: Any | None = None
-    capabilities: Any | None = None
-
-    def open_sql_session(self) -> Session:
-        return self.sql_session_factory()
+from src.utils.logger import get_logger
 
 
 class AgentRuntime:
-    """Owns conscious agents and character lookup for the server runtime."""
+    """Owns conscious agents, character lookup, and shared subconscious services."""
 
     def __init__(
         self,
-        config: dict[str, Any] | None = None,
-        llm_service: Any | None = None,
-        capability_manager: Any | None = None,
-        database_manager: Any | None = None,
-        *,
-        character_registry: CharacterRegistry | None = None,
-        conscious_agents: dict[str, LuoTianyiAgent] | None = None,
-        default_character_id: str = "luotianyi",
+        config: Dict[str, Any],
+        llm_service: Any,
+        capability_manager: Any,
+        database_manager: Any,
     ) -> None:
-        registry = character_registry or get_default_character_registry()
+        self.logger = get_logger(__name__)
+        self.config = config
+        self.character_registry = CharacterRegistry(config.get("character_registry", {}), llm_service, capability_manager, database_manager)
+        self.default_character_id = self.character_registry.get().character_id
 
-        if conscious_agents is not None:
-            self.character_registry = registry
-            self.conscious_agents = conscious_agents
-            self.default_character_id = default_character_id
-            return
-
-        if config is None or llm_service is None or capability_manager is None or database_manager is None:
-            raise ValueError("AgentRuntime requires config, llm_service, capability_manager, and database_manager")
-
-        agent_config = self._build_agent_config(config, llm_service, capability_manager)
+        agent_config = self._build_agent_config(self.config, llm_service, capability_manager)
         vector_store = self._initialize_vector_store(agent_config)
-        deps = AgentRuntimeDependencies(
-            redis_client=database_manager.redis,
+        conscious_agents, character_minds = self._build_character_runtimes(
+            agent_config=agent_config,
+            capability_manager=capability_manager,
+            database_manager=database_manager,
             vector_store=vector_store,
-            sql_session_factory=database_manager.open_sql_session,
-            database=database_manager,
-            music_manager=capability_manager.singing.music_manager,
-            capabilities=capability_manager,
         )
-
-        tts_module = capability_manager.speech.tts_module
-        self.character_registry = registry
-        self.conscious_agents = {
-            profile.character_id: LuoTianyiAgent(
-                agent_config,
-                tts_module,
-                deps,
-                character_profile=profile,
-            )
-            for profile in registry.characters.values()
-        }
-        self.default_character_id = registry.get(default_character_id).character_id
+        self.agent_registry = AgentRegistry(
+            self.config.get("agent_registry", {}),
+            self.character_registry,
+            conscious_agents,
+        )
+        self.conscious_agents = dict(self.agent_registry.all())
+        self.subconscious = Subconscious(
+            self.config.get("subconscious", {}),
+            self.agent_registry,
+            character_minds,
+        )
 
         global _agent_runtime
         _agent_runtime = self
 
     def get_agent(self, character_id: str | None = None) -> LuoTianyiAgent:
-        profile = self.character_registry.get(character_id or self.default_character_id)
-        try:
-            return self.conscious_agents[profile.character_id]
-        except KeyError as exc:
-            raise KeyError(f"No conscious agent registered for {profile.character_id}") from exc
+        return self.agent_registry.get(character_id or self.default_character_id)
+
+    def get_state(self, character_id: str | None = None):
+        return self.subconscious.get_state(character_id or self.default_character_id)
+
+    def _build_character_runtimes(
+        self,
+        *,
+        agent_config: dict[str, Any],
+        capability_manager: Any,
+        database_manager: Any,
+        vector_store: Any,
+    ) -> tuple[dict[str, LuoTianyiAgent], dict[str, CharacterSubconscious]]:
+        agents: dict[str, LuoTianyiAgent] = {}
+        minds: dict[str, CharacterSubconscious] = {}
+        for profile in self.character_registry.characters.values():
+            if not profile.enabled:
+                continue
+            tts_module = self._get_tts_module(capability_manager, profile.character_id)
+            music_manager = self._get_music_manager(capability_manager, profile.character_id)
+            hub = AgentRuntimeHub(
+                {},
+                redis_client=database_manager.redis,
+                vector_store=vector_store,
+                sql_session_factory=database_manager.open_sql_session,
+                database=database_manager,
+                music_manager=music_manager,
+                capabilities=capability_manager,
+            )
+            mind = CharacterSubconscious(agent_config, hub, profile)
+            minds[profile.character_id] = mind
+            agents[profile.character_id] = LuoTianyiAgent(
+                agent_config,
+                tts_module,
+                hub,
+                character_profile=profile,
+                subconscious=mind,
+            )
+        return agents, minds
 
     @staticmethod
-    def _build_agent_config(config: dict[str, Any], llm_service: Any, capability_manager: Any) -> dict[str, Any]:
-        subconscious_cfg = config.get("subconscious", {})
-        agent_cfg = config.get("agent", {})
-        capability_cfg = getattr(capability_manager, "_config", {})
+    def _build_agent_config(config: Dict[str, Any], llm_service: Any, capability_manager: Any) -> dict[str, Any]:
+        subconscious_cfg = dict(config.get("subconscious", {}))
+        agent_cfg = dict(config.get("agent", {}))
+        capability_cfg = getattr(capability_manager, "config", {})
         return {
             "prompt_manager": getattr(llm_service, "config", {}).get("prompt_manager", {}),
             "conversation_manager": subconscious_cfg.get("conversation_manager", {}),
@@ -98,54 +107,36 @@ class AgentRuntime:
         }
 
     @staticmethod
-    def _initialize_vector_store(agent_config: dict[str, Any]) -> Any:
+    def _initialize_vector_store(agent_config: Dict[str, Any]) -> Any:
         vector_cfg = agent_config.get("memory_manager", {}).get("vector_store", {})
         if vector_cfg:
             init_vector_store(vector_cfg)
         return get_vector_store()
 
+    def _get_tts_module(self, capability_manager: Any, character_id: str) -> Any:
+        modules = getattr(getattr(capability_manager, "speech", None), "tts_module", {})
+        if character_id in modules:
+            return modules[character_id]
+        if self.default_character_id in modules:
+            return modules[self.default_character_id]
+        if modules:
+            return next(iter(modules.values()))
+        raise ValueError(f"No TTS module available for character_id={character_id}")
+
+    def _get_music_manager(self, capability_manager: Any, character_id: str) -> Any:
+        singing = getattr(capability_manager, "singing", None)
+        managers = getattr(singing, "singing_manager", {}) if singing is not None else {}
+        if character_id in managers:
+            return managers[character_id]
+        default_character_id = getattr(singing, "default_character_id", None)
+        if default_character_id in managers:
+            return managers[default_character_id]
+        if managers:
+            return next(iter(managers.values()))
+        raise ValueError(f"No singing manager available for character_id={character_id}")
+
 
 _agent_runtime: AgentRuntime | None = None
-
-
-def init_agent_runtime(
-    config: dict[str, Any],
-    tts_module: Any,
-    redis_client: Any,
-    vector_store: Any,
-    sql_session_factory: Callable[[], Session],
-    music_manager: Any,
-    database: Any | None = None,
-    capabilities: Any | None = None,
-    character_registry: CharacterRegistry | None = None,
-) -> AgentRuntime:
-    global _agent_runtime
-
-    registry = character_registry or get_default_character_registry()
-    deps = AgentRuntimeDependencies(
-        redis_client=redis_client,
-        vector_store=vector_store,
-        sql_session_factory=sql_session_factory,
-        database=database,
-        music_manager=music_manager,
-        capabilities=capabilities,
-    )
-    conscious_agents = {
-        profile.character_id: LuoTianyiAgent(
-            config,
-            tts_module,
-            deps,
-            character_profile=profile,
-        )
-        for profile in registry.characters.values()
-    }
-    default_profile = registry.get()
-    _agent_runtime = AgentRuntime(
-        character_registry=registry,
-        conscious_agents=conscious_agents,
-        default_character_id=default_profile.character_id,
-    )
-    return _agent_runtime
 
 
 def get_agent_runtime() -> AgentRuntime:

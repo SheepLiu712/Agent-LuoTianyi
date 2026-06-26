@@ -13,7 +13,7 @@
   - 注入 Agent 私有运行时依赖（redis、vector_store、sql_session_factory、song_session_factory）
 - `ServiceHub(...)`
   - `websocket_service`
-  - `gcsm` (GlobalChatStreamManager)
+  - `gcsm` (ChatStreamManager)
   - `global_speaking_worker`
   - `agent`
 - `gcsm.start_cleanup_task(...)`
@@ -43,7 +43,7 @@
 
 - `chat_stream = gcsm.get_or_register_chat_stream(ws_connection, service_hub=service_hub)`
 
-`GlobalChatStreamManager.get_or_register_chat_stream(...)` 行为：
+`ChatStreamManager.get_or_register_chat_stream(...)` 行为：
 
 - 首次用户：创建 `ChatStream`，注入 `ServiceHub`，启动常驻任务
 - 重连用户：复用已有 `ChatStream`，替换连接
@@ -213,7 +213,7 @@
 3. `WebSocketConnection.auth(...)`
 4. `WebSocketService.try_recv_client_msg(...)`
 5. `WebSocketService.handle_auth_event(...)`
-6. `GlobalChatStreamManager.get_or_register_chat_stream(...)`
+6. `ChatStreamManager.get_or_register_chat_stream(...)`
 7. `WebSocketService.convert_to_chat_input_event(...)`
 8. `WebSocketService.send_ack_event(...)`
 9. `ChatStream.feed_event(...)`
@@ -250,7 +250,7 @@ sequenceDiagram
     participant Client
     participant WS as /chat_ws
     participant WSS as WebSocketService
-    participant GCSM as GlobalChatStreamManager
+    participant GCSM as ChatStreamManager
     participant CS as ChatStream
     participant TP as TopicPlanner
     participant TR as TopicReplier
