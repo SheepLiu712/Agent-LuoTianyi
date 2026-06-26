@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, TYPE_CHECKING
 
 
 from src.utils.logger import get_logger
@@ -14,6 +14,7 @@ from src.chat_session.chat_pipeline.topic_replier import TopicReplier
 from src.chat_session.chat_pipeline.ingress_helper import IngressHelper
 
 if TYPE_CHECKING:
+    from src.chat_session.dependency.conversation_service import ConversationContextSnapshot
     from src.system.system_runtime import SystemRuntime
     from src.system.user_interface.types import ChatResponse
     from src.system.user_interface.websocket_service import WebSocketConnection
@@ -25,21 +26,36 @@ class ChatStream:
     STATE_LISTENING = "listening"
     STATE_THINKING = "thinking"
 
-    def __init__(self, config: dict, ws_connection: "WebSocketConnection"):
+    def __init__(self, config: dict, ws_connection: "WebSocketConnection", character_id: str = "luotianyi"):
         self.config = config
         self.ws_connection = ws_connection
         self.user_name: str = ws_connection.user_name
         self.user_uuid: str = ws_connection.user_uuid
+        self.character_id: str = character_id or "luotianyi"
         self.logger = get_logger(f"{self.user_name}ChatStream")
 
         self.system_runtime: Optional["SystemRuntime"] = None
         self.connection_lost_time = None
-        self.ingress_helper = IngressHelper(config.get("ingress_helper", {}), username=self.user_name, user_id=self.user_uuid)
-        self.topic_planner = TopicPlanner(config.get("topic_planner", {}), username=self.user_name, user_id=self.user_uuid)
+        self.ingress_helper = IngressHelper(
+            config.get("ingress_helper", {}),
+            username=self.user_name,
+            user_id=self.user_uuid,
+            character_id=self.character_id,
+            send_reply_callback=self.feed_response
+        )
+        self.topic_planner = TopicPlanner(
+            config.get("topic_planner", {}),
+            username=self.user_name,
+            user_id=self.user_uuid,
+            character_id=self.character_id,
+            context_provider=self.get_conversation_context
+        )
         self.topic_replier = TopicReplier(
             config.get("topic_replier", {}),
             username=self.user_name,
             user_id=self.user_uuid,
+            character_id=self.character_id,
+            context_provider=self.get_conversation_context
         )
         self.ingress_helper.set_msg_consumer(self.topic_planner.feed_unread_message)
         self.topic_planner.set_topic_consumer(self.topic_replier.add_topic)
@@ -48,6 +64,9 @@ class ChatStream:
 
         self.response_queue: asyncio.Queue[ChatResponse] = asyncio.Queue()
         self.response_sender_task: asyncio.Task | None = None
+        self.context_snapshot: "ConversationContextSnapshot | None" = None
+        self.context_snapshot_ts_type: str = "elapsed"
+        self.context_initialized: bool = False
 
         self.state = self.STATE_WAITING
         self.state_lock = asyncio.Lock()
@@ -63,8 +82,9 @@ class ChatStream:
         self.topic_planner.set_system_runtime(system_runtime)
         self.topic_replier.set_system_runtime(system_runtime)
 
-    def start_if_needed(self):
+    async def start_if_needed(self):
         """启动常驻消息处理协程（仅启动一次）。"""
+        await self.initialize_context()
         self.ingress_helper.start_processing()
         self.topic_planner.start_processing()
         self.topic_replier.start_processing()
@@ -77,6 +97,43 @@ class ChatStream:
     async def feed_response(self, response: ChatResponse):
         """接收 topic replier 生成的回复，并发送给用户。"""
         await self.response_queue.put(response)
+
+    async def get_conversation_context(
+        self,
+        *,
+        force_refresh: bool = True,
+        ret_type: str = "str",
+        ts_type: str = "elapsed",
+    ) -> str | dict[str, Any]:
+        if self.system_runtime is None:
+            self.logger.warning("System runtime is not available, cannot load conversation context")
+            return "" if ret_type == "str" else {}
+
+        if force_refresh or self.context_snapshot is None or self.context_snapshot_ts_type != ts_type:
+            self.context_snapshot = await self.system_runtime.conversation_service.get_context_snapshot(
+                self.user_uuid,
+                character_id=self.character_id,
+                ts_type=ts_type,
+            )
+            self.context_snapshot_ts_type = ts_type
+
+        if ret_type == "str":
+            return self.context_snapshot.text
+        return self.context_snapshot.as_prompt_payload()
+
+    async def initialize_context(self, *, force: bool = False) -> None:
+        if self.context_initialized and not force:
+            return
+        if self.system_runtime is None:
+            self.logger.warning("System runtime is not available, cannot initialize conversation context")
+            return
+        self.context_snapshot = await self.system_runtime.conversation_service.initialize_context_snapshot(
+            self.user_uuid,
+            character_id=self.character_id,
+            ts_type="elapsed",
+        )
+        self.context_snapshot_ts_type = "elapsed"
+        self.context_initialized = True
 
     async def response_sender_loop(self):
         while True:
@@ -170,14 +227,14 @@ class ChatStream:
         """检查连接是否丢失"""
         return self.ws_connection is None
 
-    def reconnect(self, new_ws_connection: "WebSocketConnection"):
+    async def reconnect(self, new_ws_connection: "WebSocketConnection"):
         """用户重连时调用，更新 WebSocket 连接"""
         self.logger.info(f"User {self.user_name} reconnected")
         self.ws_connection = new_ws_connection
         self.user_name = new_ws_connection.user_name if new_ws_connection else self.user_name
         self.connection_lost_time = None
         self.state = self.STATE_WAITING
-        self.start_if_needed()
+        await self.start_if_needed()
 
     def clean_up(self):
         """清理资源的逻辑，比如关闭文件、数据库连接等"""

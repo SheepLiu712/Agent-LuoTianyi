@@ -2,6 +2,7 @@
 import sys
 import os
 from pathlib import Path
+from datetime import datetime, timedelta
 
 # 添加项目根目录
 server_root = str(Path(__file__).resolve().parent.parent)
@@ -229,6 +230,158 @@ class TestConversations:
         assert len(history) == 2
         assert history[0].content == "你好"
         assert history[1].content == "你好呀！"
+
+    def test_context_state_and_compaction(self, db_manager: "DatabaseManager", sample_user: str):
+        """运行时上下文状态和压缩接口"""
+        user_uuid = db_manager.get_user_uuid_by_username(sample_user)
+        items = [
+            ConversationItem(
+                timestamp="2026-06-22 10:00:00",
+                source="user",
+                content="第一句",
+                type="text",
+                uuid="conv-context-001",
+            ),
+            ConversationItem(
+                timestamp="2026-06-22 10:01:00",
+                source="agent",
+                content="第二句",
+                type="text",
+                uuid="conv-context-002",
+            ),
+            ConversationItem(
+                timestamp="2026-06-22 10:02:00",
+                source="agent",
+                content="（唱了《测试歌》）",
+                type="sing",
+                uuid="conv-context-003",
+                data={"song": "测试歌", "segment": "hook"},
+            ),
+        ]
+        db_manager.add_conversations(user_uuid, items)
+
+        state = db_manager.get_conversation_context_state(user_uuid)
+        assert state["summary"] == ""
+        assert state["context_count"] == 3
+        assert len(state["conversations"]) == 3
+
+        ok = db_manager.compact_conversation_context(
+            user_uuid,
+            "较早内容摘要",
+            keep_recent_count=1,
+            expected_context_count=3,
+        )
+        assert ok is True
+
+        compacted_state = db_manager.get_conversation_context_state(user_uuid)
+        assert compacted_state["summary"] == "较早内容摘要"
+        assert compacted_state["context_count"] == 1
+        assert len(compacted_state["conversations"]) == 1
+        assert compacted_state["conversations"][0]["content"] == "（唱了《测试歌》）"
+
+        stale_ok = db_manager.compact_conversation_context(
+            user_uuid,
+            "不应写入",
+            keep_recent_count=1,
+            expected_context_count=3,
+        )
+        assert stale_ok is False
+
+        history = db_manager.get_history_from_db(user_uuid, 0, 10)
+        assert history[2].data == {"song": "测试歌", "segment": "hook"}
+
+    def test_context_is_scoped_by_character(self, db_manager: "DatabaseManager", sample_user: str):
+        """同一用户的不同角色聊天流应使用独立上下文。"""
+        user_uuid = db_manager.get_user_uuid_by_username(sample_user)
+        db_manager.add_conversations(
+            user_uuid,
+            [
+                ConversationItem(
+                    timestamp="2026-06-22 11:00:00",
+                    source="user",
+                    content="给天依的消息",
+                    type="text",
+                    uuid="conv-lty-001",
+                )
+            ],
+            character_id="luotianyi",
+        )
+        db_manager.add_conversations(
+            user_uuid,
+            [
+                ConversationItem(
+                    timestamp="2026-06-22 11:01:00",
+                    source="user",
+                    content="给另一个角色的消息",
+                    type="text",
+                    uuid="conv-other-001",
+                )
+            ],
+            character_id="other_character",
+        )
+
+        lty_state = db_manager.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        other_state = db_manager.get_conversation_context_state(user_uuid, character_id="other_character")
+
+        assert lty_state["context_count"] == 1
+        assert other_state["context_count"] == 1
+        assert lty_state["conversations"][0]["content"] == "给天依的消息"
+        assert other_state["conversations"][0]["content"] == "给另一个角色的消息"
+
+        ok = db_manager.compact_conversation_context(
+            user_uuid,
+            "另一个角色的摘要",
+            keep_recent_count=0,
+            expected_context_count=1,
+            character_id="other_character",
+        )
+        assert ok is True
+
+        lty_state_after = db_manager.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        other_state_after = db_manager.get_conversation_context_state(user_uuid, character_id="other_character")
+
+        assert lty_state_after["summary"] == ""
+        assert lty_state_after["context_count"] == 1
+        assert other_state_after["summary"] == "另一个角色的摘要"
+        assert other_state_after["context_count"] == 0
+
+    def test_stale_context_returns_empty_context(self, db_manager: "DatabaseManager", sample_user: str):
+        """最近一条消息超过阈值时，运行上下文应清空但历史记录保留。"""
+        user_uuid = db_manager.get_user_uuid_by_username(sample_user)
+        old_timestamp = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d %H:%M:%S")
+        db_manager.add_conversations(
+            user_uuid,
+            [
+                ConversationItem(
+                    timestamp=old_timestamp,
+                    source="user",
+                    content="六天前的对话",
+                    type="text",
+                    uuid="conv-stale-001",
+                )
+            ],
+            character_id="luotianyi",
+        )
+
+        fresh_without_threshold = db_manager.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        assert fresh_without_threshold["context_count"] == 1
+        assert fresh_without_threshold["conversations"][0]["content"] == "六天前的对话"
+
+        cleared = db_manager.reset_conversation_context_if_stale(
+            user_uuid,
+            character_id="luotianyi",
+            max_context_age_days=5,
+        )
+        assert cleared is True
+
+        stale_state = db_manager.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        assert stale_state["summary"] == ""
+        assert stale_state["context_count"] == 0
+        assert stale_state["conversations"] == []
+
+        history = db_manager.get_history_from_db(user_uuid, 0, 10, character_id="luotianyi")
+        assert len(history) == 1
+        assert history[0].content == "六天前的对话"
 
 
 # # ═══════════════════════════════════════════════════════════════

@@ -34,6 +34,7 @@ class User(Base):
     memory_records = relationship("MemoryRecord", back_populates="user", cascade="all, delete-orphan")
     memory_update_records = relationship("MemoryUpdateRecord", back_populates="user", cascade="all, delete-orphan")
     affection_logs = relationship("AffectionLog", back_populates="user", cascade="all, delete-orphan")
+    conversation_contexts = relationship("ConversationContext", back_populates="user", cascade="all, delete-orphan")
 
 class InviteCode(Base):
     __tablename__ = "invite_codes"
@@ -51,6 +52,7 @@ class Conversation(Base):
     
     uuid = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
+    character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi", index=True)
     timestamp = Column(DateTime, default=datetime.now)
     source = Column(String, nullable=False) # 'user' or 'agent'
     type = Column(String, nullable=False) # 'text' or 'audio' or 'image'
@@ -58,6 +60,23 @@ class Conversation(Base):
     meta_data = Column(Text, nullable=True)
     
     user = relationship("User", back_populates="conversations")
+
+
+class ConversationContext(Base):
+    __tablename__ = "conversation_contexts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
+    character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi")
+    context_summary = Column(Text, default="")
+    context_memory_count = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    user = relationship("User", back_populates="conversation_contexts")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "character_id", name="uq_conversation_context_user_character"),
+    )
 
 
 # ————————————
@@ -294,6 +313,18 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
 def _migrate_sqlite_schema(db_engine: Engine) -> None:
     """Apply additive migrations for existing SQLite databases."""
     with db_engine.begin() as connection:
+        conversation_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(conversations)").fetchall()
+        }
+        if "character_id" not in conversation_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE conversations ADD COLUMN character_id VARCHAR NOT NULL DEFAULT 'luotianyi'"
+            )
+        connection.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_conversations_character_id ON conversations (character_id)"
+        )
+
         event_columns = {
             row[1]
             for row in connection.exec_driver_sql("PRAGMA table_info(events)").fetchall()

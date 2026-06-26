@@ -16,15 +16,16 @@ class IngressHelper:
     Chat Stream的预处理类
     负责处理来自WebSocket的输入事件，转化为需要被Agent理解的消息，投入topic_planner
     '''
-    def __init__(self, config: Dict[str, Any], username, user_id):
+    def __init__(self, config: Dict[str, Any], username, user_id, character_id: str = "luotianyi", send_reply_callback: Callable[["ChatResponse"], Awaitable[None]] = None):
         self.config = config
         self.username = username
         self.user_uuid = user_id
+        self.character_id = character_id or "luotianyi"
         self.logger = get_logger(f"{self.username}IngressHelper")
         self.ingress_queue: asyncio.Queue[ChatInputEvent] = asyncio.Queue()
         self.ingress_worker_task: asyncio.Task | None = None
         self.system_runtime: "SystemRuntime" | None = None
-        self.send_reply_callback: Callable[["ChatResponse"], Awaitable[None]]
+        self.send_reply_callback: Callable[["ChatResponse"], Awaitable[None]] = send_reply_callback
 
     def start_processing(self):
         if self.ingress_worker_task is None or self.ingress_worker_task.done():
@@ -43,10 +44,6 @@ class IngressHelper:
     def set_msg_consumer(self, consumer_callback):
         """设置消息消费者回调函数，用于将处理后的消息传递给下游组件。"""
         self.msg_consumer = consumer_callback
-    
-    def set_send_reply_callback(self, send_reply_callback: Callable[["ChatResponse"], Awaitable[None]]):
-        """设置发送回复的回调函数，用于将处理后的回复发送给用户。"""
-        self.send_reply_callback = send_reply_callback
 
     async def ingress_worker_loop(self):
         while True:
@@ -79,7 +76,11 @@ class IngressHelper:
                 await self.system_runtime.activity_maker.on_user_message(self.user_uuid)
                 event = await self.ingress_message(event)  # 预处理
                 if event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}:
-                    await self.system_runtime.conversation_service.persist_user_event(self.user_uuid, event)
+                    await self.system_runtime.conversation_service.persist_user_event(
+                        self.user_uuid,
+                        event,
+                        character_id=self.character_id,
+                    )
             else:
                 self.logger.warning("System runtime or user uuid is missing, skip user message preprocessing")
 

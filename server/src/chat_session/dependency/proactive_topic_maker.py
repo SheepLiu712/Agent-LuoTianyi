@@ -134,7 +134,9 @@ class ProactiveTopicMaker:
                 return
             await asyncio.sleep(1)  # 错开用户拉取历史消息的时机。等用户拉完历史消息后再派发登录活动，避免登录活动消息和历史消息混在一起导致展示异常。
             uuid_list = await system_runtime.conversation_service.persist_agent_replies(
-                user_id=user_uuid, reply_items=[item["response_line"] for item in self.first_login_res]
+                user_id=user_uuid,
+                reply_items=[item["response_line"] for item in self.first_login_res],
+                character_id=getattr(chat_stream, "character_id", "luotianyi"),
             )
             for item, item_uuid in zip(self.first_login_res, uuid_list or []):
                 from src.system.user_interface.types import ChatResponse

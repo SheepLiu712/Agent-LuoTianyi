@@ -103,6 +103,7 @@
             "raw_conversation_context_limit": 60,
             "not_zip_conversation_count": 30,
             "forget_conversation_days": 10,
+            "context_stale_after_days": 5,
             "llm_module": {
                 "llm": {
                     "name": "qwen3.5-plus",

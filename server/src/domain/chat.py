@@ -52,3 +52,9 @@ class ExtractedTopic:
     target_character_ids: tuple[str, ...] = ("luotianyi",)
     source_event_type: str | None = None
     is_forced_from_incomplete: bool = False
+
+@dataclass
+class ContextInfo:
+    summary: str
+    conversations: List
+    context_count: int

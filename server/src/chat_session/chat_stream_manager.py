@@ -42,7 +42,7 @@ class ChatStreamManager:
         self.default_expiration_seconds = config.get("default_expiration_seconds", 3600)
         self.heartbeat_timeout_seconds = config.get("heartbeat_timeout_seconds", 60)
 
-    def get_or_register_chat_stream(
+    async def get_or_register_chat_stream(
         self,
         ws_connection: WebSocketConnection,
         character: Optional[str] = "luotianyi",
@@ -57,14 +57,14 @@ class ChatStreamManager:
             raise ValueError("WebSocketConnection must have a user_uuid for chat stream management.")
 
         if (user_uuid, character) not in self.user_streams:  # 创建新的聊天流实例并注册
-            chat_stream = ChatStream(self.config.get("chat_stream", {}), ws_connection)
+            chat_stream = ChatStream(self.config.get("chat_stream", {}), ws_connection, character_id=character)
             chat_stream.set_system_runtime(system_runtime)
-            chat_stream.start_if_needed()
+            await chat_stream.start_if_needed()
             self.user_streams[(user_uuid, character)] = chat_stream
         else: # 如果已经存在聊天流实例，则更新 WebSocket 连接
             chat_stream = self.user_streams[(user_uuid, character)]
             chat_stream.set_system_runtime(system_runtime)
-            chat_stream.reconnect(ws_connection)
+            await chat_stream.reconnect(ws_connection)
         if self.proactive_topic_maker is not None:
             asyncio.create_task(self.proactive_topic_maker.add_user(user_uuid, chat_stream, system_runtime))
             asyncio.create_task(self.proactive_topic_maker.flush_login_activities(user_uuid, chat_stream, system_runtime))
@@ -79,10 +79,11 @@ class ChatStreamManager:
         当 WebSocket 连接丢失时，调用此方法进行清理。
         """
         user_uuid = ws_connection.user_uuid
-        if not user_uuid or user_uuid not in self.user_streams:
+        if not user_uuid:
             return
-        chat_stream = self.user_streams[user_uuid]
-        chat_stream.lost_connection()
+        for (stream_user_uuid, _character), chat_stream in self.user_streams.items():
+            if stream_user_uuid == user_uuid:
+                chat_stream.lost_connection()
 
     async def cleanup_expired_streams(self, expiration_seconds: int = 3600):
         """
@@ -92,8 +93,8 @@ class ChatStreamManager:
             current_time = time.time()
             current_time_ms = int(current_time * 1000)
 
-            for user_uuid in list(self.user_streams.keys()):
-                stream = self.user_streams[user_uuid]
+            for stream_key in list(self.user_streams.keys()):
+                stream = self.user_streams[stream_key]
                 ws_connection = stream.ws_connection
                 if (
                     ws_connection
@@ -103,17 +104,18 @@ class ChatStreamManager:
                     await ws_connection.websocket.close()
                     self.ws_lost_connection(ws_connection)
 
-            expired_user_uuids = []
-            for user_uuid, chat_stream in list(self.user_streams.items()):
+            expired_stream_keys = []
+            for stream_key, chat_stream in list(self.user_streams.items()):
                 if chat_stream.connection_lost_time and (current_time - chat_stream.connection_lost_time > expiration_seconds):
-                    expired_user_uuids.append(user_uuid)
+                    expired_stream_keys.append(stream_key)
 
-            for user_uuid in expired_user_uuids:
-                chat_stream = self.user_streams[user_uuid]
+            for stream_key in expired_stream_keys:
+                user_uuid, _character = stream_key
+                chat_stream = self.user_streams[stream_key]
                 chat_stream.clean_up()
                 if self.proactive_topic_maker is not None:
                     await self.proactive_topic_maker.remove_user(user_uuid)
-                del self.user_streams[user_uuid]
+                del self.user_streams[stream_key]
                 self.logger.info(f"Cleaned up expired chat stream for user_uuid={user_uuid}")
 
             await asyncio.sleep(60)

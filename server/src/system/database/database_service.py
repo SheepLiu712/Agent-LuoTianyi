@@ -10,11 +10,13 @@ from src.utils.logger import get_logger
 
 from src.domain import ConversationItem
 from src.system.database.sql_database import init_sql_db, get_sql_session, SessionLocal
-from src.system.database.sql_database import (User,InviteCode,Conversation)
+from src.system.database.sql_database import (User,InviteCode,Conversation, ConversationContext)
 from src.system.database.redis_buffer import RedisBuffer, WatchError, init_redis_buffer, get_redis_buffer
 from src.system.database.sql_writer import run_sql_write
 from src.system.database.event_store import EventStore
 from src.system.database.memory_store import MemoryStore
+
+from src.domain.chat import ContextInfo
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -110,6 +112,86 @@ class DatabaseManager:
     def open_sql_session(self) -> "Session":
         """Compatibility factory for legacy components not yet using manager methods."""
         return self._new_session()
+
+    @staticmethod
+    def _decode_redis_value(value: Any) -> Any:
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        return value
+
+    @staticmethod
+    def _context_redis_key(user_id: str, character_id: str = "luotianyi") -> str:
+        return f"user_context:{user_id}:{character_id or 'luotianyi'}"
+
+    def _get_or_create_conversation_context(
+        self,
+        db: "Session",
+        user: User,
+        character_id: str = "luotianyi",
+    ) -> ConversationContext:
+        '''
+        兼容性地获取或创建 ConversationContext 对象。若不存在，则创建一个新的 ConversationContext 并返回。
+        '''
+        character_id = character_id or "luotianyi"
+        context = (
+            db.query(ConversationContext)
+            .filter(
+                ConversationContext.user_id == user.uuid,
+                ConversationContext.character_id == character_id,
+            )
+            .first()
+        )
+        if context is not None:
+            return context
+
+        context = ConversationContext(
+            user_id=user.uuid,
+            character_id=character_id,
+            context_summary=(user.context_summary or "") if character_id == "luotianyi" else "",
+            context_memory_count=(user.context_memory_count or 0) if character_id == "luotianyi" else 0,
+        )
+        db.add(context)
+        db.flush()
+        return context
+
+    @staticmethod
+    def _is_context_stale(latest_timestamp: datetime | None, max_age_days: Optional[float]) -> bool:
+        if latest_timestamp is None or max_age_days is None or max_age_days <= 0:
+            return False
+        return (datetime.now() - latest_timestamp).total_seconds() > max_age_days * 24 * 60 * 60
+
+    def _latest_conversation_timestamp(
+        self,
+        db: "Session",
+        user_id: str,
+        character_id: str = "luotianyi",
+    ) -> datetime | None:
+        latest = (
+            db.query(Conversation.timestamp)
+            .filter(Conversation.user_id == user_id)
+            .filter(Conversation.character_id == character_id)
+            .order_by(Conversation.timestamp.desc())
+            .first()
+        )
+        return latest[0] if latest else None
+
+    def _clear_conversation_context_in_session(
+        self,
+        db: "Session",
+        user: User,
+        character_id: str = "luotianyi",
+    ) -> None:
+        context = self._get_or_create_conversation_context(db, user, character_id)
+        context.context_summary = ""
+        context.context_memory_count = 0
+        if character_id == "luotianyi":
+            user.context_summary = ""
+            user.context_memory_count = 0
 
     @staticmethod
     def init_all(config: Dict[str, Any]) -> None:
@@ -527,7 +609,12 @@ class DatabaseManager:
             db.close()
 
 
-    def prefill_buffer(self, user_id: str, types: List[str] = ["all"]) -> bool:
+    def prefill_buffer(
+        self,
+        user_id: str,
+        types: List[str] = ["all"],
+        character_id: str = "luotianyi",
+    ) -> bool:
         """
         将用户的上下文信息预加载到 Redis 中，提升响应速度。
         """
@@ -541,28 +628,34 @@ class DatabaseManager:
 
             # 1. 加载上下文
             if "all" in types or "context" in types:
-                summary = user.context_summary or ""
-                context_memory_count = user.context_memory_count or 0
+                context = self._get_or_create_conversation_context(db, user, character_id)
+                db.commit()
+                summary = context.context_summary or ""
+                context_memory_count = context.context_memory_count or 0
                 context_conversations = (
                     db.query(Conversation)
                     .filter(Conversation.user_id == user_id)
+                    .filter(Conversation.character_id == character_id)
                     .order_by(Conversation.timestamp.desc())
                     .limit(context_memory_count)
                     .all()
                 )
-                context_info = {
-                    "summary": summary,
-                    "conversations": [
+                context_info = ContextInfo(
+                    summary=summary,
+                    conversations=[
                         {
+                            "uuid": conv.uuid,
                             "timestamp": conv.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                             "source": conv.source,
                             "content": conv.content,
                             "type": conv.type,
+                            "meta_data": json.loads(conv.meta_data) if conv.meta_data else None,
                         }
                         for conv in reversed(context_conversations)
                     ],
-                }
-                redis.setex(f"user_context:{user_id}", 3600, context_info)
+                    context_count=context_memory_count,
+                )
+                redis.setex(self._context_redis_key(user_id, character_id), 3600, context_info)
 
             # # 2. 加载知识库缓存
             # if "all" in types or "knowledge" in types:
@@ -598,7 +691,13 @@ class DatabaseManager:
     # 对话记录和记忆管理
     # ────────────────────────────────────────────
 
-    def add_conversations(self, user_id: str, conversation_data: List[ConversationItem], commit: bool = True) -> List[str]:
+    def add_conversations(
+        self,
+        user_id: str,
+        conversation_data: List[ConversationItem],
+        commit: bool = True,
+        character_id: str = "luotianyi",
+    ) -> List[str]:
         """
         在数据库中增加对话记录，同时更新 user 的对话计数。
         在 Redis 中相应更新。
@@ -611,7 +710,7 @@ class DatabaseManager:
                 user = db.query(User).filter(User.uuid == user_id).first()
                 if not user:
                     return []
-
+                context = self._get_or_create_conversation_context(db, user, character_id)
                 new_convs_local: List[Dict[str, Any]] = []
                 for item in conversation_data:
                     try:
@@ -620,7 +719,7 @@ class DatabaseManager:
                         ts = datetime.now()
 
                     meta_data_str = None
-                    if item.type == "image":
+                    if item.data is not None:
                         try:
                             meta_data_str = json.dumps(item.data, ensure_ascii=False)
                         except Exception as e:
@@ -628,6 +727,7 @@ class DatabaseManager:
 
                     conv = Conversation(
                         user_id=user_id,
+                        character_id=character_id,
                         timestamp=ts,
                         source=item.source,
                         content=item.content,
@@ -646,7 +746,9 @@ class DatabaseManager:
                     })
 
                 user.all_memory_count = (user.all_memory_count or 0) + len(conversation_data)
-                user.context_memory_count = (user.context_memory_count or 0) + len(conversation_data)
+                context.context_memory_count = (context.context_memory_count or 0) + len(conversation_data)
+                if character_id == "luotianyi":
+                    user.context_memory_count = context.context_memory_count
                 if commit:
                     db.commit()
                 return new_convs_local
@@ -654,14 +756,14 @@ class DatabaseManager:
             new_convs = run_sql_write(_write)
 
             # 更新 Redis
-            redis_key = f"user_context:{user_id}"
+            redis_key = self._context_redis_key(user_id, character_id)
             with redis.pipeline() as pipe:
                 for _ in range(3):
                     try:
                         pipe.watch(redis_key)
-                        raw_data = pipe.get(redis_key)
+                        raw_data: ContextInfo = self._decode_redis_value(pipe.get(redis_key))
                         if raw_data:
-                            raw_data["conversations"].extend(new_convs)
+                            raw_data.conversations.extend(new_convs)
                             pipe.multi()
                             pipe.setex(redis_key, 3600, raw_data)
                             pipe.execute()
@@ -680,8 +782,16 @@ class DatabaseManager:
             db.close()
 
 
-    def update_context_summary(self, user_id: str, new_summary: str, new_context_memory_count: int, commit: bool = True) -> None:
-        """更新用户的上下文总结 summary，重置 context_memory_count，同步更新 Redis。"""
+    def compact_conversation_context(
+        self,
+        user_id: str,
+        new_summary: str,
+        keep_recent_count: int,
+        expected_context_count: Optional[int] = None,
+        character_id: str = "luotianyi",
+        commit: bool = True,
+    ) -> bool:
+        """更新上下文总结，并保留最近 keep_recent_count 条未压缩对话。"""
         redis = self._ensure_redis()
         db = self._new_session()
         try:
@@ -689,8 +799,14 @@ class DatabaseManager:
                 user = db.query(User).filter(User.uuid == user_id).first()
                 if not user:
                     return False
-                user.context_summary = new_summary
-                user.context_memory_count = new_context_memory_count
+                context = self._get_or_create_conversation_context(db, user, character_id)
+                if expected_context_count is not None and (context.context_memory_count or 0) != expected_context_count:
+                    return False
+                context.context_summary = new_summary
+                context.context_memory_count = keep_recent_count
+                if character_id == "luotianyi":
+                    user.context_summary = new_summary
+                    user.context_memory_count = keep_recent_count
                 if commit:
                     db.commit()
                 return True
@@ -698,19 +814,20 @@ class DatabaseManager:
             updated = run_sql_write(_write)
 
             if updated:
-                redis_key = f"user_context:{user_id}"
+                redis_key = self._context_redis_key(user_id, character_id)
                 with redis.pipeline() as pipe:
                     for _ in range(3):
                         try:
                             pipe.watch(redis_key)
-                            data = pipe.get(redis_key)
+                            data: ContextInfo = self._decode_redis_value(pipe.get(redis_key))
                             if data:
-                                data["summary"] = new_summary
-                                convs = data.get("conversations", [])
-                                if new_context_memory_count > 0:
-                                    data["conversations"] = convs[-new_context_memory_count:]
+                                data.summary = new_summary
+                                convs = data.conversations
+                                if keep_recent_count > 0:
+                                    data.conversations = convs[-keep_recent_count:]
                                 else:
-                                    data["conversations"] = []
+                                    data.conversations = []
+                                data.context_count = keep_recent_count
                                 pipe.multi()
                                 pipe.setex(redis_key, 3600, data)
                                 pipe.execute()
@@ -719,27 +836,109 @@ class DatabaseManager:
                             break
                         except WatchError:
                             continue
+            return bool(updated)
         except Exception as e:
-            logger.error(f"update_context_summary error: {e}")
+            logger.error(f"compact_conversation_context error: {e}")
             db.rollback()
+            return False
         finally:
             db.close()
 
-    def get_context_from_buffer(self, user_id: str) -> Any:
+    def reset_conversation_context_if_stale(
+        self,
+        user_id: str,
+        character_id: str = "luotianyi",
+        max_context_age_days: Optional[float] = None,
+    ) -> bool:
+        """Clear runtime context when the latest message is older than max_context_age_days."""
+        if max_context_age_days is None or max_context_age_days <= 0:
+            return False
+
+        redis = self._ensure_redis()
+        db = self._new_session()
+        try:
+            def _write() -> bool:
+                user = db.query(User).filter(User.uuid == user_id).first()
+                if not user:
+                    return False
+                latest_timestamp = self._latest_conversation_timestamp(db, user_id, character_id)
+                if not self._is_context_stale(latest_timestamp, max_context_age_days):
+                    return False
+                self._clear_conversation_context_in_session(db, user, character_id)
+                db.commit()
+                return True
+
+            cleared = run_sql_write(_write)
+            if cleared:
+                redis.setex(
+                    self._context_redis_key(user_id, character_id),
+                    3600,
+                    ContextInfo(summary="", conversations=[], context_count=0),
+                )
+            return bool(cleared)
+        except Exception as e:
+            logger.error(f"reset_conversation_context_if_stale error: {e}")
+            db.rollback()
+            return False
+        finally:
+            db.close()
+
+    def _get_context_from_buffer(
+        self,
+        user_id: str,
+        character_id: str = "luotianyi",
+    ) -> ContextInfo:
         """优先从 Redis 获取上下文，不存在则调用 prefill_buffer 加载。"""
         redis = self._ensure_redis()
-        redis_key = f"user_context:{user_id}"
-        data = redis.get(redis_key)
+        redis_key = self._context_redis_key(user_id, character_id)
+        data: Optional[ContextInfo] = self._decode_redis_value(redis.get(redis_key))
         if data:
             return data
 
-        if self.prefill_buffer(user_id):
-            data = redis.get(redis_key)
+        if self.prefill_buffer(user_id, character_id=character_id):
+            data = self._decode_redis_value(redis.get(redis_key))
             if data:
-                return json.loads(data)
+                return data
         return []
 
-    def get_history_from_db(self, user_id: str, start: int, end: int) -> List[ConversationItem]:
+    def get_conversation_context_state(
+        self,
+        user_id: str,
+        character_id: str = "luotianyi",
+    ) -> Dict[str, Any]:
+        """获取对话运行上下文的结构化状态。"""
+        context_data: ContextInfo = self._get_context_from_buffer(
+            user_id,
+            character_id=character_id,
+        )
+        if not context_data:
+            return {
+                "summary": "",
+                "conversations": [],
+                "context_count": 0,
+                "version": "0:0:",
+            }
+
+        conversations = context_data.conversations or []
+        if context_data.context_count is not None:
+            context_count = context_data.context_count
+        else:
+            context_count = self.get_context_count(user_id, character_id=character_id)
+        last_uuid = conversations[-1].get("uuid", "") if conversations else ""
+        return {
+            "summary": context_data.summary or "",
+            "conversations": conversations,
+            "context_count": context_count,
+            "version": f"{context_count}:{len(conversations)}:{last_uuid}",
+        }
+
+    def get_history_from_db(
+        self,
+        user_id: str,
+        start: int,
+        end: int,
+        character_id: Optional[str] = None,
+    ) -> List[ConversationItem]:
         """从数据库获取指定范围的历史对话，按时间顺序排列 (0 is oldest)。"""
         limit = end - start
         if limit <= 0:
@@ -747,14 +946,13 @@ class DatabaseManager:
 
         db = self._new_session()
         try:
-            conversations = (
+            query = (
                 db.query(Conversation)
                 .filter(Conversation.user_id == user_id)
-                .order_by(Conversation.timestamp.asc())
-                .offset(start)
-                .limit(limit)
-                .all()
             )
+            if character_id is not None:
+                query = query.filter(Conversation.character_id == character_id)
+            conversations = query.order_by(Conversation.timestamp.asc()).offset(start).limit(limit).all()
             result = []
             for conv in conversations:
                 result.append(ConversationItem(
@@ -769,21 +967,32 @@ class DatabaseManager:
         finally:
             db.close()
 
-    def get_total_conversation_count(self, user_id: str) -> int:
+    def get_total_conversation_count(self, user_id: str, character_id: Optional[str] = None) -> int:
         """获取用户历史对话总数。"""
         db = self._new_session()
         try:
-            return db.query(Conversation).filter(Conversation.user_id == user_id).count()
+            query = db.query(Conversation).filter(Conversation.user_id == user_id)
+            if character_id is not None:
+                query = query.filter(Conversation.character_id == character_id)
+            return query.count()
         finally:
             db.close()
 
-    def get_context_count(self, user_id: str) -> int:
+    def get_context_count(self, user_id: str, character_id: str = "luotianyi") -> int:
         """获取用户当前上下文记忆对话数量。"""
         db = self._new_session()
+        redis = self._ensure_redis()
+        context_info: Optional[ContextInfo] = self._decode_redis_value(redis.get(self._context_redis_key(user_id, character_id)))
+        if context_info and context_info.context_count is not None:
+            return context_info.context_count
+
+        # 如果 Redis 中没有缓存，则从数据库中获取 context_memory_count
         try:
             user = db.query(User).filter(User.uuid == user_id).first()
-            if user and user.context_memory_count:
-                return user.context_memory_count
+            if user:
+                context = self._get_or_create_conversation_context(db, user, character_id)
+                db.commit()
+                return context.context_memory_count or 0
             return 0
         finally:
             db.close()

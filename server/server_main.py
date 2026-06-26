@@ -68,7 +68,7 @@ async def chat_ws(
     ws_connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
     try:
         await ws_connection.auth(websocket_service, system_runtime.database_manager)  # 等待认证，认证成功之后将ws和用户信息绑定
-        chat_stream = gcsm.get_or_register_chat_stream(
+        chat_stream = await gcsm.get_or_register_chat_stream(
             ws_connection, system_runtime=system_runtime
         )  # 根据ws连接获取对应的聊天流实例，内部会根据用户UUID进行管理
         while True:

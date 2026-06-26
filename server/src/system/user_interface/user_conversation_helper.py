@@ -1,4 +1,5 @@
-from typing import Any, Callable, List, Optional, TYPE_CHECKING
+import asyncio
+from typing import Any, List, TYPE_CHECKING
 from src.domain.conversation_type import ConversationItem
 from src.utils.enum_type import ContextType
 
@@ -15,7 +16,7 @@ class UserConversationHelper:
         self.database_manager = database_manager
 
     async def handle_history_request(self, user_id: str, count: int, end_index: int) -> dict[str, Any]:
-        total_count = await self.database_manager.get_total_conversation_count(user_id)
+        total_count = await asyncio.to_thread(self.database_manager.get_total_conversation_count, user_id)
         if end_index == -1 or end_index > total_count:
             end_index = total_count
 
@@ -23,7 +24,12 @@ class UserConversationHelper:
         if start_index >= end_index:
             return {"history": [], "start_index": 0}
 
-        history_items: List[ConversationItem] = await self.database_manager.get_history_from_db(user_id, start_index, end_index)
+        history_items: List[ConversationItem] = await asyncio.to_thread(
+            self.database_manager.get_history_from_db,
+            user_id,
+            start_index,
+            end_index,
+        )
         ret: dict[str, Any] = {"history": [], "start_index": start_index}
         for item in history_items:
             content = item.content

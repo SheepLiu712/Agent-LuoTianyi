@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Optional, Any, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, List, Optional, Any, Tuple
 from src.chat_session.chat_pipeline.unread_store import UnreadMessage, UnreadStore, UnreadMessageSnapshot
 from src.chat_session.chat_pipeline.listen_timer import ListenTimer
 import asyncio
@@ -12,10 +12,12 @@ if TYPE_CHECKING:
     from src.system.system_runtime import SystemRuntime
 
 class TopicPlanner:
-    def __init__(self, config: dict, username: str, user_id: str):
+    def __init__(self, config: dict, username: str, user_id: str, character_id: str = "luotianyi", context_provider: Optional[Callable[..., Awaitable[str | dict[str, Any]]]] = None):
         self.config = config
         self.system_runtime: "SystemRuntime" | None = None
         self.user_id = user_id
+        self.character_id = character_id
+        self.context_provider = context_provider
         self.logger = get_logger(f"{username}TopicPlanner")
 
         self.unread_store: UnreadStore | None = UnreadStore(
@@ -26,6 +28,7 @@ class TopicPlanner:
         )
         self.processor_task: Optional[asyncio.Task] = None
         self.topic_consumer = None  # 由外部设置的回调函数，用于接收提取的话题
+        self.context_provider: Optional[Callable[..., Awaitable[str | dict[str, Any]]]] = None
         self._wake_event = asyncio.Event()
         self._unread_version: int = 0
         self.logger.info(f"TopicPlanner initialized for user_id={user_id}")
@@ -58,13 +61,13 @@ class TopicPlanner:
     
     def start_processing(self):
         if self.processor_task is None or self.processor_task.done():
-            self.processor_task = asyncio.create_task(self.message_processor())
+            self.processor_task = asyncio.create_task(self._message_processor())
             self.logger.info("TopicPlanner processor task started")
 
     def set_topic_consumer(self, consumer):
         self.topic_consumer = consumer
 
-    async def message_processor(self):
+    async def _message_processor(self):
         while True:
             try:
                 should_force_extract = False
@@ -188,7 +191,7 @@ class TopicPlanner:
             return [], []
 
         try:
-            conversation_history = await self.system_runtime.conversation_service.get_context(self.user_id)
+            conversation_history = await self._get_conversation_context()
             character_id = self._target_character_ids_from_messages(unread_snapshot.messages)[0]
             topic, remaining = await self.system_runtime.agent_runtime.subconscious.extract_topic(
                 character_id=character_id,
@@ -203,6 +206,12 @@ class TopicPlanner:
         except Exception as e:
             self.logger.exception(f"Topic extraction failed: {e}")
             return self._fallback_extract(unread_snapshot, force_complete)
+
+    async def _get_conversation_context(self) -> str:
+        if self.context_provider is not None:
+            context = await self.context_provider(force_refresh=True)
+            return context if isinstance(context, str) else ""
+        return await self.system_runtime.conversation_service.get_context(self.user_id)
 
     def _fallback_extract(self, unread_snapshot: UnreadMessageSnapshot, force_complete: bool) -> tuple[Optional[ExtractedTopic], List[UnreadMessage]]:
         """最小兜底策略：整批消息作为一个话题，或继续保留等待补全。"""

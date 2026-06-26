@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 import asyncio
 import traceback
 from src.utils.logger import get_logger
@@ -15,10 +15,11 @@ if TYPE_CHECKING:
 
 
 class TopicReplier:
-    def __init__(self, config: dict, username: str, user_id: str):
+    def __init__(self, config: dict, username: str, user_id: str, character_id: str = "luotianyi"):
         self.config = config
         self.username = username
         self.user_id = user_id
+        self.character_id = character_id
         self.send_reply_callback: Optional[Callable[["ChatResponse"], Awaitable[None]]] = None
         self.logger = get_logger(f"{username}TopicReplier")
         self.topic_queue = asyncio.Queue()
@@ -26,6 +27,7 @@ class TopicReplier:
         self.system_runtime: "SystemRuntime" | None = None
         self.is_processing: bool = False
         self.change_state_callback : Optional[Callable[[bool, bool], Awaitable[None]]] = None # thinking, speaking
+        self.context_provider: Optional[Callable[..., Awaitable[str | dict[str, Any]]]] = None
 
         # 触摸事件指针机制
         self._touch_pending: Optional["ExtractedTopic"] = None  # 队列中待处理的触摸 Topic 引用
@@ -40,6 +42,9 @@ class TopicReplier:
 
     def set_send_reply_callback(self, send_reply_callback: Callable[["ChatResponse"], Awaitable[None]]):
         self.send_reply_callback = send_reply_callback
+
+    def set_context_provider(self, provider: Callable[..., Awaitable[str | dict[str, Any]]]):
+        self.context_provider = provider
 
     def start_processing(self):
         if self.processor_task is None or self.processor_task.done():
@@ -105,13 +110,13 @@ class TopicReplier:
         if agent is None:
             self.logger.error("SystemRuntime or agent is not ready, skip replying topic")
             return
-        character_id = self._character_id_for_topic(topic)
+        character_id = self.character_id
 
         if self.change_state_callback is not None:
             await self.change_state_callback(thinking = True) # 进入思考状态
 
         # Read application conversation context once and reuse it for this turn.
-        conversation_history = await self.system_runtime.conversation_service.get_context(self.user_id)
+        conversation_history = await self._get_conversation_context()
 
         # 它不用等到回复完成就能检测日期，因此把日期检测放在这里，和回复workflow并行
         asyncio.create_task(self._process_date_detection(topic, conversation_history=conversation_history))
@@ -139,6 +144,7 @@ class TopicReplier:
         uuid_list = await self.system_runtime.conversation_service.persist_agent_replies(
             user_id=self.user_id,
             reply_items=reply_items,
+            character_id=character_id,
         )
 
         for item, uuid in zip(reply_items, uuid_list or []):
@@ -152,7 +158,7 @@ class TopicReplier:
         asyncio.create_task(self._schedule_memory_write(
             topic, reply_items, attention_plan.memory_hits, conversation_history=conversation_history
         ))
-        asyncio.create_task(self._schedule_profile_context_update(topic))
+        asyncio.create_task(self._schedule_context_compression_and_profile_update(topic))
 
     async def _submit_speaking_job(
         self,
@@ -169,15 +175,11 @@ class TopicReplier:
             SpeakingJob(send_reply_callback=send_reply_callback, job_content=item, character_id=character_id)
         )
 
-    def _character_id_for_topic(self, topic: "ExtractedTopic") -> str:
-        target_ids = getattr(topic, "target_character_ids", None) or ("luotianyi",)
-        return target_ids[0]
-
 
     def _agent_for_topic(self, topic: "ExtractedTopic"):
         if self.system_runtime is None:
             return None
-        target_id = self._character_id_for_topic(topic)
+        target_id = self.character_id
         runtime = getattr(self.system_runtime, "agent_runtime", None)
         if runtime is not None:
             try:
@@ -206,7 +208,7 @@ class TopicReplier:
 
         try:
             await self.system_runtime.agent_runtime.subconscious.write_topic_memories(
-                character_id=self._character_id_for_topic(topic),
+                character_id=self.character_id,
                 user_id=self.user_id,
                 current_dialogue=current_dialogue,
                 related_memories=memory_hits,
@@ -221,7 +223,7 @@ class TopicReplier:
             return
 
         result = await self.system_runtime.agent_runtime.subconscious.detect_dates_for_topic(
-            character_id=self._character_id_for_topic(topic),
+            character_id=self.character_id,
             user_id=self.user_id,
             topic=topic,
             conversation_history=conversation_history,
@@ -241,25 +243,34 @@ class TopicReplier:
         except Exception as e:
             self.logger.warning(f"Failed to add confirmation topic: {e}")
 
-    async def _schedule_profile_context_update(
+    async def _get_conversation_context(self) -> str:
+        if self.context_provider is not None:
+            context = await self.context_provider(force_refresh=True)
+            return context if isinstance(context, str) else ""
+        return await self.system_runtime.conversation_service.get_context(self.user_id)
+
+    async def _schedule_context_compression_and_profile_update(
         self,
         topic: "ExtractedTopic",
     ) -> None:
         if self.system_runtime is None:
-            self.logger.error("SystemRuntime is not ready, skip scheduling profile/context update")
+            self.logger.error("SystemRuntime is not ready, skip scheduling context compression")
             return
 
         try:
-            context = await self.system_runtime.conversation_service.update_context_if_needed(self.user_id)
-            if context is None:
+            snapshot = await self.system_runtime.conversation_service.compress_context_if_needed(
+                self.user_id,
+                character_id=self.character_id,
+            )
+            if snapshot is None:
                 return
             await self.system_runtime.agent_runtime.subconscious.update_user_profile_by_context(
-                character_id=self._character_id_for_topic(topic),
+                character_id=self.character_id,
                 user_id=self.user_id,
-                context=context,
+                context=snapshot.as_prompt_payload(),
             )
         except Exception as e:
-            self.logger.warning(f"Profile/context update task failed: {e}")
+            self.logger.warning(f"Context compression/profile update task failed: {e}")
 
     def _build_current_dialogue(self, topic: "ExtractedTopic", reply_items: List[OneResponseLine]) -> str:
         lines: List[str] = []

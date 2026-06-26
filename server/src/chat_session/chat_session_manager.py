@@ -4,7 +4,7 @@ from typing import Any, Dict, TYPE_CHECKING
 
 from .dependency.activity_context_provider import ActivityContextProvider
 from .call_stream_manager import CallStreamManager
-from .conversation import ConversationService
+from .dependency.conversation_service import ConversationService
 from .chat_stream_manager import ChatStreamManager
 from .dependency.global_speaking_worker import GlobalSpeakingWorker
 from .dependency.proactive_topic_maker import ProactiveTopicMaker
