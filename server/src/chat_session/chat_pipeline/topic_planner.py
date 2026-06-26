@@ -28,7 +28,6 @@ class TopicPlanner:
         )
         self.processor_task: Optional[asyncio.Task] = None
         self.topic_consumer = None  # 由外部设置的回调函数，用于接收提取的话题
-        self.context_provider: Optional[Callable[..., Awaitable[str | dict[str, Any]]]] = None
         self._wake_event = asyncio.Event()
         self._unread_version: int = 0
         self.logger.info(f"TopicPlanner initialized for user_id={user_id}")

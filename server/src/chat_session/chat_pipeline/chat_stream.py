@@ -12,6 +12,7 @@ from src.system.user_interface.types import WSEventType
 from src.chat_session.chat_pipeline.topic_planner import TopicPlanner
 from src.chat_session.chat_pipeline.topic_replier import TopicReplier
 from src.chat_session.chat_pipeline.ingress_helper import IngressHelper
+from src.chat_session.chat_pipeline.reflection_worker import ReflectionWorker
 
 if TYPE_CHECKING:
     from src.chat_session.dependency.conversation_service import ConversationContextSnapshot
@@ -50,13 +51,21 @@ class ChatStream:
             character_id=self.character_id,
             context_provider=self.get_conversation_context
         )
+        self.reflection_worker = ReflectionWorker(
+            config.get("reflection_worker", {}),
+            username=self.user_name,
+            user_id=self.user_uuid,
+            character_id=self.character_id,
+        )
         self.topic_replier = TopicReplier(
             config.get("topic_replier", {}),
             username=self.user_name,
             user_id=self.user_uuid,
             character_id=self.character_id,
-            context_provider=self.get_conversation_context
+            context_provider=self.get_conversation_context,
+            reflection_submitter=self.reflection_worker.submit_completed_turn,
         )
+        self.reflection_worker.set_reply_topic_callback(self.topic_replier.add_topic)
         self.ingress_helper.set_msg_consumer(self.topic_planner.feed_unread_message)
         self.topic_planner.set_topic_consumer(self.topic_replier.add_topic)
         self.topic_replier.set_change_state_callback(self.change_state)
@@ -81,12 +90,14 @@ class ChatStream:
         self.ingress_helper.set_system_runtime(system_runtime)
         self.topic_planner.set_system_runtime(system_runtime)
         self.topic_replier.set_system_runtime(system_runtime)
+        self.reflection_worker.set_system_runtime(system_runtime)
 
     async def start_if_needed(self):
         """启动常驻消息处理协程（仅启动一次）。"""
         await self.initialize_context()
         self.ingress_helper.start_processing()
         self.topic_planner.start_processing()
+        self.reflection_worker.start_processing()
         self.topic_replier.start_processing()
         self._start_response_sender()
 
@@ -244,5 +255,7 @@ class ChatStream:
             self.topic_planner.processor_task.cancel()
         if self.topic_replier.processor_task and not self.topic_replier.processor_task.done():
             self.topic_replier.processor_task.cancel()
+        if self.reflection_worker.processor_task and not self.reflection_worker.processor_task.done():
+            self.reflection_worker.processor_task.cancel()
         if self.response_sender_task and not self.response_sender_task.done():
             self.response_sender_task.cancel()

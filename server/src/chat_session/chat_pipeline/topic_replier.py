@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Optional
 import asyncio
 import traceback
 from src.utils.logger import get_logger
 from src.chat_session.dependency.global_speaking_worker import SpeakingJob
+from src.chat_session.chat_pipeline.reflection_worker import CompletedTurn
 from src.agent.main_chat import OneResponseLine, SongSegmentChat, ContextType
-from typing import Callable, Awaitable
 from src.domain.chat import ChatInputEventType
 if TYPE_CHECKING:
     from src.system.system_runtime import SystemRuntime
@@ -15,7 +15,15 @@ if TYPE_CHECKING:
 
 
 class TopicReplier:
-    def __init__(self, config: dict, username: str, user_id: str, character_id: str = "luotianyi"):
+    def __init__(
+        self,
+        config: dict,
+        username: str,
+        user_id: str,
+        character_id: str = "luotianyi",
+        context_provider: Optional[Callable[..., Awaitable[str | dict[str, Any]]]] = None,
+        reflection_submitter: Optional[Callable[[CompletedTurn], Awaitable[None]]] = None,
+    ):
         self.config = config
         self.username = username
         self.user_id = user_id
@@ -27,7 +35,8 @@ class TopicReplier:
         self.system_runtime: "SystemRuntime" | None = None
         self.is_processing: bool = False
         self.change_state_callback : Optional[Callable[[bool, bool], Awaitable[None]]] = None # thinking, speaking
-        self.context_provider: Optional[Callable[..., Awaitable[str | dict[str, Any]]]] = None
+        self.context_provider: Optional[Callable[..., Awaitable[str | dict[str, Any]]]] = context_provider
+        self.reflection_submitter = reflection_submitter
 
         # 触摸事件指针机制
         self._touch_pending: Optional["ExtractedTopic"] = None  # 队列中待处理的触摸 Topic 引用
@@ -45,6 +54,9 @@ class TopicReplier:
 
     def set_context_provider(self, provider: Callable[..., Awaitable[str | dict[str, Any]]]):
         self.context_provider = provider
+
+    def set_reflection_submitter(self, submitter: Callable[[CompletedTurn], Awaitable[None]]):
+        self.reflection_submitter = submitter
 
     def start_processing(self):
         if self.processor_task is None or self.processor_task.done():
@@ -118,9 +130,6 @@ class TopicReplier:
         # Read application conversation context once and reuse it for this turn.
         conversation_history = await self._get_conversation_context()
 
-        # 它不用等到回复完成就能检测日期，因此把日期检测放在这里，和回复workflow并行
-        asyncio.create_task(self._process_date_detection(topic, conversation_history=conversation_history))
-
         attention_plan = await self.system_runtime.agent_runtime.subconscious.plan_topic_turn(
             character_id=character_id,
             user_id=self.user_id,
@@ -153,12 +162,12 @@ class TopicReplier:
             item.uuid = uuid
             await self._submit_speaking_job(self.send_reply_callback, item, character_id)
 
-        # Fire-and-forget: memory write and profile update run in background,
-        # don't block the next topic.
-        asyncio.create_task(self._schedule_memory_write(
-            topic, reply_items, attention_plan.memory_hits, conversation_history=conversation_history
-        ))
-        asyncio.create_task(self._schedule_context_compression_and_profile_update(topic))
+        await self._submit_reflection_turn(
+            topic=topic,
+            reply_items=reply_items,
+            attention_plan=attention_plan,
+            conversation_history=conversation_history,
+        )
 
     async def _submit_speaking_job(
         self,
@@ -189,99 +198,30 @@ class TopicReplier:
         return self.system_runtime.agent
 
 
-    async def _schedule_memory_write(
+    async def _submit_reflection_turn(
         self,
         topic: "ExtractedTopic",
         reply_items: List[OneResponseLine],
-        memory_hits: List[str],
-        conversation_history: Optional[str] = None,
+        attention_plan: Any,
+        conversation_history: str,
     ) -> None:
-        agent = self._agent_for_topic(topic)
-        if agent is None:
-            self.logger.error("SystemRuntime or agent is not ready, skip scheduling memory write")
+        if self.reflection_submitter is None:
+            self.logger.warning("No reflection submitter set, skip post-turn reflection")
             return
-        if len(topic.source_messages or []) == 0:
-            self.logger.info("No source messages for topic, skip scheduling memory write")
-            return
-
-        current_dialogue = self._build_current_dialogue(topic, reply_items)
-
-        try:
-            await self.system_runtime.agent_runtime.subconscious.write_topic_memories(
-                character_id=self.character_id,
+        await self.reflection_submitter(
+            CompletedTurn(
                 user_id=self.user_id,
-                current_dialogue=current_dialogue,
-                related_memories=memory_hits,
+                character_id=self.character_id,
+                topic=topic,
+                reply_items=reply_items,
+                attention_plan=attention_plan,
                 conversation_history=conversation_history,
             )
-        except Exception as e:
-            self.logger.warning(f"Topic memory write task failed: {e}")
-
-    async def _process_date_detection(self, topic: "ExtractedTopic", conversation_history: Optional[str] = None) -> None:
-        """从话题的源消息中检测重要日期，按置信度处理。"""
-        if self.system_runtime is None:
-            return
-
-        result = await self.system_runtime.agent_runtime.subconscious.detect_dates_for_topic(
-            character_id=self.character_id,
-            user_id=self.user_id,
-            topic=topic,
-            conversation_history=conversation_history,
-            reply_topic_callback=lambda t: self._safe_add_topic(t),
         )
-
-        if result is True:
-            self.logger.info(f"Date auto-saved from topic {topic.topic_id}")
-        elif result is False:
-            self.logger.debug(f"Date discarded from topic {topic.topic_id}")
-        else:
-            self.logger.info(f"Date confirmation topic created from topic {topic.topic_id}")
-
-    def _safe_add_topic(self, topic: "ExtractedTopic") -> None:
-        try:
-            asyncio.create_task(self.add_topic(topic))
-        except Exception as e:
-            self.logger.warning(f"Failed to add confirmation topic: {e}")
 
     async def _get_conversation_context(self) -> str:
         if self.context_provider is not None:
             context = await self.context_provider(force_refresh=True)
             return context if isinstance(context, str) else ""
         return await self.system_runtime.conversation_service.get_context(self.user_id)
-
-    async def _schedule_context_compression_and_profile_update(
-        self,
-        topic: "ExtractedTopic",
-    ) -> None:
-        if self.system_runtime is None:
-            self.logger.error("SystemRuntime is not ready, skip scheduling context compression")
-            return
-
-        try:
-            snapshot = await self.system_runtime.conversation_service.compress_context_if_needed(
-                self.user_id,
-                character_id=self.character_id,
-            )
-            if snapshot is None:
-                return
-            await self.system_runtime.agent_runtime.subconscious.update_user_profile_by_context(
-                character_id=self.character_id,
-                user_id=self.user_id,
-                context=snapshot.as_prompt_payload(),
-            )
-        except Exception as e:
-            self.logger.warning(f"Context compression/profile update task failed: {e}")
-
-    def _build_current_dialogue(self, topic: "ExtractedTopic", reply_items: List[OneResponseLine]) -> str:
-        lines: List[str] = []
-
-        for msg in getattr(topic, "source_messages", []) or []:
-            content = (getattr(msg, "content", "") or "").strip()
-            if content:
-                lines.append(f"user: {content}")
-
-        for item in reply_items:
-            lines.append(f"agent: {item.get_content()}")
-
-        return "\n".join(lines)
 
