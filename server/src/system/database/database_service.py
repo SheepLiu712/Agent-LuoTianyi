@@ -145,6 +145,27 @@ class DatabaseManager:
         return value
 
     @staticmethod
+    def _normalize_preferences(value: Any) -> Dict[str, Any]:
+        """把数据库或缓存中的用户偏好统一规范化为字典。"""
+        if value is None or value == "":
+            return {}
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        while isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid user preferences payload, fallback to empty dict: {value[:80]}")
+                return {}
+            if parsed == value:
+                return {}
+            value = parsed
+        if isinstance(value, dict):
+            return value
+        logger.warning(f"Unsupported user preferences payload type: {type(value).__name__}")
+        return {}
+
+    @staticmethod
     def _context_redis_key(user_id: str, character_id: str = "luotianyi") -> str:
         return f"user_context:{user_id}:{character_id or 'luotianyi'}"
 
@@ -495,7 +516,7 @@ class DatabaseManager:
         redis = self._ensure_redis()
         cached_preferences = redis.get(f"user_preferences:{user_id}")
         if cached_preferences:
-            return cached_preferences
+            return self._normalize_preferences(cached_preferences)
 
         # 若缓存未命中，从数据库查询并更新缓存
         db = self._new_session()
@@ -503,7 +524,7 @@ class DatabaseManager:
             user = db.query(User).filter_by(uuid=user_id).first()
             if not user:
                 return None
-            preferences = json.loads(user.preferences) if user.preferences else {}
+            preferences = self._normalize_preferences(user.preferences)
             # 更新缓存
             redis.setex(f"user_preferences:{user_id}", 3600, preferences) # 注意自己实现的redis支持所有类型
             return preferences
@@ -690,8 +711,8 @@ class DatabaseManager:
 
             # 3. 加载用户偏好
             if "all" in types or "preferences" in types:
-                preferences = user.preferences or {}
-                redis.setex(f"user_preferences:{user_id}", 3600, json.dumps(preferences))
+                preferences = self._normalize_preferences(user.preferences)
+                redis.setex(f"user_preferences:{user_id}", 3600, preferences)
 
             # 3.1 加载用户画像描述
             if "all" in types or "description" in types:

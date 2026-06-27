@@ -21,6 +21,7 @@ class CharacterProfile:
     speaking_style_ref: str | None = None
     voice_profile: str | None = None
     live2d_profile: str | None = None
+    reflex: Mapping[str, Any] = field(default_factory=dict)
     default_target: bool = False
     enabled: bool = True
     metadata: Mapping[str, Any] = field(default_factory=dict)

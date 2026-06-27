@@ -92,7 +92,6 @@ class ChatStream:
         self.topic_planner.set_system_runtime(system_runtime)
         self.topic_replier.set_system_runtime(system_runtime)
         self.reflection_worker.set_system_runtime(system_runtime)
-        self.ensure_dependencies()
 
     def ensure_dependencies(self) -> None:
         """检查 ChatStream 和内部 pipeline worker 依赖已经初始化。"""

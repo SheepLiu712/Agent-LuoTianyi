@@ -24,6 +24,7 @@ class TTSModule:
     def __init__(self, tts_config: Dict[str, Any], tts_server: TTSServer) -> None:
         self.logger = get_logger("TTSModule")
         self.config = tts_config
+        self.quiet_logs = tts_config.get("suppress_worker_output", True)
         self.tts_server = tts_server
         
         self.character_name = tts_config.get("character_name", "LuoTianyi")
@@ -35,7 +36,15 @@ class TTSModule:
         self.reference_audio: Dict[str, ReferenceAudio] = self._prepare_reference_audio(
             tts_config.get("reference_audio_dir", ""), tts_config.get("reference_audio_lyrics", "")
         )
-        self.logger.info("TTSModule initialized with gsv_tts worker backend")
+        self._info("TTSModule initialized with gsv_tts worker backend")
+
+    def _debug(self, message: str) -> None:
+        if not self.quiet_logs:
+            self.logger.debug(message)
+
+    def _info(self, message: str) -> None:
+        if not self.quiet_logs:
+            self.logger.info(message)
 
     def _prepare_reference_audio(self, reference_audio_dir: str, reference_audio_lyrics: str) -> Dict[str, ReferenceAudio]:
         if not os.path.exists(reference_audio_lyrics):
@@ -61,7 +70,7 @@ class TTSModule:
                         audio_path=abs_audio_path, 
                         lyrics=reference_audio_lyrics_data.get(reference_audio_file_name, "")
                     )
-        self.logger.info(f"Loaded {len(reference_audio)} reference audio files.")
+        self._info(f"Loaded {len(reference_audio)} reference audio files.")
         return reference_audio
     
     def _prepare_tone_reference_audio_projection(self, config_path: str) -> Dict[str, str]:
@@ -124,7 +133,7 @@ class TTSModule:
             "prompt_text": ref_audio_obj.lyrics,
         }
 
-        self.logger.debug(f"Sending TTS request for text: {text[:20]}...")
+        self._debug(f"Sending TTS request for text: {text[:20]}...")
         
         try:
             # Use asyncio.to_thread to keep this method async-friendly.
@@ -135,7 +144,7 @@ class TTSModule:
                 payload["ref_audio_path"],
                 payload["prompt_text"],
             )
-            self.logger.debug(f"TTS synthesis successful for text: {text[:20]}...")
+            self._debug(f"TTS synthesis successful for text: {text[:20]}...")
             return audio_bytes
         except Exception as e:
             self.logger.error(f"TTS Request failed: {e}")
@@ -163,7 +172,7 @@ class TTSModule:
         if ref_audio_obj is None:
             raise ValueError(f"Reference audio '{ref_audio_key}' not found.")
 
-        self.logger.debug(f"Sending streaming TTS request for text: {text[:20]}...")
+        self._debug(f"Sending streaming TTS request for text: {text[:20]}...")
 
         try:
             for chunk in self.tts_server.stream_synthesize(
@@ -174,7 +183,7 @@ class TTSModule:
             ):
                 if chunk:
                     yield chunk
-            self.logger.debug(f"Streaming TTS synthesis successful for text: {text[:20]}...")
+            self._debug(f"Streaming TTS synthesis successful for text: {text[:20]}...")
         except Exception as e:
             self.logger.error(f"Streaming TTS Request failed: {e}")
             raise
@@ -191,7 +200,11 @@ class TTSModule:
 
 def init_tts_module(tts_config: Dict[str, Any]) -> TTSModule:
     server_config_path = tts_config.get("server_config_path", "res/tts/luotianyi/tts_infer.yaml")
-    tts_server = TTSServer(config_path=server_config_path)
+    tts_server = TTSServer(
+        config_path=server_config_path,
+        suppress_worker_output=tts_config.get("suppress_worker_output", True),
+        trim_startup_memory=tts_config.get("trim_startup_memory", True),
+    )
     tts_server.start()
     tts_module = TTSModule(tts_config=tts_config, tts_server=tts_server)
     return tts_module

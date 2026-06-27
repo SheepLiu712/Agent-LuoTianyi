@@ -2,6 +2,9 @@ import io
 import os
 import time
 import atexit
+import gc
+import logging
+import sys
 import traceback
 import multiprocessing
 from queue import Empty
@@ -99,13 +102,43 @@ def _make_wav_chunk_streamable(wav_bytes: bytes) -> bytes:
     return bytes(patched)
 
 
+def _silence_worker_output() -> Any:
+    logging.disable(logging.INFO)
+    devnull = open(os.devnull, "w", encoding="utf-8", errors="ignore")
+    sys.stdout = devnull
+    sys.stderr = devnull
+    return devnull
+
+
+def _release_worker_startup_memory() -> None:
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            ctypes.windll.psapi.EmptyWorkingSet(ctypes.windll.kernel32.GetCurrentProcess())
+        except Exception:
+            pass
+
+
 def _run_gsv_worker(
     config_path: str,
     request_queue: MPQueue,
     response_queue: MPQueue,
     ready_event: MPEvent,
     stop_event: MPEvent,
+    suppress_output: bool,
+    trim_startup_memory: bool,
 ):
+    devnull = _silence_worker_output() if suppress_output else None
     logger = get_logger("TTSServerWorker")
     try:
         from gsv_tts import TTS
@@ -134,6 +167,9 @@ def _run_gsv_worker(
         else:
             tts.load_sovits_model()
             logger.info("Preloaded default SoVITS model")
+
+        if trim_startup_memory:
+            _release_worker_startup_memory()
 
         ready_event.set()
         logger.info("gsv_tts worker is ready")
@@ -267,15 +303,26 @@ def _run_gsv_worker(
             pass
         ready_event.set()
     finally:
+        if devnull is not None:
+            devnull.close()
         stop_event.set()
 
 class TTSServer:
     """
     Manages the lifecycle of a dedicated gsv_tts worker process.
     """
-    def __init__(self, config_path: str, timeout: int = 600):
+    def __init__(
+        self,
+        config_path: str,
+        timeout: int = 600,
+        suppress_worker_output: bool = True,
+        trim_startup_memory: bool = True,
+    ):
         self.config_path = config_path
         self.timeout = timeout
+        self.suppress_worker_output = suppress_worker_output
+        self.quiet_logs = suppress_worker_output
+        self.trim_startup_memory = trim_startup_memory
         self.logger = get_logger("TTSServer")
         self.server_process: Optional[multiprocessing.Process] = None
         self.request_queue: Optional[MPQueue] = None
@@ -285,10 +332,14 @@ class TTSServer:
         self._request_counter = 0
         self._synthesize_lock = multiprocessing.Lock()
 
+    def _info(self, message: str) -> None:
+        if not self.quiet_logs:
+            self.logger.info(message)
+
     def start(self):
         """Starts the gsv_tts worker process if not already running."""
         if self.server_process and self.server_process.is_alive():
-            self.logger.info("gsv_tts worker is already running")
+            self._info("gsv_tts worker is already running")
             return
 
         if not os.path.exists(self.config_path):
@@ -300,7 +351,7 @@ class TTSServer:
         self.ready_event = multiprocessing.Event()
         self.stop_event = multiprocessing.Event()
 
-        self.logger.info("Starting gsv_tts worker in a separate process...")
+        self._info("Starting gsv_tts worker in a separate process...")
 
         self.server_process = multiprocessing.Process(
             target=_run_gsv_worker,
@@ -310,6 +361,8 @@ class TTSServer:
                 self.response_queue,
                 self.ready_event,
                 self.stop_event,
+                self.suppress_worker_output,
+                self.trim_startup_memory,
             ),
             daemon=True
         )
@@ -320,7 +373,7 @@ class TTSServer:
             self.stop(force=True)
             raise RuntimeError("Failed to start gsv_tts worker")
 
-        self.logger.info("gsv_tts worker started successfully")
+        self._info("gsv_tts worker started successfully")
 
         # Ensure cleanup on main process exit
         atexit.register(self.stop)
@@ -330,7 +383,7 @@ class TTSServer:
         if not self.server_process:
             return
 
-        self.logger.info("Stopping gsv_tts worker...")
+        self._info("Stopping gsv_tts worker...")
         if self.stop_event:
             self.stop_event.set()
         try:
@@ -365,7 +418,7 @@ class TTSServer:
         self.response_queue = None
         self.ready_event = None
         self.stop_event = None
-        self.logger.info("gsv_tts worker stopped")
+        self._info("gsv_tts worker stopped")
 
     def synthesize(
         self,

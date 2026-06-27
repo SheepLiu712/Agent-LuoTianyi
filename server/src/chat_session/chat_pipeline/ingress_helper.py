@@ -74,11 +74,17 @@ class IngressHelper:
 
     async def _process_ingress_event(self, event: ChatInputEvent):
 
-        # 尝试使用 ReflexPipeline 处理事件，如果处理成功则直接返回
-        reflex_pipeline = (
-            self.system_runtime.chat_session_manager.reflex_pipeline if self.system_runtime is not None else None
+        # 尝试使用角色反射处理事件，如果处理成功则直接返回
+        agent_runtime = self.system_runtime.agent_runtime if self.system_runtime is not None else None
+        handled = (
+            await agent_runtime.try_handle_reflex(
+                character_id=self.character_id,
+                event=event,
+                send_reply_callback=self.send_reply_callback,
+            )
+            if agent_runtime
+            else False
         )
-        handled = await reflex_pipeline.try_handle(event, self.send_reply_callback) if reflex_pipeline else False
         if handled:
             return
 

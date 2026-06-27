@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, TYPE_CHECKING
 
 from src.agent.luotianyi_agent import LuoTianyiAgent
+from src.agent.reflex import CharacterReflex
 from src.agent_runtime.agent_registry import AgentRegistry
 from src.agent_runtime.character_registry import CharacterRegistry
 from src.agent_runtime.character_runtime import CharacterRuntime
@@ -114,6 +115,17 @@ class AgentRuntime:
     async def preprocess_chat_event(self, *,  character_id: str, user_id: str, event: Any):
         """预处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取。"""
         return await self.preprocessor.preprocess_chat_event(character_id=character_id, user_id=user_id, event=event)
+
+    async def try_handle_reflex(
+        self,
+        *,
+        character_id: str | None,
+        event: Any,
+        send_reply_callback,
+    ) -> bool:
+        """尝试用角色反射处理输入事件，成功时不再进入话题管线。"""
+        runtime = self.get_character_runtime(character_id)
+        return await runtime.reflex.try_handle(event, send_reply_callback)
 
     async def extract_topic(
         self,
@@ -244,6 +256,7 @@ class AgentRuntime:
                 profile=profile,
                 conscious=conscious,
                 mind=mind,
+                reflex=CharacterReflex(profile),
             )
         return character_runtimes
 

@@ -99,7 +99,7 @@ class PreferencesDialog(QDialog):
         self.save_btn = QPushButton("保存设置")
         self.save_btn.setStyleSheet("""
             QPushButton {
-                background-color: #4CAF50;
+                background-color: #5BB8E8;
                 color: white;
                 border: none;
                 padding: 12px 24px;
@@ -107,7 +107,7 @@ class PreferencesDialog(QDialog):
                 font-size: 14px;
             }
             QPushButton:hover {
-                background-color: #45a049;
+                background-color: #4AA8D8;
             }
         """)
         self.save_btn.clicked.connect(self.on_save)

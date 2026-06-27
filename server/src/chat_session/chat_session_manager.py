@@ -9,7 +9,6 @@ from .chat_stream_manager import ChatStreamManager
 from . import chat_stream_manager as chat_stream_manager_module
 from .dependency.global_speaking_worker import GlobalSpeakingWorker
 from .dependency.proactive_topic_maker import ProactiveTopicMaker
-from .reflex_pipeline import ReflexPipeline
 
 if TYPE_CHECKING:
     from src.system.database import DatabaseManager
@@ -61,8 +60,6 @@ class ChatSessionManager:
             activity_context_provider = self.activity_context_provider,
             )
 
-        self.reflex_pipeline = ReflexPipeline(config.get("reflex_pipeline", {}))
-
     def wire_dependencies(
         self,
         *,
@@ -93,7 +90,6 @@ class ChatSessionManager:
             proactive_topic_maker=self.proactive_topic_maker,
             activity_context_provider=self.activity_context_provider,
         )
-        self.reflex_pipeline.ensure_dependencies()
         self.ensure_dependencies()
 
     def ensure_dependencies(self) -> None:
@@ -107,7 +103,6 @@ class ChatSessionManager:
             "activity_context_provider": self.activity_context_provider,
             "chat_stream_manager": self.chat_stream_manager,
             "call_stream_manager": self.call_stream_manager,
-            "reflex_pipeline": self.reflex_pipeline,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
@@ -118,7 +113,6 @@ class ChatSessionManager:
         self.activity_context_provider.ensure_dependencies()
         self.chat_stream_manager.ensure_dependencies()
         self.call_stream_manager.ensure_dependencies()
-        self.reflex_pipeline.ensure_dependencies()
 
     def start_background_services(self) -> None:
         """启动聊天、通话和 speaking worker 后台服务。"""

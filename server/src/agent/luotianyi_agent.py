@@ -154,6 +154,10 @@ class LuoTianyiAgent:
             return ""
         try:
             prefs = json.loads(preferences) if isinstance(preferences, str) else preferences
+            while isinstance(prefs, str):
+                prefs = json.loads(prefs)
+            if not isinstance(prefs, dict):
+                return ""
             pref_parts = []
             if prefs.get("relationship"):
                 pref_parts.append(f"用户希望你是他的：{prefs['relationship']}")
@@ -168,7 +172,7 @@ class LuoTianyiAgent:
             if pref_parts:
                 return "用户偏好设置：" + "；".join(pref_parts)
         except Exception as e:
-            self.logger.warning(f"Failed to parse preferences: {e}")
+            self.logger.debug(f"Skip invalid preferences context: {e}")
         return ""
 
     async def get_citywalk_diary_by_date(self, date_str: str) -> str | None:

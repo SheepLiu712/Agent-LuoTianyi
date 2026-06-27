@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 
 # 过期阈值（秒）：距离过期小于此值时触发刷新
 SESSDATA_EXPIRE_THRESHOLD = 7 * 24 * 3600      # SESSDATA 还剩 7 天过期时刷新
-BILL_TICKET_EXPIRE_THRESHOLD = 3 * 24 * 3600   # bili_ticket 还剩 3 天过期时刷新
+BILL_TICKET_EXPIRE_THRESHOLD = 6 * 3600   # bili_ticket 还剩 6 小时过期时刷新
 
 
 def _parse_cookie_expiry(cookie_str: str) -> dict:

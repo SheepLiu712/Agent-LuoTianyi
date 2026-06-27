@@ -29,6 +29,7 @@ class CharacterRegistry:
                 speaking_style_ref=profile_cfg.get("speaking_style_ref"),
                 voice_profile=profile_cfg.get("voice_profile"),
                 live2d_profile=profile_cfg.get("live2d_profile"),
+                reflex=profile_cfg.get("reflex", {}),
                 default_target=profile_cfg.get("default_target", False),
                 enabled=profile_cfg.get("enabled", True),
                 metadata=profile_cfg.get("metadata", {}),
@@ -67,6 +68,13 @@ class CharacterRegistry:
             speaking_style_ref="main_chat.static_variables.speaking_style",
             voice_profile=DEFAULT_CHARACTER_ID,
             live2d_profile=DEFAULT_CHARACTER_ID,
+            reflex={
+                "touch": {
+                    "fast_reply": {
+                        "touch_voice_dir": "res/agent/touch_voice",
+                    }
+                }
+            },
             default_target=True,
         )
 
@@ -84,6 +92,13 @@ def get_default_character_registry() -> CharacterRegistry:
                     "speaking_style_ref": "main_chat.static_variables.speaking_style",
                     "voice_profile": DEFAULT_CHARACTER_ID,
                     "live2d_profile": DEFAULT_CHARACTER_ID,
+                    "reflex": {
+                        "touch": {
+                            "fast_reply": {
+                                "touch_voice_dir": "res/agent/touch_voice",
+                            }
+                        }
+                    },
                     "default_target": True,
                 }
             }

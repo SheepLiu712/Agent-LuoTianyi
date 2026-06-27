@@ -69,7 +69,9 @@
                 "reference_audio_dir": "res/tts/luotianyi/reference_audio",
                 "reference_audio_lyrics": "res/tts/luotianyi/reference_audio/lrc.json",
                 "server_config_path": "res/tts/luotianyi/tts_infer.yaml",
-                "interface_config_path": "res/tts/luotianyi/tts_interface_config.json"
+                "interface_config_path": "res/tts/luotianyi/tts_interface_config.json",
+                "suppress_worker_output": true,
+                "trim_startup_memory": true
             }
         },
         "sing": {
@@ -175,6 +177,14 @@
                     "speaking_style_ref": "main_chat.static_variables.speaking_style",
                     "voice_profile": "luotianyi",
                     "live2d_profile": "luotianyi",
+                    "reflex": {
+                        "touch": {
+                            "fast_reply": {
+                                "touch_voice_dir": "res/agent/touch_voice",
+                                "probability": 1.0
+                            }
+                        }
+                    },
                     "default_target": true
                 }
             }
@@ -221,7 +231,7 @@
                     "llm_module": {
                         "llm": {
                             "name": "qwen3.5-plus",
-                            "enable_thinking": true,
+                            "enable_thinking": false,
                             "use_json": true
                         },
                         "prompt_name": "memory_write_prompt"
