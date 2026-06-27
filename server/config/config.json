@@ -186,7 +186,7 @@
                     "lyrics_file": "res/knowledge/lyrics.json"
                 }
             },
-            "memory_manager": {
+            "memory": {
                 "vector_store": {
                     "store_type": "chroma",
                     "embedding_model": {
@@ -215,10 +215,6 @@
                         },
                         "prompt_name": "user_profile_update_prompt"
                     }
-                },
-                "memory_searcher": {
-                    "max_k_graph_entities": 3,
-                    "max_k_vector_entities": 5
                 },
                 "memory_writer": {
                     "recent_update_path": "data/memory/context/recent_update.json",

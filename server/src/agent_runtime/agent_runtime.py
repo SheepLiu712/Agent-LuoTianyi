@@ -180,8 +180,9 @@ class AgentRuntime:
                 continue
             llm_modules = self._register_character_llm_modules(llm_service, profile.character_id, agent_config)
             memory = SubconsciousMemory(
-                agent_config["memory_manager"],
+                agent_config["memory"],
                 llm_modules,
+                database_manager=database_manager,
                 vector_store=vector_store,
                 owner_character_id=profile.character_id,
             )
@@ -211,7 +212,7 @@ class AgentRuntime:
     @staticmethod
     def _initialize_vector_store(agent_config: Dict[str, Any]) -> Any:
         """根据 Agent 配置初始化并返回共享向量存储。"""
-        vector_cfg = agent_config.get("memory_manager", {}).get("vector_store", {})
+        vector_cfg = agent_config.get("memory", {}).get("vector_store", {})
         if vector_cfg:
             init_vector_store(vector_cfg)
         return get_vector_store()
@@ -226,11 +227,11 @@ class AgentRuntime:
             ),
             "memory_writer": llm_service.register_llm_module(
                 f"{character_id}_memory_writer",
-                agent_config["memory_manager"]["memory_writer"]["llm_module"],
+                agent_config["memory"]["memory_writer"]["llm_module"],
             ),
             "user_profile_updater": llm_service.register_llm_module(
                 f"{character_id}_user_profile_updater",
-                agent_config["memory_manager"]["user_profile"]["llm_module"],
+                agent_config["memory"]["user_profile"]["llm_module"],
             ),
             "main_chat": llm_service.register_llm_module(
                 f"{character_id}_main_chat",

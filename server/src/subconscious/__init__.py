@@ -9,7 +9,6 @@ __all__ = [
     "CharacterSubconscious",
     "ChatPreprocessor",
     "DateDetector",
-    "MemoryUpdateService",
     "SongEntityLinker",
     "SubconsciousMemory",
     "SubconsciousState",
@@ -38,7 +37,7 @@ def __getattr__(name: str):
         from src.subconscious import date_processor
 
         return getattr(date_processor, name)
-    if name in {"MemoryUpdateService", "SubconsciousMemory"}:
+    if name == "SubconsciousMemory":
         from src.subconscious import memory
 
         return getattr(memory, name)

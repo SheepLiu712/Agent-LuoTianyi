@@ -12,13 +12,15 @@ from src.system.database.vector_store import VectorStore, Document
 from src.utils.llm.llm_module import LLMModule
 import time
 import asyncio
-from sqlalchemy.orm import Session
-from src.system.database.redis_buffer import RedisBuffer
-from src.system.database.database_service import write_agent_memory_record, write_memory_update
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
 
 from src.domain.memory_type import MemoryUpdateCommand
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.system.database.memory_store import MemoryStore
 
 
 logger = get_logger("MemoryWriter")
@@ -31,9 +33,8 @@ class MemoryWriter:
 
     async def process_interaction(
         self,
-        db: Session,
-        redis: RedisBuffer,
         vector_store: VectorStore,
+        memory_store: "MemoryStore",
         user_id: str,
         history: str,
         current_dialogue: str = "",
@@ -66,11 +67,10 @@ class MemoryWriter:
                     continue
                 seen_texts.add(text)
                 await self.write_user_memory(
-                    db,
-                    redis,
-                    vector_store,
-                    user_id,
-                    content,
+                    vector_store=vector_store,
+                    memory_store=memory_store,
+                    user_id=user_id,
+                    content=content,
                     owner_character_id=owner_character_id,
                     commit=commit,
                 )
@@ -82,15 +82,15 @@ class MemoryWriter:
             )
             for content in event_items:
                 text = (content or "").strip()
-                if not text or text in seen_texts:
+                normalized_text = self._normalize_text(text)
+                if not text or normalized_text in seen_texts:
                     continue
-                seen_texts.add(text)
+                seen_texts.add(normalized_text)
                 await self.write_event_memory(
-                    db,
-                    redis,
-                    vector_store,
-                    user_id,
-                    content,
+                    vector_store=vector_store,
+                    memory_store=memory_store,
+                    user_id=user_id,
+                    content=content,
                     owner_character_id=owner_character_id,
                     commit=commit,
                 )
@@ -166,9 +166,8 @@ class MemoryWriter:
 
     async def write_user_memory(
         self,
-        db: Session,
-        redis: RedisBuffer,
         vector_store: VectorStore,
+        memory_store: "MemoryStore",
         user_id: str,
         content: str,
         owner_character_id: str = "luotianyi",
@@ -198,10 +197,9 @@ class MemoryWriter:
         )
         ids = await asyncio.to_thread(vector_store.add_documents, [doc])
         update_cmd = MemoryUpdateCommand(type="write_user_memory", content=text, uuid=ids[0] if ids else None)
-        await asyncio.to_thread(write_memory_update, db, redis, user_id, update_cmd, commit=commit)
+        await asyncio.to_thread(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
         await asyncio.to_thread(
-            write_agent_memory_record,
-            db,
+            memory_store.write_agent_memory_record,
             DomainMemoryRecord(
                 owner_character_id=owner_character_id,
                 subject_user_id=user_id,
@@ -221,9 +219,8 @@ class MemoryWriter:
 
     async def write_event_memory(
         self,
-        db: Session,
-        redis: RedisBuffer,
         vector_store: VectorStore,
+        memory_store: "MemoryStore",
         user_id: str,
         content: str,
         owner_character_id: str = "luotianyi",
@@ -251,10 +248,9 @@ class MemoryWriter:
         )
         ids = await asyncio.to_thread(vector_store.add_documents, [doc])
         update_cmd = MemoryUpdateCommand(type="write_event_memory", content=text, uuid=ids[0] if ids else None)
-        await asyncio.to_thread(write_memory_update, db, redis, user_id, update_cmd, commit=commit)
+        await asyncio.to_thread(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
         await asyncio.to_thread(
-            write_agent_memory_record,
-            db,
+            memory_store.write_agent_memory_record,
             DomainMemoryRecord(
                 owner_character_id=owner_character_id,
                 subject_user_id=user_id,

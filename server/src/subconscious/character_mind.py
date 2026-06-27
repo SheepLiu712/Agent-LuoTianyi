@@ -126,23 +126,6 @@ class CharacterSubconscious:
         regular_hits = await self.song_knowledge.search_song_facts_for_topic(regular_constraints) if regular_constraints else []
         return special_hits + regular_hits
 
-    async def search_memories_for_topic(
-        self,
-        user_id: str,
-        queries: List[str],
-        similarity_threshold: float = 0.60,
-        k: int = 3,
-    ) -> List[str]:
-        '''弃用的接口。应该改用 search_memory_context_for_topic，返回 MemoryContext 对象，而不是字符串列表。'''
-        if not queries:
-            return []
-        return await self.memory.search_memories_for_topic(
-            user_id=user_id,
-            queries=queries,
-            similarity_threshold=similarity_threshold,
-            k=k,
-        )
-
     async def search_memory_context_for_topic(
         self,
         user_id: str,
@@ -156,17 +139,12 @@ class CharacterSubconscious:
 
             return MemoryContext()
 
-        db = self.database_manager.open_sql_session()
-        try:
-            return await self.memory.search_memory_context_for_topic(
-                db=db,
-                user_id=user_id,
-                queries=queries,
-                similarity_threshold=similarity_threshold,
-                k=k,
-            )
-        finally:
-            db.close()
+        return await self.memory.search_memory_context_for_topic(
+            user_id=user_id,
+            queries=queries,
+            similarity_threshold=similarity_threshold,
+            k=k,
+        )
 
     async def plan_topic_turn(
         self,
@@ -197,21 +175,13 @@ class CharacterSubconscious:
         related_memories: Optional[List[str]] = None,
         conversation_history: Optional[str] = None,
     ) -> None:
-        db = self.database_manager.open_sql_session()
-        redis_client = self.database_manager.redis
-        try:
-            history = conversation_history or ""
-            await self.memory.updates.post_process_interaction(
-                db=db,
-                redis=redis_client,
-                user_id=user_id,
-                history=history,
-                current_dialogue=current_dialogue,
-                related_memories=related_memories or [],
-                commit=True,
-            )
-        finally:
-            db.close()
+        await self.memory.write_topic_memories(
+            user_id=user_id,
+            history=conversation_history or "",
+            current_dialogue=current_dialogue,
+            related_memories=related_memories or [],
+            commit=True,
+        )
 
     async def detect_dates_for_topic(
         self,
@@ -248,16 +218,10 @@ class CharacterSubconscious:
         )
 
     async def update_user_profile_by_context(self, user_id: str, context: dict[str, Any]) -> str | None:
-        db = self.database_manager.open_sql_session()
-        try:
-            return await self.memory.update_user_profile_by_context(
-                db,
-                self.database_manager.redis,
-                user_id,
-                context,
-            )
-        finally:
-            db.close()
+        return await self.memory.update_user_profile_by_context(
+            user_id=user_id,
+            context=context,
+        )
 
     async def _plan_sing_attempts_for_topic(
         self,

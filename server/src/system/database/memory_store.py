@@ -165,30 +165,7 @@ class MemoryStore:
             if row is None:
                 return None
 
-            from src.domain.memory_record import MemoryType, MemoryVisibility
-
-            try:
-                metadata = json.loads(row.meta_data or "{}")
-            except Exception:
-                metadata = {}
-
-            return DomainMemoryRecord(
-                id=row.id,
-                owner_character_id=row.owner_character_id,
-                subject_user_id=row.subject_user_id,
-                memory_type=MemoryType(row.memory_type),
-                visibility=MemoryVisibility(row.visibility),
-                source=row.source,
-                content=row.content,
-                summary=row.summary,
-                importance=row.importance if row.importance is not None else 0.5,
-                confidence=row.confidence if row.confidence is not None else 1.0,
-                emotional_valence=row.emotional_valence,
-                happened_at=row.happened_at,
-                created_at=row.created_at,
-                last_accessed_at=row.last_accessed_at,
-                metadata=metadata,
-            )
+            return self._domain_record_from_row(row)
         finally:
             db.close()
 
@@ -202,6 +179,74 @@ class MemoryStore:
             return self.get_agent_memory_record(chunk.memory_record_id)
         finally:
             db.close()
+
+    def get_agent_memory_records_by_embedding_ids(
+        self,
+        embedding_ids: List[str],
+    ) -> Dict[str, DomainMemoryRecord]:
+        """批量根据向量索引 ID 反查规范记忆记录。
+
+        返回值以 embedding_id 为键，避免记忆层为了每个向量命中反复打开
+        Session。没有映射到正本的向量 ID 不会出现在结果中。
+        """
+        ids = [str(item).strip() for item in embedding_ids if str(item or "").strip()]
+        if not ids:
+            return {}
+
+        db = self._new_session()
+        try:
+            chunks = (
+                db.query(MemoryChunkRecord)
+                .filter(MemoryChunkRecord.embedding_id.in_(ids))
+                .all()
+            )
+            memory_ids = list({chunk.memory_record_id for chunk in chunks})
+            if not memory_ids:
+                return {}
+
+            rows = (
+                db.query(AgentMemoryRecord)
+                .filter(AgentMemoryRecord.id.in_(memory_ids))
+                .all()
+            )
+            records_by_id = {
+                row.id: self._domain_record_from_row(row)
+                for row in rows
+            }
+            return {
+                chunk.embedding_id: records_by_id[chunk.memory_record_id]
+                for chunk in chunks
+                if chunk.embedding_id and chunk.memory_record_id in records_by_id
+            }
+        finally:
+            db.close()
+
+    def _domain_record_from_row(self, row: AgentMemoryRecord) -> DomainMemoryRecord:
+        """将数据库行转换成领域层记忆对象。"""
+        from src.domain.memory_record import MemoryType, MemoryVisibility
+
+        try:
+            metadata = json.loads(row.meta_data or "{}")
+        except Exception:
+            metadata = {}
+
+        return DomainMemoryRecord(
+            id=row.id,
+            owner_character_id=row.owner_character_id,
+            subject_user_id=row.subject_user_id,
+            memory_type=MemoryType(row.memory_type),
+            visibility=MemoryVisibility(row.visibility),
+            source=row.source,
+            content=row.content,
+            summary=row.summary,
+            importance=row.importance if row.importance is not None else 0.5,
+            confidence=row.confidence if row.confidence is not None else 1.0,
+            emotional_valence=row.emotional_valence,
+            happened_at=row.happened_at,
+            created_at=row.created_at,
+            last_accessed_at=row.last_accessed_at,
+            metadata=metadata,
+        )
 
     def get_recent_memory_update_from_buffer(self, user_id: str) -> List[MemoryUpdateCommand]:
         """从 Redis 获取最近记忆更新列表。"""
