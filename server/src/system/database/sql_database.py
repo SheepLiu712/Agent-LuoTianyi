@@ -265,12 +265,13 @@ class EventNotification(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id = Column(String, ForeignKey("events.id"), nullable=False, index=True)
     user_id = Column(String, nullable=False, index=True)
+    character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi", index=True)
     trigger_key = Column(String, nullable=False)                    # 触发的条件名称，如 "day_of_event", "1_day_before"
     notified_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
-        # 同一事件同一用户的同一触发条件不重复通知
-        UniqueConstraint("event_id", "user_id", "trigger_key", name="uq_event_notification"),
+        # 同一事件同一用户同一角色的同一触发条件不重复通知
+        UniqueConstraint("event_id", "user_id", "character_id", "trigger_key", name="uq_event_notification"),
     )
 
 
@@ -336,6 +337,58 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
         connection.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS ix_events_character ON events (character)"
         )
+
+        notification_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(event_notifications)").fetchall()
+        }
+        if notification_columns and "character_id" not in notification_columns:
+            connection.exec_driver_sql("ALTER TABLE event_notifications RENAME TO event_notifications_legacy")
+            connection.exec_driver_sql(
+                """
+                CREATE TABLE event_notifications (
+                    id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    event_id VARCHAR NOT NULL,
+                    user_id VARCHAR NOT NULL,
+                    character_id VARCHAR DEFAULT 'luotianyi' NOT NULL,
+                    trigger_key VARCHAR NOT NULL,
+                    notified_at DATETIME,
+                    FOREIGN KEY(event_id) REFERENCES events (id),
+                    CONSTRAINT uq_event_notification UNIQUE (event_id, user_id, character_id, trigger_key)
+                )
+                """
+            )
+            if "notified_at" in notification_columns:
+                connection.exec_driver_sql(
+                    """
+                    INSERT INTO event_notifications (id, event_id, user_id, character_id, trigger_key, notified_at)
+                    SELECT id, event_id, user_id, 'luotianyi', trigger_key, notified_at
+                    FROM event_notifications_legacy
+                    """
+                )
+            else:
+                connection.exec_driver_sql(
+                    """
+                    INSERT INTO event_notifications (id, event_id, user_id, character_id, trigger_key)
+                    SELECT id, event_id, user_id, 'luotianyi', trigger_key
+                    FROM event_notifications_legacy
+                    """
+                )
+            connection.exec_driver_sql("DROP TABLE event_notifications_legacy")
+            notification_columns = {
+                row[1]
+                for row in connection.exec_driver_sql("PRAGMA table_info(event_notifications)").fetchall()
+            }
+        if notification_columns:
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_event_notifications_character_id ON event_notifications (character_id)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_event_notifications_event_id ON event_notifications (event_id)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_event_notifications_user_id ON event_notifications (user_id)"
+            )
 
 
 def get_sql_db(): # Generator for FastAPI

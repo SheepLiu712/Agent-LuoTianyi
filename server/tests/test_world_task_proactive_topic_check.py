@@ -35,8 +35,8 @@ async def test_proactive_topic_check_runs_periodic_checks():
     calls = []
 
     class FakeMaker:
-        async def run_periodic_checks(self, runtime):
-            calls.append(runtime)
+        async def run_periodic_checks(self):
+            calls.append("run")
 
     runtime = SimpleNamespace(
         chat_session_manager=SimpleNamespace(proactive_topic_maker=FakeMaker())
@@ -47,4 +47,4 @@ async def test_proactive_topic_check_runs_periodic_checks():
     result = await task.run_once()
 
     assert result.ok is True
-    assert calls == [runtime]
+    assert calls == ["run"]

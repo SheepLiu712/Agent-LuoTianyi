@@ -79,6 +79,7 @@ class ChatStream:
 
         self.state = self.STATE_WAITING
         self.state_lock = asyncio.Lock()
+        self.last_response_active_ts: float | None = None
 
     def set_system_runtime(self, system_runtime: "SystemRuntime"):
         if system_runtime is None:
@@ -184,6 +185,7 @@ class ChatStream:
                 return
 
     async def _send_response(self, response: ChatResponse) -> bool:
+        self.last_response_active_ts = time.monotonic()
         if self.ws_connection is None or self.ws_connection.websocket is None:
             return False
         ws_service = self.system_runtime.websocket_service if self.system_runtime else None
@@ -201,6 +203,22 @@ class ChatStream:
         except Exception as e:
             self.logger.warning(f"Send response failed, will retry: {e}")
             return False
+
+    def seconds_since_last_response(self) -> float:
+        """返回距离上次调用 _send_response 过去的秒数；从未发送过则视为空闲。"""
+        if self.last_response_active_ts is None:
+            return float("inf")
+        return time.monotonic() - self.last_response_active_ts
+
+    def seconds_until_proactive_idle(self, min_idle_seconds: float) -> float:
+        """返回距离允许主动发言还需要等待的秒数。"""
+        if self.last_response_active_ts is None:
+            return 0.0
+        return max(0.0, float(min_idle_seconds) - self.seconds_since_last_response())
+
+    def can_dispatch_proactive(self, min_idle_seconds: float) -> bool:
+        """聊天流足够空闲时才允许派发主动话题。"""
+        return self.seconds_until_proactive_idle(min_idle_seconds) <= 0
 
     async def _send_agent_state(self, state: str) -> bool:
         if self.ws_connection is None or self.ws_connection.websocket is None:

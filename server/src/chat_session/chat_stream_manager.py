@@ -1,6 +1,6 @@
 import asyncio
 import time
-from typing import Dict, Optional, TYPE_CHECKING, Any, Tuple
+from typing import Dict, Iterator, Optional, TYPE_CHECKING, Any, Tuple
 
 from src.system.user_interface.websocket_service import WebSocketConnection
 from src.chat_session.chat_pipeline.chat_stream import ChatStream
@@ -66,12 +66,20 @@ class ChatStreamManager:
             chat_stream.set_system_runtime(system_runtime)
             await chat_stream.reconnect(ws_connection)
         if self.proactive_topic_maker is not None:
-            asyncio.create_task(self.proactive_topic_maker.add_user(user_uuid, chat_stream, system_runtime))
-            asyncio.create_task(self.proactive_topic_maker.flush_login_activities(user_uuid, chat_stream, system_runtime))
+            asyncio.create_task(self.proactive_topic_maker.on_user_login(user_uuid, chat_stream=chat_stream))
         return chat_stream
 
     def get_stream_by_user_uuid(self, user_uuid: str, character: str = "luotianyi") -> ChatStream | None:
         return self.user_streams.get((user_uuid, character))
+
+    def iter_active_streams(self, character_id: str | None = None) -> Iterator[tuple[str, str, ChatStream]]:
+        """遍历当前仍在线的聊天流。"""
+        for (user_uuid, stream_character_id), chat_stream in list(self.user_streams.items()):
+            if character_id is not None and stream_character_id != character_id:
+                continue
+            if chat_stream is None or chat_stream.is_connection_lost():
+                continue
+            yield user_uuid, stream_character_id, chat_stream
 
 
     def ws_lost_connection(self, ws_connection: WebSocketConnection):
@@ -113,8 +121,6 @@ class ChatStreamManager:
                 user_uuid, _character = stream_key
                 chat_stream = self.user_streams[stream_key]
                 chat_stream.clean_up()
-                if self.proactive_topic_maker is not None:
-                    await self.proactive_topic_maker.remove_user(user_uuid)
                 del self.user_streams[stream_key]
                 self.logger.info(f"Cleaned up expired chat stream for user_uuid={user_uuid}")
 

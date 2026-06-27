@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from .dependency.activity_context_provider import ActivityContextProvider
 from .call_stream_manager import CallStreamManager
@@ -46,6 +46,11 @@ class ChatSessionManager:
             proactive_topic_maker = self.proactive_topic_maker,
             activity_context_provider = self.activity_context_provider,
         )
+        self.proactive_topic_maker.configure(
+            conversation_service=self.conversation_service,
+            database_manager=self.database_manager,
+            chat_stream_manager=self.chat_stream_manager,
+        )
         self.call_stream_manager = CallStreamManager(
             config.get("call_stream_manager", {}),
             conversation_service = self.conversation_service,
@@ -69,7 +74,6 @@ class ChatSessionManager:
         await self.call_stream_manager.stop_background_services()
         await self.global_speaking_worker.stop()
 
-    async def on_user_login(self, user_uuid: str, elapsed_from_last_login: float) -> None:
+    async def on_user_login(self, user_uuid: str, elapsed_from_last_login: Optional[float]) -> None:
         """用户登录时，记录主动话题所需的登录活动。"""
-        return 
-        await self.proactive_topic_maker.add_user_login_activity(user_uuid, elapsed_from_last_login)
+        await self.proactive_topic_maker.on_user_login(user_uuid, elapsed_from_last_login)

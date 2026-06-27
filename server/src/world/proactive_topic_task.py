@@ -22,7 +22,5 @@ class ProactiveTopicCheckTask(WorldTask):
     async def run_once(self) -> WorldTaskResult:
         if self.system_runtime is None:
             return WorldTaskResult.skipped_result(self.task_name, "system runtime is unavailable")
-        await self.system_runtime.chat_session_manager.proactive_topic_maker.run_periodic_checks(
-            self.system_runtime
-        )
+        await self.system_runtime.chat_session_manager.proactive_topic_maker.run_periodic_checks()
         return WorldTaskResult.success(self.task_name, "proactive topic check completed")

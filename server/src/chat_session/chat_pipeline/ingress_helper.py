@@ -73,7 +73,6 @@ class IngressHelper:
 
         if self._is_user_message_event(event):
             if self.system_runtime is not None and self.user_uuid is not None:
-                await self.system_runtime.activity_maker.on_user_message(self.user_uuid)
                 event = await self.ingress_message(event)  # 预处理
                 if event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE}:
                     await self.system_runtime.conversation_service.persist_user_event(

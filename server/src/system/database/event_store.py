@@ -58,7 +58,7 @@ class EventStore:
         # 日级缓存
         self._cache_lock = threading.Lock()
         self._all_events_cache: Optional[List[Dict[str, Any]]] = None
-        self._due_events_cache: Optional[List[Tuple[Dict[str, Any], str]]] = None
+        self._due_events_cache: Dict[tuple[date, str], List[Tuple[Dict[str, Any], str]]] = {}
         self._cache_date: Optional[date] = None
 
     def create_llm_module(self, llm_service: "LLMService"):
@@ -79,7 +79,7 @@ class EventStore:
     def _invalidate_cache(self) -> None:
         with self._cache_lock:
             self._all_events_cache = None
-            self._due_events_cache = None
+            self._due_events_cache = {}
             self._cache_date = None
 
     def _get_session(self) -> Session:
@@ -359,20 +359,26 @@ class EventStore:
 
     def get_events_due_for_trigger(
         self,
+        character: str,
         today: Optional[date] = None,
     ) -> List[tuple]:
         """
-        获取今天需要触发通知的所有事件（带日级缓存，次日 00:00 自动刷新）。
+        获取指定角色今天需要触发通知的所有事件（带日级缓存，次日 00:00 自动刷新）。
         返回 List[Tuple[Dict[str, Any], str]]，每条记录包含 (event_dict, trigger_key)。
         """
         today = today or date.today()
+        character = character or "luotianyi"
+        cache_key = (today, character)
         with self._cache_lock:
-            if self._cache_valid() and self._due_events_cache is not None:
-                return self._due_events_cache
+            if self._cache_valid() and cache_key in self._due_events_cache:
+                return self._due_events_cache[cache_key]
 
         db = self._get_session()
         try:
-            rows = db.query(Event).filter(Event.is_active == True).all()
+            rows = db.query(Event).filter(
+                Event.is_active == True,
+                Event.character == character,
+            ).all()
             due_events = []
             for row in rows:
                 conditions = parse_trigger_conditions(row.trigger_conditions or "[]")
@@ -393,7 +399,7 @@ class EventStore:
                         due_events.append((db_event_to_dict(row), condition_key))
                         break  # 同一事件只需触发一次触发条件
             with self._cache_lock:
-                self._due_events_cache = due_events
+                self._due_events_cache[cache_key] = due_events
                 self._cache_date = date.today()
             return due_events
         finally:
@@ -673,8 +679,9 @@ class EventStore:
 
     # ── 通知记录管理 ─────────────────────────────────────
 
-    def is_notified(self, event_id: str, user_id: str, trigger_key: str) -> bool:
-        """检查用户对某事件的某个触发条件是否已通知过。"""
+    def is_notified(self, event_id: str, user_id: str, trigger_key: str, character_id: str) -> bool:
+        """检查用户对某角色事件的某个触发条件是否已通知过。"""
+        character_id = character_id or "luotianyi"
         db = self._get_session()
         try:
             existing = (
@@ -682,6 +689,7 @@ class EventStore:
                 .filter(
                     EventNotification.event_id == event_id,
                     EventNotification.user_id == user_id,
+                    EventNotification.character_id == character_id,
                     EventNotification.trigger_key == trigger_key,
                 )
                 .first()
@@ -690,15 +698,17 @@ class EventStore:
         finally:
             db.close()
 
-    def mark_notified(self, event_id: str, user_id: str, trigger_key: str) -> None:
-        """标记用户对某事件的某个触发条件已通知（并刷新缓存）。"""
-        if self.is_notified(event_id, user_id, trigger_key):
+    def mark_notified(self, event_id: str, user_id: str, trigger_key: str, character_id: str) -> None:
+        """标记用户对某角色事件的某个触发条件已通知（并刷新缓存）。"""
+        character_id = character_id or "luotianyi"
+        if self.is_notified(event_id, user_id, trigger_key, character_id):
             return
         db = self._get_session()
         try:
             notification = EventNotification(
                 event_id=event_id,
                 user_id=user_id,
+                character_id=character_id,
                 trigger_key=trigger_key,
             )
             db.add(notification)

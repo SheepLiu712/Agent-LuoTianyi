@@ -130,8 +130,9 @@ class UserInterface:
         if auth_result:
             user_uuid = auth_result["user_uuid"]
             background_tasks.add_task(system_runtime.database_manager.prefill_buffer, user_uuid)
-            await system_runtime.chat_session_manager.proactive_topic_maker.add_user_login_activity(
-                user_uuid, auth_result["elapsed_from_last_login"]
+            await system_runtime.chat_session_manager.on_user_login(
+                user_uuid,
+                auth_result["elapsed_from_last_login"],
             )
             return {
                 "login_token": auth_result["login_token"],

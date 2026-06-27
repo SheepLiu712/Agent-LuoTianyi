@@ -7,11 +7,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional
 from uuid import uuid4
 
 from src.utils.logger import get_logger
@@ -20,80 +20,21 @@ from src.agent.main_chat import OneSentenceChat
 
 if TYPE_CHECKING:
     from src.chat_session.chat_pipeline.chat_stream import ChatStream
-    from src.system.system_runtime import SystemRuntime
+    from src.chat_session.chat_stream_manager import ChatStreamManager
+    from src.chat_session.dependency.conversation_service import ConversationService
+    from src.system.database import DatabaseManager
 
 
 class ActivityType(str, Enum):
     FIRST_LOGIN = "first_login"
     RETURN_LOGIN = "return_login"
-    USER_SILENCE = "user_silence"
     REGULAR_LOGIN = "regular_login"
 
 
 @dataclass
 class ActionActivity:
     activity_type: ActivityType
-    payload: Dict[str, Any]
-
-@dataclass
-class ChatIntenseMeter:
-    """
-    活跃度计量器。
-    - 每条用户消息 +1
-    - 每 inactivity_decay_interval_seconds 下降 1
-    """
-
-    score: int = 0
-    last_user_activity_ts: float = field(default_factory=time.monotonic)
-    last_decay_ts: float = field(default_factory=time.monotonic)
-    last_trigger_ts: float = 0.0
-
-    def on_user_activity(self, now_ts: float, decay_interval_seconds: float) -> None:
-        self._decay(now_ts, decay_interval_seconds)
-        self.score += 1
-        self.last_user_activity_ts = now_ts
-
-    def should_trigger(
-        self,
-        now_ts: float,
-        trigger_threshold: int,  # 当前活跃度分数达到多少可以触发主动发言
-        silence_threshold_seconds: float,  # 当前用户沉默了多久可以触发主动发言
-        cooldown_seconds: float,  # 上次触发主动发言到现在过了多久，超过这个时间才可以再次触发
-        decay_interval_seconds: float,  # 活跃度衰减间隔
-    ) -> bool:
-        self._decay(now_ts, decay_interval_seconds)
-        if self.score <= trigger_threshold:
-            return False
-        if now_ts - self.last_user_activity_ts < silence_threshold_seconds:
-            return False
-        if self.last_trigger_ts > 0 and now_ts - self.last_trigger_ts < cooldown_seconds:
-            return False
-        return True
-
-    def on_triggered(self, now_ts: float) -> None:
-        """被触发后，也就是Agent将要主动发言，重置计量器。"""
-        self.score = 0
-        self.last_user_activity_ts = now_ts
-        self.last_decay_ts = now_ts
-        self.last_trigger_ts = now_ts
-
-    def _decay(self, now_ts: float, decay_interval_seconds: float) -> None:
-        """衰减活跃度分数，过了 decay_interval_seconds 就 -1 分，直到衰减到0。"""
-        if decay_interval_seconds <= 0:
-            return
-        elapsed = now_ts - self.last_decay_ts
-        if elapsed < decay_interval_seconds:
-            return
-        drops = int(elapsed // decay_interval_seconds)
-        self.score = max(0, self.score - drops)
-        self.last_decay_ts += drops * decay_interval_seconds
-
-
-@dataclass
-class _UserActivityState:
-    meter: ChatIntenseMeter = field(default_factory=ChatIntenseMeter)
-    pending_actions: List[ActionActivity] = field(default_factory=list)
-    monitor_task: Optional[asyncio.Task] = None
+    time_since_last_login: Optional[float] = None
 
 
 class ProactiveTopicMaker:
@@ -104,36 +45,42 @@ class ProactiveTopicMaker:
         self.config = config
 
         self.return_user_threshold_seconds = float(self.config.get("return_user_threshold_seconds", 5 * 24 * 3600))
-        self.silence_threshold_seconds = float(self.config.get("silence_threshold_seconds", 180))
-        self.activity_trigger_threshold = int(self.config.get("activity_trigger_threshold", 5))
-        self.inactivity_decay_interval_seconds = float(self.config.get("inactivity_decay_interval_seconds", 180))
-        self.silence_check_interval_seconds = float(self.config.get("silence_check_interval_seconds", 5))
-        self.silence_trigger_cooldown_seconds = float(
-            self.config.get("silence_trigger_cooldown_seconds", self.silence_threshold_seconds)
-        )
+        self.proactive_idle_seconds = float(self.config.get("proactive_idle_seconds", 30))
         self._load_first_login_res()
 
-        self.user_states: Dict[str, _UserActivityState] = {}
+        self.pending_login_times: Dict[str, Optional[float]] = {}
         self._lock = asyncio.Lock()
-        self.system_runtime: Optional["SystemRuntime"] = None
+        self.conversation_service: Optional["ConversationService"] = None
+        self.database_manager: Optional["DatabaseManager"] = None
+        self.chat_stream_manager: Optional["ChatStreamManager"] = None
 
-
-    def set_system_runtime(self, system_runtime: "SystemRuntime") -> None:
-        self.system_runtime = system_runtime
+    def configure(
+        self,
+        *,
+        conversation_service: "ConversationService",
+        database_manager: "DatabaseManager",
+        chat_stream_manager: "ChatStreamManager",
+    ) -> None:
+        """注入主动发言所需的会话、数据库和聊天流访问接口。"""
+        self.conversation_service = conversation_service
+        self.database_manager = database_manager
+        self.chat_stream_manager = chat_stream_manager
 
     async def dispatch_action(
         self,
         action: ActionActivity,
         user_uuid: str,
         chat_stream: "ChatStream",
-        system_runtime: "SystemRuntime",
     ) -> None:
         if action.activity_type == ActivityType.FIRST_LOGIN:
             if not self.first_login_res:
                 self.logger.warning("No first-login resources configured, skipping activity dispatch")
                 return
             await asyncio.sleep(1)  # 错开用户拉取历史消息的时机。等用户拉完历史消息后再派发登录活动，避免登录活动消息和历史消息混在一起导致展示异常。
-            uuid_list = await system_runtime.conversation_service.persist_agent_replies(
+            if self.conversation_service is None:
+                self.logger.warning("ConversationService is unavailable, skipping first-login dispatch")
+                return
+            uuid_list = await self.conversation_service.persist_agent_replies(
                 user_id=user_uuid,
                 reply_items=[item["response_line"] for item in self.first_login_res],
                 character_id=getattr(chat_stream, "character_id", "luotianyi"),
@@ -166,8 +113,9 @@ class ProactiveTopicMaker:
             # 1-4) 统一通过 schedule 模块检索：节日 / citywalk / new_song / 用户重要日期
             #      如果已在 schedule 中提醒过，则 login 时不再重复提示
             try:
-                store = system_runtime.database_manager.event_store
-                due = store.get_events_due_for_trigger()
+                store = self._get_event_store()
+                character_id = getattr(chat_stream, "character_id", "luotianyi")
+                due = store.get_events_due_for_trigger(character=character_id)
                 for event_dict, trigger_key in due:
                     evt_type = event_dict.get("event_type", "")
 
@@ -236,8 +184,8 @@ class ProactiveTopicMaker:
                         )
 
                     # Mark notified so the periodic reminder loop does not repeat it.
-                    if not store.is_notified(event_dict["id"], user_uuid, trigger_key):
-                        store.mark_notified(event_dict["id"], user_uuid, trigger_key)
+                    if not store.is_notified(event_dict["id"], user_uuid, trigger_key, character_id):
+                        store.mark_notified(event_dict["id"], user_uuid, trigger_key, character_id)
             except Exception as e:
                 import traceback
                 traceback.print_exc()
@@ -251,61 +199,65 @@ class ProactiveTopicMaker:
 
         self.logger.warning(f"Unsupported action type: {action.activity_type}")
 
-    async def run_periodic_checks(self, system_runtime: "SystemRuntime") -> int:
-        store = system_runtime.database_manager.event_store
-        try:
-            due_events = store.get_events_due_for_trigger()
-        except Exception as e:
-            self.logger.warning(f"Failed to query due reminders: {e}")
+    async def run_periodic_checks(self) -> int:
+        if self.chat_stream_manager is None:
+            self.logger.warning("ChatStreamManager is unavailable, skip proactive reminders")
             return 0
 
+        store = self._get_event_store()
         sent = 0
-        for event_dict, trigger_key in due_events:
-            for user_id, chat_stream in self._iter_target_streams(system_runtime, event_dict):
+        for user_id, character_id, chat_stream in self.chat_stream_manager.iter_active_streams():
+            if not chat_stream.can_dispatch_proactive(self.proactive_idle_seconds):
+                continue
+            try:
+                due_events = store.get_events_due_for_trigger(character=character_id)
+            except Exception as e:
+                self.logger.warning(f"Failed to query due reminders: {e}")
+                continue
+
+            for event_dict, trigger_key in self._filter_events_for_stream(due_events, user_id):
                 event_id = event_dict.get("id")
                 if not event_id:
                     continue
-                if store.is_notified(event_id, user_id, trigger_key):
+                if store.is_notified(event_id, user_id, trigger_key, character_id):
                     continue
                 topic = self._build_reminder_topic(event_dict, trigger_key)
                 await chat_stream.topic_replier.add_topic(topic)
-                store.mark_notified(event_id, user_id, trigger_key)
+                store.mark_notified(event_id, user_id, trigger_key, character_id)
                 sent += 1
 
         if sent:
             self.logger.info(f"Dispatched {sent} proactive reminder topic(s)")
         return sent
 
-    def _iter_target_streams(self, system_runtime: "SystemRuntime", event_dict: Dict[str, Any]):
-        gcsm = getattr(system_runtime, "gcsm", None)
-        if gcsm is None:
-            return
-
-        is_personal = event_dict.get("is_personal", False)
-        target_user_id = event_dict.get("target_user_id")
-        for user_id, chat_stream in list(getattr(gcsm, "user_streams", {}).items()):
-            if chat_stream is None or chat_stream.is_connection_lost():
-                continue
+    def _filter_events_for_stream(
+        self,
+        due_events: Iterable[tuple[Dict[str, Any], str]],
+        user_id: str,
+    ) -> Iterable[tuple[Dict[str, Any], str]]:
+        for event_dict, trigger_key in due_events:
+            is_personal = event_dict.get("is_personal", False)
+            target_user_id = event_dict.get("target_user_id")
             if is_personal and target_user_id and target_user_id != user_id:
                 continue
-            yield user_id, chat_stream
+            yield event_dict, trigger_key
 
     def _build_reminder_topic(self, event_dict: Dict[str, Any], trigger_key: str) -> ExtractedTopic:
         event_type = event_dict.get("event_type", "event")
         title = event_dict.get("title", "")
         description = event_dict.get("description", "")
         trigger_desc = {
-            "7_days_before": "in seven days",
-            "3_days_before": "in three days",
-            "1_day_before": "tomorrow",
-            "day_of_event": "today",
-            "1_day_after": "yesterday",
-            "1_hour_before": "in about one hour",
-        }.get(trigger_key, "soon")
+            "7_days_before": "还有七天",
+            "3_days_before": "还有三天",
+            "1_day_before": "明天",
+            "day_of_event": "今天",
+            "1_day_after": "昨天",
+            "1_hour_before": "大约一小时后",
+        }.get(trigger_key, "快到了")
 
-        content = f"Proactively remind the user that a {event_type} event, {title}, is {trigger_desc}."
+        content = f"主动提醒用户有一个 {event_type}——{title}，时间是{trigger_desc}。"
         if description:
-            content += f" Event details: {description}."
+            content += f" 事件细节：{description}。"
 
         return ExtractedTopic(
             topic_id=str(uuid4()),
@@ -354,93 +306,58 @@ class ProactiveTopicMaker:
             is_forced_from_incomplete=True,
         )
 
-    async def add_user(self, user_uuid: str, chat_stream: "ChatStream", system_runtime: "SystemRuntime") -> None:
-        async with self._lock:
-            state = self.user_states.get(user_uuid)
-            if state is None:
-                state = _UserActivityState()
-                self.user_states[user_uuid] = state
-
-            # 主动发言控制器，当前版本不实装
-            # if state.monitor_task is None or state.monitor_task.done():
-            #     state.monitor_task = asyncio.create_task(self._silence_monitor_loop(user_uuid, chat_stream, system_runtime))
-
-    async def remove_user(self, user_uuid: str) -> None:
-        async with self._lock:
-            state = self.user_states.pop(user_uuid, None)
-        if state and state.monitor_task and not state.monitor_task.done():
-            state.monitor_task.cancel()
-            try:
-                await state.monitor_task
-            except asyncio.CancelledError:
-                pass
-
-    async def add_user_login_activity(self, user_uuid: str, time_since_last_login: Optional[float]) -> None:
-
-        state = self.user_states.get(user_uuid)
-        if state is None:
-            state = _UserActivityState()
-            self.user_states[user_uuid] = state
-
-        if time_since_last_login is not None:
-            self.logger.debug(f"user {user_uuid} 登录，距离上次登录 {time_since_last_login/86400:.2f} 天")
-        else:
-            self.logger.debug(f"user {user_uuid} 初次登录")
-
-        if time_since_last_login is None:
-            state.pending_actions.append(
-                ActionActivity(
-                    activity_type=ActivityType.FIRST_LOGIN,
-                    payload={"user_uuid": user_uuid},
-                )
-            )
+    async def on_user_login(
+        self,
+        user_uuid: str,
+        time_since_last_login: Optional[float] = None,
+        chat_stream: "ChatStream | None" = None,
+    ) -> None:
+        """
+        记录登录状态，或在 chat_stream 可用时派发并释放登录主动话题。
+        当chat_stream为空，则time_since_last_login不为空，表示用户登录但还未建立聊天流，记录登录时间以便后续派发。
+        当chat_stream不为空，则time_since_last_login为空，已经记录在了pending_login_times中，表示用户登录且已建立聊天流，派发登录主动话题。
+        """
+        if chat_stream is None:
+            async with self._lock:
+                self.pending_login_times[user_uuid] = time_since_last_login
+            if time_since_last_login is not None:
+                self.logger.debug(f"user {user_uuid} 登录，距离上次登录 {time_since_last_login/86400:.2f} 天")
+            else:
+                self.logger.debug(f"user {user_uuid} 初次登录")
             return
+
+        missing = object()
+        async with self._lock:
+            pending = self.pending_login_times.pop(user_uuid, missing)
+        if pending is missing:
+            return
+
+        action = self._make_login_action(user_uuid, pending)
+        if action is not None:
+            await self.dispatch_action(action, user_uuid, chat_stream)
+
+    def _make_login_action(
+        self,
+        user_uuid: str,
+        time_since_last_login: Optional[float],
+    ) -> Optional[ActionActivity]:
+        """根据上次登录间隔判断应该派发哪一种登录主动话题。"""
+        _ = user_uuid
+        if time_since_last_login is None:
+            return ActionActivity(ActivityType.FIRST_LOGIN)
 
         if time_since_last_login >= self.return_user_threshold_seconds:
             self.logger.debug(f"超过距离上次登录阈值 {self.return_user_threshold_seconds/86400:.2f} 天")
-            state.pending_actions.append(
-                ActionActivity(
-                    activity_type=ActivityType.RETURN_LOGIN,
-                    payload={"user_uuid": user_uuid, "time_since_last_login": time_since_last_login},
-                )
+            return ActionActivity(
+                ActivityType.RETURN_LOGIN,
+                time_since_last_login=time_since_last_login,
             )
-            return
-
-        # 如果既不是首次登录也不是长时未登录（RETURN_LOGIN），但上一登录时间在今天0点之前，视为今天的首次登录 -> REGULAR_LOGIN
-        from datetime import datetime
 
         now = datetime.now()
         seconds_since_midnight = now.hour * 3600 + now.minute * 60 + now.second
         if time_since_last_login >= seconds_since_midnight:
-            state.pending_actions.append(
-                ActionActivity(
-                    activity_type=ActivityType.REGULAR_LOGIN,
-                    payload={"user_uuid": user_uuid},
-                )
-            )
-            return
-
-    async def flush_login_activities(self, user_uuid: str, chat_stream: "ChatStream", system_runtime: "SystemRuntime") -> None:
-        """
-        登录和对话创建之间间隔了一段时间，这时候才派发登录相关的活动。这样可以避免在用户刚登录但还没有建立WebSocket连接时就派发活动，导致活动无法正确发送给用户。
-        """
-        state = self.user_states.get(user_uuid)
-        if state is None or not state.pending_actions:
-            return
-
-        to_dispatch = list(state.pending_actions)
-        state.pending_actions.clear()
-        for action in to_dispatch:
-            await self.dispatch_action(action, user_uuid, chat_stream, system_runtime)
-
-    async def on_user_message(self, user_uuid: str) -> None:
-        state = self.user_states.get(user_uuid)
-        if state is None:
-            state = _UserActivityState()
-            self.user_states[user_uuid] = state
-
-        now_ts = time.monotonic()
-        state.meter.on_user_activity(now_ts, self.inactivity_decay_interval_seconds)
+            return ActionActivity(ActivityType.REGULAR_LOGIN)
+        return None
 
     def _load_first_login_res(self) -> None:
         """加载首次登录欢迎资源配置（懒加载音频）。"""
@@ -504,7 +421,7 @@ class ProactiveTopicMaker:
             is_forced_from_incomplete=True,
         )
         if action.activity_type == ActivityType.RETURN_LOGIN:
-            seconds = float(action.payload.get("time_since_last_login", 0))
+            seconds = float(action.time_since_last_login or 0)
             days = max(1, int(seconds // 86400))
 
             # 检查是否有新学会的歌曲可以告知用户
@@ -516,6 +433,13 @@ class ProactiveTopicMaker:
                 f"{learned_announcement}"
             )
             return fallback_topic
+
+        return fallback_topic
+
+    def _get_event_store(self):
+        if self.database_manager is None or self.database_manager.event_store is None:
+            raise RuntimeError("EventStore is unavailable for proactive topic maker")
+        return self.database_manager.event_store
 
     @staticmethod
     def _get_learned_song_announcement() -> str:

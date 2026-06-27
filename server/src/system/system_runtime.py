@@ -76,9 +76,6 @@ class SystemRuntime:
     def _wire_dependencies(self) -> None:
         self.world.set_system_runtime(self)
         self.world.initialize_modules()
-        self.chat_session_manager.proactive_topic_maker.set_agent(self.agent)
-        self.chat_session_manager.proactive_topic_maker.set_system_runtime(self)
-        self.gcsm.register_activity_maker(self.chat_session_manager.proactive_topic_maker)
         self.global_speaking_worker.set_capabilities(self.capability_manager)
 
     def _start_background_services(self) -> None:
