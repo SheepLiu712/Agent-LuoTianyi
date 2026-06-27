@@ -90,12 +90,12 @@ class IngressHelper:
         return event.event_type in {ChatInputEventType.USER_TEXT, ChatInputEventType.USER_IMAGE, ChatInputEventType.USER_TOUCH}
     
     async def ingress_message(self, message: ChatInputEvent) -> ChatInputEvent:
-        """Delegate chat stimulus preprocessing to the agent runtime subconscious."""
+        """Delegate chat stimulus preprocessing to the agent runtime."""
         if self.system_runtime is None:
             self.logger.error("SystemRuntime is not set in ingress_message")
         else:
-            event = await self.system_runtime.agent_runtime.subconscious.preprocess_chat_event(
-                system_runtime=self.system_runtime,
+            event = await self.system_runtime.agent_runtime.preprocess_chat_event(
+                character_id=self.character_id,
                 user_id=self.user_uuid,
                 event=message,
             )

@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 from src.system.database.redis_buffer import RedisBuffer
 
 if TYPE_CHECKING:
-    from src.system.database.vector_store import VectorStore
     from src.subconscious.memory.facade import SubconsciousMemory
 
 
@@ -22,7 +21,6 @@ class MemoryUpdateService:
         self,
         db: Session,
         redis: RedisBuffer,
-        vector_store: "VectorStore",
         user_id: str,
         history: str,
         current_dialogue: str = "",
@@ -32,7 +30,6 @@ class MemoryUpdateService:
         await self.memory.post_process_interaction(
             db=db,
             redis=redis,
-            vector_store=vector_store,
             user_id=user_id,
             history=history,
             current_dialogue=current_dialogue,
@@ -44,7 +41,6 @@ class MemoryUpdateService:
         self,
         db: Session,
         redis: RedisBuffer,
-        vector_store: "VectorStore",
         user_id: str,
         content: str,
         commit: bool = True,
@@ -52,7 +48,6 @@ class MemoryUpdateService:
         return await self.memory.write_user_memory(
             db=db,
             redis=redis,
-            vector_store=vector_store,
             user_id=user_id,
             content=content,
             commit=commit,
@@ -62,7 +57,6 @@ class MemoryUpdateService:
         self,
         db: Session,
         redis: RedisBuffer,
-        vector_store: "VectorStore",
         user_id: str,
         content: str,
         commit: bool = True,
@@ -70,7 +64,6 @@ class MemoryUpdateService:
         return await self.memory.write_event_memory(
             db=db,
             redis=redis,
-            vector_store=vector_store,
             user_id=user_id,
             content=content,
             commit=commit,

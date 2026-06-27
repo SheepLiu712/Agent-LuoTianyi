@@ -192,7 +192,7 @@ class TopicPlanner:
         try:
             conversation_history = await self._get_conversation_context()
             character_id = self._target_character_ids_from_messages(unread_snapshot.messages)[0]
-            topic, remaining = await self.system_runtime.agent_runtime.subconscious.extract_topic(
+            topic, remaining = await self.system_runtime.agent_runtime.extract_topic(
                 character_id=character_id,
                 user_id=self.user_id,
                 unread_snapshot=unread_snapshot,

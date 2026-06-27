@@ -95,7 +95,7 @@ def test_citywalk_build_citywalk_service_skips_without_runtime():
 
 def test_citywalk_build_citywalk_service_skips_without_vector_store():
     task = CitywalkTask({})
-    task.system_runtime = SimpleNamespace(agent=SimpleNamespace(_runtime_hub=SimpleNamespace(vector_store=None)))
+    task.system_runtime = SimpleNamespace(agent_runtime=SimpleNamespace(vector_store=None))
 
     assert task._build_citywalk_service() is None
 

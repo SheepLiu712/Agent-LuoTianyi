@@ -15,6 +15,8 @@ class CharacterProfile:
     character_id: str
     display_name: str
     memory_namespace: str
+    static_variables_file: str | None = None
+    llm_tone_mapping_file: str | None = None
     persona_ref: str | None = None
     speaking_style_ref: str | None = None
     voice_profile: str | None = None

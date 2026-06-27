@@ -130,7 +130,7 @@ class TopicReplier:
         # Read application conversation context once and reuse it for this turn.
         conversation_history = await self._get_conversation_context()
 
-        attention_plan = await self.system_runtime.agent_runtime.subconscious.plan_topic_turn(
+        attention_plan = await self.system_runtime.agent_runtime.plan_topic_turn(
             character_id=character_id,
             user_id=self.user_id,
             topic=topic,
@@ -138,7 +138,7 @@ class TopicReplier:
             external_context=None,
         )
 
-        reply_items = await self.system_runtime.agent_runtime.subconscious.realize_topic_plan(
+        reply_items = await self.system_runtime.agent_runtime.realize_topic_plan(
             character_id=character_id,
             user_id=self.user_id,
             plan=attention_plan,

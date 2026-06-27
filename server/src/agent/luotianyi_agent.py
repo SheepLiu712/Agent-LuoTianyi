@@ -18,9 +18,11 @@ from src.domain import CharacterProfile, CharacterName
 
 
 if TYPE_CHECKING:
-    from src.capabilities.speech import TTSModule
-    from src.agent_runtime.runtime_hub import AgentRuntimeHub
+    from src.capabilities import CapabilityManager
+    from src.system.database import DatabaseManager
     from src.subconscious.character_mind import CharacterSubconscious
+    from src.utils.llm.llm_module import LLMModule
+    from src.domain.chat import UnreadMessageSnapshot, UnreadMessage, ExtractedTopic
     
 
 
@@ -46,10 +48,11 @@ class LuoTianyiAgent:
     def __init__(
         self,
         config: Dict[str, Any],
-        tts_module: TTSModule,
-        runtime_hub: "AgentRuntimeHub",
+        database_manager: "DatabaseManager",
+        capability_manager: "CapabilityManager",
+        main_chat_module: "LLMModule",
         character_profile: CharacterProfile | None = None,
-        subconscious: "CharacterSubconscious | None" = None,
+        mind: "CharacterSubconscious | None" = None,
     ) -> None:
         """初始化洛天依Agent
 
@@ -58,50 +61,17 @@ class LuoTianyiAgent:
         """
         self.config = config
         self.logger = get_logger("LuoTianyiAgent")
-        self._runtime_hub = runtime_hub
+        self.database_manager = database_manager
+        self.capabilities = capability_manager
         self.character_profile = character_profile
         self.character_id = character_profile.character_id if character_profile else CharacterName.LUOTIANYI.value
-        self.music_manager = runtime_hub.music_manager
-        self.capabilities = runtime_hub.capabilities
-        if subconscious is None:
+        if mind is None:
             raise ValueError("LuoTianyiAgent requires a CharacterSubconscious instance.")
-        self.subconscious = subconscious
-        self.prompt_manager = subconscious.prompt_manager
+        self.mind = mind
 
-        self.tts_engine = tts_module  # TTS模块
-        self.main_chat = MainChat(self.config["main_chat"], self.prompt_manager)
+        self.main_chat = MainChat(self.config["main_chat"], main_chat_module, self.character_profile)
         self.response_realizer = ResponseRealizer(self.main_chat)
 
-    def save_preferences(self, user_uuid: str, preferences: dict) -> bool:
-        """保存用户偏好设置到数据库。"""
-        saved = self._runtime_hub.database.save_user_preferences(user_uuid, preferences)
-        if saved:
-            self.logger.info(f"Saved preferences for user {user_uuid}: {preferences}")
-        else:
-            self.logger.warning(f"User {user_uuid} not found")
-        return saved
-
-    async def extract_topics_for_pipeline(
-        self,
-        user_id: str,
-        unread_snapshot: "UnreadMessageSnapshot",
-        force_complete: bool = False,
-        conversation_history: str | None = None,
-    ) -> tuple[Optional["ExtractedTopic"], List["UnreadMessage"]]:
-        """Pipeline topic extraction entry.
-
-        The system layer should provide conversation_history. The fallback read
-        remains only for legacy callers.
-        """
-        if unread_snapshot is None or not unread_snapshot.messages:
-            return None, []
-
-        return await self.subconscious.extract_topics(
-            user_id=user_id,
-            unread_snapshot=unread_snapshot,
-            force_complete=force_complete,
-            conversation_history=conversation_history,
-        )
     
     async def search_memories_for_topic(
         self,
@@ -111,7 +81,7 @@ class LuoTianyiAgent:
         k: int = 3,
     ) -> List[str]:
         """供 TopicReplier 调用的记忆检索接口。"""
-        return await self.subconscious.search_memories_for_topic(
+        return await self.mind.search_memories_for_topic(
             user_id=user_id,
             queries=queries,
             similarity_threshold=similarity_threshold,
@@ -120,7 +90,7 @@ class LuoTianyiAgent:
 
     async def search_song_facts_for_topic(self, constraints: List[str]) -> List[str]:
         """供 TopicReplier (或其他组件) 查找歌曲信息的代理方法"""
-        return await self.subconscious.search_song_facts_for_topic(constraints)
+        return await self.mind.search_song_facts_for_topic(constraints)
 
     async def plan_topic_turn_for_pipeline(
         self,
@@ -130,7 +100,7 @@ class LuoTianyiAgent:
         external_context: Optional[str] = None,
     ) -> TopicAttentionPlan:
         """Build a conscious attention plan for one legacy chat topic."""
-        return await self.subconscious.plan_topic_turn(
+        return await self.mind.plan_topic_turn(
             user_id=user_id,
             topic=topic,
             conversation_history=conversation_history,
@@ -144,7 +114,7 @@ class LuoTianyiAgent:
         similarity_threshold: float = 0.8,
         k: int = 3,
     ):
-        return await self.subconscious.search_memory_context_for_topic(
+        return await self.mind.search_memory_context_for_topic(
             user_id=user_id,
             queries=queries,
             similarity_threshold=similarity_threshold,
@@ -164,7 +134,7 @@ class LuoTianyiAgent:
         )
 
     async def _search_fact_constraints_for_topic(self, fact_constraints: List[str]) -> List[str]:
-        return await self.subconscious.search_fact_constraints_for_topic(fact_constraints)
+        return await self.mind.search_fact_constraints_for_topic(fact_constraints)
 
     async def _plan_sing_attempts_for_topic(
         self,
@@ -173,11 +143,12 @@ class LuoTianyiAgent:
         return self.build_sing_plan_for_topic(sing_attempts)
 
     def _load_user_expression_context(self, user_id: str) -> UserExpressionContext:
-        data = self._runtime_hub.database.get_user_expression_context_data(user_id)
+        description = self.database_manager.get_user_description(user_id) or ""
+        preferences = self.database_manager.get_user_preferences(user_id) or {}
         return UserExpressionContext(
-            nickname=data["nickname"],
-            description=data["description"],
-            preference_context=self._build_preference_context(data["preferences"]),
+            nickname="你",
+            description=description,
+            preference_context=self._build_preference_context(preferences),
         )
 
     def _build_preference_context(self, preferences: Any) -> str:
@@ -316,7 +287,7 @@ class LuoTianyiAgent:
         conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
     ) -> None:
         """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
-        await self.subconscious.write_topic_memories(
+        await self.mind.write_topic_memories(
             user_id=user_id,
             current_dialogue=current_dialogue,
             related_memories=related_memories,
@@ -325,29 +296,17 @@ class LuoTianyiAgent:
 
     def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """供 TopicReplier 调用的唱歌计划接口。返回 song|segment。"""
-        return self.subconscious.build_sing_plan_for_topic(sing_attempts)
+        return self.mind.build_sing_plan_for_topic(sing_attempts)
     
     def sing(self, song_name: str, segment: str) -> Optional[bytes]:
         """调用唱歌管理器生成歌曲片段的音频，并返回音频的Base64字符串"""
-        if self.capabilities is not None:
-            return self.capabilities.singing.sing(self.character_id, song_name, segment)
-        if not song_name or not segment:
-            return None
-        _, audio_bytes = self.music_manager.get_song_segment(song_name, segment) # 已经是base64字符串了
-        return audio_bytes
+        return self.capabilities.singing.sing(self.character_id, song_name, segment)
     
     async def tts_say(self, text: str, tone: str) -> str:
-        if self.capabilities is not None:
-            return await self.capabilities.speech.say(self.character_id, text, tone)
-        audio_bytes = await self.tts_engine.synthesize_speech_with_tone(text, tone)
-        return self.tts_engine.encode_audio_to_base64(audio_bytes)
+        return await self.capabilities.speech.say(self.character_id, text, tone)
     
     def tts_say_stream(self, text: str, tone: str) -> Generator[str, None, None]:
-        if self.capabilities is not None:
-            yield from self.capabilities.speech.say_stream(self.character_id, text, tone)
-            return
-        for chunk in self.tts_engine.stream_synthesize_speech_with_tone(text, tone):
-            yield self.tts_engine.encode_audio_to_base64(chunk)
+        yield from self.capabilities.speech.say_stream(self.character_id, text, tone)
 
     def _extract_song_name(self, text: str) -> str:
         content = (text or "").strip()

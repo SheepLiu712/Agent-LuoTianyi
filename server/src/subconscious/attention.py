@@ -70,7 +70,7 @@ class AttentionPlanner:
         fact_task = asyncio.create_task(fact_search(topic.fact_constraints or []))
         sing_task = asyncio.create_task(sing_planner(topic.sing_attempts or []))
         memory_context, fact_hits, sing_plan = await asyncio.gather(memory_task, fact_task, sing_task)
-        memory_hits = memory_context.render_for_prompt()
+        memory_hits = memory_context.render_for_prompt() # MemoryContext
 
         actions = [PlannedAction(ActionType.SAY, {"topic_id": topic.topic_id})]
         if sing_plan and sing_plan[0] and sing_plan[1]:

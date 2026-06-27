@@ -8,10 +8,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.agent.prompt_assembly import RealizationPromptAssembler
 from src.agent.response_parser import StructuredResponseParser
+from src.domain import CharacterProfile
 from src.utils.enum_type import ContextType
 from src.utils.llm.llm_module import LLMModule
-from src.utils.llm.llm_api_interface import LLMAPIFactory
-from src.utils.llm.prompt_manager import PromptManager
 from src.utils.logger import get_logger
 
 
@@ -53,26 +52,11 @@ class OneSentenceChat(OneResponseLine):
 class MainChat:
     """Realization backend for styled character replies."""
 
-    def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager):
+    def __init__(self, config: Dict[str, Any], llm_module: LLMModule, character_profile: CharacterProfile):
         self.logger = get_logger(__name__)
         self.config = config
-
-        llm_module_cfg = config.get("llm_module", {})
-        llm_cfg = llm_module_cfg.get("llm", {})
-        prompt_name = llm_module_cfg.get("prompt_name")
-        if not prompt_name:
-            raise ValueError("llm_module 配置中缺少 prompt_name")
-        prompt_template = prompt_manager.get_template(prompt_name)
-        if not prompt_template:
-            raise ValueError(f"Prompt 模板未找到: {prompt_name}")
-        llm_interface = LLMAPIFactory.create_interface(llm_cfg)
-
-        self.llm = LLMModule(
-            module_name="main_chat",
-            module_config=llm_module_cfg,
-            prompt_template=prompt_template,
-            interface=llm_interface,
-        )
+        self.character_profile = character_profile
+        self.llm = llm_module
         self.variables: List[str] = self.llm.prompt_template.get_variables()
         self._init_static_variables_sync()
         self._init_llm_tone_mapping()
@@ -125,10 +109,9 @@ class MainChat:
         return self.response_parser.parse(response, sing_plan)
 
     def _init_static_variables_sync(self) -> None:
-        static_variables_file = self.config.get("static_variables_file")
+        static_variables_file = self.character_profile.static_variables_file
         if not static_variables_file:
-            self.logger.error("No static_variables_file configured for MainChat, skip loading static variables")
-            return
+            raise ValueError(f"No static_variables_file configured for character {self.character_profile.character_id}")
 
         path = Path(static_variables_file)
         if not path.exists():
@@ -167,12 +150,11 @@ class MainChat:
         assert hasattr(self, "speaking_style"), "speaking_style is required in static variables"
 
     def _init_llm_tone_mapping(self) -> None:
-        self.llm_tone_mapping_file = self.config.get("llm_tone_mapping_file")
+        self.llm_tone_mapping_file = self.character_profile.llm_tone_mapping_file
         self.llm_tone_to_tts_tone: Dict[str, str] = {}
         self.llm_tone_to_l2d_expression: Dict[str, str] = {}
         if not self.llm_tone_mapping_file:
-            self.default_response = OneSentenceChat(content="")
-            return
+            raise ValueError(f"No llm_tone_mapping_file configured for character {self.character_profile.character_id}")
 
         path = Path(self.llm_tone_mapping_file)
         if not path.exists():

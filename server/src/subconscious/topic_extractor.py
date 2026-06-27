@@ -1,7 +1,5 @@
 from typing import Any, Dict, List, Optional, TYPE_CHECKING, Tuple
 from src.utils.llm.llm_module import LLMModule
-from src.utils.llm.llm_api_interface import LLMAPIFactory
-from src.utils.llm.prompt_manager import PromptManager
 from src.utils.logger import get_logger
 import json
 from uuid import uuid4
@@ -24,28 +22,11 @@ LLM在这一步的另一个任务是给记忆搜索提供线索。那么至少�
 '''
 
 class TopicExtractor:
-    def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager):
-        self.logger = get_logger(__name__)
+    def __init__(self, config: Dict[str, Any], character_id: str, llm_module: LLMModule):
         self.config = config
-
-        llm_module_cfg = config.get("llm_module", {})
-        llm_cfg = llm_module_cfg.get("llm", {})
-        prompt_name = llm_module_cfg.get("prompt_name")
-        if not prompt_name:
-            raise ValueError("llm_module 配置中缺少 prompt_name")
-
-        prompt_template = prompt_manager.get_template(prompt_name)
-        if not prompt_template:
-            raise ValueError(f"Prompt 模板未找到: {prompt_name}")
-
-        llm_interface = LLMAPIFactory.create_interface(llm_cfg)
-
-        self.llm = LLMModule(
-            module_name="topic_extractor",
-            module_config=llm_module_cfg,
-            prompt_template=prompt_template,
-            interface=llm_interface,
-        )
+        self.character_id = character_id
+        self.logger = get_logger(f"{self.character_id}{__name__}")
+        self.llm = llm_module
         self.variables: List[str] = self.llm.prompt_template.get_variables()
 
 

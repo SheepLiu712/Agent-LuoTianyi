@@ -6,8 +6,6 @@ Memory Search Module
 """
 
 from src.utils.logger import get_logger
-from src.utils.llm.prompt_manager import PromptManager
-from src.utils.llm.llm_module import LLMModule
 from typing import Tuple, Dict, List, Any
 from src.system.database.vector_store import VectorStore
 import asyncio
@@ -23,11 +21,10 @@ _CITYWALK_CACHE_TTL: float = 3600.0
 
 
 class MemorySearcher:
-    def __init__(self, config: Dict[str, Any], prompt_manager: PromptManager):
+    def __init__(self, config: Dict[str, Any]):
         
         self.logger = get_logger(__name__)
         self.config = config
-        # self.llm = LLMModule(config["llm_module"], prompt_manager)
         self.max_k_vector_entities = config.get("max_k_vector_entities", 5)
         self.default_threshold = float(config.get("vector_score_threshold", 0.46))
         self.max_k_graph_entities = config.get("max_k_graph_entities", 3)

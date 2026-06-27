@@ -165,10 +165,28 @@
     },
     "agent_runtime": {
         "character_registry": {
-
+            "characters": {
+                "luotianyi": {
+                    "display_name": "luotianyi",
+                    "memory_namespace": "luotianyi",
+                    "static_variables_file": "res/agent/persona/persona.json",
+                    "llm_tone_mapping_file": "res/agent/persona/llm_tones_mapping.json",
+                    "persona_ref": "main_chat.static_variables.character_persona",
+                    "speaking_style_ref": "main_chat.static_variables.speaking_style",
+                    "voice_profile": "luotianyi",
+                    "live2d_profile": "luotianyi",
+                    "default_target": true
+                }
+            }
         },
-        "subconscious": {
-            "memory": {
+        "agent": {
+            "preprocessing": {
+                "song_entity_linker": {
+                    "songname_file": "res/knowledge/songname.json",
+                    "lyrics_file": "res/knowledge/lyrics.json"
+                }
+            },
+            "memory_manager": {
                 "vector_store": {
                     "store_type": "chroma",
                     "embedding_model": {
@@ -233,9 +251,13 @@
                     },
                     "prompt_name": "topic_extraction_prompt"
                 }
-            }
-        },
-        "agent": {
+            },
+            "song_knowledge": {
+                "song_database": {
+                    "db_folder": "res/knowledge",
+                    "db_file": "knowledge_db.db"
+                }
+            },
             "main_chat": {
                 "llm_module": {
                     "llm": {
@@ -244,9 +266,7 @@
                         "use_json": false
                     },
                     "prompt_name": "topic_reply_prompt"
-                },
-                "static_variables_file": "res/agent/persona/luotianyi_persona.json",
-                "llm_tone_mapping_file": "config/llm_tones_mapping.json"
+                }
             }
         }
     },

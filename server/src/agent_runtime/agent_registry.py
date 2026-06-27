@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Dict, Mapping, TYPE_CHECKING
 
-from src.agent.luotianyi_agent import LuoTianyiAgent
-from src.agent_runtime.character_registry import CharacterRegistry
+if TYPE_CHECKING:
+    from src.agent.luotianyi_agent import LuoTianyiAgent
+    from src.agent_runtime.character_registry import CharacterRegistry
+    from src.agent_runtime.character_runtime import CharacterRuntime
 
 
 class AgentRegistry:
@@ -11,13 +13,16 @@ class AgentRegistry:
 
     def __init__(
         self,
-        config: Mapping[str, Any],
+        config: Dict[str, Any],
         character_registry: CharacterRegistry,
-        conscious_agents: Mapping[str, LuoTianyiAgent],
+        character_runtimes: Dict[str, CharacterRuntime],
     ) -> None:
-        self.config = dict(config)
+        self.config = config
         self.character_registry = character_registry
-        self._agents = dict(conscious_agents)
+        self._agents = {
+            character_id: runtime.conscious
+            for character_id, runtime in character_runtimes.items()
+        }
 
     def get(self, character_id: str | None = None) -> LuoTianyiAgent:
         profile = self.character_registry.get(character_id)

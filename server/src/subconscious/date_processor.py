@@ -1,6 +1,6 @@
 """
 日期处理器：对话后处理中运行，与 _schedule_memory_write 同时进行。
-- 使用独立 LLM 接口，通过 prompt_manager 控制 prompt
+- 使用 llm_service 预先注册的 LLMModule。
 - 按置信度处理：>0.95 自动写 Event 表，<0.5 丢弃，之间创建 ExtractedTopic
 """
 
@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
 from src.utils.llm.llm_module import LLMModule
-from src.utils.llm.llm_api_interface import LLMAPIFactory
-from src.utils.llm.prompt_manager import PromptManager
 from src.utils.logger import get_logger
 from src.system.database import Event
 
@@ -23,7 +21,7 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-CONFIDENCE_AUTO_ADD = 0.95
+CONFIDENCE_AUTO_ADD = 0.9
 CONFIDENCE_DISCARD = 0.5
 
 # ── 日期类型 → Event.event_type 映射 ────────────────
@@ -40,30 +38,17 @@ _DEFAULT_EVENT_TYPE = "anniversary"
 
 
 class DateDetector:
-    """日期检测器，使用独立 LLM 接口 + prompt_manager 控制模板。"""
+    """日期检测器，使用预先注册的 LLMModule。"""
 
     def __init__(
         self,
         config: Dict[str, Any],
-        prompt_manager: PromptManager,
+        character_id: str,
+        llm_module: LLMModule,
     ):
-        self.prompt_manager = prompt_manager
-
-        llm_cfg = config.get("llm", {})
-        prompt_name = config.get("prompt_name")
-        if not prompt_name:
-            raise ValueError("llm_config 中缺少 prompt_name")
-        prompt_template = prompt_manager.get_template(prompt_name)
-        if not prompt_template:
-            raise ValueError(f"Prompt 模板未找到: {prompt_name}")
-        llm_interface = LLMAPIFactory.create_interface(llm_cfg)
-
-        self.llm_client = LLMModule(
-            module_name="date_detector",
-            module_config=config,
-            prompt_template=prompt_template,
-            interface=llm_interface,
-        )
+        self.config = config
+        self.llm_client = llm_module
+        self.character_id = character_id
 
     async def detect(self, user_input: str, conversation_history: str = "") -> Optional[Dict[str, Any]]:
         if not user_input or not self.llm_client:
@@ -74,7 +59,7 @@ class DateDetector:
 
         try:
             result = await self.llm_client.generate_response(
-                user_input=user_input, conversation_history=conversation_history, use_json=True
+                user_input=user_input, conversation_history=conversation_history
             )
         except Exception as e:
             logger.warning(f"DateDetector LLM call failed: {e}")
@@ -147,14 +132,14 @@ async def process_detected_date(
     if reply_topic_callback:
         logger.info(f"Date {name}: confidence {confidence:.2f} in middle range, asking user")
         topic_text = (
-            f"你注意到用户似乎提到了一个重要的日期。请问以下日期信息是否正确？\n"
+            f"你注意到用户似乎提到了一个重要的日期。请询问用户以下日期信息是否正确？\n"
             f"日期名称：{name}\n日期类型：{date_type}\n"
         )
         if date_str:
             topic_text += f"具体日期：{date_str}\n"
         if description:
             topic_text += f"描述：{description}\n"
-        topic_text += "\n如果正确请天依就会把它记住。"
+        topic_text += "\n如果正确你就会把它记住。"
 
         reply_topic_callback(_make_topic(topic_text))
         return None

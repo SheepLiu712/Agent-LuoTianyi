@@ -1,16 +1,14 @@
 from __future__ import annotations
+
 from typing import Any, Dict
-from src.domain.character import CharacterProfile, CharacterName
+
+from src.domain.character import CharacterName, CharacterProfile
 
 DEFAULT_CHARACTER_ID = CharacterName.LUOTIANYI.value
 
 
 class CharacterRegistry:
-    """Small registry for first-class character lookup.
-
-    The first phase only registers Luo Tianyi. Keeping this lookup explicit
-    prevents new code from hardcoding one character throughout the runtime.
-    """
+    """Small registry for first-class character lookup."""
 
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -19,12 +17,14 @@ class CharacterRegistry:
         self._build_character_profiles()
 
     def _build_character_profiles(self) -> None:
-        """Build character profiles from config."""
-        for character_id, profile_cfg in self.config.get("characters", {}).items():
+        characters_cfg = self.config.get("characters", self.config)
+        for character_id, profile_cfg in characters_cfg.items():
             profile = CharacterProfile(
                 character_id=character_id,
                 display_name=profile_cfg.get("display_name", character_id),
                 memory_namespace=profile_cfg.get("memory_namespace", character_id),
+                static_variables_file=profile_cfg.get("static_variables_file"),
+                llm_tone_mapping_file=profile_cfg.get("llm_tone_mapping_file"),
                 persona_ref=profile_cfg.get("persona_ref"),
                 speaking_style_ref=profile_cfg.get("speaking_style_ref"),
                 voice_profile=profile_cfg.get("voice_profile"),
@@ -36,6 +36,10 @@ class CharacterRegistry:
             self.characters[character_id] = profile
             if profile.default_target:
                 self.default_character_id = character_id
+        if not self.characters:
+            profile = self._default_profile()
+            self.characters[profile.character_id] = profile
+            self.default_character_id = profile.character_id
 
     def get(self, character_id: str | None = None) -> CharacterProfile:
         resolved_id = character_id or self.default_character_id
@@ -51,16 +55,37 @@ class CharacterRegistry:
             return target_character_ids
         return (self.default_character_id,)
 
+    @staticmethod
+    def _default_profile() -> CharacterProfile:
+        return CharacterProfile(
+            character_id=DEFAULT_CHARACTER_ID,
+            display_name="Luo Tianyi",
+            memory_namespace=DEFAULT_CHARACTER_ID,
+            static_variables_file="res/agent/persona/persona.json",
+            llm_tone_mapping_file="res/agent/persona/llm_tones_mapping.json",
+            persona_ref="main_chat.static_variables.character_persona",
+            speaking_style_ref="main_chat.static_variables.speaking_style",
+            voice_profile=DEFAULT_CHARACTER_ID,
+            live2d_profile=DEFAULT_CHARACTER_ID,
+            default_target=True,
+        )
+
 
 def get_default_character_registry() -> CharacterRegistry:
-    default_profile = CharacterProfile(
-        character_id=DEFAULT_CHARACTER_ID,
-        display_name="Luo Tianyi",
-        memory_namespace=DEFAULT_CHARACTER_ID,
-        persona_ref="main_chat.static_variables.character_persona",
-        speaking_style_ref="main_chat.static_variables.speaking_style",
-        voice_profile=DEFAULT_CHARACTER_ID,
-        live2d_profile=DEFAULT_CHARACTER_ID,
-        default_target=True,
+    return CharacterRegistry(
+        {
+            "characters": {
+                DEFAULT_CHARACTER_ID: {
+                    "display_name": "Luo Tianyi",
+                    "memory_namespace": DEFAULT_CHARACTER_ID,
+                    "static_variables_file": "res/agent/persona/persona.json",
+                    "llm_tone_mapping_file": "res/agent/persona/llm_tones_mapping.json",
+                    "persona_ref": "main_chat.static_variables.character_persona",
+                    "speaking_style_ref": "main_chat.static_variables.speaking_style",
+                    "voice_profile": DEFAULT_CHARACTER_ID,
+                    "live2d_profile": DEFAULT_CHARACTER_ID,
+                    "default_target": True,
+                }
+            }
+        }
     )
-    return CharacterRegistry(characters={DEFAULT_CHARACTER_ID: default_profile})

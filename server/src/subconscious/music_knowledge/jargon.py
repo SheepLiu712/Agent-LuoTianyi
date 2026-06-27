@@ -57,10 +57,3 @@ class SongEntityLinker:
 
         self.songname_retriver.add_keyword_from_file(str(songname_path))
         self.lyric_retriver.add_keyword_from_file(str(lyric_path))
-
-
-song_entity_linker = SongEntityLinker({})
-
-
-def extract_song_entities(user_input: str | None) -> List[str]:
-    return song_entity_linker.extract_and_verify(user_input)

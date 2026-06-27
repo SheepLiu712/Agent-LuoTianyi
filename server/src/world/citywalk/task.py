@@ -58,9 +58,8 @@ class CitywalkTask(WorldTask):
             from src.world.citywalk.llm_modules import CitywalkLLMModules
             from src.world.citywalk.runtime_scheduler import CitywalkRuntimeService
 
-            agent = getattr(self.system_runtime, "agent", None)
-            runtime_hub = getattr(agent, "_runtime_hub", None)
-            vector_store = getattr(runtime_hub, "vector_store", None)
+            agent_runtime = getattr(self.system_runtime, "agent_runtime", None)
+            vector_store = getattr(agent_runtime, "vector_store", None)
             if vector_store is None:
                 self.logger.warning("Citywalk task skipped: vector store is unavailable.")
                 return None

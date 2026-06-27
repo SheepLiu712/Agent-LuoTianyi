@@ -14,7 +14,6 @@ from src.utils.logger import get_logger
 from src.subconscious.memory.memory_search import MemorySearcher
 from src.subconscious.memory.memory_write import MemoryWriter
 from src.subconscious.memory.user_profile_updater import UserProfileUpdater
-from src.utils.llm.prompt_manager import PromptManager
 from src.system.database.knowledge_graph import KnowledgeGraph
 from src.system.database.vector_store import VectorStore
 from src.system.database.database_service import get_user_nickname, get_user_description, update_user_description
@@ -23,7 +22,7 @@ class MemoryManager:
     def __init__(
         self,
         config: Dict[str, Any],
-        prompt_manager: PromptManager,
+        llm_modules: Dict[str, Any],
     ):
         """
         初始化记忆管理器
@@ -35,9 +34,9 @@ class MemoryManager:
         """
         self.logger = get_logger(__name__)
         self.config = config
-        self.memory_searcher = MemorySearcher(config["memory_searcher"], prompt_manager)
-        self.memory_writer = MemoryWriter(config["memory_writer"], prompt_manager)
-        self.user_profile_updater = UserProfileUpdater(config["user_profile"], prompt_manager)
+        self.memory_searcher = MemorySearcher(config["memory_searcher"])
+        self.memory_writer = MemoryWriter(config["memory_writer"], llm_modules["memory_writer"])
+        self.user_profile_updater = UserProfileUpdater(config["user_profile"], llm_modules["user_profile_updater"])
 
     async def get_knowledge(
         self,

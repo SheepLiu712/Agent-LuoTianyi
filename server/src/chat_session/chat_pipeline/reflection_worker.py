@@ -85,7 +85,7 @@ class ReflectionWorker:
         if self.system_runtime is None:
             return
 
-        result = await self.system_runtime.agent_runtime.subconscious.detect_dates_for_topic(
+        result = await self.system_runtime.agent_runtime.detect_dates_for_topic(
             character_id=turn.character_id,
             user_id=turn.user_id,
             topic=turn.topic,
@@ -120,7 +120,7 @@ class ReflectionWorker:
         memory_hits = getattr(turn.attention_plan, "memory_hits", []) or []
 
         try:
-            await self.system_runtime.agent_runtime.subconscious.write_topic_memories(
+            await self.system_runtime.agent_runtime.write_topic_memories(
                 character_id=turn.character_id,
                 user_id=turn.user_id,
                 current_dialogue=current_dialogue,
@@ -147,7 +147,7 @@ class ReflectionWorker:
             )
             if compressed_snapshot is None:
                 return
-            await self.system_runtime.agent_runtime.subconscious.update_user_profile_by_context(
+            await self.system_runtime.agent_runtime.update_user_profile_by_context(
                 character_id=turn.character_id,
                 user_id=turn.user_id,
                 context=pre_compression_snapshot.as_prompt_payload(),

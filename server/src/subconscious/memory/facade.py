@@ -8,7 +8,6 @@ from src.system.database.vector_store import VectorStore
 from src.system.database.database_service import get_agent_memory_record_by_embedding_id
 from src.system.database.redis_buffer import RedisBuffer
 from src.domain import MemoryContext, MemoryHit
-from src.utils.llm.prompt_manager import PromptManager
 from src.subconscious.memory.memory_manager import MemoryManager
 from src.subconscious.memory.update_service import MemoryUpdateService
 
@@ -24,11 +23,13 @@ class SubconsciousMemory:
     def __init__(
         self,
         config: Dict[str, Any],
-        prompt_manager: PromptManager,
+        llm_modules: Dict[str, Any],
+        vector_store: VectorStore,
         owner_character_id: str = "luotianyi",
     ):
         self.owner_character_id = owner_character_id
-        self.legacy_manager = MemoryManager(config, prompt_manager)
+        self.vector_store = vector_store
+        self.legacy_manager = MemoryManager(config, llm_modules)
         self.updates = MemoryUpdateService(config.get("updates", {}), self)
 
     @property
@@ -47,7 +48,6 @@ class SubconsciousMemory:
         self,
         db: Session,
         redis: RedisBuffer,
-        vector_store: VectorStore,
         knowledge_db: Session,
         user_id: str,
         user_input: str,
@@ -56,7 +56,7 @@ class SubconsciousMemory:
         return await self.legacy_manager.get_knowledge(
             db=db,
             redis=redis,
-            vector_store=vector_store,
+            vector_store=self.vector_store,
             knowledge_db=knowledge_db,
             user_id=user_id,
             user_input=user_input,
@@ -65,14 +65,13 @@ class SubconsciousMemory:
 
     async def search_memories_for_topic(
         self,
-        vector_store: VectorStore,
         user_id: str,
         queries: List[str],
         similarity_threshold: float = 0.8,
         k: int = 3,
     ) -> List[str]:
         return await self.legacy_manager.search_memories_for_topic(
-            vector_store=vector_store,
+            vector_store=self.vector_store,
             user_id=user_id,
             queries=queries,
             similarity_threshold=similarity_threshold,
@@ -82,7 +81,6 @@ class SubconsciousMemory:
     async def search_memory_context_for_topic(
         self,
         db: Session,
-        vector_store: VectorStore,
         user_id: str,
         queries: List[str],
         similarity_threshold: float = 0.8,
@@ -102,7 +100,7 @@ class SubconsciousMemory:
             q = (query or "").strip()
             if not q:
                 continue
-            results = await vector_store.search(user_id, q, k=max(1, k))
+            results = await self.vector_store.search(user_id, q, k=max(1, k))
             for doc, score in results:
                 if score < similarity_threshold:
                     continue
@@ -163,7 +161,6 @@ class SubconsciousMemory:
         self,
         db: Session,
         redis: RedisBuffer,
-        vector_store: VectorStore,
         user_id: str,
         history: str,
         current_dialogue: str = "",
@@ -173,7 +170,7 @@ class SubconsciousMemory:
         await self.legacy_manager.post_process_interaction(
             db=db,
             redis=redis,
-            vector_store=vector_store,
+            vector_store=self.vector_store,
             user_id=user_id,
             history=history,
             current_dialogue=current_dialogue,
@@ -186,7 +183,6 @@ class SubconsciousMemory:
         self,
         db: Session,
         redis: RedisBuffer,
-        vector_store: VectorStore,
         user_id: str,
         content: str,
         commit: bool = True,
@@ -194,7 +190,7 @@ class SubconsciousMemory:
         return await self.legacy_manager.write_user_memory(
             db=db,
             redis=redis,
-            vector_store=vector_store,
+            vector_store=self.vector_store,
             user_id=user_id,
             content=content,
             owner_character_id=self.owner_character_id,
@@ -205,7 +201,6 @@ class SubconsciousMemory:
         self,
         db: Session,
         redis: RedisBuffer,
-        vector_store: VectorStore,
         user_id: str,
         content: str,
         commit: bool = True,
@@ -213,7 +208,7 @@ class SubconsciousMemory:
         return await self.legacy_manager.write_event_memory(
             db=db,
             redis=redis,
-            vector_store=vector_store,
+            vector_store=self.vector_store,
             user_id=user_id,
             content=content,
             owner_character_id=self.owner_character_id,
