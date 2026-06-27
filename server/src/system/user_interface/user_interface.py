@@ -35,6 +35,23 @@ class UserInterface:
 
     def bind_database_manager(self, database_manager: "DatabaseManager"):
         self.database_manager = database_manager
+        self.user_conversation_helper = UserConversationHelper(database_manager)
+
+    def wire_dependencies(self, *, database_manager: "DatabaseManager") -> None:
+        """注入用户接口层所需依赖。"""
+        self.bind_database_manager(database_manager)
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查用户接口层依赖已经初始化。"""
+        required = {
+            "database_manager": self.database_manager,
+            "websocket_service": self.websocket_service,
+            "user_conversation_helper": self.user_conversation_helper,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"UserInterface dependencies are missing: {', '.join(missing)}")
 
     # —————————————————————————————————————————————————————————————————
     # 账号安全相关方法

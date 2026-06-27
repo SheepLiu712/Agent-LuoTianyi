@@ -46,6 +46,12 @@ class WorldRuntime:
     def set_system_runtime(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
 
+    def wire_dependencies(self, *, system_runtime: "SystemRuntime") -> None:
+        """向世界运行时和任务模块派发系统依赖。"""
+        self.set_system_runtime(system_runtime)
+        self.initialize_modules()
+        self.ensure_dependencies()
+
     def initialize_modules(self) -> None:
         if self._modules_initialized:
             return
@@ -73,6 +79,8 @@ class WorldRuntime:
         ]
         for task in self.tasks:
             task.initialize(self.system_runtime)
+            if hasattr(task, "ensure_dependencies"):
+                task.ensure_dependencies()
 
         self._register_clock_actions()
         self._modules_initialized = True
@@ -80,6 +88,7 @@ class WorldRuntime:
     def start_background_services(self) -> None:
         if not self._modules_initialized:
             self.initialize_modules()
+        self.ensure_dependencies()
         if self._startup_event_task is None or self._startup_event_task.done():
             self._startup_event_task = asyncio.create_task(self._initialize_event_store())
         self.world_clock.start()
@@ -93,6 +102,26 @@ class WorldRuntime:
             except asyncio.CancelledError:
                 pass
         self._startup_event_task = None
+
+    def ensure_dependencies(self) -> None:
+        """检查世界运行时和任务模块依赖已经初始化。"""
+        required = {
+            "system_runtime": self.system_runtime,
+            "world_clock": self.world_clock,
+            "tasks": self.tasks,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"WorldRuntime dependencies are missing: {', '.join(missing)}")
+        if not self._modules_initialized:
+            raise RuntimeError("WorldRuntime dependencies are missing: initialized modules")
+        if not self.tasks:
+            raise RuntimeError("WorldRuntime dependency is missing: tasks")
+        for task in self.tasks:
+            if task is None:
+                raise RuntimeError("WorldRuntime dependency is missing: task")
+            if hasattr(task, "ensure_dependencies"):
+                task.ensure_dependencies()
 
     async def _initialize_event_store(self) -> None:
         if self.system_runtime is None:

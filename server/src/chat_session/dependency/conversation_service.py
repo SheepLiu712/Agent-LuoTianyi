@@ -60,6 +60,24 @@ class ConversationService:
         self.context_stale_after_days = self.config.get("context_stale_after_days", 5)
         self.summary_llm = self._create_summary_llm()
 
+    def wire_dependencies(
+        self,
+        *,
+        database: "DatabaseManager",
+        llm_service: "LLMService",
+    ) -> None:
+        """更新会话服务依赖，并按需注册摘要 LLM。"""
+        self.database = database
+        self.llm_service = llm_service
+        if self.summary_llm is None:
+            self.summary_llm = self._create_summary_llm()
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查会话服务依赖已经初始化。"""
+        if self.database is None:
+            raise RuntimeError("ConversationService dependency is missing: database")
+
     def _create_summary_llm(self) -> "LLMModule" | None:
         module_config = self.config.get("llm_module")
         if not module_config or self.llm_service is None:

@@ -21,6 +21,12 @@ class ExpiredEventCleanupTask(WorldTask):
         database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
 
+    def ensure_dependencies(self) -> None:
+        """检查过期事件清理任务依赖。"""
+        super().ensure_dependencies()
+        if self.event_store is None:
+            raise RuntimeError("ExpiredEventCleanupTask dependency is missing: event_store")
+
     def run_once(self) -> WorldTaskResult:
         if self.event_store is None:
             return WorldTaskResult.skipped_result(self.task_name, "event store is unavailable")

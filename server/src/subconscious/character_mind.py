@@ -67,6 +67,24 @@ class CharacterSubconscious:
     def get_state(self):
         return self.state.get_snapshot()
 
+    def ensure_dependencies(self) -> None:
+        """检查角色潜意识依赖已经初始化。"""
+        required = {
+            "database_manager": self.database_manager,
+            "capability_manager": self.capability_manager,
+            "character_profile": self.character_profile,
+            "memory": self.memory,
+            "state": self.state,
+            "song_knowledge": self.song_knowledge,
+            "topic_extractor": self.topic_extractor,
+            "attention_planner": self.attention_planner,
+            "date_detector": self.date_detector,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"CharacterSubconscious dependencies are missing: {', '.join(missing)}")
+        self.memory.ensure_dependencies()
+
     async def extract_topics(
         self,
         user_id: str,

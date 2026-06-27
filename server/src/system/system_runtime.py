@@ -31,7 +31,6 @@ class SystemRuntime:
 
         # 2. 初始化数据库管理器
         database_manager = DatabaseManager(config.get("database", {}))
-        database_manager.create_llm_modules(llm_service)
         set_default_database_manager(database_manager)
 
         # 3. 初始化能力管理器
@@ -74,17 +73,57 @@ class SystemRuntime:
         return runtime
 
     def _wire_dependencies(self) -> None:
-        self.world.set_system_runtime(self)
-        self.world.initialize_modules()
-        self.global_speaking_worker.set_capabilities(self.capability_manager)
+        """把顶层模块依赖分发给各运行时模块。"""
+        self.llm_service.ensure_dependencies()
+        self.database_manager.wire_dependencies(llm_service=self.llm_service)
+        self.capability_manager.wire_dependencies(llm_service=self.llm_service)
+        self.agent_runtime.wire_dependencies(
+            llm_service=self.llm_service,
+            capability_manager=self.capability_manager,
+            database_manager=self.database_manager,
+        )
+        self.chat_session_manager.wire_dependencies(
+            database_manager=self.database_manager,
+            llm_service=self.llm_service,
+            capability_manager=self.capability_manager,
+        )
+        self.world.wire_dependencies(system_runtime=self)
+        self.user_interface.wire_dependencies(database_manager=self.database_manager)
+        self.ensure_dependencies()
 
     def _start_background_services(self) -> None:
+        """启动所有后台服务。"""
+        self.ensure_dependencies()
         self.chat_session_manager.start_background_services()
         self.world.start_background_services()
 
     async def shutdown(self) -> None:
+        """按依赖反向顺序关闭后台服务和资源。"""
         await self.world.stop_background_services()
         await self.chat_session_manager.stop_background_services()
+        await self.database_manager.shutdown()
+
+    def ensure_dependencies(self) -> None:
+        """检查系统运行时所有顶层模块依赖已经完成派发。"""
+        required = {
+            "user_interface": self.user_interface,
+            "world": self.world,
+            "database_manager": self.database_manager,
+            "agent_runtime": self.agent_runtime,
+            "capability_manager": self.capability_manager,
+            "chat_session_manager": self.chat_session_manager,
+            "llm_service": self.llm_service,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"SystemRuntime dependencies are missing: {', '.join(missing)}")
+        self.llm_service.ensure_dependencies()
+        self.database_manager.ensure_dependencies()
+        self.capability_manager.ensure_dependencies()
+        self.agent_runtime.ensure_dependencies()
+        self.chat_session_manager.ensure_dependencies()
+        self.world.ensure_dependencies()
+        self.user_interface.ensure_dependencies()
 
     # Properties for convenient access to subsystems
     @property

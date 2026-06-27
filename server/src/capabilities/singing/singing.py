@@ -25,6 +25,17 @@ class SingingCapability:
             None,
         )
 
+    def ensure_dependencies(self) -> None:
+        """检查歌唱能力依赖已经初始化。"""
+        required = {
+            "singing_manager": self.singing_manager,
+            "default_character_id": self.default_character_id,
+            "music_manager": self.music_manager,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"SingingCapability dependencies are missing: {', '.join(missing)}")
+
     def _get_manager(self, character_id: Optional[str] = None) -> SingingManager:
         resolved_id = character_id or self.default_character_id
         if resolved_id not in self.singing_manager:

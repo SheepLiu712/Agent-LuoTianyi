@@ -42,6 +42,33 @@ class ChatStreamManager:
         self.default_expiration_seconds = config.get("default_expiration_seconds", 3600)
         self.heartbeat_timeout_seconds = config.get("heartbeat_timeout_seconds", 60)
 
+    def wire_dependencies(
+        self,
+        *,
+        conversation_service: "ConversationService",
+        global_speaking_worker: "GlobalSpeakingWorker",
+        proactive_topic_maker: "ProactiveTopicMaker",
+        activity_context_provider: "ActivityContextProvider",
+    ) -> None:
+        """注入聊天流管理器创建 ChatStream 所需的依赖。"""
+        self.conversation_service = conversation_service
+        self.global_speaking_worker = global_speaking_worker
+        self.proactive_topic_maker = proactive_topic_maker
+        self.activity_context_provider = activity_context_provider
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查聊天流管理器依赖已经初始化。"""
+        required = {
+            "conversation_service": self.conversation_service,
+            "global_speaking_worker": self.global_speaking_worker,
+            "proactive_topic_maker": self.proactive_topic_maker,
+            "activity_context_provider": self.activity_context_provider,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"ChatStreamManager dependencies are missing: {', '.join(missing)}")
+
     async def get_or_register_chat_stream(
         self,
         ws_connection: WebSocketConnection,
@@ -127,6 +154,9 @@ class ChatStreamManager:
             await asyncio.sleep(60)
 
     def start_cleanup_task(self, expiration_seconds: Optional[int] = None):
+        self.ensure_dependencies()
+        if self.cleanup_task is not None and not self.cleanup_task.done():
+            return
         if expiration_seconds is None:
             expiration_seconds = self.default_expiration_seconds
         self.cleanup_task = asyncio.create_task(self.cleanup_expired_streams(expiration_seconds))
@@ -138,6 +168,7 @@ class ChatStreamManager:
                 await self.cleanup_task
             except asyncio.CancelledError:
                 self.logger.info("ChatStreamManager cleanup task cancelled")
+        self.cleanup_task = None
 
 
 chat_stream_manager: ChatStreamManager | None = None
@@ -146,5 +177,5 @@ chat_stream_manager: ChatStreamManager | None = None
 def get_GCSM() -> ChatStreamManager:
     global chat_stream_manager
     if chat_stream_manager is None:
-        chat_stream_manager = ChatStreamManager({})
+        raise RuntimeError("ChatStreamManager has not been initialized.")
     return chat_stream_manager

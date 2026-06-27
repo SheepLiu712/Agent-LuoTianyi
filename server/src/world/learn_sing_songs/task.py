@@ -33,6 +33,17 @@ class LearnSingSongsTask(WorldTask):
         self.event_store = getattr(database_manager, "event_store", None)
         self.auto_song_learner = self._build_auto_song_learner(system_runtime)
 
+    def ensure_dependencies(self) -> None:
+        """检查学歌任务的基础依赖。"""
+        super().ensure_dependencies()
+        required = {
+            "system_runtime": self.system_runtime,
+            "event_store": self.event_store,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"LearnSingSongsTask dependencies are missing: {', '.join(missing)}")
+
     def run_once(self) -> WorldTaskResult:
         if self.auto_song_learner is None:
             return WorldTaskResult.skipped_result(

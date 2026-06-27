@@ -16,6 +16,7 @@ class CapabilityManager:
     def __init__(self, config: Dict, llm_service: LLMService):
         self.config: Dict[str, Any] = config
         self.logger = get_logger(__name__)
+        self.llm_service: "LLMService | None" = llm_service
 
         # TTS合成能力
         self.logger.info("Start initializing Speech Capability...")
@@ -29,3 +30,24 @@ class CapabilityManager:
         self.logger.info("Start initializing Image Understanding Capability...")
         self.image_understanding: ImageUnderstanding = ImageUnderstanding(self.config.get("image_understanding", {}))
         self.image_understanding.create_vlm_module(llm_service)
+
+    def wire_dependencies(self, *, llm_service: "LLMService") -> None:
+        """向能力子模块派发外部依赖。"""
+        self.llm_service = llm_service
+        self.image_understanding.create_vlm_module(llm_service)
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查能力管理器和各能力子模块已经初始化。"""
+        required = {
+            "llm_service": self.llm_service,
+            "speech": self.speech,
+            "singing": self.singing,
+            "image_understanding": self.image_understanding,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"CapabilityManager dependencies are missing: {', '.join(missing)}")
+        self.speech.ensure_dependencies()
+        self.singing.ensure_dependencies()
+        self.image_understanding.ensure_dependencies()

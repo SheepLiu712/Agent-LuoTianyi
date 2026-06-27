@@ -27,6 +27,18 @@ class CitywalkTask(WorldTask):
         self.event_store = getattr(self.database_manager, "event_store", None)
         self.citywalk_service = self._build_citywalk_service()
 
+    def ensure_dependencies(self) -> None:
+        """检查 citywalk 任务的基础依赖。"""
+        super().ensure_dependencies()
+        required = {
+            "system_runtime": self.system_runtime,
+            "database_manager": self.database_manager,
+            "event_store": self.event_store,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"CitywalkTask dependencies are missing: {', '.join(missing)}")
+
     def run_once(self) -> WorldTaskResult:
         if self.citywalk_service is None:
             return WorldTaskResult.skipped_result(self.task_name, "citywalk service is unavailable")

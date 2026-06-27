@@ -72,6 +72,20 @@ class LuoTianyiAgent:
         self.main_chat = MainChat(self.config["main_chat"], main_chat_module, self.character_profile)
         self.response_realizer = ResponseRealizer(self.main_chat)
 
+    def ensure_dependencies(self) -> None:
+        """检查意识 Agent 的运行依赖已经初始化。"""
+        required = {
+            "database_manager": self.database_manager,
+            "capabilities": self.capabilities,
+            "character_profile": self.character_profile,
+            "mind": self.mind,
+            "main_chat": self.main_chat,
+            "response_realizer": self.response_realizer,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"LuoTianyiAgent dependencies are missing: {', '.join(missing)}")
+
     async def search_song_facts_for_topic(self, constraints: List[str]) -> List[str]:
         """供 TopicReplier (或其他组件) 查找歌曲信息的代理方法"""
         return await self.mind.search_song_facts_for_topic(constraints)

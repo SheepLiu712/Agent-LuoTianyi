@@ -21,6 +21,19 @@ class LLMService:
         self.llm_modules: Dict[str, LLMModule] = {}
         self.vlm_modules: Dict[str, VLMModule] = {}
 
+    def ensure_dependencies(self) -> None:
+        """检查 LLM 服务的基础依赖已经初始化。"""
+        required = {
+            "prompt_manager": self.prompt_manager,
+            "llm_interfaces": self.llm_interfaces,
+            "vlm_interfaces": self.vlm_interfaces,
+            "llm_modules": self.llm_modules,
+            "vlm_modules": self.vlm_modules,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"LLMService dependencies are missing: {', '.join(missing)}")
+
     def register_llm_module(self, module_name: str, module_config: Dict) -> LLMModule:
         if module_name in self.llm_modules:
             self.logger.warning(f"LLM模块已存在，覆盖注册: {module_name}")

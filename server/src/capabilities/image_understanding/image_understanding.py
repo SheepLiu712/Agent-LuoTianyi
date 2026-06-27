@@ -17,10 +17,17 @@ class ImageUnderstanding:
 
         :param llm_service: LLMService 实例，用于提供语言模型服务
         """
+        if self.vlm_module is not None:
+            return
         self.vlm_module = llm_service.register_vlm_module(
             "image_understanding",
             self.config.get("vlm_module", {}),
         )
+
+    def ensure_dependencies(self) -> None:
+        """检查图像理解能力依赖已经初始化。"""
+        if self.vlm_module is None:
+            raise RuntimeError("ImageUnderstanding dependency is missing: vlm_module")
 
     async def describe_image(self, image_base64: str, **kwargs) -> str:
         """

@@ -39,10 +39,13 @@ config = load_config("config/config.json")
 @asynccontextmanager
 async def startup_event(app: FastAPI):
     await init_system_runtime(config)
+    logger.info("系统运行时初始化完成，服务已准备接收连接")
     try:
         yield
     finally:
+        logger.info("正在关闭系统运行时")
         await shutdown_system_runtime()
+        logger.info("系统运行时已关闭")
 
 
 def get_runtime() -> SystemRuntime:
@@ -287,4 +290,6 @@ if __name__ == "__main__":
     if is_debug:
         logger.info("服务器正在以调试模式运行")
     logger.info("启用 HTTP 模式")
-    uvicorn.run(app, host="127.0.0.1", port=60030)
+    host = os.environ.get("SERVER_HOST", "127.0.0.1")
+    port = int(os.environ.get("SERVER_PORT", "60030"))
+    uvicorn.run(app, host=host, port=port)

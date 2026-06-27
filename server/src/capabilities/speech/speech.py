@@ -14,6 +14,13 @@ class SpeechCapability:
         for character, tts_config in self.tts_config.items():
             self.tts_module[character] = init_tts_module(tts_config)
 
+    def ensure_dependencies(self) -> None:
+        """检查语音能力依赖已经初始化。"""
+        if self.tts_config is None:
+            raise RuntimeError("SpeechCapability dependency is missing: tts_config")
+        if self.tts_module is None:
+            raise RuntimeError("SpeechCapability dependency is missing: tts_module")
+
     async def say(self, character: str, text: str, tone: str) -> str:
         '''
         使用TTS合成语音。

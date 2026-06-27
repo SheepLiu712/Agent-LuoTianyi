@@ -45,6 +45,17 @@ class IngressHelper:
         """设置消息消费者回调函数，用于将处理后的消息传递给下游组件。"""
         self.msg_consumer = consumer_callback
 
+    def ensure_dependencies(self) -> None:
+        """检查 ingress worker 依赖已经初始化。"""
+        required = {
+            "system_runtime": self.system_runtime,
+            "send_reply_callback": self.send_reply_callback,
+            "msg_consumer": getattr(self, "msg_consumer", None),
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"IngressHelper dependencies are missing: {', '.join(missing)}")
+
     async def ingress_worker_loop(self):
         while True:
             event: ChatInputEvent | None = None

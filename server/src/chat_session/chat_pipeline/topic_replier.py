@@ -58,6 +58,19 @@ class TopicReplier:
     def set_reflection_submitter(self, submitter: Callable[[CompletedTurn], Awaitable[None]]):
         self.reflection_submitter = submitter
 
+    def ensure_dependencies(self) -> None:
+        """检查话题回复器依赖已经初始化。"""
+        required = {
+            "system_runtime": self.system_runtime,
+            "send_reply_callback": self.send_reply_callback,
+            "change_state_callback": self.change_state_callback,
+            "context_provider": self.context_provider,
+            "reflection_submitter": self.reflection_submitter,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"TopicReplier dependencies are missing: {', '.join(missing)}")
+
     def start_processing(self):
         if self.processor_task is None or self.processor_task.done():
             self.processor_task = asyncio.create_task(self.topic_processor())

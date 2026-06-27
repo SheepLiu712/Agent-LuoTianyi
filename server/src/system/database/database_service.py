@@ -91,6 +91,26 @@ class DatabaseManager:
         if self.memory_store is not None:
             self.memory_store.create_llm_module(llm_service)
 
+    def wire_dependencies(self, *, llm_service: "LLMService") -> None:
+        """向数据库子模块派发外部依赖。"""
+        self.create_llm_modules(llm_service)
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查数据库管理器和子存储已经初始化。"""
+        required = {
+            "redis": self._ensure_redis(),
+            "event_store": self.event_store,
+            "memory_store": self.memory_store,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"DatabaseManager dependencies are missing: {', '.join(missing)}")
+
+    async def shutdown(self) -> None:
+        """关闭数据库后台资源；当前内存 Redis 实现无需额外释放。"""
+        return None
+
     # ── 内部工具 ─────────────────────────────────────────────
 
     def _ensure_redis(self) -> RedisBuffer:

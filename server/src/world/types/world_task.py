@@ -20,6 +20,11 @@ class WorldTask(ABC):
     async def run_once(self) -> None:
         pass
 
+    def ensure_dependencies(self) -> None:
+        """检查任务基础配置已经初始化；具体任务可按需扩展。"""
+        if self.config is None:
+            raise RuntimeError(f"{self.__class__.__name__} dependency is missing: config")
+
     def get_task_type(self) -> str:
         return self.clock_config.get("type", "interval")
     

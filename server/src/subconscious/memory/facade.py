@@ -39,6 +39,20 @@ class SubconsciousMemory:
             llm_modules["user_profile_updater"],
         )
 
+    def ensure_dependencies(self) -> None:
+        """检查潜意识记忆子系统依赖已经初始化。"""
+        required = {
+            "database_manager": self.database_manager,
+            "vector_store": self.vector_store,
+            "memory_writer": self.memory_writer,
+            "user_profile_updater": self.user_profile_updater,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"SubconsciousMemory dependencies are missing: {', '.join(missing)}")
+        if self.database_manager.memory_store is None:
+            raise RuntimeError("SubconsciousMemory dependency is missing: memory_store")
+
     @property
     def memory_store(self) -> "MemoryStore":
         """返回数据库层的记忆存储服务。"""

@@ -31,6 +31,10 @@ class AgentRuntime:
         """初始化所有角色的意识、潜意识、预处理器和注册表。"""
         self.logger = get_logger(__name__)
         self.config = config
+        self.llm_service = llm_service
+        self.capability_manager = capability_manager
+        self.database_manager = database_manager
+        self.vector_store = self._initialize_vector_store(self.config["agent"])
         
         # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
         self.preprocessor = ChatPreprocessor(
@@ -55,6 +59,41 @@ class AgentRuntime:
         self.default_character_id = self.character_registry.default_character_id
         global _agent_runtime
         _agent_runtime = self
+
+    def wire_dependencies(
+        self,
+        *,
+        llm_service: "LLMService",
+        capability_manager: "CapabilityManager",
+        database_manager: "DatabaseManager",
+    ) -> None:
+        """记录运行时外部依赖，并检查角色子运行时。"""
+        self.llm_service = llm_service
+        self.capability_manager = capability_manager
+        self.database_manager = database_manager
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查 AgentRuntime 和所有角色运行时依赖已经初始化。"""
+        required = {
+            "llm_service": self.llm_service,
+            "capability_manager": self.capability_manager,
+            "database_manager": self.database_manager,
+            "vector_store": self.vector_store,
+            "preprocessor": self.preprocessor,
+            "character_registry": self.character_registry,
+            "character_runtimes": self.character_runtimes,
+            "agent_registry": self.agent_registry,
+            "default_character_id": self.default_character_id,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"AgentRuntime dependencies are missing: {', '.join(missing)}")
+        if not self.character_runtimes:
+            raise RuntimeError("AgentRuntime dependency is missing: character_runtimes")
+        self.preprocessor.ensure_dependencies()
+        for runtime in self.character_runtimes.values():
+            runtime.ensure_dependencies()
 
     def get_agent(self, character_id: str | None = None) -> LuoTianyiAgent:
         """获取指定角色的意识 Agent，未指定时返回默认角色。"""
@@ -173,7 +212,6 @@ class AgentRuntime:
         database_manager: "DatabaseManager",
     ) -> dict[str, CharacterRuntime]:
         """为每个启用角色创建潜意识、意识 Agent 和角色运行时对象。"""
-        vector_store = self._initialize_vector_store(agent_config)
         character_runtimes: dict[str, CharacterRuntime] = {}
         for profile in self.character_registry.characters.values():
             if not profile.enabled:
@@ -183,7 +221,7 @@ class AgentRuntime:
                 agent_config["memory"],
                 llm_modules,
                 database_manager=database_manager,
-                vector_store=vector_store,
+                vector_store=self.vector_store,
                 owner_character_id=profile.character_id,
             )
             mind = CharacterSubconscious(

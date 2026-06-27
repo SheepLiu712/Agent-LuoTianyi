@@ -17,9 +17,11 @@ class BiliEventUpdateTask(WorldTask):
     def __init__(self, config: Dict[str, Any]) -> None:
         super().__init__(self.task_name, config)
         self.logger = get_logger(__name__)
+        self.system_runtime: "SystemRuntime" | None = None
         self.updater: Optional[BiliEventUpdater] = None
 
     def initialize(self, system_runtime: "SystemRuntime") -> None:
+        self.system_runtime = system_runtime
         event_store = system_runtime.database_manager.event_store
         llm_service = system_runtime.llm_service
         llm_module = None
@@ -37,6 +39,17 @@ class BiliEventUpdateTask(WorldTask):
             llm_module=llm_module,
             vlm_module=vlm_module,
         )
+
+    def ensure_dependencies(self) -> None:
+        """检查 B 站事件更新任务依赖。"""
+        super().ensure_dependencies()
+        required = {
+            "system_runtime": self.system_runtime,
+            "updater": self.updater,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"BiliEventUpdateTask dependencies are missing: {', '.join(missing)}")
 
     async def run_once(self) -> WorldTaskResult:
         if self.updater is None:

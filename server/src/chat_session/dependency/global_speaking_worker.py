@@ -43,6 +43,7 @@ class GlobalSpeakingWorker:
         self.logger = get_logger("GlobalSpeakingWorker")
         self.queue: asyncio.Queue[SpeakingJob] = asyncio.Queue(maxsize=512)
         self.worker_task: asyncio.Task | None = None
+        self.capabilities: "CapabilityManager | None" = None
 
     def start_if_needed(self):
         if self.worker_task is None or self.worker_task.done():
@@ -52,6 +53,16 @@ class GlobalSpeakingWorker:
     def set_capabilities(self, capabilities: "CapabilityManager"):
         """Inject action capabilities used by the speaking worker."""
         self.capabilities = capabilities
+
+    def wire_dependencies(self, *, capabilities: "CapabilityManager") -> None:
+        """注入 speaking worker 所需能力。"""
+        self.set_capabilities(capabilities)
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查 speaking worker 依赖已经初始化。"""
+        if self.capabilities is None:
+            raise RuntimeError("GlobalSpeakingWorker dependency is missing: capabilities")
 
     async def enqueue(self, job: SpeakingJob):
         self.start_if_needed()

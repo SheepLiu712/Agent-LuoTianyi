@@ -19,6 +19,12 @@ class ProactiveTopicCheckTask(WorldTask):
     def initialize(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
 
+    def ensure_dependencies(self) -> None:
+        """检查主动话题检查任务依赖。"""
+        super().ensure_dependencies()
+        if self.system_runtime is None:
+            raise RuntimeError("ProactiveTopicCheckTask dependency is missing: system_runtime")
+
     async def run_once(self) -> WorldTaskResult:
         if self.system_runtime is None:
             return WorldTaskResult.skipped_result(self.task_name, "system runtime is unavailable")

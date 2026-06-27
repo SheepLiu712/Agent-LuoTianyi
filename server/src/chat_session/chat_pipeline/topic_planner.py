@@ -66,6 +66,19 @@ class TopicPlanner:
     def set_topic_consumer(self, consumer):
         self.topic_consumer = consumer
 
+    def ensure_dependencies(self) -> None:
+        """检查话题规划器依赖已经初始化。"""
+        required = {
+            "system_runtime": self.system_runtime,
+            "context_provider": self.context_provider,
+            "unread_store": self.unread_store,
+            "listen_timer": self.listen_timer,
+            "topic_consumer": self.topic_consumer,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"TopicPlanner dependencies are missing: {', '.join(missing)}")
+
     async def _message_processor(self):
         while True:
             try:

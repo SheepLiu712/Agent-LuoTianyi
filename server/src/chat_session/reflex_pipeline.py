@@ -16,6 +16,11 @@ class ReflexPipeline:
         self.config = config
         self.touch_responder = touch_responder or TouchReflexResponder(config.get("touch", {}))
 
+    def ensure_dependencies(self) -> None:
+        """检查反射管线依赖已经初始化。"""
+        if self.touch_responder is None:
+            raise RuntimeError("ReflexPipeline dependency is missing: touch_responder")
+
     async def try_handle(
         self,
         event: ChatInputEvent,

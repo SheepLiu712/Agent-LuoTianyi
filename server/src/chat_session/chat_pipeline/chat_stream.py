@@ -92,9 +92,31 @@ class ChatStream:
         self.topic_planner.set_system_runtime(system_runtime)
         self.topic_replier.set_system_runtime(system_runtime)
         self.reflection_worker.set_system_runtime(system_runtime)
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查 ChatStream 和内部 pipeline worker 依赖已经初始化。"""
+        required = {
+            "ws_connection": self.ws_connection,
+            "user_uuid": self.user_uuid,
+            "system_runtime": self.system_runtime,
+            "ingress_helper": self.ingress_helper,
+            "topic_planner": self.topic_planner,
+            "topic_replier": self.topic_replier,
+            "reflection_worker": self.reflection_worker,
+            "response_queue": self.response_queue,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"ChatStream dependencies are missing: {', '.join(missing)}")
+        self.ingress_helper.ensure_dependencies()
+        self.topic_planner.ensure_dependencies()
+        self.topic_replier.ensure_dependencies()
+        self.reflection_worker.ensure_dependencies()
 
     async def start_if_needed(self):
         """启动常驻消息处理协程（仅启动一次）。"""
+        self.ensure_dependencies()
         await self.initialize_context()
         self.ingress_helper.start_processing()
         self.topic_planner.start_processing()

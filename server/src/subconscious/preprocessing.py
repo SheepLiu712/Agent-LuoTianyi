@@ -20,6 +20,16 @@ class ChatPreprocessor:
         self.capability_manager = capability_manager
         self.song_entity_linker = SongEntityLinker(config.get("song_entity_linker", {}))
 
+    def ensure_dependencies(self) -> None:
+        """检查聊天预处理器依赖已经初始化。"""
+        required = {
+            "capability_manager": self.capability_manager,
+            "song_entity_linker": self.song_entity_linker,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"ChatPreprocessor dependencies are missing: {', '.join(missing)}")
+
     async def preprocess_chat_event(
         self,
         character_id: str,

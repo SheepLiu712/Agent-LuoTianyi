@@ -6,6 +6,7 @@ from .dependency.activity_context_provider import ActivityContextProvider
 from .call_stream_manager import CallStreamManager
 from .dependency.conversation_service import ConversationService
 from .chat_stream_manager import ChatStreamManager
+from . import chat_stream_manager as chat_stream_manager_module
 from .dependency.global_speaking_worker import GlobalSpeakingWorker
 from .dependency.proactive_topic_maker import ProactiveTopicMaker
 from .reflex_pipeline import ReflexPipeline
@@ -46,6 +47,7 @@ class ChatSessionManager:
             proactive_topic_maker = self.proactive_topic_maker,
             activity_context_provider = self.activity_context_provider,
         )
+        chat_stream_manager_module.chat_stream_manager = self.chat_stream_manager
         self.proactive_topic_maker.configure(
             conversation_service=self.conversation_service,
             database_manager=self.database_manager,
@@ -61,8 +63,66 @@ class ChatSessionManager:
 
         self.reflex_pipeline = ReflexPipeline(config.get("reflex_pipeline", {}))
 
+    def wire_dependencies(
+        self,
+        *,
+        database_manager: "DatabaseManager",
+        llm_service: "LLMService",
+        capability_manager,
+    ) -> None:
+        """向聊天会话模块及其子模块派发依赖。"""
+        self.database_manager = database_manager
+        self.llm_service = llm_service
+        self.conversation_service.wire_dependencies(database=database_manager, llm_service=llm_service)
+        self.global_speaking_worker.wire_dependencies(capabilities=capability_manager)
+        self.proactive_topic_maker.configure(
+            conversation_service=self.conversation_service,
+            database_manager=database_manager,
+            chat_stream_manager=self.chat_stream_manager,
+        )
+        self.activity_context_provider.ensure_dependencies()
+        self.chat_stream_manager.wire_dependencies(
+            conversation_service=self.conversation_service,
+            global_speaking_worker=self.global_speaking_worker,
+            proactive_topic_maker=self.proactive_topic_maker,
+            activity_context_provider=self.activity_context_provider,
+        )
+        self.call_stream_manager.wire_dependencies(
+            conversation_service=self.conversation_service,
+            global_speaking_worker=self.global_speaking_worker,
+            proactive_topic_maker=self.proactive_topic_maker,
+            activity_context_provider=self.activity_context_provider,
+        )
+        self.reflex_pipeline.ensure_dependencies()
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查聊天会话模块和子模块依赖已经初始化。"""
+        required = {
+            "llm_service": self.llm_service,
+            "database_manager": self.database_manager,
+            "conversation_service": self.conversation_service,
+            "global_speaking_worker": self.global_speaking_worker,
+            "proactive_topic_maker": self.proactive_topic_maker,
+            "activity_context_provider": self.activity_context_provider,
+            "chat_stream_manager": self.chat_stream_manager,
+            "call_stream_manager": self.call_stream_manager,
+            "reflex_pipeline": self.reflex_pipeline,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"ChatSessionManager dependencies are missing: {', '.join(missing)}")
+        self.conversation_service.ensure_dependencies()
+        self.global_speaking_worker.ensure_dependencies()
+        self.proactive_topic_maker.ensure_dependencies()
+        self.activity_context_provider.ensure_dependencies()
+        self.chat_stream_manager.ensure_dependencies()
+        self.call_stream_manager.ensure_dependencies()
+        self.reflex_pipeline.ensure_dependencies()
+
     def start_background_services(self) -> None:
         """启动聊天、通话和 speaking worker 后台服务。"""
+        self.ensure_dependencies()
         self.global_speaking_worker.start_if_needed()
         self.chat_stream_manager.start_cleanup_task()
         self.call_stream_manager.start_background_services()

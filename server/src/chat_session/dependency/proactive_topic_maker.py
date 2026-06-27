@@ -65,6 +65,20 @@ class ProactiveTopicMaker:
         self.conversation_service = conversation_service
         self.database_manager = database_manager
         self.chat_stream_manager = chat_stream_manager
+        self.ensure_dependencies()
+
+    def ensure_dependencies(self) -> None:
+        """检查主动话题模块依赖已经初始化。"""
+        required = {
+            "conversation_service": self.conversation_service,
+            "database_manager": self.database_manager,
+            "chat_stream_manager": self.chat_stream_manager,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"ProactiveTopicMaker dependencies are missing: {', '.join(missing)}")
+        if self.database_manager.event_store is None:
+            raise RuntimeError("ProactiveTopicMaker dependency is missing: event_store")
 
     async def dispatch_action(
         self,

@@ -52,6 +52,16 @@ class ReflectionWorker:
     ) -> None:
         self.reply_topic_callback = callback
 
+    def ensure_dependencies(self) -> None:
+        """检查反思 worker 依赖已经初始化。"""
+        required = {
+            "system_runtime": self.system_runtime,
+            "reply_topic_callback": self.reply_topic_callback,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise RuntimeError(f"ReflectionWorker dependencies are missing: {', '.join(missing)}")
+
     def start_processing(self) -> None:
         if self.processor_task is None or self.processor_task.done():
             self.processor_task = asyncio.create_task(self._reflection_processor())
