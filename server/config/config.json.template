@@ -107,7 +107,7 @@
         }
     },
 
-    "memory_manager":{
+    "memory": {
         "graph_retriever": {
             "retriever_type": "memory",
             "graph_data_dir": "res/knowledge",
@@ -140,22 +140,6 @@
                     "top_p": 0.9
                 },
                 "prompt_name": "user_profile_update_prompt"
-            }
-        },
-        "memory_searcher": {
-            "max_k_graph_entities": 3,
-            "max_k_vector_entities": 5,
-            "llm_module": {
-                "llm": {
-                    "api_type": "siliconflow",
-                    "model": "Pro/deepseek-ai/DeepSeek-V3",
-                    "api_key": "$SILICONFLOW_API_KEY",
-                    "base_url": "https://api.siliconflow.cn/v1",
-                    "temperature": 0.7,
-                    "max_tokens": 16384,
-                    "top_p": 0.9
-                },
-            "prompt_name": "memory_search_prompt"
             }
         },
         "memory_writer": {

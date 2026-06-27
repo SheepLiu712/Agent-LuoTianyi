@@ -15,8 +15,8 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from .knowledge_builder import KnowledgeBuilder
-from src.database.vector_store import VectorStoreFactory
-from src.memory.graph_retriever import GraphRetrieverFactory
+from src.system.database.vector_store import VectorStoreFactory
+from src.subconscious.memory.graph_retriever import GraphRetrieverFactory
 from src.utils.logger import setup_logging, get_logger
 from src.utils.helpers import load_config
 

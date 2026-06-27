@@ -9,7 +9,7 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.append(cwd)
 
-from src.database.sql_database import get_sql_session, InviteCode, init_sql_db
+from src.system.database.sql_database import get_sql_session, InviteCode, init_sql_db
 
 def generate_invite_code(length=10):
     chars = string.ascii_uppercase + string.digits

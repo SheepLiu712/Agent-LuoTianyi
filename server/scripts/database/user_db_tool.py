@@ -7,10 +7,10 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.append(cwd)
 
-from src.database import database_service
-from src.database.sql_database import User, Conversation, get_sql_session
-from src.database.vector_store import get_vector_store, VectorStore
-from src.database.redis_buffer import get_redis_buffer
+from src.system.database import database_service
+from src.system.database.sql_database import User, Conversation, get_sql_session
+from src.system.database.vector_store import get_vector_store, VectorStore
+from src.system.database.redis_buffer import get_redis_buffer
 from src.utils.helpers import load_config
 
 
@@ -21,7 +21,7 @@ def _init_databases() -> None:
         database_service.init_all_databases(db_cfg)
     else:
         # Fallback for extremely minimal environments
-        from src.database.sql_database import init_sql_db
+        from src.system.database.sql_database import init_sql_db
 
         init_sql_db("data/database", "luotianyi.db")
 

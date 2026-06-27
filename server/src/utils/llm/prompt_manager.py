@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from jinja2 import Template, Environment, FileSystemLoader
 
-from ..logger import get_logger
+from src.utils.logger import get_logger
 
 
 class PromptTemplate:
@@ -138,15 +138,47 @@ class PromptManager:
             raise ValueError(f"模板不存在: {name}")
 
         return template.render(**kwargs)
+    
+    def add_template_from_json(self, json_data: Dict[str, Any]) -> None:
+        """从JSON数据添加模板
 
-    def add_template(self, name: str, template_str: str) -> None:
+        Args:
+            json_data: 包含模板信息的字典
+        """
+        name = json_data.get("name", "")
+        template_str = json_data.get("template", "")
+        if isinstance(template_str, list):
+            template_str = "\n".join(template_str)
+
+        if not name or not template_str:
+            raise ValueError("JSON数据中缺少'name'或'template'字段")
+
+        var_list = self._extract_template_variables(template_str)
+        self.templates[name] = PromptTemplate(template_str, var_list, name)
+        self.logger.info(f"添加模板: {name}")
+
+    def add_template_from_file(self, file_path: str) -> None:
+        """从JSON文件添加模板
+
+        Args:
+            file_path: 模板文件路径
+        """
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                json_data = json.load(f)
+            self.add_template_from_json(json_data)
+        except Exception as e:
+            raise ValueError(f"加载模板文件失败 {file_path}: {e}")
+
+    def add_template_from_str(self, name: str, template_str: str) -> None:
         """添加新模板
 
         Args:
             name: 模板名称
             template_str: 模板字符串
         """
-        self.templates[name] = PromptTemplate(template_str, name=name)
+        var_list = self._extract_template_variables(template_str)
+        self.templates[name] = PromptTemplate(template_str, var_list, name)
         self.logger.info(f"添加模板: {name}")
 
     def remove_template(self, name: str) -> bool:
@@ -188,7 +220,7 @@ class PromptManager:
         return {
             "name": template.name,
             "template": template.template_str,
-            "variables": self._extract_template_variables(template.template_str),
+            "variables": template.var_list
         }
 
     def _extract_template_variables(self, template_str: str) -> List[str]:

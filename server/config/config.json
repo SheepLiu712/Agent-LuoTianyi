@@ -1,226 +1,389 @@
 {
     "is_debug": true,
-    "database": {
-        "sql_db_folder": "data/database",
-        "sql_db_file": "luotianyi.db",
-        "vector_store": {
-            "store_type": "chroma",
-            "embedding_model": {
-                "api_type": "openai",
-                "model": "BAAI/bge-large-zh-v1.5",
-                "api_key": "$SILICONFLOW_API_KEY",
-                "base_url": "https://api.siliconflow.cn/v1"
-            },
-            "vector_store_path": "data/database/vector_store",
-            "collection_name": "luotianyi_memory"
+    "llm_service": {
+        "prompt_manager": {
+            "template_dir": "res/agent/prompts"
         },
-        "knowledge_graph": {
-            "retriever_type": "memory",
-            "graph_data_dir": "res/knowledge",
-            "graph_data_path": "knowledge_graph.json",
-            "graph_alias_path": "alias.json"
-        }
-    },
-    "tts": {
-        "character_name": "LuoTianyi",
-        "onnx_model_dir": "res/tts/lty_custom_onnx_model",
-        "language": "zh",
-        "reference_audio_dir": "res/tts/reference_audio",
-        "reference_audio_lyrics": "res/tts/reference_audio/lrc.json",
-        "api_script_path": "src/GPT_SoVITS/api_v2.py",
-        "server_config_path": "config/tts_infer.yaml",
-        "interface_config_path": "config/tts_interface_config.json"
-    },
-    "prompt_manager": {
-        "template_dir": "res/agent/prompts"
-    },
-    "date_detector": {
-        "llm_module": {
-            "llm": {
-            "api_type": "openai",
-            "model": "qwen3.5-plus",
-            "api_key": "$QWEN_API_KEY",
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "enable_thinking": false
-            },
-            "prompt_name": "date_detection_prompt"
-        }
-        
-    },
-    "topic_extractor": {
-        "llm_module": {
-            "llm": {
+        "available_llms": {
+            "qwen3.5-plus": {
                 "api_type": "openai",
                 "model": "qwen3.5-plus",
                 "api_key": "$QWEN_API_KEY",
                 "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "enable_thinking": false
-            },
-            "prompt_name": "topic_extraction_prompt"
-        }
-    },
-    "main_chat": {
-        "llm_module": {
-            "llm": {
-                "api_type": "openai",
-                "model": "qwen3.5-plus",
-                "api_key": "$QWEN_API_KEY",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "enable_thinking": false
-            },
-            "prompt_name": "topic_reply_prompt"
+                "can_enable_thinking": true,
+                "can_use_json": true,
+                "default_params": {
+                    "temperature": 0.7,
+                    "max_tokens": 8192,
+                    "top_p": 0.9
+                }
+            }
         },
-        "static_variables_file": "res/agent/persona/luotianyi_persona.json",
-        "llm_tone_mapping_file": "config/llm_tones_mapping.json"
-    },
-    "vision_module": {
-        "vlm_module": {
-            "vlm": {
+        "available_vlms": {
+            "qwen3-vl-plus": {
                 "api_type": "openai",
                 "model": "qwen3-vl-plus",
                 "api_key": "$QWEN_API_KEY",
                 "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
-            },
-            "prompt_name": "vision_interaction_prompt"
-        }
-    },
-    "conversation_manager": {
-        "history_dir": "data/memory/conversation_history",
-        "max_file_lines": 1000,
-        "recent_history_limit": 100,
-        "context_file": "data/memory/context/context.json",
-        "raw_conversation_context_limit": 60,
-        "not_zip_conversation_count": 30,
-        "forget_conversation_days": 10,
-        "llm_module": {
-            "llm": {
-                "api_type": "openai",
-                "model": "qwen3.5-plus",
-                "api_key": "$QWEN_API_KEY",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "enable_thinking": false
-            },
-            "prompt_name": "summary_prompt"
-        }
-    },
-    "memory_manager": {
-        "graph_retriever": {
-            "retriever_type": "memory"
-        },
-        "user_profile": {
-            "llm_module": {
-                "llm": {
-                    "api_type": "openai",
-                    "model": "qwen3.5-plus",
-                    "api_key": "$QWEN_API_KEY",
-                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
-                },
-                "prompt_name": "user_profile_update_prompt"
-            }
-        },
-        "memory_searcher": {
-            "max_k_graph_entities": 3,
-            "max_k_vector_entities": 5
-        },
-        "memory_writer": {
-            "recent_update_path": "data/memory/context/recent_update.json",
-            "llm_module": {
-                "llm": {
-                    "api_type": "openai",
-                    "model": "qwen3.5-plus",
-                    "api_key": "$QWEN_API_KEY",
-                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
-                },
-                "prompt_name": "memory_write_prompt"
-            }
-        }
-    },
-    "citywalk": {
-        "amap": {
-            "api_key": "$AMAP_KEY",
-            "base_url": "https://restapi.amap.com/v3",
-            "timeout_seconds": 10,
-            "max_retries": 1
-        },
-        "session": {
-            "initial_energy": 100,
-            "initial_fullness": 70,
-            "initial_mood": 70,
-            "max_minutes": 240,
-            "max_stops": 4,
-            "move_energy_per_km": 5,
-            "activity_energy_per_30min": 8,
-            "activity_duration_min": [
-                20,
-                60
-            ],
-            "start_district_code": ""
-        },
-        "search": {
-            "radius_m": 3000,
-            "offset": 10,
-            "max_action_rounds": 20,
-            "types": "050000|060000|110000|120000",
-            "keywords": [
-                "椁愬巺",
-                "鍜栧暋",
-                "鍏洯",
-                "鍟嗗満",
-                "涔﹀簵"
-            ]
-        },
-        "report": {
-            "output_dir": "data/citywalk_reports",
-            "title_prefix": "閫涜灏忔礇"
-        },
-        "decision": {
-            "enabled": true,
-            "persona_path": "res/agent/persona/luotianyi_persona.json",
-            "max_poi_candidates": 5,
-            "constrained_rounds": 2,
-            "use_llm_environment_feedback": false,
-            "fail_on_error": true,
-            "llm": {
-                "api_type": "openai",
-                "model": "qwen3.5-plus",
-                "api_key": "$QWEN_API_KEY",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "temperature": 0.4,
-                "max_tokens": 512,
-                "max_retries": 2,
-                "request_timeout_seconds": 45
-            },
-            "environment": {
-                "enabled": true,
-                "fail_on_error": true,
-                "llm": {
-                    "api_type": "openai",
-                    "model": "qwen3.5-plus",
-                    "api_key": "$QWEN_API_KEY",
-                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "can_enable_thinking": false,
+                "can_use_json": false,
+                "default_params": {
                     "temperature": 0.7,
-                    "max_tokens": 512,
-                    "max_retries": 2,
-                    "request_timeout_seconds": 45,
-                    "vlm_model": "qwen3-vl-plus"
+                    "max_tokens": 8192,
+                    "top_p": 0.9
                 }
             }
         }
     },
-    "music": {
-        "resource_path": "res/music",
-        "auto_song_learner": {
-            "resource_path": "res/music",
-            "songlearner_dir": "src/plugins/music/song_learner",
-            "songlearner_resource_dir": "res/song_learner"
+    "database": {
+        "sql_db_folder": "data/database",
+        "sql_db_file": "luotianyi.db",
+        "redis": {},
+        "event_store": {
+            "llm_module": {
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true
+                },
+                "prompt_name": "event_store_prompt"
+            }
         },
-        "singing_manager": {
-            "resource_path": "res/music"
+        "memory_store": {
+            "llm_module": {
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true
+                },
+                "prompt_name": "memory_store_prompt"
+            }
+        }
+    },
+    "capabilities": {
+        "tts": {
+            "luotianyi": {
+                "character_name": "luotianyi",
+                "language": "zh",
+                "onnx_model_dir": "res/tts/lty_custom_onnx_model",
+                "reference_audio_dir": "res/tts/luotianyi/reference_audio",
+                "reference_audio_lyrics": "res/tts/luotianyi/reference_audio/lrc.json",
+                "server_config_path": "res/tts/luotianyi/tts_infer.yaml",
+                "interface_config_path": "res/tts/luotianyi/tts_interface_config.json",
+                "suppress_worker_output": true,
+                "trim_startup_memory": true
+            }
+        },
+        "sing": {
+            "luotianyi": {
+                "character_name": "洛天依",
+                "resource_path": "res/sing_song/luotianyi",
+                "singing_manager": {
+                    "resource_path": "res/sing_song/luotianyi"
+                }
+            }
+        },
+        "image_understanding": {
+            "vlm_module": {
+                "vlm": {
+                    "name": "qwen3-vl-plus"
+                },
+                "prompt_name": "vision_interaction_prompt"
+            }
+        }
+    },
+    "chat_session_manager": {
+        "chat_stream_manager": {
+            "default_expiration_seconds": 3600,
+            "heartbeat_timeout_seconds": 60
+        },
+        "global_speaking_worker": {
+            "tts_job_timeout_seconds": 120,
+            "max_retries": 2
+        },
+        "conversation_service": {
+            "raw_conversation_context_limit": 60,
+            "not_zip_conversation_count": 30,
+            "forget_conversation_days": 10,
+            "context_stale_after_days": 5,
+            "llm_module": {
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true
+                },
+                "prompt_name": "summary_prompt"
+            },
+            "history_dir": "data/memory/conversation_history",
+            "max_file_lines": 1000,
+            "recent_history_limit": 100,
+            "context_file": "data/memory/context/context.json"
+        },
+        "proactive_topic_maker": {
+            "return_user_threshold_seconds": 432000,
+            "silence_threshold_seconds": 180,
+            "activity_trigger_threshold": 5,
+            "inactivity_decay_interval_seconds": 180,
+            "silence_check_interval_seconds": 5,
+            "silence_trigger_cooldown_seconds": 180,
+            "activity_res": {
+                "first_login": {
+                    "text": [
+                        "你好呀，我是洛天依！",
+                        "欢迎来到这里，今天想聊点什么呢？"
+                    ],
+                    "audio_path": [
+                        "res/tts/static_audio/first_greet_1.wav",
+                        "res/tts/static_audio/first_greet_2.wav"
+                    ]
+                },
+                "return_login": {
+                    "prompt": "return_login_activity_prompt"
+                },
+                "user_silence": {
+                    "prompt": "user_silence_activity_prompt"
+                }
+            },
+            "reminder": {
+                "advance_days_concert": [
+                    3,
+                    1,
+                    0
+                ],
+                "advance_days_general": [
+                    0
+                ]
+            },
+            "context": {
+                "lookahead_days": 7,
+                "max_context_events": 5,
+                "mention_cooldown_hours": 6
+            },
+            "silence": {
+                "concert_pre_start_minutes": 60,
+                "concert_post_end_minutes": 30
+            }
+        }
+    },
+    "agent_runtime": {
+        "character_registry": {
+            "characters": {
+                "luotianyi": {
+                    "display_name": "luotianyi",
+                    "memory_namespace": "luotianyi",
+                    "static_variables_file": "res/agent/persona/persona.json",
+                    "llm_tone_mapping_file": "res/agent/persona/llm_tones_mapping.json",
+                    "persona_ref": "main_chat.static_variables.character_persona",
+                    "speaking_style_ref": "main_chat.static_variables.speaking_style",
+                    "voice_profile": "luotianyi",
+                    "live2d_profile": "luotianyi",
+                    "reflex": {
+                        "touch": {
+                            "fast_reply": {
+                                "touch_voice_dir": "res/agent/touch_voice",
+                                "probability": 1.0
+                            }
+                        }
+                    },
+                    "default_target": true
+                }
+            }
+        },
+        "agent": {
+            "preprocessing": {
+                "song_entity_linker": {
+                    "songname_file": "res/knowledge/songname.json",
+                    "lyrics_file": "res/knowledge/lyrics.json"
+                }
+            },
+            "memory": {
+                "vector_store": {
+                    "store_type": "chroma",
+                    "embedding_model": {
+                        "api_type": "openai",
+                        "model": "BAAI/bge-large-zh-v1.5",
+                        "api_key": "$SILICONFLOW_API_KEY",
+                        "base_url": "https://api.siliconflow.cn/v1"
+                    },
+                    "vector_store_path": "data/database/vector_store",
+                    "collection_name": "luotianyi_memory"
+                },
+                "knowledge_graph": {
+                    "retriever_type": "memory",
+                    "graph_data_dir": "res/knowledge",
+                    "graph_data_path": "knowledge_graph.json",
+                    "graph_alias_path": "alias.json"
+                },
+                "graph_retriever": {
+                    "retriever_type": "memory"
+                },
+                "user_profile": {
+                    "llm_module": {
+                        "llm": {
+                            "name": "qwen3.5-plus",
+                            "enable_thinking": true
+                        },
+                        "prompt_name": "user_profile_update_prompt"
+                    }
+                },
+                "memory_writer": {
+                    "recent_update_path": "data/memory/context/recent_update.json",
+                    "llm_module": {
+                        "llm": {
+                            "name": "qwen3.5-plus",
+                            "enable_thinking": false,
+                            "use_json": true
+                        },
+                        "prompt_name": "memory_write_prompt"
+                    }
+                }
+            },
+            "date_detector": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": true
+                    },
+                    "prompt_name": "date_detection_prompt"
+                }
+            },
+            "topic_extractor": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": true
+                    },
+                    "prompt_name": "topic_extraction_prompt"
+                }
+            },
+            "song_knowledge": {
+                "song_database": {
+                    "db_folder": "res/knowledge",
+                    "db_file": "knowledge_db.db"
+                }
+            },
+            "main_chat": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false
+                    },
+                    "prompt_name": "topic_reply_prompt"
+                }
+            }
+        }
+    },
+    "world": {
+        "citywalk": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 4,
+                    "minute": 0
+                }
+            },
+            "amap": {
+                "api_key": "$AMAP_KEY",
+                "base_url": "https://restapi.amap.com/v3",
+                "timeout_seconds": 10,
+                "max_retries": 1
+            },
+            "session": {
+                "initial_energy": 100,
+                "initial_fullness": 70,
+                "initial_mood": 70,
+                "max_minutes": 240,
+                "max_stops": 4,
+                "move_energy_per_km": 5,
+                "activity_energy_per_30min": 8,
+                "activity_duration_min": [
+                    20,
+                    60
+                ],
+                "start_district_code": ""
+            },
+            "search": {
+                "radius_m": 3000,
+                "offset": 10,
+                "max_action_rounds": 20,
+                "types": "050000|060000|110000|080000",
+                "keywords": [
+                    "餐饮服务",
+                    "购物服务",
+                    "风景名胜",
+                    "体育休闲服务",
+                    "运动"
+                ]
+            },
+            "report": {
+                "output_dir": "data/citywalk_reports",
+                "title_prefix": "逛街小洛"
+            },
+            "decision": {
+                "enabled": true,
+                "persona_path": "res/agent/persona/luotianyi_persona.json",
+                "max_poi_candidates": 5,
+                "constrained_rounds": 2,
+                "use_llm_environment_feedback": false,
+                "fail_on_error": true,
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": true
+                }
+            },
+            "llm_modules": {
+                "json": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": true
+                    },
+                    "prompt_name": "citywalk_llm_prompt"
+                },
+                "text": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false
+                    },
+                    "prompt_name": "citywalk_llm_prompt"
+                },
+                "vlm": {
+                    "vlm": {
+                        "name": "qwen3-vl-plus"
+                    },
+                    "prompt_name": "citywalk_vlm_prompt"
+                }
+            },
+            "environment": {
+                "enabled": true,
+                "fail_on_error": true,
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false
+                    },
+                    "prompt_name": "citywalk_llm_prompt"
+                },
+                "vlm_module": {
+                    "vlm": {
+                        "name": "qwen3-vl-plus"
+                    },
+                    "prompt_name": "citywalk_vlm_prompt"
+                }
+            }
         },
         "song_knowledge": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 4,
+                    "minute": 0
+                }
+            },
             "song_database": {
                 "db_folder": "res/knowledge",
                 "db_file": "knowledge_db.db"
@@ -238,93 +401,73 @@
                     "max_pages": 1000
                 },
                 "use_llm": false,
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false
+                    },
+                    "prompt_name": "song_knowledge_crawler_prompt"
+                }
+            }
+        },
+        "auto_song_learner": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 4,
+                    "minute": 0
+                }
+            },
+            "resource_path": "res/music",
+            "songlearner_dir": "src/world/learn_sing_songs/song_learner",
+            "songlearner_resource_dir": "res/song_learner"
+        },
+        "bili_dynamic_fetcher": {
+            "clock_config": {
+                "type": "interval",
+                "params": {
+                    "interval_seconds": 21600,
+                    "run_immediately": true
+                }
+            },
+            "data_file": "data/schedule/feed_cache.json",
+            "bilibili_uids": {
+                "luotianyi": "36081646"
+            },
+            "bili_cookie_file": "config/bili_cookie.txt",
+            "llm_module": {
                 "llm": {
-                    "api_type": "openai",
-                    "model": "qwen3.5-plus",
-                    "api_key": "$QWEN_API_KEY",
-                    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                    "enable_thinking": false
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true
+                },
+                "prompt_name": "bili_dynamic_fetcher_prompt"
+            },
+            "vlm_module": {
+                "vlm": {
+                    "name": "qwen3-vl-plus",
+                    "use_json": true
+                },
+                "prompt_name": "bili_dynamic_fetcher_prompt"
+            }
+        },
+        "proactive_topic_check": {
+            "clock_config": {
+                "type": "interval",
+                "params": {
+                    "interval_seconds": 600,
+                    "run_immediately": false
+                }
+            }
+        },
+        "expired_event_cleanup": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 0,
+                    "minute": 0
                 }
             }
         }
-    },
-    "activity_maker": {
-        "return_user_threshold_seconds": 432000,
-        "silence_threshold_seconds": 180,
-        "activity_trigger_threshold": 5,
-        "inactivity_decay_interval_seconds": 180,
-        "silence_check_interval_seconds": 5,
-        "silence_trigger_cooldown_seconds": 180,
-        "activity_res": {
-            "first_login": {
-                "text": [
-                    "你好呀，我是洛天依！",
-                    "欢迎来到这里，今天想聊点什么呢？"
-                ],
-                "audio_path": [
-                    "res/tts/static_audio/first_greet_1.wav",
-                    "res/tts/static_audio/first_greet_2.wav"
-                ]
-            },
-            "return_login": {
-                "prompt": "return_login_activity_prompt"
-            },
-            "user_silence": {
-                "prompt": "user_silence_activity_prompt"
-            }
-        },
-        "llm": {
-            "api_type": "openai",
-            "model": "qwen3.5-plus",
-            "api_key": "$QWEN_API_KEY",
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "enable_thinking": false
-        }
-    },
-    "schedule": {
-        "data_file": "data/schedule/events.json",
-        "fetch_interval_hours": 6,
-        "check_interval_seconds": 60,
-        "bilibili_uids": [
-            "387636363",
-            "1149997800"
-        ],
-        "llm": {
-            "api_type": "openai",
-            "model": "qwen3.5-plus",
-            "api_key": "$QWEN_API_KEY",
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "enable_thinking": false
-        },
-        "vlm": {
-                "api_type": "openai",
-                "model": "qwen3-vl-plus",
-                "api_key": "$QWEN_API_KEY",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "temperature": 0.7,
-                "max_tokens": 8192,
-                "top_p": 0.9
-        },
-        "reminder": {
-            "advance_days_concert": [
-                3,
-                1,
-                0
-            ],
-            "advance_days_general": [
-                0
-            ]
-        },
-        "context": {
-            "lookahead_days": 7,
-            "max_context_events": 5,
-            "mention_cooldown_hours": 6
-        },
-        "silence": {
-            "concert_pre_start_minutes": 60,
-            "concert_post_end_minutes": 30
-        },
-        "official_accounts": {}
-        
     }
 }
