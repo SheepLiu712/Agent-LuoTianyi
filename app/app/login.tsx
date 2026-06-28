@@ -75,7 +75,7 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
     }
   };
 
-  const handleResetAccount = async () => {
+  const handleResetAccount = () => {
     Keyboard.dismiss();
     if (!resetInvite || !resetUsername || !resetPassword || !resetConfirm) {
       Alert.alert('错误', '请填写所有信息');
@@ -85,6 +85,17 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
       Alert.alert('错误', '两次输入的密码不一致');
       return;
     }
+    Alert.alert(
+      '确认重置',
+      '重置后原账号将被覆盖，确定要继续吗？',
+      [
+        { text: '取消', style: 'cancel' },
+        { text: '确认重置', style: 'destructive', onPress: doResetAccount },
+      ],
+    );
+  };
+
+  const doResetAccount = async () => {
     setResetting(true);
     try {
       // 加密密码（复用已有的加密方法）
@@ -131,9 +142,18 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
       if (response.ok) {
         // 保存到 AsyncStorage 以便持久化
         const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+        const SecureStore = (await import('expo-secure-store'));
         await AsyncStorage.setItem('custom_server_url', url);
         // 更新全局配置
         server_config.BASE_URL = url;
+        // 清除旧服务器的公钥缓存，下次加密会从新服务器获取
+        const { clearCachedPublicKey } = await import('../utils/crypto');
+        clearCachedPublicKey();
+        // 切换服务器后取消自动登录
+        await AsyncStorage.removeItem('auto_login');
+        await AsyncStorage.removeItem('saved_username');
+        await SecureStore.deleteItemAsync('auto_login_token');
+        await AsyncStorage.removeItem('auto_login_token');
         Alert.alert('成功', '服务器地址验证成功，地址已保存');
         setShowServer(false);
       } else {
@@ -232,13 +252,13 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
                   style={styles.actionLink}
                   onPress={() => setShowReset(true)}
                 >
-                  <Text style={styles.actionLinkText}>🔄 重置账号</Text>
+                  <Text style={styles.actionLinkText}>重置账号</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.actionLink}
                   onPress={() => setShowServer(true)}
                 >
-                  <Text style={styles.actionLinkText}>⚙ 服务器地址</Text>
+                  <Text style={styles.actionLinkText}>服务器地址</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -302,7 +322,7 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
         <Modal visible={showReset} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>🔄 重置账号</Text>
+              <Text style={styles.modalTitle}>重置账号</Text>
               <Text style={styles.modalDesc}>输入已使用的邀请码和新账号信息：</Text>
 
               <TextInput
@@ -362,7 +382,7 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
         <Modal visible={showServer} transparent animationType="fade">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>⚙ 服务器地址</Text>
+              <Text style={styles.modalTitle}>服务器地址</Text>
               <Text style={styles.modalDesc}>输入自定义服务器地址（URL），输入后会自动验证连接：</Text>
 
               <TextInput
@@ -536,8 +556,8 @@ const styles = StyleSheet.create({
   },
   actionLinkText: {
     fontSize: 14,
-    color: '#888',
-    fontWeight: '500',
+    color: '#66CCFF',
+    fontWeight: 'bold',
   },
   modalOverlay: {
     flex: 1,

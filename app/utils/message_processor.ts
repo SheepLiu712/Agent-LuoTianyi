@@ -451,11 +451,6 @@ export class MessageProcessor {
   }
 
   private async sendOne(item: SendItem): Promise<SendResult> {
-    addDebugTrace('send', 'sendOne begin', {
-      kind: item.kind,
-      uuid: item.kind === 'typing' || item.kind === 'touch' ? undefined : ('uuid' in item ? item.uuid : undefined),
-      queueLength: this.sendQueue.length,
-    });
     if (item.kind === 'text') {
       return this.networkClient.sendChat(item.text);
     }

@@ -148,22 +148,86 @@
           const scaleX = (window.innerWidth * 1.2) / model.width;
           const scaleY = (window.innerHeight * 1.2) / model.height;
           model.scale.set(Math.min(scaleX, scaleY));
-          model.x = window.innerWidth * 0.5 - (model.width / 2);
-          model.y = window.innerHeight * 0.5 - (model.height / 2) ;
+          model.x = (window.innerWidth - model.width) / 2;
+          model.y = (window.innerHeight - model.height) / 2;
         };
         resizeModel();
         model.expression('normal')
         window.addEventListener('resize', resizeModel);
 
-        // ① 触摸与鼠标交互：利用 model.focus() 实现拖拽视线跟随
+        // ① 目光跟随（带插值平滑）：鼠标/触摸移出 Live2D 区域后平滑回到默认位置
+        let gazeCurrentX = window.innerWidth / 2;
+        let gazeCurrentY = window.innerHeight / 2;
+        let gazeTargetX = window.innerWidth / 2;
+        let gazeTargetY = window.innerHeight / 2;
+        let pointerInside = false;  // 初始为 false，避免刚加载时动画跳跃
+
         const onPointerMove = (event) => {
           if (model) {
-            // 将屏幕坐标传入，模型会自动计算视线偏移量
-            model.focus(event.clientX || event.touches[0].clientX, event.clientY || event.touches[0].clientY);
+            const cx = event.clientX || (event.touches && event.touches[0] && event.touches[0].clientX);
+            const cy = event.clientY || (event.touches && event.touches[0] && event.touches[0].clientY);
+            if (cx !== undefined && cy !== undefined) {
+              gazeTargetX = cx;
+              gazeTargetY = cy;
+              pointerInside = true;
+            }
           }
         };
+
         window.addEventListener('pointermove', onPointerMove);
         window.addEventListener('touchmove', onPointerMove);
+
+        // 指针离开 canvas 时平滑回到中心
+        const resetGaze = () => {
+          pointerInside = false;
+          gazeTargetX = window.innerWidth / 2;
+          gazeTargetY = window.innerHeight / 2;
+        };
+        canvas.addEventListener('pointerleave', resetGaze);
+
+        // 目光插值动画循环
+        function gazeAnimationLoop() {
+          requestAnimationFrame(gazeAnimationLoop);
+          if (!model) return;
+          const dx = gazeTargetX - gazeCurrentX;
+          const dy = gazeTargetY - gazeCurrentY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > 1) {
+            gazeCurrentX += dx * 1;
+            gazeCurrentY += dy * 1;
+            model.focus(gazeCurrentX, gazeCurrentY);
+          } else if (!pointerInside) {
+            gazeCurrentX = gazeTargetX;
+            gazeCurrentY = gazeTargetY;
+            model.focus(gazeCurrentX, gazeCurrentY);
+          }
+        }
+        gazeAnimationLoop();
+
+        // 1Hz 定时输出当前注视点
+        setInterval(() => {
+          console.log(`[gaze] current=(${gazeCurrentX.toFixed(1)}, ${gazeCurrentY.toFixed(1)}) target=(${gazeTargetX.toFixed(1)}, ${gazeTargetY.toFixed(1)}) inside=${pointerInside} win=(${window.innerWidth}, ${window.innerHeight})`);
+        }, 1000);
+
+        // 触摸视觉反馈（浅蓝色圆环，扩大淡出）
+        let ripples = [];
+        const RIPPLE_MAX_RADIUS = 60;
+        const RIPPLE_DURATION = 0.5; // 秒
+        const rippleContainer = new PIXI.Graphics();
+        app.stage.addChild(rippleContainer);
+
+        function updateRipples(dt) {
+          rippleContainer.clear();
+          ripples = ripples.filter(r => r.alpha > 0.01);
+          for (const r of ripples) {
+            r.radius += (RIPPLE_MAX_RADIUS / RIPPLE_DURATION) * dt;
+            const progress = Math.min(r.radius / RIPPLE_MAX_RADIUS, 1.0);
+            r.alpha = 1.0 - progress;
+              rippleContainer.lineStyle(3, 0xADD8E6, r.alpha);
+            rippleContainer.drawCircle(r.x, r.y, r.radius);
+          }
+        }
+        app.ticker.add((delta) => updateRipples(delta / 60));
 
         const areaToTouch = {
           '头': '头',
@@ -195,6 +259,7 @@
         const touchSendInterval = 1.0;
 
         const handleTouch = (clientX, clientY) => {
+          console.log(`[click] pos=(${clientX.toFixed(1)}, ${clientY.toFixed(1)}) window=(${window.innerWidth}, ${window.innerHeight})`);
           if (!model) return;
           const rect = canvas.getBoundingClientRect();
           const x = clientX - rect.left;
@@ -204,6 +269,8 @@
           if (touchAreas.length === 0) {
             return;
           }
+
+          ripples.push({ x, y, radius: 0, alpha: 1.0 });
 
           const now = performance.now() / 1000;
           pendingTouchAreas.push(...touchAreas);

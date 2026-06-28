@@ -354,11 +354,6 @@ export class WebSocketTransport {
 
   private async waitUntilReady(timeoutMs = 10000) {
     const start = Date.now();
-    addDebugTrace('ws', 'waitUntilReady begin', {
-      timeoutMs,
-      isConnected: this.isConnected,
-      isAuthed: this.isAuthed,
-    });
     while (!this.isStopped && (!this.isConnected || !this.isAuthed)) {
       if (Date.now() - start > timeoutMs) {
         addDebugTrace('ws', 'waitUntilReady timeout', {
@@ -370,7 +365,6 @@ export class WebSocketTransport {
       }
       await new Promise((resolve) => setTimeout(resolve, 80));
     }
-    addDebugTrace('ws', 'waitUntilReady ok', { waitedMs: Date.now() - start });
   }
 
   private async sendWithAck(
@@ -379,7 +373,6 @@ export class WebSocketTransport {
     timeoutMs: number,
   ): Promise<AckResult> {
     const requestId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    addDebugTrace('ack', 'prepare sendWithAck', { eventType, requestId, timeoutMs });
 
     try {
       await this.waitUntilReady();
@@ -405,11 +398,6 @@ export class WebSocketTransport {
       }, timeoutMs);
 
       this.ackWaiters.set(requestId, { resolve, timer });
-      addDebugTrace('ack', 'send raw with waiter', {
-        eventType,
-        requestId,
-        pendingWaiters: this.ackWaiters.size,
-      });
       this.sendRaw({
         type: eventType,
         client_msg_id: requestId,
@@ -459,7 +447,6 @@ export class WebSocketTransport {
           const waiter = this.ackWaiters.get(replyTo)!;
           clearTimeout(waiter.timer);
           this.ackWaiters.delete(replyTo);
-          addDebugTrace('ack', 'recv ack', { replyTo, pendingWaiters: this.ackWaiters.size });
           waiter.resolve({ ok: true, request_id: replyTo });
         }
         return;

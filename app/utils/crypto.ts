@@ -54,3 +54,8 @@ export async function encryptPassword(
     return null;
   }
 }
+
+/** 清除缓存的公钥，服务器地址变更后需要调用 */
+export function clearCachedPublicKey(): void {
+  cachedForgeKey = null;
+}

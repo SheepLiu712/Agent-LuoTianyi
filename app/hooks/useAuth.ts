@@ -195,6 +195,9 @@ export function useAuth() {
 
   const logout = useCallback(async () => {
     try {
+      // 清除公钥缓存，下次登录会重新从服务器获取
+      const { clearCachedPublicKey } = await import('../utils/crypto');
+      clearCachedPublicKey();
       await AsyncStorage.removeItem(AUTO_LOGIN_KEY);
       await AsyncStorage.removeItem(USERNAME_KEY);
       await SecureStore.deleteItemAsync(AUTOLOGIN_TOKEN_KEY);
