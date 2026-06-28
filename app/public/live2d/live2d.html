@@ -49,6 +49,52 @@
     let app;
     const MODEL_SCALE_MULTIPLIER = 1.2;
     const FOCUS_Y_OFFSET_RATIO = 0.0;
+    const MODEL_SETTINGS_URL = './models/luo/model.model3.json';
+
+    const unique = (items) => [...new Set(items.filter(Boolean))];
+
+    const collectModelAssetUrls = (settings) => {
+      const base = MODEL_SETTINGS_URL.slice(0, MODEL_SETTINGS_URL.lastIndexOf('/') + 1);
+      const refs = settings.FileReferences || {};
+      const urls = [
+        MODEL_SETTINGS_URL,
+        refs.Moc && base + refs.Moc,
+        refs.Physics && base + refs.Physics,
+        ...(refs.Textures || []).map((file) => base + file),
+        ...(refs.Expressions || []).map((item) => item.File && base + item.File),
+      ];
+
+      if (refs.Motions) {
+        Object.values(refs.Motions).forEach((motions) => {
+          (motions || []).forEach((motion) => {
+            if (motion.File) urls.push(base + motion.File);
+            if (motion.Sound) urls.push(base + motion.Sound);
+          });
+        });
+      }
+
+      return unique(urls);
+    };
+
+    const preloadLive2DAssets = async () => {
+      try {
+        const settingsResponse = await fetch(MODEL_SETTINGS_URL, { cache: 'force-cache' });
+        if (!settingsResponse.ok) {
+          throw new Error(`settings preload failed: ${settingsResponse.status}`);
+        }
+        const settings = await settingsResponse.json();
+        const urls = collectModelAssetUrls(settings);
+        await Promise.allSettled(
+          urls.map((url) => fetch(url, { cache: 'force-cache' }).then((response) => {
+            if (!response.ok) throw new Error(`${url}: ${response.status}`);
+            return response.arrayBuffer();
+          })),
+        );
+        console.log('Live2D assets preloaded:', urls.length);
+      } catch (error) {
+        console.warn('Live2D asset preload skipped:', error);
+      }
+    };
 
     // 加载mouth_value_projection.json中预设的嘴部张开程度，供后续 setMouthOpenY 调用
     let mouthValueProjection = {};
@@ -92,7 +138,9 @@
           autoDensity: true,
           antialias: true,
         });
-        model = await Live2DModel.from('./models/luo/model.model3.json', {
+        await preloadLive2DAssets();
+
+        model = await Live2DModel.from(MODEL_SETTINGS_URL, {
             autoInteract: false, // 关闭自带的交互，我们手动接管以获得更高控制权
             onError: (err) => { console.error('Model load internal error:', err); }
         });

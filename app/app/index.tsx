@@ -1,5 +1,6 @@
-import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Asset } from 'expo-asset';
+import Constants from 'expo-constants';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -29,6 +30,12 @@ import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } 
 import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../utils/theme';
 import PreferencesScreen from './preferences';
 
+const THINKING_BUBBLE_FRAMES = [
+  require('../assets/images/thinking_bubble1.png'),
+  require('../assets/images/thinking_bubble2.png'),
+  require('../assets/images/thinking_bubble3.png'),
+];
+
 export default function Index({ onLogout }: { onLogout?: () => void }) {
   const { username, message_token } = auth;
   const insets = useSafeAreaInsets();
@@ -43,6 +50,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [showPreferences, setShowPreferences] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorMode, setColorMode] = useState<ColorMode>('light');
+  const [live2dReady, setLive2dReady] = useState(false);
   const webviewRef = useRef<WebView>(null);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
@@ -150,11 +158,27 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     return () => clearInterval(timer);
   }, [thinking]);
 
-  const thinkingBubbleFrames = [
-    require('../assets/images/thinking_bubble1.png'),
-    require('../assets/images/thinking_bubble2.png'),
-    require('../assets/images/thinking_bubble3.png'),
-  ];
+  useEffect(() => {
+    Asset.loadAsync(THINKING_BUBBLE_FRAMES).catch((error) => {
+      addDebugTrace('asset', 'preload thinking bubbles failed', { error: String(error) });
+    });
+  }, []);
+
+  const handleLive2DMessage = useCallback(
+    (event: any) => {
+      try {
+        const data = JSON.parse(event.nativeEvent.data);
+        if (data.type === 'modelLoaded') {
+          setLive2dReady(Boolean(data.success));
+          addDebugTrace('live2d', data.success ? 'model loaded' : 'model load failed', data.error ? { error: data.error } : undefined);
+        }
+      } catch {
+        // useChatLogic also ignores malformed messages; keep the wrapper equally quiet.
+      }
+      handleWebViewMessage(event);
+    },
+    [handleWebViewMessage],
+  );
 
   useEffect(() => {
     const showSubscription = Keyboard.addListener('keyboardDidShow', (e) => {
@@ -259,7 +283,8 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           startInLoadingState={true}
           mixedContentMode="never"
           onShouldStartLoadWithRequest={(request) => isAllowedWebviewUrl(request.url)}
-          onMessage={handleWebViewMessage}
+          onLoadStart={() => setLive2dReady(false)}
+          onMessage={handleLive2DMessage}
           onError={(event) => {
             addDebugTrace('webview', 'error', { detail: JSON.stringify(event.nativeEvent) });
           }}
@@ -268,13 +293,20 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           }}
         />
 
+        {!live2dReady ? (
+          <View pointerEvents="none" style={[styles.live2dLoadingOverlay, { backgroundColor: theme.live2dOverlay || 'rgba(0,0,0,0.16)' }]}>
+            <ActivityIndicator size="small" color={theme.accent} />
+            <Text style={[styles.live2dLoadingText, { color: theme.text }]}>天依正在过来...</Text>
+          </View>
+        ) : null}
+
         <TouchableOpacity style={[styles.menuButton, { backgroundColor: theme.menuButton }]} onPress={openDrawer} activeOpacity={0.75}>
           <Image source={require('../assets/images/menu.png')} style={[styles.menuIcon, { tintColor: theme.text }]} />
         </TouchableOpacity>
 
         {thinking ? (
           <View style={styles.thinkingBubble}>
-            <Image source={thinkingBubbleFrames[thinkingFrame]} style={styles.thinkingBubbleImage} resizeMode="contain" />
+            <Image source={THINKING_BUBBLE_FRAMES[thinkingFrame]} style={styles.thinkingBubbleImage} resizeMode="contain" />
           </View>
         ) : null}
 
@@ -453,6 +485,17 @@ const styles = StyleSheet.create({
   },
   live2dThemeOverlay: {
     zIndex: 50,
+  },
+  live2dLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 55,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  live2dLoadingText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   webview: {
     flex: 1,
