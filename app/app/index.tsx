@@ -1,55 +1,61 @@
 import Constants from 'expo-constants';
-import React, { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   FlatList,
   Image,
   Keyboard,
+  PanResponder,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput, TouchableOpacity,
+  TextInput,
+  TouchableOpacity,
+  useColorScheme,
   useWindowDimensions,
-  View
-} from "react-native";
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
-import { useHistoryLogic } from "../hooks/useHistoryLogic";
+import { useHistoryLogic } from '../hooks/useHistoryLogic';
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
+import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../utils/theme';
 import PreferencesScreen from './preferences';
-
 
 export default function Index({ onLogout }: { onLogout?: () => void }) {
   const { username, message_token } = auth;
   const insets = useSafeAreaInsets();
-  const { height: screenHeight } = useWindowDimensions();
+  const systemScheme = useColorScheme();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const live2dHeight = screenHeight * 0.4;
+  const drawerWidth = useMemo(() => Math.round(screenWidth * 0.38), [screenWidth]);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
   const [showPreferences, setShowPreferences] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [colorMode, setColorMode] = useState<ColorMode>('light');
   const webviewRef = useRef<WebView>(null);
+  const drawerProgress = useRef(new Animated.Value(0)).current;
+  const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
 
-
-  // 构建 live2d.html 的 URL
-  // Expo 开发模式下，public 目录的文件可以通过开发服务器直接访问
-  // 在生产环境（APK）中，我们将手动把 public 文件夹复制到 android/app/src/main/assets/public
   const debuggerHost = Constants.expoConfig?.hostUri || 'localhost:8081';
   const live2dAssetRoot = 'file:///android_asset/public/';
-  const live2dRoot = __DEV__
-    ? `http://${debuggerHost}/`
-    : live2dAssetRoot;
+  const live2dRoot = __DEV__ ? `http://${debuggerHost}/` : live2dAssetRoot;
   const live2dUrl = `${live2dRoot}live2d/live2d.html`;
 
   const isAllowedWebviewUrl = (url: string) => {
     return __DEV__ ? url.startsWith(live2dRoot) : url.startsWith(live2dAssetRoot);
   };
 
-  // 使用自定义 Hook 管理聊天逻辑
   const {
     inputText,
     messages,
@@ -65,14 +71,72 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     handleToggleAgentAudio,
   } = useChatLogic(webviewRef, username, message_token);
 
-
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
+
+  const animateDrawer = useCallback((open: boolean) => {
+    setDrawerOpen(open);
+    Animated.timing(drawerProgress, {
+      toValue: open ? 1 : 0,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [drawerProgress]);
+
+  const openDrawer = useCallback(() => animateDrawer(true), [animateDrawer]);
+  const closeDrawer = useCallback(() => animateDrawer(false), [animateDrawer]);
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_event, gestureState) => {
+          const isHorizontal = Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4;
+          return isHorizontal && drawerOpen && gestureState.dx < 0;
+        },
+        onMoveShouldSetPanResponder: (_event, gestureState) => {
+          const isHorizontal = Math.abs(gestureState.dx) > 18 && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.4;
+          return isHorizontal && drawerOpen && gestureState.dx < 0;
+        },
+        onPanResponderMove: (_event, gestureState) => {
+          const base = drawerOpen ? drawerWidth : 0;
+          const next = Math.max(0, Math.min(drawerWidth, base + gestureState.dx));
+          drawerProgress.setValue(next / drawerWidth);
+        },
+        onPanResponderRelease: (_event, gestureState) => {
+          const shouldOpen = gestureState.dx > -drawerWidth * 0.25;
+          animateDrawer(shouldOpen);
+        },
+        onPanResponderTerminate: () => {
+          animateDrawer(drawerOpen);
+        },
+      }),
+    [animateDrawer, drawerOpen, drawerProgress, drawerWidth],
+  );
 
   useEffect(() => {
     const unsubscribe = subscribeDebugTrace((entries) => {
       setDebugEntries(entries);
     });
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(COLOR_MODE_STORAGE_KEY)
+      .then((storedMode) => {
+        if (!active) {
+          return;
+        }
+        if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
+          setColorMode(storedMode);
+        }
+      })
+      .catch((error) => {
+        addDebugTrace('theme', 'load color mode failed', { error: String(error) });
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -111,7 +175,6 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     if (historyLoadedRef.current) {
       return;
     }
-    // 在组件加载时，自动加载一次历史记录
     if (username && message_token) {
       historyLoadedRef.current = true;
       loadHistory(username, message_token);
@@ -119,13 +182,15 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   }, [username, message_token, loadHistory]);
 
   const renderFooter = () => {
-  if (!historyLoading) return null;
-  return (
-    <View style={{ paddingVertical: 20 }}>
-      <ActivityIndicator size="small" color="#999" />
-    </View>
-  );
-};
+    if (!historyLoading) {
+      return null;
+    }
+    return (
+      <View style={{ paddingVertical: 20 }}>
+        <ActivityIndicator size="small" color="#999" />
+      </View>
+    );
+  };
 
   const visibleDebugEntries = debugEntries.slice(-50).reverse();
 
@@ -136,21 +201,45 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     ).padStart(2, '0')}.${String(d.getMilliseconds()).padStart(3, '0')}`;
   };
 
+  const drawerTranslateX = drawerProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-drawerWidth, 0],
+  });
+  const dimOpacity = drawerProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.45],
+  });
+
+  const handleToggleDebug = () => {
+    setDebugOpen((prev) => !prev);
+    closeDrawer();
+  };
+
+  const handleOpenPreferences = () => {
+    setShowPreferences(true);
+    closeDrawer();
+  };
+
+  const handleLogout = () => {
+    closeDrawer();
+    onLogout?.();
+  };
+
+  const handleColorMode = (mode: ColorMode) => {
+    setColorMode(mode);
+    AsyncStorage.setItem(COLOR_MODE_STORAGE_KEY, mode).catch((error) => {
+      addDebugTrace('theme', 'save color mode failed', { error: String(error) });
+    });
+  };
+
   return (
-    <View style={{ flex: 1, backgroundColor: 'white' }}>
+    <View style={[styles.root, { backgroundColor: theme.root }]}>
+      <View style={{ height: insets.top, backgroundColor: theme.safeArea }} />
 
-      {/* 顶部安全区占位 */}
-      <View style={{ height: insets.top, backgroundColor: 'white' }} />
-
-      {/* 【固定层：Live2D 区域】- 绝对定位，不参与 flex 布局，永远固定在顶部 */}
       <View style={[styles.live2dFixedLayer, { top: insets.top, height: live2dHeight }]}>
-        {/* 背景图 */}
         <Image
           source={require('../assets/live2d/backgrounds/bg2.jpg')}
-          style={[
-            StyleSheet.absoluteFillObject,
-            styles.background_image,
-          ]}
+          style={[StyleSheet.absoluteFillObject, styles.backgroundImage]}
           resizeMode="cover"
         />
         <WebView
@@ -179,58 +268,29 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           }}
         />
 
-        {/* 登出按钮 */}
-        {onLogout && (
-          <TouchableOpacity
-            style={styles.logoutButton}
-            onPress={onLogout}
-          >
-            <Image
-              source={require('../assets/images/logout.png')}
-              style={styles.logoutImage}
-            />
-          </TouchableOpacity>
-        )}
+        <TouchableOpacity style={[styles.menuButton, { backgroundColor: theme.menuButton }]} onPress={openDrawer} activeOpacity={0.75}>
+          <Image source={require('../assets/images/menu.png')} style={[styles.menuIcon, { tintColor: theme.text }]} />
+        </TouchableOpacity>
 
         {thinking ? (
           <View style={styles.thinkingBubble}>
-            <Image
-              source={thinkingBubbleFrames[thinkingFrame]}
-              style={styles.thinkingBubbleImage}
-              resizeMode="contain"
-            />
+            <Image source={thinkingBubbleFrames[thinkingFrame]} style={styles.thinkingBubbleImage} resizeMode="contain" />
           </View>
         ) : null}
 
-        {/* 偏好设置按钮（调试按钮左侧） */}
-        <TouchableOpacity
-          style={styles.settingsBtn}
-          onPress={() => setShowPreferences(true)}
-        >
-          <Image
-            source={require('../assets/images/setting.png')}
-            style={styles.settingsIcon}
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.debugToggleBtn}
-          onPress={() => setDebugOpen((prev) => !prev)}
-        >
-          <Text style={styles.debugToggleText}>{debugOpen ? '收起调试' : '调试'}</Text>
-        </TouchableOpacity>
+        <View pointerEvents="none" style={[StyleSheet.absoluteFillObject, styles.live2dThemeOverlay, { backgroundColor: theme.live2dOverlay }]} />
 
         {debugOpen ? (
-          <View style={styles.debugPanel}>
+          <View style={[styles.debugPanel, { backgroundColor: theme.debugBackground, borderColor: theme.debugBorder }]}>
             <View style={styles.debugHeaderRow}>
-              <Text style={styles.debugHeaderText}>发送调试日志（最近 {visibleDebugEntries.length} 条）</Text>
+              <Text style={[styles.debugHeaderText, { color: theme.debugHeader }]}>发送调试日志（最近 {visibleDebugEntries.length} 条）</Text>
               <TouchableOpacity onPress={clearDebugTrace}>
-                <Text style={styles.debugClearText}>清空</Text>
+                <Text style={[styles.debugClearText, { color: theme.debugAction }]}>清空</Text>
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.debugScroll} contentContainerStyle={styles.debugScrollContent}>
               {visibleDebugEntries.map((entry) => (
-                <Text key={entry.id} style={styles.debugLine}>
+                <Text key={entry.id} style={[styles.debugLine, { color: theme.debugText }]}>
                   [{formatDebugTs(entry.ts)}] [{entry.scope}] {entry.message}
                   {entry.detail ? ` | ${entry.detail}` : ''}
                 </Text>
@@ -240,47 +300,40 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
         ) : null}
       </View>
 
-      {/* 偏好设置弹窗 */}
-      {showPreferences && (
-        <PreferencesScreen
-          onClose={() => setShowPreferences(false)}
-        />
-      )}
+      {showPreferences ? <PreferencesScreen onClose={() => setShowPreferences(false)} theme={theme} /> : null}
 
-      {/* 【可压缩区域：聊天历史 + 输入框】- 使用 flex 布局，会被键盘压缩 */}
       <View style={{ flex: 1, marginTop: live2dHeight, marginBottom: keyboardHeight }}>
-        {/* 聊天历史区域 - 使用 FlatList 显示消息列表 */}
         <View style={{ flex: 1 }}>
           <FlatList
             ref={flatListRef}
             data={messages}
-            inverted={true} // 反转列表，使最新消息为0位置。
-            renderItem={({ item }) => (
-              <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} />
-            )}
+            inverted={true}
+            renderItem={({ item }) => <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} theme={theme} />}
             keyExtractor={(item) => item.uuid}
             onEndReached={() => {
-              // 只有当有用户信息且当前没在加载时才触发
               if (username && message_token && !historyLoading) {
                 loadHistory(username, message_token);
               }
             }}
-            onEndReachedThreshold={0.1} 
-            ListFooterComponent={renderFooter} 
-            style={styles.chatList}
+            onEndReachedThreshold={0.1}
+            ListFooterComponent={renderFooter}
+            style={[styles.chatList, { backgroundColor: theme.chatList }]}
             contentContainerStyle={styles.chatListContent}
             showsVerticalScrollIndicator={true}
-            
-            onScrollBeginDrag={Keyboard.dismiss} // 滚动时自动收起键盘
+            onScrollBeginDrag={Keyboard.dismiss}
           />
         </View>
 
-        {/* 输入框区域 - 跟随键盘 */}
-        <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        <View
+          style={[
+            styles.inputContainer,
+            { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: theme.inputBar, borderTopColor: theme.inputBorder },
+          ]}
+        >
           <TextInput
-            style={styles.inputField}
+            style={[styles.inputField, { backgroundColor: theme.inputBackground, color: theme.inputText }]}
             placeholder="给天依发消息..."
-            placeholderTextColor="#999"
+            placeholderTextColor={theme.placeholder}
             value={inputText}
             onChangeText={setInputText}
             multiline={false}
@@ -288,44 +341,96 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
           <TouchableOpacity style={styles.iconButton} onPress={handleSendImage} disabled={!canSendImage}>
             <Image
-              source={canSendImage ?
-                require('../assets/images/image_button_activate.png')
-                : require('../assets/images/image_button_un.png')
+              source={
+                canSendImage ? require('../assets/images/image_button_activate.png') : require('../assets/images/image_button_un.png')
               }
               style={styles.iconImage}
             />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={handleSendText}
-            disabled={!canSend}
-          >
+          <TouchableOpacity style={styles.iconButton} onPress={handleSendText} disabled={!canSend}>
             <Image
-              source={canSend
-                ? require('../assets/images/send_button_activate.png')
-                : require('../assets/images/send_button_un.png')
-              }
+              source={canSend ? require('../assets/images/send_button_activate.png') : require('../assets/images/send_button_un.png')}
               style={styles.iconImage}
             />
           </TouchableOpacity>
-
         </View>
       </View>
+
+      <Animated.View
+        pointerEvents={drawerOpen ? 'auto' : 'none'}
+        style={[StyleSheet.absoluteFillObject, styles.dimLayer, { backgroundColor: theme.dim, opacity: dimOpacity }]}
+      >
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={closeDrawer} />
+      </Animated.View>
+
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={[
+          styles.drawer,
+          {
+            width: drawerWidth,
+            paddingTop: insets.top + 18,
+            paddingBottom: Math.max(insets.bottom, 16),
+            backgroundColor: theme.surface,
+            borderRightColor: theme.border,
+            shadowColor: theme.shadow,
+            transform: [{ translateX: drawerTranslateX }],
+          },
+        ]}
+      >
+        <Text style={[styles.drawerTitle, { color: theme.text }]}>菜单</Text>
+        <Text style={[styles.drawerSubtitle, { color: theme.textMuted }]}>洛天依 Agent</Text>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleToggleDebug} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>{debugOpen ? '收起调试界面' : '打开调试界面'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenPreferences} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>配置偏好</Text>
+        </TouchableOpacity>
+
+        <View style={[styles.drawerSection, { borderTopColor: theme.border }]}>
+          <Text style={[styles.drawerSectionLabel, { color: theme.textMuted }]}>颜色模式</Text>
+          {(Object.keys(COLOR_MODE_LABELS) as ColorMode[]).map((mode) => (
+            <TouchableOpacity
+              key={mode}
+              style={[
+                styles.colorModeItem,
+                { backgroundColor: theme.surface, borderColor: theme.border },
+                colorMode === mode && { backgroundColor: theme.accentSoft, borderColor: theme.accent },
+              ]}
+              onPress={() => handleColorMode(mode)}
+              activeOpacity={0.78}
+            >
+              <Text style={[styles.colorModeText, { color: theme.textSoft }, colorMode === mode && { color: theme.accentText, fontWeight: '700' }]}>
+                {COLOR_MODE_LABELS[mode]}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={styles.drawerSpacer} />
+
+        {onLogout ? (
+          <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.dangerSurface }]} onPress={handleLogout} activeOpacity={0.78}>
+            <Text style={[styles.drawerItemText, { color: theme.dangerText }]}>登出</Text>
+          </TouchableOpacity>
+        ) : null}
+      </Animated.View>
     </View>
   );
 }
 
-
 const styles = StyleSheet.create({
-  background_image: {
+  root: {
+    flex: 1,
+    backgroundColor: 'white',
+  },
+  backgroundImage: {
     width: '100%',
     height: '100%',
-    transform: [
-      { scale: 1.1 },
-      { translateX: 0 },
-      { translateY: 0 }
-    ]
+    transform: [{ scale: 1.1 }, { translateX: 0 }, { translateY: 0 }],
   },
   live2dFixedLayer: {
     position: 'absolute',
@@ -334,23 +439,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     zIndex: 10,
     overflow: 'hidden',
-  },
-  logoutButton: {
-    position: 'absolute',
-    left: 10,
-    top: 10,
-    width: 32,
-    height: 32,
-    zIndex: 100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.5)',
-    borderRadius: 16,
-  },
-  logoutImage: {
-    width: 20,
-    height: 20,
-    resizeMode: 'contain',
   },
   thinkingBubble: {
     position: 'absolute',
@@ -363,13 +451,34 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  live2dThemeOverlay: {
+    zIndex: 50,
+  },
   webview: {
     flex: 1,
     backgroundColor: 'transparent',
   },
+  menuButton: {
+    position: 'absolute',
+    left: 10,
+    top: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.72)',
+    zIndex: 60,
+    elevation: 12,
+  },
+  menuIcon: {
+    width: 22,
+    height: 22,
+    resizeMode: 'contain',
+  },
   chatList: {
     flex: 1,
-    backgroundColor: '#E8E8E8', // 浅灰色背景，区分对话框
+    backgroundColor: '#E8E8E8',
   },
   chatListContent: {
     paddingTop: 10,
@@ -400,49 +509,12 @@ const styles = StyleSheet.create({
     height: 30,
     resizeMode: 'stretch',
   },
-  settingsBtn: {
-    position: 'absolute',
-    right: 56,
-    bottom: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(76, 175, 80, 0.9)',
-    zIndex: 60,
-    elevation: 12,
-  },
-  settingsIcon: {
-    width: 20,
-    height: 20,
-    resizeMode: 'contain',
-    tintColor: '#ffffff',
-  },
-  debugToggleBtn: {
-    position: 'absolute',
-    right: 10,
-    bottom: 10,
-    paddingHorizontal: 10,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#4f81bd',
-    zIndex: 60,
-    elevation: 12,
-  },
-  debugToggleText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
   debugPanel: {
     position: 'absolute',
     left: 8,
     right: 8,
-    top: 8,
-    bottom: 48,
+    top: 54,
+    bottom: 8,
     borderWidth: 1,
     borderColor: '#203244',
     borderRadius: 10,
@@ -481,5 +553,93 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     marginBottom: 2,
+  },
+  dimLayer: {
+    zIndex: 90,
+    backgroundColor: '#000',
+  },
+  drawer: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    zIndex: 100,
+    elevation: 18,
+    backgroundColor: '#ffffff',
+    borderRightWidth: 1,
+    borderRightColor: '#d9e1e8',
+    paddingHorizontal: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 4, height: 0 },
+  },
+  drawerTitle: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#243447',
+  },
+  drawerSubtitle: {
+    marginTop: 3,
+    marginBottom: 18,
+    fontSize: 12,
+    color: '#7b8794',
+  },
+  drawerItem: {
+    minHeight: 42,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    justifyContent: 'center',
+    backgroundColor: '#f4f8fb',
+    marginBottom: 10,
+  },
+  drawerItemText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#243447',
+  },
+  drawerSection: {
+    marginTop: 2,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#edf1f5',
+  },
+  drawerSectionLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#778492',
+    marginBottom: 8,
+  },
+  colorModeItem: {
+    minHeight: 34,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
+    marginBottom: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e3e8ee',
+  },
+  colorModeItemSelected: {
+    backgroundColor: '#e8f6ff',
+    borderColor: '#66CCFF',
+  },
+  colorModeText: {
+    fontSize: 13,
+    color: '#4b5967',
+  },
+  colorModeTextSelected: {
+    color: '#1674a3',
+    fontWeight: '700',
+  },
+  drawerSpacer: {
+    flex: 1,
+  },
+  logoutItem: {
+    backgroundColor: '#fff1f1',
+  },
+  logoutItemText: {
+    color: '#c24141',
   },
 });

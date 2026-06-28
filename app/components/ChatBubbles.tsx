@@ -2,10 +2,12 @@ import React from 'react';
 import { Image, ImageSourcePropType, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { CachedImage } from './CachedImage';
 import { ChatMessage } from '../types/chat';
+import { AppTheme, THEMES } from '../utils/theme';
 
 interface MessageItemProps {
   message: ChatMessage;
   onToggleAgentAudio?: (uuid: string) => void;
+  theme?: AppTheme;
 }
 
 function userStatusIcon(status?: ChatMessage['sendStatus']): ImageSourcePropType | null {
@@ -20,7 +22,7 @@ function agentAudioIcon(playState?: ChatMessage['audioPlayState']): ImageSourceP
 }
 
 // 文本气泡组件
-export const ChatBubble: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio }) => {
+export const ChatBubble: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio, theme = THEMES.light }) => {
   const { content, isUser, sendStatus, audioPlayState, uuid } = message;
   const statusIcon = userStatusIcon(sendStatus);
   const showPlayButton = !isUser && message.audioAvailable; // 只有机器人消息且有音频时才显示播放按钮
@@ -36,9 +38,10 @@ export const ChatBubble: React.FC<MessageItemProps> = ({ message, onToggleAgentA
         style={[
           styles.bubble,
           isUser ? styles.userBubble : styles.botBubble,
+          { backgroundColor: isUser ? theme.userBubble : theme.botBubble },
         ]}
       >
-        <Text style={styles.bubbleText}>{content}</Text>
+        <Text style={[styles.bubbleText, { color: isUser ? theme.userBubbleText : theme.bubbleText }]}>{content}</Text>
       </View>
 
       {!isUser ? (
@@ -84,11 +87,11 @@ export const ChatImageBubble: React.FC<MessageItemProps> = ({ message }) => {
 };
 
 // 统一的消息渲染组件
-export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio }) => {
+export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio, theme = THEMES.light }) => {
   if (message.type === 'image') {
-    return <ChatImageBubble message={message} onToggleAgentAudio={onToggleAgentAudio} />;
+    return <ChatImageBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
   }
-  return <ChatBubble message={message} onToggleAgentAudio={onToggleAgentAudio} />;
+  return <ChatBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
 };
 
 const styles = StyleSheet.create({

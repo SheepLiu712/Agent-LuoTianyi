@@ -4,11 +4,12 @@ import { addDebugTrace } from './debug_trace';
 export interface UserPreferences {
   relationship: string;
   speaking_style: string;
-  personality_traits: string[];
+  '#sym:personality_text'?: string;
+  personality_traits?: string[];
   custom_context: string;
 }
 
-/** 从服务端拉取用户的偏好设置 */
+/** 从服务端拉取用户的偏好设置。 */
 export async function getPreferences(
   username: string,
   token: string,
@@ -24,14 +25,14 @@ export async function getPreferences(
       return null;
     }
     const data = await response.json();
-    return data.preferences as UserPreferences;
+    return (data.preferences || data) as UserPreferences;
   } catch (error) {
     addDebugTrace('preferences', 'fetch error', { error: String(error) });
     return null;
   }
 }
 
-/** 将偏好设置覆写保存到服务端（HTTP） */
+/** 将偏好设置覆盖保存到服务端。 */
 export async function overwritePreferences(
   username: string,
   token: string,

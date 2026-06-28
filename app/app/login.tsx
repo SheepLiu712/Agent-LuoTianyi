@@ -1,14 +1,18 @@
-import React, { useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Keyboard,
   KeyboardAvoidingView, Modal, Platform, ScrollView,
   StyleSheet,
   Text, TextInput, TouchableOpacity,
+  useColorScheme,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { server_config } from '../config';
+import { addDebugTrace } from '../utils/debug_trace';
+import { COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../utils/theme';
 
 interface LoginScreenProps {
   onLogin: (username: string, password: string, autoLogin: boolean) => Promise<{ success: boolean; message: string }>;
@@ -19,8 +23,11 @@ type TabType = 'login' | 'register';
 
 export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
   const insets = useSafeAreaInsets();
+  const systemScheme = useColorScheme();
   const [activeTab, setActiveTab] = useState<TabType>('login');
   const [loading, setLoading] = useState(false);
+  const [colorMode, setColorMode] = useState<ColorMode>('light');
+  const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
 
   // 登录表单
   const [loginUsername, setLoginUsername] = useState('');
@@ -45,6 +52,30 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
   const [showServer, setShowServer] = useState(false);
   const [serverUrl, setServerUrl] = useState(server_config.BASE_URL);
   const [verifying, setVerifying] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(COLOR_MODE_STORAGE_KEY)
+      .then((storedMode) => {
+        if (!active) {
+          return;
+        }
+        if (storedMode === 'light' || storedMode === 'dark' || storedMode === 'system') {
+          setColorMode(storedMode);
+        }
+      })
+      .catch((error) => {
+        addDebugTrace('theme', 'load login color mode failed', { error: String(error) });
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const inputStyle = [styles.input, { backgroundColor: theme.inputBackground, borderColor: theme.border, color: theme.inputText }];
+  const modalInputStyle = [styles.modalInput, { backgroundColor: theme.inputBackground, borderColor: theme.border, color: theme.inputText }];
+  const labelStyle = [styles.label, { color: theme.textSoft }];
+  const modalTextColor = theme.name === 'dark' ? '#0F1419' : '#ffffff';
 
   const handleLogin = async () => {
     Keyboard.dismiss();
@@ -167,29 +198,29 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
+      style={{ flex: 1, backgroundColor: theme.root }}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={[styles.container, { paddingTop: insets.top + 40, paddingBottom: insets.bottom }]}>
+      <View style={[styles.container, { paddingTop: insets.top + 40, paddingBottom: insets.bottom, backgroundColor: theme.root }]}>
         {/* 标题 */}
-        <Text style={styles.title}>AI小洛</Text>
-        <Text style={styles.subtitle}>Chat with LuoTianyi</Text>
+        <Text style={[styles.title, { color: theme.accent }]}>AI小洛</Text>
+        <Text style={[styles.subtitle, { color: theme.textMuted }]}>Chat with LuoTianyi</Text>
 
         {/* Tab 切换 */}
-        <View style={styles.tabContainer}>
+        <View style={[styles.tabContainer, { backgroundColor: theme.surfaceAlt }]}>
           <TouchableOpacity
-            style={[styles.tab, activeTab === 'login' && styles.activeTab]}
+            style={[styles.tab, activeTab === 'login' && styles.activeTab, activeTab === 'login' && { backgroundColor: theme.surface }]}
             onPress={() => setActiveTab('login')}
           >
-            <Text style={[styles.tabText, activeTab === 'login' && styles.activeTabText]}>
+            <Text style={[styles.tabText, { color: theme.textMuted }, activeTab === 'login' && { color: theme.accent, fontWeight: '600' }]}>
               登录
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
-            style={[styles.tab, activeTab === 'register' && styles.activeTab]}
+            style={[styles.tab, activeTab === 'register' && styles.activeTab, activeTab === 'register' && { backgroundColor: theme.surface }]}
             onPress={() => setActiveTab('register')}
           >
-            <Text style={[styles.tabText, activeTab === 'register' && styles.activeTabText]}>
+            <Text style={[styles.tabText, { color: theme.textMuted }, activeTab === 'register' && { color: theme.accent, fontWeight: '600' }]}>
               注册
             </Text>
           </TouchableOpacity>
@@ -204,21 +235,21 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
           {activeTab === 'login' ? (
             /* ========== 登录表单 ========== */
             <View>
-              <Text style={styles.label}>用户名</Text>
+              <Text style={labelStyle}>用户名</Text>
               <TextInput
-                style={styles.input}
+                style={inputStyle}
                 placeholder="请输入用户名"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={loginUsername}
                 onChangeText={setLoginUsername}
                 autoCapitalize="none"
               />
 
-              <Text style={styles.label}>密码</Text>
+              <Text style={labelStyle}>密码</Text>
               <TextInput
-                style={styles.input}
+                style={inputStyle}
                 placeholder="请输入密码"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={loginPassword}
                 onChangeText={setLoginPassword}
                 secureTextEntry
@@ -230,20 +261,20 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
                 onPress={() => setAutoLogin(!autoLogin)}
                 activeOpacity={0.7}
               >
-                <View style={[styles.checkbox, autoLogin && styles.checkboxChecked]}>
-                  {autoLogin && <Text style={styles.checkmark}>✓</Text>}
+                <View style={[styles.checkbox, { borderColor: theme.border }, autoLogin && { backgroundColor: theme.accent, borderColor: theme.accent }]}>
+                  {autoLogin && <Text style={[styles.checkmark, { color: modalTextColor }]}>✓</Text>}
                 </View>
-                <Text style={styles.checkboxLabel}>自动登录</Text>
+                <Text style={[styles.checkboxLabel, { color: theme.textSoft }]}>自动登录</Text>
               </TouchableOpacity>
 
               {/* 登录按钮 */}
               <TouchableOpacity
-                style={[styles.button, loading && styles.buttonDisabled]}
+                style={[styles.button, { backgroundColor: theme.accent, shadowColor: theme.accent }, loading && styles.buttonDisabled]}
                 onPress={handleLogin}
                 disabled={loading}
                 activeOpacity={0.8}
               >
-                <Text style={styles.buttonText}>{loading ? '登录中...' : '登录'}</Text>
+                <Text style={[styles.buttonText, { color: modalTextColor }]}>{loading ? '登录中...' : '登录'}</Text>
               </TouchableOpacity>
 
               {/* 底部操作区 */}
@@ -252,54 +283,54 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
                   style={styles.actionLink}
                   onPress={() => setShowReset(true)}
                 >
-                  <Text style={styles.actionLinkText}>重置账号</Text>
+                  <Text style={[styles.actionLinkText, { color: theme.accent }]}>重置账号</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.actionLink}
                   onPress={() => setShowServer(true)}
                 >
-                  <Text style={styles.actionLinkText}>服务器地址</Text>
+                  <Text style={[styles.actionLinkText, { color: theme.accent }]}>服务器地址</Text>
                 </TouchableOpacity>
               </View>
             </View>
           ) : (
             /* ========== 注册表单 ========== */
             <View>
-              <Text style={styles.label}>用户名</Text>
+              <Text style={labelStyle}>用户名</Text>
               <TextInput
-                style={styles.input}
+                style={inputStyle}
                 placeholder="请输入用户名"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={regUsername}
                 onChangeText={setRegUsername}
                 autoCapitalize="none"
               />
 
-              <Text style={styles.label}>密码</Text>
+              <Text style={labelStyle}>密码</Text>
               <TextInput
-                style={styles.input}
+                style={inputStyle}
                 placeholder="请输入密码"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={regPassword}
                 onChangeText={setRegPassword}
                 secureTextEntry
               />
 
-              <Text style={styles.label}>确认密码</Text>
+              <Text style={labelStyle}>确认密码</Text>
               <TextInput
-                style={styles.input}
+                style={inputStyle}
                 placeholder="请再次输入密码"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={regConfirmPassword}
                 onChangeText={setRegConfirmPassword}
                 secureTextEntry
               />
 
-              <Text style={styles.label}>邀请码</Text>
+              <Text style={labelStyle}>邀请码</Text>
               <TextInput
-                style={styles.input}
+                style={inputStyle}
                 placeholder="请输入邀请码"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={inviteCode}
                 onChangeText={setInviteCode}
                 autoCapitalize="none"
@@ -307,12 +338,12 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
 
               {/* 注册按钮 */}
               <TouchableOpacity
-                style={[styles.button, styles.registerButton, loading && styles.buttonDisabled]}
+                style={[styles.button, { backgroundColor: theme.accent, shadowColor: theme.accent }, loading && styles.buttonDisabled]}
                 onPress={handleRegister}
                 disabled={loading}
                 activeOpacity={0.8}
               >
-                <Text style={styles.buttonText}>{loading ? '注册中...' : '注册'}</Text>
+                <Text style={[styles.buttonText, { color: modalTextColor }]}>{loading ? '注册中...' : '注册'}</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -321,37 +352,37 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
         {/* ========== 重置账号弹窗 ========== */}
         <Modal visible={showReset} transparent animationType="fade">
           <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>重置账号</Text>
-              <Text style={styles.modalDesc}>输入已使用的邀请码和新账号信息：</Text>
+            <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>重置账号</Text>
+              <Text style={[styles.modalDesc, { color: theme.textMuted }]}>输入已使用的邀请码和新账号信息：</Text>
 
               <TextInput
-                style={styles.modalInput}
+                style={modalInputStyle}
                 placeholder="已使用的邀请码"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={resetInvite}
                 onChangeText={setResetInvite}
               />
               <TextInput
-                style={styles.modalInput}
+                style={modalInputStyle}
                 placeholder="新用户名"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={resetUsername}
                 onChangeText={setResetUsername}
                 autoCapitalize="none"
               />
               <TextInput
-                style={styles.modalInput}
+                style={modalInputStyle}
                 placeholder="新密码"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={resetPassword}
                 onChangeText={setResetPassword}
                 secureTextEntry
               />
               <TextInput
-                style={styles.modalInput}
+                style={modalInputStyle}
                 placeholder="确认新密码"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={resetConfirm}
                 onChangeText={setResetConfirm}
                 secureTextEntry
@@ -359,13 +390,13 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity
-                  style={[styles.modalBtn, styles.modalBtnCancel]}
+                  style={[styles.modalBtn, { backgroundColor: theme.surfaceAlt }]}
                   onPress={() => { setShowReset(false); setResetting(false); }}
                 >
-                  <Text style={styles.modalBtnText}>取消</Text>
+                  <Text style={[styles.modalBtnText, { color: theme.textSoft }]}>取消</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalBtn, styles.modalBtnDanger, resetting && styles.buttonDisabled]}
+                  style={[styles.modalBtn, { backgroundColor: theme.dangerText }, resetting && styles.buttonDisabled]}
                   onPress={handleResetAccount}
                   disabled={resetting}
                 >
@@ -381,14 +412,14 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
         {/* ========== 服务器地址弹窗 ========== */}
         <Modal visible={showServer} transparent animationType="fade">
           <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>服务器地址</Text>
-              <Text style={styles.modalDesc}>输入自定义服务器地址（URL），输入后会自动验证连接：</Text>
+            <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
+              <Text style={[styles.modalTitle, { color: theme.text }]}>服务器地址</Text>
+              <Text style={[styles.modalDesc, { color: theme.textMuted }]}>输入自定义服务器地址（URL），输入后会自动验证连接：</Text>
 
               <TextInput
-                style={styles.modalInput}
+                style={modalInputStyle}
                 placeholder="https://your-server.com:60030"
-                placeholderTextColor="#aaa"
+                placeholderTextColor={theme.placeholder}
                 value={serverUrl}
                 onChangeText={setServerUrl}
                 autoCapitalize="none"
@@ -397,17 +428,17 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
 
               <View style={styles.modalButtons}>
                 <TouchableOpacity
-                  style={[styles.modalBtn, styles.modalBtnCancel]}
+                  style={[styles.modalBtn, { backgroundColor: theme.surfaceAlt }]}
                   onPress={() => setShowServer(false)}
                 >
-                  <Text style={styles.modalBtnText}>取消</Text>
+                  <Text style={[styles.modalBtnText, { color: theme.textSoft }]}>取消</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
-                  style={[styles.modalBtn, styles.modalBtnPrimary, verifying && styles.buttonDisabled]}
+                  style={[styles.modalBtn, { backgroundColor: theme.accent }, verifying && styles.buttonDisabled]}
                   onPress={handleVerifyServer}
                   disabled={verifying}
                 >
-                  <Text style={[styles.modalBtnText, { color: '#fff' }]}>
+                  <Text style={[styles.modalBtnText, { color: modalTextColor }]}>
                     {verifying ? '验证中...' : '验证并保存'}
                   </Text>
                 </TouchableOpacity>
