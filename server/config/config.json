@@ -110,7 +110,7 @@
                 "llm": {
                     "name": "qwen3.5-plus",
                     "enable_thinking": false,
-                    "use_json": true
+                    "use_json": false
                 },
                 "prompt_name": "summary_prompt"
             },

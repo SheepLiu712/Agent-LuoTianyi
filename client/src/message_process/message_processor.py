@@ -7,6 +7,7 @@ import os
 import re
 import base64
 import datetime
+import uuid
 from dataclasses import dataclass
 from collections import deque
 from typing import Callable, TYPE_CHECKING
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
 @dataclass
 class OutgoingMessage:
     local_id: str
+    client_msg_id: str
     kind: str
     payload: dict
     done_event: threading.Event
@@ -53,7 +55,7 @@ class MessageProcessor:
         network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state)
         self.send_text_func:Callable[..., dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
-        self.send_typing_func:Callable[[int], dict] = network_client.send_typing
+        self.send_typing_func:Callable[..., dict] = network_client.send_typing
         self.send_touch_func:Callable[..., dict] = network_client.send_touch
         self.send_preferences_func:Callable[[dict], dict] = network_client.send_preferences
         self.send_image_selecting_func:Callable = network_client.send_image_selecting
@@ -82,6 +84,7 @@ class MessageProcessor:
         local_id = self._next_local_id("typing")
         item = OutgoingMessage(
             local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
             kind="typing",
             payload={"text_length": text_length},
             done_event=threading.Event(),
@@ -94,6 +97,7 @@ class MessageProcessor:
         local_id = self._next_local_id("txt")
         item = OutgoingMessage(
             local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
             kind="text",
             payload={"text": text},
             done_event=threading.Event(),
@@ -108,6 +112,7 @@ class MessageProcessor:
         local_id = self._next_local_id("proactive")
         item = OutgoingMessage(
             local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
             kind="proactive",
             payload={"text": text},
             done_event=threading.Event(),
@@ -125,6 +130,7 @@ class MessageProcessor:
         local_id = self._next_local_id("img")
         item = OutgoingMessage(
             local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
             kind="image",
             payload={
                 "image_base64": prepared["image_base64"],
@@ -154,6 +160,7 @@ class MessageProcessor:
             payload.update(touch_meta)
         item = OutgoingMessage(
             local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
             kind="touch",
             payload=payload,
             done_event=threading.Event(),
@@ -309,25 +316,38 @@ class MessageProcessor:
         self._reply_counter += 1
         return f"{prefix}_{int(time.time() * 1000)}_{self._reply_counter}"
 
+    def _next_client_msg_id(self) -> str:
+        return f"c-{uuid.uuid4().hex[:12]}"
+
 
     def _send_one(self, item: OutgoingMessage) -> dict:
         if item.kind == "text":
-            return self.send_text_func(item.payload["text"], ack_timeout=1.0)
+            return self.send_text_func(item.payload["text"], ack_timeout=1.0, client_msg_id=item.client_msg_id)
         if item.kind == "proactive":
-            return self.send_text_func(item.payload["text"], is_proactive=True, ack_timeout=1.0)
+            return self.send_text_func(
+                item.payload["text"],
+                is_proactive=True,
+                ack_timeout=1.0,
+                client_msg_id=item.client_msg_id,
+            )
         if item.kind == "image":
             return self.send_image_func(
                 image_base64=item.payload["image_base64"],
                 mime_type=item.payload["mime_type"],
                 image_client_path=item.payload["image_client_path"],
                 ack_timeout=5.0,
+                client_msg_id=item.client_msg_id,
             )
         if item.kind == "typing":
-            return self.send_typing_func(text_length=item.payload["text_length"], ack_timeout=1.0)
+            return self.send_typing_func(
+                text_length=item.payload["text_length"],
+                ack_timeout=1.0,
+                client_msg_id=item.client_msg_id,
+            )
         if item.kind == "touch":
             payload = item.payload
             touch_area = payload.get("touchArea") or payload.get("touch_area", "")
-            kwargs = {"touch_area": touch_area, "ack_timeout": 1.0}
+            kwargs = {"touch_area": touch_area, "ack_timeout": 1.0, "client_msg_id": item.client_msg_id}
             if "click_frequency" in payload:
                 kwargs["click_frequency"] = payload["click_frequency"]
             if "timeSinceLastSentTouch" in payload:

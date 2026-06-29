@@ -91,13 +91,18 @@ async def chat_ws(
                     system_runtime.database_manager.save_user_preferences(ws_connection.user_uuid, preferences)
                 continue
 
+            if websocket_service.is_chat_related_event(event):
+                if websocket_service.is_duplicate_client_message(ws_connection, event):
+                    await websocket_service.send_duplicate_ack_event(ws_connection, event)
+                    continue
+                await websocket_service.send_ack_event(ws_connection, event)  # 先确认收到，避免图片预处理拖慢 ACK
+
             chat_event = websocket_service.convert_to_chat_input_event(
                 event,
                 sender_user_id=ws_connection.user_uuid,
             )
             if chat_event is None:
                 continue
-            await websocket_service.send_ack_event(ws_connection, event)  # 收到消息后发送 ACK 确认收到，之后进处理流程
             await chat_stream.feed_event(chat_event)
     except WebSocketDisconnect:
         gcsm.ws_lost_connection(ws_connection)

@@ -99,15 +99,27 @@ class NetworkClient:
             return False, str(exc)
 
 
-    def send_chat(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0):
+    def send_chat(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0, client_msg_id: str | None = None):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
 
-        return self.ws_transport.submit_user_text(text, is_proactive=is_proactive, ack_timeout=ack_timeout)
+        return self.ws_transport.submit_user_text(
+            text,
+            is_proactive=is_proactive,
+            ack_timeout=ack_timeout,
+            client_msg_id=client_msg_id,
+        )
 
-    def send_image(self, image_base64: str, mime_type: str, image_client_path: str | None = None, ack_timeout: float = 10.0):
+    def send_image(
+        self,
+        image_base64: str,
+        mime_type: str,
+        image_client_path: str | None = None,
+        ack_timeout: float = 10.0,
+        client_msg_id: str | None = None,
+    ):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
 
         try:
             return self.ws_transport.submit_user_image(
@@ -115,29 +127,47 @@ class NetworkClient:
                 mime_type=mime_type,
                 image_client_path=image_client_path,
                 ack_timeout=ack_timeout,
+                client_msg_id=client_msg_id,
             )
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+            return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
         
-    def send_typing(self, text_length: int, ack_timeout: float = 10.0):
+    def send_typing(self, text_length: int, ack_timeout: float = 10.0, client_msg_id: str | None = None):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
 
         try:
-            return self.ws_transport.submit_typing_event(text_length=text_length, ack_timeout=ack_timeout)
+            return self.ws_transport.submit_typing_event(
+                text_length=text_length,
+                ack_timeout=ack_timeout,
+                client_msg_id=client_msg_id,
+            )
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+            return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
 
-    def send_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None, ack_timeout: float = 10.0):
+    def send_touch(
+        self,
+        touch_area: str | list,
+        click_frequency: dict = None,
+        touch_meta: dict = None,
+        ack_timeout: float = 10.0,
+        client_msg_id: str | None = None,
+    ):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
         try:
-            return self.ws_transport.submit_user_touch(touch_area=touch_area, click_frequency=click_frequency, touch_meta=touch_meta, ack_timeout=ack_timeout)
+            return self.ws_transport.submit_user_touch(
+                touch_area=touch_area,
+                click_frequency=click_frequency,
+                touch_meta=touch_meta,
+                ack_timeout=ack_timeout,
+                client_msg_id=client_msg_id,
+            )
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+            return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
 
     def send_image_selecting(self, ack_timeout: float = 5.0):
         """通知服务端用户开始选择图片。"""

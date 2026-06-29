@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from typing import TYPE_CHECKING, Dict
 import time
 from fastapi import WebSocket, WebSocketDisconnect
@@ -19,6 +20,9 @@ if TYPE_CHECKING:
 class WebSocketService:
     def __init__(self):
         self.logger = get_logger(__name__)
+        self._recent_client_messages: OrderedDict[str, float] = OrderedDict()
+        self._recent_client_msg_ttl_seconds = 600.0
+        self._recent_client_msg_limit = 4096
 
     async def try_recv_client_msg(self, websocket_connection: "WebSocketConnection") -> WSMessage | None:
         '''
@@ -62,7 +66,8 @@ class WebSocketService:
         return WSMessage(
             event_type=event.get("type"),
             payload=event.get("payload", {}),
-            client_msg_id=event.get("client_msg_id")
+            client_msg_id=event.get("client_msg_id"),
+            ts=event.get("ts"),
         )
     
     async def handle_auth_event(
@@ -172,6 +177,47 @@ class WebSocketService:
             reply_to=event.client_msg_id,
         )
         await websocket_connection.websocket.send_json(ack_event)
+
+    async def send_duplicate_ack_event(self, websocket_connection: "WebSocketConnection", event: WSMessage) -> None:
+        """对重复客户端消息返回 ACK，但不让上游再次处理同一条业务消息。"""
+        if event.client_msg_id is None:
+            self.logger.warning("Received duplicate event without client_msg_id, cannot send ACK")
+            return
+        ack_event = self._make_event(
+            WSEventType.SERVER_ACK,
+            {
+                "received_event_type": event.event_type,
+                "duplicate": True,
+            },
+            reply_to=event.client_msg_id,
+        )
+        await websocket_connection.websocket.send_json(ack_event)
+
+    def is_duplicate_client_message(self, websocket_connection: "WebSocketConnection", event: WSMessage) -> bool:
+        """按用户和 client_msg_id 做短期幂等，避免客户端 ACK 超时重发导致重复处理。"""
+        if not event.client_msg_id:
+            return False
+
+        now = time.monotonic()
+        self._prune_recent_client_messages(now)
+        owner = websocket_connection.user_uuid or websocket_connection.user_name or "anonymous"
+        key = f"{owner}:{event.client_msg_id}"
+        if key in self._recent_client_messages:
+            self._recent_client_messages.move_to_end(key)
+            return True
+
+        self._recent_client_messages[key] = now
+        while len(self._recent_client_messages) > self._recent_client_msg_limit:
+            self._recent_client_messages.popitem(last=False)
+        return False
+
+    def _prune_recent_client_messages(self, now: float) -> None:
+        expired_before = now - self._recent_client_msg_ttl_seconds
+        while self._recent_client_messages:
+            _, accepted_at = next(iter(self._recent_client_messages.items()))
+            if accepted_at >= expired_before:
+                break
+            self._recent_client_messages.popitem(last=False)
 
     def is_chat_related_event(self, event: WSMessage) -> bool:
         return is_chat_related_ws_message(event)

@@ -39,26 +39,26 @@ export class NetworkClient {
     }
   }
 
-  sendChat(text: string, isProactive = false): Promise<SendResult> {
+  sendChat(text: string, isProactive = false, clientMsgId?: string): Promise<SendResult> {
     if (!this.transport) {
       addDebugTrace('network', 'sendChat blocked: no transport');
       return Promise.resolve({
         ok: false,
-        request_id: `local-${Date.now()}`,
+        request_id: clientMsgId || `local-${Date.now()}`,
         error: 'not logged in',
         drop: true,
       });
     }
     addDebugTrace('network', 'sendChat', { textLength: text.length });
-    return this.transport.submitUserText(text, isProactive, 10000);
+    return this.transport.submitUserText(text, isProactive, 10000, clientMsgId);
   }
 
-  async sendImage(imageUri: string, mimeType: string): Promise<SendResult> {
+  async sendImage(imageUri: string, mimeType: string, clientMsgId?: string): Promise<SendResult> {
     if (!this.transport) {
       addDebugTrace('network', 'sendImage blocked: no transport');
       return {
         ok: false,
-        request_id: `local-${Date.now()}`,
+        request_id: clientMsgId || `local-${Date.now()}`,
         error: 'not logged in',
         drop: true,
       };
@@ -75,30 +75,36 @@ export class NetworkClient {
         mimeType,
         imageUri,
         10000,
+        clientMsgId,
       );
     } catch {
       addDebugTrace('network', 'sendImage failed: read file error', { imageUri });
       return {
         ok: false,
-        request_id: `local-${Date.now()}`,
+        request_id: clientMsgId || `local-${Date.now()}`,
         error: 'failed to read image file',
         drop: true,
       };
     }
   }
 
-  sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>): Promise<SendResult> {
+  sendTouch(
+    touchArea: string | string[],
+    clickFrequency?: Record<string, number>,
+    touchMeta?: Record<string, unknown>,
+    clientMsgId?: string,
+  ): Promise<SendResult> {
     if (!this.transport) {
       addDebugTrace('network', 'sendTouch blocked: no transport');
       return Promise.resolve({
         ok: false,
-        request_id: `local-${Date.now()}`,
+        request_id: clientMsgId || `local-${Date.now()}`,
         error: 'not logged in',
         drop: true,
       });
     }
     addDebugTrace('network', 'sendTouch', { touchArea });
-    return this.transport.submitUserTouch(touchArea, clickFrequency, touchMeta, 10000);
+    return this.transport.submitUserTouch(touchArea, clickFrequency, touchMeta, 10000, clientMsgId);
   }
 
   sendPreferences(preferences: Record<string, unknown>): Promise<SendResult> {
@@ -115,46 +121,46 @@ export class NetworkClient {
     return this.transport.submitUserPreferences(preferences, 10000);
   }
 
-  sendTypingEvent(textLength: number): Promise<SendResult> {
+  sendTypingEvent(textLength: number, clientMsgId?: string): Promise<SendResult> {
     if (!this.transport) {
       addDebugTrace('network', 'sendTyping blocked: no transport');
       return Promise.resolve({
         ok: false,
-        request_id: `local-${Date.now()}`,
+        request_id: clientMsgId || `local-${Date.now()}`,
         error: 'not logged in',
         drop: true,
       });
     }
     addDebugTrace('network', 'sendTyping', { textLength });
-    return this.transport.submitUserTyping(textLength, 10000);
+    return this.transport.submitUserTyping(textLength, 10000, clientMsgId);
   }
 
-  sendImageSelecting(): Promise<SendResult> {
+  sendImageSelecting(clientMsgId?: string): Promise<SendResult> {
     if (!this.transport) {
       addDebugTrace('network', 'sendImageSelecting blocked: no transport');
       return Promise.resolve({
         ok: false,
-        request_id: `local-${Date.now()}`,
+        request_id: clientMsgId || `local-${Date.now()}`,
         error: 'not logged in',
         drop: true,
       });
     }
     addDebugTrace('network', 'sendImageSelecting');
-    return this.transport.submitUserImageSelecting(5000);
+    return this.transport.submitUserImageSelecting(5000, clientMsgId);
   }
 
-  sendImageSelectingCancel(): Promise<SendResult> {
+  sendImageSelectingCancel(clientMsgId?: string): Promise<SendResult> {
     if (!this.transport) {
       addDebugTrace('network', 'sendImageSelectingCancel blocked: no transport');
       return Promise.resolve({
         ok: false,
-        request_id: `local-${Date.now()}`,
+        request_id: clientMsgId || `local-${Date.now()}`,
         error: 'not logged in',
         drop: true,
       });
     }
     addDebugTrace('network', 'sendImageSelectingCancel');
-    return this.transport.submitUserImageSelectingCancel(5000);
+    return this.transport.submitUserImageSelectingCancel(5000, clientMsgId);
   }
 
 

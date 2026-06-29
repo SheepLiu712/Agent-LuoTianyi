@@ -131,12 +131,12 @@ export class WebSocketTransport {
     }
   }
 
-  async submitUserText(message: string, isProactive = false, ackTimeout = 10000): Promise<AckResult> {
+  async submitUserText(message: string, isProactive = false, ackTimeout = 10000, clientMsgId?: string): Promise<AckResult> {
     const payload: Record<string, unknown> = { message };
     if (isProactive) {
       payload.is_proactive = true;
     }
-    return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout);
+    return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout, clientMsgId);
   }
 
   async submitUserImage(
@@ -144,6 +144,7 @@ export class WebSocketTransport {
     mimeType: string,
     imageClientPath: string,
     ackTimeout = 10000,
+    clientMsgId?: string,
   ): Promise<AckResult> {
     return this.sendWithAck(
       WSEventType.USER_IMAGE,
@@ -153,14 +154,26 @@ export class WebSocketTransport {
         image_client_path: imageClientPath,
       },
       ackTimeout,
+      clientMsgId,
     );
   }
 
-  async submitUserTyping(textLength: number, ackTimeout = 5000): Promise<AckResult> {
-    return this.sendWithAck(WSEventType.USER_TYPING, { is_typing: true, text_length: textLength }, ackTimeout);
+  async submitUserTyping(textLength: number, ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
+    return this.sendWithAck(
+      WSEventType.USER_TYPING,
+      { is_typing: true, text_length: textLength },
+      ackTimeout,
+      clientMsgId,
+    );
   }
 
-  async submitUserTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>, ackTimeout = 5000): Promise<AckResult> {
+  async submitUserTouch(
+    touchArea: string | string[],
+    clickFrequency?: Record<string, number>,
+    touchMeta?: Record<string, unknown>,
+    ackTimeout = 5000,
+    clientMsgId?: string,
+  ): Promise<AckResult> {
     const payload: Record<string, unknown> = {};
     if (typeof touchArea === 'string') {
       payload.touch_area = touchArea;
@@ -173,19 +186,19 @@ export class WebSocketTransport {
     if (touchMeta) {
       Object.assign(payload, touchMeta);
     }
-    return this.sendWithAck(WSEventType.USER_TOUCH, payload, ackTimeout);
+    return this.sendWithAck(WSEventType.USER_TOUCH, payload, ackTimeout, clientMsgId);
   }
 
-  async submitUserImageSelecting(ackTimeout = 5000): Promise<AckResult> {
-    return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING, {}, ackTimeout);
+  async submitUserImageSelecting(ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
+    return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING, {}, ackTimeout, clientMsgId);
   }
 
-  async submitUserImageSelectingCancel(ackTimeout = 5000): Promise<AckResult> {
-    return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING_CANCEL, {}, ackTimeout);
+  async submitUserImageSelectingCancel(ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
+    return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING_CANCEL, {}, ackTimeout, clientMsgId);
   }
 
-  async submitUserPreferences(preferences: Record<string, unknown>, ackTimeout = 5000): Promise<AckResult> {
-    return this.sendWithAck(WSEventType.USER_PREFERENCE_SYNC, preferences, ackTimeout);
+  async submitUserPreferences(preferences: Record<string, unknown>, ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
+    return this.sendWithAck(WSEventType.USER_PREFERENCE_SYNC, preferences, ackTimeout, clientMsgId);
   }
 
   private connect() {
@@ -371,8 +384,9 @@ export class WebSocketTransport {
     eventType: string,
     payload: Record<string, unknown>,
     timeoutMs: number,
+    clientMsgId?: string,
   ): Promise<AckResult> {
-    const requestId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const requestId = clientMsgId || `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     try {
       await this.waitUntilReady();
