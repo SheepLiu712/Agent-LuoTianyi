@@ -76,16 +76,28 @@ class GlobalSpeakingWorker:
             job = await self.queue.get()
             try:
                 if isinstance(job.job_content, OneSentenceChat):
-                    text = job.job_content.content
+                    display_text = job.job_content.content
+                    sound_text = job.job_content.sound_content
                     expression = job.job_content.expression
+                    if not sound_text.strip():
+                        resp = ChatResponse(
+                            uuid=job.job_content.uuid,
+                            audio="",
+                            is_final_package=True,
+                            text=display_text,
+                            expression=expression,
+                        )
+                        await job.send_reply_callback(resp)
+                        continue
+
                     # Drive the sync TTS generator in a thread so the event loop
                     # can service other tasks between chunks.
                     sync_gen = self.capabilities.speech.say_stream(
-                        job.character_id, text, job.job_content.tone
+                        job.character_id, sound_text, job.job_content.tone
                     )
                     is_first = True
                     async for audio_chunk in _iter_sync_gen_in_executor(sync_gen):
-                        chunk_text = text if is_first else ""
+                        chunk_text = display_text if is_first else ""
                         is_first = False
                         resp = ChatResponse(
                             uuid=job.job_content.uuid, audio=audio_chunk,

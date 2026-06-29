@@ -3,6 +3,7 @@
 import re
 from typing import Callable, Optional, TYPE_CHECKING
 
+from src.agent.text_cleaning import build_sound_content
 from src.utils.helpers import get_unified_song_name
 
 if TYPE_CHECKING:
@@ -111,4 +112,9 @@ class StructuredResponseParser:
         if not content:
             return None
         expression, tts_tone = self.tone_mapper(tone.lower().strip())
-        return self.sentence_cls(expression=expression, tone=tts_tone, content=content)
+        return self.sentence_cls(
+            expression=expression,
+            tone=tts_tone,
+            content=content,
+            sound_content=build_sound_content(content),
+        )

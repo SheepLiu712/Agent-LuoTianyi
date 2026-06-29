@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.agent.prompt_assembly import RealizationPromptAssembler
 from src.agent.response_parser import StructuredResponseParser
+from src.agent.text_cleaning import build_sound_content
 from src.domain import CharacterProfile
 from src.utils.enum_type import ContextType
 from src.utils.llm.llm_module import LLMModule
@@ -44,6 +45,10 @@ class OneSentenceChat(OneResponseLine):
     tone: str = ""
     content: str = ""
     uuid: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.sound_content and self.content:
+            self.sound_content = build_sound_content(self.content)
 
     def get_content(self) -> str:
         return self.content
