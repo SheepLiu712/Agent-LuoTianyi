@@ -83,14 +83,6 @@ async def chat_ws(
                 await websocket_service.handle_ping_event(ws_connection, event)
                 continue
 
-            # 处理用户偏好同步事件
-            if event.event_type == WSEventType.USER_PREFERENCE_SYNC.value:
-                await websocket_service.send_ack_event(ws_connection, event)
-                preferences = event.payload if isinstance(event.payload, dict) else {}
-                if ws_connection.user_uuid and preferences:
-                    system_runtime.database_manager.save_user_preferences(ws_connection.user_uuid, preferences)
-                continue
-
             if websocket_service.is_chat_related_event(event):
                 if websocket_service.is_duplicate_client_message(ws_connection, event):
                     await websocket_service.send_duplicate_ack_event(ws_connection, event)

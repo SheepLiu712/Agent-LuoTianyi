@@ -197,10 +197,6 @@ export class WebSocketTransport {
     return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING_CANCEL, {}, ackTimeout, clientMsgId);
   }
 
-  async submitUserPreferences(preferences: Record<string, unknown>, ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
-    return this.sendWithAck(WSEventType.USER_PREFERENCE_SYNC, preferences, ackTimeout, clientMsgId);
-  }
-
   private connect() {
     if (this.isStopped) {
       return;

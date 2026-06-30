@@ -23,7 +23,6 @@ describe('WSEventType constants', () => {
       'USER_TYPING',
       'USER_AUTH',
       'USER_TOUCH',
-      'USER_PREFERENCE_SYNC',
       'HB_PING',
       'HB_PONG',
       'DATE_DETECTED',
@@ -47,7 +46,6 @@ describe('WSEventType constants', () => {
     expect(WSEventType.USER_TYPING).toBe('user_typing');
     expect(WSEventType.USER_AUTH).toBe('user_auth');
     expect(WSEventType.USER_TOUCH).toBe('user_touch');
-    expect(WSEventType.USER_PREFERENCE_SYNC).toBe('user_preference_sync');
     expect(WSEventType.HB_PING).toBe('hb_ping');
     expect(WSEventType.HB_PONG).toBe('hb_pong');
   });

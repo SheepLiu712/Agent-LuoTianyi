@@ -34,7 +34,6 @@ class AgentBinder(QObject):
         register_callback: Callable[[str, str, str], Tuple[bool, str]],
         reset_account_callback: Callable[[str, str, str], Tuple[bool, str]] | None = None,
         send_proactive_text_callback: Callable[[str], str] | None = None,
-        send_preferences_callback: Callable[[dict], None] | None = None,
         set_base_url_callback: Callable[[str, bool], None] | None = None,
         send_image_selecting_callback: Callable[[], None] | None = None,
         send_image_selecting_cancel_callback: Callable[[], None] | None = None,
@@ -47,7 +46,6 @@ class AgentBinder(QObject):
         self.send_typing_callback = send_typing_callback
         self.send_touch_callback = send_touch_callback
         self.send_proactive_text_callback = send_proactive_text_callback
-        self.send_preferences_callback = send_preferences_callback
         self.reset_account_callback = reset_account_callback
         self.play_local_tts_callback = play_local_tts_callback
         self.stop_local_tts_callback = stop_local_tts_callback
@@ -216,10 +214,6 @@ class AgentBinder(QObject):
             return msg_id
         return None
 
-    def on_send_preferences(self, preferences: dict):
-        """将用户偏好设置发送到服务端保存。"""
-        if self.send_preferences_callback:
-            self.send_preferences_callback(preferences)
     def _scheduled_start_thinking(self):
         """Legacy hook kept for compatibility; thinking bubble is no longer auto-driven."""
         return

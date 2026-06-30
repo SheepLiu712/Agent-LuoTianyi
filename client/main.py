@@ -65,7 +65,6 @@ if __name__ == "__main__":
         register_callback = network_client.register,
         reset_account_callback = network_client.reset_account,
         send_proactive_text_callback = message_processor.send_proactive_text,
-        send_preferences_callback = message_processor.send_preferences,
         set_base_url_callback = network_client.set_base_url,
         send_image_selecting_callback = message_processor.send_image_selecting_start,
         send_image_selecting_cancel_callback = message_processor.send_image_selecting_cancel,

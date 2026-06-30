@@ -105,9 +105,6 @@ export const useChatLogic = (
         sendTouch: async (touchArea, clickFrequency, touchMeta) => {
           await messageProcessorRef.current?.sendTouch(touchArea, clickFrequency, touchMeta);
         },
-        sendPreferences: async (preferences) => {
-          await messageProcessorRef.current?.sendPreferences(preferences);
-        },
         sendTyping: async (textLength) => {
           await messageProcessorRef.current?.sendTypingEvent(textLength);
         },

@@ -5,7 +5,6 @@ export interface BinderSendCallbacks {
   sendImage: (uuid: string, imageUri: string, mimeType: string) => Promise<void>;
   sendProactiveText: (uuid: string, text: string) => Promise<void>;
   sendTouch: (touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) => Promise<void>;
-  sendPreferences: (preferences: Record<string, unknown>) => Promise<void>;
   sendTyping: (textLength: number) => Promise<void>;
   sendImageSelecting: () => Promise<void>;
   sendImageSelectingCancel: () => Promise<void>;
@@ -67,10 +66,6 @@ export class AgentBinder {
       return this.sendCallbacks.sendTouch(touchArea, clickFrequency);
     }
     return this.sendCallbacks.sendTouch(touchArea, clickFrequency, touchMeta);
-  }
-
-  sendPreferences(preferences: Record<string, unknown>) {
-    return this.sendCallbacks.sendPreferences(preferences);
   }
 
   emitAgentMessage(payload: AgentMessagePayload) {
