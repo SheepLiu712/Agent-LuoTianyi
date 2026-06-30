@@ -290,6 +290,63 @@ class TestConversations:
         history = db_manager.get_history_from_db(user_uuid, 0, 10)
         assert history[2].data == {"song": "测试歌", "segment": "hook"}
 
+    def test_context_compaction_preserves_concurrent_new_messages(self, db_manager: "DatabaseManager", sample_user: str):
+        """压缩期间新写入的对话应保留在未压缩窗口中。"""
+        user_uuid = db_manager.get_user_uuid_by_username(sample_user)
+        db_manager.add_conversations(
+            user_uuid,
+            [
+                ConversationItem(
+                    timestamp=f"2026-06-22 10:0{i}:00",
+                    source="user" if i % 2 == 0 else "agent",
+                    content=f"旧对话{i}",
+                    type="text",
+                    uuid=f"conv-concurrent-old-{i}",
+                )
+                for i in range(4)
+            ],
+        )
+        snapshot_count = db_manager.get_context_count(user_uuid)
+        assert snapshot_count == 4
+
+        db_manager.add_conversations(
+            user_uuid,
+            [
+                ConversationItem(
+                    timestamp="2026-06-22 10:04:00",
+                    source="user",
+                    content="压缩期间新增1",
+                    type="text",
+                    uuid="conv-concurrent-new-1",
+                ),
+                ConversationItem(
+                    timestamp="2026-06-22 10:05:00",
+                    source="agent",
+                    content="压缩期间新增2",
+                    type="text",
+                    uuid="conv-concurrent-new-2",
+                ),
+            ],
+        )
+
+        ok = db_manager.compact_conversation_context(
+            user_uuid,
+            "并发压缩摘要",
+            keep_recent_count=2,
+            expected_context_count=snapshot_count,
+        )
+        assert ok is True
+
+        compacted_state = db_manager.get_conversation_context_state(user_uuid)
+        assert compacted_state["summary"] == "并发压缩摘要"
+        assert compacted_state["context_count"] == 4
+        assert [c["content"] for c in compacted_state["conversations"]] == [
+            "旧对话2",
+            "旧对话3",
+            "压缩期间新增1",
+            "压缩期间新增2",
+        ]
+
     def test_context_is_scoped_by_character(self, db_manager: "DatabaseManager", sample_user: str):
         """同一用户的不同角色聊天流应使用独立上下文。"""
         user_uuid = db_manager.get_user_uuid_by_username(sample_user)

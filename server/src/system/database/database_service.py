@@ -836,25 +836,29 @@ class DatabaseManager:
         redis = self._ensure_redis()
         db = self._new_session()
         try:
-            def _write() -> bool:
+            def _write() -> Optional[int]:
                 user = db.query(User).filter(User.uuid == user_id).first()
                 if not user:
-                    return False
+                    return None
                 context = self._get_or_create_conversation_context(db, user, character_id)
-                if expected_context_count is not None and (context.context_memory_count or 0) != expected_context_count:
-                    return False
+                current_context_count = context.context_memory_count or 0
+                retained_context_count = keep_recent_count
+                if expected_context_count is not None:
+                    if current_context_count < expected_context_count:
+                        return None
+                    retained_context_count += current_context_count - expected_context_count
                 context.context_summary = new_summary
-                context.context_memory_count = keep_recent_count
+                context.context_memory_count = retained_context_count
                 if character_id == "luotianyi":
                     user.context_summary = new_summary
-                    user.context_memory_count = keep_recent_count
+                    user.context_memory_count = retained_context_count
                 if commit:
                     db.commit()
-                return True
+                return retained_context_count
 
-            updated = run_sql_write(_write)
+            retained_context_count = run_sql_write(_write)
 
-            if updated:
+            if retained_context_count is not None:
                 redis_key = self._context_redis_key(user_id, character_id)
                 with redis.pipeline() as pipe:
                     for _ in range(3):
@@ -864,11 +868,11 @@ class DatabaseManager:
                             if data:
                                 data.summary = new_summary
                                 convs = data.conversations
-                                if keep_recent_count > 0:
-                                    data.conversations = convs[-keep_recent_count:]
+                                if retained_context_count > 0:
+                                    data.conversations = convs[-retained_context_count:]
                                 else:
                                     data.conversations = []
-                                data.context_count = keep_recent_count
+                                data.context_count = retained_context_count
                                 pipe.multi()
                                 pipe.setex(redis_key, 3600, data)
                                 pipe.execute()
@@ -877,7 +881,7 @@ class DatabaseManager:
                             break
                         except WatchError:
                             continue
-            return bool(updated)
+            return retained_context_count is not None
         except Exception as e:
             logger.error(f"compact_conversation_context error: {e}")
             db.rollback()

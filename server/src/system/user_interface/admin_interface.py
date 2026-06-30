@@ -42,9 +42,14 @@ async def llm_summary(
 async def llm_calls(
     limit: int = Query(default=100, ge=1, le=1000),
     module_name: str | None = None,
+    trace_id: str | None = None,
     system_runtime: SystemRuntime = Depends(get_runtime),
 ) -> list[dict[str, Any]]:
-    return system_runtime.observability.get_recent_llm_calls(limit=limit, module_name=module_name)
+    return system_runtime.observability.get_recent_llm_calls(
+        limit=limit,
+        module_name=module_name,
+        trace_id=trace_id,
+    )
 
 
 @router.get("/pipeline/latency")
@@ -67,6 +72,23 @@ async def pipeline_spans(
         trace_id=trace_id,
         order_by_slow=slow,
     )
+
+
+@router.get("/traces")
+async def traces(
+    days: int = Query(default=7, ge=1, le=90),
+    limit: int = Query(default=100, ge=1, le=1000),
+    system_runtime: SystemRuntime = Depends(get_runtime),
+) -> list[dict[str, Any]]:
+    return system_runtime.observability.get_trace_summaries(days=days, limit=limit)
+
+
+@router.get("/traces/{trace_id}")
+async def trace_detail(
+    trace_id: str,
+    system_runtime: SystemRuntime = Depends(get_runtime),
+) -> dict[str, Any]:
+    return system_runtime.observability.get_trace_detail(trace_id)
 
 
 @router.get("/logs")

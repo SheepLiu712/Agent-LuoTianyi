@@ -27,6 +27,24 @@ type LlmSummary = {
   daily: Array<Record<string, string | number>>;
 };
 
+type LlmCall = {
+  id: number;
+  ts: string;
+  trace_id?: string;
+  user_id?: string;
+  module_name: string;
+  interface_name?: string;
+  model_name?: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  latency_ms: number;
+  success: number;
+  error_type?: string;
+  error_message?: string;
+  metadata?: Record<string, unknown>;
+};
+
 type PipelineSpan = {
   id: number;
   trace_id: string;
@@ -48,7 +66,31 @@ type LogEvent = {
   traceback?: string;
 };
 
-type Page = 'dashboard' | 'llm' | 'pipeline' | 'logs';
+type TraceSummary = {
+  trace_id: string;
+  user_id?: string;
+  topic_id?: string;
+  start_ts?: string;
+  end_ts?: string;
+  duration_ms: number;
+  span_count: number;
+  total_span_ms: number;
+  max_span_ms: number;
+  llm_call_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  total_llm_latency_ms: number;
+  failed_llm_calls: number;
+};
+
+type TraceDetail = {
+  summary: TraceSummary;
+  spans: PipelineSpan[];
+  llm_calls: LlmCall[];
+};
+
+type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'logs';
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
@@ -86,6 +128,7 @@ function App() {
           <button className={page === 'dashboard' ? 'active' : ''} onClick={() => setPage('dashboard')}>首页</button>
           <button className={page === 'llm' ? 'active' : ''} onClick={() => setPage('llm')}>LLM 统计</button>
           <button className={page === 'pipeline' ? 'active' : ''} onClick={() => setPage('pipeline')}>链路耗时</button>
+          <button className={page === 'traces' ? 'active' : ''} onClick={() => setPage('traces')}>链路追踪</button>
           <button className={page === 'logs' ? 'active' : ''} onClick={() => setPage('logs')}>异常日志</button>
         </nav>
       </aside>
@@ -93,13 +136,14 @@ function App() {
         {page === 'dashboard' && <DashboardPage />}
         {page === 'llm' && <LlmPage />}
         {page === 'pipeline' && <PipelinePage />}
+        {page === 'traces' && <TracePage />}
         {page === 'logs' && <LogsPage />}
       </main>
     </div>
   );
 }
 
-function usePolling<T>(url: string, intervalMs = 10000) {
+function usePolling<T>(url: string | null, intervalMs = 10000) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -107,6 +151,11 @@ function usePolling<T>(url: string, intervalMs = 10000) {
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      if (!url) {
+        setLoading(false);
+        setData(null);
+        return;
+      }
       try {
         const next = await fetchJson<T>(url);
         if (!cancelled) {
@@ -181,8 +230,8 @@ function LlmPage() {
       <StatusBar loading={loading} error={error} />
       <section className="metric-grid">
         <MetricCard title="7 日调用" value={formatNumber(data?.totals?.call_count)} detail={`${formatNumber(data?.totals?.total_tokens)} tokens`} />
+        <MetricCard title="平均 Token" value={formatNumber(data?.totals?.avg_total_tokens)} detail={`${formatNumber(data?.totals?.avg_prompt_tokens)} prompt / ${formatNumber(data?.totals?.avg_completion_tokens)} completion`} />
         <MetricCard title="Prompt Tokens" value={formatNumber(data?.totals?.prompt_tokens)} detail="7 日累计" />
-        <MetricCard title="Completion Tokens" value={formatNumber(data?.totals?.completion_tokens)} detail="7 日累计" />
         <MetricCard title="平均耗时" value={formatMs(data?.totals?.avg_latency_ms)} detail={`${formatNumber(data?.totals?.failed_calls)} failed`} />
       </section>
       <Panel title="模块统计">
@@ -194,6 +243,9 @@ function LlmPage() {
               <th>Model</th>
               <th>Calls</th>
               <th>Tokens</th>
+              <th>Avg Tokens</th>
+              <th>Avg Prompt</th>
+              <th>Avg Completion</th>
               <th>Avg</th>
               <th>Failed</th>
             </tr>
@@ -206,6 +258,9 @@ function LlmPage() {
                 <td>{String(row.model_name || '-')}</td>
                 <td>{formatNumber(Number(row.call_count || 0))}</td>
                 <td>{formatNumber(Number(row.total_tokens || 0))}</td>
+                <td>{formatNumber(Number(row.avg_total_tokens || 0))}</td>
+                <td>{formatNumber(Number(row.avg_prompt_tokens || 0))}</td>
+                <td>{formatNumber(Number(row.avg_completion_tokens || 0))}</td>
                 <td>{formatMs(Number(row.avg_latency_ms || 0))}</td>
                 <td>{formatNumber(Number(row.failed_calls || 0))}</td>
               </tr>
@@ -254,9 +309,108 @@ function PipelinePage() {
           </tbody>
         </table>
       </Panel>
-      <Panel title="慢 Span 明细">
+      <Panel title="慢 Span 明细" className="scroll-panel">
         <SpanTable rows={spans || []} />
       </Panel>
+    </>
+  );
+}
+
+function TracePage() {
+  const { data, error, loading } = usePolling<TraceSummary[]>('/admin/api/traces?days=7&limit=200');
+  const traces = data || [];
+  const [selectedTrace, setSelectedTrace] = useState<string | null>(null);
+  const [traceQuery, setTraceQuery] = useState('');
+  const visibleTraces = useMemo(() => {
+    const query = traceQuery.trim().toLowerCase();
+    if (!query) {
+      return traces;
+    }
+    return traces.filter((trace) => trace.trace_id.toLowerCase().includes(query));
+  }, [traceQuery, traces]);
+
+  useEffect(() => {
+    if (!selectedTrace && traces.length > 0) {
+      setSelectedTrace(traces[0].trace_id);
+    }
+  }, [selectedTrace, traces]);
+
+  function submitTraceSearch(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const nextTrace = traceQuery.trim();
+    if (nextTrace) {
+      setSelectedTrace(nextTrace);
+    }
+  }
+
+  const detailUrl = selectedTrace ? `/admin/api/traces/${encodeURIComponent(selectedTrace)}` : null;
+  const { data: detail, error: detailError, loading: detailLoading } = usePolling<TraceDetail>(detailUrl);
+  const summary = detail?.summary || traces.find((trace) => trace.trace_id === selectedTrace);
+
+  return (
+    <>
+      <PageHeader title="链路追踪" subtitle="按 trace_id 汇总同一轮链路的耗时、Span 和 LLM Token" />
+      <StatusBar loading={loading} error={error} />
+      <section className="trace-layout">
+        <Panel title="最近 Trace" className="scroll-panel trace-list-panel">
+          <form className="trace-search" onSubmit={submitTraceSearch}>
+            <input
+              value={traceQuery}
+              onChange={(event) => setTraceQuery(event.target.value)}
+              placeholder="搜索或输入 trace_id"
+            />
+            <button type="submit">查看</button>
+          </form>
+          <table>
+            <thead>
+              <tr>
+                <th>Trace</th>
+                <th>Duration</th>
+                <th>Spans</th>
+                <th>LLM</th>
+                <th>Tokens</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleTraces.map((trace) => (
+                <tr
+                  key={trace.trace_id}
+                  className={trace.trace_id === selectedTrace ? 'selected-row' : ''}
+                  onClick={() => setSelectedTrace(trace.trace_id)}
+                >
+                  <td className="mono">{trace.trace_id}</td>
+                  <td>{formatMs(trace.duration_ms)}</td>
+                  <td>{formatNumber(trace.span_count)}</td>
+                  <td>{formatNumber(trace.llm_call_count)}</td>
+                  <td>{formatNumber(trace.total_tokens)}</td>
+                  <td>{trace.end_ts || trace.start_ts || '-'}</td>
+                </tr>
+              ))}
+              {visibleTraces.length === 0 && (
+                <tr>
+                  <td colSpan={6}>没有匹配的 trace</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </Panel>
+        <div>
+          <StatusBar loading={detailLoading} error={detailError} />
+          <section className="metric-grid trace-metrics">
+            <MetricCard title="链路耗时" value={formatMs(summary?.duration_ms)} detail={`${formatNumber(summary?.span_count)} spans`} />
+            <MetricCard title="LLM Token" value={formatNumber(summary?.total_tokens)} detail={`${formatNumber(summary?.prompt_tokens)} prompt / ${formatNumber(summary?.completion_tokens)} completion`} />
+            <MetricCard title="LLM 耗时和调用" value={formatMs(summary?.total_llm_latency_ms)} detail={`${formatNumber(summary?.llm_call_count)} calls`} />
+            <MetricCard title="失败调用" value={formatNumber(summary?.failed_llm_calls)} detail={summary?.topic_id || 'topic_id -'} tone={summary?.failed_llm_calls ? 'danger' : undefined} />
+          </section>
+          <Panel title="Span 明细">
+            <SpanTable rows={detail?.spans || []} />
+          </Panel>
+          <Panel title="LLM 调用明细">
+            <LlmCallTable rows={detail?.llm_calls || []} />
+          </Panel>
+        </div>
+      </section>
     </>
   );
 }
@@ -294,11 +448,11 @@ function MetricCard({ title, value, detail, tone }: { title: string; value: stri
   );
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <section className="panel">
+    <section className={`panel ${className || ''}`}>
       <h2>{title}</h2>
-      {children}
+      <div className="panel-content">{children}</div>
     </section>
   );
 }
@@ -323,6 +477,39 @@ function SpanTable({ rows, compact = false }: { rows: PipelineSpan[]; compact?: 
             {!compact && <td className="mono">{row.trace_id}</td>}
             <td><span className={`pill ${row.status}`}>{row.status}</span></td>
             {!compact && <td>{row.start_ts}</td>}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function LlmCallTable({ rows }: { rows: LlmCall[] }) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Model</th>
+          <th>Latency</th>
+          <th>Total</th>
+          <th>Prompt</th>
+          <th>Completion</th>
+          <th>Status</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.id}>
+            <td>{row.module_name}</td>
+            <td>{row.model_name || '-'}</td>
+            <td>{formatMs(row.latency_ms)}</td>
+            <td>{formatNumber(row.total_tokens)}</td>
+            <td>{formatNumber(row.prompt_tokens)}</td>
+            <td>{formatNumber(row.completion_tokens)}</td>
+            <td><span className={`pill ${row.success ? 'success' : 'error'}`}>{row.success ? 'success' : 'error'}</span></td>
+            <td>{row.ts}</td>
           </tr>
         ))}
       </tbody>

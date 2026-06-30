@@ -284,7 +284,12 @@ class ConversationService:
             character_id,
         )
         if not updated:
-            self.logger.info(f"Skipped context compaction for {user_id}; context state changed concurrently")
+            self.logger.warning(
+                "Skipped context compaction for "
+                f"user_id={user_id}, character_id={character_id}; "
+                f"context_count={context_count}, keep_recent_count={self.not_zip_conversation_count}. "
+                "Context state changed before summary could be written."
+            )
             return None
         return await self.get_context_snapshot(user_id, character_id=character_id, ts_type="date")
 

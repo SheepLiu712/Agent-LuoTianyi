@@ -153,6 +153,17 @@ button {
   gap: 16px;
 }
 
+.trace-layout {
+  display: grid;
+  grid-template-columns: minmax(520px, 0.9fr) minmax(560px, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.trace-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .panel {
   background: #ffffff;
   border: 1px solid #d9e2ea;
@@ -167,9 +178,55 @@ button {
   font-size: 17px;
 }
 
+.scroll-panel {
+  overflow: hidden;
+}
+
+.scroll-panel .panel-content {
+  max-height: 500px;
+  overflow: auto;
+}
+
+.trace-list-panel .panel-content {
+  max-height: calc(100vh - 190px);
+}
+
+.trace-search {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding-bottom: 12px;
+  background: #ffffff;
+}
+
+.trace-search input {
+  min-width: 0;
+  border: 1px solid #cad6df;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #1f2933;
+}
+
+.trace-search button {
+  border: 1px solid #2f5d7c;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: #2f5d7c;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.trace-search button:hover {
+  background: #274e68;
+}
+
 table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 13px;
 }
 
@@ -181,10 +238,34 @@ td {
   vertical-align: top;
 }
 
+tbody tr {
+  transition: background-color 120ms ease;
+}
+
+tbody tr:hover {
+  background: #f7fafc;
+}
+
+.selected-row {
+  background: #e9f2f8;
+}
+
+.selected-row:hover {
+  background: #e2edf5;
+}
+
 th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
   color: #607080;
   font-weight: 650;
   background: #f7fafc;
+}
+
+.trace-list-panel th {
+  top: 49px;
+  z-index: 3;
 }
 
 .mono {

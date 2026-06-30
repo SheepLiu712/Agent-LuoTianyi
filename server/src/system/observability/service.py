@@ -296,6 +296,9 @@ class ObservabilityService:
                 COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
                 COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                 COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                COALESCE(AVG(prompt_tokens), 0) AS avg_prompt_tokens,
+                COALESCE(AVG(completion_tokens), 0) AS avg_completion_tokens,
+                COALESCE(AVG(total_tokens), 0) AS avg_total_tokens,
                 COALESCE(AVG(latency_ms), 0) AS avg_latency_ms,
                 SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failed_calls
             FROM llm_call_metrics
@@ -307,7 +310,12 @@ class ObservabilityService:
             """
             SELECT module_name, interface_name, model_name,
                 COUNT(*) AS call_count,
+                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
                 COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                COALESCE(AVG(prompt_tokens), 0) AS avg_prompt_tokens,
+                COALESCE(AVG(completion_tokens), 0) AS avg_completion_tokens,
+                COALESCE(AVG(total_tokens), 0) AS avg_total_tokens,
                 COALESCE(AVG(latency_ms), 0) AS avg_latency_ms,
                 SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failed_calls
             FROM llm_call_metrics
@@ -322,6 +330,7 @@ class ObservabilityService:
             SELECT substr(ts, 1, 10) AS day,
                 COUNT(*) AS call_count,
                 COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                COALESCE(AVG(total_tokens), 0) AS avg_total_tokens,
                 COALESCE(AVG(latency_ms), 0) AS avg_latency_ms
             FROM llm_call_metrics
             WHERE ts >= ?
@@ -377,12 +386,22 @@ class ObservabilityService:
         )
         return [self._decode_metadata(row) for row in rows]
 
-    def get_recent_llm_calls(self, *, limit: int = 100, module_name: str | None = None) -> list[dict[str, Any]]:
-        where = ""
+    def get_recent_llm_calls(
+        self,
+        *,
+        limit: int = 100,
+        module_name: str | None = None,
+        trace_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conditions: list[str] = []
         params: list[Any] = []
         if module_name:
-            where = "WHERE module_name = ?"
+            conditions.append("module_name = ?")
             params.append(module_name)
+        if trace_id:
+            conditions.append("trace_id = ?")
+            params.append(trace_id)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.append(limit)
         rows = self._query_all(
             f"""
@@ -395,6 +414,107 @@ class ObservabilityService:
             tuple(params),
         )
         return [self._decode_metadata(row) for row in rows]
+
+    def get_trace_summaries(self, *, days: int = 7, limit: int = 100) -> list[dict[str, Any]]:
+        since = self._since_iso(days)
+        span_rows = self._query_all(
+            """
+            SELECT trace_id,
+                MAX(user_id) AS user_id,
+                MAX(topic_id) AS topic_id,
+                MIN(start_ts) AS start_ts,
+                MAX(end_ts) AS end_ts,
+                COUNT(*) AS span_count,
+                COALESCE(SUM(duration_ms), 0) AS total_span_ms,
+                COALESCE(MAX(duration_ms), 0) AS max_span_ms
+            FROM pipeline_spans
+            WHERE start_ts >= ? AND trace_id IS NOT NULL AND trace_id != ''
+            GROUP BY trace_id
+            """,
+            (since,),
+        )
+        llm_rows = self._query_all(
+            """
+            SELECT trace_id,
+                MAX(user_id) AS user_id,
+                MIN(ts) AS first_llm_ts,
+                MAX(ts) AS last_llm_ts,
+                COUNT(*) AS llm_call_count,
+                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                COALESCE(SUM(latency_ms), 0) AS total_llm_latency_ms,
+                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failed_llm_calls
+            FROM llm_call_metrics
+            WHERE ts >= ? AND trace_id IS NOT NULL AND trace_id != ''
+            GROUP BY trace_id
+            """,
+            (since,),
+        )
+        traces: dict[str, dict[str, Any]] = {}
+        for row in span_rows:
+            traces[row["trace_id"]] = {
+                "trace_id": row["trace_id"],
+                "user_id": row.get("user_id"),
+                "topic_id": row.get("topic_id"),
+                "start_ts": row.get("start_ts"),
+                "end_ts": row.get("end_ts"),
+                "duration_ms": self._duration_between(row.get("start_ts"), row.get("end_ts")),
+                "span_count": int(row.get("span_count") or 0),
+                "total_span_ms": float(row.get("total_span_ms") or 0.0),
+                "max_span_ms": float(row.get("max_span_ms") or 0.0),
+                "llm_call_count": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+                "total_llm_latency_ms": 0.0,
+                "failed_llm_calls": 0,
+            }
+        for row in llm_rows:
+            trace = traces.setdefault(
+                row["trace_id"],
+                {
+                    "trace_id": row["trace_id"],
+                    "user_id": row.get("user_id"),
+                    "topic_id": None,
+                    "start_ts": row.get("first_llm_ts"),
+                    "end_ts": row.get("last_llm_ts"),
+                    "span_count": 0,
+                    "total_span_ms": 0.0,
+                    "max_span_ms": 0.0,
+                },
+            )
+            if not trace.get("user_id"):
+                trace["user_id"] = row.get("user_id")
+            trace["start_ts"] = self._min_iso(trace.get("start_ts"), row.get("first_llm_ts"))
+            trace["end_ts"] = self._max_iso(trace.get("end_ts"), row.get("last_llm_ts"))
+            trace["duration_ms"] = self._duration_between(trace.get("start_ts"), trace.get("end_ts"))
+            trace["llm_call_count"] = int(row.get("llm_call_count") or 0)
+            trace["prompt_tokens"] = int(row.get("prompt_tokens") or 0)
+            trace["completion_tokens"] = int(row.get("completion_tokens") or 0)
+            trace["total_tokens"] = int(row.get("total_tokens") or 0)
+            trace["total_llm_latency_ms"] = float(row.get("total_llm_latency_ms") or 0.0)
+            trace["failed_llm_calls"] = int(row.get("failed_llm_calls") or 0)
+        return sorted(
+            traces.values(),
+            key=lambda row: row.get("end_ts") or row.get("start_ts") or "",
+            reverse=True,
+        )[:limit]
+
+    def get_trace_detail(self, trace_id: str) -> dict[str, Any]:
+        summaries = [
+            row for row in self.get_trace_summaries(days=self.retention_days, limit=10000)
+            if row.get("trace_id") == trace_id
+        ]
+        spans = self.get_recent_pipeline_spans(limit=1000, trace_id=trace_id)
+        spans.sort(key=lambda row: row.get("start_ts") or "")
+        llm_calls = self.get_recent_llm_calls(limit=1000, trace_id=trace_id)
+        llm_calls.sort(key=lambda row: row.get("ts") or "")
+        return {
+            "summary": summaries[0] if summaries else {"trace_id": trace_id},
+            "spans": spans,
+            "llm_calls": llm_calls,
+        }
 
     def get_recent_logs(
         self,
@@ -457,6 +577,7 @@ class ObservabilityService:
                 );
                 CREATE INDEX IF NOT EXISTS idx_llm_ts ON llm_call_metrics(ts);
                 CREATE INDEX IF NOT EXISTS idx_llm_module ON llm_call_metrics(module_name, ts);
+                CREATE INDEX IF NOT EXISTS idx_llm_trace ON llm_call_metrics(trace_id);
 
                 CREATE TABLE IF NOT EXISTS pipeline_spans (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -536,6 +657,38 @@ class ObservabilityService:
         upper = min(lower + 1, len(values) - 1)
         weight = rank - lower
         return values[lower] * (1 - weight) + values[upper] * weight
+
+    def _duration_between(self, start_ts: str | None, end_ts: str | None) -> float:
+        start = self._parse_iso(start_ts)
+        end = self._parse_iso(end_ts)
+        if start is None or end is None:
+            return 0.0
+        return max(0.0, (end - start).total_seconds() * 1000)
+
+    @staticmethod
+    def _parse_iso(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _min_iso(left: str | None, right: str | None) -> str | None:
+        if not left:
+            return right
+        if not right:
+            return left
+        return min(left, right)
+
+    @staticmethod
+    def _max_iso(left: str | None, right: str | None) -> str | None:
+        if not left:
+            return right
+        if not right:
+            return left
+        return max(left, right)
 
 
 _observability_service: ObservabilityService | None = None
