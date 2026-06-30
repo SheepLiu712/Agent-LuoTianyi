@@ -15,6 +15,7 @@ import colorlog
 
 # 全局日志配置
 _LOGGER_INSTANCES: Dict[str, logging.Logger] = {}
+_OBSERVABILITY_HANDLER: logging.Handler | None = None
 _DEFAULT_CONFIG = {
     "level": "DEBUG",
     "format": "{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}",
@@ -70,11 +71,60 @@ def get_logger(name: str) -> logging.Logger:
         if _DEFAULT_CONFIG.get("file_output", True):
             file_handler = _create_file_handler()
             logger.addHandler(file_handler)
+    if _OBSERVABILITY_HANDLER and _OBSERVABILITY_HANDLER not in logger.handlers:
+        logger.addHandler(_OBSERVABILITY_HANDLER)
     
     # 缓存日志记录器
     _LOGGER_INSTANCES[name] = logger
     
     return logger
+
+
+class ObservabilityLogHandler(logging.Handler):
+    """Capture warning/error logs into the admin observability store."""
+
+    def __init__(self, observability_service):
+        super().__init__(level=logging.WARNING)
+        self.observability_service = observability_service
+        self._traceback_formatter = logging.Formatter()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            traceback_text = None
+            if record.exc_info:
+                traceback_text = self._traceback_formatter.formatException(record.exc_info)
+            self.observability_service.record_log_event(
+                level=record.levelname,
+                logger_name=record.name,
+                message=record.getMessage(),
+                traceback_text=traceback_text,
+                module_name=record.module,
+            )
+        except Exception:
+            self.handleError(record)
+
+
+def install_observability_log_handler(observability_service) -> None:
+    """Install or replace the warning/error handler used by all project loggers."""
+    global _OBSERVABILITY_HANDLER
+    if _OBSERVABILITY_HANDLER is not None:
+        for logger in _LOGGER_INSTANCES.values():
+            if _OBSERVABILITY_HANDLER in logger.handlers:
+                logger.removeHandler(_OBSERVABILITY_HANDLER)
+    _OBSERVABILITY_HANDLER = ObservabilityLogHandler(observability_service)
+    for logger in _LOGGER_INSTANCES.values():
+        if _OBSERVABILITY_HANDLER not in logger.handlers:
+            logger.addHandler(_OBSERVABILITY_HANDLER)
+
+
+def uninstall_observability_log_handler() -> None:
+    global _OBSERVABILITY_HANDLER
+    if _OBSERVABILITY_HANDLER is None:
+        return
+    for logger in _LOGGER_INSTANCES.values():
+        if _OBSERVABILITY_HANDLER in logger.handlers:
+            logger.removeHandler(_OBSERVABILITY_HANDLER)
+    _OBSERVABILITY_HANDLER = None
 
 
 def _create_console_handler() -> logging.Handler:

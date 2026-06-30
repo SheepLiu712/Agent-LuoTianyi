@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncGenerator
+from datetime import datetime, timezone
+import time
 
 from src.utils.logger import get_logger
 import base64
 from src.agent.main_chat import OneSentenceChat, SongSegmentChat
 from typing import Callable, Awaitable, Dict, Any
+from src.system.observability import get_observability_service
 
 if TYPE_CHECKING:
     from src.capabilities import CapabilityManager
@@ -33,6 +36,13 @@ class SpeakingJob:
     send_reply_callback: Callable[[ChatResponse], Awaitable[None]]
     job_content: "OneSentenceChat | SongSegmentChat | str" 
     character_id: str = "luotianyi"
+    trace_id: str | None = None
+    user_id: str | None = None
+    topic_id: str | None = None
+    reply_generated_monotonic: float | None = None
+    reply_generated_ts: str | None = None
+    enqueued_monotonic: float | None = None
+    enqueued_ts: str | None = None
 
 
 class GlobalSpeakingWorker:
@@ -66,6 +76,10 @@ class GlobalSpeakingWorker:
 
     async def enqueue(self, job: SpeakingJob):
         self.start_if_needed()
+        if job.enqueued_monotonic is None:
+            job.enqueued_monotonic = time.perf_counter()
+        if job.enqueued_ts is None:
+            job.enqueued_ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         await self.queue.put(job)
 
 
@@ -74,6 +88,9 @@ class GlobalSpeakingWorker:
 
         while True:
             job = await self.queue.get()
+            job_start_monotonic = time.perf_counter()
+            job_start_ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+            self._record_queue_wait(job, job_start_ts, job_start_monotonic)
             try:
                 if isinstance(job.job_content, OneSentenceChat):
                     display_text = job.job_content.content
@@ -98,6 +115,8 @@ class GlobalSpeakingWorker:
                     is_first = True
                     async for audio_chunk in _iter_sync_gen_in_executor(sync_gen):
                         chunk_text = display_text if is_first else ""
+                        if is_first:
+                            self._record_first_packet(job, job_start_ts, job_start_monotonic)
                         is_first = False
                         resp = ChatResponse(
                             uuid=job.job_content.uuid, audio=audio_chunk,
@@ -128,6 +147,8 @@ class GlobalSpeakingWorker:
                         chunk = audio[i:i+CHUNK_SIZE]
                         chunk_base64 = base64.b64encode(chunk).decode("utf-8")
                         chunk_text = "" if i > 0 else text
+                        if i == 0:
+                            self._record_first_packet(job, job_start_ts, job_start_monotonic)
                         is_final_package = (i + CHUNK_SIZE) >= len(audio)
                         chunk_resp = ChatResponse(
                             uuid=job.job_content.uuid, audio=chunk_base64,
@@ -144,6 +165,59 @@ class GlobalSpeakingWorker:
                 continue
             finally:
                 self.queue.task_done()
+
+    def _record_queue_wait(self, job: SpeakingJob, job_start_ts: str, job_start_monotonic: float) -> None:
+        observability = get_observability_service()
+        if observability is None or not job.trace_id or job.enqueued_monotonic is None or job.enqueued_ts is None:
+            return
+        observability.record_pipeline_span(
+            trace_id=job.trace_id,
+            user_id=job.user_id,
+            topic_id=job.topic_id,
+            span_name="tts.queue_wait",
+            start_ts=job.enqueued_ts,
+            end_ts=job_start_ts,
+            duration_ms=(job_start_monotonic - job.enqueued_monotonic) * 1000.0,
+            metadata={
+                "character_id": job.character_id,
+                "job_type": type(job.job_content).__name__,
+            },
+        )
+
+    def _record_first_packet(self, job: SpeakingJob, job_start_ts: str, job_start_monotonic: float) -> None:
+        observability = get_observability_service()
+        if observability is None or not job.trace_id:
+            return
+        first_packet_monotonic = time.perf_counter()
+        first_packet_ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        observability.record_pipeline_span(
+            trace_id=job.trace_id,
+            user_id=job.user_id,
+            topic_id=job.topic_id,
+            span_name="tts.start_to_first_packet",
+            start_ts=job_start_ts,
+            end_ts=first_packet_ts,
+            duration_ms=(first_packet_monotonic - job_start_monotonic) * 1000.0,
+            metadata={
+                "character_id": job.character_id,
+                "job_type": type(job.job_content).__name__,
+            },
+        )
+        if job.reply_generated_monotonic is None or job.reply_generated_ts is None:
+            return
+        observability.record_pipeline_span(
+            trace_id=job.trace_id,
+            user_id=job.user_id,
+            topic_id=job.topic_id,
+            span_name="reply_generated_to_first_tts_packet",
+            start_ts=job.reply_generated_ts,
+            end_ts=first_packet_ts,
+            duration_ms=(first_packet_monotonic - job.reply_generated_monotonic) * 1000.0,
+            metadata={
+                "character_id": job.character_id,
+                "job_type": type(job.job_content).__name__,
+            },
+        )
 
     async def stop(self):
         if self.worker_task:

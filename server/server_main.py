@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Header, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
 import sys
@@ -22,6 +23,7 @@ from src.system.user_interface.types import (
     PreferenceOverwriteRequest,
 )
 from src.system.user_interface.websocket_service import WebSocketConnection
+from src.system.user_interface.admin_interface import router as admin_router
 from src.system.system_runtime import (
     SystemRuntime,
     get_system_runtime,
@@ -53,10 +55,27 @@ def get_runtime() -> SystemRuntime:
 
 
 app = FastAPI(lifespan=startup_event)
+app.include_router(admin_router)
+
+admin_ui_dist = os.path.join(current_dir, "admin_ui", "dist")
+admin_ui_assets = os.path.join(admin_ui_dist, "assets")
+if os.path.isdir(admin_ui_assets):
+    app.mount("/admin/assets", StaticFiles(directory=admin_ui_assets), name="admin-assets")
 
 # ——————————————————————————————————————————————————————————————————
 # 主要的 API 路由定义
 # ——————————————————————————————————————————————————————————————————
+
+@app.get("/admin")
+@app.get("/admin/{path:path}")
+async def admin_index(path: str = ""):
+    index_path = os.path.join(admin_ui_dist, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return HTMLResponse(
+        "<h1>AgentLuo Server Console</h1>"
+        "<p>Admin UI has not been built yet. Run <code>cd server/admin_ui && npm install && npm run build</code>.</p>"
+    )
 
 @app.websocket("/chat_ws")
 async def chat_ws(

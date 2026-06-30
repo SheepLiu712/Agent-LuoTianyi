@@ -7,8 +7,10 @@ from src.agent_runtime import AgentRuntime
 from src.capabilities import CapabilityManager
 from src.chat_session import ChatSessionManager
 from src.system.database import DatabaseManager, set_default_database_manager
+from src.system.observability import ObservabilityService, set_observability_service
 from src.system.user_interface import UserInterface
 from src.utils.llm_service import LLMService
+from src.utils.logger import install_observability_log_handler, uninstall_observability_log_handler
 from src.world import WorldRuntime
 
 
@@ -23,32 +25,38 @@ class SystemRuntime:
     capability_manager: CapabilityManager
     chat_session_manager: ChatSessionManager
     llm_service: LLMService
+    observability: ObservabilityService
 
     @classmethod
     async def initialize(cls, config: Dict) -> "SystemRuntime":
-        # 1. 初始化 LLM 服务
+        # 1. 初始化观测服务，后续模块可统一写入指标和异常日志
+        observability = ObservabilityService(config.get("observability", {}))
+        set_observability_service(observability)
+        install_observability_log_handler(observability)
+
+        # 2. 初始化 LLM 服务
         llm_service = LLMService(config.get("llm_service", {}))
 
-        # 2. 初始化数据库管理器
+        # 3. 初始化数据库管理器
         database_manager = DatabaseManager(config.get("database", {}))
         set_default_database_manager(database_manager)
 
-        # 3. 初始化能力管理器
+        # 4. 初始化能力管理器
         capability_manager = CapabilityManager(config.get("capabilities", {}), llm_service)
 
-        # 4. 初始化聊天会话管理器
+        # 5. 初始化聊天会话管理器
         chat_session_manager = ChatSessionManager(
             config.get("chat_session_manager", {}),
             llm_service,
             database_manager,
         )
         
-        # 5. 初始化箱庭世界运行时
+        # 6. 初始化箱庭世界运行时
         world = WorldRuntime(
             config.get("world", {}),
         )
 
-        # 6. 初始化 Agent 运行时
+        # 7. 初始化 Agent 运行时
         agent_runtime = AgentRuntime(
             config.get("agent_runtime", {}),
             llm_service,
@@ -56,7 +64,7 @@ class SystemRuntime:
             database_manager,
         )
 
-        # 7. 组装系统运行时
+        # 8. 组装系统运行时
         runtime = cls(
             user_interface=UserInterface(database_manager),
             world=world,
@@ -65,6 +73,7 @@ class SystemRuntime:
             capability_manager=capability_manager,
             chat_session_manager=chat_session_manager,
             llm_service=llm_service,
+            observability=observability,
         )
 
         runtime._wire_dependencies()
@@ -102,6 +111,9 @@ class SystemRuntime:
         await self.world.stop_background_services()
         await self.chat_session_manager.stop_background_services()
         await self.database_manager.shutdown()
+        self.observability.close()
+        set_observability_service(None)
+        uninstall_observability_log_handler()
 
     def ensure_dependencies(self) -> None:
         """检查系统运行时所有顶层模块依赖已经完成派发。"""
@@ -113,6 +125,7 @@ class SystemRuntime:
             "capability_manager": self.capability_manager,
             "chat_session_manager": self.chat_session_manager,
             "llm_service": self.llm_service,
+            "observability": self.observability,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
