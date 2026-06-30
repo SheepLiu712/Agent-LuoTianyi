@@ -1,0 +1,8 @@
+{
+  "name": "citywalk_llm_prompt",
+  "template": [
+    "{{ system_prompt }}",
+    "",
+    "{{ user_prompt }}"
+  ]
+}

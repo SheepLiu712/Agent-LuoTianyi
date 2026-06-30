@@ -1,6 +1,7 @@
 import { AppState } from 'react-native';
 import { server_config } from '../config';
 import { AgentMessagePayload } from '../types/chat';
+import { WSEventType } from '../types/ws_events';
 import { addDebugTrace } from './debug_trace';
 
 interface AckResult {
@@ -130,8 +131,12 @@ export class WebSocketTransport {
     }
   }
 
-  async submitUserText(message: string, ackTimeout = 10000): Promise<AckResult> {
-    return this.sendWithAck('user_text', { message }, ackTimeout);
+  async submitUserText(message: string, isProactive = false, ackTimeout = 10000, clientMsgId?: string): Promise<AckResult> {
+    const payload: Record<string, unknown> = { message };
+    if (isProactive) {
+      payload.is_proactive = true;
+    }
+    return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout, clientMsgId);
   }
 
   async submitUserImage(
@@ -139,20 +144,61 @@ export class WebSocketTransport {
     mimeType: string,
     imageClientPath: string,
     ackTimeout = 10000,
+    clientMsgId?: string,
   ): Promise<AckResult> {
     return this.sendWithAck(
-      'user_image',
+      WSEventType.USER_IMAGE,
       {
         image_base64: imageBase64,
         mime_type: mimeType,
         image_client_path: imageClientPath,
       },
       ackTimeout,
+      clientMsgId,
     );
   }
 
-  async submitUserTyping(textLength: number, ackTimeout = 5000): Promise<AckResult> {
-    return this.sendWithAck('user_typing', { is_typing: true, text_length: textLength }, ackTimeout);
+  async submitUserTyping(textLength: number, ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
+    return this.sendWithAck(
+      WSEventType.USER_TYPING,
+      { is_typing: true, text_length: textLength },
+      ackTimeout,
+      clientMsgId,
+    );
+  }
+
+  async submitUserTouch(
+    touchArea: string | string[],
+    clickFrequency?: Record<string, number>,
+    touchMeta?: Record<string, unknown>,
+    ackTimeout = 5000,
+    clientMsgId?: string,
+  ): Promise<AckResult> {
+    const payload: Record<string, unknown> = {};
+    if (typeof touchArea === 'string') {
+      payload.touch_area = touchArea;
+    } else {
+      payload.touchArea = touchArea;
+    }
+    if (clickFrequency) {
+      payload.click_frequency = clickFrequency;
+    }
+    if (touchMeta) {
+      Object.assign(payload, touchMeta);
+    }
+    return this.sendWithAck(WSEventType.USER_TOUCH, payload, ackTimeout, clientMsgId);
+  }
+
+  async submitUserImageSelecting(ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
+    return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING, {}, ackTimeout, clientMsgId);
+  }
+
+  async submitUserImageSelectingCancel(ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
+    return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING_CANCEL, {}, ackTimeout, clientMsgId);
+  }
+
+  async submitUserPreferences(preferences: Record<string, unknown>, ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
+    return this.sendWithAck(WSEventType.USER_PREFERENCE_SYNC, preferences, ackTimeout, clientMsgId);
   }
 
   private connect() {
@@ -286,7 +332,7 @@ export class WebSocketTransport {
 
   private sendAuth() {
     this.sendRaw({
-      type: 'user_auth',
+      type: WSEventType.USER_AUTH,
       client_msg_id: `auth-${Date.now()}`,
       ts: Date.now(),
       payload: {
@@ -304,7 +350,7 @@ export class WebSocketTransport {
       }
       this.pingId += 1;
       this.sendRaw({
-        type: 'hb_ping',
+        type: WSEventType.HB_PING,
         client_msg_id: `ping-${this.pingId}`,
         ts: Date.now(),
         payload: { ping_id: this.pingId },
@@ -321,11 +367,6 @@ export class WebSocketTransport {
 
   private async waitUntilReady(timeoutMs = 10000) {
     const start = Date.now();
-    addDebugTrace('ws', 'waitUntilReady begin', {
-      timeoutMs,
-      isConnected: this.isConnected,
-      isAuthed: this.isAuthed,
-    });
     while (!this.isStopped && (!this.isConnected || !this.isAuthed)) {
       if (Date.now() - start > timeoutMs) {
         addDebugTrace('ws', 'waitUntilReady timeout', {
@@ -337,16 +378,15 @@ export class WebSocketTransport {
       }
       await new Promise((resolve) => setTimeout(resolve, 80));
     }
-    addDebugTrace('ws', 'waitUntilReady ok', { waitedMs: Date.now() - start });
   }
 
   private async sendWithAck(
     eventType: string,
     payload: Record<string, unknown>,
     timeoutMs: number,
+    clientMsgId?: string,
   ): Promise<AckResult> {
-    const requestId = `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    addDebugTrace('ack', 'prepare sendWithAck', { eventType, requestId, timeoutMs });
+    const requestId = clientMsgId || `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     try {
       await this.waitUntilReady();
@@ -372,11 +412,6 @@ export class WebSocketTransport {
       }, timeoutMs);
 
       this.ackWaiters.set(requestId, { resolve, timer });
-      addDebugTrace('ack', 'send raw with waiter', {
-        eventType,
-        requestId,
-        pendingWaiters: this.ackWaiters.size,
-      });
       this.sendRaw({
         type: eventType,
         client_msg_id: requestId,
@@ -402,47 +437,46 @@ export class WebSocketTransport {
       const envelope = JSON.parse(String(raw)) as ServerEnvelope;
       const eventType = envelope.type || '';
       const payload = envelope.payload || {};
-      if (eventType === 'system_ready') {
+      if (eventType === WSEventType.SYSTEM_READY) {
         addDebugTrace('ws', 'recv system_ready');
         this.sendAuth();
         return;
       }
 
-      if (eventType === 'auth_ok') {
+      if (eventType === WSEventType.AUTH_OK) {
         this.isAuthed = true;
         return;
       }
 
-      if (eventType === 'auth_error') {
+      if (eventType === WSEventType.AUTH_ERROR) {
         this.isAuthed = false;
         addDebugTrace('ws', 'recv auth_error', { message: String(payload.message || '鉴权失败') });
         this.callbacks.onError(String(payload.message || '鉴权失败'));
         return;
       }
 
-      if (eventType === 'server_ack') {
+      if (eventType === WSEventType.SERVER_ACK) {
         const replyTo = envelope.reply_to;
         if (replyTo && this.ackWaiters.has(replyTo)) {
           const waiter = this.ackWaiters.get(replyTo)!;
           clearTimeout(waiter.timer);
           this.ackWaiters.delete(replyTo);
-          addDebugTrace('ack', 'recv ack', { replyTo, pendingWaiters: this.ackWaiters.size });
           waiter.resolve({ ok: true, request_id: replyTo });
         }
         return;
       }
 
-      if (eventType === 'agent_state_changed') {
+      if (eventType === WSEventType.AGENT_STATE_CHANGED) {
         this.callbacks.onAgentStateChanged(String(payload.state || 'waiting'));
         return;
       }
 
-      if (eventType === 'agent_message') {
+      if (eventType === WSEventType.AGENT_MESSAGE) {
         this.callbacks.onAgentMessage(payload as AgentMessagePayload);
         return;
       }
 
-      if (eventType === 'error') {
+      if (eventType === WSEventType.SERVER_ERROR) {
         addDebugTrace('ws', 'recv protocol error', { message: String(payload.message || '协议错误') });
         this.callbacks.onError(String(payload.message || '协议错误'));
       }

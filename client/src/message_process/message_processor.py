@@ -4,8 +4,10 @@ import threading
 from ..live2d import Live2dModel
 import time
 import os
+import re
 import base64
 import datetime
+import uuid
 from dataclasses import dataclass
 from collections import deque
 from typing import Callable, TYPE_CHECKING
@@ -18,6 +20,7 @@ if TYPE_CHECKING:
 @dataclass
 class OutgoingMessage:
     local_id: str
+    client_msg_id: str
     kind: str
     payload: dict
     done_event: threading.Event
@@ -37,6 +40,7 @@ class MessageProcessor:
         self.update_bubble_signal: Callable[[str, str], None] | None = None # 更新气泡信息
         self.agent_thinking_signal: Callable[[bool], None] | None = None # 显示agent正在思考的状态
         self.local_tts_state_signal: Callable[[str, str], None] | None = None # 本地TTS状态变化的回调信号，参数为事件类型（start/finish）和对应的conv_uuid
+        self.expression_signal: Callable[[str], None] | None = None # Live2D表情更新信号
 
         self._reply_counter = 0
         self._running = True
@@ -49,13 +53,18 @@ class MessageProcessor:
 
         # 设置消息处理器发送消息的网络客户端接口，以及将消息处理器接收消息的函数传入网络客户端，以便网络客户端能将WS消息传入消息处理器
         network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state)
-        self.send_text_func:Callable[[str], dict] = network_client.send_chat
+        self.send_text_func:Callable[..., dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
-        self.send_typing_func:Callable[[int], dict] = network_client.send_typing
+        self.send_typing_func:Callable[..., dict] = network_client.send_typing
+        self.send_touch_func:Callable[..., dict] = network_client.send_touch
+        self.send_preferences_func:Callable[[dict], dict] = network_client.send_preferences
+        self.send_image_selecting_func:Callable = network_client.send_image_selecting
+        self.send_image_selecting_cancel_func:Callable = network_client.send_image_selecting_cancel
         self.start()
 
         self.processing_uuid = None
         self.processing_audio: bytearray = bytearray()
+        self.date_detected_signal: Callable[[dict], None] | None = None  # 检测到重要日期的信号
 
     def start(self):
         self._listener_thread.start()
@@ -75,6 +84,7 @@ class MessageProcessor:
         local_id = self._next_local_id("typing")
         item = OutgoingMessage(
             local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
             kind="typing",
             payload={"text_length": text_length},
             done_event=threading.Event(),
@@ -87,7 +97,23 @@ class MessageProcessor:
         local_id = self._next_local_id("txt")
         item = OutgoingMessage(
             local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
             kind="text",
+            payload={"text": text},
+            done_event=threading.Event(),
+        )
+        with self._send_cond:
+            self._send_queue.append(item)
+            self._send_cond.notify()
+        return local_id
+
+    def send_proactive_text(self, text: str):
+        """发送不会被保存到数据库的系统主动消息（如日期提醒），由AI响应但不记录为用户发言。"""
+        local_id = self._next_local_id("proactive")
+        item = OutgoingMessage(
+            local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
+            kind="proactive",
             payload={"text": text},
             done_event=threading.Event(),
         )
@@ -104,6 +130,7 @@ class MessageProcessor:
         local_id = self._next_local_id("img")
         item = OutgoingMessage(
             local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
             kind="image",
             payload={
                 "image_base64": prepared["image_base64"],
@@ -116,10 +143,46 @@ class MessageProcessor:
             self._send_queue.append(item)
             self._send_cond.notify()
         return local_id
-    
+
+    def send_preferences(self, preferences: dict):
+        """将用户偏好设置发送到服务端保存，不经过消息队列。"""
+        self.send_preferences_func(preferences)
+
+    def send_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None):
+        local_id = self._next_local_id("touch")
+        if isinstance(touch_area, str):
+            payload = {"touch_area": touch_area}
+        else:
+            payload = {"touchArea": touch_area}
+        if click_frequency:
+            payload["click_frequency"] = click_frequency
+        if touch_meta:
+            payload.update(touch_meta)
+        item = OutgoingMessage(
+            local_id=local_id,
+            client_msg_id=self._next_client_msg_id(),
+            kind="touch",
+            payload=payload,
+            done_event=threading.Event(),
+        )
+        with self._send_cond:
+            self._send_queue.append(item)
+            self._send_cond.notify()
+        return local_id
+
+    def send_image_selecting_start(self):
+        """发送图片选择开始事件。"""
+        self.send_image_selecting_func()
+
+    def send_image_selecting_cancel(self):
+        """发送图片选择取消事件。"""
+        self.send_image_selecting_cancel_func()
 
     def play_local_tts_by_uuid(self, conv_uuid: str) -> bool:
         if not conv_uuid or not self.multimedia_stream:
+            return False
+        if not self._is_safe_uuid(conv_uuid):
+            self.logger.error(f"Unsafe uuid for local tts: {conv_uuid}")
             return False
 
         wav_path = os.path.join(os.getcwd(), "temp", "tts_output", f"{conv_uuid}.wav")
@@ -141,6 +204,8 @@ class MessageProcessor:
         self.multimedia_stream.set_volume_percent(percent)
 
     def process_transport_message(self, response: AgentMessage): # 真正处理消息的函数
+        display_in_chat = getattr(response, "display_in_chat", True)
+
         if self.processing_uuid is None:
             self.processing_uuid = response.uuid
             self.processing_audio = bytearray()
@@ -149,11 +214,11 @@ class MessageProcessor:
             self.processing_uuid = response.uuid
             self.processing_audio = bytearray()
 
-        if response.text:
+        if display_in_chat and response.text:
             self.response_signal(response.uuid, response.text)
 
-        if response.expression and self.model:
-            self.model.set_expression_by_cmd(response.expression)
+        if response.expression and self.expression_signal:
+            self.expression_signal(response.expression)
 
         if response.audio:
             self.multimedia_stream.feed(response.audio)
@@ -170,7 +235,7 @@ class MessageProcessor:
             ret = self._save_audio_to_temp(self.processing_audio, saved_uuid, ".wav")
             self.processing_audio = bytearray()
             self.processing_uuid = None
-            if ret and self.update_bubble_signal:
+            if display_in_chat and ret and self.update_bubble_signal:
                 # 通知UI对应的气泡有本地音频可播放
                 try:
                     self.update_bubble_signal(saved_uuid, "has_audio")
@@ -224,11 +289,13 @@ class MessageProcessor:
         update_bubble_signal: Callable[[str, str], None],
         agent_thinking_signal: Callable[[str], None],
         local_tts_state_signal: Callable[[str, str], None] | None = None,
+        expression_signal: Callable[[str], None] | None = None,
     ):
         self.response_signal = response_signal
         self.update_bubble_signal = update_bubble_signal
         self.agent_thinking_signal = agent_thinking_signal
         self.local_tts_state_signal = local_tts_state_signal
+        self.expression_signal = expression_signal
 
     def _on_local_tts_state(self, event: str, conv_uuid: str):
         if self.local_tts_state_signal:
@@ -249,20 +316,46 @@ class MessageProcessor:
         self._reply_counter += 1
         return f"{prefix}_{int(time.time() * 1000)}_{self._reply_counter}"
 
+    def _next_client_msg_id(self) -> str:
+        return f"c-{uuid.uuid4().hex[:12]}"
 
 
     def _send_one(self, item: OutgoingMessage) -> dict:
         if item.kind == "text":
-            return self.send_text_func(item.payload["text"], ack_timeout=1.0)
+            return self.send_text_func(item.payload["text"], ack_timeout=1.0, client_msg_id=item.client_msg_id)
+        if item.kind == "proactive":
+            return self.send_text_func(
+                item.payload["text"],
+                is_proactive=True,
+                ack_timeout=1.0,
+                client_msg_id=item.client_msg_id,
+            )
         if item.kind == "image":
             return self.send_image_func(
                 image_base64=item.payload["image_base64"],
                 mime_type=item.payload["mime_type"],
                 image_client_path=item.payload["image_client_path"],
                 ack_timeout=5.0,
+                client_msg_id=item.client_msg_id,
             )
         if item.kind == "typing":
-            return self.send_typing_func(text_length=item.payload["text_length"], ack_timeout=1.0)
+            return self.send_typing_func(
+                text_length=item.payload["text_length"],
+                ack_timeout=1.0,
+                client_msg_id=item.client_msg_id,
+            )
+        if item.kind == "touch":
+            payload = item.payload
+            touch_area = payload.get("touchArea") or payload.get("touch_area", "")
+            kwargs = {"touch_area": touch_area, "ack_timeout": 1.0, "client_msg_id": item.client_msg_id}
+            if "click_frequency" in payload:
+                kwargs["click_frequency"] = payload["click_frequency"]
+            if "timeSinceLastSentTouch" in payload:
+                kwargs["touch_meta"] = {
+                    "timeSinceLastSentTouch": payload["timeSinceLastSentTouch"],
+                    "touchCount": payload.get("touchCount", 1),
+                }
+            return self.send_touch_func(**kwargs)
         return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}", "drop": True}
 
     def _prepare_image_payload(self, image_path: str) -> dict:
@@ -290,6 +383,9 @@ class MessageProcessor:
     def _save_audio_to_temp(self, audio_data: bytes, uuid: str | None, postfix: str) -> str:
         try:
             cwd = os.getcwd()
+            if uuid and not self._is_safe_uuid(uuid):
+                self.logger.error(f"Unsafe uuid for audio file: {uuid}")
+                return ""
             safe_uuid = uuid or datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             new_file_path = os.path.join(
                 cwd,
@@ -328,5 +424,8 @@ class MessageProcessor:
             return True
         return False
 
-
-    
+    @staticmethod
+    def _is_safe_uuid(value: str | None) -> bool:
+        if not value:
+            return False
+        return re.fullmatch(r"[A-Za-z0-9_-]+", value) is not None

@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Callable, List, Tuple
 
 import requests
@@ -10,6 +11,13 @@ from ..utils.http_client import HttpClientFactory
 from ..safety import credential
 
 
+_SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _is_safe_uuid(value: str | None) -> bool:
+    return bool(value and _SAFE_UUID_RE.fullmatch(value))
+
+
 class NetworkClient:
     def __init__(self, base_url: str | None = None, verify_ssl: bool = True):
         self.logger = get_logger(self.__class__.__name__)
@@ -17,7 +25,7 @@ class NetworkClient:
             raise ValueError("Base URL is required. Please check config/config.json")
 
         self.base_url = base_url.rstrip("/")
-        self.verify_ssl = verify_ssl
+        self.verify_ssl = True
 
         self.user_id: str | None = None
         self.message_token: str | None = None
@@ -31,6 +39,15 @@ class NetworkClient:
             token_getter=lambda: self.message_token,
             verify_ssl=self.verify_ssl,
         )
+
+    def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
+        """更新服务器地址，同步更新 AuthApi、WsTransport 和 HTTP 会话。"""
+        self.base_url = base_url.rstrip("/")
+        self.verify_ssl = True
+        self.auth_api.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
+        self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
+        self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
+        self.logger.info(f"Base URL updated to: {self.base_url}")
 
     def login(self, username: str, password: str, request_token: bool = False) -> Tuple[bool, str]:
         try:
@@ -74,15 +91,35 @@ class NetworkClient:
         except Exception as exc:
             return False, str(exc)
 
-    def send_chat(self, text: str, ack_timeout: float = 10.0):
-        if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+    def reset_account(self, invite_code: str, new_username: str, new_password: str) -> Tuple[bool, str]:
+        """通过邀请码重置账号的用户名和密码。"""
+        try:
+            return self.auth_api.reset_account(invite_code, new_username, new_password)
+        except Exception as exc:
+            return False, str(exc)
 
-        return self.ws_transport.submit_user_text(text, ack_timeout=ack_timeout)
 
-    def send_image(self, image_base64: str, mime_type: str, image_client_path: str | None = None, ack_timeout: float = 10.0):
+    def send_chat(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0, client_msg_id: str | None = None):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
+
+        return self.ws_transport.submit_user_text(
+            text,
+            is_proactive=is_proactive,
+            ack_timeout=ack_timeout,
+            client_msg_id=client_msg_id,
+        )
+
+    def send_image(
+        self,
+        image_base64: str,
+        mime_type: str,
+        image_client_path: str | None = None,
+        ack_timeout: float = 10.0,
+        client_msg_id: str | None = None,
+    ):
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
 
         try:
             return self.ws_transport.submit_user_image(
@@ -90,21 +127,125 @@ class NetworkClient:
                 mime_type=mime_type,
                 image_client_path=image_client_path,
                 ack_timeout=ack_timeout,
+                client_msg_id=client_msg_id,
             )
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+            return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
         
-    def send_typing(self, text_length: int, ack_timeout: float = 10.0):
+    def send_typing(self, text_length: int, ack_timeout: float = 10.0, client_msg_id: str | None = None):
         if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
 
         try:
-            return self.ws_transport.submit_typing_event(text_length=text_length, ack_timeout=ack_timeout)
+            return self.ws_transport.submit_typing_event(
+                text_length=text_length,
+                ack_timeout=ack_timeout,
+                client_msg_id=client_msg_id,
+            )
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
+
+    def send_touch(
+        self,
+        touch_area: str | list,
+        click_frequency: dict = None,
+        touch_meta: dict = None,
+        ack_timeout: float = 10.0,
+        client_msg_id: str | None = None,
+    ):
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_user_touch(
+                touch_area=touch_area,
+                click_frequency=click_frequency,
+                touch_meta=touch_meta,
+                ack_timeout=ack_timeout,
+                client_msg_id=client_msg_id,
+            )
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
+
+    def send_image_selecting(self, ack_timeout: float = 5.0):
+        """通知服务端用户开始选择图片。"""
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_image_selecting(ack_timeout=ack_timeout)
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
-        
+
+    def send_image_selecting_cancel(self, ack_timeout: float = 5.0):
+        """通知服务端用户取消了图片选择。"""
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_image_selecting_cancel(ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+
+    def send_preferences(self, preferences: dict, ack_timeout: float = 10.0):
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
+        try:
+            return self.ws_transport.submit_user_preferences(preferences=preferences, ack_timeout=ack_timeout)
+        except Exception as exc:
+            self.logger.error(f"Connection Error: {exc}")
+            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
+
+    def get_preferences(self) -> dict:
+        """从服务器获取偏好设置。"""
+        if not self.user_id:
+            return {}
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/preference/get",
+                json={"username": self.user_id, "token": self.message_token},
+                verify=self.verify_ssl,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("preferences", data)
+            elif resp.status_code == 401:
+                self.logger.warning("获取偏好设置失败: 未授权")
+                return {}
+            else:
+                self.logger.warning(f"获取偏好设置失败: HTTP {resp.status_code}")
+                return {}
+        except Exception as exc:
+            self.logger.error(f"获取偏好设置失败: {exc}")
+            return {}
+
+    def overwrite_preferences(self, preferences: dict) -> dict:
+        """覆盖保存偏好设置到服务器。"""
+        if not self.user_id:
+            return {"status": "error", "message": "Not logged in"}
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/preference/overwrite",
+                json={
+                    "username": self.user_id,
+                    "token": self.message_token,
+                    "preferences": preferences,
+                },
+                verify=self.verify_ssl,
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                return resp.json()
+            elif resp.status_code == 401:
+                return {"status": "error", "message": "Unauthorized"}
+            else:
+                return {"status": "error", "message": f"HTTP {resp.status_code}"}
+        except Exception as exc:
+            self.logger.error(f"保存偏好设置失败: {exc}")
+            return {"status": "error", "message": str(exc)}
 
     def get_history(self, count: int, end_index: int) -> Tuple[List[ConversationItem], int]:
         if not self.user_id:
@@ -113,11 +254,19 @@ class NetworkClient:
         try:
             params = {
                 "username": self.user_id,
-                "token": self.message_token,
                 "count": count,
                 "end_index": end_index,
             }
-            resp = self.session.get(f"{self.base_url}/history", params=params, verify=self.verify_ssl, timeout=20)
+            headers = {}
+            if self.message_token:
+                headers["Authorization"] = f"Bearer {self.message_token}"
+            resp = self.session.get(
+                f"{self.base_url}/history",
+                params=params,
+                headers=headers,
+                verify=self.verify_ssl,
+                timeout=20,
+            )
             if resp.status_code != 200:
                 return [], -1
 
@@ -156,6 +305,9 @@ class NetworkClient:
     
     def _get_image_from_server(self, item: ConversationItem) -> ConversationItem:
         try:
+            if not _is_safe_uuid(item.uuid):
+                self.logger.error(f"Unsafe uuid from server: {item.uuid}")
+                return item
             payload = {"username": self.user_id, "token": self.message_token, "uuid": item.uuid}
             resp = self.session.post(
                 f"{self.base_url}/get_image",

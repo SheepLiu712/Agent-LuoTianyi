@@ -4,11 +4,14 @@ Data: 2026-04-07
 Description: 主界面UI实现，包含Live2D显示和聊天窗口两部分，以及它们的交互逻辑。通过Binder与后端处理逻辑连接。
 '''
 import os
-from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, Signal
-from PySide6.QtGui import QMouseEvent, QPainter, QImage, QResizeEvent, QIcon, QPixmap
-from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout, 
-                               QTextEdit, QScrollArea, QLabel, 
-                                QFrame, QPushButton, QFileDialog, QSlider, )
+import time
+from collections import deque
+from PySide6.QtCore import Qt, QTimerEvent, QRect, QEvent, QTimer, QPoint, QPointF, Signal
+from PySide6.QtGui import QMouseEvent, QPainter, QPen, QColor, QImage, QResizeEvent, QIcon, QPixmap
+from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
+                               QTextEdit, QScrollArea, QLabel,
+                                QFrame, QPushButton, QFileDialog, QSlider,
+                                QMessageBox)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
 from typing import Dict, Any, List
@@ -17,6 +20,9 @@ from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
 from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, BubblePlaybackManager
+from .preferences_dialog import PreferencesDialog
+
+
 
 class Live2DWidget(QOpenGLWidget):
     '''
@@ -27,8 +33,53 @@ class Live2DWidget(QOpenGLWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_AlwaysStackOnTop)
         self.model: Live2dModel = Live2dModel(live2d_config)
-        agent_binder.on_set_model(self.model) # 有些参数需要在创建模型之后才能设置，所以通过binder传递模型实例给agent_binder，由它来调用相关回调设置参数。
+        self.agent_binder = agent_binder
+        agent_binder.on_set_model(self.model)
+        self.agent_binder.expression_signal.connect(self.on_expression_changed)
         self.setMouseTracking(True)
+        # 点击间隔控制（防止服务端过载）
+        self._click_interval = 0.3  # 300ms
+        self._last_click_time = 0.0
+        # 点击频率统计（供LLM分析）
+        self._click_timestamps: deque = deque(maxlen=50)
+
+        # 目光跟随插值状态
+        self._gaze_current_x = 0.0
+        self._gaze_current_y = 0.0
+        self._gaze_target_x = 0.0
+        self._gaze_target_y = 0.0
+        self._mouse_inside = False
+
+        # 触摸事件控制（最大每秒一次）
+        self._touch_send_interval = 1.0
+        self._last_touch_sent_time = 0.0
+        self._touch_count_since_last_sent = 0
+        self._pending_touch_areas: list[str] = []
+
+        # 触摸反馈圆环动画状态（由 paintGL 绘制）
+        self._ripples: list[dict] = []
+
+        # 触摸区域名称映射（HitArea -> 发送给服务端的标准区域）
+        self._part_to_touch = {
+            "Part24": "头",
+            "Part8": "头",
+            "Part11": "头",
+            "Part21": "手",
+            "ArtMesh129_Skinning": "手",
+            "ArtMesh48_Skinning": "手",
+            "Part18": "身体",
+            "Part17": "身体"
+        }
+
+        # 思考气泡动画状态（由 paintGL 叠加绘制）
+        self._thinking_visible = False
+        self._thinking_frame_index = 0
+        self._thinking_frame_counter = 0  # 帧计数，用于 500ms 切换
+        self._thinking_bubble_frames: list[QImage] = [
+            QImage("res/gui/thinking_bubble1.png").convertToFormat(QImage.Format.Format_ARGB32_Premultiplied),
+            QImage("res/gui/thinking_bubble2.png").convertToFormat(QImage.Format.Format_ARGB32_Premultiplied),
+            QImage("res/gui/thinking_bubble3.png").convertToFormat(QImage.Format.Format_ARGB32_Premultiplied),
+        ]
 
     def initializeGL(self) -> None:
         # Load model config
@@ -39,9 +90,16 @@ class Live2DWidget(QOpenGLWidget):
             glClearColor(0, 0, 0, 0)
         except Exception as e:
             print(f"initializeGL glClearColor error: {e}")
-        
+
+        self._gaze_target_x = self.width() / 2
+        self._gaze_target_y = self.height() / 2
+
         # Start update timer (approx 60 FPS)
         self.startTimer(int(1000 / 60))
+
+    def on_expression_changed(self, expression: str) -> None:
+        if self.model:
+            self.model.set_expression_by_cmd(expression)
 
     def resizeGL(self, w: int, h: int) -> None:
         glViewport(0, 0, w, h)
@@ -61,31 +119,212 @@ class Live2DWidget(QOpenGLWidget):
             self.model.Update()
             self.model.Draw()
 
+        # ---- QPainter 叠加绘制 ----
+        painter = QPainter(self)
+
+        # 思考气泡（在模型上方、圆环之前）
+        if self._thinking_visible and self._thinking_bubble_frames:
+            frame = self._thinking_bubble_frames[self._thinking_frame_index % len(self._thinking_bubble_frames)]
+            if not frame.isNull():
+                w = self.width()
+                h = self.height()
+                bubble_width = max(1, int(w / 4))
+                scaled = frame.scaledToWidth(bubble_width, Qt.TransformationMode.SmoothTransformation)
+                x = int((w - scaled.width()) * 0.94)
+                y = int(h * 0.15)
+                # 直接用 OpenGL 纹理绘制，彻底避开 QPainter on OpenGL 的 Alpha 兼容问题
+                self._draw_image_as_texture(scaled, x, y)
+
+        # 触摸反馈圆环
+        if self._ripples:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            for r in self._ripples:
+                pen = QPen(QColor(133, 136, 230, int(r["opacity"] * 255)))
+                pen.setWidth(10)
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawEllipse(QPointF(r["x"], r["y"]), r["radius"], r["radius"])
+
+        painter.end()
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         '''
-        处理鼠标点击事件，判断是否点击在模型的特定区域（如头部），如果是则触发模型表情变化。
+        处理鼠标点击事件，检测所有配置的触摸区域并分组为 head/body/legs/hands。
+        生成浅蓝色圆环视觉反馈，并以新格式通过 WebSocket 发送触摸事件。
         '''
         if not self.model:
             return
+
+        now = time.time()
         x, y = event.position().x(), event.position().y()
-        if self.model.HitTest("头", x, y):
-            self.model.set_next_expression()
+        hitparts : List[str] = self.model.model.HitPart(x,y, True)
+
+        # 检测所有 HitArea，并映射为标准触摸区域
+        hit_area_names: set[str] = set()
+        for hitpart in hitparts:
+            area_name = self._part_to_touch.get(hitpart)
+            if area_name:
+                hit_area_names.add(area_name)            
+
+        if not hit_area_names:
+            return  # 没有点击到模型的可触摸区域
+
+        # 生成视觉反馈圆环
+        self._ripples.append({
+            "x": x, "y": y,
+            "radius": 0,
+            "opacity": 1.0,
+            "max_radius": 60,
+        })
+        # 触摸次数统计（用于发送）
+        self._touch_count_since_last_sent += 1
+        self._pending_touch_areas.extend(hit_area_names)
+
+
+        # 发送频率控制：最大每秒一次
+        time_since_last = now - self._last_touch_sent_time
+        if time_since_last >= self._touch_send_interval:
+            touch_areas = list(set(self._pending_touch_areas))
+            self._pending_touch_areas.clear()
+            touch_count = self._touch_count_since_last_sent
+            self._touch_count_since_last_sent = 0
+            self._last_touch_sent_time = now
+            self.agent_binder.on_send_touch(
+                touch_area=touch_areas,
+                touch_meta={
+                    "timeSinceLastSentTouch": time_since_last,
+                    "touchCount": touch_count,
+                }
+            )
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         '''
-        处理鼠标拖动事件，目前的功能是模型目光跟随鼠标指针。
+        处理鼠标移动事件：模型目光跟随鼠标指针，鼠标移出区域后平滑回到默认位置。
         '''
         if not self.model:
             return
-        x, y = event.position().x() - self.x(), event.position().y() - self.y()
-        self.model.Drag(x, y)
+        x = event.position().x()
+        y = event.position().y()
+        if 0 <= x <= self.width() and 0 <= y <= self.height():
+            self._gaze_target_x = x
+            self._gaze_target_y = y
+            self._mouse_inside = True
+        else:
+            self._gaze_target_x = self.width() / 2
+            self._gaze_target_y = self.height() / 2
+            self._mouse_inside = False
+
+    def enterEvent(self, event):
+        self._mouse_inside = True
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._mouse_inside = False
+        self._gaze_target_x = self.width() / 2
+        self._gaze_target_y = self.height() / 2
+        super().leaveEvent(event)
+
+    def set_thinking_visible(self, visible: bool) -> None:
+        """由 Live2DContainer 调用，控制思考气泡的显示与隐藏。"""
+        if not self._thinking_bubble_frames or all(f.isNull() for f in self._thinking_bubble_frames):
+            self._thinking_visible = False
+            return
+        if visible:
+            self._thinking_frame_index = 0
+            self._thinking_frame_counter = 0
+            self._thinking_visible = True
+        else:
+            self._thinking_visible = False
+
+    def _draw_image_as_texture(self, image: QImage, x: int, y: int) -> None:
+        """用 OpenGL 纹理直接绘制 QImage，避开 QPainter on OpenGL 的 Alpha 兼容问题。"""
+        img = image.convertToFormat(QImage.Format.Format_RGBA8888)
+        tw, th = img.width(), img.height()
+        bits = img.bits()
+        if bits is None:
+            return
+
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glEnable(GL_TEXTURE_2D)
+
+        texture = glGenTextures(1)
+        glBindTexture(GL_TEXTURE_2D, texture)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
+        # 告诉 GL QImage 的实际行宽（像素数），消除 stride 偏移
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, img.bytesPerLine() // 4)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, bits)
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0)
+
+        vw, vh = self.width(), self.height()
+        glMatrixMode(GL_PROJECTION)
+        glPushMatrix()
+        glLoadIdentity()
+        glOrtho(0, vw, vh, 0, -1, 1)
+        glMatrixMode(GL_MODELVIEW)
+        glPushMatrix()
+        glLoadIdentity()
+
+        x2, y2 = x + tw, y + th
+        glBegin(GL_QUADS)
+        glTexCoord2f(0, 0); glVertex2f(x, y)
+        glTexCoord2f(1, 0); glVertex2f(x2, y)
+        glTexCoord2f(1, 1); glVertex2f(x2, y2)
+        glTexCoord2f(0, 1); glVertex2f(x, y2)
+        glEnd()
+
+        glPopMatrix()
+        glMatrixMode(GL_PROJECTION)
+        glPopMatrix()
+        glMatrixMode(GL_MODELVIEW)
+
+        glDeleteTextures(1, [texture])
+        glDisable(GL_TEXTURE_2D)
+        glDisable(GL_BLEND)
 
     def timerEvent(self, event: QTimerEvent) -> None:
+        # 目光跟随插值
+        if self.model:
+            dx = self._gaze_target_x - self._gaze_current_x
+            dy = self._gaze_target_y - self._gaze_current_y
+            dist_sq = dx * dx + dy * dy
+            if dist_sq > 1.0:
+                self._gaze_current_x += dx * 0.15
+                self._gaze_current_y += dy * 0.15
+                drag_x = self._gaze_current_x - self.x()
+                drag_y = self._gaze_current_y - self.y()
+                self.model.Drag(drag_x, drag_y)
+            elif not self._mouse_inside:
+                self._gaze_current_x = self._gaze_target_x
+                self._gaze_current_y = self._gaze_target_y
+                drag_x = self._gaze_current_x - self.x()
+                drag_y = self._gaze_current_y - self.y()
+                self.model.Drag(drag_x, drag_y)
+
+        # 思考气泡帧动画（每 ~500ms 切换一帧，约 30 个 timer tick）
+        if self._thinking_visible and self._thinking_bubble_frames:
+            self._thinking_frame_counter += 1
+            if self._thinking_frame_counter >= 30:
+                self._thinking_frame_counter = 0
+                self._thinking_frame_index = (self._thinking_frame_index + 1) % len(self._thinking_bubble_frames)
+
+        # 触摸反馈圆环动画
+        self._ripples = [r for r in self._ripples if r["opacity"] > 0.01]
+        dt = 0.016
+        for r in self._ripples:
+            r["radius"] += (r["max_radius"] / 0.5) * dt
+            progress = r["radius"] / r["max_radius"]
+            r["opacity"] = 1.0 - progress
+
         self.update()
 
 class Live2DContainer(QWidget):
     '''
-    Live2D部分的容器组件，负责显示Live2DWidget和思考气泡，并根据Agent的状态控制思考气泡的显示和动画。
+    Live2D部分的容器组件，负责显示Live2DWidget（含思考气泡叠加绘制）和背景，
+    并根据Agent的状态控制思考气泡的显示和动画。
     '''
 
     def __init__(self, gui_config, live2d_config, agent_binder: AgentBinder, parent=None):
@@ -96,73 +335,10 @@ class Live2DContainer(QWidget):
         self.agent_binder.agent_thinking_signal.connect(self.on_agent_thinking)
         self.live2d_config: Dict[str, Any] = live2d_config
         self.background_image = None
-        self.thinking_visible = False
-        self.thinking_bubble_frames = [
-            QPixmap("res/gui/thinking_bubble1.png"),
-            QPixmap("res/gui/thinking_bubble2.png"),
-            QPixmap("res/gui/thinking_bubble3.png"),
-        ]
-        self._thinking_frame_index = 0
-        self._thinking_timer = QTimer(self)
-        self._thinking_timer.setInterval(500) # 每500ms切换一帧动画
-        self._thinking_timer.timeout.connect(self._advance_thinking_frame)
-
-        self.thinking_bubble_label = QLabel(self)
-        self.thinking_bubble_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.thinking_bubble_label.setStyleSheet("background: transparent;")
         self.load_background()
-        self.update_thinking_bubble()
-
-    def update_thinking_bubble(self):
-        if not self.thinking_bubble_frames:
-            self.thinking_bubble_label.hide()
-            return
-
-        frame = self.thinking_bubble_frames[self._thinking_frame_index]
-        if frame.isNull():
-            self.thinking_bubble_label.hide()
-            return
-
-        bubble_width = max(1, int(self.width() / 4))
-        scaled = frame.scaledToWidth(
-            bubble_width,
-            Qt.TransformationMode.SmoothTransformation
-        )
-        self.thinking_bubble_label.setPixmap(scaled)
-        self.thinking_bubble_label.resize(scaled.size())
-
-        x = int((self.width() - self.thinking_bubble_label.width()) * 0.94) # 一些超参数，反正这样就是可以
-        y = int(self.height() * 0.25)
-        self.thinking_bubble_label.move(x, y)
-        self.thinking_bubble_label.raise_()
-        self.thinking_bubble_label.setVisible(self.thinking_visible)
 
     def on_agent_thinking(self, is_thinking: bool):
-        self.set_thinking_visible(is_thinking)
-
-    def set_thinking_visible(self, visible: bool):
-        self.thinking_visible = visible
-        if not self.thinking_bubble_frames or all(frame.isNull() for frame in self.thinking_bubble_frames):
-            self._thinking_timer.stop()
-            self.thinking_bubble_label.hide()
-            return
-
-        if visible:
-            self._thinking_frame_index = 0
-            self.update_thinking_bubble()
-            if not self._thinking_timer.isActive():
-                self._thinking_timer.start()
-        else:
-            self._thinking_timer.stop()
-            self.thinking_bubble_label.hide()
-
-    def _advance_thinking_frame(self):
-        if not self.thinking_visible:
-            self._thinking_timer.stop()
-            self.thinking_bubble_label.hide()
-            return
-        self._thinking_frame_index = (self._thinking_frame_index + 1) % len(self.thinking_bubble_frames)
-        self.update_thinking_bubble()
+        self.live2d_widget.set_thinking_visible(is_thinking)
         
     def load_background(self): # 加载背景图片
         bg_path = self.gui_config["live2d_background"]["image_path"]
@@ -173,7 +349,6 @@ class Live2DContainer(QWidget):
 
     def resizeEvent(self, event: QResizeEvent):
         self.live2d_widget.resize(self.size())
-        self.update_thinking_bubble()
         super().resizeEvent(event)
 
     def paintEvent(self, event):
@@ -274,10 +449,12 @@ class ChatWidget(QWidget):
     我不太会写UI，这部分主要是AI写的。关键的回调逻辑是我看过的，也比较trivial，不详细解释了。
     '''
 
-    def __init__(self, config: Dict, agent_binder: AgentBinder, parent=None):
+    def __init__(self, config: Dict, agent_binder: AgentBinder, network_client=None, parent=None):
         super().__init__(parent)
         self.config = config if config is not None else {}
         self.agent = agent_binder
+        self.network_client = network_client
+        self.preferences_manager = None  # Will be set from main.py
         self.agent.response_signal.connect(self.on_agent_response)
         self.agent.delete_signal.connect(self.on_agent_delete)
         self.playback_manager = BubblePlaybackManager(
@@ -293,9 +470,9 @@ class ChatWidget(QWidget):
         self.is_loading_history = False
         self.first_load = True
         self.agent_bubbles: dict[str, ChatBubble] = {}
-
+        
         self.init_ui()
-
+        
         # Initial load
         QTimer.singleShot(100, lambda: self.agent.load_history(self.load_history_num, -1))
 
@@ -432,6 +609,27 @@ class ChatWidget(QWidget):
         
         self.toolbar_layout.addWidget(self.picture_btn)
         self.toolbar_layout.addWidget(self.volume_btn)
+        
+        # Settings Button
+        self.settings_btn = HoverButton(tooltip_text="偏好设置")
+        icon_path = os.path.join("res", "gui", "setting.png")
+        self.settings_btn.setIcon(QIcon(icon_path))
+        self.settings_btn.setFixedSize(24, 24)
+        self.settings_btn.setStyleSheet("""
+            QPushButton { 
+                border: none; 
+                background-color: transparent; 
+
+            } 
+            QPushButton:hover { 
+                background-color: #E0E0E0; 
+                border-radius: 4px; 
+            }
+        """)
+        self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.settings_btn.clicked.connect(self.open_settings)
+        self.toolbar_layout.addWidget(self.settings_btn)
+        
         self.toolbar_layout.addStretch()
 
         # Horizontal Line 2
@@ -468,6 +666,14 @@ class ChatWidget(QWidget):
         self.setLayout(layout)
         self.temp_is_user = True
 
+    def open_settings(self):
+        print("Opening preferences dialog...")
+        if self.network_client:
+            dialog = PreferencesDialog(self.network_client, self)
+            dialog.exec()
+        else:
+            QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开偏好设置")
+    
     def on_scroll_value_changed(self, value):
         if value == 0 and not self.is_loading_history and self.current_history_index > 0:
             self.is_loading_history = True
@@ -565,6 +771,8 @@ class ChatWidget(QWidget):
         self.handle_text_input()
 
     def on_picture_clicked(self): # 按工具栏的图片按钮
+        # 先发送图片选择中事件，让服务端进入等待状态
+        self.agent.on_image_selecting_start()
         file_path, _ = QFileDialog.getOpenFileName(
             self, 
             "Select Image", 
@@ -575,6 +783,9 @@ class ChatWidget(QWidget):
             self.can_send_pic = False
             bubble = self.add_message("image", file_path, is_user=True)
             self.agent.on_send_image(file_path, bubble)
+        else:
+            # 用户取消了选择：通知服务端重置等待时间
+            self.agent.on_image_selecting_cancel()
 
     def on_volume_button_clicked(self): # 按工具栏的音量按钮
         if self.volume_popup.isVisible():
@@ -628,13 +839,18 @@ class ChatWidget(QWidget):
                                       self.input_box.height() - s.height() - 10)
         return super().eventFilter(obj, event)
 
+    def set_preferences_manager(self, preferences_manager):
+        """设置用户偏好管理器"""
+        self.preferences_manager = preferences_manager
+        print("Preferences manager set in ChatWidget") 
+
     def handle_text_input(self):
         if self.can_send == False:
             return
         text = self.input_box.toPlainText().strip()
         if not text:
             return
-        
+
         bubble = self.add_message("text", text, conv_uuid="", is_user=True)
         self.input_box.clear()
         
@@ -662,7 +878,7 @@ class ChatWidget(QWidget):
 
 
 class MainWindow(QWidget):
-    def __init__(self, gui_config, live2d_config, ui_binder: AgentBinder):
+    def __init__(self, gui_config, live2d_config, ui_binder: AgentBinder, network_client=None):
         super().__init__()
         self.setWindowTitle("Chat with Luo Tianyi")
         self.resize(1100, 800)
@@ -683,7 +899,7 @@ class MainWindow(QWidget):
         self.v_line.setFixedWidth(2)
 
         # Right Side (Chat)
-        self.chat_widget = ChatWidget(config=gui_config["chat_window"], agent_binder=ui_binder)
+        self.chat_widget = ChatWidget(config=gui_config["chat_window"], agent_binder=ui_binder, network_client=network_client)
         self.layout.addWidget(self.live2d_container)
         self.layout.addWidget(self.v_line)
         self.layout.addWidget(self.chat_widget)

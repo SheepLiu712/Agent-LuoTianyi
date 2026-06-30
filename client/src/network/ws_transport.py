@@ -40,6 +40,13 @@ class WsTransport:
         self._ready_event = threading.Event()
         self._connected_event = threading.Event()
 
+    def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
+        """更新服务器地址，断开当前连接以便自动重连到新地址。"""
+        self.base_url = base_url.rstrip("/")
+        self.verify_ssl = verify_ssl
+        # 断开当前 WS，_run() 循环会自动用新 base_url 重连
+        self.stop()
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
@@ -67,23 +74,93 @@ class WsTransport:
             self._agent_message_listener = agent_message_listener
             self._agent_state_listener = agent_state_listener
 
-    def submit_user_text(self, text: str, ack_timeout: float = 10.0) -> dict:
-        return self._submit_user_event(WSEventType.USER_TEXT, payload={"message": text}, ack_timeout=ack_timeout)
+    def submit_user_text(
+        self,
+        text: str,
+        is_proactive: bool = False,
+        ack_timeout: float = 10.0,
+        client_msg_id: str | None = None,
+    ) -> dict:
+        payload = {"message": text}
+        if is_proactive:
+            payload["is_proactive"] = True
+        return self._submit_user_event(
+            WSEventType.USER_TEXT,
+            payload=payload,
+            ack_timeout=ack_timeout,
+            client_msg_id=client_msg_id,
+        )
 
-    def submit_user_image(self, image_base64: str, mime_type: str, image_client_path: str | None = None, ack_timeout: float = 10.0) -> dict:
+    def submit_user_image(
+        self,
+        image_base64: str,
+        mime_type: str,
+        image_client_path: str | None = None,
+        ack_timeout: float = 10.0,
+        client_msg_id: str | None = None,
+    ) -> dict:
         payload = {
             "image_base64": image_base64,
             "mime_type": mime_type,
         }
         if image_client_path:
             payload["image_client_path"] = image_client_path
-        return self._submit_user_event(WSEventType.USER_IMAGE, payload=payload, ack_timeout=ack_timeout)
+        return self._submit_user_event(
+            WSEventType.USER_IMAGE,
+            payload=payload,
+            ack_timeout=ack_timeout,
+            client_msg_id=client_msg_id,
+        )
     
-    def submit_typing_event(self, text_length: int, ack_timeout: float = 10.0) -> dict:
-        return self._submit_user_event(WSEventType.USER_TYPING, payload={"text_length": text_length}, ack_timeout=ack_timeout)
+    def submit_typing_event(self, text_length: int, ack_timeout: float = 10.0, client_msg_id: str | None = None) -> dict:
+        return self._submit_user_event(
+            WSEventType.USER_TYPING,
+            payload={"text_length": text_length},
+            ack_timeout=ack_timeout,
+            client_msg_id=client_msg_id,
+        )
 
-    def _submit_user_event(self, event_type: WSEventType, payload: dict, ack_timeout: float) -> dict:
-        event = build_event(event_type, payload=payload)
+    def submit_user_touch(
+        self,
+        touch_area: str | list,
+        click_frequency: dict = None,
+        touch_meta: dict = None,
+        ack_timeout: float = 10.0,
+        client_msg_id: str | None = None,
+    ) -> dict:
+        if isinstance(touch_area, str):
+            payload = {"touch_area": touch_area}
+        else:
+            payload = {"touchArea": touch_area}
+        if click_frequency:
+            payload["click_frequency"] = click_frequency
+        if touch_meta:
+            payload.update(touch_meta)
+        return self._submit_user_event(
+            WSEventType.USER_TOUCH,
+            payload=payload,
+            ack_timeout=ack_timeout,
+            client_msg_id=client_msg_id,
+        )
+
+    def submit_image_selecting(self, ack_timeout: float = 5.0) -> dict:
+        """发送图片选择中的事件，服务端会延长等待时间。"""
+        return self._submit_user_event(WSEventType.USER_IMAGE_SELECTING, payload={}, ack_timeout=ack_timeout)
+
+    def submit_image_selecting_cancel(self, ack_timeout: float = 5.0) -> dict:
+        """发送图片选择取消的事件，服务端重置等待时间。"""
+        return self._submit_user_event(WSEventType.USER_IMAGE_SELECTING_CANCEL, payload={}, ack_timeout=ack_timeout)
+    def submit_user_preferences(self, preferences: dict, ack_timeout: float = 10.0) -> dict:
+        return self._submit_user_event(WSEventType.USER_PREFERENCE_SYNC, payload=preferences, ack_timeout=ack_timeout)
+
+    def _submit_user_event(
+        self,
+        event_type: WSEventType,
+        payload: dict,
+        ack_timeout: float,
+        client_msg_id: str | None = None,
+    ) -> dict:
+        event = build_event(event_type, payload=payload, client_msg_id=client_msg_id)
         request_id = event.client_msg_id
 
         self.start()
@@ -261,6 +338,7 @@ class WsTransport:
                 self._emit_agent_state(state)
                 continue
 
+
             if event_type in (WSEventType.SERVER_ERROR, WSEventType.AUTH_ERROR):
                 error_msg = normalize_error_message(msg)
                 consumed = self._complete_ack_waiter(
@@ -277,6 +355,8 @@ class WsTransport:
                             is_final_package=True,
                             uuid=None,
                             reply_to=error_msg.reply_to,
+                            display_in_chat=True,
+                            is_ephemeral=False,
                         )
                     )
         self.logger.debug("WebSocket receive loop exited")
@@ -341,6 +421,7 @@ class WsTransport:
         except Exception:
             pass
 
+
     @staticmethod
     def _build_ws_url(base_url: str) -> str:
         if base_url.startswith("https://"):
@@ -352,11 +433,7 @@ class WsTransport:
     def _build_ssl_context(self, base_url: str):
         if not base_url.startswith("https://"):
             return None
-        if self.verify_ssl:
-            ctx = ssl.create_default_context()
-        else:
-            ctx = ssl._create_unverified_context()
-
+        ctx = ssl.create_default_context()
         # Improve compatibility with some tunneling endpoints in this project runtime.
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         return ctx

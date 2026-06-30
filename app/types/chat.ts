@@ -20,4 +20,6 @@ export interface AgentMessagePayload {
   audio?: string | null;
   expression?: string | null;
   is_final_package?: boolean;
+  display_in_chat?: boolean;
+  is_ephemeral?: boolean;
 }

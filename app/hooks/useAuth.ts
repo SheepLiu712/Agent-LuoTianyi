@@ -1,8 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from 'react';
 import { auth } from '../components/auth';
-import { server_config } from '../config/index';
+import { loadSavedServerUrl, server_config } from '../config/index';
 import { encryptPassword, getPublicKey } from '../utils/crypto';
+import { addDebugTrace } from '../utils/debug_trace';
 
 const AUTO_LOGIN_KEY = 'auto_login';
 const USERNAME_KEY = 'saved_username';
@@ -26,7 +28,15 @@ export function useAuth() {
       const autoLogin = await AsyncStorage.getItem(AUTO_LOGIN_KEY);
       if (autoLogin === 'true') {
         const savedUsername = await AsyncStorage.getItem(USERNAME_KEY);
-        const autoLoginToken = await AsyncStorage.getItem(AUTOLOGIN_TOKEN_KEY);
+        let autoLoginToken = await SecureStore.getItemAsync(AUTOLOGIN_TOKEN_KEY);
+        if (!autoLoginToken) {
+          const legacyToken = await AsyncStorage.getItem(AUTOLOGIN_TOKEN_KEY);
+          if (legacyToken) {
+            await SecureStore.setItemAsync(AUTOLOGIN_TOKEN_KEY, legacyToken);
+            await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
+            autoLoginToken = legacyToken;
+          }
+        }
         if (savedUsername && autoLoginToken) { // 此时可以尝试自动登录
           const response = await fetch(`${server_config.BASE_URL}/auth/auto_login`, {
             method: 'POST',
@@ -38,10 +48,10 @@ export function useAuth() {
           });
 
           if (response.ok) {
-            console.log('自动登录成功');
+            addDebugTrace('auth', 'auto login ok');
             const result = await response.json();
             // 获取到新的token后可以更新存储的token
-            await AsyncStorage.setItem(AUTOLOGIN_TOKEN_KEY, result.login_token);
+            await SecureStore.setItemAsync(AUTOLOGIN_TOKEN_KEY, result.login_token);
             await AsyncStorage.setItem(USERNAME_KEY, result.user_id);
             setAuthState(prev => ({
               ...prev,
@@ -55,24 +65,27 @@ export function useAuth() {
         }
       }
     } catch (e) {
-      console.error('自动登录检查失败:', e);
+      addDebugTrace('auth', 'auto login check failed', { error: String(e) });
     }
     setAuthState(prev => ({ ...prev, isLoading: false }));
   }, []);
 
   const initializeAuth = useCallback(async () => {
-    // 首先尝试获取公钥
+    // 加载保存的自定义服务器地址
+    await loadSavedServerUrl();
+
+    // 然后尝试获取公钥
     try {
-      console.log('正在获取服务器公钥...');
+      addDebugTrace('auth', 'fetching public key');
       const publicKey = await getPublicKey();
       if (publicKey) {
-        console.log('公钥获取成功');
+        addDebugTrace('auth', 'public key loaded');
         setAuthState(prev => ({ ...prev, publicKeyLoaded: true }));
       } else {
-        console.warn('公钥获取失败，登录功能可能受限');
+        addDebugTrace('auth', 'public key failed');
       }
     } catch (error) {
-      console.error('获取公钥时发生错误:', error);
+      addDebugTrace('auth', 'public key error', { error: String(error) });
     }
 
     // 然后检查自动登录
@@ -94,7 +107,7 @@ export function useAuth() {
       // 加密密码
       const encryptedPassword = await encryptPassword(password);
       if (!encryptedPassword) {
-        console.warn('密码加密失败');
+        addDebugTrace('auth', 'password encrypt failed');
         return { success: false, message: '登录失败，无法加密密码' };
       }
       // 发送登录请求
@@ -115,13 +128,15 @@ export function useAuth() {
       if (autoLogin) {
         await AsyncStorage.setItem(AUTO_LOGIN_KEY, 'true');
         await AsyncStorage.setItem(USERNAME_KEY, username);
-        await AsyncStorage.setItem(AUTOLOGIN_TOKEN_KEY, result.login_token); // 存储登录后从服务器获取的token
+        await SecureStore.setItemAsync(AUTOLOGIN_TOKEN_KEY, result.login_token); // 存储登录后从服务器获取的token
+        await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
       } else {
         await AsyncStorage.removeItem(AUTO_LOGIN_KEY);
         await AsyncStorage.removeItem(USERNAME_KEY);
+        await SecureStore.deleteItemAsync(AUTOLOGIN_TOKEN_KEY);
         await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
       }
-      console.log('登录成功，用户:', username);
+      addDebugTrace('auth', 'login ok', { username });
       setAuthState(prev => ({
         ...prev,
         isLoggedIn: true,
@@ -131,7 +146,7 @@ export function useAuth() {
 
       return { success: true, message: '登录成功' };
     } catch (e) {
-      console.error('登录失败:', e);
+      addDebugTrace('auth', 'login error', { error: String(e) });
       return { success: false, message: '登录失败，请联系管理员' };
     }
   }, []);
@@ -152,7 +167,7 @@ export function useAuth() {
       // 加密密码
       const encryptedPassword = await encryptPassword(password);
       if (!encryptedPassword) {
-        console.warn('密码加密失败，使用明文传输（不安全）');
+        addDebugTrace('auth', 'register: password encrypt failed');
         return { success: false, message: '注册失败，无法加密密码' };
       }
 
@@ -171,24 +186,27 @@ export function useAuth() {
         return { success: false, message: result.detail || '注册失败' };
       }
 
-
       return { success: true, message: '注册成功，请登录' };
     } catch (e) {
-      console.error('注册失败:', e);
+      addDebugTrace('auth', 'register error', { error: String(e) });
       return { success: false, message: '注册失败，请联系管理员' };
     }
   }, []);
 
   const logout = useCallback(async () => {
     try {
+      // 清除公钥缓存，下次登录会重新从服务器获取
+      const { clearCachedPublicKey } = await import('../utils/crypto');
+      clearCachedPublicKey();
       await AsyncStorage.removeItem(AUTO_LOGIN_KEY);
       await AsyncStorage.removeItem(USERNAME_KEY);
+      await SecureStore.deleteItemAsync(AUTOLOGIN_TOKEN_KEY);
       await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
       auth.username = '';
       auth.message_token = '';
       setAuthState(prev => ({ ...prev, isLoggedIn: false }));
     } catch (e) {
-      console.error('退出登录失败:', e);
+      addDebugTrace('auth', 'logout error', { error: String(e) });
     }
   }, []);
 

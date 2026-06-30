@@ -6,10 +6,15 @@ import { AgentBinder } from './binder';
 import { addDebugTrace } from './debug_trace';
 import { NetworkClient } from './network_client';
 
-type SendItem =
+type SendItem = { clientMsgId: string } & (
   | { kind: 'text'; uuid: string; text: string }
+  | { kind: 'proactive'; uuid: string; text: string }
   | { kind: 'image'; uuid: string; imageUri: string; mimeType: string }
-  | { kind: 'typing'; textLength: number };
+  | { kind: 'typing'; textLength: number }
+  | { kind: 'touch'; touchArea: string | string[]; clickFrequency?: Record<string, number>; touchMeta?: Record<string, unknown> }
+  | { kind: 'image_selecting' }
+  | { kind: 'image_selecting_cancel' }
+);
 
 interface SendResult {
   ok: boolean;
@@ -85,6 +90,7 @@ export class MessageProcessor {
   private serverAudioPlaying = false;
   private readonly audioChunksByUuid = new Map<string, string[]>();
   private readonly audioPathByUuid = new Map<string, string>();
+  private readonly transientMessageUuids = new Set<string>();
   private lastTypingSentAt = 0;
   private readonly serverAudioFinishWaiters: (() => void)[] = [];
   private incomingMessageChain: Promise<void> = Promise.resolve();
@@ -114,17 +120,37 @@ export class MessageProcessor {
   }
 
   async sendText(uuid: string, text: string) {
-    this.sendQueue.push({ kind: 'text', uuid, text });
+    this.sendQueue.push({ kind: 'text', uuid, text, clientMsgId: this.nextClientMsgId() });
     addDebugTrace('send', 'enqueue text', { uuid, queueLength: this.sendQueue.length, textLength: text.length });
     this.binder.emitMessageStatus(uuid, 'waiting');
     this.startSendLoop();
   }
 
+  async sendProactiveText(uuid: string, text: string) {
+    this.sendQueue.push({ kind: 'proactive', uuid, text, clientMsgId: this.nextClientMsgId() });
+    addDebugTrace('send', 'enqueue proactive text', { uuid, queueLength: this.sendQueue.length, textLength: text.length });
+    this.startSendLoop();
+  }
+
   async sendImage(uuid: string, imageUri: string, mimeType: string) {
-    this.sendQueue.push({ kind: 'image', uuid, imageUri, mimeType });
+    this.sendQueue.push({ kind: 'image', uuid, imageUri, mimeType, clientMsgId: this.nextClientMsgId() });
     addDebugTrace('send', 'enqueue image', { uuid, queueLength: this.sendQueue.length, mimeType });
     this.binder.emitMessageStatus(uuid, 'waiting');
     this.startSendLoop();
+  }
+
+  async sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) {
+    addDebugTrace('send', 'enqueue touch', { touchArea, queueLength: this.sendQueue.length });
+    this.sendQueue.push({ kind: 'touch', touchArea, clickFrequency, touchMeta, clientMsgId: this.nextClientMsgId() });
+    this.startSendLoop();
+  }
+
+  async sendPreferences(preferences: Record<string, unknown>) {
+    addDebugTrace('send', 'send preferences direct');
+    const result = await this.networkClient.sendPreferences(preferences);
+    if (!result.ok) {
+      addDebugTrace('send', 'send preferences failed', { error: result.error });
+    }
   }
 
   async sendTypingEvent(textLength: number) {
@@ -136,8 +162,20 @@ export class MessageProcessor {
       return;
     }
     this.lastTypingSentAt = now;
-    this.sendQueue.push({ kind: 'typing', textLength });
+    this.sendQueue.push({ kind: 'typing', textLength, clientMsgId: this.nextClientMsgId() });
     addDebugTrace('send', 'enqueue typing', { queueLength: this.sendQueue.length, textLength });
+    this.startSendLoop();
+  }
+
+  async sendImageSelecting() {
+    addDebugTrace('send', 'enqueue image_selecting');
+    this.sendQueue.push({ kind: 'image_selecting', clientMsgId: this.nextClientMsgId() });
+    this.startSendLoop();
+  }
+
+  async sendImageSelectingCancel() {
+    addDebugTrace('send', 'enqueue image_selecting_cancel');
+    this.sendQueue.push({ kind: 'image_selecting_cancel', clientMsgId: this.nextClientMsgId() });
     this.startSendLoop();
   }
 
@@ -277,23 +315,32 @@ export class MessageProcessor {
 
   private async handleAgentMessage(payload: AgentMessagePayload) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
+    const displayInChat = payload.display_in_chat !== false;
+
+    if (!displayInChat) {
+      this.transientMessageUuids.add(convUuid);
+    }
 
     if (this.localPlayingUuid) {
       void this.stopLocalTts();
     }
 
-    if (payload.text && payload.text.trim().length > 0) {
+    if (displayInChat && payload.text && payload.text.trim().length > 0) {
       this.binder.emitAgentMessage({
         uuid: convUuid,
         text: payload.text,
         expression: payload.expression || undefined,
         is_final_package: payload.is_final_package,
+        display_in_chat: payload.display_in_chat,
+        is_ephemeral: payload.is_ephemeral,
       });
     } else {
       this.binder.emitAgentMessage({
         uuid: convUuid,
         expression: payload.expression || undefined,
         is_final_package: payload.is_final_package,
+        display_in_chat: payload.display_in_chat,
+        is_ephemeral: payload.is_ephemeral,
       });
     }
 
@@ -357,6 +404,10 @@ export class MessageProcessor {
     void this.runSendLoop();
   }
 
+  private nextClientMsgId() {
+    return `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
   private async runSendLoop() {
     while (!this.stopRequested) {
       if (this.sendQueue.length === 0) {
@@ -367,8 +418,8 @@ export class MessageProcessor {
       const item = this.sendQueue[0];
       const result = await this.sendOne(item);
 
-      if (item.kind === 'typing') {
-        addDebugTrace('send', 'typing sent', { ok: result.ok, error: result.error });
+      if (item.kind === 'typing' || item.kind === 'proactive' || item.kind === 'touch' || item.kind === 'image_selecting' || item.kind === 'image_selecting_cancel') {
+        addDebugTrace('send', `${item.kind} sent`, { ok: result.ok, error: result.error });
         this.sendQueue.shift();
         continue;
       }
@@ -405,18 +456,25 @@ export class MessageProcessor {
   }
 
   private async sendOne(item: SendItem): Promise<SendResult> {
-    addDebugTrace('send', 'sendOne begin', {
-      kind: item.kind,
-      uuid: item.kind === 'typing' ? undefined : item.uuid,
-      queueLength: this.sendQueue.length,
-    });
     if (item.kind === 'text') {
-      return this.networkClient.sendChat(item.text);
+      return this.networkClient.sendChat(item.text, false, item.clientMsgId);
+    }
+    if (item.kind === 'proactive') {
+      return this.networkClient.sendChat(item.text, true, item.clientMsgId);
     }
     if (item.kind === 'image') {
-      return this.networkClient.sendImage(item.imageUri, item.mimeType);
+      return this.networkClient.sendImage(item.imageUri, item.mimeType, item.clientMsgId);
     }
-    return this.networkClient.sendTypingEvent(item.textLength);
+    if (item.kind === 'touch') {
+      return this.networkClient.sendTouch(item.touchArea, item.clickFrequency, item.touchMeta, item.clientMsgId);
+    }
+    if (item.kind === 'image_selecting') {
+      return this.networkClient.sendImageSelecting(item.clientMsgId);
+    }
+    if (item.kind === 'image_selecting_cancel') {
+      return this.networkClient.sendImageSelectingCancel(item.clientMsgId);
+    }
+    return this.networkClient.sendTypingEvent(item.textLength, item.clientMsgId);
   }
 
   private async saveAudioToLocal(convUuid: string) {
@@ -435,10 +493,12 @@ export class MessageProcessor {
         encoding: FileSystem.EncodingType.Base64,
       });
       this.audioPathByUuid.set(convUuid, fileUri);
-      this.binder.emitAgentMessage({
-        uuid: convUuid,
-        audio: fileUri,
-      });
+      if (!this.transientMessageUuids.has(convUuid)) {
+        this.binder.emitAgentMessage({
+          uuid: convUuid,
+          audio: fileUri,
+        });
+      }
     } catch (error) {
       const errorMessage = getErrorMessage(error);
       addDebugTrace('audio', 'save local audio failed', {
@@ -452,6 +512,7 @@ export class MessageProcessor {
       this.binder.emitErrorText(`本地音频保存失败: ${errorMessage}`);
     } finally {
       this.audioChunksByUuid.delete(convUuid);
+      this.transientMessageUuids.delete(convUuid);
     }
   }
 }

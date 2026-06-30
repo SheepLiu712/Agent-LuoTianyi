@@ -12,8 +12,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from sqlalchemy.orm import Session
 
-from src.database.sql_database import Conversation, User, get_sql_session, init_sql_db
-from src.memory.user_profile_updater import UserProfileUpdater
+from src.system.database.sql_database import Conversation, User, get_sql_session, init_sql_db
+from src.subconscious.memory.user_profile_updater import UserProfileUpdater
 from src.utils.helpers import load_config
 from src.utils.llm.prompt_manager import PromptManager
 

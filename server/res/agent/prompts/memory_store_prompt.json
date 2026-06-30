@@ -1,0 +1,6 @@
+{
+  "name": "memory_store_prompt",
+  "template": [
+    "{{ prompt }}"
+  ]
+}

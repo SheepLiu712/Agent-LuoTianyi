@@ -69,8 +69,14 @@ logs
 temp
 mobile_project
 setup
-res
+/res/*
+!/res/agent/
+!/res/agent/**
 data
+data_produce
+data_backup
+data_backups
 .VSCodeCounter
 Redis-x64-*
-bili_cookie.txt
+# B站 Cookie（敏感信息，勿提交）
+config/bili_cookie.txt

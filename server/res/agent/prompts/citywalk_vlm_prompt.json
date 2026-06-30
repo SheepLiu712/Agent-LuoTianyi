@@ -1,0 +1,6 @@
+{
+  "name": "citywalk_vlm_prompt",
+  "template": [
+    "{{ prompt }}"
+  ]
+}

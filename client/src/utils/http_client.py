@@ -14,10 +14,6 @@ class TLS12HttpAdapter(HTTPAdapter):
         ctx = ssl.create_default_context()
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
 
-        if not self.verify_ssl:
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-
         pool_kwargs["ssl_context"] = ctx
         return super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
 
@@ -27,6 +23,7 @@ class HttpClientFactory:
 
     @classmethod
     def get_session(cls, verify_ssl: bool) -> requests.Session:
+        verify_ssl = True
         key = (verify_ssl,)
         if key in cls._session_cache:
             return cls._session_cache[key]

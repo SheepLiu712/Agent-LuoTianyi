@@ -21,11 +21,17 @@ class WSEventType(str, Enum):
     USER_IMAGE = "user_image"
     USER_TEXT = "user_text"
     USER_TYPING = "user_typing"
+    USER_IMAGE_SELECTING = "user_image_selecting"
+    USER_IMAGE_SELECTING_CANCEL = "user_image_selecting_cancel"
     USER_AUTH = "user_auth"
+    USER_TOUCH = "user_touch"
+
+    USER_PREFERENCE_SYNC = "user_preference_sync"
 
 
     HB_PING = "hb_ping"
     HB_PONG = "hb_pong"
+    DATE_DETECTED = "date_detected"
 
 @dataclass
 class WSMessage:
@@ -52,6 +58,8 @@ class AgentMessage:
     is_final_package: bool
     uuid: str | None
     reply_to: str | None
+    display_in_chat: bool = True
+    is_ephemeral: bool = False
 
 @dataclass
 class AgentStateMessage:
@@ -109,6 +117,8 @@ def normalize_agent_message(message: WSMessage) -> AgentMessage:
         is_final_package=bool(payload.get("is_final_package", True)),
         uuid=payload.get("uuid"),
         reply_to=message.reply_to,
+        display_in_chat=bool(payload.get("display_in_chat", True)),
+        is_ephemeral=bool(payload.get("is_ephemeral", False)),
     )
 
 

@@ -4,4 +4,4 @@
 包含LLM客户端和Prompt管理功能
 """
 
-from .llm_api_interface import LLMAPIInterface, LLMAPIFactory
+from src.utils.llm.llm_api_interface import LLMAPIInterface, LLMAPIFactory

@@ -23,41 +23,38 @@ Server承担了绝大多数的数据处理、管理和计算任务。client和ap
 
 [这是独属于你的洛天依](https://www.bilibili.com/video/BV15LZ7BJE3e)
 
-## 🚀 PC客户端快速开始
-### 普通方式
-在Releases页面下载最新版本的安装包（以`.zip`或`.7z`结尾的文件），解压后运行`Chat with Luotianyi.exe`。
+## 🚀快速开始
+### PC客户端
+#### 普通用户
 
-第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要私信服务器管理者（现在即作者）获取。
+1. 从 [Releases](https://github.com/SheepLiu712/Agent-LuoTianyi/releases) 下载最新客户端
+2. 解压后运行 `Chat with Luotianyi.exe`
+3. 向作者获取邀请码，注册后登录
 
-注册成功之后即可登录。勾选自动登录后，下一次运行将直接进入主界面。
-
-### 开发者方式
-1. 克隆仓库：
+#### 开发者
 ```bash
-git clone https://github.com/SheepLiu712/Agent-Luotianyi
+git clone https://github.com/SheepLiu712/Agent-LuoTianyi
+cd Agent-LuoTianyi/client
+setup.bat          # 创建 conda 环境并安装依赖
+python main.py     # 启动客户端
 ```
-2. 进入项目的client目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
-3. 运行`main.py`启动客户端。
 
-## 🚀 App快速开始
-### 普通方式
+### 移动端 App
+#### 普通用户
 在Releases页面下载最新版本的apk文件，安装之。由于现在这个版本没有上架应用商店，所以需要允许安装未知来源的应用。
 
 第一次运行需要向服务器注册，注册时填写账号、密码、邀请码即可。邀请码需要私信服务器管理者（现在即作者）获取。
 
-注册成功之后即可登录。勾选自动登录后，下一次运行将直接进入主界面。
-
-### 开发者方式
-1. 克隆仓库：
+#### 开发者
 ```bash
-git clone https://github.com/SheepLiu712/Agent-Luotianyi
+git clone https://github.com/SheepLiu712/Agent-LuoTianyi
+cd Agent-LuoTianyi/app
+npx expo start                 # 启动 Expo 开发服务器
 ```
-进入app目录。项目基于Expo开发，因此依次执行以下指令，可以在expo环境中运行：
-```
-npx expo install
-npx expo start
-```
-你也可以将expo项目构建为标准的安卓项目。
+2. 进入项目的client目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
+3. 运行`main.py`启动客户端。
+
+---
 
 ## 🔧服务端架设
 ### 一、环境要求
@@ -85,6 +82,8 @@ npx expo start
       ```bash
       setx SILICONFLOW_API_KEY "your_api_key_here"
       setx QWEN_API_KEY "your_api_key_here"
+      setx DEEPSEEK_API_KEY "your_key"
+      setx AMAP_KEY "your_key"       # 高德地图，可选（城市漫步用）
       ```
     - 所配置的环境变量需要和config.json中的占位符一致，并不局限于硅基流动的api_key，如果你使用了其他需要密钥的服务，建议也按照同样的方式配置环境变量。
 
@@ -145,15 +144,18 @@ npx expo start
 - **公网访问**：使用 sakurafrp 实现内网穿透，支持公网访问
 
 ### TODO List
-等待有缘人帮我做完
-- [ ] 自动学歌功能；
-- [ ] 同步官方日程功能；
-- [ ] 更口语化的对话；
-- [ ] Live2d互动和反应功能；
-- [ ] 纪念日记忆和反应功能；
-- [ ] 用户与洛天依关系保存和演变功能；
-- [ ] 更好的记忆检索和保存，提升命中率；
+等待有缘人帮我做完（其实做完了，正在测）
+- [ ] Live2d互动和反应功能（需要考虑用户反复点击时如何处理，防止冲垮服务器）；
+- [ ] 更好的记忆检索和保存，提升命中率和联想能力，让天依更像人；
 - [ ] 上下文注意力机制，规划关系、心情、日程、记忆、前文对回复的影响。
+- [ ] 更加有意思的对话，让天依更会聊天，成为用户的朋友，而不是一个冰冷的聊天机器人。
+- [ ] 服务端的简化配置流程，降低部署难度。
+- [ ] 服务端的webui管理工具，方便查看和管理用户数据、对话数据、知识库数据等。
+- [ ] SFT微调，获得一个符合天依设定，专攻聊天的模型，避免大厂商模型更新后导致的回复风格和质量的不可控。
+
+下面是其它可能的想法，可能成为独立项目：
+- [ ] MineCraft-LuoTianyi: 使用mineflayer项目，让天依控制机器人在Minecraft中活动，和用户一起玩耍。
+- [ ] Doll-LuoTianyi：将客户端迁移到单片机平台，然后放到棉花娃娃里，成为一个实体玩偶。
 
 ### 项目架构
 #### 客户端架构
@@ -188,6 +190,13 @@ npx expo start
 - 希望为项目做出贡献/锻炼自己的能力。
 
 你就可以尝试为项目贡献代码！
+
+⚠警告：我们注意到中文Vocaloid社区对AI生成内容的极度敏感。在社区共识改变之前，我们**不会**向项目中引入：①AI生成的美术作品；②AI生成的音乐。因此，如果你想为项目贡献美术资源或者音乐资源，请确保这些资源不是由AI生成的。另外，你设计的功能不应该涉及上述模块。但以下AI使用方式是可接受的：
+- 使用LLM进行文本生成，例如对话回复、记忆管理、上下文压缩等；
+- 使用开源的语音合成模型进行TTS合成，例如GPT-SoVITS。
+- 使用AI辅助编程工具（如GitHub Copilot）进行代码编写，但核心逻辑和设计需要由开发者完成。
+- 所有的判别式模型，例如人物识别、术语提取、情感分类等。所有不生成新内容的生成式模型（如伴奏分离）。
+- 所有非神经网络的算法。
 
 你可以用常用的方式贡献代码：
 1. 将项目fork到你自己的目录；

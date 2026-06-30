@@ -1,10 +1,11 @@
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QLabel, QLineEdit, 
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QMessageBox, QTabWidget, QWidget, QCheckBox)
 from PySide6.QtCore import Qt
 
 from .binder import AgentBinder
 from ..safety import credential
 from ..utils.logger import get_logger
+from ..utils.http_client import HttpClientFactory
 
 
 class LoginDialog(QDialog):
@@ -14,32 +15,36 @@ class LoginDialog(QDialog):
         self.binder = binder
         self.user_id = None
         self.saved_token = None
-        
+        self.custom_base_url = None  # 自定义服务器地址
+
         self.setWindowTitle("ChatWithLuoTianyi - 登录/注册")
-        self.setFixedSize(400, 350)
-        
+        self.setFixedSize(420, 380)
+
         layout = QVBoxLayout()
-        
+
         self.tabs = QTabWidget()
         self.tabs.setStyleSheet("QTabBar::tab { font-size: 16px; min-height: 28px; }")
         self.login_tab = QWidget()
         self.register_tab = QWidget()
-        
+
         self.tabs.addTab(self.login_tab, "登录")
         self.tabs.addTab(self.register_tab, "注册")
-        
+
         self.setup_login_ui()
         self.setup_register_ui()
-        
+
         layout.addWidget(self.tabs)
+
         self.setLayout(layout)
-        
+
         cred = credential.load_credentials()
         if cred:
-            username, token, do_auto_login = cred
+            username, token, do_auto_login, saved_url = cred if len(cred) >= 4 else (*cred, None)
             self.l_auto_login.setChecked(do_auto_login)
             self.l_username.setText(username or "")
             self.saved_token = token
+            if saved_url:
+                self.custom_base_url = saved_url
 
     def try_auto_login(self) -> bool:
         try:
@@ -72,19 +77,43 @@ class LoginDialog(QDialog):
         self.l_password.setPlaceholderText("密码")
         self.l_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.l_password.setStyleSheet(style)
-        
+
         self.l_auto_login = QCheckBox("自动登录")
         self.l_auto_login.setStyleSheet("font-size: 16px; padding: 5px;")
-        
+
         self.l_btn = QPushButton("登录")
         self.l_btn.clicked.connect(self.do_login)
-        self.l_btn.setStyleSheet(style + "background-color: #66ccff; color: white; border-radius: 5px;")
-        
+        self.l_btn.setStyleSheet(
+            "QPushButton { font-size: 16px; padding: 5px;"
+            " background-color: #44BBEE; color: white; border-radius: 5px; }"
+            " QPushButton:hover { background-color: #66ccff; }"
+        )
+
+        self.reset_btn = QPushButton("重置账号")
+        self.reset_btn.setStyleSheet(
+            "QPushButton { font-size: 16px; padding: 4px; color: #4488BB;"
+            " border: none; text-align: left; }"
+            " QPushButton:hover { color: #77BBEE; }"
+        )
+        self.reset_btn.clicked.connect(self.open_reset_account_dialog)
+
+        self.server_btn = QPushButton("服务器地址")
+        self.server_btn.setStyleSheet(
+            "QPushButton { font-size: 16px; padding: 4px; color: #4488BB;"
+            " border: none; text-align: left; }"
+            " QPushButton:hover { color: #77BBEE; }"
+        )
+        self.server_btn.clicked.connect(self.open_server_settings_dialog)
+
         layout.addWidget(self.l_username)
         layout.addSpacing(20)
         layout.addWidget(self.l_password)
         layout.addSpacing(10)
         layout.addWidget(self.l_auto_login)
+        layout.addSpacing(8)
+        layout.addWidget(self.reset_btn)
+        layout.addSpacing(8)
+        layout.addWidget(self.server_btn)
         layout.addStretch()
         layout.addWidget(self.l_btn)
         self.login_tab.setLayout(layout)
@@ -112,11 +141,15 @@ class LoginDialog(QDialog):
         self.r_invite = QLineEdit()
         self.r_invite.setPlaceholderText("邀请码")
         self.r_invite.setStyleSheet(style)
-        
+
         self.r_btn = QPushButton("注册")
         self.r_btn.clicked.connect(self.do_register)
-        self.r_btn.setStyleSheet(style + "background-color: #66ccff; color: white; border-radius: 5px;")
-        
+        self.r_btn.setStyleSheet(
+            "QPushButton { font-size: 16px; padding: 5px;"
+            " background-color: #44BBEE; color: white; border-radius: 5px; }"
+            " QPushButton:hover { background-color: #66ccff; }"
+        )
+
         layout.addWidget(self.r_username)
         layout.addSpacing(20)
         layout.addWidget(self.r_password)
@@ -164,3 +197,123 @@ class LoginDialog(QDialog):
             self.tabs.setCurrentIndex(0)
         else:
             QMessageBox.critical(self, "注册失败", msg)
+
+    def open_reset_account_dialog(self):
+        """打开重置账号对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("重置账号")
+        dialog.setFixedSize(380, 280)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+        style = "font-size: 14px; padding: 5px;"
+
+        desc = QLabel("输入已使用的邀请码和新账号信息来重置账号：")
+        desc.setWordWrap(True)
+        desc.setStyleSheet("font-size: 13px; color: #666;")
+        layout.addWidget(desc)
+
+        invite_input = QLineEdit()
+        invite_input.setPlaceholderText("已使用的邀请码")
+        invite_input.setStyleSheet(style)
+        layout.addWidget(invite_input)
+
+        username_input = QLineEdit()
+        username_input.setPlaceholderText("新用户名")
+        username_input.setStyleSheet(style)
+        layout.addWidget(username_input)
+
+        password_input = QLineEdit()
+        password_input.setPlaceholderText("新密码")
+        password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        password_input.setStyleSheet(style)
+        layout.addWidget(password_input)
+
+        confirm_input = QLineEdit()
+        confirm_input.setPlaceholderText("确认新密码")
+        confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
+        confirm_input.setStyleSheet(style)
+        layout.addWidget(confirm_input)
+
+        btn = QPushButton("确认重置")
+        btn.setStyleSheet("font-size: 14px; padding: 8px; background-color: #FF6B6B; color: white; border-radius: 5px;")
+        layout.addWidget(btn)
+
+        def do_reset():
+            invite = invite_input.text().strip()
+            new_username = username_input.text().strip()
+            new_password = password_input.text().strip()
+            confirm = confirm_input.text().strip()
+
+            if not invite or not new_username or not new_password or not confirm:
+                QMessageBox.warning(dialog, "错误", "请填写所有信息")
+                return
+            if new_password != confirm:
+                QMessageBox.warning(dialog, "错误", "两次输入的密码不一致")
+                return
+
+            success, msg = self.binder.on_reset_account(invite, new_username, new_password)
+            if success:
+                QMessageBox.information(dialog, "成功", "账号重置成功，请使用新账号登录")
+                self.l_username.setText(new_username)
+                self.tabs.setCurrentIndex(0)
+                dialog.accept()
+            else:
+                QMessageBox.critical(dialog, "重置失败", msg)
+
+        btn.clicked.connect(do_reset)
+        dialog.exec()
+
+    def open_server_settings_dialog(self):
+        """打开服务器地址设置对话框"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("服务器地址设置")
+        dialog.setFixedSize(400, 200)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+
+        desc = QLabel("输入自定义服务器地址（URL），输入后会自动验证连接：")
+        desc.setWordWrap(True)
+        desc.setStyleSheet("font-size: 13px; color: #666;")
+        layout.addWidget(desc)
+
+        url_input = QLineEdit()
+        url_input.setPlaceholderText("例如：https://your-server.com:60030")
+        url_input.setStyleSheet("font-size: 14px; padding: 6px;")
+        if self.custom_base_url:
+            url_input.setText(self.custom_base_url)
+        layout.addWidget(url_input)
+
+        btn = QPushButton("验证并保存")
+        btn.setStyleSheet("font-size: 14px; padding: 8px; background-color: #66CCFF; color: white; border-radius: 5px;")
+        layout.addWidget(btn)
+
+        def do_verify():
+            url = url_input.text().strip().rstrip("/")
+            if not url:
+                QMessageBox.warning(dialog, "错误", "请输入服务器地址")
+                return
+
+            # 自动补全协议头
+            if not url.startswith("http://") and not url.startswith("https://"):
+                url = "https://" + url
+
+            # 尝试获取 public key 来验证服务器
+            try:
+                session = HttpClientFactory.get_session(verify_ssl=True)
+                resp = session.get(f"{url}/auth/public_key", timeout=10)
+                if resp.status_code == 200:
+                    self.custom_base_url = url
+                    credential.save_server_url(url, verify_ssl=True)
+                    # 同步更新 NetworkClient（AuthApi + WsTransport）
+                    self.binder.on_set_base_url(url, verify_ssl=True)
+                    QMessageBox.information(dialog, "成功", "服务器地址验证成功，地址已保存")
+                    dialog.accept()
+                else:
+                    QMessageBox.critical(dialog, "验证失败", f"服务器返回状态码: {resp.status_code}")
+            except Exception as e:
+                QMessageBox.critical(dialog, "验证失败", f"无法连接到服务器: {e}")
+
+        btn.clicked.connect(do_verify)
+        dialog.exec()

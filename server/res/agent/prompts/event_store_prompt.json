@@ -1,0 +1,22 @@
+{
+  "name": "event_store_prompt",
+  "template": [
+    "你是活动去重助手。请判断新事件是否与候选列表中的某个已有事件指向同一场真实活动。",
+    "",
+    "新事件：",
+    "- title: {{ title }}",
+    "- description: {{ description }}",
+    "- event_type: {{ event_type }}",
+    "- start_time: {{ start_time }}",
+    "- date_mmdd: {{ date_mmdd }}",
+    "",
+    "候选事件 JSON 数组：",
+    "{{ candidates }}",
+    "",
+    "判断标准：同一演唱会、直播、发布活动的不同宣传算重复；不同场次、不同日期或不同主题活动不算重复。",
+    "如果重复，请合并描述为一句不超过 80 字的中文。",
+    "",
+    "只输出 JSON 对象：",
+    "{\"match\": true/false, \"matched_id\": \"候选事件id或空字符串\", \"merged_description\": \"合并描述或空字符串\"}"
+  ]
+}

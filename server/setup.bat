@@ -30,4 +30,5 @@ if "%INSTALL_CUDA%"=="1" (
 call conda install ffmpeg -y
 pip install -r docs/gsv_requirements.txt
 pip install -r docs/requirements.txt
+python -m playwright install chromium
 pause

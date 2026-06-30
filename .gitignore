@@ -1,0 +1,32 @@
+# IDE / project config
+.workbuddy/
+.claude
+.vscode
+settings.json
+AGENTS.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+
+# OS
+Thumbs.db
+.DS_Store
+
+songlearner/
+
+# Logs
+logs/
+*.log
+
+# Submodules / embedded repos
+mineflayer/
+
+# Secrets
+server/config/encryption.key
+bili_cookie.txt
+config/bili_cookie.txt

@@ -47,6 +47,54 @@
 
     let model;
     let app;
+    const MODEL_SCALE_MULTIPLIER = 1.2;
+    const FOCUS_Y_OFFSET_RATIO = 0.0;
+    const MODEL_SETTINGS_URL = './models/luo/model.model3.json';
+
+    const unique = (items) => [...new Set(items.filter(Boolean))];
+
+    const collectModelAssetUrls = (settings) => {
+      const base = MODEL_SETTINGS_URL.slice(0, MODEL_SETTINGS_URL.lastIndexOf('/') + 1);
+      const refs = settings.FileReferences || {};
+      const urls = [
+        MODEL_SETTINGS_URL,
+        refs.Moc && base + refs.Moc,
+        refs.Physics && base + refs.Physics,
+        ...(refs.Textures || []).map((file) => base + file),
+        ...(refs.Expressions || []).map((item) => item.File && base + item.File),
+      ];
+
+      if (refs.Motions) {
+        Object.values(refs.Motions).forEach((motions) => {
+          (motions || []).forEach((motion) => {
+            if (motion.File) urls.push(base + motion.File);
+            if (motion.Sound) urls.push(base + motion.Sound);
+          });
+        });
+      }
+
+      return unique(urls);
+    };
+
+    const preloadLive2DAssets = async () => {
+      try {
+        const settingsResponse = await fetch(MODEL_SETTINGS_URL, { cache: 'force-cache' });
+        if (!settingsResponse.ok) {
+          throw new Error(`settings preload failed: ${settingsResponse.status}`);
+        }
+        const settings = await settingsResponse.json();
+        const urls = collectModelAssetUrls(settings);
+        await Promise.allSettled(
+          urls.map((url) => fetch(url, { cache: 'force-cache' }).then((response) => {
+            if (!response.ok) throw new Error(`${url}: ${response.status}`);
+            return response.arrayBuffer();
+          })),
+        );
+        console.log('Live2D assets preloaded:', urls.length);
+      } catch (error) {
+        console.warn('Live2D asset preload skipped:', error);
+      }
+    };
 
     // 加载mouth_value_projection.json中预设的嘴部张开程度，供后续 setMouthOpenY 调用
     let mouthValueProjection = {};
@@ -90,17 +138,22 @@
           autoDensity: true,
           antialias: true,
         });
-        model = await Live2DModel.from('./models/luo/model.model3.json', {
+        await preloadLive2DAssets();
+
+        model = await Live2DModel.from(MODEL_SETTINGS_URL, {
             autoInteract: false, // 关闭自带的交互，我们手动接管以获得更高控制权
             onError: (err) => { console.error('Model load internal error:', err); }
         });
         
         app.stage.addChild(model);
+        model.eventMode = 'none';
+        model.interactive = false;
+        model.interactiveChildren = false;
 
         // 响应式缩放与居中
         const resizeModel = () => {
-          const scaleX = (window.innerWidth * 1.2) / model.width;
-          const scaleY = (window.innerHeight * 1.2) / model.height;
+          const scaleX = (window.innerWidth * MODEL_SCALE_MULTIPLIER) / model.width;
+          const scaleY = (window.innerHeight * MODEL_SCALE_MULTIPLIER) / model.height;
           model.scale.set(Math.min(scaleX, scaleY));
           model.x = window.innerWidth * 0.5 - (model.width / 2);
           model.y = window.innerHeight * 0.5 - (model.height / 2) ;
@@ -109,28 +162,129 @@
         model.expression('normal')
         window.addEventListener('resize', resizeModel);
 
-        // ① 触摸与鼠标交互：利用 model.focus() 实现拖拽视线跟随
+        const focusAt = (x, y) => {
+          if (!model) return;
+          model.focus(x, y);
+        };
+
+        // ① 目光跟随：直接交给 pixi-live2d-display / Cubism 的 FocusController 处理平滑
         const onPointerMove = (event) => {
           if (model) {
-            // 将屏幕坐标传入，模型会自动计算视线偏移量
-            model.focus(event.clientX || event.touches[0].clientX, event.clientY || event.touches[0].clientY);
+            const cx = event.clientX || (event.touches && event.touches[0] && event.touches[0].clientX);
+            const cy = event.clientY || (event.touches && event.touches[0] && event.touches[0].clientY);
+            if (cx !== undefined && cy !== undefined) {
+              focusAt(cx, cy);
+            }
           }
         };
+
         window.addEventListener('pointermove', onPointerMove);
         window.addEventListener('touchmove', onPointerMove);
 
-        // 监听点击命中区域
-        model.on('hit', (hitAreas) => {
-          if (hitAreas.length > 0) {
-            console.log('hit', hitAreas[0]);
+        // 指针离开 canvas 时回到中心；回中平滑由 Live2D 库自身处理
+        const resetGaze = () => {
+          model.internalModel.focusController.focus(0, 0);
+        };
+        canvas.addEventListener('pointerleave', resetGaze);
+
+        // 触摸视觉反馈（浅蓝色圆环，扩大淡出）
+        let ripples = [];
+        const RIPPLE_MAX_RADIUS = 60;
+        const RIPPLE_DURATION = 0.5; // 秒
+        const rippleContainer = new PIXI.Graphics();
+        app.stage.addChild(rippleContainer);
+
+        function updateRipples(dt) {
+          rippleContainer.clear();
+          ripples = ripples.filter(r => r.alpha > 0.01);
+          for (const r of ripples) {
+            r.radius += (RIPPLE_MAX_RADIUS / RIPPLE_DURATION) * dt;
+            const progress = Math.min(r.radius / RIPPLE_MAX_RADIUS, 1.0);
+            r.alpha = 1.0 - progress;
+              rippleContainer.lineStyle(3, 0xADD8E6, r.alpha);
+            rippleContainer.drawCircle(r.x, r.y, r.radius);
+          }
+        }
+        app.ticker.add((delta) => updateRipples(delta / 60));
+
+        // 触摸事件处理：判断点击区域并发送 WebView 消息
+        let lastTouchSentTime = 0;
+        let touchCountSinceLastSent = 0;
+        let pendingTouchAreas = [];
+        const touchSendInterval = 1.0; // 最大每秒一次
+        // hitTest 返回 HitArea 名称（来自 model JSON 的 HitAreas[].Name），映射为标准触摸区域
+        const _hitarea_to_touch = {
+          '头': '头',
+          '辫子': '头',
+          '耳机': '头',
+          '8': '头',
+          '身体': '身体',
+          '袖': '身体',
+          '左腿': '腿',
+          '右腿': '腿',
+          '左手': '手',
+          '右手': '手',
+        };
+
+        const mapHitAreas = (hitAreas) => {
+          const mapped = [];
+          for (const area of hitAreas) {
+            const touchName = _hitarea_to_touch[area];
+            if (touchName && !mapped.includes(touchName)) {
+              mapped.push(touchName);
+            }
+          }
+          return mapped;
+        };
+
+        const handleTouch = (clientX, clientY) => {
+          if (!model) return;
+          const rect = canvas.getBoundingClientRect();
+          const x = clientX - rect.left;
+          const y = clientY - rect.top;
+          const hitAreas = model.hitTest(x, y);
+          const touchAreas = mapHitAreas(hitAreas);
+          if (touchAreas.length === 0) {
+            return;
+          }
+
+          const now = performance.now() / 1000;
+          ripples.push({ x, y, radius: 0, alpha: 1.0 });
+          pendingTouchAreas.push(...touchAreas);
+          touchCountSinceLastSent += 1;
+
+          const timeSinceLast = now - lastTouchSentTime;
+          if (timeSinceLast >= touchSendInterval) {
+            const areas = [...new Set(pendingTouchAreas)];
+            pendingTouchAreas = [];
+            const count = touchCountSinceLastSent;
+            touchCountSinceLastSent = 0;
+            lastTouchSentTime = now;
             if (window.ReactNativeWebView) {
               window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'hit',
-                hitAreaName: hitAreas[0]
+                type: 'touch',
+                touchArea: areas,
+                timeSinceLastSentTouch: timeSinceLast,
+                touchCount: count,
               }));
             }
           }
-        });
+        };
+
+        const onPointerDown = (event) => {
+          if (event.clientX !== undefined && event.clientY !== undefined) {
+            handleTouch(event.clientX, event.clientY);
+          }
+        };
+
+        const onTouchStart = (event) => {
+          if (event.touches && event.touches[0]) {
+            handleTouch(event.touches[0].clientX, event.touches[0].clientY);
+          }
+        };
+
+        canvas.addEventListener('pointerdown', onPointerDown);
+        canvas.addEventListener('touchstart', onTouchStart, { passive: true });
 
         // 通知加载完成
         if (window.ReactNativeWebView) {
