@@ -232,7 +232,10 @@
                         "llm": {
                             "name": "qwen3.5-plus",
                             "enable_thinking": false,
-                            "use_json": true
+                            "use_json": true,
+                            "params": {
+                                "max_tokens": 800
+                            }
                         },
                         "prompt_name": "memory_write_prompt"
                     }

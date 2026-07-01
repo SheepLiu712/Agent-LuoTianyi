@@ -142,6 +142,7 @@ class MemoryWriter:
         """
         history_str = history
         empty_payload = {"user_memory": [], "event_memory": []}
+        response = ""
         try:
             response = await self.llm.generate_response(
                 use_json=True,
@@ -153,8 +154,27 @@ class MemoryWriter:
             logger.debug(f"Memory extraction payload: {payload}")
             return payload
         except Exception as e:
-            logger.warning(f"Error generating memory payload: {e}")
+            if response:
+                logger.warning(
+                    "Error generating memory payload: "
+                    f"{e}; raw_response_excerpt={json.dumps(self._response_excerpt(response), ensure_ascii=False)}"
+                )
+            else:
+                logger.warning(f"Error generating memory payload: {e}")
             return empty_payload
+
+    def _response_excerpt(self, response: str, limit: int = 1000) -> Dict[str, Any]:
+        raw = str(response or "")
+        if len(raw) <= limit * 2:
+            return {
+                "length": len(raw),
+                "text": raw,
+            }
+        return {
+            "length": len(raw),
+            "prefix": raw[:limit],
+            "suffix": raw[-limit:],
+        }
 
     def _parse_memory_json_response(self, response: str) -> Dict[str, List[str]]:
         """解析 LLM 返回的 JSON，兼容 ```json 代码块包装。"""

@@ -11,6 +11,8 @@ if server_root not in sys.path:
 
 from src.domain.memory_record import MemoryRecord, MemoryType, MemoryVisibility
 from src.subconscious.memory import SubconsciousMemory
+import src.subconscious.memory.memory_write as memory_write_module
+from src.subconscious.memory.memory_write import MemoryWriter
 from src.system.database.database_service import DatabaseManager
 from src.system.database.vector_store import Document
 from src.utils.helpers import load_config
@@ -34,6 +36,18 @@ class FakeLLMModule:
         if isinstance(response, (dict, list)):
             return json.dumps(response, ensure_ascii=False)
         return str(response)
+
+
+class FakeMemoryWriterLogger:
+    def __init__(self):
+        self.warnings = []
+        self.debugs = []
+
+    def warning(self, message):
+        self.warnings.append(message)
+
+    def debug(self, message):
+        self.debugs.append(message)
 
 
 class InMemoryVectorStore:
@@ -303,6 +317,27 @@ async def test_direct_memory_write_skips_empty_and_duplicate_content(fake_memory
         "用户喜欢蓝莓蛋糕",
         "今天讨论了星空摄影",
     ]
+
+
+@pytest.mark.asyncio
+async def test_memory_writer_logs_raw_excerpt_when_json_parse_fails(monkeypatch):
+    """LLM 返回非法 JSON 时，warning 应带截断后的原始响应，方便定位坏字符串。"""
+    bad_response = '{\n  "user_memory": [],\n  "event_memory": ["用户提到了"∞"发髻"]\n}'
+    fake_logger = FakeMemoryWriterLogger()
+    monkeypatch.setattr(memory_write_module, "logger", fake_logger)
+    writer = MemoryWriter({}, FakeLLMModule(bad_response))
+
+    payload = await writer._extract_knowledge(
+        history="",
+        current_dialogue="用户提到了\"∞\"发髻",
+        related_memories=[],
+    )
+
+    assert payload == {"user_memory": [], "event_memory": []}
+    assert fake_logger.warnings
+    assert "raw_response_excerpt" in fake_logger.warnings[0]
+    assert "用户提到了" in fake_logger.warnings[0]
+    assert '"length"' in fake_logger.warnings[0]
 
 
 @pytest.mark.asyncio
