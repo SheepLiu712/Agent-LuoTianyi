@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+import time
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Optional
 
 from src.agent.main_chat import OneResponseLine
+from src.system.observability import get_observability_service
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -130,13 +132,16 @@ class ReflectionWorker:
         memory_hits = getattr(turn.attention_plan, "memory_hits", []) or []
 
         try:
-            await self.system_runtime.agent_runtime.write_topic_memories(
+            start = time.perf_counter()
+            write_result = await self.system_runtime.agent_runtime.write_topic_memories(
                 character_id=turn.character_id,
                 user_id=turn.user_id,
                 current_dialogue=current_dialogue,
                 related_memories=memory_hits,
                 conversation_history=turn.conversation_history,
             )
+            duration_ms = (time.perf_counter() - start) * 1000
+            self._record_memory_write_events(turn, current_dialogue, write_result or {}, duration_ms)
         except Exception as e:
             self.logger.warning(f"Topic memory write task failed: {e}")
 
@@ -157,10 +162,24 @@ class ReflectionWorker:
             )
             if compressed_snapshot is None:
                 return
-            await self.system_runtime.agent_runtime.update_user_profile_by_context(
+            current_profile = ""
+            try:
+                current_profile = self.system_runtime.database_manager.get_user_description(turn.user_id) or ""
+            except Exception:
+                current_profile = ""
+            start = time.perf_counter()
+            new_profile = await self.system_runtime.agent_runtime.update_user_profile_by_context(
                 character_id=turn.character_id,
                 user_id=turn.user_id,
                 context=pre_compression_snapshot.as_prompt_payload(),
+            )
+            duration_ms = (time.perf_counter() - start) * 1000
+            self._record_user_profile_update_event(
+                turn,
+                pre_compression_snapshot.as_prompt_payload(),
+                current_profile,
+                new_profile,
+                duration_ms,
             )
         except Exception as e:
             self.logger.warning(f"Context compression/profile update task failed: {e}")
@@ -178,3 +197,90 @@ class ReflectionWorker:
             lines.append(f"agent: {item.get_content()}")
 
         return "\n".join(lines)
+
+    def _record_memory_write_events(
+        self,
+        turn: CompletedTurn,
+        current_dialogue: str,
+        write_result: dict[str, Any],
+        duration_ms: float,
+    ) -> None:
+        observability = get_observability_service()
+        if observability is None:
+            return
+        trace_id = getattr(turn.topic, "trace_id", None)
+        source_context = self._build_write_source_context(turn.conversation_history, current_dialogue)
+        payload = write_result.get("payload") or {}
+        observability.record_memory_trace_event(
+            trace_id=trace_id,
+            user_id=turn.user_id,
+            topic_id=turn.topic.topic_id,
+            event_type="memory_write_extraction",
+            item_type="memory_payload",
+            content_text=self._short_json(payload),
+            source_context=source_context,
+            result=payload,
+            duration_ms=duration_ms,
+            annotation_required=False,
+        )
+        for item in write_result.get("items") or []:
+            status = item.get("status") or ""
+            observability.record_memory_trace_event(
+                trace_id=trace_id,
+                user_id=turn.user_id,
+                topic_id=turn.topic.topic_id,
+                event_type="memory_write",
+                item_type=str(item.get("memory_type") or "memory"),
+                content_text=str(item.get("content") or ""),
+                source_context=source_context,
+                result=item,
+                duration_ms=duration_ms,
+                annotation_required=status == "written",
+            )
+
+    def _record_user_profile_update_event(
+        self,
+        turn: CompletedTurn,
+        context: dict[str, Any],
+        current_profile: str,
+        new_profile: str | None,
+        duration_ms: float,
+    ) -> None:
+        observability = get_observability_service()
+        if observability is None:
+            return
+        trace_id = getattr(turn.topic, "trace_id", None)
+        observability.record_memory_trace_event(
+            trace_id=trace_id,
+            user_id=turn.user_id,
+            topic_id=turn.topic.topic_id,
+            event_type="user_profile_update",
+            item_type="user_profile",
+            content_text=new_profile or "",
+            source_context=self._short_json(context),
+            result={
+                "old_profile": current_profile,
+                "new_profile": new_profile or "",
+                "status": "updated" if new_profile else "no_update",
+            },
+            duration_ms=duration_ms,
+            annotation_required=bool(new_profile),
+        )
+
+    @staticmethod
+    def _build_write_source_context(conversation_history: str, current_dialogue: str) -> str:
+        parts = []
+        if current_dialogue:
+            parts.append("当前对话：\n" + current_dialogue)
+        if conversation_history:
+            parts.append("会话上下文：\n" + conversation_history)
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _short_json(value: Any) -> str:
+        try:
+            import json
+
+            return json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            return str(value)

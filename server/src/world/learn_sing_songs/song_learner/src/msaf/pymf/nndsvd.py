@@ -16,8 +16,8 @@ start for nonnegative matrix factorization, Pattern Recognition, 41, 1350-1362
 
 import numpy as np
 
-from src.world.learn_sing_songs.song_learner.src.msaf.pymf.nmf import NMF
-from src.world.learn_sing_songs.song_learner.src.msaf.pymf.svd import SVD
+from msaf.pymf.nmf import NMF
+from msaf.pymf.svd import SVD
 
 __all__ = ["NNDSVD"]
 

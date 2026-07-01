@@ -32,11 +32,14 @@ _SONGLEARNER_PATH_ADDED = False
 
 
 def _add_songlearner_to_path() -> None:
-    """将 song_learner/src 添加到 Python path（幂等）。"""
+    """将 server 和 song_learner/src 添加到 Python path（幂等）。"""
     global _SONGLEARNER_PATH_ADDED
     if _SONGLEARNER_PATH_ADDED:
         return
+    server_root = Path(__file__).resolve().parents[3]
     songlearner_src = Path(__file__).resolve().parent / "song_learner" / "src"
+    if str(server_root) not in sys.path:
+        sys.path.insert(0, str(server_root))
     if str(songlearner_src) not in sys.path:
         sys.path.insert(0, str(songlearner_src))
     _SONGLEARNER_PATH_ADDED = True
@@ -207,15 +210,16 @@ class AutoSongLearner:
     def __init__(self, config: Dict[str, Any], wishlist: WishlistManager):
         self.logger = get_logger("AutoSongLearner")
         config = config or {}
-        self.resource_path = os.getcwd() / Path(config.get("resource_path", "res/music"))
+        cwd = Path.cwd()
+        self.resource_path = cwd / Path(config.get("resource_path", "res/music"))
         self.songs_dir = self.resource_path / "songs"
         self.metadata_path = self.resource_path / "metadata.json"
         self.wishlist = wishlist
         self._ensure_directories()
 
         # Songlearner integration
-        self.songlearner_dir = os.getcwd() / Path(config.get("songlearner_dir", "src/world/learn_sing_songs/song_learner"))
-        self.songlearner_resource_dir = os.getcwd() / Path(config.get("songlearner_resource_dir", "res/song_learner"))
+        self.songlearner_dir = cwd / Path(config.get("songlearner_dir", "src/world/learn_sing_songs/song_learner"))
+        self.songlearner_resource_dir = cwd / Path(config.get("songlearner_resource_dir", "res/song_learner"))
         self.songlearner_available = self._check_songlearner_models()
         if self.songlearner_available:
             self.logger.info("Songlearner 模型已就绪，将使用完整学歌流水线（QQ音乐下载->清洗->MSAF->LLM分段）")
@@ -352,6 +356,7 @@ class AutoSongLearner:
             return False
 
         self.logger.info(f"[Songlearner] 开始学习: {safe_name}")
+        env = self._build_songlearner_env()
 
         try:
             proc = subprocess.run(
@@ -359,14 +364,7 @@ class AutoSongLearner:
                 cwd=str(self.songlearner_dir),
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=self.SONGELEARNER_TIMEOUT,
-                env={
-                    **os.environ,
-                    "QWEN_API_KEY": os.environ.get("QWEN_API_KEY", ""),
-                    "SILICONFLOW_API_KEY": os.environ.get("SILICONFLOW_API_KEY", ""),
-                    "PYTHONUTF8": "1",
-                    "PYTHONIOENCODING": "utf-8",
-                    "TEST_SONGS_DIR": str(self.songs_dir),
-                },
+                env=env,
             )
         except subprocess.TimeoutExpired:
             self._handle_failure(safe_name, "Songlearner 流水线执行超时（>20分钟）")
@@ -402,6 +400,23 @@ class AutoSongLearner:
                 return False
 
         return self._finalize_song(safe_name, sl_output)
+
+    def _build_songlearner_env(self) -> dict[str, str]:
+        server_root = Path(__file__).resolve().parents[3]
+        songlearner_src = self.songlearner_dir / "src"
+        existing_pythonpath = os.environ.get("PYTHONPATH", "")
+        pythonpath_parts = [str(songlearner_src), str(server_root)]
+        if existing_pythonpath:
+            pythonpath_parts.append(existing_pythonpath)
+        return {
+            **os.environ,
+            "QWEN_API_KEY": os.environ.get("QWEN_API_KEY", ""),
+            "SILICONFLOW_API_KEY": os.environ.get("SILICONFLOW_API_KEY", ""),
+            "PYTHONUTF8": "1",
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONPATH": os.pathsep.join(pythonpath_parts),
+            "TEST_SONGS_DIR": str(self.songs_dir),
+        }
 
     def _finalize_song(self, safe_name: str, src_dir: Path) -> bool:
         """Validate and finalize the workflow output in place."""

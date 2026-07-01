@@ -55,6 +55,10 @@ class MemoryWriter:
         # then write only non-duplicate items.
         user_items = memory_payload.get("user_memory", [])
         event_items = memory_payload.get("event_memory", [])
+        result: Dict[str, Any] = {
+            "payload": memory_payload,
+            "items": [],
+        }
 
         if user_items:
             # Single de-dup pass for all user memory items
@@ -64,9 +68,14 @@ class MemoryWriter:
             for content in user_items:
                 text = (content or "").strip()
                 if not text or text in seen_texts:
+                    result["items"].append({
+                        "memory_type": "user_memory",
+                        "content": text,
+                        "status": "skipped_duplicate_or_empty",
+                    })
                     continue
                 seen_texts.add(text)
-                await self.write_user_memory(
+                written = await self.write_user_memory(
                     vector_store=vector_store,
                     memory_store=memory_store,
                     user_id=user_id,
@@ -74,6 +83,11 @@ class MemoryWriter:
                     owner_character_id=owner_character_id,
                     commit=commit,
                 )
+                result["items"].append({
+                    "memory_type": "user_memory",
+                    "content": text,
+                    "status": "written" if written else "skipped",
+                })
 
         if event_items:
             today = time.strftime("%Y-%m-%d")
@@ -84,9 +98,15 @@ class MemoryWriter:
                 text = (content or "").strip()
                 normalized_text = self._normalize_text(text)
                 if not text or normalized_text in seen_texts:
+                    result["items"].append({
+                        "memory_type": "event_memory",
+                        "content": text,
+                        "status": "skipped_duplicate_or_empty",
+                        "event_date": today,
+                    })
                     continue
                 seen_texts.add(normalized_text)
-                await self.write_event_memory(
+                written = await self.write_event_memory(
                     vector_store=vector_store,
                     memory_store=memory_store,
                     user_id=user_id,
@@ -94,6 +114,13 @@ class MemoryWriter:
                     owner_character_id=owner_character_id,
                     commit=commit,
                 )
+                result["items"].append({
+                    "memory_type": "event_memory",
+                    "content": text,
+                    "status": "written" if written else "skipped",
+                    "event_date": today,
+                })
+        return result
 
     async def _extract_knowledge(
         self,

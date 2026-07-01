@@ -8,10 +8,10 @@ import mir_eval
 import jams
 import cPickle as pickle
 
-import src.world.learn_sing_songs.song_learner.src.msaf.algorithms.olda.OLDA as OLDA
-import src.world.learn_sing_songs.song_learner.src.msaf.algorithms.olda.segmenter as segmenter
+import msaf.algorithms.olda.OLDA as OLDA
+import msaf.algorithms.olda.segmenter as segmenter
 
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
+import msaf as msaf
 
 
 def process_arguments():

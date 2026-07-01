@@ -8,13 +8,13 @@ import logging
 import numpy as np
 import os
 
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
-from src.world.learn_sing_songs.song_learner.src.msaf import input_output as io
-from src.world.learn_sing_songs.song_learner.src.msaf import utils
-from src.world.learn_sing_songs.song_learner.src.msaf import plotting
-from src.world.learn_sing_songs.song_learner.src.msaf.features import Features
-from src.world.learn_sing_songs.song_learner.src.msaf.exceptions import NoHierBoundaryError, NoAudioFileError
-import src.world.learn_sing_songs.song_learner.src.msaf.algorithms as algorithms
+import msaf as msaf
+from msaf import input_output as io
+from msaf import utils
+from msaf import plotting
+from msaf.features import Features
+from msaf.exceptions import NoHierBoundaryError, NoAudioFileError
+import msaf.algorithms as algorithms
 
 
 def get_boundaries_module(boundaries_id):

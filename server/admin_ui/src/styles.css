@@ -223,6 +223,153 @@ button {
   background: #274e68;
 }
 
+.filter-row {
+  display: grid;
+  grid-template-columns: 1fr 180px 180px;
+  gap: 10px;
+}
+
+.memory-filter-row {
+  grid-template-columns: 1fr 180px;
+  margin-top: 12px;
+}
+
+.memory-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.memory-tabs button {
+  border: 1px solid #cad6df;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #ffffff;
+  color: #365161;
+  cursor: pointer;
+}
+
+.memory-tabs button.active,
+.memory-tabs button:hover {
+  background: #2f5d7c;
+  border-color: #2f5d7c;
+  color: #ffffff;
+}
+
+.behavior-note {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid #dbe5ec;
+  border-radius: 6px;
+  background: #f7fafc;
+  color: #52616e;
+  line-height: 1.55;
+}
+
+.filter-row input,
+.filter-row select,
+.annotation-row input {
+  min-width: 0;
+  border: 1px solid #cad6df;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: #1f2933;
+  background: #ffffff;
+}
+
+.memory-event-panel .panel-content {
+  max-height: calc(100vh - 320px);
+}
+
+.memory-event-list {
+  display: grid;
+  gap: 12px;
+}
+
+.memory-event-card {
+  border: 1px solid #d9e2ea;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.memory-event-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.memory-event-head > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.memory-event-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.read-block {
+  border: 1px solid #edf1f5;
+  border-radius: 6px;
+  background: #f9fbfd;
+  min-width: 0;
+}
+
+.read-block-title {
+  padding: 7px 9px;
+  border-bottom: 1px solid #edf1f5;
+  color: #607080;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.read-block pre {
+  margin: 0;
+  padding: 9px;
+  max-height: 150px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+  font-size: 12px;
+}
+
+.annotation-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) repeat(auto-fit, minmax(76px, max-content));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.annotation-row button {
+  border: 1px solid #cad6df;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #f7fafc;
+  color: #1f2933;
+  cursor: pointer;
+}
+
+.annotation-row button:hover {
+  background: #eaf1f6;
+}
+
+.annotation-row button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.memory-event-meta,
+.empty-state {
+  margin-top: 8px;
+  color: #778592;
+  font-size: 12px;
+}
+
 table {
   width: 100%;
   border-collapse: separate;

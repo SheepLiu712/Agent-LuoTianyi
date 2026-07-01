@@ -11,10 +11,10 @@ import scipy.signal
 import scipy.linalg
 
 import librosa
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
+import msaf as msaf
 
-from src.world.learn_sing_songs.song_learner.src.msaf.algorithms.interface import SegmenterInterface
-from src.world.learn_sing_songs.song_learner.src.msaf.base import Features
+from msaf.algorithms.interface import SegmenterInterface
+from msaf.base import Features
 
 REP_WIDTH = 3
 REP_FILTER = 7

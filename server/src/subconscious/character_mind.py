@@ -192,8 +192,8 @@ class CharacterSubconscious:
         current_dialogue: str,
         related_memories: Optional[List[str]] = None,
         conversation_history: Optional[str] = None,
-    ) -> None:
-        await self.memory.write_topic_memories(
+    ) -> dict[str, Any]:
+        return await self.memory.write_topic_memories(
             user_id=user_id,
             history=conversation_history or "",
             current_dialogue=current_dialogue,

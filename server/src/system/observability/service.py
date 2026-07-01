@@ -251,6 +251,47 @@ class ObservabilityService:
             ),
         )
 
+    def record_memory_trace_event(
+        self,
+        *,
+        trace_id: str | None,
+        user_id: str | None,
+        event_type: str,
+        item_type: str,
+        topic_id: str | None = None,
+        command_text: str | None = None,
+        content_text: str | None = None,
+        source_context: str | None = None,
+        result: dict[str, Any] | list[Any] | None = None,
+        duration_ms: float | None = None,
+        annotation_required: bool = True,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self._execute(
+            """
+            INSERT INTO memory_trace_events (
+                ts, trace_id, user_id, topic_id, event_type, item_type,
+                command_text, content_text, source_context, result_json,
+                duration_ms, annotation_required, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _utc_now_iso(),
+                trace_id,
+                user_id,
+                topic_id,
+                event_type,
+                item_type,
+                command_text,
+                content_text,
+                source_context,
+                _json_dumps(result or {}),
+                float(duration_ms or 0.0),
+                1 if annotation_required else 0,
+                _json_dumps(metadata or {}),
+            ),
+        )
+
     def get_dashboard_summary(self, *, days: int = 1) -> Dict[str, Any]:
         since = self._since_iso(days)
         llm = self._query_one(
@@ -516,6 +557,108 @@ class ObservabilityService:
             "llm_calls": llm_calls,
         }
 
+    def get_memory_trace_events(
+        self,
+        *,
+        days: int = 7,
+        limit: int = 200,
+        trace_id: str | None = None,
+        event_type: str | None = None,
+        annotation_state: str | None = None,
+    ) -> list[dict[str, Any]]:
+        since = self._since_iso(days)
+        conditions = ["e.ts >= ?"]
+        params: list[Any] = [since]
+        if trace_id:
+            conditions.append("e.trace_id = ?")
+            params.append(trace_id)
+        if event_type:
+            event_types = [item.strip() for item in event_type.split(",") if item.strip()]
+            if event_types:
+                placeholders = ", ".join("?" for _ in event_types)
+                conditions.append(f"e.event_type IN ({placeholders})")
+                params.extend(event_types)
+        if annotation_state == "pending":
+            conditions.append("e.annotation_required = 1 AND a.event_id IS NULL")
+        elif annotation_state == "annotated":
+            conditions.append("a.event_id IS NOT NULL")
+        params.append(limit)
+        rows = self._query_all(
+            f"""
+            SELECT e.*, a.label AS annotation_label, a.notes AS annotation_notes,
+                a.annotator AS annotation_annotator, a.updated_at AS annotation_updated_at
+            FROM memory_trace_events e
+            LEFT JOIN memory_trace_annotations a ON a.event_id = e.id
+            WHERE {' AND '.join(conditions)}
+            ORDER BY e.ts DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        return [self._decode_memory_event(row) for row in rows]
+
+    def get_memory_trace_summary(self, *, days: int = 7) -> dict[str, Any]:
+        since = self._since_iso(days)
+        totals = self._query_one(
+            """
+            SELECT
+                COUNT(*) AS event_count,
+                SUM(CASE WHEN annotation_required = 1 THEN 1 ELSE 0 END) AS annotation_required_count,
+                SUM(CASE WHEN annotation_required = 1 AND a.event_id IS NULL THEN 1 ELSE 0 END) AS pending_annotation_count,
+                SUM(CASE WHEN a.event_id IS NOT NULL THEN 1 ELSE 0 END) AS annotated_count
+            FROM memory_trace_events e
+            LEFT JOIN memory_trace_annotations a ON a.event_id = e.id
+            WHERE e.ts >= ?
+            """,
+            (since,),
+        )
+        by_type = self._query_all(
+            """
+            SELECT e.event_type, e.item_type,
+                COUNT(*) AS event_count,
+                SUM(CASE WHEN e.annotation_required = 1 AND a.event_id IS NULL THEN 1 ELSE 0 END) AS pending_annotation_count,
+                COALESCE(AVG(e.duration_ms), 0) AS avg_duration_ms,
+                COALESCE(MAX(e.duration_ms), 0) AS max_duration_ms
+            FROM memory_trace_events e
+            LEFT JOIN memory_trace_annotations a ON a.event_id = e.id
+            WHERE e.ts >= ?
+            GROUP BY e.event_type, e.item_type
+            ORDER BY event_count DESC
+            """,
+            (since,),
+        )
+        return {"window_days": days, "totals": totals, "by_type": by_type}
+
+    def annotate_memory_trace_event(
+        self,
+        event_id: int,
+        *,
+        label: str,
+        notes: str | None = None,
+        annotator: str | None = None,
+    ) -> dict[str, Any]:
+        updated_at = _utc_now_iso()
+        self._execute(
+            """
+            INSERT INTO memory_trace_annotations (
+                event_id, label, notes, annotator, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(event_id) DO UPDATE SET
+                label = excluded.label,
+                notes = excluded.notes,
+                annotator = excluded.annotator,
+                updated_at = excluded.updated_at
+            """,
+            (event_id, label, notes, annotator, updated_at),
+        )
+        return {
+            "event_id": event_id,
+            "label": label,
+            "notes": notes,
+            "annotator": annotator,
+            "updated_at": updated_at,
+        }
+
     def get_recent_logs(
         self,
         *,
@@ -551,6 +694,7 @@ class ObservabilityService:
             ("llm_call_metrics", "ts"),
             ("pipeline_spans", "start_ts"),
             ("admin_log_events", "ts"),
+            ("memory_trace_events", "ts"),
         ):
             self._execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
 
@@ -607,6 +751,37 @@ class ObservabilityService:
                 );
                 CREATE INDEX IF NOT EXISTS idx_log_ts ON admin_log_events(ts);
                 CREATE INDEX IF NOT EXISTS idx_log_level_ts ON admin_log_events(level, ts);
+
+                CREATE TABLE IF NOT EXISTS memory_trace_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL,
+                    trace_id TEXT,
+                    user_id TEXT,
+                    topic_id TEXT,
+                    event_type TEXT NOT NULL,
+                    item_type TEXT NOT NULL,
+                    command_text TEXT,
+                    content_text TEXT,
+                    source_context TEXT,
+                    result_json TEXT,
+                    duration_ms REAL NOT NULL DEFAULT 0,
+                    annotation_required INTEGER NOT NULL DEFAULT 1,
+                    metadata_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_memory_trace_ts ON memory_trace_events(ts);
+                CREATE INDEX IF NOT EXISTS idx_memory_trace_trace ON memory_trace_events(trace_id);
+                CREATE INDEX IF NOT EXISTS idx_memory_trace_type ON memory_trace_events(event_type, item_type, ts);
+
+                CREATE TABLE IF NOT EXISTS memory_trace_annotations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id INTEGER NOT NULL UNIQUE,
+                    label TEXT NOT NULL,
+                    notes TEXT,
+                    annotator TEXT,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(event_id) REFERENCES memory_trace_events(id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_memory_annotation_label ON memory_trace_annotations(label);
                 """
             )
             self._conn.commit()
@@ -631,6 +806,12 @@ class ObservabilityService:
     def _decode_metadata(self, row: dict[str, Any]) -> dict[str, Any]:
         row = dict(row)
         row["metadata"] = _json_loads(row.pop("metadata_json", None), {})
+        return row
+
+    def _decode_memory_event(self, row: dict[str, Any]) -> dict[str, Any]:
+        row = self._decode_metadata(row)
+        row["result"] = _json_loads(row.pop("result_json", None), {})
+        row["annotation_required"] = bool(row.get("annotation_required"))
         return row
 
     def _summarize_values(self, values: list[float]) -> dict[str, Any]:

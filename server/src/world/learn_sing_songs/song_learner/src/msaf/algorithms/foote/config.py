@@ -1,6 +1,6 @@
 """Config for the Foote algorithm."""
 
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
+import msaf as msaf
 
 # Foote Params
 config = {

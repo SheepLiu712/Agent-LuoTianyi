@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.world.learn_sing_songs.task import LearnSingSongsTask
+from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner, WishlistManager
 
 
 class FakeEventStore:
@@ -97,3 +99,29 @@ def test_learn_sing_songs_write_learned_event_skips_without_store():
     import asyncio
 
     asyncio.run(task._write_learned_event(["Song A"]))
+
+
+def test_auto_song_learner_builds_child_pythonpath(monkeypatch, tmp_path):
+    monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
+    monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
+    monkeypatch.chdir(Path(__file__).resolve().parent.parent)
+
+    wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
+    learner = AutoSongLearner(
+        {
+            "resource_path": str(tmp_path / "music"),
+            "songlearner_resource_dir": str(tmp_path / "song_learner_res"),
+        },
+        wishlist,
+    )
+
+    env = learner._build_songlearner_env()
+    pythonpath_parts = env["PYTHONPATH"].split(os.pathsep)
+
+    assert learner.resource_path == tmp_path / "music"
+    assert str(Path(__file__).resolve().parent.parent) in pythonpath_parts
+    assert str(learner.songlearner_dir / "src") in pythonpath_parts
+    assert pythonpath_parts[:2] == [
+        str(learner.songlearner_dir / "src"),
+        str(Path(__file__).resolve().parent.parent),
+    ]

@@ -17,8 +17,8 @@ Reconstruction via Greedy Approximation of SVD. ISAAC'2008.
 
 
 import numpy as np
-from src.world.learn_sing_songs.song_learner.src.msaf.pymf.greedy import GREEDY
-from src.world.learn_sing_songs.song_learner.src.msaf.pymf.cur import CUR
+from msaf.pymf.greedy import GREEDY
+from msaf.pymf.cur import CUR
 
 __all__ = ["GREEDYCUR"]
 

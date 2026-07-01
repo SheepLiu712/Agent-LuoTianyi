@@ -242,6 +242,7 @@ class TopicPlanner:
             if topic is not None:
                 topic.target_character_ids = self._target_character_ids_from_messages(unread_snapshot.messages)
                 setattr(topic, "trace_id", trace_id)
+                self._record_topic_commands(trace_id, topic, conversation_history)
                 self._record_last_message_to_topic_span(unread_snapshot, topic)
             return topic, remaining or []
         except Exception as e:
@@ -249,8 +250,60 @@ class TopicPlanner:
             topic, remaining = self._fallback_extract(unread_snapshot, force_complete)
             if topic is not None:
                 setattr(topic, "trace_id", trace_id)
+                self._record_topic_commands(trace_id, topic, "", fallback=True)
                 self._record_last_message_to_topic_span(unread_snapshot, topic, fallback=True)
             return topic, remaining
+
+    def _record_topic_commands(
+        self,
+        trace_id: str,
+        topic: ExtractedTopic,
+        conversation_history: str,
+        *,
+        fallback: bool = False,
+    ) -> None:
+        observability = get_observability_service()
+        if observability is None:
+            return
+
+        source_context = self._build_topic_source_context(topic, conversation_history)
+        commands = [
+            ("memory_command", "memory_attempt", command, True)
+            for command in (topic.memory_attempts or [])
+        ] + [
+            ("fact_command", "fact_constraint", command, True)
+            for command in (topic.fact_constraints or [])
+        ] + [
+            ("sing_command", "sing_attempt", command, True)
+            for command in (topic.sing_attempts or [])
+        ]
+        for event_type, item_type, command, annotation_required in commands:
+            observability.record_memory_trace_event(
+                trace_id=trace_id,
+                user_id=self.user_id,
+                topic_id=topic.topic_id,
+                event_type=event_type,
+                item_type=item_type,
+                command_text=command,
+                content_text=topic.topic_content,
+                source_context=source_context,
+                annotation_required=annotation_required,
+                metadata={"fallback": fallback},
+            )
+
+    @staticmethod
+    def _build_topic_source_context(topic: ExtractedTopic, conversation_history: str) -> str:
+        source_messages = []
+        for msg in getattr(topic, "source_messages", []) or []:
+            content = (getattr(msg, "content", "") or "").strip()
+            if content:
+                source_messages.append(content)
+        parts = []
+        if source_messages:
+            parts.append("用户消息：\n" + "\n".join(source_messages))
+        if conversation_history:
+            parts.append("会话上下文：\n" + conversation_history)
+        return "\n\n".join(parts)
 
     async def _get_conversation_context(self) -> str:
         if self.context_provider is not None:

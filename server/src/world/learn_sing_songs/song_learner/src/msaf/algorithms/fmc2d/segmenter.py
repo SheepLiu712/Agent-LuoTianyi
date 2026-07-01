@@ -10,8 +10,8 @@ from sklearn.cluster import KMeans
 from . import utils_2dfmc as utils2d
 from .xmeans import XMeans
 
-import src.world.learn_sing_songs.song_learner.src.msaf.utils as U
-from src.world.learn_sing_songs.song_learner.src.msaf.algorithms.interface import SegmenterInterface
+import msaf.utils as U
+from msaf.algorithms.interface import SegmenterInterface
 
 
 def get_feat_segments(F, bound_idxs):

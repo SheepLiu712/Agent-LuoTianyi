@@ -317,22 +317,22 @@ def get_model_from_config(model_type: str, config_path: str) -> Tuple[nn.Module,
         from msst_core.models.torchseg_models import Torchseg_Net
         model = Torchseg_Net(config)
     elif model_type == 'mel_band_roformer':
-        from src.world.learn_sing_songs.song_learner.src.msst_core.models.bs_roformer import MelBandRoformer
+        from msst_core.models.bs_roformer import MelBandRoformer
         model = MelBandRoformer(**dict(config.model))
     elif model_type == 'mel_band_conformer':
-        from src.world.learn_sing_songs.song_learner.src.msst_core.models.bs_roformer import MelBandConformer
+        from msst_core.models.bs_roformer import MelBandConformer
         model = MelBandConformer(**dict(config.model))
     elif model_type == 'mel_band_roformer_experimental':
-        from src.world.learn_sing_songs.song_learner.src.msst_core.models.bs_roformer.mel_band_roformer_experimental import MelBandRoformer
+        from msst_core.models.bs_roformer.mel_band_roformer_experimental import MelBandRoformer
         model = MelBandRoformer(**dict(config.model))
     elif model_type == 'bs_roformer':
-        from src.world.learn_sing_songs.song_learner.src.msst_core.models.bs_roformer import BSRoformer
+        from msst_core.models.bs_roformer import BSRoformer
         model = BSRoformer(**dict(config.model))
     elif model_type == 'bs_conformer':
-        from src.world.learn_sing_songs.song_learner.src.msst_core.models.bs_roformer import BSConformer
+        from msst_core.models.bs_roformer import BSConformer
         model = BSConformer(**dict(config.model))
     elif model_type == 'bs_roformer_experimental':
-        from src.world.learn_sing_songs.song_learner.src.msst_core.models.bs_roformer.bs_roformer_experimental import BSRoformer
+        from msst_core.models.bs_roformer.bs_roformer_experimental import BSRoformer
         model = BSRoformer(**dict(config.model))
     elif model_type == 'bs_mamba2':
         from msst_core.models.bs_mamba2_code.bs_mamba2 import BSMamba2Model

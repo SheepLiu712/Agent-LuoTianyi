@@ -20,9 +20,9 @@ import librosa
 import numpy as np
 
 # Local stuff
-from src.world.learn_sing_songs.song_learner.src.msaf import config
-from src.world.learn_sing_songs.song_learner.src.msaf.base import Features
-from src.world.learn_sing_songs.song_learner.src.msaf.exceptions import FeatureParamsError
+from msaf import config
+from msaf.base import Features
+from msaf.exceptions import FeatureParamsError
 
 
 class CQT(Features):

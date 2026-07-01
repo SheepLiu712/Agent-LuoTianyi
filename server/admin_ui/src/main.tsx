@@ -90,10 +90,159 @@ type TraceDetail = {
   llm_calls: LlmCall[];
 };
 
-type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'logs';
+type MemoryTraceSummary = {
+  window_days: number;
+  totals: Record<string, number>;
+  by_type: Array<Record<string, string | number | null>>;
+};
+
+type MemoryTraceEvent = {
+  id: number;
+  ts: string;
+  trace_id?: string;
+  user_id?: string;
+  topic_id?: string;
+  event_type: string;
+  item_type: string;
+  command_text?: string;
+  content_text?: string;
+  source_context?: string;
+  result?: Record<string, unknown>;
+  duration_ms: number;
+  annotation_required: boolean;
+  annotation_label?: string;
+  annotation_notes?: string;
+  annotation_updated_at?: string;
+  metadata?: Record<string, unknown>;
+};
+
+type MemoryTraceTab = {
+  id: string;
+  label: string;
+  eventTypes: string[];
+  description: string;
+  contextLabel: string;
+  commandLabel: string;
+  contentLabel: string;
+  resultLabel: string;
+  labels: Array<{ label: string; text: string }>;
+};
+
+type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'memory' | 'logs';
+
+const memoryTraceTabs: MemoryTraceTab[] = [
+  {
+    id: 'memory_command',
+    label: '记忆检索命令',
+    eventTypes: ['memory_command'],
+    description: '查看 TopicExtractor 在什么上下文下生成了哪些记忆检索 query。重点判断 query 是否覆盖当前会话需要的长期信息。',
+    contextLabel: '输入上下文',
+    commandLabel: '检索 query',
+    contentLabel: '话题摘要',
+    resultLabel: '调试信息',
+    labels: [
+      { label: 'good_query', text: '好查询' },
+      { label: 'too_broad', text: '过宽' },
+      { label: 'too_narrow', text: '过窄' },
+      { label: 'missing_query', text: '漏查' },
+    ],
+  },
+  {
+    id: 'memory_recall',
+    label: '记忆召回',
+    eventTypes: ['memory_recall'],
+    description: '查看每条 query 召回了哪条记忆、相似度和来源。重点判断这条记忆对本轮回复是否有帮助。',
+    contextLabel: '话题上下文',
+    commandLabel: '检索 query',
+    contentLabel: '召回记忆',
+    resultLabel: '召回元数据',
+    labels: [
+      { label: 'useful', text: '有用' },
+      { label: 'not_useful', text: '无用' },
+      { label: 'wrong_memory', text: '错召回' },
+      { label: 'no_hit_should_hit', text: '应召未召' },
+    ],
+  },
+  {
+    id: 'memory_write',
+    label: '记忆写入',
+    eventTypes: ['memory_write', 'memory_write_extraction'],
+    description: '查看当前对话被抽取成了哪些候选记忆，以及最终写入/跳过状态。重点判断新记忆是否值得长期保存。',
+    contextLabel: '写入依据',
+    commandLabel: '抽取命令',
+    contentLabel: '候选/写入记忆',
+    resultLabel: '写入状态',
+    labels: [
+      { label: 'reasonable', text: '合理' },
+      { label: 'unreasonable', text: '不合理' },
+      { label: 'too_trivial', text: '太琐碎' },
+      { label: 'should_merge', text: '应合并' },
+    ],
+  },
+  {
+    id: 'user_profile_update',
+    label: '用户画像',
+    eventTypes: ['user_profile_update'],
+    description: '查看长期上下文如何更新用户画像。重点判断画像是否准确、稳定，是否把短期状态误写成长期特征。',
+    contextLabel: '画像依据',
+    commandLabel: '更新意图',
+    contentLabel: '新用户画像',
+    resultLabel: '旧/新画像',
+    labels: [
+      { label: 'accurate', text: '准确' },
+      { label: 'inaccurate', text: '不准确' },
+      { label: 'overfit', text: '过拟合' },
+      { label: 'missed_update', text: '漏更新' },
+    ],
+  },
+  {
+    id: 'fact_command',
+    label: '事实命令',
+    eventTypes: ['fact_command', 'fact_result'],
+    description: '查看模型生成的事实检索命令和确定性事实结果。事实结果本身不要求标注，重点标注命令是否应该检索。',
+    contextLabel: '输入上下文',
+    commandLabel: '事实命令',
+    contentLabel: '事实结果/话题',
+    resultLabel: '结果元数据',
+    labels: [
+      { label: 'needed', text: '需要' },
+      { label: 'unneeded', text: '多余' },
+      { label: 'wrong_target', text: '目标错误' },
+      { label: 'missing_fact', text: '漏事实' },
+    ],
+  },
+  {
+    id: 'sing_command',
+    label: '唱歌尝试',
+    eventTypes: ['sing_command', 'sing_result'],
+    description: '查看模型识别出的唱歌尝试和确定性选段结果。选段不要求标注，重点判断唱歌意图识别是否正确。',
+    contextLabel: '输入上下文',
+    commandLabel: '唱歌尝试',
+    contentLabel: '选歌/选段结果',
+    resultLabel: '规划元数据',
+    labels: [
+      { label: 'correct_intent', text: '意图正确' },
+      { label: 'wrong_intent', text: '意图错误' },
+      { label: 'wrong_song', text: '歌名错误' },
+      { label: 'missed_sing', text: '漏识别' },
+    ],
+  },
+];
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function postJson<T>(url: string, payload: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
@@ -129,6 +278,7 @@ function App() {
           <button className={page === 'llm' ? 'active' : ''} onClick={() => setPage('llm')}>LLM 统计</button>
           <button className={page === 'pipeline' ? 'active' : ''} onClick={() => setPage('pipeline')}>链路耗时</button>
           <button className={page === 'traces' ? 'active' : ''} onClick={() => setPage('traces')}>链路追踪</button>
+          <button className={page === 'memory' ? 'active' : ''} onClick={() => setPage('memory')}>记忆追踪</button>
           <button className={page === 'logs' ? 'active' : ''} onClick={() => setPage('logs')}>异常日志</button>
         </nav>
       </aside>
@@ -137,6 +287,7 @@ function App() {
         {page === 'llm' && <LlmPage />}
         {page === 'pipeline' && <PipelinePage />}
         {page === 'traces' && <TracePage />}
+        {page === 'memory' && <MemoryTracePage />}
         {page === 'logs' && <LogsPage />}
       </main>
     </div>
@@ -415,6 +566,116 @@ function TracePage() {
   );
 }
 
+function MemoryTracePage() {
+  const [traceQuery, setTraceQuery] = useState('');
+  const [activeTabId, setActiveTabId] = useState(memoryTraceTabs[0].id);
+  const [annotationState, setAnnotationState] = useState('');
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const activeTab = memoryTraceTabs.find((tab) => tab.id === activeTabId) || memoryTraceTabs[0];
+  const query = new URLSearchParams({
+    days: '7',
+    limit: '200',
+    ...(traceQuery.trim() ? { trace_id: traceQuery.trim() } : {}),
+    event_type: activeTab.eventTypes.join(','),
+    ...(annotationState ? { annotation_state: annotationState } : {}),
+    r: String(refreshNonce),
+  });
+  const { data: summary, error: summaryError, loading: summaryLoading } = usePolling<MemoryTraceSummary>('/admin/api/memory/summary?days=7');
+  const { data, error, loading } = usePolling<MemoryTraceEvent[]>(`/admin/api/memory/events?${query.toString()}`);
+  const visibleEvents = useMemo(() => {
+    return (data || []).filter((event) => activeTab.eventTypes.includes(event.event_type));
+  }, [activeTab, data]);
+  const totals = summary?.totals || {};
+  const typeRows = useMemo(() => {
+    return (summary?.by_type || []).filter((row) => activeTab.eventTypes.includes(String(row.event_type || '')));
+  }, [activeTab, summary]);
+
+  async function annotate(eventId: number, label: string, notes?: string) {
+    await postJson(`/admin/api/memory/events/${eventId}/annotation`, {
+      label,
+      notes,
+      annotator: 'console',
+    });
+    setRefreshNonce((value) => value + 1);
+  }
+
+  return (
+    <>
+      <PageHeader title="记忆追踪" subtitle="查看记忆召回、记忆写入、用户画像更新、事实命令和唱歌尝试，并进行人工标注" />
+      <StatusBar loading={summaryLoading || loading} error={summaryError || error} />
+      <section className="metric-grid">
+        <MetricCard title="事件总数" value={formatNumber(totals.event_count)} detail="最近 7 日" />
+        <MetricCard title="需要标注" value={formatNumber(totals.annotation_required_count)} detail="召回、写入、画像、命令" />
+        <MetricCard title="待标注" value={formatNumber(totals.pending_annotation_count)} detail="当前筛查重点" tone={totals.pending_annotation_count ? 'warning' : undefined} />
+        <MetricCard title="已标注" value={formatNumber(totals.annotated_count)} detail="人工反馈样本" />
+      </section>
+      <Panel title="筛选">
+        <div className="memory-tabs">
+          {memoryTraceTabs.map((tab) => (
+            <button
+              key={tab.id}
+              className={tab.id === activeTab.id ? 'active' : ''}
+              onClick={() => setActiveTabId(tab.id)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="filter-row memory-filter-row">
+          <input value={traceQuery} onChange={(event) => setTraceQuery(event.target.value)} placeholder="trace_id" />
+          <select value={annotationState} onChange={(event) => setAnnotationState(event.target.value)}>
+            <option value="">全部标注状态</option>
+            <option value="pending">待标注</option>
+            <option value="annotated">已标注</option>
+          </select>
+        </div>
+      </Panel>
+      <section className="two-column">
+        <Panel title={activeTab.label}>
+          <div className="behavior-note">{activeTab.description}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>Event</th>
+                <th>Item</th>
+                <th>Count</th>
+                <th>Pending</th>
+                <th>Avg</th>
+                <th>Max</th>
+              </tr>
+            </thead>
+            <tbody>
+              {typeRows.map((row, index) => (
+                <tr key={index}>
+                  <td>{String(row.event_type || '-')}</td>
+                  <td>{String(row.item_type || '-')}</td>
+                  <td>{formatNumber(Number(row.event_count || 0))}</td>
+                  <td>{formatNumber(Number(row.pending_annotation_count || 0))}</td>
+                  <td>{formatMs(Number(row.avg_duration_ms || 0))}</td>
+                  <td>{formatMs(Number(row.max_duration_ms || 0))}</td>
+                </tr>
+              ))}
+              {typeRows.length === 0 && (
+                <tr>
+                  <td colSpan={6}>暂无该行为的统计</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </Panel>
+        <Panel title={`${activeTab.label}事件`} className="scroll-panel memory-event-panel">
+          <div className="memory-event-list">
+            {visibleEvents.map((event) => (
+              <MemoryEventCard key={event.id} event={event} tab={activeTab} onAnnotate={annotate} />
+            ))}
+            {visibleEvents.length === 0 && <div className="empty-state">没有匹配的{activeTab.label}事件</div>}
+          </div>
+        </Panel>
+      </section>
+    </>
+  );
+}
+
 function LogsPage() {
   const { data, error, loading } = usePolling<LogEvent[]>('/admin/api/logs?limit=200&min_level=WARNING');
   return (
@@ -514,6 +775,72 @@ function LlmCallTable({ rows }: { rows: LlmCall[] }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function MemoryEventCard({
+  event,
+  tab,
+  onAnnotate,
+}: {
+  event: MemoryTraceEvent;
+  tab: MemoryTraceTab;
+  onAnnotate: (eventId: number, label: string, notes?: string) => Promise<void>;
+}) {
+  const [notes, setNotes] = useState(event.annotation_notes || '');
+  const [saving, setSaving] = useState(false);
+  const resultText = event.result ? JSON.stringify(event.result, null, 2) : '';
+
+  async function submit(label: string) {
+    setSaving(true);
+    try {
+      await onAnnotate(event.id, label, notes);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <article className="memory-event-card">
+      <div className="memory-event-head">
+        <div>
+          <span className="mono">#{event.id}</span>
+          <span className="pill">{event.event_type}</span>
+          <span className="pill">{event.item_type}</span>
+          {event.annotation_required && !event.annotation_label && <span className="pill warning">pending</span>}
+          {event.annotation_label && <span className="pill success">{event.annotation_label}</span>}
+        </div>
+        <div className="mono">{event.trace_id || '-'}</div>
+      </div>
+      <div className="memory-event-grid">
+        <ReadBlock title={tab.contextLabel} value={event.source_context} />
+        <ReadBlock title={tab.commandLabel} value={event.command_text} />
+        <ReadBlock title={tab.contentLabel} value={event.content_text} />
+        <ReadBlock title={tab.resultLabel} value={resultText} />
+      </div>
+      {event.annotation_required ? (
+        <div className="annotation-row">
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="标注意见" />
+          {tab.labels.map((label) => (
+            <button key={label.label} disabled={saving} onClick={() => submit(label.label)}>{label.text}</button>
+          ))}
+        </div>
+      ) : (
+        <div className="memory-event-meta">该事件是确定性结果，仅记录，不要求标注。</div>
+      )}
+      <div className="memory-event-meta">
+        {event.ts} · {formatMs(event.duration_ms)} · topic {event.topic_id || '-'}
+      </div>
+    </article>
+  );
+}
+
+function ReadBlock({ title, value }: { title: string; value?: string }) {
+  return (
+    <div className="read-block">
+      <div className="read-block-title">{title}</div>
+      <pre>{value || '-'}</pre>
+    </div>
   );
 }
 

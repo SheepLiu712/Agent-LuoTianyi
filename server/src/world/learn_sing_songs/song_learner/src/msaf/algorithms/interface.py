@@ -1,6 +1,6 @@
 """Interface for all the algorithms in MSAF."""
 import numpy as np
-import src.world.learn_sing_songs.song_learner.src.msaf.utils as U
+import msaf.utils as U
 
 
 class SegmenterInterface:

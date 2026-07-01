@@ -9,8 +9,8 @@ import numpy as np
 import os
 
 # Local stuff
-from src.world.learn_sing_songs.song_learner.src.msaf import io
-from src.world.learn_sing_songs.song_learner.src.msaf import utils
+from msaf import io
+from msaf import utils
 
 translate_ids = {
     "2dfmc": "2D-FMC",

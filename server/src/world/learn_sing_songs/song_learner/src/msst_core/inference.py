@@ -20,10 +20,10 @@ sys.path.append(current_dir)
 if typing.TYPE_CHECKING:
     import argparse
 
-from src.world.learn_sing_songs.song_learner.src.msst_core.utils.audio_utils import normalize_audio, denormalize_audio, draw_spectrogram
-from src.world.learn_sing_songs.song_learner.src.msst_core.utils.settings import get_model_from_config, parse_args_inference
-from src.world.learn_sing_songs.song_learner.src.msst_core.utils.model_utils import bigshifts_wrapper
-from src.world.learn_sing_songs.song_learner.src.msst_core.utils.model_utils import prefer_target_instrument, apply_tta, load_start_checkpoint
+from msst_core.utils.audio_utils import normalize_audio, denormalize_audio, draw_spectrogram
+from msst_core.utils.settings import get_model_from_config, parse_args_inference
+from msst_core.utils.model_utils import bigshifts_wrapper
+from msst_core.utils.model_utils import prefer_target_instrument, apply_tta, load_start_checkpoint
 
 import warnings
 

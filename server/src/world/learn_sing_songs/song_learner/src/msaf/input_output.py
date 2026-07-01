@@ -15,9 +15,9 @@ import numpy as np
 import six
 
 # Local stuff
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
-from src.world.learn_sing_songs.song_learner.src.msaf import utils
-from src.world.learn_sing_songs.song_learner.src.msaf.exceptions import NoEstimationsError
+import msaf as msaf
+from msaf import utils
+from msaf.exceptions import NoEstimationsError
 
 # Put dataset config in a global var
 ds_config = msaf.config.dataset

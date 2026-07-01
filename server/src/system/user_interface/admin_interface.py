@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 
 from src.system.system_runtime import SystemRuntime, get_system_runtime
 
@@ -89,6 +89,46 @@ async def trace_detail(
     system_runtime: SystemRuntime = Depends(get_runtime),
 ) -> dict[str, Any]:
     return system_runtime.observability.get_trace_detail(trace_id)
+
+
+@router.get("/memory/summary")
+async def memory_summary(
+    days: int = Query(default=7, ge=1, le=90),
+    system_runtime: SystemRuntime = Depends(get_runtime),
+) -> dict[str, Any]:
+    return system_runtime.observability.get_memory_trace_summary(days=days)
+
+
+@router.get("/memory/events")
+async def memory_events(
+    days: int = Query(default=7, ge=1, le=90),
+    limit: int = Query(default=200, ge=1, le=1000),
+    trace_id: str | None = None,
+    event_type: str | None = None,
+    annotation_state: str | None = None,
+    system_runtime: SystemRuntime = Depends(get_runtime),
+) -> list[dict[str, Any]]:
+    return system_runtime.observability.get_memory_trace_events(
+        days=days,
+        limit=limit,
+        trace_id=trace_id,
+        event_type=event_type,
+        annotation_state=annotation_state,
+    )
+
+
+@router.post("/memory/events/{event_id}/annotation")
+async def annotate_memory_event(
+    event_id: int,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    system_runtime: SystemRuntime = Depends(get_runtime),
+) -> dict[str, Any]:
+    return system_runtime.observability.annotate_memory_trace_event(
+        event_id,
+        label=str(payload.get("label") or "").strip(),
+        notes=str(payload.get("notes") or "").strip() or None,
+        annotator=str(payload.get("annotator") or "").strip() or None,
+    )
 
 
 @router.get("/logs")

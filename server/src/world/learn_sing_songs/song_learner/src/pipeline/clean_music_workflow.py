@@ -12,14 +12,17 @@ from typing import Optional, Tuple
 
 CURRENT_DIR = Path(__file__).resolve().parent
 SRC_DIR = CURRENT_DIR.parent
+SERVER_ROOT = CURRENT_DIR.parents[5]
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from src.world.learn_sing_songs.song_learner.src.msst_core.inference import proc_folder
+from msst_core.inference import proc_folder
 try:
     from .download_qq_song import download_song_and_lyric
 except ImportError:
-    from src.world.learn_sing_songs.song_learner.src.pipeline.download_qq_song import download_song_and_lyric
+    from pipeline.download_qq_song import download_song_and_lyric
 
 
 DEFAULT_STAGE1_MODEL_TYPE = "bs_roformer"

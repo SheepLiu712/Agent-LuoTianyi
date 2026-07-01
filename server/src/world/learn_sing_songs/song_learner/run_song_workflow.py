@@ -15,6 +15,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 # 之前使用 parents[4] 多退了一层，导致 ROOT 指向了上一级目录。
 SERVER_ROOT = PROJECT_ROOT.parents[3]
 SRC_DIR = PROJECT_ROOT / "src"
+if str(SERVER_ROOT) not in sys.path:
+    sys.path.insert(0, str(SERVER_ROOT))
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 

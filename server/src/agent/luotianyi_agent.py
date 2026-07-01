@@ -287,9 +287,9 @@ class LuoTianyiAgent:
         current_dialogue: str,
         related_memories: Optional[List[str]] = None,
         conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
-    ) -> None:
+    ) -> dict:
         """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
-        await self.mind.write_topic_memories(
+        return await self.mind.write_topic_memories(
             user_id=user_id,
             current_dialogue=current_dialogue,
             related_memories=related_memories,

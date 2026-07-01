@@ -7,8 +7,8 @@ from scipy.spatial import distance
 from scipy import signal, ndimage
 import pylab as plt
 
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
-from src.world.learn_sing_songs.song_learner.src.msaf.algorithms.interface import SegmenterInterface
+import msaf as msaf
+from msaf.algorithms.interface import SegmenterInterface
 
 
 def median_filter(X, M=8):

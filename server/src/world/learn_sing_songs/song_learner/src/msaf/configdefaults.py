@@ -2,7 +2,7 @@
 import logging
 import numpy as np
 
-from src.world.learn_sing_songs.song_learner.src.msaf.configparser import \
+from msaf.configparser import \
     (AddConfigVar, BoolParam, ConfigParam, EnumStr, FloatParam,
      IntParam, StrParam, ListParam, MsafConfigParser)
 
