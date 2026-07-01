@@ -11,8 +11,14 @@ from src.agent.response_parser import StructuredResponseParser
 from src.agent.text_cleaning import build_sound_content
 from src.domain import CharacterProfile
 from src.utils.enum_type import ContextType
+from src.utils.llm.llm_api_interface import LLMContentInspectionError
 from src.utils.llm.llm_module import LLMModule
 from src.utils.logger import get_logger
+
+
+DEFAULT_LLM_TONE = "中性"
+DEFAULT_TTS_TONE = "normal"
+DEFAULT_EXPRESSION = "微笑脸"
 
 
 @dataclass
@@ -104,6 +110,9 @@ class MainChat:
     async def _call_llm(self, **kwargs) -> str:
         try:
             return await self.llm.generate_response(**kwargs)
+        except LLMContentInspectionError as e:
+            self.logger.warning(f"MainChat LLM 内容审查失败，返回话题切换回复: {e}")
+            return "[中性]这个话题不太合适，我们聊点别的吧"
         except Exception as e:
             import traceback
 
@@ -164,7 +173,7 @@ class MainChat:
         path = Path(self.llm_tone_mapping_file)
         if not path.exists():
             self.logger.warning(f"LLM tone mapping file not found: {self.llm_tone_mapping_file}")
-            self.default_response = OneSentenceChat(content="")
+            self.default_response = OneSentenceChat(expression=DEFAULT_EXPRESSION, tone=DEFAULT_TTS_TONE, content="")
             return
 
         try:
@@ -182,14 +191,27 @@ class MainChat:
         except Exception as e:
             self.logger.warning(f"Failed to load LLM tone mapping: {e}")
 
+        default_key = DEFAULT_LLM_TONE.lower()
         self.default_response = OneSentenceChat(
-            expression=self.llm_tone_to_l2d_expression.get("中性", ""),
-            tone=self.llm_tone_to_tts_tone.get("中性", ""),
+            expression=self.llm_tone_to_l2d_expression.get(default_key, DEFAULT_EXPRESSION),
+            tone=self.llm_tone_to_tts_tone.get(default_key, DEFAULT_TTS_TONE),
             content="",
         )
 
     def _get_expressions_and_tts_tone(self, tone: str) -> Tuple[str, str]:
-        normalized_tone = (tone or "").lower().strip()
-        tts_tone = self.llm_tone_to_tts_tone.get(normalized_tone, "")
-        expression = self.llm_tone_to_l2d_expression.get(normalized_tone, "")
+        normalized_tone = (tone or "").lower().strip().strip("'\"“”‘’")
+        default_key = DEFAULT_LLM_TONE.lower()
+        if not normalized_tone:
+            self.logger.warning(f"LLM tone is empty, falling back to {DEFAULT_LLM_TONE}.")
+            normalized_tone = default_key
+        if normalized_tone not in self.llm_tone_to_tts_tone:
+            self.logger.warning(f"LLM tone '{tone}' not found, falling back to {DEFAULT_LLM_TONE}.")
+        tts_tone = self.llm_tone_to_tts_tone.get(
+            normalized_tone,
+            self.llm_tone_to_tts_tone.get(default_key, DEFAULT_TTS_TONE),
+        )
+        expression = self.llm_tone_to_l2d_expression.get(
+            normalized_tone,
+            self.llm_tone_to_l2d_expression.get(default_key, DEFAULT_EXPRESSION),
+        )
         return expression, tts_tone

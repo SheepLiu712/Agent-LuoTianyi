@@ -14,6 +14,40 @@ import os
 import asyncio
 
 
+class LLMContentInspectionError(Exception):
+    """Raised when the provider rejects input/output due to content inspection."""
+
+
+def _stringify_error_payload(payload: Any) -> str:
+    try:
+        return json.dumps(payload, ensure_ascii=False, default=str)
+    except Exception:
+        return str(payload)
+
+
+def _is_content_inspection_failure(error: Any) -> bool:
+    payloads: list[Any] = [
+        error,
+        getattr(error, "code", None),
+        getattr(error, "body", None),
+        getattr(error, "message", None),
+    ]
+    response = getattr(error, "response", None)
+    if response is not None:
+        payloads.append(response)
+        try:
+            payloads.append(response.json())
+        except Exception:
+            payloads.append(getattr(response, "text", None))
+
+    text = "\n".join(_stringify_error_payload(item).lower() for item in payloads if item is not None)
+    return (
+        "data_inspection_failed" in text
+        or "datainspectionfailed" in text
+        or "input text data may contain inappropriate content" in text
+    )
+
+
 class LLMAPIInterface(ABC):
     default_parameters: Dict[str, Any] = {}
     @abstractmethod
@@ -124,6 +158,9 @@ class OpenAIAPIInterface(LLMAPIInterface):
 
             except Exception as e:
                 last_exception = e
+                if _is_content_inspection_failure(e):
+                    self.logger.warning(f"请求被内容审查拦截，不再重试: {e}")
+                    raise LLMContentInspectionError(str(e)) from e
                 self.logger.warning(f"请求失败 (尝试 {attempt + 1}/{self.max_retries}): {e}")
 
                 if attempt < self.max_retries - 1:
@@ -290,12 +327,17 @@ class RequestsAPIInterface(LLMAPIInterface):
                     )
 
                 ret = await asyncio.to_thread(_do_request)
+                if _is_content_inspection_failure(ret):
+                    raise LLMContentInspectionError(_stringify_error_payload(ret.json()))
                 elapsed = time.time() - st_time
                 extracted = self._extract_content(ret, elapsed=elapsed)
                 return extracted
 
             except Exception as e:
                 last_exception = e
+                if isinstance(e, LLMContentInspectionError) or _is_content_inspection_failure(e):
+                    self.logger.warning(f"请求被内容审查拦截，不再重试: {e}")
+                    raise e if isinstance(e, LLMContentInspectionError) else LLMContentInspectionError(str(e)) from e
                 self.logger.warning(f"请求失败 (尝试 {attempt + 1}/{self.max_retries}): {e}")
 
                 if attempt < self.max_retries - 1:
