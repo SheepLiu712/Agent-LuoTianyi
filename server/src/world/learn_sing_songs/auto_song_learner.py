@@ -240,7 +240,9 @@ class AutoSongLearner:
             raise RuntimeError("Songlearner 模型未就绪，无法执行自动学歌")
 
         # QQ 音乐凭证检测（启动时）
-        self._credential_file = self.songlearner_resource_dir / ".qq_music_credential.json"
+        credential_path = config.get("qq_credential_file", "config/qq_music_credential.json")
+        self._credential_file = self._resolve_path(cwd, credential_path)
+        self._migrate_legacy_qq_credential()
         self.qq_credential_valid = self._validate_qq_credential()
         if not self.qq_credential_valid:
             self.logger.warning(
@@ -278,6 +280,17 @@ class AutoSongLearner:
         except Exception as e:
             self.logger.warning(f"QQ 音乐凭证检测异常: {e}")
         return False
+
+    def _migrate_legacy_qq_credential(self) -> None:
+        legacy_file = self.songlearner_resource_dir / ".qq_music_credential.json"
+        if self._credential_file.exists() or not legacy_file.exists():
+            return
+        try:
+            self._credential_file.parent.mkdir(parents=True, exist_ok=True)
+            self._credential_file.write_text(legacy_file.read_text(encoding="utf-8"), encoding="utf-8")
+            self.logger.info(f"已迁移 QQ 音乐凭证: {legacy_file} -> {self._credential_file}")
+        except Exception as e:
+            self.logger.warning(f"迁移 QQ 音乐凭证失败: {e}")
 
     def _generate_login_qr(self) -> None:
         """生成 QQ 登录二维码并保存到文件（不等待扫码）。"""

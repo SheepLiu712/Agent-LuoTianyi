@@ -30,6 +30,66 @@ type LlmSummary = {
   daily: Array<Record<string, string | number>>;
 };
 
+type AdminAuthStatus = {
+  configured: boolean;
+  setup_required: boolean;
+};
+
+type RuntimeStatus = {
+  state: string;
+  running: boolean;
+  busy?: boolean;
+  last_error?: string | null;
+  last_started_at?: string | null;
+  last_stopped_at?: string | null;
+  validation?: RuntimeValidation | null;
+};
+
+type RuntimeValidation = {
+  ok: boolean;
+  core_ok: boolean;
+  items: ValidationItem[];
+  world_disabled: ValidationItem[];
+};
+
+type ValidationItem = {
+  scope: string;
+  name: string;
+  status: string;
+  severity: string;
+  message: string;
+};
+
+type SecretStatus = Record<string, { configured: boolean; source?: string | null; masked: string }>;
+
+type LlmInterfaceConfig = {
+  api_type?: string;
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+  can_enable_thinking?: boolean;
+  can_use_json?: boolean;
+  default_params?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+type ModuleBinding = {
+  path: string;
+  kind: 'llm' | 'vlm';
+  interface_name: string;
+  prompt_name?: string;
+  enable_thinking?: boolean;
+  use_json?: boolean;
+  params?: Record<string, unknown>;
+  params_text?: string;
+};
+
+type LlmConfigInfo = {
+  available_llms: Record<string, LlmInterfaceConfig>;
+  available_vlms: Record<string, LlmInterfaceConfig>;
+  module_bindings: ModuleBinding[];
+};
+
 type LlmCall = {
   id: number;
   ts: string;
@@ -131,7 +191,7 @@ type MemoryTraceTab = {
   labels: Array<{ label: string; text: string }>;
 };
 
-type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'memory' | 'logs';
+type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'memory' | 'config' | 'logs';
 
 type LlmStatsTab = {
   id: 'seven_days' | 'one_day' | 'recent';
@@ -290,7 +350,7 @@ const memoryTraceTabs: MemoryTraceTab[] = [
 ];
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  const response = await fetch(url, { credentials: 'same-origin' });
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
@@ -301,6 +361,20 @@ async function postJson<T>(url: string, payload: unknown): Promise<T> {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function putJson<T>(url: string, payload: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
@@ -327,8 +401,108 @@ function formatChartValue(value: number, metric: LlmChartMetric) {
   return metric.format === 'ms' ? formatMs(value) : formatNumber(value);
 }
 
-function App() {
+function AdminGate() {
+  const [status, setStatus] = useState<AdminAuthStatus | null>(null);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      const nextStatus = await fetchJson<AdminAuthStatus>('/admin/api/admin-auth/status');
+      setStatus(nextStatus);
+      if (nextStatus.configured) {
+        try {
+          await fetchJson<RuntimeStatus>('/admin/api/runtime/status');
+          setAuthenticated(true);
+        } catch {
+          setAuthenticated(false);
+        }
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  if (loading) {
+    return <div className="auth-shell"><div className="auth-panel">加载中...</div></div>;
+  }
+  if (!status?.configured) {
+    return <AdminSetupPage onReady={refresh} />;
+  }
+  if (!authenticated) {
+    return <AdminLoginPage onReady={() => setAuthenticated(true)} />;
+  }
+  return <App onLogout={() => setAuthenticated(false)} />;
+}
+
+function AdminSetupPage({ onReady }: { onReady: () => void }) {
+  const [setupToken, setSetupToken] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    try {
+      await postJson('/admin/api/admin-auth/setup', { setup_token: setupToken, password });
+      setError(null);
+      onReady();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-panel">
+        <h1>初始化控制台</h1>
+        <p>输入服务器本地生成的 setup token，并设置管理员密码。</p>
+        {error && <div className="status error">{error}</div>}
+        <input value={setupToken} onChange={(event) => setSetupToken(event.target.value)} placeholder="Setup token" />
+        <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Admin password" type="password" />
+        <button onClick={submit}>完成初始化</button>
+      </div>
+    </div>
+  );
+}
+
+function AdminLoginPage({ onReady }: { onReady: () => void }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    try {
+      await postJson('/admin/api/admin-auth/login', { password });
+      setError(null);
+      onReady();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-panel">
+        <h1>控制台登录</h1>
+        <p>需要管理员密码才能访问服务端配置和监控数据。</p>
+        {error && <div className="status error">{error}</div>}
+        <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Admin password" type="password" onKeyDown={(event) => event.key === 'Enter' && void submit()} />
+        <button onClick={submit}>登录</button>
+      </div>
+    </div>
+  );
+}
+
+function App({ onLogout }: { onLogout: () => void }) {
   const [page, setPage] = useState<Page>('dashboard');
+
+  async function logout() {
+    await postJson('/admin/api/admin-auth/logout', {});
+    onLogout();
+  }
 
   return (
     <div className="app-shell">
@@ -343,7 +517,9 @@ function App() {
           <button className={page === 'pipeline' ? 'active' : ''} onClick={() => setPage('pipeline')}>链路耗时</button>
           <button className={page === 'traces' ? 'active' : ''} onClick={() => setPage('traces')}>链路追踪</button>
           <button className={page === 'memory' ? 'active' : ''} onClick={() => setPage('memory')}>记忆追踪</button>
+          <button className={page === 'config' ? 'active' : ''} onClick={() => setPage('config')}>服务配置</button>
           <button className={page === 'logs' ? 'active' : ''} onClick={() => setPage('logs')}>异常日志</button>
+          <button onClick={logout}>退出登录</button>
         </nav>
       </aside>
       <main className="content">
@@ -352,6 +528,7 @@ function App() {
         {page === 'pipeline' && <PipelinePage />}
         {page === 'traces' && <TracePage />}
         {page === 'memory' && <MemoryTracePage />}
+        {page === 'config' && <ConfigPage />}
         {page === 'logs' && <LogsPage />}
       </main>
     </div>
@@ -853,6 +1030,447 @@ function MemoryTracePage() {
   );
 }
 
+function ConfigPage() {
+  const { data: runtime, error: runtimeError, loading: runtimeLoading } = usePolling<RuntimeStatus>('/admin/api/runtime/status', 5000);
+  const { data: secrets, error: secretError, loading: secretLoading } = usePolling<SecretStatus>('/admin/api/secrets/status', 10000);
+  const { data: validation, error: validationError, loading: validationLoading } = usePolling<RuntimeValidation>('/admin/api/config/validation', 10000);
+  const [llmDraft, setLlmDraft] = useState<LlmConfigInfo | null>(null);
+  const [llmLoading, setLlmLoading] = useState(true);
+  const [secretUpdates, setSecretUpdates] = useState<Record<string, string>>({});
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [runtimeOverride, setRuntimeOverride] = useState<RuntimeStatus | null>(null);
+
+  async function loadLlmConfig() {
+    setLlmLoading(true);
+    try {
+      setLlmDraft(await fetchJson<LlmConfigInfo>('/admin/api/llm/config'));
+      setActionError(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLlmLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadLlmConfig();
+  }, []);
+
+  useEffect(() => {
+    if (!runtime || !runtimeOverride) {
+      return;
+    }
+    const overrideState = runtimeOverride.state;
+    const runtimeState = runtime.state;
+    const actualStateCaughtUp =
+      (!['starting', 'stopping'].includes(overrideState) && runtimeState === overrideState) ||
+      (overrideState === 'starting' && ['starting', 'running', 'blocked', 'failed'].includes(runtimeState)) ||
+      (overrideState === 'stopping' && ['stopping', 'stopped', 'starting', 'failed'].includes(runtimeState));
+    if (actualStateCaughtUp) {
+      setRuntimeOverride(null);
+      if (actionMessage?.startsWith('Runtime ')) {
+        setActionMessage(null);
+      }
+    }
+  }, [runtime?.state, runtimeOverride?.state, actionMessage]);
+
+  useEffect(() => {
+    const runtimeSettled = runtime && !runtime.busy && !['starting', 'stopping'].includes(runtime.state);
+    if (!runtimeOverride && runtimeSettled && actionMessage?.startsWith('Runtime ')) {
+      setActionMessage(null);
+    }
+  }, [runtime?.state, runtime?.busy, runtimeOverride, actionMessage]);
+
+  async function runtimeAction(action: 'start' | 'stop' | 'restart') {
+    const pendingState = action === 'stop' || (action === 'restart' && runtime?.running) ? 'stopping' : 'starting';
+    const pendingMessage =
+      action === 'start' ? 'Runtime 启动中...' : action === 'stop' ? 'Runtime 停止中...' : 'Runtime 重启中...';
+    const pendingStatus: RuntimeStatus = {
+      ...(runtime || {
+        state: 'stopped',
+        running: false,
+        last_error: null,
+        last_started_at: null,
+        last_stopped_at: null,
+        validation: null,
+      }),
+      state: pendingState,
+      busy: true,
+    };
+    try {
+      setRuntimeOverride(pendingStatus);
+      setActionMessage(pendingMessage);
+      const nextStatus = await postJson<RuntimeStatus>(`/admin/api/runtime/${action}`, {});
+      setRuntimeOverride(nextStatus);
+      const isTransition = nextStatus.busy || ['starting', 'stopping'].includes(nextStatus.state);
+      setActionMessage(isTransition ? pendingMessage : `Runtime 当前状态：${nextStatus.state}`);
+      setActionError(null);
+    } catch (err) {
+      setRuntimeOverride(null);
+      setActionMessage(null);
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function saveSecrets() {
+    try {
+      await putJson('/admin/api/secrets', secretUpdates);
+      setSecretUpdates({});
+      setActionError(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function applyLlmConfig() {
+    if (!llmDraft) {
+      return;
+    }
+    try {
+      const result = await postJson<{ ok: boolean; validation: RuntimeValidation; runtime: RuntimeStatus; written: boolean; restarted: boolean }>('/admin/api/llm/config/apply', llmDraft);
+      if (!result.ok) {
+        const errors = result.validation.items.filter((item) => item.status === 'error' && item.scope !== 'world');
+        setActionError(`配置未写入：${errors[0]?.message || '核心配置校验失败'}`);
+        setActionMessage(null);
+        return;
+      }
+      setActionError(null);
+      setActionMessage(result.restarted ? '配置已写入，runtime 已重启' : '配置已写入，runtime 当前未启动');
+      await loadLlmConfig();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  const validationItems = validation?.items || runtime?.validation?.items || [];
+  const worldDisabled = validation?.world_disabled || runtime?.validation?.world_disabled || [];
+  const effectiveRuntime = runtimeOverride || runtime;
+  const runtimeState = effectiveRuntime?.state || '-';
+  const runtimeBusy = Boolean(effectiveRuntime?.busy || ['starting', 'stopping'].includes(runtimeState));
+  const runtimeDetail = runtimeBusy ? '状态切换中' : effectiveRuntime?.running ? '业务运行中' : '业务未启动';
+
+  return (
+    <>
+      <PageHeader title="服务配置" subtitle="运行时启停、环境变量、资源和 LLM/VLM 配置检查" />
+      <StatusBar loading={runtimeLoading || secretLoading || validationLoading || llmLoading} error={runtimeError || secretError || validationError || actionError} />
+      {actionMessage && <div className="status">{actionMessage}</div>}
+      <section className="metric-grid">
+        <MetricCard title="Runtime" value={runtimeState} detail={runtimeDetail} />
+        <MetricCard title="核心配置" value={validation?.core_ok ? 'OK' : 'BLOCKED'} detail={`${validationItems.filter((item) => item.status === 'error' && item.scope !== 'world').length} errors`} tone={validation?.core_ok ? undefined : 'danger'} />
+        <MetricCard title="World 降级" value={formatNumber(worldDisabled.length)} detail="可选任务禁用数" tone={worldDisabled.length ? 'warning' : undefined} />
+        <MetricCard title="Secrets" value={formatNumber(Object.values(secrets || {}).filter((item) => item.configured).length)} detail="已配置项" />
+      </section>
+      <Panel title="运行时控制">
+        <div className="action-row">
+          <button disabled={runtimeBusy} onClick={() => void runtimeAction('start')}>启动</button>
+          <button disabled={runtimeBusy} onClick={() => void runtimeAction('restart')}>重启</button>
+          <button disabled={runtimeBusy} onClick={() => void runtimeAction('stop')}>停止</button>
+        </div>
+        {runtime?.last_error && <pre className="error-block">{runtime.last_error}</pre>}
+      </Panel>
+      <Panel title="环境变量 / Secrets">
+        <div className="secret-list">
+          {Object.entries(secrets || {}).map(([key, value]) => (
+            <div className="secret-row" key={key}>
+              <div>
+                <strong>{key}</strong>
+                <span>{value.configured ? `${value.source || '-'} · ${value.masked}` : '未配置'}</span>
+              </div>
+              <input
+                value={secretUpdates[key] || ''}
+                onChange={(event) => setSecretUpdates((prev) => ({ ...prev, [key]: event.target.value }))}
+                placeholder="留空则不修改"
+                type="password"
+              />
+            </div>
+          ))}
+        </div>
+        <div className="action-row">
+          <button onClick={() => void saveSecrets()}>保存 Secrets</button>
+        </div>
+      </Panel>
+      <Panel title="LLM Interfaces">
+        <LlmInterfacesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
+      </Panel>
+      <Panel title="LLMModule / VLMModule 绑定">
+        <LlmModuleBindingDraftEditor draft={llmDraft} onChange={setLlmDraft} onApply={() => void applyLlmConfig()} onReload={() => void loadLlmConfig()} />
+      </Panel>
+      <Panel title="配置检查">
+        <ValidationTable rows={validationItems} />
+      </Panel>
+    </>
+  );
+}
+
+function LlmInterfacesDraftEditor({
+  draft,
+  onChange,
+}: {
+  draft: LlmConfigInfo | null;
+  onChange: (draft: LlmConfigInfo) => void;
+}) {
+  if (!draft) {
+    return <div className="empty-state">暂无 LLM 配置</div>;
+  }
+  const currentDraft = draft;
+
+  function updateInterfaces(kind: 'available_llms' | 'available_vlms', next: Record<string, LlmInterfaceConfig>) {
+    onChange({ ...currentDraft, [kind]: next });
+  }
+
+  return (
+    <div className="llm-config-editor">
+      <InterfaceEditor title="LLM Interfaces" kind="available_llms" rows={currentDraft.available_llms} onChange={updateInterfaces} />
+      <InterfaceEditor title="VLM Interfaces" kind="available_vlms" rows={currentDraft.available_vlms} onChange={updateInterfaces} />
+    </div>
+  );
+}
+
+function LlmModuleBindingDraftEditor({
+  draft,
+  onChange,
+  onApply,
+  onReload,
+}: {
+  draft: LlmConfigInfo | null;
+  onChange: (draft: LlmConfigInfo) => void;
+  onApply: () => void;
+  onReload: () => void;
+}) {
+  if (!draft) {
+    return <div className="empty-state">暂无模块绑定</div>;
+  }
+  const currentDraft = draft;
+  const llmNames = Object.keys(currentDraft.available_llms);
+  const vlmNames = Object.keys(currentDraft.available_vlms);
+
+  function updateBindings(next: ModuleBinding[]) {
+    onChange({ ...currentDraft, module_bindings: next });
+  }
+
+  return (
+    <div className="llm-config-editor">
+      <ModuleBindingEditor bindings={currentDraft.module_bindings} llmNames={llmNames} vlmNames={vlmNames} onChange={updateBindings} />
+      <div className="action-row">
+        <button onClick={onApply}>修改</button>
+        <button className="secondary-button" onClick={onReload}>放弃草稿</button>
+      </div>
+    </div>
+  );
+}
+
+function InterfaceEditor({
+  title,
+  kind,
+  rows,
+  onChange,
+}: {
+  title: string;
+  kind: 'available_llms' | 'available_vlms';
+  rows: Record<string, LlmInterfaceConfig>;
+  onChange: (kind: 'available_llms' | 'available_vlms', next: Record<string, LlmInterfaceConfig>) => void;
+}) {
+  function updateName(oldName: string, newName: string) {
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) {
+      return;
+    }
+    const next = { ...rows };
+    next[trimmed] = next[oldName];
+    delete next[oldName];
+    onChange(kind, next);
+  }
+
+  function updateField(name: string, field: string, value: unknown) {
+    onChange(kind, { ...rows, [name]: { ...rows[name], [field]: value } });
+  }
+
+  function updateDefaultParams(name: string, value: string) {
+    try {
+      updateField(name, 'default_params', value.trim() ? JSON.parse(value) : {});
+    } catch {
+      updateField(name, 'default_params_text', value);
+    }
+  }
+
+  function addInterface() {
+    let index = Object.keys(rows).length + 1;
+    let name = `${kind === 'available_llms' ? 'llm' : 'vlm'}_${index}`;
+    while (rows[name]) {
+      index += 1;
+      name = `${kind === 'available_llms' ? 'llm' : 'vlm'}_${index}`;
+    }
+    onChange(kind, {
+      ...rows,
+      [name]: {
+        api_type: 'openai',
+        model: '',
+        api_key: '',
+        base_url: '',
+        can_enable_thinking: false,
+        can_use_json: false,
+        default_params: {},
+      },
+    });
+  }
+
+  function removeInterface(name: string) {
+    const next = { ...rows };
+    delete next[name];
+    onChange(kind, next);
+  }
+
+  return (
+    <div className="interface-editor">
+      <div className="editor-head">
+        <h3>{title}</h3>
+        <button onClick={addInterface}>新增</button>
+      </div>
+      {Object.entries(rows).map(([name, item]) => (
+        <div className="interface-card" key={name}>
+          <input className="interface-name-input" defaultValue={name} onBlur={(event) => updateName(name, event.target.value)} />
+          <input className="interface-type-input" value={String(item.api_type || '')} onChange={(event) => updateField(name, 'api_type', event.target.value)} placeholder="api_type" />
+          <input className="interface-model-input" value={String(item.model || '')} onChange={(event) => updateField(name, 'model', event.target.value)} placeholder="model" />
+          <input className="interface-key-input" value={String(item.api_key || '')} onChange={(event) => updateField(name, 'api_key', event.target.value)} placeholder="$API_KEY" />
+          <input className="interface-url-input" value={String(item.base_url || '')} onChange={(event) => updateField(name, 'base_url', event.target.value)} placeholder="base_url" />
+          <div className="interface-flags">
+            <label><input type="checkbox" checked={Boolean(item.can_enable_thinking)} onChange={(event) => updateField(name, 'can_enable_thinking', event.target.checked)} /> thinking</label>
+            <label><input type="checkbox" checked={Boolean(item.can_use_json)} onChange={(event) => updateField(name, 'can_use_json', event.target.checked)} /> json</label>
+          </div>
+          <textarea
+            value={String(item.default_params_text || JSON.stringify(item.default_params || {}, null, 2))}
+            onChange={(event) => updateDefaultParams(name, event.target.value)}
+            placeholder="default_params JSON"
+          />
+          <button className="danger-button" onClick={() => removeInterface(name)}>删除</button>
+        </div>
+      ))}
+      {Object.keys(rows).length === 0 && <div className="empty-state">暂无配置</div>}
+    </div>
+  );
+}
+
+function ModuleBindingEditor({
+  bindings,
+  llmNames,
+  vlmNames,
+  onChange,
+}: {
+  bindings: ModuleBinding[];
+  llmNames: string[];
+  vlmNames: string[];
+  onChange: (bindings: ModuleBinding[]) => void;
+}) {
+  function updateBinding(index: number, patch: Partial<ModuleBinding>) {
+    onChange(bindings.map((binding, current) => current === index ? { ...binding, ...patch } : binding));
+  }
+
+  function updateParams(index: number, value: string) {
+    try {
+      updateBinding(index, { params: value.trim() ? JSON.parse(value) : {}, params_text: undefined });
+    } catch {
+      updateBinding(index, { params_text: value });
+    }
+  }
+
+  return (
+    <div className="module-binding-editor">
+      <h3>LLMModule / VLMModule 绑定</h3>
+      <div className="module-binding-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Kind</th>
+            <th>Module Path</th>
+            <th>Prompt</th>
+            <th>Interface</th>
+            <th>Thinking</th>
+            <th>JSON</th>
+            <th>Params</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bindings.map((binding, index) => {
+            const names = binding.kind === 'llm' ? llmNames : vlmNames;
+            const options = names.includes(binding.interface_name) ? names : [binding.interface_name, ...names].filter(Boolean);
+            return (
+              <tr key={`${binding.kind}-${binding.path}`}>
+                <td className="module-kind-cell">{binding.kind.toUpperCase()}</td>
+                <td className="mono module-path-cell">{binding.path}</td>
+                <td className="module-prompt-cell">{binding.prompt_name || '-'}</td>
+                <td>
+                  <select value={binding.interface_name} onChange={(event) => updateBinding(index, { interface_name: event.target.value })}>
+                    {options.map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                </td>
+                <td className="module-check-cell">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(binding.enable_thinking)}
+                    onChange={(event) => updateBinding(index, { enable_thinking: event.target.checked })}
+                  />
+                </td>
+                <td className="module-check-cell">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(binding.use_json)}
+                    onChange={(event) => updateBinding(index, { use_json: event.target.checked })}
+                  />
+                </td>
+                <td className="module-params-cell">
+                  <textarea
+                    className={binding.params_text !== undefined ? 'json-invalid' : undefined}
+                    value={binding.params_text ?? JSON.stringify(binding.params || {}, null, 2)}
+                    onChange={(event) => updateParams(index, event.target.value)}
+                    placeholder='{"temperature": 0.7}'
+                  />
+                </td>
+              </tr>
+            );
+          })}
+          {bindings.length === 0 && (
+            <tr>
+              <td colSpan={7} className="empty-state">暂无模块绑定</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+      </div>
+    </div>
+  );
+}
+
+function ValidationTable({ rows }: { rows: ValidationItem[] }) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Scope</th>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Message</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={`${row.name}-${index}`}>
+            <td>{row.scope}</td>
+            <td>{row.name}</td>
+            <td><span className={`pill ${row.status === 'ok' ? 'success' : row.status === 'disabled' ? 'warning' : 'error'}`}>{row.status}</span></td>
+            <td>{row.message}</td>
+          </tr>
+        ))}
+        {rows.length === 0 && (
+          <tr>
+            <td colSpan={4} className="empty-state">暂无检查结果</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
 function LogsPage() {
   const { data, error, loading } = usePolling<LogEvent[]>('/admin/api/logs?limit=200&min_level=WARNING');
   return (
@@ -1046,4 +1664,4 @@ function LogTable({ rows, compact = false }: { rows: LogEvent[]; compact?: boole
   );
 }
 
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(<AdminGate />);

@@ -189,8 +189,8 @@
         "agent": {
             "preprocessing": {
                 "song_entity_linker": {
-                    "songname_file": "res/knowledge/songname.json",
-                    "lyrics_file": "res/knowledge/lyrics.json"
+                    "songname_file": "res/knowledge/song_name_keywords.txt",
+                    "lyric_file": "res/knowledge/song_lyric_keywords.txt"
                 }
             },
             "memory": {
@@ -414,6 +414,7 @@
             }
         },
         "auto_song_learner": {
+            "enabled": true,
             "clock_config": {
                 "type": "daily",
                 "params": {
@@ -422,7 +423,8 @@
                 }
             },
             "songlearner_dir": "src/world/learn_sing_songs/song_learner",
-            "songlearner_resource_dir": "res/song_learner"
+            "songlearner_resource_dir": "res/song_learner",
+            "qq_credential_file": "config/qq_music_credential.json"
         },
         "bili_dynamic_fetcher": {
             "clock_config": {

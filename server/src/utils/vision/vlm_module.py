@@ -15,12 +15,13 @@ class VLMModule:
         self.logger = get_logger(f"VLMModule:{module_name}")
 
         self.config = module_config
-        self.enable_thinking = module_config.get("enable_thinking", False)
-        self.use_json = module_config.get("use_json", False)
+        vlm_config = module_config.get("vlm", {})
+        self.enable_thinking = module_config.get("enable_thinking", vlm_config.get("enable_thinking", False))
+        self.use_json = module_config.get("use_json", vlm_config.get("use_json", False))
         self.vlm_client: VLMAPIInterface = interface
         self.prompt_template: PromptTemplate = prompt_template
 
-        self.params = module_config.get("params", {})
+        self.params = module_config.get("params", vlm_config.get("params", {}))
 
     async def generate_response(self, image_base64: str, **kwargs) -> dict:
         """生成 VLM 响应，返回完整字典（含 content / usage / response_time_s）
@@ -30,7 +31,14 @@ class VLMModule:
         :return: {"content": str, "usage": dict, "response_time_s": float}
         """
         prompt = self.prompt_template.render(**kwargs)
-        response = await self.vlm_client.generate_response(prompt, image_base64=image_base64)
+        request_kwargs = dict(self.params or {})
+        if self.enable_thinking:
+            extra_body = dict(request_kwargs.get("extra_body") or {})
+            extra_body["enable_thinking"] = True
+            request_kwargs["extra_body"] = extra_body
+        if self.use_json:
+            request_kwargs["response_format"] = {"type": "json_object"}
+        response = await self.vlm_client.generate_response(prompt, image_base64=image_base64, **request_kwargs)
         token_usage = response.get("usage", {})
         self.logger.debug(
             f"Token usage - Prompt: {token_usage.get('prompt_tokens', 0)}, "

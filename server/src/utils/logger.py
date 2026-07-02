@@ -79,6 +79,32 @@ def get_logger(name: str) -> logging.Logger:
     
     return logger
 
+class AdminSuccessAccessLogFilter(logging.Filter):
+    """Hide noisy successful admin polling from uvicorn access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno >= logging.WARNING:
+            return True
+        args = record.args if isinstance(record.args, tuple) else ()
+        try:
+            if len(args) >= 5:
+                method = str(args[1])
+                path = str(args[2])
+                status_code = int(args[4])
+            else:
+                message = record.getMessage()
+                request_part = message.split('"', 2)[1]
+                method, path, *_ = request_part.split()
+                status_code = int(message.rsplit(" ", 2)[-2])
+        except (IndexError, TypeError, ValueError):
+            return True
+        return not (path.startswith("/admin") and status_code < 400 and method in {"GET", "POST", "PUT", "DELETE", "PATCH"})
+
+
+def install_access_log_filter() -> None:
+    access_logger = logging.getLogger("uvicorn.access")
+    if not any(isinstance(item, AdminSuccessAccessLogFilter) for item in access_logger.filters):
+        access_logger.addFilter(AdminSuccessAccessLogFilter())
 
 class ObservabilityLogHandler(logging.Handler):
     """Capture warning/error logs into the admin observability store."""

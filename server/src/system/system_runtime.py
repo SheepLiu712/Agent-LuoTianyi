@@ -26,13 +26,16 @@ class SystemRuntime:
     chat_session_manager: ChatSessionManager
     llm_service: LLMService
     observability: ObservabilityService
+    owns_observability: bool = field(default=True)
 
     @classmethod
-    async def initialize(cls, config: Dict) -> "SystemRuntime":
+    async def initialize(cls, config: Dict, observability: ObservabilityService | None = None) -> "SystemRuntime":
         # 1. 初始化观测服务，后续模块可统一写入指标和异常日志
-        observability = ObservabilityService(config.get("observability", {}))
-        set_observability_service(observability)
-        install_observability_log_handler(observability)
+        owns_observability = observability is None
+        if observability is None:
+            observability = ObservabilityService(config.get("observability", {}))
+            set_observability_service(observability)
+            install_observability_log_handler(observability)
 
         # 2. 初始化 LLM 服务
         llm_service = LLMService(config.get("llm_service", {}))
@@ -74,6 +77,7 @@ class SystemRuntime:
             chat_session_manager=chat_session_manager,
             llm_service=llm_service,
             observability=observability,
+            owns_observability=owns_observability,
         )
 
         runtime._wire_dependencies()
@@ -111,9 +115,10 @@ class SystemRuntime:
         await self.world.stop_background_services()
         await self.chat_session_manager.stop_background_services()
         await self.database_manager.shutdown()
-        self.observability.close()
-        set_observability_service(None)
-        uninstall_observability_log_handler()
+        if self.owns_observability:
+            self.observability.close()
+            set_observability_service(None)
+            uninstall_observability_log_handler()
 
     def ensure_dependencies(self) -> None:
         """检查系统运行时所有顶层模块依赖已经完成派发。"""
@@ -177,9 +182,18 @@ class SystemRuntime:
 _system_runtime: SystemRuntime | None = None
 
 
+def set_system_runtime(runtime: SystemRuntime | None) -> None:
+    global _system_runtime
+    _system_runtime = runtime
+
+
 async def init_system_runtime(config: Dict) -> SystemRuntime:
     global _system_runtime
     _system_runtime = await SystemRuntime.initialize(config)
+    return _system_runtime
+
+
+def get_system_runtime_optional() -> SystemRuntime | None:
     return _system_runtime
 
 

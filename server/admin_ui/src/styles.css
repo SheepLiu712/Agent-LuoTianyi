@@ -15,6 +15,96 @@ body {
   min-width: 960px;
 }
 
+.auth-shell {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 28px;
+}
+
+.auth-panel {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  border: 1px solid #d9e2ea;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.auth-panel h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.auth-panel p {
+  margin: 0;
+  color: #667481;
+  line-height: 1.5;
+}
+
+.auth-panel input,
+.secret-row input,
+.interface-card input,
+.interface-card textarea,
+.module-binding-editor select,
+.module-binding-editor textarea {
+  min-width: 0;
+  border: 1px solid #cad6df;
+  border-radius: 6px;
+  padding: 9px 10px;
+  color: #1f2933;
+  background: #ffffff;
+}
+
+.auth-panel button,
+.action-row button,
+.editor-head button,
+.interface-card button {
+  border: 1px solid #2f5d7c;
+  border-radius: 6px;
+  padding: 9px 12px;
+  background: #2f5d7c;
+  color: #ffffff;
+  cursor: pointer;
+}
+
+.auth-panel button:hover,
+.action-row button:hover,
+.editor-head button:hover,
+.interface-card button:hover {
+  background: #274e68;
+}
+
+.auth-panel button:disabled,
+.action-row button:disabled,
+.editor-head button:disabled,
+.interface-card button:disabled {
+  border-color: #9fb2bf;
+  background: #9fb2bf;
+  cursor: not-allowed;
+  opacity: 0.68;
+}
+
+.auth-panel button:disabled:hover,
+.action-row button:disabled:hover,
+.editor-head button:disabled:hover,
+.interface-card button:disabled:hover {
+  background: #9fb2bf;
+}
+
+.secondary-button {
+  background: #f7fafc !important;
+  border-color: #cad6df !important;
+  color: #365161 !important;
+}
+
+.danger-button {
+  background: #fff7f7 !important;
+  border-color: #e28b8b !important;
+  color: #a73636 !important;
+}
+
 button {
   font: inherit;
 }
@@ -359,6 +449,193 @@ button {
   background: #f7fafc;
   color: #52616e;
   line-height: 1.55;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.error-block {
+  max-height: 240px;
+  overflow: auto;
+  margin: 12px 0 0;
+  padding: 10px;
+  border: 1px solid #e28b8b;
+  border-radius: 6px;
+  background: #fff7f7;
+  color: #8f2e2e;
+  white-space: pre-wrap;
+}
+
+.secret-list {
+  display: grid;
+  gap: 10px;
+}
+
+.secret-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(220px, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.secret-row div,
+.config-interface-row {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.secret-row span,
+.config-interface-row span {
+  color: #667481;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.llm-config-editor,
+.interface-editor,
+.module-binding-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.interface-editor,
+.module-binding-editor {
+  padding-bottom: 14px;
+  border-bottom: 1px solid #edf1f5;
+}
+
+.editor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.editor-head h3,
+.module-binding-editor h3 {
+  margin: 0;
+  color: #52616e;
+  font-size: 14px;
+}
+
+.interface-card {
+  display: grid;
+  grid-template-columns: 130px 90px minmax(160px, 1fr) minmax(190px, 0.9fr);
+  gap: 8px;
+  align-items: start;
+  padding: 9px;
+  border: 1px solid #edf1f5;
+  border-radius: 6px;
+  background: #f9fbfd;
+}
+
+.interface-card label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #52616e;
+  font-size: 13px;
+}
+
+.interface-url-input {
+  grid-column: 1 / 4;
+}
+
+.interface-flags {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-self: stretch;
+  padding: 5px 0;
+}
+
+.interface-card input[type="checkbox"] {
+  min-width: auto;
+  padding: 0;
+}
+
+.interface-card textarea {
+  grid-column: 1 / 4;
+  min-height: 74px;
+  resize: vertical;
+  font-family: "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+  font-size: 12px;
+}
+
+.interface-card .danger-button {
+  grid-column: 4;
+}
+
+.module-binding-table {
+  overflow-x: hidden;
+}
+
+.module-binding-table table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 0;
+}
+
+.module-binding-table th:nth-child(1),
+.module-kind-cell {
+  width: 54px;
+}
+
+.module-binding-table th:nth-child(2),
+.module-path-cell {
+  width: 22%;
+}
+
+.module-binding-table th:nth-child(3),
+.module-prompt-cell {
+  width: 14%;
+}
+
+.module-binding-table th:nth-child(4) {
+  width: 16%;
+}
+
+.module-binding-table th:nth-child(5),
+.module-binding-table th:nth-child(6),
+.module-check-cell {
+  width: 68px;
+  text-align: center;
+}
+
+.module-binding-table th:nth-child(7),
+.module-params-cell {
+  width: 24%;
+}
+
+.module-path-cell,
+.module-prompt-cell {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.module-binding-editor input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.module-binding-editor textarea {
+  width: 100%;
+  min-height: 58px;
+  resize: vertical;
+  font-family: "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+  font-size: 12px;
+}
+
+.module-binding-editor textarea.json-invalid {
+  border-color: #e28b8b;
+  background: #fff7f7;
 }
 
 .filter-row input,

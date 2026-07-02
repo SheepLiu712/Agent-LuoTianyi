@@ -75,12 +75,18 @@ def check_auth_token(db_session: Session, username: str, token: str) -> bool:
 # 发送消息时使用的token，编码用户的UUID
 
 JWT_SECRET_ENV = "JWT_SECRET"
-JWT_SECRET = os.environ.get(JWT_SECRET_ENV)
-if not JWT_SECRET:
-    logger.error("JWT_SECRET is not set. Refusing to start.")
-    raise RuntimeError("JWT_SECRET is not set")
 ALGORITHM = "HS256"
+
+
+def _get_jwt_secret() -> str | None:
+    return os.environ.get(JWT_SECRET_ENV)
+
+
 def generate_message_token(db_session: Session, username: str) -> str:
+    jwt_secret = _get_jwt_secret()
+    if not jwt_secret:
+        logger.error("JWT_SECRET is not set. Cannot generate legacy message token.")
+        return None
     user: User = db_session.query(User).filter_by(username=username).first()
     if not user:
         return None
@@ -88,12 +94,16 @@ def generate_message_token(db_session: Session, username: str) -> str:
     payload = {
         "user_uuid": user_uuid,
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)
+    token = jwt.encode(payload, jwt_secret, algorithm=ALGORITHM)
     return token
 
 def decode_message_token(token: str) -> str:
+    jwt_secret = _get_jwt_secret()
+    if not jwt_secret:
+        logger.error("JWT_SECRET is not set. Cannot decode legacy message token.")
+        return None
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+        payload = jwt.decode(token, jwt_secret, algorithms=[ALGORITHM])
         return payload.get("user_uuid")
     except jwt.JWTError:
         return None

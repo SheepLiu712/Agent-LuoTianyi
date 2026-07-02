@@ -22,21 +22,7 @@ if TYPE_CHECKING:
     from src.system.database import DatabaseManager
     from src.subconscious.character_mind import CharacterSubconscious
     from src.utils.llm.llm_module import LLMModule
-    from src.domain.chat import UnreadMessageSnapshot, UnreadMessage, ExtractedTopic
-    
-
-
-_expression_cache: Dict[str, List[str]] = {}
-
-def get_available_expression(config_path: str = "config/live2d_interface_config.json") -> List[str]:
-    if config_path in _expression_cache:
-        return _expression_cache[config_path]
-    with open(config_path, "r", encoding="utf-8") as f:
-        config: Dict = json.load(f)
-    expressions: Dict = config.get("expression_projection", {})
-    result = list(expressions.keys())
-    _expression_cache[config_path] = result
-    return result
+    from src.domain.chat import ExtractedTopic
 
 
 class LuoTianyiAgent:

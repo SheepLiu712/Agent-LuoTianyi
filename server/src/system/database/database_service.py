@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 logger = get_logger("database")
 
 JWT_SECRET_ENV = "JWT_SECRET"
-JWT_SECRET = os.environ.get(JWT_SECRET_ENV)
 ALGORITHM = "HS256"
 
 _BCRYPT_PREFIXES = ("$2a$", "$2b$", "$2y$")
@@ -64,6 +63,7 @@ class DatabaseManager:
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         self.config = config or {}
+        self.jwt_secret = os.environ.get(JWT_SECRET_ENV)
         self._redis: Optional[RedisBuffer] = None
         self.event_store: Optional[EventStore] = None
         self.memory_store: Optional[MemoryStore] = None
@@ -299,7 +299,7 @@ class DatabaseManager:
             db.close()
 
     def generate_message_token(self, username: str) -> Optional[str]:
-        if not JWT_SECRET:
+        if not self.jwt_secret:
             logger.error("JWT_SECRET is not set. Cannot generate message token.")
             return None
         db = self._new_session()
@@ -307,7 +307,7 @@ class DatabaseManager:
             user = db.query(User).filter_by(username=username).first()
             if not user:
                 return None
-            message_token = jwt.encode({"user_uuid": user.uuid}, JWT_SECRET, algorithm=ALGORITHM)
+            message_token = jwt.encode({"user_uuid": user.uuid}, self.jwt_secret, algorithm=ALGORITHM)
             redis = self._ensure_redis()
             redis.setex(f"user_message_token:{user.uuid}", 3600, message_token)
             return message_token
@@ -315,11 +315,11 @@ class DatabaseManager:
             db.close()
 
     def decode_message_token(self, token: str) -> Optional[str]:
-        if not JWT_SECRET:
+        if not self.jwt_secret:
             logger.error("JWT_SECRET is not set. Cannot decode message token.")
             return None
         try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+            payload = jwt.decode(token, self.jwt_secret, algorithms=[ALGORITHM])
             return payload.get("user_uuid")
         except jwt.JWTError:
             return None
