@@ -35,6 +35,7 @@ class WorldRuntime:
         self.world_clock = WorldClock()
         self.citywalk_task: CitywalkTask | None = None
         self.learn_sing_songs_task: LearnSingSongsTask | None = None
+        self.learn_sing_songs_tasks: List[LearnSingSongsTask] = []
         self.vcpedia_new_song_task: VCPediaNewSongTask | None = None
         self.bili_event_update_task: BiliEventUpdateTask | None = None
         self.proactive_topic_check_task: ProactiveTopicCheckTask | None = None
@@ -59,7 +60,10 @@ class WorldRuntime:
             raise RuntimeError("WorldRuntime requires system_runtime before module initialization.")
 
         self.citywalk_task = CitywalkTask(self.config.get("citywalk", {}))
-        self.learn_sing_songs_task = LearnSingSongsTask(self.config.get("auto_song_learner", {}))
+        self.learn_sing_songs_tasks = self._build_learn_sing_songs_tasks()
+        self.learn_sing_songs_task = (
+            self.learn_sing_songs_tasks[0] if self.learn_sing_songs_tasks else None
+        )
         self.vcpedia_new_song_task = VCPediaNewSongTask(self.config.get("song_knowledge", {}))
         self.bili_event_update_task = BiliEventUpdateTask(self.config.get("bili_dynamic_fetcher", {}))
         self.proactive_topic_check_task = ProactiveTopicCheckTask(
@@ -71,7 +75,7 @@ class WorldRuntime:
 
         self.tasks: List["WorldTask"] = [
             self.citywalk_task,
-            self.learn_sing_songs_task,
+            *self.learn_sing_songs_tasks,
             self.vcpedia_new_song_task,
             self.bili_event_update_task,
             self.proactive_topic_check_task,
@@ -152,3 +156,17 @@ class WorldRuntime:
                 )
             else:
                 self.logger.warning(f"Unknown world clock task type for {task_name}: {task_type}")
+
+    def _build_learn_sing_songs_tasks(self) -> List[LearnSingSongsTask]:
+        if self.system_runtime is None:
+            return []
+        singing = getattr(getattr(self.system_runtime, "capability_manager", None), "singing", None)
+        managers = getattr(singing, "singing_manager", None) or {}
+        if not managers:
+            self.logger.warning("No singing managers available; learn_sing_songs tasks skipped")
+            return []
+        config = self.config.get("auto_song_learner", {})
+        return [
+            LearnSingSongsTask(config, character_id=character_id)
+            for character_id in sorted(managers.keys())
+        ]

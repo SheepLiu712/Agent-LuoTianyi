@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import argparse
+import os
 import asyncio
 import base64
 import importlib
@@ -51,7 +52,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--song_name", required=True, help="歌曲名（必填）。")
     parser.add_argument("--singer", default="洛天依", help="歌手名（默认：洛天依）。")
-    parser.add_argument("--output_dir", default="res/music/songs", help="输出根目录（默认：res/music/songs）。")
+    parser.add_argument(
+        "--output_dir",
+        default=os.environ.get("TEST_SONGS_DIR", "outputs/songs"),
+        help="输出根目录（默认：TEST_SONGS_DIR 或 outputs/songs）。",
+    )
     parser.add_argument("--timeout", type=int, default=20, help="网络请求超时秒数（默认：20）。")
     parser.add_argument(
         "--credential_file",
@@ -79,7 +84,7 @@ def parse_args() -> argparse.Namespace:
 
 def safe_name(name: str) -> str:
     bad_chars = '<>:"/\\|?*\n\r\t'
-    cleaned = "".join("_" if c in bad_chars else c for c in name).strip(" .")
+    cleaned = "".join("_" if c in bad_chars else c for c in name)
     import re
     bracket_patterns = [
         r"\([^()]*\)",
@@ -93,6 +98,8 @@ def safe_name(name: str) -> str:
                 break
             cleaned = updated
 
+    cleaned = " ".join(cleaned.split())
+    cleaned = cleaned.strip().rstrip(".").strip()
     return cleaned or f"song_{int(time.time())}"
 
 
@@ -293,6 +300,37 @@ def pick_song_by_singer(songs: List[Dict], singer_name: str) -> List[Dict]:
     )
 
 
+def rank_songs_by_title(songs: List[Dict], requested_name: str) -> List[Dict]:
+    requested = normalize_text(safe_name(requested_name))
+    exact: List[Dict] = []
+    partial: List[Dict] = []
+    for song in songs:
+        title = safe_name(str(song.get("title") or ""))
+        normalized_title = normalize_text(title)
+        if normalized_title == requested:
+            exact.append(song)
+        elif requested and normalized_title and (requested in normalized_title or normalized_title in requested):
+            partial.append(song)
+    ranked = exact + partial
+    if ranked:
+        ranked_ids = {id(song) for song in ranked}
+        ranked.extend(song for song in songs if id(song) not in ranked_ids)
+        return ranked
+    return list(songs)
+
+
+def ensure_title_matches(song: Dict, requested_name: str, candidates: List[Dict]) -> None:
+    requested = normalize_text(safe_name(requested_name))
+    title = normalize_text(safe_name(str(song.get("title") or "")))
+    if title and (title == requested or requested in title or title in requested):
+        return
+    candidate_titles = [str(item.get("title") or "") for item in candidates[:5]]
+    raise RuntimeError(
+        f"搜索到洛天依歌曲，但最佳标题与请求不匹配: requested={requested_name!r}, "
+        f"matched={song.get('title')!r}, candidates={candidate_titles}"
+    )
+
+
 def qq_fetch_lyric(songmid: str, timeout: int = 20) -> str:
     params = {
         "songmid": songmid,
@@ -383,9 +421,10 @@ def download_song_and_lyric(
     credential_file = Path(credential_file).expanduser().resolve()
 
     songs = qq_search_songs(song_name + " " + singer_name, timeout=timeout)
-    singer_songs = pick_song_by_singer(songs, singer_name)
+    singer_songs = rank_songs_by_title(pick_song_by_singer(songs, singer_name), song_name)
 
     for song in singer_songs:
+        ensure_title_matches(song, song_name, singer_songs)
         title = song.get("title") or song_name
         songmid = song.get("mid")
         if not songmid:
@@ -445,6 +484,8 @@ def download_song_and_lyric(
 
         lrc_path.write_text(lyric, encoding="utf-8")
         return file_stem, mp3_path, lrc_path
+
+    raise RuntimeError(f"未能下载到可用的歌曲音频: {song_name} - {singer_name}")
 
 
 def main() -> None:

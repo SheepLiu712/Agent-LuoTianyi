@@ -22,9 +22,14 @@ class FakeClock:
 
 
 class FakeTask:
-    def __init__(self, config=None):
+    def __init__(self, config=None, character_id=None):
         self.config = config or {}
-        self.name = self.__class__.__name__
+        self.character_id = character_id
+        self.name = (
+            f"{self.__class__.__name__}:{character_id}"
+            if character_id
+            else self.__class__.__name__
+        )
         self.task_name = self.name
         self.clock_config = self.config.get("clock_config", {})
         self.initialized_with = None
@@ -65,12 +70,24 @@ def test_world_runtime_distributes_task_config_from_world_section(monkeypatch):
         config=world_config,
     )
     runtime.world_clock = FakeClock()
-    system_runtime = SimpleNamespace(database_manager=SimpleNamespace(event_store=None))
+    system_runtime = SimpleNamespace(
+        database_manager=SimpleNamespace(event_store=None),
+        capability_manager=SimpleNamespace(
+            singing=SimpleNamespace(
+                singing_manager={
+                    "luotianyi": object(),
+                    "miku": object(),
+                }
+            )
+        ),
+    )
     runtime.set_system_runtime(system_runtime)
 
     runtime.initialize_modules()
 
     assert runtime.citywalk_task.config == {"source": "world-citywalk"}
+    assert len(runtime.learn_sing_songs_tasks) == 2
+    assert [task.character_id for task in runtime.learn_sing_songs_tasks] == ["luotianyi", "miku"]
     assert runtime.learn_sing_songs_task.config == {"source": "world-learner"}
     assert runtime.vcpedia_new_song_task.config == {"source": "world-song-knowledge"}
     assert runtime.bili_event_update_task.config["source"] == "world-bili"
@@ -78,6 +95,7 @@ def test_world_runtime_distributes_task_config_from_world_section(monkeypatch):
     assert runtime.expired_event_cleanup_task.config == {"source": "world-cleanup"}
     assert runtime.citywalk_task.initialized_with is system_runtime
     assert runtime.learn_sing_songs_task.initialized_with is system_runtime
+    assert all(task.initialized_with is system_runtime for task in runtime.learn_sing_songs_tasks)
     assert runtime.vcpedia_new_song_task.initialized_with is system_runtime
     assert runtime.bili_event_update_task.initialized_with is system_runtime
 

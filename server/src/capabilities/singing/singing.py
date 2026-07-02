@@ -42,6 +42,14 @@ class SingingCapability:
             raise ValueError(f"Character ID '{resolved_id}' not found in singing manager.")
         return self.singing_manager[resolved_id]
 
+    def reload_songs(self, character_id: Optional[str] = None) -> None:
+        """Reload one character's song library, or all libraries when no character is specified."""
+        if character_id:
+            self._get_manager(character_id).reload_songs()
+            return
+        for manager in self.singing_manager.values():
+            manager.reload_songs()
+
     def build_sing_plan(
         self,
         character_id: str | List[str],

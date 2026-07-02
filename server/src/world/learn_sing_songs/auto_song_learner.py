@@ -207,11 +207,20 @@ class AutoSongLearner:
     MAX_ATTEMPTS = 3
     SONGELEARNER_TIMEOUT = 1200  # 20 minutes max for the full pipeline
 
-    def __init__(self, config: Dict[str, Any], wishlist: WishlistManager):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        wishlist: WishlistManager,
+        *,
+        resource_path: str | Path | None = None,
+    ):
         self.logger = get_logger("AutoSongLearner")
         config = config or {}
         cwd = Path.cwd()
-        self.resource_path = cwd / Path(config.get("resource_path", "res/music"))
+        configured_resource_path = resource_path or config.get("resource_path")
+        if not configured_resource_path:
+            raise ValueError("AutoSongLearner requires resource_path from SingingManager")
+        self.resource_path = self._resolve_path(cwd, configured_resource_path)
         self.songs_dir = self.resource_path / "songs"
         self.metadata_path = self.resource_path / "metadata.json"
         self.wishlist = wishlist
@@ -243,6 +252,13 @@ class AutoSongLearner:
             )
 
     # -- directory setup -----------------------------------------------------
+
+    @staticmethod
+    def _resolve_path(cwd: Path, raw_path: str | Path) -> Path:
+        path = Path(raw_path)
+        if path.is_absolute():
+            return path
+        return cwd / path
 
     def _ensure_directories(self) -> None:
         self.songs_dir.mkdir(parents=True, exist_ok=True)
@@ -352,7 +368,7 @@ class AutoSongLearner:
         runner = self.songlearner_dir / "run_song_workflow.py"
         if not runner.exists():
             self.logger.error(f"Songlearner 启动脚本不存在: {runner}")
-            self._handle_failure(safe_name, f"Songlearner 启动脚本不存在: {runner}")
+            self._handle_failure(safe_name, f"SL001 startup: Songlearner 启动脚本不存在: {runner}")
             return False
 
         self.logger.info(f"[Songlearner] 开始学习: {safe_name}")
@@ -360,22 +376,31 @@ class AutoSongLearner:
 
         try:
             proc = subprocess.run(
-                [sys.executable, str(runner), safe_name],
+                [
+                    sys.executable,
+                    str(runner),
+                    safe_name,
+                    "--output_dir",
+                    str(self.songs_dir),
+                    "--resource_root",
+                    str(self.songlearner_resource_dir),
+                ],
                 cwd=str(self.songlearner_dir),
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=self.SONGELEARNER_TIMEOUT,
                 env=env,
             )
         except subprocess.TimeoutExpired:
-            self._handle_failure(safe_name, "Songlearner 流水线执行超时（>20分钟）")
+            self._handle_failure(safe_name, "SL091 timeout: Songlearner 流水线执行超时（>20分钟）")
             return False
 
         if proc.returncode != 0:
+            failure_reason = self._format_songlearner_failure(proc)
             self.logger.error(
                 f"[Songlearner] 流水线返回非零退出码 {proc.returncode}\n"
                 f"stderr: {proc.stderr[-500:] if proc.stderr else ''}"
             )
-            self._handle_failure(safe_name, f"Songlearner 流水线执行失败，退出码 {proc.returncode}")
+            self._handle_failure(safe_name, failure_reason)
             return False
 
         # Locate the final output directory under the music library.
@@ -393,13 +418,46 @@ class AutoSongLearner:
                         self.logger.info(f"[Songlearner] 输出目录重定向至: {sl_output.name}")
                         break
                 else:
-                    self._handle_failure(safe_name, "Songlearner 未生成任何有效输出目录")
+                    self._handle_failure(safe_name, "SL092 finalize: Songlearner 未生成任何有效输出目录")
                     return False
             else:
-                self._handle_failure(safe_name, "歌曲输出目录不存在")
+                self._handle_failure(safe_name, "SL092 finalize: 歌曲输出目录不存在")
                 return False
 
         return self._finalize_song(safe_name, sl_output)
+
+    def _format_songlearner_failure(self, proc: subprocess.CompletedProcess) -> str:
+        stderr = proc.stderr or ""
+        parsed = self._parse_songlearner_error(stderr)
+        if parsed:
+            return (
+                f"{parsed['code']} {parsed['step']}: {parsed['message']} "
+                f"(exit_code={parsed['exit_code']})"
+            )
+
+        stderr_tail = self._last_nonempty_line(stderr) or "无 stderr"
+        return f"SL099 unexpected: Songlearner 流水线执行失败，退出码 {proc.returncode}: {stderr_tail}"
+
+    def _parse_songlearner_error(self, stderr: str) -> Optional[Dict[str, str]]:
+        pattern = re.compile(
+            r"\[SONGLEARNER_ERROR\]\s+"
+            r"code=(?P<code>\S+)\s+"
+            r"exit_code=(?P<exit_code>\d+)\s+"
+            r"step=(?P<step>\S+)\s+"
+            r"message=(?P<message>.*)"
+        )
+        for line in reversed((stderr or "").splitlines()):
+            match = pattern.search(line.strip())
+            if match:
+                return match.groupdict()
+        return None
+
+    def _last_nonempty_line(self, text: str, limit: int = 300) -> str:
+        for line in reversed((text or "").splitlines()):
+            stripped = line.strip()
+            if stripped:
+                return stripped[-limit:]
+        return ""
 
     def _build_songlearner_env(self) -> dict[str, str]:
         server_root = Path(__file__).resolve().parents[3]
@@ -416,13 +474,14 @@ class AutoSongLearner:
             "PYTHONIOENCODING": "utf-8",
             "PYTHONPATH": os.pathsep.join(pythonpath_parts),
             "TEST_SONGS_DIR": str(self.songs_dir),
+            "SONGLEARNER_RESOURCE_DIR": str(self.songlearner_resource_dir),
         }
 
     def _finalize_song(self, safe_name: str, src_dir: Path) -> bool:
         """Validate and finalize the workflow output in place."""
         target_dir = src_dir
         if not target_dir.exists() or not target_dir.is_dir():
-            self._handle_failure(safe_name, f"歌曲输出目录不存在: {target_dir}")
+            self._handle_failure(safe_name, f"SL092 finalize: 歌曲输出目录不存在: {target_dir}")
             return False
 
         cleaned_target = target_dir / f"{safe_name}.cleaned.mp3"
@@ -453,7 +512,7 @@ class AutoSongLearner:
         if not has_audio or not has_json:
             self._handle_failure(
                 safe_name,
-                f"关键文件缺失: audio={has_audio}, json={has_json}",
+                f"SL093 finalize: 关键文件缺失: audio={has_audio}, json={has_json}",
             )
             return False
 

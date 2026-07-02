@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -42,7 +43,12 @@ def parse_args() -> argparse.Namespace:
     source_group.add_argument("--input_file", type=str, help="本地输入音频文件路径（mp3/wav/flac）。")
     source_group.add_argument("--song_name", type=str, help="歌曲名。会先尝试从 QQ 音乐下载 mp3 + 歌词。")
 
-    parser.add_argument("--output_dir", type=str, default="res/music/songs", help="输出目录。")
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default=os.environ.get("TEST_SONGS_DIR", "outputs/songs"),
+        help="输出目录（默认：TEST_SONGS_DIR 或 outputs/songs）。",
+    )
     parser.add_argument("--ffmpeg_bin", type=str, default="ffmpeg", help="ffmpeg 可执行文件路径。")
     parser.add_argument("--max_mp3_size_mb", type=float, default=8.0, help="目标 mp3 最大大小（MB）。")
     parser.add_argument("--keep_intermediate", action="store_true", help="保留中间文件目录。")
