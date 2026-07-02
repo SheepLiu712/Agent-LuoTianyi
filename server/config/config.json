@@ -285,6 +285,7 @@
                     "minute": 0
                 }
             },
+            "daily_run_probability": 0.1,
             "amap": {
                 "api_key": "$AMAP_KEY",
                 "base_url": "https://restapi.amap.com/v3",

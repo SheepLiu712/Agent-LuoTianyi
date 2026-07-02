@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from datetime import datetime
 from typing import Any, Dict
 
@@ -43,6 +44,20 @@ class CitywalkTask(WorldTask):
     def run_once(self) -> WorldTaskResult:
         if self.citywalk_service is None:
             return WorldTaskResult.skipped_result(self.task_name, "citywalk service is unavailable")
+
+        should_run, probability, sample = self._sample_daily_run()
+        if not should_run:
+            self.logger.info(
+                "Citywalk daily sample skipped: sample=%.4f probability=%.4f",
+                sample,
+                probability,
+            )
+            return WorldTaskResult.skipped_result(
+                self.task_name,
+                "citywalk daily sample skipped",
+                sample=sample,
+                probability=probability,
+            )
 
         try:
             output_path = self.citywalk_service.run_once()
@@ -131,3 +146,13 @@ class CitywalkTask(WorldTask):
         if text.endswith(".md"):
             return f"今天写了一篇散步日记：{text}"
         return text
+
+    def _sample_daily_run(self) -> tuple[bool, float, float]:
+        raw_probability = self.config.get("daily_run_probability", 0.1)
+        try:
+            probability = float(raw_probability)
+        except (TypeError, ValueError):
+            probability = 0.1
+        probability = max(0.0, min(1.0, probability))
+        sample = random.random()
+        return sample < probability, probability, sample
