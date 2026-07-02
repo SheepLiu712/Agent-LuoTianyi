@@ -6,6 +6,7 @@ from typing import Any, Dict
 
 from src.system.database.event_models import UnifiedEventType
 from src.utils.logger import get_logger
+from src.world.citywalk.errors import CitywalkError
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
@@ -43,7 +44,15 @@ class CitywalkTask(WorldTask):
         if self.citywalk_service is None:
             return WorldTaskResult.skipped_result(self.task_name, "citywalk service is unavailable")
 
-        output_path = self.citywalk_service.run_once()
+        try:
+            output_path = self.citywalk_service.run_once()
+        except CitywalkError as exc:
+            self.logger.warning(f"Citywalk skipped due to runtime error: {exc}")
+            return WorldTaskResult.skipped_result(
+                self.task_name,
+                "citywalk runtime error",
+                error=str(exc),
+            )
         if not output_path:
             return WorldTaskResult.skipped_result(self.task_name, "citywalk did not produce a diary")
 

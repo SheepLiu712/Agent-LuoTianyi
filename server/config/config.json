@@ -288,8 +288,10 @@
             "amap": {
                 "api_key": "$AMAP_KEY",
                 "base_url": "https://restapi.amap.com/v3",
-                "timeout_seconds": 10,
-                "max_retries": 1
+                "timeout_seconds": 20,
+                "connect_timeout_seconds": 5,
+                "max_retries": 3,
+                "retry_backoff_seconds": 0.8
             },
             "session": {
                 "initial_energy": 100,

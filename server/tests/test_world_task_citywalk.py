@@ -8,6 +8,7 @@ if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.world.citywalk.task import CitywalkTask
+from src.world.citywalk.errors import AMapRequestError
 
 
 class FakeEventStore:
@@ -58,6 +59,21 @@ def test_citywalk_run_once_skips_when_no_diary():
 
     assert result.ok is True
     assert result.skipped is True
+
+
+def test_citywalk_run_once_skips_runtime_error():
+    task = CitywalkTask({})
+
+    def fail():
+        raise AMapRequestError("AMap timed out")
+
+    task.citywalk_service = SimpleNamespace(run_once=fail)
+
+    result = task.run_once()
+
+    assert result.ok is True
+    assert result.skipped is True
+    assert result.data["error"] == "AMap timed out"
 
 
 def test_citywalk_build_llm_modules_registers_expected_modules():
