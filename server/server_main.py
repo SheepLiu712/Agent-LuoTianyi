@@ -57,8 +57,8 @@ def get_runtime() -> SystemRuntime:
 app = FastAPI(lifespan=startup_event)
 app.include_router(admin_router)
 
-admin_ui_dist = os.path.join(current_dir, "admin_ui", "dist")
-admin_ui_assets = os.path.join(admin_ui_dist, "assets")
+admin_ui_build = os.path.join(current_dir, "admin_ui", "admin_static")
+admin_ui_assets = os.path.join(admin_ui_build, "assets")
 if os.path.isdir(admin_ui_assets):
     app.mount("/admin/assets", StaticFiles(directory=admin_ui_assets), name="admin-assets")
 
@@ -69,7 +69,7 @@ if os.path.isdir(admin_ui_assets):
 @app.get("/admin")
 @app.get("/admin/{path:path}")
 async def admin_index(path: str = ""):
-    index_path = os.path.join(admin_ui_dist, "index.html")
+    index_path = os.path.join(admin_ui_build, "index.html")
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return HTMLResponse(

@@ -328,59 +328,52 @@ class ObservabilityService:
             "slow_spans": self.get_recent_pipeline_spans(limit=10, order_by_slow=True),
         }
 
-    def get_llm_summary(self, *, days: int = 7) -> Dict[str, Any]:
+    def get_llm_summary(
+        self,
+        *,
+        days: int = 7,
+        recent_limit: int | None = None,
+        bucket_hours: int = 2,
+    ) -> Dict[str, Any]:
+        if recent_limit is not None:
+            limit = max(1, min(int(recent_limit), 1000))
+            rows = self._query_all(
+                """
+                SELECT *
+                FROM llm_call_metrics
+                ORDER BY ts DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            rows = sorted(rows, key=lambda row: row.get("ts") or "")
+            return {
+                "window_type": "recent",
+                "recent_limit": limit,
+                "totals": self._summarize_llm_metric_rows(rows),
+                "by_module": self._summarize_llm_rows_by_module(rows),
+                "time_buckets": [],
+                "daily": [],
+            }
+
         since = self._since_iso(days)
-        totals = self._query_one(
+        rows = self._query_all(
             """
-            SELECT
-                COUNT(*) AS call_count,
-                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-                COALESCE(SUM(total_tokens), 0) AS total_tokens,
-                COALESCE(AVG(prompt_tokens), 0) AS avg_prompt_tokens,
-                COALESCE(AVG(completion_tokens), 0) AS avg_completion_tokens,
-                COALESCE(AVG(total_tokens), 0) AS avg_total_tokens,
-                COALESCE(AVG(latency_ms), 0) AS avg_latency_ms,
-                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failed_calls
+            SELECT *
             FROM llm_call_metrics
             WHERE ts >= ?
+            ORDER BY ts
             """,
             (since,),
         )
-        by_module = self._query_all(
-            """
-            SELECT module_name, interface_name, model_name,
-                COUNT(*) AS call_count,
-                COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
-                COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
-                COALESCE(SUM(total_tokens), 0) AS total_tokens,
-                COALESCE(AVG(prompt_tokens), 0) AS avg_prompt_tokens,
-                COALESCE(AVG(completion_tokens), 0) AS avg_completion_tokens,
-                COALESCE(AVG(total_tokens), 0) AS avg_total_tokens,
-                COALESCE(AVG(latency_ms), 0) AS avg_latency_ms,
-                SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) AS failed_calls
-            FROM llm_call_metrics
-            WHERE ts >= ?
-            GROUP BY module_name, interface_name, model_name
-            ORDER BY call_count DESC
-            """,
-            (since,),
-        )
-        daily = self._query_all(
-            """
-            SELECT substr(ts, 1, 10) AS day,
-                COUNT(*) AS call_count,
-                COALESCE(SUM(total_tokens), 0) AS total_tokens,
-                COALESCE(AVG(total_tokens), 0) AS avg_total_tokens,
-                COALESCE(AVG(latency_ms), 0) AS avg_latency_ms
-            FROM llm_call_metrics
-            WHERE ts >= ?
-            GROUP BY substr(ts, 1, 10)
-            ORDER BY day
-            """,
-            (since,),
-        )
-        return {"window_days": days, "totals": totals, "by_module": by_module, "daily": daily}
+        return {
+            "window_type": "days",
+            "window_days": days,
+            "totals": self._summarize_llm_metric_rows(rows),
+            "by_module": self._summarize_llm_rows_by_module(rows),
+            "time_buckets": self._summarize_llm_rows_by_time_bucket(rows, bucket_hours=bucket_hours),
+            "daily": self._summarize_llm_rows_by_day(rows),
+        }
 
     def get_pipeline_latency_summary(self, *, days: int = 7) -> Dict[str, Any]:
         since = self._since_iso(days)
@@ -400,6 +393,98 @@ class ObservabilityService:
             span_name: self._summarize_values(values)
             for span_name, values in grouped.items()
         }
+
+    def _summarize_llm_metric_rows(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
+        count = len(rows)
+        prompt_tokens = sum(int(row.get("prompt_tokens") or 0) for row in rows)
+        completion_tokens = sum(int(row.get("completion_tokens") or 0) for row in rows)
+        total_tokens = sum(int(row.get("total_tokens") or 0) for row in rows)
+        latency_ms = sum(float(row.get("latency_ms") or 0.0) for row in rows)
+        failed_calls = sum(1 for row in rows if int(row.get("success") or 0) == 0)
+        return {
+            "call_count": count,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "avg_prompt_tokens": prompt_tokens / count if count else 0,
+            "avg_completion_tokens": completion_tokens / count if count else 0,
+            "avg_total_tokens": total_tokens / count if count else 0,
+            "avg_latency_ms": latency_ms / count if count else 0,
+            "failed_calls": failed_calls,
+        }
+
+    def _summarize_llm_rows_by_module(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[tuple[str, str | None, str | None], list[dict[str, Any]]] = {}
+        for row in rows:
+            key = (
+                str(row.get("module_name") or ""),
+                row.get("interface_name"),
+                row.get("model_name"),
+            )
+            grouped.setdefault(key, []).append(row)
+
+        result = []
+        for (module_name, interface_name, model_name), module_rows in grouped.items():
+            summary = self._summarize_llm_metric_rows(module_rows)
+            result.append(
+                {
+                    "module_name": module_name,
+                    "interface_name": interface_name,
+                    "model_name": model_name,
+                    **summary,
+                }
+            )
+        return sorted(result, key=lambda row: int(row.get("call_count") or 0), reverse=True)
+
+    def _summarize_llm_rows_by_day(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            dt = self._parse_iso(row.get("ts"))
+            if dt is None:
+                day = str(row.get("ts") or "")[:10]
+            else:
+                day = dt.astimezone().date().isoformat()
+            grouped.setdefault(day, []).append(row)
+        return [
+            {"day": day, **self._summarize_llm_metric_rows(day_rows)}
+            for day, day_rows in sorted(grouped.items())
+        ]
+
+    def _summarize_llm_rows_by_time_bucket(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        bucket_hours: int = 2,
+    ) -> list[dict[str, Any]]:
+        bucket_hours = max(1, min(int(bucket_hours or 2), 24))
+        grouped: dict[str, dict[str, Any]] = {}
+        for bucket_hour in range(0, 24, bucket_hours):
+            end_hour = (bucket_hour + bucket_hours) % 24
+            key = f"{bucket_hour:02d}:00"
+            grouped[key] = {
+                "bucket_start": key,
+                "bucket_label": f"{bucket_hour:02d}:00-{end_hour:02d}:00",
+                "bucket_hour": bucket_hour,
+                "rows": [],
+            }
+        for row in rows:
+            dt = self._parse_iso(row.get("ts"))
+            if dt is None:
+                continue
+            local_dt = dt.astimezone()
+            bucket_hour = (local_dt.hour // bucket_hours) * bucket_hours
+            key = f"{bucket_hour:02d}:00"
+            if key in grouped:
+                grouped[key]["rows"].append(row)
+        return [
+            {
+                "bucket_start": item["bucket_start"],
+                "bucket_label": item["bucket_label"],
+                "bucket_hour": item["bucket_hour"],
+                **self._summarize_llm_metric_rows(item["rows"]),
+            }
+            for _, item in sorted(grouped.items(), key=lambda pair: pair[1]["bucket_hour"])
+        ]
 
     def get_recent_pipeline_spans(
         self,

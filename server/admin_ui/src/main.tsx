@@ -21,9 +21,12 @@ type LatencySummary = {
 };
 
 type LlmSummary = {
-  window_days: number;
+  window_type: 'days' | 'recent';
+  window_days?: number;
+  recent_limit?: number;
   totals: Record<string, number>;
   by_module: Array<Record<string, string | number | null>>;
+  time_buckets: Array<Record<string, string | number>>;
   daily: Array<Record<string, string | number>>;
 };
 
@@ -129,6 +132,63 @@ type MemoryTraceTab = {
 };
 
 type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'memory' | 'logs';
+
+type LlmStatsTab = {
+  id: 'seven_days' | 'one_day' | 'recent';
+  label: string;
+  subtitle: string;
+  url: string;
+  metricTitle: string;
+  tokenDetail: string;
+  showTimeBuckets: boolean;
+};
+
+type LlmChartMetric = {
+  id: 'call_count' | 'total_tokens' | 'avg_total_tokens' | 'avg_prompt_tokens' | 'avg_completion_tokens' | 'avg_latency_ms' | 'failed_calls';
+  label: string;
+  field: string;
+  format: 'number' | 'ms';
+};
+
+const llmStatsTabs: LlmStatsTab[] = [
+  {
+    id: 'seven_days',
+    label: '7日平均',
+    subtitle: '最近 7 日 LLM 调用量、Token 与耗时',
+    url: '/admin/api/llm/summary?days=7&bucket_hours=2',
+    metricTitle: '7 日调用',
+    tokenDetail: '7 日累计',
+    showTimeBuckets: true,
+  },
+  {
+    id: 'one_day',
+    label: '1日平均',
+    subtitle: '最近 24 小时 LLM 调用量、Token 与耗时',
+    url: '/admin/api/llm/summary?days=1&bucket_hours=2',
+    metricTitle: '1 日调用',
+    tokenDetail: '1 日累计',
+    showTimeBuckets: true,
+  },
+  {
+    id: 'recent',
+    label: '最近平均',
+    subtitle: '最近 50 次 LLM 调用的平均表现',
+    url: '/admin/api/llm/summary?recent_limit=50',
+    metricTitle: '最近调用',
+    tokenDetail: '最近 50 次累计',
+    showTimeBuckets: false,
+  },
+];
+
+const llmChartMetrics: LlmChartMetric[] = [
+  { id: 'call_count', label: '调用次数', field: 'call_count', format: 'number' },
+  { id: 'total_tokens', label: 'Token 数', field: 'total_tokens', format: 'number' },
+  { id: 'avg_total_tokens', label: '平均 Token', field: 'avg_total_tokens', format: 'number' },
+  { id: 'avg_prompt_tokens', label: '平均 Prompt', field: 'avg_prompt_tokens', format: 'number' },
+  { id: 'avg_completion_tokens', label: '平均 Completion', field: 'avg_completion_tokens', format: 'number' },
+  { id: 'avg_latency_ms', label: '平均耗时', field: 'avg_latency_ms', format: 'ms' },
+  { id: 'failed_calls', label: '失败次数', field: 'failed_calls', format: 'number' },
+];
 
 const memoryTraceTabs: MemoryTraceTab[] = [
   {
@@ -263,6 +323,10 @@ function formatNumber(value?: number) {
   return Number(value || 0).toLocaleString('zh-CN');
 }
 
+function formatChartValue(value: number, metric: LlmChartMetric) {
+  return metric.format === 'ms' ? formatMs(value) : formatNumber(value);
+}
+
 function App() {
   const [page, setPage] = useState<Page>('dashboard');
 
@@ -301,6 +365,9 @@ function usePolling<T>(url: string | null, intervalMs = 10000) {
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setData(null);
     async function load() {
       if (!url) {
         setLoading(false);
@@ -374,52 +441,162 @@ function DashboardPage() {
 }
 
 function LlmPage() {
-  const { data, error, loading } = usePolling<LlmSummary>('/admin/api/llm/summary?days=7');
+  const [activeTabId, setActiveTabId] = useState<LlmStatsTab['id']>('seven_days');
+  const activeTab = llmStatsTabs.find((tab) => tab.id === activeTabId) || llmStatsTabs[0];
+  const { data, error, loading } = usePolling<LlmSummary>(activeTab.url);
   return (
     <>
-      <PageHeader title="LLM 统计" subtitle="按模块、接口和天统计调用量、Token 与耗时" />
+      <PageHeader title="LLM 统计" subtitle={activeTab.subtitle} />
+      <div className="sub-tabs">
+        {llmStatsTabs.map((tab) => (
+          <button
+            key={tab.id}
+            className={tab.id === activeTabId ? 'active' : ''}
+            onClick={() => setActiveTabId(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
       <StatusBar loading={loading} error={error} />
       <section className="metric-grid">
-        <MetricCard title="7 日调用" value={formatNumber(data?.totals?.call_count)} detail={`${formatNumber(data?.totals?.total_tokens)} tokens`} />
+        <MetricCard title={activeTab.metricTitle} value={formatNumber(data?.totals?.call_count)} detail={`${formatNumber(data?.totals?.total_tokens)} tokens`} />
         <MetricCard title="平均 Token" value={formatNumber(data?.totals?.avg_total_tokens)} detail={`${formatNumber(data?.totals?.avg_prompt_tokens)} prompt / ${formatNumber(data?.totals?.avg_completion_tokens)} completion`} />
-        <MetricCard title="Prompt Tokens" value={formatNumber(data?.totals?.prompt_tokens)} detail="7 日累计" />
+        <MetricCard title="Prompt Tokens" value={formatNumber(data?.totals?.prompt_tokens)} detail={activeTab.tokenDetail} />
         <MetricCard title="平均耗时" value={formatMs(data?.totals?.avg_latency_ms)} detail={`${formatNumber(data?.totals?.failed_calls)} failed`} />
       </section>
       <Panel title="模块统计">
-        <table>
-          <thead>
-            <tr>
-              <th>Module</th>
-              <th>Interface</th>
-              <th>Model</th>
-              <th>Calls</th>
-              <th>Tokens</th>
-              <th>Avg Tokens</th>
-              <th>Avg Prompt</th>
-              <th>Avg Completion</th>
-              <th>Avg</th>
-              <th>Failed</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(data?.by_module || []).map((row, index) => (
-              <tr key={index}>
-                <td>{String(row.module_name || '-')}</td>
-                <td>{String(row.interface_name || '-')}</td>
-                <td>{String(row.model_name || '-')}</td>
-                <td>{formatNumber(Number(row.call_count || 0))}</td>
-                <td>{formatNumber(Number(row.total_tokens || 0))}</td>
-                <td>{formatNumber(Number(row.avg_total_tokens || 0))}</td>
-                <td>{formatNumber(Number(row.avg_prompt_tokens || 0))}</td>
-                <td>{formatNumber(Number(row.avg_completion_tokens || 0))}</td>
-                <td>{formatMs(Number(row.avg_latency_ms || 0))}</td>
-                <td>{formatNumber(Number(row.failed_calls || 0))}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <LlmModuleTable rows={data?.by_module || []} />
       </Panel>
+      {activeTab.showTimeBuckets && (
+        <Panel title="分时趋势">
+          <LlmTimeBucketChart rows={data?.time_buckets || []} />
+        </Panel>
+      )}
     </>
+  );
+}
+
+function LlmModuleTable({ rows }: { rows: Array<Record<string, string | number | null>> }) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>Module</th>
+          <th>Interface</th>
+          <th>Model</th>
+          <th>Calls</th>
+          <th>Tokens</th>
+          <th>Avg Tokens</th>
+          <th>Avg Prompt</th>
+          <th>Avg Completion</th>
+          <th>Avg</th>
+          <th>Failed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, index) => (
+          <tr key={index}>
+            <td>{String(row.module_name || '-')}</td>
+            <td>{String(row.interface_name || '-')}</td>
+            <td>{String(row.model_name || '-')}</td>
+            <td>{formatNumber(Number(row.call_count || 0))}</td>
+            <td>{formatNumber(Number(row.total_tokens || 0))}</td>
+            <td>{formatNumber(Number(row.avg_total_tokens || 0))}</td>
+            <td>{formatNumber(Number(row.avg_prompt_tokens || 0))}</td>
+            <td>{formatNumber(Number(row.avg_completion_tokens || 0))}</td>
+            <td>{formatMs(Number(row.avg_latency_ms || 0))}</td>
+            <td>{formatNumber(Number(row.failed_calls || 0))}</td>
+          </tr>
+        ))}
+        {rows.length === 0 && (
+          <tr>
+            <td colSpan={10} className="empty-state">暂无 LLM 调用数据</td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+function LlmTimeBucketChart({ rows }: { rows: Array<Record<string, string | number>> }) {
+  const [activeMetricId, setActiveMetricId] = useState<LlmChartMetric['id']>('call_count');
+  const metric = llmChartMetrics.find((item) => item.id === activeMetricId) || llmChartMetrics[0];
+  const values = rows.map((row) => Number(row[metric.field] || 0));
+  const maxValue = Math.max(...values, 0);
+  const chartWidth = 960;
+  const chartHeight = 300;
+  const padding = { top: 24, right: 28, bottom: 54, left: 64 };
+  const plotWidth = chartWidth - padding.left - padding.right;
+  const plotHeight = chartHeight - padding.top - padding.bottom;
+  const scaleY = (value: number) => {
+    if (maxValue <= 0) {
+      return padding.top + plotHeight;
+    }
+    return padding.top + plotHeight - (value / maxValue) * plotHeight;
+  };
+  const points = rows.map((row, index) => {
+    const x = padding.left + (rows.length <= 1 ? plotWidth / 2 : (index / (rows.length - 1)) * plotWidth);
+    const y = scaleY(Number(row[metric.field] || 0));
+    return { x, y, row };
+  });
+  const polylinePoints = points.map((point) => `${point.x},${point.y}`).join(' ');
+  const total = values.reduce((sum, value) => sum + value, 0);
+  const average = values.length ? total / values.length : 0;
+
+  return (
+    <div className="llm-chart-panel">
+      <div className="metric-switch">
+        {llmChartMetrics.map((item) => (
+          <button
+            key={item.id}
+            className={item.id === activeMetricId ? 'active' : ''}
+            onClick={() => setActiveMetricId(item.id)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      {rows.length === 0 ? (
+        <div className="empty-state">暂无时段数据</div>
+      ) : (
+        <>
+          <div className="line-chart-wrap">
+            <svg className="line-chart" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={`${metric.label}分时趋势`}>
+              <line className="chart-axis" x1={padding.left} y1={padding.top} x2={padding.left} y2={padding.top + plotHeight} />
+              <line className="chart-axis" x1={padding.left} y1={padding.top + plotHeight} x2={padding.left + plotWidth} y2={padding.top + plotHeight} />
+              {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+                const y = padding.top + plotHeight - ratio * plotHeight;
+                const value = maxValue * ratio;
+                return (
+                  <g key={ratio}>
+                    <line className="chart-grid-line" x1={padding.left} y1={y} x2={padding.left + plotWidth} y2={y} />
+                    <text className="chart-y-label" x={padding.left - 10} y={y + 4} textAnchor="end">
+                      {formatChartValue(value, metric)}
+                    </text>
+                  </g>
+                );
+              })}
+              {polylinePoints && <polyline className="chart-line" points={polylinePoints} />}
+              {points.map((point, index) => (
+                <g key={String(point.row.bucket_start || index)}>
+                  <circle className="chart-point" cx={point.x} cy={point.y} r="4">
+                    <title>{`${String(point.row.bucket_label || point.row.bucket_start)}: ${formatChartValue(Number(point.row[metric.field] || 0), metric)}`}</title>
+                  </circle>
+                  <text className="chart-x-label" x={point.x} y={padding.top + plotHeight + 24} textAnchor="middle">
+                    {String(point.row.bucket_start || '').replace(':00', '')}
+                  </text>
+                </g>
+              ))}
+            </svg>
+          </div>
+          <div className="chart-summary">
+            <span>峰值 {formatChartValue(maxValue, metric)}</span>
+            <span>平均 {formatChartValue(average, metric)}</span>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

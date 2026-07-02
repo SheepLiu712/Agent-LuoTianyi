@@ -240,6 +240,13 @@ button {
   gap: 8px;
 }
 
+.sub-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: -6px 0 16px;
+}
+
 .memory-tabs button {
   border: 1px solid #cad6df;
   border-radius: 6px;
@@ -249,11 +256,99 @@ button {
   cursor: pointer;
 }
 
+.sub-tabs button {
+  border: 1px solid #cad6df;
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: #ffffff;
+  color: #365161;
+  cursor: pointer;
+}
+
 .memory-tabs button.active,
-.memory-tabs button:hover {
+.memory-tabs button:hover,
+.sub-tabs button.active,
+.sub-tabs button:hover {
   background: #2f5d7c;
   border-color: #2f5d7c;
   color: #ffffff;
+}
+
+.llm-chart-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.metric-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metric-switch button {
+  border: 1px solid #cad6df;
+  border-radius: 6px;
+  padding: 7px 10px;
+  background: #ffffff;
+  color: #365161;
+  cursor: pointer;
+}
+
+.metric-switch button.active,
+.metric-switch button:hover {
+  background: #2f5d7c;
+  border-color: #2f5d7c;
+  color: #ffffff;
+}
+
+.line-chart-wrap {
+  width: 100%;
+  overflow-x: auto;
+  padding: 4px 0 2px;
+}
+
+.line-chart {
+  display: block;
+  min-width: 760px;
+  width: 100%;
+  height: auto;
+}
+
+.chart-axis {
+  stroke: #9fb0bd;
+  stroke-width: 1.2;
+}
+
+.chart-grid-line {
+  stroke: #e4ebf0;
+  stroke-width: 1;
+}
+
+.chart-line {
+  fill: none;
+  stroke: #2f5d7c;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.chart-point {
+  fill: #ffffff;
+  stroke: #2f5d7c;
+  stroke-width: 2.5;
+}
+
+.chart-y-label,
+.chart-x-label {
+  fill: #607080;
+  font-size: 12px;
+}
+
+.chart-summary {
+  display: flex;
+  gap: 18px;
+  color: #52616e;
+  font-size: 13px;
 }
 
 .behavior-note {

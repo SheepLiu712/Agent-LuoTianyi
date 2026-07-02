@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, Query
 
@@ -33,9 +33,15 @@ async def dashboard(
 @router.get("/llm/summary")
 async def llm_summary(
     days: int = Query(default=7, ge=1, le=90),
+    recent_limit: Optional[int] = Query(default=None, ge=1, le=1000),
+    bucket_hours: int = Query(default=2, ge=1, le=24),
     system_runtime: SystemRuntime = Depends(get_runtime),
 ) -> dict[str, Any]:
-    return system_runtime.observability.get_llm_summary(days=days)
+    return system_runtime.observability.get_llm_summary(
+        days=days,
+        recent_limit=recent_limit,
+        bucket_hours=bucket_hours,
+    )
 
 
 @router.get("/llm/calls")
