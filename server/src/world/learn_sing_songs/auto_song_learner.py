@@ -75,7 +75,9 @@ class WishlistManager:
             self.logger.warning(f"Failed to parse metadata.json: {e}, starting fresh")
             return
 
+        self.recently_learned = raw.get("recently_learned", [])
         wished_raw = raw.get("wished_songs", {})
+        migrated_learned = False
         if isinstance(wished_raw, list):
             self.logger.info("Migrating v1 wishlist (flat list) to v2 (dict)")
             for name in wished_raw:
@@ -88,9 +90,18 @@ class WishlistManager:
             self._atomic_write(raw)
         elif isinstance(wished_raw, dict):
             for name, entry_dict in wished_raw.items():
-                self.wished_songs[name] = WishEntry(**entry_dict)
+                entry = WishEntry(**entry_dict)
+                if entry.status == "learned":
+                    unified_name = entry.unified_name or get_unified_song_name(entry.safe_name or name)
+                    if unified_name and unified_name not in self.recently_learned:
+                        self.recently_learned.append(unified_name)
+                    migrated_learned = True
+                    continue
+                self.wished_songs[name] = entry
 
-        self.recently_learned = raw.get("recently_learned", [])
+        if migrated_learned:
+            self._save()
+        self._prune_learned_entries()
 
     def _save(self) -> None:
         data = {
@@ -143,12 +154,10 @@ class WishlistManager:
 
     def mark_learned(self, safe_name: str) -> None:
         unified_name = get_unified_song_name(safe_name)
-        entry = self.wished_songs.get(unified_name)
-        if entry is None:
-            return
-        entry.status = "learned"
-        entry.learned_date = time.strftime("%Y-%m-%d")
-        self.recently_learned.append(unified_name)
+        if unified_name in self.wished_songs:
+            self.wished_songs.pop(unified_name)
+        if unified_name and unified_name not in self.recently_learned:
+            self.recently_learned.append(unified_name)
         self._save()
 
     def mark_awaiting_audio(self, safe_name: str, reason: str = "") -> None:
@@ -185,17 +194,32 @@ class WishlistManager:
         return dict(self.wished_songs)
 
     def sync_existing_songs(self, all_safe_names: set) -> None:
-        """Mark any wished songs that now exist in the library as learned."""
+        """Remove wished songs that now exist in the library."""
         changed = False
         for safe_name in all_safe_names:
             unified_name = get_unified_song_name(safe_name)
-            entry = self.wished_songs.get(unified_name)
-            if entry and entry.status not in ("learned", "abandoned"):
-                entry.status = "learned"
-                entry.learned_date = time.strftime("%Y-%m-%d")
+            entry = self.wished_songs.pop(unified_name, None)
+            if entry:
+                if unified_name and unified_name not in self.recently_learned:
+                    self.recently_learned.append(unified_name)
                 changed = True
         if changed:
             self._save()
+
+    def _prune_learned_entries(self) -> None:
+        learned_names = [
+            name
+            for name, entry in self.wished_songs.items()
+            if entry.status == "learned"
+        ]
+        if not learned_names:
+            return
+        for name in learned_names:
+            entry = self.wished_songs.pop(name)
+            unified_name = entry.unified_name or get_unified_song_name(entry.safe_name or name)
+            if unified_name and unified_name not in self.recently_learned:
+                self.recently_learned.append(unified_name)
+        self._save()
 
 
 class AutoSongLearner:

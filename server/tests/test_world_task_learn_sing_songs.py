@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -212,6 +213,7 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
     monkeypatch.chdir(Path(__file__).resolve().parent.parent)
 
     wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
+    wishlist.add("Song A")
     learner = AutoSongLearner(
         {
             "songlearner_dir": str(tmp_path / "song_learner"),
@@ -240,6 +242,55 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
     assert learner._learn_via_songlearner("Song A") is True
     assert "--singer_name" in captured["args"]
     assert captured["args"][captured["args"].index("--singer_name") + 1] == "初音未来"
+    metadata = json.loads((tmp_path / "metadata.json").read_text(encoding="utf-8"))
+    assert "songa" not in metadata["wished_songs"]
+    assert "songa" in metadata["recently_learned"]
+
+
+def test_wishlist_sync_existing_songs_removes_wished_song(tmp_path):
+    logger = SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
+    wishlist = WishlistManager(str(tmp_path / "metadata.json"), logger)
+    wishlist.add("HelloByeDays")
+
+    wishlist.sync_existing_songs({"HelloByeDays"})
+
+    metadata = json.loads((tmp_path / "metadata.json").read_text(encoding="utf-8"))
+    assert "hellobyedays" not in metadata["wished_songs"]
+    assert "hellobyedays" in metadata["recently_learned"]
+
+
+def test_wishlist_load_prunes_legacy_learned_entries(tmp_path):
+    metadata_path = tmp_path / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "wished_songs": {
+                    "oldlearned": {
+                        "safe_name": "Old Learned",
+                        "unified_name": "oldlearned",
+                        "status": "learned",
+                    },
+                    "stillpending": {
+                        "safe_name": "Still Pending",
+                        "unified_name": "stillpending",
+                        "status": "pending",
+                    },
+                },
+                "recently_learned": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    logger = SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
+
+    wishlist = WishlistManager(str(metadata_path), logger)
+
+    assert "oldlearned" not in wishlist.wished_songs
+    assert "stillpending" in wishlist.wished_songs
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    assert "oldlearned" not in metadata["wished_songs"]
+    assert "oldlearned" in metadata["recently_learned"]
 
 
 def test_songlearner_safe_name_strips_trailing_spaces():
