@@ -5,6 +5,7 @@ import json
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse
 
 from src.system.admin import get_admin_shell
 from src.system.admin.llm_config_editor import apply_llm_config_draft, build_llm_config_view
@@ -123,6 +124,24 @@ async def secrets_status() -> dict[str, Any]:
 async def update_secrets(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
     get_admin_shell().secret_store.update(payload)
     return {"ok": True, "secrets": await secrets_status()}
+
+
+@protected_router.get("/qq-music/credential/status")
+async def qq_music_credential_status() -> dict[str, Any]:
+    return get_admin_shell().qq_music_credential_refresh.status()
+
+
+@protected_router.post("/qq-music/credential/refresh")
+async def refresh_qq_music_credential() -> dict[str, Any]:
+    return get_admin_shell().qq_music_credential_refresh.start(timeout_seconds=30)
+
+
+@protected_router.get("/qq-music/credential/qr")
+async def qq_music_credential_qr() -> FileResponse:
+    qr_file = get_admin_shell().qq_music_credential_refresh.qr_file()
+    if qr_file is None or not qr_file.is_file():
+        raise HTTPException(status_code=404, detail="QQ 音乐登录二维码尚未生成")
+    return FileResponse(qr_file, media_type="image/png")
 
 
 @protected_router.get("/llm/config")

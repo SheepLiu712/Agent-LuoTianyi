@@ -1,4 +1,5 @@
 import asyncio
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -7,6 +8,8 @@ from fastapi import HTTPException
 from src.system.admin.auth import AdminAuthService
 from src.system.admin.config_store import ConfigStore
 from src.system.admin.config_validator import RuntimeConfigValidator
+from src.system.admin.qq_music_credential_refresh import QQMusicCredentialRefreshService
+from src.system.admin import qq_music_credential_refresh as qq_refresh_module
 from src.system.admin.runtime_supervisor import RuntimeSupervisor
 from src.system.admin.secret_store import SecretStore
 from src.system.admin.admin_shell import init_admin_shell, shutdown_admin_shell
@@ -382,3 +385,64 @@ def test_validator_accepts_legacy_qq_music_credential(tmp_path, monkeypatch):
     qq_item = next(item for item in result["items"] if item["name"] == "auto_song_learner.qq_music")
     assert qq_item["status"] == "ok"
     assert "旧路径" in qq_item["message"]
+
+
+def test_qq_music_credential_refresh_runs_in_background(tmp_path, monkeypatch):
+    config_store = ConfigStore(tmp_path / "config.json", root_dir=tmp_path)
+    config_store.write_raw(
+        {
+            "world": {
+                "auto_song_learner": {
+                    "qq_credential_file": "config/qq_music_credential.json",
+                    "songlearner_resource_dir": "res/song_learner",
+                }
+            }
+        },
+        backup=False,
+    )
+    credential_file = tmp_path / "config" / "qq_music_credential.json"
+    legacy_file = tmp_path / "res" / "song_learner" / ".qq_music_credential.json"
+
+    def fake_login(*, credential_file: Path, login_timeout: int, force_login: bool):
+        assert login_timeout == 30
+        assert force_login is True
+        credential_file.parent.mkdir(parents=True, exist_ok=True)
+        credential_file.write_text('{"musicid": 123}', encoding="utf-8")
+        (credential_file.parent / "qq_login_qr.png").write_bytes(b"png")
+
+    monkeypatch.setattr(qq_refresh_module.download_qq_song, "QQ_SDK_AVAILABLE", True)
+    monkeypatch.setattr(qq_refresh_module.download_qq_song, "ensure_qr_login", fake_login)
+    monkeypatch.setattr(qq_refresh_module.download_qq_song, "load_saved_credential", lambda path: {"musicid": 123})
+    monkeypatch.setattr(qq_refresh_module.download_qq_song, "validate_credential", lambda credential: True)
+
+    learner = SimpleNamespace(_credential_file=credential_file, qq_credential_valid=False)
+    runtime = SimpleNamespace(
+        world=SimpleNamespace(
+            learn_sing_songs_tasks=[
+                SimpleNamespace(auto_song_learner=learner),
+            ],
+        )
+    )
+    service = QQMusicCredentialRefreshService(
+        root_dir=tmp_path,
+        config_store=config_store,
+        runtime_getter=lambda: runtime,
+    )
+
+    start_status = service.start(timeout_seconds=30)
+    assert start_status["running"] is True
+
+    for _ in range(50):
+        status = service.status()
+        if not status["running"]:
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("QQ music credential refresh did not finish")
+
+    status = service.status()
+    assert status["state"] == "success"
+    assert status["success"] is True
+    assert credential_file.exists()
+    assert legacy_file.exists()
+    assert learner.qq_credential_valid is True

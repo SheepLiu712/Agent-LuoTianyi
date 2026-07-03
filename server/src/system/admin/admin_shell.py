@@ -7,6 +7,7 @@ from pathlib import Path
 from src.system.admin.auth import AdminAuthService
 from src.system.admin.config_store import ConfigStore
 from src.system.admin.config_validator import RuntimeConfigValidator
+from src.system.admin.qq_music_credential_refresh import QQMusicCredentialRefreshService
 from src.system.admin.runtime_supervisor import RuntimeSupervisor
 from src.system.admin.secret_store import SecretStore
 from src.system.observability import ObservabilityService, set_observability_service
@@ -21,6 +22,7 @@ class AdminShell:
     auth: AdminAuthService
     validator: RuntimeConfigValidator
     runtime_supervisor: RuntimeSupervisor
+    qq_music_credential_refresh: QQMusicCredentialRefreshService
     observability: ObservabilityService
 
     @classmethod
@@ -44,6 +46,11 @@ class AdminShell:
             validator=validator,
             observability=observability,
         )
+        qq_music_credential_refresh = QQMusicCredentialRefreshService(
+            root_dir=root,
+            config_store=config_store,
+            runtime_getter=lambda: runtime_supervisor.runtime,
+        )
         return cls(
             root_dir=root,
             config_store=config_store,
@@ -51,6 +58,7 @@ class AdminShell:
             auth=auth,
             validator=validator,
             runtime_supervisor=runtime_supervisor,
+            qq_music_credential_refresh=qq_music_credential_refresh,
             observability=observability,
         )
 

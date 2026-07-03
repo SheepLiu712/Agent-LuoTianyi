@@ -45,6 +45,7 @@ body {
 
 .auth-panel input,
 .secret-row input,
+.qq-credential-row textarea,
 .interface-card input,
 .interface-card textarea,
 .module-binding-editor select,
@@ -59,6 +60,7 @@ body {
 
 .auth-panel button,
 .action-row button,
+.qq-credential-row button,
 .editor-head button,
 .interface-card button {
   border: 1px solid #2f5d7c;
@@ -71,6 +73,7 @@ body {
 
 .auth-panel button:hover,
 .action-row button:hover,
+.qq-credential-row button:hover,
 .editor-head button:hover,
 .interface-card button:hover {
   background: #274e68;
@@ -78,6 +81,7 @@ body {
 
 .auth-panel button:disabled,
 .action-row button:disabled,
+.qq-credential-row button:disabled,
 .editor-head button:disabled,
 .interface-card button:disabled {
   border-color: #9fb2bf;
@@ -88,6 +92,7 @@ body {
 
 .auth-panel button:disabled:hover,
 .action-row button:disabled:hover,
+.qq-credential-row button:disabled:hover,
 .editor-head button:disabled:hover,
 .interface-card button:disabled:hover {
   background: #9fb2bf;
@@ -494,6 +499,36 @@ button {
   color: #667481;
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.qq-credential-row {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.qq-credential-row textarea {
+  width: 100%;
+  min-height: 74px;
+  resize: vertical;
+  white-space: pre-wrap;
+  font-family: "Cascadia Code", Consolas, "Microsoft YaHei", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.qq-credential-qr-wrap {
+  margin-top: 12px;
+}
+
+.qq-credential-qr {
+  display: block;
+  width: 180px;
+  max-width: 100%;
+  border: 1px solid #d9e2ea;
+  border-radius: 6px;
+  background: #ffffff;
 }
 
 .llm-config-editor,

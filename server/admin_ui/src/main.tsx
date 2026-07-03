@@ -62,6 +62,18 @@ type ValidationItem = {
 
 type SecretStatus = Record<string, { configured: boolean; source?: string | null; masked: string }>;
 
+type QQMusicCredentialStatus = {
+  state: 'idle' | 'running' | 'success' | 'failed';
+  running: boolean;
+  message: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  success?: boolean | null;
+  credential_file?: string | null;
+  legacy_file?: string | null;
+  qr_file?: string | null;
+};
+
 type LlmInterfaceConfig = {
   api_type?: string;
   model?: string;
@@ -418,6 +430,30 @@ function formatShanghaiTime(value?: string | null) {
     return value;
   }
   return shanghaiDateTimeFormatter.format(date).replace(/\//g, '-');
+}
+
+function currentShanghaiTimeText() {
+  return shanghaiDateTimeFormatter.format(new Date()).replace(/\//g, '-');
+}
+
+function formatQQCredentialStatus(status?: QQMusicCredentialStatus | null) {
+  if (!status) {
+    return '尚未刷新';
+  }
+  const timestamp = formatShanghaiTime(status.finished_at || status.started_at);
+  const title =
+    status.running ? '正在更新' :
+    status.success ? '更新成功' :
+    status.state === 'failed' ? '更新失败' :
+    '尚未刷新';
+  const lines = [`${title} · ${timestamp}`];
+  if (status.message) {
+    lines.push(status.message);
+  }
+  if (status.running) {
+    lines.push('请扫描下方二维码完成 QQ 音乐登录。');
+  }
+  return lines.join('\n');
 }
 
 function formatChartValue(value: number, metric: LlmChartMetric) {
@@ -1057,12 +1093,15 @@ function ConfigPage() {
   const { data: runtime, error: runtimeError, loading: runtimeLoading } = usePolling<RuntimeStatus>('/admin/api/runtime/status', 5000);
   const { data: secrets, error: secretError, loading: secretLoading } = usePolling<SecretStatus>('/admin/api/secrets/status', 10000);
   const { data: validation, error: validationError, loading: validationLoading } = usePolling<RuntimeValidation>('/admin/api/config/validation', 10000);
+  const { data: qqCredentialStatus, error: qqCredentialError, loading: qqCredentialLoading } = usePolling<QQMusicCredentialStatus>('/admin/api/qq-music/credential/status', 3000);
   const [llmDraft, setLlmDraft] = useState<LlmConfigInfo | null>(null);
   const [llmLoading, setLlmLoading] = useState(true);
   const [secretUpdates, setSecretUpdates] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [runtimeOverride, setRuntimeOverride] = useState<RuntimeStatus | null>(null);
+  const [qqCredentialOverride, setQqCredentialOverride] = useState<QQMusicCredentialStatus | null>(null);
+  const [qrImageNonce, setQrImageNonce] = useState(0);
 
   async function loadLlmConfig() {
     setLlmLoading(true);
@@ -1105,6 +1144,25 @@ function ConfigPage() {
     }
   }, [runtime?.state, runtime?.busy, runtimeOverride, actionMessage]);
 
+  useEffect(() => {
+    if (!qqCredentialStatus || !qqCredentialOverride) {
+      return;
+    }
+    if (qqCredentialStatus.started_at === qqCredentialOverride.started_at) {
+      setQqCredentialOverride(null);
+    }
+  }, [qqCredentialStatus?.state, qqCredentialStatus?.started_at, qqCredentialOverride?.started_at]);
+
+  useEffect(() => {
+    const activeStatus = qqCredentialOverride || qqCredentialStatus;
+    if (!activeStatus?.running) {
+      return;
+    }
+    setQrImageNonce(Date.now());
+    const timer = window.setInterval(() => setQrImageNonce(Date.now()), 2000);
+    return () => window.clearInterval(timer);
+  }, [qqCredentialOverride?.running, qqCredentialStatus?.running, qqCredentialOverride?.started_at, qqCredentialStatus?.started_at]);
+
   async function runtimeAction(action: 'start' | 'stop' | 'restart') {
     const pendingState = action === 'stop' || (action === 'restart' && runtime?.running) ? 'stopping' : 'starting';
     const pendingMessage =
@@ -1146,6 +1204,29 @@ function ConfigPage() {
     }
   }
 
+  async function refreshQQMusicCredential() {
+    const startedAt = new Date().toISOString();
+    setQqCredentialOverride({
+      state: 'running',
+      running: true,
+      message: `正在更新 QQ 音乐凭证，操作时间 ${currentShanghaiTimeText()}`,
+      started_at: startedAt,
+      finished_at: null,
+      success: null,
+      credential_file: null,
+      legacy_file: null,
+      qr_file: null,
+    });
+    try {
+      const nextStatus = await postJson<QQMusicCredentialStatus>('/admin/api/qq-music/credential/refresh', {});
+      setQqCredentialOverride(nextStatus);
+      setActionError(null);
+    } catch (err) {
+      setQqCredentialOverride(null);
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function applyLlmConfig() {
     if (!llmDraft) {
       return;
@@ -1169,14 +1250,17 @@ function ConfigPage() {
   const validationItems = validation?.items || runtime?.validation?.items || [];
   const worldDisabled = validation?.world_disabled || runtime?.validation?.world_disabled || [];
   const effectiveRuntime = runtimeOverride || runtime;
+  const effectiveQQCredentialStatus = qqCredentialOverride || qqCredentialStatus;
   const runtimeState = effectiveRuntime?.state || '-';
   const runtimeBusy = Boolean(effectiveRuntime?.busy || ['starting', 'stopping'].includes(runtimeState));
   const runtimeDetail = runtimeBusy ? '状态切换中' : effectiveRuntime?.running ? '业务运行中' : '业务未启动';
+  const qqCredentialRunning = Boolean(effectiveQQCredentialStatus?.running);
+  const qqQrUrl = qqCredentialRunning ? `/admin/api/qq-music/credential/qr?ts=${encodeURIComponent(effectiveQQCredentialStatus?.started_at || '')}&nonce=${qrImageNonce}` : null;
 
   return (
     <>
       <PageHeader title="服务配置" subtitle="运行时启停、环境变量、资源和 LLM/VLM 配置检查" />
-      <StatusBar loading={runtimeLoading || secretLoading || validationLoading || llmLoading} error={runtimeError || secretError || validationError || actionError} />
+      <StatusBar loading={runtimeLoading || secretLoading || validationLoading || qqCredentialLoading || llmLoading} error={runtimeError || secretError || validationError || qqCredentialError || actionError} />
       {actionMessage && <div className="status">{actionMessage}</div>}
       <section className="metric-grid">
         <MetricCard title="Runtime" value={runtimeState} detail={runtimeDetail} />
@@ -1212,6 +1296,17 @@ function ConfigPage() {
         <div className="action-row">
           <button onClick={() => void saveSecrets()}>保存 Secrets</button>
         </div>
+      </Panel>
+      <Panel title="QQ 音乐凭证">
+        <div className="qq-credential-row">
+          <button disabled={qqCredentialRunning} onClick={() => void refreshQQMusicCredential()}>刷新 QQ 音乐凭证</button>
+          <textarea readOnly value={formatQQCredentialStatus(effectiveQQCredentialStatus)} />
+        </div>
+        {qqQrUrl && (
+          <div className="qq-credential-qr-wrap">
+            <img className="qq-credential-qr" src={qqQrUrl} alt="QQ 音乐登录二维码" />
+          </div>
+        )}
       </Panel>
       <Panel title="LLM Interfaces">
         <LlmInterfacesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
