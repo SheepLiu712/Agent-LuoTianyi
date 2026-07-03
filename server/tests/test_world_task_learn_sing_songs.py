@@ -10,6 +10,7 @@ if server_root not in sys.path:
 
 from src.world.learn_sing_songs.task import LearnSingSongsTask
 from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner, WishlistManager
+from src.world.learn_sing_songs.song_learner.src.pipeline import download_qq_song
 from src.world.learn_sing_songs.song_learner.src.pipeline.download_qq_song import (
     ensure_title_matches,
     rank_songs_by_title,
@@ -29,7 +30,7 @@ class FakeEventStore:
 def test_learn_sing_songs_initialize_sets_event_store_and_learner(monkeypatch):
     task = LearnSingSongsTask({})
     learner = object()
-    monkeypatch.setattr(task, "_build_auto_song_learner", lambda runtime: learner)
+    monkeypatch.setattr(task, "_build_auto_song_learner", lambda: learner)
     event_store = object()
     runtime = SimpleNamespace(database_manager=SimpleNamespace(event_store=event_store))
 
@@ -41,10 +42,12 @@ def test_learn_sing_songs_initialize_sets_event_store_and_learner(monkeypatch):
 
 
 def test_learn_sing_songs_build_learner_skips_without_wishlist():
-    task = LearnSingSongsTask({})
-    runtime = SimpleNamespace(capability_manager=SimpleNamespace(singing=SimpleNamespace(singing_manager={})))
+    task = LearnSingSongsTask(
+        {},
+        singing_manager=SimpleNamespace(resource_path="music"),
+    )
 
-    learner = task._build_auto_song_learner(runtime)
+    learner = task._build_auto_song_learner()
 
     assert learner is None
     assert "wishlist" in task._init_error
@@ -62,18 +65,18 @@ def test_learn_sing_songs_build_learner_uses_manager_resource_path(monkeypatch, 
     manager = SimpleNamespace(
         wishlist=wishlist,
         resource_path=tmp_path / "character_music",
+        character_name="初音未来",
     )
-    task = LearnSingSongsTask({"songlearner_resource_dir": str(tmp_path / "song_learner_res")})
-    runtime = SimpleNamespace(
-        capability_manager=SimpleNamespace(
-            singing=SimpleNamespace(singing_manager={"luotianyi": manager})
-        )
+    task = LearnSingSongsTask(
+        {"songlearner_resource_dir": str(tmp_path / "song_learner_res")},
+        singing_manager=manager,
     )
 
-    learner = task._build_auto_song_learner(runtime)
+    learner = task._build_auto_song_learner()
 
     assert learner is not None
     assert learner.resource_path == tmp_path / "character_music"
+    assert learner.character_name == "初音未来"
 
 
 def test_learn_sing_songs_run_once_skips_without_learner():
@@ -161,6 +164,7 @@ def test_auto_song_learner_builds_child_pythonpath(monkeypatch, tmp_path):
         {
             "songlearner_resource_dir": str(tmp_path / "song_learner_res"),
         },
+        "洛天依",
         wishlist,
         resource_path=tmp_path / "music",
     )
@@ -189,6 +193,7 @@ def test_auto_song_learner_formats_structured_failure(monkeypatch, tmp_path):
         {
             "songlearner_resource_dir": str(tmp_path / "song_learner_res"),
         },
+        "洛天依",
         wishlist,
         resource_path=tmp_path / "music",
     )
@@ -199,6 +204,42 @@ def test_auto_song_learner_formats_structured_failure(monkeypatch, tmp_path):
     )
 
     assert learner._format_songlearner_failure(proc) == "SL040 clean_audio: 清洗后音频不存在 (exit_code=40)"
+
+
+def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path):
+    monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
+    monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
+    monkeypatch.chdir(Path(__file__).resolve().parent.parent)
+
+    wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
+    learner = AutoSongLearner(
+        {
+            "songlearner_dir": str(tmp_path / "song_learner"),
+            "songlearner_resource_dir": str(tmp_path / "song_learner_res"),
+        },
+        "初音未来",
+        wishlist,
+        resource_path=tmp_path / "music",
+    )
+    runner = learner.songlearner_dir / "run_song_workflow.py"
+    runner.parent.mkdir(parents=True)
+    runner.write_text("print('ok')", encoding="utf-8")
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    sl_output = learner.songs_dir / "Song A"
+    sl_output.mkdir(parents=True)
+    (sl_output / "Song A.mp3").write_bytes(b"mp3")
+    (sl_output / "Song A.lrc").write_text("[00:00.00]x", encoding="utf-8")
+    (sl_output / "Song A.json").write_text('{"title": "Song A"}', encoding="utf-8")
+
+    assert learner._learn_via_songlearner("Song A") is True
+    assert "--singer_name" in captured["args"]
+    assert captured["args"][captured["args"].index("--singer_name") + 1] == "初音未来"
 
 
 def test_songlearner_safe_name_strips_trailing_spaces():
@@ -219,3 +260,31 @@ def test_songlearner_title_ranking_rejects_unrelated_match():
         assert "最佳标题与请求不匹配" in str(exc)
     else:
         raise AssertionError("Expected unrelated title to be rejected")
+
+
+def test_songlearner_skips_unrelated_candidates_after_matching_download_failure(monkeypatch, tmp_path):
+    songs = [
+        {"title": "下等马", "mid": "bad-mid", "singer": [{"name": "洛天依"}]},
+        {"title": "告死鸟", "mid": "target-mid", "singer": [{"name": "洛天依"}]},
+    ]
+    monkeypatch.setattr(download_qq_song, "qq_search_songs", lambda *_args, **_kwargs: songs)
+    monkeypatch.setattr(download_qq_song, "qq_fetch_mp3_url", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(download_qq_song, "load_saved_credential", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(download_qq_song, "ensure_qr_login", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(download_qq_song, "qq_fetch_mp3_url_by_sdk", lambda *_args, **_kwargs: "")
+
+    try:
+        download_qq_song.download_song_and_lyric(
+            "告死鸟",
+            output_dir=tmp_path,
+            credential_file=tmp_path / "credential.json",
+            no_auto_login=True,
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+        assert "匹配到 告死鸟" in message
+        assert "告死鸟: 已禁用自动登录，且未拿到可下载链接" in message
+        assert "已跳过不匹配候选" in message
+        assert "最佳标题与请求不匹配" not in message
+    else:
+        raise AssertionError("Expected matching candidate download failure")

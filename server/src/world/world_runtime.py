@@ -13,11 +13,7 @@ from src.world.world_clock import WorldClock
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.capabilities import CapabilityManager
-    from src.system.database import DatabaseManager
-    from src.system.database.event_store import EventStore
     from src.system.system_runtime import SystemRuntime
-    from src.utils.llm_service import LLMService
     from src.world.types.world_task import WorldTask
 
 
@@ -178,8 +174,8 @@ class WorldRuntime:
             return []
         config = self.config.get("auto_song_learner", {})
         return [
-            LearnSingSongsTask(config, character_id=character_id)
-            for character_id in sorted(managers.keys())
+            LearnSingSongsTask(config, character_id=character_id, singing_manager=singing_manager)
+            for character_id, singing_manager in managers.items()
         ]
 
     def _task_enabled(self, config_key: str) -> bool:

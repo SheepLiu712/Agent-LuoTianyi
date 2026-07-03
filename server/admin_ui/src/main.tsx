@@ -397,6 +397,29 @@ function formatNumber(value?: number) {
   return Number(value || 0).toLocaleString('zh-CN');
 }
 
+const shanghaiDateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+function formatShanghaiTime(value?: string | null) {
+  if (!value) {
+    return '-';
+  }
+  const normalized = /[zZ]|[+-]\d{2}:\d{2}$/.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return shanghaiDateTimeFormatter.format(date).replace(/\//g, '-');
+}
+
 function formatChartValue(value: number, metric: LlmChartMetric) {
   return metric.format === 'ms' ? formatMs(value) : formatNumber(value);
 }
@@ -889,7 +912,7 @@ function TracePage() {
                   <td>{formatNumber(trace.span_count)}</td>
                   <td>{formatNumber(trace.llm_call_count)}</td>
                   <td>{formatNumber(trace.total_tokens)}</td>
-                  <td>{trace.end_ts || trace.start_ts || '-'}</td>
+                  <td>{formatShanghaiTime(trace.end_ts || trace.start_ts)}</td>
                 </tr>
               ))}
               {visibleTraces.length === 0 && (
@@ -1532,7 +1555,7 @@ function SpanTable({ rows, compact = false }: { rows: PipelineSpan[]; compact?: 
             <td>{formatMs(row.duration_ms)}</td>
             {!compact && <td className="mono">{row.trace_id}</td>}
             <td><span className={`pill ${row.status}`}>{row.status}</span></td>
-            {!compact && <td>{row.start_ts}</td>}
+            {!compact && <td>{formatShanghaiTime(row.start_ts)}</td>}
           </tr>
         ))}
       </tbody>
@@ -1565,7 +1588,7 @@ function LlmCallTable({ rows }: { rows: LlmCall[] }) {
             <td>{formatNumber(row.prompt_tokens)}</td>
             <td>{formatNumber(row.completion_tokens)}</td>
             <td><span className={`pill ${row.success ? 'success' : 'error'}`}>{row.success ? 'success' : 'error'}</span></td>
-            <td>{row.ts}</td>
+            <td>{formatShanghaiTime(row.ts)}</td>
           </tr>
         ))}
       </tbody>
@@ -1624,7 +1647,7 @@ function MemoryEventCard({
         <div className="memory-event-meta">该事件是确定性结果，仅记录，不要求标注。</div>
       )}
       <div className="memory-event-meta">
-        {event.ts} · {formatMs(event.duration_ms)} · topic {event.topic_id || '-'}
+        {formatShanghaiTime(event.ts)} · {formatMs(event.duration_ms)} · topic {event.topic_id || '-'}
       </div>
     </article>
   );
@@ -1656,7 +1679,7 @@ function LogTable({ rows, compact = false }: { rows: LogEvent[]; compact?: boole
             <td><span className={`pill ${row.level.toLowerCase()}`}>{row.level}</span></td>
             <td>{row.logger_name}</td>
             <td>{row.message}</td>
-            {!compact && <td>{row.ts}</td>}
+            {!compact && <td>{formatShanghaiTime(row.ts)}</td>}
           </tr>
         ))}
       </tbody>

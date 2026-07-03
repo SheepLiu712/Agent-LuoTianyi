@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 from uuid import uuid4
 
+SHANGHAI_TZ = timezone(timedelta(hours=8))
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
@@ -443,7 +445,7 @@ class ObservabilityService:
             if dt is None:
                 day = str(row.get("ts") or "")[:10]
             else:
-                day = dt.astimezone().date().isoformat()
+                day = dt.astimezone(SHANGHAI_TZ).date().isoformat()
             grouped.setdefault(day, []).append(row)
         return [
             {"day": day, **self._summarize_llm_metric_rows(day_rows)}
@@ -471,7 +473,7 @@ class ObservabilityService:
             dt = self._parse_iso(row.get("ts"))
             if dt is None:
                 continue
-            local_dt = dt.astimezone()
+            local_dt = dt.astimezone(SHANGHAI_TZ)
             bucket_hour = (local_dt.hour // bucket_hours) * bucket_hours
             key = f"{bucket_hour:02d}:00"
             if key in grouped:

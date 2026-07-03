@@ -210,12 +210,14 @@ class AutoSongLearner:
     def __init__(
         self,
         config: Dict[str, Any],
+        character_name: str,
         wishlist: WishlistManager,
         *,
         resource_path: str | Path | None = None,
     ):
         self.logger = get_logger("AutoSongLearner")
         config = config or {}
+        self.character_name = character_name
         cwd = Path.cwd()
         configured_resource_path = resource_path or config.get("resource_path")
         if not configured_resource_path:
@@ -397,6 +399,8 @@ class AutoSongLearner:
                     str(self.songs_dir),
                     "--resource_root",
                     str(self.songlearner_resource_dir),
+                    "--singer_name",
+                    self.character_name,
                 ],
                 cwd=str(self.songlearner_dir),
                 capture_output=True, text=True, encoding="utf-8", errors="replace",

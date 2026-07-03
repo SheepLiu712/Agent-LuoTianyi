@@ -22,9 +22,10 @@ class FakeClock:
 
 
 class FakeTask:
-    def __init__(self, config=None, character_id=None):
+    def __init__(self, config=None, character_id=None, singing_manager=None):
         self.config = config or {}
         self.character_id = character_id
+        self.singing_manager = singing_manager
         self.name = (
             f"{self.__class__.__name__}:{character_id}"
             if character_id

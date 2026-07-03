@@ -112,7 +112,23 @@ def parse_args() -> argparse.Namespace:
         default=str(RESOURCE_ROOT),
         help="Songlearner 资源目录，默认读取 SONGLEARNER_RESOURCE_DIR 或 res/song_learner。",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--character_name",
+        dest="singer_name",
+        type=str,
+        default=None,
+        help="兼容旧参数：下载时使用的歌手名，默认为 '洛天依'",
+    )
+    parser.add_argument(
+        "--singer_name",
+        dest="singer_name",
+        type=str,
+        help="下载时使用的歌手名，默认继承 --character_name 或 '洛天依'",
+    )
+    args = parser.parse_args()
+    if not args.singer_name:
+        args.singer_name = "洛天依"
+    return args
 
 
 def ensure_file(path: Path, desc: str) -> None:
@@ -234,7 +250,7 @@ def main() -> None:
             print("[PROCESS] 正在执行步骤: download_song - 下载歌曲和歌词")
             safe_song_name, downloaded_mp3, downloaded_lrc = download_song_and_lyric(
                 song_name=song_name,
-                singer_name="洛天依",
+                singer_name=args.singer_name,
                 output_dir=outputs_dir,
                 credential_file=resource_root / ".qq_music_credential.json",
             )

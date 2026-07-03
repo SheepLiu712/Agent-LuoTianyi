@@ -320,15 +320,21 @@ def rank_songs_by_title(songs: List[Dict], requested_name: str) -> List[Dict]:
 
 
 def ensure_title_matches(song: Dict, requested_name: str, candidates: List[Dict]) -> None:
-    requested = normalize_text(safe_name(requested_name))
-    title = normalize_text(safe_name(str(song.get("title") or "")))
-    if title and (title == requested or requested in title or title in requested):
+    if title_matches(song, requested_name):
         return
     candidate_titles = [str(item.get("title") or "") for item in candidates[:5]]
     raise RuntimeError(
         f"搜索到洛天依歌曲，但最佳标题与请求不匹配: requested={requested_name!r}, "
         f"matched={song.get('title')!r}, candidates={candidate_titles}"
     )
+
+
+def title_matches(song: Dict, requested_name: str) -> bool:
+    requested = normalize_text(safe_name(requested_name))
+    title = normalize_text(safe_name(str(song.get("title") or "")))
+    if title and (title == requested or requested in title or title in requested):
+        return True
+    return False
 
 
 def qq_fetch_lyric(songmid: str, timeout: int = 20) -> str:
@@ -422,13 +428,19 @@ def download_song_and_lyric(
 
     songs = qq_search_songs(song_name + " " + singer_name, timeout=timeout)
     singer_songs = rank_songs_by_title(pick_song_by_singer(songs, singer_name), song_name)
+    matched_failures: List[str] = []
+    skipped_titles: List[str] = []
 
     for song in singer_songs:
-        ensure_title_matches(song, song_name, singer_songs)
         title = song.get("title") or song_name
+        if not title_matches(song, song_name):
+            skipped_titles.append(str(title))
+            continue
         songmid = song.get("mid")
         if not songmid:
-            print(f"[WARN] 歌曲信息不完整，缺少 songmid，跳过: {title}")
+            reason = "歌曲信息不完整，缺少 songmid"
+            matched_failures.append(f"{title}: {reason}")
+            print(f"[WARN] {reason}，跳过: {title}")
             continue
 
         singers = song.get("singer") or []
@@ -461,7 +473,9 @@ def download_song_and_lyric(
         if not mp3_url:
             print("[WARN] 普通下载链接不可用，可能是版权或 VIP 限制。")
             if no_auto_login:
-                print("[WARN] 已禁用自动登录，且未拿到可下载链接。")
+                reason = "已禁用自动登录，且未拿到可下载链接"
+                matched_failures.append(f"{title}: {reason}")
+                print(f"[WARN] {reason}。")
                 continue
             active_credential = ensure_qr_login(
                 credential_file=credential_file,
@@ -471,7 +485,9 @@ def download_song_and_lyric(
             mp3_url = qq_fetch_mp3_url_by_sdk(songmid, active_credential)
 
         if not mp3_url:
-            print("[WARN] 登录后仍未获取到可下载链接，可能歌曲不可用或权限受限。")
+            reason = "登录后仍未获取到可下载链接，可能歌曲不可用或权限受限"
+            matched_failures.append(f"{title}: {reason}")
+            print(f"[WARN] {reason}。")
             continue
 
         print(f"[INFO] 已匹配歌曲: {title} - {singer} (songmid={songmid})")
@@ -480,11 +496,19 @@ def download_song_and_lyric(
 
         lyric = qq_fetch_lyric(songmid, timeout=timeout)
         if not lyric.strip():
-            raise RuntimeError("歌曲下载成功，但未获取到歌词内容。")
+            matched_failures.append(f"{title}: 歌曲下载成功，但未获取到歌词内容")
+            print("[WARN] 歌曲下载成功，但未获取到歌词内容。")
+            continue
 
         lrc_path.write_text(lyric, encoding="utf-8")
         return file_stem, mp3_path, lrc_path
 
+    if matched_failures:
+        skipped_text = f"；已跳过不匹配候选: {skipped_titles[:5]}" if skipped_titles else ""
+        raise RuntimeError(
+            f"匹配到 {song_name} - {singer_name}，但匹配候选均不可下载或不可用: "
+            f"{'; '.join(matched_failures)}{skipped_text}"
+        )
     raise RuntimeError(f"未能下载到可用的歌曲音频: {song_name} - {singer_name}")
 
 
