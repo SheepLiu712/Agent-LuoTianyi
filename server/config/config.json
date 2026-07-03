@@ -130,15 +130,9 @@
                         "欢迎来到这里，今天想聊点什么呢？"
                     ],
                     "audio_path": [
-                        "res/tts/static_audio/first_greet_1.wav",
-                        "res/tts/static_audio/first_greet_2.wav"
+                        "res/tts/luotianyi/static_audio/first_greet_1.wav",
+                        "res/tts/luotianyi/static_audio/first_greet_2.wav"
                     ]
-                },
-                "return_login": {
-                    "prompt": "return_login_activity_prompt"
-                },
-                "user_silence": {
-                    "prompt": "user_silence_activity_prompt"
                 }
             },
             "reminder": {
