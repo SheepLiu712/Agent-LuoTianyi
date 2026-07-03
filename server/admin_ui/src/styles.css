@@ -203,6 +203,25 @@ button {
   color: #a73636;
 }
 
+.inline-status {
+  padding: 9px 11px;
+  border-radius: 6px;
+  background: #e6f0f7;
+  color: #27526d;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.inline-status.success {
+  background: #e7f5ec;
+  color: #2c7945;
+}
+
+.inline-status.error {
+  background: #fdecec;
+  color: #a73636;
+}
+
 .metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

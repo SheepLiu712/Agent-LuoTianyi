@@ -215,6 +215,11 @@ type LlmStatsTab = {
   showTimeBuckets: boolean;
 };
 
+type LocalActionStatus = {
+  tone: 'info' | 'success' | 'error';
+  message: string;
+};
+
 type LlmChartMetric = {
   id: 'call_count' | 'total_tokens' | 'avg_total_tokens' | 'avg_prompt_tokens' | 'avg_completion_tokens' | 'avg_latency_ms' | 'failed_calls';
   label: string;
@@ -1102,6 +1107,8 @@ function ConfigPage() {
   const [runtimeOverride, setRuntimeOverride] = useState<RuntimeStatus | null>(null);
   const [qqCredentialOverride, setQqCredentialOverride] = useState<QQMusicCredentialStatus | null>(null);
   const [qrImageNonce, setQrImageNonce] = useState(0);
+  const [llmApplyStatus, setLlmApplyStatus] = useState<LocalActionStatus | null>(null);
+  const [llmApplying, setLlmApplying] = useState(false);
 
   async function loadLlmConfig() {
     setLlmLoading(true);
@@ -1231,19 +1238,29 @@ function ConfigPage() {
     if (!llmDraft) {
       return;
     }
+    setLlmApplying(true);
+    setLlmApplyStatus({ tone: 'info', message: '正在写入配置并校验，必要时会重启 runtime...' });
     try {
       const result = await postJson<{ ok: boolean; validation: RuntimeValidation; runtime: RuntimeStatus; written: boolean; restarted: boolean }>('/admin/api/llm/config/apply', llmDraft);
       if (!result.ok) {
         const errors = result.validation.items.filter((item) => item.status === 'error' && item.scope !== 'world');
-        setActionError(`配置未写入：${errors[0]?.message || '核心配置校验失败'}`);
+        const message = `配置未写入：${errors[0]?.message || '核心配置校验失败'}`;
+        setActionError(message);
+        setLlmApplyStatus({ tone: 'error', message });
         setActionMessage(null);
         return;
       }
+      const message = result.restarted ? '配置已写入，runtime 已重启' : '配置已写入，runtime 当前未启动';
       setActionError(null);
-      setActionMessage(result.restarted ? '配置已写入，runtime 已重启' : '配置已写入，runtime 当前未启动');
+      setActionMessage(message);
+      setLlmApplyStatus({ tone: 'success', message });
       await loadLlmConfig();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setActionError(message);
+      setLlmApplyStatus({ tone: 'error', message: `配置写入失败：${message}` });
+    } finally {
+      setLlmApplying(false);
     }
   }
 
@@ -1312,7 +1329,14 @@ function ConfigPage() {
         <LlmInterfacesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
       </Panel>
       <Panel title="LLMModule / VLMModule 绑定">
-        <LlmModuleBindingDraftEditor draft={llmDraft} onChange={setLlmDraft} onApply={() => void applyLlmConfig()} onReload={() => void loadLlmConfig()} />
+        <LlmModuleBindingDraftEditor
+          draft={llmDraft}
+          onChange={setLlmDraft}
+          onApply={() => void applyLlmConfig()}
+          onReload={() => void loadLlmConfig()}
+          applyStatus={llmApplyStatus}
+          applying={llmApplying}
+        />
       </Panel>
       <Panel title="配置检查">
         <ValidationTable rows={validationItems} />
@@ -1350,11 +1374,15 @@ function LlmModuleBindingDraftEditor({
   onChange,
   onApply,
   onReload,
+  applyStatus,
+  applying,
 }: {
   draft: LlmConfigInfo | null;
   onChange: (draft: LlmConfigInfo) => void;
   onApply: () => void;
   onReload: () => void;
+  applyStatus: LocalActionStatus | null;
+  applying: boolean;
 }) {
   if (!draft) {
     return <div className="empty-state">暂无模块绑定</div>;
@@ -1371,9 +1399,10 @@ function LlmModuleBindingDraftEditor({
     <div className="llm-config-editor">
       <ModuleBindingEditor bindings={currentDraft.module_bindings} llmNames={llmNames} vlmNames={vlmNames} onChange={updateBindings} />
       <div className="action-row">
-        <button onClick={onApply}>修改</button>
-        <button className="secondary-button" onClick={onReload}>放弃草稿</button>
+        <button disabled={applying} onClick={onApply}>{applying ? '修改中...' : '修改'}</button>
+        <button className="secondary-button" disabled={applying} onClick={onReload}>放弃草稿</button>
       </div>
+      {applyStatus && <div className={`inline-status ${applyStatus.tone}`}>{applyStatus.message}</div>}
     </div>
   );
 }
