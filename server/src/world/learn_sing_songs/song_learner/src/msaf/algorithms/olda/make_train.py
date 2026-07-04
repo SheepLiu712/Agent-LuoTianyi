@@ -9,10 +9,10 @@ import time
 from joblib import Parallel, delayed
 import cPickle as pickle
 
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
-from src.world.learn_sing_songs.song_learner.src.msaf.base import Features
+import msaf as msaf
+from msaf.base import Features
 
-from src.world.learn_sing_songs.song_learner.src.msaf.algorithms.olda.segmenter import features
+from msaf.algorithms.olda.segmenter import features
 
 
 def align_segmentation(beat_times, song):

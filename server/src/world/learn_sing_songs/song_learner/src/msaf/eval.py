@@ -17,10 +17,10 @@ import pandas as pd
 import six
 
 # Local stuff
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
-from src.world.learn_sing_songs.song_learner.src.msaf.exceptions import NoReferencesError
-import src.world.learn_sing_songs.song_learner.src.msaf.input_output as io
-from src.world.learn_sing_songs.song_learner.src.msaf import utils
+import msaf as msaf
+from msaf.exceptions import NoReferencesError
+import msaf.input_output as io
+from msaf import utils
 
 
 def print_results(results):

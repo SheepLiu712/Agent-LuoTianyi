@@ -3,9 +3,11 @@ from src.chat_session.chat_pipeline.unread_store import UnreadMessage, UnreadSto
 from src.chat_session.chat_pipeline.listen_timer import ListenTimer
 import asyncio
 import time
+from datetime import datetime, timezone
 from uuid import uuid4
 
 from src.domain.chat import ChatInputEvent, ChatInputEventType, ExtractedTopic
+from src.system.observability import get_observability_service, new_trace_id
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -54,6 +56,13 @@ class TopicPlanner:
             return
 
         unread_msg = UnreadStore.trans_ChatInputEvent_to_UnreadMessage(message)
+        setattr(unread_msg, "_observability_trace_id", new_trace_id("topic"))
+        setattr(unread_msg, "_observability_entered_monotonic", time.perf_counter())
+        setattr(
+            unread_msg,
+            "_observability_entered_ts",
+            datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        )
         await self.unread_store.append(unread_msg)
         await self.listen_timer.set_deadline()  # 新消息来了，重置等待超时
         self._wake_event.set()
@@ -92,8 +101,8 @@ class TopicPlanner:
                         self._wake_event.clear()
                         continue
                     except asyncio.TimeoutError:
-                        should_force_extract = True
-                elif has_unread and deadline is None: # 有未读且无需等待：直接提取。目前这个状态不会进入，之后可能有用。
+                        should_force_extract = True # 等待超时，强制提取
+                elif has_unread and deadline is None: # 有未读且无需等待：直接提取。
                     pass
                 else: # 没有未读：等待唤醒。
                     await self._wake_event.wait()
@@ -140,6 +149,7 @@ class TopicPlanner:
             target_character_ids=unread_msg.target_character_ids,
             source_event_type=ChatInputEventType.USER_TOUCH.value,
         )
+        setattr(touch_topic, "trace_id", new_trace_id("topic"))
         self.logger.info(f"Touch event -> ExtractedTopic: {text}")
         await self._consume_topics([touch_topic])
 
@@ -158,15 +168,14 @@ class TopicPlanner:
         if event.event_type == ChatInputEventType.USER_IMAGE_SELECTING:
             # 用户正在选择图片：设置 30 秒等待，给用户足够时间
             if await self.unread_store.has_unread():
-                await self.listen_timer.set_deadline(timeout=30.0)
-                self._wake_event.set()
+                await self.listen_timer.set_deadline(timeout=60.0)
 
         if event.event_type == ChatInputEventType.USER_IMAGE_SELECTING_CANCEL:
             if not await self.unread_store.has_unread():
-                await self.listen_timer.remove_deadline()
+                await self.listen_timer.remove_deadline() # 直接提取
             else:
                 await self.listen_timer.set_deadline()  # 用户取消了选择，但还有未读消息，重置等待时间，继续等待补全
-                self._wake_event.set()
+        self._wake_event.set()
 
     async def _commit_extraction_result(
         self,
@@ -202,22 +211,98 @@ class TopicPlanner:
         if unread_snapshot is None or not unread_snapshot.messages:
             return [], []
 
+        trace_id = self._trace_id_from_snapshot(unread_snapshot)
+        observability = get_observability_service()
         try:
             conversation_history = await self._get_conversation_context()
             character_id = self._target_character_ids_from_messages(unread_snapshot.messages)[0]
-            topic, remaining = await self.system_runtime.agent_runtime.extract_topic(
-                character_id=character_id,
-                user_id=self.user_id,
-                unread_snapshot=unread_snapshot,
-                force_complete=force_complete,
-                conversation_history=conversation_history,
-            )
+            if observability is not None:
+                with observability.span(
+                    trace_id=trace_id,
+                    user_id=self.user_id,
+                    span_name="topic_planner.extract_topic_llm",
+                    metadata={"force_complete": force_complete, "message_count": len(unread_snapshot.messages)},
+                ):
+                    topic, remaining = await self.system_runtime.agent_runtime.extract_topic(
+                        character_id=character_id,
+                        user_id=self.user_id,
+                        unread_snapshot=unread_snapshot,
+                        force_complete=force_complete,
+                        conversation_history=conversation_history,
+                    )
+            else:
+                topic, remaining = await self.system_runtime.agent_runtime.extract_topic(
+                    character_id=character_id,
+                    user_id=self.user_id,
+                    unread_snapshot=unread_snapshot,
+                    force_complete=force_complete,
+                    conversation_history=conversation_history,
+                )
             if topic is not None:
                 topic.target_character_ids = self._target_character_ids_from_messages(unread_snapshot.messages)
+                setattr(topic, "trace_id", trace_id)
+                self._record_topic_commands(trace_id, topic, conversation_history)
+                self._record_last_message_to_topic_span(unread_snapshot, topic)
             return topic, remaining or []
         except Exception as e:
             self.logger.exception(f"Topic extraction failed: {e}")
-            return self._fallback_extract(unread_snapshot, force_complete)
+            topic, remaining = self._fallback_extract(unread_snapshot, force_complete)
+            if topic is not None:
+                setattr(topic, "trace_id", trace_id)
+                self._record_topic_commands(trace_id, topic, "", fallback=True)
+                self._record_last_message_to_topic_span(unread_snapshot, topic, fallback=True)
+            return topic, remaining
+
+    def _record_topic_commands(
+        self,
+        trace_id: str,
+        topic: ExtractedTopic,
+        conversation_history: str,
+        *,
+        fallback: bool = False,
+    ) -> None:
+        observability = get_observability_service()
+        if observability is None:
+            return
+
+        source_context = self._build_topic_source_context(topic, conversation_history)
+        commands = [
+            ("memory_command", "memory_attempt", command, True)
+            for command in (topic.memory_attempts or [])
+        ] + [
+            ("fact_command", "fact_constraint", command, True)
+            for command in (topic.fact_constraints or [])
+        ] + [
+            ("sing_command", "sing_attempt", command, True)
+            for command in (topic.sing_attempts or [])
+        ]
+        for event_type, item_type, command, annotation_required in commands:
+            observability.record_memory_trace_event(
+                trace_id=trace_id,
+                user_id=self.user_id,
+                topic_id=topic.topic_id,
+                event_type=event_type,
+                item_type=item_type,
+                command_text=command,
+                content_text=topic.topic_content,
+                source_context=source_context,
+                annotation_required=annotation_required,
+                metadata={"fallback": fallback},
+            )
+
+    @staticmethod
+    def _build_topic_source_context(topic: ExtractedTopic, conversation_history: str) -> str:
+        source_messages = []
+        for msg in getattr(topic, "source_messages", []) or []:
+            content = (getattr(msg, "content", "") or "").strip()
+            if content:
+                source_messages.append(content)
+        parts = []
+        if source_messages:
+            parts.append("用户消息：\n" + "\n".join(source_messages))
+        if conversation_history:
+            parts.append("会话上下文：\n" + conversation_history)
+        return "\n\n".join(parts)
 
     async def _get_conversation_context(self) -> str:
         if self.context_provider is not None:
@@ -253,6 +338,7 @@ class TopicPlanner:
             target_character_ids=self._target_character_ids_from_messages(messages),
             is_forced_from_incomplete=force_complete,
         )
+        setattr(topic, "trace_id", self._trace_id_from_snapshot(unread_snapshot))
         return topic, []
 
     def _target_character_ids_from_messages(self, messages: List[UnreadMessage]) -> tuple[str, ...]:
@@ -272,3 +358,44 @@ class TopicPlanner:
 
         for topic in topics:
             await self.topic_consumer(topic)
+
+    def _trace_id_from_snapshot(self, unread_snapshot: UnreadMessageSnapshot) -> str:
+        messages = unread_snapshot.messages or []
+        if not messages:
+            return new_trace_id("topic")
+        trace_id = getattr(messages[-1], "_observability_trace_id", None)
+        if trace_id:
+            return trace_id
+        trace_id = new_trace_id("topic")
+        setattr(messages[-1], "_observability_trace_id", trace_id)
+        return trace_id
+
+    def _record_last_message_to_topic_span(
+        self,
+        unread_snapshot: UnreadMessageSnapshot,
+        topic: ExtractedTopic,
+        *,
+        fallback: bool = False,
+    ) -> None:
+        observability = get_observability_service()
+        if observability is None or not unread_snapshot.messages:
+            return
+        last_message = unread_snapshot.messages[-1]
+        entered_monotonic = getattr(last_message, "_observability_entered_monotonic", None)
+        entered_ts = getattr(last_message, "_observability_entered_ts", None)
+        if entered_monotonic is None or entered_ts is None:
+            return
+        observability.record_pipeline_span(
+            trace_id=getattr(topic, "trace_id", self._trace_id_from_snapshot(unread_snapshot)),
+            user_id=self.user_id,
+            topic_id=topic.topic_id,
+            span_name="topic_planner.last_message_to_extracted_topic",
+            start_ts=entered_ts,
+            end_ts=datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+            duration_ms=(time.perf_counter() - float(entered_monotonic)) * 1000.0,
+            status="fallback" if fallback else "success",
+            metadata={
+                "message_count": len(unread_snapshot.messages),
+                "force_complete_topic": topic.is_forced_from_incomplete,
+            },
+        )

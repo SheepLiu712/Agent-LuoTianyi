@@ -145,14 +145,6 @@ export class MessageProcessor {
     this.startSendLoop();
   }
 
-  async sendPreferences(preferences: Record<string, unknown>) {
-    addDebugTrace('send', 'send preferences direct');
-    const result = await this.networkClient.sendPreferences(preferences);
-    if (!result.ok) {
-      addDebugTrace('send', 'send preferences failed', { error: result.error });
-    }
-  }
-
   async sendTypingEvent(textLength: number) {
     const now = Date.now();
     if (now - this.lastTypingSentAt < 400) {

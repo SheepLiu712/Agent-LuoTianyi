@@ -19,7 +19,7 @@ WORKFLOW_STEPS = {
     "generate_clear_lrc": "生成清晰歌词（clear.lrc）",
     "generate_llm_lrc": "生成LLM歌词（llm.lrc）",
     "generate_song_json": "生成最终JSON文件",
-    "sync_output_files": "同步输出文件集合",
+    "sync_output_files": "校验输出文件集合",
 }
 
 

@@ -32,11 +32,14 @@ _SONGLEARNER_PATH_ADDED = False
 
 
 def _add_songlearner_to_path() -> None:
-    """将 song_learner/src 添加到 Python path（幂等）。"""
+    """将 server 和 song_learner/src 添加到 Python path（幂等）。"""
     global _SONGLEARNER_PATH_ADDED
     if _SONGLEARNER_PATH_ADDED:
         return
+    server_root = Path(__file__).resolve().parents[3]
     songlearner_src = Path(__file__).resolve().parent / "song_learner" / "src"
+    if str(server_root) not in sys.path:
+        sys.path.insert(0, str(server_root))
     if str(songlearner_src) not in sys.path:
         sys.path.insert(0, str(songlearner_src))
     _SONGLEARNER_PATH_ADDED = True
@@ -72,7 +75,9 @@ class WishlistManager:
             self.logger.warning(f"Failed to parse metadata.json: {e}, starting fresh")
             return
 
+        self.recently_learned = raw.get("recently_learned", [])
         wished_raw = raw.get("wished_songs", {})
+        migrated_learned = False
         if isinstance(wished_raw, list):
             self.logger.info("Migrating v1 wishlist (flat list) to v2 (dict)")
             for name in wished_raw:
@@ -85,9 +90,18 @@ class WishlistManager:
             self._atomic_write(raw)
         elif isinstance(wished_raw, dict):
             for name, entry_dict in wished_raw.items():
-                self.wished_songs[name] = WishEntry(**entry_dict)
+                entry = WishEntry(**entry_dict)
+                if entry.status == "learned":
+                    unified_name = entry.unified_name or get_unified_song_name(entry.safe_name or name)
+                    if unified_name and unified_name not in self.recently_learned:
+                        self.recently_learned.append(unified_name)
+                    migrated_learned = True
+                    continue
+                self.wished_songs[name] = entry
 
-        self.recently_learned = raw.get("recently_learned", [])
+        if migrated_learned:
+            self._save()
+        self._prune_learned_entries()
 
     def _save(self) -> None:
         data = {
@@ -140,12 +154,10 @@ class WishlistManager:
 
     def mark_learned(self, safe_name: str) -> None:
         unified_name = get_unified_song_name(safe_name)
-        entry = self.wished_songs.get(unified_name)
-        if entry is None:
-            return
-        entry.status = "learned"
-        entry.learned_date = time.strftime("%Y-%m-%d")
-        self.recently_learned.append(unified_name)
+        if unified_name in self.wished_songs:
+            self.wished_songs.pop(unified_name)
+        if unified_name and unified_name not in self.recently_learned:
+            self.recently_learned.append(unified_name)
         self._save()
 
     def mark_awaiting_audio(self, safe_name: str, reason: str = "") -> None:
@@ -182,17 +194,32 @@ class WishlistManager:
         return dict(self.wished_songs)
 
     def sync_existing_songs(self, all_safe_names: set) -> None:
-        """Mark any wished songs that now exist in the library as learned."""
+        """Remove wished songs that now exist in the library."""
         changed = False
         for safe_name in all_safe_names:
             unified_name = get_unified_song_name(safe_name)
-            entry = self.wished_songs.get(unified_name)
-            if entry and entry.status not in ("learned", "abandoned"):
-                entry.status = "learned"
-                entry.learned_date = time.strftime("%Y-%m-%d")
+            entry = self.wished_songs.pop(unified_name, None)
+            if entry:
+                if unified_name and unified_name not in self.recently_learned:
+                    self.recently_learned.append(unified_name)
                 changed = True
         if changed:
             self._save()
+
+    def _prune_learned_entries(self) -> None:
+        learned_names = [
+            name
+            for name, entry in self.wished_songs.items()
+            if entry.status == "learned"
+        ]
+        if not learned_names:
+            return
+        for name in learned_names:
+            entry = self.wished_songs.pop(name)
+            unified_name = entry.unified_name or get_unified_song_name(entry.safe_name or name)
+            if unified_name and unified_name not in self.recently_learned:
+                self.recently_learned.append(unified_name)
+        self._save()
 
 
 class AutoSongLearner:
@@ -204,18 +231,30 @@ class AutoSongLearner:
     MAX_ATTEMPTS = 3
     SONGELEARNER_TIMEOUT = 1200  # 20 minutes max for the full pipeline
 
-    def __init__(self, config: Dict[str, Any], wishlist: WishlistManager):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        character_name: str,
+        wishlist: WishlistManager,
+        *,
+        resource_path: str | Path | None = None,
+    ):
         self.logger = get_logger("AutoSongLearner")
         config = config or {}
-        self.resource_path = os.getcwd() / Path(config.get("resource_path", "res/music"))
+        self.character_name = character_name
+        cwd = Path.cwd()
+        configured_resource_path = resource_path or config.get("resource_path")
+        if not configured_resource_path:
+            raise ValueError("AutoSongLearner requires resource_path from SingingManager")
+        self.resource_path = self._resolve_path(cwd, configured_resource_path)
         self.songs_dir = self.resource_path / "songs"
         self.metadata_path = self.resource_path / "metadata.json"
         self.wishlist = wishlist
         self._ensure_directories()
 
         # Songlearner integration
-        self.songlearner_dir = os.getcwd() / Path(config.get("songlearner_dir", "src/world/learn_sing_songs/song_learner"))
-        self.songlearner_resource_dir = os.getcwd() / Path(config.get("songlearner_resource_dir", "res/song_learner"))
+        self.songlearner_dir = cwd / Path(config.get("songlearner_dir", "src/world/learn_sing_songs/song_learner"))
+        self.songlearner_resource_dir = cwd / Path(config.get("songlearner_resource_dir", "res/song_learner"))
         self.songlearner_available = self._check_songlearner_models()
         if self.songlearner_available:
             self.logger.info("Songlearner 模型已就绪，将使用完整学歌流水线（QQ音乐下载->清洗->MSAF->LLM分段）")
@@ -227,7 +266,9 @@ class AutoSongLearner:
             raise RuntimeError("Songlearner 模型未就绪，无法执行自动学歌")
 
         # QQ 音乐凭证检测（启动时）
-        self._credential_file = self.songlearner_resource_dir / ".qq_music_credential.json"
+        credential_path = config.get("qq_credential_file", "config/qq_music_credential.json")
+        self._credential_file = self._resolve_path(cwd, credential_path)
+        self._migrate_legacy_qq_credential()
         self.qq_credential_valid = self._validate_qq_credential()
         if not self.qq_credential_valid:
             self.logger.warning(
@@ -239,6 +280,13 @@ class AutoSongLearner:
             )
 
     # -- directory setup -----------------------------------------------------
+
+    @staticmethod
+    def _resolve_path(cwd: Path, raw_path: str | Path) -> Path:
+        path = Path(raw_path)
+        if path.is_absolute():
+            return path
+        return cwd / path
 
     def _ensure_directories(self) -> None:
         self.songs_dir.mkdir(parents=True, exist_ok=True)
@@ -258,6 +306,17 @@ class AutoSongLearner:
         except Exception as e:
             self.logger.warning(f"QQ 音乐凭证检测异常: {e}")
         return False
+
+    def _migrate_legacy_qq_credential(self) -> None:
+        legacy_file = self.songlearner_resource_dir / ".qq_music_credential.json"
+        if self._credential_file.exists() or not legacy_file.exists():
+            return
+        try:
+            self._credential_file.parent.mkdir(parents=True, exist_ok=True)
+            self._credential_file.write_text(legacy_file.read_text(encoding="utf-8"), encoding="utf-8")
+            self.logger.info(f"已迁移 QQ 音乐凭证: {legacy_file} -> {self._credential_file}")
+        except Exception as e:
+            self.logger.warning(f"迁移 QQ 音乐凭证失败: {e}")
 
     def _generate_login_qr(self) -> None:
         """生成 QQ 登录二维码并保存到文件（不等待扫码）。"""
@@ -348,36 +407,44 @@ class AutoSongLearner:
         runner = self.songlearner_dir / "run_song_workflow.py"
         if not runner.exists():
             self.logger.error(f"Songlearner 启动脚本不存在: {runner}")
-            self._handle_failure(safe_name, f"Songlearner 启动脚本不存在: {runner}")
+            self._handle_failure(safe_name, f"SL001 startup: Songlearner 启动脚本不存在: {runner}")
             return False
 
         self.logger.info(f"[Songlearner] 开始学习: {safe_name}")
+        env = self._build_songlearner_env()
 
         try:
             proc = subprocess.run(
-                [sys.executable, str(runner), safe_name],
+                [
+                    sys.executable,
+                    str(runner),
+                    safe_name,
+                    "--output_dir",
+                    str(self.songs_dir),
+                    "--resource_root",
+                    str(self.songlearner_resource_dir),
+                    "--credential_file",
+                    str(self._credential_file),
+                    "--no_auto_login",
+                    "--singer_name",
+                    self.character_name,
+                ],
                 cwd=str(self.songlearner_dir),
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=self.SONGELEARNER_TIMEOUT,
-                env={
-                    **os.environ,
-                    "QWEN_API_KEY": os.environ.get("QWEN_API_KEY", ""),
-                    "SILICONFLOW_API_KEY": os.environ.get("SILICONFLOW_API_KEY", ""),
-                    "PYTHONUTF8": "1",
-                    "PYTHONIOENCODING": "utf-8",
-                    "TEST_SONGS_DIR": str(self.songs_dir),
-                },
+                env=env,
             )
         except subprocess.TimeoutExpired:
-            self._handle_failure(safe_name, "Songlearner 流水线执行超时（>20分钟）")
+            self._handle_failure(safe_name, "SL091 timeout: Songlearner 流水线执行超时（>20分钟）")
             return False
 
         if proc.returncode != 0:
+            failure_reason = self._format_songlearner_failure(proc)
             self.logger.error(
                 f"[Songlearner] 流水线返回非零退出码 {proc.returncode}\n"
                 f"stderr: {proc.stderr[-500:] if proc.stderr else ''}"
             )
-            self._handle_failure(safe_name, f"Songlearner 流水线执行失败，退出码 {proc.returncode}")
+            self._handle_failure(safe_name, failure_reason)
             return False
 
         # Locate the final output directory under the music library.
@@ -395,19 +462,71 @@ class AutoSongLearner:
                         self.logger.info(f"[Songlearner] 输出目录重定向至: {sl_output.name}")
                         break
                 else:
-                    self._handle_failure(safe_name, "Songlearner 未生成任何有效输出目录")
+                    self._handle_failure(safe_name, "SL092 finalize: Songlearner 未生成任何有效输出目录")
                     return False
             else:
-                self._handle_failure(safe_name, "歌曲输出目录不存在")
+                self._handle_failure(safe_name, "SL092 finalize: 歌曲输出目录不存在")
                 return False
 
         return self._finalize_song(safe_name, sl_output)
+
+    def _format_songlearner_failure(self, proc: subprocess.CompletedProcess) -> str:
+        stderr = proc.stderr or ""
+        parsed = self._parse_songlearner_error(stderr)
+        if parsed:
+            return (
+                f"{parsed['code']} {parsed['step']}: {parsed['message']} "
+                f"(exit_code={parsed['exit_code']})"
+            )
+
+        stderr_tail = self._last_nonempty_line(stderr) or "无 stderr"
+        return f"SL099 unexpected: Songlearner 流水线执行失败，退出码 {proc.returncode}: {stderr_tail}"
+
+    def _parse_songlearner_error(self, stderr: str) -> Optional[Dict[str, str]]:
+        pattern = re.compile(
+            r"\[SONGLEARNER_ERROR\]\s+"
+            r"code=(?P<code>\S+)\s+"
+            r"exit_code=(?P<exit_code>\d+)\s+"
+            r"step=(?P<step>\S+)\s+"
+            r"message=(?P<message>.*)"
+        )
+        for line in reversed((stderr or "").splitlines()):
+            match = pattern.search(line.strip())
+            if match:
+                return match.groupdict()
+        return None
+
+    def _last_nonempty_line(self, text: str, limit: int = 300) -> str:
+        for line in reversed((text or "").splitlines()):
+            stripped = line.strip()
+            if stripped:
+                return stripped[-limit:]
+        return ""
+
+    def _build_songlearner_env(self) -> dict[str, str]:
+        server_root = Path(__file__).resolve().parents[3]
+        songlearner_src = self.songlearner_dir / "src"
+        existing_pythonpath = os.environ.get("PYTHONPATH", "")
+        pythonpath_parts = [str(songlearner_src), str(server_root)]
+        if existing_pythonpath:
+            pythonpath_parts.append(existing_pythonpath)
+        return {
+            **os.environ,
+            "QWEN_API_KEY": os.environ.get("QWEN_API_KEY", ""),
+            "SILICONFLOW_API_KEY": os.environ.get("SILICONFLOW_API_KEY", ""),
+            "PYTHONUTF8": "1",
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONPATH": os.pathsep.join(pythonpath_parts),
+            "TEST_SONGS_DIR": str(self.songs_dir),
+            "SONGLEARNER_RESOURCE_DIR": str(self.songlearner_resource_dir),
+            "SONGLEARNER_QQ_CREDENTIAL_FILE": str(self._credential_file),
+        }
 
     def _finalize_song(self, safe_name: str, src_dir: Path) -> bool:
         """Validate and finalize the workflow output in place."""
         target_dir = src_dir
         if not target_dir.exists() or not target_dir.is_dir():
-            self._handle_failure(safe_name, f"歌曲输出目录不存在: {target_dir}")
+            self._handle_failure(safe_name, f"SL092 finalize: 歌曲输出目录不存在: {target_dir}")
             return False
 
         cleaned_target = target_dir / f"{safe_name}.cleaned.mp3"
@@ -438,7 +557,7 @@ class AutoSongLearner:
         if not has_audio or not has_json:
             self._handle_failure(
                 safe_name,
-                f"关键文件缺失: audio={has_audio}, json={has_json}",
+                f"SL093 finalize: 关键文件缺失: audio={has_audio}, json={has_json}",
             )
             return False
 

@@ -22,21 +22,7 @@ if TYPE_CHECKING:
     from src.system.database import DatabaseManager
     from src.subconscious.character_mind import CharacterSubconscious
     from src.utils.llm.llm_module import LLMModule
-    from src.domain.chat import UnreadMessageSnapshot, UnreadMessage, ExtractedTopic
-    
-
-
-_expression_cache: Dict[str, List[str]] = {}
-
-def get_available_expression(config_path: str = "config/live2d_interface_config.json") -> List[str]:
-    if config_path in _expression_cache:
-        return _expression_cache[config_path]
-    with open(config_path, "r", encoding="utf-8") as f:
-        config: Dict = json.load(f)
-    expressions: Dict = config.get("expression_projection", {})
-    result = list(expressions.keys())
-    _expression_cache[config_path] = result
-    return result
+    from src.domain.chat import ExtractedTopic
 
 
 class LuoTianyiAgent:
@@ -287,9 +273,9 @@ class LuoTianyiAgent:
         current_dialogue: str,
         related_memories: Optional[List[str]] = None,
         conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
-    ) -> None:
+    ) -> dict:
         """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
-        await self.mind.write_topic_memories(
+        return await self.mind.write_topic_memories(
             user_id=user_id,
             current_dialogue=current_dialogue,
             related_memories=related_memories,

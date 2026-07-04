@@ -189,15 +189,6 @@ class NetworkClient:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
 
-    def send_preferences(self, preferences: dict, ack_timeout: float = 10.0):
-        if not self.user_id or not self.message_token:
-            return {"ok": False, "request_id": None, "error": "Not logged in", "drop": True}
-        try:
-            return self.ws_transport.submit_user_preferences(preferences=preferences, ack_timeout=ack_timeout)
-        except Exception as exc:
-            self.logger.error(f"Connection Error: {exc}")
-            return {"ok": False, "request_id": None, "error": f"Connection Error: {exc}"}
-
     def get_preferences(self) -> dict:
         """从服务器获取偏好设置。"""
         if not self.user_id:

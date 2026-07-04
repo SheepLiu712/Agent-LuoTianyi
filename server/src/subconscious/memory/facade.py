@@ -141,9 +141,9 @@ class SubconsciousMemory:
         current_dialogue: str = "",
         related_memories: List[str] | None = None,
         commit: bool = True,
-    ) -> None:
+    ) -> Dict[str, Any]:
         """从一轮对话中抽取可长期保存的用户事实和事件记忆。"""
-        await self.memory_writer.process_interaction(
+        return await self.memory_writer.process_interaction(
             vector_store=self.vector_store,
             memory_store=self.memory_store,
             user_id=user_id,

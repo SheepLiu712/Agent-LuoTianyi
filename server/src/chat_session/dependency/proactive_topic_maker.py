@@ -407,7 +407,7 @@ class ProactiveTopicMaker:
                 {
                     "text": text,
                     "audio_path": audio_path,
-                    "response_line": OneSentenceChat(content=text, tone="neutral", expression="normal"),
+                    "response_line": OneSentenceChat(content=text, tone="normal", expression="微笑脸"),
                 }
             )
 

@@ -11,6 +11,24 @@ from .types import (
     PreferenceGetRequest,
     PreferenceOverwriteRequest,
 )
-from .user_interface import UserInterface
 
-__all__ = ["WebSocketConnection", "WebSocketService", "account", "get_websocket_service"]
+__all__ = [
+    "RegisterRequest",
+    "LoginRequest",
+    "AutoLoginRequest",
+    "HistoryRequest",
+    "ImageRequest",
+    "ResetAccountRequest",
+    "WSEventType",
+    "PreferenceGetRequest",
+    "PreferenceOverwriteRequest",
+    "UserInterface",
+]
+
+
+def __getattr__(name: str):
+    if name == "UserInterface":
+        from .user_interface import UserInterface
+
+        return UserInterface
+    raise AttributeError(name)

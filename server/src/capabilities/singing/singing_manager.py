@@ -17,15 +17,18 @@ class SingingManager:
         self.logger = get_logger(__name__)
         self.config = config
         self.character_name = config.get("character_name", "洛天依")
-        self.resource_path = config.get("resource_path", "res/sing_song/luotianyi")
+        self.resource_path = config.get("resource_path")
+        if not self.resource_path:
+            raise ValueError("SingingManager requires capabilities.sing.<character_id>.resource_path")
         self.all_songs: dict[str, SongMetadata] = {}
+        self.song_aliases: dict[str, str] = {}
         self.tools: Dict[str, MyTool] = {}
         self.wishlist = WishlistManager(
             str(pathlib.Path(self.resource_path) / "metadata.json"),
             self.logger,
         )
         self.get_music_data()
-        self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
+        self.wishlist.sync_existing_songs(set(self.all_songs.keys()) | set(self.song_aliases.keys()))
 
     @staticmethod
     def get_unified_song_name(song_name: str) -> str:
@@ -35,6 +38,8 @@ class SingingManager:
 
     def get_music_data(self):
         self.logger.info(f"Loading music data from {self.resource_path}")
+        self.all_songs = {}
+        self.song_aliases = {}
         music_lib = pathlib.Path(self.resource_path) / "songs"
         if not music_lib.exists():
             self.logger.warning(f"Music library path does not exist: {music_lib}")
@@ -89,6 +94,10 @@ class SingingManager:
                 )
                 unified_song_name = SingingManager.get_unified_song_name(title)
                 self.all_songs[unified_song_name] = song_metadata
+                self._index_song_aliases(
+                    canonical_key=unified_song_name,
+                    aliases=[title, song, config_file.stem],
+                )
 
             except Exception as e:
                 import traceback
@@ -96,11 +105,17 @@ class SingingManager:
                 self.logger.error(f"Failed to load song {song} config: {e}\n{traceback.format_exc()}")
         self.logger.info(f"Loaded {len(self.all_songs)} songs into music manager.")
 
+    def _index_song_aliases(self, canonical_key: str, aliases: List[str]) -> None:
+        for alias in aliases:
+            unified_alias = SingingManager.get_unified_song_name(alias)
+            if unified_alias:
+                self.song_aliases[unified_alias] = canonical_key
+
     def reload_songs(self) -> None:
         """Re-scan songs/ directory to pick up newly learned songs."""
         old_count = len(self.all_songs)
         self.get_music_data()
-        self.wishlist.sync_existing_songs(set(self.all_songs.keys()))
+        self.wishlist.sync_existing_songs(set(self.all_songs.keys()) | set(self.song_aliases.keys()))
         self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
 
     # ————歌曲选择相关————
@@ -132,9 +147,9 @@ class SingingManager:
         if not song_name:
             return "", []
         safe_song_name = SingingManager.get_unified_song_name(song_name)
-        if not safe_song_name in self.all_songs:
+        song_metadata = self.get_song_metadata(safe_song_name)
+        if not song_metadata:
             return "", []
-        song_metadata: SongMetadata = self.all_songs[safe_song_name]
         if not song_metadata.segments:
             self.add_wished_song(safe_song_name)
             return "", []
@@ -266,5 +281,11 @@ class SingingManager:
         if not song_name:
             return None
         safe_song_name = SingingManager.get_unified_song_name(song_name)
-        return self.all_songs.get(safe_song_name, None)
+        song_metadata = self.all_songs.get(safe_song_name)
+        if song_metadata is not None:
+            return song_metadata
+        canonical_key = self.song_aliases.get(safe_song_name)
+        if canonical_key:
+            return self.all_songs.get(canonical_key, None)
+        return None
 

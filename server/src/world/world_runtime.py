@@ -13,11 +13,7 @@ from src.world.world_clock import WorldClock
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.capabilities import CapabilityManager
-    from src.system.database import DatabaseManager
-    from src.system.database.event_store import EventStore
     from src.system.system_runtime import SystemRuntime
-    from src.utils.llm_service import LLMService
     from src.world.types.world_task import WorldTask
 
 
@@ -35,6 +31,7 @@ class WorldRuntime:
         self.world_clock = WorldClock()
         self.citywalk_task: CitywalkTask | None = None
         self.learn_sing_songs_task: LearnSingSongsTask | None = None
+        self.learn_sing_songs_tasks: List[LearnSingSongsTask] = []
         self.vcpedia_new_song_task: VCPediaNewSongTask | None = None
         self.bili_event_update_task: BiliEventUpdateTask | None = None
         self.proactive_topic_check_task: ProactiveTopicCheckTask | None = None
@@ -58,10 +55,21 @@ class WorldRuntime:
         if self.system_runtime is None:
             raise RuntimeError("WorldRuntime requires system_runtime before module initialization.")
 
-        self.citywalk_task = CitywalkTask(self.config.get("citywalk", {}))
-        self.learn_sing_songs_task = LearnSingSongsTask(self.config.get("auto_song_learner", {}))
+        self.citywalk_task = (
+            CitywalkTask(self.config.get("citywalk", {}))
+            if self._task_enabled("citywalk")
+            else None
+        )
+        self.learn_sing_songs_tasks = self._build_learn_sing_songs_tasks()
+        self.learn_sing_songs_task = (
+            self.learn_sing_songs_tasks[0] if self.learn_sing_songs_tasks else None
+        )
         self.vcpedia_new_song_task = VCPediaNewSongTask(self.config.get("song_knowledge", {}))
-        self.bili_event_update_task = BiliEventUpdateTask(self.config.get("bili_dynamic_fetcher", {}))
+        self.bili_event_update_task = (
+            BiliEventUpdateTask(self.config.get("bili_dynamic_fetcher", {}))
+            if self._task_enabled("bili_dynamic_fetcher")
+            else None
+        )
         self.proactive_topic_check_task = ProactiveTopicCheckTask(
             self.config.get("proactive_topic_check", {})
         )
@@ -71,12 +79,13 @@ class WorldRuntime:
 
         self.tasks: List["WorldTask"] = [
             self.citywalk_task,
-            self.learn_sing_songs_task,
+            *self.learn_sing_songs_tasks,
             self.vcpedia_new_song_task,
             self.bili_event_update_task,
             self.proactive_topic_check_task,
             self.expired_event_cleanup_task,
         ]
+        self.tasks = [task for task in self.tasks if task is not None]
         for task in self.tasks:
             task.initialize(self.system_runtime)
             if hasattr(task, "ensure_dependencies"):
@@ -152,3 +161,23 @@ class WorldRuntime:
                 )
             else:
                 self.logger.warning(f"Unknown world clock task type for {task_name}: {task_type}")
+
+    def _build_learn_sing_songs_tasks(self) -> List[LearnSingSongsTask]:
+        if not self._task_enabled("auto_song_learner"):
+            return []
+        if self.system_runtime is None:
+            return []
+        singing = getattr(getattr(self.system_runtime, "capability_manager", None), "singing", None)
+        managers = getattr(singing, "singing_manager", None) or {}
+        if not managers:
+            self.logger.warning("No singing managers available; learn_sing_songs tasks skipped")
+            return []
+        config = self.config.get("auto_song_learner", {})
+        return [
+            LearnSingSongsTask(config, character_id=character_id, singing_manager=singing_manager)
+            for character_id, singing_manager in managers.items()
+        ]
+
+    def _task_enabled(self, config_key: str) -> bool:
+        cfg = self.config.get(config_key, {})
+        return bool(cfg.get("enabled", True))

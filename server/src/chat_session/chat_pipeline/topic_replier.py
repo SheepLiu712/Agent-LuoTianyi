@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Awaitable, Callable, List, Optional
 import asyncio
+import time
+from datetime import datetime, timezone
 import traceback
 from src.utils.logger import get_logger
 from src.chat_session.dependency.global_speaking_worker import SpeakingJob
 from src.chat_session.chat_pipeline.reflection_worker import CompletedTurn
 from src.agent.main_chat import OneResponseLine, SongSegmentChat, ContextType
 from src.domain.chat import ChatInputEventType
+from src.system.observability import get_observability_service, new_trace_id
 if TYPE_CHECKING:
     from src.system.system_runtime import SystemRuntime
     from src.domain.chat import ExtractedTopic
@@ -136,6 +139,9 @@ class TopicReplier:
             self.logger.error("SystemRuntime or agent is not ready, skip replying topic")
             return
         character_id = self.character_id
+        trace_id = getattr(topic, "trace_id", None) or new_trace_id("topic")
+        setattr(topic, "trace_id", trace_id)
+        observability = get_observability_service()
 
         if self.change_state_callback is not None:
             await self.change_state_callback(thinking = True) # 进入思考状态
@@ -143,19 +149,48 @@ class TopicReplier:
         # Read application conversation context once and reuse it for this turn.
         conversation_history = await self._get_conversation_context()
 
-        attention_plan = await self.system_runtime.agent_runtime.plan_topic_turn(
-            character_id=character_id,
-            user_id=self.user_id,
-            topic=topic,
-            conversation_history=conversation_history,
-            external_context=None,
-        )
+        if observability is not None:
+            with observability.span(
+                trace_id=trace_id,
+                user_id=self.user_id,
+                topic_id=topic.topic_id,
+                span_name="topic_replier.topic_to_reply_generated",
+                metadata={
+                    "topic_content": topic.topic_content,
+                    "memory_attempt_count": len(topic.memory_attempts or []),
+                    "fact_constraint_count": len(topic.fact_constraints or []),
+                    "sing_attempt_count": len(topic.sing_attempts or []),
+                },
+            ):
+                attention_plan = await self.system_runtime.agent_runtime.plan_topic_turn(
+                    character_id=character_id,
+                    user_id=self.user_id,
+                    topic=topic,
+                    conversation_history=conversation_history,
+                    external_context=None,
+                )
 
-        reply_items = await self.system_runtime.agent_runtime.realize_topic_plan(
-            character_id=character_id,
-            user_id=self.user_id,
-            plan=attention_plan,
-        )
+                reply_items = await self.system_runtime.agent_runtime.realize_topic_plan(
+                    character_id=character_id,
+                    user_id=self.user_id,
+                    plan=attention_plan,
+                )
+        else:
+            attention_plan = await self.system_runtime.agent_runtime.plan_topic_turn(
+                character_id=character_id,
+                user_id=self.user_id,
+                topic=topic,
+                conversation_history=conversation_history,
+                external_context=None,
+            )
+
+            reply_items = await self.system_runtime.agent_runtime.realize_topic_plan(
+                character_id=character_id,
+                user_id=self.user_id,
+                plan=attention_plan,
+            )
+        reply_generated_monotonic = time.perf_counter()
+        reply_generated_ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
         for item in reply_items:
             if isinstance(item, SongSegmentChat):
                 lyrics = self.system_runtime.capabilities.singing.get_segment_lyrics(
@@ -173,7 +208,15 @@ class TopicReplier:
             if uuid is None:
                 continue
             item.uuid = uuid
-            await self._submit_speaking_job(self.send_reply_callback, item, character_id)
+            await self._submit_speaking_job(
+                self.send_reply_callback,
+                item,
+                character_id,
+                trace_id=trace_id,
+                topic_id=topic.topic_id,
+                reply_generated_monotonic=reply_generated_monotonic,
+                reply_generated_ts=reply_generated_ts,
+            )
 
         await self._submit_reflection_turn(
             topic=topic,
@@ -187,6 +230,11 @@ class TopicReplier:
         send_reply_callback: Callable[["ChatResponse"], Awaitable[None]],
         item: OneResponseLine,
         character_id: str,
+        *,
+        trace_id: str | None = None,
+        topic_id: str | None = None,
+        reply_generated_monotonic: float | None = None,
+        reply_generated_ts: str | None = None,
     ) -> None:
         if item.type not in {ContextType.TEXT, ContextType.SING}:
             self.logger.warning(f"Unsupported topic reply type: {item.type}")
@@ -194,7 +242,16 @@ class TopicReplier:
 
         
         await self.system_runtime.global_speaking_worker.enqueue(
-            SpeakingJob(send_reply_callback=send_reply_callback, job_content=item, character_id=character_id)
+            SpeakingJob(
+                send_reply_callback=send_reply_callback,
+                job_content=item,
+                character_id=character_id,
+                trace_id=trace_id,
+                user_id=self.user_id,
+                topic_id=topic_id,
+                reply_generated_monotonic=reply_generated_monotonic,
+                reply_generated_ts=reply_generated_ts,
+            )
         )
 
 

@@ -1,7 +1,7 @@
 """
 Example of algorithm for MSAF
 """
-from src.world.learn_sing_songs.song_learner.src.msaf.algorithms.interface import SegmenterInterface
+from msaf.algorithms.interface import SegmenterInterface
 import numpy as np
 
 

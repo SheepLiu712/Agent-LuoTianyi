@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Header, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
 import sys
@@ -22,15 +23,15 @@ from src.system.user_interface.types import (
     PreferenceOverwriteRequest,
 )
 from src.system.user_interface.websocket_service import WebSocketConnection
-from src.system.system_runtime import (
-    SystemRuntime,
-    get_system_runtime,
-    init_system_runtime,
-    shutdown_system_runtime,
-)
+from src.system.user_interface.admin_interface import router as admin_router
+from src.system.admin import get_admin_shell, init_admin_shell, shutdown_admin_shell
 
 from src.utils.helpers import load_config
-from src.utils.logger import get_logger
+from src.utils.logger import get_logger, install_access_log_filter
+
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from src.system.system_runtime import SystemRuntime
 
 logger = get_logger("server_main")
 config = load_config("config/config.json")
@@ -38,36 +39,88 @@ config = load_config("config/config.json")
 
 @asynccontextmanager
 async def startup_event(app: FastAPI):
-    await init_system_runtime(config)
-    logger.info("系统运行时初始化完成，服务已准备接收连接")
+    install_access_log_filter()
+    await init_admin_shell(root_dir=current_dir)
+    logger.info("AdminShell 初始化完成，等待配置并启动系统运行时")
     try:
         yield
     finally:
-        logger.info("正在关闭系统运行时")
-        await shutdown_system_runtime()
-        logger.info("系统运行时已关闭")
+        logger.info("正在关闭 AdminShell 和系统运行时")
+        await shutdown_admin_shell()
+        logger.info("AdminShell 已关闭")
 
 
-def get_runtime() -> SystemRuntime:
-    return get_system_runtime()
+def runtime_not_ready_detail() -> dict:
+    status = get_admin_shell().runtime_supervisor.status()
+    return {
+        "ok": False,
+        "code": "SYSTEM_RUNTIME_NOT_READY",
+        "message": "服务端尚未完成配置或系统运行时未启动",
+        "runtime": status,
+    }
+
+
+def get_runtime():
+    runtime = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail=runtime_not_ready_detail())
+    return runtime
 
 
 app = FastAPI(lifespan=startup_event)
+app.include_router(admin_router)
+
+admin_ui_build = os.path.join(current_dir, "admin_ui", "admin_static")
+admin_ui_assets = os.path.join(admin_ui_build, "assets")
+if os.path.isdir(admin_ui_assets):
+    app.mount("/admin/assets", StaticFiles(directory=admin_ui_assets), name="admin-assets")
 
 # ——————————————————————————————————————————————————————————————————
 # 主要的 API 路由定义
 # ——————————————————————————————————————————————————————————————————
 
+@app.get("/admin")
+@app.get("/admin/{path:path}")
+async def admin_index(path: str = ""):
+    index_path = os.path.join(admin_ui_build, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return HTMLResponse(
+        "<h1>AgentLuo Server Console</h1>"
+        "<p>Admin UI has not been built yet. Run <code>cd server/admin_ui && npm install && npm run build</code>.</p>"
+    )
+
 @app.websocket("/chat_ws")
-async def chat_ws(
-    websocket: WebSocket,
-    system_runtime: SystemRuntime = Depends(get_runtime),
-):
-    await websocket.accept()
+async def chat_ws(websocket: WebSocket):
+    try:
+        await websocket.accept()
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected before accept on /chat_ws")
+        return
+
+    system_runtime: "SystemRuntime" = get_admin_shell().runtime_supervisor.runtime
+    if system_runtime is None:
+        try:
+            await websocket.send_json(
+                {
+                    "type": "system_not_ready",
+                    "payload": runtime_not_ready_detail(),
+                }
+            )
+            await websocket.close(code=1013)
+        except WebSocketDisconnect:
+            logger.info("WebSocket client disconnected before system_not_ready on /chat_ws")
+        return
+
     logger.info("WebSocket client connected to /chat_ws")
     websocket_service = system_runtime.websocket_service  # WebSocketService 实例
     gcsm = system_runtime.gcsm  # 全局聊天流管理器实例
-    await websocket_service.send_system_ready_event(websocket)
+    try:
+        await websocket_service.send_system_ready_event(websocket)
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected before system_ready on /chat_ws")
+        return
+
     ws_connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
     try:
         await ws_connection.auth(websocket_service, system_runtime.database_manager)  # 等待认证，认证成功之后将ws和用户信息绑定
@@ -81,14 +134,6 @@ async def chat_ws(
 
             if event.event_type == WSEventType.HB_PING.value:
                 await websocket_service.handle_ping_event(ws_connection, event)
-                continue
-
-            # 处理用户偏好同步事件
-            if event.event_type == WSEventType.USER_PREFERENCE_SYNC.value:
-                await websocket_service.send_ack_event(ws_connection, event)
-                preferences = event.payload if isinstance(event.payload, dict) else {}
-                if ws_connection.user_uuid and preferences:
-                    system_runtime.database_manager.save_user_preferences(ws_connection.user_uuid, preferences)
                 continue
 
             if websocket_service.is_chat_related_event(event):
@@ -113,7 +158,7 @@ async def chat_ws(
 
 
 @app.get("/auth/public_key")
-async def get_public_key(system_runtime: SystemRuntime = Depends(get_runtime)):
+async def get_public_key(system_runtime = Depends(get_runtime)):
     """
     获取用户登录加密密码时使用的公钥。客户端在登录或注册时使用该公钥加密密码后发送给服务器。
     """
@@ -124,7 +169,7 @@ async def get_public_key(system_runtime: SystemRuntime = Depends(get_runtime)):
 async def auto_login(
     req: AutoLoginRequest,
     background_tasks: BackgroundTasks,
-    system_runtime: SystemRuntime = Depends(get_runtime),
+    system_runtime = Depends(get_runtime),
     request: Request = None,
 ):
     """
@@ -146,7 +191,7 @@ async def auto_login(
 @app.post("/auth/register")
 async def register(
     req: RegisterRequest,
-    system_runtime: SystemRuntime = Depends(get_runtime),
+    system_runtime = Depends(get_runtime),
     request: Request = None,
 ):
     """
@@ -169,7 +214,7 @@ async def register(
 @app.post("/auth/reset_account")
 async def reset_account(
     req: ResetAccountRequest,
-    system_runtime: SystemRuntime = Depends(get_runtime),
+    system_runtime = Depends(get_runtime),
     request: Request = None,
 ):
     """以邀请码重置账号的用户名和密码。
@@ -192,7 +237,7 @@ async def reset_account(
 async def login(
     req: LoginRequest,
     background_tasks: BackgroundTasks,
-    system_runtime: SystemRuntime = Depends(get_runtime),
+    system_runtime = Depends(get_runtime),
     request: Request = None,
 ):
     """
@@ -214,7 +259,7 @@ async def login(
 @app.post("/preference/get")
 async def get_preference(
     req: PreferenceGetRequest,
-    system_runtime: SystemRuntime = Depends(get_runtime),
+    system_runtime = Depends(get_runtime),
 ):
     """获取偏好设置：委托到 UserInterface。"""
     return await system_runtime.user_interface.get_preference(req, system_runtime)
@@ -223,7 +268,7 @@ async def get_preference(
 @app.post("/preference/overwrite")
 async def overwrite_preference(
     req: PreferenceOverwriteRequest,
-    system_runtime: SystemRuntime = Depends(get_runtime),
+    system_runtime = Depends(get_runtime),
 ):
     """覆盖偏好设置：委托到 UserInterface。"""
     return await system_runtime.user_interface.overwrite_preference(req, system_runtime)
@@ -233,7 +278,7 @@ async def overwrite_preference(
 async def get_history(
     request: HistoryRequest = Depends(),
     authorization: str | None = Header(default=None),
-    system_runtime: SystemRuntime = Depends(get_runtime),
+    system_runtime = Depends(get_runtime),
 ):
     """获取聊天历史：委托到 UserInterface。"""
     logger.info(f"Server received: Get history request from {request.username}")
@@ -252,7 +297,7 @@ async def get_history(
 @app.post("/get_image")
 async def get_image(
     request: ImageRequest,
-    system_runtime: SystemRuntime = Depends(get_runtime),
+    system_runtime = Depends(get_runtime),
 ):
     """
     获取图片接口。用户提供图片的服务器路径，服务器返回图片二进制数据。
@@ -272,7 +317,7 @@ async def get_image(
 @app.post("/update_image_client_path")
 async def update_image_client_path(
     request: ImageRequest,
-    system_runtime: SystemRuntime = Depends(get_runtime),
+    system_runtime = Depends(get_runtime),
 ):
     """
     更新图片的客户端路径。用户提供图片的 UUID 和新的客户端路径，服务器更新数据库记录。

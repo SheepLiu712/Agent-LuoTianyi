@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 from typing import Iterable, List
 
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
+import msaf as msaf
 
 
 def parse_args() -> argparse.Namespace:

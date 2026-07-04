@@ -16,8 +16,8 @@ import os
 import six
 
 # Local stuff
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
-from src.world.learn_sing_songs.song_learner.src.msaf.exceptions import WrongFeaturesFormatError, NoFeaturesFileError,\
+import msaf as msaf
+from msaf.exceptions import WrongFeaturesFormatError, NoFeaturesFileError,\
     FeaturesNotFound, FeatureTypeNotFound, FeatureParamsError, NoAudioFileError
 
 # Three types of features at the moment:

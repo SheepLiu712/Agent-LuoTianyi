@@ -75,6 +75,13 @@ def test_singing_known_song_interfaces_return_usable_results(singing_capability:
     assert audio[:4] == b"RIFF"
 
 
+def test_singing_song_lookup_accepts_directory_name_alias(singing_capability: "SingingCapability"):
+    correct_song, segments = singing_capability.can_i_sing_song(CHARACTER_ID, "HelloByeDays")
+
+    assert correct_song == "HelloByeDays"
+    assert segments
+
+
 def test_singing_default_character_interfaces_work(singing_capability: "SingingCapability"):
     correct_song, segments = singing_capability.can_i_sing_song(CHARACTER_ID, KNOWN_SONG)
 

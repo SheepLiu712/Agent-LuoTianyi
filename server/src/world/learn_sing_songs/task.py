@@ -13,14 +13,17 @@ if TYPE_CHECKING:
     from src.system.system_runtime import SystemRuntime
     from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
     from src.system.database.event_store import EventStore
+    from src.capabilities.singing.singing_manager import SingingManager
 
 
 class LearnSingSongsTask(WorldTask):
-    task_name = "learn_sing_songs"
+    base_task_name = "learn_sing_songs"
 
-    def __init__(self, config: Dict[str, Any] | None = None, character_id: str = "luotianyi") -> None:
-        super().__init__(self.task_name, config)
+    def __init__(self, config: Dict[str, Any] | None = None, character_id: str = "luotianyi", singing_manager: "SingingManager" | None = None) -> None:
         self.character_id = character_id
+        self.singing_manager = singing_manager
+        self.character_name: str = getattr(singing_manager, "character_name", "洛天依")
+        super().__init__(f"{self.base_task_name}:{character_id}", config)
         self.logger = get_logger(__name__)
         self.system_runtime: "SystemRuntime" | None = None
         self.event_store: "EventStore" | None = None
@@ -31,7 +34,7 @@ class LearnSingSongsTask(WorldTask):
         self.system_runtime = system_runtime
         database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
-        self.auto_song_learner = self._build_auto_song_learner(system_runtime)
+        self.auto_song_learner = self._build_auto_song_learner()
 
     def ensure_dependencies(self) -> None:
         """检查学歌任务的基础依赖。"""
@@ -59,6 +62,8 @@ class LearnSingSongsTask(WorldTask):
 
         if learned and self.event_store is not None:
             asyncio.run(self._write_learned_event(learned))
+        if learned:
+            self._reload_singing_library()
 
         return WorldTaskResult.success(
             self.task_name,
@@ -69,17 +74,26 @@ class LearnSingSongsTask(WorldTask):
             awaiting=awaiting,
         )
 
-    def _build_auto_song_learner(self, system_runtime: "SystemRuntime") -> "AutoSongLearner" | None:
+    def _build_auto_song_learner(self) -> "AutoSongLearner" | None:
         try:
             from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
 
-            singing = getattr(getattr(system_runtime, "capability_manager", None), "singing", None)
-            manager = getattr(singing, "singing_manager", {}).get(self.character_id)
+            manager = self.singing_manager
+            if manager is None:
+                self._init_error = f"singing manager for {self.character_id} is unavailable"
+                return None
+
+            self.singing_manager = manager
+            self.character_name = getattr(manager, "character_name", self.character_name)
             wishlist = getattr(manager, "wishlist", None)
             if wishlist is None:
                 self._init_error = f"singing wishlist for {self.character_id} is unavailable"
                 return None
-            return AutoSongLearner(self.config, wishlist)
+            resource_path = getattr(manager, "resource_path", None)
+            if not resource_path:
+                self._init_error = f"singing resource_path for {self.character_id} is unavailable"
+                return None
+            return AutoSongLearner(self.config, self.character_name, wishlist, resource_path=resource_path)
         except Exception as exc:
             self._init_error = str(exc)
             self.logger.warning(f"LearnSingSongsTask initialization skipped: {exc}")
@@ -90,7 +104,8 @@ class LearnSingSongsTask(WorldTask):
             return
         await self.event_store.add_event(
             {
-                "title": "洛天依学会了新歌",
+                "character": self.character_id,
+                "title": f"{self.character_name}学会了新歌",
                 "description": "、".join(learned),
                 "event_type": UnifiedEventType.NEW_SONG.value,
                 "start_datetime": datetime.now(),
@@ -98,3 +113,16 @@ class LearnSingSongsTask(WorldTask):
                 "source": "world_song_learner",
             }
         )
+
+    def _reload_singing_library(self) -> None:
+        if self.system_runtime is None:
+            return
+        singing = getattr(getattr(self.system_runtime, "capability_manager", None), "singing", None)
+        reload_songs = getattr(singing, "reload_songs", None)
+        if not callable(reload_songs):
+            return
+        try:
+            reload_songs(self.character_id)
+        except Exception as exc:
+            self.logger.warning(f"Failed to reload singing library after learning songs: {exc}")
+

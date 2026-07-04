@@ -7,7 +7,7 @@ class ListenTimer:
         self.config = config
         self.username = username
         self.user_id = user_id
-        self.listening_timeout_seconds: float = float(config.get("timeout", 2.5))
+        self.listening_timeout_seconds: float = float(config.get("timeout", 1.0))
         self.listening_deadline: Optional[float] = None
         self._timer_lock = asyncio.Lock()
 

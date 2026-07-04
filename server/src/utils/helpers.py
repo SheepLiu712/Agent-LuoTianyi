@@ -81,7 +81,7 @@ def get_unified_song_name(song_name: str) -> str:
 
     # 去除空白和常见干扰标点
     unified = re.sub(r"\s+", "", unified)
-    unified = re.sub(r"[？！!?~，,、·《》]", "", unified)
+    unified = re.sub(r"[？！!?~，,、·《》&＆]", "", unified)
 
     return unified.strip().lower()
 

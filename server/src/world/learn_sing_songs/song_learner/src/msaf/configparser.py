@@ -16,7 +16,7 @@ from six import string_types
 import sys
 import warnings
 
-import src.world.learn_sing_songs.song_learner.src.msaf as msaf
+import msaf as msaf
 
 
 MSAF_FLAGS = os.getenv(msaf.MSAF_FLAGS_VAR, "")

@@ -28,5 +28,9 @@ mineflayer/
 
 # Secrets
 server/config/encryption.key
+server/config/secrets.local.env
+server/config/admin_auth.json
+server/config/admin_setup_token.txt
+server/config/qq_music_credential.json
 bili_cookie.txt
 config/bili_cookie.txt

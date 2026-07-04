@@ -17,6 +17,19 @@
                     "max_tokens": 8192,
                     "top_p": 0.9
                 }
+            },
+            "qwen3.6-flash": {
+                "api_type": "openai",
+                "model": "qwen3.6-flash",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "can_enable_thinking": true,
+                "can_use_json": true,
+                "default_params": {
+                    "temperature": 0.7,
+                    "max_tokens": 8192,
+                    "top_p": 0.9
+                }
             }
         },
         "available_vlms": {
@@ -44,7 +57,8 @@
                 "llm": {
                     "name": "qwen3.5-plus",
                     "enable_thinking": false,
-                    "use_json": true
+                    "use_json": true,
+                    "params": {}
                 },
                 "prompt_name": "event_store_prompt"
             }
@@ -54,7 +68,8 @@
                 "llm": {
                     "name": "qwen3.5-plus",
                     "enable_thinking": false,
-                    "use_json": true
+                    "use_json": true,
+                    "params": {}
                 },
                 "prompt_name": "memory_store_prompt"
             }
@@ -77,10 +92,7 @@
         "sing": {
             "luotianyi": {
                 "character_name": "洛天依",
-                "resource_path": "res/sing_song/luotianyi",
-                "singing_manager": {
-                    "resource_path": "res/sing_song/luotianyi"
-                }
+                "resource_path": "res/sing_song/luotianyi"
             }
         },
         "image_understanding": {
@@ -88,7 +100,10 @@
                 "vlm": {
                     "name": "qwen3-vl-plus"
                 },
-                "prompt_name": "vision_interaction_prompt"
+                "prompt_name": "vision_interaction_prompt",
+                "enable_thinking": false,
+                "use_json": false,
+                "params": {}
             }
         }
     },
@@ -110,7 +125,8 @@
                 "llm": {
                     "name": "qwen3.5-plus",
                     "enable_thinking": false,
-                    "use_json": false
+                    "use_json": false,
+                    "params": {}
                 },
                 "prompt_name": "summary_prompt"
             },
@@ -133,15 +149,9 @@
                         "欢迎来到这里，今天想聊点什么呢？"
                     ],
                     "audio_path": [
-                        "res/tts/static_audio/first_greet_1.wav",
-                        "res/tts/static_audio/first_greet_2.wav"
+                        "res/tts/luotianyi/static_audio/first_greet_1.wav",
+                        "res/tts/luotianyi/static_audio/first_greet_2.wav"
                     ]
-                },
-                "return_login": {
-                    "prompt": "return_login_activity_prompt"
-                },
-                "user_silence": {
-                    "prompt": "user_silence_activity_prompt"
                 }
             },
             "reminder": {
@@ -192,8 +202,8 @@
         "agent": {
             "preprocessing": {
                 "song_entity_linker": {
-                    "songname_file": "res/knowledge/songname.json",
-                    "lyrics_file": "res/knowledge/lyrics.json"
+                    "songname_file": "res/knowledge/song_name_keywords.txt",
+                    "lyric_file": "res/knowledge/song_lyric_keywords.txt"
                 }
             },
             "memory": {
@@ -221,7 +231,9 @@
                     "llm_module": {
                         "llm": {
                             "name": "qwen3.5-plus",
-                            "enable_thinking": true
+                            "enable_thinking": true,
+                            "use_json": false,
+                            "params": {}
                         },
                         "prompt_name": "user_profile_update_prompt"
                     }
@@ -232,7 +244,10 @@
                         "llm": {
                             "name": "qwen3.5-plus",
                             "enable_thinking": false,
-                            "use_json": true
+                            "use_json": true,
+                            "params": {
+                                "max_tokens": 800
+                            }
                         },
                         "prompt_name": "memory_write_prompt"
                     }
@@ -241,9 +256,10 @@
             "date_detector": {
                 "llm_module": {
                     "llm": {
-                        "name": "qwen3.5-plus",
+                        "name": "qwen3.6-flash",
                         "enable_thinking": false,
-                        "use_json": true
+                        "use_json": true,
+                        "params": {}
                     },
                     "prompt_name": "date_detection_prompt"
                 }
@@ -251,9 +267,10 @@
             "topic_extractor": {
                 "llm_module": {
                     "llm": {
-                        "name": "qwen3.5-plus",
+                        "name": "qwen3.6-flash",
                         "enable_thinking": false,
-                        "use_json": true
+                        "use_json": true,
+                        "params": {}
                     },
                     "prompt_name": "topic_extraction_prompt"
                 }
@@ -269,7 +286,8 @@
                     "llm": {
                         "name": "qwen3.5-plus",
                         "enable_thinking": false,
-                        "use_json": false
+                        "use_json": false,
+                        "params": {}
                     },
                     "prompt_name": "topic_reply_prompt"
                 }
@@ -285,11 +303,14 @@
                     "minute": 0
                 }
             },
+            "daily_run_probability": 0.1,
             "amap": {
                 "api_key": "$AMAP_KEY",
                 "base_url": "https://restapi.amap.com/v3",
-                "timeout_seconds": 10,
-                "max_retries": 1
+                "timeout_seconds": 20,
+                "connect_timeout_seconds": 5,
+                "max_retries": 3,
+                "retry_backoff_seconds": 0.8
             },
             "session": {
                 "initial_energy": 100,
@@ -331,7 +352,9 @@
                 "fail_on_error": true,
                 "llm": {
                     "name": "qwen3.5-plus",
-                    "enable_thinking": true
+                    "enable_thinking": true,
+                    "use_json": false,
+                    "params": {}
                 }
             },
             "llm_modules": {
@@ -339,7 +362,8 @@
                     "llm": {
                         "name": "qwen3.5-plus",
                         "enable_thinking": false,
-                        "use_json": true
+                        "use_json": true,
+                        "params": {}
                     },
                     "prompt_name": "citywalk_llm_prompt"
                 },
@@ -347,7 +371,8 @@
                     "llm": {
                         "name": "qwen3.5-plus",
                         "enable_thinking": false,
-                        "use_json": false
+                        "use_json": false,
+                        "params": {}
                     },
                     "prompt_name": "citywalk_llm_prompt"
                 },
@@ -355,7 +380,10 @@
                     "vlm": {
                         "name": "qwen3-vl-plus"
                     },
-                    "prompt_name": "citywalk_vlm_prompt"
+                    "prompt_name": "citywalk_vlm_prompt",
+                    "enable_thinking": false,
+                    "use_json": false,
+                    "params": {}
                 }
             },
             "environment": {
@@ -364,7 +392,9 @@
                 "llm_module": {
                     "llm": {
                         "name": "qwen3.5-plus",
-                        "enable_thinking": false
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {}
                     },
                     "prompt_name": "citywalk_llm_prompt"
                 },
@@ -372,7 +402,10 @@
                     "vlm": {
                         "name": "qwen3-vl-plus"
                     },
-                    "prompt_name": "citywalk_vlm_prompt"
+                    "prompt_name": "citywalk_vlm_prompt",
+                    "enable_thinking": false,
+                    "use_json": false,
+                    "params": {}
                 }
             }
         },
@@ -404,13 +437,16 @@
                 "llm_module": {
                     "llm": {
                         "name": "qwen3.5-plus",
-                        "enable_thinking": false
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {}
                     },
                     "prompt_name": "song_knowledge_crawler_prompt"
                 }
             }
         },
         "auto_song_learner": {
+            "enabled": true,
             "clock_config": {
                 "type": "daily",
                 "params": {
@@ -418,9 +454,9 @@
                     "minute": 0
                 }
             },
-            "resource_path": "res/music",
             "songlearner_dir": "src/world/learn_sing_songs/song_learner",
-            "songlearner_resource_dir": "res/song_learner"
+            "songlearner_resource_dir": "res/song_learner",
+            "qq_credential_file": "config/qq_music_credential.json"
         },
         "bili_dynamic_fetcher": {
             "clock_config": {
@@ -437,9 +473,10 @@
             "bili_cookie_file": "config/bili_cookie.txt",
             "llm_module": {
                 "llm": {
-                    "name": "qwen3.5-plus",
+                    "name": "qwen3.6-flash",
                     "enable_thinking": false,
-                    "use_json": true
+                    "use_json": true,
+                    "params": {}
                 },
                 "prompt_name": "bili_dynamic_fetcher_prompt"
             },
@@ -448,7 +485,10 @@
                     "name": "qwen3-vl-plus",
                     "use_json": true
                 },
-                "prompt_name": "bili_dynamic_fetcher_prompt"
+                "prompt_name": "bili_dynamic_fetcher_prompt",
+                "enable_thinking": false,
+                "use_json": true,
+                "params": {}
             }
         },
         "proactive_topic_check": {

@@ -18,7 +18,7 @@ import logging
 import logging.config
 import scipy.sparse
 
-from src.world.learn_sing_songs.song_learner.src.msaf.pymf.nmf import NMF
+from msaf.pymf.nmf import NMF
 
 __all__ = ["RNMF"]
 

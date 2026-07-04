@@ -5,7 +5,7 @@ from torch import nn, einsum, tensor, Tensor
 from torch.nn import Module, ModuleList
 import torch.nn.functional as F
 
-from src.world.learn_sing_songs.song_learner.src.msst_core.models.bs_roformer.attend import Attend
+from msst_core.models.bs_roformer.attend import Attend
 
 from torch.utils.checkpoint import checkpoint
 

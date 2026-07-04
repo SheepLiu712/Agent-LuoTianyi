@@ -107,20 +107,6 @@ export class NetworkClient {
     return this.transport.submitUserTouch(touchArea, clickFrequency, touchMeta, 10000, clientMsgId);
   }
 
-  sendPreferences(preferences: Record<string, unknown>): Promise<SendResult> {
-    if (!this.transport) {
-      addDebugTrace('network', 'sendPreferences blocked: no transport');
-      return Promise.resolve({
-        ok: false,
-        request_id: `local-${Date.now()}`,
-        error: 'not logged in',
-        drop: true,
-      });
-    }
-    addDebugTrace('network', 'sendPreferences');
-    return this.transport.submitUserPreferences(preferences, 10000);
-  }
-
   sendTypingEvent(textLength: number, clientMsgId?: string): Promise<SendResult> {
     if (!this.transport) {
       addDebugTrace('network', 'sendTyping blocked: no transport');

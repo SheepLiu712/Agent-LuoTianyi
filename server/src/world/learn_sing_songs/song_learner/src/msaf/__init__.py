@@ -14,7 +14,7 @@ MSAFRC_FILE = "~/.msafrc"
 MSAFRC_WIN_FILE = "~/.msafrc.txt"
 
 # Get config
-from src.world.learn_sing_songs.song_learner.src.msaf.configdefaults import config
+from msaf.configdefaults import config
 
 # Import all submodules
 from . import features

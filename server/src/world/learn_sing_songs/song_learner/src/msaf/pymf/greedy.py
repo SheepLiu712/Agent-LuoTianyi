@@ -18,8 +18,8 @@ Reconstruction via Greedy Approximation of SVD. ISAAC'2008.
 import time
 import scipy.sparse
 import numpy as np
-from src.world.learn_sing_songs.song_learner.src.msaf.pymf.svd import *
-from src.world.learn_sing_songs.song_learner.src.msaf.pymf.nmf import NMF
+from msaf.pymf.svd import *
+from msaf.pymf.nmf import NMF
 
 __all__ = ["GREEDY"]
 

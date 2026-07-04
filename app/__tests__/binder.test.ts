@@ -16,7 +16,6 @@ describe('AgentBinder', () => {
       sendImage: jest.fn(),
       sendProactiveText: jest.fn(),
       sendTouch: jest.fn(),
-      sendPreferences: jest.fn(),
       sendTyping: jest.fn(),
       sendImageSelecting: jest.fn(),
       sendImageSelectingCancel: jest.fn(),
@@ -77,10 +76,6 @@ describe('AgentBinder', () => {
       expect(sendCallbacks.sendTouch).toHaveBeenCalledWith('辫子', undefined);
     });
 
-    it('sendPreferences should delegate', async () => {
-      await binder.sendPreferences({ theme: 'dark', tts_speed: 1.2 });
-      expect(sendCallbacks.sendPreferences).toHaveBeenCalledWith({ theme: 'dark', tts_speed: 1.2 });
-    });
   });
 
   describe('emit methods', () => {

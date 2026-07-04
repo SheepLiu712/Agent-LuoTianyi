@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 logger = get_logger("database")
 
 JWT_SECRET_ENV = "JWT_SECRET"
-JWT_SECRET = os.environ.get(JWT_SECRET_ENV)
 ALGORITHM = "HS256"
 
 _BCRYPT_PREFIXES = ("$2a$", "$2b$", "$2y$")
@@ -64,6 +63,7 @@ class DatabaseManager:
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         self.config = config or {}
+        self.jwt_secret = os.environ.get(JWT_SECRET_ENV)
         self._redis: Optional[RedisBuffer] = None
         self.event_store: Optional[EventStore] = None
         self.memory_store: Optional[MemoryStore] = None
@@ -299,7 +299,7 @@ class DatabaseManager:
             db.close()
 
     def generate_message_token(self, username: str) -> Optional[str]:
-        if not JWT_SECRET:
+        if not self.jwt_secret:
             logger.error("JWT_SECRET is not set. Cannot generate message token.")
             return None
         db = self._new_session()
@@ -307,7 +307,7 @@ class DatabaseManager:
             user = db.query(User).filter_by(username=username).first()
             if not user:
                 return None
-            message_token = jwt.encode({"user_uuid": user.uuid}, JWT_SECRET, algorithm=ALGORITHM)
+            message_token = jwt.encode({"user_uuid": user.uuid}, self.jwt_secret, algorithm=ALGORITHM)
             redis = self._ensure_redis()
             redis.setex(f"user_message_token:{user.uuid}", 3600, message_token)
             return message_token
@@ -315,11 +315,11 @@ class DatabaseManager:
             db.close()
 
     def decode_message_token(self, token: str) -> Optional[str]:
-        if not JWT_SECRET:
+        if not self.jwt_secret:
             logger.error("JWT_SECRET is not set. Cannot decode message token.")
             return None
         try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+            payload = jwt.decode(token, self.jwt_secret, algorithms=[ALGORITHM])
             return payload.get("user_uuid")
         except jwt.JWTError:
             return None
@@ -836,25 +836,29 @@ class DatabaseManager:
         redis = self._ensure_redis()
         db = self._new_session()
         try:
-            def _write() -> bool:
+            def _write() -> Optional[int]:
                 user = db.query(User).filter(User.uuid == user_id).first()
                 if not user:
-                    return False
+                    return None
                 context = self._get_or_create_conversation_context(db, user, character_id)
-                if expected_context_count is not None and (context.context_memory_count or 0) != expected_context_count:
-                    return False
+                current_context_count = context.context_memory_count or 0
+                retained_context_count = keep_recent_count
+                if expected_context_count is not None:
+                    if current_context_count < expected_context_count:
+                        return None
+                    retained_context_count += current_context_count - expected_context_count
                 context.context_summary = new_summary
-                context.context_memory_count = keep_recent_count
+                context.context_memory_count = retained_context_count
                 if character_id == "luotianyi":
                     user.context_summary = new_summary
-                    user.context_memory_count = keep_recent_count
+                    user.context_memory_count = retained_context_count
                 if commit:
                     db.commit()
-                return True
+                return retained_context_count
 
-            updated = run_sql_write(_write)
+            retained_context_count = run_sql_write(_write)
 
-            if updated:
+            if retained_context_count is not None:
                 redis_key = self._context_redis_key(user_id, character_id)
                 with redis.pipeline() as pipe:
                     for _ in range(3):
@@ -864,11 +868,11 @@ class DatabaseManager:
                             if data:
                                 data.summary = new_summary
                                 convs = data.conversations
-                                if keep_recent_count > 0:
-                                    data.conversations = convs[-keep_recent_count:]
+                                if retained_context_count > 0:
+                                    data.conversations = convs[-retained_context_count:]
                                 else:
                                     data.conversations = []
-                                data.context_count = keep_recent_count
+                                data.context_count = retained_context_count
                                 pipe.multi()
                                 pipe.setex(redis_key, 3600, data)
                                 pipe.execute()
@@ -877,7 +881,7 @@ class DatabaseManager:
                             break
                         except WatchError:
                             continue
-            return bool(updated)
+            return retained_context_count is not None
         except Exception as e:
             logger.error(f"compact_conversation_context error: {e}")
             db.rollback()

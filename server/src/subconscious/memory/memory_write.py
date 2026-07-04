@@ -55,6 +55,10 @@ class MemoryWriter:
         # then write only non-duplicate items.
         user_items = memory_payload.get("user_memory", [])
         event_items = memory_payload.get("event_memory", [])
+        result: Dict[str, Any] = {
+            "payload": memory_payload,
+            "items": [],
+        }
 
         if user_items:
             # Single de-dup pass for all user memory items
@@ -64,9 +68,14 @@ class MemoryWriter:
             for content in user_items:
                 text = (content or "").strip()
                 if not text or text in seen_texts:
+                    result["items"].append({
+                        "memory_type": "user_memory",
+                        "content": text,
+                        "status": "skipped_duplicate_or_empty",
+                    })
                     continue
                 seen_texts.add(text)
-                await self.write_user_memory(
+                written = await self.write_user_memory(
                     vector_store=vector_store,
                     memory_store=memory_store,
                     user_id=user_id,
@@ -74,6 +83,11 @@ class MemoryWriter:
                     owner_character_id=owner_character_id,
                     commit=commit,
                 )
+                result["items"].append({
+                    "memory_type": "user_memory",
+                    "content": text,
+                    "status": "written" if written else "skipped",
+                })
 
         if event_items:
             today = time.strftime("%Y-%m-%d")
@@ -84,9 +98,15 @@ class MemoryWriter:
                 text = (content or "").strip()
                 normalized_text = self._normalize_text(text)
                 if not text or normalized_text in seen_texts:
+                    result["items"].append({
+                        "memory_type": "event_memory",
+                        "content": text,
+                        "status": "skipped_duplicate_or_empty",
+                        "event_date": today,
+                    })
                     continue
                 seen_texts.add(normalized_text)
-                await self.write_event_memory(
+                written = await self.write_event_memory(
                     vector_store=vector_store,
                     memory_store=memory_store,
                     user_id=user_id,
@@ -94,6 +114,13 @@ class MemoryWriter:
                     owner_character_id=owner_character_id,
                     commit=commit,
                 )
+                result["items"].append({
+                    "memory_type": "event_memory",
+                    "content": text,
+                    "status": "written" if written else "skipped",
+                    "event_date": today,
+                })
+        return result
 
     async def _extract_knowledge(
         self,
@@ -115,6 +142,7 @@ class MemoryWriter:
         """
         history_str = history
         empty_payload = {"user_memory": [], "event_memory": []}
+        response = ""
         try:
             response = await self.llm.generate_response(
                 use_json=True,
@@ -126,8 +154,27 @@ class MemoryWriter:
             logger.debug(f"Memory extraction payload: {payload}")
             return payload
         except Exception as e:
-            logger.warning(f"Error generating memory payload: {e}")
+            if response:
+                logger.warning(
+                    "Error generating memory payload: "
+                    f"{e}; raw_response_excerpt={json.dumps(self._response_excerpt(response), ensure_ascii=False)}"
+                )
+            else:
+                logger.warning(f"Error generating memory payload: {e}")
             return empty_payload
+
+    def _response_excerpt(self, response: str, limit: int = 1000) -> Dict[str, Any]:
+        raw = str(response or "")
+        if len(raw) <= limit * 2:
+            return {
+                "length": len(raw),
+                "text": raw,
+            }
+        return {
+            "length": len(raw),
+            "prefix": raw[:limit],
+            "suffix": raw[-limit:],
+        }
 
     def _parse_memory_json_response(self, response: str) -> Dict[str, List[str]]:
         """解析 LLM 返回的 JSON，兼容 ```json 代码块包装。"""

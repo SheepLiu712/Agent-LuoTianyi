@@ -4,11 +4,14 @@ from src.utils.helpers import load_config
 
 
 DEFAULT_CITYWALK_CONFIG: Dict[str, Any] = {
+    "daily_run_probability": 0.1,
     "amap": {
         "api_key": "$AMAP_KEY",
         "base_url": "https://restapi.amap.com/v3",
-        "timeout_seconds": 10,
-        "max_retries": 1,
+        "timeout_seconds": 20,
+        "connect_timeout_seconds": 5,
+        "max_retries": 3,
+        "retry_backoff_seconds": 0.8,
     },
     "session": {
         "initial_energy": 100,
@@ -74,6 +77,10 @@ def load_citywalk_config(citywalk: Dict[str,Any]) -> Dict[str, Any]:
 
     # Merge defaults manually to avoid side effects.
     merged = {
+        "daily_run_probability": citywalk.get(
+            "daily_run_probability",
+            DEFAULT_CITYWALK_CONFIG["daily_run_probability"],
+        ),
         "amap": {**DEFAULT_CITYWALK_CONFIG["amap"], **citywalk.get("amap", {})},
         "session": {**DEFAULT_CITYWALK_CONFIG["session"], **citywalk.get("session", {})},
         "search": {**DEFAULT_CITYWALK_CONFIG["search"], **citywalk.get("search", {})},

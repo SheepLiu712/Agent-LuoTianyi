@@ -2,9 +2,9 @@
 import numpy as np
 from scipy import ndimage
 
-import src.world.learn_sing_songs.song_learner.src.msaf.utils as U
-from src.world.learn_sing_songs.song_learner.src.msaf.algorithms.interface import SegmenterInterface
-from src.world.learn_sing_songs.song_learner.src.msaf import pymf
+import msaf.utils as U
+from msaf.algorithms.interface import SegmenterInterface
+from msaf import pymf
 
 
 def median_filter(X, M=8):

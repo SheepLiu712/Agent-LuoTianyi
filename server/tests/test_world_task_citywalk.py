@@ -8,6 +8,7 @@ if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.world.citywalk.task import CitywalkTask
+from src.world.citywalk.errors import AMapRequestError
 
 
 class FakeEventStore:
@@ -35,7 +36,7 @@ def test_citywalk_run_once_skips_without_service():
 
 def test_citywalk_run_once_writes_travel_event():
     event_store = FakeEventStore()
-    task = CitywalkTask({})
+    task = CitywalkTask({"daily_run_probability": 1.0})
     task.event_store = event_store
     task.citywalk_service = SimpleNamespace(run_once=lambda: "data/citywalk_reports/today.md")
 
@@ -51,13 +52,42 @@ def test_citywalk_run_once_writes_travel_event():
 
 
 def test_citywalk_run_once_skips_when_no_diary():
-    task = CitywalkTask({})
+    task = CitywalkTask({"daily_run_probability": 1.0})
     task.citywalk_service = SimpleNamespace(run_once=lambda: "")
 
     result = task.run_once()
 
     assert result.ok is True
     assert result.skipped is True
+
+
+def test_citywalk_run_once_skips_runtime_error():
+    task = CitywalkTask({"daily_run_probability": 1.0})
+
+    def fail():
+        raise AMapRequestError("AMap timed out")
+
+    task.citywalk_service = SimpleNamespace(run_once=fail)
+
+    result = task.run_once()
+
+    assert result.ok is True
+    assert result.skipped is True
+    assert result.data["error"] == "AMap timed out"
+
+
+def test_citywalk_run_once_skips_when_daily_sample_misses():
+    calls = []
+    task = CitywalkTask({"daily_run_probability": 0.0})
+    task.citywalk_service = SimpleNamespace(run_once=lambda: calls.append("run"))
+
+    result = task.run_once()
+
+    assert result.ok is True
+    assert result.skipped is True
+    assert result.message == "citywalk daily sample skipped"
+    assert result.data["probability"] == 0.0
+    assert calls == []
 
 
 def test_citywalk_build_llm_modules_registers_expected_modules():

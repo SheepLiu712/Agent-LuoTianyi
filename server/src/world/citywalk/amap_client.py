@@ -14,8 +14,10 @@ class AMapClient:
         amap_cfg = config.get("amap", {})
         self.api_key = amap_cfg.get("api_key", "")
         self.base_url = amap_cfg.get("base_url", "https://restapi.amap.com/v3").rstrip("/")
-        self.timeout_seconds = int(amap_cfg.get("timeout_seconds", 10))
-        self.max_retries = int(amap_cfg.get("max_retries", 1))
+        self.timeout_seconds = float(amap_cfg.get("timeout_seconds", 20))
+        self.connect_timeout_seconds = float(amap_cfg.get("connect_timeout_seconds", 5))
+        self.max_retries = int(amap_cfg.get("max_retries", 3))
+        self.retry_backoff_seconds = float(amap_cfg.get("retry_backoff_seconds", 0.8))
         self.logger = get_logger(__name__)
         self.session = requests.Session()
 
@@ -29,7 +31,11 @@ class AMapClient:
         last_error: Optional[Exception] = None
         for attempt in range(self.max_retries + 1):
             try:
-                resp = self.session.get(url, params=query, timeout=self.timeout_seconds)
+                resp = self.session.get(
+                    url,
+                    params=query,
+                    timeout=(self.connect_timeout_seconds, self.timeout_seconds),
+                )
                 resp.raise_for_status()
                 payload = resp.json()
                 if payload.get("status") != "1":
@@ -37,13 +43,26 @@ class AMapClient:
                         f"AMap business error: info={payload.get('info')} infocode={payload.get('infocode')}"
                     )
                 return payload
-            except (requests.RequestException, ValueError, AMapResponseError) as exc:
+            except AMapResponseError:
+                raise
+            except (requests.RequestException, ValueError) as exc:
                 last_error = exc
-                self.logger.warning("AMap request failed at attempt %s: %s", attempt + 1, exc)
+                self.logger.warning(
+                    "AMap request failed at attempt %s/%s path=%s timeout=(connect %.1fs, read %.1fs): %s",
+                    attempt + 1,
+                    self.max_retries + 1,
+                    path,
+                    self.connect_timeout_seconds,
+                    self.timeout_seconds,
+                    exc,
+                )
                 if attempt < self.max_retries:
-                    time.sleep(0.3 * (attempt + 1))
+                    sleep_seconds = self.retry_backoff_seconds * (2 ** attempt)
+                    time.sleep(sleep_seconds)
 
-        raise AMapRequestError(f"AMap request failed: {last_error}")
+        raise AMapRequestError(
+            f"AMap request failed after {self.max_retries + 1} attempts at {path}: {last_error}"
+        )
 
     def search_nearby_pois(
         self,

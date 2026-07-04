@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import argparse
+import os
 import asyncio
 import base64
 import importlib
@@ -42,6 +43,10 @@ QQ_LYRIC_URL = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
 QQ_MUSICU_URL = "https://u.y.qq.com/cgi-bin/musicu.fcg"
 
 
+class QQMusicCredentialError(RuntimeError):
+    """Raised when QQ Music credential is missing, invalid, or rejected by SDK."""
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -51,12 +56,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--song_name", required=True, help="歌曲名（必填）。")
     parser.add_argument("--singer", default="洛天依", help="歌手名（默认：洛天依）。")
-    parser.add_argument("--output_dir", default="res/music/songs", help="输出根目录（默认：res/music/songs）。")
+    parser.add_argument(
+        "--output_dir",
+        default=os.environ.get("TEST_SONGS_DIR", "outputs/songs"),
+        help="输出根目录（默认：TEST_SONGS_DIR 或 outputs/songs）。",
+    )
     parser.add_argument("--timeout", type=int, default=20, help="网络请求超时秒数（默认：20）。")
     parser.add_argument(
         "--credential_file",
-        default="res/song_learner/.qq_music_credential.json",
-        help="QQ 音乐登录凭证保存路径（默认：res/song_learner/.qq_music_credential.json）。",
+        default="config/qq_music_credential.json",
+        help="QQ 音乐登录凭证保存路径（默认：config/qq_music_credential.json）。",
     )
     parser.add_argument(
         "--login_timeout",
@@ -79,7 +88,7 @@ def parse_args() -> argparse.Namespace:
 
 def safe_name(name: str) -> str:
     bad_chars = '<>:"/\\|?*\n\r\t'
-    cleaned = "".join("_" if c in bad_chars else c for c in name).strip(" .")
+    cleaned = "".join("_" if c in bad_chars else c for c in name)
     import re
     bracket_patterns = [
         r"\([^()]*\)",
@@ -93,6 +102,8 @@ def safe_name(name: str) -> str:
                 break
             cleaned = updated
 
+    cleaned = " ".join(cleaned.split())
+    cleaned = cleaned.strip().rstrip(".").strip()
     return cleaned or f"song_{int(time.time())}"
 
 
@@ -219,7 +230,10 @@ def ensure_qr_login(credential_file: Path, login_timeout: int, force_login: bool
 
 def qq_fetch_mp3_url_by_sdk(songmid: str, credential_dict: Dict[str, Any]) -> str:
     if not QQ_SDK_AVAILABLE:
-        return ""
+        raise QQMusicCredentialError(
+            "qqmusic-api-python 不可用，无法使用 credential 下载 VIP/受限歌曲。"
+            f"导入错误: {QQ_SDK_IMPORT_ERROR}"
+        )
 
     async def _inner() -> str:
         credential = QQ_SDK["Credential"].model_validate(credential_dict)
@@ -242,8 +256,8 @@ def qq_fetch_mp3_url_by_sdk(songmid: str, credential_dict: Dict[str, Any]) -> st
 
     try:
         return asyncio.run(_inner())
-    except Exception:
-        return ""
+    except Exception as exc:
+        raise QQMusicCredentialError(f"QQ 音乐 credential 不可用或已过期: {exc}") from exc
 
 
 def qq_search_songs(song_name: str, timeout: int = 20) -> List[Dict]:
@@ -291,6 +305,43 @@ def pick_song_by_singer(songs: List[Dict], singer_name: str) -> List[Dict]:
         f"搜索到歌曲，但没有匹配到指定歌手: {singer_name}。"
         "请检查歌手名或更换歌曲关键字。"
     )
+
+
+def rank_songs_by_title(songs: List[Dict], requested_name: str) -> List[Dict]:
+    requested = normalize_text(safe_name(requested_name))
+    exact: List[Dict] = []
+    partial: List[Dict] = []
+    for song in songs:
+        title = safe_name(str(song.get("title") or ""))
+        normalized_title = normalize_text(title)
+        if normalized_title == requested:
+            exact.append(song)
+        elif requested and normalized_title and (requested in normalized_title or normalized_title in requested):
+            partial.append(song)
+    ranked = exact + partial
+    if ranked:
+        ranked_ids = {id(song) for song in ranked}
+        ranked.extend(song for song in songs if id(song) not in ranked_ids)
+        return ranked
+    return list(songs)
+
+
+def ensure_title_matches(song: Dict, requested_name: str, candidates: List[Dict]) -> None:
+    if title_matches(song, requested_name):
+        return
+    candidate_titles = [str(item.get("title") or "") for item in candidates[:5]]
+    raise RuntimeError(
+        f"搜索到洛天依歌曲，但最佳标题与请求不匹配: requested={requested_name!r}, "
+        f"matched={song.get('title')!r}, candidates={candidate_titles}"
+    )
+
+
+def title_matches(song: Dict, requested_name: str) -> bool:
+    requested = normalize_text(safe_name(requested_name))
+    title = normalize_text(safe_name(str(song.get("title") or "")))
+    if title and (title == requested or requested in title or title in requested):
+        return True
+    return False
 
 
 def qq_fetch_lyric(songmid: str, timeout: int = 20) -> str:
@@ -383,13 +434,20 @@ def download_song_and_lyric(
     credential_file = Path(credential_file).expanduser().resolve()
 
     songs = qq_search_songs(song_name + " " + singer_name, timeout=timeout)
-    singer_songs = pick_song_by_singer(songs, singer_name)
+    singer_songs = rank_songs_by_title(pick_song_by_singer(songs, singer_name), song_name)
+    matched_failures: List[str] = []
+    skipped_titles: List[str] = []
 
     for song in singer_songs:
         title = song.get("title") or song_name
+        if not title_matches(song, song_name):
+            skipped_titles.append(str(title))
+            continue
         songmid = song.get("mid")
         if not songmid:
-            print(f"[WARN] 歌曲信息不完整，缺少 songmid，跳过: {title}")
+            reason = "歌曲信息不完整，缺少 songmid"
+            matched_failures.append(f"{title}: {reason}")
+            print(f"[WARN] {reason}，跳过: {title}")
             continue
 
         singers = song.get("singer") or []
@@ -411,19 +469,22 @@ def download_song_and_lyric(
             )
         else:
             saved = load_saved_credential(credential_file)
-            if saved and validate_credential(saved):
+            if saved:
+                if not validate_credential(saved):
+                    raise QQMusicCredentialError(f"QQ 音乐 credential 格式无效: {credential_file}")
                 active_credential = saved
                 print(f"[INFO] 已加载本地登录凭证: {credential_file}")
 
         mp3_url = qq_fetch_mp3_url(songmid, timeout=timeout)
-        if force_login and active_credential and not mp3_url:
+        if active_credential and not mp3_url:
             mp3_url = qq_fetch_mp3_url_by_sdk(songmid, active_credential)
 
         if not mp3_url:
             print("[WARN] 普通下载链接不可用，可能是版权或 VIP 限制。")
             if no_auto_login:
-                print("[WARN] 已禁用自动登录，且未拿到可下载链接。")
-                continue
+                raise QQMusicCredentialError(
+                    f"VIP/受限歌曲需要有效 QQ 音乐 credential，但未能获取下载链接: {credential_file}"
+                )
             active_credential = ensure_qr_login(
                 credential_file=credential_file,
                 login_timeout=login_timeout,
@@ -432,7 +493,9 @@ def download_song_and_lyric(
             mp3_url = qq_fetch_mp3_url_by_sdk(songmid, active_credential)
 
         if not mp3_url:
-            print("[WARN] 登录后仍未获取到可下载链接，可能歌曲不可用或权限受限。")
+            reason = "登录后仍未获取到可下载链接，可能歌曲不可用或权限受限"
+            matched_failures.append(f"{title}: {reason}")
+            print(f"[WARN] {reason}。")
             continue
 
         print(f"[INFO] 已匹配歌曲: {title} - {singer} (songmid={songmid})")
@@ -441,10 +504,20 @@ def download_song_and_lyric(
 
         lyric = qq_fetch_lyric(songmid, timeout=timeout)
         if not lyric.strip():
-            raise RuntimeError("歌曲下载成功，但未获取到歌词内容。")
+            matched_failures.append(f"{title}: 歌曲下载成功，但未获取到歌词内容")
+            print("[WARN] 歌曲下载成功，但未获取到歌词内容。")
+            continue
 
         lrc_path.write_text(lyric, encoding="utf-8")
         return file_stem, mp3_path, lrc_path
+
+    if matched_failures:
+        skipped_text = f"；已跳过不匹配候选: {skipped_titles[:5]}" if skipped_titles else ""
+        raise RuntimeError(
+            f"匹配到 {song_name} - {singer_name}，但匹配候选均不可下载或不可用: "
+            f"{'; '.join(matched_failures)}{skipped_text}"
+        )
+    raise RuntimeError(f"未能下载到可用的歌曲音频: {song_name} - {singer_name}")
 
 
 def main() -> None:

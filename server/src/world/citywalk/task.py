@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from datetime import datetime
 from typing import Any, Dict
 
 from src.system.database.event_models import UnifiedEventType
 from src.utils.logger import get_logger
+from src.world.citywalk.errors import CitywalkError
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
@@ -43,7 +45,29 @@ class CitywalkTask(WorldTask):
         if self.citywalk_service is None:
             return WorldTaskResult.skipped_result(self.task_name, "citywalk service is unavailable")
 
-        output_path = self.citywalk_service.run_once()
+        should_run, probability, sample = self._sample_daily_run()
+        if not should_run:
+            self.logger.info(
+                "Citywalk daily sample skipped: sample=%.4f probability=%.4f",
+                sample,
+                probability,
+            )
+            return WorldTaskResult.skipped_result(
+                self.task_name,
+                "citywalk daily sample skipped",
+                sample=sample,
+                probability=probability,
+            )
+
+        try:
+            output_path = self.citywalk_service.run_once()
+        except CitywalkError as exc:
+            self.logger.warning(f"Citywalk skipped due to runtime error: {exc}")
+            return WorldTaskResult.skipped_result(
+                self.task_name,
+                "citywalk runtime error",
+                error=str(exc),
+            )
         if not output_path:
             return WorldTaskResult.skipped_result(self.task_name, "citywalk did not produce a diary")
 
@@ -122,3 +146,13 @@ class CitywalkTask(WorldTask):
         if text.endswith(".md"):
             return f"今天写了一篇散步日记：{text}"
         return text
+
+    def _sample_daily_run(self) -> tuple[bool, float, float]:
+        raw_probability = self.config.get("daily_run_probability", 0.1)
+        try:
+            probability = float(raw_probability)
+        except (TypeError, ValueError):
+            probability = 0.1
+        probability = max(0.0, min(1.0, probability))
+        sample = random.random()
+        return sample < probability, probability, sample

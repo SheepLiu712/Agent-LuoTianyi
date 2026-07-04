@@ -57,7 +57,6 @@ class MessageProcessor:
         self.send_image_func:Callable[..., dict] = network_client.send_image
         self.send_typing_func:Callable[..., dict] = network_client.send_typing
         self.send_touch_func:Callable[..., dict] = network_client.send_touch
-        self.send_preferences_func:Callable[[dict], dict] = network_client.send_preferences
         self.send_image_selecting_func:Callable = network_client.send_image_selecting
         self.send_image_selecting_cancel_func:Callable = network_client.send_image_selecting_cancel
         self.start()
@@ -143,10 +142,6 @@ class MessageProcessor:
             self._send_queue.append(item)
             self._send_cond.notify()
         return local_id
-
-    def send_preferences(self, preferences: dict):
-        """将用户偏好设置发送到服务端保存，不经过消息队列。"""
-        self.send_preferences_func(preferences)
 
     def send_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None):
         local_id = self._next_local_id("touch")

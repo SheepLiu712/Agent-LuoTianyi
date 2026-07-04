@@ -2,8 +2,8 @@
 # coding: utf-8
 import numpy as np
 
-from src.world.learn_sing_songs.song_learner.src.msaf.algorithms.interface import SegmenterInterface
-from src.world.learn_sing_songs.song_learner.src.msaf.base import Features
+from msaf.algorithms.interface import SegmenterInterface
+from msaf.base import Features
 from . import main2
 
 

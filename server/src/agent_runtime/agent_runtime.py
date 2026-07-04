@@ -176,10 +176,10 @@ class AgentRuntime:
         current_dialogue: str,
         related_memories: list[str] | None = None,
         conversation_history: str | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         """在完成一轮回复后异步提取并写入长期记忆。"""
         runtime = self.get_character_runtime(character_id)
-        await runtime.mind.write_topic_memories(
+        return await runtime.mind.write_topic_memories(
             user_id=user_id,
             current_dialogue=current_dialogue,
             related_memories=related_memories,
