@@ -27,6 +27,50 @@ def config_read_http_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=detail)
 
 
+REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
+
+
+def _extract_env_name(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if not raw.startswith("$"):
+        return None
+    name = raw[1:]
+    if name.startswith("{") and name.endswith("}"):
+        name = name[1:-1]
+    return name.strip() or None
+
+
+def _collect_llm_api_key_names(config: dict[str, Any]) -> set[str]:
+    llm_service = config.get("llm_service", {}) or {}
+    names: set[str] = set()
+    for collection_name in ("available_llms", "available_vlms"):
+        collection = llm_service.get(collection_name, {}) or {}
+        for item in collection.values():
+            if not isinstance(item, dict):
+                continue
+            env_name = _extract_env_name(item.get("api_key"))
+            if env_name:
+                names.add(env_name)
+    return names
+
+
+def _ordered_secret_names(required: list[str], referenced: set[str], stored: set[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for name in required:
+        result.append(name)
+        seen.add(name)
+    for name in sorted(referenced):
+        if name not in seen:
+            result.append(name)
+            seen.add(name)
+    for name in sorted(stored):
+        if name not in seen:
+            result.append(name)
+            seen.add(name)
+    return result
+
+
 router = APIRouter(prefix="/admin/api", tags=["admin"])
 protected_router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -110,14 +154,20 @@ async def validate_config() -> dict[str, Any]:
 
 @protected_router.get("/secrets/status")
 async def secrets_status() -> dict[str, Any]:
-    keys = [
-        "JWT_SECRET",
-        "QWEN_API_KEY",
-        "SILICONFLOW_API_KEY",
-        "DEEPSEEK_API_KEY",
-        "AMAP_KEY",
-    ]
-    return get_admin_shell().secret_store.status(keys)
+    shell = get_admin_shell()
+    try:
+        config = shell.config_store.read_raw()
+    except (json.JSONDecodeError, OSError):
+        config = {}
+    referenced_llm_keys = _collect_llm_api_key_names(config)
+    stored_keys = set(shell.secret_store.read().keys())
+    keys = _ordered_secret_names(REQUIRED_SECRET_KEYS, referenced_llm_keys, stored_keys)
+    status = shell.secret_store.status(keys)
+    for key, item in status.items():
+        item["required"] = key in REQUIRED_SECRET_KEYS
+        item["referenced"] = key in referenced_llm_keys
+        item["category"] = "required" if key in REQUIRED_SECRET_KEYS else "llm_api_key" if key in referenced_llm_keys else "custom"
+    return status
 
 
 @protected_router.put("/secrets")

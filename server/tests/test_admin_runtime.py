@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,8 @@ from src.system.admin.secret_store import SecretStore
 from src.system.admin.admin_shell import init_admin_shell, shutdown_admin_shell
 from src.system.admin.llm_config_editor import apply_llm_config_draft, build_llm_config_view
 from src.system.observability import ObservabilityService
+from src.system.user_interface.admin_interface import _collect_llm_api_key_names
+from src.utils.helpers import apply_env_variables
 from src.world.world_runtime import WorldRuntime
 
 
@@ -137,8 +140,7 @@ def test_admin_auth_requires_setup_token_and_login(tmp_path):
 
 def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "jwt")
-    monkeypatch.setenv("QWEN_API_KEY", "qwen")
-    monkeypatch.setenv("SILICONFLOW_API_KEY", "silicon")
+    monkeypatch.setenv("AMAP_KEY", "amap")
     secret_store = SecretStore(tmp_path / "secrets.local.env")
     validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secret_store)
     config = minimal_config(tmp_path)
@@ -161,8 +163,29 @@ def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
     assert runtime_config["world"]["auto_song_learner"]["enabled"] is False
 
 
+def test_validator_uses_custom_llm_api_keys_without_hardcoded_provider_keys(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    monkeypatch.setenv("CUSTOM_CHAT_API_KEY", "chat-key")
+    monkeypatch.setenv("CUSTOM_VISION_API_KEY", "vision-key")
+    for key in ["QWEN_API_KEY", "SILICONFLOW_API_KEY", "DEEPSEEK_API_KEY"]:
+        monkeypatch.delenv(key, raising=False)
+    secret_store = SecretStore(tmp_path / "secrets.local.env")
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secret_store)
+    config = minimal_config(tmp_path)
+    config["llm_service"]["available_llms"]["main"]["api_key"] = "$CUSTOM_CHAT_API_KEY"
+    config["llm_service"]["available_vlms"]["vision"]["api_key"] = "$CUSTOM_VISION_API_KEY"
+
+    result = validator.validate(apply_env_variables(copy.deepcopy(config)))
+
+    assert result["core_ok"] is True
+    secret_names = {item["name"] for item in result["items"] if item["name"].startswith("secret.")}
+    assert secret_names == {"secret.JWT_SECRET", "secret.AMAP_KEY"}
+    assert _collect_llm_api_key_names(config) == {"CUSTOM_CHAT_API_KEY", "CUSTOM_VISION_API_KEY"}
+
+
 def test_supervisor_blocks_start_when_core_validation_fails(tmp_path, monkeypatch):
-    for key in ["JWT_SECRET", "QWEN_API_KEY", "SILICONFLOW_API_KEY"]:
+    for key in ["JWT_SECRET", "AMAP_KEY"]:
         monkeypatch.delenv(key, raising=False)
     config_store = ConfigStore(tmp_path / "config.json", root_dir=tmp_path)
     config_store.write_raw(minimal_config(tmp_path), backup=False)
@@ -367,8 +390,7 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
 
 def test_validator_accepts_legacy_qq_music_credential(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "jwt")
-    monkeypatch.setenv("QWEN_API_KEY", "qwen")
-    monkeypatch.setenv("SILICONFLOW_API_KEY", "silicon")
+    monkeypatch.setenv("AMAP_KEY", "amap")
     legacy_dir = tmp_path / "res" / "song_learner"
     legacy_dir.mkdir(parents=True)
     (legacy_dir / ".qq_music_credential.json").write_text("{}", encoding="utf-8")

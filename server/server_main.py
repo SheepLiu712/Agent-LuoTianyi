@@ -342,4 +342,8 @@ if __name__ == "__main__":
     logger.info("启用 HTTP 模式")
     host = os.environ.get("SERVER_HOST", "127.0.0.1")
     port = int(os.environ.get("SERVER_PORT", "60030"))
+    display_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    admin_url = f"http://{display_host}:{port}/admin"
+    logger.info(f"控制台地址: {admin_url}")
+    print(f"\nAgentLuo 控制台: {admin_url}\n", flush=True)
     uvicorn.run(app, host=host, port=port)

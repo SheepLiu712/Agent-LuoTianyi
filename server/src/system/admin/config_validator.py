@@ -30,7 +30,7 @@ class ValidationItem:
 class RuntimeConfigValidator:
     """Validate core runtime config and report optional world disablements."""
 
-    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "QWEN_API_KEY", "SILICONFLOW_API_KEY"]
+    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
 
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",

@@ -45,6 +45,7 @@ body {
 
 .auth-panel input,
 .secret-row input,
+.secret-add-row input,
 .qq-credential-row textarea,
 .interface-card input,
 .interface-card textarea,
@@ -60,6 +61,8 @@ body {
 
 .auth-panel button,
 .action-row button,
+.secret-row button,
+.secret-add-row button,
 .qq-credential-row button,
 .editor-head button,
 .interface-card button {
@@ -73,6 +76,8 @@ body {
 
 .auth-panel button:hover,
 .action-row button:hover,
+.secret-row button:hover,
+.secret-add-row button:hover,
 .qq-credential-row button:hover,
 .editor-head button:hover,
 .interface-card button:hover {
@@ -81,6 +86,8 @@ body {
 
 .auth-panel button:disabled,
 .action-row button:disabled,
+.secret-row button:disabled,
+.secret-add-row button:disabled,
 .qq-credential-row button:disabled,
 .editor-head button:disabled,
 .interface-card button:disabled {
@@ -92,6 +99,8 @@ body {
 
 .auth-panel button:disabled:hover,
 .action-row button:disabled:hover,
+.secret-row button:disabled:hover,
+.secret-add-row button:disabled:hover,
 .qq-credential-row button:disabled:hover,
 .editor-head button:disabled:hover,
 .interface-card button:disabled:hover {
@@ -501,9 +510,19 @@ button {
 
 .secret-row {
   display: grid;
-  grid-template-columns: minmax(180px, 0.8fr) minmax(220px, 1fr);
+  grid-template-columns: minmax(180px, 0.8fr) minmax(220px, 1fr) 86px;
   gap: 10px;
   align-items: center;
+}
+
+.secret-add-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(220px, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #edf1f5;
 }
 
 .secret-row div,

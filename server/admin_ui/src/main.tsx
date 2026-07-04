@@ -60,7 +60,16 @@ type ValidationItem = {
   message: string;
 };
 
-type SecretStatus = Record<string, { configured: boolean; source?: string | null; masked: string }>;
+type SecretInfo = {
+  configured: boolean;
+  source?: string | null;
+  masked: string;
+  required?: boolean;
+  referenced?: boolean;
+  category?: 'required' | 'llm_api_key' | 'custom' | string;
+};
+
+type SecretStatus = Record<string, SecretInfo>;
 
 type QQMusicCredentialStatus = {
   state: 'idle' | 'running' | 'success' | 'failed';
@@ -459,6 +468,16 @@ function formatQQCredentialStatus(status?: QQMusicCredentialStatus | null) {
     lines.push('请扫描下方二维码完成 QQ 音乐登录。');
   }
   return lines.join('\n');
+}
+
+function formatSecretCategory(secret: SecretInfo) {
+  if (secret.required) {
+    return '必需';
+  }
+  if (secret.referenced) {
+    return 'LLM API Key';
+  }
+  return '自定义';
 }
 
 function formatChartValue(value: number, metric: LlmChartMetric) {
@@ -1096,7 +1115,8 @@ function MemoryTracePage() {
 
 function ConfigPage() {
   const { data: runtime, error: runtimeError, loading: runtimeLoading } = usePolling<RuntimeStatus>('/admin/api/runtime/status', 5000);
-  const { data: secrets, error: secretError, loading: secretLoading } = usePolling<SecretStatus>('/admin/api/secrets/status', 10000);
+  const [secretRefreshNonce, setSecretRefreshNonce] = useState(0);
+  const { data: secrets, error: secretError, loading: secretLoading } = usePolling<SecretStatus>(`/admin/api/secrets/status?nonce=${secretRefreshNonce}`, 10000);
   const { data: validation, error: validationError, loading: validationLoading } = usePolling<RuntimeValidation>('/admin/api/config/validation', 10000);
   const { data: qqCredentialStatus, error: qqCredentialError, loading: qqCredentialLoading } = usePolling<QQMusicCredentialStatus>('/admin/api/qq-music/credential/status', 3000);
   const [llmDraft, setLlmDraft] = useState<LlmConfigInfo | null>(null);
@@ -1109,6 +1129,8 @@ function ConfigPage() {
   const [qrImageNonce, setQrImageNonce] = useState(0);
   const [llmApplyStatus, setLlmApplyStatus] = useState<LocalActionStatus | null>(null);
   const [llmApplying, setLlmApplying] = useState(false);
+  const [newSecretKey, setNewSecretKey] = useState('');
+  const [newSecretValue, setNewSecretValue] = useState('');
 
   async function loadLlmConfig() {
     setLlmLoading(true);
@@ -1205,7 +1227,54 @@ function ConfigPage() {
     try {
       await putJson('/admin/api/secrets', secretUpdates);
       setSecretUpdates({});
+      setSecretRefreshNonce(Date.now());
       setActionError(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function addSecret() {
+    const key = newSecretKey.trim();
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) {
+      setActionError('新增 Secret 名称必须是合法环境变量名，例如 QWEN_API_KEY');
+      return;
+    }
+    if (!newSecretValue) {
+      setActionError('新增 Secret 的值不能为空');
+      return;
+    }
+    try {
+      await putJson('/admin/api/secrets', { [key]: newSecretValue });
+      setNewSecretKey('');
+      setNewSecretValue('');
+      setSecretRefreshNonce(Date.now());
+      setActionError(null);
+      setActionMessage(`已保存 ${key}`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function deleteSecret(key: string) {
+    const info = secrets?.[key];
+    if (info?.required) {
+      setActionError(`${key} 是必需项，不能删除`);
+      return;
+    }
+    if (!window.confirm(`删除 ${key}？`)) {
+      return;
+    }
+    try {
+      await putJson('/admin/api/secrets', { [key]: null });
+      setSecretUpdates((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setSecretRefreshNonce(Date.now());
+      setActionError(null);
+      setActionMessage(`已删除 ${key}`);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     }
@@ -1268,6 +1337,7 @@ function ConfigPage() {
   const worldDisabled = validation?.world_disabled || runtime?.validation?.world_disabled || [];
   const effectiveRuntime = runtimeOverride || runtime;
   const effectiveQQCredentialStatus = qqCredentialOverride || qqCredentialStatus;
+  const secretEntries = Object.entries(secrets || {});
   const runtimeState = effectiveRuntime?.state || '-';
   const runtimeBusy = Boolean(effectiveRuntime?.busy || ['starting', 'stopping'].includes(runtimeState));
   const runtimeDetail = runtimeBusy ? '状态切换中' : effectiveRuntime?.running ? '业务运行中' : '业务未启动';
@@ -1295,11 +1365,11 @@ function ConfigPage() {
       </Panel>
       <Panel title="环境变量 / Secrets">
         <div className="secret-list">
-          {Object.entries(secrets || {}).map(([key, value]) => (
+          {secretEntries.map(([key, value]) => (
             <div className="secret-row" key={key}>
               <div>
                 <strong>{key}</strong>
-                <span>{value.configured ? `${value.source || '-'} · ${value.masked}` : '未配置'}</span>
+                <span>{formatSecretCategory(value)} · {value.configured ? `${value.source || '-'} · ${value.masked}` : '未配置'}</span>
               </div>
               <input
                 value={secretUpdates[key] || ''}
@@ -1307,8 +1377,14 @@ function ConfigPage() {
                 placeholder="留空则不修改"
                 type="password"
               />
+              <button className="danger-button" disabled={Boolean(value.required)} onClick={() => void deleteSecret(key)}>删除</button>
             </div>
           ))}
+        </div>
+        <div className="secret-add-row">
+          <input value={newSecretKey} onChange={(event) => setNewSecretKey(event.target.value.toUpperCase())} placeholder="NEW_LLM_API_KEY" />
+          <input value={newSecretValue} onChange={(event) => setNewSecretValue(event.target.value)} placeholder="API key" type="password" />
+          <button onClick={() => void addSecret()}>新增 LLM API Key</button>
         </div>
         <div className="action-row">
           <button onClick={() => void saveSecrets()}>保存 Secrets</button>
