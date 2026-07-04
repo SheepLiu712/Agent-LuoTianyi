@@ -33,7 +33,9 @@ Agent-LuoTianyi/
 
 ### 🎞️展示视频
 
-[这是独属于你的洛天依](https://www.bilibili.com/video/BV15LZ7BJE3e)
+<a href="https://www.bilibili.com/video/BV15LZ7BJE3e" target="_blank">
+  <img src="https://i0.hdslb.com/bfs/archive/d8f3fde015e9e2efd16cc9b662a4a8ab1d2f1724.jpg" alt="这是独属于你的洛天依" width="720">
+</a>
 
 ## 🚀快速开始
 ### PC客户端
