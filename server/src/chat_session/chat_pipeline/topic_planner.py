@@ -101,8 +101,8 @@ class TopicPlanner:
                         self._wake_event.clear()
                         continue
                     except asyncio.TimeoutError:
-                        should_force_extract = True
-                elif has_unread and deadline is None: # 有未读且无需等待：直接提取。目前这个状态不会进入，之后可能有用。
+                        should_force_extract = True # 等待超时，强制提取
+                elif has_unread and deadline is None: # 有未读且无需等待：直接提取。
                     pass
                 else: # 没有未读：等待唤醒。
                     await self._wake_event.wait()
@@ -168,15 +168,14 @@ class TopicPlanner:
         if event.event_type == ChatInputEventType.USER_IMAGE_SELECTING:
             # 用户正在选择图片：设置 30 秒等待，给用户足够时间
             if await self.unread_store.has_unread():
-                await self.listen_timer.set_deadline(timeout=30.0)
-                self._wake_event.set()
+                await self.listen_timer.set_deadline(timeout=60.0)
 
         if event.event_type == ChatInputEventType.USER_IMAGE_SELECTING_CANCEL:
             if not await self.unread_store.has_unread():
-                await self.listen_timer.remove_deadline()
+                await self.listen_timer.remove_deadline() # 直接提取
             else:
                 await self.listen_timer.set_deadline()  # 用户取消了选择，但还有未读消息，重置等待时间，继续等待补全
-                self._wake_event.set()
+        self._wake_event.set()
 
     async def _commit_extraction_result(
         self,
