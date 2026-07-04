@@ -43,6 +43,10 @@ QQ_LYRIC_URL = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
 QQ_MUSICU_URL = "https://u.y.qq.com/cgi-bin/musicu.fcg"
 
 
+class QQMusicCredentialError(RuntimeError):
+    """Raised when QQ Music credential is missing, invalid, or rejected by SDK."""
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -60,8 +64,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=20, help="网络请求超时秒数（默认：20）。")
     parser.add_argument(
         "--credential_file",
-        default="res/song_learner/.qq_music_credential.json",
-        help="QQ 音乐登录凭证保存路径（默认：res/song_learner/.qq_music_credential.json）。",
+        default="config/qq_music_credential.json",
+        help="QQ 音乐登录凭证保存路径（默认：config/qq_music_credential.json）。",
     )
     parser.add_argument(
         "--login_timeout",
@@ -226,7 +230,10 @@ def ensure_qr_login(credential_file: Path, login_timeout: int, force_login: bool
 
 def qq_fetch_mp3_url_by_sdk(songmid: str, credential_dict: Dict[str, Any]) -> str:
     if not QQ_SDK_AVAILABLE:
-        return ""
+        raise QQMusicCredentialError(
+            "qqmusic-api-python 不可用，无法使用 credential 下载 VIP/受限歌曲。"
+            f"导入错误: {QQ_SDK_IMPORT_ERROR}"
+        )
 
     async def _inner() -> str:
         credential = QQ_SDK["Credential"].model_validate(credential_dict)
@@ -249,8 +256,8 @@ def qq_fetch_mp3_url_by_sdk(songmid: str, credential_dict: Dict[str, Any]) -> st
 
     try:
         return asyncio.run(_inner())
-    except Exception:
-        return ""
+    except Exception as exc:
+        raise QQMusicCredentialError(f"QQ 音乐 credential 不可用或已过期: {exc}") from exc
 
 
 def qq_search_songs(song_name: str, timeout: int = 20) -> List[Dict]:
@@ -462,21 +469,22 @@ def download_song_and_lyric(
             )
         else:
             saved = load_saved_credential(credential_file)
-            if saved and validate_credential(saved):
+            if saved:
+                if not validate_credential(saved):
+                    raise QQMusicCredentialError(f"QQ 音乐 credential 格式无效: {credential_file}")
                 active_credential = saved
                 print(f"[INFO] 已加载本地登录凭证: {credential_file}")
 
         mp3_url = qq_fetch_mp3_url(songmid, timeout=timeout)
-        if force_login and active_credential and not mp3_url:
+        if active_credential and not mp3_url:
             mp3_url = qq_fetch_mp3_url_by_sdk(songmid, active_credential)
 
         if not mp3_url:
             print("[WARN] 普通下载链接不可用，可能是版权或 VIP 限制。")
             if no_auto_login:
-                reason = "已禁用自动登录，且未拿到可下载链接"
-                matched_failures.append(f"{title}: {reason}")
-                print(f"[WARN] {reason}。")
-                continue
+                raise QQMusicCredentialError(
+                    f"VIP/受限歌曲需要有效 QQ 音乐 credential，但未能获取下载链接: {credential_file}"
+                )
             active_credential = ensure_qr_login(
                 credential_file=credential_file,
                 login_timeout=login_timeout,

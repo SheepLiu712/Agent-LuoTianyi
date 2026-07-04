@@ -218,6 +218,7 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
         {
             "songlearner_dir": str(tmp_path / "song_learner"),
             "songlearner_resource_dir": str(tmp_path / "song_learner_res"),
+            "qq_credential_file": str(tmp_path / "config" / "qq_music_credential.json"),
         },
         "初音未来",
         wishlist,
@@ -230,6 +231,7 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
 
     def fake_run(args, **kwargs):
         captured["args"] = args
+        captured["kwargs"] = kwargs
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -242,9 +244,47 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
     assert learner._learn_via_songlearner("Song A") is True
     assert "--singer_name" in captured["args"]
     assert captured["args"][captured["args"].index("--singer_name") + 1] == "初音未来"
+    assert "--credential_file" in captured["args"]
+    assert captured["args"][captured["args"].index("--credential_file") + 1] == str(learner._credential_file)
+    assert "--no_auto_login" in captured["args"]
+    assert captured["kwargs"]["env"]["SONGLEARNER_QQ_CREDENTIAL_FILE"] == str(learner._credential_file)
     metadata = json.loads((tmp_path / "metadata.json").read_text(encoding="utf-8"))
     assert "songa" not in metadata["wished_songs"]
     assert "songa" in metadata["recently_learned"]
+
+
+def test_run_song_workflow_maps_credential_error(monkeypatch, tmp_path):
+    from src.world.learn_sing_songs.song_learner import run_song_workflow
+
+    def fail_download(**_kwargs):
+        raise run_song_workflow.download_qq_song.QQMusicCredentialError("credential expired")
+
+    monkeypatch.setattr(run_song_workflow, "download_song_and_lyric", fail_download)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_song_workflow.py",
+            "Song A",
+            "--output_dir",
+            str(tmp_path / "songs"),
+            "--resource_root",
+            str(tmp_path / "resource"),
+            "--credential_file",
+            str(tmp_path / "config" / "qq_music_credential.json"),
+            "--no_auto_login",
+        ],
+    )
+
+    try:
+        run_song_workflow.main()
+    except run_song_workflow.SongWorkflowError as exc:
+        assert exc.exit_code == 21
+        assert exc.error_code == "SL021"
+        assert exc.step == "qq_credential"
+        assert "credential expired" in str(exc)
+    else:
+        raise AssertionError("Expected credential error to be mapped to SL021")
 
 
 def test_wishlist_sync_existing_songs_removes_wished_song(tmp_path):
@@ -329,12 +369,11 @@ def test_songlearner_skips_unrelated_candidates_after_matching_download_failure(
             "告死鸟",
             output_dir=tmp_path,
             credential_file=tmp_path / "credential.json",
-            no_auto_login=True,
         )
     except RuntimeError as exc:
         message = str(exc)
         assert "匹配到 告死鸟" in message
-        assert "告死鸟: 已禁用自动登录，且未拿到可下载链接" in message
+        assert "告死鸟: 登录后仍未获取到可下载链接" in message
         assert "已跳过不匹配候选" in message
         assert "最佳标题与请求不匹配" not in message
     else:

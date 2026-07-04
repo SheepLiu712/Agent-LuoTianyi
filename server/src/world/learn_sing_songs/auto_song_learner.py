@@ -423,6 +423,9 @@ class AutoSongLearner:
                     str(self.songs_dir),
                     "--resource_root",
                     str(self.songlearner_resource_dir),
+                    "--credential_file",
+                    str(self._credential_file),
+                    "--no_auto_login",
                     "--singer_name",
                     self.character_name,
                 ],
@@ -516,6 +519,7 @@ class AutoSongLearner:
             "PYTHONPATH": os.pathsep.join(pythonpath_parts),
             "TEST_SONGS_DIR": str(self.songs_dir),
             "SONGLEARNER_RESOURCE_DIR": str(self.songlearner_resource_dir),
+            "SONGLEARNER_QQ_CREDENTIAL_FILE": str(self._credential_file),
         }
 
     def _finalize_song(self, safe_name: str, src_dir: Path) -> bool:

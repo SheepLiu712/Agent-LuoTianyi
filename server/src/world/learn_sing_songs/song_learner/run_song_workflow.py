@@ -51,6 +51,7 @@ WorkflowStatus = workflow_status.WorkflowStatus
 ERROR_CODE_TABLE = {
     10: ("SL010", "startup", "参数、路径或工作流状态初始化失败"),
     20: ("SL020", "download_song", "下载歌曲或歌词失败"),
+    21: ("SL021", "qq_credential", "QQ 音乐 credential 缺失、无效或已过期"),
     30: ("SL030", "normalize_download", "下载结果目录或文件归一化失败"),
     40: ("SL040", "clean_audio", "音频清洗、人声分离或降噪失败"),
     50: ("SL050", "generate_boundary", "MSAF 边界生成失败"),
@@ -111,6 +112,17 @@ def parse_args() -> argparse.Namespace:
         type=str,
         default=str(RESOURCE_ROOT),
         help="Songlearner 资源目录，默认读取 SONGLEARNER_RESOURCE_DIR 或 res/song_learner。",
+    )
+    parser.add_argument(
+        "--credential_file",
+        type=str,
+        default=os.environ.get("SONGLEARNER_QQ_CREDENTIAL_FILE", ""),
+        help="QQ 音乐 credential 文件路径，默认读取 SONGLEARNER_QQ_CREDENTIAL_FILE 或 resource_root/.qq_music_credential.json。",
+    )
+    parser.add_argument(
+        "--no_auto_login",
+        action="store_true",
+        help="下载受限歌曲时不在子进程内触发扫码登录，credential 无效则直接失败。",
     )
     parser.add_argument(
         "--character_name",
@@ -224,6 +236,11 @@ def main() -> None:
     project_root: Path = SERVER_ROOT
     outputs_dir: Path = Path(args.output_dir).expanduser().resolve()
     resource_root: Path = Path(args.resource_root).expanduser().resolve()
+    credential_file: Path = (
+        Path(args.credential_file).expanduser().resolve()
+        if args.credential_file
+        else resource_root / ".qq_music_credential.json"
+    )
 
     song_name = safe_name(args.song_name)
     if not song_name:
@@ -252,9 +269,12 @@ def main() -> None:
                 song_name=song_name,
                 singer_name=args.singer_name,
                 output_dir=outputs_dir,
-                credential_file=resource_root / ".qq_music_credential.json",
+                credential_file=credential_file,
+                no_auto_login=args.no_auto_login,
             )
     except Exception as exc:
+        if isinstance(exc, download_qq_song.QQMusicCredentialError):
+            raise_step_error(21, "qq_credential", exc)
         raise_step_error(20, "download_song", exc)
 
     try:
