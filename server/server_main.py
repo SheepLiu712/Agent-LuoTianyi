@@ -92,21 +92,35 @@ async def admin_index(path: str = ""):
 
 @app.websocket("/chat_ws")
 async def chat_ws(websocket: WebSocket):
-    await websocket.accept()
+    try:
+        await websocket.accept()
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected before accept on /chat_ws")
+        return
+
     system_runtime: "SystemRuntime" = get_admin_shell().runtime_supervisor.runtime
     if system_runtime is None:
-        await websocket.send_json(
-            {
-                "type": "system_not_ready",
-                "payload": runtime_not_ready_detail(),
-            }
-        )
-        await websocket.close(code=1013)
+        try:
+            await websocket.send_json(
+                {
+                    "type": "system_not_ready",
+                    "payload": runtime_not_ready_detail(),
+                }
+            )
+            await websocket.close(code=1013)
+        except WebSocketDisconnect:
+            logger.info("WebSocket client disconnected before system_not_ready on /chat_ws")
         return
+
     logger.info("WebSocket client connected to /chat_ws")
     websocket_service = system_runtime.websocket_service  # WebSocketService 实例
     gcsm = system_runtime.gcsm  # 全局聊天流管理器实例
-    await websocket_service.send_system_ready_event(websocket)
+    try:
+        await websocket_service.send_system_ready_event(websocket)
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected before system_ready on /chat_ws")
+        return
+
     ws_connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
     try:
         await ws_connection.auth(websocket_service, system_runtime.database_manager)  # 等待认证，认证成功之后将ws和用户信息绑定
