@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import copy
 import json
-from typing import Any, Optional
+from datetime import datetime
+from typing import Any, Optional, TYPE_CHECKING
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse
 
-from src.system.admin import get_admin_shell
-from src.system.admin.llm_config_editor import apply_llm_config_draft, build_llm_config_view
+from .admin_shell import get_admin_shell
+from .llm_config_editor import apply_llm_config_draft, build_llm_config_view
 from src.utils.helpers import apply_env_variables
 
+if TYPE_CHECKING:
+    from src.system.system_runtime import SystemRuntime
 
 def require_admin(request: Request) -> None:
     get_admin_shell().auth.require_admin(request)
@@ -69,6 +72,23 @@ def _ordered_secret_names(required: list[str], referenced: set[str], stored: set
             result.append(name)
             seen.add(name)
     return result
+
+
+def _parse_admin_datetime_filter(value: str | None, *, end_of_day: bool = False) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+
+    normalized = raw.replace("T", " ")
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            parsed = datetime.strptime(normalized, fmt)
+            if fmt == "%Y-%m-%d" and end_of_day:
+                return parsed.replace(hour=23, minute=59, second=59)
+            return parsed
+        except ValueError:
+            continue
+    raise HTTPException(status_code=400, detail=f"无效的时间格式: {raw}")
 
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
@@ -349,6 +369,52 @@ async def logs(
     min_level: str | None = "WARNING",
 ) -> list[dict[str, Any]]:
     return get_admin_shell().observability.get_recent_logs(limit=limit, min_level=min_level)
+
+
+@protected_router.get("/dynamics")
+async def admin_dynamics(
+    limit: int = Query(default=100, ge=1, le=500),
+    cursor: str | None = None,
+    owner_user_id: str | None = None,
+    author_type: str | None = None,
+    source_type: str | None = None,
+    status: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    return runtime.database_manager.dynamic_store.admin_list_dynamics(
+        limit=limit,
+        cursor=cursor,
+        owner_user_id=owner_user_id,
+        author_type=author_type,
+        source_type=source_type,
+        status=status,
+        created_after=_parse_admin_datetime_filter(created_after),
+        created_before=_parse_admin_datetime_filter(created_before, end_of_day=True),
+    )
+
+
+@protected_router.get("/dynamics/{dynamic_id}/comments")
+async def admin_dynamic_comments(
+    dynamic_id: str,
+    limit: int = Query(default=200, ge=1, le=500),
+    owner_user_id: str | None = None,
+    created_after: str | None = None,
+    created_before: str | None = None,
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    return runtime.database_manager.dynamic_store.admin_list_dynamic_comments(
+        dynamic_id,
+        limit=limit,
+        owner_user_id=owner_user_id,
+        created_after=_parse_admin_datetime_filter(created_after),
+        created_before=_parse_admin_datetime_filter(created_before, end_of_day=True),
+    )
 
 
 router.include_router(protected_router)

@@ -15,6 +15,7 @@ from src.utils.logger import get_logger
 from src.subconscious.attention import TopicAttentionPlan
 from src.agent.response_realizer import ResponseRealizer, UserExpressionContext
 from src.domain import CharacterProfile, CharacterName
+from src.utils.llm.llm_api_interface import LLMContentInspectionError
 
 
 if TYPE_CHECKING:

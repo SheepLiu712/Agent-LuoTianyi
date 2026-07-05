@@ -6,15 +6,25 @@ import json
 from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 from datetime import datetime
 import uuid
+from sqlalchemy import and_, func, or_
 from src.utils.logger import get_logger
 
 from src.domain import ConversationItem
 from src.system.database.sql_database import init_sql_db, get_sql_session, SessionLocal
-from src.system.database.sql_database import (User,InviteCode,Conversation, ConversationContext)
+from src.system.database.sql_database import (
+    User,
+    InviteCode,
+    Conversation,
+    ConversationContext,
+    DynamicPost,
+    DynamicComment,
+    DynamicReadState,  # kept for type compatibility; dynamic ops delegated to DynamicStore
+)
 from src.system.database.redis_buffer import RedisBuffer, WatchError, init_redis_buffer, get_redis_buffer
 from src.system.database.sql_writer import run_sql_write
 from src.system.database.event_store import EventStore
 from src.system.database.memory_store import MemoryStore
+from src.system.database.dynamic_store import DynamicStore
 
 from src.domain.chat import ContextInfo
 
@@ -67,6 +77,7 @@ class DatabaseManager:
         self._redis: Optional[RedisBuffer] = None
         self.event_store: Optional[EventStore] = None
         self.memory_store: Optional[MemoryStore] = None
+        self.dynamic_store: Optional[DynamicStore] = None
         self.init_all_databases()
 
     def init_all_databases(self) -> None:
@@ -80,6 +91,7 @@ class DatabaseManager:
 
             self.event_store = EventStore(config = self.config.get("event_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis())
             self.memory_store = MemoryStore(config = self.config.get("memory_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis())
+            self.dynamic_store = DynamicStore(config=self.config.get("dynamic_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis())
             logger.info("Main database initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing databases: {e}")
@@ -102,6 +114,7 @@ class DatabaseManager:
             "redis": self._ensure_redis(),
             "event_store": self.event_store,
             "memory_store": self.memory_store,
+            "dynamic_store": self.dynamic_store,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:

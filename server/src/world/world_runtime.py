@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from src.world.bili_event_updater.task import BiliEventUpdateTask
 from src.world.citywalk.task import CitywalkTask
+from src.world.dynamic_interaction.task import DynamicInteractionTask
 from src.world.event_cleanup_task import ExpiredEventCleanupTask
 from src.world.get_new_songs.task import VCPediaNewSongTask
 from src.world.learn_sing_songs.task import LearnSingSongsTask
@@ -34,6 +35,7 @@ class WorldRuntime:
         self.learn_sing_songs_tasks: List[LearnSingSongsTask] = []
         self.vcpedia_new_song_task: VCPediaNewSongTask | None = None
         self.bili_event_update_task: BiliEventUpdateTask | None = None
+        self.dynamic_interaction_task: DynamicInteractionTask | None = None
         self.proactive_topic_check_task: ProactiveTopicCheckTask | None = None
         self.expired_event_cleanup_task: ExpiredEventCleanupTask | None = None
         self.tasks: List["WorldTask"] = []
@@ -70,6 +72,11 @@ class WorldRuntime:
             if self._task_enabled("bili_dynamic_fetcher")
             else None
         )
+        self.dynamic_interaction_task = (
+            DynamicInteractionTask(self.config.get("dynamic_interaction", {}))
+            if self._task_enabled("dynamic_interaction")
+            else None
+        )
         self.proactive_topic_check_task = ProactiveTopicCheckTask(
             self.config.get("proactive_topic_check", {})
         )
@@ -82,6 +89,7 @@ class WorldRuntime:
             *self.learn_sing_songs_tasks,
             self.vcpedia_new_song_task,
             self.bili_event_update_task,
+            self.dynamic_interaction_task,
             self.proactive_topic_check_task,
             self.expired_event_cleanup_task,
         ]

@@ -258,6 +258,12 @@ class AgentRuntime:
                 mind=mind,
                 reflex=CharacterReflex(profile),
             )
+            # Wire 角色上下文到 DynamicCapability（供动态文案生成使用）
+            capability_manager.dynamics.wire_character_context(
+                character_name=conscious.main_chat.character_name,
+                character_persona=conscious.main_chat.character_persona,
+                speaking_style=conscious.main_chat.speaking_style,
+            )
         return character_runtimes
 
     @staticmethod
@@ -287,6 +293,10 @@ class AgentRuntime:
             "main_chat": llm_service.register_llm_module(
                 f"{character_id}_main_chat",
                 agent_config["main_chat"]["llm_module"],
+            ),
+            "dynamic_composer": llm_service.register_llm_module(
+                f"{character_id}_dynamic_composer",
+                agent_config["dynamic_composer"]["llm_module"]
             ),
             "date_detector": llm_service.register_llm_module(
                 f"{character_id}_date_detector",

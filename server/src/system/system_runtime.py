@@ -89,7 +89,9 @@ class SystemRuntime:
         """把顶层模块依赖分发给各运行时模块。"""
         self.llm_service.ensure_dependencies()
         self.database_manager.wire_dependencies(llm_service=self.llm_service)
-        self.capability_manager.wire_dependencies(llm_service=self.llm_service)
+        self.capability_manager.wire_dependencies(
+            database_manager=self.database_manager,
+        )
         self.agent_runtime.wire_dependencies(
             llm_service=self.llm_service,
             capability_manager=self.capability_manager,

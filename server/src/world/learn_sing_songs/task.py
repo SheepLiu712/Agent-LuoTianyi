@@ -27,6 +27,7 @@ class LearnSingSongsTask(WorldTask):
         self.logger = get_logger(__name__)
         self.system_runtime: "SystemRuntime" | None = None
         self.event_store: "EventStore" | None = None
+        self.dynamic_capability: Any | None = None
         self.auto_song_learner: "AutoSongLearner" | None = None
         self._init_error: str = ""
 
@@ -34,6 +35,7 @@ class LearnSingSongsTask(WorldTask):
         self.system_runtime = system_runtime
         database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
+        self.dynamic_capability = getattr(getattr(system_runtime, "capability_manager", None), "dynamics", None)
         self.auto_song_learner = self._build_auto_song_learner()
 
     def ensure_dependencies(self) -> None:
@@ -64,6 +66,9 @@ class LearnSingSongsTask(WorldTask):
             asyncio.run(self._write_learned_event(learned))
         if learned:
             self._reload_singing_library()
+            published_dynamic_ids = self._publish_learned_dynamics(learned)
+        else:
+            published_dynamic_ids = []
 
         return WorldTaskResult.success(
             self.task_name,
@@ -72,6 +77,7 @@ class LearnSingSongsTask(WorldTask):
             learned=learned,
             abandoned=abandoned,
             awaiting=awaiting,
+            dynamic_ids=published_dynamic_ids,
         )
 
     def _build_auto_song_learner(self) -> "AutoSongLearner" | None:
@@ -125,4 +131,57 @@ class LearnSingSongsTask(WorldTask):
             reload_songs(self.character_id)
         except Exception as exc:
             self.logger.warning(f"Failed to reload singing library after learning songs: {exc}")
+
+    def _publish_learned_dynamics(self, learned: list[str]) -> list[str]:
+        if self.dynamic_capability is None:
+            return []
+        published: list[str] = []
+        for song_name in learned:
+            content = self._compose_learned_dynamic_content(song_name)
+            try:
+                ok, _, item = self.dynamic_capability.publish_agent_dynamic(
+                    character_id=self.character_id,
+                    content=content,
+                    source_type="song_learned",
+                    source_id=song_name,
+                    visibility="global",
+                    allow_comment=True,
+                )
+                if ok and item is not None:
+                    published.append(item["id"])
+            except Exception as exc:
+                self.logger.warning(f"Failed to publish learned-song dynamic for {song_name}: {exc}")
+        return published
+
+    def _build_learned_dynamic_content(self, song_name: str) -> str:
+        return f"今天学会了《{song_name}》。之后如果你想听，我就可以唱给你听啦。"
+
+    def _compose_learned_dynamic_content(self, song_name: str) -> str:
+        fallback = self._build_learned_dynamic_content(song_name)
+        if self.dynamic_capability is None:
+            return fallback
+
+        instruction = (
+            "这是一次学歌成功后的角色动态。"
+            "请以角色的第一人称视角，表达学会一首新歌后的开心，对这首歌的感受"
+            "以及想唱给用户听的心情，语气活泼可爱。"
+        )
+        structured_context = "\n".join(
+            [
+                f"角色名：{self.character_name}",
+                f"新学会的歌曲：{song_name}",
+            ]
+        )
+        try:
+            result = asyncio.run(
+                self.dynamic_capability.generate_world_dynamic_content(
+                    dynamic_type="song_learned",
+                    instruction=instruction,
+                    structured_context=structured_context,
+                )
+            )
+            return result or fallback
+        except Exception as exc:
+            self.logger.warning(f"Learned-song dynamic composer failed, fallback to template text: {exc}")
+            return fallback
 
