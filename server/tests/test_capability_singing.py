@@ -69,6 +69,11 @@ def test_singing_known_song_interfaces_return_usable_results(singing_capability:
     assert isinstance(lyrics, str)
     assert lyrics.strip()
 
+    full_lyrics = singing_capability.get_full_lyrics(CHARACTER_ID, correct_song)
+    assert isinstance(full_lyrics, str)
+    assert full_lyrics.strip()
+    assert lyrics.splitlines()[0] in full_lyrics
+
     audio = singing_capability.sing(CHARACTER_ID, correct_song, segments[0])
     assert isinstance(audio, bytes)
     assert len(audio) > 1024
@@ -115,6 +120,7 @@ async def test_singing_unknown_song_interfaces_return_empty_results_without_erro
 
     assert singing_capability.sing(CHARACTER_ID, UNKNOWN_SONG, "不存在的段落") is None
     assert singing_capability.get_segment_lyrics(CHARACTER_ID, UNKNOWN_SONG, "不存在的段落") == ""
+    assert singing_capability.get_full_lyrics(CHARACTER_ID, UNKNOWN_SONG) == ""
 
     llm_text = await singing_capability.can_i_sing_song_llm(CHARACTER_ID, UNKNOWN_SONG)
     assert UNKNOWN_SONG in llm_text

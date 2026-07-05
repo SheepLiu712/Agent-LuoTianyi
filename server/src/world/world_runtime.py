@@ -31,10 +31,12 @@ class WorldRuntime:
 
         self.world_clock = WorldClock()
         self.citywalk_task: CitywalkTask | None = None
+        self.citywalk_tasks: List[CitywalkTask] = []
         self.learn_sing_songs_task: LearnSingSongsTask | None = None
         self.learn_sing_songs_tasks: List[LearnSingSongsTask] = []
         self.vcpedia_new_song_task: VCPediaNewSongTask | None = None
         self.bili_event_update_task: BiliEventUpdateTask | None = None
+        self.bili_event_update_tasks: List[BiliEventUpdateTask] = []
         self.dynamic_interaction_task: DynamicInteractionTask | None = None
         self.proactive_topic_check_task: ProactiveTopicCheckTask | None = None
         self.expired_event_cleanup_task: ExpiredEventCleanupTask | None = None
@@ -57,23 +59,19 @@ class WorldRuntime:
         if self.system_runtime is None:
             raise RuntimeError("WorldRuntime requires system_runtime before module initialization.")
 
-        self.citywalk_task = (
-            CitywalkTask(self.config.get("citywalk", {}))
-            if self._task_enabled("citywalk")
-            else None
-        )
+        self.citywalk_tasks = self._build_citywalk_tasks()
+        self.citywalk_task = self.citywalk_tasks[0] if self.citywalk_tasks else None
         self.learn_sing_songs_tasks = self._build_learn_sing_songs_tasks()
         self.learn_sing_songs_task = (
             self.learn_sing_songs_tasks[0] if self.learn_sing_songs_tasks else None
         )
         self.vcpedia_new_song_task = VCPediaNewSongTask(self.config.get("song_knowledge", {}))
-        self.bili_event_update_task = (
-            BiliEventUpdateTask(self.config.get("bili_dynamic_fetcher", {}))
-            if self._task_enabled("bili_dynamic_fetcher")
-            else None
-        )
+        self.bili_event_update_tasks = self._build_bili_event_update_tasks()
+        self.bili_event_update_task = self.bili_event_update_tasks[0] if self.bili_event_update_tasks else None
         self.dynamic_interaction_task = (
-            DynamicInteractionTask(self.config.get("dynamic_interaction", {}))
+            DynamicInteractionTask(
+                self._character_task_config("dynamic_interaction", self._default_character_id())
+            )
             if self._task_enabled("dynamic_interaction")
             else None
         )
@@ -85,10 +83,10 @@ class WorldRuntime:
         )
 
         self.tasks: List["WorldTask"] = [
-            self.citywalk_task,
+            *self.citywalk_tasks,
             *self.learn_sing_songs_tasks,
             self.vcpedia_new_song_task,
-            self.bili_event_update_task,
+            *self.bili_event_update_tasks,
             self.dynamic_interaction_task,
             self.proactive_topic_check_task,
             self.expired_event_cleanup_task,
@@ -170,6 +168,17 @@ class WorldRuntime:
             else:
                 self.logger.warning(f"Unknown world clock task type for {task_name}: {task_type}")
 
+    def _build_citywalk_tasks(self) -> List[CitywalkTask]:
+        if not self._task_enabled("citywalk"):
+            return []
+        tasks: list[CitywalkTask] = []
+        for character_id in self._character_ids():
+            config = self._character_task_config("citywalk", character_id)
+            if not config.get("enabled", True):
+                continue
+            tasks.append(CitywalkTask(config, character_id=character_id))
+        return tasks
+
     def _build_learn_sing_songs_tasks(self) -> List[LearnSingSongsTask]:
         if not self._task_enabled("auto_song_learner"):
             return []
@@ -181,10 +190,72 @@ class WorldRuntime:
             self.logger.warning("No singing managers available; learn_sing_songs tasks skipped")
             return []
         config = self.config.get("auto_song_learner", {})
-        return [
-            LearnSingSongsTask(config, character_id=character_id, singing_manager=singing_manager)
-            for character_id, singing_manager in managers.items()
-        ]
+        tasks: list[LearnSingSongsTask] = []
+        for character_id, singing_manager in managers.items():
+            task_config = self._character_task_config("auto_song_learner", character_id, base_config=config)
+            if not task_config.get("enabled", True):
+                continue
+            tasks.append(
+                LearnSingSongsTask(
+                    task_config,
+                    character_id=character_id,
+                    singing_manager=singing_manager,
+                )
+            )
+        return tasks
+
+    def _build_bili_event_update_tasks(self) -> List[BiliEventUpdateTask]:
+        if not self._task_enabled("bili_dynamic_fetcher"):
+            return []
+        config = self.config.get("bili_dynamic_fetcher", {})
+        bili_uids = config.get("bilibili_uids")
+        tasks: list[BiliEventUpdateTask] = []
+        for character_id in self._character_ids():
+            if isinstance(bili_uids, dict) and character_id not in bili_uids:
+                continue
+            task_config = self._character_task_config("bili_dynamic_fetcher", character_id, base_config=config)
+            if not task_config.get("enabled", True):
+                continue
+            if isinstance(bili_uids, dict):
+                task_config["bilibili_uids"] = {character_id: bili_uids[character_id]}
+            tasks.append(BiliEventUpdateTask(task_config, character_id=character_id))
+        return tasks
+
+    def _character_ids(self) -> list[str]:
+        agent_runtime = getattr(self.system_runtime, "agent_runtime", None)
+        runtimes = getattr(agent_runtime, "character_runtimes", None)
+        if isinstance(runtimes, dict) and runtimes:
+            return [str(character_id) for character_id in runtimes.keys()]
+        default_character_id = getattr(agent_runtime, "default_character_id", None)
+        if default_character_id:
+            return [str(default_character_id)]
+        return ["luotianyi"]
+
+    def _default_character_id(self) -> str:
+        agent_runtime = getattr(self.system_runtime, "agent_runtime", None)
+        default_character_id = getattr(agent_runtime, "default_character_id", None)
+        if default_character_id:
+            return str(default_character_id)
+        character_ids = self._character_ids()
+        return character_ids[0] if character_ids else "luotianyi"
+
+    def _character_task_config(
+        self,
+        config_key: str,
+        character_id: str,
+        *,
+        base_config: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        source = dict(base_config or self.config.get(config_key, {}) or {})
+        character_overrides = source.pop("characters", None) or source.pop("per_character", None) or {}
+        override = {}
+        if isinstance(character_overrides, dict):
+            raw_override = character_overrides.get(character_id, {})
+            if isinstance(raw_override, dict):
+                override = raw_override
+        merged = {**source, **override}
+        merged["character_id"] = character_id
+        return merged
 
     def _task_enabled(self, config_key: str) -> bool:
         cfg = self.config.get(config_key, {})

@@ -280,6 +280,16 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     closeDrawer();
   };
 
+  const handleCloseDynamics = useCallback(() => {
+    setShowDynamics(false);
+    refreshDynamicsUnread();
+  }, [refreshDynamicsUnread]);
+
+  const handleDynamicsUnreadCleared = useCallback(() => {
+    setHasDynamicsUnread(false);
+    setDynamicsUnreadCount(0);
+  }, []);
+
   const handleLogout = () => {
     closeDrawer();
     onLogout?.();
@@ -371,14 +381,8 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       {showPreferences ? <PreferencesScreen onClose={() => setShowPreferences(false)} theme={theme} /> : null}
       {showDynamics ? (
         <DynamicsScreen
-          onClose={() => {
-            setShowDynamics(false);
-            refreshDynamicsUnread();
-          }}
-          onUnreadCleared={() => {
-            setHasDynamicsUnread(false);
-            setDynamicsUnreadCount(0);
-          }}
+          onClose={handleCloseDynamics}
+          onUnreadCleared={handleDynamicsUnreadCleared}
           theme={theme}
         />
       ) : null}

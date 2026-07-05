@@ -12,7 +12,7 @@ from src.world.types.world_task import WorldTask
 if TYPE_CHECKING:
     from src.system.database import DatabaseManager
     from src.system.system_runtime import SystemRuntime
-    from src.capabilities.dynamic.dynamic import DynamicCapability
+    from src.agent_runtime.character_runtime import CharacterRuntime
 
 
 class DynamicInteractionTask(WorldTask):
@@ -28,19 +28,19 @@ class DynamicInteractionTask(WorldTask):
         self.logger = get_logger(__name__)
         self.system_runtime: "SystemRuntime" | None = None
         self.database_manager: "DatabaseManager" | None = None
-        self.dynamic_capability: "DynamicCapability" | None = None
         self.agent_runtime: Any | None = None
+        self.character_runtime: "CharacterRuntime" | None = None
         self.character_id = str(self.config.get("character_id", "luotianyi"))
         self.character_name = str(self.config.get("character_name", "洛天依"))
 
     def initialize(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
         self.database_manager = getattr(system_runtime, "database_manager", None)
-        self.dynamic_capability = getattr(getattr(system_runtime, "capability_manager", None), "dynamics", None)
         self.agent_runtime = getattr(system_runtime, "agent_runtime", None)
         try:
             runtime = self.agent_runtime.get_character_runtime(self.character_id) if self.agent_runtime is not None else None
             if runtime is not None:
+                self.character_runtime = runtime
                 self.character_name = getattr(getattr(runtime, "profile", None), "display_name", self.character_name) or self.character_name
         except Exception:
             pass
@@ -50,6 +50,8 @@ class DynamicInteractionTask(WorldTask):
         required = {
             "system_runtime": self.system_runtime,
             "database_manager": self.database_manager,
+            "agent_runtime": self.agent_runtime,
+            "character_runtime": self.character_runtime,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
@@ -57,9 +59,9 @@ class DynamicInteractionTask(WorldTask):
 
     async def run_once(self) -> WorldTaskResult:
         self.ensure_dependencies()
-        if self.dynamic_capability is None or self.agent_runtime is None:
+        if self.character_runtime is None or self.agent_runtime is None:
             return WorldTaskResult.skipped_result(self.task_name, "dynamic interaction dependencies are unavailable")
-        replier_available = self.dynamic_capability.replier.ensure_llm()
+        replier_available = self.character_runtime.capability_manager.dynamics.replier.ensure_llm()
         if replier_available:
             reply_stats = await self._process_replies()
         else:
@@ -84,17 +86,15 @@ class DynamicInteractionTask(WorldTask):
         failed = 0
         post_limit = int(self.config.get("reply_post_limit", 10))
         comment_limit = int(self.config.get("reply_comment_limit", 20))
-        replier = self.dynamic_capability.replier
 
         for item in self.database_manager.dynamic_store.list_pending_dynamic_posts_for_reply(limit=post_limit):
             processed += 1
             try:
-                reply_text = await replier.generate_reply_for_post(item)
-                ok, message, created = self.dynamic_capability.publish_agent_comment(
+                reply_text = await self.character_runtime.generate_dynamic_reply_for_post(item)
+                ok, message, created = self.character_runtime.publish_dynamic_comment(
                     dynamic_id=item["id"],
                     owner_user_id=item["owner_user_id"],
                     content=reply_text,
-                    character_id=self.character_id,
                 )
                 if ok and created is not None:
                     self.database_manager.dynamic_store.update_dynamic_post_reply_state(item["id"], status="replied", error=None)
@@ -109,16 +109,15 @@ class DynamicInteractionTask(WorldTask):
         for item in self.database_manager.dynamic_store.list_pending_dynamic_comments_for_reply(limit=comment_limit):
             processed += 1
             try:
-                decision = await replier.generate_reply_for_comment(item)
+                decision = await self.character_runtime.generate_dynamic_reply_for_comment(item)
                 if not decision["should_reply"]:
                     self.database_manager.dynamic_store.update_dynamic_comment_reply_state(item["id"], status="ignored", error=None)
                     ignored += 1
                     continue
-                ok, message, created = self.dynamic_capability.publish_agent_comment(
+                ok, message, created = self.character_runtime.publish_dynamic_comment(
                     dynamic_id=item["dynamic_id"],
                     owner_user_id=item["owner_user_id"],
                     content=decision["reply"],
-                    character_id=self.character_id,
                     parent_comment_id=item["id"],
                 )
                 if ok and created is not None:

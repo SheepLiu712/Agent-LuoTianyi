@@ -60,12 +60,12 @@ class DynamicReplier:
     # ── 角色上下文 ─────────────────────────────────────────
 
     def set_character_context(self, *, character_name: str) -> None:
-        """设置角色名称（供回复生成使用）。"""
+        """设置默认角色名称（兼容旧调用；多角色调用应显式传入 character_name）。"""
         self._character_name = character_name
 
     # ── 回复生成 ───────────────────────────────────────────
 
-    async def generate_reply_for_post(self, item: dict[str, Any]) -> str:
+    async def generate_reply_for_post(self, item: dict[str, Any], *, character_name: str | None = None) -> str:
         """为动态帖子生成回复文本。
 
         Args:
@@ -77,6 +77,7 @@ class DynamicReplier:
         decision = await self._ask_reply_llm(
             item_type="dynamic_post",
             must_reply=True,
+            character_name=character_name or self._character_name,
             user_name=item.get("username") or "用户",
             user_description=item.get("user_description") or "",
             preference_context=self._build_preference_context(item.get("preferences") or {}),
@@ -88,7 +89,7 @@ class DynamicReplier:
             return reply
         return "我认真看完啦。谢谢你愿意和我分享这些，之后如果你还想继续说，我会认真听着。"
 
-    async def generate_reply_for_comment(self, item: dict[str, Any]) -> dict[str, Any]:
+    async def generate_reply_for_comment(self, item: dict[str, Any], *, character_name: str | None = None) -> dict[str, Any]:
         """为动态评论生成是否回复的判断及回复文本。
 
         Args:
@@ -101,6 +102,7 @@ class DynamicReplier:
         decision = await self._ask_reply_llm(
             item_type="dynamic_comment",
             must_reply=False,
+            character_name=character_name or self._character_name,
             user_name=item.get("username") or "用户",
             user_description=item.get("user_description") or "",
             preference_context=self._build_preference_context(item.get("preferences") or {}),
@@ -120,6 +122,7 @@ class DynamicReplier:
         *,
         item_type: str,
         must_reply: bool,
+        character_name: str,
         user_name: str,
         user_description: str,
         preference_context: str,
@@ -129,7 +132,7 @@ class DynamicReplier:
         if self._reply_llm is None:
             return {"should_reply": must_reply, "reply": "" if not must_reply else "谢谢你的分享~"}
         response = await self._reply_llm.generate_response(
-            character_name=self._character_name,
+            character_name=character_name,
             user_name=user_name,
             user_description=user_description,
             preference_context=preference_context,

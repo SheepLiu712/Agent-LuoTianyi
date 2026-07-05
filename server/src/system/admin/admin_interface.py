@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 
 from .admin_shell import get_admin_shell
 from .llm_config_editor import apply_llm_config_draft, build_llm_config_view
+from .system_dynamic_publisher import publish_system_dynamic
 from src.utils.helpers import apply_env_variables
 
 if TYPE_CHECKING:
@@ -89,6 +90,19 @@ def _parse_admin_datetime_filter(value: str | None, *, end_of_day: bool = False)
         except ValueError:
             continue
     raise HTTPException(status_code=400, detail=f"无效的时间格式: {raw}")
+
+
+def _parse_bool_payload(value: Any, *, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off", ""}:
+        return False
+    return default
 
 
 router = APIRouter(prefix="/admin/api", tags=["admin"])
@@ -395,6 +409,38 @@ async def admin_dynamics(
         created_after=_parse_admin_datetime_filter(created_after),
         created_before=_parse_admin_datetime_filter(created_before, end_of_day=True),
     )
+
+
+@protected_router.post("/dynamics/system")
+async def admin_create_system_dynamic(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="系统动态内容不能为空")
+
+    visibility = str(payload.get("visibility") or "global").strip()
+    if visibility != "global":
+        raise HTTPException(status_code=400, detail="系统动态目前只支持全局可见")
+
+    source_type = str(payload.get("source_type") or "system_notice").strip() or "system_notice"
+    source_id = str(payload.get("source_id") or "").strip() or None
+    allow_comment = _parse_bool_payload(payload.get("allow_comment"), default=False)
+    ok, message, item = publish_system_dynamic(
+        runtime.database_manager,
+        content=content,
+        source_type=source_type,
+        source_id=source_id,
+        visibility=visibility,
+        allow_comment=allow_comment,
+    )
+    if not ok or item is None:
+        raise HTTPException(status_code=400, detail=message)
+    return {"ok": True, "item": item}
 
 
 @protected_router.get("/dynamics/{dynamic_id}/comments")

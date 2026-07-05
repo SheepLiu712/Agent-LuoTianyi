@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
+  Image,
   Platform,
   RefreshControl,
   StyleSheet,
@@ -27,6 +28,10 @@ import {
 } from '../utils/dynamics';
 import { addDebugTrace } from '../utils/debug_trace';
 import { AppTheme, THEMES } from '../utils/theme';
+
+const TIAN_YI_ICON = require('../assets/images/tianyi_icon.png');
+const USER_ICON = require('../assets/images/user_icon.png');
+const ADD_DYNAMIC_ICON = require('../assets/images/add_dynamic.png');
 
 interface DynamicsScreenProps {
   onClose: () => void;
@@ -62,6 +67,16 @@ function getAuthorTone(authorType: string, theme: AppTheme) {
     return { backgroundColor: theme.surfaceAlt, color: theme.textMuted, label: '系统' };
   }
   return { backgroundColor: theme.surfaceAlt, color: theme.textSoft, label: '你' };
+}
+
+function getAuthorAvatarSource(authorType: string) {
+  if (authorType === 'agent') {
+    return TIAN_YI_ICON;
+  }
+  if (authorType === 'user') {
+    return USER_ICON;
+  }
+  return null;
 }
 
 function getSourceLabel(sourceType: string) {
@@ -105,6 +120,7 @@ export default function DynamicsScreen({
   const [hasMore, setHasMore] = useState(false);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [createEditorOpen, setCreateEditorOpen] = useState(false);
   const [createText, setCreateText] = useState('');
   const [expandedPostIds, setExpandedPostIds] = useState<Record<string, boolean>>({});
   const [commentStateMap, setCommentStateMap] = useState<Record<string, CommentBucket>>({});
@@ -113,9 +129,14 @@ export default function DynamicsScreen({
   const [errorText, setErrorText] = useState('');
   const [lastHeaderTapAt, setLastHeaderTapAt] = useState(0);
   const listRef = React.useRef<FlatList<DynamicPost>>(null);
+  const onUnreadClearedRef = React.useRef(onUnreadCleared);
 
   const username = auth.username;
   const token = auth.message_token;
+
+  useEffect(() => {
+    onUnreadClearedRef.current = onUnreadCleared;
+  }, [onUnreadCleared]);
 
   const loadReadState = useCallback(async () => {
     if (!username || !token) {
@@ -124,12 +145,12 @@ export default function DynamicsScreen({
     try {
       const result = await markDynamicsRead(username, token);
       if (result.ok) {
-        onUnreadCleared?.();
+        onUnreadClearedRef.current?.();
       }
     } catch (error) {
       addDebugTrace('dynamics', 'mark read failed', { error: String(error) });
     }
-  }, [onUnreadCleared, token, username]);
+  }, [token, username]);
 
   const loadPosts = useCallback(async (options?: { cursor?: string | null; append?: boolean; silent?: boolean }) => {
     if (!username || !token) {
@@ -216,6 +237,7 @@ export default function DynamicsScreen({
       const created = await createDynamic(username, token, text);
       setPosts((current) => [created, ...current]);
       setCreateText('');
+      setCreateEditorOpen(false);
       setErrorText('');
     } catch (error) {
       Alert.alert('发布失败', error instanceof Error ? error.message : '动态发布失败');
@@ -223,6 +245,24 @@ export default function DynamicsScreen({
       setCreateSubmitting(false);
     }
   }, [createText, token, username]);
+
+  const handleRequestCloseCreateEditor = useCallback(() => {
+    Alert.alert(
+      '退出编辑',
+      '退出后这条动态不会保存。',
+      [
+        { text: '继续编辑', style: 'cancel' },
+        {
+          text: '退出',
+          style: 'destructive',
+          onPress: () => {
+            setCreateText('');
+            setCreateEditorOpen(false);
+          },
+        },
+      ],
+    );
+  }, []);
 
   const updateCommentBucket = useCallback((dynamicId: string, updater: (current: CommentBucket) => CommentBucket) => {
     setCommentStateMap((current) => {
@@ -375,12 +415,19 @@ export default function DynamicsScreen({
 
         {bucket.items.map((comment) => {
           const tone = getAuthorTone(comment.author_type, theme);
+          const avatarSource = getAuthorAvatarSource(comment.author_type);
           return (
             <View key={comment.id} style={styles.commentRow}>
               <View style={styles.commentHeaderRow}>
-                <View style={[styles.authorBadge, { backgroundColor: tone.backgroundColor }]}>
-                  <Text style={[styles.authorBadgeText, { color: tone.color }]}>{tone.label}</Text>
-                </View>
+                {avatarSource ? (
+                  <View style={[styles.authorAvatarFrame, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                    <Image source={avatarSource} style={styles.authorAvatarImage} resizeMode="cover" />
+                  </View>
+                ) : (
+                  <View style={[styles.authorBadge, { backgroundColor: tone.backgroundColor }]}>
+                    <Text style={[styles.authorBadgeText, { color: tone.color }]}>{tone.label}</Text>
+                  </View>
+                )}
                 <Text style={[styles.commentAuthorText, { color: theme.text }]}>{comment.author_name}</Text>
                 <Text style={[styles.commentTimeText, { color: theme.textMuted }]}>{comment.created_at || ''}</Text>
               </View>
@@ -442,6 +489,7 @@ export default function DynamicsScreen({
 
   const renderPost = ({ item }: { item: DynamicPost }) => {
     const tone = getAuthorTone(item.author_type, theme);
+    const avatarSource = getAuthorAvatarSource(item.author_type);
     const replyStatusText = getReplyStatusText(item);
     const commentsOpen = Boolean(expandedPostIds[item.id]);
 
@@ -449,9 +497,15 @@ export default function DynamicsScreen({
       <View style={[styles.postCard, { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.shadow }]}>
         <View style={styles.postHeaderRow}>
           <View style={styles.postHeaderLeft}>
-            <View style={[styles.authorBadge, { backgroundColor: tone.backgroundColor }]}>
-              <Text style={[styles.authorBadgeText, { color: tone.color }]}>{tone.label}</Text>
-            </View>
+            {avatarSource ? (
+              <View style={[styles.authorAvatarFrame, { backgroundColor: theme.surfaceAlt, borderColor: theme.border }]}>
+                <Image source={avatarSource} style={styles.authorAvatarImage} resizeMode="cover" />
+              </View>
+            ) : (
+              <View style={[styles.authorBadge, { backgroundColor: tone.backgroundColor }]}>
+                <Text style={[styles.authorBadgeText, { color: tone.color }]}>{tone.label}</Text>
+              </View>
+            )}
             <View style={styles.authorMeta}>
               <Text style={[styles.authorNameText, { color: theme.text }]}>{item.author_name}</Text>
               <Text style={[styles.sourceText, { color: theme.textMuted }]}>{getSourceLabel(item.source_type)}</Text>
@@ -510,43 +564,6 @@ export default function DynamicsScreen({
           </TouchableOpacity>
         </View>
 
-        <View style={[styles.composerPanel, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-          <TextInput
-            style={[
-              styles.composerInput,
-              {
-                backgroundColor: theme.inputBackground,
-                borderColor: theme.border,
-                color: theme.inputText,
-              },
-            ]}
-            placeholder="分享一点最近发生的事..."
-            placeholderTextColor={theme.placeholder}
-            value={createText}
-            onChangeText={setCreateText}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-          />
-          <View style={styles.composerActionRow}>
-            <Text style={[styles.composerHintText, { color: theme.textMuted }]}>只有你、天依和管理员能看到你的动态</Text>
-            <TouchableOpacity
-              style={[
-                styles.publishButton,
-                { backgroundColor: theme.accent },
-                createSubmitting && styles.disabledButton,
-              ]}
-              onPress={handleCreatePost}
-              disabled={createSubmitting}
-              activeOpacity={0.82}
-            >
-              <Text style={[styles.publishButtonText, { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' }]}>
-                {createSubmitting ? '发布中' : '发布'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
         {errorText ? (
           <View style={[styles.errorBanner, { backgroundColor: theme.dangerSurface }]}>
             <Text style={[styles.errorBannerText, { color: theme.dangerText }]}>{errorText}</Text>
@@ -577,7 +594,69 @@ export default function DynamicsScreen({
           }
           showsVerticalScrollIndicator={true}
         />
+
+        <TouchableOpacity
+          style={[
+            styles.addDynamicButton,
+            {
+              right: 20,
+              bottom: Math.max(insets.bottom + 20, 32),
+            },
+          ]}
+          onPress={() => setCreateEditorOpen(true)}
+          activeOpacity={0.82}
+        >
+          <Image source={ADD_DYNAMIC_ICON} style={styles.addDynamicIcon} resizeMode="contain" />
+        </TouchableOpacity>
       </View>
+
+      {createEditorOpen ? (
+        <View style={[styles.createEditorOverlay, { backgroundColor: theme.root, paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+          <View style={[styles.createEditorHeader, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+            <TouchableOpacity
+              style={styles.editorHeaderButton}
+              onPress={handleRequestCloseCreateEditor}
+              activeOpacity={0.72}
+              disabled={createSubmitting}
+            >
+              <Text style={[styles.editorHeaderButtonText, { color: theme.accentText }]}>退出编辑</Text>
+            </TouchableOpacity>
+            <Text style={[styles.createEditorTitle, { color: theme.text }]}>发一条动态</Text>
+            <TouchableOpacity
+              style={[styles.editorHeaderButton, styles.editorPublishButton, createSubmitting && styles.disabledButton]}
+              onPress={handleCreatePost}
+              activeOpacity={0.72}
+              disabled={createSubmitting}
+            >
+              <Text style={[styles.editorHeaderButtonText, { color: theme.accentText }]}>
+                {createSubmitting ? '发布中' : '发布'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.createEditorBody}>
+            <TextInput
+              style={[
+                styles.createEditorInput,
+                {
+                  backgroundColor: theme.inputBackground,
+                  borderColor: theme.border,
+                  color: theme.inputText,
+                },
+              ]}
+              placeholder="分享一点最近发生的事..."
+              placeholderTextColor={theme.placeholder}
+              value={createText}
+              onChangeText={setCreateText}
+              multiline
+              textAlignVertical="top"
+              autoFocus
+            />
+            <Text style={[styles.createEditorHintText, { color: theme.textMuted }]}>
+              只有你、天依和管理员能够看到动态
+            </Text>
+          </View>
+        </View>
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
@@ -633,45 +712,6 @@ const styles = StyleSheet.create({
   refreshButtonText: {
     fontSize: 15,
     fontWeight: '600',
-  },
-  composerPanel: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 14,
-    borderBottomWidth: 1,
-    gap: 10,
-  },
-  composerInput: {
-    minHeight: 92,
-    borderWidth: 1,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 15,
-    lineHeight: 21,
-  },
-  composerActionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  composerHintText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  publishButton: {
-    minWidth: 78,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  publishButtonText: {
-    fontSize: 14,
-    fontWeight: '700',
   },
   disabledButton: {
     opacity: 0.6,
@@ -730,6 +770,19 @@ const styles = StyleSheet.create({
   authorBadgeText: {
     fontSize: 11,
     fontWeight: '700',
+  },
+  authorAvatarFrame: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  authorAvatarImage: {
+    width: '100%',
+    height: '100%',
   },
   authorMeta: {
     flex: 1,
@@ -867,5 +920,64 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     fontSize: 14,
+  },
+  addDynamicButton: {
+    position: 'absolute',
+    width: 58,
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addDynamicIcon: {
+    width: 58,
+    height: 58,
+  },
+  createEditorOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 160,
+  },
+  createEditorHeader: {
+    height: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    paddingHorizontal: 14,
+  },
+  editorHeaderButton: {
+    minWidth: 72,
+    paddingVertical: 8,
+  },
+  editorPublishButton: {
+    alignItems: 'flex-end',
+  },
+  editorHeaderButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  createEditorTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  createEditorBody: {
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    gap: 12,
+  },
+  createEditorInput: {
+    minHeight: 210,
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 16,
+    lineHeight: 23,
+  },
+  createEditorHintText: {
+    fontSize: 13,
+    lineHeight: 19,
   },
 });

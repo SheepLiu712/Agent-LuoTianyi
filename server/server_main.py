@@ -30,7 +30,7 @@ from src.system.user_interface.types import (
     DynamicReadMarkRequest,
 )
 from src.system.user_interface.websocket_service import WebSocketConnection
-from server.src.system.admin.admin_interface import router as admin_router
+from src.system.admin.admin_interface import router as admin_router
 from src.system.admin import get_admin_shell, init_admin_shell, shutdown_admin_shell
 
 from src.utils.helpers import load_config

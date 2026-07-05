@@ -33,12 +33,17 @@ def test_learn_sing_songs_initialize_sets_event_store_and_learner(monkeypatch):
     learner = object()
     monkeypatch.setattr(task, "_build_auto_song_learner", lambda: learner)
     event_store = object()
-    runtime = SimpleNamespace(database_manager=SimpleNamespace(event_store=event_store))
+    character_runtime = object()
+    runtime = SimpleNamespace(
+        database_manager=SimpleNamespace(event_store=event_store),
+        agent_runtime=SimpleNamespace(get_character_runtime=lambda character_id: character_runtime),
+    )
 
     task.initialize(runtime)
 
     assert task.system_runtime is runtime
     assert task.event_store is event_store
+    assert task.character_runtime is character_runtime
     assert task.auto_song_learner is learner
 
 
@@ -145,6 +150,37 @@ def test_learn_sing_songs_run_once_reloads_singing_library_for_learned_songs():
 
     assert result.ok is True
     assert calls == ["luotianyi"]
+
+
+def test_learn_sing_songs_passes_full_lyrics_to_dynamic_capability():
+    learner = SimpleNamespace(
+        check_qq_credential=lambda: True,
+        try_learn_pending=lambda: SimpleNamespace(learned=["Song A"], abandoned=[], awaiting=[]),
+    )
+    captured = {}
+
+    class FakeCharacterRuntime:
+        async def publish_learned_song_dynamic(self, **kwargs):
+            captured.update(kwargs)
+            return {"dynamic_id": "dynamic-song-a", "content": "learned song dynamic"}
+
+    manager = SimpleNamespace(
+        character_name="洛天依",
+        can_i_sing_song=lambda song_name: ("Song A", ["主歌", "副歌"]),
+        get_full_lyrics=lambda song_name: "第一句歌词\n第二句歌词\n副歌歌词",
+    )
+    task = LearnSingSongsTask({}, character_id="luotianyi", singing_manager=manager)
+    task.auto_song_learner = learner
+    task.character_runtime = FakeCharacterRuntime()
+    task.system_runtime = SimpleNamespace(capability_manager=SimpleNamespace(singing=SimpleNamespace(reload_songs=lambda *_: None)))
+
+    result = task.run_once()
+
+    assert result.ok is True
+    assert result.data["dynamic_ids"] == ["dynamic-song-a"]
+    assert captured["song_name"] == "Song A"
+    assert captured["segment_description"] == "主歌"
+    assert captured["lyrics"] == "第一句歌词\n第二句歌词\n副歌歌词"
 
 
 def test_learn_sing_songs_write_learned_event_skips_without_store():

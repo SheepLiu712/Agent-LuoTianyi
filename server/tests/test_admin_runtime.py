@@ -17,7 +17,7 @@ from src.system.admin.secret_store import SecretStore
 from src.system.admin.admin_shell import init_admin_shell, shutdown_admin_shell
 from src.system.admin.llm_config_editor import apply_llm_config_draft, build_llm_config_view
 from src.system.observability import ObservabilityService
-from server.src.system.admin.admin_interface import _collect_llm_api_key_names
+from src.system.admin.admin_interface import _collect_llm_api_key_names
 from src.utils.helpers import apply_env_variables
 from src.world.world_runtime import WorldRuntime
 

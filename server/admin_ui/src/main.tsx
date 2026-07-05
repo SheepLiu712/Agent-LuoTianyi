@@ -1166,9 +1166,17 @@ function DynamicsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [createdAfter, setCreatedAfter] = useState('');
   const [createdBefore, setCreatedBefore] = useState('');
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [systemContent, setSystemContent] = useState('');
+  const [systemSourceType, setSystemSourceType] = useState('system_notice');
+  const [systemSourceId, setSystemSourceId] = useState('');
+  const [systemAllowComment, setSystemAllowComment] = useState(false);
+  const [systemPublishStatus, setSystemPublishStatus] = useState<LocalActionStatus | null>(null);
+  const [systemPublishing, setSystemPublishing] = useState(false);
 
   const query = useMemo(() => {
     const params = new URLSearchParams({ limit: '100' });
+    params.set('_', String(refreshNonce));
     if (ownerQuery.trim()) {
       params.set('owner_user_id', ownerQuery.trim());
     }
@@ -1188,7 +1196,7 @@ function DynamicsPage() {
       params.set('created_before', createdBefore);
     }
     return params.toString();
-  }, [authorType, createdAfter, createdBefore, ownerQuery, sourceType, statusFilter]);
+  }, [authorType, createdAfter, createdBefore, ownerQuery, refreshNonce, sourceType, statusFilter]);
 
   const { data, error, loading } = usePolling<{ items: DynamicAdminPost[]; has_more: boolean; next_cursor: string | null }>(
     `/admin/api/dynamics?${query}`,
@@ -1236,6 +1244,40 @@ function DynamicsPage() {
   const waitingMemoryCount = rows.filter((row) => row.memory_status === 'pending').length;
   const failedCount = rows.filter((row) => row.reply_status === 'failed' || row.memory_status === 'failed').length;
 
+  async function publishSystemDynamic() {
+    const content = systemContent.trim();
+    if (!content) {
+      setSystemPublishStatus({ tone: 'error', message: '系统动态内容不能为空' });
+      return;
+    }
+    setSystemPublishing(true);
+    setSystemPublishStatus({ tone: 'info', message: '正在发布系统动态...' });
+    try {
+      const result = await postJson<{ ok: boolean; item: DynamicAdminPost }>('/admin/api/dynamics/system', {
+        content,
+        source_type: systemSourceType.trim() || 'system_notice',
+        source_id: systemSourceId.trim() || null,
+        visibility: 'global',
+        allow_comment: systemAllowComment,
+      });
+      setSystemContent('');
+      setSystemPublishStatus({
+        tone: 'success',
+        message: `发布成功 · ${result.item.id}`,
+      });
+      setAuthorType('');
+      setSourceType('');
+      setRefreshNonce((value) => value + 1);
+    } catch (err) {
+      setSystemPublishStatus({
+        tone: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setSystemPublishing(false);
+    }
+  }
+
   return (
     <>
       <PageHeader title="动态管理" subtitle="查看用户动态、天依动态、系统通知，以及评论、回复和记忆处理状态" />
@@ -1246,6 +1288,45 @@ function DynamicsPage() {
         <MetricCard title="待记忆" value={formatNumber(waitingMemoryCount)} detail="memory_status = pending" />
         <MetricCard title="失败项" value={formatNumber(failedCount)} detail="reply/memory failed" tone={failedCount ? 'danger' : undefined} />
       </section>
+
+      <Panel title="发布系统动态">
+        <div className="system-dynamic-publisher">
+          <textarea
+            value={systemContent}
+            onChange={(event) => setSystemContent(event.target.value)}
+            placeholder="输入要展示给所有用户的系统通知"
+            rows={4}
+          />
+          <div className="system-dynamic-controls">
+            <input
+              value={systemSourceType}
+              onChange={(event) => setSystemSourceType(event.target.value)}
+              placeholder="source_type"
+            />
+            <input
+              value={systemSourceId}
+              onChange={(event) => setSystemSourceId(event.target.value)}
+              placeholder="source_id，可选"
+            />
+            <label className="checkbox-line">
+              <input
+                type="checkbox"
+                checked={systemAllowComment}
+                onChange={(event) => setSystemAllowComment(event.target.checked)}
+              />
+              允许评论
+            </label>
+            <button onClick={publishSystemDynamic} disabled={systemPublishing || !systemContent.trim()}>
+              {systemPublishing ? '发布中...' : '发布'}
+            </button>
+          </div>
+          {systemPublishStatus && (
+            <div className={`inline-status ${systemPublishStatus.tone === 'error' ? 'error' : systemPublishStatus.tone === 'success' ? 'success' : ''}`}>
+              {systemPublishStatus.message}
+            </div>
+          )}
+        </div>
+      </Panel>
 
       <Panel title="筛选">
         <div className="filter-row dynamic-filter-row">

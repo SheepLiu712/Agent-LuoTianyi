@@ -123,7 +123,7 @@
                     "llm": {
                         "name": "qwen3.6-flash",
                         "enable_thinking": false,
-                        "use_json": false,
+                        "use_json": true,
                         "params": {}
                     },
                     "prompt_name": "dynamic_reply_prompt"
@@ -534,6 +534,19 @@
                     "run_immediately": false
                 }
             }
+        },
+        "dynamic_interaction": {
+            "clock_config": {
+                "type": "interval",
+                "params": {
+                    "interval_seconds": 600,
+                    "run_immediately": false
+                }
+            },
+            "reply_post_limit": 10,
+            "reply_comment_limit": 20,
+            "memory_post_limit": 10,
+            "memory_comment_limit": 20
         },
         "expired_event_cleanup": {
             "clock_config": {

@@ -29,6 +29,67 @@ from src.world.citywalk.task import CitywalkTask
 from src.world.learn_sing_songs.task import LearnSingSongsTask
 
 
+def test_dynamic_capability_accepts_nested_module_config_and_degrades_on_invalid_llm():
+    registered = []
+
+    class FakeLLMService:
+        llm_interfaces = {}
+
+        def register_llm_module(self, name, config):
+            registered.append((name, config))
+            if name == "dynamic_composer":
+                return SimpleNamespace(module_name=name)
+            raise ValueError("reply llm unavailable")
+
+    capability = DynamicCapability(
+        {
+            "dynamic_composer": {
+                "llm_module": {
+                    "llm": {"name": "qwen3.5-plus"},
+                    "prompt_name": "dynamic_post_prompt",
+                }
+            },
+            "dynamic_replier": {
+                "llm_module": {
+                    "llm": {"name": "qwen3.6-flash"},
+                    "prompt_name": "dynamic_reply_prompt",
+                }
+            },
+        }
+    )
+
+    capability.create_dynamic_composer_module(FakeLLMService())
+
+    assert registered[0] == (
+        "dynamic_composer",
+        {
+            "llm": {"name": "qwen3.5-plus"},
+            "prompt_name": "dynamic_post_prompt",
+        },
+    )
+    assert registered[1][0] == "dynamic_reply"
+
+    bad_capability = DynamicCapability(
+        {
+            "dynamic_composer": {
+                "llm_module": {
+                    "llm": {"name": ""},
+                    "prompt_name": "dynamic_post_prompt",
+                }
+            }
+        }
+    )
+
+    class RejectingLLMService:
+        llm_interfaces = {}
+
+        def register_llm_module(self, name, config):
+            raise ValueError("LLM接口未找到")
+
+    bad_capability.create_dynamic_composer_module(RejectingLLMService())
+    assert bad_capability._dynamic_composer is None
+
+
 @pytest.fixture(scope="function")
 def db_manager(tmp_path):
     os.environ["JWT_SECRET"] = "test-secret"
@@ -203,6 +264,38 @@ def test_system_dynamic_skips_memory_and_reply_and_disallows_comments(db_manager
     pending_memory = db_manager.dynamic_store.list_pending_dynamic_posts_for_memory()
     assert all(item["id"] != dynamic["id"] for item in pending_reply)
     assert all(item["id"] != dynamic["id"] for item in pending_memory)
+
+
+def test_admin_create_system_dynamic_endpoint(db_manager: DatabaseManager, monkeypatch):
+    from src.system.admin import admin_interface
+
+    shell = SimpleNamespace(
+        runtime_supervisor=SimpleNamespace(
+            runtime=SimpleNamespace(database_manager=db_manager),
+        )
+    )
+    monkeypatch.setattr(admin_interface, "get_admin_shell", lambda: shell)
+
+    result = asyncio.run(
+        admin_interface.admin_create_system_dynamic(
+            {
+                "content": "系统通知：动态功能已更新。",
+                "source_type": "system_notice",
+                "source_id": "notice-001",
+            }
+        )
+    )
+
+    assert result["ok"] is True
+    item = result["item"]
+    assert item["author_type"] == "system"
+    assert item["author_id"] == "system"
+    assert item["visibility"] == "global"
+    assert item["source_type"] == "system_notice"
+    assert item["source_id"] == "notice-001"
+    assert item["allow_comment"] is False
+    assert item["memory_policy"] == "disabled"
+    assert item["reply_status"] == "not_applicable"
 
 
 def test_admin_dynamic_time_filters(db_manager: DatabaseManager):
@@ -403,6 +496,11 @@ def test_citywalk_task_publishes_global_dynamic(db_manager: DatabaseManager, tmp
     dynamic_capability = DynamicCapability()
     dynamic_capability.wire_dependencies(database_manager=db_manager)
 
+    async def fake_generate_world_dynamic_content(**kwargs):
+        return "今天在上海的武康路散步，风很舒服。"
+
+    dynamic_capability.generate_world_dynamic_content = fake_generate_world_dynamic_content
+
     report_path = tmp_path / "citywalk_20260704_120000.json"
     report_path.write_text(
         '{"overview": {"city": "上海", "selected_destination": "武康路"}, "diary_text": "今天慢慢走了很多路，也看了不少风景。"}',
@@ -417,18 +515,25 @@ def test_citywalk_task_publishes_global_dynamic(db_manager: DatabaseManager, tmp
         async def add_event(self, payload):
             return payload
 
-    class FakeDynamicComposer:
-        """只 mock generate_world_dynamic_content，保留 publish_agent_dynamic 的真实写入。"""
-        async def generate_world_dynamic_content(self, **kwargs):
-            return "今天在上海的武康路散步，风很舒服。"
+    class FakeCharacterRuntime:
+        profile = SimpleNamespace(character_id="luotianyi", display_name="洛天依")
+
+        async def publish_citywalk_dynamic(self, **kwargs):
+            return await dynamic_capability.publish_citywalk_dynamic(
+                character_id="luotianyi",
+                character_name="洛天依",
+                character_persona="",
+                speaking_style="",
+                **kwargs,
+            )
 
     task = CitywalkTask({"daily_run_probability": 1.0})
     task.system_runtime = SimpleNamespace(
-        capability_manager=SimpleNamespace(dynamics=FakeDynamicComposer()),
+        capability_manager=SimpleNamespace(dynamics=dynamic_capability),
     )
     task.database_manager = db_manager
     task.event_store = FakeEventStore()
-    task.dynamic_capability = dynamic_capability  # 用真实的 DynamicCapability 来写 DB
+    task.character_runtime = FakeCharacterRuntime()
     task.citywalk_service = FakeCitywalkService()
 
     result = task.run_once()
@@ -447,6 +552,11 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
     dynamic_capability = DynamicCapability()
     dynamic_capability.wire_dependencies(database_manager=db_manager)
 
+    async def fake_generate_world_dynamic_content(**kwargs):
+        return "今天学会了《告死鸟》，下次可以唱给你听。"
+
+    dynamic_capability.generate_world_dynamic_content = fake_generate_world_dynamic_content
+
     class FakeLearner:
         def check_qq_credential(self):
             return True
@@ -462,20 +572,25 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
         def reload_songs(self, character_id: str):
             return character_id
 
-    class FakeDynamicComposer:
-        """只 mock generate_world_dynamic_content，保留 publish_agent_dynamic 的真实写入。"""
-        async def generate_world_dynamic_content(self, **kwargs):
-            return "今天学会了《告死鸟》，下次可以唱给你听。"
+    class FakeCharacterRuntime:
+        async def publish_learned_song_dynamic(self, **kwargs):
+            return await dynamic_capability.publish_learned_song_dynamic(
+                character_id="luotianyi",
+                character_name="洛天依",
+                character_persona="",
+                speaking_style="",
+                **kwargs,
+            )
 
     task = LearnSingSongsTask({}, character_id="luotianyi", singing_manager=None)
     task.system_runtime = SimpleNamespace(
         capability_manager=SimpleNamespace(
-            dynamics=FakeDynamicComposer(),
+            dynamics=dynamic_capability,
             singing=FakeSinging(),
         ),
     )
     task.event_store = FakeEventStore()
-    task.dynamic_capability = dynamic_capability  # 用真实的 DynamicCapability 来写 DB
+    task.character_runtime = FakeCharacterRuntime()
     task.auto_song_learner = FakeLearner()
 
     result = task.run_once()
@@ -509,11 +624,23 @@ def test_dynamic_interaction_task_replies_and_updates_status(db_manager: Databas
         def ensure_llm(self) -> bool:
             return True
 
-        async def generate_reply_for_post(self, item):
+        async def generate_reply_for_post(self, item, **kwargs):
             return "我看到你很努力地撑过来了，辛苦啦。"
 
-        async def generate_reply_for_comment(self, item):
+        async def generate_reply_for_comment(self, item, **kwargs):
             return {"should_reply": False, "reply": ""}
+
+    class FakeCharacterRuntime:
+        capability_manager = SimpleNamespace(dynamics=dynamic_capability)
+
+        async def generate_dynamic_reply_for_post(self, item):
+            return await dynamic_capability.replier.generate_reply_for_post(item, character_name="洛天依")
+
+        async def generate_dynamic_reply_for_comment(self, item):
+            return await dynamic_capability.replier.generate_reply_for_comment(item, character_name="洛天依")
+
+        def publish_dynamic_comment(self, **kwargs):
+            return dynamic_capability.publish_agent_comment(character_id="luotianyi", **kwargs)
 
     class FakeAgentRuntime:
         async def write_topic_memories(self, **kwargs):
@@ -522,8 +649,8 @@ def test_dynamic_interaction_task_replies_and_updates_status(db_manager: Databas
     task = DynamicInteractionTask({})
     task.system_runtime = SimpleNamespace()
     task.database_manager = db_manager
-    task.dynamic_capability = dynamic_capability
-    task.dynamic_capability.replier = FakeReplier()
+    dynamic_capability.replier = FakeReplier()
+    task.character_runtime = FakeCharacterRuntime()
     task.agent_runtime = FakeAgentRuntime()
 
     result = asyncio.run(task.run_once())
@@ -561,11 +688,23 @@ def test_dynamic_interaction_task_processes_memory_status(db_manager: DatabaseMa
         def ensure_llm(self) -> bool:
             return True
 
-        async def generate_reply_for_post(self, item):
+        async def generate_reply_for_post(self, item, **kwargs):
             return "我看到你很努力地撑过来了，辛苦啦。"
 
-        async def generate_reply_for_comment(self, item):
+        async def generate_reply_for_comment(self, item, **kwargs):
             return {"should_reply": False, "reply": ""}
+
+    class FakeCharacterRuntime:
+        capability_manager = SimpleNamespace(dynamics=dynamic_capability)
+
+        async def generate_dynamic_reply_for_post(self, item):
+            return await dynamic_capability.replier.generate_reply_for_post(item, character_name="洛天依")
+
+        async def generate_dynamic_reply_for_comment(self, item):
+            return await dynamic_capability.replier.generate_reply_for_comment(item, character_name="洛天依")
+
+        def publish_dynamic_comment(self, **kwargs):
+            return dynamic_capability.publish_agent_comment(character_id="luotianyi", **kwargs)
 
     class FakeAgentRuntime:
         async def write_topic_memories(self, **kwargs):
@@ -583,8 +722,8 @@ def test_dynamic_interaction_task_processes_memory_status(db_manager: DatabaseMa
     task = DynamicInteractionTask({})
     task.system_runtime = SimpleNamespace()
     task.database_manager = db_manager
-    task.dynamic_capability = dynamic_capability
-    task.dynamic_capability.replier = FakeReplier()
+    dynamic_capability.replier = FakeReplier()
+    task.character_runtime = FakeCharacterRuntime()
     task.agent_runtime = FakeAgentRuntime()
 
     result = asyncio.run(task.run_once())

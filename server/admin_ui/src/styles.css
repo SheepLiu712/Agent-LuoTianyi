@@ -47,6 +47,8 @@ body {
 .secret-row input,
 .secret-add-row input,
 .qq-credential-row textarea,
+.system-dynamic-publisher input,
+.system-dynamic-publisher textarea,
 .interface-card input,
 .interface-card textarea,
 .module-binding-editor select,
@@ -64,6 +66,7 @@ body {
 .secret-row button,
 .secret-add-row button,
 .qq-credential-row button,
+.system-dynamic-publisher button,
 .editor-head button,
 .interface-card button {
   border: 1px solid #2f5d7c;
@@ -79,6 +82,7 @@ body {
 .secret-row button:hover,
 .secret-add-row button:hover,
 .qq-credential-row button:hover,
+.system-dynamic-publisher button:hover,
 .editor-head button:hover,
 .interface-card button:hover {
   background: #274e68;
@@ -89,6 +93,7 @@ body {
 .secret-row button:disabled,
 .secret-add-row button:disabled,
 .qq-credential-row button:disabled,
+.system-dynamic-publisher button:disabled,
 .editor-head button:disabled,
 .interface-card button:disabled {
   border-color: #9fb2bf;
@@ -102,6 +107,7 @@ body {
 .secret-row button:disabled:hover,
 .secret-add-row button:disabled:hover,
 .qq-credential-row button:disabled:hover,
+.system-dynamic-publisher button:disabled:hover,
 .editor-head button:disabled:hover,
 .interface-card button:disabled:hover {
   background: #9fb2bf;
@@ -746,6 +752,41 @@ button {
 .dynamic-comment-list {
   display: grid;
   gap: 12px;
+}
+
+.system-dynamic-publisher {
+  display: grid;
+  gap: 10px;
+}
+
+.system-dynamic-publisher textarea {
+  width: 100%;
+  min-height: 104px;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+.system-dynamic-controls {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(180px, 1fr) max-content max-content;
+  gap: 10px;
+  align-items: center;
+}
+
+.checkbox-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #365161;
+  white-space: nowrap;
+}
+
+.checkbox-line input {
+  width: 16px;
+  height: 16px;
+  min-width: auto;
+  padding: 0;
+  accent-color: #2f5d7c;
 }
 
 .dynamic-card {

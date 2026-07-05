@@ -1,8 +1,6 @@
 from __future__ import annotations
 from typing import Any, Dict, TYPE_CHECKING
-from dataclasses import dataclass
 
-from src.capabilities.dynamic import DynamicCapability
 from src.capabilities.dynamic import DynamicCapability
 from src.capabilities.singing import SingingCapability
 from src.capabilities.speech import SpeechCapability
@@ -10,7 +8,6 @@ from src.capabilities.image_understanding import ImageUnderstanding
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.system.database import DatabaseManager
     from src.system.database import DatabaseManager
     from src.utils.llm_service import LLMService
 
@@ -40,8 +37,10 @@ class CapabilityManager:
         self.image_understanding: ImageUnderstanding = ImageUnderstanding(self.config.get("image_understanding", {}))
         self.image_understanding.create_vlm_module(llm_service)
 
-    def wire_dependencies(self, *,  database_manager: "DatabaseManager") -> None:
+    def wire_dependencies(self, *, database_manager: "DatabaseManager", llm_service: "LLMService | None" = None) -> None:
         """向能力子模块派发外部依赖。"""
+        if llm_service is not None:
+            self.llm_service = llm_service
         self.dynamics.wire_dependencies(database_manager=database_manager)
         
         self.ensure_dependencies()
@@ -53,7 +52,6 @@ class CapabilityManager:
             "speech": self.speech,
             "singing": self.singing,
             "dynamics": self.dynamics,
-            "dynamics": self.dynamics,
             "image_understanding": self.image_understanding,
         }
         missing = [name for name, value in required.items() if value is None]
@@ -61,6 +59,5 @@ class CapabilityManager:
             raise RuntimeError(f"CapabilityManager dependencies are missing: {', '.join(missing)}")
         self.speech.ensure_dependencies()
         self.singing.ensure_dependencies()
-        self.dynamics.ensure_dependencies()
         self.dynamics.ensure_dependencies()
         self.image_understanding.ensure_dependencies()
