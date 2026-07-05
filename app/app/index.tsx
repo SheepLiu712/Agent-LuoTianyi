@@ -26,8 +26,10 @@ import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from '../hooks/useHistoryLogic';
+import { getDynamicUnreadStatus } from '../utils/dynamics';
 import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } from '../utils/debug_trace';
 import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../utils/theme';
+import DynamicsScreen from './dynamics';
 import PreferencesScreen from './preferences';
 
 const THINKING_BUBBLE_FRAMES = [
@@ -48,9 +50,12 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
   const [showPreferences, setShowPreferences] = useState(false);
+  const [showDynamics, setShowDynamics] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorMode, setColorMode] = useState<ColorMode>('light');
   const [live2dReady, setLive2dReady] = useState(false);
+  const [hasDynamicsUnread, setHasDynamicsUnread] = useState(false);
+  const [dynamicsUnreadCount, setDynamicsUnreadCount] = useState(0);
   const webviewRef = useRef<WebView>(null);
   const drawerProgress = useRef(new Animated.Value(0)).current;
   const theme = useMemo(() => resolveTheme(colorMode, systemScheme), [colorMode, systemScheme]);
@@ -244,6 +249,37 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     closeDrawer();
   };
 
+  const refreshDynamicsUnread = useCallback(async () => {
+    if (!username || !message_token) {
+      setHasDynamicsUnread(false);
+      setDynamicsUnreadCount(0);
+      return;
+    }
+    try {
+      const status = await getDynamicUnreadStatus(username, message_token);
+      setHasDynamicsUnread(Boolean(status.has_unread));
+      setDynamicsUnreadCount(Number(status.unread_count || 0));
+    } catch (error) {
+      addDebugTrace('dynamics', 'unread fetch failed', { error: String(error) });
+    }
+  }, [message_token, username]);
+
+  useEffect(() => {
+    refreshDynamicsUnread();
+    if (!username || !message_token) {
+      return;
+    }
+    const timer = setInterval(() => {
+      refreshDynamicsUnread();
+    }, 30000);
+    return () => clearInterval(timer);
+  }, [message_token, refreshDynamicsUnread, username]);
+
+  const handleOpenDynamics = () => {
+    setShowDynamics(true);
+    closeDrawer();
+  };
+
   const handleLogout = () => {
     closeDrawer();
     onLogout?.();
@@ -333,6 +369,19 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       </View>
 
       {showPreferences ? <PreferencesScreen onClose={() => setShowPreferences(false)} theme={theme} /> : null}
+      {showDynamics ? (
+        <DynamicsScreen
+          onClose={() => {
+            setShowDynamics(false);
+            refreshDynamicsUnread();
+          }}
+          onUnreadCleared={() => {
+            setHasDynamicsUnread(false);
+            setDynamicsUnreadCount(0);
+          }}
+          theme={theme}
+        />
+      ) : null}
 
       <View style={{ flex: 1, marginTop: live2dHeight, marginBottom: keyboardHeight }}>
         <View style={{ flex: 1 }}>
@@ -420,6 +469,19 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenPreferences} activeOpacity={0.78}>
           <Text style={[styles.drawerItemText, { color: theme.text }]}>配置偏好</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenDynamics} activeOpacity={0.78}>
+          <View style={styles.drawerItemRow}>
+            <Text style={[styles.drawerItemText, { color: theme.text }]}>动态</Text>
+            {hasDynamicsUnread ? (
+              <View style={[styles.drawerDotBadge, { backgroundColor: theme.accent }]}>
+                <Text style={[styles.drawerDotBadgeText, { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' }]}>
+                  {dynamicsUnreadCount > 99 ? '99+' : String(dynamicsUnreadCount)}
+                </Text>
+              </View>
+            ) : null}
+          </View>
         </TouchableOpacity>
 
         <View style={[styles.drawerSection, { borderTopColor: theme.border }]}>
@@ -641,6 +703,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#243447',
+  },
+  drawerItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  drawerDotBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  drawerDotBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   drawerSection: {
     marginTop: 2,

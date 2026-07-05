@@ -15,6 +15,12 @@ from .types import (
     WSEventType,
     PreferenceGetRequest,
     PreferenceOverwriteRequest,
+    DynamicListRequest,
+    DynamicCreateRequest,
+    DynamicCommentListRequest,
+    DynamicCommentCreateRequest,
+    DynamicUnreadRequest,
+    DynamicReadMarkRequest,
 )
 
 from .account import get_public_key_pem, decrypt_password, generate_keys
@@ -259,5 +265,117 @@ class UserInterface:
         if not success:
             raise HTTPException(status_code=400, detail="更新失败，记录不存在或无权限访问")
         return {"message": "更新成功"}
+
+    async def list_dynamics(
+        self,
+        req: DynamicListRequest,
+        system_runtime: SystemRuntime,
+    ):
+        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+            req.username, req.token or ""
+        )
+        if not message_token_valid:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        return system_runtime.database_manager.dynamic_store.list_dynamics_for_user(
+            user_uuid,
+            limit=req.limit,
+            cursor=req.cursor,
+        )
+
+    async def create_dynamic(
+        self,
+        req: DynamicCreateRequest,
+        system_runtime: SystemRuntime,
+    ):
+        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+            req.username, req.token
+        )
+        if not message_token_valid:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        ok, message, item = system_runtime.database_manager.dynamic_store.create_dynamic(
+            author_type="user",
+            author_id=user_uuid,
+            owner_user_id=user_uuid,
+            visibility="private",
+            content=req.content,
+            source_type="user_post",
+            allow_comment=True,
+            memory_policy="candidate",
+        )
+        if not ok or item is None:
+            raise HTTPException(status_code=400, detail=message)
+        return {"item": item}
+
+    async def list_dynamic_comments(
+        self,
+        dynamic_id: str,
+        req: DynamicCommentListRequest,
+        system_runtime: SystemRuntime,
+    ):
+        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+            req.username, req.token or ""
+        )
+        if not message_token_valid:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        ok, message, payload = system_runtime.database_manager.dynamic_store.list_dynamic_comments_for_user(
+            user_uuid,
+            dynamic_id,
+            limit=req.limit,
+            cursor=req.cursor,
+        )
+        if not ok:
+            raise HTTPException(status_code=404, detail=message)
+        return payload
+
+    async def create_dynamic_comment(
+        self,
+        dynamic_id: str,
+        req: DynamicCommentCreateRequest,
+        system_runtime: SystemRuntime,
+    ):
+        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+            req.username, req.token
+        )
+        if not message_token_valid:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        ok, message, item = system_runtime.database_manager.dynamic_store.create_dynamic_comment(
+            dynamic_id=dynamic_id,
+            author_type="user",
+            author_id=user_uuid,
+            owner_user_id=user_uuid,
+            content=req.content,
+            parent_comment_id=req.parent_comment_id,
+            memory_policy="candidate",
+        )
+        if not ok or item is None:
+            raise HTTPException(status_code=400, detail=message)
+        return {"item": item}
+
+    async def get_dynamic_unread(
+        self,
+        req: DynamicUnreadRequest,
+        system_runtime: SystemRuntime,
+    ):
+        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+            req.username, req.token or ""
+        )
+        if not message_token_valid:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        return system_runtime.database_manager.dynamic_store.get_dynamic_unread_status(user_uuid)
+
+    async def mark_dynamic_read(
+        self,
+        req: DynamicReadMarkRequest,
+        system_runtime: SystemRuntime,
+    ):
+        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+            req.username, req.token
+        )
+        if not message_token_valid:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        result = system_runtime.database_manager.dynamic_store.mark_dynamic_read(user_uuid)
+        if not result.get("ok"):
+            raise HTTPException(status_code=400, detail="标记已读失败")
+        return result
     
 

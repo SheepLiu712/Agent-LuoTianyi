@@ -291,6 +291,17 @@
                     },
                     "prompt_name": "topic_reply_prompt"
                 }
+            },
+            "dynamic_composer": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {}
+                    },
+                    "prompt_name": "dynamic_post_prompt"
+                }
             }
         }
     },

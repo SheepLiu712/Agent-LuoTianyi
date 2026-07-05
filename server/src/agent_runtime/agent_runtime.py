@@ -249,6 +249,7 @@ class AgentRuntime:
                 database_manager,
                 capability_manager,
                 llm_modules["main_chat"],
+                dynamic_composer_module=llm_modules["dynamic_composer"],
                 character_profile=profile,
                 mind=mind,
             )
@@ -287,6 +288,10 @@ class AgentRuntime:
             "main_chat": llm_service.register_llm_module(
                 f"{character_id}_main_chat",
                 agent_config["main_chat"]["llm_module"],
+            ),
+            "dynamic_composer": llm_service.register_llm_module(
+                f"{character_id}_dynamic_composer",
+                agent_config["dynamic_composer"]["llm_module"]
             ),
             "date_detector": llm_service.register_llm_module(
                 f"{character_id}_date_detector",

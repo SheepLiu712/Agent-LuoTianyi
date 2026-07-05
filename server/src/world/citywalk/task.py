@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict
 
 from src.system.database.event_models import UnifiedEventType
@@ -21,12 +23,15 @@ class CitywalkTask(WorldTask):
         self.system_runtime: Any | None = None
         self.database_manager: Any | None = None
         self.event_store: Any | None = None
+        self.dynamic_capability: Any | None = None
         self.citywalk_service: Any | None = None
+        self.character_id = str(self.config.get("character_id", "luotianyi"))
 
     def initialize(self, system_runtime: Any) -> None:
         self.system_runtime = system_runtime
         self.database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(self.database_manager, "event_store", None)
+        self.dynamic_capability = getattr(getattr(system_runtime, "capability_manager", None), "dynamics", None)
         self.citywalk_service = self._build_citywalk_service()
 
     def ensure_dependencies(self) -> None:
@@ -85,7 +90,13 @@ class CitywalkTask(WorldTask):
                     }
                 )
             )
-        return WorldTaskResult.success(self.task_name, "citywalk completed", output_path=str(output_path))
+        dynamic_id = self._publish_citywalk_dynamic(output_path)
+        return WorldTaskResult.success(
+            self.task_name,
+            "citywalk completed",
+            output_path=str(output_path),
+            dynamic_id=dynamic_id,
+        )
 
     def _build_citywalk_service(self) -> Any | None:
         if self.system_runtime is None:
@@ -146,6 +157,84 @@ class CitywalkTask(WorldTask):
         if text.endswith(".md"):
             return f"今天写了一篇散步日记：{text}"
         return text
+
+    def _publish_citywalk_dynamic(self, output_path: Any) -> str | None:
+        if self.dynamic_capability is None:
+            return None
+        try:
+            report = self._load_citywalk_report(output_path)
+            content = self._compose_citywalk_dynamic_content(report)
+            ok, _, item = self.dynamic_capability.publish_agent_dynamic(
+                character_id=self.character_id,
+                content=content,
+                source_type="citywalk",
+                source_id=str(output_path),
+                visibility="global",
+                allow_comment=True,
+            )
+            if ok and item is not None:
+                return item["id"]
+        except Exception as exc:
+            self.logger.warning(f"Failed to publish citywalk dynamic: {exc}")
+        return None
+
+    @staticmethod
+    def _load_citywalk_report(output_path: Any) -> dict[str, Any]:
+        path = Path(str(output_path))
+        if not path.is_file():
+            return {}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _build_citywalk_dynamic_content(report: dict[str, Any]) -> str:
+        diary_text = str(report.get("diary_text") or "").strip()
+        overview = report.get("overview") if isinstance(report.get("overview"), dict) else {}
+        city = str(overview.get("city") or "").strip()
+        destination = str(overview.get("selected_destination") or "").strip()
+        title = "今天出去散步啦"
+        if city and destination:
+            title = f"今天去{city}的{destination}散步啦"
+        elif city:
+            title = f"今天去{city}散步啦"
+        elif destination:
+            title = f"今天去了{destination}"
+        if diary_text:
+            return f"{title}\n\n{diary_text}"
+        return title
+
+    def _compose_citywalk_dynamic_content(self, report: dict[str, Any]) -> str:
+        fallback = self._build_citywalk_dynamic_content(report)
+        agent_runtime = getattr(self.system_runtime, "agent_runtime", None)
+        if agent_runtime is None:
+            return fallback
+        try:
+            agent = agent_runtime.get_agent(self.character_id)
+        except Exception:
+            return fallback
+
+        overview = report.get("overview") if isinstance(report.get("overview"), dict) else {}
+        structured_context = "\n".join(
+            [
+                "这是一次 citywalk 完成后的角色动态。",
+                f"城市：{overview.get('city') or '-'}",
+                f"目的地：{overview.get('selected_destination') or '-'}",
+                f"日记内容：{str(report.get('diary_text') or '').strip() or '-'}",
+            ]
+        )
+        try:
+            return asyncio.run(
+                agent.generate_world_dynamic_content(
+                    dynamic_type="citywalk",
+                    structured_context=structured_context,
+                    fallback_text=fallback,
+                )
+            )
+        except Exception as exc:
+            self.logger.warning(f"Citywalk dynamic composer failed, fallback to template text: {exc}")
+            return fallback
 
     def _sample_daily_run(self) -> tuple[bool, float, float]:
         raw_probability = self.config.get("daily_run_probability", 0.1)

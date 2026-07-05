@@ -26,9 +26,4 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
-    if name == "UserInterface":
-        from .user_interface import UserInterface
-
-        return UserInterface
-    raise AttributeError(name)
+from .user_interface import UserInterface

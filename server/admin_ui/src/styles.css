@@ -283,6 +283,13 @@ button {
   align-items: start;
 }
 
+.dynamic-layout {
+  display: grid;
+  grid-template-columns: minmax(420px, 0.9fr) minmax(520px, 1.1fr);
+  gap: 16px;
+  align-items: start;
+}
+
 .trace-metrics {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -312,6 +319,11 @@ button {
 
 .trace-list-panel .panel-content {
   max-height: calc(100vh - 190px);
+}
+
+.dynamic-list-panel .panel-content,
+.dynamic-comments-panel .panel-content {
+  max-height: calc(100vh - 260px);
 }
 
 .trace-search {
@@ -350,6 +362,10 @@ button {
   display: grid;
   grid-template-columns: 1fr 180px 180px;
   gap: 10px;
+}
+
+.dynamic-filter-row {
+  grid-template-columns: minmax(220px, 1fr) 170px 170px 170px 190px 190px;
 }
 
 .memory-filter-row {
@@ -724,6 +740,90 @@ button {
 
 .memory-event-panel .panel-content {
   max-height: calc(100vh - 320px);
+}
+
+.dynamic-card-list,
+.dynamic-comment-list {
+  display: grid;
+  gap: 12px;
+}
+
+.dynamic-card {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #d9e2ea;
+  border-radius: 8px;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dynamic-card:hover,
+.dynamic-card.active {
+  border-color: #84b3cf;
+  background: #f8fbfd;
+}
+
+.dynamic-card-head,
+.dynamic-comment-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dynamic-card-head > div:first-child,
+.dynamic-comment-head > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.dynamic-card-meta,
+.dynamic-comment-meta {
+  color: #667481;
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.dynamic-card-content,
+.dynamic-comment-content,
+.dynamic-comment-errors {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+}
+
+.dynamic-card-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dynamic-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.dynamic-comment-card {
+  border: 1px solid #d9e2ea;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+  display: grid;
+  gap: 8px;
+}
+
+.dynamic-comment-errors {
+  color: #a73636;
+  font-size: 12px;
 }
 
 .memory-event-list {

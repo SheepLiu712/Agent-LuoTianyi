@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi import HTTPException
 
 from src.system.admin.auth import AdminAuthService
@@ -136,6 +137,26 @@ def test_admin_auth_requires_setup_token_and_login(tmp_path):
         assert exc.status_code == 401
     else:
         raise AssertionError("bad admin password should fail")
+
+
+def test_admin_require_admin_blocks_missing_session(tmp_path):
+    auth = AdminAuthService(tmp_path / "admin_auth.json", tmp_path / "setup_token.txt")
+    token = (tmp_path / "setup_token.txt").read_text(encoding="utf-8").strip()
+    auth.setup(token, "password-123")
+
+    response = SimpleNamespace(set_cookie=lambda *args, **kwargs: None)
+    login_result = auth.login("password-123", response)
+
+    with pytest.raises(HTTPException) as exc_info:
+        auth.require_admin(SimpleNamespace(headers={}, cookies={}))
+    assert exc_info.value.status_code == 401
+
+    auth.require_admin(
+        SimpleNamespace(
+            headers={"authorization": f"Bearer {login_result['token']}"},
+            cookies={},
+        )
+    )
 
 
 def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):

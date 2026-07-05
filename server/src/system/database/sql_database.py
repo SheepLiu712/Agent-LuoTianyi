@@ -35,6 +35,9 @@ class User(Base):
     memory_update_records = relationship("MemoryUpdateRecord", back_populates="user", cascade="all, delete-orphan")
     affection_logs = relationship("AffectionLog", back_populates="user", cascade="all, delete-orphan")
     conversation_contexts = relationship("ConversationContext", back_populates="user", cascade="all, delete-orphan")
+    dynamic_posts = relationship("DynamicPost", back_populates="owner_user", cascade="all, delete-orphan")
+    dynamic_comments = relationship("DynamicComment", back_populates="owner_user", cascade="all, delete-orphan")
+    dynamic_read_state = relationship("DynamicReadState", back_populates="user", uselist=False, cascade="all, delete-orphan")
 
 class InviteCode(Base):
     __tablename__ = "invite_codes"
@@ -275,6 +278,67 @@ class EventNotification(Base):
     )
 
 
+class DynamicPost(Base):
+    __tablename__ = "dynamic_posts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    author_type = Column(String, nullable=False, index=True)      # user / agent / system
+    author_id = Column(String, nullable=False, index=True)
+    owner_user_id = Column(String, ForeignKey("users.uuid"), nullable=True, index=True)
+    visibility = Column(String, nullable=False, default="private", server_default="private", index=True)
+    content = Column(Text, nullable=False)
+    image_refs = Column(Text, nullable=True)
+    source_type = Column(String, nullable=False, default="user_post", server_default="user_post", index=True)
+    source_id = Column(String, nullable=True)
+    allow_comment = Column(Boolean, nullable=False, default=True, server_default=text("1"))
+    memory_policy = Column(String, nullable=False, default="candidate", server_default="candidate")
+    memory_status = Column(String, nullable=False, default="pending", server_default="pending", index=True)
+    memory_error = Column(Text, nullable=True)
+    reply_status = Column(String, nullable=False, default="pending", server_default="pending", index=True)
+    reply_error = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="published", server_default="published", index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    owner_user = relationship("User", back_populates="dynamic_posts")
+    comments = relationship("DynamicComment", back_populates="dynamic_post", cascade="all, delete-orphan")
+
+
+class DynamicComment(Base):
+    __tablename__ = "dynamic_comments"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    dynamic_id = Column(String, ForeignKey("dynamic_posts.id"), nullable=False, index=True)
+    author_type = Column(String, nullable=False, index=True)      # user / agent / system
+    author_id = Column(String, nullable=False, index=True)
+    owner_user_id = Column(String, ForeignKey("users.uuid"), nullable=False, index=True)
+    parent_comment_id = Column(String, ForeignKey("dynamic_comments.id"), nullable=True, index=True)
+    content = Column(Text, nullable=False)
+    memory_policy = Column(String, nullable=False, default="candidate", server_default="candidate")
+    memory_status = Column(String, nullable=False, default="pending", server_default="pending", index=True)
+    memory_error = Column(Text, nullable=True)
+    reply_status = Column(String, nullable=False, default="pending", server_default="pending", index=True)
+    reply_error = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="published", server_default="published", index=True)
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    dynamic_post = relationship("DynamicPost", back_populates="comments")
+    owner_user = relationship("User", back_populates="dynamic_comments")
+    parent_comment = relationship("DynamicComment", remote_side=[id], backref="child_comments")
+
+
+class DynamicReadState(Base):
+    __tablename__ = "dynamic_read_states"
+
+    user_id = Column(String, ForeignKey("users.uuid"), primary_key=True)
+    last_read_dynamic_at = Column(DateTime, nullable=True)
+    last_read_comment_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    user = relationship("User", back_populates="dynamic_read_state")
+
+
 # Database URL
 SessionLocal = None
 engine = None
@@ -389,6 +453,26 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
             connection.exec_driver_sql(
                 "CREATE INDEX IF NOT EXISTS ix_event_notifications_user_id ON event_notifications (user_id)"
             )
+
+        dynamic_post_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(dynamic_posts)").fetchall()
+        }
+        if dynamic_post_columns:
+            if "memory_error" not in dynamic_post_columns:
+                connection.exec_driver_sql("ALTER TABLE dynamic_posts ADD COLUMN memory_error TEXT")
+            if "reply_error" not in dynamic_post_columns:
+                connection.exec_driver_sql("ALTER TABLE dynamic_posts ADD COLUMN reply_error TEXT")
+
+        dynamic_comment_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(dynamic_comments)").fetchall()
+        }
+        if dynamic_comment_columns:
+            if "memory_error" not in dynamic_comment_columns:
+                connection.exec_driver_sql("ALTER TABLE dynamic_comments ADD COLUMN memory_error TEXT")
+            if "reply_error" not in dynamic_comment_columns:
+                connection.exec_driver_sql("ALTER TABLE dynamic_comments ADD COLUMN reply_error TEXT")
 
 
 def get_sql_db(): # Generator for FastAPI

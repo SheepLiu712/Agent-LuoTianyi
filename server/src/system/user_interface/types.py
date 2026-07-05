@@ -49,6 +49,43 @@ class PreferenceOverwriteRequest(BaseModel):
     token: str
     preferences: dict
 
+
+class DynamicListRequest(BaseModel):
+    username: str
+    token: str | None = None
+    limit: int = 20
+    cursor: str | None = None
+
+
+class DynamicCreateRequest(BaseModel):
+    username: str
+    token: str
+    content: str
+
+
+class DynamicCommentListRequest(BaseModel):
+    username: str
+    token: str | None = None
+    limit: int = 100
+    cursor: str | None = None
+
+
+class DynamicCommentCreateRequest(BaseModel):
+    username: str
+    token: str
+    content: str
+    parent_comment_id: str | None = None
+
+
+class DynamicUnreadRequest(BaseModel):
+    username: str
+    token: str | None = None
+
+
+class DynamicReadMarkRequest(BaseModel):
+    username: str
+    token: str
+
 from fastapi import Form, File, UploadFile
 class PictureChatRequest:
     def __init__(
