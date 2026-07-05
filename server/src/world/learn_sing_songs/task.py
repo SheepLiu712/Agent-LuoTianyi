@@ -28,6 +28,7 @@ class LearnSingSongsTask(WorldTask):
         self.system_runtime: "SystemRuntime" | None = None
         self.event_store: "EventStore" | None = None
         self.dynamic_capability: Any | None = None
+        self.dynamic_capability: Any | None = None
         self.auto_song_learner: "AutoSongLearner" | None = None
         self._init_error: str = ""
 
@@ -35,6 +36,7 @@ class LearnSingSongsTask(WorldTask):
         self.system_runtime = system_runtime
         database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
+        self.dynamic_capability = getattr(getattr(system_runtime, "capability_manager", None), "dynamics", None)
         self.dynamic_capability = getattr(getattr(system_runtime, "capability_manager", None), "dynamics", None)
         self.auto_song_learner = self._build_auto_song_learner()
 
@@ -69,6 +71,9 @@ class LearnSingSongsTask(WorldTask):
             published_dynamic_ids = self._publish_learned_dynamics(learned)
         else:
             published_dynamic_ids = []
+            published_dynamic_ids = self._publish_learned_dynamics(learned)
+        else:
+            published_dynamic_ids = []
 
         return WorldTaskResult.success(
             self.task_name,
@@ -77,6 +82,7 @@ class LearnSingSongsTask(WorldTask):
             learned=learned,
             abandoned=abandoned,
             awaiting=awaiting,
+            dynamic_ids=published_dynamic_ids,
             dynamic_ids=published_dynamic_ids,
         )
 

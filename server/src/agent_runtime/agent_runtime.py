@@ -249,6 +249,7 @@ class AgentRuntime:
                 database_manager,
                 capability_manager,
                 llm_modules["main_chat"],
+                dynamic_composer_module=llm_modules["dynamic_composer"],
                 character_profile=profile,
                 mind=mind,
             )

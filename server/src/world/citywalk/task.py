@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import json
 import random
 from datetime import datetime
 from pathlib import Path
@@ -32,11 +33,13 @@ class CitywalkTask(WorldTask):
         self.dynamic_capability: "DynamicCapability" | None = None
         self.citywalk_service: Any | None = None
         self.character_id = str(self.config.get("character_id", "luotianyi"))
+        self.character_id = str(self.config.get("character_id", "luotianyi"))
 
     def initialize(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
         self.database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(self.database_manager, "event_store", None)
+        self.dynamic_capability = getattr(getattr(system_runtime, "capability_manager", None), "dynamics", None)
         self.dynamic_capability = getattr(getattr(system_runtime, "capability_manager", None), "dynamics", None)
         self.citywalk_service = self._build_citywalk_service()
 
@@ -96,6 +99,13 @@ class CitywalkTask(WorldTask):
                     }
                 )
             )
+        dynamic_id = self._publish_citywalk_dynamic(output_path)
+        return WorldTaskResult.success(
+            self.task_name,
+            "citywalk completed",
+            output_path=str(output_path),
+            dynamic_id=dynamic_id,
+        )
         dynamic_id = self._publish_citywalk_dynamic(output_path)
         return WorldTaskResult.success(
             self.task_name,

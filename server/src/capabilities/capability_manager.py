@@ -3,12 +3,14 @@ from typing import Any, Dict, TYPE_CHECKING
 from dataclasses import dataclass
 
 from src.capabilities.dynamic import DynamicCapability
+from src.capabilities.dynamic import DynamicCapability
 from src.capabilities.singing import SingingCapability
 from src.capabilities.speech import SpeechCapability
 from src.capabilities.image_understanding import ImageUnderstanding
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
+    from src.system.database import DatabaseManager
     from src.system.database import DatabaseManager
     from src.utils.llm_service import LLMService
 
@@ -51,6 +53,7 @@ class CapabilityManager:
             "speech": self.speech,
             "singing": self.singing,
             "dynamics": self.dynamics,
+            "dynamics": self.dynamics,
             "image_understanding": self.image_understanding,
         }
         missing = [name for name, value in required.items() if value is None]
@@ -58,5 +61,6 @@ class CapabilityManager:
             raise RuntimeError(f"CapabilityManager dependencies are missing: {', '.join(missing)}")
         self.speech.ensure_dependencies()
         self.singing.ensure_dependencies()
+        self.dynamics.ensure_dependencies()
         self.dynamics.ensure_dependencies()
         self.image_understanding.ensure_dependencies()
