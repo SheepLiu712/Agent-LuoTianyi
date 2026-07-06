@@ -13,7 +13,6 @@ from src.world.learn_sing_songs.task import LearnSingSongsTask
 from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner, WishlistManager
 from src.world.learn_sing_songs.song_learner.src.pipeline import download_qq_song
 from src.world.learn_sing_songs.song_learner.src.pipeline.download_qq_song import (
-    ensure_title_matches,
     rank_songs_by_title,
     safe_name as qq_safe_name,
 )
@@ -277,7 +276,7 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
     (sl_output / "Song A.lrc").write_text("[00:00.00]x", encoding="utf-8")
     (sl_output / "Song A.json").write_text('{"title": "Song A"}', encoding="utf-8")
 
-    assert learner._learn_via_songlearner("Song A") is True
+    assert learner._learn_via_songlearner("Song A") == "Song A"
     assert "--singer_name" in captured["args"]
     assert captured["args"][captured["args"].index("--singer_name") + 1] == "初音未来"
     assert "--credential_file" in captured["args"]
@@ -287,6 +286,63 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
     metadata = json.loads((tmp_path / "metadata.json").read_text(encoding="utf-8"))
     assert "songa" not in metadata["wished_songs"]
     assert "songa" in metadata["recently_learned"]
+
+
+def test_auto_song_learner_records_redirected_wish_and_learned_target(monkeypatch, tmp_path):
+    monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
+    monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
+    monkeypatch.chdir(Path(__file__).resolve().parent.parent)
+
+    wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
+    wishlist.add("海")
+    learner = AutoSongLearner(
+        {
+            "songlearner_dir": str(tmp_path / "song_learner"),
+            "songlearner_resource_dir": str(tmp_path / "song_learner_res"),
+            "qq_credential_file": str(tmp_path / "config" / "qq_music_credential.json"),
+        },
+        "洛天依",
+        wishlist,
+        resource_path=tmp_path / "music",
+    )
+    runner = learner.songlearner_dir / "run_song_workflow.py"
+    runner.parent.mkdir(parents=True)
+    runner.write_text("print('ok')", encoding="utf-8")
+
+    redirected_name = "想和你迎着台风去看海"
+
+    def fake_run(args, **kwargs):
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout=(
+                "[REDIRECT] requested_song_name=海 actual_song_name=想和你迎着台风去看海\n"
+                "[RESULT] song_name: 想和你迎着台风去看海\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    sl_output = learner.songs_dir / redirected_name
+    sl_output.mkdir(parents=True)
+    (sl_output / f"{redirected_name}.mp3").write_bytes(b"mp3")
+    (sl_output / f"{redirected_name}.lrc").write_text("[00:00.00]x", encoding="utf-8")
+    (sl_output / f"{redirected_name}.json").write_text(
+        json.dumps({"title": redirected_name}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    assert learner._learn_via_songlearner("海") == redirected_name
+
+    metadata = json.loads((tmp_path / "metadata.json").read_text(encoding="utf-8"))
+    original = metadata["wished_songs"]["海"]
+    assert original["status"] == "redirected"
+    assert original["redirected_to"] == redirected_name
+    assert original["redirected_unified_name"] == redirected_name
+    assert original["redirected_status"] == "learned"
+    assert redirected_name in metadata["recently_learned"]
+    assert (learner.songs_dir / redirected_name).exists()
+    assert not (learner.songs_dir / "海").exists()
 
 
 def test_run_song_workflow_maps_credential_error(monkeypatch, tmp_path):
@@ -373,7 +429,7 @@ def test_songlearner_safe_name_strips_trailing_spaces():
     assert qq_safe_name("虚拟歌舞《戏游九州》 ") == "虚拟歌舞《戏游九州》"
 
 
-def test_songlearner_title_ranking_rejects_unrelated_match():
+def test_songlearner_title_ranking_prefers_exact_but_allows_redirect():
     songs = [
         {"title": "虚拟歌舞《戏游九州》"},
         {"title": "恋爱色魔法"},
@@ -381,15 +437,10 @@ def test_songlearner_title_ranking_rejects_unrelated_match():
     ranked = rank_songs_by_title(songs, "恋爱色魔法")
 
     assert ranked[0]["title"] == "恋爱色魔法"
-    try:
-        ensure_title_matches({"title": "虚拟歌舞《戏游九州》"}, "恋爱色魔法", songs)
-    except RuntimeError as exc:
-        assert "最佳标题与请求不匹配" in str(exc)
-    else:
-        raise AssertionError("Expected unrelated title to be rejected")
+    assert qq_safe_name("想和你迎着台风去看海（Live版）") == "想和你迎着台风去看海"
 
 
-def test_songlearner_skips_unrelated_candidates_after_matching_download_failure(monkeypatch, tmp_path):
+def test_songlearner_allows_redirect_candidates_after_matching_download_failure(monkeypatch, tmp_path):
     songs = [
         {"title": "下等马", "mid": "bad-mid", "singer": [{"name": "洛天依"}]},
         {"title": "告死鸟", "mid": "target-mid", "singer": [{"name": "洛天依"}]},
@@ -410,7 +461,33 @@ def test_songlearner_skips_unrelated_candidates_after_matching_download_failure(
         message = str(exc)
         assert "匹配到 告死鸟" in message
         assert "告死鸟: 登录后仍未获取到可下载链接" in message
-        assert "已跳过不匹配候选" in message
+        assert "下等马: 登录后仍未获取到可下载链接" in message
         assert "最佳标题与请求不匹配" not in message
     else:
         raise AssertionError("Expected matching candidate download failure")
+
+
+def test_download_song_and_lyric_uses_qq_redirected_title(monkeypatch, tmp_path):
+    songs = [
+        {"title": "想和你迎着台风去看海（Live版）", "mid": "target-mid", "singer": [{"name": "洛天依"}]},
+    ]
+    monkeypatch.setattr(download_qq_song, "qq_search_songs", lambda *_args, **_kwargs: songs)
+    monkeypatch.setattr(download_qq_song, "qq_fetch_mp3_url", lambda *_args, **_kwargs: "https://example.test/song.mp3")
+    monkeypatch.setattr(download_qq_song, "load_saved_credential", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(download_qq_song, "qq_fetch_lyric", lambda *_args, **_kwargs: "[00:00.00]海风")
+
+    def fake_download(url, target, **_kwargs):
+        target.write_bytes(b"mp3")
+
+    monkeypatch.setattr(download_qq_song, "download_song_file", fake_download)
+
+    safe_song_name, mp3_path, lrc_path = download_qq_song.download_song_and_lyric(
+        "海",
+        output_dir=tmp_path,
+        credential_file=tmp_path / "credential.json",
+    )
+
+    assert safe_song_name == "想和你迎着台风去看海"
+    assert mp3_path == tmp_path / "想和你迎着台风去看海" / "想和你迎着台风去看海.mp3"
+    assert lrc_path == tmp_path / "想和你迎着台风去看海" / "想和你迎着台风去看海.lrc"
+    assert not (tmp_path / "海").exists()

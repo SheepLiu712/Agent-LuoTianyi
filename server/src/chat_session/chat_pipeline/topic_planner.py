@@ -245,8 +245,8 @@ class TopicPlanner:
                 self._record_last_message_to_topic_span(unread_snapshot, topic)
             return topic, remaining or []
         except Exception as e:
-            self.logger.exception(f"Topic extraction failed: {e}")
-            topic, remaining = self._fallback_extract(unread_snapshot, force_complete)
+            self.logger.exception(f"Topic extraction failed, use fallback topic extraction: {e}")
+            topic, remaining = self._fallback_extract(unread_snapshot, force_complete=True)
             if topic is not None:
                 setattr(topic, "trace_id", trace_id)
                 self._record_topic_commands(trace_id, topic, "", fallback=True)

@@ -326,16 +326,6 @@ def rank_songs_by_title(songs: List[Dict], requested_name: str) -> List[Dict]:
     return list(songs)
 
 
-def ensure_title_matches(song: Dict, requested_name: str, candidates: List[Dict]) -> None:
-    if title_matches(song, requested_name):
-        return
-    candidate_titles = [str(item.get("title") or "") for item in candidates[:5]]
-    raise RuntimeError(
-        f"搜索到洛天依歌曲，但最佳标题与请求不匹配: requested={requested_name!r}, "
-        f"matched={song.get('title')!r}, candidates={candidate_titles}"
-    )
-
-
 def title_matches(song: Dict, requested_name: str) -> bool:
     requested = normalize_text(safe_name(requested_name))
     title = normalize_text(safe_name(str(song.get("title") or "")))
@@ -436,13 +426,9 @@ def download_song_and_lyric(
     songs = qq_search_songs(song_name + " " + singer_name, timeout=timeout)
     singer_songs = rank_songs_by_title(pick_song_by_singer(songs, singer_name), song_name)
     matched_failures: List[str] = []
-    skipped_titles: List[str] = []
 
     for song in singer_songs:
         title = song.get("title") or song_name
-        if not title_matches(song, song_name):
-            skipped_titles.append(str(title))
-            continue
         songmid = song.get("mid")
         if not songmid:
             reason = "歌曲信息不完整，缺少 songmid"
@@ -453,7 +439,7 @@ def download_song_and_lyric(
         singers = song.get("singer") or []
         singer = singers[0].get("name") if singers else singer_name
 
-        song_folder = output_dir / safe_name(song_name)
+        song_folder = output_dir / safe_name(title)
         song_folder.mkdir(parents=True, exist_ok=True)
 
         file_stem = safe_name(f"{title}")
@@ -512,10 +498,9 @@ def download_song_and_lyric(
         return file_stem, mp3_path, lrc_path
 
     if matched_failures:
-        skipped_text = f"；已跳过不匹配候选: {skipped_titles[:5]}" if skipped_titles else ""
         raise RuntimeError(
             f"匹配到 {song_name} - {singer_name}，但匹配候选均不可下载或不可用: "
-            f"{'; '.join(matched_failures)}{skipped_text}"
+            f"{'; '.join(matched_failures)}"
         )
     raise RuntimeError(f"未能下载到可用的歌曲音频: {song_name} - {singer_name}")
 

@@ -272,6 +272,8 @@ def main() -> None:
                 credential_file=credential_file,
                 no_auto_login=args.no_auto_login,
             )
+            if song_name != safe_song_name:
+                print(f"[REDIRECT] requested_song_name={song_name} actual_song_name={safe_song_name}")
     except Exception as exc:
         if isinstance(exc, download_qq_song.QQMusicCredentialError):
             raise_step_error(21, "qq_credential", exc)
@@ -385,6 +387,7 @@ def main() -> None:
 
     status.print_status()
     print("[SUCCESS] 全流程已完成")
+    print(f"[RESULT] song_name: {safe_song_name}")
     print(f"[RESULT] 输出目录: {target_song_dir}")
 
 
