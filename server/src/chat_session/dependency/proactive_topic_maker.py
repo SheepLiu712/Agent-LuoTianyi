@@ -131,6 +131,10 @@ class ProactiveTopicMaker:
                 character_id = getattr(chat_stream, "character_id", "luotianyi")
                 due = store.get_events_due_for_trigger(character=character_id)
                 for event_dict, trigger_key in due:
+                    event_id = event_dict.get("id")
+                    if event_id and store.is_notified(event_id, user_uuid, trigger_key, character_id):
+                        continue
+
                     evt_type = event_dict.get("event_type", "")
 
                     if evt_type == "holiday":
@@ -198,8 +202,8 @@ class ProactiveTopicMaker:
                         )
 
                     # Mark notified so the periodic reminder loop does not repeat it.
-                    if not store.is_notified(event_dict["id"], user_uuid, trigger_key, character_id):
-                        store.mark_notified(event_dict["id"], user_uuid, trigger_key, character_id)
+                    if event_id:
+                        store.mark_notified(event_id, user_uuid, trigger_key, character_id)
             except Exception as e:
                 import traceback
                 traceback.print_exc()

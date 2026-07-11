@@ -83,6 +83,7 @@ class DynamicReplier:
             preference_context=self._build_preference_context(item.get("preferences") or {}),
             dynamic_content=item.get("content") or "",
             comment_content="",
+            thread_comments=self._format_thread_comments(item.get("thread_comments") or []),
         )
         reply = str(decision.get("reply") or "").strip()
         if reply:
@@ -108,6 +109,7 @@ class DynamicReplier:
             preference_context=self._build_preference_context(item.get("preferences") or {}),
             dynamic_content=dynamic.get("content") or "",
             comment_content=item.get("content") or "",
+            thread_comments=self._format_thread_comments(item.get("thread_comments") or []),
         )
         reply = str(decision.get("reply") or "").strip()
         should_reply = bool(decision.get("should_reply"))
@@ -128,6 +130,7 @@ class DynamicReplier:
         preference_context: str,
         dynamic_content: str,
         comment_content: str,
+        thread_comments: str,
     ) -> dict[str, Any]:
         if self._reply_llm is None:
             return {"should_reply": must_reply, "reply": "" if not must_reply else "谢谢你的分享~"}
@@ -140,6 +143,7 @@ class DynamicReplier:
             must_reply="true" if must_reply else "false",
             dynamic_content=dynamic_content,
             comment_content=comment_content,
+            thread_comments=thread_comments,
         )
         return self._parse_reply_json(response, must_reply=must_reply)
 
@@ -195,3 +199,26 @@ class DynamicReplier:
         if preferences.get("custom_context"):
             parts.append(f"用户补充的上下文：{str(preferences['custom_context']).replace('我', '用户')}")
         return "；".join(parts)
+
+    @staticmethod
+    def _format_thread_comments(comments: list[dict[str, Any]]) -> str:
+        """格式化当前动态下已有评论，供角色理解上下文。"""
+        if not isinstance(comments, list) or not comments:
+            return ""
+        lines: list[str] = []
+        for idx, comment in enumerate(comments[-30:], start=1):
+            if not isinstance(comment, dict):
+                continue
+            author_type = str(comment.get("author_type") or "")
+            author_name = str(comment.get("author_name") or "").strip()
+            if not author_name:
+                author_name = "天依" if author_type == "agent" else "用户"
+            content = str(comment.get("content") or "").strip()
+            if not content:
+                continue
+            created_at = str(comment.get("created_at") or "").strip()
+            prefix = f"{idx}. {author_name}"
+            if created_at:
+                prefix += f"（{created_at}）"
+            lines.append(f"{prefix}：{content}")
+        return "\n".join(lines)

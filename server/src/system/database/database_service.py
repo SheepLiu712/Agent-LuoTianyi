@@ -25,6 +25,7 @@ from src.system.database.sql_writer import run_sql_write
 from src.system.database.event_store import EventStore
 from src.system.database.memory_store import MemoryStore
 from src.system.database.dynamic_store import DynamicStore
+from src.system.database.user_store import UserStore
 
 from src.domain.chat import ContextInfo
 
@@ -78,6 +79,7 @@ class DatabaseManager:
         self.event_store: Optional[EventStore] = None
         self.memory_store: Optional[MemoryStore] = None
         self.dynamic_store: Optional[DynamicStore] = None
+        self.user_store: Optional[UserStore] = None
         self.init_all_databases()
 
     def init_all_databases(self) -> None:
@@ -89,9 +91,15 @@ class DatabaseManager:
             )
             init_redis_buffer(self.config.get("redis", {}))
 
+            self.user_store = UserStore(config=self.config.get("user_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis())
             self.event_store = EventStore(config = self.config.get("event_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis())
             self.memory_store = MemoryStore(config = self.config.get("memory_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis())
-            self.dynamic_store = DynamicStore(config=self.config.get("dynamic_store", {}), sql_session_factory=self.open_sql_session, redis_buffer=self._ensure_redis())
+            self.dynamic_store = DynamicStore(
+                config=self.config.get("dynamic_store", {}),
+                sql_session_factory=self.open_sql_session,
+                redis_buffer=self._ensure_redis(),
+                user_store=self.user_store,
+            )
             logger.info("Main database initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing databases: {e}")
@@ -112,6 +120,7 @@ class DatabaseManager:
         """检查数据库管理器和子存储已经初始化。"""
         required = {
             "redis": self._ensure_redis(),
+            "user_store": self.user_store,
             "event_store": self.event_store,
             "memory_store": self.memory_store,
             "dynamic_store": self.dynamic_store,
@@ -525,82 +534,29 @@ class DatabaseManager:
         '''
         获取用户的聊天偏好设置。返回字典，如果用户不存在则返回 None。
         '''
-        # 先尝试从 Redis 缓存获取
-        redis = self._ensure_redis()
-        cached_preferences = redis.get(f"user_preferences:{user_id}")
-        if cached_preferences:
-            return self._normalize_preferences(cached_preferences)
-
-        # 若缓存未命中，从数据库查询并更新缓存
-        db = self._new_session()
-        try:
-            user = db.query(User).filter_by(uuid=user_id).first()
-            if not user:
-                return None
-            preferences = self._normalize_preferences(user.preferences)
-            # 更新缓存
-            redis.setex(f"user_preferences:{user_id}", 3600, preferences) # 注意自己实现的redis支持所有类型
-            return preferences
-        finally:
-            db.close()
+        if self.user_store is None:
+            return None
+        return self.user_store.get_user_preferences(user_id)
 
     def save_user_preferences(self, user_id: str, preferences: Dict[str, Any]) -> bool:
         '''
         更新数据库中的用户聊天偏好设置，并同步更新 Redis 缓存。成功返回 True，失败返回 False。
         '''
-        db = self._new_session()
-        redis = self._ensure_redis()
-        try:
-            user = db.query(User).filter_by(uuid=user_id).first()
-            if not user:
-                return False
-            user.preferences = json.dumps(preferences, ensure_ascii=False)
-            db.commit()
-            # 更新 Redis 缓存
-            redis.setex(f"user_preferences:{user_id}", 3600, preferences)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save preferences for user {user_id}: {e}")
-            db.rollback()
+        if self.user_store is None:
             return False
-        finally:
-            db.close()
+        return self.user_store.save_user_preferences(user_id, preferences)
 
     def update_user_description(self, user_id: str, new_description: str, commit: bool = True) -> None:
         """更新用户画像描述，同时更新 Redis 缓存。"""
-        redis = self._ensure_redis()
-        db = self._new_session()
-        try:
-            def _write() -> bool:
-                user = db.query(User).filter(User.uuid == user_id).first()
-                if not user:
-                    return False
-                user.description = new_description
-                if commit:
-                    db.commit()
-                return True
-
-            updated = run_sql_write(_write)
-            if updated:
-                redis.setex(f"user_description:{user_id}", 3600, new_description)
-        except Exception as e:
-            logger.error(f"update_user_description error: {e}")
-            db.rollback()
-        finally:
-            db.close()
+        if self.user_store is None:
+            return
+        self.user_store.update_user_description(user_id, new_description, commit=commit)
 
     def get_user_description(self, user_id: str) -> Optional[str]:
         """获取用户画像描述。"""
-        redis = self._ensure_redis()
-        redis_key = f"user_description:{user_id}"
-        description = redis.get(redis_key)
-        if description is not None:
-            return description
-        if self.prefill_buffer(user_id, types=["description"]):
-            description = redis.get(redis_key)
-            if description is not None:
-                return description
-        return None
+        if self.user_store is None:
+            return None
+        return self.user_store.get_user_description(user_id)
     
     def get_user_nickname(self, user_id: str) -> Optional[str]:
         """获取用户昵称。"""

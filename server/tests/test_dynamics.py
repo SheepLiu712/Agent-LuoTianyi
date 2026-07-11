@@ -666,6 +666,87 @@ def test_dynamic_interaction_task_replies_and_updates_status(db_manager: Databas
     assert "辛苦" in comments["items"][0]["content"]
 
 
+def test_dynamic_pending_reply_items_include_thread_comments(db_manager: DatabaseManager):
+    _add_invite_code(db_manager, "INVITE_THREAD")
+    auth = _register_and_login(db_manager, "threaduser", "INVITE_THREAD")
+
+    db_manager.save_user_preferences(auth["user_uuid"], {"relationship": "朋友"})
+    db_manager.update_user_description(auth["user_uuid"], "用户最近在记录自己的日常状态。")
+    ok, _, created = db_manager.dynamic_store.create_dynamic(
+        author_type="user",
+        author_id=auth["user_uuid"],
+        owner_user_id=auth["user_uuid"],
+        visibility="private",
+        content="今天路过海边，风很大。",
+        source_type="user_post",
+    )
+    assert ok is True
+    dynamic_id = created["id"]
+    db_manager.dynamic_store.create_dynamic_comment(
+        dynamic_id=dynamic_id,
+        author_type="agent",
+        author_id="luotianyi",
+        owner_user_id=auth["user_uuid"],
+        content="听起来像一次很有画面的散步。",
+        memory_policy="disabled",
+        memory_status="disabled",
+        reply_status="not_applicable",
+    )
+    ok, _, user_comment = db_manager.dynamic_store.create_dynamic_comment(
+        dynamic_id=dynamic_id,
+        author_type="user",
+        author_id=auth["user_uuid"],
+        owner_user_id=auth["user_uuid"],
+        content="嗯，而且我想起了以前去海边的事。",
+    )
+    assert ok is True
+
+    pending_posts = db_manager.dynamic_store.list_pending_dynamic_posts_for_reply()
+    post_item = next(item for item in pending_posts if item["id"] == dynamic_id)
+    assert post_item["user_description"] == "用户最近在记录自己的日常状态。"
+    assert post_item["preferences"] == {"relationship": "朋友"}
+    assert [item["content"] for item in post_item["thread_comments"]] == [
+        "听起来像一次很有画面的散步。",
+        "嗯，而且我想起了以前去海边的事。",
+    ]
+
+    pending_comments = db_manager.dynamic_store.list_pending_dynamic_comments_for_reply()
+    comment_item = next(item for item in pending_comments if item["id"] == user_comment["id"])
+    assert comment_item["dynamic"]["content"] == "今天路过海边，风很大。"
+    assert [item["content"] for item in comment_item["thread_comments"]] == [
+        "听起来像一次很有画面的散步。",
+        "嗯，而且我想起了以前去海边的事。",
+    ]
+
+
+def test_dynamic_replier_passes_thread_comments_to_llm():
+    captured = {}
+    dynamic_capability = DynamicCapability()
+
+    class FakeLLM:
+        async def generate_response(self, **kwargs):
+            captured.update(kwargs)
+            return '{"should_reply": true, "reply": "我看到前面也聊到了海边的风。"}'
+
+    dynamic_capability.replier._reply_llm = FakeLLM()
+    item = {
+        "username": "Dpon",
+        "user_description": "用户喜欢散步。",
+        "preferences": {"relationship": "朋友"},
+        "content": "今天去了海边。",
+        "thread_comments": [
+            {"author_type": "agent", "author_name": "天依", "content": "海边听起来很舒服。", "created_at": "2026-07-06 10:00:00"},
+            {"author_type": "user", "author_name": "Dpon", "content": "但是风很大。", "created_at": "2026-07-06 10:01:00"},
+        ],
+    }
+
+    reply = asyncio.run(dynamic_capability.replier.generate_reply_for_post(item, character_name="洛天依"))
+
+    assert "海边的风" in reply
+    assert "海边听起来很舒服" in captured["thread_comments"]
+    assert "但是风很大" in captured["thread_comments"]
+
+
 def test_dynamic_interaction_task_processes_memory_status(db_manager: DatabaseManager):
     _add_invite_code(db_manager, "INVITE8")
     auth = _register_and_login(db_manager, "memoryuser", "INVITE8")

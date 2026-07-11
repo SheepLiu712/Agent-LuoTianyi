@@ -16,13 +16,12 @@ from src.system.database.sql_database import (
     DynamicPost,
     DynamicComment,
     DynamicReadState,
-    User,
 )
 from src.system.database.redis_buffer import RedisBuffer
 from src.system.database.sql_writer import run_sql_write
 
 if TYPE_CHECKING:
-    pass
+    from src.system.database.user_store import UserStore
 
 logger = get_logger(__name__)
 
@@ -41,10 +40,12 @@ class DynamicStore:
         config: Dict[str, Any],
         sql_session_factory: Callable[[], Session],
         redis_buffer: RedisBuffer,
+        user_store: "UserStore",
     ):
         self.config = config
         self.logger = get_logger(__name__)
         self.sql_session_factory = sql_session_factory
+        self.user_store = user_store
         _ = redis_buffer  # not used now, but kept for consistency with other stores
 
     def _get_session(self) -> Session:
@@ -86,10 +87,7 @@ class DynamicStore:
     # ── 内部查询工具 ─────────────────────────────────────────
 
     def _load_user_names(self, db: Session, user_ids: set[str]) -> dict[str, str]:
-        if not user_ids:
-            return {}
-        rows = db.query(User.uuid, User.username).filter(User.uuid.in_(user_ids)).all()
-        return {row[0]: row[1] for row in rows}
+        return self.user_store.load_user_names_in_session(db, user_ids)
 
     def _get_or_create_dynamic_read_state(self, db: Session, user_id: str) -> DynamicReadState:
         state = db.query(DynamicReadState).filter(DynamicReadState.user_id == user_id).first()
@@ -101,25 +99,10 @@ class DynamicStore:
         return state
 
     def _get_user_preferences(self, db: Session, user_id: str) -> dict[str, Any]:
-        """从 User 表直接读取用户偏好字典。"""
-        user = db.query(User).filter(User.uuid == user_id).first()
-        if user is None or user.preferences is None:
-            return {}
-        if isinstance(user.preferences, dict):
-            return user.preferences
-        if isinstance(user.preferences, str):
-            try:
-                return json.loads(user.preferences)
-            except json.JSONDecodeError:
-                return {}
-        return {}
+        return self.user_store.get_user_preferences_in_session(db, user_id)
 
     def _get_user_description(self, db: Session, user_id: str) -> str:
-        """从 User 表直接读取用户画像描述。"""
-        user = db.query(User).filter(User.uuid == user_id).first()
-        if user is None:
-            return ""
-        return user.description or ""
+        return self.user_store.get_user_description_in_session(db, user_id)
 
     # ── 序列化方法 ───────────────────────────────────────────
 
@@ -184,6 +167,18 @@ class DynamicStore:
             "cursor": self._encode_page_cursor(comment.created_at, comment.id),
         }
 
+    def _list_thread_comments(self, db: Session, dynamic_id: str) -> list[dict[str, Any]]:
+        rows = (
+            db.query(DynamicComment)
+            .filter(DynamicComment.dynamic_id == dynamic_id)
+            .filter(DynamicComment.status == "published")
+            .order_by(DynamicComment.created_at.asc(), DynamicComment.id.asc())
+            .all()
+        )
+        user_ids = {row.author_id for row in rows if row.author_type == "user"}
+        user_names = self._load_user_names(db, user_ids)
+        return [self._serialize_dynamic_comment(row, user_names) for row in rows]
+
     # ── 动态创建与查询 ───────────────────────────────────────
 
     def create_dynamic(
@@ -223,8 +218,7 @@ class DynamicStore:
             def _write() -> bool:
                 nonlocal created
                 if owner_user_id:
-                    owner = db.query(User).filter(User.uuid == owner_user_id).first()
-                    if owner is None:
+                    if not self.user_store.user_exists_in_session(db, owner_user_id):
                         return False
                 created = DynamicPost(
                     author_type=author_type,
@@ -244,10 +238,9 @@ class DynamicStore:
                 db.add(created)
                 db.flush()
                 if author_type != "user":
-                    users = db.query(User.uuid).all()
                     now = created.created_at or datetime.now()
-                    for row in users:
-                        state = self._get_or_create_dynamic_read_state(db, row[0])
+                    for user_id in self.user_store.list_user_ids_in_session(db):
+                        state = self._get_or_create_dynamic_read_state(db, user_id)
                         if state.last_read_dynamic_at is None:
                             continue
                         if state.last_read_dynamic_at > now:
@@ -423,8 +416,7 @@ class DynamicStore:
                     parent = db.query(DynamicComment).filter(DynamicComment.id == parent_comment_id).first()
                     if parent is None or parent.dynamic_id != dynamic_id or parent.owner_user_id != owner_user_id:
                         return False
-                owner = db.query(User).filter(User.uuid == owner_user_id).first()
-                if owner is None:
+                if not self.user_store.user_exists_in_session(db, owner_user_id):
                     return False
                 created = DynamicComment(
                     dynamic_id=dynamic_id,
@@ -548,6 +540,7 @@ class DynamicStore:
                 item["username"] = user_names.get(row.author_id, "")
                 item["user_description"] = self._get_user_description(db, uid) or ""
                 item["preferences"] = self._get_user_preferences(db, uid)
+                item["thread_comments"] = self._list_thread_comments(db, row.id)
                 items.append(item)
             return items
         finally:
@@ -576,6 +569,7 @@ class DynamicStore:
                 item["username"] = user_names.get(comment.author_id, "")
                 item["user_description"] = self._get_user_description(db, comment.owner_user_id) or ""
                 item["preferences"] = self._get_user_preferences(db, comment.owner_user_id)
+                item["thread_comments"] = self._list_thread_comments(db, dynamic.id)
                 items.append(item)
             return items
         finally:

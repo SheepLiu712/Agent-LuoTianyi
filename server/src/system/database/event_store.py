@@ -452,6 +452,7 @@ class EventStore:
                 event_type=event_type,
                 title=title,
                 description=event_data.get("description", ""),
+                user_id=event_data.get("user_id"),
                 date_type=event_data.get("date_type", "solar"),
                 date_mmdd=date_mmdd,
                 start_datetime=start_datetime,
@@ -507,9 +508,12 @@ class EventStore:
                 if hasattr(row, key) and value is not None:
                     if key == "trigger_conditions" and isinstance(value, list):
                         setattr(row, key, serialize_trigger_conditions(value))
-                    elif key in ("id", "description"):
-                        # id 不可改；description 已在 merged_description 分支处理
+                    elif key == "id":
+                        # id 不可改
                         continue
+                    elif key == "description":
+                        if not merged_description:
+                            setattr(row, key, value)
                     else:
                         setattr(row, key, value)
             row.updated_at = datetime.now()
