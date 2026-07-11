@@ -328,17 +328,6 @@
                     },
                     "prompt_name": "topic_reply_prompt"
                 }
-            },
-            "dynamic_composer": {
-                "llm_module": {
-                    "llm": {
-                        "name": "dsv4-flash",
-                        "enable_thinking": false,
-                        "use_json": false,
-                        "params": {}
-                    },
-                    "prompt_name": "dynamic_post_prompt"
-                }
             }
         }
     },

@@ -87,6 +87,30 @@
                 },
                 "prompt_name": "vision_interaction_prompt"
             }
+        },
+        "dynamic": {
+            "dynamic_composer": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {}
+                    },
+                    "prompt_name": "dynamic_post_prompt"
+                }
+            },
+            "dynamic_replier": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": true,
+                        "params": {}
+                    },
+                    "prompt_name": "dynamic_reply_prompt"
+                }
+            }
         }
     },
     "chat_session_manager": {
@@ -272,17 +296,6 @@
                         "use_json": false
                     },
                     "prompt_name": "topic_reply_prompt"
-                }
-            },
-            "dynamic_composer": {
-                "llm_module": {
-                    "llm": {
-                        "name": "qwen3.5-plus",
-                        "enable_thinking": false,
-                        "use_json": false,
-                        "params": {}
-                    },
-                    "prompt_name": "dynamic_post_prompt"
                 }
             }
         }

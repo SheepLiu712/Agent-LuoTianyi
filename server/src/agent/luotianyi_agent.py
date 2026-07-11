@@ -15,7 +15,6 @@ from src.utils.logger import get_logger
 from src.subconscious.attention import TopicAttentionPlan
 from src.agent.response_realizer import ResponseRealizer, UserExpressionContext
 from src.domain import CharacterProfile, CharacterName
-from src.utils.llm.llm_api_interface import LLMContentInspectionError
 
 
 if TYPE_CHECKING:
@@ -38,7 +37,6 @@ class LuoTianyiAgent:
         database_manager: "DatabaseManager",
         capability_manager: "CapabilityManager",
         main_chat_module: "LLMModule",
-        dynamic_composer_module: "LLMModule | None" = None,
         character_profile: CharacterProfile | None = None,
         mind: "CharacterSubconscious | None" = None,
     ) -> None:
@@ -58,7 +56,6 @@ class LuoTianyiAgent:
         self.mind = mind
 
         self.main_chat = MainChat(self.config["main_chat"], main_chat_module, self.character_profile)
-        self.dynamic_composer = dynamic_composer_module
         self.response_realizer = ResponseRealizer(self.main_chat)
 
     def ensure_dependencies(self) -> None:
@@ -163,34 +160,6 @@ class LuoTianyiAgent:
         except Exception as e:
             self.logger.debug(f"Skip invalid preferences context: {e}")
         return ""
-
-    async def generate_world_dynamic_content(
-        self,
-        *,
-        dynamic_type: str,
-        structured_context: str,
-        fallback_text: str = "",
-    ) -> str:
-        fallback = (fallback_text or "").strip()
-        if self.dynamic_composer is None:
-            return fallback
-        try:
-            response = await self.dynamic_composer.generate_response(
-                character_name=self.main_chat.character_name,
-                character_persona=self.main_chat.character_persona,
-                speaking_style=self.main_chat.speaking_style,
-                dynamic_type=dynamic_type,
-                structured_context=structured_context,
-                fallback_text=fallback,
-            )
-            text = str(response or "").strip()
-            return text or fallback
-        except LLMContentInspectionError as exc:
-            self.logger.warning(f"Dynamic composer content inspection failed, fallback to template text: {exc}")
-            return fallback
-        except Exception as exc:
-            self.logger.warning(f"Dynamic composer failed, fallback to template text: {exc}")
-            return fallback
 
     async def get_citywalk_diary_by_date(self, date_str: str) -> str | None:
         """按日期检索 citywalk 报告并返回 diary_text 字段。
