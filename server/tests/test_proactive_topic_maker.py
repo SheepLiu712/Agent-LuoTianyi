@@ -12,12 +12,15 @@ from src.chat_session.dependency.proactive_topic_maker import ProactiveTopicMake
 
 
 class FakeEventStore:
-    def __init__(self):
+    def __init__(self, events=None):
         self.notified = set()
         self.due_calls = []
+        self.events = events
 
     def get_events_due_for_trigger(self, *, character, today=None):
         self.due_calls.append(character)
+        if self.events is not None:
+            return self.events
         return [
             (
                 {
@@ -92,6 +95,62 @@ async def test_periodic_checks_dispatch_only_when_stream_is_idle():
     assert len(idle_stream.topic_replier.topics) == 1
     assert event_store.due_calls == ["miku"]
     assert event_store.notified == {("miku-event", "idle-user", "day_of_event", "miku")}
+
+
+@pytest.mark.asyncio
+async def test_periodic_checks_randomly_dispatches_only_one_due_event(monkeypatch):
+    events = [
+        (
+            {
+                "id": "event-1",
+                "event_type": "holiday",
+                "title": "节日A",
+                "description": "",
+                "is_personal": False,
+            },
+            "day_of_event",
+        ),
+        (
+            {
+                "id": "event-2",
+                "event_type": "birthday",
+                "title": "生日B",
+                "description": "",
+                "is_personal": True,
+                "target_user_id": "idle-user",
+            },
+            "day_of_event",
+        ),
+        (
+            {
+                "id": "event-3",
+                "event_type": "new_song",
+                "title": "新歌C",
+                "description": "",
+                "is_personal": False,
+            },
+            "day_of_event",
+        ),
+    ]
+    monkeypatch.setattr(
+        "src.chat_session.dependency.proactive_topic_maker.random.choice",
+        lambda candidates: candidates[1],
+    )
+    maker = ProactiveTopicMaker({"proactive_idle_seconds": 0})
+    idle_stream = FakeChatStream("luotianyi", idle=True)
+    event_store = FakeEventStore(events)
+    maker.configure(
+        conversation_service=SimpleNamespace(),
+        database_manager=SimpleNamespace(event_store=event_store),
+        chat_stream_manager=FakeStreamManager([("idle-user", "luotianyi", idle_stream)]),
+    )
+
+    sent = await maker.run_periodic_checks()
+
+    assert sent == 1
+    assert len(idle_stream.topic_replier.topics) == 1
+    assert "生日B" in idle_stream.topic_replier.topics[0].topic_content
+    assert event_store.notified == {("event-2", "idle-user", "day_of_event", "luotianyi")}
 
 
 @pytest.mark.asyncio

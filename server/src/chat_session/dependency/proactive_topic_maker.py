@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import random
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
@@ -233,16 +234,23 @@ class ProactiveTopicMaker:
                 self.logger.warning(f"Failed to query due reminders: {e}")
                 continue
 
+            candidates = []
             for event_dict, trigger_key in self._filter_events_for_stream(due_events, user_id):
                 event_id = event_dict.get("id")
                 if not event_id:
                     continue
                 if store.is_notified(event_id, user_id, trigger_key, character_id):
                     continue
-                topic = self._build_reminder_topic(event_dict, trigger_key)
-                await chat_stream.topic_replier.add_topic(topic)
-                store.mark_notified(event_id, user_id, trigger_key, character_id)
-                sent += 1
+                candidates.append((event_dict, trigger_key))
+            if not candidates:
+                continue
+
+            event_dict, trigger_key = random.choice(candidates)
+            event_id = event_dict.get("id")
+            topic = self._build_reminder_topic(event_dict, trigger_key)
+            await chat_stream.topic_replier.add_topic(topic)
+            store.mark_notified(event_id, user_id, trigger_key, character_id)
+            sent += 1
 
         if sent:
             self.logger.info(f"Dispatched {sent} proactive reminder topic(s)")

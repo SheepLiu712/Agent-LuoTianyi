@@ -543,7 +543,7 @@
             "clock_config": {
                 "type": "interval",
                 "params": {
-                    "interval_seconds": 600,
+                    "interval_seconds": 300,
                     "run_immediately": false
                 }
             }
