@@ -105,15 +105,13 @@ class TopicExtractor:
 
     async def _call_llm(self, **kwargs) -> Optional[str]:
         try:
-            response = await self.llm.generate_response(
+            return await self.llm.generate_response(
                 **kwargs,
                 use_json = True
             )
         except Exception as e:
-            import traceback
-            self.logger.error(f"Error during LLM response generation: {e} \n{traceback.format_exc()}")
-            response = None
-        return response
+            self.logger.exception(f"Error during topic extraction LLM response generation: {e}")
+            raise
 
     def _parse_response(self, response: str) -> Optional[Dict[str, Any]]:
         """解析 LLM 返回的 JSON 对象（单个话题）。"""

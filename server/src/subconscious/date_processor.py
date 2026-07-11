@@ -104,6 +104,8 @@ async def process_detected_date(
     user_id: str,
     open_sql_session,
     reply_topic_callback,
+    event_store=None,
+    character_id: str = "luotianyi",
 ) -> Optional[bool]:
     """
     处理检测到的重要日期，写入 Event 表。
@@ -122,7 +124,16 @@ async def process_detected_date(
         return False
 
     if confidence >= CONFIDENCE_AUTO_ADD and date_str:
-        saved = _save_user_date_event(open_sql_session, user_id, name, date_type, date_str, description)
+        saved = await _save_user_date_event(
+            open_sql_session,
+            user_id,
+            name,
+            date_type,
+            date_str,
+            description,
+            event_store=event_store,
+            character_id=character_id,
+        )
         if saved:
             logger.info(f"Date {name}: confidence {confidence:.2f} >= {CONFIDENCE_AUTO_ADD}, auto-saved to Event table")
             return True
@@ -151,13 +162,15 @@ async def process_detected_date(
 # ── 数据库操作（Event 表）──────────────────────────────────
 
 
-def _save_user_date_event(
+async def _save_user_date_event(
     open_sql_session,
     user_id: str,
     name: str,
     date_type: str,
     date_str: str,
     description: str,
+    event_store=None,
+    character_id: str = "luotianyi",
 ) -> bool:
     """将用户重要日期写入 Event 表（birthday / anniversary / holiday）。"""
     if not date_str:
@@ -176,6 +189,30 @@ def _save_user_date_event(
         return False
 
     event_type = _DATE_TYPE_MAP.get(date_type, _DEFAULT_EVENT_TYPE)
+    character_id = character_id or "luotianyi"
+
+    if event_store is not None:
+        try:
+            await event_store.add_event(
+                {
+                    "character": character_id,
+                    "event_type": event_type,
+                    "title": name,
+                    "description": description,
+                    "user_id": user_id,
+                    "date_type": "solar",
+                    "date_mmdd": f"{mm:02d}-{dd:02d}",
+                    "is_recurring": True,
+                    "is_personal": True,
+                    "target_user_id": user_id,
+                    "source": "user",
+                    "trigger_conditions": ["day_of_event"],
+                }
+            )
+            logger.info(f"Saved user date event through EventStore for user {user_id}: {name} ({date_str}) type={event_type}")
+            return True
+        except Exception as e:
+            logger.warning(f"EventStore failed to save user date event, falling back to direct SQL: {e}")
 
     db: "Session" = open_sql_session()
     try:
@@ -198,6 +235,7 @@ def _save_user_date_event(
         else:
             db.add(Event(
                 id=str(uuid4()),
+                character=character_id,
                 event_type=event_type,
                 title=name,
                 description=description,

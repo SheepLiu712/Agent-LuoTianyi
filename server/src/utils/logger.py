@@ -16,6 +16,8 @@ import colorlog
 # 全局日志配置
 _LOGGER_INSTANCES: Dict[str, logging.Logger] = {}
 _OBSERVABILITY_HANDLER: logging.Handler | None = None
+_CONSOLE_HANDLER: logging.Handler | None = None
+_FILE_HANDLER: logging.Handler | None = None
 _DEFAULT_CONFIG = {
     "level": "DEBUG",
     "format": "{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}",
@@ -33,7 +35,7 @@ def setup_logging(config: Optional[Dict[str, Any]] = None) -> None:
     Args:
         config: 日志配置字典
     """
-    global _DEFAULT_CONFIG
+    global _DEFAULT_CONFIG, _CONSOLE_HANDLER, _FILE_HANDLER
     
     if config:
         _DEFAULT_CONFIG.update(config)
@@ -41,6 +43,26 @@ def setup_logging(config: Optional[Dict[str, Any]] = None) -> None:
     # 创建日志目录
     log_file = Path(_DEFAULT_CONFIG["file"])
     log_file.parent.mkdir(parents=True, exist_ok=True)
+    old_handlers = []
+    if _CONSOLE_HANDLER is not None:
+        old_handlers.append(_CONSOLE_HANDLER)
+    if _FILE_HANDLER is not None:
+        old_handlers.append(_FILE_HANDLER)
+    for handler in old_handlers:
+        try:
+            handler.close()
+        except Exception:
+            pass
+    _CONSOLE_HANDLER = None
+    _FILE_HANDLER = None
+    for logger in _LOGGER_INSTANCES.values():
+        logger.handlers.clear()
+        if _DEFAULT_CONFIG.get("console_output", True):
+            logger.addHandler(_get_console_handler())
+        if _DEFAULT_CONFIG.get("file_output", True):
+            logger.addHandler(_get_file_handler())
+        if _OBSERVABILITY_HANDLER and _OBSERVABILITY_HANDLER not in logger.handlers:
+            logger.addHandler(_OBSERVABILITY_HANDLER)
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -64,13 +86,11 @@ def get_logger(name: str) -> logging.Logger:
     if not logger.handlers:
         # 控制台处理器
         if _DEFAULT_CONFIG.get("console_output", True):
-            console_handler = _create_console_handler()
-            logger.addHandler(console_handler)
+            logger.addHandler(_get_console_handler())
         
         # 文件处理器
         if _DEFAULT_CONFIG.get("file_output", True):
-            file_handler = _create_file_handler()
-            logger.addHandler(file_handler)
+            logger.addHandler(_get_file_handler())
     if _OBSERVABILITY_HANDLER and _OBSERVABILITY_HANDLER not in logger.handlers:
         logger.addHandler(_OBSERVABILITY_HANDLER)
     
@@ -153,6 +173,34 @@ def uninstall_observability_log_handler() -> None:
     _OBSERVABILITY_HANDLER = None
 
 
+class WindowsSafeRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that tolerates Windows file-lock rollover failures."""
+
+    def doRollover(self) -> None:
+        try:
+            super().doRollover()
+        except PermissionError:
+            # Windows refuses os.rename() when another process still has the
+            # log open. Keep the current file and continue logging instead of
+            # letting logging.Handler print a noisy "--- Logging error ---".
+            if self.stream is None or self.stream.closed:
+                self.stream = self._open()
+
+
+def _get_console_handler() -> logging.Handler:
+    global _CONSOLE_HANDLER
+    if _CONSOLE_HANDLER is None:
+        _CONSOLE_HANDLER = _create_console_handler()
+    return _CONSOLE_HANDLER
+
+
+def _get_file_handler() -> logging.Handler:
+    global _FILE_HANDLER
+    if _FILE_HANDLER is None:
+        _FILE_HANDLER = _create_file_handler()
+    return _FILE_HANDLER
+
+
 def _create_console_handler() -> logging.Handler:
     """创建控制台处理器
     
@@ -197,7 +245,7 @@ def _create_file_handler() -> logging.Handler:
         if not os.path.exists(os.path.dirname(_DEFAULT_CONFIG["file"])):
             os.makedirs(os.path.dirname(_DEFAULT_CONFIG["file"]))
         open(_DEFAULT_CONFIG["file"], 'a').close()
-    file_handler = RotatingFileHandler(
+    file_handler = WindowsSafeRotatingFileHandler(
         filename=_DEFAULT_CONFIG["file"],
         maxBytes=rotation_size,
         backupCount=5,

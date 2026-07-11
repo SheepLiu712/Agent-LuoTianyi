@@ -35,7 +35,7 @@ class AdminShell:
             raw_config = config_store.read_raw()
         except (json.JSONDecodeError, OSError):
             raw_config = {}
-        observability = ObservabilityService(raw_config.get("observability", {}))
+        observability = ObservabilityService(raw_config.get("observability", {}), base_dir=root)
         set_observability_service(observability)
         install_observability_log_handler(observability)
         auth = AdminAuthService(root / "config" / "admin_auth.json", root / "config" / "admin_setup_token.txt")

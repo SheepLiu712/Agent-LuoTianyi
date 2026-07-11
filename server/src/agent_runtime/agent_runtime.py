@@ -257,6 +257,7 @@ class AgentRuntime:
                 conscious=conscious,
                 mind=mind,
                 reflex=CharacterReflex(profile),
+                capability_manager=capability_manager,
             )
         return character_runtimes
 

@@ -3,6 +3,7 @@ import pathlib
 import os
 import json
 import io
+import re
 import traceback
 from src.domain.music_type import SongSegment, SongMetadata, OneLyricLine, WishEntry
 from src.domain.tool_type import  MyTool, ToolFunction, ToolOneParameter
@@ -200,6 +201,28 @@ class SingingManager:
         lyrics_content = "\n".join([line.content for line in lyrics])
         return lyrics_content
 
+    def get_full_lyrics(self, song_name: str) -> str:
+        """获取整首歌歌词。
+
+        优先使用歌曲 JSON 中所有唱段的歌词，避免依赖 LRC 解析；如果唱段歌词不存在，
+        则回退读取 lrc 文件并去掉时间戳。
+        """
+        song_metadata = self.get_song_metadata(song_name)
+        if not song_metadata:
+            self.logger.warning(f"Song not found: {song_name}")
+            return ""
+
+        segment_lines: List[str] = []
+        for segment in song_metadata.segments or []:
+            for line in self._normalize_lyric_lines(segment.lyrics):
+                content = line.content.strip()
+                if content:
+                    segment_lines.append(content)
+        if segment_lines:
+            return "\n".join(self._dedupe_adjacent_lines(segment_lines))
+
+        return self._read_lrc_lyrics(song_metadata.lrc_path)
+
     def get_song_segment(self, song_name: str, segment_description: str, require_audio: bool = True) -> Tuple[List[OneLyricLine], bytes | None]:
         """
         根据歌曲名称和唱段描述，获取对应唱段的歌词对象列表，并返回音频数据的base64编码
@@ -228,12 +251,7 @@ class SingingManager:
         # 转换 lyrics (如果是 dict 则转换为 OneLyricLine)
         real_lyrics = []
         if target_segment.lyrics:
-            first_elem = target_segment.lyrics[0]
-            if isinstance(first_elem, dict):
-                for l in target_segment.lyrics:
-                    real_lyrics.append(OneLyricLine(duration=float(l.get("duration", 0.0)), content=str(l.get("content", ""))))
-            elif isinstance(first_elem, OneLyricLine):
-                real_lyrics = target_segment.lyrics
+            real_lyrics = self._normalize_lyric_lines(target_segment.lyrics)
 
         if not require_audio:
             return real_lyrics, None
@@ -288,4 +306,46 @@ class SingingManager:
         if canonical_key:
             return self.all_songs.get(canonical_key, None)
         return None
+
+    @staticmethod
+    def _normalize_lyric_lines(raw_lines: Any) -> List[OneLyricLine]:
+        real_lyrics: List[OneLyricLine] = []
+        if not raw_lines:
+            return real_lyrics
+        for item in raw_lines:
+            if isinstance(item, dict):
+                real_lyrics.append(
+                    OneLyricLine(
+                        duration=float(item.get("duration", 0.0)),
+                        content=str(item.get("content", "")),
+                    )
+                )
+            elif isinstance(item, OneLyricLine):
+                real_lyrics.append(item)
+            elif isinstance(item, str):
+                real_lyrics.append(OneLyricLine(duration=0.0, content=item))
+        return real_lyrics
+
+    @staticmethod
+    def _dedupe_adjacent_lines(lines: List[str]) -> List[str]:
+        deduped: List[str] = []
+        for line in lines:
+            if not deduped or deduped[-1] != line:
+                deduped.append(line)
+        return deduped
+
+    def _read_lrc_lyrics(self, lrc_path: str) -> str:
+        path = pathlib.Path(lrc_path)
+        if not path.exists():
+            return ""
+        lines: List[str] = []
+        try:
+            for raw_line in path.read_text(encoding="utf-8").splitlines():
+                line = re.sub(r"\[[^\]]*\]", "", raw_line).strip()
+                if line:
+                    lines.append(line)
+        except Exception as exc:
+            self.logger.warning(f"Failed to read lrc lyrics for {lrc_path}: {exc}")
+            return ""
+        return "\n".join(self._dedupe_adjacent_lines(lines))
 

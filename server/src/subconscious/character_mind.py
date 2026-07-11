@@ -233,6 +233,8 @@ class CharacterSubconscious:
             user_id=user_id,
             open_sql_session=self.database_manager.open_sql_session,
             reply_topic_callback=reply_topic_callback,
+            event_store=getattr(self.database_manager, "event_store", None),
+            character_id=self.character_id,
         )
 
     async def update_user_profile_by_context(self, user_id: str, context: dict[str, Any]) -> str | None:

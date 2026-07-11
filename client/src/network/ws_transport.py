@@ -8,6 +8,7 @@ import websockets
 
 from .event_types import build_event, normalize_agent_message, normalize_error_message, parse_server_message, WSEventType, WSMessage, AgentMessage, AgentStateMessage
 from ..utils.logger import get_logger
+from ..utils.tls import create_default_ssl_context
 
 class WsTransport:
     def __init__(
@@ -430,7 +431,7 @@ class WsTransport:
     def _build_ssl_context(self, base_url: str):
         if not base_url.startswith("https://"):
             return None
-        ctx = ssl.create_default_context()
+        ctx = create_default_ssl_context()
         # Improve compatibility with some tunneling endpoints in this project runtime.
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         return ctx

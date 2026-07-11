@@ -14,4 +14,5 @@ from src.system.database.database_service import (
     DatabaseManager,
     set_default_database_manager,
 )
+from src.system.database.user_store import UserStore
 

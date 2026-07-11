@@ -272,6 +272,215 @@ class NetworkClient:
             self.logger.error(f"History Error: {exc}")
             return [], -1
 
+    def get_dynamics(self, limit: int = 50, cursor: str | None = None) -> dict:
+        if not self.user_id:
+            return {"ok": False, "message": "Not logged in", "items": [], "has_more": False, "next_cursor": None}
+
+        try:
+            params = {
+                "username": self.user_id,
+                "limit": limit,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            headers = {}
+            if self.message_token:
+                headers["Authorization"] = f"Bearer {self.message_token}"
+            resp = self.session.get(
+                f"{self.base_url}/dynamics",
+                params=params,
+                headers=headers,
+                verify=self.verify_ssl,
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                detail = f"HTTP {resp.status_code}"
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                self.logger.warning(f"获取动态失败: {detail}")
+                return {"ok": False, "message": detail, "items": [], "has_more": False, "next_cursor": None}
+            data = resp.json()
+            data["ok"] = True
+            return data
+        except Exception as exc:
+            self.logger.error(f"获取动态失败: {exc}")
+            return {"ok": False, "message": str(exc), "items": [], "has_more": False, "next_cursor": None}
+
+    def create_dynamic(self, content: str) -> dict:
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "message": "Not logged in"}
+
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/dynamics",
+                json={
+                    "username": self.user_id,
+                    "token": self.message_token,
+                    "content": content,
+                },
+                verify=self.verify_ssl,
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                detail = f"HTTP {resp.status_code}"
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                return {"ok": False, "message": detail}
+            data = resp.json()
+            return {"ok": True, "item": data.get("item")}
+        except Exception as exc:
+            self.logger.error(f"发布动态失败: {exc}")
+            return {"ok": False, "message": str(exc)}
+
+    def get_dynamic_comments(self, dynamic_id: str, limit: int = 100, cursor: str | None = None) -> dict:
+        if not self.user_id:
+            return {"ok": False, "message": "Not logged in", "items": [], "has_more": False, "next_cursor": None}
+
+        try:
+            params = {
+                "username": self.user_id,
+                "limit": limit,
+            }
+            if cursor:
+                params["cursor"] = cursor
+            headers = {}
+            if self.message_token:
+                headers["Authorization"] = f"Bearer {self.message_token}"
+            resp = self.session.get(
+                f"{self.base_url}/dynamics/{dynamic_id}/comments",
+                params=params,
+                headers=headers,
+                verify=self.verify_ssl,
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                detail = f"HTTP {resp.status_code}"
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                self.logger.warning(f"获取动态评论失败: {detail}")
+                return {"ok": False, "message": detail, "items": [], "has_more": False, "next_cursor": None}
+            data = resp.json()
+            data["ok"] = True
+            return data
+        except Exception as exc:
+            self.logger.error(f"获取动态评论失败: {exc}")
+            return {"ok": False, "message": str(exc), "items": [], "has_more": False, "next_cursor": None}
+
+    def create_dynamic_comment(self, dynamic_id: str, content: str, parent_comment_id: str | None = None) -> dict:
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "message": "Not logged in"}
+
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/dynamics/{dynamic_id}/comments",
+                json={
+                    "username": self.user_id,
+                    "token": self.message_token,
+                    "content": content,
+                    "parent_comment_id": parent_comment_id,
+                },
+                verify=self.verify_ssl,
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                detail = f"HTTP {resp.status_code}"
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                return {"ok": False, "message": detail}
+            data = resp.json()
+            return {"ok": True, "item": data.get("item")}
+        except Exception as exc:
+            self.logger.error(f"发表评论失败: {exc}")
+            return {"ok": False, "message": str(exc)}
+
+    def get_dynamic_unread_status(self) -> dict:
+        if not self.user_id:
+            return {
+                "ok": False,
+                "message": "Not logged in",
+                "has_unread": False,
+                "unread_count": 0,
+                "unread_dynamic_count": 0,
+                "unread_comment_count": 0,
+            }
+
+        try:
+            params = {
+                "username": self.user_id,
+            }
+            headers = {}
+            if self.message_token:
+                headers["Authorization"] = f"Bearer {self.message_token}"
+            resp = self.session.get(
+                f"{self.base_url}/dynamics/unread",
+                params=params,
+                headers=headers,
+                verify=self.verify_ssl,
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                detail = f"HTTP {resp.status_code}"
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                self.logger.warning(f"获取动态未读状态失败: {detail}")
+                return {
+                    "ok": False,
+                    "message": detail,
+                    "has_unread": False,
+                    "unread_count": 0,
+                    "unread_dynamic_count": 0,
+                    "unread_comment_count": 0,
+                }
+            data = resp.json()
+            data["ok"] = True
+            return data
+        except Exception as exc:
+            self.logger.error(f"获取动态未读状态失败: {exc}")
+            return {
+                "ok": False,
+                "message": str(exc),
+                "has_unread": False,
+                "unread_count": 0,
+                "unread_dynamic_count": 0,
+                "unread_comment_count": 0,
+            }
+
+    def mark_dynamics_read(self) -> dict:
+        if not self.user_id or not self.message_token:
+            return {"ok": False, "message": "Not logged in"}
+
+        try:
+            resp = self.session.post(
+                f"{self.base_url}/dynamics/read",
+                json={
+                    "username": self.user_id,
+                    "token": self.message_token,
+                },
+                verify=self.verify_ssl,
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                detail = f"HTTP {resp.status_code}"
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                return {"ok": False, "message": detail}
+            return resp.json()
+        except Exception as exc:
+            self.logger.error(f"标记动态已读失败: {exc}")
+            return {"ok": False, "message": str(exc)}
+
 
     def network_set_message_listener(self, listener: Callable[[dict], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
         self.ws_transport.set_agent_message_listener(listener, agent_state_listener)

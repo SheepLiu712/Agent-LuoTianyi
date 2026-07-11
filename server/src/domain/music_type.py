@@ -11,9 +11,12 @@ class WishEntry:
     first_requested: str = ""       # ISO date, e.g. "2026-05-05"
     last_attempt: str = ""
     attempt_count: int = 0
-    status: str = "pending"         # pending | awaiting_audio | learned | abandoned
+    status: str = "pending"         # pending | awaiting_audio | learned | abandoned | redirected
     failure_reason: str = ""
     learned_date: str = ""
+    redirected_to: str = ""
+    redirected_unified_name: str = ""
+    redirected_status: str = ""
 
 
 @dataclass

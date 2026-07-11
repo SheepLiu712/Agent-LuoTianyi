@@ -8,6 +8,7 @@ import sys
 
 # Ensure src is importable
 current_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(current_dir)
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
@@ -21,9 +22,15 @@ from src.system.user_interface.types import (
     WSEventType,
     PreferenceGetRequest,
     PreferenceOverwriteRequest,
+    DynamicListRequest,
+    DynamicCreateRequest,
+    DynamicCommentListRequest,
+    DynamicCommentCreateRequest,
+    DynamicUnreadRequest,
+    DynamicReadMarkRequest,
 )
 from src.system.user_interface.websocket_service import WebSocketConnection
-from src.system.user_interface.admin_interface import router as admin_router
+from src.system.admin.admin_interface import router as admin_router
 from src.system.admin import get_admin_shell, init_admin_shell, shutdown_admin_shell
 
 from src.utils.helpers import load_config
@@ -278,7 +285,7 @@ async def overwrite_preference(
 async def get_history(
     request: HistoryRequest = Depends(),
     authorization: str | None = Header(default=None),
-    system_runtime = Depends(get_runtime),
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
     """获取聊天历史：委托到 UserInterface。"""
     logger.info(f"Server received: Get history request from {request.username}")
@@ -294,10 +301,97 @@ async def get_history(
     )
 
 
+@app.get("/dynamics")
+async def list_dynamics(
+    request: DynamicListRequest = Depends(),
+    authorization: str | None = Header(default=None),
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
+):
+    token = request.token
+    if not token and authorization:
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1]
+    if not token:
+        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    req = DynamicListRequest(
+        username=request.username,
+        token=token,
+        limit=request.limit,
+        cursor=request.cursor,
+    )
+    return await system_runtime.user_interface.list_dynamics(req, system_runtime)
+
+
+@app.post("/dynamics")
+async def create_dynamic(
+    request: DynamicCreateRequest,
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
+):
+    return await system_runtime.user_interface.create_dynamic(request, system_runtime)
+
+
+@app.get("/dynamics/unread")
+async def get_dynamic_unread(
+    request: DynamicUnreadRequest = Depends(),
+    authorization: str | None = Header(default=None),
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
+):
+    token = request.token
+    if not token and authorization:
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1]
+    if not token:
+        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    req = DynamicUnreadRequest(username=request.username, token=token)
+    return await system_runtime.user_interface.get_dynamic_unread(req, system_runtime)
+
+
+@app.post("/dynamics/read")
+async def mark_dynamic_read(
+    request: DynamicReadMarkRequest,
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
+):
+    return await system_runtime.user_interface.mark_dynamic_read(request, system_runtime)
+
+
+@app.get("/dynamics/{dynamic_id}/comments")
+async def list_dynamic_comments(
+    dynamic_id: str,
+    request: DynamicCommentListRequest = Depends(),
+    authorization: str | None = Header(default=None),
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
+):
+    token = request.token
+    if not token and authorization:
+        parts = authorization.split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            token = parts[1]
+    if not token:
+        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    req = DynamicCommentListRequest(
+        username=request.username,
+        token=token,
+        limit=request.limit,
+        cursor=request.cursor,
+    )
+    return await system_runtime.user_interface.list_dynamic_comments(dynamic_id, req, system_runtime)
+
+
+@app.post("/dynamics/{dynamic_id}/comments")
+async def create_dynamic_comment(
+    dynamic_id: str,
+    request: DynamicCommentCreateRequest,
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
+):
+    return await system_runtime.user_interface.create_dynamic_comment(dynamic_id, request, system_runtime)
+
+
 @app.post("/get_image")
 async def get_image(
     request: ImageRequest,
-    system_runtime = Depends(get_runtime),
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
     """
     获取图片接口。用户提供图片的服务器路径，服务器返回图片二进制数据。
@@ -317,7 +411,7 @@ async def get_image(
 @app.post("/update_image_client_path")
 async def update_image_client_path(
     request: ImageRequest,
-    system_runtime = Depends(get_runtime),
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
     """
     更新图片的客户端路径。用户提供图片的 UUID 和新的客户端路径，服务器更新数据库记录。
