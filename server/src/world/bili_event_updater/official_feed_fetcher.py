@@ -98,8 +98,21 @@ class OfficialFeedFetcher:
     def _save_cache(self) -> None:
         try:
             self.data_file.parent.mkdir(parents=True, exist_ok=True)
-            for uid in self.seen_ids:
-                self.seen_ids[uid] = self.seen_ids[uid][-200:]
+            merged: Dict[str, List[str]] = {}
+            if self.data_file.exists():
+                try:
+                    raw_cache = json.loads(self.data_file.read_text(encoding="utf-8"))
+                    if isinstance(raw_cache, dict):
+                        merged = {
+                            str(key): list(value)[-200:]
+                            for key, value in raw_cache.items()
+                            if isinstance(value, list)
+                        }
+                except Exception as e:
+                    self.logger.warning(f"Failed to merge existing feed cache: {e}")
+            for uid, ids in self.seen_ids.items():
+                merged[uid] = list(ids)[-200:]
+            self.seen_ids = merged
             self.data_file.write_text(
                 json.dumps(self.seen_ids, ensure_ascii=False, indent=2),
                 encoding="utf-8",

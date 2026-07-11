@@ -12,10 +12,11 @@ if TYPE_CHECKING:
 
 
 class BiliEventUpdateTask(WorldTask):
-    task_name = "bili_event_update"
+    base_task_name = "bili_event_update"
 
-    def __init__(self, config: Dict[str, Any]) -> None:
-        super().__init__(self.task_name, config)
+    def __init__(self, config: Dict[str, Any] | None = None, character_id: str = "luotianyi") -> None:
+        self.character_id = character_id
+        super().__init__(f"{self.base_task_name}:{character_id}", config)
         self.logger = get_logger(__name__)
         self.system_runtime: "SystemRuntime" | None = None
         self.updater: Optional[BiliEventUpdater] = None
@@ -30,9 +31,9 @@ class BiliEventUpdateTask(WorldTask):
             llm_cfg = self.config.get("llm_module")
             vlm_cfg = self.config.get("vlm_module")
             if llm_cfg:
-                llm_module = llm_service.register_llm_module("bili_event_parser", llm_cfg)
+                llm_module = llm_service.register_llm_module(f"{self.character_id}_bili_event_parser", llm_cfg)
             if vlm_cfg:
-                vlm_module = llm_service.register_vlm_module("bili_event_parser", vlm_cfg)
+                vlm_module = llm_service.register_vlm_module(f"{self.character_id}_bili_event_parser", vlm_cfg)
         self.updater = BiliEventUpdater(
             config=self.config,
             event_store=event_store,

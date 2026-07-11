@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
     from src.system.database.event_store import EventStore
     from src.capabilities.singing.singing_manager import SingingManager
+    from src.agent_runtime.character_runtime import CharacterRuntime
 
 
 class LearnSingSongsTask(WorldTask):
@@ -27,6 +28,7 @@ class LearnSingSongsTask(WorldTask):
         self.logger = get_logger(__name__)
         self.system_runtime: "SystemRuntime" | None = None
         self.event_store: "EventStore" | None = None
+        self.character_runtime: "CharacterRuntime" | None = None
         self.auto_song_learner: "AutoSongLearner" | None = None
         self._init_error: str = ""
 
@@ -34,6 +36,8 @@ class LearnSingSongsTask(WorldTask):
         self.system_runtime = system_runtime
         database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
+        agent_runtime = getattr(system_runtime, "agent_runtime", None)
+        self.character_runtime = agent_runtime.get_character_runtime(self.character_id) if agent_runtime is not None else None
         self.auto_song_learner = self._build_auto_song_learner()
 
     def ensure_dependencies(self) -> None:
@@ -64,6 +68,9 @@ class LearnSingSongsTask(WorldTask):
             asyncio.run(self._write_learned_event(learned))
         if learned:
             self._reload_singing_library()
+            published_dynamic_ids = self._publish_learned_dynamics(learned)
+        else:
+            published_dynamic_ids = []
 
         return WorldTaskResult.success(
             self.task_name,
@@ -72,6 +79,7 @@ class LearnSingSongsTask(WorldTask):
             learned=learned,
             abandoned=abandoned,
             awaiting=awaiting,
+            dynamic_ids=published_dynamic_ids,
         )
 
     def _build_auto_song_learner(self) -> "AutoSongLearner" | None:
@@ -125,4 +133,63 @@ class LearnSingSongsTask(WorldTask):
             reload_songs(self.character_id)
         except Exception as exc:
             self.logger.warning(f"Failed to reload singing library after learning songs: {exc}")
+
+    def _publish_learned_dynamics(self, learned: list[str]) -> list[str]:
+        if self.character_runtime is None:
+            return []
+        published: list[str] = []
+        for song_name in learned:
+            material = self._collect_learned_song_material(song_name)
+            try:
+                result = asyncio.run(
+                    self.character_runtime.publish_learned_song_dynamic(
+                        song_name=song_name,
+                        segment_description=material.get("segment_description", ""),
+                        lyrics=material.get("lyrics", ""),
+                    )
+                )
+                dynamic_id = result.get("dynamic_id")
+                if dynamic_id:
+                    published.append(str(dynamic_id))
+            except Exception as exc:
+                self.logger.warning(f"Failed to publish learned-song dynamic for {song_name}: {exc}")
+        return published
+
+    def _collect_learned_song_material(self, song_name: str) -> dict[str, str]:
+        manager = self.singing_manager
+        if manager is None:
+            return {"song_name": song_name, "segment_description": "", "lyrics": ""}
+
+        correct_song_name = song_name
+        segment_description = ""
+        try:
+            resolved_name, segments = manager.can_i_sing_song(song_name)
+            if resolved_name:
+                correct_song_name = resolved_name
+            if segments:
+                segment_description = str(segments[0])
+        except Exception as exc:
+            self.logger.warning(f"Failed to resolve learned song segments for {song_name}: {exc}")
+
+        lyrics = ""
+        get_full_lyrics = getattr(manager, "get_full_lyrics", None)
+        if callable(get_full_lyrics):
+            try:
+                lyrics = str(get_full_lyrics(correct_song_name or song_name) or "").strip()
+            except Exception as exc:
+                self.logger.warning(f"Failed to read full lyrics for {song_name}: {exc}")
+
+        if not lyrics and segment_description:
+            get_segment_lyrics = getattr(manager, "get_segment_lyrics", None)
+            if callable(get_segment_lyrics):
+                try:
+                    lyrics = str(get_segment_lyrics(correct_song_name or song_name, segment_description) or "").strip()
+                except Exception as exc:
+                    self.logger.warning(f"Failed to read segment lyrics for {song_name}: {exc}")
+
+        return {
+            "song_name": correct_song_name or song_name,
+            "segment_description": segment_description,
+            "lyrics": lyrics,
+        }
 

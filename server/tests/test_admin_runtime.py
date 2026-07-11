@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi import HTTPException
 
 from src.system.admin.auth import AdminAuthService
@@ -16,7 +17,7 @@ from src.system.admin.secret_store import SecretStore
 from src.system.admin.admin_shell import init_admin_shell, shutdown_admin_shell
 from src.system.admin.llm_config_editor import apply_llm_config_draft, build_llm_config_view
 from src.system.observability import ObservabilityService
-from src.system.user_interface.admin_interface import _collect_llm_api_key_names
+from src.system.admin.admin_interface import _collect_llm_api_key_names
 from src.utils.helpers import apply_env_variables
 from src.world.world_runtime import WorldRuntime
 
@@ -136,6 +137,26 @@ def test_admin_auth_requires_setup_token_and_login(tmp_path):
         assert exc.status_code == 401
     else:
         raise AssertionError("bad admin password should fail")
+
+
+def test_admin_require_admin_blocks_missing_session(tmp_path):
+    auth = AdminAuthService(tmp_path / "admin_auth.json", tmp_path / "setup_token.txt")
+    token = (tmp_path / "setup_token.txt").read_text(encoding="utf-8").strip()
+    auth.setup(token, "password-123")
+
+    response = SimpleNamespace(set_cookie=lambda *args, **kwargs: None)
+    login_result = auth.login("password-123", response)
+
+    with pytest.raises(HTTPException) as exc_info:
+        auth.require_admin(SimpleNamespace(headers={}, cookies={}))
+    assert exc_info.value.status_code == 401
+
+    auth.require_admin(
+        SimpleNamespace(
+            headers={"authorization": f"Bearer {login_result['token']}"},
+            cookies={},
+        )
+    )
 
 
 def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):

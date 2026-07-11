@@ -32,6 +32,7 @@ class TopicPlanner:
         self.topic_consumer = None  # 由外部设置的回调函数，用于接收提取的话题
         self._wake_event = asyncio.Event()
         self._unread_version: int = 0
+        self._extraction_in_progress = False
         self.logger.info(f"TopicPlanner initialized for user_id={user_id}")
 
     def set_system_runtime(self, system_runtime: "SystemRuntime"):
@@ -111,18 +112,23 @@ class TopicPlanner:
 
                 # 开始提取
                 unread_message_snapshot = await self.unread_store.snapshot()
+                await self.listen_timer.remove_deadline()
+                self._extraction_in_progress = True
 
-                extracted_topic, remaining_unread = await self._extract_topics(
-                    unread_message_snapshot,
-                    force_complete=should_force_extract,
-                )
+                try:
+                    extracted_topic, remaining_unread = await self._extract_topics(
+                        unread_message_snapshot,
+                        force_complete=should_force_extract,
+                    )
 
-                # 提取结果提交后，可能会被新消息打断，导致提取结果无效；也可能没有新消息，提取结果有效。根据是否有新消息来决定保留提取结果还是丢弃。
-                extracted_topics = await self._commit_extraction_result(
-                    snapshot=unread_message_snapshot,
-                    extracted_topics=[extracted_topic] if extracted_topic else [],
-                    remaining_unread=remaining_unread,
-                )
+                    # 提取结果提交后，可能会被新消息、typing 或选图事件打断，导致提取结果无效；也可能没有新事件，提取结果有效。
+                    extracted_topics = await self._commit_extraction_result(
+                        snapshot=unread_message_snapshot,
+                        extracted_topics=[extracted_topic] if extracted_topic else [],
+                        remaining_unread=remaining_unread,
+                    )
+                finally:
+                    self._extraction_in_progress = False
 
                 if extracted_topics:
                     await self._consume_topics(extracted_topics)
@@ -156,7 +162,7 @@ class TopicPlanner:
     async def _handle_user_typing(self, event: "ChatInputEvent"):
         """处理用户输入中的事件，重置超时等待。"""
         text_length = event.payload["text_length"]
-        if not await self.unread_store.has_unread():  
+        if not await self.unread_store.has_unread() and not self._extraction_in_progress:
             return # 没有未读消息，不需要重置等待。
         if text_length > 0:
             await self.listen_timer.set_deadline(timeout=10)  # 认为用户明确地有话要说，设置一个更长的等待时间
@@ -167,11 +173,11 @@ class TopicPlanner:
     async def _handle_user_image_selecting(self, event: "ChatInputEvent"):
         if event.event_type == ChatInputEventType.USER_IMAGE_SELECTING:
             # 用户正在选择图片：设置 30 秒等待，给用户足够时间
-            if await self.unread_store.has_unread():
+            if await self.unread_store.has_unread() or self._extraction_in_progress:
                 await self.listen_timer.set_deadline(timeout=60.0)
 
         if event.event_type == ChatInputEventType.USER_IMAGE_SELECTING_CANCEL:
-            if not await self.unread_store.has_unread():
+            if not await self.unread_store.has_unread() and not self._extraction_in_progress:
                 await self.listen_timer.remove_deadline() # 直接提取
             else:
                 await self.listen_timer.set_deadline()  # 用户取消了选择，但还有未读消息，重置等待时间，继续等待补全
@@ -188,17 +194,20 @@ class TopicPlanner:
             return []
 
         has_new_message = await self.unread_store.has_unread()
-        if has_new_message:
-            remaining_unread = snapshot.messages.copy()  # 已经有新消息了，丢弃提取时的剩余未读，保留新消息继续等待补全
-            new_extracted_topics = []  # 已经有新消息了，丢弃提取结果，保留新消息继续等待补全
+        has_new_waiting_signal = (await self.listen_timer.deadline) is not None
+        should_restart_waiting = has_new_message or has_new_waiting_signal
+        if should_restart_waiting:
+            remaining_unread = snapshot.messages.copy()  # 已经有新消息或用户继续输入/选图了，丢弃提取时的剩余未读，保留原消息继续等待补全
+            new_extracted_topics = []  # 已经有新消息或用户继续输入/选图了，丢弃提取结果，保留消息继续等待补全
         else:
             new_extracted_topics = extracted_topics  # 没有新消息，提取结果有效
         
         await self.unread_store.update_unread_message(snapshot, remaining_unread) # 将剩余的信息加入未读消息中
 
-        if has_new_message:
+        if should_restart_waiting:
             self._wake_event.set()
-            await self.listen_timer.set_deadline()  # 已经有新消息了，不需要等待补全，直接进入下一轮提取
+            if has_new_message and not has_new_waiting_signal:
+                await self.listen_timer.set_deadline()  # 有新消息但没有额外等待信号，按默认等待时间重新计时
         else:
             if remaining_unread:
                 await self.listen_timer.set_deadline()  # 没有新消息，但还有剩余未读，继续等待补全
@@ -245,8 +254,8 @@ class TopicPlanner:
                 self._record_last_message_to_topic_span(unread_snapshot, topic)
             return topic, remaining or []
         except Exception as e:
-            self.logger.exception(f"Topic extraction failed: {e}")
-            topic, remaining = self._fallback_extract(unread_snapshot, force_complete)
+            self.logger.exception(f"Topic extraction failed, use fallback topic extraction: {e}")
+            topic, remaining = self._fallback_extract(unread_snapshot, force_complete=True)
             if topic is not None:
                 setattr(topic, "trace_id", trace_id)
                 self._record_topic_commands(trace_id, topic, "", fallback=True)

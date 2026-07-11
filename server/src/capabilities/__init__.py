@@ -5,11 +5,13 @@ when an action should happen; that belongs to the agent layer.
 """
 
 from src.capabilities.capability_manager import CapabilityManager
+from src.capabilities.dynamic import DynamicCapability
 from src.capabilities.singing import SingingCapability
 from src.capabilities.speech import SpeechCapability, TTSModule, TTSServer, init_tts_module
 
 __all__ = [
     "CapabilityRegistry",
+    "DynamicCapability",
     "SingingCapability",
     "SpeechCapability",
     "TTSModule",

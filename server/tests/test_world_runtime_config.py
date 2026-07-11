@@ -56,6 +56,7 @@ def test_world_runtime_distributes_task_config_from_world_section(monkeypatch):
     monkeypatch.setattr(world_runtime_module, "LearnSingSongsTask", FakeTask)
     monkeypatch.setattr(world_runtime_module, "VCPediaNewSongTask", FakeTask)
     monkeypatch.setattr(world_runtime_module, "BiliEventUpdateTask", FakeTask)
+    monkeypatch.setattr(world_runtime_module, "DynamicInteractionTask", FakeTask)
     monkeypatch.setattr(world_runtime_module, "ProactiveTopicCheckTask", FakeTask)
     monkeypatch.setattr(world_runtime_module, "ExpiredEventCleanupTask", FakeTask)
 
@@ -63,7 +64,15 @@ def test_world_runtime_distributes_task_config_from_world_section(monkeypatch):
         "citywalk": {"source": "world-citywalk"},
         "auto_song_learner": {"source": "world-learner"},
         "song_knowledge": {"source": "world-song-knowledge"},
-        "bili_dynamic_fetcher": {"source": "world-bili", "fetch_interval_hours": 6},
+        "bili_dynamic_fetcher": {
+            "source": "world-bili",
+            "fetch_interval_hours": 6,
+            "bilibili_uids": {
+                "luotianyi": "1",
+                "miku": "2",
+            },
+        },
+        "dynamic_interaction": {"source": "world-dynamic"},
         "proactive_topic_check": {"source": "world-proactive"},
         "expired_event_cleanup": {"source": "world-cleanup"},
     }
@@ -81,17 +90,28 @@ def test_world_runtime_distributes_task_config_from_world_section(monkeypatch):
                 }
             )
         ),
+        agent_runtime=SimpleNamespace(
+            character_runtimes={
+                "luotianyi": object(),
+                "miku": object(),
+            },
+            default_character_id="luotianyi",
+        ),
     )
     runtime.set_system_runtime(system_runtime)
 
     runtime.initialize_modules()
 
-    assert runtime.citywalk_task.config == {"source": "world-citywalk"}
+    assert len(runtime.citywalk_tasks) == 2
+    assert [task.character_id for task in runtime.citywalk_tasks] == ["luotianyi", "miku"]
+    assert runtime.citywalk_task.config == {"source": "world-citywalk", "character_id": "luotianyi"}
     assert len(runtime.learn_sing_songs_tasks) == 2
     assert [task.character_id for task in runtime.learn_sing_songs_tasks] == ["luotianyi", "miku"]
-    assert runtime.learn_sing_songs_task.config == {"source": "world-learner"}
+    assert runtime.learn_sing_songs_task.config == {"source": "world-learner", "character_id": "luotianyi"}
     assert runtime.vcpedia_new_song_task.config == {"source": "world-song-knowledge"}
     assert runtime.bili_event_update_task.config["source"] == "world-bili"
+    assert len(runtime.bili_event_update_tasks) == 2
+    assert runtime.bili_event_update_task.config["bilibili_uids"] == {"luotianyi": "1"}
     assert runtime.proactive_topic_check_task.config == {"source": "world-proactive"}
     assert runtime.expired_event_cleanup_task.config == {"source": "world-cleanup"}
     assert runtime.citywalk_task.initialized_with is system_runtime

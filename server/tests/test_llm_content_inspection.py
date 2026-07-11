@@ -8,6 +8,8 @@ if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.agent.main_chat import MainChat
+from src.chat_session.chat_pipeline.topic_planner import TopicPlanner
+from src.domain.chat import UnreadMessage, UnreadMessageSnapshot
 from src.utils.llm.llm_api_interface import LLMContentInspectionError, OpenAIAPIInterface
 
 
@@ -72,3 +74,38 @@ def test_main_chat_returns_topic_switch_reply_on_content_inspection_failure():
 
     response = asyncio.run(main_chat._call_llm(reply_topic="bad topic"))
     assert response == "[中性]这个话题不太合适，我们聊点别的吧"
+
+
+def test_topic_planner_fallback_extracts_all_messages_on_content_inspection_failure():
+    class FakeAgentRuntime:
+        async def extract_topic(self, **_kwargs):
+            raise LLMContentInspectionError("data_inspection_failed")
+
+    class FakeSystemRuntime:
+        agent_runtime = FakeAgentRuntime()
+
+    async def context_provider(**_kwargs):
+        return ""
+
+    planner = TopicPlanner(
+        config={},
+        username="test",
+        user_id="user-1",
+        context_provider=context_provider,
+    )
+    planner.set_system_runtime(FakeSystemRuntime())
+    snapshot = UnreadMessageSnapshot(
+        messages=[
+            UnreadMessage(message_id="m1", message_type="text", content="短句"),
+            UnreadMessage(message_id="m2", message_type="text", content="第二句"),
+        ],
+        version=1,
+    )
+
+    topic, remaining = asyncio.run(planner._extract_topics(snapshot, force_complete=False))
+
+    assert topic is not None
+    assert topic.source_messages == snapshot.messages
+    assert topic.topic_content == "短句\n第二句"
+    assert topic.is_forced_from_incomplete is True
+    assert remaining == []

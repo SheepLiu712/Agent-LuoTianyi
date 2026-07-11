@@ -8,6 +8,22 @@ if server_root not in sys.path:
 from src.system.observability.service import ObservabilityService
 
 
+def test_observability_relative_db_path_uses_base_dir(tmp_path, monkeypatch):
+    cwd = tmp_path / "cwd"
+    base_dir = tmp_path / "server"
+    cwd.mkdir()
+    base_dir.mkdir()
+    monkeypatch.chdir(cwd)
+
+    service = ObservabilityService({"db_path": "data/admin_metrics.sqlite3"}, base_dir=base_dir)
+    try:
+        assert service.db_path == base_dir / "data" / "admin_metrics.sqlite3"
+        assert service.db_path.exists()
+        assert not (cwd / "data" / "admin_metrics.sqlite3").exists()
+    finally:
+        service.close()
+
+
 def insert_llm_call(
     service: ObservabilityService,
     *,

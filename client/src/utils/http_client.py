@@ -4,6 +4,8 @@ from typing import Dict, Tuple
 import requests
 from requests.adapters import HTTPAdapter
 
+from .tls import sanitize_tls_certificate_environment
+
 
 class TLS12HttpAdapter(HTTPAdapter):
     def __init__(self, verify_ssl: bool = True, *args, **kwargs):
@@ -11,6 +13,7 @@ class TLS12HttpAdapter(HTTPAdapter):
         super().__init__(*args, **kwargs)
 
     def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        sanitize_tls_certificate_environment()
         ctx = ssl.create_default_context()
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
 
@@ -23,6 +26,7 @@ class HttpClientFactory:
 
     @classmethod
     def get_session(cls, verify_ssl: bool) -> requests.Session:
+        sanitize_tls_certificate_environment()
         verify_ssl = True
         key = (verify_ssl,)
         if key in cls._session_cache:

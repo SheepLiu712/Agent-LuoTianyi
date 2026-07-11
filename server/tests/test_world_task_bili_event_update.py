@@ -16,6 +16,7 @@ if server_root not in sys.path:
 
 import src.world.bili_event_updater.task as task_module
 from src.world.bili_event_updater.task import BiliEventUpdateTask
+from src.world.bili_event_updater.official_feed_fetcher import OfficialFeedFetcher
 from src.utils.helpers import load_config
 from src.utils.llm_service import LLMService
 
@@ -80,8 +81,31 @@ def test_bili_event_update_initialize_builds_updater(monkeypatch):
     assert captured["config"] is cfg
     assert captured["event_store"] is event_store
     assert captured["llm_module"][0] == "llm"
+    assert captured["llm_module"][1] == "luotianyi_bili_event_parser"
     assert captured["vlm_module"][0] == "vlm"
+    assert captured["vlm_module"][1] == "luotianyi_bili_event_parser"
     assert task.get_task_type() == "interval"
+
+
+def test_official_feed_fetcher_save_cache_merges_existing_character_cache(tmp_path):
+    cache_file = tmp_path / "feed_cache.json"
+    cache_file.write_text(
+        json.dumps({"luotianyi": ["old-1", "old-2"]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    fetcher = OfficialFeedFetcher(
+        {
+            "data_file": str(cache_file),
+            "bilibili_uids": {"miku": "123"},
+        }
+    )
+    fetcher.seen_ids = {"miku": ["new-1"]}
+
+    fetcher._save_cache()
+
+    saved = json.loads(cache_file.read_text(encoding="utf-8"))
+    assert saved["luotianyi"] == ["old-1", "old-2"]
+    assert saved["miku"] == ["new-1"]
 
 
 @pytest.mark.asyncio

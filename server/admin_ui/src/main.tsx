@@ -200,6 +200,50 @@ type MemoryTraceEvent = {
   metadata?: Record<string, unknown>;
 };
 
+type DynamicAdminPost = {
+  id: string;
+  author_type: string;
+  author_id: string;
+  author_name: string;
+  owner_user_id?: string | null;
+  visibility: string;
+  content: string;
+  image_refs?: unknown[];
+  source_type: string;
+  source_id?: string | null;
+  allow_comment: boolean;
+  memory_policy?: string | null;
+  memory_status?: string | null;
+  memory_error?: string | null;
+  reply_status?: string | null;
+  reply_error?: string | null;
+  status: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  comment_count?: number;
+  cursor?: string;
+};
+
+type DynamicAdminComment = {
+  id: string;
+  dynamic_id: string;
+  author_type: string;
+  author_id: string;
+  author_name: string;
+  owner_user_id?: string | null;
+  parent_comment_id?: string | null;
+  content: string;
+  memory_policy?: string | null;
+  memory_status?: string | null;
+  memory_error?: string | null;
+  reply_status?: string | null;
+  reply_error?: string | null;
+  status: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+  cursor?: string;
+};
+
 type MemoryTraceTab = {
   id: string;
   label: string;
@@ -212,7 +256,7 @@ type MemoryTraceTab = {
   labels: Array<{ label: string; text: string }>;
 };
 
-type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'memory' | 'config' | 'logs';
+type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'memory' | 'dynamics' | 'config' | 'logs';
 
 type LlmStatsTab = {
   id: 'seven_days' | 'one_day' | 'recent';
@@ -600,6 +644,7 @@ function App({ onLogout }: { onLogout: () => void }) {
           <button className={page === 'pipeline' ? 'active' : ''} onClick={() => setPage('pipeline')}>链路耗时</button>
           <button className={page === 'traces' ? 'active' : ''} onClick={() => setPage('traces')}>链路追踪</button>
           <button className={page === 'memory' ? 'active' : ''} onClick={() => setPage('memory')}>记忆追踪</button>
+          <button className={page === 'dynamics' ? 'active' : ''} onClick={() => setPage('dynamics')}>动态管理</button>
           <button className={page === 'config' ? 'active' : ''} onClick={() => setPage('config')}>服务配置</button>
           <button className={page === 'logs' ? 'active' : ''} onClick={() => setPage('logs')}>异常日志</button>
           <button onClick={logout}>退出登录</button>
@@ -611,6 +656,7 @@ function App({ onLogout }: { onLogout: () => void }) {
         {page === 'pipeline' && <PipelinePage />}
         {page === 'traces' && <TracePage />}
         {page === 'memory' && <MemoryTracePage />}
+        {page === 'dynamics' && <DynamicsPage />}
         {page === 'config' && <ConfigPage />}
         {page === 'logs' && <LogsPage />}
       </main>
@@ -1108,6 +1154,321 @@ function MemoryTracePage() {
             {visibleEvents.length === 0 && <div className="empty-state">没有匹配的{activeTab.label}事件</div>}
           </div>
         </Panel>
+      </section>
+    </>
+  );
+}
+
+function DynamicsPage() {
+  const [ownerQuery, setOwnerQuery] = useState('');
+  const [authorType, setAuthorType] = useState('');
+  const [sourceType, setSourceType] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
+  const [createdAfter, setCreatedAfter] = useState('');
+  const [createdBefore, setCreatedBefore] = useState('');
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [systemContent, setSystemContent] = useState('');
+  const [systemSourceType, setSystemSourceType] = useState('system_notice');
+  const [systemSourceId, setSystemSourceId] = useState('');
+  const [systemAllowComment, setSystemAllowComment] = useState(false);
+  const [systemPublishStatus, setSystemPublishStatus] = useState<LocalActionStatus | null>(null);
+  const [systemPublishing, setSystemPublishing] = useState(false);
+
+  const query = useMemo(() => {
+    const params = new URLSearchParams({ limit: '100' });
+    params.set('_', String(refreshNonce));
+    if (ownerQuery.trim()) {
+      params.set('owner_user_id', ownerQuery.trim());
+    }
+    if (authorType) {
+      params.set('author_type', authorType);
+    }
+    if (sourceType) {
+      params.set('source_type', sourceType);
+    }
+    if (statusFilter) {
+      params.set('status', statusFilter);
+    }
+    if (createdAfter) {
+      params.set('created_after', createdAfter);
+    }
+    if (createdBefore) {
+      params.set('created_before', createdBefore);
+    }
+    return params.toString();
+  }, [authorType, createdAfter, createdBefore, ownerQuery, refreshNonce, sourceType, statusFilter]);
+
+  const { data, error, loading } = usePolling<{ items: DynamicAdminPost[]; has_more: boolean; next_cursor: string | null }>(
+    `/admin/api/dynamics?${query}`,
+    15000,
+  );
+  const rows = data?.items || [];
+
+  const [selectedDynamicId, setSelectedDynamicId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!rows.length) {
+      setSelectedDynamicId(null);
+      return;
+    }
+    if (!selectedDynamicId || !rows.some((row) => row.id === selectedDynamicId)) {
+      setSelectedDynamicId(rows[0].id);
+    }
+  }, [rows, selectedDynamicId]);
+
+  const selected = rows.find((row) => row.id === selectedDynamicId) || null;
+  const commentQuery = useMemo(() => {
+    if (!selectedDynamicId) {
+      return null;
+    }
+    const params = new URLSearchParams({ limit: '200' });
+    if (ownerQuery.trim()) {
+      params.set('owner_user_id', ownerQuery.trim());
+    }
+    if (createdAfter) {
+      params.set('created_after', createdAfter);
+    }
+    if (createdBefore) {
+      params.set('created_before', createdBefore);
+    }
+    return `/admin/api/dynamics/${encodeURIComponent(selectedDynamicId)}/comments?${params.toString()}`;
+  }, [createdAfter, createdBefore, ownerQuery, selectedDynamicId]);
+
+  const { data: commentData, error: commentError, loading: commentLoading } = usePolling<{ items: DynamicAdminComment[] }>(
+    commentQuery,
+    15000,
+  );
+  const comments = commentData?.items || [];
+
+  const waitingReplyCount = rows.filter((row) => row.reply_status === 'pending').length;
+  const waitingMemoryCount = rows.filter((row) => row.memory_status === 'pending').length;
+  const failedCount = rows.filter((row) => row.reply_status === 'failed' || row.memory_status === 'failed').length;
+
+  async function publishSystemDynamic() {
+    const content = systemContent.trim();
+    if (!content) {
+      setSystemPublishStatus({ tone: 'error', message: '系统动态内容不能为空' });
+      return;
+    }
+    setSystemPublishing(true);
+    setSystemPublishStatus({ tone: 'info', message: '正在发布系统动态...' });
+    try {
+      const result = await postJson<{ ok: boolean; item: DynamicAdminPost }>('/admin/api/dynamics/system', {
+        content,
+        source_type: systemSourceType.trim() || 'system_notice',
+        source_id: systemSourceId.trim() || null,
+        visibility: 'global',
+        allow_comment: systemAllowComment,
+      });
+      setSystemContent('');
+      setSystemPublishStatus({
+        tone: 'success',
+        message: `发布成功 · ${result.item.id}`,
+      });
+      setAuthorType('');
+      setSourceType('');
+      setRefreshNonce((value) => value + 1);
+    } catch (err) {
+      setSystemPublishStatus({
+        tone: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setSystemPublishing(false);
+    }
+  }
+
+  return (
+    <>
+      <PageHeader title="动态管理" subtitle="查看用户动态、天依动态、系统通知，以及评论、回复和记忆处理状态" />
+      <StatusBar loading={loading} error={error} />
+      <section className="metric-grid">
+        <MetricCard title="当前动态" value={formatNumber(rows.length)} detail={data?.has_more ? '当前页前 100 条' : '当前筛选结果'} />
+        <MetricCard title="待回复" value={formatNumber(waitingReplyCount)} detail="reply_status = pending" />
+        <MetricCard title="待记忆" value={formatNumber(waitingMemoryCount)} detail="memory_status = pending" />
+        <MetricCard title="失败项" value={formatNumber(failedCount)} detail="reply/memory failed" tone={failedCount ? 'danger' : undefined} />
+      </section>
+
+      <Panel title="发布系统动态">
+        <div className="system-dynamic-publisher">
+          <textarea
+            value={systemContent}
+            onChange={(event) => setSystemContent(event.target.value)}
+            placeholder="输入要展示给所有用户的系统通知"
+            rows={4}
+          />
+          <div className="system-dynamic-controls">
+            <input
+              value={systemSourceType}
+              onChange={(event) => setSystemSourceType(event.target.value)}
+              placeholder="source_type"
+            />
+            <input
+              value={systemSourceId}
+              onChange={(event) => setSystemSourceId(event.target.value)}
+              placeholder="source_id，可选"
+            />
+            <label className="checkbox-line">
+              <input
+                type="checkbox"
+                checked={systemAllowComment}
+                onChange={(event) => setSystemAllowComment(event.target.checked)}
+              />
+              允许评论
+            </label>
+            <button onClick={publishSystemDynamic} disabled={systemPublishing || !systemContent.trim()}>
+              {systemPublishing ? '发布中...' : '发布'}
+            </button>
+          </div>
+          {systemPublishStatus && (
+            <div className={`inline-status ${systemPublishStatus.tone === 'error' ? 'error' : systemPublishStatus.tone === 'success' ? 'success' : ''}`}>
+              {systemPublishStatus.message}
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="筛选">
+        <div className="filter-row dynamic-filter-row">
+          <input value={ownerQuery} onChange={(event) => setOwnerQuery(event.target.value)} placeholder="owner_user_id" />
+          <select value={authorType} onChange={(event) => setAuthorType(event.target.value)}>
+            <option value="">全部作者</option>
+            <option value="user">用户</option>
+            <option value="agent">天依</option>
+            <option value="system">系统</option>
+          </select>
+          <select value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+            <option value="">全部来源</option>
+            <option value="user_post">用户动态</option>
+            <option value="citywalk">城市漫步</option>
+            <option value="song_learned">学歌完成</option>
+            <option value="system_notice">系统通知</option>
+          </select>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="">全部状态</option>
+            <option value="published">published</option>
+            <option value="hidden">hidden</option>
+            <option value="deleted">deleted</option>
+          </select>
+          <input type="datetime-local" value={createdAfter} onChange={(event) => setCreatedAfter(event.target.value)} />
+          <input type="datetime-local" value={createdBefore} onChange={(event) => setCreatedBefore(event.target.value)} />
+        </div>
+      </Panel>
+
+      <section className="dynamic-layout">
+        <Panel title="动态列表" className="scroll-panel dynamic-list-panel">
+          <div className="dynamic-card-list">
+            {rows.map((row) => (
+              <button
+                key={row.id}
+                className={`dynamic-card ${row.id === selectedDynamicId ? 'active' : ''}`}
+                onClick={() => setSelectedDynamicId(row.id)}
+              >
+                <div className="dynamic-card-head">
+                  <div>
+                    <strong>{row.author_name}</strong>
+                    <span className="pill">{row.author_type}</span>
+                    <span className="pill">{row.source_type}</span>
+                  </div>
+                  <div className="mono">{row.id.slice(0, 8)}</div>
+                </div>
+                <div className="dynamic-card-meta">
+                  <span>{row.created_at || '-'}</span>
+                  <span>owner {row.owner_user_id || '-'}</span>
+                  <span>{row.visibility}</span>
+                </div>
+                <div className="dynamic-card-content">{row.content || '-'}</div>
+                <div className="dynamic-card-status">
+                  <span className={`pill ${row.reply_status === 'failed' ? 'error' : row.reply_status === 'pending' ? 'warning' : 'success'}`}>
+                    reply {row.reply_status || '-'}
+                  </span>
+                  <span className={`pill ${row.memory_status === 'failed' ? 'error' : row.memory_status === 'pending' ? 'warning' : 'success'}`}>
+                    memory {row.memory_status || '-'}
+                  </span>
+                  <span className="pill">{formatNumber(row.comment_count || 0)} comments</span>
+                </div>
+              </button>
+            ))}
+            {rows.length === 0 && <div className="empty-state">当前筛选条件下没有动态</div>}
+          </div>
+        </Panel>
+
+        <div>
+          <Panel title="动态详情">
+            {selected ? (
+              <div className="dynamic-detail-grid">
+                <ReadBlock title="内容" value={selected.content} />
+                <ReadBlock
+                  title="元信息"
+                  value={[
+                    `id: ${selected.id}`,
+                    `author: ${selected.author_name} (${selected.author_type})`,
+                    `owner_user_id: ${selected.owner_user_id || '-'}`,
+                    `source_type: ${selected.source_type}`,
+                    `visibility: ${selected.visibility}`,
+                    `allow_comment: ${String(selected.allow_comment)}`,
+                    `created_at: ${selected.created_at || '-'}`,
+                    `updated_at: ${selected.updated_at || '-'}`,
+                  ].join('\n')}
+                />
+                <ReadBlock
+                  title="回复状态"
+                  value={[
+                    `reply_status: ${selected.reply_status || '-'}`,
+                    selected.reply_error ? `reply_error: ${selected.reply_error}` : '',
+                  ].filter(Boolean).join('\n') || '-'}
+                />
+                <ReadBlock
+                  title="记忆状态"
+                  value={[
+                    `memory_policy: ${selected.memory_policy || '-'}`,
+                    `memory_status: ${selected.memory_status || '-'}`,
+                    selected.memory_error ? `memory_error: ${selected.memory_error}` : '',
+                  ].filter(Boolean).join('\n') || '-'}
+                />
+              </div>
+            ) : (
+              <div className="empty-state">请选择一条动态</div>
+            )}
+          </Panel>
+
+          <Panel title={`评论列表 (${formatNumber(comments.length)})`} className="scroll-panel dynamic-comments-panel">
+            {commentLoading && <div className="inline-status">评论加载中...</div>}
+            {commentError && <div className="inline-status error">评论请求失败：{commentError}</div>}
+            {!commentLoading && !commentError && comments.length === 0 && <div className="empty-state">暂无评论</div>}
+            <div className="dynamic-comment-list">
+              {comments.map((comment) => (
+                <article key={comment.id} className="dynamic-comment-card">
+                  <div className="dynamic-comment-head">
+                    <div>
+                      <strong>{comment.author_name}</strong>
+                      <span className="pill">{comment.author_type}</span>
+                    </div>
+                    <div>{comment.created_at || '-'}</div>
+                  </div>
+                  <div className="dynamic-comment-meta">
+                    owner {comment.owner_user_id || '-'} · parent {comment.parent_comment_id || '-'}
+                  </div>
+                  <div className="dynamic-comment-content">{comment.content}</div>
+                  <div className="dynamic-card-status">
+                    <span className={`pill ${comment.reply_status === 'failed' ? 'error' : comment.reply_status === 'pending' ? 'warning' : 'success'}`}>
+                      reply {comment.reply_status || '-'}
+                    </span>
+                    <span className={`pill ${comment.memory_status === 'failed' ? 'error' : comment.memory_status === 'pending' ? 'warning' : 'success'}`}>
+                      memory {comment.memory_status || '-'}
+                    </span>
+                  </div>
+                  {(comment.reply_error || comment.memory_error) ? (
+                    <div className="dynamic-comment-errors">
+                      {comment.reply_error && <div>reply_error: {comment.reply_error}</div>}
+                      {comment.memory_error && <div>memory_error: {comment.memory_error}</div>}
+                    </div>
+                  ) : null}
+                </article>
+              ))}
+            </div>
+          </Panel>
+        </div>
       </section>
     </>
   );

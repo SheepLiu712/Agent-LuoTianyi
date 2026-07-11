@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -49,6 +50,44 @@ def test_citywalk_run_once_writes_travel_event():
     assert event["event_type"] == "travel"
     assert event["source"] == "world_citywalk"
     assert "today.md" in event["description"]
+
+
+def test_citywalk_run_once_writes_dynamic_content_back_to_report(tmp_path):
+    event_store = FakeEventStore()
+    report_path = tmp_path / "citywalk_20260705_120000.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "overview": {"city": "上海", "selected_destination": "武康路"},
+                "places": ["武康路"],
+                "event_cards": [],
+                "diary_text": "",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    class FakeCharacterRuntime:
+        async def publish_citywalk_dynamic(self, **kwargs):
+            return {
+                "dynamic_id": "dynamic-citywalk",
+                "content": "今天在武康路散步，风很舒服。",
+            }
+
+    task = CitywalkTask({"daily_run_probability": 1.0})
+    task.event_store = event_store
+    task.character_runtime = FakeCharacterRuntime()
+    task.citywalk_service = SimpleNamespace(run_once=lambda: str(report_path))
+
+    result = task.run_once()
+
+    assert result.ok is True
+    assert result.data["dynamic_id"] == "dynamic-citywalk"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["diary_text"] == "今天在武康路散步，风很舒服。"
+    assert report["dynamic_content"] == "今天在武康路散步，风很舒服。"
+    assert report["dynamic_id"] == "dynamic-citywalk"
 
 
 def test_citywalk_run_once_skips_when_no_diary():
@@ -110,11 +149,11 @@ def test_citywalk_build_llm_modules_registers_expected_modules():
 
     modules = task._build_llm_modules()
 
-    assert modules.json_module.name == "citywalk_json"
-    assert modules.text_module.name == "citywalk_text"
-    assert modules.vlm_module.name == "citywalk_vlm"
-    assert [name for name, _ in llm_service.llm_names] == ["citywalk_json", "citywalk_text"]
-    assert [name for name, _ in llm_service.vlm_names] == ["citywalk_vlm"]
+    assert modules.json_module.name == "luotianyi_citywalk_json"
+    assert modules.text_module.name == "luotianyi_citywalk_text"
+    assert modules.vlm_module.name == "luotianyi_citywalk_vlm"
+    assert [name for name, _ in llm_service.llm_names] == ["luotianyi_citywalk_json", "luotianyi_citywalk_text"]
+    assert [name for name, _ in llm_service.vlm_names] == ["luotianyi_citywalk_vlm"]
 
 
 def test_citywalk_build_citywalk_service_skips_without_runtime():
@@ -135,10 +174,15 @@ def test_citywalk_initialize_uses_runtime_dependencies(monkeypatch):
     built = object()
     monkeypatch.setattr(task, "_build_citywalk_service", lambda: built)
     event_store = object()
-    runtime = SimpleNamespace(database_manager=SimpleNamespace(event_store=event_store))
+    character_runtime = object()
+    runtime = SimpleNamespace(
+        database_manager=SimpleNamespace(event_store=event_store),
+        agent_runtime=SimpleNamespace(get_character_runtime=lambda character_id: character_runtime),
+    )
 
     task.initialize(runtime)
 
     assert task.system_runtime is runtime
     assert task.event_store is event_store
+    assert task.character_runtime is character_runtime
     assert task.citywalk_service is built

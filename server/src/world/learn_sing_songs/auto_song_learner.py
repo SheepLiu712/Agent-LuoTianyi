@@ -160,6 +160,42 @@ class WishlistManager:
             self.recently_learned.append(unified_name)
         self._save()
 
+    def mark_redirected(
+        self,
+        requested_name: str,
+        redirected_to: str,
+        *,
+        redirected_status: str = "",
+        reason: str = "",
+    ) -> None:
+        requested_unified = get_unified_song_name(requested_name)
+        redirected_unified = get_unified_song_name(redirected_to)
+        entry = self.wished_songs.get(requested_unified)
+        if entry is None:
+            entry = WishEntry(
+                safe_name=requested_name,
+                unified_name=requested_unified,
+                first_requested=time.strftime("%Y-%m-%d"),
+            )
+            self.wished_songs[requested_unified] = entry
+        entry.status = "redirected"
+        entry.last_attempt = time.strftime("%Y-%m-%d")
+        entry.failure_reason = reason
+        entry.redirected_to = redirected_to
+        entry.redirected_unified_name = redirected_unified
+        entry.redirected_status = redirected_status
+        self._save()
+
+    def update_redirect_status(self, requested_name: str, redirected_status: str, reason: str = "") -> None:
+        requested_unified = get_unified_song_name(requested_name)
+        entry = self.wished_songs.get(requested_unified)
+        if entry is None or entry.status != "redirected":
+            return
+        entry.redirected_status = redirected_status
+        if reason:
+            entry.failure_reason = reason
+        self._save()
+
     def mark_awaiting_audio(self, safe_name: str, reason: str = "") -> None:
         unified_name = get_unified_song_name(safe_name)
         entry = self.wished_songs.get(unified_name)
@@ -367,13 +403,25 @@ class AutoSongLearner:
             safe_name = entry.safe_name
             self.logger.info(f"Trying to learn: {safe_name}")
             try:
-                if self._try_learn_one(safe_name):
-                    result.learned.append(safe_name)
-                    self.logger.info(f"  ✓ Learned: {safe_name}")
+                learned_name = self._try_learn_one(safe_name)
+                if learned_name:
+                    result.learned.append(learned_name)
+                    if get_unified_song_name(learned_name) != get_unified_song_name(safe_name):
+                        self.logger.info(f"  ✓ Learned via redirect: {safe_name} -> {learned_name}")
+                    else:
+                        self.logger.info(f"  ✓ Learned: {safe_name}")
                 else:
                     unified_name = get_unified_song_name(safe_name)
                     entry_after = self.wishlist.wished_songs.get(unified_name)
-                    if entry_after and entry_after.status == "abandoned":
+                    if entry_after and entry_after.status == "redirected":
+                        redirected_name = entry_after.redirected_to or safe_name
+                        if entry_after.redirected_status == "abandoned":
+                            result.abandoned.append(redirected_name)
+                            self.logger.info(f"  ✗ Redirected target abandoned: {safe_name} -> {redirected_name}")
+                        else:
+                            result.awaiting.append(redirected_name)
+                            self.logger.info(f"  ... Redirected target awaiting: {safe_name} -> {redirected_name}")
+                    elif entry_after and entry_after.status == "abandoned":
                         result.abandoned.append(safe_name)
                         self.logger.info(f"  ✗ Abandoned: {safe_name}")
                     else:
@@ -390,25 +438,25 @@ class AutoSongLearner:
 
     # -- routing -------------------------------------------------------------
 
-    def _try_learn_one(self, safe_name: str) -> bool:
+    def _try_learn_one(self, safe_name: str) -> Optional[str]:
         """Route to Songlearner pipeline."""
         if not safe_name or ".." in safe_name or "/" in safe_name or "\\" in safe_name:
             self.logger.error(f"Invalid safe_name rejected: {safe_name!r}")
-            return False
+            return None
         if not self.songlearner_available:
             self.logger.error(f"Songlearner 不可用，无法学习: {safe_name}")
-            return False
+            return None
         return self._learn_via_songlearner(safe_name)
 
     # -- Songlearner pipeline ------------------------------------------------
 
-    def _learn_via_songlearner(self, safe_name: str) -> bool:
+    def _learn_via_songlearner(self, safe_name: str) -> Optional[str]:
         """Full Songlearner pipeline: download -> clean -> MSAF -> LLM -> JSON."""
         runner = self.songlearner_dir / "run_song_workflow.py"
         if not runner.exists():
             self.logger.error(f"Songlearner 启动脚本不存在: {runner}")
             self._handle_failure(safe_name, f"SL001 startup: Songlearner 启动脚本不存在: {runner}")
-            return False
+            return None
 
         self.logger.info(f"[Songlearner] 开始学习: {safe_name}")
         env = self._build_songlearner_env()
@@ -436,19 +484,31 @@ class AutoSongLearner:
             )
         except subprocess.TimeoutExpired:
             self._handle_failure(safe_name, "SL091 timeout: Songlearner 流水线执行超时（>20分钟）")
-            return False
+            return None
 
         if proc.returncode != 0:
             failure_reason = self._format_songlearner_failure(proc)
+            redirected_name = self._parse_songlearner_redirect(proc.stdout)
             self.logger.error(
                 f"[Songlearner] 流水线返回非零退出码 {proc.returncode}\n"
                 f"stderr: {proc.stderr[-500:] if proc.stderr else ''}"
             )
-            self._handle_failure(safe_name, failure_reason)
-            return False
+            if redirected_name and get_unified_song_name(redirected_name) != get_unified_song_name(safe_name):
+                self.wishlist.mark_redirected(
+                    safe_name,
+                    redirected_name,
+                    redirected_status="awaiting_audio",
+                    reason=failure_reason,
+                )
+                redirected_status = self._handle_failure(redirected_name, failure_reason, create_if_missing=True)
+                self.wishlist.update_redirect_status(safe_name, redirected_status, failure_reason)
+            else:
+                self._handle_failure(safe_name, failure_reason)
+            return None
 
         # Locate the final output directory under the music library.
-        sl_output = self.songs_dir / safe_name
+        learned_name = self._parse_songlearner_result(proc.stdout) or safe_name
+        sl_output = self.songs_dir / learned_name
         print(f"Looking for Songlearner output at: {sl_output}")
         if not sl_output.exists():
             # The workflow may have normalized the folder name.
@@ -458,17 +518,17 @@ class AutoSongLearner:
                 for c in candidates:
                     if c.is_dir() and (c / f"{c.name}.json").exists():
                         sl_output = c
-                        safe_name = c.name
+                        learned_name = c.name
                         self.logger.info(f"[Songlearner] 输出目录重定向至: {sl_output.name}")
                         break
                 else:
                     self._handle_failure(safe_name, "SL092 finalize: Songlearner 未生成任何有效输出目录")
-                    return False
+                    return None
             else:
                 self._handle_failure(safe_name, "SL092 finalize: 歌曲输出目录不存在")
-                return False
+                return None
 
-        return self._finalize_song(safe_name, sl_output)
+        return self._finalize_song(safe_name, learned_name, sl_output)
 
     def _format_songlearner_failure(self, proc: subprocess.CompletedProcess) -> str:
         stderr = proc.stderr or ""
@@ -496,6 +556,23 @@ class AutoSongLearner:
                 return match.groupdict()
         return None
 
+    def _parse_songlearner_result(self, stdout: str) -> str:
+        for line in reversed((stdout or "").splitlines()):
+            match = re.search(r"\[RESULT\]\s+song_name:\s*(?P<song_name>.+)\s*$", line.strip())
+            if match:
+                return match.group("song_name").strip()
+        return ""
+
+    def _parse_songlearner_redirect(self, stdout: str) -> str:
+        for line in reversed((stdout or "").splitlines()):
+            match = re.search(
+                r"\[REDIRECT\]\s+requested_song_name=(?P<requested>.*?)\s+actual_song_name=(?P<actual>.+)\s*$",
+                line.strip(),
+            )
+            if match:
+                return match.group("actual").strip()
+        return self._parse_songlearner_result(stdout)
+
     def _last_nonempty_line(self, text: str, limit: int = 300) -> str:
         for line in reversed((text or "").splitlines()):
             stripped = line.strip()
@@ -522,16 +599,17 @@ class AutoSongLearner:
             "SONGLEARNER_QQ_CREDENTIAL_FILE": str(self._credential_file),
         }
 
-    def _finalize_song(self, safe_name: str, src_dir: Path) -> bool:
+    def _finalize_song(self, requested_name: str, learned_name: str, src_dir: Path) -> Optional[str]:
         """Validate and finalize the workflow output in place."""
         target_dir = src_dir
         if not target_dir.exists() or not target_dir.is_dir():
-            self._handle_failure(safe_name, f"SL092 finalize: 歌曲输出目录不存在: {target_dir}")
-            return False
+            self._handle_failure(requested_name, f"SL092 finalize: 歌曲输出目录不存在: {target_dir}")
+            return None
 
-        cleaned_target = target_dir / f"{safe_name}.cleaned.mp3"
-        raw_mp3 = target_dir / f"{safe_name}.mp3"
-        json_path = target_dir / f"{safe_name}.json"
+        learned_name = learned_name or target_dir.name
+        cleaned_target = target_dir / f"{learned_name}.cleaned.mp3"
+        raw_mp3 = target_dir / f"{learned_name}.mp3"
+        json_path = target_dir / f"{learned_name}.json"
 
         if not cleaned_target.exists() and raw_mp3.exists():
             self.logger.warning(f"  - 未找到清洗后音频，继续使用原始 MP3: {raw_mp3.name}")
@@ -541,10 +619,10 @@ class AutoSongLearner:
             try:
                 data = json.loads(json_path.read_text("utf-8"))
                 if "description" not in data:
-                    data["description"] = f"洛天依演唱的歌曲《{safe_name}》"
+                    data["description"] = f"{self.character_name}演唱的歌曲《{learned_name}》"
                 # Ensure title field is set
                 if not data.get("title"):
-                    data["title"] = safe_name
+                    data["title"] = learned_name
                 json_path.write_text(
                     json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
@@ -556,23 +634,38 @@ class AutoSongLearner:
         has_json = json_path.exists()
         if not has_audio or not has_json:
             self._handle_failure(
-                safe_name,
+                requested_name,
                 f"SL093 finalize: 关键文件缺失: audio={has_audio}, json={has_json}",
             )
-            return False
+            return None
 
-        self.wishlist.mark_learned(safe_name)
-        self.logger.info(f"[Songlearner] ✓ 学习完成: {safe_name}")
-        return True
+        if get_unified_song_name(requested_name) != get_unified_song_name(learned_name):
+            self.wishlist.mark_redirected(
+                requested_name,
+                learned_name,
+                redirected_status="learned",
+                reason="QQ 音乐搜索结果重定向",
+            )
+        self.wishlist.mark_learned(learned_name)
+        self.logger.info(f"[Songlearner] ✓ 学习完成: {learned_name}")
+        return learned_name
 
     # (Removed LRC parsing and auto-segmentation helpers; staging fallback removed.)
 
     # -- failure handling ----------------------------------------------------
 
-    def _handle_failure(self, safe_name: str, reason: str) -> None:
-        entry = self.wishlist.wished_songs.get(safe_name)
+    def _handle_failure(self, safe_name: str, reason: str, *, create_if_missing: bool = False) -> str:
+        unified_name = get_unified_song_name(safe_name)
+        entry = self.wishlist.wished_songs.get(unified_name)
+        if entry is None and create_if_missing:
+            entry = WishEntry(
+                safe_name=safe_name,
+                unified_name=unified_name,
+                first_requested=time.strftime("%Y-%m-%d"),
+            )
+            self.wishlist.wished_songs[unified_name] = entry
         if entry is None:
-            return
+            return ""
         entry.last_attempt = time.strftime("%Y-%m-%d")
         entry.attempt_count += 1
         entry.failure_reason = reason
@@ -583,6 +676,7 @@ class AutoSongLearner:
             entry.status = "awaiting_audio"
             self.logger.info(f"Learning {safe_name} awaits audio (attempt {entry.attempt_count}/{self.MAX_ATTEMPTS}): {reason}")
         self.wishlist._save()
+        return entry.status
 
     # -- notification --------------------------------------------------------
 

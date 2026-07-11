@@ -30,6 +30,19 @@
                     "max_tokens": 8192,
                     "top_p": 0.9
                 }
+            },
+            "dsv4-flash": {
+                "api_type": "openai",
+                "model": "deepseek-v4-flash",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://ws-lbtuwahfzgpelt4a.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+                "can_enable_thinking": true,
+                "can_use_json": true,
+                "default_params": {
+                    "temperature": 0.7,
+                    "max_tokens": 8192,
+                    "top_p": 0.9
+                }
             }
         },
         "available_vlms": {
@@ -55,7 +68,7 @@
         "event_store": {
             "llm_module": {
                 "llm": {
-                    "name": "qwen3.5-plus",
+                    "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
                     "params": {}
@@ -66,7 +79,7 @@
         "memory_store": {
             "llm_module": {
                 "llm": {
-                    "name": "qwen3.5-plus",
+                    "name": "qwen3.6-flash",
                     "enable_thinking": false,
                     "use_json": true,
                     "params": {}
@@ -105,6 +118,30 @@
                 "use_json": false,
                 "params": {}
             }
+        },
+        "dynamic": {
+            "dynamic_composer": {
+                "llm_module": {
+                    "llm": {
+                        "name": "dsv4-flash",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {}
+                    },
+                    "prompt_name": "dynamic_post_prompt"
+                }
+            },
+            "dynamic_replier": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.6-flash",
+                        "enable_thinking": false,
+                        "use_json": true,
+                        "params": {}
+                    },
+                    "prompt_name": "dynamic_reply_prompt"
+                }
+            }
         }
     },
     "chat_session_manager": {
@@ -123,7 +160,7 @@
             "context_stale_after_days": 5,
             "llm_module": {
                 "llm": {
-                    "name": "qwen3.5-plus",
+                    "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": false,
                     "params": {}
@@ -230,8 +267,8 @@
                 "user_profile": {
                     "llm_module": {
                         "llm": {
-                            "name": "qwen3.5-plus",
-                            "enable_thinking": true,
+                            "name": "dsv4-flash",
+                            "enable_thinking": false,
                             "use_json": false,
                             "params": {}
                         },
@@ -256,7 +293,7 @@
             "date_detector": {
                 "llm_module": {
                     "llm": {
-                        "name": "qwen3.6-flash",
+                        "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": true,
                         "params": {}
@@ -351,7 +388,7 @@
                 "use_llm_environment_feedback": false,
                 "fail_on_error": true,
                 "llm": {
-                    "name": "qwen3.5-plus",
+                    "name": "dsv4-flash",
                     "enable_thinking": true,
                     "use_json": false,
                     "params": {}
@@ -360,7 +397,7 @@
             "llm_modules": {
                 "json": {
                     "llm": {
-                        "name": "qwen3.5-plus",
+                        "name": "qwen3.6-flash",
                         "enable_thinking": false,
                         "use_json": true,
                         "params": {}
@@ -369,7 +406,7 @@
                 },
                 "text": {
                     "llm": {
-                        "name": "qwen3.5-plus",
+                        "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
                         "params": {}
@@ -391,7 +428,7 @@
                 "fail_on_error": true,
                 "llm_module": {
                     "llm": {
-                        "name": "qwen3.5-plus",
+                        "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
                         "params": {}
@@ -436,7 +473,7 @@
                 "use_llm": false,
                 "llm_module": {
                     "llm": {
-                        "name": "qwen3.5-plus",
+                        "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
                         "params": {}
@@ -495,10 +532,23 @@
             "clock_config": {
                 "type": "interval",
                 "params": {
-                    "interval_seconds": 600,
+                    "interval_seconds": 300,
                     "run_immediately": false
                 }
             }
+        },
+        "dynamic_interaction": {
+            "clock_config": {
+                "type": "interval",
+                "params": {
+                    "interval_seconds": 600,
+                    "run_immediately": false
+                }
+            },
+            "reply_post_limit": 10,
+            "reply_comment_limit": 20,
+            "memory_post_limit": 10,
+            "memory_comment_limit": 20
         },
         "expired_event_cleanup": {
             "clock_config": {

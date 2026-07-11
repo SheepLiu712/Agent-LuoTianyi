@@ -21,6 +21,7 @@ from .binder import AgentBinder
 from ..types import ConversationItem
 from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, BubblePlaybackManager
 from .preferences_dialog import PreferencesDialog
+from .dynamics_dialog import DynamicsDialog
 
 
 
@@ -455,6 +456,8 @@ class ChatWidget(QWidget):
         self.agent = agent_binder
         self.network_client = network_client
         self.preferences_manager = None  # Will be set from main.py
+        self.dynamic_dialog = None
+        self.dynamic_unread_count = 0
         self.agent.response_signal.connect(self.on_agent_response)
         self.agent.delete_signal.connect(self.on_agent_delete)
         self.playback_manager = BubblePlaybackManager(
@@ -472,6 +475,10 @@ class ChatWidget(QWidget):
         self.agent_bubbles: dict[str, ChatBubble] = {}
         
         self.init_ui()
+        self.dynamic_badge_timer = QTimer(self)
+        self.dynamic_badge_timer.timeout.connect(self.refresh_dynamic_badge)
+        self.dynamic_badge_timer.start(30000)
+        QTimer.singleShot(400, self.refresh_dynamic_badge)
         
         # Initial load
         QTimer.singleShot(100, lambda: self.agent.load_history(self.load_history_num, -1))
@@ -629,6 +636,26 @@ class ChatWidget(QWidget):
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.clicked.connect(self.open_settings)
         self.toolbar_layout.addWidget(self.settings_btn)
+
+        self.dynamic_btn = HoverButton(tooltip_text="动态")
+        self.dynamic_btn.setText("动态")
+        self.dynamic_btn.setFixedSize(68, 24)
+        self.dynamic_btn.setStyleSheet("""
+            QPushButton {
+                border: none;
+                background-color: transparent;
+                color: #3A4B59;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background-color: #E0E0E0;
+                border-radius: 4px;
+            }
+        """)
+        self.dynamic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.dynamic_btn.clicked.connect(self.open_dynamics)
+        self.toolbar_layout.addWidget(self.dynamic_btn)
         
         self.toolbar_layout.addStretch()
 
@@ -673,6 +700,36 @@ class ChatWidget(QWidget):
             dialog.exec()
         else:
             QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开偏好设置")
+
+    def open_dynamics(self):
+        if self.network_client:
+            if self.dynamic_dialog is None:
+                self.dynamic_dialog = DynamicsDialog(self.network_client, on_read_callback=self.refresh_dynamic_badge, parent=self)
+            self.dynamic_dialog.show()
+            self.dynamic_dialog.raise_()
+            self.dynamic_dialog.activateWindow()
+            self.refresh_dynamic_badge()
+        else:
+            QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开动态窗口")
+
+    def refresh_dynamic_badge(self):
+        if not self.network_client:
+            self.dynamic_unread_count = 0
+            self.dynamic_btn.setText("动态")
+            return
+
+        status = self.network_client.get_dynamic_unread_status()
+        if not status.get("ok", False):
+            return
+        count = int(status.get("unread_count") or 0)
+        self.dynamic_unread_count = count
+        if count > 0:
+            text = f"动态 {min(count, 99)}"
+            if count > 99:
+                text = "动态 99+"
+        else:
+            text = "动态"
+        self.dynamic_btn.setText(text)
     
     def on_scroll_value_changed(self, value):
         if value == 0 and not self.is_loading_history and self.current_history_index > 0:

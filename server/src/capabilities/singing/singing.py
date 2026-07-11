@@ -175,6 +175,25 @@ class SingingCapability:
             return ""
         return self._get_manager(character_id).get_segment_lyrics(song_name, segment)
 
+    def get_full_lyrics(
+        self,
+        character_id: str,
+        song_name: Optional[str] = None,
+    ) -> str:
+        '''
+        获取指定歌曲的完整歌词。
+
+        :param character_id: 角色ID
+        :param song_name: 歌曲名称
+        :return: 歌词文本，如果无法获取，则返回空字符串
+        '''
+        if song_name is None:
+            song_name = character_id
+            character_id = self.default_character_id
+        if not song_name:
+            return ""
+        return self._get_manager(character_id).get_full_lyrics(song_name)
+
     def _extract_song_name(self, text: str) -> str:
         content = (text or "").strip()
         if not content:

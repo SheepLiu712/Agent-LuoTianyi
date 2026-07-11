@@ -182,16 +182,7 @@ class CitywalkSessionRunner:
 
 
 
-        # 结束游走后，生成流水账文本
-        print("[citywalk][阶段3] 生成洛天依流水账与总结")
-        diary_text = self._generate_diary_text(
-            city=city_walk_data.city,
-            destination_name=selected_destination,
-            destination_reason=destination_reason,
-            events=city_walk_data.events,
-        )
-
-        print("[citywalk][阶段4] 行程结束，准备输出结果")
+        print("[citywalk][阶段3] 行程结束，准备输出结果")
         return CitywalkSessionResult(
             city=city_walk_data.city,
             start_location=city_walk_data.session_start_location,
@@ -203,7 +194,6 @@ class CitywalkSessionRunner:
             selected_destination=selected_destination,
             destination_reason=destination_reason,
             poi_details=city_walk_data.poi_details,
-            diary_text=diary_text,
         )
     
     def _resolve_start_location(self, selected_destination: str, selected_city: str, district_code: str) -> str:
@@ -363,29 +353,6 @@ class CitywalkSessionRunner:
                 last_error = exc
         raise RuntimeError(f"LLM JSON 调用失败: {last_error}")
 
-    def _call_llm_text(self, system_prompt: str, user_prompt: str) -> str:
-        if self.llm_client is None:
-            raise RuntimeError("LLM client unavailable")
-        last_error: Optional[Exception] = None
-        for attempt in range(self.max_retries + 1):
-            try:
-                resp = self.llm_client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    temperature=min(self.temperature + 0.2, 0.9),
-                    max_tokens=max(self.max_tokens, 1500),
-                    timeout=self.request_timeout,
-                    extra_body={"enable_thinking": False},
-                )
-                return (resp.choices[0].message.content or "").strip()
-            except Exception as exc:
-                print(f"[citywalk][llm-text] 第{attempt + 1}次失败: {exc}")
-                last_error = exc
-        raise RuntimeError(f"LLM 文本调用失败: {last_error}")
-
     @staticmethod
     def _is_food_poi(type_name: str) -> bool:
         text = type_name or ""
@@ -510,39 +477,4 @@ class CitywalkSessionRunner:
             "expected_activity": activity,
         }
 
-    def _generate_diary_text(
-        self,
-        city: str,
-        destination_name: str,
-        destination_reason: str,
-        events: List[CitywalkEvent],
-    ) -> str:
-        if self.llm_client is None:
-            if not events:
-                return "今天路线比较短，下一次要去更多有意思的地方。\n\n总结感想：慢慢逛也有收获。"
-            lines = [f"今天在{city}围绕{destination_name}逛了{len(events)}站。"]
-            for idx, item in enumerate(events, start=1):
-                lines.append(f"第{idx}站去了{item.poi.name}，{item.poi_activity}")
-            lines.append("\n总结感想：这次节奏刚好，既看见了风景，也留住了心情。")
-            return "\n".join(lines)
-
-        details_text = []
-        for idx, item in enumerate(events, start=1):
-            poi = item.poi
-            poi_content = item.poi_content
-            details_text.append(
-                f"第{idx}站: {poi.name} | 类型:{poi.type_name}"
-                f"招牌/标签:{'、'.join(poi_content.get('signature_or_tags', [])) or '无'} | "
-                f"图片描述:{poi_content.get('image_description', '无')}"
-                f"发生的事情：{item.poi_activity}"
-            )
-        prompt = (
-            f"角色设定: {self.persona}\n"
-            f"今天起点动机: {destination_name}，原因: {destination_reason}\n"
-            "你要写一段今天的流水账，像讲故事一样，描述见闻并穿插个人感受。最后必须有一段总结。\n"
-            "不得使用Emoji和颜文字。不得提到在各个地点准确的逗留时间。\n"
-            "素材如下:\n"
-            + "\n".join(details_text)
-        )
-        return self._call_llm_text("你是洛天依，擅长写有画面感的一日见闻。", prompt)
 
