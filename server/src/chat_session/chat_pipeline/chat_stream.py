@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import deque
 from typing import Any, List, Optional, TYPE_CHECKING
 
 
@@ -33,6 +34,7 @@ class ChatStream:
         self.user_name: str = ws_connection.user_name
         self.user_uuid: str = ws_connection.user_uuid
         self.character_id: str = character_id or "luotianyi"
+        self.recent_sung_segments: deque[tuple[str, str]] = deque(maxlen=10)
         self.logger = get_logger(f"{self.user_name}ChatStream")
 
         self.system_runtime: Optional["SystemRuntime"] = None
@@ -64,6 +66,7 @@ class ChatStream:
             character_id=self.character_id,
             context_provider=self.get_conversation_context,
             reflection_submitter=self.reflection_worker.submit_completed_turn,
+            recent_sung_segments=self.recent_sung_segments,
         )
         self.reflection_worker.set_reply_topic_callback(self.topic_replier.add_topic)
         self.ingress_helper.set_msg_consumer(self.topic_planner.feed_unread_message)
@@ -80,6 +83,16 @@ class ChatStream:
         self.state = self.STATE_WAITING
         self.state_lock = asyncio.Lock()
         self.last_response_active_ts: float | None = None
+
+    def record_sung_segment(self, song_name: str, segment: str) -> None:
+        self.recent_sung_segments.append((song_name, segment))
+
+    async def get_recent_conversation_context(self) -> str:
+        payload = await self.get_conversation_context(force_refresh=False, ret_type="dict")
+        if not isinstance(payload, dict):
+            return ""
+        recent = payload.get("recent_conversation") or []
+        return "\n".join(str(item) for item in recent if str(item).strip())
 
     def set_system_runtime(self, system_runtime: "SystemRuntime"):
         if system_runtime is None:

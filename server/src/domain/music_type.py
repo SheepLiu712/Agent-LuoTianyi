@@ -40,3 +40,4 @@ class SongMetadata:
     lrc_path: str
     lrc_offset: float  # in seconds
     segments: list[SongSegment]
+    emotion_tags: list[str] = field(default_factory=list)

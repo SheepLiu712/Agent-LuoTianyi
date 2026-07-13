@@ -52,7 +52,8 @@ def test_singing_config_is_valid(capability_config):
     assert (Path(resource_path) / "metadata.json").exists()
 
 
-def test_singing_known_song_interfaces_return_usable_results(singing_capability: "SingingCapability"):
+@pytest.mark.asyncio
+async def test_singing_known_song_interfaces_return_usable_results(singing_capability: "SingingCapability"):
     songs = singing_capability.get_songs_can_sing(CHARACTER_ID)
     assert isinstance(songs, dict)
     assert songs, "singing capability should load at least one singable song"
@@ -61,7 +62,7 @@ def test_singing_known_song_interfaces_return_usable_results(singing_capability:
     assert correct_song == KNOWN_SONG
     assert segments
 
-    planned_song, planned_segment = singing_capability.build_sing_plan(CHARACTER_ID, [KNOWN_SONG])
+    planned_song, planned_segment = await singing_capability.build_sing_plan(CHARACTER_ID, [KNOWN_SONG])
     assert planned_song == KNOWN_SONG
     assert planned_segment in segments
 
@@ -87,10 +88,11 @@ def test_singing_song_lookup_accepts_directory_name_alias(singing_capability: "S
     assert segments
 
 
-def test_singing_default_character_interfaces_work(singing_capability: "SingingCapability"):
+@pytest.mark.asyncio
+async def test_singing_default_character_interfaces_work(singing_capability: "SingingCapability"):
     correct_song, segments = singing_capability.can_i_sing_song(CHARACTER_ID, KNOWN_SONG)
 
-    planned_song, planned_segment = singing_capability.build_sing_plan([KNOWN_SONG])
+    planned_song, planned_segment = await singing_capability.build_sing_plan([KNOWN_SONG])
     assert planned_song == KNOWN_SONG
     assert planned_segment in segments
 
@@ -114,7 +116,7 @@ async def test_singing_unknown_song_interfaces_return_empty_results_without_erro
     assert correct_song == ""
     assert segments == []
 
-    planned_song, planned_segment = singing_capability.build_sing_plan(CHARACTER_ID, [UNKNOWN_SONG])
+    planned_song, planned_segment = await singing_capability.build_sing_plan(CHARACTER_ID, [UNKNOWN_SONG])
     assert planned_song == UNKNOWN_SONG
     assert planned_segment is None
 
@@ -125,3 +127,57 @@ async def test_singing_unknown_song_interfaces_return_empty_results_without_erro
     llm_text = await singing_capability.can_i_sing_song_llm(CHARACTER_ID, UNKNOWN_SONG)
     assert UNKNOWN_SONG in llm_text
     assert "无法演唱" in llm_text
+
+
+@pytest.mark.asyncio
+async def test_singing_plan_prefers_segments_outside_recent_history(
+    singing_capability: "SingingCapability",
+):
+    manager = singing_capability.singing_manager[CHARACTER_ID]
+    correct_song, segments = manager.can_i_sing_song(KNOWN_SONG)
+    assert len(segments) >= 2
+
+    planned_song, planned_segment = await singing_capability.build_sing_plan(
+        CHARACTER_ID,
+        [KNOWN_SONG],
+        excluded_segments={(correct_song, segments[0])},
+    )
+
+    assert planned_song == correct_song
+    assert planned_segment != segments[0]
+
+
+def test_resolve_singing_intent_prefers_non_excluded_segment(
+    singing_capability: "SingingCapability",
+):
+    manager = singing_capability.singing_manager[CHARACTER_ID]
+    correct_song, segments = manager.can_i_sing_song(KNOWN_SONG)
+    assert len(segments) >= 2
+
+    resolved_song, resolved_segment = singing_capability.resolve_sing_plan(
+        CHARACTER_ID,
+        KNOWN_SONG,
+        preferred_segment=segments[0],
+        excluded_segments={(correct_song, segments[0])},
+    )
+
+    assert resolved_song == correct_song
+    assert resolved_segment != segments[0]
+
+
+def test_resolve_singing_intent_allows_repeat_when_all_segments_are_excluded(
+    singing_capability: "SingingCapability",
+):
+    manager = singing_capability.singing_manager[CHARACTER_ID]
+    correct_song, segments = manager.can_i_sing_song(KNOWN_SONG)
+    excluded = {(correct_song, segment) for segment in segments}
+
+    resolved_song, resolved_segment = singing_capability.resolve_sing_plan(
+        CHARACTER_ID,
+        KNOWN_SONG,
+        preferred_segment=segments[0],
+        excluded_segments=excluded,
+    )
+
+    assert resolved_song == correct_song
+    assert resolved_segment == segments[0]

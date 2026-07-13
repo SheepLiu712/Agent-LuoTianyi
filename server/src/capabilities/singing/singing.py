@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional, Tuple, Dict
+from typing import Any, Collection, List, Optional, Tuple, Dict
 from .singing_manager import SingingManager
 from src.domain.character import CharacterName
 
@@ -50,10 +50,12 @@ class SingingCapability:
         for manager in self.singing_manager.values():
             manager.reload_songs()
 
-    def build_sing_plan(
+    async def build_sing_plan(
         self,
         character_id: str | List[str],
         sing_attempts: Optional[List[str]] = None,
+        excluded_segments: Collection[tuple[str, str]] | None = None,
+        emotion_context: str = "",
     ) -> Tuple[Optional[str], Optional[str]]:
         """
         根据用户的唱歌尝试，构建一个唱歌计划。
@@ -67,6 +69,7 @@ class SingingCapability:
             character_id = self.default_character_id
 
         manager = self._get_manager(character_id if isinstance(character_id, str) else None)
+        excluded = set(excluded_segments or ())
 
         if not sing_attempts:
             return None, None
@@ -77,19 +80,46 @@ class SingingCapability:
             if not candidate:
                 continue
             if candidate == "random_song":
-                pair = manager.pick_random_song_and_segment()
+                pair = manager.pick_random_song_and_segment(excluded_segments=excluded)
                 return pair if pair else (None, None)
 
             song_name = self._extract_song_name(candidate)
             if not song_name:
                 continue
 
-            correct_song_name, segment = manager.pick_segment_for_song(song_name)
+            correct_song_name, segment = manager.pick_segment_for_song(
+                song_name,
+                excluded_segments=excluded,
+            )
             if segment:
                 return correct_song_name, segment
         if song_name:
             manager.add_wished_song(song_name)
         return song_name, None
+
+    def resolve_sing_plan(
+        self,
+        character_id: str,
+        song_name: str,
+        preferred_segment: str | None = None,
+        excluded_segments: Collection[tuple[str, str]] | None = None,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """校验最终唱歌意图，并按会话历史重新选择可唱段落。"""
+        manager = self._get_manager(character_id)
+        correct_song_name, segments = manager.can_i_sing_song(song_name)
+        if not correct_song_name or not segments:
+            return None, None
+
+        excluded = set(excluded_segments or ())
+        available = [
+            segment
+            for segment in segments
+            if (correct_song_name, segment) not in excluded
+        ]
+        candidates = available or segments
+        if preferred_segment and preferred_segment in candidates:
+            return correct_song_name, preferred_segment
+        return correct_song_name, candidates[0]
     
     def can_i_sing_song(self, character_id: str, song_name: str) -> Tuple[str, List[str]]:
         '''

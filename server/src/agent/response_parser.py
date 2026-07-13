@@ -55,11 +55,10 @@ class StructuredResponseParser:
             if self.logger:
                 self.logger.debug(f"Parsing line: '{line}'")
             if sing_match:
-                if sing_plan:
-                    item = self._parse_sing_line(sing_match.group(1), sing_plan)
-                    if item is not None:
-                        results.append(item)
-                        structured_found = True
+                item = self._parse_sing_line(sing_match.group(1), sing_plan)
+                if item is not None:
+                    results.append(item)
+                    structured_found = True
                 continue
 
             tone_match = self.tone_pattern.match(line)
@@ -88,20 +87,26 @@ class StructuredResponseParser:
     def _parse_sing_line(
         self,
         raw_song: str,
-        sing_plan: tuple[str, str],
+        sing_plan: Optional[tuple[str, str]],
     ) -> Optional["SongSegmentChat"]:
         song = self._clean_song_token(raw_song)
-        sing_plan_song = self._clean_song_token(sing_plan[0])
-        if song and get_unified_song_name(song) == get_unified_song_name(sing_plan_song):
-            return self.song_cls(song=sing_plan_song, segment=sing_plan[1], lyrics="")
-        if self.logger:
-            self.logger.warning(
-                f"LLM requested to sing '{song}', but it does not match the sing plan song '{sing_plan_song}'. Ignoring this sing instruction."
-            )
-        return None
+        if not song:
+            return None
+        segment = ""
+        if sing_plan and sing_plan[0]:
+            planned_song = self._clean_song_token(sing_plan[0])
+            if get_unified_song_name(song) == get_unified_song_name(planned_song):
+                segment = sing_plan[1] or ""
+        return self.song_cls(song=song, segment=segment, lyrics="")
 
     def _clean_song_token(self, value: str) -> str:
-        return (value or "").strip().strip("<>").strip().strip("'\"")
+        return (
+            (value or "")
+            .strip()
+            .strip("<>《》")
+            .strip()
+            .strip("'\"“”‘’")
+        )
 
     def _parse_tone_line(
         self,

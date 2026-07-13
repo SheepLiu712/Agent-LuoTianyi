@@ -153,6 +153,8 @@ class AgentRuntime:
         topic: Any,
         conversation_history: str,
         external_context: str | None = None,
+        sing_excluded_segments: set[tuple[str, str]] | None = None,
+        sing_emotion_context: str = "",
     ):
         """根据话题、上下文和记忆检索结果规划本轮回复。"""
         runtime = self.get_character_runtime(character_id)
@@ -161,6 +163,8 @@ class AgentRuntime:
             topic=topic,
             conversation_history=conversation_history,
             external_context=external_context,
+            sing_excluded_segments=sing_excluded_segments,
+            sing_emotion_context=sing_emotion_context,
         )
 
     async def realize_topic_plan(self, *, character_id: str | None, user_id: str, plan: Any):
