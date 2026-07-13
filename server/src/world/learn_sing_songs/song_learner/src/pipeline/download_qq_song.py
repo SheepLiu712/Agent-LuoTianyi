@@ -41,6 +41,7 @@ QQ_SDK_IMPORT_ERROR = str(QQ_SDK.get("error", ""))
 
 QQ_LYRIC_URL = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
 QQ_MUSICU_URL = "https://u.y.qq.com/cgi-bin/musicu.fcg"
+VIRTUAL_SINGERS = frozenset(("洛天依", "乐正绫", "言和", "星尘", "诗岸"))
 
 
 class QQMusicCredentialError(RuntimeError):
@@ -121,6 +122,45 @@ def qq_headers() -> Dict[str, str]:
 
 def normalize_text(text: str) -> str:
     return "".join(text.strip().lower().split())
+
+
+def get_song_singer_names(song: Dict[str, Any]) -> List[str]:
+    """Return the structured singer names supplied by QQ Music."""
+    names: List[str] = []
+    for singer in song.get("singer") or []:
+        if isinstance(singer, dict):
+            name = singer.get("name", "")
+        else:
+            name = singer
+        name = str(name or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def validate_song_singers(song: Dict[str, Any], target_singer: str = "洛天依") -> Tuple[bool, str]:
+    """Allow only songs whose complete structured singer list is the target singer."""
+    singer_names = get_song_singer_names(song)
+    target = normalize_text(target_singer)
+    normalized_names = [normalize_text(name) for name in singer_names]
+
+    if not singer_names:
+        return False, "歌手信息为空"
+    if target not in normalized_names:
+        return False, f"歌手列表不包含目标歌手 {target_singer}"
+
+    other_names = [name for name, normalized in zip(singer_names, normalized_names) if normalized != target]
+    if other_names:
+        known_other_names = [name for name in other_names if name in VIRTUAL_SINGERS]
+        unknown_other_names = [name for name in other_names if name not in VIRTUAL_SINGERS]
+        details = []
+        if known_other_names:
+            details.append(f"其他虚拟歌手: {'、'.join(known_other_names)}")
+        if unknown_other_names:
+            details.append(f"未知歌手: {'、'.join(unknown_other_names)}")
+        return False, "歌曲包含其他歌手（" + "；".join(details) + "）"
+
+    return True, ""
 
 
 def load_saved_credential(credential_file: Path) -> Optional[Dict[str, Any]]:
@@ -427,6 +467,17 @@ def download_song_and_lyric(
     singer_songs = rank_songs_by_title(pick_song_by_singer(songs, singer_name), song_name)
     matched_failures: List[str] = []
 
+    validated_singer_songs: List[Dict[str, Any]] = []
+    for song in singer_songs:
+        title = song.get("title") or song_name
+        singers_valid, reason = validate_song_singers(song, singer_name)
+        if not singers_valid:
+            matched_failures.append(f"{title}: {reason}")
+            print(f"[WARN] {reason}，跳过: {title}")
+            continue
+        validated_singer_songs.append(song)
+    singer_songs = validated_singer_songs
+
     for song in singer_songs:
         title = song.get("title") or song_name
         songmid = song.get("mid")
@@ -436,8 +487,7 @@ def download_song_and_lyric(
             print(f"[WARN] {reason}，跳过: {title}")
             continue
 
-        singers = song.get("singer") or []
-        singer = singers[0].get("name") if singers else singer_name
+        singer = "、".join(get_song_singer_names(song)) or singer_name
 
         song_folder = output_dir / safe_name(title)
         song_folder.mkdir(parents=True, exist_ok=True)
