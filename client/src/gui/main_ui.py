@@ -638,19 +638,16 @@ class ChatWidget(QWidget):
         self.toolbar_layout.addWidget(self.settings_btn)
 
         self.dynamic_btn = HoverButton(tooltip_text="动态")
-        self.dynamic_btn.setText("动态")
-        self.dynamic_btn.setFixedSize(68, 24)
+        self.dynamic_btn.setIcon(QIcon("res/gui/dynamic.png"))
+        self.dynamic_btn.setFixedSize(24, 24)
         self.dynamic_btn.setStyleSheet("""
-            QPushButton {
-                border: none;
-                background-color: transparent;
-                color: #3A4B59;
-                font-size: 12px;
-                font-weight: 600;
-            }
-            QPushButton:hover {
-                background-color: #E0E0E0;
-                border-radius: 4px;
+            QPushButton { 
+                border: none; 
+                background-color: transparent; 
+            } 
+            QPushButton:hover { 
+                background-color: #E0E0E0; 
+                border-radius: 4px; 
             }
         """)
         self.dynamic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -724,11 +721,11 @@ class ChatWidget(QWidget):
         count = int(status.get("unread_count") or 0)
         self.dynamic_unread_count = count
         if count > 0:
-            text = f"动态 {min(count, 99)}"
+            text = str(min(count, 99))
             if count > 99:
-                text = "动态 99+"
+                text = "99+"
         else:
-            text = "动态"
+            text = ""
         self.dynamic_btn.setText(text)
     
     def on_scroll_value_changed(self, value):
