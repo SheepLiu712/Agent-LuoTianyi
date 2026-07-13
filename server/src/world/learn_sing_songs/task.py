@@ -68,6 +68,7 @@ class LearnSingSongsTask(WorldTask):
             asyncio.run(self._write_learned_event(learned))
         if learned:
             self._reload_singing_library()
+            self._tag_learned_songs(learned)
             published_dynamic_ids = self._publish_learned_dynamics(learned)
         else:
             published_dynamic_ids = []
@@ -133,6 +134,20 @@ class LearnSingSongsTask(WorldTask):
             reload_songs(self.character_id)
         except Exception as exc:
             self.logger.warning(f"Failed to reload singing library after learning songs: {exc}")
+
+    def _tag_learned_songs(self, learned: list[str]) -> None:
+        if self.system_runtime is None:
+            return
+        singing = getattr(getattr(self.system_runtime, "capability_manager", None), "singing", None)
+        tag_song = getattr(singing, "tag_song_emotions", None)
+        if not callable(tag_song):
+            return
+        for song_name in learned:
+            try:
+                tags = asyncio.run(tag_song(self.character_id, song_name))
+                self.logger.info(f"Song emotion tags generated: {song_name} -> {tags}")
+            except Exception as exc:
+                self.logger.warning(f"Failed to tag learned song emotions for {song_name}: {exc}")
 
     def _publish_learned_dynamics(self, learned: list[str]) -> list[str]:
         if self.character_runtime is None:

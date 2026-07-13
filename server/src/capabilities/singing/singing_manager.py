@@ -123,6 +123,33 @@ class SingingManager:
         old_count = len(self.all_songs)
         self.get_music_data()
         self.wishlist.sync_existing_songs(set(self.all_songs.keys()) | set(self.song_aliases.keys()))
+
+    def update_song_emotion_tags(self, song_name: str, emotion_tags: list[str]) -> bool:
+        metadata = self.get_song_metadata(song_name)
+        if metadata is None:
+            return False
+        config_path = pathlib.Path(metadata.song_path).parent / f"{metadata.song_name}.json"
+        if not config_path.exists():
+            return False
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            normalized = []
+            for tag in emotion_tags:
+                value = str(tag).strip()
+                if value and value not in normalized:
+                    normalized.append(value)
+            data["emotion_tags"] = normalized
+            tmp_path = config_path.with_suffix(".json.tmp")
+            tmp_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            tmp_path.replace(config_path)
+            metadata.emotion_tags = normalized
+            return True
+        except Exception as exc:
+            self.logger.warning(f"Failed to persist emotion tags for {song_name}: {exc}")
+            return False
         self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
 
     # ————歌曲选择相关————

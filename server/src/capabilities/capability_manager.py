@@ -25,7 +25,10 @@ class CapabilityManager:
 
         # 歌唱能力
         self.logger.info("Start initializing Singing Capability...")
-        self.singing: SingingCapability = SingingCapability(self.config.get("sing", {}))
+        self.singing: SingingCapability = SingingCapability(
+            self.config.get("sing", {}),
+            llm_service=llm_service,
+        )
 
         # 动态能力
         self.logger.info("Start initializing Dynamic Capability...")

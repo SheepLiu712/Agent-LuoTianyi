@@ -3,18 +3,25 @@ from __future__ import annotations
 import re
 from typing import Any, Collection, List, Optional, Tuple, Dict
 from .singing_manager import SingingManager
+from .song_emotion_tagger import SongEmotionTagger
 from src.domain.character import CharacterName
 
 
 class SingingCapability:
     """Action capability for choosing and rendering sing actions."""
 
-    def __init__(self, config: Dict[str, Any]) -> None:
+    def __init__(self, config: Dict[str, Any], llm_service=None) -> None:
         self._config: Dict[str, Any] = config
         self.singing_manager : Dict[str, SingingManager] = {}
         if "characters" in config:
             raise ValueError("capabilities.sing no longer supports a 'characters' layer; use sing.<character_id> directly.")
+        self.song_emotion_tagger = SongEmotionTagger()
+        tagger_config = config.get("song_emotion_tagger")
+        if llm_service is not None and isinstance(tagger_config, dict):
+            self.song_emotion_tagger.register(llm_service, tagger_config)
         for character_id, character_config in config.items():
+            if character_id == "song_emotion_tagger":
+                continue
             self.singing_manager[character_id] = SingingManager(character_config)
         self.default_character_id = CharacterName.LUOTIANYI.value if CharacterName.LUOTIANYI.value in self.singing_manager else next(
             iter(self.singing_manager),
@@ -80,7 +87,13 @@ class SingingCapability:
             if not candidate:
                 continue
             if candidate == "random_song":
-                pair = manager.pick_random_song_and_segment(excluded_segments=excluded)
+                target_tags = []
+                if emotion_context.strip():
+                    target_tags = await self.song_emotion_tagger.infer_target_tags(emotion_context)
+                pair = manager.pick_random_song_and_segment(
+                    target_emotion_tags=target_tags,
+                    excluded_segments=excluded,
+                )
                 return pair if pair else (None, None)
 
             song_name = self._extract_song_name(candidate)
@@ -96,6 +109,20 @@ class SingingCapability:
         if song_name:
             manager.add_wished_song(song_name)
         return song_name, None
+
+    async def tag_song_emotions(self, character_id: str, song_name: str) -> list[str]:
+        """Classify a song's full lyrics and persist its tags in the song JSON."""
+        manager = self._get_manager(character_id)
+        metadata = manager.get_song_metadata(song_name)
+        if metadata is None:
+            return []
+        tags = await self.song_emotion_tagger.tag_song(
+            metadata.song_name,
+            manager.get_full_lyrics(metadata.song_name),
+        )
+        if tags:
+            manager.update_song_emotion_tags(metadata.song_name, tags)
+        return tags
 
     def resolve_sing_plan(
         self,
