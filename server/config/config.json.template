@@ -84,9 +84,11 @@
                 },
                 "prompt_name": "song_emotion_prompt"
             },
-            "luotianyi": {
-                "character_name": "洛天依",
-                "resource_path": "res/sing_song/luotianyi"
+            "characters": {
+                "luotianyi": {
+                    "character_name": "洛天依",
+                    "resource_path": "res/sing_song/luotianyi"
+                }
             }
         },
         "image_understanding": {

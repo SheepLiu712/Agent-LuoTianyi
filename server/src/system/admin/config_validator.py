@@ -41,6 +41,7 @@ class RuntimeConfigValidator:
         "agent.memory_writer": "agent_runtime.agent.memory.memory_writer.llm_module",
         "agent.user_profile": "agent_runtime.agent.memory.user_profile.llm_module",
         "agent.date_detector": "agent_runtime.agent.date_detector.llm_module",
+        "capability.singing.song_emotion_tagger": "capabilities.sing.song_emotion_tagger",
     }
 
     CORE_VLM_MODULE_PATHS = {
@@ -165,8 +166,18 @@ class RuntimeConfigValidator:
                 result.append(self._path_item("core", f"resource.tts.{character}.{key}", item.get(key)))
 
         sing_cfg = config.get("capabilities", {}).get("sing", {})
-        for character, item in sing_cfg.items():
-            result.append(self._path_item("core", f"resource.sing.{character}.resource_path", item.get("resource_path")))
+        characters_cfg = sing_cfg.get("characters")
+        if not isinstance(characters_cfg, dict) or not characters_cfg:
+            result.append(ValidationItem("core", "resource.sing.characters", "error", "未配置任何角色歌曲资源"))
+        else:
+            for character, item in characters_cfg.items():
+                result.append(
+                    self._path_item(
+                        "core",
+                        f"resource.sing.characters.{character}.resource_path",
+                        item.get("resource_path"),
+                    )
+                )
         return result
 
     def _validate_song_knowledge_resources(self, config: dict[str, Any]) -> list[ValidationItem]:

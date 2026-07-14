@@ -20,7 +20,7 @@ class SingingManager:
         self.character_name = config.get("character_name", "洛天依")
         self.resource_path = config.get("resource_path")
         if not self.resource_path:
-            raise ValueError("SingingManager requires capabilities.sing.<character_id>.resource_path")
+            raise ValueError("SingingManager requires capabilities.sing.characters.<character_id>.resource_path")
         self.all_songs: dict[str, SongMetadata] = {}
         self.song_aliases: dict[str, str] = {}
         self.tools: Dict[str, MyTool] = {}

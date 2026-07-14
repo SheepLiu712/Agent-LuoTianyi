@@ -14,14 +14,16 @@ class SingingCapability:
         self._config: Dict[str, Any] = config
         self.singing_manager : Dict[str, SingingManager] = {}
         if "characters" in config:
-            raise ValueError("capabilities.sing no longer supports a 'characters' layer; use sing.<character_id> directly.")
+            characters_config = config["characters"]
+        else:
+            raise ValueError("capabilities.sing requires a 'characters' layer for character song resources.")
+        if not isinstance(characters_config, dict) or not characters_config:
+            raise ValueError("capabilities.sing.characters must contain at least one character.")
         self.song_emotion_tagger = SongEmotionTagger()
         tagger_config = config.get("song_emotion_tagger")
         if llm_service is not None and isinstance(tagger_config, dict):
             self.song_emotion_tagger.register(llm_service, tagger_config)
-        for character_id, character_config in config.items():
-            if character_id == "song_emotion_tagger":
-                continue
+        for character_id, character_config in characters_config.items():
             self.singing_manager[character_id] = SingingManager(character_config)
         self.default_character_id = CharacterName.LUOTIANYI.value if CharacterName.LUOTIANYI.value in self.singing_manager else next(
             iter(self.singing_manager),

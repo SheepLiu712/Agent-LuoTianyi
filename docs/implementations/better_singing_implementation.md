@@ -48,6 +48,27 @@ conda run -n lty python server/scripts/music/tag_song_emotions.py --config serve
 | `server/src/world/learn_sing_songs/song_learner/src/pipeline/download_qq_song.py` | 下载前的完整歌手校验 |
 | `server/res/agent/prompts/song_emotion_prompt.json` | 情绪标注与目标情绪提示词 |
 
+## 配置结构
+
+`capabilities.sing` 只在模块层直接放置 `song_emotion_tagger`，角色歌曲资源统一放在 `characters` 层：
+
+```json
+{
+  "capabilities": {
+    "sing": {
+      "song_emotion_tagger": { "llm": { "name": "..." } },
+      "characters": {
+        "luotianyi": {
+          "resource_path": "res/sing_song/luotianyi"
+        }
+      }
+    }
+  }
+}
+```
+
+旧的 `capabilities.sing.luotianyi` 扁平结构不再支持。
+
 ## 验证
 
 - 唱歌能力、响应解析、情绪标签和学歌流水线相关测试通过。

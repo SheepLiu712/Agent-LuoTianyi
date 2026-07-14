@@ -41,10 +41,10 @@ def singing_capability(capability_config):
 
 def test_singing_config_is_valid(capability_config):
     sing_cfg = capability_config.get("sing", {})
-    assert "characters" not in sing_cfg
-    assert CHARACTER_ID in sing_cfg
+    assert "characters" in sing_cfg
+    assert CHARACTER_ID in sing_cfg["characters"]
 
-    character_cfg = sing_cfg[CHARACTER_ID]
+    character_cfg = sing_cfg["characters"][CHARACTER_ID]
     resource_path = character_cfg.get("resource_path")
     assert resource_path
     assert Path(resource_path).exists()
