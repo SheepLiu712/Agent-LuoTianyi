@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from src.utils.llm_service import LLMService
 
 
-SONG_EMOTION_TAGS = ("甜美", "温柔", "积极", "帅气", "搞怪")
+SONG_EMOTION_TAGS = ("甜美", "温柔", "积极", "帅气", "搞怪", "伤感", "愤怒")
 
 
 class SongEmotionTagger:

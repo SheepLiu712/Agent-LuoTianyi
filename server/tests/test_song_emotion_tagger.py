@@ -25,10 +25,10 @@ class FakeEmotionLLM:
 
 def test_song_emotion_tags_are_normalized_and_restricted():
     tags = SongEmotionTagger.parse_tags(
-        '{"emotion_tags":["温柔", "温柔", "无关标签", "帅气"]}'
+        '{"emotion_tags":["温柔", "温柔", "无关标签", "帅气", "伤感", "愤怒"]}'
     )
 
-    assert tags == ["温柔", "帅气"]
+    assert tags == ["温柔", "帅气", "伤感", "愤怒"]
 
 
 @pytest.mark.asyncio
