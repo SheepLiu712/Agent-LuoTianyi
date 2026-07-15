@@ -75,7 +75,13 @@ def minimal_config(tmp_path: Path) -> dict:
                     "interface_config_path": str(tmp_path / "tts_interface.json"),
                 }
             },
-            "sing": {"luotianyi": {"resource_path": str(tmp_path / "sing")}},
+            "sing": {
+                "song_emotion_tagger": {
+                    "llm": {"name": "main"},
+                    "prompt_name": "p",
+                },
+                "characters": {"luotianyi": {"resource_path": str(tmp_path / "sing")}},
+            },
             "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
         },
         "agent_runtime": {
@@ -175,6 +181,9 @@ def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
     assert "resource.song knowledge db" in item_names
     assert "resource.song name keywords" in item_names
     assert "resource.song lyric keywords" in item_names
+    assert "resource.sing.characters.luotianyi.resource_path" in item_names
+    assert "resource.sing.song_emotion_tagger.resource_path" not in item_names
+    assert "llm_module.capability.singing.song_emotion_tagger" in item_names
     disabled_names = {item["name"] for item in result["world_disabled"]}
     assert {"citywalk", "bili_dynamic_fetcher", "auto_song_learner.qq_music"} <= disabled_names
 
@@ -182,6 +191,23 @@ def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
     assert runtime_config["world"]["citywalk"]["enabled"] is False
     assert runtime_config["world"]["bili_dynamic_fetcher"]["enabled"] is False
     assert runtime_config["world"]["auto_song_learner"]["enabled"] is False
+
+
+def test_validator_rejects_flat_singing_character_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    secret_store = SecretStore(tmp_path / "secrets.local.env")
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secret_store)
+    config = minimal_config(tmp_path)
+    config["capabilities"]["sing"] = {
+        "luotianyi": {"resource_path": str(tmp_path / "sing")},
+    }
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    item = next(item for item in result["items"] if item["name"] == "resource.sing.characters")
+    assert item["status"] == "error"
 
 
 def test_validator_uses_custom_llm_api_keys_without_hardcoded_provider_keys(tmp_path, monkeypatch):

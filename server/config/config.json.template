@@ -75,9 +75,20 @@
             }
         },
         "sing": {
-            "luotianyi": {
-                "character_name": "洛天依",
-                "resource_path": "res/sing_song/luotianyi"
+            "song_emotion_tagger": {
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true,
+                    "params": {}
+                },
+                "prompt_name": "song_emotion_prompt"
+            },
+            "characters": {
+                "luotianyi": {
+                    "character_name": "洛天依",
+                    "resource_path": "res/sing_song/luotianyi"
+                }
             }
         },
         "image_understanding": {

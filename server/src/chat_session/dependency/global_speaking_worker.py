@@ -41,6 +41,7 @@ class SpeakingJob:
     topic_id: str | None = None
     reply_generated_monotonic: float | None = None
     reply_generated_ts: str | None = None
+    song_audio_generated_callback: Callable[[str, str], None] | None = None
     enqueued_monotonic: float | None = None
     enqueued_ts: str | None = None
 
@@ -142,6 +143,8 @@ class GlobalSpeakingWorker:
                     if not audio:
                         self.logger.warning(f"No audio generated for song: {job.job_content.song}")
                         continue
+                    if job.song_audio_generated_callback is not None:
+                        job.song_audio_generated_callback(job.job_content.song, job.job_content.segment)
                     CHUNK_SIZE = 48 * 1024
                     for i in range(0, len(audio), CHUNK_SIZE):
                         chunk = audio[i:i+CHUNK_SIZE]

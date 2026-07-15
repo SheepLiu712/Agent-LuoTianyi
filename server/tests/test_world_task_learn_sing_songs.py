@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
@@ -13,8 +15,10 @@ from src.world.learn_sing_songs.task import LearnSingSongsTask
 from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner, WishlistManager
 from src.world.learn_sing_songs.song_learner.src.pipeline import download_qq_song
 from src.world.learn_sing_songs.song_learner.src.pipeline.download_qq_song import (
+    get_song_singer_names,
     rank_songs_by_title,
     safe_name as qq_safe_name,
+    validate_song_singers,
 )
 
 
@@ -25,6 +29,62 @@ class FakeEventStore:
     async def add_event(self, event):
         self.events.append(event)
         return "event-id"
+
+
+def test_qq_song_singer_validation_accepts_only_luo_tianyi():
+    song = {"singer": [{"name": "洛天依"}]}
+
+    assert get_song_singer_names(song) == ["洛天依"]
+    assert validate_song_singers(song) == (True, "")
+
+
+def test_qq_song_singer_validation_rejects_known_duet():
+    song = {"singer": [{"name": "洛天依"}, {"name": "乐正绫"}]}
+
+    valid, reason = validate_song_singers(song)
+
+    assert valid is False
+    assert "乐正绫" in reason
+
+
+def test_qq_song_singer_validation_rejects_unknown_singer():
+    song = {"singer": [{"name": "洛天依"}, {"name": "未知歌手"}]}
+
+    valid, reason = validate_song_singers(song)
+
+    assert valid is False
+    assert "未知歌手" in reason
+
+
+def test_qq_song_singer_validation_rejects_missing_singer():
+    valid, reason = validate_song_singers({})
+
+    assert valid is False
+    assert reason == "歌手信息为空"
+
+
+def test_qq_download_rejects_duet_before_creating_output(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        download_qq_song,
+        "qq_search_songs",
+        lambda *_args, **_kwargs: [
+            {
+                "title": "合唱歌曲",
+                "mid": "song-mid",
+                "singer": [{"name": "洛天依"}, {"name": "言和"}],
+            }
+        ],
+    )
+    output_dir = tmp_path / "songs"
+
+    with pytest.raises(RuntimeError, match="言和"):
+        download_qq_song.download_song_and_lyric(
+            "合唱歌曲",
+            output_dir=output_dir,
+            no_auto_login=True,
+        )
+
+    assert not output_dir.exists()
 
 
 def test_learn_sing_songs_initialize_sets_event_store_and_learner(monkeypatch):
