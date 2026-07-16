@@ -31,61 +31,57 @@ class PreferencesDialog(QDialog):
     def init_ui(self):
         """初始化UI"""
         layout = QVBoxLayout()
-        layout.setSpacing(12)
-        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
 
         title = QLabel("和天依的相处模式")
-        title.setStyleSheet("font-size: 20px; font-weight: bold; color: #66CCFF;")
+        title.setObjectName("dialogTitle")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
         desc = QLabel("你可以在这里告诉天依你们之间的关系和相处方式，"
                        "这样天依会更好地了解你！")
+        desc.setObjectName("dialogDesc")
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 13px; color: #666; margin-bottom: 10px;")
         layout.addWidget(desc)
 
         # 关系类型
         rel_label = QLabel("你希望天依是你的：")
-        rel_label.setStyleSheet("font-size: 14px; font-weight: 500;")
+        rel_label.setObjectName("sectionLabel")
         layout.addWidget(rel_label)
 
         self.relationship_combo = QComboBox()
         self.relationship_combo.addItems(["朋友", "知己", "偶像", "搭档", "家人"])
         self.relationship_combo.setEditable(True)
-        self.relationship_combo.setStyleSheet("font-size: 14px; padding: 6px;")
         layout.addWidget(self.relationship_combo)
 
         # 表达风格
         style_label = QLabel("你希望天依的表达风格偏向：")
-        style_label.setStyleSheet("font-size: 14px; font-weight: 500; margin-top: 8px;")
+        style_label.setObjectName("sectionLabel")
         layout.addWidget(style_label)
 
         self.style_combo = QComboBox()
-        self.style_combo.addItems(["活泼可爱", "温柔可人", "文静恬淡", ])
+        self.style_combo.addItems(["活泼可爱", "温柔可人", "文静恬淡"])
         self.style_combo.setEditable(True)
-        self.style_combo.setStyleSheet("font-size: 14px; padding: 6px;")
         layout.addWidget(self.style_combo)
 
         # 性格特点
         trait_label = QLabel("你希望天依的性格特点（用逗号分隔，可选）：")
-        trait_label.setStyleSheet("font-size: 14px; font-weight: 500; margin-top: 8px;")
+        trait_label.setObjectName("sectionLabel")
         layout.addWidget(trait_label)
 
         self.personality_input = QLineEdit()
         self.personality_input.setPlaceholderText("例如：温柔、耐心、善解人意")
-        self.personality_input.setStyleSheet("font-size: 14px; padding: 6px;")
         layout.addWidget(self.personality_input)
 
         # 自定义上下文
         ctx_label = QLabel("其他你想让天依知道的（可选）：")
-        ctx_label.setStyleSheet("font-size: 14px; font-weight: 500; margin-top: 8px;")
+        ctx_label.setObjectName("sectionLabel")
         layout.addWidget(ctx_label)
 
         self.custom_context_input = QTextEdit()
         self.custom_context_input.setMaximumHeight(80)
         self.custom_context_input.setPlaceholderText("在这里添加任何你想让天依知道的关于你们关系的信息...")
-        self.custom_context_input.setStyleSheet("font-size: 13px; padding: 4px;")
         layout.addWidget(self.custom_context_input)
 
         layout.addStretch()
@@ -93,23 +89,10 @@ class PreferencesDialog(QDialog):
         # 按钮区域
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(16)
-
         btn_layout.addStretch()
 
         self.save_btn = QPushButton("保存设置")
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #5BB8E8;
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                border-radius: 8px;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #4AA8D8;
-            }
-        """)
+        self.save_btn.setObjectName("primaryButton")
         self.save_btn.clicked.connect(self.on_save)
         btn_layout.addWidget(self.save_btn)
 
