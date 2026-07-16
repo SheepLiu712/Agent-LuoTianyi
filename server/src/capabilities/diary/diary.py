@@ -1,15 +1,22 @@
 """
 日记能力：为高活跃用户生成每日日记。
 
-日记以 DynamicPost（作者类型=agent，可见性=private）的形式发布，
-用户可以在现有动态界面中查看，无需独立存储和展示。
+## 设计思路
 
-格式：
+日记以 DynamicPost（作者类型=agent，可见性=private）的形式发布，
+直接复用现有动态功能，无需独立存储和展示。用户可以在动态界面
+中看到天依为自己写的日记（其他人不可见）。
+
+## 日记格式（在动态中展示）
+
   2026-07-16 · 心情: 开心
 
-  <正文内容>
+  今天和主人聊了很多关于音乐的话题...
 
-本能力不负责调度（何时写日记），调度由 world/diary_task 负责。
+## 职责边界
+
+本能力只负责「生成并发布日记」，不负责调度（何时写日记）。
+调度由 world/diary_task 负责，每天 UTC 16:00 触发一次。
 """
 from __future__ import annotations
 
@@ -27,22 +34,66 @@ if TYPE_CHECKING:
 
 
 class DiaryCapability:
-    """日记生成能力。生成的日记以 DynamicPost 形式发布，复用现有动态功能。"""
+    """
+    日记生成能力。
+
+    核心流程：
+      1. 收集素材（今日聊天记录 + 用户动态）
+      2. 构建 prompt（填充角色人设、表达风格、素材）
+      3. 调用 LLM 生成日记文本
+      4. 解析 LLM 输出（提取心情标签、正文）
+      5. 通过 DynamicCapability.publish_agent_dynamic() 发布为 Agent 动态
+
+    复用了动态系统的完整链路：
+      DiaryCapability → DynamicCapability → DynamicStore → 用户可见
+    """
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
+        """
+        初始化日记能力。
+
+        Args:
+            config: 配置项，支持以下字段：
+                - diary_llm: LLM 模块配置（用于注册日记专用的 LLM 模块）
+                - prompt_path: 日记 prompt 模板路径（默认 res/agent/prompts/diary_prompt.json）
+                - diary_source_type: 日记动态的 source_type 标记（默认 "diary"）
+        """
         self.config = config or {}
         self.logger = get_logger(__name__)
+
+        # ── 外部依赖（由 wire_dependencies 注入） ──
         self.database_manager: "DatabaseManager | None" = None
-        self._diary_llm: "LLMModule | None" = None
-        self._prompt_template: str | None = None
-        # 日记动态的 source_type 标记，用于区分普通动态
+        self._dynamic_capability: Any | None = None  # DynamicCapability 实例
+
+        # ── LLM 相关 ──
+        self._diary_llm: "LLMModule | None" = None       # 日记专用的 LLM 模块
+        self._prompt_template: str | None = None          # 缓存已加载的 prompt 模板
+
+        # ── 标识 ──
+        # 日记动态的 source_type，用于在动态列表中区分「日记」和普通动态
         self.diary_source_type: str = self.config.get("diary_source_type", "diary")
 
+    # ────────────────────── 依赖注入 ──────────────────────
+
     def create_diary_llm_module(self, llm_service: "LLMService") -> None:
-        """从 config 注册日记 LLM 模块。"""
+        """
+        从 config 注册日记专用的 LLM 模块。
+
+        config.diary_llm 的结构与其它能力模块一致：
+        {
+            "llm_module": {
+                "llm": {"name": "...", ...},
+                "prompt_name": "..."
+            }
+        }
+
+        如果配置缺失或注册失败，_diary_llm 保持为 None，后续
+        ensure_llm() 会检测到并阻止日记生成。
+        """
         module_cfg = self._module_config(self.config.get("diary_llm"))
         if module_cfg:
             try:
+                # 注册一个名为 "diary_composer" 的 LLM 模块，专门用于日记生成
                 self._diary_llm = llm_service.register_llm_module("diary_composer", module_cfg)
             except Exception as exc:
                 self._diary_llm = None
@@ -54,22 +105,47 @@ class DiaryCapability:
         database_manager: "DatabaseManager",
         dynamic_capability: Any | None = None,
     ) -> None:
+        """
+        注入外部依赖。
+
+        由 CapabilityManager.wire_dependencies() 在初始化阶段调用。
+        dynamic_capability 是日记的发布通道——日记本质是一种特殊类型的动态。
+        """
         self.database_manager = database_manager
         self._dynamic_capability = dynamic_capability
 
+    # ────────────────────── 前置检查 ──────────────────────
+
     def ensure_llm(self) -> bool:
-        """确保 LLM 模块可用。"""
+        """检查 LLM 模块是否可用，不可用时记录警告并返回 False。"""
         if self._diary_llm is None:
             self.logger.warning("Diary LLM module is not available")
             return False
         return True
 
     def _get_dynamic_capability(self) -> Any | None:
-        """获取动态能力实例，可能为 None。"""
+        """获取动态能力实例（用于发布日记动态），可能为 None。"""
         return self._dynamic_capability
 
+    # ────────────────────── Prompt 管理 ──────────────────────
+
     def _load_prompt_template(self) -> str:
-        """加载日记 prompt 模板。"""
+        """
+        加载日记 prompt 模板。
+
+        模板文件为 JSON 格式，包含 system_prompt 字段。
+        模板占位符说明：
+          {{character_name}}      — 角色名（如"洛天依"）
+          {{user_name}}           — 用户名
+          {{diary_date}}          — 日记日期
+          {{user_description}}    — 用户画像
+          {{user_preferences}}    — 用户偏好（JSON 序列化）
+          {{conversation_materials}} — 今日互动素材
+          {{character_persona}}   — 角色人设（由 update_prompt_with_persona 填入）
+          {{speaking_style}}      — 表达风格（由 update_prompt_with_persona 填入）
+
+        模板加载后会被缓存到 self._prompt_template，避免重复读文件。
+        """
         if self._prompt_template is not None:
             return self._prompt_template
 
@@ -87,10 +163,16 @@ class DiaryCapability:
         return self._prompt_template
 
     def update_prompt_with_persona(self, prompt: str, persona: str, style: str) -> str:
-        """用人设和表达风格替换 prompt 占位符。"""
+        """
+        用人设和表达风格替换 prompt 中的占位符。
+
+        如果角色运行时没有提供人设/风格，使用默认值以保证 prompt 完整性。
+        """
         return (prompt
                 .replace("{{character_persona}}", persona or "一个温柔体贴的虚拟歌手")
                 .replace("{{speaking_style}}", style or "温柔、细腻、有画面感，像在跟老朋友轻声诉说"))
+
+    # ────────────────────── 核心流程 ──────────────────────
 
     async def generate_and_post_diary(
         self,
@@ -105,9 +187,26 @@ class DiaryCapability:
         """
         生成日记并通过 DynamicCapability 发布为 Agent 动态。
 
+        执行顺序：
+          1. 前置检查（DynamicCapability、LLM、数据库是否可用）
+          2. 获取用户信息和角色人设
+          3. 收集今日聊天记录和用户动态作为素材
+          4. 构建 system prompt + 调 LLM 生成日记
+          5. 解析 LLM 输出为标准化格式
+          6. 通过 publish_agent_dynamic() 发布为私密动态
+
+        Args:
+            user_id: 目标用户 ID
+            character_id: 角色 ID（默认 luotianyi）
+            character_name: 角色显示名称（默认 洛天依）
+            character_persona: 角色人设描述，从 CharacterRuntime 获取
+            speaking_style: 角色表达风格，从 CharacterRuntime 获取
+            diary_date: 日记日期（YYYY-MM-DD），默认今天。支持为过去日期补写。
+
         Returns:
-            (成功标志, 消息, 动态对象)
+            (成功标志, 消息字符串, 动态对象字典 | None)
         """
+        # ── 前置检查 ──
         dynamic_capability = self._get_dynamic_capability()
         if dynamic_capability is None:
             return False, "DynamicCapability 不可用", None
@@ -118,19 +217,21 @@ class DiaryCapability:
         if self.database_manager is None:
             return False, "数据库管理器不可用", None
 
+        # ── 准备上下文 ──
         target_date = diary_date or date.today().strftime("%Y-%m-%d")
         user_name = self._get_user_name(user_id)
         user_description = self._get_user_description(user_id)
         user_preferences = self._get_user_preferences(user_id)
 
-        # 收集素材
+        # ── 收集素材（异步：需要查数据库） ──
         materials = await self._collect_materials(
             user_id=user_id,
             character_id=character_id,
             target_date=target_date,
         )
 
-        # 构建 prompt
+        # ── 构建 prompt ──
+        # 模板中的 {{xxx}} 占位符逐个替换为实际内容
         prompt_template = self._load_prompt_template()
         system_prompt = (
             prompt_template
@@ -143,7 +244,7 @@ class DiaryCapability:
         )
         system_prompt = self.update_prompt_with_persona(system_prompt, character_persona, speaking_style)
 
-        # 调用 LLM 生成
+        # ── 调用 LLM 生成日记 ──
         try:
             result = await self._diary_llm.generate_async(
                 system_prompt=system_prompt,
@@ -156,19 +257,21 @@ class DiaryCapability:
             self.logger.error(f"Diary generation LLM call failed: {exc}")
             return False, f"日记生成失败: {str(exc)}", None
 
-        # 通过 DynamicCapability.publish_agent_dynamic 发布为 Agent 动态
+        # ── 通过 DynamicCapability 发布为 Agent 动态 ──
         if not self._dynamic_capability:
             return False, "DynamicCapability 不可用", None
 
         try:
+            # publish_agent_dynamic 会创建一条 author_type=agent 的动态，
+            # 日记会被保存到 dynamic_posts 表，用户通过动态界面即可查看。
             ok, msg, item = self._dynamic_capability.publish_agent_dynamic(
                 character_id=character_id,
                 content=diary_text,
-                source_type=self.diary_source_type,
-                source_id=None,
-                visibility="private",
-                owner_user_id=user_id,
-                allow_comment=False,
+                source_type=self.diary_source_type,     # 标记为 "diary" 类型
+                source_id=None,                          # 非外部来源
+                visibility="private",                    # 仅用户自己可见
+                owner_user_id=user_id,                   # 归属于该用户
+                allow_comment=False,                     # 日记不支持评论
             )
             if ok:
                 self.logger.info(f"Diary posted as dynamic for user={user_id} date={target_date}")
@@ -180,26 +283,43 @@ class DiaryCapability:
             self.logger.error(f"DynamicCapability call failed: {exc}")
             return False, f"日记发布失败: {str(exc)}", None
 
+    # ────────────────────── 素材收集 ──────────────────────
+
     async def _collect_materials(
         self,
         user_id: str,
         character_id: str,
         target_date: str,
     ) -> str:
-        """收集日记素材：今日聊天记录、动态。"""
+        """
+        收集日记素材：今日聊天记录 + 今日用户动态。
+
+        返回值是一个纯文本字符串，直接嵌入到 prompt 的
+        {{conversation_materials}} 占位符中。
+
+        收集策略：
+          - 聊天记录：从数据库中拉取最近 100 条对话，在内存中按日期过滤
+          - 用户动态：通过 DynamicStore 获取最近 50 条，按日期 + author_type 过滤
+          - 两者各取最多 30 条，避免 prompt 过长
+
+        如果没有任何素材，返回友好的缺省提示（"今天没有特别的互动记录。"）。
+        这样 LLM 仍然可以生成一篇简单的日记，例如表达思念。
+        """
         if self.database_manager is None:
             return "今天没有特别的互动记录。"
 
         db = self.database_manager
         lines: List[str] = []
 
+        # 构造当日时间范围（用于字符串比较，因为数据库中的时间戳是 ISO 格式字符串）
         today_start = f"{target_date} 00:00:00"
         today_end = f"{target_date} 23:59:59"
 
+        # ── 收集聊天记录 ──
         try:
-            # 获取今日对话
             total = db.get_total_conversation_count(user_id, character_id=character_id)
             if total > 0:
+                # 取最近 100 条（最多），然后在内存中按日期过滤
                 conversations = db.get_history_from_db(
                     user_id, max(0, total - 100), total, character_id=character_id
                 )
@@ -209,13 +329,15 @@ class DiaryCapability:
                 ]
                 if today_convs:
                     lines.append("【今日聊天记录】")
-                    for c in today_convs[-30:]:  # 最多 30 条
+                    # 最多展示 30 条，防止 prompt 过长
+                    for c in today_convs[-30:]:
                         speaker = "用户" if c.source == "user" else "天依"
                         lines.append(f"[{speaker}] {c.content}")
         except Exception as exc:
+            # 聊天记录收集失败不应阻断整个日记流程，记录日志后继续
             self.logger.warning(f"Failed to collect conversations for diary: {exc}")
 
-        # 获取今日动态（用户发的）
+        # ── 收集用户今日动态 ──
         try:
             if db.dynamic_store is not None:
                 dynamics = db.dynamic_store.list_dynamics_for_user(user_id, limit=50)
@@ -236,13 +358,37 @@ class DiaryCapability:
 
         return "\n".join(lines)
 
+    # ────────────────────── 日记文本解析 ──────────────────────
+
     def _parse_diary_result(self, raw: str, target_date: Optional[str] = None) -> Optional[str]:
-        """解析 LLM 返回的日记文本，返回格式化后的完整文本。
+        """
+        解析 LLM 返回的日记文本，返回格式化后的完整文本。
 
-        期望格式：
-        心情：<标签>
+        LLM 输出期望格式（严格按照 prompt 要求）：
 
-        <正文内容>
+            心情：<标签>
+
+            <正文内容>
+
+        解析规则：
+          1. 匹配「心情：」或「心情:」行提取心情标签（支持中英文冒号）
+          2. 匹配「正文：」或「正文」行标记正文开始
+          3. 跳过「标题：」「摘要：」行（旧版 prompt 产物，兼容处理）
+          4. 正文中的空行保留（段落分隔），开头空行会被 strip 掉
+          5. 如果没有任何正文内容，回退使用原始 LLM 输出
+
+        返回格式：
+
+            2026-07-16 · 心情: 开心
+
+            <正文>
+
+        Args:
+            raw: LLM 原始输出文本
+            target_date: 日记日期（YYYY-MM-DD），用于构建表头
+
+        Returns:
+            格式化后的完整日记文本，解析失败返回 None
         """
         if not raw or not raw.strip():
             return None
@@ -254,31 +400,39 @@ class DiaryCapability:
 
         for line in lines:
             stripped = line.strip()
+
+            # 空行：在正文区域内保留（段落分隔），区域外忽略
             if not stripped:
                 if in_body:
                     body_lines.append("")
                 continue
 
+            # 提取心情标签（支持中英文冒号）
+            # 使用 removeprefix 链式处理两种冒号，比 split 更简洁
             if stripped.startswith("心情：") or stripped.startswith("心情:"):
-                # 处理中文冒号或英文冒号
                 mood = stripped.removeprefix("心情：").removeprefix("心情:").strip()
             elif stripped.startswith("正文：") or stripped == "正文":
                 in_body = True
             else:
+                # 跳过「标题：」「摘要：」行——这些是旧版 prompt 的产物，
+                # 日记动态不需要单独展示标题和摘要
                 if not in_body and (stripped.startswith("标题：") or stripped.startswith("摘要：")):
-                    continue  # 跳过标题/摘要行（动态不需要单独展示）
+                    continue
                 body_lines.append(stripped)
 
         body = "\n".join(body_lines).strip()
         if not body:
-            body = raw  # 保底
+            body = raw  # 保底：解析失败时使用原始输出
 
-        # 构建最终文本：日期 + 心情表头 + 正文
+        # 构建最终展示文本
         date_str = target_date or date.today().strftime("%Y-%m-%d")
         header = f"{date_str} · 心情: {mood}" if mood else f"{date_str}"
         return f"{header}\n\n{body}"
 
+    # ────────────────────── 用户信息查询 ──────────────────────
+
     def _get_user_name(self, user_id: str) -> str:
+        """获取用户昵称，用于 prompt 中个性化称呼。查询失败时返回「你」。"""
         if self.database_manager is None:
             return "你"
         prefs = self.database_manager.get_user_preferences(user_id)
@@ -287,12 +441,19 @@ class DiaryCapability:
         return "你"
 
     def _get_user_description(self, user_id: str) -> str:
+        """获取用户画像描述，用于 prompt 背景信息。"""
         if self.database_manager is None:
             return ""
         desc = self.database_manager.get_user_description(user_id)
         return desc or ""
 
     def _get_user_preferences(self, user_id: str) -> str:
+        """
+        获取用户偏好设置，序列化为 JSON 字符串。
+
+        偏好信息（称呼、关系设定、表达风格偏好等）会被注入 prompt，
+        帮助 LLM 写出更贴合用户与天依关系的日记。
+        """
         if self.database_manager is None:
             return ""
         prefs = self.database_manager.get_user_preferences(user_id)
@@ -300,8 +461,20 @@ class DiaryCapability:
             return json.dumps(prefs, ensure_ascii=False)
         return ""
 
+    # ────────────────────── 工具方法 ──────────────────────
+
     @staticmethod
     def _module_config(config: Any) -> Dict[str, Any]:
+        """
+        从能力配置中提取 LLM 模块配置。
+
+        config 结构示例：
+            {"llm_module": {"llm": {"name": "gpt-4o"}, "prompt_name": "diary"}}
+
+        兼容两种格式：
+          - 直接在 config 中嵌套 llm_module 字段
+          - config 本身就是模块配置（旧格式）
+        """
         if not isinstance(config, dict):
             return {}
         llm_module = config.get("llm_module")
