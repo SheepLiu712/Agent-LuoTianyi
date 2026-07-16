@@ -3,6 +3,7 @@ import asyncio
 from typing import Any, Dict, TYPE_CHECKING
 
 from src.capabilities.dynamic import DynamicCapability
+from src.capabilities.diary import DiaryCapability
 from src.capabilities.singing import SingingCapability
 from src.capabilities.speech import SpeechCapability
 from src.capabilities.image_understanding import ImageUnderstanding
@@ -39,6 +40,11 @@ class CapabilityManager:
             self.dynamics: DynamicCapability = DynamicCapability(self.config.get("dynamic", {}))
             self.dynamics.create_dynamic_composer_module(llm_service)
 
+            # 日记能力
+            self.logger.info("Start initializing Diary Capability...")
+            self.diary: DiaryCapability = DiaryCapability(self.config.get("diary", {}))
+            self.diary.create_diary_llm_module(llm_service)
+
             # 图像理解能力
             self.logger.info("Start initializing Image Understanding Capability...")
             self.image_understanding: ImageUnderstanding = ImageUnderstanding(
@@ -59,6 +65,7 @@ class CapabilityManager:
         if llm_service is not None:
             self.llm_service = llm_service
         self.dynamics.wire_dependencies(database_manager=database_manager)
+        self.diary.wire_dependencies(database_manager=database_manager)
         
         self.ensure_dependencies()
 
@@ -69,6 +76,7 @@ class CapabilityManager:
             "speech": self.speech,
             "singing": self.singing,
             "dynamics": self.dynamics,
+            "diary": self.diary,
             "image_understanding": self.image_understanding,
         }
         missing = [name for name, value in required.items() if value is None]
@@ -77,6 +85,7 @@ class CapabilityManager:
         self.speech.ensure_dependencies()
         self.singing.ensure_dependencies()
         self.dynamics.ensure_dependencies()
+        self.diary.ensure_llm()
         self.image_understanding.ensure_dependencies()
 
     async def stop(self) -> None:

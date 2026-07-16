@@ -111,6 +111,23 @@ class DynamicReadMarkRequest(BaseModel):
     token: str
 
 from fastapi import Form, File, UploadFile
+
+
+class DiaryListRequest(BaseModel):
+    username: str
+    token: str | None = None
+    limit: int = 20
+    cursor: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+
+
+class DiaryGenerateRequest(BaseModel):
+    username: str
+    token: str
+    date: str | None = None  # 指定日期，不指定则为今天
+
+
 class PictureChatRequest:
     def __init__(
         self,

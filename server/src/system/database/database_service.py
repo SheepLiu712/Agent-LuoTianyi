@@ -29,6 +29,7 @@ from src.system.database.sql_writer import run_sql_write
 from src.system.database.event_store import EventStore
 from src.system.database.memory_store import MemoryStore
 from src.system.database.dynamic_store import DynamicStore
+from src.system.database.diary_store import DiaryStore
 from src.system.database.user_store import UserStore
 from src.system.token_config import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
@@ -95,6 +96,7 @@ class DatabaseManager:
         self.event_store: Optional[EventStore] = None
         self.memory_store: Optional[MemoryStore] = None
         self.dynamic_store: Optional[DynamicStore] = None
+        self.diary_store: Optional[DiaryStore] = None
         self.user_store: Optional[UserStore] = None
         self.init_all_databases()
 
@@ -115,6 +117,11 @@ class DatabaseManager:
                 sql_session_factory=self.open_sql_session,
                 redis_buffer=self._ensure_redis(),
                 user_store=self.user_store,
+            )
+            self.diary_store = DiaryStore(
+                config=self.config.get("diary_store", {}),
+                sql_session_factory=self.open_sql_session,
+                redis_buffer=self._ensure_redis(),
             )
             logger.info("Main database initialized successfully.")
         except Exception as e:
@@ -140,6 +147,7 @@ class DatabaseManager:
             "event_store": self.event_store,
             "memory_store": self.memory_store,
             "dynamic_store": self.dynamic_store,
+            "diary_store": self.diary_store,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
