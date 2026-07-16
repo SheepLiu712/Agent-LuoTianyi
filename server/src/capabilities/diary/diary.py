@@ -145,7 +145,7 @@ class DiaryCapability:
                 system_prompt=system_prompt,
                 user_prompt=f"请为{user_name}撰写{target_date}的日记。",
             )
-            diary_text = self._parse_diary_result(result)
+            diary_text = self._parse_diary_result(result, target_date=target_date)
             if diary_text is None or diary_text.strip() == "":
                 return False, "日记格式解析失败", None
         except Exception as exc:
@@ -232,7 +232,7 @@ class DiaryCapability:
 
         return "\n".join(lines)
 
-    def _parse_diary_result(self, raw: str) -> Optional[str]:
+    def _parse_diary_result(self, raw: str, target_date: Optional[str] = None) -> Optional[str]:
         """解析 LLM 返回的日记文本，返回格式化后的完整文本。
 
         期望格式：
@@ -256,24 +256,22 @@ class DiaryCapability:
                 continue
 
             if stripped.startswith("心情：") or stripped.startswith("心情:"):
-                mood = stripped.split("：", 1)[-1].split(":", 1)[-1].strip()
+                # 处理中文冒号或英文冒号
+                mood = stripped.removeprefix("心情：").removeprefix("心情:").strip()
             elif stripped.startswith("正文：") or stripped == "正文":
                 in_body = True
             else:
-                if not in_body and stripped.startswith("标题：") or stripped.startswith("摘要："):
+                if not in_body and (stripped.startswith("标题：") or stripped.startswith("摘要：")):
                     continue  # 跳过标题/摘要行（动态不需要单独展示）
-                if not in_body:
-                    body_lines.append(stripped)
-                else:
-                    body_lines.append(stripped)
+                body_lines.append(stripped)
 
         body = "\n".join(body_lines).strip()
         if not body:
             body = raw  # 保底
 
         # 构建最终文本：日期 + 心情表头 + 正文
-        today_str = date.today().strftime("%Y-%m-%d")
-        header = f"{today_str} · 心情: {mood}" if mood else f"{today_str}"
+        date_str = target_date or date.today().strftime("%Y-%m-%d")
+        header = f"{date_str} · 心情: {mood}" if mood else f"{date_str}"
         return f"{header}\n\n{body}"
 
     def _get_user_name(self, user_id: str) -> str:
