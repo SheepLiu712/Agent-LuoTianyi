@@ -59,17 +59,15 @@ LineDivider {
     padding: 8px 20px;
     font-size: 15px;
     font-weight: 600;
+    background-color: #E2E8F0;
+    color: {{TEXT_DISABLED}};
 }
-#sendButton[enabled="true"] {
+#sendButton:enabled {
     background-color: {{TIANYI_BLUE}};
     color: {{TEXT_ON_PRIMARY}};
 }
-#sendButton[enabled="true"]:hover {
+#sendButton:enabled:hover {
     background-color: {{TIANYI_BLUE_DEEP}};
-}
-#sendButton[enabled="false"] {
-    background-color: #E2E8F0;
-    color: {{TEXT_DISABLED}};
 }
 
 /* ── 音量弹窗 ── */
@@ -104,23 +102,10 @@ QSlider::handle:vertical:hover {
 }
 
 /* ── 聊天气泡 ── */
-/* Agent 气泡：左侧声纹条 + 浅蓝背景 */
-ChatBubble[is_user="false"] QTextEdit {
-    background-color: {{AGENT_BUBBLE_BG}};
-    color: {{TEXT_PRIMARY}};
+/* 气泡内文本样式 — 由 Python 代码动态设置背景色 */
+ChatBubble QTextEdit {
     border: none;
-    border-left: 3px solid {{TIANYI_BLUE}};
-    border-radius: 0 10px 10px 10px;
-    padding: 10px 12px;
-    font-size: 15px;
-}
-
-/* 用户气泡：白色背景，右对齐圆角 */
-ChatBubble[is_user="true"] QTextEdit {
-    background-color: {{USER_BUBBLE_BG}};
-    color: {{TEXT_PRIMARY}};
-    border: 1px solid {{BORDER}};
-    border-radius: 10px 10px 0 10px;
+    border-radius: 10px;
     padding: 10px 12px;
     font-size: 15px;
 }

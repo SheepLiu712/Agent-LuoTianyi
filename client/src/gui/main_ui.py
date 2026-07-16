@@ -393,17 +393,7 @@ class CustomToolTip(QLabel):
         super().__init__(text, parent)
         self.setWindowFlags(Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setWindowOpacity(0.8)
-        self.setStyleSheet("""
-            QLabel {
-                background-color: #BBBBBB;
-                color: #222222;
-                border: 1px solid #76797C;
-                border-radius: 4px;
-                padding: 4px;
-                font-size: 14px;
-            }
-        """)
+        self.setWindowOpacity(0.9)
         
     def showEvent(self, event):
         super().showEvent(event)
@@ -484,94 +474,51 @@ class ChatWidget(QWidget):
         QTimer.singleShot(100, lambda: self.agent.load_history(self.load_history_num, -1))
 
     def init_ui(self):
-        # Right side background color
         self.setObjectName("ChatWidget")
-        self.setStyleSheet("""
-            QWidget#ChatWidget {
-                background-color: #DDDDDD;
-            }
-            QToolTip {
-                background-color: #66ccff;
-                color: #000000;
-                border: 1px solid #76797C;
-                padding: 1px;
-            }
-        """)
         self.setMinimumWidth(500)
-        
+
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        
+
         # History Area
         self.scroll_area = QScrollArea()
+        self.scroll_area.setObjectName("chatScrollArea")
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("""
-            QScrollArea {
-                background-color: transparent;
-                border: none;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: transparent;
-                width: 10px;
-                margin: 0px 0px 0px 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #A8A8A8;
-                min-height: 20px;
-                border-radius: 5px;
-            }
-            QScrollBar::add-line:vertical {
-                height: 0px;
-                subcontrol-position: bottom;
-                subcontrol-origin: margin;
-            }
-            QScrollBar::sub-line:vertical {
-                height: 0px;
-                subcontrol-position: top;
-                subcontrol-origin: margin;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: none;
-            }
-        """)
-        
+        self.scroll_area.setStyleSheet("background-color: transparent; border: none;")
+
         self.history_container = QWidget()
         self.history_container.setStyleSheet("background-color: transparent;")
         self.history_layout = QVBoxLayout(self.history_container)
         self.history_layout.addStretch() # Push messages to bottom
-        
+
         self.scroll_area.setWidget(self.history_container)
         self.scroll_area.verticalScrollBar().valueChanged.connect(self.on_scroll_value_changed)
-        
-        # Horizontal Line
+
+        # Horizontal Line (below scroll area)
         self.h_line = QFrame()
         self.h_line.setFrameShape(QFrame.Shape.HLine)
         self.h_line.setFrameShadow(QFrame.Shadow.Sunken)
-        self.h_line.setStyleSheet("background-color: #B9B9B9; border: none;") # DarkGray
-        self.h_line.setFixedHeight(2)
+        self.h_line.setStyleSheet("background-color: #E2E8F0; border: none;")
+        self.h_line.setFixedHeight(1)
 
         # Toolbar
         self.toolbar = QWidget()
-        self.toolbar.setStyleSheet("background-color: transparent; padding: 5px; border-radius: 0px; border: none;")
-        self.toolbar.setFixedHeight(30)
+        self.toolbar.setObjectName("toolbar")
+        self.toolbar.setFixedHeight(36)
         self.toolbar_layout = QHBoxLayout(self.toolbar)
         self.toolbar_layout.setContentsMargins(10, 0, 10, 0)
-        
+
         # Picture Button
         self.picture_btn = HoverButton(tooltip_text="发送图片")
         self.picture_btn.setIcon(QIcon("res/gui/picture_icon.png"))
         self.picture_btn.setFixedSize(24, 24)
-        self.picture_btn.setStyleSheet("QPushButton { border: none; background-color: transparent; } QPushButton:hover { background-color: #E0E0E0; border-radius: 4px; }")
-
         self.picture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.picture_btn.clicked.connect(self.on_picture_clicked)
 
         self.volume_btn = HoverButton(tooltip_text="音量")
         self.volume_btn.setIcon(QIcon("res/gui/volume.png"))
         self.volume_btn.setFixedSize(24, 24)
-        self.volume_btn.setStyleSheet("QPushButton { border: none; background-color: transparent; } QPushButton:hover { background-color: #E0E0E0; border-radius: 4px; }")
         self.volume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.volume_btn.pressed.connect(self.on_volume_button_clicked)
 
@@ -581,58 +528,24 @@ class ChatWidget(QWidget):
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.NoDropShadowWindowHint,
         )
-        self.volume_popup.setStyleSheet("background-color: #F6F6F6; border: 1px solid #B8B8B8; border-radius: 6px;")
-        self.volume_popup.setFixedSize(32, 150)
+        self.volume_popup.setObjectName("volumePopup")
+        self.volume_popup.setFixedSize(40, 160)
         volume_layout = QVBoxLayout(self.volume_popup)
-        volume_layout.setContentsMargins(4, 10, 4, 6)
+        volume_layout.setContentsMargins(6, 12, 6, 8)
         self.volume_slider = QSlider(Qt.Orientation.Vertical, self.volume_popup)
         self.volume_slider.setRange(0, 100)
         self.volume_slider.setValue(70)
         self.volume_slider.setTickPosition(QSlider.TickPosition.NoTicks)
-        self.volume_slider.setStyleSheet("""
-            QSlider::groove:vertical {
-                background: #D8D8D8;
-                width: 8px;
-                border-radius: 4px;
-            }
-            QSlider::sub-page:vertical {
-                background: #D8D8D8;
-                border-radius: 4px;
-            }
-            QSlider::add-page:vertical {
-                background: #66ccff;
-                border-radius: 4px;
-            }
-            QSlider::handle:vertical {
-                background: #FFFFFF;
-                border: 1px solid #9A9A9A;
-                height: 14px;
-                margin: -2px -4px;
-                border-radius: 7px;
-            }
-        """)
         self.volume_slider.valueChanged.connect(self.on_volume_changed)
         volume_layout.addWidget(self.volume_slider)
-        
+
         self.toolbar_layout.addWidget(self.picture_btn)
         self.toolbar_layout.addWidget(self.volume_btn)
-        
+
         # Settings Button
         self.settings_btn = HoverButton(tooltip_text="偏好设置")
-        icon_path = os.path.join("res", "gui", "setting.png")
-        self.settings_btn.setIcon(QIcon(icon_path))
+        self.settings_btn.setIcon(QIcon(os.path.join("res", "gui", "setting.png")))
         self.settings_btn.setFixedSize(24, 24)
-        self.settings_btn.setStyleSheet("""
-            QPushButton { 
-                border: none; 
-                background-color: transparent; 
-
-            } 
-            QPushButton:hover { 
-                background-color: #E0E0E0; 
-                border-radius: 4px; 
-            }
-        """)
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.clicked.connect(self.open_settings)
         self.toolbar_layout.addWidget(self.settings_btn)
@@ -640,53 +553,50 @@ class ChatWidget(QWidget):
         self.dynamic_btn = HoverButton(tooltip_text="动态")
         self.dynamic_btn.setIcon(QIcon("res/gui/dynamic.png"))
         self.dynamic_btn.setFixedSize(24, 24)
-        self.dynamic_btn.setStyleSheet("""
-            QPushButton { 
-                border: none; 
-                background-color: transparent; 
-            } 
-            QPushButton:hover { 
-                background-color: #E0E0E0; 
-                border-radius: 4px; 
-            }
-        """)
         self.dynamic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.dynamic_btn.clicked.connect(self.open_dynamics)
         self.toolbar_layout.addWidget(self.dynamic_btn)
-        
+
         self.toolbar_layout.addStretch()
 
-        # Horizontal Line 2
+        # Horizontal Line 2 (above input area)
         self.h_line_2 = QFrame()
         self.h_line_2.setFrameShape(QFrame.Shape.HLine)
         self.h_line_2.setFrameShadow(QFrame.Shadow.Sunken)
-        self.h_line_2.setStyleSheet("background-color: #CCCCCC; border: none;") 
-        self.h_line_2.setFixedHeight(2)
+        self.h_line_2.setStyleSheet("background-color: #E2E8F0; border: none;")
+        self.h_line_2.setFixedHeight(1)
 
         # Input Area
         self.input_box = QTextEdit()
-        self.input_box.setStyleSheet("background-color: transparent; padding: 5px; border-radius: 0px; border: none; font-size: 16px;")
-        self.input_box.setFixedHeight(120) # Fixed height
+        self.input_box.setObjectName("inputBox")
+        self.input_box.setFixedHeight(110)
         self.input_box.installEventFilter(self)
         self.input_box.textChanged.connect(self.on_text_changed)
 
         # Send Button
-        self.send_button = QPushButton("发送", self.input_box)
+        self.send_button = QPushButton("发送")
+        self.send_button.setObjectName("sendButton")
         self.send_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.send_button.resize(80, 30)
         self.send_button.clicked.connect(self.on_send_clicked)
-        
+
         self.can_send = False
         self.agent_free = True
         self.update_send_button_state()
         self.on_volume_changed(self.volume_slider.value())
-        
+
         layout.addWidget(self.scroll_area)
         layout.addWidget(self.h_line)
         layout.addWidget(self.toolbar)
         layout.addWidget(self.h_line_2)
-        layout.addWidget(self.input_box)
-        
+
+        # Input area horizontal layout: text edit + send button
+        input_layout = QHBoxLayout()
+        input_layout.setContentsMargins(8, 6, 8, 8)
+        input_layout.setSpacing(8)
+        input_layout.addWidget(self.input_box, 1)
+        input_layout.addWidget(self.send_button, 0, Qt.AlignmentFlag.AlignBottom)
+        layout.addLayout(input_layout)
+
         self.setLayout(layout)
         self.temp_is_user = True
 
@@ -789,29 +699,6 @@ class ChatWidget(QWidget):
 
     def update_send_button_state(self):
         self.send_button.setEnabled(self.can_send)
-        if self.can_send:
-            self.send_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #66CCFF;
-                    color: white;
-                    border: none;
-                    border-radius: 5px;
-                    font-size: 14px;
-                }
-                QPushButton:hover {
-                    background-color: #55BBEE;
-                }
-            """)
-        else:
-            self.send_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #D8D8D8;
-                    color: #B8B8B8;
-                    border: none;
-                    border-radius: 5px;
-                    font-size: 14px;
-                }
-            """)
     
     def update_send_pic_button_state(self):
         if self.can_send_pic:
@@ -887,10 +774,6 @@ class ChatWidget(QWidget):
                     if not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
                         self.handle_text_input()
                         return True
-            elif event.type() == QEvent.Type.Resize:
-                s = self.send_button.size()
-                self.send_button.move(self.input_box.width() - s.width() - 10, 
-                                      self.input_box.height() - s.height() - 10)
         return super().eventFilter(obj, event)
 
     def set_preferences_manager(self, preferences_manager):
@@ -949,8 +832,8 @@ class MainWindow(QWidget):
         self.v_line = QFrame()
         self.v_line.setFrameShape(QFrame.Shape.VLine)
         self.v_line.setFrameShadow(QFrame.Shadow.Sunken)
-        self.v_line.setStyleSheet("background-color: #B9B9B9; border: none;") # DarkGray
-        self.v_line.setFixedWidth(2)
+        self.v_line.setStyleSheet("background-color: #E2E8F0; border: none;")
+        self.v_line.setFixedWidth(1)
 
         # Right Side (Chat)
         self.chat_widget = ChatWidget(config=gui_config["chat_window"], agent_binder=ui_binder, network_client=network_client)
