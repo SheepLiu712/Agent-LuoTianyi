@@ -5,6 +5,7 @@ Voice Theme — PC 客户端统一设计令牌系统
 QSS 模板中的 {{PLACEHOLDER}} 替换为实际色值后返回完整样式表。
 """
 import os
+import sys
 from typing import Dict
 
 
@@ -44,10 +45,12 @@ class VoiceTheme:
     )
 
     # ── 路径 ──
-    QSS_DIR = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "resources", "qss",
-    )
+    # 在 frozen (PyInstaller) 环境下，QSS 文件相对于可执行文件路径查找
+    if getattr(sys, "frozen", False):
+        _base = os.path.dirname(os.path.abspath(sys.executable))
+    else:
+        _base = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    QSS_DIR = os.path.join(_base, "resources", "qss")
 
     @classmethod
     def as_dict(cls) -> Dict[str, str]:
