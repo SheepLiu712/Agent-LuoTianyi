@@ -31,8 +31,6 @@ from src.system.user_interface.types import (
     DynamicUnreadRequest,
     DynamicUnreadQuery,
     DynamicReadMarkRequest,
-    DiaryListRequest,
-    DiaryGenerateRequest,
 )
 from src.system.user_interface.websocket_service import ChatEventAcceptance, WebSocketConnection
 from src.system.admin.admin_interface import router as admin_router
@@ -451,116 +449,6 @@ async def update_image_client_path(
     """
     logger.info(f"Update image client path request from {request.username} for {request.uuid}")
     return await system_runtime.user_interface.update_image_client_path(request, system_runtime)
-
-
-# ——————————————————————————————————————————————————————————————————
-# 日记 API 路由
-# ——————————————————————————————————————————————————————————————————
-
-
-@app.post("/diaries/list")
-async def list_diaries(
-    request: DiaryListRequest,
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
-):
-    """获取当前用户的日记列表。"""
-    message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
-        request.username, request.token or ""
-    )
-    if not message_token_valid:
-        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-
-    diary_store = system_runtime.database_manager.diary_store
-    if diary_store is None:
-        raise HTTPException(status_code=503, detail="日记服务不可用")
-
-    return diary_store.list_diaries(
-        user_uuid,
-        limit=request.limit,
-        cursor=request.cursor,
-        date_from=request.date_from,
-        date_to=request.date_to,
-    )
-
-
-@app.get("/diaries/{diary_id}")
-async def get_diary(
-    diary_id: str,
-    username: str,
-    token: str,
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
-):
-    """获取单篇日记详情。"""
-    message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
-        username, token
-    )
-    if not message_token_valid:
-        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-
-    diary_store = system_runtime.database_manager.diary_store
-    if diary_store is None:
-        raise HTTPException(status_code=503, detail="日记服务不可用")
-
-    diary = diary_store.get_diary(diary_id)
-    if diary is None:
-        raise HTTPException(status_code=404, detail="日记不存在")
-
-    # 验证所有权
-    if diary["user_id"] != user_uuid:
-        raise HTTPException(status_code=403, detail="无权访问该日记")
-
-    return diary
-
-
-@app.post("/diaries/generate")
-async def generate_diary(
-    request: DiaryGenerateRequest,
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
-):
-    """手动触发日记生成。"""
-    message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
-        request.username, request.token
-    )
-    if not message_token_valid:
-        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-
-    diary_capability = getattr(system_runtime.capability_manager, "diary", None)
-    if diary_capability is None:
-        raise HTTPException(status_code=503, detail="日记能力不可用")
-
-    ok, msg, item = await diary_capability.generate_diary(
-        user_id=user_uuid,
-        diary_date=request.date,
-    )
-
-    if not ok:
-        if "已有日记" in msg:
-            return {"ok": True, "message": msg, "item": item}
-        raise HTTPException(status_code=400, detail=msg)
-
-    return {"ok": True, "message": "日记生成成功", "item": item}
-
-
-@app.get("/diaries/available")
-async def list_available_diary_dates(
-    username: str,
-    token: str,
-    limit: int = 30,
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
-):
-    """获取用户有日记的日期列表（用于日历展示）。"""
-    message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
-        username, token
-    )
-    if not message_token_valid:
-        raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-
-    diary_store = system_runtime.database_manager.diary_store
-    if diary_store is None:
-        raise HTTPException(status_code=503, detail="日记服务不可用")
-
-    dates = diary_store.list_available_dates(user_uuid, limit=limit)
-    return {"ok": True, "dates": dates}
 
 
 if __name__ == "__main__":

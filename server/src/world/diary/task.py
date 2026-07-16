@@ -1,14 +1,14 @@
 """
-日记生成世界任务：每天检查高活跃用户，为有足够互动的用户生成日记。
+日记生成世界任务：每天检查高活跃用户，为互动量达标的用户生成日记。
 
-调度逻辑：
-- 每天在指定时间运行一次（默认 UTC 16:00，即北京时间 0:00）
-- 遍历所有活跃用户，检查当日互动量
-- 互动量达标且尚未有日记的用户，触发日记生成
+日记以 Agent 动态（可见性=private）形式通过 DynamicCapability 发布，
+用户可在现有动态界面中查看。
+
+调度：每天 UTC 16:00（北京时间 0:00）运行一次。
+活跃度阈值：当日总对话数 >= 50 条（约 25 轮问答）。
 """
 from __future__ import annotations
 
-import json
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, TYPE_CHECKING
 
@@ -47,9 +47,9 @@ class DiaryTask(WorldTask):
         self.character_id = str(self.config.get("character_id", "luotianyi"))
         self.character_name = str(self.config.get("character_name", "洛天依"))
 
-        # 活跃度阈值：当日互动消息数达到此值才生成日记
-        self.min_daily_conversations = int(self.config.get("min_daily_conversations", 10))
-        # 最大日记生成用户数（单次运行）
+        # 高活跃用户阈值：当日总对话数 >= 50 条（约 25 轮问答）
+        # 对日活用户来说，50 条以下是比较随意的聊天，50 条以上才算高活跃
+        self.min_daily_conversations = int(self.config.get("min_daily_conversations", 50))
         self.max_users_per_run = int(self.config.get("max_users_per_run", 20))
 
     def initialize(self, system_runtime: "SystemRuntime") -> None:
@@ -80,15 +80,23 @@ class DiaryTask(WorldTask):
     async def run_once(self) -> WorldTaskResult:
         self.ensure_dependencies()
 
-        if self.database_manager is None:
-            return WorldTaskResult.skipped_result(self.task_name, "database_manager is unavailable")
-
-        diary_capability = self._get_diary_capability()
-        if diary_capability is None:
+        diary_cap = self._get_diary_capability()
+        if diary_cap is None:
             return WorldTaskResult.skipped_result(self.task_name, "diary capability is unavailable")
 
-        if not diary_capability.ensure_llm():
+        if not diary_cap.ensure_llm():
             return WorldTaskResult.skipped_result(self.task_name, "diary LLM module is unavailable")
+
+        # 获取角色人设和表达风格
+        character_persona = ""
+        speaking_style = ""
+        if self.character_runtime is not None:
+            try:
+                ctx = self.character_runtime.dynamic_context()
+                character_persona = getattr(ctx, "character_persona", "") or ""
+                speaking_style = getattr(ctx, "speaking_style", "") or ""
+            except Exception as exc:
+                self.logger.warning(f"Failed to get character context: {exc}")
 
         today_str = date.today().strftime("%Y-%m-%d")
         active_users = self._find_active_users(today_str)
@@ -102,96 +110,85 @@ class DiaryTask(WorldTask):
                 diaries_created=0,
             )
 
-        self.logger.info(f"Found {len(active_users)} active users for diary generation")
         created_count = 0
-        skipped_count = 0
         failed_count = 0
 
         for user_id in active_users[: self.max_users_per_run]:
-            ok, msg, item = await diary_capability.generate_diary(
+            ok, msg, item = await diary_cap.generate_and_post_diary(
                 user_id=user_id,
                 character_id=self.character_id,
                 character_name=self.character_name,
+                character_persona=character_persona,
+                speaking_style=speaking_style,
                 diary_date=today_str,
             )
 
             if ok:
                 created_count += 1
-                self.logger.info(f"Diary created for user={user_id}")
             elif "已有日记" in msg:
-                skipped_count += 1
+                # 已有日记不算失败
+                continue
             else:
                 failed_count += 1
                 self.logger.warning(f"Diary generation failed for user={user_id}: {msg}")
 
         return WorldTaskResult.success(
             self.task_name,
-            f"diary generation completed: {created_count} created, {skipped_count} skipped, {failed_count} failed",
+            f"diary generation completed: {created_count} created, {failed_count} failed",
             active_users_count=len(active_users),
             diaries_created=created_count,
-            diaries_skipped=skipped_count,
             diaries_failed=failed_count,
         )
 
     def _find_active_users(self, target_date: str) -> List[str]:
         """
-        查找活跃用户：在目标日期有足够互动量的用户。
-        这里使用简单策略——检查今日有聊天记录的用户。
+        查找高活跃用户：在目标日期互动量 >= min_daily_conversations 的用户。
         """
         if self.database_manager is None:
             return []
-
         db = self.database_manager
-        active_users: List[str] = []
 
         try:
-            # 从会话记录中查找活跃用户
-            # 获取所有有聊天记录的用户
             sql_session = db.get_sql_session()
             if sql_session is None:
                 return []
 
-            from src.system.database.sql_database import Conversation, User
+            from src.system.database.sql_database import Conversation
 
             try:
-                # 查找今天有聊天记录的用户
                 today_start = f"{target_date} 00:00:00"
                 today_end = f"{target_date} 23:59:59"
 
                 results = (
                     sql_session.query(
                         Conversation.user_id,
-                        Conversation.character_id,
                         func.count(Conversation.id).label("msg_count"),
                     )
                     .filter(Conversation.timestamp >= today_start)
                     .filter(Conversation.timestamp <= today_end)
                     .filter(Conversation.character_id == self.character_id)
-                    .group_by(Conversation.user_id, Conversation.character_id)
+                    .group_by(Conversation.user_id)
                     .having(func.count(Conversation.id) >= self.min_daily_conversations)
                     .all()
                 )
 
+                active_users = []
                 for row in results:
                     user_id = row[0]
-                    # 检查是否已有日记
-                    if db.diary_store and not db.diary_store.has_diary_for_date(
-                        user_id, target_date, character_id=self.character_id
-                    ):
-                        active_users.append(user_id)
+                    active_users.append(user_id)
+                return active_users
 
             except Exception as exc:
                 self.logger.error(f"Query active users failed: {exc}")
+                return []
             finally:
                 sql_session.close()
 
         except Exception as exc:
             self.logger.error(f"Failed to find active users: {exc}")
-
-        return active_users
+            return []
 
     def _get_diary_capability(self):
-        """获取日记能力实例。"""
         if self.system_runtime is None:
             return None
         capability_manager = getattr(self.system_runtime, "capability_manager", None)

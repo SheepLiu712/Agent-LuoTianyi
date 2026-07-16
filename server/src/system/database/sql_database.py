@@ -38,7 +38,6 @@ class User(Base):
     dynamic_posts = relationship("DynamicPost", back_populates="owner_user", cascade="all, delete-orphan")
     dynamic_comments = relationship("DynamicComment", back_populates="owner_user", cascade="all, delete-orphan")
     dynamic_read_state = relationship("DynamicReadState", back_populates="user", uselist=False, cascade="all, delete-orphan")
-    diary_entries = relationship("DiaryEntry", back_populates="user", cascade="all, delete-orphan")
 
 class InviteCode(Base):
     __tablename__ = "invite_codes"
@@ -339,33 +338,6 @@ class DynamicReadState(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     user = relationship("User", back_populates="dynamic_read_state")
-
-
-class DiaryEntry(Base):
-    """日记条目：为高活跃用户生成的每日日记。"""
-    __tablename__ = "diary_entries"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String, ForeignKey("users.uuid"), nullable=False, index=True)
-    character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi", index=True)
-    diary_date = Column(String, nullable=False, index=True)          # 日记日期 "YYYY-MM-DD"
-    title = Column(String, nullable=False)
-    content = Column(Text, nullable=False)                           # 日记正文（Markdown 格式）
-    summary = Column(String, nullable=True)                          # 简要摘要（用于展示）
-    mood = Column(String, nullable=True)                             # 心情标签，如 "开心/温暖/平静"
-    tags = Column(Text, nullable=True)                               # JSON 标签列表
-    source = Column(String, nullable=False, default="auto")          # "auto" / "manual"
-    status = Column(String, nullable=False, default="published", server_default="published", index=True)
-    metadata_json = Column(Text, nullable=True)                      # 额外的元数据（如生成所用的素材来源）
-    created_at = Column(DateTime, default=datetime.now, index=True)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-    user = relationship("User", back_populates="diary_entries")
-
-    __table_args__ = (
-        # 同一用户同一天只能有一篇日记
-        UniqueConstraint("user_id", "character_id", "diary_date", name="uq_diary_per_day"),
-    )
 
 
 # Database URL

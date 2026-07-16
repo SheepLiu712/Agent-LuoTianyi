@@ -65,7 +65,7 @@ class CapabilityManager:
         if llm_service is not None:
             self.llm_service = llm_service
         self.dynamics.wire_dependencies(database_manager=database_manager)
-        self.diary.wire_dependencies(database_manager=database_manager)
+        self.diary.wire_dependencies(database_manager=database_manager, dynamic_capability=self.dynamics)
         
         self.ensure_dependencies()
 
