@@ -34,6 +34,11 @@ class VoiceTheme:
     # ── 功能色 ──
     ERROR = "#EF4444"               # 错误红
 
+    # ── 动态对话框 ──
+    DYNAMICS_SURFACE = "#F6F7F9"    # 动态页背景（区别于主背景的冷白）
+    DYNAMICS_ACTION = "#1296DB"     # 动态编辑器操作按钮色
+    DYNAMICS_ERROR = "#A35C00"      # 动态错误/警告文字
+
     # ── 气泡 ──
     AGENT_BUBBLE_BG = "#E0F2FE"     # Agent 气泡背景
     USER_BUBBLE_BG = "#FFFFFF"      # 用户气泡背景

@@ -213,36 +213,40 @@ QMessageBox QPushButton {
 
 /* ── 动态对话框 ── */
 QDialog#dynamicsDialog {
-    background-color: #F6F7F9;
+    background-color: {{DYNAMICS_SURFACE}};
 }
 
 QLabel#dynamicsTitle {
     font-size: 20px;
     font-weight: 700;
-    color: #243447;
+    color: {{TEXT_PRIMARY}};
 }
 
 QLabel#dynamicsMeta {
     font-size: 12px;
-    color: #667481;
+    color: {{TEXT_SECONDARY}};
 }
 
 QLabel#dynamicsContent {
-    color: #243447;
+    color: {{TEXT_PRIMARY}};
 }
 
 QLabel#dynamicsError {
     font-size: 12px;
-    color: #A35C00;
+    color: {{DYNAMICS_ERROR}};
 }
 
 QLabel#dynamicsStatus {
-    color: #A35C00;
+    color: {{DYNAMICS_ERROR}};
 }
 
 QLabel#dynamicsSectionLabel {
     font-weight: 600;
-    color: #243447;
+    color: {{TEXT_PRIMARY}};
+}
+
+QLabel#dynamicItemPreview {
+    color: {{TEXT_PRIMARY}};
 }
 
 QDialog#dynamicsDialog QPushButton {
@@ -289,33 +293,33 @@ QLabel#dynamicDetailPlaceholder {
 
 /* 动态编辑器 */
 QDialog#dynamicEditor {
-    background: #F6F7F9;
+    background: {{DYNAMICS_SURFACE}};
 }
 
 QLabel#editorTitle {
     font-size: 18px;
     font-weight: 800;
-    color: #243447;
+    color: {{TEXT_PRIMARY}};
 }
 
 QDialog#dynamicEditor QPushButton#editorAction {
     background: transparent;
-    color: #1296DB;
+    color: {{DYNAMICS_ACTION}};
     border: none;
     padding: 8px 10px;
     font-weight: 700;
 }
 QDialog#dynamicEditor QPushButton#editorAction:hover {
-    background: #E6F4FE;
+    background: {{TIANYI_BLUE_GLOW}};
     border-radius: 6px;
 }
 QDialog#dynamicEditor QPushButton#editorAction:disabled {
-    color: #8AA7B8;
+    color: {{TEXT_DISABLED}};
 }
 
 QDialog#dynamicEditor QTextEdit {
-    background: #FFFFFF;
-    border: 1px solid #D5DEE7;
+    background: {{CARD}};
+    border: 1px solid {{BORDER}};
     border-radius: 6px;
     padding: 10px;
     font-size: 15px;
