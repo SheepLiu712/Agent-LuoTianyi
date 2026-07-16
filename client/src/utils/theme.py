@@ -20,7 +20,6 @@ class VoiceTheme:
     # ── 背景 ──
     SURFACE = "#FAFAFA"              # 主背景（舞台白）
     CARD = "#FFFFFF"                 # 卡片/面板背景
-    CHAT_BG = "#DDDDDD"             # 聊天区背景（保留原色）
 
     # ── 文字 ──
     TEXT_PRIMARY = "#1E293B"         # 主要文字（板岩黑）
@@ -30,19 +29,13 @@ class VoiceTheme:
 
     # ── 边框 & 分割线 ──
     BORDER = "#E2E8F0"              # 默认边框
-    DIVIDER = "#B9B9B9"             # 分割线（保留原色）
 
     # ── 功能色 ──
-    ACCENT = "#F97316"              # 暖橙点缀
-    SUCCESS = "#34D399"             # 成功绿
     ERROR = "#EF4444"               # 错误红
-    WARNING = "#F59E0B"             # 警告黄
-    INFO = "#66CCFF"                # 信息蓝
 
     # ── 气泡 ──
     AGENT_BUBBLE_BG = "#E0F2FE"     # Agent 气泡背景
     USER_BUBBLE_BG = "#FFFFFF"      # 用户气泡背景
-    BUBBLE_RADIUS = "10px"          # 气泡圆角
 
     # ── 字型 ──
     FONT_FAMILY = (
