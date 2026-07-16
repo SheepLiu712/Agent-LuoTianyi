@@ -1,0 +1,212 @@
+/* ========================================
+   Voice Dialogs — 对话框通用样式
+   ======================================== */
+
+/* ── 对话框全局 ── */
+QDialog {
+    background-color: {{CARD}};
+}
+
+/* ── 标签页（TabWidget） ── */
+QTabWidget::pane {
+    border: none;
+    background-color: transparent;
+}
+QTabBar::tab {
+    font-size: 15px;
+    padding: 8px 20px;
+    margin-right: 2px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: {{TEXT_SECONDARY}};
+    background-color: transparent;
+}
+QTabBar::tab:selected {
+    color: {{TIANYI_BLUE}};
+    border-bottom: 2px solid {{TIANYI_BLUE}};
+    font-weight: 600;
+}
+QTabBar::tab:hover:!selected {
+    color: {{TEXT_PRIMARY}};
+    border-bottom: 2px solid {{BORDER}};
+}
+
+/* ── 按钮（通用） ── */
+QPushButton#primaryButton {
+    background-color: {{TIANYI_BLUE}};
+    color: {{TEXT_ON_PRIMARY}};
+    border: none;
+    border-radius: 8px;
+    padding: 10px 24px;
+    font-size: 15px;
+    font-weight: 600;
+}
+QPushButton#primaryButton:hover {
+    background-color: {{TIANYI_BLUE_DEEP}};
+}
+QPushButton#primaryButton:pressed {
+    background-color: #2980B9;
+}
+QPushButton#primaryButton:disabled {
+    background-color: #E2E8F0;
+    color: {{TEXT_DISABLED}};
+}
+
+/* ── 文字按钮 ── */
+QPushButton#textButton {
+    background-color: transparent;
+    color: {{TIANYI_BLUE_DEEP}};
+    border: none;
+    padding: 4px 8px;
+    font-size: 14px;
+    text-align: left;
+}
+QPushButton#textButton:hover {
+    color: {{TIANYI_BLUE}};
+}
+
+/* ── 危险按钮 ── */
+QPushButton#dangerButton {
+    background-color: {{ERROR}};
+    color: {{TEXT_ON_PRIMARY}};
+    border: none;
+    border-radius: 8px;
+    padding: 10px 24px;
+    font-size: 14px;
+}
+QPushButton#dangerButton:hover {
+    background-color: #DC2626;
+}
+
+/* ── 输入框（通用） ── */
+QLineEdit, QTextEdit, QSpinBox, QDateEdit, QTimeEdit {
+    border: 1px solid {{BORDER}};
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 14px;
+    color: {{TEXT_PRIMARY}};
+    background-color: {{CARD}};
+}
+QLineEdit:focus, QTextEdit:focus, QSpinBox:focus, QDateEdit:focus, QTimeEdit:focus {
+    border: 1px solid {{TIANYI_BLUE}};
+    background-color: {{CARD}};
+}
+QLineEdit:disabled, QTextEdit:disabled {
+    background-color: #F1F5F9;
+    color: {{TEXT_DISABLED}};
+}
+QLineEdit::placeholder, QTextEdit::placeholder {
+    color: {{TEXT_DISABLED}};
+}
+
+/* ── 下拉框 ── */
+QComboBox {
+    border: 1px solid {{BORDER}};
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 14px;
+    color: {{TEXT_PRIMARY}};
+    background-color: {{CARD}};
+}
+QComboBox:focus {
+    border: 1px solid {{TIANYI_BLUE}};
+}
+QComboBox::drop-down {
+    border: none;
+    width: 28px;
+}
+QComboBox::down-arrow {
+    width: 10px;
+    height: 10px;
+}
+QComboBox QAbstractItemView {
+    border: 1px solid {{BORDER}};
+    border-radius: 6px;
+    background-color: {{CARD}};
+    selection-background-color: {{TIANYI_BLUE_GLOW}};
+    selection-color: {{TEXT_PRIMARY}};
+    padding: 4px;
+}
+
+/* ── 复选框 ── */
+QCheckBox {
+    font-size: 14px;
+    color: {{TEXT_PRIMARY}};
+    spacing: 6px;
+}
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 1px solid {{BORDER}};
+}
+QCheckBox::indicator:checked {
+    background-color: {{TIANYI_BLUE}};
+    border-color: {{TIANYI_BLUE}};
+}
+
+/* ── 标签（通用） ── */
+QLabel#dialogTitle {
+    font-size: 20px;
+    font-weight: 700;
+    color: {{TIANYI_BLUE}};
+}
+QLabel#dialogDesc {
+    font-size: 13px;
+    color: {{TEXT_SECONDARY}};
+}
+QLabel#sectionLabel {
+    font-size: 14px;
+    font-weight: 600;
+    color: {{TEXT_PRIMARY}};
+}
+
+/* ── 列表（动态等） ── */
+QListWidget {
+    background-color: {{CARD}};
+    border: 1px solid {{BORDER}};
+    border-radius: 6px;
+    padding: 4px;
+    outline: none;
+}
+QListWidget::item {
+    border: none;
+    border-radius: 6px;
+    padding: 6px;
+    margin: 2px;
+}
+QListWidget::item:selected {
+    background-color: {{TIANYI_BLUE_GLOW}};
+    border-left: 3px solid {{TIANYI_BLUE}};
+}
+QListWidget::item:hover:!selected {
+    background-color: #F1F5F9;
+}
+
+/* ── 对话框底部按钮行 ── */
+QDialogButtonBox QPushButton {
+    background-color: {{TIANYI_BLUE}};
+    color: {{TEXT_ON_PRIMARY}};
+    border: none;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-size: 14px;
+}
+QDialogButtonBox QPushButton:hover {
+    background-color: {{TIANYI_BLUE_DEEP}};
+}
+
+/* ── 消息框 ── */
+QMessageBox {
+    background-color: {{CARD}};
+}
+QMessageBox QLabel {
+    color: {{TEXT_PRIMARY}};
+    font-size: 14px;
+}
+QMessageBox QPushButton {
+    min-width: 80px;
+    padding: 6px 16px;
+    border-radius: 6px;
+    font-size: 13px;
+}

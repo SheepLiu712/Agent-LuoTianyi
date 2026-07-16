@@ -1,0 +1,145 @@
+/* ========================================
+   Voice Chat — 聊天区域专属样式
+   ======================================== */
+
+/* ── 聊天主容器 ── */
+#ChatWidget {
+    background-color: {{SURFACE}};
+}
+
+/* ── 消息历史滚动区 ── */
+QScrollArea#chatScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+/* ── 分割线 ── */
+LineDivider {
+    background-color: {{BORDER}};
+    border: none;
+}
+
+/* ── 工具栏 ── */
+#toolbar {
+    background-color: transparent;
+    padding: 4px 10px;
+    border: none;
+}
+#toolbar QPushButton {
+    border: none;
+    background-color: transparent;
+    padding: 4px;
+    border-radius: 6px;
+}
+#toolbar QPushButton:hover {
+    background-color: #E8E8E8;
+}
+#toolbar QPushButton:pressed {
+    background-color: #D0D0D0;
+}
+
+/* ── 输入框 ── */
+#inputBox {
+    background-color: {{CARD}};
+    border: 1px solid {{BORDER}};
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 15px;
+    color: {{TEXT_PRIMARY}};
+}
+#inputBox:focus {
+    border: 1px solid {{TIANYI_BLUE}};
+    background-color: {{CARD}};
+}
+
+/* ── 发送按钮 ── */
+#sendButton {
+    border: none;
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-size: 15px;
+    font-weight: 600;
+}
+#sendButton[enabled="true"] {
+    background-color: {{TIANYI_BLUE}};
+    color: {{TEXT_ON_PRIMARY}};
+}
+#sendButton[enabled="true"]:hover {
+    background-color: {{TIANYI_BLUE_DEEP}};
+}
+#sendButton[enabled="false"] {
+    background-color: #E2E8F0;
+    color: {{TEXT_DISABLED}};
+}
+
+/* ── 音量弹窗 ── */
+#volumePopup {
+    background-color: {{CARD}};
+    border: 1px solid {{BORDER}};
+    border-radius: 8px;
+}
+QSlider::groove:vertical {
+    background: #E2E8F0;
+    width: 6px;
+    border-radius: 3px;
+}
+QSlider::add-page:vertical {
+    background: {{TIANYI_BLUE}};
+    border-radius: 3px;
+}
+QSlider::sub-page:vertical {
+    background: #E2E8F0;
+    border-radius: 3px;
+}
+QSlider::handle:vertical {
+    background: {{CARD}};
+    border: 2px solid {{TIANYI_BLUE}};
+    height: 16px;
+    width: 16px;
+    margin: -5px -2px;
+    border-radius: 8px;
+}
+QSlider::handle:vertical:hover {
+    background: {{TIANYI_BLUE_LIGHT}};
+}
+
+/* ── 聊天气泡 ── */
+/* Agent 气泡：左侧声纹条 + 浅蓝背景 */
+ChatBubble[is_user="false"] QTextEdit {
+    background-color: {{AGENT_BUBBLE_BG}};
+    color: {{TEXT_PRIMARY}};
+    border: none;
+    border-left: 3px solid {{TIANYI_BLUE}};
+    border-radius: 0 10px 10px 10px;
+    padding: 10px 12px;
+    font-size: 15px;
+}
+
+/* 用户气泡：白色背景，右对齐圆角 */
+ChatBubble[is_user="true"] QTextEdit {
+    background-color: {{USER_BUBBLE_BG}};
+    color: {{TEXT_PRIMARY}};
+    border: 1px solid {{BORDER}};
+    border-radius: 10px 10px 0 10px;
+    padding: 10px 12px;
+    font-size: 15px;
+}
+
+/* 图片气泡 */
+ChatImageBubble {
+    background-color: transparent;
+}
+ChatImageBubble QLabel {
+    border: 1px solid {{BORDER}};
+    border-radius: 10px;
+    background-color: transparent;
+}
+
+/* 气泡播放/停止图标 hover 反馈 */
+ClickableLabel {
+    background-color: transparent;
+    border-radius: 14px;
+}
+ClickableLabel:hover {
+    background-color: rgba(102, 204, 255, 0.15);
+}
