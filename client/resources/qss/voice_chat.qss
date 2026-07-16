@@ -13,6 +13,11 @@ QScrollArea#chatScrollArea {
     border: none;
 }
 
+/* ── 消息历史容器 ── */
+#history_container {
+    background-color: transparent;
+}
+
 /* ── 分割线 ── */
 LineDivider {
     background-color: {{BORDER}};

@@ -485,10 +485,8 @@ class ChatWidget(QWidget):
         self.scroll_area = QScrollArea()
         self.scroll_area.setObjectName("chatScrollArea")
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setStyleSheet("background-color: transparent; border: none;")
-
         self.history_container = QWidget()
-        self.history_container.setStyleSheet("background-color: transparent;")
+        self.history_container.setObjectName("history_container")
         self.history_layout = QVBoxLayout(self.history_container)
         self.history_layout.addStretch() # Push messages to bottom
 
