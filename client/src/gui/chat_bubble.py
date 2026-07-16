@@ -257,16 +257,13 @@ class ChatBubble(QWidget):
         self._label.setCursor(Qt.CursorShape.PointingHandCursor)
         self._label.clicked.connect(self._on_agent_label_clicked)
 
-        # insert into layout after content_widget if possible
+        # insert into layout after content_widget (已有 stretch 在末尾，无需重复添加)
         try:
             idx = self._layout.indexOf(self.content_widget)
             if idx >= 0:
                 self._layout.insertWidget(idx + 1, self._label)
-                self._layout.addStretch()
             else:
-                # fallback: append at end
                 self._layout.addWidget(self._label)
-                self._layout.addStretch()
         except Exception:
             # silent fallback
             pass
