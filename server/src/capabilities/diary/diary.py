@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from src.utils.logger import get_logger
@@ -63,6 +63,10 @@ class DiaryCapability:
             self.logger.warning("Diary LLM module is not available")
             return False
         return True
+
+    def _get_dynamic_capability(self):
+        """获取动态能力实例。"""
+        return self._dynamic_capability
 
     def _load_prompt_template(self) -> str:
         """加载日记 prompt 模板。"""

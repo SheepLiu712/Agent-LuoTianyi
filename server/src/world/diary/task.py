@@ -9,7 +9,7 @@
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date
 from typing import Any, Dict, List, TYPE_CHECKING
 
 from sqlalchemy import func
@@ -125,9 +125,6 @@ class DiaryTask(WorldTask):
 
             if ok:
                 created_count += 1
-            elif "已有日记" in msg:
-                # 已有日记不算失败
-                continue
             else:
                 failed_count += 1
                 self.logger.warning(f"Diary generation failed for user={user_id}: {msg}")
