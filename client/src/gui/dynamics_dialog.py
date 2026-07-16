@@ -109,14 +109,14 @@ class DynamicListItemWidget(QWidget):
 
         # 第一行：名称（加粗）
         header = QLabel(f"{dynamic.get('author_name', '-')}")
-        header.setStyleSheet("font-weight: 700; color: #243447;")
+        header.setObjectName("dynamicItemHeader")
         text_box.addWidget(header)
 
         # 第二行：来源 · 时间（小字灰色）
         meta = QLabel(
             f"{_source_label(str(dynamic.get('source_type', '')))} · {dynamic.get('created_at', '-')}"
         )
-        meta.setStyleSheet("font-size: 12px; color: #667481;")
+        meta.setObjectName("dynamicsMeta")
         text_box.addWidget(meta)
 
         # 第三行：单行预览（截断 + 省略号）
@@ -125,7 +125,7 @@ class DynamicListItemWidget(QWidget):
         preview = (preview[:48] + "…") if len(preview) > 48 else preview
         preview_label = QLabel(preview or "-")
         preview_label.setFixedHeight(18)  # 固定单行高度
-        preview_label.setStyleSheet("color: #334155; font-size: 13px;")
+        preview_label.setObjectName("dynamicItemPreview")
         text_box.addWidget(preview_label)
 
         layout.addLayout(text_box, 1)
@@ -149,13 +149,13 @@ class DynamicCommentWidget(QWidget):
         header = QLabel(
             f"{comment.get('author_name', '-')} · {comment.get('created_at', '-')}"
         )
-        header.setStyleSheet("font-size: 12px; color: #667481;")
+        header.setObjectName("dynamicsMeta")
         text_box.addWidget(header)
 
         # 正文
         content = QLabel(str(comment.get("content", "") or "-"))
+        content.setObjectName("dynamicsContent")
         content.setWordWrap(True)
-        content.setStyleSheet("color: #243447;")
         text_box.addWidget(content)
 
         # 错误信息（如有）
@@ -166,8 +166,8 @@ class DynamicCommentWidget(QWidget):
             errors.append(f"记忆失败: {comment.get('memory_error')}")
         if errors:
             error_label = QLabel("\n".join(errors))
+            error_label.setObjectName("dynamicsError")
             error_label.setWordWrap(True)
-            error_label.setStyleSheet("font-size: 12px; color: #A35C00;")
             text_box.addWidget(error_label)
 
         layout.addLayout(text_box, 1)
@@ -185,45 +185,14 @@ class DynamicEditorDialog(QDialog):
         self._build_ui()
 
     def _build_ui(self):
-        self.setStyleSheet(
-            """
-            QDialog {
-                background: #F6F7F9;
-            }
-            QLabel#editorTitle {
-                font-size: 18px;
-                font-weight: 800;
-                color: #243447;
-            }
-            QTextEdit {
-                background: #FFFFFF;
-                border: 1px solid #D5DEE7;
-                border-radius: 6px;
-                padding: 10px;
-                font-size: 15px;
-            }
-            QPushButton {
-                background: transparent;
-                color: #1296DB;
-                border: none;
-                padding: 8px 10px;
-                font-weight: 700;
-            }
-            QPushButton:hover {
-                background: #E6F4FE;
-                border-radius: 6px;
-            }
-            QPushButton:disabled {
-                color: #8AA7B8;
-            }
-            """
-        )
+        self.setObjectName("dynamicEditor")
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 14, 16, 16)
         root.setSpacing(14)
 
         header = QHBoxLayout()
         self.exit_button = QPushButton("退出编辑")
+        self.exit_button.setObjectName("editorAction")
         self.exit_button.clicked.connect(self.reject)
         header.addWidget(self.exit_button)
         title = QLabel("发一条动态")
@@ -231,6 +200,7 @@ class DynamicEditorDialog(QDialog):
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header.addWidget(title, 1)
         self.publish_button = QPushButton("发布")
+        self.publish_button.setObjectName("editorAction")
         self.publish_button.clicked.connect(self._publish)
         header.addWidget(self.publish_button)
         root.addLayout(header)
@@ -239,7 +209,7 @@ class DynamicEditorDialog(QDialog):
         self.input.setPlaceholderText("分享一点最近发生的事...")
         root.addWidget(self.input, 1)
         hint = QLabel("只有你、天依和管理员能够看到动态")
-        hint.setStyleSheet("color: #667481; font-size: 13px;")
+        hint.setObjectName("dynamicsMeta")
         root.addWidget(hint)
 
     def _publish(self):
@@ -308,51 +278,7 @@ class DynamicsDialog(QDialog):
 
     def _build_ui(self):
         """构建完整 UI 布局。"""
-        self.setStyleSheet(
-            """
-            QDialog {
-                background: #F6F7F9;
-            }
-            QLabel#titleLabel {
-                font-size: 20px;
-                font-weight: 700;
-                color: #243447;
-            }
-            QListWidget, QTextEdit {
-                background: #FFFFFF;
-                border: 1px solid #D5DEE7;
-                border-radius: 6px;
-                padding: 4px;
-            }
-            QListWidget::item {
-                border: none;
-                padding: 0;
-                margin: 3px;
-            }
-            QPushButton {
-                background: #66CCFF;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 12px;
-            }
-            QPushButton:hover {
-                background: #55BBEE;
-            }
-            QPushButton:disabled {
-                background: #B8CAD6;
-            }
-            QPushButton#publishBtn {
-                background: #66CCFF;
-                color: white;
-                font-weight: 700;
-                padding: 8px 16px;
-            }
-            QPushButton#publishBtn:hover {
-                background: #55BBEE;
-            }
-            """
-        )
+        self.setObjectName("dynamicsDialog")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -361,9 +287,9 @@ class DynamicsDialog(QDialog):
         # ── 顶部栏：标题 + 刷新 + 发动态 ──
         header_row = QHBoxLayout()
         title = QLabel("动态")
-        title.setObjectName("titleLabel")
+        title.setObjectName("dynamicsTitle")
         subtitle = QLabel("查看天依的动态，分享自己的生活。")
-        subtitle.setStyleSheet("color: #667481;")
+        subtitle.setObjectName("dynamicsMeta")
         subtitle.setWordWrap(True)
         title_box = QVBoxLayout()
         title_box.addWidget(title)
@@ -386,7 +312,7 @@ class DynamicsDialog(QDialog):
 
         # 状态提示
         self.feed_status = QLabel("")
-        self.feed_status.setStyleSheet("color: #A35C00;")
+        self.feed_status.setObjectName("dynamicsStatus")
         self.feed_status.setWordWrap(True)
         self.feed_status.hide()
         root.addWidget(self.feed_status)
@@ -398,7 +324,7 @@ class DynamicsDialog(QDialog):
         # ── 左侧：动态列表 ──
         left_panel = QVBoxLayout()
         left_label = QLabel("动态列表")
-        left_label.setStyleSheet("font-weight: 600; color: #243447;")
+        left_label.setObjectName("dynamicsSectionLabel")
         self.dynamic_list = QListWidget()
         self.dynamic_list.currentItemChanged.connect(self.on_dynamic_selected)
         self.load_more_button = QPushButton("加载更多动态")
@@ -410,20 +336,11 @@ class DynamicsDialog(QDialog):
         # ── 右侧：详情 + 评论 ──
         right_panel = QVBoxLayout()
         right_label = QLabel("详情与评论")
-        right_label.setStyleSheet("font-weight: 600; color: #243447;")
+        right_label.setObjectName("dynamicsSectionLabel")
 
         # 【修复 2】详情区域：用 QWidget 替代 QTextEdit，干净地展示头像 + 名称 + 时间 + 正文
         self.detail_widget = QWidget()
         self.detail_widget.setObjectName("detailWidget")
-        self.detail_widget.setStyleSheet(
-            """
-            QWidget#detailWidget {
-                background: #FFFFFF;
-                border: 1px solid #D5DEE7;
-                border-radius: 6px;
-            }
-            """
-        )
         self.detail_layout = QVBoxLayout(self.detail_widget)
         self.detail_layout.setContentsMargins(12, 12, 12, 12)
         self.detail_layout.setSpacing(8)
@@ -434,9 +351,9 @@ class DynamicsDialog(QDialog):
         self.detail_avatar = QLabel()
         self.detail_avatar.setFixedSize(28, 28)
         self.detail_name = QLabel("")
-        self.detail_name.setStyleSheet("font-weight: 600; color: #243447; font-size: 14px;")
+        self.detail_name.setObjectName("dynamicDetailName")
         self.detail_time = QLabel("")
-        self.detail_time.setStyleSheet("color: #94A3B8; font-size: 12px;")
+        self.detail_time.setObjectName("dynamicsMeta")
         self.detail_header_layout.addWidget(self.detail_avatar)
         self.detail_header_layout.addWidget(self.detail_name)
         self.detail_header_layout.addWidget(self.detail_time)
@@ -446,26 +363,26 @@ class DynamicsDialog(QDialog):
         # 分割线
         sep = QLabel()
         sep.setFixedHeight(1)
-        sep.setStyleSheet("background: #E2E8F0;")
+        sep.setObjectName("dynamicDetailSeparator")
         self.detail_layout.addWidget(sep)
 
         # 正文
         self.detail_content = QLabel("")
         self.detail_content.setWordWrap(True)
-        self.detail_content.setStyleSheet("color: #334155; font-size: 14px; line-height: 1.6;")
+        self.detail_content.setObjectName("dynamicDetailContent")
         self.detail_layout.addWidget(self.detail_content)
 
         # 错误信息（后台错误/回复错误）
         self.detail_error = QLabel("")
         self.detail_error.setWordWrap(True)
-        self.detail_error.setStyleSheet("color: #A35C00; font-size: 12px;")
+        self.detail_error.setObjectName("dynamicsError")
         self.detail_error.hide()
         self.detail_layout.addWidget(self.detail_error)
 
         # 缺省提示（未选择动态时）
         self.detail_placeholder = QLabel("请从左侧选择一条动态查看详情")
         self.detail_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.detail_placeholder.setStyleSheet("color: #94A3B8; font-size: 13px; padding: 20px;")
+        self.detail_placeholder.setObjectName("dynamicDetailPlaceholder")
         self.detail_layout.addWidget(self.detail_placeholder)
 
         self.detail_widget.hide()  # 初始隐藏
@@ -477,7 +394,7 @@ class DynamicsDialog(QDialog):
         self.comment_input.setFixedHeight(80)
         comment_action_row = QHBoxLayout()
         self.comment_status = QLabel("请选择一条动态")
-        self.comment_status.setStyleSheet("color: #667481;")
+        self.comment_status.setObjectName("dynamicsMeta")
         comment_action_row.addWidget(self.comment_status, 1)
         self.comment_button = QPushButton("发送评论")
         self.comment_button.setEnabled(False)
@@ -499,8 +416,6 @@ class DynamicsDialog(QDialog):
         content_row.addWidget(right_widget, 6)
 
         root.addLayout(content_row, 1)
-
-        # 【修复 4】不再创建 FAB 按钮，不需要 _build_add_dynamic_button / _position_add_dynamic_button
 
     # ────────────────────── 动态加载 ──────────────────────
 
