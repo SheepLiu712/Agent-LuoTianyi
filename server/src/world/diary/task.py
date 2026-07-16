@@ -64,8 +64,8 @@ class DiaryTask(WorldTask):
                     getattr(getattr(runtime, "profile", None), "display_name", self.character_name)
                     or self.character_name
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            self.logger.warning(f"Failed to get character runtime for diary: {exc}")
 
     def ensure_dependencies(self) -> None:
         super().ensure_dependencies()
@@ -197,7 +197,7 @@ class DiaryTask(WorldTask):
             self.logger.error(f"Failed to find active users: {exc}")
             return []
 
-    def _get_diary_capability(self):
+    def _get_diary_capability(self) -> Any | None:
         if self.system_runtime is None:
             return None
         capability_manager = getattr(self.system_runtime, "capability_manager", None)

@@ -64,8 +64,8 @@ class DiaryCapability:
             return False
         return True
 
-    def _get_dynamic_capability(self):
-        """获取动态能力实例。"""
+    def _get_dynamic_capability(self) -> Any | None:
+        """获取动态能力实例，可能为 None。"""
         return self._dynamic_capability
 
     def _load_prompt_template(self) -> str:
