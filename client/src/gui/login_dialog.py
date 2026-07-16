@@ -18,12 +18,11 @@ class LoginDialog(QDialog):
         self.custom_base_url = None  # 自定义服务器地址
 
         self.setWindowTitle("ChatWithLuoTianyi - 登录/注册")
-        self.setFixedSize(420, 380)
+        self.setFixedSize(420, 400)
 
         layout = QVBoxLayout()
 
         self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("QTabBar::tab { font-size: 16px; min-height: 28px; }")
         self.login_tab = QWidget()
         self.register_tab = QWidget()
 
@@ -65,54 +64,38 @@ class LoginDialog(QDialog):
 
     def setup_login_ui(self):
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(0)
-        style = "font-size: 16px; padding: 5px;"
 
         self.l_username = QLineEdit()
         self.l_username.setPlaceholderText("用户名")
-        self.l_username.setStyleSheet(style)
 
         self.l_password = QLineEdit()
         self.l_password.setPlaceholderText("密码")
         self.l_password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.l_password.setStyleSheet(style)
 
         self.l_auto_login = QCheckBox("自动登录")
-        self.l_auto_login.setStyleSheet("font-size: 16px; padding: 5px;")
 
         self.l_btn = QPushButton("登录")
+        self.l_btn.setObjectName("primaryButton")
         self.l_btn.clicked.connect(self.do_login)
-        self.l_btn.setStyleSheet(
-            "QPushButton { font-size: 16px; padding: 5px;"
-            " background-color: #44BBEE; color: white; border-radius: 5px; }"
-            " QPushButton:hover { background-color: #66ccff; }"
-        )
 
         self.reset_btn = QPushButton("重置账号")
-        self.reset_btn.setStyleSheet(
-            "QPushButton { font-size: 16px; padding: 4px; color: #4488BB;"
-            " border: none; text-align: left; }"
-            " QPushButton:hover { color: #77BBEE; }"
-        )
+        self.reset_btn.setObjectName("textButton")
         self.reset_btn.clicked.connect(self.open_reset_account_dialog)
 
         self.server_btn = QPushButton("服务器地址")
-        self.server_btn.setStyleSheet(
-            "QPushButton { font-size: 16px; padding: 4px; color: #4488BB;"
-            " border: none; text-align: left; }"
-            " QPushButton:hover { color: #77BBEE; }"
-        )
+        self.server_btn.setObjectName("textButton")
         self.server_btn.clicked.connect(self.open_server_settings_dialog)
 
         layout.addWidget(self.l_username)
-        layout.addSpacing(20)
+        layout.addSpacing(16)
         layout.addWidget(self.l_password)
         layout.addSpacing(10)
         layout.addWidget(self.l_auto_login)
-        layout.addSpacing(8)
+        layout.addSpacing(12)
         layout.addWidget(self.reset_btn)
-        layout.addSpacing(8)
+        layout.addSpacing(4)
         layout.addWidget(self.server_btn)
         layout.addStretch()
         layout.addWidget(self.l_btn)
@@ -120,45 +103,35 @@ class LoginDialog(QDialog):
 
     def setup_register_ui(self):
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(0)
-        style = "font-size: 16px; padding: 5px;"
 
         self.r_username = QLineEdit()
         self.r_username.setPlaceholderText("用户名")
-        self.r_username.setStyleSheet(style)
 
         self.r_password = QLineEdit()
         self.r_password.setPlaceholderText("密码")
         self.r_password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.r_password.setStyleSheet(style)
 
         self.r_confirm_password = QLineEdit()
         self.r_confirm_password.setPlaceholderText("确认密码")
         self.r_confirm_password.setEchoMode(QLineEdit.EchoMode.Password)
-        self.r_confirm_password.setStyleSheet(style)
 
         self.r_invite = QLineEdit()
         self.r_invite.setPlaceholderText("邀请码")
-        self.r_invite.setStyleSheet(style)
 
         self.r_btn = QPushButton("注册")
+        self.r_btn.setObjectName("primaryButton")
         self.r_btn.clicked.connect(self.do_register)
-        self.r_btn.setStyleSheet(
-            "QPushButton { font-size: 16px; padding: 5px;"
-            " background-color: #44BBEE; color: white; border-radius: 5px; }"
-            " QPushButton:hover { background-color: #66ccff; }"
-        )
 
         layout.addWidget(self.r_username)
-        layout.addSpacing(20)
+        layout.addSpacing(16)
         layout.addWidget(self.r_password)
-        layout.addSpacing(20)
+        layout.addSpacing(16)
         layout.addWidget(self.r_confirm_password)
-        layout.addSpacing(20)
+        layout.addSpacing(16)
         layout.addWidget(self.r_invite)
         layout.addStretch()
-        layout.setContentsMargins(20, 20, 20, 20)
         layout.addWidget(self.r_btn)
         self.register_tab.setLayout(layout)
 
@@ -205,38 +178,32 @@ class LoginDialog(QDialog):
         dialog.setFixedSize(380, 280)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(10)
-        style = "font-size: 14px; padding: 5px;"
+        layout.setSpacing(12)
 
         desc = QLabel("输入已使用的邀请码和新账号信息来重置账号：")
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 13px; color: #666;")
         layout.addWidget(desc)
 
         invite_input = QLineEdit()
         invite_input.setPlaceholderText("已使用的邀请码")
-        invite_input.setStyleSheet(style)
         layout.addWidget(invite_input)
 
         username_input = QLineEdit()
         username_input.setPlaceholderText("新用户名")
-        username_input.setStyleSheet(style)
         layout.addWidget(username_input)
 
         password_input = QLineEdit()
         password_input.setPlaceholderText("新密码")
         password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        password_input.setStyleSheet(style)
         layout.addWidget(password_input)
 
         confirm_input = QLineEdit()
         confirm_input.setPlaceholderText("确认新密码")
         confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
-        confirm_input.setStyleSheet(style)
         layout.addWidget(confirm_input)
 
         btn = QPushButton("确认重置")
-        btn.setStyleSheet("font-size: 14px; padding: 8px; background-color: #FF6B6B; color: white; border-radius: 5px;")
+        btn.setObjectName("dangerButton")
         layout.addWidget(btn)
 
         def do_reset():
@@ -275,18 +242,16 @@ class LoginDialog(QDialog):
 
         desc = QLabel("输入自定义服务器地址（URL），输入后会自动验证连接：")
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 13px; color: #666;")
         layout.addWidget(desc)
 
         url_input = QLineEdit()
         url_input.setPlaceholderText("例如：https://your-server.com:60030")
-        url_input.setStyleSheet("font-size: 14px; padding: 6px;")
         if self.custom_base_url:
             url_input.setText(self.custom_base_url)
         layout.addWidget(url_input)
 
         btn = QPushButton("验证并保存")
-        btn.setStyleSheet("font-size: 14px; padding: 8px; background-color: #66CCFF; color: white; border-radius: 5px;")
+        btn.setObjectName("primaryButton")
         layout.addWidget(btn)
 
         def do_verify():
