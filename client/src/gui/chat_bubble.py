@@ -19,6 +19,7 @@ agent_stop_icon_path = "res/gui/stop_agent_msg.png"
 agent_play_icon = None
 agent_stop_icon = None
 from ..utils.logger import get_logger
+from ..utils.theme import VoiceTheme
 
 def has_wav_file(conv_uuid: str) -> bool:
     import os
@@ -159,27 +160,25 @@ class ChatBubble(QWidget):
 
         if self.is_user:
             self._label = ClickableLabel()
-            self._label.setFixedSize(24, 24)
-            self._label.setStyleSheet("background-color: transparent;")
+            self._label.setFixedSize(20, 20)
             self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
             layout.addStretch()
             layout.addWidget(self._label)
-            layout.addSpacing(0)
+            layout.addSpacing(4)
             layout.addWidget(self.content_widget)
         else: # agent
             # 如果有本地音频：
             if has_wav_file(self.conv_uuid):
                 self._label = ClickableLabel()
-                self._label.setFixedSize(24, 24)
-                self._label.setStyleSheet("background-color: transparent;")
+                self._label.setFixedSize(20, 20)
                 self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._label.setPixmap(agent_play_icon)
                 self._label.setCursor(Qt.CursorShape.PointingHandCursor)
                 self._label.clicked.connect(self._on_agent_label_clicked)
-            
+
                 layout.addWidget(self.content_widget)
-                layout.addSpacing(0)
+                layout.addSpacing(4)
                 layout.addWidget(self._label)
                 layout.addStretch()
             else:
@@ -251,8 +250,7 @@ class ChatBubble(QWidget):
             return
         # create clickable label
         self._label = ClickableLabel()
-        self._label.setFixedSize(24, 24)
-        self._label.setStyleSheet("background-color: transparent;")
+        self._label.setFixedSize(20, 20)
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if agent_play_icon is not None:
             self._label.setPixmap(agent_play_icon)
@@ -291,7 +289,6 @@ class ChatImageBubble(ChatBubble):
 
     def build_content_widget(self) -> QWidget:
         self.image_label = QLabel()
-        self.image_label.setStyleSheet("background-color: transparent;")
 
         # Load and scale image
         pixmap = QPixmap(self.image_path)
@@ -323,15 +320,8 @@ class CustomTextEdit(QTextEdit):
         self.document().setDocumentMargin(0)
 
     def contextMenuEvent(self, event):
-        # 创建自定义菜单
+        # 创建自定义菜单（使用全局 QSS 样式）
         menu = QMenu(self)
-        
-        # 设置菜单样式（也可以在全局设置）
-        menu.setStyleSheet("""
-            QMenu { background-color: white; border: 1px solid #88EDFF; }
-            QMenu::item { color: black; padding: 5px 20px; }
-            QMenu::item:selected { background-color: #88EDFF; }
-        """)
 
         # 添加自定义行为
         copy_action = menu.addAction("复制 (Copy)")
@@ -364,20 +354,32 @@ class ChatTextBubble(ChatBubble):
     def build_content_widget(self) -> QWidget:
         self.text_edit = CustomTextEdit()
         self.text_edit.setText(self.text)
-        
-        # Style
-        bg_color = "#FFFFFF" if self.is_user else "#88EDFF"
-        text_color = "#000000"
-        
-        style = f"""
-            QTextEdit {{
-                background-color: {bg_color};
-                color: {text_color};
-                border-radius: 10px;
-                padding: 10px;
-                font-size: 16px;
-            }}
-        """
+
+        if self.is_user:
+            # 用户气泡：白色背景 + 右边框圆角
+            style = f"""
+                QTextEdit {{
+                    background-color: {VoiceTheme.USER_BUBBLE_BG};
+                    color: {VoiceTheme.TEXT_PRIMARY};
+                    border: 1px solid {VoiceTheme.BORDER};
+                    border-radius: 10px 10px 0 10px;
+                    padding: 10px 12px;
+                    font-size: 15px;
+                }}
+            """
+        else:
+            # Agent 气泡：天依蓝辉光 + 左侧声纹条
+            style = f"""
+                QTextEdit {{
+                    background-color: {VoiceTheme.AGENT_BUBBLE_BG};
+                    color: {VoiceTheme.TEXT_PRIMARY};
+                    border: none;
+                    border-left: 3px solid {VoiceTheme.TIANYI_BLUE};
+                    border-radius: 0 10px 10px 10px;
+                    padding: 10px 12px;
+                    font-size: 15px;
+                }}
+            """
         self.text_edit.setStyleSheet(style)
 
         return self.text_edit
