@@ -142,7 +142,8 @@ class DiaryTask(WorldTask):
 
     def _find_active_users(self, target_date: str) -> List[str]:
         """
-        查找高活跃用户：在目标日期互动量 >= min_daily_conversations 的用户。
+        查找高活跃用户：在目标日期互动量 >= min_daily_conversations 的用户，
+        且当天尚未生成日记的用户。
         """
         if self.database_manager is None:
             return []
@@ -153,11 +154,20 @@ class DiaryTask(WorldTask):
             if sql_session is None:
                 return []
 
-            from src.system.database.sql_database import Conversation
+            from src.system.database.sql_database import Conversation, DynamicPost
 
             try:
                 today_start = f"{target_date} 00:00:00"
                 today_end = f"{target_date} 23:59:59"
+
+                # 子查询：当天已有日记的用户
+                existing_diary = (
+                    sql_session.query(DynamicPost.owner_user_id)
+                    .filter(DynamicPost.source_type == "diary")
+                    .filter(DynamicPost.created_at >= today_start)
+                    .filter(DynamicPost.created_at <= today_end)
+                    .subquery()
+                )
 
                 results = (
                     sql_session.query(
@@ -167,15 +177,17 @@ class DiaryTask(WorldTask):
                     .filter(Conversation.timestamp >= today_start)
                     .filter(Conversation.timestamp <= today_end)
                     .filter(Conversation.character_id == self.character_id)
+                    # 排除已有日记的用户
+                    .filter(~Conversation.user_id.in_(sql_session.query(existing_diary.c.owner_user_id)))
                     .group_by(Conversation.user_id)
                     .having(func.count(Conversation.id) >= self.min_daily_conversations)
                     .all()
                 )
 
-                active_users = []
-                for row in results:
-                    user_id = row[0]
-                    active_users.append(user_id)
+                active_users = [row.user_id for row in results]
+
+                # 清理空字符串
+                active_users = [uid for uid in active_users if uid]
                 return active_users
 
             except Exception as exc:
