@@ -233,6 +233,33 @@
                 }
             }
         },
+        "call_stream_manager": {
+            "max_concurrent_calls": 5,
+            "request_delay_seconds": 2,
+            "reconnect_grace_seconds": 5,
+            "heartbeat_timeout_seconds": 5,
+            "playback_stop_ack_timeout_seconds": 3,
+            "playback_complete_min_timeout_seconds": 15,
+            "proactive_delay_seconds": 2,
+            "memory_pool_limit": 10,
+            "context": {
+                "recent_minutes": 10,
+                "recent_limit": 20
+            },
+            "settlement": {
+                "summary": {
+                    "llm_module": {
+                        "llm": {
+                            "name": "dsv4-flash",
+                            "enable_thinking": false,
+                            "use_json": false,
+                            "params": {}
+                        },
+                        "prompt_name": "call_summary_prompt"
+                    }
+                }
+            }
+        },
         "global_speaking_worker": {
             "queue_maxsize": 512,
             "terminal_send_max_attempts": 3,

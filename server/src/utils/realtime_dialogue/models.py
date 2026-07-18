@@ -28,7 +28,6 @@ class RealtimeEventType(str, Enum):
     RESPONSE_DONE = "response.done"
     ERROR = "error"
 
-
 @dataclass(frozen=True)
 class RealtimeToolDefinition:
     name: str

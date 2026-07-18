@@ -13,8 +13,12 @@ from src.system.database import DatabaseManager, set_default_database_manager
 from src.system.observability import ObservabilityService, set_observability_service
 from src.system.user_interface import UserInterface
 from src.utils.llm_service import LLMService
-from src.utils.realtime_dialogue import get_logger, RealtimeDialogueService
-from src.utils.logger import install_observability_log_handler, uninstall_observability_log_handler
+from src.utils.realtime_dialogue import RealtimeDialogueService
+from src.utils.logger import (
+    get_logger,
+    install_observability_log_handler,
+    uninstall_observability_log_handler,
+)
 from src.world import WorldRuntime
 
 logger = get_logger(__name__)
