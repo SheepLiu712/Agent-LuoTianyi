@@ -61,6 +61,21 @@
             }
         }
     },
+    "realtime_dialogue_service": {
+        "provider": "qwen",
+        "qwen": {
+            "api_key": "$QWEN_API_KEY",
+            "model": "qwen-audio-3.0-realtime-flash",
+            "base_url": "wss://ws-lbtuwahfzgpelt4a.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime",
+            "connect_timeout_seconds": 3,
+            "event_timeout_seconds": 30,
+            "input_audio_format": "pcm",
+            "input_sample_rate": 16000,
+            "output_modalities": ["text"],
+            "context_item_transport": "session_update",
+            "turn_detection": {"type": "server_vad"}
+        }
+    },
     "database": {
         "sql_db_folder": "data/database",
         "sql_db_file": "luotianyi.db",
@@ -188,6 +203,33 @@
                 },
                 "reflection_worker": {
                     "queue_maxsize": 64
+                }
+            }
+        },
+        "call_stream_manager": {
+            "max_concurrent_calls": 5,
+            "request_delay_seconds": 2,
+            "reconnect_grace_seconds": 5,
+            "heartbeat_timeout_seconds": 5,
+            "playback_stop_ack_timeout_seconds": 3,
+            "playback_complete_min_timeout_seconds": 15,
+            "proactive_delay_seconds": 2,
+            "memory_pool_limit": 10,
+            "context": {
+                "recent_minutes": 10,
+                "recent_limit": 20
+            },
+            "settlement": {
+                "summary": {
+                    "llm_module": {
+                        "llm": {
+                            "name": "dsv4-flash",
+                            "enable_thinking": false,
+                            "use_json": false,
+                            "params": {}
+                        },
+                        "prompt_name": "call_summary_prompt"
+                    }
                 }
             }
         },

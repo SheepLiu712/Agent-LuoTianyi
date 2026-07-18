@@ -28,6 +28,23 @@ export const WSEventType = {
 
   // 其他
   DATE_DETECTED: "date_detected",
+
+  // 语音通话专用事件
+  CALL_START: "call.start",
+  CALL_RESUME: "call.resume",
+  CALL_AUDIO_APPEND: "call.audio.append",
+  CALL_HANGUP: "call.hangup",
+  CALL_PLAYBACK_COMPLETED: "call.playback_completed",
+  CALL_PLAYBACK_STOPPED: "call.playback_stopped",
+  CALL_REQUESTED: "call.requested",
+  CALL_CONNECTED: "call.connected",
+  CALL_AUDIO_CHUNK: "call.audio.chunk",
+  CALL_STOP_PLAYBACK: "call.stop_playback",
+  CALL_RECONNECTING: "call.reconnecting",
+  CALL_RESUMED: "call.resumed",
+  CALL_REJECTED: "call.rejected",
+  CALL_ENDED: "call.ended",
+  CALL_ERROR: "call.error",
 } as const;
 
 export type WSEventType = (typeof WSEventType)[keyof typeof WSEventType];

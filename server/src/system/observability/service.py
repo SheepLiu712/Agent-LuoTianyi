@@ -253,6 +253,74 @@ class ObservabilityService:
             ),
         )
 
+    def record_call_event(
+        self,
+        *,
+        event_name: str,
+        trace_id: str,
+        call_id: str | None,
+        user_id: str | None,
+        duration_ms: float | None = None,
+        error: dict[str, Any] | None = None,
+        usage: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """保存电话事件的可观测元数据，不保存原始音频或完整 transcript。"""
+        self._execute(
+            """
+            INSERT INTO call_events (
+                ts, event_name, trace_id, call_id, user_id, duration_ms,
+                error_json, usage_json, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _utc_now_iso(),
+                event_name,
+                trace_id,
+                call_id,
+                user_id,
+                float(duration_ms or 0.0),
+                _json_dumps(error) if error else None,
+                _json_dumps(usage) if usage else None,
+                _json_dumps(metadata or {}),
+            ),
+        )
+
+    def get_recent_call_events(
+        self,
+        *,
+        limit: int = 100,
+        call_id: str | None = None,
+        event_name: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conditions: list[str] = []
+        params: list[Any] = []
+        if call_id:
+            conditions.append("call_id = ?")
+            params.append(call_id)
+        if event_name:
+            conditions.append("event_name = ?")
+            params.append(event_name)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(max(1, int(limit)))
+        rows = self._query_all(
+            f"""
+            SELECT * FROM call_events
+            {where}
+            ORDER BY ts DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["error"] = _json_loads(item.pop("error_json", None))
+            item["usage"] = _json_loads(item.pop("usage_json", None))
+            item["metadata"] = _json_loads(item.pop("metadata_json", None), {})
+            result.append(item)
+        return result
+
     def record_memory_trace_event(
         self,
         *,
@@ -781,6 +849,7 @@ class ObservabilityService:
             ("llm_call_metrics", "ts"),
             ("pipeline_spans", "start_ts"),
             ("admin_log_events", "ts"),
+            ("call_events", "ts"),
             ("memory_trace_events", "ts"),
         ):
             self._execute(f"DELETE FROM {table} WHERE {column} < ?", (cutoff,))
@@ -838,6 +907,22 @@ class ObservabilityService:
                 );
                 CREATE INDEX IF NOT EXISTS idx_log_ts ON admin_log_events(ts);
                 CREATE INDEX IF NOT EXISTS idx_log_level_ts ON admin_log_events(level, ts);
+
+                CREATE TABLE IF NOT EXISTS call_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL,
+                    event_name TEXT NOT NULL,
+                    trace_id TEXT NOT NULL,
+                    call_id TEXT,
+                    user_id TEXT,
+                    duration_ms REAL NOT NULL DEFAULT 0,
+                    error_json TEXT,
+                    usage_json TEXT,
+                    metadata_json TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_call_event_ts ON call_events(ts);
+                CREATE INDEX IF NOT EXISTS idx_call_event_call ON call_events(call_id, ts);
+                CREATE INDEX IF NOT EXISTS idx_call_event_name ON call_events(event_name, ts);
 
                 CREATE TABLE IF NOT EXISTS memory_trace_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

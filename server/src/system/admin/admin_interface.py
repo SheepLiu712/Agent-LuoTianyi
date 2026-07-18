@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from datetime import datetime
@@ -328,6 +329,50 @@ async def llm_calls(
         limit=limit,
         module_name=module_name,
         trace_id=trace_id,
+    )
+
+
+@protected_router.get("/calls")
+async def calls(
+    limit: int = Query(default=100, ge=1, le=1000),
+    user_id: str | None = None,
+    status: str | None = None,
+) -> list[dict[str, Any]]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None or runtime.database_manager.call_store is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    return await asyncio.to_thread(
+        runtime.database_manager.call_store.list_sessions,
+        limit=limit,
+        user_id=user_id,
+        status=status,
+    )
+
+
+@protected_router.get("/calls/{call_id}")
+async def call_summary(call_id: str) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None or runtime.database_manager.call_store is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    result = await asyncio.to_thread(
+        runtime.database_manager.call_store.get_session_summary,
+        call_id,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="call not found")
+    return result
+
+
+@protected_router.get("/calls-events")
+async def call_events(
+    limit: int = Query(default=100, ge=1, le=1000),
+    call_id: str | None = None,
+    event_name: str | None = None,
+) -> list[dict[str, Any]]:
+    return get_admin_shell().observability.get_recent_call_events(
+        limit=limit,
+        call_id=call_id,
+        event_name=event_name,
     )
 
 

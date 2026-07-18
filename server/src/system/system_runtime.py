@@ -13,9 +13,9 @@ from src.system.database import DatabaseManager, set_default_database_manager
 from src.system.observability import ObservabilityService, set_observability_service
 from src.system.user_interface import UserInterface
 from src.utils.llm_service import LLMService
-from src.utils.logger import get_logger, install_observability_log_handler, uninstall_observability_log_handler
+from src.utils.realtime_dialogue import get_logger, RealtimeDialogueService
+from src.utils.logger import install_observability_log_handler, uninstall_observability_log_handler
 from src.world import WorldRuntime
-
 
 logger = get_logger(__name__)
 
@@ -31,6 +31,7 @@ class SystemRuntime:
     capability_manager: CapabilityManager
     chat_session_manager: ChatSessionManager
     llm_service: LLMService
+    realtime_dialogue_service: RealtimeDialogueService
     observability: ObservabilityService
     owns_observability: bool = field(default=True)
     _shutdown_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
@@ -47,75 +48,67 @@ class SystemRuntime:
         agent_runtime: AgentRuntime | None = None
         runtime: SystemRuntime | None = None
 
-        try:
-            # 1. 初始化观测服务，后续模块可统一写入指标和异常日志
-            if observability is None:
-                observability = ObservabilityService(config.get("observability", {}))
-                set_observability_service(observability)
-                install_observability_log_handler(observability)
+        # 1. 初始化观测服务，后续模块可统一写入指标和异常日志
+        if observability is None:
+            observability = ObservabilityService(config.get("observability", {}))
+            set_observability_service(observability)
+            install_observability_log_handler(observability)
 
-            # 2. 初始化 LLM 服务
-            llm_service = LLMService(config.get("llm_service", {}))
+        # 2. 初始化 LLM 服务
+        llm_service = LLMService(config.get("llm_service", {}))
 
-            # 3. 初始化数据库管理器
-            database_manager = DatabaseManager(config.get("database", {}))
-            set_default_database_manager(database_manager)
+        # 实时对话是模型供应商基础设施，不属于角色 capability。
+        realtime_dialogue_service = RealtimeDialogueService(config.get("realtime_dialogue_service", {}))
 
-            # 4. 初始化能力管理器。SpeechCapability 会在这里启动 TTS worker。
-            capability_manager = CapabilityManager(config.get("capabilities", {}), llm_service)
+        # 3. 初始化数据库管理器
+        database_manager = DatabaseManager(config.get("database", {}))
+        set_default_database_manager(database_manager)
 
-            # 5. 初始化聊天会话管理器
-            chat_session_manager = ChatSessionManager(
-                config.get("chat_session_manager", {}),
-                llm_service,
-                database_manager,
-            )
+        # 4. 初始化能力管理器。SpeechCapability 会在这里启动 TTS worker。
+        capability_manager = CapabilityManager(config.get("capabilities", {}), llm_service)
 
-            # 6. 初始化箱庭世界运行时
-            world = WorldRuntime(config.get("world", {}))
+        # 5. 初始化聊天会话管理器
+        chat_session_manager = ChatSessionManager(
+            config.get("chat_session_manager", {}),
+            llm_service,
+            database_manager,
+        )
 
-            # 7. 初始化 Agent 运行时
-            agent_runtime = AgentRuntime(
-                config.get("agent_runtime", {}),
-                llm_service,
-                capability_manager,
-                database_manager,
-            )
+        # 6. 初始化箱庭世界运行时
+        world = WorldRuntime(config.get("world", {}))
 
-            # 8. 组装系统运行时
-            runtime = cls(
-                user_interface=UserInterface(database_manager),
-                world=world,
-                database_manager=database_manager,
-                agent_runtime=agent_runtime,
-                capability_manager=capability_manager,
-                chat_session_manager=chat_session_manager,
-                llm_service=llm_service,
-                observability=observability,
-                owns_observability=owns_observability,
-            )
+        # 7. 初始化 Agent 运行时
+        agent_runtime = AgentRuntime(
+            config.get("agent_runtime", {}),
+            llm_service,
+            capability_manager,
+            database_manager,
+        )
 
-            runtime._wire_dependencies()
-            runtime._start_background_services()
-            runtime.user_interface.generate_rsa_keys()
-            return runtime
-        except BaseException:
-            logger.error("SystemRuntime initialization failed, starting rollback...")
-            await cls._rollback_failed_initialization(
-                runtime=runtime,
-                world=world,
-                database_manager=database_manager,
-                capability_manager=capability_manager,
-                chat_session_manager=chat_session_manager,
-                agent_runtime=agent_runtime,
-                observability=observability,
-                owns_observability=owns_observability,
-            )
-            raise
+        # 8. 组装系统运行时
+        runtime = cls(
+            user_interface=UserInterface(database_manager),
+            world=world,
+            database_manager=database_manager,
+            agent_runtime=agent_runtime,
+            capability_manager=capability_manager,
+            chat_session_manager=chat_session_manager,
+            llm_service=llm_service,
+            realtime_dialogue_service=realtime_dialogue_service,
+            observability=observability,
+            owns_observability=owns_observability,
+        )
+
+        runtime._wire_dependencies()
+        runtime._start_background_services()
+        runtime.user_interface.generate_rsa_keys()
+        return runtime
+        
 
     def _wire_dependencies(self) -> None:
         """把顶层模块依赖分发给各运行时模块。"""
         self.llm_service.ensure_dependencies()
+        self.realtime_dialogue_service.ensure_dependencies()
         self.database_manager.wire_dependencies(llm_service=self.llm_service)
         self.capability_manager.wire_dependencies(
             database_manager=self.database_manager,
@@ -129,6 +122,9 @@ class SystemRuntime:
             database_manager=self.database_manager,
             llm_service=self.llm_service,
             capability_manager=self.capability_manager,
+            agent_runtime=self.agent_runtime,
+            realtime_dialogue_service=self.realtime_dialogue_service,
+            observability=self.observability,
         )
         self.world.wire_dependencies(system_runtime=self)
         self.user_interface.wire_dependencies(database_manager=self.database_manager)
@@ -287,6 +283,7 @@ class SystemRuntime:
             "capability_manager": self.capability_manager,
             "chat_session_manager": self.chat_session_manager,
             "llm_service": self.llm_service,
+            "realtime_dialogue_service": self.realtime_dialogue_service,
             "observability": self.observability,
         }
         missing = [name for name, value in required.items() if value is None]

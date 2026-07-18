@@ -200,9 +200,28 @@ class WebSocketService:
             return
         ack_event = self._make_event(
             WSEventType.SERVER_ACK,
+            {"ok": True, "received_event_type": event.event_type},
+            reply_to=event.client_msg_id,
+        )
+        await websocket_connection.websocket.send_json(ack_event)
+
+    async def send_rejected_ack_event(
+        self,
+        websocket_connection: "WebSocketConnection",
+        event: WSMessage,
+        *,
+        code: str,
+        message: str,
+    ) -> None:
+        if event.client_msg_id is None:
+            return
+        ack_event = self._make_event(
+            WSEventType.SERVER_ACK,
             {
-                "ok": True,
+                "ok": False,
                 "received_event_type": event.event_type,
+                "code": code,
+                "message": message,
             },
             reply_to=event.client_msg_id,
         )

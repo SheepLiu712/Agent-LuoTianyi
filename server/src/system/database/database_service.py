@@ -9,6 +9,7 @@ from src.system.database.services.memory_store import MemoryStore
 from src.system.database.redis_buffer import RedisBuffer, get_redis_buffer, init_redis_buffer
 from src.system.database.sql_database import SessionLocal, get_sql_session, init_sql_db
 from src.system.database.services.user_store import UserStore
+from src.system.database.call_store import CallStore
 from src.system.database.utils import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
     normalize_message_token_ttl_seconds,
@@ -48,6 +49,7 @@ class DatabaseManager:
         self.user_store: Optional[UserStore] = None
         self.credential_service: Optional[CredentialService] = None
         self.conversation_service: Optional[ConversationService] = None
+        self.call_store: Optional[CallStore] = None
         self.init_all_databases()
 
     def init_all_databases(self) -> None:
@@ -91,6 +93,7 @@ class DatabaseManager:
                 redis_buffer=self._ensure_redis(),
                 user_store=self.user_store,
             )
+            self.call_store = CallStore(self)
             logger.info("Main database initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing databases: {e}")
@@ -117,6 +120,7 @@ class DatabaseManager:
             "dynamic_store": self.dynamic_store,
             "credential_service": self.credential_service,
             "conversation_service": self.conversation_service,
+            "call_store": self.call_store,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:

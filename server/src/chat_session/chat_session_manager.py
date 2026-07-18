@@ -72,6 +72,9 @@ class ChatSessionManager:
         database_manager: "DatabaseManager",
         llm_service: "LLMService",
         capability_manager,
+        agent_runtime=None,
+        realtime_dialogue_service=None,
+        observability=None,
     ) -> None:
         """向聊天会话模块及其子模块派发依赖。"""
         self.database_manager = database_manager
@@ -95,6 +98,11 @@ class ChatSessionManager:
             global_speaking_worker=self.global_speaking_worker,
             proactive_topic_maker=self.proactive_topic_maker,
             activity_context_provider=self.activity_context_provider,
+            agent_runtime=agent_runtime,
+            realtime_dialogue_service=realtime_dialogue_service,
+            llm_service=llm_service,
+            call_store=getattr(database_manager, "call_store", None),
+            observability=observability,
         )
         self.ensure_dependencies()
 

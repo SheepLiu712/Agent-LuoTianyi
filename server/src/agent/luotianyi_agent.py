@@ -135,6 +135,14 @@ class LuoTianyiAgent:
             preference_context=self._build_preference_context(preferences),
         )
 
+    def load_user_expression_context(self, user_id: str) -> UserExpressionContext:
+        """公开聊天/电话共用的用户画像与偏好格式化入口。"""
+        return self._load_user_expression_context(user_id)
+
+    def get_user_expression_context(self, user_id: str) -> UserExpressionContext:
+        """兼容 getter 命名的调用方。"""
+        return self.load_user_expression_context(user_id)
+
     def _build_preference_context(self, preferences: Any) -> str:
         if not preferences:
             return ""

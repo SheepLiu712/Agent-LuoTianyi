@@ -5,6 +5,7 @@ class ContextType(str, Enum):
     SING = "sing"
     CMD = "cmd"
     IMAGE = "image"
+    CALL = "call"
 
 
 class ConversationSource(str, Enum):

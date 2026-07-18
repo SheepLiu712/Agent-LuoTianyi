@@ -31,6 +31,7 @@ from src.system.user_interface.types import (
     DynamicReadMarkRequest,
 )
 from src.system.user_interface.websocket_service import ChatEventAcceptance, WebSocketConnection
+from src.chat_session.call_stream_manager import CallRejectedError
 from src.system.admin import (
     get_admin_shell,
     init_admin_shell,
@@ -145,6 +146,16 @@ async def chat_ws(websocket: WebSocket):
                 continue
 
             if websocket_service.is_chat_related_event(event):
+                if system_runtime.chat_session_manager.call_stream_manager.has_blocking_call(
+                    ws_connection.user_uuid
+                ):
+                    await websocket_service.send_rejected_ack_event(
+                        ws_connection,
+                        event,
+                        code="CALL_IN_PROGRESS",
+                        message="通话期间不能发送聊天消息",
+                    )
+                    continue
                 acceptance = websocket_service.try_accept_chat_event(
                     ws_connection,
                     event,
@@ -187,6 +198,118 @@ async def chat_ws(websocket: WebSocket):
     except Exception as e:
         gcsm.ws_lost_connection(ws_connection)
         logger.error(f"Error in /chat_ws: {e}")
+
+
+@app.websocket("/call_ws")
+async def call_ws(websocket: WebSocket):
+    """语音通话专用 WebSocket；控制事件和音频均使用 JSON/base64。"""
+    try:
+        await websocket.accept()
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected before accept on /call_ws")
+        return
+
+    system_runtime: "SystemRuntime" = get_admin_shell().runtime_supervisor.runtime
+    if system_runtime is None:
+        try:
+            await websocket.send_json({"type": "system_not_ready", "payload": runtime_not_ready_detail()})
+            await websocket.close(code=1013)
+        except WebSocketDisconnect:
+            logger.info("WebSocket client disconnected before system_not_ready on /call_ws")
+        return
+
+    websocket_service = system_runtime.websocket_service
+    call_manager = system_runtime.chat_session_manager.call_stream_manager
+    ws_connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
+    bound_stream = None
+    try:
+        await websocket_service.send_system_ready_event(websocket)
+        await ws_connection.auth(websocket_service, system_runtime.database_manager)
+        while True:
+            event = await websocket_service.try_recv_client_msg(ws_connection)
+            if event is None:
+                continue
+            if event.event_type == WSEventType.HB_PING.value:
+                await websocket_service.handle_ping_event(ws_connection, event)
+                continue
+
+            if event.event_type == WSEventType.CALL_START.value:
+                try:
+                    bound_stream = await call_manager.start_call(
+                        ws_connection=ws_connection,
+                        character_id=str((event.payload or {}).get("character_id") or "luotianyi"),
+                        client_request_id=event.client_msg_id,
+                    )
+                except CallRejectedError as exc:
+                    await websocket.send_json(
+                        websocket_service._make_event(
+                            WSEventType.CALL_REJECTED,
+                            {"code": exc.code, "message": exc.message, "exit_code": exc.exit_code},
+                            reply_to=event.client_msg_id,
+                        )
+                    )
+                    await websocket_service.send_rejected_ack_event(
+                        ws_connection,
+                        event,
+                        code=exc.code,
+                        message=exc.message,
+                    )
+                    continue
+                await websocket.send_json(
+                    websocket_service._make_event(
+                        WSEventType.SERVER_ACK,
+                        {"ok": True, "received_event_type": event.event_type, "call_id": bound_stream.call_id},
+                        reply_to=event.client_msg_id,
+                    )
+                )
+                continue
+
+            if event.event_type == WSEventType.CALL_RESUME.value:
+                call_id = str((event.payload or {}).get("call_id") or "")
+                try:
+                    bound_stream = await call_manager.resume_call(
+                        ws_connection=ws_connection,
+                        call_id=call_id,
+                    )
+                except CallRejectedError as exc:
+                    await websocket.send_json(
+                        websocket_service._make_event(
+                            WSEventType.CALL_REJECTED,
+                            {"code": exc.code, "message": exc.message, "exit_code": exc.exit_code},
+                            reply_to=event.client_msg_id,
+                        )
+                    )
+                    await websocket_service.send_rejected_ack_event(
+                        ws_connection,
+                        event,
+                        code=exc.code,
+                        message=exc.message,
+                    )
+                    continue
+                await websocket_service.send_ack_event(ws_connection, event)
+                continue
+
+            if bound_stream is None:
+                await websocket_service.send_rejected_ack_event(
+                    ws_connection,
+                    event,
+                    code="CALL_NOT_STARTED",
+                    message="请先建立或恢复通话",
+                )
+                continue
+            await bound_stream.handle_client_event(event)
+            if event.event_type in {
+                WSEventType.CALL_HANGUP.value,
+                WSEventType.CALL_PLAYBACK_COMPLETED.value,
+                WSEventType.CALL_PLAYBACK_STOPPED.value,
+            }:
+                await websocket_service.send_ack_event(ws_connection, event)
+    except WebSocketDisconnect:
+        await call_manager.on_ws_lost(ws_connection)
+        logger.info("WebSocket client disconnected from /call_ws")
+    except Exception as exc:
+        await call_manager.on_ws_lost(ws_connection)
+        logger.exception("Error in /call_ws: %s", exc)
 
 
 @app.get("/auth/public_key")

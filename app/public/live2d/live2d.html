@@ -47,7 +47,8 @@
 
     let model;
     let app;
-    const MODEL_SCALE_MULTIPLIER = 1.2;
+    const isCallMode = new URLSearchParams(window.location.search).get('mode') === 'call';
+    const MODEL_SCALE_MULTIPLIER = isCallMode ? 1.45 : 1.2;
     const FOCUS_Y_OFFSET_RATIO = 0.0;
     const MODEL_SETTINGS_URL = './models/luo/model.model3.json';
 
@@ -342,15 +343,19 @@
     };
 
     let nextStartTime = 0;
-    let isWaitingForEnd = false;
     let isPlaying = false;
     // 当前已排队的音频源，用于停止/清空队列（音频播放互斥，Bug#9）
     const activeSources = [];
     // 最后一段已排队的音频源，用于精确感知播放结束（Bug#7）
     let lastSource = null;
 
-    window.feedAudioChunk = async (base64Audio, isFinal) => {
+    window.feedAudioChunk = async (base64Audio, isFinal, audioId, responseId) => {
       if (audioCtx.state === 'suspended') await audioCtx.resume();
+      currentAudioId = audioId || currentAudioId;
+      if (audioId) {
+        knownAudioIds.add(audioId);
+        if (responseId) audioResponseIds.set(audioId, responseId);
+      }
       
       if (base64Audio) {
         // 1. Base64 转 Uint8Array
@@ -427,7 +432,9 @@
 
       // 6. 处理结束标志
       if (isFinal) {
-        isWaitingForEnd = true;
+        const finalId = audioId || currentAudioId || `audio-${Date.now()}`;
+        if (!audioEndTimes.has(finalId)) audioEndTimes.set(finalId, audioCtx.currentTime);
+        finalAudioIds.add(finalId);
         checkFinished();
       }
     };

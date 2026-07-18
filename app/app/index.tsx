@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Easing,
   FlatList,
@@ -38,7 +39,7 @@ const THINKING_BUBBLE_FRAMES = [
   require('../assets/images/thinking_bubble3.png'),
 ];
 
-export default function Index({ onLogout }: { onLogout?: () => void }) {
+export default function Index({ onLogout, onOpenCall }: { onLogout?: () => void; onOpenCall?: () => void }) {
   const { username, message_token } = auth;
   const insets = useSafeAreaInsets();
   const systemScheme = useColorScheme();
@@ -281,6 +282,18 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     closeDrawer();
   };
 
+  const handleOpenCall = () => {
+    closeDrawer();
+    Alert.alert(
+      '语音通话',
+      '当前版本请使用耳机，扬声器模式可能导致错误打断。',
+      [
+        { text: '取消', style: 'cancel' },
+        { text: '继续', onPress: () => onOpenCall?.() },
+      ],
+    );
+  };
+
   const handleCloseDynamics = useCallback(() => {
     setShowDynamics(false);
     refreshDynamicsUnread();
@@ -506,6 +519,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
               </View>
             ) : null}
           </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenCall} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>语音通话</Text>
         </TouchableOpacity>
 
         <View style={[styles.drawerSection, { borderTopColor: theme.border }]}>

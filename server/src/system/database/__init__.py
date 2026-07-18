@@ -2,6 +2,8 @@ from src.system.database.sql_database import (
     AffectionLog,
     AgentMemoryRecord,
     Base,
+    CallSession,
+    CallTurn,
     Conversation,
     Event,
     EventNotification,
