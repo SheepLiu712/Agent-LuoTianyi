@@ -47,7 +47,8 @@
 
     let model;
     let app;
-    const MODEL_SCALE_MULTIPLIER = 1.2;
+    const isCallMode = new URLSearchParams(window.location.search).get('mode') === 'call';
+    const MODEL_SCALE_MULTIPLIER = isCallMode ? 1.45 : 1.2;
     const FOCUS_Y_OFFSET_RATIO = 0.0;
     const MODEL_SETTINGS_URL = './models/luo/model.model3.json';
 
@@ -344,13 +345,22 @@
     let nextStartTime = 0;
     let isWaitingForEnd = false;
     let isPlaying = false;
-    // 当前已排队的音频源，用于停止/清空队列（音频播放互斥，Bug#9）
-    const activeSources = [];
-    // 最后一段已排队的音频源，用于精确感知播放结束（Bug#7）
+    let currentAudioId = null;
+    const activeSources = new Set();
+    // 普通聊天没有 audio_id，使用最后一段音频精确感知播放结束。
     let lastSource = null;
+    const audioEndTimes = new Map();
+    const finalAudioIds = new Set();
+    const audioResponseIds = new Map();
+    const knownAudioIds = new Set();
 
-    window.feedAudioChunk = async (base64Audio, isFinal) => {
+    window.feedAudioChunk = async (base64Audio, isFinal, audioId, responseId) => {
       if (audioCtx.state === 'suspended') await audioCtx.resume();
+      currentAudioId = audioId || currentAudioId;
+      if (audioId) {
+        knownAudioIds.add(audioId);
+        if (responseId) audioResponseIds.set(audioId, responseId);
+      }
       
       if (base64Audio) {
         // 1. Base64 转 Uint8Array
@@ -402,17 +412,11 @@
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(analyser);
-        // 统一 onended：从队列移除 + 若为最后一段则通知播放结束（合并 Bug#7/Bug#9 的 onended 逻辑，避免互相覆盖）
+        activeSources.add(source);
         source.onended = () => {
-          const idx = activeSources.indexOf(source);
-          if (idx >= 0) {
-            activeSources.splice(idx, 1);
-          }
-          if (lastSource === source) {
-            notifyAudioFinished();
-          }
+          activeSources.delete(source);
+          if (!audioId && lastSource === source) notifyChatAudioFinished();
         };
-        activeSources.push(source);
         
         const currentTime = audioCtx.currentTime;
         // 留 50ms 缓冲，防止高频小包导致破音/队列下溢
@@ -422,26 +426,37 @@
         
         source.start(nextStartTime);
         nextStartTime += audioBuffer.duration;
-        lastSource = source;
+        if (audioId || currentAudioId) {
+          audioEndTimes.set(audioId || currentAudioId, nextStartTime);
+        } else {
+          lastSource = source;
+        }
       }
 
       // 6. 处理结束标志
       if (isFinal) {
-        isWaitingForEnd = true;
-        checkFinished();
+        const finalId = audioId || currentAudioId;
+        if (finalId) {
+          if (!audioEndTimes.has(finalId)) audioEndTimes.set(finalId, audioCtx.currentTime);
+          finalAudioIds.add(finalId);
+          checkCallFinished();
+        } else {
+          isWaitingForEnd = true;
+          checkChatFinished();
+        }
       }
     };
 
     // 停止并清空所有已排队的音频（用于音频播放互斥）
     window.stopServerAudio = () => {
-      for (const src of activeSources.slice()) {
+      for (const source of activeSources) {
         try {
-          src.stop();
-        } catch (e) {
+          source.stop();
+        } catch (_) {
           // 忽略已结束或未启动的源
         }
       }
-      activeSources.length = 0;
+      activeSources.clear();
       nextStartTime = 0;
       isWaitingForEnd = false;
       isPlaying = false;
@@ -455,18 +470,18 @@
     // 检测是否播放完毕：主信号是最后一段音频的 onended（精确、不受 rAF 节流影响，
     // 页面被节流/切后台时 rAF 会停摆，导致 audio_finished 丢失、回复中的后续句子迟迟不出现），
     // rAF 轮询作为兜底（onended 异常丢失时也能收敛）。
-    function checkFinished() {
+    function checkChatFinished() {
       if (!isWaitingForEnd) return;
       // 还有音频排队未播完：继续轮询兜底
       if (lastSource && audioCtx.currentTime < nextStartTime) {
-        requestAnimationFrame(checkFinished);
+        requestAnimationFrame(checkChatFinished);
         return;
       }
       // 没有待播音频，或已全部播完：立即通知
-      notifyAudioFinished();
+      notifyChatAudioFinished();
     }
 
-    function notifyAudioFinished() {
+    function notifyChatAudioFinished() {
       if (!isWaitingForEnd) return;
       isWaitingForEnd = false;
       isPlaying = false;
@@ -478,6 +493,57 @@
       // 通知 RN 播放完成
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'audio_finished' }));
+      }
+    }
+
+    window.stopAudioPlayback = () => {
+      for (const source of activeSources) {
+        try { source.stop(); } catch (_) {}
+      }
+      activeSources.clear();
+      isPlaying = false;
+      nextStartTime = 0;
+      const stoppedAudioIds = new Set([...knownAudioIds, ...finalAudioIds]);
+      if (currentAudioId) stoppedAudioIds.add(currentAudioId);
+      audioEndTimes.clear();
+      finalAudioIds.clear();
+      for (const stoppedAudioId of stoppedAudioIds) {
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'audio_stopped',
+            audio_id: stoppedAudioId,
+            response_id: audioResponseIds.get(stoppedAudioId) || null,
+          }));
+        }
+      }
+      knownAudioIds.clear();
+      audioResponseIds.clear();
+      currentAudioId = null;
+    };
+
+    // 通话音频按 audio_id 回执，服务端据此推进播放队列。
+    function checkCallFinished() {
+      const now = audioCtx.currentTime;
+      for (const audioId of [...finalAudioIds]) {
+        if (now < (audioEndTimes.get(audioId) || now)) continue;
+        finalAudioIds.delete(audioId);
+        audioEndTimes.delete(audioId);
+        knownAudioIds.delete(audioId);
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'audio_finished',
+            audio_id: audioId,
+            response_id: audioResponseIds.get(audioId) || null,
+          }));
+        }
+        audioResponseIds.delete(audioId);
+      }
+      if (finalAudioIds.size > 0) {
+        requestAnimationFrame(checkCallFinished);
+      } else if (!activeSources.size) {
+        isPlaying = false;
+        nextStartTime = 0;
+        currentAudioId = null;
       }
     }
     // 浏览器原生的 60FPS 渲染循环

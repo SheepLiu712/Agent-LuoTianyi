@@ -14,6 +14,7 @@ from src.system.observability import ObservabilityService, set_observability_ser
 from src.system.user_interface import UserInterface
 from src.utils.llm_service import LLMService
 from src.utils.logger import get_logger, install_observability_log_handler, uninstall_observability_log_handler
+from src.utils.realtime_dialogue import RealtimeDialogueService
 from src.world import WorldRuntime
 
 
@@ -31,6 +32,7 @@ class SystemRuntime:
     capability_manager: CapabilityManager
     chat_session_manager: ChatSessionManager
     llm_service: LLMService
+    realtime_dialogue_service: RealtimeDialogueService
     observability: ObservabilityService
     owns_observability: bool = field(default=True)
     _shutdown_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
@@ -45,6 +47,7 @@ class SystemRuntime:
         chat_session_manager: ChatSessionManager | None = None
         world: WorldRuntime | None = None
         agent_runtime: AgentRuntime | None = None
+        realtime_dialogue_service: RealtimeDialogueService | None = None
         runtime: SystemRuntime | None = None
 
         try:
@@ -56,6 +59,11 @@ class SystemRuntime:
 
             # 2. 初始化 LLM 服务
             llm_service = LLMService(config.get("llm_service", {}))
+
+            # 实时对话是模型供应商基础设施，不属于角色 capability。
+            realtime_dialogue_service = RealtimeDialogueService(
+                config.get("realtime_dialogue_service", {})
+            )
 
             # 3. 初始化数据库管理器
             database_manager = DatabaseManager(config.get("database", {}))
@@ -91,6 +99,7 @@ class SystemRuntime:
                 capability_manager=capability_manager,
                 chat_session_manager=chat_session_manager,
                 llm_service=llm_service,
+                realtime_dialogue_service=realtime_dialogue_service,
                 observability=observability,
                 owns_observability=owns_observability,
             )
@@ -190,6 +199,7 @@ class SystemRuntime:
     def _wire_dependencies(self) -> None:
         """把顶层模块依赖分发给各运行时模块。"""
         self.llm_service.ensure_dependencies()
+        self.realtime_dialogue_service.ensure_dependencies()
         self.database_manager.wire_dependencies(llm_service=self.llm_service)
         self.capability_manager.wire_dependencies(
             database_manager=self.database_manager,
@@ -203,6 +213,9 @@ class SystemRuntime:
             database_manager=self.database_manager,
             llm_service=self.llm_service,
             capability_manager=self.capability_manager,
+            agent_runtime=self.agent_runtime,
+            realtime_dialogue_service=self.realtime_dialogue_service,
+            observability=self.observability,
         )
         self.world.wire_dependencies(system_runtime=self)
         self.user_interface.wire_dependencies(database_manager=self.database_manager)
@@ -288,6 +301,7 @@ class SystemRuntime:
             "capability_manager": self.capability_manager,
             "chat_session_manager": self.chat_session_manager,
             "llm_service": self.llm_service,
+            "realtime_dialogue_service": self.realtime_dialogue_service,
             "observability": self.observability,
         }
         missing = [name for name, value in required.items() if value is None]

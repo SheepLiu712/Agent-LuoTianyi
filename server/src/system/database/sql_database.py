@@ -38,6 +38,7 @@ class User(Base):
     dynamic_posts = relationship("DynamicPost", back_populates="owner_user", cascade="all, delete-orphan")
     dynamic_comments = relationship("DynamicComment", back_populates="owner_user", cascade="all, delete-orphan")
     dynamic_read_state = relationship("DynamicReadState", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    call_sessions = relationship("CallSession", back_populates="user", cascade="all, delete-orphan")
 
 class InviteCode(Base):
     __tablename__ = "invite_codes"
@@ -64,6 +65,59 @@ class Conversation(Base):
     meta_data = Column(Text, nullable=True)
     
     user = relationship("User", back_populates="conversations")
+
+
+class CallSession(Base):
+    """永久保存一通电话的生命周期和异步后处理状态。"""
+
+    __tablename__ = "call_sessions"
+
+    call_id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.uuid", ondelete="CASCADE"), nullable=False, index=True)
+    character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi", index=True)
+    status = Column(String, nullable=False, index=True)
+    requested_at = Column(DateTime, nullable=False, default=datetime.now)
+    connected_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    duration_seconds = Column(Integer, nullable=False, default=0, server_default="0")
+    exit_code = Column(Integer, nullable=True, index=True)
+    summary = Column(Text, nullable=True)
+    summary_status = Column(String, nullable=False, default="pending", server_default="pending")
+    summary_error = Column(Text, nullable=True)
+    memory_status = Column(String, nullable=False, default="pending", server_default="pending")
+    memory_error = Column(Text, nullable=True)
+    profile_status = Column(String, nullable=False, default="pending", server_default="pending")
+    profile_error = Column(Text, nullable=True)
+    conversation_id = Column(String, ForeignKey("conversations.uuid", ondelete="SET NULL"), nullable=True, unique=True)
+    end_seq = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
+
+    user = relationship("User", back_populates="call_sessions")
+    conversation = relationship("Conversation", foreign_keys=[conversation_id])
+    turns = relationship("CallTurn", back_populates="session", cascade="all, delete-orphan")
+
+
+class CallTurn(Base):
+    """一行已经确认的电话转写，音频正文永不持久化。"""
+
+    __tablename__ = "call_turns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    call_id = Column(String, ForeignKey("call_sessions.call_id", ondelete="CASCADE"), nullable=False, index=True)
+    seq = Column(Integer, nullable=False)
+    speaker = Column(String, nullable=False)
+    text = Column(Text, nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
+    raw_events_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    session = relationship("CallSession", back_populates="turns")
+
+    __table_args__ = (
+        UniqueConstraint("call_id", "seq", name="uq_call_turn_call_seq"),
+    )
 
 
 class ConversationContext(Base):
@@ -376,6 +430,7 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
         cursor = dbapi_connection.cursor()
         # 开启 WAL 模式
         cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA foreign_keys=ON")
         # 建议同时开启：同步模式设为 NORMAL，能显著提升写入速度且保证断电安全
         cursor.execute("PRAGMA synchronous=NORMAL")
         # 建议同时设置：忙等待超时时间（毫秒），防止并发写入时立刻报错

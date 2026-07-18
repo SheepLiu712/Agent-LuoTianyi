@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 from typing import TYPE_CHECKING, Any, List, Optional
 from uuid import uuid4
@@ -262,6 +262,27 @@ class ConversationService:
             return snapshot.text
         return snapshot.as_prompt_payload()
 
+    async def get_recent_items(
+        self,
+        user_id: str,
+        *,
+        character_id: str = "luotianyi",
+        since_minutes: int = 10,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """获取电话初始上下文使用的最近原始 conversation，不包含压缩 summary。"""
+        call_store = getattr(self.database, "call_store", None)
+        if call_store is None:
+            return []
+        since = datetime.now() - timedelta(minutes=max(0, int(since_minutes)))
+        return await asyncio.to_thread(
+            call_store.get_recent_conversations,
+            user_id=user_id,
+            character_id=character_id,
+            since=since,
+            limit=max(0, int(limit)),
+        )
+
     async def compress_context_if_needed(
         self,
         user_id: str,
@@ -353,5 +374,11 @@ class ConversationService:
                 ts = timestamp_to_date(ts)
             src = c.get("source", "")
             cnt = c.get("content", "")
-            conv_list.append(f"[{ts}]{src}: {cnt}")
+            if c.get("type") == ContextType.CALL.value:
+                metadata = c.get("meta_data") or {}
+                summary = metadata.get("summary", "") if isinstance(metadata, dict) else ""
+                suffix = f"：{summary}" if summary else ""
+                conv_list.append(f"[{ts}]语音通话：{cnt}{suffix}")
+            else:
+                conv_list.append(f"[{ts}]{src}: {cnt}")
         return conv_list

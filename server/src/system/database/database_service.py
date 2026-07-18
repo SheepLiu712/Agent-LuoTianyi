@@ -24,6 +24,7 @@ from src.system.database.sql_database import (
     DynamicComment,
     DynamicReadState,  # kept for type compatibility; dynamic ops delegated to DynamicStore
 )
+from src.system.database.call_store import CallStore
 from src.system.database.redis_buffer import RedisBuffer, WatchError, init_redis_buffer, get_redis_buffer
 from src.system.database.sql_writer import run_sql_write
 from src.system.database.event_store import EventStore
@@ -96,6 +97,7 @@ class DatabaseManager:
         self.memory_store: Optional[MemoryStore] = None
         self.dynamic_store: Optional[DynamicStore] = None
         self.user_store: Optional[UserStore] = None
+        self.call_store: Optional[CallStore] = None
         self.init_all_databases()
 
     def init_all_databases(self) -> None:
@@ -116,6 +118,7 @@ class DatabaseManager:
                 redis_buffer=self._ensure_redis(),
                 user_store=self.user_store,
             )
+            self.call_store = CallStore(self)
             logger.info("Main database initialized successfully.")
         except Exception as e:
             logger.error(f"Error initializing databases: {e}")
@@ -140,6 +143,7 @@ class DatabaseManager:
             "event_store": self.event_store,
             "memory_store": self.memory_store,
             "dynamic_store": self.dynamic_store,
+            "call_store": self.call_store,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:

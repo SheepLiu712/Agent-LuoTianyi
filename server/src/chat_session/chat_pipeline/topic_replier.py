@@ -260,6 +260,7 @@ class TopicReplier:
                 send_reply_callback=send_reply_callback,
                 job_content=item,
                 character_id=character_id,
+                stream_id=f"chat:{character_id}:{self.user_id}",
                 trace_id=trace_id,
                 user_id=self.user_id,
                 topic_id=topic_id,

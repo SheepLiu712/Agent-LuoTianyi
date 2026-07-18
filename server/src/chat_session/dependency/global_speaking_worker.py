@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import time
+from collections import deque
 from contextlib import aclosing
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, AsyncGenerator
 from datetime import datetime, timezone
-import time
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict
 
-from src.utils.logger import get_logger
-import base64
 from src.agent.main_chat import OneSentenceChat, SongSegmentChat
-from typing import Callable, Awaitable, Dict, Any
+from src.chat_session.call_models import CallTTSLine
 from src.system.observability import get_observability_service
 from src.utils.asyncio_helpers import (
     DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
@@ -18,6 +18,7 @@ from src.utils.asyncio_helpers import (
     run_sync_owned,
     wait_for_owned_tasks,
 )
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.capabilities import CapabilityManager
@@ -48,28 +49,45 @@ async def _iter_sync_gen_in_executor(gen, executor=None):
 
 @dataclass
 class SpeakingJob:
-    """全局 speaking 队列中的任务。"""
-    send_reply_callback: Callable[[ChatResponse], Awaitable[None]]
-    job_content: "OneSentenceChat | SongSegmentChat | str" 
+    send_reply_callback: Callable[["ChatResponse"], Awaitable[None]]
+    job_content: "OneSentenceChat | SongSegmentChat | CallTTSLine | str"
     character_id: str = "luotianyi"
+    stream_id: str = "default"
+    stream_seq: int = 0
     trace_id: str | None = None
     user_id: str | None = None
     topic_id: str | None = None
+    response_id: str | None = None
     reply_generated_monotonic: float | None = None
     reply_generated_ts: str | None = None
     song_audio_generated_callback: Callable[[str, str], None] | None = None
+    on_error: Callable[[Exception], Awaitable[None] | None] | None = None
+    cancellation_event: asyncio.Event | None = None
     enqueued_monotonic: float | None = None
     enqueued_ts: str | None = None
+    estimated_seconds: float | None = None
+
+    def is_cancelled(self) -> bool:
+        return bool(self.cancellation_event and self.cancellation_event.is_set())
+
+    def estimate_duration(self) -> float:
+        if self.estimated_seconds is not None:
+            return max(0.3, float(self.estimated_seconds))
+        if isinstance(self.job_content, OneSentenceChat):
+            count = len(self.job_content.sound_content or self.job_content.content)
+        elif isinstance(self.job_content, CallTTSLine):
+            count = len(self.job_content.content)
+        else:
+            count = len(self.job_content.get_content()) if hasattr(self.job_content, "get_content") else len(str(self.job_content))
+        return max(count / 200 * 60, 0.3)
 
 
 class GlobalSpeakingWorker:
-    """全局唯一 speaking consumer：串行处理 TTS/多媒体生成任务。"""
+    """单 GPU TTS worker：每流 FIFO，流头按等待/估算时长动态选择。"""
 
     def __init__(self, config: Dict):
-        self.config = config
+        self.config = config or {}
         self.logger = get_logger("GlobalSpeakingWorker")
-        queue_maxsize = max(1, int(config.get("queue_maxsize", 512)))
-        self.queue: asyncio.Queue[SpeakingJob] = asyncio.Queue(maxsize=queue_maxsize)
         self.worker_task: asyncio.Task | None = None
         self.capabilities: "CapabilityManager | None" = None
         self._stopping = False
@@ -90,6 +108,19 @@ class GlobalSpeakingWorker:
                 )
             ),
         )
+        self._stream_queues: dict[str, deque[SpeakingJob]] = {}
+        self._last_started_at: dict[str, float] = {}
+        self._condition = asyncio.Condition()
+        self._total_jobs = 0
+        self._active_job: SpeakingJob | None = None
+        self._max_total_jobs = max(
+            1,
+            int(self.config.get("max_total_jobs", self.config.get("queue_maxsize", 512))),
+        )
+        self._max_stream_jobs = max(
+            1,
+            min(self._max_total_jobs, int(self.config.get("max_stream_jobs", 64))),
+        )
 
     def start_if_needed(self):
         if self._stopping:
@@ -99,16 +130,13 @@ class GlobalSpeakingWorker:
             self.logger.info("Global speaking worker started")
 
     def set_capabilities(self, capabilities: "CapabilityManager"):
-        """Inject action capabilities used by the speaking worker."""
         self.capabilities = capabilities
 
     def wire_dependencies(self, *, capabilities: "CapabilityManager") -> None:
-        """注入 speaking worker 所需能力。"""
         self.set_capabilities(capabilities)
         self.ensure_dependencies()
 
     def ensure_dependencies(self) -> None:
-        """检查 speaking worker 依赖已经初始化。"""
         if self.capabilities is None:
             raise RuntimeError("GlobalSpeakingWorker dependency is missing: capabilities")
 
@@ -118,166 +146,306 @@ class GlobalSpeakingWorker:
             job.enqueued_monotonic = time.perf_counter()
         if job.enqueued_ts is None:
             job.enqueued_ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
-        await self.queue.put(job)
+        async with self._condition:
+            stream_queue = self._stream_queues.setdefault(job.stream_id, deque())
+            if self._total_jobs >= self._max_total_jobs or len(stream_queue) >= self._max_stream_jobs:
+                raise RuntimeError("speaking queue is full")
+            stream_queue.append(job)
+            self._total_jobs += 1
+            self._condition.notify()
 
+    async def cancel_pending(self, *, stream_id: str, response_id: str | None = None, reason: str = "cancelled") -> int:
+        _ = reason
+        removed = 0
+        async with self._condition:
+            active = self._active_job
+            if (
+                active is not None
+                and active.stream_id == stream_id
+                and (response_id is None or active.response_id == response_id)
+                and active.cancellation_event is not None
+            ):
+                # GPT-SoVITS 的同步生成器无法被 asyncio 强制抢占；设置取消令牌后，
+                # 处理循环会在当前生成调用返回时立即丢弃剩余音频，不再发送后续包。
+                active.cancellation_event.set()
+            queue = self._stream_queues.get(stream_id)
+            if queue is None:
+                return 0
+            kept = deque()
+            while queue:
+                job = queue.popleft()
+                if response_id is None or job.response_id == response_id:
+                    if job.cancellation_event:
+                        job.cancellation_event.set()
+                    removed += 1
+                    self._total_jobs -= 1
+                else:
+                    kept.append(job)
+            if kept:
+                self._stream_queues[stream_id] = kept
+            else:
+                self._stream_queues.pop(stream_id, None)
+            self._condition.notify_all()
+        return removed
+
+    def has_work(self, stream_id: str) -> bool:
+        queue = self._stream_queues.get(stream_id)
+        return bool(queue) or bool(self._active_job and self._active_job.stream_id == stream_id)
+
+    async def _take_next_job(self) -> SpeakingJob:
+        async with self._condition:
+            while self._total_jobs <= 0:
+                await self._condition.wait()
+            now = time.perf_counter()
+            candidates: list[tuple[float, float, str, SpeakingJob]] = []
+            for stream_id, queue in self._stream_queues.items():
+                if not queue:
+                    continue
+                job = queue[0]
+                last_started = self._last_started_at.get(stream_id)
+                priority = 1.0 if last_started is None else max((now - last_started) / job.estimate_duration(), 1.0)
+                candidates.append((priority, -(job.enqueued_monotonic or now), stream_id, job))
+            _, _, stream_id, job = max(candidates, key=lambda item: (item[0], item[1]))
+            queue = self._stream_queues[stream_id]
+            queue.popleft()
+            if not queue:
+                self._stream_queues.pop(stream_id, None)
+            self._total_jobs -= 1
+            self._last_started_at[stream_id] = time.perf_counter()
+            self._active_job = job
+            return job
 
     async def _run(self):
         from src.system.user_interface.types import ChatResponse
 
         while True:
-            job = await self.queue.get()
+            job = await self._take_next_job()
             job_start_monotonic = time.perf_counter()
             job_start_ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
             self._record_queue_wait(job, job_start_ts, job_start_monotonic)
-            terminal_sent = False
-
-            async def send_terminal(
-                *,
-                text: str,
-                expression: str,
-                audio: str = "",
-                error_code: str | None = None,
-            ) -> None:
-                nonlocal terminal_sent
-                if terminal_sent:
-                    return
-                response = ChatResponse(
-                    uuid=job.job_content.uuid,
-                    audio=audio,
-                    is_final_package=True,
-                    text=text,
-                    expression=expression,
-                    audio_error=error_code is not None,
-                    error_code=error_code,
-                )
-                for attempt in range(1, self.terminal_send_max_attempts + 1):
-                    try:
-                        await job.send_reply_callback(response)
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as error:
-                        if attempt >= self.terminal_send_max_attempts:
-                            raise
-                        self.logger.warning(
-                            "Terminal response was not accepted "
-                            f"({attempt}/{self.terminal_send_max_attempts}): {error}"
-                        )
-                        if self.terminal_send_retry_delay_seconds:
-                            await asyncio.sleep(self.terminal_send_retry_delay_seconds)
-                    else:
-                        terminal_sent = True
-                        return
 
             try:
-                if isinstance(job.job_content, OneSentenceChat):
-                    display_text = job.job_content.content
-                    sound_text = job.job_content.sound_content
-                    expression = job.job_content.expression
-                    if not sound_text.strip():
-                        await send_terminal(
-                            text=display_text,
-                            expression=expression,
-                        )
-                        continue
-
-                    # Drive the sync TTS generator in a thread so the event loop
-                    # can service other tasks between chunks.
-                    sync_gen = self.capabilities.speech.say_stream(
-                        job.character_id, sound_text, job.job_content.tone
-                    )
-                    audio_sent = False
-                    try:
-                        async with aclosing(_iter_sync_gen_in_executor(sync_gen)) as audio_chunks:
-                            async for audio_chunk in audio_chunks:
-                                if not audio_chunk:
-                                    continue
-                                chunk_text = display_text if not audio_sent else ""
-                                if not audio_sent:
-                                    self._record_first_packet(job, job_start_ts, job_start_monotonic)
-                                audio_sent = True
-                                resp = ChatResponse(
-                                    uuid=job.job_content.uuid, audio=audio_chunk,
-                                    is_final_package=False, text=chunk_text, expression=expression,
-                                )
-                                await job.send_reply_callback(resp)
-                    except Exception as error:
-                        self.logger.error(f"Streaming TTS failed: {error}")
-                        await send_terminal(
-                            text="" if audio_sent else display_text,
-                            expression="" if audio_sent else expression,
-                            error_code="TTS_STREAM_ERROR",
-                        )
-                        continue
-
-                    if not audio_sent:
-                        await send_terminal(
-                            text=display_text,
-                            expression=expression,
-                            error_code="TTS_EMPTY",
-                        )
-                    else:
-                        await send_terminal(text="", expression="")
-
-                elif isinstance(job.job_content, SongSegmentChat):
-                    text = f"(唱了《{job.job_content.song}》)\n{job.job_content.lyrics}"
-                    expression = "唱歌"
-                    try:
-                        audio = await _run_sync_in_executor(
-                            self.capabilities.singing.sing,
-                            job.character_id,
-                            job.job_content.song,
-                            job.job_content.segment,
-                        )
-                    except Exception as error:
-                        self.logger.error(f"Singing synthesis failed: {error}")
-                        await send_terminal(
-                            text=text,
-                            expression=expression,
-                            error_code="TTS_STREAM_ERROR",
-                        )
-                        continue
-                    if not audio:
-                        self.logger.warning(f"No audio generated for song: {job.job_content.song}")
-                        await send_terminal(
-                            text=text,
-                            expression=expression,
-                            error_code="TTS_EMPTY",
-                        )
-                        continue
-                    if job.song_audio_generated_callback is not None:
-                        job.song_audio_generated_callback(job.job_content.song, job.job_content.segment)
-                    CHUNK_SIZE = 48 * 1024
-                    for i in range(0, len(audio), CHUNK_SIZE):
-                        chunk = audio[i:i+CHUNK_SIZE]
-                        chunk_base64 = base64.b64encode(chunk).decode("utf-8")
-                        chunk_text = "" if i > 0 else text
-                        if i == 0:
-                            self._record_first_packet(job, job_start_ts, job_start_monotonic)
-                        is_final_package = (i + CHUNK_SIZE) >= len(audio)
-                        if is_final_package:
-                            await send_terminal(
-                                audio=chunk_base64,
-                                text=chunk_text,
-                                expression=expression,
-                            )
-                        else:
-                            chunk_resp = ChatResponse(
-                                uuid=job.job_content.uuid, audio=chunk_base64,
-                                is_final_package=False, text=chunk_text,
-                                expression=expression,
-                            )
-                            await job.send_reply_callback(chunk_resp)
-                else:
-                    self.logger.warning(f"Unsupported speaking job type: {type(job.job_content)}")
+                if job.is_cancelled():
                     continue
-
-            except Exception as e:
-                self.logger.error(f"Error processing speaking job: {e}")
-                continue
+                if isinstance(job.job_content, OneSentenceChat):
+                    await self._process_sentence_job(job, job_start_ts, job_start_monotonic, ChatResponse)
+                elif isinstance(job.job_content, SongSegmentChat):
+                    await self._process_song_job(job, job_start_ts, job_start_monotonic, ChatResponse)
+                elif isinstance(job.job_content, CallTTSLine):
+                    await self._process_call_job(job, job_start_ts, job_start_monotonic, ChatResponse)
+                else:
+                    self.logger.warning("Unsupported speaking job type: %s", type(job.job_content))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.logger.exception("Error processing speaking job")
+                if job.on_error is not None:
+                    result = job.on_error(exc)
+                    if asyncio.iscoroutine(result):
+                        await result
             finally:
-                self.queue.task_done()
+                self._active_job = None
 
-    def _record_queue_wait(self, job: SpeakingJob, job_start_ts: str, job_start_monotonic: float) -> None:
+    async def _send_terminal(
+        self,
+        job: SpeakingJob,
+        ChatResponse,
+        *,
+        text: str,
+        expression: str,
+        audio: str = "",
+        error_code: str | None = None,
+    ) -> None:
+        response_uuid = (
+            job.job_content.audio_id
+            if isinstance(job.job_content, CallTTSLine)
+            else job.job_content.uuid
+        )
+        response = ChatResponse(
+            uuid=response_uuid,
+            audio=audio,
+            is_final_package=True,
+            text=text,
+            expression=expression,
+            audio_error=error_code is not None,
+            error_code=error_code,
+        )
+        for attempt in range(1, self.terminal_send_max_attempts + 1):
+            try:
+                await job.send_reply_callback(response)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if attempt >= self.terminal_send_max_attempts:
+                    raise
+                self.logger.warning(
+                    "Terminal response was not accepted "
+                    f"({attempt}/{self.terminal_send_max_attempts}): {error}"
+                )
+                if self.terminal_send_retry_delay_seconds:
+                    await asyncio.sleep(self.terminal_send_retry_delay_seconds)
+            else:
+                return
+
+    async def _process_sentence_job(self, job, start_ts, start_monotonic, ChatResponse):
+        display_text = job.job_content.content
+        sound_text = job.job_content.sound_content
+        expression = job.job_content.expression
+        if not sound_text.strip():
+            await self._send_terminal(
+                job,
+                ChatResponse,
+                text=display_text,
+                expression=expression,
+            )
+            return
+        sync_gen = self.capabilities.speech.say_stream(job.character_id, sound_text, job.job_content.tone)
+        audio_sent = False
+        try:
+            async with aclosing(_iter_sync_gen_in_executor(sync_gen)) as audio_chunks:
+                async for audio_chunk in audio_chunks:
+                    if job.is_cancelled():
+                        return
+                    if not audio_chunk:
+                        continue
+                    if not audio_sent:
+                        self._record_first_packet(job, start_ts, start_monotonic)
+                    response = ChatResponse(
+                        uuid=job.job_content.uuid,
+                        audio=audio_chunk,
+                        is_final_package=False,
+                        text=display_text if not audio_sent else "",
+                        expression=expression,
+                    )
+                    audio_sent = True
+                    await job.send_reply_callback(response)
+        except Exception as error:
+            self.logger.error(f"Streaming TTS failed: {error}")
+            await self._send_terminal(
+                job,
+                ChatResponse,
+                text="" if audio_sent else display_text,
+                expression="" if audio_sent else expression,
+                error_code="TTS_STREAM_ERROR",
+            )
+            return
+
+        if job.is_cancelled():
+            return
+        await self._send_terminal(
+            job,
+            ChatResponse,
+            text="" if audio_sent else display_text,
+            expression="" if audio_sent else expression,
+            error_code=None if audio_sent else "TTS_EMPTY",
+        )
+
+    async def _process_call_job(self, job, start_ts, start_monotonic, ChatResponse):
+        line = job.job_content
+        sync_gen = self.capabilities.speech.say_stream(job.character_id, line.content, line.tone)
+        audio_sent = False
+        try:
+            async with aclosing(_iter_sync_gen_in_executor(sync_gen)) as audio_chunks:
+                async for audio_chunk in audio_chunks:
+                    if job.is_cancelled():
+                        return
+                    if not audio_chunk:
+                        continue
+                    if not audio_sent:
+                        self._record_first_packet(job, start_ts, start_monotonic)
+                    response = ChatResponse(
+                        uuid=line.audio_id,
+                        audio=audio_chunk,
+                        is_final_package=False,
+                        text=line.content if not audio_sent else "",
+                        expression=line.expression if not audio_sent else "",
+                    )
+                    audio_sent = True
+                    await job.send_reply_callback(response)
+        except Exception:
+            await self._send_terminal(
+                job,
+                ChatResponse,
+                text="" if audio_sent else line.content,
+                expression="" if audio_sent else line.expression,
+                error_code="TTS_STREAM_ERROR",
+            )
+            raise
+
+        if job.is_cancelled():
+            return
+        await self._send_terminal(
+            job,
+            ChatResponse,
+            text="" if audio_sent else line.content,
+            expression="" if audio_sent else line.expression,
+            error_code=None if audio_sent else "TTS_EMPTY",
+        )
+        if not audio_sent:
+            raise RuntimeError("Call TTS produced no audio")
+
+    async def _process_song_job(self, job, start_ts, start_monotonic, ChatResponse):
+        content = job.job_content
+        text = f"(唱了《{content.song}》)\n{content.lyrics}"
+        expression = "唱歌"
+        try:
+            audio = await _run_sync_in_executor(
+                self.capabilities.singing.sing,
+                job.character_id,
+                content.song,
+                content.segment,
+            )
+        except Exception as error:
+            self.logger.error(f"Singing synthesis failed: {error}")
+            await self._send_terminal(
+                job,
+                ChatResponse,
+                text=text,
+                expression=expression,
+                error_code="TTS_STREAM_ERROR",
+            )
+            return
+        if job.is_cancelled():
+            return
+        if not audio:
+            await self._send_terminal(
+                job,
+                ChatResponse,
+                text=text,
+                expression=expression,
+                error_code="TTS_EMPTY",
+            )
+            return
+        if job.song_audio_generated_callback is not None:
+            job.song_audio_generated_callback(content.song, content.segment)
+        chunk_size = 48 * 1024
+        for i in range(0, len(audio), chunk_size):
+            if job.is_cancelled():
+                return
+            chunk = base64.b64encode(audio[i:i + chunk_size]).decode("utf-8")
+            if i == 0:
+                self._record_first_packet(job, start_ts, start_monotonic)
+            is_final = (i + chunk_size) >= len(audio)
+            if is_final:
+                await self._send_terminal(
+                    job,
+                    ChatResponse,
+                    audio=chunk,
+                    text=text if i == 0 else "",
+                    expression=expression if i == 0 else "",
+                )
+            else:
+                await job.send_reply_callback(
+                    ChatResponse(
+                        uuid=job.job_content.uuid,
+                        audio=chunk,
+                        is_final_package=False,
+                        text=text if i == 0 else "",
+                        expression=expression if i == 0 else "",
+                    )
+                )
+
+    def _record_queue_wait(self, job, job_start_ts, job_start_monotonic) -> None:
         observability = get_observability_service()
         if observability is None or not job.trace_id or job.enqueued_monotonic is None or job.enqueued_ts is None:
             return
@@ -289,13 +457,10 @@ class GlobalSpeakingWorker:
             start_ts=job.enqueued_ts,
             end_ts=job_start_ts,
             duration_ms=(job_start_monotonic - job.enqueued_monotonic) * 1000.0,
-            metadata={
-                "character_id": job.character_id,
-                "job_type": type(job.job_content).__name__,
-            },
+            metadata={"character_id": job.character_id, "job_type": type(job.job_content).__name__, "stream_id": job.stream_id},
         )
 
-    def _record_first_packet(self, job: SpeakingJob, job_start_ts: str, job_start_monotonic: float) -> None:
+    def _record_first_packet(self, job, job_start_ts, job_start_monotonic) -> None:
         observability = get_observability_service()
         if observability is None or not job.trace_id:
             return
@@ -309,26 +474,19 @@ class GlobalSpeakingWorker:
             start_ts=job_start_ts,
             end_ts=first_packet_ts,
             duration_ms=(first_packet_monotonic - job_start_monotonic) * 1000.0,
-            metadata={
-                "character_id": job.character_id,
-                "job_type": type(job.job_content).__name__,
-            },
+            metadata={"character_id": job.character_id, "job_type": type(job.job_content).__name__, "stream_id": job.stream_id},
         )
-        if job.reply_generated_monotonic is None or job.reply_generated_ts is None:
-            return
-        observability.record_pipeline_span(
-            trace_id=job.trace_id,
-            user_id=job.user_id,
-            topic_id=job.topic_id,
-            span_name="reply_generated_to_first_tts_packet",
-            start_ts=job.reply_generated_ts,
-            end_ts=first_packet_ts,
-            duration_ms=(first_packet_monotonic - job.reply_generated_monotonic) * 1000.0,
-            metadata={
-                "character_id": job.character_id,
-                "job_type": type(job.job_content).__name__,
-            },
-        )
+        if job.reply_generated_monotonic is not None and job.reply_generated_ts is not None:
+            observability.record_pipeline_span(
+                trace_id=job.trace_id,
+                user_id=job.user_id,
+                topic_id=job.topic_id,
+                span_name="reply_generated_to_first_tts_packet",
+                start_ts=job.reply_generated_ts,
+                end_ts=first_packet_ts,
+                duration_ms=(first_packet_monotonic - job.reply_generated_monotonic) * 1000.0,
+                metadata={"character_id": job.character_id, "job_type": type(job.job_content).__name__, "stream_id": job.stream_id},
+            )
 
     async def stop(self):
         self._stopping = True
@@ -357,6 +515,11 @@ class GlobalSpeakingWorker:
             finally:
                 if self.worker_task is task:
                     self.worker_task = None
+
+        async with self._condition:
+            self._stream_queues.clear()
+            self._total_jobs = 0
+            self._active_job = None
 
         if signal_error is not None:
             raise RuntimeError(f"Failed to signal TTS shutdown: {signal_error}") from signal_error

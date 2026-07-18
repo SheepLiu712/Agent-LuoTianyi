@@ -4,9 +4,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useAuth } from '../hooks/useAuth';
 import Index from './index';
 import LoginScreen from './login';
+import CallScreen from './call';
 
 export default function RootLayout() {
   const { isLoggedIn, isLoading, login, register, logout } = useAuth();
+  const [showCall, setShowCall] = React.useState(false);
 
   // 注册成功后的回调：不再弹出偏好设置，用户可以在主界面右上角自行设置
   const handleRegister = async (
@@ -39,10 +41,18 @@ export default function RootLayout() {
     );
   }
 
+  if (showCall) {
+    return (
+      <SafeAreaProvider>
+        <CallScreen onClose={() => setShowCall(false)} />
+      </SafeAreaProvider>
+    );
+  }
+
   // 已登录 → 显示主界面
   return (
     <SafeAreaProvider>
-      <Index onLogout={logout} />
+      <Index onLogout={logout} onOpenCall={() => setShowCall(true)} />
     </SafeAreaProvider>
   );
 }

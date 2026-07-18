@@ -77,6 +77,7 @@ class RuntimeConfigValidator:
         items.extend(self._validate_secrets())
         items.extend(self._validate_security_config(config))
         items.extend(self._validate_llm_interfaces(config))
+        items.extend(self._validate_realtime_dialogue(config))
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
         items.extend(self._validate_world_optionals(config))
@@ -188,6 +189,30 @@ class RuntimeConfigValidator:
                     result.append(ValidationItem("core", f"{kind}.{name}", "ok", "配置完整"))
         return result
 
+    def _validate_realtime_dialogue(self, config: dict[str, Any]) -> list[ValidationItem]:
+        """实时通话使用独立的 WebSocket 模型配置，不复用 OpenAI-compatible interface。"""
+        realtime = config.get("realtime_dialogue_service") or {}
+        if not realtime:
+            # 旧配置/未启用电话功能时不阻断聊天运行时；完整配置一旦出现则严格校验。
+            return [ValidationItem("core", "realtime_dialogue_service", "disabled", "未配置实时电话，电话功能不可用", severity="warning")]
+        qwen = realtime.get("qwen") or {}
+        if str(realtime.get("provider") or "qwen") != "qwen":
+            return [ValidationItem("core", "realtime_dialogue_service.provider", "error", "仅支持 qwen provider")]
+        missing = [field for field in ("api_key", "model", "base_url") if not qwen.get(field)]
+        unresolved = any(str(qwen.get(field, "")).startswith("$") for field in ("api_key", "base_url"))
+        if missing or unresolved:
+            details = []
+            if missing:
+                details.append(f"缺少: {', '.join(missing)}")
+            if unresolved:
+                details.append("api_key 或 base_url 环境变量未解析")
+            return [ValidationItem("core", "realtime_dialogue_service.qwen", "error", "实时对话配置不完整，" + "，".join(details))]
+        if qwen.get("model") != "qwen-audio-3.0-realtime-flash":
+            return [ValidationItem("core", "realtime_dialogue_service.qwen.model", "error", "必须使用 qwen-audio-3.0-realtime-flash")]
+        if not str(qwen.get("base_url", "")).startswith(("ws://", "wss://")):
+            return [ValidationItem("core", "realtime_dialogue_service.qwen.base_url", "error", "必须是 ws:// 或 wss:// WebSocket 地址")]
+        return [ValidationItem("core", "realtime_dialogue_service.qwen", "ok", "配置完整")]
+
     def _validate_core_modules(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []
         llms = set((config.get("llm_service", {}).get("available_llms") or {}).keys())
@@ -200,6 +225,10 @@ class RuntimeConfigValidator:
             module = self._get(config, path) or {}
             vlm_name = ((module.get("vlm") or {}).get("name") or "").strip()
             result.append(self._module_item("vlm", name, vlm_name, vlms))
+        call_summary = self._get(config, "chat_session_manager.call_stream_manager.settlement.summary")
+        if call_summary is not None:
+            llm_name = ((call_summary.get("llm_module") or {}).get("llm") or {}).get("name", "")
+            result.append(self._module_item("llm", "call.summary", str(llm_name).strip(), llms))
         return result
 
     def _validate_core_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
