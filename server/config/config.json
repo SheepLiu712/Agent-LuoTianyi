@@ -504,7 +504,18 @@
             },
             "songlearner_dir": "src/world/learn_sing_songs/song_learner",
             "songlearner_resource_dir": "res/song_learner",
-            "qq_credential_file": "config/qq_music_credential.json"
+            "qq_credential_file": "config/qq_music_credential.json",
+            "qq_credential_refresh_before_seconds": 86400
+        },
+        "qq_music_credential_refresh": {
+            "enabled": true,
+            "clock_config": {
+                "type": "interval",
+                "params": {
+                    "interval_seconds": 21600,
+                    "run_immediately": true
+                }
+            }
         },
         "bili_dynamic_fetcher": {
             "clock_config": {

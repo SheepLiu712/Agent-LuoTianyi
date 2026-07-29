@@ -1,7 +1,7 @@
 sqlalchemy
 fastapi
 uvicorn
-pydantic
+pydantic>=2.13.3
 requests
 redis
 python-jose
@@ -26,7 +26,7 @@ pedalboard~=0.8.1
 omegaconf==2.2.3
 beartype==0.14.1
 einops==0.8.1
-qqmusic-api-python
+qqmusic-api-python==0.6.9
 demucs==4.0.0
 spafe==0.3.2
 torch_audiomentations

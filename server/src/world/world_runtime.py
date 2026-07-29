@@ -8,6 +8,7 @@ from src.world.citywalk.task import CitywalkTask
 from src.world.dynamic_interaction.task import DynamicInteractionTask
 from src.world.event_cleanup_task import ExpiredEventCleanupTask
 from src.world.get_new_songs.task import VCPediaNewSongTask
+from src.world.learn_sing_songs.qq_music_credential_refresh_task import QQMusicCredentialRefreshTask
 from src.world.learn_sing_songs.task import LearnSingSongsTask
 from src.world.proactive_topic_task import ProactiveTopicCheckTask
 from src.world.world_clock import WorldClock
@@ -34,6 +35,7 @@ class WorldRuntime:
         self.citywalk_tasks: List[CitywalkTask] = []
         self.learn_sing_songs_task: LearnSingSongsTask | None = None
         self.learn_sing_songs_tasks: List[LearnSingSongsTask] = []
+        self.qq_music_credential_refresh_task: QQMusicCredentialRefreshTask | None = None
         self.vcpedia_new_song_task: VCPediaNewSongTask | None = None
         self.bili_event_update_task: BiliEventUpdateTask | None = None
         self.bili_event_update_tasks: List[BiliEventUpdateTask] = []
@@ -65,6 +67,14 @@ class WorldRuntime:
         self.learn_sing_songs_task = (
             self.learn_sing_songs_tasks[0] if self.learn_sing_songs_tasks else None
         )
+        self.qq_music_credential_refresh_task = (
+            QQMusicCredentialRefreshTask(
+                self.learn_sing_songs_tasks,
+                self.config.get("qq_music_credential_refresh", {}),
+            )
+            if self.learn_sing_songs_tasks and self._task_enabled("qq_music_credential_refresh")
+            else None
+        )
         self.vcpedia_new_song_task = VCPediaNewSongTask(self.config.get("song_knowledge", {}))
         self.bili_event_update_tasks = self._build_bili_event_update_tasks()
         self.bili_event_update_task = self.bili_event_update_tasks[0] if self.bili_event_update_tasks else None
@@ -85,6 +95,7 @@ class WorldRuntime:
         self.tasks: List["WorldTask"] = [
             *self.citywalk_tasks,
             *self.learn_sing_songs_tasks,
+            self.qq_music_credential_refresh_task,
             self.vcpedia_new_song_task,
             *self.bili_event_update_tasks,
             self.dynamic_interaction_task,

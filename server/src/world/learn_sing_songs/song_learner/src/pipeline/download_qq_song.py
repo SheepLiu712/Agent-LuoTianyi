@@ -2,13 +2,13 @@
 # coding: utf-8
 
 import argparse
-import os
 import asyncio
 import base64
 import importlib
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -41,7 +41,20 @@ QQ_SDK_IMPORT_ERROR = str(QQ_SDK.get("error", ""))
 
 QQ_LYRIC_URL = "https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg"
 QQ_MUSICU_URL = "https://u.y.qq.com/cgi-bin/musicu.fcg"
-VIRTUAL_SINGERS = frozenset(("洛天依", "乐正绫", "言和", "星尘", "诗岸"))
+VIRTUAL_SINGERS = frozenset(("洛天依", "乐正绫", "言和", "星尘", "诗岸", "心华", "墨清弦", "初音未来", "镜音铃", "镜音连", "巡音流歌", "GUMI", "IA", "乐正龙牙"))
+DEFAULT_CREDENTIAL_REFRESH_BEFORE_SECONDS = 24 * 60 * 60
+_CREDENTIAL_REFRESH_LOCK = threading.Lock()
+_REFRESH_PRESERVED_FIELDS = (
+    "openid",
+    "refresh_token",
+    "access_token",
+    "musicid",
+    "musickey",
+    "unionid",
+    "str_musicid",
+    "refresh_key",
+    "login_type",
+)
 
 
 class QQMusicCredentialError(RuntimeError):
@@ -139,7 +152,7 @@ def get_song_singer_names(song: Dict[str, Any]) -> List[str]:
 
 
 def validate_song_singers(song: Dict[str, Any], target_singer: str = "洛天依") -> Tuple[bool, str]:
-    """Allow only songs whose complete structured singer list is the target singer."""
+    """Require the target singer and reject only other known virtual singers."""
     singer_names = get_song_singer_names(song)
     target = normalize_text(target_singer)
     normalized_names = [normalize_text(name) for name in singer_names]
@@ -150,15 +163,9 @@ def validate_song_singers(song: Dict[str, Any], target_singer: str = "洛天依"
         return False, f"歌手列表不包含目标歌手 {target_singer}"
 
     other_names = [name for name, normalized in zip(singer_names, normalized_names) if normalized != target]
-    if other_names:
-        known_other_names = [name for name in other_names if name in VIRTUAL_SINGERS]
-        unknown_other_names = [name for name in other_names if name not in VIRTUAL_SINGERS]
-        details = []
-        if known_other_names:
-            details.append(f"其他虚拟歌手: {'、'.join(known_other_names)}")
-        if unknown_other_names:
-            details.append(f"未知歌手: {'、'.join(unknown_other_names)}")
-        return False, "歌曲包含其他歌手（" + "；".join(details) + "）"
+    known_other_names = [name for name in other_names if name in VIRTUAL_SINGERS]
+    if known_other_names:
+        return False, f"歌曲包含其他虚拟歌手: {'、'.join(known_other_names)}"
 
     return True, ""
 
@@ -177,10 +184,17 @@ def load_saved_credential(credential_file: Path) -> Optional[Dict[str, Any]]:
 
 def save_credential(credential_file: Path, credential_dict: Dict[str, Any]) -> None:
     credential_file.parent.mkdir(parents=True, exist_ok=True)
-    credential_file.write_text(
-        json.dumps(credential_dict, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    temporary_file = credential_file.with_name(
+        f".{credential_file.name}.{os.getpid()}.{threading.get_ident()}.tmp"
     )
+    try:
+        temporary_file.write_text(
+            json.dumps(credential_dict, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        os.replace(temporary_file, credential_file)
+    finally:
+        temporary_file.unlink(missing_ok=True)
 
 
 def validate_credential(credential_dict: Dict[str, Any]) -> bool:
@@ -191,6 +205,134 @@ def validate_credential(credential_dict: Dict[str, Any]) -> bool:
         return True
     except Exception:
         return False
+
+
+def credential_seconds_until_expiry(credential_dict: Dict[str, Any]) -> Optional[int]:
+    """Return the local musickey lifetime, or None when the SDK supplied no timestamps."""
+    try:
+        created_at = int(credential_dict.get("musickey_create_time") or 0)
+        expires_in = int(credential_dict.get("key_expires_in") or 0)
+    except (TypeError, ValueError):
+        return None
+    if created_at <= 0 or expires_in <= 0:
+        return None
+    return created_at + expires_in - int(time.time())
+
+
+def _merge_refreshed_credential(
+    previous: Dict[str, Any],
+    refreshed: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Keep refresh material when QQ omits unchanged fields from its refresh response."""
+    merged = dict(refreshed)
+    for field in _REFRESH_PRESERVED_FIELDS:
+        if not merged.get(field) and previous.get(field):
+            merged[field] = previous[field]
+    return merged
+
+
+def _run_async_from_sync(coroutine):
+    """Run an async SDK operation from sync code, including during async server startup."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+
+    results: List[Any] = []
+    errors: List[BaseException] = []
+
+    def _runner() -> None:
+        try:
+            results.append(asyncio.run(coroutine))
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=_runner, name="qq-credential-refresh", daemon=True)
+    worker.start()
+    worker.join()
+    if errors:
+        raise errors[0]
+    return results[0]
+
+
+async def _ensure_fresh_credential_async(
+    credential_dict: Dict[str, Any],
+    *,
+    refresh_before_seconds: int,
+    force_refresh: bool,
+    check_remote: bool,
+) -> Tuple[Dict[str, Any], bool]:
+    credential = QQ_SDK["Credential"].model_validate(credential_dict)
+    seconds_left = credential_seconds_until_expiry(credential_dict)
+    expires_soon = seconds_left is not None and seconds_left <= refresh_before_seconds
+    remote_expired = False
+
+    async with QQ_SDK["Client"](credential=credential, verify=False) as client:
+        if check_remote:
+            try:
+                remote_expired = bool(await client.login.check_expired(credential))
+            except Exception as exc:
+                if force_refresh or expires_soon:
+                    raise
+                print(f"[WARN] QQ 音乐 credential 服务端校验失败，暂按本地有效期继续使用: {exc}")
+
+        if not (force_refresh or expires_soon or remote_expired):
+            return credential_dict, False
+
+        refreshed = await client.login.refresh_credential(credential)
+        refreshed_dict = _merge_refreshed_credential(
+            credential_dict,
+            refreshed.model_dump(by_alias=False),
+        )
+        refreshed_model = QQ_SDK["Credential"].model_validate(refreshed_dict)
+        if await client.login.check_expired(refreshed_model):
+            raise QQMusicCredentialError("QQ 音乐 credential 刷新后仍被服务端判定为过期")
+        return refreshed_dict, True
+
+
+def ensure_fresh_credential(
+    credential_file: Path,
+    *,
+    refresh_before_seconds: int = DEFAULT_CREDENTIAL_REFRESH_BEFORE_SECONDS,
+    force_refresh: bool = False,
+    check_remote: bool = True,
+) -> Dict[str, Any]:
+    """Validate and refresh a saved credential without requiring another QR scan."""
+    if not QQ_SDK_AVAILABLE:
+        raise QQMusicCredentialError(
+            "qqmusic-api-python 不可用，无法检查或刷新 credential。"
+            f"导入错误: {QQ_SDK_IMPORT_ERROR}"
+        )
+
+    credential_file = Path(credential_file).expanduser().resolve()
+    refresh_before_seconds = max(0, int(refresh_before_seconds))
+    with _CREDENTIAL_REFRESH_LOCK:
+        saved = load_saved_credential(credential_file)
+        if not saved:
+            raise QQMusicCredentialError(f"QQ 音乐 credential 不存在或不可读取: {credential_file}")
+        if not validate_credential(saved):
+            raise QQMusicCredentialError(f"QQ 音乐 credential 格式无效: {credential_file}")
+
+        try:
+            active, refreshed = _run_async_from_sync(
+                _ensure_fresh_credential_async(
+                    saved,
+                    refresh_before_seconds=refresh_before_seconds,
+                    force_refresh=force_refresh,
+                    check_remote=check_remote,
+                )
+            )
+        except QQMusicCredentialError:
+            raise
+        except Exception as exc:
+            raise QQMusicCredentialError(f"QQ 音乐 credential 自动刷新失败: {exc}") from exc
+
+        if refreshed:
+            save_credential(credential_file, active)
+            print(f"[INFO] QQ 音乐 credential 已自动刷新并保存: {credential_file}")
+        else:
+            print(f"[INFO] QQ 音乐 credential 已通过有效性检查: {credential_file}")
+        return active
 
 
 async def generate_qr_only(qr_image_path: Path) -> bool:
@@ -254,14 +396,14 @@ def ensure_qr_login(credential_file: Path, login_timeout: int, force_login: bool
         )
 
     if not force_login:
-        saved = load_saved_credential(credential_file)
-        if saved and validate_credential(saved):
-            print(f"[INFO] 已加载本地登录凭证: {credential_file}")
-            return saved
+        try:
+            return ensure_fresh_credential(credential_file)
+        except QQMusicCredentialError as exc:
+            print(f"[WARN] 已保存的 QQ 音乐 credential 无法自动续期: {exc}")
 
     print("[INFO] 开始 QQ 扫码登录流程。")
     qr_image_path = credential_file.parent / "qq_login_qr.png"
-    credential = asyncio.run(qr_login_async(login_timeout, qr_image_path))
+    credential = _run_async_from_sync(qr_login_async(login_timeout, qr_image_path))
     credential_dict = credential.model_dump(by_alias=False)
     save_credential(credential_file, credential_dict)
     print(f"[INFO] 登录凭证已保存，下次会自动复用: {credential_file}")
@@ -506,14 +648,27 @@ def download_song_and_lyric(
         else:
             saved = load_saved_credential(credential_file)
             if saved:
-                if not validate_credential(saved):
-                    raise QQMusicCredentialError(f"QQ 音乐 credential 格式无效: {credential_file}")
-                active_credential = saved
-                print(f"[INFO] 已加载本地登录凭证: {credential_file}")
+                try:
+                    active_credential = ensure_fresh_credential(credential_file)
+                except QQMusicCredentialError:
+                    if no_auto_login:
+                        raise
+                    active_credential = ensure_qr_login(
+                        credential_file=credential_file,
+                        login_timeout=login_timeout,
+                        force_login=True,
+                    )
 
         mp3_url = qq_fetch_mp3_url(songmid, timeout=timeout)
         if active_credential and not mp3_url:
-            mp3_url = qq_fetch_mp3_url_by_sdk(songmid, active_credential)
+            try:
+                mp3_url = qq_fetch_mp3_url_by_sdk(songmid, active_credential)
+            except QQMusicCredentialError:
+                active_credential = ensure_fresh_credential(
+                    credential_file,
+                    force_refresh=True,
+                )
+                mp3_url = qq_fetch_mp3_url_by_sdk(songmid, active_credential)
 
         if not mp3_url:
             print("[WARN] 普通下载链接不可用，可能是版权或 VIP 限制。")

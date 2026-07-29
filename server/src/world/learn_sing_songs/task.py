@@ -59,6 +59,13 @@ class LearnSingSongsTask(WorldTask):
             )
 
         credential_ok = bool(self.auto_song_learner.check_qq_credential())
+        if not credential_ok:
+            return WorldTaskResult.skipped_result(
+                self.task_name,
+                "QQ Music credential could not be refreshed; song learning was not started",
+                credential_ok=False,
+            )
+
         result = self.auto_song_learner.try_learn_pending()
         learned = list(getattr(result, "learned", []) or [])
         abandoned = list(getattr(result, "abandoned", []) or [])
