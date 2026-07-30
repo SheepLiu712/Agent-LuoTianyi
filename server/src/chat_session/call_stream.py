@@ -16,7 +16,7 @@ from src.chat_session.call_settlement import CallSettlementCoordinator
 from src.chat_session.dependency.global_speaking_worker import GlobalSpeakingWorker, SpeakingJob
 from src.system.user_interface.types import WSEventType, WSMessage
 from src.utils.realtime_dialogue import RealtimeToolDefinition
-from src.utils.realtime_dialogue.models import RealtimeEvent
+from src.utils.realtime_dialogue.models import RealtimeEvent, RealtimeEventType
 from src.utils.logger import get_logger
 
 
@@ -264,39 +264,42 @@ class CallStream:
                 CallResponseState(response_id=event.response_id),
             )
             response.raw_events.append(event.raw)
-        if event_type == "input_audio_buffer.speech_started":
+        if event_type == RealtimeEventType.SPEECH_STARTED:
             await self._handle_speech_started(event)
-        elif event_type == "input_audio_buffer.speech_stopped":
+        elif event_type == RealtimeEventType.SPEECH_STOPPED:
             self._last_speech_stopped_at = time.perf_counter()
             self._record_call_event(
                 "qwen.speech_stopped",
                 metadata={"qwen_event_id": event.event_id, "qwen_item_id": event.item_id},
             )
-        elif event_type == "conversation.item.input_audio_transcription.completed":
+        elif event_type == RealtimeEventType.INPUT_TRANSCRIPTION_COMPLETED:
             await self._append_turn("user", event.transcript, raw_events=[event.raw])
-        elif event_type == "response.created":
+        elif event_type == RealtimeEventType.RESPONSE_CREATED:
             await self._cancel_proactive_task()
             response_id = event.response_id or f"response-{uuid.uuid4().hex}"
             self._current_response_id = response_id
             self._responses[response_id] = CallResponseState(response_id=response_id)
         elif event_type in {
-            "response.text.delta",
-            "response.output_text.delta",
-            "response.audio_transcript.delta",
-            "response.output_audio_transcript.delta",
+            RealtimeEventType.TEXT_DELTA,
+            RealtimeEventType.OUTPUT_TEXT_DELTA,
+            RealtimeEventType.AUDIO_TRANSCRIPT_DELTA,
+            RealtimeEventType.OUTPUT_AUDIO_TRANSCRIPT_DELTA,
         }:
             response_id = event.response_id or self._current_response_id
             if response_id:
                 for line in self._parser.feed_text_delta(response_id, event.delta):
                     await self._enqueue_tts_line(line)
-        elif event_type == "response.function_call_arguments.done":
+        elif event_type == RealtimeEventType.FUNCTION_ARGUMENTS_DONE:
             await self._handle_function_call(event)
-        elif event_type in {"response.output_item.done", "response.content_part.done"}:
+        elif event_type in {
+            RealtimeEventType.OUTPUT_ITEM_DONE,
+            RealtimeEventType.CONTENT_PART_DONE,
+        }:
             response_id = event.response_id or self._current_response_id
             if response_id:
                 for line in self._parser.flush_response(response_id):
                     await self._enqueue_tts_line(line)
-        elif event_type == "response.done":
+        elif event_type == RealtimeEventType.RESPONSE_DONE:
             response_id = event.response_id or self._current_response_id
             if response_id:
                 for line in self._parser.flush_response(response_id):
@@ -311,7 +314,7 @@ class CallStream:
                     metadata={"qwen_event_id": event.event_id, "response_id": response_id},
                 )
                 self._schedule_proactive_check(response_id)
-        elif event_type == "error":
+        elif event_type == RealtimeEventType.ERROR:
             await self.end(CallExitCode.REALTIME_PROVIDER_FAILED, self._safe_error(event.error))
 
     async def _handle_function_call(self, event: RealtimeEvent) -> None:
