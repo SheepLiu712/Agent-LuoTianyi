@@ -602,6 +602,53 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
     assert feed["items"][0]["content"]  # 内容不为空
 
 
+def test_learned_song_dynamic_is_idempotent_by_character_and_song(
+    db_manager: DatabaseManager,
+):
+    _add_invite_code(db_manager, "INVITE6B")
+    user = _register_and_login(db_manager, "songuser2", "INVITE6B")
+    dynamic_capability = DynamicCapability()
+    dynamic_capability.wire_dependencies(database_manager=db_manager)
+    compose_calls = []
+
+    async def fake_compose(**kwargs):
+        compose_calls.append(kwargs["song_name"])
+        return f"学会了《{kwargs['song_name']}》"
+
+    dynamic_capability.compose_learned_song_dynamic_content = fake_compose
+
+    first = asyncio.run(
+        dynamic_capability.publish_learned_song_dynamic(
+            character_id="luotianyi",
+            character_name="洛天依",
+            character_persona="",
+            speaking_style="",
+            song_name="告死鸟",
+        )
+    )
+    second = asyncio.run(
+        dynamic_capability.publish_learned_song_dynamic(
+            character_id="luotianyi",
+            character_name="洛天依",
+            character_persona="",
+            speaking_style="",
+            song_name="告死鸟",
+        )
+    )
+
+    assert first["dynamic_id"] == second["dynamic_id"]
+    assert first["created"] is True
+    assert second["created"] is False
+    assert compose_calls == ["告死鸟"]
+    feed = db_manager.dynamic_store.list_dynamics_for_user(user["user_uuid"])
+    learned_items = [
+        item
+        for item in feed["items"]
+        if item["source_type"] == "song_learned" and item["source_id"] == "告死鸟"
+    ]
+    assert len(learned_items) == 1
+
+
 def test_dynamic_interaction_task_replies_and_updates_status(db_manager: DatabaseManager):
     _add_invite_code(db_manager, "INVITE7")
     auth = _register_and_login(db_manager, "replyuser", "INVITE7")

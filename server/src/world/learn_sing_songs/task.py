@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, TYPE_CHECKING
 
 from src.system.database.event_models import UnifiedEventType
+from src.utils.helpers import get_unified_song_name
 from src.utils.logger import get_logger
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
@@ -67,7 +68,20 @@ class LearnSingSongsTask(WorldTask):
             )
 
         result = self.auto_song_learner.try_learn_pending()
-        learned = list(getattr(result, "learned", []) or [])
+        learned = self._deduplicate_song_names(
+            list(getattr(result, "learned", []) or [])
+        )
+        already_learned = self._deduplicate_song_names(
+            list(getattr(result, "already_learned", []) or [])
+        )
+        already_learned_keys = {
+            get_unified_song_name(song_name) for song_name in already_learned
+        }
+        learned = [
+            song_name
+            for song_name in learned
+            if get_unified_song_name(song_name) not in already_learned_keys
+        ]
         abandoned = list(getattr(result, "abandoned", []) or [])
         awaiting = list(getattr(result, "awaiting", []) or [])
 
@@ -85,10 +99,24 @@ class LearnSingSongsTask(WorldTask):
             "song learning pass completed",
             credential_ok=credential_ok,
             learned=learned,
+            already_learned=already_learned,
             abandoned=abandoned,
             awaiting=awaiting,
             dynamic_ids=published_dynamic_ids,
         )
+
+    @staticmethod
+    def _deduplicate_song_names(song_names: list[str]) -> list[str]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for song_name in song_names:
+            display_name = str(song_name or "").strip()
+            unified_name = get_unified_song_name(display_name)
+            if not display_name or not unified_name or unified_name in seen:
+                continue
+            seen.add(unified_name)
+            unique.append(display_name)
+        return unique
 
     def _build_auto_song_learner(self) -> "AutoSongLearner" | None:
         try:
@@ -171,7 +199,7 @@ class LearnSingSongsTask(WorldTask):
                     )
                 )
                 dynamic_id = result.get("dynamic_id")
-                if dynamic_id:
+                if dynamic_id and result.get("created", True):
                     published.append(str(dynamic_id))
             except Exception as exc:
                 self.logger.warning(f"Failed to publish learned-song dynamic for {song_name}: {exc}")
