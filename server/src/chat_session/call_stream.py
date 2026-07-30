@@ -263,7 +263,7 @@ class CallStream:
                 event.response_id,
                 CallResponseState(response_id=event.response_id),
             )
-        response.raw_events.append(event.raw)
+            response.raw_events.append(event.raw)
         if event_type == RealtimeEventType.SPEECH_STARTED:
             await self._handle_speech_started(event)
         elif event_type == RealtimeEventType.SPEECH_STOPPED:
