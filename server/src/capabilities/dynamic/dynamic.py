@@ -88,6 +88,7 @@ class DynamicCapability:
         owner_user_id: str | None = None,
         allow_comment: bool = True,
         image_refs: list[Any] | None = None,
+        idempotent_by_source: bool = False,
     ) -> tuple[bool, str, Optional[dict[str, Any]]]:
         self.ensure_dependencies()
         return self.database_manager.dynamic_store.create_dynamic(
@@ -103,6 +104,7 @@ class DynamicCapability:
             memory_policy="disabled",
             memory_status="disabled",
             reply_status="not_applicable",
+            idempotent_by_source=idempotent_by_source,
         )
 
     def publish_agent_comment(
@@ -219,6 +221,23 @@ class DynamicCapability:
 
         world 侧负责收集新歌和歌词材料；文案生成和动态落库都由 capability 负责。
         """
+        self.ensure_dependencies()
+        existing = self.database_manager.dynamic_store.get_dynamic_by_source(
+            author_type="agent",
+            author_id=character_id,
+            source_type="song_learned",
+            source_id=song_name,
+        )
+        if existing is not None:
+            return {
+                "ok": True,
+                "message": "dynamic already exists",
+                "item": existing,
+                "dynamic_id": existing.get("id"),
+                "content": existing.get("content", ""),
+                "created": False,
+            }
+
         content = await self.compose_learned_song_dynamic_content(
             character_name=character_name,
             character_persona=character_persona,
@@ -234,6 +253,7 @@ class DynamicCapability:
             source_id=song_name,
             visibility="global",
             allow_comment=True,
+            idempotent_by_source=True,
         )
         return {
             "ok": ok,
@@ -241,6 +261,7 @@ class DynamicCapability:
             "item": item,
             "dynamic_id": item.get("id") if ok and item else None,
             "content": content,
+            "created": message != "dynamic already exists",
         }
 
     async def compose_learned_song_dynamic_content(

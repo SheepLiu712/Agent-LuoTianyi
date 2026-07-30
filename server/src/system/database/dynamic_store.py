@@ -181,6 +181,38 @@ class DynamicStore:
 
     # ── 动态创建与查询 ───────────────────────────────────────
 
+    def get_dynamic_by_source(
+        self,
+        *,
+        author_type: str,
+        author_id: str,
+        source_type: str,
+        source_id: str,
+    ) -> Optional[dict[str, Any]]:
+        db = self._get_session()
+        try:
+            dynamic = (
+                db.query(DynamicPost)
+                .filter(
+                    DynamicPost.author_type == author_type,
+                    DynamicPost.author_id == author_id,
+                    DynamicPost.source_type == source_type,
+                    DynamicPost.source_id == source_id,
+                    DynamicPost.status == "published",
+                )
+                .order_by(DynamicPost.created_at.asc(), DynamicPost.id.asc())
+                .first()
+            )
+            if dynamic is None:
+                return None
+            user_names = self._load_user_names(
+                db,
+                {dynamic.author_id} if dynamic.author_type == "user" else set(),
+            )
+            return self._serialize_dynamic_post(dynamic, user_names=user_names)
+        finally:
+            db.close()
+
     def create_dynamic(
         self,
         *,
@@ -196,6 +228,7 @@ class DynamicStore:
         memory_policy: str = "candidate",
         memory_status: str | None = None,
         reply_status: str | None = None,
+        idempotent_by_source: bool = False,
     ) -> tuple[bool, str, Optional[dict[str, Any]]]:
         normalized_content = str(content or "").strip()
         if not normalized_content:
@@ -207,6 +240,30 @@ class DynamicStore:
 
         db = self._get_session()
         try:
+            if idempotent_by_source and source_id:
+                existing = (
+                    db.query(DynamicPost)
+                    .filter(
+                        DynamicPost.author_type == author_type,
+                        DynamicPost.author_id == author_id,
+                        DynamicPost.source_type == source_type,
+                        DynamicPost.source_id == source_id,
+                        DynamicPost.status == "published",
+                    )
+                    .order_by(DynamicPost.created_at.asc(), DynamicPost.id.asc())
+                    .first()
+                )
+                if existing is not None:
+                    user_names = self._load_user_names(
+                        db,
+                        {existing.author_id} if existing.author_type == "user" else set(),
+                    )
+                    return (
+                        True,
+                        "dynamic already exists",
+                        self._serialize_dynamic_post(existing, user_names=user_names),
+                    )
+
             image_refs_raw = json.dumps(image_refs or [], ensure_ascii=False) if image_refs is not None else None
             if memory_status is None:
                 memory_status = "pending" if memory_policy == "candidate" else "disabled"

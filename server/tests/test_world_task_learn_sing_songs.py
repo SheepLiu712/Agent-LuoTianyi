@@ -16,8 +16,10 @@ from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner, Wishli
 from src.world.learn_sing_songs.song_learner.src.pipeline import download_qq_song
 from src.world.learn_sing_songs.song_learner.src.pipeline.download_qq_song import (
     get_song_singer_names,
+    longest_common_subsequence_length,
     rank_songs_by_title,
     safe_name as qq_safe_name,
+    title_matches,
     validate_song_singers,
 )
 
@@ -240,6 +242,76 @@ def test_learn_sing_songs_passes_full_lyrics_to_dynamic_capability():
     assert captured["song_name"] == "Song A"
     assert captured["segment_description"] == "主歌"
     assert captured["lyrics"] == "第一句歌词\n第二句歌词\n副歌歌词"
+
+
+def test_learn_sing_songs_deduplicates_learned_songs_before_side_effects():
+    learner = SimpleNamespace(
+        check_qq_credential=lambda: True,
+        try_learn_pending=lambda: SimpleNamespace(
+            learned=["Song A", "song a", "Song B", "Song A"],
+            abandoned=[],
+            awaiting=[],
+        ),
+    )
+    event_store = FakeEventStore()
+    published = []
+
+    class FakeCharacterRuntime:
+        async def publish_learned_song_dynamic(self, **kwargs):
+            published.append(kwargs["song_name"])
+            return {"dynamic_id": f"dynamic-{kwargs['song_name']}"}
+
+    manager = SimpleNamespace(
+        can_i_sing_song=lambda song_name: (song_name, ["主歌"]),
+        get_full_lyrics=lambda _song_name: "歌词",
+    )
+    task = LearnSingSongsTask({}, character_id="luotianyi", singing_manager=manager)
+    task.auto_song_learner = learner
+    task.event_store = event_store
+    task.character_runtime = FakeCharacterRuntime()
+    task.system_runtime = SimpleNamespace(
+        capability_manager=SimpleNamespace(
+            singing=SimpleNamespace(
+                reload_songs=lambda *_: None,
+                tag_song_emotions=lambda *_: [],
+            )
+        )
+    )
+
+    result = task.run_once()
+
+    assert result.data["learned"] == ["Song A", "Song B"]
+    assert published == ["Song A", "Song B"]
+    assert event_store.events[0]["description"] == "Song A、Song B"
+
+
+def test_learn_sing_songs_already_learned_wins_over_learned_result():
+    learner = SimpleNamespace(
+        check_qq_credential=lambda: True,
+        try_learn_pending=lambda: SimpleNamespace(
+            learned=["Song A"],
+            already_learned=["song a"],
+            abandoned=[],
+            awaiting=[],
+        ),
+    )
+    published = []
+
+    class FakeCharacterRuntime:
+        async def publish_learned_song_dynamic(self, **kwargs):
+            published.append(kwargs["song_name"])
+            return {"dynamic_id": "unexpected"}
+
+    task = LearnSingSongsTask({})
+    task.auto_song_learner = learner
+    task.character_runtime = FakeCharacterRuntime()
+
+    result = task.run_once()
+
+    assert result.data["learned"] == []
+    assert result.data["already_learned"] == ["song a"]
+    assert result.data["dynamic_ids"] == []
+    assert published == []
 
 
 def test_learn_sing_songs_write_learned_event_skips_without_store():
@@ -500,7 +572,52 @@ def test_songlearner_title_ranking_prefers_exact_but_allows_redirect():
     assert qq_safe_name("想和你迎着台风去看海（Live版）") == "想和你迎着台风去看海"
 
 
-def test_songlearner_allows_redirect_candidates_after_matching_download_failure(monkeypatch, tmp_path):
+def test_songlearner_title_matching_accepts_long_common_subsequence():
+    assert longest_common_subsequence_length("星河入梦", "星光入梦") == 3
+    assert title_matches({"title": "星光入梦"}, "星河入梦") is True
+    assert title_matches({"title": "我的悲伤是水做的"}, "Style") is False
+    assert title_matches({}, "告死鸟") is False
+
+
+def test_songlearner_title_ranking_excludes_unrelated_candidates():
+    songs = [
+        {"title": "我的悲伤是水做的"},
+        {"title": "告死鸟"},
+        {"title": "告死鸟（Live版）"},
+    ]
+
+    ranked = rank_songs_by_title(songs, "告死鸟")
+
+    assert [song["title"] for song in ranked] == ["告死鸟", "告死鸟（Live版）"]
+
+
+@pytest.mark.parametrize(
+    "requested_name",
+    [
+        "我的灵魂是个哑巴",
+        "Xterfusion",
+        "anmianqu",
+        "庸俗救星",
+        "云端的悄悄话",
+        "The Fox (What Does the Fox Say?)",
+        "桃花笑",
+        "星愿",
+        "new_song",
+        "monolought",
+        "并不喜欢吃鱼",
+        "豪庭喵",
+        "光与影的未来",
+        "汽水一样冒泡泡的歌",
+        "Style",
+    ],
+)
+def test_songlearner_rejects_titles_from_duplicate_water_sorrow_incident(
+    requested_name,
+):
+    assert title_matches({"title": "我的悲伤是水做的"}, requested_name) is False
+
+
+def test_songlearner_does_not_try_unrelated_candidates_after_matching_download_failure(monkeypatch, tmp_path):
     songs = [
         {"title": "下等马", "mid": "bad-mid", "singer": [{"name": "洛天依"}]},
         {"title": "告死鸟", "mid": "target-mid", "singer": [{"name": "洛天依"}]},
@@ -521,8 +638,7 @@ def test_songlearner_allows_redirect_candidates_after_matching_download_failure(
         message = str(exc)
         assert "匹配到 告死鸟" in message
         assert "告死鸟: 登录后仍未获取到可下载链接" in message
-        assert "下等马: 登录后仍未获取到可下载链接" in message
-        assert "最佳标题与请求不匹配" not in message
+        assert "下等马" not in message
     else:
         raise AssertionError("Expected matching candidate download failure")
 
@@ -551,3 +667,40 @@ def test_download_song_and_lyric_uses_qq_redirected_title(monkeypatch, tmp_path)
     assert mp3_path == tmp_path / "想和你迎着台风去看海" / "想和你迎着台风去看海.mp3"
     assert lrc_path == tmp_path / "想和你迎着台风去看海" / "想和你迎着台风去看海.lrc"
     assert not (tmp_path / "海").exists()
+
+
+def test_auto_song_learner_does_not_report_redirect_to_existing_song_as_new(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
+    monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
+    wishlist = WishlistManager(
+        str(tmp_path / "music" / "metadata.json"),
+        SimpleNamespace(info=lambda *_: None, warning=lambda *_: None),
+    )
+    wishlist.add("星河入梦")
+    learner = AutoSongLearner(
+        {"songlearner_resource_dir": str(tmp_path / "song_learner_res")},
+        "洛天依",
+        wishlist,
+        resource_path=tmp_path / "music",
+    )
+    existing_name = "星光入梦"
+    existing_dir = learner.songs_dir / existing_name
+    existing_dir.mkdir(parents=True)
+    (existing_dir / f"{existing_name}.mp3").write_bytes(b"mp3")
+    (existing_dir / f"{existing_name}.lrc").write_text("[00:00.00]歌词", encoding="utf-8")
+    (existing_dir / f"{existing_name}.json").write_text(
+        json.dumps({"title": existing_name}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(learner, "_try_learn_one", lambda _name: existing_name)
+    notifications = []
+    monkeypatch.setattr(learner, "_notify_new_songs", notifications.append)
+
+    result = learner.try_learn_pending()
+
+    assert result.learned == []
+    assert result.already_learned == [existing_name]
+    assert notifications == []

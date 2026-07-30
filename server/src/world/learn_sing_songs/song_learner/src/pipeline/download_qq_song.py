@@ -347,31 +347,66 @@ def pick_song_by_singer(songs: List[Dict], singer_name: str) -> List[Dict]:
     )
 
 
+def longest_common_subsequence_length(left: str, right: str) -> int:
+    """Return the length of the longest not-necessarily-contiguous common subsequence."""
+    if not left or not right:
+        return 0
+    if len(left) > len(right):
+        left, right = right, left
+
+    previous = [0] * (len(left) + 1)
+    for right_char in right:
+        current = [0]
+        for index, left_char in enumerate(left, start=1):
+            if left_char == right_char:
+                current.append(previous[index - 1] + 1)
+            else:
+                current.append(max(previous[index], current[index - 1]))
+        previous = current
+    return previous[-1]
+
+
+def _normalized_song_title(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return normalize_text(safe_name(raw))
+
+
+def _title_match_kind(song: Dict, requested_name: str) -> str:
+    requested = _normalized_song_title(requested_name)
+    title = _normalized_song_title(str(song.get("title") or ""))
+    if not requested or not title:
+        return ""
+    if title == requested:
+        return "exact"
+    if requested in title or title in requested:
+        return "contains"
+
+    common_length = longest_common_subsequence_length(requested, title)
+    threshold = max(2, max(len(requested), len(title)) / 2)
+    if common_length >= threshold:
+        return "subsequence"
+    return ""
+
+
 def rank_songs_by_title(songs: List[Dict], requested_name: str) -> List[Dict]:
-    requested = normalize_text(safe_name(requested_name))
     exact: List[Dict] = []
     partial: List[Dict] = []
+    subsequence: List[Dict] = []
     for song in songs:
-        title = safe_name(str(song.get("title") or ""))
-        normalized_title = normalize_text(title)
-        if normalized_title == requested:
+        match_kind = _title_match_kind(song, requested_name)
+        if match_kind == "exact":
             exact.append(song)
-        elif requested and normalized_title and (requested in normalized_title or normalized_title in requested):
+        elif match_kind == "contains":
             partial.append(song)
-    ranked = exact + partial
-    if ranked:
-        ranked_ids = {id(song) for song in ranked}
-        ranked.extend(song for song in songs if id(song) not in ranked_ids)
-        return ranked
-    return list(songs)
+        elif match_kind == "subsequence":
+            subsequence.append(song)
+    return exact + partial + subsequence
 
 
 def title_matches(song: Dict, requested_name: str) -> bool:
-    requested = normalize_text(safe_name(requested_name))
-    title = normalize_text(safe_name(str(song.get("title") or "")))
-    if title and (title == requested or requested in title or title in requested):
-        return True
-    return False
+    return bool(_title_match_kind(song, requested_name))
 
 
 def qq_fetch_lyric(songmid: str, timeout: int = 20) -> str:
@@ -465,6 +500,10 @@ def download_song_and_lyric(
 
     songs = qq_search_songs(song_name + " " + singer_name, timeout=timeout)
     singer_songs = rank_songs_by_title(pick_song_by_singer(songs, singer_name), song_name)
+    if not singer_songs:
+        raise RuntimeError(
+            f"搜索到 {singer_name} 的歌曲，但没有标题匹配请求: {song_name}"
+        )
     matched_failures: List[str] = []
 
     validated_singer_songs: List[Dict[str, Any]] = []

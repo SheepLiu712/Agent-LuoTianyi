@@ -49,6 +49,7 @@ def _add_songlearner_to_path() -> None:
 class LearnResult:
     """Result from one learning pass."""
     learned: List[str] = field(default_factory=list)
+    already_learned: List[str] = field(default_factory=list)
     abandoned: List[str] = field(default_factory=list)
     awaiting: List[str] = field(default_factory=list)
 
@@ -398,14 +399,34 @@ class AutoSongLearner:
             return result
 
         self.logger.info(f"Attempting to learn {len(pending)} pending song(s)")
+        known_song_names = self._get_existing_song_names()
 
         for entry in pending:
             safe_name = entry.safe_name
             self.logger.info(f"Trying to learn: {safe_name}")
             try:
+                requested_unified = get_unified_song_name(safe_name)
+                if requested_unified in known_song_names:
+                    self.wishlist.mark_learned(safe_name)
+                    result.already_learned.append(safe_name)
+                    self.logger.info(f"  ↷ Already learned, skipped: {safe_name}")
+                    continue
+
                 learned_name = self._try_learn_one(safe_name)
                 if learned_name:
+                    learned_unified = get_unified_song_name(learned_name)
+                    if learned_unified in known_song_names:
+                        if learned_name not in result.already_learned:
+                            result.already_learned.append(learned_name)
+                        self.logger.info(
+                            f"  ↷ Redirected to already learned song, no notification: "
+                            f"{safe_name} -> {learned_name}"
+                        )
+                        continue
+
                     result.learned.append(learned_name)
+                    if learned_unified:
+                        known_song_names.add(learned_unified)
                     if get_unified_song_name(learned_name) != get_unified_song_name(safe_name):
                         self.logger.info(f"  ✓ Learned via redirect: {safe_name} -> {learned_name}")
                     else:
@@ -435,6 +456,37 @@ class AutoSongLearner:
             self._notify_new_songs(result.learned)
 
         return result
+
+    def _get_existing_song_names(self) -> set[str]:
+        """Collect valid songs already present in the character's singing library."""
+        existing: set[str] = set()
+        if not self.songs_dir.exists():
+            return existing
+
+        for song_dir in self.songs_dir.iterdir():
+            if not song_dir.is_dir():
+                continue
+            song_name = song_dir.name
+            has_audio = (
+                (song_dir / f"{song_name}.cleaned.mp3").is_file()
+                or (song_dir / f"{song_name}.mp3").is_file()
+            )
+            lrc_path = song_dir / f"{song_name}.lrc"
+            json_path = song_dir / f"{song_name}.json"
+            if not has_audio or not lrc_path.is_file() or not json_path.is_file():
+                continue
+
+            unified_dir_name = get_unified_song_name(song_name)
+            if unified_dir_name:
+                existing.add(unified_dir_name)
+            try:
+                title = str(json.loads(json_path.read_text("utf-8")).get("title") or "")
+            except Exception:
+                title = ""
+            unified_title = get_unified_song_name(title)
+            if unified_title:
+                existing.add(unified_title)
+        return existing
 
     # -- routing -------------------------------------------------------------
 
