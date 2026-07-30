@@ -10,6 +10,7 @@ from src.chat_session.call_response_parser import CallResponseParser
 from src.chat_session.call_models import CallExitCode
 from src.system.database.call_store import CallStore
 from src.system.database.sql_database import Base, CallTurn, User
+from src.utils.realtime_dialogue.models import RealtimeEventType
 from src.utils.realtime_dialogue.qwen_session import normalize_qwen_event
 from src.utils.realtime_dialogue.qwen_session import QwenRealtimeSession
 
@@ -70,8 +71,17 @@ def test_qwen_event_normalization_keeps_response_and_function_call_ids():
         }
     )
     assert text_event.response_id == "resp-1"
+    assert text_event.type is RealtimeEventType.TEXT_DELTA
     assert function_event.call_id == "call-1"
     assert function_event.name == "search_memory"
+    assert function_event.type is RealtimeEventType.FUNCTION_ARGUMENTS_DONE
+
+
+def test_realtime_event_type_uses_provider_protocol_values():
+    assert RealtimeEventType.SESSION_UPDATE.value == "session.update"
+    assert RealtimeEventType.SPEECH_STARTED.value == "input_audio_buffer.speech_started"
+    assert RealtimeEventType.RESPONSE_DONE.value == "response.done"
+    assert normalize_qwen_event({"type": "provider.future_event"}).type == "provider.future_event"
 
 
 def test_qwen_context_adapter_uses_documented_session_update_fallback():
