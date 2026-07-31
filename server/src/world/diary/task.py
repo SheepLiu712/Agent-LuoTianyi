@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import random
 from datetime import date
 from typing import Any, Dict, List, TYPE_CHECKING
 
@@ -188,10 +189,17 @@ class DiaryTask(WorldTask):
             )
 
         # ── 逐个生成日记 ──
+        # 若活跃用户超出单次上限，随机取 max_users_per_run 个
+        # 避免每次只处理 SQL 前 N 条，保证所有用户都有机会被写到日记
         created_count = 0
         failed_count = 0
+        selected_users = (
+            random.sample(active_users, self.max_users_per_run)
+            if len(active_users) > self.max_users_per_run
+            else active_users
+        )
 
-        for user_id in active_users[: self.max_users_per_run]:
+        for user_id in selected_users:
             ok, msg, item = await diary_cap.generate_and_post_diary(
                 user_id=user_id,
                 character_id=self.character_id,
