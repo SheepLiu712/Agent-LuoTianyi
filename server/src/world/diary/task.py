@@ -49,9 +49,9 @@ class DiaryTask(WorldTask):
     task_name = "diary" 用于配置系统中的任务开关和参数覆盖。
     """
 
-    task_name = "diary"
+    base_task_name = "diary"
 
-    def __init__(self, config: Dict[str, Any] | None = None) -> None:
+    def __init__(self, config: Dict[str, Any] | None = None, character_id: str = "luotianyi") -> None:
         """
         初始化日记任务。
 
@@ -63,7 +63,9 @@ class DiaryTask(WorldTask):
                 - max_users_per_run: 单次最多处理的用户数（默认 20）
                 - clock_config: 世界时钟调度配置（默认每天 UTC+8 0:00）
                 - enabled: 是否启用此任务（由世界任务系统读取）
+            character_id: 角色 ID，用于多角色场景
         """
+        self.character_id = character_id
         merged_config = dict(config or {})
 
         # 设置默认调度时间：每天 UTC+8 0:00 运行
@@ -78,7 +80,7 @@ class DiaryTask(WorldTask):
                 },
             },
         )
-        super().__init__(self.task_name, merged_config)
+        super().__init__(f"{self.base_task_name}:{character_id}", merged_config)
         self.logger = get_logger(__name__)
 
         # ── 外部依赖（由 initialize 注入） ──
@@ -87,7 +89,9 @@ class DiaryTask(WorldTask):
         self.character_runtime: "CharacterRuntime" | None = None
 
         # ── 角色标识 ──
-        self.character_id = str(self.config.get("character_id", "luotianyi"))
+        # character_id 由构造函数参数传入（多角色场景）或从 config 读取
+        if not self.character_id:
+            self.character_id = str(self.config.get("character_id", "luotianyi"))
         self.character_name = str(self.config.get("character_name", "洛天依"))
 
         # ── 阈值参数 ──

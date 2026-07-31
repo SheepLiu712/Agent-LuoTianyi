@@ -41,7 +41,7 @@ class WorldRuntime:
         self.bili_event_update_task: BiliEventUpdateTask | None = None
         self.bili_event_update_tasks: List[BiliEventUpdateTask] = []
         self.dynamic_interaction_task: DynamicInteractionTask | None = None
-        self.diary_task: DiaryTask | None = None
+        self.diary_tasks: List[DiaryTask] = []
         self.proactive_topic_check_task: ProactiveTopicCheckTask | None = None
         self.expired_event_cleanup_task: ExpiredEventCleanupTask | None = None
         self.tasks: List["WorldTask"] = []
@@ -87,13 +87,7 @@ class WorldRuntime:
             if self._task_enabled("dynamic_interaction")
             else None
         )
-        self.diary_task = (
-            DiaryTask(
-                self._character_task_config("diary", self._default_character_id())
-            )
-            if self._task_enabled("diary")
-            else None
-        )
+        self.diary_tasks = self._build_diary_tasks()
         self.proactive_topic_check_task = ProactiveTopicCheckTask(
             self.config.get("proactive_topic_check", {})
         )
@@ -108,7 +102,7 @@ class WorldRuntime:
             self.vcpedia_new_song_task,
             *self.bili_event_update_tasks,
             self.dynamic_interaction_task,
-            self.diary_task,
+            *self.diary_tasks,
             self.proactive_topic_check_task,
             self.expired_event_cleanup_task,
         ]
@@ -240,6 +234,17 @@ class WorldRuntime:
             if isinstance(bili_uids, dict):
                 task_config["bilibili_uids"] = {character_id: bili_uids[character_id]}
             tasks.append(BiliEventUpdateTask(task_config, character_id=character_id))
+        return tasks
+
+    def _build_diary_tasks(self) -> List[DiaryTask]:
+        if not self._task_enabled("diary"):
+            return []
+        tasks: list[DiaryTask] = []
+        for character_id in self._character_ids():
+            config = self._character_task_config("diary", character_id)
+            if not config.get("enabled", True):
+                continue
+            tasks.append(DiaryTask(config, character_id=character_id))
         return tasks
 
     def _character_ids(self) -> list[str]:
