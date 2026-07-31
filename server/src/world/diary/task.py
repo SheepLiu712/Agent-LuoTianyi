@@ -27,7 +27,7 @@
 from __future__ import annotations
 
 import random
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, TYPE_CHECKING
 
 from sqlalchemy import func
@@ -113,7 +113,8 @@ class DiaryTask(WorldTask):
           - character_name: 从角色配置中读取显示名称
         """
         self.system_runtime = system_runtime
-        self.database_manager = getattr(system_runtime, "database_manager", None)
+        # database_manager 是必要依赖，直接访问以便尽早暴露配置错误
+        self.database_manager = system_runtime.database_manager
         agent_runtime = getattr(system_runtime, "agent_runtime", None)
         try:
             runtime = agent_runtime.get_character_runtime(self.character_id) if agent_runtime is not None else None
@@ -163,9 +164,16 @@ class DiaryTask(WorldTask):
         if diary_cap is None:
             return WorldTaskResult.skipped_result(self.task_name, "diary capability is unavailable")
 
-        # 检查 LLM 模块是否已注册
+        # 检查 LLM 模块是否已注册（每天仅运行一次，缺失时明确记录原因）
         if not diary_cap.ensure_llm():
+            self.logger.warning("Diary LLM module is not registered; diary task skipped for today")
             return WorldTaskResult.skipped_result(self.task_name, "diary LLM module is unavailable")
+
+        # 角色运行时缺失时降级使用默认人设（不阻断任务）
+        if self.character_runtime is None:
+            self.logger.warning(
+                "Character runtime for %s is unavailable; diary will use default persona", self.character_id
+            )
 
         # ── 获取角色人设和表达风格 ──
         # 这些信息会被注入到日记 prompt 中，让生成的日记更符合角色设定
@@ -261,16 +269,19 @@ class DiaryTask(WorldTask):
             from src.system.database.sql_database import Conversation, DynamicPost
 
             try:
-                today_start = f"{target_date} 00:00:00"
-                today_end = f"{target_date} 23:59:59"
+                # 将目标日期转为 datetime 范围 [day_start, day_end)
+                # 用 datetime 对象做边界比较，避免字符串比较在
+                # 微秒/时区格式下的边界误差
+                day_start = datetime.strptime(target_date, "%Y-%m-%d")
+                day_end = day_start + timedelta(days=1)
 
                 # 子查询：当天已有日记的用户
                 # 日记动态的 source_type == "diary"，可见性为 private
                 existing_diary = (
                     sql_session.query(DynamicPost.owner_user_id)
                     .filter(DynamicPost.source_type == "diary")
-                    .filter(DynamicPost.created_at >= today_start)
-                    .filter(DynamicPost.created_at <= today_end)
+                    .filter(DynamicPost.created_at >= day_start)
+                    .filter(DynamicPost.created_at < day_end)
                     .subquery()
                 )
 
@@ -280,8 +291,8 @@ class DiaryTask(WorldTask):
                         Conversation.user_id,
                         func.count(Conversation.id).label("msg_count"),
                     )
-                    .filter(Conversation.timestamp >= today_start)
-                    .filter(Conversation.timestamp <= today_end)
+                    .filter(Conversation.timestamp >= day_start)
+                    .filter(Conversation.timestamp < day_end)
                     .filter(Conversation.character_id == self.character_id)
                     # 排除已有日记的用户——避免无效 LLM 调用
                     .filter(~Conversation.user_id.in_(sql_session.query(existing_diary.c.owner_user_id)))

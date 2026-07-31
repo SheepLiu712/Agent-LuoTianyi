@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
@@ -68,6 +69,8 @@ class DiaryCapability:
         # ── LLM 相关 ──
         self._diary_llm: "LLMModule | None" = None       # 日记专用的 LLM 模块
         self._prompt_template: str | None = None          # 缓存已加载的 prompt 模板
+        self._prompt_path: str | None = None              # 当前模板文件路径
+        self._prompt_mtime: float | None = None           # 模板文件修改时间（用于热加载）
 
         # ── 标识 ──
         # 日记动态的 source_type，用于在动态列表中区分「日记」和普通动态
@@ -123,10 +126,6 @@ class DiaryCapability:
             return False
         return True
 
-    def _get_dynamic_capability(self) -> Any | None:
-        """获取动态能力实例（用于发布日记动态），可能为 None。"""
-        return self._dynamic_capability
-
     # ────────────────────── Prompt 管理 ──────────────────────
 
     def _load_prompt_template(self) -> str:
@@ -145,21 +144,30 @@ class DiaryCapability:
           {{speaking_style}}      — 表达风格（由 update_prompt_with_persona 填入）
 
         模板加载后会被缓存到 self._prompt_template，避免重复读文件。
+        若模板文件在运行期间被修改（mtime 变化），会自动重新加载。
         """
-        if self._prompt_template is not None:
-            return self._prompt_template
-
         prompt_path = self.config.get(
             "prompt_path",
             os.path.join("res", "agent", "prompts", "diary_prompt.json"),
         )
         try:
+            mtime = os.path.getmtime(prompt_path)
+        except OSError:
+            mtime = None
+
+        if self._prompt_template is not None and mtime == self._prompt_mtime:
+            return self._prompt_template
+
+        try:
             with open(prompt_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             self._prompt_template = data.get("system_prompt", "")
+            self._prompt_path = prompt_path
+            self._prompt_mtime = mtime
         except Exception as exc:
             self.logger.error(f"Failed to load diary prompt template: {exc}")
-            self._prompt_template = ""
+            if self._prompt_template is None:
+                self._prompt_template = ""
         return self._prompt_template
 
     def update_prompt_with_persona(self, prompt: str, persona: str, style: str) -> str:
@@ -207,7 +215,7 @@ class DiaryCapability:
             (成功标志, 消息字符串, 动态对象字典 | None)
         """
         # ── 前置检查 ──
-        dynamic_capability = self._get_dynamic_capability()
+        dynamic_capability = self._dynamic_capability
         if dynamic_capability is None:
             return False, "DynamicCapability 不可用", None
 
@@ -311,10 +319,6 @@ class DiaryCapability:
         db = self.database_manager
         lines: List[str] = []
 
-        # 构造当日时间范围（用于字符串比较，因为数据库中的时间戳是 ISO 格式字符串）
-        today_start = f"{target_date} 00:00:00"
-        today_end = f"{target_date} 23:59:59"
-
         # ── 收集聊天记录 ──
         try:
             total = db.get_total_conversation_count(user_id, character_id=character_id)
@@ -323,9 +327,10 @@ class DiaryCapability:
                 conversations = db.get_history_from_db(
                     user_id, max(0, total - 100), total, character_id=character_id
                 )
+                # 时间戳格式为 "YYYY-MM-DD HH:MM:SS"，前缀匹配目标日期即可
                 today_convs = [
                     c for c in conversations
-                    if today_start <= c.timestamp <= today_end
+                    if c.timestamp.startswith(target_date)
                 ]
                 if today_convs:
                     lines.append("【今日聊天记录】")
@@ -393,6 +398,9 @@ class DiaryCapability:
         if not raw or not raw.strip():
             return None
 
+        # 先剔除 LLM 思考块（<think>...</think>），避免思考内容混入日记
+        raw = self._strip_think_block(raw)
+
         lines = raw.strip().split("\n")
         mood = ""
         body_lines: list[str] = []
@@ -408,9 +416,8 @@ class DiaryCapability:
                 continue
 
             # 提取心情标签（支持中英文冒号）
-            # 使用 removeprefix 链式处理两种冒号，比 split 更简洁
-            if stripped.startswith("心情：") or stripped.startswith("心情:"):
-                mood = stripped.removeprefix("心情：").removeprefix("心情:").strip()
+            if stripped.startswith("心情"):
+                mood = stripped[2:].lstrip("：:").strip()
             elif stripped.startswith("正文：") or stripped == "正文":
                 in_body = True
             else:
@@ -421,6 +428,8 @@ class DiaryCapability:
                 body_lines.append(stripped)
 
         body = "\n".join(body_lines).strip()
+        # 压缩连续空行（LLM 输出中常见多余空行）
+        body = re.sub(r"\n{3,}", "\n\n", body)
         if not body:
             body = raw  # 保底：解析失败时使用原始输出
 
@@ -430,6 +439,16 @@ class DiaryCapability:
         return f"{header}\n\n{body}"
 
     # ────────────────────── 用户信息查询 ──────────────────────
+
+    @staticmethod
+    def _strip_think_block(raw: str) -> str:
+        """
+        剔除 LLM 输出中的思考块（<think>...</think>）。
+
+        部分 LLM 在返回最终答案前会输出思考链，若混入日记正文
+        会破坏解析格式。使用非贪婪匹配剔除完整思考块。
+        """
+        return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 
     def _get_user_name(self, user_id: str) -> str:
         """获取用户昵称，用于 prompt 中个性化称呼。查询失败时返回「你」。"""
