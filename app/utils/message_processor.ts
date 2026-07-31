@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer';
+import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
@@ -414,7 +415,6 @@ export class MessageProcessor {
 
     if (payload.is_final_package) {
       this.feedServerAudioChunk('', true);
-      await this.waitForServerAudioFinished();
       if (payload.audio_error) {
         this.audioChunksByUuid.delete(convUuid);
         this.transientMessageUuids.delete(convUuid);
@@ -423,7 +423,14 @@ export class MessageProcessor {
           errorCode: payload.error_code || 'UNKNOWN',
         });
       } else {
+        // Audio is complete on the wire, so persist it before waiting for the
+        // WebView player. Background suspension must not block later messages.
         await this.saveAudioToLocal(convUuid);
+      }
+      if (AppState.currentState === 'active') {
+        await this.waitForServerAudioFinished();
+      } else {
+        this.onServerAudioFinished();
       }
     }
   }

@@ -1,4 +1,4 @@
-export type MessageType = 'text' | 'image';
+export type MessageType = 'text' | 'image' | 'sing';
 export type SendStatus = 'waiting' | 'submitted' | 'failed';
 export type AudioPlayState = 'idle' | 'playing';
 
