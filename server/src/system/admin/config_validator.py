@@ -47,6 +47,7 @@ class RuntimeConfigValidator:
         "agent.user_profile": "agent_runtime.agent.memory.user_profile.llm_module",
         "agent.date_detector": "agent_runtime.agent.date_detector.llm_module",
         "capability.singing.song_emotion_tagger": "capabilities.sing.song_emotion_tagger",
+        "capability.diary": "capabilities.diary.diary_llm",
     }
 
     CORE_VLM_MODULE_PATHS = {

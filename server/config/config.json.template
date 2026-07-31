@@ -123,6 +123,19 @@
                     "prompt_name": "dynamic_reply_prompt"
                 }
             }
+        },
+        "diary": {
+            "diary_llm": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {}
+                    },
+                    "prompt_name": "diary_prompt"
+                }
+            }
         }
     },
     "chat_session_manager": {
@@ -527,6 +540,15 @@
                 "params": {
                     "interval_seconds": 300,
                     "run_immediately": false
+                }
+            }
+        },
+        "diary": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 0,
+                    "minute": 0
                 }
             }
         },
