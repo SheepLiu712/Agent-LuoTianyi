@@ -3,8 +3,7 @@
 
 ## 调度策略
 
-通过 WorldClock 的 cron 调度，每天 UTC 16:00（北京时间 0:00）运行一次。
-此时 UTC 日期已变更，可以基于 UTC 日期判断"今天"的互动量。
+通过 WorldClock 的 daily 调度，每天 UTC+8 0:00 运行一次。
 
 ## 活跃度判断
 
@@ -45,7 +44,7 @@ class DiaryTask(WorldTask):
     """
     日记生成世界任务。
 
-    继承自 WorldTask，通过 WorldClock 的 cron 机制每天触发一次。
+    继承自 WorldTask，通过 WorldClock 的 daily 机制每天触发一次。
     task_name = "diary" 用于配置系统中的任务开关和参数覆盖。
     """
 
@@ -61,21 +60,20 @@ class DiaryTask(WorldTask):
                 - character_name: 角色名称（默认 洛天依）
                 - min_daily_conversations: 日对话数阈值（默认 50）
                 - max_users_per_run: 单次最多处理的用户数（默认 20）
-                - clock_config: 世界时钟调度配置（默认每天 UTC 16:00）
+                - clock_config: 世界时钟调度配置（默认每天 UTC+8 0:00）
                 - enabled: 是否启用此任务（由世界任务系统读取）
         """
         merged_config = dict(config or {})
 
-        # 设置默认调度时间：每天 UTC 16:00 运行
-        # 此时对应北京时间 0:00（UTC+8），恰好是一天的开始
+        # 设置默认调度时间：每天 UTC+8 0:00 运行
+        # 系统已使用 UTC+8 时区，hour=0 即为每天午夜
         merged_config.setdefault(
             "clock_config",
             {
-                "type": "cron",
+                "type": "daily",
                 "params": {
-                    "hour": 16,       # 北京时间 0:00 (UTC+8)
+                    "hour": 0,
                     "minute": 0,
-                    "run_immediately": False,  # 首次启动时不立即运行
                 },
             },
         )
