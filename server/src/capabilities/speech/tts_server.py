@@ -3,6 +3,7 @@ import os
 import time
 import atexit
 import gc
+import json
 import logging
 import sys
 import threading
@@ -41,6 +42,73 @@ def _extract_model_paths_from_yaml(config_path: str) -> Dict[str, Any]:
         "is_half": custom.get("is_half"),
         "pretrained_models_path": custom.get("pretrained_models_path"),
     }
+
+
+def _extract_multispeaker_config(config_path: str) -> Optional[Dict[str, Any]]:
+    """Extract the multi-speaker (MultiSpeakerTTS) config from the yaml file.
+
+    Returns None when the ``multispeaker`` section is missing or
+    ``enabled: false`` — the worker then falls back to the legacy
+    single-speaker TTS path.
+    """
+    with open(config_path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    if not isinstance(data, dict):
+        return None
+    ms = data.get("multispeaker") or {}
+    if not ms.get("enabled") or not ms.get("speakers"):
+        return None
+    return ms
+
+
+def _build_speaker_configs(ms_config: Dict[str, Any]) -> list[Any]:
+    """Build SpeakerConfig objects from the multispeaker yaml section.
+
+    Each speaker entry may provide ``prompt_audio_path``/``prompt_audio_text``
+    explicitly, or ``prompt_audio_name`` which is resolved against
+    ``reference_audio_dir`` + ``reference_audio_lyrics`` (lrc.json) — the
+    single source of truth for reference-audio transcriptions.
+    """
+    from gsv_tts import SpeakerConfig
+
+    ref_audio_dir = ms_config.get("reference_audio_dir")
+    lyrics_map: Dict[str, str] = {}
+    lyrics_path = ms_config.get("reference_audio_lyrics")
+    if lyrics_path and os.path.exists(_build_absolute_path(lyrics_path)):
+        try:
+            with open(_build_absolute_path(lyrics_path), "r", encoding="utf-8") as f:
+                lyrics_map = json.load(f) or {}
+        except Exception as e:
+            logger = get_logger("TTSServer")
+            logger.warning(f"Failed to load reference audio lyrics: {e}")
+
+    speakers = []
+    for spk in ms_config.get("speakers") or []:
+        prompt_audio_path = spk.get("prompt_audio_path")
+        prompt_audio_text = spk.get("prompt_audio_text")
+        prompt_audio_name = spk.get("prompt_audio_name")
+
+        if prompt_audio_name and not prompt_audio_path:
+            prompt_audio_path = os.path.join(
+                _build_absolute_path(ref_audio_dir), f"{prompt_audio_name}.wav"
+            )
+        if prompt_audio_name and prompt_audio_text is None:
+            prompt_audio_text = lyrics_map.get(prompt_audio_name)
+
+        speakers.append(
+            SpeakerConfig(
+                name=spk["name"],
+                gpt_model_path=_build_absolute_path(spk["gpt_model_path"]),
+                sovits_model_path=_build_absolute_path(spk["sovits_model_path"]),
+                spk_audio_path=_build_absolute_path(spk["spk_audio_path"]),
+                prompt_audio_path=_build_absolute_path(prompt_audio_path)
+                if prompt_audio_path
+                else None,
+                prompt_audio_text=prompt_audio_text,
+            )
+        )
+    return speakers
 
 
 def _audio_to_wav_bytes(audio_data, samplerate: int) -> bytes:
@@ -142,32 +210,58 @@ def _run_gsv_worker(
     devnull = _silence_worker_output() if suppress_output else None
     logger = get_logger("TTSServerWorker")
     try:
-        from gsv_tts import TTS
         import pathlib
+        from gsv_tts import TTS
         model_config = _extract_model_paths_from_yaml(config_path)
-        tts = TTS(
-            device=model_config.get("device"),
-            dtype= "float16" if model_config.get("is_half") else "float32",
-            models_dir= pathlib.Path.cwd() / model_config.get("pretrained_models_path"),
-            use_bert=True,
-        )
+        ms_config = _extract_multispeaker_config(config_path)
 
-        gpt_model_path = model_config.get("gpt_model_path")
-        sovits_model_path = model_config.get("sovits_model_path")
-
-        if gpt_model_path:
-            tts.load_gpt_model(gpt_model_path)
-            logger.info(f"Preloaded GPT model: {gpt_model_path}")
+        if ms_config is not None:
+            # ── Multi-speaker mode: MultiSpeakerTTS (shared backbone) ──
+            from gsv_tts import MultiSpeakerTTS
+            speakers = _build_speaker_configs(ms_config)
+            tts = MultiSpeakerTTS(
+                speakers=speakers,
+                base_gpt_path=_build_absolute_path(ms_config.get("base_gpt_path")),
+                base_sovits_path=_build_absolute_path(ms_config.get("base_sovits_path")),
+                device=model_config.get("device"),
+                dtype="float16" if model_config.get("is_half") else "float32",
+                models_dir=pathlib.Path.cwd() / model_config.get("pretrained_models_path"),
+                use_bert=True,
+            )
+            is_multispeaker = True
+            default_speaker = speakers[0].name
+            logger.info(
+                f"MultiSpeakerTTS ready with speakers: "
+                f"{[s.name for s in speakers]} (default: {default_speaker})"
+            )
         else:
-            tts.load_gpt_model()
-            logger.info("Preloaded default GPT model")
+            # ── Legacy single-speaker mode ──
+            tts = TTS(
+                device=model_config.get("device"),
+                dtype="float16" if model_config.get("is_half") else "float32",
+                models_dir=pathlib.Path.cwd() / model_config.get("pretrained_models_path"),
+                use_bert=True,
+            )
 
-        if sovits_model_path:
-            tts.load_sovits_model(sovits_model_path)
-            logger.info(f"Preloaded SoVITS model: {sovits_model_path}")
-        else:
-            tts.load_sovits_model()
-            logger.info("Preloaded default SoVITS model")
+            gpt_model_path = model_config.get("gpt_model_path")
+            sovits_model_path = model_config.get("sovits_model_path")
+
+            if gpt_model_path:
+                tts.load_gpt_model(gpt_model_path)
+                logger.info(f"Preloaded GPT model: {gpt_model_path}")
+            else:
+                tts.load_gpt_model()
+                logger.info("Preloaded default GPT model")
+
+            if sovits_model_path:
+                tts.load_sovits_model(sovits_model_path)
+                logger.info(f"Preloaded SoVITS model: {sovits_model_path}")
+            else:
+                tts.load_sovits_model()
+                logger.info("Preloaded default SoVITS model")
+
+            is_multispeaker = False
+            default_speaker = None
 
         if trim_startup_memory:
             _release_worker_startup_memory()
@@ -205,14 +299,25 @@ def _run_gsv_worker(
                         prompt_audio_path = message["prompt_audio_path"]
                         prompt_audio_text = message["prompt_audio_text"]
                         text = message["text"]
+                        speaker = message.get("speaker") or default_speaker
 
                         is_first_chunk = True
-                        for clip in tts.infer_stream(
-                            spk_audio_path=spk_audio_path,
-                            prompt_audio_path=prompt_audio_path,
-                            prompt_audio_text=prompt_audio_text,
-                            text=text,
-                        ):
+                        if is_multispeaker:
+                            stream = tts.infer_stream(
+                                speaker=speaker,
+                                text=text,
+                                prompt_audio_path=prompt_audio_path,
+                                prompt_audio_text=prompt_audio_text,
+                            )
+                        else:
+                            stream = tts.infer_stream(
+                                spk_audio_path=spk_audio_path,
+                                prompt_audio_path=prompt_audio_path,
+                                prompt_audio_text=prompt_audio_text,
+                                text=text,
+                            )
+
+                        for clip in stream:
                             if stop_event.is_set():
                                 break
                             chunk_bytes = _audio_to_wav_bytes(clip.audio_data, clip.samplerate)
@@ -264,13 +369,22 @@ def _run_gsv_worker(
                 prompt_audio_path = message["prompt_audio_path"]
                 prompt_audio_text = message["prompt_audio_text"]
                 text = message["text"]
+                speaker = message.get("speaker") or default_speaker
 
-                clip = tts.infer(
-                    spk_audio_path=spk_audio_path,
-                    prompt_audio_path=prompt_audio_path,
-                    prompt_audio_text=prompt_audio_text,
-                    text=text,
-                )
+                if is_multispeaker:
+                    clip = tts.infer(
+                        speaker=speaker,
+                        text=text,
+                        prompt_audio_path=prompt_audio_path,
+                        prompt_audio_text=prompt_audio_text,
+                    )
+                else:
+                    clip = tts.infer(
+                        spk_audio_path=spk_audio_path,
+                        prompt_audio_path=prompt_audio_path,
+                        prompt_audio_text=prompt_audio_text,
+                        text=text,
+                    )
                 wav_bytes = _audio_to_wav_bytes(clip.audio_data, clip.samplerate)
 
                 response_queue.put(
@@ -513,6 +627,7 @@ class TTSServer:
         prompt_audio_path: str,
         prompt_audio_text: str,
         timeout: int = 600,
+        speaker: Optional[str] = None,
     ) -> bytes:
         self._begin_request()
         try:
@@ -534,6 +649,7 @@ class TTSServer:
                         "spk_audio_path": spk_audio_path,
                         "prompt_audio_path": prompt_audio_path,
                         "prompt_audio_text": prompt_audio_text,
+                        "speaker": speaker,
                     }
                 )
 
@@ -555,6 +671,7 @@ class TTSServer:
         prompt_audio_path: str,
         prompt_audio_text: str,
         timeout: int = 600,
+        speaker: Optional[str] = None,
     ) -> Generator[bytes, None, None]:
         self._begin_request()
         try:
@@ -576,6 +693,7 @@ class TTSServer:
                         "spk_audio_path": spk_audio_path,
                         "prompt_audio_path": prompt_audio_path,
                         "prompt_audio_text": prompt_audio_text,
+                        "speaker": speaker,
                     }
                 )
 

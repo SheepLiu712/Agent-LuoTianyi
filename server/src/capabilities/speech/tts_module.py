@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Dict, Any, Generator
+from typing import Dict, Any, Generator, Optional
 from src.utils.logger import get_logger
 from src.utils.asyncio_helpers import run_sync_owned
 from src.capabilities.speech.tts_server import TTSServer
@@ -89,13 +89,14 @@ class TTSModule:
         """获取可用的语气列表"""
         return list(self.tone_reference_audio_projection.keys())
 
-    async def synthesize_speech_with_tone(self, text: str, tone: str) -> bytes:
+    async def synthesize_speech_with_tone(self, text: str, tone: str, speaker: Optional[str] = None) -> bytes:
         """
         根据指定语气合成语音, 异步调用，返回音频数据 bytes
         
         Args:
             text: 要合成的文本
             tone: 语气 key
+            speaker: 角色名（MultiSpeakerTTS 模式），默认使用服务端配置的第一个角色
             
         Returns:
             bytes: WAV 格式音频数据
@@ -108,15 +109,16 @@ class TTSModule:
             else:
                  raise ValueError("No reference audio available.")
 
-        return await self.synthesize_speech(text, ref_audio_name)
+        return await self.synthesize_speech(text, ref_audio_name, speaker=speaker)
 
-    async def synthesize_speech(self, text: str, ref_audio_key: str) -> bytes:
+    async def synthesize_speech(self, text: str, ref_audio_key: str, speaker: Optional[str] = None) -> bytes:
         """
         合成语音的核心方法 (异步)
         
         Args:
             text: 要合成的文本
             ref_audio_key: 参考音频的键名 (文件名不含后缀)
+            speaker: 角色名（MultiSpeakerTTS 模式），默认使用服务端配置的第一个角色
             
         Returns:
             bytes: WAV 格式音频数据
@@ -143,6 +145,7 @@ class TTSModule:
                 payload["ref_audio_path"],
                 payload["ref_audio_path"],
                 payload["prompt_text"],
+                speaker=speaker,
             )
             self._debug(f"TTS synthesis successful for text: {text[:20]}...")
             return audio_bytes
@@ -150,7 +153,7 @@ class TTSModule:
             self.logger.error(f"TTS Request failed: {e}")
             raise
 
-    def stream_synthesize_speech_with_tone(self, text: str, tone: str) -> Generator[bytes, None, None]:
+    def stream_synthesize_speech_with_tone(self, text: str, tone: str, speaker: Optional[str] = None) -> Generator[bytes, None, None]:
         """
         根据指定语气流式合成语音，返回可直接拼接写入文件的 bytes 片段生成器。
         """
@@ -162,9 +165,9 @@ class TTSModule:
             else:
                 raise ValueError("No reference audio available.")
 
-        return self.stream_synthesize_speech(text, ref_audio_name)
+        return self.stream_synthesize_speech(text, ref_audio_name, speaker=speaker)
 
-    def stream_synthesize_speech(self, text: str, ref_audio_key: str) -> Generator[bytes, None, None]:
+    def stream_synthesize_speech(self, text: str, ref_audio_key: str, speaker: Optional[str] = None) -> Generator[bytes, None, None]:
         """
         流式合成语音的核心方法，返回 bytes 片段生成器。
         """
@@ -180,6 +183,7 @@ class TTSModule:
                 spk_audio_path=ref_audio_obj.audio_path,
                 prompt_audio_path=ref_audio_obj.audio_path,
                 prompt_audio_text=ref_audio_obj.lyrics,
+                speaker=speaker,
             ):
                 if chunk:
                     yield chunk
