@@ -281,6 +281,7 @@ class MainChat:
         self.llm_tone_mapping_file = self.character_profile.llm_tone_mapping_file
         self.llm_tone_to_tts_tone: Dict[str, str] = {}
         self.llm_tone_to_l2d_expression: Dict[str, str] = {}
+        self.llm_tone_aliases: Dict[str, str] = {}
         if not self.llm_tone_mapping_file:
             raise ValueError(f"No llm_tone_mapping_file configured for character {self.character_profile.character_id}")
 
@@ -302,6 +303,10 @@ class MainChat:
                     str(k).strip().lower(): str(v).strip()
                     for k, v in mapping.get("llm_tone_to_l2d_expression", {}).items()
                 }
+                self.llm_tone_aliases = {
+                    str(k).strip().lower(): str(v).strip().lower()
+                    for k, v in mapping.get("tone_aliases", {}).items()
+                }
         except Exception as e:
             self.logger.warning(f"Failed to load LLM tone mapping: {e}")
 
@@ -313,19 +318,48 @@ class MainChat:
         )
 
     def _get_expressions_and_tts_tone(self, tone: str) -> Tuple[str, str]:
-        normalized_tone = (tone or "").lower().strip().strip("'\"“”‘’")
+        normalized_tone = self._normalize_tone_label(tone)
         default_key = DEFAULT_LLM_TONE.lower()
         if not normalized_tone:
             self.logger.warning(f"LLM tone is empty, falling back to {DEFAULT_LLM_TONE}.")
             normalized_tone = default_key
-        if normalized_tone not in self.llm_tone_to_tts_tone:
+        resolved_tone = self._resolve_tone_label(normalized_tone)
+        if resolved_tone is None:
             self.logger.warning(f"LLM tone '{tone}' not found, falling back to {DEFAULT_LLM_TONE}.")
+            resolved_tone = default_key
         tts_tone = self.llm_tone_to_tts_tone.get(
-            normalized_tone,
+            resolved_tone,
             self.llm_tone_to_tts_tone.get(default_key, DEFAULT_TTS_TONE),
         )
         expression = self.llm_tone_to_l2d_expression.get(
-            normalized_tone,
+            resolved_tone,
             self.llm_tone_to_l2d_expression.get(default_key, DEFAULT_EXPRESSION),
         )
         return expression, tts_tone
+
+    @staticmethod
+    def _normalize_tone_label(tone: str) -> str:
+        """容错归一化情绪标签：去引号/括号/标点、多余空白并统一小写。"""
+        if not tone:
+            return ""
+        text = str(tone).strip().lower()
+        text = text.strip("[]()（）【】{}'\"“”‘’")
+        text = text.strip(" \t\r\n。，、；：！？!?.;:…·~～")
+        return "".join(text.split())
+
+    def _resolve_tone_label(self, normalized_tone: str) -> Optional[str]:
+        """将归一化后的情绪标签解析为映射表中的正式情绪。
+
+        解析顺序：精确命中正式情绪 -> 别名表 -> 包含匹配（处理“有点伤心”“开心地”等带修饰的标签）。
+        """
+        if not normalized_tone:
+            return DEFAULT_LLM_TONE.lower()
+        if normalized_tone in self.llm_tone_to_tts_tone:
+            return normalized_tone
+        aliases = getattr(self, "llm_tone_aliases", {})
+        if normalized_tone in aliases:
+            return aliases[normalized_tone]
+        for key in sorted(self.llm_tone_to_tts_tone, key=len, reverse=True):
+            if key and (key in normalized_tone or normalized_tone in key):
+                return key
+        return None
