@@ -30,5 +30,18 @@ if "%INSTALL_CUDA%"=="1" (
 call conda install ffmpeg -y
 pip install -r docs/gsv_requirements.txt
 pip install -r docs/requirements.txt
+
+REM Install multi-speaker gsv-tts-lite from res\packages (shipped with the
+REM resource package; the MultiSpeakerTTS build is not published on PyPI).
+set "GSV_WHEEL="
+for %%f in (res\packages\gsv_tts_lite-*.whl) do set "GSV_WHEEL=%%f"
+if defined GSV_WHEEL (
+    echo Installing gsv-tts-lite from %GSV_WHEEL%
+    pip install "%GSV_WHEEL%"
+) else (
+    echo [WARN] No gsv-tts-lite wheel found in res\packages, skipping.
+    echo        Build/download it or install manually: pip install gsv-tts-lite
+)
+
 python -m playwright install chromium
 pause

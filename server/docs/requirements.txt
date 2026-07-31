@@ -16,9 +16,8 @@ cryptography
 bcrypt
 Pillow
 flashtext
-# gsv-tts-lite==0.3.9
-# 多说话人版本（MultiSpeakerTTS）未发布 PyPI，需本地安装本项目：
-#   pip install -e D:\GSV-TTS-Lite
+# gsv-tts-lite 多说话人版本（MultiSpeakerTTS）未发布 PyPI，
+# 由 setup.bat 从 res\packages\gsv_tts_lite-*.whl 自动安装。
 # 若使用标准单角色版本：pip install gsv-tts-lite（注意多说话人模式会 ImportError）
 lunardate
 ml_collections
