@@ -147,10 +147,18 @@ export const useChatLogic = (
 
     binderRef.current = binder;
 
-    const processor = new MessageProcessor(networkClient, binder, (base64Audio, isFinal) => {
-      const jsCode = `window.feedAudioChunk(${JSON.stringify(base64Audio)}, ${isFinal ? 'true' : 'false'}); true;`;
-      webviewRef.current?.injectJavaScript(jsCode);
-    });
+    const processor = new MessageProcessor(
+      networkClient,
+      binder,
+      (base64Audio, isFinal) => {
+        const jsCode = `window.feedAudioChunk(${JSON.stringify(base64Audio)}, ${isFinal ? 'true' : 'false'}); true;`;
+        webviewRef.current?.injectJavaScript(jsCode);
+      },
+      () => {
+        const jsCode = `window.stopServerAudio(); true;`;
+        webviewRef.current?.injectJavaScript(jsCode);
+      },
+    );
 
     messageProcessorRef.current = processor;
 
@@ -181,7 +189,7 @@ export const useChatLogic = (
   const handleWebViewMessage = useCallback((event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
-      if (data.type === 'audio_finished') {
+      if (data.type === 'audio_finished' || data.type === 'audio_stopped') {
         messageProcessorRef.current?.onServerAudioFinished();
         return;
       }

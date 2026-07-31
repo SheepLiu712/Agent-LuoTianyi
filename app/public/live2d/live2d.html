@@ -344,6 +344,8 @@
     let nextStartTime = 0;
     let isWaitingForEnd = false;
     let isPlaying = false;
+    // 当前已排队的音频源，用于停止/清空队列（音频播放互斥）
+    const activeSources = [];
 
     window.feedAudioChunk = async (base64Audio, isFinal) => {
       if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -398,6 +400,13 @@
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(analyser);
+        source.onended = () => {
+          const idx = activeSources.indexOf(source);
+          if (idx >= 0) {
+            activeSources.splice(idx, 1);
+          }
+        };
+        activeSources.push(source);
         
         const currentTime = audioCtx.currentTime;
         // 留 50ms 缓冲，防止高频小包导致破音/队列下溢
@@ -413,6 +422,25 @@
       if (isFinal) {
         isWaitingForEnd = true;
         checkFinished();
+      }
+    };
+
+    // 停止并清空所有已排队的音频（用于音频播放互斥）
+    window.stopServerAudio = () => {
+      for (const src of activeSources.slice()) {
+        try {
+          src.stop();
+        } catch (e) {
+          // 忽略已结束或未启动的源
+        }
+      }
+      activeSources.length = 0;
+      nextStartTime = 0;
+      isWaitingForEnd = false;
+      isPlaying = false;
+      // 通知 RN 服务端音频已停止（用于同步 serverAudioPlaying 状态）
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'audio_stopped' }));
       }
     };
 
