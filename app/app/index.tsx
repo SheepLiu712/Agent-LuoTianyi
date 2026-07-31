@@ -401,6 +401,17 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
               }
             }}
             onEndReachedThreshold={0.1}
+            onScrollToIndexFailed={(info) => {
+              // scrollToIndex 目标未渲染时的兜底：按平均行高估算偏移量，避免闪退
+              addDebugTrace('history', 'scrollToIndex failed', {
+                index: info.index,
+                averageItemLength: info.averageItemLength,
+              });
+              flatListRef.current?.scrollToOffset({
+                offset: info.averageItemLength * info.index,
+                animated: false,
+              });
+            }}
             ListFooterComponent={renderFooter}
             style={[styles.chatList, { backgroundColor: theme.chatList }]}
             contentContainerStyle={styles.chatListContent}

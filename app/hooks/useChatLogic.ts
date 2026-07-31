@@ -345,8 +345,14 @@ export const useChatLogic = (
       const next = [...prev, ...normalized.reverse()];
 
       if (nowScrollIndex >= 0) {
+        // 快速滑动时目标 index 可能尚未渲染，scrollToIndex 会抛 invariant violation 导致应用闪退。
+        // 捕获异常并回退到 offset 定位（见 index.tsx 的 onScrollToIndexFailed），即使失败也不影响列表。
         setTimeout(() => {
-          flatListRef.current?.scrollToIndex({ index: nowScrollIndex, animated: false });
+          try {
+            flatListRef.current?.scrollToIndex({ index: nowScrollIndex, animated: false });
+          } catch {
+            addDebugTrace('history', 'scrollToIndex failed, fallback to offset', { index: nowScrollIndex });
+          }
         }, 10);
       } else {
         setTimeout(() => {
