@@ -160,14 +160,14 @@ class TopicPlanner:
         await self._consume_topics([touch_topic])
 
     async def _handle_user_typing(self, event: "ChatInputEvent"):
-        """处理用户输入中的事件，重置超时等待。"""
-        text_length = event.payload["text_length"]
+        """处理用户输入中的事件。text_length>0 表示用户正在输入新消息，延长等待；为 0 表示用户清空了输入，立即提取。"""
+        text_length = event.payload.get("text_length", 0)
         if not await self.unread_store.has_unread() and not self._extraction_in_progress:
             return # 没有未读消息，不需要重置等待。
         if text_length > 0:
             await self.listen_timer.set_deadline(timeout=10)  # 认为用户明确地有话要说，设置一个更长的等待时间
         else:
-            await self.listen_timer.set_deadline() # 用户开始输入了，重置等待时间，给用户更多时间输入。
+            await self.listen_timer.remove_deadline()  # 用户清空了输入（或 payload 为空），不再等待补全，立即提取
         self._wake_event.set()  # 唤醒处理循环，重新评估状态
 
     async def _handle_user_image_selecting(self, event: "ChatInputEvent"):

@@ -227,9 +227,8 @@ export const useChatLogic = (
   const handleInputChange = useCallback((text: string) => {
     setInputText(text);
     const trimmedLength = text.trim().length;
-    if (trimmedLength > 0) {
-      void binderRef.current?.sendTyping(trimmedLength);
-    }
+    // 清空输入时也发送 text_length=0 事件，通知服务端"用户已清空输入"并立即提取，而非继续等待补全
+    void binderRef.current?.sendTyping(trimmedLength);
   }, []);
 
   const handleSendText = useCallback(async () => {
