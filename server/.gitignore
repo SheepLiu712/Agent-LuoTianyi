@@ -72,6 +72,8 @@ setup
 /res/*
 !/res/agent/
 !/res/agent/**
+!/res/packages/
+!/res/packages/**
 data
 data_produce
 data_backup
