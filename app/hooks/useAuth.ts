@@ -3,12 +3,24 @@ import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from 'react';
 import { auth } from '../components/auth';
 import { loadSavedServerUrl, server_config } from '../config/index';
-import { encryptPassword, getPublicKey } from '../utils/crypto';
+import { encryptPassword, getPublicKey, type PublicKeyFailureReason } from '../utils/crypto';
 import { addDebugTrace } from '../utils/debug_trace';
 
 const AUTO_LOGIN_KEY = 'auto_login';
 const USERNAME_KEY = 'saved_username';
 const AUTOLOGIN_TOKEN_KEY = 'auto_login_token';
+
+/** 根据加密失败原因生成面向用户的明确提示 */
+function describeEncryptFailure(scope: '登录' | '注册', reason: PublicKeyFailureReason | 'crypto'): string {
+  switch (reason) {
+    case 'network':
+      return `${scope}失败，无法获取加密密钥，请检查网络后重试`;
+    case 'server':
+      return `${scope}失败，服务器返回异常，请稍后重试`;
+    default:
+      return `${scope}失败，无法加密密码`;
+  }
+}
 
 export interface AuthState {
   isLoggedIn: boolean;
@@ -105,10 +117,10 @@ export function useAuth() {
       }
 
       // 加密密码
-      const encryptedPassword = await encryptPassword(password);
-      if (!encryptedPassword) {
-        addDebugTrace('auth', 'password encrypt failed');
-        return { success: false, message: '登录失败，无法加密密码' };
+      const encrypted = await encryptPassword(password);
+      if (!encrypted.ok) {
+        addDebugTrace('auth', 'password encrypt failed', { reason: encrypted.reason });
+        return { success: false, message: describeEncryptFailure('登录', encrypted.reason) };
       }
       // 发送登录请求
       const response = await fetch(`${server_config.BASE_URL}/auth/login`, {
@@ -116,7 +128,7 @@ export function useAuth() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username,
-          password: encryptedPassword,
+          password: encrypted.encrypted,
         }),
       });
       const result = await response.json();
@@ -165,10 +177,10 @@ export function useAuth() {
       if (!inviteCode.trim()) return { success: false, message: '邀请码不能为空' };
 
       // 加密密码
-      const encryptedPassword = await encryptPassword(password);
-      if (!encryptedPassword) {
-        addDebugTrace('auth', 'register: password encrypt failed');
-        return { success: false, message: '注册失败，无法加密密码' };
+      const encrypted = await encryptPassword(password);
+      if (!encrypted.ok) {
+        addDebugTrace('auth', 'register: password encrypt failed', { reason: encrypted.reason });
+        return { success: false, message: describeEncryptFailure('注册', encrypted.reason) };
       }
 
       // 发送注册请求
@@ -177,7 +189,7 @@ export function useAuth() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username,
-          password: encryptedPassword,
+          password: encrypted.encrypted,
           invite_code: inviteCode,
         }),
       });

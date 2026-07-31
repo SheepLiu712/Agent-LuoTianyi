@@ -131,9 +131,15 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
     try {
       // 加密密码（复用已有的加密方法）
       const { encryptPassword } = await import('../utils/crypto');
-      const encryptedPassword = await encryptPassword(resetPassword);
-      if (!encryptedPassword) {
-        Alert.alert('错误', '密码加密失败');
+      const encrypted = await encryptPassword(resetPassword);
+      if (!encrypted.ok) {
+        const message =
+          encrypted.reason === 'network'
+            ? '无法获取加密密钥，请检查网络后重试'
+            : encrypted.reason === 'server'
+              ? '服务器返回异常，请稍后重试'
+              : '密码加密失败';
+        Alert.alert('错误', message);
         setResetting(false);
         return;
       }
@@ -143,7 +149,7 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
         body: JSON.stringify({
           invite_code: resetInvite,
           new_username: resetUsername,
-          new_password: encryptedPassword,
+          new_password: encrypted.encrypted,
         }),
       });
       const result = await response.json();
