@@ -2,6 +2,8 @@ import os
 import hmac
 import hashlib
 import bcrypt
+import random
+import string
 from jose import jwt
 import json
 from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
@@ -466,6 +468,7 @@ class DatabaseManager:
                 .filter(
                     InviteCode.code == invite_code_str,
                     InviteCode.is_used.is_(False),
+                    InviteCode.disabled.is_(False),
                 )
                 .first()
             )
@@ -492,6 +495,7 @@ class DatabaseManager:
                 .filter(
                     InviteCode.code == invite_code_str,
                     InviteCode.is_used.is_(False),
+                    InviteCode.disabled.is_(False),
                 )
                 .update(
                     {
@@ -553,6 +557,8 @@ class DatabaseManager:
             code = db.query(InviteCode).filter_by(code=invite_code_str).first()
             if not code:
                 return False, "邀请码无效"
+            if code.disabled:
+                return False, "邀请码已被禁用，无法重置"
             if not code.is_used or not code.user_id:
                 return False, "邀请码尚未被使用，无法重置"
 
@@ -585,6 +591,141 @@ class DatabaseManager:
                 self._invalidate_username_caches(old_username, new_username)
             logger.error("Error resetting account for username=%s (%s)", new_username, type(e).__name__)
             return False, "重置失败"
+        finally:
+            db.close()
+
+    # ────────────────────────────────────────────
+    # 邀请码管理（admin 控制台）
+    # ────────────────────────────────────────────
+
+    def admin_list_invite_codes(
+        self,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+        status: Optional[str] = None,
+        search: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        '''
+        邀请码列表（admin 控制台）。status 取值：'unused' | 'used' | 'disabled'。
+        search 按邀请码模糊匹配。成功返回 {"items": [...], "total": N}。
+        '''
+        db = self._new_session()
+        try:
+            query = db.query(InviteCode)
+            if status == "used":
+                query = query.filter(InviteCode.is_used.is_(True))
+            elif status == "disabled":
+                query = query.filter(InviteCode.disabled.is_(True))
+            elif status == "unused":
+                query = query.filter(
+                    InviteCode.is_used.is_(False),
+                    InviteCode.disabled.is_(False),
+                )
+
+            if search:
+                pattern = f"%{search.strip().upper()}%"
+                query = query.filter(InviteCode.code.like(pattern))
+
+            total = query.count()
+            rows = (
+                query.order_by(InviteCode.created_at.desc())
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+
+            user_ids = {row.user_id for row in rows if row.user_id}
+            usernames: Dict[str, str] = {}
+            if user_ids:
+                for user in db.query(User).filter(User.uuid.in_(user_ids)).all():
+                    usernames[user.uuid] = user.username
+
+            items = []
+            for row in rows:
+                items.append({
+                    "code": row.code,
+                    "is_used": bool(row.is_used),
+                    "disabled": bool(row.disabled),
+                    "created_at": row.created_at.strftime("%Y-%m-%d %H:%M:%S") if row.created_at else None,
+                    "used_at": row.used_at.strftime("%Y-%m-%d %H:%M:%S") if row.used_at else None,
+                    "user_id": row.user_id,
+                    "username": usernames.get(row.user_id),
+                })
+            return {"items": items, "total": total}
+        except Exception as exc:
+            logger.error(f"Error listing invite codes: {exc}")
+            db.rollback()
+            return {"items": [], "total": 0}
+        finally:
+            db.close()
+
+    def admin_generate_invite_codes(self, count: int = 1, length: int = 10) -> Tuple[bool, Any]:
+        '''批量生成邀请码（admin 控制台）。'''
+        if count < 1 or count > 100:
+            return False, "生成数量需在 1-100 之间"
+        if length < 6 or length > 32:
+            return False, "邀请码长度需在 6-32 之间"
+
+        db = self._new_session()
+        chars = string.ascii_uppercase + string.digits
+        added: List[str] = []
+        try:
+            existing = {row[0] for row in db.query(InviteCode.code).all()}
+            for _ in range(count):
+                code_str = "".join(random.choice(chars) for _ in range(length))
+                while code_str in existing:
+                    code_str = "".join(random.choice(chars) for _ in range(length))
+                existing.add(code_str)
+                db.add(InviteCode(code=code_str))
+                added.append(code_str)
+            db.commit()
+            logger.info(f"Admin generated {count} invite codes")
+            return True, added
+        except Exception as exc:
+            logger.error(f"Error generating invite codes: {exc}")
+            db.rollback()
+            return False, f"生成失败：{exc}"
+        finally:
+            db.close()
+
+    def admin_set_invite_code_disabled(self, code_str: str, disabled: bool) -> Tuple[bool, str]:
+        '''启用/禁用邀请码（admin 控制台）。'''
+        db = self._new_session()
+        try:
+            code = db.query(InviteCode).filter_by(code=code_str).first()
+            if not code:
+                return False, "邀请码不存在"
+            code.disabled = disabled
+            db.commit()
+            logger.info(f"Admin set invite code {code_str} disabled={disabled}")
+            return True, "已禁用" if disabled else "已启用"
+        except Exception as exc:
+            logger.error(f"Error setting invite code disabled={disabled} for {code_str}: {exc}")
+            db.rollback()
+            return False, f"操作失败：{exc}"
+        finally:
+            db.close()
+
+    def admin_delete_invite_code(self, code_str: str) -> Tuple[bool, str]:
+        '''删除尚未使用且未禁用的邀请码（admin 控制台）。'''
+        db = self._new_session()
+        try:
+            code = db.query(InviteCode).filter_by(code=code_str).first()
+            if not code:
+                return False, "邀请码不存在"
+            if code.is_used:
+                return False, "邀请码已被使用，无法删除"
+            if code.disabled:
+                return False, "邀请码已禁用，请先启用再删除"
+            db.delete(code)
+            db.commit()
+            logger.info(f"Admin deleted invite code {code_str}")
+            return True, "删除成功"
+        except Exception as exc:
+            logger.error(f"Error deleting invite code {code_str}: {exc}")
+            db.rollback()
+            return False, f"删除失败：{exc}"
         finally:
             db.close()
 

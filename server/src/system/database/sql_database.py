@@ -44,6 +44,7 @@ class InviteCode(Base):
     
     code = Column(String, primary_key=True)
     is_used = Column(Boolean, default=False)
+    disabled = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.now)
     used_at = Column(DateTime, nullable=True)
     user_id = Column(String, ForeignKey("users.uuid"), nullable=True, unique=True)
@@ -472,6 +473,13 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
                 connection.exec_driver_sql("ALTER TABLE dynamic_comments ADD COLUMN memory_error TEXT")
             if "reply_error" not in dynamic_comment_columns:
                 connection.exec_driver_sql("ALTER TABLE dynamic_comments ADD COLUMN reply_error TEXT")
+
+        invite_code_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(invite_codes)").fetchall()
+        }
+        if invite_code_columns and "disabled" not in invite_code_columns:
+            connection.exec_driver_sql("ALTER TABLE invite_codes ADD COLUMN disabled BOOLEAN DEFAULT 0")
 
 
 def get_sql_db(): # Generator for FastAPI

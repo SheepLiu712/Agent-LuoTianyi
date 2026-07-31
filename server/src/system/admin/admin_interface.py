@@ -479,4 +479,72 @@ async def admin_dynamic_comments(
     )
 
 
+# ── 邀请码管理 ────────────────────────────────────────────────
+
+@protected_router.get("/invite-codes")
+async def admin_list_invite_codes(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    status: str | None = None,
+    search: str | None = None,
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    return runtime.database_manager.admin_list_invite_codes(
+        limit=limit,
+        offset=offset,
+        status=status,
+        search=search,
+    )
+
+
+@protected_router.post("/invite-codes")
+async def admin_generate_invite_codes(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    count = int(payload.get("count") or 1)
+    length = int(payload.get("length") or 10)
+    ok, result = runtime.database_manager.admin_generate_invite_codes(count=count, length=length)
+    if not ok:
+        raise HTTPException(status_code=400, detail=result)
+    return {"ok": True, "codes": result}
+
+
+@protected_router.post("/invite-codes/{code}/disable")
+async def admin_disable_invite_code(code: str) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    ok, message = runtime.database_manager.admin_set_invite_code_disabled(code, True)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"ok": True, "message": message}
+
+
+@protected_router.post("/invite-codes/{code}/enable")
+async def admin_enable_invite_code(code: str) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    ok, message = runtime.database_manager.admin_set_invite_code_disabled(code, False)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"ok": True, "message": message}
+
+
+@protected_router.delete("/invite-codes/{code}")
+async def admin_delete_invite_code(code: str) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    ok, message = runtime.database_manager.admin_delete_invite_code(code)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"ok": True, "message": message}
+
+
 router.include_router(protected_router)
