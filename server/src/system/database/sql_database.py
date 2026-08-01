@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, Text, Engine, event, text, UniqueConstraint, Float
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, Text, Engine, event, text, UniqueConstraint, Float, Index
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from datetime import datetime
 import uuid
@@ -304,6 +304,18 @@ class DynamicPost(Base):
     owner_user = relationship("User", back_populates="dynamic_posts")
     comments = relationship("DynamicComment", back_populates="dynamic_post", cascade="all, delete-orphan")
 
+    __table_args__ = (
+        Index(
+            "uq_dynamic_posts_diary_source",
+            "owner_user_id",
+            "author_id",
+            "source_type",
+            "source_id",
+            unique=True,
+            sqlite_where=text("source_type = 'diary' AND source_id IS NOT NULL"),
+        ),
+    )
+
 
 class DynamicComment(Base):
     __tablename__ = "dynamic_comments"
@@ -463,6 +475,28 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
                 connection.exec_driver_sql("ALTER TABLE dynamic_posts ADD COLUMN memory_error TEXT")
             if "reply_error" not in dynamic_post_columns:
                 connection.exec_driver_sql("ALTER TABLE dynamic_posts ADD COLUMN reply_error TEXT")
+            duplicate_diaries = connection.exec_driver_sql(
+                """
+                SELECT owner_user_id, author_id, source_type, source_id, COUNT(*) AS duplicate_count
+                FROM dynamic_posts
+                WHERE source_type = 'diary' AND source_id IS NOT NULL
+                GROUP BY owner_user_id, author_id, source_type, source_id
+                HAVING COUNT(*) > 1
+                LIMIT 10
+                """
+            ).fetchall()
+            if duplicate_diaries:
+                raise RuntimeError(
+                    "Cannot create diary idempotency index: duplicate diary source keys exist: "
+                    f"{duplicate_diaries}"
+                )
+            connection.exec_driver_sql(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_dynamic_posts_diary_source
+                ON dynamic_posts (owner_user_id, author_id, source_type, source_id)
+                WHERE source_type = 'diary' AND source_id IS NOT NULL
+                """
+            )
 
         dynamic_comment_columns = {
             row[1]

@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.utils.logger import get_logger
@@ -310,6 +311,34 @@ class DynamicStore:
                 return False, "动态创建失败", None
             user_names = self._load_user_names(db, {created.author_id} if created.author_type == "user" else set())
             return True, "ok", self._serialize_dynamic_post(created, user_names=user_names, comment_count=0)
+        except IntegrityError as e:
+            db.rollback()
+            if idempotent_by_source and source_id:
+                existing = (
+                    db.query(DynamicPost)
+                    .filter(
+                        DynamicPost.author_type == author_type,
+                        DynamicPost.author_id == author_id,
+                        DynamicPost.owner_user_id == owner_user_id,
+                        DynamicPost.source_type == source_type,
+                        DynamicPost.source_id == source_id,
+                        DynamicPost.status == "published",
+                    )
+                    .order_by(DynamicPost.created_at.asc(), DynamicPost.id.asc())
+                    .first()
+                )
+                if existing is not None:
+                    user_names = self._load_user_names(
+                        db,
+                        {existing.author_id} if existing.author_type == "user" else set(),
+                    )
+                    return (
+                        True,
+                        "dynamic already exists",
+                        self._serialize_dynamic_post(existing, user_names=user_names),
+                    )
+            self.logger.error(f"Failed to create dynamic due to an integrity constraint: {e}")
+            return False, "动态创建失败", None
         except Exception as e:
             self.logger.error(f"Failed to create dynamic: {e}")
             db.rollback()

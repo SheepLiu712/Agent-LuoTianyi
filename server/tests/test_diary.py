@@ -9,12 +9,22 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import sessionmaker
 
 server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.capabilities.diary import DiaryCapability
+from src.system.database.sql_database import (
+    Base,
+    Conversation,
+    DynamicPost,
+    User,
+    _migrate_sqlite_schema,
+)
 from src.world.diary.task import DiaryTask
 
 
@@ -83,6 +93,15 @@ def test_parse_diary_result_compresses_excess_blank_lines():
     assert "\n\n\n" not in result
 
 
+def test_parse_diary_result_accepts_inline_body_label():
+    capability = DiaryCapability({})
+    raw = "心情：平静\n正文：第一段。\n\n第二段。"
+
+    result = capability._parse_diary_result(raw, target_date="2026-07-16")
+
+    assert result.endswith("第一段。\n\n第二段。")
+
+
 # ────────────────────── _strip_think_block ──────────────────────
 
 
@@ -146,9 +165,10 @@ class FakeDynamicCapability:
 class FakeDatabaseManager:
     """提供日记素材收集所需的最小 DB 桩。"""
 
-    def __init__(self):
+    def __init__(self, existing_dynamic=None):
         self.dynamic_store = SimpleNamespace(
-            list_dynamics_for_user=lambda user_id, limit=50: {"items": []}
+            list_dynamics_for_user=lambda user_id, limit=50: {"items": []},
+            get_dynamic_by_source=lambda **kwargs: existing_dynamic,
         )
         self._prefs = {"nickname": "小洛"}
         self._desc = "喜欢音乐的测试用户"
@@ -202,6 +222,8 @@ def test_generate_and_post_diary_full_flow():
     assert dynamic_cap.published
     payload = dynamic_cap.published[0]
     assert payload["source_type"] == "diary"
+    assert payload["source_id"] == "diary:luotianyi:user-1:2026-07-16"
+    assert payload["idempotent_by_source"] is True
     assert payload["visibility"] == "private"
     assert payload["owner_user_id"] == "user-1"
     assert payload["allow_comment"] is False
@@ -225,6 +247,47 @@ def test_generate_and_post_diary_publishes_via_agent_dynamic():
     # 此处验证角色 ID 与可见性已正确传递
     assert dynamic_cap.published[0]["character_id"] == "luotianyi"
     assert dynamic_cap.published[0]["visibility"] == "private"
+
+
+def test_generate_and_post_diary_returns_existing_source_without_regeneration():
+    capability = _make_capability_with_llm()
+    dynamic_cap = FakeDynamicCapability()
+    existing = {
+        "id": "existing-diary",
+        "owner_user_id": "user-1",
+        "source_id": "diary:luotianyi:user-1:2026-07-16",
+    }
+    capability.wire_dependencies(
+        database_manager=FakeDatabaseManager(existing_dynamic=existing),
+        dynamic_capability=dynamic_cap,
+    )
+
+    ok, msg, item = asyncio.run(
+        capability.generate_and_post_diary("user-1", diary_date="2026-07-16")
+    )
+
+    assert ok is True
+    assert msg == "日记已存在"
+    assert item == existing
+    assert dynamic_cap.published == []
+
+
+def test_generate_and_post_diary_rejects_noncanonical_date():
+    capability = _make_capability_with_llm()
+    dynamic_cap = FakeDynamicCapability()
+    capability.wire_dependencies(
+        database_manager=FakeDatabaseManager(),
+        dynamic_capability=dynamic_cap,
+    )
+
+    ok, msg, item = asyncio.run(
+        capability.generate_and_post_diary("user-1", diary_date="20260716")
+    )
+
+    assert ok is False
+    assert msg == "日记日期格式无效"
+    assert item is None
+    assert dynamic_cap.published == []
 
 
 # ────────────────────── DiaryTask 默认配置 ──────────────────────
@@ -341,3 +404,131 @@ def test_run_once_all_users_when_below_limit():
     result = asyncio.run(task.run_once())
     assert set(selected) == set(active_users)
     assert result.data.get("diaries_created") == 3
+
+
+def _diary_query_database():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    return engine, session_factory
+
+
+def test_find_active_users_isolated_by_character_and_source_date():
+    engine, session_factory = _diary_query_database()
+    target_date = "2026-07-16"
+    session = session_factory()
+    try:
+        session.add(User(uuid="user-1", username="user-1", password="hash"))
+        session.add(
+            Conversation(
+                uuid="conversation-1",
+                user_id="user-1",
+                character_id="miku",
+                timestamp=datetime(2026, 7, 16, 12, 0),
+                source="user",
+                type="text",
+                content="hello",
+            )
+        )
+        session.add(
+            DynamicPost(
+                id="luotianyi-diary",
+                author_type="agent",
+                author_id="luotianyi",
+                owner_user_id="user-1",
+                visibility="private",
+                content="other character diary",
+                source_type="diary",
+                source_id="diary:luotianyi:user-1:2026-07-16",
+                status="published",
+                created_at=datetime(2026, 7, 16, 23, 59),
+            )
+        )
+        session.commit()
+
+        task = DiaryTask({"min_daily_conversations": 1}, character_id="miku")
+        task.database_manager = SimpleNamespace(get_sql_session=session_factory)
+        assert task._find_active_users(target_date) == ["user-1"]
+
+        session.add(
+            DynamicPost(
+                id="miku-diary",
+                author_type="agent",
+                author_id="miku",
+                owner_user_id="user-1",
+                visibility="private",
+                content="target diary",
+                source_type="diary",
+                source_id="diary:miku:user-1:2026-07-16",
+                status="published",
+                created_at=datetime(2026, 7, 17, 0, 1),
+            )
+        )
+        session.commit()
+
+        assert task._find_active_users(target_date) == []
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_diary_source_key_has_database_uniqueness():
+    engine, session_factory = _diary_query_database()
+    session = session_factory()
+    try:
+        session.add(User(uuid="user-1", username="user-1", password="hash"))
+        session.commit()
+        common = {
+            "author_type": "agent",
+            "author_id": "luotianyi",
+            "owner_user_id": "user-1",
+            "visibility": "private",
+            "content": "diary",
+            "source_type": "diary",
+            "source_id": "diary:luotianyi:user-1:2026-07-16",
+            "status": "published",
+        }
+        session.add(DynamicPost(id="diary-1", **common))
+        session.commit()
+        session.add(DynamicPost(id="diary-2", **common))
+
+        with pytest.raises(IntegrityError):
+            session.commit()
+    finally:
+        session.rollback()
+        session.close()
+        engine.dispose()
+
+
+def test_diary_migration_rejects_duplicate_source_keys_without_deleting_rows():
+    engine, session_factory = _diary_query_database()
+    session = session_factory()
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("DROP INDEX uq_dynamic_posts_diary_source")
+        session.add(User(uuid="user-1", username="user-1", password="hash"))
+        common = {
+            "author_type": "agent",
+            "author_id": "luotianyi",
+            "owner_user_id": "user-1",
+            "visibility": "private",
+            "content": "diary",
+            "source_type": "diary",
+            "source_id": "diary:luotianyi:user-1:2026-07-16",
+            "status": "published",
+        }
+        session.add_all(
+            [
+                DynamicPost(id="duplicate-diary-1", **common),
+                DynamicPost(id="duplicate-diary-2", **common),
+            ]
+        )
+        session.commit()
+
+        with pytest.raises(RuntimeError, match="duplicate diary source keys"):
+            _migrate_sqlite_schema(engine)
+
+        assert session.query(DynamicPost).filter_by(source_type="diary").count() == 2
+    finally:
+        session.close()
+        engine.dispose()

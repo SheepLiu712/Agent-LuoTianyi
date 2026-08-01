@@ -227,6 +227,26 @@ class DiaryCapability:
 
         # ── 准备上下文 ──
         target_date = diary_date or date.today().strftime("%Y-%m-%d")
+        try:
+            parsed_target_date = date.fromisoformat(target_date)
+        except (TypeError, ValueError):
+            return False, "日记日期格式无效", None
+        if parsed_target_date.isoformat() != target_date:
+            return False, "日记日期格式无效", None
+
+        source_id = self._diary_source_id(character_id, user_id, target_date)
+        dynamic_store = getattr(self.database_manager, "dynamic_store", None)
+        get_existing = getattr(dynamic_store, "get_dynamic_by_source", None)
+        if callable(get_existing):
+            existing = get_existing(
+                author_type="agent",
+                author_id=character_id,
+                source_type=self.diary_source_type,
+                source_id=source_id,
+            )
+            if existing is not None and existing.get("owner_user_id") == user_id:
+                return True, "日记已存在", existing
+
         user_name = self._get_user_name(user_id)
         user_description = self._get_user_description(user_id)
         user_preferences = self._get_user_preferences(user_id)
@@ -276,10 +296,11 @@ class DiaryCapability:
                 character_id=character_id,
                 content=diary_text,
                 source_type=self.diary_source_type,     # 标记为 "diary" 类型
-                source_id=None,                          # 非外部来源
+                source_id=source_id,
                 visibility="private",                    # 仅用户自己可见
                 owner_user_id=user_id,                   # 归属于该用户
                 allow_comment=False,                     # 日记不支持评论
+                idempotent_by_source=True,
             )
             if ok:
                 self.logger.info(f"Diary posted as dynamic for user={user_id} date={target_date}")
@@ -363,6 +384,10 @@ class DiaryCapability:
 
         return "\n".join(lines)
 
+    @staticmethod
+    def _diary_source_id(character_id: str, user_id: str, target_date: str) -> str:
+        return f"diary:{character_id}:{user_id}:{target_date}"
+
     # ────────────────────── 日记文本解析 ──────────────────────
 
     def _parse_diary_result(self, raw: str, target_date: Optional[str] = None) -> Optional[str]:
@@ -415,16 +440,21 @@ class DiaryCapability:
                     body_lines.append("")
                 continue
 
-            # 提取心情标签（支持中英文冒号）
-            if stripped.startswith("心情"):
-                mood = stripped[2:].lstrip("：:").strip()
-            elif stripped.startswith("正文：") or stripped == "正文":
+            mood_match = re.match(r"^心情\s*[：:]\s*(.*)$", stripped)
+            body_match = re.match(r"^正文(?:\s*[：:]\s*(.*))?$", stripped)
+            if mood_match:
+                mood = mood_match.group(1).strip()
+            elif body_match:
                 in_body = True
+                inline_body = (body_match.group(1) or "").strip()
+                if inline_body:
+                    body_lines.append(inline_body)
             else:
                 # 跳过「标题：」「摘要：」行——这些是旧版 prompt 的产物，
                 # 日记动态不需要单独展示标题和摘要
-                if not in_body and (stripped.startswith("标题：") or stripped.startswith("摘要：")):
+                if not in_body and re.match(r"^(标题|摘要)\s*[：:]", stripped):
                     continue
+                in_body = True
                 body_lines.append(stripped)
 
         body = "\n".join(body_lines).strip()

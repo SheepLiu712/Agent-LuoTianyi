@@ -30,7 +30,7 @@ import random
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, TYPE_CHECKING
 
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from src.utils.logger import get_logger
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
@@ -280,8 +280,19 @@ class DiaryTask(WorldTask):
                 existing_diary = (
                     sql_session.query(DynamicPost.owner_user_id)
                     .filter(DynamicPost.source_type == "diary")
-                    .filter(DynamicPost.created_at >= day_start)
-                    .filter(DynamicPost.created_at < day_end)
+                    .filter(DynamicPost.author_type == "agent")
+                    .filter(DynamicPost.author_id == self.character_id)
+                    .filter(DynamicPost.status == "published")
+                    .filter(
+                        or_(
+                            DynamicPost.source_id.endswith(f":{target_date}"),
+                            and_(
+                                DynamicPost.source_id.is_(None),
+                                DynamicPost.created_at >= day_start,
+                                DynamicPost.created_at < day_end,
+                            ),
+                        )
+                    )
                     .subquery()
                 )
 
@@ -289,7 +300,7 @@ class DiaryTask(WorldTask):
                 results = (
                     sql_session.query(
                         Conversation.user_id,
-                        func.count(Conversation.id).label("msg_count"),
+                        func.count(Conversation.uuid).label("msg_count"),
                     )
                     .filter(Conversation.timestamp >= day_start)
                     .filter(Conversation.timestamp < day_end)
@@ -297,7 +308,7 @@ class DiaryTask(WorldTask):
                     # 排除已有日记的用户——避免无效 LLM 调用
                     .filter(~Conversation.user_id.in_(sql_session.query(existing_diary.c.owner_user_id)))
                     .group_by(Conversation.user_id)
-                    .having(func.count(Conversation.id) >= self.min_daily_conversations)
+                    .having(func.count(Conversation.uuid) >= self.min_daily_conversations)
                     .all()
                 )
 
