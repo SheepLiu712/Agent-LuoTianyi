@@ -245,8 +245,14 @@ QLabel#dynamicsSectionLabel {
     color: {{TEXT_PRIMARY}};
 }
 
+QLabel#dynamicItemHeader {
+    font-weight: 700;
+    color: {{TEXT_PRIMARY}};
+}
+
 QLabel#dynamicItemPreview {
     color: {{TEXT_PRIMARY}};
+    font-size: 13px;
 }
 
 QDialog#dynamicsDialog QPushButton {
@@ -323,25 +329,4 @@ QDialog#dynamicEditor QTextEdit {
     border-radius: 6px;
     padding: 10px;
     font-size: 15px;
-}
-
-/* 动态列表项 */
-QLabel#dynamicItemHeader {
-    font-weight: 700;
-    color: #243447;
-}
-
-QLabel#dynamicItemPreview {
-    color: #334155;
-    font-size: 13px;
-}
-
-/* 浮动发布按钮 */
-QPushButton#addDynamicButton {
-    background: transparent;
-    border: none;
-    padding: 0;
-}
-QPushButton#addDynamicButton:hover {
-    background: transparent;
 }
