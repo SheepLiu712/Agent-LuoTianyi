@@ -25,6 +25,38 @@ DEFAULT_LLM_FAILURE_MAX_ATTEMPTS = 2
 MAX_LLM_FAILURE_ATTEMPTS = 3
 DEFAULT_LLM_FAILURE_RETRY_DELAY_SECONDS = 0.2
 MAX_LLM_FAILURE_RETRY_DELAY_SECONDS = 2.0
+TONE_MODIFIER_PREFIXES = (
+    "真的",
+    "真是",
+    "实在",
+    "简直",
+    "非常",
+    "十分",
+    "特别",
+    "格外",
+    "极其",
+    "超级",
+    "有点",
+    "有些",
+    "比较",
+    "稍微",
+    "略微",
+    "这么",
+    "那么",
+    "很",
+)
+TONE_MODIFIER_SUFFIXES = (
+    "的感觉",
+    "的情绪",
+    "的心情",
+    "情绪",
+    "心情",
+    "地",
+    "的",
+    "呢",
+    "啊",
+    "呀",
+)
 
 
 @dataclass
@@ -350,16 +382,45 @@ class MainChat:
     def _resolve_tone_label(self, normalized_tone: str) -> Optional[str]:
         """将归一化后的情绪标签解析为映射表中的正式情绪。
 
-        解析顺序：精确命中正式情绪 -> 别名表 -> 包含匹配（处理“有点伤心”“开心地”等带修饰的标签）。
+        只接受精确标签或白名单修饰词包裹的标签，避免把“不开心”反向匹配为“开心”。
         """
         if not normalized_tone:
             return DEFAULT_LLM_TONE.lower()
         if normalized_tone in self.llm_tone_to_tts_tone:
             return normalized_tone
         aliases = getattr(self, "llm_tone_aliases", {})
-        if normalized_tone in aliases:
-            return aliases[normalized_tone]
-        for key in sorted(self.llm_tone_to_tts_tone, key=len, reverse=True):
-            if key and (key in normalized_tone or normalized_tone in key):
-                return key
+        exact_alias = aliases.get(normalized_tone)
+        if exact_alias in self.llm_tone_to_tts_tone:
+            return exact_alias
+
+        undecorated_tone = self._strip_tone_modifiers(normalized_tone)
+        if undecorated_tone == normalized_tone:
+            return None
+
+        for alias in sorted(aliases, key=len, reverse=True):
+            if undecorated_tone == alias:
+                canonical_tone = aliases[alias]
+                if canonical_tone in self.llm_tone_to_tts_tone:
+                    return canonical_tone
+                return None
+        if undecorated_tone in self.llm_tone_to_tts_tone:
+            return undecorated_tone
         return None
+
+    @staticmethod
+    def _strip_tone_modifiers(tone: str) -> str:
+        stripped = tone
+        changed = True
+        while stripped and changed:
+            changed = False
+            for prefix in sorted(TONE_MODIFIER_PREFIXES, key=len, reverse=True):
+                if stripped.startswith(prefix):
+                    stripped = stripped[len(prefix):]
+                    changed = True
+                    break
+            for suffix in sorted(TONE_MODIFIER_SUFFIXES, key=len, reverse=True):
+                if stripped.endswith(suffix):
+                    stripped = stripped[:-len(suffix)]
+                    changed = True
+                    break
+        return stripped

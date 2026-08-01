@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
@@ -46,6 +48,9 @@ def build_main_chat_with_mapping() -> MainChat:
     main_chat.llm_tone_aliases = {
         "高兴": "开心",
         "快乐": "开心",
+        "开开心心": "开心",
+        "不开心": "伤心",
+        "不高兴": "伤心",
         "难过": "伤心",
     }
     return main_chat
@@ -108,13 +113,28 @@ def test_main_chat_tone_mapping_normalizes_brackets_and_punctuation():
     assert tts_tone == "happy"
 
 
-def test_main_chat_tone_mapping_fuzzy_matches_decorated_tone():
+@pytest.mark.parametrize(
+    ("label", "expected_expression", "expected_tone"),
+    [
+        ("有点伤心", "难过脸", "sad"),
+        ("开心地", "微笑脸", "happy"),
+        ("很开心", "微笑脸", "happy"),
+        ("很不开心", "难过脸", "sad"),
+        ("非常不高兴", "难过脸", "sad"),
+        ("真的特别开开心心呢", "微笑脸", "happy"),
+    ],
+)
+def test_main_chat_tone_mapping_resolves_only_safe_decorated_labels(
+    label,
+    expected_expression,
+    expected_tone,
+):
     main_chat = build_main_chat_with_mapping()
 
-    expression, tts_tone = main_chat._get_expressions_and_tts_tone("有点伤心")
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone(label)
 
-    assert expression == "难过脸"
-    assert tts_tone == "sad"
+    assert expression == expected_expression
+    assert tts_tone == expected_tone
 
 
 def test_main_chat_tone_mapping_maps_extreme_joy():
@@ -144,13 +164,15 @@ def test_main_chat_tone_mapping_maps_extreme_sadness():
     assert tts_tone == "sad"
 
 
-def test_main_chat_tone_mapping_fuzzy_matches_suffix_tone():
+@pytest.mark.parametrize("label", ["开心又伤心", "伤", "这是开心"])
+def test_main_chat_tone_mapping_ambiguous_or_partial_label_falls_back(label):
     main_chat = build_main_chat_with_mapping()
 
-    expression, tts_tone = main_chat._get_expressions_and_tts_tone("温柔地")
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone(label)
 
-    assert expression == "温柔脸"
-    assert tts_tone == "tender"
+    assert expression == "微笑脸"
+    assert tts_tone == "happy"
+    assert main_chat.logger.warnings
 
 
 def test_main_chat_tone_mapping_unknown_tone_falls_back_to_default():
