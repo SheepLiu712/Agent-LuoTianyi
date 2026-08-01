@@ -44,7 +44,7 @@ class InviteCode(Base):
     
     code = Column(String, primary_key=True)
     is_used = Column(Boolean, default=False)
-    disabled = Column(Boolean, default=False)
+    disabled = Column(Boolean, nullable=False, default=False, server_default=text("0"))
     created_at = Column(DateTime, default=datetime.now)
     used_at = Column(DateTime, nullable=True)
     user_id = Column(String, ForeignKey("users.uuid"), nullable=True, unique=True)
@@ -479,7 +479,25 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
             for row in connection.exec_driver_sql("PRAGMA table_info(invite_codes)").fetchall()
         }
         if invite_code_columns and "disabled" not in invite_code_columns:
-            connection.exec_driver_sql("ALTER TABLE invite_codes ADD COLUMN disabled BOOLEAN DEFAULT 0")
+            connection.exec_driver_sql(
+                "ALTER TABLE invite_codes ADD COLUMN disabled BOOLEAN NOT NULL DEFAULT 0"
+            )
+
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                name VARCHAR NOT NULL PRIMARY KEY,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        legacy_invite_migration = "2026-08-01-disable-legacy-invite-codes"
+        migration_claim = connection.exec_driver_sql(
+            "INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)",
+            (legacy_invite_migration,),
+        )
+        if migration_claim.rowcount == 1:
+            connection.exec_driver_sql("UPDATE invite_codes SET disabled = 1")
 
 
 def get_sql_db(): # Generator for FastAPI

@@ -453,17 +453,6 @@ async function putJson<T>(url: string, payload: unknown): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-async function deleteJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, {
-    method: 'DELETE',
-    credentials: 'same-origin',
-  });
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
-  }
-  return response.json() as Promise<T>;
-}
-
 function formatMs(value?: number) {
   if (value === undefined || Number.isNaN(value)) {
     return '-';
@@ -716,6 +705,49 @@ function usePolling<T>(url: string | null, intervalMs = 10000) {
       window.clearInterval(timer);
     };
   }, [url, intervalMs]);
+
+  return { data, error, loading };
+}
+
+function usePostPolling<T>(url: string | null, payload: unknown, intervalMs = 10000, refreshKey = 0) {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const payloadJson = JSON.stringify(payload);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    async function load() {
+      if (!url) {
+        setLoading(false);
+        setData(null);
+        return;
+      }
+      try {
+        const next = await postJson<T>(url, JSON.parse(payloadJson));
+        if (!cancelled) {
+          setData(next);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+    void load();
+    const timer = window.setInterval(load, intervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [url, payloadJson, intervalMs, refreshKey]);
 
   return { data, error, loading };
 }
@@ -1506,21 +1538,17 @@ function InviteCodesPage() {
   const [genStatus, setGenStatus] = useState<LocalActionStatus | null>(null);
   const [genBusy, setGenBusy] = useState(false);
 
-  const query = useMemo(() => {
-    const params = new URLSearchParams({ limit: '200' });
-    params.set('_', String(refreshNonce));
-    if (statusFilter) {
-      params.set('status', statusFilter);
-    }
-    if (searchQuery.trim()) {
-      params.set('search', searchQuery.trim());
-    }
-    return params.toString();
-  }, [refreshNonce, searchQuery, statusFilter]);
+  const queryPayload = useMemo(() => ({
+    limit: 200,
+    status: statusFilter || null,
+    search: searchQuery.trim() || null,
+  }), [searchQuery, statusFilter]);
 
-  const { data, error, loading } = usePolling<{ items: InviteCodeRow[]; total: number }>(
-    `/admin/api/invite-codes?${query}`,
+  const { data, error, loading } = usePostPolling<{ items: InviteCodeRow[]; total: number }>(
+    '/admin/api/invite-codes/query',
+    queryPayload,
     10000,
+    refreshNonce,
   );
   const rows = data?.items || [];
 
@@ -1539,7 +1567,7 @@ function InviteCodesPage() {
     setGenCodes([]);
     setGenStatus({ tone: 'info', message: '正在生成...' });
     try {
-      const result = await postJson<{ ok: boolean; codes: string[] }>('/admin/api/invite-codes', { count });
+      const result = await postJson<{ ok: boolean; codes: string[] }>('/admin/api/invite-codes/generate', { count });
       setGenCodes(result.codes);
       setGenStatus({ tone: 'success', message: `已生成 ${result.codes.length} 个邀请码` });
       setRefreshNonce((value) => value + 1);
@@ -1559,12 +1587,14 @@ function InviteCodesPage() {
     }
   }
 
-  async function toggleDisabled(row: InviteCodeRow) {
-    const action = row.disabled ? 'enable' : 'disable';
+  async function disableCode(row: InviteCodeRow) {
+    if (row.disabled) {
+      return;
+    }
     try {
       await postJson<{ ok: boolean; message: string }>(
-        `/admin/api/invite-codes/${encodeURIComponent(row.code)}/${action}`,
-        {},
+        '/admin/api/invite-codes/disable',
+        { code: row.code },
       );
       setRefreshNonce((value) => value + 1);
     } catch (err) {
@@ -1577,7 +1607,7 @@ function InviteCodesPage() {
       return;
     }
     try {
-      await deleteJson<{ ok: boolean; message: string }>(`/admin/api/invite-codes/${encodeURIComponent(row.code)}`);
+      await postJson<{ ok: boolean; message: string }>('/admin/api/invite-codes/delete', { code: row.code });
       setRefreshNonce((value) => value + 1);
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err));
@@ -1586,7 +1616,7 @@ function InviteCodesPage() {
 
   return (
     <>
-      <PageHeader title="邀请码管理" subtitle="生成、查看、禁用和删除用户注册邀请码" />
+      <PageHeader title="邀请码管理" subtitle="生成、查看、永久禁用和删除用户注册邀请码" />
       <StatusBar loading={loading} error={error} />
       <section className="metric-grid">
         <MetricCard title="当前列表" value={formatNumber(rows.length)} detail={data?.total !== undefined ? `共 ${formatNumber(data.total)} 条` : '当前页'} />
@@ -1665,7 +1695,9 @@ function InviteCodesPage() {
                 <td>{row.username || row.user_id || '-'}</td>
                 <td>
                   <div className="row-actions">
-                    <button onClick={() => toggleDisabled(row)}>{row.disabled ? '启用' : '禁用'}</button>
+                    <button onClick={() => disableCode(row)} disabled={row.disabled}>
+                      {row.disabled ? '已禁用' : '禁用'}
+                    </button>
                     <button onClick={() => deleteCode(row)} disabled={row.is_used || row.disabled}>
                       删除
                     </button>
