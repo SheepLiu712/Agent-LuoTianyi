@@ -65,6 +65,7 @@
         "tts": {
             "luotianyi": {
                 "character_name": "luotianyi",
+                "speaker": "luotianyi",
                 "language": "zh",
                 "onnx_model_dir": "res/tts/lty_custom_onnx_model",
                 "reference_audio_dir": "res/tts/luotianyi/reference_audio",

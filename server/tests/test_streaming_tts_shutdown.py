@@ -86,7 +86,8 @@ async def test_speaking_worker_stop_signals_stream_then_waits_before_backend_sto
     class FakeModule:
         tts_server = server
 
-        def stream_synthesize_speech_with_tone(self, _text, _tone):
+        def stream_synthesize_speech_with_tone(self, _text, _tone, *, speaker=None):
+            assert speaker == "luotianyi"
             try:
                 started.set()
                 release.wait(timeout=2)
@@ -244,7 +245,8 @@ def test_partial_speech_construction_stops_already_started_tts(monkeypatch):
 
     calls = 0
 
-    def init_module(_config):
+    def init_module(_config, *, tts_server=None):
+        _ = tts_server
         nonlocal calls
         calls += 1
         if calls == 2:
@@ -254,7 +256,12 @@ def test_partial_speech_construction_stops_already_started_tts(monkeypatch):
     monkeypatch.setattr(speech_module, "init_tts_module", init_module)
 
     with pytest.raises(RuntimeError, match="second TTS failed"):
-        SpeechCapability({"first": {}, "second": {}})
+        SpeechCapability(
+            {
+                "first": {"server_config_path": "first.yaml"},
+                "second": {"server_config_path": "second.yaml"},
+            }
+        )
 
     assert events == ["stop_requested", "backend_stopped"]
 

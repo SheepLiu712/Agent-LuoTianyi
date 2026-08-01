@@ -174,3 +174,10 @@ pip install -e D:\GSV-TTS-Lite
 
 - 音色（ge）固定为 speaker 配置的 `spk_audio_path`（叙述的参考音频）；tone 语气切换通过 prompt 覆盖实现（风格变化，音色不变）——9 个参考音频均为洛天依本人声音，效果一致
 - 流式：`MultiSpeakerTTS.infer_stream` 已升级为 **token 级真流式**（gsv-tts-lite `agentluotts` 分支 commit `bb5a6ef`），首包延迟与 `TTS.infer_stream` 一致
+
+## 8. 运行时所有权加固（2026-08-01）
+
+- `capabilities.tts.<character>.speaker` 定义显式的 character 到 speaker 映射；业务入口 `say` 和 `say_stream` 都会将该值传到底层 worker。
+- TTSServer 由 `(backend, 规范化 server_config_path, suppress_worker_output, trim_startup_memory)` 唯一标识。多个角色只有键完全相同时才共享一个 worker；角色 TTSModule 仅保留 tone 和参考音频等轻量配置。
+- 初始化任一角色失败会回收此前已经启动的所有独立 worker；共享 worker 在 stop/retry 中只处理一次，停止操作保持幂等。
+- fake 自动化覆盖路由、共享所有权、不同 worker flags、部分失败回滚与重复停止。真实双 speaker 音色、20 次 restart、PID/VRAM 和首包延迟仍是部署环境的发布门槛，未由本地测试替代。

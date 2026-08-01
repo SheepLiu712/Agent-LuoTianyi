@@ -1,9 +1,37 @@
-import os
 import json
+import os
 from typing import Dict, Any, Generator, Optional
+
 from src.utils.logger import get_logger
 from src.utils.asyncio_helpers import run_sync_owned
 from src.capabilities.speech.tts_server import TTSServer
+
+
+SUPPORTED_TTS_BACKENDS = {"gsv_tts", "gsv-tts-lite", "gsv_tts_lite"}
+
+
+def get_tts_server_key(tts_config: Dict[str, Any]) -> tuple[str, str, bool, bool]:
+    """Return the worker ownership key for a character TTS configuration."""
+    backend = str(tts_config.get("backend", "gsv_tts")).strip().lower()
+    if backend not in SUPPORTED_TTS_BACKENDS:
+        raise ValueError(f"Unsupported TTS backend: {backend}")
+
+    configured_path = tts_config.get(
+        "server_config_path",
+        "res/tts/luotianyi/tts_infer.yaml",
+    )
+    if not isinstance(configured_path, str) or not configured_path.strip():
+        raise ValueError("server_config_path must be a non-empty string")
+    expanded_path = os.path.expandvars(os.path.expanduser(configured_path))
+    normalized_path = os.path.normcase(
+        os.path.realpath(os.path.abspath(expanded_path))
+    )
+    return (
+        "gsv_tts",
+        normalized_path,
+        bool(tts_config.get("suppress_worker_output", True)),
+        bool(tts_config.get("trim_startup_memory", True)),
+    )
 
 class ReferenceAudio:
     def __init__(self, audio_path: str, lyrics: str) -> None:
@@ -202,19 +230,30 @@ class TTSModule:
         return base64.b64encode(audio_bytes).decode("utf-8")
 
 
-def init_tts_module(tts_config: Dict[str, Any]) -> TTSModule:
-    server_config_path = tts_config.get("server_config_path", "res/tts/luotianyi/tts_infer.yaml")
-    tts_server = TTSServer(
-        config_path=server_config_path,
-        suppress_worker_output=tts_config.get("suppress_worker_output", True),
-        trim_startup_memory=tts_config.get("trim_startup_memory", True),
-    )
+def init_tts_module(
+    tts_config: Dict[str, Any],
+    *,
+    tts_server: Optional[TTSServer] = None,
+) -> TTSModule:
+    """Create a lightweight character module, starting a worker only if needed."""
+    server_key = get_tts_server_key(tts_config)
+    owns_server = tts_server is None
+    if tts_server is None:
+        tts_server = TTSServer(
+            config_path=server_key[1],
+            suppress_worker_output=server_key[2],
+            trim_startup_memory=server_key[3],
+        )
     try:
-        tts_server.start()
+        if owns_server:
+            tts_server.start()
         return TTSModule(tts_config=tts_config, tts_server=tts_server)
     except BaseException:
-        try:
-            tts_server.stop()
-        except Exception as error:
-            get_logger(__name__).error(f"TTS module initialization rollback failed: {error}")
+        if owns_server:
+            try:
+                tts_server.stop()
+            except Exception as error:
+                get_logger(__name__).error(
+                    f"TTS module initialization rollback failed: {error}"
+                )
         raise

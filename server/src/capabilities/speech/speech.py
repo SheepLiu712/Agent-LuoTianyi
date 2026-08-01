@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Generator, Dict
+from typing import Any, Generator, Dict
 
-from src.capabilities.speech.tts_module import init_tts_module, TTSModule
+from src.capabilities.speech.tts_module import (
+    TTSModule,
+    get_tts_server_key,
+    init_tts_module,
+)
 from src.utils.asyncio_helpers import (
     DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
     run_sync_owned,
@@ -19,14 +23,29 @@ class SpeechCapability:
         self.logger = get_logger(__name__)
         self.tts_config = config
         self.tts_module: Dict[str, TTSModule] = {}
+        self._speaker_by_character: Dict[str, str] = {}
         self._stop_lock = asyncio.Lock()
         self._stopped_server_ids: set[int] = set()
         self._stop_signaled_server_ids: set[int] = set()
         self._stop_tasks: dict[int, asyncio.Task] = {}
         self.stop_timeout_seconds = DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS
+        servers_by_key: dict[tuple[str, str, bool, bool], Any] = {}
         try:
             for character, tts_config in self.tts_config.items():
-                self.tts_module[character] = init_tts_module(tts_config)
+                if not isinstance(tts_config, dict):
+                    raise ValueError(f"TTS config for '{character}' must be an object")
+                speaker = tts_config.get("speaker", character)
+                if not isinstance(speaker, str) or not speaker.strip():
+                    raise ValueError(f"TTS speaker for '{character}' must be a non-empty string")
+
+                server_key = get_tts_server_key(tts_config)
+                module = init_tts_module(
+                    tts_config,
+                    tts_server=servers_by_key.get(server_key),
+                )
+                servers_by_key.setdefault(server_key, module.tts_server)
+                self.tts_module[character] = module
+                self._speaker_by_character[character] = speaker.strip()
         except BaseException:
             self._abort_initialization()
             raise
@@ -50,7 +69,12 @@ class SpeechCapability:
         if character not in self.tts_module:
             raise ValueError(f"TTS module for character '{character}' is not initialized.")
         character_tts_module: TTSModule = self.tts_module[character]
-        audio_bytes = await character_tts_module.synthesize_speech_with_tone(text, tone)
+        speaker = getattr(self, "_speaker_by_character", {}).get(character, character)
+        audio_bytes = await character_tts_module.synthesize_speech_with_tone(
+            text,
+            tone,
+            speaker=speaker,
+        )
         return character_tts_module.encode_audio_to_base64(audio_bytes)
 
     def say_stream(self, character: str, text: str, tone: str) -> Generator[str, None, None]:
@@ -66,7 +90,12 @@ class SpeechCapability:
             raise ValueError(f"TTS module for character '{character}' is not initialized.")
         
         character_tts_module: TTSModule = self.tts_module[character]
-        for chunk in character_tts_module.stream_synthesize_speech_with_tone(text, tone):
+        speaker = getattr(self, "_speaker_by_character", {}).get(character, character)
+        for chunk in character_tts_module.stream_synthesize_speech_with_tone(
+            text,
+            tone,
+            speaker=speaker,
+        ):
             yield character_tts_module.encode_audio_to_base64(chunk)
 
     def request_stop(self) -> None:
