@@ -16,6 +16,15 @@ class NoopRedis:
     pass
 
 
+def _create_event(event_id: str) -> None:
+    db = get_sql_session()
+    try:
+        db.add(Event(id=event_id, event_type="general", title=event_id))
+        db.commit()
+    finally:
+        db.close()
+
+
 def test_init_sql_db_migrates_existing_events_table_with_character_column(tmp_path):
     db_path = tmp_path / "legacy.db"
     conn = sqlite3.connect(db_path)
@@ -172,6 +181,7 @@ def test_event_store_due_events_are_filtered_by_character(tmp_path):
 def test_event_notification_is_scoped_by_character(tmp_path):
     init_sql_db(str(tmp_path), "events.db")
     store = EventStore({}, get_sql_session, NoopRedis())
+    _create_event("event-1")
 
     store.mark_notified("event-1", "user-1", "day_of_event", "luotianyi")
 
@@ -191,6 +201,7 @@ def test_event_notification_is_scoped_by_character(tmp_path):
 def test_event_notification_claim_is_atomic_and_releasable(tmp_path):
     init_sql_db(str(tmp_path), "events.db")
     store = EventStore({}, get_sql_session, NoopRedis())
+    _create_event("event-claim")
 
     assert store.try_claim_notification(
         "event-claim", "user-1", "day_of_event", "luotianyi"
