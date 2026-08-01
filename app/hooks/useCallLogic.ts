@@ -36,8 +36,10 @@ export function useCallLogic(
     recorderRef.current = recorder;
     try {
       await recorder.start(({ audio }) => {
-        const callSeq = audioSeqRef.current++;
-        transportRef.current?.appendAudio(audio, callSeq);
+        const callSeq = audioSeqRef.current;
+        if (transportRef.current?.appendAudio(audio, callSeq)) {
+          audioSeqRef.current += 1;
+        }
       }, (recordingError) => {
         addDebugTrace('call_audio', 'pcm recorder capture failed', recordingError);
         setError(recordingError.message);

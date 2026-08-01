@@ -32,8 +32,8 @@ class SystemRuntime:
     capability_manager: CapabilityManager
     chat_session_manager: ChatSessionManager
     llm_service: LLMService
-    realtime_dialogue_service: RealtimeDialogueService
     observability: ObservabilityService
+    realtime_dialogue_service: RealtimeDialogueService | None = None
     owns_observability: bool = field(default=True)
     _shutdown_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _shutdown_complete: bool = field(default=False, init=False, repr=False)
@@ -199,7 +199,11 @@ class SystemRuntime:
     def _wire_dependencies(self) -> None:
         """把顶层模块依赖分发给各运行时模块。"""
         self.llm_service.ensure_dependencies()
-        self.realtime_dialogue_service.ensure_dependencies()
+        call_manager = getattr(self.chat_session_manager, "call_stream_manager", None)
+        if getattr(call_manager, "enabled", False):
+            if self.realtime_dialogue_service is None:
+                raise RuntimeError("realtime dialogue service is required when calls are enabled")
+            self.realtime_dialogue_service.ensure_dependencies()
         self.database_manager.wire_dependencies(llm_service=self.llm_service)
         self.capability_manager.wire_dependencies(
             database_manager=self.database_manager,
@@ -301,9 +305,14 @@ class SystemRuntime:
             "capability_manager": self.capability_manager,
             "chat_session_manager": self.chat_session_manager,
             "llm_service": self.llm_service,
-            "realtime_dialogue_service": self.realtime_dialogue_service,
             "observability": self.observability,
         }
+        if getattr(
+            getattr(self.chat_session_manager, "call_stream_manager", None),
+            "enabled",
+            False,
+        ):
+            required["realtime_dialogue_service"] = self.realtime_dialogue_service
         missing = [name for name, value in required.items() if value is None]
         if missing:
             raise RuntimeError(f"SystemRuntime dependencies are missing: {', '.join(missing)}")

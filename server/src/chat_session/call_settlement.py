@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any
 
 from src.chat_session.call_models import CallExitCode
+from src.utils.asyncio_helpers import run_sync_owned
 from src.utils.logger import get_logger
 
 
@@ -53,9 +54,8 @@ class CallSettlementCoordinator:
             while self._memory_batch_index < target_count:
                 end = min(self._memory_batch_index + 10, target_count)
                 batch = turns[self._memory_batch_index:end]
-                self._memory_batch_index = end
                 if not batch:
-                    continue
+                    break
                 dialogue = "\n".join(f"[{item['speaker']}] {item['text']}" for item in batch)
                 try:
                     runtime = self.agent_runtime.get_character_runtime(self.character_id)
@@ -68,6 +68,10 @@ class CallSettlementCoordinator:
                 except Exception as exc:
                     self._memory_error = str(exc)[:500]
                     self.logger.exception("call memory_write failed: call_id=%s", call_id)
+                    break
+                else:
+                    self._memory_batch_index = end
+                    self._memory_error = None
 
     async def process_after_end(
         self,
@@ -81,7 +85,7 @@ class CallSettlementCoordinator:
         """独立更新摘要、记忆和画像状态；任一项失败不阻塞其他项。"""
         self._active_call_id = call_id
         self._active_user_id = user_id
-        state = await asyncio.to_thread(self.call_store.get_postprocess_state, call_id)
+        state = await run_sync_owned(self.call_store.get_postprocess_state, call_id)
         if state and state.get("memory_status") != "success":
             await self.write_memory_incremental(call_id=call_id, user_id=user_id, turns=turns, final=True)
         memory_ok = self._memory_error is None
@@ -97,7 +101,7 @@ class CallSettlementCoordinator:
                 memory_ok = False
                 self._memory_error = str(exc)[:500]
                 self.logger.exception("call event memory failed: call_id=%s", call_id)
-        await asyncio.to_thread(
+        await run_sync_owned(
             self.call_store.update_postprocess_status,
             call_id,
             "memory",
@@ -115,12 +119,12 @@ class CallSettlementCoordinator:
         if not state or state.get("summary_status") != "success":
             try:
                 summary = await self._generate_summary(turns, duration_seconds)
-                await asyncio.to_thread(self.call_store.update_summary, call_id, summary, "success", None)
+                await run_sync_owned(self.call_store.update_summary, call_id, summary, "success", None)
                 self._record_event("call.summary_completed", metadata={"summary_length": len(summary)})
             except Exception as exc:
                 summary_error = str(exc)[:500]
                 self.logger.exception("call summary failed: call_id=%s", call_id)
-                await asyncio.to_thread(self.call_store.update_summary, call_id, "", "failed", summary_error)
+                await run_sync_owned(self.call_store.update_summary, call_id, "", "failed", summary_error)
                 self._record_event("call.summary_failed", error={"message": summary_error or "summary_failed"})
         else:
             summary = str(state.get("summary") or "")
@@ -142,7 +146,7 @@ class CallSettlementCoordinator:
         else:
             profile_ok = True
         profile_status = "skipped" if exit_code != int(CallExitCode.NORMAL) else ("success" if profile_ok else "failed")
-        await asyncio.to_thread(
+        await run_sync_owned(
             self.call_store.update_postprocess_status,
             call_id,
             "profile",

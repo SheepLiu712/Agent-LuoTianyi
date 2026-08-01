@@ -208,12 +208,19 @@
             }
         },
         "call_stream_manager": {
+            "enabled": false,
             "max_concurrent_calls": 5,
             "request_delay_seconds": 2,
             "reconnect_grace_seconds": 5,
-            "heartbeat_timeout_seconds": 5,
+            "heartbeat_timeout_seconds": 30,
             "playback_stop_ack_timeout_seconds": 3,
             "playback_complete_min_timeout_seconds": 15,
+            "audio_queue_maxsize": 64,
+            "max_audio_packet_bytes": 131072,
+            "max_audio_packets_per_second": 50,
+            "audio_reorder_window": 16,
+            "audio_reorder_wait_seconds": 0.5,
+            "shutdown_timeout_seconds": 30,
             "proactive_delay_seconds": 2,
             "memory_pool_limit": 10,
             "context": {
@@ -236,6 +243,7 @@
         },
         "global_speaking_worker": {
             "queue_maxsize": 512,
+            "max_stream_jobs": 64,
             "terminal_send_max_attempts": 3,
             "terminal_send_retry_delay_seconds": 0.05,
             "shutdown_timeout_seconds": 30

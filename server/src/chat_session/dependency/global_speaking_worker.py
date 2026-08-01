@@ -82,6 +82,27 @@ class SpeakingJob:
         return max(count / 200 * 60, 0.3)
 
 
+class _SpeakingQueueView:
+    """Compatibility view over the per-stream queues and active job."""
+
+    def __init__(self, worker: "GlobalSpeakingWorker") -> None:
+        self._worker = worker
+
+    @property
+    def maxsize(self) -> int:
+        return self._worker._max_total_jobs
+
+    def qsize(self) -> int:
+        return self._worker._total_jobs
+
+    async def join(self) -> None:
+        async with self._worker._condition:
+            await self._worker._condition.wait_for(
+                lambda: self._worker._total_jobs == 0
+                and self._worker._active_job is None
+            )
+
+
 class GlobalSpeakingWorker:
     """单 GPU TTS worker：每流 FIFO，流头按等待/估算时长动态选择。"""
 
@@ -121,6 +142,7 @@ class GlobalSpeakingWorker:
             1,
             min(self._max_total_jobs, int(self.config.get("max_stream_jobs", 64))),
         )
+        self.queue = _SpeakingQueueView(self)
 
     def start_if_needed(self):
         if self._stopping:
@@ -244,7 +266,9 @@ class GlobalSpeakingWorker:
                     if asyncio.iscoroutine(result):
                         await result
             finally:
-                self._active_job = None
+                async with self._condition:
+                    self._active_job = None
+                    self._condition.notify_all()
 
     async def _send_terminal(
         self,

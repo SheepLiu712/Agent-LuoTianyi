@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import json
 import time
 import uuid
+from collections import deque
 from dataclasses import replace
 from datetime import datetime
 from typing import Any
@@ -15,9 +18,14 @@ from src.chat_session.call_response_parser import CallResponseParser
 from src.chat_session.call_settlement import CallSettlementCoordinator
 from src.chat_session.dependency.global_speaking_worker import GlobalSpeakingWorker, SpeakingJob
 from src.system.user_interface.types import WSEventType, WSMessage
+from src.utils.asyncio_helpers import run_sync_owned
 from src.utils.realtime_dialogue import RealtimeToolDefinition
 from src.utils.realtime_dialogue.models import RealtimeEvent, RealtimeEventType
 from src.utils.logger import get_logger
+
+
+class CallDeliveryError(ConnectionError):
+    pass
 
 
 class CallStream:
@@ -76,7 +84,32 @@ class CallStream:
         self._playback_ack_tasks: dict[str, asyncio.Task] = {}
         self._sent_audio_ids: set[str] = set()
         self._reconnect_deadline: float | None = None
-        self._audio_tasks: set[asyncio.Task] = set()
+        self._reconnect_from_state: CallState | None = None
+        self._reconnect_completed = asyncio.Event()
+        self._reconnect_completed.set()
+        self._audio_queue: asyncio.Queue[tuple[int, str]] = asyncio.Queue(
+            maxsize=max(1, int(self.config.get("audio_queue_maxsize", 64)))
+        )
+        self._audio_worker_task: asyncio.Task | None = None
+        self._audio_reorder_buffer: dict[int, str] = {}
+        self._audio_gap_deadline: float | None = None
+        self._audio_arrival_times: deque[float] = deque()
+        self._max_audio_packet_bytes = max(
+            1,
+            int(self.config.get("max_audio_packet_bytes", 128 * 1024)),
+        )
+        self._max_audio_packets_per_second = max(
+            1,
+            int(self.config.get("max_audio_packets_per_second", 50)),
+        )
+        self._audio_reorder_window = max(
+            1,
+            int(self.config.get("audio_reorder_window", 16)),
+        )
+        self._audio_reorder_wait_seconds = max(
+            0.05,
+            float(self.config.get("audio_reorder_wait_seconds", 0.5)),
+        )
         self._parser = CallResponseParser(call_id)
         self._context_builder = CallContextBuilder(
             agent_runtime=agent_runtime,
@@ -94,6 +127,8 @@ class CallStream:
             observability=observability,
         )
         self._postprocess_task: asyncio.Task | None = None
+        self._postprocess_args: dict[str, Any] | None = None
+        self._memory_tasks: set[asyncio.Task] = set()
         self._proactive_task: asyncio.Task | None = None
         self._pending_function_calls: set[str] = set()
 
@@ -118,70 +153,99 @@ class CallStream:
             "call.requested",
             metadata={"accept_after_ms": int(float(self.config.get("request_delay_seconds", 2)) * 1000)},
         )
-        delay_task = asyncio.create_task(asyncio.sleep(float(self.config.get("request_delay_seconds", 2))))
         self._prepare_task = asyncio.create_task(self._prepare_provider())
+        ready_task = asyncio.create_task(self._wait_until_ready())
         hangup_task = asyncio.create_task(self._hangup_event.wait())
         try:
-            while True:
-                done, _ = await asyncio.wait(
-                    {delay_task, self._prepare_task, hangup_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if hangup_task in done:
-                    await self._cancel_task(self._prepare_task)
+            await asyncio.wait(
+                {ready_task, hangup_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if self._hangup_event.is_set():
+                await self._cancel_task(ready_task)
+                await self._cancel_task(self._prepare_task)
+                await self.end(CallExitCode.HANGUP_BEFORE_CONNECTED, "user_hangup_before_connected")
+                return
+            try:
+                await ready_task
+            except Exception as exc:
+                self.logger.exception("call provider preparation failed: call_id=%s", self.call_id)
+                if self._hangup_event.is_set():
                     await self.end(CallExitCode.HANGUP_BEFORE_CONNECTED, "user_hangup_before_connected")
-                    return
-                if self._prepare_task in done:
-                    try:
-                        await self._prepare_task
-                    except Exception as exc:
-                        self.logger.exception("call provider preparation failed: call_id=%s", self.call_id)
-                        if self._hangup_event.is_set():
-                            await self.end(CallExitCode.HANGUP_BEFORE_CONNECTED, "user_hangup_before_connected")
-                        else:
-                            await self.end(CallExitCode.REALTIME_PROVIDER_FAILED, str(exc))
-                        return
-                    if delay_task in done:
-                        break
-                if delay_task in done:
-                    if self._prepare_task.done():
-                        await self._prepare_task
-                        break
+                else:
+                    await self.end(CallExitCode.REALTIME_PROVIDER_FAILED, str(exc))
+                return
         finally:
-            if not delay_task.done():
-                delay_task.cancel()
-            if not hangup_task.done():
-                hangup_task.cancel()
+            await self._cancel_task(ready_task)
+            await self._cancel_task(hangup_task)
 
-        async with self._state_lock:
-            if self.state != CallState.REQUESTING:
+        activation_failed = False
+        while True:
+            await self._wait_for_preconnect_reconnect()
+            retry_after_reconnect = False
+            async with self._end_lock:
+                async with self._state_lock:
+                    if (
+                        self.state == CallState.RECONNECTING
+                        and self._reconnect_from_state == CallState.REQUESTING
+                    ):
+                        retry_after_reconnect = True
+                    elif self.state != CallState.REQUESTING:
+                        return
+                    else:
+                        connected_at = datetime.now()
+                        created = await run_sync_owned(
+                            self.call_store.create_active_session,
+                            call_id=self.call_id,
+                            user_id=self.user_id,
+                            character_id=self.character_id,
+                            requested_at=self.requested_at,
+                            connected_at=connected_at,
+                        )
+                        if not created:
+                            activation_failed = True
+                        else:
+                            self.connected_at = connected_at
+                            self._transition(CallState.ACTIVE, expected={CallState.REQUESTING})
+                            self._memory_pool = CallMemoryPool(
+                                session=self.session,
+                                limit=int(self.config.get("memory_pool_limit", 10)),
+                            )
+                            self._audio_worker_task = asyncio.create_task(self._run_audio_worker())
+                            self.provider_task = asyncio.create_task(self._read_provider_events())
+                if retry_after_reconnect:
+                    continue
+                if not activation_failed:
+                    await self._send_event(
+                        WSEventType.CALL_CONNECTED,
+                        {"call_id": self.call_id, "connected_at": self.connected_at.isoformat()},
+                    )
+                    self._record_call_event(
+                        "call.connected",
+                        duration_ms=(self.connected_at - self.requested_at).total_seconds() * 1000,
+                    )
+            break
+        if activation_failed:
+            await self.end(CallExitCode.INTERNAL_ERROR, "call_session_create_failed")
+
+    async def _wait_for_preconnect_reconnect(self) -> None:
+        while True:
+            async with self._state_lock:
+                waiting = (
+                    self.state == CallState.RECONNECTING
+                    and self._reconnect_from_state == CallState.REQUESTING
+                )
+            if not waiting:
                 return
-            self.connected_at = datetime.now()
-            created = await asyncio.to_thread(
-                self.call_store.create_active_session,
-                call_id=self.call_id,
-                user_id=self.user_id,
-                character_id=self.character_id,
-                requested_at=self.requested_at,
-                connected_at=self.connected_at,
-            )
-            if not created:
-                await self.end(CallExitCode.INTERNAL_ERROR, "call_session_create_failed")
-                return
-            self._transition(CallState.ACTIVE, expected={CallState.REQUESTING})
-            self._memory_pool = CallMemoryPool(
-                session=self.session,
-                limit=int(self.config.get("memory_pool_limit", 10)),
-            )
-        await self._send_event(
-            WSEventType.CALL_CONNECTED,
-            {"call_id": self.call_id, "connected_at": self.connected_at.isoformat()},
+            await self._reconnect_completed.wait()
+
+    async def _wait_until_ready(self) -> None:
+        if self._prepare_task is None:
+            raise RuntimeError("call provider preparation was not started")
+        await asyncio.gather(
+            asyncio.sleep(float(self.config.get("request_delay_seconds", 2))),
+            self._prepare_task,
         )
-        self._record_call_event(
-            "call.connected",
-            duration_ms=(self.connected_at - self.requested_at).total_seconds() * 1000,
-        )
-        self.provider_task = asyncio.create_task(self._read_provider_events())
 
     async def _prepare_provider(self) -> None:
         context = await self._context_builder.build(user_id=self.user_id, character_id=self.character_id)
@@ -212,10 +276,33 @@ class CallStream:
             if self.state != CallState.ACTIVE:
                 return
             audio = payload.get("audio")
-            if isinstance(audio, str) and audio:
-                task = asyncio.create_task(self._append_audio(int(payload.get("seq", 0)), audio))
-                self._audio_tasks.add(task)
-                task.add_done_callback(self._audio_tasks.discard)
+            try:
+                seq = int(payload.get("seq"))
+            except (TypeError, ValueError):
+                await self._reject_audio("INVALID_AUDIO_SEQUENCE", "audio seq must be an integer")
+                return
+            if seq < 0 or not isinstance(audio, str) or not audio:
+                await self._reject_audio("INVALID_AUDIO_PACKET", "audio packet is invalid")
+                return
+            if not self._accept_audio_rate():
+                await self._reject_audio("AUDIO_RATE_LIMIT", "audio packet rate exceeded")
+                return
+            max_encoded_length = 4 * ((self._max_audio_packet_bytes + 2) // 3)
+            if len(audio) > max_encoded_length:
+                await self._reject_audio("AUDIO_PACKET_TOO_LARGE", "audio packet is too large")
+                return
+            try:
+                decoded_size = len(base64.b64decode(audio, validate=True))
+            except (binascii.Error, ValueError):
+                await self._reject_audio("INVALID_AUDIO_PACKET", "audio must be valid base64")
+                return
+            if decoded_size > self._max_audio_packet_bytes:
+                await self._reject_audio("AUDIO_PACKET_TOO_LARGE", "audio packet is too large")
+                return
+            try:
+                self._audio_queue.put_nowait((seq, audio))
+            except asyncio.QueueFull:
+                await self._reject_audio("AUDIO_OVERLOADED", "audio input queue is full")
             return
         if event.event_type == WSEventType.CALL_HANGUP.value:
             await self.hangup()
@@ -227,19 +314,110 @@ class CallStream:
             await self._playback_stopped(payload)
             return
 
-    async def _append_audio(self, seq: int, audio: str) -> None:
-        if self.state != CallState.ACTIVE or self.session is None:
-            return
+    def _accept_audio_rate(self) -> bool:
+        now = time.monotonic()
+        while self._audio_arrival_times and now - self._audio_arrival_times[0] >= 1.0:
+            self._audio_arrival_times.popleft()
+        if len(self._audio_arrival_times) >= self._max_audio_packets_per_second:
+            return False
+        self._audio_arrival_times.append(now)
+        return True
+
+    async def _reject_audio(self, code: str, message: str) -> None:
+        await self._send_event(
+            WSEventType.CALL_ERROR,
+            {"call_id": self.call_id, "code": code, "message": message},
+        )
+        self._record_call_event(
+            "call.audio_rejected",
+            error={"code": code, "message": message},
+            metadata={"queue_size": self._audio_queue.qsize()},
+        )
+
+    async def _run_audio_worker(self) -> None:
+        try:
+            while self.state in {CallState.ACTIVE, CallState.RECONNECTING}:
+                timeout = (
+                    max(0.0, self._audio_gap_deadline - time.monotonic())
+                    if self._audio_gap_deadline is not None
+                    else None
+                )
+                try:
+                    if timeout is None:
+                        seq, audio = await self._audio_queue.get()
+                    else:
+                        seq, audio = await asyncio.wait_for(
+                            self._audio_queue.get(),
+                            timeout=timeout,
+                        )
+                except asyncio.TimeoutError:
+                    buffered = sorted(self._audio_reorder_buffer)
+                    await self._reject_audio(
+                        "AUDIO_SEQUENCE_GAP",
+                        f"missing audio sequence {self._next_audio_seq}",
+                    )
+                    self.logger.warning(
+                        "call audio reorder timeout: call_id=%s expected=%s buffered=%s",
+                        self.call_id,
+                        self._next_audio_seq,
+                        buffered,
+                    )
+                    if buffered:
+                        self._next_audio_seq = buffered[0]
+                        resumed = self._audio_reorder_buffer.pop(
+                            self._next_audio_seq
+                        )
+                        await self._append_audio_in_order(resumed)
+                        self._next_audio_seq += 1
+                        while self._next_audio_seq in self._audio_reorder_buffer:
+                            resumed = self._audio_reorder_buffer.pop(
+                                self._next_audio_seq
+                            )
+                            await self._append_audio_in_order(resumed)
+                            self._next_audio_seq += 1
+                    self._audio_gap_deadline = (
+                        time.monotonic() + self._audio_reorder_wait_seconds
+                        if self._audio_reorder_buffer
+                        else None
+                    )
+                    continue
+
+                try:
+                    await self._process_audio_packet(seq, audio)
+                finally:
+                    self._audio_queue.task_done()
+        except asyncio.CancelledError:
+            raise
+
+    async def _process_audio_packet(self, seq: int, audio: str) -> None:
         if seq < self._next_audio_seq:
             return
         if seq > self._next_audio_seq:
-            self.logger.warning(
-                "call audio sequence gap: call_id=%s expected=%s got=%s",
-                self.call_id,
-                self._next_audio_seq,
-                seq,
-            )
-        self._next_audio_seq = seq + 1
+            if seq - self._next_audio_seq > self._audio_reorder_window:
+                await self._reject_audio(
+                    "AUDIO_SEQUENCE_WINDOW_EXCEEDED",
+                    f"expected {self._next_audio_seq}, got {seq}",
+                )
+                return
+            self._audio_reorder_buffer.setdefault(seq, audio)
+            if self._audio_gap_deadline is None:
+                self._audio_gap_deadline = (
+                    time.monotonic() + self._audio_reorder_wait_seconds
+                )
+            return
+
+        await self._append_audio_in_order(audio)
+        self._next_audio_seq += 1
+        while self._next_audio_seq in self._audio_reorder_buffer:
+            buffered = self._audio_reorder_buffer.pop(self._next_audio_seq)
+            await self._append_audio_in_order(buffered)
+            self._next_audio_seq += 1
+        if not self._audio_reorder_buffer:
+            self._audio_gap_deadline = None
+
+    async def _append_audio_in_order(self, audio: str) -> None:
+        if self.state not in {CallState.ACTIVE, CallState.RECONNECTING} or self.session is None:
+            return
         try:
             await self.session.append_audio(audio)
         except Exception as exc:
@@ -385,9 +563,24 @@ class CallStream:
             line is None
             or (call_response is not None and call_response.cancelled)
             or self.state in {CallState.ENDING, CallState.ENDED}
-            or self.ws_connection is None
         ):
             return
+        packet_seq = self._audio_packet_seq(audio_id)
+        accepted = await self._send_event(
+            WSEventType.CALL_AUDIO_CHUNK,
+            {
+                "call_id": self.call_id,
+                "response_id": line.response_id,
+                "audio_id": audio_id,
+                "seq": packet_seq,
+                "audio": response.audio or "",
+                "is_final": bool(response.is_final_package),
+                "expression": response.expression or line.expression,
+            },
+        )
+        if not accepted:
+            raise CallDeliveryError("call audio packet was not accepted by websocket")
+        self._advance_audio_packet_seq(audio_id, packet_seq)
         if audio_id not in self._sent_audio_ids and response.audio:
             self._sent_audio_ids.add(audio_id)
             duration_ms = None
@@ -399,26 +592,29 @@ class CallStream:
                 duration_ms=duration_ms,
                 metadata={"response_id": line.response_id, "audio_id": audio_id},
             )
-        await self._send_event(
-            WSEventType.CALL_AUDIO_CHUNK,
-            {
-                "call_id": self.call_id,
-                "response_id": line.response_id,
-                "audio_id": audio_id,
-                "seq": self._audio_packet_seq(audio_id, response.audio),
-                "audio": response.audio or "",
-                "is_final": bool(response.is_final_package),
-                "expression": response.expression or line.expression,
-            },
-        )
 
-    def _audio_packet_seq(self, audio_id: str, audio: str | None) -> int:
+    def _audio_packet_seq(self, audio_id: str) -> int:
         key = f"_packet_seq_{audio_id}"
-        value = getattr(self, key, 0)
-        setattr(self, key, value + 1)
-        return value
+        return getattr(self, key, 0)
+
+    def _advance_audio_packet_seq(self, audio_id: str, sent_seq: int) -> None:
+        setattr(self, f"_packet_seq_{audio_id}", sent_seq + 1)
 
     async def _on_tts_error(self, exc: Exception) -> None:
+        if isinstance(exc, CallDeliveryError):
+            self.logger.warning(
+                "call TTS delivery failed: call_id=%s error=%s",
+                self.call_id,
+                exc,
+            )
+            return
+        if self.state == CallState.RECONNECTING:
+            self.logger.warning(
+                "call TTS delivery failed while reconnecting: call_id=%s error=%s",
+                self.call_id,
+                exc,
+            )
+            return
         await self.end(CallExitCode.TTS_FAILED, str(exc))
 
     async def _handle_speech_started(self, event: RealtimeEvent) -> None:
@@ -509,7 +705,7 @@ class CallStream:
         self._turn_seq += 1
         turn = {"seq": seq, "speaker": speaker, "text": text.strip()}
         self._turns.append(turn)
-        await asyncio.to_thread(
+        appended = await run_sync_owned(
             self.call_store.append_turn,
             CallTurnDraft(
                 call_id=self.call_id,
@@ -520,32 +716,73 @@ class CallStream:
                 raw_events=raw_events or [],
             ),
         )
+        if not appended:
+            raise RuntimeError(f"failed to persist call turn {seq}")
         if len(self._turns) >= 10 and len(self._turns) % 10 == 0:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 self._settlement.write_memory_incremental(
                     call_id=self.call_id,
                     user_id=self.user_id,
                     turns=list(self._turns),
                 )
             )
+            self._memory_tasks.add(task)
+            task.add_done_callback(self._memory_tasks.discard)
 
     async def reconnect(self, ws_connection) -> bool:
-        if self.state != CallState.RECONNECTING or (self._reconnect_deadline and time.monotonic() > self._reconnect_deadline):
-            return False
-        self.ws_connection = ws_connection
-        self._reconnect_deadline = None
-        self._transition(CallState.ACTIVE, expected={CallState.RECONNECTING})
-        await self._send_event(WSEventType.CALL_RESUMED, {"call_id": self.call_id, "resumed_at": datetime.now().isoformat()})
+        async with self._end_lock:
+            async with self._state_lock:
+                if self.state != CallState.RECONNECTING or (
+                    self._reconnect_deadline
+                    and time.monotonic() > self._reconnect_deadline
+                ):
+                    return False
+                resume_state = self._reconnect_from_state or CallState.ACTIVE
+                self.ws_connection = ws_connection
+                self._reconnect_deadline = None
+                self._reconnect_from_state = None
+                self._transition(resume_state, expected={CallState.RECONNECTING})
+                self._reconnect_completed.set()
+                if resume_state == CallState.ACTIVE and (
+                    self._audio_worker_task is None
+                    or self._audio_worker_task.done()
+                ):
+                    self._audio_worker_task = asyncio.create_task(
+                        self._run_audio_worker()
+                    )
+            if resume_state == CallState.ACTIVE:
+                await self._send_event(
+                    WSEventType.CALL_RESUMED,
+                    {"call_id": self.call_id, "resumed_at": datetime.now().isoformat()},
+                )
+            else:
+                await self._send_event(
+                    WSEventType.CALL_REQUESTED,
+                    {
+                        "call_id": self.call_id,
+                        "requested_at": self.requested_at.isoformat(),
+                        "accept_after_ms": 0,
+                    },
+                )
         return True
 
     async def lost_connection(self) -> None:
-        if self.state in {CallState.ENDING, CallState.ENDED}:
-            return
         self.ws_connection = None
         await self._cancel_proactive_task()
-        if self.state in {CallState.REQUESTING, CallState.ACTIVE}:
-            self._transition(CallState.RECONNECTING, expected={CallState.REQUESTING, CallState.ACTIVE})
-        self._reconnect_deadline = time.monotonic() + float(self.config.get("reconnect_grace_seconds", 5))
+        async with self._end_lock:
+            async with self._state_lock:
+                if self.state in {CallState.ENDING, CallState.ENDED}:
+                    return
+                if self.state in {CallState.REQUESTING, CallState.ACTIVE}:
+                    self._reconnect_from_state = self.state
+                    self._reconnect_completed.clear()
+                    self._transition(
+                        CallState.RECONNECTING,
+                        expected={CallState.REQUESTING, CallState.ACTIVE},
+                    )
+                self._reconnect_deadline = time.monotonic() + float(
+                    self.config.get("reconnect_grace_seconds", 5)
+                )
         if self.session:
             try:
                 await self.session.cancel_response()
@@ -560,27 +797,61 @@ class CallStream:
         elif self.state in {CallState.ACTIVE, CallState.RECONNECTING}:
             await self.end(CallExitCode.NORMAL, "user_hangup")
 
+    async def end_if_reconnect_expired(self, now: float) -> bool:
+        async with self._end_lock:
+            async with self._state_lock:
+                if (
+                    self.state != CallState.RECONNECTING
+                    or self._reconnect_deadline is None
+                    or self._reconnect_deadline > now
+                ):
+                    return False
+                self._transition(CallState.ENDING, expected={CallState.RECONNECTING})
+                self.exit_code = int(CallExitCode.RECONNECT_TIMEOUT)
+                self.ended_at = datetime.now()
+                self._reconnect_completed.set()
+        await self.end(CallExitCode.RECONNECT_TIMEOUT, "reconnect_timeout")
+        return True
+
     async def end(self, exit_code: CallExitCode | int, reason: str) -> None:
         async with self._end_lock:
             if self.state == CallState.ENDED:
+                if not self._end_event.is_set():
+                    duration = (
+                        max(0, int((self.ended_at - self.connected_at).total_seconds()))
+                        if self.connected_at is not None and self.ended_at is not None
+                        else 0
+                    )
+                    await self._send_event(
+                        WSEventType.CALL_ENDED,
+                        {
+                            "call_id": self.call_id,
+                            "exit_code": self.exit_code,
+                            "duration_seconds": duration,
+                            "ended_at": self.ended_at.isoformat() if self.ended_at else None,
+                        },
+                    )
+                    self._end_event.set()
                 return
-            self._transition(CallState.ENDING, expected={
-                CallState.REQUESTING,
-                CallState.ACTIVE,
-                CallState.RECONNECTING,
-            })
+            if self.state != CallState.ENDING:
+                async with self._state_lock:
+                    self._transition(CallState.ENDING, expected={
+                        CallState.REQUESTING,
+                        CallState.ACTIVE,
+                        CallState.RECONNECTING,
+                    })
+                    self.exit_code = int(exit_code)
+                    self.ended_at = datetime.now()
+                    self._reconnect_completed.set()
             await self._cancel_proactive_task()
-            self.exit_code = int(exit_code)
-            self.ended_at = datetime.now()
             if self._prepare_task and not self._prepare_task.done() and self._prepare_task is not asyncio.current_task():
-                self._prepare_task.cancel()
+                await self._cancel_task(self._prepare_task)
             if self.provider_task and self.provider_task is not asyncio.current_task():
-                self.provider_task.cancel()
-            for task in self._audio_tasks:
-                task.cancel()
-            self._audio_tasks.clear()
-            for task in self._playback_ack_tasks.values():
-                task.cancel()
+                await self._cancel_task(self.provider_task)
+            await self._stop_audio_worker()
+            playback_tasks = list(self._playback_ack_tasks.values())
+            for task in playback_tasks:
+                await self._cancel_task(task)
             self._playback_ack_tasks.clear()
             await self.global_speaking_worker.cancel_pending(stream_id=self.stream_id, reason=reason)
             if self.session:
@@ -593,7 +864,7 @@ class CallStream:
                 )
                 duration = 0
             elif self.connected_at is None:
-                await asyncio.to_thread(
+                conversation_id = await run_sync_owned(
                     self.call_store.create_preconnect_hangup,
                     call_id=self.call_id,
                     user_id=self.user_id,
@@ -603,16 +874,31 @@ class CallStream:
                     exit_code=self.exit_code,
                     summary=("网络断联结束" if self.exit_code == int(CallExitCode.RECONNECT_TIMEOUT) else "未接通就挂断"),
                 )
+                if not conversation_id:
+                    raise RuntimeError("preconnect call settlement failed")
                 duration = 0
             else:
                 duration = max(0, int((self.ended_at - self.connected_at).total_seconds()))
-                await asyncio.to_thread(
+                conversation_id = await run_sync_owned(
                     self.call_store.settle_call_and_conversation,
                     call_id=self.call_id,
                     ended_at=self.ended_at,
                     exit_code=self.exit_code,
                     duration_seconds=duration,
                 )
+                if not conversation_id:
+                    raise RuntimeError("connected call settlement failed")
+            if self.connected_at is not None:
+                memory_tasks = list(self._memory_tasks)
+                self._postprocess_args = {
+                    "call_id": self.call_id,
+                    "user_id": self.user_id,
+                    "exit_code": self.exit_code,
+                    "duration_seconds": duration,
+                    "turns": list(self._turns),
+                    "memory_tasks": memory_tasks,
+                }
+                self.ensure_postprocess_started()
             self._transition(CallState.ENDED, expected={CallState.ENDING})
             await self._send_event(
                 WSEventType.CALL_ENDED,
@@ -623,17 +909,57 @@ class CallStream:
                 error=(None if self.exit_code == int(CallExitCode.NORMAL) else {"code": self.exit_code, "reason": reason}),
                 metadata={"exit_code": self.exit_code, "duration_seconds": duration},
             )
-            if self.connected_at is not None:
-                self._postprocess_task = asyncio.create_task(
-                    self._settlement.process_after_end(
-                        call_id=self.call_id,
-                        user_id=self.user_id,
-                        exit_code=self.exit_code,
-                        duration_seconds=duration,
-                        turns=list(self._turns),
-                    )
-                )
             self._end_event.set()
+
+    async def _stop_audio_worker(self) -> None:
+        task = self._audio_worker_task
+        self._audio_worker_task = None
+        if task is not None and task is not asyncio.current_task():
+            await self._cancel_task(task)
+
+        while True:
+            try:
+                self._audio_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            else:
+                self._audio_queue.task_done()
+        self._audio_reorder_buffer.clear()
+        self._audio_gap_deadline = None
+        self._audio_arrival_times.clear()
+
+    async def wait_postprocess(self) -> None:
+        self.ensure_postprocess_started()
+        task = self._postprocess_task
+        if task is not None:
+            await task
+
+    def ensure_postprocess_started(self) -> None:
+        if self._postprocess_args is None:
+            return
+        if self._postprocess_task is not None and not self._postprocess_task.done():
+            return
+        if self._postprocess_task is not None:
+            try:
+                self._postprocess_task.result()
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                self.logger.warning(
+                    "retrying call postprocess: call_id=%s",
+                    self.call_id,
+                    exc_info=True,
+                )
+            else:
+                return
+        self._postprocess_task = asyncio.create_task(self._run_postprocess())
+
+    async def _run_postprocess(self) -> None:
+        args = dict(self._postprocess_args or {})
+        memory_tasks = args.pop("memory_tasks", [])
+        if memory_tasks:
+            await asyncio.gather(*memory_tasks, return_exceptions=True)
+        await self._settlement.process_after_end(**args)
 
     async def _send_event(self, event_type: WSEventType, payload: dict[str, Any]) -> bool:
         if self.ws_connection is None or self.ws_connection.websocket is None:

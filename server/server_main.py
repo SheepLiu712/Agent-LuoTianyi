@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Header, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -33,7 +34,8 @@ from src.system.user_interface.types import (
     DynamicReadMarkRequest,
 )
 from src.system.user_interface.websocket_service import ChatEventAcceptance, WebSocketConnection
-from src.chat_session.call_stream_manager import CallRejectedError
+from src.chat_session.call_models import CallExitCode
+from src.chat_session.call_stream_manager import CallRejectedError, is_call_event_bound
 from src.system.admin.admin_interface import router as admin_router
 from src.system.admin import get_admin_shell, init_admin_shell, shutdown_admin_shell
 
@@ -246,9 +248,40 @@ async def call_ws(websocket: WebSocket):
     bound_stream = None
     try:
         await websocket_service.send_system_ready_event(websocket)
-        await ws_connection.auth(websocket_service, system_runtime.database_manager)
+        authenticated = await ws_connection.auth(
+            websocket_service,
+            system_runtime.database_manager,
+        )
+        if not authenticated:
+            return
+        if not call_manager.enabled:
+            await websocket.send_json(
+                websocket_service._make_event(
+                    WSEventType.CALL_REJECTED,
+                    {
+                        "code": "CALL_DISABLED",
+                        "message": "电话功能尚未启用",
+                        "exit_code": int(CallExitCode.INTERNAL_ERROR),
+                    },
+                )
+            )
+            await websocket.close(code=1008, reason="call service disabled")
+            return
+        heartbeat_timeout = max(
+            1.0,
+            float(call_manager.config.get("heartbeat_timeout_seconds", 30)),
+        )
         while True:
-            event = await websocket_service.try_recv_client_msg(ws_connection)
+            try:
+                event = await asyncio.wait_for(
+                    websocket_service.try_recv_client_msg(ws_connection),
+                    timeout=heartbeat_timeout,
+                )
+            except asyncio.TimeoutError:
+                await call_manager.on_ws_lost(ws_connection)
+                await websocket.close(code=1001, reason="heartbeat timeout")
+                logger.info("Call WebSocket heartbeat timed out")
+                return
             if event is None:
                 continue
             if event.event_type == WSEventType.HB_PING.value:
@@ -319,6 +352,15 @@ async def call_ws(websocket: WebSocket):
                     event,
                     code="CALL_NOT_STARTED",
                     message="请先建立或恢复通话",
+                    retryable=False,
+                )
+                continue
+            if not is_call_event_bound(bound_stream, ws_connection, event.payload):
+                await websocket_service.send_nack_event(
+                    ws_connection,
+                    event,
+                    code="CALL_CONNECTION_MISMATCH",
+                    message="通话事件与当前连接不匹配",
                     retryable=False,
                 )
                 continue

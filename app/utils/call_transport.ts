@@ -14,6 +14,7 @@ function makeRequestId(prefix: string) {
 }
 
 export class CallTransport {
+  private static readonly MAX_RECONNECT_ATTEMPTS = 5;
   private ws: WebSocket | null = null;
   private readonly username: string;
   private readonly token: string;
@@ -75,8 +76,8 @@ export class CallTransport {
     return this.sendWithAck(WSEventType.CALL_START, {}, 5000, makeRequestId('call-start'));
   }
 
-  appendAudio(audio: string, seq: number) {
-    this.sendRaw({
+  appendAudio(audio: string, seq: number): boolean {
+    return this.sendRaw({
       type: WSEventType.CALL_AUDIO_APPEND,
       ts: Date.now(),
       payload: { call_id: this.callId, audio, seq },
@@ -115,12 +116,14 @@ export class CallTransport {
     const ws = new WebSocket(`${wsBase}/call_ws`);
     this.ws = ws;
     ws.onopen = () => {
-      this.reconnectAttempts = 0;
       this.isAuthed = false;
-      this.sendAuth();
     };
     ws.onmessage = (event) => this.handleMessage(event.data);
-    ws.onerror = () => this.callbacks.onError('通话网络连接发生错误');
+    // A WebSocket error is normally followed by close. Let close drive the
+    // bounded reconnect flow so a recoverable interruption does not alarm the user.
+    ws.onerror = () => {
+      addDebugTrace('call_ws', 'connection error; waiting for close');
+    };
     ws.onclose = () => {
       this.ws = null;
       this.isAuthed = false;
@@ -138,7 +141,11 @@ export class CallTransport {
       type: WSEventType.USER_AUTH,
       client_msg_id: makeRequestId('call-auth'),
       ts: Date.now(),
-      payload: { username: this.username, token: this.token },
+      payload: {
+        username: this.username,
+        token: this.token,
+        capabilities: ['negative_ack_v1'],
+      },
     });
   }
 
@@ -153,10 +160,23 @@ export class CallTransport {
       }
       if (type === WSEventType.AUTH_OK) {
         this.isAuthed = true;
+        this.reconnectAttempts = 0;
         this.startHeartbeat();
         if (this.callId && this.status === 'reconnecting') {
           void this.sendWithAck(WSEventType.CALL_RESUME, { call_id: this.callId }, 4000, makeRequestId('call-resume'));
         }
+        return;
+      }
+      if (type === WSEventType.AUTH_ERROR) {
+        this.isStopped = true;
+        this.clearReconnectTimer();
+        this.stopHeartbeat();
+        this.rejectAll('通话身份验证失败');
+        this.callbacks.onError(
+          typeof payload.message === 'string' ? payload.message : '通话身份验证失败',
+        );
+        this.setStatus('ended');
+        this.ws?.close();
         return;
       }
       if (type === WSEventType.SERVER_ACK) {
@@ -176,8 +196,25 @@ export class CallTransport {
         }
         return;
       }
+      if (type === WSEventType.SERVER_ERROR) {
+        const replyTo = envelope.reply_to;
+        const waiter = replyTo ? this.ackWaiters.get(replyTo) : undefined;
+        if (waiter) {
+          clearTimeout(waiter.timer);
+          this.ackWaiters.delete(replyTo!);
+          waiter.resolve({
+            ok: false,
+            request_id: replyTo!,
+            code: typeof payload.code === 'string' ? payload.code : undefined,
+            message: typeof payload.message === 'string' ? payload.message : undefined,
+            error: typeof payload.message === 'string' ? payload.message : '电话服务拒绝了请求',
+          });
+        }
+        return;
+      }
       if (type === WSEventType.CALL_REQUESTED && typeof payload.call_id === 'string') {
         this.callId = payload.call_id;
+        this.setStatus('requesting');
       }
       if (type === WSEventType.CALL_CONNECTED) {
         if (typeof payload.connected_at === 'string') this.callbacks.onConnectedAt?.(payload.connected_at);
@@ -214,13 +251,21 @@ export class CallTransport {
     });
   }
 
-  private sendRaw(message: Record<string, unknown>) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+  private sendRaw(message: Record<string, unknown>): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
     this.ws.send(JSON.stringify(message));
+    return true;
   }
 
   private scheduleReconnect() {
     if (this.reconnectTimer || this.isStopped) return;
+    if (this.reconnectAttempts >= CallTransport.MAX_RECONNECT_ATTEMPTS) {
+      this.isStopped = true;
+      this.rejectAll('通话网络重连失败');
+      this.setStatus('ended');
+      this.callbacks.onError('通话网络连接已断开，请稍后重试');
+      return;
+    }
     const delay = Math.min(2 ** Math.max(this.reconnectAttempts, 1), 2) * 1000;
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
