@@ -2,6 +2,7 @@ import { server_config } from '../config';
 import { addDebugTrace } from './debug_trace';
 
 export interface DeleteMessagesResponse {
+    success: boolean;
     deleted: number;
     uuids: string[];
 }
@@ -29,9 +30,10 @@ export async function deleteMessages(
         const data = await response.json();
         if (!response.ok) {
             addDebugTrace('history', 'deleteMessages failed', { detail: data.detail || '未知错误' });
-            return { deleted: 0, uuids: [] };
+            return { success: false, deleted: 0, uuids: [] };
         }
         return {
+            success: true,
             deleted: Number(data.deleted || 0),
             uuids: Array.isArray(data.uuids) ? data.uuids : [],
         };

@@ -364,11 +364,13 @@ export const useChatLogic = (
     const uuidsToDelete = Array.from(selectedUuids);
     try {
       const result = await deleteMessages(username, messageToken, uuidsToDelete);
-      if (result.deleted > 0) {
-        const deletedSet = new Set(result.uuids);
+      if (result.success) {
+        // 服务端按对话级 uuid 删除并返回对话 uuid，而本地消息使用消息级 uuid，
+        // 层级不匹配，故直接用本地选中的 uuid 过滤，确保 UI 立即刷新。
+        const deletedSet = new Set(uuidsToDelete);
         setMessages((prev) => prev.filter((msg) => !deletedSet.has(msg.uuid)));
       } else {
-        addDebugTrace('ui', 'delete messages returned 0', { uuids: uuidsToDelete });
+        addDebugTrace('ui', 'delete messages failed', { uuids: uuidsToDelete });
       }
     } catch (error) {
       addDebugTrace('ui', 'delete messages error', { error: String(error) });
@@ -387,7 +389,13 @@ export const useChatLogic = (
 
     setMessages((prev) => {
       const nowScrollIndex = prev.length - 1;
-      const normalized = newMessages.map((msg) => ({
+      // 按 uuid 去重：跳过 prev 中已存在的 uuid，防止历史分页重复或实时消息冲突导致 FlatList 重复 key
+      const existingUuids = new Set(prev.map((m) => m.uuid));
+      const filtered = newMessages.filter((m) => !existingUuids.has(m.uuid));
+      if (filtered.length === 0) {
+        return prev;
+      }
+      const normalized = filtered.map((msg) => ({
         ...msg,
         sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
         audioPlayState: msg.audioPlayState || 'idle',

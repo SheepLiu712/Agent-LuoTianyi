@@ -120,7 +120,7 @@ class ConversationService:
             data = {"terms": payload.get("terms", [])}
 
         item = ConversationItem(
-            uuid=str(uuid4()),
+            uuid=(event.client_msg_id or str(uuid4())),
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             source=ConversationSource.USER.value,
             type=conversation_type,
