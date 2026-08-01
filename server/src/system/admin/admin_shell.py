@@ -63,7 +63,10 @@ class AdminShell:
         )
 
     async def shutdown(self) -> None:
-        await self.runtime_supervisor.stop()
+        status = await self.runtime_supervisor.stop()
+        if status.get("state") != "stopped" or self.runtime_supervisor.has_runtime:
+            error = status.get("last_error") or "runtime cleanup is incomplete"
+            raise RuntimeError(f"Cannot close AdminShell while SystemRuntime is still active: {error}")
         self.observability.close()
         set_observability_service(None)
         uninstall_observability_log_handler()

@@ -248,23 +248,40 @@ class MemoryStore:
             metadata=metadata,
         )
 
+    def _load_recent_memory_updates(self, user_id: str) -> List[Dict[str, Any]]:
+        db = self._new_session()
+        try:
+            rows = (
+                db.query(MemoryUpdateRecord)
+                .filter(MemoryUpdateRecord.user_id == user_id)
+                .order_by(
+                    MemoryUpdateRecord.created_at.desc(),
+                    MemoryUpdateRecord.update_cmd_uuid.desc(),
+                )
+                .limit(10)
+                .all()
+            )
+            return [json.loads(row.update_command) for row in reversed(rows)]
+        finally:
+            db.close()
+
     def get_recent_memory_update_from_buffer(self, user_id: str) -> List[MemoryUpdateCommand]:
         """从 Redis 获取最近记忆更新列表。"""
         redis = self._ensure_redis()
         redis_key = f"user_recent_memory_update:{user_id}"
         raw_data = redis.get(redis_key)
-        if not raw_data:
-            self.prefill_buffer(user_id)
-            raw_data = redis.get(redis_key)
-
-        if raw_data:
+        if raw_data is None:
+            updates_list = self._load_recent_memory_updates(user_id)
+            raw_data = json.dumps(updates_list, ensure_ascii=False)
+            redis.setex(redis_key, 3600, raw_data)
+        else:
             updates_list = json.loads(raw_data)
-            return [
-                MemoryUpdateCommand(
-                    uuid=item.get("uuid"),
-                    content=item.get("content"),
-                    type=item.get("type"),
-                )
-                for item in updates_list
-            ]
-        return []
+
+        return [
+            MemoryUpdateCommand(
+                uuid=item.get("uuid"),
+                content=item.get("content"),
+                type=item.get("type"),
+            )
+            for item in updates_list
+        ]

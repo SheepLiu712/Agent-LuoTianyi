@@ -2,11 +2,14 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.chat_session.chat_pipeline.chat_stream import ChatStream
+from src.chat_session.chat_stream_manager import ChatStreamManager
 
 
 def test_set_system_runtime_does_not_require_live_websocket_after_disconnect():
@@ -18,3 +21,30 @@ def test_set_system_runtime_does_not_require_live_websocket_after_disconnect():
 
     assert stream.system_runtime is not None
     assert stream.ws_connection is None
+
+
+@pytest.mark.asyncio
+async def test_stale_disconnect_does_not_drop_replacement_connection():
+    old_connection = SimpleNamespace(user_name="tester", user_uuid="user-1", websocket=object())
+    replacement = SimpleNamespace(user_name="tester", user_uuid="user-1", websocket=object())
+    replacement_stream = ChatStream({}, old_connection, character_id="luotianyi")
+    other_character_stream = ChatStream({}, old_connection, character_id="miku")
+
+    async def already_started():
+        return None
+
+    replacement_stream.start_if_needed = already_started
+    await replacement_stream.reconnect(replacement)
+
+    manager = ChatStreamManager({}, None, None, None, None)
+    manager.user_streams = {
+        ("user-1", "luotianyi"): replacement_stream,
+        ("user-1", "miku"): other_character_stream,
+    }
+
+    manager.ws_lost_connection(old_connection)
+
+    assert replacement_stream.ws_connection is replacement
+    assert replacement_stream.connection_lost_time is None
+    assert other_character_stream.ws_connection is None
+    assert other_character_stream.connection_lost_time is not None

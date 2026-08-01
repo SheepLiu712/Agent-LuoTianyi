@@ -7,6 +7,12 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, Optional
 
 from src.utils.logger import get_logger
+from src.utils.asyncio_helpers import (
+    DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+    cancel_task_once,
+    run_sync_owned,
+    wait_for_owned_tasks,
+)
 
 
 ClockAction = Callable[[], Any]
@@ -38,6 +44,7 @@ class WorldClock:
         self._tasks: Dict[str, asyncio.Task] = {}
         self._stop_event: Optional[asyncio.Event] = None
         self.last_results: Dict[str, Any] = {}
+        self.stop_timeout_seconds = DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS
 
     def register_interval_action(
         self,
@@ -87,15 +94,30 @@ class WorldClock:
     async def stop(self) -> None:
         if self._stop_event is not None:
             self._stop_event.set()
-        tasks = list(self._tasks.values())
-        for task in tasks:
-            task.cancel()
-        for task in tasks:
+        task_items = list(self._tasks.items())
+        for _, task in task_items:
+            cancel_task_once(task)
+        done, pending = await wait_for_owned_tasks(
+            (task for _, task in task_items),
+            timeout_seconds=self.stop_timeout_seconds,
+        )
+        errors: list[str] = []
+        for key, task in task_items:
+            if task not in done:
+                continue
             try:
-                await task
+                task.result()
             except asyncio.CancelledError:
                 pass
-        self._tasks.clear()
+            except Exception as error:
+                errors.append(f"{key}: {type(error).__name__}: {error}")
+            finally:
+                if self._tasks.get(key) is task:
+                    self._tasks.pop(key, None)
+        if pending:
+            errors.append(f"{len(pending)} world task(s) still stopping")
+        if errors:
+            raise RuntimeError("World clock shutdown failed: " + "; ".join(errors))
         self._stop_event = None
 
     def _start_interval_action(self, action: _IntervalAction) -> None:
@@ -139,7 +161,7 @@ class WorldClock:
             if inspect.iscoroutinefunction(action):
                 result = action()
             else:
-                result = await asyncio.to_thread(action)
+                result = await run_sync_owned(action)
             if inspect.isawaitable(result):
                 result = await result
             self.last_results[name] = result

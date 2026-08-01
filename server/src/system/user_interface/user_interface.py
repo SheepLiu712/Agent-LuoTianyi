@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING, Optional
 import os
 from contextlib import asynccontextmanager
@@ -37,6 +38,21 @@ class UserInterface:
         self.websocket_service: WebSocketService = WebSocketService()
         self.database_manager: "DatabaseManager" = database_manager
         self.user_conversation_helper = UserConversationHelper(database_manager)
+        self._auth_work_slots = asyncio.Semaphore(4)
+        self._auth_work_admission_timeout = 1.0
+
+    async def _run_auth_work(self, func, *args):
+        try:
+            await asyncio.wait_for(
+                self._auth_work_slots.acquire(),
+                timeout=self._auth_work_admission_timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(status_code=503, detail="认证服务繁忙，请稍后再试") from exc
+        try:
+            return await asyncio.to_thread(func, *args)
+        finally:
+            self._auth_work_slots.release()
 
 
     def bind_database_manager(self, database_manager: "DatabaseManager"):
@@ -87,7 +103,11 @@ class UserInterface:
         """
         if request is not None:
             enforce_rate_limit(request, "auth_auto_login", req.username)
-        auth_result = system_runtime.database_manager.authenticate_auto_login(req.username, req.token)
+        auth_result = await self._run_auth_work(
+            system_runtime.database_manager.authenticate_auto_login,
+            req.username,
+            req.token,
+        )
         if auth_result:
             user_uuid = auth_result["user_uuid"]
             await system_runtime.chat_session_manager.on_user_login(
@@ -112,8 +132,11 @@ class UserInterface:
         if request is not None:
             enforce_rate_limit(request, "auth_register", req.username)
         decrypted_password = self.decrypt_user_password(req.password)
-        success, msg = system_runtime.database_manager.register_user(
-            req.username, decrypted_password, req.invite_code
+        success, msg = await self._run_auth_work(
+            system_runtime.database_manager.register_user,
+            req.username,
+            decrypted_password,
+            req.invite_code,
         )
         if not success:
             raise HTTPException(status_code=400, detail=msg)
@@ -127,10 +150,13 @@ class UserInterface:
     ):
         """以邀请码重置账号的用户名和密码"""
         if request is not None:
-            enforce_rate_limit(request, "auth_reset", req.new_username)
+            enforce_rate_limit(request, "auth_reset", req.invite_code)
         decrypted_password = self.decrypt_user_password(req.new_password)
-        success, msg = system_runtime.database_manager.reset_account(
-            req.invite_code, req.new_username, decrypted_password
+        success, msg = await self._run_auth_work(
+            system_runtime.database_manager.reset_account,
+            req.invite_code,
+            req.new_username,
+            decrypted_password,
         )
         if not success:
             raise HTTPException(status_code=400, detail=msg)
@@ -147,8 +173,10 @@ class UserInterface:
         if request is not None:
             enforce_rate_limit(request, "auth_login", req.username)
         decrypted_password = self.decrypt_user_password(req.password)
-        auth_result = system_runtime.database_manager.authenticate_password_login(
-            req.username, decrypted_password
+        auth_result = await self._run_auth_work(
+            system_runtime.database_manager.authenticate_password_login,
+            req.username,
+            decrypted_password,
         )
         if auth_result:
             user_uuid = auth_result["user_uuid"]

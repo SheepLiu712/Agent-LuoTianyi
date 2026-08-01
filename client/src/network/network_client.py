@@ -551,5 +551,4 @@ class NetworkClient:
                 )
         except Exception as exc:
             self.logger.error(f"Failed to retrieve image for history item {item.uuid}: {exc}")
-        finally:
-            return item
+        return item

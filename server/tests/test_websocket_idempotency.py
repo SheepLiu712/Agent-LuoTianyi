@@ -33,6 +33,8 @@ def test_websocket_service_deduplicates_recent_client_message_per_user():
     connection = WebSocketConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
 
     assert service.is_duplicate_client_message(connection, _message("msg-1")) is False
+    assert service.is_duplicate_client_message(connection, _message("msg-1")) is False
+    assert service.mark_client_message_accepted(connection, _message("msg-1")) is True
     assert service.is_duplicate_client_message(connection, _message("msg-1")) is True
     assert service.is_duplicate_client_message(connection, _message("msg-2")) is False
 
@@ -42,8 +44,8 @@ def test_websocket_service_dedup_cache_is_scoped_by_user():
     user_a = WebSocketConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
     user_b = WebSocketConnection(FakeWebSocket(), user_uuid="user-b", user_name="bob")
 
-    assert service.is_duplicate_client_message(user_a, _message("same-id")) is False
-    assert service.is_duplicate_client_message(user_b, _message("same-id")) is False
+    assert service.mark_client_message_accepted(user_a, _message("same-id")) is True
+    assert service.mark_client_message_accepted(user_b, _message("same-id")) is True
     assert service.is_duplicate_client_message(user_a, _message("same-id")) is True
     assert service.is_duplicate_client_message(user_b, _message("same-id")) is True
 
@@ -61,6 +63,7 @@ async def test_duplicate_ack_marks_duplicate_payload():
             "type": WSEventType.SERVER_ACK.value,
             "ts": websocket.sent[0]["ts"],
             "payload": {
+                "ok": True,
                 "received_event_type": WSEventType.USER_TEXT.value,
                 "duplicate": True,
             },

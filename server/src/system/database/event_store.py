@@ -11,6 +11,7 @@ from datetime import datetime, date, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from src.utils.logger import get_logger
 from src.utils.lunar_date import get_lunar_mmdd, lunar_to_solar, FIXED_SOLAR_HOLIDAYS, LUNAR_HOLIDAYS_MMDD, is_lunar_new_year_eve
@@ -60,6 +61,7 @@ class EventStore:
         self._all_events_cache: Optional[List[Dict[str, Any]]] = None
         self._due_events_cache: Dict[tuple[date, str], List[Tuple[Dict[str, Any], str]]] = {}
         self._cache_date: Optional[date] = None
+        self._cache_generation = 0
 
     def create_llm_module(self, llm_service: "LLMService"):
         llm_module_config = self.config.get("llm_module")
@@ -78,6 +80,7 @@ class EventStore:
 
     def _invalidate_cache(self) -> None:
         with self._cache_lock:
+            self._cache_generation += 1
             self._all_events_cache = None
             self._due_events_cache = {}
             self._cache_date = None
@@ -92,14 +95,20 @@ class EventStore:
         with self._cache_lock:
             if self._cache_valid() and self._all_events_cache is not None:
                 return self._all_events_cache
+            cache_generation = self._cache_generation
+            cache_date = date.today()
 
         db = self._get_session()
         try:
             rows = db.query(Event).filter(Event.is_active == True).all()
             result = [db_event_to_dict(r) for r in rows]
             with self._cache_lock:
-                self._all_events_cache = result
-                self._cache_date = date.today()
+                if (
+                    self._cache_generation == cache_generation
+                    and date.today() == cache_date
+                ):
+                    self._all_events_cache = result
+                    self._cache_date = cache_date
             return result
         finally:
             db.close()
@@ -372,6 +381,8 @@ class EventStore:
         with self._cache_lock:
             if self._cache_valid() and cache_key in self._due_events_cache:
                 return self._due_events_cache[cache_key]
+            cache_generation = self._cache_generation
+            cache_date = date.today()
 
         db = self._get_session()
         try:
@@ -399,8 +410,12 @@ class EventStore:
                         due_events.append((db_event_to_dict(row), condition_key))
                         break  # 同一事件只需触发一次触发条件
             with self._cache_lock:
-                self._due_events_cache[cache_key] = due_events
-                self._cache_date = date.today()
+                if (
+                    self._cache_generation == cache_generation
+                    and date.today() == cache_date
+                ):
+                    self._due_events_cache[cache_key] = due_events
+                    self._cache_date = cache_date
             return due_events
         finally:
             db.close()
@@ -620,7 +635,7 @@ class EventStore:
                     continue
                 existing = await self.find_matching_event(name, date_mmdd=f"{month:02d}-{day:02d}", source="system")
                 if existing:
-                    break # 所有的节日都是统一加进去的，一个有重复，说明所有的都加过了
+                    continue
                 await self.add_event({
                     "title": name,
                     "description": desc,
@@ -704,9 +719,21 @@ class EventStore:
 
     def mark_notified(self, event_id: str, user_id: str, trigger_key: str, character_id: str) -> None:
         """标记用户对某角色事件的某个触发条件已通知（并刷新缓存）。"""
+        self.try_claim_notification(event_id, user_id, trigger_key, character_id)
+
+    def try_claim_notification(
+        self,
+        event_id: str,
+        user_id: str,
+        trigger_key: str,
+        character_id: str,
+    ) -> bool:
+        """Atomically claim a notification key before dispatch.
+
+        The unique row becomes the durable notification record after a successful
+        dispatch. Call ``release_notification_claim`` if dispatch fails.
+        """
         character_id = character_id or "luotianyi"
-        if self.is_notified(event_id, user_id, trigger_key, character_id):
-            return
         db = self._get_session()
         try:
             notification = EventNotification(
@@ -718,8 +745,43 @@ class EventStore:
             db.add(notification)
             db.commit()
             self._invalidate_cache()
-        except Exception as e:
+            return True
+        except IntegrityError:
             db.rollback()
-            self.logger.warning(f"Failed to mark notification: {e}")
+            return False
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def release_notification_claim(
+        self,
+        event_id: str,
+        user_id: str,
+        trigger_key: str,
+        character_id: str,
+    ) -> bool:
+        """Release a claim whose dispatch did not reach the topic queue."""
+        character_id = character_id or "luotianyi"
+        db = self._get_session()
+        try:
+            deleted = (
+                db.query(EventNotification)
+                .filter(
+                    EventNotification.event_id == event_id,
+                    EventNotification.user_id == user_id,
+                    EventNotification.character_id == character_id,
+                    EventNotification.trigger_key == trigger_key,
+                )
+                .delete(synchronize_session=False)
+            )
+            db.commit()
+            if deleted:
+                self._invalidate_cache()
+            return bool(deleted)
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
