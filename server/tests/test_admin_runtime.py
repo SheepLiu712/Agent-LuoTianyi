@@ -84,6 +84,11 @@ def minimal_config(tmp_path: Path) -> dict:
                 "characters": {"luotianyi": {"resource_path": str(tmp_path / "sing")}},
             },
             "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
+            "diary": {
+                "diary_llm": {
+                    "llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}
+                }
+            },
         },
         "agent_runtime": {
             "character_registry": {
@@ -192,6 +197,80 @@ def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
     assert runtime_config["world"]["citywalk"]["enabled"] is False
     assert runtime_config["world"]["bili_dynamic_fetcher"]["enabled"] is False
     assert runtime_config["world"]["auto_song_learner"]["enabled"] is False
+
+
+def test_validator_skips_realtime_dependencies_when_calls_are_disabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    validator = RuntimeConfigValidator(
+        root_dir=tmp_path,
+        secret_store=SecretStore(tmp_path / "secrets.local.env"),
+    )
+    config = minimal_config(tmp_path)
+    config["realtime_dialogue_service"] = {
+        "provider": "qwen",
+        "qwen": {
+            "api_key": "$QWEN_API_KEY",
+            "model": "invalid-while-disabled",
+            "base_url": "$QWEN_REALTIME_BASE_URL",
+        },
+    }
+    config["chat_session_manager"]["call_stream_manager"] = {
+        "enabled": False,
+        "settlement": {
+            "summary": {"llm_module": {"llm": {"name": "missing"}}}
+        },
+    }
+
+    result = validator.validate(config)
+
+    realtime = next(
+        item for item in result["items"]
+        if item["name"] == "realtime_dialogue_service"
+    )
+    assert result["core_ok"] is True
+    assert realtime["status"] == "disabled"
+    assert not any(
+        item["name"] == "llm_module.call.summary"
+        for item in result["items"]
+    )
+
+
+def test_validator_requires_realtime_dependencies_when_calls_are_enabled(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    validator = RuntimeConfigValidator(
+        root_dir=tmp_path,
+        secret_store=SecretStore(tmp_path / "secrets.local.env"),
+    )
+    config = minimal_config(tmp_path)
+    config["realtime_dialogue_service"] = {
+        "provider": "qwen",
+        "qwen": {
+            "api_key": "$QWEN_API_KEY",
+            "model": "qwen-audio-3.0-realtime-flash",
+            "base_url": "$QWEN_REALTIME_BASE_URL",
+        },
+    }
+    config["chat_session_manager"]["call_stream_manager"] = {
+        "enabled": True,
+        "settlement": {
+            "summary": {"llm_module": {"llm": {"name": "main"}}}
+        },
+    }
+
+    result = validator.validate(config)
+
+    realtime = next(
+        item for item in result["items"]
+        if item["name"] == "realtime_dialogue_service.qwen"
+    )
+    assert result["core_ok"] is False
+    assert realtime["status"] == "error"
+    assert any(
+        item["name"] == "llm_module.call.summary" and item["status"] == "ok"
+        for item in result["items"]
+    )
 
 
 @pytest.mark.parametrize(

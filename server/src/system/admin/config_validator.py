@@ -47,7 +47,7 @@ class RuntimeConfigValidator:
         "agent.user_profile": "agent_runtime.agent.memory.user_profile.llm_module",
         "agent.date_detector": "agent_runtime.agent.date_detector.llm_module",
         "capability.singing.song_emotion_tagger": "capabilities.sing.song_emotion_tagger",
-        "capability.diary": "capabilities.diary.diary_llm",
+        "capability.diary": "capabilities.diary.diary_llm.llm_module",
     }
 
     CORE_VLM_MODULE_PATHS = {
@@ -191,9 +191,19 @@ class RuntimeConfigValidator:
 
     def _validate_realtime_dialogue(self, config: dict[str, Any]) -> list[ValidationItem]:
         """实时通话使用独立的 WebSocket 模型配置，不复用 OpenAI-compatible interface。"""
+        call_config = self._get(config, "chat_session_manager.call_stream_manager") or {}
+        if not bool(call_config.get("enabled", False)):
+            return [
+                ValidationItem(
+                    "core",
+                    "realtime_dialogue_service",
+                    "disabled",
+                    "实时电话未启用",
+                    severity="warning",
+                )
+            ]
         realtime = config.get("realtime_dialogue_service") or {}
         if not realtime:
-            # 旧配置/未启用电话功能时不阻断聊天运行时；完整配置一旦出现则严格校验。
             return [ValidationItem("core", "realtime_dialogue_service", "disabled", "未配置实时电话，电话功能不可用", severity="warning")]
         qwen = realtime.get("qwen") or {}
         if str(realtime.get("provider") or "qwen") != "qwen":
@@ -225,8 +235,9 @@ class RuntimeConfigValidator:
             module = self._get(config, path) or {}
             vlm_name = ((module.get("vlm") or {}).get("name") or "").strip()
             result.append(self._module_item("vlm", name, vlm_name, vlms))
-        call_summary = self._get(config, "chat_session_manager.call_stream_manager.settlement.summary")
-        if call_summary is not None:
+        call_config = self._get(config, "chat_session_manager.call_stream_manager") or {}
+        call_summary = self._get(call_config, "settlement.summary")
+        if bool(call_config.get("enabled", False)) and call_summary is not None:
             llm_name = ((call_summary.get("llm_module") or {}).get("llm") or {}).get("name", "")
             result.append(self._module_item("llm", "call.summary", str(llm_name).strip(), llms))
         return result
