@@ -1068,6 +1068,99 @@ class DatabaseManager:
         finally:
             db.close()
 
+    def delete_conversations_by_uuids(
+        self,
+        user_id: str,
+        uuids: list[str],
+        character_id: str = "luotianyi",
+    ) -> tuple[int, list[str]]:
+        """按 uuid 列表批量删除对话记录，同时同步 Redis 上下文缓存与用户计数。
+
+        返回 (成功删除的条数, 实际删除的 uuid 列表)。未匹配到任何记录时返回 (0, [])。
+        """
+        if not uuids:
+            return 0, []
+
+        redis = self._ensure_redis()
+        db = self._new_session()
+        try:
+            def _write() -> Optional[list[str]]:
+                user = db.query(User).filter(User.uuid == user_id).first()
+                if not user:
+                    return None
+                # 找到实际属于该用户、且 uuid 在列表中的对话
+                targets = db.query(Conversation).filter(
+                    Conversation.user_id == user_id,
+                    Conversation.uuid.in_(uuids),
+                ).all()
+                if not targets:
+                    return []
+                # 同步删除对应的图片文件（若 meta_data 中有 image_server_path）
+                for conv in targets:
+                    if conv.meta_data:
+                        try:
+                            meta = json.loads(conv.meta_data)
+                            server_path = meta.get("image_server_path")
+                            if server_path and os.path.isfile(server_path):
+                                try:
+                                    os.remove(server_path)
+                                except OSError as e:
+                                    logger.warning(f"Failed to remove image file {server_path}: {e}")
+                        except Exception as e:
+                            logger.warning(f"Failed to parse meta_data for {conv.uuid}: {e}")
+                    db.delete(conv)
+                # 更新用户对话计数
+                deleted_count = len(targets)
+                deleted_uuids = [conv.uuid for conv in targets]
+                user.all_memory_count = max(0, (user.all_memory_count or 0) - deleted_count)
+                context = self._get_or_create_conversation_context(db, user, character_id)
+                context.context_memory_count = max(0, (context.context_memory_count or 0) - deleted_count)
+                if character_id == "luotianyi":
+                    user.context_memory_count = context.context_memory_count
+                db.commit()
+                return deleted_uuids
+
+            write_result = run_sql_write(_write)
+
+            if write_result is None:
+                logger.warning(f"delete_conversations_by_uuids: user {user_id} not found")
+                return 0, []
+
+            deleted_uuids: list[str] = write_result
+            deleted_count = len(deleted_uuids)
+
+            if deleted_count == 0:
+                return 0, []
+
+            # 同步 Redis：从上下文缓存中移除被实际删除的 uuid
+            redis_key = self._context_redis_key(user_id, character_id)
+            with redis.pipeline() as pipe:
+                for _ in range(3):
+                    try:
+                        pipe.watch(redis_key)
+                        raw_data: ContextInfo = self._decode_redis_value(pipe.get(redis_key))
+                        if raw_data:
+                            uuid_set = set(deleted_uuids)
+                            raw_data.conversations = [
+                                c for c in raw_data.conversations if c.get("uuid") not in uuid_set
+                            ]
+                            raw_data.context_count = max(0, (raw_data.context_count or 0) - deleted_count)
+                            pipe.multi()
+                            pipe.setex(redis_key, 3600, raw_data)
+                            pipe.execute()
+                        else:
+                            pipe.unwatch()
+                        break
+                    except WatchError:
+                        continue
+            return deleted_count, deleted_uuids
+        except Exception as e:
+            logger.error(f"delete_conversations_by_uuids error: {e}")
+            db.rollback()
+            return 0, []
+        finally:
+            db.close()
+
     @property
     def redis(self) -> RedisBuffer:
         """便捷属性：直接访问 Redis 实例。"""

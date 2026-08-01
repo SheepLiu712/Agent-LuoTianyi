@@ -21,6 +21,7 @@ from .types import (
     DynamicCommentCreateRequest,
     DynamicUnreadRequest,
     DynamicReadMarkRequest,
+    DeleteMessagesRequest,
 )
 
 from .account import get_public_key_pem, decrypt_password, generate_keys
@@ -265,6 +266,24 @@ class UserInterface:
         if not success:
             raise HTTPException(status_code=400, detail="更新失败，记录不存在或无权限访问")
         return {"message": "更新成功"}
+
+    async def delete_messages(
+        self,
+        req: DeleteMessagesRequest,
+        system_runtime: SystemRuntime,
+    ):
+        """按 uuid 批量删除对话消息"""
+        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+            req.username, req.token
+        )
+        if not message_token_valid:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        if not req.uuids:
+            return {"deleted": 0, "uuids": []}
+        deleted_count, deleted_uuids = system_runtime.database_manager.delete_conversations_by_uuids(
+            user_uuid, list(req.uuids)
+        )
+        return {"deleted": deleted_count, "uuids": deleted_uuids}
 
     async def list_dynamics(
         self,

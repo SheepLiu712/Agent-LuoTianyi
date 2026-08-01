@@ -8,6 +8,7 @@ import { MessageProcessor } from '../utils/message_processor';
 import { NetworkClient } from '../utils/network_client';
 import { AgentMessagePayload, ChatMessage } from '../types/chat';
 import { addDebugTrace } from '../utils/debug_trace';
+import { deleteMessages } from '../utils/deleteMessages';
 
 function createUuid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -22,6 +23,9 @@ export const useChatLogic = (
   const [thinking, setThinking] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentPlayingUuid, setCurrentPlayingUuid] = useState<string | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedUuids, setSelectedUuids] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
   const flatListRef = useRef<FlatList>(null);
 
   const networkClientRef = useRef<NetworkClient | null>(null);
@@ -328,6 +332,52 @@ export const useChatLogic = (
     [currentPlayingUuid, messages, updateMessageByUuid],
   );
 
+  const enterSelectionMode = useCallback((uuid: string) => {
+    setSelectedUuids(new Set([uuid]));
+    setSelectionMode(true);
+  }, []);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectedUuids(new Set());
+    setSelectionMode(false);
+  }, []);
+
+  const toggleSelection = useCallback((uuid: string) => {
+    setSelectedUuids((prev) => {
+      const next = new Set(prev);
+      if (next.has(uuid)) {
+        next.delete(uuid);
+      } else {
+        next.add(uuid);
+      }
+      return next;
+    });
+  }, []);
+
+  const selectedCount = useMemo(() => selectedUuids.size, [selectedUuids]);
+
+  const handleDeleteSelected = useCallback(async () => {
+    if (selectedUuids.size === 0 || deleting) {
+      return;
+    }
+    setDeleting(true);
+    const uuidsToDelete = Array.from(selectedUuids);
+    try {
+      const result = await deleteMessages(username, messageToken, uuidsToDelete);
+      if (result.deleted > 0) {
+        const deletedSet = new Set(result.uuids);
+        setMessages((prev) => prev.filter((msg) => !deletedSet.has(msg.uuid)));
+      } else {
+        addDebugTrace('ui', 'delete messages returned 0', { uuids: uuidsToDelete });
+      }
+    } catch (error) {
+      addDebugTrace('ui', 'delete messages error', { error: String(error) });
+    } finally {
+      setDeleting(false);
+      exitSelectionMode();
+    }
+  }, [deleting, exitSelectionMode, messageToken, selectedUuids, username]);
+
   const addHistoryMessage = useCallback((newMessages: ChatMessage[]) => {
     for (const msg of newMessages) {
       if (!msg.isUser && msg.audioAvailable && msg.audioLocalUri) {
@@ -370,5 +420,13 @@ export const useChatLogic = (
     handleSendImage,
     handleWebViewMessage,
     handleToggleAgentAudio,
+    selectionMode,
+    selectedUuids,
+    selectedCount,
+    deleting,
+    enterSelectionMode,
+    exitSelectionMode,
+    toggleSelection,
+    handleDeleteSelected,
   };
 };

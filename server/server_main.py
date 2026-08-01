@@ -28,6 +28,7 @@ from src.system.user_interface.types import (
     DynamicCommentCreateRequest,
     DynamicUnreadRequest,
     DynamicReadMarkRequest,
+    DeleteMessagesRequest,
 )
 from src.system.user_interface.websocket_service import WebSocketConnection
 from src.system.admin.admin_interface import router as admin_router
@@ -427,6 +428,16 @@ async def update_image_client_path(
     """
     logger.info(f"Update image client path request from {request.username} for {request.uuid}")
     return await system_runtime.user_interface.update_image_client_path(request, system_runtime)
+
+
+@app.post("/delete_messages")
+async def delete_messages(
+    request: DeleteMessagesRequest,
+    system_runtime: "SystemRuntime" = Depends(get_runtime),
+):
+    """按 uuid 批量删除对话消息。"""
+    logger.info(f"Delete messages request from {request.username}, count={len(request.uuids)}")
+    return await system_runtime.user_interface.delete_messages(request, system_runtime)
 
 
 if __name__ == "__main__":

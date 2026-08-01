@@ -108,6 +108,13 @@ class ImageRequest(BaseModel):
     image_client_path: str = None
 
 
+class DeleteMessagesRequest(BaseModel):
+    """批量删除对话消息请求"""
+    username: str
+    token: str
+    uuids: list[str]
+
+
 #### WebSocket Event Types
 from enum import Enum
 from dataclasses import dataclass

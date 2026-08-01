@@ -82,6 +82,14 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     handleSendImage,
     handleWebViewMessage,
     handleToggleAgentAudio,
+    selectionMode,
+    selectedUuids,
+    selectedCount,
+    deleting,
+    enterSelectionMode,
+    exitSelectionMode,
+    toggleSelection,
+    handleDeleteSelected,
   } = useChatLogic(webviewRef, username, message_token);
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
@@ -350,6 +358,12 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           <Image source={require('../assets/images/menu.png')} style={[styles.menuIcon, { tintColor: theme.text }]} />
         </TouchableOpacity>
 
+        {selectionMode ? (
+          <TouchableOpacity style={[styles.cancelButton, { backgroundColor: theme.menuButton }]} onPress={exitSelectionMode} activeOpacity={0.75}>
+            <Text style={[styles.cancelButtonText, { color: theme.text }]}>取消</Text>
+          </TouchableOpacity>
+        ) : null}
+
         {thinking ? (
           <View style={styles.thinkingBubble}>
             <Image source={THINKING_BUBBLE_FRAMES[thinkingFrame]} style={styles.thinkingBubbleImage} resizeMode="contain" />
@@ -393,10 +407,20 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             ref={flatListRef}
             data={messages}
             inverted={true}
-            renderItem={({ item }) => <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} theme={theme} />}
+            renderItem={({ item }) => (
+              <MessageItem
+                message={item}
+                onToggleAgentAudio={handleToggleAgentAudio}
+                theme={theme}
+                selectionMode={selectionMode}
+                selected={selectedUuids.has(item.uuid)}
+                onLongPressMessage={enterSelectionMode}
+                onToggleSelect={toggleSelection}
+              />
+            )}
             keyExtractor={(item) => item.uuid}
             onEndReached={() => {
-              if (username && message_token && !historyLoading) {
+              if (username && message_token && !historyLoading && !selectionMode) {
                 loadHistory(username, message_token);
               }
             }}
@@ -409,37 +433,61 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           />
         </View>
 
-        <View
-          style={[
-            styles.inputContainer,
-            { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: theme.inputBar, borderTopColor: theme.inputBorder },
-          ]}
-        >
-          <TextInput
-            style={[styles.inputField, { backgroundColor: theme.inputBackground, color: theme.inputText }]}
-            placeholder="给天依发消息..."
-            placeholderTextColor={theme.placeholder}
-            value={inputText}
-            onChangeText={setInputText}
-            multiline={false}
-          />
-
-          <TouchableOpacity style={styles.iconButton} onPress={handleSendImage} disabled={!canSendImage}>
-            <Image
-              source={
-                canSendImage ? require('../assets/images/image_button_activate.png') : require('../assets/images/image_button_un.png')
-              }
-              style={styles.iconImage}
+        {selectionMode ? (
+          <View
+            style={[
+              styles.inputContainer,
+              styles.deleteBar,
+              { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: theme.dangerSurface, borderTopColor: theme.border },
+            ]}
+          >
+            <Text style={[styles.deleteBarCount, { color: theme.dangerText }]}>
+              已选择 {selectedCount} 条
+            </Text>
+            <TouchableOpacity
+              style={[styles.deleteButton, { backgroundColor: theme.dangerText }]}
+              onPress={handleDeleteSelected}
+              disabled={selectedCount === 0 || deleting}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.deleteButtonText, { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' }]}>
+                {deleting ? '删除中...' : `删除${selectedCount > 0 ? `(${selectedCount})` : ''}`}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.inputContainer,
+              { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: theme.inputBar, borderTopColor: theme.inputBorder },
+            ]}
+          >
+            <TextInput
+              style={[styles.inputField, { backgroundColor: theme.inputBackground, color: theme.inputText }]}
+              placeholder="给天依发消息..."
+              placeholderTextColor={theme.placeholder}
+              value={inputText}
+              onChangeText={setInputText}
+              multiline={false}
             />
-          </TouchableOpacity>
 
-          <TouchableOpacity style={styles.iconButton} onPress={handleSendText} disabled={!canSend}>
-            <Image
-              source={canSend ? require('../assets/images/send_button_activate.png') : require('../assets/images/send_button_un.png')}
-              style={styles.iconImage}
-            />
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={styles.iconButton} onPress={handleSendImage} disabled={!canSendImage}>
+              <Image
+                source={
+                  canSendImage ? require('../assets/images/image_button_activate.png') : require('../assets/images/image_button_un.png')
+                }
+                style={styles.iconImage}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.iconButton} onPress={handleSendText} disabled={!canSend}>
+              <Image
+                source={canSend ? require('../assets/images/send_button_activate.png') : require('../assets/images/send_button_un.png')}
+                style={styles.iconImage}
+              />
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       <Animated.View
@@ -580,6 +628,22 @@ const styles = StyleSheet.create({
     zIndex: 60,
     elevation: 12,
   },
+  cancelButton: {
+    position: 'absolute',
+    right: 10,
+    top: 10,
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 60,
+    elevation: 12,
+  },
+  cancelButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
   menuIcon: {
     width: 22,
     height: 22,
@@ -617,6 +681,27 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     resizeMode: 'stretch',
+  },
+  deleteBar: {
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+  },
+  deleteBarCount: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  deleteButton: {
+    height: 38,
+    paddingHorizontal: 22,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteButtonText: {
+    fontSize: 15,
+    fontWeight: '700',
   },
   debugPanel: {
     position: 'absolute',
