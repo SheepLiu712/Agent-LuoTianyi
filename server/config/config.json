@@ -59,7 +59,29 @@
                     "top_p": 0.9
                 }
             }
-        }
+        },
+        "llm_providers": [
+            {
+                "name": "阿里云百炼（DashScope）",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "model": "qwen3.5-plus"
+            },
+            {
+                "name": "DeepSeek",
+                "base_url": "https://api.deepseek.com/v1",
+                "model": "deepseek-v4-flash"
+            },
+            {
+                "name": "硅基流动（SiliconFlow）",
+                "base_url": "https://api.siliconflow.cn/v1",
+                "model": "Pro/deepseek-ai/DeepSeek-V3"
+            },
+            {
+                "name": "OpenAI",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4o-mini"
+            }
+        ]
     },
     "database": {
         "sql_db_folder": "data/database",

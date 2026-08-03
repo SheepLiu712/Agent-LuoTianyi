@@ -11,7 +11,7 @@ from PySide6.QtGui import QMouseEvent, QPainter, QPen, QColor, QImage, QResizeEv
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
                                QTextEdit, QScrollArea, QLabel,
                                 QFrame, QPushButton, QFileDialog, QSlider,
-                                QMessageBox)
+                                QMessageBox, QMenu)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
 from typing import Dict, Any, List
@@ -22,6 +22,7 @@ from ..types import ConversationItem
 from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, SystemMessage, BubblePlaybackManager
 from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
+from .llm_settings_dialog import LLMSettingsDialog
 
 DYNAMIC_ICON_PATH = "res/gui/dynamic.png"
 DYNAMIC_HAS_NEW_ICON_PATH = "res/gui/dynamic_has_new.png"
@@ -704,12 +705,19 @@ class ChatWidget(QWidget):
         self.temp_is_user = True
 
     def open_settings(self):
-        print("Opening preferences dialog...")
-        if self.network_client:
-            dialog = PreferencesDialog(self.network_client, self)
-            dialog.exec()
-        else:
-            QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开偏好设置")
+        if not self.network_client:
+            QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开设置")
+            return
+        menu = QMenu(self)
+        prefs_action = menu.addAction("相处模式设置")
+        llm_action = menu.addAction("LLM 模型设置")
+        chosen = menu.exec(
+            self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft())
+        )
+        if chosen == prefs_action:
+            PreferencesDialog(self.network_client, self).exec()
+        elif chosen == llm_action:
+            LLMSettingsDialog(self.network_client, self).exec()
 
     def open_dynamics(self):
         if self.network_client:

@@ -141,10 +141,110 @@ def save_credentials(username: str, token: str, do_auto_login: bool) -> None:
                 logger.error("Auto-login token not saved due to encryption failure.")
         if existing_data.get("server_url"):
             data["server_url"] = existing_data["server_url"]
+        if existing_data.get("api_key_dpapi"):
+            data["api_key_dpapi"] = existing_data["api_key_dpapi"]
+        if existing_data.get("llm_provider"):
+            data["llm_provider"] = existing_data["llm_provider"]
+        if existing_data.get("llm_model"):
+            data["llm_model"] = existing_data["llm_model"]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error(f"Error saving credentials: {e}")
+
+def save_api_key(api_key: str) -> None:
+    """保存用户的 LLM API Key 到本地凭据文件（与 token 相同方式加密）。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if api_key:
+            key_enc = _encrypt_token(api_key)
+            if key_enc:
+                data["api_key_dpapi"] = key_enc
+            else:
+                logger.error("LLM API Key not saved due to encryption failure.")
+        else:
+            data.pop("api_key_dpapi", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logger.info("LLM API Key saved.")
+    except Exception as e:
+        logger.error(f"Error saving LLM API Key: {e}")
+
+def get_api_key() -> Optional[str]:
+    """读取用户保存的 LLM API Key；未配置时返回 None。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            key_enc = data.get("api_key_dpapi")
+            if key_enc:
+                return _decrypt_token(key_enc)
+    except Exception as e:
+        logger.error(f"Error loading LLM API Key: {e}")
+    return None
+
+def save_provider(provider_name: str) -> None:
+    """保存用户选择的 LLM provider 预设名称。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if provider_name:
+            data["llm_provider"] = provider_name
+        else:
+            data.pop("llm_provider", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving LLM provider: {e}")
+
+def get_provider() -> Optional[str]:
+    """读取用户选择的 LLM provider 预设名称。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("llm_provider", None)
+    except Exception as e:
+        logger.error(f"Error loading LLM provider: {e}")
+    return None
+
+def save_model(model_name: str) -> None:
+    """保存用户选择的 LLM model 名称。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if model_name:
+            data["llm_model"] = model_name
+        else:
+            data.pop("llm_model", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving LLM model: {e}")
+
+def get_model() -> Optional[str]:
+    """读取用户保存的 LLM model 名称。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("llm_model", None)
+    except Exception as e:
+        logger.error(f"Error loading LLM model: {e}")
+    return None
 
 def save_server_url(server_url: str, verify_ssl: bool = True) -> None:
     """保存自定义服务器地址到凭据文件。"""

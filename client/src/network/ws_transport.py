@@ -10,6 +10,13 @@ import websockets
 from .event_types import build_event, normalize_agent_message, normalize_error_message, parse_server_message, WSEventType, WSMessage, AgentMessage, AgentStateMessage
 from ..utils.logger import get_logger
 from ..utils.tls import create_default_ssl_context
+from ..utils.llm_client import (
+    build_chat_completions_payload,
+    call_llm_api_async,
+    fetch_llm_providers,
+    resolve_provider_base_url,
+    resolve_provider_model,
+)
 
 
 WS_CLIENT_CAPABILITIES = ("negative_ack_v1",)
@@ -42,12 +49,19 @@ class WsTransport:
         token_getter: Callable[[], str | None],
         verify_ssl: bool = True,
         heartbeat_interval: float = 10.0,
+        api_key_getter: Callable[[], str | None] | None = None,
+        provider_getter: Callable[[], str | None] | None = None,
+        model_getter: Callable[[], str | None] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.username_getter = username_getter
         self.token_getter = token_getter
         self.verify_ssl = verify_ssl
         self.heartbeat_interval = heartbeat_interval
+        self.api_key_getter = api_key_getter
+        self.provider_getter = provider_getter
+        self.model_getter = model_getter
+        self._llm_providers: list | None = None
 
         self._lock = threading.Lock()
         self._submit_lock = threading.Lock()
@@ -122,6 +136,8 @@ class WsTransport:
         payload = {"message": text}
         if is_proactive:
             payload["is_proactive"] = True
+        if self.api_key_getter and self.api_key_getter():
+            payload["llm_mode"] = "client"
         return self._submit_user_event(
             WSEventType.USER_TEXT,
             payload=payload,
@@ -143,6 +159,8 @@ class WsTransport:
         }
         if image_client_path:
             payload["image_client_path"] = image_client_path
+        if self.api_key_getter and self.api_key_getter():
+            payload["llm_mode"] = "client"
         return self._submit_user_event(
             WSEventType.USER_IMAGE,
             payload=payload,
@@ -425,6 +443,10 @@ class WsTransport:
                 ping_id = msg.payload.get("ping_id")
                 continue
 
+            if event_type == WSEventType.LLM_REQUEST:
+                asyncio.create_task(self._handle_llm_request(ws, msg.payload))
+                continue
+
             if event_type == WSEventType.AGENT_STATE_CHANGED:
                 state = msg.payload.get("state", "waiting")
                 self._emit_agent_state(state)
@@ -448,6 +470,88 @@ class WsTransport:
                 if not consumed:
                     self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
         self.logger.debug("WebSocket receive loop exited")
+
+    async def _handle_llm_request(self, ws, payload: dict) -> None:
+        """处理服务端下发的 llm_request：用用户自己的 api-key 调用大模型。"""
+        request_id = payload.get("request_id")
+        if not request_id:
+            return
+
+        api_key = self.api_key_getter() if self.api_key_getter else None
+        if not api_key:
+            self.logger.warning("llm_request received but no api key configured on client")
+            await self._send_llm_response(request_id, error="no api key configured on client")
+            return
+
+        provider_name = self.provider_getter() if self.provider_getter else None
+        presets = await self._ensure_llm_providers()
+        if not presets:
+            await self._send_llm_response(request_id, error="failed to load llm providers")
+            return
+        base_url = resolve_provider_base_url(provider_name, presets=presets)
+        if not base_url:
+            await self._send_llm_response(request_id, error="unknown llm provider")
+            return
+        url = f"{base_url.rstrip('/')}/chat/completions"
+        model = self.model_getter() if self.model_getter else None
+        if not model:
+            model = resolve_provider_model(provider_name, presets=presets)
+        if not model:
+            await self._send_llm_response(request_id, error="missing provider info")
+            return
+
+        body = build_chat_completions_payload(
+            prompt=payload.get("prompt", ""),
+            model=model,
+            params=payload.get("params"),
+            enable_thinking=bool(payload.get("enable_thinking")),
+            use_json=bool(payload.get("use_json")),
+            image_base64=payload.get("image_base64"),
+        )
+        try:
+            result = await call_llm_api_async(url=url, api_key=api_key, payload=body)
+            await self._send_llm_response(
+                request_id,
+                content=result["content"],
+                usage=result["usage"],
+            )
+        except Exception as exc:
+            self.logger.error(f"Client LLM execution failed: {exc}")
+            await self._send_llm_response(request_id, error=str(exc))
+
+    async def _ensure_llm_providers(self) -> list:
+        """懒加载服务端下发的 LLM 服务商预设列表（带缓存）。"""
+        if self._llm_providers is None:
+            try:
+                self._llm_providers = await asyncio.to_thread(
+                    fetch_llm_providers,
+                    self.base_url,
+                )
+            except Exception as exc:
+                self.logger.warning(f"Failed to fetch llm providers: {exc}")
+                self._llm_providers = []
+        return self._llm_providers
+
+    async def _send_llm_response(
+        self,
+        request_id: str,
+        *,
+        content: str | None = None,
+        usage: dict | None = None,
+        error: str | None = None,
+    ) -> None:
+        payload = {"request_id": request_id}
+        if error is not None:
+            payload["error"] = error
+        else:
+            payload["content"] = content or ""
+            payload["usage"] = usage
+        event = build_event(WSEventType.LLM_RESPONSE, payload=payload)
+        if self._ws is not None:
+            try:
+                await self._ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
+            except Exception as exc:
+                self.logger.warning(f"Failed to send llm_response: {exc}")
 
     async def _heartbeat_loop(self, ws) -> None:
         ping_id = 0
