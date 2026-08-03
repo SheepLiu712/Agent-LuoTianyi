@@ -9,6 +9,7 @@ from ..types import ConversationItem
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
 from ..safety import credential
+from ..utils.llm_client import fetch_llm_providers
 
 
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -30,6 +31,7 @@ class NetworkClient:
         self.user_id: str | None = None
         self.message_token: str | None = None
         self.login_token: str | None = None
+        self._llm_providers: list | None = None
 
         self.auth_api = AuthApi(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
@@ -38,6 +40,9 @@ class NetworkClient:
             username_getter=lambda: self.user_id,
             token_getter=lambda: self.message_token,
             verify_ssl=self.verify_ssl,
+            api_key_getter=lambda: credential.get_api_key(),
+            provider_getter=lambda: credential.get_provider(),
+            model_getter=lambda: credential.get_model(),
         )
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
@@ -47,7 +52,23 @@ class NetworkClient:
         self.auth_api.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
         self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
+        self._llm_providers = None
         self.logger.info(f"Base URL updated to: {self.base_url}")
+
+    def get_llm_providers(self, force_refresh: bool = False) -> list:
+        """获取服务端下发的 LLM 服务商预设列表（带缓存）。
+
+        失败时不缓存空结果，下次调用会重新尝试。
+        """
+        if force_refresh:
+            self._llm_providers = None
+        if self._llm_providers is None:
+            try:
+                self._llm_providers = fetch_llm_providers(self.base_url)
+            except Exception as exc:
+                self.logger.warning(f"获取 LLM 服务商列表失败: {exc}")
+                return []
+        return self._llm_providers
 
     def login(self, username: str, password: str, request_token: bool = False) -> Tuple[bool, str]:
         try:

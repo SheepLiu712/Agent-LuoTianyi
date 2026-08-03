@@ -12,6 +12,8 @@ export const WSEventType = {
   // 代理状态
   AGENT_STATE_CHANGED: "agent_state_changed",
   AGENT_MESSAGE: "agent_message",
+  LLM_REQUEST: "llm_request",
+  LLM_RESPONSE: "llm_response",
 
   // 用户事件（客户端发送）
   USER_MESSAGE: "user_message",

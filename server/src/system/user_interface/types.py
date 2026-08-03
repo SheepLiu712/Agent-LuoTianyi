@@ -152,6 +152,9 @@ class WSEventType(str, Enum):
     AGENT_STATE_CHANGED = "agent_state_changed"
     AGENT_MESSAGE = "agent_message"
 
+    LLM_REQUEST = "llm_request"
+    LLM_RESPONSE = "llm_response"
+
     USER_MESSAGE = "user_message"
     USER_IMAGE = "user_image"
     USER_TEXT = "user_text"

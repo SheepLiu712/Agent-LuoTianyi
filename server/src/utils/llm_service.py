@@ -5,10 +5,16 @@ from .llm.llm_api_interface import LLMAPIInterface, LLMAPIFactory
 from .vision.vlm_api_interface import VLMAPIInterface, VLMAPIFactory
 from .llm.llm_module import LLMModule
 from .vision.vlm_module import VLMModule
+from .llm.client_llm_executor import ClientLLMExecutor
+from .llm.client_delegating_interface import (
+    ClientDelegatingLLMInterface,
+    ClientDelegatingVLMInterface,
+)
 
 class LLMService:
-    def __init__(self, config: Dict):
+    def __init__(self, config: Dict, client_llm_executor: Optional[ClientLLMExecutor] = None):
         self.config = config
+        self.client_llm_executor = client_llm_executor
         self.logger = get_logger(__name__)
         self.prompt_manager = PromptManager(config.get("prompt_manager", {}))
 
@@ -88,7 +94,12 @@ class LLMService:
         llm_interfaces = {}
         for llm_name, llm_config in self.llms_config.items():
             try:
-                llm_interfaces[llm_name] = LLMAPIFactory.create_interface(llm_config)
+                interface = LLMAPIFactory.create_interface(llm_config)
+                if self.client_llm_executor is not None:
+                    wrapped = ClientDelegatingLLMInterface(interface, self.client_llm_executor)
+                    wrapped._module_name = llm_name
+                    interface = wrapped
+                llm_interfaces[llm_name] = interface
                 self.logger.info(f"成功创建LLM接口: {llm_name}")
             except Exception as e:
                 self.logger.error(f"创建LLM接口失败: {llm_name}, 错误: {e}")
@@ -99,7 +110,12 @@ class LLMService:
         vlm_interfaces = {}
         for vlm_name, vlm_config in self.vlms_config.items():
             try:
-                vlm_interfaces[vlm_name] = VLMAPIFactory.create_interface(vlm_config)
+                interface = VLMAPIFactory.create_interface(vlm_config)
+                if self.client_llm_executor is not None:
+                    wrapped = ClientDelegatingVLMInterface(interface, self.client_llm_executor)
+                    wrapped._module_name = vlm_name
+                    interface = wrapped
+                vlm_interfaces[vlm_name] = interface
                 self.logger.info(f"成功创建VLM接口: {vlm_name}")
             except Exception as e:
                 self.logger.error(f"创建VLM接口失败: {vlm_name}, 错误: {e}")

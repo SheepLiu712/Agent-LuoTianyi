@@ -1,0 +1,154 @@
+"""
+ClientDelegatingLLMInterface / ClientDelegatingVLMInterface
+----------------------------------------------------------
+包装原始 LLM/VLM 接口：当当前用户启用了客户端执行模式且在线连接可用时，
+把本次调用转发给客户端执行（客户端使用用户自己的 api-key）；
+否则或转发失败时，回退到内部接口（服务端自带 key）。
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, Optional
+
+from src.system.observability import get_trace_context
+from src.utils.llm.client_llm_executor import ClientLLMExecutor
+from src.utils.llm.llm_api_interface import LLMAPIInterface
+from src.utils.logger import get_logger
+from src.utils.vision.vlm_api_interface import VLMAPIInterface
+
+
+def _provider_info_from_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """从接口配置中提取客户端调用所需的非敏感信息（不含 api_key）。"""
+    config = config or {}
+    api_type = str(config.get("api_type", "openai")).lower()
+    model = config.get("model", "")
+    if api_type == "requests":
+        url = config.get("url", "")
+    else:
+        base_url = str(config.get("base_url", "")).rstrip("/")
+        url = f"{base_url}/chat/completions" if base_url else ""
+    return {
+        "api_type": api_type,
+        "url": url,
+        "model": model,
+    }
+
+
+class ClientDelegatingLLMInterface(LLMAPIInterface):
+    """LLM 接口包装：优先由用户客户端执行，失败回退服务端直连。"""
+
+    def __init__(self, inner: LLMAPIInterface, executor: Optional[ClientLLMExecutor]):
+        self.inner = inner
+        self.executor = executor
+        self.logger = get_logger(__name__)
+        self.default_parameters = dict(getattr(inner, "default_parameters", None) or {})
+
+    async def generate_response(
+        self,
+        prompt: str,
+        params: Optional[Dict[str, Any]] = None,
+        enable_thinking: bool = False,
+        use_json: bool = False,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        user_id = get_trace_context().get("user_id")
+        if self._can_use_client(user_id):
+            config = getattr(self.inner, "config", {}) or {}
+            provider = _provider_info_from_config(config)
+            effective_thinking = enable_thinking and bool(config.get("can_enable_thinking", False))
+            effective_json = use_json and bool(config.get("can_use_json", False))
+            try:
+                return await self.executor.request(
+                    user_id,
+                    module=getattr(self, "_module_name", "unknown"),
+                    prompt=prompt,
+                    params=params,
+                    enable_thinking=effective_thinking,
+                    use_json=effective_json,
+                    provider=provider,
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    "Client LLM execution failed for user %s, falling back to server key: %s",
+                    user_id,
+                    exc,
+                )
+        return await self.inner.generate_response(
+            prompt,
+            params=params,
+            enable_thinking=enable_thinking,
+            use_json=use_json,
+            **kwargs,
+        )
+
+    def set_parameters(self, **params: Any) -> None:
+        return self.inner.set_parameters(**params)
+
+    def get_interface_info(self) -> Dict[str, Any]:
+        return self.inner.get_interface_info()
+
+    def _can_use_client(self, user_id: Optional[str]) -> bool:
+        return bool(
+            self.executor is not None
+            and user_id
+            and self.executor.is_enabled(user_id)
+        )
+
+
+class ClientDelegatingVLMInterface(VLMAPIInterface):
+    """VLM 接口包装：优先由用户客户端执行，失败回退服务端直连。"""
+
+    def __init__(self, inner: VLMAPIInterface, executor: Optional[ClientLLMExecutor]):
+        self.inner = inner
+        self.executor = executor
+        self.logger = get_logger(__name__)
+
+    async def generate_response(
+        self,
+        prompt: str,
+        image_base64: str,
+        **kwargs: Any,
+    ) -> Dict[str, Any]:
+        user_id = get_trace_context().get("user_id")
+        if self._can_use_client(user_id):
+            config = getattr(self.inner, "config", {}) or {}
+            provider = _provider_info_from_config(config)
+            extra_body = dict(kwargs.get("extra_body") or {})
+            effective_thinking = bool(extra_body.get("enable_thinking", False))
+            effective_json = bool(kwargs.get("response_format"))
+            params = {
+                key: value
+                for key, value in kwargs.items()
+                if key not in ("extra_body", "response_format")
+            }
+            try:
+                return await self.executor.request(
+                    user_id,
+                    module=getattr(self, "_module_name", "unknown"),
+                    prompt=prompt,
+                    params=params,
+                    enable_thinking=effective_thinking,
+                    use_json=effective_json,
+                    image_base64=image_base64,
+                    provider=provider,
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    "Client VLM execution failed for user %s, falling back to server key: %s",
+                    user_id,
+                    exc,
+                )
+        return await self.inner.generate_response(prompt, image_base64=image_base64, **kwargs)
+
+    def set_parameters(self, **params: Any) -> None:
+        return self.inner.set_parameters(**params)
+
+    def get_interface_info(self) -> Dict[str, Any]:
+        return self.inner.get_interface_info()
+
+    def _can_use_client(self, user_id: Optional[str]) -> bool:
+        return bool(
+            self.executor is not None
+            and user_id
+            and self.executor.is_enabled(user_id)
+        )

@@ -1,9 +1,22 @@
 import { AppState } from 'react-native';
-import { server_config } from '../config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  server_config,
+  LLM_API_KEY_STORAGE_KEY,
+  LLM_PROVIDER_STORAGE_KEY,
+  LLM_MODEL_STORAGE_KEY,
+} from '../config';
 import { AgentMessagePayload } from '../types/chat';
 import { WSEventType } from '../types/ws_events';
 import { addDebugTrace } from './debug_trace';
 import { AckResult, normalizeServerAck } from './ws_ack';
+import {
+  buildChatCompletionsPayload,
+  callLlmProvider,
+  ensureProviderPresets,
+  resolveProviderBaseUrl,
+  resolveProviderModel,
+} from './llm_client';
 
 export type { AckResult } from './ws_ack';
 export { normalizeServerAck } from './ws_ack';
@@ -139,9 +152,13 @@ export class WebSocketTransport {
   }
 
   async submitUserText(message: string, isProactive = false, ackTimeout = 10000, clientMsgId?: string): Promise<AckResult> {
+    const apiKey = await AsyncStorage.getItem(LLM_API_KEY_STORAGE_KEY);
     const payload: Record<string, unknown> = { message };
     if (isProactive) {
       payload.is_proactive = true;
+    }
+    if (apiKey) {
+      payload.llm_mode = 'client';
     }
     return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout, clientMsgId);
   }
@@ -153,16 +170,16 @@ export class WebSocketTransport {
     ackTimeout = 10000,
     clientMsgId?: string,
   ): Promise<AckResult> {
-    return this.sendWithAck(
-      WSEventType.USER_IMAGE,
-      {
-        image_base64: imageBase64,
-        mime_type: mimeType,
-        image_client_path: imageClientPath,
-      },
-      ackTimeout,
-      clientMsgId,
-    );
+    const apiKey = await AsyncStorage.getItem(LLM_API_KEY_STORAGE_KEY);
+    const payload: Record<string, unknown> = {
+      image_base64: imageBase64,
+      mime_type: mimeType,
+      image_client_path: imageClientPath,
+    };
+    if (apiKey) {
+      payload.llm_mode = 'client';
+    }
+    return this.sendWithAck(WSEventType.USER_IMAGE, payload, ackTimeout, clientMsgId);
   }
 
   async submitUserTyping(textLength: number, ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
@@ -546,6 +563,11 @@ export class WebSocketTransport {
         return;
       }
 
+      if (eventType === WSEventType.LLM_REQUEST) {
+        void this.handleLlmRequest(payload);
+        return;
+      }
+
       if (eventType === WSEventType.AGENT_MESSAGE) {
         this.callbacks.onAgentMessage(payload as AgentMessagePayload);
         return;
@@ -558,6 +580,63 @@ export class WebSocketTransport {
     } catch {
       addDebugTrace('ws', 'recv parse error');
       this.callbacks.onError('收到无法解析的 WebSocket 消息');
+    }
+  }
+
+  private async handleLlmRequest(payload: Record<string, unknown>) {
+    const requestId = String(payload.request_id || '');
+    if (!requestId) {
+      return;
+    }
+    const sendError = (error: string) => {
+      this.sendRaw({
+        type: WSEventType.LLM_RESPONSE,
+        ts: Date.now(),
+        payload: { request_id: requestId, error },
+      });
+    };
+    try {
+      const apiKey = await AsyncStorage.getItem(LLM_API_KEY_STORAGE_KEY);
+      if (!apiKey) {
+        addDebugTrace('llm', 'llm_request without api key');
+        sendError('no api key configured on client');
+        return;
+      }
+      const presets = await ensureProviderPresets(server_config.BASE_URL);
+      const savedProvider = await AsyncStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
+      const baseUrl = resolveProviderBaseUrl(savedProvider, presets);
+      if (!baseUrl) {
+        sendError('unknown llm provider');
+        return;
+      }
+      const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+      const savedModel = await AsyncStorage.getItem(LLM_MODEL_STORAGE_KEY);
+      const model = savedModel || resolveProviderModel(savedProvider, presets);
+      if (!model) {
+        sendError('missing provider info');
+        return;
+      }
+      const body = buildChatCompletionsPayload({
+        prompt: String(payload.prompt || ''),
+        model,
+        params: (payload.params || {}) as Record<string, unknown>,
+        enableThinking: Boolean(payload.enable_thinking),
+        useJson: Boolean(payload.use_json),
+        imageBase64: typeof payload.image_base64 === 'string' ? payload.image_base64 : undefined,
+      });
+      const result = await callLlmProvider({ url, apiKey, body });
+      this.sendRaw({
+        type: WSEventType.LLM_RESPONSE,
+        ts: Date.now(),
+        payload: {
+          request_id: requestId,
+          content: result.content,
+          usage: result.usage ?? null,
+        },
+      });
+    } catch (e) {
+      addDebugTrace('llm', 'llm_request failed', { error: String(e) });
+      sendError(e instanceof Error ? e.message : String(e));
     }
   }
 
