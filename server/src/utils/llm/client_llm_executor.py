@@ -37,6 +37,61 @@ class ClientLLMError(ClientLLMExecutionError):
     """客户端执行 LLM 调用时返回了错误。"""
 
 
+# 可重试的错误类型（连接不可用 / 等待超时）
+RETRYABLE_EXCEPTIONS = (
+    ClientLLMUnavailable,
+    ClientLLMTimeout,
+)
+
+_KEY_ERROR_MARKERS = (
+    "401",
+    "403",
+    "invalid api key",
+    "api key",
+    "authentication",
+    "unauthorized",
+    "access denied",
+    "bad key",
+    "permission denied",
+    "arrearage",
+    "overdue payment",
+    "account in good standing",
+    "no api key configured",
+)
+
+_NETWORK_ERROR_MARKERS = (
+    "connection",
+    "timed out",
+    "timeout",
+    "network",
+    "refused",
+    "resolve",
+    "failed to fetch",
+    "aborted",
+    "socket",
+    "dns",
+    "unreachable",
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "rate limit",
+    "overloaded",
+    "temporarily",
+)
+
+
+def _looks_like_key_error(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in _KEY_ERROR_MARKERS)
+
+
+def _looks_like_network_error(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(marker in lowered for marker in _NETWORK_ERROR_MARKERS)
+
+
 class ClientLLMExecutor:
     """服务端单例：向用户的客户端转发 LLM 请求并等待响应。"""
 
@@ -46,6 +101,8 @@ class ClientLLMExecutor:
         self._stream_manager: Any = None
         # request_id -> (user_id, asyncio.Future)
         self._pending: Dict[str, tuple[str, asyncio.Future]] = {}
+        # user_id -> 最近一次处理该用户请求的连接（用于把失败通知发回正确的客户端）
+        self._user_connections: Dict[str, Any] = {}
 
     def bind(self, stream_manager: Any) -> None:
         """绑定 ChatStreamManager，用于按 user_id 找到在线连接。"""
@@ -72,10 +129,26 @@ class ClientLLMExecutor:
         """用户断开连接时失败其挂起的请求。"""
         if not user_id:
             return
+        self._user_connections.pop(user_id, None)
         for request_id in [rid for rid, (uid, _) in self._pending.items() if uid == user_id]:
             _, fut = self._pending.pop(request_id)
             if not fut.done():
                 fut.set_exception(ClientLLMUnavailable("client disconnected"))
+
+    async def notify_user(self, user_id: str, message: str) -> None:
+        """向实际处理该用户请求的连接发送错误通知；未知则跳过。"""
+        ws_connection = self._user_connections.get(user_id)
+        if ws_connection is None:
+            return
+        try:
+            event = {
+                "type": "error",
+                "ts": int(time.time() * 1000),
+                "payload": {"code": "LLM_CLIENT_ERROR", "message": message},
+            }
+            await ws_connection.websocket.send_json(event)
+        except Exception as exc:
+            self.logger.debug(f"Failed to notify user {user_id}: {exc}")
 
     async def request(
         self,
@@ -101,6 +174,7 @@ class ClientLLMExecutor:
             raise ClientLLMUnavailable(
                 f"active connection of user {user_id} does not enable client LLM"
             )
+        self._user_connections[user_id] = ws_connection
         websocket = ws_connection.websocket
 
         request_id = f"llm-{uuid.uuid4().hex[:16]}"
@@ -130,6 +204,12 @@ class ClientLLMExecutor:
         started = time.perf_counter()
         try:
             await websocket.send_json(event)
+        except Exception as exc:
+            self._pending.pop(request_id, None)
+            raise ClientLLMUnavailable(
+                f"failed to send llm_request {request_id}: {exc}"
+            ) from exc
+        try:
             result = await asyncio.wait_for(future, timeout=self.timeout_seconds)
         except asyncio.TimeoutError:
             self._pending.pop(request_id, None)

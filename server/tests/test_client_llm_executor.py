@@ -15,6 +15,8 @@ from src.utils.llm.client_llm_executor import (
     ClientLLMExecutor,
     ClientLLMTimeout,
     ClientLLMUnavailable,
+    _looks_like_key_error,
+    _looks_like_network_error,
 )
 from src.utils.llm.llm_api_interface import LLMAPIInterface
 from src.utils.llm_service import LLMService
@@ -55,9 +57,43 @@ class FakeStreamManager:
         return self.stream
 
 
+class FakeExecutor:
+    """模拟 ClientLLMExecutor，用于测试包装接口的重试/通知逻辑。"""
+
+    def __init__(self, enabled=True):
+        self.enabled = enabled
+        self.request_calls = 0
+        self.notices = []
+        self.behavior = []
+
+    def is_enabled(self, user_id):
+        return self.enabled
+
+    async def request(self, user_id, **kwargs):
+        self.request_calls += 1
+        if self.behavior:
+            item = self.behavior.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+        return {"content": "client-answer", "usage": None, "response_time_s": 0.1}
+
+    async def notify_user(self, user_id, message):
+        self.notices.append(message)
+
+
 def test_on_llm_response_is_sync():
     """on_llm_response 是同步回调，server_main 中不能用 await 调用。"""
     assert not inspect.iscoroutinefunction(ClientLLMExecutor.on_llm_response)
+
+
+def test_error_classification():
+    assert _looks_like_key_error("LLM provider returned HTTP 401: invalid api key") is True
+    assert _looks_like_key_error("HTTP 403 Access denied") is True
+    assert _looks_like_key_error("connection refused") is False
+    assert _looks_like_network_error("LLM provider request failed: Connection error") is True
+    assert _looks_like_network_error("timed out") is True
+    assert _looks_like_network_error("HTTP 401 invalid api key") is False
 
 
 def test_is_enabled_uses_connection_flag(executor, fake_ws):
@@ -153,6 +189,39 @@ async def test_multi_connection_device_a_reconnects_back(executor):
     result = await task
     assert result["content"] == "ok"
     assert device_b_ws.sent_events == []
+
+
+@pytest.mark.asyncio
+async def test_notify_goes_to_request_connection_after_switch(executor):
+    """设备切换后，失败通知仍发回实际处理请求的连接，而不是新的活跃连接。"""
+    device_a_ws = FakeWebSocket()
+    device_b_ws = FakeWebSocket()
+    stream = FakeStream(device_a_ws, client_llm_enabled=True)
+    executor.bind(FakeStreamManager(stream))
+
+    # 请求发到设备 A
+    task = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p", params=None)
+    )
+    await asyncio.sleep(0)
+    request_id = device_a_ws.sent_events[-1]["payload"]["request_id"]
+
+    # 请求进行中，设备 B 接管活跃连接
+    stream.reconnect(device_b_ws, client_llm_enabled=False)
+
+    # A 返回 key 错误
+    executor.on_llm_response(
+        {"request_id": request_id, "error": "HTTP 401 invalid api key"}
+    )
+    with pytest.raises(ClientLLMError):
+        await task
+
+    # 通知应发回 A，而不是新的活跃连接 B
+    await executor.notify_user("u1", "测试通知")
+    error_events_a = [e for e in device_a_ws.sent_events if e["type"] == "error"]
+    error_events_b = [e for e in device_b_ws.sent_events if e["type"] == "error"]
+    assert len(error_events_a) == 1
+    assert error_events_b == []
 
 
 class FakeInner(LLMAPIInterface):
@@ -276,6 +345,76 @@ async def test_request_client_error(executor, fake_ws):
 
 
 @pytest.mark.asyncio
+async def test_request_classifies_errors(executor, fake_ws):
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
+
+    # key 类错误
+    task = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p", params=None)
+    )
+    await asyncio.sleep(0)
+    request_id = fake_ws.sent_events[-1]["payload"]["request_id"]
+    executor.on_llm_response(
+        {"request_id": request_id, "error": "LLM provider returned HTTP 401: invalid api key"}
+    )
+    with pytest.raises(ClientLLMError):
+        await task
+
+    # 网络类错误
+    task = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p", params=None)
+    )
+    await asyncio.sleep(0)
+    request_id = fake_ws.sent_events[-1]["payload"]["request_id"]
+    executor.on_llm_response(
+        {"request_id": request_id, "error": "LLM provider request failed: Connection error"}
+    )
+    with pytest.raises(ClientLLMError):
+        await task
+
+    # 其他错误保持 ClientLLMError
+    task = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p", params=None)
+    )
+    await asyncio.sleep(0)
+    request_id = fake_ws.sent_events[-1]["payload"]["request_id"]
+    executor.on_llm_response({"request_id": request_id, "error": "HTTP 400 bad request"})
+    with pytest.raises(ClientLLMError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_notify_user_sends_error_event(executor, fake_ws):
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
+    task = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p", params=None)
+    )
+    await asyncio.sleep(0)
+    request_id = fake_ws.sent_events[0]["payload"]["request_id"]
+
+    await executor.notify_user("u1", "测试通知")
+    error_events = [e for e in fake_ws.sent_events if e["type"] == "error"]
+    assert error_events
+    event = error_events[0]
+    assert event["type"] == "error"
+    assert event["payload"]["code"] == "LLM_CLIENT_ERROR"
+    assert event["payload"]["message"] == "测试通知"
+
+    executor.on_llm_response(
+        {"request_id": request_id, "content": "ok", "usage": None}
+    )
+    result = await task
+    assert result["content"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_notify_user_unknown_is_noop(executor, fake_ws):
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
+    await executor.notify_user("u1", "不应发送")
+    assert fake_ws.sent_events == []
+
+
+@pytest.mark.asyncio
 async def test_clear_user_fails_pending(executor, fake_ws):
     executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
     task = asyncio.create_task(executor.request("u1", module="m", prompt="p", params=None))
@@ -328,7 +467,7 @@ async def test_delegating_enabled_uses_client(monkeypatch, executor, fake_ws):
 
 
 @pytest.mark.asyncio
-async def test_delegating_fallback_on_client_error(monkeypatch, executor, fake_ws):
+async def test_delegating_client_error_raises_and_notifies(monkeypatch, executor, fake_ws):
     inner = FakeInner()
     executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
     wrapper = ClientDelegatingLLMInterface(inner, executor)
@@ -342,9 +481,12 @@ async def test_delegating_fallback_on_client_error(monkeypatch, executor, fake_w
     request_id = fake_ws.sent_events[0]["payload"]["request_id"]
     executor.on_llm_response({"request_id": request_id, "error": "boom"})
 
-    result = await task
-    assert result["content"] == "server-answer"
-    assert len(inner.calls) == 1
+    with pytest.raises(ClientLLMError):
+        await task
+    assert len(inner.calls) == 0
+    error_events = [e for e in fake_ws.sent_events if e["type"] == "error"]
+    assert error_events
+    assert error_events[0]["payload"]["code"] == "LLM_CLIENT_ERROR"
 
 
 @pytest.mark.asyncio
@@ -369,6 +511,95 @@ async def test_vlm_delegating_enabled(monkeypatch, executor, fake_ws):
     result = await task
     assert result["content"] == "vlm-client"
     assert inner.calls == []
+
+
+@pytest.mark.asyncio
+async def test_wrapper_retries_network_errors_then_succeeds(monkeypatch):
+    inner = FakeInner()
+    executor = FakeExecutor()
+    executor.behavior = [
+        ClientLLMError("connection refused"),
+        ClientLLMError("connection refused"),
+        {"content": "ok-after-retry", "usage": None, "response_time_s": 0.1},
+    ]
+    wrapper = ClientDelegatingLLMInterface(inner, executor)
+    monkeypatch.setattr(
+        "src.utils.llm.client_delegating_interface.get_trace_context",
+        lambda: {"user_id": "u1"},
+    )
+    monkeypatch.setattr(
+        "src.utils.llm.client_delegating_interface.CLIENT_RETRY_INITIAL_DELAY", 0
+    )
+
+    result = await wrapper.generate_response("p")
+    assert result["content"] == "ok-after-retry"
+    assert executor.request_calls == 3
+    assert executor.notices == []
+    assert inner.calls == []
+
+
+@pytest.mark.asyncio
+async def test_wrapper_network_failure_notifies_and_raises(monkeypatch):
+    inner = FakeInner()
+    executor = FakeExecutor()
+    executor.behavior = [
+        ClientLLMError("connection refused"),
+        ClientLLMError("connection refused"),
+        ClientLLMError("connection refused"),
+    ]
+    wrapper = ClientDelegatingLLMInterface(inner, executor)
+    monkeypatch.setattr(
+        "src.utils.llm.client_delegating_interface.get_trace_context",
+        lambda: {"user_id": "u1"},
+    )
+    monkeypatch.setattr(
+        "src.utils.llm.client_delegating_interface.CLIENT_RETRY_INITIAL_DELAY", 0
+    )
+
+    with pytest.raises(ClientLLMError):
+        await wrapper.generate_response("p")
+    assert executor.request_calls == 3
+    assert len(executor.notices) == 1
+    assert len(inner.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_wrapper_key_error_no_retry_notifies_and_raises(monkeypatch):
+    inner = FakeInner()
+    executor = FakeExecutor()
+    executor.behavior = [ClientLLMError("HTTP 401 invalid api key")]
+    wrapper = ClientDelegatingLLMInterface(inner, executor)
+    monkeypatch.setattr(
+        "src.utils.llm.client_delegating_interface.get_trace_context",
+        lambda: {"user_id": "u1"},
+    )
+
+    with pytest.raises(ClientLLMError):
+        await wrapper.generate_response("p")
+    assert executor.request_calls == 1  # key 错误不重试
+    assert len(executor.notices) == 1
+    assert "API Key" in executor.notices[0]
+    assert len(inner.calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_vlm_wrapper_key_error_notifies_and_raises(monkeypatch):
+    inner = FakeVLMInner()
+    executor = FakeExecutor()
+    executor.behavior = [ClientLLMError("HTTP 403 forbidden")]
+    wrapper = ClientDelegatingVLMInterface(inner, executor)
+    monkeypatch.setattr(
+        "src.utils.llm.client_delegating_interface.get_trace_context",
+        lambda: {"user_id": "u1"},
+    )
+
+    with pytest.raises(ClientLLMError):
+        await wrapper.generate_response(
+            "describe", image_base64="data:image/png;base64,AAA"
+        )
+    assert executor.request_calls == 1
+    assert len(executor.notices) == 1
+    assert len(inner.calls) == 0
 
 
 def test_llm_service_wraps_interfaces_when_executor_given(monkeypatch):
