@@ -4,10 +4,10 @@
 import {
   buildChatCompletionsPayload,
   callLlmProvider,
-  fetchProviderModels,
   fetchProviderPresets,
   resolveProviderBaseUrl,
   resolveProviderModel,
+  resolveProviderVlmModel,
 } from '../utils/llm_client';
 import type { LlmProviderPreset } from '../utils/llm_client';
 
@@ -15,12 +15,14 @@ const PRESETS: LlmProviderPreset[] = [
   {
     name: '阿里云百炼（DashScope）',
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen3.5-plus',
+    models: ['qwen3.5-plus', 'qwen3.6-flash'],
+    vlm_models: ['qwen3-vl-plus'],
   },
   {
     name: 'DeepSeek',
     base_url: 'https://api.deepseek.com/v1',
-    model: 'deepseek-v4-flash',
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    vlm_models: [],
   },
 ];
 
@@ -75,6 +77,16 @@ describe('resolveProviderModel', () => {
   it('returns empty string for unknown or empty names', () => {
     expect(resolveProviderModel(null, PRESETS)).toBe('');
     expect(resolveProviderModel('不存在的服务商', PRESETS)).toBe('');
+  });
+});
+
+describe('resolveProviderVlmModel', () => {
+  it('resolves the default image model of a preset', () => {
+    expect(resolveProviderVlmModel('阿里云百炼（DashScope）', PRESETS)).toBe('qwen3-vl-plus');
+  });
+
+  it('returns empty string when the provider has no image models', () => {
+    expect(resolveProviderVlmModel('DeepSeek', PRESETS)).toBe('');
   });
 });
 
@@ -146,42 +158,6 @@ describe('callLlmProvider', () => {
 
     await expect(
       callLlmProvider({ url: 'https://example.com', apiKey: 'bad', body: {} }),
-    ).rejects.toThrow('401');
-  });
-});
-
-describe('fetchProviderModels', () => {
-  it('fetches and parses model ids with the bearer key', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        object: 'list',
-        data: [{ id: 'qwen3.5-plus' }, { id: 'deepseek-chat' }],
-      }),
-    } as unknown as Response);
-    global.fetch = fetchMock as unknown as typeof fetch;
-
-    const models = await fetchProviderModels(
-      'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      'sk-test',
-    );
-
-    expect(models).toEqual(['qwen3.5-plus', 'deepseek-chat']);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1/models');
-    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-test');
-  });
-
-  it('throws on http error', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: async () => 'unauthorized',
-    } as unknown as Response) as unknown as typeof fetch;
-
-    await expect(
-      fetchProviderModels('https://example.com/v1', 'bad'),
     ).rejects.toThrow('401');
   });
 });

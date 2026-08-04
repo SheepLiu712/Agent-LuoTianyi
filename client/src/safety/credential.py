@@ -149,15 +149,29 @@ def save_credentials(username: str, token: str, do_auto_login: bool) -> None:
             data["llm_provider"] = existing_data["llm_provider"]
         if existing_data.get("llm_model"):
             data["llm_model"] = existing_data["llm_model"]
+        if existing_data.get("vlm_model"):
+            data["vlm_model"] = existing_data["vlm_model"]
+        if existing_data.get("vlm_provider"):
+            data["vlm_provider"] = existing_data["vlm_provider"]
+        if existing_data.get("vlm_provider_base_url"):
+            data["vlm_provider_base_url"] = existing_data["vlm_provider_base_url"]
+        if existing_data.get("vlm_api_key_dpapi"):
+            data["vlm_api_key_dpapi"] = existing_data["vlm_api_key_dpapi"]
+        if existing_data.get("vlm_api_key_plain"):
+            data["vlm_api_key_plain"] = existing_data["vlm_api_key_plain"]
         if existing_data.get("llm_provider_base_url"):
             data["llm_provider_base_url"] = existing_data["llm_provider_base_url"]
+        if existing_data.get("llm_params"):
+            data["llm_params"] = existing_data["llm_params"]
+        if existing_data.get("vlm_params"):
+            data["vlm_params"] = existing_data["vlm_params"]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logger.error(f"Error saving credentials: {e}")
 
-def save_api_key(api_key: str) -> bool:
-    """保存用户的 LLM API Key 到本地凭据文件。"""
+def _save_api_key_impl(api_key: str, allow_plaintext: bool, prefix: str) -> bool:
+    """按前缀保存 API Key（加密优先；allow_plaintext 时明文兜底）。"""
     try:
         path = get_credential_path()
         data = {}
@@ -167,25 +181,29 @@ def save_api_key(api_key: str) -> bool:
         if api_key:
             key_enc = _encrypt_token(api_key)
             if key_enc:
-                data["api_key_dpapi"] = key_enc
-                data.pop("api_key_plain", None)
+                data[f"{prefix}api_key_dpapi"] = key_enc
+                data.pop(f"{prefix}api_key_plain", None)
+            elif allow_plaintext:
+                logger.warning("API Key 无法加密，将以明文保存。")
+                data[f"{prefix}api_key_plain"] = api_key
+                data.pop(f"{prefix}api_key_dpapi", None)
             else:
-                logger.error("LLM API Key not saved due to encryption failure.")
+                logger.error("API Key not saved due to encryption failure.")
                 return False
         else:
-            data.pop("api_key_dpapi", None)
-            data.pop("api_key_plain", None)
+            data.pop(f"{prefix}api_key_dpapi", None)
+            data.pop(f"{prefix}api_key_plain", None)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        logger.info("LLM API Key saved.")
+        logger.info("API Key saved.")
         return True
     except Exception as e:
-        logger.error(f"Error saving LLM API Key: {e}")
+        logger.error(f"Error saving API Key: {e}")
         return False
 
 
-def save_api_key_plain(api_key: str) -> None:
-    """以明文保存 LLM API Key。
+def _save_api_key_plain_impl(api_key: str, prefix: str) -> None:
+    """以明文保存 API Key。
 
     仅应在用户二次确认后调用；调用方需明确告知用户 key 将明文存储。
     """
@@ -196,34 +214,65 @@ def save_api_key_plain(api_key: str) -> None:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
         if api_key:
-            logger.warning("LLM API Key 将以明文保存。")
-            data["api_key_plain"] = api_key
-            data.pop("api_key_dpapi", None)
+            logger.warning("API Key 将以明文保存。")
+            data[f"{prefix}api_key_plain"] = api_key
+            data.pop(f"{prefix}api_key_dpapi", None)
         else:
-            data.pop("api_key_plain", None)
-            data.pop("api_key_dpapi", None)
+            data.pop(f"{prefix}api_key_plain", None)
+            data.pop(f"{prefix}api_key_dpapi", None)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        logger.info("LLM API Key saved (plaintext).")
+        logger.info("API Key saved (plaintext).")
     except Exception as e:
-        logger.error(f"Error saving LLM API Key (plaintext): {e}")
+        logger.error(f"Error saving API Key (plaintext): {e}")
 
-def get_api_key() -> Optional[str]:
-    """读取用户保存的 LLM API Key；未配置时返回 None。"""
+
+def _get_api_key_impl(prefix: str) -> Optional[str]:
+    """按前缀读取 API Key；未配置时返回 None。"""
     try:
         path = get_credential_path()
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            key_enc = data.get("api_key_dpapi")
+            key_enc = data.get(f"{prefix}api_key_dpapi")
             if key_enc:
                 return _decrypt_token(key_enc)
-            plain = data.get("api_key_plain")
+            plain = data.get(f"{prefix}api_key_plain")
             if plain:
                 return str(plain)
     except Exception as e:
-        logger.error(f"Error loading LLM API Key: {e}")
+        logger.error(f"Error loading API Key: {e}")
     return None
+
+
+def save_api_key(api_key: str) -> bool:
+    """保存对话模块的 LLM API Key（加密优先）。"""
+    return _save_api_key_impl(api_key, False, "")
+
+
+def save_api_key_plain(api_key: str) -> None:
+    """以明文保存对话模块的 LLM API Key（仅限二次确认后调用）。"""
+    _save_api_key_plain_impl(api_key, "")
+
+
+def get_api_key() -> Optional[str]:
+    """读取对话模块的 LLM API Key；未配置时返回 None。"""
+    return _get_api_key_impl("")
+
+
+def save_vlm_api_key(api_key: str, allow_plaintext: bool = False) -> bool:
+    """保存图片理解模块的 LLM API Key（加密优先；allow_plaintext 时明文兜底）。"""
+    return _save_api_key_impl(api_key, allow_plaintext, "vlm_")
+
+
+def save_vlm_api_key_plain(api_key: str) -> None:
+    """以明文保存图片理解模块的 LLM API Key（仅限二次确认后调用）。"""
+    _save_api_key_plain_impl(api_key, "vlm_")
+
+
+def get_vlm_api_key() -> Optional[str]:
+    """读取图片理解模块的 LLM API Key；未配置时返回 None。"""
+    return _get_api_key_impl("vlm_")
 
 def save_provider(provider_name: str) -> None:
     """保存用户选择的 LLM provider 预设名称。"""
@@ -311,6 +360,155 @@ def get_provider_base_url() -> Optional[str]:
     except Exception as e:
         logger.error(f"Error loading LLM provider base_url: {e}")
     return None
+
+def save_vlm_model(model_name: str) -> None:
+    """保存用户选择的图片理解模型名称。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if model_name:
+            data["vlm_model"] = model_name
+        else:
+            data.pop("vlm_model", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving LLM VLM model: {e}")
+
+def get_vlm_model() -> Optional[str]:
+    """读取用户保存的图片理解模型名称。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("vlm_model", None)
+    except Exception as e:
+        logger.error(f"Error loading LLM VLM model: {e}")
+    return None
+
+def save_vlm_provider(provider_name: str) -> None:
+    """保存用户为图片理解单独选择的服务商。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if provider_name:
+            data["vlm_provider"] = provider_name
+        else:
+            data.pop("vlm_provider", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving LLM VLM provider: {e}")
+
+def get_vlm_provider() -> Optional[str]:
+    """读取用户为图片理解单独选择的服务商。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("vlm_provider", None)
+    except Exception as e:
+        logger.error(f"Error loading LLM VLM provider: {e}")
+    return None
+
+def save_vlm_provider_base_url(base_url: str) -> None:
+    """保存图片理解服务商的 base_url。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if base_url:
+            data["vlm_provider_base_url"] = base_url
+        else:
+            data.pop("vlm_provider_base_url", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving LLM VLM provider base_url: {e}")
+
+def get_vlm_provider_base_url() -> Optional[str]:
+    """读取图片理解服务商的 base_url。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("vlm_provider_base_url", None)
+    except Exception as e:
+        logger.error(f"Error loading LLM VLM provider base_url: {e}")
+    return None
+
+def save_llm_params(params: dict) -> None:
+    """保存用户自定义的 LLM 请求参数（temperature / max_tokens / top_p）。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if params:
+            data["llm_params"] = params
+        else:
+            data.pop("llm_params", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving LLM params: {e}")
+
+def get_llm_params() -> dict:
+    """读取用户自定义的 LLM 请求参数；未配置时返回空字典。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            params = data.get("llm_params")
+            if isinstance(params, dict):
+                return params
+    except Exception as e:
+        logger.error(f"Error loading LLM params: {e}")
+    return {}
+
+def save_vlm_params(params: dict) -> None:
+    """保存图片理解模型的自定义请求参数（temperature / max_tokens / top_p 等）。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if params:
+            data["vlm_params"] = params
+        else:
+            data.pop("vlm_params", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving LLM VLM params: {e}")
+
+def get_vlm_params() -> dict:
+    """读取图片理解模型的自定义请求参数；未配置时返回空字典。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            params = data.get("vlm_params")
+            if isinstance(params, dict):
+                return params
+    except Exception as e:
+        logger.error(f"Error loading LLM VLM params: {e}")
+    return {}
 
 def save_server_url(server_url: str, verify_ssl: bool = True) -> None:
     """保存自定义服务器地址到凭据文件。"""

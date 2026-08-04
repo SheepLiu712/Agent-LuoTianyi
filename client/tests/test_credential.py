@@ -47,3 +47,21 @@ def test_save_api_key_clears_plaintext(monkeypatch, tmp_path):
     assert credential.get_api_key() == "sk-test"
     assert credential.save_api_key("") is True
     assert credential.get_api_key() is None
+
+
+def test_vlm_api_key_separate_from_text_key(monkeypatch, tmp_path):
+    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
+    monkeypatch.setattr(credential, "get_credential_path", lambda: str(tmp_path / "user.json"))
+
+    credential.save_api_key_plain("sk-text")
+    credential.save_vlm_api_key_plain("sk-vlm")
+    assert credential.get_api_key() == "sk-text"
+    assert credential.get_vlm_api_key() == "sk-vlm"
+
+
+def test_vlm_api_key_plaintext_fallback(monkeypatch, tmp_path):
+    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
+    monkeypatch.setattr(credential, "get_credential_path", lambda: str(tmp_path / "user.json"))
+
+    assert credential.save_vlm_api_key("sk-vlm", allow_plaintext=True) is True
+    assert credential.get_vlm_api_key() == "sk-vlm"

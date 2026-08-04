@@ -49,7 +49,13 @@ class WsTransport:
         api_key_getter: Callable[[], str | None] | None = None,
         provider_getter: Callable[[], str | None] | None = None,
         model_getter: Callable[[], str | None] | None = None,
+        vlm_provider_getter: Callable[[], str | None] | None = None,
+        vlm_model_getter: Callable[[], str | None] | None = None,
+        vlm_api_key_getter: Callable[[], str | None] | None = None,
         base_url_getter: Callable[[], str | None] | None = None,
+        vlm_base_url_getter: Callable[[], str | None] | None = None,
+        params_getter: Callable[[], dict | None] | None = None,
+        vlm_params_getter: Callable[[], dict | None] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.username_getter = username_getter
@@ -59,7 +65,13 @@ class WsTransport:
         self.api_key_getter = api_key_getter
         self.provider_getter = provider_getter
         self.model_getter = model_getter
+        self.vlm_provider_getter = vlm_provider_getter
+        self.vlm_model_getter = vlm_model_getter
+        self.vlm_api_key_getter = vlm_api_key_getter
         self.base_url_getter = base_url_getter
+        self.vlm_base_url_getter = vlm_base_url_getter
+        self.params_getter = params_getter
+        self.vlm_params_getter = vlm_params_getter
 
         self._lock = threading.Lock()
         self._submit_lock = threading.Lock()
@@ -475,13 +487,21 @@ class WsTransport:
         if not request_id:
             return
 
-        api_key = self.api_key_getter() if self.api_key_getter else None
+        is_image = bool(payload.get("image_base64"))
+        api_key = (
+            self.vlm_api_key_getter() if is_image and self.vlm_api_key_getter else None
+        )
+        if not api_key:
+            api_key = self.api_key_getter() if self.api_key_getter else None
         if not api_key:
             self.logger.warning("llm_request received but no api key configured on client")
             await self._send_llm_response(request_id, error="no api key configured on client")
             return
 
-        base_url = self.base_url_getter() if self.base_url_getter else None
+        if is_image:
+            base_url = self.vlm_base_url_getter() if self.vlm_base_url_getter else None
+        else:
+            base_url = self.base_url_getter() if self.base_url_getter else None
         if not base_url:
             await self._send_llm_response(
                 request_id,
@@ -489,15 +509,24 @@ class WsTransport:
             )
             return
         url = f"{base_url.rstrip('/')}/chat/completions"
-        model = self.model_getter() if self.model_getter else None
+        if is_image:
+            model = self.vlm_model_getter() if self.vlm_model_getter else None
+        else:
+            model = self.model_getter() if self.model_getter else None
         if not model:
             await self._send_llm_response(request_id, error="missing provider info")
             return
 
+        server_params = payload.get("params") or {}
+        if is_image:
+            cached_params = self.vlm_params_getter() if self.vlm_params_getter else None
+        else:
+            cached_params = self.params_getter() if self.params_getter else None
+        merged_params = {**(server_params or {}), **(cached_params or {})}
         body = build_chat_completions_payload(
             prompt=payload.get("prompt", ""),
             model=model,
-            params=payload.get("params"),
+            params=merged_params,
             enable_thinking=bool(payload.get("enable_thinking")),
             use_json=bool(payload.get("use_json")),
             image_base64=payload.get("image_base64"),
