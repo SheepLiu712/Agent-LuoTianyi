@@ -143,6 +143,8 @@ def save_credentials(username: str, token: str, do_auto_login: bool) -> None:
             data["server_url"] = existing_data["server_url"]
         if existing_data.get("api_key_dpapi"):
             data["api_key_dpapi"] = existing_data["api_key_dpapi"]
+        if existing_data.get("api_key_plain"):
+            data["api_key_plain"] = existing_data["api_key_plain"]
         if existing_data.get("llm_provider"):
             data["llm_provider"] = existing_data["llm_provider"]
         if existing_data.get("llm_model"):
@@ -154,8 +156,8 @@ def save_credentials(username: str, token: str, do_auto_login: bool) -> None:
     except Exception as e:
         logger.error(f"Error saving credentials: {e}")
 
-def save_api_key(api_key: str) -> None:
-    """保存用户的 LLM API Key 到本地凭据文件（与 token 相同方式加密）。"""
+def save_api_key(api_key: str) -> bool:
+    """保存用户的 LLM API Key 到本地凭据文件。"""
     try:
         path = get_credential_path()
         data = {}
@@ -166,15 +168,45 @@ def save_api_key(api_key: str) -> None:
             key_enc = _encrypt_token(api_key)
             if key_enc:
                 data["api_key_dpapi"] = key_enc
+                data.pop("api_key_plain", None)
             else:
                 logger.error("LLM API Key not saved due to encryption failure.")
+                return False
         else:
             data.pop("api_key_dpapi", None)
+            data.pop("api_key_plain", None)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("LLM API Key saved.")
+        return True
     except Exception as e:
         logger.error(f"Error saving LLM API Key: {e}")
+        return False
+
+
+def save_api_key_plain(api_key: str) -> None:
+    """以明文保存 LLM API Key。
+
+    仅应在用户二次确认后调用；调用方需明确告知用户 key 将明文存储。
+    """
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if api_key:
+            logger.warning("LLM API Key 将以明文保存。")
+            data["api_key_plain"] = api_key
+            data.pop("api_key_dpapi", None)
+        else:
+            data.pop("api_key_plain", None)
+            data.pop("api_key_dpapi", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        logger.info("LLM API Key saved (plaintext).")
+    except Exception as e:
+        logger.error(f"Error saving LLM API Key (plaintext): {e}")
 
 def get_api_key() -> Optional[str]:
     """读取用户保存的 LLM API Key；未配置时返回 None。"""
@@ -186,6 +218,9 @@ def get_api_key() -> Optional[str]:
             key_enc = data.get("api_key_dpapi")
             if key_enc:
                 return _decrypt_token(key_enc)
+            plain = data.get("api_key_plain")
+            if plain:
+                return str(plain)
     except Exception as e:
         logger.error(f"Error loading LLM API Key: {e}")
     return None

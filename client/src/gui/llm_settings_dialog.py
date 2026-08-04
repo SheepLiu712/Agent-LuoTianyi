@@ -260,9 +260,22 @@ class LLMSettingsDialog(QDialog):
         if not provider:
             QMessageBox.warning(self, "提示", "服务商列表未加载，无法保存")
             return
+        api_key = self.api_key_input.text().strip()
+        if api_key and not credential.save_api_key(api_key):
+            ret = QMessageBox.question(
+                self,
+                "加密失败",
+                "当前环境无法加密保存 LLM API Key（非 Windows 或系统加密不可用）。\n"
+                "如果继续保存，key 将以明文形式存储在本机文件中。\n\n"
+                "是否仍然保存？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ret != QMessageBox.StandardButton.Yes:
+                return
+            credential.save_api_key_plain(api_key)
         credential.save_provider(provider)
         credential.save_model(self.model_combo.currentText().strip())
-        credential.save_api_key(self.api_key_input.text().strip())
         credential.save_provider_base_url(
             resolve_provider_base_url(provider, presets=self._llm_providers)
         )
