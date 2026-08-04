@@ -39,6 +39,7 @@ interface LlmSettingsScreenProps {
 export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: LlmSettingsScreenProps) {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  const modelsSeqRef = useRef(0);
 
   const [providers, setProviders] = useState<LlmProviderPreset[]>([]);
   const [llmProvider, setLlmProvider] = useState('');
@@ -70,20 +71,24 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   useEffect(() => {
     let active = true;
     (async () => {
+      let savedProvider: string | null = null;
+      let savedKey: string | null = null;
       try {
-        const [savedProvider, savedModel, savedKey] = await Promise.all([
+        const [provider, model, key] = await Promise.all([
           AsyncStorage.getItem(LLM_PROVIDER_STORAGE_KEY),
           AsyncStorage.getItem(LLM_MODEL_STORAGE_KEY),
           getLlmApiKey(),
         ]);
+        savedProvider = provider;
+        savedKey = key;
         if (!active) {
           return;
         }
         if (savedProvider) {
           setLlmProvider(savedProvider);
         }
-        if (savedModel) {
-          setLlmModel(savedModel);
+        if (model) {
+          setLlmModel(model);
         }
         if (savedKey) {
           setLlmApiKey(savedKey);
@@ -97,7 +102,11 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           return;
         }
         setProviders(list);
-        setLlmProvider((prev) => prev || (list[0]?.name ?? ''));
+        const nextProvider = savedProvider || list[0]?.name || '';
+        setLlmProvider((prev) => prev || nextProvider);
+        if (savedKey && nextProvider) {
+          void fetchModels(nextProvider, savedKey);
+        }
       } catch (e) {
         if (!active) {
           return;
@@ -110,49 +119,44 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     };
   }, []);
 
-  useEffect(() => {
-    const key = llmApiKey.trim();
-    if (!key || !llmProvider) {
+  const fetchModels = async (providerOverride?: string, keyOverride?: string) => {
+    const key = (keyOverride ?? llmApiKey).trim();
+    const provider = providerOverride ?? llmProvider;
+    if (!key || !provider) {
       setLlmModels([]);
       setModelsError('');
       return;
     }
-    let active = true;
-    const timer = setTimeout(async () => {
-      setModelsLoading(true);
-      setModelsError('');
-      try {
-        let baseUrl = resolveProviderBaseUrl(llmProvider, providers);
-        if (!baseUrl) {
-          baseUrl =
-            (await AsyncStorage.getItem(LLM_PROVIDER_BASE_URL_STORAGE_KEY)) ?? '';
-        }
-        if (!baseUrl) {
-          throw new Error('unknown provider');
-        }
-        const models = await fetchProviderModels(baseUrl, key);
-        if (!active) {
-          return;
-        }
-        setLlmModels(models);
-        setLlmModel((prev) => (models.length > 0 && !models.includes(prev) ? models[0] : prev));
-        setModelPickerText('');
-      } catch (e) {
-        if (!active) {
-          return;
-        }
-        setModelsError(e instanceof Error ? e.message : String(e));
-      } finally {
-        if (active) {
-          setModelsLoading(false);
-        }
+    const seq = ++modelsSeqRef.current;
+    setModelsLoading(true);
+    setModelsError('');
+    try {
+      let baseUrl = resolveProviderBaseUrl(provider, providers);
+      if (!baseUrl) {
+        baseUrl =
+          (await AsyncStorage.getItem(LLM_PROVIDER_BASE_URL_STORAGE_KEY)) ?? '';
       }
-    }, 600);
-    return () => {
-      active = false;
-      clearTimeout(timer);
-    };
-  }, [llmProvider, llmApiKey, providers]);
+      if (!baseUrl) {
+        throw new Error('unknown provider');
+      }
+      const models = await fetchProviderModels(baseUrl, key);
+      if (seq !== modelsSeqRef.current) {
+        return;
+      }
+      setLlmModels(models);
+      setLlmModel((prev) => (models.length > 0 && !models.includes(prev) ? models[0] : prev));
+      setModelPickerText('');
+    } catch (e) {
+      if (seq !== modelsSeqRef.current) {
+        return;
+      }
+      setModelsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (seq === modelsSeqRef.current) {
+        setModelsLoading(false);
+      }
+    }
+  };
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -224,6 +228,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
                   onPress={() => {
                     setLlmProvider(preset.name);
                     setLlmModel(resolveProviderModel(preset.name, providers));
+                    void fetchModels(preset.name);
                   }}
                   activeOpacity={0.75}
                 >
@@ -256,12 +261,16 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
               autoCapitalize="none"
               autoCorrect={false}
               onFocus={scrollToBottom}
+              onEndEditing={() => void fetchModels()}
             />
 
             <Text style={[styles.label, { color: theme.text }]}>模型</Text>
             <TouchableOpacity
               style={[styles.input, { backgroundColor: theme.inputBackground, borderColor: theme.border }]}
-              onPress={() => setShowModelPicker(true)}
+              onPress={() => {
+                setShowModelPicker(true);
+                void fetchModels();
+              }}
               activeOpacity={0.7}
             >
               <Text style={{ color: theme.inputText, fontSize: 15 }} numberOfLines={1}>

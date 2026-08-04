@@ -2,7 +2,7 @@
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QComboBox, QMessageBox)
-from PySide6.QtCore import Qt, QTimer, QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from typing import TYPE_CHECKING
 
 from ..utils.logger import get_logger
@@ -67,10 +67,7 @@ class LLMSettingsDialog(QDialog):
         self._llm_providers: list = []
         self._saved_provider: str | None = None
         self._saved_model: str | None = None
-        self._models_timer = QTimer(self)
-        self._models_timer.setSingleShot(True)
-        self._models_timer.setInterval(800)
-        self._models_timer.timeout.connect(self._refresh_llm_models)
+        self._models_request_seq = 0
         self._models_loader: "_ModelsLoader | None" = None
         self._providers_loader: "_ProvidersLoader | None" = None
 
@@ -116,20 +113,27 @@ class LLMSettingsDialog(QDialog):
         layout.addWidget(key_label)
 
         self.api_key_input = QLineEdit()
-        self.api_key_input.setPlaceholderText("填写后自动获取可用模型列表")
+        self.api_key_input.setPlaceholderText("输入完成后回车或点击刷新获取模型列表")
         self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_input.setStyleSheet("font-size: 14px; padding: 6px;")
-        self.api_key_input.textChanged.connect(self._on_api_key_changed)
+        self.api_key_input.editingFinished.connect(self._on_api_key_editing_finished)
         layout.addWidget(self.api_key_input)
 
         model_label = QLabel("模型：")
         model_label.setStyleSheet("font-size: 14px; font-weight: 500; margin-top: 8px;")
         layout.addWidget(model_label)
 
+        model_row = QHBoxLayout()
+        model_row.setSpacing(8)
         self.model_combo = QComboBox()
         self.model_combo.setPlaceholderText("模型名称（从服务商接口获取）")
         self.model_combo.setStyleSheet("font-size: 14px; padding: 6px;")
-        layout.addWidget(self.model_combo)
+        model_row.addWidget(self.model_combo, 1)
+        self.refresh_models_btn = QPushButton("刷新模型")
+        self.refresh_models_btn.setStyleSheet("font-size: 13px; padding: 6px 12px;")
+        self.refresh_models_btn.clicked.connect(self._fetch_llm_models)
+        model_row.addWidget(self.refresh_models_btn)
+        layout.addLayout(model_row)
 
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
@@ -189,7 +193,8 @@ class LLMSettingsDialog(QDialog):
             if provider_index >= 0:
                 self.provider_combo.setCurrentIndex(provider_index)
         self.status_label.setText("")
-        self._schedule_refresh_models()
+        if self.api_key_input.text().strip():
+            self._fetch_llm_models()
 
     def _on_providers_failed(self, message: str) -> None:
         self.status_label.setText(f"获取服务商列表失败：{message}")
@@ -211,19 +216,22 @@ class LLMSettingsDialog(QDialog):
 
     def _on_provider_changed(self, _index: int) -> None:
         self.model_combo.clear()
-        self._schedule_refresh_models()
+        if self.api_key_input.text().strip():
+            self._fetch_llm_models()
+        else:
+            self.status_label.setText("请先填写 LLM API Key")
 
-    def _on_api_key_changed(self, _text: str) -> None:
-        self._schedule_refresh_models()
+    def _on_api_key_editing_finished(self) -> None:
+        if self.provider_combo.currentText() and self.api_key_input.text().strip():
+            self._fetch_llm_models()
+        else:
+            self.status_label.setText("请先选择服务商并填写 LLM API Key")
 
-    def _schedule_refresh_models(self) -> None:
-        self._models_timer.start()
-
-    def _refresh_llm_models(self) -> None:
+    def _fetch_llm_models(self) -> None:
         """用当前服务商 + api-key 拉取模型列表并填充下拉框。"""
         api_key = self.api_key_input.text().strip()
         if not api_key:
-            self.status_label.setText("填写 LLM API Key 后自动获取可用模型列表")
+            self.status_label.setText("请先填写 LLM API Key")
             return
         base_url = resolve_provider_base_url(
             self.provider_combo.currentText(),
@@ -234,16 +242,21 @@ class LLMSettingsDialog(QDialog):
         if not base_url:
             self.status_label.setText("请先选择可用的服务商")
             return
+        self._models_request_seq += 1
+        seq = self._models_request_seq
         self.status_label.setText("正在获取模型列表…")
-        if self._models_loader is not None and self._models_loader.isRunning():
-            self._models_loader.terminate()
-            self._models_loader.wait(200)
         self._models_loader = _ModelsLoader(base_url, api_key, self)
-        self._models_loader.loaded.connect(self._on_models_loaded)
-        self._models_loader.failed.connect(self._on_models_failed)
+        self._models_loader.loaded.connect(
+            lambda models, s=seq: self._on_models_loaded(models, s)
+        )
+        self._models_loader.failed.connect(
+            lambda message, s=seq: self._on_models_failed(message, s)
+        )
         self._models_loader.start()
 
-    def _on_models_loaded(self, models: list) -> None:
+    def _on_models_loaded(self, models: list, seq: int) -> None:
+        if seq != self._models_request_seq:
+            return
         self.model_combo.clear()
         self.model_combo.addItems([str(m) for m in models])
         if self._saved_model and self._saved_model in [str(m) for m in models]:
@@ -252,8 +265,10 @@ class LLMSettingsDialog(QDialog):
             self.model_combo.setCurrentIndex(0)
         self.status_label.setText(f"已获取 {len(models)} 个可用模型")
 
-    def _on_models_failed(self, message: str) -> None:
-        self.status_label.setText(f"获取模型列表失败：请检查api-key是否正确")
+    def _on_models_failed(self, message: str, seq: int) -> None:
+        if seq != self._models_request_seq:
+            return
+        self.status_label.setText(f"获取模型列表失败：{message}")
 
     def on_save(self) -> None:
         provider = self.provider_combo.currentText().strip()
