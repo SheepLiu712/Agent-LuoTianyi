@@ -1,6 +1,7 @@
 {
     "is_debug": true,
     "llm_service": {
+        "client_llm_timeout_seconds": 120,
         "prompt_manager": {
             "template_dir": "res/agent/prompts"
         },
