@@ -4,6 +4,10 @@ import {
   server_config,
   LLM_MODEL_STORAGE_KEY,
   LLM_PROVIDER_BASE_URL_STORAGE_KEY,
+  LLM_PARAMS_STORAGE_KEY,
+  VLM_MODEL_STORAGE_KEY,
+  VLM_PROVIDER_BASE_URL_STORAGE_KEY,
+  VLM_PARAMS_STORAGE_KEY,
 } from '../config';
 import { AgentMessagePayload } from '../types/chat';
 import { WSEventType } from '../types/ws_events';
@@ -13,7 +17,7 @@ import {
   buildChatCompletionsPayload,
   callLlmProvider,
 } from './llm_client';
-import { getLlmApiKey } from './llm_key_storage';
+import { getLlmApiKey, getVlmApiKey } from './llm_key_storage';
 
 export type { AckResult } from './ws_ack';
 export { normalizeServerAck } from './ws_ack';
@@ -593,28 +597,48 @@ export class WebSocketTransport {
       });
     };
     try {
-      const apiKey = await getLlmApiKey();
+      const isImage = typeof payload.image_base64 === 'string' && !!payload.image_base64;
+      const apiKey = isImage ? await getVlmApiKey() : await getLlmApiKey();
       if (!apiKey) {
         addDebugTrace('llm', 'llm_request without api key');
         sendError('no api key configured on client');
         return;
       }
-      const baseUrl = (await AsyncStorage.getItem(LLM_PROVIDER_BASE_URL_STORAGE_KEY)) ?? '';
+      const baseUrl = (await AsyncStorage.getItem(
+        isImage ? VLM_PROVIDER_BASE_URL_STORAGE_KEY : LLM_PROVIDER_BASE_URL_STORAGE_KEY,
+      )) ?? '';
       if (!baseUrl) {
         sendError('LLM 配置不完整，请在 LLM 模型设置中重新保存');
         return;
       }
       const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-      const savedModel = await AsyncStorage.getItem(LLM_MODEL_STORAGE_KEY);
+      const savedModel = await AsyncStorage.getItem(
+        isImage ? VLM_MODEL_STORAGE_KEY : LLM_MODEL_STORAGE_KEY,
+      );
       const model = savedModel || '';
       if (!model) {
         sendError('missing provider info');
         return;
       }
+      const serverParams = (payload.params || {}) as Record<string, unknown>;
+      const cachedParamsText = (await AsyncStorage.getItem(
+        isImage ? VLM_PARAMS_STORAGE_KEY : LLM_PARAMS_STORAGE_KEY,
+      )) ?? '';
+      let cachedParams: Record<string, unknown> = {};
+      if (cachedParamsText) {
+        try {
+          const parsed = JSON.parse(cachedParamsText);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            cachedParams = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // 忽略损坏的参数缓存
+        }
+      }
       const body = buildChatCompletionsPayload({
         prompt: String(payload.prompt || ''),
         model,
-        params: (payload.params || {}) as Record<string, unknown>,
+        params: { ...serverParams, ...cachedParams },
         enableThinking: Boolean(payload.enable_thinking),
         useJson: Boolean(payload.use_json),
         imageBase64: typeof payload.image_base64 === 'string' ? payload.image_base64 : undefined,

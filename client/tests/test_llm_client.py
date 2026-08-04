@@ -10,21 +10,23 @@ from src.utils.llm_client import (
     build_chat_completions_payload,
     call_llm_api,
     fetch_llm_providers,
-    fetch_provider_models,
     resolve_provider_base_url,
     resolve_provider_model,
+    resolve_provider_vlm_model,
 )
 
 PRESETS = [
     {
         "name": "阿里云百炼（DashScope）",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen3.5-plus",
+        "models": ["qwen3.5-plus", "qwen3.6-flash"],
+        "vlm_models": ["qwen3-vl-plus"],
     },
     {
         "name": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-v4-flash",
+        "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        "vlm_models": [],
     },
 ]
 
@@ -71,6 +73,15 @@ def test_resolve_provider_model():
     assert resolve_provider_model("DeepSeek", presets=PRESETS) == "deepseek-v4-flash"
     assert resolve_provider_model(None, presets=PRESETS) == ""
     assert resolve_provider_model("不存在的服务商", presets=PRESETS) == ""
+
+
+def test_resolve_provider_vlm_model():
+    assert (
+        resolve_provider_vlm_model("阿里云百炼（DashScope）", presets=PRESETS)
+        == "qwen3-vl-plus"
+    )
+    assert resolve_provider_vlm_model("DeepSeek", presets=PRESETS) == ""
+    assert resolve_provider_vlm_model(None, presets=PRESETS) == ""
 
 
 def test_build_payload_image():
@@ -128,46 +139,6 @@ def test_call_llm_api_network_error(monkeypatch):
         call_llm_api(url="https://example.com/v1", api_key="sk", payload={})
 
 
-def test_fetch_provider_models_success(monkeypatch):
-    captured = {}
-
-    def fake_get(url, headers=None, timeout=None):
-        captured["url"] = url
-        captured["headers"] = headers
-        return FakeResponse(
-            data={"object": "list", "data": [{"id": "qwen3.5-plus"}, {"id": "deepseek-chat"}]}
-        )
-
-    monkeypatch.setattr("src.utils.llm_client.requests.get", fake_get)
-    models = fetch_provider_models(
-        "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "sk-test",
-    )
-    assert models == ["qwen3.5-plus", "deepseek-chat"]
-    assert captured["url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/models"
-    assert captured["headers"]["Authorization"] == "Bearer sk-test"
-
-
-def test_fetch_provider_models_http_error(monkeypatch):
-    monkeypatch.setattr(
-        "src.utils.llm_client.requests.get",
-        lambda url, headers=None, timeout=None: FakeResponse(
-            status_code=401, data={"error": "invalid key"}
-        ),
-    )
-    with pytest.raises(RuntimeError, match="401"):
-        fetch_provider_models("https://example.com/v1", "bad")
-
-
-def test_fetch_provider_models_network_error(monkeypatch):
-    def fake_get(url, headers=None, timeout=None):
-        raise ConnectionError("network down")
-
-    monkeypatch.setattr("src.utils.llm_client.requests.get", fake_get)
-    with pytest.raises(RuntimeError, match="network down"):
-        fetch_provider_models("https://example.com/v1", "sk")
-
-
 def test_fetch_llm_providers_success(monkeypatch):
     captured = {}
 
@@ -179,7 +150,8 @@ def test_fetch_llm_providers_success(monkeypatch):
                     {
                         "name": "DeepSeek",
                         "base_url": "https://api.deepseek.com/v1",
-                        "model": "deepseek-v4-flash",
+                        "models": ["deepseek-v4-flash"],
+                        "vlm_models": [],
                     }
                 ]
             }
@@ -310,7 +282,7 @@ async def test_handle_llm_request_uses_saved_model(monkeypatch):
         token_getter=lambda: "t",
         api_key_getter=lambda: "sk-user",
         provider_getter=lambda: "DeepSeek",
-        model_getter=lambda: "deepseek-reasoner",
+        model_getter=lambda: "deepseek-v4-pro",
         base_url_getter=lambda: "https://api.deepseek.com/v1",
     )
     await transport._handle_llm_request(
@@ -322,7 +294,7 @@ async def test_handle_llm_request_uses_saved_model(monkeypatch):
             "params": {},
         },
     )
-    assert captured["payload"]["model"] == "deepseek-reasoner"
+    assert captured["payload"]["model"] == "deepseek-v4-pro"
 
 
 @pytest.mark.asyncio
@@ -355,6 +327,77 @@ async def test_handle_llm_request_uses_cached_base_url_and_model(monkeypatch):
     )
     assert captured["url"] == "https://cached.example.com/v1/chat/completions"
     assert captured["payload"]["model"] == "cached-model"
+
+
+@pytest.mark.asyncio
+async def test_handle_llm_request_uses_vlm_model_for_image(monkeypatch):
+    """图片请求使用缓存的图片理解模型。"""
+    captured = {}
+
+    async def fake_call(**kwargs):
+        captured.update(kwargs)
+        return {"content": "ok", "usage": None, "response_time_s": 0.1}
+
+    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
+    transport = WsTransport(
+        "wss://example.com",
+        username_getter=lambda: "u",
+        token_getter=lambda: "t",
+        api_key_getter=lambda: "sk-user",
+        provider_getter=lambda: "阿里云百炼（DashScope）",
+        model_getter=lambda: "qwen3.5-plus",
+        vlm_provider_getter=lambda: "阿里云百炼（DashScope）",
+        vlm_model_getter=lambda: "qwen3-vl-plus",
+        vlm_api_key_getter=lambda: "sk-vlm",
+        base_url_getter=lambda: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        vlm_base_url_getter=lambda: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
+    await transport._handle_llm_request(
+        None,
+        {
+            "request_id": "req-img",
+            "prompt": "描述图片",
+            "image_base64": "data:image/png;base64,AAA",
+            "provider": {},
+            "params": {},
+        },
+    )
+    assert captured["payload"]["model"] == "qwen3-vl-plus"
+    assert captured["api_key"] == "sk-vlm"
+
+
+@pytest.mark.asyncio
+async def test_handle_llm_request_merges_cached_params(monkeypatch):
+    """用户自定义参数覆盖服务端下发参数。"""
+    captured = {}
+
+    async def fake_call(**kwargs):
+        captured.update(kwargs)
+        return {"content": "ok", "usage": None, "response_time_s": 0.1}
+
+    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
+    transport = WsTransport(
+        "wss://example.com",
+        username_getter=lambda: "u",
+        token_getter=lambda: "t",
+        api_key_getter=lambda: "sk-user",
+        model_getter=lambda: "m",
+        base_url_getter=lambda: "https://example.com/v1",
+        params_getter=lambda: {"temperature": 0.2, "max_tokens": 2048},
+    )
+    await transport._handle_llm_request(
+        None,
+        {
+            "request_id": "req-params",
+            "prompt": "hi",
+            "provider": {},
+            "params": {"temperature": 0.9, "top_p": 0.5},
+        },
+    )
+    body = captured["payload"]
+    assert body["temperature"] == 0.2  # 用户参数覆盖
+    assert body["max_tokens"] == 2048  # 仅用户设置
+    assert body["top_p"] == 0.5  # 服务端参数保留
 
 
 class FakeClientWs:

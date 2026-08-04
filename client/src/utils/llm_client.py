@@ -53,40 +53,30 @@ def resolve_provider_model(
     provider_name: str | None,
     presets: Optional[list[Dict[str, Any]]] = None,
 ) -> str:
-    """按预设名称返回默认 model；未匹配返回空串。"""
+    """按预设名称返回默认文本 model（models 列表第一项）；未匹配返回空串。"""
     if presets is None:
         presets = []
     name = provider_name or ""
     for preset in presets:
         if preset["name"] == name:
-            return preset["model"]
+            models = preset.get("models") or []
+            return str(models[0]) if models else ""
     return ""
 
 
-def fetch_provider_models(
-    base_url: str,
-    api_key: str,
-    timeout: float = 15.0,
-) -> list[str]:
-    """调用 OpenAI 兼容的模型列表接口，返回可用的模型 id 列表。"""
-    url = f"{base_url.rstrip('/')}/models"
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json",
-    }
-    try:
-        resp = requests.get(url, headers=headers, timeout=timeout)
-    except Exception as exc:
-        raise RuntimeError(f"获取模型列表失败: {exc}") from exc
-    if resp.status_code < 200 or resp.status_code >= 300:
-        raise RuntimeError(f"获取模型列表失败: HTTP {resp.status_code}")
-    data = resp.json()
-    models: list[str] = []
-    for item in data.get("data") or []:
-        model_id = item.get("id")
-        if model_id:
-            models.append(str(model_id))
-    return models
+def resolve_provider_vlm_model(
+    provider_name: str | None,
+    presets: Optional[list[Dict[str, Any]]] = None,
+) -> str:
+    """按预设名称返回默认图片理解 model（vlm_models 列表第一项）；未匹配返回空串。"""
+    if presets is None:
+        presets = []
+    name = provider_name or ""
+    for preset in presets:
+        if preset["name"] == name:
+            vlm_models = preset.get("vlm_models") or []
+            return str(vlm_models[0]) if vlm_models else ""
+    return ""
 
 
 def build_chat_completions_payload(

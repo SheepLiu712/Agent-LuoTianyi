@@ -12,7 +12,8 @@ interface LlmResult {
 export interface LlmProviderPreset {
   name: string;
   base_url: string;
-  model: string;
+  models: string[];
+  vlm_models: string[];
 }
 
 let cachedProviderPresets: LlmProviderPreset[] = [];
@@ -73,46 +74,28 @@ export function resolveProviderModel(
   providerName?: string | null,
   presets: LlmProviderPreset[] = cachedProviderPresets,
 ): string {
+  // 返回默认文本模型（models 列表第一项）
   const name = providerName || '';
   for (const preset of presets) {
     if (preset.name === name) {
-      return preset.model;
+      return preset.models?.[0] ?? '';
     }
   }
   return '';
 }
 
-export async function fetchProviderModels(
-  baseUrl: string,
-  apiKey: string,
-  timeoutMs = 15000,
-): Promise<string[]> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const resp = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: 'application/json',
-      },
-      signal: controller.signal,
-    });
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`);
+export function resolveProviderVlmModel(
+  providerName?: string | null,
+  presets: LlmProviderPreset[] = cachedProviderPresets,
+): string {
+  // 返回默认图片理解模型（vlm_models 列表第一项）
+  const name = providerName || '';
+  for (const preset of presets) {
+    if (preset.name === name) {
+      return preset.vlm_models?.[0] ?? '';
     }
-    const data = (await resp.json()) as {
-      data?: Array<{ id?: unknown }>;
-    };
-    const models: string[] = [];
-    for (const item of data?.data ?? []) {
-      if (typeof item?.id === 'string' && item.id) {
-        models.push(item.id);
-      }
-    }
-    return models;
-  } finally {
-    clearTimeout(timer);
   }
+  return '';
 }
 
 interface BuildPayloadOptions {

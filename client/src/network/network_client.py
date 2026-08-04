@@ -43,7 +43,13 @@ class NetworkClient:
             api_key_getter=lambda: credential.get_api_key(),
             provider_getter=lambda: credential.get_provider(),
             model_getter=lambda: credential.get_model(),
+            vlm_provider_getter=lambda: credential.get_vlm_provider(),
+            vlm_model_getter=lambda: credential.get_vlm_model(),
+            vlm_api_key_getter=lambda: credential.get_vlm_api_key(),
             base_url_getter=lambda: credential.get_provider_base_url(),
+            vlm_base_url_getter=lambda: credential.get_vlm_provider_base_url(),
+            params_getter=lambda: credential.get_llm_params(),
+            vlm_params_getter=lambda: credential.get_vlm_params(),
         )
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:

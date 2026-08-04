@@ -8,6 +8,13 @@ export const LLM_API_KEY_STORAGE_KEY = 'llm_api_key';
 export const LLM_PROVIDER_STORAGE_KEY = 'llm_provider';
 export const LLM_MODEL_STORAGE_KEY = 'llm_model';
 export const LLM_PROVIDER_BASE_URL_STORAGE_KEY = 'llm_provider_base_url';
+export const LLM_PARAMS_STORAGE_KEY = 'llm_params';
+
+export const VLM_API_KEY_STORAGE_KEY = 'vlm_api_key';
+export const VLM_PROVIDER_STORAGE_KEY = 'vlm_provider';
+export const VLM_MODEL_STORAGE_KEY = 'vlm_model';
+export const VLM_PROVIDER_BASE_URL_STORAGE_KEY = 'vlm_provider_base_url';
+export const VLM_PARAMS_STORAGE_KEY = 'vlm_params';
 
 export const server_config: {
   BASE_URL: string;
