@@ -3,8 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   server_config,
   LLM_API_KEY_STORAGE_KEY,
-  LLM_PROVIDER_STORAGE_KEY,
   LLM_MODEL_STORAGE_KEY,
+  LLM_PROVIDER_BASE_URL_STORAGE_KEY,
 } from '../config';
 import { AgentMessagePayload } from '../types/chat';
 import { WSEventType } from '../types/ws_events';
@@ -13,9 +13,6 @@ import { AckResult, normalizeServerAck } from './ws_ack';
 import {
   buildChatCompletionsPayload,
   callLlmProvider,
-  ensureProviderPresets,
-  resolveProviderBaseUrl,
-  resolveProviderModel,
 } from './llm_client';
 
 export type { AckResult } from './ws_ack';
@@ -602,16 +599,14 @@ export class WebSocketTransport {
         sendError('no api key configured on client');
         return;
       }
-      const presets = await ensureProviderPresets(server_config.BASE_URL);
-      const savedProvider = await AsyncStorage.getItem(LLM_PROVIDER_STORAGE_KEY);
-      const baseUrl = resolveProviderBaseUrl(savedProvider, presets);
+      const baseUrl = (await AsyncStorage.getItem(LLM_PROVIDER_BASE_URL_STORAGE_KEY)) ?? '';
       if (!baseUrl) {
-        sendError('unknown llm provider');
+        sendError('LLM 配置不完整，请在 LLM 模型设置中重新保存');
         return;
       }
       const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
       const savedModel = await AsyncStorage.getItem(LLM_MODEL_STORAGE_KEY);
-      const model = savedModel || resolveProviderModel(savedProvider, presets);
+      const model = savedModel || '';
       if (!model) {
         sendError('missing provider info');
         return;

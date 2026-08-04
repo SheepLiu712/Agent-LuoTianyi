@@ -66,7 +66,7 @@ export function resolveProviderBaseUrl(
       return preset.base_url;
     }
   }
-  return presets[0]?.base_url ?? '';
+  return '';
 }
 
 export function resolveProviderModel(
@@ -79,7 +79,7 @@ export function resolveProviderModel(
       return preset.model;
     }
   }
-  return presets[0]?.model ?? '';
+  return '';
 }
 
 export async function fetchProviderModels(

@@ -13,9 +13,6 @@ from ..utils.tls import create_default_ssl_context
 from ..utils.llm_client import (
     build_chat_completions_payload,
     call_llm_api_async,
-    fetch_llm_providers,
-    resolve_provider_base_url,
-    resolve_provider_model,
 )
 
 
@@ -52,6 +49,7 @@ class WsTransport:
         api_key_getter: Callable[[], str | None] | None = None,
         provider_getter: Callable[[], str | None] | None = None,
         model_getter: Callable[[], str | None] | None = None,
+        base_url_getter: Callable[[], str | None] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.username_getter = username_getter
@@ -61,7 +59,7 @@ class WsTransport:
         self.api_key_getter = api_key_getter
         self.provider_getter = provider_getter
         self.model_getter = model_getter
-        self._llm_providers: list | None = None
+        self.base_url_getter = base_url_getter
 
         self._lock = threading.Lock()
         self._submit_lock = threading.Lock()
@@ -483,19 +481,15 @@ class WsTransport:
             await self._send_llm_response(request_id, error="no api key configured on client")
             return
 
-        provider_name = self.provider_getter() if self.provider_getter else None
-        presets = await self._ensure_llm_providers()
-        if not presets:
-            await self._send_llm_response(request_id, error="failed to load llm providers")
-            return
-        base_url = resolve_provider_base_url(provider_name, presets=presets)
+        base_url = self.base_url_getter() if self.base_url_getter else None
         if not base_url:
-            await self._send_llm_response(request_id, error="unknown llm provider")
+            await self._send_llm_response(
+                request_id,
+                error="LLM 配置不完整，请在 LLM 模型设置中重新保存",
+            )
             return
         url = f"{base_url.rstrip('/')}/chat/completions"
         model = self.model_getter() if self.model_getter else None
-        if not model:
-            model = resolve_provider_model(provider_name, presets=presets)
         if not model:
             await self._send_llm_response(request_id, error="missing provider info")
             return
@@ -518,19 +512,6 @@ class WsTransport:
         except Exception as exc:
             self.logger.error(f"Client LLM execution failed: {exc}")
             await self._send_llm_response(request_id, error=str(exc))
-
-    async def _ensure_llm_providers(self) -> list:
-        """懒加载服务端下发的 LLM 服务商预设列表（带缓存）。"""
-        if self._llm_providers is None:
-            try:
-                self._llm_providers = await asyncio.to_thread(
-                    fetch_llm_providers,
-                    self.base_url,
-                )
-            except Exception as exc:
-                self.logger.warning(f"Failed to fetch llm providers: {exc}")
-                self._llm_providers = []
-        return self._llm_providers
 
     async def _send_llm_response(
         self,

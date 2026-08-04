@@ -1,5 +1,7 @@
 """桌面 client 的 LLM 客户端执行助手测试。"""
 
+import json
+
 import pytest
 
 from src.network.ws_transport import WsTransport
@@ -61,20 +63,14 @@ def test_resolve_provider_base_url():
         resolve_provider_base_url("DeepSeek", presets=PRESETS)
         == "https://api.deepseek.com/v1"
     )
-    assert (
-        resolve_provider_base_url(None, presets=PRESETS)
-        == "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    )
-    assert (
-        resolve_provider_base_url("不存在的服务商", presets=PRESETS)
-        == "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    )
+    assert resolve_provider_base_url(None, presets=PRESETS) == ""
+    assert resolve_provider_base_url("不存在的服务商", presets=PRESETS) == ""
 
 
 def test_resolve_provider_model():
     assert resolve_provider_model("DeepSeek", presets=PRESETS) == "deepseek-v4-flash"
-    assert resolve_provider_model(None, presets=PRESETS) == "qwen3.5-plus"
-    assert resolve_provider_model("不存在的服务商", presets=PRESETS) == "qwen3.5-plus"
+    assert resolve_provider_model(None, presets=PRESETS) == ""
+    assert resolve_provider_model("不存在的服务商", presets=PRESETS) == ""
 
 
 def test_build_payload_image():
@@ -265,7 +261,7 @@ def test_submit_user_text_no_llm_mode_without_key(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_handle_llm_request_uses_preset_provider(monkeypatch):
+async def test_handle_llm_request_uses_cached_config(monkeypatch):
     captured = {}
 
     async def fake_call(**kwargs):
@@ -273,14 +269,14 @@ async def test_handle_llm_request_uses_preset_provider(monkeypatch):
         return {"content": "ok", "usage": None, "response_time_s": 0.1}
 
     monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    monkeypatch.setattr("src.network.ws_transport.fetch_llm_providers", lambda base_url: PRESETS)
     transport = WsTransport(
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
         api_key_getter=lambda: "sk-user",
         provider_getter=lambda: "DeepSeek",
-        model_getter=lambda: None,
+        model_getter=lambda: "deepseek-v4-flash",
+        base_url_getter=lambda: "https://api.deepseek.com/v1",
     )
     await transport._handle_llm_request(
         None,
@@ -293,7 +289,7 @@ async def test_handle_llm_request_uses_preset_provider(monkeypatch):
             "use_json": False,
         },
     )
-    # 必须使用用户预设的 base_url 与 model，而不是服务端下发的 url/model
+    # 请求直接使用缓存的 base_url 与 model，而不是服务端下发的 url/model
     assert captured["url"] == "https://api.deepseek.com/v1/chat/completions"
     assert captured["api_key"] == "sk-user"
     assert captured["payload"]["model"] == "deepseek-v4-flash"
@@ -308,7 +304,6 @@ async def test_handle_llm_request_uses_saved_model(monkeypatch):
         return {"content": "ok", "usage": None, "response_time_s": 0.1}
 
     monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    monkeypatch.setattr("src.network.ws_transport.fetch_llm_providers", lambda base_url: PRESETS)
     transport = WsTransport(
         "wss://example.com",
         username_getter=lambda: "u",
@@ -316,6 +311,7 @@ async def test_handle_llm_request_uses_saved_model(monkeypatch):
         api_key_getter=lambda: "sk-user",
         provider_getter=lambda: "DeepSeek",
         model_getter=lambda: "deepseek-reasoner",
+        base_url_getter=lambda: "https://api.deepseek.com/v1",
     )
     await transport._handle_llm_request(
         None,
@@ -327,3 +323,65 @@ async def test_handle_llm_request_uses_saved_model(monkeypatch):
         },
     )
     assert captured["payload"]["model"] == "deepseek-reasoner"
+
+
+@pytest.mark.asyncio
+async def test_handle_llm_request_uses_cached_base_url_and_model(monkeypatch):
+    """请求直接使用缓存的 base_url 与模型名，不依赖预设解析。"""
+    captured = {}
+
+    async def fake_call(**kwargs):
+        captured.update(kwargs)
+        return {"content": "ok", "usage": None, "response_time_s": 0.1}
+
+    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
+    transport = WsTransport(
+        "wss://example.com",
+        username_getter=lambda: "u",
+        token_getter=lambda: "t",
+        api_key_getter=lambda: "sk-user",
+        provider_getter=lambda: "不存在的服务商",
+        model_getter=lambda: "cached-model",
+        base_url_getter=lambda: "https://cached.example.com/v1",
+    )
+    await transport._handle_llm_request(
+        None,
+        {
+            "request_id": "req-3",
+            "prompt": "hi",
+            "provider": {"model": "server-model"},
+            "params": {},
+        },
+    )
+    assert captured["url"] == "https://cached.example.com/v1/chat/completions"
+    assert captured["payload"]["model"] == "cached-model"
+
+
+class FakeClientWs:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, raw):
+        self.sent.append(raw)
+
+
+@pytest.mark.asyncio
+async def test_handle_llm_request_missing_cached_base_url_errors():
+    transport = WsTransport(
+        "wss://example.com",
+        username_getter=lambda: "u",
+        token_getter=lambda: "t",
+        api_key_getter=lambda: "sk-user",
+        provider_getter=lambda: "DeepSeek",
+        model_getter=lambda: "deepseek-v4-flash",
+        base_url_getter=lambda: None,
+    )
+    fake_ws = FakeClientWs()
+    transport._ws = fake_ws
+    await transport._handle_llm_request(
+        None,
+        {"request_id": "req-4", "prompt": "hi", "provider": {}, "params": {}},
+    )
+    assert fake_ws.sent
+    payload = json.loads(fake_ws.sent[0])["payload"]
+    assert "error" in payload

@@ -18,6 +18,7 @@ import {
   LLM_API_KEY_STORAGE_KEY,
   LLM_PROVIDER_STORAGE_KEY,
   LLM_MODEL_STORAGE_KEY,
+  LLM_PROVIDER_BASE_URL_STORAGE_KEY,
   server_config,
 } from '../config';
 import { addDebugTrace } from '../utils/debug_trace';
@@ -121,7 +122,11 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       setModelsLoading(true);
       setModelsError('');
       try {
-        const baseUrl = resolveProviderBaseUrl(llmProvider, providers);
+        let baseUrl = resolveProviderBaseUrl(llmProvider, providers);
+        if (!baseUrl) {
+          baseUrl =
+            (await AsyncStorage.getItem(LLM_PROVIDER_BASE_URL_STORAGE_KEY)) ?? '';
+        }
         if (!baseUrl) {
           throw new Error('unknown provider');
         }
@@ -161,6 +166,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       await AsyncStorage.setItem(LLM_API_KEY_STORAGE_KEY, llmApiKey.trim());
       await AsyncStorage.setItem(LLM_PROVIDER_STORAGE_KEY, llmProvider);
       await AsyncStorage.setItem(LLM_MODEL_STORAGE_KEY, llmModel.trim());
+      await AsyncStorage.setItem(
+        LLM_PROVIDER_BASE_URL_STORAGE_KEY,
+        resolveProviderBaseUrl(llmProvider, providers),
+      );
       Alert.alert('成功', 'LLM 模型设置已保存');
       onClose();
     } catch (e) {

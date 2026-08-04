@@ -7,6 +7,7 @@ const CUSTOM_SERVER_URL_KEY = 'custom_server_url';
 export const LLM_API_KEY_STORAGE_KEY = 'llm_api_key';
 export const LLM_PROVIDER_STORAGE_KEY = 'llm_provider';
 export const LLM_MODEL_STORAGE_KEY = 'llm_model';
+export const LLM_PROVIDER_BASE_URL_STORAGE_KEY = 'llm_provider_base_url';
 
 export const server_config: {
   BASE_URL: string;

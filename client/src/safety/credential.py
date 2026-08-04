@@ -147,6 +147,8 @@ def save_credentials(username: str, token: str, do_auto_login: bool) -> None:
             data["llm_provider"] = existing_data["llm_provider"]
         if existing_data.get("llm_model"):
             data["llm_model"] = existing_data["llm_model"]
+        if existing_data.get("llm_provider_base_url"):
+            data["llm_provider_base_url"] = existing_data["llm_provider_base_url"]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -244,6 +246,35 @@ def get_model() -> Optional[str]:
             return data.get("llm_model", None)
     except Exception as e:
         logger.error(f"Error loading LLM model: {e}")
+    return None
+
+def save_provider_base_url(base_url: str) -> None:
+    """保存用户所选服务商的 base_url；请求时直接使用该缓存值。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if base_url:
+            data["llm_provider_base_url"] = base_url
+        else:
+            data.pop("llm_provider_base_url", None)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving LLM provider base_url: {e}")
+
+def get_provider_base_url() -> Optional[str]:
+    """读取缓存的 LLM 服务商 base_url。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("llm_provider_base_url", None)
+    except Exception as e:
+        logger.error(f"Error loading LLM provider base_url: {e}")
     return None
 
 def save_server_url(server_url: str, verify_ssl: bool = True) -> None:
