@@ -119,7 +119,7 @@ def build_chat_completions_payload(
     payload: Dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "max_tokens": params.get("max_tokens", 8192),
+        "max_tokens": params.get("max_tokens", 4096),
         "temperature": params.get("temperature", 0.7),
         "top_p": params.get("top_p", 0.9),
     }
