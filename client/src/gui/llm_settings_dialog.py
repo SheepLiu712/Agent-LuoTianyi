@@ -4,28 +4,47 @@ import json
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QComboBox, QMessageBox, QGroupBox,
-                               QPlainTextEdit, QTabWidget, QWidget)
+                               QPlainTextEdit, QTabWidget, QWidget, QCheckBox)
 from PySide6.QtCore import Qt, QThread, Signal
 from typing import TYPE_CHECKING
 
 from ..utils.logger import get_logger
 from ..safety import credential
-from ..utils.llm_client import resolve_provider_base_url
+from ..utils.llm_client import (
+    fetch_llm_json_required_modules,
+    probe_llm_config,
+    resolve_provider_base_url,
+)
 
 if TYPE_CHECKING:
     from ..network.network_client import NetworkClient
+
+
+def _friendly_probe_error(name: str, exc: Exception) -> str:
+    """把探测失败转成面向用户的提示。"""
+    text = str(exc)
+    lowered = text.lower()
+    if any(marker in lowered for marker in ("401", "403", "unauthorized", "invalid api key", "api key", "authentication", "access denied", "arrearage")):
+        return f"{name}：API Key 无效或没有权限，请检查后重试。"
+    if "400" in lowered or "unsupported" in lowered or "invalidparameter" in lowered:
+        return f"{name}：模型或所选开关不受支持，请更换模型或取消不支持的选项后重试。"
+    if any(marker in lowered for marker in ("connection", "timed out", "timeout", "network", "request failed", "resolve")):
+        return f"{name}：无法连接服务商，请检查网络后重试。"
+    return f"{name}：{text}"
 
 
 class _ProvidersLoader(QThread):
     """后台线程：从服务端获取服务商预设列表，避免阻塞 UI。"""
 
     loaded = Signal(list)
+    json_loaded = Signal(list, list)
     failed = Signal(str)
 
     def __init__(self, network_client, force_refresh: bool = False, parent=None):
         super().__init__(parent)
         self._network_client = network_client
         self._force_refresh = force_refresh
+        self.logger = get_logger(self.__class__.__name__)
 
     def run(self) -> None:
         try:
@@ -33,8 +52,41 @@ class _ProvidersLoader(QThread):
                 force_refresh=self._force_refresh
             )
             self.loaded.emit(providers)
+            try:
+                llm_modules, vlm_modules = fetch_llm_json_required_modules(
+                    self._network_client.base_url
+                )
+            except Exception as exc:
+                self.logger.warning(f"获取 JSON 功能列表失败: {exc}")
+                llm_modules, vlm_modules = [], []
+            self.json_loaded.emit(llm_modules, vlm_modules)
         except Exception as exc:
             self.failed.emit(str(exc))
+
+
+class _ProbeWorker(QThread):
+    """后台线程：保存前用当前配置向服务商发探测请求。"""
+
+    errors = Signal(list)
+
+    def __init__(self, configs: list, parent=None):
+        super().__init__(parent)
+        self._configs = configs
+
+    def run(self) -> None:
+        errors = []
+        for cfg in self._configs:
+            try:
+                probe_llm_config(
+                    cfg["base_url"],
+                    cfg["api_key"],
+                    cfg["model"],
+                    flags=cfg["flags"],
+                    params=cfg["params"],
+                )
+            except Exception as exc:
+                errors.append(_friendly_probe_error(cfg["name"], exc))
+        self.errors.emit(errors)
 
 
 class LLMSettingsDialog(QDialog):
@@ -49,11 +101,15 @@ class LLMSettingsDialog(QDialog):
         self.setModal(True)
 
         self._llm_providers: list = []
+        self._llm_json_modules: list = []
+        self._vlm_json_modules: list = []
         self._saved_provider: str | None = None
         self._saved_model: str | None = None
         self._saved_vlm_provider: str | None = None
         self._saved_vlm_model: str | None = None
         self._providers_loader: "_ProvidersLoader | None" = None
+        self._probe_worker: "_ProbeWorker | None" = None
+        self._pending_save: tuple | None = None
 
         self._init_ui()
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
@@ -83,11 +139,14 @@ class LLMSettingsDialog(QDialog):
 
         text_tab = QWidget()
         text_layout = QVBoxLayout(text_tab)
-        self.provider_combo, self.api_key_input, self.model_combo, self.base_url_hint, self.params_editor = self._build_form(text_layout, "对话")
+        (self.provider_combo, self.api_key_input, self.model_combo, self.base_url_hint,
+         self.params_editor, self.enable_thinking_check, self.use_json_check) = self._build_form(text_layout, "对话")
 
         vlm_tab = QWidget()
         vlm_layout = QVBoxLayout(vlm_tab)
-        self.vlm_provider_combo, self.vlm_api_key_input, self.vlm_model_combo, self.vlm_base_url_hint, self.vlm_params_editor = self._build_form(vlm_layout, "图片理解")
+        (self.vlm_provider_combo, self.vlm_api_key_input, self.vlm_model_combo,
+         self.vlm_base_url_hint, self.vlm_params_editor,
+         self.vlm_enable_thinking_check, self.vlm_use_json_check) = self._build_form(vlm_layout, "图片理解")
 
         self.tabs.addTab(text_tab, "对话模型")
         self.tabs.addTab(vlm_tab, "图片理解模型")
@@ -178,10 +237,34 @@ class LLMSettingsDialog(QDialog):
         params_editor.setMaximumHeight(110)
         params_editor.setStyleSheet("font-size: 13px;")
         advanced_layout.addWidget(params_editor)
+
+        flags_hint = QLabel(
+            "思考：仅模型支持思考参数时勾选；JSON：未勾选时相关功能改用服务端 API。"
+        )
+        flags_hint.setWordWrap(True)
+        flags_hint.setStyleSheet("font-size: 12px; color: #888;")
+        advanced_layout.addWidget(flags_hint)
+
+        enable_thinking_check = QCheckBox("支持思考模式")
+        enable_thinking_check.setStyleSheet("font-size: 13px;")
+        advanced_layout.addWidget(enable_thinking_check)
+
+        use_json_check = QCheckBox("支持 JSON 输出")
+        use_json_check.setStyleSheet("font-size: 13px;")
+        advanced_layout.addWidget(use_json_check)
+
         layout.addWidget(advanced_group)
 
         layout.addStretch()
-        return provider_combo, api_key_input, model_combo, base_url_hint, params_editor
+        return (
+            provider_combo,
+            api_key_input,
+            model_combo,
+            base_url_hint,
+            params_editor,
+            enable_thinking_check,
+            use_json_check,
+        )
 
     def _load_config(self) -> None:
         """从本地凭据加载已保存的配置，并从服务端拉取服务商列表。"""
@@ -207,10 +290,17 @@ class LLMSettingsDialog(QDialog):
         vlm_params = credential.get_vlm_params()
         if vlm_params:
             self.vlm_params_editor.setPlainText(json.dumps(vlm_params, ensure_ascii=False, indent=2))
+        text_flags = credential.get_llm_flags()
+        self.enable_thinking_check.setChecked(text_flags.get("enable_thinking", False))
+        self.use_json_check.setChecked(text_flags.get("use_json", False))
+        vlm_flags = credential.get_vlm_flags()
+        self.vlm_enable_thinking_check.setChecked(vlm_flags.get("enable_thinking", False))
+        self.vlm_use_json_check.setChecked(vlm_flags.get("use_json", False))
 
         self.status_label.setText("正在获取服务商列表…")
         self._providers_loader = _ProvidersLoader(self.network_client, parent=self)
         self._providers_loader.loaded.connect(self._on_providers_loaded)
+        self._providers_loader.json_loaded.connect(self._on_json_modules_loaded)
         self._providers_loader.failed.connect(self._on_providers_failed)
         self._providers_loader.start()
 
@@ -247,8 +337,13 @@ class LLMSettingsDialog(QDialog):
             self.network_client, force_refresh=True, parent=self
         )
         self._providers_loader.loaded.connect(self._on_providers_loaded)
+        self._providers_loader.json_loaded.connect(self._on_json_modules_loaded)
         self._providers_loader.failed.connect(self._on_providers_failed)
         self._providers_loader.start()
+
+    def _on_json_modules_loaded(self, llm_modules: list, vlm_modules: list) -> None:
+        self._llm_json_modules = llm_modules or []
+        self._vlm_json_modules = vlm_modules or []
 
     def _on_provider_changed(self, _index: int) -> None:
         preset = self._find_preset(self.provider_combo.currentText())
@@ -300,6 +395,65 @@ class LLMSettingsDialog(QDialog):
         if vlm_params is None:
             return
 
+        probe_configs = []
+        api_key = self.api_key_input.text().strip()
+        text_provider = self.provider_combo.currentText().strip()
+        if api_key and text_provider and self.model_combo.currentText().strip():
+            probe_configs.append(
+                {
+                    "name": "对话模型",
+                    "base_url": resolve_provider_base_url(
+                        text_provider, presets=self._llm_providers
+                    ),
+                    "api_key": api_key,
+                    "model": self.model_combo.currentText().strip(),
+                    "flags": {
+                        "enable_thinking": self.enable_thinking_check.isChecked(),
+                        "use_json": self.use_json_check.isChecked(),
+                    },
+                    "params": text_params,
+                }
+            )
+        vlm_api_key = self.vlm_api_key_input.text().strip()
+        vlm_provider = self.vlm_provider_combo.currentText().strip()
+        if vlm_api_key and vlm_provider and self.vlm_model_combo.currentText().strip():
+            probe_configs.append(
+                {
+                    "name": "图片理解模型",
+                    "base_url": resolve_provider_base_url(
+                        vlm_provider, presets=self._llm_providers
+                    ),
+                    "api_key": vlm_api_key,
+                    "model": self.vlm_model_combo.currentText().strip(),
+                    "flags": {
+                        "enable_thinking": self.vlm_enable_thinking_check.isChecked(),
+                        "use_json": self.vlm_use_json_check.isChecked(),
+                    },
+                    "params": vlm_params,
+                }
+            )
+
+        if not probe_configs:
+            self._finish_save(text_params, vlm_params)
+            return
+
+        self._pending_save = (text_params, vlm_params)
+        self.save_btn.setEnabled(False)
+        self.status_label.setText("正在校验配置…")
+        self._probe_worker = _ProbeWorker(probe_configs, parent=self)
+        self._probe_worker.errors.connect(self._on_probe_done)
+        self._probe_worker.start()
+
+    def _on_probe_done(self, errors: list) -> None:
+        self.save_btn.setEnabled(True)
+        if errors:
+            self.status_label.setText("配置校验失败")
+            QMessageBox.critical(self, "配置校验失败", "\n".join(errors))
+            return
+        text_params, vlm_params = self._pending_save or ({}, {})
+        self._finish_save(text_params, vlm_params)
+
+    def _finish_save(self, text_params: dict, vlm_params: dict) -> None:
         api_key = self.api_key_input.text().strip()
         vlm_api_key = self.vlm_api_key_input.text().strip()
         text_key_failed = bool(api_key) and not credential.save_api_key(api_key)
@@ -336,6 +490,10 @@ class LLMSettingsDialog(QDialog):
             resolve_provider_base_url(text_provider, presets=self._llm_providers)
         )
         credential.save_llm_params(text_params)
+        credential.save_llm_flags(
+            self.enable_thinking_check.isChecked(),
+            self.use_json_check.isChecked(),
+        )
 
         credential.save_vlm_provider(vlm_provider)
         credential.save_vlm_model(self.vlm_model_combo.currentText().strip())
@@ -343,6 +501,25 @@ class LLMSettingsDialog(QDialog):
             resolve_provider_base_url(vlm_provider, presets=self._llm_providers)
         )
         credential.save_vlm_params(vlm_params)
+        credential.save_vlm_flags(
+            self.vlm_enable_thinking_check.isChecked(),
+            self.vlm_use_json_check.isChecked(),
+        )
+
+        server_api_functions = []
+        if not self.use_json_check.isChecked():
+            server_api_functions.extend(self._llm_json_modules)
+        if not self.vlm_use_json_check.isChecked():
+            server_api_functions.extend(self._vlm_json_modules)
+        server_api_functions = sorted(set(server_api_functions))
+        if server_api_functions:
+            labels = "、".join(server_api_functions)
+            QMessageBox.information(
+                self,
+                "提示",
+                "以下功能需要 JSON 输出，当前模型未勾选支持，将改用服务端 API 执行：\n"
+                f"{labels}",
+            )
 
         QMessageBox.information(self, "成功", "LLM 模型设置已保存")
         self.accept()

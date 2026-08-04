@@ -129,3 +129,41 @@ class TestLLMService:
         assert "total_tokens" in token_usage and token_usage["total_tokens"] > 0, "最近一次响应的使用情况中缺少 'total_tokens'"
         response_time_s = recent_resp.get("response_time_s", None)
         assert response_time_s is not None, "最近一次响应的使用情况中缺少 'response_time_s'"
+
+    def test_register_llm_module_tracks_json_label(self, llm_service: LLMService, sample_template):
+        """需要 JSON 输出的模块应记录配置中的友好标签，供客户端保存提示使用。"""
+        llm_service.prompt_manager.add_template_from_json(sample_template)
+        module_config = {
+            "label": "测试模块",
+            "llm": {
+                "name": list(llm_service.llm_interfaces.keys())[0],
+                "enable_thinking": False,
+                "use_json": True,
+            },
+            "prompt_name": sample_template["name"],
+        }
+        llm_service.register_llm_module("test_json_module", module_config)
+        assert llm_service.get_llm_json_required_modules() == [
+            {"name": "test_json_module", "label": "测试模块"}
+        ]
+
+        # 未开启 use_json 的模块不应进入列表
+        plain_config = {
+            "label": "普通模块",
+            "llm": {
+                "name": list(llm_service.llm_interfaces.keys())[0],
+                "enable_thinking": False,
+                "use_json": False,
+            },
+            "prompt_name": sample_template["name"],
+        }
+        llm_service.register_llm_module("test_plain_module", plain_config)
+        names = [m["name"] for m in llm_service.get_llm_json_required_modules()]
+        assert "test_plain_module" not in names
+
+        # 未配置 label 时回退到模块名
+        no_label_config = dict(module_config)
+        no_label_config.pop("label", None)
+        llm_service.register_llm_module("test_no_label_module", no_label_config)
+        labels = {m["name"]: m["label"] for m in llm_service.get_llm_json_required_modules()}
+        assert labels["test_no_label_module"] == "test_no_label_module"

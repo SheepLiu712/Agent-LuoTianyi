@@ -50,6 +50,8 @@ class NetworkClient:
             vlm_base_url_getter=lambda: credential.get_vlm_provider_base_url(),
             params_getter=lambda: credential.get_llm_params(),
             vlm_params_getter=lambda: credential.get_vlm_params(),
+            flags_getter=lambda: credential.get_llm_flags(),
+            vlm_flags_getter=lambda: credential.get_vlm_flags(),
         )
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:

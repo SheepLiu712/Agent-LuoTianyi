@@ -19,14 +19,23 @@ import {
   LLM_MODEL_STORAGE_KEY,
   LLM_PROVIDER_BASE_URL_STORAGE_KEY,
   LLM_PARAMS_STORAGE_KEY,
+  LLM_ENABLE_THINKING_STORAGE_KEY,
+  LLM_USE_JSON_STORAGE_KEY,
   VLM_PROVIDER_STORAGE_KEY,
   VLM_MODEL_STORAGE_KEY,
   VLM_PROVIDER_BASE_URL_STORAGE_KEY,
   VLM_PARAMS_STORAGE_KEY,
+  VLM_ENABLE_THINKING_STORAGE_KEY,
+  VLM_USE_JSON_STORAGE_KEY,
   server_config,
 } from '../config';
 import { addDebugTrace } from '../utils/debug_trace';
-import { fetchProviderPresets, resolveProviderBaseUrl } from '../utils/llm_client';
+import {
+  fetchJsonRequiredModules,
+  fetchProviderPresets,
+  probeLlmConfig,
+  resolveProviderBaseUrl,
+} from '../utils/llm_client';
 import type { LlmProviderPreset } from '../utils/llm_client';
 import {
   getLlmApiKey,
@@ -49,17 +58,23 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   const scrollRef = useRef<ScrollView>(null);
 
   const [providers, setProviders] = useState<LlmProviderPreset[]>([]);
+  const [llmJsonModules, setLlmJsonModules] = useState<string[]>([]);
+  const [vlmJsonModules, setVlmJsonModules] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<TabKind>('text');
 
   const [llmProvider, setLlmProvider] = useState('');
   const [llmApiKey, setLlmApiKey] = useState('');
   const [llmModel, setLlmModel] = useState('');
   const [llmParamsText, setLlmParamsText] = useState('');
+  const [llmEnableThinking, setLlmEnableThinking] = useState(false);
+  const [llmUseJson, setLlmUseJson] = useState(false);
 
   const [vlmProvider, setVlmProvider] = useState('');
   const [vlmApiKey, setVlmApiKey] = useState('');
   const [vlmModel, setVlmModel] = useState('');
   const [vlmParamsText, setVlmParamsText] = useState('');
+  const [vlmEnableThinking, setVlmEnableThinking] = useState(false);
+  const [vlmUseJson, setVlmUseJson] = useState(false);
 
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [pickerKind, setPickerKind] = useState<PickerKind | null>(null);
@@ -90,6 +105,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           provider, model, params,
           vlmProv, vlmMod, vlmParams,
           key, vlmKey,
+          llmThinking, llmJson, vlmThinking, vlmJson,
         ] = await Promise.all([
           AsyncStorage.getItem(LLM_PROVIDER_STORAGE_KEY),
           AsyncStorage.getItem(LLM_MODEL_STORAGE_KEY),
@@ -99,6 +115,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           AsyncStorage.getItem(VLM_PARAMS_STORAGE_KEY),
           getLlmApiKey(),
           getVlmApiKey(),
+          AsyncStorage.getItem(LLM_ENABLE_THINKING_STORAGE_KEY),
+          AsyncStorage.getItem(LLM_USE_JSON_STORAGE_KEY),
+          AsyncStorage.getItem(VLM_ENABLE_THINKING_STORAGE_KEY),
+          AsyncStorage.getItem(VLM_USE_JSON_STORAGE_KEY),
         ]);
         if (!active) {
           return;
@@ -111,6 +131,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         if (vlmParams) setVlmParamsText(vlmParams);
         if (key) setLlmApiKey(key);
         if (vlmKey) setVlmApiKey(vlmKey);
+        setLlmEnableThinking(llmThinking === '1' || llmThinking === 'true');
+        setLlmUseJson(llmJson === '1' || llmJson === 'true');
+        setVlmEnableThinking(vlmThinking === '1' || vlmThinking === 'true');
+        setVlmUseJson(vlmJson === '1' || vlmJson === 'true');
       } catch (e) {
         addDebugTrace('llm_settings', 'load saved config failed', { error: String(e) });
       }
@@ -129,6 +153,19 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         }
         addDebugTrace('llm_settings', 'fetch providers failed', { error: String(e) });
       }
+      try {
+        const jsonModules = await fetchJsonRequiredModules(server_config.BASE_URL);
+        if (!active) {
+          return;
+        }
+        setLlmJsonModules(jsonModules.llm);
+        setVlmJsonModules(jsonModules.vlm);
+      } catch (e) {
+        if (!active) {
+          return;
+        }
+        addDebugTrace('llm_settings', 'fetch json modules failed', { error: String(e) });
+      }
     })();
     return () => {
       active = false;
@@ -142,6 +179,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   const isVlmTab = activeTab === 'vlm';
   const paramsText = isVlmTab ? vlmParamsText : llmParamsText;
   const setParamsText = isVlmTab ? setVlmParamsText : setLlmParamsText;
+  const enableThinking = isVlmTab ? vlmEnableThinking : llmEnableThinking;
+  const useJson = isVlmTab ? vlmUseJson : llmUseJson;
+  const setEnableThinking = isVlmTab ? setVlmEnableThinking : setLlmEnableThinking;
+  const setUseJson = isVlmTab ? setVlmUseJson : setLlmUseJson;
   const pickerProvider = isVlmTab ? currentVlmPreset : currentPreset;
   const pickerList = isVlmTab
     ? (currentVlmPreset?.vlm_models ?? [])
@@ -179,6 +220,44 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
 
     setSaving(true);
     try {
+      const probeErrors: string[] = [];
+      const textBaseUrl = resolveProviderBaseUrl(llmProvider, providers);
+      if (llmApiKey.trim() && llmModel.trim() && textBaseUrl) {
+        try {
+          await probeLlmConfig({
+            baseUrl: textBaseUrl,
+            apiKey: llmApiKey.trim(),
+            model: llmModel.trim(),
+            flags: { enableThinking: llmEnableThinking, useJson: llmUseJson },
+            params: textParams,
+          });
+        } catch (e) {
+          probeErrors.push(
+            `对话模型校验失败：${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+      const vlmBaseUrl = resolveProviderBaseUrl(vlmProvider, providers);
+      if (vlmApiKey.trim() && vlmModel.trim() && vlmBaseUrl) {
+        try {
+          await probeLlmConfig({
+            baseUrl: vlmBaseUrl,
+            apiKey: vlmApiKey.trim(),
+            model: vlmModel.trim(),
+            flags: { enableThinking: vlmEnableThinking, useJson: vlmUseJson },
+            params: vlmParams,
+          });
+        } catch (e) {
+          probeErrors.push(
+            `图片理解模型校验失败：${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
+      if (probeErrors.length > 0) {
+        Alert.alert('配置校验失败', probeErrors.join('\n'));
+        return;
+      }
+
       await setLlmApiKey(llmApiKey.trim());
       await AsyncStorage.setItem(LLM_PROVIDER_STORAGE_KEY, llmProvider);
       await AsyncStorage.setItem(LLM_MODEL_STORAGE_KEY, llmModel.trim());
@@ -187,6 +266,11 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         resolveProviderBaseUrl(llmProvider, providers),
       );
       await AsyncStorage.setItem(LLM_PARAMS_STORAGE_KEY, llmParamsText.trim());
+      await AsyncStorage.setItem(
+        LLM_ENABLE_THINKING_STORAGE_KEY,
+        llmEnableThinking ? '1' : '0',
+      );
+      await AsyncStorage.setItem(LLM_USE_JSON_STORAGE_KEY, llmUseJson ? '1' : '0');
 
       await setVlmApiKey(vlmApiKey.trim());
       await AsyncStorage.setItem(VLM_PROVIDER_STORAGE_KEY, vlmProvider);
@@ -196,6 +280,27 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         resolveProviderBaseUrl(vlmProvider, providers),
       );
       await AsyncStorage.setItem(VLM_PARAMS_STORAGE_KEY, vlmParamsText.trim());
+      await AsyncStorage.setItem(
+        VLM_ENABLE_THINKING_STORAGE_KEY,
+        vlmEnableThinking ? '1' : '0',
+      );
+      await AsyncStorage.setItem(VLM_USE_JSON_STORAGE_KEY, vlmUseJson ? '1' : '0');
+
+      const serverApiFunctions: string[] = [];
+      if (!llmUseJson) {
+        serverApiFunctions.push(...llmJsonModules);
+      }
+      if (!vlmUseJson) {
+        serverApiFunctions.push(...vlmJsonModules);
+      }
+      const uniqueFunctions = [...new Set(serverApiFunctions)];
+      if (uniqueFunctions.length > 0) {
+        const labels = uniqueFunctions.join('、');
+        Alert.alert(
+          '提示',
+          `以下功能需要 JSON 输出，当前模型未勾选支持，将改用服务端 API 执行：\n${labels}`,
+        );
+      }
 
       Alert.alert('成功', 'LLM 模型设置已保存');
       onClose();
@@ -367,6 +472,63 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
                   autoCorrect={false}
                   onFocus={scrollToBottom}
                 />
+                <Text style={[styles.hintText, { color: theme.textMuted }]}>
+                  思考：仅模型支持思考参数时勾选；JSON：未勾选时相关功能改用服务端 API。
+                </Text>
+                <TouchableOpacity
+                  style={styles.checkboxRow}
+                  onPress={() => setEnableThinking(!enableThinking)}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.checkbox,
+                      { borderColor: theme.border },
+                      enableThinking && { backgroundColor: theme.accent, borderColor: theme.accent },
+                    ]}
+                  >
+                    {enableThinking && (
+                      <Text
+                        style={[
+                          styles.checkmark,
+                          { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' },
+                        ]}
+                      >
+                        ✓
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={[styles.checkboxLabel, { color: theme.textSoft }]}>
+                    支持思考模式
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.checkboxRow}
+                  onPress={() => setUseJson(!useJson)}
+                  activeOpacity={0.7}
+                >
+                  <View
+                    style={[
+                      styles.checkbox,
+                      { borderColor: theme.border },
+                      useJson && { backgroundColor: theme.accent, borderColor: theme.accent },
+                    ]}
+                  >
+                    {useJson && (
+                      <Text
+                        style={[
+                          styles.checkmark,
+                          { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' },
+                        ]}
+                      >
+                        ✓
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={[styles.checkboxLabel, { color: theme.textSoft }]}>
+                    支持 JSON 输出
+                  </Text>
+                </TouchableOpacity>
               </View>
             ) : null}
 
@@ -381,7 +543,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
                 activeOpacity={0.8}
               >
                 <Text style={[styles.saveButtonText, { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' }]}>
-                  {saving ? '保存中...' : '保存设置'}
+                  {saving ? '校验中...' : '保存设置'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -571,6 +733,28 @@ const styles = StyleSheet.create({
   paramsInput: {
     minHeight: 100,
     textAlignVertical: 'top',
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 2,
+    marginRight: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkmark: {
+    fontSize: 13,
+    fontWeight: 'bold',
+    lineHeight: 16,
+  },
+  checkboxLabel: {
+    fontSize: 14,
   },
   advancedToggle: {
     borderRadius: 10,

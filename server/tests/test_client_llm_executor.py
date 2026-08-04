@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.utils.llm.client_delegating_interface import (
+    CLIENT_JSON_UNSUPPORTED_MARKER,
     ClientDelegatingLLMInterface,
     ClientDelegatingVLMInterface,
 )
@@ -467,6 +468,35 @@ async def test_delegating_enabled_uses_client(monkeypatch, executor, fake_ws):
 
 
 @pytest.mark.asyncio
+async def test_delegating_json_unsupported_falls_back_to_server(monkeypatch, executor, fake_ws):
+    inner = FakeInner()
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
+    wrapper = ClientDelegatingLLMInterface(inner, executor)
+    monkeypatch.setattr(
+        "src.utils.llm.client_delegating_interface.get_trace_context",
+        lambda: {"user_id": "u1"},
+    )
+
+    task = asyncio.create_task(
+        wrapper.generate_response(
+            "p", params={"temperature": 0.5}, enable_thinking=True, use_json=True
+        )
+    )
+    await asyncio.sleep(0)
+    request_id = fake_ws.sent_events[0]["payload"]["request_id"]
+    executor.on_llm_response(
+        {"request_id": request_id, "error": CLIENT_JSON_UNSUPPORTED_MARKER}
+    )
+
+    result = await task
+    assert result["content"] == "server-answer"
+    assert len(inner.calls) == 1
+    # 能力不足导致的回退不应向用户发错误通知
+    error_events = [e for e in fake_ws.sent_events if e["type"] == "error"]
+    assert error_events == []
+
+
+@pytest.mark.asyncio
 async def test_delegating_client_error_raises_and_notifies(monkeypatch, executor, fake_ws):
     inner = FakeInner()
     executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
@@ -500,17 +530,54 @@ async def test_vlm_delegating_enabled(monkeypatch, executor, fake_ws):
     )
 
     task = asyncio.create_task(
-        wrapper.generate_response("describe", image_base64="data:image/png;base64,AAA")
+        wrapper.generate_response(
+            "describe",
+            image_base64="data:image/png;base64,AAA",
+            extra_body={"enable_thinking": True},
+            response_format={"type": "json_object"},
+        )
     )
     await asyncio.sleep(0)
 
     sent = fake_ws.sent_events[0]["payload"]
     assert sent["image_base64"].startswith("data:image/png")
+    assert sent["enable_thinking"] is True
+    assert sent["use_json"] is True
     executor.on_llm_response({"request_id": sent["request_id"], "content": "vlm-client", "usage": None})
 
     result = await task
     assert result["content"] == "vlm-client"
     assert inner.calls == []
+
+
+@pytest.mark.asyncio
+async def test_vlm_delegating_json_unsupported_falls_back_to_server(monkeypatch, executor, fake_ws):
+    inner = FakeVLMInner()
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
+    wrapper = ClientDelegatingVLMInterface(inner, executor)
+    monkeypatch.setattr(
+        "src.utils.llm.client_delegating_interface.get_trace_context",
+        lambda: {"user_id": "u1"},
+    )
+
+    task = asyncio.create_task(
+        wrapper.generate_response(
+            "describe",
+            image_base64="data:image/png;base64,AAA",
+            response_format={"type": "json_object"},
+        )
+    )
+    await asyncio.sleep(0)
+    request_id = fake_ws.sent_events[0]["payload"]["request_id"]
+    executor.on_llm_response(
+        {"request_id": request_id, "error": CLIENT_JSON_UNSUPPORTED_MARKER}
+    )
+
+    result = await task
+    assert result["content"] == "vlm-answer"
+    assert len(inner.calls) == 1
+    error_events = [e for e in fake_ws.sent_events if e["type"] == "error"]
+    assert error_events == []
 
 
 @pytest.mark.asyncio

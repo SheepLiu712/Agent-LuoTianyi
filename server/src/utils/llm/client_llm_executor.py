@@ -5,7 +5,8 @@ ClientLLMExecutor
 api-key 直接调用云端 OpenAI 兼容接口，服务端全程不接触用户的 key。
 
 当用户未启用客户端执行、客户端离线、超时或客户端返回错误时，调用方
-（ClientDelegatingLLMInterface）会回退到服务端自带的 key 直连。
+（ClientDelegatingLLMInterface）决定是否回退到服务端自带的 key 直连；
+目前仅"客户端模型不支持 JSON 输出"这一明确场景会回退。
 """
 
 from __future__ import annotations
