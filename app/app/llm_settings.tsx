@@ -15,7 +15,6 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  LLM_API_KEY_STORAGE_KEY,
   LLM_PROVIDER_STORAGE_KEY,
   LLM_MODEL_STORAGE_KEY,
   LLM_PROVIDER_BASE_URL_STORAGE_KEY,
@@ -29,6 +28,7 @@ import {
   resolveProviderModel,
 } from '../utils/llm_client';
 import type { LlmProviderPreset } from '../utils/llm_client';
+import { getLlmApiKey, setLlmApiKey } from '../utils/llm_key_storage';
 import { AppTheme, THEMES } from '../utils/theme';
 
 interface LlmSettingsScreenProps {
@@ -74,7 +74,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         const [savedProvider, savedModel, savedKey] = await Promise.all([
           AsyncStorage.getItem(LLM_PROVIDER_STORAGE_KEY),
           AsyncStorage.getItem(LLM_MODEL_STORAGE_KEY),
-          AsyncStorage.getItem(LLM_API_KEY_STORAGE_KEY),
+          getLlmApiKey(),
         ]);
         if (!active) {
           return;
@@ -163,7 +163,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   const handleSave = async () => {
     setSaving(true);
     try {
-      await AsyncStorage.setItem(LLM_API_KEY_STORAGE_KEY, llmApiKey.trim());
+      await setLlmApiKey(llmApiKey.trim());
       await AsyncStorage.setItem(LLM_PROVIDER_STORAGE_KEY, llmProvider);
       await AsyncStorage.setItem(LLM_MODEL_STORAGE_KEY, llmModel.trim());
       await AsyncStorage.setItem(

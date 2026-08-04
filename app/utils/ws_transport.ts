@@ -2,7 +2,6 @@ import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   server_config,
-  LLM_API_KEY_STORAGE_KEY,
   LLM_MODEL_STORAGE_KEY,
   LLM_PROVIDER_BASE_URL_STORAGE_KEY,
 } from '../config';
@@ -14,6 +13,7 @@ import {
   buildChatCompletionsPayload,
   callLlmProvider,
 } from './llm_client';
+import { getLlmApiKey } from './llm_key_storage';
 
 export type { AckResult } from './ws_ack';
 export { normalizeServerAck } from './ws_ack';
@@ -149,7 +149,7 @@ export class WebSocketTransport {
   }
 
   async submitUserText(message: string, isProactive = false, ackTimeout = 10000, clientMsgId?: string): Promise<AckResult> {
-    const apiKey = await AsyncStorage.getItem(LLM_API_KEY_STORAGE_KEY);
+    const apiKey = await getLlmApiKey();
     const payload: Record<string, unknown> = { message };
     if (isProactive) {
       payload.is_proactive = true;
@@ -167,7 +167,7 @@ export class WebSocketTransport {
     ackTimeout = 10000,
     clientMsgId?: string,
   ): Promise<AckResult> {
-    const apiKey = await AsyncStorage.getItem(LLM_API_KEY_STORAGE_KEY);
+    const apiKey = await getLlmApiKey();
     const payload: Record<string, unknown> = {
       image_base64: imageBase64,
       mime_type: mimeType,
@@ -593,7 +593,7 @@ export class WebSocketTransport {
       });
     };
     try {
-      const apiKey = await AsyncStorage.getItem(LLM_API_KEY_STORAGE_KEY);
+      const apiKey = await getLlmApiKey();
       if (!apiKey) {
         addDebugTrace('llm', 'llm_request without api key');
         sendError('no api key configured on client');
