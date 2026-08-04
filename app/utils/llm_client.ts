@@ -152,7 +152,7 @@ export function buildChatCompletionsPayload(options: BuildPayloadOptions): Recor
   const body: Record<string, unknown> = {
     model,
     messages,
-    max_tokens: params.max_tokens ?? 8192,
+    max_tokens: params.max_tokens ?? 4096,
     temperature: params.temperature ?? 0.7,
     top_p: params.top_p ?? 0.9,
   };
