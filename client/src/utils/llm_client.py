@@ -15,6 +15,8 @@ from ..utils.logger import get_logger
 
 logger = get_logger("llm_client")
 
+CLIENT_JSON_UNSUPPORTED_MARKER = "client_model_does_not_support_json"
+
 
 def fetch_llm_providers(
     server_base_url: str,
@@ -33,6 +35,36 @@ def fetch_llm_providers(
     if isinstance(providers, list):
         return [p for p in providers if isinstance(p, dict)]
     return []
+
+
+def fetch_llm_json_required_modules(
+    server_base_url: str,
+    timeout: float = 15.0,
+) -> tuple[list, list]:
+    """从服务端获取需要 JSON 输出的模块友好标签列表（LLM / VLM）。"""
+    url = f"{server_base_url.rstrip('/')}/llm/providers"
+    try:
+        resp = requests.get(url, timeout=timeout)
+    except Exception as exc:
+        raise RuntimeError(f"获取 JSON 功能列表失败: {exc}") from exc
+    if resp.status_code < 200 or resp.status_code >= 300:
+        raise RuntimeError(f"获取 JSON 功能列表失败: HTTP {resp.status_code}")
+    data = resp.json()
+    llm_modules = data.get("llm_json_required_modules") or []
+    vlm_modules = data.get("vlm_json_required_modules") or []
+    return _extract_module_labels(llm_modules), _extract_module_labels(vlm_modules)
+
+
+def _extract_module_labels(items: list) -> list:
+    """服务端下发 [{name, label}]，提取友好标签；兼容旧的纯字符串列表。"""
+    labels = []
+    for item in items:
+        if isinstance(item, dict):
+            label = item.get("label")
+            labels.append(str(label) if label else str(item.get("name", "")))
+        elif isinstance(item, str):
+            labels.append(item)
+    return labels
 
 
 def resolve_provider_base_url(
@@ -184,5 +216,34 @@ async def call_llm_api_async(
         url=url,
         api_key=api_key,
         payload=payload,
+        timeout=timeout,
+    )
+
+
+def probe_llm_config(
+    base_url: str,
+    api_key: str,
+    model: str,
+    flags: Optional[Dict[str, Any]] = None,
+    params: Optional[Dict[str, Any]] = None,
+    timeout: float = 30.0,
+) -> None:
+    """保存前探测：用所选模型/开关向服务商发一次最小请求，失败抛异常。"""
+    flags = flags or {}
+    use_json = bool(flags.get("use_json"))
+    probe_params = dict(params or {})
+    probe_params["max_tokens"] = 8
+    probe_params["temperature"] = 0
+    body = build_chat_completions_payload(
+        prompt='返回 JSON：{"ok": true}' if use_json else "ping",
+        model=model,
+        params=probe_params,
+        enable_thinking=bool(flags.get("enable_thinking")),
+        use_json=use_json,
+    )
+    call_llm_api(
+        url=f"{base_url.rstrip('/')}/chat/completions",
+        api_key=api_key,
+        payload=body,
         timeout=timeout,
     )

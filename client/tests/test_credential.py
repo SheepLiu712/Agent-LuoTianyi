@@ -65,3 +65,50 @@ def test_vlm_api_key_plaintext_fallback(monkeypatch, tmp_path):
 
     assert credential.save_vlm_api_key("sk-vlm", allow_plaintext=True) is True
     assert credential.get_vlm_api_key() == "sk-vlm"
+
+
+def test_llm_flags_default_false(monkeypatch, tmp_path):
+    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
+    monkeypatch.setattr(
+        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
+    )
+
+    assert credential.get_llm_flags() == {"enable_thinking": False, "use_json": False}
+
+
+def test_llm_flags_roundtrip(monkeypatch, tmp_path):
+    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
+    monkeypatch.setattr(
+        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
+    )
+
+    credential.save_llm_flags(True, True)
+    assert credential.get_llm_flags() == {"enable_thinking": True, "use_json": True}
+
+    credential.save_llm_flags(False, True)
+    assert credential.get_llm_flags() == {"enable_thinking": False, "use_json": True}
+
+
+def test_vlm_flags_roundtrip(monkeypatch, tmp_path):
+    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
+    monkeypatch.setattr(
+        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
+    )
+
+    assert credential.get_vlm_flags() == {"enable_thinking": False, "use_json": False}
+    credential.save_vlm_flags(True, False)
+    assert credential.get_vlm_flags() == {"enable_thinking": True, "use_json": False}
+
+
+def test_save_credentials_preserves_flags(monkeypatch, tmp_path):
+    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
+    monkeypatch.setattr(
+        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
+    )
+
+    credential.save_llm_flags(True, True)
+    credential.save_vlm_flags(True, False)
+    credential.save_credentials("u", "", False)
+
+    assert credential.get_llm_flags() == {"enable_thinking": True, "use_json": True}
+    assert credential.get_vlm_flags() == {"enable_thinking": True, "use_json": False}

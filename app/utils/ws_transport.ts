@@ -5,9 +5,13 @@ import {
   LLM_MODEL_STORAGE_KEY,
   LLM_PROVIDER_BASE_URL_STORAGE_KEY,
   LLM_PARAMS_STORAGE_KEY,
+  LLM_ENABLE_THINKING_STORAGE_KEY,
+  LLM_USE_JSON_STORAGE_KEY,
   VLM_MODEL_STORAGE_KEY,
   VLM_PROVIDER_BASE_URL_STORAGE_KEY,
   VLM_PARAMS_STORAGE_KEY,
+  VLM_ENABLE_THINKING_STORAGE_KEY,
+  VLM_USE_JSON_STORAGE_KEY,
 } from '../config';
 import { AgentMessagePayload } from '../types/chat';
 import { WSEventType } from '../types/ws_events';
@@ -16,6 +20,7 @@ import { AckResult, normalizeServerAck } from './ws_ack';
 import {
   buildChatCompletionsPayload,
   callLlmProvider,
+  CLIENT_JSON_UNSUPPORTED_MARKER,
 } from './llm_client';
 import { getLlmApiKey, getVlmApiKey } from './llm_key_storage';
 
@@ -635,12 +640,28 @@ export class WebSocketTransport {
           // 忽略损坏的参数缓存
         }
       }
+      const [enableThinkingText, useJsonText] = await Promise.all([
+        AsyncStorage.getItem(
+          isImage ? VLM_ENABLE_THINKING_STORAGE_KEY : LLM_ENABLE_THINKING_STORAGE_KEY,
+        ),
+        AsyncStorage.getItem(
+          isImage ? VLM_USE_JSON_STORAGE_KEY : LLM_USE_JSON_STORAGE_KEY,
+        ),
+      ]);
+      const capableThinking = enableThinkingText === '1' || enableThinkingText === 'true';
+      const capableJson = useJsonText === '1' || useJsonText === 'true';
+      const serverEnableThinking = Boolean(payload.enable_thinking);
+      const serverUseJson = Boolean(payload.use_json);
+      if (serverUseJson && !capableJson) {
+        sendError(CLIENT_JSON_UNSUPPORTED_MARKER);
+        return;
+      }
       const body = buildChatCompletionsPayload({
         prompt: String(payload.prompt || ''),
         model,
         params: { ...serverParams, ...cachedParams },
-        enableThinking: Boolean(payload.enable_thinking),
-        useJson: Boolean(payload.use_json),
+        enableThinking: capableThinking && serverEnableThinking,
+        useJson: serverUseJson,
         imageBase64: typeof payload.image_base64 === 'string' ? payload.image_base64 : undefined,
       });
       const result = await callLlmProvider({ url, apiKey, body });

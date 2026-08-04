@@ -260,7 +260,11 @@ async def get_llm_providers(system_runtime = Depends(get_runtime)):
     获取客户端可选的 LLM 服务商预设列表（name / base_url / model）。
     供 APP 和桌面 client 在偏好设置中使用；不包含任何密钥。
     """
-    return {"providers": system_runtime.llm_service.config.get("llm_providers", [])}
+    return {
+        "providers": system_runtime.llm_service.config.get("llm_providers", []),
+        "llm_json_required_modules": system_runtime.llm_service.get_llm_json_required_modules(),
+        "vlm_json_required_modules": system_runtime.llm_service.get_vlm_json_required_modules(),
+    }
 
 
 @app.post("/auth/auto_login")

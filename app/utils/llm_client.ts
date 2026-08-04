@@ -9,6 +9,8 @@ interface LlmResult {
   usage: unknown;
 }
 
+export const CLIENT_JSON_UNSUPPORTED_MARKER = 'client_model_does_not_support_json';
+
 export interface LlmProviderPreset {
   name: string;
   base_url: string;
@@ -55,6 +57,50 @@ export async function ensureProviderPresets(
     return fetchProviderPresets(serverBaseUrl);
   }
   return cachedProviderPresets;
+}
+
+export async function fetchJsonRequiredModules(
+  serverBaseUrl: string,
+  timeoutMs = 15000,
+): Promise<{ llm: string[]; vlm: string[] }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(`${serverBaseUrl.replace(/\/+$/, '')}/llm/providers`, {
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    const data = (await resp.json()) as {
+      llm_json_required_modules?: unknown;
+      vlm_json_required_modules?: unknown;
+    };
+    const toLabels = (value: unknown): string[] => {
+      if (!Array.isArray(value)) {
+        return [];
+      }
+      return value
+        .map((item) => {
+          if (item && typeof item === 'object') {
+            const record = item as { label?: unknown; name?: unknown };
+            return typeof record.label === 'string' && record.label
+              ? record.label
+              : typeof record.name === 'string'
+                ? record.name
+                : '';
+          }
+          return typeof item === 'string' ? item : '';
+        })
+        .filter((label) => label.length > 0);
+    };
+    return {
+      llm: toLabels(data.llm_json_required_modules),
+      vlm: toLabels(data.vlm_json_required_modules),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function resolveProviderBaseUrl(
@@ -197,4 +243,43 @@ export async function callLlmProvider(options: CallProviderOptions): Promise<Llm
   } finally {
     clearTimeout(timer);
   }
+}
+
+interface ProbeOptions {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  flags?: { enableThinking?: boolean; useJson?: boolean };
+  params?: Record<string, unknown>;
+  timeoutMs?: number;
+}
+
+/**
+ * 保存前探测：用所选模型/开关向服务商发一次最小请求，失败抛异常。
+ * 仅验证文本链路（key/模型/开关），图片能力由服务端下发的 vlm_models 保证。
+ */
+export async function probeLlmConfig(options: ProbeOptions): Promise<void> {
+  const {
+    baseUrl,
+    apiKey,
+    model,
+    flags = {},
+    params = {},
+    timeoutMs = 30000,
+  } = options;
+  const useJson = Boolean(flags.useJson);
+  const probeParams: Record<string, unknown> = { ...params, max_tokens: 8, temperature: 0 };
+  const body = buildChatCompletionsPayload({
+    prompt: useJson ? '返回 JSON：{"ok": true}' : 'ping',
+    model,
+    params: probeParams,
+    enableThinking: Boolean(flags.enableThinking),
+    useJson,
+  });
+  await callLlmProvider({
+    url: `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
+    apiKey,
+    body,
+    timeoutMs,
+  });
 }

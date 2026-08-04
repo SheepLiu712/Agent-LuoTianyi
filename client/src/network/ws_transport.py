@@ -11,6 +11,7 @@ from .event_types import build_event, normalize_agent_message, normalize_error_m
 from ..utils.logger import get_logger
 from ..utils.tls import create_default_ssl_context
 from ..utils.llm_client import (
+    CLIENT_JSON_UNSUPPORTED_MARKER,
     build_chat_completions_payload,
     call_llm_api_async,
 )
@@ -56,6 +57,8 @@ class WsTransport:
         vlm_base_url_getter: Callable[[], str | None] | None = None,
         params_getter: Callable[[], dict | None] | None = None,
         vlm_params_getter: Callable[[], dict | None] | None = None,
+        flags_getter: Callable[[], dict | None] | None = None,
+        vlm_flags_getter: Callable[[], dict | None] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.username_getter = username_getter
@@ -72,6 +75,8 @@ class WsTransport:
         self.vlm_base_url_getter = vlm_base_url_getter
         self.params_getter = params_getter
         self.vlm_params_getter = vlm_params_getter
+        self.flags_getter = flags_getter
+        self.vlm_flags_getter = vlm_flags_getter
 
         self._lock = threading.Lock()
         self._submit_lock = threading.Lock()
@@ -520,15 +525,23 @@ class WsTransport:
         server_params = payload.get("params") or {}
         if is_image:
             cached_params = self.vlm_params_getter() if self.vlm_params_getter else None
+            flags = self.vlm_flags_getter() if self.vlm_flags_getter else None
         else:
             cached_params = self.params_getter() if self.params_getter else None
+            flags = self.flags_getter() if self.flags_getter else None
         merged_params = {**(server_params or {}), **(cached_params or {})}
+        flags = flags or {}
+        server_enable_thinking = bool(payload.get("enable_thinking"))
+        server_use_json = bool(payload.get("use_json"))
+        if server_use_json and not bool(flags.get("use_json")):
+            await self._send_llm_response(request_id, error=CLIENT_JSON_UNSUPPORTED_MARKER)
+            return
         body = build_chat_completions_payload(
             prompt=payload.get("prompt", ""),
             model=model,
             params=merged_params,
-            enable_thinking=bool(payload.get("enable_thinking")),
-            use_json=bool(payload.get("use_json")),
+            enable_thinking=bool(flags.get("enable_thinking")) and server_enable_thinking,
+            use_json=server_use_json,
             image_base64=payload.get("image_base64"),
         )
         try:

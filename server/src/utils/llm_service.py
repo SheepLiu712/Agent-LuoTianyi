@@ -26,6 +26,9 @@ class LLMService:
 
         self.llm_modules: Dict[str, LLMModule] = {}
         self.vlm_modules: Dict[str, VLMModule] = {}
+        # 需要 JSON 输出的模块：module_name -> 用户可见标签（来自模块配置）
+        self._llm_json_modules: Dict[str, str] = {}
+        self._vlm_json_modules: Dict[str, str] = {}
 
     def ensure_dependencies(self) -> None:
         """检查 LLM 服务的基础依赖已经初始化。"""
@@ -56,6 +59,11 @@ class LLMService:
         
         module = LLMModule(module_name, llm_config, prompt_template, llm_interface)
         self.llm_modules[module_name] = module
+        self._llm_json_modules.pop(module_name, None)
+        if llm_config.get("use_json", False):
+            self._llm_json_modules[module_name] = str(
+                module_config.get("label") or module_name
+            )
         return module
 
     def register_vlm_module(self, module_name: str, module_config: Dict) -> VLMModule:
@@ -74,7 +82,26 @@ class LLMService:
         
         module = VLMModule(module_name, module_config, prompt_template, vlm_interface)
         self.vlm_modules[module_name] = module
+        self._vlm_json_modules.pop(module_name, None)
+        if module_config.get("use_json", vlm_config.get("use_json", False)):
+            self._vlm_json_modules[module_name] = str(
+                module_config.get("label") or module_name
+            )
         return module
+
+    def get_llm_json_required_modules(self) -> list:
+        """返回需要 JSON 输出的 LLM 模块（名称+友好标签），客户端能力不足时这些模块回退服务端 key。"""
+        return [
+            {"name": name, "label": label}
+            for name, label in sorted(self._llm_json_modules.items())
+        ]
+
+    def get_vlm_json_required_modules(self) -> list:
+        """返回需要 JSON 输出的 VLM 模块（名称+友好标签）。"""
+        return [
+            {"name": name, "label": label}
+            for name, label in sorted(self._vlm_json_modules.items())
+        ]
     
     def get_llm_interface_info(self) -> Dict[str, Dict]:
         """获取所有已注册的LLM接口信息"""

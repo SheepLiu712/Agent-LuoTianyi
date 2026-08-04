@@ -31,6 +31,7 @@ KEY_ERROR_MESSAGE = (
     "你的 LLM API Key 或账户存在问题（无效/未授权/欠费等），本次回复未生成。"
     "请在「LLM 模型设置」重新配置；如需使用服务端 key，请清空后重试。"
 )
+CLIENT_JSON_UNSUPPORTED_MARKER = "client_model_does_not_support_json"
 CLIENT_ERROR_MESSAGE = (
     "客户端 LLM 调用失败，本次回复未生成。请检查网络后重试；"
     "如需使用服务端 key，请在「LLM 模型设置」清空配置。"
@@ -52,6 +53,11 @@ def _provider_info_from_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "url": url,
         "model": model,
     }
+
+
+def _looks_like_json_unsupported(text: str) -> bool:
+    """客户端模型不支持 JSON 输出时，客户端会返回该标记错误。"""
+    return CLIENT_JSON_UNSUPPORTED_MARKER in (text or "").lower()
 
 
 async def _client_request_with_retry(
@@ -114,8 +120,6 @@ class ClientDelegatingLLMInterface(LLMAPIInterface):
         if self._can_use_client(user_id):
             config = getattr(self.inner, "config", {}) or {}
             provider = _provider_info_from_config(config)
-            effective_thinking = enable_thinking and bool(config.get("can_enable_thinking", False))
-            effective_json = use_json and bool(config.get("can_use_json", False))
             try:
                 return await _client_request_with_retry(
                     self.executor,
@@ -123,11 +127,25 @@ class ClientDelegatingLLMInterface(LLMAPIInterface):
                     module=getattr(self, "_module_name", "unknown"),
                     prompt=prompt,
                     params=params,
-                    enable_thinking=effective_thinking,
-                    use_json=effective_json,
+                    enable_thinking=enable_thinking,
+                    use_json=use_json,
                     provider=provider,
                 )
             except ClientLLMError as exc:
+                if _looks_like_json_unsupported(str(exc)):
+                    self.logger.warning(
+                        "Client model does not support JSON mode, falling back to "
+                        "server key for user %s: %s",
+                        user_id,
+                        exc,
+                    )
+                    return await self.inner.generate_response(
+                        prompt,
+                        params=params,
+                        enable_thinking=enable_thinking,
+                        use_json=use_json,
+                        **kwargs,
+                    )
                 message = (
                     KEY_ERROR_MESSAGE
                     if _looks_like_key_error(str(exc))
@@ -187,8 +205,8 @@ class ClientDelegatingVLMInterface(VLMAPIInterface):
             config = getattr(self.inner, "config", {}) or {}
             provider = _provider_info_from_config(config)
             extra_body = dict(kwargs.get("extra_body") or {})
-            effective_thinking = bool(extra_body.get("enable_thinking", False))
-            effective_json = bool(kwargs.get("response_format"))
+            enable_thinking = bool(extra_body.get("enable_thinking", False))
+            use_json = bool(kwargs.get("response_format"))
             params = {
                 key: value
                 for key, value in kwargs.items()
@@ -201,12 +219,24 @@ class ClientDelegatingVLMInterface(VLMAPIInterface):
                     module=getattr(self, "_module_name", "unknown"),
                     prompt=prompt,
                     params=params,
-                    enable_thinking=effective_thinking,
-                    use_json=effective_json,
+                    enable_thinking=enable_thinking,
+                    use_json=use_json,
                     image_base64=image_base64,
                     provider=provider,
                 )
             except ClientLLMError as exc:
+                if _looks_like_json_unsupported(str(exc)):
+                    self.logger.warning(
+                        "Client VLM model does not support JSON mode, falling back "
+                        "to server key for user %s: %s",
+                        user_id,
+                        exc,
+                    )
+                    return await self.inner.generate_response(
+                        prompt,
+                        image_base64=image_base64,
+                        **kwargs,
+                    )
                 message = (
                     KEY_ERROR_MESSAGE
                     if _looks_like_key_error(str(exc))

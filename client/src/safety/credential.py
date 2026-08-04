@@ -12,6 +12,29 @@ logger = get_logger("credential")
 _DPAPI_AVAILABLE = os.name == "nt"
 _CRYPTPROTECT_UI_FORBIDDEN = 0x1
 
+_CREDENTIAL_PRESERVED_FIELDS = (
+    "server_url",
+    "api_key_dpapi",
+    "api_key_plain",
+    "llm_provider",
+    "llm_model",
+    "vlm_model",
+    "vlm_provider",
+    "vlm_provider_base_url",
+    "vlm_api_key_dpapi",
+    "vlm_api_key_plain",
+    "llm_provider_base_url",
+    "llm_params",
+    "vlm_params",
+)
+
+_CREDENTIAL_FLAG_FIELDS = (
+    "llm_enable_thinking",
+    "llm_use_json",
+    "vlm_enable_thinking",
+    "vlm_use_json",
+)
+
 
 class _DATA_BLOB(ctypes.Structure):
     _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_byte))]
@@ -123,7 +146,7 @@ def load_credentials() -> Tuple[Optional[str], Optional[str], bool, Optional[str
 def save_credentials(username: str, token: str, do_auto_login: bool) -> None:
     try:
         path = get_credential_path()
-        # 保留已有的 server_url
+        # 保留已有的本地配置字段
         existing_data = {}
         if os.path.exists(path):
             with open(path, "r", encoding="utf-8") as f:
@@ -139,32 +162,12 @@ def save_credentials(username: str, token: str, do_auto_login: bool) -> None:
             else:
                 data["auto_login"] = False
                 logger.error("Auto-login token not saved due to encryption failure.")
-        if existing_data.get("server_url"):
-            data["server_url"] = existing_data["server_url"]
-        if existing_data.get("api_key_dpapi"):
-            data["api_key_dpapi"] = existing_data["api_key_dpapi"]
-        if existing_data.get("api_key_plain"):
-            data["api_key_plain"] = existing_data["api_key_plain"]
-        if existing_data.get("llm_provider"):
-            data["llm_provider"] = existing_data["llm_provider"]
-        if existing_data.get("llm_model"):
-            data["llm_model"] = existing_data["llm_model"]
-        if existing_data.get("vlm_model"):
-            data["vlm_model"] = existing_data["vlm_model"]
-        if existing_data.get("vlm_provider"):
-            data["vlm_provider"] = existing_data["vlm_provider"]
-        if existing_data.get("vlm_provider_base_url"):
-            data["vlm_provider_base_url"] = existing_data["vlm_provider_base_url"]
-        if existing_data.get("vlm_api_key_dpapi"):
-            data["vlm_api_key_dpapi"] = existing_data["vlm_api_key_dpapi"]
-        if existing_data.get("vlm_api_key_plain"):
-            data["vlm_api_key_plain"] = existing_data["vlm_api_key_plain"]
-        if existing_data.get("llm_provider_base_url"):
-            data["llm_provider_base_url"] = existing_data["llm_provider_base_url"]
-        if existing_data.get("llm_params"):
-            data["llm_params"] = existing_data["llm_params"]
-        if existing_data.get("vlm_params"):
-            data["vlm_params"] = existing_data["vlm_params"]
+        for key in _CREDENTIAL_PRESERVED_FIELDS:
+            if existing_data.get(key):
+                data[key] = existing_data[key]
+        for key in _CREDENTIAL_FLAG_FIELDS:
+            if existing_data.get(key) is not None:
+                data[key] = existing_data[key]
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -509,6 +512,66 @@ def get_vlm_params() -> dict:
     except Exception as e:
         logger.error(f"Error loading LLM VLM params: {e}")
     return {}
+
+def save_llm_flags(enable_thinking: bool, use_json: bool) -> None:
+    """保存对话模型的思考/JSON 开关。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        data["llm_enable_thinking"] = bool(enable_thinking)
+        data["llm_use_json"] = bool(use_json)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving LLM flags: {e}")
+
+def get_llm_flags() -> dict:
+    """读取对话模型的思考/JSON 开关；未配置时默认 False。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return {
+                "enable_thinking": bool(data.get("llm_enable_thinking", False)),
+                "use_json": bool(data.get("llm_use_json", False)),
+            }
+    except Exception as e:
+        logger.error(f"Error loading LLM flags: {e}")
+    return {"enable_thinking": False, "use_json": False}
+
+def save_vlm_flags(enable_thinking: bool, use_json: bool) -> None:
+    """保存图片理解模型的思考/JSON 开关。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        data["vlm_enable_thinking"] = bool(enable_thinking)
+        data["vlm_use_json"] = bool(use_json)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Error saving VLM flags: {e}")
+
+def get_vlm_flags() -> dict:
+    """读取图片理解模型的思考/JSON 开关；未配置时默认 False。"""
+    try:
+        path = get_credential_path()
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return {
+                "enable_thinking": bool(data.get("vlm_enable_thinking", False)),
+                "use_json": bool(data.get("vlm_use_json", False)),
+            }
+    except Exception as e:
+        logger.error(f"Error loading VLM flags: {e}")
+    return {"enable_thinking": False, "use_json": False}
 
 def save_server_url(server_url: str, verify_ssl: bool = True) -> None:
     """保存自定义服务器地址到凭据文件。"""

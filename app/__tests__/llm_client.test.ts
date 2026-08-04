@@ -4,7 +4,9 @@
 import {
   buildChatCompletionsPayload,
   callLlmProvider,
+  fetchJsonRequiredModules,
   fetchProviderPresets,
+  probeLlmConfig,
   resolveProviderBaseUrl,
   resolveProviderModel,
   resolveProviderVlmModel,
@@ -118,6 +120,30 @@ describe('fetchProviderPresets', () => {
   });
 });
 
+describe('fetchJsonRequiredModules', () => {
+  it('returns llm and vlm modules that require json output', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        providers: [],
+        llm_json_required_modules: [
+          { name: 'topic_extractor', label: '话题抽取' },
+          { name: 'memory_writer', label: '记忆写入' },
+        ],
+        vlm_json_required_modules: [],
+      }),
+    } as unknown as Response);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const result = await fetchJsonRequiredModules('https://server.example.com');
+    expect(result.llm).toEqual(['话题抽取', '记忆写入']);
+    expect(result.vlm).toEqual([]);
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toBe('https://server.example.com/llm/providers');
+  });
+});
+
 describe('callLlmProvider', () => {
   afterEach(() => {
     jest.restoreAllMocks();
@@ -159,5 +185,82 @@ describe('callLlmProvider', () => {
     await expect(
       callLlmProvider({ url: 'https://example.com', apiKey: 'bad', body: {} }),
     ).rejects.toThrow('401');
+  });
+});
+
+describe('probeLlmConfig', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('builds a probe request with flags and minimal params', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: 'ok' } }], usage: null }),
+    } as unknown as Response);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await probeLlmConfig({
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'sk-user',
+      model: 'test-model',
+      flags: { enableThinking: true, useJson: true },
+      params: { temperature: 0.9, max_tokens: 2048 },
+      timeoutMs: 15000,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://example.com/v1/chat/completions');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer sk-user');
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect(body.model).toBe('test-model');
+    expect(body.max_tokens).toBe(8);
+    expect(body.temperature).toBe(0);
+    expect(body.enable_thinking).toBe(true);
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect((body.messages as Array<{ content: string }>)[0].content).toContain('ok');
+  });
+
+  it('sends a plain ping when no flags are set', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: 'ok' } }], usage: null }),
+    } as unknown as Response);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await probeLlmConfig({
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'sk-user',
+      model: 'm',
+      flags: { enableThinking: false, useJson: false },
+    });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://example.com/v1/chat/completions');
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    expect((body.messages as Array<{ content: string }>)[0].content).toBe('ping');
+    expect(body.enable_thinking).toBeUndefined();
+    expect(body.response_format).toBeUndefined();
+  });
+
+  it('rejects when the provider returns an error', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: async () => 'unsupported switch',
+      json: async () => ({ error: { message: 'unsupported switch' } }),
+    } as unknown as Response) as unknown as typeof fetch;
+
+    await expect(
+      probeLlmConfig({
+        baseUrl: 'https://example.com/v1',
+        apiKey: 'sk',
+        model: 'm',
+        flags: { useJson: true },
+      }),
+    ).rejects.toThrow('400');
   });
 });

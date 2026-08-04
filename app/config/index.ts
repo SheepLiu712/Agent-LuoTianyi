@@ -9,12 +9,16 @@ export const LLM_PROVIDER_STORAGE_KEY = 'llm_provider';
 export const LLM_MODEL_STORAGE_KEY = 'llm_model';
 export const LLM_PROVIDER_BASE_URL_STORAGE_KEY = 'llm_provider_base_url';
 export const LLM_PARAMS_STORAGE_KEY = 'llm_params';
+export const LLM_ENABLE_THINKING_STORAGE_KEY = 'llm_enable_thinking';
+export const LLM_USE_JSON_STORAGE_KEY = 'llm_use_json';
 
 export const VLM_API_KEY_STORAGE_KEY = 'vlm_api_key';
 export const VLM_PROVIDER_STORAGE_KEY = 'vlm_provider';
 export const VLM_MODEL_STORAGE_KEY = 'vlm_model';
 export const VLM_PROVIDER_BASE_URL_STORAGE_KEY = 'vlm_provider_base_url';
 export const VLM_PARAMS_STORAGE_KEY = 'vlm_params';
+export const VLM_ENABLE_THINKING_STORAGE_KEY = 'vlm_enable_thinking';
+export const VLM_USE_JSON_STORAGE_KEY = 'vlm_use_json';
 
 export const server_config: {
   BASE_URL: string;
