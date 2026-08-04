@@ -39,28 +39,28 @@ def resolve_provider_base_url(
     provider_name: str | None,
     presets: Optional[list[Dict[str, Any]]] = None,
 ) -> str:
-    """按预设名称返回 base_url；未匹配或为空时回退到第一个预设。"""
+    """按预设名称返回 base_url；未匹配返回空串"""
     if presets is None:
         presets = []
     name = provider_name or ""
     for preset in presets:
         if preset["name"] == name:
             return preset["base_url"]
-    return presets[0]["base_url"] if presets else ""
+    return ""
 
 
 def resolve_provider_model(
     provider_name: str | None,
     presets: Optional[list[Dict[str, Any]]] = None,
 ) -> str:
-    """按预设名称返回默认 model；未匹配或为空时回退到第一个预设。"""
+    """按预设名称返回默认 model；未匹配返回空串。"""
     if presets is None:
         presets = []
     name = provider_name or ""
     for preset in presets:
         if preset["name"] == name:
             return preset["model"]
-    return presets[0]["model"] if presets else ""
+    return ""
 
 
 def fetch_provider_models(

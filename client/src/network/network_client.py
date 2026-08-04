@@ -43,6 +43,7 @@ class NetworkClient:
             api_key_getter=lambda: credential.get_api_key(),
             provider_getter=lambda: credential.get_provider(),
             model_getter=lambda: credential.get_model(),
+            base_url_getter=lambda: credential.get_provider_base_url(),
         )
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:

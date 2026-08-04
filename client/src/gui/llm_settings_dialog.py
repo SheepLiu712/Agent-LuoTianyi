@@ -230,6 +230,8 @@ class LLMSettingsDialog(QDialog):
             presets=self._llm_providers,
         )
         if not base_url:
+            base_url = credential.get_provider_base_url() or ""
+        if not base_url:
             self.status_label.setText("请先选择可用的服务商")
             return
         self.status_label.setText("正在获取模型列表…")
@@ -261,5 +263,8 @@ class LLMSettingsDialog(QDialog):
         credential.save_provider(provider)
         credential.save_model(self.model_combo.currentText().strip())
         credential.save_api_key(self.api_key_input.text().strip())
+        credential.save_provider_base_url(
+            resolve_provider_base_url(provider, presets=self._llm_providers)
+        )
         QMessageBox.information(self, "成功", "LLM 模型设置已保存")
         self.accept()

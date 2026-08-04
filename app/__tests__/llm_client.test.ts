@@ -61,13 +61,9 @@ describe('resolveProviderBaseUrl', () => {
     expect(resolveProviderBaseUrl('DeepSeek', PRESETS)).toBe('https://api.deepseek.com/v1');
   });
 
-  it('falls back to the first preset for unknown or empty names', () => {
-    expect(resolveProviderBaseUrl(null, PRESETS)).toBe(
-      'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    );
-    expect(resolveProviderBaseUrl('不存在的服务商', PRESETS)).toBe(
-      'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    );
+  it('returns empty string for unknown or empty names', () => {
+    expect(resolveProviderBaseUrl(null, PRESETS)).toBe('');
+    expect(resolveProviderBaseUrl('不存在的服务商', PRESETS)).toBe('');
   });
 });
 
@@ -76,9 +72,9 @@ describe('resolveProviderModel', () => {
     expect(resolveProviderModel('DeepSeek', PRESETS)).toBe('deepseek-v4-flash');
   });
 
-  it('falls back to the first preset for unknown or empty names', () => {
-    expect(resolveProviderModel(null, PRESETS)).toBe('qwen3.5-plus');
-    expect(resolveProviderModel('不存在的服务商', PRESETS)).toBe('qwen3.5-plus');
+  it('returns empty string for unknown or empty names', () => {
+    expect(resolveProviderModel(null, PRESETS)).toBe('');
+    expect(resolveProviderModel('不存在的服务商', PRESETS)).toBe('');
   });
 });
 
