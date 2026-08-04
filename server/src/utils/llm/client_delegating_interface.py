@@ -8,13 +8,33 @@ ClientDelegatingLLMInterface / ClientDelegatingVLMInterface
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, Optional
 
 from src.system.observability import get_trace_context
-from src.utils.llm.client_llm_executor import ClientLLMExecutor
+from src.utils.llm.client_llm_executor import (
+    RETRYABLE_EXCEPTIONS,
+    ClientLLMExecutor,
+    ClientLLMError,
+    _looks_like_key_error,
+    _looks_like_network_error,
+)
 from src.utils.llm.llm_api_interface import LLMAPIInterface
 from src.utils.logger import get_logger
 from src.utils.vision.vlm_api_interface import VLMAPIInterface
+
+
+CLIENT_RETRY_TIMES = 2
+CLIENT_RETRY_INITIAL_DELAY = 1.0
+
+KEY_ERROR_MESSAGE = (
+    "你的 LLM API Key 或账户存在问题（无效/未授权/欠费等），本次回复未生成。"
+    "请在「LLM 模型设置」重新配置；如需使用服务端 key，请清空后重试。"
+)
+CLIENT_ERROR_MESSAGE = (
+    "客户端 LLM 调用失败，本次回复未生成。请检查网络后重试；"
+    "如需使用服务端 key，请在「LLM 模型设置」清空配置。"
+)
 
 
 def _provider_info_from_config(config: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +52,45 @@ def _provider_info_from_config(config: Dict[str, Any]) -> Dict[str, Any]:
         "url": url,
         "model": model,
     }
+
+
+async def _client_request_with_retry(
+    executor: ClientLLMExecutor,
+    user_id: str,
+    *,
+    retries: Optional[int] = None,
+    initial_delay: Optional[float] = None,
+    **kwargs: Any,
+) -> Dict[str, Any]:
+    """客户端执行并处理重试：网络类错误重试，key 类错误不重试。"""
+    if retries is None:
+        retries = CLIENT_RETRY_TIMES
+    if initial_delay is None:
+        initial_delay = CLIENT_RETRY_INITIAL_DELAY
+    last_exc: Optional[Exception] = None
+    delay = initial_delay
+    for attempt in range(retries + 1):
+        try:
+            return await executor.request(user_id, **kwargs)
+        except ClientLLMError as exc:
+            # key 类错误或其他非网络错误不重试
+            if _looks_like_key_error(str(exc)) or not _looks_like_network_error(str(exc)):
+                raise
+            last_exc = exc
+            if attempt < retries:
+                await asyncio.sleep(delay)
+                delay *= 2
+        except RETRYABLE_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt < retries:
+                await asyncio.sleep(delay)
+                delay *= 2
+        except Exception as exc:
+            last_exc = exc
+            break
+    if last_exc is None:
+        last_exc = ClientLLMError("client request failed")
+    raise last_exc
 
 
 class ClientDelegatingLLMInterface(LLMAPIInterface):
@@ -58,7 +117,8 @@ class ClientDelegatingLLMInterface(LLMAPIInterface):
             effective_thinking = enable_thinking and bool(config.get("can_enable_thinking", False))
             effective_json = use_json and bool(config.get("can_use_json", False))
             try:
-                return await self.executor.request(
+                return await _client_request_with_retry(
+                    self.executor,
                     user_id,
                     module=getattr(self, "_module_name", "unknown"),
                     prompt=prompt,
@@ -67,12 +127,25 @@ class ClientDelegatingLLMInterface(LLMAPIInterface):
                     use_json=effective_json,
                     provider=provider,
                 )
-            except Exception as exc:
+            except ClientLLMError as exc:
+                message = (
+                    KEY_ERROR_MESSAGE
+                    if _looks_like_key_error(str(exc))
+                    else CLIENT_ERROR_MESSAGE
+                )
+                await self.executor.notify_user(user_id, message)
                 self.logger.warning(
-                    "Client LLM execution failed for user %s, falling back to server key: %s",
+                    "Client LLM execution failed for user %s: %s", user_id, exc
+                )
+                raise
+            except Exception as exc:
+                await self.executor.notify_user(user_id, CLIENT_ERROR_MESSAGE)
+                self.logger.warning(
+                    "Client LLM execution failed for user %s: %s",
                     user_id,
                     exc,
                 )
+                raise
         return await self.inner.generate_response(
             prompt,
             params=params,
@@ -122,7 +195,8 @@ class ClientDelegatingVLMInterface(VLMAPIInterface):
                 if key not in ("extra_body", "response_format")
             }
             try:
-                return await self.executor.request(
+                return await _client_request_with_retry(
+                    self.executor,
                     user_id,
                     module=getattr(self, "_module_name", "unknown"),
                     prompt=prompt,
@@ -132,12 +206,25 @@ class ClientDelegatingVLMInterface(VLMAPIInterface):
                     image_base64=image_base64,
                     provider=provider,
                 )
-            except Exception as exc:
+            except ClientLLMError as exc:
+                message = (
+                    KEY_ERROR_MESSAGE
+                    if _looks_like_key_error(str(exc))
+                    else CLIENT_ERROR_MESSAGE
+                )
+                await self.executor.notify_user(user_id, message)
                 self.logger.warning(
-                    "Client VLM execution failed for user %s, falling back to server key: %s",
+                    "Client VLM execution failed for user %s: %s", user_id, exc
+                )
+                raise
+            except Exception as exc:
+                await self.executor.notify_user(user_id, CLIENT_ERROR_MESSAGE)
+                self.logger.warning(
+                    "Client VLM execution failed for user %s: %s",
                     user_id,
                     exc,
                 )
+                raise
         return await self.inner.generate_response(prompt, image_base64=image_base64, **kwargs)
 
     def set_parameters(self, **params: Any) -> None:
