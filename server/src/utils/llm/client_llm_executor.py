@@ -46,38 +46,19 @@ class ClientLLMExecutor:
         self._stream_manager: Any = None
         # request_id -> (user_id, asyncio.Future)
         self._pending: Dict[str, tuple[str, asyncio.Future]] = {}
-        # 已启用客户端执行模式的用户集合
-        self._enabled_users: set[str] = set()
 
     def bind(self, stream_manager: Any) -> None:
         """绑定 ChatStreamManager，用于按 user_id 找到在线连接。"""
         self._stream_manager = stream_manager
 
-    def set_llm_mode(self, user_id: Optional[str], enabled: bool) -> None:
-        """更新用户是否使用客户端执行 LLM 调用。"""
-        if not user_id:
-            return
-        if enabled:
-            self._enabled_users.add(user_id)
-        else:
-            self._enabled_users.discard(user_id)
-
     def is_enabled(self, user_id: Optional[str]) -> bool:
-        return bool(user_id and user_id in self._enabled_users)
+        """判断该用户当前活跃连接是否声明了客户端执行模式。"""
+        ws_connection = self._get_live_connection(user_id)
+        return bool(getattr(ws_connection, "client_llm_enabled", False))
 
-    def clear_user(self, user_id: Optional[str]) -> None:
-        """用户断开连接时清理使能标记并失败其挂起的请求。"""
-        if not user_id:
-            return
-        self._enabled_users.discard(user_id)
-        for request_id in [rid for rid, (uid, _) in self._pending.items() if uid == user_id]:
-            _, fut = self._pending.pop(request_id)
-            if not fut.done():
-                fut.set_exception(ClientLLMUnavailable("client disconnected"))
-
-    def _get_live_websocket(self, user_id: str):
-        """返回该用户任一活跃连接的 websocket；没有则返回 None。"""
-        if self._stream_manager is None:
+    def _get_live_connection(self, user_id: Optional[str]):
+        """返回该用户活跃连接的 WebSocketConnection；没有则返回 None。"""
+        if not user_id or self._stream_manager is None:
             return None
         stream = self._stream_manager.get_stream_by_user_uuid(user_id)
         if stream is None or stream.is_connection_lost():
@@ -85,7 +66,16 @@ class ClientLLMExecutor:
         ws_connection = getattr(stream, "ws_connection", None)
         if ws_connection is None or getattr(ws_connection, "websocket", None) is None:
             return None
-        return ws_connection.websocket
+        return ws_connection
+
+    def clear_user(self, user_id: Optional[str]) -> None:
+        """用户断开连接时失败其挂起的请求。"""
+        if not user_id:
+            return
+        for request_id in [rid for rid, (uid, _) in self._pending.items() if uid == user_id]:
+            _, fut = self._pending.pop(request_id)
+            if not fut.done():
+                fut.set_exception(ClientLLMUnavailable("client disconnected"))
 
     async def request(
         self,
@@ -104,9 +94,14 @@ class ClientLLMExecutor:
         返回与 LLMAPIInterface.generate_response 相同结构的字典：
         {"content": str, "usage": dict|None, "response_time_s": float}
         """
-        websocket = self._get_live_websocket(user_id)
-        if websocket is None:
+        ws_connection = self._get_live_connection(user_id)
+        if ws_connection is None:
             raise ClientLLMUnavailable(f"no live client connection for user {user_id}")
+        if not getattr(ws_connection, "client_llm_enabled", False):
+            raise ClientLLMUnavailable(
+                f"active connection of user {user_id} does not enable client LLM"
+            )
+        websocket = ws_connection.websocket
 
         request_id = f"llm-{uuid.uuid4().hex[:16]}"
         loop = asyncio.get_running_loop()

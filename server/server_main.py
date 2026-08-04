@@ -194,14 +194,10 @@ async def chat_ws(websocket: WebSocket):
 
             if (
                 event.event_type in (WSEventType.USER_TEXT.value, WSEventType.USER_IMAGE.value)
-                and ws_connection.user_uuid
             ):
                 llm_mode = event.payload.get("llm_mode")
                 if llm_mode is not None:
-                    system_runtime.client_llm_executor.set_llm_mode(
-                        ws_connection.user_uuid,
-                        llm_mode == "client",
-                    )
+                    ws_connection.client_llm_enabled = llm_mode == "client"
 
             if websocket_service.is_chat_related_event(event):
                 acceptance = websocket_service.try_accept_chat_event(

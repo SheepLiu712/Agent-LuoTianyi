@@ -30,11 +30,21 @@ class FakeWebSocket:
 
 
 class FakeStream:
-    def __init__(self, websocket):
-        self.ws_connection = SimpleNamespace(websocket=websocket)
+    def __init__(self, websocket, client_llm_enabled=False):
+        self.ws_connection = SimpleNamespace(
+            websocket=websocket,
+            client_llm_enabled=client_llm_enabled,
+        )
 
     def is_connection_lost(self):
         return False
+
+    def reconnect(self, websocket, client_llm_enabled=False):
+        """模拟 ChatStream.reconnect：用新连接替换当前连接。"""
+        self.ws_connection = SimpleNamespace(
+            websocket=websocket,
+            client_llm_enabled=client_llm_enabled,
+        )
 
 
 class FakeStreamManager:
@@ -48,6 +58,101 @@ class FakeStreamManager:
 def test_on_llm_response_is_sync():
     """on_llm_response 是同步回调，server_main 中不能用 await 调用。"""
     assert not inspect.iscoroutinefunction(ClientLLMExecutor.on_llm_response)
+
+
+def test_is_enabled_uses_connection_flag(executor, fake_ws):
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
+    assert executor.is_enabled("u1") is True
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=False)))
+    assert executor.is_enabled("u1") is False
+    executor.bind(FakeStreamManager(None))
+    assert executor.is_enabled("u1") is False
+
+
+def test_multi_connection_mode_follows_active_connection(executor):
+    """多设备场景：llm_mode 只跟随当前活跃连接，不随用户残留。"""
+    device_a_ws = FakeWebSocket()
+    device_b_ws = FakeWebSocket()
+    stream = FakeStream(device_a_ws, client_llm_enabled=True)
+    executor.bind(FakeStreamManager(stream))
+
+    # 设备 A 声明了客户端执行
+    assert executor.is_enabled("u1") is True
+
+    # 设备 B 接管连接（模拟 reconnect），未声明客户端执行
+    stream.reconnect(device_b_ws, client_llm_enabled=False)
+    assert executor.is_enabled("u1") is False
+
+    # 设备 B 声明客户端执行后恢复
+    stream.reconnect(device_b_ws, client_llm_enabled=True)
+    assert executor.is_enabled("u1") is True
+
+
+@pytest.mark.asyncio
+async def test_multi_connection_request_only_goes_to_enabled_active_connection(executor):
+    """多设备场景：请求只发给声明了客户端执行的活跃连接。"""
+    device_a_ws = FakeWebSocket()
+    device_b_ws = FakeWebSocket()
+    stream = FakeStream(device_a_ws, client_llm_enabled=True)
+    executor.bind(FakeStreamManager(stream))
+
+    # 设备 B 接管但未声明客户端执行：不应转发请求，也不应发到 B
+    stream.reconnect(device_b_ws, client_llm_enabled=False)
+    with pytest.raises(ClientLLMUnavailable):
+        await executor.request("u1", module="m", prompt="p", params=None)
+    assert device_b_ws.sent_events == []
+
+    # 设备 B 声明客户端执行后：请求应发到 B 并能正常完成
+    stream.reconnect(device_b_ws, client_llm_enabled=True)
+    task = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p", params=None)
+    )
+    await asyncio.sleep(0)
+    assert device_b_ws.sent_events
+    request_id = device_b_ws.sent_events[0]["payload"]["request_id"]
+    executor.on_llm_response(
+        {"request_id": request_id, "content": "ok", "usage": None}
+    )
+    result = await task
+    assert result["content"] == "ok"
+    assert device_a_ws.sent_events == []
+
+
+@pytest.mark.asyncio
+async def test_multi_connection_device_a_reconnects_back(executor):
+    """设备 A 重新连接回来后：初始未声明，声明后恢复客户端执行。"""
+    device_a_ws = FakeWebSocket()
+    device_b_ws = FakeWebSocket()
+    stream = FakeStream(device_a_ws, client_llm_enabled=True)
+    executor.bind(FakeStreamManager(stream))
+    assert executor.is_enabled("u1") is True
+
+    # 设备 B 接管连接，未声明客户端执行
+    stream.reconnect(device_b_ws, client_llm_enabled=False)
+    assert executor.is_enabled("u1") is False
+
+    # 设备 A 重新连接回来：新连接初始未声明
+    device_a_new_ws = FakeWebSocket()
+    stream.reconnect(device_a_new_ws, client_llm_enabled=False)
+    assert executor.is_enabled("u1") is False
+    assert device_a_new_ws.sent_events == []
+
+    # A 发消息携带 llm_mode=client（server_main 写入连接标记）
+    stream.ws_connection.client_llm_enabled = True
+    assert executor.is_enabled("u1") is True
+
+    task = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p", params=None)
+    )
+    await asyncio.sleep(0)
+    assert device_a_new_ws.sent_events
+    request_id = device_a_new_ws.sent_events[0]["payload"]["request_id"]
+    executor.on_llm_response(
+        {"request_id": request_id, "content": "ok", "usage": None}
+    )
+    result = await task
+    assert result["content"] == "ok"
+    assert device_b_ws.sent_events == []
 
 
 class FakeInner(LLMAPIInterface):
@@ -123,8 +228,7 @@ def fake_ws():
 
 @pytest.mark.asyncio
 async def test_request_response_correlation(executor, fake_ws):
-    executor.bind(FakeStreamManager(FakeStream(fake_ws)))
-    executor.set_llm_mode("u1", True)
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
 
     task = asyncio.create_task(
         executor.request("u1", module="main_chat", prompt="hello", params={"temperature": 0.7})
@@ -148,8 +252,7 @@ async def test_request_response_correlation(executor, fake_ws):
 @pytest.mark.asyncio
 async def test_request_timeout(fake_ws):
     ex = ClientLLMExecutor(timeout_seconds=0.05)
-    ex.bind(FakeStreamManager(FakeStream(fake_ws)))
-    ex.set_llm_mode("u1", True)
+    ex.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
     with pytest.raises(ClientLLMTimeout):
         await ex.request("u1", module="m", prompt="p", params=None)
 
@@ -157,15 +260,13 @@ async def test_request_timeout(fake_ws):
 @pytest.mark.asyncio
 async def test_request_no_live_connection(executor):
     executor.bind(FakeStreamManager(None))
-    executor.set_llm_mode("u1", True)
     with pytest.raises(ClientLLMUnavailable):
         await executor.request("u1", module="m", prompt="p", params=None)
 
 
 @pytest.mark.asyncio
 async def test_request_client_error(executor, fake_ws):
-    executor.bind(FakeStreamManager(FakeStream(fake_ws)))
-    executor.set_llm_mode("u1", True)
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
     task = asyncio.create_task(executor.request("u1", module="m", prompt="p", params=None))
     await asyncio.sleep(0)
     request_id = fake_ws.sent_events[0]["payload"]["request_id"]
@@ -176,14 +277,12 @@ async def test_request_client_error(executor, fake_ws):
 
 @pytest.mark.asyncio
 async def test_clear_user_fails_pending(executor, fake_ws):
-    executor.bind(FakeStreamManager(FakeStream(fake_ws)))
-    executor.set_llm_mode("u1", True)
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
     task = asyncio.create_task(executor.request("u1", module="m", prompt="p", params=None))
     await asyncio.sleep(0)
     executor.clear_user("u1")
     with pytest.raises(ClientLLMUnavailable):
         await task
-    assert not executor.is_enabled("u1")
 
 
 def test_delegating_disabled_uses_inner():
@@ -199,8 +298,7 @@ def test_delegating_disabled_uses_inner():
 @pytest.mark.asyncio
 async def test_delegating_enabled_uses_client(monkeypatch, executor, fake_ws):
     inner = FakeInner()
-    executor.bind(FakeStreamManager(FakeStream(fake_ws)))
-    executor.set_llm_mode("u1", True)
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
     wrapper = ClientDelegatingLLMInterface(inner, executor)
     monkeypatch.setattr(
         "src.utils.llm.client_delegating_interface.get_trace_context",
@@ -232,8 +330,7 @@ async def test_delegating_enabled_uses_client(monkeypatch, executor, fake_ws):
 @pytest.mark.asyncio
 async def test_delegating_fallback_on_client_error(monkeypatch, executor, fake_ws):
     inner = FakeInner()
-    executor.bind(FakeStreamManager(FakeStream(fake_ws)))
-    executor.set_llm_mode("u1", True)
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
     wrapper = ClientDelegatingLLMInterface(inner, executor)
     monkeypatch.setattr(
         "src.utils.llm.client_delegating_interface.get_trace_context",
@@ -253,8 +350,7 @@ async def test_delegating_fallback_on_client_error(monkeypatch, executor, fake_w
 @pytest.mark.asyncio
 async def test_vlm_delegating_enabled(monkeypatch, executor, fake_ws):
     inner = FakeVLMInner()
-    executor.bind(FakeStreamManager(FakeStream(fake_ws)))
-    executor.set_llm_mode("u1", True)
+    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_llm_enabled=True)))
     wrapper = ClientDelegatingVLMInterface(inner, executor)
     monkeypatch.setattr(
         "src.utils.llm.client_delegating_interface.get_trace_context",
