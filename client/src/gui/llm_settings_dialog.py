@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineE
                                QPlainTextEdit, QStackedWidget, QWidget, QCheckBox,
                                QApplication)
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QCloseEvent
 from typing import TYPE_CHECKING
 
 from ..utils.logger import get_logger
@@ -158,6 +159,7 @@ class LLMSettingsDialog(QDialog):
         text_layout.setContentsMargins(0, 0, 0, 0)
         (self.provider_combo, self.api_key_input, self.model_combo, self.base_url_hint,
          self.params_editor, self.enable_thinking_check, self.use_json_check) = self._build_form(text_layout, "对话")
+        self.text_page = text_tab
 
         vlm_tab = QWidget()
         vlm_layout = QVBoxLayout(vlm_tab)
@@ -165,6 +167,7 @@ class LLMSettingsDialog(QDialog):
         (self.vlm_provider_combo, self.vlm_api_key_input, self.vlm_model_combo,
          self.vlm_base_url_hint, self.vlm_params_editor,
          self.vlm_enable_thinking_check, self.vlm_use_json_check) = self._build_form(vlm_layout, "图片理解")
+        self.vlm_page = vlm_tab
 
         self.stack.addWidget(text_tab)
         self.stack.addWidget(vlm_tab)
@@ -246,6 +249,14 @@ class LLMSettingsDialog(QDialog):
     def _update_page_status(self) -> None:
         """当前页无额外状态提示（空列表由弹窗处理）。"""
         self.status_label.setText("")
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        """校验期间禁止关闭窗口，避免探测回调在关闭后写入配置。"""
+        if self._probe_worker is not None and self._probe_worker.isRunning():
+            event.ignore()
+            self.status_label.setText("正在校验配置…，请稍候")
+            return
+        event.accept()
 
     def _can_advance(self) -> bool:
         """当前页下拉框有可用项时才允许继续（拉取失败/无模型时禁用）。"""
@@ -745,17 +756,27 @@ class LLMSettingsDialog(QDialog):
             self._finish_module_save(cfg, on_success=on_success)
             return
         self._pending_save = (cfg, on_success)
-        self.prev_btn.setEnabled(False)
-        self.next_btn.setEnabled(False)
+        self._set_frozen(True)
         self.status_label.setText("正在校验配置…")
         self._probe_worker = _ProbeWorker(probe_configs, parent=self)
         self._probe_worker.errors.connect(self._on_probe_done)
         self._probe_worker.start()
 
+    def _set_frozen(self, frozen: bool) -> None:
+        """校验期间冻结两页所有控件，完成后恢复（整页冻结，无遗漏）。"""
+        self.text_page.setEnabled(not frozen)
+        self.vlm_page.setEnabled(not frozen)
+        if frozen:
+            self.prev_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
+        else:
+            index = self.stack.currentIndex()
+            self.prev_btn.setVisible(index == 1)
+            self.prev_btn.setEnabled(index == 1)
+            self.next_btn.setEnabled(self._next_enabled())
+
     def _on_probe_done(self, errors: list) -> None:
-        index = self.stack.currentIndex()
-        self.prev_btn.setEnabled(index == 1)
-        self.next_btn.setEnabled(self._next_enabled())
+        self._set_frozen(False)
         if errors:
             self.status_label.setText("配置校验失败")
             QMessageBox.critical(self, "配置校验失败", "\n".join(errors))
