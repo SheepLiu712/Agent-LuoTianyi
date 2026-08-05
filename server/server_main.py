@@ -196,11 +196,11 @@ async def chat_ws(websocket: WebSocket):
                 await websocket_service.send_ack_event(ws_connection, event)
     except WebSocketDisconnect:
         gcsm.ws_lost_connection(ws_connection)
-        system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid)
+        system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
         logger.info("WebSocket client disconnected from /chat_ws")
     except Exception as e:
         gcsm.ws_lost_connection(ws_connection)
-        system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid)
+        system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
         logger.error(f"Error in /chat_ws: {e}")
 
 
