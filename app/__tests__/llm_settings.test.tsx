@@ -81,6 +81,7 @@ jest.mock('react-native', () => {
       addListener: jest.fn(() => ({ remove: jest.fn() })),
       dismiss: jest.fn(),
     },
+    ActivityIndicator: stub('ActivityIndicator'),
     Alert: { alert: jest.fn() },
     View: stub('View'),
     Text: stub('Text'),
@@ -796,5 +797,70 @@ describe('LlmSettingsScreen 保存→重载', () => {
       (node) => node.props.children === '完成',
     )[0];
     expect(doneText).toBeFalsy();
+  });
+
+  it('校验期间整页遮罩冻结并显示校验中，完成后恢复', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      probeLlmConfig: jest.Mock;
+    };
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+    let rejectProbe!: (reason?: unknown) => void;
+
+    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
+    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 探测挂起，模拟校验进行中
+    llmClient.probeLlmConfig.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectProbe = reject;
+        }),
+    );
+
+    const apiKeyInput = tree!.root.findAllByProps({
+      placeholder: '粘贴对话服务商的 API Key',
+    })[0];
+    await act(async () => {
+      apiKeyInput.props.onChangeText('sk-test');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    await act(async () => {
+      await nextText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 校验中：整页遮罩覆盖（含头部返回），并显示“校验中…”
+    const overlayText = tree!.root.findAll(
+      (node) => node.props.children === '校验中…',
+    )[0];
+    expect(overlayText).toBeTruthy();
+
+    // 校验结束（失败路径）：遮罩消失，控件未单独冻结
+    await act(async () => {
+      rejectProbe(new Error('401 Unauthorized'));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      tree!.root.findAll((node) => node.props.children === '校验中…')[0],
+    ).toBeFalsy();
+    expect(apiKeyInput.props.editable).not.toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 import * as Clipboard from 'expo-clipboard';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Keyboard,
   KeyboardAvoidingView,
@@ -564,6 +565,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     const useJson = forVlm ? vlmUseJson : llmUseJson;
     const jsonModules = forVlm ? vlmJsonModules : llmJsonModules;
     setSaving(true);
+    Keyboard.dismiss();
     try {
       const baseUrl = resolveProviderBaseUrl(provider, providers);
       if (apiKey && model && baseUrl) {
@@ -880,6 +882,15 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         </View>
       </KeyboardAvoidingView>
 
+      {saving ? (
+        <View style={styles.savingOverlay}>
+          <ActivityIndicator size="large" color={theme.accent} />
+          <Text style={[styles.savingOverlayText, { color: theme.text }]}>
+            校验中…
+          </Text>
+        </View>
+      ) : null}
+
       <Modal
         visible={pickerKind !== null}
         transparent
@@ -946,6 +957,18 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 120,
     backgroundColor: '#f5f7fa',
+  },
+  savingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 200,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  savingOverlayText: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginTop: 10,
   },
   kavFill: {
     flex: 1,
