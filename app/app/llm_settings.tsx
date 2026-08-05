@@ -191,15 +191,25 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           return;
         }
         setProvidersError('');
-        setProviders(list);
+        // 只保留包含 models 的服务商，保证下拉一定可选
+        const usableList = list.filter((p) => (p.models?.length ?? 0) > 0);
+        setProviders(usableList);
+        if (usableList.length === 0) {
+          // 服务端未配置 LLM：询问是否继续配置图片模型
+          Alert.alert('提示', '服务端未配置 LLM，是否继续配置图片模型？', [
+            { text: '退出', style: 'cancel', onPress: onClose },
+            { text: '继续配置图片模型', onPress: () => goStep(1) },
+          ]);
+          return;
+        }
         // 仅 key 为空（未配置）时默认展示首项，方便用户直接填入 key；
         // 已配置则保留已保存选择，网络数据只提供下拉选项
         const snapshot = loadedRef.current;
         if (snapshot && !snapshot.llmApiKey) {
-          const first = list[0];
+          const first = usableList[0];
           const nextProvider = snapshot.llmProvider || first?.name || '';
           setLlmProvider(nextProvider);
-          const preset = list.find((p) => p.name === nextProvider) ?? null;
+          const preset = usableList.find((p) => p.name === nextProvider) ?? null;
           setLlmModel(
             snapshot.llmModel && preset?.models?.includes(snapshot.llmModel)
               ? snapshot.llmModel
@@ -207,7 +217,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           );
         }
         if (snapshot && !snapshot.vlmApiKey) {
-          const firstVlm = list.find((p) => (p.vlm_models?.length ?? 0) > 0);
+          const firstVlm = usableList.find((p) => (p.vlm_models?.length ?? 0) > 0);
           const nextProvider = snapshot.vlmProvider || firstVlm?.name || '';
           setVlmProvider(nextProvider);
           const preset = list.find((p) => p.name === nextProvider) ?? null;
@@ -300,6 +310,12 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   };
 
   const goStep = (index: number) => {
+    if (index === 1 && vlmProviders.length === 0) {
+      // VLM 服务商缺失：直接关闭并提示
+      Alert.alert('提示', '没有 VLM 服务商可用');
+      onClose();
+      return;
+    }
     setStepIndex(index);
     Keyboard.dismiss();
     requestAnimationFrame(() => {
@@ -343,13 +359,23 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     try {
       const list = await fetchProviderPresets(server_config.BASE_URL);
       setProvidersError('');
-      setProviders(list);
+      // 只保留包含 models 的服务商，保证下拉一定可选
+      const usableList = list.filter((p) => (p.models?.length ?? 0) > 0);
+      setProviders(usableList);
+      if (usableList.length === 0) {
+        // 服务端未配置 LLM：询问是否继续配置图片模型
+        Alert.alert('提示', '服务端未配置 LLM，是否继续配置图片模型？', [
+          { text: '退出', style: 'cancel', onPress: onClose },
+          { text: '继续配置图片模型', onPress: () => goStep(1) },
+        ]);
+        return;
+      }
       // 刷新同样只在 key 为空（未配置）时补默认首项，保留已有选择
       const snapshot = loadedRef.current;
       if (snapshot && !snapshot.llmApiKey) {
-        const nextProvider = llmProvider || list[0]?.name || '';
+        const nextProvider = llmProvider || usableList[0]?.name || '';
         setLlmProvider(nextProvider);
-        const preset = list.find((p) => p.name === nextProvider) ?? null;
+        const preset = usableList.find((p) => p.name === nextProvider) ?? null;
         setLlmModel(
           llmModel && preset?.models?.includes(llmModel)
             ? llmModel
@@ -357,7 +383,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         );
       }
       if (snapshot && !snapshot.vlmApiKey) {
-        const firstVlm = list.find((p) => (p.vlm_models?.length ?? 0) > 0);
+        const firstVlm = usableList.find((p) => (p.vlm_models?.length ?? 0) > 0);
         const nextProvider = vlmProvider || firstVlm?.name || '';
         setVlmProvider(nextProvider);
         const preset = list.find((p) => p.name === nextProvider) ?? null;
@@ -574,6 +600,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         );
       }
 
+      Alert.alert('成功', `${name}设置已保存`);
       if (forVlm) {
         onClose();
       } else {
@@ -684,14 +711,6 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
             {providersError ? (
               <Text style={[styles.emptyText, { color: theme.textMuted }]}>
                 {providersError}
-              </Text>
-            ) : providers.length === 0 ? (
-              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
-                暂无可用的服务商（请确认服务端已配置）
-              </Text>
-            ) : isVlmTab && vlmProviders.length === 0 ? (
-              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
-                当前服务端没有支持图片理解的模型
               </Text>
             ) : null}
 
