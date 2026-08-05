@@ -342,12 +342,19 @@ class LLMSettingsDialog(QDialog):
         paste_btn = QPushButton("粘贴")
         paste_btn.setStyleSheet("font-size: 13px; padding: 6px 12px;")
         paste_btn.clicked.connect(
-            lambda checked=False, edit=api_key_input: edit.setText(
-                QApplication.clipboard().text()
+            lambda checked=False, edit=api_key_input: self._toggle_key_input(edit)
+        )
+        api_key_input.textChanged.connect(
+            lambda _text, btn=paste_btn, edit=api_key_input: self._update_paste_button(
+                btn, edit
             )
         )
         key_row.addWidget(paste_btn)
         layout.addLayout(key_row)
+        if label == "对话":
+            self.paste_btn = paste_btn
+        else:
+            self.vlm_paste_btn = paste_btn
 
         model_label = QLabel(f"{label}模型：")
         model_label.setStyleSheet("font-size: 14px; font-weight: 500; margin-top: 4px;")
@@ -411,6 +418,17 @@ class LLMSettingsDialog(QDialog):
             enable_thinking_check,
             use_json_check,
         )
+
+    def _toggle_key_input(self, edit: QLineEdit) -> None:
+        """粘贴/清空按钮：输入框有值时清空，否则粘贴剪贴板内容。"""
+        if edit.text():
+            edit.clear()
+        else:
+            edit.setText(QApplication.clipboard().text())
+
+    def _update_paste_button(self, button: QPushButton, edit: QLineEdit) -> None:
+        """按键输入值切换按钮文案：有值显示“清空”，无值显示“粘贴”。"""
+        button.setText("清空" if edit.text() else "粘贴")
 
     def _load_config(self) -> None:
         """从本地凭据加载已保存的配置，并从服务端拉取服务商列表。"""
@@ -623,11 +641,21 @@ class LLMSettingsDialog(QDialog):
         box.exec()
         if box.clickedButton() is not continue_btn:
             return
-        self._clear_saved_module(cfg["kind"])
+        # 清除失败不继续导航：提示重试，放弃则停留并保留旧配置
+        while not self._clear_saved_module(cfg["kind"]):
+            ret = QMessageBox.question(
+                self,
+                "清除失败",
+                "清除配置失败，是否重试？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if ret != QMessageBox.StandardButton.Yes:
+                return
         self._advance_or_close(index)
 
-    def _clear_saved_module(self, kind: str) -> None:
-        """清空该模块已保存的配置，使相关调用使用服务端 Key。"""
+    def _clear_saved_module(self, kind: str) -> bool:
+        """清空该模块已保存的配置，使相关调用使用服务端 Key；返回是否清空成功。"""
         if kind == "text":
             credential.save_api_key("")
             credential.save_provider("")
@@ -635,13 +663,22 @@ class LLMSettingsDialog(QDialog):
             credential.save_provider_base_url("")
             credential.save_llm_params({})
             credential.save_llm_flags(False, False)
-        else:
-            credential.save_vlm_api_key("")
-            credential.save_vlm_provider("")
-            credential.save_vlm_model("")
-            credential.save_vlm_provider_base_url("")
-            credential.save_vlm_params({})
-            credential.save_vlm_flags(False, False)
+            return not (
+                credential.get_api_key()
+                or credential.get_provider()
+                or credential.get_model()
+            )
+        credential.save_vlm_api_key("")
+        credential.save_vlm_provider("")
+        credential.save_vlm_model("")
+        credential.save_vlm_provider_base_url("")
+        credential.save_vlm_params({})
+        credential.save_vlm_flags(False, False)
+        return not (
+            credential.get_vlm_api_key()
+            or credential.get_vlm_provider()
+            or credential.get_vlm_model()
+        )
 
     def _update_config_hint(self) -> None:
         """按当前页 API Key 填写情况更新提示：未填 key 则使用服务端 Key。"""

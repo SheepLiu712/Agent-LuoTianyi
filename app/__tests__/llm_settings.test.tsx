@@ -489,6 +489,109 @@ describe('LlmSettingsScreen 保存→重载', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it('清除失败时不继续导航，可取消重试且不破坏现有配置', async () => {
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
+    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // key 为空 → 下一步 → 弹窗 → 继续（触发清除）
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    await act(async () => {
+      await nextText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const promptCall = Alert.alert.mock.calls.find(
+      (call) => call[0] === '提示',
+    );
+    const continueBtn = promptCall![2].find(
+      (button: { text: string }) => button.text === '继续',
+    );
+
+    // 清除失败
+    mockAsyncStorage.setItem.mockRejectedValueOnce(new Error('disk full'));
+    await act(async () => {
+      continueBtn.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 弹清除失败提示，未导航
+    const failCall = Alert.alert.mock.calls.find(
+      (call) => call[0] === '清除失败',
+    );
+    expect(failCall).toBeTruthy();
+    expect(
+      tree!.root.findAll((node) => node.props.children === '完成')[0],
+    ).toBeFalsy();
+    expect(onClose).not.toHaveBeenCalled();
+    // 不点“重试”即放弃：留在本页；失败写入未生效，现有配置保持原样
+    await expect(mockAsyncStorage.getItem('llm_provider')).resolves.toBe(
+      'DeepSeek',
+    );
+  });
+
+  it('粘贴按钮随输入值切换为清空/粘贴', async () => {
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 初始无值：显示“粘贴”
+    expect(
+      tree!.root.findAll((node) => node.props.children === '粘贴')[0],
+    ).toBeTruthy();
+
+    const apiKeyInput = tree!.root.findAllByProps({
+      placeholder: '粘贴对话服务商的 API Key',
+    })[0];
+    await act(async () => {
+      apiKeyInput.props.onChangeText('sk-x');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      tree!.root.findAll((node) => node.props.children === '清空')[0],
+    ).toBeTruthy();
+
+    // 点击“清空”后输入框清空，按钮恢复“粘贴”
+    const clearText = tree!.root.findAll(
+      (node) => node.props.children === '清空',
+    )[0];
+    await act(async () => {
+      await clearText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(apiKeyInput.props.value).toBe('');
+    expect(
+      tree!.root.findAll((node) => node.props.children === '粘贴')[0],
+    ).toBeTruthy();
+  });
+
   it('点击刷新会重新拉取服务商与 JSON 功能列表', async () => {
     const llmClient = jest.requireMock('../utils/llm_client') as {
       fetchProviderPresets: jest.Mock;
