@@ -151,13 +151,19 @@ class ClientDelegatingLLMInterface(LLMAPIInterface):
                     if _looks_like_key_error(str(exc))
                     else CLIENT_ERROR_MESSAGE
                 )
-                await self.executor.notify_user(user_id, message)
+                await self.executor.notify_user(
+                    user_id, message, connection=getattr(exc, "connection", None)
+                )
                 self.logger.warning(
                     "Client LLM execution failed for user %s: %s", user_id, exc
                 )
                 raise
             except Exception as exc:
-                await self.executor.notify_user(user_id, CLIENT_ERROR_MESSAGE)
+                await self.executor.notify_user(
+                    user_id,
+                    CLIENT_ERROR_MESSAGE,
+                    connection=getattr(exc, "connection", None),
+                )
                 self.logger.warning(
                     "Client LLM execution failed for user %s: %s",
                     user_id,
@@ -243,13 +249,19 @@ class ClientDelegatingVLMInterface(VLMAPIInterface):
                     if _looks_like_key_error(str(exc))
                     else CLIENT_ERROR_MESSAGE
                 )
-                await self.executor.notify_user(user_id, message)
+                await self.executor.notify_user(
+                    user_id, message, connection=getattr(exc, "connection", None)
+                )
                 self.logger.warning(
                     "Client VLM execution failed for user %s: %s", user_id, exc
                 )
                 raise
             except Exception as exc:
-                await self.executor.notify_user(user_id, CLIENT_ERROR_MESSAGE)
+                await self.executor.notify_user(
+                    user_id,
+                    CLIENT_ERROR_MESSAGE,
+                    connection=getattr(exc, "connection", None),
+                )
                 self.logger.warning(
                     "Client VLM execution failed for user %s: %s",
                     user_id,
