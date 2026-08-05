@@ -489,10 +489,10 @@ class LLMSettingsDialog(QDialog):
 
         text_provider = self.provider_combo.currentText().strip()
         vlm_provider = self.vlm_provider_combo.currentText().strip()
-        text_configured = bool(api_key) and bool(text_provider) and bool(
+        text_configured = bool(api_key) and bool(
             self.model_combo.currentText().strip()
         )
-        vlm_configured = bool(vlm_api_key) and bool(vlm_provider) and bool(
+        vlm_configured = bool(vlm_api_key) and bool(
             self.vlm_model_combo.currentText().strip()
         )
         # 仅校验已配置的模块，未配置的模块不要求服务商，避免一个模块影响另一个
