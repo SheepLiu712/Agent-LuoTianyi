@@ -152,8 +152,10 @@ async def chat_ws(websocket: WebSocket):
                 event.event_type in (WSEventType.USER_TEXT.value, WSEventType.USER_IMAGE.value)
             ):
                 llm_mode = event.payload.get("llm_mode")
-                if llm_mode is not None:
-                    ws_connection.client_llm_enabled = llm_mode == "client"
+                if isinstance(llm_mode, dict):
+                    ws_connection.client_mode = {
+                        key: bool(llm_mode.get(key, False)) for key in ("text", "vlm")
+                    }
 
             if websocket_service.is_chat_related_event(event):
                 acceptance = websocket_service.try_accept_chat_event(

@@ -109,10 +109,11 @@ class ClientLLMExecutor:
         """绑定 ChatStreamManager，用于按 user_id 找到在线连接。"""
         self._stream_manager = stream_manager
 
-    def is_enabled(self, user_id: Optional[str]) -> bool:
-        """判断该用户当前活跃连接是否声明了客户端执行模式。"""
+    def is_enabled(self, user_id: Optional[str], vlm: bool = False) -> bool:
+        """判断该用户当前活跃连接是否声明了 LLM（默认）或 VLM 客户端执行模式。"""
         ws_connection = self._get_live_connection(user_id)
-        return bool(getattr(ws_connection, "client_llm_enabled", False))
+        mode = getattr(ws_connection, "client_mode", None) or {}
+        return bool(mode.get("vlm" if vlm else "text", False))
 
     def _get_live_connection(self, user_id: Optional[str]):
         """返回该用户活跃连接的 WebSocketConnection；没有则返回 None。"""
@@ -160,6 +161,7 @@ class ClientLLMExecutor:
         params: Optional[Dict[str, Any]],
         enable_thinking: bool = False,
         use_json: bool = False,
+        vlm: bool = False,
         image_base64: Optional[str] = None,
         provider: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
@@ -171,9 +173,11 @@ class ClientLLMExecutor:
         ws_connection = self._get_live_connection(user_id)
         if ws_connection is None:
             raise ClientLLMUnavailable(f"no live client connection for user {user_id}")
-        if not getattr(ws_connection, "client_llm_enabled", False):
+        mode = getattr(ws_connection, "client_mode", None) or {}
+        if not mode.get("vlm" if vlm else "text", False):
             raise ClientLLMUnavailable(
-                f"active connection of user {user_id} does not enable client LLM"
+                f"active connection of user {user_id} does not enable client "
+                f"{'VLM' if vlm else 'LLM'}"
             )
         self._user_connections[user_id] = ws_connection
         websocket = ws_connection.websocket

@@ -83,7 +83,7 @@ class WsTransport:
         self._ack_waiter: dict | None = None
         self._agent_message_listener: Callable[[AgentMessage], None] | None = None # 收到的消息发送到哪里
         self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
-        self._llm_mode_client = False  # 服务端当前是否标记为客户端 LLM 模式（随连接重置）
+        self._client_mode = {"text": False, "vlm": False}  # 服务端当前客户端 LLM 模式（随连接重置）
         self._system_message_listener: Callable[[str], None] | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -152,13 +152,10 @@ class WsTransport:
         payload = {"message": text}
         if is_proactive:
             payload["is_proactive"] = True
-        if self.api_key_getter and self.api_key_getter():
-            payload["llm_mode"] = "client"
-            self._llm_mode_client = True
-        elif self._llm_mode_client:
-            # 无 key 但服务端仍标记为 client 模式，显式切回 server 模式
-            payload["llm_mode"] = "server"
-            self._llm_mode_client = False
+        self._client_mode["text"] = bool(
+            self.api_key_getter and self.api_key_getter()
+        )
+        payload["llm_mode"] = dict(self._client_mode)
         return self._submit_user_event(
             WSEventType.USER_TEXT,
             payload=payload,
@@ -180,13 +177,10 @@ class WsTransport:
         }
         if image_client_path:
             payload["image_client_path"] = image_client_path
-        if self.api_key_getter and self.api_key_getter():
-            payload["llm_mode"] = "client"
-            self._llm_mode_client = True
-        elif self._llm_mode_client:
-            # 无 key 但服务端仍标记为 client 模式，显式切回 server 模式
-            payload["llm_mode"] = "server"
-            self._llm_mode_client = False
+        self._client_mode["vlm"] = bool(
+            self.vlm_api_key_getter and self.vlm_api_key_getter()
+        )
+        payload["llm_mode"] = dict(self._client_mode)
         return self._submit_user_event(
             WSEventType.USER_IMAGE,
             payload=payload,
@@ -343,7 +337,7 @@ class WsTransport:
             try:
                 async with websockets.connect(ws_url, max_size=8 * 1024 * 1024, ssl=ssl_ctx) as ws:
                     self._ws = ws
-                    self._llm_mode_client = False
+                    self._client_mode = {"text": False, "vlm": False}
                     self._connected_event.set()
                     self._ready_event.clear()
 

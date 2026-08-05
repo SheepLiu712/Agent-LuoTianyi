@@ -66,7 +66,7 @@ export class WebSocketTransport {
   private isConnected = false;
   private isAuthed = false;
   private authRejected = false;
-  private llmModeClient = false; // 服务端当前是否标记为客户端 LLM 模式（随连接重置）
+  private clientMode = { text: false, vlm: false }; // 服务端当前客户端 LLM 模式（随连接重置）
 
   constructor(username: string, token: string, callbacks: WsCallbacks) {
     this.username = username;
@@ -164,14 +164,8 @@ export class WebSocketTransport {
     if (isProactive) {
       payload.is_proactive = true;
     }
-    if (apiKey) {
-      payload.llm_mode = 'client';
-      this.llmModeClient = true;
-    } else if (this.llmModeClient) {
-      // 无 key 但服务端仍标记为 client 模式，显式切回 server 模式
-      payload.llm_mode = 'server';
-      this.llmModeClient = false;
-    }
+    this.clientMode.text = Boolean(apiKey);
+    payload.llm_mode = { ...this.clientMode };
     return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout, clientMsgId);
   }
 
@@ -182,20 +176,14 @@ export class WebSocketTransport {
     ackTimeout = 10000,
     clientMsgId?: string,
   ): Promise<AckResult> {
-    const apiKey = await getLlmApiKey();
+    const apiKey = await getVlmApiKey();
     const payload: Record<string, unknown> = {
       image_base64: imageBase64,
       mime_type: mimeType,
       image_client_path: imageClientPath,
     };
-    if (apiKey) {
-      payload.llm_mode = 'client';
-      this.llmModeClient = true;
-    } else if (this.llmModeClient) {
-      // 无 key 但服务端仍标记为 client 模式，显式切回 server 模式
-      payload.llm_mode = 'server';
-      this.llmModeClient = false;
-    }
+    this.clientMode.vlm = Boolean(apiKey);
+    payload.llm_mode = { ...this.clientMode };
     return this.sendWithAck(WSEventType.USER_IMAGE, payload, ackTimeout, clientMsgId);
   }
 
@@ -248,7 +236,7 @@ export class WebSocketTransport {
 
     this.ws.onopen = () => {
       this.isConnected = true;
-      this.llmModeClient = false;
+      this.clientMode = { text: false, vlm: false };
       this.reconnectAttempts = 0;
       this.sendAuth();
       this.startHeartbeat();
