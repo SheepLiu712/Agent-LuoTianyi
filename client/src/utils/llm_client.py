@@ -145,6 +145,10 @@ def build_chat_completions_payload(
         "temperature": params.get("temperature", 0.7),
         "top_p": params.get("top_p", 0.9),
     }
+    # 其余用户参数全量透传（stop、presence_penalty 等），避免静默丢弃
+    for key, value in params.items():
+        if key not in payload:
+            payload[key] = value
     if enable_thinking:
         payload["enable_thinking"] = True
     if use_json:

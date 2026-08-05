@@ -63,6 +63,23 @@ def test_build_payload_text():
     assert payload["response_format"] == {"type": "json_object"}
 
 
+def test_build_payload_passes_through_extra_params():
+    payload = build_chat_completions_payload(
+        prompt="hi",
+        model="m",
+        params={
+            "max_tokens": 1024,
+            "stop": ["END"],
+            "presence_penalty": 0.5,
+            "frequency_penalty": 0.3,
+        },
+    )
+    assert payload["max_tokens"] == 1024
+    assert payload["stop"] == ["END"]
+    assert payload["presence_penalty"] == 0.5
+    assert payload["frequency_penalty"] == 0.3
+
+
 def test_resolve_provider_base_url():
     assert (
         resolve_provider_base_url("DeepSeek", presets=PRESETS)
