@@ -25,6 +25,11 @@ LLM_REQUEST_EVENT_TYPE = "llm_request"
 class ClientLLMExecutionError(Exception):
     """客户端执行 LLM 调用失败（未连接 / 超时 / 客户端返回错误）。"""
 
+    def __init__(self, message: str = "", connection: Any = None):
+        super().__init__(message)
+        # 发起该请求的连接，用于把失败通知发回正确的客户端
+        self.connection = connection
+
 
 class ClientLLMUnavailable(ClientLLMExecutionError):
     """用户没有可用的在线客户端连接。"""
@@ -100,8 +105,8 @@ class ClientLLMExecutor:
         self.timeout_seconds = float(timeout_seconds)
         self.logger = get_logger(__name__)
         self._stream_manager: Any = None
-        # request_id -> (user_id, asyncio.Future)
-        self._pending: Dict[str, tuple[str, asyncio.Future]] = {}
+        # request_id -> (user_id, asyncio.Future, 发起请求的连接)
+        self._pending: Dict[str, tuple[str, asyncio.Future, Any]] = {}
         # user_id -> 最近一次处理该用户请求的连接（用于把失败通知发回正确的客户端）
         self._user_connections: Dict[str, Any] = {}
 
@@ -131,17 +136,20 @@ class ClientLLMExecutor:
         """用户断开连接时失败其挂起的请求；仅当断开的是发起请求的连接时才执行。"""
         if not user_id:
             return
-        if ws_connection is not None and self._user_connections.get(user_id) is not ws_connection:
-            return
-        self._user_connections.pop(user_id, None)
-        for request_id in [rid for rid, (uid, _) in self._pending.items() if uid == user_id]:
-            _, fut = self._pending.pop(request_id)
+        for request_id in [
+            rid
+            for rid, (uid, _fut, owner) in self._pending.items()
+            if uid == user_id and (ws_connection is None or owner is ws_connection)
+        ]:
+            _, fut, _owner = self._pending.pop(request_id)
             if not fut.done():
                 fut.set_exception(ClientLLMUnavailable("client disconnected"))
+        if ws_connection is None or self._user_connections.get(user_id) is ws_connection:
+            self._user_connections.pop(user_id, None)
 
-    async def notify_user(self, user_id: str, message: str) -> None:
-        """向实际处理该用户请求的连接发送错误通知；未知则跳过。"""
-        ws_connection = self._user_connections.get(user_id)
+    async def notify_user(self, user_id: str, message: str, connection: Any = None) -> None:
+        """向发起请求的连接发送错误通知；未指定时回退到最近请求的连接；未知则跳过。"""
+        ws_connection = connection if connection is not None else self._user_connections.get(user_id)
         if ws_connection is None:
             return
         try:
@@ -187,7 +195,7 @@ class ClientLLMExecutor:
         request_id = f"llm-{uuid.uuid4().hex[:16]}"
         loop = asyncio.get_running_loop()
         future: asyncio.Future = loop.create_future()
-        self._pending[request_id] = (user_id, future)
+        self._pending[request_id] = (user_id, future, ws_connection)
 
         payload: Dict[str, Any] = {
             "request_id": request_id,
@@ -214,24 +222,29 @@ class ClientLLMExecutor:
         except Exception as exc:
             self._pending.pop(request_id, None)
             raise ClientLLMUnavailable(
-                f"failed to send llm_request {request_id}: {exc}"
+                f"failed to send llm_request {request_id}: {exc}",
+                connection=ws_connection,
             ) from exc
         try:
             result = await asyncio.wait_for(future, timeout=self.timeout_seconds)
         except asyncio.TimeoutError:
             self._pending.pop(request_id, None)
             raise ClientLLMTimeout(
-                f"llm_request {request_id} timed out after {self.timeout_seconds}s"
+                f"llm_request {request_id} timed out after {self.timeout_seconds}s",
+                connection=ws_connection,
             ) from None
         finally:
             self._pending.pop(request_id, None)
 
         if isinstance(result, dict) and result.get("error"):
-            raise ClientLLMError(str(result["error"]))
+            raise ClientLLMError(str(result["error"]), connection=ws_connection)
 
         content = (result or {}).get("content")
         if content is None:
-            raise ClientLLMError(f"llm_response {request_id} missing content")
+            raise ClientLLMError(
+                f"llm_response {request_id} missing content",
+                connection=ws_connection,
+            )
 
         return {
             "content": str(content),
@@ -251,7 +264,7 @@ class ClientLLMExecutor:
         if pending is None:
             self.logger.debug(f"llm_response for unknown request_id: {request_id}")
             return
-        _, future = pending
+        _, future, _owner = pending
         if future.done():
             return
         future.set_result(payload)

@@ -91,7 +91,7 @@ class FakeExecutor:
             return item
         return {"content": "client-answer", "usage": None, "response_time_s": 0.1}
 
-    async def notify_user(self, user_id, message):
+    async def notify_user(self, user_id, message, connection=None):
         self.notices.append(message)
 
 
@@ -291,6 +291,51 @@ async def test_notify_goes_to_request_connection_after_switch(executor):
     error_events_b = [e for e in device_b_ws.sent_events if e["type"] == "error"]
     assert len(error_events_a) == 1
     assert error_events_b == []
+
+
+@pytest.mark.asyncio
+async def test_notify_binds_to_request_connection(executor):
+    """同一用户两台设备各有在途请求时，A 的失败通知发回 A，不被 B 覆盖。"""
+    device_a_ws = FakeWebSocket()
+    device_b_ws = FakeWebSocket()
+    stream = FakeStream(device_a_ws, client_mode={"text": True})
+    executor.bind(FakeStreamManager(stream))
+    connection_a = stream.ws_connection  # A 发起请求时的连接对象
+
+    # A 发起请求
+    task_a = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p", params=None)
+    )
+    await asyncio.sleep(0)
+    request_a_id = device_a_ws.sent_events[-1]["payload"]["request_id"]
+
+    # B 接管并发起请求（旧单槽会被覆盖）
+    stream.reconnect(device_b_ws, client_mode={"text": True})
+    task_b = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p2", params=None)
+    )
+    await asyncio.sleep(0)
+
+    # A 的请求返回 key 错误：异常应携带 A 的连接
+    executor.on_llm_response(
+        {"request_id": request_a_id, "error": "HTTP 401 invalid api key"}
+    )
+    with pytest.raises(ClientLLMError) as exc_info:
+        await task_a
+    assert exc_info.value.connection is connection_a
+
+    # 按异常连接发通知：应到 A，不到 B
+    await executor.notify_user(
+        "u1", "测试通知", connection=getattr(exc_info.value, "connection", None)
+    )
+    error_events_a = [e for e in device_a_ws.sent_events if e["type"] == "error"]
+    assert error_events_a
+    assert all(e["type"] != "error" for e in device_b_ws.sent_events)
+
+    # 收尾：完成 B 的请求
+    request_b_id = device_b_ws.sent_events[-1]["payload"]["request_id"]
+    executor.on_llm_response({"request_id": request_b_id, "content": "ok", "usage": None})
+    await task_b
 
 
 class FakeInner(LLMAPIInterface):
