@@ -456,6 +456,8 @@ class LLMSettingsDialog(QDialog):
         self._llm_providers = [p for p in providers if isinstance(p, dict)]
         all_names = [p["name"] for p in self._llm_providers]
         vlm_names = [p["name"] for p in self._llm_providers if p.get("vlm_models")]
+        previous_text = self.provider_combo.currentText().strip()
+        previous_vlm_text = self.vlm_provider_combo.currentText().strip()
         self.provider_combo.clear()
         self.provider_combo.addItems(all_names)
         self.provider_combo.setPlaceholderText("请选择服务商")
@@ -469,12 +471,26 @@ class LLMSettingsDialog(QDialog):
         text_index = self.provider_combo.findText(self._saved_provider or "")
         if text_index >= 0:
             self.provider_combo.setCurrentIndex(text_index)
+        elif previous_text and self.provider_combo.findText(previous_text) >= 0:
+            # 刷新时保留用户手动选择
+            self.provider_combo.setCurrentIndex(
+                self.provider_combo.findText(previous_text)
+            )
+        elif not credential.get_api_key():
+            # key 为空（未配置）：默认展示首项，方便用户直接填入 key
+            self.provider_combo.setCurrentIndex(0)
         else:
-            # 网络数据只提供下拉选项，不替用户选中；未选择时显示占位提示
+            # 已配置但保存的服务商不在列表中：保持未选择，不覆盖
             self.provider_combo.setCurrentIndex(-1)
         vlm_index = self.vlm_provider_combo.findText(self._saved_vlm_provider or "")
         if vlm_index >= 0:
             self.vlm_provider_combo.setCurrentIndex(vlm_index)
+        elif previous_vlm_text and self.vlm_provider_combo.findText(previous_vlm_text) >= 0:
+            self.vlm_provider_combo.setCurrentIndex(
+                self.vlm_provider_combo.findText(previous_vlm_text)
+            )
+        elif not credential.get_vlm_api_key():
+            self.vlm_provider_combo.setCurrentIndex(0)
         else:
             self.vlm_provider_combo.setCurrentIndex(-1)
         self._on_provider_changed(self.provider_combo.currentIndex())
