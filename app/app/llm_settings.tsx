@@ -192,6 +192,31 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         }
         setProvidersError('');
         setProviders(list);
+        // 仅 key 为空（未配置）时默认展示首项，方便用户直接填入 key；
+        // 已配置则保留已保存选择，网络数据只提供下拉选项
+        const snapshot = loadedRef.current;
+        if (snapshot && !snapshot.llmApiKey) {
+          const first = list[0];
+          const nextProvider = snapshot.llmProvider || first?.name || '';
+          setLlmProvider(nextProvider);
+          const preset = list.find((p) => p.name === nextProvider) ?? null;
+          setLlmModel(
+            snapshot.llmModel && preset?.models?.includes(snapshot.llmModel)
+              ? snapshot.llmModel
+              : preset?.models?.[0] || '',
+          );
+        }
+        if (snapshot && !snapshot.vlmApiKey) {
+          const firstVlm = list.find((p) => (p.vlm_models?.length ?? 0) > 0);
+          const nextProvider = snapshot.vlmProvider || firstVlm?.name || '';
+          setVlmProvider(nextProvider);
+          const preset = list.find((p) => p.name === nextProvider) ?? null;
+          setVlmModel(
+            snapshot.vlmModel && preset?.vlm_models?.includes(snapshot.vlmModel)
+              ? snapshot.vlmModel
+              : preset?.vlm_models?.[0] || '',
+          );
+        }
       } catch (e) {
         if (!active) {
           return;
@@ -319,6 +344,29 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       const list = await fetchProviderPresets(server_config.BASE_URL);
       setProvidersError('');
       setProviders(list);
+      // 刷新同样只在 key 为空（未配置）时补默认首项，保留已有选择
+      const snapshot = loadedRef.current;
+      if (snapshot && !snapshot.llmApiKey) {
+        const nextProvider = llmProvider || list[0]?.name || '';
+        setLlmProvider(nextProvider);
+        const preset = list.find((p) => p.name === nextProvider) ?? null;
+        setLlmModel(
+          llmModel && preset?.models?.includes(llmModel)
+            ? llmModel
+            : preset?.models?.[0] || '',
+        );
+      }
+      if (snapshot && !snapshot.vlmApiKey) {
+        const firstVlm = list.find((p) => (p.vlm_models?.length ?? 0) > 0);
+        const nextProvider = vlmProvider || firstVlm?.name || '';
+        setVlmProvider(nextProvider);
+        const preset = list.find((p) => p.name === nextProvider) ?? null;
+        setVlmModel(
+          vlmModel && preset?.vlm_models?.includes(vlmModel)
+            ? vlmModel
+            : preset?.vlm_models?.[0] || '',
+        );
+      }
       const jsonModules = await fetchJsonRequiredModules(server_config.BASE_URL);
       setLlmJsonModules(jsonModules.llm);
       setVlmJsonModules(jsonModules.vlm);
