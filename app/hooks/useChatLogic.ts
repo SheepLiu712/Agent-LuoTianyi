@@ -8,6 +8,7 @@ import { MessageProcessor } from '../utils/message_processor';
 import { NetworkClient } from '../utils/network_client';
 import { AgentMessagePayload, ChatMessage } from '../types/chat';
 import { addDebugTrace } from '../utils/debug_trace';
+import { deduplicateMessages } from '../utils/message_dedup';
 
 function createUuid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -337,7 +338,8 @@ export const useChatLogic = (
 
     setMessages((prev) => {
       const nowScrollIndex = prev.length - 1;
-      const normalized = newMessages.map((msg) => ({
+      // 按 uuid 去重：已有列表、跨批次与批次内重复均只保留第一条，避免 FlatList key 冲突
+      const normalized = deduplicateMessages(prev, newMessages).map((msg) => ({
         ...msg,
         sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
         audioPlayState: msg.audioPlayState || 'idle',

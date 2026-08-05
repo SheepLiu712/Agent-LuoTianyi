@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { ChatMessage } from '../types/chat';
 import { server_config } from '../config';
 import { addDebugTrace } from './debug_trace';
+import { buildFallbackUuid } from './message_dedup';
 
 export interface HistoryResponse {
     messages: ChatMessage[];
@@ -16,7 +17,7 @@ export interface ImageResponse {
 
 async function attachLocalAudioIfExists(msg: any, baseMessage: ChatMessage): Promise<ChatMessage> {
     // 历史音频使用固定本地缓存路径，重启后按 uuid 回连。
-    if (baseMessage.isUser || baseMessage.type !== 'text' || !baseMessage.uuid || baseMessage.uuid === 'unknown_id') {
+    if (baseMessage.isUser || baseMessage.type !== 'text' || !baseMessage.uuid) {
         return baseMessage;
     }
 
@@ -66,7 +67,7 @@ export async function getHistory(username: string, token: string, count: number,
         
         const messages: ChatMessage[] = await Promise.all(data.history.map(async (msg: any) => {
             const baseMessage: ChatMessage = {
-                uuid: msg.uuid || "unknown_id",
+                uuid: buildFallbackUuid(msg),
                 content: msg.content,
                 isUser: msg.source === 'user',
                 type: msg.type,
