@@ -225,6 +225,13 @@ class LLMSettingsDialog(QDialog):
     def _go_to_page(self, index: int) -> None:
         """翻页：切换当前配置页并同步导航按钮。"""
         index = 0 if index <= 0 else 1
+        if index == 1 and not any(
+            p.get("vlm_models") for p in self._llm_providers
+        ):
+            # VLM 服务商缺失：直接关闭并提示
+            QMessageBox.warning(self, "提示", "没有 VLM 服务商可用")
+            self.reject()
+            return
         self.stack.setCurrentIndex(index)
         self.page_label.setText(
             "1 / 2 · 对话模型" if index == 0 else "2 / 2 · 图片理解模型"
@@ -237,14 +244,8 @@ class LLMSettingsDialog(QDialog):
         self._update_config_hint()
 
     def _update_page_status(self) -> None:
-        """按当前页可用项更新状态提示（与 APP 的空列表提示一致）。"""
-        index = self.stack.currentIndex()
-        if index == 1 and not any(
-            p.get("vlm_models") for p in self._llm_providers
-        ):
-            self.status_label.setText("当前服务端没有支持图片理解的模型")
-        else:
-            self.status_label.setText("")
+        """当前页无额外状态提示（空列表由弹窗处理）。"""
+        self.status_label.setText("")
 
     def _can_advance(self) -> bool:
         """当前页下拉框有可用项时才允许继续（拉取失败/无模型时禁用）。"""
@@ -471,7 +472,12 @@ class LLMSettingsDialog(QDialog):
         self.next_btn.setEnabled(self._next_enabled())
 
     def _on_providers_loaded(self, providers: list) -> None:
-        self._llm_providers = [p for p in providers if isinstance(p, dict)]
+        # 只保留包含 models 的服务商，保证下拉一定可选
+        self._llm_providers = [
+            p
+            for p in providers
+            if isinstance(p, dict) and isinstance(p.get("models"), list) and p["models"]
+        ]
         all_names = [p["name"] for p in self._llm_providers]
         vlm_names = [p["name"] for p in self._llm_providers if p.get("vlm_models")]
         previous_text = self.provider_combo.currentText().strip()
@@ -483,8 +489,7 @@ class LLMSettingsDialog(QDialog):
         self.vlm_provider_combo.addItems(vlm_names)
         self.vlm_provider_combo.setPlaceholderText("请选择服务商")
         if not all_names:
-            self.status_label.setText("暂无可用的服务商（请确认服务端已配置）")
-            self._update_config_hint()
+            self._on_llm_missing()
             return
         text_index = self.provider_combo.findText(self._saved_provider or "")
         if text_index >= 0:
@@ -515,6 +520,22 @@ class LLMSettingsDialog(QDialog):
         self._on_vlm_provider_changed(self.vlm_provider_combo.currentIndex())
         self._update_page_status()
         self._update_config_hint()
+
+    def _on_llm_missing(self) -> None:
+        """服务端未配置 LLM：询问是否继续配置图片模型。"""
+        box = QMessageBox(self)
+        box.setWindowTitle("提示")
+        box.setText("服务端未配置 LLM，是否继续配置图片模型？")
+        continue_btn = box.addButton(
+            "继续配置图片模型", QMessageBox.ButtonRole.AcceptRole
+        )
+        exit_btn = box.addButton("退出", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(exit_btn)
+        box.exec()
+        if box.clickedButton() is continue_btn:
+            self._go_to_page(1)
+        else:
+            self.reject()
 
     def _on_providers_failed(self, message: str) -> None:
         self.status_label.setText(f"获取服务商列表失败：{message}")
@@ -806,6 +827,7 @@ class LLMSettingsDialog(QDialog):
                 + "、".join(sorted(set(cfg["json_modules"]))),
             )
 
+        QMessageBox.information(self, "成功", f"{cfg['name']}设置已保存")
         self.status_label.setText(f"{cfg['name']}设置已保存")
         if on_success:
             on_success()
