@@ -254,6 +254,10 @@ describe('LlmSettingsScreen 保存→重载', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;
 
+    // 预置已保存的服务商与模型（网络数据只提供下拉选项，不再自动选中）
+    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
+    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
     });
@@ -261,7 +265,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
       await Promise.resolve();
     });
 
-    // 服务商/模型已自动选中，仅 key 未填 → 页面常驻提示
+    // 服务商/模型已回填，仅 key 未填 → 页面常驻提示
     const note = tree!.root.findAll(
       (node) =>
         node.props.children ===

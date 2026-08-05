@@ -133,10 +133,6 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   useEffect(() => {
     let active = true;
     (async () => {
-      let savedProvider: string | null = null;
-      let savedModel: string | null = null;
-      let savedVlmProvider: string | null = null;
-      let savedVlmModel: string | null = null;
       try {
         const [
           provider, model, params,
@@ -157,10 +153,6 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           AsyncStorage.getItem(VLM_ENABLE_THINKING_STORAGE_KEY),
           AsyncStorage.getItem(VLM_USE_JSON_STORAGE_KEY),
         ]);
-        savedProvider = provider;
-        savedModel = model;
-        savedVlmProvider = vlmProv;
-        savedVlmModel = vlmMod;
         if (!active) {
           return;
         }
@@ -200,36 +192,6 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         }
         setProvidersError('');
         setProviders(list);
-        // 列表为空（拉取失败）时保留已保存的选择，便于旧配置直接翻页
-        if (list.length > 0) {
-          // 下拉框默认选中第一项：已保存服务商存在则回填，否则用第一个服务商及第一个模型
-          const textPreset = list.find((p) => p.name === savedProvider) ?? null;
-          if (textPreset) {
-            setLlmProvider(savedProvider ?? '');
-            setLlmModel(
-              savedModel && textPreset.models?.includes(savedModel)
-                ? savedModel
-                : textPreset.models?.[0] || '',
-            );
-          } else {
-            const first = list[0];
-            setLlmProvider(first?.name ?? '');
-            setLlmModel(first?.models?.[0] ?? '');
-          }
-          const vlmPreset = list.find((p) => p.name === savedVlmProvider) ?? null;
-          if (vlmPreset) {
-            setVlmProvider(savedVlmProvider ?? '');
-            setVlmModel(
-              savedVlmModel && vlmPreset.vlm_models?.includes(savedVlmModel)
-                ? savedVlmModel
-                : vlmPreset.vlm_models?.[0] || '',
-            );
-          } else {
-            const firstVlm = list.find((p) => (p.vlm_models?.length ?? 0) > 0);
-            setVlmProvider(firstVlm?.name ?? '');
-            setVlmModel(firstVlm?.vlm_models?.[0] ?? '');
-          }
-        }
       } catch (e) {
         if (!active) {
           return;
@@ -276,7 +238,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   const pickerTitle = isVlmTab ? '选择图片理解模型' : '选择对话模型';
   const advancedVisible = isVlmTab ? showVlmAdvanced : showLlmAdvanced;
   const pageApiKey = (isVlmTab ? vlmApiKey : llmApiKey).trim();
-  const listReady = (isVlmTab ? vlmProviders : providers).length > 0;
+  // 当前页已选中服务商且其模型列表可用时才能继续（未选择或列表未加载则禁用）
+  const modelReady = isVlmTab
+    ? (currentVlmPreset?.vlm_models?.length ?? 0) > 0
+    : (currentPreset?.models?.length ?? 0) > 0;
 
   const hasUnchangedSaved = (forVlm: boolean): boolean => {
     const saved = loadedRef.current;
@@ -301,7 +266,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       && llmUseJson === saved.llmJson;
   };
 
-  const canNext = listReady || hasUnchangedSaved(isVlmTab);
+  const canNext = modelReady || hasUnchangedSaved(isVlmTab);
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -354,28 +319,6 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       const list = await fetchProviderPresets(server_config.BASE_URL);
       setProvidersError('');
       setProviders(list);
-      const nextTextPreset = list.find((p) => p.name === llmProvider) ?? null;
-      if (!nextTextPreset) {
-        setLlmProvider('');
-        setLlmModel('');
-      } else {
-        setLlmModel((prev) =>
-          nextTextPreset.models?.includes(prev)
-            ? prev
-            : nextTextPreset.models?.[0] || '',
-        );
-      }
-      const nextVlmPreset = list.find((p) => p.name === vlmProvider) ?? null;
-      if (!nextVlmPreset) {
-        setVlmProvider('');
-        setVlmModel('');
-      } else {
-        setVlmModel((prev) =>
-          nextVlmPreset.vlm_models?.includes(prev)
-            ? prev
-            : nextVlmPreset.vlm_models?.[0] || '',
-        );
-      }
       const jsonModules = await fetchJsonRequiredModules(server_config.BASE_URL);
       setLlmJsonModules(jsonModules.llm);
       setVlmJsonModules(jsonModules.vlm);
@@ -500,8 +443,8 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       }
       return;
     }
-    if (!(forVlm ? vlmProviders.length : providers.length)) {
-      // 列表未加载且配置有改动：无法保存，保持禁用
+    if (!modelReady) {
+      // 服务商未选择或列表未加载：无法保存，保持禁用
       return;
     }
     if (parseParams(forVlm ? vlmParamsText : llmParamsText) === null) {
