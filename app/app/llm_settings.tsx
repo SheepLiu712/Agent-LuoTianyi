@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
@@ -193,6 +194,17 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     requestAnimationFrame(() => {
       scrollRef.current?.scrollToEnd({ animated: true });
     });
+  };
+
+  const pasteKey = async (setter: (value: string) => void) => {
+    try {
+      const text = await Clipboard.getStringAsync();
+      if (text) {
+        setter(text);
+      }
+    } catch (e) {
+      addDebugTrace('llm_settings', 'paste key failed', { error: String(e) });
+    }
   };
 
   const handleSave = async () => {
@@ -414,17 +426,25 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
             ) : null}
 
             <Text style={[styles.label, { color: theme.text }]}>API Key</Text>
-            <TextInput
-              style={[styles.input, { backgroundColor: theme.inputBackground, borderColor: theme.border, color: theme.inputText }]}
-              placeholder={isVlmTab ? '粘贴图片理解服务商的 API Key' : '粘贴对话服务商的 API Key'}
-              placeholderTextColor={theme.placeholder}
-              value={isVlmTab ? vlmApiKey : llmApiKey}
-              onChangeText={isVlmTab ? setVlmApiKeyState : setLlmApiKeyState}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              onFocus={scrollToBottom}
-            />
+            <View style={styles.keyRow}>
+              <TextInput
+                style={[styles.input, styles.keyInput, { backgroundColor: theme.inputBackground, borderColor: theme.border, color: theme.inputText }]}
+                placeholder={isVlmTab ? '粘贴图片理解服务商的 API Key' : '粘贴对话服务商的 API Key'}
+                placeholderTextColor={theme.placeholder}
+                value={isVlmTab ? vlmApiKey : llmApiKey}
+                onChangeText={isVlmTab ? setVlmApiKeyState : setLlmApiKeyState}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[styles.pasteButton, { backgroundColor: theme.surfaceAlt }]}
+                onPress={() => pasteKey(isVlmTab ? setVlmApiKeyState : setLlmApiKeyState)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.pasteButtonText, { color: theme.textSoft }]}>粘贴</Text>
+              </TouchableOpacity>
+            </View>
 
             <Text style={[styles.label, { color: theme.text }]}>模型</Text>
             <TouchableOpacity
@@ -445,6 +465,64 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
                 服务商地址：{pickerProvider.base_url}
               </Text>
             ) : null}
+
+            <Text style={[styles.hintText, { color: theme.textMuted }]}>
+              思考：仅模型支持思考参数时勾选；JSON：未勾选时相关功能改用服务端 API。
+            </Text>
+            <TouchableOpacity
+              style={styles.checkboxRow}
+              onPress={() => setEnableThinking(!enableThinking)}
+              activeOpacity={0.7}
+            >
+              <View
+                style={[
+                  styles.checkbox,
+                  { borderColor: theme.border },
+                  enableThinking && { backgroundColor: theme.accent, borderColor: theme.accent },
+                ]}
+              >
+                {enableThinking && (
+                  <Text
+                    style={[
+                      styles.checkmark,
+                      { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' },
+                    ]}
+                  >
+                    ✓
+                  </Text>
+                )}
+              </View>
+              <Text style={[styles.checkboxLabel, { color: theme.textSoft }]}>
+                支持思考模式
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.checkboxRow}
+              onPress={() => setUseJson(!useJson)}
+              activeOpacity={0.7}
+            >
+              <View
+                style={[
+                  styles.checkbox,
+                  { borderColor: theme.border },
+                  useJson && { backgroundColor: theme.accent, borderColor: theme.accent },
+                ]}
+              >
+                {useJson && (
+                  <Text
+                    style={[
+                      styles.checkmark,
+                      { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' },
+                    ]}
+                  >
+                    ✓
+                  </Text>
+                )}
+              </View>
+              <Text style={[styles.checkboxLabel, { color: theme.textSoft }]}>
+                支持 JSON 输出
+              </Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.advancedToggle, { backgroundColor: theme.surfaceAlt }]}
@@ -472,63 +550,6 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
                   autoCorrect={false}
                   onFocus={scrollToBottom}
                 />
-                <Text style={[styles.hintText, { color: theme.textMuted }]}>
-                  思考：仅模型支持思考参数时勾选；JSON：未勾选时相关功能改用服务端 API。
-                </Text>
-                <TouchableOpacity
-                  style={styles.checkboxRow}
-                  onPress={() => setEnableThinking(!enableThinking)}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[
-                      styles.checkbox,
-                      { borderColor: theme.border },
-                      enableThinking && { backgroundColor: theme.accent, borderColor: theme.accent },
-                    ]}
-                  >
-                    {enableThinking && (
-                      <Text
-                        style={[
-                          styles.checkmark,
-                          { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' },
-                        ]}
-                      >
-                        ✓
-                      </Text>
-                    )}
-                  </View>
-                  <Text style={[styles.checkboxLabel, { color: theme.textSoft }]}>
-                    支持思考模式
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.checkboxRow}
-                  onPress={() => setUseJson(!useJson)}
-                  activeOpacity={0.7}
-                >
-                  <View
-                    style={[
-                      styles.checkbox,
-                      { borderColor: theme.border },
-                      useJson && { backgroundColor: theme.accent, borderColor: theme.accent },
-                    ]}
-                  >
-                    {useJson && (
-                      <Text
-                        style={[
-                          styles.checkmark,
-                          { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' },
-                        ]}
-                      >
-                        ✓
-                      </Text>
-                    )}
-                  </View>
-                  <Text style={[styles.checkboxLabel, { color: theme.textSoft }]}>
-                    支持 JSON 输出
-                  </Text>
-                </TouchableOpacity>
               </View>
             ) : null}
 
@@ -729,6 +750,25 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderWidth: 1,
     borderColor: '#dfe6ee',
+  },
+  keyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  keyInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  pasteButton: {
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+  },
+  pasteButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   paramsInput: {
     minHeight: 100,

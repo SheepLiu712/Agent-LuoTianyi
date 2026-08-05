@@ -4,7 +4,8 @@ import json
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QComboBox, QMessageBox, QGroupBox,
-                               QPlainTextEdit, QTabWidget, QWidget, QCheckBox)
+                               QPlainTextEdit, QTabWidget, QWidget, QCheckBox,
+                               QApplication)
 from PySide6.QtCore import Qt, QThread, Signal
 from typing import TYPE_CHECKING
 
@@ -201,7 +202,18 @@ class LLMSettingsDialog(QDialog):
         api_key_input.setPlaceholderText(f"粘贴{label}服务商的 API Key")
         api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         api_key_input.setStyleSheet("font-size: 14px; padding: 6px;")
-        layout.addWidget(api_key_input)
+        key_row = QHBoxLayout()
+        key_row.setSpacing(8)
+        key_row.addWidget(api_key_input, 1)
+        paste_btn = QPushButton("粘贴")
+        paste_btn.setStyleSheet("font-size: 13px; padding: 6px 12px;")
+        paste_btn.clicked.connect(
+            lambda checked=False, edit=api_key_input: edit.setText(
+                QApplication.clipboard().text()
+            )
+        )
+        key_row.addWidget(paste_btn)
+        layout.addLayout(key_row)
 
         model_label = QLabel(f"{label}模型：")
         model_label.setStyleSheet("font-size: 14px; font-weight: 500; margin-top: 4px;")
@@ -216,6 +228,21 @@ class LLMSettingsDialog(QDialog):
         base_url_hint.setWordWrap(True)
         base_url_hint.setStyleSheet("font-size: 12px; color: #999;")
         layout.addWidget(base_url_hint)
+
+        flags_hint = QLabel(
+            "思考：仅模型支持思考参数时勾选；JSON：未勾选时相关功能改用服务端 API。"
+        )
+        flags_hint.setWordWrap(True)
+        flags_hint.setStyleSheet("font-size: 12px; color: #888;")
+        layout.addWidget(flags_hint)
+
+        enable_thinking_check = QCheckBox("支持思考模式")
+        enable_thinking_check.setStyleSheet("font-size: 13px;")
+        layout.addWidget(enable_thinking_check)
+
+        use_json_check = QCheckBox("支持 JSON 输出")
+        use_json_check.setStyleSheet("font-size: 13px;")
+        layout.addWidget(use_json_check)
 
         advanced_group = QGroupBox("高级设置")
         advanced_group.setCheckable(True)
@@ -237,21 +264,6 @@ class LLMSettingsDialog(QDialog):
         params_editor.setMaximumHeight(110)
         params_editor.setStyleSheet("font-size: 13px;")
         advanced_layout.addWidget(params_editor)
-
-        flags_hint = QLabel(
-            "思考：仅模型支持思考参数时勾选；JSON：未勾选时相关功能改用服务端 API。"
-        )
-        flags_hint.setWordWrap(True)
-        flags_hint.setStyleSheet("font-size: 12px; color: #888;")
-        advanced_layout.addWidget(flags_hint)
-
-        enable_thinking_check = QCheckBox("支持思考模式")
-        enable_thinking_check.setStyleSheet("font-size: 13px;")
-        advanced_layout.addWidget(enable_thinking_check)
-
-        use_json_check = QCheckBox("支持 JSON 输出")
-        use_json_check.setStyleSheet("font-size: 13px;")
-        advanced_layout.addWidget(use_json_check)
 
         layout.addWidget(advanced_group)
 
