@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
+from ..utils.message_dedup import build_fallback_uuid
 
 @dataclass
 class ConversationItem:
@@ -8,6 +9,10 @@ class ConversationItem:
     type: str
     content: str
     uuid: str = None
+    def __post_init__(self) -> None:
+        # 服务端缺失 uuid 时生成确定性 ID，避免多条消息共享同一标识
+        if not self.uuid:
+            self.uuid = build_fallback_uuid(self.source, self.type, self.timestamp, self.content)
     def __repr__(self) -> str:
         elapsed_time: str = self._timestamp_to_elapsed_time()
         return f"[{elapsed_time}] {self.source} ({self.type}): {self.content}"

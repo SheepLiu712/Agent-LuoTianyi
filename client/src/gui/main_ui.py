@@ -20,6 +20,7 @@ from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
 from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, BubblePlaybackManager
+from ..utils.message_dedup import deduplicate_by_uuid
 from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
 
@@ -740,6 +741,11 @@ class ChatWidget(QWidget):
         
         if start_index >=0:
             self.current_history_index = start_index
+
+        # 按 uuid 去重：过滤已渲染气泡与批次内重复，避免重复拉取/重推时重复渲染
+        history_list = deduplicate_by_uuid(self._rendered_bubble_uuids(), history_list)
+        if not history_list:
+            return
         
         # Save scroll position
         scrollbar = self.scroll_area.verticalScrollBar()
@@ -779,6 +785,15 @@ class ChatWidget(QWidget):
              QTimer.singleShot(5, lambda: scrollbar.setValue(old_value + scrollbar.maximum() - old_max))
         else:
             QTimer.singleShot(5, lambda: scrollbar.setValue(scrollbar.maximum() - old_max))
+
+    def _rendered_bubble_uuids(self) -> set[str]:
+        """收集当前已渲染气泡的 conv_uuid，用于历史消息去重。"""
+        uuids: set[str] = set()
+        for i in range(self.history_layout.count()):
+            widget = self.history_layout.itemAt(i).widget()
+            if isinstance(widget, ChatBubble) and widget.conv_uuid:
+                uuids.add(widget.conv_uuid)
+        return uuids
 
     def on_text_changed(self):
         text = self.input_box.toPlainText()
