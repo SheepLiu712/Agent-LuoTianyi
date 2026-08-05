@@ -8,24 +8,18 @@ ClientDelegatingLLMInterface / ClientDelegatingVLMInterface
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Dict, Optional
 
 from src.system.observability import get_trace_context
 from src.utils.llm.client_llm_executor import (
-    RETRYABLE_EXCEPTIONS,
     ClientLLMExecutor,
     ClientLLMError,
     _looks_like_key_error,
-    _looks_like_network_error,
 )
 from src.utils.llm.llm_api_interface import LLMAPIInterface
 from src.utils.logger import get_logger
 from src.utils.vision.vlm_api_interface import VLMAPIInterface
 
-
-CLIENT_RETRY_TIMES = 2
-CLIENT_RETRY_INITIAL_DELAY = 1.0
 
 KEY_ERROR_MESSAGE = (
     "你的 LLM API Key 或账户存在问题（无效/未授权/欠费等），本次回复未生成。"
@@ -60,45 +54,6 @@ def _looks_like_json_unsupported(text: str) -> bool:
     return CLIENT_JSON_UNSUPPORTED_MARKER in (text or "").lower()
 
 
-async def _client_request_with_retry(
-    executor: ClientLLMExecutor,
-    user_id: str,
-    *,
-    retries: Optional[int] = None,
-    initial_delay: Optional[float] = None,
-    **kwargs: Any,
-) -> Dict[str, Any]:
-    """客户端执行并处理重试：网络类错误重试，key 类错误不重试。"""
-    if retries is None:
-        retries = CLIENT_RETRY_TIMES
-    if initial_delay is None:
-        initial_delay = CLIENT_RETRY_INITIAL_DELAY
-    last_exc: Optional[Exception] = None
-    delay = initial_delay
-    for attempt in range(retries + 1):
-        try:
-            return await executor.request(user_id, **kwargs)
-        except ClientLLMError as exc:
-            # key 类错误或其他非网络错误不重试
-            if _looks_like_key_error(str(exc)) or not _looks_like_network_error(str(exc)):
-                raise
-            last_exc = exc
-            if attempt < retries:
-                await asyncio.sleep(delay)
-                delay *= 2
-        except RETRYABLE_EXCEPTIONS as exc:
-            last_exc = exc
-            if attempt < retries:
-                await asyncio.sleep(delay)
-                delay *= 2
-        except Exception as exc:
-            last_exc = exc
-            break
-    if last_exc is None:
-        last_exc = ClientLLMError("client request failed")
-    raise last_exc
-
-
 class ClientDelegatingLLMInterface(LLMAPIInterface):
     """LLM 接口包装：优先由用户客户端执行，失败回退服务端直连。"""
 
@@ -121,8 +76,7 @@ class ClientDelegatingLLMInterface(LLMAPIInterface):
             config = getattr(self.inner, "config", {}) or {}
             provider = _provider_info_from_config(config)
             try:
-                return await _client_request_with_retry(
-                    self.executor,
+                return await self.executor.request(
                     user_id,
                     module=getattr(self, "_module_name", "unknown"),
                     prompt=prompt,
@@ -219,8 +173,7 @@ class ClientDelegatingVLMInterface(VLMAPIInterface):
                 if key not in ("extra_body", "response_format")
             }
             try:
-                return await _client_request_with_retry(
-                    self.executor,
+                return await self.executor.request(
                     user_id,
                     module=getattr(self, "_module_name", "unknown"),
                     prompt=prompt,

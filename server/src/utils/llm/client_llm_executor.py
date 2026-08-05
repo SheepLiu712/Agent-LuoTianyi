@@ -43,12 +43,6 @@ class ClientLLMError(ClientLLMExecutionError):
     """客户端执行 LLM 调用时返回了错误。"""
 
 
-# 可重试的错误类型（连接不可用 / 等待超时）
-RETRYABLE_EXCEPTIONS = (
-    ClientLLMUnavailable,
-    ClientLLMTimeout,
-)
-
 _KEY_ERROR_MARKERS = (
     "401",
     "403",

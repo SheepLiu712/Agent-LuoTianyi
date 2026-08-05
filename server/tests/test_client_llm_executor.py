@@ -713,27 +713,21 @@ async def test_vlm_delegating_json_unsupported_falls_back_to_server(monkeypatch,
 
 
 @pytest.mark.asyncio
-async def test_wrapper_retries_network_errors_then_succeeds(monkeypatch):
+async def test_wrapper_network_error_fails_immediately(monkeypatch):
+    """客户端执行不做自动重试：网络类错误立即失败并通知。"""
     inner = FakeInner()
     executor = FakeExecutor()
-    executor.behavior = [
-        ClientLLMError("connection refused"),
-        ClientLLMError("connection refused"),
-        {"content": "ok-after-retry", "usage": None, "response_time_s": 0.1},
-    ]
+    executor.behavior = [ClientLLMError("connection refused")]
     wrapper = ClientDelegatingLLMInterface(inner, executor)
     monkeypatch.setattr(
         "src.utils.llm.client_delegating_interface.get_trace_context",
         lambda: {"user_id": "u1"},
     )
-    monkeypatch.setattr(
-        "src.utils.llm.client_delegating_interface.CLIENT_RETRY_INITIAL_DELAY", 0
-    )
 
-    result = await wrapper.generate_response("p")
-    assert result["content"] == "ok-after-retry"
-    assert executor.request_calls == 3
-    assert executor.notices == []
+    with pytest.raises(ClientLLMError):
+        await wrapper.generate_response("p")
+    assert executor.request_calls == 1  # 不重试
+    assert len(executor.notices) == 1
     assert inner.calls == []
 
 
@@ -741,23 +735,16 @@ async def test_wrapper_retries_network_errors_then_succeeds(monkeypatch):
 async def test_wrapper_network_failure_notifies_and_raises(monkeypatch):
     inner = FakeInner()
     executor = FakeExecutor()
-    executor.behavior = [
-        ClientLLMError("connection refused"),
-        ClientLLMError("connection refused"),
-        ClientLLMError("connection refused"),
-    ]
+    executor.behavior = [ClientLLMError("connection refused")]
     wrapper = ClientDelegatingLLMInterface(inner, executor)
     monkeypatch.setattr(
         "src.utils.llm.client_delegating_interface.get_trace_context",
         lambda: {"user_id": "u1"},
     )
-    monkeypatch.setattr(
-        "src.utils.llm.client_delegating_interface.CLIENT_RETRY_INITIAL_DELAY", 0
-    )
 
     with pytest.raises(ClientLLMError):
         await wrapper.generate_response("p")
-    assert executor.request_calls == 3
+    assert executor.request_calls == 1
     assert len(executor.notices) == 1
     assert len(inner.calls) == 0
 
