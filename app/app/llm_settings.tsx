@@ -54,14 +54,45 @@ interface LlmSettingsScreenProps {
 type TabKind = 'text' | 'vlm';
 type PickerKind = TabKind;
 
+interface LoadedConfigSnapshot {
+  llmProvider: string;
+  llmModel: string;
+  llmApiKey: string;
+  llmParams: string;
+  llmThinking: boolean;
+  llmJson: boolean;
+  vlmProvider: string;
+  vlmModel: string;
+  vlmApiKey: string;
+  vlmParams: string;
+  vlmThinking: boolean;
+  vlmJson: boolean;
+}
+
+function friendlyProbeError(name: string, error: unknown): string {
+  const text = String(error instanceof Error ? error.message : error).toLowerCase();
+  if (/(401|403|unauthorized|invalid api key|api key|authentication|access denied|arrearage)/.test(text)) {
+    return `${name}：API Key 无效或没有权限，请检查后重试。`;
+  }
+  if (/(400|unsupported|invalidparameter)/.test(text)) {
+    return `${name}：模型或所选开关不受支持，请更换模型或取消不支持的选项后重试。`;
+  }
+  if (/(connection|timed out|timeout|network|request failed|resolve)/.test(text)) {
+    return `${name}：无法连接服务商，请检查网络后重试。`;
+  }
+  return `${name}：${error instanceof Error ? error.message : String(error)}`;
+}
+
 export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: LlmSettingsScreenProps) {
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
+  const loadedRef = useRef<LoadedConfigSnapshot | null>(null);
 
   const [providers, setProviders] = useState<LlmProviderPreset[]>([]);
+  const [providersError, setProvidersError] = useState('');
   const [llmJsonModules, setLlmJsonModules] = useState<string[]>([]);
   const [vlmJsonModules, setVlmJsonModules] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<TabKind>('text');
+  const [stepIndex, setStepIndex] = useState(0);
 
   const [llmProvider, setLlmProvider] = useState('');
   const [llmApiKey, setLlmApiKeyState] = useState('');
@@ -77,7 +108,8 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   const [vlmEnableThinking, setVlmEnableThinking] = useState(false);
   const [vlmUseJson, setVlmUseJson] = useState(false);
 
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showLlmAdvanced, setShowLlmAdvanced] = useState(false);
+  const [showVlmAdvanced, setShowVlmAdvanced] = useState(false);
   const [pickerKind, setPickerKind] = useState<PickerKind | null>(null);
   const [pickerText, setPickerText] = useState('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -101,6 +133,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   useEffect(() => {
     let active = true;
     (async () => {
+      let savedProvider: string | null = null;
+      let savedModel: string | null = null;
+      let savedVlmProvider: string | null = null;
+      let savedVlmModel: string | null = null;
       try {
         const [
           provider, model, params,
@@ -121,6 +157,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           AsyncStorage.getItem(VLM_ENABLE_THINKING_STORAGE_KEY),
           AsyncStorage.getItem(VLM_USE_JSON_STORAGE_KEY),
         ]);
+        savedProvider = provider;
+        savedModel = model;
+        savedVlmProvider = vlmProv;
+        savedVlmModel = vlmMod;
         if (!active) {
           return;
         }
@@ -136,6 +176,20 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         setLlmUseJson(llmJson === '1' || llmJson === 'true');
         setVlmEnableThinking(vlmThinking === '1' || vlmThinking === 'true');
         setVlmUseJson(vlmJson === '1' || vlmJson === 'true');
+        loadedRef.current = {
+          llmProvider: provider ?? '',
+          llmModel: model ?? '',
+          llmApiKey: key ?? '',
+          llmParams: params ?? '',
+          llmThinking: llmThinking === '1' || llmThinking === 'true',
+          llmJson: llmJson === '1' || llmJson === 'true',
+          vlmProvider: vlmProv ?? '',
+          vlmModel: vlmMod ?? '',
+          vlmApiKey: vlmKey ?? '',
+          vlmParams: vlmParams ?? '',
+          vlmThinking: vlmThinking === '1' || vlmThinking === 'true',
+          vlmJson: vlmJson === '1' || vlmJson === 'true',
+        };
       } catch (e) {
         addDebugTrace('llm_settings', 'load saved config failed', { error: String(e) });
       }
@@ -144,15 +198,46 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         if (!active) {
           return;
         }
+        setProvidersError('');
         setProviders(list);
-        setLlmProvider((prev) => prev || list[0]?.name || '');
-        const firstVlmProvider = list.find((p) => (p.vlm_models?.length ?? 0) > 0)?.name || '';
-        setVlmProvider((prev) => prev || firstVlmProvider);
+        // 列表为空（拉取失败）时保留已保存的选择，便于旧配置直接翻页
+        if (list.length > 0) {
+          // 下拉框默认选中第一项：已保存服务商存在则回填，否则用第一个服务商及第一个模型
+          const textPreset = list.find((p) => p.name === savedProvider) ?? null;
+          if (textPreset) {
+            setLlmProvider(savedProvider ?? '');
+            setLlmModel(
+              savedModel && textPreset.models?.includes(savedModel)
+                ? savedModel
+                : textPreset.models?.[0] || '',
+            );
+          } else {
+            const first = list[0];
+            setLlmProvider(first?.name ?? '');
+            setLlmModel(first?.models?.[0] ?? '');
+          }
+          const vlmPreset = list.find((p) => p.name === savedVlmProvider) ?? null;
+          if (vlmPreset) {
+            setVlmProvider(savedVlmProvider ?? '');
+            setVlmModel(
+              savedVlmModel && vlmPreset.vlm_models?.includes(savedVlmModel)
+                ? savedVlmModel
+                : vlmPreset.vlm_models?.[0] || '',
+            );
+          } else {
+            const firstVlm = list.find((p) => (p.vlm_models?.length ?? 0) > 0);
+            setVlmProvider(firstVlm?.name ?? '');
+            setVlmModel(firstVlm?.vlm_models?.[0] ?? '');
+          }
+        }
       } catch (e) {
         if (!active) {
           return;
         }
         addDebugTrace('llm_settings', 'fetch providers failed', { error: String(e) });
+        setProvidersError(
+          `获取服务商列表失败：${e instanceof Error ? e.message : String(e)}`,
+        );
       }
       try {
         const jsonModules = await fetchJsonRequiredModules(server_config.BASE_URL);
@@ -177,7 +262,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   const currentVlmPreset = providers.find((p) => p.name === vlmProvider) ?? null;
   const vlmProviders = providers.filter((p) => (p.vlm_models?.length ?? 0) > 0);
 
-  const isVlmTab = activeTab === 'vlm';
+  const isVlmTab = stepIndex === 1;
   const paramsText = isVlmTab ? vlmParamsText : llmParamsText;
   const setParamsText = isVlmTab ? setVlmParamsText : setLlmParamsText;
   const enableThinking = isVlmTab ? vlmEnableThinking : llmEnableThinking;
@@ -189,10 +274,46 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     ? (currentVlmPreset?.vlm_models ?? [])
     : (currentPreset?.models ?? []);
   const pickerTitle = isVlmTab ? '选择图片理解模型' : '选择对话模型';
+  const advancedVisible = isVlmTab ? showVlmAdvanced : showLlmAdvanced;
+  const pageApiKey = (isVlmTab ? vlmApiKey : llmApiKey).trim();
+  const listReady = (isVlmTab ? vlmProviders : providers).length > 0;
+
+  const hasUnchangedSaved = (forVlm: boolean): boolean => {
+    const saved = loadedRef.current;
+    if (!saved) {
+      return false;
+    }
+    if (forVlm) {
+      return Boolean(saved.vlmProvider && saved.vlmModel && saved.vlmApiKey)
+        && vlmProvider === saved.vlmProvider
+        && vlmModel === saved.vlmModel
+        && vlmApiKey.trim() === saved.vlmApiKey
+        && vlmParamsText.trim() === saved.vlmParams
+        && vlmEnableThinking === saved.vlmThinking
+        && vlmUseJson === saved.vlmJson;
+    }
+    return Boolean(saved.llmProvider && saved.llmModel && saved.llmApiKey)
+      && llmProvider === saved.llmProvider
+      && llmModel === saved.llmModel
+      && llmApiKey.trim() === saved.llmApiKey
+      && llmParamsText.trim() === saved.llmParams
+      && llmEnableThinking === saved.llmThinking
+      && llmUseJson === saved.llmJson;
+  };
+
+  const canNext = listReady || hasUnchangedSaved(isVlmTab);
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
+      scrollRef.current?.scrollToEnd?.({ animated: true });
+    });
+  };
+
+  const goStep = (index: number) => {
+    setStepIndex(index);
+    Keyboard.dismiss();
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo?.({ y: 0, animated: true });
     });
   };
 
@@ -207,123 +328,249 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     }
   };
 
-  const handleSave = async () => {
-    const parseParams = (text: string): Record<string, unknown> | null => {
-      const trimmed = text.trim();
-      if (!trimmed) {
-        return {};
-      }
-      try {
-        const parsed = JSON.parse(trimmed);
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-          Alert.alert('提示', '高级参数必须是 JSON 对象');
-          return null;
-        }
-        return parsed as Record<string, unknown>;
-      } catch (e) {
-        Alert.alert('提示', `高级参数不是合法 JSON：${e instanceof Error ? e.message : String(e)}`);
+  const parseParams = (text: string): Record<string, unknown> | null => {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      return {};
+    }
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        Alert.alert('提示', '高级参数必须是 JSON 对象');
         return null;
       }
-    };
-    const textParams = parseParams(llmParamsText);
-    if (textParams === null) return;
-    const vlmParams = parseParams(vlmParamsText);
-    if (vlmParams === null) return;
+      return parsed as Record<string, unknown>;
+    } catch (e) {
+      Alert.alert(
+        '提示',
+        `高级参数不是合法 JSON：${e instanceof Error ? e.message : String(e)}`,
+      );
+      return null;
+    }
+  };
 
-    setSaving(true);
+  const refreshProviders = async () => {
     try {
-      const probeErrors: string[] = [];
-      const textBaseUrl = resolveProviderBaseUrl(llmProvider, providers);
-      if (llmApiKey.trim() && llmModel.trim() && textBaseUrl) {
-        try {
-          await probeLlmConfig({
-            baseUrl: textBaseUrl,
-            apiKey: llmApiKey.trim(),
-            model: llmModel.trim(),
-            flags: { enableThinking: llmEnableThinking, useJson: llmUseJson },
-            params: textParams,
-          });
-        } catch (e) {
-          probeErrors.push(
-            `对话模型校验失败：${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
+      const list = await fetchProviderPresets(server_config.BASE_URL);
+      setProvidersError('');
+      setProviders(list);
+      const nextTextPreset = list.find((p) => p.name === llmProvider) ?? null;
+      if (!nextTextPreset) {
+        setLlmProvider('');
+        setLlmModel('');
+      } else {
+        setLlmModel((prev) =>
+          nextTextPreset.models?.includes(prev)
+            ? prev
+            : nextTextPreset.models?.[0] || '',
+        );
       }
-      const vlmBaseUrl = resolveProviderBaseUrl(vlmProvider, providers);
-      if (vlmApiKey.trim() && vlmModel.trim() && vlmBaseUrl) {
-        try {
-          await probeLlmConfig({
-            baseUrl: vlmBaseUrl,
-            apiKey: vlmApiKey.trim(),
-            model: vlmModel.trim(),
-            flags: { enableThinking: vlmEnableThinking, useJson: vlmUseJson },
-            params: vlmParams,
-          });
-        } catch (e) {
-          probeErrors.push(
-            `图片理解模型校验失败：${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
+      const nextVlmPreset = list.find((p) => p.name === vlmProvider) ?? null;
+      if (!nextVlmPreset) {
+        setVlmProvider('');
+        setVlmModel('');
+      } else {
+        setVlmModel((prev) =>
+          nextVlmPreset.vlm_models?.includes(prev)
+            ? prev
+            : nextVlmPreset.vlm_models?.[0] || '',
+        );
       }
-      if (probeErrors.length > 0) {
-        Alert.alert('配置校验失败', probeErrors.join('\n'));
-        return;
-      }
+      const jsonModules = await fetchJsonRequiredModules(server_config.BASE_URL);
+      setLlmJsonModules(jsonModules.llm);
+      setVlmJsonModules(jsonModules.vlm);
+    } catch (e) {
+      addDebugTrace('llm_settings', 'refresh providers failed', {
+        error: String(e),
+      });
+      setProvidersError(
+        `获取服务商列表失败：${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  };
 
-      await setLlmApiKey(llmApiKey.trim());
-      await AsyncStorage.setItem(LLM_PROVIDER_STORAGE_KEY, llmProvider);
-      await AsyncStorage.setItem(LLM_MODEL_STORAGE_KEY, llmModel.trim());
-      await AsyncStorage.setItem(
-        LLM_PROVIDER_BASE_URL_STORAGE_KEY,
-        resolveProviderBaseUrl(llmProvider, providers),
-      );
-      await AsyncStorage.setItem(LLM_PARAMS_STORAGE_KEY, llmParamsText.trim());
-      await AsyncStorage.setItem(
-        LLM_ENABLE_THINKING_STORAGE_KEY,
-        llmEnableThinking ? '1' : '0',
-      );
-      await AsyncStorage.setItem(LLM_USE_JSON_STORAGE_KEY, llmUseJson ? '1' : '0');
-
-      await setVlmApiKey(vlmApiKey.trim());
-      await AsyncStorage.setItem(VLM_PROVIDER_STORAGE_KEY, vlmProvider);
-      await AsyncStorage.setItem(VLM_MODEL_STORAGE_KEY, vlmModel.trim());
-      await AsyncStorage.setItem(
-        VLM_PROVIDER_BASE_URL_STORAGE_KEY,
-        resolveProviderBaseUrl(vlmProvider, providers),
-      );
-      await AsyncStorage.setItem(VLM_PARAMS_STORAGE_KEY, vlmParamsText.trim());
+  const writeModuleConfig = async (
+    forVlm: boolean,
+    cfg: {
+      apiKey: string;
+      provider: string;
+      model: string;
+      baseUrl: string;
+      paramsText: string;
+      enableThinking: boolean;
+      useJson: boolean;
+    },
+  ) => {
+    if (forVlm) {
+      await setVlmApiKey(cfg.apiKey);
+      await AsyncStorage.setItem(VLM_PROVIDER_STORAGE_KEY, cfg.provider);
+      await AsyncStorage.setItem(VLM_MODEL_STORAGE_KEY, cfg.model);
+      await AsyncStorage.setItem(VLM_PROVIDER_BASE_URL_STORAGE_KEY, cfg.baseUrl);
+      await AsyncStorage.setItem(VLM_PARAMS_STORAGE_KEY, cfg.paramsText);
       await AsyncStorage.setItem(
         VLM_ENABLE_THINKING_STORAGE_KEY,
-        vlmEnableThinking ? '1' : '0',
+        cfg.enableThinking ? '1' : '0',
       );
-      await AsyncStorage.setItem(VLM_USE_JSON_STORAGE_KEY, vlmUseJson ? '1' : '0');
+      await AsyncStorage.setItem(VLM_USE_JSON_STORAGE_KEY, cfg.useJson ? '1' : '0');
+    } else {
+      await setLlmApiKey(cfg.apiKey);
+      await AsyncStorage.setItem(LLM_PROVIDER_STORAGE_KEY, cfg.provider);
+      await AsyncStorage.setItem(LLM_MODEL_STORAGE_KEY, cfg.model);
+      await AsyncStorage.setItem(LLM_PROVIDER_BASE_URL_STORAGE_KEY, cfg.baseUrl);
+      await AsyncStorage.setItem(LLM_PARAMS_STORAGE_KEY, cfg.paramsText);
+      await AsyncStorage.setItem(
+        LLM_ENABLE_THINKING_STORAGE_KEY,
+        cfg.enableThinking ? '1' : '0',
+      );
+      await AsyncStorage.setItem(LLM_USE_JSON_STORAGE_KEY, cfg.useJson ? '1' : '0');
+    }
+    // 保存后同步快照为存储值，保证“未修改”判断对比的是当前存储而非进入时的值
+    loadedRef.current = {
+      ...(loadedRef.current ?? {
+        llmProvider: '',
+        llmModel: '',
+        llmApiKey: '',
+        llmParams: '',
+        llmThinking: false,
+        llmJson: false,
+        vlmProvider: '',
+        vlmModel: '',
+        vlmApiKey: '',
+        vlmParams: '',
+        vlmThinking: false,
+        vlmJson: false,
+      }),
+      ...(forVlm
+        ? {
+            vlmProvider: cfg.provider,
+            vlmModel: cfg.model,
+            vlmApiKey: cfg.apiKey,
+            vlmParams: cfg.paramsText,
+            vlmThinking: cfg.enableThinking,
+            vlmJson: cfg.useJson,
+          }
+        : {
+            llmProvider: cfg.provider,
+            llmModel: cfg.model,
+            llmApiKey: cfg.apiKey,
+            llmParams: cfg.paramsText,
+            llmThinking: cfg.enableThinking,
+            llmJson: cfg.useJson,
+          }),
+    };
+  };
 
-      const promptParts: string[] = [];
-      const textConfigured = Boolean(llmApiKey.trim() && llmProvider && llmModel.trim());
-      const vlmConfigured = Boolean(vlmApiKey.trim() && vlmProvider && vlmModel.trim());
-      if (textConfigured && !llmUseJson && llmJsonModules.length > 0) {
-        promptParts.push(
-          `对话模型未勾选“支持 JSON 输出”，以下功能将改用服务端 API 执行：\n${[
-            ...new Set(llmJsonModules),
-          ].join('、')}`,
-        );
+  const clearAndAdvance = async (forVlm: boolean) => {
+    try {
+      await writeModuleConfig(forVlm, {
+        apiKey: '',
+        provider: '',
+        model: '',
+        baseUrl: '',
+        paramsText: '',
+        enableThinking: false,
+        useJson: false,
+      });
+    } catch (e) {
+      addDebugTrace('llm_settings', 'clear config failed', { error: String(e) });
+    }
+    if (forVlm) {
+      onClose();
+    } else {
+      goStep(1);
+    }
+  };
+
+  const toggleAdvanced = () => {
+    if (isVlmTab) {
+      setShowVlmAdvanced((v) => !v);
+    } else {
+      setShowLlmAdvanced((v) => !v);
+    }
+  };
+
+  const handleNext = () => {
+    const forVlm = isVlmTab;
+    // 旧配置完整且未修改：任意情况下直接翻页/关闭，不执行保存
+    if (hasUnchangedSaved(forVlm)) {
+      if (forVlm) {
+        onClose();
+      } else {
+        goStep(1);
       }
-      if (vlmConfigured && !vlmUseJson && vlmJsonModules.length > 0) {
-        promptParts.push(
-          `图片理解模型未勾选“支持 JSON 输出”，以下功能将改用服务端 API 执行：\n${[
-            ...new Set(vlmJsonModules),
-          ].join('、')}`,
-        );
+      return;
+    }
+    if (!(forVlm ? vlmProviders.length : providers.length)) {
+      // 列表未加载且配置有改动：无法保存，保持禁用
+      return;
+    }
+    if (parseParams(forVlm ? vlmParamsText : llmParamsText) === null) {
+      return;
+    }
+    const apiKey = (forVlm ? vlmApiKey : llmApiKey).trim();
+    if (apiKey) {
+      void handleSave(forVlm);
+      return;
+    }
+    Alert.alert('提示', '未配置 API Key，相关调用将使用服务端 Key。是否继续？', [
+      { text: '取消', style: 'cancel' },
+      { text: '继续', onPress: () => { void clearAndAdvance(forVlm); } },
+    ]);
+  };
+
+  const handleSave = async (forVlm: boolean) => {
+    const params = parseParams(forVlm ? vlmParamsText : llmParamsText);
+    if (params === null) return;
+
+    const name = forVlm ? '图片理解模型' : '对话模型';
+    const apiKey = (forVlm ? vlmApiKey : llmApiKey).trim();
+    const provider = forVlm ? vlmProvider : llmProvider;
+    const model = (forVlm ? vlmModel : llmModel).trim();
+    const enableThinking = forVlm ? vlmEnableThinking : llmEnableThinking;
+    const useJson = forVlm ? vlmUseJson : llmUseJson;
+    const jsonModules = forVlm ? vlmJsonModules : llmJsonModules;
+    setSaving(true);
+    try {
+      const baseUrl = resolveProviderBaseUrl(provider, providers);
+      if (apiKey && model && baseUrl) {
+        try {
+          await probeLlmConfig({
+            baseUrl,
+            apiKey,
+            model,
+            flags: { enableThinking, useJson },
+            params,
+          });
+        } catch (e) {
+          Alert.alert('配置校验失败', friendlyProbeError(name, e));
+          return;
+        }
       }
-      if (promptParts.length > 0) {
+      await writeModuleConfig(forVlm, {
+        apiKey,
+        provider,
+        model,
+        baseUrl,
+        paramsText: (forVlm ? vlmParamsText : llmParamsText).trim(),
+        enableThinking,
+        useJson,
+      });
+
+      const configured = Boolean(apiKey && provider && model);
+      if (configured && !useJson && jsonModules.length > 0) {
         Alert.alert(
           '提示',
-          promptParts.join('\n\n'),
+          `${name}未勾选“支持 JSON 输出”，以下功能将改用服务端 API 执行：\n${[
+            ...new Set(jsonModules),
+          ].join('、')}`,
         );
       }
 
-      Alert.alert('成功', 'LLM 模型设置已保存');
-      onClose();
+      if (forVlm) {
+        onClose();
+      } else {
+        goStep(1);
+      }
     } catch (e) {
       addDebugTrace('llm_settings', 'save failed', { error: String(e) });
       Alert.alert('保存失败', e instanceof Error ? e.message : '网络错误');
@@ -344,25 +591,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
             <View style={styles.headerPlaceholder} />
           </View>
 
-          <View style={styles.tabBar}>
-            <TouchableOpacity
-              style={[styles.tabItem, activeTab === 'text' && { backgroundColor: theme.accent }]}
-              onPress={() => setActiveTab('text')}
-              activeOpacity={0.75}
-            >
-              <Text style={[styles.tabItemText, { color: activeTab === 'text' ? (theme.name === 'dark' ? '#0F1419' : '#ffffff') : theme.text }]}>
-                对话模型
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tabItem, activeTab === 'vlm' && { backgroundColor: theme.accent }]}
-              onPress={() => setActiveTab('vlm')}
-              activeOpacity={0.75}
-            >
-              <Text style={[styles.tabItemText, { color: activeTab === 'vlm' ? (theme.name === 'dark' ? '#0F1419' : '#ffffff') : theme.text }]}>
-                图片理解模型
-              </Text>
-            </TouchableOpacity>
+          <View style={styles.stepBar}>
+            <Text style={[styles.stepText, { color: theme.text }]}>
+              {isVlmTab ? '2 / 2 · 图片理解模型' : '1 / 2 · 对话模型'}
+            </Text>
           </View>
 
           <ScrollView
@@ -385,8 +617,26 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
                 ? '配置图片理解使用的服务商、API Key 与模型；该服务商必须支持图片理解。'
                 : '配置对话使用的服务商、API Key 与模型。key 只保存在本机，不会上传服务器。'}
             </Text>
+            {!pageApiKey ? (
+              <Text style={[styles.configNote, { color: theme.textMuted }]}>
+                未配置 API Key，相关调用将使用服务端 Key。
+              </Text>
+            ) : null}
 
-            <Text style={[styles.label, { color: theme.text }]}>服务商</Text>
+            <View style={styles.labelRow}>
+              <Text style={[styles.label, styles.labelInRow, { color: theme.text }]}>
+                服务商
+              </Text>
+              <TouchableOpacity
+                style={styles.refreshButton}
+                onPress={() => { void refreshProviders(); }}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.refreshText, { color: theme.accentText }]}>
+                  刷新
+                </Text>
+              </TouchableOpacity>
+            </View>
             <View style={styles.optionRow}>
               {(isVlmTab ? vlmProviders : providers).map((preset) => (
                 <TouchableOpacity
@@ -423,7 +673,11 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
                 </TouchableOpacity>
               ))}
             </View>
-            {providers.length === 0 ? (
+            {providersError ? (
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
+                {providersError}
+              </Text>
+            ) : providers.length === 0 ? (
               <Text style={[styles.emptyText, { color: theme.textMuted }]}>
                 暂无可用的服务商（请确认服务端已配置）
               </Text>
@@ -459,7 +713,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
               style={[styles.input, { backgroundColor: theme.inputBackground, borderColor: theme.border }]}
               onPress={() => {
                 setPickerText('');
-                setPickerKind(activeTab);
+                setPickerKind(isVlmTab ? 'vlm' : 'text');
               }}
               activeOpacity={0.7}
             >
@@ -534,15 +788,15 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
 
             <TouchableOpacity
               style={[styles.advancedToggle, { backgroundColor: theme.surfaceAlt }]}
-              onPress={() => setShowAdvanced((prev) => !prev)}
+              onPress={toggleAdvanced}
               activeOpacity={0.8}
             >
               <Text style={[styles.advancedToggleText, { color: theme.text }]}>
-                高级设置{showAdvanced ? '（收起）' : ''}
+                高级设置{advancedVisible ? '（收起）' : ''}
               </Text>
             </TouchableOpacity>
 
-            {showAdvanced ? (
+            {advancedVisible ? (
               <View>
                 <Text style={[styles.hintText, { color: theme.textMuted }]}>
                   可选，以 JSON 覆盖请求参数（不同模型参数不同，请按服务商文档填写）
@@ -562,17 +816,34 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
             ) : null}
 
             <View style={styles.buttonRow}>
-              <TouchableOpacity style={[styles.cancelButton, { backgroundColor: theme.surfaceAlt }]} onPress={onClose} activeOpacity={0.8}>
-                <Text style={[styles.cancelButtonText, { color: theme.textSoft }]}>取消</Text>
-              </TouchableOpacity>
+              {isVlmTab ? (
+                <TouchableOpacity
+                  style={[
+                    styles.prevButton,
+                    { backgroundColor: theme.surfaceAlt },
+                    saving && styles.buttonDisabled,
+                  ]}
+                  onPress={() => goStep(0)}
+                  disabled={saving}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.prevButtonText, { color: theme.textSoft }]}>
+                    上一步
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
-                style={[styles.saveButton, { backgroundColor: theme.accent }, saving && styles.buttonDisabled]}
-                onPress={handleSave}
-                disabled={saving}
+                style={[
+                  styles.saveButton,
+                  { backgroundColor: theme.accent },
+                  (saving || !canNext) && styles.saveButtonDisabled,
+                ]}
+                onPress={handleNext}
+                disabled={saving || !canNext}
                 activeOpacity={0.8}
               >
                 <Text style={[styles.saveButtonText, { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' }]}>
-                  {saving ? '校验中...' : '保存设置'}
+                  {saving ? '校验中...' : isVlmTab ? '完成' : '下一步'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -606,7 +877,9 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
             <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
               {pickerList.length === 0 ? (
                 <Text style={[styles.modalEmptyText, { color: theme.textMuted }]}>
-                  该服务商未提供{pickerKind === 'vlm' ? '图片理解' : '对话'}模型
+                  {pickerProvider
+                    ? `该服务商未提供${pickerKind === 'vlm' ? '图片理解' : '对话'}模型`
+                    : '请先选择服务商'}
                 </Text>
               ) : (
                 pickerList
@@ -682,22 +955,16 @@ const styles = StyleSheet.create({
   headerPlaceholder: {
     width: 56,
   },
-  tabBar: {
+  stepBar: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    gap: 10,
   },
-  tabItem: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 9,
-    alignItems: 'center',
-    backgroundColor: '#e8edf2',
-  },
-  tabItemText: {
+  stepText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   scrollArea: {
     flex: 1,
@@ -713,12 +980,35 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 12,
   },
+  configNote: {
+    fontSize: 12,
+    marginBottom: 8,
+  },
   label: {
     fontSize: 15,
     fontWeight: '700',
     color: '#344252',
     marginBottom: 10,
     marginTop: 8,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    marginBottom: 10,
+  },
+  labelInRow: {
+    marginTop: 0,
+    marginBottom: 0,
+  },
+  refreshButton: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  refreshText: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   optionRow: {
     flexDirection: 'row',
@@ -819,14 +1109,14 @@ const styles = StyleSheet.create({
     marginTop: 14,
     gap: 12,
   },
-  cancelButton: {
+  prevButton: {
     flex: 1,
     backgroundColor: '#e8edf2',
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  cancelButtonText: {
+  prevButtonText: {
     color: '#4b5967',
     fontSize: 15,
     fontWeight: '700',
@@ -844,7 +1134,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: 0.5,
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#b8bec6',
+    opacity: 0.9,
   },
   modalOverlay: {
     flex: 1,
