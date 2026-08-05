@@ -462,13 +462,30 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         enableThinking: false,
         useJson: false,
       });
+      // 清除成功才导航
+      if (forVlm) {
+        onClose();
+      } else {
+        goStep(1);
+      }
     } catch (e) {
       addDebugTrace('llm_settings', 'clear config failed', { error: String(e) });
+      Alert.alert('清除失败', '清除配置失败，是否重试？', [
+        { text: '取消', style: 'cancel' },
+        { text: '重试', onPress: () => { void clearAndAdvance(forVlm); } },
+      ]);
     }
-    if (forVlm) {
-      onClose();
+  };
+
+  const toggleKeyInput = (forVlm: boolean) => {
+    const setter = forVlm ? setVlmApiKeyState : setLlmApiKeyState;
+    const hasValue = forVlm
+      ? vlmApiKey.trim().length > 0
+      : llmApiKey.trim().length > 0;
+    if (hasValue) {
+      setter('');
     } else {
-      goStep(1);
+      void pasteKey(setter);
     }
   };
 
@@ -692,10 +709,12 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
               />
               <TouchableOpacity
                 style={[styles.pasteButton, { backgroundColor: theme.surfaceAlt }]}
-                onPress={() => pasteKey(isVlmTab ? setVlmApiKeyState : setLlmApiKeyState)}
+                onPress={() => toggleKeyInput(isVlmTab)}
                 activeOpacity={0.8}
               >
-                <Text style={[styles.pasteButtonText, { color: theme.textSoft }]}>粘贴</Text>
+                <Text style={[styles.pasteButtonText, { color: theme.textSoft }]}>
+                  {pageApiKey ? '清空' : '粘贴'}
+                </Text>
               </TouchableOpacity>
             </View>
 
