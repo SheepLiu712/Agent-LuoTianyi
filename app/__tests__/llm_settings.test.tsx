@@ -77,7 +77,10 @@ jest.mock('react-native', () => {
   return {
     Platform: { OS: 'ios' },
     StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
-    Keyboard: { addListener: jest.fn(() => ({ remove: jest.fn() })) },
+    Keyboard: {
+      addListener: jest.fn(() => ({ remove: jest.fn() })),
+      dismiss: jest.fn(),
+    },
     Alert: { alert: jest.fn() },
     View: stub('View'),
     Text: stub('Text'),
@@ -138,6 +141,10 @@ describe('LlmSettingsScreen 保存→重载', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;
 
+    // 预置已保存的服务商与模型，使对话页三个必填项齐全（直接走校验+保存）
+    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
+    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
     });
@@ -155,13 +162,13 @@ describe('LlmSettingsScreen 保存→重载', () => {
       apiKeyInput.props.onChangeText('sk-test-key');
     });
 
-    const saveText = tree!.root.findAll(
-      (node) => node.props.children === '保存设置',
+    // 点击“下一步”：配置完整，探测校验通过后保存并进入第 2 页
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
     )[0];
-    expect(saveText).toBeTruthy();
-    const saveButton = saveText.parent!;
+    expect(nextText).toBeTruthy();
     await act(async () => {
-      await saveButton.props.onPress();
+      await nextText.parent!.props.onPress();
     });
     // 等待保存链路的剩余状态更新（setSaving(false) 等）
     await act(async () => {
@@ -172,7 +179,8 @@ describe('LlmSettingsScreen 保存→重载', () => {
     await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBe(
       'sk-test-key',
     );
-    expect(onClose).toHaveBeenCalled();
+    // 保存后进入图片理解页，不关闭设置页
+    expect(onClose).not.toHaveBeenCalled();
 
     // 重载：卸载后重新渲染，设置页应回填已保存的 key
     await act(async () => {
@@ -206,6 +214,9 @@ describe('LlmSettingsScreen 保存→重载', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;
 
+    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
+    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
     });
@@ -221,19 +232,337 @@ describe('LlmSettingsScreen 保存→重载', () => {
       apiKeyInput.props.onChangeText('sk-text');
     });
 
-    const saveText = tree!.root.findAll(
-      (node) => node.props.children === '保存设置',
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
     )[0];
-    const saveButton = saveText.parent!;
     await act(async () => {
-      await saveButton.props.onPress();
+      await nextText.parent!.props.onPress();
     });
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(onClose).toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
     const alertTitles = Alert.alert.mock.calls.map((call) => String(call[0]));
     expect(alertTitles).not.toContain('提示');
+  });
+
+  it('未填 API Key 时弹窗提示将使用服务端 Key，继续后进入下一页', async () => {
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 服务商/模型已自动选中，仅 key 未填 → 页面常驻提示
+    const note = tree!.root.findAll(
+      (node) =>
+        node.props.children ===
+        '未配置 API Key，相关调用将使用服务端 Key。',
+    )[0];
+    expect(note).toBeTruthy();
+
+    // 点击“下一步”弹窗确认
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    await act(async () => {
+      await nextText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const promptCall = Alert.alert.mock.calls.find(
+      (call) => call[0] === '提示',
+    );
+    expect(promptCall).toBeTruthy();
+    expect(String(promptCall![1])).toContain('服务端 Key');
+    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBeNull();
+    // 不点“继续”即相当于取消：仍留在第 1 页，不保存
+    expect(
+      tree!.root.findAll((node) => node.props.children === '完成')[0],
+    ).toBeFalsy();
+
+    // 再次“下一步”并选择“继续”：进入第 2 页
+    const nextText2 = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    await act(async () => {
+      await nextText2.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const promptCall2 =
+      Alert.alert.mock.calls[Alert.alert.mock.calls.length - 1];
+    const continueBtn = promptCall2[2].find(
+      (button: { text: string }) => button.text === '继续',
+    );
+    await act(async () => {
+      continueBtn.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBeNull();
+    expect(
+      tree!.root.findAll((node) => node.props.children === '完成')[0],
+    ).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('服务商列表未加载时“下一步”禁用且不弹窗', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce([]);
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    expect(nextText.parent!.props.disabled).toBe(true);
+
+    // 即使触发点击也不会弹窗或保存
+    await act(async () => {
+      await nextText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(Alert.alert).not.toHaveBeenCalled();
+    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('列表为空但旧配置完整且未修改时，可直接下一步且不执行保存', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce([]);
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    // 预置完整旧配置
+    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
+    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await mockSecureStore.setItemAsync('llm_api_key', 'sk-saved');
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 列表为空但旧配置未修改，“下一步”可用
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    expect(nextText.parent!.props.disabled).toBe(false);
+
+    await act(async () => {
+      await nextText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 直接翻页：不保存、不弹窗、key 保持原样
+    expect(
+      tree!.root.findAll((node) => node.props.children === '完成')[0],
+    ).toBeTruthy();
+    expect(Alert.alert).not.toHaveBeenCalled();
+    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBe(
+      'sk-saved',
+    );
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('列表为空且 key 已修改时，“下一步”保持禁用', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce([]);
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
+    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await mockSecureStore.setItemAsync('llm_api_key', 'sk-saved');
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 修改 key 后与旧配置不一致
+    const apiKeyInput = tree!.root.findAllByProps({
+      placeholder: '粘贴对话服务商的 API Key',
+    })[0];
+    await act(async () => {
+      apiKeyInput.props.onChangeText('sk-changed');
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    expect(nextText.parent!.props.disabled).toBe(true);
+  });
+
+  it('列表已加载且旧配置未修改时，直接下一步且不执行保存', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      probeLlmConfig: jest.Mock;
+    };
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    // 预置完整旧配置（与默认服务商预设一致）
+    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
+    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await mockSecureStore.setItemAsync('llm_api_key', 'sk-saved');
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    expect(nextText.parent!.props.disabled).toBe(false);
+
+    await act(async () => {
+      await nextText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 直接翻页：未探测、未弹窗、key 未动
+    expect(
+      tree!.root.findAll((node) => node.props.children === '完成')[0],
+    ).toBeTruthy();
+    expect(llmClient.probeLlmConfig).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBe(
+      'sk-saved',
+    );
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('点击刷新会重新拉取服务商与 JSON 功能列表', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+      fetchJsonRequiredModules: jest.Mock;
+    };
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(llmClient.fetchProviderPresets).toHaveBeenCalledTimes(1);
+
+    const refreshText = tree!.root.findAll(
+      (node) => node.props.children === '刷新',
+    )[0];
+    expect(refreshText).toBeTruthy();
+    await act(async () => {
+      await refreshText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(llmClient.fetchProviderPresets).toHaveBeenCalledTimes(2);
+    expect(llmClient.fetchJsonRequiredModules).toHaveBeenCalledTimes(2);
+  });
+
+  it('探测失败时显示友好错误提示且不保存', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      probeLlmConfig: jest.Mock;
+    };
+    llmClient.probeLlmConfig.mockRejectedValueOnce(new Error('401 Unauthorized'));
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
+    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const apiKeyInput = tree!.root.findAllByProps({
+      placeholder: '粘贴对话服务商的 API Key',
+    })[0];
+    await act(async () => {
+      apiKeyInput.props.onChangeText('sk-bad');
+    });
+
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    await act(async () => {
+      await nextText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const failCall = Alert.alert.mock.calls.find(
+      (call) => call[0] === '配置校验失败',
+    );
+    expect(failCall).toBeTruthy();
+    expect(String(failCall![1])).toContain('API Key 无效');
+    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBeNull();
+    // 校验失败仍停留在第 1 页
+    const doneText = tree!.root.findAll(
+      (node) => node.props.children === '完成',
+    )[0];
+    expect(doneText).toBeFalsy();
   });
 });
