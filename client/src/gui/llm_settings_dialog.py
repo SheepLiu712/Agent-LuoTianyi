@@ -489,10 +489,17 @@ class LLMSettingsDialog(QDialog):
 
         text_provider = self.provider_combo.currentText().strip()
         vlm_provider = self.vlm_provider_combo.currentText().strip()
-        if not text_provider:
+        text_configured = bool(api_key) and bool(text_provider) and bool(
+            self.model_combo.currentText().strip()
+        )
+        vlm_configured = bool(vlm_api_key) and bool(vlm_provider) and bool(
+            self.vlm_model_combo.currentText().strip()
+        )
+        # 仅校验已配置的模块，未配置的模块不要求服务商，避免一个模块影响另一个
+        if text_configured and not text_provider:
             QMessageBox.warning(self, "提示", "对话服务商列表未加载，无法保存")
             return
-        if not vlm_provider:
+        if vlm_configured and not vlm_provider:
             QMessageBox.warning(self, "提示", "图片理解服务商列表未加载，无法保存")
             return
 
@@ -518,20 +525,19 @@ class LLMSettingsDialog(QDialog):
             self.vlm_use_json_check.isChecked(),
         )
 
-        server_api_functions = []
-        if not self.use_json_check.isChecked():
-            server_api_functions.extend(self._llm_json_modules)
-        if not self.vlm_use_json_check.isChecked():
-            server_api_functions.extend(self._vlm_json_modules)
-        server_api_functions = sorted(set(server_api_functions))
-        if server_api_functions:
-            labels = "、".join(server_api_functions)
-            QMessageBox.information(
-                self,
-                "提示",
-                "以下功能需要 JSON 输出，当前模型未勾选支持，将改用服务端 API 执行：\n"
-                f"{labels}",
+        prompt_parts = []
+        if text_configured and not self.use_json_check.isChecked() and self._llm_json_modules:
+            prompt_parts.append(
+                "对话模型未勾选“支持 JSON 输出”，以下功能将改用服务端 API 执行：\n"
+                + "、".join(sorted(set(self._llm_json_modules)))
             )
+        if vlm_configured and not self.vlm_use_json_check.isChecked() and self._vlm_json_modules:
+            prompt_parts.append(
+                "图片理解模型未勾选“支持 JSON 输出”，以下功能将改用服务端 API 执行：\n"
+                + "、".join(sorted(set(self._vlm_json_modules)))
+            )
+        if prompt_parts:
+            QMessageBox.information(self, "提示", "\n\n".join(prompt_parts))
 
         QMessageBox.information(self, "成功", "LLM 模型设置已保存")
         self.accept()
