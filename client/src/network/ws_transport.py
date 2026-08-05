@@ -83,6 +83,7 @@ class WsTransport:
         self._ack_waiter: dict | None = None
         self._agent_message_listener: Callable[[AgentMessage], None] | None = None # 收到的消息发送到哪里
         self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
+        self._llm_mode_client = False  # 服务端当前是否标记为客户端 LLM 模式（随连接重置）
         self._system_message_listener: Callable[[str], None] | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -153,6 +154,11 @@ class WsTransport:
             payload["is_proactive"] = True
         if self.api_key_getter and self.api_key_getter():
             payload["llm_mode"] = "client"
+            self._llm_mode_client = True
+        elif self._llm_mode_client:
+            # 无 key 但服务端仍标记为 client 模式，显式切回 server 模式
+            payload["llm_mode"] = "server"
+            self._llm_mode_client = False
         return self._submit_user_event(
             WSEventType.USER_TEXT,
             payload=payload,
@@ -176,6 +182,11 @@ class WsTransport:
             payload["image_client_path"] = image_client_path
         if self.api_key_getter and self.api_key_getter():
             payload["llm_mode"] = "client"
+            self._llm_mode_client = True
+        elif self._llm_mode_client:
+            # 无 key 但服务端仍标记为 client 模式，显式切回 server 模式
+            payload["llm_mode"] = "server"
+            self._llm_mode_client = False
         return self._submit_user_event(
             WSEventType.USER_IMAGE,
             payload=payload,
@@ -332,6 +343,7 @@ class WsTransport:
             try:
                 async with websockets.connect(ws_url, max_size=8 * 1024 * 1024, ssl=ssl_ctx) as ws:
                     self._ws = ws
+                    self._llm_mode_client = False
                     self._connected_event.set()
                     self._ready_event.clear()
 
@@ -493,10 +505,9 @@ class WsTransport:
             return
 
         is_image = bool(payload.get("image_base64"))
-        api_key = (
-            self.vlm_api_key_getter() if is_image and self.vlm_api_key_getter else None
-        )
-        if not api_key:
+        if is_image:
+            api_key = self.vlm_api_key_getter() if self.vlm_api_key_getter else None
+        else:
             api_key = self.api_key_getter() if self.api_key_getter else None
         if not api_key:
             self.logger.warning("llm_request received but no api key configured on client")

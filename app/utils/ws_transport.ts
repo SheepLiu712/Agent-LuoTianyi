@@ -66,6 +66,7 @@ export class WebSocketTransport {
   private isConnected = false;
   private isAuthed = false;
   private authRejected = false;
+  private llmModeClient = false; // 服务端当前是否标记为客户端 LLM 模式（随连接重置）
 
   constructor(username: string, token: string, callbacks: WsCallbacks) {
     this.username = username;
@@ -165,6 +166,11 @@ export class WebSocketTransport {
     }
     if (apiKey) {
       payload.llm_mode = 'client';
+      this.llmModeClient = true;
+    } else if (this.llmModeClient) {
+      // 无 key 但服务端仍标记为 client 模式，显式切回 server 模式
+      payload.llm_mode = 'server';
+      this.llmModeClient = false;
     }
     return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout, clientMsgId);
   }
@@ -184,6 +190,11 @@ export class WebSocketTransport {
     };
     if (apiKey) {
       payload.llm_mode = 'client';
+      this.llmModeClient = true;
+    } else if (this.llmModeClient) {
+      // 无 key 但服务端仍标记为 client 模式，显式切回 server 模式
+      payload.llm_mode = 'server';
+      this.llmModeClient = false;
     }
     return this.sendWithAck(WSEventType.USER_IMAGE, payload, ackTimeout, clientMsgId);
   }
@@ -237,6 +248,8 @@ export class WebSocketTransport {
 
     this.ws.onopen = () => {
       this.isConnected = true;
+      this.llmModeClient = false;
+      this.reconnectAttempts = 0;
       this.sendAuth();
       this.startHeartbeat();
     };
