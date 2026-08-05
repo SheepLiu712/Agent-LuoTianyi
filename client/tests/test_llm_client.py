@@ -239,10 +239,10 @@ def test_submit_user_text_includes_llm_mode_when_key(monkeypatch):
     )
     monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
     transport.submit_user_text("hello")
-    assert captured["payload"]["llm_mode"] == "client"
+    assert captured["payload"]["llm_mode"] == {"text": True, "vlm": False}
 
 
-def test_submit_user_text_no_llm_mode_without_key(monkeypatch):
+def test_submit_user_text_llm_mode_false_without_key(monkeypatch):
     captured = {}
 
     def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
@@ -257,10 +257,10 @@ def test_submit_user_text_no_llm_mode_without_key(monkeypatch):
     )
     monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
     transport.submit_user_text("hello")
-    assert "llm_mode" not in captured["payload"]
+    assert captured["payload"]["llm_mode"] == {"text": False, "vlm": False}
 
 
-def test_submit_user_text_switches_to_server_mode_when_key_cleared(monkeypatch):
+def test_submit_user_text_updates_mode_from_key(monkeypatch):
     captured = []
 
     def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
@@ -275,20 +275,71 @@ def test_submit_user_text_switches_to_server_mode_when_key_cleared(monkeypatch):
     )
     monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
     transport.submit_user_text("hello")
-    assert captured[-1]["llm_mode"] == "client"
+    assert captured[-1]["llm_mode"] == {"text": True, "vlm": False}
 
-    # key 清空后，下一条消息应显式切回 server 模式
+    # key 清空后，下一条消息携带全量模式对象并关闭 text 维度
     monkeypatch.setattr(
         transport,
         "api_key_getter",
         lambda: None,
     )
     transport.submit_user_text("hi")
-    assert captured[-1]["llm_mode"] == "server"
+    assert captured[-1]["llm_mode"] == {"text": False, "vlm": False}
 
-    # 再发无 key 消息不再携带 llm_mode
+    # 再发无 key 消息模式保持关闭
     transport.submit_user_text("again")
-    assert "llm_mode" not in captured[-1]
+    assert captured[-1]["llm_mode"] == {"text": False, "vlm": False}
+
+
+def test_submit_user_image_uses_vlm_key_for_mode(monkeypatch):
+    captured = []
+
+    def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
+        captured.append(payload)
+        return {"ok": True}
+
+    transport = WsTransport(
+        "wss://example.com",
+        username_getter=lambda: "u",
+        token_getter=lambda: "t",
+        api_key_getter=lambda: "sk-text-key",
+        vlm_api_key_getter=lambda: "sk-vlm-key",
+    )
+    monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
+    transport.submit_user_text("hello")
+    assert captured[-1]["llm_mode"] == {"text": True, "vlm": False}
+
+    transport.submit_user_image("data:image/png;base64,AAA", "image/png")
+    assert captured[-1]["llm_mode"] == {"text": True, "vlm": True}
+
+    # vlm key 清空后，下一条图片消息关闭 vlm 维度（text 不受影响）
+    monkeypatch.setattr(transport, "vlm_api_key_getter", lambda: None)
+    transport.submit_user_image("data:image/png;base64,AAA", "image/png")
+    assert captured[-1]["llm_mode"] == {"text": True, "vlm": False}
+
+    # 再发无 vlm key 的图片消息 vlm 维度保持关闭
+    transport.submit_user_image("data:image/png;base64,AAA", "image/png")
+    assert captured[-1]["llm_mode"] == {"text": True, "vlm": False}
+
+
+def test_submit_user_image_mode_not_affected_by_text_key(monkeypatch):
+    """图片模式只由 vlm key 决定，文本 key 存在与否不影响。"""
+    captured = []
+
+    def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
+        captured.append(payload)
+        return {"ok": True}
+
+    transport = WsTransport(
+        "wss://example.com",
+        username_getter=lambda: "u",
+        token_getter=lambda: "t",
+        api_key_getter=lambda: "sk-text-key",
+    )
+    monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
+    transport.submit_user_image("data:image/png;base64,AAA", "image/png")
+    # 只有文本 key：vlm 维度关闭；text 维度未被文本事件更新，保持默认 False
+    assert captured[-1]["llm_mode"] == {"text": False, "vlm": False}
 
 
 @pytest.mark.asyncio

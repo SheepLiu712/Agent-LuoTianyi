@@ -221,6 +221,7 @@ class ClientDelegatingVLMInterface(VLMAPIInterface):
                     params=params,
                     enable_thinking=enable_thinking,
                     use_json=use_json,
+                    vlm=True,
                     image_base64=image_base64,
                     provider=provider,
                 )
@@ -267,5 +268,5 @@ class ClientDelegatingVLMInterface(VLMAPIInterface):
         return bool(
             self.executor is not None
             and user_id
-            and self.executor.is_enabled(user_id)
+            and self.executor.is_enabled(user_id, vlm=True)
         )
