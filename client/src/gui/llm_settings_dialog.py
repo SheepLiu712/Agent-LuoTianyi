@@ -233,7 +233,6 @@ class LLMSettingsDialog(QDialog):
         self.prev_btn.setVisible(index == 1)
         self.prev_btn.setEnabled(index == 1)
         self.next_btn.setText("下一步" if index == 0 else "完成")
-        self.next_btn.setEnabled(self._next_enabled())
         self._update_page_status()
         self._update_config_hint()
 
@@ -459,29 +458,33 @@ class LLMSettingsDialog(QDialog):
         vlm_names = [p["name"] for p in self._llm_providers if p.get("vlm_models")]
         self.provider_combo.clear()
         self.provider_combo.addItems(all_names)
+        self.provider_combo.setPlaceholderText("请选择服务商")
         self.vlm_provider_combo.clear()
         self.vlm_provider_combo.addItems(vlm_names)
+        self.vlm_provider_combo.setPlaceholderText("请选择服务商")
         if not all_names:
             self.status_label.setText("暂无可用的服务商（请确认服务端已配置）")
             self._update_config_hint()
-            self.next_btn.setEnabled(self._next_enabled())
             return
         text_index = self.provider_combo.findText(self._saved_provider or "")
         if text_index >= 0:
             self.provider_combo.setCurrentIndex(text_index)
-        # 未保存过服务商时下拉框默认选中第一项
+        else:
+            # 网络数据只提供下拉选项，不替用户选中；未选择时显示占位提示
+            self.provider_combo.setCurrentIndex(-1)
         vlm_index = self.vlm_provider_combo.findText(self._saved_vlm_provider or "")
         if vlm_index >= 0:
             self.vlm_provider_combo.setCurrentIndex(vlm_index)
+        else:
+            self.vlm_provider_combo.setCurrentIndex(-1)
         self._on_provider_changed(self.provider_combo.currentIndex())
         self._on_vlm_provider_changed(self.vlm_provider_combo.currentIndex())
         self._update_page_status()
         self._update_config_hint()
-        self.next_btn.setEnabled(self._next_enabled())
 
     def _on_providers_failed(self, message: str) -> None:
         self.status_label.setText(f"获取服务商列表失败：{message}")
-        self.next_btn.setEnabled(self._next_enabled())
+        self._update_config_hint()
 
     def _refresh_providers(self) -> None:
         self.status_label.setText("正在获取服务商列表…")
@@ -636,6 +639,8 @@ class LLMSettingsDialog(QDialog):
             self.config_hint.setText("")
         else:
             self.config_hint.setText("未配置 API Key，相关调用将使用服务端 Key。")
+        if self._probe_worker is None or not self._probe_worker.isRunning():
+            self.next_btn.setEnabled(self._next_enabled())
 
     def _advance_or_close(self, index: int) -> None:
         """保存/跳过后的落点：第 1 页进入第 2 页，第 2 页关闭。"""
