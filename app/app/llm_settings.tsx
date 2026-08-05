@@ -63,14 +63,14 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   const [activeTab, setActiveTab] = useState<TabKind>('text');
 
   const [llmProvider, setLlmProvider] = useState('');
-  const [llmApiKey, setLlmApiKey] = useState('');
+  const [llmApiKey, setLlmApiKeyState] = useState('');
   const [llmModel, setLlmModel] = useState('');
   const [llmParamsText, setLlmParamsText] = useState('');
   const [llmEnableThinking, setLlmEnableThinking] = useState(false);
   const [llmUseJson, setLlmUseJson] = useState(false);
 
   const [vlmProvider, setVlmProvider] = useState('');
-  const [vlmApiKey, setVlmApiKey] = useState('');
+  const [vlmApiKey, setVlmApiKeyState] = useState('');
   const [vlmModel, setVlmModel] = useState('');
   const [vlmParamsText, setVlmParamsText] = useState('');
   const [vlmEnableThinking, setVlmEnableThinking] = useState(false);
@@ -129,8 +129,8 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         if (vlmProv) setVlmProvider(vlmProv);
         if (vlmMod) setVlmModel(vlmMod);
         if (vlmParams) setVlmParamsText(vlmParams);
-        if (key) setLlmApiKey(key);
-        if (vlmKey) setVlmApiKey(vlmKey);
+        if (key) setLlmApiKeyState(key);
+        if (vlmKey) setVlmApiKeyState(vlmKey);
         setLlmEnableThinking(llmThinking === '1' || llmThinking === 'true');
         setLlmUseJson(llmJson === '1' || llmJson === 'true');
         setVlmEnableThinking(vlmThinking === '1' || vlmThinking === 'true');
@@ -419,7 +419,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
               placeholder={isVlmTab ? '粘贴图片理解服务商的 API Key' : '粘贴对话服务商的 API Key'}
               placeholderTextColor={theme.placeholder}
               value={isVlmTab ? vlmApiKey : llmApiKey}
-              onChangeText={isVlmTab ? setVlmApiKey : setLlmApiKey}
+              onChangeText={isVlmTab ? setVlmApiKeyState : setLlmApiKeyState}
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
