@@ -175,16 +175,20 @@ class ChatStreamManager:
             yield user_uuid, stream_character_id, chat_stream
 
 
-    def ws_lost_connection(self, ws_connection: WebSocketConnection):
+    def ws_lost_connection(self, ws_connection: WebSocketConnection) -> bool:
         """
-        当 WebSocket 连接丢失时，调用此方法进行清理。
+        当 WebSocket 连接丢失时进行清理；仅当断开的是该流当前活跃连接时才清理，
+        避免旧连接断开误清掉新连接的活跃状态。返回是否清理了任一聊天流。
         """
         user_uuid = ws_connection.user_uuid
         if not user_uuid:
-            return
+            return False
+        cleared = False
         for (stream_user_uuid, _character), chat_stream in list(self.user_streams.items()):
-            if stream_user_uuid == user_uuid:
+            if stream_user_uuid == user_uuid and chat_stream.ws_connection is ws_connection:
                 chat_stream.lost_connection(ws_connection)
+                cleared = True
+        return cleared
 
     async def _cleanup_once(self, expiration_seconds: int, current_time: float | None = None) -> None:
         """Run one cleanup pass while isolating failures to the affected stream."""

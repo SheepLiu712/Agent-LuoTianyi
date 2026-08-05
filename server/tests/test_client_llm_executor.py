@@ -19,6 +19,7 @@ from src.utils.llm.client_llm_executor import (
     _looks_like_key_error,
     _looks_like_network_error,
 )
+from src.chat_session.chat_stream_manager import ChatStreamManager
 from src.utils.llm.llm_api_interface import LLMAPIInterface
 from src.utils.llm_service import LLMService
 from src.utils.vision.vlm_api_interface import VLMAPIInterface
@@ -34,17 +35,28 @@ class FakeWebSocket:
 
 class FakeStream:
     def __init__(self, websocket, client_mode=None):
-        self.ws_connection = SimpleNamespace(
-            websocket=websocket,
-            client_mode=dict(client_mode or {"text": False, "vlm": False}),
-        )
+        self.ws_connection = self._as_connection(websocket, client_mode)
 
     def is_connection_lost(self):
         return False
 
+    def lost_connection(self):
+        self.ws_connection = None
+
     def reconnect(self, websocket, client_mode=None):
         """模拟 ChatStream.reconnect：用新连接替换当前连接。"""
-        self.ws_connection = SimpleNamespace(
+        self.ws_connection = self._as_connection(websocket, client_mode)
+
+    @staticmethod
+    def _as_connection(websocket, client_mode=None):
+        """已是连接对象（含 websocket 属性）则直接复用，保证身份比较；否则包装。"""
+        if hasattr(websocket, "websocket"):
+            websocket.client_mode = dict(
+                client_mode or getattr(websocket, "client_mode", None)
+                or {"text": False, "vlm": False}
+            )
+            return websocket
+        return SimpleNamespace(
             websocket=websocket,
             client_mode=dict(client_mode or {"text": False, "vlm": False}),
         )
@@ -190,6 +202,62 @@ async def test_multi_connection_device_a_reconnects_back(executor):
     result = await task
     assert result["content"] == "ok"
     assert device_b_ws.sent_events == []
+
+
+def test_ws_lost_connection_ignores_stale_connection():
+    """旧连接断开不应清掉新连接的活跃状态（走真实 ws_lost_connection 入口）。"""
+    manager = ChatStreamManager({}, None, None, None, None)
+    device_a = SimpleNamespace(websocket=FakeWebSocket(), user_uuid="u1")
+    stream = FakeStream(device_a, client_mode={"text": True})
+    manager.user_streams[("u1", "luotianyi")] = stream
+
+    # 设备 B 接管（reconnect 替换当前连接）
+    device_b = SimpleNamespace(websocket=FakeWebSocket(), user_uuid="u1")
+    stream.reconnect(device_b, client_mode={"text": False})
+
+    # 旧连接 A 断开：不清理当前活跃的 B
+    assert manager.ws_lost_connection(device_a) is False
+    assert stream.ws_connection is device_b
+
+    # 当前活跃连接 B 断开：清理
+    assert manager.ws_lost_connection(device_b) is True
+    assert stream.ws_connection is None
+
+
+def test_ws_lost_connection_per_user_isolation():
+    """ws_lost_connection 只清理断开者所属用户的活跃流。"""
+    manager = ChatStreamManager({}, None, None, None, None)
+    user_a_conn = SimpleNamespace(websocket=FakeWebSocket(), user_uuid="u1")
+    user_b_conn = SimpleNamespace(websocket=FakeWebSocket(), user_uuid="u2")
+    stream_a = FakeStream(user_a_conn)
+    stream_b = FakeStream(user_b_conn)
+    manager.user_streams[("u1", "luotianyi")] = stream_a
+    manager.user_streams[("u2", "luotianyi")] = stream_b
+
+    manager.ws_lost_connection(user_a_conn)
+    assert stream_a.ws_connection is None
+    assert stream_b.ws_connection is user_b_conn
+
+
+@pytest.mark.asyncio
+async def test_clear_user_ignores_stale_connection(executor, fake_ws):
+    """旧连接断开时，不失败当前连接发起的 pending 请求。"""
+    stream = FakeStream(fake_ws, client_mode={"text": True})
+    executor.bind(FakeStreamManager(stream))
+    task = asyncio.create_task(
+        executor.request("u1", module="m", prompt="p", params=None)
+    )
+    await asyncio.sleep(0)
+
+    # 旧连接断开：pending 保留
+    stale_connection = SimpleNamespace(websocket=object(), user_uuid="u1")
+    executor.clear_user("u1", stale_connection)
+    assert not task.done()
+
+    # 当前连接断开：pending 被失败
+    executor.clear_user("u1", stream.ws_connection)
+    with pytest.raises(ClientLLMUnavailable):
+        await task
 
 
 @pytest.mark.asyncio

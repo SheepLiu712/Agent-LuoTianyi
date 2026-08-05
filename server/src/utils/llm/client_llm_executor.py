@@ -127,9 +127,11 @@ class ClientLLMExecutor:
             return None
         return ws_connection
 
-    def clear_user(self, user_id: Optional[str]) -> None:
-        """用户断开连接时失败其挂起的请求。"""
+    def clear_user(self, user_id: Optional[str], ws_connection: Any = None) -> None:
+        """用户断开连接时失败其挂起的请求；仅当断开的是发起请求的连接时才执行。"""
         if not user_id:
+            return
+        if ws_connection is not None and self._user_connections.get(user_id) is not ws_connection:
             return
         self._user_connections.pop(user_id, None)
         for request_id in [rid for rid, (uid, _) in self._pending.items() if uid == user_id]:
