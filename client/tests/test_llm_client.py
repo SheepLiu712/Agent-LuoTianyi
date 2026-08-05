@@ -260,6 +260,37 @@ def test_submit_user_text_no_llm_mode_without_key(monkeypatch):
     assert "llm_mode" not in captured["payload"]
 
 
+def test_submit_user_text_switches_to_server_mode_when_key_cleared(monkeypatch):
+    captured = []
+
+    def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
+        captured.append(payload)
+        return {"ok": True}
+
+    transport = WsTransport(
+        "wss://example.com",
+        username_getter=lambda: "u",
+        token_getter=lambda: "t",
+        api_key_getter=lambda: "sk-user-key",
+    )
+    monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
+    transport.submit_user_text("hello")
+    assert captured[-1]["llm_mode"] == "client"
+
+    # key 清空后，下一条消息应显式切回 server 模式
+    monkeypatch.setattr(
+        transport,
+        "api_key_getter",
+        lambda: None,
+    )
+    transport.submit_user_text("hi")
+    assert captured[-1]["llm_mode"] == "server"
+
+    # 再发无 key 消息不再携带 llm_mode
+    transport.submit_user_text("again")
+    assert "llm_mode" not in captured[-1]
+
+
 @pytest.mark.asyncio
 async def test_handle_llm_request_uses_cached_config(monkeypatch):
     captured = {}
@@ -392,6 +423,44 @@ async def test_handle_llm_request_uses_vlm_model_for_image(monkeypatch):
     )
     assert captured["payload"]["model"] == "qwen3-vl-plus"
     assert captured["api_key"] == "sk-vlm"
+
+
+@pytest.mark.asyncio
+async def test_handle_llm_request_image_does_not_fallback_to_text_key(monkeypatch):
+    """图片请求缺 vlm key 时不应回退文本 key，直接报无 key。"""
+    captured = {}
+
+    async def fake_call(**kwargs):
+        captured["called"] = True
+        return {"content": "ok", "usage": None, "response_time_s": 0.1}
+
+    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
+    transport = WsTransport(
+        "wss://example.com",
+        username_getter=lambda: "u",
+        token_getter=lambda: "t",
+        api_key_getter=lambda: "sk-text-key",
+        model_getter=lambda: "m",
+        vlm_model_getter=lambda: "vlm-m",
+        base_url_getter=lambda: "https://example.com/v1",
+        vlm_base_url_getter=lambda: "https://example.com/v1",
+    )
+    fake_ws = FakeClientWs()
+    transport._ws = fake_ws
+    await transport._handle_llm_request(
+        None,
+        {
+            "request_id": "req-img-nokey",
+            "prompt": "describe",
+            "image_base64": "data:image/png;base64,AAA",
+            "provider": {},
+            "params": {},
+        },
+    )
+    assert "called" not in captured
+    assert fake_ws.sent
+    payload = json.loads(fake_ws.sent[0])["payload"]
+    assert "no api key" in payload["error"]
 
 
 @pytest.mark.asyncio
