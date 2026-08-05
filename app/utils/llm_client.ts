@@ -185,6 +185,12 @@ export function buildChatCompletionsPayload(options: BuildPayloadOptions): Recor
     temperature: params.temperature ?? 0.7,
     top_p: params.top_p ?? 0.9,
   };
+  // 其余用户参数全量透传（stop、presence_penalty 等），避免静默丢弃
+  for (const [key, value] of Object.entries(params)) {
+    if (!(key in body)) {
+      body[key] = value;
+    }
+  }
   if (enableThinking) {
     body.enable_thinking = true;
   }

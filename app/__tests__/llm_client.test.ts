@@ -58,6 +58,21 @@ describe('buildChatCompletionsPayload', () => {
       (content[1] as { image_url: { url: string } }).image_url.url,
     ).toBe('data:image/png;base64,AAA');
   });
+
+  it('passes through extra params without dropping them', () => {
+    const body = buildChatCompletionsPayload({
+      prompt: 'hi',
+      model: 'm',
+      params: {
+        max_tokens: 1024,
+        stop: ['END'],
+        presence_penalty: 0.5,
+      },
+    });
+    expect(body.max_tokens).toBe(1024);
+    expect(body.stop).toEqual(['END']);
+    expect(body.presence_penalty).toBe(0.5);
+  });
 });
 
 describe('resolveProviderBaseUrl', () => {
