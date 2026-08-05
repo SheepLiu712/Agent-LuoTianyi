@@ -298,19 +298,27 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       );
       await AsyncStorage.setItem(VLM_USE_JSON_STORAGE_KEY, vlmUseJson ? '1' : '0');
 
-      const serverApiFunctions: string[] = [];
-      if (!llmUseJson) {
-        serverApiFunctions.push(...llmJsonModules);
+      const promptParts: string[] = [];
+      const textConfigured = Boolean(llmApiKey.trim() && llmProvider && llmModel.trim());
+      const vlmConfigured = Boolean(vlmApiKey.trim() && vlmProvider && vlmModel.trim());
+      if (textConfigured && !llmUseJson && llmJsonModules.length > 0) {
+        promptParts.push(
+          `对话模型未勾选“支持 JSON 输出”，以下功能将改用服务端 API 执行：\n${[
+            ...new Set(llmJsonModules),
+          ].join('、')}`,
+        );
       }
-      if (!vlmUseJson) {
-        serverApiFunctions.push(...vlmJsonModules);
+      if (vlmConfigured && !vlmUseJson && vlmJsonModules.length > 0) {
+        promptParts.push(
+          `图片理解模型未勾选“支持 JSON 输出”，以下功能将改用服务端 API 执行：\n${[
+            ...new Set(vlmJsonModules),
+          ].join('、')}`,
+        );
       }
-      const uniqueFunctions = [...new Set(serverApiFunctions)];
-      if (uniqueFunctions.length > 0) {
-        const labels = uniqueFunctions.join('、');
+      if (promptParts.length > 0) {
         Alert.alert(
           '提示',
-          `以下功能需要 JSON 输出，当前模型未勾选支持，将改用服务端 API 执行：\n${labels}`,
+          promptParts.join('\n\n'),
         );
       }
 

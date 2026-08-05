@@ -191,4 +191,49 @@ describe('LlmSettingsScreen 保存→重载', () => {
     })[0];
     expect(apiKeyInput2.props.value).toBe('sk-test-key');
   });
+
+  it('vlm 未配置时不提示图片理解模型 JSON 未勾选', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchJsonRequiredModules: jest.Mock;
+    };
+    llmClient.fetchJsonRequiredModules.mockResolvedValueOnce({
+      llm: [],
+      vlm: ['B站动态解析'],
+    });
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 只填对话 key，不配置图片理解模型
+    const apiKeyInput = tree!.root.findAllByProps({
+      placeholder: '粘贴对话服务商的 API Key',
+    })[0];
+    await act(async () => {
+      apiKeyInput.props.onChangeText('sk-text');
+    });
+
+    const saveText = tree!.root.findAll(
+      (node) => node.props.children === '保存设置',
+    )[0];
+    const saveButton = saveText.parent!;
+    await act(async () => {
+      await saveButton.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(onClose).toHaveBeenCalled();
+    const alertTitles = Alert.alert.mock.calls.map((call) => String(call[0]));
+    expect(alertTitles).not.toContain('提示');
+  });
 });
