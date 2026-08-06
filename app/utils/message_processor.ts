@@ -343,25 +343,25 @@ export class MessageProcessor {
   }
 
   onAgentMessage(payload: AgentMessagePayload) {
+    // 文本与表情展示即时执行，不被上一句的音频完成/落盘阻塞，
+    // 保证多句回复可以流式渲染出全部句子（而不是只显示第一句）。
+    this.handleAgentMessageDisplay(payload);
+    // 音频链路保持串行：分片累积、播放、落盘按到达顺序执行。
     this.incomingMessageChain = this.incomingMessageChain
-      .then(() => this.handleAgentMessage(payload))
+      .then(() => this.handleAgentMessageAudio(payload))
       .catch((error) => {
-        addDebugTrace('agent', 'handleAgentMessage failed', {
+        addDebugTrace('agent', 'handleAgentMessageAudio failed', {
           error: getErrorMessage(error),
         });
       });
   }
 
-  private async handleAgentMessage(payload: AgentMessagePayload) {
+  private handleAgentMessageDisplay(payload: AgentMessagePayload) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
     const displayInChat = payload.display_in_chat !== false;
 
     if (!displayInChat) {
       this.transientMessageUuids.add(convUuid);
-    }
-
-    if (this.localPlayingUuid) {
-      void this.stopLocalTts();
     }
 
     if (displayInChat && payload.text && payload.text.trim().length > 0) {
@@ -385,6 +385,14 @@ export class MessageProcessor {
         display_in_chat: payload.display_in_chat,
         is_ephemeral: payload.is_ephemeral,
       });
+    }
+  }
+
+  private async handleAgentMessageAudio(payload: AgentMessagePayload) {
+    const convUuid = payload.uuid || `agent-${Date.now()}`;
+
+    if (this.localPlayingUuid) {
+      void this.stopLocalTts();
     }
 
     const audioChunk = payload.audio || '';
