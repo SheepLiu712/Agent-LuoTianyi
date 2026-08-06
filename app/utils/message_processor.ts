@@ -114,6 +114,7 @@ export class MessageProcessor {
   private readonly networkClient: NetworkClient;
   private readonly binder: AgentBinder;
   private readonly feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void;
+  private readonly stopServerAudio: () => void;
   private sendQueue: SendItem[] = [];
   private sendLoopRunning = false;
   private stopRequested = false;
@@ -131,15 +132,18 @@ export class MessageProcessor {
     networkClient: NetworkClient,
     binder: AgentBinder,
     feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void,
+    stopServerAudio?: () => void,
   ) {
     this.networkClient = networkClient;
     this.binder = binder;
     this.feedServerAudioChunk = feedServerAudioChunk;
+    this.stopServerAudio = stopServerAudio || (() => {});
   }
 
   stop() {
     this.stopRequested = true;
     this.sendQueue = [];
+    this.stopServerAudio();
     void this.stopLocalTts();
   }
 
@@ -224,6 +228,10 @@ export class MessageProcessor {
       addDebugTrace('audio', 'play blocked by server audio playing', { convUuid });
       return false;
     }
+
+    // 防御性清空 WebView 音频队列：即使 serverAudioPlaying 标志因异常未同步，
+    // 也保证本地播放开始时没有服务端音频在播（单播放器互斥）。
+    this.stopServerAudio();
 
     const localUri = this.audioPathByUuid.get(convUuid);
     if (!localUri) {
@@ -392,7 +400,7 @@ export class MessageProcessor {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
 
     if (this.localPlayingUuid) {
-      void this.stopLocalTts();
+      await this.stopLocalTts();
     }
 
     const audioChunk = payload.audio || '';
