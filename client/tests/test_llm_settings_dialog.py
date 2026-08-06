@@ -1,6 +1,10 @@
 """桌面 client LLM 设置对话框：服务商/模型联动与重新选择行为测试。"""
 
+import json
+
 import pytest
+from PySide6.QtCore import QByteArray, QObject, QTimer, Signal
+from PySide6.QtNetwork import QNetworkReply
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 import src.gui.llm_settings_dialog as dlg_mod
@@ -39,8 +43,90 @@ def qapp():
 class FakeNetwork:
     base_url = "https://x"
 
-    def get_llm_providers(self, force_refresh=False):
-        return [dict(p) for p in PROVIDERS]
+
+class FakeReply(QObject):
+    """模拟 QNetworkReply：单次异步发出 finished，sender() 可识别身份。"""
+
+    finished = Signal()
+
+    def __init__(
+        self,
+        payload: bytes,
+        error=QNetworkReply.NetworkError.NoError,
+        error_string="",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._payload = payload
+        self._error = error
+        self._error_string = error_string
+        # 自持引用直到信号发出：模拟 QNetworkAccessManager 对 reply 的持有
+        self._self_ref = self
+        QTimer.singleShot(0, self._emit_finished)
+
+    def _emit_finished(self):
+        self.finished.emit()
+        self._self_ref = None
+
+    def error(self):
+        return self._error
+
+    def errorString(self):
+        return self._error_string
+
+    def readAll(self):
+        return QByteArray(self._payload)
+
+    def isFinished(self):
+        return True
+
+    def isRunning(self):
+        return False
+
+    def abort(self):
+        pass
+
+
+class FakeHttp:
+    """替代 QNetworkAccessManager：get 从队列取响应，缺省返回固定 providers。"""
+
+    def __init__(self, parent=None):
+        self.requests = []
+        self._responses = []
+
+    def queue_response(
+        self,
+        providers,
+        error=QNetworkReply.NetworkError.NoError,
+        error_string="",
+    ):
+        payload = json.dumps(
+            {
+                "providers": providers,
+                "llm_json_required_modules": [],
+                "vlm_json_required_modules": [],
+            }
+        ).encode("utf-8")
+        self._responses.append(
+            FakeReply(payload, error=error, error_string=error_string)
+        )
+
+    def get(self, request):
+        self.requests.append(request)
+        if self._responses:
+            return self._responses.pop(0)
+        return FakeReply(
+            json.dumps(
+                {
+                    "providers": PROVIDERS,
+                    "llm_json_required_modules": [],
+                    "vlm_json_required_modules": [],
+                }
+            ).encode("utf-8")
+        )
+
+    def post(self, request, data):
+        return FakeReply(b"{}")
 
 
 @pytest.fixture
@@ -66,12 +152,9 @@ def make_dialog(qapp, monkeypatch, tmp_path):
         monkeypatch.setattr(
             credential, "get_vlm_api_key", lambda: saved.get("vlm_key")
         )
-        monkeypatch.setattr(
-            dlg_mod, "fetch_llm_json_required_modules", lambda *a, **k: ([], [])
-        )
+        monkeypatch.setattr(dlg_mod, "QNetworkAccessManager", FakeHttp)
         dlg = LLMSettingsDialog(FakeNetwork())
-        dlg._providers_loader.wait(3000)
-        for _ in range(3):
+        for _ in range(5):
             qapp.processEvents()
         created.append(dlg)
         return dlg
@@ -184,3 +267,31 @@ def test_reselect_model_stale_keeps_provider_selects_first_model(make_dialog, mo
     dialog._go_to_page(1)
     assert dialog.vlm_provider_combo.currentText() == "Both"
     assert dialog.vlm_model_combo.currentText() == "vb1"
+
+
+def test_refresh_ignores_stale_providers_reply(make_dialog, qapp):
+    """刷新竞态：旧请求晚到不覆盖新请求的结果。"""
+    dialog = make_dialog()
+    http = dialog._http
+    old_only = [
+        {
+            "name": "OldOnly",
+            "base_url": "https://o/v1",
+            "models": ["old-model"],
+            "vlm_models": [],
+        }
+    ]
+    http.queue_response(old_only)
+    http.queue_response(PROVIDERS)
+
+    dialog._refresh_providers()
+    dialog._refresh_providers()
+    for _ in range(5):
+        qapp.processEvents()
+
+    # 只有第二次刷新（最新）的结果生效
+    # 首次请求来自对话框初始化，后两次来自刷新
+    assert len(http.requests) == 3
+    assert dialog.provider_combo.currentText() == "DeepSeek"
+    assert dialog.model_combo.currentText() == "deepseek-v4-flash"
+    assert dialog._llm_providers[0]["name"] == "DeepSeek"
