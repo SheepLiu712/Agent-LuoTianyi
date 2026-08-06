@@ -154,6 +154,19 @@
                     "prompt_name": "dynamic_reply_prompt"
                 }
             }
+        },
+        "diary": {
+            "diary_llm": {
+                "llm_module": {
+                    "llm": {
+                        "name": "dsv4-flash",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {}
+                    },
+                    "prompt_name": "diary_prompt"
+                }
+            }
         }
     },
     "chat_session_manager": {
@@ -591,6 +604,15 @@
             "reply_comment_limit": 20,
             "memory_post_limit": 10,
             "memory_comment_limit": 20
+        },
+        "diary": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 0,
+                    "minute": 0
+                }
+            }
         },
         "expired_event_cleanup": {
             "clock_config": {

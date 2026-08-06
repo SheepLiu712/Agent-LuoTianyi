@@ -111,6 +111,8 @@ class DynamicReadMarkRequest(BaseModel):
     token: str
 
 from fastapi import Form, File, UploadFile
+
+
 class PictureChatRequest:
     def __init__(
         self,
