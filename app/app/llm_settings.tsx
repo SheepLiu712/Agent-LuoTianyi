@@ -102,6 +102,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   const [pickerText, setPickerText] = useState('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [forceHidePrev, setForceHidePrev] = useState(false);
 
   useEffect(() => {
     const showSub = Keyboard.addListener(
@@ -304,6 +305,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           text: '不重新选择',
           style: 'cancel',
           onPress: () => {
+            setForceHidePrev(true);
             if (others.length > 0) {
               setStepIndex(safePages.indexOf(others[0]));
             } else {
@@ -362,7 +364,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   };
 
   const goStep = (index: number) => {
-    // 只在可见页范围内翻页（无可用服务商的能力页已隐藏）
+    setForceHidePrev(false); 
     setStepIndex(Math.max(0, Math.min(index, totalPages - 1)));
     Keyboard.dismiss();
     requestAnimationFrame(() => {
@@ -805,7 +807,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
             ) : null}
 
             <View style={styles.buttonRow}>
-              {stepIndex > 0 ? (
+              {stepIndex > 0 && !forceHidePrev ? (
                 <TouchableOpacity
                   style={[
                     styles.prevButton,
