@@ -654,6 +654,8 @@ class LLMSettingsDialog(QDialog):
         self.model_combo.addItems([str(m) for m in models])
         if self._saved_model in [str(m) for m in models]:
             self.model_combo.setCurrentText(str(self._saved_model))
+        elif self.model_combo.count() > 0:
+            self.model_combo.setCurrentIndex(0)
         self.base_url_hint.setText(f"服务商地址：{preset.get('base_url', '')}")
 
     def _on_vlm_provider_changed(self, _index: int) -> None:
@@ -665,6 +667,8 @@ class LLMSettingsDialog(QDialog):
         self.vlm_model_combo.addItems([str(m) for m in vlm_models])
         if self._saved_vlm_model in [str(m) for m in vlm_models]:
             self.vlm_model_combo.setCurrentText(str(self._saved_vlm_model))
+        elif self.vlm_model_combo.count() > 0:
+            self.vlm_model_combo.setCurrentIndex(0)
         self.vlm_base_url_hint.setText(f"服务商地址：{preset.get('base_url', '')}")
 
     def _find_preset(self, name: str) -> dict | None:
