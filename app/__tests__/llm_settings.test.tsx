@@ -93,20 +93,8 @@ jest.mock('react-native', () => {
   };
 });
 jest.mock('../config', () => ({
-  LLM_API_KEY_STORAGE_KEY: 'llm_api_key',
-  LLM_PROVIDER_STORAGE_KEY: 'llm_provider',
-  LLM_MODEL_STORAGE_KEY: 'llm_model',
-  LLM_PROVIDER_BASE_URL_STORAGE_KEY: 'llm_provider_base_url',
-  LLM_PARAMS_STORAGE_KEY: 'llm_params',
-  LLM_ENABLE_THINKING_STORAGE_KEY: 'llm_enable_thinking',
-  LLM_USE_JSON_STORAGE_KEY: 'llm_use_json',
-  VLM_API_KEY_STORAGE_KEY: 'vlm_api_key',
-  VLM_PROVIDER_STORAGE_KEY: 'vlm_provider',
-  VLM_MODEL_STORAGE_KEY: 'vlm_model',
-  VLM_PROVIDER_BASE_URL_STORAGE_KEY: 'vlm_provider_base_url',
-  VLM_PARAMS_STORAGE_KEY: 'vlm_params',
-  VLM_ENABLE_THINKING_STORAGE_KEY: 'vlm_enable_thinking',
-  VLM_USE_JSON_STORAGE_KEY: 'vlm_use_json',
+  LLM_CONFIG_STORAGE_KEY: 'llm_config',
+  VLM_CONFIG_STORAGE_KEY: 'vlm_config',
   server_config: { BASE_URL: 'https://server.example.com' },
 }));
 
@@ -118,6 +106,34 @@ const mockPresets = [
     vlm_models: ['deepseek-vl'],
   },
 ];
+
+// 预置对话模块整份配置（单次 SecureStore 写入）
+const seedLlmConfig = async (
+  cfg: Partial<{
+    apiKey: string;
+    provider: string;
+    model: string;
+    baseUrl: string;
+  }> = {},
+) => {
+  await mockSecureStore.setItemAsync(
+    'llm_config',
+    JSON.stringify({
+      apiKey: cfg.apiKey ?? '',
+      provider: cfg.provider ?? 'DeepSeek',
+      model: cfg.model ?? 'deepseek-v4-flash',
+      baseUrl: cfg.baseUrl ?? 'https://api.deepseek.com/v1',
+      paramsText: '',
+      enableThinking: false,
+      useJson: false,
+    }),
+  );
+};
+
+const getSavedLlmConfig = async (): Promise<Record<string, unknown>> => {
+  const raw = await mockSecureStore.getItemAsync('llm_config');
+  return raw ? JSON.parse(raw) : {};
+};
 
 jest.mock('../utils/llm_client', () => ({
   fetchProviderPresets: jest.fn(async () => mockPresets),
@@ -146,8 +162,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     let tree: ReactTestRenderer | undefined;
 
     // 预置已保存的服务商与模型，使对话页三个必填项齐全（直接走校验+保存）
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await seedLlmConfig({});
 
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
@@ -179,10 +194,8 @@ describe('LlmSettingsScreen 保存→重载', () => {
       await Promise.resolve();
     });
 
-    // 保存后 key 已写入 SecureStore（llm_api_key）
-    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBe(
-      'sk-test-key',
-    );
+    // 保存后整份配置已写入 SecureStore（llm_config）
+    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', 'sk-test-key');
     // 保存后进入图片理解页，不关闭设置页
     expect(onClose).not.toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenCalledWith('成功', '对话模型设置已保存');
@@ -219,8 +232,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;
 
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await seedLlmConfig({});
 
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
@@ -260,8 +272,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     let tree: ReactTestRenderer | undefined;
 
     // 预置已保存的服务商与模型（网络数据只提供下拉选项，不再自动选中）
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await seedLlmConfig({});
 
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
@@ -294,7 +305,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     );
     expect(promptCall).toBeTruthy();
     expect(String(promptCall![1])).toContain('服务端 Key');
-    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBeNull();
+    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', '');
     // 不点“继续”即相当于取消：仍留在第 1 页，不保存
     expect(
       tree!.root.findAll((node) => node.props.children === '完成')[0],
@@ -322,7 +333,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
       await Promise.resolve();
     });
 
-    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBeNull();
+    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', '');
     expect(
       tree!.root.findAll((node) => node.props.children === '完成')[0],
     ).toBeTruthy();
@@ -364,7 +375,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
       await Promise.resolve();
     });
     expect(onClose).toHaveBeenCalled();
-    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBeNull();
+    await expect(getSavedLlmConfig()).resolves.toEqual({});
   });
 
   it('服务商缺少 models 时被过滤并触发 LLM 缺失询问', async () => {
@@ -427,9 +438,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     let tree: ReactTestRenderer | undefined;
 
     // 预置完整旧配置
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
-    await mockSecureStore.setItemAsync('llm_api_key', 'sk-saved');
+    await seedLlmConfig({ apiKey: 'sk-saved' });
 
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
@@ -461,12 +470,8 @@ describe('LlmSettingsScreen 保存→重载', () => {
       await Promise.resolve();
     });
     expect(onClose).toHaveBeenCalled();
-    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBe(
-      'sk-saved',
-    );
-    await expect(mockAsyncStorage.getItem('llm_provider')).resolves.toBe(
-      'DeepSeek',
-    );
+    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', 'sk-saved');
+    await expect(getSavedLlmConfig()).resolves.toHaveProperty('provider', 'DeepSeek');
   });
 
   it('列表为空时询问后退出，未保存的修改不落盘', async () => {
@@ -480,9 +485,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;
 
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
-    await mockSecureStore.setItemAsync('llm_api_key', 'sk-saved');
+    await seedLlmConfig({ apiKey: 'sk-saved' });
 
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
@@ -516,9 +519,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
       await Promise.resolve();
     });
     expect(onClose).toHaveBeenCalled();
-    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBe(
-      'sk-saved',
-    );
+    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', 'sk-saved');
   });
 
   it('列表已加载且旧配置未修改时，直接下一步且不执行保存', async () => {
@@ -532,9 +533,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     let tree: ReactTestRenderer | undefined;
 
     // 预置完整旧配置（与默认服务商预设一致）
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
-    await mockSecureStore.setItemAsync('llm_api_key', 'sk-saved');
+    await seedLlmConfig({ apiKey: 'sk-saved' });
 
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
@@ -561,9 +560,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     ).toBeTruthy();
     expect(llmClient.probeLlmConfig).not.toHaveBeenCalled();
     expect(Alert.alert).not.toHaveBeenCalled();
-    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBe(
-      'sk-saved',
-    );
+    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', 'sk-saved');
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -585,9 +582,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;
 
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
-    await mockSecureStore.setItemAsync('llm_api_key', 'sk-saved');
+    await seedLlmConfig({ apiKey: 'sk-saved' });
 
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
@@ -622,8 +617,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;
 
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await seedLlmConfig({});
 
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
@@ -650,7 +644,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     );
 
     // 清除失败
-    mockAsyncStorage.setItem.mockRejectedValueOnce(new Error('disk full'));
+    mockSecureStore.setItemAsync.mockRejectedValueOnce(new Error('disk full'));
     await act(async () => {
       continueBtn.onPress();
     });
@@ -668,9 +662,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     ).toBeFalsy();
     expect(onClose).not.toHaveBeenCalled();
     // 不点“重试”即放弃：留在本页；失败写入未生效，现有配置保持原样
-    await expect(mockAsyncStorage.getItem('llm_provider')).resolves.toBe(
-      'DeepSeek',
-    );
+    await expect(getSavedLlmConfig()).resolves.toHaveProperty('provider', 'DeepSeek');
   });
 
   it('粘贴按钮随输入值切换为清空/粘贴', async () => {
@@ -760,8 +752,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     const onClose = jest.fn();
     let tree: ReactTestRenderer | undefined;
 
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await seedLlmConfig({});
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
     });
@@ -791,7 +782,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     );
     expect(failCall).toBeTruthy();
     expect(String(failCall![1])).toContain('API Key 无效');
-    await expect(mockSecureStore.getItemAsync('llm_api_key')).resolves.toBeNull();
+    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', '');
     // 校验失败仍停留在第 1 页
     const doneText = tree!.root.findAll(
       (node) => node.props.children === '完成',
@@ -807,8 +798,7 @@ describe('LlmSettingsScreen 保存→重载', () => {
     let tree: ReactTestRenderer | undefined;
     let rejectProbe!: (reason?: unknown) => void;
 
-    await mockAsyncStorage.setItem('llm_provider', 'DeepSeek');
-    await mockAsyncStorage.setItem('llm_model', 'deepseek-v4-flash');
+    await seedLlmConfig({});
 
     await act(async () => {
       tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
