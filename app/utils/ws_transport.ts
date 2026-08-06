@@ -1,18 +1,5 @@
 import { AppState } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  server_config,
-  LLM_MODEL_STORAGE_KEY,
-  LLM_PROVIDER_BASE_URL_STORAGE_KEY,
-  LLM_PARAMS_STORAGE_KEY,
-  LLM_ENABLE_THINKING_STORAGE_KEY,
-  LLM_USE_JSON_STORAGE_KEY,
-  VLM_MODEL_STORAGE_KEY,
-  VLM_PROVIDER_BASE_URL_STORAGE_KEY,
-  VLM_PARAMS_STORAGE_KEY,
-  VLM_ENABLE_THINKING_STORAGE_KEY,
-  VLM_USE_JSON_STORAGE_KEY,
-} from '../config';
+import { server_config } from '../config';
 import { AgentMessagePayload } from '../types/chat';
 import { WSEventType } from '../types/ws_events';
 import { addDebugTrace } from './debug_trace';
@@ -22,7 +9,7 @@ import {
   callLlmProvider,
   CLIENT_JSON_UNSUPPORTED_MARKER,
 } from './llm_client';
-import { getLlmApiKey, getVlmApiKey } from './llm_key_storage';
+import { getLlmConfig, getVlmConfig } from './llm_key_storage';
 
 export type { AckResult } from './ws_ack';
 export { normalizeServerAck } from './ws_ack';
@@ -159,12 +146,12 @@ export class WebSocketTransport {
   }
 
   async submitUserText(message: string, isProactive = false, ackTimeout = 10000, clientMsgId?: string): Promise<AckResult> {
-    const apiKey = await getLlmApiKey();
+    const cfg = await getLlmConfig();
     const payload: Record<string, unknown> = { message };
     if (isProactive) {
       payload.is_proactive = true;
     }
-    this.clientMode.text = Boolean(apiKey);
+    this.clientMode.text = Boolean(cfg?.apiKey);
     payload.llm_mode = { ...this.clientMode };
     return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout, clientMsgId);
   }
@@ -176,13 +163,13 @@ export class WebSocketTransport {
     ackTimeout = 10000,
     clientMsgId?: string,
   ): Promise<AckResult> {
-    const apiKey = await getVlmApiKey();
+    const cfg = await getVlmConfig();
     const payload: Record<string, unknown> = {
       image_base64: imageBase64,
       mime_type: mimeType,
       image_client_path: imageClientPath,
     };
-    this.clientMode.vlm = Boolean(apiKey);
+    this.clientMode.vlm = Boolean(cfg?.apiKey);
     payload.llm_mode = { ...this.clientMode };
     return this.sendWithAck(WSEventType.USER_IMAGE, payload, ackTimeout, clientMsgId);
   }
@@ -604,36 +591,28 @@ export class WebSocketTransport {
     };
     try {
       const isImage = typeof payload.image_base64 === 'string' && !!payload.image_base64;
-      const apiKey = isImage ? await getVlmApiKey() : await getLlmApiKey();
-      if (!apiKey) {
+      const cfg = isImage ? await getVlmConfig() : await getLlmConfig();
+      if (!cfg || !cfg.apiKey) {
         addDebugTrace('llm', 'llm_request without api key');
         sendError('no api key configured on client');
         return;
       }
-      const baseUrl = (await AsyncStorage.getItem(
-        isImage ? VLM_PROVIDER_BASE_URL_STORAGE_KEY : LLM_PROVIDER_BASE_URL_STORAGE_KEY,
-      )) ?? '';
+      const baseUrl = cfg.baseUrl || '';
       if (!baseUrl) {
         sendError('LLM 配置不完整，请在 LLM 模型设置中重新保存');
         return;
       }
       const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-      const savedModel = await AsyncStorage.getItem(
-        isImage ? VLM_MODEL_STORAGE_KEY : LLM_MODEL_STORAGE_KEY,
-      );
-      const model = savedModel || '';
+      const model = cfg.model || '';
       if (!model) {
         sendError('missing provider info');
         return;
       }
       const serverParams = (payload.params || {}) as Record<string, unknown>;
-      const cachedParamsText = (await AsyncStorage.getItem(
-        isImage ? VLM_PARAMS_STORAGE_KEY : LLM_PARAMS_STORAGE_KEY,
-      )) ?? '';
       let cachedParams: Record<string, unknown> = {};
-      if (cachedParamsText) {
+      if (cfg.paramsText) {
         try {
-          const parsed = JSON.parse(cachedParamsText);
+          const parsed = JSON.parse(cfg.paramsText);
           if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
             cachedParams = parsed as Record<string, unknown>;
           }
@@ -641,16 +620,8 @@ export class WebSocketTransport {
           // 忽略损坏的参数缓存
         }
       }
-      const [enableThinkingText, useJsonText] = await Promise.all([
-        AsyncStorage.getItem(
-          isImage ? VLM_ENABLE_THINKING_STORAGE_KEY : LLM_ENABLE_THINKING_STORAGE_KEY,
-        ),
-        AsyncStorage.getItem(
-          isImage ? VLM_USE_JSON_STORAGE_KEY : LLM_USE_JSON_STORAGE_KEY,
-        ),
-      ]);
-      const capableThinking = enableThinkingText === '1' || enableThinkingText === 'true';
-      const capableJson = useJsonText === '1' || useJsonText === 'true';
+      const capableThinking = cfg.enableThinking;
+      const capableJson = cfg.useJson;
       const serverEnableThinking = Boolean(payload.enable_thinking);
       const serverUseJson = Boolean(payload.use_json);
       if (serverUseJson && !capableJson) {
@@ -665,7 +636,7 @@ export class WebSocketTransport {
         useJson: serverUseJson,
         imageBase64: typeof payload.image_base64 === 'string' ? payload.image_base64 : undefined,
       });
-      const result = await callLlmProvider({ url, apiKey, body });
+      const result = await callLlmProvider({ url, apiKey: cfg.apiKey, body });
       this.sendRaw({
         type: WSEventType.LLM_RESPONSE,
         ts: Date.now(),

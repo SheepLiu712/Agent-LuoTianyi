@@ -15,20 +15,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  LLM_PROVIDER_STORAGE_KEY,
-  LLM_MODEL_STORAGE_KEY,
-  LLM_PROVIDER_BASE_URL_STORAGE_KEY,
-  LLM_PARAMS_STORAGE_KEY,
-  LLM_ENABLE_THINKING_STORAGE_KEY,
-  LLM_USE_JSON_STORAGE_KEY,
-  VLM_PROVIDER_STORAGE_KEY,
-  VLM_MODEL_STORAGE_KEY,
-  VLM_PROVIDER_BASE_URL_STORAGE_KEY,
-  VLM_PARAMS_STORAGE_KEY,
-  VLM_ENABLE_THINKING_STORAGE_KEY,
-  VLM_USE_JSON_STORAGE_KEY,
   server_config,
 } from '../config';
 import { addDebugTrace } from '../utils/debug_trace';
@@ -40,10 +27,10 @@ import {
 } from '../utils/llm_client';
 import type { LlmProviderPreset } from '../utils/llm_client';
 import {
-  getLlmApiKey,
-  setLlmApiKey,
-  getVlmApiKey,
-  setVlmApiKey,
+  getLlmConfig,
+  setLlmConfig,
+  getVlmConfig,
+  setVlmConfig,
 } from '../utils/llm_key_storage';
 import { AppTheme, THEMES } from '../utils/theme';
 
@@ -135,53 +122,43 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     let active = true;
     (async () => {
       try {
-        const [
-          provider, model, params,
-          vlmProv, vlmMod, vlmParams,
-          key, vlmKey,
-          llmThinking, llmJson, vlmThinking, vlmJson,
-        ] = await Promise.all([
-          AsyncStorage.getItem(LLM_PROVIDER_STORAGE_KEY),
-          AsyncStorage.getItem(LLM_MODEL_STORAGE_KEY),
-          AsyncStorage.getItem(LLM_PARAMS_STORAGE_KEY),
-          AsyncStorage.getItem(VLM_PROVIDER_STORAGE_KEY),
-          AsyncStorage.getItem(VLM_MODEL_STORAGE_KEY),
-          AsyncStorage.getItem(VLM_PARAMS_STORAGE_KEY),
-          getLlmApiKey(),
-          getVlmApiKey(),
-          AsyncStorage.getItem(LLM_ENABLE_THINKING_STORAGE_KEY),
-          AsyncStorage.getItem(LLM_USE_JSON_STORAGE_KEY),
-          AsyncStorage.getItem(VLM_ENABLE_THINKING_STORAGE_KEY),
-          AsyncStorage.getItem(VLM_USE_JSON_STORAGE_KEY),
-        ]);
+        const [llmCfg, vlmCfg] = await Promise.all([getLlmConfig(), getVlmConfig()]);
+        const llm = llmCfg ?? {
+          apiKey: '', provider: '', model: '', baseUrl: '',
+          paramsText: '', enableThinking: false, useJson: false,
+        };
+        const vlm = vlmCfg ?? {
+          apiKey: '', provider: '', model: '', baseUrl: '',
+          paramsText: '', enableThinking: false, useJson: false,
+        };
         if (!active) {
           return;
         }
-        if (provider) setLlmProvider(provider);
-        if (model) setLlmModel(model);
-        if (params) setLlmParamsText(params);
-        if (vlmProv) setVlmProvider(vlmProv);
-        if (vlmMod) setVlmModel(vlmMod);
-        if (vlmParams) setVlmParamsText(vlmParams);
-        if (key) setLlmApiKeyState(key);
-        if (vlmKey) setVlmApiKeyState(vlmKey);
-        setLlmEnableThinking(llmThinking === '1' || llmThinking === 'true');
-        setLlmUseJson(llmJson === '1' || llmJson === 'true');
-        setVlmEnableThinking(vlmThinking === '1' || vlmThinking === 'true');
-        setVlmUseJson(vlmJson === '1' || vlmJson === 'true');
+        if (llm.provider) setLlmProvider(llm.provider);
+        if (llm.model) setLlmModel(llm.model);
+        if (llm.paramsText) setLlmParamsText(llm.paramsText);
+        if (llm.apiKey) setLlmApiKeyState(llm.apiKey);
+        setLlmEnableThinking(llm.enableThinking);
+        setLlmUseJson(llm.useJson);
+        if (vlm.provider) setVlmProvider(vlm.provider);
+        if (vlm.model) setVlmModel(vlm.model);
+        if (vlm.paramsText) setVlmParamsText(vlm.paramsText);
+        if (vlm.apiKey) setVlmApiKeyState(vlm.apiKey);
+        setVlmEnableThinking(vlm.enableThinking);
+        setVlmUseJson(vlm.useJson);
         loadedRef.current = {
-          llmProvider: provider ?? '',
-          llmModel: model ?? '',
-          llmApiKey: key ?? '',
-          llmParams: params ?? '',
-          llmThinking: llmThinking === '1' || llmThinking === 'true',
-          llmJson: llmJson === '1' || llmJson === 'true',
-          vlmProvider: vlmProv ?? '',
-          vlmModel: vlmMod ?? '',
-          vlmApiKey: vlmKey ?? '',
-          vlmParams: vlmParams ?? '',
-          vlmThinking: vlmThinking === '1' || vlmThinking === 'true',
-          vlmJson: vlmJson === '1' || vlmJson === 'true',
+          llmProvider: llm.provider,
+          llmModel: llm.model,
+          llmApiKey: llm.apiKey,
+          llmParams: llm.paramsText,
+          llmThinking: llm.enableThinking,
+          llmJson: llm.useJson,
+          vlmProvider: vlm.provider,
+          vlmModel: vlm.model,
+          vlmApiKey: vlm.apiKey,
+          vlmParams: vlm.paramsText,
+          vlmThinking: vlm.enableThinking,
+          vlmJson: vlm.useJson,
         };
       } catch (e) {
         addDebugTrace('llm_settings', 'load saved config failed', { error: String(e) });
@@ -419,28 +396,11 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       useJson: boolean;
     },
   ) => {
+    // 单次 SecureStore 写入，整份配置原子生效
     if (forVlm) {
-      await setVlmApiKey(cfg.apiKey);
-      await AsyncStorage.setItem(VLM_PROVIDER_STORAGE_KEY, cfg.provider);
-      await AsyncStorage.setItem(VLM_MODEL_STORAGE_KEY, cfg.model);
-      await AsyncStorage.setItem(VLM_PROVIDER_BASE_URL_STORAGE_KEY, cfg.baseUrl);
-      await AsyncStorage.setItem(VLM_PARAMS_STORAGE_KEY, cfg.paramsText);
-      await AsyncStorage.setItem(
-        VLM_ENABLE_THINKING_STORAGE_KEY,
-        cfg.enableThinking ? '1' : '0',
-      );
-      await AsyncStorage.setItem(VLM_USE_JSON_STORAGE_KEY, cfg.useJson ? '1' : '0');
+      await setVlmConfig(cfg);
     } else {
-      await setLlmApiKey(cfg.apiKey);
-      await AsyncStorage.setItem(LLM_PROVIDER_STORAGE_KEY, cfg.provider);
-      await AsyncStorage.setItem(LLM_MODEL_STORAGE_KEY, cfg.model);
-      await AsyncStorage.setItem(LLM_PROVIDER_BASE_URL_STORAGE_KEY, cfg.baseUrl);
-      await AsyncStorage.setItem(LLM_PARAMS_STORAGE_KEY, cfg.paramsText);
-      await AsyncStorage.setItem(
-        LLM_ENABLE_THINKING_STORAGE_KEY,
-        cfg.enableThinking ? '1' : '0',
-      );
-      await AsyncStorage.setItem(LLM_USE_JSON_STORAGE_KEY, cfg.useJson ? '1' : '0');
+      await setLlmConfig(cfg);
     }
     // 保存后同步快照为存储值，保证“未修改”判断对比的是当前存储而非进入时的值
     loadedRef.current = {

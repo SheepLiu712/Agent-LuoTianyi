@@ -604,3 +604,132 @@ def get_server_url() -> Optional[str]:
 def get_server_verify_ssl() -> bool:
     """获取保存的自定义服务器 SSL 验证设置，默认开启验证。"""
     return True
+
+
+def _atomic_write_json(path: str, data: dict) -> None:
+    """先写临时文件再原子替换，避免写一半损坏凭据文件。"""
+    temp_path = f"{path}.tmp"
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(temp_path, path)
+
+
+def _apply_llm_module_fields(
+    data: dict,
+    *,
+    module: str,
+    key_prefix: str,
+    api_key: str,
+    provider: str,
+    model: str,
+    base_url: str,
+    params: dict,
+    enable_thinking: bool,
+    use_json: bool,
+    allow_plaintext: bool,
+) -> bool:
+    """把某模块完整配置写入凭据字典；key 加密失败且不允许明文时返回 False。"""
+    if api_key:
+        key_enc = _encrypt_token(api_key)
+        if key_enc:
+            data[f"{key_prefix}api_key_dpapi"] = key_enc
+            data.pop(f"{key_prefix}api_key_plain", None)
+        elif allow_plaintext:
+            logger.warning("API Key 无法加密，将以明文保存。")
+            data[f"{key_prefix}api_key_plain"] = api_key
+            data.pop(f"{key_prefix}api_key_dpapi", None)
+        else:
+            return False
+    else:
+        data.pop(f"{key_prefix}api_key_dpapi", None)
+        data.pop(f"{key_prefix}api_key_plain", None)
+
+    def _set_or_pop(name: str, value) -> None:
+        if value:
+            data[name] = value
+        else:
+            data.pop(name, None)
+
+    _set_or_pop(f"{module}_provider", provider)
+    _set_or_pop(f"{module}_model", model)
+    _set_or_pop(f"{module}_provider_base_url", base_url)
+    _set_or_pop(f"{module}_params", params)
+    data[f"{module}_enable_thinking"] = bool(enable_thinking)
+    data[f"{module}_use_json"] = bool(use_json)
+    return True
+
+
+def save_llm_config(
+    api_key: str,
+    provider: str,
+    model: str,
+    base_url: str,
+    params: dict,
+    enable_thinking: bool,
+    use_json: bool,
+    allow_plaintext: bool = False,
+) -> bool:
+    """原子保存对话模块完整配置（单次读改写 + 临时文件替换）。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if not _apply_llm_module_fields(
+            data,
+            module="llm",
+            key_prefix="",
+            api_key=api_key,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            params=params,
+            enable_thinking=enable_thinking,
+            use_json=use_json,
+            allow_plaintext=allow_plaintext,
+        ):
+            return False
+        _atomic_write_json(path, data)
+        return True
+    except Exception as exc:
+        logger.error(f"Error saving LLM config: {exc}")
+        return False
+
+
+def save_vlm_config(
+    api_key: str,
+    provider: str,
+    model: str,
+    base_url: str,
+    params: dict,
+    enable_thinking: bool,
+    use_json: bool,
+    allow_plaintext: bool = False,
+) -> bool:
+    """原子保存图片理解模块完整配置（单次读改写 + 临时文件替换）。"""
+    try:
+        path = get_credential_path()
+        data = {}
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        if not _apply_llm_module_fields(
+            data,
+            module="vlm",
+            key_prefix="vlm_",
+            api_key=api_key,
+            provider=provider,
+            model=model,
+            base_url=base_url,
+            params=params,
+            enable_thinking=enable_thinking,
+            use_json=use_json,
+            allow_plaintext=allow_plaintext,
+        ):
+            return False
+        _atomic_write_json(path, data)
+        return True
+    except Exception as exc:
+        logger.error(f"Error saving VLM config: {exc}")
+        return False

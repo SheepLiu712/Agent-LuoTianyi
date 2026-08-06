@@ -689,28 +689,8 @@ class LLMSettingsDialog(QDialog):
     def _clear_saved_module(self, kind: str) -> bool:
         """清空该模块已保存的配置，使相关调用使用服务端 Key；返回是否清空成功。"""
         if kind == "text":
-            credential.save_api_key("")
-            credential.save_provider("")
-            credential.save_model("")
-            credential.save_provider_base_url("")
-            credential.save_llm_params({})
-            credential.save_llm_flags(False, False)
-            return not (
-                credential.get_api_key()
-                or credential.get_provider()
-                or credential.get_model()
-            )
-        credential.save_vlm_api_key("")
-        credential.save_vlm_provider("")
-        credential.save_vlm_model("")
-        credential.save_vlm_provider_base_url("")
-        credential.save_vlm_params({})
-        credential.save_vlm_flags(False, False)
-        return not (
-            credential.get_vlm_api_key()
-            or credential.get_vlm_provider()
-            or credential.get_vlm_model()
-        )
+            return credential.save_llm_config("", "", "", "", {}, False, False)
+        return credential.save_vlm_config("", "", "", "", {}, False, False)
 
     def _update_config_hint(self) -> None:
         """按当前页 API Key 填写情况更新提示：未填 key 则使用服务端 Key。"""
@@ -789,56 +769,48 @@ class LLMSettingsDialog(QDialog):
         """把当前页配置快照写入本地凭据；加密失败需二次确认明文保存。"""
         api_key = cfg["api_key"]
         kind = cfg["kind"]
-        if kind == "text":
-            save_key = credential.save_api_key
-            save_key_plain = credential.save_api_key_plain
-        else:
-            save_key = credential.save_vlm_api_key
-            save_key_plain = credential.save_vlm_api_key_plain
-        if api_key:
-            if not save_key(api_key):
-                ret = QMessageBox.question(
-                    self,
-                    "加密失败",
-                    "当前环境无法加密保存 API Key（非 Windows 或系统加密不可用）。\n"
-                    "如果继续保存，对应的 key 将以明文形式存储在本机文件中。\n\n"
-                    "是否仍然保存？",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if ret != QMessageBox.StandardButton.Yes:
-                    return
-                save_key_plain(api_key)
-        else:
-            # 未填 key：清空已保存的 key，与“未填项将被清空”的提示保持一致
-            save_key("")
-
         provider = cfg["provider"]
         model = cfg["model"]
-        configured = bool(api_key) and bool(provider) and bool(model)
-
+        base_url = resolve_provider_base_url(provider, presets=self._llm_providers)
+        params = cfg["params"]
+        flags = cfg["flags"]
         if kind == "text":
-            credential.save_provider(provider)
-            credential.save_model(model)
-            credential.save_provider_base_url(
-                resolve_provider_base_url(provider, presets=self._llm_providers)
-            )
-            credential.save_llm_params(cfg["params"])
-            credential.save_llm_flags(
-                cfg["flags"]["enable_thinking"],
-                cfg["flags"]["use_json"],
+            ok = credential.save_llm_config(
+                api_key, provider, model, base_url,
+                params, flags["enable_thinking"], flags["use_json"],
             )
         else:
-            credential.save_vlm_provider(provider)
-            credential.save_vlm_model(model)
-            credential.save_vlm_provider_base_url(
-                resolve_provider_base_url(provider, presets=self._llm_providers)
+            ok = credential.save_vlm_config(
+                api_key, provider, model, base_url,
+                params, flags["enable_thinking"], flags["use_json"],
             )
-            credential.save_vlm_params(cfg["params"])
-            credential.save_vlm_flags(
-                cfg["flags"]["enable_thinking"],
-                cfg["flags"]["use_json"],
+        if not ok:
+            # key 加密失败：二次确认后以明文整份重写
+            ret = QMessageBox.question(
+                self,
+                "加密失败",
+                "当前环境无法加密保存 API Key（非 Windows 或系统加密不可用）。\n"
+                "如果继续保存，对应的 key 将以明文形式存储在本机文件中。\n\n"
+                "是否仍然保存？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
+            if ret != QMessageBox.StandardButton.Yes:
+                return
+            if kind == "text":
+                credential.save_llm_config(
+                    api_key, provider, model, base_url,
+                    params, flags["enable_thinking"], flags["use_json"],
+                    allow_plaintext=True,
+                )
+            else:
+                credential.save_vlm_config(
+                    api_key, provider, model, base_url,
+                    params, flags["enable_thinking"], flags["use_json"],
+                    allow_plaintext=True,
+                )
+
+        configured = bool(api_key) and bool(provider) and bool(model)
 
         if configured and not cfg["use_json_checked"] and cfg["json_modules"]:
             QMessageBox.information(
