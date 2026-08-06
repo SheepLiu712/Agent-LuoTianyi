@@ -336,6 +336,7 @@ class LLMSettingsDialog(QDialog):
             return
         if others:
             self._go_to_page(self._page_kinds.index(others[0]))
+            self.prev_btn.setVisible(False)
         else:
             self.reject()
 
