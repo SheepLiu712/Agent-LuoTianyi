@@ -41,6 +41,7 @@ export class WebSocketTransport {
   private reconnectDueAt: number | null = null;
   private reconnectDelayMs: number | null = null;
   private reconnectPausedForBackground = false;
+  private hasNotifiedReconnectStruggle = false;
   private appStateSubscription: { remove: () => void } | null = null;
   private isStopped = true;
   private isConnected = false;
@@ -111,6 +112,7 @@ export class WebSocketTransport {
     this.isStopped = true;
     this.isConnected = false;
     this.isAuthed = false;
+    this.hasNotifiedReconnectStruggle = false;
     addDebugTrace('ws', 'stop transport');
     this.clearReconnectTimer();
     this.stopHeartbeat();
@@ -221,13 +223,11 @@ export class WebSocketTransport {
     };
 
     this.ws.onerror = (event) => {
+      // 瞬时网络抖动/服务器短暂不可用都会触发 onerror，随后 onclose 会自动重连。
+      // 这里不直接向用户抛"连接错误"，避免在自动重连自愈期间刷出多条错误气泡（Bug#10）。
+      // 持续重连失败时的提示由 notifyReconnectStruggleIfNeeded 在 onclose 中统一给出。
       const detail = this.describeWebSocketEvent(event);
       addDebugTrace('ws', 'onerror', detail);
-      if (this.isBackgrounded()) {
-        addDebugTrace('ws', 'onerror suppressed while backgrounded', detail);
-        return;
-      }
-      this.callbacks.onError('WebSocket 连接发生错误。');
     };
 
     this.ws.onclose = (event) => {
@@ -255,6 +255,7 @@ export class WebSocketTransport {
       }
 
       this.scheduleReconnect();
+      this.notifyReconnectStruggleIfNeeded();
     };
   }
 
@@ -300,6 +301,18 @@ export class WebSocketTransport {
     const delay = Math.min(2 ** Math.max(this.reconnectAttempts, 1), 30) * 1000;
     this.reconnectAttempts += 1;
     this.armReconnectTimer(delay);
+  }
+
+  private notifyReconnectStruggleIfNeeded() {
+    // 仅当连续多次重连失败（指数退避累计约 14 秒）时，温和提示一次，
+    // 避免瞬时抖动刷出多条"连接错误"。重连成功或 stop 后重置，下次断线可再次提示。
+    if (this.isBackgrounded() || this.hasNotifiedReconnectStruggle) {
+      return;
+    }
+    if (this.reconnectAttempts >= 3) {
+      this.hasNotifiedReconnectStruggle = true;
+      this.callbacks.onError('网络连接不稳定，正在自动重连…');
+    }
   }
 
   private pauseReconnectIfNeeded() {
@@ -493,6 +506,7 @@ export class WebSocketTransport {
         this.authRejected = false;
         this.isAuthed = true;
         this.reconnectAttempts = 0;
+        this.hasNotifiedReconnectStruggle = false;
         return;
       }
 
