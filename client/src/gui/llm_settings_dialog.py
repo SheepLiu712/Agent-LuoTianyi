@@ -4,10 +4,10 @@ import json
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QComboBox, QMessageBox, QGroupBox,
-                               QPlainTextEdit, QStackedWidget, QWidget, QCheckBox,
-                               QApplication)
+                               QPlainTextEdit, QStackedWidget, QWidget,
+                               QApplication, QProgressBar)
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QCloseEvent, QResizeEvent
 from typing import TYPE_CHECKING
 
 from ..utils.logger import get_logger
@@ -88,6 +88,22 @@ class _ProbeWorker(QThread):
             except Exception as exc:
                 errors.append(_friendly_probe_error(cfg["name"], exc))
         self.errors.emit(errors)
+
+
+class _BlockingOverlay(QWidget):
+    """校验期间覆盖整个对话框，吸收鼠标与键盘事件，保证任何操作都不可用。"""
+
+    def keyPressEvent(self, event) -> None:
+        event.accept()
+
+    def keyReleaseEvent(self, event) -> None:
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:
+        event.accept()
+
+    def mouseReleaseEvent(self, event) -> None:
+        event.accept()
 
 
 class LLMSettingsDialog(QDialog):
@@ -224,6 +240,29 @@ class LLMSettingsDialog(QDialog):
         btn_layout.addWidget(self.next_btn)
         layout.addLayout(btn_layout)
         self.setLayout(layout)
+
+        # 校验遮罩：覆盖整个对话框，保证探测期间任何操作都不可用
+        self._overlay = _BlockingOverlay(self)
+        self._overlay.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._overlay.setStyleSheet("background-color: rgba(255, 255, 255, 210);")
+        overlay_layout = QVBoxLayout(self._overlay)
+        overlay_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        overlay_layout.setSpacing(12)
+        self._overlay_progress = QProgressBar(self._overlay)
+        self._overlay_progress.setRange(0, 0)
+        self._overlay_progress.setFixedWidth(180)
+        self._overlay_progress.setTextVisible(False)
+        self._overlay_label = QLabel("正在校验配置…", self._overlay)
+        self._overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._overlay_label.setStyleSheet(
+            "font-size: 15px; font-weight: 600; color: #333333;"
+            "background: transparent;"
+        )
+        overlay_layout.addWidget(
+            self._overlay_progress, 0, Qt.AlignmentFlag.AlignHCenter
+        )
+        overlay_layout.addWidget(self._overlay_label)
+        self._overlay.hide()
 
     def _go_to_page(self, index: int) -> None:
         """翻页：切换当前配置页并同步导航按钮。"""
@@ -687,17 +726,28 @@ class LLMSettingsDialog(QDialog):
         self._probe_worker.start()
 
     def _set_frozen(self, frozen: bool) -> None:
-        """校验期间冻结两页所有控件，完成后恢复（整页冻结，无遗漏）。"""
+        """校验期间整页冻结并显示遮罩，保证任何操作都不可用，完成后恢复。"""
         self.text_page.setEnabled(not frozen)
         self.vlm_page.setEnabled(not frozen)
         if frozen:
+            self._overlay.setGeometry(self.rect())
+            self._overlay.raise_()
+            self._overlay.show()
+            self._overlay.setFocus()
             self.prev_btn.setEnabled(False)
             self.next_btn.setEnabled(False)
         else:
+            self._overlay.hide()
             index = self._page_kinds.index(self._current_kind)
             self.prev_btn.setVisible(index > 0)
             self.prev_btn.setEnabled(index > 0)
             self.next_btn.setEnabled(self._next_enabled())
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        """窗口尺寸变化时让遮罩始终覆盖整个客户区。"""
+        super().resizeEvent(event)
+        if self._overlay.isVisible():
+            self._overlay.setGeometry(self.rect())
 
     def _on_probe_done(self, errors: list) -> None:
         self._set_frozen(False)
