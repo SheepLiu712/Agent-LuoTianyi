@@ -439,13 +439,11 @@ class LLMSettingsDialog(QDialog):
         self.next_btn.setEnabled(self._next_enabled())
 
     def _on_providers_loaded(self, providers: list) -> None:
-        # 只保留包含 models 的服务商，保证下拉一定可选
-        self._llm_providers = [
-            p
-            for p in providers
-            if isinstance(p, dict) and isinstance(p.get("models"), list) and p["models"]
+        # 全量保存，渲染/填充下拉时按能力分类（保留纯 VLM 等服务商）
+        self._llm_providers = [p for p in providers if isinstance(p, dict)]
+        all_names = [
+            p["name"] for p in self._llm_providers if p.get("models")
         ]
-        all_names = [p["name"] for p in self._llm_providers]
         vlm_names = [p["name"] for p in self._llm_providers if p.get("vlm_models")]
         previous_text = self.provider_combo.currentText().strip()
         previous_vlm_text = self.vlm_provider_combo.currentText().strip()

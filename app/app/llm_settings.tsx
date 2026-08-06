@@ -157,9 +157,8 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           return;
         }
         setProvidersError('');
-        // 只保留包含 models 的服务商，保证下拉一定可选
-        const usableList = data.providers.filter((p) => (p.models?.length ?? 0) > 0);
-        setProviders(usableList);
+        // 全量保存，渲染时按能力分类（保留纯 VLM 等服务商）
+        setProviders(data.providers);
         setLlmCapabilities(data.llmModelCapabilities);
         setVlmCapabilities(data.vlmModelCapabilities);
         // 服务端启动时已验证 LLM/VLM 接口存在（缺失会注册失败），
@@ -168,10 +167,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         // 已配置则保留已保存选择，网络数据只提供下拉选项
         const snapshot = loadedRef.current;
         if (snapshot && !snapshot.llmApiKey) {
-          const first = usableList[0];
+          const first = data.providers.find((p) => (p.models?.length ?? 0) > 0);
           const nextProvider = snapshot.llmProvider || first?.name || '';
           setLlmProvider(nextProvider);
-          const preset = usableList.find((p) => p.name === nextProvider) ?? null;
+          const preset = data.providers.find((p) => p.name === nextProvider) ?? null;
           setLlmModel(
             snapshot.llmModel && preset?.models?.includes(snapshot.llmModel)
               ? snapshot.llmModel
@@ -179,7 +178,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
           );
         }
         if (snapshot && !snapshot.vlmApiKey) {
-          const firstVlm = usableList.find((p) => (p.vlm_models?.length ?? 0) > 0);
+          const firstVlm = data.providers.find((p) => (p.vlm_models?.length ?? 0) > 0);
           const nextProvider = snapshot.vlmProvider || firstVlm?.name || '';
           setVlmProvider(nextProvider);
           const preset = data.providers.find((p) => p.name === nextProvider) ?? null;
@@ -219,6 +218,8 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
 
   const currentPreset = providers.find((p) => p.name === llmProvider) ?? null;
   const currentVlmPreset = providers.find((p) => p.name === vlmProvider) ?? null;
+  // 渲染时按能力分类，不在加载时过滤整个列表（保留纯 VLM 等服务商）
+  const textProviders = providers.filter((p) => (p.models?.length ?? 0) > 0);
   const vlmProviders = providers.filter((p) => (p.vlm_models?.length ?? 0) > 0);
 
   const isVlmTab = stepIndex === 1;
@@ -308,18 +309,18 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     try {
       const data = await fetchProviderPresets(server_config.BASE_URL);
       setProvidersError('');
-      // 只保留包含 models 的服务商，保证下拉一定可选
-      const usableList = data.providers.filter((p) => (p.models?.length ?? 0) > 0);
-      setProviders(usableList);
+      // 全量保存，渲染时按能力分类（保留纯 VLM 等服务商）
+      setProviders(data.providers);
       setLlmCapabilities(data.llmModelCapabilities);
       setVlmCapabilities(data.vlmModelCapabilities);
       // 服务端启动时已验证 LLM/VLM 接口存在，下发列表必然非空
       // 刷新同样只在 key 为空（未配置）时补默认首项，保留已有选择
       const snapshot = loadedRef.current;
       if (snapshot && !snapshot.llmApiKey) {
-        const nextProvider = llmProvider || usableList[0]?.name || '';
+        const nextProvider =
+          llmProvider || data.providers.find((p) => (p.models?.length ?? 0) > 0)?.name || '';
         setLlmProvider(nextProvider);
-        const preset = usableList.find((p) => p.name === nextProvider) ?? null;
+        const preset = data.providers.find((p) => p.name === nextProvider) ?? null;
         setLlmModel(
           llmModel && preset?.models?.includes(llmModel)
             ? llmModel
@@ -327,7 +328,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         );
       }
       if (snapshot && !snapshot.vlmApiKey) {
-        const firstVlm = usableList.find((p) => (p.vlm_models?.length ?? 0) > 0);
+        const firstVlm = data.providers.find((p) => (p.vlm_models?.length ?? 0) > 0);
         const nextProvider = vlmProvider || firstVlm?.name || '';
         setVlmProvider(nextProvider);
         const preset = data.providers.find((p) => p.name === nextProvider) ?? null;
@@ -590,7 +591,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
               </TouchableOpacity>
             </View>
             <View style={styles.optionRow}>
-              {(isVlmTab ? vlmProviders : providers).map((preset) => (
+              {(isVlmTab ? vlmProviders : textProviders).map((preset) => (
                 <TouchableOpacity
                   key={preset.name}
                   style={[
