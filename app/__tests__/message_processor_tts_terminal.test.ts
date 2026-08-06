@@ -1,3 +1,6 @@
+const mockAppState = { currentState: 'active' };
+
+jest.mock('react-native', () => ({ AppState: mockAppState }));
 jest.mock('expo-av', () => ({ Audio: {} }));
 jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file://documents/',
@@ -35,6 +38,7 @@ async function drainIncoming(processor: MessageProcessor) {
 describe('MessageProcessor TTS terminal contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAppState.currentState = 'active';
   });
 
   it('finishes a zero-chunk error and preserves the server text', async () => {
@@ -130,6 +134,25 @@ describe('MessageProcessor TTS terminal contract', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('persists complete audio without waiting for playback while backgrounded', async () => {
+    mockAppState.currentState = 'background';
+    const processor = new MessageProcessor(
+      {} as NetworkClient,
+      fakeBinder(),
+      jest.fn(),
+    );
+
+    processor.onAgentMessage({
+      uuid: 'reply-background',
+      audio: 'YXVkaW8=',
+      is_final_package: true,
+    });
+    await drainIncoming(processor);
+
+    expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1);
+    expect((processor as any).serverAudioPlaying).toBe(false);
   });
 });
 
