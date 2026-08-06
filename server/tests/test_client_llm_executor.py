@@ -40,8 +40,14 @@ class FakeStream:
     def is_connection_lost(self):
         return False
 
-    def lost_connection(self):
+    def lost_connection(self, ws_connection=None):
+        """模拟 ChatStream.lost_connection：仅当断开的是当前活跃连接时才清理。"""
+        if ws_connection is not None and self.ws_connection is not ws_connection:
+            return False
+        if self.ws_connection is None:
+            return False
         self.ws_connection = None
+        return True
 
     def reconnect(self, websocket, client_mode=None):
         """模拟 ChatStream.reconnect：用新连接替换当前连接。"""
