@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from .admin_shell import get_admin_shell
 from .llm_config_editor import apply_llm_config_draft, build_llm_config_view
 from .system_dynamic_publisher import publish_system_dynamic
+from src.system.user_interface.rate_limits import enforce_rate_limit
 from src.utils.helpers import apply_env_variables
 
 if TYPE_CHECKING:
@@ -115,7 +116,7 @@ async def admin_health() -> dict[str, Any]:
     return {
         "status": "ok",
         "admin_auth": shell.auth.status(),
-        "runtime": shell.runtime_supervisor.status(),
+        "runtime": shell.runtime_supervisor.public_status(),
         "observability": shell.observability is not None,
     }
 
@@ -135,10 +136,13 @@ async def admin_auth_setup(payload: dict[str, Any] = Body(default_factory=dict))
 
 @router.post("/admin-auth/login")
 async def admin_auth_login(
+    request: Request,
     response: Response,
     payload: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    return get_admin_shell().auth.login(str(payload.get("password") or ""), response)
+    password = str(payload.get("password") or "")
+    enforce_rate_limit(request, "admin_login", "admin")
+    return await get_admin_shell().auth.login_async(password, response)
 
 
 @protected_router.post("/admin-auth/logout")
@@ -206,8 +210,20 @@ async def secrets_status() -> dict[str, Any]:
 
 @protected_router.put("/secrets")
 async def update_secrets(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
-    get_admin_shell().secret_store.update(payload)
-    return {"ok": True, "secrets": await secrets_status()}
+    shell = get_admin_shell()
+    before = shell.secret_store.read()
+    after = shell.secret_store.update(payload)
+    changed_keys = sorted(
+        key
+        for key in before.keys() | after.keys()
+        if before.get(key) != after.get(key)
+    )
+    return {
+        "ok": True,
+        "secrets": await secrets_status(),
+        "restart_required": bool(changed_keys and shell.runtime_supervisor.is_running()),
+        "changed_keys": changed_keys,
+    }
 
 
 @protected_router.get("/qq-music/credential/status")

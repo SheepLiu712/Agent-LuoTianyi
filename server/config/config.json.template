@@ -38,6 +38,7 @@
     "database": {
         "sql_db_folder": "data/database",
         "sql_db_file": "luotianyi.db",
+        "message_token_ttl_seconds": 3600,
         "redis": {},
         "event_store": {
             "llm_module": {
@@ -127,11 +128,30 @@
     "chat_session_manager": {
         "chat_stream_manager": {
             "default_expiration_seconds": 3600,
-            "heartbeat_timeout_seconds": 60
+            "heartbeat_timeout_seconds": 60,
+            "chat_stream": {
+                "response_queue_maxsize": 256,
+                "ingress_helper": {
+                    "queue_maxsize": 128
+                },
+                "topic_planner": {
+                    "unread_store": {
+                        "maxsize": 128
+                    }
+                },
+                "topic_replier": {
+                    "queue_maxsize": 64
+                },
+                "reflection_worker": {
+                    "queue_maxsize": 64
+                }
+            }
         },
         "global_speaking_worker": {
-            "tts_job_timeout_seconds": 120,
-            "max_retries": 2
+            "queue_maxsize": 512,
+            "terminal_send_max_attempts": 3,
+            "terminal_send_retry_delay_seconds": 0.05,
+            "shutdown_timeout_seconds": 30
         },
         "conversation_service": {
             "raw_conversation_context_limit": 60,

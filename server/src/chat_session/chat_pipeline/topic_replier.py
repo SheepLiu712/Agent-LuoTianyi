@@ -34,7 +34,8 @@ class TopicReplier:
         self.character_id = character_id
         self.send_reply_callback: Optional[Callable[["ChatResponse"], Awaitable[None]]] = None
         self.logger = get_logger(f"{username}TopicReplier")
-        self.topic_queue = asyncio.Queue()
+        self.queue_maxsize = max(1, int(config.get("queue_maxsize", 64)))
+        self.topic_queue = asyncio.Queue(maxsize=self.queue_maxsize)
         self.processor_task: asyncio.Task | None = None
         self.system_runtime: "SystemRuntime" | None = None
         self.is_processing: bool = False

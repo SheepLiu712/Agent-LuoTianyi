@@ -11,7 +11,7 @@ from src.utils.logger import get_logger
 from src.system.database.vector_store import VectorStore, Document
 from src.utils.llm.llm_module import LLMModule
 import time
-import asyncio
+from src.utils.asyncio_helpers import run_sync_owned
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
 
@@ -242,10 +242,10 @@ class MemoryWriter:
                 "user_id": user_id,
             },
         )
-        ids = await asyncio.to_thread(vector_store.add_documents, [doc])
+        ids = await run_sync_owned(vector_store.add_documents, [doc])
         update_cmd = MemoryUpdateCommand(type="write_user_memory", content=text, uuid=ids[0] if ids else None)
-        await asyncio.to_thread(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
-        await asyncio.to_thread(
+        await run_sync_owned(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
+        await run_sync_owned(
             memory_store.write_agent_memory_record,
             DomainMemoryRecord(
                 owner_character_id=owner_character_id,
@@ -293,10 +293,10 @@ class MemoryWriter:
                 "user_id": user_id,
             },
         )
-        ids = await asyncio.to_thread(vector_store.add_documents, [doc])
+        ids = await run_sync_owned(vector_store.add_documents, [doc])
         update_cmd = MemoryUpdateCommand(type="write_event_memory", content=text, uuid=ids[0] if ids else None)
-        await asyncio.to_thread(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
-        await asyncio.to_thread(
+        await run_sync_owned(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
+        await run_sync_owned(
             memory_store.write_agent_memory_record,
             DomainMemoryRecord(
                 owner_character_id=owner_character_id,

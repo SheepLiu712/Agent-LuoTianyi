@@ -186,3 +186,21 @@ def test_event_notification_is_scoped_by_character(tmp_path):
         db.close()
 
     assert {row.character_id for row in rows} == {"luotianyi", "miku"}
+
+
+def test_event_notification_claim_is_atomic_and_releasable(tmp_path):
+    init_sql_db(str(tmp_path), "events.db")
+    store = EventStore({}, get_sql_session, NoopRedis())
+
+    assert store.try_claim_notification(
+        "event-claim", "user-1", "day_of_event", "luotianyi"
+    ) is True
+    assert store.try_claim_notification(
+        "event-claim", "user-1", "day_of_event", "luotianyi"
+    ) is False
+    assert store.release_notification_claim(
+        "event-claim", "user-1", "day_of_event", "luotianyi"
+    ) is True
+    assert store.try_claim_notification(
+        "event-claim", "user-1", "day_of_event", "luotianyi"
+    ) is True

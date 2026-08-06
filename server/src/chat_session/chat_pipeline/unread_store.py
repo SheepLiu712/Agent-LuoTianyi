@@ -13,12 +13,16 @@ class UnreadStore:
     def __init__(self, config: dict, username: str, user_id: str):
         self.config = config
         self.logger = get_logger(f"{username}UnreadStore")
+        self.maxsize = max(1, int(config.get("maxsize", 128)))
         self.unread_messages: List[UnreadMessage] = []
         self.username: str = username
         self.user_id: str = user_id
         self._snapshot_version: int = 0  # 用于跟踪消息版本，确保一致性
         self._snapshot: UnreadMessageSnapshot | None = None
         self._message_lock = asyncio.Lock()  # 用于保护unread_messages的并发访问
+        self._capacity_changed = asyncio.Condition(self._message_lock)
+        # A snapshot still owns its messages until update_unread_message commits.
+        self._occupied_count = 0
 
     @staticmethod
     def trans_ChatInputEvent_to_UnreadMessage(event: ChatInputEvent) -> UnreadMessage:
@@ -37,32 +41,49 @@ class UnreadStore:
         )
 
     async def append(self, message: UnreadMessage):
-        async with self._message_lock:
+        async with self._capacity_changed:
+            while self._occupied_count >= self.maxsize:
+                await self._capacity_changed.wait()
             self.unread_messages.append(message)
+            self._occupied_count += 1
 
     async def snapshot(self) -> UnreadMessageSnapshot:
-        if self._snapshot is not None:
-            self.logger.error("在snapshot被销毁之前不应该重新建立snapshot，可能存在并发问题")
-            return self._snapshot
         async with self._message_lock:
+            if self._snapshot is not None:
+                self.logger.error("在snapshot被销毁之前不应该重新建立snapshot，可能存在并发问题")
+                return self._snapshot
             self._snapshot_version += 1
             self._snapshot = UnreadMessageSnapshot(messages=self.unread_messages.copy(), version=self._snapshot_version)
             self.unread_messages.clear()  # 清空当前未读消息列表
             return self._snapshot
 
     async def update_unread_message(self, snapshot: UnreadMessageSnapshot, remained_messages: List[UnreadMessage]):
-        if self._snapshot is None or snapshot.version != self._snapshot.version:
-            self.logger.error("更新未读消息失败，版本不匹配，可能存在并发问题")
-            return
-        async with self._message_lock:
+        async with self._capacity_changed:
+            if self._snapshot is None or snapshot.version != self._snapshot.version:
+                self.logger.error("更新未读消息失败，版本不匹配，可能存在并发问题")
+                return
+            if len(remained_messages) > len(snapshot.messages):
+                raise ValueError("remained_messages cannot exceed the active snapshot")
+
+            released = len(snapshot.messages) - len(remained_messages)
             self._snapshot = None  # 销毁当前snapshot
             self.unread_messages = remained_messages + self.unread_messages  # 将未处理的消息重新加入未读消息列表
+            self._occupied_count -= released
+            if released:
+                self._capacity_changed.notify_all()
 
     async def has_unread(self) -> bool:
         async with self._message_lock:
             return len(self.unread_messages) > 0
+
+    async def pending_count(self) -> int:
+        """Return all capacity-owned messages, including the active snapshot."""
+        async with self._message_lock:
+            return self._occupied_count
         
     async def clear(self):
-        async with self._message_lock:
+        async with self._capacity_changed:
             self.unread_messages.clear()
             self._snapshot = None
+            self._occupied_count = 0
+            self._capacity_changed.notify_all()

@@ -355,7 +355,6 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False, "timeout": 30},
-        isolation_level="AUTOCOMMIT",
     )
 
     # 2. 注册监听器：在每个连接建立时执行 WAL 开启指令

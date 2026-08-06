@@ -8,11 +8,18 @@ import re
 import base64
 import datetime
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import deque
 from typing import Callable, TYPE_CHECKING
-from ..network.event_types import AgentMessage
+from ..network.event_types import AgentMessage, is_audio_terminal
 from ..utils.logger import get_logger
+from ..delivery_policy import (
+    MAX_DURABLE_MESSAGE_AGE_SECONDS,
+    can_retry_durable_message,
+    delivery_uncertain_result,
+    get_send_retry_delay_seconds,
+    is_durable_send_kind,
+)
 
 if TYPE_CHECKING:
     from ..network.network_client import NetworkClient
@@ -25,6 +32,9 @@ class OutgoingMessage:
     payload: dict
     done_event: threading.Event
     result: dict | None = None
+    retry_attempt: int = 0
+    enqueued_monotonic: float = field(default_factory=time.monotonic)
+
 
 class MessageProcessor:
     def __init__(self,
@@ -223,11 +233,17 @@ class MessageProcessor:
             except Exception as exc:
                 self.logger.error(f"Failed to decode audio chunk (uuid={response.uuid}): {exc}")
 
-        if response.is_final_package:
+        if is_audio_terminal(response):
             self.multimedia_stream.finish_one_sentense()
             # 将最终的音频结果保存到本地
             saved_uuid = self.processing_uuid
-            ret = self._save_audio_to_temp(self.processing_audio, saved_uuid, ".wav")
+            ret = ""
+            if self.processing_audio and not response.audio_error:
+                ret = self._save_audio_to_temp(self.processing_audio, saved_uuid, ".wav")
+            if response.audio_error:
+                self.logger.warning(
+                    f"Audio stream ended with error (uuid={saved_uuid}, code={response.error_code or 'UNKNOWN'})"
+                )
             self.processing_audio = bytearray()
             self.processing_uuid = None
             if display_in_chat and ret and self.update_bubble_signal:
@@ -246,7 +262,13 @@ class MessageProcessor:
                     return
                 item = self._send_queue[0]
 
-            self.update_bubble_signal(item.local_id, "waiting")
+            durable = is_durable_send_kind(item.kind)
+            if durable and time.monotonic() - item.enqueued_monotonic >= MAX_DURABLE_MESSAGE_AGE_SECONDS:
+                self._fail_delivery_uncertain(item, "message exceeded the automatic delivery window")
+                continue
+
+            if durable:
+                self.update_bubble_signal(item.local_id, "waiting")
             ack = self._send_one(item)
             if ack.get("ok", False):
                 with self._send_cond:
@@ -254,11 +276,23 @@ class MessageProcessor:
                         self._send_queue.popleft()
                 item.result = ack
                 item.done_event.set()
-                self.update_bubble_signal(item.local_id, "submitted")
+                if durable:
+                    self.update_bubble_signal(item.local_id, "submitted")
                 continue
 
             error_text = str(ack.get("error") or "")
             self.logger.error(f"Failed to send message (local_id={item.local_id}): {error_text}")
+            if not durable:
+                with self._send_cond:
+                    if self._send_queue and self._send_queue[0] is item:
+                        self._send_queue.popleft()
+                item.result = ack
+                item.done_event.set()
+                self.logger.debug(
+                    f"Dropped transient event after send failure (kind={item.kind}, local_id={item.local_id})"
+                )
+                continue
+
             if self._is_terminal_send_error(error_text) or ack.get("drop", False):
                 with self._send_cond:
                     if self._send_queue and self._send_queue[0] is item:
@@ -267,9 +301,31 @@ class MessageProcessor:
                 item.done_event.set()
                 self.update_bubble_signal(item.local_id, "failed")
                 continue
+            retry_delay = get_send_retry_delay_seconds(item.retry_attempt)
+            if not can_retry_durable_message(
+                item.retry_attempt,
+                item.enqueued_monotonic,
+                retry_delay,
+            ):
+                self._fail_delivery_uncertain(item, error_text or "delivery acknowledgement was not received")
+                continue
+            item.retry_attempt += 1
             self.update_bubble_signal(item.local_id, "waiting")
-            # Retransmit head item after 1s when ack timeout/disconnect occurs.
-            time.sleep(1.0)
+            time.sleep(retry_delay)
+
+    def _fail_delivery_uncertain(self, item: OutgoingMessage, reason: str) -> None:
+        result = delivery_uncertain_result(item.client_msg_id, reason)
+        with self._send_cond:
+            if self._send_queue and self._send_queue[0] is item:
+                self._send_queue.popleft()
+        item.result = result
+        item.done_event.set()
+        self.update_bubble_signal(item.local_id, "failed")
+        self.logger.error(
+            "Durable message delivery is uncertain "
+            f"(local_id={item.local_id}, client_msg_id={item.client_msg_id}, "
+            f"retry_attempt={item.retry_attempt}): {reason}"
+        )
 
     def feed_agent_msg(self, payload: AgentMessage): # 接收WS传来的消息，放入队列等待处理
         self._event_queue.put(payload)
@@ -413,8 +469,6 @@ class MessageProcessor:
     @staticmethod
     def _is_terminal_send_error(error_text: str) -> bool:
         text = error_text.lower()
-        if "not logged in" in text:
-            return True
         if "failed to read image file" in text:
             return True
         return False

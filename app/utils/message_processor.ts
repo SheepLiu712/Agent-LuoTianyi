@@ -6,7 +6,16 @@ import { AgentBinder } from './binder';
 import { addDebugTrace } from './debug_trace';
 import { NetworkClient } from './network_client';
 
-type SendItem = { clientMsgId: string } & (
+type SendKind =
+  | 'text'
+  | 'proactive'
+  | 'image'
+  | 'typing'
+  | 'touch'
+  | 'image_selecting'
+  | 'image_selecting_cancel';
+
+type SendItem = { clientMsgId: string; retryAttempt: number; enqueuedAtMs: number } & (
   | { kind: 'text'; uuid: string; text: string }
   | { kind: 'proactive'; uuid: string; text: string }
   | { kind: 'image'; uuid: string; imageUri: string; mimeType: string }
@@ -16,6 +25,25 @@ type SendItem = { clientMsgId: string } & (
   | { kind: 'image_selecting_cancel' }
 );
 
+export const MAX_DURABLE_RETRY_ATTEMPTS = 8;
+export const MAX_DURABLE_MESSAGE_AGE_MS = 4 * 60 * 1000;
+
+export function isDurableSendKind(kind: SendKind) {
+  return kind === 'text' || kind === 'image' || kind === 'proactive';
+}
+
+export function canRetryDurableMessage(
+  retryAttempt: number,
+  enqueuedAtMs: number,
+  retryDelayMs: number,
+  nowMs = Date.now(),
+) {
+  return (
+    retryAttempt < MAX_DURABLE_RETRY_ATTEMPTS
+    && nowMs - enqueuedAtMs + retryDelayMs < MAX_DURABLE_MESSAGE_AGE_MS
+  );
+}
+
 interface SendResult {
   ok: boolean;
   error?: string;
@@ -24,7 +52,11 @@ interface SendResult {
 
 function isTerminalSendError(errorText?: string) {
   const text = (errorText || '').toLowerCase();
-  return text.includes('not logged in') || text.includes('failed to read image file');
+  return text.includes('failed to read image file');
+}
+
+export function getSendRetryDelayMs(retryAttempt: number) {
+  return Math.min(2 ** Math.max(0, retryAttempt), 30) * 1000;
 }
 
 function getErrorMessage(error: unknown) {
@@ -120,20 +152,26 @@ export class MessageProcessor {
   }
 
   async sendText(uuid: string, text: string) {
-    this.sendQueue.push({ kind: 'text', uuid, text, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'text', uuid, text, clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     addDebugTrace('send', 'enqueue text', { uuid, queueLength: this.sendQueue.length, textLength: text.length });
     this.binder.emitMessageStatus(uuid, 'waiting');
     this.startSendLoop();
   }
 
   async sendProactiveText(uuid: string, text: string) {
-    this.sendQueue.push({ kind: 'proactive', uuid, text, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'proactive', uuid, text, clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     addDebugTrace('send', 'enqueue proactive text', { uuid, queueLength: this.sendQueue.length, textLength: text.length });
     this.startSendLoop();
   }
 
   async sendImage(uuid: string, imageUri: string, mimeType: string) {
-    this.sendQueue.push({ kind: 'image', uuid, imageUri, mimeType, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'image', uuid, imageUri, mimeType, clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     addDebugTrace('send', 'enqueue image', { uuid, queueLength: this.sendQueue.length, mimeType });
     this.binder.emitMessageStatus(uuid, 'waiting');
     this.startSendLoop();
@@ -141,7 +179,10 @@ export class MessageProcessor {
 
   async sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) {
     addDebugTrace('send', 'enqueue touch', { touchArea, queueLength: this.sendQueue.length });
-    this.sendQueue.push({ kind: 'touch', touchArea, clickFrequency, touchMeta, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'touch', touchArea, clickFrequency, touchMeta, clientMsgId: this.nextClientMsgId(), retryAttempt: 0,
+      enqueuedAtMs: Date.now(),
+    });
     this.startSendLoop();
   }
 
@@ -154,20 +195,26 @@ export class MessageProcessor {
       return;
     }
     this.lastTypingSentAt = now;
-    this.sendQueue.push({ kind: 'typing', textLength, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'typing', textLength, clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     addDebugTrace('send', 'enqueue typing', { queueLength: this.sendQueue.length, textLength });
     this.startSendLoop();
   }
 
   async sendImageSelecting() {
     addDebugTrace('send', 'enqueue image_selecting');
-    this.sendQueue.push({ kind: 'image_selecting', clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'image_selecting', clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     this.startSendLoop();
   }
 
   async sendImageSelectingCancel() {
     addDebugTrace('send', 'enqueue image_selecting_cancel');
-    this.sendQueue.push({ kind: 'image_selecting_cancel', clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'image_selecting_cancel', clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     this.startSendLoop();
   }
 
@@ -323,6 +370,8 @@ export class MessageProcessor {
         text: payload.text,
         expression: payload.expression || undefined,
         is_final_package: payload.is_final_package,
+        audio_error: payload.audio_error,
+        error_code: payload.error_code,
         display_in_chat: payload.display_in_chat,
         is_ephemeral: payload.is_ephemeral,
       });
@@ -331,6 +380,8 @@ export class MessageProcessor {
         uuid: convUuid,
         expression: payload.expression || undefined,
         is_final_package: payload.is_final_package,
+        audio_error: payload.audio_error,
+        error_code: payload.error_code,
         display_in_chat: payload.display_in_chat,
         is_ephemeral: payload.is_ephemeral,
       });
@@ -348,7 +399,16 @@ export class MessageProcessor {
     if (payload.is_final_package) {
       this.feedServerAudioChunk('', true);
       await this.waitForServerAudioFinished();
-      await this.saveAudioToLocal(convUuid);
+      if (payload.audio_error) {
+        this.audioChunksByUuid.delete(convUuid);
+        this.transientMessageUuids.delete(convUuid);
+        addDebugTrace('audio', 'server audio stream ended with error', {
+          convUuid,
+          errorCode: payload.error_code || 'UNKNOWN',
+        });
+      } else {
+        await this.saveAudioToLocal(convUuid);
+      }
     }
   }
 
@@ -379,7 +439,7 @@ export class MessageProcessor {
         addDebugTrace('audio', 'waitForServerAudioFinished timeout', {
           timeoutMs,
         });
-        onFinished();
+        this.onServerAudioFinished();
       }, timeoutMs);
 
       this.serverAudioFinishWaiters.push(onFinished);
@@ -408,43 +468,82 @@ export class MessageProcessor {
       }
 
       const item = this.sendQueue[0];
-      const result = await this.sendOne(item);
-
-      if (item.kind === 'typing' || item.kind === 'proactive' || item.kind === 'touch' || item.kind === 'image_selecting' || item.kind === 'image_selecting_cancel') {
-        addDebugTrace('send', `${item.kind} sent`, { ok: result.ok, error: result.error });
+      const durable = isDurableSendKind(item.kind);
+      if (durable && Date.now() - item.enqueuedAtMs >= MAX_DURABLE_MESSAGE_AGE_MS) {
+        this.failDeliveryUncertain(item, 'message exceeded the automatic delivery window');
         this.sendQueue.shift();
         continue;
       }
 
+      const result = await this.sendOne(item);
+      const tracksMessageStatus = durable && 'uuid' in item;
+
       if (result.ok) {
-        addDebugTrace('send', 'send success', { uuid: item.uuid, kind: item.kind, queueLength: this.sendQueue.length });
-        this.binder.emitMessageStatus(item.uuid, 'submitted');
+        addDebugTrace('send', 'send success', { kind: item.kind, queueLength: this.sendQueue.length });
+        if (tracksMessageStatus) {
+          this.binder.emitMessageStatus(item.uuid, 'submitted');
+        }
+        this.sendQueue.shift();
+        continue;
+      }
+
+      if (!durable) {
+        addDebugTrace('send', 'transient event dropped after send failure', {
+          kind: item.kind,
+          error: result.error,
+        });
         this.sendQueue.shift();
         continue;
       }
 
       if (result.drop || isTerminalSendError(result.error)) {
         addDebugTrace('send', 'send failed terminal', {
-          uuid: item.uuid,
           kind: item.kind,
           error: result.error,
           drop: result.drop,
         });
-        this.binder.emitMessageStatus(item.uuid, 'failed');
+        if (tracksMessageStatus) {
+          this.binder.emitMessageStatus(item.uuid, 'failed');
+        }
         this.sendQueue.shift();
         continue;
       }
 
+      const retryDelayMs = getSendRetryDelayMs(item.retryAttempt);
+      if (!canRetryDurableMessage(item.retryAttempt, item.enqueuedAtMs, retryDelayMs)) {
+        this.failDeliveryUncertain(item, result.error || 'delivery acknowledgement was not received');
+        this.sendQueue.shift();
+        continue;
+      }
+      item.retryAttempt += 1;
       addDebugTrace('send', 'send failed retry', {
-        uuid: item.uuid,
         kind: item.kind,
         error: result.error,
+        retryAttempt: item.retryAttempt,
+        retryDelayMs,
       });
-      this.binder.emitMessageStatus(item.uuid, 'waiting');
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (tracksMessageStatus) {
+        this.binder.emitMessageStatus(item.uuid, 'waiting');
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
 
     this.sendLoopRunning = false;
+  }
+
+  private failDeliveryUncertain(item: SendItem, reason: string) {
+    addDebugTrace('send', 'durable message delivery is uncertain', {
+      kind: item.kind,
+      clientMsgId: item.clientMsgId,
+      retryAttempt: item.retryAttempt,
+      ageMs: Date.now() - item.enqueuedAtMs,
+      code: 'DELIVERY_UNCERTAIN',
+      reason,
+    });
+    if ('uuid' in item) {
+      this.binder.emitMessageStatus(item.uuid, 'failed');
+    }
+    this.binder.emitErrorText('[DELIVERY_UNCERTAIN] 消息发送结果无法确认，请检查会话后再重试。');
   }
 
   private async sendOne(item: SendItem): Promise<SendResult> {

@@ -152,7 +152,7 @@ async def process_detected_date(
             topic_text += f"描述：{description}\n"
         topic_text += "\n如果正确你就会把它记住。"
 
-        reply_topic_callback(_make_topic(topic_text))
+        await reply_topic_callback(_make_topic(topic_text))
         return None
 
     logger.info(f"Date {name}: confidence {confidence:.2f} in middle range but no callback, discarded")

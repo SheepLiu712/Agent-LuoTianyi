@@ -9,7 +9,8 @@ from typing import Any, Coroutine
 from src.system.admin.config_store import ConfigStore
 from src.system.admin.config_validator import RuntimeConfigValidator
 from src.system.admin.secret_store import SecretStore
-from src.system.observability import ObservabilityService
+from src.system.observability import ObservabilityService, new_trace_id
+from src.utils.logger import get_logger
 
 
 class RuntimeSupervisor:
@@ -27,10 +28,13 @@ class RuntimeSupervisor:
         self.secret_store = secret_store
         self.validator = validator
         self.observability = observability
+        self.logger = get_logger(self.__class__.__name__)
         self._runtime: Any | None = None
         self._lock = asyncio.Lock()
         self.state = "stopped"
         self.last_error: str | None = None
+        self.last_error_code: str | None = None
+        self.last_error_trace_id: str | None = None
         self.last_started_at: str | None = None
         self.last_stopped_at: str | None = None
         self.last_validation: dict[str, Any] | None = None
@@ -38,10 +42,17 @@ class RuntimeSupervisor:
 
     @property
     def runtime(self) -> Any | None:
+        if self.state != "running":
+            return None
         return self._runtime
 
     def is_running(self) -> bool:
         return self._runtime is not None and self.state == "running"
+
+    @property
+    def has_runtime(self) -> bool:
+        """Whether a runtime handle still exists, including failed cleanup."""
+        return self._runtime is not None
 
     def _has_active_transition(self) -> bool:
         return self._transition_task is not None and not self._transition_task.done()
@@ -62,16 +73,55 @@ class RuntimeSupervisor:
             "running": self.is_running(),
             "busy": self.state in {"starting", "stopping"} or self._has_active_transition(),
             "last_error": self.last_error,
+            "last_error_code": self.last_error_code,
+            "last_error_trace_id": self.last_error_trace_id,
             "last_started_at": self.last_started_at,
             "last_stopped_at": self.last_stopped_at,
             "validation": self.last_validation,
         }
 
+    def public_status(self) -> dict[str, Any]:
+        error = None
+        if self.last_error_code:
+            error = {
+                "code": self.last_error_code,
+                "trace_id": self.last_error_trace_id,
+            }
+        return {
+            "state": self.state,
+            "running": self.is_running(),
+            "busy": self.state in {"starting", "stopping"} or self._has_active_transition(),
+            "error": error,
+            "last_started_at": self.last_started_at,
+            "last_stopped_at": self.last_stopped_at,
+        }
+
+    def _clear_error(self) -> None:
+        self.last_error = None
+        self.last_error_code = None
+        self.last_error_trace_id = None
+
+    def _record_error(
+        self,
+        code: str,
+        detail: str,
+        *,
+        log_exception: bool = False,
+    ) -> None:
+        trace_id = new_trace_id("runtime")
+        self.last_error = detail
+        self.last_error_code = code
+        self.last_error_trace_id = trace_id
+        if log_exception:
+            self.logger.exception(f"{code} trace_id={trace_id}")
+        else:
+            self.logger.error(f"{code} trace_id={trace_id}: {detail}")
+
     def request_start(self) -> dict[str, Any]:
-        if self.is_running() or self._has_active_transition():
+        if self._runtime is not None or self._has_active_transition():
             return self.status()
         self.state = "starting"
-        self.last_error = None
+        self._clear_error()
         return self._schedule_transition(self.start())
 
     def request_stop(self) -> dict[str, Any]:
@@ -87,7 +137,7 @@ class RuntimeSupervisor:
         if self._has_active_transition():
             return self.status()
         self.state = "stopping" if self._runtime is not None else "starting"
-        self.last_error = None
+        self._clear_error()
         return self._schedule_transition(self.restart())
 
     def validate_current_config(self) -> dict[str, Any]:
@@ -123,8 +173,16 @@ class RuntimeSupervisor:
         async with self._lock:
             if self.is_running():
                 return self.status()
+            if self._runtime is not None:
+                self.state = "failed"
+                if not self.last_error:
+                    self._record_error(
+                        "RUNTIME_CLEANUP_INCOMPLETE",
+                        "Previous runtime cleanup is incomplete",
+                    )
+                return self.status()
             self.state = "starting"
-            self.last_error = None
+            self._clear_error()
             try:
                 self.secret_store.load_into_environment()
                 try:
@@ -132,13 +190,19 @@ class RuntimeSupervisor:
                 except (json.JSONDecodeError, OSError) as exc:
                     self.last_validation = self._config_read_error_validation(exc)
                     self.state = "blocked"
-                    self.last_error = self.last_validation["items"][0]["message"]
+                    self._record_error(
+                        "CONFIG_READ_FAILED",
+                        self.last_validation["items"][0]["message"],
+                    )
                     return self.status()
                 validation = self.validator.validate(config)
                 self.last_validation = validation
                 if not validation.get("core_ok"):
                     self.state = "blocked"
-                    self.last_error = "Runtime config validation failed"
+                    self._record_error(
+                        "CONFIG_VALIDATION_FAILED",
+                        "Runtime config validation failed",
+                    )
                     return self.status()
                 config = self.validator.apply_world_disablements(config, validation)
 
@@ -152,7 +216,11 @@ class RuntimeSupervisor:
                 return self.status()
             except Exception as exc:
                 self.state = "failed"
-                self.last_error = f"{exc}\n{traceback.format_exc()}"
+                self._record_error(
+                    "RUNTIME_START_FAILED",
+                    f"{exc}\n{traceback.format_exc()}",
+                    log_exception=True,
+                )
                 return self.status()
 
     async def stop(self) -> dict[str, Any]:
@@ -162,20 +230,27 @@ class RuntimeSupervisor:
                 return self.status()
             self.state = "stopping"
             runtime = self._runtime
-            self._runtime = None
+            self._clear_error()
             try:
                 from src.system.system_runtime import set_system_runtime
 
                 set_system_runtime(None)
                 await runtime.shutdown()
+                self._runtime = None
                 self.state = "stopped"
                 self.last_stopped_at = datetime.now().isoformat(timespec="seconds")
                 return self.status()
             except Exception as exc:
                 self.state = "failed"
-                self.last_error = f"{exc}\n{traceback.format_exc()}"
+                self._record_error(
+                    "RUNTIME_STOP_FAILED",
+                    f"{exc}\n{traceback.format_exc()}",
+                    log_exception=True,
+                )
                 return self.status()
 
     async def restart(self) -> dict[str, Any]:
-        await self.stop()
+        stop_status = await self.stop()
+        if stop_status.get("state") != "stopped" or self._runtime is not None:
+            return stop_status
         return await self.start()

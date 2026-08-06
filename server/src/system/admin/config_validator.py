@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from src.system.admin.secret_store import SecretStore
+from src.system.token_config import (
+    DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
+    MAX_MESSAGE_TOKEN_TTL_SECONDS,
+    MIN_MESSAGE_TOKEN_TTL_SECONDS,
+)
 
 
 @dataclass
@@ -69,6 +74,7 @@ class RuntimeConfigValidator:
     def validate(self, config: dict[str, Any]) -> dict[str, Any]:
         items: list[ValidationItem] = []
         items.extend(self._validate_secrets())
+        items.extend(self._validate_security_config(config))
         items.extend(self._validate_llm_interfaces(config))
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
@@ -114,6 +120,50 @@ class RuntimeConfigValidator:
                 )
             )
         return result
+
+    def _validate_security_config(self, config: dict[str, Any]) -> list[ValidationItem]:
+        name = "config.database.message_token_ttl_seconds"
+        database_config = config.get("database")
+        if (
+            not isinstance(database_config, dict)
+            or "message_token_ttl_seconds" not in database_config
+        ):
+            return [
+                ValidationItem(
+                    "core",
+                    name,
+                    "warning",
+                    (
+                        "未配置 message_token_ttl_seconds，使用安全默认值 "
+                        f"{DEFAULT_MESSAGE_TOKEN_TTL_SECONDS} 秒"
+                    ),
+                    severity="warning",
+                )
+            ]
+        value = database_config["message_token_ttl_seconds"]
+        if type(value) is not int:
+            return [
+                ValidationItem(
+                    "core",
+                    name,
+                    "error",
+                    "message_token_ttl_seconds 必须是整数秒数",
+                )
+            ]
+        if not MIN_MESSAGE_TOKEN_TTL_SECONDS <= value <= MAX_MESSAGE_TOKEN_TTL_SECONDS:
+            return [
+                ValidationItem(
+                    "core",
+                    name,
+                    "error",
+                    (
+                        "message_token_ttl_seconds 必须在 "
+                        f"{MIN_MESSAGE_TOKEN_TTL_SECONDS} 至 "
+                        f"{MAX_MESSAGE_TOKEN_TTL_SECONDS} 秒之间"
+                    ),
+                )
+            ]
+        return [ValidationItem("core", name, "ok", f"消息令牌有效期为 {value} 秒")]
 
     def _validate_llm_interfaces(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []

@@ -22,7 +22,10 @@ class IngressHelper:
         self.user_uuid = user_id
         self.character_id = character_id or "luotianyi"
         self.logger = get_logger(f"{self.username}IngressHelper")
-        self.ingress_queue: asyncio.Queue[ChatInputEvent] = asyncio.Queue()
+        self.queue_maxsize = max(1, int(config.get("queue_maxsize", 128)))
+        self.ingress_queue: asyncio.Queue[ChatInputEvent] = asyncio.Queue(
+            maxsize=self.queue_maxsize,
+        )
         self.ingress_worker_task: asyncio.Task | None = None
         self.system_runtime: "SystemRuntime" | None = None
         self.send_reply_callback: Callable[["ChatResponse"], Awaitable[None]] = send_reply_callback
@@ -35,6 +38,14 @@ class IngressHelper:
     async def put(self, event: ChatInputEvent):
         """将事件放入 ingress 队列，供 ingress worker 处理。"""
         await self.ingress_queue.put(event)
+
+    def put_nowait(self, event: ChatInputEvent) -> bool:
+        """Try to accept an event without blocking the WebSocket receive loop."""
+        try:
+            self.ingress_queue.put_nowait(event)
+        except asyncio.QueueFull:
+            return False
+        return True
 
     # ————————————————————设置依赖————————————————————————
 

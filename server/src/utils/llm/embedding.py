@@ -5,12 +5,23 @@ from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 
 class SiliconFlowEmbeddings(EmbeddingFunction):
-    def __init__(self, model="BAAI/bge-m3", api_key=None, base_url="https://api.siliconflow.cn/v1"):
+    def __init__(
+        self,
+        model="BAAI/bge-m3",
+        api_key=None,
+        base_url="https://api.siliconflow.cn/v1",
+        connect_timeout_seconds=5.0,
+        read_timeout_seconds=30.0,
+    ):
         self.model = model
         self.api_key = api_key
         if not self.api_key:
             raise ValueError("API key for SiliconFlowEmbeddings cannot be None.")
-        self.base_url = base_url
+        self.base_url = base_url.rstrip("/")
+        self.request_timeout = (
+            max(0.1, float(connect_timeout_seconds)),
+            max(0.1, float(read_timeout_seconds)),
+        )
 
     def __call__(self, input: Documents) -> Embeddings: # not used?
         return self.embed_documents(input)
@@ -31,7 +42,12 @@ class SiliconFlowEmbeddings(EmbeddingFunction):
         url = f"{self.base_url}/embeddings"
         headers = {"Authorization": f"Bearer {self.api_key}"}
         payload = {"model": self.model, "input": text}
-        resp = requests.post(url, headers=headers, json=payload)
+        resp = requests.post(
+            url,
+            headers=headers,
+            json=payload,
+            timeout=self.request_timeout,
+        )
         resp.raise_for_status()
         return resp.json()["data"][0]["embedding"]
     
