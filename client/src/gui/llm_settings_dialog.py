@@ -6,15 +6,15 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineE
                                QPushButton, QComboBox, QMessageBox, QGroupBox,
                                QPlainTextEdit, QStackedWidget, QWidget,
                                QApplication, QProgressBar)
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QByteArray, QUrl
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtGui import QCloseEvent, QResizeEvent
 from typing import TYPE_CHECKING
 
 from ..utils.logger import get_logger
 from ..safety import credential
 from ..utils.llm_client import (
-    fetch_llm_json_required_modules,
-    probe_llm_config,
+    build_chat_completions_payload,
     resolve_provider_base_url,
 )
 
@@ -35,59 +35,16 @@ def _friendly_probe_error(name: str, exc: Exception) -> str:
     return f"{name}：{text}"
 
 
-class _ProvidersLoader(QThread):
-    """后台线程：从服务端获取服务商预设列表，避免阻塞 UI。"""
-
-    loaded = Signal(list)
-    json_loaded = Signal(list, list)
-    failed = Signal(str)
-
-    def __init__(self, network_client, force_refresh: bool = False, parent=None):
-        super().__init__(parent)
-        self._network_client = network_client
-        self._force_refresh = force_refresh
-        self.logger = get_logger(self.__class__.__name__)
-
-    def run(self) -> None:
-        try:
-            providers = self._network_client.get_llm_providers(
-                force_refresh=self._force_refresh
-            )
-            self.loaded.emit(providers)
-            try:
-                llm_modules, vlm_modules = fetch_llm_json_required_modules(
-                    self._network_client.base_url
-                )
-            except Exception as exc:
-                self.logger.warning(f"获取 JSON 功能列表失败: {exc}")
-                llm_modules, vlm_modules = [], []
-            self.json_loaded.emit(llm_modules, vlm_modules)
-        except Exception as exc:
-            self.failed.emit(str(exc))
-
-
-class _ProbeWorker(QThread):
-    """后台线程：保存前用当前配置向服务商发探测请求。"""
-
-    errors = Signal(list)
-
-    def __init__(self, configs: list, parent=None):
-        super().__init__(parent)
-        self._configs = configs
-
-    def run(self) -> None:
-        errors = []
-        for cfg in self._configs:
-            try:
-                probe_llm_config(
-                    cfg["base_url"],
-                    cfg["api_key"],
-                    cfg["model"],
-                    params=cfg["params"],
-                )
-            except Exception as exc:
-                errors.append(_friendly_probe_error(cfg["name"], exc))
-        self.errors.emit(errors)
+def _module_labels(items: list) -> list:
+    """服务端下发 [{name, label}]，提取友好标签；兼容纯字符串列表。"""
+    labels = []
+    for item in items:
+        if isinstance(item, dict):
+            label = item.get("label")
+            labels.append(str(label) if label else str(item.get("name", "")))
+        elif isinstance(item, str):
+            labels.append(item)
+    return labels
 
 
 class _BlockingOverlay(QWidget):
@@ -124,8 +81,10 @@ class LLMSettingsDialog(QDialog):
         self._saved_model: str | None = None
         self._saved_vlm_provider: str | None = None
         self._saved_vlm_model: str | None = None
-        self._providers_loader: "_ProvidersLoader | None" = None
-        self._probe_worker: "_ProbeWorker | None" = None
+        self._http = QNetworkAccessManager(self)
+        self._providers_reply: "QNetworkReply | None" = None
+        self._probe_replies: list = []
+        self._probe_configs: list = []
         self._pending_save: tuple | None = None
         self._page_kinds: list = ["text"]
         self._current_kind: str = "text"
@@ -374,11 +333,13 @@ class LLMSettingsDialog(QDialog):
         self.status_label.setText("")
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        """校验期间禁止关闭窗口，避免探测回调在关闭后写入配置。"""
-        if self._probe_worker is not None and self._probe_worker.isRunning():
+        """校验期间禁止关闭窗口；服务商列表请求直接取消，避免残留请求/线程。"""
+        if self._probe_replies and any(r.isRunning() for r in self._probe_replies):
             event.ignore()
             self.status_label.setText("正在校验配置…，请稍候")
             return
+        if self._providers_reply is not None and not self._providers_reply.isFinished():
+            self._providers_reply.abort()
         event.accept()
 
     def _can_advance(self) -> bool:
@@ -563,16 +524,51 @@ class LLMSettingsDialog(QDialog):
         if vlm_params:
             self.vlm_params_editor.setPlainText(json.dumps(vlm_params, ensure_ascii=False, indent=2))
         self.status_label.setText("正在获取服务商列表…")
-        self._providers_loader = _ProvidersLoader(self.network_client, parent=self)
-        self._providers_loader.loaded.connect(self._on_providers_loaded)
-        self._providers_loader.json_loaded.connect(self._on_json_modules_loaded)
-        self._providers_loader.failed.connect(self._on_providers_failed)
-        self._providers_loader.start()
+        self._start_fetch_providers()
         self._update_config_hint()
         self.next_btn.setEnabled(self._next_enabled())
 
+    def _start_fetch_providers(self) -> None:
+        """异步拉取服务商列表（含 JSON 能力标注），取消前一个未完成的请求。"""
+        if self._providers_reply is not None and not self._providers_reply.isFinished():
+            self._providers_reply.abort()
+        base = self.network_client.base_url
+        request = QNetworkRequest(QUrl(f"{base.rstrip('/')}/llm/providers"))
+        request.setTransferTimeout(15000)
+        self._providers_reply = self._http.get(request)
+        self._providers_reply.finished.connect(self._on_providers_reply)
+
+    def _on_providers_reply(self) -> None:
+        """处理服务商列表响应；旧请求被取消/替换后直接忽略。"""
+        reply = self.sender()
+        if reply is None or reply is not self._providers_reply:
+            return
+        self._providers_reply = None
+        if reply.error() == QNetworkReply.NetworkError.OperationCanceledError:
+            return
+        if reply.error() != QNetworkReply.NetworkError.NoError:
+            self._on_providers_failed(reply.errorString())
+            return
+        try:
+            data = json.loads(bytes(reply.readAll()))
+        except Exception as exc:
+            self._on_providers_failed(f"数据解析失败: {exc}")
+            return
+        providers = data.get("providers") if isinstance(data, dict) else data
+        if not isinstance(providers, list):
+            self._on_providers_failed("服务商列表格式错误")
+            return
+        self._on_providers_loaded(providers)
+        if isinstance(data, dict):
+            self._on_json_modules_loaded(
+                _module_labels(data.get("llm_json_required_modules") or []),
+                _module_labels(data.get("vlm_json_required_modules") or []),
+            )
+
     def _on_providers_loaded(self, providers: list) -> None:
         # 全量保存，渲染/填充下拉时按能力分类（保留纯 VLM 等服务商）
+        if not isinstance(providers, list):
+            return
         self._llm_providers = [p for p in providers if isinstance(p, dict)]
         all_names = [
             p["name"] for p in self._llm_providers if p.get("models")
@@ -631,16 +627,7 @@ class LLMSettingsDialog(QDialog):
 
     def _refresh_providers(self) -> None:
         self.status_label.setText("正在获取服务商列表…")
-        if self._providers_loader is not None and self._providers_loader.isRunning():
-            self._providers_loader.terminate()
-            self._providers_loader.wait(200)
-        self._providers_loader = _ProvidersLoader(
-            self.network_client, force_refresh=True, parent=self
-        )
-        self._providers_loader.loaded.connect(self._on_providers_loaded)
-        self._providers_loader.json_loaded.connect(self._on_json_modules_loaded)
-        self._providers_loader.failed.connect(self._on_providers_failed)
-        self._providers_loader.start()
+        self._start_fetch_providers()
 
     def _on_json_modules_loaded(self, llm_modules: list, vlm_modules: list) -> None:
         self._llm_json_modules = llm_modules or []
@@ -775,7 +762,7 @@ class LLMSettingsDialog(QDialog):
             self.config_hint.setText("")
         else:
             self.config_hint.setText("未配置 API Key，相关调用将使用服务端 Key。")
-        if self._probe_worker is None or not self._probe_worker.isRunning():
+        if not any(r.isRunning() for r in self._probe_replies):
             self.next_btn.setEnabled(self._next_enabled())
 
     def _advance_or_close(self, kind: str) -> None:
@@ -809,9 +796,28 @@ class LLMSettingsDialog(QDialog):
         self._pending_save = (cfg, on_success)
         self._set_frozen(True)
         self.status_label.setText("正在校验配置…")
-        self._probe_worker = _ProbeWorker(probe_configs, parent=self)
-        self._probe_worker.errors.connect(self._on_probe_done)
-        self._probe_worker.start()
+        self._probe_replies = []
+        self._probe_configs = list(probe_configs)
+        for probe in probe_configs:
+            params = dict(probe.get("params") or {})
+            params["max_tokens"] = 8
+            params["temperature"] = 0
+            body = build_chat_completions_payload(
+                prompt="ping",
+                model=probe["model"],
+                params=params,
+            )
+            request = QNetworkRequest(
+                QUrl(f"{probe['base_url'].rstrip('/')}/chat/completions")
+            )
+            request.setHeader(
+                QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json"
+            )
+            request.setRawHeader(b"Authorization", f"Bearer {probe['api_key']}".encode())
+            request.setTransferTimeout(30000)
+            reply = self._http.post(request, QByteArray(json.dumps(body).encode()))
+            self._probe_replies.append(reply)
+            reply.finished.connect(self._on_probe_reply)
 
     def _set_frozen(self, frozen: bool) -> None:
         """校验期间整页冻结并显示遮罩，保证任何操作都不可用，完成后恢复。"""
@@ -837,7 +843,34 @@ class LLMSettingsDialog(QDialog):
         if self._overlay.isVisible():
             self._overlay.setGeometry(self.rect())
 
-    def _on_probe_done(self, errors: list) -> None:
+    def _on_probe_reply(self) -> None:
+        """全部探测请求结束时汇总错误；被取消的请求不视为校验失败。"""
+        if not all(r.isFinished() for r in self._probe_replies):
+            return
+        errors = []
+        for reply, probe in zip(self._probe_replies, self._probe_configs):
+            if reply.error() == QNetworkReply.NetworkError.NoError:
+                continue
+            if reply.error() == QNetworkReply.NetworkError.OperationCanceledError:
+                continue
+            detail = reply.errorString()
+            status = reply.attribute(
+                QNetworkRequest.Attribute.HttpStatusCodeAttribute
+            )
+            try:
+                data = json.loads(bytes(reply.readAll()))
+                if isinstance(data, dict) and data.get("error"):
+                    detail = str(data["error"])
+            except Exception:
+                pass
+            errors.append(
+                _friendly_probe_error(
+                    probe["name"],
+                    Exception(f"LLM provider returned HTTP {status}: {detail}"),
+                )
+            )
+        self._probe_replies = []
+        self._probe_configs = []
         self._set_frozen(False)
         if errors:
             self.status_label.setText("配置校验失败")
