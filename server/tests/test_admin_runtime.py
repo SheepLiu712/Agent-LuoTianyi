@@ -84,9 +84,6 @@ def minimal_config(tmp_path: Path) -> dict:
                 "characters": {"luotianyi": {"resource_path": str(tmp_path / "sing")}},
             },
             "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
-            "diary": {
-                "diary_llm": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}
-            },
         },
         "agent_runtime": {
             "character_registry": {
