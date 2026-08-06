@@ -651,6 +651,116 @@ describe('LlmSettingsScreen 保存→重载', () => {
     ).toBeTruthy();
   });
 
+  it('已保存服务商变化时提示重新选择，拒绝则跳转到另一配置页', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce({
+      providers: mockPresets,
+      llmModelCapabilities: {},
+      vlmModelCapabilities: {},
+    });
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    // 已保存的服务商/模型与当前列表不一致
+    await mockSecureStore.setItemAsync(
+      'llm_config',
+      JSON.stringify({
+        apiKey: 'sk-old',
+        provider: 'OldProvider',
+        model: 'old-model',
+        baseUrl: 'https://old.example.com/v1',
+        paramsText: '',
+      }),
+    );
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const promptCall = Alert.alert.mock.calls.find(
+      (call) => call[0] === '提示' && String(call[1]).includes('已变化'),
+    );
+    expect(promptCall).toBeTruthy();
+
+    // 拒绝重新选择 → 跳转到图片理解页
+    const skipBtn = promptCall![2].find(
+      (button: { text: string }) => button.text === '不重新选择',
+    );
+    await act(async () => {
+      skipBtn.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      tree!.root.findAll((node) => node.props.children === '2 / 2 · 图片理解模型')[0],
+    ).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('仅一页且已保存配置变化时，拒绝重新选择则关闭设置页', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce({
+      providers: [
+        {
+          name: 'DeepSeek',
+          base_url: 'https://api.deepseek.com/v1',
+          models: ['deepseek-v4-flash'],
+          vlm_models: [],
+        },
+      ],
+      llmModelCapabilities: {},
+      vlmModelCapabilities: {},
+    });
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await mockSecureStore.setItemAsync(
+      'llm_config',
+      JSON.stringify({
+        apiKey: 'sk-old',
+        provider: 'OldProvider',
+        model: 'old-model',
+        baseUrl: 'https://old.example.com/v1',
+        paramsText: '',
+      }),
+    );
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const promptCall = Alert.alert.mock.calls.find(
+      (call) => call[0] === '提示' && String(call[1]).includes('已变化'),
+    );
+    const skipBtn = promptCall![2].find(
+      (button: { text: string }) => button.text === '不重新选择',
+    );
+    await act(async () => {
+      skipBtn.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('探测失败时显示友好错误提示且不保存', async () => {
     const llmClient = jest.requireMock('../utils/llm_client') as {
       probeLlmConfig: jest.Mock;
