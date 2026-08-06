@@ -83,7 +83,6 @@ class _ProbeWorker(QThread):
                     cfg["base_url"],
                     cfg["api_key"],
                     cfg["model"],
-                    flags=cfg["flags"],
                     params=cfg["params"],
                 )
             except Exception as exc:
@@ -158,15 +157,14 @@ class LLMSettingsDialog(QDialog):
         text_layout = QVBoxLayout(text_tab)
         text_layout.setContentsMargins(0, 0, 0, 0)
         (self.provider_combo, self.api_key_input, self.model_combo, self.base_url_hint,
-         self.params_editor, self.enable_thinking_check, self.use_json_check) = self._build_form(text_layout, "对话")
+         self.params_editor) = self._build_form(text_layout, "对话")
         self.text_page = text_tab
 
         vlm_tab = QWidget()
         vlm_layout = QVBoxLayout(vlm_tab)
         vlm_layout.setContentsMargins(0, 0, 0, 0)
         (self.vlm_provider_combo, self.vlm_api_key_input, self.vlm_model_combo,
-         self.vlm_base_url_hint, self.vlm_params_editor,
-         self.vlm_enable_thinking_check, self.vlm_use_json_check) = self._build_form(vlm_layout, "图片理解")
+         self.vlm_base_url_hint, self.vlm_params_editor) = self._build_form(vlm_layout, "图片理解")
         self.vlm_page = vlm_tab
 
         self.stack.addWidget(text_tab)
@@ -228,13 +226,7 @@ class LLMSettingsDialog(QDialog):
     def _go_to_page(self, index: int) -> None:
         """翻页：切换当前配置页并同步导航按钮。"""
         index = 0 if index <= 0 else 1
-        if index == 1 and not any(
-            p.get("vlm_models") for p in self._llm_providers
-        ):
-            # VLM 服务商缺失：直接关闭并提示
-            QMessageBox.warning(self, "提示", "没有 VLM 服务商可用")
-            self.reject()
-            return
+        # 服务端启动已验证 VLM 接口存在，图片理解页必有可用服务商
         self.stack.setCurrentIndex(index)
         self.page_label.setText(
             "1 / 2 · 对话模型" if index == 0 else "2 / 2 · 图片理解模型"
@@ -277,12 +269,6 @@ class LLMSettingsDialog(QDialog):
             current_key = self.api_key_input.text().strip()
             current_provider = self.provider_combo.currentText().strip()
             current_model = self.model_combo.currentText().strip()
-            flags_match = (
-                self.enable_thinking_check.isChecked()
-                == credential.get_llm_flags().get("enable_thinking", False)
-                and self.use_json_check.isChecked()
-                == credential.get_llm_flags().get("use_json", False)
-            )
             params_match = self._params_match(
                 self.params_editor, credential.get_llm_params()
             )
@@ -293,18 +279,12 @@ class LLMSettingsDialog(QDialog):
             current_key = self.vlm_api_key_input.text().strip()
             current_provider = self.vlm_provider_combo.currentText().strip()
             current_model = self.vlm_model_combo.currentText().strip()
-            flags_match = (
-                self.vlm_enable_thinking_check.isChecked()
-                == credential.get_vlm_flags().get("enable_thinking", False)
-                and self.vlm_use_json_check.isChecked()
-                == credential.get_vlm_flags().get("use_json", False)
-            )
             params_match = self._params_match(
                 self.vlm_params_editor, credential.get_vlm_params()
             )
         if not (saved_key and saved_provider and saved_model):
             return False
-        if current_key != saved_key or not flags_match or not params_match:
+        if current_key != saved_key or not params_match:
             return False
         # 列表未加载时下拉框为空，无法比较服务商/模型，视为一致
         if (self.model_combo if index == 0 else self.vlm_model_combo).count() > 0:
@@ -382,21 +362,6 @@ class LLMSettingsDialog(QDialog):
         base_url_hint.setStyleSheet("font-size: 12px; color: #999;")
         layout.addWidget(base_url_hint)
 
-        flags_hint = QLabel(
-            "思考：仅模型支持思考参数时勾选；JSON：未勾选时相关功能改用服务端 API。"
-        )
-        flags_hint.setWordWrap(True)
-        flags_hint.setStyleSheet("font-size: 12px; color: #888;")
-        layout.addWidget(flags_hint)
-
-        enable_thinking_check = QCheckBox("支持思考模式")
-        enable_thinking_check.setStyleSheet("font-size: 13px;")
-        layout.addWidget(enable_thinking_check)
-
-        use_json_check = QCheckBox("支持 JSON 输出")
-        use_json_check.setStyleSheet("font-size: 13px;")
-        layout.addWidget(use_json_check)
-
         advanced_group = QGroupBox("高级设置")
         advanced_group.setCheckable(True)
         advanced_group.setChecked(False)
@@ -427,8 +392,6 @@ class LLMSettingsDialog(QDialog):
             model_combo,
             base_url_hint,
             params_editor,
-            enable_thinking_check,
-            use_json_check,
         )
 
     def _toggle_key_input(self, edit: QLineEdit) -> None:
@@ -466,13 +429,6 @@ class LLMSettingsDialog(QDialog):
         vlm_params = credential.get_vlm_params()
         if vlm_params:
             self.vlm_params_editor.setPlainText(json.dumps(vlm_params, ensure_ascii=False, indent=2))
-        text_flags = credential.get_llm_flags()
-        self.enable_thinking_check.setChecked(text_flags.get("enable_thinking", False))
-        self.use_json_check.setChecked(text_flags.get("use_json", False))
-        vlm_flags = credential.get_vlm_flags()
-        self.vlm_enable_thinking_check.setChecked(vlm_flags.get("enable_thinking", False))
-        self.vlm_use_json_check.setChecked(vlm_flags.get("use_json", False))
-
         self.status_label.setText("正在获取服务商列表…")
         self._providers_loader = _ProvidersLoader(self.network_client, parent=self)
         self._providers_loader.loaded.connect(self._on_providers_loaded)
@@ -499,9 +455,8 @@ class LLMSettingsDialog(QDialog):
         self.vlm_provider_combo.clear()
         self.vlm_provider_combo.addItems(vlm_names)
         self.vlm_provider_combo.setPlaceholderText("请选择服务商")
-        if not all_names:
-            self._on_llm_missing()
-            return
+        # 服务端启动时已验证 LLM/VLM 接口存在（缺失会注册失败），
+        # 下发列表必然非空，客户端不再做空列表验证
         text_index = self.provider_combo.findText(self._saved_provider or "")
         if text_index >= 0:
             self.provider_combo.setCurrentIndex(text_index)
@@ -531,22 +486,6 @@ class LLMSettingsDialog(QDialog):
         self._on_vlm_provider_changed(self.vlm_provider_combo.currentIndex())
         self._update_page_status()
         self._update_config_hint()
-
-    def _on_llm_missing(self) -> None:
-        """服务端未配置 LLM：询问是否继续配置图片模型。"""
-        box = QMessageBox(self)
-        box.setWindowTitle("提示")
-        box.setText("服务端未配置 LLM，是否继续配置图片模型？")
-        continue_btn = box.addButton(
-            "继续配置图片模型", QMessageBox.ButtonRole.AcceptRole
-        )
-        exit_btn = box.addButton("退出", QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(exit_btn)
-        box.exec()
-        if box.clickedButton() is continue_btn:
-            self._go_to_page(1)
-        else:
-            self.reject()
 
     def _on_providers_failed(self, message: str) -> None:
         self.status_label.setText(f"获取服务商列表失败：{message}")
@@ -623,13 +562,8 @@ class LLMSettingsDialog(QDialog):
                 "api_key": self.api_key_input.text().strip(),
                 "provider": self.provider_combo.currentText().strip(),
                 "model": self.model_combo.currentText().strip(),
-                "flags": {
-                    "enable_thinking": self.enable_thinking_check.isChecked(),
-                    "use_json": self.use_json_check.isChecked(),
-                },
                 "params": params,
                 "json_modules": self._llm_json_modules,
-                "use_json_checked": self.use_json_check.isChecked(),
             }
         params = self._parse_params(self.vlm_params_editor)
         if params is None:
@@ -640,13 +574,8 @@ class LLMSettingsDialog(QDialog):
             "api_key": self.vlm_api_key_input.text().strip(),
             "provider": self.vlm_provider_combo.currentText().strip(),
             "model": self.vlm_model_combo.currentText().strip(),
-            "flags": {
-                "enable_thinking": self.vlm_enable_thinking_check.isChecked(),
-                "use_json": self.vlm_use_json_check.isChecked(),
-            },
             "params": params,
             "json_modules": self._vlm_json_modules,
-            "use_json_checked": self.vlm_use_json_check.isChecked(),
         }
 
     def _on_advance(self) -> None:
@@ -689,8 +618,8 @@ class LLMSettingsDialog(QDialog):
     def _clear_saved_module(self, kind: str) -> bool:
         """清空该模块已保存的配置，使相关调用使用服务端 Key；返回是否清空成功。"""
         if kind == "text":
-            return credential.save_llm_config("", "", "", "", {}, False, False)
-        return credential.save_vlm_config("", "", "", "", {}, False, False)
+            return credential.save_llm_config("", "", "", "", {})
+        return credential.save_vlm_config("", "", "", "", {})
 
     def _update_config_hint(self) -> None:
         """按当前页 API Key 填写情况更新提示：未填 key 则使用服务端 Key。"""
@@ -728,7 +657,6 @@ class LLMSettingsDialog(QDialog):
                         "base_url": base_url,
                         "api_key": cfg["api_key"],
                         "model": cfg["model"],
-                        "flags": cfg["flags"],
                         "params": cfg["params"],
                     }
                 )
@@ -773,16 +701,15 @@ class LLMSettingsDialog(QDialog):
         model = cfg["model"]
         base_url = resolve_provider_base_url(provider, presets=self._llm_providers)
         params = cfg["params"]
-        flags = cfg["flags"]
         if kind == "text":
             ok = credential.save_llm_config(
                 api_key, provider, model, base_url,
-                params, flags["enable_thinking"], flags["use_json"],
+                params,
             )
         else:
             ok = credential.save_vlm_config(
                 api_key, provider, model, base_url,
-                params, flags["enable_thinking"], flags["use_json"],
+                params,
             )
         if not ok:
             # key 加密失败：二次确认后以明文整份重写
@@ -800,25 +727,15 @@ class LLMSettingsDialog(QDialog):
             if kind == "text":
                 credential.save_llm_config(
                     api_key, provider, model, base_url,
-                    params, flags["enable_thinking"], flags["use_json"],
-                    allow_plaintext=True,
+                    params, allow_plaintext=True,
                 )
             else:
                 credential.save_vlm_config(
                     api_key, provider, model, base_url,
-                    params, flags["enable_thinking"], flags["use_json"],
-                    allow_plaintext=True,
+                    params, allow_plaintext=True,
                 )
 
         configured = bool(api_key) and bool(provider) and bool(model)
-
-        if configured and not cfg["use_json_checked"] and cfg["json_modules"]:
-            QMessageBox.information(
-                self,
-                "提示",
-                f"{cfg['name']}未勾选“支持 JSON 输出”，以下功能将改用服务端 API 执行：\n"
-                + "、".join(sorted(set(cfg["json_modules"]))),
-            )
 
         QMessageBox.information(self, "成功", f"{cfg['name']}设置已保存")
         self.status_label.setText(f"{cfg['name']}设置已保存")

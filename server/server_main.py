@@ -260,17 +260,12 @@ async def get_public_key(system_runtime = Depends(get_runtime)):
 async def get_llm_providers(system_runtime = Depends(get_runtime)):
     """
     获取客户端可选的 LLM 服务商预设列表（name / base_url / model）。
-    仅下发包含 models 的服务商，保证客户端下拉一定可选；不包含任何密钥。
+    列表由已配置的 LLM/VLM 接口直接拼接，不包含任何密钥。
     """
-    providers = [
-        p
-        for p in system_runtime.llm_service.config.get("llm_providers", [])
-        if isinstance(p, dict)
-        and isinstance(p.get("models"), list)
-        and p["models"]
-    ]
     return {
-        "providers": providers,
+        "providers": system_runtime.llm_service.get_client_providers(),
+        "llm_model_capabilities": system_runtime.llm_service.get_llm_model_capabilities(),
+        "vlm_model_capabilities": system_runtime.llm_service.get_vlm_model_capabilities(),
         "llm_json_required_modules": system_runtime.llm_service.get_llm_json_required_modules(),
         "vlm_json_required_modules": system_runtime.llm_service.get_vlm_json_required_modules(),
     }

@@ -60,53 +60,7 @@
                     "top_p": 0.9
                 }
             }
-        },
-        "llm_providers": [
-            {
-                "name": "阿里云百炼（DashScope）",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "models": [
-                    "qwen3.5-plus",
-                    "qwen3.6-flash"
-                ],
-                "vlm_models": [
-                    "qwen3-vl-plus"
-                ]
-            },
-            {
-                "name": "DeepSeek",
-                "base_url": "https://api.deepseek.com/v1",
-                "models": [
-                    "deepseek-v4-flash",
-                    "deepseek-v4-pro"
-                ],
-                "vlm_models": []
-            },
-            {
-                "name": "硅基流动（SiliconFlow）",
-                "base_url": "https://api.siliconflow.cn/v1",
-                "models": [
-                    "Pro/deepseek-ai/DeepSeek-V3",
-                    "Qwen/Qwen2.5-7B-Instruct"
-                ],
-                "vlm_models": [
-                    "Qwen/Qwen2.5-VL-7B-Instruct",
-                    "Qwen/Qwen2-VL-72B-Instruct"
-                ]
-            },
-            {
-                "name": "OpenAI",
-                "base_url": "https://api.openai.com/v1",
-                "models": [
-                    "gpt-4o-mini",
-                    "gpt-4.1-mini"
-                ],
-                "vlm_models": [
-                    "gpt-4o-mini",
-                    "gpt-4.1-mini"
-                ]
-            }
-        ]
+        }
     },
     "database": {
         "sql_db_folder": "data/database",

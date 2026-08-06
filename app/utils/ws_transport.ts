@@ -8,6 +8,7 @@ import {
   buildChatCompletionsPayload,
   callLlmProvider,
   CLIENT_JSON_UNSUPPORTED_MARKER,
+  ensureProviderPresets,
 } from './llm_client';
 import { getLlmConfig, getVlmConfig } from './llm_key_storage';
 
@@ -620,8 +621,12 @@ export class WebSocketTransport {
           // 忽略损坏的参数缓存
         }
       }
-      const capableThinking = cfg.enableThinking;
-      const capableJson = cfg.useJson;
+      const providers = await ensureProviderPresets(server_config.BASE_URL);
+      const caps = isImage
+        ? providers.vlmModelCapabilities
+        : providers.llmModelCapabilities;
+      const capableThinking = caps[model]?.can_enable_thinking ?? false;
+      const capableJson = caps[model]?.can_use_json ?? false;
       const serverEnableThinking = Boolean(payload.enable_thinking);
       const serverUseJson = Boolean(payload.use_json);
       if (serverUseJson && !capableJson) {

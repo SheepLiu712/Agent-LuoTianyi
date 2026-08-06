@@ -9,7 +9,7 @@ from ..types import ConversationItem
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
 from ..safety import credential
-from ..utils.llm_client import fetch_llm_providers
+from ..utils.llm_client import fetch_llm_capabilities, fetch_llm_providers
 
 
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -32,6 +32,8 @@ class NetworkClient:
         self.message_token: str | None = None
         self.login_token: str | None = None
         self._llm_providers: list | None = None
+        self._llm_capabilities: dict | None = None
+        self._vlm_capabilities: dict | None = None
 
         self.auth_api = AuthApi(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
@@ -50,8 +52,8 @@ class NetworkClient:
             vlm_base_url_getter=lambda: credential.get_vlm_provider_base_url(),
             params_getter=lambda: credential.get_llm_params(),
             vlm_params_getter=lambda: credential.get_vlm_params(),
-            flags_getter=lambda: credential.get_llm_flags(),
-            vlm_flags_getter=lambda: credential.get_vlm_flags(),
+            llm_capabilities_getter=lambda: self.get_llm_capabilities(),
+            vlm_capabilities_getter=lambda: self.get_vlm_capabilities(),
         )
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
@@ -62,6 +64,8 @@ class NetworkClient:
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
         self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
         self._llm_providers = None
+        self._llm_capabilities = None
+        self._vlm_capabilities = None
         self.logger.info(f"Base URL updated to: {self.base_url}")
 
     def get_llm_providers(self, force_refresh: bool = False) -> list:
@@ -78,6 +82,28 @@ class NetworkClient:
                 self.logger.warning(f"获取 LLM 服务商列表失败: {exc}")
                 return []
         return self._llm_providers
+
+    def get_llm_capabilities(self) -> dict:
+        """获取服务端下发的 LLM 模型能力标注（带缓存，随服务商列表一起拉取）。"""
+        if self._llm_capabilities is None:
+            self._fetch_capabilities()
+        return self._llm_capabilities or {}
+
+    def get_vlm_capabilities(self) -> dict:
+        """获取服务端下发的 VLM 模型能力标注（带缓存）。"""
+        if self._vlm_capabilities is None:
+            self._fetch_capabilities()
+        return self._vlm_capabilities or {}
+
+    def _fetch_capabilities(self) -> None:
+        try:
+            llm_caps, vlm_caps = fetch_llm_capabilities(self.base_url)
+            self._llm_capabilities = llm_caps
+            self._vlm_capabilities = vlm_caps
+        except Exception as exc:
+            self.logger.warning(f"获取模型能力列表失败: {exc}")
+            self._llm_capabilities = {}
+            self._vlm_capabilities = {}
 
     def login(self, username: str, password: str, request_token: bool = False) -> Tuple[bool, str]:
         try:

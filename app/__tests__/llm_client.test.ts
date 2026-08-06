@@ -116,8 +116,10 @@ describe('fetchProviderPresets', () => {
     } as unknown as Response);
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const list = await fetchProviderPresets('https://server.example.com');
-    expect(list).toEqual(PRESETS);
+    const data = await fetchProviderPresets('https://server.example.com');
+    expect(data.providers).toEqual(PRESETS);
+    expect(data.llmModelCapabilities).toEqual({});
+    expect(data.vlmModelCapabilities).toEqual({});
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toBe('https://server.example.com/llm/providers');
   });

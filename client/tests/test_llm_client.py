@@ -582,7 +582,9 @@ async def test_handle_llm_request_follows_server_suggestions_when_capable(monkey
         api_key_getter=lambda: "sk-user",
         model_getter=lambda: "m",
         base_url_getter=lambda: "https://example.com/v1",
-        flags_getter=lambda: {"enable_thinking": True, "use_json": True},
+        llm_capabilities_getter=lambda: {
+            "m": {"can_enable_thinking": True, "can_use_json": True}
+        },
     )
     await transport._handle_llm_request(
         None,
@@ -617,7 +619,9 @@ async def test_handle_llm_request_skips_switch_when_server_does_not_suggest(monk
         api_key_getter=lambda: "sk-user",
         model_getter=lambda: "m",
         base_url_getter=lambda: "https://example.com/v1",
-        flags_getter=lambda: {"enable_thinking": True, "use_json": True},
+        llm_capabilities_getter=lambda: {
+            "m": {"can_enable_thinking": True, "can_use_json": True}
+        },
     )
     await transport._handle_llm_request(
         None,
@@ -652,7 +656,9 @@ async def test_handle_llm_request_json_needed_but_not_capable_errors(monkeypatch
         api_key_getter=lambda: "sk-user",
         model_getter=lambda: "m",
         base_url_getter=lambda: "https://example.com/v1",
-        flags_getter=lambda: {"enable_thinking": False, "use_json": False},
+        llm_capabilities_getter=lambda: {
+            "m": {"can_enable_thinking": False, "can_use_json": False}
+        },
     )
     fake_ws = FakeClientWs()
     transport._ws = fake_ws
@@ -693,8 +699,12 @@ async def test_handle_llm_request_uses_vlm_flags_for_image(monkeypatch):
         vlm_api_key_getter=lambda: "sk-vlm",
         base_url_getter=lambda: "https://example.com/v1",
         vlm_base_url_getter=lambda: "https://example.com/v1",
-        flags_getter=lambda: {"enable_thinking": False, "use_json": False},
-        vlm_flags_getter=lambda: {"enable_thinking": True, "use_json": True},
+        llm_capabilities_getter=lambda: {
+            "m": {"can_enable_thinking": False, "can_use_json": False}
+        },
+        vlm_capabilities_getter=lambda: {
+            "vlm-m": {"can_enable_thinking": True, "can_use_json": True}
+        },
     )
     await transport._handle_llm_request(
         None,
