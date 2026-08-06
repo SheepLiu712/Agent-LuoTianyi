@@ -28,7 +28,7 @@ async def run_sync_owned(
 
 def cancel_task_once(task: asyncio.Task) -> None:
     """Request cancellation without interrupting an in-progress owned cleanup wait."""
-    if task.done() or task.cancelling():
+    if task.done() or task.cancelled():
         return
     task.cancel()
 
