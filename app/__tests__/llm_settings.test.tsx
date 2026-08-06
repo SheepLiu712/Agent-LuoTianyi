@@ -517,6 +517,62 @@ describe('LlmSettingsScreen 保存→重载', () => {
     expect(llmClient.fetchJsonRequiredModules).toHaveBeenCalledTimes(2);
   });
 
+  it('纯 VLM 服务商不被全量过滤，图片理解页可渲染', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce({
+      providers: [
+        {
+          name: 'DeepSeek',
+          base_url: 'https://api.deepseek.com/v1',
+          models: ['deepseek-v4-flash'],
+          vlm_models: [],
+        },
+        {
+          name: 'VlmOnly',
+          base_url: 'https://vlm.example.com/v1',
+          models: [],
+          vlm_models: ['vlm-model'],
+        },
+      ],
+      llmModelCapabilities: {},
+      vlmModelCapabilities: {},
+    });
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await seedLlmConfig({ apiKey: 'sk-saved' });
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 对话页：纯 VLM 服务商不出现，普通对话服务商出现
+    expect(
+      tree!.root.findAll((node) => node.props.children === 'VlmOnly')[0],
+    ).toBeFalsy();
+    expect(
+      tree!.root.findAll((node) => node.props.children === 'DeepSeek')[0],
+    ).toBeTruthy();
+
+    // 下一步（配置未修改 → 直接翻页）进入图片理解页：纯 VLM 服务商出现
+    const nextText = tree!.root.findAll(
+      (node) => node.props.children === '下一步',
+    )[0];
+    await act(async () => {
+      await nextText.parent!.props.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      tree!.root.findAll((node) => node.props.children === 'VlmOnly')[0],
+    ).toBeTruthy();
+  });
+
   it('探测失败时显示友好错误提示且不保存', async () => {
     const llmClient = jest.requireMock('../utils/llm_client') as {
       probeLlmConfig: jest.Mock;
