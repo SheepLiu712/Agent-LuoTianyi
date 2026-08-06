@@ -106,6 +106,16 @@ def _parse_bool_payload(value: Any, *, default: bool = False) -> bool:
     return default
 
 
+def _parse_invite_code_payload(payload: dict[str, Any]) -> str:
+    value = payload.get("code")
+    if not isinstance(value, str):
+        raise HTTPException(status_code=400, detail="邀请码不能为空")
+    code = value.strip()
+    if not code or len(code) > 256:
+        raise HTTPException(status_code=400, detail="邀请码格式无效")
+    return code
+
+
 router = APIRouter(prefix="/admin/api", tags=["admin"])
 protected_router = APIRouter(dependencies=[Depends(require_admin)])
 
@@ -477,6 +487,88 @@ async def admin_dynamic_comments(
         created_after=_parse_admin_datetime_filter(created_after),
         created_before=_parse_admin_datetime_filter(created_before, end_of_day=True),
     )
+
+
+# ── 邀请码管理 ────────────────────────────────────────────────
+
+@protected_router.post("/invite-codes/query")
+async def admin_list_invite_codes(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+
+    try:
+        limit = int(payload.get("limit", 100))
+        offset = int(payload.get("offset", 0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="分页参数无效") from exc
+    if limit < 1 or limit > 500 or offset < 0:
+        raise HTTPException(status_code=400, detail="分页参数无效")
+
+    status = str(payload.get("status") or "").strip() or None
+    if status not in {None, "unused", "used", "disabled"}:
+        raise HTTPException(status_code=400, detail="邀请码状态无效")
+    search = str(payload.get("search") or "").strip() or None
+    if search is not None and len(search) > 128:
+        raise HTTPException(status_code=400, detail="搜索内容过长")
+    return runtime.database_manager.admin_list_invite_codes(
+        limit=limit,
+        offset=offset,
+        status=status,
+        search=search,
+    )
+
+
+@protected_router.post("/invite-codes/generate")
+async def admin_generate_invite_codes(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    raw_count = payload.get("count", 1)
+    if isinstance(raw_count, bool):
+        raise HTTPException(status_code=400, detail="生成数量需在 1-100 之间")
+    try:
+        count = int(raw_count)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="生成数量需在 1-100 之间") from exc
+    ok, result = runtime.database_manager.admin_generate_invite_codes(count=count)
+    if not ok:
+        raise HTTPException(status_code=400, detail=result)
+    return {"ok": True, "codes": result}
+
+
+@protected_router.post("/invite-codes/disable")
+async def admin_disable_invite_code(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    ok, message = runtime.database_manager.admin_disable_invite_code(
+        _parse_invite_code_payload(payload)
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"ok": True, "message": message}
+
+
+@protected_router.post("/invite-codes/delete")
+async def admin_delete_invite_code(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    ok, message = runtime.database_manager.admin_delete_invite_code(
+        _parse_invite_code_payload(payload)
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"ok": True, "message": message}
 
 
 router.include_router(protected_router)

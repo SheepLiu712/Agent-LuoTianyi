@@ -1031,3 +1031,51 @@ th {
   background: #fdecec;
   color: #a73636;
 }
+
+.invite-code-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.invite-code-copy {
+  border: 1px dashed #9fb2bf;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #f7fafc;
+  color: #1f2933;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+}
+
+.invite-code-copy:hover {
+  background: #eef3f7;
+  border-color: #2f5d7c;
+}
+
+.row-actions {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.row-actions button {
+  border: 1px solid #2f5d7c;
+  border-radius: 6px;
+  padding: 5px 10px;
+  background: #f7fafc;
+  color: #2f5d7c;
+  cursor: pointer;
+}
+
+.row-actions button:hover {
+  background: #eef3f7;
+}
+
+.row-actions button:disabled {
+  border-color: #9fb2bf;
+  background: #f0f3f6;
+  color: #9fb2bf;
+  cursor: not-allowed;
+  opacity: 0.68;
+}
