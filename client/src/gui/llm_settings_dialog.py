@@ -332,11 +332,41 @@ class LLMSettingsDialog(QDialog):
         box.setDefaultButton(reselect_btn)
         box.exec()
         if box.clickedButton() is reselect_btn:
+            self._select_available_config(kind)
             return
         if others:
             self._go_to_page(self._page_kinds.index(others[0]))
         else:
             self.reject()
+
+    def _select_available_config(self, kind: str) -> None:
+        """重新选择时按失效情况自动选中可用配置。"""
+        if kind == "text":
+            preset = self._find_preset(credential.get_provider() or "")
+            if preset is None:
+                # 服务商失效：服务商与模型一起选第一个可用
+                first = next(
+                    (p for p in self._llm_providers if p.get("models")), None
+                )
+                if first is not None:
+                    self.provider_combo.setCurrentIndex(
+                        self.provider_combo.findText(first["name"])
+                    )
+            elif preset.get("models"):
+                # 仅模型失效：保留服务商，选其第一个可用模型
+                self.model_combo.setCurrentIndex(0)
+        else:
+            preset = self._find_preset(credential.get_vlm_provider() or "")
+            if preset is None:
+                first = next(
+                    (p for p in self._llm_providers if p.get("vlm_models")), None
+                )
+                if first is not None:
+                    self.vlm_provider_combo.setCurrentIndex(
+                        self.vlm_provider_combo.findText(first["name"])
+                    )
+            elif preset.get("vlm_models"):
+                self.vlm_model_combo.setCurrentIndex(0)
 
     def _update_page_status(self) -> None:
         """当前页无额外状态提示（空列表由弹窗处理）。"""
