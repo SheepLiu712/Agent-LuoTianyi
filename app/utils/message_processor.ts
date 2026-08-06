@@ -128,6 +128,9 @@ export class MessageProcessor {
   private lastTypingSentAt = 0;
   private readonly serverAudioFinishWaiters: (() => void)[] = [];
   private incomingMessageChain: Promise<void> = Promise.resolve();
+  // 消息级幂等：uuid -> 已处理过的分片包签名集合（text+audio+expression+final），用于跳过服务端 at-least-once 重发的重复分片
+  private readonly seenPacketsByUuid = new Map<string, Set<string>>();
+  private static readonly MAX_TRACKED_MESSAGES = 50;
 
   constructor(
     networkClient: NetworkClient,
@@ -352,6 +355,11 @@ export class MessageProcessor {
   }
 
   onAgentMessage(payload: AgentMessagePayload) {
+    // 消息级幂等：服务端 at-least-once 重发的重复分片在入口直接跳过，
+    // 展示与音频两条路径都不再处理（若只在展示路径去重，重复音频仍会被串行链消费）。
+    if (this.isDuplicatePacket(payload.uuid || `agent-${Date.now()}`, payload)) {
+      return;
+    }
     // 文本与表情展示即时执行，不被上一句的音频完成/落盘阻塞，
     // 保证多句回复可以流式渲染出全部句子（而不是只显示第一句）。
     this.handleAgentMessageDisplay(payload);
@@ -363,6 +371,36 @@ export class MessageProcessor {
           error: getErrorMessage(error),
         });
       });
+  }
+
+  private isDuplicatePacket(convUuid: string, payload: AgentMessagePayload): boolean {
+    // 签名覆盖 text/audio/expression/is_final_package：同一 uuid 的合法分片内容互不相同，
+    // 只有服务端 at-least-once 重发的完全相同的分片才会命中同一签名。
+    const signature = [
+      payload.text || '',
+      payload.audio || '',
+      payload.expression || '',
+      payload.is_final_package ? 'F' : '',
+    ].join('|');
+
+    let seen = this.seenPacketsByUuid.get(convUuid);
+    if (!seen) {
+      seen = new Set();
+      this.seenPacketsByUuid.set(convUuid, seen);
+      // 防止 uuid 集合无限增长：超出上限时按插入顺序淘汰最旧的 uuid
+      if (this.seenPacketsByUuid.size > MessageProcessor.MAX_TRACKED_MESSAGES) {
+        const oldestKey = this.seenPacketsByUuid.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.seenPacketsByUuid.delete(oldestKey);
+        }
+      }
+    }
+    if (seen.has(signature)) {
+      addDebugTrace('agent', 'duplicate agent_message packet skipped', { uuid: convUuid });
+      return true;
+    }
+    seen.add(signature);
+    return false;
   }
 
   private handleAgentMessageDisplay(payload: AgentMessagePayload) {

@@ -57,7 +57,9 @@ export const useChatLogic = (
           const target = prev[index];
           const merged: ChatMessage = {
             ...target,
-            content: payload.text ? `${target.content}${payload.text}` : target.content,
+            // 服务端约定文本只在每句话的首包携带（global_speaking_worker 首个分片带 text）。
+            // 同 uuid 的重复文本包（at-least-once 重发）直接忽略，避免"同一句话显示两次"。
+            content: payload.text && !target.content ? payload.text : target.content,
             audioAvailable: payload.audio ? true : target.audioAvailable,
             audioLocalUri: payload.audio || target.audioLocalUri,
           };
@@ -345,11 +347,15 @@ export const useChatLogic = (
 
     setMessages((prev) => {
       const nowScrollIndex = prev.length - 1;
-      const normalized = newMessages.map((msg) => ({
-        ...msg,
-        sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
-        audioPlayState: msg.audioPlayState || 'idle',
-      }));
+      // 按 uuid 去重：历史消息与实时消息（或分页重叠）可能包含同一条消息，避免重复渲染
+      const existingUuids = new Set(prev.map((msg) => msg.uuid));
+      const normalized = newMessages
+        .filter((msg) => !existingUuids.has(msg.uuid))
+        .map((msg) => ({
+          ...msg,
+          sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
+          audioPlayState: msg.audioPlayState || 'idle',
+        }));
       const next = [...prev, ...normalized.reverse()];
 
       if (nowScrollIndex >= 0) {
