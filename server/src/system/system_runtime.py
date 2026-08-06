@@ -48,6 +48,7 @@ class SystemRuntime:
         world: WorldRuntime | None = None
         agent_runtime: AgentRuntime | None = None
         runtime: SystemRuntime | None = None
+        llm_service: LLMService | None = None
 
         try:
             # 1. 初始化观测服务，后续模块可统一写入指标和异常日志
@@ -161,6 +162,8 @@ class SystemRuntime:
         agent_runtime: "AgentRuntime | None",
         observability: "ObservabilityService | None",
         owns_observability: bool,
+        llm_service: "LLMService | None" = None,
+        client_llm_executor: "ClientLLMExecutor | None" = None,
     ) -> None:
         """在初始化失败的情况下，尝试回滚初始化失败的系统运行时，关闭已启动的后台服务和资源。"""
         errors: list[str] = []
