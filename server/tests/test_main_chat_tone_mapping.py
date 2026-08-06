@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pytest
+
 server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
@@ -21,11 +23,35 @@ def build_main_chat_with_mapping() -> MainChat:
     main_chat.logger = FakeLogger()
     main_chat.llm_tone_to_tts_tone = {
         "中性": "happy",
+        "开心": "happy",
+        "喜欢": "happy",
         "温柔": "tender",
+        "伤心": "sad",
+        "生气": "angry",
+        "狂喜": "happy",
+        "暴怒": "angry",
+        "悲痛": "sad",
+        "惊恐": "sad",
     }
     main_chat.llm_tone_to_l2d_expression = {
         "中性": "微笑脸",
+        "开心": "微笑脸",
+        "喜欢": "喜欢脸",
         "温柔": "温柔脸",
+        "伤心": "难过脸",
+        "生气": "生气脸",
+        "狂喜": "卖萌",
+        "暴怒": "生气脸",
+        "悲痛": "难过脸",
+        "惊恐": "害怕脸",
+    }
+    main_chat.llm_tone_aliases = {
+        "高兴": "开心",
+        "快乐": "开心",
+        "开开心心": "开心",
+        "不开心": "伤心",
+        "不高兴": "伤心",
+        "难过": "伤心",
     }
     return main_chat
 
@@ -58,6 +84,114 @@ def test_main_chat_tone_mapping_falls_back_when_mapping_is_missing():
 
     assert expression == "微笑脸"
     assert tts_tone == "normal"
+
+
+def test_main_chat_tone_mapping_resolves_alias_to_canonical():
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone("高兴")
+
+    assert expression == "微笑脸"
+    assert tts_tone == "happy"
+
+
+def test_main_chat_tone_mapping_resolves_canonical_expression():
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone("喜欢")
+
+    assert expression == "喜欢脸"
+    assert tts_tone == "happy"
+
+
+def test_main_chat_tone_mapping_normalizes_brackets_and_punctuation():
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone("[开心。]")
+
+    assert expression == "微笑脸"
+    assert tts_tone == "happy"
+
+
+@pytest.mark.parametrize(
+    ("label", "expected_expression", "expected_tone"),
+    [
+        ("有点伤心", "难过脸", "sad"),
+        ("开心地", "微笑脸", "happy"),
+        ("很开心", "微笑脸", "happy"),
+        ("很不开心", "难过脸", "sad"),
+        ("非常不高兴", "难过脸", "sad"),
+        ("真的特别开开心心呢", "微笑脸", "happy"),
+    ],
+)
+def test_main_chat_tone_mapping_resolves_only_safe_decorated_labels(
+    label,
+    expected_expression,
+    expected_tone,
+):
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone(label)
+
+    assert expression == expected_expression
+    assert tts_tone == expected_tone
+
+
+def test_main_chat_tone_mapping_maps_extreme_joy():
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone("狂喜")
+
+    assert expression == "卖萌"
+    assert tts_tone == "happy"
+
+
+def test_main_chat_tone_mapping_maps_extreme_anger():
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone("暴怒")
+
+    assert expression == "生气脸"
+    assert tts_tone == "angry"
+
+
+def test_main_chat_tone_mapping_maps_extreme_sadness():
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone("悲痛")
+
+    assert expression == "难过脸"
+    assert tts_tone == "sad"
+
+
+@pytest.mark.parametrize("label", ["开心又伤心", "伤", "这是开心"])
+def test_main_chat_tone_mapping_ambiguous_or_partial_label_falls_back(label):
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone(label)
+
+    assert expression == "微笑脸"
+    assert tts_tone == "happy"
+    assert main_chat.logger.warnings
+
+
+def test_main_chat_tone_mapping_unknown_tone_falls_back_to_default():
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone("量子态")
+
+    assert expression == "微笑脸"
+    assert tts_tone == "happy"
+    assert main_chat.logger.warnings, "expected a warning for unknown tone"
+
+
+def test_main_chat_tone_mapping_maps_extreme_fear():
+    main_chat = build_main_chat_with_mapping()
+
+    expression, tts_tone = main_chat._get_expressions_and_tts_tone("惊恐")
+
+    assert expression == "害怕脸"
+    assert tts_tone == "sad"
 
 
 def test_one_sentence_chat_allows_default_tts_tone():

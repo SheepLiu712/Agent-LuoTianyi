@@ -25,6 +25,38 @@ DEFAULT_LLM_FAILURE_MAX_ATTEMPTS = 2
 MAX_LLM_FAILURE_ATTEMPTS = 3
 DEFAULT_LLM_FAILURE_RETRY_DELAY_SECONDS = 0.2
 MAX_LLM_FAILURE_RETRY_DELAY_SECONDS = 2.0
+TONE_MODIFIER_PREFIXES = (
+    "真的",
+    "真是",
+    "实在",
+    "简直",
+    "非常",
+    "十分",
+    "特别",
+    "格外",
+    "极其",
+    "超级",
+    "有点",
+    "有些",
+    "比较",
+    "稍微",
+    "略微",
+    "这么",
+    "那么",
+    "很",
+)
+TONE_MODIFIER_SUFFIXES = (
+    "的感觉",
+    "的情绪",
+    "的心情",
+    "情绪",
+    "心情",
+    "地",
+    "的",
+    "呢",
+    "啊",
+    "呀",
+)
 
 
 @dataclass
@@ -281,6 +313,7 @@ class MainChat:
         self.llm_tone_mapping_file = self.character_profile.llm_tone_mapping_file
         self.llm_tone_to_tts_tone: Dict[str, str] = {}
         self.llm_tone_to_l2d_expression: Dict[str, str] = {}
+        self.llm_tone_aliases: Dict[str, str] = {}
         if not self.llm_tone_mapping_file:
             raise ValueError(f"No llm_tone_mapping_file configured for character {self.character_profile.character_id}")
 
@@ -302,6 +335,10 @@ class MainChat:
                     str(k).strip().lower(): str(v).strip()
                     for k, v in mapping.get("llm_tone_to_l2d_expression", {}).items()
                 }
+                self.llm_tone_aliases = {
+                    str(k).strip().lower(): str(v).strip().lower()
+                    for k, v in mapping.get("tone_aliases", {}).items()
+                }
         except Exception as e:
             self.logger.warning(f"Failed to load LLM tone mapping: {e}")
 
@@ -313,19 +350,77 @@ class MainChat:
         )
 
     def _get_expressions_and_tts_tone(self, tone: str) -> Tuple[str, str]:
-        normalized_tone = (tone or "").lower().strip().strip("'\"“”‘’")
+        normalized_tone = self._normalize_tone_label(tone)
         default_key = DEFAULT_LLM_TONE.lower()
         if not normalized_tone:
             self.logger.warning(f"LLM tone is empty, falling back to {DEFAULT_LLM_TONE}.")
             normalized_tone = default_key
-        if normalized_tone not in self.llm_tone_to_tts_tone:
+        resolved_tone = self._resolve_tone_label(normalized_tone)
+        if resolved_tone is None:
             self.logger.warning(f"LLM tone '{tone}' not found, falling back to {DEFAULT_LLM_TONE}.")
+            resolved_tone = default_key
         tts_tone = self.llm_tone_to_tts_tone.get(
-            normalized_tone,
+            resolved_tone,
             self.llm_tone_to_tts_tone.get(default_key, DEFAULT_TTS_TONE),
         )
         expression = self.llm_tone_to_l2d_expression.get(
-            normalized_tone,
+            resolved_tone,
             self.llm_tone_to_l2d_expression.get(default_key, DEFAULT_EXPRESSION),
         )
         return expression, tts_tone
+
+    @staticmethod
+    def _normalize_tone_label(tone: str) -> str:
+        """容错归一化情绪标签：去引号/括号/标点、多余空白并统一小写。"""
+        if not tone:
+            return ""
+        text = str(tone).strip().lower()
+        text = text.strip("[]()（）【】{}'\"“”‘’")
+        text = text.strip(" \t\r\n。，、；：！？!?.;:…·~～")
+        return "".join(text.split())
+
+    def _resolve_tone_label(self, normalized_tone: str) -> Optional[str]:
+        """将归一化后的情绪标签解析为映射表中的正式情绪。
+
+        只接受精确标签或白名单修饰词包裹的标签，避免把“不开心”反向匹配为“开心”。
+        """
+        if not normalized_tone:
+            return DEFAULT_LLM_TONE.lower()
+        if normalized_tone in self.llm_tone_to_tts_tone:
+            return normalized_tone
+        aliases = getattr(self, "llm_tone_aliases", {})
+        exact_alias = aliases.get(normalized_tone)
+        if exact_alias in self.llm_tone_to_tts_tone:
+            return exact_alias
+
+        undecorated_tone = self._strip_tone_modifiers(normalized_tone)
+        if undecorated_tone == normalized_tone:
+            return None
+
+        for alias in sorted(aliases, key=len, reverse=True):
+            if undecorated_tone == alias:
+                canonical_tone = aliases[alias]
+                if canonical_tone in self.llm_tone_to_tts_tone:
+                    return canonical_tone
+                return None
+        if undecorated_tone in self.llm_tone_to_tts_tone:
+            return undecorated_tone
+        return None
+
+    @staticmethod
+    def _strip_tone_modifiers(tone: str) -> str:
+        stripped = tone
+        changed = True
+        while stripped and changed:
+            changed = False
+            for prefix in sorted(TONE_MODIFIER_PREFIXES, key=len, reverse=True):
+                if stripped.startswith(prefix):
+                    stripped = stripped[len(prefix):]
+                    changed = True
+                    break
+            for suffix in sorted(TONE_MODIFIER_SUFFIXES, key=len, reverse=True):
+                if stripped.endswith(suffix):
+                    stripped = stripped[:-len(suffix)]
+                    changed = True
+                    break
+        return stripped
