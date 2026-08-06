@@ -761,6 +761,131 @@ describe('LlmSettingsScreen 保存→重载', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('点击重新选择时自动选中第一个可用服务商与模型', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce({
+      providers: mockPresets,
+      llmModelCapabilities: {},
+      vlmModelCapabilities: {},
+    });
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await mockSecureStore.setItemAsync(
+      'llm_config',
+      JSON.stringify({
+        apiKey: 'sk-old',
+        provider: 'OldProvider',
+        model: 'old-model',
+        baseUrl: 'https://old.example.com/v1',
+        paramsText: '',
+      }),
+    );
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const promptCall = Alert.alert.mock.calls.find(
+      (call) => call[0] === '提示' && String(call[1]).includes('已变化'),
+    );
+    const reselectBtn = promptCall![2].find(
+      (button: { text: string }) => button.text === '重新选择',
+    );
+    await act(async () => {
+      reselectBtn.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 自动选中第一个可用服务商的第一个模型
+    expect(
+      tree!.root.findAll((node) => node.props.children === 'deepseek-v4-flash')[0],
+    ).toBeTruthy();
+    expect(
+      tree!.root.findAll((node) => node.props.children === 'old-model')[0],
+    ).toBeFalsy();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('仅模型失效时重新选择只换模型，保留服务商', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce({
+      providers: [
+        {
+          name: 'Another',
+          base_url: 'https://another.example.com/v1',
+          models: ['another-model'],
+          vlm_models: [],
+        },
+        {
+          name: 'DeepSeek',
+          base_url: 'https://api.deepseek.com/v1',
+          models: ['deepseek-v4-flash'],
+          vlm_models: [],
+        },
+      ],
+      llmModelCapabilities: {},
+      vlmModelCapabilities: {},
+    });
+    const Alert = (jest.requireMock('react-native') as {
+      Alert: { alert: jest.Mock };
+    }).Alert;
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    // 服务商 DeepSeek 仍在列表，但模型 old-model 已不在其模型列表
+    await mockSecureStore.setItemAsync(
+      'llm_config',
+      JSON.stringify({
+        apiKey: 'sk',
+        provider: 'DeepSeek',
+        model: 'old-model',
+        baseUrl: 'https://api.deepseek.com/v1',
+        paramsText: '',
+      }),
+    );
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const promptCall = Alert.alert.mock.calls.find(
+      (call) => call[0] === '提示' && String(call[1]).includes('已变化'),
+    );
+    const reselectBtn = promptCall![2].find(
+      (button: { text: string }) => button.text === '重新选择',
+    );
+    await act(async () => {
+      reselectBtn.onPress();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 保留 DeepSeek，只把模型换成其第一个可用模型
+    expect(
+      tree!.root.findAll((node) => node.props.children === 'deepseek-v4-flash')[0],
+    ).toBeTruthy();
+    expect(
+      tree!.root.findAll((node) => node.props.children === 'another-model')[0],
+    ).toBeFalsy();
+  });
+
   it('探测失败时显示友好错误提示且不保存', async () => {
     const llmClient = jest.requireMock('../utils/llm_client') as {
       probeLlmConfig: jest.Mock;

@@ -311,7 +311,37 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
             }
           },
         },
-        { text: '重新选择', onPress: () => {} },
+        {
+          text: '重新选择',
+          onPress: () => {
+            const savedProvider =
+              kind === 'text' ? saved?.llmProvider : saved?.vlmProvider;
+            const preset = list.find((p) => p.name === savedProvider);
+            if (preset) {
+              // 仅模型失效：保留服务商，自动选其第一个可用模型
+              const models =
+                kind === 'text' ? (preset.models ?? []) : (preset.vlm_models ?? []);
+              if (kind === 'text') {
+                setLlmModel(models[0] ?? '');
+              } else {
+                setVlmModel(models[0] ?? '');
+              }
+            } else {
+              // 服务商失效：服务商与模型一起选第一个可用
+              const first = list[0];
+              if (!first) {
+                return;
+              }
+              if (kind === 'text') {
+                setLlmProvider(first.name);
+                setLlmModel(first.models?.[0] ?? '');
+              } else {
+                setVlmProvider(first.name);
+                setVlmModel(first.vlm_models?.[0] ?? '');
+              }
+            }
+          },
+        },
       ],
     );
   };
