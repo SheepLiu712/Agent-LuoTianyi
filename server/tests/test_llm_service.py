@@ -62,6 +62,51 @@ class TestLLMService:
             assert "temperature" in info, f"接口 {name} 缺少 'temperature' 字段"
 
         assert llm_service.prompt_manager is not None, "PromptManager 应该被正确初始化"
+
+    def test_get_client_providers_derived_from_interfaces(self, llm_service: LLMService):
+        """服务商列表应由 LLM/VLM 接口配置拼接，且每个服务商至少在一种能力下可用。"""
+        providers = llm_service.get_client_providers()
+        assert isinstance(providers, list)
+        assert len(providers) > 0
+
+        by_name = {}
+        for provider in providers:
+            assert provider["name"]
+            assert provider["base_url"]
+            assert isinstance(provider["models"], list)
+            assert isinstance(provider["vlm_models"], list)
+            assert provider["models"] or provider["vlm_models"]
+            by_name[provider["name"]] = provider
+
+        # LLM 接口的 model 应出现在对应服务商的 models 中
+        llm_info = llm_service.get_llm_interface_info()
+        for name, info in llm_info.items():
+            assert info["model"] in by_name[name]["models"]
+        # VLM 接口的 model 应出现在对应服务商的 vlm_models 中
+        vlm_info = llm_service.get_vlm_interface_info()
+        for name, info in vlm_info.items():
+            assert info["model"] in by_name[name]["vlm_models"]
+
+    def test_model_capabilities_from_interfaces(self, llm_service: LLMService):
+        """模型能力标注应由接口配置的 can_* 字段下发，作为客户端唯一能力来源。"""
+        llm_caps = llm_service.get_llm_model_capabilities()
+        vlm_caps = llm_service.get_vlm_model_capabilities()
+        assert llm_caps
+        assert vlm_caps
+        for caps in (*llm_caps.values(), *vlm_caps.values()):
+            assert "can_enable_thinking" in caps
+            assert "can_use_json" in caps
+        cfg = llm_service.config
+        for entry in (cfg.get("available_llms") or {}).values():
+            if isinstance(entry, dict) and entry.get("model"):
+                assert llm_caps[entry["model"]]["can_use_json"] == bool(
+                    entry.get("can_use_json", False)
+                )
+        for entry in (cfg.get("available_vlms") or {}).values():
+            if isinstance(entry, dict) and entry.get("model"):
+                assert vlm_caps[entry["model"]]["can_enable_thinking"] == bool(
+                    entry.get("can_enable_thinking", False)
+                )
         templates =  llm_service.prompt_manager.list_templates()
         assert len(templates) > 0, "PromptManager 应该加载至少一个模板"
 

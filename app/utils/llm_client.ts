@@ -18,16 +18,27 @@ export interface LlmProviderPreset {
   vlm_models: string[];
 }
 
-let cachedProviderPresets: LlmProviderPreset[] = [];
+export interface LlmModelCapability {
+  can_enable_thinking: boolean;
+  can_use_json: boolean;
+}
+
+export interface LlmProvidersResponse {
+  providers: LlmProviderPreset[];
+  llmModelCapabilities: Record<string, LlmModelCapability>;
+  vlmModelCapabilities: Record<string, LlmModelCapability>;
+}
+
+let cachedProvidersResponse: LlmProvidersResponse | null = null;
 
 export function getProviderPresets(): LlmProviderPreset[] {
-  return cachedProviderPresets;
+  return cachedProvidersResponse?.providers ?? [];
 }
 
 export async function fetchProviderPresets(
   serverBaseUrl: string,
   timeoutMs = 15000,
-): Promise<LlmProviderPreset[]> {
+): Promise<LlmProvidersResponse> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -37,14 +48,23 @@ export async function fetchProviderPresets(
     if (!resp.ok) {
       throw new Error(`HTTP ${resp.status}`);
     }
-    const data = (await resp.json()) as { providers?: unknown };
+    const data = (await resp.json()) as Record<string, unknown>;
     const list = Array.isArray(data?.providers)
       ? (data.providers as LlmProviderPreset[]).filter(
           (p) => p && typeof p.name === 'string',
         )
       : [];
-    cachedProviderPresets = list;
-    return list;
+    const result: LlmProvidersResponse = {
+      providers: list,
+      llmModelCapabilities:
+        (data.llm_model_capabilities as Record<string, LlmModelCapability>) ??
+        {},
+      vlmModelCapabilities:
+        (data.vlm_model_capabilities as Record<string, LlmModelCapability>) ??
+        {},
+    };
+    cachedProvidersResponse = result;
+    return result;
   } finally {
     clearTimeout(timer);
   }
@@ -52,11 +72,11 @@ export async function fetchProviderPresets(
 
 export async function ensureProviderPresets(
   serverBaseUrl: string,
-): Promise<LlmProviderPreset[]> {
-  if (cachedProviderPresets.length === 0) {
+): Promise<LlmProvidersResponse> {
+  if (!cachedProvidersResponse) {
     return fetchProviderPresets(serverBaseUrl);
   }
-  return cachedProviderPresets;
+  return cachedProvidersResponse;
 }
 
 export async function fetchJsonRequiredModules(
@@ -105,7 +125,7 @@ export async function fetchJsonRequiredModules(
 
 export function resolveProviderBaseUrl(
   providerName?: string | null,
-  presets: LlmProviderPreset[] = cachedProviderPresets,
+  presets: LlmProviderPreset[] = cachedProvidersResponse?.providers ?? [],
 ): string {
   const name = providerName || '';
   for (const preset of presets) {
@@ -118,7 +138,7 @@ export function resolveProviderBaseUrl(
 
 export function resolveProviderModel(
   providerName?: string | null,
-  presets: LlmProviderPreset[] = cachedProviderPresets,
+  presets: LlmProviderPreset[] = cachedProvidersResponse?.providers ?? [],
 ): string {
   // 返回默认文本模型（models 列表第一项）
   const name = providerName || '';
@@ -132,7 +152,7 @@ export function resolveProviderModel(
 
 export function resolveProviderVlmModel(
   providerName?: string | null,
-  presets: LlmProviderPreset[] = cachedProviderPresets,
+  presets: LlmProviderPreset[] = cachedProvidersResponse?.providers ?? [],
 ): string {
   // 返回默认图片理解模型（vlm_models 列表第一项）
   const name = providerName || '';

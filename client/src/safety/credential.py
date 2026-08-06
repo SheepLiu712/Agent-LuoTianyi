@@ -624,8 +624,6 @@ def _apply_llm_module_fields(
     model: str,
     base_url: str,
     params: dict,
-    enable_thinking: bool,
-    use_json: bool,
     allow_plaintext: bool,
 ) -> bool:
     """把某模块完整配置写入凭据字典；key 加密失败且不允许明文时返回 False。"""
@@ -654,8 +652,6 @@ def _apply_llm_module_fields(
     _set_or_pop(f"{module}_model", model)
     _set_or_pop(f"{module}_provider_base_url", base_url)
     _set_or_pop(f"{module}_params", params)
-    data[f"{module}_enable_thinking"] = bool(enable_thinking)
-    data[f"{module}_use_json"] = bool(use_json)
     return True
 
 
@@ -665,8 +661,6 @@ def save_llm_config(
     model: str,
     base_url: str,
     params: dict,
-    enable_thinking: bool,
-    use_json: bool,
     allow_plaintext: bool = False,
 ) -> bool:
     """原子保存对话模块完整配置（单次读改写 + 临时文件替换）。"""
@@ -685,8 +679,6 @@ def save_llm_config(
             model=model,
             base_url=base_url,
             params=params,
-            enable_thinking=enable_thinking,
-            use_json=use_json,
             allow_plaintext=allow_plaintext,
         ):
             return False
@@ -703,8 +695,6 @@ def save_vlm_config(
     model: str,
     base_url: str,
     params: dict,
-    enable_thinking: bool,
-    use_json: bool,
     allow_plaintext: bool = False,
 ) -> bool:
     """原子保存图片理解模块完整配置（单次读改写 + 临时文件替换）。"""
@@ -723,8 +713,6 @@ def save_vlm_config(
             model=model,
             base_url=base_url,
             params=params,
-            enable_thinking=enable_thinking,
-            use_json=use_json,
             allow_plaintext=allow_plaintext,
         ):
             return False

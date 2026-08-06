@@ -117,6 +117,58 @@ class LLMService:
             for name, interface in self.vlm_interfaces.items()
         }
 
+    def get_llm_model_capabilities(self) -> Dict[str, Dict]:
+        """返回各 LLM 模型的能力标注（思考/JSON），作为客户端唯一能力来源。"""
+        return {
+            str(cfg.get("model")): {
+                "can_enable_thinking": bool(cfg.get("can_enable_thinking", False)),
+                "can_use_json": bool(cfg.get("can_use_json", False)),
+            }
+            for cfg in (self.llms_config or {}).values()
+            if isinstance(cfg, dict) and isinstance(cfg.get("model"), str)
+        }
+
+    def get_vlm_model_capabilities(self) -> Dict[str, Dict]:
+        """返回各 VLM 模型的能力标注（思考/JSON），作为客户端唯一能力来源。"""
+        return {
+            str(cfg.get("model")): {
+                "can_enable_thinking": bool(cfg.get("can_enable_thinking", False)),
+                "can_use_json": bool(cfg.get("can_use_json", False)),
+            }
+            for cfg in (self.vlms_config or {}).values()
+            if isinstance(cfg, dict) and isinstance(cfg.get("model"), str)
+        }
+
+    def get_client_providers(self) -> list:
+        """由已配置的 LLM/VLM 接口拼接客户端可选服务商列表。
+
+        不再维护独立的 llm_providers 配置：每个接口按名称去重合并，
+        LLM 接口提供 models，VLM 接口提供 vlm_models，均取接口配置中的
+        model 与 base_url。
+        """
+        providers: Dict[str, Dict] = {}
+
+        def _merge(name: str, cfg: Dict, key: str) -> None:
+            if not isinstance(cfg, dict):
+                return
+            entry = providers.setdefault(
+                name,
+                {"name": name, "base_url": "", "models": [], "vlm_models": []},
+            )
+            if cfg.get("base_url"):
+                entry["base_url"] = str(cfg["base_url"])
+            model = cfg.get("model")
+            if isinstance(model, str) and model and model not in entry[key]:
+                entry[key].append(model)
+
+        for name, cfg in (self.llms_config or {}).items():
+            _merge(name, cfg, "models")
+        for name, cfg in (self.vlms_config or {}).items():
+            _merge(name, cfg, "vlm_models")
+        return [
+            p for p in providers.values() if p["models"] or p["vlm_models"]
+        ]
+
     def _create_llm_interfaces(self) -> Dict[str, LLMAPIInterface]:
         llm_interfaces = {}
         for llm_name, llm_config in self.llms_config.items():

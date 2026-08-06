@@ -17,8 +17,6 @@ export interface LlmConfigSnapshot {
   model: string;
   baseUrl: string;
   paramsText: string;
-  enableThinking: boolean;
-  useJson: boolean;
 }
 
 async function readConfig(key: string): Promise<LlmConfigSnapshot | null> {

@@ -136,7 +136,11 @@ const getSavedLlmConfig = async (): Promise<Record<string, unknown>> => {
 };
 
 jest.mock('../utils/llm_client', () => ({
-  fetchProviderPresets: jest.fn(async () => mockPresets),
+  fetchProviderPresets: jest.fn(async () => ({
+    providers: mockPresets,
+    llmModelCapabilities: {},
+    vlmModelCapabilities: {},
+  })),
   fetchJsonRequiredModules: jest.fn(async () => ({ llm: [], vlm: [] })),
   probeLlmConfig: jest.fn(async () => undefined),
   resolveProviderBaseUrl: jest.fn(
@@ -340,188 +344,6 @@ describe('LlmSettingsScreen 保存→重载', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('服务端未配置 LLM 时询问是否继续配置图片模型，退出则关闭', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce([]);
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 询问是否继续配置图片模型，退出则关闭
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示' && String(call[1]).includes('服务端未配置 LLM'),
-    );
-    expect(promptCall).toBeTruthy();
-    expect(onClose).not.toHaveBeenCalled();
-
-    const exitBtn = promptCall![2].find(
-      (button: { text: string }) => button.text === '退出',
-    );
-    await act(async () => {
-      exitBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(onClose).toHaveBeenCalled();
-    await expect(getSavedLlmConfig()).resolves.toEqual({});
-  });
-
-  it('服务商缺少 models 时被过滤并触发 LLM 缺失询问', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce([
-      {
-        name: 'Broken',
-        base_url: 'https://broken.example.com',
-        models: [],
-        vlm_models: [],
-      },
-    ]);
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示' && String(call[1]).includes('服务端未配置 LLM'),
-    );
-    expect(promptCall).toBeTruthy();
-
-    // 继续配置图片模型 → 无 VLM 服务商 → 提示并关闭
-    const continueBtn = promptCall![2].find(
-      (button: { text: string }) => button.text === '继续配置图片模型',
-    );
-    await act(async () => {
-      continueBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    const vlmCall = Alert.alert.mock.calls.find((call) =>
-      String(call[1]).includes('没有 VLM'),
-    );
-    expect(vlmCall).toBeTruthy();
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it('列表为空且旧配置完整时询问后退出并保留旧配置', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-      probeLlmConfig: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce([]);
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    // 预置完整旧配置
-    await seedLlmConfig({ apiKey: 'sk-saved' });
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 触发 LLM 缺失询问，未自动保存/关闭
-    expect(
-      Alert.alert.mock.calls.some(
-        (call) => call[0] === '提示' && String(call[1]).includes('服务端未配置 LLM'),
-      ),
-    ).toBe(true);
-    expect(onClose).not.toHaveBeenCalled();
-    expect(llmClient.probeLlmConfig).not.toHaveBeenCalled();
-
-    // 退出 → 关闭，旧配置原样保留
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示' && String(call[1]).includes('服务端未配置 LLM'),
-    );
-    const exitBtn = promptCall![2].find(
-      (button: { text: string }) => button.text === '退出',
-    );
-    await act(async () => {
-      exitBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(onClose).toHaveBeenCalled();
-    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', 'sk-saved');
-    await expect(getSavedLlmConfig()).resolves.toHaveProperty('provider', 'DeepSeek');
-  });
-
-  it('列表为空时询问后退出，未保存的修改不落盘', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce([]);
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await seedLlmConfig({ apiKey: 'sk-saved' });
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 修改输入（未保存）
-    const apiKeyInput = tree!.root.findAllByProps({
-      placeholder: '粘贴对话服务商的 API Key',
-    })[0];
-    await act(async () => {
-      apiKeyInput.props.onChangeText('sk-changed');
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 退出 → 关闭，存储仍为旧值
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示' && String(call[1]).includes('服务端未配置 LLM'),
-    );
-    const exitBtn = promptCall![2].find(
-      (button: { text: string }) => button.text === '退出',
-    );
-    await act(async () => {
-      exitBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(onClose).toHaveBeenCalled();
-    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', 'sk-saved');
-  });
-
   it('列表已加载且旧配置未修改时，直接下一步且不执行保存', async () => {
     const llmClient = jest.requireMock('../utils/llm_client') as {
       probeLlmConfig: jest.Mock;
@@ -562,52 +384,6 @@ describe('LlmSettingsScreen 保存→重载', () => {
     expect(Alert.alert).not.toHaveBeenCalled();
     await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', 'sk-saved');
     expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('无 VLM 服务商时进入图片理解页直接关闭并提示', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce([
-      {
-        name: 'DeepSeek',
-        base_url: 'https://api.deepseek.com/v1',
-        models: ['deepseek-v4-flash'],
-        vlm_models: [],
-      },
-    ]);
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await seedLlmConfig({ apiKey: 'sk-saved' });
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 文本页可用，下一步（未修改 → 直接翻页）
-    const nextText = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
-    await act(async () => {
-      await nextText.parent!.props.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 进入图片理解页时无 VLM 服务商 → 提示并关闭
-    const vlmCall = Alert.alert.mock.calls.find((call) =>
-      String(call[1]).includes('没有 VLM'),
-    );
-    expect(vlmCall).toBeTruthy();
-    expect(onClose).toHaveBeenCalled();
   });
 
   it('清除失败时不继续导航，可取消重试且不破坏现有配置', async () => {

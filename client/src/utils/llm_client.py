@@ -37,6 +37,24 @@ def fetch_llm_providers(
     return []
 
 
+def fetch_llm_capabilities(
+    server_base_url: str,
+    timeout: float = 15.0,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """获取服务端下发的模型能力标注（LLM / VLM 各一份）。"""
+    url = f"{server_base_url.rstrip('/')}/llm/providers"
+    try:
+        resp = requests.get(url, timeout=timeout)
+    except Exception as exc:
+        raise RuntimeError(f"获取模型能力列表失败: {exc}") from exc
+    if resp.status_code < 200 or resp.status_code >= 300:
+        raise RuntimeError(f"获取模型能力列表失败: HTTP {resp.status_code}")
+    data = resp.json()
+    llm_caps = data.get("llm_model_capabilities") or {}
+    vlm_caps = data.get("vlm_model_capabilities") or {}
+    return llm_caps, vlm_caps
+
+
 def fetch_llm_json_required_modules(
     server_base_url: str,
     timeout: float = 15.0,
