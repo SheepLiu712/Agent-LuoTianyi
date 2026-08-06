@@ -573,6 +573,84 @@ describe('LlmSettingsScreen 保存→重载', () => {
     ).toBeTruthy();
   });
 
+  it('仅 LLM 服务商时隐藏图片理解页，主按钮为完成', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce({
+      providers: [
+        {
+          name: 'DeepSeek',
+          base_url: 'https://api.deepseek.com/v1',
+          models: ['deepseek-v4-flash'],
+          vlm_models: [],
+        },
+      ],
+      llmModelCapabilities: {},
+      vlmModelCapabilities: {},
+    });
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    // 只有对话页：1/1、无上一步、主按钮为完成
+    expect(
+      tree!.root.findAll((node) => node.props.children === '1 / 1 · 对话模型')[0],
+    ).toBeTruthy();
+    expect(
+      tree!.root.findAll((node) => node.props.children === '上一步')[0],
+    ).toBeFalsy();
+    expect(
+      tree!.root.findAll((node) => node.props.children === '完成')[0],
+    ).toBeTruthy();
+    expect(
+      tree!.root.findAll((node) => node.props.children === '下一步')[0],
+    ).toBeFalsy();
+  });
+
+  it('仅 VLM 服务商时隐藏对话页，直接展示图片理解页', async () => {
+    const llmClient = jest.requireMock('../utils/llm_client') as {
+      fetchProviderPresets: jest.Mock;
+    };
+    llmClient.fetchProviderPresets.mockResolvedValueOnce({
+      providers: [
+        {
+          name: 'VlmOnly',
+          base_url: 'https://vlm.example.com/v1',
+          models: [],
+          vlm_models: ['vlm-model'],
+        },
+      ],
+      llmModelCapabilities: {},
+      vlmModelCapabilities: {},
+    });
+    const onClose = jest.fn();
+    let tree: ReactTestRenderer | undefined;
+
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(
+      tree!.root.findAll((node) => node.props.children === '1 / 1 · 图片理解模型')[0],
+    ).toBeTruthy();
+    expect(
+      tree!.root.findAll((node) => node.props.children === 'VlmOnly')[0],
+    ).toBeTruthy();
+    expect(
+      tree!.root.findAll((node) => node.props.children === '完成')[0],
+    ).toBeTruthy();
+  });
+
   it('探测失败时显示友好错误提示且不保存', async () => {
     const llmClient = jest.requireMock('../utils/llm_client') as {
       probeLlmConfig: jest.Mock;

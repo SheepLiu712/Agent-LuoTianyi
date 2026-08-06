@@ -221,8 +221,16 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   // 渲染时按能力分类，不在加载时过滤整个列表（保留纯 VLM 等服务商）
   const textProviders = providers.filter((p) => (p.models?.length ?? 0) > 0);
   const vlmProviders = providers.filter((p) => (p.vlm_models?.length ?? 0) > 0);
+  // 某能力无可用服务商时隐藏对应配置页
+  const visiblePages: TabKind[] = [
+    ...(textProviders.length > 0 ? (['text'] as TabKind[]) : []),
+    ...(vlmProviders.length > 0 ? (['vlm'] as TabKind[]) : []),
+  ];
+  const safePages = visiblePages.length > 0 ? visiblePages : ['text'];
+  const totalPages = safePages.length;
+  const isLastPage = stepIndex >= totalPages - 1;
 
-  const isVlmTab = stepIndex === 1;
+  const isVlmTab = (safePages[stepIndex] ?? 'text') === 'vlm';
   const paramsText = isVlmTab ? vlmParamsText : llmParamsText;
   const setParamsText = isVlmTab ? setVlmParamsText : setLlmParamsText;
   const pickerProvider = isVlmTab ? currentVlmPreset : currentPreset;
@@ -265,8 +273,8 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   };
 
   const goStep = (index: number) => {
-    // 服务端启动已验证 VLM 接口存在，图片理解页必有可用服务商
-    setStepIndex(index);
+    // 只在可见页范围内翻页（无可用服务商的能力页已隐藏）
+    setStepIndex(Math.max(0, Math.min(index, totalPages - 1)));
     Keyboard.dismiss();
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo?.({ y: 0, animated: true });
@@ -405,10 +413,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         paramsText: '',
       });
       // 清除成功才导航
-      if (forVlm) {
+      if (isLastPage) {
         onClose();
       } else {
-        goStep(1);
+        goStep(stepIndex + 1);
       }
     } catch (e) {
       addDebugTrace('llm_settings', 'clear config failed', { error: String(e) });
@@ -443,10 +451,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     const forVlm = isVlmTab;
     // 旧配置完整且未修改：任意情况下直接翻页/关闭，不执行保存
     if (hasUnchangedSaved(forVlm)) {
-      if (forVlm) {
+      if (isLastPage) {
         onClose();
       } else {
-        goStep(1);
+        goStep(stepIndex + 1);
       }
       return;
     }
@@ -519,10 +527,10 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       }
 
       Alert.alert('成功', `${name}设置已保存`);
-      if (forVlm) {
+      if (isLastPage) {
         onClose();
       } else {
-        goStep(1);
+        goStep(stepIndex + 1);
       }
     } catch (e) {
       addDebugTrace('llm_settings', 'save failed', { error: String(e) });
@@ -546,7 +554,9 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
 
           <View style={styles.stepBar}>
             <Text style={[styles.stepText, { color: theme.text }]}>
-              {isVlmTab ? '2 / 2 · 图片理解模型' : '1 / 2 · 对话模型'}
+              {`${stepIndex + 1} / ${totalPages} · ${
+                isVlmTab ? '图片理解模型' : '对话模型'
+              }`}
             </Text>
           </View>
 
@@ -705,14 +715,14 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
             ) : null}
 
             <View style={styles.buttonRow}>
-              {isVlmTab ? (
+              {stepIndex > 0 ? (
                 <TouchableOpacity
                   style={[
                     styles.prevButton,
                     { backgroundColor: theme.surfaceAlt },
                     saving && styles.buttonDisabled,
                   ]}
-                  onPress={() => goStep(0)}
+                  onPress={() => goStep(stepIndex - 1)}
                   disabled={saving}
                   activeOpacity={0.8}
                 >
@@ -732,7 +742,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
                 activeOpacity={0.8}
               >
                 <Text style={[styles.saveButtonText, { color: theme.name === 'dark' ? '#0F1419' : '#ffffff' }]}>
-                  {saving ? '校验中...' : isVlmTab ? '完成' : '下一步'}
+                  {saving ? '校验中...' : isLastPage ? '完成' : '下一步'}
                 </Text>
               </TouchableOpacity>
             </View>

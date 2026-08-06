@@ -111,6 +111,8 @@ class LLMSettingsDialog(QDialog):
         self._providers_loader: "_ProvidersLoader | None" = None
         self._probe_worker: "_ProbeWorker | None" = None
         self._pending_save: tuple | None = None
+        self._page_kinds: list = ["text"]
+        self._current_kind: str = "text"
 
         self._init_ui()
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
@@ -225,16 +227,22 @@ class LLMSettingsDialog(QDialog):
 
     def _go_to_page(self, index: int) -> None:
         """翻页：切换当前配置页并同步导航按钮。"""
-        index = 0 if index <= 0 else 1
-        # 服务端启动已验证 VLM 接口存在，图片理解页必有可用服务商
-        self.stack.setCurrentIndex(index)
-        self.page_label.setText(
-            "1 / 2 · 对话模型" if index == 0 else "2 / 2 · 图片理解模型"
+        index = max(0, min(index, len(self._page_kinds) - 1))
+        kind = self._page_kinds[index]
+        self._current_kind = kind
+        self.stack.setCurrentWidget(
+            self.text_page if kind == "text" else self.vlm_page
         )
-        # 第 1 页不显示“上一步”，与 APP 一致
-        self.prev_btn.setVisible(index == 1)
-        self.prev_btn.setEnabled(index == 1)
-        self.next_btn.setText("下一步" if index == 0 else "完成")
+        self.page_label.setText(
+            f"{index + 1} / {len(self._page_kinds)} · "
+            + ("对话模型" if kind == "text" else "图片理解模型")
+        )
+        # 仅首页不显示“上一步”，与 APP 一致
+        self.prev_btn.setVisible(index > 0)
+        self.prev_btn.setEnabled(index > 0)
+        self.next_btn.setText(
+            "完成" if index == len(self._page_kinds) - 1 else "下一步"
+        )
         self._update_page_status()
         self._update_config_hint()
 
@@ -252,17 +260,19 @@ class LLMSettingsDialog(QDialog):
 
     def _can_advance(self) -> bool:
         """当前页下拉框有可用项时才允许继续（拉取失败/无模型时禁用）。"""
-        index = self.stack.currentIndex()
-        return (self.model_combo if index == 0 else self.vlm_model_combo).count() > 0
+        return (
+            self.model_combo if self._current_kind == "text" else self.vlm_model_combo
+        ).count() > 0
 
     def _next_enabled(self) -> bool:
         """下一步可用：下拉框有项，或旧配置完整且与当前填写一致。"""
-        index = self.stack.currentIndex()
-        return self._can_advance() or self._has_unchanged_saved_config(index)
+        return self._can_advance() or self._has_unchanged_saved_config(
+            self._current_kind
+        )
 
-    def _has_unchanged_saved_config(self, index: int) -> bool:
+    def _has_unchanged_saved_config(self, kind: str) -> bool:
         """已保存配置完整且当前填写与之一致（任意情况下直接翻页不保存）。"""
-        if index == 0:
+        if kind == "text":
             saved_key = credential.get_api_key()
             saved_provider = credential.get_provider()
             saved_model = credential.get_model()
@@ -287,7 +297,7 @@ class LLMSettingsDialog(QDialog):
         if current_key != saved_key or not params_match:
             return False
         # 列表未加载时下拉框为空，无法比较服务商/模型，视为一致
-        if (self.model_combo if index == 0 else self.vlm_model_combo).count() > 0:
+        if (self.model_combo if kind == "text" else self.vlm_model_combo).count() > 0:
             if current_provider != saved_provider or current_model != saved_model:
                 return False
         return True
@@ -482,8 +492,15 @@ class LLMSettingsDialog(QDialog):
             self.vlm_provider_combo.setCurrentIndex(-1)
         self._on_provider_changed(self.provider_combo.currentIndex())
         self._on_vlm_provider_changed(self.vlm_provider_combo.currentIndex())
-        self._update_page_status()
-        self._update_config_hint()
+        # 无可用服务商的能力页不展示：只保留有可用服务的配置页
+        self._page_kinds = []
+        if all_names:
+            self._page_kinds.append("text")
+        if vlm_names:
+            self._page_kinds.append("vlm")
+        if not self._page_kinds:
+            self._page_kinds = ["text"]
+        self._go_to_page(0)
 
     def _on_providers_failed(self, message: str) -> None:
         self.status_label.setText(f"获取服务商列表失败：{message}")
@@ -578,18 +595,18 @@ class LLMSettingsDialog(QDialog):
 
     def _on_advance(self) -> None:
         """下一步/完成：配置未修改直接翻页；否则保存（key 未填先弹窗确认）。"""
-        index = self.stack.currentIndex()
+        kind = self._current_kind
         # 旧配置完整且未修改：任意情况下直接翻页/关闭，不执行保存
-        if self._has_unchanged_saved_config(index):
-            self._advance_or_close(index)
+        if self._has_unchanged_saved_config(kind):
+            self._advance_or_close(kind)
             return
         if not self._can_advance():
             return
-        cfg = self._build_cfg("text" if index == 0 else "vlm")
+        cfg = self._build_cfg(kind)
         if cfg is None:
             return
         if cfg["api_key"]:
-            self._save_page(cfg, on_success=lambda: self._advance_or_close(index))
+            self._save_page(cfg, on_success=lambda: self._advance_or_close(kind))
             return
         box = QMessageBox(self)
         box.setWindowTitle("提示")
@@ -611,7 +628,7 @@ class LLMSettingsDialog(QDialog):
             )
             if ret != QMessageBox.StandardButton.Yes:
                 return
-        self._advance_or_close(index)
+        self._advance_or_close(kind)
 
     def _clear_saved_module(self, kind: str) -> bool:
         """清空该模块已保存的配置，使相关调用使用服务端 Key；返回是否清空成功。"""
@@ -621,10 +638,10 @@ class LLMSettingsDialog(QDialog):
 
     def _update_config_hint(self) -> None:
         """按当前页 API Key 填写情况更新提示：未填 key 则使用服务端 Key。"""
-        index = self.stack.currentIndex()
+        kind = self._current_kind
         api_key = (
             self.api_key_input.text().strip()
-            if index == 0
+            if kind == "text"
             else self.vlm_api_key_input.text().strip()
         )
         if api_key:
@@ -634,10 +651,11 @@ class LLMSettingsDialog(QDialog):
         if self._probe_worker is None or not self._probe_worker.isRunning():
             self.next_btn.setEnabled(self._next_enabled())
 
-    def _advance_or_close(self, index: int) -> None:
-        """保存/跳过后的落点：第 1 页进入第 2 页，第 2 页关闭。"""
-        if index == 0:
-            self._go_to_page(1)
+    def _advance_or_close(self, kind: str) -> None:
+        """保存/跳过后的落点：非末页进入下一页，末页关闭。"""
+        index = self._page_kinds.index(kind)
+        if index < len(self._page_kinds) - 1:
+            self._go_to_page(index + 1)
         else:
             self.accept()
 
@@ -676,9 +694,9 @@ class LLMSettingsDialog(QDialog):
             self.prev_btn.setEnabled(False)
             self.next_btn.setEnabled(False)
         else:
-            index = self.stack.currentIndex()
-            self.prev_btn.setVisible(index == 1)
-            self.prev_btn.setEnabled(index == 1)
+            index = self._page_kinds.index(self._current_kind)
+            self.prev_btn.setVisible(index > 0)
+            self.prev_btn.setEnabled(index > 0)
             self.next_btn.setEnabled(self._next_enabled())
 
     def _on_probe_done(self, errors: list) -> None:
