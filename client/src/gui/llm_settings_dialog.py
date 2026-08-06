@@ -129,6 +129,7 @@ class LLMSettingsDialog(QDialog):
         self._pending_save: tuple | None = None
         self._page_kinds: list = ["text"]
         self._current_kind: str = "text"
+        self._prompted_changes: set = set()
 
         self._init_ui()
         self.provider_combo.currentIndexChanged.connect(self._on_provider_changed)
@@ -284,6 +285,58 @@ class LLMSettingsDialog(QDialog):
         )
         self._update_page_status()
         self._update_config_hint()
+        self._check_saved_change(kind)
+
+    def _saved_config_stale(self, kind: str) -> bool:
+        """已保存的服务商/模型是否已不在当前可用列表（视为配置变化）。"""
+        if kind == "text":
+            saved_provider = credential.get_provider()
+            saved_model = credential.get_model()
+            preset = self._find_preset(saved_provider or "")
+            model_list = preset.get("models") if preset else None
+        else:
+            saved_provider = credential.get_vlm_provider()
+            saved_model = credential.get_vlm_model()
+            preset = self._find_preset(saved_provider or "")
+            model_list = preset.get("vlm_models") if preset else None
+        if not saved_provider:
+            return False
+        if preset is None:
+            return True
+        return bool(saved_model) and saved_model not in (model_list or [])
+
+    def _check_saved_change(self, kind: str) -> None:
+        """进入页面时检查已保存配置是否已变化；变化则提示重新选择或跳转/关闭。"""
+        if kind in self._prompted_changes:
+            return
+        if not self._saved_config_stale(kind):
+            return
+        self._prompted_changes.add(kind)
+        kind_name = "对话模型" if kind == "text" else "图片理解模型"
+        others = [k for k in self._page_kinds if k != kind]
+        box = QMessageBox(self)
+        box.setWindowTitle("提示")
+        if others:
+            other_name = "对话模型" if others[0] == "text" else "图片理解模型"
+            box.setText(
+                f"已保存的{kind_name}服务商或模型已变化，是否重新选择？\n"
+                f"不重新选择将跳转到{other_name}配置页。"
+            )
+        else:
+            box.setText(
+                f"已保存的{kind_name}服务商或模型已变化，是否重新选择？\n"
+                "不重新选择将关闭设置页。"
+            )
+        reselect_btn = box.addButton("重新选择", QMessageBox.ButtonRole.AcceptRole)
+        box.addButton("不重新选择", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(reselect_btn)
+        box.exec()
+        if box.clickedButton() is reselect_btn:
+            return
+        if others:
+            self._go_to_page(self._page_kinds.index(others[0]))
+        else:
+            self.reject()
 
     def _update_page_status(self) -> None:
         """当前页无额外状态提示（空列表由弹窗处理）。"""

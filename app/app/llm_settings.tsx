@@ -71,6 +71,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
   const loadedRef = useRef<LoadedConfigSnapshot | null>(null);
+  const promptedChangesRef = useRef<Set<TabKind>>(new Set());
 
   const [providers, setProviders] = useState<LlmProviderPreset[]>([]);
   const [llmCapabilities, setLlmCapabilities] = useState<
@@ -80,6 +81,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     Record<string, LlmModelCapability>
   >({});
   const [providersError, setProvidersError] = useState('');
+  const [providersLoaded, setProvidersLoaded] = useState(false);
   const [llmJsonModules, setLlmJsonModules] = useState<string[]>([]);
   const [vlmJsonModules, setVlmJsonModules] = useState<string[]>([]);
   const [stepIndex, setStepIndex] = useState(0);
@@ -159,6 +161,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
         setProvidersError('');
         // 全量保存，渲染时按能力分类（保留纯 VLM 等服务商）
         setProviders(data.providers);
+        setProvidersLoaded(true);
         setLlmCapabilities(data.llmModelCapabilities);
         setVlmCapabilities(data.vlmModelCapabilities);
         // 服务端启动时已验证 LLM/VLM 接口存在（缺失会注册失败），
@@ -226,7 +229,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
     ...(textProviders.length > 0 ? (['text'] as TabKind[]) : []),
     ...(vlmProviders.length > 0 ? (['vlm'] as TabKind[]) : []),
   ];
-  const safePages = visiblePages.length > 0 ? visiblePages : ['text'];
+  const safePages = visiblePages.length > 0 ? visiblePages : (['text'] as TabKind[]);
   const totalPages = safePages.length;
   const isLastPage = stepIndex >= totalPages - 1;
 
@@ -265,6 +268,62 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   };
 
   const canNext = modelReady || hasUnchangedSaved(isVlmTab);
+
+  const checkSavedChange = (kind: TabKind, list: LlmProviderPreset[]) => {
+    if (promptedChangesRef.current.has(kind)) {
+      return;
+    }
+    const saved = loadedRef.current;
+    if (!saved) {
+      return;
+    }
+    const provider = kind === 'text' ? saved.llmProvider : saved.vlmProvider;
+    const model = kind === 'text' ? saved.llmModel : saved.vlmModel;
+    if (!provider) {
+      return;
+    }
+    const preset = list.find((p) => p.name === provider);
+    const modelList = kind === 'text' ? preset?.models : preset?.vlm_models;
+    if (preset && (!model || modelList?.includes(model))) {
+      return;
+    }
+    promptedChangesRef.current.add(kind);
+    const kindName = kind === 'text' ? '对话模型' : '图片理解模型';
+    const others = safePages.filter((k) => k !== kind);
+    const otherName =
+      others.length > 0 ? (others[0] === 'text' ? '对话模型' : '图片理解模型') : '';
+    Alert.alert(
+      '提示',
+      `已保存的${kindName}服务商或模型已变化，是否重新选择？\n${
+        others.length > 0
+          ? `不重新选择将跳转到${otherName}配置页。`
+          : '不重新选择将关闭设置页。'
+      }`,
+      [
+        {
+          text: '不重新选择',
+          style: 'cancel',
+          onPress: () => {
+            if (others.length > 0) {
+              setStepIndex(safePages.indexOf(others[0]));
+            } else {
+              onClose();
+            }
+          },
+        },
+        { text: '重新选择', onPress: () => {} },
+      ],
+    );
+  };
+
+  useEffect(() => {
+    if (!providersLoaded) {
+      return;
+    }
+    const kind: TabKind = safePages[stepIndex] ?? 'text';
+    checkSavedChange(kind, kind === 'text' ? textProviders : vlmProviders);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providersLoaded, stepIndex]);
 
   const scrollToBottom = () => {
     requestAnimationFrame(() => {
@@ -319,6 +378,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
       setProvidersError('');
       // 全量保存，渲染时按能力分类（保留纯 VLM 等服务商）
       setProviders(data.providers);
+      setProvidersLoaded(true);
       setLlmCapabilities(data.llmModelCapabilities);
       setVlmCapabilities(data.vlmModelCapabilities);
       // 服务端启动时已验证 LLM/VLM 接口存在，下发列表必然非空
