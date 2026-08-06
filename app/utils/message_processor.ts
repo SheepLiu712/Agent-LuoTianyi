@@ -196,7 +196,8 @@ export class MessageProcessor {
 
   async sendTypingEvent(textLength: number) {
     const now = Date.now();
-    if (now - this.lastTypingSentAt < 400) {
+    // 0 长度事件表示用户清空了输入，必须立即发送、不受节流限制（对齐桌面端实现）
+    if (now - this.lastTypingSentAt < 400 && textLength > 0) {
       return;
     }
     if (this.sendQueue.length > 0) {
