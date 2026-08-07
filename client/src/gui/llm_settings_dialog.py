@@ -935,17 +935,18 @@ class LLMSettingsDialog(QDialog):
             if ret != QMessageBox.StandardButton.Yes:
                 return
             if kind == "text":
-                credential.save_llm_config(
+                ok = credential.save_llm_config(
                     api_key, provider, model, base_url,
                     params, allow_plaintext=True,
                 )
             else:
-                credential.save_vlm_config(
+                ok = credential.save_vlm_config(
                     api_key, provider, model, base_url,
                     params, allow_plaintext=True,
                 )
-
-        configured = bool(api_key) and bool(provider) and bool(model)
+            if not ok:
+                QMessageBox.critical(self, "保存失败", "保存配置失败，请重试")
+                return
 
         QMessageBox.information(self, "成功", f"{cfg['name']}设置已保存")
         self.status_label.setText(f"{cfg['name']}设置已保存")
