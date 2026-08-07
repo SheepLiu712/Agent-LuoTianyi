@@ -82,6 +82,7 @@ class LLMSettingsDialog(QDialog):
         self._saved_vlm_provider: str | None = None
         self._saved_vlm_model: str | None = None
         self._http = QNetworkAccessManager(self)
+        self._http.setRedirectPolicy(QNetworkRequest.RedirectPolicy.SameOriginRedirectPolicy)
         self._providers_reply: "QNetworkReply | None" = None
         self._probe_replies: list = []
         self._probe_configs: list = []
