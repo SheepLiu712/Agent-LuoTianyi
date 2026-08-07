@@ -850,26 +850,48 @@ class LLMSettingsDialog(QDialog):
             return
         errors = []
         for reply, probe in zip(self._probe_replies, self._probe_configs):
-            if reply.error() == QNetworkReply.NetworkError.NoError:
-                continue
             if reply.error() == QNetworkReply.NetworkError.OperationCanceledError:
                 continue
-            detail = reply.errorString()
-            status = reply.attribute(
-                QNetworkRequest.Attribute.HttpStatusCodeAttribute
-            )
-            try:
-                data = json.loads(bytes(reply.readAll()))
-                if isinstance(data, dict) and data.get("error"):
-                    detail = str(data["error"])
-            except Exception:
-                pass
-            errors.append(
-                _friendly_probe_error(
-                    probe["name"],
-                    Exception(f"LLM provider returned HTTP {status}: {detail}"),
+            if reply.error() != QNetworkReply.NetworkError.NoError:
+                errors.append(
+                    _friendly_probe_error(
+                        probe["name"],
+                        Exception(f"网络请求失败: {reply.errorString()}"),
+                    )
                 )
-            )
+                continue
+        
+            status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+            if status != 200:
+                errors.append(
+                    _friendly_probe_error(
+                        probe["name"],
+                        Exception(f"非预期响应：HTTP {status} - {reply.errorString()}"),
+                    )
+                )
+                continue
+
+            try:
+                raw_data = bytes(reply.readAll())
+                if not raw_data:
+                    raise ValueError("响应体为空")
+                data = json.loads(raw_data)
+
+                if not isinstance(data, dict):
+                    raise ValueError("响应体不是 JSON 对象")
+                if "error" in data:
+                    raise ValueError(f"响应体包含错误字段: {data['error']}")
+                if "choices" not in data or not isinstance(data["choices"], list) or not data["choices"]:
+                    raise ValueError("响应体缺少 choices 字段或格式不正确")
+            except (json.JSONDecodeError, ValueError) as exc:
+                errors.append(
+                    _friendly_probe_error(
+                        probe["name"],
+                        Exception(f"响应体解析失败: {exc}"),
+                    )
+                )
+                continue
+
         self._probe_replies = []
         self._probe_configs = []
         self._set_frozen(False)
