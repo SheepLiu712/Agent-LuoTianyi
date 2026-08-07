@@ -364,7 +364,7 @@ export default function LlmSettingsScreen({ onClose, theme = THEMES.light }: Llm
   };
 
   const goStep = (index: number) => {
-    setForceHidePrev(false); 
+    setForceHidePrev(false);
     setStepIndex(Math.max(0, Math.min(index, totalPages - 1)));
     Keyboard.dismiss();
     requestAnimationFrame(() => {
