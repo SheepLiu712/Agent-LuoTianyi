@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, TYPE_CHECKING
 
 from src.agent.luotianyi_agent import LuoTianyiAgent
@@ -10,7 +11,12 @@ from src.agent_runtime.character_runtime import CharacterRuntime
 from src.subconscious.character_mind import CharacterSubconscious
 from src.subconscious.memory import SubconsciousMemory
 from src.subconscious.preprocessing import ChatPreprocessor
-from src.system.database.vector_store import get_vector_store, init_vector_store
+from src.system.database.vector_store import clear_vector_store, get_vector_store, init_vector_store
+from src.utils.asyncio_helpers import (
+    DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+    run_sync_owned,
+    wait_for_owned_tasks,
+)
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -35,31 +41,99 @@ class AgentRuntime:
         self.llm_service = llm_service
         self.capability_manager = capability_manager
         self.database_manager = database_manager
+        self._shutdown_lock = asyncio.Lock()
+        self._shutdown_complete = False
+        self._shutdown_task: asyncio.Task | None = None
+        self.shutdown_timeout_seconds = DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS
         self.vector_store = self._initialize_vector_store(self.config["agent"])
-        
-        # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
-        self.preprocessor = ChatPreprocessor(
-            self.config.get("agent", {}).get("preprocessing", {}),
-            capability_manager
-        )
+        try:
+            # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
+            self.preprocessor = ChatPreprocessor(
+                self.config.get("agent", {}).get("preprocessing", {}),
+                capability_manager
+            )
 
-        self.character_registry = CharacterRegistry(config.get("character_registry", {}))
-        self.character_runtimes = self._build_character_runtimes(
-            agent_config=self.config["agent"],
-            llm_service=llm_service,
-            capability_manager=capability_manager,
-            database_manager=database_manager,
-        )
+            self.character_registry = CharacterRegistry(config.get("character_registry", {}))
+            self.character_runtimes = self._build_character_runtimes(
+                agent_config=self.config["agent"],
+                llm_service=llm_service,
+                capability_manager=capability_manager,
+                database_manager=database_manager,
+            )
 
-        self.agent_registry = AgentRegistry(
-            self.config.get("agent_registry", {}),
-            self.character_registry,
-            self.character_runtimes,
-        )
+            self.agent_registry = AgentRegistry(
+                self.config.get("agent_registry", {}),
+                self.character_registry,
+                self.character_runtimes,
+            )
 
-        self.default_character_id = self.character_registry.default_character_id
-        global _agent_runtime
-        _agent_runtime = self
+            self.default_character_id = self.character_registry.default_character_id
+            set_agent_runtime(self)
+        except BaseException:
+            try:
+                self._abort_initialization()
+            except Exception as cleanup_error:
+                self.logger.error(
+                    f"AgentRuntime initialization rollback failed: {cleanup_error}"
+                )
+            raise
+
+    def _abort_initialization(self) -> None:
+        vector_store = getattr(self, "vector_store", None)
+        try:
+            close = getattr(vector_store, "close", None)
+            if close is not None:
+                close()
+        finally:
+            if vector_store is not None:
+                clear_vector_store(vector_store)
+            clear_agent_runtime(self)
+
+    async def shutdown(self) -> None:
+        """Release AgentRuntime-owned resources exactly once after success."""
+        async with self._shutdown_lock:
+            if self._shutdown_complete:
+                return
+            close = getattr(self.vector_store, "close", None)
+            if close is not None:
+                shutdown_task = getattr(self, "_shutdown_task", None)
+                if shutdown_task is None:
+                    shutdown_task = asyncio.create_task(run_sync_owned(close))
+                    self._shutdown_task = shutdown_task
+                cancellation: asyncio.CancelledError | None = None
+                try:
+                    done, pending = await wait_for_owned_tasks(
+                        (shutdown_task,),
+                        timeout_seconds=getattr(
+                            self,
+                            "shutdown_timeout_seconds",
+                            DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+                        ),
+                    )
+                except asyncio.CancelledError as error:
+                    cancellation = error
+                    done, pending = await asyncio.shield(
+                        wait_for_owned_tasks(
+                            (shutdown_task,),
+                            timeout_seconds=getattr(
+                                self,
+                                "shutdown_timeout_seconds",
+                                DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+                            ),
+                        )
+                    )
+                if pending:
+                    raise RuntimeError("Vector store close task is still running")
+                try:
+                    shutdown_task.result()
+                except BaseException:
+                    self._shutdown_task = None
+                    raise
+                if cancellation is not None:
+                    raise cancellation
+            clear_vector_store(self.vector_store)
+            clear_agent_runtime(self)
+            self._shutdown_complete = True
 
     def wire_dependencies(
         self,
@@ -302,6 +376,19 @@ class AgentRuntime:
 
 
 _agent_runtime: AgentRuntime | None = None
+
+
+def set_agent_runtime(runtime: AgentRuntime | None) -> None:
+    global _agent_runtime
+    _agent_runtime = runtime
+
+
+def clear_agent_runtime(expected: AgentRuntime | None = None) -> bool:
+    global _agent_runtime
+    if expected is not None and _agent_runtime is not expected:
+        return False
+    _agent_runtime = None
+    return True
 
 
 def get_agent_runtime() -> AgentRuntime:

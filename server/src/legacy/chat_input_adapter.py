@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import re
 from typing import Any
 
 from src.domain.stimulus import PersistPolicy, SourceChannel, Stimulus, StimulusModality
@@ -21,9 +24,142 @@ CHAT_RELATED_EVENT_TYPES = {
     "chat",
 }
 
+MAX_TEXT_LENGTH = 20_000
+MAX_IMAGE_BASE64_CHARS = 8 * 1024 * 1024
+MAX_IMAGE_BYTES = 6 * 1024 * 1024
+MAX_TYPING_TEXT_LENGTH = 100_000
+MAX_TARGET_CHARACTERS = 8
+ALLOWED_IMAGE_MIME_TYPES = {
+    "image/jpeg",
+    "image/jpg",
+    "image/png",
+    "image/gif",
+    "image/bmp",
+    "image/webp",
+}
+TARGET_CHARACTER_KEYS = (
+    "target_character_ids",
+    "target_characters",
+    "character_ids",
+    "target_character_id",
+    "character_id",
+)
+
 
 def is_chat_related_ws_message(event: WSMessage) -> bool:
     return event.event_type in CHAT_RELATED_EVENT_TYPES
+
+
+def validate_ws_chat_message(event: WSMessage) -> None:
+    """Validate the real client payload before idempotency marking or ACK."""
+    if not is_chat_related_ws_message(event):
+        raise ValueError("unsupported chat event type")
+    if not isinstance(event.payload, dict):
+        raise TypeError("chat event payload must be an object")
+
+    payload = event.payload
+    _validate_target_character_ids(payload)
+
+    if event.event_type == WSEventType.USER_IMAGE.value:
+        _validate_image_payload(payload)
+        return
+    if event.event_type == WSEventType.USER_TYPING.value:
+        text_length = payload.get("text_length")
+        if type(text_length) is not int or not 0 <= text_length <= MAX_TYPING_TEXT_LENGTH:
+            raise ValueError("text_length must be a non-negative integer")
+        return
+    if event.event_type == WSEventType.USER_TOUCH.value:
+        _validate_touch_payload(payload)
+        return
+    if event.event_type in {
+        WSEventType.USER_IMAGE_SELECTING.value,
+        WSEventType.USER_IMAGE_SELECTING_CANCEL.value,
+    }:
+        return
+
+    text = _extract_text(payload)
+    if not text or len(text) > MAX_TEXT_LENGTH:
+        raise ValueError("text message must be non-empty and within the size limit")
+    if "is_proactive" in payload and type(payload["is_proactive"]) is not bool:
+        raise ValueError("is_proactive must be a boolean")
+
+
+def _validate_image_payload(payload: dict[str, Any]) -> None:
+    image_base64 = payload.get("image_base64")
+    mime_type = payload.get("mime_type")
+    if not isinstance(image_base64, str) or not image_base64.strip():
+        raise ValueError("image_base64 is required")
+    if len(image_base64) > MAX_IMAGE_BASE64_CHARS:
+        raise ValueError("image payload exceeds the size limit")
+    if not isinstance(mime_type, str) or mime_type.lower() not in ALLOWED_IMAGE_MIME_TYPES:
+        raise ValueError("mime_type is not supported")
+    if "image_client_path" in payload:
+        path = payload["image_client_path"]
+        if path is not None and (not isinstance(path, str) or len(path) > 4096):
+            raise ValueError("image_client_path must be a string")
+
+    encoded = image_base64.strip()
+    if encoded.startswith("data:"):
+        match = re.fullmatch(r"data:([^;,]+);base64,(.*)", encoded, flags=re.DOTALL)
+        if match is None or match.group(1).lower() != mime_type.lower():
+            raise ValueError("image data URI does not match mime_type")
+        encoded = match.group(2)
+    encoded = "".join(encoded.split())
+    if not encoded:
+        raise ValueError("image_base64 is empty")
+    encoded += "=" * (-len(encoded) % 4)
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("image_base64 is invalid") from exc
+    if not decoded or len(decoded) > MAX_IMAGE_BYTES:
+        raise ValueError("decoded image exceeds the size limit")
+
+
+def _validate_touch_payload(payload: dict[str, Any]) -> None:
+    touch_areas = payload.get("touchArea")
+    if touch_areas is None:
+        touch_areas = payload.get("touch_area")
+    if isinstance(touch_areas, str):
+        areas = [touch_areas]
+    elif isinstance(touch_areas, list):
+        areas = touch_areas
+    else:
+        raise ValueError("touch_area or touchArea is required")
+    if not 1 <= len(areas) <= 16:
+        raise ValueError("touch area count is invalid")
+    if any(not isinstance(area, str) or not area.strip() or len(area) > 128 for area in areas):
+        raise ValueError("touch areas must be non-empty strings")
+
+    click_frequency = payload.get("click_frequency")
+    if click_frequency is not None:
+        if not isinstance(click_frequency, dict):
+            raise ValueError("click_frequency must be an object")
+        for value in click_frequency.values():
+            if type(value) is not int or value < 0:
+                raise ValueError("click_frequency values must be non-negative integers")
+
+
+def _validate_target_character_ids(payload: dict[str, Any]) -> None:
+    raw_targets = next(
+        (payload[key] for key in TARGET_CHARACTER_KEYS if key in payload),
+        None,
+    )
+    if raw_targets is None:
+        return
+    if isinstance(raw_targets, str):
+        targets = [raw_targets]
+    elif isinstance(raw_targets, (list, tuple)):
+        targets = list(raw_targets)
+    else:
+        raise ValueError("target character ids must be a string or list")
+    if not 1 <= len(targets) <= MAX_TARGET_CHARACTERS:
+        raise ValueError("target character count is invalid")
+    if any(
+        not isinstance(target, str) or not target.strip() or len(target) > 64
+        for target in targets
+    ):
+        raise ValueError("target character ids must be non-empty strings")
 
 
 def ws_message_to_stimulus(
@@ -134,7 +270,7 @@ def stimulus_to_chat_input_event(stimulus: Stimulus) -> ChatInputEvent | None:
         return None
 
     payload = dict(stimulus.payload or {})
-    payload.setdefault("target_character_ids", list(stimulus.target_character_ids))
+    payload["target_character_ids"] = list(stimulus.target_character_ids)
     payload.setdefault("ephemeral", stimulus.ephemeral)
     payload.setdefault("persist_policy", stimulus.persist_policy.value)
 

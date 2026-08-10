@@ -100,7 +100,7 @@ export async function getDynamics(
   limit = 20,
   cursor?: string | null,
 ): Promise<DynamicListResponse> {
-  const query = buildQuery({ username, token, limit, cursor: cursor || undefined });
+  const query = buildQuery({ username, limit, cursor: cursor || undefined });
   const url = `${server_config.BASE_URL}/dynamics?${query}`;
   addDebugTrace('dynamics', 'fetch list', { limit, hasCursor: Boolean(cursor) });
   const response = await fetch(url, {
@@ -134,7 +134,7 @@ export async function getDynamicComments(
   limit = 50,
   cursor?: string | null,
 ): Promise<DynamicCommentListResponse> {
-  const query = buildQuery({ username, token, limit, cursor: cursor || undefined });
+  const query = buildQuery({ username, limit, cursor: cursor || undefined });
   addDebugTrace('dynamics', 'fetch comments', { dynamicId, hasCursor: Boolean(cursor) });
   const response = await fetch(`${server_config.BASE_URL}/dynamics/${encodeURIComponent(dynamicId)}/comments?${query}`, {
     method: 'GET',
@@ -171,7 +171,7 @@ export async function getDynamicUnreadStatus(
   username: string,
   token: string,
 ): Promise<DynamicUnreadStatus> {
-  const query = buildQuery({ username, token });
+  const query = buildQuery({ username });
   const response = await fetch(`${server_config.BASE_URL}/dynamics/unread?${query}`, {
     method: 'GET',
     headers: {

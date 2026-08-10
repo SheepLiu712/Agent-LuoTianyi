@@ -1,4 +1,4 @@
-export type MessageType = 'text' | 'image';
+export type MessageType = 'text' | 'image' | 'sing';
 export type SendStatus = 'waiting' | 'submitted' | 'failed';
 export type AudioPlayState = 'idle' | 'playing';
 
@@ -20,6 +20,8 @@ export interface AgentMessagePayload {
   audio?: string | null;
   expression?: string | null;
   is_final_package?: boolean;
+  audio_error?: boolean;
+  error_code?: string | null;
   display_in_chat?: boolean;
   is_ephemeral?: boolean;
 }

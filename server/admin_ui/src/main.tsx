@@ -256,7 +256,7 @@ type MemoryTraceTab = {
   labels: Array<{ label: string; text: string }>;
 };
 
-type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'memory' | 'dynamics' | 'config' | 'logs';
+type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'memory' | 'dynamics' | 'invite_codes' | 'config' | 'logs';
 
 type LlmStatsTab = {
   id: 'seven_days' | 'one_day' | 'recent';
@@ -645,6 +645,7 @@ function App({ onLogout }: { onLogout: () => void }) {
           <button className={page === 'traces' ? 'active' : ''} onClick={() => setPage('traces')}>链路追踪</button>
           <button className={page === 'memory' ? 'active' : ''} onClick={() => setPage('memory')}>记忆追踪</button>
           <button className={page === 'dynamics' ? 'active' : ''} onClick={() => setPage('dynamics')}>动态管理</button>
+          <button className={page === 'invite_codes' ? 'active' : ''} onClick={() => setPage('invite_codes')}>邀请码</button>
           <button className={page === 'config' ? 'active' : ''} onClick={() => setPage('config')}>服务配置</button>
           <button className={page === 'logs' ? 'active' : ''} onClick={() => setPage('logs')}>异常日志</button>
           <button onClick={logout}>退出登录</button>
@@ -657,6 +658,7 @@ function App({ onLogout }: { onLogout: () => void }) {
         {page === 'traces' && <TracePage />}
         {page === 'memory' && <MemoryTracePage />}
         {page === 'dynamics' && <DynamicsPage />}
+        {page === 'invite_codes' && <InviteCodesPage />}
         {page === 'config' && <ConfigPage />}
         {page === 'logs' && <LogsPage />}
       </main>
@@ -703,6 +705,49 @@ function usePolling<T>(url: string | null, intervalMs = 10000) {
       window.clearInterval(timer);
     };
   }, [url, intervalMs]);
+
+  return { data, error, loading };
+}
+
+function usePostPolling<T>(url: string | null, payload: unknown, intervalMs = 10000, refreshKey = 0) {
+  const [data, setData] = useState<T | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const payloadJson = JSON.stringify(payload);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    async function load() {
+      if (!url) {
+        setLoading(false);
+        setData(null);
+        return;
+      }
+      try {
+        const next = await postJson<T>(url, JSON.parse(payloadJson));
+        if (!cancelled) {
+          setData(next);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+    void load();
+    const timer = window.setInterval(load, intervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [url, payloadJson, intervalMs, refreshKey]);
 
   return { data, error, loading };
 }
@@ -1470,6 +1515,204 @@ function DynamicsPage() {
           </Panel>
         </div>
       </section>
+    </>
+  );
+}
+
+type InviteCodeRow = {
+  code: string;
+  is_used: boolean;
+  disabled: boolean;
+  created_at?: string | null;
+  used_at?: string | null;
+  user_id?: string | null;
+  username?: string | null;
+};
+
+function InviteCodesPage() {
+  const [statusFilter, setStatusFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const [genCount, setGenCount] = useState('5');
+  const [genCodes, setGenCodes] = useState<string[]>([]);
+  const [genStatus, setGenStatus] = useState<LocalActionStatus | null>(null);
+  const [genBusy, setGenBusy] = useState(false);
+
+  const queryPayload = useMemo(() => ({
+    limit: 200,
+    status: statusFilter || null,
+    search: searchQuery.trim() || null,
+  }), [searchQuery, statusFilter]);
+
+  const { data, error, loading } = usePostPolling<{ items: InviteCodeRow[]; total: number }>(
+    '/admin/api/invite-codes/query',
+    queryPayload,
+    10000,
+    refreshNonce,
+  );
+  const rows = data?.items || [];
+
+  const unusedCount = rows.filter((row) => !row.is_used && !row.disabled).length;
+  const usedCount = rows.filter((row) => row.is_used).length;
+  const disabledCount = rows.filter((row) => row.disabled).length;
+
+  async function generateCodes() {
+    const count = Number.parseInt(genCount, 10);
+    if (!Number.isFinite(count) || count < 1 || count > 100) {
+      setGenCodes([]);
+      setGenStatus({ tone: 'error', message: '生成数量需在 1-100 之间' });
+      return;
+    }
+    setGenBusy(true);
+    setGenCodes([]);
+    setGenStatus({ tone: 'info', message: '正在生成...' });
+    try {
+      const result = await postJson<{ ok: boolean; codes: string[] }>('/admin/api/invite-codes/generate', { count });
+      setGenCodes(result.codes);
+      setGenStatus({ tone: 'success', message: `已生成 ${result.codes.length} 个邀请码` });
+      setRefreshNonce((value) => value + 1);
+    } catch (err) {
+      setGenStatus({ tone: 'error', message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setGenBusy(false);
+    }
+  }
+
+  async function copyCode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code);
+      setGenStatus({ tone: 'success', message: `已复制 ${code}` });
+    } catch {
+      setGenStatus({ tone: 'error', message: '复制失败，请手动复制' });
+    }
+  }
+
+  async function disableCode(row: InviteCodeRow) {
+    if (row.disabled) {
+      return;
+    }
+    try {
+      await postJson<{ ok: boolean; message: string }>(
+        '/admin/api/invite-codes/disable',
+        { code: row.code },
+      );
+      setRefreshNonce((value) => value + 1);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function deleteCode(row: InviteCodeRow) {
+    if (!window.confirm(`确定删除邀请码 ${row.code} 吗？`)) {
+      return;
+    }
+    try {
+      await postJson<{ ok: boolean; message: string }>('/admin/api/invite-codes/delete', { code: row.code });
+      setRefreshNonce((value) => value + 1);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  return (
+    <>
+      <PageHeader title="邀请码管理" subtitle="生成、查看、永久禁用和删除用户注册邀请码" />
+      <StatusBar loading={loading} error={error} />
+      <section className="metric-grid">
+        <MetricCard title="当前列表" value={formatNumber(rows.length)} detail={data?.total !== undefined ? `共 ${formatNumber(data.total)} 条` : '当前页'} />
+        <MetricCard title="未使用" value={formatNumber(unusedCount)} detail="可用于注册" />
+        <MetricCard title="已使用" value={formatNumber(usedCount)} detail="已绑定用户" />
+        <MetricCard title="已禁用" value={formatNumber(disabledCount)} detail="不可注册" tone={disabledCount ? 'warning' : undefined} />
+      </section>
+
+      <Panel title="生成邀请码">
+        <div className="system-dynamic-publisher">
+          <div className="system-dynamic-controls">
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={genCount}
+              onChange={(event) => setGenCount(event.target.value)}
+              placeholder="生成数量"
+            />
+            <button onClick={generateCodes} disabled={genBusy}>
+              {genBusy ? '生成中...' : '生成'}
+            </button>
+          </div>
+          {genStatus && (
+            <div className={`inline-status ${genStatus.tone === 'error' ? 'error' : genStatus.tone === 'success' ? 'success' : ''}`}>
+              {genStatus.message}
+            </div>
+          )}
+          {genCodes.length > 0 && (
+            <div className="invite-code-result">
+              {genCodes.map((code) => (
+                <button key={code} className="mono invite-code-copy" onClick={() => copyCode(code)} title="点击复制">
+                  {code}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="筛选">
+        <div className="filter-row">
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="">全部状态</option>
+            <option value="unused">未使用</option>
+            <option value="used">已使用</option>
+            <option value="disabled">已禁用</option>
+          </select>
+          <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="按邀请码搜索" />
+        </div>
+      </Panel>
+
+      <Panel title="邀请码列表">
+        <table>
+          <thead>
+            <tr>
+              <th>邀请码</th>
+              <th>状态</th>
+              <th>创建时间</th>
+              <th>使用时间</th>
+              <th>使用者</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.code}>
+                <td className="mono">{row.code}</td>
+                <td>
+                  <span className={`pill ${row.disabled ? 'error' : row.is_used ? 'warning' : 'success'}`}>
+                    {row.disabled ? '已禁用' : row.is_used ? '已使用' : '未使用'}
+                  </span>
+                </td>
+                <td>{row.created_at || '-'}</td>
+                <td>{row.used_at || '-'}</td>
+                <td>{row.username || row.user_id || '-'}</td>
+                <td>
+                  <div className="row-actions">
+                    <button onClick={() => disableCode(row)} disabled={row.disabled}>
+                      {row.disabled ? '已禁用' : '禁用'}
+                    </button>
+                    <button onClick={() => deleteCode(row)} disabled={row.is_used || row.disabled}>
+                      删除
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6}>当前筛选条件下没有邀请码</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </Panel>
     </>
   );
 }

@@ -57,7 +57,9 @@ export const useChatLogic = (
           const target = prev[index];
           const merged: ChatMessage = {
             ...target,
-            content: payload.text ? `${target.content}${payload.text}` : target.content,
+            // 服务端约定文本只在每句话的首包携带（global_speaking_worker 首个分片带 text）。
+            // 同 uuid 的重复文本包（at-least-once 重发）直接忽略，避免"同一句话显示两次"。
+            content: payload.text && !target.content ? payload.text : target.content,
             audioAvailable: payload.audio ? true : target.audioAvailable,
             audioLocalUri: payload.audio || target.audioLocalUri,
           };
@@ -147,10 +149,18 @@ export const useChatLogic = (
 
     binderRef.current = binder;
 
-    const processor = new MessageProcessor(networkClient, binder, (base64Audio, isFinal) => {
-      const jsCode = `window.feedAudioChunk(${JSON.stringify(base64Audio)}, ${isFinal ? 'true' : 'false'}); true;`;
-      webviewRef.current?.injectJavaScript(jsCode);
-    });
+    const processor = new MessageProcessor(
+      networkClient,
+      binder,
+      (base64Audio, isFinal) => {
+        const jsCode = `window.feedAudioChunk(${JSON.stringify(base64Audio)}, ${isFinal ? 'true' : 'false'}); true;`;
+        webviewRef.current?.injectJavaScript(jsCode);
+      },
+      () => {
+        const jsCode = `window.stopServerAudio(); true;`;
+        webviewRef.current?.injectJavaScript(jsCode);
+      },
+    );
 
     messageProcessorRef.current = processor;
 
@@ -181,7 +191,7 @@ export const useChatLogic = (
   const handleWebViewMessage = useCallback((event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
-      if (data.type === 'audio_finished') {
+      if (data.type === 'audio_finished' || data.type === 'audio_stopped') {
         messageProcessorRef.current?.onServerAudioFinished();
         return;
       }
@@ -217,9 +227,8 @@ export const useChatLogic = (
   const handleInputChange = useCallback((text: string) => {
     setInputText(text);
     const trimmedLength = text.trim().length;
-    if (trimmedLength > 0) {
-      void binderRef.current?.sendTyping(trimmedLength);
-    }
+    // 清空输入时也发送 text_length=0 事件，通知服务端"用户已清空输入"并立即提取，而非继续等待补全
+    void binderRef.current?.sendTyping(trimmedLength);
   }, []);
 
   const handleSendText = useCallback(async () => {
@@ -337,16 +346,26 @@ export const useChatLogic = (
 
     setMessages((prev) => {
       const nowScrollIndex = prev.length - 1;
-      const normalized = newMessages.map((msg) => ({
-        ...msg,
-        sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
-        audioPlayState: msg.audioPlayState || 'idle',
-      }));
+      // 按 uuid 去重：历史消息与实时消息（或分页重叠）可能包含同一条消息，避免重复渲染
+      const existingUuids = new Set(prev.map((msg) => msg.uuid));
+      const normalized = newMessages
+        .filter((msg) => !existingUuids.has(msg.uuid))
+        .map((msg) => ({
+          ...msg,
+          sendStatus: msg.isUser ? 'submitted' : msg.sendStatus,
+          audioPlayState: msg.audioPlayState || 'idle',
+        }));
       const next = [...prev, ...normalized.reverse()];
 
       if (nowScrollIndex >= 0) {
+        // 快速滑动时目标 index 可能尚未渲染，scrollToIndex 会抛 invariant violation 导致应用闪退。
+        // 捕获异常并回退到 offset 定位（见 index.tsx 的 onScrollToIndexFailed），即使失败也不影响列表。
         setTimeout(() => {
-          flatListRef.current?.scrollToIndex({ index: nowScrollIndex, animated: false });
+          try {
+            flatListRef.current?.scrollToIndex({ index: nowScrollIndex, animated: false });
+          } catch {
+            addDebugTrace('history', 'scrollToIndex failed, fallback to offset', { index: nowScrollIndex });
+          }
         }, 10);
       } else {
         setTimeout(() => {

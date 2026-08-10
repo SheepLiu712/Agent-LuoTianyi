@@ -16,20 +16,23 @@ from src.system.user_interface.types import (
     RegisterRequest,
     LoginRequest,
     AutoLoginRequest,
-    HistoryRequest,
+    HistoryQuery,
     ImageRequest,
     ResetAccountRequest,
     WSEventType,
     PreferenceGetRequest,
     PreferenceOverwriteRequest,
     DynamicListRequest,
+    DynamicListQuery,
     DynamicCreateRequest,
     DynamicCommentListRequest,
+    DynamicCommentListQuery,
     DynamicCommentCreateRequest,
     DynamicUnreadRequest,
+    DynamicUnreadQuery,
     DynamicReadMarkRequest,
 )
-from src.system.user_interface.websocket_service import WebSocketConnection
+from src.system.user_interface.websocket_service import ChatEventAcceptance, WebSocketConnection
 from src.system.admin.admin_interface import router as admin_router
 from src.system.admin import get_admin_shell, init_admin_shell, shutdown_admin_shell
 
@@ -67,7 +70,7 @@ async def startup_event(app: FastAPI):
 
 
 def runtime_not_ready_detail() -> dict:
-    status = get_admin_shell().runtime_supervisor.status()
+    status = get_admin_shell().runtime_supervisor.public_status()
     return {
         "ok": False,
         "code": "SYSTEM_RUNTIME_NOT_READY",
@@ -81,6 +84,20 @@ def get_runtime():
     if runtime is None:
         raise HTTPException(status_code=503, detail=runtime_not_ready_detail())
     return runtime
+
+
+def require_bearer_token(authorization: str | None) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    scheme, separator, token = authorization.partition(" ")
+    if (
+        separator != " "
+        or scheme.lower() != "bearer"
+        or not token
+        or any(character.isspace() for character in token)
+    ):
+        raise HTTPException(status_code=401, detail="无效的 Authorization 请求头")
+    return token
 
 
 app = FastAPI(lifespan=startup_event)
@@ -153,7 +170,12 @@ async def chat_ws(websocket: WebSocket):
 
     ws_connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
     try:
-        await ws_connection.auth(websocket_service, system_runtime.database_manager)  # 等待认证，认证成功之后将ws和用户信息绑定
+        authenticated = await ws_connection.auth(
+            websocket_service,
+            system_runtime.database_manager,
+        )
+        if not authenticated:
+            return
         chat_stream = await gcsm.get_or_register_chat_stream(
             ws_connection, system_runtime=system_runtime
         )  # 根据ws连接获取对应的聊天流实例，内部会根据用户UUID进行管理
@@ -167,18 +189,42 @@ async def chat_ws(websocket: WebSocket):
                 continue
 
             if websocket_service.is_chat_related_event(event):
-                if websocket_service.is_duplicate_client_message(ws_connection, event):
+                acceptance = websocket_service.try_accept_chat_event(
+                    ws_connection,
+                    event,
+                    chat_stream,
+                )
+                if acceptance == ChatEventAcceptance.DUPLICATE:
                     await websocket_service.send_duplicate_ack_event(ws_connection, event)
                     continue
-                await websocket_service.send_ack_event(ws_connection, event)  # 先确认收到，避免图片预处理拖慢 ACK
-
-            chat_event = websocket_service.convert_to_chat_input_event(
-                event,
-                sender_user_id=ws_connection.user_uuid,
-            )
-            if chat_event is None:
-                continue
-            await chat_stream.feed_event(chat_event)
+                if acceptance == ChatEventAcceptance.BAD_MESSAGE:
+                    await websocket_service.send_nack_event(
+                        ws_connection,
+                        event,
+                        code="BAD_MESSAGE",
+                        message="chat event payload is invalid",
+                        retryable=False,
+                    )
+                    continue
+                if acceptance == ChatEventAcceptance.UNSUPPORTED:
+                    await websocket_service.send_nack_event(
+                        ws_connection,
+                        event,
+                        code="UNSUPPORTED_EVENT",
+                        message="chat event type is not supported",
+                        retryable=False,
+                    )
+                    continue
+                if acceptance == ChatEventAcceptance.OVERLOADED:
+                    await websocket_service.send_nack_event(
+                        ws_connection,
+                        event,
+                        code="OVERLOADED",
+                        message="chat ingress queue is full",
+                        retryable=True,
+                    )
+                    continue
+                await websocket_service.send_ack_event(ws_connection, event)
     except WebSocketDisconnect:
         gcsm.ws_lost_connection(ws_connection)
         logger.info("WebSocket client disconnected from /chat_ws")
@@ -235,7 +281,7 @@ async def register(
     - 成功：{"message": "注册成功", "user_id": req.username}
     - 失败：HTTP 400 错误，{"detail": "注册失败，失败原因"}
     """
-    logger.info(f"Register request: {req.username} with code {req.invite_code}")
+    logger.info("Register request for username=%s", req.username)
     return await system_runtime.user_interface.register(
         req, system_runtime, request
     )
@@ -257,7 +303,7 @@ async def reset_account(
     - 成功：{"message": "重置成功"}
     - 失败：HTTP 400 错误，{"detail": "失败原因"}
     """
-    logger.info(f"Reset account request for invite_code: {req.invite_code[:4]}****")
+    logger.info("Reset account request for username=%s", req.new_username)
     return await system_runtime.user_interface.reset_account(
         req, system_runtime, request
     )
@@ -306,19 +352,13 @@ async def overwrite_preference(
 
 @app.get("/history")
 async def get_history(
-    request: HistoryRequest = Depends(),
+    request: HistoryQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
     """获取聊天历史：委托到 UserInterface。"""
     logger.info(f"Server received: Get history request from {request.username}")
-    token = request.token
-    if not token and authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if not token:
-        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    token = require_bearer_token(authorization)
     return await system_runtime.user_interface.get_history(
         request.username, token, request.count, request.end_index, system_runtime
     )
@@ -326,17 +366,11 @@ async def get_history(
 
 @app.get("/dynamics")
 async def list_dynamics(
-    request: DynamicListRequest = Depends(),
+    request: DynamicListQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
-    token = request.token
-    if not token and authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if not token:
-        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    token = require_bearer_token(authorization)
     req = DynamicListRequest(
         username=request.username,
         token=token,
@@ -356,17 +390,11 @@ async def create_dynamic(
 
 @app.get("/dynamics/unread")
 async def get_dynamic_unread(
-    request: DynamicUnreadRequest = Depends(),
+    request: DynamicUnreadQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
-    token = request.token
-    if not token and authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if not token:
-        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    token = require_bearer_token(authorization)
     req = DynamicUnreadRequest(username=request.username, token=token)
     return await system_runtime.user_interface.get_dynamic_unread(req, system_runtime)
 
@@ -382,17 +410,11 @@ async def mark_dynamic_read(
 @app.get("/dynamics/{dynamic_id}/comments")
 async def list_dynamic_comments(
     dynamic_id: str,
-    request: DynamicCommentListRequest = Depends(),
+    request: DynamicCommentListQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
-    token = request.token
-    if not token and authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if not token:
-        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    token = require_bearer_token(authorization)
     req = DynamicCommentListRequest(
         username=request.username,
         token=token,

@@ -3,13 +3,12 @@ import { server_config } from '../config';
 import { AgentMessagePayload } from '../types/chat';
 import { WSEventType } from '../types/ws_events';
 import { addDebugTrace } from './debug_trace';
+import { AckResult, normalizeServerAck } from './ws_ack';
 
-interface AckResult {
-  ok: boolean;
-  request_id: string;
-  error?: string;
-  drop?: boolean;
-}
+export type { AckResult } from './ws_ack';
+export { normalizeServerAck } from './ws_ack';
+
+export const WS_CLIENT_CAPABILITIES = ['negative_ack_v1'] as const;
 
 interface ServerEnvelope {
   type?: string;
@@ -42,10 +41,12 @@ export class WebSocketTransport {
   private reconnectDueAt: number | null = null;
   private reconnectDelayMs: number | null = null;
   private reconnectPausedForBackground = false;
+  private hasNotifiedReconnectStruggle = false;
   private appStateSubscription: { remove: () => void } | null = null;
   private isStopped = true;
   private isConnected = false;
   private isAuthed = false;
+  private authRejected = false;
 
   constructor(username: string, token: string, callbacks: WsCallbacks) {
     this.username = username;
@@ -99,6 +100,7 @@ export class WebSocketTransport {
 
   start() {
     this.isStopped = false;
+    this.authRejected = false;
     addDebugTrace('ws', 'start transport', { username: this.username });
     if (!this.appStateSubscription) {
       this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange);
@@ -110,10 +112,15 @@ export class WebSocketTransport {
     this.isStopped = true;
     this.isConnected = false;
     this.isAuthed = false;
+    this.hasNotifiedReconnectStruggle = false;
     addDebugTrace('ws', 'stop transport');
     this.clearReconnectTimer();
     this.stopHeartbeat();
-    this.rejectAllWaiters('websocket stopped');
+    this.rejectAllWaiters('websocket stopped', {
+      code: 'TRANSPORT_STOPPED',
+      retryable: false,
+      drop: true,
+    });
     this.reconnectPausedForBackground = false;
     this.reconnectDueAt = null;
     this.reconnectDelayMs = null;
@@ -207,7 +214,6 @@ export class WebSocketTransport {
 
     this.ws.onopen = () => {
       this.isConnected = true;
-      this.reconnectAttempts = 0;
       this.sendAuth();
       this.startHeartbeat();
     };
@@ -217,13 +223,11 @@ export class WebSocketTransport {
     };
 
     this.ws.onerror = (event) => {
+      // 瞬时网络抖动/服务器短暂不可用都会触发 onerror，随后 onclose 会自动重连。
+      // 这里不直接向用户抛"连接错误"，避免在自动重连自愈期间刷出多条错误气泡（Bug#10）。
+      // 持续重连失败时的提示由 notifyReconnectStruggleIfNeeded 在 onclose 中统一给出。
       const detail = this.describeWebSocketEvent(event);
       addDebugTrace('ws', 'onerror', detail);
-      if (this.isBackgrounded()) {
-        addDebugTrace('ws', 'onerror suppressed while backgrounded', detail);
-        return;
-      }
-      this.callbacks.onError('WebSocket 连接发生错误。');
     };
 
     this.ws.onclose = (event) => {
@@ -232,7 +236,16 @@ export class WebSocketTransport {
       this.isConnected = false;
       this.isAuthed = false;
       this.stopHeartbeat();
+      this.rejectAllWaiters('websocket disconnected', {
+        code: 'DISCONNECTED',
+        retryable: true,
+        drop: false,
+      });
       if (this.isStopped) {
+        return;
+      }
+      if (!this.canReconnectAfterClose()) {
+        addDebugTrace('ws', 'reconnect suppressed after authentication rejection');
         return;
       }
 
@@ -242,6 +255,7 @@ export class WebSocketTransport {
       }
 
       this.scheduleReconnect();
+      this.notifyReconnectStruggleIfNeeded();
     };
   }
 
@@ -289,6 +303,18 @@ export class WebSocketTransport {
     this.armReconnectTimer(delay);
   }
 
+  private notifyReconnectStruggleIfNeeded() {
+    // 仅当连续多次重连失败（指数退避累计约 14 秒）时，温和提示一次，
+    // 避免瞬时抖动刷出多条"连接错误"。重连成功或 stop 后重置，下次断线可再次提示。
+    if (this.isBackgrounded() || this.hasNotifiedReconnectStruggle) {
+      return;
+    }
+    if (this.reconnectAttempts >= 3) {
+      this.hasNotifiedReconnectStruggle = true;
+      this.callbacks.onError('网络连接不稳定，正在自动重连…');
+    }
+  }
+
   private pauseReconnectIfNeeded() {
     if (!this.reconnectTimer) {
       return;
@@ -334,6 +360,7 @@ export class WebSocketTransport {
       payload: {
         username: this.username,
         token: this.token,
+        capabilities: [...WS_CLIENT_CAPABILITIES],
       },
     });
   }
@@ -361,19 +388,35 @@ export class WebSocketTransport {
     }
   }
 
-  private async waitUntilReady(timeoutMs = 10000) {
+  private async waitUntilReady(
+    timeoutMs = 10000,
+  ): Promise<'ready' | 'auth_rejected' | 'stopped' | 'timeout'> {
     const start = Date.now();
     while (!this.isStopped && (!this.isConnected || !this.isAuthed)) {
+      if (this.authRejected) {
+        return 'auth_rejected';
+      }
       if (Date.now() - start > timeoutMs) {
         addDebugTrace('ws', 'waitUntilReady timeout', {
           waitedMs: Date.now() - start,
           isConnected: this.isConnected,
           isAuthed: this.isAuthed,
         });
-        throw new Error('websocket not ready');
+        return 'timeout';
       }
       await new Promise((resolve) => setTimeout(resolve, 80));
     }
+    if (this.authRejected) {
+      return 'auth_rejected';
+    }
+    if (this.isStopped) {
+      return 'stopped';
+    }
+    return 'ready';
+  }
+
+  private canReconnectAfterClose() {
+    return !this.authRejected;
   }
 
   private async sendWithAck(
@@ -384,15 +427,17 @@ export class WebSocketTransport {
   ): Promise<AckResult> {
     const requestId = clientMsgId || `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    try {
-      await this.waitUntilReady();
-    } catch {
+    const readiness = await this.waitUntilReady();
+    if (readiness !== 'ready') {
+      const permanent = readiness === 'auth_rejected' || readiness === 'stopped';
       addDebugTrace('ack', 'sendWithAck blocked: websocket not ready', { eventType, requestId });
       return {
         ok: false,
         request_id: requestId,
-        error: 'not logged in',
-        drop: true,
+        error: readiness === 'auth_rejected' ? 'authentication rejected' : 'websocket not ready',
+        code: readiness === 'auth_rejected' ? 'AUTH_REJECTED' : 'NOT_READY',
+        retryable: !permanent,
+        drop: permanent,
       };
     }
 
@@ -408,24 +453,42 @@ export class WebSocketTransport {
       }, timeoutMs);
 
       this.ackWaiters.set(requestId, { resolve, timer });
-      this.sendRaw({
+      const sent = this.sendRaw({
         type: eventType,
         client_msg_id: requestId,
         ts: Date.now(),
         payload,
       });
+      if (!sent) {
+        clearTimeout(timer);
+        this.ackWaiters.delete(requestId);
+        resolve({
+          ok: false,
+          request_id: requestId,
+          error: 'websocket disconnected before send',
+          code: 'DISCONNECTED',
+          retryable: true,
+          drop: false,
+        });
+      }
     });
   }
 
-  private sendRaw(message: Record<string, unknown>) {
+  private sendRaw(message: Record<string, unknown>): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       addDebugTrace('ws', 'sendRaw skipped: socket not open', {
         readyState: this.ws?.readyState,
         type: String(message.type || ''),
       });
-      return;
+      return false;
     }
-    this.ws.send(JSON.stringify(message));
+    try {
+      this.ws.send(JSON.stringify(message));
+      return true;
+    } catch {
+      addDebugTrace('ws', 'sendRaw failed', { type: String(message.type || '') });
+      return false;
+    }
   }
 
   private handleServerMessage(raw: unknown) {
@@ -440,14 +503,30 @@ export class WebSocketTransport {
       }
 
       if (eventType === WSEventType.AUTH_OK) {
+        this.authRejected = false;
         this.isAuthed = true;
+        this.reconnectAttempts = 0;
+        this.hasNotifiedReconnectStruggle = false;
         return;
       }
 
       if (eventType === WSEventType.AUTH_ERROR) {
         this.isAuthed = false;
+        this.authRejected = true;
+        this.rejectAllWaiters(String(payload.message || 'authentication rejected'), {
+          code: 'AUTH_REJECTED',
+          retryable: false,
+          drop: true,
+        });
         addDebugTrace('ws', 'recv auth_error', { message: String(payload.message || '鉴权失败') });
         this.callbacks.onError(String(payload.message || '鉴权失败'));
+        this.clearReconnectTimer();
+        this.stopHeartbeat();
+        try {
+          this.ws?.close();
+        } catch {
+          // The close path already suppresses reconnect for rejected credentials.
+        }
         return;
       }
 
@@ -457,7 +536,7 @@ export class WebSocketTransport {
           const waiter = this.ackWaiters.get(replyTo)!;
           clearTimeout(waiter.timer);
           this.ackWaiters.delete(replyTo);
-          waiter.resolve({ ok: true, request_id: replyTo });
+          waiter.resolve(normalizeServerAck(payload, replyTo));
         }
         return;
       }
@@ -482,7 +561,10 @@ export class WebSocketTransport {
     }
   }
 
-  private rejectAllWaiters(errorText: string) {
+  private rejectAllWaiters(
+    errorText: string,
+    options: Pick<AckResult, 'code' | 'retryable' | 'drop'> = {},
+  ) {
     addDebugTrace('ack', 'reject all waiters', { count: this.ackWaiters.size, errorText });
     for (const [requestId, waiter] of this.ackWaiters.entries()) {
       clearTimeout(waiter.timer);
@@ -490,6 +572,7 @@ export class WebSocketTransport {
         ok: false,
         request_id: requestId,
         error: errorText,
+        ...options,
       });
     }
     this.ackWaiters.clear();

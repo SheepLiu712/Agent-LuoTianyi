@@ -1,4 +1,5 @@
 import { Buffer } from 'buffer';
+import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
@@ -6,7 +7,16 @@ import { AgentBinder } from './binder';
 import { addDebugTrace } from './debug_trace';
 import { NetworkClient } from './network_client';
 
-type SendItem = { clientMsgId: string } & (
+type SendKind =
+  | 'text'
+  | 'proactive'
+  | 'image'
+  | 'typing'
+  | 'touch'
+  | 'image_selecting'
+  | 'image_selecting_cancel';
+
+type SendItem = { clientMsgId: string; retryAttempt: number; enqueuedAtMs: number } & (
   | { kind: 'text'; uuid: string; text: string }
   | { kind: 'proactive'; uuid: string; text: string }
   | { kind: 'image'; uuid: string; imageUri: string; mimeType: string }
@@ -16,6 +26,25 @@ type SendItem = { clientMsgId: string } & (
   | { kind: 'image_selecting_cancel' }
 );
 
+export const MAX_DURABLE_RETRY_ATTEMPTS = 8;
+export const MAX_DURABLE_MESSAGE_AGE_MS = 4 * 60 * 1000;
+
+export function isDurableSendKind(kind: SendKind) {
+  return kind === 'text' || kind === 'image' || kind === 'proactive';
+}
+
+export function canRetryDurableMessage(
+  retryAttempt: number,
+  enqueuedAtMs: number,
+  retryDelayMs: number,
+  nowMs = Date.now(),
+) {
+  return (
+    retryAttempt < MAX_DURABLE_RETRY_ATTEMPTS
+    && nowMs - enqueuedAtMs + retryDelayMs < MAX_DURABLE_MESSAGE_AGE_MS
+  );
+}
+
 interface SendResult {
   ok: boolean;
   error?: string;
@@ -24,7 +53,11 @@ interface SendResult {
 
 function isTerminalSendError(errorText?: string) {
   const text = (errorText || '').toLowerCase();
-  return text.includes('not logged in') || text.includes('failed to read image file');
+  return text.includes('failed to read image file');
+}
+
+export function getSendRetryDelayMs(retryAttempt: number) {
+  return Math.min(2 ** Math.max(0, retryAttempt), 30) * 1000;
 }
 
 function getErrorMessage(error: unknown) {
@@ -82,6 +115,7 @@ export class MessageProcessor {
   private readonly networkClient: NetworkClient;
   private readonly binder: AgentBinder;
   private readonly feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void;
+  private readonly stopServerAudio: () => void;
   private sendQueue: SendItem[] = [];
   private sendLoopRunning = false;
   private stopRequested = false;
@@ -94,20 +128,26 @@ export class MessageProcessor {
   private lastTypingSentAt = 0;
   private readonly serverAudioFinishWaiters: (() => void)[] = [];
   private incomingMessageChain: Promise<void> = Promise.resolve();
+  // 消息级幂等：uuid -> 已处理过的分片包签名集合（text+audio+expression+final），用于跳过服务端 at-least-once 重发的重复分片
+  private readonly seenPacketsByUuid = new Map<string, Set<string>>();
+  private static readonly MAX_TRACKED_MESSAGES = 50;
 
   constructor(
     networkClient: NetworkClient,
     binder: AgentBinder,
     feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void,
+    stopServerAudio?: () => void,
   ) {
     this.networkClient = networkClient;
     this.binder = binder;
     this.feedServerAudioChunk = feedServerAudioChunk;
+    this.stopServerAudio = stopServerAudio || (() => {});
   }
 
   stop() {
     this.stopRequested = true;
     this.sendQueue = [];
+    this.stopServerAudio();
     void this.stopLocalTts();
   }
 
@@ -120,20 +160,26 @@ export class MessageProcessor {
   }
 
   async sendText(uuid: string, text: string) {
-    this.sendQueue.push({ kind: 'text', uuid, text, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'text', uuid, text, clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     addDebugTrace('send', 'enqueue text', { uuid, queueLength: this.sendQueue.length, textLength: text.length });
     this.binder.emitMessageStatus(uuid, 'waiting');
     this.startSendLoop();
   }
 
   async sendProactiveText(uuid: string, text: string) {
-    this.sendQueue.push({ kind: 'proactive', uuid, text, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'proactive', uuid, text, clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     addDebugTrace('send', 'enqueue proactive text', { uuid, queueLength: this.sendQueue.length, textLength: text.length });
     this.startSendLoop();
   }
 
   async sendImage(uuid: string, imageUri: string, mimeType: string) {
-    this.sendQueue.push({ kind: 'image', uuid, imageUri, mimeType, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'image', uuid, imageUri, mimeType, clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     addDebugTrace('send', 'enqueue image', { uuid, queueLength: this.sendQueue.length, mimeType });
     this.binder.emitMessageStatus(uuid, 'waiting');
     this.startSendLoop();
@@ -141,33 +187,43 @@ export class MessageProcessor {
 
   async sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) {
     addDebugTrace('send', 'enqueue touch', { touchArea, queueLength: this.sendQueue.length });
-    this.sendQueue.push({ kind: 'touch', touchArea, clickFrequency, touchMeta, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'touch', touchArea, clickFrequency, touchMeta, clientMsgId: this.nextClientMsgId(), retryAttempt: 0,
+      enqueuedAtMs: Date.now(),
+    });
     this.startSendLoop();
   }
 
   async sendTypingEvent(textLength: number) {
     const now = Date.now();
-    if (now - this.lastTypingSentAt < 400) {
+    // 0 长度事件表示用户清空了输入，必须立即发送、不受节流限制（对齐桌面端实现）
+    if (now - this.lastTypingSentAt < 400 && textLength > 0) {
       return;
     }
     if (this.sendQueue.length > 0) {
       return;
     }
     this.lastTypingSentAt = now;
-    this.sendQueue.push({ kind: 'typing', textLength, clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'typing', textLength, clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     addDebugTrace('send', 'enqueue typing', { queueLength: this.sendQueue.length, textLength });
     this.startSendLoop();
   }
 
   async sendImageSelecting() {
     addDebugTrace('send', 'enqueue image_selecting');
-    this.sendQueue.push({ kind: 'image_selecting', clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'image_selecting', clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     this.startSendLoop();
   }
 
   async sendImageSelectingCancel() {
     addDebugTrace('send', 'enqueue image_selecting_cancel');
-    this.sendQueue.push({ kind: 'image_selecting_cancel', clientMsgId: this.nextClientMsgId() });
+    this.sendQueue.push({
+      kind: 'image_selecting_cancel', clientMsgId: this.nextClientMsgId(), retryAttempt: 0, enqueuedAtMs: Date.now(),
+    });
     this.startSendLoop();
   }
 
@@ -177,6 +233,10 @@ export class MessageProcessor {
       addDebugTrace('audio', 'play blocked by server audio playing', { convUuid });
       return false;
     }
+
+    // 防御性清空 WebView 音频队列：即使 serverAudioPlaying 标志因异常未同步，
+    // 也保证本地播放开始时没有服务端音频在播（单播放器互斥）。
+    this.stopServerAudio();
 
     const localUri = this.audioPathByUuid.get(convUuid);
     if (!localUri) {
@@ -296,25 +356,60 @@ export class MessageProcessor {
   }
 
   onAgentMessage(payload: AgentMessagePayload) {
+    // 消息级幂等：服务端 at-least-once 重发的重复分片在入口直接跳过，
+    // 展示与音频两条路径都不再处理（若只在展示路径去重，重复音频仍会被串行链消费）。
+    if (this.isDuplicatePacket(payload.uuid || `agent-${Date.now()}`, payload)) {
+      return;
+    }
+    // 文本与表情展示即时执行，不被上一句的音频完成/落盘阻塞，
+    // 保证多句回复可以流式渲染出全部句子（而不是只显示第一句）。
+    this.handleAgentMessageDisplay(payload);
+    // 音频链路保持串行：分片累积、播放、落盘按到达顺序执行。
     this.incomingMessageChain = this.incomingMessageChain
-      .then(() => this.handleAgentMessage(payload))
+      .then(() => this.handleAgentMessageAudio(payload))
       .catch((error) => {
-        addDebugTrace('agent', 'handleAgentMessage failed', {
+        addDebugTrace('agent', 'handleAgentMessageAudio failed', {
           error: getErrorMessage(error),
         });
       });
   }
 
-  private async handleAgentMessage(payload: AgentMessagePayload) {
+  private isDuplicatePacket(convUuid: string, payload: AgentMessagePayload): boolean {
+    // 签名覆盖 text/audio/expression/is_final_package：同一 uuid 的合法分片内容互不相同，
+    // 只有服务端 at-least-once 重发的完全相同的分片才会命中同一签名。
+    const signature = [
+      payload.text || '',
+      payload.audio || '',
+      payload.expression || '',
+      payload.is_final_package ? 'F' : '',
+    ].join('|');
+
+    let seen = this.seenPacketsByUuid.get(convUuid);
+    if (!seen) {
+      seen = new Set();
+      this.seenPacketsByUuid.set(convUuid, seen);
+      // 防止 uuid 集合无限增长：超出上限时按插入顺序淘汰最旧的 uuid
+      if (this.seenPacketsByUuid.size > MessageProcessor.MAX_TRACKED_MESSAGES) {
+        const oldestKey = this.seenPacketsByUuid.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.seenPacketsByUuid.delete(oldestKey);
+        }
+      }
+    }
+    if (seen.has(signature)) {
+      addDebugTrace('agent', 'duplicate agent_message packet skipped', { uuid: convUuid });
+      return true;
+    }
+    seen.add(signature);
+    return false;
+  }
+
+  private handleAgentMessageDisplay(payload: AgentMessagePayload) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
     const displayInChat = payload.display_in_chat !== false;
 
     if (!displayInChat) {
       this.transientMessageUuids.add(convUuid);
-    }
-
-    if (this.localPlayingUuid) {
-      void this.stopLocalTts();
     }
 
     if (displayInChat && payload.text && payload.text.trim().length > 0) {
@@ -323,6 +418,8 @@ export class MessageProcessor {
         text: payload.text,
         expression: payload.expression || undefined,
         is_final_package: payload.is_final_package,
+        audio_error: payload.audio_error,
+        error_code: payload.error_code,
         display_in_chat: payload.display_in_chat,
         is_ephemeral: payload.is_ephemeral,
       });
@@ -331,9 +428,19 @@ export class MessageProcessor {
         uuid: convUuid,
         expression: payload.expression || undefined,
         is_final_package: payload.is_final_package,
+        audio_error: payload.audio_error,
+        error_code: payload.error_code,
         display_in_chat: payload.display_in_chat,
         is_ephemeral: payload.is_ephemeral,
       });
+    }
+  }
+
+  private async handleAgentMessageAudio(payload: AgentMessagePayload) {
+    const convUuid = payload.uuid || `agent-${Date.now()}`;
+
+    if (this.localPlayingUuid) {
+      await this.stopLocalTts();
     }
 
     const audioChunk = payload.audio || '';
@@ -347,8 +454,23 @@ export class MessageProcessor {
 
     if (payload.is_final_package) {
       this.feedServerAudioChunk('', true);
-      await this.waitForServerAudioFinished();
-      await this.saveAudioToLocal(convUuid);
+      if (payload.audio_error) {
+        this.audioChunksByUuid.delete(convUuid);
+        this.transientMessageUuids.delete(convUuid);
+        addDebugTrace('audio', 'server audio stream ended with error', {
+          convUuid,
+          errorCode: payload.error_code || 'UNKNOWN',
+        });
+      } else {
+        // Audio is complete on the wire, so persist it before waiting for the
+        // WebView player. Background suspension must not block later messages.
+        await this.saveAudioToLocal(convUuid);
+      }
+      if (AppState.currentState === 'active') {
+        await this.waitForServerAudioFinished();
+      } else {
+        this.onServerAudioFinished();
+      }
     }
   }
 
@@ -379,7 +501,7 @@ export class MessageProcessor {
         addDebugTrace('audio', 'waitForServerAudioFinished timeout', {
           timeoutMs,
         });
-        onFinished();
+        this.onServerAudioFinished();
       }, timeoutMs);
 
       this.serverAudioFinishWaiters.push(onFinished);
@@ -408,43 +530,82 @@ export class MessageProcessor {
       }
 
       const item = this.sendQueue[0];
-      const result = await this.sendOne(item);
-
-      if (item.kind === 'typing' || item.kind === 'proactive' || item.kind === 'touch' || item.kind === 'image_selecting' || item.kind === 'image_selecting_cancel') {
-        addDebugTrace('send', `${item.kind} sent`, { ok: result.ok, error: result.error });
+      const durable = isDurableSendKind(item.kind);
+      if (durable && Date.now() - item.enqueuedAtMs >= MAX_DURABLE_MESSAGE_AGE_MS) {
+        this.failDeliveryUncertain(item, 'message exceeded the automatic delivery window');
         this.sendQueue.shift();
         continue;
       }
 
+      const result = await this.sendOne(item);
+      const tracksMessageStatus = durable && 'uuid' in item;
+
       if (result.ok) {
-        addDebugTrace('send', 'send success', { uuid: item.uuid, kind: item.kind, queueLength: this.sendQueue.length });
-        this.binder.emitMessageStatus(item.uuid, 'submitted');
+        addDebugTrace('send', 'send success', { kind: item.kind, queueLength: this.sendQueue.length });
+        if (tracksMessageStatus) {
+          this.binder.emitMessageStatus(item.uuid, 'submitted');
+        }
+        this.sendQueue.shift();
+        continue;
+      }
+
+      if (!durable) {
+        addDebugTrace('send', 'transient event dropped after send failure', {
+          kind: item.kind,
+          error: result.error,
+        });
         this.sendQueue.shift();
         continue;
       }
 
       if (result.drop || isTerminalSendError(result.error)) {
         addDebugTrace('send', 'send failed terminal', {
-          uuid: item.uuid,
           kind: item.kind,
           error: result.error,
           drop: result.drop,
         });
-        this.binder.emitMessageStatus(item.uuid, 'failed');
+        if (tracksMessageStatus) {
+          this.binder.emitMessageStatus(item.uuid, 'failed');
+        }
         this.sendQueue.shift();
         continue;
       }
 
+      const retryDelayMs = getSendRetryDelayMs(item.retryAttempt);
+      if (!canRetryDurableMessage(item.retryAttempt, item.enqueuedAtMs, retryDelayMs)) {
+        this.failDeliveryUncertain(item, result.error || 'delivery acknowledgement was not received');
+        this.sendQueue.shift();
+        continue;
+      }
+      item.retryAttempt += 1;
       addDebugTrace('send', 'send failed retry', {
-        uuid: item.uuid,
         kind: item.kind,
         error: result.error,
+        retryAttempt: item.retryAttempt,
+        retryDelayMs,
       });
-      this.binder.emitMessageStatus(item.uuid, 'waiting');
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (tracksMessageStatus) {
+        this.binder.emitMessageStatus(item.uuid, 'waiting');
+      }
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
 
     this.sendLoopRunning = false;
+  }
+
+  private failDeliveryUncertain(item: SendItem, reason: string) {
+    addDebugTrace('send', 'durable message delivery is uncertain', {
+      kind: item.kind,
+      clientMsgId: item.clientMsgId,
+      retryAttempt: item.retryAttempt,
+      ageMs: Date.now() - item.enqueuedAtMs,
+      code: 'DELIVERY_UNCERTAIN',
+      reason,
+    });
+    if ('uuid' in item) {
+      this.binder.emitMessageStatus(item.uuid, 'failed');
+    }
+    this.binder.emitErrorText('[DELIVERY_UNCERTAIN] 消息发送结果无法确认，请检查会话后再重试。');
   }
 
   private async sendOne(item: SendItem): Promise<SendResult> {

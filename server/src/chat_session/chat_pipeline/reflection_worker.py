@@ -42,7 +42,10 @@ class ReflectionWorker:
         self.reply_topic_callback = reply_topic_callback
         self.system_runtime: "SystemRuntime | None" = None
         self.logger = get_logger(f"{username}ReflectionWorker")
-        self.reflection_queue: asyncio.Queue[CompletedTurn] = asyncio.Queue()
+        self.queue_maxsize = max(1, int(config.get("queue_maxsize", 64)))
+        self.reflection_queue: asyncio.Queue[CompletedTurn] = asyncio.Queue(
+            maxsize=self.queue_maxsize,
+        )
         self.processor_task: asyncio.Task | None = None
 
     def set_system_runtime(self, system_runtime: "SystemRuntime") -> None:
@@ -102,7 +105,7 @@ class ReflectionWorker:
             user_id=turn.user_id,
             topic=turn.topic,
             conversation_history=turn.conversation_history,
-            reply_topic_callback=lambda t: self._safe_reply_topic(t),
+            reply_topic_callback=self._safe_reply_topic,
         )
 
         if result is True:
@@ -112,12 +115,14 @@ class ReflectionWorker:
         else:
             self.logger.info(f"Date confirmation topic created from topic {turn.topic.topic_id}")
 
-    def _safe_reply_topic(self, topic: "ExtractedTopic") -> None:
+    async def _safe_reply_topic(self, topic: "ExtractedTopic") -> None:
         if self.reply_topic_callback is None:
             self.logger.warning("No reply topic callback set, cannot enqueue reflection topic")
             return
         try:
-            asyncio.create_task(self.reply_topic_callback(topic))
+            await self.reply_topic_callback(topic)
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             self.logger.warning(f"Failed to add reflection topic: {e}")
 

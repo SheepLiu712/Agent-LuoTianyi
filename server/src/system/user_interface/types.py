@@ -11,12 +11,20 @@ class HistoryRequest(BaseModel):
     count: int = 10
     end_index: int = -1
 
+
+class HistoryQuery(BaseModel):
+    username: str
+    count: int = 10
+    end_index: int = -1
+
 class ChatResponse(BaseModel):
     uuid: str
     text: str
     audio: str | None = None
     expression: str | None = None
     is_final_package: bool = True
+    audio_error: bool | None = None
+    error_code: str | None = None
     display_in_chat: bool = True
     is_ephemeral: bool = False
 
@@ -57,6 +65,12 @@ class DynamicListRequest(BaseModel):
     cursor: str | None = None
 
 
+class DynamicListQuery(BaseModel):
+    username: str
+    limit: int = 20
+    cursor: str | None = None
+
+
 class DynamicCreateRequest(BaseModel):
     username: str
     token: str
@@ -66,6 +80,12 @@ class DynamicCreateRequest(BaseModel):
 class DynamicCommentListRequest(BaseModel):
     username: str
     token: str | None = None
+    limit: int = 100
+    cursor: str | None = None
+
+
+class DynamicCommentListQuery(BaseModel):
+    username: str
     limit: int = 100
     cursor: str | None = None
 
@@ -82,11 +102,17 @@ class DynamicUnreadRequest(BaseModel):
     token: str | None = None
 
 
+class DynamicUnreadQuery(BaseModel):
+    username: str
+
+
 class DynamicReadMarkRequest(BaseModel):
     username: str
     token: str
 
 from fastapi import Form, File, UploadFile
+
+
 class PictureChatRequest:
     def __init__(
         self,

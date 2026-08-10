@@ -15,9 +15,11 @@ class CharacterRegistry:
         self.characters: dict[str, CharacterProfile] = {}
         self.default_character_id: str = DEFAULT_CHARACTER_ID
         self._build_character_profiles()
+        self._validate_default_character()
 
     def _build_character_profiles(self) -> None:
         characters_cfg = self.config.get("characters", self.config)
+        default_targets: list[str] = []
         for character_id, profile_cfg in characters_cfg.items():
             profile = CharacterProfile(
                 character_id=character_id,
@@ -36,11 +38,30 @@ class CharacterRegistry:
             )
             self.characters[character_id] = profile
             if profile.default_target:
-                self.default_character_id = character_id
+                default_targets.append(character_id)
+        if len(default_targets) > 1:
+            raise ValueError(
+                "Multiple default characters are configured: "
+                + ", ".join(default_targets)
+            )
+        if default_targets:
+            self.default_character_id = default_targets[0]
         if not self.characters:
             profile = self._default_profile()
             self.characters[profile.character_id] = profile
             self.default_character_id = profile.character_id
+
+    def _validate_default_character(self) -> None:
+        try:
+            default_profile = self.characters[self.default_character_id]
+        except KeyError as exc:
+            raise ValueError(
+                f"Default character '{self.default_character_id}' is not configured."
+            ) from exc
+        if not default_profile.enabled:
+            raise ValueError(
+                f"Default character '{self.default_character_id}' must be enabled."
+            )
 
     def get(self, character_id: str | None = None) -> CharacterProfile:
         resolved_id = character_id or self.default_character_id
@@ -50,11 +71,12 @@ class CharacterRegistry:
             raise KeyError(f"Unknown character_id: {resolved_id}") from exc
 
     def resolve_targets(self, target_character_ids: tuple[str, ...] | None = None) -> tuple[str, ...]:
-        if target_character_ids:
-            for character_id in target_character_ids:
-                self.get(character_id)
-            return target_character_ids
-        return (self.default_character_id,)
+        resolved = target_character_ids or (self.default_character_id,)
+        for character_id in resolved:
+            profile = self.get(character_id)
+            if not profile.enabled:
+                raise ValueError(f"Target character '{character_id}' is disabled.")
+        return resolved
 
     @staticmethod
     def _default_profile() -> CharacterProfile:

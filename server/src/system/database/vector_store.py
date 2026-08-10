@@ -87,6 +87,7 @@ from chromadb.config import Settings
 from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
 
 import asyncio
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 class ChromaVectorStore(VectorStore):
@@ -113,11 +114,18 @@ class ChromaVectorStore(VectorStore):
         # 专用线程池，避免 Chroma 的同步 HTTP 调用耗尽 asyncio 默认线程池
         max_workers = config.get("vector_store_threads", 4)
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="chroma")
+        self._close_lock = threading.Lock()
+        self._closed = False
 
         # 初始化Chroma客户端
         self.client = None
         self.collection = None
-        self._init_chroma()
+        try:
+            self._init_chroma()
+        except BaseException:
+            self._executor.shutdown(wait=True, cancel_futures=False)
+            self._closed = True
+            raise
         
         self.logger.info(f"Chroma向量存储初始化完成: {self.collection_name}")
     
@@ -127,8 +135,19 @@ class ChromaVectorStore(VectorStore):
             # 初始化 Embedding 模型
             embedding_function = SiliconFlowEmbeddings(
                 model=self.embedding_model_name,
-                base_url="https://api.siliconflow.cn/v1",
-                api_key=self.api_key
+                base_url=self.embedding_model_config.get(
+                    "base_url",
+                    "https://api.siliconflow.cn/v1",
+                ),
+                api_key=self.api_key,
+                connect_timeout_seconds=self.embedding_model_config.get(
+                    "connect_timeout_seconds",
+                    5.0,
+                ),
+                read_timeout_seconds=self.embedding_model_config.get(
+                    "read_timeout_seconds",
+                    30.0,
+                ),
             )
             
             # 创建客户端
@@ -172,6 +191,9 @@ class ChromaVectorStore(VectorStore):
     async def search(self, user_id: str, query: str, k: int = 5, **kwargs) -> List[Tuple[BaseDocument, float]]:
         """搜索相似文档 (异步)"""
         try:
+            if self._closed:
+                raise RuntimeError("Vector store is closed")
+
             def _do_query():
                 return self.collection.query(
                     query_texts=[query],
@@ -213,6 +235,14 @@ class ChromaVectorStore(VectorStore):
             traceback.print_exc()
             self.logger.error(f"文档搜索失败: {e}")
             return []
+
+    def close(self) -> None:
+        """Wait for all owned search work and release the dedicated executor."""
+        with self._close_lock:
+            if self._closed:
+                return
+            self._executor.shutdown(wait=True, cancel_futures=False)
+            self._closed = True
     
     def delete_documents(self, doc_ids: List[str]) -> bool:
         """删除文档"""
@@ -329,11 +359,21 @@ class VectorStoreFactory:
 
 vector_store: Optional[VectorStore] = None
 
-def init_vector_store(config: Dict[str, Any]) -> None:
+def init_vector_store(config: Dict[str, Any]) -> VectorStore:
     """初始化向量存储"""
     global vector_store
     store_type = config.get("vector_store_type", "chroma")
     vector_store = VectorStoreFactory.create_vector_store(store_type, config)
+    return vector_store
+
+
+def clear_vector_store(expected: VectorStore | None = None) -> bool:
+    """Clear the shared store only when it still refers to ``expected``."""
+    global vector_store
+    if expected is not None and vector_store is not expected:
+        return False
+    vector_store = None
+    return True
 
 
 def get_vector_store() -> VectorStore:

@@ -7,6 +7,11 @@ from typing import Any, List, Optional, TYPE_CHECKING
 
 
 from src.utils.logger import get_logger
+from src.utils.asyncio_helpers import (
+    DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+    cancel_task_once,
+    wait_for_owned_tasks,
+)
 from src.domain.chat import ChatInputEvent, ChatInputEventType
 from src.system.user_interface.types import WSEventType
 
@@ -74,7 +79,13 @@ class ChatStream:
         self.topic_replier.set_change_state_callback(self.change_state)
         self.topic_replier.set_send_reply_callback(self.feed_response)
 
-        self.response_queue: asyncio.Queue[ChatResponse] = asyncio.Queue()
+        self.response_queue_maxsize = max(
+            1,
+            int(config.get("response_queue_maxsize", 256)),
+        )
+        self.response_queue: asyncio.Queue[ChatResponse] = asyncio.Queue(
+            maxsize=self.response_queue_maxsize,
+        )
         self.response_sender_task: asyncio.Task | None = None
         self.context_snapshot: "ConversationContextSnapshot | None" = None
         self.context_snapshot_ts_type: str = "elapsed"
@@ -83,6 +94,18 @@ class ChatStream:
         self.state = self.STATE_WAITING
         self.state_lock = asyncio.Lock()
         self.last_response_active_ts: float | None = None
+        self._stop_lock = asyncio.Lock()
+        self._closing = False
+        self._stopped = False
+        self.shutdown_timeout_seconds = max(
+            0.001,
+            float(
+                config.get(
+                    "shutdown_timeout_seconds",
+                    DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+                )
+            ),
+        )
 
     def record_sung_segment(self, song_name: str, segment: str) -> None:
         self.recent_sung_segments.append((song_name, segment))
@@ -128,6 +151,8 @@ class ChatStream:
 
     async def start_if_needed(self):
         """启动常驻消息处理协程（仅启动一次）。"""
+        if self._closing:
+            raise RuntimeError("Chat stream is stopping and cannot be started")
         self.ensure_dependencies()
         await self.initialize_context()
         self.ingress_helper.start_processing()
@@ -138,10 +163,20 @@ class ChatStream:
 
     async def feed_event(self, event: ChatInputEvent):
         """接收 service 层转换后的聊天事件，并交给 ingress worker。"""
+        if self._closing:
+            raise RuntimeError("Chat stream is stopping and cannot accept events")
         await self.ingress_helper.put(event)
+
+    def try_feed_event(self, event: ChatInputEvent) -> bool:
+        """Try to accept a WebSocket event without waiting for queue capacity."""
+        if self._closing:
+            return False
+        return self.ingress_helper.put_nowait(event)
     
     async def feed_response(self, response: ChatResponse):
         """接收 topic replier 生成的回复，并发送给用户。"""
+        if self._closing:
+            raise RuntimeError("Chat stream is stopping and cannot accept responses")
         await self.response_queue.put(response)
 
     async def get_conversation_context(
@@ -281,10 +316,19 @@ class ChatStream:
 
     ####### 下方为连接管理相关方法 #######
 
-    def lost_connection(self):
-        """连接丢失时的清理逻辑"""
+    def owns_connection(self, ws_connection: "WebSocketConnection") -> bool:
+        """Return whether ``ws_connection`` is still the stream's active connection."""
+        return self.ws_connection is ws_connection
+
+    def lost_connection(self, ws_connection: "WebSocketConnection | None" = None) -> bool:
+        """Mark the stream offline only when the active connection was lost."""
+        if ws_connection is not None and not self.owns_connection(ws_connection):
+            return False
+        if self.ws_connection is None:
+            return False
         self.ws_connection = None
         self.connection_lost_time = time.time()
+        return True
 
     def is_connection_lost(self):
         """检查连接是否丢失"""
@@ -292,6 +336,8 @@ class ChatStream:
 
     async def reconnect(self, new_ws_connection: "WebSocketConnection"):
         """用户重连时调用，更新 WebSocket 连接"""
+        if self._closing:
+            raise RuntimeError("Chat stream is stopping and cannot reconnect")
         self.logger.info(f"User {self.user_name} reconnected")
         self.ws_connection = new_ws_connection
         self.user_name = new_ws_connection.user_name if new_ws_connection else self.user_name
@@ -299,15 +345,72 @@ class ChatStream:
         self.state = self.STATE_WAITING
         await self.start_if_needed()
 
+    def _worker_task_bindings(self):
+        return (
+            (self.ingress_helper, "ingress_worker_task"),
+            (self.topic_planner, "processor_task"),
+            (self.topic_replier, "processor_task"),
+            (self.reflection_worker, "processor_task"),
+            (self, "response_sender_task"),
+        )
+
     def clean_up(self):
-        """清理资源的逻辑，比如关闭文件、数据库连接等"""
-        if self.ingress_helper.ingress_worker_task and not self.ingress_helper.ingress_worker_task.done():
-            self.ingress_helper.ingress_worker_task.cancel()
-        if self.topic_planner.processor_task and not self.topic_planner.processor_task.done():
-            self.topic_planner.processor_task.cancel()
-        if self.topic_replier.processor_task and not self.topic_replier.processor_task.done():
-            self.topic_replier.processor_task.cancel()
-        if self.reflection_worker.processor_task and not self.reflection_worker.processor_task.done():
-            self.reflection_worker.processor_task.cancel()
-        if self.response_sender_task and not self.response_sender_task.done():
-            self.response_sender_task.cancel()
+        """Request cancellation of all stream workers without waiting for completion."""
+        for owner, attribute in self._worker_task_bindings():
+            task = getattr(owner, attribute, None)
+            if task is not None and not task.done():
+                task.cancel()
+
+    async def stop(self, *, close_connection: bool = True) -> None:
+        """Stop the stream completely; failed steps remain retryable."""
+        async with self._stop_lock:
+            if self._stopped:
+                return
+
+            self._closing = True
+            errors: list[str] = []
+            connection = self.ws_connection
+            if close_connection and connection is not None and connection.websocket is not None:
+                try:
+                    await connection.websocket.close()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
+                    errors.append(f"websocket close failed: {error}")
+                else:
+                    self.lost_connection(connection)
+
+            bindings = self._worker_task_bindings()
+            tasks = []
+            for owner, attribute in bindings:
+                task = getattr(owner, attribute, None)
+                if task is not None:
+                    cancel_task_once(task)
+                    tasks.append(task)
+
+            if tasks:
+                done, pending = await wait_for_owned_tasks(
+                    tasks,
+                    timeout_seconds=self.shutdown_timeout_seconds,
+                )
+                for task in done:
+                    try:
+                        task.result()
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as error:
+                        errors.append(f"worker stop failed: {error}")
+                if pending:
+                    errors.append(f"{len(pending)} worker task(s) still stopping")
+
+            for owner, attribute in bindings:
+                task = getattr(owner, attribute, None)
+                if task is not None and task.done():
+                    setattr(owner, attribute, None)
+
+            if errors:
+                raise RuntimeError("; ".join(errors))
+
+            if connection is not None and self.ws_connection is connection:
+                self.lost_connection(connection)
+            self._stopped = True

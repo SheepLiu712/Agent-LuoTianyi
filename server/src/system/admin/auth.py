@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -23,6 +24,8 @@ class AdminAuthService:
         self.setup_token_file = Path(setup_token_file)
         self.sessions: dict[str, float] = {}
         self.session_ttl_seconds = 12 * 3600
+        self._password_work_slots = asyncio.Semaphore(4)
+        self._password_work_admission_timeout = 1.0
         if not self.is_configured():
             self._ensure_setup_token()
 
@@ -52,6 +55,27 @@ class AdminAuthService:
             raise HTTPException(status_code=403, detail={"code": "ADMIN_SETUP_REQUIRED", "message": "Admin password has not been configured"})
         if not self._verify_password(password):
             raise HTTPException(status_code=401, detail={"code": "BAD_ADMIN_PASSWORD", "message": "Invalid admin password"})
+        return self._create_session(response)
+
+    async def login_async(self, password: str, response: Response) -> dict[str, Any]:
+        if not self.is_configured():
+            raise HTTPException(status_code=403, detail={"code": "ADMIN_SETUP_REQUIRED", "message": "Admin password has not been configured"})
+        try:
+            await asyncio.wait_for(
+                self._password_work_slots.acquire(),
+                timeout=self._password_work_admission_timeout,
+            )
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(status_code=503, detail={"code": "ADMIN_AUTH_BUSY", "message": "Admin authentication is busy"}) from exc
+        try:
+            password_valid = await asyncio.to_thread(self._verify_password, password)
+        finally:
+            self._password_work_slots.release()
+        if not password_valid:
+            raise HTTPException(status_code=401, detail={"code": "BAD_ADMIN_PASSWORD", "message": "Invalid admin password"})
+        return self._create_session(response)
+
+    def _create_session(self, response: Response) -> dict[str, Any]:
         token = secrets.token_urlsafe(32)
         expires_at = time.time() + self.session_ttl_seconds
         self.sessions[token] = expires_at

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 from .dependency.activity_context_provider import ActivityContextProvider
@@ -47,18 +48,23 @@ class ChatSessionManager:
             activity_context_provider = self.activity_context_provider,
         )
         chat_stream_manager_module.chat_stream_manager = self.chat_stream_manager
-        self.proactive_topic_maker.configure(
-            conversation_service=self.conversation_service,
-            database_manager=self.database_manager,
-            chat_stream_manager=self.chat_stream_manager,
-        )
-        self.call_stream_manager = CallStreamManager(
-            config.get("call_stream_manager", {}),
-            conversation_service = self.conversation_service,
-            global_speaking_worker = self.global_speaking_worker,
-            proactive_topic_maker = self.proactive_topic_maker,
-            activity_context_provider = self.activity_context_provider,
+        try:
+            self.proactive_topic_maker.configure(
+                conversation_service=self.conversation_service,
+                database_manager=self.database_manager,
+                chat_stream_manager=self.chat_stream_manager,
             )
+            self.call_stream_manager = CallStreamManager(
+                config.get("call_stream_manager", {}),
+                conversation_service = self.conversation_service,
+                global_speaking_worker = self.global_speaking_worker,
+                proactive_topic_maker = self.proactive_topic_maker,
+                activity_context_provider = self.activity_context_provider,
+                )
+        except BaseException:
+            if chat_stream_manager_module.chat_stream_manager is self.chat_stream_manager:
+                chat_stream_manager_module.chat_stream_manager = None
+            raise
 
     def wire_dependencies(
         self,
@@ -124,9 +130,21 @@ class ChatSessionManager:
 
     async def stop_background_services(self) -> None:
         """停止聊天、通话和 speaking worker 后台服务。"""
-        await self.chat_stream_manager.stop_cleanup_task()
-        await self.call_stream_manager.stop_background_services()
-        await self.global_speaking_worker.stop()
+        errors: list[str] = []
+        shutdown_steps = (
+            ("chat streams", self.chat_stream_manager.stop_all_streams),
+            ("call streams", self.call_stream_manager.stop_background_services),
+            ("speaking worker", self.global_speaking_worker.stop),
+        )
+        for name, stop in shutdown_steps:
+            try:
+                await stop()
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                errors.append(f"{name}: {error}")
+        if errors:
+            raise RuntimeError("Chat session shutdown failed: " + "; ".join(errors))
 
     async def on_user_login(self, user_uuid: str, elapsed_from_last_login: Optional[float]) -> None:
         """用户登录时，记录主动话题所需的登录活动。"""
