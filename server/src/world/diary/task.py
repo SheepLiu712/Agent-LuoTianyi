@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from src.system.database import DatabaseManager
     from src.system.system_runtime import SystemRuntime
     from src.agent_runtime.character_runtime import CharacterRuntime
+    from src.capabilities.diary import DiaryCapability
 
 
 class DiaryTask(WorldTask):
@@ -160,12 +161,12 @@ class DiaryTask(WorldTask):
         self.ensure_dependencies()
 
         # 获取日记能力实例
-        diary_cap = self._get_diary_capability()
+        diary_cap: "DiaryCapability" = self._get_diary_capability()
         if diary_cap is None:
             return WorldTaskResult.skipped_result(self.task_name, "diary capability is unavailable")
 
         # 检查 LLM 模块是否已注册（每天仅运行一次，缺失时明确记录原因）
-        if not diary_cap.ensure_dependency():
+        if not diary_cap.ensure_dependencies():
             self.logger.warning("Diary LLM module is not registered; diary task skipped for today")
             return WorldTaskResult.skipped_result(self.task_name, "diary LLM module is unavailable")
 
@@ -331,7 +332,7 @@ class DiaryTask(WorldTask):
 
     # ────────────────────── 能力获取 ──────────────────────
 
-    def _get_diary_capability(self) -> Any | None:
+    def _get_diary_capability(self) -> "DiaryCapability" | None:
         """
         从系统运行时中获取 DiaryCapability 实例。
 
