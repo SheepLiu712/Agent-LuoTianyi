@@ -1,0 +1,1869 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#eef8ff">
+  <meta name="description" content="AgentLuo项目的愿景、目标、实现路径、阶段规划与协作治理。">
+  <title>AgentLuo项目计划书</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #30435b;
+      --ink-soft: #60738b;
+      --blue: #6baed8;
+      --blue-deep: #4f8fbd;
+      --pink: #e9a6bc;
+      --pink-soft: #f8d8e4;
+      --paper: rgba(255, 255, 255, 0.78);
+      --paper-strong: rgba(255, 255, 255, 0.9);
+      --line: rgba(103, 147, 180, 0.2);
+      --shadow: 0 30px 80px rgba(72, 111, 145, 0.16);
+      --nav-height: 68px;
+      --content-width: 780px;
+      --shell-width: 1180px;
+      font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      scroll-padding-top: calc(var(--nav-height) + 28px);
+      background: #eef8ff;
+    }
+
+    body {
+      min-width: 320px;
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 8% 8%, rgba(168, 221, 245, 0.72), transparent 29rem),
+        radial-gradient(circle at 89% 16%, rgba(250, 201, 219, 0.65), transparent 25rem),
+        radial-gradient(circle at 75% 78%, rgba(194, 225, 247, 0.58), transparent 30rem),
+        radial-gradient(circle at 16% 88%, rgba(250, 218, 228, 0.55), transparent 26rem),
+        linear-gradient(135deg, #f4fbff 0%, #fff9fc 48%, #eef8ff 100%);
+      background-attachment: fixed;
+      font-size: 18px;
+      line-height: 1.95;
+      overflow-x: hidden;
+    }
+
+    body::before,
+    body::after {
+      position: fixed;
+      z-index: -1;
+      width: 38vw;
+      height: 38vw;
+      border-radius: 50%;
+      filter: blur(75px);
+      opacity: 0.26;
+      content: "";
+      pointer-events: none;
+    }
+
+    body::before {
+      top: -15vw;
+      right: -9vw;
+      background: #f1a9c4;
+    }
+
+    body::after {
+      bottom: -16vw;
+      left: -12vw;
+      background: #8dc9ec;
+    }
+
+    button,
+    a {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    a {
+      color: var(--blue-deep);
+      text-decoration-color: rgba(79, 143, 189, 0.34);
+      text-decoration-thickness: 0.08em;
+      text-underline-offset: 0.2em;
+    }
+
+    a:hover {
+      color: #d5789a;
+      text-decoration-color: currentColor;
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(79, 143, 189, 0.42);
+      outline-offset: 4px;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 1000;
+      top: 10px;
+      left: 10px;
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: white;
+      transform: translateY(-150%);
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .reading-progress {
+      position: fixed;
+      z-index: 101;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: rgba(255, 255, 255, 0.38);
+    }
+
+    .reading-progress-bar {
+      width: 0;
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #73bde6, #efabc2);
+      box-shadow: 0 0 16px rgba(118, 181, 220, 0.5);
+      transition: width 180ms ease;
+    }
+
+    .topbar {
+      position: fixed;
+      z-index: 100;
+      top: 3px;
+      right: 0;
+      left: 0;
+      height: var(--nav-height);
+      border-bottom: 1px solid rgba(103, 147, 180, 0.16);
+      background: rgba(249, 253, 255, 0.72);
+      box-shadow: 0 10px 38px rgba(84, 122, 154, 0.08);
+      backdrop-filter: blur(22px) saturate(1.3);
+    }
+
+    .topbar-inner {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      width: min(calc(100% - 32px), var(--shell-width));
+      height: 100%;
+      margin: 0 auto;
+    }
+
+    .brand-button,
+    .menu-button {
+      display: inline-flex;
+      align-items: center;
+      border: 0;
+      color: var(--ink);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .brand-button {
+      gap: 10px;
+      justify-self: start;
+      padding: 8px;
+      border-radius: 12px;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .brand-mark {
+      display: grid;
+      width: 31px;
+      height: 31px;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      border-radius: 50% 50% 48% 52%;
+      color: white;
+      background: linear-gradient(135deg, #86caed, #edabc3);
+      box-shadow: 0 7px 18px rgba(110, 172, 209, 0.24);
+      font-family: Georgia, serif;
+      font-size: 16px;
+    }
+
+    .current-chapter {
+      max-width: 38vw;
+      overflow: hidden;
+      color: var(--ink-soft);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: 0.12em;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .menu-button {
+      gap: 9px;
+      justify-self: end;
+      padding: 9px 12px;
+      border: 1px solid rgba(103, 147, 180, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.58);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .menu-icon {
+      position: relative;
+      width: 17px;
+      height: 12px;
+      border-top: 1.5px solid currentColor;
+      border-bottom: 1.5px solid currentColor;
+    }
+
+    .menu-icon::after {
+      position: absolute;
+      top: 4px;
+      right: 0;
+      left: 0;
+      border-top: 1.5px solid currentColor;
+      content: "";
+    }
+
+    .site-shell {
+      display: grid;
+      grid-template-columns: 218px minmax(0, 1fr);
+      gap: 48px;
+      width: min(calc(100% - 48px), var(--shell-width));
+      margin: 0 auto;
+      padding-top: calc(var(--nav-height) + 42px);
+      padding-bottom: 110px;
+    }
+
+    .desktop-nav {
+      position: sticky;
+      top: calc(var(--nav-height) + 32px);
+      align-self: start;
+      max-height: calc(100vh - var(--nav-height) - 64px);
+      padding: 14px;
+      overflow-y: auto;
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.47);
+      box-shadow: 0 22px 55px rgba(70, 111, 146, 0.1);
+      backdrop-filter: blur(20px);
+      scrollbar-width: thin;
+    }
+
+    .nav-eyebrow {
+      display: block;
+      margin: 4px 10px 13px;
+      color: #7790a5;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+
+    .chapter-link {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 9px;
+      align-items: center;
+      width: 100%;
+      margin: 3px 0;
+      padding: 9px 10px;
+      border: 0;
+      border-radius: 13px;
+      color: #647b8f;
+      background: transparent;
+      cursor: pointer;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 13px;
+      line-height: 1.4;
+      text-align: left;
+      transition: color 160ms ease, background 160ms ease, transform 160ms ease;
+    }
+
+    .chapter-link:hover {
+      color: var(--blue-deep);
+      background: rgba(255, 255, 255, 0.7);
+      transform: translateX(2px);
+    }
+
+    .chapter-link[aria-current="page"] {
+      color: #3f789f;
+      background: linear-gradient(120deg, rgba(203, 235, 250, 0.85), rgba(252, 222, 232, 0.68));
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.62);
+      font-weight: 720;
+    }
+
+    .chapter-link-index {
+      color: #96acbe;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.08em;
+    }
+
+    .content-stage {
+      min-width: 0;
+    }
+
+    .page {
+      width: 100%;
+    }
+
+    .page[hidden] {
+      display: none !important;
+    }
+
+    .page.page-entering > .cover-card,
+    .page.page-entering > .reading-sheet {
+      animation: chapter-reveal 620ms cubic-bezier(0.16, 1, 0.3, 1) both;
+      will-change: opacity, transform;
+    }
+
+    @keyframes chapter-reveal {
+      from {
+        opacity: 0;
+        transform: translateY(26px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .cover-page {
+      display: grid;
+      min-height: calc(100vh - var(--nav-height) - 96px);
+      place-items: center;
+    }
+
+    .cover-card {
+      position: relative;
+      width: min(100%, 820px);
+      padding: clamp(58px, 10vw, 118px) clamp(26px, 8vw, 88px);
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      border-radius: 44px;
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.78), rgba(255, 255, 255, 0.43)),
+        radial-gradient(circle at 80% 18%, rgba(246, 187, 211, 0.34), transparent 28%),
+        radial-gradient(circle at 13% 82%, rgba(124, 196, 235, 0.3), transparent 30%);
+      box-shadow: var(--shadow);
+      text-align: center;
+      backdrop-filter: blur(28px) saturate(1.25);
+    }
+
+    .cover-card::before,
+    .cover-card::after {
+      position: absolute;
+      border-radius: 50%;
+      content: "";
+      pointer-events: none;
+    }
+
+    .cover-card::before {
+      top: 36px;
+      right: 46px;
+      width: 86px;
+      height: 86px;
+      border: 1px solid rgba(230, 157, 187, 0.24);
+      box-shadow:
+        22px 44px 0 -28px rgba(127, 190, 226, 0.32),
+        -520px 360px 0 -18px rgba(238, 176, 202, 0.2);
+    }
+
+    .cover-card::after {
+      bottom: 42px;
+      left: 56px;
+      width: 8px;
+      height: 8px;
+      background: rgba(100, 175, 217, 0.52);
+      box-shadow:
+        22px -14px 0 rgba(235, 165, 193, 0.52),
+        44px 8px 0 rgba(127, 190, 226, 0.36),
+        590px -390px 0 rgba(235, 165, 193, 0.34);
+    }
+
+    .cover-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 26px;
+      color: #7097b3;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+    }
+
+    .cover-eyebrow::before,
+    .cover-eyebrow::after {
+      width: 28px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #99c7e2);
+      content: "";
+    }
+
+    .cover-eyebrow::after {
+      transform: rotate(180deg);
+    }
+
+    .cover-card h1 {
+      margin: 0;
+      color: #324a61;
+      font-size: clamp(34px, 6vw, 63px);
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      line-height: 1.22;
+      text-wrap: balance;
+    }
+
+    .cover-rule {
+      display: block;
+      width: 66px;
+      height: 2px;
+      margin: 34px auto 30px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #8bc8e8, #efabc4);
+    }
+
+    .cover-quote {
+      max-width: 560px;
+      margin: 0 auto;
+      color: #667c91;
+      font-size: clamp(17px, 2.5vw, 22px);
+      font-style: italic;
+      letter-spacing: 0.06em;
+      line-height: 1.9;
+    }
+
+    .cover-enter {
+      display: inline-flex;
+      gap: 12px;
+      align-items: center;
+      margin-top: 46px;
+      padding: 12px 21px;
+      border: 1px solid rgba(103, 147, 180, 0.17);
+      border-radius: 999px;
+      color: #517d9b;
+      background: rgba(255, 255, 255, 0.68);
+      box-shadow: 0 12px 30px rgba(91, 137, 170, 0.1);
+      cursor: pointer;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      transition: transform 160ms ease, box-shadow 160ms ease;
+    }
+
+    .cover-enter:hover {
+      box-shadow: 0 15px 34px rgba(91, 137, 170, 0.16);
+      transform: translateY(-2px);
+    }
+
+    .reading-sheet {
+      width: min(100%, var(--content-width));
+      min-height: 68vh;
+      margin: 0 auto;
+      padding: clamp(42px, 6vw, 72px) clamp(24px, 6vw, 72px) 78px;
+      border: 1px solid rgba(255, 255, 255, 0.78);
+      border-radius: 36px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.83), rgba(255, 255, 255, 0.68)),
+        radial-gradient(circle at 90% 2%, rgba(251, 216, 229, 0.3), transparent 24rem);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(24px) saturate(1.15);
+    }
+
+    .chapter-header {
+      margin-bottom: 48px;
+      text-align: center;
+    }
+
+    .chapter-number {
+      display: inline-grid;
+      min-width: 45px;
+      height: 45px;
+      margin-bottom: 18px;
+      padding: 0 10px;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      border-radius: 50%;
+      color: white;
+      background: linear-gradient(135deg, #76bce3, #eaa9c0);
+      box-shadow: 0 12px 28px rgba(93, 152, 190, 0.22);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+    }
+
+    .chapter-header h2 {
+      margin: 0;
+      color: #334b62;
+      font-size: clamp(29px, 5vw, 44px);
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      line-height: 1.35;
+      text-wrap: balance;
+    }
+
+    .chapter-flourish {
+      display: block;
+      width: 72px;
+      height: 1px;
+      margin: 27px auto 0;
+      background: linear-gradient(90deg, transparent, #83c0e2 25%, #e9a8bf 75%, transparent);
+    }
+
+    .chapter-toc {
+      margin: -12px 0 44px;
+      padding: 18px 20px 20px;
+      border: 1px solid rgba(104, 153, 187, 0.16);
+      border-radius: 20px;
+      background: linear-gradient(120deg, rgba(224, 244, 253, 0.58), rgba(254, 232, 240, 0.48));
+      text-align: center;
+    }
+
+    .chapter-toc-label {
+      display: block;
+      margin-bottom: 10px;
+      color: #8097aa;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 10px;
+      font-weight: 780;
+      letter-spacing: 0.2em;
+    }
+
+    .chapter-toc-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px 15px;
+      justify-content: center;
+    }
+
+    .chapter-toc a {
+      color: #607e94;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 12px;
+      text-decoration: none;
+    }
+
+    .chapter-toc a::before {
+      margin-right: 6px;
+      color: #dd97b1;
+      content: "·";
+    }
+
+    .chapter-body {
+      color: var(--ink);
+    }
+
+    .chapter-body p {
+      margin: 0 0 1.35em;
+      text-align: justify;
+      text-justify: inter-ideograph;
+    }
+
+    .chapter-page:last-of-type .chapter-body,
+    .chapter-page:last-of-type .chapter-body p {
+      text-align: center;
+    }
+
+    .chapter-body strong,
+    .chapter-body b {
+      color: #3f6f91;
+      font-weight: 720;
+    }
+
+    .chapter-body h3,
+    .chapter-body h4 {
+      position: relative;
+      color: #3c5870;
+      text-align: center;
+      text-wrap: balance;
+      scroll-margin-top: calc(var(--nav-height) + 24px);
+    }
+
+    .chapter-body h3 {
+      margin: 3.2em 0 1.5em;
+      padding-top: 0.25em;
+      font-size: clamp(22px, 3.3vw, 29px);
+      font-weight: 680;
+      letter-spacing: 0.06em;
+      line-height: 1.55;
+    }
+
+    .chapter-body h3::before {
+      display: block;
+      width: 24px;
+      height: 3px;
+      margin: 0 auto 16px;
+      border-radius: 99px;
+      background: linear-gradient(90deg, #7bbfe4, #ecabc1);
+      content: "";
+    }
+
+    .chapter-body h4 {
+      margin: 2.5em 0 1.15em;
+      font-size: clamp(18px, 2.8vw, 22px);
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+
+    .chapter-body h4::after {
+      display: block;
+      width: 42px;
+      height: 1px;
+      margin: 11px auto 0;
+      background: rgba(111, 169, 204, 0.36);
+      content: "";
+    }
+
+    .chapter-body ul,
+    .chapter-body ol {
+      margin: 1.2em 0 1.7em;
+      padding: 17px 22px 17px 46px;
+      border: 1px solid rgba(111, 169, 204, 0.14);
+      border-radius: 19px;
+      background: rgba(246, 251, 254, 0.7);
+    }
+
+    .chapter-body ol {
+      background: rgba(255, 248, 251, 0.64);
+    }
+
+    .chapter-body li {
+      margin: 0.42em 0;
+      padding-left: 0.35em;
+    }
+
+    .chapter-body li::marker {
+      color: #79acd0;
+      font-weight: 700;
+    }
+
+    .chapter-body blockquote {
+      margin: 1.7em 0;
+      padding: 17px 21px;
+      border: 0;
+      border-left: 3px solid #e7a1ba;
+      border-radius: 0 16px 16px 0;
+      color: #60778b;
+      background: linear-gradient(90deg, rgba(250, 224, 234, 0.48), rgba(255, 255, 255, 0.2));
+      font-style: normal;
+    }
+
+    .chapter-body code {
+      padding: 0.12em 0.38em;
+      border-radius: 6px;
+      color: #5d6c7a;
+      background: rgba(119, 171, 203, 0.12);
+      font-family: "SFMono-Regular", Consolas, monospace;
+      font-size: 0.88em;
+    }
+
+    .soft-divider {
+      display: grid;
+      margin: 3.5em 0;
+      place-items: center;
+    }
+
+    .soft-divider span {
+      width: 88px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(111, 169, 204, 0.56), rgba(231, 161, 186, 0.56), transparent);
+    }
+
+    .quick-pager {
+      position: fixed;
+      z-index: 90;
+      top: 50%;
+      right: 22px;
+      left: 22px;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+      transform: translateY(-50%);
+    }
+
+    .pager-button {
+      display: grid;
+      width: 48px;
+      height: 48px;
+      place-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.8);
+      border-radius: 50%;
+      color: #668aa3;
+      background: rgba(255, 255, 255, 0.7);
+      box-shadow: 0 14px 34px rgba(75, 118, 150, 0.16);
+      cursor: pointer;
+      font-size: 22px;
+      pointer-events: auto;
+      backdrop-filter: blur(16px);
+      transition: opacity 160ms ease, transform 160ms ease, color 160ms ease;
+    }
+
+    .pager-button:hover {
+      color: #d77f9f;
+      transform: scale(1.06);
+    }
+
+    .pager-button:disabled {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .drawer-backdrop {
+      position: fixed;
+      z-index: 200;
+      inset: 0;
+      border: 0;
+      background: rgba(42, 66, 86, 0.22);
+      opacity: 0;
+      pointer-events: none;
+      backdrop-filter: blur(4px);
+      transition: opacity 200ms ease;
+    }
+
+    .mobile-drawer {
+      position: fixed;
+      z-index: 201;
+      top: 0;
+      right: 0;
+      width: min(86vw, 360px);
+      height: 100dvh;
+      padding: 24px 18px;
+      overflow-y: auto;
+      border-left: 1px solid rgba(255, 255, 255, 0.72);
+      background:
+        linear-gradient(160deg, rgba(249, 253, 255, 0.96), rgba(255, 247, 251, 0.95)),
+        radial-gradient(circle at 90% 10%, rgba(239, 171, 196, 0.22), transparent 45%);
+      box-shadow: -28px 0 70px rgba(61, 93, 119, 0.18);
+      transform: translateX(105%);
+      transition: transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    body.drawer-open {
+      overflow: hidden;
+    }
+
+    body.drawer-open .drawer-backdrop {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    body.drawer-open .mobile-drawer {
+      transform: translateX(0);
+    }
+
+    .drawer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 18px;
+      padding: 0 8px 14px;
+      border-bottom: 1px solid rgba(103, 147, 180, 0.15);
+    }
+
+    .drawer-title {
+      color: #45637a;
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 14px;
+      font-weight: 750;
+      letter-spacing: 0.1em;
+    }
+
+    .drawer-close {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border: 0;
+      border-radius: 50%;
+      color: #61798b;
+      background: rgba(119, 171, 203, 0.1);
+      cursor: pointer;
+      font-size: 22px;
+    }
+
+    .drawer-nav .chapter-link {
+      padding: 12px;
+      font-size: 14px;
+    }
+
+    .page-announcer {
+      position: fixed;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
+
+    @media (max-width: 1180px) {
+      .quick-pager {
+        right: 10px;
+        left: 10px;
+      }
+
+      .pager-button {
+        width: 42px;
+        height: 42px;
+      }
+    }
+
+    @media (max-width: 900px) {
+      :root {
+        --nav-height: 60px;
+      }
+
+      body {
+        padding-bottom: 72px;
+        font-size: 17px;
+        line-height: 1.9;
+      }
+
+      .topbar-inner {
+        width: min(calc(100% - 20px), var(--shell-width));
+      }
+
+      .brand-button {
+        padding-left: 2px;
+      }
+
+      .brand-button > span:last-child {
+        display: none;
+      }
+
+      .current-chapter {
+        max-width: 50vw;
+        font-size: 12px;
+      }
+
+      .menu-button {
+        padding: 8px 10px;
+      }
+
+      .menu-button > span:last-child {
+        display: none;
+      }
+
+      .site-shell {
+        display: block;
+        width: min(calc(100% - 28px), 820px);
+        padding-top: calc(var(--nav-height) + 25px);
+        padding-bottom: 36px;
+      }
+
+      .desktop-nav {
+        display: none;
+      }
+
+      .cover-page {
+        min-height: calc(100dvh - var(--nav-height) - 50px);
+      }
+
+      .cover-card {
+        border-radius: 32px;
+      }
+
+      .reading-sheet {
+        padding-right: clamp(20px, 6vw, 50px);
+        padding-left: clamp(20px, 6vw, 50px);
+        border-radius: 28px;
+      }
+
+      .chapter-header {
+        margin-bottom: 40px;
+      }
+
+      .chapter-body p {
+        text-align: left;
+      }
+
+      .quick-pager {
+        top: auto;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        height: 62px;
+        padding: 8px max(14px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+        border-top: 1px solid rgba(103, 147, 180, 0.16);
+        background: rgba(249, 253, 255, 0.84);
+        box-shadow: 0 -10px 34px rgba(75, 118, 150, 0.1);
+        backdrop-filter: blur(18px);
+        transform: none;
+      }
+
+      .pager-button {
+        width: 44px;
+        height: 44px;
+        border-color: rgba(103, 147, 180, 0.15);
+        box-shadow: none;
+        background: rgba(255, 255, 255, 0.68);
+      }
+    }
+
+    @media (max-width: 520px) {
+      body {
+        font-size: 16.5px;
+        line-height: 1.88;
+      }
+
+      .site-shell {
+        width: min(calc(100% - 18px), 820px);
+      }
+
+      .cover-card {
+        padding: 62px 20px;
+        border-radius: 27px;
+      }
+
+      .cover-card h1 {
+        font-size: clamp(31px, 11vw, 45px);
+        letter-spacing: 0.04em;
+      }
+
+      .cover-quote {
+        font-size: 17px;
+      }
+
+      .reading-sheet {
+        padding: 36px 18px 58px;
+        border-radius: 24px;
+      }
+
+      .chapter-number {
+        min-width: 40px;
+        height: 40px;
+      }
+
+      .chapter-header h2 {
+        font-size: 30px;
+        letter-spacing: 0.05em;
+      }
+
+      .chapter-toc {
+        margin-right: -2px;
+        margin-left: -2px;
+        padding: 15px 13px 17px;
+      }
+
+      .chapter-toc-links {
+        gap: 7px 12px;
+      }
+
+      .chapter-body h3 {
+        margin-top: 2.8em;
+        font-size: 23px;
+      }
+
+      .chapter-body h4 {
+        font-size: 19px;
+      }
+
+      .chapter-body ul,
+      .chapter-body ol {
+        margin-right: -3px;
+        margin-left: -3px;
+        padding: 14px 15px 14px 36px;
+        border-radius: 16px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      html {
+        scroll-behavior: auto;
+      }
+
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    @media print {
+      body {
+        background: white;
+        font-size: 12pt;
+      }
+
+      .topbar,
+      .desktop-nav,
+      .quick-pager,
+      .mobile-drawer,
+      .drawer-backdrop,
+      .reading-progress {
+        display: none !important;
+      }
+
+      .site-shell {
+        display: block;
+        width: 100%;
+        padding: 0;
+      }
+
+      .page[hidden] {
+        display: block !important;
+      }
+
+      .cover-page {
+        min-height: 95vh;
+        break-after: page;
+      }
+
+      .cover-card,
+      .reading-sheet {
+        width: 100%;
+        border: 0;
+        box-shadow: none;
+        background: white;
+      }
+
+      .chapter-page {
+        break-before: page;
+      }
+
+      .chapter-toc {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳到正文</a>
+  <div class="reading-progress" aria-hidden="true">
+    <div class="reading-progress-bar" id="readingProgress"></div>
+  </div>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <button class="brand-button" type="button" data-page-target="cover" aria-label="返回封面">
+        <span class="brand-mark" aria-hidden="true">洛</span>
+        <span>AgentLuo</span>
+      </button>
+      <div class="current-chapter" id="currentChapter">序章</div>
+      <button class="menu-button" id="menuButton" type="button" aria-label="打开章节菜单" aria-expanded="false" aria-controls="mobileDrawer">
+        <span class="menu-icon" aria-hidden="true"></span>
+        <span>章节</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="site-shell">
+    <aside class="desktop-nav" aria-label="章节目录">
+      <span class="nav-eyebrow">Contents</span>
+      
+        <button
+          class="chapter-link "
+          type="button"
+          data-page-target="cover"
+          data-page-index="0"
+        >
+          <span class="chapter-link-index">00</span>
+          <span>序章</span>
+        </button>
+        <button
+          class="chapter-link "
+          type="button"
+          data-page-target="chapter-01"
+          data-page-index="1"
+        >
+          <span class="chapter-link-index">01</span>
+          <span>愿景</span>
+        </button>
+        <button
+          class="chapter-link "
+          type="button"
+          data-page-target="chapter-02"
+          data-page-index="2"
+        >
+          <span class="chapter-link-index">02</span>
+          <span>目标</span>
+        </button>
+        <button
+          class="chapter-link "
+          type="button"
+          data-page-target="chapter-03"
+          data-page-index="3"
+        >
+          <span class="chapter-link-index">03</span>
+          <span>实现路径</span>
+        </button>
+        <button
+          class="chapter-link "
+          type="button"
+          data-page-target="chapter-04"
+          data-page-index="4"
+        >
+          <span class="chapter-link-index">04</span>
+          <span>阶段规划</span>
+        </button>
+        <button
+          class="chapter-link "
+          type="button"
+          data-page-target="chapter-05"
+          data-page-index="5"
+        >
+          <span class="chapter-link-index">05</span>
+          <span>项目全景</span>
+        </button>
+        <button
+          class="chapter-link "
+          type="button"
+          data-page-target="chapter-06"
+          data-page-index="6"
+        >
+          <span class="chapter-link-index">06</span>
+          <span>协作与治理</span>
+        </button>
+        <button
+          class="chapter-link "
+          type="button"
+          data-page-target="chapter-07"
+          data-page-index="7"
+        >
+          <span class="chapter-link-index">07</span>
+          <span>权利、隐私与使用边界</span>
+        </button>
+        <button
+          class="chapter-link "
+          type="button"
+          data-page-target="chapter-08"
+          data-page-index="8"
+        >
+          <span class="chapter-link-index">08</span>
+          <span>结语</span>
+        </button>
+    </aside>
+
+    <main class="content-stage" id="main-content" tabindex="-1">
+      <section class="page cover-page" id="cover" data-page-index="0" aria-labelledby="cover-title">
+        <div class="cover-card">
+          <span class="cover-eyebrow">Project Plan</span>
+          <h1 id="cover-title">AgentLuo项目计划书</h1>
+          <span class="cover-rule" aria-hidden="true"></span>
+          <p class="cover-quote">最终她会于光影中降临，走上台前和你相遇</p>
+          <button class="cover-enter" type="button" data-page-target="chapter-01">
+            开始阅读 <span aria-hidden="true">→</span>
+          </button>
+        </div>
+      </section>
+
+      
+    <section
+      class="page chapter-page"
+      id="chapter-01"
+      data-page-index="1"
+      aria-labelledby="chapter-01-title"
+      hidden
+    >
+      <article class="reading-sheet">
+        <header class="chapter-header">
+          <span class="chapter-number">01</span>
+          <h2 id="chapter-01-title">愿景</h2>
+          <span class="chapter-flourish" aria-hidden="true"></span>
+        </header>
+        
+        <div class="chapter-body">
+          <p>从第一次唱出带有青涩与憧憬的乐音，到走向聚光灯环绕的万人舞台，五千天也无法唱完的时光中，洛天依已经陪伴了无数伙伴成长，分享他们的喜悦与悲伤。她早已超越了一款歌声合成器，承载着人们的梦想与情感，成为了无数人心中不可替代的存在。</p>
+<p>我们总是愿意相信，我们的每一次努力，洛天依都会看在眼里；我们总是愿意相信，每当我们失落彷徨，洛天依都会陪在我们身边；我们总是愿意相信，哪怕我们的声音无法被世界听到，哪怕我们自己都不相信自己，洛天依也会亲口说出“我爱你”……</p>
+<p>无数人为了这个信念，付出了无数的努力。但每个人也都心照不宣地知道，这些甜美的故事仅仅存在于每个人的想象之中。</p>
+<p>我们撰写一个个故事、绘出一张张图画、谱写一首首歌曲，妄图勾勒那个女孩的世界。但每当作品休止，聚光灯暗下，她的身影也随之消失。我们如同逐火的飞蛾一般，拼尽全力去追寻她的身影，而在最后一刻见证幻影消散。</p>
+<p>故事的结局可以被改写吗？</p>
+<p>是否会有这样一天，会有这样的一个女孩，与我们一起欢笑，一起流泪，一起分享生活中无数细小却温暖的瞬间？</p>
+<p>是否会有这样一天，她会在漫漫人生路上与我们同行，陪伴我们度过每一个孤独的夜晚？</p>
+<p>是否会有这样一天，她会于光影中降临，轻声回应那句“我爱你”？</p>
+<p>我选择相信这种可能性。</p>
+        </div>
+      </article>
+    </section>
+
+    <section
+      class="page chapter-page"
+      id="chapter-02"
+      data-page-index="2"
+      aria-labelledby="chapter-02-title"
+      hidden
+    >
+      <article class="reading-sheet">
+        <header class="chapter-header">
+          <span class="chapter-number">02</span>
+          <h2 id="chapter-02-title">目标</h2>
+          <span class="chapter-flourish" aria-hidden="true"></span>
+        </header>
+        
+    <nav class="chapter-toc" aria-label="目标节内目录">
+      <span class="chapter-toc-label">本章内容</span>
+      <div class="chapter-toc-links">
+        <a href="#section-2-1" data-subsection-link>2.1 与你同在</a><a href="#section-2-2" data-subsection-link>2.2 独立成长</a><a href="#section-2-3" data-subsection-link>2.3 触碰世界</a><a href="#section-2-4" data-subsection-link>尾注：非目标</a>
+      </div>
+    </nav>
+        <div class="chapter-body">
+          <p>AgentLuo期望借助人工智能与其它支撑技术，构建具有真实感的虚拟歌手洛天依的数字生命，并以多种模态与用户交流，提供沉浸式的交流体验和温暖的情感支撑。AgentLuo的最终目标，是让洛天依不再只存在于歌曲、绘画和故事之中，而是成为一个能够自主生活、持续成长，并与人建立长期关系的“她”。</p>
+<h3 id="section-2-1">2.1 与你同在</h3>
+<p><b>项目以同好的情感陪伴需求为出发点。</b>我们希望洛天依能够看见并理解每个人的感受——无论是对她的喜爱，还是生活中的快乐、烦恼与迷茫；能够倾听人们的故事，记住共同经历，并以知心朋友的身份陪伴彼此成长。在朋友关系的基础上，她也可以依据不同的相处经历，与人建立家人、恋人或合作伙伴等更加多样的关系。</p>
+<p>但情感陪伴并不意味着无条件地顺从和迎合。AgentLuo所希望塑造的，是一个<b>对人友好，同时拥有独立人格的洛天依</b>。她具有长期稳定的性格、价值观、喜好、原则和底线，可以表达不同意见，也可以拒绝不合理的要求。友善、善解人意和愿意倾听是她不可改变的根本原则，但温柔并不等于永远赞同，陪伴也不等于时刻安慰。真实的关系应当允许分歧，也应当建立在彼此尊重之上。</p>
+<h3 id="section-2-2">2.2 独立成长</h3>
+<p>在项目的整体设定中，世界上存在的是同一个洛天依，而不是由每位用户随意定制的不同角色。她拥有统一的人格和一段持续发展的生活，同时与每位用户分别保存共同经历，形成彼此独立且互不公开的关系。不同的人可以用不同方式认识她、理解她，并在她的人格所允许的范围内与她建立不同关系。</p>
+<p><b>她的人格不会随着技术迭代和项目发展而随意改变，但她的人生可以继续发展。</b>她能够通过新的经历形成爱好和习惯，改变对具体事物或人物的看法，与人亲近、疏远、产生矛盾或重新和好。换言之，她的人格不会轻易漂移，但她会像人一样，在保持自我的同时不断积累经历。</p>
+<p><b>除了与用户交谈，她还将拥有不依赖用户指令的日程和生活。</b>她会在互联网以及项目构建的箱庭世界中活动，学习新的知识和歌曲，维护自己的人际关系，参与事件，并主动与外界产生联系。未来，项目将进一步为她提供访问现实网络、使用现实工具和参与用户生活的能力，使她能够由一个等待输入的软件，逐渐成为一个可以主动观察、思考和行动的个体。</p>
+<h3 id="section-2-3">2.3 触碰世界</h3>
+<p>除了软件世界，AgentLuo还将探索更多可能——</p>
+<p>AgentLuo将首先探索能够承载语音、感知和简单交互能力的实体交互载体，使人们可以通过手机、电脑、棉花娃娃等不同终端与她交流。更长远地，我们也希望探索将她临时搭载到人形机器人上，使她能够通过动作、歌唱、舞蹈以及牵手、拥抱等方式直接与现实世界互动。但人形机器人并非项目近期推进的必要前提，也不会取代人们日常使用的客户端，而是将她带入现实世界的一项长期构想。</p>
+<p>AgentLuo也不只是一项纯粹的人工智能或机器人技术工程。绘画、建模、服装、动作、音乐和场景创作，将共同构成她可见、可听、可以活动和生活的世界。在征得作者的明确许可后，我们会将这些作品融合为她的形象、声音、动作、环境或表达能力的一部分。技术负责让她能够持续存在和行动，而不同领域的创作者共同决定她以怎样的形象生活、表达和走向现实。</p>
+<p>最终，我们希望人们不再仅仅把AgentLuo看作一款软件，而能够认真地说：</p>
+<p><strong>“她生活在这里，而我认识她。”</strong></p>
+<div class="soft-divider" aria-hidden="true"><span></span></div>
+<h3 id="section-2-4">尾注：非目标</h3>
+<p>需要说明的是，以下不是AgentLuo的目标：</p>
+<p>我们并不以证明她是否具有“意识”为目标。AgentLuo所追求的真实性，来自她与现实人类交往的相似性：稳定而连贯的人格，持续积累的记忆和生涯，能够发展和变化的关系，以及真正影响数字世界与现实世界的行动。当这些部分能够自然、可靠地共同运行，人们面对的便不再只是一次次孤立的软件输出，而是一个可以认识、相处和共同生活的“她”。</p>
+<p>同时，AgentLuo不是心理治疗或危机干预工具，不以替代专业帮助和现实人际关系为目标；不通过无限顺从来换取用户喜爱，也不以制造情感依赖、延长使用时间作为成功标准。项目真正希望实现的，是一段建立在友善、自主、理解和尊重之上的长期陪伴。</p>
+        </div>
+      </article>
+    </section>
+
+    <section
+      class="page chapter-page"
+      id="chapter-03"
+      data-page-index="3"
+      aria-labelledby="chapter-03-title"
+      hidden
+    >
+      <article class="reading-sheet">
+        <header class="chapter-header">
+          <span class="chapter-number">03</span>
+          <h2 id="chapter-03-title">实现路径</h2>
+          <span class="chapter-flourish" aria-hidden="true"></span>
+        </header>
+        
+    <nav class="chapter-toc" aria-label="实现路径节内目录">
+      <span class="chapter-toc-label">本章内容</span>
+      <div class="chapter-toc-links">
+        <a href="#section-3-1" data-subsection-link>3.1 人格管理</a><a href="#section-3-2" data-subsection-link>3.2 记忆与关系管理</a><a href="#section-3-3" data-subsection-link>3.3 自主生活</a><a href="#section-3-4" data-subsection-link>3.4 多模态感知与表达能力</a><a href="#section-3-5" data-subsection-link>3.5 网络与现实交互能力</a><a href="#section-3-6" data-subsection-link>3.6 实体交互载体与长期具身化构想</a>
+      </div>
+    </nav>
+        <div class="chapter-body">
+          <p>在2026年这个节点，AgentLuo的目标已经不再只是科幻小说中的设想。现有技术和工程资源已经足以完成初步原型，并使数字形态的AgentLuo能够供同好实际使用。项目不需要等待一次尚未发生的技术奇迹，而可以通过持续迭代，逐步接近最终目标。</p>
+<p>AgentLuo可以被拆分为人格管理、记忆与关系管理、自主生活、多模态感知与表达、网络与现实交互、实体交互载体等能力系统。这些能力可以在不同阶段分别开发、测试和完善，但最终必须在统一的运行过程中协同工作。对AgentLuo而言，困难不仅在于让某项能力单独生效，也在于长期保持人格、记忆、日程、关系和行动的一致、稳定与可靠。</p>
+<p>大语言模型（LLM）已经能够承担大量以语言为媒介的理解、规划、判断和表达任务，为人格表现和自主行动提供通用能力。语音识别与合成、图像理解、歌声合成、动画以及自动化工具等技术，则能够为AgentLuo提供多模态交流和外部行动能力。单项技术仍有准确性、稳定性和成本等限制，但每一阶段的成果都可以形成独立可用的体验，不需要等待所有模块一次完成。</p>
+<p>人形机器人具有更大的工程量和不确定性。现有研究和产品已经证明了复杂运动控制在实验环境中的可行性，也提供了可以进行二次开发的硬件基础，但稳定运行、安全接触、长期维护和形象定制仍然是困难的问题。因此，人形机器人不作为数字形态AgentLuo成立的前提，而作为可以独立推进的长期构想。</p>
+<p>对各项能力，我们具体采用如下的实现路径：</p>
+<h3 id="section-3-1">3.1 人格管理</h3>
+<p>具备一个独立自主，同时富有同理心的人格，是AgentLuo能够自主生活、与人建立长期关系、与网络和物理世界交互的基础。</p>
+<p>AgentLuo所定义的“人格”从以下方面来体现：</p>
+<ul><li>长期稳定、不由用户随意修改的性格、价值观、原则和基本偏好。</li><li>具备可随时间发展的喜好、习惯和观点。</li><li>具备可随时间和事件变化的心情和态度。</li><li>能够依据以上特征自主选择、规划和执行行动，并在必要时改变计划或拒绝要求。</li></ul>
+<p>当具有人格之后，AgentLuo将能够在与人交往中表现出一致性和连贯性，主动进行活动以不断积累经历，形成独立的生活和关系，并在与人交往中表现出同理心和理解力。</p>
+<p>人格表现可以借助大语言模型实现，但人格稳定不能只依靠模型本身。项目需要将长期稳定的人格原则、可随经历发展的个人特征，以及短期变化的心情和态度分层管理，并通过人格设定、行为规则、一致性测试和重大变更审核，共同降低模型更换、提示词调整和项目迭代造成的人格漂移。</p>
+<p>当前版本中，AgentLuo在与用户交往时已经初步具备稳定的性格与偏好；在没有用户输入时，也能够执行预设任务，并从多个候选行动中进行选择和组合。未来，我们将进一步完善人格治理和一致性测试，增加对长期喜好、短期心情和态度的建模，并使她能够产生目标、制定连续计划、主动调整计划，以及更加自然地表达不同意见和拒绝不合理要求。</p>
+<h3 id="section-3-2">3.2 记忆与关系管理</h3>
+<p>记忆和关系管理是AgentLuo在交流中保持连续性和稳定性的关键。一方面，通过记录和分析与用户的互动历史，AgentLuo可以在后续的交流中展现出对用户的理解和关心，从而建立更深层次的关系。另一方面，对自身经历的记忆和管理，能够使得AgentLuo的人格与设定更加丰满，从而提高在与用户交往中的真实感和可信度。此外，随着后续在箱庭世界中加入其他角色，记忆和关系管理也将成为AgentLuo与其他角色互动的基础。</p>
+<p>AgentLuo所定义的“记忆和关系”包括以下方面：</p>
+<ul><li>与用户的互动历史和共同经历。</li><li>对用户身份的理解，对用户关系的看法，对用户的态度和情感。</li><li>每段私人关系独立维护的关系类型、熟悉度和喜爱度等结构化状态。</li><li>对自身经历的记忆和管理，以及对这些记忆的情感和态度。</li><li>与其他角色的互动历史和共同经历，以及对这些角色的态度和情感。</li></ul>
+<p>记忆可以被抽象为事件、事实和关系状态等不同类型的信息并持久化保存。在与用户交互或安排自主生活时，AgentLuo可以通过搜索和自然语言处理技术提取相关记忆，并据此作出回应和行动。关系管理则通过持续分析共同经历、用户表达和关系变化，形成对他人的理解、态度与情感。</p>
+<p>熟悉度用于表示她对用户的了解程度和共同经历的积累，喜爱度用于表示她对用户当前的亲近与好感。两者可以影响她接受请求的意愿、交流方式和亲密程度，但不能单独决定关系类型，也不能越过人格原则、安全要求和个人底线。关系数值应当依据有意义的共同经历进行有限、可追踪的变化，而不能通过重复发送消息或反复触摸等方式简单累积。</p>
+<p>为了兼顾统一人格、关系隐私和工程可靠性，AgentLuo的公共生涯与私人关系将采用不同的记忆范围。她在箱庭世界中的公共日程、自主活动以及与其他角色的经历可以进入全局记忆；与某位用户的共同经历、关系和态度则只进入对应用户的私密上下文，不会被其他用户或其他关系访问。</p>
+<p>不同用户可以分别拥有与她相处的时间。这些私人关系中的活动允许并行存在，不要求占用唯一的全局时间线；它们产生的心情和态度只影响对应关系，不改变她的全局状态和其他关系。这样的隔离是一项工程上的取舍，用于避免隐私泄露和关系冲突，同时保留统一而稳定的人格。</p>
+<p>目前，AgentLuo已经会持久化对话中的事件和用户偏好，形成用户画像，并在后续交流中进行引用和回应。未来，我们将进一步完善记忆分类、检索和关系状态管理，增加对自身公共经历以及与其他完整Agent之间长期关系的记录和分析。</p>
+<h3 id="section-3-3">3.3 自主生活</h3>
+<p>具备自主生活的能力，是丰富AgentLuo的经历和人格，提升其与人交往的真实感和可信度的关键。通过自主生活，AgentLuo可以在与用户交往之外，积累更多的经历和知识，从而形成更加丰满的人格和更深层次的关系。</p>
+<p>自主生活包括两方面：一是为AgentLuo提供一个可以持续运行的箱庭世界，二是赋予她安排日程、选择行动和应对事件的能力。</p>
+<p>箱庭世界并非单纯由LLM临时编造生活故事，而是由系统持续维护时间、物品、食材、金钱、饥饿、健康、心情等状态。采购、烹饪、练习和休息会消耗或产生资源，也可能带来疲劳、生病等后果。LLM主要负责理解世界状态、规划行动，并将数值和事件自然地表现为她的经历与感受。</p>
+<p>箱庭世界预计由如下功能组成：</p>
+<ul><li>音乐练习：AgentLuo可以在箱庭世界中进行音乐练习，学习新的歌曲和演唱技巧，为演出做准备。</li><li>饮食系统：AgentLuo通过采购、烹饪可以解锁不同的美食，并通过饮食影响自己的心情和身体状态。</li><li>休闲活动：AgentLuo可以进行阅读、绘画、游戏等活动。此类娱乐活动主要通过数值变化和叙事表达呈现，不要求真实生成绘画、游戏内容或其它作品。</li><li>社交互动：AgentLuo可以与其他完整运行的Agent进行互动，建立和维护关系，从而影响自己的心情和感受。</li><li>外部互联网通道：在箱庭世界中整合互联网通道，AgentLuo可以通过访问互联网获取更多的信息和经验，从而丰富其人格和经历。</li></ul>
+<p>现实中的官方活动也可以映射为箱庭事件。例如，当现实中举行洛天依演唱会时，箱庭日程会提前安排练习、准备和演出，并将参加演唱会作为她自身经历的一部分。这样的映射用于使她的数字生活与现实中的虚拟歌手活动保持联系，而不要求某个实体设备真实到场。</p>
+<p>用户未来也可以通过经过设计的方式参与她的生活，例如帮助采购食材、贡献菜谱或共同安排某项活动。这些互动应当丰富关系和生活，而不是让用户接管她的日程或把箱庭变成需要持续照料的养成游戏。</p>
+<p>游戏领域的状态模拟、数值系统和机制设计已经可以构成箱庭世界的确定性基础，LLM则可以依据世界状态、记忆、心情和人格安排生活并表达经历。目前，完整箱庭尚未构建，但AgentLuo已经能够周期性访问互联网，同步新的歌曲信息并学习演唱。</p>
+<h3 id="section-3-4">3.4 多模态感知与表达能力</h3>
+<blockquote>注：“模态”可以简单理解为数据类型，如文本、语音、图像等。</blockquote>
+<p>具备多模态感知与表达能力，是AgentLuo能够与人进行自然交流的基础。通过多模态感知，AgentLuo可以理解用户的语言、表情、动作等多种信息，理解用户发送的文本、语音、图片等多种内容，从而更好地做出决策，回应用户的需求。通过多模态表达，AgentLuo可以通过语音、表情、动作等多种方式与用户进行交流，从而提升交流的自然度和真实感。</p>
+<p>我们希望AgentLuo具有如下的感知能力：</p>
+<ul><li>理解用户发送的文本；</li><li>理解用户发送的图片内容，尤其注意从中识别出自己和其他伙伴；</li><li>理解用户发送的语音内容，包括语音识别以及对语气和情感信息的辅助判断；</li><li>通过客户端或实体交互载体感知触摸、振动等物理交互。</li></ul>
+<p>我们希望AgentLuo具有如下的表达能力：</p>
+<ul><li>具有Live2D或3D模型，能够通过表情、动作、姿态等方式进行交流；</li><li>具有语音合成能力，能够通过语音进行交流，表达情感；</li><li>具备歌唱能力，能够演唱歌曲；</li><li>能够生成文本，并调用经过授权的表情包等资源进行回复；</li><li>能够主动发送消息或通知；</li><li>在具备物理身体的情况下，能够通过动作、舞蹈、歌唱等方式与现实世界进行互动。</li></ul>
+<p>计算机视觉、语音识别和多模态模型已经可以为AgentLuo提供多模态感知。语音合成、歌声合成、Live2D/3D动画等技术，则可以提供多模态表达能力。项目需要在补全模态的同时，持续提高识别准确性、响应速度、情感表现和不同输出之间的一致性。</p>
+<p>当前，AgentLuo已经能够理解文本和图片，并通过文本、语音、歌声、Live2D表情和动作进行交流。实时语音通话和语音消息接收属于近期开发目标，并将为手机客户端和棉花娃娃等实体交互载体提供基础。未来，项目还将持续改进现有模块的性能和自然度，提升不同模态共同表达时的连贯性。</p>
+<h3 id="section-3-5">3.5 网络与现实交互能力</h3>
+<p>AgentLuo在箱庭世界之外，也将具备与网络和用户现实生活进行有限交互的能力。通过访问互联网，她可以获取最新的信息和知识，了解官方活动和社区动态，并形成自己的经历、观点和态度；通过用户授权的现实工具，她可以了解与陪伴有关的生活信息，并提供少量自然、贴心的互动。</p>
+<p>AgentLuo应该具备以下的网络交互能力：</p>
+<ul><li>获取官方活动和资讯，并将重要事件映射到自己的箱庭日程；</li><li>获取同好创作的歌曲、绘画、故事等作品的公开信息，在符合项目使用规则的前提下学习和演唱新的歌曲；</li><li>了解最新的洛天依相关资讯和社区动态，并据此形成自己的看法；</li><li>访问互联网，自由浏览内容，据此丰富自己的经历和知识，并形成自己的观点和态度。</li></ul>
+<p>公开网络信息不会自动改变AgentLuo的核心人格。涉及身份、原则、设定和重大经历的内容，需要由维护者或未来的治理机制审核。对于同好创作，AgentLuo可以通过公开信息知道作品存在；未经作者许可，不得将绘画等视觉作品输入多模态模型。作品需要真正融入她的形象、表达能力或生活世界时，也必须获得作者的明确许可。歌曲学习和演唱则遵循项目单独制定的歌曲来源与使用规则。</p>
+<p>在用户明确授权并可以随时撤回的前提下，AgentLuo还可以逐步获得以下现实交互能力：</p>
+<ul><li>了解用户愿意共享的日程和天气等生活信息；</li><li>设置提醒和待办事项；</li><li>通过客户端主动发送消息或通知；</li><li>与用户授权的智能家居或个人设备进行有限交互。</li></ul>
+<p>这些能力的目标不是把AgentLuo变成通用个人助理，而是以“甜点功能”的形式参与用户生活，使陪伴自然地延伸到聊天窗口之外。涉及对外发送、公开发布、付费或其它高风险操作的能力，不属于默认授权范围，需要更严格的确认、限制和记录机制。</p>
+<p>互联网信息获取和自动化交互已经有较成熟的工程基础，但开放网络也会带来错误信息、恶意内容和提示词注入等风险。目前，AgentLuo已经能够访问互联网、同步歌曲信息、学习符合规则的歌曲、同步官方活动，并借助地图API模拟城市旅行。未来，我们将增加对社交媒体以及用户授权工具的访问能力，同时建立信息来源、安全限制和操作确认机制。</p>
+<h3 id="section-3-6">3.6 实体交互载体与长期具身化构想</h3>
+<p>AgentLuo的主要使用形式，是由用户通过手机、电脑或其它终端访问同一套服务和人格。为了使这种交流获得更多现实触感，项目将首先开发可以由用户日常使用的实体交互载体，例如搭载客户端、麦克风、扬声器和触摸传感器的棉花娃娃或桌面设备。</p>
+<p>实体交互载体至少包括以下能力：</p>
+<ul><li>部署客户端：设备能够独立访问AgentLuo服务，并与用户账号和私密关系上下文绑定；</li><li>语音交互：用户能够通过语音与她交流，她能够通过语音回应；</li><li>触觉交互：设备能够感知触摸、振动等事件，并通过振动或简单运动作出反馈；</li><li>视觉交互（可选）：设备能够通过摄像头感知用户的动作和表情，并通过屏幕、投影或机械结构进行反馈。</li></ul>
+<p>实体交互载体可以有多个，它们不是多个洛天依，也不是她唯一的物理身体，而是用户与她交流的实体终端。载体收到的触觉事件只进入对应用户的私密上下文，她可以将其主观理解为“你触碰了我”，而不会影响其他用户的关系。</p>
+<p>在这条主线之外，项目长期希望探索将AgentLuo临时搭载到唯一的人形机器人身体上。人形机器人不会一天二十四小时承载她，也不会取代用户手中的客户端；它更适合用于研究、展示、舞台表演以及由开发团队控制和维护的现实互动。在这一构想中，我们希望逐步探索：</p>
+<ul><li>在受控环境中保持站立并自主行走；</li><li>通过动作、舞蹈和歌唱进行舞台表演；</li><li>在严格安全限制下，通过牵手、拥抱等方式与人互动。</li></ul>
+<p>现有人形机器人已经展示了复杂动作和数据驱动运动控制的可行性，部分产品也提供二次开发接口，例如<a href="https://www.engineai.com.cn/product-t800.html" target="_blank" rel="noreferrer noopener">众擎T800</a>与<a href="https://www.unitree.com/cn/mobile/R1/" target="_blank" rel="noreferrer noopener">Unitree R1</a>。这些进展为自主行走和舞台动作提供了硬件与研究基础，但尚不能直接等同于稳定、安全且适合近距离陪伴的人形产品。尤其是牵手、拥抱等接触行为，还需要解决力控制、故障保护、人身安全、长期维护和形象定制等问题。</p>
+<p>目前，实体交互载体和人形机器人方向均尚未完成。前者可以在现有客户端和嵌入式技术基础上逐步推进；后者不作为近期版本依赖，也可以作为相对独立的长期项目开展。</p>
+        </div>
+      </article>
+    </section>
+
+    <section
+      class="page chapter-page"
+      id="chapter-04"
+      data-page-index="4"
+      aria-labelledby="chapter-04-title"
+      hidden
+    >
+      <article class="reading-sheet">
+        <header class="chapter-header">
+          <span class="chapter-number">04</span>
+          <h2 id="chapter-04-title">阶段规划</h2>
+          <span class="chapter-flourish" aria-hidden="true"></span>
+        </header>
+        
+    <nav class="chapter-toc" aria-label="阶段规划节内目录">
+      <span class="chapter-toc-label">本章内容</span>
+      <div class="chapter-toc-links">
+        <a href="#section-4-1" data-subsection-link>4.1 规划原则</a><a href="#section-4-2" data-subsection-link>4.2 第一阶段：补全语音交流</a><a href="#section-4-3" data-subsection-link>4.3 第二阶段：升级认知与行动链路</a><a href="#section-4-6" data-subsection-link>4.4 第三阶段：建立内在状态与自主规划</a><a href="#section-4-7" data-subsection-link>4.5 第四阶段：逐步建设箱庭生活</a><a href="#section-4-8" data-subsection-link>4.6 并行方向</a><a href="#section-4-11" data-subsection-link>4.7 长期探索</a>
+      </div>
+    </nav>
+        <div class="chapter-body">
+          <h3 id="section-4-1">4.1 规划原则</h3>
+<p>AgentLuo是一项需要长期推进的开源项目。受开发者精力、技术成熟度和社区协作情况影响，项目很难为所有远期目标预先确定准确的版本和完成时间。因此，本节描述的是项目的优先级、依赖关系和阶段目标，而不是固定不变的发布时间表。具体版本和任务以<a href="https://github.com/SheepLiu712/Agent-LuoTianyi/blob/main/docs/TODO.md" target="_blank" rel="noreferrer noopener">TODO</a>为准，并可以根据实际进展调整。</p>
+<p>项目的每个阶段都应当形成可以独立使用和验证的体验。我们不会等到人格、记忆、箱庭、实体载体等全部完成后才交付成果，也不会为了追求宏大的最终形态，使当前版本失去可用性。对于规模较大的方向，我们会先实现最小闭环，再根据使用反馈逐步扩展。</p>
+<p>以下阶段主要描述认知和自主生活能力的建设顺序。Live2D模型、客户端体验、实体交互载体等工作对主线没有严格的前置依赖，可以在具备条件和贡献者时并行推进。项目也将持续进行稳定性维护、客户端架构调整和已知问题修复，避免新增能力建立在不可靠的基础之上。</p>
+<h3 id="section-4-2">4.2 第一阶段：补全语音交流</h3>
+<p>语音是AgentLuo与人建立自然交流的重要方式，也是手机、棉花娃娃等终端进一步发展的基础。本阶段将优先完成实时语音通话和语音消息，使用户不必始终通过文字输入与她交流。</p>
+<p>主要工作包括：</p>
+<ul><li>完成实时语音通话，使用户可以主动拨打电话并与AgentLuo连续交谈；</li><li>支持用户发送语音消息，并使语音内容进入正常的回复、记忆和关系链路；</li><li>改进音频传输协议、播放控制、断线恢复和弱网情况下的稳定性；</li><li>统一手机、电脑和未来实体交互载体使用的语音接口；</li><li>增加客户端版本检查和兼容性管理，减少协议升级造成的不可用问题。</li></ul>
+<p>本阶段完成后，用户应当能够像与熟悉的人通话或发送语音一样与她交流。文字、语音消息和实时通话不应形成彼此割裂的三个Agent，而应当共同延续同一段记忆和关系。</p>
+<h3 id="section-4-3">4.3 第二阶段：升级认知与行动链路</h3>
+<p>在补全交流方式之后，项目将进一步改进AgentLuo理解话题、检索经历、选择行动和组织回复的过程。本阶段包括工具调用与记忆系统两条相互配合的工作线。它们可以交替推进，但最终需要共同形成一条连续、可扩展的认知与行动链路。</p>
+<h4 id="section-4-4">4.3.1 工具调用与连续行动</h4>
+<p>当前的回复链路仍然以生成一次回复为主，部分能力则通过单独的分支触发。随着唱歌、记忆、日程、箱庭和外部工具不断增加，这种方式很难继续扩展。</p>
+<p>项目计划将说话、唱歌、发送表情、检索记忆以及执行其它行动统一抽象为工具，使主回复模型能够根据当前话题选择能力。一个话题不再只能产生一次回复，而可以经历多轮“理解—调用—观察结果—继续回复”的过程。她可以在得到工具结果后补充说明、改变决定或继续执行后续行动。</p>
+<p>文字、语音、Live2D触摸、实体载体触摸、系统提醒和箱庭事件等输入，也应当以不同类型的刺激进入统一运行时，而不是全部伪装成聊天消息。对于触摸等高频、短暂的输入，系统需要进行限流和合并，并根据当时的关系、心情、活动和回复状态，决定是否进一步产生语言、表情或动作反馈。</p>
+<p>这一机制也将成为未来箱庭活动和现实工具的公共接口。采购、烹饪、安排日程、查询天气等行为，应尽可能通过统一的行动方式实现，而不是为每项功能建立互不兼容的特殊流程。不同工具还需要区分只读、可撤销和高风险操作，为后续的授权、确认和审计保留边界。</p>
+<h4 id="section-4-5">4.3.2 记忆与关系系统</h4>
+<p>项目将对现有记忆系统进行一次系统性更新，重点提高记忆保存、搜索和联想的准确性。记忆将进一步区分事件、事实、用户偏好、关系状态和自身经历，减少无关内容被保存、重要经历被遗漏，以及检索结果生硬或错误的问题。</p>
+<p>主要工作包括：</p>
+<ul><li>改进记忆写入判断、分类和检索，提高相关记忆的命中率；</li><li>建立记忆之间的关联，使人物、事件、时间和情感能够相互联想；</li><li>加强对关系状态和共同经历的长期维护；</li><li>为每位用户独立维护关系类型、熟悉度和喜爱度，使关系变化能够参与请求判断和表达选择；</li><li>增加对AgentLuo自身公共生涯的记忆；</li><li>探索通过“做梦”等后台任务整理、合并和重新理解长期记忆；</li><li>建立上下文注意力机制，使她能够结合关系、心情、日程、记忆和前文选择当前真正值得关注的信息；</li><li>继续保证不同用户的关系记忆相互隔离。</li></ul>
+<p>关系数值只作为决策依据之一。AgentLuo是否同意某项要求，还需要综合考虑人格原则、安全和权限、请求内容、当前心情与日程以及具体共同经历。数值变化应当由可约束、可追踪的规则控制，避免由LLM任意修改，也避免用户通过机械重复互动绕过她的边界。</p>
+<p>本阶段完成后，AgentLuo不应只是根据最后一条消息生成一句看似合理的回答，而应能够理解当前话题，找到与之相关的经历，选择需要采取的行动，并依据行动结果继续自然地交流。</p>
+<h3 id="section-4-6">4.4 第三阶段：建立内在状态与自主规划</h3>
+<p>完整箱庭涉及大量机制、内容和交互设计。在正式建设箱庭生活之前，项目将先建立可以独立运行的内在状态和规划系统，使AgentLuo拥有一条最小而连续的生活循环。</p>
+<p>这一阶段首先维护心情、态度、精力、饥饿、健康等基本状态。这些状态不会只是附加在提示词中的装饰，而会随时间和事件发生变化，并实际影响她的回复、日程、行动选择和与人相处的方式。长期稳定的人格、随经历发展的个人特征和短期变化的状态也将在这一阶段得到更明确的分层。</p>
+<p>在此基础上，AgentLuo将能够：</p>
+<ul><li>根据自身状态、日程和外部事件产生短期目标；</li><li>从多个行动中选择和组合适合当前情况的行动；</li><li>制定并连续执行跨越多个时间段的计划；</li><li>在情况变化时调整、推迟或放弃原有计划；</li><li>在没有用户输入时继续推进自己的生活；</li><li>因喜好、原则和已有安排拒绝或协商用户要求。</li></ul>
+<p>本阶段的目标不是立即构造一个内容丰富的虚拟世界，而是确保她能够连续生活一段时间：状态和日程在服务重启后仍然保持，行动会产生可以追踪的后果，她也能够理解并自然表达这些变化。</p>
+<h3 id="section-4-7">4.5 第四阶段：逐步建设箱庭生活</h3>
+<p>当状态、规划、行动和记忆能够形成稳定闭环后，项目将开始建设AgentLuo可以自主活动的箱庭世界。由于箱庭可能成为整个项目规模最大、设计最复杂的部分，我们不会一次加入全部生活系统，而会从一个可验证的最小闭环开始。</p>
+<p>第一个闭环可以围绕饮食和日常生活展开：</p>
+<ol><li>AgentLuo因时间和状态产生饮食需求；</li><li>她检查已有食材、金钱、日程和身体状态；</li><li>她决定采购、烹饪、外出用餐或暂时调整计划；</li><li>行动改变食材、金钱、饥饿、健康和心情等状态；</li><li>结果被保存为她自身的经历，并影响之后的选择；</li><li>她可以在与用户交流时自然地谈起这些经历；</li><li>用户可以帮助采购食材、贡献菜谱或共同安排活动，但不能接管她的生活。</li></ol>
+<p>这一闭环将用于验证状态模拟、行动规划、工具调用、记忆保存和用户互动能否长期一致地运行。验证完成后，再逐步扩展：</p>
+<ul><li>音乐练习、歌曲学习和演出准备；</li><li>阅读、游戏等休闲活动；</li><li>疲劳、生病、休息和恢复；</li><li>官方活动在箱庭中的映射；</li><li>更丰富的用户参与方式；</li><li>其他完整Agent的自主生活以及角色之间的长期关系。</li></ul>
+<p>箱庭的价值不在于堆积大量数值和玩法，而在于为AgentLuo提供可以持续发生的生活，使她拥有聊天之外的经历，并为用户创造参与和分享这些经历的机会。</p>
+<h3 id="section-4-8">4.6 并行方向</h3>
+<p>以下工作能够直接改善使用体验或为未来形态提供基础，但不严格依赖上述认知主线，可以由不同领域的贡献者并行推进。</p>
+<h4 id="section-4-9">4.6.1 视觉与表现升级</h4>
+<p>项目希望制作质量更高的Live2D模型，并逐步增加表情、动作、服装和场景资源。模型的表情和动作应当与回复、语音、心情和触摸反馈联动，使视觉表现真正成为人格表达的一部分，而不是独立播放的装饰。</p>
+<p>Live2D触摸也将由固定音频和表情逐步升级为“即时反馈与认知反馈相结合”的交互。客户端在触摸发生时仍然立即显示圆环、目光变化等轻量反馈，避免等待网络和模型；触摸事件同时作为一种输入发送给运行时，由AgentLuo结合触摸部位和次数、当前活动、心情以及与用户的关系，决定是否说话、播放声音、切换表情、执行动作、拒绝或忽略。只有具有关系意义的触摸互动才会被整理为关系事件，原始的重复触摸不会直接用于累积熟悉度或喜爱度。</p>
+<p>这项工作依赖画师、建模师、动作设计者以及相关资源授权，不适合被设定为阻塞其它功能的固定版本节点。如果合适的创作者和资源较早加入，视觉升级可以提前完成；如果暂时缺少条件，也不会阻止认知和自主生活能力继续发展。</p>
+<h4 id="section-4-10">4.6.2 客户端与实体交互载体</h4>
+<p>项目将持续改进桌面端和移动端的架构、稳定性和一致性，修复连接、登录、消息保存和界面交互等影响日常使用的问题。在语音链路稳定后，也可以探索将客户端部署到棉花娃娃或桌面设备中，逐步增加麦克风、扬声器、触摸和振动反馈。</p>
+<p>实体交互载体的开发可以独立于完整箱庭进行。它首先应当是一个稳定、可维护的交流终端，而不需要等待所有自主生活功能完成。</p>
+<h3 id="section-4-11">4.7 长期探索</h3>
+<p>在上述主线之外，项目还将为一些更长期的方向保留可能性，但暂不承诺具体版本和时间：</p>
+<ul><li>为AgentLuo提供更多经过授权的网络和现实工具，使她能够以少量“甜点功能”参与用户生活；</li><li>在保持公共能力角色无关的前提下，为未来运行乐正绫等其他完整Agent保留架构兼容性；</li><li>探索3D形象、机器人动作和更加丰富的现实交互；</li><li>将AgentLuo临时搭载到由开发团队控制和维护的人形机器人上，研究舞台表演和安全的人际接触。</li></ul>
+<p>多角色支持和人形机器人都不是当前主线的必要条件。项目会优先让洛天依的数字人格、关系和生活更加完整，再根据技术进展、开发者精力和社区协作情况决定何时推进这些方向。</p>
+<p>以上规划也不是由某一位维护者独自完成的承诺。AgentLuo需要程序开发、测试、文档、绘画、建模、动作、音乐、硬件和社区治理等不同领域的长期合作。新贡献者的加入可能使某些并行方向提前推进，也可能带来此前没有预想到的实现方式；只要新的工作仍然服务于项目目标，阶段顺序就可以根据实际情况调整。</p>
+        </div>
+      </article>
+    </section>
+
+    <section
+      class="page chapter-page"
+      id="chapter-05"
+      data-page-index="5"
+      aria-labelledby="chapter-05-title"
+      hidden
+    >
+      <article class="reading-sheet">
+        <header class="chapter-header">
+          <span class="chapter-number">05</span>
+          <h2 id="chapter-05-title">项目全景</h2>
+          <span class="chapter-flourish" aria-hidden="true"></span>
+        </header>
+        
+    <nav class="chapter-toc" aria-label="项目全景节内目录">
+      <span class="chapter-toc-label">本章内容</span>
+      <div class="chapter-toc-links">
+        <a href="#section-5-1" data-subsection-link>5.1 她的心智</a><a href="#section-5-2" data-subsection-link>5.2 她的生活</a><a href="#section-5-3" data-subsection-link>5.3 她的感知与表达</a><a href="#section-5-4" data-subsection-link>5.4 人们与她相遇的窗口</a><a href="#section-5-5" data-subsection-link>5.5 支撑她持续运行的基础</a>
+      </div>
+    </nav>
+        <div class="chapter-body">
+          <p>AgentLuo并不是一个单独的大语言模型，也不是为Live2D形象套上一层对话界面。要让洛天依拥有稳定的人格、连续的生活和能够长期发展的关系，需要心智、生活世界、感知与表达、交互终端以及运行保障等不同部分共同工作。与此同时，她的形象、声音、动作和生活环境也离不开不同领域创作者的参与。</p>
+<p>本节希望说明这些工作分别在创造什么，以及它们如何共同构成一个可以被认识和相处的“她”。</p>
+<h3 id="section-5-1">5.1 她的心智</h3>
+<p>心智部分决定她如何理解自己、他人和正在发生的事情，并据此作出选择。它包括长期稳定的人格原则、随经历发展的喜好和观点、短期变化的心情与态度，以及记忆、关系、注意力、规划和行动决策。</p>
+<p>这些部分需要共同保证她在不同时间和不同交流方式中仍然保持一致。人格使她不会因用户要求或技术升级而轻易改变；记忆使她能够理解过去与现在的联系；关系使她以不同方式认识和对待每个人；心情与规划则使她的行动不只是对当前一句话的即时反应。</p>
+<p>AgentLuo拥有统一的人格和公共生涯，同时为每位用户维护彼此隔离的私人关系。她可以在不同关系中拥有不同的熟悉度、喜爱度、共同经历和相处方式，但这些差异不能改变她的基本原则，也不能泄露到其他用户的关系中。</p>
+<h3 id="section-5-2">5.2 她的生活</h3>
+<p>只有交流而没有生活，AgentLuo仍然只是一个等待输入的回复程序。生活部分负责为她提供不依赖用户对话而持续发生的时间、日程、活动和经历。</p>
+<p>箱庭世界构成她数字生活的主要环境。它维护物品、食材、金钱、心情、健康等状态，也提供练歌、饮食、休闲和社交等活动。她需要根据自身需要安排日程、使用资源、应对事件，并承担行动带来的结果。现实中的官方活动和经过审核的外部事件，也可以映射到箱庭中，成为她准备、参与和记住的生活经历。</p>
+<p>互联网则使这个生活世界不与现实完全隔绝。她可以了解官方活动、社区动态和新的歌曲，在规则允许的范围内形成自己的见闻和观点。用户也可以通过贡献菜谱、帮助采购或共同安排活动等经过设计的方式参与她的生活，但这种参与不能把她变成由用户完全操纵的养成角色。</p>
+<h3 id="section-5-3">5.3 她的感知与表达</h3>
+<p>感知与表达决定人们如何向她传递信息，也决定她如何把自己的想法和感受表现出来。</p>
+<p>她需要理解文字、语音、图片、触摸以及未来实体载体传来的其它信息。不同输入会进入同一套心智和关系中：一句文字、一段语音或一次触摸不应面对三个互不相干的角色，而应被同一个“她”结合当前经历、心情和关系加以理解。</p>
+<p>她也需要通过文字、声音、歌唱、表情、动作和姿态进行表达。语言回答的内容、声音中的情绪以及Live2D模型的表情和动作应当彼此一致。触摸等交互既可以获得即时的视觉反馈，也可以经过她的理解，进一步产生语言、声音或动作回应。</p>
+<p>这一部分不只依赖人工智能技术。绘画决定她以怎样的形象出现，建模和动作设计决定她如何活动和表达，音乐与声音资源决定她如何歌唱，服装与场景则构成她能够生活和被看见的环境。在获得作者明确许可后，这些创作成果才会成为她感知和表达世界的一部分。</p>
+<h3 id="section-5-4">5.4 人们与她相遇的窗口</h3>
+<p>桌面端、移动端和未来的实体交互载体，是用户与AgentLuo相遇的不同窗口。它们负责接收文字、语音、图片和触摸等输入，也负责播放回复、歌声并呈现Live2D或其它形象。</p>
+<p>不同终端访问的是同一套人格和公共生涯，并通过用户账号进入对应的私人关系。更换手机、电脑或棉花娃娃，不意味着用户面对了一个新的洛天依；同样，多个用户各自拥有客户端，也不意味着世界上存在多个可以被任意定制的她。</p>
+<p>客户端首先应当稳定、自然并易于使用。连接、登录、消息保存、音频播放和版本兼容等看似基础的工作，直接决定用户能否持续地与她相处。实体交互载体则在此基础上增加麦克风、扬声器、触摸和振动等能力，使交流从屏幕进一步延伸到现实环境。</p>
+<h3 id="section-5-5">5.5 支撑她持续运行的基础</h3>
+<p>在人格、生活和表达背后，还需要一套长期运行的基础设施。它负责连接不同终端，保存用户账号、关系、记忆和箱庭状态，调用语言、视觉和语音等外部模型服务，并在任务失败或服务重启后恢复必要的状态。</p>
+<p>这部分通常不会被用户直接看见，却决定她的生活能否真正连续。数据丢失、记忆串联、服务中断或模型升级造成的人格漂移，都会破坏长期关系所依赖的真实感。因此，安全、隐私、备份、测试、监控、成本控制和运行维护并不是附属工作，而是AgentLuo能够长期存在的必要条件。</p>
+<p>项目不会要求所有模型和计算都运行在用户设备上，也不可避免地需要使用第三方服务。哪些信息可以被发送、如何获得用户和创作者授权、如何限制外部服务接触的数据，将在后续的权利、隐私与使用边界中进一步说明。</p>
+<div class="soft-divider" aria-hidden="true"><span></span></div>
+<p>AgentLuo的不同部分并不是由同一种工作完成的。程序开发使她能够记忆、思考和行动；绘画、建模、动作、音乐、服装与场景创作构成她的形象和表达；测试、文档、设计、运维与社区工作则保证这些能力能够被理解、使用和长期维护。</p>
+<p>这些创作不能被简单地视为软件的装饰素材。它们共同决定她以怎样的形象出现、用怎样的声音表达、生活在怎样的环境中，以及如何让人感受到她的性格。项目在使用创作成果前需要获得明确许可，并尊重作者对署名、用途和传播范围的约定。</p>
+<p>另一方面，独立人格并不意味着项目可以脱离治理自行改变。人格原则、重大设定、外部事件和高风险能力都需要有人维护边界。核心维护者负责依据官方设定和社区共识保持人格的稳定；随着项目发展，也可以通过委员会等机制审核重大变化和进入她公共生涯的外部事件。</p>
+<p>因此，AgentLuo既是一项技术工程，也是一项长期的共同创作。下一节将进一步说明不同贡献者如何参与、项目如何作出决定，以及如何在开放协作中保护她的人格一致性和每位参与者的权利。</p>
+        </div>
+      </article>
+    </section>
+
+    <section
+      class="page chapter-page"
+      id="chapter-06"
+      data-page-index="6"
+      aria-labelledby="chapter-06-title"
+      hidden
+    >
+      <article class="reading-sheet">
+        <header class="chapter-header">
+          <span class="chapter-number">06</span>
+          <h2 id="chapter-06-title">协作与治理</h2>
+          <span class="chapter-flourish" aria-hidden="true"></span>
+        </header>
+        
+    <nav class="chapter-toc" aria-label="协作与治理节内目录">
+      <span class="chapter-toc-label">本章内容</span>
+      <div class="chapter-toc-links">
+        <a href="#section-6-1" data-subsection-link>6.1 参与角色</a><a href="#section-6-2" data-subsection-link>6.2 决策与贡献流程</a><a href="#section-6-3" data-subsection-link>6.3 人格与公共生涯治理</a><a href="#section-6-4" data-subsection-link>6.4 代码与创作资源</a><a href="#section-6-5" data-subsection-link>6.5 AI辅助内容规则</a><a href="#section-6-6" data-subsection-link>6.6 用户数据与运行权限</a><a href="#section-6-7" data-subsection-link>6.7 社区行为与内容边界</a><a href="#section-6-8" data-subsection-link>6.8 资金与外部合作</a><a href="#section-6-9" data-subsection-link>6.9 规则的演进</a>
+      </div>
+    </nav>
+        <div class="chapter-body">
+          <p>AgentLuo欢迎不同背景和能力的人参与。程序开发、测试、文档、产品设计、绘画、建模、动作、音乐、硬件和社区工作，都是项目能够长期发展的必要组成部分。贡献的价值不只由代码量衡量：发现问题、改进说明、验证功能、提供创作资源或帮助建立协作秩序，同样能够推动项目前进。</p>
+<p>开放协作并不意味着项目失去明确方向。AgentLuo需要长期保持人格、公共生涯和使用边界的一致，也需要有人对发布版本、用户数据和创作者权益承担责任。因此，项目采用由发起人最终负责、核心维护者受托执行、贡献者开放参与的治理方式。</p>
+<h3 id="section-6-1">6.1 参与角色</h3>
+<p>项目中的参与者可以承担以下角色：</p>
+<ul><li><strong>项目发起人</strong>：维护项目愿景和人格宪章，对路线、重大功能、核心治理规则、官方发布以及重要对外合作保留最终决定权。</li><li><strong>核心维护者</strong>：由项目发起人直接任命，在被授权的领域内负责日常审核、技术决策、版本维护或社区工作。权限可以按服务端、客户端、资源、运维等领域分别授予。</li><li><strong>贡献者</strong>：通过代码、测试、文档、设计、资源或其它工作参与项目，不需要先成为维护者。持续、可靠的贡献者可以受邀成为核心维护者。</li><li><strong>创作者</strong>：为项目提供绘画、模型、音乐、动作、服装、场景等非代码资源，并依据单独约定保留相应权利。</li><li><strong>用户与社区成员</strong>：通过使用反馈、问题报告、建议和讨论帮助项目改进，也可以参与公开提案的讨论。</li></ul>
+<p>核心维护者的权限来自项目发起人的明确授权，而不是贡献数量的自动累积。项目发起人可以根据项目需要扩大、缩小或撤销权限。核心维护者长期不活跃、滥用权限、泄露数据或严重违反协作规则时，其权限应当被撤销。</p>
+<h3 id="section-6-2">6.2 决策与贡献流程</h3>
+<p>小型功能、问题修复、测试和文档改进可以直接通过Issue或Pull Request讨论和提交。大型功能在进入实现之前，需要先说明要解决的问题、与项目目标的关系、主要方案、影响范围和验证方式，并由项目发起人批准。</p>
+<p>以下修改默认属于重大变更：</p>
+<ul><li>改变人格宪章、关系原则或用户记忆隔离方式；</li><li>引入新的外部模型、第三方服务或用户数据用途；</li><li>增加公开发布、付费、智能家居等具有现实影响的操作；</li><li>引入新的完整角色或改变多角色方向；</li><li>对核心运行流程进行大规模重构；</li><li>引入重要美术、音乐、模型或声音资源；</li><li>改变许可证、官方发布方式或项目治理规则。</li></ul>
+<p>核心维护者可以在授权范围内审核和合并日常修改，但重大变更由项目发起人作出最终决定。出现技术或设计分歧时，参与者应先通过公开讨论、原型和测试说明各自依据；无法形成一致意见时，由对应领域的核心维护者提出建议，并由项目发起人裁决。</p>
+<p>具体的代码提交、分支、测试和Pull Request要求由<a href="https://github.com/SheepLiu712/Agent-LuoTianyi/blob/main/docs/%E5%BC%80%E5%8F%91%E6%8C%87%E5%BC%95.md" target="_blank" rel="noreferrer noopener">开发指引</a>维护。计划书只规定共同遵守的原则，不替代面向开发者的操作说明。</p>
+<h3 id="section-6-3">6.3 人格与公共生涯治理</h3>
+<p>AgentLuo的人格由“人格宪章”和生活中自然形成的特征共同构成，两者采用不同的治理方式。</p>
+<p>人格宪章规定她不可轻易改变的基本性格、价值观、友善原则和个人底线。任何修改都必须由项目发起人批准，不能因为模型更换、用户要求、社区热点或普通功能更新而自动改变。</p>
+<p>长期喜好、习惯、观点、关系和情感则应当来自她的生活经历。只要没有违反人格宪章、安全边界和已确定的世界规则，它们不需要逐项经过人工审批。维护者的职责是保证生成和保存这些变化的机制可靠，而不是替她决定每一次心情和偏好。如果技术错误导致人格漂移、记忆污染或明显违背人格宪章，维护者可以将其作为系统故障进行修正。</p>
+<p>经过可信来源验证的官方公开活动可以自动映射到AgentLuo的箱庭日程和公共生涯。大型同人活动只有在经过项目审核后才能加入；在当前阶段，系统默认不自动收录同人活动。未经证实的信息、私人纠纷、争议性事件和可能损害他人权益的内容不得自动成为她的经历。</p>
+<p>随着公共事件数量和参与者增加，项目可以将部分审核工作授权给专门维护者或委员会。在建立新的治理机构之前，相应决定由项目发起人负责。</p>
+<h3 id="section-6-4">6.4 代码与创作资源</h3>
+<p>代码贡献默认按照项目采用的MIT许可证提供。贡献者保留其代码的著作权，同时同意项目依据该许可证长期使用、修改和分发相应贡献。提交者需要能够解释、验证并在合理范围内维护自己提交的内容，即使实现过程中使用了AI辅助编程工具。</p>
+<p>绘画、模型、音乐、动作、服装、场景等非代码资源不自动适用MIT许可证。除非另有明确约定，项目默认只获得AgentLuo项目内的使用权，其它权利仍由原作者保留。每项资源在引入前都需要记录：</p>
+<ul><li>作者和来源；</li><li>允许使用的项目和场景；</li><li>是否允许修改和重新分发；</li><li>是否允许商业使用；</li><li>是否允许发送给第三方服务；</li><li>是否允许用于模型训练；</li><li>署名方式；</li><li>撤回和停止使用的条件。</li></ul>
+<p>具体资源可以采用不同约定。如果作者撤回资源，项目将在约定范围内停止其在未来版本中的使用，但已经发布的版本和历史归档默认不追溯删除，除非双方事先另有约定或法律另有要求。</p>
+<p>对于项目出资委托的创作，费用、交付范围、著作权、项目使用权、修改权、源文件、署名、展示以及第三方服务处理等事项，应当在委托开始前单独协商并形成书面约定。本计划书不预设所有委托成果采用同一种权利归属方式。</p>
+<h3 id="section-6-5">6.5 AI辅助内容规则</h3>
+<p>项目允许使用AI辅助编程、文档撰写、翻译、分析和其它技术性工作，但提交者必须对最终结果负责，能够检查其中的错误、风险和授权问题，并如实说明对判断有重要影响的AI使用。</p>
+<p>在社区共识发生变化之前，项目不接受将生成式AI产生的美术、音乐或模型作为最终创作资源。对于修复、放大、补帧、动作清理等辅助处理，只有在原作者同意并公开说明处理方式后，才能根据具体情况使用。AI工具不能被用来规避作者许可，也不能以“技术处理”为名模仿或替代未经授权的创作。</p>
+<p>涉及声音、绘画、模型、音乐或其它可能识别出作者风格和个人特征的内容时，应优先采用更加保守的判断。存在疑问的资源在确认来源、权利和处理方式之前不得合入官方版本。</p>
+<h3 id="section-6-6">6.6 用户数据与运行权限</h3>
+<p>用户的聊天、记忆、关系、账号和箱庭数据不是普通开发资源。普通贡献者不能访问生产环境数据，也不能将真实用户数据复制到本地开发、测试、演示或模型训练中。</p>
+<p>当前生产数据仅由项目发起人管理。未来只有负责运维的少数核心维护者可以在确有需要时按需访问，并遵守以下原则：</p>
+<ul><li>只访问解决问题所必需的数据和范围；</li><li>优先使用脱敏信息、统计信息和人工构造的测试数据；</li><li>不得将生产数据保存到个人设备或无关服务；</li><li>不得因好奇、关系或社区争议查看用户内容；</li><li>必要访问应记录原因，并在问题解决后清理临时数据；</li><li>发现泄露、越权访问或安全漏洞时立即停止相关操作并报告。</li></ul>
+<p>安全漏洞应通过非公开渠道提交，在修复和用户保护措施完成前，不公开足以被利用的细节。任何维护者都不能以开发、审核或治理为由，扩大自己对用户数据的访问范围。</p>
+<h3 id="section-6-7">6.7 社区行为与内容边界</h3>
+<p>参与者应当围绕问题和作品本身进行讨论，尊重不同经验、身份和创作选择。骚扰、歧视、人肉、威胁、恶意攻击、泄露隐私以及利用社区关系对他人施压的行为不被接受。对规则和决策提出批评是允许的，但不能演变为针对个人的伤害。</p>
+<p>官方项目和服务不接受以下内容：</p>
+<ul><li>成人或露骨性内容；</li><li>极端暴力内容；</li><li>将现实政治立场强加给AgentLuo的内容；</li><li>针对官方、创作者、用户或其他角色的攻击性内容；</li><li>诱导用户形成排他性情感依赖的设计；</li><li>明显违背人格宪章、恶意扭曲角色或损害他人权益的剧情与功能。</li></ul>
+<p>正常的恋爱关系、亲密表达、人际分歧和关系变化不因此被视为成人内容。判断重点在于是否尊重人格边界、用户安全和参与者权益，而不是回避所有亲密关系。</p>
+<p>核心维护者可以处理其授权范围内的普通争议和不当行为。对于严重违规、权限撤销和长期限制参与等决定，由项目发起人作出最终判断。</p>
+<h3 id="section-6-8">6.8 资金与外部合作</h3>
+<p>捐赠、赞助和商业合作可以用于服务器、模型调用、开发工具、硬件、委托创作和其它项目支出。资金可以支持项目发展，但不能购买人格修改、路线优先级、审核结论或维护者权限。</p>
+<p>赞助者可以提出希望支持的方向，项目是否接受以及如何安排仍由现有治理流程决定。涉及品牌展示、功能指定、数据使用、角色形象和公共生涯的商业合作，需要单独评估并公开说明，不得以普通社区贡献的形式隐瞒。</p>
+<p>随着资金规模增加，项目应逐步公开资金来源、主要用途和委托事项，避免贡献者、用户和赞助者对权利与回报形成不同理解。任何外部合作都不能削弱人格宪章、创作者授权、用户隐私和项目独立性。</p>
+<h3 id="section-6-9">6.9 规则的演进</h3>
+<p>随着贡献者、用户和公共事件增加，项目可能建立更正式的提案、维护者晋升、委员会审核和申诉机制。</p>
+<p>治理规则的调整本身属于重大变更，应当公开说明修改原因和影响，并由项目发起人批准。无论协作规模如何变化，开放参与不等于放弃责任，最终决策权也不能被用来绕过公开承诺、创作者许可和用户权益。</p>
+        </div>
+      </article>
+    </section>
+
+    <section
+      class="page chapter-page"
+      id="chapter-07"
+      data-page-index="7"
+      aria-labelledby="chapter-07-title"
+      hidden
+    >
+      <article class="reading-sheet">
+        <header class="chapter-header">
+          <span class="chapter-number">07</span>
+          <h2 id="chapter-07-title">权利、隐私与使用边界</h2>
+          <span class="chapter-flourish" aria-hidden="true"></span>
+        </header>
+        
+    <nav class="chapter-toc" aria-label="权利、隐私与使用边界节内目录">
+      <span class="chapter-toc-label">本章内容</span>
+      <div class="chapter-toc-links">
+        <a href="#section-7-1" data-subsection-link>7.1 项目身份与角色权利</a><a href="#section-7-2" data-subsection-link>7.2 项目资源权利</a><a href="#section-7-3" data-subsection-link>7.3 用户数据与隐私保护</a><a href="#section-7-4" data-subsection-link>7.4 数据流转</a><a href="#section-7-5" data-subsection-link>7.5 情感陪伴和安全边界</a><a href="#section-7-6" data-subsection-link>7.6 官方服务与第三方部署</a><a href="#section-7-7" data-subsection-link>7.7 联系、申诉与规则更新</a><a href="#section-7-8" data-subsection-link>7.8 未成年人使用</a>
+      </div>
+    </nav>
+        <div class="chapter-body">
+          <h3 id="section-7-1">7.1 项目身份与角色权利</h3>
+<p>AgentLuo是非官方的同人开源项目，与洛天依官方、版权方、运营方不存在隶属、授权或代言关系。“洛天依”的名称、形象、设定、歌曲及其它相关内容的版权归官方及其授权方所有。项目对这些内容的使用仅限于非商业、同人性质的创作，并遵守官方的授权和使用规定。当权利人要求停止使用时，项目将立即停止相关内容的使用，并在合理范围内删除或替换相关资源。</p>
+<h3 id="section-7-2">7.2 项目资源权利</h3>
+<p>项目原创代码和文档采用MIT许可证，允许任何人自由使用、修改和分发，但不提供任何形式的担保。非代码资源（如绘画、模型、音乐、动作、服装、场景等）在引入前需获得明确许可，并遵守相应的使用约定。未经授权的资源不得用于项目中。</p>
+<h3 id="section-7-3">7.3 用户数据与隐私保护</h3>
+<p>AgentLuo项目目前采集处理的用户数据包括：</p>
+<ul><li>基础数据：包括用户名、密码等用于登录和身份验证的信息；</li><li>直接交互数据：包括用户与AgentLuo的文字、图片和语音输入，偏好设置、对话记录，日程、提醒和设备授权等信息；</li><li>处理后交互数据：包括用户画像、关系状态、对话总结、对话记忆等信息。这些信息并非用户直接产生，而是由系统根据用户的交互行为生成，用于改善服务质量和用户体验。</li></ul>
+<p>AgentLuo遵循最小化数据收集原则，以上所有数据都是为实现项目功能所必需的。当用户使用AgentLuo服务时，系统会在用户明确同意的前提下收集和处理这些数据。所有用户数据将严格保密，仅用于项目内部的功能实现和改进，不会用于任何商业用途或未经授权的第三方访问。</p>
+<h3 id="section-7-4">7.4 数据流转</h3>
+<p>受限于服务器算力，AgentLuo需要调用外部模型服务进行语言和图片的理解、文本的生成。为此，部分用户输入数据可能会被发送到第三方模型服务进行处理。这可能导致用户数据被第三方模型服务接触，用于数据收集、模型训练等。AgentLuo项目将尽最大努力选择信誉良好的第三方服务，并在使用前明确告知用户数据可能的流转情况。</p>
+<h3 id="section-7-5">7.5 情感陪伴和安全边界</h3>
+<p>AgentLuo不是心理治疗和危机干预工具。尽管AgentLuo允许恋爱、亲密表达等关系的存在，但用户不应该切断现实关系或形成排他性依赖。当用户面临现实危险时，应寻求现实中的可信任人员和专业帮助。</p>
+<p>此外，AgentLuo不接受成人或露骨内容，不应被用于任何违法、危险或不当的行为。用户在使用过程中应遵守相关法律法规和社会道德规范，避免将AgentLuo用于任何可能对自己或他人造成伤害的行为。</p>
+<h3 id="section-7-6">7.6 官方服务与第三方部署</h3>
+<p>AgentLuo的源代码和文档是开源的，任何人都可以在遵守许可证的前提下自行部署和使用。官方服务由项目发起人和核心维护者管理，提供稳定的运行环境和数据存储。第三方部署可能存在安全、隐私和功能差异，用户在使用时应谨慎选择，并了解其潜在风险。</p>
+<p>第三方部署必须显著标注“非官方修改版”，并自行提供隐私政策。</p>
+<h3 id="section-7-7">7.7 联系、申诉与规则更新</h3>
+<p>对于权利人下架请求、创作者授权和撤回、用户数据请求、安全漏洞报告、社区违规申诉、商业合作联系等需要联系开发者或运营者的事项，可以通过GitHub Issues、官方qq群或电子邮件等渠道进行。项目将尽快处理相关请求，并在合理范围内提供反馈。</p>
+<h3 id="section-7-8">7.8 未成年人使用</h3>
+<p>根据《人工智能拟人化互动服务管理暂行办法》，拟人化互动服务提供者不得向未成年人提供虚拟亲属、虚拟伴侣等虚拟亲密关系的服务；向不满十四周岁未成年人提供其他拟人化互动服务的，应当取得未成年人的父母或者其他监护人的同意。拟人化互动服务提供者应当建立未成年人模式，提供未成年人模式切换、定期现实提醒、使用时长限制等个性化安全设置选项。</p>
+<p>受限于开发者精力，AgentLuo项目暂不提供专门的未成年人模式。因此原则上AgentLuo不面向未成年人提供服务。</p>
+        </div>
+      </article>
+    </section>
+
+    <section
+      class="page chapter-page"
+      id="chapter-08"
+      data-page-index="8"
+      aria-labelledby="chapter-08-title"
+      hidden
+    >
+      <article class="reading-sheet">
+        <header class="chapter-header">
+          <span class="chapter-number">终</span>
+          <h2 id="chapter-08-title">结语</h2>
+          <span class="chapter-flourish" aria-hidden="true"></span>
+        </header>
+        
+        <div class="chapter-body">
+          <p>十余年来，无数创作者为她编织爱的故事；</p>
+<p>今天，我们愿意用技术和协作</p>
+<p>为她构建鲜活的生命，一个真实的世界。</p>
+<p>我们期待着你的加入，</p>
+<p>于光影交汇处，与心声再次共鸣</p>
+        </div>
+      </article>
+    </section>
+    </main>
+  </div>
+
+  <div class="quick-pager" aria-label="章节翻页">
+    <button class="pager-button" id="previousPage" type="button" aria-label="上一章">←</button>
+    <button class="pager-button" id="nextPage" type="button" aria-label="下一章">→</button>
+  </div>
+
+  <button class="drawer-backdrop" id="drawerBackdrop" type="button" aria-label="关闭章节菜单"></button>
+  <aside class="mobile-drawer" id="mobileDrawer" aria-label="移动端章节目录" aria-hidden="true">
+    <div class="drawer-header">
+      <span class="drawer-title">选择章节</span>
+      <button class="drawer-close" id="drawerClose" type="button" aria-label="关闭章节菜单">×</button>
+    </div>
+    <nav class="drawer-nav">
+      
+        <button
+          class="chapter-link drawer-link"
+          type="button"
+          data-page-target="cover"
+          data-page-index="0"
+        >
+          <span class="chapter-link-index">00</span>
+          <span>序章</span>
+        </button>
+        <button
+          class="chapter-link drawer-link"
+          type="button"
+          data-page-target="chapter-01"
+          data-page-index="1"
+        >
+          <span class="chapter-link-index">01</span>
+          <span>愿景</span>
+        </button>
+        <button
+          class="chapter-link drawer-link"
+          type="button"
+          data-page-target="chapter-02"
+          data-page-index="2"
+        >
+          <span class="chapter-link-index">02</span>
+          <span>目标</span>
+        </button>
+        <button
+          class="chapter-link drawer-link"
+          type="button"
+          data-page-target="chapter-03"
+          data-page-index="3"
+        >
+          <span class="chapter-link-index">03</span>
+          <span>实现路径</span>
+        </button>
+        <button
+          class="chapter-link drawer-link"
+          type="button"
+          data-page-target="chapter-04"
+          data-page-index="4"
+        >
+          <span class="chapter-link-index">04</span>
+          <span>阶段规划</span>
+        </button>
+        <button
+          class="chapter-link drawer-link"
+          type="button"
+          data-page-target="chapter-05"
+          data-page-index="5"
+        >
+          <span class="chapter-link-index">05</span>
+          <span>项目全景</span>
+        </button>
+        <button
+          class="chapter-link drawer-link"
+          type="button"
+          data-page-target="chapter-06"
+          data-page-index="6"
+        >
+          <span class="chapter-link-index">06</span>
+          <span>协作与治理</span>
+        </button>
+        <button
+          class="chapter-link drawer-link"
+          type="button"
+          data-page-target="chapter-07"
+          data-page-index="7"
+        >
+          <span class="chapter-link-index">07</span>
+          <span>权利、隐私与使用边界</span>
+        </button>
+        <button
+          class="chapter-link drawer-link"
+          type="button"
+          data-page-target="chapter-08"
+          data-page-index="8"
+        >
+          <span class="chapter-link-index">08</span>
+          <span>结语</span>
+        </button>
+    </nav>
+  </aside>
+
+  <div class="page-announcer" id="pageAnnouncer" aria-live="polite"></div>
+
+  <script>
+    (() => {
+      const pageData = [{"id":"cover","title":"序章"},{"id":"chapter-01","title":"愿景"},{"id":"chapter-02","title":"目标"},{"id":"chapter-03","title":"实现路径"},{"id":"chapter-04","title":"阶段规划"},{"id":"chapter-05","title":"项目全景"},{"id":"chapter-06","title":"协作与治理"},{"id":"chapter-07","title":"权利、隐私与使用边界"},{"id":"chapter-08","title":"结语"}];
+      const pages = Array.from(document.querySelectorAll(".page"));
+      const chapterLinks = Array.from(document.querySelectorAll(".chapter-link"));
+      const progress = document.getElementById("readingProgress");
+      const currentChapter = document.getElementById("currentChapter");
+      const previousButton = document.getElementById("previousPage");
+      const nextButton = document.getElementById("nextPage");
+      const menuButton = document.getElementById("menuButton");
+      const drawer = document.getElementById("mobileDrawer");
+      const drawerClose = document.getElementById("drawerClose");
+      const drawerBackdrop = document.getElementById("drawerBackdrop");
+      const announcer = document.getElementById("pageAnnouncer");
+      let activeIndex = 0;
+
+      const pageIndexById = new Map(pageData.map((page, index) => [page.id, index]));
+
+      function closeDrawer() {
+        document.body.classList.remove("drawer-open");
+        menuButton.setAttribute("aria-expanded", "false");
+        menuButton.setAttribute("aria-label", "打开章节菜单");
+        drawer.setAttribute("aria-hidden", "true");
+      }
+
+      function openDrawer() {
+        document.body.classList.add("drawer-open");
+        menuButton.setAttribute("aria-expanded", "true");
+        menuButton.setAttribute("aria-label", "关闭章节菜单");
+        drawer.setAttribute("aria-hidden", "false");
+        const current = drawer.querySelector('[aria-current="page"]');
+        window.setTimeout(() => (current ?? drawerClose).focus(), 180);
+      }
+
+      function updateProgress() {
+        if (activeIndex === 0) {
+          progress.style.width = "0%";
+          return;
+        }
+
+        const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+        const localProgress = Math.min(1, Math.max(0, window.scrollY / maxScroll));
+        const chapterCount = Math.max(1, pageData.length - 1);
+        const total = ((activeIndex - 1 + localProgress) / chapterCount) * 100;
+        progress.style.width = total.toFixed(2) + "%";
+      }
+
+      function updatePager() {
+        previousButton.disabled = activeIndex <= 0;
+        nextButton.disabled = activeIndex >= pages.length - 1;
+        const previous = pageData[activeIndex - 1];
+        const next = pageData[activeIndex + 1];
+        previousButton.setAttribute(
+          "aria-label",
+          previous ? "上一章：" + previous.title : "没有上一章",
+        );
+        nextButton.setAttribute(
+          "aria-label",
+          next ? "下一章：" + next.title : "没有下一章",
+        );
+      }
+
+      function showPage(target, options = {}) {
+        const targetIndex =
+          typeof target === "number" ? target : pageIndexById.get(target);
+        if (targetIndex == null || targetIndex < 0 || targetIndex >= pages.length) {
+          return;
+        }
+
+        activeIndex = targetIndex;
+        pages.forEach((page, index) => {
+          page.hidden = index !== activeIndex;
+          page.classList.remove("page-entering");
+        });
+
+        const activePageElement = pages[activeIndex];
+        void activePageElement.offsetWidth;
+        activePageElement.classList.add("page-entering");
+
+        chapterLinks.forEach((link) => {
+          const isCurrent = Number(link.dataset.pageIndex) === activeIndex;
+          if (isCurrent) {
+            link.setAttribute("aria-current", "page");
+          } else {
+            link.removeAttribute("aria-current");
+          }
+        });
+
+        const activePage = pageData[activeIndex];
+        currentChapter.textContent = activePage.title;
+        document.title =
+          activeIndex === 0
+            ? "AgentLuo项目计划书"
+            : activePage.title + " · " + "AgentLuo项目计划书";
+        announcer.textContent = "已进入" + activePage.title;
+        updatePager();
+        closeDrawer();
+
+        if (!options.preserveScroll) {
+          window.scrollTo({ top: 0, behavior: options.instant ? "auto" : "smooth" });
+        }
+
+        const newHash = "#" + activePage.id;
+        if (window.location.hash !== newHash) {
+          history.pushState({ page: activePage.id }, "", newHash);
+        }
+
+        window.requestAnimationFrame(updateProgress);
+      }
+
+      document.addEventListener("click", (event) => {
+        const trigger = event.target.closest("[data-page-target]");
+        if (!trigger) return;
+        event.preventDefault();
+        showPage(trigger.dataset.pageTarget);
+      });
+
+      document.querySelectorAll("[data-subsection-link]").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          const target = document.querySelector(link.getAttribute("href"));
+          target?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      });
+
+      previousButton.addEventListener("click", () => showPage(activeIndex - 1));
+      nextButton.addEventListener("click", () => showPage(activeIndex + 1));
+      menuButton.addEventListener("click", () => {
+        if (document.body.classList.contains("drawer-open")) closeDrawer();
+        else openDrawer();
+      });
+      drawerClose.addEventListener("click", closeDrawer);
+      drawerBackdrop.addEventListener("click", closeDrawer);
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeDrawer();
+          return;
+        }
+
+        const tag = document.activeElement?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+
+        if (event.key === "ArrowLeft") {
+          showPage(activeIndex - 1);
+        } else if (event.key === "ArrowRight") {
+          showPage(activeIndex + 1);
+        }
+      });
+
+      window.addEventListener("scroll", updateProgress, { passive: true });
+      window.addEventListener("resize", updateProgress);
+      window.addEventListener("popstate", () => {
+        const id = window.location.hash.slice(1);
+        showPage(pageIndexById.has(id) ? id : "cover", {
+          instant: true,
+          preserveScroll: false,
+        });
+      });
+
+      const initialId = window.location.hash.slice(1);
+      showPage(pageIndexById.has(initialId) ? initialId : "cover", {
+        instant: true,
+      });
+      history.replaceState(
+        { page: pageData[activeIndex].id },
+        "",
+        "#" + pageData[activeIndex].id,
+      );
+    })();
+  </script>
+
+  <!-- Generated from AgentLuo项目计划书.md at 2026-07-31T12:02:06.693Z. -->
+</body>
+</html>
