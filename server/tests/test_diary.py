@@ -2,7 +2,7 @@
 DiaryCapability / DiaryTask 单元测试。
 """
 import asyncio
-import os
+import json
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -86,6 +86,11 @@ def test_parse_diary_result_empty_input():
     assert capability._parse_diary_result("   \n ", target_date="2026-07-16") is None
 
 
+def test_parse_diary_result_think_only_is_empty():
+    capability = DiaryCapability({})
+    assert capability._parse_diary_result("<think>只返回思考</think>", target_date="2026-07-16") is None
+
+
 def test_parse_diary_result_compresses_excess_blank_lines():
     capability = DiaryCapability({})
     raw = "心情：开心\n\n正文第一段。\n\n\n\n\n正文第二段。"
@@ -126,7 +131,11 @@ def test_strip_think_block_absent():
 
 
 class FakeLLMModule:
-    async def generate_async(self, system_prompt=None, user_prompt=None):
+    def __init__(self):
+        self.calls = []
+
+    async def generate_response(self, **kwargs):
+        self.calls.append(kwargs)
         return "心情：开心\n\n测试日记内容。"
 
 
@@ -151,6 +160,18 @@ def _make_capability_with_llm() -> DiaryCapability:
     )
     capability.create_llm_module(FakeLLMService())
     return capability
+
+
+def test_diary_prompt_uses_prompt_manager_schema():
+    prompt_path = Path(__file__).resolve().parents[1] / "res" / "agent" / "prompts" / "diary_prompt.json"
+    with prompt_path.open("r", encoding="utf-8") as prompt_file:
+        prompt = json.load(prompt_file)
+
+    assert set(prompt) == {"name", "description", "template"}
+    assert prompt["name"] == "diary_prompt"
+    assert prompt["description"]
+    assert isinstance(prompt["template"], list)
+    assert "{{ character_name }}" in "\n".join(prompt["template"])
 
 
 class FakeDynamicCapability:
@@ -228,6 +249,26 @@ def test_generate_and_post_diary_full_flow():
     assert payload["owner_user_id"] == "user-1"
     assert payload["allow_comment"] is False
     assert "2026-07-16" in payload["content"]
+    llm_call = capability._diary_llm.calls[0]
+    assert set(llm_call) == {
+        "character_name",
+        "user_name",
+        "diary_date",
+        "user_description",
+        "user_preferences",
+        "conversation_materials",
+        "character_persona",
+        "speaking_style",
+    }
+    assert llm_call["diary_date"] == "2026-07-16"
+    assert "system_prompt" not in llm_call
+    assert "user_prompt" not in llm_call
+
+
+def test_diary_capability_exposes_llm_readiness():
+    capability = _make_capability_with_llm()
+    assert capability.ensure_llm() is True
+    assert DiaryCapability({}).ensure_llm() is False
 
 
 def test_generate_and_post_diary_publishes_via_agent_dynamic():

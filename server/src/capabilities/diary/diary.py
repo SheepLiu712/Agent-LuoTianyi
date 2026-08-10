@@ -21,7 +21,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
@@ -41,7 +40,7 @@ class DiaryCapability:
 
     核心流程：
       1. 收集素材（今日聊天记录 + 用户动态）
-      2. 构建 prompt（填充角色人设、表达风格、素材）
+      2. 准备 prompt 模板变量（角色人设、表达风格、素材）
       3. 调用 LLM 生成日记文本
       4. 解析 LLM 输出（提取心情标签、正文）
       5. 通过 DynamicCapability.publish_agent_dynamic() 发布为 Agent 动态
@@ -57,7 +56,6 @@ class DiaryCapability:
         Args:
             config: 配置项，支持以下字段：
                 - diary_llm: LLM 模块配置（用于注册日记专用的 LLM 模块）
-                - prompt_path: 日记 prompt 模板路径（默认 res/agent/prompts/diary_prompt.json）
                 - diary_source_type: 日记动态的 source_type 标记（默认 "diary"）
         """
         self.config = config or {}
@@ -69,10 +67,6 @@ class DiaryCapability:
 
         # ── LLM 相关 ──
         self._diary_llm: "LLMModule | None" = None       # 日记专用的 LLM 模块
-        self._prompt_template: str | None = None          # 缓存已加载的 prompt 模板
-        self._prompt_path: str | None = None              # 当前模板文件路径
-        self._prompt_mtime: float | None = None           # 模板文件修改时间（用于热加载）
-
         # ── 标识 ──
         # 日记动态的 source_type，用于在动态列表中区分「日记」和普通动态
         self.diary_source_type: str = self.config.get("diary_source_type", "diary")
@@ -120,6 +114,10 @@ class DiaryCapability:
 
     # ────────────────────── 前置检查 ──────────────────────
 
+    def ensure_llm(self) -> bool:
+        """返回日记专用 LLM 模块是否已经注册。"""
+        return self._diary_llm is not None
+
     def ensure_dependencies(self) -> Tuple[bool, str]:
         """检查所有依赖是否可用，不可用时记录警告并返回 (False, 错误信息)。"""
         if self._diary_llm is None:
@@ -132,60 +130,6 @@ class DiaryCapability:
             self.logger.warning("Database manager is not available")
             return False, "数据库管理器不可用"
         return True, ""
-
-    # ────────────────────── Prompt 管理 ──────────────────────
-
-    def _load_prompt_template(self) -> str:
-        """
-        加载日记 prompt 模板。
-
-        模板文件为 JSON 格式，包含 system_prompt 字段。
-        模板占位符说明：
-          {{character_name}}      — 角色名（如"洛天依"）
-          {{user_name}}           — 用户名
-          {{diary_date}}          — 日记日期
-          {{user_description}}    — 用户画像
-          {{user_preferences}}    — 用户偏好（JSON 序列化）
-          {{conversation_materials}} — 今日互动素材
-          {{character_persona}}   — 角色人设（由 update_prompt_with_persona 填入）
-          {{speaking_style}}      — 表达风格（由 update_prompt_with_persona 填入）
-
-        模板加载后会被缓存到 self._prompt_template，避免重复读文件。
-        若模板文件在运行期间被修改（mtime 变化），会自动重新加载。
-        """
-        prompt_path = self.config.get(
-            "prompt_path",
-            os.path.join("res", "agent", "prompts", "diary_prompt.json"),
-        )
-        try:
-            mtime = os.path.getmtime(prompt_path)
-        except OSError:
-            mtime = None
-
-        if self._prompt_template is not None and mtime == self._prompt_mtime:
-            return self._prompt_template
-
-        try:
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            self._prompt_template = data.get("system_prompt", "")
-            self._prompt_path = prompt_path
-            self._prompt_mtime = mtime
-        except Exception as exc:
-            self.logger.error(f"Failed to load diary prompt template: {exc}")
-            if self._prompt_template is None:
-                self._prompt_template = ""
-        return self._prompt_template
-
-    def update_prompt_with_persona(self, prompt: str, persona: str, style: str) -> str:
-        """
-        用人设和表达风格替换 prompt 中的占位符。
-
-        如果角色运行时没有提供人设/风格，使用默认值以保证 prompt 完整性。
-        """
-        return (prompt
-                .replace("{{character_persona}}", persona or "一个温柔体贴的虚拟歌手")
-                .replace("{{speaking_style}}", style or "温柔、细腻、有画面感，像在跟老朋友轻声诉说"))
 
     # ────────────────────── 核心流程 ──────────────────────
 
@@ -206,7 +150,7 @@ class DiaryCapability:
           1. 前置检查（DynamicCapability、LLM、数据库是否可用）
           2. 获取用户信息和角色人设
           3. 收集今日聊天记录和用户动态作为素材
-          4. 构建 system prompt + 调 LLM 生成日记
+          4. 准备 prompt 变量并调 LLM 生成日记
           5. 解析 LLM 输出为标准化格式
           6. 通过 publish_agent_dynamic() 发布为私密动态
 
@@ -259,25 +203,17 @@ class DiaryCapability:
             target_date=target_date,
         )
 
-        # ── 构建 prompt ──
-        # 模板中的 {{xxx}} 占位符逐个替换为实际内容
-        prompt_template = self._load_prompt_template()
-        system_prompt = (
-            prompt_template
-            .replace("{{character_name}}", character_name)
-            .replace("{{user_name}}", user_name)
-            .replace("{{diary_date}}", target_date)
-            .replace("{{user_description}}", user_description)
-            .replace("{{user_preferences}}", user_preferences)
-            .replace("{{conversation_materials}}", materials)
-        )
-        system_prompt = self.update_prompt_with_persona(system_prompt, character_persona, speaking_style)
-
         # ── 调用 LLM 生成日记 ──
         try:
-            result = await self._diary_llm.generate_async(
-                system_prompt=system_prompt,
-                user_prompt=f"请为{user_name}撰写{target_date}的日记。",
+            result = await self._diary_llm.generate_response(
+                character_name=character_name,
+                user_name=user_name,
+                diary_date=target_date,
+                user_description=user_description,
+                user_preferences=user_preferences,
+                conversation_materials=materials,
+                character_persona=character_persona or "一个温柔体贴的虚拟歌手",
+                speaking_style=speaking_style or "温柔、细腻、有画面感，像在跟老朋友轻声诉说",
             )
             diary_text = self._parse_diary_result(result, target_date=target_date)
             if diary_text is None or diary_text.strip() == "":
@@ -423,6 +359,8 @@ class DiaryCapability:
 
         # 先剔除 LLM 思考块（<think>...</think>），避免思考内容混入日记
         raw = self._strip_think_block(raw)
+        if not raw:
+            return None
 
         lines = raw.strip().split("\n")
         mood = ""
