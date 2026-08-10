@@ -165,7 +165,7 @@ class DiaryTask(WorldTask):
             return WorldTaskResult.skipped_result(self.task_name, "diary capability is unavailable")
 
         # 检查 LLM 模块是否已注册（每天仅运行一次，缺失时明确记录原因）
-        if not diary_cap.ensure_llm():
+        if not diary_cap.ensure_dependency():
             self.logger.warning("Diary LLM module is not registered; diary task skipped for today")
             return WorldTaskResult.skipped_result(self.task_name, "diary LLM module is unavailable")
 
