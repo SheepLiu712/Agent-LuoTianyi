@@ -79,7 +79,7 @@
         "memory_store": {
             "llm_module": {
                 "llm": {
-                    "name": "qwen3.6-flash",
+                    "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
                     "params": {}
@@ -105,7 +105,7 @@
         "sing": {
             "song_emotion_tagger": {
                 "llm": {
-                    "name": "qwen3.6-flash",
+                    "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
                     "params": {}
@@ -145,7 +145,7 @@
             "dynamic_replier": {
                 "llm_module": {
                     "llm": {
-                        "name": "qwen3.6-flash",
+                        "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": true,
                         "params": {}
@@ -408,7 +408,7 @@
             "llm_modules": {
                 "json": {
                     "llm": {
-                        "name": "qwen3.6-flash",
+                        "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": true,
                         "params": {}
@@ -532,7 +532,7 @@
             "bili_cookie_file": "config/bili_cookie.txt",
             "llm_module": {
                 "llm": {
-                    "name": "qwen3.6-flash",
+                    "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
                     "params": {}

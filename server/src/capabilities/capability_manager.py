@@ -64,3 +64,7 @@ class CapabilityManager:
         self.singing.ensure_dependencies()
         self.dynamics.ensure_dependencies()
         self.image_understanding.ensure_dependencies()
+
+    def shutdown(self) -> None:
+        """Release resources owned by capability modules."""
+        self.speech.shutdown()

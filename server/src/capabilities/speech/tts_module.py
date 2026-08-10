@@ -197,6 +197,10 @@ class TTSModule:
         import base64
         return base64.b64encode(audio_bytes).decode("utf-8")
 
+    def shutdown(self) -> None:
+        """Stop the dedicated TTS worker owned by this module."""
+        self.tts_server.stop()
+
 
 def init_tts_module(tts_config: Dict[str, Any]) -> TTSModule:
     server_config_path = tts_config.get("server_config_path", "res/tts/luotianyi/tts_infer.yaml")

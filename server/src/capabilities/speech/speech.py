@@ -21,6 +21,11 @@ class SpeechCapability:
         if self.tts_module is None:
             raise RuntimeError("SpeechCapability dependency is missing: tts_module")
 
+    def shutdown(self) -> None:
+        """Stop every character-specific TTS worker."""
+        for tts_module in self.tts_module.values():
+            tts_module.shutdown()
+
     async def say(self, character: str, text: str, tone: str) -> str:
         '''
         使用TTS合成语音。

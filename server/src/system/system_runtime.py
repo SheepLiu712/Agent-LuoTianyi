@@ -116,6 +116,7 @@ class SystemRuntime:
         """按依赖反向顺序关闭后台服务和资源。"""
         await self.world.stop_background_services()
         await self.chat_session_manager.stop_background_services()
+        self.capability_manager.shutdown()
         await self.database_manager.shutdown()
         if self.owns_observability:
             self.observability.close()
