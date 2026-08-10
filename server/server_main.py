@@ -47,8 +47,17 @@ config = load_config("config/config.json")
 @asynccontextmanager
 async def startup_event(app: FastAPI):
     install_access_log_filter()
-    await init_admin_shell(root_dir=current_dir)
-    logger.info("AdminShell 初始化完成，等待配置并启动系统运行时")
+    admin_shell = await init_admin_shell(root_dir=current_dir)
+    logger.info("AdminShell 初始化完成，正在校验配置并启动系统运行时")
+    runtime_status = await admin_shell.runtime_supervisor.start()
+    if runtime_status.get("running"):
+        logger.info("配置校验通过，SystemRuntime 已自动启动")
+    else:
+        logger.warning(
+            "SystemRuntime 未自动启动: state=%s, error=%s",
+            runtime_status.get("state"),
+            runtime_status.get("last_error"),
+        )
     try:
         yield
     finally:
@@ -79,6 +88,12 @@ app.include_router(admin_router)
 
 admin_ui_build = os.path.join(current_dir, "admin_ui", "admin_static")
 admin_ui_assets = os.path.join(admin_ui_build, "assets")
+project_plan_path = os.path.join(
+    os.path.dirname(current_dir),
+    "docs",
+    "项目计划书",
+    "AgentLuo项目计划书.html",
+)
 if os.path.isdir(admin_ui_assets):
     app.mount("/admin/assets", StaticFiles(directory=admin_ui_assets), name="admin-assets")
 
@@ -96,6 +111,14 @@ async def admin_index(path: str = ""):
         "<h1>AgentLuo Server Console</h1>"
         "<p>Admin UI has not been built yet. Run <code>cd server/admin_ui && npm install && npm run build</code>.</p>"
     )
+
+
+@app.get("/project-plan", include_in_schema=False)
+@app.get("/project-plan/", include_in_schema=False)
+async def project_plan():
+    if not os.path.isfile(project_plan_path):
+        raise HTTPException(status_code=404, detail="项目计划书页面尚未生成")
+    return FileResponse(project_plan_path, media_type="text/html")
 
 @app.websocket("/chat_ws")
 async def chat_ws(websocket: WebSocket):
