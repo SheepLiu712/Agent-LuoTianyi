@@ -121,7 +121,9 @@ export class MessageProcessor {
   private stopRequested = false;
   private localSound: Audio.Sound | null = null;
   private localPlayingUuid: string | null = null;
+  private localPlaybackRequestId = 0;
   private serverAudioPlaying = false;
+  private pendingServerAudioChunks = 0;
   private readonly audioChunksByUuid = new Map<string, string[]>();
   private readonly audioPathByUuid = new Map<string, string>();
   private readonly transientMessageUuids = new Set<string>();
@@ -228,15 +230,12 @@ export class MessageProcessor {
   }
 
   async playLocalTtsByUuid(convUuid: string) {
-
-    if (this.serverAudioPlaying) {
+    if (this.hasServerAudioPriority()) {
       addDebugTrace('audio', 'play blocked by server audio playing', { convUuid });
       return false;
     }
 
-    // 防御性清空 WebView 音频队列：即使 serverAudioPlaying 标志因异常未同步，
-    // 也保证本地播放开始时没有服务端音频在播（单播放器互斥）。
-    this.stopServerAudio();
+    const requestId = ++this.localPlaybackRequestId;
 
     const localUri = this.audioPathByUuid.get(convUuid);
     if (!localUri) {
@@ -259,36 +258,73 @@ export class MessageProcessor {
       return false;
     }
 
-    if (this.localPlayingUuid === convUuid) {
-      addDebugTrace('audio', 'play toggled off same uuid', { convUuid });
-      await this.stopLocalTts();
+    if (!this.canStartLocalPlayback(requestId)) {
+      addDebugTrace('audio', 'play cancelled by server audio while checking local file', { convUuid });
       return false;
     }
 
-    await this.stopLocalTts();
+    if (this.localPlayingUuid === convUuid) {
+      addDebugTrace('audio', 'play toggled off same uuid', { convUuid });
+      await this.stopLocalTtsNow();
+      return false;
+    }
 
+    await this.stopLocalTtsNow();
+    if (!this.canStartLocalPlayback(requestId)) {
+      return false;
+    }
+
+    let sound: Audio.Sound | null = null;
     try {
-      const sound = new Audio.Sound();
-      await sound.loadAsync({ uri: localUri }, { shouldPlay: true });
-      sound.setOnPlaybackStatusUpdate((status) => {
+      sound = new Audio.Sound();
+      const playbackSound = sound;
+      // 先静默加载，再次确认没有服务端音频占用播放权，最后才开始回放。
+      // 这样服务端音频在文件加载期间到达时，本地音频不会短暂抢播。
+      await playbackSound.loadAsync({ uri: localUri }, { shouldPlay: false });
+      if (!this.canStartLocalPlayback(requestId)) {
+        await playbackSound.unloadAsync();
+        return false;
+      }
+      playbackSound.setOnPlaybackStatusUpdate((status) => {
         if (!status.isLoaded) {
           return;
         }
-        if (status.didJustFinish) {
+        if (status.didJustFinish && this.localSound === playbackSound) {
           const finishedUuid = this.localPlayingUuid;
           this.localPlayingUuid = null;
-          void sound.unloadAsync();
+          void playbackSound.unloadAsync();
           this.localSound = null;
           if (finishedUuid) {
             this.binder.emitLocalTtsState('finished', finishedUuid);
           }
         }
       });
-      this.localSound = sound;
+      this.localSound = playbackSound;
       this.localPlayingUuid = convUuid;
+      await playbackSound.playAsync();
+      if (!this.canStartLocalPlayback(requestId) || this.localSound !== playbackSound) {
+        if (this.localSound === playbackSound) {
+          await this.stopLocalTtsNow();
+        }
+        return false;
+      }
       addDebugTrace('audio', 'playLocalTtsByUuid success', { convUuid, localUri });
       return true;
     } catch (error) {
+      if (!this.canStartLocalPlayback(requestId)) {
+        if (sound && this.localSound === sound) {
+          this.localSound = null;
+          this.localPlayingUuid = null;
+        }
+        if (sound) {
+          try {
+            await sound.unloadAsync();
+          } catch {
+            // 服务端抢占期间的清理失败不应覆盖在线音频处理。
+          }
+        }
+        return false;
+      }
       let fileSize: number | null = null;
       let wavHeader: string | null = null;
       try {
@@ -329,26 +365,42 @@ export class MessageProcessor {
   }
 
   async stopLocalTts() {
-    if (!this.localSound) {
-      if (this.localPlayingUuid) {
-        const stoppedUuid = this.localPlayingUuid;
-        this.localPlayingUuid = null;
-        this.binder.emitLocalTtsState('stopped', stoppedUuid);
+    this.localPlaybackRequestId += 1;
+    await this.stopLocalTtsNow();
+  }
+
+  private async stopLocalTtsNow() {
+    const sound = this.localSound;
+    const stoppedUuid = this.localPlayingUuid;
+    this.localSound = null;
+    this.localPlayingUuid = null;
+
+    if (sound) {
+      try {
+        await sound.stopAsync();
+      } catch (error) {
+        addDebugTrace('audio', 'stop local tts failed', { error: getErrorMessage(error) });
       }
-      return;
+      try {
+        await sound.unloadAsync();
+      } catch (error) {
+        addDebugTrace('audio', 'unload local tts failed', { error: getErrorMessage(error) });
+      }
     }
 
-    const stoppedUuid = this.localPlayingUuid;
-    try {
-      await this.localSound.stopAsync();
-      await this.localSound.unloadAsync();
-    } finally {
-      this.localSound = null;
-      this.localPlayingUuid = null;
-      if (stoppedUuid) {
-        this.binder.emitLocalTtsState('stopped', stoppedUuid);
-      }
+    if (stoppedUuid) {
+      this.binder.emitLocalTtsState('stopped', stoppedUuid);
     }
+  }
+
+  private hasServerAudioPriority() {
+    return this.serverAudioPlaying || this.pendingServerAudioChunks > 0;
+  }
+
+  private canStartLocalPlayback(requestId: number) {
+    return requestId === this.localPlaybackRequestId
+      && !this.hasServerAudioPriority()
+      && !this.stopRequested;
   }
 
   onAgentStateChanged(state: string) {
@@ -361,14 +413,23 @@ export class MessageProcessor {
     if (this.isDuplicatePacket(payload.uuid || `agent-${Date.now()}`, payload)) {
       return;
     }
-    // 文本与表情展示即时执行，不被上一句的音频完成/落盘阻塞，
-    // 保证多句回复可以流式渲染出全部句子（而不是只显示第一句）。
-    this.handleAgentMessageDisplay(payload);
-    // 音频链路保持串行：分片累积、播放、落盘按到达顺序执行。
+    let serverAudioPreemption = Promise.resolve();
+    if (payload.audio) {
+      // 在异步消息链开始处理前先占用在线音频优先权，关闭点击回放及其加载竞态。
+      this.pendingServerAudioChunks += 1;
+      this.localPlaybackRequestId += 1;
+      // 调用时会同步摘除当前回放状态，异步部分负责真正 stop/unload。
+      serverAudioPreemption = this.stopLocalTtsNow();
+    }
+    // 展示和音频作为同一个串行单元处理：第一句话在空闲链上立即显示并开始播放；
+    // 后续句话则等待上一句话播放完成后，才显示文字/表情并开始播放自己的音频。
     this.incomingMessageChain = this.incomingMessageChain
-      .then(() => this.handleAgentMessageAudio(payload))
+      .then(async () => {
+        this.handleAgentMessageDisplay(payload);
+        await this.handleAgentMessageAudio(payload, serverAudioPreemption);
+      })
       .catch((error) => {
-        addDebugTrace('agent', 'handleAgentMessageAudio failed', {
+        addDebugTrace('agent', 'handleAgentMessage failed', {
           error: getErrorMessage(error),
         });
       });
@@ -436,19 +497,29 @@ export class MessageProcessor {
     }
   }
 
-  private async handleAgentMessageAudio(payload: AgentMessagePayload) {
+  private async handleAgentMessageAudio(
+    payload: AgentMessagePayload,
+    serverAudioPreemption: Promise<void>,
+  ) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
+    const audioChunk = payload.audio || '';
 
-    if (this.localPlayingUuid) {
-      await this.stopLocalTts();
+    if (audioChunk) {
+      this.serverAudioPlaying = true;
+      this.pendingServerAudioChunks = Math.max(0, this.pendingServerAudioChunks - 1);
+      // onAgentMessage 已经立即发起停止；这里等待同一次停止完成，之后才能投喂在线音频。
+      await serverAudioPreemption;
     }
 
-    const audioChunk = payload.audio || '';
+    if (audioChunk && (this.localPlayingUuid || this.localSound)) {
+      // 必须等消息回放真正停止后，才把在线音频交给 WebView 播放器。
+      await this.stopLocalTtsNow();
+    }
+
     if (audioChunk) {
       const list = this.audioChunksByUuid.get(convUuid) || [];
       list.push(audioChunk);
       this.audioChunksByUuid.set(convUuid, list);
-      this.serverAudioPlaying = true;
       this.feedServerAudioChunk(audioChunk, false);
     }
 

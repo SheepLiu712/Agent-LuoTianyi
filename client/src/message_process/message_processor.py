@@ -234,8 +234,8 @@ class MessageProcessor:
                 self.logger.error(f"Failed to decode audio chunk (uuid={response.uuid}): {exc}")
 
         if is_audio_terminal(response):
-            self.multimedia_stream.finish_one_sentense()
-            # 将最终的音频结果保存到本地
+            # 终止包代表这一句话的音频已经全部到达。先立即落盘并更新气泡，
+            # 再等待播放完成；监听线程在等待期间不会展示下一句话。
             saved_uuid = self.processing_uuid
             ret = ""
             if self.processing_audio and not response.audio_error:
@@ -252,6 +252,7 @@ class MessageProcessor:
                     self.update_bubble_signal(saved_uuid, "has_audio")
                 except Exception as exc:
                     self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={saved_uuid}): {exc}")
+            self.multimedia_stream.finish_one_sentense()
 
     def _send_loop(self):
         while self._running:
@@ -328,6 +329,9 @@ class MessageProcessor:
         )
 
     def feed_agent_msg(self, payload: AgentMessage): # 接收WS传来的消息，放入队列等待处理
+        if getattr(payload, "audio", "") and self.multimedia_stream:
+            # 在监听线程排队之前就停止消息回放，服务端在线音频始终拥有优先权。
+            self.multimedia_stream.reserve_server_audio()
         self._event_queue.put(payload)
     
     def change_agent_state(self, state: str):

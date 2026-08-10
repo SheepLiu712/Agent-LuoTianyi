@@ -35,6 +35,12 @@ async function drainIncoming(processor: MessageProcessor) {
   await (processor as unknown as { incomingMessageChain: Promise<void> }).incomingMessageChain;
 }
 
+async function flushAsyncWork() {
+  for (let i = 0; i < 6; i += 1) {
+    await Promise.resolve();
+  }
+}
+
 describe('MessageProcessor TTS terminal contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -153,6 +159,71 @@ describe('MessageProcessor TTS terminal contract', () => {
 
     expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1);
     expect((processor as any).serverAudioPlaying).toBe(false);
+  });
+
+  it('saves completed audio immediately and displays the next sentence after playback', async () => {
+    const binder = fakeBinder();
+    const feedServerAudioChunk = jest.fn();
+    const processor = new MessageProcessor(
+      {} as NetworkClient,
+      binder,
+      feedServerAudioChunk,
+    );
+
+    processor.onAgentMessage({
+      uuid: 'sentence-1',
+      text: '第一句',
+      expression: '开心',
+      audio: 'YXVkaW8tMQ==',
+      is_final_package: false,
+    });
+    await drainIncoming(processor);
+
+    expect(binder.emitAgentMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uuid: 'sentence-1',
+        text: '第一句',
+        expression: '开心',
+      }),
+    );
+    expect(feedServerAudioChunk).toHaveBeenCalledWith('YXVkaW8tMQ==', false);
+
+    processor.onAgentMessage({
+      uuid: 'sentence-1',
+      audio: 'YXVkaW8tMg==',
+      is_final_package: true,
+    });
+    processor.onAgentMessage({
+      uuid: 'sentence-2',
+      text: '第二句',
+      expression: '期待',
+      audio: 'YXVkaW8tMw==',
+      is_final_package: true,
+    });
+    await flushAsyncWork();
+
+    // 终止包到达后先落盘，即使第一句话仍在播放。
+    expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1);
+    const savedBase64 = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls[0][1];
+    expect(Buffer.from(savedBase64, 'base64').toString('utf8')).toBe('audio-1audio-2');
+    expect(binder.emitAgentMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: '第二句' }),
+    );
+
+    processor.onServerAudioFinished();
+    await flushAsyncWork();
+
+    expect(binder.emitAgentMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uuid: 'sentence-2',
+        text: '第二句',
+        expression: '期待',
+      }),
+    );
+    expect(feedServerAudioChunk).toHaveBeenCalledWith('YXVkaW8tMw==', false);
+
+    processor.onServerAudioFinished();
+    await drainIncoming(processor);
   });
 });
 
