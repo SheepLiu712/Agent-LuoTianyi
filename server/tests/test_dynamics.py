@@ -58,7 +58,7 @@ def test_dynamic_capability_accepts_nested_module_config_and_degrades_on_invalid
         }
     )
 
-    capability.create_dynamic_composer_module(FakeLLMService())
+    capability.create_llm_module(FakeLLMService())
 
     assert registered[0] == (
         "dynamic_composer",
@@ -86,7 +86,7 @@ def test_dynamic_capability_accepts_nested_module_config_and_degrades_on_invalid
         def register_llm_module(self, name, config):
             raise ValueError("LLM接口未找到")
 
-    bad_capability.create_dynamic_composer_module(RejectingLLMService())
+    bad_capability.create_llm_module(RejectingLLMService())
     assert bad_capability._dynamic_composer is None
 
 

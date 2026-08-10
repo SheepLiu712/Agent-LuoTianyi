@@ -149,7 +149,7 @@ def _make_capability_with_llm() -> DiaryCapability:
             }
         }
     )
-    capability.create_diary_llm_module(FakeLLMService())
+    capability.create_llm_module(FakeLLMService())
     return capability
 
 

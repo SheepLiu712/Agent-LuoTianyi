@@ -35,7 +35,7 @@ class DynamicCapability:
             self.config.get("dynamic_replier") or self.config.get("reply", {})
         )
 
-    def create_dynamic_composer_module(self, llm_service: "LLMService") -> None:
+    def create_llm_module(self, llm_service: "LLMService") -> None:
         """从 config 注册 world dynamic composer LLM 模块。"""
         composer_cfg = self._module_config(self.config.get("dynamic_composer"))
         if composer_cfg:
@@ -45,7 +45,7 @@ class DynamicCapability:
                 self._dynamic_composer = None
                 self.logger.warning(f"Dynamic composer module unavailable: {exc}")
         # 同时注册动态回复 LLM 模块
-        self.replier.create_reply_llm_module(llm_service)
+        self.replier.create_llm_module(llm_service)
 
     @staticmethod
     def _module_config(config: Any) -> dict[str, Any]:

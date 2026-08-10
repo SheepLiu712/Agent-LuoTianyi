@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from src.system.database import DatabaseManager
     from src.utils.llm_service import LLMService
     from src.utils.llm.llm_module import LLMModule
+    from src.capabilities.dynamic import DynamicCapability
 
 
 class DiaryCapability:
@@ -64,7 +65,7 @@ class DiaryCapability:
 
         # ── 外部依赖（由 wire_dependencies 注入） ──
         self.database_manager: "DatabaseManager | None" = None
-        self._dynamic_capability: Any | None = None  # DynamicCapability 实例
+        self._dynamic_capability: "DynamicCapability | None" = None  # DynamicCapability 实例
 
         # ── LLM 相关 ──
         self._diary_llm: "LLMModule | None" = None       # 日记专用的 LLM 模块
@@ -78,7 +79,7 @@ class DiaryCapability:
 
     # ────────────────────── 依赖注入 ──────────────────────
 
-    def create_diary_llm_module(self, llm_service: "LLMService") -> None:
+    def create_llm_module(self, llm_service: "LLMService") -> None:
         """
         从 config 注册日记专用的 LLM 模块。
 
@@ -91,7 +92,7 @@ class DiaryCapability:
         }
 
         如果配置缺失或注册失败，_diary_llm 保持为 None，后续
-        ensure_llm() 会检测到并阻止日记生成。
+        ensure_dependencies() 会检测到并阻止日记生成。
         """
         module_cfg = self._module_config(self.config.get("diary_llm"))
         if module_cfg:
@@ -119,12 +120,18 @@ class DiaryCapability:
 
     # ────────────────────── 前置检查 ──────────────────────
 
-    def ensure_llm(self) -> bool:
-        """检查 LLM 模块是否可用，不可用时记录警告并返回 False。"""
+    def ensure_dependencies(self) -> Tuple[bool, str]:
+        """检查所有依赖是否可用，不可用时记录警告并返回 (False, 错误信息)。"""
         if self._diary_llm is None:
             self.logger.warning("Diary LLM module is not available")
-            return False
-        return True
+            return False, "日记 LLM 模块不可用"
+        if self._dynamic_capability is None:
+            self.logger.warning("DynamicCapability is not available")
+            return False, "DynamicCapability 不可用"
+        if self.database_manager is None:
+            self.logger.warning("Database manager is not available")
+            return False, "数据库管理器不可用"
+        return True, ""
 
     # ────────────────────── Prompt 管理 ──────────────────────
 
@@ -215,15 +222,9 @@ class DiaryCapability:
             (成功标志, 消息字符串, 动态对象字典 | None)
         """
         # ── 前置检查 ──
-        dynamic_capability = self._dynamic_capability
-        if dynamic_capability is None:
-            return False, "DynamicCapability 不可用", None
-
-        if not self.ensure_llm() or self._diary_llm is None:
-            return False, "日记 LLM 模块不可用", None
-
-        if self.database_manager is None:
-            return False, "数据库管理器不可用", None
+        ok, err_msg = self.ensure_dependencies()
+        if not ok:
+            return False, err_msg, None
 
         # ── 准备上下文 ──
         target_date = diary_date or date.today().strftime("%Y-%m-%d")
@@ -286,9 +287,6 @@ class DiaryCapability:
             return False, f"日记生成失败: {str(exc)}", None
 
         # ── 通过 DynamicCapability 发布为 Agent 动态 ──
-        if not self._dynamic_capability:
-            return False, "DynamicCapability 不可用", None
-
         try:
             # publish_agent_dynamic 会创建一条 author_type=agent 的动态，
             # 日记会被保存到 dynamic_posts 表，用户通过动态界面即可查看。

@@ -31,7 +31,7 @@ class DynamicReplier:
         self._reply_llm: Optional["LLMModule"] = None
         self._character_name: str = "洛天依"
 
-    def create_reply_llm_module(self, llm_service: "LLMService") -> None:
+    def create_llm_module(self, llm_service: "LLMService") -> None:
         """从 config 注册 dynamic reply LLM 模块。"""
         llm_cfg = self.config.get("llm_module")
         if not llm_cfg:

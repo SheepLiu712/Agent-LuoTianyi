@@ -38,12 +38,12 @@ class CapabilityManager:
             # 动态能力
             self.logger.info("Start initializing Dynamic Capability...")
             self.dynamics: DynamicCapability = DynamicCapability(self.config.get("dynamic", {}))
-            self.dynamics.create_dynamic_composer_module(llm_service)
+            self.dynamics.create_llm_module(llm_service)
 
             # 日记能力
             self.logger.info("Start initializing Diary Capability...")
             self.diary: DiaryCapability = DiaryCapability(self.config.get("diary", {}))
-            self.diary.create_diary_llm_module(llm_service)
+            self.diary.create_llm_module(llm_service)
 
             # 图像理解能力
             self.logger.info("Start initializing Image Understanding Capability...")
@@ -85,7 +85,7 @@ class CapabilityManager:
         self.speech.ensure_dependencies()
         self.singing.ensure_dependencies()
         self.dynamics.ensure_dependencies()
-        self.diary.ensure_llm()
+        self.diary.ensure_dependencies()
         self.image_understanding.ensure_dependencies()
 
     async def stop(self) -> None:

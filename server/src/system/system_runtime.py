@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
@@ -100,6 +100,7 @@ class SystemRuntime:
             runtime.user_interface.generate_rsa_keys()
             return runtime
         except BaseException:
+            logger.error("SystemRuntime initialization failed, starting rollback...")
             await cls._rollback_failed_initialization(
                 runtime=runtime,
                 world=world,
@@ -111,81 +112,6 @@ class SystemRuntime:
                 owns_observability=owns_observability,
             )
             raise
-
-    @classmethod
-    async def _rollback_failed_initialization(
-        cls,
-        *,
-        runtime: "SystemRuntime | None",
-        world: "WorldRuntime | None",
-        database_manager: "DatabaseManager | None",
-        capability_manager: "CapabilityManager | None",
-        chat_session_manager: "ChatSessionManager | None",
-        agent_runtime: "AgentRuntime | None",
-        observability: "ObservabilityService | None",
-        owns_observability: bool,
-    ) -> None:
-        """Best-effort rollback that never masks the initialization error."""
-        errors: list[str] = []
-        shutdown_steps = (
-            ("world runtime", world.stop_background_services if world is not None else None),
-            (
-                "chat session manager",
-                chat_session_manager.stop_background_services if chat_session_manager is not None else None,
-            ),
-            (
-                "agent runtime",
-                getattr(agent_runtime, "shutdown", None) if agent_runtime is not None else None,
-            ),
-            ("capability manager", capability_manager.stop if capability_manager is not None else None),
-            ("database manager", database_manager.shutdown if database_manager is not None else None),
-        )
-        for name, stop in shutdown_steps:
-            if stop is None:
-                continue
-            try:
-                await stop()
-            except BaseException as error:
-                errors.append(f"{name}: {type(error).__name__}: {error}")
-
-        cls._clear_global_references(
-            runtime=runtime,
-            database_manager=database_manager,
-            chat_session_manager=chat_session_manager,
-            agent_runtime=agent_runtime,
-        )
-        if owns_observability and observability is not None:
-            try:
-                observability.close()
-            except Exception as error:
-                errors.append(f"observability: {type(error).__name__}: {error}")
-            finally:
-                set_observability_service(None)
-                uninstall_observability_log_handler()
-
-        if errors:
-            logger.error("SystemRuntime initialization rollback had errors: " + "; ".join(errors))
-
-    @staticmethod
-    def _clear_global_references(
-        *,
-        runtime: "SystemRuntime | None",
-        database_manager: "DatabaseManager | None",
-        chat_session_manager: "ChatSessionManager | None",
-        agent_runtime: "AgentRuntime | None",
-    ) -> None:
-        global _system_runtime
-        if runtime is not None and _system_runtime is runtime:
-            _system_runtime = None
-        if agent_runtime is not None:
-            clear_agent_runtime(agent_runtime)
-        if database_manager is not None:
-            # The runtime is the sole owner of the legacy database singleton.
-            set_default_database_manager(None)
-        if chat_session_manager is not None:
-            manager = getattr(chat_session_manager, "chat_stream_manager", None)
-            if chat_stream_manager_module.chat_stream_manager is manager:
-                chat_stream_manager_module.chat_stream_manager = None
 
     def _wire_dependencies(self) -> None:
         """把顶层模块依赖分发给各运行时模块。"""
@@ -214,6 +140,90 @@ class SystemRuntime:
         self.chat_session_manager.start_background_services()
         self.world.start_background_services()
 
+    @classmethod
+    async def _rollback_failed_initialization(
+        cls,
+        *,
+        runtime: "SystemRuntime | None",
+        world: "WorldRuntime | None",
+        database_manager: "DatabaseManager | None",
+        capability_manager: "CapabilityManager | None",
+        chat_session_manager: "ChatSessionManager | None",
+        agent_runtime: "AgentRuntime | None",
+        observability: "ObservabilityService | None",
+        owns_observability: bool,
+    ) -> None:
+        """在初始化失败的情况下，尝试回滚初始化失败的系统运行时，关闭已启动的后台服务和资源。"""
+        errors: list[str] = []
+
+        async def _clear_refs() -> None:
+            cls._clear_global_references(
+                runtime=runtime,
+                database_manager=database_manager,
+                chat_session_manager=chat_session_manager,
+                agent_runtime=agent_runtime,
+            )
+
+        async def _close_obs() -> None:
+            """关闭观测服务，finally 确保无论成功与否都清理全局状态。"""
+            try:
+                observability.close()  # type: ignore[union-attr]
+            finally:
+                set_observability_service(None)
+                uninstall_observability_log_handler()
+
+        shutdown_steps: tuple[tuple[str, callable | None], ...] = (
+            ("world runtime", world.stop_background_services if world is not None else None),
+            (
+                "chat session manager",
+                chat_session_manager.stop_background_services if chat_session_manager is not None else None,
+            ),
+            (
+                "agent runtime",
+                getattr(agent_runtime, "shutdown", None) if agent_runtime is not None else None,
+            ),
+            ("capability manager", capability_manager.stop if capability_manager is not None else None),
+            ("database manager", database_manager.shutdown if database_manager is not None else None),
+            ("global references", _clear_refs),
+            ("observability", _close_obs if (owns_observability and observability is not None) else None),
+        )
+        for name, stop in shutdown_steps:
+            if stop is None:
+                continue
+            try:
+                await stop()
+            except BaseException as error:
+                errors.append(f"{name}: {type(error).__name__}: {error}")
+
+        if errors:
+            logger.error("SystemRuntime initialization rollback had errors: " + "; ".join(errors))
+        else:
+            logger.info("SystemRuntime initialization rollback completed successfully.")
+
+    @staticmethod
+    def _clear_global_references(
+        *,
+        runtime: "SystemRuntime | None",
+        database_manager: "DatabaseManager | None",
+        chat_session_manager: "ChatSessionManager | None",
+        agent_runtime: "AgentRuntime | None",
+    ) -> None:
+        '''将已经连接的引用清理掉，避免在系统运行时关闭后仍然被引用。'''
+        global _system_runtime
+        if runtime is not None and _system_runtime is runtime:
+            _system_runtime = None
+        if agent_runtime is not None:
+            clear_agent_runtime(agent_runtime)
+        if database_manager is not None:
+            # The runtime is the sole owner of the legacy database singleton.
+            set_default_database_manager(None)
+        if chat_session_manager is not None:
+            manager = getattr(chat_session_manager, "chat_stream_manager", None)
+            if chat_stream_manager_module.chat_stream_manager is manager:
+                chat_stream_manager_module.chat_stream_manager = None
+
+    ########## 关闭逻辑 ##########
+
     async def shutdown(self) -> None:
         """按依赖反向顺序关闭后台服务和资源。"""
         async with self._shutdown_lock:
@@ -226,8 +236,10 @@ class SystemRuntime:
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),
                 ("capability manager", self.capability_manager.stop),
                 ("database manager", self.database_manager.shutdown),
+                ("global references", self._shutdown_clear_global_references),
+                ("observability", self._shutdown_observability),
             )
-            core_stages = {name for name, _stop in shutdown_steps}
+            all_stages = {name for name, _stop in shutdown_steps}
 
             for name, stop in shutdown_steps:
                 if name in self._shutdown_completed_stages:
@@ -245,38 +257,25 @@ class SystemRuntime:
                 else:
                     self._shutdown_completed_stages.add(name)
 
-            if core_stages.issubset(self._shutdown_completed_stages):
-                if "global references" not in self._shutdown_completed_stages:
-                    try:
-                        self._clear_global_references(
-                            runtime=self,
-                            database_manager=self.database_manager,
-                            chat_session_manager=self.chat_session_manager,
-                            agent_runtime=self.agent_runtime,
-                        )
-                    except Exception as error:
-                        errors.append(f"global references: {type(error).__name__}: {error}")
-                    else:
-                        self._shutdown_completed_stages.add("global references")
-
-                if "observability" not in self._shutdown_completed_stages:
-                    try:
-                        if self.owns_observability:
-                            self.observability.close()
-                            set_observability_service(None)
-                            uninstall_observability_log_handler()
-                    except Exception as error:
-                        errors.append(f"observability: {type(error).__name__}: {error}")
-                    else:
-                        self._shutdown_completed_stages.add("observability")
-
-            self._shutdown_complete = {
-                *core_stages,
-                "global references",
-                "observability",
-            }.issubset(self._shutdown_completed_stages)
+            self._shutdown_complete = all_stages.issubset(self._shutdown_completed_stages)
             if errors:
                 raise RuntimeError("System runtime shutdown failed: " + "; ".join(errors))
+
+    async def _shutdown_clear_global_references(self) -> None:
+        """清理模块级全局引用，防止关闭后仍被其他代码引用。"""
+        self._clear_global_references(
+            runtime=self,
+            database_manager=self.database_manager,
+            chat_session_manager=self.chat_session_manager,
+            agent_runtime=self.agent_runtime,
+        )
+
+    async def _shutdown_observability(self) -> None:
+        """关闭观测服务并清理相关全局状态。"""
+        if self.owns_observability:
+            self.observability.close()
+            set_observability_service(None)
+            uninstall_observability_log_handler()
 
     def ensure_dependencies(self) -> None:
         """检查系统运行时所有顶层模块依赖已经完成派发。"""
