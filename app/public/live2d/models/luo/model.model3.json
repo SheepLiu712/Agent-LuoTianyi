@@ -50,6 +50,10 @@
 			{
 				"Name": "sing",
 				"File": "expressions/sing.exp3.json"
+			},
+			{
+				"Name": "yanndere",
+				"File": "expressions/yanndere.exp3.json"
 			}
 		],
 		"Motions": {
@@ -90,50 +94,5 @@
 			]
 		}
 	},
-	"HitAreas": [
-		{
-			"Name": "辫子",
-			"Id": "ArtMesh130"
-		},
-		{
-			"Name": "左腿",
-			"Id": "ArtMesh97"
-		},
-		{
-			"Name": "袖",
-			"Id": "ArtMesh85"
-		},
-		{
-			"Name": "耳机",
-			"Id": "ArtMesh50"
-		},
-		{
-			"Name": "8",
-			"Id": "ArtMesh105"
-		},
-		{
-			"Name": "头",
-			"Id": "ArtMesh35"
-		},
-		{
-			"Name": "身体",
-			"Id": "ArtMesh88"
-		},
-		{
-			"Name": "裙子",
-			"Id": "ArtMesh91"
-		},
-		{
-			"Name": "右腿",
-			"Id": "ArtMesh98"
-		},
-		{
-			"Name": "左手",
-			"Id": "ArtMesh116"
-		},
-		{
-			"Name": "右手",
-			"Id": "ArtMesh127"
-		}
-	]
+	"HitAreas": []
 }
