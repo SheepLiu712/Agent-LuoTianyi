@@ -71,6 +71,7 @@ def test_desktop_saves_complete_audio_before_waiting_and_defers_next_sentence():
     first_playback_wait_started = threading.Event()
     release_first_playback = threading.Event()
     second_text_displayed = threading.Event()
+    second_audio_saved = threading.Event()
 
     class FakeMultiMediaStream:
         finish_count = 0
@@ -87,10 +88,10 @@ def test_desktop_saves_complete_audio_before_waiting_and_defers_next_sentence():
 
     processor = MessageProcessor.__new__(MessageProcessor)
     processor._event_queue = queue.Queue()
+    processor._playback_queue = queue.Queue()
     processor._running = True
     processor.multimedia_stream = FakeMultiMediaStream()
-    processor.processing_uuid = None
-    processor.processing_audio = bytearray()
+    processor._audio_buffers = {}
     processor.logger = _FakeLogger()
 
     def display_text(uuid, _text):
@@ -104,12 +105,16 @@ def test_desktop_saves_complete_audio_before_waiting_and_defers_next_sentence():
 
     def save_audio(audio_data, uuid, _postfix):
         events.append(f"save-{uuid}-{audio_data.decode('utf-8')}")
+        if uuid == "sentence-2":
+            second_audio_saved.set()
         return f"{uuid}.wav"
 
     processor._save_audio_to_temp = save_audio
 
     listener = threading.Thread(target=processor._listen_ws_events, daemon=True)
+    playback = threading.Thread(target=processor._process_playback_events, daemon=True)
     listener.start()
+    playback.start()
     processor._event_queue.put(
         _agent_message(
             uuid="sentence-1",
@@ -140,18 +145,22 @@ def test_desktop_saves_complete_audio_before_waiting_and_defers_next_sentence():
     processor._event_queue.put(None)
 
     assert first_playback_wait_started.wait(timeout=2)
+    assert second_audio_saved.wait(timeout=2)
+    listener.join(timeout=2)
     assert "text-sentence-1" in events
     assert "expression-开心" in events
     assert "save-sentence-1-audio-1-tail" in events
     assert events.index("save-sentence-1-audio-1-tail") < events.index("finish-1")
+    assert "save-sentence-2-audio-2" in events
     assert "text-sentence-2" not in events
     assert "expression-期待" not in events
+    assert not listener.is_alive()
+    assert playback.is_alive()
 
     release_first_playback.set()
     assert second_text_displayed.wait(timeout=2)
-    listener.join(timeout=2)
+    playback.join(timeout=2)
 
     assert "text-sentence-2" in events
     assert "expression-期待" in events
-    assert "save-sentence-2-audio-2" in events
-    assert not listener.is_alive()
+    assert not playback.is_alive()

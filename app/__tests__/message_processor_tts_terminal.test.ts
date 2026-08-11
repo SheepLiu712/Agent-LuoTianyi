@@ -161,7 +161,7 @@ describe('MessageProcessor TTS terminal contract', () => {
     expect((processor as any).serverAudioPlaying).toBe(false);
   });
 
-  it('saves completed audio immediately and displays the next sentence after playback', async () => {
+  it('saves later sentences on arrival and displays them after prior playback', async () => {
     const binder = fakeBinder();
     const feedServerAudioChunk = jest.fn();
     const processor = new MessageProcessor(
@@ -202,12 +202,14 @@ describe('MessageProcessor TTS terminal contract', () => {
     });
     await flushAsyncWork();
 
-    // 终止包到达后先落盘，即使第一句话仍在播放。
-    expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1);
-    const savedBase64 = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls[0][1];
-    expect(Buffer.from(savedBase64, 'base64').toString('utf8')).toBe('audio-1audio-2');
+    // 两句话都已完整到达，因此第二句即使尚未展示/播放，也必须已经落盘。
+    expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(2);
+    const firstSavedBase64 = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls[0][1];
+    const secondSavedBase64 = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls[1][1];
+    expect(Buffer.from(firstSavedBase64, 'base64').toString('utf8')).toBe('audio-1audio-2');
+    expect(Buffer.from(secondSavedBase64, 'base64').toString('utf8')).toBe('audio-3');
     expect(binder.emitAgentMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ text: '第二句' }),
+      expect.objectContaining({ uuid: 'sentence-2' }),
     );
 
     processor.onServerAudioFinished();

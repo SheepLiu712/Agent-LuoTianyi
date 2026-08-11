@@ -421,12 +421,14 @@ export class MessageProcessor {
       // 调用时会同步摘除当前回放状态，异步部分负责真正 stop/unload。
       serverAudioPreemption = this.stopLocalTtsNow();
     }
+    // 音频聚合与尾包落盘不进入展示/播放串行链，后续句子即使尚未展示也能立即保存。
+    const audioPersistence = this.persistAgentAudioOnArrival(payload);
     // 展示和音频作为同一个串行单元处理：第一句话在空闲链上立即显示并开始播放；
     // 后续句话则等待上一句话播放完成后，才显示文字/表情并开始播放自己的音频。
     this.incomingMessageChain = this.incomingMessageChain
       .then(async () => {
         this.handleAgentMessageDisplay(payload);
-        await this.handleAgentMessageAudio(payload, serverAudioPreemption);
+        await this.handleAgentMessageAudio(payload, serverAudioPreemption, audioPersistence);
       })
       .catch((error) => {
         addDebugTrace('agent', 'handleAgentMessage failed', {
@@ -500,6 +502,7 @@ export class MessageProcessor {
   private async handleAgentMessageAudio(
     payload: AgentMessagePayload,
     serverAudioPreemption: Promise<void>,
+    audioPersistence: Promise<string | null>,
   ) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
     const audioChunk = payload.audio || '';
@@ -517,32 +520,56 @@ export class MessageProcessor {
     }
 
     if (audioChunk) {
-      const list = this.audioChunksByUuid.get(convUuid) || [];
-      list.push(audioChunk);
-      this.audioChunksByUuid.set(convUuid, list);
       this.feedServerAudioChunk(audioChunk, false);
     }
 
     if (payload.is_final_package) {
       this.feedServerAudioChunk('', true);
+      const isTransient = this.transientMessageUuids.has(convUuid);
       if (payload.audio_error) {
-        this.audioChunksByUuid.delete(convUuid);
-        this.transientMessageUuids.delete(convUuid);
         addDebugTrace('audio', 'server audio stream ended with error', {
           convUuid,
           errorCode: payload.error_code || 'UNKNOWN',
         });
       } else {
-        // Audio is complete on the wire, so persist it before waiting for the
-        // WebView player. Background suspension must not block later messages.
-        await this.saveAudioToLocal(convUuid);
+        const savedUri = await audioPersistence;
+        if (savedUri && !isTransient) {
+          // 此时该句已经轮到展示，避免提前发送 audio 更新而创建空白气泡。
+          this.binder.emitAgentMessage({
+            uuid: convUuid,
+            audio: savedUri,
+          });
+        }
       }
+      // 落盘可能早于该句展示，临时消息状态由展示阶段在尾包处统一清理。
+      this.transientMessageUuids.delete(convUuid);
       if (AppState.currentState === 'active') {
         await this.waitForServerAudioFinished();
       } else {
         this.onServerAudioFinished();
       }
     }
+  }
+
+  private persistAgentAudioOnArrival(payload: AgentMessagePayload): Promise<string | null> {
+    const convUuid = payload.uuid || `agent-${Date.now()}`;
+    const audioChunk = payload.audio || '';
+
+    if (audioChunk) {
+      const list = this.audioChunksByUuid.get(convUuid) || [];
+      list.push(audioChunk);
+      this.audioChunksByUuid.set(convUuid, list);
+    }
+
+    if (!payload.is_final_package) {
+      return Promise.resolve(null);
+    }
+    const completedChunks = this.audioChunksByUuid.get(convUuid) || [];
+    this.audioChunksByUuid.delete(convUuid);
+    if (payload.audio_error) {
+      return Promise.resolve(null);
+    }
+    return this.saveAudioToLocal(convUuid, completedChunks);
   }
 
   onServerAudioFinished() {
@@ -701,10 +728,9 @@ export class MessageProcessor {
     return this.networkClient.sendTypingEvent(item.textLength, item.clientMsgId);
   }
 
-  private async saveAudioToLocal(convUuid: string) {
-    const chunks = this.audioChunksByUuid.get(convUuid);
-    if (!chunks || chunks.length === 0) {
-      return;
+  private async saveAudioToLocal(convUuid: string, chunks: string[]): Promise<string | null> {
+    if (chunks.length === 0) {
+      return null;
     }
 
     const baseDir = `${FileSystem.documentDirectory}tts_output`;
@@ -717,12 +743,7 @@ export class MessageProcessor {
         encoding: FileSystem.EncodingType.Base64,
       });
       this.audioPathByUuid.set(convUuid, fileUri);
-      if (!this.transientMessageUuids.has(convUuid)) {
-        this.binder.emitAgentMessage({
-          uuid: convUuid,
-          audio: fileUri,
-        });
-      }
+      return fileUri;
     } catch (error) {
       const errorMessage = getErrorMessage(error);
       addDebugTrace('audio', 'save local audio failed', {
@@ -734,9 +755,7 @@ export class MessageProcessor {
         error: errorMessage,
       });
       this.binder.emitErrorText(`本地音频保存失败: ${errorMessage}`);
-    } finally {
-      this.audioChunksByUuid.delete(convUuid);
-      this.transientMessageUuids.delete(convUuid);
+      return null;
     }
   }
 }

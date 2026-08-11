@@ -36,14 +36,22 @@ class OutgoingMessage:
     enqueued_monotonic: float = field(default_factory=time.monotonic)
 
 
+@dataclass
+class PreparedAgentMessage:
+    response: AgentMessage
+    audio_saved: bool = False
+
+
 class MessageProcessor:
     def __init__(self,
                 network_client: "NetworkClient",
                 ):
         self._event_queue: queue.Queue = queue.Queue() # 收到的WS消息会被放入这个队列，等待处理线程处理
+        self._playback_queue: queue.Queue = queue.Queue() # 已完成音频聚合/落盘、等待展示和播放的消息
         self._send_queue: deque[OutgoingMessage] = deque() # 需要发送的消息会被放入这个队列
         self._send_cond = threading.Condition() # 发送线程会等待这个条件变量，直到有消息需要发送
-        self._listener_thread = threading.Thread(target=self._listen_ws_events, daemon=True) # 处理WS消息的线程
+        self._listener_thread = threading.Thread(target=self._listen_ws_events, daemon=True) # 收包、聚合和落盘线程
+        self._playback_thread = threading.Thread(target=self._process_playback_events, daemon=True) # 串行展示和播放线程
         self._sender_thread = threading.Thread(target=self._send_loop, daemon=True) # 处理发送消息的线程
         self.model: Live2dModel | None = None # Live2D模型实例，用于根据消息中的表情指令更新模型表情
         self.response_signal: Callable[[str, str], None] | None = None # 为ui增加一条回复信息
@@ -55,6 +63,7 @@ class MessageProcessor:
         self._reply_counter = 0
         self._running = True
         self._last_typing_time = None
+        self._audio_buffers: dict[str, bytearray] = {}
 
         self.multimedia_stream: MultiMediaStream | None = MultiMediaStream()
         self.multimedia_stream.set_local_playback_state_callback(self._on_local_tts_state)
@@ -69,14 +78,12 @@ class MessageProcessor:
         self.send_touch_func:Callable[..., dict] = network_client.send_touch
         self.send_image_selecting_func:Callable = network_client.send_image_selecting
         self.send_image_selecting_cancel_func:Callable = network_client.send_image_selecting_cancel
-        self.start()
-
-        self.processing_uuid = None
-        self.processing_audio: bytearray = bytearray()
         self.date_detected_signal: Callable[[dict], None] | None = None  # 检测到重要日期的信号
+        self.start()
 
     def start(self):
         self._listener_thread.start()
+        self._playback_thread.start()
         self._sender_thread.start()
         self.multimedia_stream.start()
 
@@ -208,16 +215,8 @@ class MessageProcessor:
             return
         self.multimedia_stream.set_volume_percent(percent)
 
-    def process_transport_message(self, response: AgentMessage): # 真正处理消息的函数
+    def process_transport_message(self, response: AgentMessage, audio_saved: bool = False): # 展示和播放消息
         display_in_chat = getattr(response, "display_in_chat", True)
-
-        if self.processing_uuid is None:
-            self.processing_uuid = response.uuid
-            self.processing_audio = bytearray()
-        elif self.processing_uuid != response.uuid: # 如果uuid不同，说明是新的消息了，重置状态
-            self.logger.warning(f"Received message with new uuid (old={self.processing_uuid}, new={response.uuid}), resetting processing state.")
-            self.processing_uuid = response.uuid
-            self.processing_audio = bytearray()
 
         if display_in_chat and response.text:
             self.response_signal(response.uuid, response.text)
@@ -227,32 +226,36 @@ class MessageProcessor:
 
         if response.audio:
             self.multimedia_stream.feed(response.audio)
+
+        if is_audio_terminal(response):
+            if display_in_chat and audio_saved and self.update_bubble_signal:
+                # 通知UI对应的气泡有本地音频可播放
+                try:
+                    self.update_bubble_signal(response.uuid, "has_audio")
+                except Exception as exc:
+                    self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={response.uuid}): {exc}")
+            self.multimedia_stream.finish_one_sentense()
+
+    def _prepare_agent_message(self, response: AgentMessage) -> PreparedAgentMessage:
+        """在收包线程中聚合并落盘，不等待该句话展示或播放。"""
+        audio_buffer = self._audio_buffers.setdefault(response.uuid, bytearray())
+        if response.audio:
             try:
-                chunk_bytes = base64.b64decode(response.audio)
-                self.processing_audio.extend(chunk_bytes)
+                audio_buffer.extend(base64.b64decode(response.audio))
             except Exception as exc:
                 self.logger.error(f"Failed to decode audio chunk (uuid={response.uuid}): {exc}")
 
+        audio_saved = False
         if is_audio_terminal(response):
-            # 终止包代表这一句话的音频已经全部到达。先立即落盘并更新气泡，
-            # 再等待播放完成；监听线程在等待期间不会展示下一句话。
-            saved_uuid = self.processing_uuid
-            ret = ""
-            if self.processing_audio and not response.audio_error:
-                ret = self._save_audio_to_temp(self.processing_audio, saved_uuid, ".wav")
+            completed_audio = self._audio_buffers.pop(response.uuid, bytearray())
             if response.audio_error:
                 self.logger.warning(
-                    f"Audio stream ended with error (uuid={saved_uuid}, code={response.error_code or 'UNKNOWN'})"
+                    f"Audio stream ended with error (uuid={response.uuid}, code={response.error_code or 'UNKNOWN'})"
                 )
-            self.processing_audio = bytearray()
-            self.processing_uuid = None
-            if display_in_chat and ret and self.update_bubble_signal:
-                # 通知UI对应的气泡有本地音频可播放
-                try:
-                    self.update_bubble_signal(saved_uuid, "has_audio")
-                except Exception as exc:
-                    self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={saved_uuid}): {exc}")
-            self.multimedia_stream.finish_one_sentense()
+            elif completed_audio:
+                audio_saved = bool(self._save_audio_to_temp(completed_audio, response.uuid, ".wav"))
+
+        return PreparedAgentMessage(response=response, audio_saved=audio_saved)
 
     def _send_loop(self):
         while self._running:
@@ -364,8 +367,16 @@ class MessageProcessor:
         while self._running:
             payload = self._event_queue.get()
             if payload is None:
+                self._playback_queue.put(None)
                 break
-            self.process_transport_message(payload)
+            self._playback_queue.put(self._prepare_agent_message(payload))
+
+    def _process_playback_events(self):
+        while self._running:
+            prepared = self._playback_queue.get()
+            if prepared is None:
+                break
+            self.process_transport_message(prepared.response, audio_saved=prepared.audio_saved)
 
     def _next_local_id(self, prefix: str) -> str:
         self._reply_counter += 1
