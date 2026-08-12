@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 class AgentBinder(QObject):
     response_signal = Signal(str, str)  # uuid, text
+    system_message_signal = Signal(str)  # 不属于用户或 Agent 的界面提示
     update_signal = Signal(str, str)
     delete_signal = Signal()
     free_signal = Signal(bool)
@@ -66,6 +67,9 @@ class AgentBinder(QObject):
     def emit_response_signal(self, uuid: str, text: str):
         # 让QT框架外的成员能触发信号
         self.response_signal.emit(uuid, text)
+
+    def emit_system_message_signal(self, text: str):
+        self.system_message_signal.emit(text)
 
     def emit_expression_signal(self, expression: str):
         self.expression_signal.emit(expression)

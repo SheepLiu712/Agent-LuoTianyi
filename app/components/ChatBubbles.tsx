@@ -86,8 +86,20 @@ export const ChatImageBubble: React.FC<MessageItemProps> = ({ message }) => {
   );
 };
 
+// 系统消息：不属于用户或天依，仅作为居中的轻量提示。
+export const SystemMessage: React.FC<MessageItemProps> = ({ message, theme = THEMES.light }) => (
+  <View style={styles.systemMessageContainer}>
+    <Text style={[styles.systemMessageText, { color: theme.systemMessageText }]}>
+      {message.content}
+    </Text>
+  </View>
+);
+
 // 统一的消息渲染组件
 export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio, theme = THEMES.light }) => {
+  if (message.type === 'system') {
+    return <SystemMessage message={message} theme={theme} />;
+  }
   if (message.type === 'image') {
     return <ChatImageBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
   }
@@ -143,6 +155,19 @@ const styles = StyleSheet.create({
   bubbleText: {
     fontSize: 16,
     color: '#000000',
+    includeFontPadding: false,
+  },
+  systemMessageContainer: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 5,
+  },
+  systemMessageText: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
     includeFontPadding: false,
   },
   imageWrapperUser: {

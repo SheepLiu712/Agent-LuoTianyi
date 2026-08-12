@@ -134,3 +134,27 @@ def test_auth_payload_advertises_negative_ack_support():
         "token": "token",
         "capabilities": ["negative_ack_v1"],
     }
+
+
+def test_unmatched_websocket_error_is_routed_as_system_message():
+    transport = WsTransport("http://localhost:60030", lambda: "alice", lambda: "token")
+    agent_messages = []
+    system_messages = []
+    transport.set_agent_message_listener(
+        agent_messages.append,
+        lambda _state: None,
+        system_messages.append,
+    )
+
+    class FakeWebSocket:
+        async def recv(self):
+            transport._stop_event.set()
+            return json.dumps({
+                "type": "error",
+                "payload": {"code": "WS_FAILED", "message": "WebSocket 错误"},
+            })
+
+    asyncio.run(transport._recv_loop(FakeWebSocket()))
+
+    assert system_messages == ["[WS_FAILED] WebSocket 错误"]
+    assert agent_messages == []

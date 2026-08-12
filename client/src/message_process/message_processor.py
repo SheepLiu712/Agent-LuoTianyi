@@ -55,6 +55,7 @@ class MessageProcessor:
         self._sender_thread = threading.Thread(target=self._send_loop, daemon=True) # 处理发送消息的线程
         self.model: Live2dModel | None = None # Live2D模型实例，用于根据消息中的表情指令更新模型表情
         self.response_signal: Callable[[str, str], None] | None = None # 为ui增加一条回复信息
+        self.system_message_signal: Callable[[str], None] | None = None # 为 UI 增加系统提示
         self.update_bubble_signal: Callable[[str, str], None] | None = None # 更新气泡信息
         self.agent_thinking_signal: Callable[[bool], None] | None = None # 显示agent正在思考的状态
         self.local_tts_state_signal: Callable[[str, str], None] | None = None # 本地TTS状态变化的回调信号，参数为事件类型（start/finish）和对应的conv_uuid
@@ -71,7 +72,11 @@ class MessageProcessor:
         self.logger = get_logger("MessageProcessor")
 
         # 设置消息处理器发送消息的网络客户端接口，以及将消息处理器接收消息的函数传入网络客户端，以便网络客户端能将WS消息传入消息处理器
-        network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state)
+        network_client.network_set_message_listener(
+            self.feed_agent_msg,
+            self.change_agent_state,
+            self.feed_system_message,
+        )
         self.send_text_func:Callable[..., dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
         self.send_typing_func:Callable[..., dict] = network_client.send_typing
@@ -341,6 +346,10 @@ class MessageProcessor:
         if self.agent_thinking_signal:
             self.agent_thinking_signal(state)
 
+    def feed_system_message(self, text: str):
+        if text and self.system_message_signal:
+            self.system_message_signal(text)
+
     def set_signals(
         self,
         response_signal: Callable[[str, str], None],
@@ -348,12 +357,14 @@ class MessageProcessor:
         agent_thinking_signal: Callable[[str], None],
         local_tts_state_signal: Callable[[str, str], None] | None = None,
         expression_signal: Callable[[str], None] | None = None,
+        system_message_signal: Callable[[str], None] | None = None,
     ):
         self.response_signal = response_signal
         self.update_bubble_signal = update_bubble_signal
         self.agent_thinking_signal = agent_thinking_signal
         self.local_tts_state_signal = local_tts_state_signal
         self.expression_signal = expression_signal
+        self.system_message_signal = system_message_signal
 
     def _on_local_tts_state(self, event: str, conv_uuid: str):
         if self.local_tts_state_signal:

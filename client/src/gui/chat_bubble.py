@@ -121,6 +121,33 @@ class ClickableLabel(QLabel):
         super().mousePressEvent(event)
 
 
+class SystemMessage(QWidget):
+    """居中显示的轻量系统提示，不使用对话气泡外框。"""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(24, 4, 24, 4)
+        layout.setSpacing(0)
+
+        self.label = QLabel(text)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.label.setWordWrap(True)
+        self.label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.label.setStyleSheet("""
+            QLabel {
+                color: #555555;
+                background-color: transparent;
+                border: none;
+                font-size: 14px;
+            }
+        """)
+        layout.addWidget(self.label)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.setStyleSheet("background-color: transparent; border: none;")
+
+
 class ChatBubble(QWidget):
     def __init__(
         self,

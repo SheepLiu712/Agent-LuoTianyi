@@ -19,7 +19,7 @@ from typing import Dict, Any, List
 from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
-from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, BubblePlaybackManager
+from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, SystemMessage, BubblePlaybackManager
 from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
 
@@ -459,6 +459,7 @@ class ChatWidget(QWidget):
         self.dynamic_dialog = None
         self.dynamic_unread_count = 0
         self.agent.response_signal.connect(self.on_agent_response)
+        self.agent.system_message_signal.connect(self.on_system_message)
         self.agent.delete_signal.connect(self.on_agent_delete)
         self.playback_manager = BubblePlaybackManager(
             play_audio_callback=self.agent.on_play_local_tts,
@@ -859,7 +860,7 @@ class ChatWidget(QWidget):
         # Backend treats 70% as baseline for server-streamed audio level.
         self.agent.on_set_volume(value)
 
-    def add_message(self, type: str, content: str, conv_uuid: str = "", is_user: bool = False) -> ChatBubble | ChatImageBubble:
+    def add_message(self, type: str, content: str, conv_uuid: str = "", is_user: bool = False) -> ChatBubble | ChatImageBubble | SystemMessage:
         if type == "image":
             bubble = ChatImageBubble(
                 content,
@@ -874,6 +875,10 @@ class ChatWidget(QWidget):
                 is_user=is_user,
                 playback_manager=self.playback_manager,
             )
+        elif type == "system":
+            bubble = SystemMessage(content)
+        else:
+            raise ValueError(f"Unsupported chat message type: {type}")
 
         self.history_layout.insertWidget(self.history_layout.count() - 1, bubble)
         QApplication.processEvents() # Ensure layout updates
@@ -917,6 +922,10 @@ class ChatWidget(QWidget):
             self.agent.msg_to_bubble[uuid] = bubble
         except Exception:
             pass
+
+    def on_system_message(self, text: str):
+        if text:
+            self.add_message("system", text)
     
     def on_agent_delete(self):
         count = self.history_layout.count()

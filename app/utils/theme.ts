@@ -27,6 +27,7 @@ export interface AppTheme {
   botBubble: string;
   bubbleText: string;
   userBubbleText: string;
+  systemMessageText: string;
   dangerSurface: string;
   dangerText: string;
   debugBackground: string;
@@ -74,6 +75,7 @@ export const THEMES: Record<ResolvedThemeName, AppTheme> = {
     botBubble: '#88EDFF',
     bubbleText: '#000000',
     userBubbleText: '#000000',
+    systemMessageText: '#555555',
     dangerSurface: '#fff1f1',
     dangerText: '#c24141',
     debugBackground: '#0f1720',
@@ -111,6 +113,7 @@ export const THEMES: Record<ResolvedThemeName, AppTheme> = {
     botBubble: '#0D5B73',
     bubbleText: '#F4FAFC',
     userBubbleText: '#F4FAFC',
+    systemMessageText: '#9AA8B7',
     dangerSurface: '#3A2024',
     dangerText: '#FF9A9A',
     debugBackground: '#0A1118',
