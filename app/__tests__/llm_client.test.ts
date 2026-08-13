@@ -5,6 +5,7 @@ import {
   buildChatCompletionsPayload,
   callLlmProvider,
   fetchJsonRequiredModules,
+  fetchModelsList,
   fetchProviderPresets,
   probeLlmConfig,
   resolveProviderBaseUrl,
@@ -17,13 +18,13 @@ const PRESETS: LlmProviderPreset[] = [
   {
     name: '阿里云百炼（DashScope）',
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    models: ['qwen3.5-plus', 'qwen3.6-flash'],
+    llm_models: ['qwen3.5-plus', 'qwen3.6-flash'],
     vlm_models: ['qwen3-vl-plus'],
   },
   {
     name: 'DeepSeek',
     base_url: 'https://api.deepseek.com/v1',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    llm_models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
     vlm_models: [],
   },
 ];
@@ -158,6 +159,48 @@ describe('fetchJsonRequiredModules', () => {
     expect(result.vlm).toEqual([]);
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toBe('https://server.example.com/llm/providers');
+  });
+});
+
+describe('fetchModelsList', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('calls /models with the bearer key and returns model ids', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [{ id: 'm1' }, { id: 'm2' }, {}],
+      }),
+    } as unknown as Response);
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const ids = await fetchModelsList(
+      'https://example.com/v1',
+      'sk-user',
+      5000,
+    );
+    expect(ids).toEqual(['m1', 'm2']);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://example.com/v1/models');
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      'Bearer sk-user',
+    );
+  });
+
+  it('throws on http error', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => 'unauthorized',
+      json: async () => ({}),
+    } as unknown as Response) as unknown as typeof fetch;
+
+    await expect(
+      fetchModelsList('https://example.com/v1', 'bad'),
+    ).rejects.toThrow('401');
   });
 });
 

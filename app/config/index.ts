@@ -4,9 +4,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CUSTOM_SERVER_URL_KEY = 'custom_server_url';
-// LLM/VLM 配置整体以单个 JSON 存储（SecureStore），写入即原子
-export const LLM_CONFIG_STORAGE_KEY = 'llm_config';
-export const VLM_CONFIG_STORAGE_KEY = 'vlm_config';
 
 export const server_config: {
   BASE_URL: string;

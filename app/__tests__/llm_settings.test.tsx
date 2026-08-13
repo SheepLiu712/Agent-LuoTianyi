@@ -1,7 +1,6 @@
 /**
- * LlmSettingsScreen 保存→重载测试
- *
- * 验证设置页保存 API Key 后写入 SecureStore（mock），组件重载后回填到输入框。
+ * LlmSettingsScreen 单页模块列表测试：
+ * 模块派生/标题、加载回填、开关保留值、预检、统一校验（batchId）与整体写入。
  */
 import React from 'react';
 import renderer, { act, ReactTestRenderer } from 'react-test-renderer';
@@ -10,12 +9,7 @@ const secureStoreBacking: Record<string, string> =
   ((globalThis as { __testSecureStoreBacking?: Record<string, string> })
     .__testSecureStoreBacking ??= {});
 
-const mockSecureStore: {
-  getItemAsync: jest.Mock;
-  setItemAsync: jest.Mock;
-  deleteItemAsync: jest.Mock;
-  __reset: () => void;
-} = {
+const mockSecureStore = {
   getItemAsync: jest.fn(async (key: string) => secureStoreBacking[key] ?? null),
   setItemAsync: jest.fn(async (key: string, value: string) => {
     secureStoreBacking[key] = value;
@@ -30,40 +24,37 @@ const mockSecureStore: {
   },
 };
 
-const mockAsyncStorage: {
-  getItem: jest.Mock;
-  setItem: jest.Mock;
-  removeItem: jest.Mock;
-  clear: jest.Mock;
-  __reset: () => void;
-} = (() => {
-  const store: Record<string, string> = {};
-  return {
-    getItem: jest.fn(async (key: string) => store[key] ?? null),
-    setItem: jest.fn(async (key: string, value: string) => {
-      store[key] = value;
-    }),
-    removeItem: jest.fn(async (key: string) => {
-      delete store[key];
-    }),
-    clear: jest.fn(async () => {
-      for (const key of Object.keys(store)) {
-        delete store[key];
-      }
-    }),
-    __reset: () => {
-      for (const key of Object.keys(store)) {
-        delete store[key];
-      }
-    },
-  };
-})();
+const mockPresets = [
+  {
+    name: 'DeepSeek',
+    base_url: 'https://api.deepseek.com/v1',
+    llm_models: ['deepseek-v4-flash'],
+    vlm_models: ['deepseek-vl'],
+  },
+  {
+    name: 'AudioOnly',
+    base_url: 'https://audio.example.com/v1',
+    llm_models: [],
+    vlm_models: [],
+    audio_models: ['audio-1'],
+  },
+];
+
+const mockCapabilities = {
+  llmModelCapabilities: {
+    'deepseek-v4-flash': { can_enable_thinking: false, can_use_json: false },
+  },
+  vlmModelCapabilities: {
+    'deepseek-vl': { can_enable_thinking: false, can_use_json: true },
+  },
+};
+
+const mockFetchModelsList = jest.fn(async () => ['deepseek-v4-flash']);
 
 jest.mock('expo-secure-store', () => mockSecureStore);
 jest.mock('expo-clipboard', () => ({
   getStringAsync: jest.fn(async () => 'sk-clipboard'),
 }));
-jest.mock('@react-native-async-storage/async-storage', () => mockAsyncStorage);
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
@@ -90,912 +81,305 @@ jest.mock('react-native', () => {
     ScrollView: stub('ScrollView'),
     Modal: stub('Modal'),
     KeyboardAvoidingView: stub('KeyboardAvoidingView'),
+    Switch: stub('Switch'),
   };
 });
 jest.mock('../config', () => ({
-  LLM_CONFIG_STORAGE_KEY: 'llm_config',
-  VLM_CONFIG_STORAGE_KEY: 'vlm_config',
   server_config: { BASE_URL: 'https://server.example.com' },
 }));
-
-const mockPresets = [
-  {
-    name: 'DeepSeek',
-    base_url: 'https://api.deepseek.com/v1',
-    models: ['deepseek-v4-flash'],
-    vlm_models: ['deepseek-vl'],
-  },
-];
-
-// 预置对话模块整份配置（单次 SecureStore 写入）
-const seedLlmConfig = async (
-  cfg: Partial<{
-    apiKey: string;
-    provider: string;
-    model: string;
-    baseUrl: string;
-  }> = {},
-) => {
-  await mockSecureStore.setItemAsync(
-    'llm_config',
-    JSON.stringify({
-      apiKey: cfg.apiKey ?? '',
-      provider: cfg.provider ?? 'DeepSeek',
-      model: cfg.model ?? 'deepseek-v4-flash',
-      baseUrl: cfg.baseUrl ?? 'https://api.deepseek.com/v1',
-      paramsText: '',
-      enableThinking: false,
-      useJson: false,
-    }),
-  );
-};
-
-const getSavedLlmConfig = async (): Promise<Record<string, unknown>> => {
-  const raw = await mockSecureStore.getItemAsync('llm_config');
-  return raw ? JSON.parse(raw) : {};
-};
-
 jest.mock('../utils/llm_client', () => ({
   fetchProviderPresets: jest.fn(async () => ({
     providers: mockPresets,
-    llmModelCapabilities: {},
-    vlmModelCapabilities: {},
+    ...mockCapabilities,
   })),
-  fetchJsonRequiredModules: jest.fn(async () => ({ llm: [], vlm: [] })),
-  probeLlmConfig: jest.fn(async () => undefined),
-  resolveProviderBaseUrl: jest.fn(
-    (name: string, presets: Array<{ name: string; base_url: string }>) =>
-      presets?.find((p) => p.name === name)?.base_url ?? '',
-  ),
+  fetchJsonRequiredModules: jest.fn(async () => ({ llm: ['记忆写入'], vlm: [] })),
+  fetchModelsList: mockFetchModelsList,
 }));
 
 import LlmSettingsScreen from '../app/llm_settings';
 
-describe('LlmSettingsScreen 保存→重载', () => {
+const seedConfig = async (cfg: Record<string, unknown>) => {
+  await mockSecureStore.setItemAsync(
+    'llm_modules_config',
+    JSON.stringify(cfg),
+  );
+};
+
+async function renderScreen(): Promise<ReactTestRenderer> {
+  let tree!: ReactTestRenderer;
+  await act(async () => {
+    tree = renderer.create(<LlmSettingsScreen onClose={jest.fn()} />);
+  });
+  for (let i = 0; i < 6; i += 1) {
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+  return tree;
+}
+
+function pressLabel(tree: ReactTestRenderer, label: string) {
+  const textNode = tree.root.findAll((node) => node.props?.children === label)[0];
+  expect(textNode).toBeTruthy();
+  let node = textNode.parent;
+  while (node && !node.props?.onPress) {
+    node = node.parent;
+  }
+  expect(node).toBeTruthy();
+  if (!node) {
+    throw new Error(`no pressable found for label: ${label}`);
+  }
+  act(() => {
+    node.props.onPress();
+  });
+}
+
+function switches(tree: ReactTestRenderer) {
+  const RN = jest.requireMock('react-native') as { Switch: unknown };
+  return tree.root.findAllByType(RN.Switch as never);
+}
+
+function textInputs(tree: ReactTestRenderer) {
+  const RN = jest.requireMock('react-native') as { TextInput: unknown };
+  return tree.root.findAllByType(RN.TextInput as never);
+}
+
+function moduleConfigWrites(): number {
+  return mockSecureStore.setItemAsync.mock.calls.filter(
+    (call) => call[0] === 'llm_modules_config',
+  ).length;
+}
+
+describe('LlmSettingsScreen 单页模块列表', () => {
+  const Alert = (jest.requireMock('react-native') as {
+    Alert: { alert: jest.Mock };
+  }).Alert;
+
   beforeEach(() => {
     mockSecureStore.__reset();
-    mockAsyncStorage.__reset();
     jest.clearAllMocks();
+    mockFetchModelsList.mockImplementation(async () => ['deepseek-v4-flash']);
   });
 
-  it('保存 API Key 后 SecureStore 持久化，重载后回填', async () => {
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    // 预置已保存的服务商与模型，使对话页三个必填项齐全（直接走校验+保存）
-    await seedLlmConfig({});
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    // 等待加载 effect（读取本地配置 / 拉取服务商与 JSON 功能列表）完成
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const apiKeyInput = tree!.root.findAllByProps({
-      placeholder: '粘贴对话服务商的 API Key',
-    })[0];
-    expect(apiKeyInput).toBeTruthy();
-
-    await act(async () => {
-      apiKeyInput.props.onChangeText('sk-test-key');
-    });
-
-    // 点击“下一步”：配置完整，探测校验通过后保存并进入第 2 页
-    const nextText = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
-    expect(nextText).toBeTruthy();
-    await act(async () => {
-      await nextText.parent!.props.onPress();
-    });
-    // 等待保存链路的剩余状态更新（setSaving(false) 等）
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 保存后整份配置已写入 SecureStore（llm_config）
-    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', 'sk-test-key');
-    // 保存后进入图片理解页，不关闭设置页
-    expect(onClose).not.toHaveBeenCalled();
-    expect(Alert.alert).toHaveBeenCalledWith('成功', '对话模型设置已保存');
-
-    // 重载：卸载后重新渲染，设置页应回填已保存的 key
-    await act(async () => {
-      tree!.unmount();
-    });
-    let tree2: ReactTestRenderer | undefined;
-    await act(async () => {
-      tree2 = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const apiKeyInput2 = tree2!.root.findAllByProps({
-      placeholder: '粘贴对话服务商的 API Key',
-    })[0];
-    expect(apiKeyInput2.props.value).toBe('sk-test-key');
+  it('模块由 providers 字段派生，标题取映射或字段名', async () => {
+    const tree = await renderScreen();
+    expect(
+      tree.root.findAllByProps({ children: '对话模型' }).length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      tree.root.findAllByProps({ children: '图片理解模型' }).length,
+    ).toBeGreaterThanOrEqual(1);
+    // 未映射新字段回退显示字段名
+    expect(
+      tree.root.findAllByProps({ children: 'audio_models' }).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 
-  it('vlm 未配置时不提示图片理解模型 JSON 未勾选', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchJsonRequiredModules: jest.Mock;
-    };
-    llmClient.fetchJsonRequiredModules.mockResolvedValueOnce({
-      llm: [],
-      vlm: ['B站动态解析'],
-    });
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await seedLlmConfig({});
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 只填对话 key，不配置图片理解模型
-    const apiKeyInput = tree!.root.findAllByProps({
-      placeholder: '粘贴对话服务商的 API Key',
-    })[0];
-    await act(async () => {
-      apiKeyInput.props.onChangeText('sk-text');
-    });
-
-    const nextText = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
-    await act(async () => {
-      await nextText.parent!.props.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(onClose).not.toHaveBeenCalled();
-    const alertTitles = Alert.alert.mock.calls.map((call) => String(call[0]));
-    expect(alertTitles).not.toContain('提示');
+  it('空存储：开关全关、无自动选择', async () => {
+    const tree = await renderScreen();
+    for (const node of switches(tree)) {
+      expect(node.props.value).toBe(false);
+    }
+    // 开关关闭时字段整体隐藏，无“选择服务商”占位
+    expect(tree.root.findAllByProps({ children: '选择服务商' }).length).toBe(0);
   });
 
-  it('未填 API Key 时弹窗提示将使用服务端 Key，继续后进入下一页', async () => {
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    // 预置已保存的服务商与模型（网络数据只提供下拉选项，不再自动选中）
-    await seedLlmConfig({});
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 服务商/模型已回填，仅 key 未填 → 页面常驻提示
-    const note = tree!.root.findAll(
-      (node) =>
-        node.props.children ===
-        '未配置 API Key，相关调用将使用服务端 Key。',
-    )[0];
-    expect(note).toBeTruthy();
-
-    // 点击“下一步”弹窗确认
-    const nextText = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
-    await act(async () => {
-      await nextText.parent!.props.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示',
-    );
-    expect(promptCall).toBeTruthy();
-    expect(String(promptCall![1])).toContain('服务端 Key');
-    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', '');
-    // 不点“继续”即相当于取消：仍留在第 1 页，不保存
-    expect(
-      tree!.root.findAll((node) => node.props.children === '完成')[0],
-    ).toBeFalsy();
-
-    // 再次“下一步”并选择“继续”：进入第 2 页
-    const nextText2 = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
-    await act(async () => {
-      await nextText2.parent!.props.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    const promptCall2 =
-      Alert.alert.mock.calls[Alert.alert.mock.calls.length - 1];
-    const continueBtn = promptCall2[2].find(
-      (button: { text: string }) => button.text === '继续',
-    );
-    await act(async () => {
-      continueBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', '');
-    expect(
-      tree!.root.findAll((node) => node.props.children === '完成')[0],
-    ).toBeTruthy();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('列表已加载且旧配置未修改时，直接下一步且不执行保存', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      probeLlmConfig: jest.Mock;
-    };
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    // 预置完整旧配置（与默认服务商预设一致）
-    await seedLlmConfig({ apiKey: 'sk-saved' });
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const nextText = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
-    expect(nextText.parent!.props.disabled).toBe(false);
-
-    await act(async () => {
-      await nextText.parent!.props.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 直接翻页：未探测、未弹窗、key 未动
-    expect(
-      tree!.root.findAll((node) => node.props.children === '完成')[0],
-    ).toBeTruthy();
-    expect(llmClient.probeLlmConfig).not.toHaveBeenCalled();
-    expect(Alert.alert).not.toHaveBeenCalled();
-    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', 'sk-saved');
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('清除失败时不继续导航，可取消重试且不破坏现有配置', async () => {
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await seedLlmConfig({});
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // key 为空 → 下一步 → 弹窗 → 继续（触发清除）
-    const nextText = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
-    await act(async () => {
-      await nextText.parent!.props.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示',
-    );
-    const continueBtn = promptCall![2].find(
-      (button: { text: string }) => button.text === '继续',
-    );
-
-    // 清除失败
-    mockSecureStore.setItemAsync.mockRejectedValueOnce(new Error('disk full'));
-    await act(async () => {
-      continueBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 弹清除失败提示，未导航
-    const failCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '清除失败',
-    );
-    expect(failCall).toBeTruthy();
-    expect(
-      tree!.root.findAll((node) => node.props.children === '完成')[0],
-    ).toBeFalsy();
-    expect(onClose).not.toHaveBeenCalled();
-    // 不点“重试”即放弃：留在本页；失败写入未生效，现有配置保持原样
-    await expect(getSavedLlmConfig()).resolves.toHaveProperty('provider', 'DeepSeek');
-  });
-
-  it('粘贴按钮随输入值切换为清空/粘贴', async () => {
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 初始无值：显示“粘贴”
-    expect(
-      tree!.root.findAll((node) => node.props.children === '粘贴')[0],
-    ).toBeTruthy();
-
-    const apiKeyInput = tree!.root.findAllByProps({
-      placeholder: '粘贴对话服务商的 API Key',
-    })[0];
-    await act(async () => {
-      apiKeyInput.props.onChangeText('sk-x');
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(
-      tree!.root.findAll((node) => node.props.children === '清空')[0],
-    ).toBeTruthy();
-
-    // 点击“清空”后输入框清空，按钮恢复“粘贴”
-    const clearText = tree!.root.findAll(
-      (node) => node.props.children === '清空',
-    )[0];
-    await act(async () => {
-      await clearText.parent!.props.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(apiKeyInput.props.value).toBe('');
-    expect(
-      tree!.root.findAll((node) => node.props.children === '粘贴')[0],
-    ).toBeTruthy();
-  });
-
-  it('点击刷新会重新拉取服务商与 JSON 功能列表', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-      fetchJsonRequiredModules: jest.Mock;
-    };
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(llmClient.fetchProviderPresets).toHaveBeenCalledTimes(1);
-
-    const refreshText = tree!.root.findAll(
-      (node) => node.props.children === '刷新',
-    )[0];
-    expect(refreshText).toBeTruthy();
-    await act(async () => {
-      await refreshText.parent!.props.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(llmClient.fetchProviderPresets).toHaveBeenCalledTimes(2);
-    expect(llmClient.fetchJsonRequiredModules).toHaveBeenCalledTimes(2);
-  });
-
-  it('纯 VLM 服务商不被全量过滤，图片理解页可渲染', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce({
-      providers: [
-        {
-          name: 'DeepSeek',
-          base_url: 'https://api.deepseek.com/v1',
-          models: ['deepseek-v4-flash'],
-          vlm_models: [],
-        },
-        {
-          name: 'VlmOnly',
-          base_url: 'https://vlm.example.com/v1',
-          models: [],
-          vlm_models: ['vlm-model'],
-        },
-      ],
-      llmModelCapabilities: {},
-      vlmModelCapabilities: {},
-    });
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await seedLlmConfig({ apiKey: 'sk-saved' });
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 对话页：纯 VLM 服务商不出现，普通对话服务商出现
-    expect(
-      tree!.root.findAll((node) => node.props.children === 'VlmOnly')[0],
-    ).toBeFalsy();
-    expect(
-      tree!.root.findAll((node) => node.props.children === 'DeepSeek')[0],
-    ).toBeTruthy();
-
-    // 下一步（配置未修改 → 直接翻页）进入图片理解页：纯 VLM 服务商出现
-    const nextText = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
-    await act(async () => {
-      await nextText.parent!.props.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(
-      tree!.root.findAll((node) => node.props.children === 'VlmOnly')[0],
-    ).toBeTruthy();
-  });
-
-  it('仅 LLM 服务商时隐藏图片理解页，主按钮为完成', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce({
-      providers: [
-        {
-          name: 'DeepSeek',
-          base_url: 'https://api.deepseek.com/v1',
-          models: ['deepseek-v4-flash'],
-          vlm_models: [],
-        },
-      ],
-      llmModelCapabilities: {},
-      vlmModelCapabilities: {},
-    });
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 只有对话页：1/1、无上一步、主按钮为完成
-    expect(
-      tree!.root.findAll((node) => node.props.children === '1 / 1 · 对话模型')[0],
-    ).toBeTruthy();
-    expect(
-      tree!.root.findAll((node) => node.props.children === '上一步')[0],
-    ).toBeFalsy();
-    expect(
-      tree!.root.findAll((node) => node.props.children === '完成')[0],
-    ).toBeTruthy();
-    expect(
-      tree!.root.findAll((node) => node.props.children === '下一步')[0],
-    ).toBeFalsy();
-  });
-
-  it('仅 VLM 服务商时隐藏对话页，直接展示图片理解页', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce({
-      providers: [
-        {
-          name: 'VlmOnly',
-          base_url: 'https://vlm.example.com/v1',
-          models: [],
-          vlm_models: ['vlm-model'],
-        },
-      ],
-      llmModelCapabilities: {},
-      vlmModelCapabilities: {},
-    });
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(
-      tree!.root.findAll((node) => node.props.children === '1 / 1 · 图片理解模型')[0],
-    ).toBeTruthy();
-    expect(
-      tree!.root.findAll((node) => node.props.children === 'VlmOnly')[0],
-    ).toBeTruthy();
-    expect(
-      tree!.root.findAll((node) => node.props.children === '完成')[0],
-    ).toBeTruthy();
-  });
-
-  it('已保存服务商变化时提示重新选择，拒绝则跳转到另一配置页', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce({
-      providers: mockPresets,
-      llmModelCapabilities: {},
-      vlmModelCapabilities: {},
-    });
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    // 已保存的服务商/模型与当前列表不一致
-    await mockSecureStore.setItemAsync(
-      'llm_config',
-      JSON.stringify({
-        apiKey: 'sk-old',
-        provider: 'OldProvider',
-        model: 'old-model',
-        baseUrl: 'https://old.example.com/v1',
-        paramsText: '',
-      }),
-    );
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示' && String(call[1]).includes('已变化'),
-    );
-    expect(promptCall).toBeTruthy();
-
-    // 拒绝重新选择 → 跳转到图片理解页
-    const skipBtn = promptCall![2].find(
-      (button: { text: string }) => button.text === '不重新选择',
-    );
-    await act(async () => {
-      skipBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(
-      tree!.root.findAll((node) => node.props.children === '2 / 2 · 图片理解模型')[0],
-    ).toBeTruthy();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('仅一页且已保存配置变化时，拒绝重新选择则关闭设置页', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce({
-      providers: [
-        {
-          name: 'DeepSeek',
-          base_url: 'https://api.deepseek.com/v1',
-          models: ['deepseek-v4-flash'],
-          vlm_models: [],
-        },
-      ],
-      llmModelCapabilities: {},
-      vlmModelCapabilities: {},
-    });
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await mockSecureStore.setItemAsync(
-      'llm_config',
-      JSON.stringify({
-        apiKey: 'sk-old',
-        provider: 'OldProvider',
-        model: 'old-model',
-        baseUrl: 'https://old.example.com/v1',
-        paramsText: '',
-      }),
-    );
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示' && String(call[1]).includes('已变化'),
-    );
-    const skipBtn = promptCall![2].find(
-      (button: { text: string }) => button.text === '不重新选择',
-    );
-    await act(async () => {
-      skipBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it('点击重新选择时自动选中第一个可用服务商与模型', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce({
-      providers: mockPresets,
-      llmModelCapabilities: {},
-      vlmModelCapabilities: {},
-    });
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await mockSecureStore.setItemAsync(
-      'llm_config',
-      JSON.stringify({
-        apiKey: 'sk-old',
-        provider: 'OldProvider',
-        model: 'old-model',
-        baseUrl: 'https://old.example.com/v1',
-        paramsText: '',
-      }),
-    );
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示' && String(call[1]).includes('已变化'),
-    );
-    const reselectBtn = promptCall![2].find(
-      (button: { text: string }) => button.text === '重新选择',
-    );
-    await act(async () => {
-      reselectBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 自动选中第一个可用服务商的第一个模型
-    expect(
-      tree!.root.findAll((node) => node.props.children === 'deepseek-v4-flash')[0],
-    ).toBeTruthy();
-    expect(
-      tree!.root.findAll((node) => node.props.children === 'old-model')[0],
-    ).toBeFalsy();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it('仅模型失效时重新选择只换模型，保留服务商', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      fetchProviderPresets: jest.Mock;
-    };
-    llmClient.fetchProviderPresets.mockResolvedValueOnce({
-      providers: [
-        {
-          name: 'Another',
-          base_url: 'https://another.example.com/v1',
-          models: ['another-model'],
-          vlm_models: [],
-        },
-        {
-          name: 'DeepSeek',
-          base_url: 'https://api.deepseek.com/v1',
-          models: ['deepseek-v4-flash'],
-          vlm_models: [],
-        },
-      ],
-      llmModelCapabilities: {},
-      vlmModelCapabilities: {},
-    });
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    // 服务商 DeepSeek 仍在列表，但模型 old-model 已不在其模型列表
-    await mockSecureStore.setItemAsync(
-      'llm_config',
-      JSON.stringify({
-        apiKey: 'sk',
+  it('加载回填保存值（开关/服务商/模型/Key），不清空', async () => {
+    await seedConfig({
+      llm_models: {
+        enabled: true,
         provider: 'DeepSeek',
-        model: 'old-model',
+        model: 'deepseek-v4-flash',
         baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'sk-saved',
+        paramsText: '{"temperature": 0.7}',
+      },
+    });
+    const tree = await renderScreen();
+    expect(switches(tree)[0].props.value).toBe(true);
+    expect(tree.root.findAllByProps({ children: 'DeepSeek' }).length).toBeGreaterThan(0);
+    expect(tree.root.findAllByProps({ children: 'deepseek-v4-flash' }).length).toBeGreaterThan(0);
+    const keyInput = tree.root.findAllByProps({ placeholder: '粘贴 API Key' })[0];
+    expect(keyInput.props.value).toBe('sk-saved');
+  });
+
+  it('关闭开关隐藏字段但保留值，重新开启恢复', async () => {
+    const tree = await renderScreen();
+    act(() => {
+      switches(tree)[0].props.onValueChange(true);
+    });
+    const keyInput = tree.root.findAllByProps({ placeholder: '粘贴 API Key' })[0];
+    act(() => {
+      keyInput.props.onChangeText('sk-test');
+    });
+    expect(
+      tree.root.findAllByProps({ placeholder: '粘贴 API Key' }).length,
+    ).toBeGreaterThanOrEqual(1);
+    act(() => {
+      switches(tree)[0].props.onValueChange(false);
+    });
+    expect(tree.root.findAllByProps({ placeholder: '粘贴 API Key' }).length).toBe(0);
+    act(() => {
+      switches(tree)[0].props.onValueChange(true);
+    });
+    expect(
+      tree.root.findAllByProps({ placeholder: '粘贴 API Key' })[0].props.value,
+    ).toBe('sk-test');
+  });
+
+  it('预检：缺少 API Key 弹窗提示且不写入', async () => {
+    await seedConfig({
+      llm_models: {
+        enabled: true,
+        provider: 'DeepSeek',
+        model: 'deepseek-v4-flash',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: '',
         paramsText: '',
-      }),
-    );
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+      },
     });
+    const tree = await renderScreen();
+    pressLabel(tree, '保存');
     await act(async () => {
       await Promise.resolve();
     });
-
-    const promptCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '提示' && String(call[1]).includes('已变化'),
+    expect(Alert.alert).toHaveBeenCalledWith(
+      '配置不完整',
+      expect.stringContaining('缺少 API Key'),
     );
-    const reselectBtn = promptCall![2].find(
-      (button: { text: string }) => button.text === '重新选择',
-    );
-    await act(async () => {
-      reselectBtn.onPress();
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 保留 DeepSeek，只把模型换成其第一个可用模型
-    expect(
-      tree!.root.findAll((node) => node.props.children === 'deepseek-v4-flash')[0],
-    ).toBeTruthy();
-    expect(
-      tree!.root.findAll((node) => node.props.children === 'another-model')[0],
-    ).toBeFalsy();
+    expect(moduleConfigWrites()).toBe(1); // 仅种子写入，预检未写
   });
 
-  it('探测失败时显示友好错误提示且不保存', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      probeLlmConfig: jest.Mock;
-    };
-    llmClient.probeLlmConfig.mockRejectedValueOnce(new Error('401 Unauthorized'));
-    const Alert = (jest.requireMock('react-native') as {
-      Alert: { alert: jest.Mock };
-    }).Alert;
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-
-    await seedLlmConfig({});
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+  it('预检：高级参数非法 JSON 弹窗提示', async () => {
+    await seedConfig({
+      llm_models: {
+        enabled: true,
+        provider: 'DeepSeek',
+        model: 'deepseek-v4-flash',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'sk-test',
+        paramsText: '',
+      },
     });
-    await act(async () => {
-      await Promise.resolve();
+    const tree = await renderScreen();
+    const inputs = textInputs(tree);
+    const params = inputs[inputs.length - 1];
+    act(() => {
+      params.props.onChangeText('{bad json');
     });
-
-    const apiKeyInput = tree!.root.findAllByProps({
-      placeholder: '粘贴对话服务商的 API Key',
-    })[0];
-    await act(async () => {
-      apiKeyInput.props.onChangeText('sk-bad');
-    });
-
-    const nextText = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
-    await act(async () => {
-      await nextText.parent!.props.onPress();
-    });
+    pressLabel(tree, '保存');
     await act(async () => {
       await Promise.resolve();
     });
-
-    const failCall = Alert.alert.mock.calls.find(
-      (call) => call[0] === '配置校验失败',
+    expect(Alert.alert).toHaveBeenCalledWith(
+      '配置不完整',
+      expect.stringContaining('JSON'),
     );
-    expect(failCall).toBeTruthy();
-    expect(String(failCall![1])).toContain('API Key 无效');
-    await expect(getSavedLlmConfig()).resolves.toHaveProperty('apiKey', '');
-    // 校验失败仍停留在第 1 页
-    const doneText = tree!.root.findAll(
-      (node) => node.props.children === '完成',
-    )[0];
-    expect(doneText).toBeFalsy();
   });
 
-  it('校验期间整页遮罩冻结并显示校验中，完成后恢复', async () => {
-    const llmClient = jest.requireMock('../utils/llm_client') as {
-      probeLlmConfig: jest.Mock;
-    };
-    const onClose = jest.fn();
-    let tree: ReactTestRenderer | undefined;
-    let rejectProbe!: (reason?: unknown) => void;
-
-    await seedLlmConfig({});
-
-    await act(async () => {
-      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+  it('校验通过后整体写入（含关闭模块），显示成功提示', async () => {
+    await seedConfig({
+      llm_models: {
+        enabled: true,
+        provider: 'DeepSeek',
+        model: 'deepseek-v4-flash',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'sk-test',
+        paramsText: '',
+      },
     });
+    const tree = await renderScreen();
+    pressLabel(tree, '保存');
     await act(async () => {
       await Promise.resolve();
     });
+    expect(mockFetchModelsList).toHaveBeenCalled();
+    expect(secureStoreBacking['llm_modules_config']).toBeTruthy();
+    const saved = JSON.parse(secureStoreBacking['llm_modules_config']) as Record<
+      string,
+      { enabled: boolean; provider: string; apiKey: string }
+    >;
+    expect(saved.llm_models.enabled).toBe(true);
+    expect(saved.llm_models.apiKey).toBe('sk-test');
+    // 未开启模块也一并写入
+    expect(saved.audio_models.enabled).toBe(false);
+    expect(tree.root.findAllByProps({ children: '配置已保存' }).length).toBeGreaterThanOrEqual(1);
+  });
 
-    // 探测挂起，模拟校验进行中
-    llmClient.probeLlmConfig.mockImplementationOnce(
+  it('校验失败（Key 无效）不写入并提示模块', async () => {
+    await seedConfig({
+      llm_models: {
+        enabled: true,
+        provider: 'DeepSeek',
+        model: 'deepseek-v4-flash',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'bad-key',
+        paramsText: '',
+      },
+    });
+    mockFetchModelsList.mockRejectedValue(new Error('HTTP 401'));
+    const tree = await renderScreen();
+    pressLabel(tree, '保存');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(Alert.alert).toHaveBeenCalledWith(
+      '配置校验失败',
+      expect.stringContaining('对话模型'),
+    );
+    expect(moduleConfigWrites()).toBe(1); // 仅种子写入，校验失败未写
+  });
+
+  it('模型不在服务商列表时判定不可用', async () => {
+    await seedConfig({
+      llm_models: {
+        enabled: true,
+        provider: 'DeepSeek',
+        model: 'ghost-model',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'sk-test',
+        paramsText: '',
+      },
+    });
+    const tree = await renderScreen();
+    pressLabel(tree, '保存');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(Alert.alert).toHaveBeenCalledWith(
+      '配置校验失败',
+      expect.stringContaining('模型不可用'),
+    );
+    expect(moduleConfigWrites()).toBe(1);
+  });
+
+  it('取消校验使过期批次丢弃，不写入', async () => {
+    await seedConfig({
+      llm_models: {
+        enabled: true,
+        provider: 'DeepSeek',
+        model: 'deepseek-v4-flash',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: 'sk-test',
+        paramsText: '',
+      },
+    });
+    let resolveModels!: (value: string[]) => void;
+    mockFetchModelsList.mockImplementation(
       () =>
-        new Promise<void>((_resolve, reject) => {
-          rejectProbe = reject;
+        new Promise<string[]>((resolve) => {
+          resolveModels = resolve;
         }),
     );
-
-    const apiKeyInput = tree!.root.findAllByProps({
-      placeholder: '粘贴对话服务商的 API Key',
-    })[0];
-    await act(async () => {
-      apiKeyInput.props.onChangeText('sk-test');
-    });
+    const tree = await renderScreen();
+    pressLabel(tree, '保存');
     await act(async () => {
       await Promise.resolve();
     });
-
-    const nextText = tree!.root.findAll(
-      (node) => node.props.children === '下一步',
-    )[0];
+    pressLabel(tree, '取消');
     await act(async () => {
-      await nextText.parent!.props.onPress();
+      resolveModels(['deepseek-v4-flash']);
     });
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    // 校验中：整页遮罩覆盖（含头部返回），并显示“校验中…”
-    const overlayText = tree!.root.findAll(
-      (node) => node.props.children === '校验中…',
-    )[0];
-    expect(overlayText).toBeTruthy();
-
-    // 校验结束（失败路径）：遮罩消失，控件未单独冻结
-    await act(async () => {
-      rejectProbe(new Error('401 Unauthorized'));
-    });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(
-      tree!.root.findAll((node) => node.props.children === '校验中…')[0],
-    ).toBeFalsy();
-    expect(apiKeyInput.props.editable).not.toBe(false);
+    expect(moduleConfigWrites()).toBe(1);
   });
 });

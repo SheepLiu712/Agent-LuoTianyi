@@ -1,204 +1,117 @@
-"""credential 模块：LLM API Key 加密/明文保存行为测试。"""
+"""credential 模块：统一 LLM 模块配置（llm_modules）加密/明文保存行为测试。"""
 
 import json
 
 from src.safety import credential
 
 
-def test_save_api_key_plaintext_when_encryption_unavailable(monkeypatch, tmp_path):
+def _setup(monkeypatch, tmp_path):
+    """关闭 DPAPI，把凭据文件指到临时目录：与旧测试同一套隔离方式。"""
     monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
     monkeypatch.setattr(
         credential, "get_credential_path", lambda: str(tmp_path / "user.json")
     )
 
-    # 普通保存路径在加密不可用时返回 False 且不写入明文
-    assert credential.save_api_key("sk-test") is False
-    assert credential.get_api_key() is None
-    # 显式明文保存（仅二次确认后可调用）
-    credential.save_api_key_plain("sk-test")
-    assert credential.get_api_key() == "sk-test"
+
+def test_get_llm_modules_config_empty_default(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    assert credential.get_llm_modules_config() == {}
+    assert credential.get_module_config("llm_models") is None
+
+
+def test_save_llm_modules_config_plaintext_roundtrip(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    modules = {
+        "llm_models": {
+            "enabled": True,
+            "provider": "DeepSeek",
+            "model": "deepseek-v4-flash",
+            "base_url": "https://api.deepseek.com/v1",
+            "params": {"temperature": 0.7},
+            "api_key": "sk-test",
+        },
+        "vlm_models": {
+            "enabled": False,
+            "provider": "",
+            "model": "",
+            "base_url": "",
+            "params": {},
+            "api_key": "",
+        },
+    }
+    assert credential.save_llm_modules_config(modules, allow_plaintext=True) is True
+
+    cfg = credential.get_llm_modules_config()
+    assert cfg["llm_models"]["enabled"] is True
+    assert cfg["llm_models"]["api_key"] == "sk-test"
+    assert cfg["llm_models"]["provider"] == "DeepSeek"
+    assert cfg["llm_models"]["model"] == "deepseek-v4-flash"
+    assert cfg["llm_models"]["base_url"] == "https://api.deepseek.com/v1"
+    assert cfg["llm_models"]["params"] == {"temperature": 0.7}
+    assert cfg["vlm_models"]["enabled"] is False
+    assert cfg["vlm_models"]["api_key"] == ""
+    assert credential.get_module_config("llm_models")["api_key"] == "sk-test"
+
     with open(tmp_path / "user.json", encoding="utf-8") as f:
         data = json.load(f)
-    assert data.get("api_key_plain") == "sk-test"
-    assert "api_key_dpapi" not in data
+    stored = data["llm_modules"]["llm_models"]
+    assert stored["api_key_plain"] == "sk-test"
+    assert "api_key_dpapi" not in stored
 
 
-def test_save_api_key_refuses_plaintext_without_flag(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    assert credential.save_api_key("sk-test") is False
-    assert credential.get_api_key() is None
+def test_save_llm_modules_config_refuses_plaintext_without_flag(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    modules = {
+        "llm_models": {
+            "enabled": True,
+            "provider": "P",
+            "model": "M",
+            "base_url": "B",
+            "params": {},
+            "api_key": "sk-test",
+        }
+    }
+    assert credential.save_llm_modules_config(modules) is False
     if (tmp_path / "user.json").exists():
         data = json.loads((tmp_path / "user.json").read_text(encoding="utf-8"))
-        assert "api_key_plain" not in data
-        assert "api_key_dpapi" not in data
+        assert "llm_modules" not in data or not data["llm_modules"]
 
 
-def test_save_api_key_clears_plaintext(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
+def test_save_llm_modules_config_preserves_other_fields(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    path = tmp_path / "user.json"
+    path.write_text(
+        json.dumps(
+            {
+                "username": "user1",
+                "server_url": "https://srv",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
     )
-
-    credential.save_api_key_plain("sk-test")
-    assert credential.get_api_key() == "sk-test"
-    assert credential.save_api_key("") is True
-    assert credential.get_api_key() is None
-
-
-def test_vlm_api_key_separate_from_text_key(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(credential, "get_credential_path", lambda: str(tmp_path / "user.json"))
-
-    credential.save_api_key_plain("sk-text")
-    credential.save_vlm_api_key_plain("sk-vlm")
-    assert credential.get_api_key() == "sk-text"
-    assert credential.get_vlm_api_key() == "sk-vlm"
-
-
-def test_vlm_api_key_plaintext_fallback(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(credential, "get_credential_path", lambda: str(tmp_path / "user.json"))
-
-    assert credential.save_vlm_api_key("sk-vlm", allow_plaintext=True) is True
-    assert credential.get_vlm_api_key() == "sk-vlm"
-
-
-def test_llm_flags_default_false(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    assert credential.get_llm_flags() == {"enable_thinking": False, "use_json": False}
-
-
-def test_llm_flags_roundtrip(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    credential.save_llm_flags(True, True)
-    assert credential.get_llm_flags() == {"enable_thinking": True, "use_json": True}
-
-    credential.save_llm_flags(False, True)
-    assert credential.get_llm_flags() == {"enable_thinking": False, "use_json": True}
-
-
-def test_vlm_flags_roundtrip(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    assert credential.get_vlm_flags() == {"enable_thinking": False, "use_json": False}
-    credential.save_vlm_flags(True, False)
-    assert credential.get_vlm_flags() == {"enable_thinking": True, "use_json": False}
-
-
-def test_save_credentials_preserves_flags(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    credential.save_llm_flags(True, True)
-    credential.save_vlm_flags(True, False)
-    credential.save_credentials("u", "", False)
-
-    assert credential.get_llm_flags() == {"enable_thinking": True, "use_json": True}
-    assert credential.get_vlm_flags() == {"enable_thinking": True, "use_json": False}
-
-
-def test_save_llm_config_atomic_roundtrip(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    ok = credential.save_llm_config(
-        "sk-test", "DeepSeek", "deepseek-v4-flash", "https://api.deepseek.com/v1",
-        {"temperature": 0.7}, allow_plaintext=True,
-    )
-    assert ok is True
-    assert credential.get_api_key() == "sk-test"
-    assert credential.get_provider() == "DeepSeek"
-    assert credential.get_model() == "deepseek-v4-flash"
-    assert credential.get_provider_base_url() == "https://api.deepseek.com/v1"
-    assert credential.get_llm_params() == {"temperature": 0.7}
-    assert credential.get_llm_flags() == {"enable_thinking": False, "use_json": False}
-
-
-def test_save_llm_config_clears_all_atomically(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    credential.save_llm_config(
-        "sk-test", "DeepSeek", "deepseek-v4-flash", "https://api.deepseek.com/v1",
-        {"temperature": 0.7}, allow_plaintext=True,
-    )
-    assert credential.save_llm_config("", "", "", "", {}) is True
-    assert credential.get_api_key() is None
-    assert credential.get_provider() is None
-    assert credential.get_model() is None
-    assert credential.get_provider_base_url() is None
-    assert credential.get_llm_params() == {}
-    assert credential.get_llm_flags() == {"enable_thinking": False, "use_json": False}
-
-
-def test_save_llm_config_refuses_plaintext_without_flag(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    assert (
-        credential.save_llm_config(
-            "sk-test", "DeepSeek", "deepseek-v4-flash", "https://api.deepseek.com/v1",
-            {},
-        )
-        is False
-    )
-    assert credential.get_api_key() is None
-    assert credential.get_provider() is None
-
-
-def test_save_vlm_config_roundtrip(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    assert credential.save_vlm_config(
-        "sk-vlm", "DeepSeek", "deepseek-vl", "https://api.deepseek.com/v1",
-        {"temperature": 0.3}, allow_plaintext=True,
+    assert credential.save_llm_modules_config(
+        {
+            "llm_models": {
+                "enabled": True,
+                "provider": "P",
+                "model": "M",
+                "base_url": "B",
+                "params": {},
+                "api_key": "sk2",
+            }
+        },
+        allow_plaintext=True,
     ) is True
-    assert credential.get_vlm_api_key() == "sk-vlm"
-    assert credential.get_vlm_provider() == "DeepSeek"
-    assert credential.get_vlm_model() == "deepseek-vl"
-    assert credential.get_vlm_provider_base_url() == "https://api.deepseek.com/v1"
-    assert credential.get_vlm_params() == {"temperature": 0.3}
-    assert credential.get_vlm_flags() == {"enable_thinking": False, "use_json": False}
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["username"] == "user1"
+    assert data["server_url"] == "https://srv"
+    assert credential.load_credentials()[0] == "user1"
 
 
-def test_save_llm_config_preserves_other_fields(monkeypatch, tmp_path):
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
-    monkeypatch.setattr(
-        credential, "get_credential_path", lambda: str(tmp_path / "user.json")
-    )
-
-    credential.save_credentials("user1", "", True)
-    credential.save_llm_config(
-        "sk-test", "DeepSeek", "deepseek-v4-flash", "https://api.deepseek.com/v1",
-        {}, allow_plaintext=True,
-    )
-    assert credential.get_provider() == "DeepSeek"
-    with open(tmp_path / "user.json", encoding="utf-8") as f:
-        data = json.load(f)
-    assert data.get("username") == "user1"
+def test_save_credentials_preserves_server_url(monkeypatch, tmp_path):
+    _setup(monkeypatch, tmp_path)
+    credential.save_server_url("https://srv", verify_ssl=True)
+    credential.save_credentials("u", "", False)
+    assert credential.get_server_url() == "https://srv"

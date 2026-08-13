@@ -47,16 +47,7 @@ class WsTransport:
         token_getter: Callable[[], str | None],
         verify_ssl: bool = True,
         heartbeat_interval: float = 10.0,
-        api_key_getter: Callable[[], str | None] | None = None,
-        provider_getter: Callable[[], str | None] | None = None,
-        model_getter: Callable[[], str | None] | None = None,
-        vlm_provider_getter: Callable[[], str | None] | None = None,
-        vlm_model_getter: Callable[[], str | None] | None = None,
-        vlm_api_key_getter: Callable[[], str | None] | None = None,
-        base_url_getter: Callable[[], str | None] | None = None,
-        vlm_base_url_getter: Callable[[], str | None] | None = None,
-        params_getter: Callable[[], dict | None] | None = None,
-        vlm_params_getter: Callable[[], dict | None] | None = None,
+        module_config_getter: Callable[[str], dict | None] | None = None,
         llm_capabilities_getter: Callable[[], dict | None] | None = None,
         vlm_capabilities_getter: Callable[[], dict | None] | None = None,
     ):
@@ -65,16 +56,7 @@ class WsTransport:
         self.token_getter = token_getter
         self.verify_ssl = verify_ssl
         self.heartbeat_interval = heartbeat_interval
-        self.api_key_getter = api_key_getter
-        self.provider_getter = provider_getter
-        self.model_getter = model_getter
-        self.vlm_provider_getter = vlm_provider_getter
-        self.vlm_model_getter = vlm_model_getter
-        self.vlm_api_key_getter = vlm_api_key_getter
-        self.base_url_getter = base_url_getter
-        self.vlm_base_url_getter = vlm_base_url_getter
-        self.params_getter = params_getter
-        self.vlm_params_getter = vlm_params_getter
+        self.module_config_getter = module_config_getter
         self.llm_capabilities_getter = llm_capabilities_getter
         self.vlm_capabilities_getter = vlm_capabilities_getter
 
@@ -96,6 +78,17 @@ class WsTransport:
         self._ready_event = threading.Event()
         self._connected_event = threading.Event()
         self._auth_rejected_credentials: tuple[str | None, str | None] | None = None
+
+    def _module_config(self, module_key: str) -> dict | None:
+        """读取某个能力模块的客户端配置；未配置/读取异常返回 None。"""
+        if self.module_config_getter is None:
+            return None
+        try:
+            cfg = self.module_config_getter(module_key)
+        except Exception as exc:
+            self.logger.error(f"module config getter failed for {module_key}: {exc}")
+            return None
+        return cfg if isinstance(cfg, dict) else None
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
         """更新服务器地址，断开当前连接以便自动重连到新地址。"""
@@ -153,7 +146,7 @@ class WsTransport:
         if is_proactive:
             payload["is_proactive"] = True
         self._client_mode["text"] = bool(
-            self.api_key_getter and self.api_key_getter()
+            (self._module_config("llm_models") or {}).get("enabled")
         )
         payload["llm_mode"] = dict(self._client_mode)
         return self._submit_user_event(
@@ -178,7 +171,7 @@ class WsTransport:
         if image_client_path:
             payload["image_client_path"] = image_client_path
         self._client_mode["vlm"] = bool(
-            self.vlm_api_key_getter and self.vlm_api_key_getter()
+            (self._module_config("vlm_models") or {}).get("enabled")
         )
         payload["llm_mode"] = dict(self._client_mode)
         return self._submit_user_event(
@@ -499,19 +492,15 @@ class WsTransport:
             return
 
         is_image = bool(payload.get("image_base64"))
-        if is_image:
-            api_key = self.vlm_api_key_getter() if self.vlm_api_key_getter else None
-        else:
-            api_key = self.api_key_getter() if self.api_key_getter else None
+        module_key = "vlm_models" if is_image else "llm_models"
+        cfg = self._module_config(module_key) or {}
+        api_key = cfg.get("api_key") or ""
         if not api_key:
             self.logger.warning("llm_request received but no api key configured on client")
             await self._send_llm_response(request_id, error="no api key configured on client")
             return
 
-        if is_image:
-            base_url = self.vlm_base_url_getter() if self.vlm_base_url_getter else None
-        else:
-            base_url = self.base_url_getter() if self.base_url_getter else None
+        base_url = cfg.get("base_url") or ""
         if not base_url:
             await self._send_llm_response(
                 request_id,
@@ -519,29 +508,26 @@ class WsTransport:
             )
             return
         url = f"{base_url.rstrip('/')}/chat/completions"
-        if is_image:
-            model = self.vlm_model_getter() if self.vlm_model_getter else None
-        else:
-            model = self.model_getter() if self.model_getter else None
+        model = cfg.get("model") or ""
         if not model:
             await self._send_llm_response(request_id, error="missing provider info")
             return
 
         server_params = payload.get("params") or {}
-        if is_image:
-            cached_params = self.vlm_params_getter() if self.vlm_params_getter else None
-            capabilities = (
+        cached_params = cfg.get("params") or {}
+        capabilities = (
+            (
                 self.vlm_capabilities_getter()
-                if self.vlm_capabilities_getter
+                if is_image and self.vlm_capabilities_getter
                 else None
             )
-        else:
-            cached_params = self.params_getter() if self.params_getter else None
-            capabilities = (
+            or (
                 self.llm_capabilities_getter()
-                if self.llm_capabilities_getter
+                if not is_image and self.llm_capabilities_getter
                 else None
             )
+            or None
+        )
         merged_params = {**(server_params or {}), **(cached_params or {})}
         capabilities = capabilities or {}
         model_cap = capabilities.get(model) or {}
