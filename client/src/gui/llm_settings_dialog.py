@@ -341,8 +341,19 @@ class LLMSettingsDialog(QDialog):
             self.status_label.setText("正在校验配置…，请稍候")
             return
         if self._providers_reply is not None and not self._providers_reply.isFinished():
+            self._mark_cancelled(self._providers_reply)
             self._providers_reply.abort()
         event.accept()
+
+    def _mark_cancelled(self, reply) -> None:
+        """标记 reply 为用户主动取消；Qt 超时与 abort() 同用 OperationCanceledError，只能靠标记区分。"""
+        if reply is not None:
+            reply._intentional_cancel = True
+
+    @staticmethod
+    def _is_intentional_cancel(reply) -> bool:
+        """判断 OperationCanceledError 是否来自主动取消（否则视为传输超时）。"""
+        return bool(getattr(reply, "_intentional_cancel", False))
 
     def _can_advance(self) -> bool:
         """当前页下拉框有可用项时才允许继续（拉取失败/无模型时禁用）。"""
@@ -533,6 +544,7 @@ class LLMSettingsDialog(QDialog):
     def _start_fetch_providers(self) -> None:
         """异步拉取服务商列表（含 JSON 能力标注），取消前一个未完成的请求。"""
         if self._providers_reply is not None and not self._providers_reply.isFinished():
+            self._mark_cancelled(self._providers_reply)
             self._providers_reply.abort()
         base = self.network_client.base_url
         request = QNetworkRequest(QUrl(f"{base.rstrip('/')}/llm/providers"))
@@ -541,12 +553,15 @@ class LLMSettingsDialog(QDialog):
         self._providers_reply.finished.connect(self._on_providers_reply)
 
     def _on_providers_reply(self) -> None:
-        """处理服务商列表响应；旧请求被取消/替换后直接忽略。"""
+        """处理服务商列表响应；仅用户主动取消才静默忽略，超时按失败提示。"""
         reply = self.sender()
         if reply is None or reply is not self._providers_reply:
             return
         self._providers_reply = None
         if reply.error() == QNetworkReply.NetworkError.OperationCanceledError:
+            if self._is_intentional_cancel(reply):
+                return
+            self._on_providers_failed("请求超时（15 秒无响应），请检查网络后重试。")
             return
         if reply.error() != QNetworkReply.NetworkError.NoError:
             self._on_providers_failed(reply.errorString())
@@ -846,12 +861,20 @@ class LLMSettingsDialog(QDialog):
             self._overlay.setGeometry(self.rect())
 
     def _on_probe_reply(self) -> None:
-        """全部探测请求结束时汇总错误；被取消的请求不视为校验失败。"""
+        """全部探测请求结束时汇总错误；超时视为校验失败，仅主动取消的请求跳过。"""
         if not all(r.isFinished() for r in self._probe_replies):
             return
         errors = []
         for reply, probe in zip(self._probe_replies, self._probe_configs):
             if reply.error() == QNetworkReply.NetworkError.OperationCanceledError:
+                if self._is_intentional_cancel(reply):
+                    continue
+                errors.append(
+                    _friendly_probe_error(
+                        probe["name"],
+                        Exception("网络请求超时（30 秒无响应），请检查网络后重试。"),
+                    )
+                )
                 continue
             if reply.error() != QNetworkReply.NetworkError.NoError:
                 errors.append(

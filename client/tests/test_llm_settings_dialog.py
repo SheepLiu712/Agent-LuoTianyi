@@ -93,6 +93,13 @@ class FakeHttp:
     def __init__(self, parent=None):
         self.requests = []
         self._responses = []
+        self._post_responses = []
+
+    def setRedirectPolicy(self, policy):
+        pass
+
+    def setAutoDeleteReplies(self, enabled):
+        pass
 
     def queue_response(
         self,
@@ -125,7 +132,12 @@ class FakeHttp:
             ).encode("utf-8")
         )
 
+    def queue_post_response(self, reply):
+        self._post_responses.append(reply)
+
     def post(self, request, data):
+        if self._post_responses:
+            return self._post_responses.pop(0)
         return FakeReply(b"{}")
 
 
@@ -295,3 +307,151 @@ def test_refresh_ignores_stale_providers_reply(make_dialog, qapp):
     assert dialog.provider_combo.currentText() == "DeepSeek"
     assert dialog.model_combo.currentText() == "deepseek-v4-flash"
     assert dialog._llm_providers[0]["name"] == "DeepSeek"
+
+
+def test_providers_timeout_is_reported(make_dialog, qapp):
+    """服务商列表 15 秒传输超时（Qt 6.9 下为 OperationCanceledError）应提示失败，而非静默忽略。"""
+    dialog = make_dialog()
+    http = dialog._http
+    http.queue_response(
+        PROVIDERS,
+        error=QNetworkReply.NetworkError.OperationCanceledError,
+        error_string="Operation canceled",
+    )
+    dialog._refresh_providers()
+    for _ in range(5):
+        qapp.processEvents()
+    assert "获取服务商列表失败" in dialog.status_label.text()
+    assert "超时" in dialog.status_label.text()
+
+
+def test_providers_intentional_cancel_is_ignored(make_dialog, qapp):
+    """用户主动 abort 服务商列表请求（关闭/刷新）时保持静默忽略。"""
+    dialog = make_dialog()
+    reply = FakeReply(
+        b"",
+        error=QNetworkReply.NetworkError.OperationCanceledError,
+        error_string="Operation canceled",
+    )
+    dialog._mark_cancelled(reply)
+    dialog._providers_reply = reply
+    reply.finished.connect(dialog._on_providers_reply)
+    for _ in range(5):
+        qapp.processEvents()
+    assert dialog._providers_reply is None
+    assert "获取服务商列表失败" not in dialog.status_label.text()
+
+
+def _probe_cfg():
+    return {
+        "name": "DeepSeek",
+        "kind": "text",
+        "api_key": "sk-test",
+        "provider": "DeepSeek",
+        "model": "deepseek-v4-flash",
+        "params": {},
+    }
+
+
+def test_probe_timeout_fails_validation(make_dialog, qapp, monkeypatch):
+    """探测请求 30 秒超时（OperationCanceledError）必须判定校验失败，不能保存配置。"""
+    dialog = make_dialog()
+    saved = []
+    monkeypatch.setattr(
+        credential, "save_llm_config", lambda *a, **k: saved.append(a) or True
+    )
+    errors_box = []
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox, "critical", lambda parent, title, text: errors_box.append(text)
+    )
+
+    reply = FakeReply(
+        b"",
+        error=QNetworkReply.NetworkError.OperationCanceledError,
+        error_string="Operation canceled",
+    )
+    dialog._probe_replies = [reply]
+    dialog._probe_configs = [
+        {
+            "name": "DeepSeek",
+            "base_url": "https://d/v1",
+            "api_key": "sk-test",
+            "model": "deepseek-v4-flash",
+            "params": {},
+        }
+    ]
+    cfg = _probe_cfg()
+    dialog._pending_save = (cfg, None)
+    dialog._set_frozen(True)
+    reply.finished.connect(dialog._on_probe_reply)
+    for _ in range(5):
+        qapp.processEvents()
+
+    assert errors_box, "超时应当弹窗报错"
+    assert dialog.status_label.text() == "配置校验失败"
+    assert saved == [], "超时不应保存配置"
+    assert dialog._pending_save == (cfg, None)
+
+
+def test_probe_intentional_cancel_is_skipped(make_dialog, qapp, monkeypatch):
+    """主动取消的探测请求跳过不算失败，其余请求正常时允许保存。"""
+    dialog = make_dialog()
+    saved = []
+    monkeypatch.setattr(
+        credential, "save_llm_config", lambda *a, **k: saved.append(a) or True
+    )
+    monkeypatch.setattr(dlg_mod.QMessageBox, "information", lambda *a, **k: None)
+
+    reply = FakeReply(
+        b"",
+        error=QNetworkReply.NetworkError.OperationCanceledError,
+        error_string="Operation canceled",
+    )
+    dialog._mark_cancelled(reply)
+    dialog._probe_replies = [reply]
+    dialog._probe_configs = [
+        {
+            "name": "DeepSeek",
+            "base_url": "https://d/v1",
+            "api_key": "sk-test",
+            "model": "deepseek-v4-flash",
+            "params": {},
+        }
+    ]
+    dialog._pending_save = (_probe_cfg(), None)
+    dialog._set_frozen(True)
+    reply.finished.connect(dialog._on_probe_reply)
+    for _ in range(5):
+        qapp.processEvents()
+
+    assert saved, "主动取消应被跳过并继续保存"
+    assert dialog._pending_save is None
+
+
+def test_save_with_timed_out_probe_is_rejected(make_dialog, qapp, monkeypatch):
+    """端到端：_save_page 发起探测，30 秒超时后弹窗报错且不落盘。"""
+    dialog = make_dialog()
+    saved = []
+    monkeypatch.setattr(
+        credential, "save_llm_config", lambda *a, **k: saved.append(a) or True
+    )
+    errors_box = []
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox, "critical", lambda parent, title, text: errors_box.append(text)
+    )
+
+    http = dialog._http
+    http.queue_post_response(
+        FakeReply(
+            b"",
+            error=QNetworkReply.NetworkError.OperationCanceledError,
+            error_string="Operation canceled",
+        )
+    )
+    dialog._save_page(_probe_cfg())
+    for _ in range(5):
+        qapp.processEvents()
+
+    assert errors_box, "超时应弹窗报错"
+    assert saved == [], "超时不应保存配置"
+    assert dialog.status_label.text() == "配置校验失败"
