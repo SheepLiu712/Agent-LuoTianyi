@@ -14,7 +14,7 @@ export const CLIENT_JSON_UNSUPPORTED_MARKER = 'client_model_does_not_support_jso
 export interface LlmProviderPreset {
   name: string;
   base_url: string;
-  models: string[];
+  llm_models: string[];
   vlm_models: string[];
 }
 
@@ -140,14 +140,47 @@ export function resolveProviderModel(
   providerName?: string | null,
   presets: LlmProviderPreset[] = cachedProvidersResponse?.providers ?? [],
 ): string {
-  // 返回默认文本模型（models 列表第一项）
+  // 返回默认文本模型（llm_models 列表第一项）
   const name = providerName || '';
   for (const preset of presets) {
     if (preset.name === name) {
-      return preset.models?.[0] ?? '';
+      return preset.llm_models?.[0] ?? '';
     }
   }
   return '';
+}
+
+/**
+ * 校验用：GET {base_url}/models，返回模型 id 列表。
+ * 不发起任何对话请求，不消耗 Token；超时/非 2xx 抛异常。
+ */
+export async function fetchModelsList(
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs = 30000,
+): Promise<string[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const resp = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      throw new Error(`HTTP ${resp.status}`);
+    }
+    const data = (await resp.json()) as { data?: unknown };
+    const raw = Array.isArray(data?.data) ? data.data : [];
+    return raw
+      .filter(
+        (item): item is { id?: unknown } =>
+          !!item && typeof item === 'object' && 'id' in (item as object),
+      )
+      .map((item) => String(item.id ?? ''))
+      .filter((id) => id.length > 0);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function resolveProviderVlmModel(

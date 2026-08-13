@@ -103,13 +103,13 @@ def resolve_provider_model(
     provider_name: str | None,
     presets: Optional[list[Dict[str, Any]]] = None,
 ) -> str:
-    """按预设名称返回默认文本 model（models 列表第一项）；未匹配返回空串。"""
+    """按预设名称返回默认文本 model（llm_models 列表第一项）；未匹配返回空串。"""
     if presets is None:
         presets = []
     name = provider_name or ""
     for preset in presets:
         if preset["name"] == name:
-            models = preset.get("models") or []
+            models = preset.get("llm_models") or []
             return str(models[0]) if models else ""
     return ""
 

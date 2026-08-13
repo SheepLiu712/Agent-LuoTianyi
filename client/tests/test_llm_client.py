@@ -18,17 +18,27 @@ from src.utils.llm_client import (
     resolve_provider_vlm_model,
 )
 
+
+def _module_cfg(**modules):
+    """按能力 key 构造 module_config_getter；未提供的 key 返回 None。"""
+
+    def getter(key: str) -> dict | None:
+        return modules.get(key)
+
+    return getter
+
+
 PRESETS = [
     {
         "name": "阿里云百炼（DashScope）",
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "models": ["qwen3.5-plus", "qwen3.6-flash"],
+        "llm_models": ["qwen3.5-plus", "qwen3.6-flash"],
         "vlm_models": ["qwen3-vl-plus"],
     },
     {
         "name": "DeepSeek",
         "base_url": "https://api.deepseek.com/v1",
-        "models": ["deepseek-v4-flash", "deepseek-v4-pro"],
+        "llm_models": ["deepseek-v4-flash", "deepseek-v4-pro"],
         "vlm_models": [],
     },
 ]
@@ -252,7 +262,9 @@ def test_submit_user_text_includes_llm_mode_when_key(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user-key",
+        module_config_getter=_module_cfg(
+            llm_models={"enabled": True, "api_key": "sk-user-key"}
+        ),
     )
     monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
     transport.submit_user_text("hello")
@@ -270,7 +282,7 @@ def test_submit_user_text_llm_mode_false_without_key(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: None,
+        module_config_getter=lambda key: None,
     )
     monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
     transport.submit_user_text("hello")
@@ -288,7 +300,9 @@ def test_submit_user_text_updates_mode_from_key(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user-key",
+        module_config_getter=_module_cfg(
+            llm_models={"enabled": True, "api_key": "sk-user-key"}
+        ),
     )
     monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
     transport.submit_user_text("hello")
@@ -297,8 +311,8 @@ def test_submit_user_text_updates_mode_from_key(monkeypatch):
     # key 清空后，下一条消息携带全量模式对象并关闭 text 维度
     monkeypatch.setattr(
         transport,
-        "api_key_getter",
-        lambda: None,
+        "module_config_getter",
+        lambda key: None,
     )
     transport.submit_user_text("hi")
     assert captured[-1]["llm_mode"] == {"text": False, "vlm": False}
@@ -319,8 +333,10 @@ def test_submit_user_image_uses_vlm_key_for_mode(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-text-key",
-        vlm_api_key_getter=lambda: "sk-vlm-key",
+        module_config_getter=_module_cfg(
+            llm_models={"enabled": True, "api_key": "sk-text-key"},
+            vlm_models={"enabled": True, "api_key": "sk-vlm-key"},
+        ),
     )
     monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
     transport.submit_user_text("hello")
@@ -330,7 +346,14 @@ def test_submit_user_image_uses_vlm_key_for_mode(monkeypatch):
     assert captured[-1]["llm_mode"] == {"text": True, "vlm": True}
 
     # vlm key 清空后，下一条图片消息关闭 vlm 维度（text 不受影响）
-    monkeypatch.setattr(transport, "vlm_api_key_getter", lambda: None)
+    monkeypatch.setattr(
+        transport,
+        "module_config_getter",
+        _module_cfg(
+            llm_models={"enabled": True, "api_key": "sk-text-key"},
+            vlm_models={"enabled": False, "api_key": ""},
+        ),
+    )
     transport.submit_user_image("data:image/png;base64,AAA", "image/png")
     assert captured[-1]["llm_mode"] == {"text": True, "vlm": False}
 
@@ -351,7 +374,9 @@ def test_submit_user_image_mode_not_affected_by_text_key(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-text-key",
+        module_config_getter=_module_cfg(
+            llm_models={"enabled": True, "api_key": "sk-text-key"}
+        ),
     )
     monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
     transport.submit_user_image("data:image/png;base64,AAA", "image/png")
@@ -372,10 +397,16 @@ async def test_handle_llm_request_uses_cached_config(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        provider_getter=lambda: "DeepSeek",
-        model_getter=lambda: "deepseek-v4-flash",
-        base_url_getter=lambda: "https://api.deepseek.com/v1",
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "provider": "DeepSeek",
+                "model": "deepseek-v4-flash",
+                "base_url": "https://api.deepseek.com/v1",
+                "params": {},
+            }
+        ),
     )
     await transport._handle_llm_request(
         None,
@@ -407,10 +438,16 @@ async def test_handle_llm_request_uses_saved_model(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        provider_getter=lambda: "DeepSeek",
-        model_getter=lambda: "deepseek-v4-pro",
-        base_url_getter=lambda: "https://api.deepseek.com/v1",
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "provider": "DeepSeek",
+                "model": "deepseek-v4-pro",
+                "base_url": "https://api.deepseek.com/v1",
+                "params": {},
+            }
+        ),
     )
     await transport._handle_llm_request(
         None,
@@ -438,10 +475,16 @@ async def test_handle_llm_request_uses_cached_base_url_and_model(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        provider_getter=lambda: "不存在的服务商",
-        model_getter=lambda: "cached-model",
-        base_url_getter=lambda: "https://cached.example.com/v1",
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "provider": "不存在的服务商",
+                "model": "cached-model",
+                "base_url": "https://cached.example.com/v1",
+                "params": {},
+            }
+        ),
     )
     await transport._handle_llm_request(
         None,
@@ -470,14 +513,24 @@ async def test_handle_llm_request_uses_vlm_model_for_image(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        provider_getter=lambda: "阿里云百炼（DashScope）",
-        model_getter=lambda: "qwen3.5-plus",
-        vlm_provider_getter=lambda: "阿里云百炼（DashScope）",
-        vlm_model_getter=lambda: "qwen3-vl-plus",
-        vlm_api_key_getter=lambda: "sk-vlm",
-        base_url_getter=lambda: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        vlm_base_url_getter=lambda: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "provider": "阿里云百炼（DashScope）",
+                "model": "qwen3.5-plus",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "params": {},
+            },
+            vlm_models={
+                "enabled": True,
+                "api_key": "sk-vlm",
+                "provider": "阿里云百炼（DashScope）",
+                "model": "qwen3-vl-plus",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "params": {},
+            },
+        ),
     )
     await transport._handle_llm_request(
         None,
@@ -507,11 +560,15 @@ async def test_handle_llm_request_image_does_not_fallback_to_text_key(monkeypatc
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-text-key",
-        model_getter=lambda: "m",
-        vlm_model_getter=lambda: "vlm-m",
-        base_url_getter=lambda: "https://example.com/v1",
-        vlm_base_url_getter=lambda: "https://example.com/v1",
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-text-key",
+                "model": "m",
+                "base_url": "https://example.com/v1",
+                "params": {},
+            }
+        ),
     )
     fake_ws = FakeClientWs()
     transport._ws = fake_ws
@@ -545,10 +602,15 @@ async def test_handle_llm_request_merges_cached_params(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        model_getter=lambda: "m",
-        base_url_getter=lambda: "https://example.com/v1",
-        params_getter=lambda: {"temperature": 0.2, "max_tokens": 2048},
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "model": "m",
+                "base_url": "https://example.com/v1",
+                "params": {"temperature": 0.2, "max_tokens": 2048},
+            }
+        ),
     )
     await transport._handle_llm_request(
         None,
@@ -579,9 +641,15 @@ async def test_handle_llm_request_follows_server_suggestions_when_capable(monkey
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        model_getter=lambda: "m",
-        base_url_getter=lambda: "https://example.com/v1",
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "model": "m",
+                "base_url": "https://example.com/v1",
+                "params": {},
+            }
+        ),
         llm_capabilities_getter=lambda: {
             "m": {"can_enable_thinking": True, "can_use_json": True}
         },
@@ -616,9 +684,15 @@ async def test_handle_llm_request_skips_switch_when_server_does_not_suggest(monk
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        model_getter=lambda: "m",
-        base_url_getter=lambda: "https://example.com/v1",
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "model": "m",
+                "base_url": "https://example.com/v1",
+                "params": {},
+            }
+        ),
         llm_capabilities_getter=lambda: {
             "m": {"can_enable_thinking": True, "can_use_json": True}
         },
@@ -653,9 +727,15 @@ async def test_handle_llm_request_json_needed_but_not_capable_errors(monkeypatch
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        model_getter=lambda: "m",
-        base_url_getter=lambda: "https://example.com/v1",
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "model": "m",
+                "base_url": "https://example.com/v1",
+                "params": {},
+            }
+        ),
         llm_capabilities_getter=lambda: {
             "m": {"can_enable_thinking": False, "can_use_json": False}
         },
@@ -693,12 +773,22 @@ async def test_handle_llm_request_uses_vlm_flags_for_image(monkeypatch):
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        model_getter=lambda: "m",
-        vlm_model_getter=lambda: "vlm-m",
-        vlm_api_key_getter=lambda: "sk-vlm",
-        base_url_getter=lambda: "https://example.com/v1",
-        vlm_base_url_getter=lambda: "https://example.com/v1",
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "model": "m",
+                "base_url": "https://example.com/v1",
+                "params": {},
+            },
+            vlm_models={
+                "enabled": True,
+                "api_key": "sk-vlm",
+                "model": "vlm-m",
+                "base_url": "https://example.com/v1",
+                "params": {},
+            },
+        ),
         llm_capabilities_getter=lambda: {
             "m": {"can_enable_thinking": False, "can_use_json": False}
         },
@@ -737,10 +827,16 @@ async def test_handle_llm_request_missing_cached_base_url_errors():
         "wss://example.com",
         username_getter=lambda: "u",
         token_getter=lambda: "t",
-        api_key_getter=lambda: "sk-user",
-        provider_getter=lambda: "DeepSeek",
-        model_getter=lambda: "deepseek-v4-flash",
-        base_url_getter=lambda: None,
+        module_config_getter=_module_cfg(
+            llm_models={
+                "enabled": True,
+                "api_key": "sk-user",
+                "provider": "DeepSeek",
+                "model": "deepseek-v4-flash",
+                "base_url": "",
+                "params": {},
+            }
+        ),
     )
     fake_ws = FakeClientWs()
     transport._ws = fake_ws

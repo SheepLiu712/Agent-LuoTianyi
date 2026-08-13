@@ -10,7 +10,7 @@ import {
   CLIENT_JSON_UNSUPPORTED_MARKER,
   ensureProviderPresets,
 } from './llm_client';
-import { getLlmConfig, getVlmConfig } from './llm_key_storage';
+import { getModuleConfig } from './llm_key_storage';
 
 export type { AckResult } from './ws_ack';
 export { normalizeServerAck } from './ws_ack';
@@ -147,12 +147,12 @@ export class WebSocketTransport {
   }
 
   async submitUserText(message: string, isProactive = false, ackTimeout = 10000, clientMsgId?: string): Promise<AckResult> {
-    const cfg = await getLlmConfig();
+    const cfg = await getModuleConfig('llm_models');
     const payload: Record<string, unknown> = { message };
     if (isProactive) {
       payload.is_proactive = true;
     }
-    this.clientMode.text = Boolean(cfg?.apiKey);
+    this.clientMode.text = Boolean(cfg?.enabled);
     payload.llm_mode = { ...this.clientMode };
     return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout, clientMsgId);
   }
@@ -164,13 +164,13 @@ export class WebSocketTransport {
     ackTimeout = 10000,
     clientMsgId?: string,
   ): Promise<AckResult> {
-    const cfg = await getVlmConfig();
+    const cfg = await getModuleConfig('vlm_models');
     const payload: Record<string, unknown> = {
       image_base64: imageBase64,
       mime_type: mimeType,
       image_client_path: imageClientPath,
     };
-    this.clientMode.vlm = Boolean(cfg?.apiKey);
+    this.clientMode.vlm = Boolean(cfg?.enabled);
     payload.llm_mode = { ...this.clientMode };
     return this.sendWithAck(WSEventType.USER_IMAGE, payload, ackTimeout, clientMsgId);
   }
@@ -592,8 +592,10 @@ export class WebSocketTransport {
     };
     try {
       const isImage = typeof payload.image_base64 === 'string' && !!payload.image_base64;
-      const cfg = isImage ? await getVlmConfig() : await getLlmConfig();
-      if (!cfg || !cfg.apiKey) {
+      const cfg = isImage
+        ? await getModuleConfig('vlm_models')
+        : await getModuleConfig('llm_models');
+      if (!cfg || !cfg.enabled || !cfg.apiKey) {
         addDebugTrace('llm', 'llm_request without api key');
         sendError('no api key configured on client');
         return;

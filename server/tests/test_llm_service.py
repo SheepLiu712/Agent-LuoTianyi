@@ -73,15 +73,16 @@ class TestLLMService:
         for provider in providers:
             assert provider["name"]
             assert provider["base_url"]
-            assert isinstance(provider["models"], list)
+            assert isinstance(provider["llm_models"], list)
             assert isinstance(provider["vlm_models"], list)
-            assert provider["models"] or provider["vlm_models"]
+            assert "models" not in provider
+            assert provider["llm_models"] or provider["vlm_models"]
             by_name[provider["name"]] = provider
 
-        # LLM 接口的 model 应出现在对应服务商的 models 中
+        # LLM 接口的 model 应出现在对应服务商的 llm_models 中
         llm_info = llm_service.get_llm_interface_info()
         for name, info in llm_info.items():
-            assert info["model"] in by_name[name]["models"]
+            assert info["model"] in by_name[name]["llm_models"]
         # VLM 接口的 model 应出现在对应服务商的 vlm_models 中
         vlm_info = llm_service.get_vlm_interface_info()
         for name, info in vlm_info.items():
