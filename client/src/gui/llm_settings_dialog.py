@@ -671,7 +671,26 @@ class LLMSettingsDialog(QDialog):
         self._write_modules(modules)
 
     def _write_modules(self, modules: dict) -> None:
-        ok = credential.save_llm_modules_config(modules)
+        to_save = {}
+        for key, entry in modules.items():
+            params = {}
+            text = (entry.get("params_text") or "").strip()
+            if text:
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict):
+                        params = parsed
+                except json.JSONDecodeError:
+                    params = {}
+            to_save[key] = {
+                "enabled": entry.get("enabled", False),
+                "provider": entry.get("provider", ""),
+                "model": entry.get("model", ""),
+                "base_url": entry.get("base_url", ""),
+                "params": params,
+                "api_key": entry.get("api_key", ""),
+            }
+        ok = credential.save_llm_modules_config(to_save)
         if not ok:
             ret = QMessageBox.question(
                 self,
@@ -683,7 +702,7 @@ class LLMSettingsDialog(QDialog):
             if ret != QMessageBox.StandardButton.Yes:
                 self.status_label.setText("保存已取消（Key 未保存）")
                 return
-            ok = credential.save_llm_modules_config(modules, allow_plaintext=True)
+            ok = credential.save_llm_modules_config(to_save, allow_plaintext=True)
             if not ok:
                 self.status_label.setText("保存失败，请重试")
                 return
