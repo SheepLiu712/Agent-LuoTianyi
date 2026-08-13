@@ -355,6 +355,28 @@ def test_validation_success_saves_all_modules(make_dialog, qapp, monkeypatch):
     assert dialog.status_label.text() == "配置已保存"
 
 
+def test_validation_success_persists_advanced_params(make_dialog, qapp, monkeypatch):
+    """高级参数 JSON 文本在保存时应解析为 dict 落盘，而不是被丢弃。"""
+    dialog = make_dialog()
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox,
+        "question",
+        lambda parent, title, text, *a, **k: QMessageBox.StandardButton.Yes,
+    )
+    http = dialog._http
+    info = _fill_module(dialog)
+    info["params_editor"].setPlainText('{"temperature": 0.7, "max_tokens": 2048}')
+    http.queue_models_response(payload=_models_payload("deepseek-v4-flash"))
+    dialog._on_save()
+    for _ in range(10):
+        qapp.processEvents()
+    saved = credential.get_llm_modules_config()
+    assert saved["llm_models"]["params"] == {
+        "temperature": 0.7,
+        "max_tokens": 2048,
+    }
+
+
 def test_validation_failure_no_write(make_dialog, qapp, monkeypatch):
     """任一模块校验失败：不写入任何数据并弹窗列明模块。"""
     dialog = make_dialog()
