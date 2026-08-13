@@ -377,6 +377,25 @@ def test_validation_success_persists_advanced_params(make_dialog, qapp, monkeypa
     }
 
 
+def test_save_updates_base_url_when_provider_exists(make_dialog, qapp, monkeypatch):
+    """保存时若服务商在当前列表中，自动用预设地址更新 base_url。"""
+    dialog = make_dialog()
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox,
+        "question",
+        lambda parent, title, text, *a, **k: QMessageBox.StandardButton.Yes,
+    )
+    http = dialog._http
+    info = _fill_module(dialog)
+    info["base_url"] = "https://stale.example.com/v1"  # 模拟旧固化地址
+    http.queue_models_response(payload=_models_payload("deepseek-v4-flash"))
+    dialog._on_save()
+    for _ in range(10):
+        qapp.processEvents()
+    saved = credential.get_llm_modules_config()
+    assert saved["llm_models"]["base_url"] == "https://api.deepseek.com/v1"
+
+
 def test_validation_failure_no_write(make_dialog, qapp, monkeypatch):
     """任一模块校验失败：不写入任何数据并弹窗列明模块。"""
     dialog = make_dialog()

@@ -515,18 +515,24 @@ class LLMSettingsDialog(QDialog):
     def _collect_form_modules(self) -> dict:
         modules = {}
         for key, info in self._modules.items():
+            provider = (
+                info["provider_combo"].currentText().strip()
+                or info.get("stored_provider", "")
+            )
+            preset = next(
+                (p for p in self._providers_with_key(key) if p.get("name") == provider),
+                None,
+            )
             modules[key] = {
                 "enabled": info["switch"].isChecked(),
-                "provider": (
-                    info["provider_combo"].currentText().strip()
-                    or info.get("stored_provider", "")
-                ),
+                "provider": provider,
                 "api_key": info["api_key_input"].text().strip(),
                 "model": (
                     info["model_combo"].currentText().strip()
                     or info.get("stored_model", "")
                 ),
-                "base_url": info["base_url"],
+                # 服务商在列表中：保存时自动同步预设地址；不在则保持原值
+                "base_url": str(preset.get("base_url", "")) if preset else info["base_url"],
                 "params_text": info["params_editor"].toPlainText().strip(),
             }
         return modules

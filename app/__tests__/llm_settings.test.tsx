@@ -306,6 +306,28 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     expect(tree.root.findAllByProps({ children: '配置已保存' }).length).toBeGreaterThanOrEqual(1);
   });
 
+  it('保存时服务商在列表则自动更新 baseUrl', async () => {
+    await seedConfig({
+      llm_models: {
+        enabled: true,
+        provider: 'DeepSeek',
+        model: 'deepseek-v4-flash',
+        baseUrl: 'https://stale.example.com/v1',
+        apiKey: 'sk-test',
+        paramsText: '',
+      },
+    });
+    const tree = await renderScreen();
+    pressLabel(tree, '保存');
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const saved = JSON.parse(
+      secureStoreBacking['llm_modules_config'],
+    ) as Record<string, { baseUrl: string }>;
+    expect(saved.llm_models.baseUrl).toBe('https://api.deepseek.com/v1');
+  });
+
   it('校验失败（Key 无效）不写入并提示模块', async () => {
     await seedConfig({
       llm_models: {

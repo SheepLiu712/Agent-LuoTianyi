@@ -405,8 +405,16 @@ export default function LlmSettingsScreen({
     setSuccessMsg('');
     Keyboard.dismiss();
 
+    const effectiveBaseUrl = (key: string): string => {
+      const form = forms[key];
+      const provider = form.provider || form.storedProvider;
+      const preset = presetsFor(key).find((p) => p.name === provider);
+      // 服务商在列表中：保存时自动同步预设地址；不在则保持原值
+      return preset ? preset.base_url : form.baseUrl;
+    };
+
     const targets = moduleKeys.filter(
-      (key) => forms[key]?.enabled && forms[key]?.baseUrl,
+      (key) => forms[key]?.enabled && effectiveBaseUrl(key),
     );
     const results = await Promise.all(
       targets.map(async (key): Promise<{ key: string; error: string | null }> => {
@@ -414,7 +422,7 @@ export default function LlmSettingsScreen({
         const model = form.model || form.storedModel;
         try {
           const ids = await fetchModelsList(
-            form.baseUrl,
+            effectiveBaseUrl(key),
             form.apiKey,
             VALIDATION_TIMEOUT_MS,
           );
@@ -452,11 +460,12 @@ export default function LlmSettingsScreen({
     const cfg: LlmModulesConfig = {};
     for (const key of moduleKeys) {
       const form = forms[key];
+      const provider = form.provider || form.storedProvider;
       cfg[key] = {
         enabled: form.enabled,
-        provider: form.provider || form.storedProvider,
+        provider,
         model: form.model || form.storedModel,
-        baseUrl: form.baseUrl,
+        baseUrl: effectiveBaseUrl(key),
         apiKey: form.apiKey,
         paramsText: form.paramsText,
       };
