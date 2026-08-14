@@ -13,9 +13,6 @@ from src.utils.llm_client import (
     fetch_llm_json_required_modules,
     fetch_llm_providers,
     probe_llm_config,
-    resolve_provider_base_url,
-    resolve_provider_model,
-    resolve_provider_vlm_model,
 )
 
 
@@ -26,22 +23,6 @@ def _module_cfg(**modules):
         return modules.get(key)
 
     return getter
-
-
-PRESETS = [
-    {
-        "name": "阿里云百炼（DashScope）",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "llm_models": ["qwen3.5-plus", "qwen3.6-flash"],
-        "vlm_models": ["qwen3-vl-plus"],
-    },
-    {
-        "name": "DeepSeek",
-        "base_url": "https://api.deepseek.com/v1",
-        "llm_models": ["deepseek-v4-flash", "deepseek-v4-pro"],
-        "vlm_models": [],
-    },
-]
 
 
 class FakeResponse:
@@ -88,30 +69,6 @@ def test_build_payload_passes_through_extra_params():
     assert payload["stop"] == ["END"]
     assert payload["presence_penalty"] == 0.5
     assert payload["frequency_penalty"] == 0.3
-
-
-def test_resolve_provider_base_url():
-    assert (
-        resolve_provider_base_url("DeepSeek", presets=PRESETS)
-        == "https://api.deepseek.com/v1"
-    )
-    assert resolve_provider_base_url(None, presets=PRESETS) == ""
-    assert resolve_provider_base_url("不存在的服务商", presets=PRESETS) == ""
-
-
-def test_resolve_provider_model():
-    assert resolve_provider_model("DeepSeek", presets=PRESETS) == "deepseek-v4-flash"
-    assert resolve_provider_model(None, presets=PRESETS) == ""
-    assert resolve_provider_model("不存在的服务商", presets=PRESETS) == ""
-
-
-def test_resolve_provider_vlm_model():
-    assert (
-        resolve_provider_vlm_model("阿里云百炼（DashScope）", presets=PRESETS)
-        == "qwen3-vl-plus"
-    )
-    assert resolve_provider_vlm_model("DeepSeek", presets=PRESETS) == ""
-    assert resolve_provider_vlm_model(None, presets=PRESETS) == ""
 
 
 def test_build_payload_image():
@@ -919,4 +876,3 @@ def test_probe_llm_config_raises_on_provider_error(monkeypatch):
             model="m",
             flags={"use_json": True},
         )
-

@@ -67,50 +67,6 @@ def _extract_module_labels(items: list) -> list:
     return labels
 
 
-def resolve_provider_base_url(
-    provider_name: str | None,
-    presets: Optional[list[Dict[str, Any]]] = None,
-) -> str:
-    """按预设名称返回 base_url；未匹配返回空串"""
-    if presets is None:
-        presets = []
-    name = provider_name or ""
-    for preset in presets:
-        if preset["name"] == name:
-            return preset["base_url"]
-    return ""
-
-
-def resolve_provider_model(
-    provider_name: str | None,
-    presets: Optional[list[Dict[str, Any]]] = None,
-) -> str:
-    """按预设名称返回默认文本 model（llm_models 列表第一项）；未匹配返回空串。"""
-    if presets is None:
-        presets = []
-    name = provider_name or ""
-    for preset in presets:
-        if preset["name"] == name:
-            models = preset.get("llm_models") or []
-            return str(models[0]) if models else ""
-    return ""
-
-
-def resolve_provider_vlm_model(
-    provider_name: str | None,
-    presets: Optional[list[Dict[str, Any]]] = None,
-) -> str:
-    """按预设名称返回默认图片理解 model（vlm_models 列表第一项）；未匹配返回空串。"""
-    if presets is None:
-        presets = []
-    name = provider_name or ""
-    for preset in presets:
-        if preset["name"] == name:
-            vlm_models = preset.get("vlm_models") or []
-            return str(vlm_models[0]) if vlm_models else ""
-    return ""
-
-
 def build_chat_completions_payload(
     *,
     prompt: str,

@@ -8,9 +8,6 @@ import {
   fetchModelsList,
   fetchProviderPresets,
   probeLlmConfig,
-  resolveProviderBaseUrl,
-  resolveProviderModel,
-  resolveProviderVlmModel,
 } from '../utils/llm_client';
 import type { LlmProviderPreset } from '../utils/llm_client';
 
@@ -73,38 +70,6 @@ describe('buildChatCompletionsPayload', () => {
     expect(body.max_tokens).toBe(1024);
     expect(body.stop).toEqual(['END']);
     expect(body.presence_penalty).toBe(0.5);
-  });
-});
-
-describe('resolveProviderBaseUrl', () => {
-  it('resolves a preset name to its base url', () => {
-    expect(resolveProviderBaseUrl('DeepSeek', PRESETS)).toBe('https://api.deepseek.com/v1');
-  });
-
-  it('returns empty string for unknown or empty names', () => {
-    expect(resolveProviderBaseUrl(null, PRESETS)).toBe('');
-    expect(resolveProviderBaseUrl('不存在的服务商', PRESETS)).toBe('');
-  });
-});
-
-describe('resolveProviderModel', () => {
-  it('resolves a preset name to its default model', () => {
-    expect(resolveProviderModel('DeepSeek', PRESETS)).toBe('deepseek-v4-flash');
-  });
-
-  it('returns empty string for unknown or empty names', () => {
-    expect(resolveProviderModel(null, PRESETS)).toBe('');
-    expect(resolveProviderModel('不存在的服务商', PRESETS)).toBe('');
-  });
-});
-
-describe('resolveProviderVlmModel', () => {
-  it('resolves the default image model of a preset', () => {
-    expect(resolveProviderVlmModel('阿里云百炼（DashScope）', PRESETS)).toBe('qwen3-vl-plus');
-  });
-
-  it('returns empty string when the provider has no image models', () => {
-    expect(resolveProviderVlmModel('DeepSeek', PRESETS)).toBe('');
   });
 });
 

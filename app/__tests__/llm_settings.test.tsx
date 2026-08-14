@@ -203,6 +203,44 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     expect(keyInput.props.value).toBe('sk-saved');
   });
 
+  it('已选服务商显示服务商地址提示', async () => {
+    await seedConfig({
+      llm_models: {
+        enabled: true,
+        provider: 'DeepSeek',
+        model: 'deepseek-v4-flash',
+        baseUrl: 'https://api.deepseek.com/v1',
+        apiKey: '',
+        paramsText: '',
+      },
+    });
+    const tree = await renderScreen();
+    const hintNodes = tree.root.findAll(
+      (n) =>
+        Array.isArray(n.props?.children) &&
+        n.props.children[0] === '服务商地址：',
+    );
+    expect(hintNodes.length).toBeGreaterThanOrEqual(1);
+    expect(hintNodes[0].props.children.join('')).toBe(
+      '服务商地址：https://api.deepseek.com/v1',
+    );
+  });
+
+  it('点击返回按钮关闭设置页', async () => {
+    const onClose = jest.fn();
+    let tree!: ReactTestRenderer;
+    await act(async () => {
+      tree = renderer.create(<LlmSettingsScreen onClose={onClose} />);
+    });
+    for (let i = 0; i < 6; i += 1) {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+    pressLabel(tree, '‹ 返回');
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('关闭开关隐藏字段但保留值，重新开启恢复', async () => {
     const tree = await renderScreen();
     act(() => {
@@ -312,7 +350,7 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     });
     // 未开启模块也一并写入
     expect(saved.audio_models.enabled).toBe(false);
-    expect(tree.root.findAllByProps({ children: '配置已保存' }).length).toBeGreaterThanOrEqual(1);
+    expect(Alert.alert).toHaveBeenCalledWith('保存成功', '配置已保存');
   });
 
   it('保存时服务商在列表则自动更新 baseUrl', async () => {
