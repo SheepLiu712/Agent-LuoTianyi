@@ -506,12 +506,6 @@ export default function LlmSettingsScreen({
       return null;
     }
     const title = moduleTitle(key);
-    const presets = presetsFor(key);
-    const models = (
-      presets.find((p) => p.name === form.provider) as
-        | (LlmProviderPreset & Record<string, unknown>)
-        | undefined
-    )?.[key] as string[] | undefined;
     const badge = badgeFor(key);
     const fieldStyle = (field: FieldKey) =>
       form.highlight === field ? styles.inputError : undefined;
