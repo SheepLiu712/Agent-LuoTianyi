@@ -694,6 +694,11 @@ class LLMSettingsDialog(QDialog):
                 "model": entry.get("model", ""),
                 "base_url": entry.get("base_url", ""),
                 "params": params,
+                "model_capabilities": dict(
+                    (self._module_capabilities.get(key) or {}).get(
+                        entry.get("model", ""), {}
+                    )
+                ),
                 "api_key": entry.get("api_key", ""),
             }
         ok = credential.save_llm_modules_config(to_save)

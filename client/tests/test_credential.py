@@ -115,3 +115,35 @@ def test_save_credentials_preserves_server_url(monkeypatch, tmp_path):
     credential.save_server_url("https://srv", verify_ssl=True)
     credential.save_credentials("u", "", False)
     assert credential.get_server_url() == "https://srv"
+
+
+def test_model_capabilities_roundtrip_in_module_config(monkeypatch, tmp_path):
+    """所选模型的能力支持随模块配置原子写入并可读回。"""
+    _setup(monkeypatch, tmp_path)
+    credential.save_server_url("https://srv", verify_ssl=True)
+    assert (
+        credential.save_llm_modules_config(
+            {
+                "llm_models": {
+                    "enabled": True,
+                    "provider": "P",
+                    "model": "M",
+                    "base_url": "B",
+                    "params": {},
+                    "model_capabilities": {
+                        "can_enable_thinking": True,
+                        "can_use_json": False,
+                    },
+                    "api_key": "",
+                }
+            }
+        )
+        is True
+    )
+    saved = credential.get_llm_modules_config()["llm_models"]
+    assert saved["provider"] == "P"
+    assert saved["model_capabilities"] == {
+        "can_enable_thinking": True,
+        "can_use_json": False,
+    }
+    assert credential.get_server_url() == "https://srv"

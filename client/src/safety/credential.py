@@ -191,6 +191,11 @@ def get_llm_modules_config() -> dict:
             "model": str(raw.get("model") or ""),
             "base_url": str(raw.get("base_url") or ""),
             "params": raw.get("params") if isinstance(raw.get("params"), dict) else {},
+            "model_capabilities": (
+                raw.get("model_capabilities")
+                if isinstance(raw.get("model_capabilities"), dict)
+                else {}
+            ),
             "api_key": "",
         }
         key_enc = raw.get("api_key_dpapi")
@@ -215,7 +220,8 @@ def save_llm_modules_config(
 ) -> bool:
     """原子写入整份模块配置；保留其它凭据字段。
 
-    modules: {能力key: {enabled, provider, model, base_url, params, api_key}}
+    modules: {能力key: {enabled, provider, model, base_url, params,
+    model_capabilities, api_key}}
     API Key 加密失败且不允许明文时返回 False（调用方二次确认后可重试）。
     """
     try:
@@ -231,6 +237,11 @@ def save_llm_modules_config(
                 "model": str(raw.get("model") or ""),
                 "base_url": str(raw.get("base_url") or ""),
                 "params": raw.get("params") if isinstance(raw.get("params"), dict) else {},
+                "model_capabilities": (
+                    raw.get("model_capabilities")
+                    if isinstance(raw.get("model_capabilities"), dict)
+                    else {}
+                ),
             }
             if api_key:
                 key_enc = _encrypt_token(api_key)

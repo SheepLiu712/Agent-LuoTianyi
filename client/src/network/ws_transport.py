@@ -48,8 +48,6 @@ class WsTransport:
         verify_ssl: bool = True,
         heartbeat_interval: float = 10.0,
         module_config_getter: Callable[[str], dict | None] | None = None,
-        llm_capabilities_getter: Callable[[], dict | None] | None = None,
-        vlm_capabilities_getter: Callable[[], dict | None] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.username_getter = username_getter
@@ -57,8 +55,6 @@ class WsTransport:
         self.verify_ssl = verify_ssl
         self.heartbeat_interval = heartbeat_interval
         self.module_config_getter = module_config_getter
-        self.llm_capabilities_getter = llm_capabilities_getter
-        self.vlm_capabilities_getter = vlm_capabilities_getter
 
         self._lock = threading.Lock()
         self._submit_lock = threading.Lock()
@@ -515,22 +511,8 @@ class WsTransport:
 
         server_params = payload.get("params") or {}
         cached_params = cfg.get("params") or {}
-        capabilities = (
-            (
-                self.vlm_capabilities_getter()
-                if is_image and self.vlm_capabilities_getter
-                else None
-            )
-            or (
-                self.llm_capabilities_getter()
-                if not is_image and self.llm_capabilities_getter
-                else None
-            )
-            or None
-        )
+        model_cap = cfg.get("model_capabilities") or {}
         merged_params = {**(server_params or {}), **(cached_params or {})}
-        capabilities = capabilities or {}
-        model_cap = capabilities.get(model) or {}
         server_enable_thinking = bool(payload.get("enable_thinking"))
         server_use_json = bool(payload.get("use_json"))
         if server_use_json and not bool(model_cap.get("can_use_json")):

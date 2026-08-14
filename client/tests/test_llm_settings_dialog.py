@@ -352,6 +352,10 @@ def test_validation_success_saves_all_modules(make_dialog, qapp, monkeypatch):
     assert saved["llm_models"]["api_key"] == "sk-test"
     assert saved["llm_models"]["base_url"] == "https://api.deepseek.com/v1"
     assert saved["vlm_models"]["enabled"] is False
+    assert saved["llm_models"]["model_capabilities"] == {
+        "can_enable_thinking": False,
+        "can_use_json": True,
+    }
     assert dialog.status_label.text() == "配置已保存"
 
 
