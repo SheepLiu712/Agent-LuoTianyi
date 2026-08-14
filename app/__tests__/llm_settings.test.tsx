@@ -297,10 +297,19 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     expect(secureStoreBacking['llm_modules_config']).toBeTruthy();
     const saved = JSON.parse(secureStoreBacking['llm_modules_config']) as Record<
       string,
-      { enabled: boolean; provider: string; apiKey: string }
+      {
+        enabled: boolean;
+        provider: string;
+        apiKey: string;
+        modelCapabilities: { can_enable_thinking: boolean; can_use_json: boolean };
+      }
     >;
     expect(saved.llm_models.enabled).toBe(true);
     expect(saved.llm_models.apiKey).toBe('sk-test');
+    expect(saved.llm_models.modelCapabilities).toEqual({
+      can_enable_thinking: false,
+      can_use_json: false,
+    });
     // 未开启模块也一并写入
     expect(saved.audio_models.enabled).toBe(false);
     expect(tree.root.findAllByProps({ children: '配置已保存' }).length).toBeGreaterThanOrEqual(1);

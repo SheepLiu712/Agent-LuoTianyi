@@ -17,12 +17,20 @@ export interface LlmModuleConfig {
   baseUrl: string;
   apiKey: string;
   paramsText: string;
+  modelCapabilities: {
+    can_enable_thinking: boolean;
+    can_use_json: boolean;
+  };
 }
 
 export type LlmModulesConfig = Record<string, LlmModuleConfig>;
 
 function sanitize(value: unknown): LlmModuleConfig {
   const raw = (value && typeof value === 'object' ? value : {}) as Partial<LlmModuleConfig>;
+  const caps =
+    raw.modelCapabilities && typeof raw.modelCapabilities === 'object'
+      ? raw.modelCapabilities
+      : { can_enable_thinking: false, can_use_json: false };
   return {
     enabled: Boolean(raw.enabled),
     provider: typeof raw.provider === 'string' ? raw.provider : '',
@@ -30,6 +38,10 @@ function sanitize(value: unknown): LlmModuleConfig {
     baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : '',
     apiKey: typeof raw.apiKey === 'string' ? raw.apiKey : '',
     paramsText: typeof raw.paramsText === 'string' ? raw.paramsText : '',
+    modelCapabilities: {
+      can_enable_thinking: Boolean(caps.can_enable_thinking),
+      can_use_json: Boolean(caps.can_use_json),
+    },
   };
 }
 

@@ -461,13 +461,19 @@ export default function LlmSettingsScreen({
     for (const key of moduleKeys) {
       const form = forms[key];
       const provider = form.provider || form.storedProvider;
+      const model = form.model || form.storedModel;
+      const cap = model ? capsFor(key)[model] : undefined;
       cfg[key] = {
         enabled: form.enabled,
         provider,
-        model: form.model || form.storedModel,
+        model,
         baseUrl: effectiveBaseUrl(key),
         apiKey: form.apiKey,
         paramsText: form.paramsText,
+        modelCapabilities: {
+          can_enable_thinking: Boolean(cap?.can_enable_thinking),
+          can_use_json: Boolean(cap?.can_use_json),
+        },
       };
     }
     try {
