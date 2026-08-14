@@ -204,6 +204,20 @@ export default function LlmSettingsScreen({
     [providers],
   );
 
+  const effectiveBaseUrl = useCallback(
+    (key: string): string => {
+      const form = forms[key];
+      if (!form) {
+        return '';
+      }
+      const provider = form.provider || form.storedProvider;
+      const preset = presetsFor(key).find((p) => p.name === provider);
+      // 服务商在列表中：用预设地址；不在则保持原值
+      return preset ? preset.base_url : form.baseUrl;
+    },
+    [forms, presetsFor],
+  );
+
   const loadForms = useCallback(
     async (providerList: LlmProviderPreset[], keys: string[]) => {
       const stored = await getLlmModulesConfig();
@@ -405,14 +419,6 @@ export default function LlmSettingsScreen({
     setSuccessMsg('');
     Keyboard.dismiss();
 
-    const effectiveBaseUrl = (key: string): string => {
-      const form = forms[key];
-      const provider = form.provider || form.storedProvider;
-      const preset = presetsFor(key).find((p) => p.name === provider);
-      // 服务商在列表中：保存时自动同步预设地址；不在则保持原值
-      return preset ? preset.base_url : form.baseUrl;
-    };
-
     const targets = moduleKeys.filter(
       (key) => forms[key]?.enabled && effectiveBaseUrl(key),
     );
@@ -546,6 +552,9 @@ export default function LlmSettingsScreen({
                 {form.provider || (form.storedProvider ? form.storedProvider : '选择服务商')}
               </Text>
             </TouchableOpacity>
+            {form.provider || form.storedProvider ? (
+              <Text style={styles.urlHint}>服务商地址：{effectiveBaseUrl(key)}</Text>
+            ) : null}
 
             <Text style={styles.fieldLabel}>API Key</Text>
             <View style={styles.keyRow}>
@@ -640,6 +649,9 @@ export default function LlmSettingsScreen({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.header}>
+        <TouchableOpacity onPress={onClose} disabled={saving} style={styles.backButton}>
+          <Text style={styles.backText}>‹ 返回</Text>
+        </TouchableOpacity>
         <Text style={styles.title}>LLM 模型设置</Text>
         <TouchableOpacity onPress={refreshProviders} disabled={saving}>
           <Text style={styles.refreshText}>刷新服务商列表</Text>
@@ -694,8 +706,9 @@ export default function LlmSettingsScreen({
 
 const styles = StyleSheet.create({
   screen: {
-    flex: 1,
-    backgroundColor: '#F5F7FA',
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 120,
+    backgroundColor: '#f5f7fa',
   },
   header: {
     flexDirection: 'row',
@@ -708,6 +721,14 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     color: '#333',
+  },
+  backButton: {
+    minWidth: 72,
+    paddingVertical: 4,
+  },
+  backText: {
+    fontSize: 15,
+    color: '#2F80ED',
   },
   refreshText: {
     fontSize: 14,
@@ -786,6 +807,12 @@ const styles = StyleSheet.create({
   pickerPlaceholder: {
     fontSize: 14,
     color: '#aaa',
+  },
+  urlHint: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+    marginBottom: 4,
   },
   keyRow: {
     flexDirection: 'row',
