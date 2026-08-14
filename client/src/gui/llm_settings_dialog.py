@@ -749,6 +749,7 @@ class LLMSettingsDialog(QDialog):
                 self.status_label.setText("保存失败，请重试")
                 return
         self.status_label.setText("配置已保存")
+        QMessageBox.information(self, "保存成功", "配置已保存")
 
     def _cancel_validation(self) -> None:
         self._validation_batch += 1

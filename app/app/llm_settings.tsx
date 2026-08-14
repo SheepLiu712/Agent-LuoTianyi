@@ -180,7 +180,6 @@ export default function LlmSettingsScreen({
   const [providersLoaded, setProvidersLoaded] = useState(false);
   const [providersError, setProvidersError] = useState('');
   const [saving, setSaving] = useState(false);
-  const [successMsg, setSuccessMsg] = useState('');
   const [picker, setPicker] = useState<PickerTarget | null>(null);
 
   const capsFor = useCallback(
@@ -416,7 +415,6 @@ export default function LlmSettingsScreen({
     }
     const batch = ++batchRef.current;
     setSaving(true);
-    setSuccessMsg('');
     Keyboard.dismiss();
 
     const targets = moduleKeys.filter(
@@ -484,7 +482,7 @@ export default function LlmSettingsScreen({
     }
     try {
       await setLlmModulesConfig(cfg);
-      setSuccessMsg('配置已保存');
+      Alert.alert('保存成功', '配置已保存');
     } catch (e) {
       Alert.alert('保存失败', String(e instanceof Error ? e.message : e));
     }
@@ -658,7 +656,6 @@ export default function LlmSettingsScreen({
         </TouchableOpacity>
       </View>
       {providersError ? <Text style={styles.errorText}>{providersError}</Text> : null}
-      {successMsg ? <Text style={styles.successText}>{successMsg}</Text> : null}
 
       <ScrollView ref={scrollRef} contentContainerStyle={styles.listContent}>
         {!providersLoaded ? (
@@ -737,12 +734,6 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 13,
     color: '#C0392B',
-    paddingHorizontal: 16,
-    paddingBottom: 4,
-  },
-  successText: {
-    fontSize: 13,
-    color: '#1E8E3E',
     paddingHorizontal: 16,
     paddingBottom: 4,
   },

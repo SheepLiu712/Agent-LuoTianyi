@@ -29,12 +29,6 @@ export interface LlmProvidersResponse {
   vlmModelCapabilities: Record<string, LlmModelCapability>;
 }
 
-let cachedProvidersResponse: LlmProvidersResponse | null = null;
-
-export function getProviderPresets(): LlmProviderPreset[] {
-  return cachedProvidersResponse?.providers ?? [];
-}
-
 export async function fetchProviderPresets(
   serverBaseUrl: string,
   timeoutMs = 15000,
@@ -63,20 +57,10 @@ export async function fetchProviderPresets(
         (data.vlm_model_capabilities as Record<string, LlmModelCapability>) ??
         {},
     };
-    cachedProvidersResponse = result;
     return result;
   } finally {
     clearTimeout(timer);
   }
-}
-
-export async function ensureProviderPresets(
-  serverBaseUrl: string,
-): Promise<LlmProvidersResponse> {
-  if (!cachedProvidersResponse) {
-    return fetchProviderPresets(serverBaseUrl);
-  }
-  return cachedProvidersResponse;
 }
 
 export async function fetchJsonRequiredModules(
@@ -123,33 +107,6 @@ export async function fetchJsonRequiredModules(
   }
 }
 
-export function resolveProviderBaseUrl(
-  providerName?: string | null,
-  presets: LlmProviderPreset[] = cachedProvidersResponse?.providers ?? [],
-): string {
-  const name = providerName || '';
-  for (const preset of presets) {
-    if (preset.name === name) {
-      return preset.base_url;
-    }
-  }
-  return '';
-}
-
-export function resolveProviderModel(
-  providerName?: string | null,
-  presets: LlmProviderPreset[] = cachedProvidersResponse?.providers ?? [],
-): string {
-  // 返回默认文本模型（llm_models 列表第一项）
-  const name = providerName || '';
-  for (const preset of presets) {
-    if (preset.name === name) {
-      return preset.llm_models?.[0] ?? '';
-    }
-  }
-  return '';
-}
-
 /**
  * 校验用：GET {base_url}/models，返回模型 id 列表。
  * 不发起任何对话请求，不消耗 Token；超时/非 2xx 抛异常。
@@ -181,20 +138,6 @@ export async function fetchModelsList(
   } finally {
     clearTimeout(timer);
   }
-}
-
-export function resolveProviderVlmModel(
-  providerName?: string | null,
-  presets: LlmProviderPreset[] = cachedProvidersResponse?.providers ?? [],
-): string {
-  // 返回默认图片理解模型（vlm_models 列表第一项）
-  const name = providerName || '';
-  for (const preset of presets) {
-    if (preset.name === name) {
-      return preset.vlm_models?.[0] ?? '';
-    }
-  }
-  return '';
 }
 
 interface BuildPayloadOptions {

@@ -347,6 +347,7 @@ def test_validation_success_saves_all_modules(make_dialog, qapp, monkeypatch):
     """校验全部通过后一次性写入整份配置（含关闭模块），成功状态提示。"""
     dialog = make_dialog()
     questions = []
+    infos = []
     monkeypatch.setattr(
         dlg_mod.QMessageBox,
         "question",
@@ -354,6 +355,11 @@ def test_validation_success_saves_all_modules(make_dialog, qapp, monkeypatch):
             questions.append(title),
             QMessageBox.StandardButton.Yes,
         )[1],
+    )
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox,
+        "information",
+        lambda parent, title, text: infos.append((title, text)),
     )
     http = dialog._http
     _fill_module(dialog)
@@ -371,6 +377,7 @@ def test_validation_success_saves_all_modules(make_dialog, qapp, monkeypatch):
         "can_use_json": True,
     }
     assert dialog.status_label.text() == "配置已保存"
+    assert infos and infos[0] == ("保存成功", "配置已保存")
 
 
 def test_validation_success_persists_advanced_params(make_dialog, qapp, monkeypatch):
@@ -381,6 +388,7 @@ def test_validation_success_persists_advanced_params(make_dialog, qapp, monkeypa
         "question",
         lambda parent, title, text, *a, **k: QMessageBox.StandardButton.Yes,
     )
+    monkeypatch.setattr(dlg_mod.QMessageBox, "information", lambda *a, **k: None)
     http = dialog._http
     info = _fill_module(dialog)
     info["params_editor"].setPlainText('{"temperature": 0.7, "max_tokens": 2048}')
@@ -403,6 +411,7 @@ def test_save_updates_base_url_when_provider_exists(make_dialog, qapp, monkeypat
         "question",
         lambda parent, title, text, *a, **k: QMessageBox.StandardButton.Yes,
     )
+    monkeypatch.setattr(dlg_mod.QMessageBox, "information", lambda *a, **k: None)
     http = dialog._http
     info = _fill_module(dialog)
     info["base_url"] = "https://stale.example.com/v1"  # 模拟旧固化地址
@@ -545,6 +554,7 @@ def test_provider_missing_from_list_shows_notice_and_save_works(
         "question",
         lambda parent, title, text, *a, **k: QMessageBox.StandardButton.Yes,
     )
+    monkeypatch.setattr(dlg_mod.QMessageBox, "information", lambda *a, **k: None)
     http = dialog._http
     http.queue_models_response(payload=_models_payload("old-model"))
     dialog._on_save()
