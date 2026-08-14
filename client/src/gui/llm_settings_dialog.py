@@ -331,6 +331,12 @@ class LLMSettingsDialog(QDialog):
             provider_combo.addItem(str(preset.get("name", "")), preset.get("base_url", ""))
         fl.addWidget(provider_combo)
 
+        url_hint = QLabel("")
+        url_hint.setWordWrap(True)
+        url_hint.setStyleSheet("font-size: 12px; color: #999;")
+        url_hint.hide()
+        fl.addWidget(url_hint)
+
         api_key_input = QLineEdit()
         api_key_input.setPlaceholderText("粘贴 API Key")
         api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -378,6 +384,7 @@ class LLMSettingsDialog(QDialog):
             "provider_combo": provider_combo,
             "api_key_input": api_key_input,
             "model_combo": model_combo,
+            "url_hint": url_hint,
             "badge_label": badge,
             "info_btn": info_btn,
             "params_editor": params_editor,
@@ -414,6 +421,12 @@ class LLMSettingsDialog(QDialog):
             return
         preset = self._find_preset(text)
         info["base_url"] = str(preset.get("base_url", "")) if preset else ""
+        if info["base_url"]:
+            info["url_hint"].setText(f"服务商地址：{info['base_url']}")
+            info["url_hint"].show()
+        else:
+            info["url_hint"].clear()
+            info["url_hint"].hide()
         info["stored_provider"] = ""
         info["stored_model"] = ""
         self._clear_highlight(info["provider_combo"])
@@ -470,6 +483,9 @@ class LLMSettingsDialog(QDialog):
                         f"注意：服务商 ‘{provider}’ 已不在列表中（保存时仍使用已固化的地址）"
                     )
                     info["notice_label"].show()
+                    if info["base_url"]:
+                        info["url_hint"].setText(f"服务商地址：{info['base_url']}")
+                        info["url_hint"].show()
             if model:
                 index = info["model_combo"].findText(model)
                 if index >= 0:
