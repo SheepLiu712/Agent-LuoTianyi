@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QCheckBox,
 )
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QTimer, QUrl
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
 from PySide6.QtGui import QCloseEvent
 from typing import TYPE_CHECKING
@@ -89,7 +89,8 @@ class LLMSettingsDialog(QDialog):
         self.logger = get_logger(self.__class__.__name__)
         self.network_client = network_client
         self.setWindowTitle("LLM 模型设置")
-        self.setMinimumSize(680, 720)
+        self.setMinimumSize(680, 360)
+        self.resize(720, 820)
         self.setModal(True)
 
         self._http = QNetworkAccessManager(self)
@@ -103,6 +104,7 @@ class LLMSettingsDialog(QDialog):
         self._modules: dict = {}
         self._module_capabilities: dict = {}
         self._module_json_labels: dict = {}
+        self._chrome: int | None = None
 
         # 校验状态：batchId 递增使旧请求响应自动失效
         self._validation_batch = 0
@@ -147,7 +149,7 @@ class LLMSettingsDialog(QDialog):
         self._cards_layout.setContentsMargins(0, 0, 0, 0)
         self._cards_layout.setSpacing(12)
         self._scroll.setWidget(self._cards_container)
-        layout.addWidget(self._scroll, 1)
+        layout.addWidget(self._scroll)
 
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
@@ -247,6 +249,7 @@ class LLMSettingsDialog(QDialog):
             if key in self._module_keys
         }
         self._rebuild_cards()
+        QTimer.singleShot(0, self._auto_resize)
         self._load_modules_from_storage()
         self._providers_loaded = True
         self.save_btn.setEnabled(bool(self._module_keys))
@@ -291,6 +294,17 @@ class LLMSettingsDialog(QDialog):
         self._clear_cards()
         for key in self._module_keys:
             self._modules[key] = self._build_module_card(key, MODULE_TITLES.get(key, key))
+
+    def _auto_resize(self) -> None:
+        """按卡片内容高度调整窗口：折叠时贴合内容，展开时封顶走滚动。"""
+        if self._cards_layout.count() == 0:
+            return
+        content_h = self._cards_layout.sizeHint().height()
+        if self._chrome is None:
+            self._chrome = max(0, self.height() - self._scroll.height())
+        target_h = max(self._chrome + 40, min(content_h + self._chrome, 900))
+        if abs(target_h - self.height()) > 8:
+            self.resize(self.width(), target_h)
 
     def _build_module_card(self, key: str, title: str) -> dict:
         card = QWidget()
@@ -401,6 +415,7 @@ class LLMSettingsDialog(QDialog):
         switch.toggled.connect(
             lambda checked, w=fields: w.setVisible(checked)
         )
+        switch.toggled.connect(lambda: QTimer.singleShot(0, self._auto_resize))
         provider_combo.currentTextChanged.connect(
             lambda text, k=key: self._on_module_provider_changed(k, text)
         )

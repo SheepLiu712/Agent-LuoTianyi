@@ -229,6 +229,20 @@ def test_empty_storage_all_modules_disabled(make_dialog):
         assert info["model_combo"].currentText() == ""
 
 
+def test_collapsed_dialog_height_fits_content(make_dialog, qapp):
+    """所有模块折叠时窗口贴合内容（高度远小于 720），展开后变高。"""
+    dialog = make_dialog()
+    dialog.show()
+    qapp.processEvents()
+    collapsed_h = dialog.height()
+    assert collapsed_h < 720
+    info = dialog._modules["llm_models"]
+    info["switch"].setChecked(True)
+    for _ in range(5):
+        qapp.processEvents()
+    assert dialog.height() > collapsed_h
+
+
 def test_load_restores_switch_and_values_no_auto_select(make_dialog):
     """保存值回填表单；未保存的服务商/模型不会被自动选中。"""
     credential.save_llm_modules_config(
