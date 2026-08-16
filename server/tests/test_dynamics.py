@@ -777,6 +777,8 @@ def test_dynamic_replier_passes_thread_comments_to_llm():
 
     dynamic_capability.replier._reply_llm = FakeLLM()
     item = {
+        "author_type": "user",
+        "author_name": "Dpon",
         "username": "Dpon",
         "user_description": "用户喜欢散步。",
         "preferences": {"relationship": "朋友"},
@@ -790,8 +792,63 @@ def test_dynamic_replier_passes_thread_comments_to_llm():
     reply = asyncio.run(dynamic_capability.replier.generate_reply_for_post(item, character_name="洛天依"))
 
     assert "海边的风" in reply
-    assert "海边听起来很舒服" in captured["thread_comments"]
-    assert "但是风很大" in captured["thread_comments"]
+    assert "海边听起来很舒服" in captured["message_list"]
+    assert "但是风很大" in captured["message_list"]
+    assert "发布者类型：用户" in captured["message_list"]
+    assert "发布者类型：角色" in captured["message_list"]
+    assert "发布者：天依" in captured["message_list"]
+    assert "消息 1" in captured["target_message"]
+
+
+def test_dynamic_replier_targets_comment_in_sender_labeled_message_list():
+    captured = {}
+    dynamic_capability = DynamicCapability()
+
+    class FakeLLM:
+        async def generate_response(self, **kwargs):
+            captured.update(kwargs)
+            return '{"should_reply": true, "reply": "我看到你的补充啦。"}'
+
+    dynamic_capability.replier._reply_llm = FakeLLM()
+    item = {
+        "id": "comment-user-2",
+        "author_type": "user",
+        "author_name": "Dpon",
+        "username": "Dpon",
+        "content": "我也想去看看。",
+        "dynamic": {
+            "id": "dynamic-agent-1",
+            "author_type": "agent",
+            "author_name": "洛天依",
+            "content": "今天去海边散步啦。",
+        },
+        "thread_comments": [
+            {
+                "id": "comment-agent-1",
+                "author_type": "agent",
+                "author_name": "洛天依",
+                "content": "海风吹起来很舒服呢。",
+            },
+            {
+                "id": "comment-user-2",
+                "author_type": "user",
+                "author_name": "Dpon",
+                "content": "我也想去看看。",
+            },
+        ],
+    }
+
+    decision = asyncio.run(dynamic_capability.replier.generate_reply_for_comment(item, character_name="洛天依"))
+
+    assert decision == {"should_reply": True, "reply": "我看到你的补充啦。"}
+    message_list = captured["message_list"]
+    assert "发布者类型：角色" in message_list
+    assert "发布者类型：用户" in message_list
+    assert "发布者：洛天依" in message_list
+    assert "发布者：Dpon" in message_list
+    assert "内容：今天去海边散步啦" in message_list
+    assert "内容：我也想去看看" in captured["target_message"]
+    assert "消息 3" in captured["target_message"]
 
 
 def test_dynamic_interaction_task_processes_memory_status(db_manager: DatabaseManager):
