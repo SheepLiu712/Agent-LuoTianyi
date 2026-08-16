@@ -291,6 +291,9 @@ class DynamicEditorDialog(QDialog):
             QPushButton:disabled {
                 color: #8AA7B8;
             }
+            QPushButton:focus {
+                outline: none;
+            }
             """
         )
         root = QVBoxLayout(self)
@@ -399,14 +402,20 @@ class DynamicsDialog(QDialog):
                 border: 1px solid #D5DEE7;
                 border-radius: 6px;
             }
-            QPushButton#addDynamicButton {
-                background: #1296DB;
+            QPushButton#addDynamicButton,
+            QPushButton#refreshButton,
+            QPushButton#sendCommentButton {
+                background: #66CCFF;
+                color: white;
+                border: none;
                 border-radius: 6px;
-                font-weight: 700;
-                padding: 6px 12px;
+                padding: 8px 12px;
+                font-size: 16px;
             }
-            QPushButton#addDynamicButton:hover {
-                background: #0D82C2;
+            QPushButton#addDynamicButton:hover,
+            QPushButton#refreshButton:hover,
+            QPushButton#sendCommentButton:hover {
+                background: #55BBEE;
             }
             QPushButton {
                 background: #66CCFF;
@@ -420,6 +429,9 @@ class DynamicsDialog(QDialog):
             }
             QPushButton:disabled {
                 background: #B8CAD6;
+            }
+            QPushButton:focus {
+                outline: none;
             }
             """
         )
@@ -442,6 +454,8 @@ class DynamicsDialog(QDialog):
         header_row.addWidget(self.add_dynamic_button, 0, Qt.AlignmentFlag.AlignTop)
 
         self.refresh_button = QPushButton("刷新")
+        self.refresh_button.setObjectName("refreshButton")
+        self.refresh_button.setFixedSize(65, 38)
         self.refresh_button.clicked.connect(self.load_dynamics)
         header_row.addWidget(self.refresh_button, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(header_row)
@@ -486,6 +500,7 @@ class DynamicsDialog(QDialog):
         self.comment_status.setStyleSheet("color: #667481;")
         comment_action_row.addWidget(self.comment_status, 1)
         self.comment_button = QPushButton("发送评论")
+        self.comment_button.setObjectName("sendCommentButton")
         self.comment_button.setEnabled(False)
         self.comment_button.clicked.connect(self.publish_comment)
         comment_action_row.addWidget(self.comment_button)
@@ -679,6 +694,7 @@ class DynamicsDialog(QDialog):
             return
         for comment in rows:
             self._add_comment_item(comment)
+        self._add_detail_message("没有更多评论了。")
 
     def _add_comment_item(self, comment: dict):
         item = QListWidgetItem()
