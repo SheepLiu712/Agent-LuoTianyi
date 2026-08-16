@@ -756,6 +756,150 @@ def test_run_song_workflow_maps_credential_error(monkeypatch, tmp_path):
         raise AssertionError("Expected credential error to be mapped to SL021")
 
 
+def _patch_song_workflow_after_download(monkeypatch, run_song_workflow):
+    def fake_clean_audio_file(*, output_dir, final_stem_name, **_kwargs):
+        cleaned = output_dir / f"{final_stem_name}.cleaned.mp3"
+        inst = output_dir / f"{final_stem_name}.inst.mp3"
+        cleaned.write_bytes(b"cleaned")
+        inst.write_bytes(b"inst")
+        return cleaned, inst
+
+    monkeypatch.setattr(run_song_workflow, "clean_audio_file", fake_clean_audio_file)
+    monkeypatch.setattr(
+        run_song_workflow,
+        "generate_boundary_inst",
+        lambda song_dir: (song_dir / "boundary_inst.txt").write_text("boundary", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        run_song_workflow,
+        "generate_clear_lrc",
+        lambda song_dir: (song_dir / "song.clear.lrc").write_text("clear", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        run_song_workflow,
+        "generate_llm_lrc",
+        lambda song_dir, **_kwargs: (song_dir / "song.llm.lrc").write_text("llm", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        run_song_workflow,
+        "generate_song_json",
+        lambda song_dir: (song_dir / "song.json").write_text("{}", encoding="utf-8"),
+    )
+    monkeypatch.setattr(run_song_workflow, "validate_output_files", lambda **_kwargs: None)
+
+
+def test_run_song_workflow_downloads_new_song_in_temp_dir(monkeypatch, tmp_path):
+    from src.world.learn_sing_songs.song_learner import run_song_workflow
+
+    output_dir = tmp_path / "songs"
+    captured = {}
+
+    def fake_download(*, output_dir, **_kwargs):
+        temporary_output_dir = Path(output_dir)
+        captured["output_dir"] = temporary_output_dir
+        assert not (output_dir_root / "Requested Song").exists()
+        source_dir = temporary_output_dir / "Actual Song"
+        source_dir.mkdir(parents=True)
+        mp3 = source_dir / "Actual Song.mp3"
+        lrc = source_dir / "Actual Song.lrc"
+        mp3.write_bytes(b"mp3")
+        lrc.write_text("[00:00.00]歌词", encoding="utf-8")
+        return "Actual Song", mp3, lrc
+
+    output_dir_root = output_dir
+    monkeypatch.setattr(run_song_workflow, "download_song_and_lyric", fake_download)
+    _patch_song_workflow_after_download(monkeypatch, run_song_workflow)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_song_workflow.py",
+            "Requested Song",
+            "--output_dir",
+            str(output_dir),
+            "--resource_root",
+            str(tmp_path / "resource"),
+        ],
+    )
+
+    run_song_workflow.main()
+
+    assert captured["output_dir"].parent == output_dir
+    assert not (output_dir / "Requested Song").exists()
+    assert (output_dir / "Actual Song" / "Actual Song.mp3").exists()
+    assert (output_dir / "Actual Song" / "Actual Song.lrc").exists()
+    assert not any(path.name.startswith(".Requested Song.") for path in output_dir.iterdir())
+
+
+def test_run_song_workflow_removes_temp_dir_when_new_download_fails(monkeypatch, tmp_path):
+    from src.world.learn_sing_songs.song_learner import run_song_workflow
+
+    output_dir = tmp_path / "songs"
+
+    def fail_download(*, output_dir, **_kwargs):
+        partial_dir = Path(output_dir) / "Requested Song"
+        partial_dir.mkdir(parents=True)
+        (partial_dir / "Requested Song.mp3").write_bytes(b"partial")
+        raise RuntimeError("download failed")
+
+    monkeypatch.setattr(run_song_workflow, "download_song_and_lyric", fail_download)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_song_workflow.py",
+            "Requested Song",
+            "--output_dir",
+            str(output_dir),
+            "--resource_root",
+            str(tmp_path / "resource"),
+        ],
+    )
+
+    with pytest.raises(run_song_workflow.SongWorkflowError) as exc_info:
+        run_song_workflow.main()
+
+    assert exc_info.value.exit_code == 20
+    assert output_dir.exists()
+    assert not (output_dir / "Requested Song").exists()
+    assert list(output_dir.iterdir()) == []
+
+
+def test_run_song_workflow_resumes_existing_target_dir(monkeypatch, tmp_path):
+    from src.world.learn_sing_songs.song_learner import run_song_workflow
+
+    output_dir = tmp_path / "songs"
+    target_dir = output_dir / "Existing Song"
+    target_dir.mkdir(parents=True)
+    (target_dir / "Existing Song.mp3").write_bytes(b"mp3")
+    (target_dir / "Existing Song.lrc").write_text("[00:00.00]歌词", encoding="utf-8")
+    status = run_song_workflow.WorkflowStatus(target_dir)
+    status.mark_completed("download_song")
+
+    def fail_if_download_called(**_kwargs):
+        raise AssertionError("已有目录且 download_song 已完成时不应重新下载")
+
+    monkeypatch.setattr(run_song_workflow, "download_song_and_lyric", fail_if_download_called)
+    _patch_song_workflow_after_download(monkeypatch, run_song_workflow)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_song_workflow.py",
+            "Existing Song",
+            "--output_dir",
+            str(output_dir),
+            "--resource_root",
+            str(tmp_path / "resource"),
+        ],
+    )
+
+    run_song_workflow.main()
+
+    assert (target_dir / "workflow_status.json").exists()
+    assert not any(path.name.startswith(".Existing Song.") for path in output_dir.iterdir())
+
+
 def test_wishlist_sync_existing_songs_removes_wished_song(tmp_path):
     logger = SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
     wishlist = WishlistManager(str(tmp_path / "metadata.json"), logger)

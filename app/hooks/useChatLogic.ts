@@ -6,7 +6,7 @@ import { setExpression } from '../utils/live2d_helper';
 import { AgentBinder } from '../utils/binder';
 import { MessageProcessor } from '../utils/message_processor';
 import { NetworkClient } from '../utils/network_client';
-import { AgentMessagePayload, ChatMessage } from '../types/chat';
+import { AgentMessagePayload, ChatMessage, createSystemChatMessage } from '../types/chat';
 import { addDebugTrace } from '../utils/debug_trace';
 
 function createUuid(prefix: string) {
@@ -85,6 +85,14 @@ export const useChatLogic = (
     [webviewRef],
   );
 
+  const appendSystemMessage = useCallback((text: string) => {
+    if (!text) {
+      return;
+    }
+    const message = createSystemChatMessage(text, createUuid('system'));
+    setMessages((prev) => [message, ...prev]);
+  }, []);
+
   useEffect(() => {
     if (!username || !messageToken) {
       return;
@@ -142,7 +150,7 @@ export const useChatLogic = (
         },
         onErrorText: (text) => {
           addDebugTrace('ui', 'error text', { text });
-          appendOrMergeAgentMessage({ uuid: createUuid('error'), text });
+          appendSystemMessage(text);
         },
       },
     );
@@ -183,7 +191,7 @@ export const useChatLogic = (
       binderRef.current = null;
       networkClientRef.current = null;
     };
-  }, [appendOrMergeAgentMessage, messageToken, updateMessageByUuid, username, webviewRef]);
+  }, [appendOrMergeAgentMessage, appendSystemMessage, messageToken, updateMessageByUuid, username, webviewRef]);
 
   const canSend = useMemo(() => inputText.trim().length > 0, [inputText]);
   const canSendImage = true;
@@ -196,6 +204,10 @@ export const useChatLogic = (
         return;
       }
       if (data.type === 'touch') {
+        // WebView 已经绘制触摸圆环；在线音频期间不再统计或发送触摸。
+        if (messageProcessorRef.current?.isServerAudioActive()) {
+          return;
+        }
         const now = Date.now();
         const timestamps = clickTimestampsRef.current;
         timestamps.push(now);

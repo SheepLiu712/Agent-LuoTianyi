@@ -68,6 +68,7 @@ if __name__ == "__main__":
         set_base_url_callback = network_client.set_base_url,
         send_image_selecting_callback = message_processor.send_image_selecting_start,
         send_image_selecting_cancel_callback = message_processor.send_image_selecting_cancel,
+        is_server_audio_active_callback = message_processor.is_server_audio_active,
     ) 
     # 将Binder的信号传入消息处理器，以便消息处理器能通过信号与UI交互
     message_processor.set_signals(
@@ -76,6 +77,7 @@ if __name__ == "__main__":
         agent_thinking_signal=binder.emit_agent_thinking_signal,
         local_tts_state_signal=binder.emit_local_tts_state_signal,
         expression_signal=binder.emit_expression_signal,
+        system_message_signal=binder.emit_system_message_signal,
     ) 
 
     

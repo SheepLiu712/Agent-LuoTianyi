@@ -437,10 +437,11 @@ class ProactiveTopicMaker:
 
         if time_since_last_login >= self.return_user_threshold_seconds:
             self.logger.debug(f"超过距离上次登录阈值 {self.return_user_threshold_seconds/86400:.2f} 天")
-            return ActionActivity(
-                ActivityType.RETURN_LOGIN,
-                time_since_last_login=time_since_last_login,
-            )
+            # return ActionActivity(
+            #     ActivityType.RETURN_LOGIN,
+            #     time_since_last_login=time_since_last_login,
+            # )
+            return None # 暂时不派发 RETURN_LOGIN，避免用户登录时被打断
 
         now = datetime.now()
         seconds_since_midnight = now.hour * 3600 + now.minute * 60 + now.second

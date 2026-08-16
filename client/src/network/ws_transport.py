@@ -54,6 +54,7 @@ class WsTransport:
         self._ack_waiter: dict | None = None
         self._agent_message_listener: Callable[[AgentMessage], None] | None = None # 收到的消息发送到哪里
         self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
+        self._system_message_listener: Callable[[str], None] | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -100,10 +101,16 @@ class WsTransport:
             except Exception:
                 pass
 
-    def set_agent_message_listener(self, agent_message_listener: Callable[[AgentMessage], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
+    def set_agent_message_listener(
+        self,
+        agent_message_listener: Callable[[AgentMessage], None] | None,
+        agent_state_listener: Callable[[bool], None] | None,
+        system_message_listener: Callable[[str], None] | None = None,
+    ) -> None:
         with self._lock:
             self._agent_message_listener = agent_message_listener
             self._agent_state_listener = agent_state_listener
+            self._system_message_listener = system_message_listener
 
     def submit_user_text(
         self,
@@ -341,6 +348,8 @@ class WsTransport:
                 return
             if msg and msg.event_type == WSEventType.AUTH_ERROR:
                 self._mark_auth_rejected()
+                error_msg = normalize_error_message(msg)
+                self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
                 return
         except Exception as e:
             self.logger.error(f"Error occurred while waiting for auth response: {e}")
@@ -377,9 +386,13 @@ class WsTransport:
             if msg.event_type == WSEventType.AUTH_ERROR:
                 self._mark_auth_rejected()
                 self.logger.error(f"WebSocket auth failed: {msg.payload.get('message')}")
+                error_msg = normalize_error_message(msg)
+                self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
                 return
             if msg.event_type == WSEventType.SERVER_ERROR:
                 self.logger.error(f"WebSocket auth failed: {msg.payload.get('message')}")
+                error_msg = normalize_error_message(msg)
+                self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
                 return
 
     async def _recv_loop(self, ws) -> None:
@@ -433,18 +446,7 @@ class WsTransport:
                     retryable=False if is_auth_rejection else None,
                 )
                 if not consumed:
-                    self._emit_agent_message(
-                        AgentMessage(
-                            text=f"[{error_msg.code}] {error_msg.message}",
-                            audio="",
-                            expression=None,
-                            is_final_package=True,
-                            uuid=None,
-                            reply_to=error_msg.reply_to,
-                            display_in_chat=True,
-                            is_ephemeral=False,
-                        )
-                    )
+                    self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
         self.logger.debug("WebSocket receive loop exited")
 
     async def _heartbeat_loop(self, ws) -> None:
@@ -545,6 +547,14 @@ class WsTransport:
             return
         try:
             self._agent_state_listener(state_msg)
+        except Exception:
+            pass
+
+    def _emit_system_message(self, text: str) -> None:
+        if not self._system_message_listener:
+            return
+        try:
+            self._system_message_listener(text)
         except Exception:
             pass
 

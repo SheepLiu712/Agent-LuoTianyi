@@ -46,6 +46,14 @@
 			{
 				"Name": "sad",
 				"File": "expressions/sad.exp3.json"
+			},
+			{
+				"Name": "sing",
+				"File": "expressions/sing.exp3.json"
+			},
+			{
+				"Name": "yanndere",
+				"File": "expressions/yanndere.exp3.json"
 			}
 		],
 		"Motions": {
@@ -78,33 +86,13 @@
 				{
 					"File": "motions/Motions_Tap头_0.json"
 				}
+			],
+			"倾听点头": [
+				{
+					"File": "motions/Motions_倾听点头.json"
+				}
 			]
 		}
 	},
-	"HitAreas": [
-        {
-            "Name": "辫子",
-            "Id": "ArtMesh130"
-        },
-        {
-            "Name": "左腿",
-            "Id": "ArtMesh97"
-        },
-        {
-            "Name": "袖",
-            "Id": "ArtMesh85"
-        },
-        {
-            "Name": "耳机",
-            "Id": "ArtMesh50"
-        },
-        {
-            "Name": "8",
-            "Id": "ArtMesh105"
-        },
-        {
-            "Name": "头",
-            "Id": "ArtMesh35"
-        }
-    ]
+	"HitAreas": []
 }

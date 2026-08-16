@@ -35,6 +35,12 @@ async function drainIncoming(processor: MessageProcessor) {
   await (processor as unknown as { incomingMessageChain: Promise<void> }).incomingMessageChain;
 }
 
+async function flushAsyncWork() {
+  for (let i = 0; i < 6; i += 1) {
+    await Promise.resolve();
+  }
+}
+
 describe('MessageProcessor TTS terminal contract', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -153,6 +159,97 @@ describe('MessageProcessor TTS terminal contract', () => {
 
     expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1);
     expect((processor as any).serverAudioPlaying).toBe(false);
+  });
+
+  it('plays ephemeral touch audio without persisting it', async () => {
+    mockAppState.currentState = 'background';
+    const feedServerAudioChunk = jest.fn();
+    const processor = new MessageProcessor(
+      {} as NetworkClient,
+      fakeBinder(),
+      feedServerAudioChunk,
+    );
+
+    processor.onAgentMessage({
+      uuid: 'touch-fast-reply',
+      audio: 'dG91Y2gtYXVkaW8=',
+      expression: '开心',
+      is_final_package: true,
+      display_in_chat: false,
+      is_ephemeral: true,
+    });
+    await drainIncoming(processor);
+
+    expect(feedServerAudioChunk).toHaveBeenCalledWith('dG91Y2gtYXVkaW8=', false);
+    expect(feedServerAudioChunk).toHaveBeenCalledWith('', true);
+    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
+  it('saves later sentences on arrival and displays them after prior playback', async () => {
+    const binder = fakeBinder();
+    const feedServerAudioChunk = jest.fn();
+    const processor = new MessageProcessor(
+      {} as NetworkClient,
+      binder,
+      feedServerAudioChunk,
+    );
+
+    processor.onAgentMessage({
+      uuid: 'sentence-1',
+      text: '第一句',
+      expression: '开心',
+      audio: 'YXVkaW8tMQ==',
+      is_final_package: false,
+    });
+    await drainIncoming(processor);
+
+    expect(binder.emitAgentMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uuid: 'sentence-1',
+        text: '第一句',
+        expression: '开心',
+      }),
+    );
+    expect(feedServerAudioChunk).toHaveBeenCalledWith('YXVkaW8tMQ==', false);
+
+    processor.onAgentMessage({
+      uuid: 'sentence-1',
+      audio: 'YXVkaW8tMg==',
+      is_final_package: true,
+    });
+    processor.onAgentMessage({
+      uuid: 'sentence-2',
+      text: '第二句',
+      expression: '期待',
+      audio: 'YXVkaW8tMw==',
+      is_final_package: true,
+    });
+    await flushAsyncWork();
+
+    // 两句话都已完整到达，因此第二句即使尚未展示/播放，也必须已经落盘。
+    expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(2);
+    const firstSavedBase64 = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls[0][1];
+    const secondSavedBase64 = (FileSystem.writeAsStringAsync as jest.Mock).mock.calls[1][1];
+    expect(Buffer.from(firstSavedBase64, 'base64').toString('utf8')).toBe('audio-1audio-2');
+    expect(Buffer.from(secondSavedBase64, 'base64').toString('utf8')).toBe('audio-3');
+    expect(binder.emitAgentMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ uuid: 'sentence-2' }),
+    );
+
+    processor.onServerAudioFinished();
+    await flushAsyncWork();
+
+    expect(binder.emitAgentMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        uuid: 'sentence-2',
+        text: '第二句',
+        expression: '期待',
+      }),
+    );
+    expect(feedServerAudioChunk).toHaveBeenCalledWith('YXVkaW8tMw==', false);
+
+    processor.onServerAudioFinished();
+    await drainIncoming(processor);
   });
 });
 
