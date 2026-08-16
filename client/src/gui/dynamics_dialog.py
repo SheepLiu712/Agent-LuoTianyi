@@ -283,6 +283,7 @@ class DynamicEditorDialog(QDialog):
                 border: none;
                 padding: 8px 10px;
                 font-weight: 700;
+                font-size: 16px;
             }
             QPushButton:hover {
                 background: #E6F4FE;
@@ -341,6 +342,7 @@ class DynamicEditorDialog(QDialog):
         box = QMessageBox(self)
         box.setWindowTitle("退出编辑")
         box.setText("退出后这条动态不会保存。")
+        box.setStyleSheet("font-size: 14px;")
         keep_button = box.addButton("继续编辑", QMessageBox.ButtonRole.RejectRole)
         exit_button = box.addButton("退出", QMessageBox.ButtonRole.DestructiveRole)
         box.setDefaultButton(keep_button)
