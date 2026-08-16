@@ -118,4 +118,21 @@ describe('MessageProcessor online audio priority', () => {
     expect(await processor.playLocalTtsByUuid('saved-message')).toBe(false);
     expect(mockSoundConstructor).toHaveBeenCalledTimes(1);
   });
+
+  it('does not enqueue a touch while server audio has priority', async () => {
+    const networkClient = {
+      sendTouch: jest.fn(),
+    } as unknown as NetworkClient;
+    const processor = new MessageProcessor(
+      networkClient,
+      fakeBinder(),
+      jest.fn(),
+    );
+    (processor as any).serverAudioPlaying = true;
+
+    await processor.sendTouch('头');
+
+    expect(processor.queueLength()).toBe(0);
+    expect((networkClient as any).sendTouch).not.toHaveBeenCalled();
+  });
 });

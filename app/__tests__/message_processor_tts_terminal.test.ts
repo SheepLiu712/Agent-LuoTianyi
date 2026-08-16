@@ -161,6 +161,30 @@ describe('MessageProcessor TTS terminal contract', () => {
     expect((processor as any).serverAudioPlaying).toBe(false);
   });
 
+  it('plays ephemeral touch audio without persisting it', async () => {
+    mockAppState.currentState = 'background';
+    const feedServerAudioChunk = jest.fn();
+    const processor = new MessageProcessor(
+      {} as NetworkClient,
+      fakeBinder(),
+      feedServerAudioChunk,
+    );
+
+    processor.onAgentMessage({
+      uuid: 'touch-fast-reply',
+      audio: 'dG91Y2gtYXVkaW8=',
+      expression: '开心',
+      is_final_package: true,
+      display_in_chat: false,
+      is_ephemeral: true,
+    });
+    await drainIncoming(processor);
+
+    expect(feedServerAudioChunk).toHaveBeenCalledWith('dG91Y2gtYXVkaW8=', false);
+    expect(feedServerAudioChunk).toHaveBeenCalledWith('', true);
+    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
   it('saves later sentences on arrival and displays them after prior playback', async () => {
     const binder = fakeBinder();
     const feedServerAudioChunk = jest.fn();

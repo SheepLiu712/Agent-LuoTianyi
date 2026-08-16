@@ -177,6 +177,10 @@ class Live2DWidget(QOpenGLWidget):
             "opacity": 1.0,
             "max_radius": 60,
         })
+        # 在线流式音频播放期间，触摸只保留圆环反馈，不计数也不发送。
+        if self.agent_binder.is_server_audio_active():
+            return
+
         # 触摸次数统计（用于发送）
         self._touch_count_since_last_sent += 1
         self._pending_touch_areas.extend(hit_area_names)

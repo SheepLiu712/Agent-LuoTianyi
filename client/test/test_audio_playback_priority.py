@@ -93,3 +93,17 @@ def test_network_receive_reserves_server_audio_before_listener_queue():
     processor.feed_agent_msg(payload)
 
     assert events == ["reserved", "queued"]
+
+
+def test_touch_is_not_enqueued_while_server_audio_is_active():
+    processor = MessageProcessor.__new__(MessageProcessor)
+    processor.multimedia_stream = _bare_stream()
+    processor.multimedia_stream._server_audio_active = True
+    processor._send_queue = []
+    processor._send_cond = threading.Condition()
+    processor._reply_counter = 0
+
+    result = processor.send_touch("头")
+
+    assert result is None
+    assert processor._send_queue == []

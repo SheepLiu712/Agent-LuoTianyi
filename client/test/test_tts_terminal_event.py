@@ -164,3 +164,28 @@ def test_desktop_saves_complete_audio_before_waiting_and_defers_next_sentence():
     assert "text-sentence-2" in events
     assert "expression-期待" in events
     assert not playback.is_alive()
+
+
+def test_ephemeral_touch_audio_is_played_but_not_saved():
+    processor = MessageProcessor.__new__(MessageProcessor)
+    processor._audio_buffers = {}
+    processor.logger = _FakeLogger()
+    processor._save_audio_to_temp = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("ephemeral audio must not be saved")
+    )
+    response = AgentMessage(
+        uuid="touch-fast-reply",
+        text="",
+        expression="开心",
+        audio=base64.b64encode(b"touch-audio").decode("ascii"),
+        is_final_package=True,
+        reply_to=None,
+        display_in_chat=False,
+        is_ephemeral=True,
+    )
+
+    prepared = processor._prepare_agent_message(response)
+
+    assert prepared.response is response
+    assert prepared.audio_saved is False
+    assert processor._audio_buffers == {}

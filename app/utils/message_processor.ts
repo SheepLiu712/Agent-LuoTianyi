@@ -188,6 +188,10 @@ export class MessageProcessor {
   }
 
   async sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) {
+    if (this.hasServerAudioPriority()) {
+      addDebugTrace('send', 'touch suppressed by server audio', { touchArea });
+      return;
+    }
     addDebugTrace('send', 'enqueue touch', { touchArea, queueLength: this.sendQueue.length });
     this.sendQueue.push({
       kind: 'touch', touchArea, clickFrequency, touchMeta, clientMsgId: this.nextClientMsgId(), retryAttempt: 0,
@@ -397,6 +401,10 @@ export class MessageProcessor {
     return this.serverAudioPlaying || this.pendingServerAudioChunks > 0;
   }
 
+  isServerAudioActive() {
+    return this.hasServerAudioPriority();
+  }
+
   private canStartLocalPlayback(requestId: number) {
     return requestId === this.localPlaybackRequestId
       && !this.hasServerAudioPriority()
@@ -554,6 +562,12 @@ export class MessageProcessor {
   private persistAgentAudioOnArrival(payload: AgentMessagePayload): Promise<string | null> {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
     const audioChunk = payload.audio || '';
+
+    if (payload.is_ephemeral) {
+      // 触摸快速反射没有聊天气泡和历史回放入口，只播放，不持久化。
+      this.audioChunksByUuid.delete(convUuid);
+      return Promise.resolve(null);
+    }
 
     if (audioChunk) {
       const list = this.audioChunksByUuid.get(convUuid) || [];

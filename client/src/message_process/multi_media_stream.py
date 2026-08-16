@@ -173,6 +173,11 @@ class MultiMediaStream:
             return True
         return False
 
+    def is_server_audio_active(self) -> bool:
+        """Return whether online server audio currently owns playback priority."""
+        with self._state_lock:
+            return self._server_audio_active
+
     def _play_local_wav_worker(self, wav_path: str, conv_uuid: str, request_id: int, stop_event: threading.Event):
         pa = None
         stream = None

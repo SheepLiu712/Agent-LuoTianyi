@@ -166,6 +166,8 @@ class MessageProcessor:
         return local_id
 
     def send_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None):
+        if self.is_server_audio_active():
+            return None
         local_id = self._next_local_id("touch")
         if isinstance(touch_area, str):
             payload = {"touch_area": touch_area}
@@ -186,6 +188,9 @@ class MessageProcessor:
             self._send_queue.append(item)
             self._send_cond.notify()
         return local_id
+
+    def is_server_audio_active(self) -> bool:
+        return bool(self.multimedia_stream and self.multimedia_stream.is_server_audio_active())
 
     def send_image_selecting_start(self):
         """发送图片选择开始事件。"""
@@ -243,6 +248,11 @@ class MessageProcessor:
 
     def _prepare_agent_message(self, response: AgentMessage) -> PreparedAgentMessage:
         """在收包线程中聚合并落盘，不等待该句话展示或播放。"""
+        if getattr(response, "is_ephemeral", False):
+            # 触摸快速反射不会进入聊天历史，也没有消息气泡可供回放；只做实时播放。
+            self._audio_buffers.pop(response.uuid, None)
+            return PreparedAgentMessage(response=response, audio_saved=False)
+
         audio_buffer = self._audio_buffers.setdefault(response.uuid, bytearray())
         if response.audio:
             try:
