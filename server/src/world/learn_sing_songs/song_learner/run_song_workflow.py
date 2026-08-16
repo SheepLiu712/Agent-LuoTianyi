@@ -6,6 +6,7 @@ from importlib import import_module
 import os
 import shutil
 import sys
+import tempfile
 import traceback
 from pathlib import Path
 
@@ -246,61 +247,82 @@ def main() -> None:
     if not song_name:
         raise SongWorkflowError(10, "startup", "song_name 不能为空")
 
+    temporary_download_dir = None
+    status = None
     try:
         target_song_dir: Path = outputs_dir / song_name
-        target_song_dir.mkdir(parents=True, exist_ok=True)
-
-        # 初始化工作流状态管理
-        status = WorkflowStatus(target_song_dir)
-        status.print_status()
+        if target_song_dir.exists():
+            # 已有目录直接读取状态，从上次中断的步骤继续。
+            download_output_dir = outputs_dir
+            status = WorkflowStatus(target_song_dir)
+            status.print_status()
+        else:
+            # 首次下载先放入临时目录，下载失败时由 TemporaryDirectory 自动清理。
+            outputs_dir.mkdir(parents=True, exist_ok=True)
+            temporary_download_dir = tempfile.TemporaryDirectory(
+                prefix=f".{song_name}.",
+                dir=outputs_dir,
+            )
+            download_output_dir = Path(temporary_download_dir.name)
     except Exception as exc:
         raise_step_error(10, "startup", exc)
 
     # Step 1: 下载 QQ 音乐音频与歌词。
     try:
-        if status.is_completed("download_song"):
-            print("[SKIP] 步骤 download_song 已完成，跳过")
-            safe_song_name = song_name
-            downloaded_mp3 = find_first(target_song_dir, "*.mp3")
-            downloaded_lrc = find_first(target_song_dir, "*.lrc")
-        else:
-            print("[PROCESS] 正在执行步骤: download_song - 下载歌曲和歌词")
-            safe_song_name, downloaded_mp3, downloaded_lrc = download_song_and_lyric(
-                song_name=song_name,
-                singer_name=args.singer_name,
-                output_dir=outputs_dir,
-                credential_file=credential_file,
-                no_auto_login=args.no_auto_login,
-            )
-            if song_name != safe_song_name:
-                print(f"[REDIRECT] requested_song_name={song_name} actual_song_name={safe_song_name}")
-    except Exception as exc:
-        if isinstance(exc, download_qq_song.QQMusicCredentialError):
-            raise_step_error(21, "qq_credential", exc)
-        raise_step_error(20, "download_song", exc)
+        try:
+            if status is not None and status.is_completed("download_song"):
+                print("[SKIP] 步骤 download_song 已完成，跳过")
+                safe_song_name = song_name
+                downloaded_mp3 = find_first(target_song_dir, "*.mp3")
+                downloaded_lrc = find_first(target_song_dir, "*.lrc")
+            else:
+                print("[PROCESS] 正在执行步骤: download_song - 下载歌曲和歌词")
+                safe_song_name, downloaded_mp3, downloaded_lrc = download_song_and_lyric(
+                    song_name=song_name,
+                    singer_name=args.singer_name,
+                    output_dir=download_output_dir,
+                    credential_file=credential_file,
+                    no_auto_login=args.no_auto_login,
+                )
+                if song_name != safe_song_name:
+                    print(f"[REDIRECT] requested_song_name={song_name} actual_song_name={safe_song_name}")
+        except Exception as exc:
+            if isinstance(exc, download_qq_song.QQMusicCredentialError):
+                raise_step_error(21, "qq_credential", exc)
+            raise_step_error(20, "download_song", exc)
 
-    try:
-        if song_name != safe_song_name:
-            # 重命名文件夹以匹配安全的文件名（如果下载的文件名与输入的歌曲名不同）。
-            print(f"[INFO] 输入歌曲名 '{song_name}' 与下载文件名 '{safe_song_name}' 不同，正在调整目录结构以匹配安全文件名。")
-            new_target_song_dir = outputs_dir / safe_song_name
-            downloaded_mp3 = move_downloaded_file(downloaded_mp3, new_target_song_dir)
-            downloaded_lrc = move_downloaded_file(downloaded_lrc, new_target_song_dir)
-            # 删除tarrget_song_dir下的其他文件（如果有的话），保持目录干净。
-            for item in target_song_dir.iterdir():
-                if item.is_file():
-                    item.unlink()
-            # 删除target_song_dir目录（如果是空的），保持目录结构干净。
-            try:
-                target_song_dir.rmdir()
-            except OSError:
-                pass
-            target_song_dir = new_target_song_dir
-            status = WorkflowStatus(target_song_dir)
+        try:
+            if temporary_download_dir is not None:
+                # 下载成功后，才按下载接口返回的歌名创建正式目录并搬入文件。
+                target_song_dir = outputs_dir / safe_song_name
+                target_song_dir.mkdir(parents=True, exist_ok=True)
+                downloaded_mp3 = move_downloaded_file(downloaded_mp3, target_song_dir)
+                downloaded_lrc = move_downloaded_file(downloaded_lrc, target_song_dir)
+                status = WorkflowStatus(target_song_dir)
+            elif song_name != safe_song_name:
+                # 重命名文件夹以匹配安全的文件名（如果下载的文件名与输入的歌曲名不同）。
+                print(f"[INFO] 输入歌曲名 '{song_name}' 与下载文件名 '{safe_song_name}' 不同，正在调整目录结构以匹配安全文件名。")
+                new_target_song_dir = outputs_dir / safe_song_name
+                downloaded_mp3 = move_downloaded_file(downloaded_mp3, new_target_song_dir)
+                downloaded_lrc = move_downloaded_file(downloaded_lrc, new_target_song_dir)
+                # 删除target_song_dir下的其他文件（如果有的话），保持目录干净。
+                for item in target_song_dir.iterdir():
+                    if item.is_file():
+                        item.unlink()
+                # 删除target_song_dir目录（如果是空的），保持目录结构干净。
+                try:
+                    target_song_dir.rmdir()
+                except OSError:
+                    pass
+                target_song_dir = new_target_song_dir
+                status = WorkflowStatus(target_song_dir)
 
-        status.mark_completed("download_song")
-    except Exception as exc:
-        raise_step_error(30, "normalize_download", exc)
+            status.mark_completed("download_song")
+        except Exception as exc:
+            raise_step_error(30, "normalize_download", exc)
+    finally:
+        if temporary_download_dir is not None:
+            temporary_download_dir.cleanup()
 
     # 统一整理到 outputs/<歌名>/ 并固定命名。
     target_cleaned = target_song_dir / f"{safe_song_name}.cleaned.mp3"
