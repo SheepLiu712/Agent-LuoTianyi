@@ -5,10 +5,11 @@ import time
 import pytest
 from jose import jwt
 
-from src.system.database import database_service
-from src.system.database.database_service import ALGORITHM, DatabaseManager
+from src.system.database.database_service import DatabaseManager
+from src.system.database.services import credential_service
+from src.system.database.services.credential_service import ALGORITHM
 from src.system.database.sql_database import InviteCode, User
-from src.system.token_config import (
+from src.system.database.utils import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
     MAX_MESSAGE_TOKEN_TTL_SECONDS,
     MIN_MESSAGE_TOKEN_TTL_SECONDS,
@@ -22,14 +23,14 @@ from src.system.user_interface.account import (
 @pytest.fixture
 def authenticated_user(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "message-token-test-secret")
-    monkeypatch.setattr(database_service, "_hash_password", lambda password: f"hash:{password}")
+    monkeypatch.setattr(credential_service, "_hash_password", lambda password: f"hash:{password}")
     monkeypatch.setattr(
-        database_service,
+        credential_service,
         "_is_bcrypt_hash",
         lambda value: bool(value and value.startswith("hash:")),
     )
     monkeypatch.setattr(
-        database_service,
+        credential_service,
         "_verify_password",
         lambda password, stored: stored == f"hash:{password}",
     )
@@ -46,9 +47,9 @@ def authenticated_user(tmp_path, monkeypatch):
         session.commit()
     finally:
         session.close()
-    assert manager.register_user("alice", "password", "AUTH-CODE")[0] is True
-    auth_token = manager.update_auth_token("alice")
-    message_token = manager.generate_message_token("alice", expected_auth_token=auth_token)
+    assert manager.credential_service.register_user("alice", "password", "AUTH-CODE")[0] is True
+    auth_token = manager.credential_service.update_auth_token("alice")
+    message_token = manager.credential_service.generate_message_token("alice", expected_auth_token=auth_token)
     return manager, auth_token, message_token
 
 
@@ -83,16 +84,16 @@ def test_message_token_has_expiring_session_bound_claims(authenticated_user):
     assert {"user_uuid", "iat", "exp", "jti", "session_fp"} <= claims.keys()
     assert claims["exp"] > claims["iat"]
     assert auth_token not in claims.values()
-    assert manager.check_message_token("alice", message_token) == (True, claims["user_uuid"])
+    assert manager.credential_service.check_message_token("alice", message_token) == (True, claims["user_uuid"])
 
 
 def test_relogin_invalidates_previous_message_token(authenticated_user):
     manager, _, old_message_token = authenticated_user
-    new_auth_token = manager.update_auth_token("alice")
-    new_message_token = manager.generate_message_token("alice", expected_auth_token=new_auth_token)
+    new_auth_token = manager.credential_service.update_auth_token("alice")
+    new_message_token = manager.credential_service.generate_message_token("alice", expected_auth_token=new_auth_token)
 
-    assert manager.check_message_token("alice", old_message_token) == (False, None)
-    assert manager.check_message_token("alice", new_message_token)[0] is True
+    assert manager.credential_service.check_message_token("alice", old_message_token) == (False, None)
+    assert manager.credential_service.check_message_token("alice", new_message_token)[0] is True
 
 
 def test_expired_message_token_is_rejected(authenticated_user):
@@ -104,20 +105,20 @@ def test_expired_message_token_is_rejected(authenticated_user):
             **claims,
             "iat": now - 120,
             "exp": now - 60,
-            "session_fp": manager._session_fingerprint(auth_token),
+            "session_fp": manager.credential_service._session_fingerprint(auth_token),
         },
         manager.jwt_secret,
         algorithm=ALGORITHM,
     )
 
-    assert manager.check_message_token("alice", expired_token) == (False, None)
+    assert manager.credential_service.check_message_token("alice", expired_token) == (False, None)
 
 
 def test_message_token_validation_ignores_poisoned_username_cache(authenticated_user):
     manager, _, message_token = authenticated_user
     manager._ensure_redis().setex("user_id:alice", 3600, "attacker-controlled-id")
 
-    ok, user_uuid = manager.check_message_token("alice", message_token)
+    ok, user_uuid = manager.credential_service.check_message_token("alice", message_token)
 
     assert ok is True
     assert user_uuid != "attacker-controlled-id"
@@ -132,7 +133,7 @@ def test_password_login_ignores_poisoned_username_cache(authenticated_user):
         session.close()
     manager._ensure_redis().setex("user_id:alice", 3600, "attacker-controlled-id")
 
-    result = manager.authenticate_password_login("alice", "password")
+    result = manager.credential_service.authenticate_password_login("alice", "password")
 
     assert result is not None
     assert result["user_uuid"] == database_uuid
@@ -146,7 +147,7 @@ def test_inflight_password_login_cannot_restore_session_after_reset(
     manager, _, _ = authenticated_user
     ready = Event()
     release = Event()
-    original_rotate = manager._rotate_authenticated_session
+    original_rotate = manager.credential_service._rotate_authenticated_session
 
     def delayed_rotate(*args, **kwargs):
         ready.set()
@@ -154,12 +155,12 @@ def test_inflight_password_login_cannot_restore_session_after_reset(
             raise AssertionError("test did not release authentication")
         return original_rotate(*args, **kwargs)
 
-    monkeypatch.setattr(manager, "_rotate_authenticated_session", delayed_rotate)
+    monkeypatch.setattr(manager.credential_service, "_rotate_authenticated_session", delayed_rotate)
     with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(manager.authenticate_password_login, "alice", "password")
+        future = executor.submit(manager.credential_service.authenticate_password_login, "alice", "password")
         try:
             assert ready.wait(timeout=5)
-            assert manager.reset_account("AUTH-CODE", "alice", "new-password")[0] is True
+            assert manager.credential_service.reset_account("AUTH-CODE", "alice", "new-password")[0] is True
         finally:
             release.set()
         result = future.result(timeout=10)
@@ -178,32 +179,32 @@ def test_concurrent_auto_login_token_can_only_be_rotated_once(
 ):
     manager, auth_token, _ = authenticated_user
     barrier = Barrier(2)
-    original_rotate = manager._rotate_authenticated_session
+    original_rotate = manager.credential_service._rotate_authenticated_session
 
     def synchronized_rotate(*args, **kwargs):
         barrier.wait(timeout=5)
         return original_rotate(*args, **kwargs)
 
-    monkeypatch.setattr(manager, "_rotate_authenticated_session", synchronized_rotate)
+    monkeypatch.setattr(manager.credential_service, "_rotate_authenticated_session", synchronized_rotate)
     with ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
-            executor.submit(manager.authenticate_auto_login, "alice", auth_token)
+            executor.submit(manager.credential_service.authenticate_auto_login, "alice", auth_token)
             for _ in range(2)
         ]
         results = [future.result(timeout=10) for future in futures]
 
     successful = [result for result in results if result is not None]
     assert len(successful) == 1
-    assert manager.check_auth_token("alice", auth_token) is False
-    assert manager.check_message_token("alice", successful[0]["message_token"])[0] is True
+    assert manager.credential_service.check_auth_token("alice", auth_token) is False
+    assert manager.credential_service.check_message_token("alice", successful[0]["message_token"])[0] is True
 
 
 def test_account_reset_invalidates_message_token(authenticated_user):
     manager, _, message_token = authenticated_user
 
-    assert manager.reset_account("AUTH-CODE", "alice-renamed", "new-password")[0] is True
-    assert manager.check_message_token("alice", message_token) == (False, None)
-    assert manager.check_message_token("alice-renamed", message_token) == (False, None)
+    assert manager.credential_service.reset_account("AUTH-CODE", "alice-renamed", "new-password")[0] is True
+    assert manager.credential_service.check_message_token("alice", message_token) == (False, None)
+    assert manager.credential_service.check_message_token("alice-renamed", message_token) == (False, None)
 
 
 def test_legacy_message_token_path_is_expiring_and_session_bound(authenticated_user):
@@ -217,7 +218,7 @@ def test_legacy_message_token_path_is_expiring_and_session_bound(authenticated_u
     finally:
         session.close()
 
-    manager.update_auth_token("alice")
+    manager.credential_service.update_auth_token("alice")
     session = manager.open_sql_session()
     try:
         assert check_legacy_message_token(session, "alice", token) == (False, None)

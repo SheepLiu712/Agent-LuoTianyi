@@ -11,7 +11,7 @@ server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.system.database.memory_store import MemoryStore
+from src.system.database.services.memory_store import MemoryStore
 from src.system.database.redis_buffer import RedisBuffer
 from src.system.database.sql_database import Base, MemoryUpdateRecord
 

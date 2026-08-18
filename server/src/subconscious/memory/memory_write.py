@@ -20,7 +20,7 @@ from src.domain.memory_type import MemoryUpdateCommand
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.system.database.memory_store import MemoryStore
+    from src.system.database.services.memory_store import MemoryStore
 
 
 logger = get_logger("MemoryWriter")

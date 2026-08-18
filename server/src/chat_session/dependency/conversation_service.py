@@ -128,7 +128,7 @@ class ConversationService:
             data=data,
         )
         uuid_list = await run_sync_owned(
-            self.database.add_conversations,
+            self.database.conversation_service.add_conversations,
             user_id,
             [item],
             True,
@@ -154,7 +154,7 @@ class ConversationService:
         :return: ConversationContextSnapshot对象
         '''
         await run_sync_owned(
-            self.database.reset_conversation_context_if_stale,
+            self.database.conversation_service.reset_conversation_context_if_stale,
             user_id,
             character_id,
             self.context_stale_after_days,
@@ -213,7 +213,7 @@ class ConversationService:
             return [None] * len(reply_items)
 
         uuid_list = await run_sync_owned(
-            self.database.add_conversations,
+            self.database.conversation_service.add_conversations,
             user_id,
             conversation_items,
             True,
@@ -235,7 +235,7 @@ class ConversationService:
         获取快照形式的对话上下文状态，包含summary、conversations、context_count等信息
         '''
         context_data = await run_sync_owned(
-            self.database.get_conversation_context_state,
+            self.database.conversation_service.get_conversation_context_state,
             user_id,
             character_id,
         )
@@ -272,7 +272,7 @@ class ConversationService:
         根据需要压缩对话上下文
         '''
         context_count = await run_sync_owned(
-            self.database.get_context_count,
+            self.database.conversation_service.get_context_count,
             user_id,
             character_id,
         )
@@ -296,7 +296,7 @@ class ConversationService:
         )
 
         updated = await run_sync_owned(
-            self.database.compact_conversation_context,
+            self.database.conversation_service.compact_conversation_context,
             user_id,
             new_summary.strip(),
             self.not_zip_conversation_count,

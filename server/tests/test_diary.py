@@ -191,6 +191,7 @@ class FakeDatabaseManager:
             list_dynamics_for_user=lambda user_id, limit=50: {"items": []},
             get_dynamic_by_source=lambda **kwargs: existing_dynamic,
         )
+        self.conversation_service = self
         self._prefs = {"nickname": "小洛"}
         self._desc = "喜欢音乐的测试用户"
 

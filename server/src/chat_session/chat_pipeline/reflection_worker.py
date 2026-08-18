@@ -169,7 +169,7 @@ class ReflectionWorker:
                 return
             current_profile = ""
             try:
-                current_profile = self.system_runtime.database_manager.get_user_description(turn.user_id) or ""
+                current_profile = self.system_runtime.database_manager.conversation_service.get_user_description(turn.user_id) or ""
             except Exception:
                 current_profile = ""
             start = time.perf_counter()

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from src.system.admin.secret_store import SecretStore
-from src.system.token_config import (
+from src.system.database.utils import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
     MAX_MESSAGE_TOKEN_TTL_SECONDS,
     MIN_MESSAGE_TOKEN_TTL_SECONDS,

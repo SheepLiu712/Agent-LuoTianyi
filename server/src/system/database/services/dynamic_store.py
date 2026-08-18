@@ -22,7 +22,7 @@ from src.system.database.redis_buffer import RedisBuffer
 from src.system.database.sql_writer import run_sql_write
 
 if TYPE_CHECKING:
-    from src.system.database.user_store import UserStore
+    from src.system.database.services.user_store import UserStore
 
 logger = get_logger(__name__)
 

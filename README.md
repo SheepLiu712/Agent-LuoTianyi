@@ -97,7 +97,7 @@ npx expo start                 # 启动 Expo 开发服务器
 
 4. 如果需要重新构建控制台前端：
    ```bash
-   cd admin_ui
+   cd res/admin_ui
    npm install
    npm run build
    cd ..

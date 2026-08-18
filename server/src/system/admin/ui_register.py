@@ -27,6 +27,6 @@ def register_admin_ui(app: "FastAPI", current_dir: str) -> None:
             return FileResponse(index_path, headers={"Cache-Control": "no-store"})
         return HTMLResponse(
             "<h1>AgentLuo Server Console</h1>"
-            "<p>Admin UI has not been built yet. Run <code>cd server/admin_ui && npm install && npm run build</code>.</p>"
+            "<p>Admin UI has not been built yet. Run <code>cd server/res/admin_ui && npm install && npm run build</code>.</p>"
         )
 

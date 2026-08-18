@@ -16,7 +16,7 @@ from src.chat_session.dependency.proactive_topic_maker import (
     ProactiveTopicMaker,
 )
 from src.subconscious.date_processor import DateDetector, process_detected_date
-from src.system.database.event_store import EventStore
+from src.system.database.services.event_store import EventStore
 from src.system.database.sql_database import Event, get_sql_session, init_sql_db
 
 

@@ -6,8 +6,8 @@ server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-import src.system.database.event_store as event_store_module
-from src.system.database.event_store import EventStore
+import src.system.database.services.event_store as event_store_module
+from src.system.database.services.event_store import EventStore
 
 
 class NoopRedis:
