@@ -123,7 +123,7 @@ if os.path.isdir(admin_ui_assets):
 async def admin_index(path: str = ""):
     index_path = os.path.join(admin_ui_build, "index.html")
     if os.path.exists(index_path):
-        return FileResponse(index_path)
+        return FileResponse(index_path, headers={"Cache-Control": "no-store"})
     return HTMLResponse(
         "<h1>AgentLuo Server Console</h1>"
         "<p>Admin UI has not been built yet. Run <code>cd server/admin_ui && npm install && npm run build</code>.</p>"

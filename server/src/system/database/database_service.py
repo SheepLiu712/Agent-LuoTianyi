@@ -3,6 +3,7 @@ import hmac
 import hashlib
 import bcrypt
 import secrets
+import string
 from jose import jwt
 import json
 from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
@@ -49,7 +50,8 @@ ALGORITHM = "HS256"
 
 _BCRYPT_PREFIXES = ("$2a$", "$2b$", "$2y$")
 _BCRYPT_ROUNDS = 12
-_INVITE_CODE_RANDOM_BYTES = 24
+_INVITE_CODE_LENGTH = 10
+_INVITE_CODE_ALPHABET = string.ascii_uppercase + string.digits
 _INVITE_CODE_COLLISION_RETRIES = 8
 
 
@@ -60,6 +62,10 @@ def _is_bcrypt_hash(value: str | None) -> bool:
 def _hash_password(password: str) -> str:
     hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=_BCRYPT_ROUNDS))
     return hashed.decode("utf-8")
+
+
+def _generate_invite_code(length: int = _INVITE_CODE_LENGTH) -> str:
+    return "".join(secrets.choice(_INVITE_CODE_ALPHABET) for _ in range(length))
 
 
 def _verify_password(password: str, stored_hash: str) -> bool:
@@ -638,9 +644,11 @@ class DatabaseManager:
 
             user_ids = {row.user_id for row in rows if row.user_id}
             usernames: Dict[str, str] = {}
+            nicknames: Dict[str, str] = {}
             if user_ids:
                 for user in db.query(User).filter(User.uuid.in_(user_ids)).all():
                     usernames[user.uuid] = user.username
+                    nicknames[user.uuid] = user.nickname
 
             items = []
             for row in rows:
@@ -652,6 +660,8 @@ class DatabaseManager:
                     "used_at": row.used_at.strftime("%Y-%m-%d %H:%M:%S") if row.used_at else None,
                     "user_id": row.user_id,
                     "username": usernames.get(row.user_id),
+                    "nickname": nicknames.get(row.user_id),
+                    "can_use": not bool(row.is_used) and not bool(row.disabled),
                 })
             return {"items": items, "total": total}
         except Exception as exc:
@@ -662,7 +672,7 @@ class DatabaseManager:
             db.close()
 
     def admin_generate_invite_codes(self, count: int = 1) -> Tuple[bool, Any]:
-        '''批量生成固定 192-bit 随机邀请码。'''
+        '''批量生成 10 位大写字母和数字组成的邀请码。'''
         if isinstance(count, bool) or not isinstance(count, int) or count < 1 or count > 100:
             return False, "生成数量需在 1-100 之间"
 
@@ -675,7 +685,7 @@ class DatabaseManager:
                 db.connection().exec_driver_sql("BEGIN")
             for _ in range(count):
                 for _attempt in range(_INVITE_CODE_COLLISION_RETRIES):
-                    candidate = secrets.token_urlsafe(_INVITE_CODE_RANDOM_BYTES)
+                    candidate = _generate_invite_code()
                     try:
                         with db.begin_nested():
                             db.add(InviteCode(code=candidate))
@@ -701,34 +711,33 @@ class DatabaseManager:
         finally:
             db.close()
 
-    def admin_disable_invite_code(self, code_str: str) -> Tuple[bool, str]:
-        '''不可逆地禁用邀请码（admin 控制台）。'''
+    def admin_set_invite_code_disabled(self, code_str: str, disabled: bool) -> Tuple[bool, str]:
+        '''设置邀请码的禁用状态（admin 控制台）。'''
         db = self._new_session()
         try:
-            updated = (
-                db.query(InviteCode)
-                .filter(
-                    InviteCode.code == code_str,
-                    InviteCode.disabled.is_(False),
-                )
-                .update({InviteCode.disabled: True}, synchronize_session=False)
-            )
-            if updated == 1:
-                db.commit()
-                logger.info("Admin disabled an invite code")
-                return True, "已禁用"
-
-            db.rollback()
-            exists = db.query(InviteCode.code).filter(InviteCode.code == code_str).first()
-            if not exists:
+            code = db.query(InviteCode).filter(InviteCode.code == code_str).first()
+            if code is None:
+                db.rollback()
                 return False, "邀请码不存在"
-            return True, "已禁用"
+
+            if bool(code.disabled) == disabled:
+                db.rollback()
+                return True, "已禁用" if disabled else "已启用"
+
+            code.disabled = disabled
+            db.commit()
+            logger.info("Admin %s an invite code", "disabled" if disabled else "enabled")
+            return True, "已禁用" if disabled else "已启用"
         except Exception as exc:
             db.rollback()
-            logger.error("Error disabling invite code (%s)", type(exc).__name__)
+            logger.error("Error setting invite code disabled state (%s)", type(exc).__name__)
             return False, "操作失败，请重试"
         finally:
             db.close()
+
+    def admin_disable_invite_code(self, code_str: str) -> Tuple[bool, str]:
+        '''兼容旧管理接口，禁用邀请码。'''
+        return self.admin_set_invite_code_disabled(code_str, True)
 
     def admin_delete_invite_code(self, code_str: str) -> Tuple[bool, str]:
         '''删除尚未使用且未禁用的邀请码（admin 控制台）。'''

@@ -38,23 +38,15 @@ def add_invite(manager: DatabaseManager, code: str, *, disabled: bool = False) -
         session.close()
 
 
-def test_generation_uses_fixed_192_bit_secrets_tokens(db_manager, monkeypatch):
-    requested_bytes = []
-
-    def fake_token_urlsafe(nbytes: int) -> str:
-        requested_bytes.append(nbytes)
-        return f"secure-token-{len(requested_bytes)}"
-
-    monkeypatch.setattr(database_service.secrets, "token_urlsafe", fake_token_urlsafe)
-
+def test_generation_uses_ten_character_uppercase_alphanumeric_codes(db_manager):
     ok, codes = db_manager.admin_generate_invite_codes(count=3)
 
     assert ok is True
-    assert codes == ["secure-token-1", "secure-token-2", "secure-token-3"]
-    assert requested_bytes == [24, 24, 24]
-    assert database_service._INVITE_CODE_RANDOM_BYTES * 8 == 192
+    assert len(codes) == 3
+    assert len(set(codes)) == 3
+    assert all(len(code) == 10 and code.isascii() and code.isalnum() and code == code.upper() for code in codes)
     source = pyinspect.getsource(DatabaseManager.admin_generate_invite_codes)
-    assert "secrets.token_urlsafe" in source
+    assert "_generate_invite_code()" in source
     assert "begin_nested" in source
     assert "db.flush()" in source
 
@@ -71,17 +63,17 @@ def test_database_collision_is_retried_without_preloading_codes(db_manager, monk
     ])
     calls = []
 
-    def fake_token_urlsafe(nbytes: int) -> str:
-        calls.append(nbytes)
+    def fake_generate_invite_code() -> str:
+        calls.append(True)
         return next(candidates)
 
-    monkeypatch.setattr(database_service.secrets, "token_urlsafe", fake_token_urlsafe)
+    monkeypatch.setattr(database_service, "_generate_invite_code", fake_generate_invite_code)
 
     ok, codes = db_manager.admin_generate_invite_codes(count=1)
 
     assert ok is True
     assert codes == ["fresh-secure-token"]
-    assert calls == [24, 24, 24]
+    assert calls == [True, True, True]
 
 
 def test_collision_retry_limit_rolls_back_whole_batch(db_manager, monkeypatch):
@@ -89,17 +81,17 @@ def test_collision_retry_limit_rolls_back_whole_batch(db_manager, monkeypatch):
     candidates = iter(["first-batch-token"] + ["always-collides"] * 8)
     calls = []
 
-    def fake_token_urlsafe(nbytes: int) -> str:
-        calls.append(nbytes)
+    def fake_generate_invite_code() -> str:
+        calls.append(True)
         return next(candidates)
 
-    monkeypatch.setattr(database_service.secrets, "token_urlsafe", fake_token_urlsafe)
+    monkeypatch.setattr(database_service, "_generate_invite_code", fake_generate_invite_code)
 
     ok, message = db_manager.admin_generate_invite_codes(count=2)
 
     assert ok is False
     assert message == "生成失败，请重试"
-    assert calls == [24] * 9
+    assert calls == [True] * 9
     session = db_manager.open_sql_session()
     try:
         assert session.query(InviteCode).filter_by(code="first-batch-token").first() is None
@@ -112,8 +104,7 @@ def test_concurrent_generation_relies_on_unique_constraint(db_manager, monkeypat
     calls_by_thread = {}
     calls_lock = Lock()
 
-    def colliding_then_unique(nbytes: int) -> str:
-        assert nbytes == 24
+    def colliding_then_unique() -> str:
         thread_id = threading.get_ident()
         with calls_lock:
             call_number = calls_by_thread.get(thread_id, 0)
@@ -123,7 +114,7 @@ def test_concurrent_generation_relies_on_unique_constraint(db_manager, monkeypat
             return "shared-concurrent-token"
         return f"fallback-{thread_id}"
 
-    monkeypatch.setattr(database_service.secrets, "token_urlsafe", colliding_then_unique)
+    monkeypatch.setattr(database_service, "_generate_invite_code", colliding_then_unique)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _: db_manager.admin_generate_invite_codes(), range(2)))
@@ -138,26 +129,43 @@ def test_concurrent_generation_relies_on_unique_constraint(db_manager, monkeypat
         session.close()
 
 
-def test_disabling_is_idempotent_irreversible_and_never_logs_code(db_manager, caplog):
+def test_setting_disabled_is_reversible_idempotent_and_never_logs_code(db_manager, caplog):
     unused_code = "DO-NOT-LOG-UNUSED-INVITE"
     used_code = "DO-NOT-LOG-USED-INVITE"
+    available_code = "DO-NOT-LOG-AVAILABLE-INVITE"
     add_invite(db_manager, unused_code)
     add_invite(db_manager, used_code)
+    add_invite(db_manager, available_code)
     assert db_manager.register_user("invite-owner", "password", used_code)[0] is True
 
     caplog.set_level(logging.INFO)
-    assert db_manager.admin_disable_invite_code(unused_code) == (True, "已禁用")
-    assert db_manager.admin_disable_invite_code(unused_code) == (True, "已禁用")
-    assert db_manager.admin_disable_invite_code(used_code) == (True, "已禁用")
+    assert db_manager.admin_set_invite_code_disabled(unused_code, True) == (True, "已禁用")
+    assert db_manager.admin_set_invite_code_disabled(unused_code, True) == (True, "已禁用")
+    assert db_manager.admin_set_invite_code_disabled(unused_code, False) == (True, "已启用")
+    assert db_manager.admin_set_invite_code_disabled(unused_code, False) == (True, "已启用")
+    assert db_manager.admin_set_invite_code_disabled(used_code, True) == (True, "已禁用")
 
-    assert db_manager.register_user("blocked-user", "password", unused_code)[0] is False
+    assert db_manager.register_user("re-enabled-user", "password", unused_code)[0] is True
+    rows_before_disable = db_manager.admin_list_invite_codes()["items"]
+    row_by_code_before_disable = {row["code"]: row for row in rows_before_disable}
+    assert row_by_code_before_disable[available_code]["can_use"] is True
+    assert db_manager.admin_set_invite_code_disabled(available_code, True) == (True, "已禁用")
+    assert db_manager.register_user("blocked-user", "password", available_code)[0] is False
     assert db_manager.reset_account(used_code, "renamed-owner", "new-password")[0] is False
     assert db_manager.admin_delete_invite_code(unused_code)[0] is False
-    assert not hasattr(db_manager, "admin_set_invite_code_disabled")
+    assert hasattr(db_manager, "admin_set_invite_code_disabled")
+
+    rows = db_manager.admin_list_invite_codes()["items"]
+    row_by_code = {row["code"]: row for row in rows}
+    assert row_by_code[used_code]["is_used"] is True
+    assert row_by_code[used_code]["username"] == "invite-owner"
+    assert row_by_code[used_code]["can_use"] is False
+    assert row_by_code[available_code]["can_use"] is False
 
     rendered_logs = "\n".join(record.getMessage() for record in caplog.records)
     assert unused_code not in rendered_logs
     assert used_code not in rendered_logs
+    assert available_code not in rendered_logs
 
 
 def test_legacy_invite_migration_disables_once_and_is_idempotent(tmp_path):
@@ -218,6 +226,10 @@ def test_admin_invite_routes_keep_codes_in_request_bodies(monkeypatch):
             calls.append(("disable", code))
             return True, "已禁用"
 
+        def admin_set_invite_code_disabled(self, code: str, disabled: bool):
+            calls.append(("set-disabled", code, disabled))
+            return True, "已禁用" if disabled else "已启用"
+
         def admin_delete_invite_code(self, code: str):
             calls.append(("delete", code))
             return True, "删除成功"
@@ -230,8 +242,9 @@ def test_admin_invite_routes_keep_codes_in_request_bodies(monkeypatch):
     monkeypatch.setattr(admin_interface, "get_admin_shell", lambda: shell)
 
     assert asyncio.run(admin_interface.admin_disable_invite_code({"code": secret_code}))["ok"] is True
+    assert asyncio.run(admin_interface.admin_set_invite_code_disabled({"code": secret_code, "disabled": False}))["ok"] is True
     assert asyncio.run(admin_interface.admin_delete_invite_code({"code": secret_code}))["ok"] is True
-    assert calls == [("disable", secret_code), ("delete", secret_code)]
+    assert calls == [("disable", secret_code), ("set-disabled", secret_code, False), ("delete", secret_code)]
 
     invite_routes = [
         route
@@ -243,6 +256,7 @@ def test_admin_invite_routes_keep_codes_in_request_bodies(monkeypatch):
         "/invite-codes/query",
         "/invite-codes/generate",
         "/invite-codes/disable",
+        "/invite-codes/set-disabled",
         "/invite-codes/delete",
     }
     assert all("{code}" not in route.path for route in invite_routes)
@@ -251,5 +265,5 @@ def test_admin_invite_routes_keep_codes_in_request_bodies(monkeypatch):
     source = (Path(__file__).parents[1] / "admin_ui" / "src" / "main.tsx").read_text(encoding="utf-8")
     assert "encodeURIComponent(row.code)" not in source
     assert "/admin/api/invite-codes?" not in source
-    assert "'/admin/api/invite-codes/disable'," in source
+    assert "'/admin/api/invite-codes/set-disabled'," in source
     assert "'/admin/api/invite-codes/delete'," in source
