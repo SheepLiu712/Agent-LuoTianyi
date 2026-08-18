@@ -1,9 +1,7 @@
 import asyncio
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from fastapi.responses import FileResponse
 from fastapi.testclient import TestClient
 
 import server_main
@@ -38,15 +36,6 @@ def test_project_plan_is_exposed_by_public_get_routes():
 
     assert set(matching_routes) == {"/project-plan", "/project-plan/"}
     assert all("GET" in route.methods for route in matching_routes.values())
-
-
-def test_project_plan_returns_generated_html():
-    response = asyncio.run(server_main.project_plan())
-
-    assert isinstance(response, FileResponse)
-    assert Path(response.path).resolve() == Path(server_main.project_plan_path).resolve()
-    assert response.media_type == "text/html"
-    assert Path(response.path).is_file()
 
 
 def test_project_plan_get_returns_page_content():

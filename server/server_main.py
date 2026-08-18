@@ -1,7 +1,5 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Header, Request
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
 import sys
@@ -33,11 +31,19 @@ from src.system.user_interface.types import (
     DynamicReadMarkRequest,
 )
 from src.system.user_interface.websocket_service import ChatEventAcceptance, WebSocketConnection
-from src.system.admin.admin_interface import router as admin_router
-from src.system.admin import get_admin_shell, init_admin_shell, shutdown_admin_shell
-
+from src.system.admin import (
+    get_admin_shell,
+    init_admin_shell,
+    register_admin_ui,
+    shutdown_admin_shell,
+)
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger, install_access_log_filter
+from src.system.network_helper import (
+    register_project_plan,
+    require_bearer_token,
+    runtime_not_ready_detail,
+)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -68,74 +74,24 @@ async def startup_event(app: FastAPI):
         await shutdown_admin_shell()
         logger.info("AdminShell 已关闭")
 
-
-def runtime_not_ready_detail() -> dict:
-    status = get_admin_shell().runtime_supervisor.public_status()
-    return {
-        "ok": False,
-        "code": "SYSTEM_RUNTIME_NOT_READY",
-        "message": "服务端尚未完成配置或系统运行时未启动",
-        "runtime": status,
-    }
-
-
 def get_runtime():
     runtime = get_admin_shell().runtime_supervisor.runtime
     if runtime is None:
         raise HTTPException(status_code=503, detail=runtime_not_ready_detail())
     return runtime
 
-
-def require_bearer_token(authorization: str | None) -> str:
-    if not authorization:
-        raise HTTPException(status_code=401, detail="消息令牌缺失")
-    scheme, separator, token = authorization.partition(" ")
-    if (
-        separator != " "
-        or scheme.lower() != "bearer"
-        or not token
-        or any(character.isspace() for character in token)
-    ):
-        raise HTTPException(status_code=401, detail="无效的 Authorization 请求头")
-    return token
-
-
 app = FastAPI(lifespan=startup_event)
-app.include_router(admin_router)
-
-admin_ui_build = os.path.join(current_dir, "res", "admin_ui", "admin_static")
-admin_ui_assets = os.path.join(admin_ui_build, "assets")
-project_plan_path = os.path.join(
-    os.path.dirname(current_dir),
-    "docs",
-    "项目计划书",
-    "AgentLuo项目计划书.html",
-)
-if os.path.isdir(admin_ui_assets):
-    app.mount("/admin/assets", StaticFiles(directory=admin_ui_assets), name="admin-assets")
 
 # ——————————————————————————————————————————————————————————————————
 # 主要的 API 路由定义
 # ——————————————————————————————————————————————————————————————————
 
-@app.get("/admin")
-@app.get("/admin/{path:path}")
-async def admin_index(path: str = ""):
-    index_path = os.path.join(admin_ui_build, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path, headers={"Cache-Control": "no-store"})
-    return HTMLResponse(
-        "<h1>AgentLuo Server Console</h1>"
-        "<p>Admin UI has not been built yet. Run <code>cd server/admin_ui && npm install && npm run build</code>.</p>"
-    )
+# 注册管理后台的 UI 和路由
+register_admin_ui(app, current_dir)
 
+# 注册项目计划书页面
+register_project_plan(app, current_dir)
 
-@app.get("/project-plan", include_in_schema=False)
-@app.get("/project-plan/", include_in_schema=False)
-async def project_plan():
-    if not os.path.isfile(project_plan_path):
-        raise HTTPException(status_code=404, detail="项目计划书页面尚未生成")
-    return FileResponse(project_plan_path, media_type="text/html")
 
 @app.websocket("/chat_ws")
 async def chat_ws(websocket: WebSocket):
