@@ -103,7 +103,7 @@ def require_bearer_token(authorization: str | None) -> str:
 app = FastAPI(lifespan=startup_event)
 app.include_router(admin_router)
 
-admin_ui_build = os.path.join(current_dir, "admin_ui", "admin_static")
+admin_ui_build = os.path.join(current_dir, "res", "admin_ui", "admin_static")
 admin_ui_assets = os.path.join(admin_ui_build, "assets")
 project_plan_path = os.path.join(
     os.path.dirname(current_dir),
