@@ -5,6 +5,7 @@ from datetime import datetime
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
     QGridLayout,
     QHBoxLayout,
@@ -21,6 +22,8 @@ from PySide6.QtWidgets import (
 
 TIANYI_ICON_PATH = "res/gui/tianyi_icon.png"
 USER_ICON_PATH = "res/gui/user_icon.png"
+DYNAMIC_PAGE_SIZE = 10
+SCROLLBAR_SINGLE_STEP = 12
 
 
 def _source_label(source_type: str) -> str:
@@ -272,7 +275,7 @@ class DynamicEditorDialog(QDialog):
                 border: 1px solid #D5DEE7;
                 border-radius: 6px;
                 padding: 10px;
-                font-size: 15px;
+                font-size: 14px;
             }
             QPushButton {
                 background: transparent;
@@ -280,6 +283,7 @@ class DynamicEditorDialog(QDialog):
                 border: none;
                 padding: 8px 10px;
                 font-weight: 700;
+                font-size: 16px;
             }
             QPushButton:hover {
                 background: #E6F4FE;
@@ -287,6 +291,9 @@ class DynamicEditorDialog(QDialog):
             }
             QPushButton:disabled {
                 color: #8AA7B8;
+            }
+            QPushButton:focus {
+                outline: none;
             }
             """
         )
@@ -335,6 +342,7 @@ class DynamicEditorDialog(QDialog):
         box = QMessageBox(self)
         box.setWindowTitle("退出编辑")
         box.setText("退出后这条动态不会保存。")
+        box.setStyleSheet("font-size: 14px;")
         keep_button = box.addButton("继续编辑", QMessageBox.ButtonRole.RejectRole)
         exit_button = box.addButton("退出", QMessageBox.ButtonRole.DestructiveRole)
         box.setDefaultButton(keep_button)
@@ -353,6 +361,7 @@ class DynamicsDialog(QDialog):
         self.has_more = False
         self._loading_dynamics = False
         self._loading_more_dynamics = False
+        self.dynamic_end_item: QListWidgetItem | None = None
         self.add_dynamic_button: QPushButton | None = None
 
         self.setWindowTitle("动态")
@@ -395,14 +404,20 @@ class DynamicsDialog(QDialog):
                 border: 1px solid #D5DEE7;
                 border-radius: 6px;
             }
-            QPushButton#addDynamicButton {
-                background: #1296DB;
+            QPushButton#addDynamicButton,
+            QPushButton#refreshButton,
+            QPushButton#sendCommentButton {
+                background: #66CCFF;
+                color: white;
+                border: none;
                 border-radius: 6px;
-                font-weight: 700;
-                padding: 6px 12px;
+                padding: 8px 12px;
+                font-size: 16px;
             }
-            QPushButton#addDynamicButton:hover {
-                background: #0D82C2;
+            QPushButton#addDynamicButton:hover,
+            QPushButton#refreshButton:hover,
+            QPushButton#sendCommentButton:hover {
+                background: #55BBEE;
             }
             QPushButton {
                 background: #66CCFF;
@@ -416,6 +431,9 @@ class DynamicsDialog(QDialog):
             }
             QPushButton:disabled {
                 background: #B8CAD6;
+            }
+            QPushButton:focus {
+                outline: none;
             }
             """
         )
@@ -438,6 +456,8 @@ class DynamicsDialog(QDialog):
         header_row.addWidget(self.add_dynamic_button, 0, Qt.AlignmentFlag.AlignTop)
 
         self.refresh_button = QPushButton("刷新")
+        self.refresh_button.setObjectName("refreshButton")
+        self.refresh_button.setFixedSize(65, 38)
         self.refresh_button.clicked.connect(self.load_dynamics)
         header_row.addWidget(self.refresh_button, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(header_row)
@@ -456,21 +476,20 @@ class DynamicsDialog(QDialog):
         left_label.setStyleSheet("font-weight: 600; font-size: 14px; color: #243447;")
         self.dynamic_list = QListWidget()
         self.dynamic_list.setObjectName("dynamicList")
+        self.dynamic_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.dynamic_list.verticalScrollBar().setSingleStep(SCROLLBAR_SINGLE_STEP)
         self.dynamic_list.currentItemChanged.connect(self.on_dynamic_selected)
         self.dynamic_list.verticalScrollBar().valueChanged.connect(self._on_dynamic_list_scroll)
-        self.dynamic_end_label = QLabel("已经到底了")
-        self.dynamic_end_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.dynamic_end_label.setStyleSheet("color: #9AA6B2; padding: 4px;")
-        self.dynamic_end_label.hide()
         left_panel.addWidget(left_label)
         left_panel.addWidget(self.dynamic_list, 1)
-        left_panel.addWidget(self.dynamic_end_label)
 
         right_panel = QVBoxLayout()
         right_label = QLabel("详情与评论")
         right_label.setStyleSheet("font-weight: 600; font-size: 14px; color: #243447;")
         self.comments_text = QListWidget()
         self.comments_text.setObjectName("dynamicFeedList")
+        self.comments_text.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.comments_text.verticalScrollBar().setSingleStep(SCROLLBAR_SINGLE_STEP)
         self.comments_text.setSpacing(6)
         self.comments_text.setUniformItemSizes(False)
         self.comments_text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -483,6 +502,7 @@ class DynamicsDialog(QDialog):
         self.comment_status.setStyleSheet("color: #667481;")
         comment_action_row.addWidget(self.comment_status, 1)
         self.comment_button = QPushButton("发送评论")
+        self.comment_button.setObjectName("sendCommentButton")
         self.comment_button.setEnabled(False)
         self.comment_button.clicked.connect(self.publish_comment)
         comment_action_row.addWidget(self.comment_button)
@@ -516,7 +536,22 @@ class DynamicsDialog(QDialog):
             self.load_more_dynamics()
 
     def _update_dynamic_end_state(self):
-        self.dynamic_end_label.setVisible(not self.has_more)
+        if self.dynamic_end_item is not None:
+            row = self.dynamic_list.row(self.dynamic_end_item)
+            if row >= 0:
+                self.dynamic_list.takeItem(row)
+            self.dynamic_end_item = None
+
+        if self.has_more:
+            return
+
+        item = QListWidgetItem("已经到底了")
+        item.setFlags(item.flags() & ~(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled))
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setForeground(QColor("#9AA6B2"))
+        item.setSizeHint(QSize(0, 32))
+        self.dynamic_list.addItem(item)
+        self.dynamic_end_item = item
 
     def _update_detail_item_sizes(self):
         width = self.comments_text.viewport().width() - 8
@@ -536,7 +571,7 @@ class DynamicsDialog(QDialog):
 
     def _add_detail_message(self, message: str):
         item = QListWidgetItem(message)
-        item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+        item.setFlags(item.flags() & ~(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled))
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         item.setForeground(QColor("#9AA6B2"))
         item.setSizeHint(QSize(0, 40))
@@ -551,16 +586,16 @@ class DynamicsDialog(QDialog):
     def load_dynamics(self):
         self._loading_dynamics = True
         try:
-            payload = self.network_client.get_dynamics(limit=40)
+            payload = self.network_client.get_dynamics(limit=DYNAMIC_PAGE_SIZE)
             if not payload.get("ok", False):
                 self.feed_status.setText(f"动态加载失败：{payload.get('message', '未知错误')}。点击“刷新”重试。")
                 self.feed_status.show()
-                self.dynamic_end_label.hide()
                 return False
 
             self.feed_status.hide()
             items = payload.get("items", [])
             self.dynamic_list.clear()
+            self.dynamic_end_item = None
             self.current_dynamic = None
             self.comments_text.clear()
             self.comment_status.setText("请选择一条动态")
@@ -572,7 +607,7 @@ class DynamicsDialog(QDialog):
                 self._add_dynamic_item(dynamic)
 
             self._update_dynamic_end_state()
-            if self.dynamic_list.count() > 0:
+            if items:
                 self.dynamic_list.setCurrentRow(0)
             return True
         finally:
@@ -583,8 +618,12 @@ class DynamicsDialog(QDialog):
             return
 
         self._loading_more_dynamics = True
+        scrollbar = self.dynamic_list.verticalScrollBar()
+        scroll_value = scrollbar.value()
+        current_item = self.dynamic_list.currentItem()
+        current_row = self.dynamic_list.row(current_item) if current_item is not None else -1
         try:
-            payload = self.network_client.get_dynamics(limit=40, cursor=self.next_cursor)
+            payload = self.network_client.get_dynamics(limit=DYNAMIC_PAGE_SIZE, cursor=self.next_cursor)
             if not payload.get("ok", False):
                 self.feed_status.setText(f"动态加载失败：{payload.get('message', '未知错误')}。点击“刷新”重试。")
                 self.feed_status.show()
@@ -598,6 +637,10 @@ class DynamicsDialog(QDialog):
             for dynamic in items:
                 self._add_dynamic_item(dynamic)
             self._update_dynamic_end_state()
+
+            if current_row >= 0 and current_row < self.dynamic_list.count():
+                self.dynamic_list.setCurrentRow(current_row)
+            scrollbar.setValue(scroll_value)
         finally:
             self._loading_more_dynamics = False
 
@@ -653,6 +696,7 @@ class DynamicsDialog(QDialog):
             return
         for comment in rows:
             self._add_comment_item(comment)
+        self._add_detail_message("没有更多评论了。")
 
     def _add_comment_item(self, comment: dict):
         item = QListWidgetItem()

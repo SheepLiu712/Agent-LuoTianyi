@@ -23,6 +23,8 @@ from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, SystemMess
 from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
 
+DYNAMIC_ICON_PATH = "res/gui/dynamic.png"
+DYNAMIC_HAS_NEW_ICON_PATH = "res/gui/dynamic_has_new.png"
 
 
 class Live2DWidget(QOpenGLWidget):
@@ -568,7 +570,7 @@ class ChatWidget(QWidget):
         self.picture_btn = HoverButton(tooltip_text="发送图片")
         self.picture_btn.setIcon(QIcon("res/gui/picture_icon.png"))
         self.picture_btn.setFixedSize(24, 24)
-        self.picture_btn.setStyleSheet("QPushButton { border: none; background-color: transparent; } QPushButton:hover { background-color: #E0E0E0; border-radius: 4px; }")
+        self.picture_btn.setStyleSheet("QPushButton { border: none; background-color: transparent; } QPushButton:hover { background-color: #E0E0E0; border-radius: 4px; } QPushButton:focus { outline: none; }")
 
         self.picture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.picture_btn.clicked.connect(self.on_picture_clicked)
@@ -576,7 +578,7 @@ class ChatWidget(QWidget):
         self.volume_btn = HoverButton(tooltip_text="音量")
         self.volume_btn.setIcon(QIcon("res/gui/volume.png"))
         self.volume_btn.setFixedSize(24, 24)
-        self.volume_btn.setStyleSheet("QPushButton { border: none; background-color: transparent; } QPushButton:hover { background-color: #E0E0E0; border-radius: 4px; }")
+        self.volume_btn.setStyleSheet("QPushButton { border: none; background-color: transparent; } QPushButton:hover { background-color: #E0E0E0; border-radius: 4px; } QPushButton:focus { outline: none; }")
         self.volume_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.volume_btn.pressed.connect(self.on_volume_button_clicked)
 
@@ -637,13 +639,16 @@ class ChatWidget(QWidget):
                 background-color: #E0E0E0; 
                 border-radius: 4px; 
             }
+            QPushButton:focus {
+                outline: none;
+            }
         """)
         self.settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.settings_btn.clicked.connect(self.open_settings)
         self.toolbar_layout.addWidget(self.settings_btn)
 
         self.dynamic_btn = HoverButton(tooltip_text="动态")
-        self.dynamic_btn.setIcon(QIcon("res/gui/dynamic.png"))
+        self.dynamic_btn.setIcon(QIcon(DYNAMIC_ICON_PATH))
         self.dynamic_btn.setFixedSize(24, 24)
         self.dynamic_btn.setStyleSheet("""
             QPushButton { 
@@ -653,6 +658,9 @@ class ChatWidget(QWidget):
             QPushButton:hover { 
                 background-color: #E0E0E0; 
                 border-radius: 4px; 
+            }
+            QPushButton:focus {
+                outline: none;
             }
         """)
         self.dynamic_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -717,6 +725,7 @@ class ChatWidget(QWidget):
     def refresh_dynamic_badge(self):
         if not self.network_client:
             self.dynamic_unread_count = 0
+            self.dynamic_btn.setIcon(QIcon(DYNAMIC_ICON_PATH))
             self.dynamic_btn.setText("动态")
             return
 
@@ -725,6 +734,8 @@ class ChatWidget(QWidget):
             return
         count = int(status.get("unread_count") or 0)
         self.dynamic_unread_count = count
+        icon_path = DYNAMIC_HAS_NEW_ICON_PATH if count > 0 else DYNAMIC_ICON_PATH
+        self.dynamic_btn.setIcon(QIcon(icon_path))
         if count > 0:
             text = str(min(count, 99))
             if count > 99:
@@ -799,23 +810,29 @@ class ChatWidget(QWidget):
                 QPushButton {
                     background-color: #66CCFF;
                     color: white;
-                    border: none;
-                    border-radius: 5px;
-                    font-size: 14px;
-                }
-                QPushButton:hover {
-                    background-color: #55BBEE;
-                }
+                border: none;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #55BBEE;
+            }
+            QPushButton:focus {
+                outline: none;
+            }
             """)
         else:
             self.send_button.setStyleSheet("""
                 QPushButton {
                     background-color: #D8D8D8;
                     color: #B8B8B8;
-                    border: none;
-                    border-radius: 5px;
-                    font-size: 14px;
-                }
+                border: none;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QPushButton:focus {
+                outline: none;
+            }
             """)
     
     def update_send_pic_button_state(self):
