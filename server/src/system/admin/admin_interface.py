@@ -556,6 +556,25 @@ async def admin_disable_invite_code(
     return {"ok": True, "message": message}
 
 
+@protected_router.post("/invite-codes/set-disabled")
+async def admin_set_invite_code_disabled(
+    payload: dict[str, Any] = Body(default_factory=dict),
+) -> dict[str, Any]:
+    runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
+    if runtime is None:
+        raise HTTPException(status_code=503, detail="system runtime is not running")
+    disabled = payload.get("disabled")
+    if not isinstance(disabled, bool):
+        raise HTTPException(status_code=400, detail="disabled 必须是布尔值")
+    ok, message = runtime.database_manager.admin_set_invite_code_disabled(
+        _parse_invite_code_payload(payload),
+        disabled,
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"ok": True, "message": message}
+
+
 @protected_router.post("/invite-codes/delete")
 async def admin_delete_invite_code(
     payload: dict[str, Any] = Body(default_factory=dict),

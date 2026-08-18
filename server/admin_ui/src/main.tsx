@@ -645,8 +645,8 @@ function App({ onLogout }: { onLogout: () => void }) {
           <button className={page === 'traces' ? 'active' : ''} onClick={() => setPage('traces')}>链路追踪</button>
           <button className={page === 'memory' ? 'active' : ''} onClick={() => setPage('memory')}>记忆追踪</button>
           <button className={page === 'dynamics' ? 'active' : ''} onClick={() => setPage('dynamics')}>动态管理</button>
-          <button className={page === 'invite_codes' ? 'active' : ''} onClick={() => setPage('invite_codes')}>邀请码</button>
           <button className={page === 'config' ? 'active' : ''} onClick={() => setPage('config')}>服务配置</button>
+          <button className={page === 'invite_codes' ? 'active' : ''} onClick={() => setPage('invite_codes')}>邀请码管理</button>
           <button className={page === 'logs' ? 'active' : ''} onClick={() => setPage('logs')}>异常日志</button>
           <button onClick={logout}>退出登录</button>
         </nav>
@@ -1527,6 +1527,8 @@ type InviteCodeRow = {
   used_at?: string | null;
   user_id?: string | null;
   username?: string | null;
+  nickname?: string | null;
+  can_use?: boolean;
 };
 
 function InviteCodesPage() {
@@ -1539,7 +1541,7 @@ function InviteCodesPage() {
   const [genBusy, setGenBusy] = useState(false);
 
   const queryPayload = useMemo(() => ({
-    limit: 200,
+    limit: 500,
     status: statusFilter || null,
     search: searchQuery.trim() || null,
   }), [searchQuery, statusFilter]);
@@ -1552,7 +1554,9 @@ function InviteCodesPage() {
   );
   const rows = data?.items || [];
 
-  const unusedCount = rows.filter((row) => !row.is_used && !row.disabled).length;
+  const canUse = (row: InviteCodeRow) => row.can_use ?? (!row.is_used && !row.disabled);
+  const unusedCount = rows.filter((row) => !row.is_used).length;
+  const availableCount = rows.filter(canUse).length;
   const usedCount = rows.filter((row) => row.is_used).length;
   const disabledCount = rows.filter((row) => row.disabled).length;
 
@@ -1587,14 +1591,11 @@ function InviteCodesPage() {
     }
   }
 
-  async function disableCode(row: InviteCodeRow) {
-    if (row.disabled) {
-      return;
-    }
+  async function setCodeDisabled(row: InviteCodeRow, disabled: boolean) {
     try {
       await postJson<{ ok: boolean; message: string }>(
-        '/admin/api/invite-codes/disable',
-        { code: row.code },
+        '/admin/api/invite-codes/set-disabled',
+        { code: row.code, disabled },
       );
       setRefreshNonce((value) => value + 1);
     } catch (err) {
@@ -1616,11 +1617,12 @@ function InviteCodesPage() {
 
   return (
     <>
-      <PageHeader title="邀请码管理" subtitle="生成、查看、永久禁用和删除用户注册邀请码" />
+      <PageHeader title="邀请码管理" subtitle="查看使用情况、批量生成并启用或禁用邀请码" />
       <StatusBar loading={loading} error={error} />
       <section className="metric-grid">
         <MetricCard title="当前列表" value={formatNumber(rows.length)} detail={data?.total !== undefined ? `共 ${formatNumber(data.total)} 条` : '当前页'} />
-        <MetricCard title="未使用" value={formatNumber(unusedCount)} detail="可用于注册" />
+        <MetricCard title="未使用" value={formatNumber(unusedCount)} detail="尚未绑定用户" />
+        <MetricCard title="可使用" value={formatNumber(availableCount)} detail="可用于注册" />
         <MetricCard title="已使用" value={formatNumber(usedCount)} detail="已绑定用户" />
         <MetricCard title="已禁用" value={formatNumber(disabledCount)} detail="不可注册" tone={disabledCount ? 'warning' : undefined} />
       </section>
@@ -1661,7 +1663,7 @@ function InviteCodesPage() {
         <div className="filter-row">
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="">全部状态</option>
-            <option value="unused">未使用</option>
+            <option value="unused">可使用</option>
             <option value="used">已使用</option>
             <option value="disabled">已禁用</option>
           </select>
@@ -1670,48 +1672,56 @@ function InviteCodesPage() {
       </Panel>
 
       <Panel title="邀请码列表">
-        <table>
-          <thead>
-            <tr>
-              <th>邀请码</th>
-              <th>状态</th>
-              <th>创建时间</th>
-              <th>使用时间</th>
-              <th>使用者</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.code}>
-                <td className="mono">{row.code}</td>
-                <td>
-                  <span className={`pill ${row.disabled ? 'error' : row.is_used ? 'warning' : 'success'}`}>
-                    {row.disabled ? '已禁用' : row.is_used ? '已使用' : '未使用'}
-                  </span>
-                </td>
-                <td>{row.created_at || '-'}</td>
-                <td>{row.used_at || '-'}</td>
-                <td>{row.username || row.user_id || '-'}</td>
-                <td>
-                  <div className="row-actions">
-                    <button onClick={() => disableCode(row)} disabled={row.disabled}>
-                      {row.disabled ? '已禁用' : '禁用'}
-                    </button>
-                    <button onClick={() => deleteCode(row)} disabled={row.is_used || row.disabled}>
-                      删除
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
+        <div className="invite-code-table-scroll">
+          <table>
+            <thead>
               <tr>
-                <td colSpan={6}>当前筛选条件下没有邀请码</td>
+                <th>邀请码</th>
+                <th>使用状态</th>
+                <th>可使用</th>
+                <th>创建时间</th>
+                <th>使用时间</th>
+                <th>使用者</th>
+                <th>操作</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.code}>
+                  <td className="mono">{row.code}</td>
+                  <td>
+                    <span className={`pill ${row.is_used ? 'warning' : 'success'}`}>
+                      {row.is_used ? '已使用' : '未使用'}
+                    </span>
+                  </td>
+                  <td>
+                    <span className={`pill ${canUse(row) ? 'success' : 'error'}`}>
+                      {canUse(row) ? '可以' : '不可以'}
+                    </span>
+                  </td>
+                  <td>{row.created_at || '-'}</td>
+                  <td>{row.used_at || '-'}</td>
+                  <td>{row.username ? `${row.username}${row.nickname ? `（${row.nickname}）` : ''}` : row.user_id || '-'}</td>
+                  <td>
+                    <div className="row-actions">
+                      <button onClick={() => setCodeDisabled(row, !row.disabled)}>
+                        {row.disabled ? '启用' : '禁用'}
+                      </button>
+                      <button onClick={() => deleteCode(row)} disabled={row.is_used || row.disabled}>
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={7}>当前筛选条件下没有邀请码</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </Panel>
     </>
   );

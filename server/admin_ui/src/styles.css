@@ -1054,6 +1054,15 @@ th {
   border-color: #2f5d7c;
 }
 
+.invite-code-table-scroll {
+  max-height: 500px;
+  overflow: auto;
+}
+
+.invite-code-table-scroll table {
+  min-width: 900px;
+}
+
 .row-actions {
   display: inline-flex;
   gap: 8px;
