@@ -72,6 +72,7 @@ setup
 /res/*
 !/res/agent/
 !/res/agent/**
+!/res/admin_ui/
 data
 data_produce
 data_backup

@@ -15,7 +15,7 @@ from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
     from src.system.database import DatabaseManager
-    from src.system.database.event_store import EventStore
+    from src.system.database.services.event_store import EventStore
     from src.system.system_runtime import SystemRuntime
     from src.agent_runtime.character_runtime import CharacterRuntime
 

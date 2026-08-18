@@ -111,9 +111,9 @@ def _add_invite_code(db_manager: DatabaseManager, code: str) -> None:
 
 
 def _register_and_login(db_manager: DatabaseManager, username: str, invite_code: str) -> dict:
-    ok, message = db_manager.register_user(username, "password123", invite_code)
+    ok, message = db_manager.credential_service.register_user(username, "password123", invite_code)
     assert ok is True, message
-    result = db_manager.authenticate_password_login(username, "password123")
+    result = db_manager.credential_service.authenticate_password_login(username, "password123")
     assert result is not None
     return result
 
@@ -717,8 +717,8 @@ def test_dynamic_pending_reply_items_include_thread_comments(db_manager: Databas
     _add_invite_code(db_manager, "INVITE_THREAD")
     auth = _register_and_login(db_manager, "threaduser", "INVITE_THREAD")
 
-    db_manager.save_user_preferences(auth["user_uuid"], {"relationship": "朋友"})
-    db_manager.update_user_description(auth["user_uuid"], "用户最近在记录自己的日常状态。")
+    db_manager.conversation_service.save_user_preferences(auth["user_uuid"], {"relationship": "朋友"})
+    db_manager.conversation_service.update_user_description(auth["user_uuid"], "用户最近在记录自己的日常状态。")
     ok, _, created = db_manager.dynamic_store.create_dynamic(
         author_type="user",
         author_id=auth["user_uuid"],

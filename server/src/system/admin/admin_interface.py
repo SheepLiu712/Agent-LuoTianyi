@@ -513,7 +513,7 @@ async def admin_list_invite_codes(
     search = str(payload.get("search") or "").strip() or None
     if search is not None and len(search) > 128:
         raise HTTPException(status_code=400, detail="搜索内容过长")
-    return runtime.database_manager.admin_list_invite_codes(
+    return runtime.database_manager.credential_service.admin_list_invite_codes(
         limit=limit,
         offset=offset,
         status=status,
@@ -535,7 +535,7 @@ async def admin_generate_invite_codes(
         count = int(raw_count)
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="生成数量需在 1-100 之间") from exc
-    ok, result = runtime.database_manager.admin_generate_invite_codes(count=count)
+    ok, result = runtime.database_manager.credential_service.admin_generate_invite_codes(count=count)
     if not ok:
         raise HTTPException(status_code=400, detail=result)
     return {"ok": True, "codes": result}
@@ -548,7 +548,7 @@ async def admin_disable_invite_code(
     runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
     if runtime is None:
         raise HTTPException(status_code=503, detail="system runtime is not running")
-    ok, message = runtime.database_manager.admin_disable_invite_code(
+    ok, message = runtime.database_manager.credential_service.admin_disable_invite_code(
         _parse_invite_code_payload(payload)
     )
     if not ok:
@@ -566,7 +566,7 @@ async def admin_set_invite_code_disabled(
     disabled = payload.get("disabled")
     if not isinstance(disabled, bool):
         raise HTTPException(status_code=400, detail="disabled 必须是布尔值")
-    ok, message = runtime.database_manager.admin_set_invite_code_disabled(
+    ok, message = runtime.database_manager.credential_service.admin_set_invite_code_disabled(
         _parse_invite_code_payload(payload),
         disabled,
     )
@@ -582,7 +582,7 @@ async def admin_delete_invite_code(
     runtime: "SystemRuntime" | None = get_admin_shell().runtime_supervisor.runtime
     if runtime is None:
         raise HTTPException(status_code=503, detail="system runtime is not running")
-    ok, message = runtime.database_manager.admin_delete_invite_code(
+    ok, message = runtime.database_manager.credential_service.admin_delete_invite_code(
         _parse_invite_code_payload(payload)
     )
     if not ok:

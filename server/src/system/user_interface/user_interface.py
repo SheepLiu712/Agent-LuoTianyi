@@ -104,7 +104,7 @@ class UserInterface:
         if request is not None:
             enforce_rate_limit(request, "auth_auto_login", req.username)
         auth_result = await self._run_auth_work(
-            system_runtime.database_manager.authenticate_auto_login,
+            system_runtime.database_manager.credential_service.authenticate_auto_login,
             req.username,
             req.token,
         )
@@ -113,7 +113,10 @@ class UserInterface:
             await system_runtime.chat_session_manager.on_user_login(
                 user_uuid, auth_result["elapsed_from_last_login"]
             )
-            background_tasks.add_task(system_runtime.database_manager.prefill_buffer, user_uuid)
+            background_tasks.add_task(
+                system_runtime.database_manager.conversation_service.prefill_buffer,
+                user_uuid,
+            )
             return {
                 "message": "登录成功",
                 "user_id": req.username,
@@ -133,7 +136,7 @@ class UserInterface:
             enforce_rate_limit(request, "auth_register", req.username)
         decrypted_password = self.decrypt_user_password(req.password)
         success, msg = await self._run_auth_work(
-            system_runtime.database_manager.register_user,
+            system_runtime.database_manager.credential_service.register_user,
             req.username,
             decrypted_password,
             req.invite_code,
@@ -153,7 +156,7 @@ class UserInterface:
             enforce_rate_limit(request, "auth_reset", req.invite_code)
         decrypted_password = self.decrypt_user_password(req.new_password)
         success, msg = await self._run_auth_work(
-            system_runtime.database_manager.reset_account,
+            system_runtime.database_manager.credential_service.reset_account,
             req.invite_code,
             req.new_username,
             decrypted_password,
@@ -174,13 +177,16 @@ class UserInterface:
             enforce_rate_limit(request, "auth_login", req.username)
         decrypted_password = self.decrypt_user_password(req.password)
         auth_result = await self._run_auth_work(
-            system_runtime.database_manager.authenticate_password_login,
+            system_runtime.database_manager.credential_service.authenticate_password_login,
             req.username,
             decrypted_password,
         )
         if auth_result:
             user_uuid = auth_result["user_uuid"]
-            background_tasks.add_task(system_runtime.database_manager.prefill_buffer, user_uuid)
+            background_tasks.add_task(
+                system_runtime.database_manager.conversation_service.prefill_buffer,
+                user_uuid,
+            )
             await system_runtime.chat_session_manager.on_user_login(
                 user_uuid,
                 auth_result["elapsed_from_last_login"],
@@ -198,12 +204,12 @@ class UserInterface:
         system_runtime: SystemRuntime,
     ):
         """获取用户偏好设置"""
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token
         )
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-        preferences = system_runtime.database_manager.get_user_preferences(user_uuid)
+        preferences = system_runtime.database_manager.conversation_service.get_user_preferences(user_uuid)
         if preferences is None:
             raise HTTPException(status_code=404, detail="未找到该用户")
         return {"preferences": preferences}
@@ -214,12 +220,12 @@ class UserInterface:
         system_runtime: SystemRuntime,
     ):
         """覆盖用户偏好设置"""
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token
         )
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-        if not system_runtime.database_manager.save_user_preferences(user_uuid, req.preferences):
+        if not system_runtime.database_manager.conversation_service.save_user_preferences(user_uuid, req.preferences):
             raise HTTPException(status_code=404, detail="未找到该用户")
         return {"status": "success", "message": "Preferences overwritten successfully"}
 
@@ -232,7 +238,7 @@ class UserInterface:
         system_runtime: SystemRuntime,
     ):
         """获取聊天历史"""
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             username, token
         )
         if not message_token_valid:
@@ -248,12 +254,12 @@ class UserInterface:
         system_runtime: SystemRuntime,
     ):
         """获取图片"""
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token
         )
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-        image_server_path = system_runtime.database_manager.get_image_server_path(
+        image_server_path = system_runtime.database_manager.conversation_service.get_image_server_path(
             user_uuid, req.uuid
         )
         if not image_server_path:
@@ -282,12 +288,12 @@ class UserInterface:
         system_runtime: SystemRuntime,
     ):
         """更新图片客户端路径"""
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token
         )
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-        success = system_runtime.database_manager.update_image_client_path(
+        success = system_runtime.database_manager.conversation_service.update_image_client_path(
             user_uuid, req.uuid, req.image_client_path
         )
         if not success:
@@ -299,7 +305,7 @@ class UserInterface:
         req: DynamicListRequest,
         system_runtime: SystemRuntime,
     ):
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token or ""
         )
         if not message_token_valid:
@@ -315,7 +321,7 @@ class UserInterface:
         req: DynamicCreateRequest,
         system_runtime: SystemRuntime,
     ):
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token
         )
         if not message_token_valid:
@@ -340,7 +346,7 @@ class UserInterface:
         req: DynamicCommentListRequest,
         system_runtime: SystemRuntime,
     ):
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token or ""
         )
         if not message_token_valid:
@@ -361,7 +367,7 @@ class UserInterface:
         req: DynamicCommentCreateRequest,
         system_runtime: SystemRuntime,
     ):
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token
         )
         if not message_token_valid:
@@ -384,7 +390,7 @@ class UserInterface:
         req: DynamicUnreadRequest,
         system_runtime: SystemRuntime,
     ):
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token or ""
         )
         if not message_token_valid:
@@ -396,7 +402,7 @@ class UserInterface:
         req: DynamicReadMarkRequest,
         system_runtime: SystemRuntime,
     ):
-        message_token_valid, user_uuid = system_runtime.database_manager.check_message_token(
+        message_token_valid, user_uuid = system_runtime.database_manager.credential_service.check_message_token(
             req.username, req.token
         )
         if not message_token_valid:

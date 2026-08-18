@@ -9,7 +9,7 @@ from src.world.bili_event_updater.official_feed_fetcher import OfficialFeedFetch
 
 
 if TYPE_CHECKING:
-    from src.system.database.event_store import EventStore
+    from src.system.database.services.event_store import EventStore
 
 class BiliEventUpdater:
     """Fetch Bilibili dynamics, parse them, and upsert schedule events."""

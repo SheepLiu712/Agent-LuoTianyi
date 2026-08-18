@@ -95,7 +95,9 @@ async def test_auth_negotiates_negative_ack_capability():
     websocket = FakeWebSocket()
     connection = WebSocketConnection(websocket, user_uuid=None, user_name=None)
     database = SimpleNamespace(
-        check_message_token=lambda _username, _token: (True, "user-1"),
+        credential_service=SimpleNamespace(
+            check_message_token=lambda _username, _token: (True, "user-1"),
+        ),
     )
     event = WSMessage(
         event_type=WSEventType.USER_AUTH.value,

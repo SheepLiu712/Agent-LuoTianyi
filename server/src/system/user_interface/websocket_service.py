@@ -107,7 +107,7 @@ class WebSocketService:
             )
             return False
 
-        is_valid, user_uuid = database.check_message_token(username, token)
+        is_valid, user_uuid = database.credential_service.check_message_token(username, token)
 
         if not is_valid:
             await websocket.send_json(

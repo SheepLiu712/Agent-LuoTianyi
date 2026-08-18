@@ -10,7 +10,7 @@ from src.subconscious.memory.user_profile_updater import UserProfileUpdater
 
 if TYPE_CHECKING:
     from src.system.database import DatabaseManager
-    from src.system.database.memory_store import MemoryStore
+    from src.system.database.services.memory_store import MemoryStore
 
 
 class SubconsciousMemory:
@@ -193,7 +193,7 @@ class SubconsciousMemory:
         commit: bool = True,
     ) -> str | None:
         """根据长期上下文更新用户画像。"""
-        current_profile = self.database_manager.get_user_description(user_id) or ""
+        current_profile = self.database_manager.conversation_service.get_user_description(user_id) or ""
         new_profile = await self.user_profile_updater.update_profile(
             history=context,
             current_profile=current_profile,
@@ -202,7 +202,7 @@ class SubconsciousMemory:
             return None
 
         await asyncio.to_thread(
-            self.database_manager.update_user_description,
+            self.database_manager.conversation_service.update_user_description,
             user_id,
             new_profile,
             commit,

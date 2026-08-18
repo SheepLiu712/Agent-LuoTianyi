@@ -16,7 +16,10 @@ class UserConversationHelper:
         self.database_manager = database_manager
 
     async def handle_history_request(self, user_id: str, count: int, end_index: int) -> dict[str, Any]:
-        total_count = await asyncio.to_thread(self.database_manager.get_total_conversation_count, user_id)
+        total_count = await asyncio.to_thread(
+            self.database_manager.conversation_service.get_total_conversation_count,
+            user_id,
+        )
         if end_index == -1 or end_index > total_count:
             end_index = total_count
 
@@ -25,7 +28,7 @@ class UserConversationHelper:
             return {"history": [], "start_index": 0}
 
         history_items: List[ConversationItem] = await asyncio.to_thread(
-            self.database_manager.get_history_from_db,
+            self.database_manager.conversation_service.get_history_from_db,
             user_id,
             start_index,
             end_index,

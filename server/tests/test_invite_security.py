@@ -12,15 +12,17 @@ import pytest
 from sqlalchemy import inspect as sa_inspect
 
 from src.system.admin import admin_interface
-from src.system.database import database_service, sql_database
+from src.system.database import sql_database
 from src.system.database.database_service import DatabaseManager
+from src.system.database.services import credential_service
+from src.system.database.services.credential_service import CredentialService
 from src.system.database.sql_database import InviteCode
 
 
 @pytest.fixture
 def db_manager(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "invite-security-test-secret")
-    monkeypatch.setattr(database_service, "_hash_password", lambda password: f"hash:{password}")
+    monkeypatch.setattr(credential_service, "_hash_password", lambda password: f"hash:{password}")
     return DatabaseManager(
         {
             "sql_db_folder": str(tmp_path / "db"),
@@ -39,13 +41,13 @@ def add_invite(manager: DatabaseManager, code: str, *, disabled: bool = False) -
 
 
 def test_generation_uses_ten_character_uppercase_alphanumeric_codes(db_manager):
-    ok, codes = db_manager.admin_generate_invite_codes(count=3)
+    ok, codes = db_manager.credential_service.admin_generate_invite_codes(count=3)
 
     assert ok is True
     assert len(codes) == 3
     assert len(set(codes)) == 3
     assert all(len(code) == 10 and code.isascii() and code.isalnum() and code == code.upper() for code in codes)
-    source = pyinspect.getsource(DatabaseManager.admin_generate_invite_codes)
+    source = pyinspect.getsource(CredentialService.admin_generate_invite_codes)
     assert "_generate_invite_code()" in source
     assert "begin_nested" in source
     assert "db.flush()" in source
@@ -67,9 +69,9 @@ def test_database_collision_is_retried_without_preloading_codes(db_manager, monk
         calls.append(True)
         return next(candidates)
 
-    monkeypatch.setattr(database_service, "_generate_invite_code", fake_generate_invite_code)
+    monkeypatch.setattr(credential_service, "_generate_invite_code", fake_generate_invite_code)
 
-    ok, codes = db_manager.admin_generate_invite_codes(count=1)
+    ok, codes = db_manager.credential_service.admin_generate_invite_codes(count=1)
 
     assert ok is True
     assert codes == ["fresh-secure-token"]
@@ -85,9 +87,9 @@ def test_collision_retry_limit_rolls_back_whole_batch(db_manager, monkeypatch):
         calls.append(True)
         return next(candidates)
 
-    monkeypatch.setattr(database_service, "_generate_invite_code", fake_generate_invite_code)
+    monkeypatch.setattr(credential_service, "_generate_invite_code", fake_generate_invite_code)
 
-    ok, message = db_manager.admin_generate_invite_codes(count=2)
+    ok, message = db_manager.credential_service.admin_generate_invite_codes(count=2)
 
     assert ok is False
     assert message == "生成失败，请重试"
@@ -114,10 +116,10 @@ def test_concurrent_generation_relies_on_unique_constraint(db_manager, monkeypat
             return "shared-concurrent-token"
         return f"fallback-{thread_id}"
 
-    monkeypatch.setattr(database_service, "_generate_invite_code", colliding_then_unique)
+    monkeypatch.setattr(credential_service, "_generate_invite_code", colliding_then_unique)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(lambda _: db_manager.admin_generate_invite_codes(), range(2)))
+        results = list(executor.map(lambda _: db_manager.credential_service.admin_generate_invite_codes(), range(2)))
 
     assert all(ok for ok, _ in results)
     generated = [codes[0] for _, codes in results]
@@ -136,26 +138,26 @@ def test_setting_disabled_is_reversible_idempotent_and_never_logs_code(db_manage
     add_invite(db_manager, unused_code)
     add_invite(db_manager, used_code)
     add_invite(db_manager, available_code)
-    assert db_manager.register_user("invite-owner", "password", used_code)[0] is True
+    assert db_manager.credential_service.register_user("invite-owner", "password", used_code)[0] is True
 
     caplog.set_level(logging.INFO)
-    assert db_manager.admin_set_invite_code_disabled(unused_code, True) == (True, "已禁用")
-    assert db_manager.admin_set_invite_code_disabled(unused_code, True) == (True, "已禁用")
-    assert db_manager.admin_set_invite_code_disabled(unused_code, False) == (True, "已启用")
-    assert db_manager.admin_set_invite_code_disabled(unused_code, False) == (True, "已启用")
-    assert db_manager.admin_set_invite_code_disabled(used_code, True) == (True, "已禁用")
+    assert db_manager.credential_service.admin_set_invite_code_disabled(unused_code, True) == (True, "已禁用")
+    assert db_manager.credential_service.admin_set_invite_code_disabled(unused_code, True) == (True, "已禁用")
+    assert db_manager.credential_service.admin_set_invite_code_disabled(unused_code, False) == (True, "已启用")
+    assert db_manager.credential_service.admin_set_invite_code_disabled(unused_code, False) == (True, "已启用")
+    assert db_manager.credential_service.admin_set_invite_code_disabled(used_code, True) == (True, "已禁用")
 
-    assert db_manager.register_user("re-enabled-user", "password", unused_code)[0] is True
-    rows_before_disable = db_manager.admin_list_invite_codes()["items"]
+    assert db_manager.credential_service.register_user("re-enabled-user", "password", unused_code)[0] is True
+    rows_before_disable = db_manager.credential_service.admin_list_invite_codes()["items"]
     row_by_code_before_disable = {row["code"]: row for row in rows_before_disable}
     assert row_by_code_before_disable[available_code]["can_use"] is True
-    assert db_manager.admin_set_invite_code_disabled(available_code, True) == (True, "已禁用")
-    assert db_manager.register_user("blocked-user", "password", available_code)[0] is False
-    assert db_manager.reset_account(used_code, "renamed-owner", "new-password")[0] is False
-    assert db_manager.admin_delete_invite_code(unused_code)[0] is False
-    assert hasattr(db_manager, "admin_set_invite_code_disabled")
+    assert db_manager.credential_service.admin_set_invite_code_disabled(available_code, True) == (True, "已禁用")
+    assert db_manager.credential_service.register_user("blocked-user", "password", available_code)[0] is False
+    assert db_manager.credential_service.reset_account(used_code, "renamed-owner", "new-password")[0] is False
+    assert db_manager.credential_service.admin_delete_invite_code(unused_code)[0] is False
+    assert hasattr(db_manager.credential_service, "admin_set_invite_code_disabled")
 
-    rows = db_manager.admin_list_invite_codes()["items"]
+    rows = db_manager.credential_service.admin_list_invite_codes()["items"]
     row_by_code = {row["code"]: row for row in rows}
     assert row_by_code[used_code]["is_used"] is True
     assert row_by_code[used_code]["username"] == "invite-owner"
@@ -222,6 +224,9 @@ def test_admin_invite_routes_keep_codes_in_request_bodies(monkeypatch):
     calls = []
 
     class FakeDatabaseManager:
+        def __init__(self):
+            self.credential_service = self
+
         def admin_disable_invite_code(self, code: str):
             calls.append(("disable", code))
             return True, "已禁用"
@@ -262,7 +267,7 @@ def test_admin_invite_routes_keep_codes_in_request_bodies(monkeypatch):
     assert all("{code}" not in route.path for route in invite_routes)
     assert all("GET" not in (route.methods or set()) for route in invite_routes)
 
-    source = (Path(__file__).parents[1] / "admin_ui" / "src" / "main.tsx").read_text(encoding="utf-8")
+    source = (Path(__file__).parents[1] / "res" / "admin_ui" / "src" / "main.tsx").read_text(encoding="utf-8")
     assert "encodeURIComponent(row.code)" not in source
     assert "/admin/api/invite-codes?" not in source
     assert "'/admin/api/invite-codes/set-disabled'," in source

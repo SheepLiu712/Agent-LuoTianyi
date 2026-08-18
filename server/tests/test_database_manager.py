@@ -15,7 +15,8 @@ from src.system.database.sql_database import (
     init_sql_db, Base, User, InviteCode
 )
 from src.system.database.redis_buffer import init_redis_buffer
-from src.system.database.database_service import DatabaseManager, _hash_password
+from src.system.database.database_service import DatabaseManager
+from src.system.database.services.credential_service import _hash_password
 from src.domain import ConversationItem
 
 
@@ -83,52 +84,52 @@ def sample_invite_code_2(db_manager: "DatabaseManager") -> str:
 class TestRegistration:
     def test_register_success(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """正常注册"""
-        ok, msg = db_manager.register_user("newuser", "pass123", sample_invite_code)
+        ok, msg = db_manager.credential_service.register_user("newuser", "pass123", sample_invite_code)
         assert ok is True
         assert msg == "注册成功"
 
     def test_register_duplicate_username(self, db_manager: "DatabaseManager", sample_invite_code: str, sample_invite_code_2: str):
         """重复用户名"""
 
-        ok1, _ = db_manager.register_user("dupe", "pass1", sample_invite_code)
+        ok1, _ = db_manager.credential_service.register_user("dupe", "pass1", sample_invite_code)
         assert ok1 is True
-        ok2, msg2 = db_manager.register_user("dupe", "pass2", sample_invite_code_2)
+        ok2, msg2 = db_manager.credential_service.register_user("dupe", "pass2", sample_invite_code_2)
         assert ok2 is False
 
     def test_register_bad_invite_code(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """无效邀请码"""
-        ok, msg = db_manager.register_user("someone", "pass", "NOEXIST")
+        ok, msg = db_manager.credential_service.register_user("someone", "pass", "NOEXIST")
         assert ok is False
 
     def test_used_invite_code(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """邀请码已被使用"""
-        ok1, _ = db_manager.register_user("user1", "pass1", sample_invite_code)
+        ok1, _ = db_manager.credential_service.register_user("user1", "pass1", sample_invite_code)
         assert ok1 is True
-        ok2, msg2 = db_manager.register_user("user2", "pass2", sample_invite_code)
+        ok2, msg2 = db_manager.credential_service.register_user("user2", "pass2", sample_invite_code)
         assert ok2 is False
 
     def test_used_username(self, db_manager: "DatabaseManager", sample_invite_code: str, sample_invite_code_2: str):
         """用户名已被使用"""
-        ok1, _ = db_manager.register_user("unique_user", "pass1", sample_invite_code)
+        ok1, _ = db_manager.credential_service.register_user("unique_user", "pass1", sample_invite_code)
         assert ok1 is True
-        ok2, msg2 = db_manager.register_user("unique_user", "pass2", sample_invite_code_2)
+        ok2, msg2 = db_manager.credential_service.register_user("unique_user", "pass2", sample_invite_code_2)
         assert ok2 is False
 
 
 class TestAuthentication:
     def test_verify_user(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """验证用户成功"""
-        db_manager.register_user("authuser", "mypassword", sample_invite_code)
-        success = db_manager.verify_user("authuser", "mypassword")
+        db_manager.credential_service.register_user("authuser", "mypassword", sample_invite_code)
+        success = db_manager.credential_service.verify_user("authuser", "mypassword")
         assert success is True
 
-        success = db_manager.verify_user("authuser", "wrongpassword")
+        success = db_manager.credential_service.verify_user("authuser", "wrongpassword")
         assert success is False
 
     def test_authenticate_password_login_success(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """密码登录成功"""
-        db_manager.register_user("authuser", "mypassword", sample_invite_code)
-        result = db_manager.authenticate_password_login("authuser", "mypassword")
+        db_manager.credential_service.register_user("authuser", "mypassword", sample_invite_code)
+        result = db_manager.credential_service.authenticate_password_login("authuser", "mypassword")
         assert result is not None
         assert result["user_uuid"] is not None
         assert result["login_token"] is not None
@@ -137,62 +138,62 @@ class TestAuthentication:
 
     def test_authenticate_password_login_wrong_password(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """密码登录失败"""
-        db_manager.register_user("authuser", "mypassword", sample_invite_code)
-        result = db_manager.authenticate_password_login("authuser", "wrongpassword")
+        db_manager.credential_service.register_user("authuser", "mypassword", sample_invite_code)
+        result = db_manager.credential_service.authenticate_password_login("authuser", "wrongpassword")
         assert result is None
         """密码错误"""
-        result = db_manager.authenticate_password_login("user1", "wrongpass")
+        result = db_manager.credential_service.authenticate_password_login("user1", "wrongpass")
         assert result is None
 
     def test_auto_login(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """自动登录成功"""
-        db_manager.register_user("autouser", "pass123", sample_invite_code)
-        auth_result = db_manager.authenticate_password_login("autouser", "pass123")
+        db_manager.credential_service.register_user("autouser", "pass123", sample_invite_code)
+        auth_result = db_manager.credential_service.authenticate_password_login("autouser", "pass123")
         assert auth_result is not None
         login_token = auth_result["login_token"]
-        auto_login_result = db_manager.authenticate_auto_login("autouser", login_token)
+        auto_login_result = db_manager.credential_service.authenticate_auto_login("autouser", login_token)
         assert auto_login_result is not None
         assert auto_login_result["user_uuid"] is not None
         assert auto_login_result["message_token"] is not None
 
-        auto_login_result_invalid = db_manager.authenticate_auto_login("autouser", "invalidtoken")
+        auto_login_result_invalid = db_manager.credential_service.authenticate_auto_login("autouser", "invalidtoken")
         assert auto_login_result_invalid is None
 
     def test_reset_account(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """重置账号"""
-        db_manager.register_user("resetuser", "pass123", sample_invite_code)
-        auth_result = db_manager.authenticate_password_login("resetuser", "pass123")
+        db_manager.credential_service.register_user("resetuser", "pass123", sample_invite_code)
+        auth_result = db_manager.credential_service.authenticate_password_login("resetuser", "pass123")
         assert auth_result is not None
 
-        reset_result, result_str = db_manager.reset_account(sample_invite_code, "resetuser", "newpass456")
+        reset_result, result_str = db_manager.credential_service.reset_account(sample_invite_code, "resetuser", "newpass456")
         assert reset_result is True
         assert result_str == "重置成功"
 
         # 重置后，登录应该失败
-        auth_result_after_reset = db_manager.authenticate_password_login("resetuser", "pass123")
+        auth_result_after_reset = db_manager.credential_service.authenticate_password_login("resetuser", "pass123")
         assert auth_result_after_reset is None
 
-        auth_result_new_pass = db_manager.authenticate_password_login("resetuser", "newpass456")
+        auth_result_new_pass = db_manager.credential_service.authenticate_password_login("resetuser", "newpass456")
         assert auth_result_new_pass is not None
 
     def test_reset_account_invalid_invite_code(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """重置账号失败 - 无效邀请码"""
-        db_manager.register_user("resetuser", "pass123", sample_invite_code)
-        reset_result, result_str = db_manager.reset_account("INVALIDCODE", "resetuser", "newpass456")
+        db_manager.credential_service.register_user("resetuser", "pass123", sample_invite_code)
+        reset_result, result_str = db_manager.credential_service.reset_account("INVALIDCODE", "resetuser", "newpass456")
         assert reset_result is False
         assert result_str == "邀请码无效"
 
     def test_update_login_time(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """更新登录时间"""
-        db_manager.register_user("timeuser", "pass123", sample_invite_code)
-        auth_result = db_manager.authenticate_password_login("timeuser", "pass123")
+        db_manager.credential_service.register_user("timeuser", "pass123", sample_invite_code)
+        auth_result = db_manager.credential_service.authenticate_password_login("timeuser", "pass123")
         assert auth_result is not None
         login_time = auth_result["elapsed_from_last_login"]
         assert login_time is None # 首次登录，应该为 None
 
         import time
         time.sleep(1)  # 等待一秒钟
-        auth_result2 = db_manager.authenticate_password_login("timeuser", "pass123")
+        auth_result2 = db_manager.credential_service.authenticate_password_login("timeuser", "pass123")
         assert auth_result2 is not None
         login_time2 = auth_result2["elapsed_from_last_login"]
         assert login_time2 > 0.7 and login_time2 < 2.0  # 应该大约为 1 秒
@@ -205,7 +206,7 @@ class TestAuthentication:
 class TestConversations:
     def test_add_and_retrieve(self, db_manager: "DatabaseManager", sample_user: str):
         """添加对话并检索"""
-        user_uuid = db_manager.get_user_uuid_by_username(sample_user)
+        user_uuid = db_manager.credential_service.get_user_uuid_by_username(sample_user)
         items = [
             ConversationItem(
                 timestamp="2026-06-22 10:00:00",
@@ -222,18 +223,18 @@ class TestConversations:
                 uuid="conv-002",
             ),
         ]
-        uuids = db_manager.add_conversations(user_uuid, items)
+        uuids = db_manager.conversation_service.add_conversations(user_uuid, items)
         assert len(uuids) == 2
 
         # 从 DB 检索
-        history = db_manager.get_history_from_db(user_uuid, 0, 10)
+        history = db_manager.conversation_service.get_history_from_db(user_uuid, 0, 10)
         assert len(history) == 2
         assert history[0].content == "你好"
         assert history[1].content == "你好呀！"
 
     def test_context_state_and_compaction(self, db_manager: "DatabaseManager", sample_user: str):
         """运行时上下文状态和压缩接口"""
-        user_uuid = db_manager.get_user_uuid_by_username(sample_user)
+        user_uuid = db_manager.credential_service.get_user_uuid_by_username(sample_user)
         items = [
             ConversationItem(
                 timestamp="2026-06-22 10:00:00",
@@ -258,14 +259,14 @@ class TestConversations:
                 data={"song": "测试歌", "segment": "hook"},
             ),
         ]
-        db_manager.add_conversations(user_uuid, items)
+        db_manager.conversation_service.add_conversations(user_uuid, items)
 
-        state = db_manager.get_conversation_context_state(user_uuid)
+        state = db_manager.conversation_service.get_conversation_context_state(user_uuid)
         assert state["summary"] == ""
         assert state["context_count"] == 3
         assert len(state["conversations"]) == 3
 
-        ok = db_manager.compact_conversation_context(
+        ok = db_manager.conversation_service.compact_conversation_context(
             user_uuid,
             "较早内容摘要",
             keep_recent_count=1,
@@ -273,13 +274,13 @@ class TestConversations:
         )
         assert ok is True
 
-        compacted_state = db_manager.get_conversation_context_state(user_uuid)
+        compacted_state = db_manager.conversation_service.get_conversation_context_state(user_uuid)
         assert compacted_state["summary"] == "较早内容摘要"
         assert compacted_state["context_count"] == 1
         assert len(compacted_state["conversations"]) == 1
         assert compacted_state["conversations"][0]["content"] == "（唱了《测试歌》）"
 
-        stale_ok = db_manager.compact_conversation_context(
+        stale_ok = db_manager.conversation_service.compact_conversation_context(
             user_uuid,
             "不应写入",
             keep_recent_count=1,
@@ -287,13 +288,13 @@ class TestConversations:
         )
         assert stale_ok is False
 
-        history = db_manager.get_history_from_db(user_uuid, 0, 10)
+        history = db_manager.conversation_service.get_history_from_db(user_uuid, 0, 10)
         assert history[2].data == {"song": "测试歌", "segment": "hook"}
 
     def test_context_compaction_preserves_concurrent_new_messages(self, db_manager: "DatabaseManager", sample_user: str):
         """压缩期间新写入的对话应保留在未压缩窗口中。"""
-        user_uuid = db_manager.get_user_uuid_by_username(sample_user)
-        db_manager.add_conversations(
+        user_uuid = db_manager.credential_service.get_user_uuid_by_username(sample_user)
+        db_manager.conversation_service.add_conversations(
             user_uuid,
             [
                 ConversationItem(
@@ -306,10 +307,10 @@ class TestConversations:
                 for i in range(4)
             ],
         )
-        snapshot_count = db_manager.get_context_count(user_uuid)
+        snapshot_count = db_manager.conversation_service.get_context_count(user_uuid)
         assert snapshot_count == 4
 
-        db_manager.add_conversations(
+        db_manager.conversation_service.add_conversations(
             user_uuid,
             [
                 ConversationItem(
@@ -329,7 +330,7 @@ class TestConversations:
             ],
         )
 
-        ok = db_manager.compact_conversation_context(
+        ok = db_manager.conversation_service.compact_conversation_context(
             user_uuid,
             "并发压缩摘要",
             keep_recent_count=2,
@@ -337,7 +338,7 @@ class TestConversations:
         )
         assert ok is True
 
-        compacted_state = db_manager.get_conversation_context_state(user_uuid)
+        compacted_state = db_manager.conversation_service.get_conversation_context_state(user_uuid)
         assert compacted_state["summary"] == "并发压缩摘要"
         assert compacted_state["context_count"] == 4
         assert [c["content"] for c in compacted_state["conversations"]] == [
@@ -349,8 +350,8 @@ class TestConversations:
 
     def test_context_is_scoped_by_character(self, db_manager: "DatabaseManager", sample_user: str):
         """同一用户的不同角色聊天流应使用独立上下文。"""
-        user_uuid = db_manager.get_user_uuid_by_username(sample_user)
-        db_manager.add_conversations(
+        user_uuid = db_manager.credential_service.get_user_uuid_by_username(sample_user)
+        db_manager.conversation_service.add_conversations(
             user_uuid,
             [
                 ConversationItem(
@@ -363,7 +364,7 @@ class TestConversations:
             ],
             character_id="luotianyi",
         )
-        db_manager.add_conversations(
+        db_manager.conversation_service.add_conversations(
             user_uuid,
             [
                 ConversationItem(
@@ -377,15 +378,15 @@ class TestConversations:
             character_id="other_character",
         )
 
-        lty_state = db_manager.get_conversation_context_state(user_uuid, character_id="luotianyi")
-        other_state = db_manager.get_conversation_context_state(user_uuid, character_id="other_character")
+        lty_state = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        other_state = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="other_character")
 
         assert lty_state["context_count"] == 1
         assert other_state["context_count"] == 1
         assert lty_state["conversations"][0]["content"] == "给天依的消息"
         assert other_state["conversations"][0]["content"] == "给另一个角色的消息"
 
-        ok = db_manager.compact_conversation_context(
+        ok = db_manager.conversation_service.compact_conversation_context(
             user_uuid,
             "另一个角色的摘要",
             keep_recent_count=0,
@@ -394,8 +395,8 @@ class TestConversations:
         )
         assert ok is True
 
-        lty_state_after = db_manager.get_conversation_context_state(user_uuid, character_id="luotianyi")
-        other_state_after = db_manager.get_conversation_context_state(user_uuid, character_id="other_character")
+        lty_state_after = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        other_state_after = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="other_character")
 
         assert lty_state_after["summary"] == ""
         assert lty_state_after["context_count"] == 1
@@ -404,9 +405,9 @@ class TestConversations:
 
     def test_stale_context_returns_empty_context(self, db_manager: "DatabaseManager", sample_user: str):
         """最近一条消息超过阈值时，运行上下文应清空但历史记录保留。"""
-        user_uuid = db_manager.get_user_uuid_by_username(sample_user)
+        user_uuid = db_manager.credential_service.get_user_uuid_by_username(sample_user)
         old_timestamp = (datetime.now() - timedelta(days=6)).strftime("%Y-%m-%d %H:%M:%S")
-        db_manager.add_conversations(
+        db_manager.conversation_service.add_conversations(
             user_uuid,
             [
                 ConversationItem(
@@ -420,23 +421,23 @@ class TestConversations:
             character_id="luotianyi",
         )
 
-        fresh_without_threshold = db_manager.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        fresh_without_threshold = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="luotianyi")
         assert fresh_without_threshold["context_count"] == 1
         assert fresh_without_threshold["conversations"][0]["content"] == "六天前的对话"
 
-        cleared = db_manager.reset_conversation_context_if_stale(
+        cleared = db_manager.conversation_service.reset_conversation_context_if_stale(
             user_uuid,
             character_id="luotianyi",
             max_context_age_days=5,
         )
         assert cleared is True
 
-        stale_state = db_manager.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        stale_state = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="luotianyi")
         assert stale_state["summary"] == ""
         assert stale_state["context_count"] == 0
         assert stale_state["conversations"] == []
 
-        history = db_manager.get_history_from_db(user_uuid, 0, 10, character_id="luotianyi")
+        history = db_manager.conversation_service.get_history_from_db(user_uuid, 0, 10, character_id="luotianyi")
         assert len(history) == 1
         assert history[0].content == "六天前的对话"
 
@@ -457,10 +458,10 @@ class TestConversations:
 #         session.close()
 
 #         # 从 DB prefill 到 Redis
-#         ok = db_manager.prefill_buffer("cache-user", types=["nickname"])
+#         ok = db_manager.conversation_service.prefill_buffer("cache-user", types=["nickname"])
 #         assert ok is True
 
-#         nickname = db_manager.get_user_nickname("cache-user")
+#         nickname = db_manager.conversation_service.get_user_nickname("cache-user")
 #         assert nickname == "小明"
 
 #     def test_prefill_buffer_full(self, db_manager):
@@ -485,7 +486,7 @@ class TestConversations:
 #         session.commit()
 #         session.close()
 
-#         ok = db_manager.prefill_buffer("full-user")
+#         ok = db_manager.conversation_service.prefill_buffer("full-user")
 #         assert ok is True
 
 #         context = db_manager.get_context_from_buffer("full-user")

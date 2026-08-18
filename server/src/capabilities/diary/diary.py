@@ -276,10 +276,10 @@ class DiaryCapability:
 
         # ── 收集聊天记录 ──
         try:
-            total = db.get_total_conversation_count(user_id, character_id=character_id)
+            total = db.conversation_service.get_total_conversation_count(user_id, character_id=character_id)
             if total > 0:
                 # 取最近 100 条（最多），然后在内存中按日期过滤
-                conversations = db.get_history_from_db(
+                conversations = db.conversation_service.get_history_from_db(
                     user_id, max(0, total - 100), total, character_id=character_id
                 )
                 # 时间戳格式为 "YYYY-MM-DD HH:MM:SS"，前缀匹配目标日期即可
@@ -420,7 +420,7 @@ class DiaryCapability:
         """获取用户昵称，用于 prompt 中个性化称呼。查询失败时返回「你」。"""
         if self.database_manager is None:
             return "你"
-        prefs = self.database_manager.get_user_preferences(user_id)
+        prefs = self.database_manager.conversation_service.get_user_preferences(user_id)
         if prefs and isinstance(prefs, dict):
             return prefs.get("nickname", prefs.get("name", "你"))
         return "你"
@@ -429,7 +429,7 @@ class DiaryCapability:
         """获取用户画像描述，用于 prompt 背景信息。"""
         if self.database_manager is None:
             return ""
-        desc = self.database_manager.get_user_description(user_id)
+        desc = self.database_manager.conversation_service.get_user_description(user_id)
         return desc or ""
 
     def _get_user_preferences(self, user_id: str) -> str:
@@ -441,7 +441,7 @@ class DiaryCapability:
         """
         if self.database_manager is None:
             return ""
-        prefs = self.database_manager.get_user_preferences(user_id)
+        prefs = self.database_manager.conversation_service.get_user_preferences(user_id)
         if prefs and isinstance(prefs, dict):
             return json.dumps(prefs, ensure_ascii=False)
         return ""

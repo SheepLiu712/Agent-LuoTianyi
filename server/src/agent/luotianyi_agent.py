@@ -127,8 +127,8 @@ class LuoTianyiAgent:
         return await self.build_sing_plan_for_topic(sing_attempts)
 
     def _load_user_expression_context(self, user_id: str) -> UserExpressionContext:
-        description = self.database_manager.get_user_description(user_id) or ""
-        preferences = self.database_manager.get_user_preferences(user_id) or {}
+        description = self.database_manager.conversation_service.get_user_description(user_id) or ""
+        preferences = self.database_manager.conversation_service.get_user_preferences(user_id) or {}
         return UserExpressionContext(
             nickname="你",
             description=description,

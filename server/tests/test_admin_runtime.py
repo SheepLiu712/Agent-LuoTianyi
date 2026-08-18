@@ -357,6 +357,7 @@ def test_supervisor_reports_busy_transition_states(tmp_path):
 
 
 def test_world_runtime_skips_disabled_optional_tasks():
+    character_runtime = SimpleNamespace()
     runtime = WorldRuntime(
         {
             "citywalk": {"enabled": False},
@@ -365,6 +366,9 @@ def test_world_runtime_skips_disabled_optional_tasks():
         }
     )
     runtime.system_runtime = SimpleNamespace(
+        agent_runtime=SimpleNamespace(
+            get_character_runtime=lambda _character_id: character_runtime,
+        ),
         capability_manager=SimpleNamespace(singing=None),
         llm_service=SimpleNamespace(register_llm_module=lambda *args, **kwargs: object()),
         database_manager=SimpleNamespace(event_store=SimpleNamespace(purge_expired_events=lambda: 0)),

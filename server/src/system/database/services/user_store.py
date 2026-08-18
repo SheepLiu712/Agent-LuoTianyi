@@ -17,8 +17,8 @@ logger = get_logger(__name__)
 class UserStore:
     """用户表读写与用户相关缓存。
 
-    DatabaseManager 仍保留原有 public API，并委托到这里；其它子存储如果需要用户画像、
-    偏好或用户名，也通过 UserStore 读取，避免反向调用 DatabaseManager。
+    DatabaseManager 通过组合后的服务把用户相关能力暴露给上层；其它子存储如果需要
+    用户画像、偏好或用户名，也通过 UserStore 读取，避免反向调用 DatabaseManager。
     """
 
     def __init__(

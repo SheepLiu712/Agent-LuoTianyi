@@ -64,7 +64,7 @@
     "database": {
         "sql_db_folder": "data/database",
         "sql_db_file": "luotianyi.db",
-        "message_token_ttl_seconds": 3600,
+        "message_token_ttl_seconds": 86400,
         "redis": {},
         "event_store": {
             "llm_module": {
