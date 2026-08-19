@@ -175,7 +175,7 @@ class RuntimeConfigValidator:
                 result.append(ValidationItem("core", f"{kind}.interfaces", "error", f"未配置任何 {kind.upper()} interface"))
                 continue
             for name, item in interfaces.items():
-                missing = [field for field in ("api_type", "model", "api_key", "base_url") if not item.get(field)]
+                missing = [field for field in ("api_type", "model", "base_url") if not item.get(field)]
                 unresolved = str(item.get("api_key", "")).startswith("$")
                 if missing or unresolved:
                     msg = f"{name} 配置不完整"
@@ -185,7 +185,12 @@ class RuntimeConfigValidator:
                         msg += "，api_key 环境变量未解析"
                     result.append(ValidationItem("core", f"{kind}.{name}", "error", msg))
                 else:
-                    result.append(ValidationItem("core", f"{kind}.{name}", "ok", "配置完整"))
+                    api_key = item.get("api_key")
+                    if not api_key or str(api_key).strip() == "":
+                        msg = "配置完整，当前接口已启用客户端模式"
+                    else:
+                        msg = "配置完整，当前接口已启用兼容模式（客户端可回退使用服务端api_key）"
+                    result.append(ValidationItem("core", f"{kind}.{name}", "ok", msg))
         return result
 
     def _validate_core_modules(self, config: dict[str, Any]) -> list[ValidationItem]:
