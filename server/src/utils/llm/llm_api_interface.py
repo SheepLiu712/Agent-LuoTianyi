@@ -106,21 +106,35 @@ class OpenAIAPIInterface(LLMAPIInterface):
         # 避免 httpx/ssl 报错。临时操作不影响其他模块。
         self._ssl_cert_file = os.environ.get("SSL_CERT_FILE")
         self._ssl_cert_file_removed = False
+        # 服务端未配置 Key 时允许接口正常创建（客户端模式），
+        # 仅在真正需要服务端直连调用时才惰性创建 OpenAI client。
+        self.client = None
+        if self.api_key:
+            self._ensure_client()
+
+    def _ensure_client(self) -> "OpenAI":
+        """惰性创建 OpenAI client；未配置服务端 Key 时抛出明确错误。"""
+        if self.client is not None:
+            return self.client
+        if not self.api_key:
+            raise RuntimeError(
+                "服务端未配置 LLM API Key（该接口处于客户端模式），"
+                "且本次调用未启用客户端执行，无法完成调用"
+            )
         if self._ssl_cert_file and not os.path.exists(self._ssl_cert_file):
             self.logger.warning(f"SSL_CERT_FILE 指向不存在的文件: {self._ssl_cert_file}，暂时移除。")
             del os.environ["SSL_CERT_FILE"]
             self._ssl_cert_file_removed = True
-
         try:
-            # 兼容同步和异步调用
             self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
             self.logger.info(f"OpenAI客户端初始化完成，模型: {self.model}")
         except Exception as e:
             self.logger.error(f"初始化OpenAI客户端失败: {e}")
-            raise Exception(f"无法初始化OpenAI客户端: {e}")
+            raise Exception(f"无法初始化OpenAI客户端: {e}") from e
         finally:
             if self._ssl_cert_file_removed:
                 os.environ["SSL_CERT_FILE"] = self._ssl_cert_file
+        return self.client
 
     async def generate_response(self, prompt: str, params: Dict[str, Any], enable_thinking: bool = False, use_json: bool = False, **kwargs) -> Dict[str, Any]:
         """
@@ -134,13 +148,15 @@ class OpenAIAPIInterface(LLMAPIInterface):
         if use_json and self.can_use_json:
             kwargs["response_format"] = {"type": "json_object"}
 
+        client = self._ensure_client()
+
         for attempt in range(self.max_retries):
             try:
                 st_time = time.time()
                 
                 # 定义一个同步函数来执行实际的阻塞调用
                 def _do_request(messages: List, use_json: bool):
-                    return self.client.chat.completions.create(
+                    return client.chat.completions.create(
                         messages=messages,
                         model=self.model,
                         max_tokens=params.get("max_tokens", self.default_parameters.get("max_tokens", 8192)),
@@ -181,10 +197,7 @@ class OpenAIAPIInterface(LLMAPIInterface):
     def _init_parameters(self):
         # 初始化默认参数
         self.base_url = self.config.get("base_url", "https://api.siliconflow.cn/v1")
-        self.api_key = self.config.get("api_key")
-        if not self.api_key:
-            self.logger.error("未提供API密钥，无法正常调用API。")
-            raise ValueError("缺少API密钥")
+        self.api_key = self.config.get("api_key") or ""
 
         self.model = self.config.get("model", "Pro/deepseek-ai/DeepSeek-V3")
         self.max_retries = self.config.get("max_retries", 3)
@@ -313,6 +326,11 @@ class RequestsAPIInterface(LLMAPIInterface):
 
     async def generate_response(self, prompt: str, use_json: bool = False, **kwargs) -> str:
         # 实现调用SiliconFlow API生成响应的逻辑
+        if not self.api_key:
+            raise RuntimeError(
+                "服务端未配置 LLM API Key（该接口处于客户端模式），"
+                "且本次调用未启用客户端执行，无法完成调用"
+            )
         last_exception = None
         self.payload["messages"] = [{"role": "user", "content": prompt}]
         if use_json:
@@ -355,10 +373,7 @@ class RequestsAPIInterface(LLMAPIInterface):
     def _init_parameters(self):
         # 初始化默认参数
         self.url = self.config.get("url", "")
-        self.api_key = self.config.get("api_key")
-        if not self.api_key:
-            self.logger.error("未提供硅基流动API密钥，无法正常调用API。")
-            raise ValueError("缺少硅基流动API密钥")
+        self.api_key = self.config.get("api_key") or ""
 
         self.headers = {
             "accept": "application/json",
