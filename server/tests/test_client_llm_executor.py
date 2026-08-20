@@ -91,12 +91,16 @@ class FakeDelegateExecutor:
         self.result = result
         self.error = error
         self.calls = []
+        self.notices = []
 
     async def delegate(self, user_id, **kwargs):
         self.calls.append((user_id, kwargs))
         if self.error is not None:
             raise self.error
         return self.result
+
+    async def notify_user(self, user_id, message, connection=None):
+        self.notices.append((user_id, message, connection))
 
 
 class FakeInner:
@@ -399,6 +403,70 @@ async def test_llm_module_delegate_none_falls_back_to_inner():
 
 
 @pytest.mark.asyncio
+async def test_llm_module_client_error_falls_back_with_notice(monkeypatch):
+    monkeypatch.setattr(
+        "src.utils.llm.llm_module.get_trace_context",
+        lambda: {"user_id": "u1"},
+    )
+    executor = FakeDelegateExecutor(error=ClientLLMError("HTTP 401 invalid api key"))
+    inner = FakeInner()
+    module = LLMModule(
+        "m",
+        {"name": "x", "client_model_type": "对话模型"},
+        FakePromptTemplate(),
+        inner,
+        client_llm_executor=executor,
+    )
+    result = await module.generate_response(character_name="洛天依", input_text="你好")
+    assert result == "inner-answer"
+    assert inner.calls == 1
+    assert len(executor.notices) == 1
+    user_id, message, _connection = executor.notices[0]
+    assert user_id == "u1"
+    assert "已自动改用服务端配置" in message
+    assert "API Key" in message
+
+
+@pytest.mark.asyncio
+async def test_llm_module_timeout_falls_back_with_notice(monkeypatch):
+    monkeypatch.setattr(
+        "src.utils.llm.llm_module.get_trace_context",
+        lambda: {"user_id": "u1"},
+    )
+    executor = FakeDelegateExecutor(error=ClientLLMTimeout("timed out"))
+    inner = FakeInner()
+    module = LLMModule(
+        "m",
+        {"name": "x", "client_model_type": "对话模型"},
+        FakePromptTemplate(),
+        inner,
+        client_llm_executor=executor,
+    )
+    result = await module.generate_response(character_name="洛天依", input_text="你好")
+    assert result == "inner-answer"
+    assert inner.calls == 1
+    assert len(executor.notices) == 1
+    assert "已自动改用服务端配置" in executor.notices[0][1]
+
+
+@pytest.mark.asyncio
+async def test_llm_module_client_error_without_user_skips_notice():
+    executor = FakeDelegateExecutor(error=ClientLLMError("boom"))
+    inner = FakeInner()
+    module = LLMModule(
+        "m",
+        {"name": "x", "client_model_type": "对话模型"},
+        FakePromptTemplate(),
+        inner,
+        client_llm_executor=executor,
+    )
+    result = await module.generate_response(character_name="洛天依", input_text="你好")
+    assert result == "inner-answer"
+    assert inner.calls == 1
+    assert executor.notices == []
+
+
+@pytest.mark.asyncio
 async def test_vlm_module_delegates_with_image():
     executor = FakeDelegateExecutor()
     inner = FakeVLMInner()
@@ -418,6 +486,31 @@ async def test_vlm_module_delegates_with_image():
     assert kwargs["model_type"] == "图片理解模型"
     assert kwargs["image_base64"] == "data:image/png;base64,AAA"
     assert inner.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_vlm_module_client_error_falls_back_with_notice(monkeypatch):
+    monkeypatch.setattr(
+        "src.utils.vision.vlm_module.get_trace_context",
+        lambda: {"user_id": "u1"},
+    )
+    executor = FakeDelegateExecutor(error=ClientLLMError("HTTP 503 overloaded"))
+    inner = FakeVLMInner()
+    module = VLMModule(
+        "v",
+        {"vlm": {"name": "x", "client_model_type": "图片理解模型"}},
+        FakePromptTemplate(),
+        inner,
+        client_llm_executor=executor,
+    )
+    result = await module.generate_response(
+        image_base64="data:image/png;base64,AAA",
+        user_text="这是什么",
+    )
+    assert result["content"] == "inner-vlm-answer"
+    assert inner.calls == 1
+    assert len(executor.notices) == 1
+    assert "已自动改用服务端配置" in executor.notices[0][1]
 
 
 @pytest.mark.asyncio

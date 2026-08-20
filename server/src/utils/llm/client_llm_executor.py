@@ -21,6 +21,8 @@ from src.utils.logger import get_logger
 
 LLM_REQUEST_EVENT_TYPE = "llm_request"
 
+logger = get_logger(__name__)
+
 
 class ClientLLMExecutionError(Exception):
     """客户端执行 LLM 调用失败（未连接 / 超时 / 客户端返回错误）。"""
@@ -63,6 +65,33 @@ _KEY_ERROR_MARKERS = (
 def _looks_like_key_error(text: str) -> bool:
     lowered = (text or "").lower()
     return any(marker in lowered for marker in _KEY_ERROR_MARKERS)
+
+
+def build_fallback_notice(exc: Exception) -> str:
+    """生成客户端执行失败后的聊天信息提示（含回退说明）。"""
+    text = str(exc or "")
+    if _looks_like_key_error(text):
+        return "你的 LLM API Key 或账户存在问题（无效/未授权/欠费等），已自动改用服务端配置继续处理。"
+    reason = " ".join((text or "").split())
+    if len(reason) > 120:
+        reason = reason[:117] + "..."
+    return f"客户端模型调用失败（{reason or '未知错误'}），已自动改用服务端配置继续处理。"
+
+
+async def notify_fallback(executor: "ClientLLMExecutor", user_id: Optional[str], module: str, exc: Exception) -> None:
+    """向用户发送客户端委托失败的信息提示；后台任务（无 user_id）只记录日志。"""
+    if not user_id:
+        logger.warning(
+            "Client delegation failed for module %s (no user to notify): %s",
+            module,
+            exc,
+        )
+        return
+    await executor.notify_user(
+        user_id,
+        build_fallback_notice(exc),
+        connection=getattr(exc, "connection", None),
+    )
 
 
 class ClientLLMExecutor:

@@ -1,5 +1,6 @@
 from src.utils.vision.vlm_api_interface import VLMAPIInterface
 from src.utils.llm.prompt_manager import PromptTemplate
+from src.utils.llm.client_llm_executor import ClientLLMExecutionError, notify_fallback
 from src.utils.logger import get_logger
 from src.system.observability import get_trace_context
 from typing import Any, Dict
@@ -67,16 +68,27 @@ class VLMModule:
         """优先按客户端模型类型委托；未配置/未启用时用服务端接口直连。"""
         if self.client_model_type and self.client_llm_executor is not None:
             user_id = get_trace_context().get("user_id")
-            response = await self.client_llm_executor.delegate(
-                user_id,
-                module=self.name,
-                model_type=self.client_model_type,
-                prompt=prompt,
-                params=self.params,
-                enable_thinking=self.enable_thinking,
-                use_json=self.use_json,
-                image_base64=image_base64,
-            )
+            try:
+                response = await self.client_llm_executor.delegate(
+                    user_id,
+                    module=self.name,
+                    model_type=self.client_model_type,
+                    prompt=prompt,
+                    params=self.params,
+                    enable_thinking=self.enable_thinking,
+                    use_json=self.use_json,
+                    image_base64=image_base64,
+                )
+            except ClientLLMExecutionError as exc:
+                self.logger.warning(
+                    "Client delegation failed for module %s: %s; falling back to server interface",
+                    self.name,
+                    exc,
+                )
+                await notify_fallback(
+                    self.client_llm_executor, user_id, self.name, exc
+                )
+                response = None
             if response is not None:
                 return response
         return await self.vlm_client.generate_response(
