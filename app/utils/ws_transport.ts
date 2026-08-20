@@ -1,5 +1,6 @@
 import { AppState } from 'react-native';
 import { server_config } from '../config';
+import { AudioStreamType } from '../types/audio';
 import { AgentMessagePayload } from '../types/chat';
 import { WSEventType } from '../types/ws_events';
 import { addDebugTrace } from './debug_trace';
@@ -547,7 +548,14 @@ export class WebSocketTransport {
       }
 
       if (eventType === WSEventType.AGENT_MESSAGE) {
-        this.callbacks.onAgentMessage(payload as AgentMessagePayload);
+        if (payload.stream_type !== AudioStreamType.CHAT) {
+          addDebugTrace('ws', 'agent message with invalid stream_type rejected', {
+            streamType: payload.stream_type,
+          });
+          this.callbacks.onError('收到流类型错误的聊天音频包');
+          return;
+        }
+        this.callbacks.onAgentMessage(payload as unknown as AgentMessagePayload);
         return;
       }
 

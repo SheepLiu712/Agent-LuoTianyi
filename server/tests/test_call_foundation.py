@@ -7,9 +7,11 @@ from sqlalchemy.orm import sessionmaker
 
 from src.chat_session.call_memory_pool import CallMemoryPool
 from src.chat_session.call_response_parser import CallResponseParser
-from src.chat_session.call_models import CallExitCode
+from src.chat_session.call_models import CallExitCode, CallResponseState, CallState
+from src.chat_session.call_stream import CallStream
 from src.system.database.call_store import CallStore
 from src.system.database.sql_database import Base, CallTurn, User
+from src.system.user_interface.types import AudioStreamType, ChatResponse, WSEventType
 from src.utils.realtime_dialogue.models import RealtimeEventType
 from src.utils.realtime_dialogue.qwen_session import normalize_qwen_event
 from src.utils.realtime_dialogue.qwen_session import QwenRealtimeSession
@@ -55,6 +57,70 @@ def test_call_exit_codes_keep_contract():
     assert int(CallExitCode.HANGUP_BEFORE_CONNECTED) == 1
     assert int(CallExitCode.RECONNECT_TIMEOUT) == -1
     assert int(CallExitCode.REALTIME_PROVIDER_FAILED) == -2
+
+
+def test_server_audio_packets_declare_their_stream_type():
+    chat_packet = ChatResponse(uuid="chat-1", text="你好")
+    assert chat_packet.stream_type is AudioStreamType.CHAT
+
+    sent = []
+    stream = CallStream.__new__(CallStream)
+    stream.call_id = "call-1"
+    stream.state = CallState.ACTIVE
+    stream.ws_connection = object()
+    stream._sent_audio_ids = set()
+    stream._last_speech_stopped_at = None
+    stream._audio_lines = {
+        "audio-1": SimpleNamespace(response_id="response-1", expression="开心"),
+    }
+    stream._responses = {
+        "response-1": CallResponseState(response_id="response-1"),
+    }
+    stream._record_call_event = lambda *args, **kwargs: None
+
+    async def capture(event_type, payload):
+        sent.append((event_type, payload))
+
+    stream._send_event = capture
+    asyncio.run(
+        stream._send_tts_packet(
+            SimpleNamespace(
+                uuid="audio-1",
+                audio="cGNt",
+                is_final_package=True,
+                expression="开心",
+            )
+        )
+    )
+
+    assert sent[0][0] is WSEventType.CALL_AUDIO_CHUNK
+    assert sent[0][1]["stream_type"] == AudioStreamType.CALL.value
+
+
+def test_cancelled_call_response_rejects_late_playback_completion():
+    appended = []
+    stream = CallStream.__new__(CallStream)
+    stream.logger = SimpleNamespace(warning=lambda *args, **kwargs: None)
+    stream._audio_lines = {
+        "audio-1": SimpleNamespace(response_id="response-1", content="不应落库"),
+    }
+    stream._responses = {
+        "response-1": CallResponseState(response_id="response-1", cancelled=True),
+    }
+
+    async def append_turn(*args, **kwargs):
+        appended.append((args, kwargs))
+
+    stream._append_turn = append_turn
+    stream._record_call_event = lambda *args, **kwargs: None
+    stream._schedule_proactive_check = lambda *args, **kwargs: None
+
+    asyncio.run(
+        stream._playback_completed(
+            {"audio_id": "audio-1", "response_id": "response-1"}
+        )
+    )
+    assert appended == []
 
 
 def test_qwen_event_normalization_keeps_response_and_function_call_ids():

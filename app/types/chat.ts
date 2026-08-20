@@ -15,6 +15,7 @@ export interface ChatMessage {
 }
 
 export interface AgentMessagePayload {
+  stream_type: 'chat';
   uuid?: string;
   text?: string;
   audio?: string | null;

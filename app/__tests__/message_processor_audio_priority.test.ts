@@ -66,6 +66,7 @@ describe('MessageProcessor online audio priority', () => {
 
     const replayStarted = processor.playLocalTtsByUuid('saved-message');
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'online-message',
       audio: 'c2VydmVy',
       is_final_package: false,
@@ -101,6 +102,7 @@ describe('MessageProcessor online audio priority', () => {
 
     expect(await processor.playLocalTtsByUuid('saved-message')).toBe(true);
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'online-message',
       audio: 'c2VydmVy',
       is_final_package: false,

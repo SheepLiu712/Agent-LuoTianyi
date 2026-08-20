@@ -88,20 +88,20 @@ export class CallTransport {
     return this.sendWithAck(WSEventType.CALL_HANGUP, { call_id: this.callId }, 5000, makeRequestId('call-hangup'));
   }
 
-  playbackCompleted(audioId: string, responseId?: string) {
-    this.sendRaw({
-      type: WSEventType.CALL_PLAYBACK_COMPLETED,
-      ts: Date.now(),
-      payload: { call_id: this.callId, audio_id: audioId, response_id: responseId },
-    });
+  playbackCompleted(audioId: string, responseId?: string): Promise<CallAckResult> {
+    return this.sendPlaybackWithAck(
+      WSEventType.CALL_PLAYBACK_COMPLETED,
+      { call_id: this.callId, audio_id: audioId, response_id: responseId },
+      `call-playback-completed-${audioId}`,
+    );
   }
 
-  playbackStopped(audioId: string, responseId?: string) {
-    this.sendRaw({
-      type: WSEventType.CALL_PLAYBACK_STOPPED,
-      ts: Date.now(),
-      payload: { call_id: this.callId, audio_id: audioId, response_id: responseId },
-    });
+  playbackStopped(audioId: string, responseId?: string, reason = 'stopped'): Promise<CallAckResult> {
+    return this.sendPlaybackWithAck(
+      WSEventType.CALL_PLAYBACK_STOPPED,
+      { call_id: this.callId, audio_id: audioId, response_id: responseId, reason },
+      `call-playback-stopped-${audioId}`,
+    );
   }
 
   private connect() {
@@ -125,6 +125,7 @@ export class CallTransport {
       this.ws = null;
       this.isAuthed = false;
       this.stopHeartbeat();
+      this.rejectAll('通话连接已中断');
       if (this.isStopped) return;
       if (this.status === 'active' || this.status === 'requesting' || this.status === 'reconnecting') {
         this.setStatus('reconnecting');
@@ -212,6 +213,33 @@ export class CallTransport {
       this.ackWaiters.set(requestId, { resolve, timer });
       this.sendRaw({ type, client_msg_id: requestId, ts: Date.now(), payload });
     });
+  }
+
+  private async sendPlaybackWithAck(
+    type: string,
+    payload: Record<string, unknown>,
+    requestIdPrefix: string,
+  ): Promise<CallAckResult> {
+    const requestId = makeRequestId(requestIdPrefix);
+    let result: CallAckResult = { ok: false, request_id: requestId, error: '播放状态尚未确认' };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      result = await this.sendWithAck(type, payload, 5000, requestId);
+      if (result.ok || this.isStopped || this.status === 'ended' || this.status === 'idle') {
+        return result;
+      }
+      addDebugTrace('call_ws', 'retry playback acknowledgement', {
+        type,
+        requestId,
+        attempt: attempt + 1,
+        error: result.error,
+      });
+    }
+    addDebugTrace('call_ws', 'playback acknowledgement failed', {
+      type,
+      requestId,
+      error: result.error,
+    });
+    return result;
   }
 
   private sendRaw(message: Record<string, unknown>) {

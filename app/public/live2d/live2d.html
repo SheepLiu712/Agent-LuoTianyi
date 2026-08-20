@@ -25,6 +25,8 @@
   <script src="./js/live2dcubismcore.min.js"></script>
   <!-- 3. pixi-live2d-display (仅 Cubism4) -->
   <script src="./js/cubism4.min.js"></script>
+  <!-- 4. Chat/Call 独立音频流播放器 -->
+  <script src="./audio_stream_player.js"></script>
 </head>
 <body>
   <canvas id="live2d"></canvas>
@@ -336,158 +338,22 @@
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 
-    // 维护当前音频流的状态（从第一个包提取，作用于后续包）
-    let streamState = {
-      sampleRate: 44100,
-      channels: 1,
-    };
-
-    let nextStartTime = 0;
-    let isPlaying = false;
-    let currentAudioId = null;
-    const activeSources = new Set();
-    const audioEndTimes = new Map();
-    const finalAudioIds = new Set();
-    const audioResponseIds = new Map();
-    const knownAudioIds = new Set();
-
-    window.feedAudioChunk = async (base64Audio, isFinal, audioId, responseId) => {
-      if (audioCtx.state === 'suspended') await audioCtx.resume();
-      currentAudioId = audioId || currentAudioId;
-      if (audioId) {
-        knownAudioIds.add(audioId);
-        if (responseId) audioResponseIds.set(audioId, responseId);
-      }
-      
-      if (base64Audio) {
-        // 1. Base64 转 Uint8Array
-        const binary = atob(base64Audio);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        
-        let offset = 0;
-
-        // 2. 检测并解析 WAV (RIFF) 文件头
-        if (bytes.length >= 44 && 
-            String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) === 'RIFF') {
-          const view = new DataView(bytes.buffer);
-          streamState.channels = view.getUint16(22, true);
-          streamState.sampleRate = view.getUint32(24, true);
-          
-          // 寻找 'data' 块，跳过不固定长度的文件头
-          let scan = 12;
-          while (scan < bytes.length - 8) {
-            const id = String.fromCharCode(bytes[scan], bytes[scan+1], bytes[scan+2], bytes[scan+3]);
-            const size = view.getUint32(scan + 4, true);
-            if (id === 'data') {
-              offset = scan + 8;
-              break;
-            }
-            scan += 8 + size;
-          }
-          if (offset === 0) offset = 44; // 兜底标准长度
-        }
-
-        // 3. 提取纯 PCM 数据 (使用 slice 保证内存对齐)
-        const pcmBytes = bytes.slice(offset);
-        const pcm16 = new Int16Array(pcmBytes.buffer);
-        
-        // 4. 将 16-bit PCM 转换为 WebAudio 需要的 Float32 [-1.0, 1.0]
-        const numSamples = pcm16.length / streamState.channels;
-        const audioBuffer = audioCtx.createBuffer(streamState.channels, numSamples, streamState.sampleRate);
-        
-        for (let channel = 0; channel < streamState.channels; channel++) {
-          const channelData = audioBuffer.getChannelData(channel);
-          for (let i = 0; i < numSamples; i++) {
-            // 解码交错的 PCM 数据
-            channelData[i] = pcm16[i * streamState.channels + channel] / 32768.0;
-          }
-        }
-
-        // 5. 排队播放
-        isPlaying = true;
-        const source = audioCtx.createBufferSource();
-        source.buffer = audioBuffer;
-        source.connect(analyser);
-        activeSources.add(source);
-        source.onended = () => activeSources.delete(source);
-        
-        const currentTime = audioCtx.currentTime;
-        // 留 50ms 缓冲，防止高频小包导致破音/队列下溢
-        if (nextStartTime < currentTime) {
-          nextStartTime = currentTime + 0.05; 
-        }
-        
-        source.start(nextStartTime);
-        nextStartTime += audioBuffer.duration;
-        audioEndTimes.set(audioId || currentAudioId || `audio-${nextStartTime}`, nextStartTime);
-      }
-
-      // 6. 处理结束标志
-      if (isFinal) {
-        const finalId = audioId || currentAudioId || `audio-${Date.now()}`;
-        if (!audioEndTimes.has(finalId)) audioEndTimes.set(finalId, audioCtx.currentTime);
-        finalAudioIds.add(finalId);
-        checkFinished();
-      }
-    };
-
-    window.stopAudioPlayback = () => {
-      for (const source of activeSources) {
-        try { source.stop(); } catch (_) {}
-      }
-      activeSources.clear();
-      isPlaying = false;
-      nextStartTime = 0;
-      const stoppedAudioIds = new Set([...knownAudioIds, ...finalAudioIds]);
-      if (currentAudioId) stoppedAudioIds.add(currentAudioId);
-      audioEndTimes.clear();
-      finalAudioIds.clear();
-      for (const stoppedAudioId of stoppedAudioIds) {
+    const audioStreamPlayer = window.createLive2DAudioStreamPlayer({
+      audioContext: audioCtx,
+      analyser,
+      postMessage: (message) => {
         if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'audio_stopped',
-            audio_id: stoppedAudioId,
-            response_id: audioResponseIds.get(stoppedAudioId) || null,
-          }));
+          window.ReactNativeWebView.postMessage(JSON.stringify(message));
         }
-      }
-      knownAudioIds.clear();
-      audioResponseIds.clear();
-      currentAudioId = null;
-    };
-
-    // 轮询检测是否播放完毕
-    function checkFinished() {
-      const now = audioCtx.currentTime;
-      for (const audioId of [...finalAudioIds]) {
-        if (now < (audioEndTimes.get(audioId) || now)) continue;
-        finalAudioIds.delete(audioId);
-        audioEndTimes.delete(audioId);
-        knownAudioIds.delete(audioId);
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'audio_finished',
-            audio_id: audioId,
-            response_id: audioResponseIds.get(audioId) || null,
-          }));
-        }
-        audioResponseIds.delete(audioId);
-      }
-      if (finalAudioIds.size > 0) {
-        requestAnimationFrame(checkFinished);
-      } else if (!activeSources.size) {
-        isPlaying = false;
-        nextStartTime = 0;
-        currentAudioId = null;
-      }
-    }
-    // 聊天流使用的旧名称保留为同一停止入口。
-    window.stopServerAudio = window.stopAudioPlayback;
+      },
+      requestFrame: (callback) => requestAnimationFrame(callback),
+    });
+    window.feedAudioPacket = (packet) => audioStreamPlayer.feed(packet);
+    window.stopAudioStream = (command) => audioStreamPlayer.stop(command);
     // 浏览器原生的 60FPS 渲染循环
     const renderLoop = () => {
       requestAnimationFrame(renderLoop);
-      if (isPlaying === false) return; // 只有在有音频播放时才计算嘴型
+      if (!audioStreamPlayer.isPlaying()) return; // 只有在有音频播放时才计算嘴型
 
       // 3. 实时提取幅值 (RMS / 响度)
       analyser.getByteTimeDomainData(dataArray);

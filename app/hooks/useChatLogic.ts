@@ -2,6 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { AudioStreamType } from '../types/audio';
 import { setExpression } from '../utils/live2d_helper';
 import { AgentBinder } from '../utils/binder';
 import { MessageProcessor } from '../utils/message_processor';
@@ -160,12 +161,12 @@ export const useChatLogic = (
     const processor = new MessageProcessor(
       networkClient,
       binder,
-      (base64Audio, isFinal) => {
-        const jsCode = `window.feedAudioChunk(${JSON.stringify(base64Audio)}, ${isFinal ? 'true' : 'false'}); true;`;
+      (packet) => {
+        const jsCode = `window.feedAudioPacket(${JSON.stringify(packet)}); true;`;
         webviewRef.current?.injectJavaScript(jsCode);
       },
-      () => {
-        const jsCode = `window.stopServerAudio(); true;`;
+      (command) => {
+        const jsCode = `window.stopAudioStream(${JSON.stringify(command)}); true;`;
         webviewRef.current?.injectJavaScript(jsCode);
       },
     );
@@ -199,7 +200,10 @@ export const useChatLogic = (
   const handleWebViewMessage = useCallback((event: any) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
-      if (data.type === 'audio_finished' || data.type === 'audio_stopped') {
+      if (
+        data.stream_type === AudioStreamType.CHAT
+        && (data.type === 'audio_finished' || data.type === 'audio_stopped')
+      ) {
         messageProcessorRef.current?.onServerAudioFinished();
         return;
       }

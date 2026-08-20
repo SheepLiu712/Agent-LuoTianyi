@@ -1,5 +1,14 @@
 
+from enum import Enum
+
 from pydantic import BaseModel
+
+
+class AudioStreamType(str, Enum):
+    CHAT = "chat"
+    CALL = "call"
+
+
 class ChatRequest(BaseModel):
     text: str
     username: str
@@ -18,6 +27,7 @@ class HistoryQuery(BaseModel):
     end_index: int = -1
 
 class ChatResponse(BaseModel):
+    stream_type: AudioStreamType = AudioStreamType.CHAT
     uuid: str
     text: str
     audio: str | None = None
@@ -135,7 +145,6 @@ class ImageRequest(BaseModel):
 
 
 #### WebSocket Event Types
-from enum import Enum
 from dataclasses import dataclass
 from typing import Dict
 

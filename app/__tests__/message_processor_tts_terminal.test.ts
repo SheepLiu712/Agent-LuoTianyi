@@ -57,6 +57,7 @@ describe('MessageProcessor TTS terminal contract', () => {
     );
 
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'reply-1',
       text: '已经生成的文本',
       audio: '',
@@ -67,7 +68,12 @@ describe('MessageProcessor TTS terminal contract', () => {
     await drainIncoming(processor);
 
     expect(feedServerAudioChunk).toHaveBeenCalledTimes(1);
-    expect(feedServerAudioChunk).toHaveBeenCalledWith('', true);
+    expect(feedServerAudioChunk).toHaveBeenCalledWith(expect.objectContaining({
+      stream_type: 'chat',
+      audio_id: 'reply-1',
+      audio: '',
+      is_final: true,
+    }));
     expect(binder.emitAgentMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         uuid: 'reply-1',
@@ -82,8 +88,8 @@ describe('MessageProcessor TTS terminal contract', () => {
   it('finishes after a mid-stream error without saving partial audio', async () => {
     const binder = fakeBinder();
     let processor: MessageProcessor;
-    const feedServerAudioChunk = jest.fn((_audio: string, isFinal: boolean) => {
-      if (isFinal) {
+    const feedServerAudioChunk = jest.fn((packet: { is_final: boolean }) => {
+      if (packet.is_final) {
         processor.onServerAudioFinished();
       }
     });
@@ -94,6 +100,7 @@ describe('MessageProcessor TTS terminal contract', () => {
     );
 
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'reply-2',
       text: '已经生成的文本',
       audio: 'YXVkaW8=',
@@ -101,6 +108,7 @@ describe('MessageProcessor TTS terminal contract', () => {
     });
     await drainIncoming(processor);
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'reply-2',
       audio: '',
       is_final_package: true,
@@ -109,8 +117,13 @@ describe('MessageProcessor TTS terminal contract', () => {
     });
     await drainIncoming(processor);
 
-    expect(feedServerAudioChunk.mock.calls.filter((call) => call[1] === true)).toHaveLength(1);
-    expect(feedServerAudioChunk).toHaveBeenLastCalledWith('', true);
+    expect(feedServerAudioChunk.mock.calls.filter((call) => call[0].is_final === true)).toHaveLength(1);
+    expect(feedServerAudioChunk).toHaveBeenLastCalledWith(expect.objectContaining({
+      stream_type: 'chat',
+      audio_id: 'reply-2',
+      audio: '',
+      is_final: true,
+    }));
     expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
     expect(binder.emitAgentMessage).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -151,6 +164,7 @@ describe('MessageProcessor TTS terminal contract', () => {
     );
 
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'reply-background',
       audio: 'YXVkaW8=',
       is_final_package: true,
@@ -171,6 +185,7 @@ describe('MessageProcessor TTS terminal contract', () => {
     );
 
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'touch-fast-reply',
       audio: 'dG91Y2gtYXVkaW8=',
       expression: '开心',
@@ -180,8 +195,18 @@ describe('MessageProcessor TTS terminal contract', () => {
     });
     await drainIncoming(processor);
 
-    expect(feedServerAudioChunk).toHaveBeenCalledWith('dG91Y2gtYXVkaW8=', false);
-    expect(feedServerAudioChunk).toHaveBeenCalledWith('', true);
+    expect(feedServerAudioChunk).toHaveBeenCalledWith(expect.objectContaining({
+      stream_type: 'chat',
+      audio_id: 'touch-fast-reply',
+      audio: 'dG91Y2gtYXVkaW8=',
+      is_final: false,
+    }));
+    expect(feedServerAudioChunk).toHaveBeenCalledWith(expect.objectContaining({
+      stream_type: 'chat',
+      audio_id: 'touch-fast-reply',
+      audio: '',
+      is_final: true,
+    }));
     expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
   });
 
@@ -195,6 +220,7 @@ describe('MessageProcessor TTS terminal contract', () => {
     );
 
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'sentence-1',
       text: '第一句',
       expression: '开心',
@@ -210,14 +236,21 @@ describe('MessageProcessor TTS terminal contract', () => {
         expression: '开心',
       }),
     );
-    expect(feedServerAudioChunk).toHaveBeenCalledWith('YXVkaW8tMQ==', false);
+    expect(feedServerAudioChunk).toHaveBeenCalledWith(expect.objectContaining({
+      stream_type: 'chat',
+      audio_id: 'sentence-1',
+      audio: 'YXVkaW8tMQ==',
+      is_final: false,
+    }));
 
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'sentence-1',
       audio: 'YXVkaW8tMg==',
       is_final_package: true,
     });
     processor.onAgentMessage({
+      stream_type: 'chat',
       uuid: 'sentence-2',
       text: '第二句',
       expression: '期待',
@@ -246,7 +279,12 @@ describe('MessageProcessor TTS terminal contract', () => {
         expression: '期待',
       }),
     );
-    expect(feedServerAudioChunk).toHaveBeenCalledWith('YXVkaW8tMw==', false);
+    expect(feedServerAudioChunk).toHaveBeenCalledWith(expect.objectContaining({
+      stream_type: 'chat',
+      audio_id: 'sentence-2',
+      audio: 'YXVkaW8tMw==',
+      is_final: false,
+    }));
 
     processor.onServerAudioFinished();
     await drainIncoming(processor);

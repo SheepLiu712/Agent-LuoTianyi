@@ -80,7 +80,7 @@ describe('AgentBinder', () => {
 
   describe('emit methods', () => {
     it('emitAgentMessage should delegate', () => {
-      const payload: AgentMessagePayload = { uuid: 'a1', text: 'hi' };
+      const payload: AgentMessagePayload = { stream_type: 'chat', uuid: 'a1', text: 'hi' };
       binder.emitAgentMessage(payload);
       expect(uiCallbacks.onAgentMessage).toHaveBeenCalledWith(payload);
     });

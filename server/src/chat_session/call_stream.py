@@ -14,7 +14,7 @@ from src.chat_session.call_models import CallExitCode, CallResponseState, CallSt
 from src.chat_session.call_response_parser import CallResponseParser
 from src.chat_session.call_settlement import CallSettlementCoordinator
 from src.chat_session.dependency.global_speaking_worker import GlobalSpeakingWorker, SpeakingJob
-from src.system.user_interface.types import WSEventType, WSMessage
+from src.system.user_interface.types import AudioStreamType, WSEventType, WSMessage
 from src.utils.realtime_dialogue import RealtimeToolDefinition
 from src.utils.realtime_dialogue.models import RealtimeEvent, RealtimeEventType
 from src.utils.logger import get_logger
@@ -402,6 +402,7 @@ class CallStream:
         await self._send_event(
             WSEventType.CALL_AUDIO_CHUNK,
             {
+                "stream_type": AudioStreamType.CALL.value,
                 "call_id": self.call_id,
                 "response_id": line.response_id,
                 "audio_id": audio_id,
@@ -432,11 +433,19 @@ class CallStream:
             return
         response = self._responses.setdefault(response_id, CallResponseState(response_id=response_id))
         response.cancelled = True
-        self._interrupt_started_at[response_id] = time.perf_counter()
+        stopped_audio_ids = [
+            audio_id
+            for audio_id in response.pending_audio_ids
+            if audio_id not in response.completed_audio_ids
+        ]
         previous_ack_task = self._playback_ack_tasks.pop(response_id, None)
         if previous_ack_task and not previous_ack_task.done():
             previous_ack_task.cancel()
-        self._playback_ack_tasks[response_id] = asyncio.create_task(self._wait_playback_stop_ack(response_id))
+        if stopped_audio_ids:
+            self._interrupt_started_at[response_id] = time.perf_counter()
+            self._playback_ack_tasks[response_id] = asyncio.create_task(
+                self._wait_playback_stop_ack(response_id)
+            )
         self._record_call_event(
             "qwen.speech_started",
             metadata={"qwen_event_id": event.event_id, "response_id": response_id},
@@ -451,9 +460,10 @@ class CallStream:
         await self._send_event(
             WSEventType.CALL_STOP_PLAYBACK,
             {
+                "stream_type": AudioStreamType.CALL.value,
                 "call_id": self.call_id,
                 "response_id": response_id,
-                "audio_ids": list(response.pending_audio_ids),
+                "audio_ids": stopped_audio_ids,
                 "reason": "user_barge_in",
             },
         )
@@ -468,6 +478,16 @@ class CallStream:
             self.logger.warning("call playback response mismatch: call_id=%s audio_id=%s", self.call_id, audio_id)
             return
         response = self._responses.setdefault(line.response_id, CallResponseState(response_id=line.response_id))
+        if response.cancelled:
+            self._record_call_event(
+                "client.playback_completed_ignored",
+                metadata={
+                    "response_id": line.response_id,
+                    "audio_id": audio_id,
+                    "reason": "cancelled_response",
+                },
+            )
+            return
         if audio_id in response.completed_audio_ids:
             return
         response.completed_audio_ids.add(audio_id)
@@ -499,7 +519,11 @@ class CallStream:
             self._record_call_event(
                 "client.playback_stopped",
                 duration_ms=((time.perf_counter() - started_at) * 1000 if started_at is not None else None),
-                metadata={"response_id": line.response_id, "audio_id": audio_id},
+                metadata={
+                    "response_id": line.response_id,
+                    "audio_id": audio_id,
+                    "reason": str(payload.get("reason") or "stopped"),
+                },
             )
 
     async def _append_turn(self, speaker: str, text: str, raw_events: list[dict[str, Any]] | None = None) -> None:

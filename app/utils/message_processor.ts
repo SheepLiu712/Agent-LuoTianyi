@@ -2,6 +2,7 @@ import { Buffer } from 'buffer';
 import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import { AudioStreamType, Live2DAudioPacket, Live2DAudioStopCommand } from '../types/audio';
 import { AgentMessagePayload } from '../types/chat';
 import { AgentBinder } from './binder';
 import { addDebugTrace } from './debug_trace';
@@ -114,8 +115,8 @@ function mergeAudioChunksAsBase64(chunks: string[]) {
 export class MessageProcessor {
   private readonly networkClient: NetworkClient;
   private readonly binder: AgentBinder;
-  private readonly feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void;
-  private readonly stopServerAudio: () => void;
+  private readonly feedServerAudioChunk: (packet: Live2DAudioPacket) => void;
+  private readonly stopServerAudio: (command: Live2DAudioStopCommand) => void;
   private sendQueue: SendItem[] = [];
   private sendLoopRunning = false;
   private stopRequested = false;
@@ -137,8 +138,8 @@ export class MessageProcessor {
   constructor(
     networkClient: NetworkClient,
     binder: AgentBinder,
-    feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void,
-    stopServerAudio?: () => void,
+    feedServerAudioChunk: (packet: Live2DAudioPacket) => void,
+    stopServerAudio?: (command: Live2DAudioStopCommand) => void,
   ) {
     this.networkClient = networkClient;
     this.binder = binder;
@@ -149,7 +150,10 @@ export class MessageProcessor {
   stop() {
     this.stopRequested = true;
     this.sendQueue = [];
-    this.stopServerAudio();
+    this.stopServerAudio({
+      stream_type: AudioStreamType.CHAT,
+      reason: 'chat_processor_stopped',
+    });
     void this.stopLocalTts();
   }
 
@@ -416,6 +420,12 @@ export class MessageProcessor {
   }
 
   onAgentMessage(payload: AgentMessagePayload) {
+    if (payload.stream_type !== AudioStreamType.CHAT) {
+      addDebugTrace('agent', 'non-chat packet rejected by chat processor', {
+        streamType: payload.stream_type,
+      });
+      return;
+    }
     // 消息级幂等：服务端 at-least-once 重发的重复分片在入口直接跳过，
     // 展示与音频两条路径都不再处理（若只在展示路径去重，重复音频仍会被串行链消费）。
     if (this.isDuplicatePacket(payload.uuid || `agent-${Date.now()}`, payload)) {
@@ -485,6 +495,7 @@ export class MessageProcessor {
 
     if (displayInChat && payload.text && payload.text.trim().length > 0) {
       this.binder.emitAgentMessage({
+        stream_type: AudioStreamType.CHAT,
         uuid: convUuid,
         text: payload.text,
         expression: payload.expression || undefined,
@@ -496,6 +507,7 @@ export class MessageProcessor {
       });
     } else {
       this.binder.emitAgentMessage({
+        stream_type: AudioStreamType.CHAT,
         uuid: convUuid,
         expression: payload.expression || undefined,
         is_final_package: payload.is_final_package,
@@ -528,11 +540,21 @@ export class MessageProcessor {
     }
 
     if (audioChunk) {
-      this.feedServerAudioChunk(audioChunk, false);
+      this.feedServerAudioChunk({
+        stream_type: AudioStreamType.CHAT,
+        audio_id: convUuid,
+        audio: audioChunk,
+        is_final: false,
+      });
     }
 
     if (payload.is_final_package) {
-      this.feedServerAudioChunk('', true);
+      this.feedServerAudioChunk({
+        stream_type: AudioStreamType.CHAT,
+        audio_id: convUuid,
+        audio: '',
+        is_final: true,
+      });
       const isTransient = this.transientMessageUuids.has(convUuid);
       if (payload.audio_error) {
         addDebugTrace('audio', 'server audio stream ended with error', {
@@ -544,6 +566,7 @@ export class MessageProcessor {
         if (savedUri && !isTransient) {
           // 此时该句已经轮到展示，避免提前发送 audio 更新而创建空白气泡。
           this.binder.emitAgentMessage({
+            stream_type: AudioStreamType.CHAT,
             uuid: convUuid,
             audio: savedUri,
           });
