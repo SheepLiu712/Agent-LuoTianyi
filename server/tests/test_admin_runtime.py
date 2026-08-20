@@ -60,6 +60,7 @@ def minimal_config(tmp_path: Path) -> dict:
             },
         },
         "database": {
+            "message_token_ttl_seconds": 3600,
             "event_store": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
             "memory_store": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
         },
@@ -75,8 +76,17 @@ def minimal_config(tmp_path: Path) -> dict:
                     "interface_config_path": str(tmp_path / "tts_interface.json"),
                 }
             },
-            "sing": {"luotianyi": {"resource_path": str(tmp_path / "sing")}},
+            "sing": {
+                "song_emotion_tagger": {
+                    "llm": {"name": "main"},
+                    "prompt_name": "p",
+                },
+                "characters": {"luotianyi": {"resource_path": str(tmp_path / "sing")}},
+            },
             "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
+            "diary": {
+                "diary_llm": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}
+            },
         },
         "agent_runtime": {
             "character_registry": {
@@ -175,6 +185,9 @@ def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
     assert "resource.song knowledge db" in item_names
     assert "resource.song name keywords" in item_names
     assert "resource.song lyric keywords" in item_names
+    assert "resource.sing.characters.luotianyi.resource_path" in item_names
+    assert "resource.sing.song_emotion_tagger.resource_path" not in item_names
+    assert "llm_module.capability.singing.song_emotion_tagger" in item_names
     disabled_names = {item["name"] for item in result["world_disabled"]}
     assert {"citywalk", "bili_dynamic_fetcher", "auto_song_learner.qq_music"} <= disabled_names
 
@@ -182,6 +195,74 @@ def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
     assert runtime_config["world"]["citywalk"]["enabled"] is False
     assert runtime_config["world"]["bili_dynamic_fetcher"]["enabled"] is False
     assert runtime_config["world"]["auto_song_learner"]["enabled"] is False
+
+
+@pytest.mark.parametrize(
+    "value",
+    [None, True, "3600", 59, 86401, 3600.5],
+)
+def test_validator_rejects_invalid_message_token_ttl(tmp_path, monkeypatch, value):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    validator = RuntimeConfigValidator(
+        root_dir=tmp_path,
+        secret_store=SecretStore(tmp_path / "secrets.local.env"),
+    )
+    config = minimal_config(tmp_path)
+    config["database"]["message_token_ttl_seconds"] = value
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    item = next(
+        item
+        for item in result["items"]
+        if item["name"] == "config.database.message_token_ttl_seconds"
+    )
+    assert item["status"] == "error"
+
+
+def test_validator_warns_and_uses_safe_default_when_message_token_ttl_is_missing(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    validator = RuntimeConfigValidator(
+        root_dir=tmp_path,
+        secret_store=SecretStore(tmp_path / "secrets.local.env"),
+    )
+    config = minimal_config(tmp_path)
+    del config["database"]["message_token_ttl_seconds"]
+
+    result = validator.validate(config)
+
+    item = next(
+        item
+        for item in result["items"]
+        if item["name"] == "config.database.message_token_ttl_seconds"
+    )
+    assert result["core_ok"] is True
+    assert item["status"] == "warning"
+    assert item["severity"] == "warning"
+    assert "3600" in item["message"]
+
+
+def test_validator_rejects_flat_singing_character_config(tmp_path, monkeypatch):
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    secret_store = SecretStore(tmp_path / "secrets.local.env")
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secret_store)
+    config = minimal_config(tmp_path)
+    config["capabilities"]["sing"] = {
+        "luotianyi": {"resource_path": str(tmp_path / "sing")},
+    }
+
+    result = validator.validate(config)
+
+    assert result["core_ok"] is False
+    item = next(item for item in result["items"] if item["name"] == "resource.sing.characters")
+    assert item["status"] == "error"
 
 
 def test_validator_uses_custom_llm_api_keys_without_hardcoded_provider_keys(tmp_path, monkeypatch):
@@ -276,6 +357,7 @@ def test_supervisor_reports_busy_transition_states(tmp_path):
 
 
 def test_world_runtime_skips_disabled_optional_tasks():
+    character_runtime = SimpleNamespace()
     runtime = WorldRuntime(
         {
             "citywalk": {"enabled": False},
@@ -284,6 +366,9 @@ def test_world_runtime_skips_disabled_optional_tasks():
         }
     )
     runtime.system_runtime = SimpleNamespace(
+        agent_runtime=SimpleNamespace(
+            get_character_runtime=lambda _character_id: character_runtime,
+        ),
         capability_manager=SimpleNamespace(singing=None),
         llm_service=SimpleNamespace(register_llm_module=lambda *args, **kwargs: object()),
         database_manager=SimpleNamespace(event_store=SimpleNamespace(purge_expired_events=lambda: 0)),
@@ -351,6 +436,62 @@ def test_admin_success_access_log_filter_keeps_user_and_errors():
     assert access_filter.filter(admin_ok) is False
     assert access_filter.filter(admin_error) is True
     assert access_filter.filter(user_ok) is True
+
+
+def test_access_log_filter_redacts_sensitive_query_parameters():
+    import logging
+    from src.utils.logger import AdminSuccessAccessLogFilter
+
+    access_filter = AdminSuccessAccessLogFilter()
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        '%s - "%s %s HTTP/%s" %d',
+        (
+            "127.0.0.1:1234",
+            "GET",
+            (
+                "/dynamics?username=alice&ToKeN=first-secret"
+                "&%6dessage%5Ftoken=second-secret&token=third-secret"
+                "&cursor=x%20y"
+            ),
+            "1.1",
+            401,
+        ),
+        None,
+    )
+
+    assert access_filter.filter(record) is True
+    rendered = record.getMessage()
+
+    assert "first-secret" not in rendered
+    assert "second-secret" not in rendered
+    assert "third-secret" not in rendered
+    assert rendered.count("REDACTED") == 3
+    assert "username=alice" in rendered
+    assert "cursor=x%20y" in rendered
+
+
+def test_access_log_filter_redacts_fallback_message():
+    import logging
+    from src.utils.logger import AdminSuccessAccessLogFilter
+
+    access_filter = AdminSuccessAccessLogFilter()
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        '127.0.0.1:1234 - "GET /history?%74oken=fallback-secret HTTP/1.1" 401',
+        (),
+        None,
+    )
+
+    assert access_filter.filter(record) is True
+    assert "fallback-secret" not in record.getMessage()
+    assert "REDACTED" in record.getMessage()
 
 
 def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):

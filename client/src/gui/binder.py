@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 class AgentBinder(QObject):
     response_signal = Signal(str, str)  # uuid, text
+    system_message_signal = Signal(str)  # 不属于用户或 Agent 的界面提示
     update_signal = Signal(str, str)
     delete_signal = Signal()
     free_signal = Signal(bool)
@@ -23,7 +24,7 @@ class AgentBinder(QObject):
         send_text_callback: Callable[[str], str],
         send_image_callback: Callable[[str], str],
         send_typing_callback: Callable[[], None],
-        send_touch_callback: Callable[[str | list, dict | None], str],
+        send_touch_callback: Callable[[str | list, dict | None], str | None],
         play_local_tts_callback: Callable[[str], bool],
         stop_local_tts_callback: Callable[[], bool],
         set_volume_callback: Callable[[int], None],
@@ -37,6 +38,7 @@ class AgentBinder(QObject):
         set_base_url_callback: Callable[[str, bool], None] | None = None,
         send_image_selecting_callback: Callable[[], None] | None = None,
         send_image_selecting_cancel_callback: Callable[[], None] | None = None,
+        is_server_audio_active_callback: Callable[[], bool] | None = None,
     ):
         super().__init__()
         self.logger = get_logger(self.__class__.__name__)
@@ -58,6 +60,7 @@ class AgentBinder(QObject):
         self.set_base_url_callback = set_base_url_callback
         self.send_image_selecting_callback = send_image_selecting_callback
         self.send_image_selecting_cancel_callback = send_image_selecting_cancel_callback
+        self.is_server_audio_active_callback = is_server_audio_active_callback
 
         self.msg_to_bubble: Dict[str, ChatBubble] = {}  # 用于记录消息ID和气泡的对应关系，以便后续更新气泡内容
         # 将跨线程的更新请求通过 Qt 信号转发到主线程执行
@@ -66,6 +69,9 @@ class AgentBinder(QObject):
     def emit_response_signal(self, uuid: str, text: str):
         # 让QT框架外的成员能触发信号
         self.response_signal.emit(uuid, text)
+
+    def emit_system_message_signal(self, text: str):
+        self.system_message_signal.emit(text)
 
     def emit_expression_signal(self, expression: str):
         self.expression_signal.emit(expression)
@@ -150,6 +156,11 @@ class AgentBinder(QObject):
     def on_send_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None):
         if self.send_touch_callback:
             self.send_touch_callback(touch_area, click_frequency=click_frequency, touch_meta=touch_meta)
+
+    def is_server_audio_active(self) -> bool:
+        if self.is_server_audio_active_callback:
+            return self.is_server_audio_active_callback()
+        return False
 
     def on_play_local_tts(self, conv_uuid: str) -> bool:
         if self.play_local_tts_callback:

@@ -66,6 +66,56 @@ async def test_typing_during_topic_extraction_discards_result_and_restarts_waiti
 
 
 @pytest.mark.asyncio
+async def test_typing_cleared_during_waiting_removes_deadline():
+    """0 长度打字事件表示用户清空了输入，应清除等待状态立即提取。"""
+    planner = _planner()
+    await planner.feed_unread_message(
+        ChatInputEvent(
+            event_type=ChatInputEventType.USER_TEXT,
+            text="上一句还没说完",
+            payload={},
+            client_msg_id="msg-1",
+        )
+    )
+    await planner.listen_timer.set_deadline(timeout=10)
+
+    await planner._handle_user_typing(
+        ChatInputEvent(
+            event_type=ChatInputEventType.USER_TYPING,
+            payload={"text_length": 0},
+            client_msg_id="typing-0",
+        )
+    )
+
+    assert (await planner.listen_timer.deadline) is None
+
+
+@pytest.mark.asyncio
+async def test_typing_with_empty_payload_treated_as_cleared():
+    """typing 事件 payload 为空时按 text_length=0 处理，清空输入状态。"""
+    planner = _planner()
+    await planner.feed_unread_message(
+        ChatInputEvent(
+            event_type=ChatInputEventType.USER_TEXT,
+            text="上一句还没说完",
+            payload={},
+            client_msg_id="msg-1",
+        )
+    )
+    await planner.listen_timer.set_deadline(timeout=10)
+
+    await planner._handle_user_typing(
+        ChatInputEvent(
+            event_type=ChatInputEventType.USER_TYPING,
+            payload={},
+            client_msg_id="typing-empty",
+        )
+    )
+
+    assert (await planner.listen_timer.deadline) is None
+
+
+@pytest.mark.asyncio
 async def test_image_selecting_during_topic_extraction_discards_result_and_restarts_waiting():
     planner = _planner()
     snapshot = await _begin_extraction(planner)

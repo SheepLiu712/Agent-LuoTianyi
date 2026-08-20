@@ -134,6 +134,7 @@ class FakeDatabaseManager:
 
     def __init__(self):
         self.memory_store = FakeMemoryStore()
+        self.conversation_service = self
         self.descriptions = {}
         self.description_updates = []
 
@@ -446,7 +447,7 @@ async def test_update_user_profile_with_fake_llm_updates_when_context_has_memory
     )
 
     assert new_profile == "用户喜欢观星，也喜欢安静的夜晚活动。"
-    assert fake_database_manager.get_user_description(USER_ID) == new_profile
+    assert fake_database_manager.conversation_service.get_user_description(USER_ID) == new_profile
     assert fake_database_manager.description_updates == [(USER_ID, new_profile, True)]
 
 
@@ -472,7 +473,7 @@ async def test_update_user_profile_with_fake_llm_keeps_profile_without_memory(me
     )
 
     assert new_profile is None
-    assert fake_database_manager.get_user_description(USER_ID) == "用户喜欢音乐。"
+    assert fake_database_manager.conversation_service.get_user_description(USER_ID) == "用户喜欢音乐。"
     assert fake_database_manager.description_updates == []
 
 
@@ -525,7 +526,7 @@ async def test_update_user_profile_with_real_llm_optional(memory_config, real_ll
         },
     )
     assert new_profile
-    assert fake_database_manager.get_user_description(USER_ID) == new_profile
+    assert fake_database_manager.conversation_service.get_user_description(USER_ID) == new_profile
 
     fake_database_manager.description_updates.clear()
     no_update = await memory.update_user_profile_by_context(

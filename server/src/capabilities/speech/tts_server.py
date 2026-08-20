@@ -5,6 +5,7 @@ import atexit
 import gc
 import logging
 import sys
+import threading
 import traceback
 import multiprocessing
 from queue import Empty
@@ -212,6 +213,8 @@ def _run_gsv_worker(
                             prompt_audio_text=prompt_audio_text,
                             text=text,
                         ):
+                            if stop_event.is_set():
+                                break
                             chunk_bytes = _audio_to_wav_bytes(clip.audio_data, clip.samplerate)
                             if not is_first_chunk:
                                 chunk_bytes = _strip_wav_header(chunk_bytes)
@@ -331,6 +334,11 @@ class TTSServer:
         self.stop_event: Optional[MPEvent] = None
         self._request_counter = 0
         self._synthesize_lock = multiprocessing.Lock()
+        self._lifecycle_lock = threading.RLock()
+        self._lifecycle_condition = threading.Condition()
+        self._active_requests = 0
+        self._stopping = False
+        self._atexit_registered = False
 
     def _info(self, message: str) -> None:
         if not self.quiet_logs:
@@ -338,9 +346,29 @@ class TTSServer:
 
     def start(self):
         """Starts the gsv_tts worker process if not already running."""
+        with self._lifecycle_lock:
+            try:
+                self._start()
+            except BaseException:
+                try:
+                    self._stop(force=True)
+                except Exception as cleanup_error:
+                    self.logger.error(
+                        f"Failed to roll back gsv_tts startup: {cleanup_error}"
+                    )
+                raise
+
+    def _start(self) -> None:
         if self.server_process and self.server_process.is_alive():
+            if self._stopping:
+                raise RuntimeError("gsv_tts worker is still stopping")
             self._info("gsv_tts worker is already running")
             return
+
+        with self._lifecycle_condition:
+            if self._active_requests:
+                raise RuntimeError("Cannot restart gsv_tts while synthesis requests are still active")
+            self._stopping = False
 
         if not os.path.exists(self.config_path):
             self.logger.error(f"Config file not found at {self.config_path}")
@@ -375,49 +403,107 @@ class TTSServer:
 
         self._info("gsv_tts worker started successfully")
 
-        # Ensure cleanup on main process exit
-        atexit.register(self.stop)
+        # Ensure cleanup on main process exit without retaining stopped servers.
+        if not self._atexit_registered:
+            atexit.register(self.stop)
+            self._atexit_registered = True
+
+    def request_stop(self) -> None:
+        """Reject new requests and wake in-flight response waiters."""
+        with self._lifecycle_condition:
+            self._stopping = True
+        if self.stop_event is not None:
+            self.stop_event.set()
+
+    def _begin_request(self) -> None:
+        with self._lifecycle_condition:
+            if self._stopping:
+                raise RuntimeError("gsv_tts worker is stopping")
+            self._active_requests += 1
+
+    def _end_request(self) -> None:
+        with self._lifecycle_condition:
+            self._active_requests -= 1
+            if self._active_requests == 0:
+                self._lifecycle_condition.notify_all()
+
+    def _wait_for_active_requests(self, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        with self._lifecycle_condition:
+            while self._active_requests:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                self._lifecycle_condition.wait(remaining)
+            return True
 
     def stop(self, force: bool = False):
         """Stops the gsv_tts worker process."""
-        if not self.server_process:
-            return
+        with self._lifecycle_lock:
+            self._stop(force=force)
 
-        self._info("Stopping gsv_tts worker...")
-        if self.stop_event:
-            self.stop_event.set()
-        try:
-            if self.request_queue and not force:
-                self.request_queue.put({"command": "shutdown", "request_id": "__shutdown__"})
-        except Exception:
-            pass
+    def _stop(self, force: bool = False) -> None:
+        self.request_stop()
+        process = self.server_process
 
-        if self.server_process.is_alive():
-            self.server_process.join(timeout=10)
-            if self.server_process.is_alive():
+        if process is not None:
+            if not force and not self._wait_for_active_requests(timeout=10.0):
+                self.logger.warning(
+                    "Timed out waiting for active gsv_tts requests; forcing worker shutdown"
+                )
+                force = True
+
+            self._info("Stopping gsv_tts worker...")
+            try:
+                if self.request_queue is not None and not force:
+                    self.request_queue.put({"command": "shutdown", "request_id": "__shutdown__"})
+            except Exception:
+                pass
+
+            if process.is_alive():
+                process.join(timeout=10)
+            if process.is_alive():
                 self.logger.warning("gsv_tts worker did not exit gracefully, terminating...")
-                self.server_process.terminate()
-                self.server_process.join(timeout=5)
+                process.terminate()
+                process.join(timeout=5)
+            if process.is_alive():
+                kill = getattr(process, "kill", None)
+                if kill is not None:
+                    self.logger.warning("gsv_tts worker survived terminate(), killing...")
+                    kill()
+                    process.join(timeout=5)
+            if process.is_alive():
+                raise RuntimeError("gsv_tts worker is still alive after forced shutdown")
 
-        self.server_process = None
+            close_process = getattr(process, "close", None)
+            if close_process is not None:
+                close_process()
+            self.server_process = None
 
-        if self.request_queue is not None:
+        cleanup_errors: list[str] = []
+        for attribute in ("request_queue", "response_queue"):
+            queue = getattr(self, attribute)
+            if queue is None:
+                continue
             try:
-                self.request_queue.close()
-                self.request_queue.cancel_join_thread()
-            except Exception:
-                pass
-        if self.response_queue is not None:
-            try:
-                self.response_queue.close()
-                self.response_queue.cancel_join_thread()
-            except Exception:
-                pass
+                queue.close()
+                queue.cancel_join_thread()
+            except ValueError:
+                # multiprocessing.Queue raises ValueError when already closed.
+                setattr(self, attribute, None)
+            except Exception as error:
+                cleanup_errors.append(f"{attribute}: {type(error).__name__}: {error}")
+            else:
+                setattr(self, attribute, None)
 
-        self.request_queue = None
-        self.response_queue = None
+        if cleanup_errors:
+            raise RuntimeError("Failed to close gsv_tts queues: " + "; ".join(cleanup_errors))
+
         self.ready_event = None
         self.stop_event = None
+        if self._atexit_registered:
+            atexit.unregister(self.stop)
+            self._atexit_registered = False
         self._info("gsv_tts worker stopped")
 
     def synthesize(
@@ -428,35 +514,39 @@ class TTSServer:
         prompt_audio_text: str,
         timeout: int = 600,
     ) -> bytes:
-        if not self.server_process or not self.server_process.is_alive():
-            raise RuntimeError("gsv_tts worker is not running")
+        self._begin_request()
+        try:
+            if not self.server_process or not self.server_process.is_alive():
+                raise RuntimeError("gsv_tts worker is not running")
 
-        if not self.request_queue or not self.response_queue:
-            raise RuntimeError("gsv_tts worker queues are not initialized")
+            if not self.request_queue or not self.response_queue:
+                raise RuntimeError("gsv_tts worker queues are not initialized")
 
-        with self._synthesize_lock:
-            self._request_counter += 1
-            request_id = f"req-{self._request_counter}"
+            with self._synthesize_lock:
+                self._request_counter += 1
+                request_id = f"req-{self._request_counter}"
 
-            self.request_queue.put(
-                {
-                    "command": "synthesize",
-                    "request_id": request_id,
-                    "text": text,
-                    "spk_audio_path": spk_audio_path,
-                    "prompt_audio_path": prompt_audio_path,
-                    "prompt_audio_text": prompt_audio_text,
-                }
-            )
+                self.request_queue.put(
+                    {
+                        "command": "synthesize",
+                        "request_id": request_id,
+                        "text": text,
+                        "spk_audio_path": spk_audio_path,
+                        "prompt_audio_path": prompt_audio_path,
+                        "prompt_audio_text": prompt_audio_text,
+                    }
+                )
 
-            response = self._wait_for_response(request_id=request_id, timeout=timeout)
-            if not response.get("ok"):
-                error = response.get("error", "unknown error")
-                tb = response.get("traceback")
-                if tb:
-                    self.logger.error(f"gsv_tts synthesize failed: {error}\n{tb}")
-                raise RuntimeError(f"gsv_tts synthesize failed: {error}")
-            return response.get("audio_bytes", b"")
+                response = self._wait_for_response(request_id=request_id, timeout=timeout)
+                if not response.get("ok"):
+                    error = response.get("error", "unknown error")
+                    tb = response.get("traceback")
+                    if tb:
+                        self.logger.error(f"gsv_tts synthesize failed: {error}\n{tb}")
+                    raise RuntimeError(f"gsv_tts synthesize failed: {error}")
+                return response.get("audio_bytes", b"")
+        finally:
+            self._end_request()
 
     def stream_synthesize(
         self,
@@ -466,42 +556,46 @@ class TTSServer:
         prompt_audio_text: str,
         timeout: int = 600,
     ) -> Generator[bytes, None, None]:
-        if not self.server_process or not self.server_process.is_alive():
-            raise RuntimeError("gsv_tts worker is not running")
+        self._begin_request()
+        try:
+            if not self.server_process or not self.server_process.is_alive():
+                raise RuntimeError("gsv_tts worker is not running")
 
-        if not self.request_queue or not self.response_queue:
-            raise RuntimeError("gsv_tts worker queues are not initialized")
+            if not self.request_queue or not self.response_queue:
+                raise RuntimeError("gsv_tts worker queues are not initialized")
 
-        with self._synthesize_lock:
-            self._request_counter += 1
-            request_id = f"req-{self._request_counter}"
+            with self._synthesize_lock:
+                self._request_counter += 1
+                request_id = f"req-{self._request_counter}"
 
-            self.request_queue.put(
-                {
-                    "command": "stream_synthesize",
-                    "request_id": request_id,
-                    "text": text,
-                    "spk_audio_path": spk_audio_path,
-                    "prompt_audio_path": prompt_audio_path,
-                    "prompt_audio_text": prompt_audio_text,
-                }
-            )
+                self.request_queue.put(
+                    {
+                        "command": "stream_synthesize",
+                        "request_id": request_id,
+                        "text": text,
+                        "spk_audio_path": spk_audio_path,
+                        "prompt_audio_path": prompt_audio_path,
+                        "prompt_audio_text": prompt_audio_text,
+                    }
+                )
 
-            while True:
-                response = self._wait_for_response(request_id=request_id, timeout=timeout)
-                if not response.get("ok"):
-                    error = response.get("error", "unknown error")
-                    tb = response.get("traceback")
-                    if tb:
-                        self.logger.error(f"gsv_tts stream synthesize failed: {error}\n{tb}")
-                    raise RuntimeError(f"gsv_tts stream synthesize failed: {error}")
+                while True:
+                    response = self._wait_for_response(request_id=request_id, timeout=timeout)
+                    if not response.get("ok"):
+                        error = response.get("error", "unknown error")
+                        tb = response.get("traceback")
+                        if tb:
+                            self.logger.error(f"gsv_tts stream synthesize failed: {error}\n{tb}")
+                        raise RuntimeError(f"gsv_tts stream synthesize failed: {error}")
 
-                chunk = response.get("audio_bytes")
-                if chunk:
-                    yield chunk
+                    chunk = response.get("audio_bytes")
+                    if chunk:
+                        yield chunk
 
-                if response.get("is_final"):
-                    break
+                    if response.get("is_final"):
+                        break
+        finally:
+            self._end_request()
 
     def _wait_for_worker_ready(self, timeout: int) -> bool:
         if not self.ready_event:
@@ -528,6 +622,8 @@ class TTSServer:
     def _wait_for_response(self, request_id: str, timeout: int) -> Dict[str, Any]:
         start_time = time.time()
         while (time.time() - start_time) < timeout:
+            if self._stopping or (self.stop_event is not None and self.stop_event.is_set()):
+                raise RuntimeError("gsv_tts worker is stopping")
             if self.server_process and not self.server_process.is_alive():
                 raise RuntimeError("gsv_tts worker exited unexpectedly")
 

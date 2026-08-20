@@ -3,12 +3,28 @@ import * as SecureStore from 'expo-secure-store';
 import { useCallback, useEffect, useState } from 'react';
 import { auth } from '../components/auth';
 import { loadSavedServerUrl, server_config } from '../config/index';
-import { encryptPassword, getPublicKey } from '../utils/crypto';
+import { encryptPassword, getPublicKey, type PublicKeyFailureReason } from '../utils/crypto';
 import { addDebugTrace } from '../utils/debug_trace';
+import { classifyAutoLoginStatus, runAutoLoginWithRetry } from '../utils/auto_login';
 
 const AUTO_LOGIN_KEY = 'auto_login';
 const USERNAME_KEY = 'saved_username';
 const AUTOLOGIN_TOKEN_KEY = 'auto_login_token';
+
+/** 根据加密失败原因生成面向用户的明确提示 */
+function describeEncryptFailure(scope: '登录' | '注册', reason: PublicKeyFailureReason | 'crypto'): string {
+  switch (reason) {
+    case 'network':
+      return `${scope}失败，无法获取加密密钥，请检查网络后重试`;
+    case 'server':
+      return `${scope}失败，服务器返回异常，请稍后重试`;
+    default:
+      return `${scope}失败，无法加密密码`;
+  }
+}
+
+// 自动登录进行中的标记，避免并发调用同时轮换 login_token 导致会话失效
+let autoLoginInFlight: Promise<boolean> | null = null;
 
 export interface AuthState {
   isLoggedIn: boolean;
@@ -22,6 +38,56 @@ export function useAuth() {
     isLoading: true,
     publicKeyLoaded: false,
   });
+
+  /**
+   * 尝试自动登录：瞬时故障（网络错误/5xx/429）按退避重试，
+   * 只有 token 被明确拒绝（401/403）时才判定需要重新登录。
+   * 返回是否登录成功。
+   */
+  const tryAutoLogin = useCallback(async (username: string, token: string): Promise<boolean> => {
+    const outcome = await runAutoLoginWithRetry(async (attemptNumber) => {
+      try {
+        const response = await fetch(`${server_config.BASE_URL}/auth/auto_login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, token }),
+        });
+        if (response.ok) {
+          const result = await response.json();
+          // 获取到新的token后可以更新存储的token
+          await SecureStore.setItemAsync(AUTOLOGIN_TOKEN_KEY, result.login_token);
+          await AsyncStorage.setItem(USERNAME_KEY, result.user_id);
+          auth.username = username;
+          auth.message_token = result.message_token;
+          return 'ok';
+        }
+        const classified = classifyAutoLoginStatus(response.status);
+        if (classified === 'invalid') {
+          addDebugTrace('auth', 'auto login rejected', { status: response.status, attempt: attemptNumber });
+        } else {
+          addDebugTrace('auth', 'auto login transient failure', { status: response.status, attempt: attemptNumber });
+        }
+        return classified;
+      } catch (e) {
+        // 网络波动/超时视为瞬时故障，退避后重试
+        addDebugTrace('auth', 'auto login network failure', { error: String(e), attempt: attemptNumber });
+        return 'transient';
+      }
+    });
+
+    if (outcome !== 'ok') {
+      addDebugTrace('auth', 'auto login failed', { outcome });
+      return false;
+    }
+
+    addDebugTrace('auth', 'auto login ok');
+    setAuthState(prev => ({
+      ...prev,
+      isLoggedIn: true,
+      isLoading: false,
+    }));
+    return true;
+  }, []);
 
   const checkAutoLogin = useCallback(async () => {
     try {
@@ -38,37 +104,25 @@ export function useAuth() {
           }
         }
         if (savedUsername && autoLoginToken) { // 此时可以尝试自动登录
-          const response = await fetch(`${server_config.BASE_URL}/auth/auto_login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              username: savedUsername,
-              token: autoLoginToken,
-            }),
-          });
-
-          if (response.ok) {
-            addDebugTrace('auth', 'auto login ok');
-            const result = await response.json();
-            // 获取到新的token后可以更新存储的token
-            await SecureStore.setItemAsync(AUTOLOGIN_TOKEN_KEY, result.login_token);
-            await AsyncStorage.setItem(USERNAME_KEY, result.user_id);
-            setAuthState(prev => ({
-              ...prev,
-              isLoggedIn: true,
-              isLoading: false,
-            }));
-            auth.username = savedUsername;
-            auth.message_token = result.message_token;
-            return;
+          // 并发保护：重复进入时复用进行中的自动登录，避免重复请求竞争轮换 token
+          if (!autoLoginInFlight) {
+            autoLoginInFlight = tryAutoLogin(savedUsername, autoLoginToken);
+            try {
+              await autoLoginInFlight;
+            } finally {
+              autoLoginInFlight = null;
+            }
+          } else {
+            await autoLoginInFlight;
           }
         }
       }
     } catch (e) {
       addDebugTrace('auth', 'auto login check failed', { error: String(e) });
     }
-    setAuthState(prev => ({ ...prev, isLoading: false }));
-  }, []);
+    // 自动登录成功路径已设置 isLoading=false；失败路径在这里兜底关闭 loading
+    setAuthState(prev => (prev.isLoading ? { ...prev, isLoading: false } : prev));
+  }, [tryAutoLogin]);
 
   const initializeAuth = useCallback(async () => {
     // 加载保存的自定义服务器地址
@@ -105,10 +159,10 @@ export function useAuth() {
       }
 
       // 加密密码
-      const encryptedPassword = await encryptPassword(password);
-      if (!encryptedPassword) {
-        addDebugTrace('auth', 'password encrypt failed');
-        return { success: false, message: '登录失败，无法加密密码' };
+      const encrypted = await encryptPassword(password);
+      if (!encrypted.ok) {
+        addDebugTrace('auth', 'password encrypt failed', { reason: encrypted.reason });
+        return { success: false, message: describeEncryptFailure('登录', encrypted.reason) };
       }
       // 发送登录请求
       const response = await fetch(`${server_config.BASE_URL}/auth/login`, {
@@ -116,7 +170,7 @@ export function useAuth() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username,
-          password: encryptedPassword,
+          password: encrypted.encrypted,
         }),
       });
       const result = await response.json();
@@ -165,10 +219,10 @@ export function useAuth() {
       if (!inviteCode.trim()) return { success: false, message: '邀请码不能为空' };
 
       // 加密密码
-      const encryptedPassword = await encryptPassword(password);
-      if (!encryptedPassword) {
-        addDebugTrace('auth', 'register: password encrypt failed');
-        return { success: false, message: '注册失败，无法加密密码' };
+      const encrypted = await encryptPassword(password);
+      if (!encrypted.ok) {
+        addDebugTrace('auth', 'register: password encrypt failed', { reason: encrypted.reason });
+        return { success: false, message: describeEncryptFailure('注册', encrypted.reason) };
       }
 
       // 发送注册请求
@@ -177,7 +231,7 @@ export function useAuth() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username,
-          password: encryptedPassword,
+          password: encrypted.encrypted,
           invite_code: inviteCode,
         }),
       });

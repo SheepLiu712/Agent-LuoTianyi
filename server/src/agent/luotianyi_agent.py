@@ -124,11 +124,11 @@ class LuoTianyiAgent:
         self,
         sing_attempts: List[str],
     ) -> Tuple[Optional[str], Optional[str]]:
-        return self.build_sing_plan_for_topic(sing_attempts)
+        return await self.build_sing_plan_for_topic(sing_attempts)
 
     def _load_user_expression_context(self, user_id: str) -> UserExpressionContext:
-        description = self.database_manager.get_user_description(user_id) or ""
-        preferences = self.database_manager.get_user_preferences(user_id) or {}
+        description = self.database_manager.conversation_service.get_user_description(user_id) or ""
+        preferences = self.database_manager.conversation_service.get_user_preferences(user_id) or {}
         return UserExpressionContext(
             nickname="你",
             description=description,
@@ -282,9 +282,9 @@ class LuoTianyiAgent:
             conversation_history=conversation_history,
         )
 
-    def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    async def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """供 TopicReplier 调用的唱歌计划接口。返回 song|segment。"""
-        return self.mind.build_sing_plan_for_topic(sing_attempts)
+        return await self.mind.build_sing_plan_for_topic(sing_attempts)
     
     def sing(self, song_name: str, segment: str) -> Optional[bytes]:
         """调用唱歌管理器生成歌曲片段的音频，并返回音频的Base64字符串"""

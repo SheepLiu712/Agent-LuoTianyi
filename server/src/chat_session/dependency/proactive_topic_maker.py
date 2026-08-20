@@ -123,97 +123,72 @@ class ProactiveTopicMaker:
 
         if action.activity_type == ActivityType.REGULAR_LOGIN:
             # 当天第一次登录（非首次安装/首次登录，也不是长时未登录）触发
-            topics_to_add: List[ExtractedTopic] = []
+            topics_to_add: List[tuple[ExtractedTopic, str, str]] = []
+            character_id = getattr(chat_stream, "character_id", "luotianyi")
 
             # 1-4) 统一通过 schedule 模块检索：节日 / citywalk / new_song / 用户重要日期
             #      如果已在 schedule 中提醒过，则 login 时不再重复提示
             try:
                 store = self._get_event_store()
-                character_id = getattr(chat_stream, "character_id", "luotianyi")
                 due = store.get_events_due_for_trigger(character=character_id)
-                for event_dict, trigger_key in due:
+                for event_dict, trigger_key in self._filter_events_for_stream(
+                    due,
+                    user_uuid,
+                    character_id,
+                ):
                     event_id = event_dict.get("id")
-                    if event_id and store.is_notified(event_id, user_uuid, trigger_key, character_id):
+                    if not event_id:
+                        continue
+                    if store.is_notified(event_id, user_uuid, trigger_key, character_id):
                         continue
 
-                    evt_type = event_dict.get("event_type", "")
-
-                    if evt_type == "holiday":
-                        holiday_name = event_dict.get("title", "节日")
-                        topics_to_add.append(
-                            ExtractedTopic(
-                                topic_id=str(uuid4()),
-                                source_messages=[],
-                                topic_content=f"今天是{holiday_name}，闲聊几句并询问用户今天是否有安排。",
-                                memory_attempts=[],
-                                fact_constraints=[],
-                                sing_attempts=[],
-                                is_forced_from_incomplete=True,
-                            )
+                    try:
+                        topic = self._build_login_reminder_topic(event_dict)
+                    except Exception as e:
+                        self.logger.warning(
+                            f"Failed to build login reminder for event {event_id}: {e}"
                         )
-
-                    elif evt_type == "travel":
-                        dest_name = event_dict.get("title", "某个地方")
-                        topic_content = f"洛天依昨天独自前往{dest_name}游玩了，和用户分享一下。"
-                        topics_to_add.append(
-                            ExtractedTopic(
-                                topic_id=str(uuid4()),
-                                source_messages=[],
-                                topic_content=topic_content,
-                                memory_attempts=["/YesterdayCityWalk"],
-                                fact_constraints=[],
-                                sing_attempts=[],
-                                is_forced_from_incomplete=True,
-                            )
-                        )
-
-                    elif evt_type == "new_song":
-                        song_title = event_dict.get("title", "洛天依学了一首新歌")
-                        topic_content = f"{song_title}！"
-                        topics_to_add.append(
-                            ExtractedTopic(
-                                topic_id=str(uuid4()),
-                                source_messages=[],
-                                topic_content=topic_content,
-                                memory_attempts=[],
-                                fact_constraints=[],
-                                sing_attempts=[],
-                                is_forced_from_incomplete=True,
-                            )
-                        )
-
-                    elif evt_type in ("birthday", "anniversary"):
-                        # 个人事件：仅当 target_user_id 匹配当前用户时才派发
-                        is_personal = event_dict.get("is_personal", False)
-                        target = event_dict.get("target_user_id", "")
-                        if is_personal and target and target != user_uuid:
-                            continue  # 不是当前用户的，跳过
-                        name = event_dict.get("title", "重要日子")
-                        topic_content = f"今天是{name}！问用户有没有什么安排或计划，并送上祝福。"
-                        topics_to_add.append(
-                            ExtractedTopic(
-                                topic_id=str(uuid4()),
-                                source_messages=[],
-                                topic_content=topic_content,
-                                memory_attempts=[],
-                                fact_constraints=[],
-                                sing_attempts=[],
-                                is_forced_from_incomplete=True,
-                            )
-                        )
-
-                    # Mark notified so the periodic reminder loop does not repeat it.
-                    if event_id:
-                        store.mark_notified(event_id, user_uuid, trigger_key, character_id)
+                        continue
+                    if topic is not None:
+                        topics_to_add.append((topic, event_id, trigger_key))
             except Exception as e:
-                import traceback
-                traceback.print_exc()
                 self.logger.warning(f"Failed to query schedule events for login: {e}")
 
-            # 合并所有话题为单一 ExtractedTopic
-            merged = self._merge_topics(topics_to_add)
+            claimed_topics: List[tuple[ExtractedTopic, str, str]] = []
+            for topic, event_id, trigger_key in topics_to_add:
+                try:
+                    claimed = store.try_claim_notification(
+                        event_id,
+                        user_uuid,
+                        trigger_key,
+                        character_id,
+                    )
+                except Exception as e:
+                    self.logger.warning(f"Failed to claim login reminder {event_id}: {e}")
+                    continue
+                if claimed:
+                    claimed_topics.append((topic, event_id, trigger_key))
+
+            # 合并本次成功 claim 的话题，避免登录与周期任务并发重复派发。
+            merged = self._merge_topics([topic for topic, _, _ in claimed_topics])
             if merged:
-                await chat_stream.topic_replier.add_topic(merged)
+                try:
+                    await chat_stream.topic_replier.add_topic(merged)
+                except BaseException:
+                    self._release_notification_claims(
+                        store,
+                        claimed_topics,
+                        user_uuid,
+                        character_id,
+                    )
+                    raise
+            elif claimed_topics:
+                self._release_notification_claims(
+                    store,
+                    claimed_topics,
+                    user_uuid,
+                    character_id,
+                )
             return
 
         self.logger.warning(f"Unsupported action type: {action.activity_type}")
@@ -235,7 +210,11 @@ class ProactiveTopicMaker:
                 continue
 
             candidates = []
-            for event_dict, trigger_key in self._filter_events_for_stream(due_events, user_id):
+            for event_dict, trigger_key in self._filter_events_for_stream(
+                due_events,
+                user_id,
+                character_id,
+            ):
                 event_id = event_dict.get("id")
                 if not event_id:
                     continue
@@ -247,26 +226,110 @@ class ProactiveTopicMaker:
 
             event_dict, trigger_key = random.choice(candidates)
             event_id = event_dict.get("id")
-            topic = self._build_reminder_topic(event_dict, trigger_key)
-            await chat_stream.topic_replier.add_topic(topic)
-            store.mark_notified(event_id, user_id, trigger_key, character_id)
+            claimed = False
+            try:
+                topic = self._build_reminder_topic(event_dict, trigger_key)
+                claimed = store.try_claim_notification(
+                    event_id,
+                    user_id,
+                    trigger_key,
+                    character_id,
+                )
+                if not claimed:
+                    continue
+                await chat_stream.topic_replier.add_topic(topic)
+            except asyncio.CancelledError:
+                if claimed:
+                    self._release_notification_claims(
+                        store,
+                        [(None, event_id, trigger_key)],
+                        user_id,
+                        character_id,
+                    )
+                raise
+            except Exception as e:
+                if claimed:
+                    self._release_notification_claims(
+                        store,
+                        [(None, event_id, trigger_key)],
+                        user_id,
+                        character_id,
+                    )
+                self.logger.warning(f"Failed to dispatch proactive reminder {event_id}: {e}")
+                continue
             sent += 1
 
         if sent:
             self.logger.info(f"Dispatched {sent} proactive reminder topic(s)")
         return sent
 
+    def _release_notification_claims(
+        self,
+        store,
+        claimed_topics,
+        user_id: str,
+        character_id: str,
+    ) -> None:
+        for _, event_id, trigger_key in claimed_topics:
+            try:
+                store.release_notification_claim(
+                    event_id,
+                    user_id,
+                    trigger_key,
+                    character_id,
+                )
+            except Exception as e:
+                self.logger.error(f"Failed to release notification claim {event_id}: {e}")
+
     def _filter_events_for_stream(
         self,
         due_events: Iterable[tuple[Dict[str, Any], str]],
         user_id: str,
+        character_id: str,
     ) -> Iterable[tuple[Dict[str, Any], str]]:
+        character_id = character_id or "luotianyi"
         for event_dict, trigger_key in due_events:
+            event_character = event_dict.get("character")
+            if event_character and event_character != character_id:
+                continue
             is_personal = event_dict.get("is_personal", False)
             target_user_id = event_dict.get("target_user_id")
-            if is_personal and target_user_id and target_user_id != user_id:
+            if is_personal and target_user_id != user_id:
                 continue
             yield event_dict, trigger_key
+
+    def _build_login_reminder_topic(
+        self,
+        event_dict: Dict[str, Any],
+    ) -> Optional[ExtractedTopic]:
+        evt_type = event_dict.get("event_type", "")
+        memory_attempts: List[str] = []
+
+        if evt_type == "holiday":
+            holiday_name = event_dict.get("title", "节日")
+            topic_content = f"今天是{holiday_name}，闲聊几句并询问用户今天是否有安排。"
+        elif evt_type == "travel":
+            dest_name = event_dict.get("title", "某个地方")
+            topic_content = f"洛天依昨天独自前往{dest_name}游玩了，和用户分享一下。"
+            memory_attempts = ["/YesterdayCityWalk"]
+        elif evt_type == "new_song":
+            song_title = event_dict.get("title", "洛天依学了一首新歌")
+            topic_content = f"{song_title}！"
+        elif evt_type in ("birthday", "anniversary"):
+            name = event_dict.get("title", "重要日子")
+            topic_content = f"今天是{name}！问用户有没有什么安排或计划，并送上祝福。"
+        else:
+            return None
+
+        return ExtractedTopic(
+            topic_id=str(uuid4()),
+            source_messages=[],
+            topic_content=topic_content,
+            memory_attempts=memory_attempts,
+            fact_constraints=[],
+            sing_attempts=[],
+            is_forced_from_incomplete=True,
+        )
 
     def _build_reminder_topic(self, event_dict: Dict[str, Any], trigger_key: str) -> ExtractedTopic:
         event_type = event_dict.get("event_type", "event")
@@ -374,10 +437,11 @@ class ProactiveTopicMaker:
 
         if time_since_last_login >= self.return_user_threshold_seconds:
             self.logger.debug(f"超过距离上次登录阈值 {self.return_user_threshold_seconds/86400:.2f} 天")
-            return ActionActivity(
-                ActivityType.RETURN_LOGIN,
-                time_since_last_login=time_since_last_login,
-            )
+            # return ActionActivity(
+            #     ActivityType.RETURN_LOGIN,
+            #     time_since_last_login=time_since_last_login,
+            # )
+            return None # 暂时不派发 RETURN_LOGIN，避免用户登录时被打断
 
         now = datetime.now()
         seconds_since_midnight = now.hour * 3600 + now.minute * 60 + now.second

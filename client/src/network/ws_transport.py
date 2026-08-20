@@ -2,6 +2,7 @@ import asyncio
 import json
 import ssl
 import threading
+import time
 from typing import Callable
 
 import websockets
@@ -10,7 +11,30 @@ from .event_types import build_event, normalize_agent_message, normalize_error_m
 from ..utils.logger import get_logger
 from ..utils.tls import create_default_ssl_context
 
+
+WS_CLIENT_CAPABILITIES = ("negative_ack_v1",)
+
+
+def normalize_server_ack(payload: dict) -> dict:
+    """Normalize positive and negative ACK payloads, including legacy ACKs."""
+    if payload.get("ok") is not False:
+        return {"ok": True, "error": None}
+
+    code = payload.get("code") if isinstance(payload.get("code"), str) else "REJECTED"
+    retryable = payload.get("retryable") is True
+    message = payload.get("message") if isinstance(payload.get("message"), str) else code
+    return {
+        "ok": False,
+        "error": f"[{code}] {message}",
+        "code": code,
+        "retryable": retryable,
+        "drop": not retryable,
+    }
+
+
 class WsTransport:
+    READY_TIMEOUT_SECONDS = 8.0
+
     def __init__(
         self,
         base_url: str,
@@ -30,6 +54,7 @@ class WsTransport:
         self._ack_waiter: dict | None = None
         self._agent_message_listener: Callable[[AgentMessage], None] | None = None # 收到的消息发送到哪里
         self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
+        self._system_message_listener: Callable[[str], None] | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -40,6 +65,7 @@ class WsTransport:
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
         self._connected_event = threading.Event()
+        self._auth_rejected_credentials: tuple[str | None, str | None] | None = None
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
         """更新服务器地址，断开当前连接以便自动重连到新地址。"""
@@ -62,7 +88,12 @@ class WsTransport:
         self._stop_event.set()
         self._ready_event.clear()
         self._connected_event.clear()
-        self._notify_ack_failure("WebSocket disconnected")
+        self._notify_ack_failure(
+            "WebSocket stopped",
+            drop=True,
+            code="TRANSPORT_STOPPED",
+            retryable=False,
+        )
         self.logger.debug("WebSocket disconnected")
         if self._loop and self._ws:
             try:
@@ -70,10 +101,16 @@ class WsTransport:
             except Exception:
                 pass
 
-    def set_agent_message_listener(self, agent_message_listener: Callable[[AgentMessage], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
+    def set_agent_message_listener(
+        self,
+        agent_message_listener: Callable[[AgentMessage], None] | None,
+        agent_state_listener: Callable[[bool], None] | None,
+        system_message_listener: Callable[[str], None] | None = None,
+    ) -> None:
         with self._lock:
             self._agent_message_listener = agent_message_listener
             self._agent_state_listener = agent_state_listener
+            self._system_message_listener = system_message_listener
 
     def submit_user_text(
         self,
@@ -162,12 +199,30 @@ class WsTransport:
         request_id = event.client_msg_id
 
         self.start()
-        if not self._ready_event.wait(timeout=8): # 验证是否登录，从而完整地建立WS连接，避免登录后立即发消息导致的鉴权失败问题
+        deadline = time.monotonic() + self.READY_TIMEOUT_SECONDS
+        while not self._ready_event.is_set():
+            if self._is_auth_rejected():
+                return {
+                    "ok": False,
+                    "request_id": request_id,
+                    "error": "WebSocket authentication rejected",
+                    "code": "AUTH_REJECTED",
+                    "retryable": False,
+                    "drop": True,
+                }
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            self._ready_event.wait(timeout=min(0.1, remaining))
+
+        if not self._ready_event.is_set():
             return {
                 "ok": False,
                 "request_id": request_id,
                 "error": "WebSocket auth timeout",
-                "drop": True,
+                "code": "NOT_READY",
+                "retryable": True,
+                "drop": False,
             }
 
         with self._submit_lock:
@@ -187,7 +242,7 @@ class WsTransport:
                     "ok": False,
                     "request_id": request_id,
                     "error": "Send failed",
-                    "drop": True,
+                    "drop": False,
                 }
 
             if not waiter["event"].wait(timeout=max(0.1, ack_timeout)):
@@ -199,7 +254,7 @@ class WsTransport:
                     "ok": False,
                     "request_id": request_id,
                     "error": "Wait server ack timeout",
-                    "drop": True,
+                    "drop": False,
                 }
 
             result = waiter["result"] or {
@@ -248,6 +303,9 @@ class WsTransport:
                     self._ready_event.clear()
 
                     await self._authenticate(ws)
+                    if self._is_auth_rejected():
+                        await ws.close()
+                        return
                     recv_task = asyncio.create_task(self._recv_loop(ws))
                     hb_task = asyncio.create_task(self._heartbeat_loop(ws))
                     reconnect_delay = 2
@@ -264,7 +322,12 @@ class WsTransport:
                             self.logger.error(f"WebSocket inner task exited with error: {exc}")
             except Exception as e:
                 self.logger.error(f"WebSocket connection error: {e}")
-                self._notify_ack_failure("WebSocket disconnected")
+                self._notify_ack_failure(
+                    "WebSocket disconnected",
+                    drop=False,
+                    code="DISCONNECTED",
+                    retryable=True,
+                )
                 self.logger.debug("WebSocket connection closed, retrying...")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 30) # 指数退避，最大30秒
@@ -280,7 +343,13 @@ class WsTransport:
             raw = await asyncio.wait_for(ws.recv(), timeout=5)
             msg = parse_server_message(raw)
             if msg and msg.event_type == WSEventType.AUTH_OK:
+                self._auth_rejected_credentials = None
                 self._ready_event.set()
+                return
+            if msg and msg.event_type == WSEventType.AUTH_ERROR:
+                self._mark_auth_rejected()
+                error_msg = normalize_error_message(msg)
+                self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
                 return
         except Exception as e:
             self.logger.error(f"Error occurred while waiting for auth response: {e}")
@@ -290,9 +359,17 @@ class WsTransport:
         token = self.token_getter()
         if not username or not token:
             self.logger.error("WebSocket auth failed: missing username or token")
+            self._mark_auth_rejected()
             return
 
-        auth_event = build_event(WSEventType.USER_AUTH, payload={"username": username, "token": token})
+        auth_event = build_event(
+            WSEventType.USER_AUTH,
+            payload={
+                "username": username,
+                "token": token,
+                "capabilities": list(WS_CLIENT_CAPABILITIES),
+            },
+        )
         await ws.send(json.dumps(auth_event.__dict__(), ensure_ascii=False))
 
         # 等待 auth_ok
@@ -303,10 +380,19 @@ class WsTransport:
                 continue
             if msg.event_type == WSEventType.AUTH_OK:
                 self.logger.debug("WebSocket auth successful")
+                self._auth_rejected_credentials = None
                 self._ready_event.set()
                 return
-            if msg.event_type in (WSEventType.AUTH_ERROR, WSEventType.SERVER_ERROR):
+            if msg.event_type == WSEventType.AUTH_ERROR:
+                self._mark_auth_rejected()
                 self.logger.error(f"WebSocket auth failed: {msg.payload.get('message')}")
+                error_msg = normalize_error_message(msg)
+                self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
+                return
+            if msg.event_type == WSEventType.SERVER_ERROR:
+                self.logger.error(f"WebSocket auth failed: {msg.payload.get('message')}")
+                error_msg = normalize_error_message(msg)
+                self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
                 return
 
     async def _recv_loop(self, ws) -> None:
@@ -319,7 +405,15 @@ class WsTransport:
 
             if event_type == WSEventType.SERVER_ACK:
                 self.logger.debug(f"Received ack for request_id {msg.reply_to}")
-                self._complete_ack_waiter(ok=True, error=None, reply_to=msg.reply_to)
+                ack = normalize_server_ack(msg.payload)
+                self._complete_ack_waiter(
+                    ok=ack["ok"],
+                    error=ack["error"],
+                    reply_to=msg.reply_to,
+                    drop=ack.get("drop"),
+                    code=ack.get("code"),
+                    retryable=ack.get("retryable"),
+                )
                 continue
 
             if event_type == WSEventType.AGENT_MESSAGE:
@@ -339,24 +433,20 @@ class WsTransport:
 
             if event_type in (WSEventType.SERVER_ERROR, WSEventType.AUTH_ERROR):
                 error_msg = normalize_error_message(msg)
+                is_auth_rejection = event_type == WSEventType.AUTH_ERROR
+                if is_auth_rejection:
+                    self._mark_auth_rejected()
+                    self._ready_event.clear()
                 consumed = self._complete_ack_waiter(
                     ok=False,
                     error=f"[{error_msg.code}] {error_msg.message}",
                     reply_to=error_msg.reply_to,
+                    drop=True if is_auth_rejection else None,
+                    code="AUTH_REJECTED" if is_auth_rejection else None,
+                    retryable=False if is_auth_rejection else None,
                 )
                 if not consumed:
-                    self._emit_agent_message(
-                        AgentMessage(
-                            text=f"[{error_msg.code}] {error_msg.message}",
-                            audio="",
-                            expression=None,
-                            is_final_package=True,
-                            uuid=None,
-                            reply_to=error_msg.reply_to,
-                            display_in_chat=True,
-                            is_ephemeral=False,
-                        )
-                    )
+                    self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
         self.logger.debug("WebSocket receive loop exited")
 
     async def _heartbeat_loop(self, ws) -> None:
@@ -369,7 +459,16 @@ class WsTransport:
             await asyncio.sleep(self.heartbeat_interval)
         self.logger.debug("WebSocket heartbeat loop exited")
 
-    def _complete_ack_waiter(self, ok: bool, error: str | None, reply_to: str | None) -> bool:
+    def _complete_ack_waiter(
+        self,
+        ok: bool,
+        error: str | None,
+        reply_to: str | None,
+        *,
+        drop: bool | None = None,
+        code: str | None = None,
+        retryable: bool | None = None,
+    ) -> bool:
         with self._lock:
             waiter = self._ack_waiter
             if not waiter:
@@ -386,11 +485,24 @@ class WsTransport:
                 "request_id": expected,
                 "error": error,
             }
+            if drop is not None:
+                waiter["result"]["drop"] = drop
+            if code is not None:
+                waiter["result"]["code"] = code
+            if retryable is not None:
+                waiter["result"]["retryable"] = retryable
             waiter["event"].set()
             self.logger.debug(f"ACK waiter completed for request_id {expected}")
             return True
 
-    def _notify_ack_failure(self, error_text: str) -> None:
+    def _notify_ack_failure(
+        self,
+        error_text: str,
+        *,
+        drop: bool = False,
+        code: str = "DISCONNECTED",
+        retryable: bool = True,
+    ) -> None:
         with self._lock:
             waiter = self._ack_waiter
             if not waiter:
@@ -399,8 +511,27 @@ class WsTransport:
                 "ok": False,
                 "request_id": waiter.get("request_id"),
                 "error": error_text,
+                "drop": drop,
+                "code": code,
+                "retryable": retryable,
             }
             waiter["event"].set()
+
+    def _mark_auth_rejected(self) -> None:
+        self._auth_rejected_credentials = (
+            self.username_getter(),
+            self.token_getter(),
+        )
+
+    def _is_auth_rejected(self) -> bool:
+        rejected = self._auth_rejected_credentials
+        if rejected is None:
+            return False
+        current = (self.username_getter(), self.token_getter())
+        if current != rejected:
+            self._auth_rejected_credentials = None
+            return False
+        return True
 
     def _emit_agent_message(self, agent_msg: AgentMessage) -> None:
         if not self._agent_message_listener:
@@ -416,6 +547,14 @@ class WsTransport:
             return
         try:
             self._agent_state_listener(state_msg)
+        except Exception:
+            pass
+
+    def _emit_system_message(self, text: str) -> None:
+        if not self._system_message_listener:
+            return
+        try:
+            self._system_message_listener(text)
         except Exception:
             pass
 

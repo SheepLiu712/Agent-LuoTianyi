@@ -1,15 +1,20 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtGui import QIcon, QPixmap
+from datetime import datetime
+
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QPixmap
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QDialog,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -17,7 +22,8 @@ from PySide6.QtWidgets import (
 
 TIANYI_ICON_PATH = "res/gui/tianyi_icon.png"
 USER_ICON_PATH = "res/gui/user_icon.png"
-ADD_DYNAMIC_ICON_PATH = "res/gui/add_dynamic.png"
+DYNAMIC_PAGE_SIZE = 10
+SCROLLBAR_SINGLE_STEP = 12
 
 
 def _source_label(source_type: str) -> str:
@@ -44,6 +50,20 @@ def _avatar_path(author_type: str) -> str | None:
     if author_type == "user":
         return USER_ICON_PATH
     return None
+
+
+def _format_dynamic_time(value: object) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "-"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parsed.strftime("%Y-%m-%d\n%H:%M")
+    except ValueError:
+        parts = raw.replace("T", " ").split()
+        if len(parts) >= 2:
+            return f"{parts[0]}\n{parts[1][:5]}"
+        return raw
 
 
 class AvatarLabel(QLabel):
@@ -79,6 +99,47 @@ class AvatarLabel(QLabel):
         )
 
 
+class CommentInput(QTextEdit):
+    send_requested = Signal()
+
+    def keyPressEvent(self, event):
+        is_enter = event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        has_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        if is_enter and not has_shift:
+            self.send_requested.emit()
+            return
+        super().keyPressEvent(event)
+
+
+class ElidedLabel(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._full_text = "-"
+        self.setWordWrap(False)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+
+    def set_full_text(self, text: str):
+        self._full_text = str(text or "-")
+        self._update_elided_text()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided_text()
+
+    def _update_elided_text(self):
+        width = self.contentsRect().width()
+        if width <= 0:
+            self.setText(self._full_text)
+            return
+        self.setText(
+            QFontMetrics(self.font()).elidedText(
+                self._full_text,
+                Qt.TextElideMode.ElideRight,
+                width,
+            )
+        )
+
+
 class DynamicListItemWidget(QWidget):
     def __init__(self, dynamic: dict, parent=None):
         super().__init__(parent)
@@ -92,50 +153,101 @@ class DynamicListItemWidget(QWidget):
         text_box.setContentsMargins(0, 0, 0, 0)
         text_box.setSpacing(4)
         header = QLabel(f"{dynamic.get('author_name', '-')}")
-        header.setStyleSheet("font-weight: 700; color: #243447;")
+        header.setStyleSheet("font-weight: 900; font-size: 16px; color: #243447;")
         meta = QLabel(f"{_source_label(str(dynamic.get('source_type', '')))} · {dynamic.get('created_at', '-')}")
         meta.setStyleSheet("font-size: 12px; color: #667481;")
-        preview = str(dynamic.get("content", "")).strip().replace("\n", " ")
-        if len(preview) > 72:
-            preview = preview[:72] + "..."
-        preview_label = QLabel(preview or "-")
-        preview_label.setWordWrap(True)
-        preview_label.setStyleSheet("color: #334155;")
+        preview = str(dynamic.get("content", "")).strip().replace("\n", " ") or "-"
+        preview_label = ElidedLabel()
+        preview_label.set_full_text(preview)
+        preview_label.setStyleSheet("color: #334155; font-size: 14px;")
         text_box.addWidget(header)
         text_box.addWidget(meta)
         text_box.addWidget(preview_label)
         layout.addLayout(text_box, 1)
 
 
+class DynamicPostWidget(QWidget):
+    def __init__(self, dynamic: dict, parent=None):
+        super().__init__(parent)
+        self.setObjectName("dynamicPostCard")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout = QGridLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setHorizontalSpacing(10)
+        layout.setVerticalSpacing(6)
+        layout.addWidget(
+            AvatarLabel(str(dynamic.get("author_type", "")), 36),
+            0,
+            0,
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+        )
+
+        author_name = QLabel(
+            str(dynamic.get("author_name") or _author_label(str(dynamic.get("author_type", ""))))
+        )
+        author_name.setStyleSheet("font-weight: 900; font-size: 16px; color: #243447;")
+        author_name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        author_name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        created_at = QLabel(_format_dynamic_time(dynamic.get("created_at")))
+        created_at.setStyleSheet("font-size: 12px; color: #667481;")
+        created_at.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        created_at.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(10)
+        header.addWidget(author_name, 1)
+        header.addWidget(created_at)
+        layout.addLayout(header, 0, 1)
+
+        content = QLabel(str(dynamic.get("content", "") or "-"))
+        content.setWordWrap(True)
+        content.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        content.setStyleSheet("color: #243447; font-size: 14px;")
+        layout.addWidget(content, 1, 1)
+        layout.setColumnStretch(1, 1)
+
+
 class DynamicCommentWidget(QWidget):
     def __init__(self, comment: dict, parent=None):
         super().__init__(parent)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(10)
-        layout.addWidget(AvatarLabel(str(comment.get("author_type", "")), 30))
+        self.setObjectName("dynamicCommentCard")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout = QGridLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setHorizontalSpacing(10)
+        layout.setVerticalSpacing(6)
+        layout.addWidget(
+            AvatarLabel(str(comment.get("author_type", "")), 30),
+            0,
+            0,
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+        )
 
-        text_box = QVBoxLayout()
-        text_box.setContentsMargins(0, 0, 0, 0)
-        text_box.setSpacing(4)
-        header = QLabel(f"{comment.get('author_name', '-')} · {comment.get('created_at', '-')}")
-        header.setStyleSheet("font-size: 12px; color: #667481;")
+        author_name = QLabel(
+            str(comment.get("author_name") or _author_label(str(comment.get("author_type", ""))))
+        )
+        author_name.setStyleSheet("font-weight: 900; font-size: 16px; color: #243447;")
+        author_name.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        author_name.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        created_at = QLabel(_format_dynamic_time(comment.get("created_at")))
+        created_at.setStyleSheet("font-size: 12px; color: #667481;")
+        created_at.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        created_at.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(10)
+        header.addWidget(author_name, 1)
+        header.addWidget(created_at)
+        layout.addLayout(header, 0, 1)
+
         content = QLabel(str(comment.get("content", "") or "-"))
         content.setWordWrap(True)
-        content.setStyleSheet("color: #243447;")
-        text_box.addWidget(header)
-        text_box.addWidget(content)
-        if comment.get("reply_error") or comment.get("memory_error"):
-            error_lines = []
-            if comment.get("reply_error"):
-                error_lines.append(f"reply_error: {comment.get('reply_error')}")
-            if comment.get("memory_error"):
-                error_lines.append(f"memory_error: {comment.get('memory_error')}")
-            error_label = QLabel("\n".join(error_lines))
-            error_label.setWordWrap(True)
-            error_label.setStyleSheet("font-size: 12px; color: #A35C00;")
-            text_box.addWidget(error_label)
-        layout.addLayout(text_box, 1)
+        content.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        content.setStyleSheet("color: #243447; font-size: 14px;")
+        layout.addWidget(content, 1, 1)
+        layout.setColumnStretch(1, 1)
 
 
 class DynamicEditorDialog(QDialog):
@@ -163,7 +275,7 @@ class DynamicEditorDialog(QDialog):
                 border: 1px solid #D5DEE7;
                 border-radius: 6px;
                 padding: 10px;
-                font-size: 15px;
+                font-size: 14px;
             }
             QPushButton {
                 background: transparent;
@@ -171,6 +283,7 @@ class DynamicEditorDialog(QDialog):
                 border: none;
                 padding: 8px 10px;
                 font-weight: 700;
+                font-size: 16px;
             }
             QPushButton:hover {
                 background: #E6F4FE;
@@ -178,6 +291,9 @@ class DynamicEditorDialog(QDialog):
             }
             QPushButton:disabled {
                 color: #8AA7B8;
+            }
+            QPushButton:focus {
+                outline: none;
             }
             """
         )
@@ -226,6 +342,7 @@ class DynamicEditorDialog(QDialog):
         box = QMessageBox(self)
         box.setWindowTitle("退出编辑")
         box.setText("退出后这条动态不会保存。")
+        box.setStyleSheet("font-size: 14px;")
         keep_button = box.addButton("继续编辑", QMessageBox.ButtonRole.RejectRole)
         exit_button = box.addButton("退出", QMessageBox.ButtonRole.DestructiveRole)
         box.setDefaultButton(keep_button)
@@ -242,6 +359,9 @@ class DynamicsDialog(QDialog):
         self.current_dynamic: dict | None = None
         self.next_cursor: str | None = None
         self.has_more = False
+        self._loading_dynamics = False
+        self._loading_more_dynamics = False
+        self.dynamic_end_item: QListWidgetItem | None = None
         self.add_dynamic_button: QPushButton | None = None
 
         self.setWindowTitle("动态")
@@ -274,6 +394,31 @@ class DynamicsDialog(QDialog):
                 padding: 0;
                 margin: 3px;
             }
+            QWidget#dynamicPostCard {
+                background: #F0F8FF;
+                border: 1px solid #B8DDF3;
+                border-radius: 6px;
+            }
+            QWidget#dynamicCommentCard {
+                background: #FFFFFF;
+                border: 1px solid #D5DEE7;
+                border-radius: 6px;
+            }
+            QPushButton#addDynamicButton,
+            QPushButton#refreshButton,
+            QPushButton#sendCommentButton {
+                background: #66CCFF;
+                color: white;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 16px;
+            }
+            QPushButton#addDynamicButton:hover,
+            QPushButton#refreshButton:hover,
+            QPushButton#sendCommentButton:hover {
+                background: #55BBEE;
+            }
             QPushButton {
                 background: #66CCFF;
                 color: white;
@@ -287,6 +432,9 @@ class DynamicsDialog(QDialog):
             QPushButton:disabled {
                 background: #B8CAD6;
             }
+            QPushButton:focus {
+                outline: none;
+            }
             """
         )
 
@@ -297,15 +445,19 @@ class DynamicsDialog(QDialog):
         header_row = QHBoxLayout()
         title = QLabel("动态")
         title.setObjectName("titleLabel")
-        subtitle = QLabel("发布自己的动态，查看天依和系统的动态，并对选中的动态发表评论。")
-        subtitle.setStyleSheet("color: #667481;")
-        subtitle.setWordWrap(True)
         title_box = QVBoxLayout()
         title_box.addWidget(title)
-        title_box.addWidget(subtitle)
         header_row.addLayout(title_box, 1)
 
+        self.add_dynamic_button = QPushButton("发布动态")
+        self.add_dynamic_button.setObjectName("addDynamicButton")
+        self.add_dynamic_button.setFixedSize(92, 38)
+        self.add_dynamic_button.clicked.connect(self.open_dynamic_editor)
+        header_row.addWidget(self.add_dynamic_button, 0, Qt.AlignmentFlag.AlignTop)
+
         self.refresh_button = QPushButton("刷新")
+        self.refresh_button.setObjectName("refreshButton")
+        self.refresh_button.setFixedSize(65, 38)
         self.refresh_button.clicked.connect(self.load_dynamics)
         header_row.addWidget(self.refresh_button, 0, Qt.AlignmentFlag.AlignTop)
         root.addLayout(header_row)
@@ -321,35 +473,40 @@ class DynamicsDialog(QDialog):
 
         left_panel = QVBoxLayout()
         left_label = QLabel("动态列表")
-        left_label.setStyleSheet("font-weight: 600; color: #243447;")
+        left_label.setStyleSheet("font-weight: 600; font-size: 14px; color: #243447;")
         self.dynamic_list = QListWidget()
+        self.dynamic_list.setObjectName("dynamicList")
+        self.dynamic_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.dynamic_list.verticalScrollBar().setSingleStep(SCROLLBAR_SINGLE_STEP)
         self.dynamic_list.currentItemChanged.connect(self.on_dynamic_selected)
-        self.load_more_button = QPushButton("加载更多动态")
-        self.load_more_button.clicked.connect(self.load_more_dynamics)
+        self.dynamic_list.verticalScrollBar().valueChanged.connect(self._on_dynamic_list_scroll)
         left_panel.addWidget(left_label)
         left_panel.addWidget(self.dynamic_list, 1)
-        left_panel.addWidget(self.load_more_button)
 
         right_panel = QVBoxLayout()
         right_label = QLabel("详情与评论")
-        right_label.setStyleSheet("font-weight: 600; color: #243447;")
-        self.detail_text = QTextEdit()
-        self.detail_text.setReadOnly(True)
-        self.detail_text.setFixedHeight(180)
+        right_label.setStyleSheet("font-weight: 600; font-size: 14px; color: #243447;")
         self.comments_text = QListWidget()
-        self.comment_input = QTextEdit()
+        self.comments_text.setObjectName("dynamicFeedList")
+        self.comments_text.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.comments_text.verticalScrollBar().setSingleStep(SCROLLBAR_SINGLE_STEP)
+        self.comments_text.setSpacing(6)
+        self.comments_text.setUniformItemSizes(False)
+        self.comments_text.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.comment_input = CommentInput()
         self.comment_input.setPlaceholderText("给当前动态写一条评论...")
         self.comment_input.setFixedHeight(84)
+        self.comment_input.send_requested.connect(self.publish_comment)
         comment_action_row = QHBoxLayout()
         self.comment_status = QLabel("请选择一条动态")
         self.comment_status.setStyleSheet("color: #667481;")
         comment_action_row.addWidget(self.comment_status, 1)
         self.comment_button = QPushButton("发送评论")
+        self.comment_button.setObjectName("sendCommentButton")
         self.comment_button.setEnabled(False)
         self.comment_button.clicked.connect(self.publish_comment)
         comment_action_row.addWidget(self.comment_button)
         right_panel.addWidget(right_label)
-        right_panel.addWidget(self.detail_text)
         right_panel.addWidget(self.comments_text, 1)
         right_panel.addWidget(self.comment_input)
         right_panel.addLayout(comment_action_row)
@@ -362,94 +519,135 @@ class DynamicsDialog(QDialog):
         content_row.addWidget(right_widget, 6)
 
         root.addLayout(content_row, 1)
-        self._build_add_dynamic_button()
-
-    def _build_add_dynamic_button(self):
-        self.add_dynamic_button = QPushButton(self)
-        self.add_dynamic_button.setObjectName("addDynamicButton")
-        self.add_dynamic_button.setFixedSize(58, 58)
-        self.add_dynamic_button.setIcon(QIcon(ADD_DYNAMIC_ICON_PATH))
-        self.add_dynamic_button.setIconSize(QSize(58, 58))
-        self.add_dynamic_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.add_dynamic_button.setStyleSheet(
-            """
-            QPushButton#addDynamicButton {
-                background: transparent;
-                border: none;
-                padding: 0;
-            }
-            QPushButton#addDynamicButton:hover {
-                background: transparent;
-            }
-            """
-        )
-        self.add_dynamic_button.clicked.connect(self.open_dynamic_editor)
-        self.add_dynamic_button.raise_()
-        self._position_add_dynamic_button()
-
-    def _position_add_dynamic_button(self):
-        if self.add_dynamic_button is None:
-            return
-        margin = 22
-        self.add_dynamic_button.move(
-            max(margin, self.width() - margin - self.add_dynamic_button.width()),
-            max(margin, self.height() - margin - self.add_dynamic_button.height()),
-        )
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._position_add_dynamic_button()
+        self._update_detail_item_sizes()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._update_detail_item_sizes()
+
+    def _on_dynamic_list_scroll(self, value: int):
+        if self._loading_dynamics or self._loading_more_dynamics:
+            return
+        scrollbar = self.dynamic_list.verticalScrollBar()
+        if value >= scrollbar.maximum():
+            self.load_more_dynamics()
+
+    def _update_dynamic_end_state(self):
+        if self.dynamic_end_item is not None:
+            row = self.dynamic_list.row(self.dynamic_end_item)
+            if row >= 0:
+                self.dynamic_list.takeItem(row)
+            self.dynamic_end_item = None
+
+        if self.has_more:
+            return
+
+        item = QListWidgetItem("已经到底了")
+        item.setFlags(item.flags() & ~(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled))
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setForeground(QColor("#9AA6B2"))
+        item.setSizeHint(QSize(0, 32))
+        self.dynamic_list.addItem(item)
+        self.dynamic_end_item = item
+
+    def _update_detail_item_sizes(self):
+        width = self.comments_text.viewport().width() - 8
+        if width <= 20:
+            return
+        for index in range(self.comments_text.count()):
+            item = self.comments_text.item(index)
+            widget = self.comments_text.itemWidget(item)
+            if widget is None:
+                continue
+            widget.setFixedWidth(width)
+            widget.layout().activate()
+            height = widget.heightForWidth(width)
+            if height <= 0:
+                height = widget.sizeHint().height()
+            item.setSizeHint(QSize(width, height + 6))
+
+    def _add_detail_message(self, message: str):
+        item = QListWidgetItem(message)
+        item.setFlags(item.flags() & ~(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled))
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setForeground(QColor("#9AA6B2"))
+        item.setSizeHint(QSize(0, 40))
+        self.comments_text.addItem(item)
+
+    def _add_post_item(self, dynamic: dict):
+        item = QListWidgetItem()
+        self.comments_text.addItem(item)
+        self.comments_text.setItemWidget(item, DynamicPostWidget(dynamic))
+        self._update_detail_item_sizes()
 
     def load_dynamics(self):
-        payload = self.network_client.get_dynamics(limit=40)
-        if not payload.get("ok", False):
-            self.feed_status.setText(f"动态加载失败：{payload.get('message', '未知错误')}。点击“刷新”重试。")
-            self.feed_status.show()
-            self.load_more_button.setEnabled(False)
-            return False
+        self._loading_dynamics = True
+        try:
+            payload = self.network_client.get_dynamics(limit=DYNAMIC_PAGE_SIZE)
+            if not payload.get("ok", False):
+                self.feed_status.setText(f"动态加载失败：{payload.get('message', '未知错误')}。点击“刷新”重试。")
+                self.feed_status.show()
+                return False
 
-        self.feed_status.hide()
-        items = payload.get("items", [])
-        self.dynamic_list.clear()
-        self.current_dynamic = None
-        self.detail_text.clear()
-        self.comments_text.clear()
-        self.comment_status.setText("请选择一条动态")
-        self.comment_button.setEnabled(False)
-        self.next_cursor = payload.get("next_cursor")
-        self.has_more = bool(payload.get("has_more"))
-        self.load_more_button.setEnabled(self.has_more)
+            self.feed_status.hide()
+            items = payload.get("items", [])
+            self.dynamic_list.clear()
+            self.dynamic_end_item = None
+            self.current_dynamic = None
+            self.comments_text.clear()
+            self.comment_status.setText("请选择一条动态")
+            self.comment_button.setEnabled(False)
+            self.next_cursor = payload.get("next_cursor")
+            self.has_more = bool(payload.get("has_more"))
 
-        for dynamic in items:
-            self._add_dynamic_item(dynamic)
+            for dynamic in items:
+                self._add_dynamic_item(dynamic)
 
-        if self.dynamic_list.count() > 0:
-            self.dynamic_list.setCurrentRow(0)
-        return True
+            self._update_dynamic_end_state()
+            if items:
+                self.dynamic_list.setCurrentRow(0)
+            return True
+        finally:
+            self._loading_dynamics = False
 
     def load_more_dynamics(self):
-        if not self.has_more or not self.next_cursor:
+        if self._loading_dynamics or self._loading_more_dynamics or not self.has_more or not self.next_cursor:
             return
 
-        payload = self.network_client.get_dynamics(limit=40, cursor=self.next_cursor)
-        if not payload.get("ok", False):
-            self.feed_status.setText(f"动态加载失败：{payload.get('message', '未知错误')}。点击“刷新”重试。")
-            self.feed_status.show()
-            return
+        self._loading_more_dynamics = True
+        scrollbar = self.dynamic_list.verticalScrollBar()
+        scroll_value = scrollbar.value()
+        current_item = self.dynamic_list.currentItem()
+        current_row = self.dynamic_list.row(current_item) if current_item is not None else -1
+        try:
+            payload = self.network_client.get_dynamics(limit=DYNAMIC_PAGE_SIZE, cursor=self.next_cursor)
+            if not payload.get("ok", False):
+                self.feed_status.setText(f"动态加载失败：{payload.get('message', '未知错误')}。点击“刷新”重试。")
+                self.feed_status.show()
+                return
 
-        self.feed_status.hide()
-        items = payload.get("items", [])
-        self.next_cursor = payload.get("next_cursor")
-        self.has_more = bool(payload.get("has_more"))
-        self.load_more_button.setEnabled(self.has_more)
+            self.feed_status.hide()
+            items = payload.get("items", [])
+            self.next_cursor = payload.get("next_cursor")
+            self.has_more = bool(payload.get("has_more"))
 
-        for dynamic in items:
-            self._add_dynamic_item(dynamic)
+            for dynamic in items:
+                self._add_dynamic_item(dynamic)
+            self._update_dynamic_end_state()
+
+            if current_row >= 0 and current_row < self.dynamic_list.count():
+                self.dynamic_list.setCurrentRow(current_row)
+            scrollbar.setValue(scroll_value)
+        finally:
+            self._loading_more_dynamics = False
 
     def _add_dynamic_item(self, dynamic: dict):
         item = QListWidgetItem()
         item.setData(Qt.ItemDataRole.UserRole, dynamic)
-        item.setSizeHint(QSize(0, 92))
+        item.setSizeHint(QSize(0, 82))
         self.dynamic_list.addItem(item)
         self.dynamic_list.setItemWidget(item, DynamicListItemWidget(dynamic))
 
@@ -461,7 +659,6 @@ class DynamicsDialog(QDialog):
     def on_dynamic_selected(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None):
         if current is None:
             self.current_dynamic = None
-            self.detail_text.clear()
             self.comments_text.clear()
             self.comment_status.setText("请选择一条动态")
             self.comment_button.setEnabled(False)
@@ -473,51 +670,39 @@ class DynamicsDialog(QDialog):
         self.load_comments(dynamic)
 
     def render_dynamic_detail(self, dynamic: dict):
-        detail_lines = [
-            f"id: {dynamic.get('id', '-')}",
-            f"author: {dynamic.get('author_name', '-')} ({dynamic.get('author_type', '-')})",
-            f"owner_user_id: {dynamic.get('owner_user_id') or '-'}",
-            f"source_type: {dynamic.get('source_type', '-')}",
-            f"visibility: {dynamic.get('visibility', '-')}",
-            f"created_at: {dynamic.get('created_at', '-')}",
-            f"reply_status: {dynamic.get('reply_status', '-')}",
-            f"memory_status: {dynamic.get('memory_status', '-')}",
-            "",
-            str(dynamic.get("content", "") or "-"),
-        ]
-        if dynamic.get("reply_error"):
-            detail_lines.extend(["", f"reply_error: {dynamic.get('reply_error')}"])
-        if dynamic.get("memory_error"):
-            detail_lines.extend(["", f"memory_error: {dynamic.get('memory_error')}"])
-        self.detail_text.setPlainText("\n".join(detail_lines))
+        self.comments_text.clear()
+        self._add_post_item(dynamic)
         allow_comment = bool(dynamic.get("allow_comment", False))
         self.comment_button.setEnabled(allow_comment)
         self.comment_status.setText("可评论" if allow_comment else "当前动态不支持评论")
 
+    def _clear_comment_items(self):
+        while self.comments_text.count() > 1:
+            self.comments_text.takeItem(1)
+
     def load_comments(self, dynamic: dict):
         dynamic_id = dynamic.get("id")
         if not dynamic_id:
-            self.comments_text.clear()
             return
         payload = self.network_client.get_dynamic_comments(dynamic_id, limit=200)
         if not payload.get("ok", False):
-            self.comments_text.clear()
-            item = QListWidgetItem(f"评论加载失败：{payload.get('message', '未知错误')}\n再次点击这条动态，或点击“刷新”后重试。")
-            self.comments_text.addItem(item)
+            self._clear_comment_items()
+            self._add_detail_message(f"评论加载失败：{payload.get('message', '未知错误')}\n再次点击这条动态，或点击“刷新”后重试。")
             return
         rows = payload.get("items", [])
-        self.comments_text.clear()
+        self._clear_comment_items()
         if not rows:
-            self.comments_text.addItem(QListWidgetItem("还没有评论。"))
+            self._add_detail_message("还没有评论。")
             return
         for comment in rows:
             self._add_comment_item(comment)
+        self._add_detail_message("没有更多评论了。")
 
     def _add_comment_item(self, comment: dict):
         item = QListWidgetItem()
-        item.setSizeHint(QSize(0, 74))
         self.comments_text.addItem(item)
         self.comments_text.setItemWidget(item, DynamicCommentWidget(comment))
+        self._update_detail_item_sizes()
 
     def open_dynamic_editor(self):
         editor = DynamicEditorDialog(self.publish_dynamic, self)

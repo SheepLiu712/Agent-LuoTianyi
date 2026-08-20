@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ChatMessage } from "../types/chat";
 import { server_config } from "../config/index";
 import { getHistory } from "../utils/getHistory";
@@ -7,6 +7,9 @@ import { addDebugTrace } from "../utils/debug_trace";
 export function useHistoryLogic(addHistoryMessage: (messages: ChatMessage[]) => void) {
     const [history_start_index, setHistoryStartIndex] = useState(-1); 
     const [historyLoading, setHistoryLoading] = useState(false);
+    // ref 守卫：state 更新是异步的，同一帧内多次 onEndReached 会穿透 historyLoading 检查，
+    // 导致并发请求、消息重复追加。用 ref 同步拦截并发调用。
+    const loadingRef = useRef(false);
 
     const loadHistory = useCallback(async (
         username: string,
@@ -14,10 +17,11 @@ export function useHistoryLogic(addHistoryMessage: (messages: ChatMessage[]) => 
         count: number = server_config.LOAD_HISTORY_COUNT 
     ): Promise<void> => {
         // 如果正在加载或已经到头，则直接返回
-        if (historyLoading || history_start_index === 0) {
+        if (loadingRef.current || historyLoading || history_start_index === 0) {
             return;
         }
 
+        loadingRef.current = true;
         setHistoryLoading(true); 
         try {
             // 获取历史记录数据
@@ -31,6 +35,7 @@ export function useHistoryLogic(addHistoryMessage: (messages: ChatMessage[]) => 
         } catch (error) {
             addDebugTrace('history', 'load error', { error: String(error) });
         } finally {
+            loadingRef.current = false;
             setHistoryLoading(false); 
         }
     }, [historyLoading, history_start_index, addHistoryMessage]); // 核心依赖项

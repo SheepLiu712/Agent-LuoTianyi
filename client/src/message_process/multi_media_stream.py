@@ -88,6 +88,9 @@ class MultiMediaStream:
         self._volume_percent = 70
         self._volume_gain = self._percent_to_gain(self._volume_percent)
         self._state_lock = threading.Lock()
+        # 从收到第一块服务端音频起，到该句话实际播放完毕为止保持为 True。
+        # 本地消息回放只能在这个窗口之外启动。
+        self._server_audio_active = False
 
     @staticmethod
     def _percent_to_gain(percent: int) -> float:
@@ -121,21 +124,33 @@ class MultiMediaStream:
         audio_data = decode_from_base64(audio_data_base64)
         if not audio_data:
             return
-        # Server audio has higher priority than local replay.
-        self._interrupt_local_playback()
+        self.reserve_server_audio()
         self._append_audio_stream(audio_data)
 
+    def reserve_server_audio(self):
+        """在网络音频入播放队列前立即抢占本地消息回放。"""
+        # 先占用播放权，再停止本地回放，避免点击回放与首个服务端分片并发时
+        # 本地线程在抢占过程里重新启动。
+        with self._state_lock:
+            self._server_audio_active = True
+        self._interrupt_local_playback()
+
     def feed_local_wav(self, wav_path: str, conv_uuid: str = "") -> bool:
-        if self._mouth_thread is not None:
-            return False
         if not wav_path or not os.path.exists(wav_path):
             return False
 
         with self._state_lock:
+            if self._server_audio_active or self._mouth_thread is not None:
+                return False
             self._local_play_request_id += 1
             request_id = self._local_play_request_id
-            self._stop_local_playback_locked(join_timeout=0.4)
 
+        self._stop_local_playback(join_timeout=0.4)
+
+        with self._state_lock:
+            # 等待旧回放停止期间可能恰好收到服务端音频，此时服务端优先。
+            if self._server_audio_active or request_id != self._local_play_request_id:
+                return False
             self._local_stop_event = threading.Event()
             self._local_play_thread = threading.Thread(
                 target=self._play_local_wav_worker,
@@ -148,8 +163,8 @@ class MultiMediaStream:
     def stop_local_wav(self) -> bool:
         with self._state_lock:
             self._local_play_request_id += 1
-            self._stop_local_playback_locked(join_timeout=0.4)
-            return True
+        self._stop_local_playback(join_timeout=0.4)
+        return True
 
     def is_busy(self) -> bool:
         if self._mouth_thread and self._mouth_thread.is_alive():
@@ -157,6 +172,11 @@ class MultiMediaStream:
         if self._local_play_thread and self._local_play_thread.is_alive():
             return True
         return False
+
+    def is_server_audio_active(self) -> bool:
+        """Return whether online server audio currently owns playback priority."""
+        with self._state_lock:
+            return self._server_audio_active
 
     def _play_local_wav_worker(self, wav_path: str, conv_uuid: str, request_id: int, stop_event: threading.Event):
         pa = None
@@ -222,24 +242,30 @@ class MultiMediaStream:
             self._emit_local_playback_state(state, conv_uuid)
 
     def _interrupt_local_playback(self):
-        with self._state_lock:
-            self._stop_local_playback_locked(join_timeout=0.2)
+        self._stop_local_playback(join_timeout=0.4)
 
-    def _stop_local_playback_locked(self, join_timeout: float):
-        if self._local_stop_event:
-            self._local_stop_event.set()
+    def _stop_local_playback(self, join_timeout: float):
+        with self._state_lock:
+            stop_event = self._local_stop_event
+            thread = self._local_play_thread
+            if stop_event:
+                stop_event.set()
 
         current_thread = threading.current_thread()
-        thread = self._local_play_thread
         if thread and thread.is_alive() and thread is not current_thread:
             thread.join(timeout=join_timeout)
 
-        if thread and not thread.is_alive():
-            self._local_play_thread = None
-            self._local_stop_event = None
+        with self._state_lock:
+            if self._local_play_thread is thread and thread and not thread.is_alive():
+                self._local_play_thread = None
+                self._local_stop_event = None
 
     def finish_one_sentense(self):
-        self._close_audio_stream(wait_audio_finish=True)
+        try:
+            self._close_audio_stream(wait_audio_finish=True)
+        finally:
+            with self._state_lock:
+                self._server_audio_active = False
 
 
     def _open_audio_stream_if_needed(self):

@@ -58,7 +58,7 @@ def test_dynamic_capability_accepts_nested_module_config_and_degrades_on_invalid
         }
     )
 
-    capability.create_dynamic_composer_module(FakeLLMService())
+    capability.create_llm_module(FakeLLMService())
 
     assert registered[0] == (
         "dynamic_composer",
@@ -86,7 +86,7 @@ def test_dynamic_capability_accepts_nested_module_config_and_degrades_on_invalid
         def register_llm_module(self, name, config):
             raise ValueError("LLM接口未找到")
 
-    bad_capability.create_dynamic_composer_module(RejectingLLMService())
+    bad_capability.create_llm_module(RejectingLLMService())
     assert bad_capability._dynamic_composer is None
 
 
@@ -111,9 +111,9 @@ def _add_invite_code(db_manager: DatabaseManager, code: str) -> None:
 
 
 def _register_and_login(db_manager: DatabaseManager, username: str, invite_code: str) -> dict:
-    ok, message = db_manager.register_user(username, "password123", invite_code)
+    ok, message = db_manager.credential_service.register_user(username, "password123", invite_code)
     assert ok is True, message
-    result = db_manager.authenticate_password_login(username, "password123")
+    result = db_manager.credential_service.authenticate_password_login(username, "password123")
     assert result is not None
     return result
 
@@ -602,6 +602,53 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
     assert feed["items"][0]["content"]  # 内容不为空
 
 
+def test_learned_song_dynamic_is_idempotent_by_character_and_song(
+    db_manager: DatabaseManager,
+):
+    _add_invite_code(db_manager, "INVITE6B")
+    user = _register_and_login(db_manager, "songuser2", "INVITE6B")
+    dynamic_capability = DynamicCapability()
+    dynamic_capability.wire_dependencies(database_manager=db_manager)
+    compose_calls = []
+
+    async def fake_compose(**kwargs):
+        compose_calls.append(kwargs["song_name"])
+        return f"学会了《{kwargs['song_name']}》"
+
+    dynamic_capability.compose_learned_song_dynamic_content = fake_compose
+
+    first = asyncio.run(
+        dynamic_capability.publish_learned_song_dynamic(
+            character_id="luotianyi",
+            character_name="洛天依",
+            character_persona="",
+            speaking_style="",
+            song_name="告死鸟",
+        )
+    )
+    second = asyncio.run(
+        dynamic_capability.publish_learned_song_dynamic(
+            character_id="luotianyi",
+            character_name="洛天依",
+            character_persona="",
+            speaking_style="",
+            song_name="告死鸟",
+        )
+    )
+
+    assert first["dynamic_id"] == second["dynamic_id"]
+    assert first["created"] is True
+    assert second["created"] is False
+    assert compose_calls == ["告死鸟"]
+    feed = db_manager.dynamic_store.list_dynamics_for_user(user["user_uuid"])
+    learned_items = [
+        item
+        for item in feed["items"]
+        if item["source_type"] == "song_learned" and item["source_id"] == "告死鸟"
+    ]
+    assert len(learned_items) == 1
+
+
 def test_dynamic_interaction_task_replies_and_updates_status(db_manager: DatabaseManager):
     _add_invite_code(db_manager, "INVITE7")
     auth = _register_and_login(db_manager, "replyuser", "INVITE7")
@@ -670,8 +717,8 @@ def test_dynamic_pending_reply_items_include_thread_comments(db_manager: Databas
     _add_invite_code(db_manager, "INVITE_THREAD")
     auth = _register_and_login(db_manager, "threaduser", "INVITE_THREAD")
 
-    db_manager.save_user_preferences(auth["user_uuid"], {"relationship": "朋友"})
-    db_manager.update_user_description(auth["user_uuid"], "用户最近在记录自己的日常状态。")
+    db_manager.conversation_service.save_user_preferences(auth["user_uuid"], {"relationship": "朋友"})
+    db_manager.conversation_service.update_user_description(auth["user_uuid"], "用户最近在记录自己的日常状态。")
     ok, _, created = db_manager.dynamic_store.create_dynamic(
         author_type="user",
         author_id=auth["user_uuid"],
@@ -730,6 +777,8 @@ def test_dynamic_replier_passes_thread_comments_to_llm():
 
     dynamic_capability.replier._reply_llm = FakeLLM()
     item = {
+        "author_type": "user",
+        "author_name": "Dpon",
         "username": "Dpon",
         "user_description": "用户喜欢散步。",
         "preferences": {"relationship": "朋友"},
@@ -743,8 +792,63 @@ def test_dynamic_replier_passes_thread_comments_to_llm():
     reply = asyncio.run(dynamic_capability.replier.generate_reply_for_post(item, character_name="洛天依"))
 
     assert "海边的风" in reply
-    assert "海边听起来很舒服" in captured["thread_comments"]
-    assert "但是风很大" in captured["thread_comments"]
+    assert "海边听起来很舒服" in captured["message_list"]
+    assert "但是风很大" in captured["message_list"]
+    assert "发布者类型：用户" in captured["message_list"]
+    assert "发布者类型：角色" in captured["message_list"]
+    assert "发布者：天依" in captured["message_list"]
+    assert "消息 1" in captured["target_message"]
+
+
+def test_dynamic_replier_targets_comment_in_sender_labeled_message_list():
+    captured = {}
+    dynamic_capability = DynamicCapability()
+
+    class FakeLLM:
+        async def generate_response(self, **kwargs):
+            captured.update(kwargs)
+            return '{"should_reply": true, "reply": "我看到你的补充啦。"}'
+
+    dynamic_capability.replier._reply_llm = FakeLLM()
+    item = {
+        "id": "comment-user-2",
+        "author_type": "user",
+        "author_name": "Dpon",
+        "username": "Dpon",
+        "content": "我也想去看看。",
+        "dynamic": {
+            "id": "dynamic-agent-1",
+            "author_type": "agent",
+            "author_name": "洛天依",
+            "content": "今天去海边散步啦。",
+        },
+        "thread_comments": [
+            {
+                "id": "comment-agent-1",
+                "author_type": "agent",
+                "author_name": "洛天依",
+                "content": "海风吹起来很舒服呢。",
+            },
+            {
+                "id": "comment-user-2",
+                "author_type": "user",
+                "author_name": "Dpon",
+                "content": "我也想去看看。",
+            },
+        ],
+    }
+
+    decision = asyncio.run(dynamic_capability.replier.generate_reply_for_comment(item, character_name="洛天依"))
+
+    assert decision == {"should_reply": True, "reply": "我看到你的补充啦。"}
+    message_list = captured["message_list"]
+    assert "发布者类型：角色" in message_list
+    assert "发布者类型：用户" in message_list
+    assert "发布者：洛天依" in message_list
+    assert "发布者：Dpon" in message_list
+    assert "内容：今天去海边散步啦" in message_list
+    assert "内容：我也想去看看" in captured["target_message"]
+    assert "消息 3" in captured["target_message"]
 
 
 def test_dynamic_interaction_task_processes_memory_status(db_manager: DatabaseManager):

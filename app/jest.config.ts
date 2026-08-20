@@ -10,6 +10,7 @@ const config: Config = {
   },
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
+    '\\.(png|jpg|jpeg|gif|webp|svg)$': '<rootDir>/jest.assetMock.js',
   },
   setupFiles: ['<rootDir>/jest.setup.ts'],
 };

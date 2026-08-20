@@ -46,6 +46,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const live2dHeight = screenHeight * 0.4;
   const drawerWidth = useMemo(() => Math.round(screenWidth * 0.38), [screenWidth]);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [inputHeight, setInputHeight] = useState(40);
   const [thinkingFrame, setThinkingFrame] = useState(0);
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
@@ -401,6 +402,17 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
               }
             }}
             onEndReachedThreshold={0.1}
+            onScrollToIndexFailed={(info) => {
+              // scrollToIndex 目标未渲染时的兜底：按平均行高估算偏移量，避免闪退
+              addDebugTrace('history', 'scrollToIndex failed', {
+                index: info.index,
+                averageItemLength: info.averageItemLength,
+              });
+              flatListRef.current?.scrollToOffset({
+                offset: info.averageItemLength * info.index,
+                animated: false,
+              });
+            }}
             ListFooterComponent={renderFooter}
             style={[styles.chatList, { backgroundColor: theme.chatList }]}
             contentContainerStyle={styles.chatListContent}
@@ -416,12 +428,20 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
           ]}
         >
           <TextInput
-            style={[styles.inputField, { backgroundColor: theme.inputBackground, color: theme.inputText }]}
+            style={[
+              styles.inputField,
+              {
+                backgroundColor: theme.inputBackground,
+                color: theme.inputText,
+                height: Math.min(Math.max(40, inputHeight), 120),
+              },
+            ]}
             placeholder="给天依发消息..."
             placeholderTextColor={theme.placeholder}
             value={inputText}
             onChangeText={setInputText}
-            multiline={false}
+            multiline={true}
+            onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
           />
 
           <TouchableOpacity style={styles.iconButton} onPress={handleSendImage} disabled={!canSendImage}>
@@ -603,11 +623,14 @@ const styles = StyleSheet.create({
   },
   inputField: {
     flex: 1,
-    height: 40,
+    minHeight: 40,
     backgroundColor: '#ffffff',
     borderRadius: 20,
     paddingHorizontal: 15,
     marginRight: 10,
+    paddingTop: 10,
+    paddingBottom: 10,
+    textAlignVertical: 'top',
   },
   iconButton: {
     padding: 5,

@@ -6,8 +6,10 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from src.world.bili_event_updater.task import BiliEventUpdateTask
 from src.world.citywalk.task import CitywalkTask
 from src.world.dynamic_interaction.task import DynamicInteractionTask
+from src.world.diary.task import DiaryTask
 from src.world.event_cleanup_task import ExpiredEventCleanupTask
 from src.world.get_new_songs.task import VCPediaNewSongTask
+from src.world.learn_sing_songs.qq_music_credential_refresh_task import QQMusicCredentialRefreshTask
 from src.world.learn_sing_songs.task import LearnSingSongsTask
 from src.world.proactive_topic_task import ProactiveTopicCheckTask
 from src.world.world_clock import WorldClock
@@ -34,10 +36,12 @@ class WorldRuntime:
         self.citywalk_tasks: List[CitywalkTask] = []
         self.learn_sing_songs_task: LearnSingSongsTask | None = None
         self.learn_sing_songs_tasks: List[LearnSingSongsTask] = []
+        self.qq_music_credential_refresh_task: QQMusicCredentialRefreshTask | None = None
         self.vcpedia_new_song_task: VCPediaNewSongTask | None = None
         self.bili_event_update_task: BiliEventUpdateTask | None = None
         self.bili_event_update_tasks: List[BiliEventUpdateTask] = []
         self.dynamic_interaction_task: DynamicInteractionTask | None = None
+        self.diary_tasks: List[DiaryTask] = []
         self.proactive_topic_check_task: ProactiveTopicCheckTask | None = None
         self.expired_event_cleanup_task: ExpiredEventCleanupTask | None = None
         self.tasks: List["WorldTask"] = []
@@ -65,6 +69,14 @@ class WorldRuntime:
         self.learn_sing_songs_task = (
             self.learn_sing_songs_tasks[0] if self.learn_sing_songs_tasks else None
         )
+        self.qq_music_credential_refresh_task = (
+            QQMusicCredentialRefreshTask(
+                self.learn_sing_songs_tasks,
+                self.config.get("qq_music_credential_refresh", {}),
+            )
+            if self.learn_sing_songs_tasks and self._task_enabled("qq_music_credential_refresh")
+            else None
+        )
         self.vcpedia_new_song_task = VCPediaNewSongTask(self.config.get("song_knowledge", {}))
         self.bili_event_update_tasks = self._build_bili_event_update_tasks()
         self.bili_event_update_task = self.bili_event_update_tasks[0] if self.bili_event_update_tasks else None
@@ -75,6 +87,7 @@ class WorldRuntime:
             if self._task_enabled("dynamic_interaction")
             else None
         )
+        self.diary_tasks = self._build_diary_tasks()
         self.proactive_topic_check_task = ProactiveTopicCheckTask(
             self.config.get("proactive_topic_check", {})
         )
@@ -85,9 +98,11 @@ class WorldRuntime:
         self.tasks: List["WorldTask"] = [
             *self.citywalk_tasks,
             *self.learn_sing_songs_tasks,
+            self.qq_music_credential_refresh_task,
             self.vcpedia_new_song_task,
             *self.bili_event_update_tasks,
             self.dynamic_interaction_task,
+            *self.diary_tasks,
             self.proactive_topic_check_task,
             self.expired_event_cleanup_task,
         ]
@@ -219,6 +234,17 @@ class WorldRuntime:
             if isinstance(bili_uids, dict):
                 task_config["bilibili_uids"] = {character_id: bili_uids[character_id]}
             tasks.append(BiliEventUpdateTask(task_config, character_id=character_id))
+        return tasks
+
+    def _build_diary_tasks(self) -> List[DiaryTask]:
+        if not self._task_enabled("diary"):
+            return []
+        tasks: list[DiaryTask] = []
+        for character_id in self._character_ids():
+            config = self._character_task_config("diary", character_id)
+            if not config.get("enabled", True):
+                continue
+            tasks.append(DiaryTask(config, character_id=character_id))
         return tasks
 
     def _character_ids(self) -> list[str]:

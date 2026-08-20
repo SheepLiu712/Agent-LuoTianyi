@@ -31,7 +31,7 @@ class DynamicReplier:
         self._reply_llm: Optional["LLMModule"] = None
         self._character_name: str = "洛天依"
 
-    def create_reply_llm_module(self, llm_service: "LLMService") -> None:
+    def create_llm_module(self, llm_service: "LLMService") -> None:
         """从 config 注册 dynamic reply LLM 模块。"""
         llm_cfg = self.config.get("llm_module")
         if not llm_cfg:
@@ -74,16 +74,23 @@ class DynamicReplier:
         Returns:
             回复文本；LLM 不可用时返回兜底文案
         """
+        character_name = character_name or self._character_name
+        message_list, target_message = self._build_message_context(
+            dynamic=item,
+            comments=item.get("thread_comments") or [],
+            target=item,
+            character_name=character_name,
+            target_is_dynamic=True,
+        )
         decision = await self._ask_reply_llm(
             item_type="dynamic_post",
             must_reply=True,
-            character_name=character_name or self._character_name,
+            character_name=character_name,
             user_name=item.get("username") or "用户",
             user_description=item.get("user_description") or "",
             preference_context=self._build_preference_context(item.get("preferences") or {}),
-            dynamic_content=item.get("content") or "",
-            comment_content="",
-            thread_comments=self._format_thread_comments(item.get("thread_comments") or []),
+            message_list=message_list,
+            target_message=target_message,
         )
         reply = str(decision.get("reply") or "").strip()
         if reply:
@@ -100,16 +107,22 @@ class DynamicReplier:
             {"should_reply": bool, "reply": str}
         """
         dynamic = item.get("dynamic") or {}
+        character_name = character_name or self._character_name
+        message_list, target_message = self._build_message_context(
+            dynamic=dynamic,
+            comments=item.get("thread_comments") or [],
+            target=item,
+            character_name=character_name,
+        )
         decision = await self._ask_reply_llm(
             item_type="dynamic_comment",
             must_reply=False,
-            character_name=character_name or self._character_name,
+            character_name=character_name,
             user_name=item.get("username") or "用户",
             user_description=item.get("user_description") or "",
             preference_context=self._build_preference_context(item.get("preferences") or {}),
-            dynamic_content=dynamic.get("content") or "",
-            comment_content=item.get("content") or "",
-            thread_comments=self._format_thread_comments(item.get("thread_comments") or []),
+            message_list=message_list,
+            target_message=target_message,
         )
         reply = str(decision.get("reply") or "").strip()
         should_reply = bool(decision.get("should_reply"))
@@ -128,9 +141,8 @@ class DynamicReplier:
         user_name: str,
         user_description: str,
         preference_context: str,
-        dynamic_content: str,
-        comment_content: str,
-        thread_comments: str,
+        message_list: str,
+        target_message: str,
     ) -> dict[str, Any]:
         if self._reply_llm is None:
             return {"should_reply": must_reply, "reply": "" if not must_reply else "谢谢你的分享~"}
@@ -141,9 +153,8 @@ class DynamicReplier:
             preference_context=preference_context,
             item_type=item_type,
             must_reply="true" if must_reply else "false",
-            dynamic_content=dynamic_content,
-            comment_content=comment_content,
-            thread_comments=thread_comments,
+            message_list=message_list,
+            target_message=target_message,
         )
         return self._parse_reply_json(response, must_reply=must_reply)
 
@@ -200,25 +211,59 @@ class DynamicReplier:
             parts.append(f"用户补充的上下文：{str(preferences['custom_context']).replace('我', '用户')}")
         return "；".join(parts)
 
+    @classmethod
+    def _build_message_context(
+        cls,
+        *,
+        dynamic: dict[str, Any],
+        comments: list[dict[str, Any]],
+        target: dict[str, Any],
+        character_name: str,
+        target_is_dynamic: bool = False,
+    ) -> tuple[str, str]:
+        """将原动态和评论统一整理为消息列表，并标出本次回复目标。"""
+        messages: list[dict[str, Any]] = [dynamic]
+        if isinstance(comments, list):
+            messages.extend(comment for comment in comments if isinstance(comment, dict))
+
+        formatted_messages = [
+            cls._format_message(message, index, character_name)
+            for index, message in enumerate(messages, start=1)
+        ]
+        message_list = "\n\n".join(formatted_messages) or "无"
+
+        target_index: int | None = 1 if target_is_dynamic else None
+        if target_index is None:
+            target_id = str(target.get("id") or "").strip()
+            for index, message in enumerate(messages, start=1):
+                if target_id and str(message.get("id") or "").strip() == target_id:
+                    target_index = index
+                    break
+                if message is target:
+                    target_index = index
+                    break
+
+        if target_index is not None:
+            target_message = cls._format_message(messages[target_index - 1], target_index, character_name)
+        else:
+            target_message = "目标消息：\n" + cls._format_message(target, "目标", character_name)
+        return message_list, target_message
+
     @staticmethod
-    def _format_thread_comments(comments: list[dict[str, Any]]) -> str:
-        """格式化当前动态下已有评论，供角色理解上下文。"""
-        if not isinstance(comments, list) or not comments:
-            return ""
-        lines: list[str] = []
-        for idx, comment in enumerate(comments[-30:], start=1):
-            if not isinstance(comment, dict):
-                continue
-            author_type = str(comment.get("author_type") or "")
-            author_name = str(comment.get("author_name") or "").strip()
-            if not author_name:
-                author_name = "天依" if author_type == "agent" else "用户"
-            content = str(comment.get("content") or "").strip()
-            if not content:
-                continue
-            created_at = str(comment.get("created_at") or "").strip()
-            prefix = f"{idx}. {author_name}"
-            if created_at:
-                prefix += f"（{created_at}）"
-            lines.append(f"{prefix}：{content}")
-        return "\n".join(lines)
+    def _format_message(message: dict[str, Any], index: int | str, character_name: str) -> str:
+        author_type = str(message.get("author_type") or "user").strip()
+        author_role = {
+            "agent": "角色",
+            "user": "用户",
+            "system": "系统",
+        }.get(author_type, author_type or "未知")
+        author_name = str(message.get("author_name") or message.get("username") or "").strip()
+        if not author_name:
+            author_name = character_name if author_type == "agent" else author_role
+        content = str(message.get("content") or "").strip()
+        return (
+            f"消息 {index}：\n"
+            f"发布者类型：{author_role}\n"
+            f"发布者：{author_name}\n"
+            f"内容：{content}"
+        )

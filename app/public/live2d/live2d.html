@@ -344,6 +344,10 @@
     let nextStartTime = 0;
     let isWaitingForEnd = false;
     let isPlaying = false;
+    // 当前已排队的音频源，用于停止/清空队列（音频播放互斥，Bug#9）
+    const activeSources = [];
+    // 最后一段已排队的音频源，用于精确感知播放结束（Bug#7）
+    let lastSource = null;
 
     window.feedAudioChunk = async (base64Audio, isFinal) => {
       if (audioCtx.state === 'suspended') await audioCtx.resume();
@@ -398,6 +402,17 @@
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffer;
         source.connect(analyser);
+        // 统一 onended：从队列移除 + 若为最后一段则通知播放结束（合并 Bug#7/Bug#9 的 onended 逻辑，避免互相覆盖）
+        source.onended = () => {
+          const idx = activeSources.indexOf(source);
+          if (idx >= 0) {
+            activeSources.splice(idx, 1);
+          }
+          if (lastSource === source) {
+            notifyAudioFinished();
+          }
+        };
+        activeSources.push(source);
         
         const currentTime = audioCtx.currentTime;
         // 留 50ms 缓冲，防止高频小包导致破音/队列下溢
@@ -407,6 +422,7 @@
         
         source.start(nextStartTime);
         nextStartTime += audioBuffer.duration;
+        lastSource = source;
       }
 
       // 6. 处理结束标志
@@ -416,22 +432,52 @@
       }
     };
 
-    // 轮询检测是否播放完毕
+    // 停止并清空所有已排队的音频（用于音频播放互斥）
+    window.stopServerAudio = () => {
+      for (const src of activeSources.slice()) {
+        try {
+          src.stop();
+        } catch (e) {
+          // 忽略已结束或未启动的源
+        }
+      }
+      activeSources.length = 0;
+      nextStartTime = 0;
+      isWaitingForEnd = false;
+      isPlaying = false;
+      lastSource = null;
+      // 通知 RN 服务端音频已停止（用于同步 serverAudioPlaying 状态）
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'audio_stopped' }));
+      }
+    };
+
+    // 检测是否播放完毕：主信号是最后一段音频的 onended（精确、不受 rAF 节流影响，
+    // 页面被节流/切后台时 rAF 会停摆，导致 audio_finished 丢失、回复中的后续句子迟迟不出现），
+    // rAF 轮询作为兜底（onended 异常丢失时也能收敛）。
     function checkFinished() {
       if (!isWaitingForEnd) return;
-      // 当音频上下文的时间超过了最后一个包的结束时间，说明播放完毕
-      if (audioCtx.currentTime >= nextStartTime) {
-        isWaitingForEnd = false;
-        isPlaying = false;
-        console.log('Audio playback finished');
-        // 重置时间轴，防止下一次对话错乱
-        nextStartTime = 0; 
-        // 通知 RN 播放完成
-        if (window.ReactNativeWebView) {
-          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'audio_finished' }));
-        }
-      } else {
+      // 还有音频排队未播完：继续轮询兜底
+      if (lastSource && audioCtx.currentTime < nextStartTime) {
         requestAnimationFrame(checkFinished);
+        return;
+      }
+      // 没有待播音频，或已全部播完：立即通知
+      notifyAudioFinished();
+    }
+
+    function notifyAudioFinished() {
+      if (!isWaitingForEnd) return;
+      isWaitingForEnd = false;
+      isPlaying = false;
+      console.log('Audio playback finished');
+      // 重置时间轴，防止下一次对话错乱
+      nextStartTime = 0;
+      // 保留 lastSource 的 onended（负责从 activeSources 移除），仅解除引用
+      lastSource = null;
+      // 通知 RN 播放完成
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'audio_finished' }));
       }
     }
     // 浏览器原生的 60FPS 渲染循环

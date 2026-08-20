@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 import time
@@ -13,6 +12,7 @@ from src.domain.chat import ChatInputEvent, ChatInputEventType
 from src.domain.conversation_type import ConversationItem, timestamp_to_date, timestamp_to_elapsed_time
 from src.utils.enum_type import ContextType, ConversationSource
 from src.utils.logger import get_logger
+from src.utils.asyncio_helpers import run_sync_owned
 
 if TYPE_CHECKING:
     from src.system.database.database_service import DatabaseManager
@@ -127,7 +127,13 @@ class ConversationService:
             content=content,
             data=data,
         )
-        uuid_list = await asyncio.to_thread(self.database.add_conversations, user_id, [item], True, character_id)
+        uuid_list = await run_sync_owned(
+            self.database.conversation_service.add_conversations,
+            user_id,
+            [item],
+            True,
+            character_id,
+        )
         return uuid_list[0] if uuid_list else None
 
     async def initialize_context_snapshot(
@@ -147,8 +153,8 @@ class ConversationService:
         :param ts_type: 时间戳类型，'elapsed'表示相对时间，'date'表示绝对时间
         :return: ConversationContextSnapshot对象
         '''
-        await asyncio.to_thread(
-            self.database.reset_conversation_context_if_stale,
+        await run_sync_owned(
+            self.database.conversation_service.reset_conversation_context_if_stale,
             user_id,
             character_id,
             self.context_stale_after_days,
@@ -206,7 +212,13 @@ class ConversationService:
         if not conversation_items:
             return [None] * len(reply_items)
 
-        uuid_list = await asyncio.to_thread(self.database.add_conversations, user_id, conversation_items, True, character_id)
+        uuid_list = await run_sync_owned(
+            self.database.conversation_service.add_conversations,
+            user_id,
+            conversation_items,
+            True,
+            character_id,
+        )
         result: list[Optional[str]] = [None] * len(reply_items)
         for index, uuid in zip(persisted_indices, uuid_list):
             result[index] = uuid
@@ -222,7 +234,11 @@ class ConversationService:
         '''
         获取快照形式的对话上下文状态，包含summary、conversations、context_count等信息
         '''
-        context_data = await asyncio.to_thread(self.database.get_conversation_context_state, user_id, character_id)
+        context_data = await run_sync_owned(
+            self.database.conversation_service.get_conversation_context_state,
+            user_id,
+            character_id,
+        )
         return self._build_snapshot(user_id, character_id, context_data, ts_type=ts_type)
 
     async def get_context(
@@ -255,7 +271,11 @@ class ConversationService:
         '''
         根据需要压缩对话上下文
         '''
-        context_count = await asyncio.to_thread(self.database.get_context_count, user_id, character_id)
+        context_count = await run_sync_owned(
+            self.database.conversation_service.get_context_count,
+            user_id,
+            character_id,
+        )
         if context_count <= self.raw_conversation_context_limit:
             return None
 
@@ -275,8 +295,8 @@ class ConversationService:
             recent_conversation="\n".join(recent_conversation),
         )
 
-        updated = await asyncio.to_thread(
-            self.database.compact_conversation_context,
+        updated = await run_sync_owned(
+            self.database.conversation_service.compact_conversation_context,
             user_id,
             new_summary.strip(),
             self.not_zip_conversation_count,

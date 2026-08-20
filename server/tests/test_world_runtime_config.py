@@ -2,11 +2,14 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 import src.world.world_runtime as world_runtime_module
+from src.agent_runtime.character_registry import CharacterRegistry
 from src.world.world_runtime import WorldRuntime
 
 
@@ -51,9 +54,20 @@ class FakeTask:
         return self.name
 
 
+class FakeQQMusicCredentialRefreshTask(FakeTask):
+    def __init__(self, learn_sing_songs_tasks, config=None):
+        super().__init__(config)
+        self.learn_sing_songs_tasks = list(learn_sing_songs_tasks)
+
+
 def test_world_runtime_distributes_task_config_from_world_section(monkeypatch):
     monkeypatch.setattr(world_runtime_module, "CitywalkTask", FakeTask)
     monkeypatch.setattr(world_runtime_module, "LearnSingSongsTask", FakeTask)
+    monkeypatch.setattr(
+        world_runtime_module,
+        "QQMusicCredentialRefreshTask",
+        FakeQQMusicCredentialRefreshTask,
+    )
     monkeypatch.setattr(world_runtime_module, "VCPediaNewSongTask", FakeTask)
     monkeypatch.setattr(world_runtime_module, "BiliEventUpdateTask", FakeTask)
     monkeypatch.setattr(world_runtime_module, "DynamicInteractionTask", FakeTask)
@@ -63,6 +77,13 @@ def test_world_runtime_distributes_task_config_from_world_section(monkeypatch):
     world_config = {
         "citywalk": {"source": "world-citywalk"},
         "auto_song_learner": {"source": "world-learner"},
+        "qq_music_credential_refresh": {
+            "source": "world-credential-refresh",
+            "clock_config": {
+                "type": "interval",
+                "params": {"interval_seconds": 3600, "run_immediately": True},
+            },
+        },
         "song_knowledge": {"source": "world-song-knowledge"},
         "bili_dynamic_fetcher": {
             "source": "world-bili",
@@ -108,6 +129,9 @@ def test_world_runtime_distributes_task_config_from_world_section(monkeypatch):
     assert len(runtime.learn_sing_songs_tasks) == 2
     assert [task.character_id for task in runtime.learn_sing_songs_tasks] == ["luotianyi", "miku"]
     assert runtime.learn_sing_songs_task.config == {"source": "world-learner", "character_id": "luotianyi"}
+    assert runtime.qq_music_credential_refresh_task.config["source"] == "world-credential-refresh"
+    assert runtime.qq_music_credential_refresh_task.learn_sing_songs_tasks == runtime.learn_sing_songs_tasks
+    assert runtime.qq_music_credential_refresh_task in runtime.tasks
     assert runtime.vcpedia_new_song_task.config == {"source": "world-song-knowledge"}
     assert runtime.bili_event_update_task.config["source"] == "world-bili"
     assert len(runtime.bili_event_update_tasks) == 2
@@ -117,6 +141,7 @@ def test_world_runtime_distributes_task_config_from_world_section(monkeypatch):
     assert runtime.citywalk_task.initialized_with is system_runtime
     assert runtime.learn_sing_songs_task.initialized_with is system_runtime
     assert all(task.initialized_with is system_runtime for task in runtime.learn_sing_songs_tasks)
+    assert runtime.qq_music_credential_refresh_task.initialized_with is system_runtime
     assert runtime.vcpedia_new_song_task.initialized_with is system_runtime
     assert runtime.bili_event_update_task.initialized_with is system_runtime
 
@@ -146,3 +171,47 @@ def test_world_runtime_registers_clock_actions_from_task_clock_config():
         ("interval_task",),
         {"interval_seconds": 120, "action": interval_task.run_once, "run_immediately": True},
     ) in runtime.world_clock.actions
+
+
+def test_character_registry_rejects_missing_default_character():
+    with pytest.raises(ValueError, match="Default character 'luotianyi' is not configured"):
+        CharacterRegistry(
+            {
+                "characters": {
+                    "miku": {
+                        "display_name": "Hatsune Miku",
+                        "enabled": True,
+                    }
+                }
+            }
+        )
+
+
+def test_character_registry_rejects_disabled_default_character():
+    with pytest.raises(ValueError, match="Default character 'luotianyi' must be enabled"):
+        CharacterRegistry(
+            {
+                "characters": {
+                    "luotianyi": {
+                        "display_name": "Luo Tianyi",
+                        "enabled": False,
+                    },
+                    "miku": {
+                        "display_name": "Hatsune Miku",
+                        "enabled": True,
+                    },
+                }
+            }
+        )
+
+
+def test_character_registry_rejects_multiple_default_characters():
+    with pytest.raises(ValueError, match="Multiple default characters"):
+        CharacterRegistry(
+            {
+                "characters": {
+                    "luotianyi": {"enabled": True, "default_target": True},
+                    "miku": {"enabled": True, "default_target": True},
+                }
+            }
+        )

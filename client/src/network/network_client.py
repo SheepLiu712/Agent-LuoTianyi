@@ -482,8 +482,17 @@ class NetworkClient:
             return {"ok": False, "message": str(exc)}
 
 
-    def network_set_message_listener(self, listener: Callable[[dict], None] | None, agent_state_listener: Callable[[bool], None] | None) -> None:
-        self.ws_transport.set_agent_message_listener(listener, agent_state_listener)
+    def network_set_message_listener(
+        self,
+        listener: Callable[[dict], None] | None,
+        agent_state_listener: Callable[[bool], None] | None,
+        system_message_listener: Callable[[str], None] | None = None,
+    ) -> None:
+        self.ws_transport.set_agent_message_listener(
+            listener,
+            agent_state_listener,
+            system_message_listener,
+        )
 
     ###### Internal methods ######
 
@@ -551,5 +560,4 @@ class NetworkClient:
                 )
         except Exception as exc:
             self.logger.error(f"Failed to retrieve image for history item {item.uuid}: {exc}")
-        finally:
-            return item
+        return item

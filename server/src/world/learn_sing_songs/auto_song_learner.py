@@ -10,7 +10,6 @@ Songlearner pipeline only:
 
 from __future__ import annotations
 
-import asyncio
 import importlib
 import json
 import os
@@ -49,6 +48,7 @@ def _add_songlearner_to_path() -> None:
 class LearnResult:
     """Result from one learning pass."""
     learned: List[str] = field(default_factory=list)
+    already_learned: List[str] = field(default_factory=list)
     abandoned: List[str] = field(default_factory=list)
     awaiting: List[str] = field(default_factory=list)
 
@@ -304,6 +304,10 @@ class AutoSongLearner:
         # QQ 音乐凭证检测（启动时）
         credential_path = config.get("qq_credential_file", "config/qq_music_credential.json")
         self._credential_file = self._resolve_path(cwd, credential_path)
+        self.qq_credential_refresh_before_seconds = max(
+            0,
+            int(config.get("qq_credential_refresh_before_seconds", 86400)),
+        )
         self._migrate_legacy_qq_credential()
         self.qq_credential_valid = self._validate_qq_credential()
         if not self.qq_credential_valid:
@@ -330,18 +334,33 @@ class AutoSongLearner:
     # -- QQ 凭证管理 ---------------------------------------------------------
 
     def _validate_qq_credential(self) -> bool:
-        """加载并验证本地 QQ 音乐凭证。"""
+        """启动时验证本地凭证格式；服务端检查由定时任务立即执行。"""
         try:
             # song_learner/src 需要在 Python path 中
             _add_songlearner_to_path()
             download_qq_song = importlib.import_module("pipeline.download_qq_song")
             saved = download_qq_song.load_saved_credential(self._credential_file)
             if saved and download_qq_song.validate_credential(saved):
-                self.logger.info(f"QQ 音乐凭证有效: {self._credential_file}")
+                self.logger.info(f"QQ 音乐凭证格式有效: {self._credential_file}")
                 return True
         except Exception as e:
             self.logger.warning(f"QQ 音乐凭证检测异常: {e}")
         return False
+
+    def _ensure_qq_credential_fresh(self) -> bool:
+        try:
+            _add_songlearner_to_path()
+            download_qq_song = importlib.import_module("pipeline.download_qq_song")
+            download_qq_song.ensure_fresh_credential(
+                self._credential_file,
+                refresh_before_seconds=self.qq_credential_refresh_before_seconds,
+                check_remote=True,
+            )
+            self.logger.info(f"QQ 音乐凭证有效且已完成续期检查: {self._credential_file}")
+            return True
+        except Exception as e:
+            self.logger.warning(f"QQ 音乐凭证自动续期失败: {e}")
+            return False
 
     def _migrate_legacy_qq_credential(self) -> None:
         legacy_file = self.songlearner_resource_dir / ".qq_music_credential.json"
@@ -360,7 +379,9 @@ class AutoSongLearner:
             _add_songlearner_to_path()
             download_qq_song = importlib.import_module("pipeline.download_qq_song")
             qr_path = self._credential_file.parent / "qq_login_qr.png"
-            success = asyncio.run(download_qq_song.generate_qr_only(qr_path))
+            success = download_qq_song._run_async_from_sync(
+                download_qq_song.generate_qr_only(qr_path)
+            )
             if success:
                 self.logger.info(f"QQ 登录二维码已生成: {qr_path}")
             else:
@@ -370,12 +391,12 @@ class AutoSongLearner:
 
     def check_qq_credential(self) -> bool:
         """
-        公开方法：重新检查 QQ 音乐凭证有效性。
-        供世界时钟凌晨任务调用。无效时重新生成二维码。
+        公开方法：服务端检查 QQ 音乐凭证，并在到期前自动续期。
+        供定时刷新和每次学歌任务的前置检查调用。无效时重新生成二维码。
         """
         if not self.songlearner_available:
             return False
-        valid = self._validate_qq_credential()
+        valid = self._ensure_qq_credential_fresh()
         self.qq_credential_valid = valid
         if not valid:
             self.logger.warning(
@@ -398,14 +419,34 @@ class AutoSongLearner:
             return result
 
         self.logger.info(f"Attempting to learn {len(pending)} pending song(s)")
+        known_song_names = self._get_existing_song_names()
 
         for entry in pending:
             safe_name = entry.safe_name
             self.logger.info(f"Trying to learn: {safe_name}")
             try:
+                requested_unified = get_unified_song_name(safe_name)
+                if requested_unified in known_song_names:
+                    self.wishlist.mark_learned(safe_name)
+                    result.already_learned.append(safe_name)
+                    self.logger.info(f"  ↷ Already learned, skipped: {safe_name}")
+                    continue
+
                 learned_name = self._try_learn_one(safe_name)
                 if learned_name:
+                    learned_unified = get_unified_song_name(learned_name)
+                    if learned_unified in known_song_names:
+                        if learned_name not in result.already_learned:
+                            result.already_learned.append(learned_name)
+                        self.logger.info(
+                            f"  ↷ Redirected to already learned song, no notification: "
+                            f"{safe_name} -> {learned_name}"
+                        )
+                        continue
+
                     result.learned.append(learned_name)
+                    if learned_unified:
+                        known_song_names.add(learned_unified)
                     if get_unified_song_name(learned_name) != get_unified_song_name(safe_name):
                         self.logger.info(f"  ✓ Learned via redirect: {safe_name} -> {learned_name}")
                     else:
@@ -435,6 +476,37 @@ class AutoSongLearner:
             self._notify_new_songs(result.learned)
 
         return result
+
+    def _get_existing_song_names(self) -> set[str]:
+        """Collect valid songs already present in the character's singing library."""
+        existing: set[str] = set()
+        if not self.songs_dir.exists():
+            return existing
+
+        for song_dir in self.songs_dir.iterdir():
+            if not song_dir.is_dir():
+                continue
+            song_name = song_dir.name
+            has_audio = (
+                (song_dir / f"{song_name}.cleaned.mp3").is_file()
+                or (song_dir / f"{song_name}.mp3").is_file()
+            )
+            lrc_path = song_dir / f"{song_name}.lrc"
+            json_path = song_dir / f"{song_name}.json"
+            if not has_audio or not lrc_path.is_file() or not json_path.is_file():
+                continue
+
+            unified_dir_name = get_unified_song_name(song_name)
+            if unified_dir_name:
+                existing.add(unified_dir_name)
+            try:
+                title = str(json.loads(json_path.read_text("utf-8")).get("title") or "")
+            except Exception:
+                title = ""
+            unified_title = get_unified_song_name(title)
+            if unified_title:
+                existing.add(unified_title)
+        return existing
 
     # -- routing -------------------------------------------------------------
 

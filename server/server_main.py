@@ -1,7 +1,5 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Header, Request
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os
 import sys
@@ -16,25 +14,36 @@ from src.system.user_interface.types import (
     RegisterRequest,
     LoginRequest,
     AutoLoginRequest,
-    HistoryRequest,
+    HistoryQuery,
     ImageRequest,
     ResetAccountRequest,
     WSEventType,
     PreferenceGetRequest,
     PreferenceOverwriteRequest,
     DynamicListRequest,
+    DynamicListQuery,
     DynamicCreateRequest,
     DynamicCommentListRequest,
+    DynamicCommentListQuery,
     DynamicCommentCreateRequest,
     DynamicUnreadRequest,
+    DynamicUnreadQuery,
     DynamicReadMarkRequest,
 )
-from src.system.user_interface.websocket_service import WebSocketConnection
-from src.system.admin.admin_interface import router as admin_router
-from src.system.admin import get_admin_shell, init_admin_shell, shutdown_admin_shell
-
+from src.system.user_interface.websocket_service import ChatEventAcceptance, WebSocketConnection
+from src.system.admin import (
+    get_admin_shell,
+    init_admin_shell,
+    register_admin_ui,
+    shutdown_admin_shell,
+)
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger, install_access_log_filter
+from src.system.network_helper import (
+    register_project_plan,
+    require_bearer_token,
+    runtime_not_ready_detail,
+)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -47,8 +56,17 @@ config = load_config("config/config.json")
 @asynccontextmanager
 async def startup_event(app: FastAPI):
     install_access_log_filter()
-    await init_admin_shell(root_dir=current_dir)
-    logger.info("AdminShell 初始化完成，等待配置并启动系统运行时")
+    admin_shell = await init_admin_shell(root_dir=current_dir)
+    logger.info("AdminShell 初始化完成，正在校验配置并启动系统运行时")
+    runtime_status = await admin_shell.runtime_supervisor.start()
+    if runtime_status.get("running"):
+        logger.info("配置校验通过，SystemRuntime 已自动启动")
+    else:
+        logger.warning(
+            "SystemRuntime 未自动启动: state=%s, error=%s",
+            runtime_status.get("state"),
+            runtime_status.get("last_error"),
+        )
     try:
         yield
     finally:
@@ -56,46 +74,24 @@ async def startup_event(app: FastAPI):
         await shutdown_admin_shell()
         logger.info("AdminShell 已关闭")
 
-
-def runtime_not_ready_detail() -> dict:
-    status = get_admin_shell().runtime_supervisor.status()
-    return {
-        "ok": False,
-        "code": "SYSTEM_RUNTIME_NOT_READY",
-        "message": "服务端尚未完成配置或系统运行时未启动",
-        "runtime": status,
-    }
-
-
 def get_runtime():
     runtime = get_admin_shell().runtime_supervisor.runtime
     if runtime is None:
         raise HTTPException(status_code=503, detail=runtime_not_ready_detail())
     return runtime
 
-
 app = FastAPI(lifespan=startup_event)
-app.include_router(admin_router)
-
-admin_ui_build = os.path.join(current_dir, "admin_ui", "admin_static")
-admin_ui_assets = os.path.join(admin_ui_build, "assets")
-if os.path.isdir(admin_ui_assets):
-    app.mount("/admin/assets", StaticFiles(directory=admin_ui_assets), name="admin-assets")
 
 # ——————————————————————————————————————————————————————————————————
 # 主要的 API 路由定义
 # ——————————————————————————————————————————————————————————————————
 
-@app.get("/admin")
-@app.get("/admin/{path:path}")
-async def admin_index(path: str = ""):
-    index_path = os.path.join(admin_ui_build, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return HTMLResponse(
-        "<h1>AgentLuo Server Console</h1>"
-        "<p>Admin UI has not been built yet. Run <code>cd server/admin_ui && npm install && npm run build</code>.</p>"
-    )
+# 注册管理后台的 UI 和路由
+register_admin_ui(app, current_dir)
+
+# 注册项目计划书页面
+register_project_plan(app, current_dir)
+
 
 @app.websocket("/chat_ws")
 async def chat_ws(websocket: WebSocket):
@@ -130,7 +126,12 @@ async def chat_ws(websocket: WebSocket):
 
     ws_connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
     try:
-        await ws_connection.auth(websocket_service, system_runtime.database_manager)  # 等待认证，认证成功之后将ws和用户信息绑定
+        authenticated = await ws_connection.auth(
+            websocket_service,
+            system_runtime.database_manager,
+        )
+        if not authenticated:
+            return
         chat_stream = await gcsm.get_or_register_chat_stream(
             ws_connection, system_runtime=system_runtime
         )  # 根据ws连接获取对应的聊天流实例，内部会根据用户UUID进行管理
@@ -144,18 +145,42 @@ async def chat_ws(websocket: WebSocket):
                 continue
 
             if websocket_service.is_chat_related_event(event):
-                if websocket_service.is_duplicate_client_message(ws_connection, event):
+                acceptance = websocket_service.try_accept_chat_event(
+                    ws_connection,
+                    event,
+                    chat_stream,
+                )
+                if acceptance == ChatEventAcceptance.DUPLICATE:
                     await websocket_service.send_duplicate_ack_event(ws_connection, event)
                     continue
-                await websocket_service.send_ack_event(ws_connection, event)  # 先确认收到，避免图片预处理拖慢 ACK
-
-            chat_event = websocket_service.convert_to_chat_input_event(
-                event,
-                sender_user_id=ws_connection.user_uuid,
-            )
-            if chat_event is None:
-                continue
-            await chat_stream.feed_event(chat_event)
+                if acceptance == ChatEventAcceptance.BAD_MESSAGE:
+                    await websocket_service.send_nack_event(
+                        ws_connection,
+                        event,
+                        code="BAD_MESSAGE",
+                        message="chat event payload is invalid",
+                        retryable=False,
+                    )
+                    continue
+                if acceptance == ChatEventAcceptance.UNSUPPORTED:
+                    await websocket_service.send_nack_event(
+                        ws_connection,
+                        event,
+                        code="UNSUPPORTED_EVENT",
+                        message="chat event type is not supported",
+                        retryable=False,
+                    )
+                    continue
+                if acceptance == ChatEventAcceptance.OVERLOADED:
+                    await websocket_service.send_nack_event(
+                        ws_connection,
+                        event,
+                        code="OVERLOADED",
+                        message="chat ingress queue is full",
+                        retryable=True,
+                    )
+                    continue
+                await websocket_service.send_ack_event(ws_connection, event)
     except WebSocketDisconnect:
         gcsm.ws_lost_connection(ws_connection)
         logger.info("WebSocket client disconnected from /chat_ws")
@@ -212,7 +237,7 @@ async def register(
     - 成功：{"message": "注册成功", "user_id": req.username}
     - 失败：HTTP 400 错误，{"detail": "注册失败，失败原因"}
     """
-    logger.info(f"Register request: {req.username} with code {req.invite_code}")
+    logger.info("Register request for username=%s", req.username)
     return await system_runtime.user_interface.register(
         req, system_runtime, request
     )
@@ -234,7 +259,7 @@ async def reset_account(
     - 成功：{"message": "重置成功"}
     - 失败：HTTP 400 错误，{"detail": "失败原因"}
     """
-    logger.info(f"Reset account request for invite_code: {req.invite_code[:4]}****")
+    logger.info("Reset account request for username=%s", req.new_username)
     return await system_runtime.user_interface.reset_account(
         req, system_runtime, request
     )
@@ -283,19 +308,13 @@ async def overwrite_preference(
 
 @app.get("/history")
 async def get_history(
-    request: HistoryRequest = Depends(),
+    request: HistoryQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
     """获取聊天历史：委托到 UserInterface。"""
     logger.info(f"Server received: Get history request from {request.username}")
-    token = request.token
-    if not token and authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if not token:
-        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    token = require_bearer_token(authorization)
     return await system_runtime.user_interface.get_history(
         request.username, token, request.count, request.end_index, system_runtime
     )
@@ -303,17 +322,11 @@ async def get_history(
 
 @app.get("/dynamics")
 async def list_dynamics(
-    request: DynamicListRequest = Depends(),
+    request: DynamicListQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
-    token = request.token
-    if not token and authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if not token:
-        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    token = require_bearer_token(authorization)
     req = DynamicListRequest(
         username=request.username,
         token=token,
@@ -333,17 +346,11 @@ async def create_dynamic(
 
 @app.get("/dynamics/unread")
 async def get_dynamic_unread(
-    request: DynamicUnreadRequest = Depends(),
+    request: DynamicUnreadQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
-    token = request.token
-    if not token and authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if not token:
-        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    token = require_bearer_token(authorization)
     req = DynamicUnreadRequest(username=request.username, token=token)
     return await system_runtime.user_interface.get_dynamic_unread(req, system_runtime)
 
@@ -359,17 +366,11 @@ async def mark_dynamic_read(
 @app.get("/dynamics/{dynamic_id}/comments")
 async def list_dynamic_comments(
     dynamic_id: str,
-    request: DynamicCommentListRequest = Depends(),
+    request: DynamicCommentListQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
-    token = request.token
-    if not token and authorization:
-        parts = authorization.split()
-        if len(parts) == 2 and parts[0].lower() == "bearer":
-            token = parts[1]
-    if not token:
-        raise HTTPException(status_code=401, detail="消息令牌缺失")
+    token = require_bearer_token(authorization)
     req = DynamicCommentListRequest(
         username=request.username,
         token=token,

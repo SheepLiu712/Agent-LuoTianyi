@@ -16,7 +16,11 @@ export interface ImageResponse {
 
 async function attachLocalAudioIfExists(msg: any, baseMessage: ChatMessage): Promise<ChatMessage> {
     // 历史音频使用固定本地缓存路径，重启后按 uuid 回连。
-    if (baseMessage.isUser || baseMessage.type !== 'text' || !baseMessage.uuid || baseMessage.uuid === 'unknown_id') {
+    // 唱歌消息在服务端以 type='sing' 持久化，同样需要回连音频（Bug#5）。
+    if (baseMessage.isUser || !baseMessage.uuid || baseMessage.uuid === 'unknown_id') {
+        return baseMessage;
+    }
+    if (baseMessage.type !== 'text' && baseMessage.type !== 'sing') {
         return baseMessage;
     }
 

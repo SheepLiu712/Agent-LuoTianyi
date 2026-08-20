@@ -5,11 +5,13 @@
 """
 
 import os
+import re
 import sys
 from typing import Optional, Dict, Any
 from pathlib import Path
 import logging
 from logging.handlers import RotatingFileHandler
+from urllib.parse import unquote_plus
 import colorlog
 
 
@@ -99,10 +101,92 @@ def get_logger(name: str) -> logging.Logger:
     
     return logger
 
+_SENSITIVE_QUERY_KEYS = {
+    "token",
+    "message_token",
+    "login_token",
+    "access_token",
+    "refresh_token",
+    "invite_code",
+    "setup_token",
+    "authorization",
+    "api_key",
+    "apikey",
+    "password",
+    "secret",
+}
+_ACCESS_REQUEST_TARGET_RE = re.compile(
+    r'(?P<prefix>"[A-Z]+\s+)(?P<target>\S+)(?P<suffix>\s+HTTP/\d(?:\.\d+)?")'
+)
+
+
+def _normalized_query_key(raw_key: str) -> str:
+    decoded = raw_key
+    for _ in range(3):
+        next_value = unquote_plus(decoded)
+        if next_value == decoded:
+            break
+        decoded = next_value
+    return decoded.strip().casefold().replace("-", "_")
+
+
+def _is_sensitive_query_key(raw_key: str) -> bool:
+    normalized = _normalized_query_key(raw_key)
+    return (
+        normalized in _SENSITIVE_QUERY_KEYS
+        or normalized.endswith("_token")
+        or normalized.endswith("_secret")
+    )
+
+
+def _redact_sensitive_query(target: str) -> str:
+    base, separator, query = target.partition("?")
+    if not separator:
+        return target
+    redacted_fields = []
+    changed = False
+    for field in query.split("&"):
+        raw_key, equals, _ = field.partition("=")
+        if _is_sensitive_query_key(raw_key):
+            redacted_fields.append(f"{raw_key}=REDACTED")
+            changed = True
+        else:
+            redacted_fields.append(field if equals else raw_key)
+    if not changed:
+        return target
+    return f"{base}?{'&'.join(redacted_fields)}"
+
+
+def _redact_access_message(message: str) -> str:
+    return _ACCESS_REQUEST_TARGET_RE.sub(
+        lambda match: (
+            f"{match.group('prefix')}"
+            f"{_redact_sensitive_query(match.group('target'))}"
+            f"{match.group('suffix')}"
+        ),
+        message,
+    )
+
+
 class AdminSuccessAccessLogFilter(logging.Filter):
     """Hide noisy successful admin polling from uvicorn access logs."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args if isinstance(record.args, tuple) else ()
+        if len(args) >= 3:
+            sanitized_args = list(args)
+            sanitized_args[2] = _redact_sensitive_query(str(sanitized_args[2]))
+            record.args = tuple(sanitized_args)
+        else:
+            try:
+                message = record.getMessage()
+            except (TypeError, ValueError):
+                message = ""
+            sanitized_message = _redact_access_message(message)
+            if sanitized_message != message:
+                record.msg = sanitized_message
+                record.args = ()
+
         if record.levelno >= logging.WARNING:
             return True
         args = record.args if isinstance(record.args, tuple) else ()

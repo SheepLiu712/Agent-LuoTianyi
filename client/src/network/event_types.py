@@ -55,6 +55,8 @@ class AgentMessage:
     is_final_package: bool
     uuid: str | None
     reply_to: str | None
+    audio_error: bool = False
+    error_code: str | None = None
     display_in_chat: bool = True
     is_ephemeral: bool = False
 
@@ -114,9 +116,16 @@ def normalize_agent_message(message: WSMessage) -> AgentMessage:
         is_final_package=bool(payload.get("is_final_package", True)),
         uuid=payload.get("uuid"),
         reply_to=message.reply_to,
+        audio_error=bool(payload.get("audio_error", False)),
+        error_code=payload.get("error_code"),
         display_in_chat=bool(payload.get("display_in_chat", True)),
         is_ephemeral=bool(payload.get("is_ephemeral", False)),
     )
+
+
+def is_audio_terminal(message: AgentMessage) -> bool:
+    """All final packages, including audio failures, end client playback."""
+    return message.is_final_package
 
 
 def normalize_error_message(message: WSMessage) -> ErrorMessage:

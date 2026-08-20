@@ -7,7 +7,7 @@ server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.system.database.event_store import EventStore
+from src.system.database.services.event_store import EventStore
 from src.system.database.sql_database import Event, get_sql_session, init_sql_db
 
 

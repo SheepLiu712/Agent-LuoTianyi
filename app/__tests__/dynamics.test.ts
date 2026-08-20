@@ -38,7 +38,7 @@ describe('dynamics api helpers', () => {
     const result = await getDynamics('alice', 'token-123', 20, 'cursor-1');
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://example.test/dynamics?username=alice&token=token-123&limit=20&cursor=cursor-1',
+      'http://example.test/dynamics?username=alice&limit=20&cursor=cursor-1',
       {
         method: 'GET',
         headers: {
@@ -89,7 +89,7 @@ describe('dynamics api helpers', () => {
     const result = await getDynamicComments('alice', 'token-123', 'dynamic/1', 50, null);
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://example.test/dynamics/dynamic%2F1/comments?username=alice&token=token-123&limit=50',
+      'http://example.test/dynamics/dynamic%2F1/comments?username=alice&limit=50',
       {
         method: 'GET',
         headers: {
@@ -130,7 +130,7 @@ describe('dynamics api helpers', () => {
     const result = await getDynamicUnreadStatus('alice', 'token-123');
 
     expect(mockFetch).toHaveBeenCalledWith(
-      'http://example.test/dynamics/unread?username=alice&token=token-123',
+      'http://example.test/dynamics/unread?username=alice',
       {
         method: 'GET',
         headers: {

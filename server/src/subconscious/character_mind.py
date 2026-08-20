@@ -170,6 +170,8 @@ class CharacterSubconscious:
         topic: "ExtractedTopic",
         conversation_history: str,
         external_context: Optional[str] = None,
+        sing_excluded_segments: set[tuple[str, str]] | None = None,
+        sing_emotion_context: str = "",
     ) -> TopicAttentionPlan:
         return await self.attention_planner.plan_topic_turn(
             user_id=user_id,
@@ -181,7 +183,11 @@ class CharacterSubconscious:
                 similarity_threshold=0.8,
             ),
             fact_search=self.search_fact_constraints_for_topic,
-            sing_planner=self._plan_sing_attempts_for_topic,
+            sing_planner=lambda attempts: self._plan_sing_attempts_for_topic(
+                attempts,
+                excluded_segments=sing_excluded_segments,
+                emotion_context=sing_emotion_context,
+            ),
             external_context=external_context,
             agent_state=self.state.get_snapshot(),
         )
@@ -246,8 +252,24 @@ class CharacterSubconscious:
     async def _plan_sing_attempts_for_topic(
         self,
         sing_attempts: List[str],
+        excluded_segments: set[tuple[str, str]] | None = None,
+        emotion_context: str = "",
     ) -> Tuple[Optional[str], Optional[str]]:
-        return self.build_sing_plan_for_topic(sing_attempts)
+        return await self.build_sing_plan_for_topic(
+            sing_attempts,
+            excluded_segments=excluded_segments,
+            emotion_context=emotion_context,
+        )
 
-    def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
-        return self.capability_manager.singing.build_sing_plan(self.character_id, sing_attempts)
+    async def build_sing_plan_for_topic(
+        self,
+        sing_attempts: List[str],
+        excluded_segments: set[tuple[str, str]] | None = None,
+        emotion_context: str = "",
+    ) -> Tuple[Optional[str], Optional[str]]:
+        return await self.capability_manager.singing.build_sing_plan(
+            self.character_id,
+            sing_attempts,
+            excluded_segments=excluded_segments,
+            emotion_context=emotion_context,
+        )

@@ -6,11 +6,16 @@ from pathlib import Path
 from typing import Any
 
 
+_MISSING_ENVIRONMENT_VALUE = object()
+
+
 class SecretStore:
     """Local .env-backed secret store for runtime configuration."""
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
+        self._managed_keys: set[str] = set()
+        self._original_environment: dict[str, str | object] = {}
 
     def read(self) -> dict[str, str]:
         if not self.path.exists():
@@ -35,6 +40,7 @@ class SecretStore:
 
     def update(self, updates: dict[str, Any]) -> dict[str, str]:
         secrets = self.read()
+        self._capture_original_environment(secrets)
         for key, value in updates.items():
             key = str(key).strip()
             if not key:
@@ -49,9 +55,33 @@ class SecretStore:
 
     def load_into_environment(self) -> dict[str, str]:
         secrets = self.read()
+        self._capture_original_environment(secrets)
+
+        for key in self._managed_keys - secrets.keys():
+            original_value = self._original_environment.pop(
+                key,
+                _MISSING_ENVIRONMENT_VALUE,
+            )
+            if original_value is _MISSING_ENVIRONMENT_VALUE:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = str(original_value)
+
+        self._managed_keys.intersection_update(secrets)
         for key, value in secrets.items():
             os.environ[key] = value
+            self._managed_keys.add(key)
         return secrets
+
+    def _capture_original_environment(self, secrets: dict[str, str]) -> None:
+        for key in secrets:
+            if key in self._managed_keys:
+                continue
+            self._original_environment[key] = os.environ.get(
+                key,
+                _MISSING_ENVIRONMENT_VALUE,
+            )
+            self._managed_keys.add(key)
 
     def status(self, keys: list[str] | None = None) -> dict[str, dict[str, Any]]:
         secrets = self.read()

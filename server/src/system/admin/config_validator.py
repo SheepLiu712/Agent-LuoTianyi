@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from src.system.admin.secret_store import SecretStore
+from src.system.database.utils import (
+    DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
+    MAX_MESSAGE_TOKEN_TTL_SECONDS,
+    MIN_MESSAGE_TOKEN_TTL_SECONDS,
+)
 
 
 @dataclass
@@ -41,6 +46,8 @@ class RuntimeConfigValidator:
         "agent.memory_writer": "agent_runtime.agent.memory.memory_writer.llm_module",
         "agent.user_profile": "agent_runtime.agent.memory.user_profile.llm_module",
         "agent.date_detector": "agent_runtime.agent.date_detector.llm_module",
+        "capability.singing.song_emotion_tagger": "capabilities.sing.song_emotion_tagger",
+        "capability.diary": "capabilities.diary.diary_llm.llm_module",
     }
 
     CORE_VLM_MODULE_PATHS = {
@@ -68,6 +75,7 @@ class RuntimeConfigValidator:
     def validate(self, config: dict[str, Any]) -> dict[str, Any]:
         items: list[ValidationItem] = []
         items.extend(self._validate_secrets())
+        items.extend(self._validate_security_config(config))
         items.extend(self._validate_llm_interfaces(config))
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
@@ -113,6 +121,50 @@ class RuntimeConfigValidator:
                 )
             )
         return result
+
+    def _validate_security_config(self, config: dict[str, Any]) -> list[ValidationItem]:
+        name = "config.database.message_token_ttl_seconds"
+        database_config = config.get("database")
+        if (
+            not isinstance(database_config, dict)
+            or "message_token_ttl_seconds" not in database_config
+        ):
+            return [
+                ValidationItem(
+                    "core",
+                    name,
+                    "warning",
+                    (
+                        "未配置 message_token_ttl_seconds，使用安全默认值 "
+                        f"{DEFAULT_MESSAGE_TOKEN_TTL_SECONDS} 秒"
+                    ),
+                    severity="warning",
+                )
+            ]
+        value = database_config["message_token_ttl_seconds"]
+        if type(value) is not int:
+            return [
+                ValidationItem(
+                    "core",
+                    name,
+                    "error",
+                    "message_token_ttl_seconds 必须是整数秒数",
+                )
+            ]
+        if not MIN_MESSAGE_TOKEN_TTL_SECONDS <= value <= MAX_MESSAGE_TOKEN_TTL_SECONDS:
+            return [
+                ValidationItem(
+                    "core",
+                    name,
+                    "error",
+                    (
+                        "message_token_ttl_seconds 必须在 "
+                        f"{MIN_MESSAGE_TOKEN_TTL_SECONDS} 至 "
+                        f"{MAX_MESSAGE_TOKEN_TTL_SECONDS} 秒之间"
+                    ),
+                )
+            ]
+        return [ValidationItem("core", name, "ok", f"消息令牌有效期为 {value} 秒")]
 
     def _validate_llm_interfaces(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []
@@ -165,8 +217,18 @@ class RuntimeConfigValidator:
                 result.append(self._path_item("core", f"resource.tts.{character}.{key}", item.get(key)))
 
         sing_cfg = config.get("capabilities", {}).get("sing", {})
-        for character, item in sing_cfg.items():
-            result.append(self._path_item("core", f"resource.sing.{character}.resource_path", item.get("resource_path")))
+        characters_cfg = sing_cfg.get("characters")
+        if not isinstance(characters_cfg, dict) or not characters_cfg:
+            result.append(ValidationItem("core", "resource.sing.characters", "error", "未配置任何角色歌曲资源"))
+        else:
+            for character, item in characters_cfg.items():
+                result.append(
+                    self._path_item(
+                        "core",
+                        f"resource.sing.characters.{character}.resource_path",
+                        item.get("resource_path"),
+                    )
+                )
         return result
 
     def _validate_song_knowledge_resources(self, config: dict[str, Any]) -> list[ValidationItem]:

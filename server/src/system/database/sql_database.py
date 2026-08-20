@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, Text, Engine, event, text, UniqueConstraint, Float
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Boolean, ForeignKey, Text, Engine, event, text, UniqueConstraint, Float, Index
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from datetime import datetime
 import uuid
@@ -44,6 +44,7 @@ class InviteCode(Base):
     
     code = Column(String, primary_key=True)
     is_used = Column(Boolean, default=False)
+    disabled = Column(Boolean, nullable=False, default=False, server_default=text("0"))
     created_at = Column(DateTime, default=datetime.now)
     used_at = Column(DateTime, nullable=True)
     user_id = Column(String, ForeignKey("users.uuid"), nullable=True, unique=True)
@@ -303,6 +304,18 @@ class DynamicPost(Base):
     owner_user = relationship("User", back_populates="dynamic_posts")
     comments = relationship("DynamicComment", back_populates="dynamic_post", cascade="all, delete-orphan")
 
+    __table_args__ = (
+        Index(
+            "uq_dynamic_posts_diary_source",
+            "owner_user_id",
+            "author_id",
+            "source_type",
+            "source_id",
+            unique=True,
+            sqlite_where=text("source_type = 'diary' AND source_id IS NOT NULL"),
+        ),
+    )
+
 
 class DynamicComment(Base):
     __tablename__ = "dynamic_comments"
@@ -355,7 +368,6 @@ def init_sql_db(db_folder: str = None, db_file: str = None):
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False, "timeout": 30},
-        isolation_level="AUTOCOMMIT",
     )
 
     # 2. 注册监听器：在每个连接建立时执行 WAL 开启指令
@@ -463,6 +475,28 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
                 connection.exec_driver_sql("ALTER TABLE dynamic_posts ADD COLUMN memory_error TEXT")
             if "reply_error" not in dynamic_post_columns:
                 connection.exec_driver_sql("ALTER TABLE dynamic_posts ADD COLUMN reply_error TEXT")
+            duplicate_diaries = connection.exec_driver_sql(
+                """
+                SELECT owner_user_id, author_id, source_type, source_id, COUNT(*) AS duplicate_count
+                FROM dynamic_posts
+                WHERE source_type = 'diary' AND source_id IS NOT NULL
+                GROUP BY owner_user_id, author_id, source_type, source_id
+                HAVING COUNT(*) > 1
+                LIMIT 10
+                """
+            ).fetchall()
+            if duplicate_diaries:
+                raise RuntimeError(
+                    "Cannot create diary idempotency index: duplicate diary source keys exist: "
+                    f"{duplicate_diaries}"
+                )
+            connection.exec_driver_sql(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS uq_dynamic_posts_diary_source
+                ON dynamic_posts (owner_user_id, author_id, source_type, source_id)
+                WHERE source_type = 'diary' AND source_id IS NOT NULL
+                """
+            )
 
         dynamic_comment_columns = {
             row[1]
@@ -473,6 +507,31 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
                 connection.exec_driver_sql("ALTER TABLE dynamic_comments ADD COLUMN memory_error TEXT")
             if "reply_error" not in dynamic_comment_columns:
                 connection.exec_driver_sql("ALTER TABLE dynamic_comments ADD COLUMN reply_error TEXT")
+
+        invite_code_columns = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(invite_codes)").fetchall()
+        }
+        if invite_code_columns and "disabled" not in invite_code_columns:
+            connection.exec_driver_sql(
+                "ALTER TABLE invite_codes ADD COLUMN disabled BOOLEAN NOT NULL DEFAULT 0"
+            )
+
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                name VARCHAR NOT NULL PRIMARY KEY,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        legacy_invite_migration = "2026-08-01-disable-legacy-invite-codes"
+        migration_claim = connection.exec_driver_sql(
+            "INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)",
+            (legacy_invite_migration,),
+        )
+        if migration_claim.rowcount == 1:
+            connection.exec_driver_sql("UPDATE invite_codes SET disabled = 1")
 
 
 def get_sql_db(): # Generator for FastAPI

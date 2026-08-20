@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import subprocess
@@ -5,16 +6,23 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.world.learn_sing_songs.task import LearnSingSongsTask
+from src.world.learn_sing_songs.qq_music_credential_refresh_task import QQMusicCredentialRefreshTask
 from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner, WishlistManager
 from src.world.learn_sing_songs.song_learner.src.pipeline import download_qq_song
 from src.world.learn_sing_songs.song_learner.src.pipeline.download_qq_song import (
+    get_song_singer_names,
+    longest_common_subsequence_length,
     rank_songs_by_title,
     safe_name as qq_safe_name,
+    title_matches,
+    validate_song_singers,
 )
 
 
@@ -25,6 +33,256 @@ class FakeEventStore:
     async def add_event(self, event):
         self.events.append(event)
         return "event-id"
+
+
+def test_qq_song_singer_validation_accepts_only_luo_tianyi():
+    song = {"singer": [{"name": "洛天依"}]}
+
+    assert get_song_singer_names(song) == ["洛天依"]
+    assert validate_song_singers(song) == (True, "")
+
+
+def test_qq_song_singer_validation_rejects_known_duet():
+    song = {"singer": [{"name": "洛天依"}, {"name": "乐正绫"}]}
+
+    valid, reason = validate_song_singers(song)
+
+    assert valid is False
+    assert "乐正绫" in reason
+
+
+def test_qq_song_singer_validation_allows_unknown_singer():
+    song = {"singer": [{"name": "洛天依"}, {"name": "未知歌手"}]}
+
+    assert validate_song_singers(song) == (True, "")
+
+
+def test_qq_song_singer_validation_rejects_missing_singer():
+    valid, reason = validate_song_singers({})
+
+    assert valid is False
+    assert reason == "歌手信息为空"
+
+
+def test_qq_download_rejects_duet_before_creating_output(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        download_qq_song,
+        "qq_search_songs",
+        lambda *_args, **_kwargs: [
+            {
+                "title": "合唱歌曲",
+                "mid": "song-mid",
+                "singer": [{"name": "洛天依"}, {"name": "言和"}],
+            }
+        ],
+    )
+    output_dir = tmp_path / "songs"
+
+    with pytest.raises(RuntimeError, match="言和"):
+        download_qq_song.download_song_and_lyric(
+            "合唱歌曲",
+            output_dir=output_dir,
+            no_auto_login=True,
+        )
+
+    assert not output_dir.exists()
+
+
+def test_qq_credential_refreshes_when_server_reports_expired(monkeypatch, tmp_path):
+    now = int(download_qq_song.time.time())
+    credential_file = tmp_path / "qq_music_credential.json"
+    saved = {
+        "musicid": 123,
+        "musickey": "old-key",
+        "refresh_key": "refresh-key",
+        "refresh_token": "refresh-token",
+        "access_token": "access-token",
+        "login_type": 2,
+        "musickey_create_time": now,
+        "key_expires_in": 259200,
+    }
+    credential_file.write_text(json.dumps(saved), encoding="utf-8")
+    calls = []
+    check_results = iter((True, False))
+
+    class FakeCredential:
+        def __init__(self, data):
+            self.data = dict(data)
+
+        @classmethod
+        def model_validate(cls, data):
+            return cls(data)
+
+        def model_dump(self, **_kwargs):
+            return dict(self.data)
+
+    class FakeClient:
+        def __init__(self, credential=None, **_kwargs):
+            self.credential = credential
+            self.login = self
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def check_expired(self, _credential):
+            calls.append("check")
+            return next(check_results)
+
+        async def refresh_credential(self, _credential):
+            calls.append("refresh")
+            return FakeCredential(
+                {
+                    "musicid": 123,
+                    "musickey": "new-key",
+                    "musickey_create_time": now + 1,
+                    "key_expires_in": 259200,
+                }
+            )
+
+    monkeypatch.setattr(download_qq_song, "QQ_SDK_AVAILABLE", True)
+    monkeypatch.setattr(
+        download_qq_song,
+        "QQ_SDK",
+        {"Credential": FakeCredential, "Client": FakeClient},
+    )
+
+    refreshed = download_qq_song.ensure_fresh_credential(
+        credential_file,
+        refresh_before_seconds=86400,
+    )
+
+    assert calls == ["check", "refresh", "check"]
+    assert refreshed["musickey"] == "new-key"
+    assert refreshed["refresh_token"] == "refresh-token"
+    persisted = json.loads(credential_file.read_text(encoding="utf-8"))
+    assert persisted == refreshed
+
+
+def test_qq_credential_refreshes_before_local_expiry(monkeypatch, tmp_path):
+    now = int(download_qq_song.time.time())
+    credential_file = tmp_path / "qq_music_credential.json"
+    credential_file.write_text(
+        json.dumps(
+            {
+                "musicid": 123,
+                "musickey": "old-key",
+                "refresh_key": "refresh-key",
+                "refresh_token": "refresh-token",
+                "login_type": 2,
+                "musickey_create_time": now - 100,
+                "key_expires_in": 200,
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+
+    class FakeCredential:
+        def __init__(self, data):
+            self.data = dict(data)
+
+        @classmethod
+        def model_validate(cls, data):
+            return cls(data)
+
+        def model_dump(self, **_kwargs):
+            return dict(self.data)
+
+    class FakeClient:
+        def __init__(self, credential=None, **_kwargs):
+            self.credential = credential
+            self.login = self
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def check_expired(self, _credential):
+            calls.append("check")
+            return False
+
+        async def refresh_credential(self, _credential):
+            calls.append("refresh")
+            return FakeCredential(
+                {
+                    "musicid": 123,
+                    "musickey": "new-key",
+                    "musickey_create_time": now,
+                    "key_expires_in": 259200,
+                }
+            )
+
+    monkeypatch.setattr(download_qq_song, "QQ_SDK_AVAILABLE", True)
+    monkeypatch.setattr(
+        download_qq_song,
+        "QQ_SDK",
+        {"Credential": FakeCredential, "Client": FakeClient},
+    )
+
+    async def ensure_from_running_loop():
+        return download_qq_song.ensure_fresh_credential(
+            credential_file,
+            refresh_before_seconds=3600,
+            check_remote=False,
+        )
+
+    refreshed = asyncio.run(ensure_from_running_loop())
+
+    assert calls == ["refresh", "check"]
+    assert refreshed["musickey"] == "new-key"
+
+
+def test_qq_download_refreshes_and_retries_after_sdk_rejects_credential(monkeypatch, tmp_path):
+    credential_file = tmp_path / "qq_music_credential.json"
+    monkeypatch.setattr(
+        download_qq_song,
+        "qq_search_songs",
+        lambda *_args, **_kwargs: [
+            {"title": "Song A", "mid": "song-mid", "singer": [{"name": "洛天依"}]}
+        ],
+    )
+    monkeypatch.setattr(download_qq_song, "qq_fetch_mp3_url", lambda *_args, **_kwargs: "")
+    monkeypatch.setattr(download_qq_song, "load_saved_credential", lambda *_args, **_kwargs: {"musicid": 123})
+    monkeypatch.setattr(download_qq_song, "qq_fetch_lyric", lambda *_args, **_kwargs: "[00:00.00]歌词")
+
+    refresh_calls = []
+
+    def fake_ensure(_credential_file, **kwargs):
+        refresh_calls.append(bool(kwargs.get("force_refresh", False)))
+        return {"musicid": 123, "musickey": "new" if kwargs.get("force_refresh") else "old"}
+
+    sdk_calls = []
+
+    def fake_sdk_fetch(_songmid, credential):
+        sdk_calls.append(credential["musickey"])
+        if len(sdk_calls) == 1:
+            raise download_qq_song.QQMusicCredentialError("expired")
+        return "https://example.test/song.mp3"
+
+    monkeypatch.setattr(download_qq_song, "ensure_fresh_credential", fake_ensure)
+    monkeypatch.setattr(download_qq_song, "qq_fetch_mp3_url_by_sdk", fake_sdk_fetch)
+    monkeypatch.setattr(
+        download_qq_song,
+        "download_song_file",
+        lambda _url, target, **_kwargs: target.write_bytes(b"mp3"),
+    )
+
+    safe_song_name, mp3_path, _ = download_qq_song.download_song_and_lyric(
+        "Song A",
+        output_dir=tmp_path / "songs",
+        credential_file=credential_file,
+        no_auto_login=True,
+    )
+
+    assert safe_song_name == "Song A"
+    assert mp3_path.exists()
+    assert refresh_calls == [False, True]
+    assert sdk_calls == ["old", "new"]
 
 
 def test_learn_sing_songs_initialize_sets_event_store_and_learner(monkeypatch):
@@ -114,7 +372,7 @@ def test_learn_sing_songs_run_once_records_result_without_learned():
 
 def test_learn_sing_songs_run_once_writes_event_for_learned_songs():
     learner = SimpleNamespace(
-        check_qq_credential=lambda: False,
+        check_qq_credential=lambda: True,
         try_learn_pending=lambda: SimpleNamespace(learned=["Song A", "Song B"], abandoned=[], awaiting=[]),
     )
     event_store = FakeEventStore()
@@ -125,13 +383,62 @@ def test_learn_sing_songs_run_once_writes_event_for_learned_songs():
     result = task.run_once()
 
     assert result.ok is True
-    assert result.data["credential_ok"] is False
+    assert result.data["credential_ok"] is True
     assert event_store.events
     event = event_store.events[0]
     assert event["character"] == "luotianyi"
     assert event["event_type"] == "new_song"
     assert event["source"] == "world_song_learner"
     assert "Song A" in event["description"]
+
+
+def test_learn_sing_songs_run_once_does_not_start_with_unrefreshable_credential():
+    calls = []
+    learner = SimpleNamespace(
+        check_qq_credential=lambda: False,
+        try_learn_pending=lambda: calls.append("started"),
+    )
+    task = LearnSingSongsTask({})
+    task.auto_song_learner = learner
+
+    result = task.run_once()
+
+    assert result.ok is True
+    assert result.skipped is True
+    assert result.data["credential_ok"] is False
+    assert calls == []
+
+
+def test_qq_music_credential_refresh_task_deduplicates_shared_file(tmp_path):
+    credential_file = tmp_path / "qq_music_credential.json"
+    refresh_calls = []
+
+    def make_learn_task(character_id):
+        learner = SimpleNamespace(
+            _credential_file=credential_file,
+            check_qq_credential=lambda: refresh_calls.append(character_id) or True,
+        )
+        return SimpleNamespace(character_id=character_id, auto_song_learner=learner)
+
+    task = QQMusicCredentialRefreshTask(
+        [make_learn_task("luotianyi"), make_learn_task("miku")],
+        {
+            "clock_config": {
+                "type": "interval",
+                "params": {"interval_seconds": 3600, "run_immediately": True},
+            }
+        },
+    )
+    task.initialize(SimpleNamespace())
+
+    result = task.run_once()
+
+    assert result.ok is True
+    assert result.data["credential_count"] == 1
+    assert refresh_calls == ["luotianyi"]
+    assert task.get_task_name() == "qq_music_credential_refresh"
+    assert task.get_task_type() == "interval"
+    assert task.get_task_params() == {"interval_seconds": 3600, "run_immediately": True}
 
 
 def test_learn_sing_songs_run_once_reloads_singing_library_for_learned_songs():
@@ -180,6 +487,76 @@ def test_learn_sing_songs_passes_full_lyrics_to_dynamic_capability():
     assert captured["song_name"] == "Song A"
     assert captured["segment_description"] == "主歌"
     assert captured["lyrics"] == "第一句歌词\n第二句歌词\n副歌歌词"
+
+
+def test_learn_sing_songs_deduplicates_learned_songs_before_side_effects():
+    learner = SimpleNamespace(
+        check_qq_credential=lambda: True,
+        try_learn_pending=lambda: SimpleNamespace(
+            learned=["Song A", "song a", "Song B", "Song A"],
+            abandoned=[],
+            awaiting=[],
+        ),
+    )
+    event_store = FakeEventStore()
+    published = []
+
+    class FakeCharacterRuntime:
+        async def publish_learned_song_dynamic(self, **kwargs):
+            published.append(kwargs["song_name"])
+            return {"dynamic_id": f"dynamic-{kwargs['song_name']}"}
+
+    manager = SimpleNamespace(
+        can_i_sing_song=lambda song_name: (song_name, ["主歌"]),
+        get_full_lyrics=lambda _song_name: "歌词",
+    )
+    task = LearnSingSongsTask({}, character_id="luotianyi", singing_manager=manager)
+    task.auto_song_learner = learner
+    task.event_store = event_store
+    task.character_runtime = FakeCharacterRuntime()
+    task.system_runtime = SimpleNamespace(
+        capability_manager=SimpleNamespace(
+            singing=SimpleNamespace(
+                reload_songs=lambda *_: None,
+                tag_song_emotions=lambda *_: [],
+            )
+        )
+    )
+
+    result = task.run_once()
+
+    assert result.data["learned"] == ["Song A", "Song B"]
+    assert published == ["Song A", "Song B"]
+    assert event_store.events[0]["description"] == "Song A、Song B"
+
+
+def test_learn_sing_songs_already_learned_wins_over_learned_result():
+    learner = SimpleNamespace(
+        check_qq_credential=lambda: True,
+        try_learn_pending=lambda: SimpleNamespace(
+            learned=["Song A"],
+            already_learned=["song a"],
+            abandoned=[],
+            awaiting=[],
+        ),
+    )
+    published = []
+
+    class FakeCharacterRuntime:
+        async def publish_learned_song_dynamic(self, **kwargs):
+            published.append(kwargs["song_name"])
+            return {"dynamic_id": "unexpected"}
+
+    task = LearnSingSongsTask({})
+    task.auto_song_learner = learner
+    task.character_runtime = FakeCharacterRuntime()
+
+    result = task.run_once()
+
+    assert result.data["learned"] == []
+    assert result.data["already_learned"] == ["song a"]
+    assert result.data["dynamic_ids"] == []
+    assert published == []
 
 
 def test_learn_sing_songs_write_learned_event_skips_without_store():
@@ -379,6 +756,150 @@ def test_run_song_workflow_maps_credential_error(monkeypatch, tmp_path):
         raise AssertionError("Expected credential error to be mapped to SL021")
 
 
+def _patch_song_workflow_after_download(monkeypatch, run_song_workflow):
+    def fake_clean_audio_file(*, output_dir, final_stem_name, **_kwargs):
+        cleaned = output_dir / f"{final_stem_name}.cleaned.mp3"
+        inst = output_dir / f"{final_stem_name}.inst.mp3"
+        cleaned.write_bytes(b"cleaned")
+        inst.write_bytes(b"inst")
+        return cleaned, inst
+
+    monkeypatch.setattr(run_song_workflow, "clean_audio_file", fake_clean_audio_file)
+    monkeypatch.setattr(
+        run_song_workflow,
+        "generate_boundary_inst",
+        lambda song_dir: (song_dir / "boundary_inst.txt").write_text("boundary", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        run_song_workflow,
+        "generate_clear_lrc",
+        lambda song_dir: (song_dir / "song.clear.lrc").write_text("clear", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        run_song_workflow,
+        "generate_llm_lrc",
+        lambda song_dir, **_kwargs: (song_dir / "song.llm.lrc").write_text("llm", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        run_song_workflow,
+        "generate_song_json",
+        lambda song_dir: (song_dir / "song.json").write_text("{}", encoding="utf-8"),
+    )
+    monkeypatch.setattr(run_song_workflow, "validate_output_files", lambda **_kwargs: None)
+
+
+def test_run_song_workflow_downloads_new_song_in_temp_dir(monkeypatch, tmp_path):
+    from src.world.learn_sing_songs.song_learner import run_song_workflow
+
+    output_dir = tmp_path / "songs"
+    captured = {}
+
+    def fake_download(*, output_dir, **_kwargs):
+        temporary_output_dir = Path(output_dir)
+        captured["output_dir"] = temporary_output_dir
+        assert not (output_dir_root / "Requested Song").exists()
+        source_dir = temporary_output_dir / "Actual Song"
+        source_dir.mkdir(parents=True)
+        mp3 = source_dir / "Actual Song.mp3"
+        lrc = source_dir / "Actual Song.lrc"
+        mp3.write_bytes(b"mp3")
+        lrc.write_text("[00:00.00]歌词", encoding="utf-8")
+        return "Actual Song", mp3, lrc
+
+    output_dir_root = output_dir
+    monkeypatch.setattr(run_song_workflow, "download_song_and_lyric", fake_download)
+    _patch_song_workflow_after_download(monkeypatch, run_song_workflow)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_song_workflow.py",
+            "Requested Song",
+            "--output_dir",
+            str(output_dir),
+            "--resource_root",
+            str(tmp_path / "resource"),
+        ],
+    )
+
+    run_song_workflow.main()
+
+    assert captured["output_dir"].parent == output_dir
+    assert not (output_dir / "Requested Song").exists()
+    assert (output_dir / "Actual Song" / "Actual Song.mp3").exists()
+    assert (output_dir / "Actual Song" / "Actual Song.lrc").exists()
+    assert not any(path.name.startswith(".Requested Song.") for path in output_dir.iterdir())
+
+
+def test_run_song_workflow_removes_temp_dir_when_new_download_fails(monkeypatch, tmp_path):
+    from src.world.learn_sing_songs.song_learner import run_song_workflow
+
+    output_dir = tmp_path / "songs"
+
+    def fail_download(*, output_dir, **_kwargs):
+        partial_dir = Path(output_dir) / "Requested Song"
+        partial_dir.mkdir(parents=True)
+        (partial_dir / "Requested Song.mp3").write_bytes(b"partial")
+        raise RuntimeError("download failed")
+
+    monkeypatch.setattr(run_song_workflow, "download_song_and_lyric", fail_download)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_song_workflow.py",
+            "Requested Song",
+            "--output_dir",
+            str(output_dir),
+            "--resource_root",
+            str(tmp_path / "resource"),
+        ],
+    )
+
+    with pytest.raises(run_song_workflow.SongWorkflowError) as exc_info:
+        run_song_workflow.main()
+
+    assert exc_info.value.exit_code == 20
+    assert output_dir.exists()
+    assert not (output_dir / "Requested Song").exists()
+    assert list(output_dir.iterdir()) == []
+
+
+def test_run_song_workflow_resumes_existing_target_dir(monkeypatch, tmp_path):
+    from src.world.learn_sing_songs.song_learner import run_song_workflow
+
+    output_dir = tmp_path / "songs"
+    target_dir = output_dir / "Existing Song"
+    target_dir.mkdir(parents=True)
+    (target_dir / "Existing Song.mp3").write_bytes(b"mp3")
+    (target_dir / "Existing Song.lrc").write_text("[00:00.00]歌词", encoding="utf-8")
+    status = run_song_workflow.WorkflowStatus(target_dir)
+    status.mark_completed("download_song")
+
+    def fail_if_download_called(**_kwargs):
+        raise AssertionError("已有目录且 download_song 已完成时不应重新下载")
+
+    monkeypatch.setattr(run_song_workflow, "download_song_and_lyric", fail_if_download_called)
+    _patch_song_workflow_after_download(monkeypatch, run_song_workflow)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "run_song_workflow.py",
+            "Existing Song",
+            "--output_dir",
+            str(output_dir),
+            "--resource_root",
+            str(tmp_path / "resource"),
+        ],
+    )
+
+    run_song_workflow.main()
+
+    assert (target_dir / "workflow_status.json").exists()
+    assert not any(path.name.startswith(".Existing Song.") for path in output_dir.iterdir())
+
+
 def test_wishlist_sync_existing_songs_removes_wished_song(tmp_path):
     logger = SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
     wishlist = WishlistManager(str(tmp_path / "metadata.json"), logger)
@@ -440,7 +961,52 @@ def test_songlearner_title_ranking_prefers_exact_but_allows_redirect():
     assert qq_safe_name("想和你迎着台风去看海（Live版）") == "想和你迎着台风去看海"
 
 
-def test_songlearner_allows_redirect_candidates_after_matching_download_failure(monkeypatch, tmp_path):
+def test_songlearner_title_matching_accepts_long_common_subsequence():
+    assert longest_common_subsequence_length("星河入梦", "星光入梦") == 3
+    assert title_matches({"title": "星光入梦"}, "星河入梦") is True
+    assert title_matches({"title": "我的悲伤是水做的"}, "Style") is False
+    assert title_matches({}, "告死鸟") is False
+
+
+def test_songlearner_title_ranking_excludes_unrelated_candidates():
+    songs = [
+        {"title": "我的悲伤是水做的"},
+        {"title": "告死鸟"},
+        {"title": "告死鸟（Live版）"},
+    ]
+
+    ranked = rank_songs_by_title(songs, "告死鸟")
+
+    assert [song["title"] for song in ranked] == ["告死鸟", "告死鸟（Live版）"]
+
+
+@pytest.mark.parametrize(
+    "requested_name",
+    [
+        "我的灵魂是个哑巴",
+        "Xterfusion",
+        "anmianqu",
+        "庸俗救星",
+        "云端的悄悄话",
+        "The Fox (What Does the Fox Say?)",
+        "桃花笑",
+        "星愿",
+        "new_song",
+        "monolought",
+        "并不喜欢吃鱼",
+        "豪庭喵",
+        "光与影的未来",
+        "汽水一样冒泡泡的歌",
+        "Style",
+    ],
+)
+def test_songlearner_rejects_titles_from_duplicate_water_sorrow_incident(
+    requested_name,
+):
+    assert title_matches({"title": "我的悲伤是水做的"}, requested_name) is False
+
+
+def test_songlearner_does_not_try_unrelated_candidates_after_matching_download_failure(monkeypatch, tmp_path):
     songs = [
         {"title": "下等马", "mid": "bad-mid", "singer": [{"name": "洛天依"}]},
         {"title": "告死鸟", "mid": "target-mid", "singer": [{"name": "洛天依"}]},
@@ -461,8 +1027,7 @@ def test_songlearner_allows_redirect_candidates_after_matching_download_failure(
         message = str(exc)
         assert "匹配到 告死鸟" in message
         assert "告死鸟: 登录后仍未获取到可下载链接" in message
-        assert "下等马: 登录后仍未获取到可下载链接" in message
-        assert "最佳标题与请求不匹配" not in message
+        assert "下等马" not in message
     else:
         raise AssertionError("Expected matching candidate download failure")
 
@@ -491,3 +1056,40 @@ def test_download_song_and_lyric_uses_qq_redirected_title(monkeypatch, tmp_path)
     assert mp3_path == tmp_path / "想和你迎着台风去看海" / "想和你迎着台风去看海.mp3"
     assert lrc_path == tmp_path / "想和你迎着台风去看海" / "想和你迎着台风去看海.lrc"
     assert not (tmp_path / "海").exists()
+
+
+def test_auto_song_learner_does_not_report_redirect_to_existing_song_as_new(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
+    monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
+    wishlist = WishlistManager(
+        str(tmp_path / "music" / "metadata.json"),
+        SimpleNamespace(info=lambda *_: None, warning=lambda *_: None),
+    )
+    wishlist.add("星河入梦")
+    learner = AutoSongLearner(
+        {"songlearner_resource_dir": str(tmp_path / "song_learner_res")},
+        "洛天依",
+        wishlist,
+        resource_path=tmp_path / "music",
+    )
+    existing_name = "星光入梦"
+    existing_dir = learner.songs_dir / existing_name
+    existing_dir.mkdir(parents=True)
+    (existing_dir / f"{existing_name}.mp3").write_bytes(b"mp3")
+    (existing_dir / f"{existing_name}.lrc").write_text("[00:00.00]歌词", encoding="utf-8")
+    (existing_dir / f"{existing_name}.json").write_text(
+        json.dumps({"title": existing_name}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(learner, "_try_learn_one", lambda _name: existing_name)
+    notifications = []
+    monkeypatch.setattr(learner, "_notify_new_songs", notifications.append)
+
+    result = learner.try_learn_pending()
+
+    assert result.learned == []
+    assert result.already_learned == [existing_name]
+    assert notifications == []

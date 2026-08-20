@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, TYPE_CHECKING
 
 from src.system.database.event_models import UnifiedEventType
+from src.utils.helpers import get_unified_song_name
 from src.utils.logger import get_logger
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
@@ -12,7 +13,7 @@ from src.world.types.world_task import WorldTask
 if TYPE_CHECKING:
     from src.system.system_runtime import SystemRuntime
     from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
-    from src.system.database.event_store import EventStore
+    from src.system.database.services.event_store import EventStore
     from src.capabilities.singing.singing_manager import SingingManager
     from src.agent_runtime.character_runtime import CharacterRuntime
 
@@ -59,8 +60,28 @@ class LearnSingSongsTask(WorldTask):
             )
 
         credential_ok = bool(self.auto_song_learner.check_qq_credential())
+        if not credential_ok:
+            return WorldTaskResult.skipped_result(
+                self.task_name,
+                "QQ Music credential could not be refreshed; song learning was not started",
+                credential_ok=False,
+            )
+
         result = self.auto_song_learner.try_learn_pending()
-        learned = list(getattr(result, "learned", []) or [])
+        learned = self._deduplicate_song_names(
+            list(getattr(result, "learned", []) or [])
+        )
+        already_learned = self._deduplicate_song_names(
+            list(getattr(result, "already_learned", []) or [])
+        )
+        already_learned_keys = {
+            get_unified_song_name(song_name) for song_name in already_learned
+        }
+        learned = [
+            song_name
+            for song_name in learned
+            if get_unified_song_name(song_name) not in already_learned_keys
+        ]
         abandoned = list(getattr(result, "abandoned", []) or [])
         awaiting = list(getattr(result, "awaiting", []) or [])
 
@@ -68,6 +89,7 @@ class LearnSingSongsTask(WorldTask):
             asyncio.run(self._write_learned_event(learned))
         if learned:
             self._reload_singing_library()
+            self._tag_learned_songs(learned)
             published_dynamic_ids = self._publish_learned_dynamics(learned)
         else:
             published_dynamic_ids = []
@@ -77,10 +99,24 @@ class LearnSingSongsTask(WorldTask):
             "song learning pass completed",
             credential_ok=credential_ok,
             learned=learned,
+            already_learned=already_learned,
             abandoned=abandoned,
             awaiting=awaiting,
             dynamic_ids=published_dynamic_ids,
         )
+
+    @staticmethod
+    def _deduplicate_song_names(song_names: list[str]) -> list[str]:
+        unique: list[str] = []
+        seen: set[str] = set()
+        for song_name in song_names:
+            display_name = str(song_name or "").strip()
+            unified_name = get_unified_song_name(display_name)
+            if not display_name or not unified_name or unified_name in seen:
+                continue
+            seen.add(unified_name)
+            unique.append(display_name)
+        return unique
 
     def _build_auto_song_learner(self) -> "AutoSongLearner" | None:
         try:
@@ -134,6 +170,20 @@ class LearnSingSongsTask(WorldTask):
         except Exception as exc:
             self.logger.warning(f"Failed to reload singing library after learning songs: {exc}")
 
+    def _tag_learned_songs(self, learned: list[str]) -> None:
+        if self.system_runtime is None:
+            return
+        singing = getattr(getattr(self.system_runtime, "capability_manager", None), "singing", None)
+        tag_song = getattr(singing, "tag_song_emotions", None)
+        if not callable(tag_song):
+            return
+        for song_name in learned:
+            try:
+                tags = asyncio.run(tag_song(self.character_id, song_name))
+                self.logger.info(f"Song emotion tags generated: {song_name} -> {tags}")
+            except Exception as exc:
+                self.logger.warning(f"Failed to tag learned song emotions for {song_name}: {exc}")
+
     def _publish_learned_dynamics(self, learned: list[str]) -> list[str]:
         if self.character_runtime is None:
             return []
@@ -149,7 +199,7 @@ class LearnSingSongsTask(WorldTask):
                     )
                 )
                 dynamic_id = result.get("dynamic_id")
-                if dynamic_id:
+                if dynamic_id and result.get("created", True):
                     published.append(str(dynamic_id))
             except Exception as exc:
                 self.logger.warning(f"Failed to publish learned-song dynamic for {song_name}: {exc}")

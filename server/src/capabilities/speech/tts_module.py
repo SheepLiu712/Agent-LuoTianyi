@@ -1,8 +1,8 @@
 import os
 import json
-import asyncio
 from typing import Dict, Any, Generator
 from src.utils.logger import get_logger
+from src.utils.asyncio_helpers import run_sync_owned
 from src.capabilities.speech.tts_server import TTSServer
 
 class ReferenceAudio:
@@ -136,8 +136,8 @@ class TTSModule:
         self._debug(f"Sending TTS request for text: {text[:20]}...")
         
         try:
-            # Use asyncio.to_thread to keep this method async-friendly.
-            audio_bytes = await asyncio.to_thread(
+            # Keep the event loop responsive while retaining shutdown ownership.
+            audio_bytes = await run_sync_owned(
                 self.tts_server.synthesize,
                 payload["text"],
                 payload["ref_audio_path"],
@@ -197,6 +197,10 @@ class TTSModule:
         import base64
         return base64.b64encode(audio_bytes).decode("utf-8")
 
+    def shutdown(self) -> None:
+        """Stop the dedicated TTS worker owned by this module."""
+        self.tts_server.stop()
+
 
 def init_tts_module(tts_config: Dict[str, Any]) -> TTSModule:
     server_config_path = tts_config.get("server_config_path", "res/tts/luotianyi/tts_infer.yaml")
@@ -205,6 +209,12 @@ def init_tts_module(tts_config: Dict[str, Any]) -> TTSModule:
         suppress_worker_output=tts_config.get("suppress_worker_output", True),
         trim_startup_memory=tts_config.get("trim_startup_memory", True),
     )
-    tts_server.start()
-    tts_module = TTSModule(tts_config=tts_config, tts_server=tts_server)
-    return tts_module
+    try:
+        tts_server.start()
+        return TTSModule(tts_config=tts_config, tts_server=tts_server)
+    except BaseException:
+        try:
+            tts_server.stop()
+        except Exception as error:
+            get_logger(__name__).error(f"TTS module initialization rollback failed: {error}")
+        raise

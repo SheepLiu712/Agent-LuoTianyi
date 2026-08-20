@@ -8,11 +8,18 @@ import re
 import base64
 import datetime
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import deque
 from typing import Callable, TYPE_CHECKING
-from ..network.event_types import AgentMessage
+from ..network.event_types import AgentMessage, is_audio_terminal
 from ..utils.logger import get_logger
+from ..delivery_policy import (
+    MAX_DURABLE_MESSAGE_AGE_SECONDS,
+    can_retry_durable_message,
+    delivery_uncertain_result,
+    get_send_retry_delay_seconds,
+    is_durable_send_kind,
+)
 
 if TYPE_CHECKING:
     from ..network.network_client import NetworkClient
@@ -25,18 +32,30 @@ class OutgoingMessage:
     payload: dict
     done_event: threading.Event
     result: dict | None = None
+    retry_attempt: int = 0
+    enqueued_monotonic: float = field(default_factory=time.monotonic)
+
+
+@dataclass
+class PreparedAgentMessage:
+    response: AgentMessage
+    audio_saved: bool = False
+
 
 class MessageProcessor:
     def __init__(self,
                 network_client: "NetworkClient",
                 ):
         self._event_queue: queue.Queue = queue.Queue() # 收到的WS消息会被放入这个队列，等待处理线程处理
+        self._playback_queue: queue.Queue = queue.Queue() # 已完成音频聚合/落盘、等待展示和播放的消息
         self._send_queue: deque[OutgoingMessage] = deque() # 需要发送的消息会被放入这个队列
         self._send_cond = threading.Condition() # 发送线程会等待这个条件变量，直到有消息需要发送
-        self._listener_thread = threading.Thread(target=self._listen_ws_events, daemon=True) # 处理WS消息的线程
+        self._listener_thread = threading.Thread(target=self._listen_ws_events, daemon=True) # 收包、聚合和落盘线程
+        self._playback_thread = threading.Thread(target=self._process_playback_events, daemon=True) # 串行展示和播放线程
         self._sender_thread = threading.Thread(target=self._send_loop, daemon=True) # 处理发送消息的线程
         self.model: Live2dModel | None = None # Live2D模型实例，用于根据消息中的表情指令更新模型表情
         self.response_signal: Callable[[str, str], None] | None = None # 为ui增加一条回复信息
+        self.system_message_signal: Callable[[str], None] | None = None # 为 UI 增加系统提示
         self.update_bubble_signal: Callable[[str, str], None] | None = None # 更新气泡信息
         self.agent_thinking_signal: Callable[[bool], None] | None = None # 显示agent正在思考的状态
         self.local_tts_state_signal: Callable[[str, str], None] | None = None # 本地TTS状态变化的回调信号，参数为事件类型（start/finish）和对应的conv_uuid
@@ -45,6 +64,7 @@ class MessageProcessor:
         self._reply_counter = 0
         self._running = True
         self._last_typing_time = None
+        self._audio_buffers: dict[str, bytearray] = {}
 
         self.multimedia_stream: MultiMediaStream | None = MultiMediaStream()
         self.multimedia_stream.set_local_playback_state_callback(self._on_local_tts_state)
@@ -52,21 +72,23 @@ class MessageProcessor:
         self.logger = get_logger("MessageProcessor")
 
         # 设置消息处理器发送消息的网络客户端接口，以及将消息处理器接收消息的函数传入网络客户端，以便网络客户端能将WS消息传入消息处理器
-        network_client.network_set_message_listener(self.feed_agent_msg, self.change_agent_state)
+        network_client.network_set_message_listener(
+            self.feed_agent_msg,
+            self.change_agent_state,
+            self.feed_system_message,
+        )
         self.send_text_func:Callable[..., dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
         self.send_typing_func:Callable[..., dict] = network_client.send_typing
         self.send_touch_func:Callable[..., dict] = network_client.send_touch
         self.send_image_selecting_func:Callable = network_client.send_image_selecting
         self.send_image_selecting_cancel_func:Callable = network_client.send_image_selecting_cancel
-        self.start()
-
-        self.processing_uuid = None
-        self.processing_audio: bytearray = bytearray()
         self.date_detected_signal: Callable[[dict], None] | None = None  # 检测到重要日期的信号
+        self.start()
 
     def start(self):
         self._listener_thread.start()
+        self._playback_thread.start()
         self._sender_thread.start()
         self.multimedia_stream.start()
 
@@ -144,6 +166,8 @@ class MessageProcessor:
         return local_id
 
     def send_touch(self, touch_area: str | list, click_frequency: dict = None, touch_meta: dict = None):
+        if self.is_server_audio_active():
+            return None
         local_id = self._next_local_id("touch")
         if isinstance(touch_area, str):
             payload = {"touch_area": touch_area}
@@ -164,6 +188,9 @@ class MessageProcessor:
             self._send_queue.append(item)
             self._send_cond.notify()
         return local_id
+
+    def is_server_audio_active(self) -> bool:
+        return bool(self.multimedia_stream and self.multimedia_stream.is_server_audio_active())
 
     def send_image_selecting_start(self):
         """发送图片选择开始事件。"""
@@ -198,16 +225,8 @@ class MessageProcessor:
             return
         self.multimedia_stream.set_volume_percent(percent)
 
-    def process_transport_message(self, response: AgentMessage): # 真正处理消息的函数
+    def process_transport_message(self, response: AgentMessage, audio_saved: bool = False): # 展示和播放消息
         display_in_chat = getattr(response, "display_in_chat", True)
-
-        if self.processing_uuid is None:
-            self.processing_uuid = response.uuid
-            self.processing_audio = bytearray()
-        elif self.processing_uuid != response.uuid: # 如果uuid不同，说明是新的消息了，重置状态
-            self.logger.warning(f"Received message with new uuid (old={self.processing_uuid}, new={response.uuid}), resetting processing state.")
-            self.processing_uuid = response.uuid
-            self.processing_audio = bytearray()
 
         if display_in_chat and response.text:
             self.response_signal(response.uuid, response.text)
@@ -217,25 +236,41 @@ class MessageProcessor:
 
         if response.audio:
             self.multimedia_stream.feed(response.audio)
+
+        if is_audio_terminal(response):
+            if display_in_chat and audio_saved and self.update_bubble_signal:
+                # 通知UI对应的气泡有本地音频可播放
+                try:
+                    self.update_bubble_signal(response.uuid, "has_audio")
+                except Exception as exc:
+                    self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={response.uuid}): {exc}")
+            self.multimedia_stream.finish_one_sentense()
+
+    def _prepare_agent_message(self, response: AgentMessage) -> PreparedAgentMessage:
+        """在收包线程中聚合并落盘，不等待该句话展示或播放。"""
+        if getattr(response, "is_ephemeral", False):
+            # 触摸快速反射不会进入聊天历史，也没有消息气泡可供回放；只做实时播放。
+            self._audio_buffers.pop(response.uuid, None)
+            return PreparedAgentMessage(response=response, audio_saved=False)
+
+        audio_buffer = self._audio_buffers.setdefault(response.uuid, bytearray())
+        if response.audio:
             try:
-                chunk_bytes = base64.b64decode(response.audio)
-                self.processing_audio.extend(chunk_bytes)
+                audio_buffer.extend(base64.b64decode(response.audio))
             except Exception as exc:
                 self.logger.error(f"Failed to decode audio chunk (uuid={response.uuid}): {exc}")
 
-        if response.is_final_package:
-            self.multimedia_stream.finish_one_sentense()
-            # 将最终的音频结果保存到本地
-            saved_uuid = self.processing_uuid
-            ret = self._save_audio_to_temp(self.processing_audio, saved_uuid, ".wav")
-            self.processing_audio = bytearray()
-            self.processing_uuid = None
-            if display_in_chat and ret and self.update_bubble_signal:
-                # 通知UI对应的气泡有本地音频可播放
-                try:
-                    self.update_bubble_signal(saved_uuid, "has_audio")
-                except Exception as exc:
-                    self.logger.error(f"Failed to emit update_bubble_signal for audio (uuid={saved_uuid}): {exc}")
+        audio_saved = False
+        if is_audio_terminal(response):
+            completed_audio = self._audio_buffers.pop(response.uuid, bytearray())
+            if response.audio_error:
+                self.logger.warning(
+                    f"Audio stream ended with error (uuid={response.uuid}, code={response.error_code or 'UNKNOWN'})"
+                )
+            elif completed_audio:
+                audio_saved = bool(self._save_audio_to_temp(completed_audio, response.uuid, ".wav"))
+
+        return PreparedAgentMessage(response=response, audio_saved=audio_saved)
 
     def _send_loop(self):
         while self._running:
@@ -246,7 +281,13 @@ class MessageProcessor:
                     return
                 item = self._send_queue[0]
 
-            self.update_bubble_signal(item.local_id, "waiting")
+            durable = is_durable_send_kind(item.kind)
+            if durable and time.monotonic() - item.enqueued_monotonic >= MAX_DURABLE_MESSAGE_AGE_SECONDS:
+                self._fail_delivery_uncertain(item, "message exceeded the automatic delivery window")
+                continue
+
+            if durable:
+                self.update_bubble_signal(item.local_id, "waiting")
             ack = self._send_one(item)
             if ack.get("ok", False):
                 with self._send_cond:
@@ -254,11 +295,23 @@ class MessageProcessor:
                         self._send_queue.popleft()
                 item.result = ack
                 item.done_event.set()
-                self.update_bubble_signal(item.local_id, "submitted")
+                if durable:
+                    self.update_bubble_signal(item.local_id, "submitted")
                 continue
 
             error_text = str(ack.get("error") or "")
             self.logger.error(f"Failed to send message (local_id={item.local_id}): {error_text}")
+            if not durable:
+                with self._send_cond:
+                    if self._send_queue and self._send_queue[0] is item:
+                        self._send_queue.popleft()
+                item.result = ack
+                item.done_event.set()
+                self.logger.debug(
+                    f"Dropped transient event after send failure (kind={item.kind}, local_id={item.local_id})"
+                )
+                continue
+
             if self._is_terminal_send_error(error_text) or ack.get("drop", False):
                 with self._send_cond:
                     if self._send_queue and self._send_queue[0] is item:
@@ -267,16 +320,45 @@ class MessageProcessor:
                 item.done_event.set()
                 self.update_bubble_signal(item.local_id, "failed")
                 continue
+            retry_delay = get_send_retry_delay_seconds(item.retry_attempt)
+            if not can_retry_durable_message(
+                item.retry_attempt,
+                item.enqueued_monotonic,
+                retry_delay,
+            ):
+                self._fail_delivery_uncertain(item, error_text or "delivery acknowledgement was not received")
+                continue
+            item.retry_attempt += 1
             self.update_bubble_signal(item.local_id, "waiting")
-            # Retransmit head item after 1s when ack timeout/disconnect occurs.
-            time.sleep(1.0)
+            time.sleep(retry_delay)
+
+    def _fail_delivery_uncertain(self, item: OutgoingMessage, reason: str) -> None:
+        result = delivery_uncertain_result(item.client_msg_id, reason)
+        with self._send_cond:
+            if self._send_queue and self._send_queue[0] is item:
+                self._send_queue.popleft()
+        item.result = result
+        item.done_event.set()
+        self.update_bubble_signal(item.local_id, "failed")
+        self.logger.error(
+            "Durable message delivery is uncertain "
+            f"(local_id={item.local_id}, client_msg_id={item.client_msg_id}, "
+            f"retry_attempt={item.retry_attempt}): {reason}"
+        )
 
     def feed_agent_msg(self, payload: AgentMessage): # 接收WS传来的消息，放入队列等待处理
+        if getattr(payload, "audio", "") and self.multimedia_stream:
+            # 在监听线程排队之前就停止消息回放，服务端在线音频始终拥有优先权。
+            self.multimedia_stream.reserve_server_audio()
         self._event_queue.put(payload)
     
     def change_agent_state(self, state: str):
         if self.agent_thinking_signal:
             self.agent_thinking_signal(state)
+
+    def feed_system_message(self, text: str):
+        if text and self.system_message_signal:
+            self.system_message_signal(text)
 
     def set_signals(
         self,
@@ -285,12 +367,14 @@ class MessageProcessor:
         agent_thinking_signal: Callable[[str], None],
         local_tts_state_signal: Callable[[str, str], None] | None = None,
         expression_signal: Callable[[str], None] | None = None,
+        system_message_signal: Callable[[str], None] | None = None,
     ):
         self.response_signal = response_signal
         self.update_bubble_signal = update_bubble_signal
         self.agent_thinking_signal = agent_thinking_signal
         self.local_tts_state_signal = local_tts_state_signal
         self.expression_signal = expression_signal
+        self.system_message_signal = system_message_signal
 
     def _on_local_tts_state(self, event: str, conv_uuid: str):
         if self.local_tts_state_signal:
@@ -304,8 +388,16 @@ class MessageProcessor:
         while self._running:
             payload = self._event_queue.get()
             if payload is None:
+                self._playback_queue.put(None)
                 break
-            self.process_transport_message(payload)
+            self._playback_queue.put(self._prepare_agent_message(payload))
+
+    def _process_playback_events(self):
+        while self._running:
+            prepared = self._playback_queue.get()
+            if prepared is None:
+                break
+            self.process_transport_message(prepared.response, audio_saved=prepared.audio_saved)
 
     def _next_local_id(self, prefix: str) -> str:
         self._reply_counter += 1
@@ -413,8 +505,6 @@ class MessageProcessor:
     @staticmethod
     def _is_terminal_send_error(error_text: str) -> bool:
         text = error_text.lower()
-        if "not logged in" in text:
-            return True
         if "failed to read image file" in text:
             return True
         return False

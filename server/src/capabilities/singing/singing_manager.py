@@ -20,7 +20,7 @@ class SingingManager:
         self.character_name = config.get("character_name", "洛天依")
         self.resource_path = config.get("resource_path")
         if not self.resource_path:
-            raise ValueError("SingingManager requires capabilities.sing.<character_id>.resource_path")
+            raise ValueError("SingingManager requires capabilities.sing.characters.<character_id>.resource_path")
         self.all_songs: dict[str, SongMetadata] = {}
         self.song_aliases: dict[str, str] = {}
         self.tools: Dict[str, MyTool] = {}
@@ -74,6 +74,11 @@ class SingingManager:
                 description = song_config.get("description", "")
                 lrc_offset = song_config.get("lrc_offset", 0)
                 segments = song_config.get("segments", [])
+                emotion_tags = song_config.get("emotion_tags", [])
+                if isinstance(emotion_tags, str):
+                    emotion_tags = [emotion_tags]
+                if not isinstance(emotion_tags, list):
+                    emotion_tags = []
                 segment_objs = []
                 for seg in segments:
                     segment_objs.append(
@@ -92,6 +97,7 @@ class SingingManager:
                     lrc_path=str(lyrics_file),
                     lrc_offset=lrc_offset,
                     segments=segment_objs,
+                    emotion_tags=[str(tag).strip() for tag in emotion_tags if str(tag).strip()],
                 )
                 unified_song_name = SingingManager.get_unified_song_name(title)
                 self.all_songs[unified_song_name] = song_metadata
@@ -117,26 +123,80 @@ class SingingManager:
         old_count = len(self.all_songs)
         self.get_music_data()
         self.wishlist.sync_existing_songs(set(self.all_songs.keys()) | set(self.song_aliases.keys()))
+
+    def update_song_emotion_tags(self, song_name: str, emotion_tags: list[str]) -> bool:
+        metadata = self.get_song_metadata(song_name)
+        if metadata is None:
+            return False
+        config_path = pathlib.Path(metadata.song_path).parent / f"{metadata.song_name}.json"
+        if not config_path.exists():
+            return False
+        try:
+            data = json.loads(config_path.read_text(encoding="utf-8"))
+            normalized = []
+            for tag in emotion_tags:
+                value = str(tag).strip()
+                if value and value not in normalized:
+                    normalized.append(value)
+            data["emotion_tags"] = normalized
+            tmp_path = config_path.with_suffix(".json.tmp")
+            tmp_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            tmp_path.replace(config_path)
+            metadata.emotion_tags = normalized
+            return True
+        except Exception as exc:
+            self.logger.warning(f"Failed to persist emotion tags for {song_name}: {exc}")
+            return False
         self.logger.info(f"Reloaded songs: {old_count} → {len(self.all_songs)}")
 
     # ————歌曲选择相关————
 
-    def pick_segment_for_song(self, song_name: str) -> Tuple[str, str]:
+    def pick_segment_for_song(
+        self,
+        song_name: str,
+        excluded_segments: set[tuple[str, str]] | None = None,
+    ) -> Tuple[str, str]:
         """为指定歌曲随机选择一个可唱唱段描述。"""
         correct_song_name, segments = self.can_i_sing_song(song_name)
         if not segments:
             return "", ""
-        return correct_song_name, random.choice(segments)
+        excluded = excluded_segments or set()
+        available = [
+            segment
+            for segment in segments
+            if (correct_song_name, segment) not in excluded
+        ]
+        return correct_song_name, random.choice(available or segments)
 
-    def pick_random_song_and_segment(self) -> Optional[Tuple[str, str]]:
+    def pick_random_song_and_segment(
+        self,
+        target_emotion_tags: list[str] | None = None,
+        excluded_segments: set[tuple[str, str]] | None = None,
+    ) -> Optional[Tuple[str, str]]:
         """从可唱曲库中随机选择一首歌及其可唱唱段。"""
         if not self.all_songs:
             return None, None
 
-        unified_song_names = list(self.all_songs.keys())
+        target_tags = {str(tag).strip() for tag in (target_emotion_tags or []) if str(tag).strip()}
+        candidates = list(self.all_songs.items())
+        if target_tags:
+            tagged_candidates = [
+                item for item in candidates
+                if target_tags.intersection(item[1].emotion_tags)
+            ]
+            if tagged_candidates:
+                candidates = tagged_candidates
+
+        unified_song_names = [song_name for song_name, _ in candidates]
         random.shuffle(unified_song_names)
         for unified_song_name in unified_song_names:
-            correct_song_name, segment = self.pick_segment_for_song(unified_song_name)
+            correct_song_name, segment = self.pick_segment_for_song(
+                unified_song_name,
+                excluded_segments=excluded_segments,
+            )
             if segment:
                 return correct_song_name, segment
         return None, None

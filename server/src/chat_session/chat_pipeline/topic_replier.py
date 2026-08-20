@@ -26,6 +26,7 @@ class TopicReplier:
         character_id: str = "luotianyi",
         context_provider: Optional[Callable[..., Awaitable[str | dict[str, Any]]]] = None,
         reflection_submitter: Optional[Callable[[CompletedTurn], Awaitable[None]]] = None,
+        recent_sung_segments=None,
     ):
         self.config = config
         self.username = username
@@ -33,13 +34,15 @@ class TopicReplier:
         self.character_id = character_id
         self.send_reply_callback: Optional[Callable[["ChatResponse"], Awaitable[None]]] = None
         self.logger = get_logger(f"{username}TopicReplier")
-        self.topic_queue = asyncio.Queue()
+        self.queue_maxsize = max(1, int(config.get("queue_maxsize", 64)))
+        self.topic_queue = asyncio.Queue(maxsize=self.queue_maxsize)
         self.processor_task: asyncio.Task | None = None
         self.system_runtime: "SystemRuntime" | None = None
         self.is_processing: bool = False
         self.change_state_callback : Optional[Callable[[bool, bool], Awaitable[None]]] = None # thinking, speaking
         self.context_provider: Optional[Callable[..., Awaitable[str | dict[str, Any]]]] = context_provider
         self.reflection_submitter = reflection_submitter
+        self.recent_sung_segments = recent_sung_segments
 
         # 触摸事件指针机制
         self._touch_pending: Optional["ExtractedTopic"] = None  # 队列中待处理的触摸 Topic 引用
@@ -148,6 +151,10 @@ class TopicReplier:
 
         # Read application conversation context once and reuse it for this turn.
         conversation_history = await self._get_conversation_context()
+        recent_conversation = await self._get_recent_conversation_context()
+        sing_emotion_context = "\n".join(
+            part for part in [recent_conversation, f"当前话题：{topic.topic_content}"] if part
+        )
 
         if observability is not None:
             with observability.span(
@@ -168,6 +175,8 @@ class TopicReplier:
                     topic=topic,
                     conversation_history=conversation_history,
                     external_context=None,
+                    sing_excluded_segments=set(self.recent_sung_segments or ()),
+                    sing_emotion_context=sing_emotion_context,
                 )
 
                 reply_items = await self.system_runtime.agent_runtime.realize_topic_plan(
@@ -182,6 +191,8 @@ class TopicReplier:
                 topic=topic,
                 conversation_history=conversation_history,
                 external_context=None,
+                sing_excluded_segments=set(self.recent_sung_segments or ()),
+                sing_emotion_context=sing_emotion_context,
             )
 
             reply_items = await self.system_runtime.agent_runtime.realize_topic_plan(
@@ -191,6 +202,7 @@ class TopicReplier:
             )
         reply_generated_monotonic = time.perf_counter()
         reply_generated_ts = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        reply_items = self._resolve_singing_items(reply_items)
         for item in reply_items:
             if isinstance(item, SongSegmentChat):
                 lyrics = self.system_runtime.capabilities.singing.get_segment_lyrics(
@@ -216,6 +228,7 @@ class TopicReplier:
                 topic_id=topic.topic_id,
                 reply_generated_monotonic=reply_generated_monotonic,
                 reply_generated_ts=reply_generated_ts,
+                song_audio_generated_callback=self._record_sung_segment,
             )
 
         await self._submit_reflection_turn(
@@ -235,6 +248,7 @@ class TopicReplier:
         topic_id: str | None = None,
         reply_generated_monotonic: float | None = None,
         reply_generated_ts: str | None = None,
+        song_audio_generated_callback: Callable[[str, str], None] | None = None,
     ) -> None:
         if item.type not in {ContextType.TEXT, ContextType.SING}:
             self.logger.warning(f"Unsupported topic reply type: {item.type}")
@@ -251,6 +265,7 @@ class TopicReplier:
                 topic_id=topic_id,
                 reply_generated_monotonic=reply_generated_monotonic,
                 reply_generated_ts=reply_generated_ts,
+                song_audio_generated_callback=song_audio_generated_callback,
             )
         )
 
@@ -294,4 +309,36 @@ class TopicReplier:
             context = await self.context_provider(force_refresh=True)
             return context if isinstance(context, str) else ""
         return await self.system_runtime.conversation_service.get_context(self.user_id)
+
+    async def _get_recent_conversation_context(self) -> str:
+        if self.context_provider is not None:
+            context = await self.context_provider(force_refresh=False, ret_type="dict")
+            if isinstance(context, dict):
+                recent = context.get("recent_conversation") or []
+                return "\n".join(str(item) for item in recent if str(item).strip())
+        return ""
+
+    def _resolve_singing_items(self, reply_items: List[OneResponseLine]) -> List[OneResponseLine]:
+        resolved: List[OneResponseLine] = []
+        excluded = set(self.recent_sung_segments or ())
+        for item in reply_items:
+            if not isinstance(item, SongSegmentChat):
+                resolved.append(item)
+                continue
+            result = self.system_runtime.capabilities.singing.resolve_sing_plan(
+                self.character_id,
+                item.song,
+                preferred_segment=item.segment,
+                excluded_segments=excluded,
+            )
+            if result is None or result[0] is None or result[1] is None:
+                self.logger.warning(f"Skip unavailable singing intent: {item.song}")
+                continue
+            item.song, item.segment = result
+            resolved.append(item)
+        return resolved
+
+    def _record_sung_segment(self, song_name: str, segment: str) -> None:
+        if self.recent_sung_segments is not None:
+            self.recent_sung_segments.append((song_name, segment))
 
