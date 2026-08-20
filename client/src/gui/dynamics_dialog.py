@@ -29,6 +29,7 @@ SCROLLBAR_SINGLE_STEP = 12
 def _source_label(source_type: str) -> str:
     labels = {
         "citywalk": "城市漫步",
+        "diary": "天依日记",
         "song_learned": "学会新歌",
         "system_notice": "系统通知",
         "user_post": "生活动态",

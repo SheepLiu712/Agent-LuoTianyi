@@ -1386,6 +1386,7 @@ function DynamicsPage() {
             <option value="">全部来源</option>
             <option value="user_post">用户动态</option>
             <option value="citywalk">城市漫步</option>
+            <option value="diary">天依日记</option>
             <option value="song_learned">学歌完成</option>
             <option value="system_notice">系统通知</option>
           </select>

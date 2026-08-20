@@ -396,6 +396,42 @@ def test_admin_dynamic_list_includes_comment_count(db_manager: DatabaseManager):
     assert matched["comment_count"] == 2
 
 
+def test_admin_dynamic_list_filters_diary_source_type(db_manager: DatabaseManager):
+    _add_invite_code(db_manager, "INVITE_DIARY_FILTER")
+    auth = _register_and_login(db_manager, "diaryfilteruser", "INVITE_DIARY_FILTER")
+
+    ok, _, diary = db_manager.dynamic_store.create_dynamic(
+        author_type="agent",
+        author_id="luotianyi",
+        owner_user_id=auth["user_uuid"],
+        visibility="private",
+        content="2026-08-20\n今天和你聊了很多。",
+        source_type="diary",
+        source_id="diary:luotianyi:test-user:2026-08-20",
+        memory_policy="disabled",
+        memory_status="disabled",
+        reply_status="not_applicable",
+    )
+    assert ok is True
+    assert diary is not None
+
+    ok, _, _ = db_manager.dynamic_store.create_dynamic(
+        author_type="user",
+        author_id=auth["user_uuid"],
+        owner_user_id=auth["user_uuid"],
+        visibility="private",
+        content="普通动态",
+        source_type="user_post",
+    )
+    assert ok is True
+
+    feed = db_manager.dynamic_store.admin_list_dynamics(source_type="diary")
+
+    assert [item["id"] for item in feed["items"]] == [diary["id"]]
+    assert feed["items"][0]["source_type"] == "diary"
+    assert feed["items"][0]["content"] == "2026-08-20\n今天和你聊了很多。"
+
+
 def test_user_interface_dynamic_flow(db_manager: DatabaseManager):
     _add_invite_code(db_manager, "INVITE4")
     auth = _register_and_login(db_manager, "uiuser", "INVITE4")
