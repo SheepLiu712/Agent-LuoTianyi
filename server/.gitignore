@@ -5,6 +5,7 @@ __pycache__/
 
 # 分发/打包
 .Python
+node_modules/
 build/
 develop-eggs/
 dist/
