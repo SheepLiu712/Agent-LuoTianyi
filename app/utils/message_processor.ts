@@ -5,12 +5,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
 import { AgentBinder } from './binder';
 import { addDebugTrace } from './debug_trace';
-import {
-  buildChatCompletionsPayload,
-  callLlmProvider,
-  CLIENT_JSON_UNSUPPORTED_MARKER,
-} from './llm_client';
-import { getModuleConfig } from './llm_key_storage';
+import { buildChatCompletionsPayload, callLlmProvider } from './llm_client';
+import { getLlmModulesConfig, getModuleConfig } from './llm_key_storage';
 import { NetworkClient } from './network_client';
 
 type SendKind =
@@ -458,8 +454,11 @@ export class MessageProcessor {
     }
 
     try {
-      const isImage = typeof payload.image_base64 === 'string' && !!payload.image_base64;
-      const cfg = await getModuleConfig(isImage ? 'vlm_models' : 'llm_models');
+      const modelType = String(payload.type || '').trim();
+      if (!modelType) {
+        return { request_id: requestId, error: 'missing model type' };
+      }
+      const cfg = await getModuleConfig(modelType);
       if (!cfg || !cfg.enabled || !cfg.apiKey) {
         return { request_id: requestId, error: 'no api key configured on client' };
       }
@@ -482,10 +481,8 @@ export class MessageProcessor {
         }
       }
       const caps = cfg.modelCapabilities ?? {};
-      const useJson = Boolean(payload.use_json);
-      if (useJson && !Boolean(caps.can_use_json)) {
-        return { request_id: requestId, error: CLIENT_JSON_UNSUPPORTED_MARKER };
-      }
+      // 门控对齐服务端：模块绑定“想要” + 模型勾选“能”才附加参数
+      const useJson = Boolean(payload.use_json) && Boolean(caps.can_use_json);
       const body = buildChatCompletionsPayload({
         prompt: String(payload.prompt || ''),
         model: cfg.model,
@@ -506,11 +503,12 @@ export class MessageProcessor {
   }
 
   async getLlmMode() {
-    const [llmConfig, vlmConfig] = await Promise.all([
-      getModuleConfig('llm_models'),
-      getModuleConfig('vlm_models'),
-    ]);
-    return { text: Boolean(llmConfig?.enabled), vlm: Boolean(vlmConfig?.enabled) };
+    const cfg = await getLlmModulesConfig();
+    return {
+      types: Object.entries(cfg)
+        .filter(([, entry]) => entry.enabled)
+        .map(([key]) => key),
+    };
   }
 
   private isDuplicatePacket(convUuid: string, payload: AgentMessagePayload): boolean {

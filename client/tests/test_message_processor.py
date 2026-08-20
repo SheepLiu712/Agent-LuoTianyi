@@ -12,7 +12,7 @@ def processor():
 @pytest.fixture
 def config(monkeypatch):
     modules = {
-        "llm_models": {
+        "对话模型": {
             "enabled": True,
             "api_key": "sk-text",
             "model": "text-model",
@@ -23,7 +23,7 @@ def config(monkeypatch):
                 "can_use_json": True,
             },
         },
-        "vlm_models": {
+        "图片理解模型": {
             "enabled": True,
             "api_key": "sk-vlm",
             "model": "vision-model",
@@ -36,6 +36,11 @@ def config(monkeypatch):
         },
     }
     monkeypatch.setattr(message_processor_module.credential, "get_module_config", modules.get)
+    monkeypatch.setattr(
+        message_processor_module.credential,
+        "get_llm_modules_config",
+        lambda: modules,
+    )
     return modules
 
 
@@ -52,7 +57,7 @@ async def test_process_text_request_uses_saved_config_and_merges_params(processo
         {
             "request_id": "req-1",
             "prompt": "hello",
-            "provider": {"model": "server-model"},
+            "type": "对话模型",
             "params": {"temperature": 0.9, "top_p": 0.5},
         }
     )
@@ -66,7 +71,7 @@ async def test_process_text_request_uses_saved_config_and_merges_params(processo
 
 
 @pytest.mark.asyncio
-async def test_process_image_request_uses_vlm_config(processor, config, monkeypatch):
+async def test_process_image_request_uses_type_config(processor, config, monkeypatch):
     captured = {}
 
     async def fake_call(**kwargs):
@@ -78,6 +83,7 @@ async def test_process_image_request_uses_vlm_config(processor, config, monkeypa
         {
             "request_id": "req-image",
             "prompt": "describe",
+            "type": "图片理解模型",
             "image_base64": "data:image/png;base64,AAA",
         }
     )
@@ -88,27 +94,40 @@ async def test_process_image_request_uses_vlm_config(processor, config, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_process_request_rejects_unsupported_json(processor, config, monkeypatch):
-    config["llm_models"]["model_capabilities"]["can_use_json"] = False
-    monkeypatch.setattr(message_processor_module, "call_llm_api_async", pytest.fail)
+async def test_process_request_gates_json_by_capability(processor, config, monkeypatch):
+    config["对话模型"]["model_capabilities"]["can_use_json"] = False
+    captured = {}
 
+    async def fake_call(**kwargs):
+        captured.update(kwargs)
+        return {"content": "ok", "usage": None}
+
+    monkeypatch.setattr(message_processor_module, "call_llm_api_async", fake_call)
     result = await processor.process_llm_request(
-        {"request_id": "req-json", "prompt": "hello", "use_json": True}
+        {
+            "request_id": "req-json",
+            "prompt": "hello",
+            "type": "对话模型",
+            "use_json": True,
+            "enable_thinking": True,
+        }
     )
 
-    assert result["error"] == message_processor_module.CLIENT_JSON_UNSUPPORTED_MARKER
+    assert result["content"] == "ok"
+    assert "response_format" not in captured["payload"]
+    assert "enable_thinking" in captured["payload"]
 
 
 def test_get_llm_mode_reads_both_module_states(processor, config):
-    assert processor.get_llm_mode() == {"text": True, "vlm": True}
+    assert processor.get_llm_mode() == {"types": ["对话模型", "图片理解模型"]}
 
 
 @pytest.mark.asyncio
-async def test_process_request_reports_missing_vlm_key(processor, monkeypatch):
+async def test_process_request_reports_missing_type_key(processor, monkeypatch):
     monkeypatch.setattr(
         message_processor_module.credential,
         "get_module_config",
-        lambda key: {"enabled": True, "api_key": ""} if key == "vlm_models" else {
+        lambda key: {"enabled": True, "api_key": ""} if key == "图片理解模型" else {
             "enabled": True,
             "api_key": "sk-text",
             "model": "text-model",
@@ -117,7 +136,11 @@ async def test_process_request_reports_missing_vlm_key(processor, monkeypatch):
     )
 
     result = await processor.process_llm_request(
-        {"request_id": "req-image", "image_base64": "data:image/png;base64,AAA"}
+        {
+            "request_id": "req-image",
+            "type": "图片理解模型",
+            "image_base64": "data:image/png;base64,AAA",
+        }
     )
 
     assert result["error"] == "no api key configured on client"

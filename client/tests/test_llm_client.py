@@ -5,8 +5,7 @@ import pytest
 from src.utils.llm_client import (
     build_chat_completions_payload,
     call_llm_api,
-    fetch_llm_json_required_modules,
-    fetch_llm_providers,
+    fetch_client_model_types,
     probe_llm_config,
 )
 
@@ -110,45 +109,42 @@ def test_call_llm_api_network_error(monkeypatch):
         call_llm_api(url="https://example.com/v1", api_key="sk", payload={})
 
 
-def test_fetch_llm_providers_success(monkeypatch):
+def test_fetch_client_model_types_success(monkeypatch):
     captured = {}
 
     def fake_get(url, timeout=None):
         captured["url"] = url
-        return FakeResponse(data={"providers": [{"name": "DeepSeek"}]})
+        return FakeResponse(
+            data={
+                "types": [
+                    {
+                        "type": "对话模型",
+                        "providers": [
+                            {
+                                "name": "DeepSeek",
+                                "base_url": "https://api.deepseek.com/v1",
+                                "models": [{"id": "deepseek-chat"}],
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
 
     monkeypatch.setattr("src.utils.llm_client.requests.get", fake_get)
-    providers = fetch_llm_providers("https://server.example.com")
-    assert providers == [{"name": "DeepSeek"}]
+    types = fetch_client_model_types("https://server.example.com")
+    assert types[0]["type"] == "对话模型"
+    assert types[0]["providers"][0]["name"] == "DeepSeek"
     assert captured["url"] == "https://server.example.com/llm/providers"
 
 
-def test_fetch_llm_providers_error(monkeypatch):
+def test_fetch_client_model_types_error(monkeypatch):
     monkeypatch.setattr(
         "src.utils.llm_client.requests.get",
         lambda url, timeout=None: FakeResponse(status_code=500),
     )
     with pytest.raises(RuntimeError, match="500"):
-        fetch_llm_providers("https://server.example.com")
-
-
-def test_fetch_llm_json_required_modules(monkeypatch):
-    def fake_get(url, timeout=None):
-        return FakeResponse(
-            data={
-                "llm_json_required_modules": [
-                    {"name": "topic_extractor", "label": "话题抽取"},
-                    {"name": "memory_writer", "label": "记忆写入"},
-                ],
-                "vlm_json_required_modules": [],
-            }
-        )
-
-    monkeypatch.setattr("src.utils.llm_client.requests.get", fake_get)
-    assert fetch_llm_json_required_modules("https://server.example.com") == (
-        ["话题抽取", "记忆写入"],
-        [],
-    )
+        fetch_client_model_types("https://server.example.com")
 
 
 def test_probe_llm_config_builds_probe_payload(monkeypatch):

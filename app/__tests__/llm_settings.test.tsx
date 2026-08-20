@@ -1,6 +1,6 @@
 /**
- * LlmSettingsScreen 单页模块列表测试：
- * 模块派生/标题、加载回填、开关保留值、预检、统一校验（batchId）与整体写入。
+ * LlmSettingsScreen 按类型卡片测试：
+ * 类型渲染/描述、加载回填、开关保留值、预检、统一校验（batchId）与整体写入。
  */
 import React from 'react';
 import renderer, { act, ReactTestRenderer } from 'react-test-renderer';
@@ -24,30 +24,42 @@ const mockSecureStore = {
   },
 };
 
-const mockPresets = [
+const mockTypes = [
   {
-    name: 'DeepSeek',
-    base_url: 'https://api.deepseek.com/v1',
-    llm_models: ['deepseek-v4-flash'],
-    vlm_models: ['deepseek-vl'],
+    type: '对话模型',
+    description: '对话说明',
+    providers: [
+      {
+        name: 'DeepSeek',
+        base_url: 'https://api.deepseek.com/v1',
+        models: [
+          {
+            id: 'deepseek-v4-flash',
+            can_enable_thinking: false,
+            can_use_json: true,
+          },
+        ],
+      },
+    ],
   },
   {
-    name: 'AudioOnly',
-    base_url: 'https://audio.example.com/v1',
-    llm_models: [],
-    vlm_models: [],
-    audio_models: ['audio-1'],
+    type: '图片理解模型',
+    description: '图片说明',
+    providers: [
+      {
+        name: 'VlmOnly',
+        base_url: 'https://v.example.com/v1',
+        models: [
+          {
+            id: 'deepseek-vl',
+            can_enable_thinking: false,
+            can_use_json: false,
+          },
+        ],
+      },
+    ],
   },
 ];
-
-const mockCapabilities = {
-  llmModelCapabilities: {
-    'deepseek-v4-flash': { can_enable_thinking: false, can_use_json: false },
-  },
-  vlmModelCapabilities: {
-    'deepseek-vl': { can_enable_thinking: false, can_use_json: true },
-  },
-};
 
 const mockFetchModelsList = jest.fn(async () => ['deepseek-v4-flash']);
 
@@ -61,7 +73,8 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('react-native', () => {
   const React = require('react');
   const stub = (name: string) => {
-    const Comp = (props: Record<string, unknown>) => React.createElement('View', props);
+    const Comp = (props: Record<string, unknown>) =>
+      React.createElement('View', props);
     (Comp as { displayName?: string }).displayName = name;
     return Comp;
   };
@@ -88,11 +101,7 @@ jest.mock('../config', () => ({
   server_config: { BASE_URL: 'https://server.example.com' },
 }));
 jest.mock('../utils/llm_client', () => ({
-  fetchProviderPresets: jest.fn(async () => ({
-    providers: mockPresets,
-    ...mockCapabilities,
-  })),
-  fetchJsonRequiredModules: jest.fn(async () => ({ llm: ['记忆写入'], vlm: [] })),
+  fetchClientModelTypes: jest.fn(async () => ({ types: mockTypes })),
   fetchModelsList: mockFetchModelsList,
 }));
 
@@ -150,7 +159,7 @@ function moduleConfigWrites(): number {
   ).length;
 }
 
-describe('LlmSettingsScreen 单页模块列表', () => {
+describe('LlmSettingsScreen 按类型卡片', () => {
   const Alert = (jest.requireMock('react-native') as {
     Alert: { alert: jest.Mock };
   }).Alert;
@@ -161,7 +170,7 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     mockFetchModelsList.mockImplementation(async () => ['deepseek-v4-flash']);
   });
 
-  it('模块由 providers 字段派生，标题取映射或字段名', async () => {
+  it('按服务端类型渲染卡片与填写说明', async () => {
     const tree = await renderScreen();
     expect(
       tree.root.findAllByProps({ children: '对话模型' }).length,
@@ -169,9 +178,8 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     expect(
       tree.root.findAllByProps({ children: '图片理解模型' }).length,
     ).toBeGreaterThanOrEqual(1);
-    // 未映射新字段回退显示字段名
     expect(
-      tree.root.findAllByProps({ children: 'audio_models' }).length,
+      tree.root.findAllByProps({ children: '对话说明' }).length,
     ).toBeGreaterThanOrEqual(1);
   });
 
@@ -180,13 +188,12 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     for (const node of switches(tree)) {
       expect(node.props.value).toBe(false);
     }
-    // 开关关闭时字段整体隐藏，无“选择服务商”占位
     expect(tree.root.findAllByProps({ children: '选择服务商' }).length).toBe(0);
   });
 
   it('加载回填保存值（开关/服务商/模型/Key），不清空', async () => {
     await seedConfig({
-      llm_models: {
+      对话模型: {
         enabled: true,
         provider: 'DeepSeek',
         model: 'deepseek-v4-flash',
@@ -197,15 +204,19 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     });
     const tree = await renderScreen();
     expect(switches(tree)[0].props.value).toBe(true);
-    expect(tree.root.findAllByProps({ children: 'DeepSeek' }).length).toBeGreaterThan(0);
-    expect(tree.root.findAllByProps({ children: 'deepseek-v4-flash' }).length).toBeGreaterThan(0);
+    expect(
+      tree.root.findAllByProps({ children: 'DeepSeek' }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      tree.root.findAllByProps({ children: 'deepseek-v4-flash' }).length,
+    ).toBeGreaterThan(0);
     const keyInput = tree.root.findAllByProps({ placeholder: '粘贴 API Key' })[0];
     expect(keyInput.props.value).toBe('sk-saved');
   });
 
   it('已选服务商显示服务商地址提示', async () => {
     await seedConfig({
-      llm_models: {
+      对话模型: {
         enabled: true,
         provider: 'DeepSeek',
         model: 'deepseek-v4-flash',
@@ -267,7 +278,7 @@ describe('LlmSettingsScreen 单页模块列表', () => {
 
   it('预检：缺少 API Key 弹窗提示且不写入', async () => {
     await seedConfig({
-      llm_models: {
+      对话模型: {
         enabled: true,
         provider: 'DeepSeek',
         model: 'deepseek-v4-flash',
@@ -290,7 +301,7 @@ describe('LlmSettingsScreen 单页模块列表', () => {
 
   it('预检：高级参数非法 JSON 弹窗提示', async () => {
     await seedConfig({
-      llm_models: {
+      对话模型: {
         enabled: true,
         provider: 'DeepSeek',
         model: 'deepseek-v4-flash',
@@ -315,9 +326,9 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     );
   });
 
-  it('校验通过后整体写入（含关闭模块），显示成功提示', async () => {
+  it('校验通过后整体写入（含未开启类型），能力勾选随模型保存', async () => {
     await seedConfig({
-      llm_models: {
+      对话模型: {
         enabled: true,
         provider: 'DeepSeek',
         model: 'deepseek-v4-flash',
@@ -342,20 +353,20 @@ describe('LlmSettingsScreen 单页模块列表', () => {
         modelCapabilities: { can_enable_thinking: boolean; can_use_json: boolean };
       }
     >;
-    expect(saved.llm_models.enabled).toBe(true);
-    expect(saved.llm_models.apiKey).toBe('sk-test');
-    expect(saved.llm_models.modelCapabilities).toEqual({
+    expect(saved['对话模型'].enabled).toBe(true);
+    expect(saved['对话模型'].apiKey).toBe('sk-test');
+    expect(saved['对话模型'].modelCapabilities).toEqual({
       can_enable_thinking: false,
-      can_use_json: false,
+      can_use_json: true,
     });
-    // 未开启模块也一并写入
-    expect(saved.audio_models.enabled).toBe(false);
+    // 未开启类型也一并写入
+    expect(saved['图片理解模型'].enabled).toBe(false);
     expect(Alert.alert).toHaveBeenCalledWith('保存成功', '配置已保存');
   });
 
   it('保存时服务商在列表则自动更新 baseUrl', async () => {
     await seedConfig({
-      llm_models: {
+      对话模型: {
         enabled: true,
         provider: 'DeepSeek',
         model: 'deepseek-v4-flash',
@@ -372,12 +383,12 @@ describe('LlmSettingsScreen 单页模块列表', () => {
     const saved = JSON.parse(
       secureStoreBacking['llm_modules_config'],
     ) as Record<string, { baseUrl: string }>;
-    expect(saved.llm_models.baseUrl).toBe('https://api.deepseek.com/v1');
+    expect(saved['对话模型'].baseUrl).toBe('https://api.deepseek.com/v1');
   });
 
-  it('校验失败（Key 无效）不写入并提示模块', async () => {
+  it('校验失败（Key 无效）不写入并提示类型', async () => {
     await seedConfig({
-      llm_models: {
+      对话模型: {
         enabled: true,
         provider: 'DeepSeek',
         model: 'deepseek-v4-flash',
@@ -401,7 +412,7 @@ describe('LlmSettingsScreen 单页模块列表', () => {
 
   it('模型不在服务商列表时判定不可用', async () => {
     await seedConfig({
-      llm_models: {
+      对话模型: {
         enabled: true,
         provider: 'DeepSeek',
         model: 'ghost-model',
@@ -424,7 +435,7 @@ describe('LlmSettingsScreen 单页模块列表', () => {
 
   it('取消校验使过期批次丢弃，不写入', async () => {
     await seedConfig({
-      llm_models: {
+      对话模型: {
         enabled: true,
         provider: 'DeepSeek',
         model: 'deepseek-v4-flash',

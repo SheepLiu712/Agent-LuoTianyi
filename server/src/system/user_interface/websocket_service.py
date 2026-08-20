@@ -399,7 +399,7 @@ class WebSocketConnection:
         self.user_name = user_name
         self.last_ping_id: int | None = None
         self.last_ping_time: int | None = None
-        self.client_mode: dict = {"text": False, "vlm": False}
+        self.client_mode: dict = {"types": []}
         self.capabilities: set[str] = set()
 
     def set_user(self, user_uuid: str, user_name: str):

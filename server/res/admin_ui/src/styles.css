@@ -666,6 +666,71 @@ button {
   grid-column: 4;
 }
 
+.client-type-row,
+.client-provider-row {
+  grid-column: 1 / -1;
+}
+
+.client-type-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.client-type-row input:first-child {
+  flex: 1.2;
+}
+
+.client-type-row input:nth-child(2) {
+  flex: 2;
+}
+
+.client-provider-row {
+  border-top: 1px dashed #e2e8ee;
+  padding-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.client-provider-fields {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.client-provider-fields input:first-child {
+  flex: 1;
+}
+
+.client-provider-fields input:nth-child(2) {
+  flex: 2;
+}
+
+.client-model-list {
+  display: grid;
+  gap: 6px;
+  margin-left: 8px;
+}
+
+.client-model-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.client-model-row input {
+  flex: 1;
+}
+
+.client-model-row .interface-flags {
+  flex: 0 0 auto;
+}
+
+.interface-card > .client-provider-row ~ button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
 .module-binding-table {
   overflow-x: hidden;
 }

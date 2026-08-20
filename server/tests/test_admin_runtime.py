@@ -42,6 +42,25 @@ def minimal_config(tmp_path: Path) -> dict:
     return {
         "llm_service": {
             "prompt_manager": {"template_dir": str(prompt_dir)},
+            "client_model_types": [
+                {
+                    "type": "对话模型",
+                    "description": "测试类型",
+                    "providers": [
+                        {
+                            "name": "Test",
+                            "base_url": "http://example.invalid/v1",
+                            "models": [
+                                {
+                                    "id": "test",
+                                    "can_enable_thinking": False,
+                                    "can_use_json": True,
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
             "available_llms": {
                 "main": {
                     "api_type": "openai",

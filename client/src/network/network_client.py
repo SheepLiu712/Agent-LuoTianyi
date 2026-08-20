@@ -7,7 +7,7 @@ from ..types import ConversationItem
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
 from ..safety import credential
-from ..utils.llm_client import fetch_llm_providers
+from ..utils.llm_client import fetch_client_model_types
 
 
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -29,7 +29,7 @@ class NetworkClient:
         self.user_id: str | None = None
         self.message_token: str | None = None
         self.login_token: str | None = None
-        self._llm_providers: list | None = None
+        self._client_model_types: list | None = None
 
         self.auth_api = AuthApi(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
@@ -47,23 +47,20 @@ class NetworkClient:
         self.auth_api.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
         self.session = HttpClientFactory.get_session(verify_ssl=self.verify_ssl)
         self.ws_transport.set_base_url(self.base_url, verify_ssl=self.verify_ssl)
-        self._llm_providers = None
+        self._client_model_types = None
         self.logger.info(f"Base URL updated to: {self.base_url}")
 
-    def get_llm_providers(self, force_refresh: bool = False) -> list:
-        """获取服务端下发的 LLM 服务商预设列表（带缓存）。
-
-        失败时不缓存空结果，下次调用会重新尝试。
-        """
+    def get_client_model_types(self, force_refresh: bool = False) -> list:
+        """获取服务端下发的客户端模型类型字典（带缓存）。"""
         if force_refresh:
-            self._llm_providers = None
-        if self._llm_providers is None:
+            self._client_model_types = None
+        if self._client_model_types is None:
             try:
-                self._llm_providers = fetch_llm_providers(self.base_url)
+                self._client_model_types = fetch_client_model_types(self.base_url)
             except Exception as exc:
-                self.logger.warning(f"获取 LLM 服务商列表失败: {exc}")
+                self.logger.warning(f"获取客户端模型类型列表失败: {exc}")
                 return []
-        return self._llm_providers
+        return self._client_model_types
 
     def login(self, username: str, password: str, request_token: bool = False) -> Tuple[bool, str]:
         try:

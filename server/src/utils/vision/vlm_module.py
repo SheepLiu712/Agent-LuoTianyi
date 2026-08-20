@@ -1,6 +1,8 @@
 from src.utils.vision.vlm_api_interface import VLMAPIInterface
 from src.utils.llm.prompt_manager import PromptTemplate
 from src.utils.logger import get_logger
+from src.system.observability import get_trace_context
+from typing import Any, Dict
 
 
 class VLMModule:
@@ -10,6 +12,7 @@ class VLMModule:
         module_config: dict,
         prompt_template: PromptTemplate,
         interface: VLMAPIInterface,
+        client_llm_executor: Any = None,
     ) -> None:
         self.name = module_name
         self.logger = get_logger(f"VLMModule:{module_name}")
@@ -20,6 +23,8 @@ class VLMModule:
         self.use_json = module_config.get("use_json", vlm_config.get("use_json", False))
         self.vlm_client: VLMAPIInterface = interface
         self.prompt_template: PromptTemplate = prompt_template
+        self.client_llm_executor = client_llm_executor
+        self.client_model_type = str(vlm_config.get("client_model_type") or "").strip()
 
         self.params = module_config.get("params", vlm_config.get("params", {}))
 
@@ -38,7 +43,11 @@ class VLMModule:
             request_kwargs["extra_body"] = extra_body
         if self.use_json:
             request_kwargs["response_format"] = {"type": "json_object"}
-        response = await self.vlm_client.generate_response(prompt, image_base64=image_base64, **request_kwargs)
+        response = await self._generate(
+            prompt,
+            image_base64=image_base64,
+            request_kwargs=request_kwargs,
+        )
         token_usage = response.get("usage", {})
         self.logger.debug(
             f"Token usage - Prompt: {token_usage.get('prompt_tokens', 0)}, "
@@ -47,3 +56,31 @@ class VLMModule:
             f" | Response time: {response.get('response_time_s', 'N/A')}s"
         )
         return response
+
+    async def _generate(
+        self,
+        prompt: str,
+        *,
+        image_base64: str,
+        request_kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """优先按客户端模型类型委托；未配置/未启用时用服务端接口直连。"""
+        if self.client_model_type and self.client_llm_executor is not None:
+            user_id = get_trace_context().get("user_id")
+            response = await self.client_llm_executor.delegate(
+                user_id,
+                module=self.name,
+                model_type=self.client_model_type,
+                prompt=prompt,
+                params=self.params,
+                enable_thinking=self.enable_thinking,
+                use_json=self.use_json,
+                image_base64=image_base64,
+            )
+            if response is not None:
+                return response
+        return await self.vlm_client.generate_response(
+            prompt,
+            image_base64=image_base64,
+            **request_kwargs,
+        )

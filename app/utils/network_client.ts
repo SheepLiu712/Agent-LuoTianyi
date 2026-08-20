@@ -16,7 +16,7 @@ interface ConnectCallbacks {
   onError: (errorText: string) => void;
 
   onLlmRequest?: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
-  getLlmMode?: () => Promise<{ text: boolean; vlm: boolean }>;
+  getLlmMode?: () => Promise<{ types: string[] }>;
 }
 
 function sanitizeBase64(input: string) {

@@ -21,7 +21,6 @@ from ..live2d import Live2dModel
 from ..network.event_types import AgentMessage, is_audio_terminal
 from ..safety import credential
 from ..utils.llm_client import (
-    CLIENT_JSON_UNSUPPORTED_MARKER,
     build_chat_completions_payload,
     call_llm_api_async,
 )
@@ -374,7 +373,10 @@ class MessageProcessor:
         if not request_id:
             return None
 
-        config = credential.get_module_config("vlm_models" if payload.get("image_base64") else "llm_models") or {}
+        model_type = str(payload.get("type") or "").strip()
+        if not model_type:
+            return {"request_id": request_id, "error": "missing model type"}
+        config = credential.get_module_config(model_type) or {}
         api_key = config.get("api_key") or ""
         if not api_key:
             return {"request_id": request_id, "error": "no api key configured on client"}
@@ -387,8 +389,8 @@ class MessageProcessor:
 
         capabilities = config.get("model_capabilities") or {}
         use_json = bool(payload.get("use_json"))
-        if use_json and not bool(capabilities.get("can_use_json")):
-            return {"request_id": request_id, "error": CLIENT_JSON_UNSUPPORTED_MARKER}
+        # 门控对齐服务端：模块绑定“想要” + 模型勾选“能”才附加参数
+        use_json = use_json and bool(capabilities.get("can_use_json"))
         body = build_chat_completions_payload(
             prompt=payload.get("prompt", ""),
             model=model,
@@ -407,10 +409,15 @@ class MessageProcessor:
         except Exception as exc:
             return {"request_id": request_id, "error": str(exc)}
 
-    def get_llm_mode(self) -> dict[str, bool]:
-        llm_config = credential.get_module_config("llm_models") or {}
-        vlm_config = credential.get_module_config("vlm_models") or {}
-        return {"text": bool(llm_config.get("enabled")), "vlm": bool(vlm_config.get("enabled"))}
+    def get_llm_mode(self) -> dict[str, list[str]]:
+        modules = credential.get_llm_modules_config()
+        return {
+            "types": [
+                str(type_name)
+                for type_name, entry in modules.items()
+                if isinstance(entry, dict) and entry.get("enabled")
+            ]
+        }
 
     def set_signals(
         self,

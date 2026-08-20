@@ -4,25 +4,41 @@
 import {
   buildChatCompletionsPayload,
   callLlmProvider,
-  fetchJsonRequiredModules,
+  fetchClientModelTypes,
   fetchModelsList,
-  fetchProviderPresets,
   probeLlmConfig,
 } from '../utils/llm_client';
-import type { LlmProviderPreset } from '../utils/llm_client';
+import type { ClientModelType } from '../utils/llm_client';
 
-const PRESETS: LlmProviderPreset[] = [
+const TYPES: ClientModelType[] = [
   {
-    name: '阿里云百炼（DashScope）',
-    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    llm_models: ['qwen3.5-plus', 'qwen3.6-flash'],
-    vlm_models: ['qwen3-vl-plus'],
+    type: '对话模型',
+    description: '对话说明',
+    providers: [
+      {
+        name: '阿里云百炼（DashScope）',
+        base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        models: [
+          { id: 'qwen3.5-plus', can_enable_thinking: true, can_use_json: true },
+          { id: 'qwen3.6-flash', can_enable_thinking: true, can_use_json: true },
+          { id: 'qwen3-vl-plus', can_enable_thinking: false, can_use_json: false },
+        ],
+      },
+    ],
   },
   {
-    name: 'DeepSeek',
-    base_url: 'https://api.deepseek.com/v1',
-    llm_models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
-    vlm_models: [],
+    type: '图片理解模型',
+    description: '图片说明',
+    providers: [
+      {
+        name: 'DeepSeek',
+        base_url: 'https://api.deepseek.com/v1',
+        models: [
+          { id: 'deepseek-v4-flash', can_enable_thinking: true, can_use_json: true },
+          { id: 'deepseek-v4-pro', can_enable_thinking: true, can_use_json: true },
+        ],
+      },
+    ],
   },
 ];
 
@@ -73,19 +89,17 @@ describe('buildChatCompletionsPayload', () => {
   });
 });
 
-describe('fetchProviderPresets', () => {
-  it('fetches and caches provider presets from the server', async () => {
+describe('fetchClientModelTypes', () => {
+  it('fetches client model types from the server', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ providers: PRESETS }),
+      json: async () => ({ types: TYPES }),
     } as unknown as Response);
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const data = await fetchProviderPresets('https://server.example.com');
-    expect(data.providers).toEqual(PRESETS);
-    expect(data.llmModelCapabilities).toEqual({});
-    expect(data.vlmModelCapabilities).toEqual({});
+    const data = await fetchClientModelTypes('https://server.example.com');
+    expect(data.types).toEqual(TYPES);
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toBe('https://server.example.com/llm/providers');
   });
@@ -98,32 +112,8 @@ describe('fetchProviderPresets', () => {
     } as unknown as Response) as unknown as typeof fetch;
 
     await expect(
-      fetchProviderPresets('https://server.example.com'),
+      fetchClientModelTypes('https://server.example.com'),
     ).rejects.toThrow('500');
-  });
-});
-
-describe('fetchJsonRequiredModules', () => {
-  it('returns llm and vlm modules that require json output', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        providers: [],
-        llm_json_required_modules: [
-          { name: 'topic_extractor', label: '话题抽取' },
-          { name: 'memory_writer', label: '记忆写入' },
-        ],
-        vlm_json_required_modules: [],
-      }),
-    } as unknown as Response);
-    global.fetch = fetchMock as unknown as typeof fetch;
-
-    const result = await fetchJsonRequiredModules('https://server.example.com');
-    expect(result.llm).toEqual(['话题抽取', '记忆写入']);
-    expect(result.vlm).toEqual([]);
-    const [url] = fetchMock.mock.calls[0] as [string];
-    expect(url).toBe('https://server.example.com/llm/providers');
   });
 });
 

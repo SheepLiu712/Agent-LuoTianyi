@@ -27,7 +27,7 @@ export interface WsCallbacks {
   onError: (errorText: string) => void;
 
   onLlmRequest?: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
-  getLlmMode?: () => Promise<{ text: boolean; vlm: boolean }>;
+  getLlmMode?: () => Promise<{ types: string[] }>;
 }
 
 export class WebSocketTransport {
@@ -50,7 +50,7 @@ export class WebSocketTransport {
   private isConnected = false;
   private isAuthed = false;
   private authRejected = false;
-  private clientMode = { text: false, vlm: false }; // 服务端当前客户端 LLM 模式（随连接重置）
+  private clientMode = { types: [] as string[] }; // 服务端当前客户端委托类型列表（随连接重置）
 
   constructor(username: string, token: string, callbacks: WsCallbacks) {
     this.username = username;
@@ -218,7 +218,7 @@ export class WebSocketTransport {
 
     this.ws.onopen = () => {
       this.isConnected = true;
-      this.clientMode = { text: false, vlm: false };
+      this.clientMode = { types: [] };
       this.reconnectAttempts = 0;
       this.sendAuth();
       this.startHeartbeat();

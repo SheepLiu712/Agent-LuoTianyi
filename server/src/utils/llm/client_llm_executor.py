@@ -1,12 +1,12 @@
 """
 ClientLLMExecutor
 -----------------
-将单个 LLM/VLM 调用转发给在线客户端执行，客户端使用用户自己输入的
-api-key 直接调用云端 OpenAI 兼容接口，服务端全程不接触用户的 key。
+将单个 LLM 调用按客户端模型类型转发给在线客户端执行，客户端使用用户自己
+输入的 api-key 直接调用云端 OpenAI 兼容接口，服务端全程不接触用户的 key。
 
-当用户未启用客户端执行、客户端离线、超时或客户端返回错误时，调用方
-（ClientDelegatingLLMInterface）决定是否回退到服务端自带的 key 直连；
-目前仅"客户端模型不支持 JSON 输出"这一明确场景会回退。
+当模块未配置委托类型、客户端未启用该类型或客户端离线时，
+delegate() 返回 None，由调用方（LLMModule/VLMModule）直接使用服务端接口。
+委托执行失败时不回退，直接抛错，由调用方通知用户。
 """
 
 from __future__ import annotations
@@ -59,37 +59,10 @@ _KEY_ERROR_MARKERS = (
     "no api key configured",
 )
 
-_NETWORK_ERROR_MARKERS = (
-    "connection",
-    "timed out",
-    "timeout",
-    "network",
-    "refused",
-    "resolve",
-    "failed to fetch",
-    "aborted",
-    "socket",
-    "dns",
-    "unreachable",
-    "429",
-    "500",
-    "502",
-    "503",
-    "504",
-    "rate limit",
-    "overloaded",
-    "temporarily",
-)
-
 
 def _looks_like_key_error(text: str) -> bool:
     lowered = (text or "").lower()
     return any(marker in lowered for marker in _KEY_ERROR_MARKERS)
-
-
-def _looks_like_network_error(text: str) -> bool:
-    lowered = (text or "").lower()
-    return any(marker in lowered for marker in _NETWORK_ERROR_MARKERS)
 
 
 class ClientLLMExecutor:
@@ -108,11 +81,13 @@ class ClientLLMExecutor:
         """绑定 ChatStreamManager，用于按 user_id 找到在线连接。"""
         self._stream_manager = stream_manager
 
-    def is_enabled(self, user_id: Optional[str], vlm: bool = False) -> bool:
-        """判断该用户当前活跃连接是否声明了 LLM（默认）或 VLM 客户端执行模式。"""
+    def is_enabled(self, user_id: Optional[str], model_type: Optional[str]) -> bool:
+        """判断该用户当前活跃连接是否声明了指定客户端委托类型。"""
+        if not model_type:
+            return False
         ws_connection = self._get_live_connection(user_id)
         mode = getattr(ws_connection, "client_mode", None) or {}
-        return bool(mode.get("vlm" if vlm else "text", False))
+        return model_type in (mode.get("types") or [])
 
     def _get_live_connection(self, user_id: Optional[str]):
         """返回该用户活跃连接的 WebSocketConnection；没有则返回 None。"""
@@ -156,33 +131,33 @@ class ClientLLMExecutor:
         except Exception as exc:
             self.logger.debug(f"Failed to notify user {user_id}: {exc}")
 
-    async def request(
+    async def delegate(
         self,
-        user_id: str,
+        user_id: Optional[str],
         *,
         module: str,
+        model_type: str,
         prompt: str,
         params: Optional[Dict[str, Any]],
         enable_thinking: bool = False,
         use_json: bool = False,
-        vlm: bool = False,
         image_base64: Optional[str] = None,
-        provider: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """向用户客户端发送 llm_request 并等待 llm_response。
+    ) -> Optional[Dict[str, Any]]:
+        """按客户端模型类型向用户客户端转发请求并等待响应。
 
-        返回与 LLMAPIInterface.generate_response 相同结构的字典：
-        {"content": str, "usage": dict|None, "response_time_s": float}
+        未配置委托类型、客户端未启用该类型或客户端离线时返回 None，调用方
+        应使用服务端接口直连。返回成功时与 LLMAPIInterface.generate_response
+        相同结构：{"content", "usage", "response_time_s"}。执行失败抛错，不回退。
         """
+        if not model_type:
+            return None
         ws_connection = self._get_live_connection(user_id)
         if ws_connection is None:
-            raise ClientLLMUnavailable(f"no live client connection for user {user_id}")
+            return None
         mode = getattr(ws_connection, "client_mode", None) or {}
-        if not mode.get("vlm" if vlm else "text", False):
-            raise ClientLLMUnavailable(
-                f"active connection of user {user_id} does not enable client "
-                f"{'VLM' if vlm else 'LLM'}"
-            )
+        if model_type not in (mode.get("types") or []):
+            return None
+
         self._user_connections[user_id] = ws_connection
         websocket = ws_connection.websocket
 
@@ -194,6 +169,7 @@ class ClientLLMExecutor:
         payload: Dict[str, Any] = {
             "request_id": request_id,
             "module": module,
+            "type": model_type,
             "prompt": prompt,
             "params": dict(params or {}),
             "enable_thinking": bool(enable_thinking),
@@ -201,8 +177,6 @@ class ClientLLMExecutor:
         }
         if image_base64:
             payload["image_base64"] = image_base64
-        if provider:
-            payload["provider"] = provider
 
         event = {
             "type": LLM_REQUEST_EVENT_TYPE,

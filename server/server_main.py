@@ -153,9 +153,17 @@ async def chat_ws(websocket: WebSocket):
             ):
                 llm_mode = event.payload.get("llm_mode")
                 if isinstance(llm_mode, dict):
-                    ws_connection.client_mode = {
-                        key: bool(llm_mode.get(key, False)) for key in ("text", "vlm")
-                    }
+                    raw_types = llm_mode.get("types")
+                    if isinstance(raw_types, list):
+                        ws_connection.client_mode = {
+                            "types": [
+                                str(t).strip()
+                                for t in raw_types
+                                if isinstance(t, str) and t.strip()
+                            ]
+                        }
+                    elif isinstance(raw_types, str) and raw_types.strip():
+                        ws_connection.client_mode = {"types": [raw_types.strip()]}
 
             if websocket_service.is_chat_related_event(event):
                 acceptance = websocket_service.try_accept_chat_event(
@@ -215,16 +223,10 @@ async def get_public_key(system_runtime = Depends(get_runtime)):
 @app.get("/llm/providers")
 async def get_llm_providers(system_runtime = Depends(get_runtime)):
     """
-    获取客户端可选的 LLM 服务商预设列表（name / base_url / llm_models / vlm_models）。
-    列表由已配置的 LLM/VLM 接口直接拼接，不包含任何密钥。
+    获取客户端模型类型字典（type -> providers[base_url, models[勾选]]）。
+    字典由 llm_service.client_model_types 配置生成，不包含任何密钥。
     """
-    return {
-        "providers": system_runtime.llm_service.get_client_providers(),
-        "llm_model_capabilities": system_runtime.llm_service.get_llm_model_capabilities(),
-        "vlm_model_capabilities": system_runtime.llm_service.get_vlm_model_capabilities(),
-        "llm_json_required_modules": system_runtime.llm_service.get_llm_json_required_modules(),
-        "vlm_json_required_modules": system_runtime.llm_service.get_vlm_json_required_modules(),
-    }
+    return {"types": system_runtime.llm_service.get_client_model_types()}
 
 
 @app.post("/auth/auto_login")

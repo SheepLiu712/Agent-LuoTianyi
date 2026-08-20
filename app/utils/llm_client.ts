@@ -1,7 +1,8 @@
 /**
  * APP 侧 LLM 执行助手。
- * 服务端下发 llm_request 后，APP 使用用户自己的 api-key 直接调用
- * OpenAI 兼容的 chat/completions 接口，并把结果回传给服务端。
+ * 服务端下发 llm_request（按客户端模型类型）后，APP 使用用户自己的 api-key
+ * 直接调用 OpenAI 兼容的 chat/completions 接口，并把结果回传给服务端。
+ * 委托完全由 type 驱动，代码中不区分 llm/vlm。
  */
 
 interface LlmResult {
@@ -9,30 +10,32 @@ interface LlmResult {
   usage: unknown;
 }
 
-export const CLIENT_JSON_UNSUPPORTED_MARKER = 'client_model_does_not_support_json';
-
-export interface LlmProviderPreset {
-  name: string;
-  base_url: string;
-  llm_models: string[];
-  vlm_models: string[];
-}
-
-export interface LlmModelCapability {
+export interface ClientModelTypeModel {
+  id: string;
   can_enable_thinking: boolean;
   can_use_json: boolean;
 }
 
-export interface LlmProvidersResponse {
-  providers: LlmProviderPreset[];
-  llmModelCapabilities: Record<string, LlmModelCapability>;
-  vlmModelCapabilities: Record<string, LlmModelCapability>;
+export interface ClientModelTypeProvider {
+  name: string;
+  base_url: string;
+  models: ClientModelTypeModel[];
 }
 
-export async function fetchProviderPresets(
+export interface ClientModelType {
+  type: string;
+  description: string;
+  providers: ClientModelTypeProvider[];
+}
+
+export interface ClientModelTypesResponse {
+  types: ClientModelType[];
+}
+
+export async function fetchClientModelTypes(
   serverBaseUrl: string,
   timeoutMs = 15000,
-): Promise<LlmProvidersResponse> {
+): Promise<ClientModelTypesResponse> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -43,65 +46,12 @@ export async function fetchProviderPresets(
       throw new Error(`HTTP ${resp.status}`);
     }
     const data = (await resp.json()) as Record<string, unknown>;
-    const list = Array.isArray(data?.providers)
-      ? (data.providers as LlmProviderPreset[]).filter(
-          (p) => p && typeof p.name === 'string',
+    const list = Array.isArray(data?.types)
+      ? (data.types as ClientModelType[]).filter(
+          (item) => item && typeof item.type === 'string',
         )
       : [];
-    const result: LlmProvidersResponse = {
-      providers: list,
-      llmModelCapabilities:
-        (data.llm_model_capabilities as Record<string, LlmModelCapability>) ??
-        {},
-      vlmModelCapabilities:
-        (data.vlm_model_capabilities as Record<string, LlmModelCapability>) ??
-        {},
-    };
-    return result;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-export async function fetchJsonRequiredModules(
-  serverBaseUrl: string,
-  timeoutMs = 15000,
-): Promise<{ llm: string[]; vlm: string[] }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const resp = await fetch(`${serverBaseUrl.replace(/\/+$/, '')}/llm/providers`, {
-      signal: controller.signal,
-    });
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`);
-    }
-    const data = (await resp.json()) as {
-      llm_json_required_modules?: unknown;
-      vlm_json_required_modules?: unknown;
-    };
-    const toLabels = (value: unknown): string[] => {
-      if (!Array.isArray(value)) {
-        return [];
-      }
-      return value
-        .map((item) => {
-          if (item && typeof item === 'object') {
-            const record = item as { label?: unknown; name?: unknown };
-            return typeof record.label === 'string' && record.label
-              ? record.label
-              : typeof record.name === 'string'
-                ? record.name
-                : '';
-          }
-          return typeof item === 'string' ? item : '';
-        })
-        .filter((label) => label.length > 0);
-    };
-    return {
-      llm: toLabels(data.llm_json_required_modules),
-      vlm: toLabels(data.vlm_json_required_modules),
-    };
+    return { types: list };
   } finally {
     clearTimeout(timer);
   }
@@ -258,7 +208,7 @@ interface ProbeOptions {
 
 /**
  * 保存前探测：用所选模型/开关向服务商发一次最小请求，失败抛异常。
- * 仅验证文本链路（key/模型/开关），图片能力由服务端下发的 vlm_models 保证。
+ * 仅验证文本链路（key/模型/开关）。
  */
 export async function probeLlmConfig(options: ProbeOptions): Promise<void> {
   const {

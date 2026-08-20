@@ -34,7 +34,70 @@
                     "top_p": 0.9
                 }
             }
-        }
+        },
+        "client_model_types": [
+            {
+                "type": "主对话模型",
+                "description": "填写你自己的 API Key；开启后主对话相关调用将使用该模型与服务商。",
+                "providers": [
+                    {
+                        "name": "DashScope",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "models": [
+                            {
+                                "id": "qwen3.5-plus",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            },
+                            {
+                                "id": "qwen3.6-flash",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "主题提取模型",
+                "description": "填写你自己的 API Key；开启后主题提取相关调用将使用该模型与服务商。",
+                "providers": [
+                    {
+                        "name": "DashScope",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "models": [
+                            {
+                                "id": "qwen3.5-plus",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            },
+                            {
+                                "id": "qwen3.6-flash",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "图片理解模型",
+                "description": "填写你自己的 API Key；开启后图片理解相关调用将使用该模型与服务商。",
+                "providers": [
+                    {
+                        "name": "DashScope",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "models": [
+                            {
+                                "id": "qwen3-vl-plus",
+                                "can_enable_thinking": false,
+                                "can_use_json": false
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
     },
     "database": {
         "sql_db_folder": "data/database",

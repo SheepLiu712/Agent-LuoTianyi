@@ -63,53 +63,51 @@ class TestLLMService:
 
         assert llm_service.prompt_manager is not None, "PromptManager 应该被正确初始化"
 
-    def test_get_client_providers_derived_from_interfaces(self, llm_service: LLMService):
-        """服务商列表应由 LLM/VLM 接口配置拼接，且每个服务商至少在一种能力下可用。"""
-        providers = llm_service.get_client_providers()
-        assert isinstance(providers, list)
-        assert len(providers) > 0
+    def test_get_client_model_types_dictionary(self, llm_service: LLMService):
+        """客户端类型字典应由 client_model_types 配置生成，无 llm/vlm 字段，勾选内嵌。"""
+        types = llm_service.get_client_model_types()
+        assert isinstance(types, list)
+        assert len(types) > 0
+        for type_item in types:
+            assert type_item["type"]
+            assert isinstance(type_item.get("description"), str)
+            assert isinstance(type_item["providers"], list)
+            assert len(type_item["providers"]) > 0
+            for provider in type_item["providers"]:
+                assert provider["name"]
+                assert provider["base_url"]
+                assert isinstance(provider["models"], list)
+                assert len(provider["models"]) > 0
+                for model in provider["models"]:
+                    assert model["id"]
+                    assert "can_enable_thinking" in model
+                    assert "can_use_json" in model
+                # 响应中不允许出现任何 llm/vlm 命名字段
+                for key in ("llm_models", "vlm_models", "llm", "vlm"):
+                    assert key not in provider
+                    assert key not in type_item
 
-        by_name = {}
-        for provider in providers:
-            assert provider["name"]
-            assert provider["base_url"]
-            assert isinstance(provider["llm_models"], list)
-            assert isinstance(provider["vlm_models"], list)
-            assert "models" not in provider
-            assert provider["llm_models"] or provider["vlm_models"]
-            by_name[provider["name"]] = provider
-
-        # LLM 接口的 model 应出现在对应服务商的 llm_models 中
-        llm_info = llm_service.get_llm_interface_info()
-        for name, info in llm_info.items():
-            assert info["model"] in by_name[name]["llm_models"]
-        # VLM 接口的 model 应出现在对应服务商的 vlm_models 中
-        vlm_info = llm_service.get_vlm_interface_info()
-        for name, info in vlm_info.items():
-            assert info["model"] in by_name[name]["vlm_models"]
-
-    def test_model_capabilities_from_interfaces(self, llm_service: LLMService):
-        """模型能力标注应由接口配置的 can_* 字段下发，作为客户端唯一能力来源。"""
-        llm_caps = llm_service.get_llm_model_capabilities()
-        vlm_caps = llm_service.get_vlm_model_capabilities()
-        assert llm_caps
-        assert vlm_caps
-        for caps in (*llm_caps.values(), *vlm_caps.values()):
-            assert "can_enable_thinking" in caps
-            assert "can_use_json" in caps
-        cfg = llm_service.config
-        for entry in (cfg.get("available_llms") or {}).values():
-            if isinstance(entry, dict) and entry.get("model"):
-                assert llm_caps[entry["model"]]["can_use_json"] == bool(
-                    entry.get("can_use_json", False)
-                )
-        for entry in (cfg.get("available_vlms") or {}).values():
-            if isinstance(entry, dict) and entry.get("model"):
-                assert vlm_caps[entry["model"]]["can_enable_thinking"] == bool(
-                    entry.get("can_enable_thinking", False)
-                )
-        templates =  llm_service.prompt_manager.list_templates()
-        assert len(templates) > 0, "PromptManager 应该加载至少一个模板"
+    def test_client_model_types_match_config(self, llm_service: LLMService):
+        """字典中的模型与服务商应与配置一致，勾选值透传。"""
+        raw = (llm_service.config or {}).get("client_model_types") or []
+        types = llm_service.get_client_model_types()
+        assert len(types) == len([x for x in raw if isinstance(x, dict) and str(x.get("type") or "").strip()])
+        raw_by_type = {
+            str(x.get("type") or "").strip(): x
+            for x in raw
+            if isinstance(x, dict) and str(x.get("type") or "").strip()
+        }
+        for type_item in types:
+            raw_type = raw_by_type[type_item["type"]]
+            assert type_item["description"] == str(raw_type.get("description") or "").strip()
+            raw_provider = raw_type["providers"][0]
+            provider = type_item["providers"][0]
+            assert provider["name"] == str(raw_provider.get("name") or "").strip()
+            assert provider["base_url"] == str(raw_provider.get("base_url") or "").strip().rstrip("/")
+            assert provider["models"][0]["id"] == str(raw_provider["models"][0].get("id") or "").strip()
+            assert provider["models"][0]["can_use_json"] == bool(
+                raw_provider["models"][0].get("can_use_json", False)
+            )
 
     def test_template_add_remove(self, llm_service: LLMService, sample_template, tmp_path):
         # 添加模板（从JSON数据）
@@ -176,26 +174,25 @@ class TestLLMService:
         response_time_s = recent_resp.get("response_time_s", None)
         assert response_time_s is not None, "最近一次响应的使用情况中缺少 'response_time_s'"
 
-    def test_register_llm_module_tracks_json_label(self, llm_service: LLMService, sample_template):
-        """需要 JSON 输出的模块应记录配置中的友好标签，供客户端保存提示使用。"""
+    def test_register_llm_module_carries_client_model_type(
+        self, llm_service: LLMService, sample_template
+    ):
+        """注册模块时应透传 client_model_type 与客户端执行器。"""
         llm_service.prompt_manager.add_template_from_json(sample_template)
         module_config = {
-            "label": "测试模块",
             "llm": {
                 "name": list(llm_service.llm_interfaces.keys())[0],
                 "enable_thinking": False,
                 "use_json": True,
+                "client_model_type": "对话模型",
             },
             "prompt_name": sample_template["name"],
         }
-        llm_service.register_llm_module("test_json_module", module_config)
-        assert llm_service.get_llm_json_required_modules() == [
-            {"name": "test_json_module", "label": "测试模块"}
-        ]
+        module = llm_service.register_llm_module("test_delegated_module", module_config)
+        assert module.client_model_type == "对话模型"
+        assert module.client_llm_executor is None  # fixture 未注入执行器
 
-        # 未开启 use_json 的模块不应进入列表
         plain_config = {
-            "label": "普通模块",
             "llm": {
                 "name": list(llm_service.llm_interfaces.keys())[0],
                 "enable_thinking": False,
@@ -203,13 +200,5 @@ class TestLLMService:
             },
             "prompt_name": sample_template["name"],
         }
-        llm_service.register_llm_module("test_plain_module", plain_config)
-        names = [m["name"] for m in llm_service.get_llm_json_required_modules()]
-        assert "test_plain_module" not in names
-
-        # 未配置 label 时回退到模块名
-        no_label_config = dict(module_config)
-        no_label_config.pop("label", None)
-        llm_service.register_llm_module("test_no_label_module", no_label_config)
-        labels = {m["name"]: m["label"] for m in llm_service.get_llm_json_required_modules()}
-        assert labels["test_no_label_module"] == "test_no_label_module"
+        plain_module = llm_service.register_llm_module("test_plain_module", plain_config)
+        assert plain_module.client_model_type == ""

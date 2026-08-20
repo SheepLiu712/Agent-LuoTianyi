@@ -1,10 +1,10 @@
-"""LLM 模型设置对话框 - 单页垂直模块列表，全局保存。
+"""LLM 模型设置对话框 - 按服务端下发的客户端模型类型渲染卡片，全局保存。
 
-模块列表由服务端 /llm/providers 下发的 provider 能力字段动态生成
-（值为非空列表的字段，如 llm_models / vlm_models），模块 key 即字段名。
-每个模块用开关控制是否使用自己的 API Key；全局保存时先做客户端预检
-（必填项 + 高级参数 JSON），再对开启模块并行发起 /v1/models 校验
-（batchId 防过期响应），全部通过后一次性原子写入本地凭据。
+类型字典由服务端 /llm/providers 生成（type -> providers[base_url, models[勾选]]），
+每个类型一张卡片：服务商下拉、baseURL 提示、API Key、模型下拉、高级参数。
+保存时对开启的类型并行校验 /models，全部通过后一次性原子写入本地凭据，
+键为类型名；并把所选模型的 thinking/json 勾选复制为本地能力快照，
+供运行时按服务端门控逻辑附加 enable_thinking / response_format。
 """
 
 import json
@@ -35,16 +35,6 @@ if TYPE_CHECKING:
     from ..network.network_client import NetworkClient
 
 
-MODULE_TITLES = {
-    "llm_models": "对话模型",
-    "vlm_models": "图片理解模型",
-}
-
-_MODULE_DATA_SOURCES = {
-    "llm_models": ("llm", "llm"),
-    "vlm_models": ("vlm", "vlm"),
-}
-
 _PROVIDERS_TIMEOUT_MS = 15000
 _VALIDATION_TIMEOUT_MS = 30000
 _HIGHLIGHT_STYLE = "border: 2px solid #E53935;"
@@ -57,32 +47,35 @@ _FIELD_NAMES = {
 }
 
 
-def _module_labels(items: list) -> list:
-    """服务端下发 [{name, label}]，提取友好标签；兼容纯字符串列表。"""
-    labels = []
-    for item in items:
-        if isinstance(item, dict):
-            label = item.get("label")
-            labels.append(str(label) if label else str(item.get("name", "")))
-        elif isinstance(item, str):
-            labels.append(item)
-    return labels
+def _model_ids(models: list) -> list:
+    """从模型条目中提取 id 列表（兼容纯字符串与带勾选的对象）。"""
+    ids = []
+    for model in models or []:
+        if isinstance(model, dict):
+            model_id = str(model.get("id") or "").strip()
+            if model_id:
+                ids.append(model_id)
+        elif isinstance(model, str) and model.strip():
+            ids.append(model.strip())
+    return ids
 
 
-def _derive_module_keys(providers: list) -> list:
-    """收集 providers 中值为非空列表的字段名，去重保序作为模块 key。"""
-    keys = []
-    for provider in providers:
-        if not isinstance(provider, dict):
+def _model_capabilities(models: list, model_id: str) -> dict:
+    """返回指定模型的能力勾选快照；未找到返回空字典。"""
+    for model in models or []:
+        if not isinstance(model, dict):
             continue
-        for key, value in provider.items():
-            if isinstance(value, list) and value and key not in keys:
-                keys.append(key)
-    return keys
+        if str(model.get("id") or "").strip() != model_id:
+            continue
+        return {
+            "can_enable_thinking": bool(model.get("can_enable_thinking", False)),
+            "can_use_json": bool(model.get("can_use_json", False)),
+        }
+    return {}
 
 
 class LLMSettingsDialog(QDialog):
-    """对话/图片理解等能力模块统一在一页内配置，全局保存。"""
+    """按服务端类型字典渲染的一页式客户端模型设置。"""
 
     def __init__(self, network_client: "NetworkClient", parent=None):
         super().__init__(parent)
@@ -99,11 +92,8 @@ class LLMSettingsDialog(QDialog):
 
         self._providers_reply: "QNetworkReply | None" = None
         self._providers_loaded = False
-        self._providers: list = []
-        self._module_keys: list = []
+        self._types: list = []
         self._modules: dict = {}
-        self._module_capabilities: dict = {}
-        self._module_json_labels: dict = {}
         self._chrome: int | None = None
 
         # 校验状态：batchId 递增使旧请求响应自动失效
@@ -127,7 +117,7 @@ class LLMSettingsDialog(QDialog):
         layout.addWidget(title)
 
         desc = QLabel(
-            "各模块可独立开启“使用自己的 API Key”；关闭时相关调用使用服务端 Key。"
+            "各类型可独立开启“使用自己的 API Key”；关闭时相关调用使用服务端 Key。"
             "Key 只保存在本机，不会上传服务器。"
         )
         desc.setWordWrap(True)
@@ -135,7 +125,7 @@ class LLMSettingsDialog(QDialog):
         layout.addWidget(desc)
 
         header = QHBoxLayout()
-        self.refresh_btn = QPushButton("刷新服务商列表")
+        self.refresh_btn = QPushButton("刷新类型列表")
         self.refresh_btn.setStyleSheet("font-size: 13px; padding: 6px 12px;")
         self.refresh_btn.clicked.connect(self._refresh_providers)
         header.addStretch()
@@ -183,7 +173,7 @@ class LLMSettingsDialog(QDialog):
         self.setLayout(layout)
 
     def _start_fetch_providers(self) -> None:
-        """异步拉取服务商列表（含能力字段/能力标注/JSON 任务），取消前一个请求。"""
+        """异步拉取客户端模型类型字典，取消前一个请求。"""
         if self._providers_reply is not None and not self._providers_reply.isFinished():
             self._mark_cancelled(self._providers_reply)
             self._providers_reply.abort()
@@ -192,10 +182,9 @@ class LLMSettingsDialog(QDialog):
         request.setTransferTimeout(_PROVIDERS_TIMEOUT_MS)
         self._providers_reply = self._http.get(request)
         self._providers_reply.finished.connect(self._on_providers_reply)
-        self.status_label.setText("正在获取服务商列表…")
+        self.status_label.setText("正在获取类型列表…")
 
     def _on_providers_reply(self) -> None:
-        """处理服务商列表响应；仅主动取消才静默忽略，超时按失败提示。"""
         reply = self.sender()
         if reply is None or reply is not self._providers_reply:
             return
@@ -213,73 +202,43 @@ class LLMSettingsDialog(QDialog):
         except Exception as exc:
             self._on_providers_failed(f"数据解析失败: {exc}")
             return
-        providers = data.get("providers") if isinstance(data, dict) else data
-        if not isinstance(providers, list):
-            self._on_providers_failed("服务商列表格式错误")
+        types = data.get("types") if isinstance(data, dict) else data
+        if not isinstance(types, list):
+            self._on_providers_failed("类型列表格式错误")
             return
-        self._on_providers_loaded(
-            providers,
-            llm_caps=data.get("llm_model_capabilities") or {},
-            vlm_caps=data.get("vlm_model_capabilities") or {},
-            llm_json=_module_labels(data.get("llm_json_required_modules") or []),
-            vlm_json=_module_labels(data.get("vlm_json_required_modules") or []),
-        )
+        self._on_providers_loaded([t for t in types if isinstance(t, dict)])
 
-    def _on_providers_loaded(
-        self,
-        providers: list,
-        *,
-        llm_caps: dict,
-        vlm_caps: dict,
-        llm_json: list,
-        vlm_json: list,
-    ) -> None:
-        self._providers = [p for p in providers if isinstance(p, dict)]
-        self._module_keys = _derive_module_keys(self._providers)
-        caps_by_source = {"llm": llm_caps or {}, "vlm": vlm_caps or {}}
-        labels_by_source = {"llm": llm_json or [], "vlm": vlm_json or []}
-        self._module_capabilities = {
-            key: caps_by_source[source[0]]
-            for key, source in _MODULE_DATA_SOURCES.items()
-            if key in self._module_keys
-        }
-        self._module_json_labels = {
-            key: labels_by_source[source[1]]
-            for key, source in _MODULE_DATA_SOURCES.items()
-            if key in self._module_keys
-        }
+    def _on_providers_loaded(self, types: list) -> None:
+        self._types = types
         self._rebuild_cards()
         QTimer.singleShot(0, self._auto_resize)
         self._load_modules_from_storage()
         self._providers_loaded = True
-        self.save_btn.setEnabled(bool(self._module_keys))
-        if not self._module_keys:
-            self.status_label.setText("服务商列表为空，请刷新重试。")
+        self.save_btn.setEnabled(bool(self._types))
+        if not self._types:
+            self.status_label.setText("类型列表为空，请刷新重试。")
         else:
             self.status_label.setText("")
 
     def _on_providers_failed(self, message: str) -> None:
         self._providers_loaded = False
         self.save_btn.setEnabled(False)
-        self.status_label.setText(f"获取服务商列表失败：{message}")
+        self.status_label.setText(f"获取类型列表失败：{message}")
 
     def _refresh_providers(self) -> None:
-        self.status_label.setText("正在获取服务商列表…")
+        self.status_label.setText("正在获取类型列表…")
         self._start_fetch_providers()
 
-    def _capabilities_for(self, key: str) -> dict:
-        return self._module_capabilities.get(key, {})
+    def _providers_of_type(self, type_name: str) -> list:
+        for type_item in self._types:
+            if str(type_item.get("type") or "") == type_name:
+                return [p for p in type_item.get("providers") or [] if isinstance(p, dict)]
+        return []
 
-    def _json_labels_for(self, key: str) -> list:
-        return self._module_json_labels.get(key, [])
-
-    def _providers_with_key(self, key: str) -> list:
-        return [p for p in self._providers if p.get(key)]
-
-    def _find_preset(self, name: str) -> dict | None:
-        for preset in self._providers:
-            if preset.get("name") == name:
-                return preset
+    def _find_provider_in_type(self, type_name: str, provider_name: str) -> dict | None:
+        for provider in self._providers_of_type(type_name):
+            if str(provider.get("name") or "") == provider_name:
+                return provider
         return None
 
     def _clear_cards(self) -> None:
@@ -292,11 +251,17 @@ class LLMSettingsDialog(QDialog):
 
     def _rebuild_cards(self) -> None:
         self._clear_cards()
-        for key in self._module_keys:
-            self._modules[key] = self._build_module_card(key, MODULE_TITLES.get(key, key))
+        for type_item in self._types:
+            type_name = str(type_item.get("type") or "").strip()
+            if not type_name:
+                continue
+            self._modules[type_name] = self._build_type_card(
+                type_name,
+                str(type_item.get("description") or "").strip(),
+                type_item.get("providers") or [],
+            )
 
     def _auto_resize(self) -> None:
-        """按卡片内容高度调整窗口：折叠时贴合内容，展开时封顶走滚动。"""
         if self._cards_layout.count() == 0:
             return
         content_h = self._cards_layout.sizeHint().height()
@@ -306,7 +271,7 @@ class LLMSettingsDialog(QDialog):
         if abs(target_h - self.height()) > 8:
             self.resize(self.width(), target_h)
 
-    def _build_module_card(self, key: str, title: str) -> dict:
+    def _build_type_card(self, type_name: str, description: str, providers: list) -> dict:
         card = QWidget()
         card.setStyleSheet(
             "QWidget#moduleCard { background: #F7F9FB; border: 1px solid #E0E6EC;"
@@ -318,7 +283,7 @@ class LLMSettingsDialog(QDialog):
         layout.setSpacing(8)
 
         head = QHBoxLayout()
-        head_label = QLabel(title)
+        head_label = QLabel(type_name)
         head_label.setStyleSheet("font-size: 15px; font-weight: 600; color: #333;")
         switch = QCheckBox("使用自己的 API Key")
         switch.setStyleSheet("font-size: 13px;")
@@ -327,11 +292,11 @@ class LLMSettingsDialog(QDialog):
         head.addWidget(switch)
         layout.addLayout(head)
 
-        notice = QLabel("")
-        notice.setWordWrap(True)
-        notice.setStyleSheet("font-size: 12px; color: #C77700;")
-        notice.hide()
-        layout.addWidget(notice)
+        if description:
+            notice = QLabel(description)
+            notice.setWordWrap(True)
+            notice.setStyleSheet("font-size: 12px; color: #888;")
+            layout.addWidget(notice)
 
         fields = QWidget()
         fl = QVBoxLayout(fields)
@@ -341,8 +306,11 @@ class LLMSettingsDialog(QDialog):
         provider_combo = QComboBox()
         provider_combo.setPlaceholderText("选择服务商")
         provider_combo.setStyleSheet("font-size: 14px; padding: 6px;")
-        for preset in self._providers_with_key(key):
-            provider_combo.addItem(str(preset.get("name", "")), preset.get("base_url", ""))
+        for provider in providers:
+            provider_combo.addItem(
+                str(provider.get("name", "")),
+                str(provider.get("base_url", "")),
+            )
         fl.addWidget(provider_combo)
 
         url_hint = QLabel("")
@@ -362,23 +330,6 @@ class LLMSettingsDialog(QDialog):
         model_combo.setStyleSheet("font-size: 14px; padding: 6px;")
         fl.addWidget(model_combo)
 
-        badge_row = QHBoxLayout()
-        badge = QLabel("")
-        badge.setStyleSheet(
-            "font-size: 12px; color: #B7791F; background: #FDF3DC;"
-            " border-radius: 4px; padding: 2px 8px;"
-        )
-        badge.hide()
-        info_btn = QPushButton("?")
-        info_btn.setFixedSize(22, 22)
-        info_btn.setStyleSheet("font-size: 12px;")
-        info_btn.setToolTip("")
-        info_btn.hide()
-        badge_row.addWidget(badge)
-        badge_row.addWidget(info_btn)
-        badge_row.addStretch()
-        fl.addLayout(badge_row)
-
         params_editor = QPlainTextEdit()
         params_editor.setPlaceholderText(
             '高级参数（JSON，可选），例如 {"temperature": 0.7}'
@@ -391,7 +342,7 @@ class LLMSettingsDialog(QDialog):
         self._cards_layout.addWidget(card)
 
         info = {
-            "key": key,
+            "key": type_name,
             "card": card,
             "switch": switch,
             "fields": fields,
@@ -399,10 +350,7 @@ class LLMSettingsDialog(QDialog):
             "api_key_input": api_key_input,
             "model_combo": model_combo,
             "url_hint": url_hint,
-            "badge_label": badge,
-            "info_btn": info_btn,
             "params_editor": params_editor,
-            "notice_label": notice,
             "base_url": "",
             "stored_provider": "",
             "stored_model": "",
@@ -412,30 +360,25 @@ class LLMSettingsDialog(QDialog):
             "params_style": params_editor.styleSheet(),
         }
 
-        switch.toggled.connect(
-            lambda checked, w=fields: w.setVisible(checked)
-        )
+        switch.toggled.connect(lambda checked, w=fields: w.setVisible(checked))
         switch.toggled.connect(lambda: QTimer.singleShot(0, self._auto_resize))
         provider_combo.currentTextChanged.connect(
-            lambda text, k=key: self._on_module_provider_changed(k, text)
-        )
-        model_combo.currentTextChanged.connect(
-            lambda _text, k=key: self._update_badge(k)
+            lambda text, k=type_name: self._on_provider_changed(k, text)
         )
         api_key_input.textChanged.connect(
-            lambda _t, k=key: self._clear_highlight(self._modules[k]["api_key_input"])
+            lambda _t, k=type_name: self._clear_highlight(self._modules[k]["api_key_input"])
         )
         params_editor.textChanged.connect(
-            lambda _t, k=key: self._clear_highlight(self._modules[k]["params_editor"])
+            lambda _t, k=type_name: self._clear_highlight(self._modules[k]["params_editor"])
         )
         return info
 
-    def _on_module_provider_changed(self, key: str, text: str) -> None:
-        info = self._modules.get(key)
+    def _on_provider_changed(self, type_name: str, text: str) -> None:
+        info = self._modules.get(type_name)
         if info is None:
             return
-        preset = self._find_preset(text)
-        info["base_url"] = str(preset.get("base_url", "")) if preset else ""
+        provider = self._find_provider_in_type(type_name, text)
+        info["base_url"] = str(provider.get("base_url", "")) if provider else ""
         if info["base_url"]:
             info["url_hint"].setText(f"服务商地址：{info['base_url']}")
             info["url_hint"].show()
@@ -446,33 +389,14 @@ class LLMSettingsDialog(QDialog):
         info["stored_model"] = ""
         self._clear_highlight(info["provider_combo"])
         info["model_combo"].clear()
-        if preset:
-            for model in preset.get(key) or []:
-                info["model_combo"].addItem(str(model))
-        self._update_badge(key)
-
-    def _update_badge(self, key: str) -> None:
-        info = self._modules.get(key)
-        if info is None:
-            return
-        model = info["model_combo"].currentText().strip()
-        cap = self._capabilities_for(key).get(model) if model else None
-        labels = self._json_labels_for(key)
-        if model and cap is not None and not cap.get("can_use_json") and labels:
-            info["badge_label"].setText("部分高级功能将使用服务端 Key")
-            info["badge_label"].show()
-            info["info_btn"].setToolTip(
-                "以下功能将使用服务端 Key：\n" + "、".join(str(x) for x in labels)
-            )
-            info["info_btn"].show()
-        else:
-            info["badge_label"].hide()
-            info["info_btn"].hide()
+        if provider:
+            for model_id in _model_ids(provider.get("models")):
+                info["model_combo"].addItem(model_id)
 
     def _load_modules_from_storage(self) -> None:
         saved = credential.get_llm_modules_config()
-        for key, info in self._modules.items():
-            entry = saved.get(key) or {}
+        for type_name, info in self._modules.items():
+            entry = saved.get(type_name) or {}
             info["base_url"] = str(entry.get("base_url") or "")
             provider = str(entry.get("provider") or "")
             model = str(entry.get("model") or "")
@@ -486,18 +410,8 @@ class LLMSettingsDialog(QDialog):
                 index = info["provider_combo"].findText(provider)
                 if index >= 0:
                     info["provider_combo"].setCurrentIndex(index)
-                    info["stored_provider"] = ""
-                    info["base_url"] = str(
-                        self._find_preset(provider).get("base_url", "")
-                        if self._find_preset(provider)
-                        else info["base_url"]
-                    )
                 else:
                     info["stored_provider"] = provider
-                    info["notice_label"].setText(
-                        f"注意：服务商 ‘{provider}’ 已不在列表中（保存时仍使用已固化的地址）"
-                    )
-                    info["notice_label"].show()
                     if info["base_url"]:
                         info["url_hint"].setText(f"服务商地址：{info['base_url']}")
                         info["url_hint"].show()
@@ -514,9 +428,7 @@ class LLMSettingsDialog(QDialog):
                     json.dumps(params, ensure_ascii=False, indent=2)
                 )
             info["fields"].setVisible(info["switch"].isChecked())
-            self._update_badge(key)
 
-    # 高亮辅助
     def _clear_highlight(self, widget) -> None:
         for info in self._modules.values():
             base = None
@@ -542,49 +454,53 @@ class LLMSettingsDialog(QDialog):
         elif widget is info["params_editor"]:
             widget.setStyleSheet(info["params_style"] + " " + _HIGHLIGHT_STYLE)
 
-    # 保存：预检、校验与原子写入
     def _collect_form_modules(self) -> dict:
         modules = {}
-        for key, info in self._modules.items():
+        for type_name, info in self._modules.items():
             provider = (
                 info["provider_combo"].currentText().strip()
                 or info.get("stored_provider", "")
             )
-            preset = next(
-                (p for p in self._providers_with_key(key) if p.get("name") == provider),
-                None,
+            provider_cfg = self._find_provider_in_type(type_name, provider)
+            model = (
+                info["model_combo"].currentText().strip()
+                or info.get("stored_model", "")
             )
-            modules[key] = {
+            modules[type_name] = {
                 "enabled": info["switch"].isChecked(),
                 "provider": provider,
                 "api_key": info["api_key_input"].text().strip(),
-                "model": (
-                    info["model_combo"].currentText().strip()
-                    or info.get("stored_model", "")
+                "model": model,
+                "base_url": (
+                    str(provider_cfg.get("base_url", ""))
+                    if provider_cfg
+                    else info["base_url"]
                 ),
-                # 服务商在列表中：保存时自动同步预设地址；不在则保持原值
-                "base_url": str(preset.get("base_url", "")) if preset else info["base_url"],
+                "model_capabilities": (
+                    _model_capabilities(provider_cfg.get("models"), model)
+                    if provider_cfg
+                    else {}
+                ),
                 "params_text": info["params_editor"].toPlainText().strip(),
             }
         return modules
 
     def _precheck(self, modules: dict) -> tuple | None:
-        """客户端预检：返回首个 (key, field) 缺失项或非法 JSON；通过返回 None。"""
-        for key in self._module_keys:
-            info = self._modules[key]
-            entry = modules[key]
+        """客户端预检：返回首个 (type, field) 缺失项或非法 JSON；通过返回 None。"""
+        for type_name, info in self._modules.items():
+            entry = modules[type_name]
             if not entry["enabled"]:
                 continue
             for field in ("provider", "api_key", "model"):
                 if not entry[field]:
-                    return key, field
+                    return type_name, field
             if entry["params_text"]:
                 try:
                     parsed = json.loads(entry["params_text"])
                     if not isinstance(parsed, dict):
-                        return key, "params"
+                        return type_name, "params"
                 except json.JSONDecodeError:
-                    return key, "params"
+                    return type_name, "params"
         return None
 
     def _on_save(self) -> None:
@@ -593,8 +509,8 @@ class LLMSettingsDialog(QDialog):
         modules = self._collect_form_modules()
         missing = self._precheck(modules)
         if missing is not None:
-            key, field = missing
-            info = self._modules[key]
+            type_name, field = missing
+            info = self._modules[type_name]
             widget = {
                 "provider": info["provider_combo"],
                 "api_key": info["api_key_input"],
@@ -604,13 +520,12 @@ class LLMSettingsDialog(QDialog):
             self._highlight_widget(info, widget)
             self._scroll.ensureWidgetVisible(info["card"], 0, 120)
             widget.setFocus()
-            title = MODULE_TITLES.get(key, key)
             QMessageBox.warning(
                 self,
                 "配置不完整",
-                f"模块「{title}」缺少 {_FIELD_NAMES[field]}，请补全后重试。"
+                f"类型「{type_name}」缺少 {_FIELD_NAMES[field]}，请补全后重试。"
                 if field != "params"
-                else f"模块「{title}」的高级参数不是合法 JSON，请修正后重试。",
+                else f"类型「{type_name}」的高级参数不是合法 JSON，请修正后重试。",
             )
             return
         self._save_modules = modules
@@ -626,14 +541,14 @@ class LLMSettingsDialog(QDialog):
         self.status_label.setText("正在校验配置…")
 
         targets = [
-            (key, entry)
-            for key, entry in modules.items()
+            (type_name, entry)
+            for type_name, entry in modules.items()
             if entry["enabled"] and entry["base_url"]
         ]
         if not targets:
             self._finish_validation(modules)
             return
-        for key, entry in targets:
+        for type_name, entry in targets:
             request = QNetworkRequest(
                 QUrl(f"{entry['base_url'].rstrip('/')}/models")
             )
@@ -641,7 +556,7 @@ class LLMSettingsDialog(QDialog):
             request.setTransferTimeout(_VALIDATION_TIMEOUT_MS)
             reply = self._http.get(request)
             self._validation_items.append(
-                {"reply": reply, "key": key, "batch": batch, "done": False}
+                {"reply": reply, "key": type_name, "batch": batch, "done": False}
             )
             reply.finished.connect(self._on_validation_reply)
 
@@ -658,8 +573,8 @@ class LLMSettingsDialog(QDialog):
         if all(it["done"] for it in self._validation_items):
             self._finish_validation(self._save_modules)
 
-    def _evaluate_validation(self, reply, key: str) -> str | None:
-        """校验单个 /v1/models 响应；返回 None 表示通过，否则返回失败原因。"""
+    def _evaluate_validation(self, reply, type_name: str) -> str | None:
+        """校验单个 /models 响应；返回 None 表示通过，否则返回失败原因。"""
         error = reply.error()
         if error == QNetworkReply.NetworkError.OperationCanceledError:
             if self._is_intentional_cancel(reply):
@@ -684,7 +599,7 @@ class LLMSettingsDialog(QDialog):
                 for item in raw
                 if isinstance(item, dict) and item.get("id")
             ]
-        entry = self._save_modules.get(key) or {}
+        entry = self._save_modules.get(type_name) or {}
         if entry.get("model") not in model_ids:
             return "模型不可用（不在服务商模型列表中），请更换模型后重试。"
         return None
@@ -693,14 +608,14 @@ class LLMSettingsDialog(QDialog):
         self._validating = False
         self._set_validation_ui(False)
         failures = [
-            (key, err)
-            for key, (ok, err) in self._validation_results.items()
+            (type_name, err)
+            for type_name, (ok, err) in self._validation_results.items()
             if not ok
         ]
         if failures:
             lines = [
-                f"模块「{MODULE_TITLES.get(key, key)}」：{err}"
-                for key, err in failures
+                f"类型「{type_name}」：{err}"
+                for type_name, err in failures
             ]
             self.status_label.setText("配置校验失败")
             QMessageBox.critical(self, "配置校验失败", "\n".join(lines))
@@ -709,7 +624,7 @@ class LLMSettingsDialog(QDialog):
 
     def _write_modules(self, modules: dict) -> None:
         to_save = {}
-        for key, entry in modules.items():
+        for type_name, entry in modules.items():
             params = {}
             text = (entry.get("params_text") or "").strip()
             if text:
@@ -719,17 +634,13 @@ class LLMSettingsDialog(QDialog):
                         params = parsed
                 except json.JSONDecodeError:
                     params = {}
-            to_save[key] = {
+            to_save[type_name] = {
                 "enabled": entry.get("enabled", False),
                 "provider": entry.get("provider", ""),
                 "model": entry.get("model", ""),
                 "base_url": entry.get("base_url", ""),
                 "params": params,
-                "model_capabilities": dict(
-                    (self._module_capabilities.get(key) or {}).get(
-                        entry.get("model", ""), {}
-                    )
-                ),
+                "model_capabilities": dict(entry.get("model_capabilities") or {}),
                 "api_key": entry.get("api_key", ""),
             }
         ok = credential.save_llm_modules_config(to_save)
@@ -774,9 +685,7 @@ class LLMSettingsDialog(QDialog):
             info["model_combo"].setEnabled(not active)
             info["params_editor"].setEnabled(not active)
 
-    # 取消/关闭与超时区分
     def _mark_cancelled(self, reply) -> None:
-        """标记 reply 为用户主动取消；Qt 超时与 abort() 同用 OperationCanceledError。"""
         if reply is not None:
             reply._intentional_cancel = True
 

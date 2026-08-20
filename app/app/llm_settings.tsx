@@ -1,11 +1,11 @@
 /**
- * LLM 模型设置页：单页垂直模块列表 + 全局保存。
+ * LLM 模型设置页：按服务端下发的客户端模型类型渲染卡片 + 全局保存。
  *
- * 模块列表由 /llm/providers 返回的 provider 能力字段（值为非空列表的字段，
- * 如 llm_models / vlm_models）动态生成，模块 key 即字段名，标题取极简映射
- * 表，未映射字段回退字段名。每个模块用开关控制“使用自己的 API Key”；
- * 保存时先做客户端预检（必填 + 高级参数 JSON），再对开启模块并行
- * GET /v1/models 校验（batchId 防过期），全部通过后一次性写入 SecureStore。
+ * 类型字典由 /llm/providers 生成（type -> providers[base_url, models[勾选]]），
+ * 每个类型一张卡片：服务商/模型下拉由类型数据驱动，保存时对开启的类型并行
+ * GET /models 校验（batchId 防过期），全部通过后一次性写入 SecureStore，
+ * 键为类型名；并把所选模型的 thinking/json 勾选复制为本地能力快照，
+ * 供运行时按服务端门控逻辑附加 enable_thinking / response_format。
  */
 
 import * as Clipboard from 'expo-clipboard';
@@ -28,12 +28,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { server_config } from '../config';
 import { addDebugTrace } from '../utils/debug_trace';
-import {
-  fetchJsonRequiredModules,
-  fetchModelsList,
-  fetchProviderPresets,
-} from '../utils/llm_client';
-import type { LlmModelCapability, LlmProviderPreset } from '../utils/llm_client';
+import { fetchClientModelTypes, fetchModelsList } from '../utils/llm_client';
+import type { ClientModelType } from '../utils/llm_client';
 import {
   getLlmModulesConfig,
   setLlmModulesConfig,
@@ -41,21 +37,7 @@ import {
 import type { LlmModulesConfig } from '../utils/llm_key_storage';
 import { AppTheme, THEMES } from '../utils/theme';
 
-const MODULE_TITLES: Record<string, string> = {
-  llm_models: '对话模型',
-  vlm_models: '图片理解模型',
-};
-
 const VALIDATION_TIMEOUT_MS = 30000;
-
-/** 模块 key -> 服务端能力/JSON 任务数据来源（数据驱动，非运行时分支判断）。 */
-const MODULE_SERVER_SOURCES: Record<
-  string,
-  { caps: 'llmModelCapabilities' | 'vlmModelCapabilities'; json: 'llm' | 'vlm' }
-> = {
-  llm_models: { caps: 'llmModelCapabilities', json: 'llm' },
-  vlm_models: { caps: 'vlmModelCapabilities', json: 'vlm' },
-};
 
 type FieldKey = 'provider' | 'apiKey' | 'model' | 'paramsText';
 
@@ -70,7 +52,6 @@ interface ModuleFormState {
   baseUrl: string;
   notice: string;
   highlight: FieldKey | null;
-  showJsonTasks: boolean;
 }
 
 interface LlmSettingsScreenProps {
@@ -79,28 +60,8 @@ interface LlmSettingsScreenProps {
 }
 
 interface PickerTarget {
-  moduleKey: string;
+  typeName: string;
   field: 'provider' | 'model';
-}
-
-function deriveModuleKeys(providers: LlmProviderPreset[]): string[] {
-  const keys: string[] = [];
-  for (const provider of providers) {
-    for (const [key, value] of Object.entries(provider)) {
-      if (Array.isArray(value) && value.length > 0 && !keys.includes(key)) {
-        keys.push(key);
-      }
-    }
-  }
-  return keys;
-}
-
-function moduleTitle(key: string): string {
-  return MODULE_TITLES[key] ?? key;
-}
-
-function providerField(provider: LlmProviderPreset, key: string): unknown {
-  return (provider as unknown as Record<string, unknown>)[key];
 }
 
 function friendlyFieldName(field: FieldKey): string {
@@ -168,66 +129,39 @@ export default function LlmSettingsScreen({
   const cardYRef = useRef<Record<string, number>>({});
   const batchRef = useRef(0);
 
-  const [providers, setProviders] = useState<LlmProviderPreset[]>([]);
-  const [moduleKeys, setModuleKeys] = useState<string[]>([]);
+  const [types, setTypes] = useState<ClientModelType[]>([]);
   const [forms, setForms] = useState<Record<string, ModuleFormState>>({});
-  const [moduleCaps, setModuleCaps] = useState<
-    Record<string, Record<string, LlmModelCapability>>
-  >({});
-  const [moduleJsonLabels, setModuleJsonLabels] = useState<Record<string, string[]>>(
-    {},
-  );
-  const [providersLoaded, setProvidersLoaded] = useState(false);
-  const [providersError, setProvidersError] = useState('');
+  const [typesLoaded, setTypesLoaded] = useState(false);
+  const [typesError, setTypesError] = useState('');
   const [saving, setSaving] = useState(false);
   const [picker, setPicker] = useState<PickerTarget | null>(null);
 
-  const capsFor = useCallback(
-    (key: string): Record<string, LlmModelCapability> =>
-      moduleCaps[key] ?? {},
-    [moduleCaps],
-  );
-
-  const jsonLabelsFor = useCallback(
-    (key: string): string[] => moduleJsonLabels[key] ?? [],
-    [moduleJsonLabels],
-  );
-
-  const presetsFor = useCallback(
-    (key: string): LlmProviderPreset[] =>
-      providers.filter(
-        (p) =>
-          Array.isArray(providerField(p, key)) &&
-          (providerField(p, key) as string[]).length > 0,
-      ),
-    [providers],
+  const providersFor = useCallback(
+    (typeName: string): ClientModelType['providers'] =>
+      types.find((item) => item.type === typeName)?.providers ?? [],
+    [types],
   );
 
   const effectiveBaseUrl = useCallback(
-    (key: string): string => {
-      const form = forms[key];
+    (typeName: string): string => {
+      const form = forms[typeName];
       if (!form) {
         return '';
       }
       const provider = form.provider || form.storedProvider;
-      const preset = presetsFor(key).find((p) => p.name === provider);
-      // 服务商在列表中：用预设地址；不在则保持原值
+      const preset = providersFor(typeName).find((p) => p.name === provider);
       return preset ? preset.base_url : form.baseUrl;
     },
-    [forms, presetsFor],
+    [forms, providersFor],
   );
 
   const loadForms = useCallback(
-    async (providerList: LlmProviderPreset[], keys: string[]) => {
+    async (typeList: ClientModelType[]) => {
       const stored = await getLlmModulesConfig();
       const next: Record<string, ModuleFormState> = {};
-      for (const key of keys) {
-        const saved = stored[key];
-        const presets = providerList.filter(
-          (p) =>
-            Array.isArray(providerField(p, key)) &&
-            (providerField(p, key) as string[]).length > 0,
-        );
+      for (const typeItem of typeList) {
+        const saved = stored[typeItem.type];
+        const presets = typeItem.providers;
         let provider = saved?.provider ?? '';
         let storedProvider = '';
         let notice = '';
@@ -240,12 +174,12 @@ export default function LlmSettingsScreen({
         let storedModel = '';
         if (
           model &&
-          !(preset && (providerField(preset, key) as string[]).includes(model))
+          !(preset && preset.models.some((m) => m.id === model))
         ) {
           storedModel = model;
           model = '';
         }
-        next[key] = {
+        next[typeItem.type] = {
           enabled: Boolean(saved?.enabled),
           provider,
           storedProvider,
@@ -256,7 +190,6 @@ export default function LlmSettingsScreen({
           baseUrl: saved?.baseUrl ?? preset?.base_url ?? '',
           notice,
           highlight: null,
-          showJsonTasks: false,
         };
       }
       setForms(next);
@@ -264,64 +197,50 @@ export default function LlmSettingsScreen({
     [],
   );
 
-  const refreshProviders = useCallback(async () => {
+  const refreshTypes = useCallback(async () => {
     try {
-      const data = await fetchProviderPresets(server_config.BASE_URL);
-      const jsonModules = await fetchJsonRequiredModules(server_config.BASE_URL);
-      setProviders(data.providers);
-      const keys = deriveModuleKeys(data.providers);
-      const capsMap: Record<string, Record<string, LlmModelCapability>> = {};
-      const labelsMap: Record<string, string[]> = {};
-      for (const key of keys) {
-        const source = MODULE_SERVER_SOURCES[key];
-        if (source) {
-          capsMap[key] = data[source.caps];
-          labelsMap[key] = jsonModules[source.json];
-        }
-      }
-      setModuleCaps(capsMap);
-      setModuleJsonLabels(labelsMap);
-      setModuleKeys(keys);
-      setProvidersLoaded(true);
-      setProvidersError('');
-      await loadForms(data.providers, keys);
+      const data = await fetchClientModelTypes(server_config.BASE_URL);
+      setTypes(data.types);
+      setTypesLoaded(true);
+      setTypesError('');
+      await loadForms(data.types);
     } catch (e) {
-      addDebugTrace('llm_settings', 'fetch providers failed', {
+      addDebugTrace('llm_settings', 'fetch types failed', {
         error: String(e),
       });
-      setProvidersError(
-        `获取服务商列表失败：${e instanceof Error ? e.message : String(e)}`,
+      setTypesError(
+        `获取类型列表失败：${e instanceof Error ? e.message : String(e)}`,
       );
     }
   }, [loadForms]);
 
   useEffect(() => {
-    void refreshProviders();
-  }, [refreshProviders]);
+    void refreshTypes();
+  }, [refreshTypes]);
 
   const updateForm = useCallback(
-    (moduleKey: string, patch: Partial<ModuleFormState>) => {
+    (typeName: string, patch: Partial<ModuleFormState>) => {
       setForms((prev) => ({
         ...prev,
-        [moduleKey]: { ...prev[moduleKey], ...patch },
+        [typeName]: { ...prev[typeName], ...patch },
       }));
     },
     [],
   );
 
   const clearHighlight = useCallback(
-    (moduleKey: string, field: FieldKey) => {
-      const current = forms[moduleKey];
+    (typeName: string, field: FieldKey) => {
+      const current = forms[typeName];
       if (current && current.highlight === field) {
-        updateForm(moduleKey, { highlight: null });
+        updateForm(typeName, { highlight: null });
       }
     },
     [forms, updateForm],
   );
 
-  const selectProvider = (moduleKey: string, value: string) => {
-    const preset = presetsFor(moduleKey).find((p) => p.name === value);
-    updateForm(moduleKey, {
+  const selectProvider = (typeName: string, value: string) => {
+    const preset = providersFor(typeName).find((p) => p.name === value);
+    updateForm(typeName, {
       provider: value,
       baseUrl: preset?.base_url ?? '',
       storedProvider: '',
@@ -332,27 +251,27 @@ export default function LlmSettingsScreen({
     });
   };
 
-  const selectModel = (moduleKey: string, value: string) => {
-    updateForm(moduleKey, {
+  const selectModel = (typeName: string, value: string) => {
+    updateForm(typeName, {
       model: value,
       storedModel: '',
       highlight: null,
     });
   };
 
-  const pasteKey = async (moduleKey: string) => {
+  const pasteKey = async (typeName: string) => {
     try {
       const text = await Clipboard.getStringAsync();
       if (text) {
-        updateForm(moduleKey, { apiKey: text.trim(), highlight: null });
+        updateForm(typeName, { apiKey: text.trim(), highlight: null });
       }
     } catch (e) {
       addDebugTrace('llm_settings', 'paste key failed', { error: String(e) });
     }
   };
 
-  const scrollToModule = (moduleKey: string) => {
-    const y = cardYRef.current[moduleKey] ?? 0;
+  const scrollToType = (typeName: string) => {
+    const y = cardYRef.current[typeName] ?? 0;
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true });
     });
@@ -373,23 +292,23 @@ export default function LlmSettingsScreen({
     }
   };
 
-  const precheck = (): { moduleKey: string; field: FieldKey } | null => {
-    for (const key of moduleKeys) {
-      const form = forms[key];
+  const precheck = (): { typeName: string; field: FieldKey } | null => {
+    for (const typeItem of types) {
+      const form = forms[typeItem.type];
       if (!form || !form.enabled) {
         continue;
       }
       if (!form.provider && !form.storedProvider) {
-        return { moduleKey: key, field: 'provider' };
+        return { typeName: typeItem.type, field: 'provider' };
       }
       if (!form.apiKey) {
-        return { moduleKey: key, field: 'apiKey' };
+        return { typeName: typeItem.type, field: 'apiKey' };
       }
       if (!form.model && !form.storedModel) {
-        return { moduleKey: key, field: 'model' };
+        return { typeName: typeItem.type, field: 'model' };
       }
       if (form.paramsText.trim() && parseParams(form.paramsText) === null) {
-        return { moduleKey: key, field: 'paramsText' };
+        return { typeName: typeItem.type, field: 'paramsText' };
       }
     }
     return null;
@@ -401,15 +320,14 @@ export default function LlmSettingsScreen({
     }
     const missing = precheck();
     if (missing) {
-      updateForm(missing.moduleKey, { highlight: missing.field });
-      scrollToModule(missing.moduleKey);
-      const title = moduleTitle(missing.moduleKey);
+      updateForm(missing.typeName, { highlight: missing.field });
+      scrollToType(missing.typeName);
       const field = friendlyFieldName(missing.field);
       Alert.alert(
         '配置不完整',
         missing.field === 'paramsText'
-          ? `模块「${title}」的高级参数不是合法 JSON，请修正后重试。`
-          : `模块「${title}」缺少 ${field}，请补全后重试。`,
+          ? `类型「${missing.typeName}」的高级参数不是合法 JSON，请修正后重试。`
+          : `类型「${missing.typeName}」缺少 ${field}，请补全后重试。`,
       );
       return;
     }
@@ -417,66 +335,82 @@ export default function LlmSettingsScreen({
     setSaving(true);
     Keyboard.dismiss();
 
-    const targets = moduleKeys.filter(
-      (key) => forms[key]?.enabled && effectiveBaseUrl(key),
+    const targets = types.filter(
+      (typeItem) =>
+        forms[typeItem.type]?.enabled && effectiveBaseUrl(typeItem.type),
     );
     const results = await Promise.all(
-      targets.map(async (key): Promise<{ key: string; error: string | null }> => {
-        const form = forms[key];
-        const model = form.model || form.storedModel;
-        try {
-          const ids = await fetchModelsList(
-            effectiveBaseUrl(key),
-            form.apiKey,
-            VALIDATION_TIMEOUT_MS,
-          );
-          if (!model || !ids.includes(model)) {
-            return { key, error: '模型不可用（不在服务商模型列表中），请更换模型后重试。' };
+      targets.map(
+        async (typeItem): Promise<{ typeName: string; error: string | null }> => {
+          const form = forms[typeItem.type];
+          const model = form.model || form.storedModel;
+          try {
+            const ids = await fetchModelsList(
+              effectiveBaseUrl(typeItem.type),
+              form.apiKey,
+              VALIDATION_TIMEOUT_MS,
+            );
+            if (!model || !ids.includes(model)) {
+              return {
+                typeName: typeItem.type,
+                error: '模型不可用（不在服务商模型列表中），请更换模型后重试。',
+              };
+            }
+            return { typeName: typeItem.type, error: null };
+          } catch (e) {
+            const message = String(e instanceof Error ? e.message : e);
+            if (/(401|403|unauthorized|invalid api key)/i.test(message)) {
+              return {
+                typeName: typeItem.type,
+                error: 'API Key 无效或没有权限，请检查后重试。',
+              };
+            }
+            if (/(timeout|timed out)/i.test(message)) {
+              return {
+                typeName: typeItem.type,
+                error: '请求超时（30 秒无响应），请检查网络后重试。',
+              };
+            }
+            return {
+              typeName: typeItem.type,
+              error: '无法连接服务商（URL 不可达），请检查网络后重试。',
+            };
           }
-          return { key, error: null };
-        } catch (e) {
-          const message = String(e instanceof Error ? e.message : e);
-          if (/(401|403|unauthorized|invalid api key)/i.test(message)) {
-            return { key, error: 'API Key 无效或没有权限，请检查后重试。' };
-          }
-          if (/(timeout|timed out)/i.test(message)) {
-            return { key, error: '请求超时（30 秒无响应），请检查网络后重试。' };
-          }
-          return { key, error: '无法连接服务商（URL 不可达），请检查网络后重试。' };
-        }
-      }),
+        },
+      ),
     );
     if (batch !== batchRef.current) {
       return; // 过期批次：静默丢弃
     }
     setSaving(false);
-    const failed = results.filter((r): r is { key: string; error: string } => !!r.error);
+    const failed = results.filter(
+      (r): r is { typeName: string; error: string } => !!r.error,
+    );
     if (failed.length > 0) {
       Alert.alert(
         '配置校验失败',
-        failed
-          .map((r) => `模块「${moduleTitle(r.key)}」：${r.error}`)
-          .join('\n'),
+        failed.map((r) => `类型「${r.typeName}」：${r.error}`).join('\n'),
       );
       return;
     }
 
     const cfg: LlmModulesConfig = {};
-    for (const key of moduleKeys) {
-      const form = forms[key];
+    for (const typeItem of types) {
+      const form = forms[typeItem.type];
       const provider = form.provider || form.storedProvider;
       const model = form.model || form.storedModel;
-      const cap = model ? capsFor(key)[model] : undefined;
-      cfg[key] = {
+      const preset = providersFor(typeItem.type).find((p) => p.name === provider);
+      const modelEntry = preset?.models.find((m) => m.id === model);
+      cfg[typeItem.type] = {
         enabled: form.enabled,
         provider,
         model,
-        baseUrl: effectiveBaseUrl(key),
+        baseUrl: effectiveBaseUrl(typeItem.type),
         apiKey: form.apiKey,
         paramsText: form.paramsText,
         modelCapabilities: {
-          can_enable_thinking: Boolean(cap?.can_enable_thinking),
-          can_use_json: Boolean(cap?.can_use_json),
+          can_enable_thinking: Boolean(modelEntry?.can_enable_thinking),
+          can_use_json: Boolean(modelEntry?.can_use_json),
         },
       };
     }
@@ -493,55 +427,44 @@ export default function LlmSettingsScreen({
     setSaving(false);
   };
 
-  const badgeFor = (key: string): { show: boolean; labels: string[] } => {
-    const form = forms[key];
-    if (!form) {
-      return { show: false, labels: [] };
-    }
-    const model = form.model || form.storedModel;
-    const cap = model ? capsFor(key)[model] : undefined;
-    const labels = jsonLabelsFor(key);
-    return { show: !!model && !!cap && !cap.can_use_json && labels.length > 0, labels };
-  };
-
-  const renderCard = (key: string) => {
-    const form = forms[key];
+  const renderCard = (typeItem: ClientModelType) => {
+    const typeName = typeItem.type;
+    const form = forms[typeName];
     if (!form) {
       return null;
     }
-    const title = moduleTitle(key);
-    const badge = badgeFor(key);
     const fieldStyle = (field: FieldKey) =>
       form.highlight === field ? styles.inputError : undefined;
 
     return (
       <View
-        key={key}
+        key={typeName}
         style={styles.card}
         onLayout={(e) => {
-          cardYRef.current[key] = e.nativeEvent.layout.y;
+          cardYRef.current[typeName] = e.nativeEvent.layout.y;
         }}
       >
         <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>{title}</Text>
+          <Text style={styles.cardTitle}>{typeName}</Text>
           <View style={styles.switchRow}>
             <Text style={styles.switchLabel}>使用自己的 API Key</Text>
             <Switch
               value={form.enabled}
               disabled={saving}
-              onValueChange={(value) => updateForm(key, { enabled: value })}
+              onValueChange={(value) => updateForm(typeName, { enabled: value })}
             />
           </View>
         </View>
-        {form.notice ? (
-          <Text style={styles.notice}>{form.notice}</Text>
+        {typeItem.description ? (
+          <Text style={styles.description}>{typeItem.description}</Text>
         ) : null}
+        {form.notice ? <Text style={styles.notice}>{form.notice}</Text> : null}
         {form.enabled ? (
           <View>
             <Text style={styles.fieldLabel}>服务商</Text>
             <TouchableOpacity
               disabled={saving}
-              onPress={() => setPicker({ moduleKey: key, field: 'provider' })}
+              onPress={() => setPicker({ typeName, field: 'provider' })}
               style={[styles.pickerInput, fieldStyle('provider')]}
             >
               <Text
@@ -551,7 +474,9 @@ export default function LlmSettingsScreen({
               </Text>
             </TouchableOpacity>
             {form.provider || form.storedProvider ? (
-              <Text style={styles.urlHint}>服务商地址：{effectiveBaseUrl(key)}</Text>
+              <Text style={styles.urlHint}>
+                服务商地址：{effectiveBaseUrl(typeName)}
+              </Text>
             ) : null}
 
             <Text style={styles.fieldLabel}>API Key</Text>
@@ -559,8 +484,8 @@ export default function LlmSettingsScreen({
               <TextInput
                 value={form.apiKey}
                 onChangeText={(text) => {
-                  updateForm(key, { apiKey: text });
-                  clearHighlight(key, 'apiKey');
+                  updateForm(typeName, { apiKey: text });
+                  clearHighlight(typeName, 'apiKey');
                 }}
                 placeholder="粘贴 API Key"
                 placeholderTextColor="#aaa"
@@ -569,7 +494,11 @@ export default function LlmSettingsScreen({
               />
               <TouchableOpacity
                 disabled={saving}
-                onPress={() => (form.apiKey ? updateForm(key, { apiKey: '' }) : void pasteKey(key))}
+                onPress={() =>
+                  form.apiKey
+                    ? updateForm(typeName, { apiKey: '' })
+                    : void pasteKey(typeName)
+                }
                 style={styles.smallButton}
               >
                 <Text style={styles.smallButtonText}>
@@ -581,7 +510,7 @@ export default function LlmSettingsScreen({
             <Text style={styles.fieldLabel}>模型</Text>
             <TouchableOpacity
               disabled={saving}
-              onPress={() => setPicker({ moduleKey: key, field: 'model' })}
+              onPress={() => setPicker({ typeName, field: 'model' })}
               style={[styles.pickerInput, fieldStyle('model')]}
             >
               <Text
@@ -591,29 +520,12 @@ export default function LlmSettingsScreen({
               </Text>
             </TouchableOpacity>
 
-            {badge.show ? (
-              <View style={styles.badgeRow}>
-                <Text style={styles.badge}>部分高级功能将使用服务端 Key</Text>
-                <TouchableOpacity
-                  onPress={() => updateForm(key, { showJsonTasks: !form.showJsonTasks })}
-                  style={styles.infoButton}
-                >
-                  <Text style={styles.infoButtonText}>?</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-            {badge.show && form.showJsonTasks ? (
-              <Text style={styles.badgeDetail}>
-                以下功能将使用服务端 Key：{badge.labels.join('、')}
-              </Text>
-            ) : null}
-
             <Text style={styles.fieldLabel}>高级参数（JSON，可选）</Text>
             <TextInput
               value={form.paramsText}
               onChangeText={(text) => {
-                updateForm(key, { paramsText: text });
-                clearHighlight(key, 'paramsText');
+                updateForm(typeName, { paramsText: text });
+                clearHighlight(typeName, 'paramsText');
               }}
               placeholder={'{"temperature": 0.7}'}
               placeholderTextColor="#aaa"
@@ -626,19 +538,18 @@ export default function LlmSettingsScreen({
     );
   };
 
-  const pickerTarget = picker ? forms[picker.moduleKey] : null;
+  const pickerTarget = picker ? forms[picker.typeName] : null;
   const pickerOptions: string[] = (() => {
     if (!picker || !pickerTarget) {
       return [];
     }
     if (picker.field === 'provider') {
-      return presetsFor(picker.moduleKey).map((p) => p.name);
+      return providersFor(picker.typeName).map((p) => p.name);
     }
-    const preset = presetsFor(picker.moduleKey).find(
+    const preset = providersFor(picker.typeName).find(
       (p) => p.name === pickerTarget.provider,
     );
-    const field = preset ? providerField(preset, picker.moduleKey) : undefined;
-    return Array.isArray(field) ? (field as string[]) : [];
+    return preset ? preset.models.map((m) => m.id) : [];
   })();
 
   return (
@@ -651,17 +562,17 @@ export default function LlmSettingsScreen({
           <Text style={styles.backText}>‹ 返回</Text>
         </TouchableOpacity>
         <Text style={styles.title}>LLM 模型设置</Text>
-        <TouchableOpacity onPress={refreshProviders} disabled={saving}>
-          <Text style={styles.refreshText}>刷新服务商列表</Text>
+        <TouchableOpacity onPress={refreshTypes} disabled={saving}>
+          <Text style={styles.refreshText}>刷新类型列表</Text>
         </TouchableOpacity>
       </View>
-      {providersError ? <Text style={styles.errorText}>{providersError}</Text> : null}
+      {typesError ? <Text style={styles.errorText}>{typesError}</Text> : null}
 
       <ScrollView ref={scrollRef} contentContainerStyle={styles.listContent}>
-        {!providersLoaded ? (
+        {!typesLoaded ? (
           <ActivityIndicator style={styles.loading} />
         ) : (
-          moduleKeys.map(renderCard)
+          types.map(renderCard)
         )}
       </ScrollView>
 
@@ -672,9 +583,9 @@ export default function LlmSettingsScreen({
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity
-          disabled={!providersLoaded || saving}
+          disabled={!typesLoaded || saving}
           onPress={() => void onSave()}
-          style={[styles.saveButton, (!providersLoaded || saving) && styles.saveButtonDisabled]}
+          style={[styles.saveButton, (!typesLoaded || saving) && styles.saveButtonDisabled]}
         >
           <Text style={styles.saveButtonText}>保存</Text>
         </TouchableOpacity>
@@ -682,15 +593,25 @@ export default function LlmSettingsScreen({
 
       <OptionPicker
         visible={!!picker}
-        title={picker ? `${moduleTitle(picker.moduleKey)} - ${picker.field === 'provider' ? '选择服务商' : '选择模型'}` : ''}
+        title={
+          picker
+            ? `${picker.typeName} - ${picker.field === 'provider' ? '选择服务商' : '选择模型'}`
+            : ''
+        }
         options={pickerOptions}
-        selected={picker && pickerTarget ? (picker.field === 'provider' ? pickerTarget.provider : pickerTarget.model) : ''}
+        selected={
+          picker && pickerTarget
+            ? picker.field === 'provider'
+              ? pickerTarget.provider
+              : pickerTarget.model
+            : ''
+        }
         onSelect={(value) => {
           if (picker) {
             if (picker.field === 'provider') {
-              selectProvider(picker.moduleKey, value);
+              selectProvider(picker.typeName, value);
             } else {
-              selectModel(picker.moduleKey, value);
+              selectModel(picker.typeName, value);
             }
           }
           setPicker(null);
@@ -762,6 +683,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
+  },
+  description: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 6,
   },
   switchRow: {
     flexDirection: 'row',
@@ -838,39 +764,6 @@ const styles = StyleSheet.create({
   smallButtonText: {
     fontSize: 13,
     color: '#2F80ED',
-  },
-  badgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  badge: {
-    fontSize: 12,
-    color: '#B7791F',
-    backgroundColor: '#FDF3DC',
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    overflow: 'hidden',
-  },
-  infoButton: {
-    marginLeft: 6,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#E5E7EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  infoButtonText: {
-    fontSize: 13,
-    color: '#555',
-    fontWeight: '700',
-  },
-  badgeDetail: {
-    fontSize: 12,
-    color: '#8A6D1A',
-    marginTop: 4,
   },
   footer: {
     flexDirection: 'row',

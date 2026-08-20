@@ -101,15 +101,114 @@ type ModuleBinding = {
   prompt_name?: string;
   enable_thinking?: boolean;
   use_json?: boolean;
+  client_model_type?: string;
   params?: Record<string, unknown>;
   params_text?: string;
+};
+
+type ClientModelTypeModel = {
+  id: string;
+  can_enable_thinking: boolean;
+  can_use_json: boolean;
+};
+
+type ClientModelTypeProvider = {
+  name: string;
+  base_url: string;
+  models: ClientModelTypeModel[];
+};
+
+type ClientModelType = {
+  type: string;
+  description: string;
+  providers: ClientModelTypeProvider[];
 };
 
 type LlmConfigInfo = {
   available_llms: Record<string, LlmInterfaceConfig>;
   available_vlms: Record<string, LlmInterfaceConfig>;
+  client_model_types: ClientModelType[];
   module_bindings: ModuleBinding[];
 };
+
+function validateClientModelTypes(
+  types: ClientModelType[],
+  bindings: ModuleBinding[],
+): string[] {
+  const errors: string[] = [];
+  const safeTypes = types || [];
+  if (safeTypes.length === 0) {
+    errors.push('客户端模型列表至少需要一个类型');
+  }
+  const typeNames = new Set<string>();
+  safeTypes.forEach((typeItem, tIndex) => {
+    const typeName = (typeItem.type || '').trim();
+    if (!typeName) {
+      errors.push(`第 ${tIndex + 1} 个类型：类型必须填写`);
+      return;
+    }
+    if (typeNames.has(typeName)) {
+      errors.push(`类型「${typeName}」重复`);
+      return;
+    }
+    typeNames.add(typeName);
+    const providers = typeItem.providers || [];
+    if (providers.length === 0) {
+      errors.push(`类型「${typeName}」至少需要一个服务商`);
+      return;
+    }
+    const providerNames = new Set<string>();
+    providers.forEach((provider, pIndex) => {
+      const providerName = (provider.name || '').trim();
+      const baseUrl = (provider.base_url || '').trim();
+      if (!providerName) {
+        errors.push(`类型「${typeName}」第 ${pIndex + 1} 个服务商：服务商必须填写`);
+      }
+      if (!baseUrl) {
+        errors.push(
+          `类型「${typeName}」服务商「${providerName || '?'}」：baseURL 必须填写`,
+        );
+      }
+      if (providerName && providerNames.has(providerName)) {
+        errors.push(`类型「${typeName}」服务商名重复：${providerName}`);
+      }
+      if (providerName) {
+        providerNames.add(providerName);
+      }
+      const models = provider.models || [];
+      if (models.length === 0) {
+        errors.push(
+          `类型「${typeName}」服务商「${providerName || '?'}」至少需要一个模型`,
+        );
+        return;
+      }
+      const modelIds = new Set<string>();
+      models.forEach((model, mIndex) => {
+        const modelId = (model.id || '').trim();
+        if (!modelId) {
+          errors.push(
+            `类型「${typeName}」服务商「${providerName || '?'}」第 ${mIndex + 1} 个模型：模型 id 必须填写`,
+          );
+        } else if (modelIds.has(modelId)) {
+          errors.push(
+            `类型「${typeName}」服务商「${providerName || '?'}」模型 id 重复：${modelId}`,
+          );
+        } else {
+          modelIds.add(modelId);
+        }
+      });
+    });
+  });
+  (bindings || []).forEach((binding) => {
+    const boundType = (binding.client_model_type || '').trim();
+    if (boundType && !typeNames.has(boundType)) {
+      errors.push(
+        `模块绑定 ${binding.kind.toUpperCase()} ${binding.path} 引用了不存在的客户端类型：${boundType}`,
+      );
+    }
+  });
+  return errors;
+}
 
 type LlmCall = {
   id: number;
@@ -1922,6 +2021,17 @@ function ConfigPage() {
     if (!llmDraft) {
       return;
     }
+    const clientModelErrors = validateClientModelTypes(
+      llmDraft.client_model_types || [],
+      llmDraft.module_bindings || [],
+    );
+    if (clientModelErrors.length > 0) {
+      const message = `配置未写入：${clientModelErrors[0]}`;
+      setActionError(message);
+      setLlmApplyStatus({ tone: 'error', message });
+      setActionMessage(null);
+      return;
+    }
     setLlmApplying(true);
     setLlmApplyStatus({ tone: 'info', message: '正在写入配置并校验，必要时会重启 runtime...' });
     try {
@@ -2019,6 +2129,9 @@ function ConfigPage() {
       <Panel title="LLM Interfaces">
         <LlmInterfacesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
       </Panel>
+      <Panel title="客户端模型列表">
+        <ClientModelTypesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
+      </Panel>
       <Panel title="LLMModule / VLMModule 绑定">
         <LlmModuleBindingDraftEditor
           draft={llmDraft}
@@ -2060,6 +2173,233 @@ function LlmInterfacesDraftEditor({
   );
 }
 
+function ClientModelTypesDraftEditor({
+  draft,
+  onChange,
+}: {
+  draft: LlmConfigInfo | null;
+  onChange: (draft: LlmConfigInfo) => void;
+}) {
+  if (!draft) {
+    return <div className="empty-state">暂无客户端模型配置</div>;
+  }
+  const currentDraft = draft;
+  const types = currentDraft.client_model_types || [];
+
+  function updateTypes(next: ClientModelType[]) {
+    onChange({ ...currentDraft, client_model_types: next });
+  }
+
+  function updateType(index: number, patch: Partial<ClientModelType>) {
+    updateTypes(types.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  }
+
+  function addType() {
+    updateTypes([
+      ...types,
+      {
+        type: '',
+        description: '',
+        providers: [
+          {
+            name: '',
+            base_url: '',
+            models: [{ id: '', can_enable_thinking: false, can_use_json: false }],
+          },
+        ],
+      },
+    ]);
+  }
+
+  function removeType(index: number) {
+    updateTypes(types.filter((_, i) => i !== index));
+  }
+
+  function updateProvider(
+    tIndex: number,
+    pIndex: number,
+    patch: Partial<ClientModelTypeProvider>,
+  ) {
+    const providers = types[tIndex].providers.map((p, i) =>
+      i === pIndex ? { ...p, ...patch } : p,
+    );
+    updateType(tIndex, { providers });
+  }
+
+  function addProvider(tIndex: number) {
+    updateType(tIndex, {
+      providers: [
+        ...types[tIndex].providers,
+        { name: '', base_url: '', models: [] },
+      ],
+    });
+  }
+
+  function removeProvider(tIndex: number, pIndex: number) {
+    updateType(tIndex, {
+      providers: types[tIndex].providers.filter((_, i) => i !== pIndex),
+    });
+  }
+
+  function updateModel(
+    tIndex: number,
+    pIndex: number,
+    mIndex: number,
+    patch: Partial<ClientModelTypeModel>,
+  ) {
+    const providers = types[tIndex].providers.map((p, i) =>
+      i === pIndex
+        ? {
+            ...p,
+            models: p.models.map((m, j) =>
+              j === mIndex ? { ...m, ...patch } : m,
+            ),
+          }
+        : p,
+    );
+    updateType(tIndex, { providers });
+  }
+
+  function addModel(tIndex: number, pIndex: number) {
+    const providers = types[tIndex].providers.map((p, i) =>
+      i === pIndex
+        ? {
+            ...p,
+            models: [
+              ...p.models,
+              { id: '', can_enable_thinking: false, can_use_json: false },
+            ],
+          }
+        : p,
+    );
+    updateType(tIndex, { providers });
+  }
+
+  function removeModel(tIndex: number, pIndex: number, mIndex: number) {
+    const providers = types[tIndex].providers.map((p, i) =>
+      i === pIndex
+        ? { ...p, models: p.models.filter((_, j) => j !== mIndex) }
+        : p,
+    );
+    updateType(tIndex, { providers });
+  }
+
+  return (
+    <div className="interface-editor">
+      <div className="editor-head">
+        <h3>客户端模型列表</h3>
+        <button onClick={addType}>新增类型</button>
+      </div>
+      {types.map((typeItem, tIndex) => (
+        <div className="interface-card" key={`type-${tIndex}`}>
+          <div className="client-type-row">
+            <input
+              value={typeItem.type}
+              onChange={(event) => updateType(tIndex, { type: event.target.value })}
+              placeholder="类型（显示在客户端设置页）"
+            />
+            <input
+              value={typeItem.description}
+              onChange={(event) =>
+                updateType(tIndex, { description: event.target.value })
+              }
+              placeholder="填写说明（可选）"
+            />
+            <button className="danger-button" onClick={() => removeType(tIndex)}>
+              删除类型
+            </button>
+          </div>
+          {typeItem.providers.map((provider, pIndex) => (
+            <div className="client-provider-row" key={`provider-${tIndex}-${pIndex}`}>
+              <div className="client-provider-fields">
+                <input
+                  value={provider.name}
+                  onChange={(event) =>
+                    updateProvider(tIndex, pIndex, { name: event.target.value })
+                  }
+                  placeholder="服务商"
+                />
+                <input
+                  value={provider.base_url}
+                  onChange={(event) =>
+                    updateProvider(tIndex, pIndex, {
+                      base_url: event.target.value,
+                    })
+                  }
+                  placeholder="base_url"
+                />
+                <button
+                  className="danger-button"
+                  onClick={() => removeProvider(tIndex, pIndex)}
+                >
+                  删除服务商
+                </button>
+              </div>
+              <div className="client-model-list">
+                {provider.models.map((model, mIndex) => (
+                  <div
+                    className="client-model-row"
+                    key={`model-${tIndex}-${pIndex}-${mIndex}`}
+                  >
+                    <input
+                      value={model.id}
+                      onChange={(event) =>
+                        updateModel(tIndex, pIndex, mIndex, {
+                          id: event.target.value,
+                        })
+                      }
+                      placeholder="模型 id"
+                    />
+                    <div className="interface-flags">
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(model.can_enable_thinking)}
+                          onChange={(event) =>
+                            updateModel(tIndex, pIndex, mIndex, {
+                              can_enable_thinking: event.target.checked,
+                            })
+                          }
+                        />
+                        thinking
+                      </label>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(model.can_use_json)}
+                          onChange={(event) =>
+                            updateModel(tIndex, pIndex, mIndex, {
+                              can_use_json: event.target.checked,
+                            })
+                          }
+                        />
+                        json
+                      </label>
+                    </div>
+                    <button
+                      className="danger-button"
+                      onClick={() => removeModel(tIndex, pIndex, mIndex)}
+                    >
+                      删除
+                    </button>
+                  </div>
+                ))}
+                <button onClick={() => addModel(tIndex, pIndex)}>新增模型</button>
+              </div>
+            </div>
+          ))}
+          <button onClick={() => addProvider(tIndex)}>新增服务商</button>
+        </div>
+      ))}
+      {types.length === 0 && (
+        <div className="empty-state">
+          暂无客户端模型类型，请新增（至少需要一个完整类型）
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LlmModuleBindingDraftEditor({
   draft,
   onChange,
@@ -2081,6 +2421,9 @@ function LlmModuleBindingDraftEditor({
   const currentDraft = draft;
   const llmNames = Object.keys(currentDraft.available_llms);
   const vlmNames = Object.keys(currentDraft.available_vlms);
+  const clientTypeNames = (currentDraft.client_model_types || []).map(
+    (item) => item.type,
+  );
 
   function updateBindings(next: ModuleBinding[]) {
     onChange({ ...currentDraft, module_bindings: next });
@@ -2088,7 +2431,13 @@ function LlmModuleBindingDraftEditor({
 
   return (
     <div className="llm-config-editor">
-      <ModuleBindingEditor bindings={currentDraft.module_bindings} llmNames={llmNames} vlmNames={vlmNames} onChange={updateBindings} />
+      <ModuleBindingEditor
+        bindings={currentDraft.module_bindings}
+        llmNames={llmNames}
+        vlmNames={vlmNames}
+        clientTypeNames={clientTypeNames}
+        onChange={updateBindings}
+      />
       <div className="action-row">
         <button disabled={applying} onClick={onApply}>{applying ? '修改中...' : '修改'}</button>
         <button className="secondary-button" disabled={applying} onClick={onReload}>放弃草稿</button>
@@ -2193,11 +2542,13 @@ function ModuleBindingEditor({
   bindings,
   llmNames,
   vlmNames,
+  clientTypeNames,
   onChange,
 }: {
   bindings: ModuleBinding[];
   llmNames: string[];
   vlmNames: string[];
+  clientTypeNames: string[];
   onChange: (bindings: ModuleBinding[]) => void;
 }) {
   function updateBinding(index: number, patch: Partial<ModuleBinding>) {
@@ -2225,6 +2576,7 @@ function ModuleBindingEditor({
             <th>Interface</th>
             <th>Thinking</th>
             <th>JSON</th>
+            <th>客户端委托（按类型）</th>
             <th>Params</th>
           </tr>
         </thead>
@@ -2256,6 +2608,21 @@ function ModuleBindingEditor({
                     onChange={(event) => updateBinding(index, { use_json: event.target.checked })}
                   />
                 </td>
+                <td>
+                  <select
+                    value={binding.client_model_type || ''}
+                    onChange={(event) =>
+                      updateBinding(index, { client_model_type: event.target.value })
+                    }
+                  >
+                    <option value="">不委托</option>
+                    {clientTypeNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
                 <td className="module-params-cell">
                   <textarea
                     className={binding.params_text !== undefined ? 'json-invalid' : undefined}
@@ -2269,7 +2636,7 @@ function ModuleBindingEditor({
           })}
           {bindings.length === 0 && (
             <tr>
-              <td colSpan={7} className="empty-state">暂无模块绑定</td>
+              <td colSpan={8} className="empty-state">暂无模块绑定</td>
             </tr>
           )}
         </tbody>

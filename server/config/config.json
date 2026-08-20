@@ -60,7 +60,70 @@
                     "top_p": 0.9
                 }
             }
-        }
+        },
+        "client_model_types": [
+            {
+                "type": "主对话模型",
+                "description": "填写你自己的 API Key；开启后主对话相关调用将使用该模型与服务商。",
+                "providers": [
+                    {
+                        "name": "DashScope",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "models": [
+                            {
+                                "id": "qwen3.5-plus",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            },
+                            {
+                                "id": "qwen3.6-flash",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "主题提取模型",
+                "description": "填写你自己的 API Key；开启后主题提取相关调用将使用该模型与服务商。",
+                "providers": [
+                    {
+                        "name": "DashScope",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "models": [
+                            {
+                                "id": "qwen3.5-plus",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            },
+                            {
+                                "id": "qwen3.6-flash",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "图片理解模型",
+                "description": "填写你自己的 API Key；开启后图片理解相关调用将使用该模型与服务商。",
+                "providers": [
+                    {
+                        "name": "DashScope",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "models": [
+                            {
+                                "id": "qwen3-vl-plus",
+                                "can_enable_thinking": false,
+                                "can_use_json": false
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
     },
     "database": {
         "sql_db_folder": "data/database",
@@ -74,7 +137,8 @@
                     "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": ""
                 },
                 "prompt_name": "event_store_prompt"
             }
@@ -86,7 +150,8 @@
                     "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": ""
                 },
                 "prompt_name": "memory_store_prompt"
             }
@@ -112,7 +177,8 @@
                     "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": ""
                 },
                 "prompt_name": "song_emotion_prompt"
             },
@@ -126,7 +192,8 @@
         "image_understanding": {
             "vlm_module": {
                 "vlm": {
-                    "name": "qwen3-vl-plus"
+                    "name": "qwen3-vl-plus",
+                    "client_model_type": ""
                 },
                 "prompt_name": "vision_interaction_prompt",
                 "enable_thinking": false,
@@ -141,7 +208,8 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "dynamic_post_prompt"
                 }
@@ -153,7 +221,8 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": true,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "dynamic_reply_prompt"
                 }
@@ -166,7 +235,8 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "diary_prompt"
                 }
@@ -211,7 +281,8 @@
                     "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": false,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": ""
                 },
                 "prompt_name": "summary_prompt"
             },
@@ -318,7 +389,8 @@
                             "name": "dsv4-flash",
                             "enable_thinking": false,
                             "use_json": false,
-                            "params": {}
+                            "params": {},
+                            "client_model_type": ""
                         },
                         "prompt_name": "user_profile_update_prompt"
                     }
@@ -333,7 +405,8 @@
                             "use_json": true,
                             "params": {
                                 "max_tokens": 800
-                            }
+                            },
+                            "client_model_type": ""
                         },
                         "prompt_name": "memory_write_prompt"
                     }
@@ -346,7 +419,8 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": true,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "date_detection_prompt"
                 }
@@ -358,7 +432,8 @@
                         "name": "qwen3.6-flash",
                         "enable_thinking": false,
                         "use_json": true,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "topic_extraction_prompt"
                 }
@@ -375,7 +450,8 @@
                         "name": "qwen3.5-plus",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": "主对话模型"
                     },
                     "prompt_name": "topic_reply_prompt"
                 }
@@ -442,7 +518,8 @@
                     "name": "dsv4-flash",
                     "enable_thinking": true,
                     "use_json": false,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": ""
                 }
             },
             "llm_modules": {
@@ -452,7 +529,8 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": true,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_llm_prompt"
                 },
@@ -461,13 +539,15 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_llm_prompt"
                 },
                 "vlm": {
                     "vlm": {
-                        "name": "qwen3-vl-plus"
+                        "name": "qwen3-vl-plus",
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_vlm_prompt",
                     "enable_thinking": false,
@@ -483,13 +563,15 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_llm_prompt"
                 },
                 "vlm_module": {
                     "vlm": {
-                        "name": "qwen3-vl-plus"
+                        "name": "qwen3-vl-plus",
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_vlm_prompt",
                     "enable_thinking": false,
@@ -528,7 +610,8 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "song_knowledge_crawler_prompt"
                 }
@@ -577,7 +660,8 @@
                     "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": ""
                 },
                 "prompt_name": "bili_dynamic_fetcher_prompt"
             },
@@ -585,7 +669,8 @@
                 "label": "B站动态解析",
                 "vlm": {
                     "name": "qwen3-vl-plus",
-                    "use_json": true
+                    "use_json": true,
+                    "client_model_type": ""
                 },
                 "prompt_name": "bili_dynamic_fetcher_prompt",
                 "enable_thinking": false,

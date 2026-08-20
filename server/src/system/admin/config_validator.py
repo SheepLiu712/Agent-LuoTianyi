@@ -77,6 +77,7 @@ class RuntimeConfigValidator:
         items.extend(self._validate_secrets())
         items.extend(self._validate_security_config(config))
         items.extend(self._validate_llm_interfaces(config))
+        items.extend(self._validate_client_model_types(config))
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
         items.extend(self._validate_world_optionals(config))
@@ -192,6 +193,176 @@ class RuntimeConfigValidator:
                         msg = "配置完整，当前接口已启用兼容模式（客户端可回退使用服务端api_key）"
                     result.append(ValidationItem("core", f"{kind}.{name}", "ok", msg))
         return result
+
+    def _validate_client_model_types(self, config: dict[str, Any]) -> list[ValidationItem]:
+        """校验客户端模型类型配置：至少一个类型、三级完整、无空值、绑定引用存在。"""
+        result: list[ValidationItem] = []
+        llm_service = config.get("llm_service", {})
+        raw = llm_service.get("client_model_types")
+        if not isinstance(raw, list) or not raw:
+            result.append(
+                ValidationItem(
+                    "core",
+                    "client_model_types",
+                    "error",
+                    "未配置任何客户端模型类型（至少需要一个完整类型）",
+                )
+            )
+
+        seen_types: set[str] = set()
+        type_names: set[str] = set()
+        valid_type_count = 0
+        for index, item in enumerate(raw or []):
+            if not isinstance(item, dict):
+                continue
+            label = f"client_model_types[{index}]"
+            type_name = str(item.get("type") or "").strip()
+            local_errors: list[ValidationItem] = []
+            if not type_name:
+                result.append(
+                    ValidationItem("core", label, "error", "类型名不能为空")
+                )
+                continue
+            if type_name in seen_types:
+                result.append(
+                    ValidationItem("core", label, "error", f"类型名重复: {type_name}")
+                )
+                continue
+            seen_types.add(type_name)
+            type_names.add(type_name)
+
+            providers = item.get("providers")
+            if not isinstance(providers, list) or not providers:
+                local_errors.append(
+                    ValidationItem(
+                        "core",
+                        f"client_model_types.{type_name}",
+                        "error",
+                        f"类型「{type_name}」至少需要一个服务商",
+                    )
+                )
+                result.extend(local_errors)
+                continue
+            seen_providers: set[str] = set()
+            total_models = 0
+            for pidx, provider in enumerate(providers):
+                if not isinstance(provider, dict):
+                    continue
+                plabel = f"client_model_types.{type_name}.providers[{pidx}]"
+                provider_name = str(provider.get("name") or "").strip()
+                base_url = str(provider.get("base_url") or "").strip()
+                missing: list[str] = []
+                if not provider_name:
+                    missing.append("服务商")
+                if not base_url:
+                    missing.append("base_url")
+                if provider_name and provider_name in seen_providers:
+                    local_errors.append(
+                        ValidationItem(
+                            "core",
+                            plabel,
+                            "error",
+                            f"服务商名重复: {provider_name}",
+                        )
+                    )
+                if provider_name:
+                    seen_providers.add(provider_name)
+                models = provider.get("models")
+                if not isinstance(models, list) or not models:
+                    missing.append("模型列表")
+                if missing:
+                    local_errors.append(
+                        ValidationItem(
+                            "core",
+                            plabel,
+                            "error",
+                            f"服务商「{provider_name or '?'}」缺少: {', '.join(missing)}",
+                        )
+                    )
+                    continue
+                total_models += len(models)
+                seen_models: set[str] = set()
+                for midx, model in enumerate(models):
+                    mlabel = f"{plabel}.models[{midx}]"
+                    if isinstance(model, dict):
+                        model_id = str(model.get("id") or "").strip()
+                    elif isinstance(model, str):
+                        model_id = model.strip()
+                    else:
+                        continue
+                    if not model_id:
+                        local_errors.append(
+                            ValidationItem("core", mlabel, "error", "模型 id 不能为空")
+                        )
+                    elif model_id in seen_models:
+                        local_errors.append(
+                            ValidationItem(
+                                "core",
+                                mlabel,
+                                "error",
+                                f"模型 id 重复: {model_id}",
+                            )
+                        )
+                    else:
+                        seen_models.add(model_id)
+
+            if local_errors:
+                result.extend(local_errors)
+            else:
+                valid_type_count += 1
+                result.append(
+                    ValidationItem(
+                        "core",
+                        f"client_model_types.{type_name}",
+                        "ok",
+                        f"已配置 {len(providers)} 个服务商 / {total_models} 个模型",
+                    )
+                )
+
+        if valid_type_count:
+            result.append(
+                ValidationItem(
+                    "core",
+                    "client_model_types",
+                    "ok",
+                    f"已配置 {valid_type_count} 个客户端模型类型",
+                )
+            )
+
+        for path, model_type in self._collect_client_model_bindings(config):
+            if model_type and model_type not in type_names:
+                result.append(
+                    ValidationItem(
+                        "core",
+                        f"binding.{path}",
+                        "error",
+                        f"客户端委托绑定引用不存在的类型: {model_type}",
+                    )
+                )
+        return result
+
+    def _collect_client_model_bindings(
+        self, config: dict[str, Any]
+    ) -> list[tuple[str, str]]:
+        """收集所有 llm/vlm 配置中声明的 client_model_type（路径, 类型名）。"""
+        bindings: list[tuple[str, str]] = []
+
+        def walk(value: Any, path: str) -> None:
+            if isinstance(value, dict):
+                for kind in ("llm", "vlm"):
+                    cfg = value.get(kind)
+                    if isinstance(cfg, dict):
+                        model_type = str(cfg.get("client_model_type") or "").strip()
+                        if model_type:
+                            bindings.append((f"{path}.{kind}", model_type))
+                for key, item in value.items():
+                    walk(item, f"{path}.{key}" if path else str(key))
+            elif isinstance(value, list):
+                for index, item in enumerate(value):
+                    walk(item, f"{path}.{index}" if path else str(index))
+
+        walk(config, "")
+        return bindings
 
     def _validate_core_modules(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []

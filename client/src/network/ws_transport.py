@@ -56,7 +56,7 @@ class WsTransport:
         self._ack_waiter: dict | None = None
         self._agent_message_listener: Callable[[AgentMessage], None] | None = None # 收到的消息发送到哪里
         self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
-        self._client_mode = {"text": False, "vlm": False}  # 服务端当前客户端 LLM 模式（随连接重置）
+        self._client_mode = {"types": []}  # 服务端当前客户端委托类型列表（随连接重置）
         self._system_message_listener: Callable[[str], None] | None = None
         self._llm_request_listener: Callable[[dict], object] | None = None
         self._thread: threading.Thread | None = None
@@ -309,7 +309,7 @@ class WsTransport:
             try:
                 async with websockets.connect(ws_url, max_size=8 * 1024 * 1024, ssl=ssl_ctx) as ws:
                     self._ws = ws
-                    self._client_mode = {"text": False, "vlm": False}
+                    self._client_mode = {"types": []}
                     self._connected_event.set()
                     self._ready_event.clear()
 

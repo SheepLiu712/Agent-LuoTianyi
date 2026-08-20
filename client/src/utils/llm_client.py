@@ -1,7 +1,8 @@
 """客户端侧 LLM 执行助手。
 
-服务端下发 llm_request 后，客户端使用用户自己的 api-key 直接调用
-OpenAI 兼容的 chat/completions 接口，并把结果回传给服务端。
+服务端下发 llm_request（按客户端模型类型）后，客户端使用用户自己的
+api-key 直接调用 OpenAI 兼容的 chat/completions 接口，并把结果回传。
+委托完全由 type 驱动，代码中不区分 llm/vlm。
 """
 
 import asyncio
@@ -15,56 +16,24 @@ from ..utils.logger import get_logger
 
 logger = get_logger("llm_client")
 
-CLIENT_JSON_UNSUPPORTED_MARKER = "client_model_does_not_support_json"
 
-
-def fetch_llm_providers(
+def fetch_client_model_types(
     server_base_url: str,
     timeout: float = 15.0,
 ) -> list[Dict[str, Any]]:
-    """从服务端获取 LLM 服务商预设列表（name / base_url / model）。"""
+    """从服务端获取客户端模型类型字典（type / providers / models[含勾选]）。"""
     url = f"{server_base_url.rstrip('/')}/llm/providers"
     try:
         resp = requests.get(url, timeout=timeout)
     except Exception as exc:
-        raise RuntimeError(f"获取服务商列表失败: {exc}") from exc
+        raise RuntimeError(f"获取客户端模型类型列表失败: {exc}") from exc
     if resp.status_code < 200 or resp.status_code >= 300:
-        raise RuntimeError(f"获取服务商列表失败: HTTP {resp.status_code}")
+        raise RuntimeError(f"获取客户端模型类型列表失败: HTTP {resp.status_code}")
     data = resp.json()
-    providers = data.get("providers")
-    if isinstance(providers, list):
-        return [p for p in providers if isinstance(p, dict)]
+    types = data.get("types")
+    if isinstance(types, list):
+        return [t for t in types if isinstance(t, dict)]
     return []
-
-
-def fetch_llm_json_required_modules(
-    server_base_url: str,
-    timeout: float = 15.0,
-) -> tuple[list, list]:
-    """从服务端获取需要 JSON 输出的模块友好标签列表（LLM / VLM）。"""
-    url = f"{server_base_url.rstrip('/')}/llm/providers"
-    try:
-        resp = requests.get(url, timeout=timeout)
-    except Exception as exc:
-        raise RuntimeError(f"获取 JSON 功能列表失败: {exc}") from exc
-    if resp.status_code < 200 or resp.status_code >= 300:
-        raise RuntimeError(f"获取 JSON 功能列表失败: HTTP {resp.status_code}")
-    data = resp.json()
-    llm_modules = data.get("llm_json_required_modules") or []
-    vlm_modules = data.get("vlm_json_required_modules") or []
-    return _extract_module_labels(llm_modules), _extract_module_labels(vlm_modules)
-
-
-def _extract_module_labels(items: list) -> list:
-    """服务端下发 [{name, label}]，提取友好标签；兼容旧的纯字符串列表。"""
-    labels = []
-    for item in items:
-        if isinstance(item, dict):
-            label = item.get("label")
-            labels.append(str(label) if label else str(item.get("name", "")))
-        elif isinstance(item, str):
-            labels.append(item)
-    return labels
 
 
 def build_chat_completions_payload(
