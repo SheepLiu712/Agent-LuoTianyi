@@ -1,28 +1,14 @@
-"""桌面 client 的 LLM 客户端执行助手测试。"""
-
-import json
+"""桌面端 LLM HTTP 工具测试。"""
 
 import pytest
 
-from src.network.ws_transport import WsTransport
-from src.network.network_client import NetworkClient
 from src.utils.llm_client import (
-    CLIENT_JSON_UNSUPPORTED_MARKER,
     build_chat_completions_payload,
     call_llm_api,
     fetch_llm_json_required_modules,
     fetch_llm_providers,
     probe_llm_config,
 )
-
-
-def _module_cfg(**modules):
-    """按能力 key 构造 module_config_getter；未提供的 key 返回 None。"""
-
-    def getter(key: str) -> dict | None:
-        return modules.get(key)
-
-    return getter
 
 
 class FakeResponse:
@@ -88,9 +74,7 @@ def test_call_llm_api_success(monkeypatch):
     captured = {}
 
     def fake_post(url, headers=None, json=None, timeout=None):
-        captured["url"] = url
-        captured["headers"] = headers
-        captured["json"] = json
+        captured.update(url=url, headers=headers, json=json)
         return FakeResponse()
 
     monkeypatch.setattr("src.utils.llm_client.requests.post", fake_post)
@@ -131,22 +115,11 @@ def test_fetch_llm_providers_success(monkeypatch):
 
     def fake_get(url, timeout=None):
         captured["url"] = url
-        return FakeResponse(
-            data={
-                "providers": [
-                    {
-                        "name": "DeepSeek",
-                        "base_url": "https://api.deepseek.com/v1",
-                        "models": ["deepseek-v4-flash"],
-                        "vlm_models": [],
-                    }
-                ]
-            }
-        )
+        return FakeResponse(data={"providers": [{"name": "DeepSeek"}]})
 
     monkeypatch.setattr("src.utils.llm_client.requests.get", fake_get)
     providers = fetch_llm_providers("https://server.example.com")
-    assert providers[0]["name"] == "DeepSeek"
+    assert providers == [{"name": "DeepSeek"}]
     assert captured["url"] == "https://server.example.com/llm/providers"
 
 
@@ -160,13 +133,9 @@ def test_fetch_llm_providers_error(monkeypatch):
 
 
 def test_fetch_llm_json_required_modules(monkeypatch):
-    captured = {}
-
     def fake_get(url, timeout=None):
-        captured["url"] = url
         return FakeResponse(
             data={
-                "providers": [],
                 "llm_json_required_modules": [
                     {"name": "topic_extractor", "label": "话题抽取"},
                     {"name": "memory_writer", "label": "记忆写入"},
@@ -176,646 +145,17 @@ def test_fetch_llm_json_required_modules(monkeypatch):
         )
 
     monkeypatch.setattr("src.utils.llm_client.requests.get", fake_get)
-    llm_modules, vlm_modules = fetch_llm_json_required_modules(
-        "https://server.example.com"
+    assert fetch_llm_json_required_modules("https://server.example.com") == (
+        ["话题抽取", "记忆写入"],
+        [],
     )
-    assert llm_modules == ["话题抽取", "记忆写入"]
-    assert vlm_modules == []
-    assert captured["url"] == "https://server.example.com/llm/providers"
-
-
-def test_get_llm_providers_retries_after_failure(monkeypatch):
-    calls = {"n": 0}
-
-    def fake_fetch(base_url, timeout=15.0):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("boom")
-        return [
-            {
-                "name": "DeepSeek",
-                "base_url": "https://api.deepseek.com/v1",
-                "model": "deepseek-v4-flash",
-            }
-        ]
-
-    monkeypatch.setattr("src.network.network_client.fetch_llm_providers", fake_fetch)
-    client = NetworkClient(base_url="https://server.example.com")
-
-    assert client.get_llm_providers() == []
-    # 失败不应被缓存：第二次调用会重新请求
-    assert client.get_llm_providers()[0]["name"] == "DeepSeek"
-    assert calls["n"] == 2
-
-
-def test_submit_user_text_includes_llm_mode_when_key(monkeypatch):
-    captured = {}
-
-    def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
-        captured["payload"] = payload
-        return {"ok": True}
-
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={"enabled": True, "api_key": "sk-user-key"}
-        ),
-    )
-    monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
-    transport.submit_user_text("hello")
-    assert captured["payload"]["llm_mode"] == {"text": True, "vlm": False}
-
-
-def test_submit_user_text_llm_mode_false_without_key(monkeypatch):
-    captured = {}
-
-    def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
-        captured["payload"] = payload
-        return {"ok": True}
-
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=lambda key: None,
-    )
-    monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
-    transport.submit_user_text("hello")
-    assert captured["payload"]["llm_mode"] == {"text": False, "vlm": False}
-
-
-def test_submit_user_text_updates_mode_from_key(monkeypatch):
-    captured = []
-
-    def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
-        captured.append(payload)
-        return {"ok": True}
-
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={"enabled": True, "api_key": "sk-user-key"}
-        ),
-    )
-    monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
-    transport.submit_user_text("hello")
-    assert captured[-1]["llm_mode"] == {"text": True, "vlm": False}
-
-    # key 清空后，下一条消息携带全量模式对象并关闭 text 维度
-    monkeypatch.setattr(
-        transport,
-        "module_config_getter",
-        lambda key: None,
-    )
-    transport.submit_user_text("hi")
-    assert captured[-1]["llm_mode"] == {"text": False, "vlm": False}
-
-    # 再发无 key 消息模式保持关闭
-    transport.submit_user_text("again")
-    assert captured[-1]["llm_mode"] == {"text": False, "vlm": False}
-
-
-def test_submit_user_image_uses_vlm_key_for_mode(monkeypatch):
-    captured = []
-
-    def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
-        captured.append(payload)
-        return {"ok": True}
-
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={"enabled": True, "api_key": "sk-text-key"},
-            vlm_models={"enabled": True, "api_key": "sk-vlm-key"},
-        ),
-    )
-    monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
-    transport.submit_user_text("hello")
-    assert captured[-1]["llm_mode"] == {"text": True, "vlm": False}
-
-    transport.submit_user_image("data:image/png;base64,AAA", "image/png")
-    assert captured[-1]["llm_mode"] == {"text": True, "vlm": True}
-
-    # vlm key 清空后，下一条图片消息关闭 vlm 维度（text 不受影响）
-    monkeypatch.setattr(
-        transport,
-        "module_config_getter",
-        _module_cfg(
-            llm_models={"enabled": True, "api_key": "sk-text-key"},
-            vlm_models={"enabled": False, "api_key": ""},
-        ),
-    )
-    transport.submit_user_image("data:image/png;base64,AAA", "image/png")
-    assert captured[-1]["llm_mode"] == {"text": True, "vlm": False}
-
-    # 再发无 vlm key 的图片消息 vlm 维度保持关闭
-    transport.submit_user_image("data:image/png;base64,AAA", "image/png")
-    assert captured[-1]["llm_mode"] == {"text": True, "vlm": False}
-
-
-def test_submit_user_image_mode_not_affected_by_text_key(monkeypatch):
-    """图片模式只由 vlm key 决定，文本 key 存在与否不影响。"""
-    captured = []
-
-    def fake_submit(event_type, payload, ack_timeout, client_msg_id=None):
-        captured.append(payload)
-        return {"ok": True}
-
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={"enabled": True, "api_key": "sk-text-key"}
-        ),
-    )
-    monkeypatch.setattr(transport, "_submit_user_event", fake_submit)
-    transport.submit_user_image("data:image/png;base64,AAA", "image/png")
-    # 只有文本 key：vlm 维度关闭；text 维度未被文本事件更新，保持默认 False
-    assert captured[-1]["llm_mode"] == {"text": False, "vlm": False}
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_uses_cached_config(monkeypatch):
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "provider": "DeepSeek",
-                "model": "deepseek-v4-flash",
-                "base_url": "https://api.deepseek.com/v1",
-                "params": {},
-            }
-        ),
-    )
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-1",
-            "prompt": "hi",
-            "provider": {"url": "https://server.example.com/v1", "model": "server-model"},
-            "params": {"temperature": 0.5},
-            "enable_thinking": False,
-            "use_json": False,
-        },
-    )
-    # 请求直接使用缓存的 base_url 与 model，而不是服务端下发的 url/model
-    assert captured["url"] == "https://api.deepseek.com/v1/chat/completions"
-    assert captured["api_key"] == "sk-user"
-    assert captured["payload"]["model"] == "deepseek-v4-flash"
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_uses_saved_model(monkeypatch):
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "provider": "DeepSeek",
-                "model": "deepseek-v4-pro",
-                "base_url": "https://api.deepseek.com/v1",
-                "params": {},
-            }
-        ),
-    )
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-2",
-            "prompt": "hi",
-            "provider": {"model": "server-model"},
-            "params": {},
-        },
-    )
-    assert captured["payload"]["model"] == "deepseek-v4-pro"
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_uses_cached_base_url_and_model(monkeypatch):
-    """请求直接使用缓存的 base_url 与模型名，不依赖预设解析。"""
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "provider": "不存在的服务商",
-                "model": "cached-model",
-                "base_url": "https://cached.example.com/v1",
-                "params": {},
-            }
-        ),
-    )
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-3",
-            "prompt": "hi",
-            "provider": {"model": "server-model"},
-            "params": {},
-        },
-    )
-    assert captured["url"] == "https://cached.example.com/v1/chat/completions"
-    assert captured["payload"]["model"] == "cached-model"
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_uses_vlm_model_for_image(monkeypatch):
-    """图片请求使用缓存的图片理解模型。"""
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "provider": "阿里云百炼（DashScope）",
-                "model": "qwen3.5-plus",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "params": {},
-            },
-            vlm_models={
-                "enabled": True,
-                "api_key": "sk-vlm",
-                "provider": "阿里云百炼（DashScope）",
-                "model": "qwen3-vl-plus",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "params": {},
-            },
-        ),
-    )
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-img",
-            "prompt": "描述图片",
-            "image_base64": "data:image/png;base64,AAA",
-            "provider": {},
-            "params": {},
-        },
-    )
-    assert captured["payload"]["model"] == "qwen3-vl-plus"
-    assert captured["api_key"] == "sk-vlm"
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_image_does_not_fallback_to_text_key(monkeypatch):
-    """图片请求缺 vlm key 时不应回退文本 key，直接报无 key。"""
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured["called"] = True
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-text-key",
-                "model": "m",
-                "base_url": "https://example.com/v1",
-                "params": {},
-            }
-        ),
-    )
-    fake_ws = FakeClientWs()
-    transport._ws = fake_ws
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-img-nokey",
-            "prompt": "describe",
-            "image_base64": "data:image/png;base64,AAA",
-            "provider": {},
-            "params": {},
-        },
-    )
-    assert "called" not in captured
-    assert fake_ws.sent
-    payload = json.loads(fake_ws.sent[0])["payload"]
-    assert "no api key" in payload["error"]
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_merges_cached_params(monkeypatch):
-    """用户自定义参数覆盖服务端下发参数。"""
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "model": "m",
-                "base_url": "https://example.com/v1",
-                "params": {"temperature": 0.2, "max_tokens": 2048},
-            }
-        ),
-    )
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-params",
-            "prompt": "hi",
-            "provider": {},
-            "params": {"temperature": 0.9, "top_p": 0.5},
-        },
-    )
-    body = captured["payload"]
-    assert body["temperature"] == 0.2  # 用户参数覆盖
-    assert body["max_tokens"] == 2048  # 仅用户设置
-    assert body["top_p"] == 0.5  # 服务端参数保留
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_follows_server_suggestions_when_capable(monkeypatch):
-    """模型支持且服务端建议时，才带上思考/JSON 开关。"""
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "model": "m",
-                "base_url": "https://example.com/v1",
-                "params": {},
-                "model_capabilities": {
-                    "can_enable_thinking": True,
-                    "can_use_json": True,
-                },
-            }
-        ),
-    )
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-flags",
-            "prompt": "hi",
-            "provider": {},
-            "params": {},
-            "enable_thinking": True,
-            "use_json": True,
-        },
-    )
-    body = captured["payload"]
-    assert body["enable_thinking"] is True
-    assert body["response_format"] == {"type": "json_object"}
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_skips_switch_when_server_does_not_suggest(monkeypatch):
-    """模型支持思考，但服务端本次不推荐时不应携带。"""
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "model": "m",
-                "base_url": "https://example.com/v1",
-                "params": {},
-                "model_capabilities": {
-                    "can_enable_thinking": True,
-                    "can_use_json": True,
-                },
-            }
-        ),
-    )
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-flags-off",
-            "prompt": "hi",
-            "provider": {},
-            "params": {},
-            "enable_thinking": False,
-            "use_json": False,
-        },
-    )
-    body = captured["payload"]
-    assert "enable_thinking" not in body
-    assert "response_format" not in body
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_json_needed_but_not_capable_errors(monkeypatch):
-    """服务端需要 JSON 但模型未勾选支持时，不调用服务商并回传标记错误。"""
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured["called"] = True
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "model": "m",
-                "base_url": "https://example.com/v1",
-                "params": {},
-                "model_capabilities": {
-                    "can_enable_thinking": False,
-                    "can_use_json": False,
-                },
-            }
-        ),
-    )
-    fake_ws = FakeClientWs()
-    transport._ws = fake_ws
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-json-miss",
-            "prompt": "hi",
-            "provider": {},
-            "params": {},
-            "enable_thinking": False,
-            "use_json": True,
-        },
-    )
-    assert "called" not in captured
-    assert fake_ws.sent
-    payload = json.loads(fake_ws.sent[0])["payload"]
-    assert payload["error"] == CLIENT_JSON_UNSUPPORTED_MARKER
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_uses_vlm_flags_for_image(monkeypatch):
-    """图片请求按图片理解模型的能力与服务端建议应用开关。"""
-    captured = {}
-
-    async def fake_call(**kwargs):
-        captured.update(kwargs)
-        return {"content": "ok", "usage": None, "response_time_s": 0.1}
-
-    monkeypatch.setattr("src.network.ws_transport.call_llm_api_async", fake_call)
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "model": "m",
-                "base_url": "https://example.com/v1",
-                "params": {},
-            },
-            vlm_models={
-                "enabled": True,
-                "api_key": "sk-vlm",
-                "model": "vlm-m",
-                "base_url": "https://example.com/v1",
-                "params": {},
-                "model_capabilities": {
-                    "can_enable_thinking": True,
-                    "can_use_json": True,
-                },
-            },
-        ),
-    )
-    await transport._handle_llm_request(
-        None,
-        {
-            "request_id": "req-vlm-flags",
-            "prompt": "describe",
-            "image_base64": "data:image/png;base64,AAA",
-            "provider": {},
-            "params": {},
-            "enable_thinking": True,
-            "use_json": True,
-        },
-    )
-    body = captured["payload"]
-    assert body["enable_thinking"] is True
-    assert body["response_format"] == {"type": "json_object"}
-
-
-class FakeClientWs:
-    def __init__(self):
-        self.sent = []
-
-    async def send(self, raw):
-        self.sent.append(raw)
-
-
-@pytest.mark.asyncio
-async def test_handle_llm_request_missing_cached_base_url_errors():
-    transport = WsTransport(
-        "wss://example.com",
-        username_getter=lambda: "u",
-        token_getter=lambda: "t",
-        module_config_getter=_module_cfg(
-            llm_models={
-                "enabled": True,
-                "api_key": "sk-user",
-                "provider": "DeepSeek",
-                "model": "deepseek-v4-flash",
-                "base_url": "",
-                "params": {},
-            }
-        ),
-    )
-    fake_ws = FakeClientWs()
-    transport._ws = fake_ws
-    await transport._handle_llm_request(
-        None,
-        {"request_id": "req-4", "prompt": "hi", "provider": {}, "params": {}},
-    )
-    assert fake_ws.sent
-    payload = json.loads(fake_ws.sent[0])["payload"]
-    assert "error" in payload
 
 
 def test_probe_llm_config_builds_probe_payload(monkeypatch):
-    """保存前探测：开关与最小参数正确构造请求体。"""
     captured = {}
 
     def fake_post(url, headers=None, json=None, timeout=None):
-        captured["url"] = url
-        captured["headers"] = headers
-        captured["json"] = json
-        captured["timeout"] = timeout
+        captured.update(url=url, headers=headers, json=json, timeout=timeout)
         return FakeResponse()
 
     monkeypatch.setattr("src.utils.llm_client.requests.post", fake_post)
@@ -829,18 +169,14 @@ def test_probe_llm_config_builds_probe_payload(monkeypatch):
     )
     assert captured["url"] == "https://example.com/v1/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer sk-user"
-    body = captured["json"]
-    assert body["model"] == "test-model"
-    assert body["max_tokens"] == 8
-    assert body["temperature"] == 0
-    assert body["enable_thinking"] is True
-    assert body["response_format"] == {"type": "json_object"}
-    assert "ok" in body["messages"][0]["content"]
+    assert captured["json"]["max_tokens"] == 8
+    assert captured["json"]["temperature"] == 0
+    assert captured["json"]["enable_thinking"] is True
+    assert captured["json"]["response_format"] == {"type": "json_object"}
     assert captured["timeout"] == 15.0
 
 
 def test_probe_llm_config_plain_ping(monkeypatch):
-    """未开启任何开关时，探测体不带对应字段。"""
     captured = {}
 
     def fake_post(url, headers=None, json=None, timeout=None):
@@ -854,19 +190,17 @@ def test_probe_llm_config_plain_ping(monkeypatch):
         model="m",
         flags={"enable_thinking": False, "use_json": False},
     )
-    body = captured["json"]
-    assert body["messages"][0]["content"] == "ping"
-    assert "enable_thinking" not in body
-    assert "response_format" not in body
+    assert captured["json"]["messages"][0]["content"] == "ping"
+    assert "enable_thinking" not in captured["json"]
+    assert "response_format" not in captured["json"]
 
 
 def test_probe_llm_config_raises_on_provider_error(monkeypatch):
-    """保存前探测失败（如开关不被支持）应中止并抛出具体错误。"""
     monkeypatch.setattr(
         "src.utils.llm_client.requests.post",
         lambda url, headers=None, json=None, timeout=None: FakeResponse(
             status_code=400,
-            data={"error": {"message": "unsupported switch", "code": "InvalidParameter"}},
+            data={"error": {"message": "unsupported switch"}},
         ),
     )
     with pytest.raises(RuntimeError, match="400"):

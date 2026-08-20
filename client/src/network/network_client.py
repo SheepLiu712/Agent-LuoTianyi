@@ -38,7 +38,6 @@ class NetworkClient:
             username_getter=lambda: self.user_id,
             token_getter=lambda: self.message_token,
             verify_ssl=self.verify_ssl,
-            module_config_getter=lambda key: credential.get_module_config(key),
         )
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
@@ -504,12 +503,16 @@ class NetworkClient:
         listener: Callable[[dict], None] | None,
         agent_state_listener: Callable[[bool], None] | None,
         system_message_listener: Callable[[str], None] | None = None,
+        llm_request_listener: Callable[[dict], object] | None = None,
+        llm_mode_getter: Callable[[], dict[str, bool]] | None = None,
     ) -> None:
         self.ws_transport.set_agent_message_listener(
             listener,
             agent_state_listener,
             system_message_listener,
+            llm_request_listener,
         )
+        self.ws_transport.llm_mode_getter = llm_mode_getter
 
     ###### Internal methods ######
 

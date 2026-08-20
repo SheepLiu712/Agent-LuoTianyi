@@ -4,12 +4,6 @@ import { AgentMessagePayload } from '../types/chat';
 import { WSEventType } from '../types/ws_events';
 import { addDebugTrace } from './debug_trace';
 import { AckResult, normalizeServerAck } from './ws_ack';
-import {
-  buildChatCompletionsPayload,
-  callLlmProvider,
-  CLIENT_JSON_UNSUPPORTED_MARKER,
-} from './llm_client';
-import { getModuleConfig } from './llm_key_storage';
 
 export type { AckResult } from './ws_ack';
 export { normalizeServerAck } from './ws_ack';
@@ -31,6 +25,9 @@ export interface WsCallbacks {
   onAgentMessage: (payload: AgentMessagePayload) => void;
   onAgentStateChanged: (state: string) => void;
   onError: (errorText: string) => void;
+
+  onLlmRequest?: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+  getLlmMode?: () => Promise<{ text: boolean; vlm: boolean }>;
 }
 
 export class WebSocketTransport {
@@ -146,12 +143,11 @@ export class WebSocketTransport {
   }
 
   async submitUserText(message: string, isProactive = false, ackTimeout = 10000, clientMsgId?: string): Promise<AckResult> {
-    const cfg = await getModuleConfig('llm_models');
     const payload: Record<string, unknown> = { message };
     if (isProactive) {
       payload.is_proactive = true;
     }
-    this.clientMode.text = Boolean(cfg?.enabled);
+    this.clientMode = await this.callbacks.getLlmMode?.() || this.clientMode;
     payload.llm_mode = { ...this.clientMode };
     return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout, clientMsgId);
   }
@@ -163,13 +159,12 @@ export class WebSocketTransport {
     ackTimeout = 10000,
     clientMsgId?: string,
   ): Promise<AckResult> {
-    const cfg = await getModuleConfig('vlm_models');
     const payload: Record<string, unknown> = {
       image_base64: imageBase64,
       mime_type: mimeType,
       image_client_path: imageClientPath,
     };
-    this.clientMode.vlm = Boolean(cfg?.enabled);
+    this.clientMode = await this.callbacks.getLlmMode?.() || this.clientMode;
     payload.llm_mode = { ...this.clientMode };
     return this.sendWithAck(WSEventType.USER_IMAGE, payload, ackTimeout, clientMsgId);
   }
@@ -578,81 +573,19 @@ export class WebSocketTransport {
   }
 
   private async handleLlmRequest(payload: Record<string, unknown>) {
-    const requestId = String(payload.request_id || '');
-    if (!requestId) {
+    if (!this.callbacks.onLlmRequest) {
       return;
     }
-    const sendError = (error: string) => {
-      this.sendRaw({
-        type: WSEventType.LLM_RESPONSE,
-        ts: Date.now(),
-        payload: { request_id: requestId, error },
-      });
-    };
     try {
-      const isImage = typeof payload.image_base64 === 'string' && !!payload.image_base64;
-      const cfg = isImage
-        ? await getModuleConfig('vlm_models')
-        : await getModuleConfig('llm_models');
-      if (!cfg || !cfg.enabled || !cfg.apiKey) {
-        addDebugTrace('llm', 'llm_request without api key');
-        sendError('no api key configured on client');
-        return;
-      }
-      const baseUrl = cfg.baseUrl || '';
-      if (!baseUrl) {
-        sendError('LLM 配置不完整，请在 LLM 模型设置中重新保存');
-        return;
-      }
-      const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
-      const model = cfg.model || '';
-      if (!model) {
-        sendError('missing provider info');
-        return;
-      }
-      const serverParams = (payload.params || {}) as Record<string, unknown>;
-      let cachedParams: Record<string, unknown> = {};
-      if (cfg.paramsText) {
-        try {
-          const parsed = JSON.parse(cfg.paramsText);
-          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-            cachedParams = parsed as Record<string, unknown>;
-          }
-        } catch {
-          // 忽略损坏的参数缓存
-        }
-      }
-
-      const caps = cfg.modelCapabilities ?? {};
-      const capableThinking = Boolean(caps.can_enable_thinking);
-      const capableJson = Boolean(caps.can_use_json);
-      const serverEnableThinking = Boolean(payload.enable_thinking);
-      const serverUseJson = Boolean(payload.use_json);
-      if (serverUseJson && !capableJson) {
-        sendError(CLIENT_JSON_UNSUPPORTED_MARKER);
-        return;
-      }
-      const body = buildChatCompletionsPayload({
-        prompt: String(payload.prompt || ''),
-        model,
-        params: { ...serverParams, ...cachedParams },
-        enableThinking: capableThinking && serverEnableThinking,
-        useJson: serverUseJson,
-        imageBase64: typeof payload.image_base64 === 'string' ? payload.image_base64 : undefined,
-      });
-      const result = await callLlmProvider({ url, apiKey: cfg.apiKey, body });
+      const result = await this.callbacks.onLlmRequest(payload);
+      if (!result) return;
       this.sendRaw({
         type: WSEventType.LLM_RESPONSE,
         ts: Date.now(),
-        payload: {
-          request_id: requestId,
-          content: result.content,
-          usage: result.usage ?? null,
-        },
+        payload: result,
       });
-    } catch (e) {
-      addDebugTrace('llm', 'llm_request failed', { error: String(e) });
-      sendError(e instanceof Error ? e.message : String(e));
+    } catch (error) {
+      addDebugTrace('llm', 'llm_request handler failed', { error: String(error) });
     }
   }
 

@@ -10,11 +10,6 @@ import websockets
 from .event_types import build_event, normalize_agent_message, normalize_error_message, parse_server_message, WSEventType, WSMessage, AgentMessage, AgentStateMessage
 from ..utils.logger import get_logger
 from ..utils.tls import create_default_ssl_context
-from ..utils.llm_client import (
-    CLIENT_JSON_UNSUPPORTED_MARKER,
-    build_chat_completions_payload,
-    call_llm_api_async,
-)
 
 
 WS_CLIENT_CAPABILITIES = ("negative_ack_v1",)
@@ -47,14 +42,14 @@ class WsTransport:
         token_getter: Callable[[], str | None],
         verify_ssl: bool = True,
         heartbeat_interval: float = 10.0,
-        module_config_getter: Callable[[str], dict | None] | None = None,
+        llm_mode_getter: Callable[[], dict[str, bool]] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.username_getter = username_getter
         self.token_getter = token_getter
         self.verify_ssl = verify_ssl
         self.heartbeat_interval = heartbeat_interval
-        self.module_config_getter = module_config_getter
+        self.llm_mode_getter = llm_mode_getter
 
         self._lock = threading.Lock()
         self._submit_lock = threading.Lock()
@@ -63,6 +58,7 @@ class WsTransport:
         self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
         self._client_mode = {"text": False, "vlm": False}  # 服务端当前客户端 LLM 模式（随连接重置）
         self._system_message_listener: Callable[[str], None] | None = None
+        self._llm_request_listener: Callable[[dict], object] | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -74,17 +70,6 @@ class WsTransport:
         self._ready_event = threading.Event()
         self._connected_event = threading.Event()
         self._auth_rejected_credentials: tuple[str | None, str | None] | None = None
-
-    def _module_config(self, module_key: str) -> dict | None:
-        """读取某个能力模块的客户端配置；未配置/读取异常返回 None。"""
-        if self.module_config_getter is None:
-            return None
-        try:
-            cfg = self.module_config_getter(module_key)
-        except Exception as exc:
-            self.logger.error(f"module config getter failed for {module_key}: {exc}")
-            return None
-        return cfg if isinstance(cfg, dict) else None
 
     def set_base_url(self, base_url: str, verify_ssl: bool) -> None:
         """更新服务器地址，断开当前连接以便自动重连到新地址。"""
@@ -125,11 +110,13 @@ class WsTransport:
         agent_message_listener: Callable[[AgentMessage], None] | None,
         agent_state_listener: Callable[[bool], None] | None,
         system_message_listener: Callable[[str], None] | None = None,
+        llm_request_listener: Callable[[dict], object] | None = None,
     ) -> None:
         with self._lock:
             self._agent_message_listener = agent_message_listener
             self._agent_state_listener = agent_state_listener
             self._system_message_listener = system_message_listener
+            self._llm_request_listener = llm_request_listener
 
     def submit_user_text(
         self,
@@ -141,9 +128,7 @@ class WsTransport:
         payload = {"message": text}
         if is_proactive:
             payload["is_proactive"] = True
-        self._client_mode["text"] = bool(
-            (self._module_config("llm_models") or {}).get("enabled")
-        )
+        self._client_mode = self.llm_mode_getter() if self.llm_mode_getter else self._client_mode
         payload["llm_mode"] = dict(self._client_mode)
         return self._submit_user_event(
             WSEventType.USER_TEXT,
@@ -166,9 +151,7 @@ class WsTransport:
         }
         if image_client_path:
             payload["image_client_path"] = image_client_path
-        self._client_mode["vlm"] = bool(
-            (self._module_config("vlm_models") or {}).get("enabled")
-        )
+        self._client_mode = self.llm_mode_getter() if self.llm_mode_getter else self._client_mode
         payload["llm_mode"] = dict(self._client_mode)
         return self._submit_user_event(
             WSEventType.USER_IMAGE,
@@ -482,82 +465,17 @@ class WsTransport:
         self.logger.debug("WebSocket receive loop exited")
 
     async def _handle_llm_request(self, ws, payload: dict) -> None:
-        """处理服务端下发的 llm_request：用用户自己的 api-key 调用大模型。"""
-        request_id = payload.get("request_id")
-        if not request_id:
+        if self._llm_request_listener is None:
             return
-
-        is_image = bool(payload.get("image_base64"))
-        module_key = "vlm_models" if is_image else "llm_models"
-        cfg = self._module_config(module_key) or {}
-        api_key = cfg.get("api_key") or ""
-        if not api_key:
-            self.logger.warning("llm_request received but no api key configured on client")
-            await self._send_llm_response(request_id, error="no api key configured on client")
-            return
-
-        base_url = cfg.get("base_url") or ""
-        if not base_url:
-            await self._send_llm_response(
-                request_id,
-                error="LLM 配置不完整，请在 LLM 模型设置中重新保存",
-            )
-            return
-        url = f"{base_url.rstrip('/')}/chat/completions"
-        model = cfg.get("model") or ""
-        if not model:
-            await self._send_llm_response(request_id, error="missing provider info")
-            return
-
-        server_params = payload.get("params") or {}
-        cached_params = cfg.get("params") or {}
-        model_cap = cfg.get("model_capabilities") or {}
-        merged_params = {**(server_params or {}), **(cached_params or {})}
-        server_enable_thinking = bool(payload.get("enable_thinking"))
-        server_use_json = bool(payload.get("use_json"))
-        if server_use_json and not bool(model_cap.get("can_use_json")):
-            await self._send_llm_response(request_id, error=CLIENT_JSON_UNSUPPORTED_MARKER)
-            return
-        body = build_chat_completions_payload(
-            prompt=payload.get("prompt", ""),
-            model=model,
-            params=merged_params,
-            enable_thinking=bool(model_cap.get("can_enable_thinking"))
-            and server_enable_thinking,
-            use_json=server_use_json,
-            image_base64=payload.get("image_base64"),
-        )
         try:
-            result = await call_llm_api_async(url=url, api_key=api_key, payload=body)
-            await self._send_llm_response(
-                request_id,
-                content=result["content"],
-                usage=result["usage"],
-            )
+            result = self._llm_request_listener(payload)
+            if asyncio.iscoroutine(result):
+                result = await result
+            if result:
+                event = build_event(WSEventType.LLM_RESPONSE, payload=result)
+                await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
         except Exception as exc:
-            self.logger.error(f"Client LLM execution failed: {exc}")
-            await self._send_llm_response(request_id, error=str(exc))
-
-    async def _send_llm_response(
-        self,
-        request_id: str,
-        *,
-        content: str | None = None,
-        usage: dict | None = None,
-        error: str | None = None,
-    ) -> None:
-        payload = {"request_id": request_id}
-        if error is not None:
-            payload["error"] = error
-        else:
-            payload["content"] = content or ""
-            payload["usage"] = usage
-        event = build_event(WSEventType.LLM_RESPONSE, payload=payload)
-        if self._ws is not None:
-            try:
-                await self._ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
-            except Exception as exc:
-                self.logger.warning(f"Failed to send llm_response: {exc}")
+            self.logger.error(f"Client LLM request handler failed: {exc}")
 
     async def _heartbeat_loop(self, ws) -> None:
         ping_id = 0

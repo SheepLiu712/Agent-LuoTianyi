@@ -5,6 +5,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
 import { AgentBinder } from './binder';
 import { addDebugTrace } from './debug_trace';
+import {
+  buildChatCompletionsPayload,
+  callLlmProvider,
+  CLIENT_JSON_UNSUPPORTED_MARKER,
+} from './llm_client';
+import { getModuleConfig } from './llm_key_storage';
 import { NetworkClient } from './network_client';
 
 type SendKind =
@@ -443,6 +449,68 @@ export class MessageProcessor {
           error: getErrorMessage(error),
         });
       });
+  }
+
+  async processLlmRequest(payload: Record<string, unknown>) {
+    const requestId = String(payload.request_id || '');
+    if (!requestId) {
+      return null;
+    }
+
+    try {
+      const isImage = typeof payload.image_base64 === 'string' && !!payload.image_base64;
+      const cfg = await getModuleConfig(isImage ? 'vlm_models' : 'llm_models');
+      if (!cfg || !cfg.enabled || !cfg.apiKey) {
+        return { request_id: requestId, error: 'no api key configured on client' };
+      }
+      if (!cfg.baseUrl) {
+        return { request_id: requestId, error: 'LLM 配置不完整，请在 LLM 模型设置中重新保存' };
+      }
+      if (!cfg.model) {
+        return { request_id: requestId, error: 'missing provider info' };
+      }
+
+      let cachedParams: Record<string, unknown> = {};
+      if (cfg.paramsText) {
+        try {
+          const parsed = JSON.parse(cfg.paramsText);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            cachedParams = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // 损坏的参数缓存不应阻断请求。
+        }
+      }
+      const caps = cfg.modelCapabilities ?? {};
+      const useJson = Boolean(payload.use_json);
+      if (useJson && !Boolean(caps.can_use_json)) {
+        return { request_id: requestId, error: CLIENT_JSON_UNSUPPORTED_MARKER };
+      }
+      const body = buildChatCompletionsPayload({
+        prompt: String(payload.prompt || ''),
+        model: cfg.model,
+        params: { ...((payload.params || {}) as Record<string, unknown>), ...cachedParams },
+        enableThinking: Boolean(caps.can_enable_thinking) && Boolean(payload.enable_thinking),
+        useJson,
+        imageBase64: typeof payload.image_base64 === 'string' ? payload.image_base64 : undefined,
+      });
+      const result = await callLlmProvider({
+        url: `${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`,
+        apiKey: cfg.apiKey,
+        body,
+      });
+      return { request_id: requestId, content: result.content, usage: result.usage ?? null };
+    } catch (error) {
+      return { request_id: requestId, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async getLlmMode() {
+    const [llmConfig, vlmConfig] = await Promise.all([
+      getModuleConfig('llm_models'),
+      getModuleConfig('vlm_models'),
+    ]);
+    return { text: Boolean(llmConfig?.enabled), vlm: Boolean(vlmConfig?.enabled) };
   }
 
   private isDuplicatePacket(convUuid: string, payload: AgentMessagePayload): boolean {

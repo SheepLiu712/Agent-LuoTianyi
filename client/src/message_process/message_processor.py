@@ -1,18 +1,15 @@
-import queue
-from .multi_media_stream import MultiMediaStream
-import threading
-from ..live2d import Live2dModel
-import time
-import os
-import re
 import base64
 import datetime
+import os
+import queue
+import re
+import threading
+import time
 import uuid
-from dataclasses import dataclass, field
 from collections import deque
+from dataclasses import dataclass, field
 from typing import Callable, TYPE_CHECKING
-from ..network.event_types import AgentMessage, is_audio_terminal
-from ..utils.logger import get_logger
+
 from ..delivery_policy import (
     MAX_DURABLE_MESSAGE_AGE_SECONDS,
     can_retry_durable_message,
@@ -20,6 +17,16 @@ from ..delivery_policy import (
     get_send_retry_delay_seconds,
     is_durable_send_kind,
 )
+from ..live2d import Live2dModel
+from ..network.event_types import AgentMessage, is_audio_terminal
+from ..safety import credential
+from ..utils.llm_client import (
+    CLIENT_JSON_UNSUPPORTED_MARKER,
+    build_chat_completions_payload,
+    call_llm_api_async,
+)
+from ..utils.logger import get_logger
+from .multi_media_stream import MultiMediaStream
 
 if TYPE_CHECKING:
     from ..network.network_client import NetworkClient
@@ -76,6 +83,8 @@ class MessageProcessor:
             self.feed_agent_msg,
             self.change_agent_state,
             self.feed_system_message,
+            self.process_llm_request,
+            self.get_llm_mode,
         )
         self.send_text_func:Callable[..., dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
@@ -359,6 +368,49 @@ class MessageProcessor:
     def feed_system_message(self, text: str):
         if text and self.system_message_signal:
             self.system_message_signal(text)
+
+    async def process_llm_request(self, payload: dict) -> dict | None:
+        request_id = payload.get("request_id")
+        if not request_id:
+            return None
+
+        config = credential.get_module_config("vlm_models" if payload.get("image_base64") else "llm_models") or {}
+        api_key = config.get("api_key") or ""
+        if not api_key:
+            return {"request_id": request_id, "error": "no api key configured on client"}
+        base_url = config.get("base_url") or ""
+        if not base_url:
+            return {"request_id": request_id, "error": "LLM 配置不完整，请在 LLM 模型设置中重新保存"}
+        model = config.get("model") or ""
+        if not model:
+            return {"request_id": request_id, "error": "missing provider info"}
+
+        capabilities = config.get("model_capabilities") or {}
+        use_json = bool(payload.get("use_json"))
+        if use_json and not bool(capabilities.get("can_use_json")):
+            return {"request_id": request_id, "error": CLIENT_JSON_UNSUPPORTED_MARKER}
+        body = build_chat_completions_payload(
+            prompt=payload.get("prompt", ""),
+            model=model,
+            params={**(payload.get("params") or {}), **(config.get("params") or {})},
+            enable_thinking=bool(capabilities.get("can_enable_thinking")) and bool(payload.get("enable_thinking")),
+            use_json=use_json,
+            image_base64=payload.get("image_base64"),
+        )
+        try:
+            result = await call_llm_api_async(
+                url=f"{base_url.rstrip('/')}/chat/completions",
+                api_key=api_key,
+                payload=body,
+            )
+            return {"request_id": request_id, "content": result["content"], "usage": result["usage"]}
+        except Exception as exc:
+            return {"request_id": request_id, "error": str(exc)}
+
+    def get_llm_mode(self) -> dict[str, bool]:
+        llm_config = credential.get_module_config("llm_models") or {}
+        vlm_config = credential.get_module_config("vlm_models") or {}
+        return {"text": bool(llm_config.get("enabled")), "vlm": bool(vlm_config.get("enabled"))}
 
     def set_signals(
         self,
