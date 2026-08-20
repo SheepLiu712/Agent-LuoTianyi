@@ -212,6 +212,10 @@ export const useChatLogic = (
         if (messageProcessorRef.current?.isServerAudioActive()) {
           return;
         }
+        // WebView 已经绘制触摸圆环；在线音频期间不再统计或发送触摸。
+        if (messageProcessorRef.current?.isServerAudioActive()) {
+          return;
+        }
         const now = Date.now();
         const timestamps = clickTimestampsRef.current;
         timestamps.push(now);

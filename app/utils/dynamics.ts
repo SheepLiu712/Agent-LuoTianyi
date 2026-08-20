@@ -66,6 +66,18 @@ export interface DynamicUnreadStatus {
   last_read_comment_at: string | null;
 }
 
+const DYNAMIC_SOURCE_LABELS: Record<string, string> = {
+  citywalk: '城市漫步',
+  diary: '天依日记',
+  song_learned: '学会新歌',
+  system_notice: '系统通知',
+  user_post: '生活动态',
+};
+
+export function getDynamicSourceLabel(sourceType: string): string {
+  return DYNAMIC_SOURCE_LABELS[sourceType] ?? (sourceType || '动态');
+}
+
 function buildQuery(params: Record<string, string | number | undefined | null>) {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {

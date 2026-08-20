@@ -54,6 +54,7 @@
         "sql_db_folder": "data/database",
         "sql_db_file": "luotianyi.db",
         "message_token_ttl_seconds": 86400,
+        "message_token_ttl_seconds": 86400,
         "redis": {},
         "event_store": {
             "llm_module": {
@@ -105,6 +106,20 @@
                     "character_name": "洛天依",
                     "resource_path": "res/sing_song/luotianyi"
                 }
+            "song_emotion_tagger": {
+                "llm": {
+                    "name": "qwen3.5-plus",
+                    "enable_thinking": false,
+                    "use_json": true,
+                    "params": {}
+                },
+                "prompt_name": "song_emotion_prompt"
+            },
+            "characters": {
+                "luotianyi": {
+                    "character_name": "洛天依",
+                    "resource_path": "res/sing_song/luotianyi"
+                }
             }
         },
         "image_understanding": {
@@ -136,6 +151,19 @@
                         "params": {}
                     },
                     "prompt_name": "dynamic_reply_prompt"
+                }
+            }
+        },
+        "diary": {
+            "diary_llm": {
+                "llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": false,
+                        "params": {}
+                    },
+                    "prompt_name": "diary_prompt"
                 }
             }
         },
@@ -230,6 +258,10 @@
             }
         },
         "global_speaking_worker": {
+            "queue_maxsize": 512,
+            "terminal_send_max_attempts": 3,
+            "terminal_send_retry_delay_seconds": 0.05,
+            "shutdown_timeout_seconds": 30
             "queue_maxsize": 512,
             "terminal_send_max_attempts": 3,
             "terminal_send_retry_delay_seconds": 0.05,
@@ -573,6 +605,18 @@
                     "run_immediately": true
                 }
             }
+            "qq_credential_file": "config/qq_music_credential.json",
+            "qq_credential_refresh_before_seconds": 86400
+        },
+        "qq_music_credential_refresh": {
+            "enabled": true,
+            "clock_config": {
+                "type": "interval",
+                "params": {
+                    "interval_seconds": 21600,
+                    "run_immediately": true
+                }
+            }
         },
         "bili_dynamic_fetcher": {
             "clock_config": {
@@ -609,6 +653,15 @@
                 "params": {
                     "interval_seconds": 300,
                     "run_immediately": false
+                }
+            }
+        },
+        "diary": {
+            "clock_config": {
+                "type": "daily",
+                "params": {
+                    "hour": 0,
+                    "minute": 0
                 }
             }
         },

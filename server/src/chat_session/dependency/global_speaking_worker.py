@@ -26,6 +26,11 @@ async def _run_sync_in_executor(call, *args, executor=None):
     return await run_sync_owned(call, *args, executor=executor)
 
 
+async def _run_sync_in_executor(call, *args, executor=None):
+    """Await a sync call without abandoning its thread when cancellation arrives."""
+    return await run_sync_owned(call, *args, executor=executor)
+
+
 async def _iter_sync_gen_in_executor(gen, executor=None):
     loop = asyncio.get_event_loop()
     while True:
@@ -87,6 +92,8 @@ class GlobalSpeakingWorker:
         self._max_stream_jobs = int(self.config.get("max_stream_jobs", 64))
 
     def start_if_needed(self):
+        if self._stopping:
+            raise RuntimeError("Global speaking worker is stopping and cannot be restarted")
         if self._stopping:
             raise RuntimeError("Global speaking worker is stopping and cannot be restarted")
         if self.worker_task is None or self.worker_task.done():
@@ -321,6 +328,27 @@ class GlobalSpeakingWorker:
             )
 
     async def stop(self):
+        self._stopping = True
+        signal_error: Exception | None = None
+        speech = getattr(self.capabilities, "speech", None)
+        request_stop = getattr(speech, "request_stop", None)
+        if request_stop is not None:
+            try:
+                request_stop()
+            except Exception as error:
+                signal_error = error
+
+        task = self.worker_task
+        if task is not None:
+            cancel_task_once(task)
+            done, pending = await wait_for_owned_tasks(
+                (task,),
+                timeout_seconds=self.shutdown_timeout_seconds,
+            )
+            if pending:
+                raise RuntimeError("Global speaking worker is still stopping")
+            try:
+                task.result()
         self._stopping = True
         signal_error: Exception | None = None
         speech = getattr(self.capabilities, "speech", None)

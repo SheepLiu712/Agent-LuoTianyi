@@ -15,6 +15,7 @@ from src.system.user_interface.types import (
     LoginRequest,
     AutoLoginRequest,
     HistoryQuery,
+    HistoryQuery,
     ImageRequest,
     ResetAccountRequest,
     WSEventType,
@@ -22,11 +23,14 @@ from src.system.user_interface.types import (
     PreferenceOverwriteRequest,
     DynamicListRequest,
     DynamicListQuery,
+    DynamicListQuery,
     DynamicCreateRequest,
     DynamicCommentListRequest,
     DynamicCommentListQuery,
+    DynamicCommentListQuery,
     DynamicCommentCreateRequest,
     DynamicUnreadRequest,
+    DynamicUnreadQuery,
     DynamicUnreadQuery,
     DynamicReadMarkRequest,
 )
@@ -45,6 +49,11 @@ from src.system.network_helper import (
     require_bearer_token,
     runtime_not_ready_detail,
 )
+from src.system.network_helper import (
+    register_project_plan,
+    require_bearer_token,
+    runtime_not_ready_detail,
+)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -57,6 +66,17 @@ config = load_config("config/config.json")
 @asynccontextmanager
 async def startup_event(app: FastAPI):
     install_access_log_filter()
+    admin_shell = await init_admin_shell(root_dir=current_dir)
+    logger.info("AdminShell 初始化完成，正在校验配置并启动系统运行时")
+    runtime_status = await admin_shell.runtime_supervisor.start()
+    if runtime_status.get("running"):
+        logger.info("配置校验通过，SystemRuntime 已自动启动")
+    else:
+        logger.warning(
+            "SystemRuntime 未自动启动: state=%s, error=%s",
+            runtime_status.get("state"),
+            runtime_status.get("last_error"),
+        )
     admin_shell = await init_admin_shell(root_dir=current_dir)
     logger.info("AdminShell 初始化完成，正在校验配置并启动系统运行时")
     runtime_status = await admin_shell.runtime_supervisor.start()
@@ -86,6 +106,12 @@ app = FastAPI(lifespan=startup_event)
 # ——————————————————————————————————————————————————————————————————
 # 主要的 API 路由定义
 # ——————————————————————————————————————————————————————————————————
+
+# 注册管理后台的 UI 和路由
+register_admin_ui(app, current_dir)
+
+# 注册项目计划书页面
+register_project_plan(app, current_dir)
 
 # 注册管理后台的 UI 和路由
 register_admin_ui(app, current_dir)
@@ -133,6 +159,12 @@ async def chat_ws(websocket: WebSocket):
         )
         if not authenticated:
             return
+        authenticated = await ws_connection.auth(
+            websocket_service,
+            system_runtime.database_manager,
+        )
+        if not authenticated:
+            return
         chat_stream = await gcsm.get_or_register_chat_stream(
             ws_connection, system_runtime=system_runtime
         )  # 根据ws连接获取对应的聊天流实例，内部会根据用户UUID进行管理
@@ -164,6 +196,34 @@ async def chat_ws(websocket: WebSocket):
                 if acceptance == ChatEventAcceptance.DUPLICATE:
                     await websocket_service.send_duplicate_ack_event(ws_connection, event)
                     continue
+                if acceptance == ChatEventAcceptance.BAD_MESSAGE:
+                    await websocket_service.send_nack_event(
+                        ws_connection,
+                        event,
+                        code="BAD_MESSAGE",
+                        message="chat event payload is invalid",
+                        retryable=False,
+                    )
+                    continue
+                if acceptance == ChatEventAcceptance.UNSUPPORTED:
+                    await websocket_service.send_nack_event(
+                        ws_connection,
+                        event,
+                        code="UNSUPPORTED_EVENT",
+                        message="chat event type is not supported",
+                        retryable=False,
+                    )
+                    continue
+                if acceptance == ChatEventAcceptance.OVERLOADED:
+                    await websocket_service.send_nack_event(
+                        ws_connection,
+                        event,
+                        code="OVERLOADED",
+                        message="chat ingress queue is full",
+                        retryable=True,
+                    )
+                    continue
+                await websocket_service.send_ack_event(ws_connection, event)
                 if acceptance == ChatEventAcceptance.BAD_MESSAGE:
                     await websocket_service.send_nack_event(
                         ws_connection,
@@ -361,6 +421,7 @@ async def register(
     - 失败：HTTP 400 错误，{"detail": "注册失败，失败原因"}
     """
     logger.info("Register request for username=%s", req.username)
+    logger.info("Register request for username=%s", req.username)
     return await system_runtime.user_interface.register(
         req, system_runtime, request
     )
@@ -382,6 +443,7 @@ async def reset_account(
     - 成功：{"message": "重置成功"}
     - 失败：HTTP 400 错误，{"detail": "失败原因"}
     """
+    logger.info("Reset account request for username=%s", req.new_username)
     logger.info("Reset account request for username=%s", req.new_username)
     return await system_runtime.user_interface.reset_account(
         req, system_runtime, request
@@ -432,11 +494,13 @@ async def overwrite_preference(
 @app.get("/history")
 async def get_history(
     request: HistoryQuery = Depends(),
+    request: HistoryQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
     """获取聊天历史：委托到 UserInterface。"""
     logger.info(f"Server received: Get history request from {request.username}")
+    token = require_bearer_token(authorization)
     token = require_bearer_token(authorization)
     return await system_runtime.user_interface.get_history(
         request.username, token, request.count, request.end_index, system_runtime
@@ -446,9 +510,11 @@ async def get_history(
 @app.get("/dynamics")
 async def list_dynamics(
     request: DynamicListQuery = Depends(),
+    request: DynamicListQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
+    token = require_bearer_token(authorization)
     token = require_bearer_token(authorization)
     req = DynamicListRequest(
         username=request.username,
@@ -470,9 +536,11 @@ async def create_dynamic(
 @app.get("/dynamics/unread")
 async def get_dynamic_unread(
     request: DynamicUnreadQuery = Depends(),
+    request: DynamicUnreadQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
+    token = require_bearer_token(authorization)
     token = require_bearer_token(authorization)
     req = DynamicUnreadRequest(username=request.username, token=token)
     return await system_runtime.user_interface.get_dynamic_unread(req, system_runtime)
@@ -490,9 +558,11 @@ async def mark_dynamic_read(
 async def list_dynamic_comments(
     dynamic_id: str,
     request: DynamicCommentListQuery = Depends(),
+    request: DynamicCommentListQuery = Depends(),
     authorization: str | None = Header(default=None),
     system_runtime: "SystemRuntime" = Depends(get_runtime),
 ):
+    token = require_bearer_token(authorization)
     token = require_bearer_token(authorization)
     req = DynamicCommentListRequest(
         username=request.username,
