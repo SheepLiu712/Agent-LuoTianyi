@@ -1623,9 +1623,9 @@ function InviteCodesPage() {
       <section className="metric-grid">
         <MetricCard title="当前列表" value={formatNumber(rows.length)} detail={data?.total !== undefined ? `共 ${formatNumber(data.total)} 条` : '当前页'} />
         <MetricCard title="未使用" value={formatNumber(unusedCount)} detail="尚未绑定用户" />
-        <MetricCard title="可使用" value={formatNumber(availableCount)} detail="可用于注册" />
+        <MetricCard title="可注册" value={formatNumber(availableCount)} detail="未使用且未禁用" />
         <MetricCard title="已使用" value={formatNumber(usedCount)} detail="已绑定用户" />
-        <MetricCard title="已禁用" value={formatNumber(disabledCount)} detail="不可注册" tone={disabledCount ? 'warning' : undefined} />
+        <MetricCard title="已禁用" value={formatNumber(disabledCount)} detail="不可注册或重置" tone={disabledCount ? 'warning' : undefined} />
       </section>
 
       <Panel title="生成邀请码">
@@ -1664,7 +1664,7 @@ function InviteCodesPage() {
         <div className="filter-row">
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="">全部状态</option>
-            <option value="unused">可使用</option>
+            <option value="unused">可注册</option>
             <option value="used">已使用</option>
             <option value="disabled">已禁用</option>
           </select>
@@ -1679,7 +1679,7 @@ function InviteCodesPage() {
               <tr>
                 <th>邀请码</th>
                 <th>使用状态</th>
-                <th>可使用</th>
+                <th>可注册</th>
                 <th>创建时间</th>
                 <th>使用时间</th>
                 <th>使用者</th>

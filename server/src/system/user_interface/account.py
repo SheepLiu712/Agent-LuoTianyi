@@ -178,6 +178,7 @@ def register_user(db_session: Session, username: str, password: str, invite_code
             .filter(
                 InviteCode.code == invite_code_str,
                 InviteCode.is_used.is_(False),
+                InviteCode.disabled.is_(False),
             )
             .first()
         )
@@ -199,6 +200,7 @@ def register_user(db_session: Session, username: str, password: str, invite_code
             .filter(
                 InviteCode.code == invite_code_str,
                 InviteCode.is_used.is_(False),
+                InviteCode.disabled.is_(False),
             )
             .update(
                 {
@@ -248,6 +250,8 @@ def reset_account(
     code = db_session.query(InviteCode).filter_by(code=invite_code_str).first()
     if not code:
         return False, "邀请码无效"
+    if code.disabled:
+        return False, "邀请码已被禁用，无法重置"
     if not code.is_used or not code.user_id:
         return False, "邀请码尚未被使用，无法重置"
 

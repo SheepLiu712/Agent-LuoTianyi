@@ -31,11 +31,31 @@ def session_factory(tmp_path):
     engine.dispose()
 
 
-def _add_invite(session_factory, code: str) -> None:
+def _add_invite(session_factory, code: str, *, disabled: bool = False) -> None:
     session = session_factory()
     try:
-        session.add(InviteCode(code=code, is_used=False))
+        session.add(InviteCode(code=code, is_used=False, disabled=disabled))
         session.commit()
+    finally:
+        session.close()
+
+
+def test_legacy_registration_and_reset_respect_manual_disabled_state(session_factory, monkeypatch):
+    _add_invite(session_factory, "LEGACY-ENABLED")
+    _add_invite(session_factory, "LEGACY-DISABLED", disabled=True)
+    monkeypatch.setattr(account, "_hash_password", lambda password: f"hash:{password}")
+
+    session = session_factory()
+    try:
+        assert account.register_user(session, "blocked", "password", "LEGACY-DISABLED")[0] is False
+        assert account.register_user(session, "owner", "password", "LEGACY-ENABLED") == (True, "注册成功")
+        claimed = session.query(InviteCode).filter_by(code="LEGACY-ENABLED").one()
+        assert claimed.is_used is True
+        assert claimed.disabled is False
+        assert account.reset_account(session, "LEGACY-ENABLED", "owner-renamed", "new-password") == (True, "重置成功")
+        claimed.disabled = True
+        session.commit()
+        assert account.reset_account(session, "LEGACY-ENABLED", "blocked-reset", "new-password")[0] is False
     finally:
         session.close()
 

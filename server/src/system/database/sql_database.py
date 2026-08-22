@@ -525,13 +525,15 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
             )
             """
         )
-        legacy_invite_migration = "2026-08-01-disable-legacy-invite-codes"
+        enable_existing_invites_migration = "2026-08-22-enable-all-invite-codes"
         migration_claim = connection.exec_driver_sql(
             "INSERT OR IGNORE INTO schema_migrations (name) VALUES (?)",
-            (legacy_invite_migration,),
+            (enable_existing_invites_migration,),
         )
         if migration_claim.rowcount == 1:
-            connection.exec_driver_sql("UPDATE invite_codes SET disabled = 1")
+            # 迁移前的禁用状态来自旧版自动迁移，不代表管理员的明确操作。
+            # 这里只执行一次；迁移完成后，禁用状态仅由管理员接口维护。
+            connection.exec_driver_sql("UPDATE invite_codes SET disabled = 0")
 
 
 def get_sql_db(): # Generator for FastAPI

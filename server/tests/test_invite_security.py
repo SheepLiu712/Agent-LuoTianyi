@@ -40,6 +40,35 @@ def add_invite(manager: DatabaseManager, code: str, *, disabled: bool = False) -
         session.close()
 
 
+def test_registration_and_reset_enforce_enabled_and_usage_states(db_manager):
+    enabled_code = "ENABLED-INVITE"
+    disabled_code = "DISABLED-INVITE"
+    unused_reset_code = "UNUSED-RESET-INVITE"
+    add_invite(db_manager, enabled_code)
+    add_invite(db_manager, disabled_code, disabled=True)
+    add_invite(db_manager, unused_reset_code)
+
+    assert db_manager.credential_service.register_user("missing", "password", "NOT-FOUND")[0] is False
+    assert db_manager.credential_service.register_user("blocked", "password", disabled_code)[0] is False
+    assert db_manager.credential_service.register_user("owner", "password", enabled_code) == (True, "注册成功")
+    assert db_manager.credential_service.register_user("second", "password", enabled_code)[0] is False
+
+    session = db_manager.open_sql_session()
+    try:
+        claimed = session.query(InviteCode).filter_by(code=enabled_code).one()
+        assert claimed.is_used is True
+        assert claimed.disabled is False
+    finally:
+        session.close()
+
+    assert db_manager.credential_service.reset_account("NOT-FOUND", "missing", "new-password")[0] is False
+    assert db_manager.credential_service.reset_account(unused_reset_code, "unused", "new-password")[0] is False
+    assert db_manager.credential_service.reset_account(enabled_code, "owner-renamed", "new-password") == (True, "重置成功")
+
+    assert db_manager.credential_service.admin_set_invite_code_disabled(enabled_code, True) == (True, "已禁用")
+    assert db_manager.credential_service.reset_account(enabled_code, "blocked-reset", "new-password")[0] is False
+
+
 def test_generation_uses_ten_character_uppercase_alphanumeric_codes(db_manager):
     ok, codes = db_manager.credential_service.admin_generate_invite_codes(count=3)
 
@@ -140,6 +169,14 @@ def test_setting_disabled_is_reversible_idempotent_and_never_logs_code(db_manage
     add_invite(db_manager, available_code)
     assert db_manager.credential_service.register_user("invite-owner", "password", used_code)[0] is True
 
+    session = db_manager.open_sql_session()
+    try:
+        registered_code = session.query(InviteCode).filter_by(code=used_code).one()
+        assert registered_code.is_used is True
+        assert registered_code.disabled is False
+    finally:
+        session.close()
+
     caplog.set_level(logging.INFO)
     assert db_manager.credential_service.admin_set_invite_code_disabled(unused_code, True) == (True, "已禁用")
     assert db_manager.credential_service.admin_set_invite_code_disabled(unused_code, True) == (True, "已禁用")
@@ -170,7 +207,7 @@ def test_setting_disabled_is_reversible_idempotent_and_never_logs_code(db_manage
     assert available_code not in rendered_logs
 
 
-def test_legacy_invite_migration_disables_once_and_is_idempotent(tmp_path):
+def test_existing_invite_migration_enables_once_and_preserves_later_admin_state(tmp_path):
     db_dir = tmp_path / "legacy"
     db_dir.mkdir()
     db_path = db_dir / "legacy.db"
@@ -195,8 +232,8 @@ def test_legacy_invite_migration_disables_once_and_is_idempotent(tmp_path):
     sql_database.init_sql_db(str(db_dir), db_path.name)
     session = sql_database.SessionLocal()
     try:
-        assert session.query(InviteCode).filter_by(code="legacy-code").one().disabled is True
-        session.add(InviteCode(code="post-migration-code", disabled=False))
+        assert session.query(InviteCode).filter_by(code="legacy-code").one().disabled is False
+        session.add(InviteCode(code="post-migration-code", disabled=True))
         session.commit()
     finally:
         session.close()
@@ -205,12 +242,12 @@ def test_legacy_invite_migration_disables_once_and_is_idempotent(tmp_path):
     sql_database.init_sql_db(str(db_dir), db_path.name)
     session = sql_database.SessionLocal()
     try:
-        assert session.query(InviteCode).filter_by(code="legacy-code").one().disabled is True
-        assert session.query(InviteCode).filter_by(code="post-migration-code").one().disabled is False
+        assert session.query(InviteCode).filter_by(code="legacy-code").one().disabled is False
+        assert session.query(InviteCode).filter_by(code="post-migration-code").one().disabled is True
         marker_count = session.execute(
             sql_database.text(
                 "SELECT COUNT(*) FROM schema_migrations "
-                "WHERE name = '2026-08-01-disable-legacy-invite-codes'"
+                "WHERE name = '2026-08-22-enable-all-invite-codes'"
             )
         ).scalar_one()
         assert marker_count == 1

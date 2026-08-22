@@ -244,7 +244,7 @@ class CredentialService:
 
     def register_user(self, username: str, password: str, invite_code_str: str) -> Tuple[bool, str]:
         '''
-        注册新用户，使用邀请码机制。检查邀请码是否存在和被使用。成功注册后，邀请码标记为已使用。
+        注册新用户。邀请码必须存在、未禁用且未使用；成功后只标记为已使用，不自动禁用。
         成功返回 (True, "注册成功")，失败返回 (False, "失败原因")。
         '''
         db = self._new_session()
@@ -335,7 +335,8 @@ class CredentialService:
 
     def reset_account(self, invite_code_str: str, new_username: str, new_password: str) -> Tuple[bool, str]:
         '''
-        使用邀请码重置账户（更改用户名和密码）。成功返回 (True, "重置成功")，失败返回 (False, "失败原因")。
+        使用邀请码重置账户。邀请码必须存在、未禁用且已经使用。
+        成功返回 (True, "重置成功")，失败返回 (False, "失败原因")。
         '''
         db = self._new_session()
         old_username: Optional[str] = None
