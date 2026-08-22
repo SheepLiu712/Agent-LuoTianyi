@@ -162,8 +162,6 @@ class SystemRuntime:
         agent_runtime: "AgentRuntime | None",
         observability: "ObservabilityService | None",
         owns_observability: bool,
-        llm_service: "LLMService | None" = None,
-        client_llm_executor: "ClientLLMExecutor | None" = None,
     ) -> None:
         """在初始化失败的情况下，尝试回滚初始化失败的系统运行时，关闭已启动的后台服务和资源。"""
         errors: list[str] = []

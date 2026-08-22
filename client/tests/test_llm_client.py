@@ -5,8 +5,6 @@ import pytest
 from src.utils.llm_client import (
     build_chat_completions_payload,
     call_llm_api,
-    fetch_client_model_types,
-    probe_llm_config,
 )
 
 
@@ -109,100 +107,3 @@ def test_call_llm_api_network_error(monkeypatch):
         call_llm_api(url="https://example.com/v1", api_key="sk", payload={})
 
 
-def test_fetch_client_model_types_success(monkeypatch):
-    captured = {}
-
-    def fake_get(url, timeout=None):
-        captured["url"] = url
-        return FakeResponse(
-            data={
-                "types": [
-                    {
-                        "type": "对话模型",
-                        "providers": [
-                            {
-                                "name": "DeepSeek",
-                                "base_url": "https://api.deepseek.com/v1",
-                                "models": [{"id": "deepseek-chat"}],
-                            }
-                        ],
-                    }
-                ]
-            }
-        )
-
-    monkeypatch.setattr("src.utils.llm_client.requests.get", fake_get)
-    types = fetch_client_model_types("https://server.example.com")
-    assert types[0]["type"] == "对话模型"
-    assert types[0]["providers"][0]["name"] == "DeepSeek"
-    assert captured["url"] == "https://server.example.com/llm/providers"
-
-
-def test_fetch_client_model_types_error(monkeypatch):
-    monkeypatch.setattr(
-        "src.utils.llm_client.requests.get",
-        lambda url, timeout=None: FakeResponse(status_code=500),
-    )
-    with pytest.raises(RuntimeError, match="500"):
-        fetch_client_model_types("https://server.example.com")
-
-
-def test_probe_llm_config_builds_probe_payload(monkeypatch):
-    captured = {}
-
-    def fake_post(url, headers=None, json=None, timeout=None):
-        captured.update(url=url, headers=headers, json=json, timeout=timeout)
-        return FakeResponse()
-
-    monkeypatch.setattr("src.utils.llm_client.requests.post", fake_post)
-    probe_llm_config(
-        base_url="https://example.com/v1",
-        api_key="sk-user",
-        model="test-model",
-        flags={"enable_thinking": True, "use_json": True},
-        params={"temperature": 0.9, "max_tokens": 2048},
-        timeout=15.0,
-    )
-    assert captured["url"] == "https://example.com/v1/chat/completions"
-    assert captured["headers"]["Authorization"] == "Bearer sk-user"
-    assert captured["json"]["max_tokens"] == 8
-    assert captured["json"]["temperature"] == 0
-    assert captured["json"]["enable_thinking"] is True
-    assert captured["json"]["response_format"] == {"type": "json_object"}
-    assert captured["timeout"] == 15.0
-
-
-def test_probe_llm_config_plain_ping(monkeypatch):
-    captured = {}
-
-    def fake_post(url, headers=None, json=None, timeout=None):
-        captured["json"] = json
-        return FakeResponse()
-
-    monkeypatch.setattr("src.utils.llm_client.requests.post", fake_post)
-    probe_llm_config(
-        base_url="https://example.com/v1",
-        api_key="sk-user",
-        model="m",
-        flags={"enable_thinking": False, "use_json": False},
-    )
-    assert captured["json"]["messages"][0]["content"] == "ping"
-    assert "enable_thinking" not in captured["json"]
-    assert "response_format" not in captured["json"]
-
-
-def test_probe_llm_config_raises_on_provider_error(monkeypatch):
-    monkeypatch.setattr(
-        "src.utils.llm_client.requests.post",
-        lambda url, headers=None, json=None, timeout=None: FakeResponse(
-            status_code=400,
-            data={"error": {"message": "unsupported switch"}},
-        ),
-    )
-    with pytest.raises(RuntimeError, match="400"):
-        probe_llm_config(
-            base_url="https://example.com/v1",
-            api_key="sk",
-            model="m",
-            flags={"use_json": True},
-        )

@@ -18,9 +18,6 @@ from typing import Any, Dict, Optional
 
 from src.utils.logger import get_logger
 
-
-LLM_REQUEST_EVENT_TYPE = "llm_request"
-
 logger = get_logger(__name__)
 
 
@@ -109,14 +106,6 @@ class ClientLLMExecutor:
     def bind(self, stream_manager: Any) -> None:
         """绑定 ChatStreamManager，用于按 user_id 找到在线连接。"""
         self._stream_manager = stream_manager
-
-    def is_enabled(self, user_id: Optional[str], model_type: Optional[str]) -> bool:
-        """判断该用户当前活跃连接是否声明了指定客户端委托类型。"""
-        if not model_type:
-            return False
-        ws_connection = self._get_live_connection(user_id)
-        mode = getattr(ws_connection, "client_mode", None) or {}
-        return model_type in (mode.get("types") or [])
 
     def _get_live_connection(self, user_id: Optional[str]):
         """返回该用户活跃连接的 WebSocketConnection；没有则返回 None。"""
@@ -207,8 +196,11 @@ class ClientLLMExecutor:
         if image_base64:
             payload["image_base64"] = image_base64
 
+        # 延迟导入：utils/llm 位于 user_interface 依赖链下方，模块加载期导入会成环
+        from src.system.user_interface.types import WSEventType
+
         event = {
-            "type": LLM_REQUEST_EVENT_TYPE,
+            "type": WSEventType.LLM_REQUEST.value,
             "ts": int(time.time() * 1000),
             "payload": payload,
         }

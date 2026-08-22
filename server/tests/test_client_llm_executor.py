@@ -169,31 +169,6 @@ def test_error_classification():
     assert _looks_like_key_error("connection refused") is False
 
 
-def test_is_enabled_checks_types_membership(executor, fake_ws):
-    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_mode={"types": ["对话模型"]})))
-    assert executor.is_enabled("u1", "对话模型") is True
-    assert executor.is_enabled("u1", "图片理解模型") is False
-    assert executor.is_enabled("u1", "") is False
-    executor.bind(FakeStreamManager(FakeStream(fake_ws, client_mode={"types": []})))
-    assert executor.is_enabled("u1", "对话模型") is False
-    executor.bind(FakeStreamManager(None))
-    assert executor.is_enabled("u1", "对话模型") is False
-
-
-def test_multi_connection_mode_follows_active_connection(executor):
-    device_a_ws = FakeWebSocket()
-    device_b_ws = FakeWebSocket()
-    stream = FakeStream(device_a_ws, client_mode={"types": ["对话模型"]})
-    executor.bind(FakeStreamManager(stream))
-    assert executor.is_enabled("u1", "对话模型") is True
-
-    stream.reconnect(device_b_ws, client_mode={"types": []})
-    assert executor.is_enabled("u1", "对话模型") is False
-
-    stream.reconnect(device_b_ws, client_mode={"types": ["对话模型"]})
-    assert executor.is_enabled("u1", "对话模型") is True
-
-
 @pytest.mark.asyncio
 async def test_delegate_returns_none_when_not_configured_or_disabled(executor, fake_ws):
     executor.bind(FakeStreamManager(FakeStream(fake_ws, client_mode={"types": []})))

@@ -17,25 +17,6 @@ from ..utils.logger import get_logger
 logger = get_logger("llm_client")
 
 
-def fetch_client_model_types(
-    server_base_url: str,
-    timeout: float = 15.0,
-) -> list[Dict[str, Any]]:
-    """从服务端获取客户端模型类型字典（type / providers / models[含勾选]）。"""
-    url = f"{server_base_url.rstrip('/')}/llm/providers"
-    try:
-        resp = requests.get(url, timeout=timeout)
-    except Exception as exc:
-        raise RuntimeError(f"获取客户端模型类型列表失败: {exc}") from exc
-    if resp.status_code < 200 or resp.status_code >= 300:
-        raise RuntimeError(f"获取客户端模型类型列表失败: HTTP {resp.status_code}")
-    data = resp.json()
-    types = data.get("types")
-    if isinstance(types, list):
-        return [t for t in types if isinstance(t, dict)]
-    return []
-
-
 def build_chat_completions_payload(
     *,
     prompt: str,
@@ -145,34 +126,5 @@ async def call_llm_api_async(
         url=url,
         api_key=api_key,
         payload=payload,
-        timeout=timeout,
-    )
-
-
-def probe_llm_config(
-    base_url: str,
-    api_key: str,
-    model: str,
-    flags: Optional[Dict[str, Any]] = None,
-    params: Optional[Dict[str, Any]] = None,
-    timeout: float = 30.0,
-) -> None:
-    """保存前探测：用所选模型/开关向服务商发一次最小请求，失败抛异常。"""
-    flags = flags or {}
-    use_json = bool(flags.get("use_json"))
-    probe_params = dict(params or {})
-    probe_params["max_tokens"] = 8
-    probe_params["temperature"] = 0
-    body = build_chat_completions_payload(
-        prompt='返回 JSON：{"ok": true}' if use_json else "ping",
-        model=model,
-        params=probe_params,
-        enable_thinking=bool(flags.get("enable_thinking")),
-        use_json=use_json,
-    )
-    call_llm_api(
-        url=f"{base_url.rstrip('/')}/chat/completions",
-        api_key=api_key,
-        payload=body,
         timeout=timeout,
     )
