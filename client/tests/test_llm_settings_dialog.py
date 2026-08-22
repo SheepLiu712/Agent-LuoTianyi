@@ -241,7 +241,8 @@ def test_load_restores_switch_and_values(make_dialog):
                 "params": {"temperature": 0.3},
                 "model_capabilities": {"can_enable_thinking": False, "can_use_json": True},
             }
-        }
+        },
+        allow_plaintext=True,
     )
     dialog = make_dialog()
     info = dialog._modules["对话模型"]
@@ -267,7 +268,7 @@ def test_precheck_missing_field_highlights_and_blocks(make_dialog, qapp, monkeyp
         staticmethod(lambda *a, **k: warnings.append(a[2])),
     )
     dialog = make_dialog()
-    info = _enable(dialog)
+    info = _fill_module(dialog)
     info["api_key_input"].setText("")
     dialog._on_save()
     qapp.processEvents()
@@ -292,6 +293,18 @@ def test_precheck_invalid_json_blocks(make_dialog, qapp, monkeypatch):
 
 
 def test_validation_success_saves_all_types(make_dialog, qapp, monkeypatch):
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox,
+        "information",
+        staticmethod(lambda *a, **k: None),
+    )
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox,
+        "question",
+        staticmethod(
+            lambda *a, **k: QMessageBox.StandardButton.Yes
+        ),
+    )
     dialog = make_dialog()
     http = dialog._http
     http.queue_models_response(_models_payload("deepseek-v4-flash"))
@@ -318,7 +331,19 @@ def test_validation_success_saves_all_types(make_dialog, qapp, monkeypatch):
     }
 
 
-def test_validation_success_persists_advanced_params(make_dialog, qapp):
+def test_validation_success_persists_advanced_params(make_dialog, qapp, monkeypatch):
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox,
+        "information",
+        staticmethod(lambda *a, **k: None),
+    )
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox,
+        "question",
+        staticmethod(
+            lambda *a, **k: QMessageBox.StandardButton.Yes
+        ),
+    )
     dialog = make_dialog()
     dialog._http.queue_models_response(_models_payload("deepseek-v4-flash"))
     info = _fill_module(dialog)
@@ -330,7 +355,19 @@ def test_validation_success_persists_advanced_params(make_dialog, qapp):
     assert saved["对话模型"]["params"] == {"temperature": 0.5}
 
 
-def test_save_updates_base_url_when_provider_exists(make_dialog, qapp):
+def test_save_updates_base_url_when_provider_exists(make_dialog, qapp, monkeypatch):
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox,
+        "information",
+        staticmethod(lambda *a, **k: None),
+    )
+    monkeypatch.setattr(
+        dlg_mod.QMessageBox,
+        "question",
+        staticmethod(
+            lambda *a, **k: QMessageBox.StandardButton.Yes
+        ),
+    )
     dialog = make_dialog()
     dialog._http.queue_models_response(_models_payload("deepseek-v4-flash"))
     _fill_module(dialog)
@@ -414,7 +451,8 @@ def test_provider_missing_from_list_keeps_stored_values(make_dialog):
                 "params": {},
                 "model_capabilities": {},
             }
-        }
+        },
+        allow_plaintext=True,
     )
     dialog = make_dialog()
     info = dialog._modules["对话模型"]
@@ -433,6 +471,7 @@ def test_types_fetch_failure_disables_save(make_dialog, qapp):
             error_string="refused",
         )
     )
+    dialog._refresh_providers()
     for _ in range(8):
         qapp.processEvents()
     assert dialog.save_btn.isEnabled() is False
