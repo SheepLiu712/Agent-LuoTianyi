@@ -158,3 +158,28 @@ def test_unmatched_websocket_error_is_routed_as_system_message():
 
     assert system_messages == ["[WS_FAILED] WebSocket 错误"]
     assert agent_messages == []
+
+
+def test_llm_handler_error_sends_error_response():
+    class FakeWebSocket:
+        def __init__(self):
+            self.sent = []
+
+        async def send(self, raw):
+            self.sent.append(json.loads(raw))
+
+    transport = WsTransport("http://localhost:60030", lambda: "alice", lambda: "token")
+    transport.set_agent_message_listener(
+        None,
+        None,
+        llm_request_listener=lambda _payload: (_ for _ in ()).throw(RuntimeError("SecureStore failed")),
+    )
+    websocket = FakeWebSocket()
+
+    asyncio.run(transport._handle_llm_request(websocket, {"request_id": "llm-1"}))
+
+    assert websocket.sent[0]["type"] == WSEventType.LLM_RESPONSE.value
+    assert websocket.sent[0]["payload"] == {
+        "request_id": "llm-1",
+        "error": "SecureStore failed",
+    }

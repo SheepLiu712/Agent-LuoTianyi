@@ -586,6 +586,14 @@ export class WebSocketTransport {
       });
     } catch (error) {
       addDebugTrace('llm', 'llm_request handler failed', { error: String(error) });
+      this.sendRaw({
+        type: WSEventType.LLM_RESPONSE,
+        ts: Date.now(),
+        payload: {
+          request_id: payload.request_id,
+          error: String(error),
+        },
+      });
     }
   }
 

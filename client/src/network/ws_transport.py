@@ -476,6 +476,17 @@ class WsTransport:
                 await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
         except Exception as exc:
             self.logger.error(f"Client LLM request handler failed: {exc}")
+            try:
+                event = build_event(
+                    WSEventType.LLM_RESPONSE,
+                    payload={
+                        "request_id": payload.get("request_id"),
+                        "error": str(exc),
+                    },
+                )
+                await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
+            except Exception as response_exc:
+                self.logger.error(f"Failed to send client LLM error response: {response_exc}")
 
     async def _heartbeat_loop(self, ws) -> None:
         ping_id = 0
