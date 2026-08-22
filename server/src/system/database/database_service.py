@@ -27,10 +27,8 @@ logger = get_logger("database")
 class DatabaseManager:
     """
     数据库组件组合根，负责初始化基础设施和各数据库服务。
-    数据库组件组合根，负责初始化基础设施和各数据库服务。
 
     - 内部持有 RedisBuffer (redis) 实例
-    - 数据库服务方法自行创建 SessionLocal() 并通过 try/finally 确保关闭
     - 数据库服务方法自行创建 SessionLocal() 并通过 try/finally 确保关闭
     - 不再要求调用者传入 db 和 redis 参数
     """
@@ -38,12 +36,6 @@ class DatabaseManager:
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
         self.config = config or {}
         self.jwt_secret = os.environ.get(JWT_SECRET_ENV)
-        self.message_token_ttl_seconds = normalize_message_token_ttl_seconds(
-            self.config.get(
-                "message_token_ttl_seconds",
-                DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
-            )
-        )
         self.message_token_ttl_seconds = normalize_message_token_ttl_seconds(
             self.config.get(
                 "message_token_ttl_seconds",
@@ -69,21 +61,6 @@ class DatabaseManager:
             )
             init_redis_buffer(self.config.get("redis", {}))
 
-            self.user_store = UserStore(
-                config=self.config.get("user_store", {}),
-                sql_session_factory=self.open_sql_session,
-                redis_buffer=self._ensure_redis(),
-            )
-            self.event_store = EventStore(
-                config=self.config.get("event_store", {}),
-                sql_session_factory=self.open_sql_session,
-                redis_buffer=self._ensure_redis(),
-            )
-            self.memory_store = MemoryStore(
-                config=self.config.get("memory_store", {}),
-                sql_session_factory=self.open_sql_session,
-                redis_buffer=self._ensure_redis(),
-            )
             self.user_store = UserStore(
                 config=self.config.get("user_store", {}),
                 sql_session_factory=self.open_sql_session,
@@ -161,8 +138,6 @@ class DatabaseManager:
             self._redis = get_redis_buffer()
         return self._redis
 
-
-
     def _new_session(self) -> "Session":
         """创建一个新的 SQL 会话。调用者负责关闭。"""
         try:
@@ -190,7 +165,6 @@ class DatabaseManager:
             raise
 
     # ── 公共基础设施方法 ──────────────────────────────────────
-    # ── 公共基础设施方法 ──────────────────────────────────────
 
     @property
     def redis(self) -> RedisBuffer:
@@ -203,7 +177,6 @@ class DatabaseManager:
 
 
 # ============================================================================
-# DatabaseManager singleton
 # DatabaseManager singleton
 # ============================================================================
 

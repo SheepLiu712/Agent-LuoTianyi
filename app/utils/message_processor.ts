@@ -115,13 +115,8 @@ function mergeAudioChunksAsBase64(chunks: string[]) {
 export class MessageProcessor {
   private readonly networkClient: NetworkClient;
   private readonly binder: AgentBinder;
-<<<<<<< HEAD
   private readonly feedServerAudioChunk: (packet: Live2DAudioPacket) => void;
   private readonly stopServerAudio: (command: Live2DAudioStopCommand) => void;
-=======
-  private readonly feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void;
-  private readonly stopServerAudio: () => void;
->>>>>>> dev
   private sendQueue: SendItem[] = [];
   private sendLoopRunning = false;
   private stopRequested = false;
@@ -143,13 +138,8 @@ export class MessageProcessor {
   constructor(
     networkClient: NetworkClient,
     binder: AgentBinder,
-<<<<<<< HEAD
     feedServerAudioChunk: (packet: Live2DAudioPacket) => void,
     stopServerAudio?: (command: Live2DAudioStopCommand) => void,
-=======
-    feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void,
-    stopServerAudio?: () => void,
->>>>>>> dev
   ) {
     this.networkClient = networkClient;
     this.binder = binder;
@@ -160,14 +150,10 @@ export class MessageProcessor {
   stop() {
     this.stopRequested = true;
     this.sendQueue = [];
-<<<<<<< HEAD
     this.stopServerAudio({
       stream_type: AudioStreamType.CHAT,
       reason: 'chat_processor_stopped',
     });
-=======
-    this.stopServerAudio();
->>>>>>> dev
     void this.stopLocalTts();
   }
 
@@ -434,15 +420,12 @@ export class MessageProcessor {
   }
 
   onAgentMessage(payload: AgentMessagePayload) {
-<<<<<<< HEAD
     if (payload.stream_type !== AudioStreamType.CHAT) {
       addDebugTrace('agent', 'non-chat packet rejected by chat processor', {
         streamType: payload.stream_type,
       });
       return;
     }
-=======
->>>>>>> dev
     // 消息级幂等：服务端 at-least-once 重发的重复分片在入口直接跳过，
     // 展示与音频两条路径都不再处理（若只在展示路径去重，重复音频仍会被串行链消费）。
     if (this.isDuplicatePacket(payload.uuid || `agent-${Date.now()}`, payload)) {
@@ -544,7 +527,6 @@ export class MessageProcessor {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
     const audioChunk = payload.audio || '';
 
-<<<<<<< HEAD
     if (audioChunk) {
       this.serverAudioPlaying = true;
       this.pendingServerAudioChunks = Math.max(0, this.pendingServerAudioChunks - 1);
@@ -598,76 +580,6 @@ export class MessageProcessor {
         this.onServerAudioFinished();
       }
     }
-  }
-
-  private persistAgentAudioOnArrival(payload: AgentMessagePayload): Promise<string | null> {
-    const convUuid = payload.uuid || `agent-${Date.now()}`;
-    const audioChunk = payload.audio || '';
-
-    if (payload.is_ephemeral) {
-      // 触摸快速反射没有聊天气泡和历史回放入口，只播放，不持久化。
-      this.audioChunksByUuid.delete(convUuid);
-      return Promise.resolve(null);
-    }
-
-    if (audioChunk) {
-      const list = this.audioChunksByUuid.get(convUuid) || [];
-      list.push(audioChunk);
-      this.audioChunksByUuid.set(convUuid, list);
-    }
-
-    if (!payload.is_final_package) {
-      return Promise.resolve(null);
-=======
-    if (audioChunk) {
-      this.serverAudioPlaying = true;
-      this.pendingServerAudioChunks = Math.max(0, this.pendingServerAudioChunks - 1);
-      // onAgentMessage 已经立即发起停止；这里等待同一次停止完成，之后才能投喂在线音频。
-      await serverAudioPreemption;
-    }
-
-    if (audioChunk && (this.localPlayingUuid || this.localSound)) {
-      // 必须等消息回放真正停止后，才把在线音频交给 WebView 播放器。
-      await this.stopLocalTtsNow();
-    }
-
-    if (audioChunk) {
-      this.feedServerAudioChunk(audioChunk, false);
-    }
-
-    if (payload.is_final_package) {
-      this.feedServerAudioChunk('', true);
-      const isTransient = this.transientMessageUuids.has(convUuid);
-      if (payload.audio_error) {
-        addDebugTrace('audio', 'server audio stream ended with error', {
-          convUuid,
-          errorCode: payload.error_code || 'UNKNOWN',
-        });
-      } else {
-        const savedUri = await audioPersistence;
-        if (savedUri && !isTransient) {
-          // 此时该句已经轮到展示，避免提前发送 audio 更新而创建空白气泡。
-          this.binder.emitAgentMessage({
-            uuid: convUuid,
-            audio: savedUri,
-          });
-        }
-      }
-      // 落盘可能早于该句展示，临时消息状态由展示阶段在尾包处统一清理。
-      this.transientMessageUuids.delete(convUuid);
-      if (AppState.currentState === 'active') {
-        await this.waitForServerAudioFinished();
-      } else {
-        this.onServerAudioFinished();
-      }
->>>>>>> dev
-    }
-    const completedChunks = this.audioChunksByUuid.get(convUuid) || [];
-    this.audioChunksByUuid.delete(convUuid);
-    if (payload.audio_error) {
-      return Promise.resolve(null);
-    }
-    return this.saveAudioToLocal(convUuid, completedChunks);
   }
 
   private persistAgentAudioOnArrival(payload: AgentMessagePayload): Promise<string | null> {

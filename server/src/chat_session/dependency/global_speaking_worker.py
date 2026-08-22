@@ -11,6 +11,12 @@ from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Dict
 from src.agent.main_chat import OneSentenceChat, SongSegmentChat
 from src.chat_session.call_models import CallTTSLine
 from src.system.observability import get_observability_service
+from src.utils.asyncio_helpers import (
+    DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+    cancel_task_once,
+    run_sync_owned,
+    wait_for_owned_tasks,
+)
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -26,18 +32,18 @@ async def _run_sync_in_executor(call, *args, executor=None):
     return await run_sync_owned(call, *args, executor=executor)
 
 
-async def _run_sync_in_executor(call, *args, executor=None):
-    """Await a sync call without abandoning its thread when cancellation arrives."""
-    return await run_sync_owned(call, *args, executor=executor)
-
-
 async def _iter_sync_gen_in_executor(gen, executor=None):
-    loop = asyncio.get_event_loop()
-    while True:
-        chunk = await loop.run_in_executor(executor, next, gen, _sentinel)
-        if chunk is _sentinel:
-            break
-        yield chunk
+    """Wrap a sync generator and retain ownership until it is closed."""
+    try:
+        while True:
+            chunk = await _run_sync_in_executor(next, gen, _sentinel, executor=executor)
+            if chunk is _sentinel:
+                break
+            yield chunk
+    finally:
+        close = getattr(gen, "close", None)
+        if close is not None:
+            await _run_sync_in_executor(close, executor=executor)
 
 
 @dataclass
@@ -75,6 +81,17 @@ class SpeakingJob:
         return max(count / 200 * 60, 0.3)
 
 
+class _SpeakingQueueView:
+    """Expose queue capacity and drain semantics for lifecycle callers."""
+
+    def __init__(self, worker: "GlobalSpeakingWorker", maxsize: int) -> None:
+        self._worker = worker
+        self.maxsize = maxsize
+
+    async def join(self) -> None:
+        await self._worker.wait_until_idle()
+
+
 class GlobalSpeakingWorker:
     """单 GPU TTS worker：每流 FIFO，流头按等待/估算时长动态选择。"""
 
@@ -88,12 +105,32 @@ class GlobalSpeakingWorker:
         self._condition = asyncio.Condition()
         self._total_jobs = 0
         self._active_job: SpeakingJob | None = None
-        self._max_total_jobs = int(self.config.get("max_total_jobs", 512))
-        self._max_stream_jobs = int(self.config.get("max_stream_jobs", 64))
+        self._max_total_jobs = max(
+            1,
+            int(self.config.get("max_total_jobs", self.config.get("queue_maxsize", 512))),
+        )
+        self._max_stream_jobs = max(1, int(self.config.get("max_stream_jobs", 64)))
+        self.queue = _SpeakingQueueView(self, self._max_total_jobs)
+        self._stopping = False
+        self.terminal_send_max_attempts = max(
+            1,
+            int(self.config.get("terminal_send_max_attempts", 3)),
+        )
+        self.terminal_send_retry_delay_seconds = max(
+            0.0,
+            float(self.config.get("terminal_send_retry_delay_seconds", 0.05)),
+        )
+        self.shutdown_timeout_seconds = max(
+            0.001,
+            float(
+                self.config.get(
+                    "shutdown_timeout_seconds",
+                    DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+                )
+            ),
+        )
 
     def start_if_needed(self):
-        if self._stopping:
-            raise RuntimeError("Global speaking worker is stopping and cannot be restarted")
         if self._stopping:
             raise RuntimeError("Global speaking worker is stopping and cannot be restarted")
         if self.worker_task is None or self.worker_task.done():
@@ -163,6 +200,11 @@ class GlobalSpeakingWorker:
         queue = self._stream_queues.get(stream_id)
         return bool(queue) or bool(self._active_job and self._active_job.stream_id == stream_id)
 
+    async def wait_until_idle(self) -> None:
+        async with self._condition:
+            while self._total_jobs > 0 or self._active_job is not None:
+                await self._condition.wait()
+
     async def _take_next_job(self) -> SpeakingJob:
         async with self._condition:
             while self._total_jobs <= 0:
@@ -214,27 +256,98 @@ class GlobalSpeakingWorker:
                     if asyncio.iscoroutine(result):
                         await result
             finally:
-                self._active_job = None
+                async with self._condition:
+                    self._active_job = None
+                    self._condition.notify_all()
+
+    async def _send_terminal(self, job, response) -> None:
+        for attempt in range(1, self.terminal_send_max_attempts + 1):
+            try:
+                await job.send_reply_callback(response)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                if attempt >= self.terminal_send_max_attempts:
+                    raise
+                self.logger.warning(
+                    "Terminal response was not accepted (%s/%s): %s",
+                    attempt,
+                    self.terminal_send_max_attempts,
+                    error,
+                )
+                if self.terminal_send_retry_delay_seconds:
+                    await asyncio.sleep(self.terminal_send_retry_delay_seconds)
+            else:
+                return
 
     async def _process_sentence_job(self, job, start_ts, start_monotonic, ChatResponse):
         display_text = job.job_content.content
         sound_text = job.job_content.sound_content
         expression = job.job_content.expression
         if not sound_text.strip():
-            await job.send_reply_callback(ChatResponse(uuid=job.job_content.uuid, audio="", is_final_package=True, text=display_text, expression=expression))
+            await self._send_terminal(
+                job,
+                ChatResponse(
+                    uuid=job.job_content.uuid,
+                    audio="",
+                    is_final_package=True,
+                    text=display_text,
+                    expression=expression,
+                ),
+            )
             return
         sync_gen = self.capabilities.speech.say_stream(job.character_id, sound_text, job.job_content.tone)
-        is_first = True
-        async for audio_chunk in _iter_sync_gen_in_executor(sync_gen):
-            if job.is_cancelled():
-                return
-            if is_first:
-                self._record_first_packet(job, start_ts, start_monotonic)
-            first = is_first
-            is_first = False
-            await job.send_reply_callback(ChatResponse(uuid=job.job_content.uuid, audio=audio_chunk, is_final_package=False, text=display_text if first else "", expression=expression))
+        audio_sent = False
+        try:
+            async for audio_chunk in _iter_sync_gen_in_executor(sync_gen):
+                if job.is_cancelled():
+                    return
+                if not audio_chunk:
+                    continue
+                if not audio_sent:
+                    self._record_first_packet(job, start_ts, start_monotonic)
+                first = not audio_sent
+                audio_sent = True
+                await job.send_reply_callback(
+                    ChatResponse(
+                        uuid=job.job_content.uuid,
+                        audio=audio_chunk,
+                        is_final_package=False,
+                        text=display_text if first else "",
+                        expression=expression,
+                    )
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self.logger.error("Streaming TTS failed: %s", error)
+            if not job.is_cancelled():
+                await self._send_terminal(
+                    job,
+                    ChatResponse(
+                        uuid=job.job_content.uuid,
+                        audio="",
+                        is_final_package=True,
+                        text="" if audio_sent else display_text,
+                        expression="" if audio_sent else expression,
+                        audio_error=True,
+                        error_code="TTS_STREAM_ERROR",
+                    ),
+                )
+            return
         if not job.is_cancelled():
-            await job.send_reply_callback(ChatResponse(uuid=job.job_content.uuid, audio="", is_final_package=True, text="", expression=""))
+            await self._send_terminal(
+                job,
+                ChatResponse(
+                    uuid=job.job_content.uuid,
+                    audio="",
+                    is_final_package=True,
+                    text="" if audio_sent else display_text,
+                    expression="" if audio_sent else expression,
+                    audio_error=not audio_sent,
+                    error_code=None if audio_sent else "TTS_EMPTY",
+                ),
+            )
 
     async def _process_call_job(self, job, start_ts, start_monotonic, ChatResponse):
         line = job.job_content
@@ -257,13 +370,56 @@ class GlobalSpeakingWorker:
                 )
             )
         if not job.is_cancelled():
-            await job.send_reply_callback(ChatResponse(uuid=line.audio_id, audio="", is_final_package=True, text="", expression=""))
+            await self._send_terminal(
+                job,
+                ChatResponse(uuid=line.audio_id, audio="", is_final_package=True, text="", expression=""),
+            )
 
     async def _process_song_job(self, job, start_ts, start_monotonic, ChatResponse):
         content = job.job_content
         text = f"(唱了《{content.song}》)\n{content.lyrics}"
-        audio = await asyncio.to_thread(self.capabilities.singing.sing, job.character_id, content.song, content.segment)
-        if not audio or job.is_cancelled():
+        expression = "唱歌"
+        try:
+            audio = await _run_sync_in_executor(
+                self.capabilities.singing.sing,
+                job.character_id,
+                content.song,
+                content.segment,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            self.logger.error("Singing synthesis failed: %s", error)
+            if not job.is_cancelled():
+                await self._send_terminal(
+                    job,
+                    ChatResponse(
+                        uuid=content.uuid,
+                        audio="",
+                        is_final_package=True,
+                        text=text,
+                        expression=expression,
+                        audio_error=True,
+                        error_code="TTS_STREAM_ERROR",
+                    ),
+                )
+            return
+        if job.is_cancelled():
+            return
+        if not audio:
+            self.logger.warning("No audio generated for song: %s", content.song)
+            await self._send_terminal(
+                job,
+                ChatResponse(
+                    uuid=content.uuid,
+                    audio="",
+                    is_final_package=True,
+                    text=text,
+                    expression=expression,
+                    audio_error=True,
+                    error_code="TTS_EMPTY",
+                ),
+            )
             return
         if job.song_audio_generated_callback is not None:
             job.song_audio_generated_callback(content.song, content.segment)
@@ -274,15 +430,17 @@ class GlobalSpeakingWorker:
             chunk = base64.b64encode(audio[i:i + chunk_size]).decode("utf-8")
             if i == 0:
                 self._record_first_packet(job, start_ts, start_monotonic)
-            await job.send_reply_callback(
-                ChatResponse(
-                    uuid=job.job_content.uuid,
-                    audio=chunk,
-                    is_final_package=(i + chunk_size >= len(audio)),
-                    text=text if i == 0 else "",
-                    expression="唱歌" if i == 0 else "",
-                )
+            response = ChatResponse(
+                uuid=job.job_content.uuid,
+                audio=chunk,
+                is_final_package=(i + chunk_size >= len(audio)),
+                text=text if i == 0 else "",
+                expression=expression if i == 0 else "",
             )
+            if response.is_final_package:
+                await self._send_terminal(job, response)
+            else:
+                await job.send_reply_callback(response)
 
     def _record_queue_wait(self, job, job_start_ts, job_start_monotonic) -> None:
         observability = get_observability_service()
@@ -349,33 +507,18 @@ class GlobalSpeakingWorker:
                 raise RuntimeError("Global speaking worker is still stopping")
             try:
                 task.result()
-        self._stopping = True
-        signal_error: Exception | None = None
-        speech = getattr(self.capabilities, "speech", None)
-        request_stop = getattr(speech, "request_stop", None)
-        if request_stop is not None:
-            try:
-                request_stop()
-            except Exception as error:
-                signal_error = error
-
-        task = self.worker_task
-        if task is not None:
-            cancel_task_once(task)
-            done, pending = await wait_for_owned_tasks(
-                (task,),
-                timeout_seconds=self.shutdown_timeout_seconds,
-            )
-            if pending:
-                raise RuntimeError("Global speaking worker is still stopping")
-            try:
-                task.result()
             except asyncio.CancelledError:
                 self.logger.info("Global speaking worker stopped")
+            finally:
+                if self.worker_task is task:
+                    self.worker_task = None
         async with self._condition:
             self._stream_queues.clear()
             self._total_jobs = 0
             self._active_job = None
+            self._condition.notify_all()
+        if signal_error is not None:
+            raise RuntimeError(f"Failed to signal TTS shutdown: {signal_error}") from signal_error
 
 
 _global_speaking_worker: GlobalSpeakingWorker | None = None

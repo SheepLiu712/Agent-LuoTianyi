@@ -1,6 +1,5 @@
 from collections import OrderedDict
 from enum import Enum
-from enum import Enum
 from typing import TYPE_CHECKING, Dict
 import time
 from fastapi import WebSocket, WebSocketDisconnect
@@ -11,7 +10,6 @@ from src.legacy.chat_input_adapter import (
     is_chat_related_ws_message,
     stimulus_to_chat_input_event,
     validate_ws_chat_message,
-    validate_ws_chat_message,
     ws_message_to_stimulus,
 )
 from src.domain.chat import ChatInputEvent
@@ -19,19 +17,7 @@ from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.chat_session.chat_pipeline.chat_stream import ChatStream
-    from src.chat_session.chat_pipeline.chat_stream import ChatStream
     from src.system.database.database_service import DatabaseManager
-
-
-NEGATIVE_ACK_CAPABILITY = "negative_ack_v1"
-
-
-class ChatEventAcceptance(str, Enum):
-    ACCEPTED = "accepted"
-    DUPLICATE = "duplicate"
-    BAD_MESSAGE = "bad_message"
-    UNSUPPORTED = "unsupported"
-    OVERLOADED = "overloaded"
 
 
 NEGATIVE_ACK_CAPABILITY = "negative_ack_v1"
@@ -108,9 +94,6 @@ class WebSocketService:
         payload = event.payload if isinstance(event.payload, dict) else {}
         username = payload.get("username", "")
         token = payload.get("token", "")
-        payload = event.payload if isinstance(event.payload, dict) else {}
-        username = payload.get("username", "")
-        token = payload.get("token", "")
         if not username or not token:
             await websocket.send_json(
                 self._make_event(
@@ -125,8 +108,6 @@ class WebSocketService:
             return False
 
         is_valid, user_uuid = database.credential_service.check_message_token(username, token)
-        is_valid, user_uuid = database.credential_service.check_message_token(username, token)
-
         if not is_valid:
             await websocket.send_json(
                 self._make_event(
@@ -150,21 +131,9 @@ class WebSocketService:
             else set()
         )
         ws_connection.capabilities = negotiated_capabilities
-        raw_capabilities = payload.get("capabilities", [])
-        negotiated_capabilities = (
-            {NEGATIVE_ACK_CAPABILITY}
-            if isinstance(raw_capabilities, list)
-            and NEGATIVE_ACK_CAPABILITY in raw_capabilities[:32]
-            else set()
-        )
-        ws_connection.capabilities = negotiated_capabilities
         await websocket.send_json(
             self._make_event(
                 WSEventType.AUTH_OK,
-                {
-                    "message": "authentication successful for user " + authed_username,
-                    "capabilities": sorted(negotiated_capabilities),
-                },
                 {
                     "message": "authentication successful for user " + authed_username,
                     "capabilities": sorted(negotiated_capabilities),
@@ -177,8 +146,6 @@ class WebSocketService:
     
     async def handle_ping_event(self, ws_connection: "WebSocketConnection", event: WSMessage) -> None:
         websocket = ws_connection.websocket
-        payload = event.payload if isinstance(event.payload, dict) else {}
-        event_ping_id = payload.get("ping_id")
         payload = event.payload if isinstance(event.payload, dict) else {}
         event_ping_id = payload.get("ping_id")
         if event_ping_id is None:
@@ -287,34 +254,6 @@ class WebSocketService:
         )
         await websocket_connection.websocket.send_json(nack_event)
 
-    async def send_nack_event(
-        self,
-        websocket_connection: "WebSocketConnection",
-        event: WSMessage,
-        *,
-        code: str,
-        message: str,
-        retryable: bool,
-    ) -> None:
-        """Report that a client event was not accepted for processing."""
-        supports_negative_ack = (
-            NEGATIVE_ACK_CAPABILITY in websocket_connection.capabilities
-        )
-        payload = {
-            "received_event_type": event.event_type,
-            "code": code,
-            "message": message,
-            "retryable": retryable,
-        }
-        if supports_negative_ack:
-            payload["ok"] = False
-        nack_event = self._make_event(
-            WSEventType.SERVER_ACK if supports_negative_ack else WSEventType.SERVER_ERROR,
-            payload,
-            reply_to=event.client_msg_id,
-        )
-        await websocket_connection.websocket.send_json(nack_event)
-
     async def send_duplicate_ack_event(self, websocket_connection: "WebSocketConnection", event: WSMessage) -> None:
         """对重复客户端消息返回 ACK，但不让上游再次处理同一条业务消息。"""
         if event.client_msg_id is None:
@@ -323,7 +262,6 @@ class WebSocketService:
         ack_event = self._make_event(
             WSEventType.SERVER_ACK,
             {
-                "ok": True,
                 "ok": True,
                 "received_event_type": event.event_type,
                 "duplicate": True,
@@ -336,24 +274,8 @@ class WebSocketService:
         """Check recent accepted messages without marking a new event as accepted."""
         key = self._client_message_key(websocket_connection, event)
         if key is None:
-        """Check recent accepted messages without marking a new event as accepted."""
-        key = self._client_message_key(websocket_connection, event)
-        if key is None:
             return False
 
-        now = time.monotonic()
-        self._prune_recent_client_messages(now)
-        return key in self._recent_client_messages
-
-    def mark_client_message_accepted(
-        self,
-        websocket_connection: "WebSocketConnection",
-        event: WSMessage,
-    ) -> bool:
-        """Record idempotency only after the ingress queue accepted the event."""
-        key = self._client_message_key(websocket_connection, event)
-        if key is None:
-            return False
         now = time.monotonic()
         self._prune_recent_client_messages(now)
         return key in self._recent_client_messages
@@ -371,26 +293,8 @@ class WebSocketService:
         self._prune_recent_client_messages(now)
         self._recent_client_messages[key] = now
         self._recent_client_messages.move_to_end(key)
-        self._recent_client_messages.move_to_end(key)
         while len(self._recent_client_messages) > self._recent_client_msg_limit:
             self._recent_client_messages.popitem(last=False)
-        return True
-
-    def has_valid_client_message_id(self, event: WSMessage) -> bool:
-        return (
-            isinstance(event.client_msg_id, str)
-            and 0 < len(event.client_msg_id) <= 128
-        )
-
-    def _client_message_key(
-        self,
-        websocket_connection: "WebSocketConnection",
-        event: WSMessage,
-    ) -> str | None:
-        if not self.has_valid_client_message_id(event):
-            return None
-        owner = websocket_connection.user_uuid or websocket_connection.user_name or "anonymous"
-        return f"{owner}:{event.client_msg_id}"
         return True
 
     def has_valid_client_message_id(self, event: WSMessage) -> bool:
@@ -464,55 +368,10 @@ class WebSocketService:
         if registry is not None:
             registry.resolve_targets(targets)
 
-    def try_accept_chat_event(
-        self,
-        websocket_connection: "WebSocketConnection",
-        event: WSMessage,
-        chat_stream: "ChatStream",
-    ) -> ChatEventAcceptance:
-        """Convert and enqueue atomically with respect to event-loop tasks."""
-        if not self.has_valid_client_message_id(event):
-            return ChatEventAcceptance.BAD_MESSAGE
-        try:
-            validate_ws_chat_message(event)
-            chat_event = self.convert_to_chat_input_event(
-                event,
-                sender_user_id=websocket_connection.user_uuid,
-                default_character_id=getattr(chat_stream, "character_id", None) or "luotianyi",
-            )
-            self._validate_chat_event_targets(chat_stream, chat_event)
-        except (KeyError, TypeError, ValueError):
-            return ChatEventAcceptance.BAD_MESSAGE
-        if chat_event is None:
-            return ChatEventAcceptance.UNSUPPORTED
-        if self.is_duplicate_client_message(websocket_connection, event):
-            return ChatEventAcceptance.DUPLICATE
-        if not chat_stream.try_feed_event(chat_event):
-            return ChatEventAcceptance.OVERLOADED
-        self.mark_client_message_accepted(websocket_connection, event)
-        return ChatEventAcceptance.ACCEPTED
-
-    @staticmethod
-    def _validate_chat_event_targets(
-        chat_stream: "ChatStream",
-        chat_event: ChatInputEvent | None,
-    ) -> None:
-        if chat_event is None:
-            return
-        payload = chat_event.payload or {}
-        raw_targets = payload.get("target_character_ids")
-        targets = (raw_targets,) if isinstance(raw_targets, str) else tuple(raw_targets or ())
-        system_runtime = getattr(chat_stream, "system_runtime", None)
-        agent_runtime = getattr(system_runtime, "agent_runtime", None)
-        registry = getattr(agent_runtime, "character_registry", None)
-        if registry is not None:
-            registry.resolve_targets(targets)
-
     def convert_to_stimulus(
         self,
         event: WSMessage,
         sender_user_id: str | None = None,
-        default_character_id: str = "luotianyi",
         default_character_id: str = "luotianyi",
     ) -> Stimulus | None:
         return ws_message_to_stimulus(
@@ -520,24 +379,12 @@ class WebSocketService:
             sender_user_id=sender_user_id,
             default_character_id=default_character_id,
         )
-        return ws_message_to_stimulus(
-            event,
-            sender_user_id=sender_user_id,
-            default_character_id=default_character_id,
-        )
-
     def convert_to_chat_input_event(
         self,
         event: WSMessage,
         sender_user_id: str | None = None,
         default_character_id: str = "luotianyi",
-        default_character_id: str = "luotianyi",
     ) -> ChatInputEvent | None:
-        stimulus = self.convert_to_stimulus(
-            event,
-            sender_user_id=sender_user_id,
-            default_character_id=default_character_id,
-        )
         stimulus = self.convert_to_stimulus(
             event,
             sender_user_id=sender_user_id,
@@ -563,9 +410,6 @@ class WebSocketConnection:
     AUTH_TIMEOUT_SECONDS = 15.0
     AUTH_MAX_ATTEMPTS = 5
 
-    AUTH_TIMEOUT_SECONDS = 15.0
-    AUTH_MAX_ATTEMPTS = 5
-
     def __init__(self, websocket: WebSocket, user_uuid: str | None, user_name: str | None):
         self.websocket = websocket
         self.user_uuid = user_uuid
@@ -573,20 +417,11 @@ class WebSocketConnection:
         self.last_ping_id: int | None = None
         self.last_ping_time: int | None = None
         self.capabilities: set[str] = set()
-        self.capabilities: set[str] = set()
 
     def set_user(self, user_uuid: str, user_name: str):
         self.user_uuid = user_uuid
         self.user_name = user_name
         
-    async def auth(
-        self,
-        websocket_service: "WebSocketService",
-        database: "DatabaseManager",
-        *,
-        timeout_seconds: float | None = None,
-        max_attempts: int | None = None,
-    ) -> bool:
     async def auth(
         self,
         websocket_service: "WebSocketService",
@@ -615,56 +450,10 @@ class WebSocketConnection:
             except asyncio.TimeoutError:
                 await self._reject_auth(websocket_service, "AUTH_TIMEOUT", "authentication timed out")
                 return False
-        timeout = max(0.001, float(timeout_seconds or self.AUTH_TIMEOUT_SECONDS))
-        attempt_limit = max(1, int(max_attempts or self.AUTH_MAX_ATTEMPTS))
-        deadline = asyncio.get_running_loop().time() + timeout
-
-        for _ in range(attempt_limit):
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                await self._reject_auth(websocket_service, "AUTH_TIMEOUT", "authentication timed out")
-                return False
-            try:
-                client_event: WSMessage | None = await asyncio.wait_for(
-                    websocket_service.try_recv_client_msg(self),
-                    timeout=remaining,
-                )
-            except asyncio.TimeoutError:
-                await self._reject_auth(websocket_service, "AUTH_TIMEOUT", "authentication timed out")
-                return False
             if client_event is None:
                 continue
             if client_event.event_type == WSEventType.USER_AUTH.value:
                 ret = await websocket_service.handle_auth_event(self, database, client_event)
-                if ret:
-                    return True
-
-        await self._reject_auth(
-            websocket_service,
-            "AUTH_ATTEMPTS_EXCEEDED",
-            "too many authentication attempts",
-        )
-        return False
-
-    async def _reject_auth(
-        self,
-        websocket_service: "WebSocketService",
-        code: str,
-        message: str,
-    ) -> None:
-        try:
-            await self.websocket.send_json(
-                websocket_service._make_event(
-                    WSEventType.AUTH_ERROR,
-                    {"code": code, "message": message},
-                )
-            )
-        except Exception:
-            pass
-        try:
-            await self.websocket.close(code=1008)
-        except Exception:
-            pass
                 if ret:
                     return True
 
