@@ -32,7 +32,7 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
             calls.append("observability_closed")
 
     class FakeLLM:
-        def __init__(self, _config):
+        def __init__(self, _config, client_llm_executor):
             pass
 
         def ensure_dependencies(self):
