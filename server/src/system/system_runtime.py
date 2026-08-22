@@ -13,6 +13,7 @@ from src.system.database import DatabaseManager, set_default_database_manager
 from src.system.observability import ObservabilityService, set_observability_service
 from src.system.user_interface import UserInterface
 from src.utils.llm_service import LLMService
+from src.utils.llm.client_llm_executor import ClientLLMExecutor
 from src.utils.logger import get_logger, install_observability_log_handler, uninstall_observability_log_handler
 from src.world import WorldRuntime
 
@@ -31,6 +32,7 @@ class SystemRuntime:
     capability_manager: CapabilityManager
     chat_session_manager: ChatSessionManager
     llm_service: LLMService
+    client_llm_executor: ClientLLMExecutor
     observability: ObservabilityService
     owns_observability: bool = field(default=True)
     _shutdown_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
@@ -46,6 +48,7 @@ class SystemRuntime:
         world: WorldRuntime | None = None
         agent_runtime: AgentRuntime | None = None
         runtime: SystemRuntime | None = None
+        llm_service: LLMService | None = None
 
         try:
             # 1. 初始化观测服务，后续模块可统一写入指标和异常日志
@@ -55,7 +58,12 @@ class SystemRuntime:
                 install_observability_log_handler(observability)
 
             # 2. 初始化 LLM 服务
-            llm_service = LLMService(config.get("llm_service", {}))
+            client_llm_timeout = config.get("llm_service", {}).get("client_llm_timeout_seconds", 120.0)
+            client_llm_executor = ClientLLMExecutor(timeout_seconds=client_llm_timeout)
+            llm_service = LLMService(
+                config.get("llm_service", {}),
+                client_llm_executor=client_llm_executor,
+            )
 
             # 3. 初始化数据库管理器
             database_manager = DatabaseManager(config.get("database", {}))
@@ -91,6 +99,7 @@ class SystemRuntime:
                 capability_manager=capability_manager,
                 chat_session_manager=chat_session_manager,
                 llm_service=llm_service,
+                client_llm_executor=client_llm_executor,
                 observability=observability,
                 owns_observability=owns_observability,
             )
@@ -130,6 +139,7 @@ class SystemRuntime:
             llm_service=self.llm_service,
             capability_manager=self.capability_manager,
         )
+        self.client_llm_executor.bind(self.chat_session_manager.chat_stream_manager)
         self.world.wire_dependencies(system_runtime=self)
         self.user_interface.wire_dependencies(database_manager=self.database_manager)
         self.ensure_dependencies()

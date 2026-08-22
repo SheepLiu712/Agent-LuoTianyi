@@ -1,6 +1,7 @@
 {
     "is_debug": true,
     "llm_service": {
+        "client_llm_timeout_seconds": 120,
         "prompt_manager": {
             "template_dir": "res/agent/prompts"
         },
@@ -33,7 +34,70 @@
                     "top_p": 0.9
                 }
             }
-        }
+        },
+        "client_model_types": [
+            {
+                "type": "主对话模型",
+                "description": "填写你自己的 API Key；开启后主对话相关调用将使用该模型与服务商。",
+                "providers": [
+                    {
+                        "name": "DashScope",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "models": [
+                            {
+                                "id": "qwen3.5-plus",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            },
+                            {
+                                "id": "qwen3.6-flash",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "主题提取模型",
+                "description": "填写你自己的 API Key；开启后主题提取相关调用将使用该模型与服务商。",
+                "providers": [
+                    {
+                        "name": "DashScope",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "models": [
+                            {
+                                "id": "qwen3.5-plus",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            },
+                            {
+                                "id": "qwen3.6-flash",
+                                "can_enable_thinking": true,
+                                "can_use_json": true
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "type": "图片理解模型",
+                "description": "填写你自己的 API Key；开启后图片理解相关调用将使用该模型与服务商。",
+                "providers": [
+                    {
+                        "name": "DashScope",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "models": [
+                            {
+                                "id": "qwen3-vl-plus",
+                                "can_enable_thinking": false,
+                                "can_use_json": false
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
     },
     "database": {
         "sql_db_folder": "data/database",
@@ -42,6 +106,7 @@
         "redis": {},
         "event_store": {
             "llm_module": {
+                "label": "事件匹配",
                 "llm": {
                     "name": "qwen3.5-plus",
                     "enable_thinking": false,
@@ -52,6 +117,7 @@
         },
         "memory_store": {
             "llm_module": {
+                "label": "记忆存储",
                 "llm": {
                     "name": "qwen3.5-plus",
                     "enable_thinking": false,
@@ -114,6 +180,7 @@
             },
             "dynamic_replier": {
                 "llm_module": {
+                    "label": "动态回复",
                     "llm": {
                         "name": "qwen3.5-plus",
                         "enable_thinking": false,
@@ -294,6 +361,7 @@
                 "memory_writer": {
                     "recent_update_path": "data/memory/context/recent_update.json",
                     "llm_module": {
+                        "label": "记忆写入",
                         "llm": {
                             "name": "qwen3.5-plus",
                             "enable_thinking": false,
@@ -308,6 +376,7 @@
             },
             "date_detector": {
                 "llm_module": {
+                    "label": "日期检测",
                     "llm": {
                         "name": "qwen3.5-plus",
                         "enable_thinking": false,
@@ -318,6 +387,7 @@
             },
             "topic_extractor": {
                 "llm_module": {
+                    "label": "话题抽取",
                     "llm": {
                         "name": "qwen3.5-plus",
                         "enable_thinking": false,
@@ -407,6 +477,7 @@
             },
             "llm_modules": {
                 "json": {
+                    "label": "城市漫步决策",
                     "llm": {
                         "name": "qwen3.5-plus",
                         "enable_thinking": false,
@@ -519,6 +590,7 @@
             },
             "bili_cookie_file": "config/bili_cookie.txt",
             "llm_module": {
+                "label": "B站动态解析",
                 "llm": {
                     "name": "qwen3.5-plus",
                     "enable_thinking": false,
@@ -527,6 +599,7 @@
                 "prompt_name": "bili_dynamic_fetcher_prompt"
             },
             "vlm_module": {
+                "label": "B站动态解析",
                 "vlm": {
                     "name": "qwen3-vl-plus",
                     "use_json": true

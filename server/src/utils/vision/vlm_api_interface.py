@@ -64,19 +64,35 @@ class OpenAIAPIInterface(
         self.logger = get_logger(__name__)
         self._init_parameters()
         
-        # 检查 SSL_CERT_FILE 环境变量，如果指向的文件不存在，则移除该环境变量，防止 httpx/ssl 报错
+        # 服务端未配置 Key 时允许接口正常创建（客户端模式），
+        # 仅在真正需要服务端直连调用时才惰性创建 OpenAI client。
+        self.client = None
+        if self.api_key:
+            self._ensure_client()
+
+    def _ensure_client(self) -> "OpenAI":
+        """惰性创建 OpenAI client；未配置服务端 Key 时抛出明确错误。"""
+        if self.client is not None:
+            return self.client
+        if not self.api_key:
+            raise RuntimeError(
+                "服务端未配置 VLM API Key（该接口处于客户端模式），"
+                "且本次调用未启用客户端执行，无法完成调用"
+            )
         ssl_cert_file = os.environ.get("SSL_CERT_FILE")
         if ssl_cert_file and not os.path.exists(ssl_cert_file):
-            self.logger.warning(f"检测到 SSL_CERT_FILE 环境变量指向不存在的文件: {ssl_cert_file}。正在移除该环境变量以避免错误。")
+            self.logger.warning(
+                f"检测到 SSL_CERT_FILE 环境变量指向不存在的文件: {ssl_cert_file}。"
+                "正在移除该环境变量以避免错误。"
+            )
             del os.environ["SSL_CERT_FILE"]
-
         try:
-            # 兼容同步和异步调用：如果需要异步，应使用 AsyncOpenAI
             self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
             self.logger.info(f"OpenAI客户端初始化完成，模型: {self.model}")
         except Exception as e:
             self.logger.error(f"初始化OpenAI客户端失败: {e}")
-            raise Exception(f"无法初始化OpenAI客户端: {e}")
+            raise Exception(f"无法初始化OpenAI客户端: {e}") from e
+        return self.client
 
     async def generate_response(self, prompt: str, image_base64: str, **kwargs) -> str:
         """
@@ -85,13 +101,15 @@ class OpenAIAPIInterface(
         # 实现调用SiliconFlow API生成响应的逻辑
         last_exception = None
 
+        client = self._ensure_client()
+
         for attempt in range(self.max_retries):
             try:
                 st_time = time.time()
                 
                 # 定义一个同步函数来执行实际的阻塞调用
                 def _do_request(messages: List):
-                    return self.client.chat.completions.create(
+                    return client.chat.completions.create(
                         messages=messages,
                         model=self.model,
                         max_tokens=self.max_tokens,
@@ -148,10 +166,7 @@ class OpenAIAPIInterface(
     def _init_parameters(self):
         # 初始化默认参数
         self.base_url = self.config.get("base_url", "https://api.siliconflow.cn/v1")
-        self.api_key = self.config.get("api_key") or os.environ.get("SILICONFLOW_API_KEY")
-        if not self.api_key:
-            self.logger.error("未提供硅基流动API密钥，无法正常调用API。")
-            raise ValueError("缺少硅基流动API密钥")
+        self.api_key = self.config.get("api_key") or os.environ.get("SILICONFLOW_API_KEY") or ""
 
         self.model = self.config.get("model", "Pro/deepseek-ai/DeepSeek-V3")
         self.temperature = self.config.get("temperature", 0.7)

@@ -42,19 +42,23 @@ class WsTransport:
         token_getter: Callable[[], str | None],
         verify_ssl: bool = True,
         heartbeat_interval: float = 10.0,
+        llm_mode_getter: Callable[[], dict[str, bool]] | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.username_getter = username_getter
         self.token_getter = token_getter
         self.verify_ssl = verify_ssl
         self.heartbeat_interval = heartbeat_interval
+        self.llm_mode_getter = llm_mode_getter
 
         self._lock = threading.Lock()
         self._submit_lock = threading.Lock()
         self._ack_waiter: dict | None = None
         self._agent_message_listener: Callable[[AgentMessage], None] | None = None # 收到的消息发送到哪里
         self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
+        self._client_mode = {"types": []}  # 服务端当前客户端委托类型列表（随连接重置）
         self._system_message_listener: Callable[[str], None] | None = None
+        self._llm_request_listener: Callable[[dict], object] | None = None
         self._thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -106,11 +110,13 @@ class WsTransport:
         agent_message_listener: Callable[[AgentMessage], None] | None,
         agent_state_listener: Callable[[bool], None] | None,
         system_message_listener: Callable[[str], None] | None = None,
+        llm_request_listener: Callable[[dict], object] | None = None,
     ) -> None:
         with self._lock:
             self._agent_message_listener = agent_message_listener
             self._agent_state_listener = agent_state_listener
             self._system_message_listener = system_message_listener
+            self._llm_request_listener = llm_request_listener
 
     def submit_user_text(
         self,
@@ -122,6 +128,8 @@ class WsTransport:
         payload = {"message": text}
         if is_proactive:
             payload["is_proactive"] = True
+        self._client_mode = self.llm_mode_getter() if self.llm_mode_getter else self._client_mode
+        payload["llm_mode"] = dict(self._client_mode)
         return self._submit_user_event(
             WSEventType.USER_TEXT,
             payload=payload,
@@ -143,6 +151,8 @@ class WsTransport:
         }
         if image_client_path:
             payload["image_client_path"] = image_client_path
+        self._client_mode = self.llm_mode_getter() if self.llm_mode_getter else self._client_mode
+        payload["llm_mode"] = dict(self._client_mode)
         return self._submit_user_event(
             WSEventType.USER_IMAGE,
             payload=payload,
@@ -299,6 +309,7 @@ class WsTransport:
             try:
                 async with websockets.connect(ws_url, max_size=8 * 1024 * 1024, ssl=ssl_ctx) as ws:
                     self._ws = ws
+                    self._client_mode = {"types": []}
                     self._connected_event.set()
                     self._ready_event.clear()
 
@@ -425,6 +436,10 @@ class WsTransport:
                 ping_id = msg.payload.get("ping_id")
                 continue
 
+            if event_type == WSEventType.LLM_REQUEST:
+                asyncio.create_task(self._handle_llm_request(ws, msg.payload))
+                continue
+
             if event_type == WSEventType.AGENT_STATE_CHANGED:
                 state = msg.payload.get("state", "waiting")
                 self._emit_agent_state(state)
@@ -448,6 +463,30 @@ class WsTransport:
                 if not consumed:
                     self._emit_system_message(f"[{error_msg.code}] {error_msg.message}")
         self.logger.debug("WebSocket receive loop exited")
+
+    async def _handle_llm_request(self, ws, payload: dict) -> None:
+        if self._llm_request_listener is None:
+            return
+        try:
+            result = self._llm_request_listener(payload)
+            if asyncio.iscoroutine(result):
+                result = await result
+            if result:
+                event = build_event(WSEventType.LLM_RESPONSE, payload=result)
+                await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
+        except Exception as exc:
+            self.logger.error(f"Client LLM request handler failed: {exc}")
+            try:
+                event = build_event(
+                    WSEventType.LLM_RESPONSE,
+                    payload={
+                        "request_id": payload.get("request_id"),
+                        "error": str(exc),
+                    },
+                )
+                await ws.send(json.dumps(event.__dict__(), ensure_ascii=False))
+            except Exception as response_exc:
+                self.logger.error(f"Failed to send client LLM error response: {response_exc}")
 
     async def _heartbeat_loop(self, ws) -> None:
         ping_id = 0
