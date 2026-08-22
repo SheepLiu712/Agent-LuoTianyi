@@ -151,7 +151,8 @@ async def chat_ws(websocket: WebSocket):
             if (
                 event.event_type in (WSEventType.USER_TEXT.value, WSEventType.USER_IMAGE.value)
             ):
-                llm_mode = event.payload.get("llm_mode")
+                payload = event.payload if isinstance(event.payload, dict) else {}
+                llm_mode = payload.get("llm_mode")
                 if isinstance(llm_mode, dict):
                     raw_types = llm_mode.get("types")
                     if isinstance(raw_types, list):
