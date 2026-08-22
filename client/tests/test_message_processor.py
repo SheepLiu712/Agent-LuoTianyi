@@ -148,3 +148,28 @@ async def test_process_request_reports_missing_type_key(processor, monkeypatch):
     )
 
     assert result["error"] == "no api key configured on client"
+
+
+@pytest.mark.asyncio
+async def test_process_request_rejects_disabled_module(processor, config, monkeypatch):
+    config["对话模型"]["enabled"] = False
+    called = {}
+
+    async def fake_call(**kwargs):
+        called.update(kwargs)
+        return {"content": "ok", "usage": None}
+
+    monkeypatch.setattr(message_processor_module, "call_llm_api_async", fake_call)
+    result = await processor.process_llm_request(
+        {
+            "request_id": "req-disabled",
+            "prompt": "hello",
+            "type": "对话模型",
+        }
+    )
+
+    assert result == {
+        "request_id": "req-disabled",
+        "error": "no api key configured on client",
+    }
+    assert "url" not in called

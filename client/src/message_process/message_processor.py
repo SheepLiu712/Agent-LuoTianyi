@@ -378,7 +378,8 @@ class MessageProcessor:
             return {"request_id": request_id, "error": "missing model type"}
         config = llm_key_storage.get_module_config(model_type) or {}
         api_key = config.get("api_key") or ""
-        if not api_key:
+        # 对齐 APP 端：未启用的模块也拒绝请求，避免连接级 client_mode.types 与本地配置不同步时桌面端仍携旧 Key 执行
+        if not config.get("enabled") or not api_key:
             return {"request_id": request_id, "error": "no api key configured on client"}
         base_url = config.get("base_url") or ""
         if not base_url:
