@@ -19,7 +19,7 @@ from ..delivery_policy import (
 )
 from ..live2d import Live2dModel
 from ..network.event_types import AgentMessage, is_audio_terminal
-from ..safety import credential
+from ..utils import llm_key_storage
 from ..utils.llm_client import (
     build_chat_completions_payload,
     call_llm_api_async,
@@ -376,7 +376,7 @@ class MessageProcessor:
         model_type = str(payload.get("type") or "").strip()
         if not model_type:
             return {"request_id": request_id, "error": "missing model type"}
-        config = credential.get_module_config(model_type) or {}
+        config = llm_key_storage.get_module_config(model_type) or {}
         api_key = config.get("api_key") or ""
         if not api_key:
             return {"request_id": request_id, "error": "no api key configured on client"}
@@ -410,7 +410,7 @@ class MessageProcessor:
             return {"request_id": request_id, "error": str(exc)}
 
     def get_llm_mode(self) -> dict[str, list[str]]:
-        modules = credential.get_llm_modules_config()
+        modules = llm_key_storage.get_llm_modules_config()
         return {
             "types": [
                 str(type_name)

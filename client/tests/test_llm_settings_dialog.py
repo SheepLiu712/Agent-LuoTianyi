@@ -9,7 +9,8 @@ from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 
 import src.gui.llm_settings_dialog as dlg_mod
 from src.gui.llm_settings_dialog import LLMSettingsDialog
-from src.safety import credential
+from src.safety import crypto
+from src.utils import llm_key_storage
 
 
 TYPES = [
@@ -158,13 +159,13 @@ class FakeHttp:
 
 @pytest.fixture
 def make_dialog(qapp, monkeypatch, tmp_path):
-    """按需创建对话框：隔离凭据文件并关闭 DPAPI，贴近真实加载流程。"""
+    """按需创建对话框：隔离 LLM 配置文件并关闭 DPAPI，贴近真实加载流程。"""
     created = []
-    monkeypatch.setattr(credential, "_DPAPI_AVAILABLE", False)
+    monkeypatch.setattr(crypto, "_BACKEND", None)
     monkeypatch.setattr(
-        credential,
-        "get_credential_path",
-        lambda: str(tmp_path / "user.json"),
+        llm_key_storage,
+        "get_llm_modules_path",
+        lambda: str(tmp_path / "llm_modules.json"),
     )
     monkeypatch.setattr(dlg_mod, "QNetworkAccessManager", FakeHttp)
 
@@ -229,7 +230,7 @@ def test_empty_storage_all_types_disabled(make_dialog):
 
 
 def test_load_restores_switch_and_values(make_dialog):
-    credential.save_llm_modules_config(
+    llm_key_storage.save_llm_modules_config(
         {
             "对话模型": {
                 "enabled": True,
@@ -301,7 +302,7 @@ def test_validation_success_saves_all_types(make_dialog, qapp, monkeypatch):
     for _ in range(16):
         qapp.processEvents()
 
-    saved = credential.get_llm_modules_config()
+    saved = llm_key_storage.get_llm_modules_config()
     assert saved["对话模型"]["enabled"] is True
     assert saved["对话模型"]["provider"] == "DeepSeek"
     assert saved["对话模型"]["base_url"] == "https://api.deepseek.com/v1"
@@ -325,7 +326,7 @@ def test_validation_success_persists_advanced_params(make_dialog, qapp):
     dialog._on_save()
     for _ in range(16):
         qapp.processEvents()
-    saved = credential.get_llm_modules_config()
+    saved = llm_key_storage.get_llm_modules_config()
     assert saved["对话模型"]["params"] == {"temperature": 0.5}
 
 
@@ -336,7 +337,7 @@ def test_save_updates_base_url_when_provider_exists(make_dialog, qapp):
     dialog._on_save()
     for _ in range(16):
         qapp.processEvents()
-    saved = credential.get_llm_modules_config()
+    saved = llm_key_storage.get_llm_modules_config()
     assert saved["对话模型"]["base_url"] == "https://api.deepseek.com/v1"
 
 
@@ -354,7 +355,7 @@ def test_validation_failure_no_write(make_dialog, qapp, monkeypatch):
     for _ in range(16):
         qapp.processEvents()
     assert dialogs
-    assert credential.get_llm_modules_config() == {}
+    assert llm_key_storage.get_llm_modules_config() == {}
 
 
 def test_validation_timeout_is_failure(make_dialog, qapp, monkeypatch):
@@ -385,7 +386,7 @@ def test_stale_batch_response_dropped(make_dialog, qapp):
     dialog._validation_batch += 1  # 模拟取消/过期
     for _ in range(16):
         qapp.processEvents()
-    assert credential.get_llm_modules_config() == {}
+    assert llm_key_storage.get_llm_modules_config() == {}
 
 
 def test_cancel_validation_restores_editable_no_write(make_dialog, qapp):
@@ -396,13 +397,13 @@ def test_cancel_validation_restores_editable_no_write(make_dialog, qapp):
     dialog._cancel_validation()
     for _ in range(16):
         qapp.processEvents()
-    assert credential.get_llm_modules_config() == {}
+    assert llm_key_storage.get_llm_modules_config() == {}
     assert dialog.save_btn.isEnabled()
     assert dialog._modules["对话模型"]["switch"].isEnabled()
 
 
 def test_provider_missing_from_list_keeps_stored_values(make_dialog):
-    credential.save_llm_modules_config(
+    llm_key_storage.save_llm_modules_config(
         {
             "对话模型": {
                 "enabled": True,

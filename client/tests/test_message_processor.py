@@ -35,9 +35,13 @@ def config(monkeypatch):
             },
         },
     }
-    monkeypatch.setattr(message_processor_module.credential, "get_module_config", modules.get)
     monkeypatch.setattr(
-        message_processor_module.credential,
+        message_processor_module.llm_key_storage,
+        "get_module_config",
+        modules.get,
+    )
+    monkeypatch.setattr(
+        message_processor_module.llm_key_storage,
         "get_llm_modules_config",
         lambda: modules,
     )
@@ -125,7 +129,7 @@ def test_get_llm_mode_reads_both_module_states(processor, config):
 @pytest.mark.asyncio
 async def test_process_request_reports_missing_type_key(processor, monkeypatch):
     monkeypatch.setattr(
-        message_processor_module.credential,
+        message_processor_module.llm_key_storage,
         "get_module_config",
         lambda key: {"enabled": True, "api_key": ""} if key == "图片理解模型" else {
             "enabled": True,

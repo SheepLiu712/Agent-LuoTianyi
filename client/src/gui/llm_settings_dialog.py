@@ -2,7 +2,7 @@
 
 类型字典由服务端 /llm/providers 生成（type -> providers[base_url, models[勾选]]），
 每个类型一张卡片：服务商下拉、baseURL 提示、API Key、模型下拉、高级参数。
-保存时对开启的类型并行校验 /models，全部通过后一次性原子写入本地凭据，
+保存时对开启的类型并行校验 /models，全部通过后一次性原子写入本地配置，
 键为类型名；并把所选模型的 thinking/json 勾选复制为本地能力快照，
 供运行时按服务端门控逻辑附加 enable_thinking / response_format。
 """
@@ -29,7 +29,7 @@ from PySide6.QtGui import QCloseEvent
 from typing import TYPE_CHECKING
 
 from ..utils.logger import get_logger
-from ..safety import credential
+from ..utils import llm_key_storage
 
 if TYPE_CHECKING:
     from ..network.network_client import NetworkClient
@@ -394,7 +394,7 @@ class LLMSettingsDialog(QDialog):
                 info["model_combo"].addItem(model_id)
 
     def _load_modules_from_storage(self) -> None:
-        saved = credential.get_llm_modules_config()
+        saved = llm_key_storage.get_llm_modules_config()
         for type_name, info in self._modules.items():
             entry = saved.get(type_name) or {}
             info["base_url"] = str(entry.get("base_url") or "")
@@ -643,7 +643,7 @@ class LLMSettingsDialog(QDialog):
                 "model_capabilities": dict(entry.get("model_capabilities") or {}),
                 "api_key": entry.get("api_key", ""),
             }
-        ok = credential.save_llm_modules_config(to_save)
+        ok = llm_key_storage.save_llm_modules_config(to_save)
         if not ok:
             ret = QMessageBox.question(
                 self,
@@ -655,7 +655,7 @@ class LLMSettingsDialog(QDialog):
             if ret != QMessageBox.StandardButton.Yes:
                 self.status_label.setText("保存已取消（Key 未保存）")
                 return
-            ok = credential.save_llm_modules_config(to_save, allow_plaintext=True)
+            ok = llm_key_storage.save_llm_modules_config(to_save, allow_plaintext=True)
             if not ok:
                 self.status_label.setText("保存失败，请重试")
                 return
