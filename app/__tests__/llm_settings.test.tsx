@@ -3,7 +3,7 @@
  * 类型渲染/描述、加载回填、开关保留值、预检、统一校验（batchId）与整体写入。
  */
 import React from 'react';
-import renderer, { act, ReactTestRenderer } from 'react-test-renderer';
+import renderer, { act, ReactTestRenderer, ReactTestInstance } from 'react-test-renderer';
 
 const secureStoreBacking: Record<string, string> =
   ((globalThis as { __testSecureStoreBacking?: Record<string, string> })
@@ -128,9 +128,9 @@ async function renderScreen(): Promise<ReactTestRenderer> {
 }
 
 function pressLabel(tree: ReactTestRenderer, label: string) {
-  const textNode = tree.root.findAll((node) => node.props?.children === label)[0];
+  const textNode = tree.root.findAll((node: ReactTestInstance) => node.props?.children === label)[0];
   expect(textNode).toBeTruthy();
-  let node = textNode.parent;
+  let node: ReactTestInstance | null = textNode.parent;
   while (node && !node.props?.onPress) {
     node = node.parent;
   }
@@ -227,7 +227,7 @@ describe('LlmSettingsScreen 按类型卡片', () => {
     });
     const tree = await renderScreen();
     const hintNodes = tree.root.findAll(
-      (n) =>
+      (n: ReactTestInstance) =>
         Array.isArray(n.props?.children) &&
         n.props.children[0] === '服务商地址：',
     );

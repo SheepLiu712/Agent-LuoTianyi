@@ -105,5 +105,3 @@ def test_call_llm_api_network_error(monkeypatch):
     monkeypatch.setattr("src.utils.llm_client.requests.post", fake_post)
     with pytest.raises(RuntimeError, match="network down"):
         call_llm_api(url="https://example.com/v1", api_key="sk", payload={})
-
-

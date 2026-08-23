@@ -70,5 +70,3 @@ def test_save_credentials_logout_clears_token(monkeypatch, tmp_path):
     assert "token_dpapi" not in data
     assert "token" not in data
     assert data["server_url"] == "https://srv"
-
-
