@@ -14,6 +14,9 @@ interface ConnectCallbacks {
   onAgentMessage: (payload: AgentMessagePayload) => void;
   onAgentStateChanged: (state: string) => void;
   onError: (errorText: string) => void;
+
+  onLlmRequest?: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+  getLlmMode?: () => Promise<{ types: string[] }>;
 }
 
 function sanitizeBase64(input: string) {

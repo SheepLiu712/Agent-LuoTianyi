@@ -25,6 +25,9 @@ export interface WsCallbacks {
   onAgentMessage: (payload: AgentMessagePayload) => void;
   onAgentStateChanged: (state: string) => void;
   onError: (errorText: string) => void;
+
+  onLlmRequest?: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+  getLlmMode?: () => Promise<{ types: string[] }>;
 }
 
 export class WebSocketTransport {
@@ -47,6 +50,7 @@ export class WebSocketTransport {
   private isConnected = false;
   private isAuthed = false;
   private authRejected = false;
+  private clientMode = { types: [] as string[] }; // 服务端当前客户端委托类型列表（随连接重置）
 
   constructor(username: string, token: string, callbacks: WsCallbacks) {
     this.username = username;
@@ -143,6 +147,8 @@ export class WebSocketTransport {
     if (isProactive) {
       payload.is_proactive = true;
     }
+    this.clientMode = await this.callbacks.getLlmMode?.() || this.clientMode;
+    payload.llm_mode = { ...this.clientMode };
     return this.sendWithAck(WSEventType.USER_TEXT, payload, ackTimeout, clientMsgId);
   }
 
@@ -153,16 +159,14 @@ export class WebSocketTransport {
     ackTimeout = 10000,
     clientMsgId?: string,
   ): Promise<AckResult> {
-    return this.sendWithAck(
-      WSEventType.USER_IMAGE,
-      {
-        image_base64: imageBase64,
-        mime_type: mimeType,
-        image_client_path: imageClientPath,
-      },
-      ackTimeout,
-      clientMsgId,
-    );
+    const payload: Record<string, unknown> = {
+      image_base64: imageBase64,
+      mime_type: mimeType,
+      image_client_path: imageClientPath,
+    };
+    this.clientMode = await this.callbacks.getLlmMode?.() || this.clientMode;
+    payload.llm_mode = { ...this.clientMode };
+    return this.sendWithAck(WSEventType.USER_IMAGE, payload, ackTimeout, clientMsgId);
   }
 
   async submitUserTyping(textLength: number, ackTimeout = 5000, clientMsgId?: string): Promise<AckResult> {
@@ -214,6 +218,8 @@ export class WebSocketTransport {
 
     this.ws.onopen = () => {
       this.isConnected = true;
+      this.clientMode = { types: [] };
+      this.reconnectAttempts = 0;
       this.sendAuth();
       this.startHeartbeat();
     };
@@ -546,6 +552,11 @@ export class WebSocketTransport {
         return;
       }
 
+      if (eventType === WSEventType.LLM_REQUEST) {
+        void this.handleLlmRequest(payload);
+        return;
+      }
+
       if (eventType === WSEventType.AGENT_MESSAGE) {
         this.callbacks.onAgentMessage(payload as AgentMessagePayload);
         return;
@@ -558,6 +569,31 @@ export class WebSocketTransport {
     } catch {
       addDebugTrace('ws', 'recv parse error');
       this.callbacks.onError('收到无法解析的 WebSocket 消息');
+    }
+  }
+
+  private async handleLlmRequest(payload: Record<string, unknown>) {
+    if (!this.callbacks.onLlmRequest) {
+      return;
+    }
+    try {
+      const result = await this.callbacks.onLlmRequest(payload);
+      if (!result) return;
+      this.sendRaw({
+        type: WSEventType.LLM_RESPONSE,
+        ts: Date.now(),
+        payload: result,
+      });
+    } catch (error) {
+      addDebugTrace('llm', 'llm_request handler failed', { error: String(error) });
+      this.sendRaw({
+        type: WSEventType.LLM_RESPONSE,
+        ts: Date.now(),
+        payload: {
+          request_id: payload.request_id,
+          error: String(error),
+        },
+      });
     }
   }
 

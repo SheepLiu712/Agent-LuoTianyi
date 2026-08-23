@@ -144,6 +144,28 @@ async def chat_ws(websocket: WebSocket):
                 await websocket_service.handle_ping_event(ws_connection, event)
                 continue
 
+            if event.event_type == WSEventType.LLM_RESPONSE.value:
+                system_runtime.client_llm_executor.on_llm_response(event.payload)
+                continue
+
+            if (
+                event.event_type in (WSEventType.USER_TEXT.value, WSEventType.USER_IMAGE.value)
+            ):
+                payload = event.payload if isinstance(event.payload, dict) else {}
+                llm_mode = payload.get("llm_mode")
+                if isinstance(llm_mode, dict):
+                    raw_types = llm_mode.get("types")
+                    if isinstance(raw_types, list):
+                        ws_connection.client_mode = {
+                            "types": [
+                                str(t).strip()
+                                for t in raw_types
+                                if isinstance(t, str) and t.strip()
+                            ]
+                        }
+                    elif isinstance(raw_types, str) and raw_types.strip():
+                        ws_connection.client_mode = {"types": [raw_types.strip()]}
+
             if websocket_service.is_chat_related_event(event):
                 acceptance = websocket_service.try_accept_chat_event(
                     ws_connection,
@@ -183,9 +205,11 @@ async def chat_ws(websocket: WebSocket):
                 await websocket_service.send_ack_event(ws_connection, event)
     except WebSocketDisconnect:
         gcsm.ws_lost_connection(ws_connection)
+        system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
         logger.info("WebSocket client disconnected from /chat_ws")
     except Exception as e:
         gcsm.ws_lost_connection(ws_connection)
+        system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
         logger.error(f"Error in /chat_ws: {e}")
 
 
@@ -195,6 +219,15 @@ async def get_public_key(system_runtime = Depends(get_runtime)):
     获取用户登录加密密码时使用的公钥。客户端在登录或注册时使用该公钥加密密码后发送给服务器。
     """
     return {"public_key": system_runtime.user_interface.get_public_key_pem()}
+
+
+@app.get("/llm/providers")
+async def get_llm_providers(system_runtime = Depends(get_runtime)):
+    """
+    获取客户端模型类型字典（type -> providers[base_url, models[勾选]]）。
+    字典由 llm_service.client_model_types 配置生成，不包含任何密钥。
+    """
+    return {"types": system_runtime.llm_service.get_client_model_types()}
 
 
 @app.post("/auth/auto_login")

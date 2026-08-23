@@ -31,6 +31,7 @@ import { addDebugTrace, clearDebugTrace, DebugTraceEntry, subscribeDebugTrace } 
 import { COLOR_MODE_LABELS, COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../utils/theme';
 import DynamicsScreen from './dynamics';
 import PreferencesScreen from './preferences';
+import LlmSettingsScreen from './llm_settings';
 
 const THINKING_BUBBLE_FRAMES = [
   require('../assets/images/thinking_bubble1.png'),
@@ -51,6 +52,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEntries, setDebugEntries] = useState<DebugTraceEntry[]>([]);
   const [showPreferences, setShowPreferences] = useState(false);
+  const [showLlmSettings, setShowLlmSettings] = useState(false);
   const [showDynamics, setShowDynamics] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorMode, setColorMode] = useState<ColorMode>('light');
@@ -250,6 +252,11 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     closeDrawer();
   };
 
+  const handleOpenLlmSettings = () => {
+    setShowLlmSettings(true);
+    closeDrawer();
+  };
+
   const refreshDynamicsUnread = useCallback(async () => {
     if (!username || !message_token) {
       setHasDynamicsUnread(false);
@@ -380,6 +387,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
       </View>
 
       {showPreferences ? <PreferencesScreen onClose={() => setShowPreferences(false)} theme={theme} /> : null}
+      {showLlmSettings ? <LlmSettingsScreen onClose={() => setShowLlmSettings(false)} theme={theme} /> : null}
       {showDynamics ? (
         <DynamicsScreen
           onClose={handleCloseDynamics}
@@ -493,6 +501,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
 
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenPreferences} activeOpacity={0.78}>
           <Text style={[styles.drawerItemText, { color: theme.text }]}>配置偏好</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenLlmSettings} activeOpacity={0.78}>
+          <Text style={[styles.drawerItemText, { color: theme.text }]}>LLM 模型设置</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={[styles.drawerItem, { backgroundColor: theme.surfaceAlt }]} onPress={handleOpenDynamics} activeOpacity={0.78}>

@@ -17,6 +17,7 @@ from src.system.admin import admin_shell as admin_shell_module
 from src.system.admin.admin_shell import AdminShell
 from src.system.admin.runtime_supervisor import RuntimeSupervisor
 from src.system.system_runtime import SystemRuntime
+from src.utils.llm.client_llm_executor import ClientLLMExecutor
 from src.world.world_clock import WorldClock
 
 
@@ -173,6 +174,7 @@ async def test_system_runtime_shutdown_is_ordered_idempotent_and_retryable():
         chat_session_manager=chat,
         llm_service=object(),
         observability=object(),
+        client_llm_executor=ClientLLMExecutor(),
         owns_observability=False,
     )
 

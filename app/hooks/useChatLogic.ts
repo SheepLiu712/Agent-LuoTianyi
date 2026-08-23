@@ -182,6 +182,8 @@ export const useChatLogic = (
       onError: (errorText) => {
         binder.emitErrorText(errorText);
       },
+      onLlmRequest: (payload) => processor.processLlmRequest(payload),
+      getLlmMode: () => processor.getLlmMode(),
     });
 
     return () => {

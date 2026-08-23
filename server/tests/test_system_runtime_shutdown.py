@@ -5,6 +5,7 @@ from src.capabilities.capability_manager import CapabilityManager
 from src.capabilities.speech.speech import SpeechCapability
 from src.capabilities.speech.tts_module import TTSModule
 from src.system.system_runtime import SystemRuntime
+from src.utils.llm.client_llm_executor import ClientLLMExecutor
 
 
 def test_system_runtime_shutdown_releases_capabilities_before_database():
@@ -35,6 +36,7 @@ def test_system_runtime_shutdown_releases_capabilities_before_database():
         ),
         llm_service=SimpleNamespace(),
         observability=SimpleNamespace(),
+        client_llm_executor=ClientLLMExecutor(),
         owns_observability=False,
     )
 
