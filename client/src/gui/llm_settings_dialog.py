@@ -33,6 +33,9 @@ if TYPE_CHECKING:
 
 _TYPES_TIMEOUT_MS = 15000
 _HIGHLIGHT_STYLE = "border: 2px solid #E53935;"
+_REFRESH_BUTTON_STYLE = "font-size: 14px; padding: 8px 16px;"
+_INPUT_STYLE = "font-size: 14px; padding: 6px 8px;"
+_FIELD_SPACING = 10
 _FIELD_NAMES = {
     "provider": "服务商名称",
     "base_url": "Base URL",
@@ -80,11 +83,12 @@ class LLMSettingsDialog(QDialog):
             "服务商、Base URL、模型和 Key 完全由你配置，Key 不会上传服务器。"
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 13px; color: #666;")
+        desc.setStyleSheet("font-size: 14px; color: #666;")
         layout.addWidget(desc)
 
         header = QHBoxLayout()
         self.refresh_btn = QPushButton("刷新需求列表")
+        self.refresh_btn.setStyleSheet(_REFRESH_BUTTON_STYLE)
         self.refresh_btn.clicked.connect(self._start_fetch_types)
         header.addStretch()
         header.addWidget(self.refresh_btn)
@@ -101,7 +105,7 @@ class LLMSettingsDialog(QDialog):
 
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
-        self.status_label.setStyleSheet("font-size: 12px; color: #888;")
+        self.status_label.setStyleSheet("font-size: 14px; color: #888;")
         layout.addWidget(self.status_label)
 
         actions = QHBoxLayout()
@@ -197,17 +201,18 @@ class LLMSettingsDialog(QDialog):
         if requirement.get("requires_thinking"):
             requirements.append("需要 thinking")
         tag = QLabel("调用要求：" + " / ".join(requirements))
-        tag.setStyleSheet("font-size: 12px; color: #4A789C;")
+        tag.setStyleSheet("font-size: 14px; color: #4A789C;")
         layout.addWidget(tag)
         if requirement.get("description"):
             description = QLabel(str(requirement["description"]))
             description.setWordWrap(True)
-            description.setStyleSheet("font-size: 12px; color: #888;")
+            description.setStyleSheet("font-size: 14px; color: #888;")
             layout.addWidget(description)
 
         fields = QWidget()
         fields_layout = QVBoxLayout(fields)
         fields_layout.setContentsMargins(0, 0, 0, 0)
+        fields_layout.setSpacing(_FIELD_SPACING)
         provider_input = QLineEdit()
         provider_input.setPlaceholderText("服务商名称（自定义）")
         base_url_input = QLineEdit()
@@ -221,6 +226,7 @@ class LLMSettingsDialog(QDialog):
         params_editor.setPlaceholderText('高级参数（JSON，可选），例如 {"temperature": 0.7}')
         params_editor.setMaximumHeight(90)
         for widget in (provider_input, base_url_input, api_key_input, model_input, params_editor):
+            widget.setStyleSheet(_INPUT_STYLE)
             fields_layout.addWidget(widget)
 
         capabilities = QHBoxLayout()
@@ -310,7 +316,7 @@ class LLMSettingsDialog(QDialog):
             type_id, field = missing
             info = self._modules[type_id]
             widget = info[f"{field}_input"] if field != "params" else info["params_editor"]
-            widget.setStyleSheet(_HIGHLIGHT_STYLE)
+            widget.setStyleSheet(_INPUT_STYLE + _HIGHLIGHT_STYLE)
             self._scroll.ensureWidgetVisible(info["card"], 0, 120)
             message = (
                 f"类型「{info['name']}」缺少 {_FIELD_NAMES[field]}，请补全后重试。"

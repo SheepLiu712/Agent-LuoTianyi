@@ -77,6 +77,23 @@ def test_cards_use_server_requirements_without_provider_catalog(make_dialog):
     assert info["provider_input"].placeholderText() == "服务商名称（自定义）"
 
 
+def test_refresh_button_and_model_fields_use_readable_spacing(make_dialog):
+    dialog = make_dialog()
+    info = dialog._modules["main_chat"]
+
+    assert "font-size: 14px" in dialog.refresh_btn.styleSheet()
+    assert "padding: 8px 16px" in dialog.refresh_btn.styleSheet()
+    assert info["fields"].layout().spacing() == 10
+    for key in (
+        "provider_input",
+        "base_url_input",
+        "api_key_input",
+        "model_input",
+        "params_editor",
+    ):
+        assert "font-size: 14px" in info[key].styleSheet()
+
+
 def test_legacy_display_name_storage_is_loaded(make_dialog):
     dialog = make_dialog(
         {

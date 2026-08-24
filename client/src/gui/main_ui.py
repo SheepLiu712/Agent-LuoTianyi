@@ -626,7 +626,7 @@ class ChatWidget(QWidget):
         self.toolbar_layout.addWidget(self.volume_btn)
         
         # Settings Button
-        self.settings_btn = HoverButton(tooltip_text="偏好设置")
+        self.settings_btn = HoverButton(tooltip_text="设置")
         icon_path = os.path.join("res", "gui", "setting.png")
         self.settings_btn.setIcon(QIcon(icon_path))
         self.settings_btn.setFixedSize(24, 24)
