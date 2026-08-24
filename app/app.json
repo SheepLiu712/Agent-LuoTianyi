@@ -2,7 +2,7 @@
   "expo": {
     "name": "ai小洛",
     "slug": "ChatwithAILuo",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon_whitebg.png",
     "scheme": "ailuotianyi",
@@ -23,8 +23,8 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
-      "package": "com.sheepliu712.ailuotianyi",
-      "versionCode": 5,
+      "package": "com.sheepliu712.agentluochat",
+      "versionCode": 6,
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE"
@@ -49,7 +49,9 @@
         }
       ],
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      "./plugins/withLive2DAndroidAssets",
+      "./plugins/withAndroidReleaseSigning"
     ],
     "experiments": {
       "typedRoutes": true,

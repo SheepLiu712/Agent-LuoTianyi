@@ -43,5 +43,8 @@ assets/images_ref
 /ios
 /android
 
+# local Android signing material (keystore, key.properties, and backups)
+/.android-signing/
+
 #vscode
 .vscode
