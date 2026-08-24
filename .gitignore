@@ -3,7 +3,6 @@
 .claude
 .vscode
 settings.json
-AGENTS.md
 
 # Python
 __pycache__/
