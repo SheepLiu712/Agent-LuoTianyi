@@ -1,5 +1,6 @@
 import base64
 import datetime
+import json
 import os
 import queue
 import re
@@ -389,14 +390,26 @@ class MessageProcessor:
             return {"request_id": request_id, "error": "missing provider info"}
 
         capabilities = config.get("model_capabilities") or {}
+        required_kind = str(payload.get("model_kind") or "llm").strip().lower()
+        configured_kind = str(config.get("model_kind") or "").strip().lower()
+        if required_kind not in {"llm", "vlm"}:
+            return {"request_id": request_id, "error": f"服务端下发了未知模型类型：{required_kind}"}
+        if configured_kind != required_kind:
+            return {
+                "request_id": request_id,
+                "error": f"本地配置是 {configured_kind or '未知'} 模型，当前调用要求 {required_kind.upper()} 模型",
+            }
         use_json = bool(payload.get("use_json"))
-        # 门控对齐服务端：模块绑定“想要” + 模型勾选“能”才附加参数
-        use_json = use_json and bool(capabilities.get("can_use_json"))
+        enable_thinking = bool(payload.get("enable_thinking"))
+        if use_json and not bool(capabilities.get("can_use_json")):
+            return {"request_id": request_id, "error": "当前客户端模型未声明 JSON 输出能力"}
+        if enable_thinking and not bool(capabilities.get("can_enable_thinking")):
+            return {"request_id": request_id, "error": "当前客户端模型未声明 thinking 能力"}
         body = build_chat_completions_payload(
             prompt=payload.get("prompt", ""),
             model=model,
             params={**(payload.get("params") or {}), **(config.get("params") or {})},
-            enable_thinking=bool(capabilities.get("can_enable_thinking")) and bool(payload.get("enable_thinking")),
+            enable_thinking=enable_thinking,
             use_json=use_json,
             image_base64=payload.get("image_base64"),
         )
@@ -406,6 +419,11 @@ class MessageProcessor:
                 api_key=api_key,
                 payload=body,
             )
+            if use_json:
+                try:
+                    json.loads(result["content"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return {"request_id": request_id, "error": "客户端模型未返回有效 JSON"}
             return {"request_id": request_id, "content": result["content"], "usage": result["usage"]}
         except Exception as exc:
             return {"request_id": request_id, "error": str(exc)}
@@ -414,8 +432,8 @@ class MessageProcessor:
         modules = llm_key_storage.get_llm_modules_config()
         return {
             "types": [
-                str(type_name)
-                for type_name, entry in modules.items()
+                str(type_id)
+                for type_id, entry in modules.items()
                 if isinstance(entry, dict) and entry.get("enabled")
             ]
         }

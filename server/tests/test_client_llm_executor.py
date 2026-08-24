@@ -209,6 +209,7 @@ async def test_delegate_sends_type_payload_without_provider(executor, fake_ws):
     payload = event["payload"]
     assert payload["module"] == "main_chat"
     assert payload["type"] == "对话模型"
+    assert payload["model_kind"] == "llm"
     assert payload["prompt"] == "hello"
     assert payload["params"] == {"temperature": 0.7}
     assert payload["enable_thinking"] is True
@@ -234,6 +235,7 @@ async def test_delegate_includes_image_base64(executor, fake_ws):
             "u1",
             module="image_understanding",
             model_type="图片理解模型",
+            model_kind="vlm",
             prompt="describe",
             params=None,
             image_base64="data:image/png;base64,AAA",
@@ -242,6 +244,7 @@ async def test_delegate_includes_image_base64(executor, fake_ws):
     await asyncio.sleep(0)
     payload = fake_ws.sent_events[0]["payload"]
     assert payload["type"] == "图片理解模型"
+    assert payload["model_kind"] == "vlm"
     assert payload["image_base64"] == "data:image/png;base64,AAA"
     request_id = payload["request_id"]
     executor.on_llm_response(
@@ -340,6 +343,7 @@ async def test_llm_module_delegates_when_type_configured():
     assert len(executor.calls) == 1
     _, kwargs = executor.calls[0]
     assert kwargs["model_type"] == "对话模型"
+    assert kwargs["model_kind"] == "llm"
     assert kwargs["module"] == "m"
     assert inner.calls == 0
 
@@ -459,6 +463,7 @@ async def test_vlm_module_delegates_with_image():
     assert result["content"] == "client-answer"
     _, kwargs = executor.calls[0]
     assert kwargs["model_type"] == "图片理解模型"
+    assert kwargs["model_kind"] == "vlm"
     assert kwargs["image_base64"] == "data:image/png;base64,AAA"
     assert inner.calls == 0
 

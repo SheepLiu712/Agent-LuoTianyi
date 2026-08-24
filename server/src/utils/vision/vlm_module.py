@@ -73,6 +73,7 @@ class VLMModule:
                     user_id,
                     module=self.name,
                     model_type=self.client_model_type,
+                    model_kind="vlm",
                     prompt=prompt,
                     params=self.params,
                     enable_thinking=self.enable_thinking,

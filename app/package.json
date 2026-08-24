@@ -1,11 +1,14 @@
 {
   "name": "agent-luotianyi-app",
   "main": "expo-router/entry",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
+    "prebuild:android": "expo prebuild --platform android",
+    "prebuild:android:clean": "expo prebuild --platform android --clean",
+    "build:android:release": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-android-release.ps1",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint"

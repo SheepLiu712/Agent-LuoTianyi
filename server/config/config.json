@@ -63,65 +63,36 @@
         },
         "client_model_types": [
             {
-                "type": "主对话模型",
+                "id": "main_chat",
+                "name": "主对话模型",
                 "description": "填写你自己的 API Key；开启后主对话相关调用将使用该模型与服务商。",
-                "providers": [
-                    {
-                        "name": "DashScope",
-                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                        "models": [
-                            {
-                                "id": "qwen3.5-plus",
-                                "can_enable_thinking": true,
-                                "can_use_json": true
-                            },
-                            {
-                                "id": "qwen3.6-flash",
-                                "can_enable_thinking": true,
-                                "can_use_json": true
-                            }
-                        ]
-                    }
-                ]
+                "model_kind": "llm",
+                "requires_json": false,
+                "requires_thinking": false
             },
             {
-                "type": "主题提取模型",
+                "id": "topic_extraction",
+                "name": "主题提取模型",
                 "description": "填写你自己的 API Key；开启后主题提取相关调用将使用该模型与服务商。",
-                "providers": [
-                    {
-                        "name": "DashScope",
-                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                        "models": [
-                            {
-                                "id": "qwen3.5-plus",
-                                "can_enable_thinking": true,
-                                "can_use_json": true
-                            },
-                            {
-                                "id": "qwen3.6-flash",
-                                "can_enable_thinking": true,
-                                "can_use_json": true
-                            }
-                        ]
-                    }
-                ]
+                "model_kind": "llm",
+                "requires_json": true,
+                "requires_thinking": false
             },
             {
-                "type": "图片理解模型",
+                "id": "image_understanding",
+                "name": "图片理解模型",
                 "description": "填写你自己的 API Key；开启后图片理解相关调用将使用该模型与服务商。",
-                "providers": [
-                    {
-                        "name": "DashScope",
-                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                        "models": [
-                            {
-                                "id": "qwen3-vl-plus",
-                                "can_enable_thinking": false,
-                                "can_use_json": false
-                            }
-                        ]
-                    }
-                ]
+                "model_kind": "vlm",
+                "requires_json": false,
+                "requires_thinking": false
+            },
+            {
+                "id": "assistance",
+                "name": "辅助模型",
+                "description": "填写你自己的 API Key；开启后记忆等功能的相关调用将使用该模型与服务商。",
+                "model_kind": "llm",
+                "requires_json": true,
+                "requires_thinking": false
             }
         ]
     },
@@ -138,7 +109,7 @@
                     "enable_thinking": false,
                     "use_json": true,
                     "params": {},
-                    "client_model_type": ""
+                    "client_model_type": "assistance"
                 },
                 "prompt_name": "event_store_prompt"
             }
@@ -151,7 +122,7 @@
                     "enable_thinking": false,
                     "use_json": true,
                     "params": {},
-                    "client_model_type": ""
+                    "client_model_type": "assistance"
                 },
                 "prompt_name": "memory_store_prompt"
             }
@@ -178,7 +149,7 @@
                     "enable_thinking": false,
                     "use_json": true,
                     "params": {},
-                    "client_model_type": ""
+                    "client_model_type": "assistance"
                 },
                 "prompt_name": "song_emotion_prompt"
             },
@@ -193,7 +164,7 @@
             "vlm_module": {
                 "vlm": {
                     "name": "qwen3-vl-plus",
-                    "client_model_type": ""
+                    "client_model_type": "image_understanding"
                 },
                 "prompt_name": "vision_interaction_prompt",
                 "enable_thinking": false,
@@ -222,7 +193,7 @@
                         "enable_thinking": false,
                         "use_json": true,
                         "params": {},
-                        "client_model_type": ""
+                        "client_model_type": "assistance"
                     },
                     "prompt_name": "dynamic_reply_prompt"
                 }
@@ -236,7 +207,7 @@
                         "enable_thinking": false,
                         "use_json": false,
                         "params": {},
-                        "client_model_type": ""
+                        "client_model_type": "assistance"
                     },
                     "prompt_name": "diary_prompt"
                 }
@@ -282,7 +253,7 @@
                     "enable_thinking": false,
                     "use_json": false,
                     "params": {},
-                    "client_model_type": ""
+                    "client_model_type": "assistance"
                 },
                 "prompt_name": "summary_prompt"
             },
@@ -390,7 +361,7 @@
                             "enable_thinking": false,
                             "use_json": false,
                             "params": {},
-                            "client_model_type": ""
+                            "client_model_type": "assistance"
                         },
                         "prompt_name": "user_profile_update_prompt"
                     }
@@ -406,7 +377,7 @@
                             "params": {
                                 "max_tokens": 800
                             },
-                            "client_model_type": ""
+                            "client_model_type": "assistance"
                         },
                         "prompt_name": "memory_write_prompt"
                     }
@@ -420,7 +391,7 @@
                         "enable_thinking": false,
                         "use_json": true,
                         "params": {},
-                        "client_model_type": ""
+                        "client_model_type": "assistance"
                     },
                     "prompt_name": "date_detection_prompt"
                 }
@@ -433,7 +404,7 @@
                         "enable_thinking": false,
                         "use_json": true,
                         "params": {},
-                        "client_model_type": ""
+                        "client_model_type": "topic_extraction"
                     },
                     "prompt_name": "topic_extraction_prompt"
                 }
@@ -451,7 +422,7 @@
                         "enable_thinking": false,
                         "use_json": false,
                         "params": {},
-                        "client_model_type": "主对话模型"
+                        "client_model_type": "main_chat"
                     },
                     "prompt_name": "topic_reply_prompt"
                 }

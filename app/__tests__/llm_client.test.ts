@@ -5,39 +5,25 @@ import {
   buildChatCompletionsPayload,
   callLlmProvider,
   fetchClientModelTypes,
-  fetchModelsList,
 } from '../utils/llm_client';
 import type { ClientModelType } from '../utils/llm_client';
 
 const TYPES: ClientModelType[] = [
   {
-    type: '对话模型',
+    id: 'main_chat',
+    name: '主对话模型',
     description: '对话说明',
-    providers: [
-      {
-        name: '阿里云百炼（DashScope）',
-        base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-        models: [
-          { id: 'qwen3.5-plus', can_enable_thinking: true, can_use_json: true },
-          { id: 'qwen3.6-flash', can_enable_thinking: true, can_use_json: true },
-          { id: 'qwen3-vl-plus', can_enable_thinking: false, can_use_json: false },
-        ],
-      },
-    ],
+    model_kind: 'llm',
+    requires_json: false,
+    requires_thinking: false,
   },
   {
-    type: '图片理解模型',
+    id: 'image_understanding',
+    name: '图片理解模型',
     description: '图片说明',
-    providers: [
-      {
-        name: 'DeepSeek',
-        base_url: 'https://api.deepseek.com/v1',
-        models: [
-          { id: 'deepseek-v4-flash', can_enable_thinking: true, can_use_json: true },
-          { id: 'deepseek-v4-pro', can_enable_thinking: true, can_use_json: true },
-        ],
-      },
-    ],
+    model_kind: 'vlm',
+    requires_json: false,
+    requires_thinking: false,
   },
 ];
 
@@ -100,7 +86,7 @@ describe('fetchClientModelTypes', () => {
     const data = await fetchClientModelTypes('https://server.example.com');
     expect(data.types).toEqual(TYPES);
     const [url] = fetchMock.mock.calls[0] as [string];
-    expect(url).toBe('https://server.example.com/llm/providers');
+    expect(url).toBe('https://server.example.com/llm/client-model-types');
   });
 
   it('throws on http error', async () => {
@@ -113,48 +99,6 @@ describe('fetchClientModelTypes', () => {
     await expect(
       fetchClientModelTypes('https://server.example.com'),
     ).rejects.toThrow('500');
-  });
-});
-
-describe('fetchModelsList', () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('calls /models with the bearer key and returns model ids', async () => {
-    const fetchMock = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        data: [{ id: 'm1' }, { id: 'm2' }, {}],
-      }),
-    } as unknown as Response);
-    global.fetch = fetchMock as unknown as typeof fetch;
-
-    const ids = await fetchModelsList(
-      'https://example.com/v1',
-      'sk-user',
-      5000,
-    );
-    expect(ids).toEqual(['m1', 'm2']);
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://example.com/v1/models');
-    expect((init.headers as Record<string, string>).Authorization).toBe(
-      'Bearer sk-user',
-    );
-  });
-
-  it('throws on http error', async () => {
-    global.fetch = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: async () => 'unauthorized',
-      json: async () => ({}),
-    } as unknown as Response) as unknown as typeof fetch;
-
-    await expect(
-      fetchModelsList('https://example.com/v1', 'bad'),
-    ).rejects.toThrow('401');
   });
 });
 

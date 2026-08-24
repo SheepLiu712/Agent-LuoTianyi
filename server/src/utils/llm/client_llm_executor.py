@@ -157,6 +157,7 @@ class ClientLLMExecutor:
         model_type: str,
         prompt: str,
         params: Optional[Dict[str, Any]],
+        model_kind: str = "llm",
         enable_thinking: bool = False,
         use_json: bool = False,
         image_base64: Optional[str] = None,
@@ -169,6 +170,9 @@ class ClientLLMExecutor:
         """
         if not model_type:
             return None
+        normalized_kind = str(model_kind or "").strip().lower()
+        if normalized_kind not in {"llm", "vlm"}:
+            raise ValueError(f"unsupported client model kind: {model_kind}")
         ws_connection = self._get_live_connection(user_id)
         if ws_connection is None:
             return None
@@ -188,6 +192,7 @@ class ClientLLMExecutor:
             "request_id": request_id,
             "module": module,
             "type": model_type,
+            "model_kind": normalized_kind,
             "prompt": prompt,
             "params": dict(params or {}),
             "enable_thinking": bool(enable_thinking),

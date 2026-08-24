@@ -43,7 +43,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Define the source folder
-DIST_FOLDER="dist/Chat with Luotianyi"
+DIST_FOLDER="dist/AgentLuoChat-Release"
 
 # Verify that the source folder exists
 if [ ! -d "$DIST_FOLDER" ]; then

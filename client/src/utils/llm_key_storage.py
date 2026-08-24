@@ -31,6 +31,7 @@ def get_llm_modules_config() -> dict:
             "provider": str(raw.get("provider") or ""),
             "model": str(raw.get("model") or ""),
             "base_url": str(raw.get("base_url") or ""),
+            "model_kind": str(raw.get("model_kind") or ""),
             "params": raw.get("params") if isinstance(raw.get("params"), dict) else {},
             "model_capabilities": (
                 raw.get("model_capabilities")
@@ -76,6 +77,7 @@ def save_llm_modules_config(
                 "provider": str(raw.get("provider") or ""),
                 "model": str(raw.get("model") or ""),
                 "base_url": str(raw.get("base_url") or ""),
+                "model_kind": str(raw.get("model_kind") or ""),
                 "params": raw.get("params") if isinstance(raw.get("params"), dict) else {},
                 "model_capabilities": (
                     raw.get("model_capabilities")

@@ -1,7 +1,7 @@
 /**
  * LLM 模块配置安全存储封装。
  *
- * 所有类型（键为客户端模型类型名，如“对话模型”）的完整配置以单个
+ * 所有类型（键为服务端下发的稳定类型 ID，如 main_chat）的完整配置以单个
  * JSON 存储在 expo-secure-store（iOS Keychain / Android Keystore）中，
  * 一次写入即原子生效，避免多键顺序写入产生撕裂配置；也避免明文落在
  * AsyncStorage。
@@ -15,6 +15,7 @@ export interface LlmModuleConfig {
   provider: string;
   model: string;
   baseUrl: string;
+  modelKind: 'llm' | 'vlm' | '';
   apiKey: string;
   paramsText: string;
   modelCapabilities: {
@@ -36,6 +37,8 @@ function sanitize(value: unknown): LlmModuleConfig {
     provider: typeof raw.provider === 'string' ? raw.provider : '',
     model: typeof raw.model === 'string' ? raw.model : '',
     baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : '',
+    modelKind:
+      raw.modelKind === 'llm' || raw.modelKind === 'vlm' ? raw.modelKind : '',
     apiKey: typeof raw.apiKey === 'string' ? raw.apiKey : '',
     paramsText: typeof raw.paramsText === 'string' ? raw.paramsText : '',
     modelCapabilities: {
