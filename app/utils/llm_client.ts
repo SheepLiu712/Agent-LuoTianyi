@@ -10,22 +10,13 @@ interface LlmResult {
   usage: unknown;
 }
 
-export interface ClientModelTypeModel {
-  id: string;
-  can_enable_thinking: boolean;
-  can_use_json: boolean;
-}
-
-export interface ClientModelTypeProvider {
-  name: string;
-  base_url: string;
-  models: ClientModelTypeModel[];
-}
-
 export interface ClientModelType {
-  type: string;
+  id: string;
+  name: string;
   description: string;
-  providers: ClientModelTypeProvider[];
+  model_kind: 'llm' | 'vlm';
+  requires_json: boolean;
+  requires_thinking: boolean;
 }
 
 export interface ClientModelTypesResponse {
@@ -39,7 +30,7 @@ export async function fetchClientModelTypes(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const resp = await fetch(`${serverBaseUrl.replace(/\/+$/, '')}/llm/providers`, {
+    const resp = await fetch(`${serverBaseUrl.replace(/\/+$/, '')}/llm/client-model-types`, {
       signal: controller.signal,
     });
     if (!resp.ok) {
@@ -48,43 +39,14 @@ export async function fetchClientModelTypes(
     const data = (await resp.json()) as Record<string, unknown>;
     const list = Array.isArray(data?.types)
       ? (data.types as ClientModelType[]).filter(
-          (item) => item && typeof item.type === 'string',
+          (item) =>
+            item &&
+            typeof item.id === 'string' &&
+            typeof item.name === 'string' &&
+            (item.model_kind === 'llm' || item.model_kind === 'vlm'),
         )
       : [];
     return { types: list };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/**
- * 校验用：GET {base_url}/models，返回模型 id 列表。
- * 不发起任何对话请求，不消耗 Token；超时/非 2xx 抛异常。
- */
-export async function fetchModelsList(
-  baseUrl: string,
-  apiKey: string,
-  timeoutMs = 30000,
-): Promise<string[]> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const resp = await fetch(`${baseUrl.replace(/\/+$/, '')}/models`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: controller.signal,
-    });
-    if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}`);
-    }
-    const data = (await resp.json()) as { data?: unknown };
-    const raw = Array.isArray(data?.data) ? data.data : [];
-    return raw
-      .filter(
-        (item): item is { id?: unknown } =>
-          !!item && typeof item === 'object' && 'id' in (item as object),
-      )
-      .map((item) => String(item.id ?? ''))
-      .filter((id) => id.length > 0);
   } finally {
     clearTimeout(timer);
   }

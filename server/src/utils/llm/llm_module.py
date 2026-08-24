@@ -91,6 +91,7 @@ class LLMModule:
                     user_id,
                     module=self.name,
                     model_type=self.client_model_type,
+                    model_kind="llm",
                     prompt=prompt,
                     params=self.params,
                     enable_thinking=self.enable_thinking,

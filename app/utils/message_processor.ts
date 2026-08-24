@@ -7,6 +7,7 @@ import { AgentBinder } from './binder';
 import { addDebugTrace } from './debug_trace';
 import { buildChatCompletionsPayload, callLlmProvider } from './llm_client';
 import { getLlmModulesConfig, getModuleConfig } from './llm_key_storage';
+import { validateClientModelRequirements, validateJsonResponse } from './llm_requirements';
 import { NetworkClient } from './network_client';
 
 type SendKind =
@@ -481,13 +482,25 @@ export class MessageProcessor {
         }
       }
       const caps = cfg.modelCapabilities ?? {};
-      // 门控对齐服务端：模块绑定“想要” + 模型勾选“能”才附加参数
-      const useJson = Boolean(payload.use_json) && Boolean(caps.can_use_json);
+      const requiredKind = String(payload.model_kind || 'llm').trim().toLowerCase();
+      const useJson = Boolean(payload.use_json);
+      const enableThinking = Boolean(payload.enable_thinking);
+      const requirementError = validateClientModelRequirements({
+        requiredKind,
+        configuredKind: cfg.modelKind,
+        requiresJson: useJson,
+        requiresThinking: enableThinking,
+        canUseJson: Boolean(caps.can_use_json),
+        canEnableThinking: Boolean(caps.can_enable_thinking),
+      });
+      if (requirementError) {
+        return { request_id: requestId, error: requirementError };
+      }
       const body = buildChatCompletionsPayload({
         prompt: String(payload.prompt || ''),
         model: cfg.model,
         params: { ...((payload.params || {}) as Record<string, unknown>), ...cachedParams },
-        enableThinking: Boolean(caps.can_enable_thinking) && Boolean(payload.enable_thinking),
+        enableThinking,
         useJson,
         imageBase64: typeof payload.image_base64 === 'string' ? payload.image_base64 : undefined,
       });
@@ -496,6 +509,10 @@ export class MessageProcessor {
         apiKey: cfg.apiKey,
         body,
       });
+      const jsonError = validateJsonResponse(result.content, useJson);
+      if (jsonError) {
+        return { request_id: requestId, error: jsonError };
+      }
       return { request_id: requestId, content: result.content, usage: result.usage ?? null };
     } catch (error) {
       return { request_id: requestId, error: error instanceof Error ? error.message : String(error) };

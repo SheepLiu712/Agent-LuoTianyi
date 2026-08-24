@@ -44,21 +44,12 @@ def minimal_config(tmp_path: Path) -> dict:
             "prompt_manager": {"template_dir": str(prompt_dir)},
             "client_model_types": [
                 {
-                    "type": "对话模型",
+                    "id": "main_chat",
+                    "name": "对话模型",
                     "description": "测试类型",
-                    "providers": [
-                        {
-                            "name": "Test",
-                            "base_url": "http://example.invalid/v1",
-                            "models": [
-                                {
-                                    "id": "test",
-                                    "can_enable_thinking": False,
-                                    "can_use_json": True,
-                                }
-                            ],
-                        }
-                    ],
+                    "model_kind": "llm",
+                    "requires_json": False,
+                    "requires_thinking": False,
                 }
             ],
             "available_llms": {

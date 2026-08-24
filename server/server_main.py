@@ -221,11 +221,10 @@ async def get_public_key(system_runtime = Depends(get_runtime)):
     return {"public_key": system_runtime.user_interface.get_public_key_pem()}
 
 
-@app.get("/llm/providers")
-async def get_llm_providers(system_runtime = Depends(get_runtime)):
+@app.get("/llm/client-model-types")
+async def get_client_model_types(system_runtime = Depends(get_runtime)):
     """
-    获取客户端模型类型字典（type -> providers[base_url, models[勾选]]）。
-    字典由 llm_service.client_model_types 配置生成，不包含任何密钥。
+    获取客户端委托需求。服务商、Base URL、模型和密钥均由客户端自行配置。
     """
     return {"types": system_runtime.llm_service.get_client_model_types()}
 

@@ -99,60 +99,26 @@ class LLMService:
         }
 
     def get_client_model_types(self) -> list:
-        """返回客户端模型类型字典（类型 -> 服务商+baseURL -> 模型[含勾选]）。
-
-        直接由 llm_service.client_model_types 配置生成，作为客户端设置页
-        的唯一数据来源；不包含任何密钥。
-        """
+        """返回客户端委托需求；不包含服务商、地址、模型或密钥。"""
         raw = (self.config or {}).get("client_model_types") or []
         types = []
         for item in raw:
             if not isinstance(item, dict):
                 continue
-            type_name = str(item.get("type") or "").strip()
-            if not type_name:
+            type_id = str(item.get("id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            model_kind = str(item.get("model_kind") or "").strip().lower()
+            if not type_id or not name or model_kind not in {"llm", "vlm"}:
                 continue
-            description = str(item.get("description") or "").strip()
-            providers = []
-            for provider in item.get("providers") or []:
-                if not isinstance(provider, dict):
-                    continue
-                name = str(provider.get("name") or "").strip()
-                base_url = str(provider.get("base_url") or "").strip()
-                if not name or not base_url:
-                    continue
-                models = []
-                for model in provider.get("models") or []:
-                    if isinstance(model, dict):
-                        model_id = str(model.get("id") or "").strip()
-                        if not model_id:
-                            continue
-                        models.append(
-                            {
-                                "id": model_id,
-                                "can_enable_thinking": bool(
-                                    model.get("can_enable_thinking", False)
-                                ),
-                                "can_use_json": bool(model.get("can_use_json", False)),
-                            }
-                        )
-                    elif isinstance(model, str) and model.strip():
-                        models.append(
-                            {
-                                "id": model.strip(),
-                                "can_enable_thinking": False,
-                                "can_use_json": False,
-                            }
-                        )
-                providers.append(
-                    {
-                        "name": name,
-                        "base_url": base_url.rstrip("/"),
-                        "models": models,
-                    }
-                )
             types.append(
-                {"type": type_name, "description": description, "providers": providers}
+                {
+                    "id": type_id,
+                    "name": name,
+                    "description": str(item.get("description") or "").strip(),
+                    "model_kind": model_kind,
+                    "requires_json": bool(item.get("requires_json", False)),
+                    "requires_thinking": bool(item.get("requires_thinking", False)),
+                }
             )
         return types
 

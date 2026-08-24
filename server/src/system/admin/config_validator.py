@@ -195,7 +195,7 @@ class RuntimeConfigValidator:
         return result
 
     def _validate_client_model_types(self, config: dict[str, Any]) -> list[ValidationItem]:
-        """校验客户端模型类型配置：至少一个类型、三级完整、无空值、绑定引用存在。"""
+        """校验客户端委托需求及其模块绑定。"""
         result: list[ValidationItem] = []
         llm_service = config.get("llm_service", {})
         raw = llm_service.get("client_model_types")
@@ -205,119 +205,53 @@ class RuntimeConfigValidator:
                     "core",
                     "client_model_types",
                     "error",
-                    "未配置任何客户端模型类型（至少需要一个完整类型）",
+                    "未配置任何客户端模型类型（至少需要一个需求类型）",
                 )
             )
 
-        seen_types: set[str] = set()
-        type_names: set[str] = set()
+        seen_ids: set[str] = set()
+        type_requirements: dict[str, dict[str, Any]] = {}
         valid_type_count = 0
         for index, item in enumerate(raw or []):
             if not isinstance(item, dict):
                 continue
             label = f"client_model_types[{index}]"
-            type_name = str(item.get("type") or "").strip()
-            local_errors: list[ValidationItem] = []
-            if not type_name:
+            type_id = str(item.get("id") or "").strip()
+            name = str(item.get("name") or "").strip()
+            model_kind = str(item.get("model_kind") or "").strip().lower()
+            if not type_id:
                 result.append(
-                    ValidationItem("core", label, "error", "类型名不能为空")
+                    ValidationItem("core", label, "error", "类型 ID 不能为空")
                 )
                 continue
-            if type_name in seen_types:
+            if type_id in seen_ids:
                 result.append(
-                    ValidationItem("core", label, "error", f"类型名重复: {type_name}")
+                    ValidationItem("core", label, "error", f"类型 ID 重复: {type_id}")
                 )
                 continue
-            seen_types.add(type_name)
-            type_names.add(type_name)
-
-            providers = item.get("providers")
-            if not isinstance(providers, list) or not providers:
-                local_errors.append(
-                    ValidationItem(
-                        "core",
-                        f"client_model_types.{type_name}",
-                        "error",
-                        f"类型「{type_name}」至少需要一个服务商",
-                    )
-                )
-                result.extend(local_errors)
+            seen_ids.add(type_id)
+            if not name:
+                result.append(ValidationItem("core", label, "error", "显示名称不能为空"))
                 continue
-            seen_providers: set[str] = set()
-            total_models = 0
-            for pidx, provider in enumerate(providers):
-                if not isinstance(provider, dict):
-                    continue
-                plabel = f"client_model_types.{type_name}.providers[{pidx}]"
-                provider_name = str(provider.get("name") or "").strip()
-                base_url = str(provider.get("base_url") or "").strip()
-                missing: list[str] = []
-                if not provider_name:
-                    missing.append("服务商")
-                if not base_url:
-                    missing.append("base_url")
-                if provider_name and provider_name in seen_providers:
-                    local_errors.append(
-                        ValidationItem(
-                            "core",
-                            plabel,
-                            "error",
-                            f"服务商名重复: {provider_name}",
-                        )
-                    )
-                if provider_name:
-                    seen_providers.add(provider_name)
-                models = provider.get("models")
-                if not isinstance(models, list) or not models:
-                    missing.append("模型列表")
-                if missing:
-                    local_errors.append(
-                        ValidationItem(
-                            "core",
-                            plabel,
-                            "error",
-                            f"服务商「{provider_name or '?'}」缺少: {', '.join(missing)}",
-                        )
-                    )
-                    continue
-                total_models += len(models)
-                seen_models: set[str] = set()
-                for midx, model in enumerate(models):
-                    mlabel = f"{plabel}.models[{midx}]"
-                    if isinstance(model, dict):
-                        model_id = str(model.get("id") or "").strip()
-                    elif isinstance(model, str):
-                        model_id = model.strip()
-                    else:
-                        continue
-                    if not model_id:
-                        local_errors.append(
-                            ValidationItem("core", mlabel, "error", "模型 id 不能为空")
-                        )
-                    elif model_id in seen_models:
-                        local_errors.append(
-                            ValidationItem(
-                                "core",
-                                mlabel,
-                                "error",
-                                f"模型 id 重复: {model_id}",
-                            )
-                        )
-                    else:
-                        seen_models.add(model_id)
-
-            if local_errors:
-                result.extend(local_errors)
-            else:
-                valid_type_count += 1
+            if model_kind not in {"llm", "vlm"}:
                 result.append(
-                    ValidationItem(
-                        "core",
-                        f"client_model_types.{type_name}",
-                        "ok",
-                        f"已配置 {len(providers)} 个服务商 / {total_models} 个模型",
-                    )
+                    ValidationItem("core", label, "error", "模型类型必须是 llm 或 vlm")
                 )
+                continue
+            type_requirements[type_id] = {
+                "model_kind": model_kind,
+                "requires_json": bool(item.get("requires_json", False)),
+                "requires_thinking": bool(item.get("requires_thinking", False)),
+            }
+            valid_type_count += 1
+            result.append(
+                ValidationItem(
+                    "core",
+                    f"client_model_types.{type_id}",
+                    "ok",
+                    f"{model_kind.upper()} / JSON={'是' if item.get('requires_json') else '否'} / thinking={'是' if item.get('requires_thinking') else '否'}",
+                )
+            )
 
         if valid_type_count:
             result.append(
@@ -329,8 +263,11 @@ class RuntimeConfigValidator:
                 )
             )
 
-        for path, model_type in self._collect_client_model_bindings(config):
-            if model_type and model_type not in type_names:
+        for binding in self._collect_client_model_bindings(config):
+            path = binding["path"]
+            model_type = binding["model_type"]
+            requirement = type_requirements.get(model_type)
+            if model_type and requirement is None:
                 result.append(
                     ValidationItem(
                         "core",
@@ -339,13 +276,43 @@ class RuntimeConfigValidator:
                         f"客户端委托绑定引用不存在的类型: {model_type}",
                     )
                 )
+                continue
+            if not requirement:
+                continue
+            if requirement["model_kind"] != binding["kind"]:
+                result.append(
+                    ValidationItem(
+                        "core",
+                        f"binding.{path}",
+                        "error",
+                        f"客户端类型 {model_type} 是 {requirement['model_kind']}，不能绑定到 {binding['kind']} 模块",
+                    )
+                )
+            if binding["use_json"] and not requirement["requires_json"]:
+                result.append(
+                    ValidationItem(
+                        "core",
+                        f"binding.{path}",
+                        "error",
+                        f"模块要求 JSON，但客户端类型 {model_type} 未声明 requires_json",
+                    )
+                )
+            if binding["enable_thinking"] and not requirement["requires_thinking"]:
+                result.append(
+                    ValidationItem(
+                        "core",
+                        f"binding.{path}",
+                        "error",
+                        f"模块要求 thinking，但客户端类型 {model_type} 未声明 requires_thinking",
+                    )
+                )
         return result
 
     def _collect_client_model_bindings(
         self, config: dict[str, Any]
-    ) -> list[tuple[str, str]]:
+    ) -> list[dict[str, Any]]:
         """收集所有 llm/vlm 配置中声明的 client_model_type（路径, 类型名）。"""
-        bindings: list[tuple[str, str]] = []
+        bindings: list[dict[str, Any]] = []
 
         def walk(value: Any, path: str) -> None:
             if isinstance(value, dict):
@@ -354,7 +321,19 @@ class RuntimeConfigValidator:
                     if isinstance(cfg, dict):
                         model_type = str(cfg.get("client_model_type") or "").strip()
                         if model_type:
-                            bindings.append((f"{path}.{kind}", model_type))
+                            bindings.append(
+                                {
+                                    "path": f"{path}.{kind}",
+                                    "model_type": model_type,
+                                    "kind": kind,
+                                    "enable_thinking": bool(
+                                        value.get("enable_thinking", cfg.get("enable_thinking", False))
+                                    ),
+                                    "use_json": bool(
+                                        value.get("use_json", cfg.get("use_json", False))
+                                    ),
+                                }
+                            )
                 for key, item in value.items():
                     walk(item, f"{path}.{key}" if path else str(key))
             elif isinstance(value, list):

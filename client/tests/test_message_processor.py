@@ -12,22 +12,24 @@ def processor():
 @pytest.fixture
 def config(monkeypatch):
     modules = {
-        "对话模型": {
+        "main_chat": {
             "enabled": True,
             "api_key": "sk-text",
             "model": "text-model",
             "base_url": "https://text.example/v1",
+            "model_kind": "llm",
             "params": {"temperature": 0.2, "max_tokens": 2048},
             "model_capabilities": {
                 "can_enable_thinking": True,
                 "can_use_json": True,
             },
         },
-        "图片理解模型": {
+        "image_understanding": {
             "enabled": True,
             "api_key": "sk-vlm",
             "model": "vision-model",
             "base_url": "https://vision.example/v1",
+            "model_kind": "vlm",
             "params": {},
             "model_capabilities": {
                 "can_enable_thinking": False,
@@ -61,7 +63,8 @@ async def test_process_text_request_uses_saved_config_and_merges_params(processo
         {
             "request_id": "req-1",
             "prompt": "hello",
-            "type": "对话模型",
+            "type": "main_chat",
+            "model_kind": "llm",
             "params": {"temperature": 0.9, "top_p": 0.5},
         }
     )
@@ -87,7 +90,8 @@ async def test_process_image_request_uses_type_config(processor, config, monkeyp
         {
             "request_id": "req-image",
             "prompt": "describe",
-            "type": "图片理解模型",
+            "type": "image_understanding",
+            "model_kind": "vlm",
             "image_base64": "data:image/png;base64,AAA",
         }
     )
@@ -98,8 +102,8 @@ async def test_process_image_request_uses_type_config(processor, config, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_process_request_gates_json_by_capability(processor, config, monkeypatch):
-    config["对话模型"]["model_capabilities"]["can_use_json"] = False
+async def test_process_request_rejects_missing_json_capability(processor, config, monkeypatch):
+    config["main_chat"]["model_capabilities"]["can_use_json"] = False
     captured = {}
 
     async def fake_call(**kwargs):
@@ -111,19 +115,73 @@ async def test_process_request_gates_json_by_capability(processor, config, monke
         {
             "request_id": "req-json",
             "prompt": "hello",
-            "type": "对话模型",
+            "type": "main_chat",
+            "model_kind": "llm",
             "use_json": True,
             "enable_thinking": True,
         }
     )
 
-    assert result["content"] == "ok"
-    assert "response_format" not in captured["payload"]
-    assert "enable_thinking" in captured["payload"]
+    assert result["error"] == "当前客户端模型未声明 JSON 输出能力"
+    assert captured == {}
+
+
+@pytest.mark.asyncio
+async def test_process_request_rejects_invalid_json_response(processor, config, monkeypatch):
+    async def fake_call(**kwargs):
+        return {"content": "not-json", "usage": None}
+
+    monkeypatch.setattr(message_processor_module, "call_llm_api_async", fake_call)
+    result = await processor.process_llm_request(
+        {
+            "request_id": "req-invalid-json",
+            "prompt": "hello",
+            "type": "main_chat",
+            "model_kind": "llm",
+            "use_json": True,
+        }
+    )
+    assert result["error"] == "客户端模型未返回有效 JSON"
+
+
+@pytest.mark.asyncio
+async def test_process_request_rejects_model_kind_mismatch(processor, config, monkeypatch):
+    called = {}
+
+    async def fake_call(**kwargs):
+        called.update(kwargs)
+        return {"content": "ok", "usage": None}
+
+    monkeypatch.setattr(message_processor_module, "call_llm_api_async", fake_call)
+    result = await processor.process_llm_request(
+        {
+            "request_id": "req-kind",
+            "prompt": "hello",
+            "type": "main_chat",
+            "model_kind": "vlm",
+        }
+    )
+    assert "当前调用要求 VLM 模型" in result["error"]
+    assert called == {}
+
+
+@pytest.mark.asyncio
+async def test_process_request_rejects_missing_thinking_capability(processor, config, monkeypatch):
+    config["main_chat"]["model_capabilities"]["can_enable_thinking"] = False
+    result = await processor.process_llm_request(
+        {
+            "request_id": "req-thinking",
+            "prompt": "hello",
+            "type": "main_chat",
+            "model_kind": "llm",
+            "enable_thinking": True,
+        }
+    )
+    assert result["error"] == "当前客户端模型未声明 thinking 能力"
 
 
 def test_get_llm_mode_reads_both_module_states(processor, config):
-    assert processor.get_llm_mode() == {"types": ["对话模型", "图片理解模型"]}
+    assert processor.get_llm_mode() == {"types": ["main_chat", "image_understanding"]}
 
 
 @pytest.mark.asyncio
@@ -131,7 +189,7 @@ async def test_process_request_reports_missing_type_key(processor, monkeypatch):
     monkeypatch.setattr(
         message_processor_module.llm_key_storage,
         "get_module_config",
-        lambda key: {"enabled": True, "api_key": ""} if key == "图片理解模型" else {
+        lambda key: {"enabled": True, "api_key": ""} if key == "image_understanding" else {
             "enabled": True,
             "api_key": "sk-text",
             "model": "text-model",
@@ -142,7 +200,8 @@ async def test_process_request_reports_missing_type_key(processor, monkeypatch):
     result = await processor.process_llm_request(
         {
             "request_id": "req-image",
-            "type": "图片理解模型",
+            "type": "image_understanding",
+            "model_kind": "vlm",
             "image_base64": "data:image/png;base64,AAA",
         }
     )
@@ -152,7 +211,7 @@ async def test_process_request_reports_missing_type_key(processor, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_process_request_rejects_disabled_module(processor, config, monkeypatch):
-    config["对话模型"]["enabled"] = False
+    config["main_chat"]["enabled"] = False
     called = {}
 
     async def fake_call(**kwargs):
@@ -164,7 +223,8 @@ async def test_process_request_rejects_disabled_module(processor, config, monkey
         {
             "request_id": "req-disabled",
             "prompt": "hello",
-            "type": "对话模型",
+            "type": "main_chat",
+            "model_kind": "llm",
         }
     )
 

@@ -95,57 +95,28 @@ def apply_llm_config_draft(config: dict[str, Any], payload: dict[str, Any]) -> d
 
 
 def _normalize_client_model_types(value: Any) -> list[dict[str, Any]]:
-    """规范化客户端模型类型配置：去空白、去重、勾选默认 false。"""
+    """规范化客户端委托需求；服务端不保存任何客户端供应商或模型目录。"""
     if not isinstance(value, list):
         return []
     types: list[dict[str, Any]] = []
-    seen_types: set[str] = set()
+    seen_ids: set[str] = set()
     for item in value:
         if not isinstance(item, dict):
             continue
-        type_name = str(item.get("type") or "").strip()
-        if not type_name or type_name in seen_types:
+        type_id = str(item.get("id") or "").strip()
+        if not type_id or type_id in seen_ids:
             continue
-        seen_types.add(type_name)
-        description = str(item.get("description") or "").strip()
-        providers: list[dict[str, Any]] = []
-        seen_providers: set[str] = set()
-        for provider in item.get("providers") or []:
-            if not isinstance(provider, dict):
-                continue
-            name = str(provider.get("name") or "").strip()
-            if not name or name in seen_providers:
-                continue
-            seen_providers.add(name)
-            base_url = str(provider.get("base_url") or "").strip().rstrip("/")
-            models: list[dict[str, Any]] = []
-            seen_models: set[str] = set()
-            for model in provider.get("models") or []:
-                if isinstance(model, dict):
-                    model_id = str(model.get("id") or "").strip()
-                    can_thinking = bool(model.get("can_enable_thinking", False))
-                    can_json = bool(model.get("can_use_json", False))
-                elif isinstance(model, str):
-                    model_id = model.strip()
-                    can_thinking = False
-                    can_json = False
-                else:
-                    continue
-                if not model_id or model_id in seen_models:
-                    continue
-                seen_models.add(model_id)
-                models.append(
-                    {
-                        "id": model_id,
-                        "can_enable_thinking": can_thinking,
-                        "can_use_json": can_json,
-                    }
-                )
-            providers.append(
-                {"name": name, "base_url": base_url, "models": models}
-            )
+        seen_ids.add(type_id)
+        model_kind = str(item.get("model_kind") or "").strip().lower()
         types.append(
-            {"type": type_name, "description": description, "providers": providers}
+            {
+                "id": type_id,
+                "name": str(item.get("name") or "").strip(),
+                "description": str(item.get("description") or "").strip(),
+                "model_kind": model_kind if model_kind in {"llm", "vlm"} else "llm",
+                "requires_json": bool(item.get("requires_json", False)),
+                "requires_thinking": bool(item.get("requires_thinking", False)),
+            }
         )
     return types
 

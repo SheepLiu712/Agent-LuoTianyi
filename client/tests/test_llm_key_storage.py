@@ -163,6 +163,7 @@ def test_model_capabilities_roundtrip_in_module_config(monkeypatch, tmp_path):
                     "provider": "P",
                     "model": "M",
                     "base_url": "B",
+                    "model_kind": "llm",
                     "params": {},
                     "model_capabilities": {
                         "can_enable_thinking": True,
@@ -180,6 +181,7 @@ def test_model_capabilities_roundtrip_in_module_config(monkeypatch, tmp_path):
         "can_enable_thinking": True,
         "can_use_json": False,
     }
+    assert saved["model_kind"] == "llm"
     assert credential.get_server_url() == "https://srv"
 
 

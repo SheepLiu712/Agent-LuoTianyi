@@ -64,50 +64,36 @@ class TestLLMService:
         assert llm_service.prompt_manager is not None, "PromptManager 应该被正确初始化"
 
     def test_get_client_model_types_dictionary(self, llm_service: LLMService):
-        """客户端类型字典应由 client_model_types 配置生成，无 llm/vlm 字段，勾选内嵌。"""
+        """客户端需求只包含类型和能力约束，不包含模型目录。"""
         types = llm_service.get_client_model_types()
         assert isinstance(types, list)
         assert len(types) > 0
         for type_item in types:
-            assert type_item["type"]
+            assert type_item["id"]
+            assert type_item["name"]
             assert isinstance(type_item.get("description"), str)
-            assert isinstance(type_item["providers"], list)
-            assert len(type_item["providers"]) > 0
-            for provider in type_item["providers"]:
-                assert provider["name"]
-                assert provider["base_url"]
-                assert isinstance(provider["models"], list)
-                assert len(provider["models"]) > 0
-                for model in provider["models"]:
-                    assert model["id"]
-                    assert "can_enable_thinking" in model
-                    assert "can_use_json" in model
-                # 响应中不允许出现任何 llm/vlm 命名字段
-                for key in ("llm_models", "vlm_models", "llm", "vlm"):
-                    assert key not in provider
-                    assert key not in type_item
+            assert type_item["model_kind"] in {"llm", "vlm"}
+            assert isinstance(type_item["requires_json"], bool)
+            assert isinstance(type_item["requires_thinking"], bool)
+            assert "providers" not in type_item
+            assert "models" not in type_item
 
     def test_client_model_types_match_config(self, llm_service: LLMService):
-        """字典中的模型与服务商应与配置一致，勾选值透传。"""
+        """需求 ID、显示名与能力约束应从配置规范化透传。"""
         raw = (llm_service.config or {}).get("client_model_types") or []
         types = llm_service.get_client_model_types()
-        assert len(types) == len([x for x in raw if isinstance(x, dict) and str(x.get("type") or "").strip()])
+        assert len(types) == len([x for x in raw if isinstance(x, dict) and str(x.get("id") or "").strip()])
         raw_by_type = {
-            str(x.get("type") or "").strip(): x
+            str(x.get("id") or "").strip(): x
             for x in raw
-            if isinstance(x, dict) and str(x.get("type") or "").strip()
+            if isinstance(x, dict) and str(x.get("id") or "").strip()
         }
         for type_item in types:
-            raw_type = raw_by_type[type_item["type"]]
+            raw_type = raw_by_type[type_item["id"]]
+            assert type_item["name"] == str(raw_type.get("name") or "").strip()
             assert type_item["description"] == str(raw_type.get("description") or "").strip()
-            raw_provider = raw_type["providers"][0]
-            provider = type_item["providers"][0]
-            assert provider["name"] == str(raw_provider.get("name") or "").strip()
-            assert provider["base_url"] == str(raw_provider.get("base_url") or "").strip().rstrip("/")
-            assert provider["models"][0]["id"] == str(raw_provider["models"][0].get("id") or "").strip()
-            assert provider["models"][0]["can_use_json"] == bool(
-                raw_provider["models"][0].get("can_use_json", False)
-            )
+            assert type_item["model_kind"] == str(raw_type.get("model_kind") or "").lower()
+            assert type_item["requires_json"] == bool(raw_type.get("requires_json", False))
 
     def test_template_add_remove(self, llm_service: LLMService, sample_template, tmp_path):
         # 添加模板（从JSON数据）
