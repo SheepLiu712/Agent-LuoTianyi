@@ -118,27 +118,47 @@ export default function LlmSettingsScreen({
 
   return (
     <KeyboardAvoidingView
-      style={[styles.root, { backgroundColor: theme.root }]}
+      style={[styles.overlayRoot, { backgroundColor: theme.root }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={onClose} style={styles.headerButton}>
-          <Text style={[styles.headerButtonText, { color: theme.accent }]}>返回</Text>
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: theme.text }]}>LLM 模型设置</Text>
-        <TouchableOpacity onPress={() => void load()} style={styles.headerButton}>
-          <Text style={[styles.headerButtonText, { color: theme.accent }]}>刷新</Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + 24 }]}
-        keyboardShouldPersistTaps="handled"
+      <View
+        style={[
+          styles.container,
+          {
+            paddingTop: insets.top,
+            paddingBottom: insets.bottom,
+            backgroundColor: theme.root,
+          },
+        ]}
       >
-        <Text style={[styles.explanation, { color: theme.textMuted }]}>
-          服务端只规定调用所需的 LLM/VLM、JSON 和 thinking 能力。服务商、Base URL、模型和
-          Key 完全由你配置，Key 只保存在本机。
-        </Text>
+        <View
+          style={[
+            styles.header,
+            { backgroundColor: theme.surface, borderBottomColor: theme.border },
+          ]}
+        >
+          <TouchableOpacity onPress={onClose} style={styles.headerButton} activeOpacity={0.72}>
+            <Text style={[styles.headerButtonText, { color: theme.accentText }]}>返回</Text>
+          </TouchableOpacity>
+          <Text style={[styles.title, { color: theme.text }]}>LLM 模型设置</Text>
+          <TouchableOpacity
+            onPress={() => void load()}
+            style={[styles.headerButton, styles.headerButtonRight]}
+            activeOpacity={0.72}
+          >
+            <Text style={[styles.headerButtonText, { color: theme.accentText }]}>刷新</Text>
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={[styles.explanation, { color: theme.textMuted }]}>
+            服务端只规定调用所需的 LLM/VLM、JSON 和 thinking 能力。服务商、Base URL、模型和
+            Key 完全由你配置，Key 只保存在本机。
+          </Text>
 
         {loading && <ActivityIndicator size="large" color={theme.accent} />}
         {!!error && (
@@ -235,25 +255,39 @@ export default function LlmSettingsScreen({
           );
         })}
 
-        <TouchableOpacity
-          disabled={loading || saving || types.length === 0}
-          onPress={() => void save()}
-          style={[styles.saveButton, { backgroundColor: theme.accent }, (loading || saving) && styles.disabled]}
-        >
-          {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>保存</Text>}
-        </TouchableOpacity>
-      </ScrollView>
+          <TouchableOpacity
+            disabled={loading || saving || types.length === 0}
+            onPress={() => void save()}
+            style={[styles.saveButton, { backgroundColor: theme.accent }, (loading || saving) && styles.disabled]}
+          >
+            {saving ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>保存</Text>}
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingBottom: 10 },
-  headerButton: { minWidth: 58, padding: 8 },
-  headerButtonText: { fontSize: 15 },
-  title: { flex: 1, textAlign: 'center', fontSize: 19, fontWeight: '600' },
-  content: { paddingHorizontal: 16, gap: 14 },
+  overlayRoot: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 130,
+  },
+  container: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  headerButton: { minWidth: 58, paddingVertical: 6 },
+  headerButtonRight: { alignItems: 'flex-end' },
+  headerButtonText: { fontSize: 16, fontWeight: '600' },
+  title: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '600' },
+  scrollView: { flex: 1 },
+  content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 24, gap: 14 },
   explanation: { fontSize: 13, lineHeight: 19 },
   errorBox: { backgroundColor: '#FFECEC', borderRadius: 8, padding: 12 },
   errorText: { color: '#C62828' },
