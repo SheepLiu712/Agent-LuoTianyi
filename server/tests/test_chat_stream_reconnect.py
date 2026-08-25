@@ -48,3 +48,46 @@ async def test_stale_disconnect_does_not_drop_replacement_connection():
     assert replacement_stream.connection_lost_time is None
     assert other_character_stream.ws_connection is None
     assert other_character_stream.connection_lost_time is not None
+
+
+@pytest.mark.asyncio
+async def test_replacement_dismisses_old_connection_with_session_replaced():
+    """新连接接管聊天流时，旧连接应收到 auth_error(SESSION_REPLACED) 并被关闭。"""
+    sent_events: list[dict] = []
+    closed: list[bool] = []
+
+    class FakeWebsocket:
+        async def send_json(self, event):
+            sent_events.append(event)
+
+        async def close(self):
+            closed.append(True)
+
+    old_connection = SimpleNamespace(
+        user_name="tester", user_uuid="user-1", websocket=FakeWebsocket()
+    )
+    replacement = SimpleNamespace(
+        user_name="tester", user_uuid="user-1", websocket=object()
+    )
+    stream = ChatStream({}, old_connection, character_id="luotianyi")
+    stream.system_runtime = SimpleNamespace(
+        websocket_service=SimpleNamespace(_make_event=None)
+    )
+
+    def make_event(event_type, payload, reply_to=None):
+        return {"type": event_type.value if hasattr(event_type, "value") else event_type,
+                "payload": payload}
+
+    stream.system_runtime.websocket_service._make_event = make_event
+
+    async def already_started():
+        return None
+
+    stream.start_if_needed = already_started
+    await stream.reconnect(replacement)
+
+    assert stream.ws_connection is replacement
+    assert len(sent_events) == 1
+    assert sent_events[0]["type"] == "auth_error"
+    assert sent_events[0]["payload"]["code"] == "SESSION_REPLACED"
+    assert closed == [True]
