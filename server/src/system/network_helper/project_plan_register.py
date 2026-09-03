@@ -12,6 +12,7 @@ def register_project_plan(app: "FastAPI", current_dir: str) -> None:
     project_plan_path = os.path.join(
         os.path.dirname(current_dir),
         "docs",
+        "项目说明",
         "项目计划书",
         "AgentLuo项目计划书.html",
     )
