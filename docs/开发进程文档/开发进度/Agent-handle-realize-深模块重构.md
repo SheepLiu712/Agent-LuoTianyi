@@ -82,7 +82,7 @@
 - [ ] `WorldStage`、world 事实投递和现有 WorldRuntime/WorldClock 的迁移已经拆为工单，但具体实现仍未开始；
 - [ ] 各 ReflectionPolicy 的上下文阈值、证据准入和调度频率尚未选择实现参数；
 - [ ] 各 typed revision 与现有数据库/任务记录的映射尚未验证；
-- [ ] 当前 GitHub token 可以创建 Issue，但不能管理仓库标签；`ready-for-agent` 只写在 Issue 正文，尚未创建或应用同名标签；
+- [x] 已创建 `ready-for-agent` 仓库标签，并应用到 #60—#89 全部实现工单；
 - [ ] `WorldClock` 九类链路来自当前源码和配置的静态盘点，尚未逐项运行真实网络、LLM、唱歌模型或数据库任务；
 - [ ] 当前歌曲抓取与学歌任务仍直接写数据、刷新库或发布动态，与目标 Stimulus 边界不同；
 - [ ] 当前 `Stimulus.payload` 和 `PlannedAction.payload` 仍是任意 Mapping，目标强类型联合尚未实现；
@@ -90,4 +90,4 @@
 
 ## 下一步
 
-将本轮 SPEC、工单底稿、领域术语和进度提交并推送到 `refactor/agent`。随后可并行开始无 blocker 的 #60（handle 输入与结算领域契约）和 #62（冻结 WorldClock 基线）；每张工单仍需独立遵守 TDD 与小 PR 门禁。
+SPEC、工单底稿、领域术语和进度已提交并推送到 `refactor/agent`。下一步可并行开始无 blocker 的 #60（handle 输入与结算领域契约）和 #62（冻结 WorldClock 基线）；每张工单仍需独立遵守 TDD 与小 PR 门禁。
