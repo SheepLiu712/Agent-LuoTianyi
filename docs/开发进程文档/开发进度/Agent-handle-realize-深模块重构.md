@@ -1,78 +1,93 @@
 # Agent `handle_stimulus / realize_action_plan` 深模块重构进度
 
-> 最后更新：2026-09-03
+> 最后更新：2026-09-04
 >
-> 当前阶段：需求与 interface 方向评审
+> 当前阶段：实现工单已发布，等待首批开发
 >
 > 总体状态：进行中
 
 ## 对应文档
 
 - PRD：[`Agent-handle-realize-深模块重构.md`](../需求说明（PRD）/Agent-handle-realize-深模块重构.md)
+- interface spec：[`Agent-handle-realize-深模块重构.md`](../设计文档/Agent-handle-realize-深模块重构.md)
+- 本地工单草案：[`issues/`](../../../.scratch/agent-handle-realize/issues/)
 - 当前 Agent interface：[`agent/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/agent/README.md)
-- 相关电话设计：[`v0.4.0-电话功能设计.md`](../需求说明（PRD）/v0.4.0-电话功能设计.md)
 
-## 当前 PR 范围
+## 本轮目标与范围
 
-- 按新讨论修订 Agent PRD；
-- 将两个目标 interface 收敛为 `handle_stimulus` 和 `realize_action_plan`；
-- 将 Recall 及其完成事件收回 Agent 内部；
-- 将 `handle_stimulus` 改为通过 `ActionPlanSink` 输出零到多个完整计划，并在结束时返回 `HandlingReport`；
-- 明确 Chat、Call、Toy、CharacterActivity 是不同 stage 实现，只共享 Agent 调用和结算约定；
-- 拆分 Realtime 媒体上行与 Agent 语义回合两个窄端口；
-- 补齐 VCPedia 新歌发现与学会歌曲的知识、记忆和日记链路；
-- 明确 `AgentOutputSink` 如何把通道无关输出路由到聊天、电话和玩偶 Adapter；
-- 明确小 PR 迁移的最终完成条件是不再保留绕过 Agent 的旧角色决策路径；
-- 增加每日规划、活动中刺激、电话和玩偶场景；
-- 同步领域术语；
-- 不修改 interface spec、生产代码和测试。
+- 把已形成的 Agent 深模块 PRD 转为可评审 interface spec，并按首轮评审意见收窄当前版本；
+- 分开描述 Agent 对外行为与 Agent 内部 Handler / Skill / Store / Ledger / Reflection 行为；
+- 明确定义 `PlanEmitter`、`InteractionContextStore`、Request/Execution Ledger、ReflectionCoordinator 和 ReflectionHandler 的职责及交互；
+- 为 `handle_stimulus(request, plan_sink)` 与 `realize_action_plan(plan, execution_context, output_sink)` 给出完整类型提示；
+- 为每个 Stimulus、InteractionSnapshot、Action、AgentOutput、报告和内部 job 字段补充类型、含义与约束；
+- 把用户打字、打开/关闭图片选择页面定义为影响全部 pending stimuli 正式处理时点的协调刺激；
+- 讨论并锁定歌曲抓取、模型处理、Agent 知识/记忆写入和跨进程学歌任务之间的边界；
+- 区分 `world`、`world_clock` 与长期 `WorldStage`，并区分 world 领域定时和 stage 交互定时；
+- 让 HandlingReport 分别表达 request 生命周期与逐 ID pending settlement，避免把“trigger 已处理”和“全部 pending 已消费”混为一谈；
+- 用各 owner 的强类型 revision 替代含义不明的全局 StateVersion，并明确 stage 拥有打断决定、Agent 只协作取消；
+- 把 ledger 定位为幂等事实账本，并明确 Reflection 由 settlement 时点唤醒、由 ReflectionPolicy 判断条件；
+- 增加最终架构收束和当前行为兼容的验收标准，详细列出聊天信号、触摸、登录主动发言和全部 `WorldClock` 注册链路；
+- 把整体重构拆为 30 个适合独立上下文和小 PR 的 expand—migrate—contract—accept 工单，写明真实 blocker、验收、验证和不确定时的参考顺序；
+- 工单先保存为独立 Markdown，经用户确认后发布为 GitHub [#60](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/60) 至 [#89](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/89)。
+
+本轮只修改 SPEC、本地工单和进度文档，并创建对应 GitHub Issue；不修改产品代码、测试、客户端/网络协议或现有运行行为。
 
 ## 已完成
 
-- [x] 当前调用链静态盘点；
-- [x] Agent、subconscious、capabilities、stage、Adapter、world 的职责划分；
-- [x] `ActionPlanSink` 与最终 `HandlingReport` 的双通道结果设计；
-- [x] stage 家族及共享协调约定，不建立统一 BaseStage；
-- [x] InteractionSnapshot 的 Chat、Call、Toy、CharacterActivity 强类型变体；
-- [x] Recall 和三类上下文的所有权设计；
-- [x] 慢 Recall 在同一次 handle 内续程，不生成 `RecallCompleted` Stimulus；
-- [x] 临时计划和正式计划作为两个完整 ActionPlan 的渐进回复设计；
-- [x] handle/realize 分别取消、迟到 Recall 丢弃和多计划结算规则；
-- [x] 交互等待与持久日程的区分；
-- [x] 每日规划和活动中刺激场景；
-- [x] 电话开始、语音、打断、语音结束和通话结束场景；
-- [x] Realtime 原始媒体与语义回合的双端口设计；
-- [x] 识别并记录现有 CallStream 处理供应商语义、绕过 Agent 的架构冲突；
-- [x] 玩偶振动与语音场景；
-- [x] stage-bound `AgentOutputSink` 与各通道 Adapter 的路由设计；
-- [x] `SongKnowledgeDiscovered`、`SongLearned` 及角色歌曲记忆落库边界；
-- [x] 渐进迁移不保留永久双路径的完成标准；
-- [x] PRD 渐进计划修订版。
+- [x] Agent、stage、Adapter、world、subconscious、capabilities 和 AgentRuntime 的职责划分；
+- [x] `handle_stimulus` / `ActionPlanSink` / `HandlingReport` 的外部行为与完整类型签名；
+- [x] `realize_action_plan` / `AgentOutputSink` / `ExecutionReport` 的外部行为与完整类型签名；
+- [x] PlanEmitter 的 draft、身份、ordinal、Request Ledger 和外部 sink 协作设计；
+- [x] InteractionContextStore 的隔离键、临时字段、revision 更新、TTL 和清理边界；
+- [x] Request Ledger 与 Execution Ledger 的不同职责、记录内容和 ReflectionCoordinator 读取关系；
+- [x] ReflectionHandler 的输入、输出、允许调用的 Skill，以及不得输出/递归 handle 的约束；
+- [x] Chat、Toy、World 三种当前版本 InteractionSnapshot；
+- [x] 所有当前版本 Stimulus 变体的语义、字段类型、字段用途和合法 Interaction；
+- [x] `UserTyping`、`ImageSelectionOpened`、`ImageSelectionClosed` 对 pending 等待、旧 handle 取消和重评的约定；
+- [x] 所有当前版本 Action、AgentOutput 和报告字段的语义、类型与约束；
+- [x] `ChangeExpression` 改为 `Say` / `Sing` 内嵌值对象，不再作为独立 Action；
+- [x] 移除 `PerformHaptic` / `HAPTIC`，明确触摸反馈仍使用音频、文字和表情；
+- [x] `RecordIntentionalMemory`、`UpsertSongKnowledge`、`RecordLearnedSong` 改为 Agent 内部状态变更 Skill；
+- [x] `RequestSongLearning` 保留为需经 realize 与 Execution Ledger 结算的持久外部长任务 Action；
+- [x] 歌曲抓取/机械模型处理在 world/capability，稳定候选与完成事实再触发 Stimulus，角色意义判断和知识接纳留在 Agent；
+- [x] 自动记忆、上下文压缩、用户画像和重要日期检查的内部异步 Reflection 设计；
+- [x] `world` 作为外部事实/效果所有者、`world_clock` 作为时间驱动、`WorldStage` 作为人格—箱庭持续交互协调器的边界；
+- [x] world 领域定时与 stage pending 重评定时的不同产生和路由链；
+- [x] Request/Execution Ledger 的幂等用途、被动证据职责，以及不直接触发 Reflection 的约束；
+- [x] façade settlement notice、ReflectionPolicy 和上下文长度触发压缩之间的协作；
+- [x] stage 打断权、Agent cancellation 协作、plan sink revision 校验和 output/Adapter 即时通道控制的分工；
+- [x] `HandlingReport.request_status` 与 considered/consumed/retained pending IDs 的正交结算语义；
+- [x] `interaction_revision`、`activity_revision`、`schedule_revision` 和 `context_revision` 的所有权与校验边界；
+- [x] Agent 只保留两个业务 interface、内部类型不导出、旧 AgentRuntime/CharacterRuntime/capability 旁路最终删除的架构验收硬门槛；
+- [x] 文字、图片、打字、图片选择、普通超时、旧判断作废和部分 pending 结算的当前聊天行为基线；
+- [x] 触摸预制音频、表情恢复、瞬时非持久输出、快速路径失败回退和触摸合流行为基线；
+- [x] 首次登录、长时未登录、当天首次登录、同日重复登录和通知 claim 的主动发言行为基线；
+- [x] 当前 `WorldClock` 九类注册任务的调度、实际动作、失败/跳过语义和目标收束路径；
+- [x] `Say.prepared_audio_ref` 与 `OutputDelivery`，用于表达触摸瞬时反应和首次登录预制音频，而不增加独立 HAPTIC 或表情 Action；
+- [x] Call/Realtime、`UserJoinedActivity`、`ActivityInterrupted` 和原 5.5 相邻接口移出当前版本；
+- [x] 30 个独立 Markdown 工单草案，覆盖强类型协议、Agent 内核、聊天、Reflection、触摸、主动发言、Toy、WorldStage、九类 WorldClock 链路、旧路径删除和最终验收；
+- [x] 每个工单写明 `What to build`、blocker、SPEC 优先的决策规则、范围、验收、测试证据、明确不包含和交接要求；
+- [x] SPEC 增加工单执行约定、TDD/小 PR 要求、expand—migrate—contract 顺序、完整依赖表和可立即开始的 frontier；
+- [x] 用户确认无需继续拆分，30 个工单已按依赖顺序发布为 GitHub #60—#89，Issue 内 Blocked by 使用真实编号；
+- [x] 本轮 SPEC 工单化修订和本进度更新。
 
-## 尚未开始
+## 待评审与未验证
 
-- [ ] PRD 评审和确认；
-- [ ] Agent、stage、domain、AgentRuntime、Realtime 双端口和输出 sink 的详细 interface spec；
-- [ ] 每种 Stimulus 和 Action 的强类型字段；
-- [ ] interface 契约测试；
-- [ ] 产品实现；
-- [ ] 旧聊天和 world 路径迁移；
-- [ ] 旧代理方法、内部类型泄漏和直接能力调用清理。
+- [ ] interface spec 尚未完成用户评审，不能据此开始产品实现；
+- [ ] `ImageSelectionClosed` 与图片消息到达顺序需要在后续测试/实现讨论中确认；关闭信号本身不携带图片内容；
+- [ ] `RequestSongLearning` 的持久任务 Adapter、任务状态和完成 Stimulus 事务边界尚未选择具体实现；
+- [ ] Agent 自有状态变更与 Reflection 之间的 evidence 去重键、revision 冲突策略只有目标语义，尚未落实；
+- [ ] Reflection 的可靠接受、至少一次投递和 shutdown 保留策略只有目标契约，尚未选择具体 Adapter；
+- [ ] InteractionContextStore、Request Ledger、Execution Ledger 尚未实现，多用户/多 interaction 隔离仍是实现风险；
+- [ ] `WorldStage`、world 事实投递和现有 WorldRuntime/WorldClock 的迁移已经拆为工单，但具体实现仍未开始；
+- [ ] 各 ReflectionPolicy 的上下文阈值、证据准入和调度频率尚未选择实现参数；
+- [ ] 各 typed revision 与现有数据库/任务记录的映射尚未验证；
+- [ ] 当前 GitHub token 可以创建 Issue，但不能管理仓库标签；`ready-for-agent` 只写在 Issue 正文，尚未创建或应用同名标签；
+- [ ] `WorldClock` 九类链路来自当前源码和配置的静态盘点，尚未逐项运行真实网络、LLM、唱歌模型或数据库任务；
+- [ ] 当前歌曲抓取与学歌任务仍直接写数据、刷新库或发布动态，与目标 Stimulus 边界不同；
+- [ ] 当前 `Stimulus.payload` 和 `PlannedAction.payload` 仍是任意 Mapping，目标强类型联合尚未实现；
+- [ ] 本轮未运行 pytest、真实 LLM、TTS、设备或生产环境验证；只进行文档静态检查。
 
-## 当前风险
+## 下一步
 
-- 当前 `Stimulus.payload` 和 `PlannedAction.payload` 仍是任意 Mapping，不能直接作为目标强类型协议。
-- 当前 stage 直接依赖 `agent.main_chat` 的回复类型，并直接执行 speech/singing。
-- Agent 是每角色共享实例，交互认知上下文若没有 interaction 隔离会产生串话风险。
-- stage 尚无同时管理 handle 生命周期、ActionPlanSink 队列和 realization worker 的机制。
-- 多计划流程若没有稳定 plan ordinal、背压和 sink 幂等，会重复执行或产生乱序。
-- 电话打断和通话关闭必须由 stage 实时执行，不能等待 Agent 或 LLM。
-- 目标 Realtime 供应商是否能由同一会话稳定实现媒体写入与语义回合两个端口尚未通过契约测试验证，电话实现前必须针对目标 Qwen 接口验证。
-- 现有电话详细设计及实现方向仍由 CallStream 消费供应商语义输出，容易形成绕过 Agent 的第二套回复心智，开始电话迁移前必须单独修订。
-- 当前 VCPedia 新歌抓取和歌曲学习任务仍直接写数据库或触发动态；迁移前要先区分运行数据与角色知识/经历。
-- Chat、Call、Toy 的 AgentOutputSink 尚未形成 interface spec，关闭通道、背压和不支持输出的失败规则还没有代码保障。
-- 持久 Action 没有先定义幂等键时，重试会重复写记忆、动态或日程。
-
-## 下一 PR
-
-PRD 评审后，只提交 interface spec 和进度更新：固定 `HandleStimulusRequest`、四种 `InteractionSnapshot`、`ActionPlanSink`、`HandlingReport`、`ActionPlan`、`ExecutionContext`、各 stage 的 `AgentOutputSink`、`AgentOutput`、`ExecutionReport`、`RealtimeMediaIngress`、`RealtimeTurnPort`，以及 `SongKnowledgeDiscovered` / `SongLearned` 和对应 Action 的字段。该 spec 还要明确多计划顺序、背压、通道路由、关闭与拒绝、取消、迟到 Recall、刺激结算和 Realtime 会话生命周期。该 PR 不写测试和实现。
+将本轮 SPEC、工单底稿、领域术语和进度提交并推送到 `refactor/agent`。随后可并行开始无 blocker 的 #60（handle 输入与结算领域契约）和 #62（冻结 WorldClock 基线）；每张工单仍需独立遵守 TDD 与小 PR 门禁。
