@@ -1038,7 +1038,7 @@ expand 阶段允许目标 interface 与旧实现暂时并存，但新调用方�
 
 ## 10. 工单拆分与依赖
 
-下面的 Markdown 底稿位于 `.scratch/agent-handle-realize/issues/`。每个文件都包含来源优先级、范围、验收、验证、明确不包含和交接要求，并记录对应 GitHub Issue。用户已确认粒度与 blocker，30 个工单已一对一发布为 [#60](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/60) 至 [#89](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/89)：本地编号 `NN` 对应 Issue `#(NN + 59)`，Issue 正文中的 Blocked by 使用真实 Issue 编号。文件和 Issue 正文均标记 `ready-for-agent`；由于当前 GitHub token 无标签管理权限，仓库尚无同名远程标签，不能把正文状态误读为标签已经应用。
+下面的 Markdown 底稿位于 `.scratch/agent-handle-realize/issues/`。每个文件都包含来源优先级、范围、验收、验证、明确不包含和交接要求，并记录对应 GitHub Issue。用户已确认粒度与 blocker，30 个工单已一对一发布为 [#60](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/60) 至 [#89](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/89)：本地编号 `NN` 对应 Issue `#(NN + 59)`，Issue 正文中的 Blocked by 使用真实 Issue 编号。所有 Issue 均已应用 `ready-for-agent` 标签，并在正文中保留同名状态，供开发协作和自动化筛选使用。
 
 | 工单 | Blocked by | 独立交付结果 |
 | --- | --- | --- |
