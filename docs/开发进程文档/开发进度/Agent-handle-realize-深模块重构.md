@@ -16,7 +16,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `test/agent-dm-01-text-message-validation`，目标 `refactor/agent`，Red-only Draft）
+- PR：[#106](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/106)（分支 `test/agent-dm-01-text-message-validation`，目标 `refactor/agent`，Red-only Draft，等待评审）
 - 目标：从 `src.domain.agent` 公开接口锁定 `TextMessage` 持久化策略与生命周期不符合唯一矩阵时的稳定构造失败。
 - 范围：参数化覆盖 `NONE/False`、`EPHEMERAL_ONLY/True` 和 `CONVERSATION_AND_MEMORY_CANDIDATE/True` 三个代表性非法组合；断言直接构造抛出 `InvalidStimulusError`，且只读取稳定 `code="CONTRACT_INVALID_STIMULUS"` 与 `retryable=False`。
 - 明确不包含：不写产品实现；不测试 schema、目标角色、字段类型、source、其他 Stimulus、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
