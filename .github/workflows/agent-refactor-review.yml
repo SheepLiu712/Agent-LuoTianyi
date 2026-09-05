@@ -36,6 +36,7 @@ concurrency:
     agent-refactor-review-${{
       github.event.pull_request.number ||
       github.event.issue.number ||
+      github.event.check_suite.pull_requests[0].number ||
       inputs.pr_number ||
       github.run_id
     }}
@@ -210,10 +211,10 @@ jobs:
     outputs:
       final_message: ${{ steps.codex.outputs.final-message }}
     steps:
-      - name: Check out the candidate merge commit
+      - name: Check out the candidate head commit
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: refs/pull/${{ needs.resolve.outputs.pr_number }}/merge
+          ref: ${{ needs.resolve.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -232,6 +233,7 @@ jobs:
       - name: Build immutable review context
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
+          EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
           REVIEW_EVENT_KEY: ${{ needs.resolve.outputs.event_key }}
@@ -278,6 +280,9 @@ jobs:
                 per_page: 100,
               }),
             ]);
+            if (pullResponse.data.head.sha !== process.env.EXPECTED_HEAD_SHA) {
+              throw new Error("The pull request head changed after event resolution.");
+            }
             const issues = [];
             for (const issueNumber of issueNumbers) {
               const {data: issue} = await github.rest.issues.get({
@@ -529,7 +534,7 @@ jobs:
               const pendingCheck = otherChecks.find((check) => check.status !== "completed");
               const failedCheck = otherChecks.find((check) =>
                 check.status === "completed" &&
-                !new Set(["success", "neutral"]).has(check.conclusion),
+                !new Set(["success", "neutral", "skipped"]).has(check.conclusion),
               );
               const currentHeadChangeRequest = reviews.find((review) =>
                 review.user?.type !== "Bot" &&

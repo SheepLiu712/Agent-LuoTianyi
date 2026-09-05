@@ -32,13 +32,13 @@ change requests before it performs any GitHub write.
 Verdicts have these effects:
 
 - `PASS`: approve and squash merge only when every recorded test is `PASS`, all
-  other checks have completed successfully or neutrally, and no human has
-  requested changes on the current head;
+  other checks have completed successfully, neutrally, or as skipped, and no
+  human has requested changes on the current head;
 - `CHANGES_REQUESTED`: publish a request-changes review and do not merge;
 - `WAITING`: publish a comment describing the external condition and do not
   merge. Completion of another check suite creates a fresh review event;
-- `SKIPPED`: publish a comment explaining why review is not applicable and do
-  not merge.
+- `BLOCKED`: publish a comment naming the unavailable external dependency or
+  infrastructure and do not merge.
 
 ## Acceptance checks
 
