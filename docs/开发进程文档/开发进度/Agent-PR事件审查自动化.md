@@ -8,7 +8,7 @@
 
 ## 当前行为切片
 
-- 分支：`codex/revise-development-pr-flow`，目标 `dev`，PR 待创建。
+- PR：[#108](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/108)（分支 `codex/revise-development-pr-flow`，目标 `dev`，Ready，等待其他开发者审核）。
 - 目标：把 SPEC、Red、Green 改为同一行为切片分支内的 commit 与作者自审门禁；完整 Green 候选才提交 PR，由其他开发者审核。管理员在评审时自行决定是否手动使用 AI，不再由 PR 事件自动审查或合并。
 - 范围：修订开发守则及 `spec-tdd-pr-guard`；删除 `agent-refactor-review.yml`、专用 `.github/codex` 审查 bundle 和只服务该流程的 actionlint runner 标签配置；停用并注销本机专用 runner、计划任务和仓库开关变量。
 - 明确不包含：不修改 Agent 产品代码、#107 的测试或实现、仓库通用 Actions 权限、其他 runner 和其他 Codex 配置。
