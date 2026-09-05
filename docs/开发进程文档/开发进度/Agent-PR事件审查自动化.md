@@ -2,9 +2,9 @@
 
 关联工单：[#93](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/93)
 
-> 当前阶段：SPEC
+> 当前阶段：GREEN
 >
-> 当前状态：退役中
+> 当前状态：退役候选完成，等待 PR 审核
 
 ## 当前行为切片
 
@@ -13,7 +13,8 @@
 - 范围：修订开发守则及 `spec-tdd-pr-guard`；删除 `agent-refactor-review.yml`、专用 `.github/codex` 审查 bundle 和只服务该流程的 actionlint runner 标签配置；停用并注销本机专用 runner、计划任务和仓库开关变量。
 - 明确不包含：不修改 Agent 产品代码、#107 的测试或实现、仓库通用 Actions 权限、其他 runner 和其他 Codex 配置。
 - Red：不适用。本切片删除废弃流程，不为“文件应不存在”制造测试；使用仓库文件清单、GitHub runner/变量状态和本机计划任务/进程状态验证。
-- 当前事实：仓库变量已从 `true` 置为 `false`；本机计划任务和专用 runner 进程已停止，GitHub runner 注册及仓库变量已删除。仓库内触发文件和本地 runner 缓存目录仍待清理。
+- Green：当前分支已删除仓库内自动触发 workflow、专用审查 bundle 和只服务该 runner 的 actionlint 配置；仓库变量、本机计划任务、runner 进程和 GitHub runner 注册均已删除。
+- 作者自审与验证：仓库工作树已无 `.github` 审查文件，排除本历史进度文档后定向扫描未发现 `pull_request_target`、`AGENT_PR_REVIEW_ENABLED`、专用 runner 或 workflow 引用；更新后的 `spec-tdd-pr-guard` 通过 Skill validator，三份中文文档通过严格 UTF-8 解码，`git diff --check` 通过。本机 runner 缓存目录已失去启动入口和远端注册，但当前命令策略阻止递归删除，作为不影响运行的残留明确记录。
 
 ## 退役后的目标
 
@@ -62,11 +63,12 @@ PR 创建、push、编辑、评论、Ready 或 review 事件不再触发 AI 审�
 
 静态配置、本地策略以及根 PR 的真实审查/拒绝合并链路已经通过；尚未验证的真实事件、PASS 合并和堆叠 PR 场景继续列在下节。
 
-## 待完成
+## 退役验证与残留
 
-- 验证 Windows 重新登录后 runner 能由计划任务自动恢复在线；计划任务已经配置，本轮不为验证而重启用户会话。
-- 下一次受信任开发者对相关 PR 提交 commit、Ready/Reopen、review 或评论回复时，确认对应事件会自动产生新运行；本轮已通过同一入口的 `workflow_dispatch` 验证完整执行链。
-- 仍需以真实堆叠子 PR 验证父链增量审查和“子 PR squash 到直接父分支”路径；当前只完成根 PR 的审查与拒绝合并路径。
-- 首个无阻塞根 PR 或堆叠子 PR 出现后，验证 PASS 会在发布前重新检查 head/base/父批准，并只合并到规则允许的目标。
-
-当前功能状态为“已启用并通过根 PR 审查/拒绝合并链路验收”；上列自动重启、真实事件和 PASS/堆叠合并路径仍需随下一批实际 PR 验证，不能提前写成通过。
+- GitHub 仓库变量 `AGENT_PR_REVIEW_ENABLED`：已删除。
+- GitHub self-hosted runner `desktop-agent-luotianyi-review`：已从仓库注销，注销前确认空闲并在停止进程后变为 offline。
+- 本机计划任务 `Codex Agent-LuoTianyi Review Runner`：已停止并注销。
+- 本机专用 `Runner.Listener.exe`：已停止，未发现同目录下仍运行的 listener/worker。
+- 仓库触发文件与专用 bundle：已在本分支删除，合入 `dev` 后不再存在 GitHub 事件入口。
+- 本机目录 `C:\Users\A\.codex\github-runners\Agent-LuoTianyi-review`：仍保留不可运行的缓存、日志和已注销凭据文件；递归删除被当前命令策略拒绝。它没有计划任务、运行进程、GitHub 注册或仓库开关，不会继续触发审查。后续可由管理员手工删除该精确目录。
+- 未修改仓库通用 Actions 权限、其他 runner、Agent 产品代码或 #107。
