@@ -12,6 +12,12 @@
 
 SPEC 第 6.9、7、8.1/8.3 节优先。阈值、上下文来源和画像格式未规定时参考当前 Conversation Context Store、配置和 ReflectionWorker；不得用 Request/Execution Ledger 状态本身代表“上下文过长”。若需要新的外部配置字段，先补 SPEC。
 
+## Architecture constraints
+
+- ContextCompaction/UserProfileUpdate 分别放入 `agent/handlers/reflection` 与 `agent/skills/reflection` 的既有边界；不要重新建立通用 ReflectionWorker 或 stage callback。
+- conversation context 的长期内容与画像由其现有存储拥有；`agent/context` 只保留临时工作集，压缩时使用固定 evidence/context revision，不复制长期真相源。
+- policy 选择步骤，Handler 编排步骤，Skill 隐藏持久/模型机制；三者不得合并成可由 stage 直接调用的 service。
+
 ## Scope
 
 - ReflectionPolicy 在安全 settlement 时点读取固定 conversation context revision，并按消息/token 阈值选择 ContextCompaction。
@@ -27,6 +33,7 @@ SPEC 第 6.9、7、8.1/8.3 节优先。阈值、上下文来源和画像格式�
 - [ ] Reflection 失败不阻塞或改写已完成回复；积压/失败/重试可观测。
 - [ ] ChatStage 不再导入、创建或调用 ReflectionWorker/具体反思步骤。
 - [ ] Agent 对外仍只有两个业务方法，没有“run_reflection”入口。
+- [ ] stage 与公开 Agent 包均不导出 ReflectionCoordinator/Handler/Skill/job；旧 ReflectionWorker 无生产调用。
 
 ## Verification
 

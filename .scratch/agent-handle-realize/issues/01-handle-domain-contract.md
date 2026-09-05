@@ -12,6 +12,12 @@
 
 SPEC 第 5.2、5.4、7、8.1 节是规范来源。字段或失败语义不清时，依次查看当前分支的领域对象、聊天输入校验和相关测试，再遵守开发守则；当前实现只能补充 SPEC 未说明的兼容细节，不能恢复任意 `payload`、Call/Realtime 或默认角色回退。若二者冲突，先停止并修订 SPEC。
 
+## Architecture constraints
+
+- 协议归 `domain` 所有；推荐最终归档到 `server/src/domain/agent/`，但本 expand 工单可以先在现有 domain 文件中落地，不能为搬目录扩大 PR。
+- `domain` 不依赖 `agent`、stage、world、subconscious 或 capabilities；公开类型不得引用任何 Agent 内部对象。
+- 本票只创建承载真实协议的文件，不预建空的 `agent/handlers`、`agent/skills` 或 `agent/context` 包。
+
 ## Scope
 
 - 增加 `HandleStimulusRequest`、`CancellationToken`、`HandlingReport` 及其稳定枚举和错误族。
@@ -26,6 +32,7 @@ SPEC 第 5.2、5.4、7、8.1 节是规范来源。字段或失败语义不清时
 - [ ] HandlingReport 强制满足 considered = consumed ∪ retained 且二者不重叠；`request_status` 与 pending 是否全部消费相互独立。
 - [ ] `interaction_revision` 只表示 stage 交互修订；协议中不存在含义不明的全局 StateVersion。
 - [ ] 当前版本没有 Call/Realtime、`UserJoinedActivity`、`ActivityInterrupted` 变体，也没有任意 payload 兜底。
+- [ ] stage/world 可只依赖公开 domain 协议；domain import graph 中没有 Agent 内部或具体实现依赖。
 - [ ] 旧生产链在本工单结束时仍可运行；本工单不删除旧领域对象或旧调用方。
 
 ## Verification

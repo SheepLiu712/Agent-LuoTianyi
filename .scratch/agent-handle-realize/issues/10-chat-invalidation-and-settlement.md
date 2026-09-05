@@ -12,6 +12,12 @@
 
 SPEC 第 5.2 HandlingReport、5.4、7、8.3 节优先。竞态顺序不清时参考当前 TopicPlanner snapshot/commit 和 waiting-signal 测试；不能用“尽量取消”替代 sink/report 的 revision 权威校验。
 
+## Architecture constraints
+
+- revision、pending、deadline、取消决定继续归 ChatStage；Agent façade/PlanEmitter 只消费 cancellation 与 basis revision，不能导入 stage 或回读其状态。
+- Handler 局部工作集只放在 `agent/context` 的 scoped accessor 或当前 coroutine；不得把跨请求可变状态挂在 Agent/Handler 单例，也不得把 pending 复制到 context。
+- 部分消费是公开 report 与 stage settlement 的协作，不为其新建可由 stage 调用的 Agent 内部接口。
+
 ## Scope
 
 - 新内容、typing、图片选择和 interaction 终态变化先递增 stage revision，再触发旧 handle cancellation。
@@ -27,6 +33,7 @@ SPEC 第 5.2 HandlingReport、5.4、7、8.3 节优先。竞态顺序不清时参
 - [ ] 旧 report 不应用到新 revision；stage 永远按 ID 结算，不使用 consume_all。
 - [ ] M1 consumed、M2 retained 后只移除 M1，M2 重新设置普通期限并可与 M3 合并。
 - [ ] 已经被 sink 接受的计划按真实状态结算；取消不回滚已提交输出/效果。
+- [ ] import/对象图证明 stage 不持有 Handler/PlanEmitter/context/ledger，Agent 内部也不持有 ChatStage/队列/定时器。
 
 ## Verification
 

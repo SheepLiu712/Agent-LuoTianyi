@@ -12,10 +12,16 @@
 
 SPEC 第 8 节全部条款是验收清单，不能以各子工单已完成替代端到端证据。差异优先按 SPEC 判断；SPEC 留白时才查最终分支当前行为和开发规范。发现行为冲突时创建/重开对应缺陷切片，不在验收 PR 中塞入大修复。
 
+## Architecture constraints
+
+- 架构验收必须覆盖 SPEC 6.1 与 A9，不只统计 façade 方法数：检查目标包所有权、`agent/__init__.py` 导出、跨包 import 方向、SystemRuntime 装配和旧目录/adapter 清理。
+- 依赖检查应同时证明 external→domain/façade、Handler→typed Skill/context/planning/ledger、Skill adapter→subconscious/capability 的单向关系，并证明禁止的反向/直连关系不存在。
+- 目录名本身不是通过证据；薄转发、空包、动态 service locator、字符串 Skill registry 或旧路径换名均按未收束处理。
+
 ## Scope
 
 - 运行/补齐从公开两接口、聊天入口、触摸入口、登录流程、WorldStage 和可控 WorldClock 观察的集成/少量 e2e 证据。
-- 逐项核对 A1—A8、聊天全部信号、超时、重新思考、部分消费、触摸、首次/当日登录和提醒 claim。
+- 逐项核对 A1—A9、聊天全部信号、超时、重新思考、部分消费、触摸、首次/当日登录和提醒 claim。
 - 逐项触发九类 clock action，区分纯机械任务和需要角色认知的目标链，并核对所有外部效果。
 - 汇总真实网络、LLM、TTS、唱歌模型、GPU、设备和生产环境尚未完成的人工验收，不用 Fake 宣称通过。
 - 更新项目架构、模块 interface、SPEC 状态和开发进度；准备但不代替功能分支最终评审。
@@ -23,6 +29,7 @@ SPEC 第 8 节全部条款是验收清单，不能以各子工单已完成替代
 ## Acceptance criteria
 
 - [ ] 公开 façade、依赖扫描和运行时对象图证明只有两个 Agent 业务 interface 且无内部泄漏。
+- [ ] 目录/导出/import/装配检查证明 A9 完整满足，旧 `agent/reflex`、外部 `agent.main_chat` 类型依赖和永久过渡 adapter 不存在。
 - [ ] 聊天文本/图片/语音/协调信号、deadline、旧 revision、慢 Recall、多计划、显式记忆和 Reflection 证据全部通过。
 - [ ] 触摸快速/回退、登录首次/当日/重复、周期提醒 claim 和持久化语义全部通过。
 - [ ] 九类 WorldClock action 的调度、skip/failure、去重、持久效果和 Agent 边界逐项有结果；`ensure_holidays()` 不误计。

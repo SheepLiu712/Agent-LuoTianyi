@@ -12,6 +12,12 @@
 
 SPEC 第 5.2、6.3—6.5、8.3 节优先。图片 MIME/大小/Base64 和当前 VLM fallback 只在 SPEC 留白时参考当前 Adapter/preprocessor/capability；VoiceMessage 没有现有外部协议时只实现已存在调用入口需要的强类型内部链，不擅自新增 WebSocket 事件。
 
+## Architecture constraints
+
+- ImageReading 与 SpeechUnderstanding 归 `agent/skills/cognitive`，以强类型 input/result 包装现有 image/speech capability；不得把 capability API、供应商对象或任意 dict 暴露给 Handler。
+- Conversation Handler 组合这些 Skill 与 Recall/Attention；stage 只持有公开 MediaRef/Stimulus，不识别任何认知中间对象。
+- 一个技术 capability 可以被多个 Skill 复用，Skill 也可组合多个 capability/subconscious 对象；不得镜像 `capabilities/` 建同名薄代理树。
+
 ## Scope
 
 - 适配并校验 ImageMessage，使用受控 MediaRef，保持 client_msg_id 去重、一次持久化和与文字共同 pending。
@@ -24,6 +30,7 @@ SPEC 第 5.2、6.3—6.5、8.3 节优先。图片 MIME/大小/Base64 和当前 V
 - [ ] 非法 Base64、MIME、大小、空语音内容或未授权媒体引用在进入 Agent/capability 前失败。
 - [ ] 图片/语音只持久化一次，重投不重复；本地任意路径、原始供应商对象不进入 Stimulus。
 - [ ] ImageReading/SpeechUnderstanding 结果只在 Agent 内流转，可复用相同 Recall/Attention/ResponseComposition。
+- [ ] Handler 不直接导入 image/speech capability 或 CapabilityManager；所有供应商适配位于 Agent 私有 Skill adapter 后。
 - [ ] 混合 pending 能产生一个有序计划或精确部分结算，stage 不需要知道图像/语音认知中间对象。
 - [ ] VLM/ASR 不可用或超时按稳定错误/fallback 处理，并保持当前图片链的可观察行为。
 - [ ] 若当前产品没有非 Realtime 语音外部事件，本票不新增客户端协议，只证明 typed stage/Agent seam。

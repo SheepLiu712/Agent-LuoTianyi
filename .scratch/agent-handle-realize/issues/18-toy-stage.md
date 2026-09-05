@@ -12,11 +12,17 @@
 
 SPEC 第 3、4.1—4.2、5.2/5.3、6.3—6.5 节优先。当前没有设备实现的行为不得凭空猜测；只在已有玩偶/设备 Adapter、协议或测试能证明时补充。若需要新外部协议或 AgentOutput kind，先修订 SPEC。
 
+## Architecture constraints
+
+- `ToyVibration`、`DeviceConnected/Disconnected` 归 `agent/handlers/stimulus/device.py` 行为族；TouchInteraction 仍走独立 touch Handler。原始采样、去抖和供应商协议留在 Adapter。
+- 设备相关角色理解复用 cognitive Skill；PerformMotion 由 `agent/handlers/action/motion.py` 与 typed execution Skill 实现，Agent 不接触硬件 SDK。
+- ToyStage 只依赖 domain 协议和 façade，拥有 pending/revision/cancellation/output sink；不得导入 Agent context、Handler 或 Skill。
+
 ## Scope
 
 - ToyStage 按 interaction/device 维护 pending、revision、取消、输出能力和持续接触快照，不建立通用 BaseStage。
 - Adapter 在 Agent 前完成采样去抖/聚合，形成 ToyVibration、DeviceConnected、DeviceDisconnected 或 TouchInteraction。
-- InteractionSignalHandler 使用共享触摸/注意力 Skill；需要独立动作时产生 PerformMotion，由 realization 输出 MOTION。
+- Device/Touch Handler 使用共享注意力 Skill；需要独立动作时产生 PerformMotion，由 realization 输出 MOTION。
 - device output sink 校验 supported outputs、顺序、背压和断开；Agent 不接触硬件 SDK。
 
 ## Acceptance criteria
@@ -27,6 +33,7 @@ SPEC 第 3、4.1—4.2、5.2/5.3、6.3—6.5 节优先。当前没有设备实�
 - [ ] PerformMotion 是独立 Action；表情仍只能嵌入 Say/Sing；没有 HAPTIC 输出。
 - [ ] 断开先由 ToyStage/Adapter 停止即时输出并递增 revision，再取消过期 handle/realization。
 - [ ] 同一角色的不同设备/interaction 上下文不串用。
+- [ ] device 与 touch 行为族边界清晰；Handler 不接触原始采样/SDK，motion execution Skill 不反向依赖 ToyStage。
 
 ## Verification
 

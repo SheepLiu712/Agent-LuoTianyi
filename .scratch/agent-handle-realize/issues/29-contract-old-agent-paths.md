@@ -10,7 +10,14 @@
 
 ## Decision rule
 
-SPEC 第 4、7、8.1，尤其 A1—A8，是唯一目标。遇到仍依赖旧入口的生产调用者时不得删除后让测试失效，也不得保留转发层蒙混验收；回到对应迁移工单完成该调用方。当前接口文档用于识别旧事实，不构成保留承诺。
+SPEC 第 4、6.1、7、8.1，尤其 A1—A9，是唯一目标。遇到仍依赖旧入口的生产调用者时不得删除后让测试失效，也不得保留转发层蒙混验收；回到对应迁移工单完成该调用方。当前接口文档用于识别旧事实，不构成保留承诺。
+
+## Architecture constraints
+
+- 最终目录按 SPEC 6.1 收束：公开协议在 `domain.agent`（或已评审的同等 domain 归属），`agent/__init__.py` 只导出 Agent façade，内部 handlers/skills/context/planning/ledgers/reflection 不对外。
+- 删除 `agent/reflex`、旧 `LuoTianyiAgent`/AgentRuntime/CharacterRuntime 业务代理、外部 `agent.main_chat` 响应类型依赖、stage ReflectionWorker 和无生产必要的迁移 adapter。
+- Handler 不直接依赖 CapabilityManager/数据库/SystemRuntime；Skill 不反向依赖 Handler/stage/report；factory 只装配。发现违反项必须回到其迁移工单修复，不能在此加永久 compatibility shim。
+- `CapabilityManager` 只有在不再承载角色业务选择且仅作为纯技术装配容器时才可保留；是否删除由真实剩余调用决定，不做无关基础设施重写。
 
 ## Scope
 
@@ -26,6 +33,7 @@ SPEC 第 4、7、8.1，尤其 A1—A8，是唯一目标。遇到仍依赖旧入�
 - [ ] stage/world/system 不导入或调用 Handler、Skill、PlanEmitter、Store/Ledger、Reflection、Recall、提示词、模型会话、subconscious 或 capability 实例。
 - [ ] 生产调用图不存在 SPEC A6 列出的旧代理、CharacterRuntime 业务或绕过 realize 的角色 capability 路径。
 - [ ] 外部只依赖强类型领域协议，不依赖旧 Unread/ExtractedTopic/AttentionPlan/OneSentenceChat/SongSegmentChat。
+- [ ] A9 包所有权/依赖扫描通过：无外部内部包导入、无 Handler→capability/database/runtime、无 Skill→Handler/stage/report 反向依赖、无空包/薄转发冒充迁移。
 - [ ] 删除旧代码后所有已迁移流程测试仍绿；没有“新 façade + 旧代理”永久双轨或无调用者公开入口。
 - [ ] Call/Realtime 和未实现事件没有因清理被顺便添加。
 

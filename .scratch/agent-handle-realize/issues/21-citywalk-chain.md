@@ -12,6 +12,12 @@
 
 SPEC 第 6.7、8.2、8.6 的 citywalk 行优先。概率、报告结构、EventStore 字段和动态发布失败语义未说明时参考当前 citywalk task/service 和测试；不得把地图/环境机械过程搬进 Agent，也不得把动态失败回滚为 citywalk 未完成。
 
+## Architecture constraints
+
+- 地图/环境/报告/EventStore 属于 world；只把稳定 WorldObservation 经 WorldStage 交给 `agent/handlers/stimulus/world_activity.py`。
+- 角色表达/发布决定使用 cognitive Skill；PublishDynamic 归 `agent/handlers/action/publishing.py` 与 typed execution Skill。world task 不导入这些内部包。
+- world 的窄技术 seam 可以保留，但不得返回 CharacterRuntime/Agent/capability 给 task；动态 receipt 通过公开 execution 结算回写。
+
 ## Scope
 
 - WorldClock 仍按每角色每日 04:00 唤醒，按配置 `daily_run_probability` 抽样。
@@ -27,6 +33,7 @@ SPEC 第 6.7、8.2、8.6 的 citywalk 行优先。概率、报告结构、EventS
 - [ ] 动态失败不删除 travel event、不抹掉完成报告，结果能区分两种效果。
 - [ ] world task 不再访问 CharacterRuntime、Agent 记忆/提示词或 dynamic capability 来生成角色内容。
 - [ ] 调度时间、角色展开和 0.1 当前配置不因迁移改变。
+- [ ] 静态扫描不存在 citywalk→CharacterRuntime/Agent internal/dynamic capability 的角色业务依赖。
 
 ## Verification
 

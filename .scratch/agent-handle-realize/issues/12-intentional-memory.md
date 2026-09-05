@@ -12,6 +12,12 @@
 
 SPEC 第 6.4、6.6—6.7、7、8.1 节优先。记忆记录结构、向量索引和当前显式记忆识别仅在 SPEC 留白时参考 subconscious 和记忆测试；不得创建 RecordIntentionalMemory Action 或让 stage 写数据库。
 
+## Architecture constraints
+
+- `IntentionalMemoryCommit` 归 `agent/skills/mutation`，通过私有 typed adapter 修改 subconscious/记忆存储；Conversation Handler 不直接导入数据库或 subconscious。
+- mutation Skill 接收显式 character/user/evidence/idempotency 输入并返回 committed revision；不生成 ActionPlan、HandlingReport 或用户文案。
+- 当前 interaction 的证据引用可进入 `agent/context`，已提交长期事实仍由长期存储拥有，不能复制成第二份 context 真相源。
+
 ## Scope
 
 - Handler 识别明确记忆意图并生成最小证据；内部 mutation 使用 `request_id + mutation kind + evidence key` 稳定幂等键。
@@ -26,6 +32,7 @@ SPEC 第 6.4、6.6—6.7、7、8.1 节优先。记忆记录结构、向量索引
 - [ ] 写入失败时不说“已经记住”，相关 pending retained，retryable 与实际错误一致。
 - [ ] 不同 character/user 的记忆隔离，空 user 的场景不伪造默认用户。
 - [ ] stage、world 和 output sink 看不到记忆对象、向量结果、数据库 session 或 mutation command。
+- [ ] Handler 只依赖 mutation Skill 契约；不存在 `execute(skill_name, payload)`、全局 registry 或 CapabilityManager 直连。
 - [ ] 新 Action 联合中仍不存在 RecordIntentionalMemory。
 
 ## Verification

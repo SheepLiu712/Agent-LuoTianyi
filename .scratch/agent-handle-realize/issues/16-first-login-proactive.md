@@ -12,6 +12,12 @@
 
 SPEC 第 5.2/5.3、8.5 节优先。欢迎文案、音频资源和历史同步延时只在 SPEC 留白时参考当前 ProactiveTopicMaker、登录调用链和配置；不得恢复 RETURN_LOGIN 或让 stage 生成角色内容。
 
+## Architecture constraints
+
+- 登录/提醒等主动刺激归 `agent/handlers/stimulus/proactive.py`；欢迎内容选择可调用 cognitive Skill，预制音频/表情输出仍由 communication Action Handler + execution Skill 实现。
+- ChatStage 只拥有历史同步窗口、pending、claim 与输出路由，不读取角色资源、不导入 proactive Handler/Skill。
+- 现有 ProactiveTopicMaker 只作为迁移源；角色内容逻辑迁走后不得作为 façade 外第二入口保留。
+
 ## Scope
 
 - 登录认证记录 elapsed_from_last_login，等对应 user/character ChatStage ready 后构造首次登录 ProactivePromptDue。
@@ -27,6 +33,7 @@ SPEC 第 5.2/5.3、8.5 节优先。欢迎文案、音频资源和历史同步延
 - [ ] stage 不读取音频、不拼角色回复；内容决定和 realization 均在 Agent 内。
 - [ ] 距上次登录大于等于 5 天仍不派发 RETURN_LOGIN。
 - [ ] 重连/重投/并发首连接不重复创建 worker 或重复欢迎。
+- [ ] 新生产链只依赖 domain 协议和 façade；主动 Handler 不依赖登录 session、WebSocket 或 ChatStage 实例。
 
 ## Verification
 

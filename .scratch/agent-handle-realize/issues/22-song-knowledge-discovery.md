@@ -12,6 +12,12 @@
 
 SPEC 第 5.2、6.4、6.7、8.6 的 VCPedia 行优先。模板、safe name、介绍字段、关键词索引和 0.8 秒节流只在 SPEC 留白时参考当前 fetcher/task/tests；不得先写知识再补 Stimulus，也不得自动申请学习所有歌曲。
 
+## Architecture constraints
+
+- 候选抓取/结构化归 world；角色接纳归 `agent/handlers/stimulus/song_knowledge.py`，持久写入归 `agent/skills/mutation` 的 SongKnowledgeAcceptance。
+- Handler 不导入 fetcher、数据库或 CapabilityManager；mutation Skill 通过 typed adapter 返回 committed revision，不生成 ActionPlan/文案。
+- 候选证据可在 scoped context 中以来源/revision/TTL 引用，歌曲知识真相源仍是长期存储；不得复制完整知识库进 `agent/context`。
+
 ## Scope
 
 - 抓取、反爬、页面解析、机械模型结构化、候选规范化、来源 revision、证据封装和来源去重留在 world。
@@ -27,6 +33,7 @@ SPEC 第 5.2、6.4、6.7、8.6 的 VCPedia 行优先。模板、safe name、介�
 - [ ] 接纳失败或冲突有稳定 report，不能把候选标为成功写入。
 - [ ] 各候选间当前 0.8 秒行为和最终统计保持；模型中间结果不成为 Stimulus。
 - [ ] 发现歌曲本身不等于学歌请求；无 Agent 决策时不创建 learning job。
+- [ ] world 不导入 Agent 内部包，SongKnowledgeHandler 不导入 world/存储实现；知识写入只能经 mutation Skill。
 
 ## Verification
 
