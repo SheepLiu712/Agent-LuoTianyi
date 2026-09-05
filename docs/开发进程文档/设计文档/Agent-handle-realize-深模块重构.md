@@ -295,6 +295,14 @@ Agent 已由角色 ID 取得，请求不重复携带 `character_id`。请求不�
 - `persist_policy` 只决定 Stimulus 原始内容是否进入会话记录和是否成为自动长期记忆候选。`DynamicObserved`、`SongLearned` 等 `NONE` 事实仍可按 Agent 内部状态变更或 Reflection 契约写入领域数据；
 - `CONVERSATION_ONLY` 在当前 22 个 kind 中没有生产者，但因复用现有唯一枚举而保留。任何 kind 改用该策略都属于需要先修改本矩阵的公开协议变更。
 
+Stimulus 构造契约错误使用独立于 HandlingReport 运行时失败的最小公开接口：
+
+- `StimulusErrorCode = Literal["CONTRACT_INVALID_STIMULUS"]`；当前只包含这一构造错误码，后续增加成员属于公开协议变更；
+- `InvalidStimulusError(ValueError)` 是不可变的公开异常，稳定暴露 `code: StimulusErrorCode` 和 `retryable: Literal[False]`；`code` 始终为 `CONTRACT_INVALID_STIMULUS`，`retryable` 始终为 `False`；
+- `str(error)` 只用于人工诊断，措辞不属于公开契约；调用方不得解析异常字符串，也不依赖字段名、规则 ID、非法值字典或内部 cause；
+- 各强类型 Stimulus 保持直接构造入口，不增加 `create()` factory 或 Result 返回。合法参数原子地产生不可变实例；字段非法、目标角色非法或 `source / persist_policy / ephemeral` 组合不在矩阵中时，直接抛出 `InvalidStimulusError`，不产生部分实例；
+- `InvalidStimulusError` 与 `StimulusErrorCode` 从 `src.domain.agent` 公开导出，只用于 Stimulus 构造契约；不替代 HandlingReport、ExecutionReport 或 ActionExecutionResult 的错误类型。
+
 #### 当前版本 Stimulus 强类型变体
 
 当前版本不保留 `payload: Mapping` 作为扩展口。下表中的每个专有字段都给出类型和用途：

@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：工单 01 `TextMessage` 完整 Green 根 PR，等待 owner 复审
+> 当前阶段：工单 01 Stimulus 构造错误 interface 设计
 >
 > 总体状态：进行中
 
@@ -16,13 +16,12 @@
 
 ## 本 PR
 
-- PR：[#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90)（完整 Green 根 PR，目标 `refactor/agent`，Ready，等待 owner 复审）
-- 目标：交付已批准的 `TextMessage` 契约测试及足以让该测试通过的最小 `src.domain.agent` 协议实现。
-- 范围：包含 `TextMessage` 公开契约测试；公开导出 `TextMessage`、`StimulusKind.TEXT_MESSAGE`、`StimulusSource.USER` 和四成员单一 `PersistPolicy`；旧 `src.domain.stimulus` 导入并重导出同一 `PersistPolicy`，保持现有调用兼容。
-- 明确不包含：不实现其余 21 个 Stimulus、非法组合校验、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
-- 前置门禁：interface 设计 PR [#91](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/91) 已获 owner 批准并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `661b7d2`。
-- 测试与实现门禁：PR #90 的 Red-only seam 已获 owner 批准，head `c724c1f`；最小 Green 子 PR [#94](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/94) 已获 owner 批准，并于 2026-09-05 squash merge 到本分支，合并提交 `3b156739`。旧批准和测试证据不作为当前完整候选的最终依据。
-- 验证及结果：相对当前 `origin/refactor/agent` 的完整候选重新验证：focused 测试 `1 passed in 0.18s`，`tests/domain -q` 为 `1 passed in 0.18s`；相关文件 `py_compile`、Ruff、`src/domain/agent` BasedPyright（0 errors、0 warnings）和 `git diff --check` 均通过；导入检查确认 `src.domain`、`src.domain.agent`、`src.domain.stimulus` 暴露同一个四成员 `PersistPolicy`。离线回归在排除真实图片/TTS/唱歌资源测试、真实 B 站/VCPedia 抓取和 `real_llm` 后为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 用同一命令为 `399 passed, 4 deselected, 6 failed`，六个失败集合一致，分别来自 diary Fake 接口漂移、测试直接调用无效外部 LLM key、已删除的数据库私有 helper、主动话题既有行为差异和项目计划路由测试假设，不是本切片引入。
+- PR：待创建（分支 `docs/agent-dm-01-stimulus-error-contract`，目标 `refactor/agent`）
+- 目标：在编写下一条非法 `TextMessage` 组合 Red 测试前，固定 Stimulus 构造失败的公开异常接口。
+- 范围：定义 `StimulusErrorCode`、`InvalidStimulusError(ValueError)`、稳定 `code / retryable` 字段、直接构造抛出行为和非契约异常文本；同步 domain 当前/目标 interface 边界。
+- 明确不包含：不写测试或产品实现；不实现 source/persist/ephemeral 校验、其他 Stimulus、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
+- 前置门禁：`TextMessage` 合法构造 PR [#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90) 已获自动审查通过并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `42580dad`。
+- 验证及结果：本 PR 为纯 interface 文档门禁；三份文档均存在且无 Unicode replacement character，关键字段检查确认异常类型、稳定 code/retryable、直接构造抛出和非契约异常文本均已写入，`git diff --check` 通过；未运行 pytest、模型、TTS、GPU、设备或真实外部服务。
 
 ## 历史设计轮次目标与范围
 
@@ -102,6 +101,7 @@
 - [x] Green：同一 focused 命令在当前完整候选上为 `1 passed in 0.18s`；
 - [x] 已实现 `src.domain.agent` 的 `TextMessage` 最小切片，并让旧 Stimulus 复用同一四成员 `PersistPolicy`；
 - [x] 已同步 domain 当前 interface 文档，记录 `src.domain.agent` 公开路径、`TextMessage` 字段与不变量、无副作用及当前仅支持合法构造的校验边界；
+- [ ] Stimulus 构造错误接口设计等待评审；设计通过后才为非法 `TextMessage` 组合编写 Red-only 契约测试；
 - [ ] 工单 01 的其余 Stimulus、InteractionSnapshot、HandleStimulusRequest、CancellationToken、HandlingReport、稳定枚举和错误族测试尚未开始；
 - [x] `tests/domain -q` 为 `1 passed in 0.18s`；Ruff、py_compile、BasedPyright 和 `git diff --check` 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整；
 - [ ] 离线回归为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 对照为 `399 passed, 4 deselected, 6 failed`，失败集合一致，未发现本切片新增回归，但仓库默认回归门禁仍未全绿；
@@ -124,4 +124,4 @@
 
 ## 下一步
 
-owner 复审通过后，由 owner 将 PR #90 squash merge 到 `refactor/agent`。工单 01 的下一可观察行为必须另开新的 TDD 切片。
+提交 Stimulus 构造错误 interface 设计 PR 并等待评审；通过后另开 Red-only PR，从 `src.domain.agent` 公开导出验证非法 `TextMessage` 组合抛出 `InvalidStimulusError`，并只断言稳定 `code` 与 `retryable`。
