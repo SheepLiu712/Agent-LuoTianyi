@@ -1,12 +1,14 @@
-# Agent `handle_stimulus / realize_action_plan` 深模块重构 interface spec
+# Agent `handle_stimulus / realize_action_plan` 深模块重构总体设计背景
 
-> 状态：待评审
+> 状态：总体设计基线已冻结；不再作为行为切片的当前 interface spec
 >
 > 日期：2026-09-04
 >
 > 来源：[`Agent-handle-realize-深模块重构 PRD`](../需求说明（PRD）/Agent-handle-realize-深模块重构.md)
 >
-> 范围：锁定当前版本的 Agent 对外行为、Agent 内部 Handler / Skill 分层、内部状态变更和事后反思；不代表这些 interface 已经实现
+> 当前权威契约：[`Server 模块接口文档`](../../项目说明/项目架构与接口（spec）/接口文档/README.md)。行为切片只更新对应模块的 interface 文档；本文保留架构背景、跨切片边界和历史设计取舍。
+>
+> 范围：记录 Agent 对外行为方向、Agent 内部 Handler / Skill 分层、内部状态变更和事后反思的总体设计背景；不代表这些 interface 已经实现
 
 ## 1. Problem Statement
 
