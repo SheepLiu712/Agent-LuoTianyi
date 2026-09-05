@@ -305,6 +305,8 @@ test("routes the Codex review through the dedicated local ChatGPT-auth runner", 
   assert.match(WORKFLOW, /codex login status/);
   assert.match(WORKFLOW, /Logged in using ChatGPT/);
   assert.match(WORKFLOW, /codex exec/);
+  assert.match(WORKFLOW, /--approve-for-me/);
+  assert.doesNotMatch(WORKFLOW, /--sandbox workspace-write/);
   assert.doesNotMatch(WORKFLOW, /uses:\s*openai\/codex-action/);
   assert.doesNotMatch(WORKFLOW, /openai-api-key:/);
 });

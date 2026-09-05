@@ -118,6 +118,10 @@ account because that account would not share the interactive user's Codex
 login. Start it at user logon under the dedicated runner account, or run
 `run.cmd` manually when reviews should be accepted.
 
+The local invocation uses `codex exec --approve-for-me`. On the installed CLI,
+that option already selects the workspace-write sandbox and cannot be combined
+with a separate `--sandbox` flag.
+
 ## Verification
 
 Run the policy tests with:
