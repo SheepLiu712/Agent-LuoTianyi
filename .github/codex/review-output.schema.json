@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "phase",
+    "verdict",
+    "summary",
+    "target_branch",
+    "issue_numbers",
+    "head_sha",
+    "flow_findings",
+    "standards_findings",
+    "spec_findings",
+    "tests"
+  ],
+  "properties": {
+    "phase": {
+      "type": "string",
+      "enum": ["design", "red_test", "implementation", "acceptance"]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "CHANGES_REQUESTED", "WAITING", "BLOCKED"]
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "target_branch": {
+      "type": "string",
+      "const": "refactor/agent"
+    },
+    "issue_numbers": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "integer",
+        "minimum": 60,
+        "maximum": 89
+      }
+    },
+    "head_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "flow_findings": {
+      "$ref": "#/$defs/findings"
+    },
+    "standards_findings": {
+      "$ref": "#/$defs/findings"
+    },
+    "spec_findings": {
+      "$ref": "#/$defs/findings"
+    },
+    "tests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "status", "details"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": ["PASS", "FAIL", "EXPECTED_RED", "NOT_RUN"]
+          },
+          "details": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "title",
+          "detail",
+          "file",
+          "line",
+          "required_change"
+        ],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["P0", "P1", "P2", "P3"]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1
+          },
+          "file": {
+            "type": ["string", "null"]
+          },
+          "line": {
+            "type": ["integer", "null"],
+            "minimum": 1
+          },
+          "required_change": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}
