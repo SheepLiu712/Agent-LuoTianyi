@@ -8,7 +8,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `codex/local-agent-pr-review-finalize`，目标 `master`）
+- PR：[#101](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/101)（分支 `codex/local-agent-pr-review-finalize`，目标 `master`）
 - 目标：记录 ChatGPT 登录、本机 Codex 事件审查的真实端到端验收结果和运行状态。
 - 范围：只更新本进度文档；确认 runner、仓库开关、真实审查/发布证据和旧轮询任务下线。
 - 明确不包含：不使用或配置 `OPENAI_API_KEY`/`CODEX_API_KEY`，不修改 Agent 产品代码、#90/#94 分支、工单范围或测试通过规则。
