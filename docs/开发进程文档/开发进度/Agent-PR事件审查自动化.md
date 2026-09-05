@@ -8,7 +8,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `codex/local-agent-pr-review-checkout-fix`，目标 `master`）
+- PR：[#98](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/98)（分支 `codex/local-agent-pr-review-checkout-fix`，目标 `master`）
 - 目标：修复真实 workflow dispatch 在 GitHub-hosted resolver 的 checkout 清理阶段失败。
 - 范围：移除三个 job 的 `actions/checkout`；resolver/publisher 通过 GitHub API 读取固定 workflow SHA 的策略文件，本机 review 在 `RUNNER_TEMP` 原生获取固定 base/head/workflow commit；保留 ChatGPT 登录、本地测试和既有审查/合并门禁。
 - 明确不包含：不使用或配置 `OPENAI_API_KEY`/`CODEX_API_KEY`，不修改 Agent 产品代码、#90/#94 分支、工单范围或测试通过规则。
