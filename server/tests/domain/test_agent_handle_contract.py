@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.domain.agent import PersistPolicy, StimulusKind, StimulusSource, TextMessage
+from src.domain.agent import StimulusKind, StimulusSource, TextMessage
 
 
 def test_text_message_constructs_as_immutable_registered_stimulus() -> None:
@@ -15,7 +15,6 @@ def test_text_message_constructs_as_immutable_registered_stimulus() -> None:
         source=StimulusSource.USER,
         target_character_ids=("luotianyi",),
         user_id="user-1",
-        persist_policy=PersistPolicy.CONVERSATION_AND_MEMORY_CANDIDATE,
         ephemeral=False,
         text="你好，天依",
         client_msg_id="client-message-1",
@@ -28,7 +27,7 @@ def test_text_message_constructs_as_immutable_registered_stimulus() -> None:
     assert stimulus.source is StimulusSource.USER
     assert stimulus.target_character_ids == ("luotianyi",)
     assert stimulus.user_id == "user-1"
-    assert stimulus.persist_policy is PersistPolicy.CONVERSATION_AND_MEMORY_CANDIDATE
+    assert not hasattr(stimulus, "persist_policy")
     assert stimulus.ephemeral is False
     assert stimulus.text == "你好，天依"
     assert stimulus.client_msg_id == "client-message-1"

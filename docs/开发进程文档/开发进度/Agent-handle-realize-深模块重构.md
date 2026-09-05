@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：工单 01 Stimulus 职责与校验 interface 修订
+> 当前阶段：工单 01 `TextMessage` 移除公开 `persist_policy` Red-only 测试
 >
 > 总体状态：进行中
 
@@ -14,14 +14,14 @@
 - 当前 Agent interface：[`agent/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/agent/README.md)
 - 当前 domain interface：[`domain/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/README.md)
 
-## 本次提交
+## 本 PR
 
-- 提交方式：按用户要求直接提交到当前 `refactor/agent` 分支，不创建 PR，避免触发自动审查。
-- 目标：收窄 Stimulus 公开 interface 和审核标准，删除预防性的 source/persist/ephemeral 唯一组合矩阵。
-- 范围：外部调用方选择强类型 Stimulus 并提供 source/ephemeral；目标 Stimulus 移除公开 `PersistPolicy`；持久化判断归 Agent 内部；构造只校验字段自身与变体结构；同步领域词汇、当前/目标 domain interface、本地工单和 GitHub Issue #60。
-- 明确不包含：不修改测试或产品实现，不立即删除 PR #90 已实现的迁移期 `PersistPolicy` 字段/导出，不改变聊天、触摸、主动发言或 world 链路的可观察持久化结果。
-- 前置事实：PR #105 已于 2026-09-05 合入 `refactor/agent`；其中字段/schema 稳定错误接口继续保留，组合非法错误边界由本次修订撤销。
-- 验证及结果：5 份变更文档均通过严格 UTF-8 解码且无 Unicode replacement character；旧“来源矩阵/表外组合/Stimulus 与 interaction 组合白名单”等约束定向检索无残留；`git diff --check` 通过；GitHub Issue #60 已同步并回读确认。不运行产品 pytest、模型、TTS、GPU、设备或真实外部服务。
+- PR：待创建（分支 `codex/agent-dm-01-remove-persist-policy-red`，目标 `refactor/agent`，Red-only Draft）。
+- 目标：从 `src.domain.agent` 的公开构造入口锁定目标 `TextMessage` 不再要求或携带 `persist_policy`。
+- 范围：更新既有 `TextMessage` 公开契约测试，调用方不再导入或传入 `PersistPolicy`，并断言构造结果不存在 `persist_policy` 字段。
+- 明确不包含：不写产品实现；不删除迁移期旧 `Stimulus` 的 `PersistPolicy`；不实现 Agent 内部持久化判断、错误族、其他 Stimulus、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
+- 前置事实：最新 SPEC 提交 `1761901e` 已删除 source/persist/ephemeral 组合白名单；方向相反的 PR #106 已关闭且不再开发 Green 子 PR。
+- 验证及结果：`D:\Anaconda\envs\lty\python.exe -m pytest tests/domain/test_agent_handle_contract.py -q -p no:cacheprovider` 为预期 Red：1 failed，仅因 `TextMessage.__init__()` 仍要求 `persist_policy`；测试主体已进入公开构造调用，不是收集错误。`py_compile` 和 Ruff 通过；本 PR 两个目标文件的 `git diff --check` 通过。工作区未纳入 PR 的 `AGENTS.md` 仍有既存尾随空格，不计为本 PR 通过。未运行产品实现后的 Green 回归、模型、TTS、GPU、设备或真实外部服务。
 
 ## 历史设计轮次目标与范围
 
@@ -103,7 +103,8 @@
 - [x] 已同步 domain 当前/目标 interface 文档，明确 PR #90 的现状与本次目标差异，不能把迁移期合法样例解释成唯一组合；
 - [x] PR #105 已实现 Stimulus 字段/schema 构造错误的 interface 设计；本次保留稳定异常和错误码，删除组合非法触发条件；
 - [x] 已明确 reviewer 只能阻塞字段自身、schema、幂等持久化和当前行为回归问题，不得要求理论组合矩阵、笛卡尔积测试或无失败依据的防御分支；
-- [ ] 目标 `TextMessage` 尚未通过 TDD 移除公开 `persist_policy`；Agent 内部持久化判断及同一 `stimulus_id` 的幂等事实也尚未实现；
+- [x] 方向相反的 PR #106 已关闭：不再把 `persist_policy / ephemeral` 理论组合锁定为构造错误，也不创建对应 Green 子 PR；
+- [ ] 目标 `TextMessage` 移除公开 `persist_policy` 的 Red-only 契约测试已确认按预期失败，等待 PR 评审；Agent 内部持久化判断及同一 `stimulus_id` 的幂等事实尚未实现；
 - [ ] 工单 01 的其余 Stimulus、InteractionSnapshot、HandleStimulusRequest、CancellationToken、HandlingReport、稳定枚举和错误族测试尚未开始；
 - [x] PR #90 时 `tests/domain -q` 为 `1 passed in 0.18s`；Ruff、py_compile、BasedPyright 和 `git diff --check` 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整。该证据只描述迁移期当前实现；
 - [ ] 离线回归为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 对照为 `399 passed, 4 deselected, 6 failed`，失败集合一致，未发现本切片新增回归，但仓库默认回归门禁仍未全绿；
@@ -126,4 +127,4 @@
 
 ## 下一步
 
-先按修订后的 Issue #60 重新规划下一个 Red-only 切片：从目标 `TextMessage` 公开构造参数中移除 `persist_policy`，只覆盖字段自身/schema 的最小错误场景，不再开发或测试 source/kind/ephemeral 组合校验。Agent 内部持久化判断作为独立可观察行为切片，在明确从哪个 Agent interface 验证幂等会话记录和记忆候选后再进入测试。
+等待本 Red-only Draft PR 评审；通过后基于其 head 创建最小 Green 子 PR，只从 `TextMessage` 移除 `persist_policy` 字段并保持旧 `Stimulus` 可用。Agent 内部持久化判断作为独立可观察行为切片，在明确从哪个 Agent interface 验证幂等会话记录和记忆候选后再进入测试。
