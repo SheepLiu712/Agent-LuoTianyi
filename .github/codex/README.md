@@ -25,6 +25,10 @@ Results contain an event/action/head-SHA marker so reruns do not publish duplica
 commits, Ready/Reopen transitions, and human replies have distinct keys and
 therefore trigger fresh reviews.
 
+The only bot exception is an internal `workflow_dispatch` created by the
+publisher when the pinned target base becomes stale. It must pass the same PR,
+branch, issue-range, and current-SHA gates before a new paid review starts.
+
 ## Review contract
 
 The workflow accepts one eligible PR event and produces exactly one structured

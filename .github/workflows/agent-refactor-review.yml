@@ -46,7 +46,7 @@ jobs:
     if: >-
       vars.AGENT_PR_REVIEW_ENABLED == 'true' &&
       github.actor != 'chatgpt-codex-connector[bot]' &&
-      github.actor != 'github-actions[bot]'
+      (github.actor != 'github-actions[bot]' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -77,16 +77,21 @@ jobs:
             const policy = require(
               `${process.env.GITHUB_WORKSPACE}/.review-automation/.github/codex/scripts/review-policy.js`,
             );
-            const allowedPermissions = new Set(["admin", "maintain", "write"]);
-            const permission = await github.rest.repos.getCollaboratorPermissionLevel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              username: context.actor,
-            });
-            if (!allowedPermissions.has(permission.data.permission)) {
-              core.notice(`Ignoring untrusted trigger from ${context.actor}.`);
-              core.setOutput("eligible", "false");
-              return;
+            const internalDispatch =
+              context.eventName === "workflow_dispatch" &&
+              context.actor === "github-actions[bot]";
+            if (!internalDispatch) {
+              const allowedPermissions = new Set(["admin", "maintain", "write"]);
+              const permission = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: context.actor,
+              });
+              if (!allowedPermissions.has(permission.data.permission)) {
+                core.notice(`Ignoring untrusted trigger from ${context.actor}.`);
+                core.setOutput("eligible", "false");
+                return;
+              }
             }
 
             let prNumber = context.payload.pull_request?.number;
@@ -410,6 +415,7 @@ jobs:
           output-schema-file: .review-automation/.github/codex/review-output.schema.json
           permission-profile: ":workspace"
           safety-strategy: drop-sudo
+          allow-bot-users: github-actions
 
   publish:
     needs:
