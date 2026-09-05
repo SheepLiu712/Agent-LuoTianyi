@@ -62,7 +62,7 @@ jobs:
     steps:
       - name: Resolve and authorize the pull request
         id: resolve
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
             if (context.eventName === "check_suite") {
@@ -211,7 +211,7 @@ jobs:
       final_message: ${{ steps.codex.outputs.final-message }}
     steps:
       - name: Check out the candidate merge commit
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: refs/pull/${{ needs.resolve.outputs.pr_number }}/merge
           fetch-depth: 0
@@ -222,7 +222,7 @@ jobs:
         run: rm -rf -- .review-automation
 
       - name: Check out trusted review policy
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: master
           path: .review-automation
@@ -230,7 +230,7 @@ jobs:
           persist-credentials: false
 
       - name: Build immutable review context
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
@@ -426,7 +426,7 @@ jobs:
       checks: read
     steps:
       - name: Publish verdict and merge an accepted PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
