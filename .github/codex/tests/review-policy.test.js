@@ -1,6 +1,8 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const {
   assertValidReviewResult,
@@ -15,6 +17,10 @@ const {
 
 const SHA = "a".repeat(40);
 const BASE_SHA = "b".repeat(40);
+const WORKFLOW = fs.readFileSync(
+  path.join(__dirname, "..", "..", "workflows", "agent-refactor-review.yml"),
+  "utf8",
+);
 
 function testRecord(overrides = {}) {
   return {
@@ -291,4 +297,21 @@ test("only a reviewer's latest current-head state can block merge", () => {
     latestHumanChangeRequest([{...request, commit_id: "b".repeat(40)}], SHA),
     undefined,
   );
+});
+
+test("routes the Codex review through the dedicated local ChatGPT-auth runner", () => {
+  assert.match(WORKFLOW, /- self-hosted\s+- Windows\s+- X64/);
+  assert.match(WORKFLOW, /- agent-luotianyi-review\s+- codex-chatgpt-auth/);
+  assert.match(WORKFLOW, /codex login status/);
+  assert.match(WORKFLOW, /Logged in using ChatGPT/);
+  assert.match(WORKFLOW, /codex exec/);
+  assert.doesNotMatch(WORKFLOW, /uses:\s*openai\/codex-action/);
+  assert.doesNotMatch(WORKFLOW, /openai-api-key:/);
+});
+
+test("keeps trusted review inputs outside the candidate workspace", () => {
+  assert.match(WORKFLOW, /Join-Path \$env:RUNNER_TEMP/);
+  assert.match(WORKFLOW, /git archive --format=zip/);
+  assert.match(WORKFLOW, /REVIEW_CONTEXT_FILE: \$\{\{ steps\.trusted\.outputs\.context_file \}\}/);
+  assert.match(WORKFLOW, /Refusing to remove a path outside RUNNER_TEMP/);
 });

@@ -7,10 +7,13 @@ submissions/edits/dismissals, PR conversation comments, and inline review
 comments. A successful non-Draft review is squash merged; other verdicts are
 published as a GitHub review.
 
-The workflow is deliberately split into two privilege domains:
+The workflow is deliberately split into three privilege domains:
 
-- the Codex job receives a read-only GitHub token and the OpenAI key through the
-  official API-key proxy; it cannot review or merge on GitHub;
+- the GitHub-hosted resolver validates the actor, issue scope, same-repository
+  head, target branch, and stacked-PR chain before a local job is dispatched;
+- the Codex job runs on the dedicated Windows self-hosted runner with the local
+  Codex CLI's ChatGPT authentication. It receives only read permissions and
+  cannot review or merge on GitHub;
 - the publish job receives no OpenAI key and is the only job allowed to publish
   a review or squash merge.
 
@@ -19,9 +22,10 @@ All jobs load policy, prompt, schema, and publisher checks from the immutable
 change the contract between resolution, review, and publication.
 
 Only repository collaborators with `write`, `maintain`, or `admin` permission
-can trigger a paid review, and the PR head must be a branch in this repository.
-This intentionally excludes untrusted fork code from the execution environment
-and prevents fork authors from spending the repository owner's API quota.
+can trigger a Codex review, and the PR head must be a branch in this repository.
+This intentionally excludes untrusted fork code from the local execution
+environment and prevents fork authors from spending the repository owner's
+Codex allowance.
 Results contain an event/action/head-SHA marker so reruns do not publish duplicate reviews. New
 commits, Ready/Reopen transitions, and human replies have distinct keys and
 therefore trigger fresh reviews.
@@ -89,11 +93,23 @@ The following repository settings are required:
 
 1. Actions enabled, with explicit per-workflow permissions retained.
 2. GitHub Actions may create pull-request reviews.
-3. Secret `OPENAI_API_KEY` contains a project-scoped OpenAI API key.
-4. Variable `AGENT_PR_REVIEW_ENABLED` is `true` only after the secret is ready.
+3. A repository-scoped Windows self-hosted runner is online with labels
+   `agent-luotianyi-review` and `codex-chatgpt-auth`.
+4. The runner account's Codex CLI reports `Logged in using ChatGPT`; neither
+   `OPENAI_API_KEY` nor `CODEX_API_KEY` may be present in the review job.
+5. Variable `AGENT_PR_REVIEW_ENABLED` is `true` only after the runner and
+   ChatGPT-auth preflight are ready.
 
-Keep the variable `false` while rotating or removing the key. Never store a
-ChatGPT/Codex desktop login token or `auth.json` in GitHub Secrets.
+Keep the variable `false` while the runner is offline or its ChatGPT login needs
+renewal. Never store a ChatGPT/Codex desktop login token or `auth.json` in
+GitHub Secrets. The local runner materializes the trusted policy and runtime
+context beneath `RUNNER_TEMP`, outside the candidate workspace, and removes it
+after each run.
+
+The runner is intentionally not configured as a Windows service under a system
+account because that account would not share the interactive user's Codex
+login. Start it at user logon under the dedicated runner account, or run
+`run.cmd` manually when reviews should be accepted.
 
 ## Verification
 
@@ -105,4 +121,6 @@ node --test .github/codex/tests/review-policy.test.js
 
 Run `actionlint` against `.github/workflows/agent-refactor-review.yml`, validate
 the JSON Schema as Draft 2020-12, and syntax-check every embedded
-`actions/github-script` block before changing the workflow.
+`actions/github-script` block before changing the workflow. The repository's
+`.github/actionlint.yaml` registers the two dedicated self-hosted runner labels;
+keep it synchronized with the labels registered in GitHub.
