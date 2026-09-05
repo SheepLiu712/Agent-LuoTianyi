@@ -18,9 +18,6 @@ name: Agent refactor PR review
   pull_request_review_comment:
     types:
       - created
-  check_suite:
-    types:
-      - completed
   workflow_dispatch:
     inputs:
       pr_number:
@@ -36,7 +33,6 @@ concurrency:
     agent-refactor-review-${{
       github.event.pull_request.number ||
       github.event.issue.number ||
-      github.event.check_suite.pull_requests[0].number ||
       inputs.pr_number ||
       github.run_id
     }}
@@ -47,7 +43,7 @@ jobs:
     if: >-
       vars.AGENT_PR_REVIEW_ENABLED == 'true' &&
       github.actor != 'chatgpt-codex-connector[bot]' &&
-      (github.actor != 'github-actions[bot]' || github.event_name == 'check_suite')
+      github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,29 +57,32 @@ jobs:
       issue_numbers: ${{ steps.resolve.outputs.issue_numbers }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
     steps:
+      - name: Check out trusted review policy
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: master
+          path: .review-automation
+          sparse-checkout: .github/codex
+          persist-credentials: false
+
       - name: Resolve and authorize the pull request
         id: resolve
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
           script: |
-            if (context.eventName === "check_suite") {
-              if (context.payload.check_suite?.app?.slug !== "github-actions") {
-                core.notice("Ignoring a check suite from an untrusted GitHub App.");
-                core.setOutput("eligible", "false");
-                return;
-              }
-            } else {
-              const allowedPermissions = new Set(["admin", "maintain", "write"]);
-              const permission = await github.rest.repos.getCollaboratorPermissionLevel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: context.actor,
-              });
-              if (!allowedPermissions.has(permission.data.permission)) {
-                core.notice(`Ignoring untrusted trigger from ${context.actor}.`);
-                core.setOutput("eligible", "false");
-                return;
-              }
+            const policy = require(
+              `${process.env.GITHUB_WORKSPACE}/.review-automation/.github/codex/scripts/review-policy.js`,
+            );
+            const allowedPermissions = new Set(["admin", "maintain", "write"]);
+            const permission = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: context.actor,
+            });
+            if (!allowedPermissions.has(permission.data.permission)) {
+              core.notice(`Ignoring untrusted trigger from ${context.actor}.`);
+              core.setOutput("eligible", "false");
+              return;
             }
 
             let prNumber = context.payload.pull_request?.number;
@@ -92,15 +91,6 @@ jobs:
             }
             if (!prNumber && context.eventName === "workflow_dispatch") {
               prNumber = Number(context.payload.inputs?.pr_number);
-            }
-            if (!prNumber && context.eventName === "check_suite") {
-              const attachedPulls = context.payload.check_suite?.pull_requests || [];
-              if (attachedPulls.length !== 1) {
-                core.notice(`Ignoring a check suite attached to ${attachedPulls.length} PRs.`);
-                core.setOutput("eligible", "false");
-                return;
-              }
-              prNumber = attachedPulls[0].number;
             }
             if (!Number.isInteger(prNumber) || prNumber <= 0) {
               core.notice("The event is not attached to a pull request.");
@@ -124,20 +114,7 @@ jobs:
               core.setOutput("eligible", "false");
               return;
             }
-            if (
-              context.eventName === "check_suite" &&
-              context.payload.check_suite?.head_sha !== pull.head.sha
-            ) {
-              core.notice(`Ignoring check suite for a SHA other than PR #${prNumber}'s current head.`);
-              core.setOutput("eligible", "false");
-              return;
-            }
-
-            const referencedIssues = new Set();
-            const referenceText = `${pull.title}\n${pull.body || ""}`;
-            for (const match of referenceText.matchAll(/(?:#|issues\/)(\d+)/g)) {
-              referencedIssues.add(Number(match[1]));
-            }
+            let closingIssues = [];
             try {
               const graph = await github.graphql(
                 `query($owner: String!, $repo: String!, $number: Int!) {
@@ -149,28 +126,28 @@ jobs:
                 }`,
                 {owner: context.repo.owner, repo: context.repo.repo, number: prNumber},
               );
-              for (const issue of graph.repository.pullRequest.closingIssuesReferences.nodes) {
-                referencedIssues.add(issue.number);
-              }
+              closingIssues = graph.repository.pullRequest.closingIssuesReferences.nodes;
             } catch (error) {
               core.warning(`Could not read closing issue links: ${error.message}`);
             }
-            const issueNumbers = [...referencedIssues]
-              .filter((number) => number >= 60 && number <= 89)
-              .sort((left, right) => left - right);
-            if (issueNumbers.length === 0) {
-              core.notice(`Ignoring PR #${prNumber}: it does not reference issue #60-#89.`);
+            const issueNumbers = policy.collectRelatedIssueNumbers(
+              pull.title,
+              pull.body,
+              closingIssues,
+              repositoryName,
+            );
+            if (
+              issueNumbers.length === 0 ||
+              issueNumbers.some((number) => number < 60 || number > 89)
+            ) {
+              core.notice(
+                `Ignoring PR #${prNumber}: explicit issue relationships must refer only to #60-#89.`,
+              );
               core.setOutput("eligible", "false");
               return;
             }
 
-            let triggerId = `${context.payload.action || "event"}-${pull.head.sha}`;
-            if (context.payload.comment?.id) triggerId = `comment-${context.payload.comment.id}`;
-            if (context.payload.review?.id) triggerId = `review-${context.payload.review.id}`;
-            if (context.payload.check_suite?.id) {
-              triggerId = `check-suite-${context.payload.check_suite.id}`;
-            }
-            const eventKey = `${context.eventName}:${pull.head.sha}:${triggerId}`;
+            const eventKey = policy.buildEventKey(context.eventName, context.payload, pull.head.sha);
             const marker = `<!-- agent-refactor-review-key:${eventKey} -->`;
 
             const [comments, reviews] = await Promise.all([
@@ -377,13 +354,6 @@ jobs:
                       body: context.payload.review.body,
                     }
                   : null,
-                check_suite: context.payload.check_suite
-                  ? {
-                      id: context.payload.check_suite.id,
-                      conclusion: context.payload.check_suite.conclusion,
-                      head_sha: context.payload.check_suite.head_sha,
-                    }
-                  : null,
               },
             };
             const runtimeDirectory = path.join(
@@ -414,7 +384,6 @@ jobs:
           output-schema-file: .review-automation/.github/codex/review-output.schema.json
           permission-profile: ":workspace"
           safety-strategy: drop-sudo
-          allow-bot-users: github-actions
 
   publish:
     needs:
@@ -428,29 +397,47 @@ jobs:
       contents: write
       issues: write
       pull-requests: write
-      checks: read
     steps:
+      - name: Check out trusted review policy
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: master
+          path: .review-automation
+          sparse-checkout: .github/codex
+          persist-credentials: false
+
       - name: Publish verdict and merge an accepted PR
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          EXPECTED_ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
           REVIEW_EVENT_KEY: ${{ needs.resolve.outputs.event_key }}
           REVIEW_RESULT: ${{ needs.review.outputs.final_message }}
         with:
           script: |
+            const policy = require(
+              `${process.env.GITHUB_WORKSPACE}/.review-automation/.github/codex/scripts/review-policy.js`,
+            );
             const prNumber = Number(process.env.PR_NUMBER);
             let result;
             try {
               result = JSON.parse(process.env.REVIEW_RESULT);
+              policy.assertValidReviewResult(result);
             } catch (error) {
-              core.setFailed(`Codex returned invalid JSON: ${error.message}`);
+              core.setFailed(`Codex returned an invalid review result: ${error.message}`);
               return;
             }
 
             const expectedHead = process.env.EXPECTED_HEAD_SHA;
             if (result.head_sha !== expectedHead) {
               core.setFailed(`Review result used ${result.head_sha}; expected ${expectedHead}.`);
+              return;
+            }
+            const expectedIssues = JSON.parse(process.env.EXPECTED_ISSUE_NUMBERS);
+            const returnedIssues = [...result.issue_numbers].sort((left, right) => left - right);
+            if (JSON.stringify(returnedIssues) !== JSON.stringify(expectedIssues)) {
+              core.setFailed("Review result issue numbers do not match the resolved PR relationships.");
               return;
             }
             const {data: pull} = await github.rest.pulls.get({
@@ -503,53 +490,26 @@ jobs:
               tests,
             ].join("\n");
 
-            const invalidPassTest = result.verdict === "PASS" && (
-              result.tests.length === 0 ||
-              result.tests.some((test) => test.status !== "PASS")
-            );
-            if (result.verdict === "PASS" && invalidPassTest) {
+            const passViolation = policy.passViolation(result);
+            if (passViolation) {
               result.verdict = "CHANGES_REQUESTED";
-              body += "\n\n工作流保护：PASS 必须至少记录一条验证，且所有记录均为 PASS；已拒绝合并。";
+              body += `\n\n工作流保护：${passViolation}；已拒绝合并。`;
             }
 
             if (result.verdict === "PASS" && !pull.draft) {
-              const [checkRuns, reviews] = await Promise.all([
-                github.paginate(github.rest.checks.listForRef, {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  ref: expectedHead,
-                  per_page: 100,
-                }, (response) => response.data.check_runs),
-                github.paginate(github.rest.pulls.listReviews, {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  pull_number: prNumber,
-                  per_page: 100,
-                }),
-              ]);
-              const currentRunPath = `/actions/runs/${context.runId}`;
-              const otherChecks = checkRuns.filter((check) =>
-                !(check.details_url || "").includes(currentRunPath),
+              const reviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                per_page: 100,
+              });
+              const currentHeadChangeRequest = policy.latestHumanChangeRequest(
+                reviews,
+                expectedHead,
               );
-              const pendingCheck = otherChecks.find((check) => check.status !== "completed");
-              const failedCheck = otherChecks.find((check) =>
-                check.status === "completed" &&
-                !new Set(["success", "neutral", "skipped"]).has(check.conclusion),
-              );
-              const currentHeadChangeRequest = reviews.find((review) =>
-                review.user?.type !== "Bot" &&
-                review.state === "CHANGES_REQUESTED" &&
-                review.commit_id === expectedHead,
-              );
-              if (failedCheck) {
-                result.verdict = "CHANGES_REQUESTED";
-                body += `\n\n外部检查 \`${failedCheck.name}\` 为 ${failedCheck.conclusion}，已拒绝合并。`;
-              } else if (currentHeadChangeRequest) {
+              if (currentHeadChangeRequest) {
                 result.verdict = "CHANGES_REQUESTED";
                 body += `\n\n${currentHeadChangeRequest.user.login} 对当前 head 提出了修改请求，已拒绝合并。`;
-              } else if (pendingCheck) {
-                result.verdict = "WAITING";
-                body += `\n\n正在等待外部检查 \`${pendingCheck.name}\`；其 check suite 完成后会自动复审。`;
               }
             }
 
