@@ -15,7 +15,7 @@
 
 ## 本 PR
 
-- PR：[#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90)（完整 Green 根 PR，目标 `refactor/agent`，等待转 Ready 后 owner 复审）
+- PR：[#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90)（完整 Green 根 PR，目标 `refactor/agent`，Ready，等待 owner 复审）
 - 目标：交付已批准的 `TextMessage` 契约测试及足以让该测试通过的最小 `src.domain.agent` 协议实现。
 - 范围：包含 `TextMessage` 公开契约测试；公开导出 `TextMessage`、`StimulusKind.TEXT_MESSAGE`、`StimulusSource.USER` 和四成员单一 `PersistPolicy`；旧 `src.domain.stimulus` 导入并重导出同一 `PersistPolicy`，保持现有调用兼容。
 - 明确不包含：不实现其余 21 个 Stimulus、非法组合校验、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
@@ -122,4 +122,4 @@
 
 ## 下一步
 
-将 PR #90 的标题、正文和状态同步为当前完整 Green 根 PR，转 Ready 并请求 owner 基于最新 head 复审；通过后由 owner squash merge 到 `refactor/agent`。工单 01 的下一可观察行为必须另开新的 TDD 切片。
+owner 复审通过后，由 owner 将 PR #90 squash merge 到 `refactor/agent`。工单 01 的下一可观察行为必须另开新的 TDD 切片。
