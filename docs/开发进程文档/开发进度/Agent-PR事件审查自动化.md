@@ -8,7 +8,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `codex/local-agent-pr-review-schema`，目标 `master`）
+- PR：[#100](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/100)（分支 `codex/local-agent-pr-review-schema`，目标 `master`）
 - 目标：让审查结果 Schema 符合 Codex 结构化输出支持的 JSON Schema 子集。
 - 范围：从模型侧 Schema 移除 `uniqueItems`、格式/范围/长度和条件关键字；这些语义继续由独立 publisher 中的 `assertValidReviewResult` 全量校验，认证、隔离、审查和合并门禁不变。
 - 明确不包含：不使用或配置 `OPENAI_API_KEY`/`CODEX_API_KEY`，不修改 Agent 产品代码、#90/#94 分支、工单范围或测试通过规则。
