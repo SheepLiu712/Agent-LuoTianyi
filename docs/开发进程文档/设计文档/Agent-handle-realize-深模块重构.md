@@ -547,6 +547,154 @@ Agent façade
 
 Façade 负责所有 Handler 都必须遵守的契约。Handler 不重复实现 plan ID、ordinal、sink 校验、公开报告一致性和跨请求幂等。Skill 不知道 stage，也不生成外部协议对象。
 
+#### 6.1.1 目标目录与所有权
+
+目标目录按“稳定职责和依赖方向”组织，不按每个 Stimulus/Action 枚举机械拆类。以下是 contract 阶段必须收束到的包边界；迁移阶段只在首次承载真实代码时创建目录或文件，不提交空包骨架：
+
+```text
+server/src/
+├─ domain/agent/                    # 跨模块公开协议；stage/world/Adapter 可依赖
+│  ├─ stimulus.py                   # Stimulus、InteractionSnapshot、HandleRequest
+│  ├─ planning.py                   # ActionPlan、ActionPlanSink/Receipt
+│  ├─ execution.py                  # Action、ExecutionContext、AgentOutput、OutputSink
+│  └─ reports.py                    # HandlingReport、ExecutionReport、稳定错误
+├─ agent/
+│  ├─ __init__.py                   # 只导出 Agent façade 的公开类型；不重导出内部构造
+│  ├─ facade.py                     # 两个业务接口、校验、取消、观测与结算编排
+│  ├─ factory.py                    # 接收显式依赖并组装内部对象；SystemRuntime 调用
+│  ├─ handlers/
+│  │  ├─ stimulus/                  # handle 侧行为族
+│  │  │  ├─ router.py
+│  │  │  ├─ conversation.py         # 文字/图片/非 Realtime 语音正式回合
+│  │  │  ├─ coordination.py         # typing、图片选择、deadline 等协调信号
+│  │  │  ├─ touch.py                # 触摸快速反应与普通回复回退
+│  │  │  ├─ device.py               # Toy 振动、连接/断开等设备事实
+│  │  │  ├─ proactive.py            # 登录、提醒、动态、日记等主动输入
+│  │  │  ├─ world_activity.py       # world 观察、规划、活动生命周期
+│  │  │  └─ song_knowledge.py       # 候选歌曲知识与学会事实
+│  │  ├─ action/                    # realize 侧 ActionKind 实现
+│  │  │  ├─ router.py
+│  │  │  ├─ communication.py        # Say/Sing 及其音频、表情输出
+│  │  │  ├─ publishing.py           # 动态、回复、日记
+│  │  │  ├─ scheduling.py           # 日程与活动迁移
+│  │  │  ├─ motion.py               # 设备/世界动作
+│  │  │  └─ song_learning.py        # 持久学歌任务派发
+│  │  └─ reflection/                # 只消费 ReflectionJob 的事后处理族
+│  │     ├─ memory.py
+│  │     ├─ context_compaction.py
+│  │     ├─ user_profile.py
+│  │     └─ important_dates.py
+│  ├─ skills/
+│  │  ├─ contracts.py               # 强类型 SkillSet/Skill 输入输出协议
+│  │  ├─ cognitive/                 # Recall、Attention、图片/语音理解、内容生成
+│  │  ├─ mutation/                  # Agent 自有记忆、知识、经验、状态提交
+│  │  ├─ execution/                 # TTS、唱歌、发布、日程、动作等实现能力
+│  │  ├─ reflection/                # 压缩、画像、日期、自动记忆维护能力
+│  │  └─ adapters/                  # 对 subconscious/capabilities 的私有适配
+│  ├─ context/
+│  │  ├─ models.py                  # 临时认知上下文和值对象
+│  │  ├─ scoped_context.py          # Handler 可见的 interaction-scoped accessor
+│  │  ├─ store.py                   # InteractionContextStore 协议
+│  │  └─ in_memory_store.py         # 若首版确有该实现；可替换为持久 Adapter
+│  ├─ planning/
+│  │  ├─ emitter.py                 # PlanEmitter
+│  │  └─ identity.py                # plan ID/fingerprint/ordinal 规则
+│  ├─ ledgers/
+│  │  ├─ models.py
+│  │  ├─ request.py
+│  │  ├─ execution.py
+│  │  └─ persistence.py             # 两个 ledger 共用的持久实现/Adapter
+│  └─ reflection/
+│     ├─ coordinator.py             # settlement notice、可靠 job 调度
+│     ├─ policy.py                  # 是否需要反思及步骤选择
+│     ├─ jobs.py                    # Agent 内部 job/result 强类型
+│     └─ scheduler.py               # shutdown/恢复/重试生命周期
+├─ subconscious/                    # 既有角色认知机制；由 Skill adapter 包装
+└─ capabilities/                    # 既有技术能力；不作为 Agent 外部业务接口
+```
+
+目录表示最终所有权，不要求每个叶文件都保留一个类。若一个行为只有很薄的转发，必须并入同族 Handler/Skill；只有出现独立状态、不变量或替换轴时才继续拆文件。`domain/agent/` 是推荐目标位置；expand 工单可以先在现有 `domain` 文件内增加同等公开协议，待协议稳定后再机械归档，不能为了目录整齐阻塞首个 tracer bullet。
+
+| 包 | 拥有的知识 | 不拥有的知识 |
+| --- | --- | --- |
+| `domain/agent` | 两个公开调用所需的强类型输入、计划、输出、报告、receipt 和稳定错误 | Handler、Skill、数据库、供应商、提示词、模型会话 |
+| `agent/handlers` | 某类刺激或 Action 应走哪条完整流程、何时调用哪些 Skill、如何形成 draft/result | stage 队列、外部 sink 实现、底层供应商协议、跨请求 ID 分配 |
+| `agent/skills` | 可复用的角色语义能力及其强类型输入输出；把 subconscious/capability 细节藏在 adapter 后 | 完整刺激编排、pending settlement、公开 plan/report |
+| `agent/context` | 当前 interaction 的临时认知工作集、检索证据引用、关注点、未完成意图与内部 context revision | stage pending/deadline/连接、长期用户画像、权威 world 状态、数据库 session |
+| `agent/planning` / `agent/ledgers` | 计划身份、幂等事实、接受/执行恢复 | 角色内容决策、Reflection 条件判断 |
+| `agent/reflection` | settlement 后的策略、可靠 job、重试与退出；调用 reflection Handler/Skill | 用户可见 ActionPlan/AgentOutput、stage worker |
+| `subconscious` / `capabilities` | 既有认知机制与技术实现 | 刺激流程、Agent 公开协议、stage settlement |
+
+#### 6.1.2 依赖原则
+
+允许的主依赖方向为：
+
+```text
+Adapter / ChatStage / ToyStage / WorldStage
+  -> domain.agent
+  -> agent façade
+
+agent façade
+  -> handlers + context + planning + ledgers + reflection coordinator
+handlers.stimulus
+  -> skills.cognitive / skills.mutation + context + planning
+handlers.action
+  -> skills.execution + ledgers
+handlers.reflection
+  -> skills.reflection
+skills.adapters
+  -> subconscious / capabilities / narrow infrastructure ports
+SystemRuntime
+  -> agent.factory -> concrete adapters
+```
+
+必须同时遵守以下限制：
+
+1. `agent/__init__.py` 只导出 façade 对外所需的 `Agent` 类型；`factory.py` 只由系统装配代码直接使用且不从包根重导出。外部模块不得从 `agent.handlers`、`agent.skills`、`agent.context`、`agent.planning`、`agent.ledgers` 或 `agent.reflection` 导入任何对象。
+2. stage/world/Adapter 只通过 `domain.agent` 构造协议对象并调用两个业务接口；`domain` 不反向依赖 `agent`、`stage`、`world`、`subconscious` 或 `capabilities`。
+3. Handler 只能依赖同层内部协议、scoped context、PlanEmitter 和按职责分组的 Skill；不得直接依赖 `CapabilityManager`、数据库、供应商 SDK、SystemRuntime 或外部 sink。
+4. Skill 不依赖 Handler、stage、PlanEmitter、ledger 或公开 report；认知、mutation、execution、reflection 四类 Skill 不相互偷渡副作用。确需组合时由上层 Handler 编排，或由一个拥有完整语义的不透明 Skill 在内部组合。
+5. `capabilities` 继续表示 TTS、图片理解、唱歌、动态等技术能力；`agent/skills` 表示“角色为什么、以何种语义使用能力”。二者不是一对一目录镜像。Skill adapter 可调用多个 capability/subconscious 对象，一个 capability 也可被多个 Skill adapter 以不同强类型契约复用。
+6. 不建立 `execute(skill_name: str, payload: dict)`、全局 Skill registry 或通用 `CALL_CAPABILITY`。`SkillSet` 是构造时注入的强类型聚合；仅把某个旧 manager 包一层同名代理不算完成迁移。
+7. `agent/context` 只存 interaction-scoped 临时工作集；长期记忆、用户画像、歌曲知识仍由 subconscious/相应存储拥有，权威 pending 与 revision 仍由 stage 拥有。检索到的长期记忆在 context 中只保存带来源、版本和 TTL 的证据引用或受控快照。
+8. 同一包内避免循环 import；共享值对象向 `domain.agent` 或拥有它的内部低层包下沉，不创建无所有权的 `common.py`/`utils.py`。`factory.py` 只装配，不包含行为分支；系统级对象生命周期仍由 `SystemRuntime.initialize()/shutdown()` 负责。
+
+#### 6.1.3 Handler 与 Skill 的拆分判据
+
+- 新增一种刺激时，先判断它属于现有行为族还是确有新的不变量；只有后者才新增 Handler 文件。Router 做精确注册和未知类型失败，不做内容决策。
+- Handler 的测试价值来自“给定强类型上下文产生何种内部决定/计划”，Skill 的测试价值来自“同一语义能力能否在多个流程复用”；只转发一个方法且不隐藏复杂度的层必须合并。
+- `TouchInteraction` 由专门的 `TouchInteractionHandler` 负责快速反射与普通回复回退，不再归入包含 typing/deadline 的宽泛协调 Handler；它可复用 attention/response Skill，但 `agent/reflex` 不作为第二棵永久目录保留。
+- `ToyVibration`、`DeviceConnected`、`DeviceDisconnected` 由 device 行为族处理；原始采样/去抖仍在 Adapter，不能为了复用触摸把设备协议塞进 touch Handler。
+- Reflection Handler 与 Stimulus/Action Handler 并列为内部入口族，但只有 ReflectionCoordinator 可以创建和投递 `ReflectionJob`。
+
+#### 6.1.4 渐进迁移路线
+
+迁移遵循 expand—migrate—contract，不进行一次性重命名或全目录搬家：
+
+| 阶段 | 对应工单 | 目录/依赖动作 | 完成信号 |
+| --- | --- | --- | --- |
+| 1. 公开协议 expand | 01、02 | 在 `domain` 中增加强类型协议；可先沿用现有文件，稳定后归入 `domain/agent` | 新旧实现都能依赖协议，但没有 Agent 内部类型进入协议 |
+| 2. façade 骨架 | 04 | 建立 `agent/facade.py`、`factory.py` 与 `handlers/*/router.py`；`SystemRuntime` 显式装配 | `get_agent` 只返回两接口 façade；尚未迁移的链可由受控内部适配调用旧实现 |
+| 3. 两个核心纵切 | 05、06 | 建立 `context/`、`planning/`、`ledgers/`，以及首个 stimulus/action Handler 和对应 Skill | 公开 seam 能完成幂等 handle/realize；ledger/context 不被外部 import |
+| 4. 认知与状态 Skill | 08、09、11、12 | 将 `main_chat.py`、`prompt_assembly.py`、`response_parser.py` 中的认知生成逐步收进 `skills/cognitive`；图片/语音走 typed adapter；显式记忆走 `skills/mutation` | stage 不再调用预处理/Recall/记忆业务代理，检索证据只进入 scoped context |
+| 5. Reflection | 13、14 | 建立 `reflection/`、`handlers/reflection`、`skills/reflection`，迁走 stage ReflectionWorker | settlement 只通知 coordinator；压缩/画像/日期/自动记忆不暴露给 stage |
+| 6. 可观察链路迁移 | 07—25 | 按聊天、触摸、主动发言、Toy、WorldStage、歌曲/动态/日记逐链切换；`response_realizer.py` 的语义决定进入 cognitive Skill，TTS/唱歌/媒体实现进入 action Handler + execution Skill | 每条链从两个 façade 接口通过，旧链对该行为无生产调用者 |
+| 7. contract 收束 | 29 | 删除 `agent/reflex`、旧 `LuoTianyiAgent`/AgentRuntime 业务代理、外部 `agent.main_chat` 类型依赖和 capability 旁路；清理临时 adapter | A1—A9 的 import/调用扫描通过，不存在永久双轨 |
+| 8. 集成验收 | 30 | 只从公开入口复验全部行为和九类 clock 链 | 架构、黑盒行为、持久结果与失败语义同时通过 |
+
+现有文件的目标归属遵循下表，不要求在第一个 PR 中机械移动：
+
+| 当前实现 | 目标归属与迁移约束 |
+| --- | --- |
+| `agent/luotianyi_agent.py` | 行为由 façade、stimulus Handler 和 cognitive Skill 吸收；所有调用方迁完后删除旧类，不保留第三个业务入口 |
+| `agent/main_chat.py`、`prompt_assembly.py`、`response_parser.py` | 角色内容理解/生成进入 `skills/cognitive`；跨模块所需的输出协议改用 `domain.agent`，不继续从 `agent.main_chat` 导入内部响应类 |
+| `agent/response_realizer.py` | “说什么/如何分段”的语义选择进入 cognitive Skill；已决定的 TTS、唱歌、预制音频、表情和输出顺序进入 action Handler + `skills/execution` |
+| `agent/reflex/*` | 在工单 15 迁入 `handlers/stimulus/touch.py` 及复用 Skill；工单 29 删除旧包与导出 |
+| `agent/affection_manager.py` | 角色状态读取/变更分别进入 cognitive 或 mutation Skill；若只是 subconscious 的技术实现，由私有 adapter 包装，不留 façade 旁的通用 manager |
+| `agent/text_cleaning.py` | 移入实际拥有该规范化不变量的 cognitive/execution Skill 内部；不得演化为无边界 utils 包 |
+| `capabilities/CapabilityManager` | 迁移期间可作为装配用技术容器，但 Handler 不得依赖；逐项被 typed Skill adapter 取代直接业务调用后，再决定是否保留为纯基础设施聚合 |
+| `agent_runtime` 业务代理与 `CharacterRuntime` | `SystemRuntime` 只保留生命周期、registry 和 façade 获取；工单 29 删除认知/表达/记忆代理及生产使用 |
+
 ### 6.2 `PlanEmitter`
 
 `PlanEmitter` 不是外部 `ActionPlanSink` 的别名。前者是 Agent 内部一次 handle 调用的受限协作者，后者是 stage 提供的计划接收接口：
@@ -582,9 +730,11 @@ Handler 是 Agent 内部“针对一类输入采取哪条流程”的模块。�
 
 | Handler 族 | 含义 | 处理刺激 | 典型内部链 |
 | --- | --- | --- | --- |
-| `ConversationTurnHandler` | 对已提交的文字、图片或非 Realtime 语音形成正式认知与回应 | `TextMessage`、`ImageMessage`、`VoiceMessage` | 预处理/多模态理解 → Recall → Attention → 内容生成 → 计划 |
-| `InteractionSignalHandler` | 根据非内容协调信号决定继续等待还是重评全部 pending，也处理低延迟触摸/设备事实 | `UserTyping`、`ImageSelectionOpened/Closed`、`TouchInteraction`、设备连接/断开 | 等待策略或低延迟规则 → 可选 Attention/短内容 → completed report（保留 pending）或计划 |
-| `ProactiveContentHandler` | 处理主动提醒、动态和日记规划 | `ProactivePromptDue`、`InteractionDeadline`、`DynamicObserved`、`DiaryPlanningDue` | Recall/事实 → 是否表达 → 内容生成 → 计划 |
+| `ConversationTurnHandler` | 对已提交的文字、图片或非 Realtime 语音形成正式认知与回应；Chat 聚合期限到达时基于全部 pending 强制完成同一流程 | `TextMessage`、`ImageMessage`、`VoiceMessage`、Chat 中的 `InteractionDeadline` | 预处理/多模态理解 → Recall → Attention → 内容生成 → 计划 |
+| `InteractionCoordinationHandler` | 根据非内容协调信号决定继续等待还是重评全部 pending | `UserTyping`、`ImageSelectionOpened/Closed` | 等待策略 → completed report（保留 pending）或要求 stage 在新 revision 重评 |
+| `TouchInteractionHandler` | 处理 Chat/Toy 的低延迟触摸反应及普通回复回退 | `TouchInteraction` | 快速候选/Attention → 瞬时计划；失败或未命中时复用普通内容 Skill |
+| `DeviceInteractionHandler` | 处理已由 Adapter 去抖/聚合的设备连接、断开与振动事实 | `ToyVibration`、`DeviceConnected`、`DeviceDisconnected` | 设备事实 → 可选 Attention/短内容 → 表达或动作计划 |
+| `ProactiveContentHandler` | 处理主动提醒、动态和日记规划 | `ProactivePromptDue`、`DynamicObserved`、`DiaryPlanningDue` | Recall/事实 → 是否表达 → 内容生成 → 计划 |
 | `ActivityHandler` | 处理 world 事实、每日规划和已实现的活动生命周期 | `WorldObservation`、`DailyPlanningDue`、`ActivityDue/Started/Observation/Ended` | world 事实 → 状态/日程 Recall → 决策 → 活动/日程计划 |
 | `SongKnowledgeHandler` | 决定是否接纳候选歌曲知识、是否申请学歌，以及如何理解已学会事实 | `SongKnowledgeDiscovered`、`SongLearned` | 核验证据 → Agent 内部知识/经验变更 → 可选学歌或表达计划 |
 
@@ -863,7 +1013,7 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 
 1. Agent 对外业务 interface 固定为 `handle_stimulus` 和 `realize_action_plan`；生命周期只由 AgentRuntime 管理。
 2. 两个方法使用完整类型提示，参数固定命名为 `request / plan_sink` 与 `plan / execution_context / output_sink`。
-3. Agent 内部至少包含 Façade、Handler、Skill、InteractionContextStore、Request Ledger、Execution Ledger 和 ReflectionCoordinator/Handler 的职责，但不要求每类成为顶层包。
+3. Agent 内部包含 Façade、Handler、Skill、InteractionContextStore、Request Ledger、Execution Ledger 和 ReflectionCoordinator/Handler；第 6.1 节给出的目录是最终所有权边界，但只在承载真实实现时创建，不以空包或薄转发满足架构。
 4. Handler 按行为族组织；不同刺激可以走完全不同链路，只共享适用 Skill。
 5. PlanEmitter 是 Handler 的内部协作者，集中分配计划身份、ordinal、校验重投并委托外部 ActionPlanSink。
 6. InteractionSnapshot 当前只包含 Chat、Toy、World 三种强类型变体；不建立统一 BaseStage。
@@ -886,6 +1036,11 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 23. 本 spec 是目标 interface；当前实现文档仍描述事实，未实现前不能把目标方法写成已可调用。
 24. 实现采用 expand—migrate—contract：先增加新协议和 façade，再按可观察链路迁移，所有生产调用方完成后统一删除旧入口；小 PR 不等于允许永久双轨。
 25. 本地 Markdown 工单已完成粒度与 blocker 评审，并一对一发布为 GitHub Issue；本地文件继续作为可版本化底稿，Issue 是开发协作与状态跟踪入口。
+26. `agent/handlers` 按 stimulus、action、reflection 三类内部入口分组；stimulus/action 再按行为族拆分，不为每个枚举建立一层同名转发类。
+27. `agent/skills` 是 Agent 私有的强类型语义能力层，既有 `capabilities` 是技术实现层；Handler 只依赖 Skill，不能直接依赖 `CapabilityManager`，两者不做一对一镜像。
+28. `agent/context` 只保存 interaction-scoped 临时认知工作集和有来源/版本/TTL 的检索证据；stage pending、连接、长期记忆/画像和权威 world 状态不得迁入。
+29. 两个 façade 的跨模块协议归 `domain` 所有；Agent 包根只导出 façade 类型，内部包和 factory 不公开重导出；`SystemRuntime` 作为装配代码直接通过 factory 注入具体 Skill、Store、Ledger 和 Handler registry。
+30. 目录迁移必须按第 6.1.4 节渐进执行：先协议和 façade，后逐链迁移，最后统一删除 `agent/reflex`、旧 AgentRuntime/CharacterRuntime 业务代理和外部 `agent.main_chat` 类型依赖；不得永久双轨。
 
 ## 8. 验收标准
 
@@ -905,8 +1060,9 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 | A6 | 迁移双轨已经删除 | `AgentRuntime.preprocess_chat_event/extract_topic/plan_topic_turn/realize_topic_plan/write_topic_memories/detect_dates_for_topic/update_user_profile_by_context/try_handle_reflex`、`get_character_runtime` 业务使用，以及 world 为角色理解、表达或 Agent 自有状态而直接调用 `CharacterRuntime`/capability 的路径都已从目标调用方移除；机械长任务只能依赖专用技术 seam；不存在“新 façade + 旧业务代理”永久并行 |
 | A7 | 外部只能依赖公开领域协议 | stage 与 world 只依赖公开的强类型 Stimulus、InteractionSnapshot、ActionPlan、ExecutionContext、两个 sink/receipt 和两个 report；不得依赖 `UnreadMessage`、`ExtractedTopic`、`AttentionPlan`、`OneSentenceChat`、`SongSegmentChat` 等 Agent 内部迁移类型 |
 | A8 | 内部异步维护归 Agent | 日期检查、记忆整理、上下文压缩和用户画像更新由 Agent 内部 settlement/Reflection 链调度；stage 不持有 Reflection worker，也不调用这些具体步骤。它们不进入 ActionPlan，不因后台失败改写已经完成的用户输出 |
+| A9 | 包所有权与依赖方向收束 | 最终代码符合 6.1 的目录所有权：外部只依赖 `domain.agent` 与 Agent façade；`agent/__init__.py` 不导出内部对象；Handler 通过强类型 Skill/context/planning/ledger 协作且不直接依赖 capability/数据库/SystemRuntime；Skill 不反向依赖 Handler/stage/report；旧 `agent/reflex`、外部 `agent.main_chat` 类型依赖和无生产必要的过渡 adapter 已删除 |
 
-最终依赖扫描必须能证明：在 `server/src/agent` 与装配代码之外，角色认知调用方只能取得 Agent façade 和公开领域对象；world/capability 的机械任务只能取得为其技术过程定义的窄依赖，不能借此读取 Agent 内部状态或生成角色表达。每个仍存在的旧入口要么已删除，要么没有生产调用者且不再作为公开 interface 导出。仅把旧调用包进另一个同名转发层不满足 A1—A8。
+最终依赖扫描必须能证明：在 `server/src/agent` 与装配代码之外，角色认知调用方只能取得 Agent façade 和公开领域对象；world/capability 的机械任务只能取得为其技术过程定义的窄依赖，不能借此读取 Agent 内部状态或生成角色表达。每个仍存在的旧入口要么已删除，要么没有生产调用者且不再作为公开 interface 导出。仅把旧调用包进另一个同名转发层不满足 A1—A9。
 
 ### 8.2 功能兼容总则
 
@@ -937,7 +1093,7 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 
 ### 8.4 触摸回复验收
 
-触摸仍是 Chat/Toy stage 可提交的 `TouchInteraction`，但所有角色反射逻辑收进 Agent 内部的 `InteractionSignalHandler` 和触摸 Skill；不得保留 `AgentRuntime.try_handle_reflex` 或 Ingress 直接发送 `ChatResponse` 的旁路。
+触摸仍是 Chat/Toy stage 可提交的 `TouchInteraction`，但所有角色反射逻辑收进 Agent 内部的 `TouchInteractionHandler` 和触摸相关 Skill；不得保留 `AgentRuntime.try_handle_reflex` 或 Ingress 直接发送 `ChatResponse` 的旁路。
 
 | 当前分支 | 必须保持的行为 | 目标链路 |
 | --- | --- | --- |
@@ -990,7 +1146,7 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 
 ### 8.7 验收证据要求
 
-后续测试专题需要为 A1—A8 和四类功能链分别选择 interface 级、跨模块集成或少量端到端证据。本轮先锁定以下最低证据形态，不锁定测试文件名、Fake 结构或 PR 切片：
+后续测试专题需要为 A1—A9 和四类功能链分别选择 interface 级、跨模块集成或少量端到端证据。本轮先锁定以下最低证据形态，不锁定测试文件名、Fake 结构或 PR 切片：
 
 - 一份生产调用图或自动依赖扫描，证明没有 Agent 内部类型、AgentRuntime 业务代理、`CharacterRuntime` 或绕过 realize 的角色表达 capability 外部生产调用；
 - 从公开两个 interface 观察零计划、单计划、多计划、取消、旧 revision 拒绝、部分执行和幂等重投；
@@ -1071,7 +1227,7 @@ expand 阶段允许目标 interface 与旧实现暂时并存，但新调用方�
 | [27 B 站事件同步](../../../.scratch/agent-handle-realize/issues/27-bili-event-update.md) | 03 | 6 小时立即运行、抓取/模型解析/EventStore upsert 和纯 world 边界 |
 | [28 过期事件清理](../../../.scratch/agent-handle-realize/issues/28-expired-event-cleanup.md) | 03 | 00:00 失活规则、缓存一致性和纯 EventStore 边界 |
 | [29 删除旧入口与旁路](../../../.scratch/agent-handle-realize/issues/29-contract-old-agent-paths.md) | 07—25 全部迁移工单 | contract：删除旧代理、内部类型外泄、直接 capability 路径并通过依赖扫描 |
-| [30 集成验收](../../../.scratch/agent-handle-realize/issues/30-integrated-acceptance.md) | 26、27、28、29 | 从公开入口证明 A1—A8、全部用户链路和九类 clock action，更新最终文档 |
+| [30 集成验收](../../../.scratch/agent-handle-realize/issues/30-integrated-acceptance.md) | 26、27、28、29 | 从公开入口证明 A1—A9、全部用户链路和九类 clock action，更新最终文档 |
 
 可立即开始的 frontier 只有 01 和 03。02 必须等待 01；04 必须等待 01/02；05 与 06 在 04 完成后可以并行。进入迁移阶段后，Chat、Toy、World 和三个纯机械 world task 可以沿各自 blocker 并行，但所有结果必须合入同一功能集成分支后再开始 29。
 
@@ -1085,7 +1241,7 @@ expand 阶段允许目标 interface 与旧实现暂时并存，但新调用方�
 - 不建立 BaseStage、通用 base 模块或任意 capability 调用协议；
 - 不保证旧 `LuoTianyiAgent`、ReflectionWorker 或 AgentRuntime 业务代理继续作为目标 interface；
 - 不在没有真实替换需求的位置预建 port；
-- 本轮只完成 SPEC、可版本化工单底稿及 GitHub Issue 发布，不执行工单、不写测试或产品实现；
+- 本轮只完成 SPEC、可版本化工单底稿及 GitHub Issue 维护，不执行工单、不写测试或产品实现；
 - 不把本地静态设计视为真实模型、设备或生产环境验收。
 
 ## 12. Further Notes

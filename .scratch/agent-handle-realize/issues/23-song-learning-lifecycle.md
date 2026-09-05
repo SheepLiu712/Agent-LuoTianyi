@@ -12,6 +12,12 @@
 
 SPEC 第 5.2/5.3、6.7、8.6 的 learn_sing_songs 行优先。wishlist 状态、凭据检查、工件有效性、通知文件、new_song event、库刷新和情绪标签细节不清时参考当前 learner/task/tests；中间进度不是 Stimulus，失败不得伪装成 SongLearned。
 
+## Architecture constraints
+
+- RequestSongLearning 归 `agent/handlers/action/song_learning.py` 与 typed execution Skill/持久 dispatch Adapter；机械 learner 保持在 world/capability，不进入 Agent。
+- SongLearned 由 `agent/handlers/stimulus/song_knowledge.py` 处理，LearnedSongExperienceCommit 归 `agent/skills/mutation`；发布/表达分别复用 publishing/communication Action Handler。
+- execution Skill/Adapter 只按已决定语义创建/恢复任务，不重新决定学什么；world learner 只通过稳定完成事实回到 WorldStage，不取得 Agent façade 或内部对象。
+
 ## Scope
 
 - 实现 RequestSongLearning Action Handler/dispatch Adapter，以 learning_job_id/dedup key 持久化任务并由 Execution Ledger 结算。
@@ -28,6 +34,7 @@ SPEC 第 5.2/5.3、6.7、8.6 的 learn_sing_songs 行优先。wishlist 状态、
 - [ ] 只有验证完成产生一次 SongLearned；失败/awaiting/abandoned 只更新 task 状态。
 - [ ] 新 learned 保持通知文件、new_song event、库刷新、情绪标签和每歌动态尝试；各效果独立、幂等、可报告部分失败。
 - [ ] 角色经验写入在 Agent 内，不存在 RecordLearnedSong Action；动态仍经 PublishDynamic realization。
+- [ ] action Handler、mutation Skill、机械 learner 三段依赖单向且可扫描；中间任务对象、凭据和工件路径不进入 Agent context/domain report。
 
 ## Verification
 

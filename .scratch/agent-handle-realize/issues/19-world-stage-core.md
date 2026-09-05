@@ -12,6 +12,13 @@
 
 SPEC 第 4.1—4.4、5.、7、8.1—8.2 节优先。实例生命周期和 world revision 来源不清时参考当前 WorldRuntime/SystemRuntime 组装及 EventStore；不得让 world 直接调用 Agent，也不得把权威 world 状态复制进 Agent context。
 
+## Architecture constraints
+
+- WorldStage 与 `agent/` 平级，是唯一调用 Agent façade 的 world 人格交互协调层；world/world_clock 不导入 façade 或任何 Agent 内部包。
+- world 事实的角色处理归 `agent/handlers/stimulus/world_activity.py`（歌曲等专门事实归其行为族）；Handler 只看到 domain snapshot/引用，不取得 EventStore、WorldRuntime 或 world task。
+- 权威 world/activity/schedule 状态与 revision 留在 owner；`agent/context` 只能存带来源/版本/TTL 的受控证据，不能成为 world 镜像。
+- `SystemRuntime` 显式装配 WorldStage registry 和 Agent factory；不得用全局 service locator 连接两者。
+
 ## Scope
 
 - SystemRuntime 显式装配 WorldStage registry、AgentRuntime 和受限 world/output Adapter，不新增全局查找。
@@ -27,6 +34,7 @@ SPEC 第 4.1—4.4、5.、7、8.1—8.2 节优先。实例生命周期和 world 
 - [ ] WorldSnapshot 只含受控事实引用及 world/activity/schedule revision，不含数据库/任务/连接对象。
 - [ ] world 仍拥有权威事实和 revision；Action 提交点由 owner Adapter 校验 StateDependency。
 - [ ] stage/output sink 不生成角色表达，也不调用 subconscious/capability。
+- [ ] 依赖图为 world→窄投递 seam→WorldStage→domain/façade，且没有 world→Agent/Skill/capability 角色业务旁路。
 
 ## Verification
 

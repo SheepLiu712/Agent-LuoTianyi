@@ -12,6 +12,13 @@
 
 SPEC 第 4.2、5.1、6.1、6.3、7、8.1 节优先。装配细节不清时参考当前 AgentRuntime/角色注册和 SystemRuntime 生命周期；不得把旧代理方法复制到 façade，也不得新增 service locator。需要第三个业务方法时停止并修订 SPEC。
 
+## Architecture constraints
+
+- 建立 `agent/facade.py` 和只负责显式装配的 `agent/factory.py`；`SystemRuntime` 仍是系统 composition root，factory 不包含行为分支或全局查找。
+- 建立 `agent/handlers/stimulus/router.py` 与 `agent/handlers/action/router.py`，只在有首个真实 Handler 时创建对应包；router 精确注册/失败，不做内容决策。
+- `agent/__init__.py` 只导出 façade 对外所需的 `Agent` 类型；factory 不从包根重导出，只由 SystemRuntime 装配代码直接使用。Handler、Skill、context、planning、ledger、reflection 均为私有包，外部生产模块不得导入。
+- 迁移期适配旧实现只能藏在 façade/Handler 之后并有后续删除工单；不得把 `LuoTianyiAgent` 或 `CharacterRuntime` 作为新 façade 字段泄漏。
+
 ## Scope
 
 - 每个启用角色创建并缓存一个 façade，明确绑定角色身份和内部依赖。
@@ -23,6 +30,7 @@ SPEC 第 4.2、5.1、6.1、6.3、7、8.1 节优先。装配细节不清时参考
 
 - [ ] 相同 character ID 返回同一 façade；未知显式 ID 稳定失败且不回退默认角色。
 - [ ] façade 的业务表面只有两个 SPEC 方法；sink 是调用参数，不是额外业务入口。
+- [ ] `agent/__init__.py` 的公开导出检查通过；外部测试和调用方不能取得 Router/Handler/Skill 或旧 runtime 对象。
 - [ ] 未注册 kind、版本不兼容、目标角色或 interaction 不匹配在进入模型/capability 前失败且不消费 pending。
 - [ ] 每个合法 kind 只能匹配一个注册 Handler；未知 kind 不回退通用 LLM。
 - [ ] shutdown 后拒绝新工作，并对已接受内部工作执行完成、可靠保留或明确失败的策略。

@@ -12,6 +12,12 @@
 
 SPEC 第 4.4、5.2/5.3、6.3—6.5、7 节优先。当前代码不存在的活动语义不得从旧 PRD 或猜测扩张；实现只覆盖 SPEC 已列变体和字段。若某个具体活动规则未被 SPEC 定义，先停在协议/通用状态机，不添加产品策略。
 
+## Architecture constraints
+
+- Activity Handler 归 `agent/handlers/stimulus/world_activity.py`，可复用 cognitive Skill，但不调用聊天 pipeline、world owner 或 scheduler。
+- Create/CancelSchedule、TransitionActivity 分别归 `agent/handlers/action/scheduling.py`，PerformMotion 归 motion Action Handler；底层提交由 typed execution Skill/owner Adapter 完成。
+- activity/schedule revision 在 domain StateDependency 中传入并由 owner 校验；不得复制进 Agent context 充当权威状态。
+
 ## Scope
 
 - ActivityHandler 处理每日规划、活动到期、开始、观察和结束事实，复用 Recall/Attention 但不使用聊天 pipeline。
@@ -27,6 +33,7 @@ SPEC 第 4.4、5.2/5.3、6.3—6.5、7 节优先。当前代码不存在的活�
 - [ ] ActivityObservation 只携带规范化事实，供应商/环境原始对象留在 world。
 - [ ] Agent 决定角色计划和表达，world owner 决定权威状态是否仍可提交。
 - [ ] 未定义的 UserJoinedActivity/ActivityInterrupted 和 Call 仍不存在。
+- [ ] stimulus Handler→cognitive Skill 与 action Handler→execution Skill 单向依赖成立，任何 Handler 都不直接导入 world/scheduler/设备 SDK。
 
 ## Verification
 

@@ -12,6 +12,12 @@
 
 SPEC 第 5.2—5.4、6.3—6.5、8.2—8.3 节优先。SPEC 没有描述的 LLM fallback、话题抽取和回复排序细节参考当前 TopicPlanner/TopicReplier/Agent failure tests；不得把旧内部对象加入新公开协议。开发守则要求先从公开 flow 得到真实 Red。
 
+## Architecture constraints
+
+- 正式文字回合归 `agent/handlers/stimulus/conversation.py`；MemoryRecall、AttentionSelection、ResponseComposition 归 `agent/skills/cognitive`，Handler 不直接依赖 subconscious、模型 provider 或 CapabilityManager。
+- Say/Sing realization 归 `agent/handlers/action/communication.py` 与 `agent/skills/execution`；Conversation Handler 只形成 ActionPlanDraft，不实现 TTS/唱歌/输出。
+- 迁移 `main_chat.py`、`prompt_assembly.py`、`response_parser.py` 时按认知语义吸收，不把旧 OneSentenceChat/SongSegmentChat 继续暴露为 stage 类型；必要过渡 adapter 必须私有并由 29 删除。
+
 ## Scope
 
 - 适配 `USER_MESSAGE`/`USER_TEXT` 为 TextMessage，保留非空、长度、角色、client_msg_id、过载和一次持久化校验。
@@ -29,6 +35,7 @@ SPEC 第 5.2—5.4、6.3—6.5、8.2—8.3 节优先。SPEC 没有描述的 LLM 
 - [ ] Say/Sing 输出顺序、文字/TTS/歌曲/表情和持久回复与当前行为等价。
 - [ ] LLM/依赖失败使用稳定错误与现有非空 fallback 语义；不得把异常字符串作为调用方协议。
 - [ ] 文字消息不再调用 AgentRuntime 的 preprocess/extract/plan/realize 业务代理。
+- [ ] ChatStage 不依赖旧/新 Agent 内部响应类；conversation Handler→cognitive Skill、communication Action Handler→execution Skill 的方向可静态证明。
 
 ## Verification
 

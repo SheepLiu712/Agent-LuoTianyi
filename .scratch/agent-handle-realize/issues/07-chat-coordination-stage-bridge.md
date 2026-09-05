@@ -12,6 +12,12 @@
 
 SPEC 第 4.2、5.2、5.4、8.3 节优先。等待秒数、WebSocket 别名和无 pending 行为不清时参考当前 Chat pipeline、listen timer、入口校验和测试；Adapter 只负责协议校验，Agent 不得读取 WebSocket 对象。
 
+## Architecture constraints
+
+- typing、图片选择开/关和 deadline 的 Agent 内判断归 `agent/handlers/stimulus/coordination.py` 行为族；ChatStage 仍拥有 pending、deadline、revision、取消和 stage-bound sink。
+- coordination Handler 只通过 scoped context/强类型策略返回内部决定，不读取 WebSocket、ChatStage 实例或定时器对象，也不直接调用 capability。
+- 生产桥只能依赖 `domain.agent` 与 Agent façade；暂未迁移正文的旧分流必须显式、互斥，并在后续工单删除。
+
 ## Scope
 
 - ChatStage 管理 immutable snapshot、pending ID、interaction revision、handle cancellation、stage-bound plan sink、execution worker 和 output sink。
@@ -28,6 +34,7 @@ SPEC 第 4.2、5.2、5.4、8.3 节优先。等待秒数、WebSocket 别名和无
 - [ ] 三类信号的 HandlingReport 可以 COMPLETED + consumed empty + retained all；stage 只在 revision 仍匹配时应用。
 - [ ] stage-bound sink 只可靠入队，不同步重入 realization；关闭和容量满返回稳定失败。
 - [ ] 同一外部信号不会同时进入新旧两条处理链。
+- [ ] ChatStage 不导入 `agent.handlers/context/planning/ledgers`；coordination Handler 不导入 stage/Adapter/capability。
 
 ## Verification
 

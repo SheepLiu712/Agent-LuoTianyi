@@ -12,6 +12,12 @@
 
 SPEC 第 5.2、5.4、6.2、6.8、8.7 节优先。临时回应文案、是否需要深 Recall 和当前记忆搜索细节只在 SPEC 留白时参考现有 Agent/潜意识；不得引入 `RecallCompleted` Stimulus、可变半计划或递归 handle。
 
+## Architecture constraints
+
+- Recall/Attention 属于 `agent/skills/cognitive`；Conversation Handler 只持有强类型 Skill interface、scoped context 与 PlanEmitter，不接触 subconscious 实例。
+- 检索结果只进入 `agent/context` 的本 request/interaction 工作集，并携带来源、版本和 TTL；不得写进 stage snapshot、公开 report 或 Agent 实例共享字段。
+- Recall future 是当前 handle 的局部内部状态；取消/恢复事实归 façade、PlanEmitter 和 Request Ledger，不新增后台 Stimulus 或通用 future registry。
+
 ## Scope
 
 - Conversation Handler 可启动内部 Recall future，并根据策略通过 PlanEmitter 发射完整临时计划。
@@ -23,6 +29,7 @@ SPEC 第 5.2、5.4、6.2、6.8、8.7 节优先。临时回应文案、是否需�
 
 - [ ] 临时计划和正式计划各自 actions 非空、不可变、可独立 realize，ordinal 连续且 plan ID 重投稳定。
 - [ ] Recall result/future 不出 Agent，不形成新 Stimulus，也不存入 stage。
+- [ ] 检索证据的 scope/provenance/revision/TTL 可验证，两个 interaction 并发时工作集不串用。
 - [ ] Recall 完成前取消时不再 emit 正式计划；已接受临时计划按真实 execution 结算。
 - [ ] Recall 完成后若 interaction revision 已变化，stage sink 拒绝迟到正式计划。
 - [ ] plan sink 背压/关闭产生稳定失败；同 request 重投不重复临时回复或生成不同正式内容。

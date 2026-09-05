@@ -12,6 +12,12 @@
 
 SPEC 第 5.2/5.3、6.3—6.7、8.6 的 dynamic_interaction 行优先。候选查询、线程评论表示、reply/ignore 和状态字段未说明时参考当前 task/dynamics tests；不得让 world 调 AgentRuntime 记忆代理或 CharacterRuntime 生成内容。
 
+## Architecture constraints
+
+- 候选选择/原记录状态归 world；DynamicObserved 的角色处理归 `agent/handlers/stimulus/proactive.py`，图片/回复判断复用 cognitive Skill，记忆写入归 mutation Skill。
+- ReplyDynamic 归 `agent/handlers/action/publishing.py` 与 typed execution Skill；stimulus Handler 不直接发布，world 不直接调用 publish capability。
+- receipt 通过公开 settlement 回写 world 状态；Agent context 只留当前 interaction 受控证据，不持有 world pending 列表或长期记忆副本。
+
 ## Scope
 
 - 每 600 秒的 world task 选择并规范化最多 10 条待回复正文、20 条待回复评论、10/20 条待记忆正文/评论。
@@ -27,6 +33,7 @@ SPEC 第 5.2/5.3、6.3—6.7、8.6 的 dynamic_interaction 行优先。候选查
 - [ ] ReplyDynamic 重投不重复评论；失败只把对应项标 failed，不污染其它项。
 - [ ] 记忆写入/忽略幂等，状态与真实 receipt 一致；同一项不因任务重跑重复记忆。
 - [ ] world 不读取 Agent memory，不生成角色回复，不直接调用 publish capability。
+- [ ] dynamic world task、proactive Handler、mutation Skill、publishing Action Handler 的依赖方向符合 SPEC 6.1，无 CharacterRuntime/AgentRuntime 业务代理旁路。
 
 ## Verification
 

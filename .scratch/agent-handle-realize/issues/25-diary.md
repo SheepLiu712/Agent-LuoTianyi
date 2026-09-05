@@ -12,6 +12,12 @@
 
 SPEC 第 5.2/5.3、6.3—6.5、8.6 的 diary 行优先。Conversation 查询、source identity、解析格式和现有日记去重未说明时参考当前 diary task/capability/tests；不得让 world 直接取得 diary LLM/capability 生成角色内容。
 
+## Architecture constraints
+
+- 用户筛选/阈值/每日去重归 world；DiaryPlanningDue 的角色生成归 `agent/handlers/stimulus/proactive.py` 与 cognitive Skill。
+- WriteDiary 归 `agent/handlers/action/publishing.py` 与 typed execution Skill；world 不取得 diary capability，stimulus Handler 不直接写 dynamic。
+- Conversation 证据以强类型受控引用进入 snapshot/scoped context；数据库 session、完整查询器和长期对话真相源不进入 Agent context。
+
 ## Scope
 
 - 每角色每日 00:00 筛选当日 Conversation 至少 50 条且当天无已发布 diary 的用户；超过 20 人随机取 20。
@@ -27,6 +33,7 @@ SPEC 第 5.2/5.3、6.3—6.5、8.6 的 diary 行优先。Conversation 查询、s
 - [ ] 每用户/日期最多发布一次 private Agent dynamic；重投不重新生成或重复发布。
 - [ ] 不创建独立 diary 表，source identity/visibility 与当前数据兼容。
 - [ ] capability/LLM 不可用时不会把用户标成已创建，created/failed/skipped 统计真实。
+- [ ] world→WorldStage→façade 与 Agent 内 proactive Handler→cognitive Skill/publishing Action Handler→execution Skill 的依赖方向可静态证明。
 
 ## Verification
 

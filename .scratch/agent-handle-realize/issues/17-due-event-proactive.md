@@ -12,6 +12,12 @@
 
 SPEC 第 5.2、8.5、8.6 中 `proactive_topic_check` 行优先。event 筛选字段、trigger key 和 claim 事务不清时参考当前 ProactiveTopicMaker、EventStore 和既有提醒测试；不得增加新事件类型或恢复久别问候。
 
+## Architecture constraints
+
+- EventStore 查询/候选过滤/claim 属于 world/ChatStage；稳定 `ProactivePromptDue` 之后的角色判断归 `agent/handlers/stimulus/proactive.py` 和 cognitive Skill。
+- proactive Handler 不导入 EventStore、WorldClock、ChatStage 或 TopicReplier；它只读取强类型事实/证据并形成计划。
+- Say/Sing 输出继续通过 communication Action Handler + execution Skill，不能让 world task 或 stage 直接调用角色 capability。
+
 ## Scope
 
 - 非首次且当天第一次登录时查询角色 due events，过滤其它角色、其它用户 personal、已通知和不支持类型。
@@ -27,6 +33,7 @@ SPEC 第 5.2、8.5、8.6 中 `proactive_topic_check` 行优先。event 筛选字
 - [ ] 角色/用户过滤发生在 claim 前，personal event 不跨用户。
 - [ ] build/enqueue/cancel 失败释放 claim；登录和周期并发只允许一方取得同一 claim。
 - [ ] 角色化内容、Recall 和 Say/Sing 都经 Agent 两接口；world task 不调用 TopicReplier。
+- [ ] 依赖扫描证明 EventStore/claim 不进入 Agent context，proactive Handler/Skill 不被 stage/world 外部导入。
 
 ## Verification
 

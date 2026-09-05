@@ -12,6 +12,12 @@
 
 SPEC 第 5.3、5.4、6.10、7、8.1 节优先。SPEC 未说明的媒体格式、当前表情映射或唱歌失败细节才参考现有回复对象、realizer、capability 和测试；开发守则决定测试位置与 TDD 流程。发现需要新增 Action/Output kind 时停止并先改 SPEC。
 
+## Architecture constraints
+
+- realization 协议与 01 相同归 `domain` 所有；推荐最终归档到 `server/src/domain/agent/`，本票不因目录整理迁移现有调用方。
+- Action/Output 协议不能引用 Action Handler、execution Skill、Execution Ledger、capability 或供应商媒体对象。
+- `agent/skills/execution` 是后续私有实现层，不得把技术 capability 名称或任意 payload 固化到公开 Action。
+
 ## Scope
 
 - 增加 ActionPlan、StateDependency、ActionPlanSink、PlanReceipt、ExecutionContext、AgentOutputSink、OutputReceipt、ExecutionReport、ActionResult 和稳定错误/状态枚举。
@@ -26,6 +32,7 @@ SPEC 第 5.3、5.4、6.10、7、8.1 节优先。SPEC 未说明的媒体格式、
 - [ ] Say 的 TTS 文本与预制音频互斥；空显示文本只有在存在预制音频时合法；delivery 能区分对话持久输出和瞬时反应。
 - [ ] StateDependency 只能引用明确的 world/activity/schedule 聚合及 revision，ExecutionContext 不携带连接、数据库会话或 revision 字典。
 - [ ] execution/action/output identity、sequence 和重投一致性可以从公开类型验证。
+- [ ] realization 公开协议可在不导入 `agent` 或 `capabilities` 的情况下独立使用和测试。
 - [ ] 旧生产执行链保持可用，本工单不删除旧 Action 类型。
 
 ## Verification

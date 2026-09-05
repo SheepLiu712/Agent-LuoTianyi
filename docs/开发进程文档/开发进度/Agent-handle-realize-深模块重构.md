@@ -1,8 +1,8 @@
 # Agent `handle_stimulus / realize_action_plan` 深模块重构进度
 
-> 最后更新：2026-09-04
+> 最后更新：2026-09-05
 >
-> 当前阶段：实现工单已发布，等待首批开发
+> 当前阶段：实现工单及架构约束已更新，等待首批开发
 >
 > 总体状态：进行中
 
@@ -29,8 +29,11 @@
 - 增加最终架构收束和当前行为兼容的验收标准，详细列出聊天信号、触摸、登录主动发言和全部 `WorldClock` 注册链路；
 - 把整体重构拆为 30 个适合独立上下文和小 PR 的 expand—migrate—contract—accept 工单，写明真实 blocker、验收、验证和不确定时的参考顺序；
 - 工单先保存为独立 Markdown，经用户确认后发布为 GitHub [#60](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/60) 至 [#89](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/89)。
+- 固定 Agent 内 `handlers / skills / context / planning / ledgers / reflection` 的目标目录所有权、允许/禁止依赖和当前文件的渐进迁移路线；
+- 明确 `agent/skills` 是角色语义层、既有 `capabilities` 是技术实现层，二者不一对一镜像，Handler 只能依赖强类型 Skill；
+- 把目录与依赖约束同步到实际承担相应迁移的本地工单和 GitHub Issue，使开发者只读单张工单也不会误建旁路。
 
-本轮只修改 SPEC、本地工单和进度文档，并创建对应 GitHub Issue；不修改产品代码、测试、客户端/网络协议或现有运行行为。
+本轮只修改 SPEC、本地工单、对应 GitHub Issue 和进度文档；不修改产品代码、测试、客户端/网络协议或现有运行行为。
 
 ## 已完成
 
@@ -69,7 +72,13 @@
 - [x] 每个工单写明 `What to build`、blocker、SPEC 优先的决策规则、范围、验收、测试证据、明确不包含和交接要求；
 - [x] SPEC 增加工单执行约定、TDD/小 PR 要求、expand—migrate—contract 顺序、完整依赖表和可立即开始的 frontier；
 - [x] 用户确认无需继续拆分，30 个工单已按依赖顺序发布为 GitHub #60—#89，Issue 内 Blocked by 使用真实编号；
-- [x] 本轮 SPEC 工单化修订和本进度更新。
+- [x] Agent 目标目录按公开 domain 协议、façade、三类 Handler、四类 Skill、临时 context、planning/ledger 和 reflection 协调层明确所有权；
+- [x] 固定 external→domain/façade、Handler→Skill/context/planning/ledger、Skill adapter→subconscious/capability 的单向依赖，并列出禁止的外部内部包导入、Handler 直连 capability/database/runtime 和 Skill 反向依赖；
+- [x] 明确 Handler 行为族拆分标准、Skill 与 capability 的语义/技术边界、context 只保存 interaction-scoped 临时工作集和检索证据；
+- [x] 为 `luotianyi_agent.py`、`main_chat.py`、`response_realizer.py`、`agent/reflex`、`affection_manager.py`、`text_cleaning.py`、CapabilityManager 和 AgentRuntime/CharacterRuntime 写明渐进迁移归属；
+- [x] 增加 A9 包所有权与依赖方向验收门槛，并更新 contract/集成验收工单的 A1—A9 范围；
+- [x] 将目录/依赖/迁移约束同步到受影响的本地工单与 GitHub Issue；纯机械 world 工单继续明确不进入 Agent；
+- [x] 本轮 SPEC 架构规划修订和本进度更新。
 
 ## 待评审与未验证
 
@@ -79,6 +88,7 @@
 - [ ] Agent 自有状态变更与 Reflection 之间的 evidence 去重键、revision 冲突策略只有目标语义，尚未落实；
 - [ ] Reflection 的可靠接受、至少一次投递和 shutdown 保留策略只有目标契约，尚未选择具体 Adapter；
 - [ ] InteractionContextStore、Request Ledger、Execution Ledger 尚未实现，多用户/多 interaction 隔离仍是实现风险；
+- [ ] 目标 `handlers / skills / context / planning / ledgers / reflection` 目录尚未实现；本轮只锁定所有权和迁移顺序，禁止先提交空包骨架宣称完成；
 - [ ] `WorldStage`、world 事实投递和现有 WorldRuntime/WorldClock 的迁移已经拆为工单，但具体实现仍未开始；
 - [ ] 各 ReflectionPolicy 的上下文阈值、证据准入和调度频率尚未选择实现参数；
 - [ ] 各 typed revision 与现有数据库/任务记录的映射尚未验证；
@@ -90,4 +100,4 @@
 
 ## 下一步
 
-SPEC、工单底稿、领域术语和进度已提交并推送到 `refactor/agent`。下一步可并行开始无 blocker 的 #60（handle 输入与结算领域契约）和 #62（冻结 WorldClock 基线）；每张工单仍需独立遵守 TDD 与小 PR 门禁。
+SPEC、工单底稿、领域术语和进度已经补充目录/依赖/迁移约束，对应 GitHub Issue 已同步更新；本次提交推送后，下一步可并行开始无 blocker 的 #60（handle 输入与结算领域契约）和 #62（冻结 WorldClock 基线）。每张工单仍需独立遵守 TDD 与小 PR 门禁。
