@@ -661,9 +661,11 @@ jobs:
               return lines.join("\n");
             };
             const tests = result.tests.length
-              ? result.tests.map((test) =>
-                  `- \`${test.command}\` → **${test.status}**：${test.details}`,
-                ).join("\n")
+              ? result.tests.map((test) => {
+                  const requirement = test.required ? "required" : "optional";
+                  const skip = test.skip_reason ? `，skip_reason=${test.skip_reason}` : "";
+                  return `- \`${test.command}\` → **${test.status}**（${requirement}${skip}）：${test.details}`;
+                }).join("\n")
               : "- 未记录验证命令。";
             let body = [
               marker,

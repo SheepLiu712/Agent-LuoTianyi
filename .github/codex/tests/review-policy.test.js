@@ -16,6 +16,17 @@ const {
 const SHA = "a".repeat(40);
 const BASE_SHA = "b".repeat(40);
 
+function testRecord(overrides = {}) {
+  return {
+    command: "pytest",
+    status: "PASS",
+    details: "passed",
+    required: true,
+    skip_reason: null,
+    ...overrides,
+  };
+}
+
 function validResult(overrides = {}) {
   return {
     phase: "implementation",
@@ -27,7 +38,7 @@ function validResult(overrides = {}) {
     flow_findings: [],
     standards_findings: [],
     spec_findings: [],
-    tests: [{command: "pytest", status: "PASS", details: "passed"}],
+    tests: [testRecord()],
     ...overrides,
   };
 }
@@ -213,6 +224,18 @@ test("validates the complete result contract", () => {
     () => assertValidReviewResult(validResult({target_branch: "dev"})),
     /target branch/,
   );
+  assert.throws(
+    () => assertValidReviewResult(validResult({
+      tests: [testRecord({status: "NOT_RUN", required: true, skip_reason: "external"})],
+    })),
+    /required test cannot be NOT_RUN/,
+  );
+  assert.throws(
+    () => assertValidReviewResult(validResult({
+      tests: [testRecord({status: "NOT_RUN", required: false, skip_reason: null})],
+    })),
+    /skip reason/,
+  );
 });
 
 test("PASS rejects failures but permits explicitly skipped non-required external checks", () => {
@@ -223,18 +246,31 @@ test("PASS rejects failures but permits explicitly skipped non-required external
   );
   assert.match(passViolation(validResult({tests: []})), /test evidence/);
   assert.match(
-    passViolation(validResult({tests: [{command: "pytest", status: "EXPECTED_RED"}]})),
+    passViolation(validResult({tests: [testRecord({status: "EXPECTED_RED"})]})),
     /failed or remained Red/,
   );
   assert.match(
-    passViolation(validResult({tests: [{command: "live crawler", status: "NOT_RUN"}]})),
+    passViolation(validResult({
+      tests: [testRecord({
+        command: "live crawler",
+        status: "NOT_RUN",
+        required: false,
+        skip_reason: "live",
+      })],
+    })),
     /passing test evidence/,
   );
   assert.equal(
     passViolation(validResult({
       tests: [
-        {command: "pytest focused", status: "PASS", details: "passed"},
-        {command: "live crawler", status: "NOT_RUN", details: "not required; external"},
+        testRecord({command: "pytest focused"}),
+        testRecord({
+          command: "live crawler",
+          status: "NOT_RUN",
+          details: "not required; external",
+          required: false,
+          skip_reason: "external",
+        }),
       ],
     })),
     null,

@@ -13,7 +13,7 @@
 - 范围：事件入口、堆叠链解析与固定、父 PR review 上下文、发布前链路复核、子/根 PR 合并目标、显式 `Issue #NN` 关联语法，以及长耗时外部测试的默认跳过规则。
 - 明确不包含：不启用 `AGENT_PR_REVIEW_ENABLED`，不配置或读取 `OPENAI_API_KEY`，不修改 Agent 产品代码或 #90/#94 分支。
 - Red：首轮新增策略测试时 5 项失败，其中显式 Issue 关联未识别，且 `resolvePullChain` 尚不存在；复审新增父层批准和 `NOT_RUN` 门禁测试时 2 项失败，分别证明批准门禁尚不存在、合法外部测试跳过会被误拒。
-- Green：`node --test .github/codex/tests/review-policy.test.js` 为 12 项通过；两个 JavaScript 文件 `node --check` 通过；Workflow YAML 使用 PyYAML 解析通过；`git diff --check` 通过。当前环境没有 `actionlint`，该项未运行。
+- Green：`node --test .github/codex/tests/review-policy.test.js` 为 12 项通过；策略 JavaScript 与三个 `actions/github-script` 块通过语法解析；Workflow YAML 使用 PyYAML 解析通过；`git diff --check` 通过；固定版本 `actionlint` 通过。
 
 ## 已完成
 
@@ -27,14 +27,14 @@
 - 仓库已允许 GitHub Actions 创建 PR review；变量 `AGENT_PR_REVIEW_ENABLED` 已创建并保持为 `false`。
 - 支持根 PR 直接指向 `refactor/agent`，以及同仓库开放父 PR 组成、最终终止于该根 PR 的无环堆叠链。
 - 子 PR 使用直接父 PR 的固定 head 作为审查基线，只能合入父分支；父 PR 更新后必须触发新的完整候选审查。
-- 默认跳过真实学歌、B 站/VCPedia 实时抓取和其他长耗时外部测试，并把跳过项记录为未验证。
+- 默认跳过真实学歌、B 站/VCPedia 实时抓取和其他长耗时外部测试；仅非必需检查可用结构化 `skip_reason` 标成 `NOT_RUN`，必需测试不能靠静态检查通过来绕过。
 - 只有父链每一层的当前 head 都具有可信审核者的有效批准、且没有当前修改请求时，子 PR 才能进入审查；发布前会重新检查，旧 SHA、已撤销批准和新增修改请求都会阻止合并。
 - 显式关联 #60-#89 但目标分支或堆叠拓扑非法的 PR 会收到可操作的流程修改评论，不再被静默忽略。
 
 ## 已验证
 
 - `node --test .github/codex/tests/review-policy.test.js`：共 12 项通过。
-- `actionlint .github/workflows/agent-refactor-review.yml`：未运行；当前环境未安装 `actionlint`。
+- `go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/agent-refactor-review.yml`：通过。
 - Workflow YAML、三个 `actions/github-script` 脚本和 Draft 2020-12 JSON Schema 静态解析：通过。
 - `git diff --check`：通过。
 

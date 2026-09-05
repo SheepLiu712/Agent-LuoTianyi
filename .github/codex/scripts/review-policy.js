@@ -17,7 +17,8 @@ const RESULT_KEYS = [
   "verdict",
 ];
 const FINDING_KEYS = ["detail", "file", "line", "required_change", "severity", "title"];
-const TEST_KEYS = ["command", "details", "status"];
+const TEST_KEYS = ["command", "details", "required", "skip_reason", "status"];
+const TEST_SKIP_REASONS = new Set(["slow", "live", "external", "real_llm"]);
 const TRUSTED_REVIEW_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 const TRUSTED_REVIEW_BOTS = new Set([
   "github-actions[bot]",
@@ -202,9 +203,18 @@ function assertValidReviewResult(result) {
     if (
       !nonEmptyString(test.command) ||
       !nonEmptyString(test.details) ||
+      typeof test.required !== "boolean" ||
       !new Set(["PASS", "FAIL", "EXPECTED_RED", "NOT_RUN"]).has(test.status)
     ) {
       throw new Error("invalid test record");
+    }
+    if (test.status === "NOT_RUN") {
+      if (test.required) throw new Error("a required test cannot be NOT_RUN");
+      if (!TEST_SKIP_REASONS.has(test.skip_reason)) {
+        throw new Error("a NOT_RUN test must have an allowed skip reason");
+      }
+    } else if (test.skip_reason !== null) {
+      throw new Error("a completed test must have a null skip reason");
     }
   }
 }
@@ -222,6 +232,9 @@ function passViolation(result) {
   }
   if (result.tests.some((test) => new Set(["FAIL", "EXPECTED_RED"]).has(test.status))) {
     return "a PASS result cannot contain a test that failed or remained Red";
+  }
+  if (result.tests.some((test) => test.required && test.status === "NOT_RUN")) {
+    return "a PASS result cannot skip a required test";
   }
   if (!result.tests.some((test) => test.status === "PASS")) {
     return "a PASS result must contain passing test evidence";

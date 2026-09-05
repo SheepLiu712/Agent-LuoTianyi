@@ -51,8 +51,10 @@ Verdicts have these effects:
 - `PASS`: approve and squash merge only when at least one test or static check
   passed, no test is `FAIL`/`EXPECTED_RED`, no P0/P1 finding remains, the phase
   is not Red, and no human's latest review on the current head requests changes.
-  A non-required long external check may be `NOT_RUN` only when its reason and
-  unverified scope are recorded;
+  A non-required long external check may be `NOT_RUN` only with
+  `required: false`, a structured `skip_reason` (`slow`, `live`, `external`, or
+  `real_llm`), and its unverified scope recorded; a required check cannot be
+  skipped;
 - `CHANGES_REQUESTED`: publish a request-changes review and do not merge;
 - `WAITING`: publish a comment describing the external condition and do not
   merge. A later authorized human reply or PR update creates a fresh review;

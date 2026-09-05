@@ -70,9 +70,12 @@ fallback, enum member, payload field, or behavior.
      by the Issue/SPEC and the smallest relevant regression set;
    - do not run an unfiltered Server full suite when it can start real song
      learning, live Bilibili/VCPedia fetching, or other long-running external
-     work. Skip `slow`, `live`, `external`, and `real_llm` tests by default;
-     precisely deselect known unmarked live nodes while retaining Fake/offline
-     tests in the same file, and record every skipped path as `NOT_RUN`;
+      work. Skip `slow`, `live`, `external`, and `real_llm` tests by default;
+      precisely deselect known unmarked live nodes while retaining Fake/offline
+      tests in the same file. Each test record must set `required: true` when
+      the Issue/SPEC requires that evidence. `NOT_RUN` is valid only with
+      `required: false` and a structured `skip_reason` of `slow`, `live`,
+      `external`, or `real_llm`; all completed records use `skip_reason: null`;
    - for design, validate links/format/diff consistency; product tests may be
      omitted only when they cannot observe a documentation-only change;
    - never report an interrupted, uncollected, or environment-blocked test as
