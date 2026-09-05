@@ -8,6 +8,14 @@ This glossary defines the project-specific language used when describing a chara
 A logical event that may be perceived by a character, after raw protocol messages and sensor samples have been normalized and aggregated.
 _Avoid_: Raw event, packet, sensor sample
 
+**Stimulus Source**:
+The supplier-independent semantic origin explicitly supplied by the Adapter, Stage, or World that constructs a Stimulus. The Agent does not infer it from the stimulus kind, and delivery mechanisms such as World Clock do not overwrite it.
+_Avoid_: Transport channel, inferred source, kind-source whitelist
+
+**Agent Persistence Decision**:
+The Agent-internal, idempotent decision about whether stimulus content enters conversation history or becomes long-term-memory evidence. It is derived while handling a stimulus and is not supplied by the external caller as part of the Stimulus.
+_Avoid_: Stimulus PersistPolicy, stage persistence flag, Action Plan
+
 **Interaction**:
 A continuous period with a shared context and lifecycle. In the current Agent design it may be a character-user chat, a toy session, or one character's ongoing relationship with a sandbox world.
 _Avoid_: Connection, user session

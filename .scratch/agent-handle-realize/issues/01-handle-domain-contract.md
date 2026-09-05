@@ -21,13 +21,16 @@ SPEC 第 5.2、5.4、7、8.1 节是规范来源。字段或失败语义不清时
 ## Scope
 
 - 增加 `HandleStimulusRequest`、`CancellationToken`、`HandlingReport` 及其稳定枚举和错误族。
-- 增加 SPEC 列出的全部 Stimulus 变体及 Chat、Toy、World 三种 InteractionSnapshot；公共字段、专有字段、时区、引用和 revision 约束必须逐项一致。
+- 增加 SPEC 列出的全部 Stimulus 变体及 Chat、Toy、World 三种 InteractionSnapshot；外部调用方通过具体变体提供 kind，并显式提供 source、ephemeral、公共字段和专有内容；时区、引用和 revision 约束必须逐项一致。
+- 目标强类型 Stimulus 不接受或公开 `PersistPolicy`。该决策由 Agent 内部在后续行为切片实现；本工单只保证 domain interface 不把它重新交给调用方。
 - 在迁移期允许旧 `Stimulus` 并存，但新类型不得继承或包裹任意 Mapping 扩展口；新调用者只导入目标协议。
 - 公开包只导出跨模块协议，不导出 Handler、Skill、ledger、Recall 或模型对象。
 
 ## Acceptance criteria
 
-- [ ] 每个 Stimulus 变体都能通过公开构造入口创建，非法字段、未知 kind/schema、目标角色缺失和 snapshot kind 不匹配返回稳定契约错误。
+- [ ] 每个 Stimulus 变体都能通过公开构造入口创建；字段自身、变体结构、未知 kind/schema、空目标集合和 snapshot 自身非法按 SPEC 返回稳定契约错误。
+- [ ] 构造入口不维护 kind/source/ephemeral 组合白名单；合法字段组成少见组合时仍可构造，不因当前没有生产者而失败。
+- [ ] `src.domain.agent` 的目标 Stimulus 构造参数和公开导出不包含 `PersistPolicy`；迁移期旧协议保持可用。
 - [ ] `UserTyping`、`ImageSelectionOpened/Closed` 可作为不进入 pending 的协调刺激；内容刺激在对应 snapshot pending 中只能出现一次。
 - [ ] HandlingReport 强制满足 considered = consumed ∪ retained 且二者不重叠；`request_status` 与 pending 是否全部消费相互独立。
 - [ ] `interaction_revision` 只表示 stage 交互修订；协议中不存在含义不明的全局 StateVersion。
@@ -37,12 +40,14 @@ SPEC 第 5.2、5.4、7、8.1 节是规范来源。字段或失败语义不清时
 
 ## Verification
 
-- 先从 `domain` 的公开导出写失败契约测试，再写最小实现；测试覆盖每类变体的一个合法样例和代表性的非法组合。
+- 先从 `domain` 的公开导出写失败契约测试，再写最小实现；每类变体覆盖一个合法样例，并只为实际存在的必填、类型、范围、时区、引用或内容为空问题选择最小代表场景。
+- 不对 kind/source/ephemeral 做笛卡尔积，不把当前生产者常用值写成唯一合法组合，也不为尚无可复现失败的字段组合增加测试或实现分支。
 - 记录 focused tests、领域模块回归和类型/静态检查的实际命令与结果；不通过私有构造 helper 证明协议正确。
 
 ## Explicit exclusions
 
 - 不实现 ActionPlan/plan sink、Agent façade、Handler 路由、PlanEmitter、stage 迁移或任何角色回复。
+- 不在本工单实现 Agent 内部持久化策略；其幂等会话记录和记忆候选行为另按 Agent 公开 interface 建立 TDD 切片。
 - 不改变 WebSocket/客户端协议，不删除旧 `Stimulus.payload` 使用者。
 
 ## Handoff
