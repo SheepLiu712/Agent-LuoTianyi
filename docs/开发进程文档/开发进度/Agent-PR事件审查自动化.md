@@ -8,7 +8,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `codex/record-pr-review-branch-migration`，目标 `dev`）
+- PR：[#104](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/104)（分支 `codex/record-pr-review-branch-migration`，目标 `dev`）
 - 目标：记录默认分支迁移和发布分支清理的最终结果。
 - 范围：只更新本进度文档，关联迁移 PR #102 和清理 PR #103 的验证事实。
 - 明确不包含：不修改工作流、审查策略、Agent 产品代码、#90/#94 分支或本机 Runner 配置。
