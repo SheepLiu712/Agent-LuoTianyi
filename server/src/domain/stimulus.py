@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 from uuid import uuid4
+
+from src.domain.agent import PersistPolicy
 
 
 class SourceChannel(str, Enum):
@@ -26,13 +29,6 @@ class StimulusModality(str, Enum):
     WORLD_EVENT = "world_event"
     SYSTEM_EVENT = "system_event"
     UNKNOWN = "unknown"
-
-
-class PersistPolicy(str, Enum):
-    NONE = "none"
-    EPHEMERAL_ONLY = "ephemeral_only"
-    CONVERSATION_ONLY = "conversation_only"
-    CONVERSATION_AND_MEMORY_CANDIDATE = "conversation_and_memory_candidate"
 
 
 @dataclass(frozen=True)
