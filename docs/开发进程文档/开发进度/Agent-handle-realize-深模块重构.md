@@ -15,12 +15,12 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `impl/agent-dm-01-text-message-green`，堆叠目标 `impl/agent-dm-01-handle-contract`）
+- PR：[#94](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/94)（Draft，目标分支 `refactor/agent`）
 - 目标：只实现足以让 PR #90 已批准 `TextMessage` 契约测试通过的最小 `src.domain.agent` 协议切片。
 - 范围：公开导出 `TextMessage`、`StimulusKind.TEXT_MESSAGE`、`StimulusSource.USER` 和四成员单一 `PersistPolicy`；旧 `src.domain.stimulus` 导入并重导出同一 `PersistPolicy`，保持现有调用兼容。
 - 明确不包含：不实现其余 21 个 Stimulus、非法组合校验、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
 - 前置门禁：interface 设计 PR [#91](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/91) 已获 owner 批准并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `661b7d2`。
-- 测试门禁：PR [#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90) 的 Red-only seam 已获 owner 批准，head `c724c1f`；该 PR 保持 Draft、不合并。
+- 测试门禁：PR [#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90) 的 Red-only seam 已获 owner 批准，head `c724c1f`；该 PR 保持 Draft、不单独合并，其测试提交由本 PR 吸收并随 Green 实现一起合回 `refactor/agent`。
 - 验证及结果：Red 为同一 focused 测试因 `ModuleNotFoundError: No module named 'src.domain.agent'` 收集失败；实现后 focused 测试为 `1 passed in 0.15s`，`tests/domain -q` 为 `1 passed in 0.14s`，相关文件 `py_compile`、Ruff 和新增 `src/domain/agent` 的 BasedPyright 均通过；导入检查确认 `src.domain`、`src.domain.agent`、`src.domain.stimulus` 暴露同一个四成员 `PersistPolicy`。Server 全量为 `424 passed, 3 skipped, 17 failed, 2 errors`，失败来自缺失 TTS/图片/唱歌资源、无效外部 API key 和既有无关测试/实现不一致；未运行真实 TTS、设备或生产环境验证。
 
 ## 历史设计轮次目标与范围
@@ -122,4 +122,4 @@
 
 ## 下一步
 
-创建 `TextMessage` 最小 Green 切片的堆叠 Draft PR 并等待 owner 审查。通过后，下一 PR 从公开 domain seam 增加一个新的失败契约场景；其余变体继续按 Red-Green 小步拆分。
+完成 PR #94 retarget 后完整 diff 的验证并等待 owner 复审。通过并合入 `refactor/agent` 后关闭已被吸收的 PR #90；下一 PR 再从公开 domain seam 增加一个新的失败契约场景。
