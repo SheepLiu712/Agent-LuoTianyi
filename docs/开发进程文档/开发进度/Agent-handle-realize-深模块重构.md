@@ -18,10 +18,10 @@
 
 - PR：[#105](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/105)（分支 `docs/agent-dm-01-stimulus-error-contract`，目标 `refactor/agent`，Ready，等待评审）
 - 目标：在编写下一条非法 `TextMessage` 组合 Red 测试前，固定 Stimulus 构造失败的公开异常接口。
-- 范围：定义 `StimulusErrorCode`、`InvalidStimulusError(ValueError)`、稳定 `code / retryable` 字段、直接构造抛出行为和非契约异常文本；同步 domain 当前/目标 interface 边界。
+- 范围：定义 `StimulusErrorCode` 的 `CONTRACT_INVALID_STIMULUS / CONTRACT_UNSUPPORTED_SCHEMA` 两个构造错误码、`InvalidStimulusError(ValueError)`、稳定 `code / retryable` 字段、schema 与一般字段的触发边界、直接构造抛出行为和非契约异常文本；同步 domain 当前/目标 interface 边界。
 - 明确不包含：不写测试或产品实现；不实现 source/persist/ephemeral 校验、其他 Stimulus、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
 - 前置门禁：`TextMessage` 合法构造 PR [#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90) 已获自动审查通过并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `42580dad`。
-- 验证及结果：本 PR 为纯 interface 文档门禁；三份文档均存在且无 Unicode replacement character，关键字段检查确认异常类型、稳定 code/retryable、直接构造抛出和非契约异常文本均已写入，`git diff --check` 通过；未运行 pytest、模型、TTS、GPU、设备或真实外部服务。
+- 验证及结果：本 PR 为纯 interface 文档门禁；三份文档均存在且无 Unicode replacement character，关键字段检查确认异常类型、两个稳定 code、schema 构造校验边界、`retryable=False`、直接构造抛出和非契约异常文本均已写入，`git diff --check` 通过；未运行 pytest、模型、TTS、GPU、设备或真实外部服务。
 
 ## 历史设计轮次目标与范围
 
@@ -124,4 +124,4 @@
 
 ## 下一步
 
-提交 Stimulus 构造错误 interface 设计 PR 并等待评审；通过后另开 Red-only PR，从 `src.domain.agent` 公开导出验证非法 `TextMessage` 组合抛出 `InvalidStimulusError`，并只断言稳定 `code` 与 `retryable`。
+等待 PR #105 重新评审；通过后另开 Red-only PR，从 `src.domain.agent` 公开导出验证非法 `TextMessage` 组合抛出 `InvalidStimulusError`，并只断言稳定 `code` 与 `retryable`。
