@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：实现工单及架构约束已更新，等待首批开发
+> 当前阶段：工单 01 interface SPEC 补充评审
 >
 > 总体状态：进行中
 
@@ -82,7 +82,9 @@
 
 ## 待评审与未验证
 
-- [ ] interface spec 尚未完成用户评审，不能据此开始产品实现；
+- [ ] 工单 01 的 `StimulusKind`、`StimulusSource`、`PersistPolicy` 成员及序列化值已补入 interface SPEC，等待用户评审；
+- [ ] PR #90 的契约测试仍为 Red-only Draft，且有 `CHANGES_REQUESTED`；本 SPEC 门禁通过前不修改该测试、不开始产品实现；
+- [ ] 本文档 PR 只做静态文档检查，未运行 pytest、真实 LLM、TTS、设备或生产环境验证；
 - [ ] `ImageSelectionClosed` 与图片消息到达顺序需要在后续测试/实现讨论中确认；关闭信号本身不携带图片内容；
 - [ ] `RequestSongLearning` 的持久任务 Adapter、任务状态和完成 Stimulus 事务边界尚未选择具体实现；
 - [ ] Agent 自有状态变更与 Reflection 之间的 evidence 去重键、revision 冲突策略只有目标语义，尚未落实；
@@ -96,8 +98,8 @@
 - [ ] `WorldClock` 九类链路来自当前源码和配置的静态盘点，尚未逐项运行真实网络、LLM、唱歌模型或数据库任务；
 - [ ] 当前歌曲抓取与学歌任务仍直接写数据、刷新库或发布动态，与目标 Stimulus 边界不同；
 - [ ] 当前 `Stimulus.payload` 和 `PlannedAction.payload` 仍是任意 Mapping，目标强类型联合尚未实现；
-- [ ] 本轮未运行 pytest、真实 LLM、TTS、设备或生产环境验证；只进行文档静态检查。
+- [ ] 先前整体 SPEC 编写轮次未运行真实 LLM、TTS、设备或生产环境验证；对应实现工单必须分别记录实际验证。
 
 ## 下一步
 
-SPEC、工单底稿、领域术语和进度已经补充目录/依赖/迁移约束，对应 GitHub Issue 已同步更新；本次提交推送后，下一步可并行开始无 blocker 的 #60（handle 输入与结算领域契约）和 #62（冻结 WorldClock 基线）。每张工单仍需独立遵守 TDD 与小 PR 门禁。
+先评审工单 01 的三个公开枚举闭集和序列化值。评审通过后，回到 PR #90 按 review comments 修正首个 `TextMessage` 契约测试并重新记录 Red；测试 seam 获批后才进入最小 Green 实现。
