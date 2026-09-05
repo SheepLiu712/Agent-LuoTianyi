@@ -49,6 +49,10 @@ test("event keys distinguish lifecycle actions and individual replies", () => {
     buildEventKey("issue_comment", {comment: {id: 1}}, SHA),
     buildEventKey("issue_comment", {comment: {id: 2}}, SHA),
   );
+  assert.notEqual(
+    buildEventKey("pull_request_review", {action: "submitted", review: {id: 3}}, SHA),
+    buildEventKey("pull_request_review", {action: "dismissed", review: {id: 3}}, SHA),
+  );
 });
 
 test("validates the complete result contract", () => {

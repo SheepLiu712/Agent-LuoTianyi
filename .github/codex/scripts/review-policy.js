@@ -46,7 +46,7 @@ function collectRelatedIssueNumbers(title, body, closingIssues = [], repository 
 function buildEventKey(eventName, payload, headSha) {
   let triggerId = `${payload.action || "event"}-${headSha}`;
   if (payload.comment?.id) triggerId = `comment-${payload.comment.id}`;
-  if (payload.review?.id) triggerId = `review-${payload.review.id}`;
+  if (payload.review?.id) triggerId = `review-${payload.action || "event"}-${payload.review.id}`;
   return `${eventName}:${headSha}:${triggerId}`;
 }
 

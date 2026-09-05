@@ -1,9 +1,10 @@
 # Agent refactor PR review automation
 
 This automation reviews pull requests targeting `refactor/agent` and linked to
-Issue #60-#89. It reacts to new/updated/ready/reopened PRs, review submissions,
-PR conversation comments, and inline review comments. A successful non-Draft
-review is squash merged; other verdicts are published as a GitHub review.
+Issue #60-#89. It reacts to new/updated/ready/reopened/retargeted PRs, review
+submissions/edits/dismissals, PR conversation comments, and inline review
+comments. A successful non-Draft review is squash merged; other verdicts are
+published as a GitHub review.
 
 The workflow is deliberately split into two privilege domains:
 
