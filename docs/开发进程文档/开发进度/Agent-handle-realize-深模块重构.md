@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：工单 01 契约测试 Draft PR
+> 当前阶段：工单 01 `TextMessage` 最小 Green Draft PR
 >
 > 总体状态：进行中
 
@@ -15,12 +15,13 @@
 
 ## 本 PR
 
-- PR：[#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90)（Draft，`CHANGES_REQUESTED`）
-- 目标：从 `src.domain.agent` 公开导出锁定 `TextMessage` 的首个合法构造与不可变行为，并保留真实 Red 证据。
-- 范围：一个 `TextMessage` 合法样例，逐项验证全部已提供公共/专有字段、固定 kind、不可变语义和不存在任意 `payload` 扩展口。
-- 明确不包含：不增加 `src.domain.agent` 产品实现，不测试其余 21 个 Stimulus、非法组合、InteractionSnapshot、request/report，也不修改旧生产链。
+- PR：待创建（分支 `impl/agent-dm-01-text-message-green`，堆叠目标 `impl/agent-dm-01-handle-contract`）
+- 目标：只实现足以让 PR #90 已批准 `TextMessage` 契约测试通过的最小 `src.domain.agent` 协议切片。
+- 范围：公开导出 `TextMessage`、`StimulusKind.TEXT_MESSAGE`、`StimulusSource.USER` 和四成员单一 `PersistPolicy`；旧 `src.domain.stimulus` 导入并重导出同一 `PersistPolicy`，保持现有调用兼容。
+- 明确不包含：不实现其余 21 个 Stimulus、非法组合校验、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
 - 前置门禁：interface 设计 PR [#91](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/91) 已获 owner 批准并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `661b7d2`。
-- 验证及结果：`conda run -n agent python -m py_compile tests/domain/test_agent_handle_contract.py` 通过；`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败（1 error，0.77s），符合公开协议入口尚未实现的预期 Red；未运行领域回归、全量 pytest、真实 LLM、TTS、设备或生产环境验证。
+- 测试门禁：PR [#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90) 的 Red-only seam 已获 owner 批准，head `c724c1f`；该 PR 保持 Draft、不合并。
+- 验证及结果：Red 为同一 focused 测试因 `ModuleNotFoundError: No module named 'src.domain.agent'` 收集失败；实现后 focused 测试为 `1 passed in 0.15s`，`tests/domain -q` 为 `1 passed in 0.14s`，相关文件 `py_compile`、Ruff 和新增 `src/domain/agent` 的 BasedPyright 均通过；导入检查确认 `src.domain`、`src.domain.agent`、`src.domain.stimulus` 暴露同一个四成员 `PersistPolicy`。Server 全量为 `424 passed, 3 skipped, 17 failed, 2 errors`，失败来自缺失 TTS/图片/唱歌资源、无效外部 API key 和既有无关测试/实现不一致；未运行真实 TTS、设备或生产环境验证。
 
 ## 历史设计轮次目标与范围
 
@@ -95,11 +96,15 @@
 - [x] PR #91 已固定全部 kind 的 `PersistPolicy / ephemeral` 唯一合法组合和表外稳定失败规则，并决定新旧 Stimulus 协议复用单一 `PersistPolicy` 类型；
 - [x] 已删除没有当前生产者的 `StimulusSource.SYSTEM`；同时删除仅表示触发机制、与 source 定义冲突的 `SCHEDULER`；
 - [x] PR #91 已获 owner 批准并 squash merge 到 `refactor/agent`；PR #90 的 interface 前置门禁已经闭合；
-- [ ] 工单 01 当前只增加第一个公开 domain seam 契约测试，尚未实现 `src.domain.agent`；
-- [ ] Red：`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败（1 error，0.77s），符合目标协议入口尚未实现的预期；
+- [x] PR #90 的首个公开 domain seam 契约测试已获 owner 批准；该 Red PR 保持 Draft、不合并；
+- [x] Red：`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败（1 error，0.77s）；
+- [x] Green：同一 focused 命令在最小实现后为 `1 passed in 0.15s`；
+- [x] 已实现 `src.domain.agent` 的 `TextMessage` 最小切片，并让旧 Stimulus 复用同一四成员 `PersistPolicy`；
 - [ ] 工单 01 的其余 Stimulus、InteractionSnapshot、HandleStimulusRequest、CancellationToken、HandlingReport、稳定枚举和错误族测试尚未开始；
-- [ ] PR #90 仍为 Red-only Draft 且有 `CHANGES_REQUESTED`；本轮修正测试 seam 后等待 owner 复审，通过前不开始产品实现；
-- [ ] 本 PR 未运行领域回归、全量 pytest、真实 LLM、TTS、设备或生产环境验证；
+- [x] `tests/domain -q` 为 `1 passed in 0.14s`；Ruff 和新增协议包的 BasedPyright 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整；
+- [ ] Server 全量回归为 `424 passed, 3 skipped, 17 failed, 2 errors`；失败集中在缺失资源/外部凭据和既有无关测试，不是本切片引入，但全量门禁未绿；
+- [ ] no-excuse 检查仅报告旧 `Stimulus` dataclass 未使用 `slots=True`；本切片不顺带改变旧对象布局；
+- [ ] 本 PR 未运行真实 LLM、TTS、设备或生产环境验证；
 - [ ] `ImageSelectionClosed` 与图片消息到达顺序需要在后续测试/实现讨论中确认；关闭信号本身不携带图片内容；
 - [ ] `RequestSongLearning` 的持久任务 Adapter、任务状态和完成 Stimulus 事务边界尚未选择具体实现；
 - [ ] Agent 自有状态变更与 Reflection 之间的 evidence 去重键、revision 冲突策略只有目标语义，尚未落实；
@@ -117,4 +122,4 @@
 
 ## 下一步
 
-修正 PR #90 的首个 `TextMessage` 契约测试并重新确认 Red，随后请求 owner 复审。测试 seam 获批后，下一 PR 只实现足以让该测试通过的最小 `src.domain.agent` 协议切片；其余变体继续按 Red-Green 小步拆分。
+创建 `TextMessage` 最小 Green 切片的堆叠 Draft PR 并等待 owner 审查。通过后，下一 PR 从公开 domain seam 增加一个新的失败契约场景；其余变体继续按 Red-Green 小步拆分。
