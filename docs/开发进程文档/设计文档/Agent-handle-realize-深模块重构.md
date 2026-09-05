@@ -210,6 +210,57 @@ Agent 已由角色 ID 取得，请求不重复携带 `character_id`。请求不�
 | `persist_policy` | `PersistPolicy` | 原始内容是否进入会话记录或成为记忆证据候选 | 由领域枚举表达，不能靠 Handler 猜测 |
 | `ephemeral` | `bool` | 是否只在当前交互窗口内有意义 | 只控制内容生命周期，不改变身份和幂等要求 |
 
+`StimulusKind` 是目标协议的稳定判别枚举。成员名和序列化值固定如下；新增、删除或改值都属于公开协议变更：
+
+| 成员 | 序列化值 | 对应变体 |
+| --- | --- | --- |
+| `TEXT_MESSAGE` | `text_message` | `TextMessage` |
+| `IMAGE_MESSAGE` | `image_message` | `ImageMessage` |
+| `VOICE_MESSAGE` | `voice_message` | `VoiceMessage` |
+| `USER_TYPING` | `user_typing` | `UserTyping` |
+| `IMAGE_SELECTION_OPENED` | `image_selection_opened` | `ImageSelectionOpened` |
+| `IMAGE_SELECTION_CLOSED` | `image_selection_closed` | `ImageSelectionClosed` |
+| `TOUCH_INTERACTION` | `touch_interaction` | `TouchInteraction` |
+| `TOY_VIBRATION` | `toy_vibration` | `ToyVibration` |
+| `DEVICE_CONNECTED` | `device_connected` | `DeviceConnected` |
+| `DEVICE_DISCONNECTED` | `device_disconnected` | `DeviceDisconnected` |
+| `PROACTIVE_PROMPT_DUE` | `proactive_prompt_due` | `ProactivePromptDue` |
+| `INTERACTION_DEADLINE` | `interaction_deadline` | `InteractionDeadline` |
+| `DYNAMIC_OBSERVED` | `dynamic_observed` | `DynamicObserved` |
+| `DIARY_PLANNING_DUE` | `diary_planning_due` | `DiaryPlanningDue` |
+| `WORLD_OBSERVATION` | `world_observation` | `WorldObservation` |
+| `DAILY_PLANNING_DUE` | `daily_planning_due` | `DailyPlanningDue` |
+| `ACTIVITY_DUE` | `activity_due` | `ActivityDue` |
+| `ACTIVITY_STARTED` | `activity_started` | `ActivityStarted` |
+| `ACTIVITY_OBSERVATION` | `activity_observation` | `ActivityObservation` |
+| `ACTIVITY_ENDED` | `activity_ended` | `ActivityEnded` |
+| `SONG_KNOWLEDGE_DISCOVERED` | `song_knowledge_discovered` | `SongKnowledgeDiscovered` |
+| `SONG_LEARNED` | `song_learned` | `SongLearned` |
+
+`StimulusSource` 表达产生领域事实的供应商无关语义来源，不表达 WebSocket、HTTP、蓝牙或具体平台等传输通道：
+
+| 成员 | 序列化值 | 使用边界 |
+| --- | --- | --- |
+| `USER` | `user` | 用户提交的消息、输入协调信号或触摸等用户行为 |
+| `DEVICE` | `device` | 设备聚合后的振动、连接和断开事实 |
+| `WORLD` | `world` | world 规范化的外部事实、活动事实、动态和歌曲事实 |
+| `SCHEDULER` | `scheduler` | 持久 scheduler 到期产生的主动提醒或领域日程事实 |
+| `STAGE` | `stage` | stage 为交互控制产生的 deadline 等协调事实 |
+| `SYSTEM` | `system` | 系统生命周期产生、且确实需要角色认知的事实 |
+
+来源按事实的语义所有者选择，而不是按最后一跳调用者选择。例如 world task 被 `WorldClock` 唤醒后产生的观察仍为 `WORLD`；持久 scheduler 到期直接产生的 `ProactivePromptDue` 为 `SCHEDULER`；`InteractionDeadline` 为 `STAGE`。Adapter 只负责转换，不构成单独的 `ADAPTER` 来源。当前版本不提供 `UNKNOWN`，无法归类的来源必须在进入领域协议前失败。
+
+`PersistPolicy` 的成员和值沿用现有领域语义，目标协议重新声明为稳定闭集：
+
+| 成员 | 序列化值 | 含义 |
+| --- | --- | --- |
+| `NONE` | `none` | 不进入会话记录，也不成为记忆证据候选 |
+| `EPHEMERAL_ONLY` | `ephemeral_only` | 仅允许当前交互窗口使用，不进入持久会话记录 |
+| `CONVERSATION_ONLY` | `conversation_only` | 进入会话记录，但不自动成为长期记忆证据候选 |
+| `CONVERSATION_AND_MEMORY_CANDIDATE` | `conversation_and_memory_candidate` | 进入会话记录，并允许成为长期记忆证据候选 |
+
+expand 阶段允许目标协议枚举与 `server/src/domain/stimulus.py` 中的旧枚举并存，但二者是不同协议类型，调用方不得依赖同名成员可隐式互换。迁移 Adapter 必须显式转换；旧 `SourceChannel` 和 `StimulusModality` 不能作为新协议的 `StimulusSource` 或 `StimulusKind` 使用。旧协议删除仍只由工单 29 负责。
+
 #### 当前版本 Stimulus 强类型变体
 
 当前版本不保留 `payload: Mapping` 作为扩展口。下表中的每个专有字段都给出类型和用途：
