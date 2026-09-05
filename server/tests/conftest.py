@@ -4,9 +4,10 @@ from pathlib import Path
 import pytest
 
 
-_ACTIVE_TEST_FILE = (
-    Path(__file__).parent / "domain" / "test_stimulus_text_message_contract.py"
-).resolve()
+_ACTIVE_TEST_FILES = {
+    (Path(__file__).parent / "domain" / "test_stimulus_text_message_contract.py").resolve(),
+    (Path(__file__).parent / "domain" / "test_stimulus_registered_types_contract.py").resolve(),
+}
 _DEFERRED_TEST_REASON = "现有 Server 测试暂由项目负责人统一处理"
 
 
@@ -29,7 +30,7 @@ def pytest_collection_modifyitems(config, items):
     skip_deferred_test = pytest.mark.skip(reason=_DEFERRED_TEST_REASON)
 
     for item in items:
-        if Path(str(item.path)).resolve() != _ACTIVE_TEST_FILE:
+        if Path(str(item.path)).resolve() not in _ACTIVE_TEST_FILES:
             item.add_marker(skip_deferred_test)
         elif not run_real_llm and "real_llm" in item.keywords:
             item.add_marker(skip_real_llm)

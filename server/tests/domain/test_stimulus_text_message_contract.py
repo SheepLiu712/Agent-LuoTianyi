@@ -59,9 +59,31 @@ def test_agent_domain_exports_registered_contract_without_persistence_policy() -
     assert set(get_args(agent_domain.StimulusErrorCode)) == {
         "CONTRACT_INVALID_STIMULUS",
         "CONTRACT_UNSUPPORTED_SCHEMA",
+        "CONTRACT_STIMULUS_UNAVAILABLE",
     }
     assert {item.name: item.value for item in agent_domain.StimulusKind} == {
         "TEXT_MESSAGE": "text_message",
+        "IMAGE_MESSAGE": "image_message",
+        "VOICE_MESSAGE": "voice_message",
+        "USER_TYPING": "user_typing",
+        "IMAGE_SELECTION_OPENED": "image_selection_opened",
+        "IMAGE_SELECTION_CLOSED": "image_selection_closed",
+        "TOUCH_INTERACTION": "touch_interaction",
+        "TOY_VIBRATION": "toy_vibration",
+        "DEVICE_CONNECTED": "device_connected",
+        "DEVICE_DISCONNECTED": "device_disconnected",
+        "PROACTIVE_PROMPT_DUE": "proactive_prompt_due",
+        "INTERACTION_DEADLINE": "interaction_deadline",
+        "DYNAMIC_OBSERVED": "dynamic_observed",
+        "DIARY_PLANNING_DUE": "diary_planning_due",
+        "WORLD_OBSERVATION": "world_observation",
+        "DAILY_PLANNING_DUE": "daily_planning_due",
+        "ACTIVITY_DUE": "activity_due",
+        "ACTIVITY_STARTED": "activity_started",
+        "ACTIVITY_OBSERVATION": "activity_observation",
+        "ACTIVITY_ENDED": "activity_ended",
+        "SONG_KNOWLEDGE_DISCOVERED": "song_knowledge_discovered",
+        "SONG_LEARNED": "song_learned",
     }
     assert {item.name: item.value for item in agent_domain.StimulusSource} == {
         "USER": "user",
