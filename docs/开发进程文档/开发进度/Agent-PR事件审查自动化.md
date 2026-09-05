@@ -8,11 +8,11 @@
 
 ## 本 PR
 
-- PR：[#99](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/99)（分支 `codex/local-agent-pr-review-cli-flags`，目标 `master`）
-- 目标：修复本机 Codex CLI 拒绝重复 sandbox 配置的问题。
-- 范围：保留 `--approve-for-me` 并移除与其冲突的 `--sandbox workspace-write`；前者在当前 CLI 中已经使用 workspace-write sandbox，其余认证、隔离、审查和合并门禁不变。
+- PR：[#100](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/100)（分支 `codex/local-agent-pr-review-schema`，目标 `master`）
+- 目标：让审查结果 Schema 符合 Codex 结构化输出支持的 JSON Schema 子集。
+- 范围：从模型侧 Schema 移除 `uniqueItems`、格式/范围/长度和条件关键字；这些语义继续由独立 publisher 中的 `assertValidReviewResult` 全量校验，认证、隔离、审查和合并门禁不变。
 - 明确不包含：不使用或配置 `OPENAI_API_KEY`/`CODEX_API_KEY`，不修改 Agent 产品代码、#90/#94 分支、工单范围或测试通过规则。
-- 验证及结果：第二次真实 dispatch [run 33962112250](https://github.com/SheepLiu712/Agent-LuoTianyi/actions/runs/33962112250) 已通过 resolver、本机固定 SHA 拉取、可信上下文构建和 ChatGPT 登录预检；`codex exec` 在模型调用前以退出码 2 拒绝同时使用 `--sandbox` 与 `--approve-for-me`，因此未产生审查或合并。修复后待重新运行静态检查与真实 dispatch；验证期间保持 #90 的人工 `CHANGES_REQUESTED` 合并门禁。
+- 验证及结果：第三次真实 dispatch [run 33962260226](https://github.com/SheepLiu712/Agent-LuoTianyi/actions/runs/33962260226) 已启动 ChatGPT 登录的 `gpt-5.6-sol`，但模型生成前以 `invalid_json_schema` 拒绝 `issue_numbers.uniqueItems`，因此未产生审查或合并。修复后待重新运行静态检查与真实 dispatch；验证期间保持 #90 的人工 `CHANGES_REQUESTED` 合并门禁。
 
 ## 已完成
 
@@ -32,7 +32,7 @@
 - 仓库级 Windows runner `desktop-agent-luotianyi-review` 已注册并以当前用户启动，标签为 `self-hosted/Windows/X64/agent-luotianyi-review/codex-chatgpt-auth`；本机 Codex CLI 当前使用 ChatGPT 登录。
 - 本地 review job 明确拒绝 API-key 环境变量，并通过 `codex exec --ephemeral --ignore-user-config --approve-for-me` 使用本地仓库、SPEC、开发规范和 workspace-write 测试环境。
 - resolver 和 publisher 继续在 GitHub-hosted runner 运行；只有已经通过受信任触发者、同仓库 head、Issue #60-#89 和堆叠链门禁的候选才会派发到本机。
-- PR #97、#98 已 squash merge 到 `master`；第二次真实 dispatch 暴露 CLI 参数冲突后，仓库变量 `AGENT_PR_REVIEW_ENABLED` 已恢复为 `false`，等待本修复合入后再开启复验。
+- PR #97—#99 已 squash merge 到 `master`；第三次真实 dispatch 暴露结构化输出 Schema 不兼容后，仓库变量 `AGENT_PR_REVIEW_ENABLED` 已恢复为 `false`，等待本修复合入后再开启复验。
 
 ## 已验证
 

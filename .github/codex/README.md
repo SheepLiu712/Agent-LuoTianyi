@@ -122,6 +122,13 @@ The local invocation uses `codex exec --approve-for-me`. On the installed CLI,
 that option already selects the workspace-write sandbox and cannot be combined
 with a separate `--sandbox` flag.
 
+`review-output.schema.json` intentionally uses only the structural subset that
+Codex structured outputs accepts. Semantic constraints that the model endpoint
+does not support—such as unique issue numbers, the issue range, SHA formatting,
+non-empty strings, and conditional test skip rules—remain mandatory and are
+revalidated by `review-policy.js` in the separate publisher job before any
+review or merge operation.
+
 ## Verification
 
 Run the policy tests with:
