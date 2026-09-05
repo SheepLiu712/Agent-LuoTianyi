@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：工单 01 `TextMessage` 最小 Green PR，已转 Ready 并等待 owner 复审
+> 当前阶段：工单 01 `TextMessage` 完整 Green 根 PR，等待 owner 复审
 >
 > 总体状态：进行中
 
@@ -15,13 +15,13 @@
 
 ## 本 PR
 
-- PR：[#94](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/94)（Ready，等待 owner 复审；堆叠目标 `impl/agent-dm-01-handle-contract`）
-- 目标：只实现足以让 PR #90 已批准 `TextMessage` 契约测试通过的最小 `src.domain.agent` 协议切片。
-- 范围：公开导出 `TextMessage`、`StimulusKind.TEXT_MESSAGE`、`StimulusSource.USER` 和四成员单一 `PersistPolicy`；旧 `src.domain.stimulus` 导入并重导出同一 `PersistPolicy`，保持现有调用兼容。
+- PR：[#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90)（完整 Green 根 PR，目标 `refactor/agent`，等待转 Ready 后 owner 复审）
+- 目标：交付已批准的 `TextMessage` 契约测试及足以让该测试通过的最小 `src.domain.agent` 协议实现。
+- 范围：包含 `TextMessage` 公开契约测试；公开导出 `TextMessage`、`StimulusKind.TEXT_MESSAGE`、`StimulusSource.USER` 和四成员单一 `PersistPolicy`；旧 `src.domain.stimulus` 导入并重导出同一 `PersistPolicy`，保持现有调用兼容。
 - 明确不包含：不实现其余 21 个 Stimulus、非法组合校验、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
 - 前置门禁：interface 设计 PR [#91](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/91) 已获 owner 批准并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `661b7d2`。
-- 测试门禁：PR [#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90) 的 Red-only seam 已获 owner 批准，head `c724c1f`；本 PR 作为子 PR 合入该父分支后，PR #90 更新为包含已批准测试和最小实现的完整 Green 交付，再重新审查并 squash merge 到 `refactor/agent`。
-- 验证及结果：Red 为同一 focused 测试因 `ModuleNotFoundError: No module named 'src.domain.agent'` 收集失败；实现后 focused 测试为 `1 passed in 0.15s`，`tests/domain -q` 为 `1 passed in 0.14s`，相关文件 `py_compile`、Ruff 和新增 `src/domain/agent` 的 BasedPyright 均通过；导入检查确认 `src.domain`、`src.domain.agent`、`src.domain.stimulus` 暴露同一个四成员 `PersistPolicy`。Server 全量为 `424 passed, 3 skipped, 17 failed, 2 errors`，失败来自缺失 TTS/图片/唱歌资源、无效外部 API key 和既有无关测试/实现不一致；未运行真实 TTS、设备或生产环境验证。
+- 测试与实现门禁：PR #90 的 Red-only seam 已获 owner 批准，head `c724c1f`；最小 Green 子 PR [#94](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/94) 已获 owner 批准，并于 2026-09-05 squash merge 到本分支，合并提交 `3b156739`。旧批准和测试证据不作为当前完整候选的最终依据。
+- 验证及结果：相对当前 `origin/refactor/agent` 的完整候选重新验证：focused 测试 `1 passed in 0.18s`，`tests/domain -q` 为 `1 passed in 0.18s`；相关文件 `py_compile`、Ruff、`src/domain/agent` BasedPyright（0 errors、0 warnings）和 `git diff --check` 均通过；导入检查确认 `src.domain`、`src.domain.agent`、`src.domain.stimulus` 暴露同一个四成员 `PersistPolicy`。离线回归在排除真实图片/TTS/唱歌资源测试、真实 B 站/VCPedia 抓取和 `real_llm` 后为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 用同一命令为 `399 passed, 4 deselected, 6 failed`，六个失败集合一致，分别来自 diary Fake 接口漂移、测试直接调用无效外部 LLM key、已删除的数据库私有 helper、主动话题既有行为差异和项目计划路由测试假设，不是本切片引入。
 
 ## 历史设计轮次目标与范围
 
@@ -96,13 +96,13 @@
 - [x] PR #91 已固定全部 kind 的 `PersistPolicy / ephemeral` 唯一合法组合和表外稳定失败规则，并决定新旧 Stimulus 协议复用单一 `PersistPolicy` 类型；
 - [x] 已删除没有当前生产者的 `StimulusSource.SYSTEM`；同时删除仅表示触发机制、与 source 定义冲突的 `SCHEDULER`；
 - [x] PR #91 已获 owner 批准并 squash merge 到 `refactor/agent`；PR #90 的 interface 前置门禁已经闭合；
-- [x] PR #90 的首个公开 domain seam 契约测试已获 owner 批准；该 Red PR 保持 Draft、不合并；
+- [x] PR #90 的首个公开 domain seam 契约测试已获 owner 批准；PR #94 已将最小 Green 实现 squash merge 到 PR #90，形成当前完整 Green 候选；
 - [x] Red：`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败（1 error，0.77s）；
-- [x] Green：同一 focused 命令在最小实现后为 `1 passed in 0.15s`；
+- [x] Green：同一 focused 命令在当前完整候选上为 `1 passed in 0.18s`；
 - [x] 已实现 `src.domain.agent` 的 `TextMessage` 最小切片，并让旧 Stimulus 复用同一四成员 `PersistPolicy`；
 - [ ] 工单 01 的其余 Stimulus、InteractionSnapshot、HandleStimulusRequest、CancellationToken、HandlingReport、稳定枚举和错误族测试尚未开始；
-- [x] `tests/domain -q` 为 `1 passed in 0.14s`；Ruff 和新增协议包的 BasedPyright 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整；
-- [ ] Server 全量回归为 `424 passed, 3 skipped, 17 failed, 2 errors`；失败集中在缺失资源/外部凭据和既有无关测试，不是本切片引入，但全量门禁未绿；
+- [x] `tests/domain -q` 为 `1 passed in 0.18s`；Ruff、py_compile、BasedPyright 和 `git diff --check` 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整；
+- [ ] 离线回归为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 对照为 `399 passed, 4 deselected, 6 failed`，失败集合一致，未发现本切片新增回归，但仓库默认回归门禁仍未全绿；
 - [ ] no-excuse 检查仅报告旧 `Stimulus` dataclass 未使用 `slots=True`；本切片不顺带改变旧对象布局；
 - [ ] 本 PR 未运行真实 LLM、TTS、设备或生产环境验证；
 - [ ] `ImageSelectionClosed` 与图片消息到达顺序需要在后续测试/实现讨论中确认；关闭信号本身不携带图片内容；
@@ -122,4 +122,4 @@
 
 ## 下一步
 
-保持 PR #94 的合法堆叠 base，等待 owner 复审。通过后 squash merge 到 PR #90 分支；随后重新验证和审查包含测试与实现的 PR #90，再由 PR #90 合入 `refactor/agent`。
+将 PR #90 的标题、正文和状态同步为当前完整 Green 根 PR，转 Ready 并请求 owner 基于最新 head 复审；通过后由 owner squash merge 到 `refactor/agent`。工单 01 的下一可观察行为必须另开新的 TDD 切片。
