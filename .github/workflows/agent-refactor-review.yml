@@ -60,13 +60,31 @@ jobs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
       stack_chain: ${{ steps.resolve.outputs.stack_chain }}
     steps:
-      - name: Check out trusted review policy
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Materialize trusted review policy
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          TRUSTED_SHA: ${{ github.workflow_sha }}
         with:
-          ref: ${{ github.workflow_sha }}
-          path: .review-automation
-          sparse-checkout: .github/codex
-          persist-credentials: false
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const policyPath = ".github/codex/scripts/review-policy.js";
+            const {data} = await github.rest.repos.getContent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: policyPath,
+              ref: process.env.TRUSTED_SHA,
+            });
+            if (Array.isArray(data) || data.type !== "file" || !data.content) {
+              throw new Error("Trusted review policy is not a readable file.");
+            }
+            const destination = path.join(
+              process.env.GITHUB_WORKSPACE,
+              ".review-automation",
+              policyPath,
+            );
+            fs.mkdirSync(path.dirname(destination), {recursive: true});
+            fs.writeFileSync(destination, Buffer.from(data.content, "base64"), {mode: 0o600});
 
       - name: Resolve and authorize the pull request
         id: resolve
@@ -274,43 +292,55 @@ jobs:
     outputs:
       final_message: ${{ steps.codex.outputs.final-message }}
     steps:
-      - name: Check out the pinned target commit
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ needs.resolve.outputs.base_sha }}
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Construct the pinned candidate integration tree
+      - name: Construct the pinned candidate repository
+        id: candidate
         shell: pwsh
         env:
+          CANDIDATE_BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
           CANDIDATE_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          TRUSTED_SHA: ${{ github.workflow_sha }}
         run: |
-          git config user.name "Agent refactor review"
-          git config user.email "agent-refactor-review@users.noreply.github.com"
-          git merge --no-commit --no-ff $env:CANDIDATE_HEAD_SHA
+          $candidateRoot = Join-Path $env:RUNNER_TEMP "agent-refactor-candidate-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          New-Item -ItemType Directory -Path $candidateRoot -Force | Out-Null
+
+          git -C $candidateRoot init
+          git -C $candidateRoot remote add origin "https://github.com/$env:GITHUB_REPOSITORY.git"
+          git -C $candidateRoot fetch --no-tags --no-recurse-submodules origin `
+            $env:CANDIDATE_BASE_SHA $env:CANDIDATE_HEAD_SHA $env:TRUSTED_SHA
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not fetch the pinned base, head, and workflow commits."
+          }
+          git -C $candidateRoot checkout --detach $env:CANDIDATE_BASE_SHA
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not check out the pinned target commit."
+          }
+          git -C $candidateRoot config user.name "Agent refactor review"
+          git -C $candidateRoot config user.email "agent-refactor-review@users.noreply.github.com"
+          git -C $candidateRoot merge --no-commit --no-ff $env:CANDIDATE_HEAD_SHA
           if ($LASTEXITCODE -eq 0) {
             "CANDIDATE_MERGE_CLEAN=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           } else {
             "CANDIDATE_MERGE_CLEAN=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             Write-Warning "The pinned base and head have merge conflicts; Codex will review them."
           }
+          "candidate_root=$candidateRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Materialize the trusted review bundle outside the candidate workspace
         id: trusted
         shell: pwsh
         env:
+          CANDIDATE_ROOT: ${{ steps.candidate.outputs.candidate_root }}
           TRUSTED_SHA: ${{ github.workflow_sha }}
         run: |
           $reviewRoot = Join-Path $env:RUNNER_TEMP "agent-refactor-review-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $archivePath = "$reviewRoot.zip"
           New-Item -ItemType Directory -Path $reviewRoot -Force | Out-Null
 
-          git cat-file -e "$env:TRUSTED_SHA^{commit}"
+          git -C $env:CANDIDATE_ROOT cat-file -e "$env:TRUSTED_SHA^{commit}"
           if ($LASTEXITCODE -ne 0) {
             throw "Trusted workflow commit $env:TRUSTED_SHA is unavailable."
           }
-          git archive --format=zip --output=$archivePath $env:TRUSTED_SHA .github/codex
+          git -C $env:CANDIDATE_ROOT archive --format=zip --output=$archivePath $env:TRUSTED_SHA .github/codex
           if ($LASTEXITCODE -ne 0) {
             throw "Could not archive the trusted review bundle."
           }
@@ -539,6 +569,7 @@ jobs:
         id: codex
         shell: pwsh
         env:
+          CANDIDATE_ROOT: ${{ steps.candidate.outputs.candidate_root }}
           REVIEW_BUNDLE_ROOT: ${{ steps.trusted.outputs.bundle_root }}
           REVIEW_CONTEXT_FILE: ${{ steps.trusted.outputs.context_file }}
           REVIEW_PROMPT_FILE: ${{ steps.trusted.outputs.prompt_file }}
@@ -564,7 +595,7 @@ jobs:
             --ignore-user-config `
             --sandbox workspace-write `
             --approve-for-me `
-            --cd $env:GITHUB_WORKSPACE `
+            --cd $env:CANDIDATE_ROOT `
             --output-schema $env:REVIEW_SCHEMA_FILE `
             --output-last-message $env:REVIEW_RESULT_FILE `
             -
@@ -583,18 +614,21 @@ jobs:
         if: always()
         shell: pwsh
         env:
+          CANDIDATE_ROOT: ${{ steps.candidate.outputs.candidate_root }}
           REVIEW_ROOT: ${{ steps.trusted.outputs.review_root }}
         run: |
-          if (-not $env:REVIEW_ROOT) {
-            exit 0
-          }
-          $reviewRoot = [IO.Path]::GetFullPath($env:REVIEW_ROOT)
           $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
-          if (-not $reviewRoot.StartsWith($runnerTemp, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Refusing to remove a path outside RUNNER_TEMP: $reviewRoot"
-          }
-          if (Test-Path -LiteralPath $reviewRoot) {
-            Remove-Item -LiteralPath $reviewRoot -Recurse -Force
+          foreach ($pathToRemove in @($env:REVIEW_ROOT, $env:CANDIDATE_ROOT)) {
+            if (-not $pathToRemove) {
+              continue
+            }
+            $fullPath = [IO.Path]::GetFullPath($pathToRemove)
+            if (-not $fullPath.StartsWith($runnerTemp, [StringComparison]::OrdinalIgnoreCase)) {
+              throw "Refusing to remove a path outside RUNNER_TEMP: $fullPath"
+            }
+            if (Test-Path -LiteralPath $fullPath) {
+              Remove-Item -LiteralPath $fullPath -Recurse -Force
+            }
           }
 
   publish:
@@ -611,13 +645,31 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - name: Check out trusted review policy
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Materialize trusted review policy
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          TRUSTED_SHA: ${{ github.workflow_sha }}
         with:
-          ref: ${{ github.workflow_sha }}
-          path: .review-automation
-          sparse-checkout: .github/codex
-          persist-credentials: false
+          script: |
+            const fs = require("fs");
+            const path = require("path");
+            const policyPath = ".github/codex/scripts/review-policy.js";
+            const {data} = await github.rest.repos.getContent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              path: policyPath,
+              ref: process.env.TRUSTED_SHA,
+            });
+            if (Array.isArray(data) || data.type !== "file" || !data.content) {
+              throw new Error("Trusted review policy is not a readable file.");
+            }
+            const destination = path.join(
+              process.env.GITHUB_WORKSPACE,
+              ".review-automation",
+              policyPath,
+            );
+            fs.mkdirSync(path.dirname(destination), {recursive: true});
+            fs.writeFileSync(destination, Buffer.from(data.content, "base64"), {mode: 0o600});
 
       - name: Publish verdict and merge an accepted PR
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
