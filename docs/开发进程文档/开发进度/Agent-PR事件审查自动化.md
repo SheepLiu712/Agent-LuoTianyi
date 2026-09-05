@@ -8,11 +8,11 @@
 
 ## 本 PR
 
-- PR：[#97](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/97)（分支 `codex/local-agent-pr-review`，目标 `master`）
-- 目标：把已部署的 API-key/GitHub-hosted Codex 审查改为 ChatGPT 登录、本机测试环境执行的事件审查。
-- 范围：仅将 `review` job 路由到专用 Windows self-hosted runner；使用本机 `codex exec`、ChatGPT 登录预检、可信临时策略目录和结构化输出；保留 GitHub-hosted resolver/publisher、现有门禁、审查标准和合并规则。
+- PR：[#98](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/98)（分支 `codex/local-agent-pr-review-checkout-fix`，目标 `master`）
+- 目标：修复真实 workflow dispatch 在 GitHub-hosted resolver 的 checkout 清理阶段失败。
+- 范围：移除三个 job 的 `actions/checkout`；resolver/publisher 通过 GitHub API 读取固定 workflow SHA 的策略文件，本机 review 在 `RUNNER_TEMP` 原生获取固定 base/head/workflow commit；保留 ChatGPT 登录、本地测试和既有审查/合并门禁。
 - 明确不包含：不使用或配置 `OPENAI_API_KEY`/`CODEX_API_KEY`，不修改 Agent 产品代码、#90/#94 分支、工单范围或测试通过规则。
-- 验证及结果：策略/工作流静态契约测试扩展为 14 项；待重新运行 workflow 静态校验和真实 `workflow_dispatch` 端到端验证；在真实链路通过前保持 `AGENT_PR_REVIEW_ENABLED=false`。
+- 验证及结果：首次真实 dispatch [run 33961947804](https://github.com/SheepLiu712/Agent-LuoTianyi/actions/runs/33961947804) 在 resolver 的 checkout 认证清理阶段失败，原因是历史 `mineflayer` gitlink 没有 `.gitmodules` URL；review/publish 均未运行，未消耗 Codex 用量或合并 PR。修复后待重新运行静态检查与真实 dispatch；验证期间保持 #90 的人工 `CHANGES_REQUESTED` 合并门禁。
 
 ## 已完成
 
@@ -32,6 +32,7 @@
 - 仓库级 Windows runner `desktop-agent-luotianyi-review` 已注册并以当前用户启动，标签为 `self-hosted/Windows/X64/agent-luotianyi-review/codex-chatgpt-auth`；本机 Codex CLI 当前使用 ChatGPT 登录。
 - 本地 review job 明确拒绝 API-key 环境变量，并通过 `codex exec --ephemeral --ignore-user-config --sandbox workspace-write --approve-for-me` 使用本地仓库、SPEC、开发规范和测试环境。
 - resolver 和 publisher 继续在 GitHub-hosted runner 运行；只有已经通过受信任触发者、同仓库 head、Issue #60-#89 和堆叠链门禁的候选才会派发到本机。
+- PR #97 已 squash merge 到 `master`；首次真实 dispatch 暴露 checkout 兼容问题后，仓库变量 `AGENT_PR_REVIEW_ENABLED` 已恢复为 `false`，等待本修复合入后再开启复验。
 
 ## 已验证
 

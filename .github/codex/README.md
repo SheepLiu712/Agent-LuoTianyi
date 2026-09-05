@@ -21,6 +21,13 @@ All jobs load policy, prompt, schema, and publisher checks from the immutable
 `github.workflow_sha` for that run. A moving default branch therefore cannot
 change the contract between resolution, review, and publication.
 
+The workflow deliberately avoids `actions/checkout`. This repository contains
+a historical gitlink without a matching `.gitmodules` URL, which makes the
+action's credential-cleanup step fail even when submodules are disabled. The
+resolver and publisher fetch the single policy file through the GitHub API at
+the trusted workflow SHA. The local review job fetches only the pinned base,
+head, and workflow commits into a run-specific directory below `RUNNER_TEMP`.
+
 Only repository collaborators with `write`, `maintain`, or `admin` permission
 can trigger a Codex review, and the PR head must be a branch in this repository.
 This intentionally excludes untrusted fork code from the local execution

@@ -311,7 +311,9 @@ test("routes the Codex review through the dedicated local ChatGPT-auth runner", 
 
 test("keeps trusted review inputs outside the candidate workspace", () => {
   assert.match(WORKFLOW, /Join-Path \$env:RUNNER_TEMP/);
-  assert.match(WORKFLOW, /git archive --format=zip/);
+  assert.match(WORKFLOW, /git -C \$candidateRoot fetch --no-tags --no-recurse-submodules/);
+  assert.match(WORKFLOW, /git -C \$env:CANDIDATE_ROOT archive --format=zip/);
   assert.match(WORKFLOW, /REVIEW_CONTEXT_FILE: \$\{\{ steps\.trusted\.outputs\.context_file \}\}/);
   assert.match(WORKFLOW, /Refusing to remove a path outside RUNNER_TEMP/);
+  assert.doesNotMatch(WORKFLOW, /uses:\s*actions\/checkout/);
 });
