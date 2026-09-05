@@ -8,7 +8,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `codex/local-agent-pr-review`，目标 `master`）
+- PR：[#97](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/97)（分支 `codex/local-agent-pr-review`，目标 `master`）
 - 目标：把已部署的 API-key/GitHub-hosted Codex 审查改为 ChatGPT 登录、本机测试环境执行的事件审查。
 - 范围：仅将 `review` job 路由到专用 Windows self-hosted runner；使用本机 `codex exec`、ChatGPT 登录预检、可信临时策略目录和结构化输出；保留 GitHub-hosted resolver/publisher、现有门禁、审查标准和合并规则。
 - 明确不包含：不使用或配置 `OPENAI_API_KEY`/`CODEX_API_KEY`，不修改 Agent 产品代码、#90/#94 分支、工单范围或测试通过规则。
