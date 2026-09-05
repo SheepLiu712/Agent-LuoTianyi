@@ -6,7 +6,9 @@ const {
   assertValidReviewResult,
   buildEventKey,
   collectRelatedIssueNumbers,
+  isAgentIssueSet,
   latestHumanChangeRequest,
+  parentApprovalViolation,
   passViolation,
   resolvePullChain,
 } = require("../scripts/review-policy");
@@ -47,6 +49,13 @@ test("recognizes an explicit Issue label without treating casual mentions as rel
     collectRelatedIssueNumbers("Green slice", "- Issue #60\n- Mentions #61 for context", [], "a/b"),
     [60],
   );
+});
+
+test("only a non-empty set wholly inside the Agent issue range is eligible", () => {
+  assert.equal(isAgentIssueSet([60, 89]), true);
+  assert.equal(isAgentIssueSet([]), false);
+  assert.equal(isAgentIssueSet([59, 60]), false);
+  assert.equal(isAgentIssueSet([89, 90]), false);
 });
 
 function pull(number, headRef, baseRef, overrides = {}) {
@@ -138,6 +147,43 @@ test("rejects foreign, closed, and cyclic PR chains", async () => {
   );
 });
 
+test("requires a current-head trusted approval for every stacked parent", () => {
+  const review = (login, state, commitId = SHA, association = "OWNER") => ({
+    user: {login, type: login.endsWith("[bot]") ? "Bot" : "User"},
+    author_association: association,
+    commit_id: commitId,
+    state,
+  });
+
+  assert.equal(parentApprovalViolation([review("alice", "APPROVED")], SHA), null);
+  assert.equal(
+    parentApprovalViolation([review("github-actions[bot]", "APPROVED", SHA, "NONE")], SHA),
+    null,
+  );
+  assert.match(
+    parentApprovalViolation([review("alice", "APPROVED", BASE_SHA)], SHA),
+    /current-head approval/,
+  );
+  assert.match(
+    parentApprovalViolation(
+      [review("alice", "APPROVED"), review("alice", "DISMISSED")],
+      SHA,
+    ),
+    /current-head approval/,
+  );
+  assert.match(
+    parentApprovalViolation(
+      [review("alice", "APPROVED"), review("bob", "CHANGES_REQUESTED")],
+      SHA,
+    ),
+    /changes requested/,
+  );
+  assert.match(
+    parentApprovalViolation([review("outsider", "APPROVED", SHA, "NONE")], SHA),
+    /current-head approval/,
+  );
+});
+
 test("event keys distinguish lifecycle actions and individual replies", () => {
   assert.notEqual(
     buildEventKey("pull_request_target", {action: "ready_for_review"}, BASE_SHA, SHA),
@@ -169,7 +215,7 @@ test("validates the complete result contract", () => {
   );
 });
 
-test("PASS is rejected for Red, blocking findings, or incomplete test evidence", () => {
+test("PASS rejects failures but permits explicitly skipped non-required external checks", () => {
   assert.match(passViolation(validResult({phase: "red_test"})), /Red-stage/);
   assert.match(
     passViolation(validResult({flow_findings: [{severity: "P1"}]})),
@@ -178,7 +224,20 @@ test("PASS is rejected for Red, blocking findings, or incomplete test evidence",
   assert.match(passViolation(validResult({tests: []})), /test evidence/);
   assert.match(
     passViolation(validResult({tests: [{command: "pytest", status: "EXPECTED_RED"}]})),
-    /must pass/,
+    /failed or remained Red/,
+  );
+  assert.match(
+    passViolation(validResult({tests: [{command: "live crawler", status: "NOT_RUN"}]})),
+    /passing test evidence/,
+  );
+  assert.equal(
+    passViolation(validResult({
+      tests: [
+        {command: "pytest focused", status: "PASS", details: "passed"},
+        {command: "live crawler", status: "NOT_RUN", details: "not required; external"},
+      ],
+    })),
+    null,
   );
   assert.equal(
     passViolation(validResult({standards_findings: [{severity: "P2"}]})),

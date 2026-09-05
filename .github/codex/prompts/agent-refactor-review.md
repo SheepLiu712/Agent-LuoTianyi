@@ -56,8 +56,9 @@ fallback, enum member, payload field, or behavior.
    - a child PR may merge only into its direct parent branch. After that merge,
      the parent is a new candidate and must update its phase/progress, rerun its
      full candidate verification, and receive a new review before it can merge;
-   - the PR must implement only its linked Issue #60-#89 scope and blockers must
-     already be merged;
+   - the PR must implement only its linked Issue #60-#89 scope; blockers must
+     already be merged into the fixed point, or appear in the explicitly
+     approved and traceable parent chain described above;
    - requirements and interface design must precede tests; a genuine failing
      test and recorded Red evidence must precede implementation;
    - progress documentation and PR claims must match facts in the diff, commit

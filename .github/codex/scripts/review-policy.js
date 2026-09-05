@@ -18,6 +18,11 @@ const RESULT_KEYS = [
 ];
 const FINDING_KEYS = ["detail", "file", "line", "required_change", "severity", "title"];
 const TEST_KEYS = ["command", "details", "status"];
+const TRUSTED_REVIEW_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const TRUSTED_REVIEW_BOTS = new Set([
+  "github-actions[bot]",
+  "chatgpt-codex-connector[bot]",
+]);
 
 function sameKeys(value, expected) {
   return (
@@ -45,6 +50,16 @@ function collectRelatedIssueNumbers(title, body, closingIssues = [], repository 
     numbers.add(Number(match[1]));
   }
   return [...numbers].sort((left, right) => left - right);
+}
+
+function isAgentIssueSet(issueNumbers, minimum = 60, maximum = 89) {
+  return (
+    Array.isArray(issueNumbers) &&
+    issueNumbers.length > 0 &&
+    issueNumbers.every(
+      (number) => Number.isInteger(number) && number >= minimum && number <= maximum,
+    )
+  );
 }
 
 function pullChainEntry(pull) {
@@ -111,6 +126,27 @@ async function resolvePullChain(
   }
 
   throw new Error("pull-request chain exceeds the maximum depth");
+}
+
+function parentApprovalViolation(reviews, headSha) {
+  const latestByReviewer = new Map();
+  for (const review of reviews) {
+    const login = review.user?.login;
+    const trusted =
+      TRUSTED_REVIEW_ASSOCIATIONS.has(review.author_association) ||
+      TRUSTED_REVIEW_BOTS.has(login);
+    if (trusted && login && review.commit_id === headSha) {
+      latestByReviewer.set(login, review);
+    }
+  }
+  const current = [...latestByReviewer.values()];
+  if (current.some((review) => review.state === "CHANGES_REQUESTED")) {
+    return "a trusted reviewer has changes requested on the parent current head";
+  }
+  if (!current.some((review) => review.state === "APPROVED")) {
+    return "the parent has no trusted current-head approval";
+  }
+  return null;
 }
 
 function buildEventKey(eventName, payload, baseSha, headSha) {
@@ -184,9 +220,11 @@ function passViolation(result) {
   if (findings.some((finding) => finding.severity === "P0" || finding.severity === "P1")) {
     return "a PASS result cannot contain P0/P1 findings";
   }
-  if (result.tests.length === 0) return "a PASS result must contain test evidence";
-  if (result.tests.some((test) => test.status !== "PASS")) {
-    return "every test record in a PASS result must pass";
+  if (result.tests.some((test) => new Set(["FAIL", "EXPECTED_RED"]).has(test.status))) {
+    return "a PASS result cannot contain a test that failed or remained Red";
+  }
+  if (!result.tests.some((test) => test.status === "PASS")) {
+    return "a PASS result must contain passing test evidence";
   }
   return null;
 }
@@ -205,7 +243,9 @@ module.exports = {
   assertValidReviewResult,
   buildEventKey,
   collectRelatedIssueNumbers,
+  isAgentIssueSet,
   latestHumanChangeRequest,
+  parentApprovalViolation,
   passViolation,
   resolvePullChain,
 };

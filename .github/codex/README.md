@@ -41,15 +41,18 @@ pinned head and can merge only into that parent; a root is reviewed relative to
 tree before inspecting or testing it. The prompt and JSON schema define the
 Codex-facing contract. The publishing job independently validates the complete
 output contract, uses the trusted event marker, and validates the head SHA,
-issue set, test evidence, current-head human change requests, and both pinned
-SHAs before it performs any GitHub write. If the target branch advances during
-review, the publisher dispatches a fresh review instead of merging stale evidence.
+issue set, test evidence, current-head change requests, every parent current-head
+approval, and both pinned SHAs before it performs any merge. If the target branch
+advances during review, the publisher dispatches a fresh review instead of
+merging stale evidence.
 
 Verdicts have these effects:
 
-- `PASS`: approve and squash merge only when every recorded test is `PASS`, no
-  P0/P1 finding remains, the phase is not Red, and no human's latest review on
-  the current head requests changes;
+- `PASS`: approve and squash merge only when at least one test or static check
+  passed, no test is `FAIL`/`EXPECTED_RED`, no P0/P1 finding remains, the phase
+  is not Red, and no human's latest review on the current head requests changes.
+  A non-required long external check may be `NOT_RUN` only when its reason and
+  unverified scope are recorded;
 - `CHANGES_REQUESTED`: publish a request-changes review and do not merge;
 - `WAITING`: publish a comment describing the external condition and do not
   merge. A later authorized human reply or PR update creates a fresh review;
@@ -58,9 +61,12 @@ Verdicts have these effects:
 
 ## Acceptance checks
 
-- Events unrelated to an open `refactor/agent` PR explicitly related only to
-  issue #60-#89, or to a valid stacked child whose open parent chain terminates
-  at such a root PR, are ignored before any paid model call.
+- Events unrelated to a PR explicitly related only to issue #60-#89 are ignored
+  before any paid model call. A related PR with an invalid target or stack is
+  rejected with an actionable flow comment instead of being silently ignored.
+- A stacked child enters review only while every parent current head has a
+  trusted current-head approval and no trusted current-head change request;
+  the publisher checks this gate again immediately before merging.
 - External forks, untrusted actors, bot replies, duplicate events, and stale
   head results cannot publish or merge.
 - PR conversation replies and inline review replies are both included in the
