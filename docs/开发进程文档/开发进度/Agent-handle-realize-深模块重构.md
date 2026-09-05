@@ -16,7 +16,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `docs/agent-dm-01-stimulus-error-contract`，目标 `refactor/agent`）
+- PR：[#105](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/105)（分支 `docs/agent-dm-01-stimulus-error-contract`，目标 `refactor/agent`，Ready，等待评审）
 - 目标：在编写下一条非法 `TextMessage` 组合 Red 测试前，固定 Stimulus 构造失败的公开异常接口。
 - 范围：定义 `StimulusErrorCode`、`InvalidStimulusError(ValueError)`、稳定 `code / retryable` 字段、直接构造抛出行为和非契约异常文本；同步 domain 当前/目标 interface 边界。
 - 明确不包含：不写测试或产品实现；不实现 source/persist/ephemeral 校验、其他 Stimulus、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
