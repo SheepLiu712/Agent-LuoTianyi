@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：工单 01 Stimulus 构造错误 interface 设计
+> 当前阶段：工单 01 `TextMessage` 非法持久化组合 Red-only 测试
 >
 > 总体状态：进行中
 
@@ -16,12 +16,12 @@
 
 ## 本 PR
 
-- PR：[#105](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/105)（分支 `docs/agent-dm-01-stimulus-error-contract`，目标 `refactor/agent`，Ready，等待评审）
-- 目标：在编写下一条非法 `TextMessage` 组合 Red 测试前，固定 Stimulus 构造失败的公开异常接口。
-- 范围：定义 `StimulusErrorCode` 的 `CONTRACT_INVALID_STIMULUS / CONTRACT_UNSUPPORTED_SCHEMA` 两个构造错误码、`InvalidStimulusError(ValueError)`、稳定 `code / retryable` 字段、schema 与一般字段的触发边界、直接构造抛出行为和非契约异常文本；同步 domain 当前/目标 interface 边界。
-- 明确不包含：不写测试或产品实现；不实现 source/persist/ephemeral 校验、其他 Stimulus、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
-- 前置门禁：`TextMessage` 合法构造 PR [#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90) 已获自动审查通过并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `42580dad`。
-- 验证及结果：本 PR 为纯 interface 文档门禁；三份文档均存在且无 Unicode replacement character，关键字段检查确认异常类型、两个稳定 code、schema 构造校验边界、`retryable=False`、直接构造抛出和非契约异常文本均已写入，`git diff --check` 通过；未运行 pytest、模型、TTS、GPU、设备或真实外部服务。
+- PR：待创建（分支 `test/agent-dm-01-text-message-validation`，目标 `refactor/agent`，Red-only Draft）
+- 目标：从 `src.domain.agent` 公开接口锁定 `TextMessage` 持久化策略与生命周期不符合唯一矩阵时的稳定构造失败。
+- 范围：参数化覆盖 `NONE/False`、`EPHEMERAL_ONLY/True` 和 `CONVERSATION_AND_MEMORY_CANDIDATE/True` 三个代表性非法组合；断言直接构造抛出 `InvalidStimulusError`，且只读取稳定 `code="CONTRACT_INVALID_STIMULUS"` 与 `retryable=False`。
+- 明确不包含：不写产品实现；不测试 schema、目标角色、字段类型、source、其他 Stimulus、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
+- 前置门禁：Stimulus 构造错误 interface 设计 PR [#105](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/105) 已获自动审查通过并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `b90b29f`。
+- 验证及结果：`conda run -n agent python -m py_compile tests/domain/test_agent_handle_contract.py` 通过；`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q -p no:cacheprovider` 在收集阶段 exit 2，仅因 `ImportError: cannot import name 'InvalidStimulusError' from 'src.domain.agent'` 失败（1 error，0.47s），符合已批准公开错误接口尚未实现的预期 Red；`git diff --check` 通过。本 Red-only PR 未运行产品实现后的 Green 回归或真实外部服务。
 
 ## 历史设计轮次目标与范围
 
@@ -101,7 +101,8 @@
 - [x] Green：同一 focused 命令在当前完整候选上为 `1 passed in 0.18s`；
 - [x] 已实现 `src.domain.agent` 的 `TextMessage` 最小切片，并让旧 Stimulus 复用同一四成员 `PersistPolicy`；
 - [x] 已同步 domain 当前 interface 文档，记录 `src.domain.agent` 公开路径、`TextMessage` 字段与不变量、无副作用及当前仅支持合法构造的校验边界；
-- [ ] Stimulus 构造错误接口设计等待评审；设计通过后才为非法 `TextMessage` 组合编写 Red-only 契约测试；
+- [x] Stimulus 构造错误 interface 设计 PR #105 已通过并合入 `refactor/agent`；
+- [ ] `TextMessage` 非法持久化/生命周期组合 Red-only 契约测试等待评审；
 - [ ] 工单 01 的其余 Stimulus、InteractionSnapshot、HandleStimulusRequest、CancellationToken、HandlingReport、稳定枚举和错误族测试尚未开始；
 - [x] `tests/domain -q` 为 `1 passed in 0.18s`；Ruff、py_compile、BasedPyright 和 `git diff --check` 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整；
 - [ ] 离线回归为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 对照为 `399 passed, 4 deselected, 6 failed`，失败集合一致，未发现本切片新增回归，但仓库默认回归门禁仍未全绿；
@@ -124,4 +125,4 @@
 
 ## 下一步
 
-等待 PR #105 重新评审；通过后另开 Red-only PR，从 `src.domain.agent` 公开导出验证非法 `TextMessage` 组合抛出 `InvalidStimulusError`，并只断言稳定 `code` 与 `retryable`。
+提交 `TextMessage` 非法持久化/生命周期组合 Red-only Draft PR 并等待评审；通过后另开最小 Green 子 PR，只实现 `InvalidStimulusError` 公开接口和该组合校验。

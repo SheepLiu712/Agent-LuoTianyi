@@ -2,7 +2,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from src.domain.agent import PersistPolicy, StimulusKind, StimulusSource, TextMessage
+from src.domain.agent import (
+    InvalidStimulusError,
+    PersistPolicy,
+    StimulusKind,
+    StimulusSource,
+    TextMessage,
+)
 
 
 def test_text_message_constructs_as_immutable_registered_stimulus() -> None:
@@ -37,3 +43,33 @@ def test_text_message_constructs_as_immutable_registered_stimulus() -> None:
     with pytest.raises((AttributeError, TypeError, ValueError)):
         stimulus.text = "被修改的内容"
     assert stimulus.text == "你好，天依"
+
+
+@pytest.mark.parametrize(
+    ("persist_policy", "ephemeral"),
+    [
+        (PersistPolicy.NONE, False),
+        (PersistPolicy.EPHEMERAL_ONLY, True),
+        (PersistPolicy.CONVERSATION_AND_MEMORY_CANDIDATE, True),
+    ],
+)
+def test_text_message_rejects_invalid_persistence_lifetime_combination(
+    persist_policy: PersistPolicy,
+    ephemeral: bool,
+) -> None:
+    with pytest.raises(InvalidStimulusError) as error_info:
+        TextMessage(
+            stimulus_id="stimulus-text-invalid-policy",
+            schema_version=1,
+            occurred_at=datetime(2026, 9, 5, 12, 15, tzinfo=timezone.utc),
+            source=StimulusSource.USER,
+            target_character_ids=("luotianyi",),
+            user_id="user-1",
+            persist_policy=persist_policy,
+            ephemeral=ephemeral,
+            text="你好，天依",
+            client_msg_id="client-message-invalid-policy",
+        )
+
+    assert error_info.value.code == "CONTRACT_INVALID_STIMULUS"
+    assert error_info.value.retryable is False
