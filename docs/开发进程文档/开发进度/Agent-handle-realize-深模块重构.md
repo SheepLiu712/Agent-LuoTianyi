@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：工单 01 `TextMessage` 最小 Green Draft PR
+> 当前阶段：工单 01 `TextMessage` 最小 Green PR，已转 Ready 并等待 owner 复审
 >
 > 总体状态：进行中
 
@@ -15,7 +15,7 @@
 
 ## 本 PR
 
-- PR：[#94](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/94)（Draft，堆叠目标 `impl/agent-dm-01-handle-contract`）
+- PR：[#94](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/94)（Ready，等待 owner 复审；堆叠目标 `impl/agent-dm-01-handle-contract`）
 - 目标：只实现足以让 PR #90 已批准 `TextMessage` 契约测试通过的最小 `src.domain.agent` 协议切片。
 - 范围：公开导出 `TextMessage`、`StimulusKind.TEXT_MESSAGE`、`StimulusSource.USER` 和四成员单一 `PersistPolicy`；旧 `src.domain.stimulus` 导入并重导出同一 `PersistPolicy`，保持现有调用兼容。
 - 明确不包含：不实现其余 21 个 Stimulus、非法组合校验、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
@@ -122,4 +122,4 @@
 
 ## 下一步
 
-保持 PR #94 的合法堆叠 base，转 Ready 并等待 owner 复审。通过后 squash merge 到 PR #90 分支；随后重新验证和审查包含测试与实现的 PR #90，再由 PR #90 合入 `refactor/agent`。
+保持 PR #94 的合法堆叠 base，等待 owner 复审。通过后 squash merge 到 PR #90 分支；随后重新验证和审查包含测试与实现的 PR #90，再由 PR #90 合入 `refactor/agent`。
