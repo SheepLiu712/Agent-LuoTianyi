@@ -64,7 +64,7 @@ jobs:
       - name: Check out trusted review policy
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: master
+          ref: ${{ github.workflow_sha }}
           path: .review-automation
           sparse-checkout: .github/codex
           persist-credentials: false
@@ -226,7 +226,7 @@ jobs:
       - name: Check out trusted review policy
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: master
+          ref: ${{ github.workflow_sha }}
           path: .review-automation
           sparse-checkout: .github/codex
           persist-credentials: false
@@ -428,7 +428,7 @@ jobs:
       - name: Check out trusted review policy
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: master
+          ref: ${{ github.workflow_sha }}
           path: .review-automation
           sparse-checkout: .github/codex
           persist-credentials: false

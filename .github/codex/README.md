@@ -13,6 +13,10 @@ The workflow is deliberately split into two privilege domains:
 - the publish job receives no OpenAI key and is the only job allowed to publish
   a review or squash merge.
 
+All jobs load policy, prompt, schema, and publisher checks from the immutable
+`github.workflow_sha` for that run. A moving default branch therefore cannot
+change the contract between resolution, review, and publication.
+
 Only repository collaborators with `write`, `maintain`, or `admin` permission
 can trigger a paid review, and the PR head must be a branch in this repository.
 This intentionally excludes untrusted fork code from the execution environment
