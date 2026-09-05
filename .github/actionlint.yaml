@@ -1,4 +1,0 @@
-self-hosted-runner:
-  labels:
-    - agent-luotianyi-review
-    - codex-chatgpt-auth
