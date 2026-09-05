@@ -57,6 +57,7 @@
 - 创建这些对象只做字段校验和默认值生成，不产生外部副作用。
 - `TextMessage` 构造后不可变，不提供任意 `payload` 扩展口，并逐项保留调用方提供的公共字段和文字消息专有字段。
 - 当前契约测试只锁定合法样例：`source=USER`、`persist_policy=CONVERSATION_AND_MEMORY_CANDIDATE`、`ephemeral=False`。本切片尚未实现 source/persist/ephemeral 组合校验，因此其他组合当前不会按目标 spec 稳定返回 `CONTRACT_INVALID_STIMULUS`；调用方不得把这种暂未校验视为受支持行为。
+- **目标 interface**：非法 Stimulus 构造将直接抛出公开 `InvalidStimulusError(ValueError)`；一般字段/目标/组合非法时 `code="CONTRACT_INVALID_STIMULUS"`，整数但不受支持的 schema 版本时 `code="CONTRACT_UNSUPPORTED_SCHEMA"`，两者的 `retryable=False`。构造失败发生在 handle 前，不产生 `HandlingReport`；调用方不解析异常文本。该异常与 `StimulusErrorCode` 尚未在当前源码实现，不能提前用于业务代码。
 - 枚举值和字段名属于跨模块协议；修改时必须先更新 spec 和消费者测试。
 - `Stimulus` 默认不持久化。调用方必须显式选择 `PersistPolicy`，不能仅凭消息来源猜测。
 - 构造参数不合法时由 dataclass、枚举或 Pydantic 抛出类型/校验异常，调用方不应静默吞掉。
