@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：工单 01 interface SPEC 补充评审
+> 当前阶段：工单 01 `TextMessage` 完整 Green 根 PR，等待 owner 复审
 >
 > 总体状态：进行中
 
@@ -12,15 +12,17 @@
 - interface spec：[`Agent-handle-realize-深模块重构.md`](../设计文档/Agent-handle-realize-深模块重构.md)
 - 本地工单草案：[`issues/`](../../../.scratch/agent-handle-realize/issues/)
 - 当前 Agent interface：[`agent/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/agent/README.md)
+- 当前 domain interface：[`domain/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/README.md)
 
 ## 本 PR
 
-- PR：[#91](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/91)（Draft，`CHANGES_REQUESTED`）
-- 目标：补齐 Issue #60 开始契约测试前缺失的 Stimulus 公开枚举设计，使测试不再猜测成员和值。
-- 范围：`StimulusKind`、`StimulusSource`、`PersistPolicy` 的成员和值；每个 kind 的 source/persist/ephemeral 唯一合法组合；expand 阶段新旧协议的兼容边界。
-- 明确不包含：不修改 PR #90 的测试，不增加产品实现，不修改旧 `Stimulus.payload` 或生产调用链，不关闭 Issue #60。
-- 验证及结果：`git diff --check` 通过；静态核对 22 个 `StimulusKind` 均在唯一组合矩阵中逐项覆盖，SPEC 中已无 `StimulusSource.SYSTEM/SCHEDULER` 枚举残留；本 PR 为纯文档 interface 门禁，未运行 pytest、真实 LLM、TTS、设备或生产环境验证；GitHub 自动审查的 `resolve`、`review`、`publish` 3 个 job 均为 `skipped`，未执行 CI 验证。
-- 评审结果：22 个 `StimulusKind` 与当前 22 个强类型变体逐项一致，该部分已通过；本轮已按 owner 意见删除无生产者的 `SYSTEM` 和仅作为触发机制的 `SCHEDULER`，增加 22 行唯一组合矩阵与非法组合规则，并明确新旧协议复用单一 `PersistPolicy` 类型，仍需 owner 重新评审。
+- PR：[#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90)（完整 Green 根 PR，目标 `refactor/agent`，Ready，等待 owner 复审）
+- 目标：交付已批准的 `TextMessage` 契约测试及足以让该测试通过的最小 `src.domain.agent` 协议实现。
+- 范围：包含 `TextMessage` 公开契约测试；公开导出 `TextMessage`、`StimulusKind.TEXT_MESSAGE`、`StimulusSource.USER` 和四成员单一 `PersistPolicy`；旧 `src.domain.stimulus` 导入并重导出同一 `PersistPolicy`，保持现有调用兼容。
+- 明确不包含：不实现其余 21 个 Stimulus、非法组合校验、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
+- 前置门禁：interface 设计 PR [#91](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/91) 已获 owner 批准并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `661b7d2`。
+- 测试与实现门禁：PR #90 的 Red-only seam 已获 owner 批准，head `c724c1f`；最小 Green 子 PR [#94](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/94) 已获 owner 批准，并于 2026-09-05 squash merge 到本分支，合并提交 `3b156739`。旧批准和测试证据不作为当前完整候选的最终依据。
+- 验证及结果：相对当前 `origin/refactor/agent` 的完整候选重新验证：focused 测试 `1 passed in 0.18s`，`tests/domain -q` 为 `1 passed in 0.18s`；相关文件 `py_compile`、Ruff、`src/domain/agent` BasedPyright（0 errors、0 warnings）和 `git diff --check` 均通过；导入检查确认 `src.domain`、`src.domain.agent`、`src.domain.stimulus` 暴露同一个四成员 `PersistPolicy`。离线回归在排除真实图片/TTS/唱歌资源测试、真实 B 站/VCPedia 抓取和 `real_llm` 后为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 用同一命令为 `399 passed, 4 deselected, 6 failed`，六个失败集合一致，分别来自 diary Fake 接口漂移、测试直接调用无效外部 LLM key、已删除的数据库私有 helper、主动话题既有行为差异和项目计划路由测试假设，不是本切片引入。
 
 ## 历史设计轮次目标与范围
 
@@ -94,9 +96,17 @@
 - [x] PR #91 已为全部 22 个 `StimulusKind` 固定唯一 `StimulusSource`；scheduler/`world_clock` 明确为时间驱动和投递机制，不是语义 source；
 - [x] PR #91 已固定全部 kind 的 `PersistPolicy / ephemeral` 唯一合法组合和表外稳定失败规则，并决定新旧 Stimulus 协议复用单一 `PersistPolicy` 类型；
 - [x] 已删除没有当前生产者的 `StimulusSource.SYSTEM`；同时删除仅表示触发机制、与 source 定义冲突的 `SCHEDULER`；
-- [ ] PR #91 上述修订尚未获得 owner 重新评审通过，当前仍不能合并或进入 PR #90；
-- [ ] PR #90 的契约测试仍为 Red-only Draft，且有 `CHANGES_REQUESTED`；本 SPEC 门禁通过前不修改该测试、不开始产品实现；
-- [ ] 本文档 PR 只做静态文档检查，未运行 pytest、真实 LLM、TTS、设备或生产环境验证；
+- [x] PR #91 已获 owner 批准并 squash merge 到 `refactor/agent`；PR #90 的 interface 前置门禁已经闭合；
+- [x] PR #90 的首个公开 domain seam 契约测试已获 owner 批准；PR #94 已将最小 Green 实现 squash merge 到 PR #90，形成当前完整 Green 候选；
+- [x] Red：`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败（1 error，0.77s）；
+- [x] Green：同一 focused 命令在当前完整候选上为 `1 passed in 0.18s`；
+- [x] 已实现 `src.domain.agent` 的 `TextMessage` 最小切片，并让旧 Stimulus 复用同一四成员 `PersistPolicy`；
+- [x] 已同步 domain 当前 interface 文档，记录 `src.domain.agent` 公开路径、`TextMessage` 字段与不变量、无副作用及当前仅支持合法构造的校验边界；
+- [ ] 工单 01 的其余 Stimulus、InteractionSnapshot、HandleStimulusRequest、CancellationToken、HandlingReport、稳定枚举和错误族测试尚未开始；
+- [x] `tests/domain -q` 为 `1 passed in 0.18s`；Ruff、py_compile、BasedPyright 和 `git diff --check` 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整；
+- [ ] 离线回归为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 对照为 `399 passed, 4 deselected, 6 failed`，失败集合一致，未发现本切片新增回归，但仓库默认回归门禁仍未全绿；
+- [ ] no-excuse 检查仅报告旧 `Stimulus` dataclass 未使用 `slots=True`；本切片不顺带改变旧对象布局；
+- [ ] 本 PR 未运行真实 LLM、TTS、设备或生产环境验证；
 - [ ] `ImageSelectionClosed` 与图片消息到达顺序需要在后续测试/实现讨论中确认；关闭信号本身不携带图片内容；
 - [ ] `RequestSongLearning` 的持久任务 Adapter、任务状态和完成 Stimulus 事务边界尚未选择具体实现；
 - [ ] Agent 自有状态变更与 Reflection 之间的 evidence 去重键、revision 冲突策略只有目标语义，尚未落实；
@@ -114,4 +124,4 @@
 
 ## 下一步
 
-完成 PR #91 的静态验证后重新请求 owner 设计评审，并保持 Draft。PR #91 获批并合入后，回到 PR #90 按 review comments 修正首个 `TextMessage` 契约测试并重新记录 Red；测试 seam 获批后才进入最小 Green 实现。
+owner 复审通过后，由 owner 将 PR #90 squash merge 到 `refactor/agent`。工单 01 的下一可观察行为必须另开新的 TDD 切片。
