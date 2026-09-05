@@ -76,6 +76,26 @@ _Avoid_: Completed job, model artifact
 An ephemeral stimulus, such as user typing or image-selection state, that changes when the Agent should reconsider all pending content without itself becoming reply content.
 _Avoid_: User message, pending content
 
+**Interaction Deadline**:
+A stage-generated coordination stimulus stating that the current immutable interaction snapshot must now be reconsidered. It does not carry or own pending content; the request snapshot does.
+_Avoid_: Pending container, stage timer state, stimulus lookup request
+
+**Non-Realtime Voice Message**:
+A completed recorded message represented by `VoiceMessage`, optionally carrying controlled media and/or a final transcript. It is not a phone turn and never represents raw or unfinished audio frames.
+_Avoid_: VoiceUtteranceFinal, realtime stream, audio packet
+
+**Controlled Domain Reference**:
+An immutable nominal identifier such as `MediaRef`, `EvidenceRef`, or `SourceRef`. It crosses the Agent boundary without exposing local paths, raw provider objects, or access credentials; existence and authorization are checked by the consuming port.
+_Avoid_: File path, URL credential, provider object, arbitrary payload
+
+**Client Touch Interaction**:
+A client-aggregated touch on the character's Live2D surface, represented by one or more body regions and an optional measured click frequency. It is distinct from physical touch sensed by a toy.
+_Avoid_: Gesture, pressure, toy sensor touch
+
+**Dynamic Message Thread**:
+An ordered, structured set of a dynamic post and its relevant comments with authorship, parent relationships, and one explicit reply target preserved.
+_Avoid_: Concatenated prompt, list of anonymous strings
+
 **Pending Settlement**:
 A revision-protected, per-stimulus decision from a Handling Report that lists which considered pending stimuli are consumed and which remain pending. Completing the trigger request does not imply consuming every pending stimulus.
 _Avoid_: Consume all, request completion status

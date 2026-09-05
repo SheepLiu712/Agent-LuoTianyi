@@ -8,8 +8,8 @@
 
 ### 输入与响应
 
-- [`Stimulus` 与 `TextMessage` 契约](stimulus.md)：工单 1 首个行为切片的权威 interface，定义抽象公共字段、文字消息专有字段、枚举、构造错误和公开测试 seam。
-- `src.domain.agent`：Agent 强类型领域协议的公开导入路径。当前已实现抽象 `Stimulus`、具体 `TextMessage`、`StimulusKind`、`StimulusSource` 和稳定构造错误；不再兼容导出 `PersistPolicy`，完整 interface 以专用契约为准。
+- [Stimulus 领域契约](stimulus.md)：当前总 SPEC 已登记的 22 个 Stimulus 类型名的权威 interface；其中 15 种定义为可构造，7 种只占位且当前统一拒绝构造。文档定义公共字段、专有字段、依赖值类型、稳定错误和公开测试 seam。
+- `src.domain.agent`：Agent 强类型领域协议的公开导入路径。当前已实现抽象 `Stimulus`、具体 `TextMessage`、`StimulusKind.TEXT_MESSAGE`、`StimulusSource` 和两类既有构造错误；不再兼容导出 `PersistPolicy`。其余契约不能在完成对应 Red/Green 前当作当前代码能力。
 - 旧 `src.domain.stimulus.Stimulus`：当前生产链仍使用的 Mapping 协议，提供 `targets_character()`、`should_persist_conversation()` 和 `can_be_memory_candidate()`。它及其 `SourceChannel`、`StimulusModality`、`PersistPolicy` 在迁移期保持可用，但不构成新 `src.domain.agent` 协议的一部分。
 - `ActionPlan`：Agent 对一次刺激给出的动作计划，包含目标角色和一组 `PlannedAction`。
 - `PlannedAction`：一个待执行动作；`ActionType` 包含说话、唱歌、表情、动作、写记忆、调用能力和不回复等类型。
@@ -48,7 +48,7 @@
 ## 正常与异常行为
 
 - 创建这些对象只做字段校验和默认值生成，不产生外部副作用。
-- `Stimulus` 与 `TextMessage` 的正常行为、字段校验和稳定错误以[专用契约](stimulus.md)为准；本切片只交付领域契约，生产调用方仍按后续迁移切片逐个接入。
+- 15 种可构造 Stimulus 与 7 种占位 Stimulus 的正常/拒绝行为、字段校验和稳定错误以[专用契约](stimulus.md)为准；生产调用方仍按后续迁移切片逐个接入。
 - 枚举值和字段名属于跨模块协议；修改时必须先更新 spec 和消费者测试。
 - 旧 Stimulus 的持久化判断和目标强类型 Stimulus 的构造错误属于两套迁移期 interface，调用方不得混用。
 
@@ -58,6 +58,6 @@
 
 ## 应覆盖的契约场景
 
-- `Stimulus` 与 `TextMessage` 只按[专用契约](stimulus.md)列出的公开 seam 验证，不通过实现细节补充未来变体。
+- 目标 Stimulus 只按[专用契约](stimulus.md)列出的公开 seam 验证，不通过实现细节增加总 SPEC 未登记的未来变体。
 - 迁移期旧 `Stimulus` 在不同 `PersistPolicy` 下，`should_persist_conversation()` 和 `can_be_memory_candidate()` 返回预期结果；该测试不构成目标强类型 Stimulus 必须暴露策略的依据。
 - `AgentState.with_updates(...)` 返回新对象且不修改原状态。
