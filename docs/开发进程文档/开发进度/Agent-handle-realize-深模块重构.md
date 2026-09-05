@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：工单 01 Stimulus 构造错误 interface 设计
+> 当前阶段：工单 01 Stimulus 职责与校验 interface 修订
 >
 > 总体状态：进行中
 
@@ -14,14 +14,14 @@
 - 当前 Agent interface：[`agent/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/agent/README.md)
 - 当前 domain interface：[`domain/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/README.md)
 
-## 本 PR
+## 本次提交
 
-- PR：[#105](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/105)（分支 `docs/agent-dm-01-stimulus-error-contract`，目标 `refactor/agent`，Ready，等待评审）
-- 目标：在编写下一条非法 `TextMessage` 组合 Red 测试前，固定 Stimulus 构造失败的公开异常接口。
-- 范围：定义 `StimulusErrorCode` 的 `CONTRACT_INVALID_STIMULUS / CONTRACT_UNSUPPORTED_SCHEMA` 两个构造错误码、`InvalidStimulusError(ValueError)`、稳定 `code / retryable` 字段、schema 与一般字段的触发边界、直接构造抛出行为和非契约异常文本；同步 domain 当前/目标 interface 边界。
-- 明确不包含：不写测试或产品实现；不实现 source/persist/ephemeral 校验、其他 Stimulus、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
-- 前置门禁：`TextMessage` 合法构造 PR [#90](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/90) 已获自动审查通过并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `42580dad`。
-- 验证及结果：本 PR 为纯 interface 文档门禁；三份文档均存在且无 Unicode replacement character，关键字段检查确认异常类型、两个稳定 code、schema 构造校验边界、`retryable=False`、直接构造抛出和非契约异常文本均已写入，`git diff --check` 通过；未运行 pytest、模型、TTS、GPU、设备或真实外部服务。
+- 提交方式：按用户要求直接提交到当前 `refactor/agent` 分支，不创建 PR，避免触发自动审查。
+- 目标：收窄 Stimulus 公开 interface 和审核标准，删除预防性的 source/persist/ephemeral 唯一组合矩阵。
+- 范围：外部调用方选择强类型 Stimulus 并提供 source/ephemeral；目标 Stimulus 移除公开 `PersistPolicy`；持久化判断归 Agent 内部；构造只校验字段自身与变体结构；同步领域词汇、当前/目标 domain interface、本地工单和 GitHub Issue #60。
+- 明确不包含：不修改测试或产品实现，不立即删除 PR #90 已实现的迁移期 `PersistPolicy` 字段/导出，不改变聊天、触摸、主动发言或 world 链路的可观察持久化结果。
+- 前置事实：PR #105 已于 2026-09-05 合入 `refactor/agent`；其中字段/schema 稳定错误接口继续保留，组合非法错误边界由本次修订撤销。
+- 验证及结果：5 份变更文档均通过严格 UTF-8 解码且无 Unicode replacement character；旧“来源矩阵/表外组合/Stimulus 与 interaction 组合白名单”等约束定向检索无残留；`git diff --check` 通过；GitHub Issue #60 已同步并回读确认。不运行产品 pytest、模型、TTS、GPU、设备或真实外部服务。
 
 ## 历史设计轮次目标与范围
 
@@ -92,21 +92,23 @@
 
 ## 待评审与未验证
 
-- [x] PR #91 已为全部 22 个 `StimulusKind` 固定唯一 `StimulusSource`；scheduler/`world_clock` 明确为时间驱动和投递机制，不是语义 source；
-- [x] PR #91 已固定全部 kind 的 `PersistPolicy / ephemeral` 唯一合法组合和表外稳定失败规则，并决定新旧 Stimulus 协议复用单一 `PersistPolicy` 类型；
+- [x] PR #91 曾为 22 个 `StimulusKind` 固定 source 与 persistence 组合；本次用户复审确认该设计过度防御，现已由“调用方显式提供 source、Agent 内部判断持久化、无组合白名单”的新 SPEC 取代；
+- [x] scheduler/`world_clock` 继续明确为时间驱动和投递机制，不是新的语义 source，也不得覆盖外部调用方已经填写的 source；
 - [x] 已删除没有当前生产者的 `StimulusSource.SYSTEM`；同时删除仅表示触发机制、与 source 定义冲突的 `SCHEDULER`；
 - [x] PR #91 已获 owner 批准并 squash merge 到 `refactor/agent`；PR #90 的 interface 前置门禁已经闭合；
 - [x] PR #90 的首个公开 domain seam 契约测试已获 owner 批准；PR #94 已将最小 Green 实现 squash merge 到 PR #90，形成当前完整 Green 候选；
 - [x] Red：`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败（1 error，0.77s）；
 - [x] Green：同一 focused 命令在当前完整候选上为 `1 passed in 0.18s`；
-- [x] 已实现 `src.domain.agent` 的 `TextMessage` 最小切片，并让旧 Stimulus 复用同一四成员 `PersistPolicy`；
-- [x] 已同步 domain 当前 interface 文档，记录 `src.domain.agent` 公开路径、`TextMessage` 字段与不变量、无副作用及当前仅支持合法构造的校验边界；
-- [ ] Stimulus 构造错误接口设计等待评审；设计通过后才为非法 `TextMessage` 组合编写 Red-only 契约测试；
+- [x] 已实现 `src.domain.agent` 的 `TextMessage` 最小切片，并让旧 Stimulus 复用同一四成员 `PersistPolicy`；该字段/导出现在只作为尚未迁移的当前实现，不再属于目标 interface；
+- [x] 已同步 domain 当前/目标 interface 文档，明确 PR #90 的现状与本次目标差异，不能把迁移期合法样例解释成唯一组合；
+- [x] PR #105 已实现 Stimulus 字段/schema 构造错误的 interface 设计；本次保留稳定异常和错误码，删除组合非法触发条件；
+- [x] 已明确 reviewer 只能阻塞字段自身、schema、幂等持久化和当前行为回归问题，不得要求理论组合矩阵、笛卡尔积测试或无失败依据的防御分支；
+- [ ] 目标 `TextMessage` 尚未通过 TDD 移除公开 `persist_policy`；Agent 内部持久化判断及同一 `stimulus_id` 的幂等事实也尚未实现；
 - [ ] 工单 01 的其余 Stimulus、InteractionSnapshot、HandleStimulusRequest、CancellationToken、HandlingReport、稳定枚举和错误族测试尚未开始；
-- [x] `tests/domain -q` 为 `1 passed in 0.18s`；Ruff、py_compile、BasedPyright 和 `git diff --check` 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整；
+- [x] PR #90 时 `tests/domain -q` 为 `1 passed in 0.18s`；Ruff、py_compile、BasedPyright 和 `git diff --check` 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整。该证据只描述迁移期当前实现；
 - [ ] 离线回归为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 对照为 `399 passed, 4 deselected, 6 failed`，失败集合一致，未发现本切片新增回归，但仓库默认回归门禁仍未全绿；
 - [ ] no-excuse 检查仅报告旧 `Stimulus` dataclass 未使用 `slots=True`；本切片不顺带改变旧对象布局；
-- [ ] 本 PR 未运行真实 LLM、TTS、设备或生产环境验证；
+- [ ] 本次纯文档提交未运行真实 LLM、TTS、设备或生产环境验证；
 - [ ] `ImageSelectionClosed` 与图片消息到达顺序需要在后续测试/实现讨论中确认；关闭信号本身不携带图片内容；
 - [ ] `RequestSongLearning` 的持久任务 Adapter、任务状态和完成 Stimulus 事务边界尚未选择具体实现；
 - [ ] Agent 自有状态变更与 Reflection 之间的 evidence 去重键、revision 冲突策略只有目标语义，尚未落实；
@@ -124,4 +126,4 @@
 
 ## 下一步
 
-等待 PR #105 重新评审；通过后另开 Red-only PR，从 `src.domain.agent` 公开导出验证非法 `TextMessage` 组合抛出 `InvalidStimulusError`，并只断言稳定 `code` 与 `retryable`。
+先按修订后的 Issue #60 重新规划下一个 Red-only 切片：从目标 `TextMessage` 公开构造参数中移除 `persist_policy`，只覆盖字段自身/schema 的最小错误场景，不再开发或测试 source/kind/ephemeral 组合校验。Agent 内部持久化判断作为独立可观察行为切片，在明确从哪个 Agent interface 验证幂等会话记录和记忆候选后再进入测试。

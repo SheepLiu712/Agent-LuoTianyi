@@ -154,7 +154,7 @@ WorldStage 不拥有权威 world/活动数据，也不解释抓取结果；权�
 | world 领域定时 | world 定义“每日规划”“活动到期”“抓取新歌”等事实为什么产生 | `world_clock` 只负责到时唤醒 | `WorldClock -> world task -> 强类型 Stimulus -> WorldStage -> Agent` |
 | stage 交互定时 | WorldStage 定义何时聚合完 pending、重试或重新判断 | WorldStage 自有 deadline/scheduler；不注册为 world 领域事件 | `WorldStage deadline -> InteractionDeadline -> handle_stimulus` |
 
-Agent 通过 `CreateSchedule` 创建的持久未来安排由 scheduler/world 保存。`future_stimulus` 只允许使用来源矩阵中 `source=WORLD` 的 kind；其 source 在创建日程时确定，到期后 world 保留该语义来源并把强类型事实投递给 WorldStage，不因 scheduler 或 `world_clock` 执行了最后一跳而改写。`ProactivePromptDue` 和 `InteractionDeadline` 不能直接作为 `future_stimulus` 保存，必须由拥有目标 interaction、pending/claim 和输出路由的 stage 在收到到期事实后构造。`world_clock` 可以作为底层唤醒器，但不得直接构造角色回复或调用 Agent。
+Agent 通过 `CreateSchedule` 创建的持久未来安排由 scheduler/world 保存。构造 `future_stimulus` 的外部调用方必须显式选择强类型变体并填写语义 `source`；到期投递者原样保留该值，不因 scheduler 或 `world_clock` 执行了最后一跳而改写。`ProactivePromptDue` 和 `InteractionDeadline` 不能直接作为 `future_stimulus` 保存，必须由拥有目标 interaction、pending/claim 和输出路由的 stage 在收到到期事实后构造。`world_clock` 可以作为底层唤醒器，但不得直接构造角色回复或调用 Agent。
 
 ## 5. Agent 暴露给外部的行为
 
@@ -189,7 +189,7 @@ async def handle_stimulus(
 | --- | --- | --- | --- |
 | `request_id` | `str` | 一次逻辑认知请求的稳定身份，也是安全重投键 | 非空；不能跨不同 interaction snapshot 复用 |
 | `stimulus` | `Stimulus` | 触发本次路由的 anchor stimulus | 必须是已注册强类型变体；内容类刺激在 pending 中恰好出现一次；协调信号可以不进入 pending |
-| `interaction` | `InteractionSnapshot` | stage 在调用瞬间拥有的不可变交互事实 | kind 必须允许该 stimulus；`interaction_revision` 必须是 stage 为本次判断签发的当前修订 |
+| `interaction` | `InteractionSnapshot` | stage 在调用瞬间拥有的不可变交互事实 | snapshot 自身字段和 revision 必须合法；不在请求构造阶段维护 StimulusKind + InteractionKind 组合白名单 |
 | `cancellation` | `CancellationToken` | stage 替换请求、结束 interaction 或系统停机时通知 Agent | Agent 必须传播给内部可取消工作，但不能把取消伪装成副作用回滚 |
 
 Agent 已由角色 ID 取得，请求不重复携带 `character_id`。请求不得携带 WebSocket、SystemRuntime、CapabilityManager、数据库会话、供应商 session 或任意 `dict` 上下文。
@@ -201,14 +201,13 @@ Agent 已由角色 ID 取得，请求不重复携带 `character_id`。请求不�
 | 字段 | 类型 | 含义 | 约束 |
 | --- | --- | --- | --- |
 | `stimulus_id` | `str` | 外部事实或协调信号的稳定身份 | 全局稳定；同一事实重投不生成新 ID |
-| `kind` | `StimulusKind` | 选择具体 schema 与 Handler 的判别值 | 必须是已注册 kind 与受支持 schema version |
+| `kind` | `StimulusKind` | 外部调用方所选择强类型变体的稳定判别值 | 调用方通过选择具体变体提供；必须是已注册 kind，不由 Agent 根据内容猜测或改写 |
 | `schema_version` | `int` | 该变体的结构版本 | 正整数；不兼容版本明确失败 |
 | `occurred_at` | `datetime` | 刺激在来源处发生的时间 | 必须带时区；不能以处理时间替代 |
-| `source` | `StimulusSource` | 供应商无关的来源类别 | 不能放供应商连接或原始事件对象 |
-| `target_character_ids` | `tuple[str, ...]` | 应感知该事实的角色集合 | 非空且包含当前 Agent；多角色由调用方分别处理 |
+| `source` | `StimulusSource` | 外部调用方声明的、供应商无关的事实来源类别 | 必须是已定义枚举值；不能放供应商连接或原始事件对象，Agent 不根据 kind 推断或改写 |
+| `target_character_ids` | `tuple[str, ...]` | 应感知该事实的角色集合 | 构造时只要求非空、成员格式合法；handle 时当前 Agent 不在集合内则明确拒绝，多角色由调用方分别处理 |
 | `user_id` | `Optional[str]` | 与刺激有关的账户用户 | 无用户的角色自主事实为空；不能伪造默认用户 |
-| `persist_policy` | `PersistPolicy` | 原始内容是否进入会话记录或成为记忆证据候选 | 由领域枚举表达，不能靠 Handler 猜测 |
-| `ephemeral` | `bool` | 是否只在当前交互窗口内有意义 | 只控制内容生命周期，不改变身份和幂等要求 |
+| `ephemeral` | `bool` | 外部调用方声明该事实是否只在当前交互窗口内有意义 | 只表达 interaction 生命周期提示，不直接命令 Agent 是否写入会话或记忆，也不改变身份和幂等要求 |
 
 `StimulusKind` 是目标协议的稳定判别枚举。成员名和序列化值固定如下；新增、删除或改值都属于公开协议变更：
 
@@ -239,76 +238,60 @@ Agent 已由角色 ID 取得，请求不重复携带 `character_id`。请求不�
 
 `StimulusSource` 表达产生领域事实的供应商无关语义来源，不表达 WebSocket、HTTP、蓝牙或具体平台等传输通道：
 
-| 成员 | 序列化值 | 使用边界 |
+| 成员 | 序列化值 | 当前语义示例 |
 | --- | --- | --- |
 | `USER` | `user` | 用户提交的消息、输入协调信号或触摸等用户行为 |
 | `DEVICE` | `device` | 以设备本身为主体、并携带 `device_id` 的振动、连接和断开事实；设备转发的用户触摸仍为 `USER` |
 | `WORLD` | `world` | world 规范化的外部事实、活动事实、动态和歌曲事实 |
 | `STAGE` | `stage` | stage 为所拥有 interaction 产生的主动表达到期、deadline 等交互事实 |
 
-来源按事实的语义所有者选择，而不是按最后一跳调用者选择。scheduler 和 `world_clock` 只提供持久保存、到期唤醒和投递机制，不是语义来源，也不得在到期时改写已经确定的 `source`。例如 world task 被 `WorldClock` 唤醒后产生的观察仍为 `WORLD`；ChatStage 或 WorldStage 为自己拥有的 interaction 构造的 `ProactivePromptDue` 和 `InteractionDeadline` 为 `STAGE`。Adapter 只负责转换，不构成单独的 `ADAPTER` 来源。当前版本不提供 `UNKNOWN`；不能满足下方来源矩阵的输入必须在进入领域协议前以稳定 `CONTRACT_INVALID_STIMULUS` 错误失败。
+`source` 由构造 Stimulus 的 Adapter、stage 或 world 调用方按其掌握的事实填写，而不是由 Agent 根据 `kind` 推断。scheduler 和 `world_clock` 只提供持久保存、到期唤醒和投递机制，不得在到期时覆盖调用方已经填写的 `source`。例如 world task 被 `WorldClock` 唤醒后通常填写 `WORLD`；ChatStage 或 WorldStage 为自己拥有的 interaction 构造到期事实时通常填写 `STAGE`。这些例子说明当前生产者的语义，不构成 `kind + source` 组合白名单。Adapter 只负责转换，不构成单独的 `ADAPTER` 来源；当前版本也不提供 `UNKNOWN`。
 
-`PersistPolicy` 是新旧 Stimulus 协议共用的单一领域枚举，不为目标协议复制第二个同义类型。其稳定闭集为：
+#### Agent 内部持久化判断
 
-| 成员 | 序列化值 | 含义 |
-| --- | --- | --- |
-| `NONE` | `none` | 不进入会话记录，也不成为记忆证据候选 |
-| `EPHEMERAL_ONLY` | `ephemeral_only` | 仅允许当前交互窗口使用，不进入持久会话记录 |
-| `CONVERSATION_ONLY` | `conversation_only` | 进入会话记录，但不自动成为长期记忆证据候选 |
-| `CONVERSATION_AND_MEMORY_CANDIDATE` | `conversation_and_memory_candidate` | 进入会话记录，并允许成为长期记忆证据候选 |
+目标 Stimulus 公共协议不包含 `persist_policy`。外部调用方只陈述发生了什么、事实来自哪里以及交互生命周期信息；是否把原始内容写入会话记录、是否把它作为长期记忆证据候选，由 Agent 在 `handle_stimulus` 内部判断和执行。
 
-目标实现把该唯一类型归属到 `domain.agent` 公共协议；expand 阶段由 `server/src/domain/stimulus.py` 导入并重导出同一类型，使旧调用方保持源码兼容。工单 29 删除旧 Stimulus 时再删除该兼容导出。`StimulusKind` 和 `StimulusSource` 则与旧 `StimulusModality`、`SourceChannel` 语义不同，迁移 Adapter 必须显式转换，不能依赖同名成员隐式互换。
+Agent 的内部持久化判断可以使用 `kind`、`source`、专有内容、`ephemeral`、InteractionSnapshot、用户隐私设置和已有 ledger 事实，但它不是公开领域对象、ActionPlan、HandlingReport 字段或 stage 必须理解的枚举。相同 `stimulus_id` 的安全重投必须复用第一次已经提交的持久化事实，不得因为上下文变化重复写入或改变已提交结果。
 
-每个 `StimulusKind` 当前只允许下表中的唯一 `source / persist_policy / ephemeral` 组合。公开构造入口必须逐项校验；表外组合以稳定 `CONTRACT_INVALID_STIMULUS` 错误失败：
+`ephemeral` 只说明该事实能否在当前 interaction 结束后继续作为交互输入使用，不等同于“不持久化”命令。Agent 可以把它作为内部判断的证据，但不得把一个公开布尔值机械映射成固定持久化结果。stage 仍按自身职责管理 pending 和 interaction 生命周期，不读取 Agent 内部的记忆候选策略。
 
-| `StimulusKind` | 唯一合法 `StimulusSource` | 唯一合法 `PersistPolicy` | `ephemeral` |
-| --- | --- | --- | --- |
-| `TEXT_MESSAGE` | `USER` | `CONVERSATION_AND_MEMORY_CANDIDATE` | `False` |
-| `IMAGE_MESSAGE` | `USER` | `CONVERSATION_AND_MEMORY_CANDIDATE` | `False` |
-| `VOICE_MESSAGE` | `USER` | `CONVERSATION_AND_MEMORY_CANDIDATE` | `False` |
-| `USER_TYPING` | `USER` | `EPHEMERAL_ONLY` | `True` |
-| `IMAGE_SELECTION_OPENED` | `USER` | `EPHEMERAL_ONLY` | `True` |
-| `IMAGE_SELECTION_CLOSED` | `USER` | `EPHEMERAL_ONLY` | `True` |
-| `TOUCH_INTERACTION` | `USER` | `EPHEMERAL_ONLY` | `True` |
-| `TOY_VIBRATION` | `DEVICE` | `NONE` | `True` |
-| `DEVICE_CONNECTED` | `DEVICE` | `NONE` | `True` |
-| `DEVICE_DISCONNECTED` | `DEVICE` | `NONE` | `True` |
-| `PROACTIVE_PROMPT_DUE` | `STAGE` | `NONE` | `True` |
-| `INTERACTION_DEADLINE` | `STAGE` | `NONE` | `True` |
-| `DYNAMIC_OBSERVED` | `WORLD` | `NONE` | `False` |
-| `DIARY_PLANNING_DUE` | `WORLD` | `NONE` | `False` |
-| `WORLD_OBSERVATION` | `WORLD` | `NONE` | `False` |
-| `DAILY_PLANNING_DUE` | `WORLD` | `NONE` | `False` |
-| `ACTIVITY_DUE` | `WORLD` | `NONE` | `False` |
-| `ACTIVITY_STARTED` | `WORLD` | `NONE` | `False` |
-| `ACTIVITY_OBSERVATION` | `WORLD` | `NONE` | `False` |
-| `ACTIVITY_ENDED` | `WORLD` | `NONE` | `False` |
-| `SONG_KNOWLEDGE_DISCOVERED` | `WORLD` | `NONE` | `False` |
-| `SONG_LEARNED` | `WORLD` | `NONE` | `False` |
+迁移期间，旧 `server/src/domain/stimulus.py` 及其生产调用方可以继续保留现有 `PersistPolicy`，以维持尚未迁移链路的当前行为；它不再属于目标 `domain.agent` Stimulus interface。迁移每条生产链时，应把持久化判断收进 Agent 内部并删除该调用方传入 `PersistPolicy` 的依赖；工单 29 最终删除没有生产调用者的旧协议和兼容导出。
 
-矩阵同时固定以下不变量：
+这项收束不要求预先新增独立的 persistence policy 模块。对应 Handler 可以通过现有强类型 Skill、repository port 和 ledger 完成判断；只有在至少两个真实行为族共享同一规则且出现重复时，才把该规则提炼为 Agent 私有策略对象。
 
-- `EPHEMERAL_ONLY` 必须搭配 `ephemeral=True`，用于原始内容只允许在当前 interaction 窗口复用的输入，例如输入长度、图片选择状态或触摸事实；
-- `ephemeral=False` 不得搭配 `EPHEMERAL_ONLY`；`NONE` 是否为 ephemeral 由逐 kind 矩阵确定；
-- `CONVERSATION_ONLY` 和 `CONVERSATION_AND_MEMORY_CANDIDATE` 必须搭配 `ephemeral=False`；
-- `NONE` 不进入会话记录；它可以搭配只在当前窗口有效的到期/振动事实，也可以搭配跨窗口仍有权威来源的设备或 world 事实；
-- `persist_policy` 只决定 Stimulus 原始内容是否进入会话记录和是否成为自动长期记忆候选。`DynamicObserved`、`SongLearned` 等 `NONE` 事实仍可按 Agent 内部状态变更或 Reflection 契约写入领域数据；
-- `CONVERSATION_ONLY` 在当前 22 个 kind 中没有生产者，但因复用现有唯一枚举而保留。任何 kind 改用该策略都属于需要先修改本矩阵的公开协议变更。
+#### Stimulus 构造与校验原则
+
+Stimulus 构造只校验类型及各字段本身能否形成可解释的强类型值，不预先维护 `kind / source / ephemeral` 或其他字段的组合白名单：
+
+- 外部调用方通过选择具体强类型变体提供 `kind`，并显式提供 `source`、`ephemeral` 和该变体的内容字段；Agent 不推断或改写这些外部事实；
+- 校验可以覆盖未知枚举、字段类型、必填值、ID/文本是否为空、数值自身范围、时间是否带时区、受控引用格式、目标集合是否为空，以及该变体没有任何可处理内容等单字段或结构完整性问题；
+- 仅因为某个 `StimulusKind` 搭配了不常见的 `StimulusSource` 或 `ephemeral` 值，不得在构造阶段拒绝，也不得要求为所有理论组合编写测试；
+- Handler 若尚不支持某种实际输入，应通过 handle 的稳定运行时结果表达，不得伪装成构造失败。只有实现中出现可复现问题并先补充 SPEC 与回归场景后，才增加解决该问题所必需的最小跨字段不变量；
+- reviewer 不得以“防御性更强”为由要求 source 矩阵、持久化矩阵、组合穷举、重复 factory 或尚无失败场景的校验分支。
 
 Stimulus 构造契约错误使用独立于 HandlingReport 运行时失败的最小公开接口：
 
 - `StimulusErrorCode = Literal["CONTRACT_INVALID_STIMULUS", "CONTRACT_UNSUPPORTED_SCHEMA"]`；后续增加成员属于公开协议变更；
 - `InvalidStimulusError(ValueError)` 是不可变的公开异常，稳定暴露 `code: StimulusErrorCode` 和 `retryable: Literal[False]`；`retryable` 始终为 `False`；
 - `str(error)` 只用于人工诊断，措辞不属于公开契约；调用方不得解析异常字符串，也不依赖字段名、规则 ID、非法值字典或内部 cause；
-- 各强类型 Stimulus 保持直接构造入口，不增加 `create()` factory 或 Result 返回。合法参数原子地产生不可变实例；一般结构或语义不变量失败、目标角色非法、缺失/非整数 `schema_version`，以及 `source / persist_policy / ephemeral` 组合不在矩阵中时，抛出 `InvalidStimulusError(code="CONTRACT_INVALID_STIMULUS")`；类型为整数但不受支持的 `schema_version`（包括非正数和未知未来版本）抛出 `InvalidStimulusError(code="CONTRACT_UNSUPPORTED_SCHEMA")`。两种情况均不产生部分实例；
+- 各强类型 Stimulus 保持直接构造入口，不增加 `create()` factory 或 Result 返回。字段本身或变体结构不合法、目标集合为空、缺失/非整数 `schema_version` 时，抛出 `InvalidStimulusError(code="CONTRACT_INVALID_STIMULUS")`；类型为整数但不受支持的 `schema_version`（包括非正数和未知未来版本）抛出 `InvalidStimulusError(code="CONTRACT_UNSUPPORTED_SCHEMA")`。合法但不常见的字段组合不属于构造错误；两种错误均不产生部分实例；
 - schema 兼容性在构造阶段校验；构造失败发生在 handle 开始前，不产生 `HandlingReport`。稳定错误族中出现 `CONTRACT_UNSUPPORTED_SCHEMA` 不表示必须把该构造错误包装成运行时报告；
 - `InvalidStimulusError` 与 `StimulusErrorCode` 从 `src.domain.agent` 公开导出，只用于 Stimulus 构造契约；不替代 HandlingReport、ExecutionReport 或 ActionExecutionResult 的错误类型。
 
+#### Stimulus 实现与审核标准
+
+实现和 review 只以本节已经确认的职责与可观察行为为准：
+
+- 必须阻塞：目标 Stimulus interface 仍要求调用方传 `PersistPolicy`；Agent 根据 `kind` 擅自推断或覆盖 `source`；字段本身不合法却产生实例；未知 schema 没有稳定失败；同一刺激重投造成重复会话记录或重复记忆证据；迁移改变第 8 节列出的当前持久化/非持久化行为；
+- 不得阻塞：实现没有建立 `kind + source`、`kind + ephemeral` 或 `source + ephemeral` 白名单；实现没有穷举理论非法组合；合法字段组成了当前没有生产者的少见组合；实现没有增加尚无真实失败依据的交叉校验或防御性 factory；
+- 契约测试按每个强类型变体覆盖一个合法样例，并为该变体实际存在的必填、类型、范围、时区、引用或内容为空问题选择最小代表场景；不得对枚举做笛卡尔积，也不得把当前生产者的常用取值写成唯一合法取值；
+- 若开发或运行中出现由字段组合导致的可复现错误，先记录输入、期望和实际结果，判断问题应由 Adapter、stage、Agent Handler 还是内部持久化策略负责；只有确需在公共构造 seam 拒绝时，才先修订本 SPEC，再增加对应的一条回归测试和最小校验。
+
 #### 当前版本 Stimulus 强类型变体
 
-当前版本不保留 `payload: Mapping` 作为扩展口。下表中的每个专有字段都给出类型和用途：
+当前版本不保留 `payload: Mapping` 作为扩展口。下表中的每个专有字段都给出类型和用途；最后一列只记录当前已知生产场景，不能据此拒绝字段本身合法的新组合：
 
-| Stimulus | 含义 | 专有字段（类型：含义） | 合法 Interaction |
+| Stimulus | 含义 | 专有字段（类型：含义） | 当前生产场景（非白名单） |
 | --- | --- | --- | --- |
 | `TextMessage` | 用户已提交、可参与语义处理的一条完整文字消息 | `text: str`：正文；`client_msg_id: str`：客户端重试稳定 ID | Chat、Toy |
 | `ImageMessage` | 用户已提交、可被图片阅读 Skill 处理的一张图片 | `media_ref: MediaRef`：受控图片引用；`caption: Optional[str]`：随图文字；`client_msg_id: str`：客户端重试稳定 ID | Chat、Toy |
@@ -421,7 +404,7 @@ Agent/PlanEmitter 在每次 emit 前检查 cancellation，并把生成决定时�
 - emitted plan IDs 与 sink/Request Ledger 完全一致；
 - 等待更多输入时不得 emit 计划、产生用户可见输出或持久外部副作用；
 - 已知刺激且角色选择不行动时，返回无计划 `COMPLETED`，并把已完成认知的内容 ID 放入 consumed；
-- 未知 kind、版本不兼容、snapshot kind 不匹配或非法字段返回 `FAILED/CONTRACT_*`，consumed 必须为空；
+- 未知 kind、版本不兼容、snapshot 自身结构非法或 Stimulus 字段非法时返回 `FAILED/CONTRACT_*`，consumed 必须为空；字段本身合法但当前 Handler 无法处理的场景使用对应 `UNSUPPORTED_*`，不能追溯伪装成构造错误；
 - `CANCELLED` / `FAILED` 仍列出取消或失败前已成功入队的计划；只有在取消/失败前已经形成可结算承诺的内容才能列入 consumed，尚未完成认知的 considered 内容必须列入 retained。
 
 stage 应按 ID 应用 settlement，永远不能因“本轮消费全部”而直接清空当前队列。通常只有 `basis_interaction_revision` 仍等于 stage 当前 revision 时才应用；如新刺激已使 revision 变化，stage 保留当前 pending、取消或忽略旧 settlement，并以新 snapshot 重新调用。
@@ -551,7 +534,7 @@ class AgentOutputSink(Protocol):
 
 | `OutputDelivery` | 含义 | stage / Adapter 行为 |
 | --- | --- | --- |
-| `CONVERSATION` | 正常对话或主动发言 | 按 stage 规则持久化并在聊天界面呈现 |
+| `CONVERSATION` | 正常对话或主动发言 | stage 在聊天界面呈现并记录通道投递事实；对话内容和记忆候选的业务持久化由 Agent 内部判断，不由 Adapter 根据 delivery 推断 |
 | `EPHEMERAL_REACTION` | 触摸等短暂反射 | 实时呈现但不写入会话记录、不显示为聊天气泡；非 `normal` 表情在音频结束或约定持续时间后恢复 `normal` |
 
 | `OutputReceipt` 字段 | 类型 | 含义 | 约束 |
@@ -619,7 +602,7 @@ output sink 在创建时绑定 stage 和 interaction：
 - interaction、activity、schedule 等 revision 冲突返回各自稳定失败，不静默覆盖新状态；
 - 日志必须能由 `interaction_id / stimulus_id / request_id / plan_id / execution_id / action_id` 串联。
 
-稳定错误族至少包括：`CONTRACT_INVALID_STIMULUS`（Stimulus 字段、source/persist/ephemeral 组合或目标角色非法）、`CONTRACT_UNSUPPORTED_SCHEMA`、`CONTRACT_SNAPSHOT_MISMATCH`、`UNSUPPORTED_*`、`STALE_INTERACTION`、`STALE_ACTIVITY`、`STALE_SCHEDULE`、`SINK_CLOSED`、`BACKPRESSURE_TIMEOUT`、`DEPENDENCY_UNAVAILABLE`、`PROVIDER_TIMEOUT`、`CANCELLED` 和 `INTERNAL_ERROR`。调用方只根据稳定码和 `retryable` 决策，不解析异常字符串。
+稳定错误族至少包括：`CONTRACT_INVALID_STIMULUS`（Stimulus 单个字段或变体结构非法）、`CONTRACT_UNSUPPORTED_SCHEMA`、`CONTRACT_SNAPSHOT_MISMATCH`（snapshot 自身的判别、结构或 revision 契约不成立；不用于维护 Stimulus 与 interaction 的组合白名单）、`UNSUPPORTED_*`、`STALE_INTERACTION`、`STALE_ACTIVITY`、`STALE_SCHEDULE`、`SINK_CLOSED`、`BACKPRESSURE_TIMEOUT`、`DEPENDENCY_UNAVAILABLE`、`PROVIDER_TIMEOUT`、`CANCELLED` 和 `INTERNAL_ERROR`。调用方只根据稳定码和 `retryable` 决策，不解析异常字符串。合法但不常见的 `kind / source / ephemeral` 组合不得归入 `CONTRACT_INVALID_STIMULUS`。
 
 本版本没有 5.5 Realtime 相邻接口。电话媒体上行、Realtime turn、通话打断和供应商会话引用留待电话版本单独设计。
 
@@ -832,7 +815,7 @@ Handler 是 Agent 内部“针对一类输入采取哪条流程”的模块。�
 | `ActivityHandler` | 处理 world 事实、每日规划和已实现的活动生命周期 | `WorldObservation`、`DailyPlanningDue`、`ActivityDue/Started/Observation/Ended` | world 事实 → 状态/日程 Recall → 决策 → 活动/日程计划 |
 | `SongKnowledgeHandler` | 决定是否接纳候选歌曲知识、是否申请学歌，以及如何理解已学会事实 | `SongKnowledgeDiscovered`、`SongLearned` | 核验证据 → Agent 内部知识/经验变更 → 可选学歌或表达计划 |
 
-每个 `StimulusKind + InteractionKind` 组合恰好由一个已注册 Handler 接受。按行为族组织，而不是为每个枚举建立浅转发类，也不建立带几十个可空开关的统一 pipeline。
+每个已注册 `StimulusKind` 由一个明确的行为族 Handler 接受；Handler 可以读取 InteractionSnapshot 决定具体行为，但 Router 不预先注册 `StimulusKind + InteractionKind` 的笛卡尔积。当前确实不支持的场景由 Handler 返回稳定 `UNSUPPORTED_*` 结果。按行为族组织，而不是为每个枚举或每个组合建立浅转发类，也不建立带几十个可空开关的统一 pipeline。
 
 Handler 可以：
 
@@ -1135,8 +1118,8 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 28. `agent/context` 只保存 interaction-scoped 临时认知工作集和有来源/版本/TTL 的检索证据；stage pending、连接、长期记忆/画像和权威 world 状态不得迁入。
 29. 两个 façade 的跨模块协议归 `domain` 所有；Agent 包根只导出 façade 类型，内部包和 factory 不公开重导出；`SystemRuntime` 作为装配代码直接通过 factory 注入具体 Skill、Store、Ledger 和 Handler registry。
 30. 目录迁移必须按第 6.1.4 节渐进执行：先协议和 façade，后逐链迁移，最后统一删除 `agent/reflex`、旧 AgentRuntime/CharacterRuntime 业务代理和外部 `agent.main_chat` 类型依赖；不得永久双轨。
-31. `StimulusSource` 只包含 `USER / DEVICE / WORLD / STAGE` 四种有当前生产者的语义来源；scheduler 和 `world_clock` 只是时间驱动与投递机制，不能作为 source 或改写 source。
-32. `PersistPolicy` 在新旧 Stimulus 协议间只有一个领域类型；每个 `StimulusKind` 的 source、persist policy 和 ephemeral 值由 5.2 的唯一组合矩阵固定，表外组合稳定失败。
+31. `StimulusSource` 只包含 `USER / DEVICE / WORLD / STAGE` 四种当前已定义的语义来源；外部调用方选择强类型 Stimulus 并显式填写 source，Agent 不推断或改写；scheduler 和 `world_clock` 只是时间驱动与投递机制，也不得覆盖已有 source。
+32. 目标 Stimulus interface 不包含 `PersistPolicy`；会话记录和长期记忆候选由 Agent 内部结合刺激、interaction、隐私设置和 ledger 事实判断。构造器只校验字段自身与变体结构，不维护 `kind / source / ephemeral` 组合矩阵；没有可复现问题和先行 SPEC 修订时，不得把理论组合列为审核阻塞项。
 
 ## 8. 验收标准
 
@@ -1173,17 +1156,17 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 
 | 当前输入或条件 | 必须保持的行为 | 目标 settlement / 输出 |
 | --- | --- | --- |
-| `USER_MESSAGE` / `USER_TEXT` | Adapter 校验非空文本、长度和目标角色，按 `client_msg_id` 去重并在 stage 容量不足时明确拒绝；有效文本只持久化一次，加入该 interaction 的 pending，并重置普通聚合期限 | `TextMessage` 进入 ChatSnapshot；正式判断后按 ID 消费实际处理的消息，回复由 `Say`/`Sing` 计划实现 |
-| `USER_IMAGE` | Adapter 继续校验 Base64、MIME、大小和目标角色；图片消息只持久化一次并进入 pending。图片读取、图文理解和歌曲/日期等语义预处理移入 Agent 内部 Skill，不再由 stage 调 AgentRuntime 预处理代理 | `ImageMessage` 进入 ChatSnapshot；handle 可与其他 pending 文字一起处理，图片内容不以本地任意路径泄漏 |
+| `USER_MESSAGE` / `USER_TEXT` | Adapter 校验非空文本、长度和目标角色，按 `client_msg_id` 去重并在 stage 容量不足时明确拒绝；有效文本加入该 interaction 的 pending，并重置普通聚合期限。Agent 在 handle 内部判断并保证需要的会话/记忆证据最多持久化一次 | `TextMessage` 进入 ChatSnapshot；正式判断后按 ID 消费实际处理的消息，回复由 `Say`/`Sing` 计划实现 |
+| `USER_IMAGE` | Adapter 继续校验 Base64、MIME、大小和目标角色；图片消息进入 pending。图片读取、图文理解、持久化判断和歌曲/日期等语义预处理移入 Agent 内部 Skill，不再由 stage 调 AgentRuntime 预处理代理或选择持久化策略 | `ImageMessage` 进入 ChatSnapshot；handle 可与其他 pending 文字一起处理，图片内容不以本地任意路径泄漏，需要的持久化事实按稳定 stimulus/client ID 最多提交一次 |
 | 普通新内容到达 | 每条新文字或图片都重新设置普通聚合期限。当前配置未覆盖 `listen_timer.timeout`，因此基线默认值为 1 秒；实现仍应读取 stage 配置，不把 1 秒写死在 Agent | 新内容使 `interaction_revision` 递增；旧结果若已基于不同 pending 集合则不能提交 |
-| `USER_TYPING(text_length > 0)` | 信号不持久化、不加入内容 pending。只有存在 pending 或正在判断时才把期限延长到 10 秒并唤醒状态机；没有 pending 且没有 handle 时不产生回复 | request 可以 `COMPLETED`，consumed 为空，considered 全部 retained，`reconsider_at` 为延长期限 |
-| `USER_TYPING(text_length == 0)` | 信号不持久化、不加入内容 pending；移除输入扩展期限并立即唤醒判断。WebSocket 入口仍要求 `text_length` 是非负整数，缺失、布尔值或负数不能被当作合法清空信号 | request 完成但不消费信号本身；现有 pending 立即进入正式重评 |
-| `USER_IMAGE_SELECTING` | 信号不持久化、不加入内容 pending；存在 pending 或正在判断时把期限延长到 60 秒。若旧判断正在运行，其尚未提交结果失效，原 pending 保留 | `ImageSelectionOpened` 完成，consumed 为空，全部 considered 保留到图片选择期限 |
-| `USER_IMAGE_SELECTING_CANCEL` | 信号不伪造图片。存在 pending 或正在判断时结束 60 秒扩展并恢复普通聚合期限；没有 pending 且没有 handle 时清除期限。若随后真有图片，仍由独立 `ImageMessage` 到达 | `ImageSelectionClosed` 完成，consumed 为空，pending retained，`reconsider_at` 为普通期限；不是无条件立即回复 |
+| `USER_TYPING(text_length > 0)` | 信号不加入内容 pending，也不得形成会话记录或记忆证据。只有存在 pending 或正在判断时才把期限延长到 10 秒并唤醒状态机；没有 pending 且没有 handle 时不产生回复 | request 可以 `COMPLETED`，consumed 为空，considered 全部 retained，`reconsider_at` 为延长期限；不持久化是 Agent 当前内部判断的可观察结果，不是调用方传入策略 |
+| `USER_TYPING(text_length == 0)` | 信号不加入内容 pending，也不得形成会话记录或记忆证据；移除输入扩展期限并立即唤醒判断。WebSocket 入口仍要求 `text_length` 是非负整数，缺失、布尔值或负数不能被当作合法清空信号 | request 完成但不消费信号本身；现有 pending 立即进入正式重评 |
+| `USER_IMAGE_SELECTING` | 信号不加入内容 pending，也不得形成会话记录或记忆证据；存在 pending 或正在判断时把期限延长到 60 秒。若旧判断正在运行，其尚未提交结果失效，原 pending 保留 | `ImageSelectionOpened` 完成，consumed 为空，全部 considered 保留到图片选择期限 |
+| `USER_IMAGE_SELECTING_CANCEL` | 信号不伪造图片，也不得形成会话记录或记忆证据。存在 pending 或正在判断时结束 60 秒扩展并恢复普通聚合期限；没有 pending 且没有 handle 时清除期限。若随后真有图片，仍由独立 `ImageMessage` 到达 | `ImageSelectionClosed` 完成，consumed 为空，pending retained，`reconsider_at` 为普通期限；不是无条件立即回复 |
 | 普通聚合期限到达 | 不能因为话语看似不完整而无限等待。stage 产生 `InteractionDeadline`，handle 必须基于当时全部 pending 进行强制正式判断；除角色按明确语义选择沉默或出现结构化失败外，应形成可实现回复 | deadline trigger 与内容消费分开报告；全部处理时 consumed 精确等于 snapshot pending、retained 为空 |
-| 判断期间出现新内容或延长等待的协调信号 | 当前判断结果不得越过新事实提交。stage 更新 pending/等待状态和 revision，取消旧 handle；旧模型/Recall 结果和旧 report 不得清空新队列，所有仍有效内容基于新 snapshot 重新思考 | plan sink 拒绝旧 revision；stage 按 ID 结算，不能 `consume_all`；新 handle 不重复持久化原消息 |
+| 判断期间出现新内容或延长等待的协调信号 | 当前判断结果不得越过新事实提交。stage 更新 pending/等待状态和 revision，取消旧 handle；旧模型/Recall 结果和旧 report 不得清空新队列，所有仍有效内容基于新 snapshot 重新思考 | plan sink 拒绝旧 revision；stage 按 ID 结算，不能 `consume_all`；Agent 内部 ledger 保证新 handle 不重复提交原消息的持久化事实 |
 | 一次判断只完成部分 pending | 已完成内容可以形成 topic/计划；尚未完成内容继续保留并恢复普通期限，后续与新内容一起重新判断 | consumed 与 retained 分列，不用 request status 表示部分消费 |
-| 回复实现完成 | 普通回复按计划顺序持久化并进入全局 speaking/output 队列；文字、TTS/预制音频、唱歌和表情的外部顺序与当前一致。完成事实再异步触发日期检查、消息记忆、必要的上下文压缩和画像更新 | 用户可见输出不等待 Reflection；Reflection 不暴露给 ChatStage，失败不会撤销已发送回复 |
+| 回复实现完成 | 普通回复按计划顺序进入全局 speaking/output 队列；Agent 内部按稳定 execution/action 事实完成所需的对话持久化，文字、TTS/预制音频、唱歌和表情的外部顺序与当前一致。完成事实再异步触发日期检查、消息记忆、必要的上下文压缩和画像更新 | 用户可见输出不等待 Reflection；ChatStage 只记录投递/结算事实，不选择 Agent 的会话或记忆策略；Reflection 失败不会撤销已发送回复 |
 
 这里的“重新思考”特指：旧判断尚未形成可接受结算时，新的 pending 集合或延长等待信号使旧结果作废，再基于新 revision 的完整 snapshot 判断。它不是把同一条旧回复先发送再撤回，也不是 `ReflectionHandler` 递归调用公开 handle。
 
@@ -1398,7 +1381,7 @@ expand 阶段允许目标 interface 与旧实现暂时并存，但新调用方�
 18. 01—30 的粒度是否都能在一个新上下文和一个聚焦 PR 中完成，哪些仍需拆分或合并？
 19. 每条 Blocked by 是否真正在接口、行为或共享实现上阻止后续工单，而不是仅表示推荐顺序？
 20. 01/03 的初始 frontier 以及 Chat、Toy、World、纯机械 world task 的并行边界是否符合团队协作方式？
-21. 每个 `StimulusKind` 允许哪个 `StimulusSource`，scheduler 和 `world_clock` 为什么只是触发机制而不是语义来源？
-22. 每个 `StimulusKind` 允许哪组 `PersistPolicy / ephemeral`，表外组合怎样稳定失败？
+21. 外部调用方怎样通过强类型变体提供 `kind` 并显式填写 `source`，scheduler 和 `world_clock` 为什么只负责触发/投递且不得覆盖来源？
+22. 为什么目标 Stimulus interface 不包含 `PersistPolicy`，Agent 怎样在内部做幂等持久化判断，reviewer 又为什么不能要求没有真实失败依据的跨字段组合矩阵？
 
 如果必须阅读内部实现才能回答这些问题，本 spec 仍不够清楚，不能进入后续测试与工单讨论。

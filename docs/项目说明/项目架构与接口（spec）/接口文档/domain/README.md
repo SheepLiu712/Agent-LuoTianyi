@@ -8,11 +8,11 @@
 
 ### 输入与响应
 
-- `src.domain.agent`：当前 Agent 强类型领域协议的公开导入路径。本切片公开 `TextMessage`、`StimulusKind`、`StimulusSource` 和与旧协议共用的 `PersistPolicy`。
-- `TextMessage`：用户已提交的一条完整文字消息。构造字段为 `stimulus_id: str`、`schema_version: int`、`occurred_at: datetime`、`source: StimulusSource`、`target_character_ids: tuple[str, ...]`、`user_id: str | None`、`persist_policy: PersistPolicy`、`ephemeral: bool`、`text: str` 和 `client_msg_id: str`；`kind` 不由调用方传入，始终为 `StimulusKind.TEXT_MESSAGE`。
+- `src.domain.agent`：当前 Agent 强类型领域协议的公开导入路径。当前实现公开 `TextMessage`、`StimulusKind`、`StimulusSource` 和迁移期兼容的 `PersistPolicy`；目标 interface 将从强类型 Stimulus 构造参数和该包公开导出中移除 `PersistPolicy`。
+- `TextMessage`：用户已提交的一条完整文字消息。当前实现的构造字段仍包含 `persist_policy: PersistPolicy`；这是 PR #90 已实现、等待后续 TDD 迁移的当前事实。目标构造字段为 `stimulus_id: str`、`schema_version: int`、`occurred_at: datetime`、`source: StimulusSource`、`target_character_ids: tuple[str, ...]`、`user_id: str | None`、`ephemeral: bool`、`text: str` 和 `client_msg_id: str`。调用方通过选择 `TextMessage` 提供刺激类型，`kind` 固定为 `StimulusKind.TEXT_MESSAGE`，不由 Agent 根据内容猜测。
 - `StimulusKind.TEXT_MESSAGE`：当前已实现强类型 Stimulus 的稳定判别值。
 - `StimulusSource.USER`：表示该领域事实由用户行为产生，不表示 WebSocket、HTTP 等传输通道。
-- `PersistPolicy`：新旧 Stimulus 协议共用的同一四成员枚举；可从 `src.domain.agent`、`src.domain.stimulus` 和 `src.domain` 导入，不是三套独立类型。
+- `PersistPolicy`：当前旧 Stimulus 与 PR #90 强类型切片仍共用的四成员枚举。它只用于描述迁移期当前实现，不再属于目标 `domain.agent` Stimulus interface；尚未迁移的旧生产调用方继续使用，直到对应链路把持久化判断收进 Agent 并由最终 contract 工单删除兼容导出。
 - `Stimulus`：系统收到的一次刺激。主要字段为 `source_channel`、`modality`、`payload`、`text`、`sender_user_id`、`target_character_ids`、`client_msg_id`、`persist_policy` 和 `ephemeral`。
 - `SourceChannel`、`StimulusModality`、`PersistPolicy`：分别限定刺激来自哪里、是什么形式、允许怎样持久化。
 - `Stimulus.targets_character(character_id)`：判断刺激是否发给指定角色。
@@ -56,20 +56,20 @@
 
 - 创建这些对象只做字段校验和默认值生成，不产生外部副作用。
 - `TextMessage` 构造后不可变，不提供任意 `payload` 扩展口，并逐项保留调用方提供的公共字段和文字消息专有字段。
-- 当前契约测试只锁定合法样例：`source=USER`、`persist_policy=CONVERSATION_AND_MEMORY_CANDIDATE`、`ephemeral=False`。本切片尚未实现 source/persist/ephemeral 组合校验，因此其他组合当前不会按目标 spec 稳定返回 `CONTRACT_INVALID_STIMULUS`；调用方不得把这种暂未校验视为受支持行为。
-- **目标 interface**：非法 Stimulus 构造将直接抛出公开 `InvalidStimulusError(ValueError)`；一般字段/目标/组合非法时 `code="CONTRACT_INVALID_STIMULUS"`，整数但不受支持的 schema 版本时 `code="CONTRACT_UNSUPPORTED_SCHEMA"`，两者的 `retryable=False`。构造失败发生在 handle 前，不产生 `HandlingReport`；调用方不解析异常文本。该异常与 `StimulusErrorCode` 尚未在当前源码实现，不能提前用于业务代码。
+- 当前契约测试只锁定 PR #90 的合法样例：`source=USER`、迁移期 `persist_policy=CONVERSATION_AND_MEMORY_CANDIDATE`、`ephemeral=False`。这些是该样例的输入，不是 `TextMessage` 的唯一合法 source/ephemeral 组合，也不应扩展成组合矩阵。
+- **目标 interface**：非法 Stimulus 构造将直接抛出公开 `InvalidStimulusError(ValueError)`；字段自身或变体结构非法时 `code="CONTRACT_INVALID_STIMULUS"`，整数但不受支持的 schema 版本时 `code="CONTRACT_UNSUPPORTED_SCHEMA"`，两者的 `retryable=False`。合法字段之间不做 source/kind/ephemeral 白名单校验；构造失败发生在 handle 前，不产生 `HandlingReport`。该异常与 `StimulusErrorCode` 尚未在当前源码实现，不能提前用于业务代码。
 - 枚举值和字段名属于跨模块协议；修改时必须先更新 spec 和消费者测试。
-- `Stimulus` 默认不持久化。调用方必须显式选择 `PersistPolicy`，不能仅凭消息来源猜测。
+- 目标强类型 Stimulus 不携带 `PersistPolicy`。外部调用方显式提供刺激类型、source 和 interaction 生命周期字段；Agent 在 handle 内部决定会话记录和长期记忆候选，并对同一稳定刺激保证幂等。
 - 构造参数不合法时由 dataclass、枚举或 Pydantic 抛出类型/校验异常，调用方不应静默吞掉。
 
 ## 使用示例
 
-假设 WebSocket 收到一条文字消息：Adapter 先生成 `Stimulus`，stage 根据其持久化策略保存消息，再把规范化输入交给 Agent；Agent 的结果最终可用 `ActionPlan` 或现有回复对象表达。整个过程中，各模块共享的是这里的数据，而不是彼此的内部对象。
+假设 WebSocket 收到一条文字消息：Adapter 选择 `TextMessage`、填写 `source` 和规范化内容，stage 管理 pending 后交给 Agent；Agent 在内部决定需要的会话记录和记忆证据，再生成零到多个 `ActionPlan`。stage 不读取或选择 Agent 的持久化策略。整个过程中，各模块共享的是公开领域数据，而不是彼此的内部对象。
 
 ## 应覆盖的契约场景
 
-- `TextMessage` 从 `src.domain.agent` 构造后固定为 `TEXT_MESSAGE`，逐项保留全部字段、拒绝赋值修改且不存在 `payload`。
-- `src.domain.agent`、`src.domain.stimulus` 和 `src.domain` 导出的 `PersistPolicy` 是同一个四成员枚举对象。
-- 不同 `PersistPolicy` 下，`should_persist_conversation()` 和 `can_be_memory_candidate()` 返回预期结果。
+- `TextMessage` 从 `src.domain.agent` 构造后固定为 `TEXT_MESSAGE`，逐项保留目标公开字段、拒绝赋值修改且不存在 `payload`；source 和 ephemeral 的合法字段值不因组合少见而被构造器拒绝。
+- 迁移期继续验证旧路径与当前 PR #90 路径导出的 `PersistPolicy` 是同一个四成员枚举对象；目标强类型 Stimulus 迁移完成后，改为验证 `src.domain.agent` 不再要求或公开该类型。
+- 迁移期旧 `Stimulus` 在不同 `PersistPolicy` 下，`should_persist_conversation()` 和 `can_be_memory_candidate()` 返回预期结果；该测试不构成目标强类型 Stimulus 必须暴露策略的依据。
 - `AgentState.with_updates(...)` 返回新对象且不修改原状态。
 - 未指定目标角色、时间或 ID 时，默认值稳定且可序列化。
