@@ -1,9 +1,9 @@
 ---
 name: spec-tdd-pr-guard
-description: Enforce Agent-LuoTianyi's spec-first, interface-locked, TDD, small-PR, and development-progress workflow before feature, bug-fix, or refactor implementation. Use whenever a request would change product code, tests, public interfaces, or implemented behavior; do not use for read-only review or explanation.
+description: Enforce Agent-LuoTianyi's spec-first, interface-locked, TDD, author-self-review, and complete behavior-slice PR workflow. Use whenever a request would change product code, tests, public interfaces, or implemented behavior; do not use for read-only review or explanation.
 ---
 
-# Spec、TDD 与小 PR 门禁
+# Spec、TDD 与完整行为切片 PR 门禁
 
 本 Skill 的目标是阻止 AI 跳过开发流程、一次生成过多代码或私自扩大公开 interface。
 
@@ -28,52 +28,54 @@ description: Enforce Agent-LuoTianyi's spec-first, interface-locked, TDD, small-
 相关公开 interface spec：存在 / 缺失 / 不足
 对应测试：存在且已确认失败 / 已有回归测试 / 缺失
 进度文档：存在 / 缺失
-预计 PR 切片：
+预计行为切片：
 最早缺失步骤：
 ```
 
-按以下顺序判断，**只处理最早缺失的一步**：
+按以下顺序推进，同一行为切片内不得跳步：
 
 1. 需求；
 2. 模块归属和公开 interface 设计；
-3. 对应公开 interface 的测试；
-4. 让一个失败测试通过的最小实现；
-5. 验证、进度记录和 PR。
+3. SPEC commit 及作者自审；
+4. 通过公开 interface 建立 Red，提交测试 commit 并自审；
+5. 最小 Green，提交实现 commit 并自审；
+6. 回归、进度记录和完整行为切片 PR。
 
-如果较早步骤缺失，不得用后面的代码、测试或用户要求“先做出来”作为跳过理由。
+如果较早步骤缺失，不得用后面的代码、测试或用户要求“先做出来”作为跳过理由。补齐并自审较早步骤后，可以在同一分支继续下一阶段；阶段门禁默认是 commit 边界，不是 PR 边界。
 
-## 缺失步骤怎样处理
+## 同一分支内怎样补齐门禁
 
 ### 1. 缺少需求
 
-只创建或补充 PRD，同步创建或更新进度文档，然后准备一个仅包含需求和进度记录的 PR。停止，不设计 interface，不写测试或实现。
+先创建或补充 PRD，并同步进度文档，提交 SPEC commit 后停止进行作者自审。需求含义仍有实质歧义时请求用户决定；已经足够明确时继续 interface 和测试，不为普通切片自动创建文档 PR。
 
 Bug 可以使用写明复现步骤、期望结果、实际结果和修复边界的 Bug 需求文档，不得只用一句聊天描述代替可审核需求。
 
 ### 2. 缺少 interface 设计
 
-只补充模块归属和 interface spec，写明调用者、输入输出、副作用、正常行为、异常行为以及从哪个 interface 验证。同步进度文档，然后准备一个仅包含设计和进度记录的 PR。停止，不写测试或实现。
+先补充模块归属和 interface spec，写明调用者、输入输出、副作用、正常行为、异常行为以及从哪个 interface 验证。同步进度文档并提交 SPEC commit，然后停止进行作者自审。只有跨模块 interface 尚有争议或需要多个团队先行采用时，才建议独立设计 PR；否则继续同一行为切片。
 
 如果现有 interface 已能满足需求，应明确列出将使用的 interface，不为形式完整新增包装层。
 
 ### 3. 缺少对应测试
 
-只为一个最小可观察行为增加测试，通过 spec 已确认的公开 interface 验证。先运行并确认它因为功能尚未实现而失败，记录命令、失败测试和失败原因；同步进度文档，然后准备 Draft PR。停止，不写产品实现。
+为本切片增加通过已确认公开 interface 观察行为的测试。先运行并确认它因为功能尚未实现而失败，记录命令、失败测试和失败原因；同步进度文档，提交 Red commit 后停止进行作者自审。确认 Red 有效后，在同一分支继续最小 Green，不默认创建 Red-only PR。
 
 如果实现早已存在，新增测试第一次运行就通过，不得伪造 Red。应在进度文档和 PR 中标为“补回归/契约测试，既有实现无 Red 证据”。不得删除或故意破坏现有代码来制造失败。
 
 ### 4. 可以实现
 
-只有需求、interface spec 和对应失败测试都已确认后，才能修改产品代码。只写足以让当前一个测试通过的实现，不顺便实现下一个场景，不增加 spec 没有要求的 fallback、配置、状态或兼容路径。
+只有需求、interface spec 和对应失败测试都已确认后，才能修改产品代码。只写足以让当前切片测试通过的实现，不顺便增加 spec 没有要求的 fallback、配置、状态或兼容路径。
 
-运行当前测试、受影响模块的回归测试和必要的静态检查。同步进度文档，然后准备本行为切片的 PR。停止，下一行为进入下一个 PR。
+运行当前测试、受影响模块的回归测试和必要的静态检查。同步进度文档，提交 Green commit 后停止进行作者自审。只有完整候选为 Green，才能请求其他开发者进行 PR 审核。
+
+文档、流程配置、机械迁移或删除废弃自动化如果没有有意义的运行时 Red，应记录“不适用”，改用静态检查、前后状态或可重复人工验证；不得制造无价值测试。
 
 ## 拒绝巨型改动并拆分 PR
 
 以下任一情况出现时，必须拒绝把请求作为一个 PR 实现：
 
 - 包含两个或更多可以独立说明、测试或发布的可观察行为；
-- 同时缺少需求、interface 或测试中的任一前置步骤；
 - 要求一次完成整个版本、多个独立模块或大范围“顺便重构”；
 - 预计超过 500 行手写实现代码，或审核者无法用一个聚焦测试集理解和验证；
 - 现有工作区已经堆积大量未拆分实现，继续编码会扩大混合 diff；
@@ -81,14 +83,14 @@ Bug 可以使用写明复现步骤、期望结果、实际结果和修复边界�
 
 拒绝的是**单次巨型执行**，不是拒绝用户目标。先说明为什么不能作为一个 PR 审核，再给出有顺序的 PR 列表。每个 PR 必须包含：
 
-- 一个目标或一个流程门禁；
+- 一个完整行为目标；
 - 对应 spec/interface；
-- 对应测试和验证命令；
+- 对应 Red、Green 和验证命令；
 - 明确不包含什么；
 - 对前后 PR 的依赖；
 - 完成条件。
 
-只执行最早且当前已获授权的 PR。不要在用户要求“大量完成”时先生成全部代码，再事后把提交记录拆开。
+按顺序执行当前已获授权的行为切片。不要在用户要求“大量完成”时先生成全部代码，再事后把提交记录拆开。
 
 如果工作区已有大量用户或其他 AI 的修改，保留它们，不删除、不覆盖。先冻结新增产品代码，盘点可独立行为和缺失门禁；无法安全分离时停止并请用户决定分支或 PR 边界。
 
@@ -110,13 +112,17 @@ Bug 可以使用写明复现步骤、期望结果、实际结果和修复边界�
 3. 不新增 interface 的替代方案；
 4. 对调用者、兼容性、测试和迁移的影响。
 
-在用户确认前不得增加公开方法、导出、路由、事件字段或共享数据字段。确认后先更新 interface spec 并提交设计 PR；设计通过后再进入测试和实现。
+在用户确认前不得增加公开方法、导出、路由、事件字段或共享数据字段。确认后先更新 interface spec 并提交 SPEC commit；自审通过后再进入测试和实现。只有 interface 本身需要独立多人决策时才先提交设计 PR。
 
-## PR 提交和停止条件
+## Commit 自审和 PR 提交条件
 
-完成一个门禁或行为切片后立即停止后续开发，并提交该范围的 PR。只有前一个 PR 已被用户确认可以继续，或用户明确批准堆叠 PR 时，才进入下一步。
+每个 SPEC、Red、Green 或 refactor commit 完成后，作者必须暂停后续开发并审查该 commit 相对父 commit 的 diff：确认阶段单一、范围没有扩大、事实记录准确，并运行该阶段需要的验证。发现问题先修正；自审通过后才能进入下一 commit。
+
+PR 默认只在一个完整行为切片已经 Green 时提交，并同时包含必要的 SPEC、测试、实现和进度记录。Red-only PR、纯实现子 PR 和堆叠 PR 不是默认流程；只有负责人为独立契约交付、多人并行、跨仓库依赖或高风险迁移明确批准时才使用。不得用 Draft PR 代替同一切片内部的 SPEC、Red 或 Green commit，也不能把未完成候选当成已经可审核或可合并。
+
+其他开发者审核 PR 当前 head。作者自审不能替代他人审核，旧 head 的审查结论也不能证明更新后的候选。管理员在评审时自行决定是否手动调用 AI 辅助；不得因为 PR 创建、push、编辑、评论、Ready 或 review 事件自动启动 AI 审核或自动合并。
 
 打开远程 PR、推送分支或发送外部消息仍需要当前任务具有相应授权。如果没有授权、远程不可用或凭据不足，则准备好分支/提交建议、PR 标题、PR 正文和验证证据，明确请求授权；不得因为无法打开 PR 就继续实现下一阶段。
 
-最终回复必须说明：完成的是哪一个门禁或行为切片、哪些步骤尚未开始、进度文档位置、实际验证结果，以及下一 PR 应做什么。
+最终回复必须说明：完成的是哪个行为切片、SPEC/Red/Green commit 和作者自审状态、进度文档位置、实际验证结果、未验证范围，以及下一步是什么。
 

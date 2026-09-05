@@ -2,11 +2,24 @@
 
 关联工单：[#93](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/93)
 
-## 目标
+> 当前阶段：SPEC
+>
+> 当前状态：退役中
 
-在 GitHub 默认分支 `dev` 部署事件驱动的审查工作流，审查以 `refactor/agent` 为最终集成分支、且显式关联 Agent 深模块重构工单 #60-#89 的同仓库根 PR 与合法堆叠子 PR。审查覆盖流程/TDD、黑盒验证、Standards 和 Spec；失败时请求修改，通过时将子 PR squash merge 到直接父分支，或将根 PR squash merge 到 `refactor/agent`。`master` 仅用于已经验收的生产发布和必要热修复，不承载该开发自动化。
+## 当前行为切片
 
-## 本 PR
+- 分支：`codex/revise-development-pr-flow`，目标 `dev`，PR 待创建。
+- 目标：把 SPEC、Red、Green 改为同一行为切片分支内的 commit 与作者自审门禁；完整 Green 候选才提交 PR，由其他开发者审核。管理员在评审时自行决定是否手动使用 AI，不再由 PR 事件自动审查或合并。
+- 范围：修订开发守则及 `spec-tdd-pr-guard`；删除 `agent-refactor-review.yml`、专用 `.github/codex` 审查 bundle 和只服务该流程的 actionlint runner 标签配置；停用并注销本机专用 runner、计划任务和仓库开关变量。
+- 明确不包含：不修改 Agent 产品代码、#107 的测试或实现、仓库通用 Actions 权限、其他 runner 和其他 Codex 配置。
+- Red：不适用。本切片删除废弃流程，不为“文件应不存在”制造测试；使用仓库文件清单、GitHub runner/变量状态和本机计划任务/进程状态验证。
+- 当前事实：仓库变量已从 `true` 置为 `false`；本机计划任务和专用 runner 进程已停止，GitHub runner 注册及仓库变量已删除。仓库内触发文件和本地 runner 缓存目录仍待清理。
+
+## 退役后的目标
+
+PR 创建、push、编辑、评论、Ready 或 review 事件不再触发 AI 审查，也不再由自动流程批准或合并。管理员在其他开发者审核完整 Green 行为切片时，可按当前风险和需要手动调用 AI 辅助；AI 结果只作为审核证据，不替代管理员的最终判断。
+
+## 历史最后一次上线 PR
 
 - PR：[#104](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/104)（分支 `codex/record-pr-review-branch-migration`，目标 `dev`）
 - 目标：记录默认分支迁移和发布分支清理的最终结果。
@@ -14,7 +27,7 @@
 - 明确不包含：不修改工作流、审查策略、Agent 产品代码、#90/#94 分支或本机 Runner 配置。
 - 验证及结果：GitHub 默认分支为 `dev`；`dev` 上的 `Agent refactor PR review` 工作流为 active；`master` 当前文件树与自动化引入前的发布提交 `450c1a53` 无差异。
 
-## 已完成
+## 历史已完成（退役前）
 
 - 建立新建、更新、重新打开、Ready、retarget、review 提交/编辑/撤销、普通评论和行内评论事件入口。
 - 在付费调用前限制目标分支、工单范围、同仓库 head 和 write/maintain/admin 触发者。
