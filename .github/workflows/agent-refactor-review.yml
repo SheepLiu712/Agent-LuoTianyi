@@ -2,8 +2,6 @@ name: Agent refactor PR review
 
 'on':
   pull_request_target:
-    branches:
-      - refactor/agent
     types:
       - opened
       - synchronize
@@ -50,7 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      issues: read
+      issues: write
       pull-requests: read
     outputs:
       duplicate: ${{ steps.resolve.outputs.duplicate }}
@@ -60,6 +58,7 @@ jobs:
       head_sha: ${{ steps.resolve.outputs.head_sha }}
       issue_numbers: ${{ steps.resolve.outputs.issue_numbers }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
+      stack_chain: ${{ steps.resolve.outputs.stack_chain }}
     steps:
       - name: Check out trusted review policy
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -112,17 +111,7 @@ jobs:
               repo: context.repo.repo,
               pull_number: prNumber,
             });
-            if (pull.base.ref !== "refactor/agent" || pull.state !== "open") {
-              core.notice(`Ignoring PR #${prNumber}: base=${pull.base.ref}, state=${pull.state}.`);
-              core.setOutput("eligible", "false");
-              return;
-            }
             const repositoryName = `${context.repo.owner}/${context.repo.repo}`;
-            if (pull.head.repo?.full_name !== repositoryName) {
-              core.notice(`Ignoring PR #${prNumber}: external fork branches are not trusted.`);
-              core.setOutput("eligible", "false");
-              return;
-            }
             let closingIssues = [];
             try {
               const graph = await github.graphql(
@@ -145,15 +134,91 @@ jobs:
               closingIssues,
               repositoryName,
             );
-            if (
-              issueNumbers.length === 0 ||
-              issueNumbers.some((number) => number < 60 || number > 89)
-            ) {
+            if (!policy.isAgentIssueSet(issueNumbers)) {
               core.notice(
                 `Ignoring PR #${prNumber}: explicit issue relationships must refer only to #60-#89.`,
               );
               core.setOutput("eligible", "false");
               return;
+            }
+            let stackChain;
+            try {
+              stackChain = await policy.resolvePullChain(
+                pull,
+                async (headRef) => github.paginate(github.rest.pulls.list, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: "open",
+                  head: `${context.repo.owner}:${headRef}`,
+                  per_page: 100,
+                }),
+                repositoryName,
+                "refactor/agent",
+              );
+            } catch (error) {
+              const marker = `<!-- agent-refactor-invalid-stack:${pull.base.sha}:${pull.head.sha} -->`;
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                per_page: 100,
+              });
+              if (!comments.some((comment) => (comment.body || "").includes(marker))) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  body: [
+                    marker,
+                    "结论：**CHANGES_REQUESTED（流程）**",
+                    "",
+                    `当前 PR 无法解析为终止于 \`refactor/agent\` 的可信堆叠链：${error.message}。`,
+                    "请将根 PR 的 base 修正为 `refactor/agent`；子 PR 必须以同仓库唯一开放父 PR 的 head 分支为 base，并保持父链开放、无环且可追溯。",
+                  ].join("\n"),
+                });
+              }
+              core.notice(`Rejected PR #${prNumber}: ${error.message}.`);
+              core.setOutput("eligible", "false");
+              return;
+            }
+
+            for (const parent of stackChain.slice(1)) {
+              const parentReviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: parent.number,
+                per_page: 100,
+              });
+              const violation = policy.parentApprovalViolation(
+                parentReviews,
+                parent.head_sha,
+              );
+              if (violation) {
+                const marker = `<!-- agent-refactor-parent-unapproved:${parent.number}:${parent.head_sha} -->`;
+                const comments = await github.paginate(github.rest.issues.listComments, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: prNumber,
+                  per_page: 100,
+                });
+                if (!comments.some((comment) => (comment.body || "").includes(marker))) {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: prNumber,
+                    body: [
+                      marker,
+                      "结论：**CHANGES_REQUESTED（流程）**",
+                      "",
+                      `父 PR #${parent.number} 的当前 head \`${parent.head_sha}\` 尚未形成有效批准：${violation}。`,
+                      "请先让父层当前 head 通过审核；旧 SHA 的批准、已撤销批准或当前修改请求均不能授权本层继续。",
+                    ].join("\n"),
+                  });
+                }
+                core.notice(`Rejected PR #${prNumber}: parent #${parent.number} is not approved.`);
+                core.setOutput("eligible", "false");
+                return;
+              }
             }
 
             const eventKey = policy.buildEventKey(
@@ -189,6 +254,7 @@ jobs:
             core.setOutput("head_sha", pull.head.sha);
             core.setOutput("issue_numbers", JSON.stringify(issueNumbers));
             core.setOutput("pr_number", String(prNumber));
+            core.setOutput("stack_chain", JSON.stringify(stackChain));
 
   review:
     needs: resolve
@@ -244,12 +310,14 @@ jobs:
           ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
           REVIEW_EVENT_KEY: ${{ needs.resolve.outputs.event_key }}
+          STACK_CHAIN: ${{ needs.resolve.outputs.stack_chain }}
         with:
           script: |
             const fs = require("fs");
             const path = require("path");
             const prNumber = Number(process.env.PR_NUMBER);
             const issueNumbers = JSON.parse(process.env.ISSUE_NUMBERS);
+            const stackChain = JSON.parse(process.env.STACK_CHAIN);
             const [pullResponse, files, commits, comments, reviews, reviewComments] = await Promise.all([
               github.rest.pulls.get({
                 owner: context.repo.owner,
@@ -308,6 +376,35 @@ jobs:
               });
             }
             const pull = pullResponse.data;
+            const pullRequestChain = await Promise.all(stackChain.map(async (entry) => {
+              const [{data: chainPull}, chainReviews] = await Promise.all([
+                github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: entry.number,
+                }),
+                github.paginate(github.rest.pulls.listReviews, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: entry.number,
+                  per_page: 100,
+                }),
+              ]);
+              return {
+                ...entry,
+                title: chainPull.title,
+                body: chainPull.body,
+                draft: chainPull.draft,
+                reviews: chainReviews.slice(-50).map((review) => ({
+                  author: review.user?.login,
+                  association: review.author_association,
+                  submitted_at: review.submitted_at,
+                  state: review.state,
+                  commit_id: review.commit_id,
+                  body: review.body,
+                })),
+              };
+            }));
             const reviewContext = {
               repository: `${context.repo.owner}/${context.repo.repo}`,
               event_name: context.eventName,
@@ -327,6 +424,7 @@ jobs:
                 candidate_merge_clean: process.env.CANDIDATE_MERGE_CLEAN === "true",
               },
               issues,
+              pull_request_chain: pullRequestChain,
               files: files.map((file) => ({
                 filename: file.filename,
                 status: file.status,
@@ -445,6 +543,7 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           EXPECTED_BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
           EXPECTED_ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
+          EXPECTED_STACK_CHAIN: ${{ needs.resolve.outputs.stack_chain }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
           REVIEW_EVENT_KEY: ${{ needs.resolve.outputs.event_key }}
           REVIEW_RESULT: ${{ needs.review.outputs.final_message }}
@@ -495,9 +594,53 @@ jobs:
               });
               return;
             }
-            if (pull.base.ref !== "refactor/agent" || pull.state !== "open") {
-              core.setFailed("The PR target or state changed after review.");
+            let currentStackChain;
+            try {
+              currentStackChain = await policy.resolvePullChain(
+                pull,
+                async (headRef) => github.paginate(github.rest.pulls.list, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: "open",
+                  head: `${context.repo.owner}:${headRef}`,
+                  per_page: 100,
+                }),
+                `${context.repo.owner}/${context.repo.repo}`,
+                "refactor/agent",
+              );
+            } catch (error) {
+              core.setFailed(`The PR stack is no longer valid: ${error.message}`);
               return;
+            }
+            const expectedStackChain = JSON.parse(process.env.EXPECTED_STACK_CHAIN);
+            if (JSON.stringify(currentStackChain) !== JSON.stringify(expectedStackChain)) {
+              core.notice("The PR stack changed after review; dispatching a fresh review.");
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: "agent-refactor-review.yml",
+                ref: "master",
+                inputs: {pr_number: String(prNumber)},
+              });
+              return;
+            }
+
+            let parentApprovalIssue = null;
+            for (const parent of currentStackChain.slice(1)) {
+              const parentReviews = await github.paginate(github.rest.pulls.listReviews, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: parent.number,
+                per_page: 100,
+              });
+              const violation = policy.parentApprovalViolation(
+                parentReviews,
+                parent.head_sha,
+              );
+              if (violation) {
+                parentApprovalIssue = `父 PR #${parent.number} 的当前 head 不再满足批准门禁：${violation}`;
+                break;
+              }
             }
 
             const marker = `<!-- agent-refactor-review-key:${process.env.REVIEW_EVENT_KEY} -->`;
@@ -518,9 +661,11 @@ jobs:
               return lines.join("\n");
             };
             const tests = result.tests.length
-              ? result.tests.map((test) =>
-                  `- \`${test.command}\` → **${test.status}**：${test.details}`,
-                ).join("\n")
+              ? result.tests.map((test) => {
+                  const requirement = test.required ? "required" : "optional";
+                  const skip = test.skip_reason ? `，skip_reason=${test.skip_reason}` : "";
+                  return `- \`${test.command}\` → **${test.status}**（${requirement}${skip}）：${test.details}`;
+                }).join("\n")
               : "- 未记录验证命令。";
             let body = [
               marker,
@@ -540,6 +685,10 @@ jobs:
             if (passViolation) {
               result.verdict = "CHANGES_REQUESTED";
               body += `\n\n工作流保护：${passViolation}；已拒绝合并。`;
+            }
+            if (parentApprovalIssue) {
+              result.verdict = "CHANGES_REQUESTED";
+              body += `\n\n工作流保护：${parentApprovalIssue}；已拒绝合并。`;
             }
 
             if (result.verdict === "PASS" && !pull.draft) {

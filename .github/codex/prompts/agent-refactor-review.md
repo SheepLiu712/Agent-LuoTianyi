@@ -43,11 +43,22 @@ fallback, enum member, payload field, or behavior.
    `git log <base_sha>..<head_sha> --oneline`. The current working tree is the
    candidate integration of those exact commits; run black-box tests there. If
    `candidate_merge_clean` is false, inspect the conflicts and require changes.
+   Read `pull_request_chain` from the runtime context. Its first entry is the
+   current PR and its final entry must be the root PR targeting
+   `refactor/agent`. A child PR uses its direct parent's pinned head as
+   `base_sha`; a root PR uses `refactor/agent` as its base.
 2. Classify the PR as `design`, `red_test`, `implementation`, or `acceptance`.
 3. Perform the flow/TDD review:
-   - the target must be exactly `refactor/agent`;
-   - the PR must implement only its linked Issue #60-#89 scope and blockers must
-     already be merged;
+   - a root PR must target `refactor/agent`; a stacked child may target the head
+     branch of its direct open parent, provided the acyclic chain terminates at
+     that root PR and the parent current head was explicitly approved for the
+     next slice;
+   - a child PR may merge only into its direct parent branch. After that merge,
+     the parent is a new candidate and must update its phase/progress, rerun its
+     full candidate verification, and receive a new review before it can merge;
+   - the PR must implement only its linked Issue #60-#89 scope; blockers must
+     already be merged into the fixed point, or appear in the explicitly
+     approved and traceable parent chain described above;
    - requirements and interface design must precede tests; a genuine failing
      test and recorded Red evidence must precede implementation;
    - progress documentation and PR claims must match facts in the diff, commit
@@ -57,6 +68,14 @@ fallback, enum member, payload field, or behavior.
 4. Perform black-box verification:
    - for implementation or acceptance, run the focused test commands required
      by the Issue/SPEC and the smallest relevant regression set;
+   - do not run an unfiltered Server full suite when it can start real song
+     learning, live Bilibili/VCPedia fetching, or other long-running external
+      work. Skip `slow`, `live`, `external`, and `real_llm` tests by default;
+      precisely deselect known unmarked live nodes while retaining Fake/offline
+      tests in the same file. Each test record must set `required: true` when
+      the Issue/SPEC requires that evidence. `NOT_RUN` is valid only with
+      `required: false` and a structured `skip_reason` of `slow`, `live`,
+      `external`, or `real_llm`; all completed records use `skip_reason: null`;
    - for design, validate links/format/diff consistency; product tests may be
      omitted only when they cannot observe a documentation-only change;
    - never report an interrupted, uncollected, or environment-blocked test as
@@ -66,9 +85,10 @@ fallback, enum member, payload field, or behavior.
    `.review-automation/.github/codex/skills/code-review/SKILL.md`. Run the
    Standards and Spec tracks independently and in parallel, then preserve them
    as separate finding arrays. Do not let one axis mask the other.
-6. Inspect for out-of-scope files and changes, target-branch mistakes, stale
-   base assumptions, missing cleanup required by the Issue, and any attempt to
-   merge to `dev` or `master` instead of `refactor/agent`.
+6. Inspect for out-of-scope files and changes, invalid or stale parent-chain
+   assumptions, missing cleanup required by the Issue, and any attempt to merge
+   a root anywhere except `refactor/agent` or a child anywhere except its
+   direct parent. Never permit a merge to `dev`, `main`, or `master`.
 
 ## Verdict rules
 
@@ -85,5 +105,6 @@ fallback, enum member, payload field, or behavior.
 Every finding must be actionable and tied to evidence. Use `P0`/`P1` for
 blocking correctness or governance failures, `P2`/`P3` for lower-severity
 findings. Return only JSON that satisfies the supplied output schema. Set
-`head_sha`, `target_branch`, and `issue_numbers` exactly from the runtime
-context.
+`head_sha` and `issue_numbers` exactly from the runtime context. Set
+`target_branch` to `refactor/agent`, which is the final integration branch even
+when the current PR is a stacked child whose immediate base is its parent PR.

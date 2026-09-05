@@ -59,7 +59,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["command", "status", "details"],
+        "required": ["command", "status", "details", "required", "skip_reason"],
         "properties": {
           "command": {
             "type": "string",
@@ -72,8 +72,32 @@
           "details": {
             "type": "string",
             "minLength": 1
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "skip_reason": {
+            "type": ["string", "null"],
+            "enum": ["slow", "live", "external", "real_llm", null]
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {"status": {"const": "NOT_RUN"}},
+              "required": ["status"]
+            },
+            "then": {
+              "properties": {
+                "required": {"const": false},
+                "skip_reason": {"type": "string"}
+              }
+            },
+            "else": {
+              "properties": {"skip_reason": {"const": null}}
+            }
+          }
+        ]
       }
     }
   },

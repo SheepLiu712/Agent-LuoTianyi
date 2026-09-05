@@ -2,6 +2,7 @@
 
 const RELATIONSHIP_PATTERN =
   /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|implement(?:s|ed)?|part\s+of)\s+(?:#(\d+)|https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/(\d+))/gi;
+const ISSUE_LABEL_PATTERN = /\bissue\s+#(\d+)\b/gi;
 
 const RESULT_KEYS = [
   "flow_findings",
@@ -16,7 +17,13 @@ const RESULT_KEYS = [
   "verdict",
 ];
 const FINDING_KEYS = ["detail", "file", "line", "required_change", "severity", "title"];
-const TEST_KEYS = ["command", "details", "status"];
+const TEST_KEYS = ["command", "details", "required", "skip_reason", "status"];
+const TEST_SKIP_REASONS = new Set(["slow", "live", "external", "real_llm"]);
+const TRUSTED_REVIEW_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
+const TRUSTED_REVIEW_BOTS = new Set([
+  "github-actions[bot]",
+  "chatgpt-codex-connector[bot]",
+]);
 
 function sameKeys(value, expected) {
   return (
@@ -40,7 +47,107 @@ function collectRelatedIssueNumbers(title, body, closingIssues = [], repository 
       numbers.add(Number(match[3]));
     }
   }
+  for (const match of text.matchAll(ISSUE_LABEL_PATTERN)) {
+    numbers.add(Number(match[1]));
+  }
   return [...numbers].sort((left, right) => left - right);
+}
+
+function isAgentIssueSet(issueNumbers, minimum = 60, maximum = 89) {
+  return (
+    Array.isArray(issueNumbers) &&
+    issueNumbers.length > 0 &&
+    issueNumbers.every(
+      (number) => Number.isInteger(number) && number >= minimum && number <= maximum,
+    )
+  );
+}
+
+function pullChainEntry(pull) {
+  return {
+    number: pull.number,
+    state: pull.state,
+    base_ref: pull.base?.ref,
+    base_sha: pull.base?.sha,
+    head_ref: pull.head?.ref,
+    head_sha: pull.head?.sha,
+    head_repository: pull.head?.repo?.full_name,
+  };
+}
+
+async function resolvePullChain(
+  startPull,
+  loadOpenParentsByHead,
+  repository,
+  integrationBranch = "refactor/agent",
+) {
+  if (typeof loadOpenParentsByHead !== "function") {
+    throw new Error("a parent PR loader is required");
+  }
+
+  const chain = [];
+  const seenNumbers = new Set();
+  const seenHeads = new Set();
+  let pull = startPull;
+
+  for (let depth = 0; depth < 20; depth += 1) {
+    const entry = pullChainEntry(pull);
+    if (entry.state !== "open") throw new Error(`PR #${entry.number} is not open`);
+    if (entry.head_repository !== repository) {
+      throw new Error(`PR #${entry.number} head must be in the same repository`);
+    }
+    if (!entry.head_ref || !entry.base_ref || !entry.head_sha || !entry.base_sha) {
+      throw new Error(`PR #${entry.number} has an incomplete branch identity`);
+    }
+    if (seenNumbers.has(entry.number) || seenHeads.has(entry.head_ref)) {
+      throw new Error(`pull-request chain contains a cycle at PR #${entry.number}`);
+    }
+
+    seenNumbers.add(entry.number);
+    seenHeads.add(entry.head_ref);
+    chain.push(entry);
+
+    if (entry.base_ref === integrationBranch) {
+      return chain.map((item, index) => ({
+        ...item,
+        role: index === chain.length - 1 ? "root" : "child",
+      }));
+    }
+    if (new Set(["dev", "main", "master"]).has(entry.base_ref)) {
+      throw new Error(`stacked PRs cannot target protected branch ${entry.base_ref}`);
+    }
+
+    const parents = await loadOpenParentsByHead(entry.base_ref);
+    if (!Array.isArray(parents) || parents.length !== 1) {
+      throw new Error(
+        `base ${entry.base_ref} must be the head of exactly one open parent PR`,
+      );
+    }
+    [pull] = parents;
+  }
+
+  throw new Error("pull-request chain exceeds the maximum depth");
+}
+
+function parentApprovalViolation(reviews, headSha) {
+  const latestByReviewer = new Map();
+  for (const review of reviews) {
+    const login = review.user?.login;
+    const trusted =
+      TRUSTED_REVIEW_ASSOCIATIONS.has(review.author_association) ||
+      TRUSTED_REVIEW_BOTS.has(login);
+    if (trusted && login && review.commit_id === headSha) {
+      latestByReviewer.set(login, review);
+    }
+  }
+  const current = [...latestByReviewer.values()];
+  if (current.some((review) => review.state === "CHANGES_REQUESTED")) {
+    return "a trusted reviewer has changes requested on the parent current head";
+  }
+  if (!current.some((review) => review.state === "APPROVED")) {
+    return "the parent has no trusted current-head approval";
+  }
+  return null;
 }
 
 function buildEventKey(eventName, payload, baseSha, headSha) {
@@ -96,9 +203,18 @@ function assertValidReviewResult(result) {
     if (
       !nonEmptyString(test.command) ||
       !nonEmptyString(test.details) ||
+      typeof test.required !== "boolean" ||
       !new Set(["PASS", "FAIL", "EXPECTED_RED", "NOT_RUN"]).has(test.status)
     ) {
       throw new Error("invalid test record");
+    }
+    if (test.status === "NOT_RUN") {
+      if (test.required) throw new Error("a required test cannot be NOT_RUN");
+      if (!TEST_SKIP_REASONS.has(test.skip_reason)) {
+        throw new Error("a NOT_RUN test must have an allowed skip reason");
+      }
+    } else if (test.skip_reason !== null) {
+      throw new Error("a completed test must have a null skip reason");
     }
   }
 }
@@ -114,9 +230,14 @@ function passViolation(result) {
   if (findings.some((finding) => finding.severity === "P0" || finding.severity === "P1")) {
     return "a PASS result cannot contain P0/P1 findings";
   }
-  if (result.tests.length === 0) return "a PASS result must contain test evidence";
-  if (result.tests.some((test) => test.status !== "PASS")) {
-    return "every test record in a PASS result must pass";
+  if (result.tests.some((test) => new Set(["FAIL", "EXPECTED_RED"]).has(test.status))) {
+    return "a PASS result cannot contain a test that failed or remained Red";
+  }
+  if (result.tests.some((test) => test.required && test.status === "NOT_RUN")) {
+    return "a PASS result cannot skip a required test";
+  }
+  if (!result.tests.some((test) => test.status === "PASS")) {
+    return "a PASS result must contain passing test evidence";
   }
   return null;
 }
@@ -135,6 +256,9 @@ module.exports = {
   assertValidReviewResult,
   buildEventKey,
   collectRelatedIssueNumbers,
+  isAgentIssueSet,
   latestHumanChangeRequest,
+  parentApprovalViolation,
   passViolation,
+  resolvePullChain,
 };
