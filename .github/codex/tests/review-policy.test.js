@@ -8,6 +8,7 @@ const {
   collectRelatedIssueNumbers,
   latestHumanChangeRequest,
   passViolation,
+  resolvePullChain,
 } = require("../scripts/review-policy");
 
 const SHA = "a".repeat(40);
@@ -38,6 +39,102 @@ test("collects only explicit issue relationships and preserves out-of-range link
       "a/b",
     ),
     [60, 62, 63, 100],
+  );
+});
+
+test("recognizes an explicit Issue label without treating casual mentions as relationships", () => {
+  assert.deepEqual(
+    collectRelatedIssueNumbers("Green slice", "- Issue #60\n- Mentions #61 for context", [], "a/b"),
+    [60],
+  );
+});
+
+function pull(number, headRef, baseRef, overrides = {}) {
+  return {
+    number,
+    state: "open",
+    base: {ref: baseRef, sha: `${number}`.padStart(40, "b").slice(-40)},
+    head: {
+      ref: headRef,
+      sha: `${number}`.padStart(40, "a").slice(-40),
+      repo: {full_name: "a/b"},
+    },
+    ...overrides,
+  };
+}
+
+test("resolves a root PR directly targeting the integration branch", async () => {
+  const root = pull(90, "test/contract", "refactor/agent");
+  const chain = await resolvePullChain(root, async () => [], "a/b", "refactor/agent");
+
+  assert.deepEqual(chain.map((item) => item.number), [90]);
+  assert.equal(chain[0].role, "root");
+});
+
+test("resolves a stacked child through its open parent PR", async () => {
+  const parent = pull(90, "test/contract", "refactor/agent");
+  const child = pull(94, "impl/green", "test/contract");
+  const chain = await resolvePullChain(
+    child,
+    async (headRef) => (headRef === "test/contract" ? [parent] : []),
+    "a/b",
+    "refactor/agent",
+  );
+
+  assert.deepEqual(chain.map((item) => [item.number, item.role]), [
+    [94, "child"],
+    [90, "root"],
+  ]);
+});
+
+test("rejects a stacked chain with no unique open parent or wrong final branch", async () => {
+  const child = pull(94, "impl/green", "test/contract");
+  await assert.rejects(
+    resolvePullChain(child, async () => [], "a/b", "refactor/agent"),
+    /exactly one open parent/,
+  );
+
+  const wrongRoot = pull(90, "test/contract", "dev");
+  await assert.rejects(
+    resolvePullChain(
+      child,
+      async (headRef) => (headRef === "test/contract" ? [wrongRoot] : []),
+      "a/b",
+      "refactor/agent",
+    ),
+    /protected branch dev/,
+  );
+});
+
+test("rejects foreign, closed, and cyclic PR chains", async () => {
+  const child = pull(94, "impl/green", "test/contract");
+  const foreignParent = pull(90, "test/contract", "refactor/agent", {
+    head: {ref: "test/contract", sha: "c".repeat(40), repo: {full_name: "fork/repo"}},
+  });
+  await assert.rejects(
+    resolvePullChain(child, async () => [foreignParent], "a/b", "refactor/agent"),
+    /same repository/,
+  );
+
+  const closedParent = pull(90, "test/contract", "refactor/agent", {state: "closed"});
+  await assert.rejects(
+    resolvePullChain(child, async () => [closedParent], "a/b", "refactor/agent"),
+    /open/,
+  );
+
+  const cycleParent = pull(90, "test/contract", "impl/green");
+  await assert.rejects(
+    resolvePullChain(
+      child,
+      async (headRef) => {
+        if (headRef === "test/contract") return [cycleParent];
+        if (headRef === "impl/green") return [child];
+        return [];
+      },
+      "a/b",
+      "refactor/agent",
+    ),
+    /cycle/,
   );
 });
 

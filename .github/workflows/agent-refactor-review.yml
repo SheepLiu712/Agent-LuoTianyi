@@ -2,8 +2,6 @@ name: Agent refactor PR review
 
 'on':
   pull_request_target:
-    branches:
-      - refactor/agent
     types:
       - opened
       - synchronize
@@ -60,6 +58,7 @@ jobs:
       head_sha: ${{ steps.resolve.outputs.head_sha }}
       issue_numbers: ${{ steps.resolve.outputs.issue_numbers }}
       pr_number: ${{ steps.resolve.outputs.pr_number }}
+      stack_chain: ${{ steps.resolve.outputs.stack_chain }}
     steps:
       - name: Check out trusted review policy
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
@@ -112,14 +111,23 @@ jobs:
               repo: context.repo.repo,
               pull_number: prNumber,
             });
-            if (pull.base.ref !== "refactor/agent" || pull.state !== "open") {
-              core.notice(`Ignoring PR #${prNumber}: base=${pull.base.ref}, state=${pull.state}.`);
-              core.setOutput("eligible", "false");
-              return;
-            }
             const repositoryName = `${context.repo.owner}/${context.repo.repo}`;
-            if (pull.head.repo?.full_name !== repositoryName) {
-              core.notice(`Ignoring PR #${prNumber}: external fork branches are not trusted.`);
+            let stackChain;
+            try {
+              stackChain = await policy.resolvePullChain(
+                pull,
+                async (headRef) => github.paginate(github.rest.pulls.list, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: "open",
+                  head: `${context.repo.owner}:${headRef}`,
+                  per_page: 100,
+                }),
+                repositoryName,
+                "refactor/agent",
+              );
+            } catch (error) {
+              core.notice(`Ignoring PR #${prNumber}: ${error.message}.`);
               core.setOutput("eligible", "false");
               return;
             }
@@ -189,6 +197,7 @@ jobs:
             core.setOutput("head_sha", pull.head.sha);
             core.setOutput("issue_numbers", JSON.stringify(issueNumbers));
             core.setOutput("pr_number", String(prNumber));
+            core.setOutput("stack_chain", JSON.stringify(stackChain));
 
   review:
     needs: resolve
@@ -244,12 +253,14 @@ jobs:
           ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
           REVIEW_EVENT_KEY: ${{ needs.resolve.outputs.event_key }}
+          STACK_CHAIN: ${{ needs.resolve.outputs.stack_chain }}
         with:
           script: |
             const fs = require("fs");
             const path = require("path");
             const prNumber = Number(process.env.PR_NUMBER);
             const issueNumbers = JSON.parse(process.env.ISSUE_NUMBERS);
+            const stackChain = JSON.parse(process.env.STACK_CHAIN);
             const [pullResponse, files, commits, comments, reviews, reviewComments] = await Promise.all([
               github.rest.pulls.get({
                 owner: context.repo.owner,
@@ -308,6 +319,35 @@ jobs:
               });
             }
             const pull = pullResponse.data;
+            const pullRequestChain = await Promise.all(stackChain.map(async (entry) => {
+              const [{data: chainPull}, chainReviews] = await Promise.all([
+                github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: entry.number,
+                }),
+                github.paginate(github.rest.pulls.listReviews, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: entry.number,
+                  per_page: 100,
+                }),
+              ]);
+              return {
+                ...entry,
+                title: chainPull.title,
+                body: chainPull.body,
+                draft: chainPull.draft,
+                reviews: chainReviews.slice(-50).map((review) => ({
+                  author: review.user?.login,
+                  association: review.author_association,
+                  submitted_at: review.submitted_at,
+                  state: review.state,
+                  commit_id: review.commit_id,
+                  body: review.body,
+                })),
+              };
+            }));
             const reviewContext = {
               repository: `${context.repo.owner}/${context.repo.repo}`,
               event_name: context.eventName,
@@ -327,6 +367,7 @@ jobs:
                 candidate_merge_clean: process.env.CANDIDATE_MERGE_CLEAN === "true",
               },
               issues,
+              pull_request_chain: pullRequestChain,
               files: files.map((file) => ({
                 filename: file.filename,
                 status: file.status,
@@ -445,6 +486,7 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           EXPECTED_BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
           EXPECTED_ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
+          EXPECTED_STACK_CHAIN: ${{ needs.resolve.outputs.stack_chain }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
           REVIEW_EVENT_KEY: ${{ needs.resolve.outputs.event_key }}
           REVIEW_RESULT: ${{ needs.review.outputs.final_message }}
@@ -495,8 +537,34 @@ jobs:
               });
               return;
             }
-            if (pull.base.ref !== "refactor/agent" || pull.state !== "open") {
-              core.setFailed("The PR target or state changed after review.");
+            let currentStackChain;
+            try {
+              currentStackChain = await policy.resolvePullChain(
+                pull,
+                async (headRef) => github.paginate(github.rest.pulls.list, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: "open",
+                  head: `${context.repo.owner}:${headRef}`,
+                  per_page: 100,
+                }),
+                `${context.repo.owner}/${context.repo.repo}`,
+                "refactor/agent",
+              );
+            } catch (error) {
+              core.setFailed(`The PR stack is no longer valid: ${error.message}`);
+              return;
+            }
+            const expectedStackChain = JSON.parse(process.env.EXPECTED_STACK_CHAIN);
+            if (JSON.stringify(currentStackChain) !== JSON.stringify(expectedStackChain)) {
+              core.notice("The PR stack changed after review; dispatching a fresh review.");
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: "agent-refactor-review.yml",
+                ref: "master",
+                inputs: {pr_number: String(prNumber)},
+              });
               return;
             }
 

@@ -1,7 +1,8 @@
 # Agent refactor PR review automation
 
-This automation reviews pull requests targeting `refactor/agent` and linked to
-Issue #60-#89. It reacts to new/updated/ready/reopened/retargeted PRs, review
+This automation reviews root pull requests targeting `refactor/agent` and
+their same-repository stacked child PRs when they are linked to Issue #60-#89.
+It reacts to new/updated/ready/reopened/retargeted PRs, review
 submissions/edits/dismissals, PR conversation comments, and inline review
 comments. A successful non-Draft review is squash merged; other verdicts are
 published as a GitHub review.
@@ -32,8 +33,12 @@ branch, issue-range, and current-SHA gates before a new paid review starts.
 ## Review contract
 
 The workflow accepts one eligible PR event and produces exactly one structured
-verdict for a pinned target-base and PR-head pair. The review job constructs
-that exact candidate integration tree before inspecting or testing it. The prompt and JSON schema define the
+verdict for a pinned immediate-base and PR-head pair. Before spending a model
+call it resolves an acyclic chain of open, same-repository PRs whose root base
+is `refactor/agent`. A stacked child is reviewed relative to its direct parent's
+pinned head and can merge only into that parent; a root is reviewed relative to
+`refactor/agent`. The review job constructs that exact candidate integration
+tree before inspecting or testing it. The prompt and JSON schema define the
 Codex-facing contract. The publishing job independently validates the complete
 output contract, uses the trusted event marker, and validates the head SHA,
 issue set, test evidence, current-head human change requests, and both pinned
@@ -54,14 +59,21 @@ Verdicts have these effects:
 ## Acceptance checks
 
 - Events unrelated to an open `refactor/agent` PR explicitly related only to
-  issue #60-#89 are ignored before any paid model call.
+  issue #60-#89, or to a valid stacked child whose open parent chain terminates
+  at such a root PR, are ignored before any paid model call.
 - External forks, untrusted actors, bot replies, duplicate events, and stale
   head results cannot publish or merge.
 - PR conversation replies and inline review replies are both included in the
   review context and create distinct review events.
 - A `PASS` without at least one successful test record cannot merge.
-- A merge uses GitHub's squash method and targets `refactor/agent`; the workflow
-  never merges to `dev`.
+- A merge uses GitHub's squash method. A child targets only its direct parent
+  branch; a root targets only `refactor/agent`. The workflow never merges to
+  `dev`, `main`, or `master`.
+- Merging a child changes the parent head and therefore requires a fresh parent
+  review; a child PASS is never treated as approval of the complete root diff.
+- Black-box review uses focused and affected-module offline tests. Real song
+  learning, live Bilibili/VCPedia fetches, and other `slow`/`live`/`external`/
+  `real_llm` paths are skipped by default and reported as unverified.
 
 ## Repository configuration
 

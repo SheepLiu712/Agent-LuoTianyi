@@ -2,6 +2,7 @@
 
 const RELATIONSHIP_PATTERN =
   /(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|implement(?:s|ed)?|part\s+of)\s+(?:#(\d+)|https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/issues\/(\d+))/gi;
+const ISSUE_LABEL_PATTERN = /\bissue\s+#(\d+)\b/gi;
 
 const RESULT_KEYS = [
   "flow_findings",
@@ -40,7 +41,76 @@ function collectRelatedIssueNumbers(title, body, closingIssues = [], repository 
       numbers.add(Number(match[3]));
     }
   }
+  for (const match of text.matchAll(ISSUE_LABEL_PATTERN)) {
+    numbers.add(Number(match[1]));
+  }
   return [...numbers].sort((left, right) => left - right);
+}
+
+function pullChainEntry(pull) {
+  return {
+    number: pull.number,
+    state: pull.state,
+    base_ref: pull.base?.ref,
+    base_sha: pull.base?.sha,
+    head_ref: pull.head?.ref,
+    head_sha: pull.head?.sha,
+    head_repository: pull.head?.repo?.full_name,
+  };
+}
+
+async function resolvePullChain(
+  startPull,
+  loadOpenParentsByHead,
+  repository,
+  integrationBranch = "refactor/agent",
+) {
+  if (typeof loadOpenParentsByHead !== "function") {
+    throw new Error("a parent PR loader is required");
+  }
+
+  const chain = [];
+  const seenNumbers = new Set();
+  const seenHeads = new Set();
+  let pull = startPull;
+
+  for (let depth = 0; depth < 20; depth += 1) {
+    const entry = pullChainEntry(pull);
+    if (entry.state !== "open") throw new Error(`PR #${entry.number} is not open`);
+    if (entry.head_repository !== repository) {
+      throw new Error(`PR #${entry.number} head must be in the same repository`);
+    }
+    if (!entry.head_ref || !entry.base_ref || !entry.head_sha || !entry.base_sha) {
+      throw new Error(`PR #${entry.number} has an incomplete branch identity`);
+    }
+    if (seenNumbers.has(entry.number) || seenHeads.has(entry.head_ref)) {
+      throw new Error(`pull-request chain contains a cycle at PR #${entry.number}`);
+    }
+
+    seenNumbers.add(entry.number);
+    seenHeads.add(entry.head_ref);
+    chain.push(entry);
+
+    if (entry.base_ref === integrationBranch) {
+      return chain.map((item, index) => ({
+        ...item,
+        role: index === chain.length - 1 ? "root" : "child",
+      }));
+    }
+    if (new Set(["dev", "main", "master"]).has(entry.base_ref)) {
+      throw new Error(`stacked PRs cannot target protected branch ${entry.base_ref}`);
+    }
+
+    const parents = await loadOpenParentsByHead(entry.base_ref);
+    if (!Array.isArray(parents) || parents.length !== 1) {
+      throw new Error(
+        `base ${entry.base_ref} must be the head of exactly one open parent PR`,
+      );
+    }
+    [pull] = parents;
+  }
+
+  throw new Error("pull-request chain exceeds the maximum depth");
 }
 
 function buildEventKey(eventName, payload, baseSha, headSha) {
@@ -137,4 +207,5 @@ module.exports = {
   collectRelatedIssueNumbers,
   latestHumanChangeRequest,
   passViolation,
+  resolvePullChain,
 };
