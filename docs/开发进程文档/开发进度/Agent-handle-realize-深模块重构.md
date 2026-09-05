@@ -19,7 +19,7 @@
 - 目标：补齐 Issue #60 开始契约测试前缺失的 Stimulus 公开枚举设计，使测试不再猜测成员和值。
 - 范围：`StimulusKind`、`StimulusSource`、`PersistPolicy` 的成员和值；每个 kind 的 source/persist/ephemeral 唯一合法组合；expand 阶段新旧协议的兼容边界。
 - 明确不包含：不修改 PR #90 的测试，不增加产品实现，不修改旧 `Stimulus.payload` 或生产调用链，不关闭 Issue #60。
-- 验证及结果：`git diff --check` 通过；静态核对 22 个 `StimulusKind` 均在唯一组合矩阵中逐项覆盖，SPEC 中已无 `StimulusSource.SYSTEM/SCHEDULER` 枚举残留；本 PR 为纯文档 interface 门禁，未运行 pytest、真实 LLM、TTS、设备或生产环境验证；GitHub 无 CI checks。
+- 验证及结果：`git diff --check` 通过；静态核对 22 个 `StimulusKind` 均在唯一组合矩阵中逐项覆盖，SPEC 中已无 `StimulusSource.SYSTEM/SCHEDULER` 枚举残留；本 PR 为纯文档 interface 门禁，未运行 pytest、真实 LLM、TTS、设备或生产环境验证；GitHub 自动审查的 `resolve`、`review`、`publish` 3 个 job 均为 `skipped`，未执行 CI 验证。
 - 评审结果：22 个 `StimulusKind` 与当前 22 个强类型变体逐项一致，该部分已通过；本轮已按 owner 意见删除无生产者的 `SYSTEM` 和仅作为触发机制的 `SCHEDULER`，增加 22 行唯一组合矩阵与非法组合规则，并明确新旧协议复用单一 `PersistPolicy` 类型，仍需 owner 重新评审。
 
 ## 历史设计轮次目标与范围
