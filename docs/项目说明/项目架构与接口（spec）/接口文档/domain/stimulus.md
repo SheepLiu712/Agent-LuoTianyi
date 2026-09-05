@@ -1,6 +1,6 @@
 # Stimulus 领域契约
 
-> 状态：抽象 `Stimulus` 与 `TextMessage` 已实现；其余可构造类型尚待 Red/Green。当前总 SPEC 登记 22 个类型名，其中 7 个只占位、当前版本不可构造。
+> 状态：当前总 SPEC 登记的 15 个可构造类型及 7 个不可构造占位类型均已实现，并已通过领域契约测试。
 >
 > 权威范围：本文件定义当前总 SPEC 的 Stimulus 公共字段、15 个可构造类型、7 个占位类型、构造所需值对象和稳定错误。`InteractionSnapshot`、request、report、ActionPlan、Call/Realtime、`UserJoinedActivity`、`ActivityInterrupted` 与玩偶触摸不在本契约中。
 
@@ -10,22 +10,9 @@
 
 `domain` 只负责不可变数据及其自身结构校验。构造对象不会访问数据库、网络、模型或文件，也不会决定会话记录或长期记忆持久化。受控引用是否存在、调用方能否读取，由消费引用的 Handler 通过对应 port 判断。
 
-## 当前与目标公开导出
+## 当前公开导出
 
-当前 Green 已公开：
-
-```python
-from src.domain.agent import (
-    InvalidStimulusError,
-    Stimulus,
-    StimulusErrorCode,
-    StimulusKind,
-    StimulusSource,
-    TextMessage,
-)
-```
-
-完成本契约对应的后续 Red/Green 后，`src.domain.agent` 还必须公开本文登记的其余类型和构造签名中出现的领域值类型。可构造类型提供下文定义的直接构造入口；占位类型只提供名称和固定 `kind`，不承诺未来字段签名。调用方不得从私有实现文件导入构造 helper。
+`src.domain.agent` 公开本文登记的全部 Stimulus 类型、枚举、稳定错误和构造签名中出现的领域值类型。可构造类型提供下文定义的直接构造入口；占位类型只提供名称和固定 `kind`，不承诺未来字段签名。调用方不得从私有实现文件导入构造 helper。
 
 目标公开包不导出 `PersistPolicy`。迁移期旧协议仍从旧路径使用自己的 `PersistPolicy`；本契约不删除旧 `server/src/domain/stimulus.py` 或迁移其生产调用方。
 
@@ -55,27 +42,27 @@ from src.domain.agent import (
 | 成员 | 序列化值 | 对应类型 | 当前可用性 |
 | --- | --- | --- | --- |
 | `TEXT_MESSAGE` | `text_message` | `TextMessage` | 已实现、可构造 |
-| `IMAGE_MESSAGE` | `image_message` | `ImageMessage` | 目标、可构造 |
-| `VOICE_MESSAGE` | `voice_message` | `VoiceMessage` | 目标、可构造；当前尚无生产者，为下一版本预先建立契约 |
-| `USER_TYPING` | `user_typing` | `UserTyping` | 目标、可构造 |
-| `IMAGE_SELECTION_OPENED` | `image_selection_opened` | `ImageSelectionOpened` | 目标、可构造 |
-| `IMAGE_SELECTION_CLOSED` | `image_selection_closed` | `ImageSelectionClosed` | 目标、可构造 |
-| `TOUCH_INTERACTION` | `touch_interaction` | `TouchInteraction` | 目标、可构造；当前只表示客户端 Live2D 触摸 |
+| `IMAGE_MESSAGE` | `image_message` | `ImageMessage` | 已实现、可构造 |
+| `VOICE_MESSAGE` | `voice_message` | `VoiceMessage` | 已实现、可构造；当前尚无生产者，为下一版本预先建立契约 |
+| `USER_TYPING` | `user_typing` | `UserTyping` | 已实现、可构造 |
+| `IMAGE_SELECTION_OPENED` | `image_selection_opened` | `ImageSelectionOpened` | 已实现、可构造 |
+| `IMAGE_SELECTION_CLOSED` | `image_selection_closed` | `ImageSelectionClosed` | 已实现、可构造 |
+| `TOUCH_INTERACTION` | `touch_interaction` | `TouchInteraction` | 已实现、可构造；当前只表示客户端 Live2D 触摸 |
 | `TOY_VIBRATION` | `toy_vibration` | `ToyVibration` | 占位、不可构造 |
 | `DEVICE_CONNECTED` | `device_connected` | `DeviceConnected` | 占位、不可构造 |
 | `DEVICE_DISCONNECTED` | `device_disconnected` | `DeviceDisconnected` | 占位、不可构造 |
-| `PROACTIVE_PROMPT_DUE` | `proactive_prompt_due` | `ProactivePromptDue` | 目标、可构造 |
-| `INTERACTION_DEADLINE` | `interaction_deadline` | `InteractionDeadline` | 目标、可构造 |
-| `DYNAMIC_OBSERVED` | `dynamic_observed` | `DynamicObserved` | 目标、可构造 |
-| `DIARY_PLANNING_DUE` | `diary_planning_due` | `DiaryPlanningDue` | 目标、可构造 |
-| `WORLD_OBSERVATION` | `world_observation` | `WorldObservation` | 目标、可构造 |
+| `PROACTIVE_PROMPT_DUE` | `proactive_prompt_due` | `ProactivePromptDue` | 已实现、可构造 |
+| `INTERACTION_DEADLINE` | `interaction_deadline` | `InteractionDeadline` | 已实现、可构造 |
+| `DYNAMIC_OBSERVED` | `dynamic_observed` | `DynamicObserved` | 已实现、可构造 |
+| `DIARY_PLANNING_DUE` | `diary_planning_due` | `DiaryPlanningDue` | 已实现、可构造 |
+| `WORLD_OBSERVATION` | `world_observation` | `WorldObservation` | 已实现、可构造 |
 | `DAILY_PLANNING_DUE` | `daily_planning_due` | `DailyPlanningDue` | 占位、不可构造 |
 | `ACTIVITY_DUE` | `activity_due` | `ActivityDue` | 占位、不可构造 |
 | `ACTIVITY_STARTED` | `activity_started` | `ActivityStarted` | 占位、不可构造 |
-| `ACTIVITY_OBSERVATION` | `activity_observation` | `ActivityObservation` | 目标、可构造 |
+| `ACTIVITY_OBSERVATION` | `activity_observation` | `ActivityObservation` | 已实现、可构造 |
 | `ACTIVITY_ENDED` | `activity_ended` | `ActivityEnded` | 占位、不可构造 |
-| `SONG_KNOWLEDGE_DISCOVERED` | `song_knowledge_discovered` | `SongKnowledgeDiscovered` | 目标、可构造 |
-| `SONG_LEARNED` | `song_learned` | `SongLearned` | 目标、可构造 |
+| `SONG_KNOWLEDGE_DISCOVERED` | `song_knowledge_discovered` | `SongKnowledgeDiscovered` | 已实现、可构造 |
+| `SONG_LEARNED` | `song_learned` | `SongLearned` | 已实现、可构造 |
 
 `StimulusSource` 表达领域事实由谁产生，不表达 WebSocket、HTTP、蓝牙、供应商或 scheduler 等传输和投递机制。
 
