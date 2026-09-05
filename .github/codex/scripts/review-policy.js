@@ -43,11 +43,11 @@ function collectRelatedIssueNumbers(title, body, closingIssues = [], repository 
   return [...numbers].sort((left, right) => left - right);
 }
 
-function buildEventKey(eventName, payload, headSha) {
+function buildEventKey(eventName, payload, baseSha, headSha) {
   let triggerId = `${payload.action || "event"}-${headSha}`;
   if (payload.comment?.id) triggerId = `comment-${payload.comment.id}`;
   if (payload.review?.id) triggerId = `review-${payload.action || "event"}-${payload.review.id}`;
-  return `${eventName}:${headSha}:${triggerId}`;
+  return `${eventName}:${baseSha}:${headSha}:${triggerId}`;
 }
 
 function assertValidReviewResult(result) {

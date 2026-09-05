@@ -11,6 +11,7 @@ const {
 } = require("../scripts/review-policy");
 
 const SHA = "a".repeat(40);
+const BASE_SHA = "b".repeat(40);
 
 function validResult(overrides = {}) {
   return {
@@ -42,16 +43,20 @@ test("collects only explicit issue relationships and preserves out-of-range link
 
 test("event keys distinguish lifecycle actions and individual replies", () => {
   assert.notEqual(
-    buildEventKey("pull_request_target", {action: "ready_for_review"}, SHA),
-    buildEventKey("pull_request_target", {action: "reopened"}, SHA),
+    buildEventKey("pull_request_target", {action: "ready_for_review"}, BASE_SHA, SHA),
+    buildEventKey("pull_request_target", {action: "reopened"}, BASE_SHA, SHA),
   );
   assert.notEqual(
-    buildEventKey("issue_comment", {comment: {id: 1}}, SHA),
-    buildEventKey("issue_comment", {comment: {id: 2}}, SHA),
+    buildEventKey("issue_comment", {comment: {id: 1}}, BASE_SHA, SHA),
+    buildEventKey("issue_comment", {comment: {id: 2}}, BASE_SHA, SHA),
   );
   assert.notEqual(
-    buildEventKey("pull_request_review", {action: "submitted", review: {id: 3}}, SHA),
-    buildEventKey("pull_request_review", {action: "dismissed", review: {id: 3}}, SHA),
+    buildEventKey("pull_request_review", {action: "submitted", review: {id: 3}}, BASE_SHA, SHA),
+    buildEventKey("pull_request_review", {action: "dismissed", review: {id: 3}}, BASE_SHA, SHA),
+  );
+  assert.notEqual(
+    buildEventKey("workflow_dispatch", {}, BASE_SHA, SHA),
+    buildEventKey("workflow_dispatch", {}, "c".repeat(40), SHA),
   );
 });
 

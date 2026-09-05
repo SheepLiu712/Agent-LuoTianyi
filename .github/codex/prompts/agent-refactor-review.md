@@ -40,7 +40,9 @@ fallback, enum member, payload field, or behavior.
 
 1. Pin `base_sha` and `head_sha` from the runtime context. Confirm both resolve,
    inspect `git diff <base_sha>...<head_sha>`, and inspect
-   `git log <base_sha>..<head_sha> --oneline`.
+   `git log <base_sha>..<head_sha> --oneline`. The current working tree is the
+   candidate integration of those exact commits; run black-box tests there. If
+   `candidate_merge_clean` is false, inspect the conflicts and require changes.
 2. Classify the PR as `design`, `red_test`, `implementation`, or `acceptance`.
 3. Perform the flow/TDD review:
    - the target must be exactly `refactor/agent`;

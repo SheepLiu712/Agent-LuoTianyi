@@ -55,6 +55,7 @@ jobs:
     outputs:
       duplicate: ${{ steps.resolve.outputs.duplicate }}
       eligible: ${{ steps.resolve.outputs.eligible }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
       event_key: ${{ steps.resolve.outputs.event_key }}
       head_sha: ${{ steps.resolve.outputs.head_sha }}
       issue_numbers: ${{ steps.resolve.outputs.issue_numbers }}
@@ -150,7 +151,12 @@ jobs:
               return;
             }
 
-            const eventKey = policy.buildEventKey(context.eventName, context.payload, pull.head.sha);
+            const eventKey = policy.buildEventKey(
+              context.eventName,
+              context.payload,
+              pull.base.sha,
+              pull.head.sha,
+            );
             const marker = `<!-- agent-refactor-review-key:${eventKey} -->`;
 
             const [comments, reviews] = await Promise.all([
@@ -173,6 +179,7 @@ jobs:
 
             core.setOutput("eligible", "true");
             core.setOutput("duplicate", duplicate ? "true" : "false");
+            core.setOutput("base_sha", pull.base.sha);
             core.setOutput("event_key", eventKey);
             core.setOutput("head_sha", pull.head.sha);
             core.setOutput("issue_numbers", JSON.stringify(issueNumbers));
@@ -191,12 +198,26 @@ jobs:
     outputs:
       final_message: ${{ steps.codex.outputs.final-message }}
     steps:
-      - name: Check out the candidate head commit
+      - name: Check out the pinned target commit
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          ref: ${{ needs.resolve.outputs.head_sha }}
+          ref: ${{ needs.resolve.outputs.base_sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Construct the pinned candidate integration tree
+        shell: bash
+        env:
+          CANDIDATE_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+        run: |
+          git config user.name "Agent refactor review"
+          git config user.email "agent-refactor-review@users.noreply.github.com"
+          if git merge --no-commit --no-ff "$CANDIDATE_HEAD_SHA"; then
+            echo "CANDIDATE_MERGE_CLEAN=true" >> "$GITHUB_ENV"
+          else
+            echo "CANDIDATE_MERGE_CLEAN=false" >> "$GITHUB_ENV"
+            echo "::warning::The pinned base and head have merge conflicts; Codex will review them."
+          fi
 
       - name: Reserve the trusted policy path
         shell: bash
@@ -213,6 +234,7 @@ jobs:
       - name: Build immutable review context
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
+          EXPECTED_BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
           ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
@@ -293,10 +315,11 @@ jobs:
                 state: pull.state,
                 draft: pull.draft,
                 base_ref: pull.base.ref,
-                base_sha: pull.base.sha,
+                base_sha: process.env.EXPECTED_BASE_SHA,
                 head_ref: pull.head.ref,
                 head_sha: pull.head.sha,
                 author: pull.user.login,
+                candidate_merge_clean: process.env.CANDIDATE_MERGE_CLEAN === "true",
               },
               issues,
               files: files.map((file) => ({
@@ -397,6 +420,7 @@ jobs:
       needs.review.outputs.final_message != ''
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: write
       issues: write
       pull-requests: write
@@ -413,6 +437,7 @@ jobs:
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
           EXPECTED_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
+          EXPECTED_BASE_SHA: ${{ needs.resolve.outputs.base_sha }}
           EXPECTED_ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
           REVIEW_EVENT_KEY: ${{ needs.resolve.outputs.event_key }}
@@ -433,6 +458,7 @@ jobs:
             }
 
             const expectedHead = process.env.EXPECTED_HEAD_SHA;
+            const expectedBase = process.env.EXPECTED_BASE_SHA;
             if (result.head_sha !== expectedHead) {
               core.setFailed(`Review result used ${result.head_sha}; expected ${expectedHead}.`);
               return;
@@ -450,6 +476,17 @@ jobs:
             });
             if (pull.head.sha !== expectedHead) {
               core.notice("The PR changed after review; the synchronize event will review the new head.");
+              return;
+            }
+            if (pull.base.sha !== expectedBase) {
+              core.notice("The target branch changed after review; dispatching a review for the new base.");
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: "agent-refactor-review.yml",
+                ref: "master",
+                inputs: {pr_number: String(prNumber)},
+              });
               return;
             }
             if (pull.base.ref !== "refactor/agent" || pull.state !== "open") {

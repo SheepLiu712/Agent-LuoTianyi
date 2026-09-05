@@ -24,11 +24,13 @@ therefore trigger fresh reviews.
 ## Review contract
 
 The workflow accepts one eligible PR event and produces exactly one structured
-verdict for the PR's current head SHA. The prompt and JSON schema define the
+verdict for a pinned target-base and PR-head pair. The review job constructs
+that exact candidate integration tree before inspecting or testing it. The prompt and JSON schema define the
 Codex-facing contract. The publishing job independently validates the complete
 output contract, uses the trusted event marker, and validates the head SHA,
-issue set, test evidence, and current-head human change requests before it
-performs any GitHub write.
+issue set, test evidence, current-head human change requests, and both pinned
+SHAs before it performs any GitHub write. If the target branch advances during
+review, the publisher dispatches a fresh review instead of merging stale evidence.
 
 Verdicts have these effects:
 
