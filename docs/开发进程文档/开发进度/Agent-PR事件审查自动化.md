@@ -8,7 +8,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `codex/migrate-pr-review-to-dev`，目标 `dev`）
+- PR：[#102](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/102)（分支 `codex/migrate-pr-review-to-dev`，目标 `dev`）
 - 目标：把事件审查的可信工作流和配套资产从发布分支迁移到 GitHub 默认开发分支，并明确 `dev`/`master` 的职责。
 - 范围：同步 `.github` 审查资产到 `dev`；将工作流内部重新派发引用从 `master` 改为 `dev`；更新分支治理和本进度文档。
 - 明确不包含：本 PR 不修改 Agent 产品代码、#90/#94 分支、工单范围、审查通过规则或本机 Runner 身份；不在本 PR 中清理 `master`，清理由迁移生效后的独立 revert PR 完成。
