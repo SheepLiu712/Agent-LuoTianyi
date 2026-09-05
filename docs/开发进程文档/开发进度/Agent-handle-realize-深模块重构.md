@@ -16,7 +16,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `codex/agent-dm-01-remove-persist-policy-red`，目标 `refactor/agent`，Red-only Draft）。
+- PR：[#107](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/107)（分支 `codex/agent-dm-01-remove-persist-policy-red`，目标 `refactor/agent`，Red-only Draft）。
 - 目标：从 `src.domain.agent` 的公开构造入口锁定目标 `TextMessage` 不再要求或携带 `persist_policy`。
 - 范围：更新既有 `TextMessage` 公开契约测试，调用方不再导入或传入 `PersistPolicy`，并断言构造结果不存在 `persist_policy` 字段。
 - 明确不包含：不写产品实现；不删除迁移期旧 `Stimulus` 的 `PersistPolicy`；不实现 Agent 内部持久化判断、错误族、其他 Stimulus、InteractionSnapshot、request/report、Agent façade 或生产调用链迁移。
