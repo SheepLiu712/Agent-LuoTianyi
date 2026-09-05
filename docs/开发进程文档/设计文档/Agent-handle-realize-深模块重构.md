@@ -1255,7 +1255,7 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 3. **开发守则决定开发方式。** 遵守 spec-first、从公开 interface 观察、TDD、隔离外部依赖、小 PR、进度同步和真实环境证据规则；
 4. 如果三者仍不能唯一确定行为，或实现要求扩大公开 interface，执行者停止该工单，记录具体缺口并先提交 SPEC 修订评审，不能靠猜测继续。
 
-工单开始时还必须以最新目标分支重新确认依赖工单已合并。文件中的 blocker 表示“未完成就不能安全开始”的真实阻塞边，不表示建议阅读顺序。
+工单开始时还必须以最新目标分支重新确认依赖工单已经合入，或存在本节允许的、父层已获批准的堆叠交付链。文件中的 blocker 表示“未完成就不能安全开始”的真实阻塞边，不表示建议阅读顺序。
 
 ### 9.2 每张实现工单的交付格式
 
@@ -1265,6 +1265,26 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 - PR 必须更新本功能开发进度，说明对应 SPEC 条款、明确不包含内容、实际测试命令与结果、未验证的网络/LLM/TTS/GPU/设备/生产风险；
 - 不允许在迁移工单中提前删除仍有调用者的旧入口。旧路径的最终删除只在 29 号 contract 工单进行；
 - 不允许因 blocker 尚未完成而在本工单内顺便实现 blocker。应等待或从共同目标分支取得已合并结果。
+
+#### 9.2.1 本重构的堆叠 PR 规则
+
+本重构的最终集成分支固定为 `refactor/agent`，但“每个 PR 的直接 base 都必须是 `refactor/agent`”不是要求。为了让 Red seam 在实现前独立评审，可以使用一层或多层堆叠 PR：
+
+```text
+refactor/agent
+  └─ 根 PR：已确认的 Red seam 或当前完整候选
+       └─ 子 PR：相对父 PR 的最小 Green 或下一门禁增量
+```
+
+- 根 PR 的 base 必须是 `refactor/agent`；子 PR 的 base 可以是同仓库直接父 PR 的 head 分支，但父链必须无环且最终回到该根 PR；
+- 每一层必须明确关联同一工单或具有已记录 blocker 关系的工单，并在 PR 正文写出父 PR、根 PR、最终集成分支和本层只增加的内容；
+- 子 PR 以父 PR 为 fixed point 做流程、黑盒、Standards 和 Spec 审查，通过后只 squash merge 到父分支；不得把子 PR 误合入 `dev`、`master` 或绕过父层直接落地；
+- 父 PR 吸收子 PR 后不再是原来的 Red-only 候选。作者必须更新 PR 标题、正文、本功能进度和验证结果，并把父 PR 的新 head 作为完整 Green 候选重新审核；任何旧 head 批准都不能直接授权最终合并；
+- 只有根 PR 对 `refactor/agent` 的完整 diff、提交顺序、相关离线测试和两轴审查全部通过后，根 PR 才能转为最终可合并状态并 squash merge。
+
+Draft/Ready 只表达作者是否请求审核：Red-only 门禁保持 Draft；子 PR 完成自检后由作者转 Ready；审核者使用 Approve/Request changes 表达结论。子 PR 被批准或合入父分支都不表示功能已进入 `refactor/agent`。
+
+自动和人工黑盒审查默认只运行工单 focused tests、受影响模块离线回归和必要静态检查。真实学歌流水线、B 站实时抓取以及 `slow/live/external/real_llm` 测试默认跳过并逐项记录为未验证；不能为了全量统计启动长耗时外部过程，也不能把跳过写成通过。
 
 ### 9.3 Expand–migrate–contract
 
