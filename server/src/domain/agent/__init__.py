@@ -1,7 +1,16 @@
-from .stimulus import PersistPolicy, StimulusKind, StimulusSource, TextMessage
+from .stimulus import (
+    InvalidStimulusError,
+    Stimulus,
+    StimulusErrorCode,
+    StimulusKind,
+    StimulusSource,
+    TextMessage,
+)
 
 __all__ = (
-    "PersistPolicy",
+    "InvalidStimulusError",
+    "Stimulus",
+    "StimulusErrorCode",
     "StimulusKind",
     "StimulusSource",
     "TextMessage",

@@ -6,7 +6,14 @@ from enum import Enum
 from typing import Any
 from uuid import uuid4
 
-from src.domain.agent import PersistPolicy
+
+class PersistPolicy(str, Enum):
+    """Controls persistence for the legacy mapping-based stimulus protocol."""
+
+    NONE = "none"
+    EPHEMERAL_ONLY = "ephemeral_only"
+    CONVERSATION_ONLY = "conversation_only"
+    CONVERSATION_AND_MEMORY_CANDIDATE = "conversation_and_memory_candidate"
 
 
 class SourceChannel(str, Enum):

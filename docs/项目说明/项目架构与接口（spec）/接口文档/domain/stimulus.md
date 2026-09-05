@@ -1,6 +1,6 @@
 # Stimulus 领域契约
 
-> 状态：工单 1 首个行为切片的目标 interface。
+> 状态：工单 1 首个行为切片已实现的当前 interface。
 >
 > 权威范围：本文件只定义抽象 `Stimulus`、首个具体变体 `TextMessage`，以及构造它们所必需的枚举和错误。其他 Stimulus、InteractionSnapshot、request 和 report 不属于本切片。
 
