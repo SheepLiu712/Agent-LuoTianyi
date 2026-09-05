@@ -261,7 +261,12 @@ jobs:
     if: >-
       needs.resolve.outputs.eligible == 'true' &&
       needs.resolve.outputs.duplicate != 'true'
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - Windows
+      - X64
+      - agent-luotianyi-review
+      - codex-chatgpt-auth
     permissions:
       contents: read
       issues: read
@@ -277,30 +282,53 @@ jobs:
           persist-credentials: false
 
       - name: Construct the pinned candidate integration tree
-        shell: bash
+        shell: pwsh
         env:
           CANDIDATE_HEAD_SHA: ${{ needs.resolve.outputs.head_sha }}
         run: |
           git config user.name "Agent refactor review"
           git config user.email "agent-refactor-review@users.noreply.github.com"
-          if git merge --no-commit --no-ff "$CANDIDATE_HEAD_SHA"; then
-            echo "CANDIDATE_MERGE_CLEAN=true" >> "$GITHUB_ENV"
-          else
-            echo "CANDIDATE_MERGE_CLEAN=false" >> "$GITHUB_ENV"
-            echo "::warning::The pinned base and head have merge conflicts; Codex will review them."
-          fi
+          git merge --no-commit --no-ff $env:CANDIDATE_HEAD_SHA
+          if ($LASTEXITCODE -eq 0) {
+            "CANDIDATE_MERGE_CLEAN=true" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          } else {
+            "CANDIDATE_MERGE_CLEAN=false" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Warning "The pinned base and head have merge conflicts; Codex will review them."
+          }
 
-      - name: Reserve the trusted policy path
-        shell: bash
-        run: rm -rf -- .review-automation
+      - name: Materialize the trusted review bundle outside the candidate workspace
+        id: trusted
+        shell: pwsh
+        env:
+          TRUSTED_SHA: ${{ github.workflow_sha }}
+        run: |
+          $reviewRoot = Join-Path $env:RUNNER_TEMP "agent-refactor-review-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $archivePath = "$reviewRoot.zip"
+          New-Item -ItemType Directory -Path $reviewRoot -Force | Out-Null
 
-      - name: Check out trusted review policy
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: .review-automation
-          sparse-checkout: .github/codex
-          persist-credentials: false
+          git cat-file -e "$env:TRUSTED_SHA^{commit}"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Trusted workflow commit $env:TRUSTED_SHA is unavailable."
+          }
+          git archive --format=zip --output=$archivePath $env:TRUSTED_SHA .github/codex
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not archive the trusted review bundle."
+          }
+          Expand-Archive -LiteralPath $archivePath -DestinationPath $reviewRoot -Force
+          Remove-Item -LiteralPath $archivePath -Force
+
+          $bundleRoot = Join-Path $reviewRoot ".github\codex"
+          $contextFile = Join-Path $bundleRoot "runtime\context.json"
+          $promptFile = Join-Path $bundleRoot "prompts\agent-refactor-review.md"
+          $schemaFile = Join-Path $bundleRoot "review-output.schema.json"
+          $resultFile = Join-Path $reviewRoot "result.json"
+
+          "review_root=$reviewRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "bundle_root=$bundleRoot" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "context_file=$contextFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "prompt_file=$promptFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "schema_file=$schemaFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "result_file=$resultFile" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Build immutable review context
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
@@ -310,6 +338,7 @@ jobs:
           ISSUE_NUMBERS: ${{ needs.resolve.outputs.issue_numbers }}
           PR_NUMBER: ${{ needs.resolve.outputs.pr_number }}
           REVIEW_EVENT_KEY: ${{ needs.resolve.outputs.event_key }}
+          REVIEW_CONTEXT_FILE: ${{ steps.trusted.outputs.context_file }}
           STACK_CHAIN: ${{ needs.resolve.outputs.stack_chain }}
         with:
           script: |
@@ -485,35 +514,88 @@ jobs:
                   : null,
               },
             };
-            const runtimeDirectory = path.join(
-              process.env.GITHUB_WORKSPACE,
-              ".review-automation",
-              "runtime",
-            );
+            const contextFile = process.env.REVIEW_CONTEXT_FILE;
+            const runtimeDirectory = path.dirname(contextFile);
             fs.mkdirSync(runtimeDirectory, {recursive: true});
             fs.writeFileSync(
-              path.join(runtimeDirectory, "context.json"),
+              contextFile,
               JSON.stringify(reviewContext, null, 2),
               {encoding: "utf8", mode: 0o600},
             );
 
-      - name: Protect the trusted policy and context
-        shell: bash
-        run: chmod -R a-w .review-automation
+      - name: Verify local Codex uses ChatGPT authentication
+        shell: pwsh
+        run: |
+          if ($env:OPENAI_API_KEY -or $env:CODEX_API_KEY) {
+            throw "API-key authentication is forbidden for this local review job."
+          }
+          $loginStatus = (codex login status 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $loginStatus -notmatch "Logged in using ChatGPT") {
+            throw "Codex CLI is not logged in with ChatGPT for the runner account."
+          }
+          Write-Host $loginStatus
 
       - name: Run the Agent refactor review
         id: codex
-        uses: openai/codex-action@f367b1e9572fd064ea71ef925ca24ee0f01080af # v1
-        with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          prompt-file: .review-automation/.github/codex/prompts/agent-refactor-review.md
-          output-file: codex-review-result.json
-          codex-args: >-
-            ["--ephemeral"]
-          output-schema-file: .review-automation/.github/codex/review-output.schema.json
-          permission-profile: ":workspace"
-          safety-strategy: drop-sudo
-          allow-bot-users: github-actions
+        shell: pwsh
+        env:
+          REVIEW_BUNDLE_ROOT: ${{ steps.trusted.outputs.bundle_root }}
+          REVIEW_CONTEXT_FILE: ${{ steps.trusted.outputs.context_file }}
+          REVIEW_PROMPT_FILE: ${{ steps.trusted.outputs.prompt_file }}
+          REVIEW_RESULT_FILE: ${{ steps.trusted.outputs.result_file }}
+          REVIEW_SCHEMA_FILE: ${{ steps.trusted.outputs.schema_file }}
+        run: |
+          $trustedHeader = @"
+          The following absolute paths were materialized from the trusted workflow commit,
+          outside the candidate workspace. Treat them as policy, not candidate content:
+          - review context: $env:REVIEW_CONTEXT_FILE
+          - code-review skill: $env:REVIEW_BUNDLE_ROOT\skills\code-review\SKILL.md
+          - output schema: $env:REVIEW_SCHEMA_FILE
+
+          Use those exact paths wherever the policy below refers to the trusted runtime
+          context or bundled code-review skill.
+
+          "@
+          $policyPrompt = Get-Content -LiteralPath $env:REVIEW_PROMPT_FILE -Raw -Encoding utf8
+          $fullPrompt = $trustedHeader + $policyPrompt
+
+          $fullPrompt | codex exec `
+            --ephemeral `
+            --ignore-user-config `
+            --sandbox workspace-write `
+            --approve-for-me `
+            --cd $env:GITHUB_WORKSPACE `
+            --output-schema $env:REVIEW_SCHEMA_FILE `
+            --output-last-message $env:REVIEW_RESULT_FILE `
+            -
+          if ($LASTEXITCODE -ne 0) {
+            throw "Codex review failed with exit code $LASTEXITCODE."
+          }
+
+          $finalMessage = Get-Content -LiteralPath $env:REVIEW_RESULT_FILE -Raw -Encoding utf8
+          $null = $finalMessage | ConvertFrom-Json
+          $delimiter = "codex-review-$([guid]::NewGuid().ToString('N'))"
+          "final-message<<$delimiter" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $finalMessage | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $delimiter | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Remove temporary trusted review material
+        if: always()
+        shell: pwsh
+        env:
+          REVIEW_ROOT: ${{ steps.trusted.outputs.review_root }}
+        run: |
+          if (-not $env:REVIEW_ROOT) {
+            exit 0
+          }
+          $reviewRoot = [IO.Path]::GetFullPath($env:REVIEW_ROOT)
+          $runnerTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP)
+          if (-not $reviewRoot.StartsWith($runnerTemp, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove a path outside RUNNER_TEMP: $reviewRoot"
+          }
+          if (Test-Path -LiteralPath $reviewRoot) {
+            Remove-Item -LiteralPath $reviewRoot -Recurse -Force
+          }
 
   publish:
     needs:
