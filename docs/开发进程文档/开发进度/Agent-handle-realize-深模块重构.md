@@ -20,7 +20,7 @@
 - 范围：一个 `TextMessage` 合法样例，逐项验证全部已提供公共/专有字段、固定 kind、不可变语义和不存在任意 `payload` 扩展口。
 - 明确不包含：不增加 `src.domain.agent` 产品实现，不测试其余 21 个 Stimulus、非法组合、InteractionSnapshot、request/report，也不修改旧生产链。
 - 前置门禁：interface 设计 PR [#91](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/91) 已获 owner 批准并于 2026-09-05 squash merge 到 `refactor/agent`，合并提交 `661b7d2`。
-- 验证及结果：`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败，符合公开协议入口尚未实现的预期 Red；未运行领域回归、全量 pytest、真实 LLM、TTS、设备或生产环境验证。
+- 验证及结果：`conda run -n agent python -m py_compile tests/domain/test_agent_handle_contract.py` 通过；`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败（1 error，0.77s），符合公开协议入口尚未实现的预期 Red；未运行领域回归、全量 pytest、真实 LLM、TTS、设备或生产环境验证。
 
 ## 历史设计轮次目标与范围
 
@@ -96,7 +96,7 @@
 - [x] 已删除没有当前生产者的 `StimulusSource.SYSTEM`；同时删除仅表示触发机制、与 source 定义冲突的 `SCHEDULER`；
 - [x] PR #91 已获 owner 批准并 squash merge 到 `refactor/agent`；PR #90 的 interface 前置门禁已经闭合；
 - [ ] 工单 01 当前只增加第一个公开 domain seam 契约测试，尚未实现 `src.domain.agent`；
-- [ ] Red：`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败，符合目标协议入口尚未实现的预期；
+- [ ] Red：`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败（1 error，0.77s），符合目标协议入口尚未实现的预期；
 - [ ] 工单 01 的其余 Stimulus、InteractionSnapshot、HandleStimulusRequest、CancellationToken、HandlingReport、稳定枚举和错误族测试尚未开始；
 - [ ] PR #90 仍为 Red-only Draft 且有 `CHANGES_REQUESTED`；本轮修正测试 seam 后等待 owner 复审，通过前不开始产品实现；
 - [ ] 本 PR 未运行领域回归、全量 pytest、真实 LLM、TTS、设备或生产环境验证；
