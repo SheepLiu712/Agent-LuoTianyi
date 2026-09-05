@@ -8,11 +8,11 @@
 
 ## 本 PR
 
-- PR：[#100](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/100)（分支 `codex/local-agent-pr-review-schema`，目标 `master`）
-- 目标：让审查结果 Schema 符合 Codex 结构化输出支持的 JSON Schema 子集。
-- 范围：从模型侧 Schema 移除 `uniqueItems`、格式/范围/长度和条件关键字；这些语义继续由独立 publisher 中的 `assertValidReviewResult` 全量校验，认证、隔离、审查和合并门禁不变。
+- PR：[#101](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/101)（分支 `codex/local-agent-pr-review-finalize`，目标 `master`）
+- 目标：记录 ChatGPT 登录、本机 Codex 事件审查的真实端到端验收结果和运行状态。
+- 范围：只更新本进度文档；确认 runner、仓库开关、真实审查/发布证据和旧轮询任务下线。
 - 明确不包含：不使用或配置 `OPENAI_API_KEY`/`CODEX_API_KEY`，不修改 Agent 产品代码、#90/#94 分支、工单范围或测试通过规则。
-- 验证及结果：第三次真实 dispatch [run 33962260226](https://github.com/SheepLiu712/Agent-LuoTianyi/actions/runs/33962260226) 已启动 ChatGPT 登录的 `gpt-5.6-sol`，但模型生成前以 `invalid_json_schema` 拒绝 `issue_numbers.uniqueItems`，因此未产生审查或合并。修复后待重新运行静态检查与真实 dispatch；验证期间保持 #90 的人工 `CHANGES_REQUESTED` 合并门禁。
+- 验证及结果：[run 33962430095](https://github.com/SheepLiu712/Agent-LuoTianyi/actions/runs/33962430095) 的 resolver、Windows self-hosted review 和 publisher 三个 job 全部成功；本机 Codex 使用 ChatGPT 登录和 `gpt-5.6-sol`，对 PR #90 发布 `CHANGES_REQUESTED`，未误合并。
 
 ## 已完成
 
@@ -33,6 +33,10 @@
 - 本地 review job 明确拒绝 API-key 环境变量，并通过 `codex exec --ephemeral --ignore-user-config --approve-for-me` 使用本地仓库、SPEC、开发规范和 workspace-write 测试环境。
 - resolver 和 publisher 继续在 GitHub-hosted runner 运行；只有已经通过受信任触发者、同仓库 head、Issue #60-#89 和堆叠链门禁的候选才会派发到本机。
 - PR #97—#99 已 squash merge 到 `master`；第三次真实 dispatch 暴露结构化输出 Schema 不兼容后，仓库变量 `AGENT_PR_REVIEW_ENABLED` 已恢复为 `false`，等待本修复合入后再开启复验。
+- PR #100 已 squash merge 到 `master`；仓库变量 `AGENT_PR_REVIEW_ENABLED` 已重新设为 `true`。
+- 真实审查已读取固定 PR/Issue/SPEC 上下文，执行 focused/domain pytest、Ruff、`PersistPolicy` 公开身份检查和 `git diff --check`；所有记录的检查均通过，真实学歌、B 站/VCPedia、真实模型/TTS/GPU/设备测试未运行。
+- publisher 已把 Standards finding 发布到 PR #90：新增公开 `src.domain.agent` interface 尚未同步到当前 domain interface 文档。PR 保持开放和 `CHANGES_REQUESTED`，证明失败结论不会触发合并。
+- 原 Codex 桌面心跳轮询任务 `agent-pr` 已删除；后续由 GitHub PR 事件直接派发，不再定时轮询。
 
 ## 已验证
 
@@ -45,9 +49,9 @@
 
 ## 待完成
 
-- 将本 PR 合入默认分支后，把 `AGENT_PR_REVIEW_ENABLED` 切换为 `true`。
 - 验证 Windows 重新登录后 runner 能由计划任务自动恢复在线；计划任务已经配置，本轮不为验证而重启用户会话。
-- 以真实根 PR 和堆叠子 PR 分别验证：事件触发、父链解析、Codex 增量/完整审查、子 PR 合入父分支，以及根 PR 最终 squash merge 到 `refactor/agent`。
-- 真实事件链路验收通过后，删除现有每 10 分钟轮询任务。
+- 下一次受信任开发者对相关 PR 提交 commit、Ready/Reopen、review 或评论回复时，确认对应事件会自动产生新运行；本轮已通过同一入口的 `workflow_dispatch` 验证完整执行链。
+- 仍需以真实堆叠子 PR 验证父链增量审查和“子 PR squash 到直接父分支”路径；当前只完成根 PR 的审查与拒绝合并路径。
+- 首个无阻塞根 PR 或堆叠子 PR 出现后，验证 PASS 会在发布前重新检查 head/base/父批准，并只合并到规则允许的目标。
 
-在以上待完成项完成前，本功能状态为“runner 已注册、工作流迁移中且仍禁用，等待端到端验收”，不得标记为完成。
+当前功能状态为“已启用并通过根 PR 审查/拒绝合并链路验收”；上列自动重启、真实事件和 PASS/堆叠合并路径仍需随下一批实际 PR 验证，不能提前写成通过。
