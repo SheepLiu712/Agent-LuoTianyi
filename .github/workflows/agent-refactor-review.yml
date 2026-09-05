@@ -18,6 +18,9 @@ name: Agent refactor PR review
   pull_request_review_comment:
     types:
       - created
+  check_suite:
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       pr_number:
@@ -42,8 +45,8 @@ jobs:
   resolve:
     if: >-
       vars.AGENT_PR_REVIEW_ENABLED == 'true' &&
-      github.actor != 'github-actions[bot]' &&
-      github.actor != 'chatgpt-codex-connector[bot]'
+      github.actor != 'chatgpt-codex-connector[bot]' &&
+      (github.actor != 'github-actions[bot]' || github.event_name == 'check_suite')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -62,16 +65,24 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const allowedPermissions = new Set(["admin", "maintain", "write"]);
-            const permission = await github.rest.repos.getCollaboratorPermissionLevel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              username: context.actor,
-            });
-            if (!allowedPermissions.has(permission.data.permission)) {
-              core.notice(`Ignoring untrusted trigger from ${context.actor}.`);
-              core.setOutput("eligible", "false");
-              return;
+            if (context.eventName === "check_suite") {
+              if (context.payload.check_suite?.app?.slug !== "github-actions") {
+                core.notice("Ignoring a check suite from an untrusted GitHub App.");
+                core.setOutput("eligible", "false");
+                return;
+              }
+            } else {
+              const allowedPermissions = new Set(["admin", "maintain", "write"]);
+              const permission = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: context.actor,
+              });
+              if (!allowedPermissions.has(permission.data.permission)) {
+                core.notice(`Ignoring untrusted trigger from ${context.actor}.`);
+                core.setOutput("eligible", "false");
+                return;
+              }
             }
 
             let prNumber = context.payload.pull_request?.number;
@@ -80,6 +91,15 @@ jobs:
             }
             if (!prNumber && context.eventName === "workflow_dispatch") {
               prNumber = Number(context.payload.inputs?.pr_number);
+            }
+            if (!prNumber && context.eventName === "check_suite") {
+              const attachedPulls = context.payload.check_suite?.pull_requests || [];
+              if (attachedPulls.length !== 1) {
+                core.notice(`Ignoring a check suite attached to ${attachedPulls.length} PRs.`);
+                core.setOutput("eligible", "false");
+                return;
+              }
+              prNumber = attachedPulls[0].number;
             }
             if (!Number.isInteger(prNumber) || prNumber <= 0) {
               core.notice("The event is not attached to a pull request.");
@@ -94,6 +114,20 @@ jobs:
             });
             if (pull.base.ref !== "refactor/agent" || pull.state !== "open") {
               core.notice(`Ignoring PR #${prNumber}: base=${pull.base.ref}, state=${pull.state}.`);
+              core.setOutput("eligible", "false");
+              return;
+            }
+            const repositoryName = `${context.repo.owner}/${context.repo.repo}`;
+            if (pull.head.repo?.full_name !== repositoryName) {
+              core.notice(`Ignoring PR #${prNumber}: external fork branches are not trusted.`);
+              core.setOutput("eligible", "false");
+              return;
+            }
+            if (
+              context.eventName === "check_suite" &&
+              context.payload.check_suite?.head_sha !== pull.head.sha
+            ) {
+              core.notice(`Ignoring check suite for a SHA other than PR #${prNumber}'s current head.`);
               core.setOutput("eligible", "false");
               return;
             }
@@ -129,9 +163,12 @@ jobs:
               return;
             }
 
-            let triggerId = pull.head.sha;
+            let triggerId = `${context.payload.action || "event"}-${pull.head.sha}`;
             if (context.payload.comment?.id) triggerId = `comment-${context.payload.comment.id}`;
             if (context.payload.review?.id) triggerId = `review-${context.payload.review.id}`;
+            if (context.payload.check_suite?.id) {
+              triggerId = `check-suite-${context.payload.check_suite.id}`;
+            }
             const eventKey = `${context.eventName}:${pull.head.sha}:${triggerId}`;
             const marker = `<!-- agent-refactor-review-key:${eventKey} -->`;
 
@@ -204,7 +241,7 @@ jobs:
             const path = require("path");
             const prNumber = Number(process.env.PR_NUMBER);
             const issueNumbers = JSON.parse(process.env.ISSUE_NUMBERS);
-            const [pullResponse, files, commits, comments, reviews] = await Promise.all([
+            const [pullResponse, files, commits, comments, reviews, reviewComments] = await Promise.all([
               github.rest.pulls.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -229,6 +266,12 @@ jobs:
                 per_page: 100,
               }),
               github.paginate(github.rest.pulls.listReviews, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                per_page: 100,
+              }),
+              github.paginate(github.rest.pulls.listReviewComments, {
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: prNumber,
@@ -296,6 +339,47 @@ jobs:
                 commit_id: review.commit_id,
                 body: review.body,
               })),
+              review_comments: reviewComments.slice(-100).map((comment) => ({
+                id: comment.id,
+                in_reply_to_id: comment.in_reply_to_id,
+                author: comment.user?.login,
+                created_at: comment.created_at,
+                updated_at: comment.updated_at,
+                path: comment.path,
+                line: comment.line,
+                original_line: comment.original_line,
+                side: comment.side,
+                commit_id: comment.commit_id,
+                body: comment.body,
+              })),
+              trigger: {
+                action: context.payload.action,
+                comment: context.payload.comment
+                  ? {
+                      id: context.payload.comment.id,
+                      author: context.payload.comment.user?.login,
+                      body: context.payload.comment.body,
+                      path: context.payload.comment.path,
+                      line: context.payload.comment.line,
+                      in_reply_to_id: context.payload.comment.in_reply_to_id,
+                    }
+                  : null,
+                review: context.payload.review
+                  ? {
+                      id: context.payload.review.id,
+                      author: context.payload.review.user?.login,
+                      state: context.payload.review.state,
+                      body: context.payload.review.body,
+                    }
+                  : null,
+                check_suite: context.payload.check_suite
+                  ? {
+                      id: context.payload.check_suite.id,
+                      conclusion: context.payload.check_suite.conclusion,
+                      head_sha: context.payload.check_suite.head_sha,
+                    }
+                  : null,
+              },
             };
             const runtimeDirectory = path.join(
               process.env.GITHUB_WORKSPACE,
@@ -315,16 +399,17 @@ jobs:
 
       - name: Run the Agent refactor review
         id: codex
-        uses: openai/codex-action@v1
+        uses: openai/codex-action@f367b1e9572fd064ea71ef925ca24ee0f01080af # v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           prompt-file: .review-automation/.github/codex/prompts/agent-refactor-review.md
           output-file: codex-review-result.json
           codex-args: >-
-            ["--ephemeral","--output-schema",
-            ".review-automation/.github/codex/review-output.schema.json"]
-          sandbox: workspace-write
+            ["--ephemeral"]
+          output-schema-file: .review-automation/.github/codex/review-output.schema.json
+          permission-profile: ":workspace"
           safety-strategy: drop-sudo
+          allow-bot-users: github-actions
 
   publish:
     needs:
@@ -413,18 +498,59 @@ jobs:
               tests,
             ].join("\n");
 
+            const invalidPassTest = result.verdict === "PASS" && (
+              result.tests.length === 0 ||
+              result.tests.some((test) => test.status !== "PASS")
+            );
+            if (result.verdict === "PASS" && invalidPassTest) {
+              result.verdict = "CHANGES_REQUESTED";
+              body += "\n\n工作流保护：PASS 必须至少记录一条验证，且所有记录均为 PASS；已拒绝合并。";
+            }
+
+            if (result.verdict === "PASS" && !pull.draft) {
+              const [checkRuns, reviews] = await Promise.all([
+                github.paginate(github.rest.checks.listForRef, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  ref: expectedHead,
+                  per_page: 100,
+                }, (response) => response.data.check_runs),
+                github.paginate(github.rest.pulls.listReviews, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: prNumber,
+                  per_page: 100,
+                }),
+              ]);
+              const currentRunPath = `/actions/runs/${context.runId}`;
+              const otherChecks = checkRuns.filter((check) =>
+                !(check.details_url || "").includes(currentRunPath),
+              );
+              const pendingCheck = otherChecks.find((check) => check.status !== "completed");
+              const failedCheck = otherChecks.find((check) =>
+                check.status === "completed" &&
+                !new Set(["success", "neutral"]).has(check.conclusion),
+              );
+              const currentHeadChangeRequest = reviews.find((review) =>
+                review.user?.type !== "Bot" &&
+                review.state === "CHANGES_REQUESTED" &&
+                review.commit_id === expectedHead,
+              );
+              if (failedCheck) {
+                result.verdict = "CHANGES_REQUESTED";
+                body += `\n\n外部检查 \`${failedCheck.name}\` 为 ${failedCheck.conclusion}，已拒绝合并。`;
+              } else if (currentHeadChangeRequest) {
+                result.verdict = "CHANGES_REQUESTED";
+                body += `\n\n${currentHeadChangeRequest.user.login} 对当前 head 提出了修改请求，已拒绝合并。`;
+              } else if (pendingCheck) {
+                result.verdict = "WAITING";
+                body += `\n\n正在等待外部检查 \`${pendingCheck.name}\`；其 check suite 完成后会自动复审。`;
+              }
+            }
+
             let reviewEvent = "COMMENT";
             if (result.verdict === "CHANGES_REQUESTED") reviewEvent = "REQUEST_CHANGES";
             if (result.verdict === "PASS") reviewEvent = "APPROVE";
-
-            const invalidPassTest = result.tests.some((test) =>
-              test.status === "FAIL" || test.status === "NOT_RUN",
-            );
-            if (result.verdict === "PASS" && invalidPassTest) {
-              reviewEvent = "REQUEST_CHANGES";
-              result.verdict = "CHANGES_REQUESTED";
-              body += "\n\n工作流保护：PASS 结果包含失败或未运行的必要测试，已拒绝合并。";
-            }
 
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
@@ -438,44 +564,6 @@ jobs:
             if (result.verdict !== "PASS") return;
             if (pull.draft) {
               core.notice("Review passed, but the PR is still Draft; ready_for_review will trigger again.");
-              return;
-            }
-
-            const [checkRuns, reviews] = await Promise.all([
-              github.paginate(github.rest.checks.listForRef, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: expectedHead,
-                per_page: 100,
-              }, (response) => response.data.check_runs),
-              github.paginate(github.rest.pulls.listReviews, {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: prNumber,
-                per_page: 100,
-              }),
-            ]);
-            const currentRunPath = `/actions/runs/${context.runId}`;
-            const otherChecks = checkRuns.filter((check) =>
-              !(check.details_url || "").includes(currentRunPath),
-            );
-            const blockingCheck = otherChecks.find((check) =>
-              check.status !== "completed" ||
-              !new Set(["success", "neutral", "skipped"]).has(check.conclusion),
-            );
-            if (blockingCheck) {
-              core.setFailed(`Cannot merge: check ${blockingCheck.name} is not successful.`);
-              return;
-            }
-            const currentHeadChangeRequest = reviews.find((review) =>
-              review.user?.type !== "Bot" &&
-              review.state === "CHANGES_REQUESTED" &&
-              review.commit_id === expectedHead,
-            );
-            if (currentHeadChangeRequest) {
-              core.setFailed(
-                `Cannot merge: ${currentHeadChangeRequest.user.login} requested changes on the current head.`,
-              );
               return;
             }
 
