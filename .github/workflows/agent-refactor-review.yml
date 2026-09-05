@@ -593,7 +593,6 @@ jobs:
           $fullPrompt | codex exec `
             --ephemeral `
             --ignore-user-config `
-            --sandbox workspace-write `
             --approve-for-me `
             --cd $env:CANDIDATE_ROOT `
             --output-schema $env:REVIEW_SCHEMA_FILE `
