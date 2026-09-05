@@ -21,6 +21,9 @@ const WORKFLOW = fs.readFileSync(
   path.join(__dirname, "..", "..", "workflows", "agent-refactor-review.yml"),
   "utf8",
 );
+const OUTPUT_SCHEMA = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "..", "review-output.schema.json"), "utf8"),
+);
 
 function testRecord(overrides = {}) {
   return {
@@ -318,4 +321,27 @@ test("keeps trusted review inputs outside the candidate workspace", () => {
   assert.match(WORKFLOW, /REVIEW_CONTEXT_FILE: \$\{\{ steps\.trusted\.outputs\.context_file \}\}/);
   assert.match(WORKFLOW, /Refusing to remove a path outside RUNNER_TEMP/);
   assert.doesNotMatch(WORKFLOW, /uses:\s*actions\/checkout/);
+});
+
+test("keeps the model output schema inside the Codex structured-output subset", () => {
+  const unsupported = new Set([
+    "allOf",
+    "else",
+    "if",
+    "maximum",
+    "minItems",
+    "minimum",
+    "minLength",
+    "pattern",
+    "then",
+    "uniqueItems",
+  ]);
+  const visit = (value) => {
+    if (!value || typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      assert.equal(unsupported.has(key), false, `unsupported schema keyword: ${key}`);
+      visit(child);
+    }
+  };
+  visit(OUTPUT_SCHEMA);
 });

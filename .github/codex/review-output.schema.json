@@ -24,8 +24,7 @@
       "enum": ["PASS", "CHANGES_REQUESTED", "WAITING", "BLOCKED"]
     },
     "summary": {
-      "type": "string",
-      "minLength": 1
+      "type": "string"
     },
     "target_branch": {
       "type": "string",
@@ -33,17 +32,10 @@
     },
     "issue_numbers": {
       "type": "array",
-      "minItems": 1,
-      "uniqueItems": true,
-      "items": {
-        "type": "integer",
-        "minimum": 60,
-        "maximum": 89
-      }
+      "items": {"type": "integer"}
     },
     "head_sha": {
-      "type": "string",
-      "pattern": "^[0-9a-f]{40}$"
+      "type": "string"
     },
     "flow_findings": {
       "$ref": "#/$defs/findings"
@@ -62,16 +54,14 @@
         "required": ["command", "status", "details", "required", "skip_reason"],
         "properties": {
           "command": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           },
           "status": {
             "type": "string",
             "enum": ["PASS", "FAIL", "EXPECTED_RED", "NOT_RUN"]
           },
           "details": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           },
           "required": {
             "type": "boolean"
@@ -80,24 +70,7 @@
             "type": ["string", "null"],
             "enum": ["slow", "live", "external", "real_llm", null]
           }
-        },
-        "allOf": [
-          {
-            "if": {
-              "properties": {"status": {"const": "NOT_RUN"}},
-              "required": ["status"]
-            },
-            "then": {
-              "properties": {
-                "required": {"const": false},
-                "skip_reason": {"type": "string"}
-              }
-            },
-            "else": {
-              "properties": {"skip_reason": {"const": null}}
-            }
-          }
-        ]
+        }
       }
     }
   },
@@ -121,23 +94,19 @@
             "enum": ["P0", "P1", "P2", "P3"]
           },
           "title": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           },
           "detail": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           },
           "file": {
             "type": ["string", "null"]
           },
           "line": {
-            "type": ["integer", "null"],
-            "minimum": 1
+            "type": ["integer", "null"]
           },
           "required_change": {
-            "type": "string",
-            "minLength": 1
+            "type": "string"
           }
         }
       }
