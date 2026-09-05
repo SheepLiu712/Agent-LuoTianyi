@@ -8,7 +8,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `codex/local-agent-pr-review-cli-flags`，目标 `master`）
+- PR：[#99](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/99)（分支 `codex/local-agent-pr-review-cli-flags`，目标 `master`）
 - 目标：修复本机 Codex CLI 拒绝重复 sandbox 配置的问题。
 - 范围：保留 `--approve-for-me` 并移除与其冲突的 `--sandbox workspace-write`；前者在当前 CLI 中已经使用 workspace-write sandbox，其余认证、隔离、审查和合并门禁不变。
 - 明确不包含：不使用或配置 `OPENAI_API_KEY`/`CODEX_API_KEY`，不修改 Agent 产品代码、#90/#94 分支、工单范围或测试通过规则。
