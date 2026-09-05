@@ -7,7 +7,7 @@
 
 ## 本 PR
 
-- PR：待创建（分支 `codex/stacked-pr-review-policy`，目标 `refactor/agent`）
+- PR：[#95](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/95)（分支 `codex/stacked-pr-review-policy`，目标 `refactor/agent`，Ready，等待复审）
 - 目标：允许可追溯的父子堆叠 PR，同时保证完整候选最终只由根 PR 合入规定功能分支。
 - 范围：定义根/子 PR、fixed point、合并顺序、旧批准失效、Draft/Ready 所有权，以及审查时跳过长耗时真实外部测试的规则；同步 Agent 深模块 SPEC。
 - 明确不包含：不修改 Agent 产品 interface、实现、测试或 #90/#94 分支；不把 `dev`、`main`、`master` 变成 Agent 重构交付目标；不宣称真实学歌、B 站、LLM、TTS、GPU 或设备链路已验证。
@@ -23,9 +23,9 @@
 
 ## 阻塞和未验证项
 
-- GitHub 事件驱动审查工作流当前仍需同步支持堆叠 PR；该工作流位于默认分支，不能在本 PR 中跨目标分支混合提交。
+- GitHub 事件驱动审查工作流已由独立的 [#96](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/96) 同步（目标 `master`，Ready，等待复审）；它不与本 PR 跨目标分支混合提交。
 - 本轮未运行真实外部服务或产品测试。
 
-## 下一 PR
+## 下一步
 
-在默认分支单独更新 Agent PR 自动审查工作流，使其识别终止于 `refactor/agent` 的可信堆叠链，并以直接父 PR 为增量审查 fixed point。
+修正本轮文档复审项后重新请求 #95 审核；#96 在默认分支独立审核和合并。
