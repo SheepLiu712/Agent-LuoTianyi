@@ -12,6 +12,7 @@
 - interface spec：[`Agent-handle-realize-深模块重构.md`](../设计文档/Agent-handle-realize-深模块重构.md)
 - 本地工单草案：[`issues/`](../../../.scratch/agent-handle-realize/issues/)
 - 当前 Agent interface：[`agent/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/agent/README.md)
+- 当前 domain interface：[`domain/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/README.md)
 
 ## 本 PR
 
@@ -100,6 +101,7 @@
 - [x] Red：`conda run -n agent python -m pytest tests/domain/test_agent_handle_contract.py -q` 因 `ModuleNotFoundError: No module named 'src.domain.agent'` 在收集阶段失败（1 error，0.77s）；
 - [x] Green：同一 focused 命令在当前完整候选上为 `1 passed in 0.18s`；
 - [x] 已实现 `src.domain.agent` 的 `TextMessage` 最小切片，并让旧 Stimulus 复用同一四成员 `PersistPolicy`；
+- [x] 已同步 domain 当前 interface 文档，记录 `src.domain.agent` 公开路径、`TextMessage` 字段与不变量、无副作用及当前仅支持合法构造的校验边界；
 - [ ] 工单 01 的其余 Stimulus、InteractionSnapshot、HandleStimulusRequest、CancellationToken、HandlingReport、稳定枚举和错误族测试尚未开始；
 - [x] `tests/domain -q` 为 `1 passed in 0.18s`；Ruff、py_compile、BasedPyright 和 `git diff --check` 通过；三处公开路径导出的 `PersistPolicy` 为同一对象且四成员完整；
 - [ ] 离线回归为 `400 passed, 4 deselected, 6 failed`；当前 `refactor/agent` 对照为 `399 passed, 4 deselected, 6 failed`，失败集合一致，未发现本切片新增回归，但仓库默认回归门禁仍未全绿；
