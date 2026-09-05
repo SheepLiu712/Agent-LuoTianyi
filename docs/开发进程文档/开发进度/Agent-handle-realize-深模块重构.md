@@ -2,7 +2,7 @@
 
 > 最后更新：2026-09-05
 >
-> 当前阶段：实现工单及架构约束已更新，等待首批开发
+> 当前阶段：工单 01 interface SPEC 补充评审
 >
 > 总体状态：进行中
 
@@ -13,7 +13,16 @@
 - 本地工单草案：[`issues/`](../../../.scratch/agent-handle-realize/issues/)
 - 当前 Agent interface：[`agent/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/agent/README.md)
 
-## 本轮目标与范围
+## 本 PR
+
+- PR：[#91](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/91)（Draft，`CHANGES_REQUESTED`）
+- 目标：补齐 Issue #60 开始契约测试前缺失的 Stimulus 公开枚举设计，使测试不再猜测成员和值。
+- 范围：`StimulusKind`、`StimulusSource`、`PersistPolicy` 的成员和值；每个 kind 的 source/persist/ephemeral 唯一合法组合；expand 阶段新旧协议的兼容边界。
+- 明确不包含：不修改 PR #90 的测试，不增加产品实现，不修改旧 `Stimulus.payload` 或生产调用链，不关闭 Issue #60。
+- 验证及结果：`git diff --check` 通过；静态核对 22 个 `StimulusKind` 均在唯一组合矩阵中逐项覆盖，SPEC 中已无 `StimulusSource.SYSTEM/SCHEDULER` 枚举残留；本 PR 为纯文档 interface 门禁，未运行 pytest、真实 LLM、TTS、设备或生产环境验证；GitHub 自动审查的 `resolve`、`review`、`publish` 3 个 job 均为 `skipped`，未执行 CI 验证。
+- 评审结果：22 个 `StimulusKind` 与当前 22 个强类型变体逐项一致，该部分已通过；本轮已按 owner 意见删除无生产者的 `SYSTEM` 和仅作为触发机制的 `SCHEDULER`，增加 22 行唯一组合矩阵与非法组合规则，并明确新旧协议复用单一 `PersistPolicy` 类型，仍需 owner 重新评审。
+
+## 历史设计轮次目标与范围
 
 - 把已形成的 Agent 深模块 PRD 转为可评审 interface spec，并按首轮评审意见收窄当前版本；
 - 分开描述 Agent 对外行为与 Agent 内部 Handler / Skill / Store / Ledger / Reflection 行为；
@@ -33,7 +42,7 @@
 - 明确 `agent/skills` 是角色语义层、既有 `capabilities` 是技术实现层，二者不一对一镜像，Handler 只能依赖强类型 Skill；
 - 把目录与依赖约束同步到实际承担相应迁移的本地工单和 GitHub Issue，使开发者只读单张工单也不会误建旁路。
 
-本轮只修改 SPEC、本地工单、对应 GitHub Issue 和进度文档；不修改产品代码、测试、客户端/网络协议或现有运行行为。
+该历史设计轮次只修改 SPEC、本地工单、对应 GitHub Issue 和进度文档；未修改产品代码、测试、客户端/网络协议或现有运行行为。
 
 ## 已完成
 
@@ -82,7 +91,12 @@
 
 ## 待评审与未验证
 
-- [ ] interface spec 尚未完成用户评审，不能据此开始产品实现；
+- [x] PR #91 已为全部 22 个 `StimulusKind` 固定唯一 `StimulusSource`；scheduler/`world_clock` 明确为时间驱动和投递机制，不是语义 source；
+- [x] PR #91 已固定全部 kind 的 `PersistPolicy / ephemeral` 唯一合法组合和表外稳定失败规则，并决定新旧 Stimulus 协议复用单一 `PersistPolicy` 类型；
+- [x] 已删除没有当前生产者的 `StimulusSource.SYSTEM`；同时删除仅表示触发机制、与 source 定义冲突的 `SCHEDULER`；
+- [ ] PR #91 上述修订尚未获得 owner 重新评审通过，当前仍不能合并或进入 PR #90；
+- [ ] PR #90 的契约测试仍为 Red-only Draft，且有 `CHANGES_REQUESTED`；本 SPEC 门禁通过前不修改该测试、不开始产品实现；
+- [ ] 本文档 PR 只做静态文档检查，未运行 pytest、真实 LLM、TTS、设备或生产环境验证；
 - [ ] `ImageSelectionClosed` 与图片消息到达顺序需要在后续测试/实现讨论中确认；关闭信号本身不携带图片内容；
 - [ ] `RequestSongLearning` 的持久任务 Adapter、任务状态和完成 Stimulus 事务边界尚未选择具体实现；
 - [ ] Agent 自有状态变更与 Reflection 之间的 evidence 去重键、revision 冲突策略只有目标语义，尚未落实；
@@ -96,8 +110,8 @@
 - [ ] `WorldClock` 九类链路来自当前源码和配置的静态盘点，尚未逐项运行真实网络、LLM、唱歌模型或数据库任务；
 - [ ] 当前歌曲抓取与学歌任务仍直接写数据、刷新库或发布动态，与目标 Stimulus 边界不同；
 - [ ] 当前 `Stimulus.payload` 和 `PlannedAction.payload` 仍是任意 Mapping，目标强类型联合尚未实现；
-- [ ] 本轮未运行 pytest、真实 LLM、TTS、设备或生产环境验证；只进行文档静态检查。
+- [ ] 先前整体 SPEC 编写轮次未运行真实 LLM、TTS、设备或生产环境验证；对应实现工单必须分别记录实际验证。
 
 ## 下一步
 
-SPEC、工单底稿、领域术语和进度已经补充目录/依赖/迁移约束，对应 GitHub Issue 已同步更新；本次提交推送后，下一步可并行开始无 blocker 的 #60（handle 输入与结算领域契约）和 #62（冻结 WorldClock 基线）。每张工单仍需独立遵守 TDD 与小 PR 门禁。
+完成 PR #91 的静态验证后重新请求 owner 设计评审，并保持 Draft。PR #91 获批并合入后，回到 PR #90 按 review comments 修正首个 `TextMessage` 契约测试并重新记录 Red；测试 seam 获批后才进入最小 Green 实现。

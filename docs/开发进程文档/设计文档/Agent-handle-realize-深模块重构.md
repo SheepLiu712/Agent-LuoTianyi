@@ -154,7 +154,7 @@ WorldStage 不拥有权威 world/活动数据，也不解释抓取结果；权�
 | world 领域定时 | world 定义“每日规划”“活动到期”“抓取新歌”等事实为什么产生 | `world_clock` 只负责到时唤醒 | `WorldClock -> world task -> 强类型 Stimulus -> WorldStage -> Agent` |
 | stage 交互定时 | WorldStage 定义何时聚合完 pending、重试或重新判断 | WorldStage 自有 deadline/scheduler；不注册为 world 领域事件 | `WorldStage deadline -> InteractionDeadline -> handle_stimulus` |
 
-Agent 通过 `CreateSchedule` 创建的持久未来安排由 scheduler/world 保存。到期后，world 把它转换为强类型事实并投递给 WorldStage；`world_clock` 可以作为底层唤醒器，但不得直接构造角色回复或调用 Agent。
+Agent 通过 `CreateSchedule` 创建的持久未来安排由 scheduler/world 保存。`future_stimulus` 只允许使用来源矩阵中 `source=WORLD` 的 kind；其 source 在创建日程时确定，到期后 world 保留该语义来源并把强类型事实投递给 WorldStage，不因 scheduler 或 `world_clock` 执行了最后一跳而改写。`ProactivePromptDue` 和 `InteractionDeadline` 不能直接作为 `future_stimulus` 保存，必须由拥有目标 interaction、pending/claim 和输出路由的 stage 在收到到期事实后构造。`world_clock` 可以作为底层唤醒器，但不得直接构造角色回复或调用 Agent。
 
 ## 5. Agent 暴露给外部的行为
 
@@ -210,6 +210,91 @@ Agent 已由角色 ID 取得，请求不重复携带 `character_id`。请求不�
 | `persist_policy` | `PersistPolicy` | 原始内容是否进入会话记录或成为记忆证据候选 | 由领域枚举表达，不能靠 Handler 猜测 |
 | `ephemeral` | `bool` | 是否只在当前交互窗口内有意义 | 只控制内容生命周期，不改变身份和幂等要求 |
 
+`StimulusKind` 是目标协议的稳定判别枚举。成员名和序列化值固定如下；新增、删除或改值都属于公开协议变更：
+
+| 成员 | 序列化值 | 对应变体 |
+| --- | --- | --- |
+| `TEXT_MESSAGE` | `text_message` | `TextMessage` |
+| `IMAGE_MESSAGE` | `image_message` | `ImageMessage` |
+| `VOICE_MESSAGE` | `voice_message` | `VoiceMessage` |
+| `USER_TYPING` | `user_typing` | `UserTyping` |
+| `IMAGE_SELECTION_OPENED` | `image_selection_opened` | `ImageSelectionOpened` |
+| `IMAGE_SELECTION_CLOSED` | `image_selection_closed` | `ImageSelectionClosed` |
+| `TOUCH_INTERACTION` | `touch_interaction` | `TouchInteraction` |
+| `TOY_VIBRATION` | `toy_vibration` | `ToyVibration` |
+| `DEVICE_CONNECTED` | `device_connected` | `DeviceConnected` |
+| `DEVICE_DISCONNECTED` | `device_disconnected` | `DeviceDisconnected` |
+| `PROACTIVE_PROMPT_DUE` | `proactive_prompt_due` | `ProactivePromptDue` |
+| `INTERACTION_DEADLINE` | `interaction_deadline` | `InteractionDeadline` |
+| `DYNAMIC_OBSERVED` | `dynamic_observed` | `DynamicObserved` |
+| `DIARY_PLANNING_DUE` | `diary_planning_due` | `DiaryPlanningDue` |
+| `WORLD_OBSERVATION` | `world_observation` | `WorldObservation` |
+| `DAILY_PLANNING_DUE` | `daily_planning_due` | `DailyPlanningDue` |
+| `ACTIVITY_DUE` | `activity_due` | `ActivityDue` |
+| `ACTIVITY_STARTED` | `activity_started` | `ActivityStarted` |
+| `ACTIVITY_OBSERVATION` | `activity_observation` | `ActivityObservation` |
+| `ACTIVITY_ENDED` | `activity_ended` | `ActivityEnded` |
+| `SONG_KNOWLEDGE_DISCOVERED` | `song_knowledge_discovered` | `SongKnowledgeDiscovered` |
+| `SONG_LEARNED` | `song_learned` | `SongLearned` |
+
+`StimulusSource` 表达产生领域事实的供应商无关语义来源，不表达 WebSocket、HTTP、蓝牙或具体平台等传输通道：
+
+| 成员 | 序列化值 | 使用边界 |
+| --- | --- | --- |
+| `USER` | `user` | 用户提交的消息、输入协调信号或触摸等用户行为 |
+| `DEVICE` | `device` | 以设备本身为主体、并携带 `device_id` 的振动、连接和断开事实；设备转发的用户触摸仍为 `USER` |
+| `WORLD` | `world` | world 规范化的外部事实、活动事实、动态和歌曲事实 |
+| `STAGE` | `stage` | stage 为所拥有 interaction 产生的主动表达到期、deadline 等交互事实 |
+
+来源按事实的语义所有者选择，而不是按最后一跳调用者选择。scheduler 和 `world_clock` 只提供持久保存、到期唤醒和投递机制，不是语义来源，也不得在到期时改写已经确定的 `source`。例如 world task 被 `WorldClock` 唤醒后产生的观察仍为 `WORLD`；ChatStage 或 WorldStage 为自己拥有的 interaction 构造的 `ProactivePromptDue` 和 `InteractionDeadline` 为 `STAGE`。Adapter 只负责转换，不构成单独的 `ADAPTER` 来源。当前版本不提供 `UNKNOWN`；不能满足下方来源矩阵的输入必须在进入领域协议前以稳定 `CONTRACT_INVALID_STIMULUS` 错误失败。
+
+`PersistPolicy` 是新旧 Stimulus 协议共用的单一领域枚举，不为目标协议复制第二个同义类型。其稳定闭集为：
+
+| 成员 | 序列化值 | 含义 |
+| --- | --- | --- |
+| `NONE` | `none` | 不进入会话记录，也不成为记忆证据候选 |
+| `EPHEMERAL_ONLY` | `ephemeral_only` | 仅允许当前交互窗口使用，不进入持久会话记录 |
+| `CONVERSATION_ONLY` | `conversation_only` | 进入会话记录，但不自动成为长期记忆证据候选 |
+| `CONVERSATION_AND_MEMORY_CANDIDATE` | `conversation_and_memory_candidate` | 进入会话记录，并允许成为长期记忆证据候选 |
+
+目标实现把该唯一类型归属到 `domain.agent` 公共协议；expand 阶段由 `server/src/domain/stimulus.py` 导入并重导出同一类型，使旧调用方保持源码兼容。工单 29 删除旧 Stimulus 时再删除该兼容导出。`StimulusKind` 和 `StimulusSource` 则与旧 `StimulusModality`、`SourceChannel` 语义不同，迁移 Adapter 必须显式转换，不能依赖同名成员隐式互换。
+
+每个 `StimulusKind` 当前只允许下表中的唯一 `source / persist_policy / ephemeral` 组合。公开构造入口必须逐项校验；表外组合以稳定 `CONTRACT_INVALID_STIMULUS` 错误失败：
+
+| `StimulusKind` | 唯一合法 `StimulusSource` | 唯一合法 `PersistPolicy` | `ephemeral` |
+| --- | --- | --- | --- |
+| `TEXT_MESSAGE` | `USER` | `CONVERSATION_AND_MEMORY_CANDIDATE` | `False` |
+| `IMAGE_MESSAGE` | `USER` | `CONVERSATION_AND_MEMORY_CANDIDATE` | `False` |
+| `VOICE_MESSAGE` | `USER` | `CONVERSATION_AND_MEMORY_CANDIDATE` | `False` |
+| `USER_TYPING` | `USER` | `EPHEMERAL_ONLY` | `True` |
+| `IMAGE_SELECTION_OPENED` | `USER` | `EPHEMERAL_ONLY` | `True` |
+| `IMAGE_SELECTION_CLOSED` | `USER` | `EPHEMERAL_ONLY` | `True` |
+| `TOUCH_INTERACTION` | `USER` | `EPHEMERAL_ONLY` | `True` |
+| `TOY_VIBRATION` | `DEVICE` | `NONE` | `True` |
+| `DEVICE_CONNECTED` | `DEVICE` | `NONE` | `True` |
+| `DEVICE_DISCONNECTED` | `DEVICE` | `NONE` | `True` |
+| `PROACTIVE_PROMPT_DUE` | `STAGE` | `NONE` | `True` |
+| `INTERACTION_DEADLINE` | `STAGE` | `NONE` | `True` |
+| `DYNAMIC_OBSERVED` | `WORLD` | `NONE` | `False` |
+| `DIARY_PLANNING_DUE` | `WORLD` | `NONE` | `False` |
+| `WORLD_OBSERVATION` | `WORLD` | `NONE` | `False` |
+| `DAILY_PLANNING_DUE` | `WORLD` | `NONE` | `False` |
+| `ACTIVITY_DUE` | `WORLD` | `NONE` | `False` |
+| `ACTIVITY_STARTED` | `WORLD` | `NONE` | `False` |
+| `ACTIVITY_OBSERVATION` | `WORLD` | `NONE` | `False` |
+| `ACTIVITY_ENDED` | `WORLD` | `NONE` | `False` |
+| `SONG_KNOWLEDGE_DISCOVERED` | `WORLD` | `NONE` | `False` |
+| `SONG_LEARNED` | `WORLD` | `NONE` | `False` |
+
+矩阵同时固定以下不变量：
+
+- `EPHEMERAL_ONLY` 必须搭配 `ephemeral=True`，用于原始内容只允许在当前 interaction 窗口复用的输入，例如输入长度、图片选择状态或触摸事实；
+- `ephemeral=False` 不得搭配 `EPHEMERAL_ONLY`；`NONE` 是否为 ephemeral 由逐 kind 矩阵确定；
+- `CONVERSATION_ONLY` 和 `CONVERSATION_AND_MEMORY_CANDIDATE` 必须搭配 `ephemeral=False`；
+- `NONE` 不进入会话记录；它可以搭配只在当前窗口有效的到期/振动事实，也可以搭配跨窗口仍有权威来源的设备或 world 事实；
+- `persist_policy` 只决定 Stimulus 原始内容是否进入会话记录和是否成为自动长期记忆候选。`DynamicObserved`、`SongLearned` 等 `NONE` 事实仍可按 Agent 内部状态变更或 Reflection 契约写入领域数据；
+- `CONVERSATION_ONLY` 在当前 22 个 kind 中没有生产者，但因复用现有唯一枚举而保留。任何 kind 改用该策略都属于需要先修改本矩阵的公开协议变更。
+
 #### 当前版本 Stimulus 强类型变体
 
 当前版本不保留 `payload: Mapping` 作为扩展口。下表中的每个专有字段都给出类型和用途：
@@ -226,7 +311,7 @@ Agent 已由角色 ID 取得，请求不重复携带 `character_id`。请求不�
 | `ToyVibration` | 经过设备层聚合、可被角色感知的一次振动模式 | `device_id: str`：设备身份；`pattern: VibrationPattern`：模式；`intensity: float`：归一化强度；`duration_ms: int`：持续时间；`location: Optional[DeviceLocation]`：可选设备位置 | Toy |
 | `DeviceConnected` | 角色交互设备已经可用 | `device_id: str`：设备身份；`supported_inputs: frozenset[DeviceInputKind]`：设备可上报输入；`supported_outputs: frozenset[AgentOutputKind]`：设备可呈现输出 | Toy |
 | `DeviceDisconnected` | 角色交互设备已经断开 | `device_id: str`：设备身份；`disconnected_at: datetime`：断开时间；`reason: DeviceDisconnectReason`：规范化原因 | Toy |
-| `ProactivePromptDue` | 持久 scheduler 判定一次主动表达已到期 | `reason: ProactiveReason`：触发原因；`due_at: datetime`：到期时间；`dedup_key: str`：调度去重键；`fact_refs: tuple[EvidenceRef, ...]`：相关事实引用 | Chat 或 World |
+| `ProactivePromptDue` | 拥有当前 interaction 的 stage 判定一次主动表达已到期；持久 scheduler 只负责唤醒和投递 | `reason: ProactiveReason`：触发原因；`due_at: datetime`：到期时间；`dedup_key: str`：调度去重键；`fact_refs: tuple[EvidenceRef, ...]`：相关事实引用 | Chat 或 World |
 | `InteractionDeadline` | stage 为仍待判断的刺激触发一次定时重评 | `origin_request_id: str`：此前保留 pending 并建立本期限的请求；`pending_stimulus_ids: tuple[str, ...]`：需重评的内容刺激；`due_at: datetime`：到期时间；`dedup_key: str`：定时器去重键 | 对应原 Interaction |
 | `DynamicObserved` | world/Adapter 观察到一条对角色有意义的动态内容 | `dynamic_id: str`：平台无关身份；`author_ref: ActorRef`：作者引用；`text: str`：正文；`media_refs: tuple[MediaRef, ...]`：媒体；`revision: int`：内容版本 | World |
 | `DiaryPlanningDue` | 角色的日记规划时点到达 | `local_date: date`：日记归属日期；`timezone: ZoneInfo`：日期解释时区；`trigger_id: str`：调度触发身份 | World |
@@ -410,7 +495,7 @@ async def realize_action_plan(
 | `WriteDiary` | 持久化并按策略发布一篇已决定的日记 | `local_date: date`：归属日期；`title: str`：标题；`body: str`：正文；`visibility: Visibility`：可见范围；`dedup_key: str`：重复执行保护键 | 产生日记持久化/发布效果 |
 | `PublishDynamic` | 发布一条角色动态 | `body: str`：正文；`media_refs: tuple[MediaRef, ...]`：媒体；`visibility: Visibility`：可见范围；`dedup_key: str`：重复发布保护键 | 产生动态发布效果 |
 | `ReplyDynamic` | 对指定动态或评论发布角色回复 | `target_ref: DynamicReplyTarget`：目标动态/评论；`body: str`：回复正文；`dedup_key: str`：重复回复保护键 | 产生评论回复效果 |
-| `CreateSchedule` | 创建一个将来产生强类型 Stimulus 的持久日程 | `schedule_id: str`：日程身份；`due_at: datetime`：到期时间；`future_stimulus: Stimulus`：到期后提交的领域事实；`dedup_key: str`：重复创建保护键 | 提交持久 scheduler 记录 |
+| `CreateSchedule` | 创建一个将来产生强类型 Stimulus 的持久日程 | `schedule_id: str`：日程身份；`due_at: datetime`：到期时间；`future_stimulus: Stimulus`：到期后提交的 `source=WORLD` 领域事实，不允许 `ProactivePromptDue` 或 `InteractionDeadline`；`dedup_key: str`：重复创建保护键 | 提交持久 scheduler 记录 |
 | `CancelSchedule` | 幂等取消一个已有日程 | `schedule_id: str`：目标日程；`expected_schedule_revision: int`：并发保护修订；`reason: ScheduleCancellationReason`：取消原因 | scheduler Adapter 查询权威 revision 后提交状态变化 |
 | `RequestSongLearning` | 启动一个可恢复、跨进程的技术学歌任务 | `learning_job_id: str`：任务身份；`song_id: str`：目标歌曲；`priority: LearningPriority`：调度优先级；`dedup_key: str`：重复任务保护键 | 由 Action Handler 提交持久 world/capability 任务，不经过 output sink |
 
@@ -525,7 +610,7 @@ output sink 在创建时绑定 stage 和 interaction：
 - interaction、activity、schedule 等 revision 冲突返回各自稳定失败，不静默覆盖新状态；
 - 日志必须能由 `interaction_id / stimulus_id / request_id / plan_id / execution_id / action_id` 串联。
 
-稳定错误族至少包括：`CONTRACT_*`、`UNSUPPORTED_*`、`STALE_INTERACTION`、`STALE_ACTIVITY`、`STALE_SCHEDULE`、`SINK_CLOSED`、`BACKPRESSURE_TIMEOUT`、`DEPENDENCY_UNAVAILABLE`、`PROVIDER_TIMEOUT`、`CANCELLED` 和 `INTERNAL_ERROR`。调用方只根据稳定码和 `retryable` 决策，不解析异常字符串。
+稳定错误族至少包括：`CONTRACT_INVALID_STIMULUS`（Stimulus 字段、source/persist/ephemeral 组合或目标角色非法）、`CONTRACT_UNSUPPORTED_SCHEMA`、`CONTRACT_SNAPSHOT_MISMATCH`、`UNSUPPORTED_*`、`STALE_INTERACTION`、`STALE_ACTIVITY`、`STALE_SCHEDULE`、`SINK_CLOSED`、`BACKPRESSURE_TIMEOUT`、`DEPENDENCY_UNAVAILABLE`、`PROVIDER_TIMEOUT`、`CANCELLED` 和 `INTERNAL_ERROR`。调用方只根据稳定码和 `retryable` 决策，不解析异常字符串。
 
 本版本没有 5.5 Realtime 相邻接口。电话媒体上行、Realtime turn、通话打断和供应商会话引用留待电话版本单独设计。
 
@@ -1041,6 +1126,8 @@ ImportantDateReview 只能把用户明确表达且字段充分的日期标成 co
 28. `agent/context` 只保存 interaction-scoped 临时认知工作集和有来源/版本/TTL 的检索证据；stage pending、连接、长期记忆/画像和权威 world 状态不得迁入。
 29. 两个 façade 的跨模块协议归 `domain` 所有；Agent 包根只导出 façade 类型，内部包和 factory 不公开重导出；`SystemRuntime` 作为装配代码直接通过 factory 注入具体 Skill、Store、Ledger 和 Handler registry。
 30. 目录迁移必须按第 6.1.4 节渐进执行：先协议和 façade，后逐链迁移，最后统一删除 `agent/reflex`、旧 AgentRuntime/CharacterRuntime 业务代理和外部 `agent.main_chat` 类型依赖；不得永久双轨。
+31. `StimulusSource` 只包含 `USER / DEVICE / WORLD / STAGE` 四种有当前生产者的语义来源；scheduler 和 `world_clock` 只是时间驱动与投递机制，不能作为 source 或改写 source。
+32. `PersistPolicy` 在新旧 Stimulus 协议间只有一个领域类型；每个 `StimulusKind` 的 source、persist policy 和 ephemeral 值由 5.2 的唯一组合矩阵固定，表外组合稳定失败。
 
 ## 8. 验收标准
 
@@ -1282,5 +1369,7 @@ expand 阶段允许目标 interface 与旧实现暂时并存，但新调用方�
 18. 01—30 的粒度是否都能在一个新上下文和一个聚焦 PR 中完成，哪些仍需拆分或合并？
 19. 每条 Blocked by 是否真正在接口、行为或共享实现上阻止后续工单，而不是仅表示推荐顺序？
 20. 01/03 的初始 frontier 以及 Chat、Toy、World、纯机械 world task 的并行边界是否符合团队协作方式？
+21. 每个 `StimulusKind` 允许哪个 `StimulusSource`，scheduler 和 `world_clock` 为什么只是触发机制而不是语义来源？
+22. 每个 `StimulusKind` 允许哪组 `PersistPolicy / ephemeral`，表外组合怎样稳定失败？
 
 如果必须阅读内部实现才能回答这些问题，本 spec 仍不够清楚，不能进入后续测试与工单讨论。
