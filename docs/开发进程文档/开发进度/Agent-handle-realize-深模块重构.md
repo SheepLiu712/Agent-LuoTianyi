@@ -13,7 +13,16 @@
 - 本地工单草案：[`issues/`](../../../.scratch/agent-handle-realize/issues/)
 - 当前 Agent interface：[`agent/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/agent/README.md)
 
-## 本轮目标与范围
+## 本 PR
+
+- PR：[#91](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/91)（Draft，`CHANGES_REQUESTED`）
+- 目标：补齐 Issue #60 开始契约测试前缺失的 Stimulus 公开枚举设计，使测试不再猜测成员和值。
+- 范围：`StimulusKind`、`StimulusSource`、`PersistPolicy` 的成员和值，以及 expand 阶段新旧协议的兼容边界。
+- 明确不包含：不修改 PR #90 的测试，不增加产品实现，不修改旧 `Stimulus.payload` 或生产调用链，不关闭 Issue #60。
+- 验证及结果：`git diff --check origin/refactor/agent...HEAD` 通过；本 PR 为纯文档 interface 门禁，未运行 pytest、真实 LLM、TTS、设备或生产环境验证；GitHub 无 CI checks。
+- 评审结果：22 个 `StimulusKind` 与当前 22 个强类型变体逐项一致，该部分通过；其余设计仍需修改后重新评审。
+
+## 历史设计轮次目标与范围
 
 - 把已形成的 Agent 深模块 PRD 转为可评审 interface spec，并按首轮评审意见收窄当前版本；
 - 分开描述 Agent 对外行为与 Agent 内部 Handler / Skill / Store / Ledger / Reflection 行为；
@@ -33,7 +42,7 @@
 - 明确 `agent/skills` 是角色语义层、既有 `capabilities` 是技术实现层，二者不一对一镜像，Handler 只能依赖强类型 Skill；
 - 把目录与依赖约束同步到实际承担相应迁移的本地工单和 GitHub Issue，使开发者只读单张工单也不会误建旁路。
 
-本轮只修改 SPEC、本地工单、对应 GitHub Issue 和进度文档；不修改产品代码、测试、客户端/网络协议或现有运行行为。
+该历史设计轮次只修改 SPEC、本地工单、对应 GitHub Issue 和进度文档；未修改产品代码、测试、客户端/网络协议或现有运行行为。
 
 ## 已完成
 
@@ -82,7 +91,9 @@
 
 ## 待评审与未验证
 
-- [ ] 工单 01 的 `StimulusKind`、`StimulusSource`、`PersistPolicy` 成员及序列化值已补入 interface SPEC，等待用户评审；
+- [ ] PR #91 已收到 owner 的 `CHANGES_REQUESTED`：需要为每个 `StimulusKind` 补充允许的 `StimulusSource` 矩阵，并明确 scheduler/WorldClock 只是触发机制还是语义 source；
+- [ ] PR #91 需要补充各 `StimulusKind` 的 `PersistPolicy` 与 `ephemeral` 合法组合，并决定目标协议复用现有 `PersistPolicy`，还是以明确语义差异建立新类型；
+- [ ] `StimulusSource.SYSTEM` 当前没有对应的 22 种 Stimulus 使用，需删除或提供当前范围内唯一、完整的使用规则；
 - [ ] PR #90 的契约测试仍为 Red-only Draft，且有 `CHANGES_REQUESTED`；本 SPEC 门禁通过前不修改该测试、不开始产品实现；
 - [ ] 本文档 PR 只做静态文档检查，未运行 pytest、真实 LLM、TTS、设备或生产环境验证；
 - [ ] `ImageSelectionClosed` 与图片消息到达顺序需要在后续测试/实现讨论中确认；关闭信号本身不携带图片内容；
@@ -102,4 +113,4 @@
 
 ## 下一步
 
-先评审工单 01 的三个公开枚举闭集和序列化值。评审通过后，回到 PR #90 按 review comments 修正首个 `TextMessage` 契约测试并重新记录 Red；测试 seam 获批后才进入最小 Green 实现。
+继续在 PR #91 内完成 source 矩阵、persist/ephemeral 组合矩阵和 `PersistPolicy` 单一类型决策，删除无实际使用者的 speculative source，并重新请求设计评审。PR #91 合入后，回到 PR #90 按 review comments 修正首个 `TextMessage` 契约测试并重新记录 Red；测试 seam 获批后才进入最小 Green 实现。
