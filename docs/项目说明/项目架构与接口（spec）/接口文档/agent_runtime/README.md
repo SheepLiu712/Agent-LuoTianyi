@@ -31,6 +31,8 @@
 agent = agent_runtime.get_agent(character_id)
 ```
 
+路由装配增量见 [Handler 路由 SPEC](../agent/handler-routing.md)：AgentRuntime 显式构造每角色的两个空路由器并注入 Agent；该增量尚未实现。
+
 ## 稳定入口
 
 ### `AgentRuntime`

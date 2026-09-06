@@ -10,14 +10,16 @@
 
 当前契约以 [Agent 门面 SPEC](../../../docs/项目说明/项目架构与接口（spec）/接口文档/agent/facade.md) 为准。
 
+路由增量以 [Handler 路由 SPEC](../../../docs/项目说明/项目架构与接口（spec）/接口文档/agent/handler-routing.md) 为准。
+
 ## Decision rule
 
 SPEC 第 4.2、5.1、6.1、6.3、7、8.1 节优先。装配细节不清时参考当前 AgentRuntime/角色注册和 SystemRuntime 生命周期；不得把旧代理方法复制到 façade，也不得新增 service locator。需要第三个业务方法时停止并修订 SPEC。
 
 ## Architecture constraints
 
-- 只新增 `agent/facade.py` 定义 Agent；AgentRuntime 初始化时直接组装新 Agent，SystemRuntime 仍是系统 composition root。
-- 路由注册暂留 facade.py 内部，精确注册/失败，不做内容决策；本版生产注册集合为空。
+- `agent/facade.py` 定义 Agent；AgentRuntime 初始化时直接组装新 Agent，SystemRuntime 仍是系统 composition root。
+- 建立 `agent/handlers/stimulus/router.py` 和 `agent/handlers/action/router.py`，只负责精确注册与查找；本版生产注册集合为空，不新建真实 Handler。
 - `agent/__init__.py` 只导出 façade 对外所需的 `Agent` 类型；装配由 AgentRuntime 负责。Handler、Skill、context、planning、ledger、reflection 均为私有包，外部生产模块不得导入。
 - 迁移期适配旧实现只能藏在 façade/Handler 之后并有后续删除工单；不得把 `LuoTianyiAgent` 或 `CharacterRuntime` 作为新 façade 字段泄漏。
 
