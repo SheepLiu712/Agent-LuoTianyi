@@ -1,12 +1,7 @@
-import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-server_root = str(Path(__file__).resolve().parent.parent)
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
 
 from src.world.proactive_topic_task import ProactiveTopicCheckTask
 

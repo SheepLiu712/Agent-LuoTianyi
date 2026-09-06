@@ -1,12 +1,6 @@
-import os
-import sys
 import json
-from pathlib import Path
 from types import SimpleNamespace
 
-server_root = str(Path(__file__).resolve().parent.parent)
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
 
 from src.world.citywalk.task import CitywalkTask
 from src.world.citywalk.errors import AMapRequestError

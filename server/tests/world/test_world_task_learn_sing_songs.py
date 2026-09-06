@@ -8,9 +8,6 @@ from types import SimpleNamespace
 
 import pytest
 
-server_root = str(Path(__file__).resolve().parent.parent)
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
 
 from src.world.learn_sing_songs.task import LearnSingSongsTask
 from src.world.learn_sing_songs.qq_music_credential_refresh_task import QQMusicCredentialRefreshTask
@@ -319,7 +316,7 @@ def test_learn_sing_songs_build_learner_skips_without_wishlist():
 def test_learn_sing_songs_build_learner_uses_manager_resource_path(monkeypatch, tmp_path):
     monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
     monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
-    monkeypatch.chdir(Path(__file__).resolve().parent.parent)
+    monkeypatch.chdir(Path(__file__).resolve().parents[2])
 
     wishlist = WishlistManager(
         str(tmp_path / "metadata.json"),
@@ -570,7 +567,7 @@ def test_learn_sing_songs_write_learned_event_skips_without_store():
 def test_auto_song_learner_builds_child_pythonpath(monkeypatch, tmp_path):
     monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
     monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
-    monkeypatch.chdir(Path(__file__).resolve().parent.parent)
+    monkeypatch.chdir(Path(__file__).resolve().parents[2])
 
     wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
     learner = AutoSongLearner(
@@ -586,11 +583,11 @@ def test_auto_song_learner_builds_child_pythonpath(monkeypatch, tmp_path):
     pythonpath_parts = env["PYTHONPATH"].split(os.pathsep)
 
     assert learner.resource_path == tmp_path / "music"
-    assert str(Path(__file__).resolve().parent.parent) in pythonpath_parts
+    assert str(Path(__file__).resolve().parents[2]) in pythonpath_parts
     assert str(learner.songlearner_dir / "src") in pythonpath_parts
     assert pythonpath_parts[:2] == [
         str(learner.songlearner_dir / "src"),
-        str(Path(__file__).resolve().parent.parent),
+        str(Path(__file__).resolve().parents[2]),
     ]
     assert env["TEST_SONGS_DIR"] == str(learner.songs_dir)
     assert env["SONGLEARNER_RESOURCE_DIR"] == str(learner.songlearner_resource_dir)
@@ -599,7 +596,7 @@ def test_auto_song_learner_builds_child_pythonpath(monkeypatch, tmp_path):
 def test_auto_song_learner_formats_structured_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
     monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
-    monkeypatch.chdir(Path(__file__).resolve().parent.parent)
+    monkeypatch.chdir(Path(__file__).resolve().parents[2])
 
     wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
     learner = AutoSongLearner(
@@ -622,7 +619,7 @@ def test_auto_song_learner_formats_structured_failure(monkeypatch, tmp_path):
 def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path):
     monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
     monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
-    monkeypatch.chdir(Path(__file__).resolve().parent.parent)
+    monkeypatch.chdir(Path(__file__).resolve().parents[2])
 
     wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
     wishlist.add("Song A")
@@ -668,7 +665,7 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
 def test_auto_song_learner_records_redirected_wish_and_learned_target(monkeypatch, tmp_path):
     monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
     monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
-    monkeypatch.chdir(Path(__file__).resolve().parent.parent)
+    monkeypatch.chdir(Path(__file__).resolve().parents[2])
 
     wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
     wishlist.add("海")
