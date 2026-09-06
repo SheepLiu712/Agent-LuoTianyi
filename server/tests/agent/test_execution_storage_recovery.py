@@ -102,6 +102,55 @@ async def test_storage_commit_failure_blocks_next_action_even_when_handler_swall
     assert not replay.retryable and sink.values == []
 
 
+async def test_cancel_cleanup_settlement_failure_keeps_known_effect_without_claiming_completion(
+    routed_runtime, runtime_dependencies,
+):
+    sessions = runtime_dependencies[0]["database_manager"].open_sql_session
+    entered = asyncio.Event()
+    fail_once = False
+
+    def reject_commit(session):
+        nonlocal fail_once
+        if fail_once:
+            fail_once = False
+            raise RuntimeError("settlement unavailable")
+
+    async def action_handler(action, context, outputs):
+        nonlocal fail_once
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            fail_once = True
+            return completed(action, irreversible_effect_committed=True,
+                             effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_POST, effect_id="cleanup-effect"))
+
+    runtime, _ = routed_runtime(realize=action_handler)
+    plan, context = plan_and_context()
+    owner = asyncio.create_task(runtime.get_agent().realize_action_plan(plan, context, Sink()))
+    await asyncio.wait_for(entered.wait(), 1)
+    waiter = asyncio.create_task(runtime.get_agent().realize_action_plan(plan, fresh(context), Sink()))
+    event.listen(sessions, "before_commit", reject_commit)
+    try:
+        await asyncio.sleep(0)
+        owner.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await owner
+        report = await asyncio.wait_for(waiter, 1)
+        assert report.error_code is d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE and not report.retryable
+        assert report.action_results[0].status is d.ActionExecutionStatus.FAILED
+        assert report.action_results[0].effect_ref.effect_id == "cleanup-effect"
+        assert report.action_results[1].status is d.ActionExecutionStatus.NOT_STARTED
+    finally:
+        event.remove(sessions, "before_commit", reject_commit)
+        owner.cancel()
+        await asyncio.gather(owner, waiter, return_exceptions=True)
+    sink = Sink()
+    replay = await runtime.get_agent().realize_action_plan(plan, fresh(context), sink)
+    assert replay.error_code is d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
+    assert not replay.retryable and sink.values == []
+
+
 @pytest.mark.parametrize("damage", ["version", "json"])
 async def test_corrupt_persisted_execution_is_not_discarded_and_reexecuted(routed_runtime, runtime_dependencies, damage):
     runtime, _ = routed_runtime(realize=deliver)

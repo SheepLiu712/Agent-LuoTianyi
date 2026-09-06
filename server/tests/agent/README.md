@@ -263,3 +263,14 @@ Agent 在同一数据库登记执行完整计划身份、运行占用、每项�
 **793 passed、2 skipped**；包含38项新增执行用例，两个跳过仍为 world 真实网络探测。
 Agent、AgentRuntime 和相关测试 Ruff、Agent compileall、git diff --check，以及 Agent SPEC 的 UTF-8、围栏和相对链接校验通过。
 独立 Python 进程完成/硬退出恢复和真实临时 SQLite 故障已验证；真实业务 Handler、外部服务、生产数据库未验证。
+
+
+## Execution Ledger 拥有者取消后等待者事实 RED（2026-09-06）
+
+初步 GREEN `94c295a3` 作者自审发现等待者读取的是加入前快照；拥有者取消时只发布空结果，
+会丢弃加入后发生的完成前缀及已确认输出。两个公开入口回归分别验证：等待期间首行动完成后
+拥有者在第二行动被取消，等待者保留完成/输出/效果；取消清理可信返回的结算提交失败时，
+等待者保留已知 effect_ref，但当前行动必须 FAILED / DEPENDENCY_UNAVAILABLE，不能冒充已持久完成。
+对初步 GREEN 执行 `-m pytest tests/agent/test_execution_idempotency.py tests/agent/test_execution_storage_recovery.py -k "cancelled_owner_waiter or cancel_cleanup_settlement_failure" -q --tb=short`
+为 **2 failed、38 deselected**；失败分别为丢失 output_started，以及当前项错误 NOT_STARTED。
+SPEC 的累计事实、取消可信返回与结算失败条目已覆盖，无新增公开接口。测试仅经公开 realize 和 SQL 提交故障边界观察。

@@ -337,6 +337,42 @@ async def test_owner_task_cancel_preserves_trusted_result_returned_during_cleanu
     assert [value.action_id for value in sink.values] == ["a1"]
 
 
+async def test_cancelled_owner_waiter_keeps_facts_committed_after_it_joined(routed_runtime):
+    entered, release, second = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def action_handler(action, context, outputs):
+        if action.action_id == "a2":
+            entered.set()
+            await release.wait()
+            return await deliver(action, context, outputs)
+        second.set()
+        await asyncio.Event().wait()
+
+    runtime, _ = routed_runtime(realize=action_handler)
+    plan, context = plan_and_context()
+    owner = asyncio.create_task(runtime.get_agent().realize_action_plan(plan, context, Sink()))
+    await asyncio.wait_for(entered.wait(), 1)
+    sink = Sink()
+    waiter = asyncio.create_task(runtime.get_agent().realize_action_plan(plan, fresh(context), sink))
+    try:
+        await asyncio.sleep(0)
+        release.set()
+        await asyncio.wait_for(second.wait(), 1)
+        owner.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await owner
+        report = await asyncio.wait_for(waiter, 1)
+        assert report.error_code is d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE and not report.retryable
+        assert report.output_started and report.irreversible_effect_committed
+        assert report.action_results[0].status is d.ActionExecutionStatus.ALREADY_COMPLETED
+        assert report.action_results[0].effect_ref.effect_id == "a2"
+        assert sink.values == []
+    finally:
+        release.set()
+        owner.cancel()
+        await asyncio.gather(owner, waiter, return_exceptions=True)
+
+
 async def test_shutdown_waits_for_execution_owner_and_joiner(routed_runtime):
     entered, release = asyncio.Event(), asyncio.Event()
 
