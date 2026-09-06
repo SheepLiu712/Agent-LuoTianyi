@@ -89,7 +89,7 @@ async def test_sink_rejection_is_stable_and_never_accepted(routed_runtime, side,
         assert report.action_results[0].status is d.ActionExecutionStatus.FAILED
         assert report.action_results[1].status is d.ActionExecutionStatus.NOT_STARTED
     assert report.error_code.name == expected
-    assert report.retryable is (rejection is d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
+    assert report.retryable is (side == "handle" and rejection is d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
 
 
 @pytest.mark.parametrize("change", [

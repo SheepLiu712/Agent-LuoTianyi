@@ -232,3 +232,20 @@ handle 不消费 pending，realize 所有行动仍 NOT_STARTED。
 
 最终完整命令 `D:/Anaconda/envs/lty/python.exe -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`
 为 **655 passed、2 skipped**（agent/agent_runtime 共 110 项）。相关 Ruff 与 compileall 通过；测试没有改变原 RED 期望。
+
+
+## Execution Ledger 逐行动恢复 RED（2026-09-06）
+
+SPEC 为 `25458406`，取消清理可信返回补充为 `15f7b06c`；两个 commit 均已作者自审。本片保留现有 ActionHandler 输出协议，从公开 `realize_action_plan` 和 `AgentRuntime.shutdown` 验证执行账本，不增加真实 Handler。
+
+新增 38 项展开用例：
+
+- `test_execution_idempotency.py`：30 项。覆盖同实例/重建后完成重投、完整计划字段冲突、角色和 execution 作用域、完成前缀带输出和效果后的安全失败/取消继续、恢复预检保留历史、终态优先级、不安全效果/已确认及未知输出、普通异常未知效果、并发加入、跨 Runtime 争用、等待者/拥有者取消、取消清理可信返回及关闭等待。
+- `test_execution_storage_recovery.py`：8 项。使用真实 SQLite 检查读取不可用的安全日志、行动结算/发送前/确认后提交失败（处理器吞错也不允许继续）、损坏版本/JSON；由新 Python 进程产生完成结果或在独立外部效果后硬退出，再通过新 Agent 公开重投检查不重复外部效果。
+- 原 `test_handler_dispatch.py` 的 realize BACKPRESSURE_TIMEOUT 期望改为 retryable=False；只有 sink 的拒绝不足以证明异常退出的 Handler 没有其他效果。handle 的原有 retryable 期望不变。
+
+工作目录 `server`，运行 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：**37 failed、756 passed、2 skipped**。新增 38 项为 **36 failed、2 passed**，另 1 项为旧契约期望修订产生的 RED。两项首次通过为不同执行/角色独立及等待者取消隔离回归，不伪造失败。两项跳过仍为 world 真实网络探测。
+
+失败均来自公开行为缺失：重复执行而非 ALREADY_COMPLETED、内容冲突未拒绝、错误 retryable、历史前缀丢失、重复 sink 投递、忽略存储故障及进程恢复；拥有者取消后等待者继续挂起产生的有界等待超时同样是目标缺失。没有导入、语法或环境错误。
+
+数据库结构只用于外部故障注入，不断言 SQL 查询步骤；初始无执行表时不会产生反射失败，由公开重投错误行为证明 RED。后台任务均显式释放并回收，新进程有超时且关闭引擎。Ruff 与 `git diff --check` 通过。没有产品代码、完成进度或 GREEN 记录。
