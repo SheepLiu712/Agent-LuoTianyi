@@ -9,6 +9,14 @@ SPEC 修正 `d7db3897` 在原 SPEC `2194c0a9` 上明确：有效回执已经确�
 实际命令（server 目录）：`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent/test_plan_delivery_recovery.py::test_ack_commit_failure_settlement_saves_receipt_without_redelivery tests/agent/test_request_idempotency.py::test_report_commit_failure_preserves_accepted_ids_and_blocks_reprocessing -q --tb=short --show-capture=no` 为 **1 failed、1 passed**。修改用例仍先因旧实现不接受 draft、sink 没有收到计划而失败，尚未到达 ack/结算分支，不把此 RED 声称为已验证原子补齐。Ruff 和 diff 检查通过。作者自审只修改文档与该测试，不含产品实现或完成记录。
 
 
+## PlanEmitter 白名单错误分类 RED（2026-09-06）
+
+GREEN `dce6f839` 作者自审发现：领域容器接受的 Action/Tone 子类不在持久白名单，
+编码拒绝被存储包装误报 DEPENDENCY_UNAVAILABLE。新增公开 handle 的两个子类场景，
+要求 INTERNAL_ERROR、retryable=False 和零交付；运行
+`-m pytest tests/agent/test_plan_emission.py -k non_whitelisted -q --tb=short`
+为 **2 failed**，均精确失败于错误码。没有修改产品代码或原42项RED断言。
+
 ## PlanEmitter GREEN（2026-09-06）
 
 SPEC `2194c0a9`、确认结算修订 `d7db3897`；RED `5ec6537a`、修订 `8a0f166e`。

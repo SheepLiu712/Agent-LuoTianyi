@@ -204,3 +204,27 @@ async def test_concurrent_drafts_have_serialized_contiguous_delivery(routed_runt
     assert report.request_status is d.HandlingRequestStatus.COMPLETED
     assert [plan.plan_ordinal for plan in values] == [0, 1]
     assert overlap is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extended_type", ["action", "tone"])
+async def test_non_whitelisted_plan_value_is_contract_failure_without_delivery(routed_runtime, extended_type):
+    class ExtendedSay(d.Say):
+        pass
+
+    class ExtendedTone(d.Tone):
+        pass
+
+    async def handle(req, plans):
+        action_type = ExtendedSay if extended_type == "action" else d.Say
+        tone_type = ExtendedTone if extended_type == "tone" else d.Tone
+        action = action_type(action_id="custom", content="自定义值", sound_content=None,
+                             prepared_audio_ref=None, tone=tone_type(value="normal"),
+                             expression=None, delivery=d.OutputDelivery.CONVERSATION)
+        await plans.emit(draft(actions=(action,)))
+
+    runtime, _ = routed_runtime(handle=handle)
+    sink = Sink()
+    report = await runtime.get_agent().handle_stimulus(request(), sink)
+    assert report.error_code is d.HandlingErrorCode.INTERNAL_ERROR
+    assert report.retryable is False and sink.values == []
