@@ -6,12 +6,13 @@ from sqlalchemy import MetaData, Table, event, select, update
 
 import src.domain.agent as d
 from routing_support import Sink, plan_and_context, request, settlement
+from plan_emission_support import draft
 
 
 async def _deliver(req, plans):
     plan, _ = plan_and_context()
-    await plans.emit(plan)
-    return settlement(req, emitted=(plan.plan_id,))
+    receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+    return settlement(req, emitted=(receipt.plan_id,))
 
 
 @pytest.mark.asyncio

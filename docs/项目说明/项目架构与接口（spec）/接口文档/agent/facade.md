@@ -44,7 +44,7 @@ async def realize_action_plan(
 
 入口拒绝时不调用模型、capability 或 sink。报告的 considered 和 retained 都按快照顺序包含全部 pending ID；consumed 和 emitted_plan_ids 为空，reconsider_at 为 None。输入不匹配、不支持和已取消的入口结果均为 `retryable=False`。
 
-处理器通过内部 PlanEmitter 提交完整草稿，稳定计划和持久投递恢复见 [PlanEmitter 契约](plan-emitter.md)（本次目标行为）。处理开始后的计划通过 plan_sink 按正常产生顺序交付；报告只记入已成功接收的计划 ID。取消或失败不抹掉此前成功接收的计划及已形成的结算事实。Agent 不直接修改 stage 的 pending 集合。
+处理器通过内部 PlanEmitter 提交完整草稿，稳定计划和持久投递恢复见 [PlanEmitter 契约](plan-emitter.md)。处理开始后的计划通过 plan_sink 按正常产生顺序交付；报告只记入已成功接收的计划 ID。取消或失败不抹掉此前成功接收的计划及已形成的结算事实。Agent 不直接修改 stage 的 pending 集合。
 
 ## realize 入口
 

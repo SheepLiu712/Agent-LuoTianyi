@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ._request_codec import decode_report, encode_report
+from .plan_outbox import PlanOutbox
 
 
 _requests = Table(
@@ -27,12 +28,13 @@ class RequestLedger:
         self._sessions = sql_session_factory
         with self._sessions() as session:
             _requests.create(session.get_bind(), checkfirst=True)
+        self.outbox = PlanOutbox(character_id, sql_session_factory)
 
     def _key(self, request_id):
         return (_requests.c.character_id == self._character_id) & (_requests.c.request_id == request_id)
 
     def claim(self, request_id, fingerprint):
-        """原子登记；返回 owner、occupied、conflict 或已有终态，存储异常向上抛出。"""
+        """原子登记；返回 owner、recovery、occupied、conflict 或已有终态，存储异常向上抛出。"""
         with self._sessions() as session:
             row = session.execute(select(_requests).where(self._key(request_id))).mappings().first()
             if row is None:
@@ -51,15 +53,17 @@ class RequestLedger:
                 raise ValueError("report identity mismatch")
             if row["fingerprint"] != fingerprint:
                 return "conflict", None
-            return ("terminal", report) if report is not None else ("occupied", None)
+        return ("terminal", report) if report is not None else self.outbox.claim(request_id)
 
-    def settle(self, request_id, fingerprint, report):
-        """只结算原身份的未完成占用；事务提交成功才算终态可恢复。"""
+    def settle(self, request_id, fingerprint, report, confirmed_ids=()):
+        """原子保存真实回执与报告；有未确认计划则释放恢复权，否则结算终态。"""
         with self._sessions() as session:
+            pending = self.outbox.reconcile(session, request_id, confirmed_ids)
             result = session.execute(update(_requests).where(
                 self._key(request_id), _requests.c.version == 1,
                 _requests.c.fingerprint == fingerprint, _requests.c.report_json.is_(None),
-            ).values(report_json=encode_report(report)))
+            ).values(report_json=None if pending else encode_report(report)))
             if result.rowcount != 1:
                 raise ValueError("request claim no longer matches")
+            self.outbox.save_recovery(session, request_id, report if pending else None)
             session.commit()

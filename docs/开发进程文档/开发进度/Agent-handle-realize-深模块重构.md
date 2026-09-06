@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-06 PlanEmitter 持久投递与恢复 GREEN
+
+- 交付行为：Handler 提交内部 ActionPlanDraft，由 PlanEmitter 分配稳定身份和连续 ordinal；完整计划落库后交付，记录有效回执、未知结果与明确拒绝。相同请求重投读取终态或原子领取已存计划恢复权，不重跑认知；同实例并发共享结果，恢复取消等待受控 sink 清理后释放恢复权。ack 写入失败时，最终结算能原子补齐真实确认，避免再次投递已知接收的计划。
+- interface spec：plan-emitter、request-ledger、facade、handler-routing 已按实现定稿；项目架构记录 planning 与 outbox 的实际归属。内部协议及公开入口具有中文 docstring，两个业务方法和领域字段不变，生产路由仍为空。
+- commit：SPEC `2194c0a9`、修订 `d7db3897`；RED `5ec6537a`、修订 `8a0f166e`；GREEN 为本记录所在提交。
+- 验证及结果：完整相关 pytest 命令 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 在 server 下为 **753 passed、2 skipped**。42 项新增用例全部通过，原 Handler 测试按 Draft/真实回执身份迁移并保留行为断言。相关 Ruff、compileall、git diff --check 通过；临时 SQLite 覆盖旧库兼容、双实例和新 Python 进程恢复、持久接收器重复识别、存储错误与恢复取消。
+- 未验证范围：两个 world 网络探测跳过；未验证真实业务 Handler、外部队列、生产数据库或客户端。持久 Fake 只证明可识别重复的接收器，不表示任意新连接恰好一次。此记录不表示 #64 的 ContextStore 等其他工作完成。
+
 ### 2026-09-06 Request Ledger 结算日志时点修复 GREEN
 
 - 交付行为：移除处理器层尚未持久化时的完成日志，统一在公开 handle 确定最终报告后记录一次结算；终态提交失败只记录返回的依赖失败，不先宣称 completed。

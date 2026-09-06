@@ -9,6 +9,25 @@ SPEC 修正 `d7db3897` 在原 SPEC `2194c0a9` 上明确：有效回执已经确�
 实际命令（server 目录）：`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent/test_plan_delivery_recovery.py::test_ack_commit_failure_settlement_saves_receipt_without_redelivery tests/agent/test_request_idempotency.py::test_report_commit_failure_preserves_accepted_ids_and_blocks_reprocessing -q --tb=short --show-capture=no` 为 **1 failed、1 passed**。修改用例仍先因旧实现不接受 draft、sink 没有收到计划而失败，尚未到达 ack/结算分支，不把此 RED 声称为已验证原子补齐。Ruff 和 diff 检查通过。作者自审只修改文档与该测试，不含产品实现或完成记录。
 
 
+## PlanEmitter GREEN（2026-09-06）
+
+SPEC `2194c0a9`、确认结算修订 `d7db3897`；RED `5ec6537a`、修订 `8a0f166e`。
+42 项 RED 预期保持不变，全部通过。内部 Handler 提交 Draft；Emitter 串行分配稳定计划身份，
+完整 outbox 提交后才交付，确认和报告原子结算；公开重投仅恢复原计划。
+外部确认后 ack 提交失败但最终结算恢复成功时，真实确认被原子补齐，终态重投零交付。
+
+旧 Handler 测试改为提交 Draft，报告使用真实回执 ID，断言使用外部 Sink 捕获的身份。
+五项旧完整计划身份伪造用例迁移为完整计划/错误草稿类型/非法来源拒绝；身份由 Emitter
+固定的事实在成功调用中逐项检查。其余错误、消费、并发、取消、重复和关闭断言保留。
+删除仅为 RED 准备的缺失类型和缺失装配参数 fallback。
+
+实际验证（工作目录 `server`）：完整相关命令
+`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`
+为 **753 passed、2 skipped**；agent/runtime 为 **208 passed**。
+相关 Agent/Runtime 产品与 agent/runtime/domain/world/system 测试 Ruff、产品 compileall、diff 检查通过。
+临时 SQLite 证明跨实例及独立 Python 进程恢复、PR115 旧数据库终态兼容与接收器持久去重。
+两项 world 网络探测仍跳过，未运行真实业务 Handler、外部接收队列或生产数据库验收。
+
 ## PlanEmitter SPEC / RED（2026-09-06）
 
 SPEC commit `2194c0a9`：内部 ActionPlanDraft、连续 ordinal、稳定计划身份、持久 outbox、请求 provisional/终态和只恢复投递的公开重投契约。作者自审检查了 source 可为空、合法部分消费不丢失、恢复预取消不改写 provisional、永久拒绝的最终错误码以及 PR115 旧数据库终态兼容。业务方法及 domain 字段没有增加。

@@ -2,12 +2,10 @@
 from contextlib import closing
 from dataclasses import asdict
 from datetime import date
-import importlib
-import importlib.util
 import json
 import sqlite3
-from types import SimpleNamespace
 
+from src.agent.planning.emitter import ActionPlanDraft
 import src.domain.agent as d
 from routing_support import settlement
 
@@ -17,11 +15,7 @@ def draft(*, text="计划正文", actions=None, sources=("m2", "m1")):
         d.Say(action_id="say", content=text, sound_content=None, prepared_audio_ref=None,
               tone=d.Tone(value="normal"), expression=None, delivery=d.OutputDelivery.CONVERSATION),
     ))
-    # RED 时仍从公开 handle 得到正常失败报告，不用缺少导入制造收集失败。
-    if importlib.util.find_spec("src.agent.planning") is None:
-        return SimpleNamespace(**values)
-    cls = getattr(importlib.import_module("src.agent.planning.emitter"), "ActionPlanDraft", None)
-    return cls(**values) if cls is not None else SimpleNamespace(**values)
+    return ActionPlanDraft(**values)
 
 
 async def one_plan(req, plans):

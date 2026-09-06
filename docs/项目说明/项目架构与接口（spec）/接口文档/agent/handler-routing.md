@@ -1,6 +1,6 @@
 # Handler 路由契约
 
-状态：路由已实现；内部 plans 协议按 [PlanEmitter](plan-emitter.md) 更新为目标契约。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
+状态：已实现；内部 plans 使用 [PlanEmitter](plan-emitter.md) 协议。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
 
 ## 文件与所有权
 
@@ -23,7 +23,7 @@ server/src/
 
 两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产注册集合为空，装配由 AgentRuntime 初始化完成。
 
-该文件树采用 #63 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定。文件树只列当前路由涉及的文件，具体业务处理器不在本轮创建。
+该文件树采用 #63 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定。文件树列出路由涉及的文件。
 
 Router 是 Agent 内部模块。AgentRuntime 仅在显式装配位置直接导入两个 router 类型；stage、world、Adapter 及其他业务调用方不导入它们。Agent 对外不增加注册、查询处理器或第三个业务方法。
 

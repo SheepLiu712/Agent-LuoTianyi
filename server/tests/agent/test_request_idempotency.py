@@ -13,6 +13,7 @@ from sqlalchemy import event
 
 import src.domain.agent as d
 from routing_support import Sink, plan_and_context, request, settlement
+from plan_emission_support import draft
 
 
 async def deliver(req, plans):
@@ -21,8 +22,8 @@ async def deliver(req, plans):
                    target_character_id=req.stimulus.target_character_ids[0],
                    interaction_id=req.interaction.interaction_id,
                    basis_interaction_revision=req.interaction.interaction_revision)
-    await plans.emit(plan)
-    return settlement(req, emitted=(plan.plan_id,), reconsider_at=req.interaction.now + timedelta(seconds=7))
+    receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+    return settlement(req, emitted=(receipt.plan_id,), reconsider_at=req.interaction.now + timedelta(seconds=7))
 
 
 def rejection(report, code):
@@ -285,7 +286,7 @@ async def test_request_and_character_keys_remain_independent(routed_runtime):
     runtime, _ = routed_runtime(handle=deliver)
     await runtime.get_agent().handle_stimulus(request(), Sink())
     sink = Sink()
-    assert (await runtime.get_agent().handle_stimulus(replace(request(), request_id="r2"), sink)).emitted_plan_ids == ("p",)
+    assert (await runtime.get_agent().handle_stimulus(replace(request(), request_id="r2"), sink)).emitted_plan_ids == (sink.values[0].plan_id,)
     req = request()
     items = tuple(replace(item, target_character_ids=("miku",)) for item in req.interaction.pending_stimuli)
     req = replace(req, stimulus=items[0], interaction=replace(req.interaction, pending_stimuli=items))
@@ -342,7 +343,7 @@ async def test_report_commit_failure_preserves_accepted_ids_and_blocks_reprocess
         assert report.request_status is d.HandlingRequestStatus.FAILED
         assert report.error_code is d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
         assert report.retryable is False
-        assert report.emitted_plan_ids == ("p",)
+        assert report.emitted_plan_ids == (sink.values[0].plan_id,)
         failing = False
         second, _ = routed_runtime(handle=deliver)
         rejection(await second.get_agent().handle_stimulus(request(), sink), d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)

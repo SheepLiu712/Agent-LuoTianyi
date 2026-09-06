@@ -1,10 +1,10 @@
 # PlanEmitter 与计划投递恢复契约
 
-状态：目标契约，尚未实现。公开入口保持 `Agent.handle_stimulus(request, plan_sink)`；结果使用现有 HandlingReport，外部接收器使用现有 ActionPlanSink。
+状态：已实现。公开入口保持 `Agent.handle_stimulus(request, plan_sink)`；结果使用现有 HandlingReport，外部接收器使用现有 ActionPlanSink。
 
 ## 所有权与内部输入
 
-`agent/planning/emitter.py` 定义内部 PlanEmitter 和 ActionPlanDraft，`agent/planning/identity.py` 保存稳定身份与计划编码规则。持久 outbox 归 `agent/ledgers`，使用 AgentRuntime 已注入的 SQLAlchemy 会话工厂与同一数据库。Handler 只能取得本次 emitter，不能取得外部 sink、账本或其他请求的投递对象。Agent 包仍只导出 Agent，生产处理器注册表保持为空。
+`agent/planning/emitter.py` 定义内部 PlanEmitter 和 ActionPlanDraft，`agent/planning/identity.py` 保存稳定身份与计划编码规则。持久 outbox 位于 `agent/ledgers/plan_outbox.py`，使用 AgentRuntime 已注入的 SQLAlchemy 会话工厂与同一数据库。Handler 只能取得本次 emitter，不能取得外部 sink、账本或其他请求的投递对象。Agent 包仍只导出 Agent，生产处理器注册表保持为空。
 
 ```python
 @dataclass(frozen=True, kw_only=True)

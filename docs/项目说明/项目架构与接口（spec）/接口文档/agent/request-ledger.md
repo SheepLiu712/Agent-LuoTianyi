@@ -1,6 +1,6 @@
 # handle 请求账本契约
 
-状态：请求幂等已实现；与 [PlanEmitter](plan-emitter.md) 联动的可恢复 outbox 为本次目标契约。业务入口为 `Agent.handle_stimulus(request, plan_sink)`，输入和结果使用现有 domain 类型。
+状态：请求幂等与 [PlanEmitter](plan-emitter.md) 联动的可恢复 outbox 已实现。业务入口为 `Agent.handle_stimulus(request, plan_sink)`，输入和结果使用现有 domain 类型。
 
 ## 装配与持久化
 
