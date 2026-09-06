@@ -72,3 +72,11 @@
 - commit 或 PR：SPEC 基线截至 `1b9d167a`；RED commit `9389c7ea`；GREEN 为分支 `codex/agent-02-handle-input-contract` 上本记录所在提交。
 - 验证及结果：使用 `D:/Anaconda/envs/lty/python.exe`，工作目录 `server`。实现前重新运行 `-m pytest tests/domain/test_handle_input_contract.py -q --tb=no -rN` 为 97 failed、1 passed；实现后该文件为 98 passed，`-m pytest tests/domain -q` 为 234 passed、0 skipped，原有 136 项领域测试均通过。`-m ruff check src/domain/agent tests/domain/test_handle_input_contract.py`、`-m compileall -q src/domain/agent` 和 `git diff --check` 通过。
 - 未验证范围：未运行完整 Server/客户端测试、真实设备或外部服务；未实现 Agent handle、plan sink、HandlingReport、stage 重连/结算、迟到模型结果丢弃或 Agent 工作上下文生命周期。本次 GREEN 仅证明输入领域对象及令牌契约，不代表生产链路已迁移或远程 PR 已合并。
+
+### 2026-09-06 handle 接口文档事实化整理
+
+- 交付内容：接口文档仅记录当前公开类型、字段、构造约束、取消状态和错误行为；移除历史删除清单、非目标、未来 Agent/stage 行为要求及尚不可调用的示例。补充可执行的请求构造示例；本轮临时测试证据已移至仓库外归档。
+- interface spec：[`domain/handle-input.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)，同步 domain 索引及 agent/stage 接口页。
+- commit 或 PR：分支 `codex/agent-02-handle-input-contract`，本记录所在文档整理提交。
+- 验证及结果：接口文档措辞、UTF-8、相对链接、实际构造示例和 `git diff --check` 检查通过；产品代码与测试未改动，文档整理的运行时 Red/Green 不适用。
+- 未验证范围：本记录不表示已完成他人代码审查或新增运行时验收。

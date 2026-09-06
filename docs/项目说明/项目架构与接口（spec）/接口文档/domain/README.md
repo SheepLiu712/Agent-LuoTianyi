@@ -9,8 +9,8 @@
 ### 输入与响应
 
 - [Stimulus 领域契约](stimulus.md)：当前总 SPEC 已登记的 22 个 Stimulus 类型名的权威 interface；其中 15 种定义为可构造，7 种只占位且当前统一拒绝构造。文档定义公共字段、专有字段、依赖值类型、稳定错误和公开测试 seam。
-- [handle 输入契约](handle-input.md)：输入领域对象已实现并通过公开契约测试，待他人评审；提供请求、Chat/Toy/World 快照、取消令牌与必要值类型。保留交互身份、修订号、输出支持和连接状态，移除打字/选图状态副本及设备限制对象。
-- `src.domain.agent`：Agent 强类型领域协议的公开导入路径。当前已实现抽象 `Stimulus`、当前总 SPEC 登记的 22 个具体类型、完整 `StimulusKind`、`StimulusSource`、构造所需领域值类型及三类稳定构造错误；其中 15 个具体类型可构造，7 个占位类型统一返回 `CONTRACT_STIMULUS_UNAVAILABLE`。目标包不导出 `PersistPolicy`。`InteractionSnapshot` 三种变体、`HandleStimulusRequest`、`CancellationToken` 及相关枚举/稳定错误已实现；`HandlingReport` 和 Agent handle 生产调用链尚未实现。
+- [handle 输入契约](handle-input.md)：提供不可变请求、Chat/Toy/World 快照、共享取消令牌、枚举及稳定构造错误。
+- `src.domain.agent`：Agent 强类型领域协议的公开导入路径。当前已实现抽象 `Stimulus`、当前总 SPEC 登记的 22 个具体类型、完整 `StimulusKind`、`StimulusSource`、构造所需领域值类型及三类稳定构造错误；其中 15 个具体类型可构造，7 个占位类型统一返回 `CONTRACT_STIMULUS_UNAVAILABLE`。目标包不导出 `PersistPolicy`。`InteractionSnapshot` 三种变体、`HandleStimulusRequest`、`CancellationToken` 及相关枚举/稳定错误已实现。
 - 旧 `src.domain.stimulus.Stimulus`：当前生产链仍使用的 Mapping 协议，提供 `targets_character()`、`should_persist_conversation()` 和 `can_be_memory_candidate()`。它及其 `SourceChannel`、`StimulusModality`、`PersistPolicy` 在迁移期保持可用，但不构成新 `src.domain.agent` 协议的一部分。
 - `ActionPlan`：Agent 对一次刺激给出的动作计划，包含目标角色和一组 `PlannedAction`。
 - `PlannedAction`：一个待执行动作；`ActionType` 包含说话、唱歌、表情、动作、写记忆、调用能力和不回复等类型。
@@ -55,7 +55,7 @@
 
 ## 使用示例
 
-假设 WebSocket 收到一条文字消息：Adapter 选择 `TextMessage`、填写 `source` 和规范化内容，stage 管理 pending 后交给 Agent；Agent 在内部决定需要的会话记录和记忆证据，再生成零到多个 `ActionPlan`。stage 不读取或选择 Agent 的持久化策略。整个过程中，各模块共享的是公开领域数据，而不是彼此的内部对象。
+调用方构造 `TextMessage`，将其放入交互快照的 `pending_stimuli`，再以相同内容作为 `HandleStimulusRequest.stimulus`。请求保存不可变快照，并持有调用方传入的同一枚 `CancellationToken`；具体构造示例见 [handle 输入契约](handle-input.md)。
 
 ## 应覆盖的契约场景
 

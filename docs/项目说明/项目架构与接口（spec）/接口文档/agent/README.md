@@ -59,9 +59,3 @@
 - 使用 Fake subconscious/capability 时，给定同一话题能从公开规划接口得到可实现的回复计划。
 - 没有记忆或歌曲事实时仍能正常回复；依赖未注入时 `ensure_dependencies()` 明确失败。
 - `sing(...)` 无可用歌曲时返回 `None`；流式语音在中途失败时把错误交给调用者处理。
-
-## 目标接口（尚未实现）
-
-`handle_stimulus(request, plan_sink)` 的请求结构以 [handle 输入契约](../domain/handle-input.md)为准。stage 传入不可变交互快照和同一枚可变取消令牌；Agent 观察取消并停止后续工作，不读取 stage 内部状态。对话工作上下文由 Agent 按角色和 interaction 隔离，并统一管理历史片段、摘要与 Recall 结果的临时生命周期；清理不删除长期正本。输入领域对象和 token 已实现；本节 Agent 运行时行为仍未实现，plan sink 和 HandlingReport 也尚未建立完整契约。
-
-目标是再给 `LuoTianyiAgent` 包一层只暴露有限方法的外壳，例如统一的 `handle_stimulus(...)`。该方法当前不存在，任何代码都不能把它当成已经可用的接口。迁移完成前，以本页“当前对外接口”为准。
