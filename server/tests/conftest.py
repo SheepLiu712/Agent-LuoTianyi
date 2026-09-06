@@ -5,6 +5,8 @@ import pytest
 
 
 _ACTIVE_TEST_FILES = {
+    (Path(__file__).parent / "world" / "test_world_clock.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_runtime.py").resolve(),
     (Path(__file__).parent / "domain" / "test_realization_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_stimulus_text_message_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_stimulus_registered_types_contract.py").resolve(),
