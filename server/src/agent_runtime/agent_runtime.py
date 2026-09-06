@@ -74,7 +74,6 @@ class AgentRuntime:
             self._agents = {
                 character_id: Agent(
                     character_id=character_id,
-                    sql_session_factory=database_manager.open_sql_session,
                     stimulus_router=StimulusRouter(()), action_router=ActionRouter(()),
                 )
                 for character_id in self.character_runtimes

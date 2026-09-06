@@ -2,7 +2,7 @@
 from collections.abc import Iterable
 from typing import Generic, Protocol, TypeVar
 
-from src.agent.planning.emitter import PlanEmitter
+from src.agent.processing.plan_emitter import PlanEmitter
 from src.domain.agent import HandleStimulusRequest, HandlingReport, StimulusKind
 
 HandlerT = TypeVar("HandlerT")

@@ -2,7 +2,7 @@
 from collections.abc import Iterable
 from typing import Generic, Protocol, TypeVar
 
-from src.agent.outputs.emitter import OutputEmitter
+from src.agent.processing.output_emitter import OutputEmitter
 
 from src.domain.agent import Action, ActionKind, ActionResult, ExecutionContext
 
