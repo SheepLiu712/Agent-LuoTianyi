@@ -68,6 +68,40 @@ async def test_confirmed_output_cancellation_preserves_completion_and_safe_conti
     )
 
 
+async def test_confirmed_output_cancellation_cannot_override_trusted_failure(routed_runtime):
+    # handler-routing: 可信 FAILED 优先于晚到取消，并保留实际效果及确认事实。
+    plan, context = plan_and_context()
+    delivered = []
+
+    async def receiver(value):
+        delivered.append(value)
+        context.cancellation.cancel(d.CancellationReason.SUPERSEDED)
+        return accepted(value)
+
+    async def handler(action, current, outputs):
+        try:
+            await outputs.emit(draft("TextFinal", action, current))
+        except Exception:
+            pass
+        return failed(action, effect=True)
+
+    runtime, _ = routed_runtime(realize=handler)
+    first = await runtime.get_agent().realize_action_plan(plan, context, Sink(receiver))
+    assert first.status is d.ExecutionStatus.FAILED
+    assert first.error_code is d.ExecutionErrorCode.PROVIDER_TIMEOUT
+    assert first.action_results[0] == failed(plan.actions[0], effect=True)
+    assert first.action_results[1].status is d.ActionExecutionStatus.NOT_STARTED
+    assert first.output_started and not first.retryable
+    assert [(value.action_id, value.sequence_no) for value in delivered] == [("a2", 0)]
+    await runtime.shutdown()
+
+    replacement, _ = routed_runtime(realize=no_reentry)
+    replay_sink = Sink()
+    replay = await replacement.get_agent().realize_action_plan(plan, fresh(context), replay_sink)
+    assert replay == first
+    assert replay_sink.values == []
+
+
 async def test_handler_catching_delivery_task_cancel_cannot_reemit_unknown_slot(routed_runtime):
     attempts = []
 
