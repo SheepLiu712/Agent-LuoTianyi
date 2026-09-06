@@ -45,3 +45,24 @@ RED commit `0601a6d2`，本轮保持其 38 项测试不变。实现空注册门�
 通过单次 pytest 插件解除两个指定旧测试文件的全局暂缓标记：`test_runtime_initialization_rollback.py` 为 5 passed；`test_system_runtime_shutdown.py` 为 1 failed，原因是旧测试用 object.__new__ 构造 CapabilityManager，缺少其关闭锁 _stop_lock。该关闭逻辑未在本轮改变，失败未修复；没有修改默认暂缓策略。
 
 原有未覆盖场景仍未实现，本轮 GREEN 仅指这组入口与兼容测试，不表示 #63 全部契约已经交付。
+
+## #63 已注册处理器与在途关闭 RED（2026-09-06）
+
+SPEC：`4c031a4c`，在提交并自审路由调用、单次交付事实和关闭规则后增加测试。该阶段没有修改产品实现。
+
+新增 69 项测试，分布如下：
+
+- `test_handler_registration.py`：19 项，验证精确枚举键、同对象多键、快照注册序列、重复拒绝、非法输入、未知键、START_THINKING 禁止注册。当前先断言 Agent 尚缺少注册装配入口；这些属于接口能力缺失证据，不能替代成功处理的业务 RED。
+- `test_handler_dispatch.py`：46 项，通过真实 AgentRuntime.get_agent 的两个业务方法调用装配的受控协作者。覆盖成功计划交付/消费、Action 顺序与终止输出位置、全部 sink 拒绝码、异常映射、回执及输出身份核对、伪造报告/消费拒绝、已确认事实保留、交付后失效、明确部分失败、取消和并发 interaction 隔离、内部错误日志。
+- `test_facade_inflight_shutdown.py`：4 项，覆盖 handle/realize 在途时关闭超时和重试、调用任务取消时等待清理、run_sync_owned 同步线程仍运行期间重复 shutdown 不提前释放依赖。
+
+注册协作者只用于模块内测试装配，遵循 SPEC 的 handle/realize 协议；不建立真实业务 Handler。装配参数尚未实现时，测试仍运行原有门面，由真实返回 UNSUPPORTED 与目标行为的差异证明 RED，未提供虚假生产实现。等待事件只用于建立明确并发时序，所有后台调用在 finally 中释放并回收。
+
+实际验证：
+
+- 新增测试最终运行：`python -m pytest tests/agent/test_handler_registration.py tests/agent/test_handler_dispatch.py tests/agent/test_facade_inflight_shutdown.py -q --tb=no`：**68 failed、1 passed**。首次通过的是整计划预检拒绝回归，不制造 RED。
+- 增加最后一项同步线程关闭测试前，合并回归 `tests/agent tests/agent_runtime tests/domain tests/world tests/system/test_system_runtime_shutdown.py`：**67 failed、584 passed、2 skipped**。现有 38 项门面/兼容测试和 domain/world 回归保持通过；两项真实网络探测仍跳过。
+- 恢复旧 `test_system_runtime_shutdown.py` 到 `tests/system`：SpeechCapability 使用真实空配置构造，旧 CapabilityManager 测试替身补充现行停止锁与状态，原断言不变，单独运行 **1 passed**。这是修复旧测试装配并恢复回归，不是产品 Bug GREEN。
+- Ruff 检查新增测试、父 conftest 与该恢复测试通过；git diff --check 通过。
+
+作者自审：SPEC 先于 RED；断言观察报告、sink 接收结果和资源释放边界，不读取路由私有映射；普通协作者 KeyError 不得冒充路由缺失。sink 接收后取消、非法 Handler 报告保留既有回执、重复 shutdown 等待同步清理均有独立测试。真实模型、能力、设备、生产链和持久账本未验证。

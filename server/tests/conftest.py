@@ -5,6 +5,10 @@ import pytest
 
 
 _ACTIVE_TEST_FILES = {
+    (Path(__file__).parent / "system" / "test_system_runtime_shutdown.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_handler_registration.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_handler_dispatch.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_facade_inflight_shutdown.py").resolve(),
     (Path(__file__).parent / "agent" / "test_facade_contract.py").resolve(),
     (Path(__file__).parent / "agent_runtime" / "test_agent_lookup.py").resolve(),
     (Path(__file__).parent / "agent_runtime" / "test_legacy_agent_access.py").resolve(),
