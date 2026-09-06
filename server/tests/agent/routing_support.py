@@ -85,5 +85,5 @@ class Sink:
 
 def output():
     """只提供内容，由 Agent 分配身份和序号。"""
-    from src.agent.outputs.drafts import TextFinalDraft
+    from src.agent.processing.output_drafts import TextFinalDraft
     return TextFinalDraft(delivery=d.OutputDelivery.CONVERSATION, text="输出")

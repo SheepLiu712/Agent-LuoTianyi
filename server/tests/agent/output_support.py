@@ -1,6 +1,6 @@
 """输出公开契约的内容样例。"""
 from dataclasses import replace
-from src.agent.outputs import drafts
+from src.agent.processing import output_drafts as drafts
 
 import src.domain.agent as d
 from routing_support import completed, plan_and_context
@@ -42,8 +42,3 @@ def accepted(value):
 
 async def reject(value):
     raise d.SinkRejectedError("private receiver content", code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
-
-
-async def no_reentry(action, context, outputs):
-    # 再进入会产生公开可见的失败，而不是断言私有协作次数。
-    raise AssertionError("settled handler must not run again")
