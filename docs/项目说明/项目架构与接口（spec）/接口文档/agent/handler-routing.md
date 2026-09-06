@@ -25,6 +25,18 @@ server/src/
 
 该文件树采用 [#63](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/63) 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定，直接位于 `agent_runtime/agent_runtime.py`。文件树只列出路由涉及的文件；两个 `router.py` 中定义注册器和处理器协议，当前没有具体业务 Handler 文件。
 
+### 与 #63 原文的对应关系
+
+| 项目 | 本文采用的约定 |
+| --- | --- |
+| 两个路由模块的位置 | `agent/handlers/stimulus/router.py` 与 `agent/handlers/action/router.py` |
+| 角色装配位置 | `agent_runtime/agent_runtime.py` 初始化；采用会话确认的装配方式，替代工单原文的 `agent/factory.py` |
+| 刺激路由键 | `StimulusKind`；沿用当前门面契约及总体设计的行为族路由，替代工单原文的 `StimulusKind + InteractionKind` |
+| 行动路由键 | `ActionKind`；`START_THINKING` 的归属见下文 |
+| 处理器实现状态 | 两个 router 中有结构协议；生产注册集合为空，没有具体业务 Handler |
+
+这里的目录约定确定路由器的归属。结构协议描述调用形状，空注册集合表示没有可调用的业务实现；二者不代表聊天、触摸或 world 已迁移到新门面。
+
 注册、解析和调用分为三个步骤：AgentRuntime 构造每角色注册集合；Router 保存集合并按键返回对象；门面调用该对象的异步方法。Router 本身不执行聊天、触摸或 world 行为。处理器对象与路由键不是一一对应：一个行为族对象可以绑定多个不同 kind，因此注册不同刺激不要求分别建立文件或类。
 
 Router 是 Agent 内部模块。AgentRuntime 仅在显式装配位置直接导入两个 router 类型；stage、world、Adapter 及其他业务调用方不导入它们。Agent 对外不增加注册、查询处理器或第三个业务方法。
