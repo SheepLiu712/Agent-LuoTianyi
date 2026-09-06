@@ -1,6 +1,6 @@
 # Handler 路由契约
 
-状态：已实现；内部 plans 使用 [PlanEmitter](plan-emitter.md) 协议。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
+状态：路由已实现；内部 plans 使用 [PlanEmitter](plan-emitter.md) 协议，outputs 改用 [OutputEmitter](output-delivery.md) 的增量为尚未实现的目标契约。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
 
 ## 文件与所有权
 
@@ -132,13 +132,13 @@ class StimulusHandler(Protocol):
 
 class ActionHandler(Protocol):
     async def realize(self, action: Action, execution_context: ExecutionContext,
-                      outputs: AgentOutputSink) -> ActionResult: ...
+                      outputs: OutputEmitter) -> ActionResult: ...
 ```
 
-`plans` 是接收 ActionPlanDraft 的内部 PlanEmitter，按 [计划投递契约](plan-emitter.md) 分配身份并保存投递事实；`outputs` 保留 AgentOutputSink 协议。二者都是门面为本次调用创建的受限交付对象。它们不能取得其他调用的 sink，不把外部 sink 原对象传给处理器。处理器正常返回后，交付对象失效；保留它再调用不会产生输出。处理器不能启动脱离调用生命周期的工作；拥有的异步任务或同步线程在返回或传播任务取消前必须完成清理。
+`plans` 是接收 ActionPlanDraft 的内部 PlanEmitter，按 [计划投递契约](plan-emitter.md) 分配身份并保存投递事实；`outputs` 是接收四类 OutputDraft 的私有 OutputEmitter，由 Agent 绑定身份并分配连续 sequence。二者都是门面为本次调用创建的受限交付对象。它们不能取得其他调用的 sink，不把外部 sink 原对象传给处理器。处理器正常返回后，交付对象失效；保留它再调用不会产生输出。处理器不能启动脱离调用生命周期的工作；拥有的异步任务或同步线程在返回或传播任务取消前必须完成清理。
 
 - plans 接收完整 draft，由门面固定角色、请求、交互与修订，校验 source_stimulus_ids 只能来自触发刺激及 pending；根据 ordinal 保存计划，再进行投递。报告只记录已确认接收的计划 ID，恢复及失败事实以 PlanEmitter 契约为准。
-- outputs 校验输出的 execution_id、interaction_id、action_id 与当前行动一致；成功回执必须是 OutputReceipt 且 execution_id、sequence_no 匹配。外部投递前持久登记未知事实，有效回执后记录累计 output_started=True；存储失败阻止后续行动，逐行动安全规则见 Execution Ledger。回执不匹配属于 INTERNAL_ERROR；输入输出身份不匹配属于 CONTRACT_MISMATCH。
+- outputs 构造当前行动绑定的领域输出；成功回执必须是 OutputReceipt 且 execution_id、sequence_no 匹配。有效回执后记录累计 output_started=True；存储失败阻止后续行动，恢复规则见输出投递契约。回执不匹配属于 INTERNAL_ERROR 且接收未知；同一持久槽位不同内容属于 CONTRACT_MISMATCH，均不能跳过后继续发送。
 - 两个交付对象在调用外部 sink 前检查取消，sink 等待返回后先保存已确认接收事实，再检查取消。取消后不开始下一次交付。每次调用结束后释放 sink 引用。
 - handle 正常返回的 HandlingReport 必须匹配请求、触发刺激、修订，considered 必须是 pending 的有序子集，emitted_plan_ids 必须等于真实回执记录。不合法的处理器结果转 INTERNAL_ERROR，pending 全部 retained，保留真实 emitted_plan_ids，不接受伪造消费。合法报告的消费和保留事实原样结算；令牌已取消时改为 CANCELLED/error_code=None，保留合法结算事实。
 - 处理器抛异常时，尚无已返回的消费事实，pending 全部 retained；已确认接收的计划仍写入报告。失败处理器也可正常返回合法的 FAILED 报告来表达已确认的部分结算。

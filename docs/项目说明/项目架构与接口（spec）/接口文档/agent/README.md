@@ -10,6 +10,8 @@
 
 执行账本与逐行动安全恢复的当前契约见 [Execution Ledger](execution-ledger.md)。
 
+输出草稿、Agent 分配的连续序号及原 payload 的安全恢复见 [输出投递目标契约](output-delivery.md)。
+
 ## 模块职责
 
 `server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。

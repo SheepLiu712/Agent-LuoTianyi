@@ -1,12 +1,12 @@
 # Execution Ledger 与逐行动恢复契约
 
-状态：已实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
+状态：逐行动账本已实现；涉及输出草稿、持久槽位和仅投递恢复的增量为[输出投递目标契约](output-delivery.md)，尚未实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
 
 ## 所有权与装配
 
 `agent/ledgers/execution_ledger.py` 保存执行身份及逐行动事实，`_execution_codec.py` 校验持久事实；`agent/execution.py` 协调准入、按行动执行和受限输出。AgentRuntime 通过已有 `sql_session_factory` 装配参数注入 `database_manager.open_sql_session`，账本使用原数据库中的独立表，关闭自己创建的 SQLAlchemy Session。事务只覆盖登记、读取和结算，不跨越 Handler 或 sink 的 await。初始化失败沿用 AgentRuntime 初始化回滚。
 
-ActionHandler 保持 `realize(action, execution_context, outputs: AgentOutputSink) -> ActionResult`。门面创建每行动受限 outputs；处理器不能取得外部 sink 或账本。生产路由保持为空。Agent 包只导出 Agent，业务方法仍为两个。
+ActionHandler 的目标内部协议为 `realize(action, execution_context, outputs: OutputEmitter) -> ActionResult`。门面创建每行动受限 outputs；处理器提交强类型草稿，由 Agent 分配完整输出身份，不能取得外部 sink 或账本。生产路由保持为空。Agent 包只导出 Agent，业务方法仍为两个。
 
 ## 身份与入口
 
@@ -16,7 +16,7 @@ ActionHandler 保持 `realize(action, execution_context, outputs: AgentOutputSin
 
 顶层类型错误抛 TypeError；计划包含编码白名单以外的具体类型时返回 INTERNAL_ERROR、无投递；绑定角色或 plan/context 交互身份错误，以及运行时停止接受时，沿用门面的入口拒绝，不读取其他执行事实。接受状态通过后先读取匹配执行，再检查当前 revision、令牌和全计划路由。首次执行的修订过期、预取消、任一行动未注册均零行动、零输出，不占用该 execution；预取消报告保持 retryable=False，换新令牌仍可首次执行。
 
-已有匹配记录全部已完成，或者已有不可安全继续的可信失败时，直接读取既有终态；完成项转换为 ALREADY_COMPLETED，保留 effect_ref、不可逆标记和累计 output_started，retryable=False。新的 revision、令牌或路由集合不改变已经发生的终态事实。对于仍可安全继续的执行，准入拒绝只阻止本次新动作：旧 revision 返回 STALE_INTERACTION，未注册返回 UNSUPPORTED_ACTION，预取消返回 CANCELLED；完成前缀仍为 ALREADY_COMPLETED，其余为本次 NOT_STARTED，retryable=False。存储中原可信失败保留，准入拒绝不覆盖它；后续合法调用仍可从该安全位置继续。output_started 表示已确认接收事实，False 不证明未知输出没有发生。
+已有匹配记录全部已完成，或者已有不可安全继续的可信失败，且没有可恢复输出时，直接读取既有终态；完成项转换为 ALREADY_COMPLETED，保留 effect_ref、不可逆标记和累计 output_started，retryable=False。新的 revision、令牌或路由集合不改变已经发生的终态事实。有 safe pending 的恢复仍经过当前准入。对于仍可安全继续的执行，准入拒绝只阻止本次新动作：旧 revision 返回 STALE_INTERACTION，未注册返回 UNSUPPORTED_ACTION，预取消返回 CANCELLED；完成前缀仍为 ALREADY_COMPLETED，其余为本次 NOT_STARTED，retryable=False。存储中原可信失败保留，准入拒绝不覆盖它；后续合法调用仍可从该安全位置继续。output_started 表示已确认接收事实，False 不证明未知输出没有发生。
 
 ## 持久执行与恢复
 
@@ -27,9 +27,10 @@ ActionHandler 保持 `realize(action, execution_context, outputs: AgentOutputSin
 | 行动事实 | 同 execution 的安全继续 |
 | --- | --- |
 | NOT_STARTED | 可在准入检查通过后开始 |
-| COMPLETED / ALREADY_COMPLETED | 保留结果，跳过执行 |
-| 可信 FAILED/CANCELLED，未提交效果且本行动没有已确认或未知输出 | 允许再次执行该行动 |
-| 可信 FAILED/CANCELLED，已有不可逆效果、已确认输出或未知输出 | 保留原失败，retryable=False，不重做 |
+| COMPLETED / ALREADY_COMPLETED | 保留结果，跳过 Handler；safe pending 先按输出契约补投，UNKNOWN 不重投 |
+| 可信 FAILED/CANCELLED，未提交效果且本行动没有已确认或未知输出 | 允许再次执行该行动；已有 safe pending 由重入 Handler 同内容复用 |
+| 可信 FAILED/CANCELLED，已有不可逆效果或已确认输出 | 不重做 Handler；有 safe pending 时仅补投，保留原失败 |
+| 存在未知输出 | DEPENDENCY_UNAVAILABLE、retryable=False，不重投、不重做 |
 | STARTED，缺少可信结算 | 无法证明未发生效果，DEPENDENCY_UNAVAILABLE、retryable=False，不接管执行 |
 
 可信无效果失败的 retryable 表示原 execution 可安全继续，而非错误码属于某个固定集合；取消后使用新令牌也能继续。已完成前缀的效果与输出不阻止后续安全行动重试。普通异常、超时、伪造返回或任务取消都不能证明本行动无副作用，即使 output_started=False 也不自动重跑。首次普通异常仍按门面稳定错误映射报告本次失败，retryable=False；后续读取未知 STARTED 时返回依赖不可用。未知行动报告为 FAILED/DEPENDENCY_UNAVAILABLE，后续 NOT_STARTED，不把“没有可信效果引用”解释为效果不存在。
@@ -38,11 +39,11 @@ ActionHandler 保持 `realize(action, execution_context, outputs: AgentOutputSin
 
 ## 输出事实与重试安全
 
-受限 outputs 仍校验 execution_id、interaction_id、action_id，以及回执的 execution_id、sequence_no。外部 emit 前先持久记录本行动存在尚未确认的投递；提交失败不调用 sink。有效 ACCEPTED/ALREADY_ACCEPTED 回执先保存已确认事实，再返回和检查令牌。output_started 只表示已确认接收，不把未知投递计成已确认。
+受限 outputs 的完整身份、连续序号及原 payload 由 Agent 持久分配，回执校验 execution_id、sequence_no。具体状态和恢复分流以[输出投递契约](output-delivery.md)为准。外部 emit 前先持久记录本行动存在尚未确认的投递；提交失败不调用 sink。有效 ACCEPTED/ALREADY_ACCEPTED 回执先保存已确认事实，再返回和检查令牌。output_started 只表示已确认接收，不把未知投递计成已确认。
 
 SinkRejectedError 表示此次明确没有新增接收；可清除此轮新产生的未知标记，但不能清除更早的已确认或未知投递。普通异常、超时、错误回执、投递中 task 取消均保留未知状态。处理器吞掉投递异常并返回“无效果失败”不能使未知输出变得可重试。未知输出不得因外部接收器没有确认而自动重投。多个 emit 的已确认及未知事实是累计关系，后一轮拒绝不能覆盖前一轮。
 
-已确认回执的本地写入失败时，本次报告保留已观察到的 output_started=True，但禁止继续行动；持久未知状态阻止以后重做。单项结算失败同样保留本次可信效果与接收事实，整体以 DEPENDENCY_UNAVAILABLE 表达无法安全结算；必要时将本项状态改为 FAILED 以符合报告状态关系，不能宣称完成已持久化。
+已确认回执的本地写入失败时，本次报告保留已观察到的 output_started=True，但禁止继续行动；最终可信结算可补存本次已知回执，补存仍失败时持久未知状态阻止以后重做。单项结算失败同样保留本次可信效果与接收事实，整体以 DEPENDENCY_UNAVAILABLE 表达无法安全结算；必要时将本项状态改为 FAILED 以符合报告状态关系，不能宣称完成已持久化。
 
 ## 并发、取消、存储失败
 
