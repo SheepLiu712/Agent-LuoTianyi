@@ -16,10 +16,12 @@ def test_system_runtime_shutdown_releases_capabilities_before_database():
 
     tts_module = object.__new__(TTSModule)
     tts_module.tts_server = SimpleNamespace(stop=lambda: calls.append("tts_server"))
-    speech = object.__new__(SpeechCapability)
+    speech = SpeechCapability({})
     speech.tts_module = {"luotianyi": tts_module}
     capability_manager = object.__new__(CapabilityManager)
     capability_manager.speech = speech
+    capability_manager._stop_lock = asyncio.Lock()
+    capability_manager._stopped = False
 
     runtime = SystemRuntime(
         user_interface=SimpleNamespace(),

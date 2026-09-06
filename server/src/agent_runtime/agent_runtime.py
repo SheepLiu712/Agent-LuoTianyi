@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, TYPE_CHECKING
 
+from src.agent import Agent
+from src.agent.handlers.action.router import ActionRouter
+from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
 from src.agent_runtime.agent_registry import AgentRegistry
@@ -26,7 +29,7 @@ if TYPE_CHECKING:
 
 
 class AgentRuntime:
-    """管理角色运行时，并直接提供聊天管线需要调用的 Agent 接口。"""
+    """装配角色门面及旧角色运行时，管理查找和关闭生命周期。"""
 
     def __init__(
         self,
@@ -35,7 +38,7 @@ class AgentRuntime:
         capability_manager: "CapabilityManager",
         database_manager: "DatabaseManager",
     ) -> None:
-        """初始化所有角色的意识、潜意识、预处理器和注册表。"""
+        """初始化启用角色的门面、旧意识、潜意识、预处理器和注册表。"""
         self.logger = get_logger(__name__)
         self.config = config
         self.llm_service = llm_service
@@ -68,6 +71,13 @@ class AgentRuntime:
             )
 
             self.default_character_id = self.character_registry.default_character_id
+            self._agents = {
+                character_id: Agent(
+                    character_id=character_id,
+                    stimulus_router=StimulusRouter(()), action_router=ActionRouter(()),
+                )
+                for character_id in self.character_runtimes
+            }
             set_agent_runtime(self)
         except BaseException:
             try:
@@ -90,10 +100,27 @@ class AgentRuntime:
             clear_agent_runtime(self)
 
     async def shutdown(self) -> None:
-        """Release AgentRuntime-owned resources exactly once after success."""
+        """停止接受并等待门面调用退出后关闭资源，成功后幂等。
+
+        在途等待超时抛 RuntimeError 并保留依赖，重试继续等待；调用方取消
+        关闭不取消业务工作。资源关闭任务同样保留所有权供后续关闭重试。
+        """
+        for agent in getattr(self, "_agents", {}).values():
+            agent._stop_accepting()
         async with self._shutdown_lock:
             if self._shutdown_complete:
                 return
+            inflight = tuple(
+                completion for agent in getattr(self, "_agents", {}).values()
+                for completion in agent._inflight
+            )
+            if inflight:
+                # asyncio.wait 超时或被取消均不取消业务调用的完成信号。
+                _, pending = await asyncio.wait(
+                    inflight, timeout=self.shutdown_timeout_seconds,
+                )
+                if pending:
+                    raise RuntimeError("Agent calls are still running")
             close = getattr(self.vector_store, "close", None)
             if close is not None:
                 shutdown_task = getattr(self, "_shutdown_task", None)
@@ -170,9 +197,19 @@ class AgentRuntime:
         for runtime in self.character_runtimes.values():
             runtime.ensure_dependencies()
 
-    def get_agent(self, character_id: str | None = None) -> LuoTianyiAgent:
-        """获取指定角色的意识 Agent，未指定时返回默认角色。"""
-        return self.agent_registry.get(character_id or self.default_character_id)
+    def get_agent(self, character_id: str | None = None) -> Agent:
+        """返回角色的缓存门面；仅 None 选择默认角色。
+
+        未知、禁用或空白 ID 抛出 KeyError，非字符串 ID 抛出 TypeError。
+        关闭后仍返回同一门面，但门面拒绝接受新工作。
+        """
+        if character_id is None:
+            character_id = self.default_character_id
+        if not isinstance(character_id, str):
+            raise TypeError("character_id must be str or None")
+        if not character_id.strip():
+            raise KeyError(character_id)
+        return self._agents[character_id]
 
     def get_character_runtime(self, character_id: str | None = None) -> CharacterRuntime:
         """获取指定角色的完整运行时，包括意识、潜意识和角色档案。"""
@@ -379,11 +416,13 @@ _agent_runtime: AgentRuntime | None = None
 
 
 def set_agent_runtime(runtime: AgentRuntime | None) -> None:
+    """设置旧调用链使用的全局运行时引用；None 表示清除引用。"""
     global _agent_runtime
     _agent_runtime = runtime
 
 
 def clear_agent_runtime(expected: AgentRuntime | None = None) -> bool:
+    """清除匹配的全局引用；被其他实例替换时返回 False，清除后返回 True。"""
     global _agent_runtime
     if expected is not None and _agent_runtime is not expected:
         return False
@@ -400,4 +439,4 @@ def get_agent_runtime() -> AgentRuntime:
 
 def get_default_agent() -> LuoTianyiAgent:
     """返回默认角色的意识 Agent。"""
-    return get_agent_runtime().get_agent()
+    return get_agent_runtime().get_character_runtime().conscious

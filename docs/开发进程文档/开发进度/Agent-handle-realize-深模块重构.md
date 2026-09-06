@@ -9,6 +9,23 @@
 
 ## 已完成事实
 
+### 2026-09-06 Agent 已注册路由、交付结算与在途关闭 GREEN
+
+- 交付行为：AgentRuntime 为每角色装配两个独立空路由器；内部注册严格拒绝重复和非法键，门面通过两个业务接口调用已注册处理器。处理器获得单次受限 sink，计划/输出身份与回执校验、已确认事实、部分失败、行动顺序、协作取消及并发交互隔离均已实现。AgentRuntime 停止接受后等待在途处理器及清理，超时保留依赖供重试。
+- 关闭修复：门面拥有处理器任务，调用方 Task.cancel 只向处理器转发一次，重复取消继续等待异步或同步清理，避免线程仍使用资源时提前关闭。没有修改共享 asyncio helper。
+- interface spec：agent/facade.md、agent/handler-routing.md、agent_runtime/README.md 已按实现定稿；公开接口和路由协议提供中文 docstring。日志保存关联身份、稳定错误码、异常类型及栈位置，省略原异常正文和局部变量。
+- commit：SPEC `4c031a4c`，RED `d870214c`，初步 GREEN `d21a2aeb`；重复调用方取消 RED `f5765cee` / GREEN `4f822f6d`；处理器实际开始前取消 RED `38322bd9`，最终 GREEN 为本记录所在提交。
+- 验证及结果：原 69 项新增 RED 及原 38 项入口/兼容测试通过；补充的重复取消 RED 在初步 GREEN 上以关闭错误返回成功失败，修复后原断言保持不变并通过。另补 handle/realize 两项调度期间取消测试，先以错误消费/完成行动失败；处理器实际启动前检查令牌后通过。`D:/Anaconda/envs/lty/python.exe -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 655 passed、2 skipped。相关产品代码与测试 Ruff、compileall、git diff --check 通过。`server/src` 的 get_agent 搜索仅剩方法定义，三处旧链路保持 get_character_runtime(...).conscious。
+- 审核与验证范围：作者自审完成，尚未进行独立 PR 审核；本地测试使用受控内部处理器与接收器。两项真实网络探测跳过，未验证真实模型、capability、客户端、设备或生产服务器。本版生产处理器注册为空。
+
+### 2026-09-06 Agent 空注册门面入口与旧查找迁移 GREEN
+
+- 交付行为：`src.agent.Agent` 提供两个异步业务方法及中文 docstring，校验角色、交互、修订、参数和预取消，空注册返回 UNSUPPORTED；AgentRuntime 初始化组装每角色门面、严格查找并在关闭时停止接受。TopicReplier、SystemRuntime.agent、get_default_agent 三处旧调用改从 get_character_runtime 取得旧意识对象。
+- interface spec：agent/facade.md 与 agent_runtime/README.md；SPEC `d5303223`，RED `0601a6d2`，GREEN 为本记录所在提交。
+- 验证及结果：原 38 项 RED 测试保持不变，GREEN 38 passed；与 domain/world 合并 582 passed、2 skipped。5 项旧初始化回滚测试通过。门面、AgentRuntime 及新增测试 Ruff、git diff --check 通过，作者自审完成。
+- 未验证范围：#63 已注册处理器路由、处理中取消、部分结算和在途关闭尚未实现；未验证真实模型、设备或生产链。额外解除暂缓运行的系统关闭测试因 CapabilityManager 测试替身缺少 _stop_lock 失败，该既有测试问题未修复。不将本轮入口 GREEN 记作 #63 完成。
+
+
 ### 2026-09-06 WorldClock 调度注册基线与关闭重试 GREEN
 
 - 交付行为：通过公开 WorldClock/WorldRuntime 入口冻结九类任务注册、角色展开、配置与启用条件、本地每日时间、立即执行、同名替换、失败隔离和关闭行为；将适用的旧 world 任务测试迁至 `server/tests/world` 并恢复默认执行。WorldClock 重试关闭时只等待已请求取消的任务，不重复取消同步线程的清理等待。

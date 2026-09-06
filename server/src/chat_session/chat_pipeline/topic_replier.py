@@ -277,7 +277,7 @@ class TopicReplier:
         runtime = getattr(self.system_runtime, "agent_runtime", None)
         if runtime is not None:
             try:
-                return runtime.get_agent(target_id)
+                return runtime.get_character_runtime(target_id).conscious
             except KeyError as e:
                 self.logger.warning(f"Unknown target character {target_id}, fallback to default agent: {e}")
         return self.system_runtime.agent

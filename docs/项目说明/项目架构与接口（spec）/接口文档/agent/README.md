@@ -1,10 +1,16 @@
 # agent 对外接口
 
+## 两接口门面
+
+[#63 门面契约](facade.md)记录 `Agent` 的两接口、入口校验、处理器调用、交付结算及关闭等待行为。`get_agent()` 返回新门面，下文记录通过 `get_character_runtime(...).conscious` 取得的旧 `LuoTianyiAgent` 兼容接口。
+
+路由的文件结构、内部注册和解析接口见 [Handler 路由 SPEC](handler-routing.md)。
+
 ## 模块职责
 
 `server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。
 
-当前入口是 `LuoTianyiAgent`，下面记录其公开接口。
+旧聊天使用 `LuoTianyiAgent`，下面记录其兼容接口。
 
 ## 对外接口
 
@@ -43,11 +49,11 @@
 
 ## 正常与异常行为
 
-- 正常调用顺序是先由 `agent_runtime.get_agent(character_id)` 取得 Agent，再调用上述接口。
+- 正常调用顺序是先由 `agent_runtime.get_character_runtime(character_id).conscious` 取得 Agent，再调用上述接口。
 - 规划、记忆、模型、唱歌和语音调用可能产生模型请求、数据库写入、文件读取或音频生成等副作用。
 - 依赖未注入、模型返回无法解析或能力执行失败时会传播异常。
 - 流式语音生成器可能在迭代过程中失败，不能只在创建生成器时判定成功。
 
 ## 使用示例
 
-stage 整理出完整话题后，通过 `agent_runtime.get_agent("luotianyi")` 取得 Agent，再调用话题规划与回复接口。
+stage 整理出完整话题后，通过 `agent_runtime.get_character_runtime("luotianyi").conscious` 取得 Agent，再调用话题规划与回复接口。
