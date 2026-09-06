@@ -73,7 +73,7 @@ async def test_storage_commit_failure_blocks_next_action_even_when_handler_swall
             failing = True
         if phase != "action_settlement":
             try:
-                await outputs.emit(output(action.action_id))
+                await outputs.emit(output())
             except Exception:
                 pass  # 验证门面不把协作者吞错当作存储已恢复。
         failing = True

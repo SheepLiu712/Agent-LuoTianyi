@@ -5,6 +5,8 @@ from dataclasses import replace
 import pytest
 
 import src.domain.agent as d
+from src.agent.outputs.drafts import MessageEndDraft
+from routing_support import full_output
 from plan_emission_support import draft
 from routing_support import (Sink, completed, output, plan_and_context, request, settlement)  # noqa: F401
 
@@ -70,7 +72,7 @@ async def test_sink_rejection_is_stable_and_never_accepted(routed_runtime, side,
         return settlement(req, emitted=(receipt.plan_id,))
 
     async def realize(action, ctx, outputs):
-        await outputs.emit(output(action.action_id))
+        await outputs.emit(output())
         return completed(action)
 
     runtime, _ = routed_runtime(handle, realize)
@@ -147,7 +149,7 @@ async def test_receipt_identity_mismatch_is_not_success(routed_runtime, side):
         return settlement(req, emitted=(receipt.plan_id,))
 
     async def realize(action, ctx, outputs):
-        await outputs.emit(output(action.action_id))
+        await outputs.emit(output())
         return completed(action)
 
     runtime, _ = routed_runtime(handle, realize)
@@ -170,12 +172,11 @@ async def test_successful_actions_preserve_plan_and_message_end_order(routed_run
         saved.append(outputs)
         if action.action_id == "a2":
             await outputs.emit(output())
-            await outputs.emit(d.MessageEndOutput(
-                interaction_id="i", execution_id="e", action_id="a2", sequence_no=1,
+            await outputs.emit(MessageEndDraft(
                 delivery=d.OutputDelivery.CONVERSATION, status=d.MessageEndStatus.COMPLETED, error_code=None,
             ))
         else:
-            await outputs.emit(output("a1", sequence_no=2))
+            await outputs.emit(output())
         return completed(action)
 
     runtime, _ = routed_runtime(realize=realize)
@@ -240,14 +241,14 @@ async def test_invalid_action_result_is_not_completed(routed_runtime, change):
 @pytest.mark.parametrize("change", [{"execution_id": "foreign"}, {"interaction_id": "foreign"}, {"action_id": "foreign"}])
 async def test_foreign_output_is_rejected_before_sink(routed_runtime, change):
     async def realize(action, ctx, outputs):
-        await outputs.emit(output(**change))
+        await outputs.emit(full_output(**change))
         return completed(action)
 
     runtime, _ = routed_runtime(realize=realize)
     plan, context = plan_and_context()
     sink = Sink()
     report = await runtime.get_agent().realize_action_plan(plan, context, sink)
-    assert report.error_code is d.ExecutionErrorCode.CONTRACT_MISMATCH
+    assert report.error_code is d.ExecutionErrorCode.INTERNAL_ERROR
     assert sink.values == []
 
 
@@ -378,7 +379,7 @@ async def test_cancellation_during_output_acceptance_preserves_output_fact(route
 
     async def realize(action, ctx, outputs):
         await outputs.emit(output())
-        await outputs.emit(output(sequence_no=1))
+        await outputs.emit(output())
         return completed(action)
 
     runtime, _ = routed_runtime(realize=realize)

@@ -7,7 +7,7 @@ from traceback import walk_tb
 from sqlalchemy.orm import Session
 
 import src.domain.agent as d
-from src.agent.execution import Execution, _HandlerNotStarted, _OutputIdentityError, _StorageError
+from src.agent.execution import Execution, _HandlerNotStarted, _StorageError
 from src.agent.ledgers.execution_ledger import ExecutionLedger
 from src.agent.handlers.action.router import ActionHandler, ActionRouter
 from src.agent.handlers.stimulus.router import StimulusHandler, StimulusRouter
@@ -260,6 +260,8 @@ class Agent:
 
         可信无效果且无已确认/未知输出的失败允许原执行安全继续；存储失败或
         未结算的开始状态阻止重做。相同执行的并发等待者共享拥有者报告。
+        输出由 Agent 绑定身份与连续序号，完整落库后串行投递；已有槽位只接受
+        原内容，未知接收禁止重发，未完成交付阻止后续行动。
         类型错误抛 TypeError；任务取消在可信结果持久结算和清理后传播。
         """
         if not isinstance(plan, d.ActionPlan) or not isinstance(execution_context, d.ExecutionContext):
@@ -311,8 +313,6 @@ class Agent:
                         else enum.CONTRACT_MISMATCH)
         if isinstance(error, TimeoutError):
             return enum.PROVIDER_TIMEOUT
-        if isinstance(error, _OutputIdentityError):
-            return enum.CONTRACT_MISMATCH
         return enum.INTERNAL_ERROR
 
     @staticmethod

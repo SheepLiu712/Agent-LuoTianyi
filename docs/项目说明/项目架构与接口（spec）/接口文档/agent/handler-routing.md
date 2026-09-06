@@ -1,6 +1,6 @@
 # Handler 路由契约
 
-状态：已实现；内部 plans 使用 [PlanEmitter](plan-emitter.md) 协议。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
+状态：路由已实现；内部 plans 使用 [PlanEmitter](plan-emitter.md)，outputs 使用 [OutputEmitter](output-delivery.md)。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
 
 ## 文件与所有权
 
@@ -24,6 +24,18 @@ server/src/
 两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产注册集合为空，装配由 AgentRuntime 初始化完成。
 
 该文件树采用 [#63](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/63) 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定，直接位于 `agent_runtime/agent_runtime.py`。文件树只列出路由涉及的文件；两个 `router.py` 中定义注册器和处理器协议，当前没有具体业务 Handler 文件。
+
+### 与 #63 原文的对应关系
+
+| 项目 | 本文采用的约定 |
+| --- | --- |
+| 两个路由模块的位置 | `agent/handlers/stimulus/router.py` 与 `agent/handlers/action/router.py` |
+| 角色装配位置 | `agent_runtime/agent_runtime.py` 初始化；采用会话确认的装配方式，替代工单原文的 `agent/factory.py` |
+| 刺激路由键 | `StimulusKind`；沿用当前门面契约及总体设计的行为族路由，替代工单原文的 `StimulusKind + InteractionKind` |
+| 行动路由键 | `ActionKind`；`START_THINKING` 的归属见下文 |
+| 处理器实现状态 | 两个 router 中有结构协议；生产注册集合为空，没有具体业务 Handler |
+
+这里的目录约定确定路由器的归属。结构协议描述调用形状，空注册集合表示没有可调用的业务实现；二者不代表聊天、触摸或 world 已迁移到新门面。
 
 注册、解析和调用分为三个步骤：AgentRuntime 构造每角色注册集合；Router 保存集合并按键返回对象；门面调用该对象的异步方法。Router 本身不执行聊天、触摸或 world 行为。处理器对象与路由键不是一一对应：一个行为族对象可以绑定多个不同 kind，因此注册不同刺激不要求分别建立文件或类。
 
@@ -132,13 +144,13 @@ class StimulusHandler(Protocol):
 
 class ActionHandler(Protocol):
     async def realize(self, action: Action, execution_context: ExecutionContext,
-                      outputs: AgentOutputSink) -> ActionResult: ...
+                      outputs: OutputEmitter) -> ActionResult: ...
 ```
 
-`plans` 是接收 ActionPlanDraft 的内部 PlanEmitter，按 [计划投递契约](plan-emitter.md) 分配身份并保存投递事实；`outputs` 保留 AgentOutputSink 协议。二者都是门面为本次调用创建的受限交付对象。它们不能取得其他调用的 sink，不把外部 sink 原对象传给处理器。处理器正常返回后，交付对象失效；保留它再调用不会产生输出。处理器不能启动脱离调用生命周期的工作；拥有的异步任务或同步线程在返回或传播任务取消前必须完成清理。
+`plans` 是接收 ActionPlanDraft 的内部 PlanEmitter，按 [计划投递契约](plan-emitter.md) 分配身份并保存投递事实；`outputs` 是接收四类 OutputDraft 的私有 OutputEmitter，由 Agent 绑定身份并分配连续 sequence。二者都是门面为本次调用创建的受限交付对象。它们不能取得其他调用的 sink，不把外部 sink 原对象传给处理器。处理器正常返回后，交付对象失效；保留它再调用不会产生输出。处理器不能启动脱离调用生命周期的工作；拥有的异步任务或同步线程在返回或传播任务取消前必须完成清理。
 
 - plans 接收完整 draft，由门面固定角色、请求、交互与修订，校验 source_stimulus_ids 只能来自触发刺激及 pending；根据 ordinal 保存计划，再进行投递。报告只记录已确认接收的计划 ID，恢复及失败事实以 PlanEmitter 契约为准。
-- outputs 校验输出的 execution_id、interaction_id、action_id 与当前行动一致；成功回执必须是 OutputReceipt 且 execution_id、sequence_no 匹配。外部投递前持久登记未知事实，有效回执后记录累计 output_started=True；存储失败阻止后续行动，逐行动安全规则见 Execution Ledger。回执不匹配属于 INTERNAL_ERROR；输入输出身份不匹配属于 CONTRACT_MISMATCH。
+- outputs 构造当前行动绑定的领域输出；成功回执必须是 OutputReceipt 且 execution_id、sequence_no 匹配。有效回执后记录累计 output_started=True；存储失败阻止后续行动，恢复规则见输出投递契约。回执不匹配属于 INTERNAL_ERROR 且接收未知；同一持久槽位不同内容属于 CONTRACT_MISMATCH，均不能跳过后继续发送。
 - 两个交付对象在调用外部 sink 前检查取消，sink 等待返回后先保存已确认接收事实，再检查取消。取消后不开始下一次交付。每次调用结束后释放 sink 引用。
 - handle 正常返回的 HandlingReport 必须匹配请求、触发刺激、修订，considered 必须是 pending 的有序子集，emitted_plan_ids 必须等于真实回执记录。不合法的处理器结果转 INTERNAL_ERROR，pending 全部 retained，保留真实 emitted_plan_ids，不接受伪造消费。合法报告的消费和保留事实原样结算；令牌已取消时改为 CANCELLED/error_code=None，保留合法结算事实。
 - 处理器抛异常时，尚无已返回的消费事实，pending 全部 retained；已确认接收的计划仍写入报告。失败处理器也可正常返回合法的 FAILED 报告来表达已确认的部分结算。

@@ -9,6 +9,22 @@
 
 ## 已完成事实
 
+### 2026-09-06 确认输出后取消的可信结果 GREEN
+
+- 交付行为：输出确认后协作取消不再覆盖处理器可信ActionResult；已完成项保留完成及效果，整体取消并只允许后续未开始行动继续；可信失败保留实际失败原因。UNKNOWN、未确认输出、持久故障和内容冲突仍阻断后续工作。
+- SPEC与commit：既有execution-ledger与handler-routing取消结算契约已满足；PR #119独立审查新增RED `c2897f54`（2项）、`57074619`（1项），均已作者自审。本记录所在提交为最小GREEN，三项RED未改。
+- 验证及结果：三个输出文件37 passed；server相关agent、agent_runtime、domain、world、system回归833 passed、2 skipped；Ruff、compileall、diff检查通过。首轮旧关闭用例20ms超时，原样定向复跑及完整复验通过。
+- 未验证范围：两个world真实网络探测跳过；没有真实业务Handler、生产库或外部接收器验收。
+
+
+### 2026-09-06 输出生产者与持久序列 GREEN
+
+- 交付行为：处理器使用四种私有内容草稿，Agent绑定输出身份、从零跨行动连续编号并持久完整payload，串行等待有效回执；安全失败重入复用原槽，内容冲突及未知接收阻止后续输出与行动，已确认输出不重发。版本二序列元数据验证完整性，版本一旧库按真实输出历史保守兼容；输出错误记录不含内容和源码的安全日志。
+- interface spec：[输出身份与持久序列](../../项目说明/项目架构与接口（spec）/接口文档/agent/output-delivery.md)，同步execution-ledger、facade、handler-routing及项目架构为实现事实；公开接口与私有输出协议具中文docstring。
+- commit与SPEC：SPEC `11ccc9bf` / `d4d9ecc5`，RED `9bb7e059`；候选整理发现吞取消后重发UNKNOWN，追加RED `57d26032`并自审，实际失败于两次sequence=0。本记录所在 `codex/agent-output-delivery` 提交为GREEN。
+- 验证及结果：server中使用 `D:/Anaconda/envs/lty/python.exe -X utf8`，相关agent、agent_runtime、domain、world、system测试 **829 passed、2 skipped**，其中34项输出用例。Ruff、compileall、Agent SPEC UTF-8/围栏/相对链接及diff检查通过；旧SQL夹具未修改。
+- 未验证范围：两个world真实网络探测跳过；没有真实业务Handler、外部接收器、客户端播放或生产库验收；本地验证不表示完整#65或业务Say已经实现。
+
 ### 2026-09-06 PlanEmitter 日志源码隔离 GREEN
 
 - 交付行为：投递失败日志从 traceback 提取文件、行号和函数名，保留角色、request、interaction、plan、ordinal、稳定错误码与异常类型；日志不传递原 traceback，不格式化源码、局部变量或原异常链。处理器捕获投递异常仍留下诊断记录，公开失败报告与消费事实保持正确。

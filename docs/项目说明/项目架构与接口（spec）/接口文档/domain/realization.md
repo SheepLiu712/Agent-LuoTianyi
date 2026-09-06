@@ -1,6 +1,6 @@
 # 计划与 realization 领域契约
 
-> 状态：2026-09-06 领域类型、构造校验及两个 Protocol 声明已实现；接收器、Agent 和客户端运行链尚未接入。
+> 状态：2026-09-06 领域类型、构造校验及两个 Protocol 声明已实现；Agent 门面、请求账本和逐行动执行账本见 [Agent 接口](../agent/facade.md)，输出生产与持久序列增量见 [输出投递目标契约](../agent/output-delivery.md)。
 >
 > 对应 [issue #61](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/61)。字段和构造规则描述当前实现；stage 消费、执行、投递和客户端映射是运行时接入契约，不表示本轮已实现这些行为。
 >
@@ -12,7 +12,7 @@
 值对象只在内存中验证字段和内部关系。跨调用的身份一致性、重复提交、当前修订和效果提交由对应运行时边界验证。
 
 协作位置沿用两个业务入口：`await agent.handle_stimulus(request, plan_sink) -> HandlingReport` 和 `await agent.realize_action_plan(plan, execution_context, output_sink) -> ExecutionReport`。
-两个 sink 是调用方传入的 Protocol；本轮定义其签名与接收契约，不实现 Agent 门面或接收器。
+两个 sink 是调用方传入的 Protocol；本文件定义其签名与接收契约，Agent 运行时行为由 Agent 接口文档说明。
 
 本轮公开类型范围：
 
@@ -185,7 +185,7 @@ AudioErrorCode 为 `EMPTY_AUDIO`、`GENERATION_FAILED`，值同成员名。
 FAILED 必须有错误码，其他状态为 None。没有产生任何音频也可以发送 FAILED 结束事件，保留已有显示文本。
 此处错误码描述当前音频生成失败，业务行动的完整失败原因由 ExecutionReport 表达。
 
-生产者按发送顺序从零分配 sequence_no，文字、音频及表情共用这一序列。发送方逐个 await emit；本版接收器按正常接收顺序处理，不要求根据序号重排、补包或建立严格重投去重机制。
+Agent 生产者按发送顺序从零分配 sequence_no，文字、音频及表情跨 Action 共用同一 execution 序列。内部 Handler 只提供业务内容，身份和安全恢复由 [Agent 输出契约](../agent/output-delivery.md) 规定。发送方逐个 await emit；本版接收器按正常接收顺序处理，不要求根据序号重排、补包或建立严格重投去重机制。
 每个 Say/Sing 对应一个展示消息、一条可选音频流；消息身份可由稳定 action_id 对应，持久化与 Adapter 必须使用同一映射。
 TextFinalOutput 只表示文字定稿。每个已开始投递的 Say/Sing 消息在通道可用时以一个 MessageEndOutput 结束，包括纯文字、正常音频、空音频和生成失败的消息。
 MessageEndOutput 表示该消息不会再追加文字或音频，Adapter 将其转换为既有 `is_final_package=True`；FAILED 映射到 `audio_error=True` 及对应错误码：EMPTY_AUDIO 对应 TTS_EMPTY，GENERATION_FAILED 对应 TTS_STREAM_ERROR。
@@ -236,7 +236,7 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 6. output_started 是调用方记录的“该 execution 是否曾有输出被接收”；action_results 未携带输出列表，不能由其状态推导。retryable 表示原 execution 是否可安全继续，不表示可以换 ID 从头执行。
 
 构造器只验证以上内部关系。action_results 是否完整对应原 plan、效果是否真实提交、重试是否重复输出，需要输入计划及 ledger/sink 验证。
-同一 execution 重试复用原行动身份，已完成行动报告 ALREADY_COMPLETED；已接收的输出保持身份及内容，不重新生成后复用同一序号。
+同一 execution 重试复用原行动身份，已完成行动报告 ALREADY_COMPLETED；已接收的输出保持身份及内容，不重新生成后复用同一序号。retryable 表示行动可安全继续，已有副作用的行动不从头重做；UNKNOWN 接收不作为可安全重投的依据。
 
 ## 10. 当前客户端行为的覆盖边界
 
