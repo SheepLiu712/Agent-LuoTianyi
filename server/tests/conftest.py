@@ -8,6 +8,7 @@ _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "domain" / "test_stimulus_text_message_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_stimulus_registered_types_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_stimulus_value_types_contract.py").resolve(),
+    (Path(__file__).parent / "domain" / "test_handle_input_contract.py").resolve(),
 }
 _DEFERRED_TEST_REASON = "现有 Server 测试暂由项目负责人统一处理"
 
