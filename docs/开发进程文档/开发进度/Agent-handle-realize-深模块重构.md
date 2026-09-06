@@ -9,6 +9,13 @@
 
 ## 已完成事实
 
+### 2026-09-06 PlanEmitter 白名单错误分类 GREEN
+
+- 交付行为：在数据库错误包装之前校验完整计划的显式类型白名单，自定义 Action 或嵌套 Tone 子类返回 INTERNAL_ERROR、无外部投递，不误报数据库不可用。接口文档精确区分累计未知接收事实与最后一次明确拒绝。
+- commit 与 SPEC：现有 PlanEmitter 契约已满足；初步 GREEN `dce6f839` 自审发现错误分类，RED `dbd19ecd` 两项公开 handle 测试均失败于错误码，修复为本记录所在 GREEN 提交。
+- 验证及结果：完整相关 pytest 为 **755 passed、2 skipped**，原42项新RED及两项补充RED全部通过；相关 Ruff、compileall、diff 检查以及四份 Agent 接口文档 UTF-8、围栏和本地链接校验通过。作者自审核对恢复权、取消清理、真实确认与旧测试迁移，没有剩余阻断发现。
+- 未验证范围：沿用上一 PlanEmitter 完成记录的本地临时 SQLite 与受控协作者边界；未进行独立 PR 审核或真实外部依赖验收。
+
 ### 2026-09-06 PlanEmitter 持久投递与恢复 GREEN
 
 - 交付行为：Handler 提交内部 ActionPlanDraft，由 PlanEmitter 分配稳定身份和连续 ordinal；完整计划落库后交付，记录有效回执、未知结果与明确拒绝。相同请求重投读取终态或原子领取已存计划恢复权，不重跑认知；同实例并发共享结果，恢复取消等待受控 sink 清理后释放恢复权。ack 写入失败时，最终结算能原子补齐真实确认，避免再次投递已知接收的计划。

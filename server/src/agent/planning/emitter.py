@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 import src.domain.agent as d
 from src.agent.ledgers.plan_outbox import PlanSlot
 from src.utils.logger import get_logger
-from .identity import plan_id
+from .identity import encode_plan, plan_id
 
 
 class _DeliveryCancelled(Exception):
@@ -88,6 +88,7 @@ class PlanEmitter:
                     basis_interaction_revision=self._request.interaction.interaction_revision,
                     source_stimulus_ids=draft.source_stimulus_ids, actions=draft.actions)
                 self._validate(plan)
+                encode_plan(plan)
                 if ordinal is None:
                     if any(slot.state != "accepted" for slot in self._slots):
                         raise ValueError("unresolved plan blocks next slot")
