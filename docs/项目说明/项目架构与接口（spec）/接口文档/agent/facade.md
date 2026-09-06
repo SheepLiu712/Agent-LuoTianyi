@@ -68,7 +68,7 @@ async def realize_action_plan(
 
 ## 本版装配行为
 
-当前实现位于 `agent/facade.py`，由 AgentRuntime 组装；后续路由模块按 [Handler 路由契约](handler-routing.md) 放置于 `handlers/stimulus/router.py` 和 `handlers/action/router.py`。内部注册和接受状态属于实现细节。本版生产装配的刺激、行动处理器集合为空，因此合法且未取消的请求返回对应 UNSUPPORTED 错误。领域类型可以构造不等于该行为已经获得运行时支持。
+当前实现位于 `agent/facade.py`，由 AgentRuntime 组装；路由模块按 [Handler 路由契约](handler-routing.md) 放置于 `handlers/stimulus/router.py` 和 `handlers/action/router.py`。内部调用协议、受限交付与在途工作规则见同一文档。内部注册和接受状态属于实现细节。本版生产装配的刺激、行动处理器集合为空，因此合法且未取消的请求返回对应 UNSUPPORTED 错误。领域类型可以构造不等于该行为已经获得运行时支持。
 
 ## 验证入口
 
