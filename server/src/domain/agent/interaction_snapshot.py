@@ -41,12 +41,12 @@ class ConnectionState(str, Enum):
 
 
 class AgentOutputKind(str, Enum):
-    """交互支持的输出种类：增量或完整文本、音频块或结束信号、表情及动作。"""
+    """交互支持的输出种类：增量或完整文本、音频块、消息结束、表情及动作。"""
 
     TEXT_DELTA = "text_delta"
     TEXT_FINAL = "text_final"
     AUDIO_CHUNK = "audio_chunk"
-    AUDIO_END = "audio_end"
+    MESSAGE_END = "message_end"
     EXPRESSION = "expression"
     MOTION = "motion"
 

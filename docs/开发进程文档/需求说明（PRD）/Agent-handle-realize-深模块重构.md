@@ -1,5 +1,7 @@
 # Agent `handle_stimulus / realize_action_plan` 深模块重构 PRD
 
+> 2026-09-06 本轮计划与执行契约以 [realization SPEC](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md) 为准：StartThinking 计划由 stage 消费，其余业务行动交给 realize；MessageEndOutput 表达消息结束；本版沿用正常顺序执行与终止包机制。下文历史计划、输出和严格投递描述不扩大该版本接口范围。
+
 > 状态：待评审
 >
 > 日期：2026-09-03
