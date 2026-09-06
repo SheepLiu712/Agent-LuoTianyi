@@ -107,7 +107,7 @@ def _readonly(obj, field, replacement):
     ("ConnectionState", {"CONNECTED": "connected", "DISCONNECTED": "disconnected"}),
     ("AgentOutputKind", {
         "TEXT_DELTA": "text_delta", "TEXT_FINAL": "text_final", "AUDIO_CHUNK": "audio_chunk",
-        "AUDIO_END": "audio_end", "EXPRESSION": "expression", "MOTION": "motion",
+        "MESSAGE_END": "message_end", "EXPRESSION": "expression", "MOTION": "motion",
     }),
     ("CancellationReason", {"SUPERSEDED": "superseded", "NO_LONGER_NEEDED": "no_longer_needed"}),
     ("HandleInputErrorCode", {
@@ -278,7 +278,7 @@ def test_legacy_mapping_stimulus_is_rejected_in_snapshot_and_request():
 
 def test_disconnected_chat_keeps_supported_outputs_and_an_expired_deadline():
     """通道可达性、支持类型和截止时间互不替代，断线不触发构造期取消。"""
-    outputs = frozenset({_public("AgentOutputKind").AUDIO_CHUNK, _public("AgentOutputKind").AUDIO_END})
+    outputs = frozenset({_public("AgentOutputKind").AUDIO_CHUNK, _public("AgentOutputKind").MESSAGE_END})
     deadline = NOW - timedelta(seconds=1)
     snapshot = _snapshot(
         supported_outputs=outputs, connection_state=_public("ConnectionState").DISCONNECTED,
