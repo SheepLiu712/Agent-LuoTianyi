@@ -232,3 +232,53 @@ handle 不消费 pending，realize 所有行动仍 NOT_STARTED。
 
 最终完整命令 `D:/Anaconda/envs/lty/python.exe -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`
 为 **655 passed、2 skipped**（agent/agent_runtime 共 110 项）。相关 Ruff 与 compileall 通过；测试没有改变原 RED 期望。
+
+
+## Execution Ledger 逐行动恢复 RED（2026-09-06）
+
+SPEC 为 `25458406`，取消清理可信返回补充为 `15f7b06c`；两个 commit 均已作者自审。本片保留现有 ActionHandler 输出协议，从公开 `realize_action_plan` 和 `AgentRuntime.shutdown` 验证执行账本，不增加真实 Handler。
+
+新增 38 项展开用例：
+
+- `test_execution_idempotency.py`：30 项。覆盖同实例/重建后完成重投、完整计划字段冲突、角色和 execution 作用域、完成前缀带输出和效果后的安全失败/取消继续、恢复预检保留历史、终态优先级、不安全效果/已确认及未知输出、普通异常未知效果、并发加入、跨 Runtime 争用、等待者/拥有者取消、取消清理可信返回及关闭等待。
+- `test_execution_storage_recovery.py`：8 项。使用真实 SQLite 检查读取不可用的安全日志、行动结算/发送前/确认后提交失败（处理器吞错也不允许继续）、损坏版本/JSON；由新 Python 进程产生完成结果或在独立外部效果后硬退出，再通过新 Agent 公开重投检查不重复外部效果。
+- 原 `test_handler_dispatch.py` 的 realize BACKPRESSURE_TIMEOUT 期望改为 retryable=False；只有 sink 的拒绝不足以证明异常退出的 Handler 没有其他效果。handle 的原有 retryable 期望不变。
+
+工作目录 `server`，运行 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：**37 failed、756 passed、2 skipped**。新增 38 项为 **36 failed、2 passed**，另 1 项为旧契约期望修订产生的 RED。两项首次通过为不同执行/角色独立及等待者取消隔离回归，不伪造失败。两项跳过仍为 world 真实网络探测。
+
+失败均来自公开行为缺失：重复执行而非 ALREADY_COMPLETED、内容冲突未拒绝、错误 retryable、历史前缀丢失、重复 sink 投递、忽略存储故障及进程恢复；拥有者取消后等待者继续挂起产生的有界等待超时同样是目标缺失。没有导入、语法或环境错误。
+
+数据库结构只用于外部故障注入，不断言 SQL 查询步骤；初始无执行表时不会产生反射失败，由公开重投错误行为证明 RED。后台任务均显式释放并回收，新进程有超时且关闭引擎。Ruff 与 `git diff --check` 通过。没有产品代码、完成进度或 GREEN 记录。
+
+
+## Execution Ledger 逐行动恢复 GREEN（2026-09-06）
+
+SPEC `25458406` / `15f7b06c` 与 RED `c7694619` 保持；38 项新增测试未改动。
+Agent 在同一数据库登记执行完整计划身份、运行占用、每项开始/可信结算和累计输出事实，
+同实例合并在途调用，重复执行跳过已完成前缀，只有可信且无效果/未知输出的未完成行动安全继续。
+取消清理正常返回的结果在受控 worker 内持久化；存储错误即使被处理器吞掉也阻止继续。
+日志去除 traceback 源码行，只保留类型和栈位置，避免异常字面量泄漏。
+
+在 server 运行 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：
+**793 passed、2 skipped**；包含38项新增执行用例，两个跳过仍为 world 真实网络探测。
+Agent、AgentRuntime 和相关测试 Ruff、Agent compileall、git diff --check，以及 Agent SPEC 的 UTF-8、围栏和相对链接校验通过。
+独立 Python 进程完成/硬退出恢复和真实临时 SQLite 故障已验证；真实业务 Handler、外部服务、生产数据库未验证。
+
+
+## Execution Ledger 拥有者取消后等待者事实 RED（2026-09-06）
+
+初步 GREEN `94c295a3` 作者自审发现等待者读取的是加入前快照；拥有者取消时只发布空结果，
+会丢弃加入后发生的完成前缀及已确认输出。两个公开入口回归分别验证：等待期间首行动完成后
+拥有者在第二行动被取消，等待者保留完成/输出/效果；取消清理可信返回的结算提交失败时，
+等待者保留已知 effect_ref，但当前行动必须 FAILED / DEPENDENCY_UNAVAILABLE，不能冒充已持久完成。
+对初步 GREEN 执行 `-m pytest tests/agent/test_execution_idempotency.py tests/agent/test_execution_storage_recovery.py -k "cancelled_owner_waiter or cancel_cleanup_settlement_failure" -q --tb=short`
+为 **2 failed、38 deselected**；失败分别为丢失 output_started，以及当前项错误 NOT_STARTED。
+SPEC 的累计事实、取消可信返回与结算失败条目已覆盖，无新增公开接口。测试仅经公开 realize 和 SQL 提交故障边界观察。
+
+
+## Execution Ledger 取消等待者事实 GREEN（2026-09-06）
+
+保持 RED `f0fdf077` 不变。拥有者清理后给等待者发布最新执行事实；结算提交失败的当前项
+保留已知效果并标为 FAILED / DEPENDENCY_UNAVAILABLE，只有持久完成前缀转换为 ALREADY_COMPLETED。
+取消清理中的存储错误日志使用 DEPENDENCY_UNAVAILABLE。
+40 项执行用例全部通过；完整相关回归为 **795 passed、2 skipped**，相关 Ruff、compileall、diff 检查通过。

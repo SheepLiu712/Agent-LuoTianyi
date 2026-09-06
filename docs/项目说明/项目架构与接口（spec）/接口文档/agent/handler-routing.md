@@ -23,7 +23,9 @@ server/src/
 
 两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产注册集合为空，装配由 AgentRuntime 初始化完成。
 
-该文件树采用 #63 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定。文件树列出路由涉及的文件。
+该文件树采用 [#63](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/63) 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定，直接位于 `agent_runtime/agent_runtime.py`。文件树只列出路由涉及的文件；两个 `router.py` 中定义注册器和处理器协议，当前没有具体业务 Handler 文件。
+
+注册、解析和调用分为三个步骤：AgentRuntime 构造每角色注册集合；Router 保存集合并按键返回对象；门面调用该对象的异步方法。Router 本身不执行聊天、触摸或 world 行为。处理器对象与路由键不是一一对应：一个行为族对象可以绑定多个不同 kind，因此注册不同刺激不要求分别建立文件或类。
 
 Router 是 Agent 内部模块。AgentRuntime 仅在显式装配位置直接导入两个 router 类型；stage、world、Adapter 及其他业务调用方不导入它们。Agent 对外不增加注册、查询处理器或第三个业务方法。
 
@@ -94,7 +96,7 @@ realize_action_plan(plan, execution_context, output_sink)
   -> 门面核对并返回 ExecutionReport
 ```
 
-上述流程说明进入路由后的选择和调用关系。门面各项入口检查及提前返回的完整顺序以 [门面契约](facade.md) 为准。
+上述流程说明进入路由后的选择和调用关系；执行重投先按 [Execution Ledger](execution-ledger.md) 读取历史，已完成或不可安全继续的终态直接返回。门面各项入口检查及提前返回的完整顺序以 [门面契约](facade.md) 为准。
 
 | 协作者 | 负责的事实 |
 | --- | --- |
@@ -113,13 +115,13 @@ AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；�
 | 入口 | 查询方式 | 未注册的公开结果 |
 | --- | --- | --- |
 | handle_stimulus | 用触发刺激 kind 查询 StimulusRouter | FAILED / UNSUPPORTED_STIMULUS，pending 全部 retained，consumed 和 emitted_plan_ids 为空 |
-| realize_action_plan | 按计划行动顺序逐项查询 ActionRouter | 任一项未注册则整份计划 FAILED / UNSUPPORTED_ACTION，所有行动 NOT_STARTED，不产生输出或效果 |
+| realize_action_plan | 按计划行动顺序逐项查询 ActionRouter | 新工作中任一项未注册则 FAILED / UNSUPPORTED_ACTION；已有完成前缀保留，其余 NOT_STARTED，不产生新的输出或效果 |
 
 门面只将 resolve 的“合法枚举未注册”KeyError 转成上述结果；不能用包住整个处理流程的 KeyError 捕获来误吞业务错误。路由器的构造异常属于启动错误，不包装为 HandlingReport 或 ExecutionReport。
 
 路由器只解析；门面负责调用解析结果并结算。Agent 构造接受仅供装配使用的关键字参数 `stimulus_router`、`action_router`；省略时为空表。AgentRuntime 显式传入每角色独立的空路由器。
 
-## 内部处理器调用与单次调用事实
+## 内部处理器调用与结算事实
 
 内部处理器采用以下异步结构协议；协议分别放在两个 router 模块，不从包根导出：
 
@@ -136,7 +138,7 @@ class ActionHandler(Protocol):
 `plans` 是接收 ActionPlanDraft 的内部 PlanEmitter，按 [计划投递契约](plan-emitter.md) 分配身份并保存投递事实；`outputs` 保留 AgentOutputSink 协议。二者都是门面为本次调用创建的受限交付对象。它们不能取得其他调用的 sink，不把外部 sink 原对象传给处理器。处理器正常返回后，交付对象失效；保留它再调用不会产生输出。处理器不能启动脱离调用生命周期的工作；拥有的异步任务或同步线程在返回或传播任务取消前必须完成清理。
 
 - plans 接收完整 draft，由门面固定角色、请求、交互与修订，校验 source_stimulus_ids 只能来自触发刺激及 pending；根据 ordinal 保存计划，再进行投递。报告只记录已确认接收的计划 ID，恢复及失败事实以 PlanEmitter 契约为准。
-- outputs 校验输出的 execution_id、interaction_id、action_id 与当前行动一致；成功回执必须是 OutputReceipt 且 execution_id、sequence_no 匹配。首次有效回执后 output_started=True。回执不匹配属于 INTERNAL_ERROR；输入输出身份不匹配属于 CONTRACT_MISMATCH。
+- outputs 校验输出的 execution_id、interaction_id、action_id 与当前行动一致；成功回执必须是 OutputReceipt 且 execution_id、sequence_no 匹配。外部投递前持久登记未知事实，有效回执后记录累计 output_started=True；存储失败阻止后续行动，逐行动安全规则见 Execution Ledger。回执不匹配属于 INTERNAL_ERROR；输入输出身份不匹配属于 CONTRACT_MISMATCH。
 - 两个交付对象在调用外部 sink 前检查取消，sink 等待返回后先保存已确认接收事实，再检查取消。取消后不开始下一次交付。每次调用结束后释放 sink 引用。
 - handle 正常返回的 HandlingReport 必须匹配请求、触发刺激、修订，considered 必须是 pending 的有序子集，emitted_plan_ids 必须等于真实回执记录。不合法的处理器结果转 INTERNAL_ERROR，pending 全部 retained，保留真实 emitted_plan_ids，不接受伪造消费。合法报告的消费和保留事实原样结算；令牌已取消时改为 CANCELLED/error_code=None，保留合法结算事实。
 - 处理器抛异常时，尚无已返回的消费事实，pending 全部 retained；已确认接收的计划仍写入报告。失败处理器也可正常返回合法的 FAILED 报告来表达已确认的部分结算。
@@ -146,7 +148,7 @@ class ActionHandler(Protocol):
 
 ## 在途调用与关闭
 
-Agent 在通过入口检查、开始调用处理器前登记该调用，直到处理器及其清理退出才解除登记。AgentRuntime.shutdown 首先禁止所有角色接受工作，然后以 shutdown_timeout_seconds 为整轮在途等待的上限等待已登记调用；不主动取消调用方令牌或任务。超时抛 RuntimeError，不关闭向量库、不清除运行时引用；后续 shutdown 继续等待。全部调用退出后才能进入既有资源关闭流程。关闭调用本身取消也不清除仍运行的业务工作。门面拥有处理器任务，调用方任务取消仅向处理器转发一次；调用方重复取消时继续等待处理器清理退出，然后传播原取消。处理器任务实际开始时再次检查令牌；调度期间已取消则不调用业务处理器，handle 保留全部 pending，realize 当前及后续行动均为 NOT_STARTED。不同 interaction 的处理可同时进行，计划回执、输出、取消和报告不能互相污染。
+Agent 在通过入口检查、开始调用处理器前登记该调用，账本调用和并发等待者也计入在途；直到处理器清理和持久结算退出才解除登记。AgentRuntime.shutdown 首先禁止所有角色接受工作，然后以 shutdown_timeout_seconds 为整轮在途等待的上限等待已登记调用；不主动取消调用方令牌或任务。超时抛 RuntimeError，不关闭向量库、不清除运行时引用；后续 shutdown 继续等待。全部调用退出后才能进入既有资源关闭流程。关闭调用本身取消也不清除仍运行的业务工作。门面拥有处理器任务，调用方任务取消仅向处理器转发一次；调用方重复取消时继续等待处理器清理退出，然后传播原取消；执行处理器在取消清理中正常返回可信 ActionResult 时，先持久结算该结果。处理器任务实际开始时再次检查令牌；调度期间已取消则不调用业务处理器，handle 保留全部 pending，realize 当前及后续行动均为 NOT_STARTED。不同 interaction 的处理可同时进行，计划回执、输出、取消和报告不能互相污染。
 
 ## 测试入口与验收
 
@@ -163,6 +165,6 @@ Agent 在通过入口检查、开始调用处理器前登记该调用，直到�
 | 修改构造所用列表 | 原 router 解析结果不变 |
 | 两个不同 router 注册相同 kind | 各自返回自己的对象，无全局串扰 |
 | 调用 resolve | 无处理器调用、副作用或异步任务 |
-| 无真实 Handler 的生产装配 | 保持既有门面 38 项测试及旧链 get_character_runtime 兼容行为 |
+| 无真实 Handler 的生产装配 | 合法且未取消的首次调用返回对应 UNSUPPORTED 报告；旧链继续通过 get_character_runtime 取得兼容对象 |
 
 契约测试覆盖成功处理器调用、错误与回执校验、等待中取消、并发交互隔离、在途关闭超时重试。测试证据见 `server/tests/agent/README.md`。

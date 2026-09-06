@@ -9,6 +9,22 @@
 
 ## 已完成事实
 
+### 2026-09-06 Execution Ledger 取消等待者事实 GREEN
+
+- 交付行为：拥有者任务取消并完成清理后，给并发等待者发布最新完成前缀、效果与已确认输出，避免使用加入前快照；清理中返回可信结果但结算失败时保留当前效果，以 FAILED / DEPENDENCY_UNAVAILABLE 表达未完成持久化，不冒充 ALREADY_COMPLETED。相关存储错误日志使用稳定依赖错误码。
+- SPEC 与 commit：Execution Ledger 既有取消、累计事实和结算失败契约已满足。初步 GREEN `94c295a3` 作者自审复现问题，RED `f0fdf077` 两项均失败；本记录所在提交为修复 GREEN，原 RED 断言未变。
+- 验证及结果：40 项执行测试全部通过；完整相关命令 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **795 passed、2 skipped**。相关 Ruff、compileall、diff 检查通过。
+- 未验证范围：沿用执行账本切片的真实临时 SQLite 与受控协作者边界，没有新增真实外部能力、生产数据库或客户端验收；两个 world 网络探测仍跳过。
+
+### 2026-09-06 Execution Ledger 逐行动持久恢复 GREEN
+
+- 交付行为：公开 realize 校验完整计划身份并用角色/execution 复合主键仲裁；持久标记行动开始、可信结果及独立累计的未知/已确认输出。重投跳过已完成前缀，仅继续可信无效果且无已确认或未知输出的未完成行动；完成前缀带有输出和效果仍可继续后续安全行动。并发同执行加入同一拥有者，任务取消清理正常返回的可信结果在传播取消前持久结算。
+- interface spec：[Execution Ledger](../../项目说明/项目架构与接口（spec）/接口文档/agent/execution-ledger.md)、facade、handler-routing 和架构索引已定稿为实现事实；公开 realize 文档说明持久身份、安全继续和取消语义。内部协议保留 AgentOutputSink，生产路由为空。
+- commit：SPEC `25458406`、修订 `15f7b06c`，RED `c7694619`；GREEN 为 codex/agent-execution-ledger 分支上本记录所在提交。38 项新增测试未改动；日志按 RED 要求去除含字面量的源码行，保留异常类型和栈位置。
+- 验证及结果：server 下 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **793 passed、2 skipped**。相关 Ruff、Agent compileall、git diff --check、Agent SPEC UTF-8/围栏/本地链接检查通过。真实临时 SQLite 覆盖新 Python 进程完成和硬退出恢复、跨 Runtime 争用、数据库故障与损坏行拒绝。
+- 未验证范围：两个 world 真实网络探测跳过；没有真实业务 Handler、外部能力、生产数据库或客户端验收。此记录只说明执行账本与逐行动安全继续，不表示 #65 全部完成或已进行独立 PR 审核。
+
+
 ### 2026-09-06 PlanEmitter 白名单错误分类 GREEN
 
 - 交付行为：在数据库错误包装之前校验完整计划的显式类型白名单，自定义 Action 或嵌套 Tone 子类返回 INTERNAL_ERROR、无外部投递，不误报数据库不可用。接口文档精确区分累计未知接收事实与最后一次明确拒绝。

@@ -48,20 +48,20 @@ async def realize_action_plan(
 
 ## realize 入口
 
-1. 顶层参数类型错误抛出 `TypeError`；领域构造异常保持原约定。
-2. plan.target_character_id 必须等于绑定角色，plan.interaction_id 必须等于 execution_context.interaction_id。不匹配返回 `FAILED / CONTRACT_MISMATCH`。
-3. plan.basis_interaction_revision 必须等于 execution_context.current_interaction_revision，否则返回 `FAILED / STALE_INTERACTION`。
-4. 身份校验通过后检查运行时接受状态和执行令牌。已取消返回 `CANCELLED / CANCELLED`。
-5. 按 `ActionKind` 精确选择内部处理器，重复注册使装配失败。开始执行前检查整个计划的行动是否均有处理器；任何一项未注册则整份计划返回 `FAILED / UNSUPPORTED_ACTION`。`StartThinking` 计划由 stage 消费，传入 realize 同样返回 `UNSUPPORTED_ACTION`。
+持久身份、逐行动事实和安全继续以 [Execution Ledger](execution-ledger.md) 为准。
 
-以上入口拒绝均不执行行动、不调用 output_sink。action_results 按计划原顺序包含所有行动，状态均为 NOT_STARTED、单项 error_code 为 None、无已提交效果；output_started=False、retryable=False。执行身份取自 context，计划身份取自 plan。
+1. 顶层参数类型错误抛出 TypeError；角色和 plan/context 交互身份不匹配返回 FAILED / CONTRACT_MISMATCH。运行时停止接受则返回 DEPENDENCY_UNAVAILABLE；这些检查不读取执行历史。
+2. 匹配执行的完成或不安全失败终态优先于本次 revision、令牌和路由检查。完成项返回 ALREADY_COMPLETED，原输出和效果不重复。相同 execution_id 的不同完整计划返回 CONTRACT_MISMATCH；报告不携带原计划事实。
+3. 新执行及可安全继续的执行，检查 basis_interaction_revision 与 current_interaction_revision 一致、令牌未取消，以及全计划均有已注册处理器；对应拒绝为 STALE_INTERACTION、CANCELLED、UNSUPPORTED_ACTION。StartThinking 传入 realize 返回 UNSUPPORTED_ACTION。
+4. 首次准入拒绝不占用执行，全部行动 NOT_STARTED。恢复准入拒绝保留完成前缀及累计输出事实，其余为本次 NOT_STARTED；不覆盖原有安全失败结算。所有准入拒绝均 retryable=False，不执行新行动或调用 sink。
+5. 原子取得执行权后，持久登记单项开始、顺序调用处理器，提交可信 ActionResult 后才开始下一项。失败或取消立即停止后续行动；完成前缀的效果不阻止后续无效果、无已确认或未知输出的可信失败重试。未可信结算的开始状态禁止自动重做。
 
-接受后的行动按计划顺序执行；失败或取消后停止启动后续行动。报告记录已完成、失败或取消的行动及其实际效果，剩余行动为 NOT_STARTED。输出保持正常调用顺序及 MessageEndOutput 的位置；sink 接收回执不代表播放完成。
+执行身份取自 context，计划身份取自 plan。output_started 表示累计已确认接收；False 不证明未知投递没有发生。输出保持正常调用顺序及 MessageEndOutput 的位置，sink 回执不代表播放完成。
 
 ## 错误、取消与关闭
 
-- sink 明确拒绝沿用 `SinkRejectedError`；不将拒绝记作成功接收。STALE_INTERACTION、SINK_CLOSED、BACKPRESSURE_TIMEOUT 映射为同名处理或执行错误码，其中 BACKPRESSURE_TIMEOUT 的 retryable=True；持久待重投计划的 retryable 以 PlanEmitter 契约为准。IDENTITY_MISMATCH、CONTENT_CONFLICT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中映射为 CONTRACT_MISMATCH；UNSUPPORTED_OUTPUT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中保留同名码。这些错误的 retryable=False。
-- 协作者抛出的 `TimeoutError` 转为 `PROVIDER_TIMEOUT`，retryable=True；未分类的普通异常转为 `INTERNAL_ERROR`，retryable=False。失败报告保留已经确认的输出、计划和效果，异常类型、调用身份和无局部变量的栈位置留在内部日志，协作者异常原文被省略。
+- sink 明确拒绝沿用 `SinkRejectedError`；不将拒绝记作成功接收。STALE_INTERACTION、SINK_CLOSED、BACKPRESSURE_TIMEOUT 映射为同名处理或执行错误码，handle 的重投规则以 PlanEmitter 契约为准，realize 的安全重试规则以 Execution Ledger 为准。IDENTITY_MISMATCH、CONTENT_CONFLICT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中映射为 CONTRACT_MISMATCH；UNSUPPORTED_OUTPUT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中保留同名码。realize 中异常退出的处理器没有可信无效果结算，因此 retryable=False。
+- 协作者抛出的 `TimeoutError` 转为 `PROVIDER_TIMEOUT`；handle 按计划恢复事实决定 retryable，realize 的普通异常不证明无效果，retryable=False；未分类的普通异常转为 `INTERNAL_ERROR`，retryable=False。失败报告保留已经确认的输出、计划和效果，异常类型、调用身份和不含源码行及局部变量的栈位置留在内部日志，协作者异常原文被省略。
 - 协作式取消在进入处理器前、每次等待返回后以及启动下一次计划交付或行动前检查。已经发起的外部效果不能因令牌取消被描述为未发生。
 - 调用任务本身收到 `asyncio.CancelledError` 时，在清理该调用拥有的工作后传播取消，不包装为 INTERNAL_ERROR，也不承诺一定返回报告。
 - `AgentRuntime.shutdown()` 开始时停止所有新 Agent 接受工作，再等待已接受调用退出，最后释放它们使用的资源。关闭期间新调用返回 `FAILED / DEPENDENCY_UNAVAILABLE`、retryable=False，其他字段按入口拒绝规则填写。
