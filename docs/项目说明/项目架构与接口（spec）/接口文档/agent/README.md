@@ -6,6 +6,8 @@
 
 路由的文件结构、内部注册和解析接口见 [Handler 路由 SPEC](handler-routing.md)。
 
+计划草稿、稳定身份与持久投递恢复见 [PlanEmitter 契约](plan-emitter.md)。
+
 ## 模块职责
 
 `server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。

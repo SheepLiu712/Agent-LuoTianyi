@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 import src.domain.agent as d
+from plan_emission_support import draft
 from routing_support import (Sink, completed, output, plan_and_context, request, settlement)  # noqa: F401
 
 
@@ -16,16 +17,22 @@ async def test_registered_handle_delivers_plan_and_settles_consumption(routed_ru
     async def handle(req, plans):
         assert plans is not external
         saved.append(plans)
-        await plans.emit(plan)
-        return settlement(req, emitted=("p",))
+        receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+        return settlement(req, emitted=(receipt.plan_id,))
 
     runtime, _ = routed_runtime(handle=handle)
     report = await runtime.get_agent().handle_stimulus(request(), external)
-    assert report == settlement(request(), emitted=("p",))
-    assert external.values == [plan]
+    assert report == settlement(request(), emitted=(external.values[0].plan_id,))
+    assert len(external.values) == 1
+    assert external.values[0].actions == plan.actions
+    assert external.values[0].origin_request_id == "r"
+    assert external.values[0].target_character_id == "luotianyi"
+    assert external.values[0].interaction_id == "i"
+    assert external.values[0].basis_interaction_revision == 3
+    assert external.values[0].source_stimulus_ids == plan.source_stimulus_ids
     with pytest.raises(Exception):
-        await saved[0].emit(plan)
-    assert external.values == [plan]
+        await saved[0].emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+    assert len(external.values) == 1
 
 
 @pytest.mark.parametrize("error,code,retryable", [
@@ -37,14 +44,15 @@ async def test_handle_exception_preserves_confirmed_plan(routed_runtime, error, 
     plan, _ = plan_and_context()
 
     async def handle(req, plans):
-        await plans.emit(plan)
+        await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
         raise error
 
     runtime, _ = routed_runtime(handle=handle)
-    report = await runtime.get_agent().handle_stimulus(request(), Sink())
+    sink = Sink()
+    report = await runtime.get_agent().handle_stimulus(request(), sink)
     assert report.error_code is code
     assert report.retryable is retryable
-    assert report.emitted_plan_ids == ("p",)
+    assert report.emitted_plan_ids == (sink.values[0].plan_id,)
     assert report.consumed_pending_stimulus_ids == ()
     assert report.retained_pending_stimulus_ids == ("m2", "m1")
 
@@ -58,8 +66,8 @@ async def test_sink_rejection_is_stable_and_never_accepted(routed_runtime, side,
         raise d.SinkRejectedError("rejected", code=rejection)
 
     async def handle(req, plans):
-        await plans.emit(plan)
-        return settlement(req, emitted=("p",))
+        receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+        return settlement(req, emitted=(receipt.plan_id,))
 
     async def realize(action, ctx, outputs):
         await outputs.emit(output(action.action_id))
@@ -94,29 +102,29 @@ async def test_forged_handling_report_cannot_consume_pending(routed_runtime, cha
     plan, _ = plan_and_context()
 
     async def handle(req, plans):
-        await plans.emit(plan)
-        return settlement(req, emitted=("p",), **change) if "emitted_plan_ids" not in change else settlement(req, **change)
+        receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+        return settlement(req, emitted=(receipt.plan_id,), **change) if "emitted_plan_ids" not in change else settlement(req, **change)
 
     runtime, _ = routed_runtime(handle=handle)
-    report = await runtime.get_agent().handle_stimulus(request(), Sink())
+    sink = Sink()
+    report = await runtime.get_agent().handle_stimulus(request(), sink)
     assert report.error_code is d.HandlingErrorCode.INTERNAL_ERROR
-    assert report.emitted_plan_ids == ("p",)
+    assert report.emitted_plan_ids == (sink.values[0].plan_id,)
     assert report.retained_pending_stimulus_ids == ("m2", "m1")
     assert report.consumed_pending_stimulus_ids == ()
 
 
-@pytest.mark.parametrize("change", [
-    {"origin_request_id": "foreign"}, {"target_character_id": "miku"},
-    {"interaction_id": "foreign"}, {"basis_interaction_revision": 4},
-    {"source_stimulus_ids": ("foreign",)},
-])
-async def test_foreign_plan_is_rejected_before_external_sink(routed_runtime, change):
+@pytest.mark.parametrize("invalid", ["complete_plan", "foreign_source", "dict", "list", "none"])
+async def test_invalid_draft_is_rejected_before_external_sink(routed_runtime, invalid):
+    # 绑定身份已不由 Handler 填写；保留来源拒绝，增加非法草稿输入覆盖同一入口边界。
     plan, _ = plan_and_context()
     sink = Sink()
 
     async def handle(req, plans):
-        await plans.emit(replace(plan, **change))
-        return settlement(req, emitted=("p",))
+        value = {"complete_plan": plan, "foreign_source": draft(sources=("foreign",)),
+                 "dict": {}, "list": [], "none": None}[invalid]
+        await plans.emit(value)
+        return settlement(req)
 
     runtime, _ = routed_runtime(handle=handle)
     report = await runtime.get_agent().handle_stimulus(request(), sink)
@@ -135,8 +143,8 @@ async def test_receipt_identity_mismatch_is_not_success(routed_runtime, side):
         return d.OutputReceipt(execution_id="foreign", sequence_no=0, status=d.OutputAcceptanceStatus.ACCEPTED)
 
     async def handle(req, plans):
-        await plans.emit(plan)
-        return settlement(req, emitted=("p",))
+        receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+        return settlement(req, emitted=(receipt.plan_id,))
 
     async def realize(action, ctx, outputs):
         await outputs.emit(output(action.action_id))
@@ -254,15 +262,15 @@ async def test_cancellation_during_plan_acceptance_retains_receipt_and_stops_nex
         return d.PlanReceipt(plan_id=value.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
 
     async def handle(req, plans):
-        await plans.emit(plan)
-        await plans.emit(replace(plan, plan_id="second", plan_ordinal=2))
-        return settlement(req, emitted=("p", "second"))
+        receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+        second = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+        return settlement(req, emitted=(receipt.plan_id, second.plan_id))
 
     runtime, _ = routed_runtime(handle=handle)
     report = await runtime.get_agent().handle_stimulus(req, Sink(accept))
     assert report.request_status is d.HandlingRequestStatus.CANCELLED
-    assert report.emitted_plan_ids == ("p",)
-    assert accepted == ["p"]
+    assert report.emitted_plan_ids == tuple(accepted)
+    assert len(accepted) == 1
 
 
 async def test_cancel_after_action_preserves_effect_and_does_not_start_next(routed_runtime):
@@ -294,21 +302,23 @@ async def test_concurrent_interactions_keep_receipts_separate(routed_runtime):
         if req.request_id == "r":
             started.set()
             await release.wait()
-        p = replace(plan, plan_id=req.request_id, origin_request_id=req.request_id,
-                    interaction_id=req.interaction.interaction_id)
-        await plans.emit(p)
-        return settlement(req, emitted=(req.request_id,))
+        receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+        return settlement(req, emitted=(receipt.plan_id,))
 
     runtime, _ = routed_runtime(handle=handle)
-    first = asyncio.create_task(runtime.get_agent().handle_stimulus(request(), Sink()))
+    first_sink, second_sink = Sink(), Sink()
+    first = asyncio.create_task(runtime.get_agent().handle_stimulus(request(), first_sink))
     try:
         await asyncio.wait_for(started.wait(), 0.5)
         req = request()
         second_req = replace(req, request_id="other", interaction=replace(req.interaction, interaction_id="other"))
-        second = await asyncio.wait_for(runtime.get_agent().handle_stimulus(second_req, Sink()), 0.5)
-        assert second.emitted_plan_ids == ("other",)
+        second = await asyncio.wait_for(runtime.get_agent().handle_stimulus(second_req, second_sink), 0.5)
+        assert second.emitted_plan_ids == (second_sink.values[0].plan_id,)
+        assert second_sink.values[0].interaction_id == "other"
         release.set()
-        assert (await first).emitted_plan_ids == ("r",)
+        assert (await first).emitted_plan_ids == (first_sink.values[0].plan_id,)
+        assert first_sink.values[0].interaction_id == "i"
+        assert first_sink.values[0].plan_id != second_sink.values[0].plan_id
     finally:
         release.set()
         await first
@@ -319,7 +329,8 @@ async def test_handler_can_reject_interaction_without_consumption(routed_runtime
                           error_code=d.HandlingErrorCode.UNSUPPORTED_INTERACTION)
 
     runtime, _ = routed_runtime(handle=handle)
-    report = await runtime.get_agent().handle_stimulus(request(), Sink())
+    sink = Sink()
+    report = await runtime.get_agent().handle_stimulus(request(), sink)
     assert report.error_code is d.HandlingErrorCode.UNSUPPORTED_INTERACTION
     assert report.retained_pending_stimulus_ids == ("m2", "m1")
 
@@ -328,16 +339,17 @@ async def test_failed_handler_preserves_explicit_partial_settlement(routed_runti
     plan, _ = plan_and_context()
 
     async def handle(req, plans):
-        await plans.emit(plan)
-        return settlement(req, emitted=("p",), request_status=d.HandlingRequestStatus.FAILED,
+        receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
+        return settlement(req, emitted=(receipt.plan_id,), request_status=d.HandlingRequestStatus.FAILED,
                           error_code=d.HandlingErrorCode.PROVIDER_TIMEOUT, retryable=True)
 
     runtime, _ = routed_runtime(handle=handle)
-    report = await runtime.get_agent().handle_stimulus(request(), Sink())
+    sink = Sink()
+    report = await runtime.get_agent().handle_stimulus(request(), sink)
     assert report.error_code is d.HandlingErrorCode.PROVIDER_TIMEOUT
     assert report.consumed_pending_stimulus_ids == ("m2",)
     assert report.retained_pending_stimulus_ids == ("m1",)
-    assert report.emitted_plan_ids == ("p",)
+    assert report.emitted_plan_ids == (sink.values[0].plan_id,)
 
 
 async def test_failed_action_preserves_its_partial_effect(routed_runtime):
@@ -383,7 +395,8 @@ async def test_late_handle_cancellation_preserves_returned_consumption(routed_ru
         return settlement(req)
 
     runtime, _ = routed_runtime(handle=handle)
-    report = await runtime.get_agent().handle_stimulus(request(), Sink())
+    sink = Sink()
+    report = await runtime.get_agent().handle_stimulus(request(), sink)
     assert report.request_status is d.HandlingRequestStatus.CANCELLED
     assert report.consumed_pending_stimulus_ids == ("m2",)
     assert report.retained_pending_stimulus_ids == ("m1",)

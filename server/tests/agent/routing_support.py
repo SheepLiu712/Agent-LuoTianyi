@@ -1,6 +1,5 @@
 """处理器路由公开契约使用的离线装配和领域样例。"""
 import importlib
-import inspect
 from types import SimpleNamespace
 
 import pytest_asyncio
@@ -12,7 +11,6 @@ from test_facade_contract import request, plan_and_context  # noqa: F401
 
 
 def router_type(side):
-    assert "stimulus_router" in inspect.signature(Agent).parameters, "Agent 尚无处理器注册装配入口"
     module = importlib.import_module(f"src.agent.handlers.{side}.router")
     return getattr(module, "StimulusRouter" if side == "stimulus" else "ActionRouter")
 
@@ -22,15 +20,13 @@ async def routed_runtime(monkeypatch, runtime_dependencies):
     instances = []
 
     def build(handle=None, realize=None, action_kinds=(d.ActionKind.SAY, d.ActionKind.SING)):
-        # RED 允许现有空表运行，让业务断言证明实际缺失；实现装配参数后即使用真实路由。
         def assemble(*, character_id, **kwargs):
-            if "stimulus_router" in inspect.signature(Agent).parameters:
-                kwargs["stimulus_router"] = router_type("stimulus")(
-                    [(d.StimulusKind.TEXT_MESSAGE, SimpleNamespace(handle=handle))] if handle else [],
-                )
-                kwargs["action_router"] = router_type("action")(
-                    [(kind, SimpleNamespace(realize=realize)) for kind in action_kinds] if realize else [],
-                )
+            kwargs["stimulus_router"] = router_type("stimulus")(
+                [(d.StimulusKind.TEXT_MESSAGE, SimpleNamespace(handle=handle))] if handle else [],
+            )
+            kwargs["action_router"] = router_type("action")(
+                [(kind, SimpleNamespace(realize=realize)) for kind in action_kinds] if realize else [],
+            )
             return Agent(character_id=character_id, **kwargs)
 
         monkeypatch.setattr(runtime_module, "Agent", assemble)

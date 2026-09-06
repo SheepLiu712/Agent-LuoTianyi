@@ -10,11 +10,8 @@ from src.agent.handlers.action.router import ActionHandler, ActionRouter
 from src.agent.handlers.stimulus.router import StimulusHandler, StimulusRouter
 from src.agent.ledgers._request_codec import fingerprint
 from src.agent.ledgers.request_ledger import RequestLedger
+from src.agent.planning.emitter import PlanEmitter, _DeliveryCancelled, _check_cancellation, handling_error
 from src.utils.logger import get_logger
-
-
-class _DeliveryCancelled(Exception):
-    """协作式取消，区别于调用任务收到的 CancelledError。"""
 
 
 class _HandlerNotStarted(_DeliveryCancelled):
@@ -23,41 +20,6 @@ class _HandlerNotStarted(_DeliveryCancelled):
 
 class _OutputIdentityError(ValueError):
     """处理器尝试交付不属于当前行动的输出。"""
-
-
-class _PlanDelivery:
-    """保存单次请求的已接收计划，并在调用结束后释放外部接收器。"""
-
-    def __init__(self, character_id, request, sink):
-        self._character_id = character_id
-        self._request = request
-        self._sink = sink
-        self.accepted_ids: list[str] = []
-
-    async def emit(self, plan: d.ActionPlan) -> d.PlanReceipt:
-        if self._sink is None:
-            raise RuntimeError("plan delivery is closed")
-        _check_cancellation(self._request.cancellation)
-        request = self._request
-        sources = {s.stimulus_id for s in (request.stimulus, *request.interaction.pending_stimuli)}
-        if (not isinstance(plan, d.ActionPlan)
-                or plan.target_character_id != self._character_id
-                or plan.origin_request_id != request.request_id
-                or plan.interaction_id != request.interaction.interaction_id
-                or plan.basis_interaction_revision != request.interaction.interaction_revision
-                or not set(plan.source_stimulus_ids).issubset(sources)):
-            raise ValueError("plan does not match request")
-        receipt = await self._sink.emit(plan)
-        if not isinstance(receipt, d.PlanReceipt) or receipt.plan_id != plan.plan_id:
-            raise ValueError("invalid plan receipt")
-        if plan.plan_id not in self.accepted_ids:
-            self.accepted_ids.append(plan.plan_id)
-        _check_cancellation(request.cancellation)
-        return receipt
-
-    def close(self):
-        self._sink = None
-        self._request = None
 
 
 class _OutputDelivery:
@@ -92,11 +54,6 @@ class _OutputDelivery:
         self._context = None
 
 
-def _check_cancellation(token):
-    if token.is_cancelled:
-        raise _DeliveryCancelled()
-
-
 def _retryable(error):
     return error is not None and error.name in {"PROVIDER_TIMEOUT", "BACKPRESSURE_TIMEOUT"}
 
@@ -105,7 +62,7 @@ class Agent:
     """角色的两接口业务门面，内部委托已注册处理器并结算接收与效果事实。
 
     AgentRuntime 装配角色私有路由并管理接受状态；生产注册表为空。
-    请求账本保存终态，同身份重投不重复处理；接收器只属于单次调用。
+    请求账本保存终态及待恢复计划，同身份重投不重复认知；接收器只属于单次调用。
     """
 
     __slots__ = ("_character_id", "_accepting", "_logger", "_stimulus_router", "_action_router",
@@ -170,11 +127,12 @@ class Agent:
 
     async def handle_stimulus(self, request: d.HandleStimulusRequest,
                               plan_sink: d.ActionPlanSink) -> d.HandlingReport:
-        """校验并登记刺激，首次调用交付计划、持久化结算；相同请求重投读取终态。
+        """校验并登记刺激，交付稳定计划并持久结算；重投读取终态或恢复原计划。
 
         相同 ID 的不同内容拒绝；并发重复等待原调用，等待者取消不影响拥有者。
-        存储或未结算占用返回依赖失败；参数错误抛 TypeError。协作取消保留已确认
-        事实，拥有者任务取消在清理后传播并保留占用，不允许重新执行处理器。
+        恢复仅交付已存计划，不重跑处理器；存储或未结算占用返回依赖失败。
+        参数错误抛 TypeError。协作取消保留已确认事实；认知任务取消保留占用，
+        恢复任务取消在清理及可信结算后释放恢复权，两者均传播 CancelledError。
         """
         if not isinstance(request, d.HandleStimulusRequest):
             raise TypeError("request must be HandleStimulusRequest")
@@ -209,9 +167,10 @@ class Agent:
         try:
             identity = fingerprint(self._character_id, request)
             state, report = self._request_ledger.claim(request.request_id, identity)
-            if state == "terminal":
+            if state in {"terminal", "recovery"}:
                 self._validate_handling_report(request, report, report.emitted_plan_ids)
-                return report
+                if state == "terminal":
+                    return report
         except Exception as error:
             return self._storage_failure(request, error)
         if state == "conflict":
@@ -225,17 +184,49 @@ class Agent:
             return result if result is not None else self._storage_failure(request)
         outcome = asyncio.get_running_loop().create_future()
         self._handling[request.request_id] = identity, outcome
-        result = None
+        result, plans = None, None
         try:
-            result = await self._handle_once(request, sink)
             try:
-                self._request_ledger.settle(request.request_id, identity, result)
+                plans = PlanEmitter(self._character_id, request, sink, self._request_ledger.outbox,
+                                    recovery=state == "recovery")
+            except Exception as error:
+                return self._storage_failure(request, error)
+            if state == "recovery":
+                result = await self._recover(request, plans, report, identity)
+            else:
+                result = plans.finish(await self._handle_once(request, plans))
+            try:
+                self._request_ledger.settle(request.request_id, identity, result, plans.accepted_ids)
             except Exception as error:
                 result = self._storage_failure(request, error, result.emitted_plan_ids)
+                return result
+            if state == "recovery" and request.cancellation.is_cancelled:
+                result = replace(result, request_status=d.HandlingRequestStatus.CANCELLED,
+                                 error_code=None, retryable=False)
             return result
         finally:
+            if plans is not None:
+                plans.close()
             outcome.set_result(result)
             self._handling.pop(request.request_id)
+
+    async def _recover(self, request, plans, provisional, identity):
+        if request.cancellation.is_cancelled:
+            return provisional
+        try:
+            await self._call_handler(plans.recover, request.cancellation,
+                                     request.request_id, request.interaction.interaction_id)
+        except asyncio.CancelledError:
+            # 受控接收器任务已经完成清理；此时才能释放恢复权并传播调用取消。
+            try:
+                self._request_ledger.settle(request.request_id, identity,
+                                           plans.finish(provisional, recovery=True), plans.accepted_ids)
+            except Exception as error:
+                self._storage_failure(request, error)
+            raise
+        except Exception:
+            pass
+        return plans.finish(provisional, recovery=True)
 
     async def _handle_once(self, request, plan_sink):
         status, error = d.HandlingRequestStatus.FAILED, None
@@ -251,8 +242,7 @@ class Agent:
         report = self._handling_failure(request, status, error)
         return report
 
-    async def _handle(self, request, sink, handler):
-        plans = _PlanDelivery(self._character_id, request, sink)
+    async def _handle(self, request, plans, handler):
         try:
             try:
                 report = await self._call_handler(lambda: handler.handle(request, plans), request.cancellation,
@@ -274,8 +264,6 @@ class Agent:
             self._record(request.request_id, request.interaction.interaction_id,
                          d.HandlingRequestStatus.CANCELLED, None)
             raise
-        finally:
-            plans.close()
 
     @staticmethod
     def _validate_handling_report(request, report, accepted_ids):
@@ -393,6 +381,8 @@ class Agent:
 
     @staticmethod
     def _error_code(error, enum):
+        if enum is d.HandlingErrorCode:
+            return handling_error(error)
         if isinstance(error, d.SinkRejectedError):
             if error.code.name in {"STALE_INTERACTION", "SINK_CLOSED", "BACKPRESSURE_TIMEOUT"}:
                 return enum[error.code.name]

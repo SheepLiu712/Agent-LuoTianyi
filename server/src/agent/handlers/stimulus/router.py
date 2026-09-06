@@ -2,7 +2,8 @@
 from collections.abc import Iterable
 from typing import Generic, Protocol, TypeVar
 
-from src.domain.agent import ActionPlanSink, HandleStimulusRequest, HandlingReport, StimulusKind
+from src.agent.planning.emitter import PlanEmitter
+from src.domain.agent import HandleStimulusRequest, HandlingReport, StimulusKind
 
 HandlerT = TypeVar("HandlerT")
 
@@ -10,7 +11,7 @@ HandlerT = TypeVar("HandlerT")
 class StimulusHandler(Protocol):
     """处理单次刺激，使用本次受限计划接收器并返回真实结算。"""
 
-    async def handle(self, request: HandleStimulusRequest, plans: ActionPlanSink) -> HandlingReport:
+    async def handle(self, request: HandleStimulusRequest, plans: PlanEmitter) -> HandlingReport:
         """处理请求并交付计划；返回结算，异常及任务取消由门面处理。"""
         ...
 
