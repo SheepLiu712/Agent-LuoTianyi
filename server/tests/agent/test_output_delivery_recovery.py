@@ -11,6 +11,63 @@ from routing_support import Sink, completed, plan_and_context
 pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.parametrize("with_remaining_action", [False, True])
+async def test_confirmed_output_cancellation_preserves_completion_and_safe_continuation(
+    routed_runtime, with_remaining_action,
+):
+    # execution-ledger: 确认后取消保留可信完成，只从未开始行动继续。
+    plan, context = plan_and_context() if with_remaining_action else single()
+    delivered = []
+    effect = d.EffectRef(kind=d.EffectKind.DYNAMIC_POST, effect_id="completed-before-cancellation")
+
+    async def receiver(value):
+        delivered.append(value)
+        context.cancellation.cancel(d.CancellationReason.SUPERSEDED)
+        return accepted(value)
+
+    async def handler(action, current, outputs):
+        try:
+            await outputs.emit(draft("TextFinal", action, current))
+        except Exception:
+            pass  # 已完成业务的清理可以捕获取消，随后返回可信完成事实。
+        return completed(action, irreversible_effect_committed=True, effect_ref=effect)
+
+    runtime, _ = routed_runtime(realize=handler)
+    first = await runtime.get_agent().realize_action_plan(plan, context, Sink(receiver))
+    assert first.status is d.ExecutionStatus.CANCELLED
+    assert first.error_code is d.ExecutionErrorCode.CANCELLED
+    assert first.output_started
+    assert first.action_results[0] == completed(
+        plan.actions[0], irreversible_effect_committed=True, effect_ref=effect,
+    )
+    assert [result.status for result in first.action_results[1:]] == (
+        [d.ActionExecutionStatus.NOT_STARTED] if with_remaining_action else []
+    )
+    assert first.retryable is with_remaining_action
+    assert [(value.action_id, value.sequence_no) for value in delivered] == [("a2", 0)]
+    await runtime.shutdown()
+
+    async def remaining(action, current, outputs):
+        await outputs.emit(draft("TextFinal", action, current))
+        return completed(action)
+
+    replacement, _ = routed_runtime(realize=remaining)
+    replay_sink = Sink()
+    replay = await replacement.get_agent().realize_action_plan(plan, fresh(context), replay_sink)
+    assert replay.status is d.ExecutionStatus.COMPLETED and replay.output_started
+    assert not replay.retryable
+    assert replay.action_results[0] == completed(
+        plan.actions[0], status=d.ActionExecutionStatus.ALREADY_COMPLETED,
+        irreversible_effect_committed=True, effect_ref=effect,
+    )
+    assert [result.status for result in replay.action_results[1:]] == (
+        [d.ActionExecutionStatus.COMPLETED] if with_remaining_action else []
+    )
+    assert [(value.action_id, value.sequence_no) for value in replay_sink.values] == (
+        [("a1", 1)] if with_remaining_action else []
+    )
+
+
 async def test_handler_catching_delivery_task_cancel_cannot_reemit_unknown_slot(routed_runtime):
     attempts = []
 
