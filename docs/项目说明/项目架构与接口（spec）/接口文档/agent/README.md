@@ -2,9 +2,9 @@
 
 ## 两接口门面
 
-[#63 门面契约](facade.md)记录 `Agent` 的两接口、空注册入口校验及关闭后拒绝行为；已注册处理器的部分仍为草案。`get_agent()` 返回新门面，下文记录通过 `get_character_runtime(...).conscious` 取得的旧 `LuoTianyiAgent` 兼容接口。
+[#63 门面契约](facade.md)记录 `Agent` 的两接口、入口校验、处理器调用、交付结算及关闭等待行为。`get_agent()` 返回新门面，下文记录通过 `get_character_runtime(...).conscious` 取得的旧 `LuoTianyiAgent` 兼容接口。
 
-路由的文件结构、内部注册和解析接口见 [Handler 路由 SPEC](handler-routing.md)（草案，尚未实现）。
+路由的文件结构、内部注册和解析接口见 [Handler 路由 SPEC](handler-routing.md)。
 
 ## 模块职责
 

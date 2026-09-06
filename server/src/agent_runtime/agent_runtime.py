@@ -38,7 +38,7 @@ class AgentRuntime:
         capability_manager: "CapabilityManager",
         database_manager: "DatabaseManager",
     ) -> None:
-        """初始化所有角色的意识、潜意识、预处理器和注册表。"""
+        """初始化启用角色的门面、旧意识、潜意识、预处理器和注册表。"""
         self.logger = get_logger(__name__)
         self.config = config
         self.llm_service = llm_service

@@ -126,6 +126,27 @@ class Agent:
         completion.set_result(None)
         self._inflight.discard(completion)
 
+    async def _call_handler(self, awaitable, call_id, interaction_id):
+        # 门面拥有处理器任务；调用方重复取消不能再次取消其正在进行的清理。
+        worker = asyncio.create_task(awaitable)
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            worker.cancel()
+            while not worker.done():
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if not worker.cancelled():
+                cleanup_error = worker.exception()
+                if cleanup_error is not None:
+                    self._record_exception(call_id, interaction_id,
+                                           d.ExecutionErrorCode.INTERNAL_ERROR, cleanup_error)
+            raise
+
     async def handle_stimulus(self, request: d.HandleStimulusRequest,
                               plan_sink: d.ActionPlanSink) -> d.HandlingReport:
         """校验并路由刺激，通过本次 plan_sink 交付计划，返回消费及接收事实。
@@ -161,7 +182,8 @@ class Agent:
         plans = _PlanDelivery(self._character_id, request, sink)
         try:
             try:
-                report = await handler.handle(request, plans)
+                report = await self._call_handler(handler.handle(request, plans),
+                                                  request.request_id, request.interaction.interaction_id)
                 self._validate_handling_report(request, report, plans.accepted_ids)
                 if request.cancellation.is_cancelled:
                     report = replace(report, request_status=d.HandlingRequestStatus.CANCELLED,
@@ -177,6 +199,10 @@ class Agent:
             self._record(request.request_id, request.interaction.interaction_id,
                          report.request_status, report.error_code)
             return report
+        except asyncio.CancelledError:
+            self._record(request.request_id, request.interaction.interaction_id,
+                         d.HandlingRequestStatus.CANCELLED, None)
+            raise
         finally:
             plans.close()
             self._end_call(completion)
@@ -248,7 +274,8 @@ class Agent:
                     break
                 outputs = _OutputDelivery(action.action_id, context, sink)
                 try:
-                    result = await handler.realize(action, context, outputs)
+                    result = await self._call_handler(handler.realize(action, context, outputs),
+                                                      context.execution_id, context.interaction_id)
                     if (not isinstance(result, d.ActionResult) or result.action_id != action.action_id
                             or result.status is d.ActionExecutionStatus.NOT_STARTED):
                         raise ValueError("invalid action result")
@@ -272,6 +299,10 @@ class Agent:
             report = self._execution_report(plan, context, status, error, results, started, _retryable(error))
             self._record(context.execution_id, context.interaction_id, status, error)
             return report
+        except asyncio.CancelledError:
+            self._record(context.execution_id, context.interaction_id,
+                         d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED)
+            raise
         finally:
             self._end_call(completion)
 

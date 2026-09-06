@@ -1,6 +1,6 @@
 # Handler 路由契约
 
-状态：#63 SPEC 草案，尚未实现。本文定义 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
+状态：已实现。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
 
 ## 文件与所有权
 
@@ -21,13 +21,13 @@ server/src/
             └── router.py         # ActionRouter
 ```
 
-本切片建立以上两个 router 模块及必要包文件。各 handlers 包的 `__init__.py` 不重导出内部类型。生产注册集合为空，不建立 ConversationTurnHandler 等真实或占位 Handler 文件。装配由 AgentRuntime 初始化完成，不建立 factory.py。
+两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产注册集合为空，装配由 AgentRuntime 初始化完成。
 
 Router 是 Agent 内部模块。AgentRuntime 仅在显式装配位置直接导入两个 router 类型；stage、world、Adapter 及其他业务调用方不导入它们。Agent 对外不增加注册、查询处理器或第三个业务方法。
 
 ## 内部接口
 
-两个 router 分别在各自模块定义，使用泛型保存处理器引用。`HandlerT` 是调用处确定的处理器类型，不是新增共享领域类型；路由器不规定处理器业务方法，也不把它转换为通用 payload。
+两个 router 分别在各自模块定义，使用泛型保存处理器引用。`HandlerT` 是调用处确定的处理器类型，只表示绑定的对象类型。路由器保存并返回原对象，调用协议见下文。
 
 ```python
 class StimulusRouter(Generic[HandlerT]):
@@ -66,7 +66,7 @@ class ActionRouter(Generic[HandlerT]):
 
 ## 路由键
 
-刺激路由使用 `request.stimulus.kind`，不使用 `StimulusKind + InteractionKind` 组合键。快照照常保留交互事实；是否支持该交互由获得请求的处理器判断。路由器不能因为 Chat、Toy、World 不同而自行换到另一个处理器。
+刺激路由使用 `request.stimulus.kind`，快照保留交互事实；是否支持该交互由获得请求的处理器判断。
 
 行动路由使用每项 `action.kind`。`START_THINKING` 由 stage 消费，ActionRouter 构造时注册该键抛出 `ValueError`；以该键查找仍属于未注册，抛出 `KeyError`。
 
@@ -89,7 +89,7 @@ AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；�
 
 ## 内部处理器调用与单次调用事实
 
-内部处理器采用以下异步结构协议；协议分别放在两个 router 模块，不从包根导出，不建立真实 Handler 文件：
+内部处理器采用以下异步结构协议；协议分别放在两个 router 模块，不从包根导出：
 
 ```python
 class StimulusHandler(Protocol):
@@ -110,11 +110,11 @@ class ActionHandler(Protocol):
 - 处理器抛异常时，尚无已返回的消费事实，pending 全部 retained；已确认接收的计划仍写入报告。失败处理器也可正常返回合法的 FAILED 报告来表达已确认的部分结算。
 - ActionResult 必须匹配当前 action_id，且不能用 NOT_STARTED 冒充已调用的结果；无效返回转 INTERNAL_ERROR。已完成行动按原顺序保留，失败或取消停止后续行动。返回的 effect_ref 与 irreversible_effect_committed 是内部处理器已确认的事实，失败或取消不能清除它们。
 - 行动等待返回时令牌取消：已返回 COMPLETED/ALREADY_COMPLETED 的效果仍为完成；整体报告为 CANCELLED，后续行动 NOT_STARTED。行动返回 FAILED 优先保留实际失败，不能用晚到取消掩盖。处理器返回 CANCELLED 时整体同样取消。
-- 处理器内部 KeyError 是 INTERNAL_ERROR，不能误判为路由缺失。TimeoutError 和 SinkRejectedError 按门面错误表转换；普通异常详情记录到 utils/logger.py，但不记录输入正文、记忆、密钥。
+- 处理器内部 KeyError 是 INTERNAL_ERROR，不能误判为路由缺失。TimeoutError 和 SinkRejectedError 按门面错误表转换；通过 utils/logger.py 记录调用身份、稳定错误码、异常类型及无局部变量的栈位置，省略协作者异常原文。
 
 ## 在途调用与关闭
 
-Agent 在通过入口检查、开始调用处理器前登记该调用，直到处理器及其清理退出才解除登记。AgentRuntime.shutdown 首先禁止所有角色接受工作，然后以 shutdown_timeout_seconds 为整轮在途等待的上限等待已登记调用；不主动取消调用方令牌或任务。超时抛 RuntimeError，不关闭向量库、不清除运行时引用；后续 shutdown 继续等待。全部调用退出后才能进入既有资源关闭流程。关闭调用本身取消也不能清除仍运行的业务工作。不同 interaction 的处理可同时进行，计划回执、输出、取消和报告不能互相污染。
+Agent 在通过入口检查、开始调用处理器前登记该调用，直到处理器及其清理退出才解除登记。AgentRuntime.shutdown 首先禁止所有角色接受工作，然后以 shutdown_timeout_seconds 为整轮在途等待的上限等待已登记调用；不主动取消调用方令牌或任务。超时抛 RuntimeError，不关闭向量库、不清除运行时引用；后续 shutdown 继续等待。全部调用退出后才能进入既有资源关闭流程。关闭调用本身取消也不清除仍运行的业务工作。门面拥有处理器任务，调用方任务取消仅向处理器转发一次；调用方重复取消时继续等待处理器清理退出，然后传播原取消。不同 interaction 的处理可同时进行，计划回执、输出、取消和报告不能互相污染。
 
 ## 测试入口与验收
 
@@ -133,4 +133,4 @@ Agent 在通过入口检查、开始调用处理器前登记该调用，直到�
 | 调用 resolve | 无处理器调用、副作用或异步任务 |
 | 无真实 Handler 的生产装配 | 保持既有门面 38 项测试及旧链 get_character_runtime 兼容行为 |
 
-本次 SPEC 的新增验收同时覆盖成功处理器调用、错误/回执校验、等待中取消、并发交互隔离、在途关闭超时重试。既有空表拒绝回归首次通过时记录为补回归，不制造失败。
+契约测试覆盖成功处理器调用、错误与回执校验、等待中取消、并发交互隔离、在途关闭超时重试。测试证据见 `server/tests/agent/README.md`。

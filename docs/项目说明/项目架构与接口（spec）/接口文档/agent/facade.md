@@ -1,6 +1,6 @@
 # Agent 两接口门面契约
 
-状态：#63 的空注册门面入口、运行时缓存与旧入口迁移已实现。已注册处理器路由、处理中的取消及部分结算仍是未实现的契约草案，不能视为可用行为。本文定义本切片的公开行为；领域对象以 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md) 为准。
+状态：已实现。本文记录门面入口校验、内部处理器调用、交付结算与生命周期行为；领域对象以 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md) 为准。
 
 ## 模块与实例
 
@@ -59,7 +59,7 @@ async def realize_action_plan(
 ## 错误、取消与关闭
 
 - sink 明确拒绝沿用 `SinkRejectedError`；不将拒绝记作成功接收。STALE_INTERACTION、SINK_CLOSED、BACKPRESSURE_TIMEOUT 映射为同名处理或执行错误码，其中只有 BACKPRESSURE_TIMEOUT 的 retryable=True。IDENTITY_MISMATCH、CONTENT_CONFLICT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中映射为 CONTRACT_MISMATCH；UNSUPPORTED_OUTPUT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中保留同名码。这些错误的 retryable=False。
-- 协作者抛出的 `TimeoutError` 转为 `PROVIDER_TIMEOUT`，retryable=True；未分类的普通异常转为 `INTERNAL_ERROR`，retryable=False。失败报告保留已经确认的输出、计划和效果，异常详情留在内部日志。
+- 协作者抛出的 `TimeoutError` 转为 `PROVIDER_TIMEOUT`，retryable=True；未分类的普通异常转为 `INTERNAL_ERROR`，retryable=False。失败报告保留已经确认的输出、计划和效果，异常类型、调用身份和无局部变量的栈位置留在内部日志，协作者异常原文被省略。
 - 协作式取消在进入处理器前、每次等待返回后以及启动下一次计划交付或行动前检查。已经发起的外部效果不能因令牌取消被描述为未发生。
 - 调用任务本身收到 `asyncio.CancelledError` 时，在清理该调用拥有的工作后传播取消，不包装为 INTERNAL_ERROR，也不承诺一定返回报告。
 - `AgentRuntime.shutdown()` 开始时停止所有新 Agent 接受工作，再等待已接受调用退出，最后释放它们使用的资源。关闭期间新调用返回 `FAILED / DEPENDENCY_UNAVAILABLE`、retryable=False，其他字段按入口拒绝规则填写。

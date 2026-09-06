@@ -76,3 +76,19 @@ SPEC：`4c031a4c`，在提交并自审路由调用、单次交付事实和关闭
 
 对初步 GREEN 执行 `python -m pytest tests/agent/test_facade_inflight_shutdown.py::test_repeated_caller_cancellation_cannot_release_sync_dependencies -q --tb=short`
 结果为 1 failed：关闭未抛 RuntimeError，错误返回成功。测试不读取私有任务或改动通用 asyncio helper。
+
+## #63 完整 GREEN（2026-09-06）
+
+门面路由 GREEN `d21a2aeb` 及重复调用方取消 RED `f5765cee` 之后，门面拥有处理器任务，
+只转发一次任务取消，重复取消继续等待清理。原 69 项路由/调用/关闭测试和原 38 项入口/兼容测试保持不变，
+加上新的重复取消测试，agent/agent_runtime 聚焦为 108 passed。
+
+工作目录 `server`，实际最终验证：
+
+- `D:/Anaconda/envs/lty/python.exe -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：653 passed、2 skipped、1 项第三方 pkg_resources 弃用警告。
+- `D:/Anaconda/envs/lty/python.exe -m ruff check src/agent/facade.py src/agent/handlers src/agent_runtime/agent_runtime.py tests/agent tests/agent_runtime tests/system`：通过。
+- `D:/Anaconda/envs/lty/python.exe -m compileall -q src/agent/facade.py src/agent/handlers src/agent_runtime/agent_runtime.py`：通过。
+- `git diff --check`：通过。
+
+生产路由器装配为空；成功处理与输出使用内部协议的受控协作者验证，没有运行真实业务 Handler、模型或能力。
+两项真实网络探测仍跳过。作者自审与后续独立 PR 审核分别记录。
