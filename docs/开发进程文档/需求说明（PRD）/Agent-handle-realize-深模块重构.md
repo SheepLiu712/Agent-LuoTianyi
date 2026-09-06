@@ -497,7 +497,7 @@ class ActionPlanSink(Protocol):
 
 ### 7.4 最终处理报告
 
-`HandlingReport` 将请求的结束状态与内容处理结果分开表达。字段、枚举和构造行为以 [HandlingReport 类型契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handling-report.md) 为准；该契约当前处于 SPEC 阶段。
+`HandlingReport` 将请求的结束状态与内容处理结果分开表达。字段、枚举和构造行为以 [HandlingReport 类型契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handling-report.md) 为准；领域类型及构造校验已实现。
 
 - `request_status` 为 `COMPLETED`、`CANCELLED` 或 `FAILED`。
 - considered 表示实际考察的 pending，consumed 和 retained 是它的互斥且完整的划分。

@@ -80,3 +80,11 @@
 - commit 或 PR：分支 `codex/agent-02-handle-input-contract`，本记录所在文档整理提交。
 - 验证及结果：接口文档措辞、UTF-8、相对链接、实际构造示例和 `git diff --check` 检查通过；产品代码与测试未改动，文档整理的运行时 Red/Green 不适用。
 - 未验证范围：本记录不表示已完成他人代码审查或新增运行时验收。
+
+### 2026-09-06 HandlingReport 类型契约 GREEN
+
+- 交付行为：`src.domain.agent` 提供不可变 `HandlingReport`、`HandlingRequestStatus`、`HandlingErrorCode`、`InvalidHandlingReportError` 和 `HandlingReportErrorCode`。实现全部字段显式关键字构造、身份元组校验、considered 的互斥完整划分及相对顺序、状态与错误码关联、重评时间约束；保留计划身份及显式 retryable 值。请求状态与内容消费结果分别表达。
+- interface spec：[`domain/handling-report.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/handling-report.md)，已同步实现状态和可执行构造示例。
+- commit 或 PR：SPEC `00ef610b`；RED `812bb249`；GREEN 为分支 `codex/agent-03-handling-report-contract` 上本记录所在提交。
+- 验证及结果：使用 `D:/Anaconda/envs/lty/python.exe`，工作目录 `server`。RED 为 94 failed，全部源于公开能力尚未实现；本次保持测试不变，`-m pytest tests/domain/test_handling_report_contract.py -q` 为 94 passed，`-m pytest tests/domain -q` 为 328 passed、0 skipped，包含原有 234 项领域用例。`-m ruff check src/domain/agent tests/domain/test_handling_report_contract.py tests/conftest.py`、`-m compileall -q src/domain/agent` 和 `git diff --check` 通过。
+- 未验证范围：未运行完整 Server/客户端测试、真实设备、外部服务或生产环境；本次只验证报告领域对象，未接入 Agent handle、计划 sink、stage 结算或运行时重试链路。

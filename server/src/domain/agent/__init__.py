@@ -1,5 +1,12 @@
 from ._handle_input_contract import HandleInputErrorCode, InvalidHandleInputError
 from .handle_input import CancellationReason, CancellationToken, HandleStimulusRequest
+from .handling_report import (
+    HandlingErrorCode,
+    HandlingReport,
+    HandlingReportErrorCode,
+    HandlingRequestStatus,
+    InvalidHandlingReportError,
+)
 from .interaction_snapshot import (
     AgentOutputKind,
     ChatInteractionSnapshot,
@@ -61,6 +68,11 @@ __all__ = (
     "ConnectionState",
     "HandleInputErrorCode",
     "HandleStimulusRequest",
+    "HandlingErrorCode",
+    "HandlingReport",
+    "HandlingReportErrorCode",
+    "HandlingRequestStatus",
+    "InvalidHandlingReportError",
     "InteractionKind",
     "InteractionSnapshot",
     "InvalidHandleInputError",

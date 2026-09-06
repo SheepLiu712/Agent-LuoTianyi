@@ -1,6 +1,6 @@
 # HandlingReport 类型契约
 
-> 状态：目标 SPEC，类型尚未实现。
+> 状态：已实现，公开入口为 `src.domain.agent`。
 >
 > 来源：[工单 1 / GitHub #60](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/60)。
 
@@ -99,7 +99,7 @@ consumed 和 retained 各自必须是 considered 的有序子序列。遗漏 con
 
 ## 构造示例
 
-以下示例展示目标公开构造形式：请求正常结束，M1 已处理，M2 保留到指定时间。
+以下示例展示公开构造形式：请求正常结束，M1 已处理，M2 保留到指定时间。
 
 ```python
 from datetime import datetime, timezone
@@ -139,4 +139,11 @@ report = HandlingReport(
 | 同状态/划分下分别传入 True 和 False | retryable 原样保留 |
 | 多个报告共享相同合法元组 | 构造不修改输入，报告字段保持不可变 |
 
-这些是目标验收场景；当前 SPEC 阶段没有相应运行结果。
+在 `server` 目录运行：
+
+```text
+python -m pytest tests/domain/test_handling_report_contract.py -q
+python -m pytest tests/domain -q
+```
+
+已完成验证记录见 [开发进度](../../../../开发进程文档/开发进度/Agent-handle-realize-深模块重构.md)。
