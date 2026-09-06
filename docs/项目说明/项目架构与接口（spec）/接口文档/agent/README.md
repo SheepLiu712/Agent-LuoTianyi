@@ -6,11 +6,11 @@
 
 路由的文件结构、内部注册和解析接口见 [Handler 路由 SPEC](handler-routing.md)。
 
-计划草稿、稳定身份与持久投递恢复见 [PlanEmitter 契约](plan-emitter.md)。
+计划草稿、身份绑定与单次顺序交付见 [PlanEmitter 契约](plan-emitter.md)。
 
-执行账本与逐行动安全恢复的当前契约见 [Execution Ledger](execution-ledger.md)。
+单次处理与行动执行集中于 `agent/processing`，流程见 [门面契约](facade.md)。
 
-输出草稿、Agent 分配的连续序号及原 payload 的安全恢复见 [输出投递目标契约](output-delivery.md)。
+输出草稿、Agent 分配的连续序号及失败停止行为见 [输出交付契约](output-delivery.md)。
 
 ## 模块职责
 

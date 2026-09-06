@@ -1,6 +1,6 @@
 # agent_runtime 对外接口
 
-Request Ledger 装配见 [handle 请求账本契约](../agent/request-ledger.md)：初始化角色 Agent 时显式传入现有 `database_manager.open_sql_session`；数据库由 SystemRuntime 统一管理。
+AgentRuntime 直接装配角色身份和路由器；新 Agent 门面不接收数据库会话工厂。数据库仍由 SystemRuntime 管理，供角色运行时的业务依赖使用。
 
 ## #63 装配与查找契约
 
