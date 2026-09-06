@@ -8,6 +8,7 @@ _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "agent" / "test_output_sequences.py").resolve(),
     (Path(__file__).parent / "agent" / "test_output_delivery_recovery.py").resolve(),
     (Path(__file__).parent / "agent" / "test_output_storage_recovery.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_output_recovery_lifecycle.py").resolve(),
     (Path(__file__).parent / "agent" / "test_execution_idempotency.py").resolve(),
     (Path(__file__).parent / "agent" / "test_execution_storage_recovery.py").resolve(),
     (Path(__file__).parent / "agent" / "test_plan_emission.py").resolve(),
