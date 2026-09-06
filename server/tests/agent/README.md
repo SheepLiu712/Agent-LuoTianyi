@@ -282,3 +282,32 @@ SPEC 的累计事实、取消可信返回与结算失败条目已覆盖，无新
 保留已知效果并标为 FAILED / DEPENDENCY_UNAVAILABLE，只有持久完成前缀转换为 ALREADY_COMPLETED。
 取消清理中的存储错误日志使用 DEPENDENCY_UNAVAILABLE。
 40 项执行用例全部通过；完整相关回归为 **795 passed、2 skipped**，相关 Ruff、compileall、diff 检查通过。
+
+
+## 输出序列与安全投递 RED（2026-09-06）
+
+SPEC `cfd19773` 定义私有草稿、Agent 输出身份、连续序号、完整持久 payload 和恢复分流；
+`ed2fd6a4` 补充旧版账本缺少序列的兼容边界；`200e97c2` 区分首次 payload 丢失与已经 PREPARED 的恢复。
+三个 SPEC commit 已作者自审，UTF-8、围栏、相对链接和 diff 检查通过。公开测试入口仍为 realize_action_plan 与 AgentRuntime.shutdown。
+
+新增 **48 项展开用例**：
+
+- `test_output_sequences.py`：14 项。四类输出的全部字段、Agent 身份、跨 Action 连续序号、并发 emit 串行、完成前缀跨 Runtime 续号、七类内容变化与旧槽冲突、safe FAILED/CANCELLED 重入先于 pending 投递、拒绝后同次重投复用槽、拒绝完整输出绕过身份分配。
+- `test_output_delivery_recovery.py`：18 项。可信完成不能丢失 pending；四类原 payload 仅投递恢复；有副作用失败/取消保留原结果；重入未 emit 旧 pending 不能进入下一行动；超时、错误回执及先确认后未知不可继续；恢复时修订/取消/路由准入；恢复所有权、等待者取消、shutdown 和拥有者取消清理；吞错仍记录不含正文的错误日志。
+- `test_output_storage_recovery.py`：16 项。PREPARED 后外部尝试标记失败、首次 payload 保存失败及一次性恢复、一次性/持续确认存储失败、旧账本四种历史、输出版本/payload/指纹/缺号/整行丢失，以及新 Python 进程中的原音频恢复和未知硬退出。
+
+工作目录 server，`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=no -rN`
+为 **43 failed、800 passed、2 skipped**。新增 48 项为 **43 failed、5 passed**；5 项首次通过是旧完整终态、首次 payload 保存持续/一次性失败、确认持续失败、未知进程硬退出的既有回归。两个跳过仍为 world 真实网络探测。
+Ruff 与 git diff --check 通过。没有产品实现、GREEN 或完成进度变更。
+
+RED 原因是实际缺失行为：序号仍由旧 Handler 提供且全部为 0、已存槽位不存在因而改内容没有冲突、可信完成吞掉拒绝后直接结束、UNKNOWN 被可信完成掩盖、已知回执一次提交失败后未补存、旧有输出的部分执行从 0 继续。没有导入、语法、环境或收集失败。
+部分后续断言必须在 GREEN 才能运行到：恢复取消/关闭测试先因首轮错误 retryable 失败；四字段综合样例先因序号失败；数据库损坏测试在旧版无输出表时不做破坏，通过公开重复调用错误成功证明目标缺失；PREPARED 故障钩子在旧版无该槽位写入时不触发，通过公开结果证明缺失。
+
+`output_support.draft()` 仅在 RED 期间有旧协议构造桥：新私有草稿不存在时构造当前合法 AgentOutput，使公开 realize 确实进入旧行为，而非以 ModuleNotFoundError 作为 RED。GREEN 必须删除该分支、直接使用强类型草稿；桥中绑定身份不构成目标 Handler 的协议。旧数据夹具由 PR117 真实公开执行生成，初始化新版 Runtime 前载入，具体来源见 fixtures/README.md。
+
+GREEN 迁移注意：
+
+- 原 routing_support.output 及 handler_dispatch、execution_idempotency、execution_storage_recovery、facade_inflight_shutdown 的受控 Handler 输出改为草稿；外部 sink/回执/报告断言保留。旧完整输出身份伪造用例改为验证完整 AgentOutput 被拒绝，不能让测试 Helper 把伪造字段静默去掉。
+- 旧 `unknown_then_rejected` 分支在首个 UNKNOWN 后不能真的发出第二槽位，仍保留 unknown 不可洗掉、无重发、output_started 和效果断言；新 UNKNOWN 重投统一 DEPENDENCY_UNAVAILABLE，首次保留实际错误映射。
+- Handler 可信返回并不覆盖未确认输出；旧测试若将这种情况视为 COMPLETED，应按目标 SPEC 改为未完成交付，并保留所有已知效果。确认一次提交失败且最终可信补存成功后，后续应读取已确认终态；持续存储失败仍不重做。
+- 不重建 SQL 夹具为新版格式；不删除生产路由为空、旧 get_character_runtime 兼容、取消清理与并发等待者的原有断言。
