@@ -5,7 +5,7 @@ from enum import Enum
 import json
 
 import src.domain.agent as d
-from src.agent.outputs import drafts
+from src.agent.processing import output_drafts as drafts
 
 
 OUTPUTS = (d.TextFinalOutput, d.AudioChunkOutput, d.MessageEndOutput, d.ExpressionOutput)

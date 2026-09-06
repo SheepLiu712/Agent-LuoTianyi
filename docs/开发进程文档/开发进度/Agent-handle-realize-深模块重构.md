@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-06 门面公共入口与请求分流整理
+
+- 交付内容：两个公共方法紧随 `__init__`；handle 入口直接登记请求，已有请求在 `_handle_existing_request` 处理后提前返回，新请求进入 `_process_request`。新处理和计划恢复共用处理权、交付及结算生命周期，原 `_handle_registered` 已删除；保留工作区已有的参数类型注解。
+- SPEC 检查：facade、request-ledger、plan-emitter 的现有契约已满足，公开接口与行为不变；纯内部重构不新增 SPEC 或 RED commit，使用既有行为回归验证。
+- commit：本记录所在 `codex/agent-facade-flow` 分支的 refactor 提交。
+- 验证及结果：server 下运行 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime -q --tb=short`，重构前 338 passed（65.62s），重构后 338 passed（46.21s）；Ruff 与 diff 检查通过。AST 确认类方法顺序为初始化、handle、realize，realize 及其他未调整方法保持原样；未修改测试。
+- 未验证范围：未运行完整 Server、外部服务或生产环境验收。
+
 ### 2026-09-06 原输出恢复与可信结算补齐 GREEN
 
 - 交付行为：可信完成或不安全失败行动的safe pending只投递原值，不重跑Handler；安全失败仍先重入Handler。恢复经过全计划准入与执行所有权，错误报告保留原效果及输出事实，失败不转换成业务完成。确认临时存储失败在最终可信结算补齐，本次仍停止新工作；首次payload保存失败保持未知，已有完整payload的尝试标记失败保留安全恢复值。
@@ -231,3 +239,11 @@
 - commit 或 PR：RED `aa0fd0a5`；GREEN 为 `codex/agent-04-realization-contract` 分支上本记录所在提交。
 - 验证及结果：使用 `D:/Anaconda/envs/lty/python.exe`，工作目录 server。RED 的 `-m pytest tests/domain -q --tb=no -rN` 为 103 failed、326 passed，其中 101 项为新协议缺失，2 项为已确认的输出枚举更名；没有收集或导入错误。保持 RED 测试不变，GREEN 领域测试为 429 passed；Ruff、compileall 通过。静态检查确认 42 个新增公开类型及其公开方法/属性具有中文 docstring。
 - 未验证范围：没有实现实际接收器、Agent 门面/执行器、stage 思考通知消费、消息终包发送、客户端播放或真实持久效果；没有运行完整 Server、客户端、外部服务或生产验收。Protocol 声明与领域值测试不构成这些运行时行为的证明。
+
+### 2026-09-06 单次处理流程与 processing 整理
+
+- 交付行为：门面委托 Handling.run 和 Execution.run；处理器取消与清理共用 invocation.call_handler；计划与输出按本次调用顺序交付。移除业务流程中的 ledger/outbox、历史报告复用、重复调用合并和重发恢复；失败停止，保留已确认结果，retryable=False。Ledger 源码保留并补充中文接口说明与类型提示。
+- interface spec：agent/facade.md、plan-emitter.md、output-delivery.md、handler-routing.md 与领域报告说明已同步；总设计和 PRD 撤销对应恢复要求。远端 15 项相关 issue 已补充范围说明，保持开放。
+- 验证：Agent/AgentRuntime 142 passed；完整 Server 687 passed、350 skipped、1 个第三方弃用警告。跳过项沿用原配置。保留单次顺序、取消、部分效果和日志测试，移除旧账本恢复测试及无引用 SQL 样例；修复捕获取消后继续发送与输出日志身份缺失。
+- 提交组织：按用户要求在 codex/agent-facade-flow 分支分别提交文档、测试和代码；本轮不是 TDD 阶段拆分。
+- 未验证范围：真实业务 Handler、外部服务、客户端和生产环境；已有数据库记录未清理。

@@ -1,91 +1,59 @@
 # Agent 两接口门面契约
 
-状态：门面、逐行动账本及[输出契约](output-delivery.md)中的仅投递恢复与结算补齐已实现。本文记录门面入口校验、内部处理器调用、交付结算与生命周期行为；领域对象以 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md) 为准。
+状态：当前工作区已实现单次处理流程。领域对象见 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md)。
 
-## 模块与实例
+## 实例与装配
 
-`server/src/agent/facade.py` 定义 `Agent`，`src.agent` 只导出该公开类型。Agent 的业务方法只有 `handle_stimulus` 和 `realize_action_plan`。构造及内部生命周期协作由 AgentRuntime 使用，业务调用方通过运行时取得实例。
-
-`server/src/agent_runtime` 保持为顶层模块。`AgentRuntime` 初始化时为每个启用角色组装并缓存一个新 Agent，绑定角色身份和所需依赖。装配直接在运行时中完成。`SystemRuntime` 创建 AgentRuntime，并协调其初始化失败清理和关闭。
-
-Agent 不公开旧意识对象、CharacterRuntime、数据库、潜意识、能力管理器或内部处理器，不通过属性转发或 `__getattr__` 暴露旧接口。角色身份绑定后不可更换；一次请求的数据保留在该调用作用域，不写入实例级“当前用户”或“当前交互”字段。不同 interaction 的调用可以并存。
-
-## 公开调用
+`src.agent` 只导出 `Agent`，业务方法只有以下两个。AgentRuntime 在初始化时为每个启用角色直接装配角色身份及两个路由器，缓存独立 Agent；Agent 构造不接收数据库会话工厂。旧调用通过 `get_character_runtime(...).conscious` 取得兼容对象。
 
 ```python
-from src.agent import Agent
-from src.domain.agent import (
-    ActionPlan, ActionPlanSink, AgentOutputSink, ExecutionContext,
-    ExecutionReport, HandleStimulusRequest, HandlingReport,
-)
+async def handle_stimulus(self, request: HandleStimulusRequest,
+                          plan_sink: ActionPlanSink) -> HandlingReport: ...
 
-# Agent 的两个异步实例方法：
-async def handle_stimulus(
-    self, request: HandleStimulusRequest, plan_sink: ActionPlanSink,
-) -> HandlingReport: ...
-
-async def realize_action_plan(
-    self, plan: ActionPlan, execution_context: ExecutionContext,
-    output_sink: AgentOutputSink,
-) -> ExecutionReport: ...
+async def realize_action_plan(self, plan: ActionPlan, context: ExecutionContext,
+                              output_sink: AgentOutputSink) -> ExecutionReport: ...
 ```
 
-两个 sink 都由每次调用传入，不保存在共享 Agent 中。公开类和方法提供中文 docstring，说明输入、结果和异常。
+请求、上下文和 sink 属于本次调用，不保存在共享 Agent 的当前用户或当前交互字段中。每次调用独立处理，不查历史报告、不合并重复调用、不恢复旧计划或输出。相同标识再次调用也会独立处理，调用方不能据此假定不会重复产生效果。两类报告的 `retryable` 均为 False。
 
-## handle 入口
+## handle 流程
 
-请求身份、持久终态重投和并发处理见 [handle 请求账本契约](request-ledger.md)。账本查询位于角色与接受状态检查之后、首次取消与路由检查之前；已有终态优先于新令牌的取消状态。
+1. 检查请求类型和 sink.emit；错误类型抛 TypeError。
+2. 检查触发刺激和全部 pending 的目标角色包含绑定角色，否则返回 FAILED / CONTRACT_SNAPSHOT_MISMATCH。
+3. 检查 Agent 是否接受工作；关闭期间返回 FAILED / DEPENDENCY_UNAVAILABLE。
+4. 登记本次在途调用，执行 `await Handling(self, request, plan_sink).run()`。
+5. Handling 先检查取消，再按触发刺激的 kind 查找一个处理器。已取消返回 CANCELLED / error_code=None；未注册返回 FAILED / UNSUPPORTED_STIMULUS。
+6. 创建本次 PlanEmitter，调用处理器，校验并整理 HandlingReport，最后关闭 emitter。
+7. 门面记录结果日志，并解除在途登记。
 
-1. 参数必须符合已有领域类型。对象构造时的字段、schema_version 校验仍使用领域构造异常；构造失败不会进入 Agent，也不会产生报告。传入错误的顶层参数类型属于调用错误，抛出 `TypeError`。
-2. 进入业务处理前，确认触发刺激及所有 pending 的目标角色集合包含绑定角色。失败返回 `FAILED / CONTRACT_SNAPSHOT_MISMATCH`。快照没有角色字段，角色校验使用刺激的 target_character_ids；handle 的 interaction_id 取自快照。
-3. 对有效请求，先检查运行时是否接受工作，再登记或读取请求账本；已有终态原样返回。同请求 ID 的不同内容拒绝为 `CONTRACT_SNAPSHOT_MISMATCH`。新取得处理权后检查调用令牌，已经取消则结算为 `CANCELLED`，`error_code=None`。两种取消原因都保留在原令牌中，Agent 不改写调用方令牌。
-4. 按触发刺激的 `StimulusKind` 精确选择内部处理器，每种 kind 至多注册一个处理器。未注册返回 `FAILED / UNSUPPORTED_STIMULUS`。处理器不支持本次交互时使用 `UNSUPPORTED_INTERACTION`，不把合法输入归为构造错误。
-5. 处理器处理的请求、计划和报告保留原请求、角色及交互身份；报告依据修订必须等于输入快照修订。Agent 不根据其他调用维护一个全局“最新 revision”。
+入口失败或处理器没有返回合法报告时，considered 和 retained 包含按快照顺序排列的全部 pending，consumed 为空。处理期间已经确认接收的计划标识仍保留。合法报告的消费事实保持不变；交付失败不能被处理器捕获异常后返回的成功报告掩盖。Agent 不直接修改 stage 的 pending。
 
-入口拒绝时不调用模型、capability 或 sink。报告的 considered 和 retained 都按快照顺序包含全部 pending ID；consumed 和 emitted_plan_ids 为空，reconsider_at 为 None。输入不匹配、不支持和已取消的入口结果均为 `retryable=False`。
+## realize 流程
 
-处理器通过内部 PlanEmitter 提交完整草稿，稳定计划和持久投递恢复见 [PlanEmitter 契约](plan-emitter.md)。处理开始后的计划通过 plan_sink 按正常产生顺序交付；报告只记入已成功接收的计划 ID。取消或失败不抹掉此前成功接收的计划及已形成的结算事实。Agent 不直接修改 stage 的 pending 集合。
+1. 检查计划、执行上下文及 sink.emit；错误类型抛 TypeError。
+2. 检查角色和交互身份匹配，否则返回 FAILED / CONTRACT_MISMATCH；停止接受时返回 DEPENDENCY_UNAVAILABLE。
+3. 登记本次在途调用，执行 `await Execution(self, plan, context, output_sink).run()`。
+4. 检查计划依据修订与当前修订一致、令牌未取消，并预先解析全部行动的处理器。分别以 STALE_INTERACTION、CANCELLED、UNSUPPORTED_ACTION 拒绝；全部行动保持 NOT_STARTED。
+5. 按计划顺序执行行动。每项使用独立 OutputEmitter，输出序号在本次执行内跨行动从零连续递增。
+6. 校验 ActionResult 的类型、action_id 和状态。失败或取消停止后续行动，保留已返回的效果与已完成结果，剩余行动为 NOT_STARTED。
+7. 关闭当前 emitter，返回 ExecutionReport；门面结束在途登记并记录结果。
 
-## realize 入口
+StartThinking 由 stage 消费，不能注册为 Agent 行动处理器。`output_started` 只表示本次有输出得到有效接收确认；False 不证明外部一定没有接收。接收确认不表示客户端播放或展示完成。
 
-持久身份、逐行动事实和安全继续以 [Execution Ledger](execution-ledger.md) 为准。
+## 错误与取消
 
-1. 顶层参数类型错误抛出 TypeError；角色和 plan/context 交互身份不匹配返回 FAILED / CONTRACT_MISMATCH。运行时停止接受则返回 DEPENDENCY_UNAVAILABLE；这些检查不读取执行历史。
-2. 匹配执行没有可恢复 pending 的完成或不安全失败终态优先于本次 revision、令牌和路由检查。完成项返回 ALREADY_COMPLETED，原输出和效果不重复。相同 execution_id 的不同完整计划返回 CONTRACT_MISMATCH；报告不携带原计划事实。
-3. 新执行、可安全继续的行动及仅投递恢复，检查 basis_interaction_revision 与 current_interaction_revision 一致、令牌未取消，以及全计划均有已注册处理器；对应拒绝为 STALE_INTERACTION、CANCELLED、UNSUPPORTED_ACTION。StartThinking 传入 realize 返回 UNSUPPORTED_ACTION。
-4. 首次准入拒绝不占用执行，全部行动 NOT_STARTED。恢复准入拒绝保留可信完成项及累计输出事实；仅投递恢复的原失败项按本次拒绝投影并保留效果，安全 Handler 重入及尚未开始项为 NOT_STARTED；不覆盖账本原业务结算，具体规则见输出投递契约。所有准入拒绝均 retryable=False，不执行新行动或调用 sink。
-5. 原子取得执行权后，持久登记单项开始、顺序调用处理器，提交可信 ActionResult 且本行动输出均已确认后才开始下一项。失败或取消立即停止后续行动；完成前缀的效果不阻止后续无效果、无已确认或未知输出的可信失败重试。未可信结算的开始状态禁止自动重做。
+- 投递失败后不重发，记录错误并终止本次后续交付；异常结束不回滚已发生的业务效果。
+- TimeoutError 映射 PROVIDER_TIMEOUT。SinkRejectedError 的 STALE_INTERACTION、SINK_CLOSED、BACKPRESSURE_TIMEOUT 映射同名码；其他拒绝在 handle 中为 INTERNAL_ERROR，在 realize 中为 CONTRACT_MISMATCH，UNSUPPORTED_OUTPUT 在 realize 中保留同名码。其他普通异常为 INTERNAL_ERROR。
+- 有效接收确认先记入本次内存状态，再检查协作取消。行动已返回的完成或失败结果不被晚到取消抹掉；未发生交付失败时，可信失败优先于晚到取消。
+- `processing/invocation.py` 的 call_handler 由两条流程共用。处理器开始前再次检查令牌；调用任务取消时只向处理器转发一次取消，并等待清理结束。重复取消不提前释放依赖，清理后传播 CancelledError，不保证返回报告。
+- 普通错误日志包含调用身份、稳定错误码、异常类型和栈位置，省略源码、局部变量及协作者异常原文。
 
-执行身份取自 context，计划身份取自 plan。output_started 表示累计已确认接收；False 不证明未知投递没有发生。输出保持正常调用顺序及 MessageEndOutput 的位置，sink 回执不代表播放完成。
+## 生命周期与代码位置
 
-## 错误、取消与关闭
+`processing/` 包含 Handling、Execution、call_handler、两种 emitter、输出草稿和计划身份工具。路由仍在 `handlers/stimulus/router.py` 和 `handlers/action/router.py`，详见 [路由契约](handler-routing.md)。生产注册集合为空。
 
-- sink 明确拒绝沿用 `SinkRejectedError`；不将拒绝记作成功接收。STALE_INTERACTION、SINK_CLOSED、BACKPRESSURE_TIMEOUT 映射为同名处理或执行错误码，handle 的重投规则以 PlanEmitter 契约为准，realize 的安全重试规则以 Execution Ledger 为准。IDENTITY_MISMATCH、CONTENT_CONFLICT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中映射为 CONTRACT_MISMATCH；UNSUPPORTED_OUTPUT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中保留同名码。realize 中异常退出的处理器没有可信无效果结算，因此 retryable=False。
-- 协作者抛出的 `TimeoutError` 转为 `PROVIDER_TIMEOUT`；handle 按计划恢复事实决定 retryable，realize 的普通异常不证明无效果，retryable=False；未分类的普通异常转为 `INTERNAL_ERROR`，retryable=False。失败报告保留已经确认的输出、计划和效果，异常类型、调用身份和不含源码行及局部变量的栈位置留在内部日志，协作者异常原文被省略。
-- 协作式取消在进入处理器前、每次等待返回后以及启动下一次计划交付或行动前检查。已经发起的外部效果不能因令牌取消被描述为未发生。
-- 调用任务本身收到 `asyncio.CancelledError` 时，在清理该调用拥有的工作后传播取消，不包装为 INTERNAL_ERROR，也不承诺一定返回报告。
-- `AgentRuntime.shutdown()` 开始时停止所有新 Agent 接受工作，再等待已接受调用退出，最后释放它们使用的资源。关闭期间新调用返回 `FAILED / DEPENDENCY_UNAVAILABLE`、retryable=False，其他字段按入口拒绝规则填写。
-- 关闭等待沿用运行时的有界超时；超时明确抛出 `RuntimeError`，保留仍在运行的工作和其依赖供后续关闭重试。不得把仍在运行的同步工作当作已关闭，也不得在它使用依赖时释放依赖。成功关闭后重复 shutdown 幂等；已取得的 Agent 引用仍拒绝新工作。
-- 日志关联角色、request_id 或 execution_id、interaction_id、结束状态及错误码，不记录完整刺激内容、记忆或密钥。观测不增加业务方法或报告字段。
+AgentRuntime.shutdown 停止新工作后，有界等待在途调用与清理退出，再释放资源。等待超时抛 RuntimeError 并保留依赖；后续 shutdown 可继续等待。进程终止后，不恢复未完成的门面调用。
 
-## 本版装配行为
+## 验证
 
-当前实现位于 `agent/facade.py`，由 AgentRuntime 组装；路由模块按 [Handler 路由契约](handler-routing.md) 放置于 `handlers/stimulus/router.py` 和 `handlers/action/router.py`。内部调用协议、受限交付与在途工作规则见同一文档。内部注册和接受状态属于实现细节。本版生产装配的刺激、行动处理器集合为空，因此合法且未取消的请求返回对应 UNSUPPORTED 错误。领域类型可以构造不等于该行为已经获得运行时支持。
-
-## 验证入口
-
-测试通过 AgentRuntime.get_agent 和上述两个业务方法观察结果。门面测试放在 `server/tests/agent`，运行时与兼容入口测试放在 `server/tests/agent_runtime`；内部测试装配可以注入受控协作者，外部契约测试不取得或断言私有注册表。
-
-| 场景 | 可观察结果 |
-| --- | --- |
-| 同角色重复查找、不同角色查找 | 同角色同实例，不同角色不同实例 |
-| 未知、禁用、空字符串角色 ID | KeyError，不回退默认角色 |
-| 包导出与实例公开业务面 | 只导出 Agent，只提供两个业务方法，不泄漏旧对象 |
-| 目标角色或交互不匹配、修订不一致 | 稳定失败，sink 与处理器无调用 |
-| 未注册刺激或计划中任一行动 | UNSUPPORTED，完整保留 pending 或全部 NOT_STARTED |
-| 已取消及等待期间取消 | 不启动后续工作，已确认事实不丢失 |
-| 注册冲突、协作者异常、sink 拒绝 | 装配失败或明确错误报告，无通用 LLM 回退 |
-| 关闭、新调用、关闭超时与重试 | 停止接受、有界等待、保留未完成工作和资源、成功关闭幂等 |
-| 旧兼容入口 | 仍取得旧 LuoTianyiAgent，旧聊天方法可以调用 |
-
-版本不兼容继续由已有领域构造测试验证，不通过导入失败或绕过不可变对象构造来制造 RED。
+从两个公开入口和运行时生命周期验证准入、计划及输出顺序、部分结果、错误、取消和关闭。当前测试说明见 `server/tests/agent/README.md`；旧持久化、重复调用合并和重放测试已移除。

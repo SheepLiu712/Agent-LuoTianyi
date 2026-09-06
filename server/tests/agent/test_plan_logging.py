@@ -28,7 +28,7 @@ async def test_caught_plan_failure_logs_location_without_source_or_exception_cha
         return settlement(req)
 
     runtime, _ = routed_runtime(handle=handle)
-    logger = get_logger("src.agent.planning.emitter")
+    logger = get_logger("src.agent.processing.plan_emitter")
     logger.addHandler(caplog.handler)
     try:
         report = await runtime.get_agent().handle_stimulus(request(), Sink(receive_plan))
@@ -37,7 +37,7 @@ async def test_caught_plan_failure_logs_location_without_source_or_exception_cha
 
     assert report.request_status is d.HandlingRequestStatus.FAILED
     assert report.error_code is d.HandlingErrorCode.INTERNAL_ERROR
-    assert report.retryable is True
+    assert report.retryable is False
     assert report.consumed_pending_stimulus_ids == ("m2",)
     assert report.retained_pending_stimulus_ids == ("m1",)
     assert report.emitted_plan_ids == ()

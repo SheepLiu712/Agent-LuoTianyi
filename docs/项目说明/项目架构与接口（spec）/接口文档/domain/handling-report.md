@@ -28,7 +28,7 @@
 | `emitted_plan_ids` | `tuple[str, ...]` | 本次请求已被接受的计划身份，按首次接受顺序记录 |
 | `reconsider_at` | `datetime \| None` | retained 内容的定时重评时间；有值时带时区，`None` 表示没有定时重评时间 |
 | `error_code` | `HandlingErrorCode \| None` | 请求失败的稳定原因；`FAILED` 时必填，其他状态必须为 `None` |
-| `retryable` | `bool` | 复用同一请求身份能否安全重试的声明；只接受布尔值 |
+| `retryable` | `bool` | 只接受布尔值；当前 Agent 返回 False，不要求调用者重投 |
 
 四个身份元组均允许为空，元素必须为非空白字符串，同一元组内不得重复。不同身份域独立，例如计划 ID 与刺激 ID 使用相同字符串不影响构造。
 

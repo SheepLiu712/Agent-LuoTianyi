@@ -10,6 +10,8 @@
 >
 > 本文细化并替代旧版 Agent `plan / act` PRD。服务端总体架构中的 `Stimulus`、多角色、记忆正本和外部协议兼容方向保持不变。
 
+> 当前范围修订：handle/realize 按单次调用处理，失败停止且 retryable=False；不要求 ledger 驱动的幂等、重发和进程恢复。具体流程以门面及交付接口 SPEC 为准。
+
 ## 1. 背景
 
 Agent 是项目中负责角色理解、选择、表达和行动的核心模块。未来虽然会增加电话、玩偶和箱庭世界，但这些变化不应迫使调用方理解潜意识、提示词、模型、记忆或能力执行的内部步骤。
@@ -38,7 +40,7 @@ Agent 是项目中负责角色理解、选择、表达和行动的核心模块�
 4. “回想起什么记忆”及“回想已经完成”都保留为 Agent 内部过程，不伪装成新的 Stimulus，也不要求 stage 回灌 Agent。
 5. Agent 可以安全处理不同用户、不同通话、不同设备和角色自身活动的上下文，不在 Agent 实例字段中保存一个简单的 `user_id -> context` 字典。
 6. 支持当前聊天和可预见的扩展：每日活动规划、活动中接受刺激、电话、玩偶、主动话题、日记和动态。
-7. 一次刺激处理期间可以依次产生零到多个完整、可审计、可重试的 ActionPlan；执行过程可流式输出、取消并报告部分失败。
+7. 一次刺激处理期间可以依次产生零到多个完整、可关联本次调用的 ActionPlan；执行过程可流式输出、取消并报告部分失败。
 8. 新刺激和新行动可以通过增加内部处理器和强类型领域对象扩展，不增加新的 Agent 公开方法。
 9. Realtime 电话把连续媒体传输和角色认知分开：CallStage 管理媒体流与通话生命周期，Agent 内部控制决定角色回复内容的 Realtime turn。
 10. 采用小 PR 逐条迁移调用路径；重构完成时，所有需要角色理解、选择、表达或记忆的调用方都只经过 Agent 门面。
@@ -432,7 +434,7 @@ class HandleStimulusRequest:
     cancellation: CancellationToken
 ```
 
-`request_id` 用于同一次处理请求的幂等重试。
+`request_id` 用于关联本次处理请求、计划和日志；不作为 Agent 的幂等重试键。
 
 `cancellation` 允许 stage 在交互关闭、新刺激使旧认知过期或系统停机时取消仍在等待 Recall、模型或只读能力的处理。Agent 必须把取消继续传给内部可取消操作，并且在每次输出计划前重新确认请求仍然有效。
 
@@ -571,7 +573,7 @@ class ExecutionContext:
     cancellation: CancellationToken
 ```
 
-- `execution_id`：同一个计划重试时复用，用于能力执行和持久写入幂等；
+- `execution_id`：关联本次计划执行、输出与日志；Agent 不据此恢复或合并重复调用；
 - `interaction_id`：必须与计划绑定的交互一致；
 - `cancellation`：允许 stage 请求停止长时间 TTS、唱歌或发布动作。
 
@@ -952,19 +954,17 @@ world 保存抓取游标、缓存和错误；Agent 不直接操作数据库，�
 - `COMPLETED + consumed` 且输出了计划：等待本次 handle 结束以及所有相关计划都有最终 `ExecutionReport` 后再结算；
 - `COMPLETED + retained`：保留 `retained_pending_stimulus_ids` 并设置重新判断条件；
 - `CANCELLED` 或 `FAILED`：结合已经接收计划的执行结果决定释放还是提交，不能假设整次调用没有发生；
-- 所有计划都在首次可见输出和不可回滚副作用前失败：可以释放预留并按报告决定是否重试；
+- 所有计划都在首次可见输出和不可回滚副作用前失败：可以释放预留并结束本次处理，不自动重试；
 - 任一计划已经产生可见输出或不可回滚副作用：相关刺激视为已消费，不自动从头重放；
-- 只有无通道输出的持久 Action 失败时，依据 Action 幂等性决定重试。
+- 只有无通道输出的持久 Action 失败时，记录失败并结束本次执行。
 
 “刺激已消费”只表示 stage 不应重新投递同一输入，不表示角色已经给出了语义上完整的最终回答。例如临时“让我想想……”已经输出后，正式回复生成失败，系统应记录一次不完整处理失败，但不能自动重放整轮让用户再次听到同一句临时回复。
 
-### 14.3 幂等
+### 14.3 单次处理
 
-- 同一 `stimulus_id` 不重复进入认知上下文；
-- 同一 `request_id + plan ordinal` 使用稳定 `plan_id`；重复 `emit` 内容相同则由 stage 幂等接受，内容不同属于契约错误；
-- `HandlingReport.emitted_plan_ids` 必须与 sink 实际接受的计划一致；
-- 同一 `execution_id + action_id` 的写入、发布和日程最多成功一次；
-- `interaction_id / stimulus_id / plan_id / execution_id / action_id` 必须能够串联日志。
+每次 handle 和 realize 调用独立执行。计划和输出按本次调用内的序号顺序交付，失败记录日志并停止后续执行，保留已确认结果，不自动重发、不查询历史报告、不在进程重启后恢复。两类报告的 retryable 均为 False。
+
+Request/Execution Ledger 及 outbox 不再是当前版本要求。业务存储、通知去重、长任务自身的持久状态和资源关闭仍遵守各自职责，不以重投 Agent 请求补救失败。
 
 ### 14.4 取消
 
@@ -981,7 +981,7 @@ world 保存抓取游标、缓存和错误；Agent 不直接操作数据库，�
 - 信息不足或等待外部条件：`COMPLETED + retained`，并且没有输出计划；
 - 已知刺激但角色不行动：无计划的 `COMPLETED + consumed`；
 - 未知刺激或非法 payload：接口错误；
-- Recall、模型或只读能力不可用：handle 返回 `FAILED`，并按是否已经输出计划及重试安全性填写报告；
+- Recall、模型或只读能力不可用：handle 返回 `FAILED`，保留已确认计划并设置 retryable=False；
 - 执行能力不可用：`ExecutionReport.status` 为 `FAILED`；
 - `AgentOutputSink` 遇到已关闭通道、不支持的输出类型或发送背压超限：拒绝该输出，并在对应 Action 的 `ExecutionReport` 中记录明确失败；
 - Realtime 端口不可用：CallStage 保持通道生命周期可控，handle 按是否已经产生可见输出返回失败或降级计划；
@@ -1044,7 +1044,7 @@ world 保存抓取游标、缓存和错误；Agent 不直接操作数据库，�
 - 业务代码不再直接调用角色 speech、singing、diary、dynamic 等能力；
 - 强类型刺激覆盖当前聊天以及电话、玩偶、每日规划和活动事件；
 - `SongKnowledgeDiscovered` 和 `SongLearned` 覆盖知识接受、学习任务、记忆、动态和后续日记链路；
-- 零计划、单计划、多计划、COMPLETED + retained、取消、迟到 Recall、重试、部分输出和重复执行都有 interface 级测试；
+- 零计划、单计划、多计划、COMPLETED + retained、取消、迟到 Recall、失败停止和部分输出都有 interface 级测试；
 - 四种 InteractionSnapshot 的隔离、每种 AgentOutputSink 的通道绑定与关闭行为都有契约测试；
 - Realtime 两个端口共享一次供应商会话，但媒体背压、语义事件、取消和关闭职责有独立契约测试；
 - 同一角色的多用户、多交互测试不会串用私有记忆或认知上下文；
@@ -1085,7 +1085,7 @@ world 保存抓取游标、缓存和错误；Agent 不直接操作数据库，�
 10. 玩偶连续产生 100 次振动采样时，为什么 Agent 不会收到 100 个刺激？
 11. 从 VCPedia 发现新歌时，哪些数据由 world 保存，哪些知识必须由 Agent 决定后写入？
 12. `SongLearned` 为什么可以成为 Stimulus，而普通 Recall 完成不能？学会歌曲后日记何时生成？
-13. 每日计划写入一半时进程崩溃，重试怎样避免重复日程？
+13. 每日计划写入一半时进程终止，哪些业务结果已保留，为什么不能假定 Agent 会恢复？
 14. 两个用户同时和同一角色交互时，哪些状态共享，哪些状态隔离？
 15. “本 PR 不迁移全部旧路径”为什么不代表可以永久保留旧回复入口？重构完成的可检查条件是什么？
 

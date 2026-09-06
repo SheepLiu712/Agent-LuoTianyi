@@ -30,46 +30,6 @@ async def test_handle_delivers_zero_or_more_complete_plans_in_order(routed_runti
 
 
 @pytest.mark.asyncio
-async def test_already_confirmed_same_ordinal_returns_receipt_without_second_emit(routed_runtime):
-    async def handle(req, plans):
-        first = await plans.emit(draft())
-        repeated = await plans.emit(draft(), ordinal=0)
-        assert repeated.plan_id == first.plan_id
-        assert repeated.status is d.PlanAcceptanceStatus.ALREADY_ACCEPTED
-        return settlement(req, emitted=(first.plan_id,))
-    runtime, _ = routed_runtime(handle=handle)
-    sink = Sink()
-    report = await runtime.get_agent().handle_stimulus(request(), sink)
-    assert report.request_status is d.HandlingRequestStatus.COMPLETED
-    assert len(sink.values) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["content", "action_id", "sources", "negative", "bool", "skip", "string"])
-async def test_conflicting_or_invalid_ordinal_preserves_first_acceptance(routed_runtime, case):
-    async def handle(req, plans):
-        first = await plans.emit(draft())
-        value, ordinal = draft(), 0
-        if case == "content":
-            value = draft(text="改写同槽位")
-        elif case == "action_id":
-            value = draft(actions=(replace(draft().actions[0], action_id="other"),))
-        elif case == "sources":
-            value = draft(sources=("m1",))
-        else:
-            ordinal = {"negative": -1, "bool": False, "skip": 2, "string": "0"}[case]
-        await plans.emit(value, ordinal=ordinal)
-        return settlement(req, emitted=(first.plan_id,))
-    runtime, _ = routed_runtime(handle=handle)
-    sink = Sink()
-    report = await runtime.get_agent().handle_stimulus(request(), sink)
-    assert len(sink.values) == 1
-    assert report.error_code is d.HandlingErrorCode.INTERNAL_ERROR
-    assert report.emitted_plan_ids == (sink.values[0].plan_id,)
-    assert report.consumed_pending_stimulus_ids == ()
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("case", ["unknown_source", "empty_actions", "duplicate_action", "late_thinking"])
 async def test_invalid_next_draft_does_not_reach_sink(routed_runtime, case):
     async def handle(req, plans):
@@ -167,7 +127,7 @@ async def test_caught_delivery_failure_still_logs_plan_identity_without_payload(
             pass
         return settlement(req)
     runtime, _ = routed_runtime(handle=handle)
-    loggers = [get_logger(name) for name in ("src.agent.facade", "src.agent.planning.emitter")]
+    loggers = [get_logger(name) for name in ("src.agent.facade", "src.agent.processing.plan_emitter")]
     for logger in loggers:
         logger.addHandler(caplog.handler)
     try:
@@ -176,7 +136,7 @@ async def test_caught_delivery_failure_still_logs_plan_identity_without_payload(
         for logger in loggers:
             logger.removeHandler(caplog.handler)
     assert report.request_status is d.HandlingRequestStatus.FAILED
-    assert report.retryable is True
+    assert report.retryable is False
     messages = "\n".join(record.getMessage() for record in caplog.records)
     assert "plan_id=" in messages and "ordinal=0" in messages and "INTERNAL_ERROR" in messages
     assert "luotianyi" in messages and "interaction_id=i" in messages

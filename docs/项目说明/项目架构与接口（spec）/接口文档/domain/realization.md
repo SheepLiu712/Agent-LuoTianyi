@@ -93,7 +93,7 @@ plan sink 校验并接收通知后，由 stage 直接消费、发送既有 `agen
 WriteDiary 的效果是当前的私密日记动态：固定 private、禁止评论、来源为 diary，业务去重身份为角色、用户与日期。它与通用 PublishDynamic 的存储通道相同，但业务唯一性和发布规则不同。
 
 PublishDynamic 的 `source` 同时携带当前动态页面使用的来源信息及业务身份，不再另设表达相同身份的 dedup_key。
-ReplyDynamic 的安全重投由 execution/action 身份识别；当前没有证据要求再提供一个平行的任意 dedup_key。
+ReplyDynamic 使用 execution/action 标识关联本次执行，不增加平行的任意 dedup_key；Agent 不提供重投去重。
 RequestSongLearning 的执行结果通过 EffectRef 返回实际任务身份；提交 Action 本身不表示歌曲已经学会。
 
 ## 4. ActionPlan
@@ -113,7 +113,7 @@ source_stimulus_ids 内部唯一，保持传入顺序。引用范围为本次请
 它表达计划依据，不代替 HandlingReport 的 considered/consumed/retained 结算。
 
 构造时验证序号非负。Agent 按产生顺序从零分配 ordinal，stage 按正常接收顺序处理计划；本版不要求接收器实现缺号检测、乱序重排或丢包恢复。
-plan_id 与 request/ordinal 分别服务独立计划引用和请求内排序；安全重投时两者以及完整计划值都保持不变。
+plan_id 与 request/ordinal 分别服务独立计划引用和本次请求内排序，不要求持久保存历史计划。
 
 ## 5. ActionPlanSink 与 PlanReceipt
 
@@ -148,7 +148,7 @@ ExecutionContext(
 )
 ```
 
-execution_id 标识一次计划执行及其重试，不能被不同 plan 共用。
+execution_id 标识本次计划执行，用于输出关联和日志；调用方为不同执行分配不同标识，Agent 不查询历史绑定或合并重复调用。
 context 保存传入的同一 CancellationToken；独立于原 handle 的取消令牌。
 current_interaction_revision 是开始执行时的事实，覆盖计划接收后排队期间的变化，因此与 plan.basis_interaction_revision 含义不同。
 
@@ -185,7 +185,7 @@ AudioErrorCode 为 `EMPTY_AUDIO`、`GENERATION_FAILED`，值同成员名。
 FAILED 必须有错误码，其他状态为 None。没有产生任何音频也可以发送 FAILED 结束事件，保留已有显示文本。
 此处错误码描述当前音频生成失败，业务行动的完整失败原因由 ExecutionReport 表达。
 
-Agent 生产者按发送顺序从零分配 sequence_no，文字、音频及表情跨 Action 共用同一 execution 序列。内部 Handler 只提供业务内容，身份和安全恢复由 [Agent 输出契约](../agent/output-delivery.md) 规定。发送方逐个 await emit；本版接收器按正常接收顺序处理，不要求根据序号重排、补包或建立严格重投去重机制。
+Agent 生产者按发送顺序从零分配 sequence_no，文字、音频及表情跨 Action 共用同一 execution 序列。内部 Handler 只提供业务内容，身份和单次顺序交付由 [Agent 输出契约](../agent/output-delivery.md) 规定。发送方逐个 await emit；本版接收器按正常接收顺序处理，不要求根据序号重排、补包或建立严格重投去重机制。
 每个 Say/Sing 对应一个展示消息、一条可选音频流；消息身份可由稳定 action_id 对应，持久化与 Adapter 必须使用同一映射。
 TextFinalOutput 只表示文字定稿。每个已开始投递的 Say/Sing 消息在通道可用时以一个 MessageEndOutput 结束，包括纯文字、正常音频、空音频和生成失败的消息。
 MessageEndOutput 表示该消息不会再追加文字或音频，Adapter 将其转换为既有 `is_final_package=True`；FAILED 映射到 `audio_error=True` 及对应错误码：EMPTY_AUDIO 对应 TTS_EMPTY，GENERATION_FAILED 对应 TTS_STREAM_ERROR。
@@ -235,8 +235,8 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 5. `ExecutionReport.irreversible_effect_committed` 作为只读派生属性，等于各 ActionResult 对应值的 any，不接受重复构造参数。
 6. output_started 是调用方记录的“该 execution 是否曾有输出被接收”；action_results 未携带输出列表，不能由其状态推导。retryable 表示原 execution 是否可安全继续，不表示可以换 ID 从头执行。
 
-构造器只验证以上内部关系。action_results 是否完整对应原 plan、效果是否真实提交、重试是否重复输出，需要输入计划及 ledger/sink 验证。
-同一 execution 重试复用原行动身份，已完成行动报告 ALREADY_COMPLETED；已接收的输出保持身份及内容，不重新生成后复用同一序号。retryable 表示行动可安全继续，已有副作用的行动不从头重做；UNKNOWN 接收不作为可安全重投的依据。
+构造器只验证以上内部关系。Agent 根据输入计划核对行动结果，实际效果由处理器报告，输出接收由 sink 的有效确认验证。
+当前 Agent 每次调用独立执行，retryable 固定为 False；失败停止后续行动，不自动重发或恢复。ALREADY_COMPLETED 仍是领域允许的结果值，但 Agent 不根据历史账本生成该状态，也不承诺重复调用不会再次产生效果。
 
 ## 10. 当前客户端行为的覆盖边界
 
@@ -259,7 +259,7 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 ## 11. 契约验证入口
 
 从 `src.domain.agent` 的公开构造器验证合法值、字段缺失/多余、不可变性、Say 音频互斥、计划身份唯一、报告内部关系及错误分类。
-两个 Protocol 的类型声明本身不证明运行时行为。正常排队、背压、身份绑定和持久效果幂等通过实际接收器及公开 Agent 调用验证；严格乱序/丢包恢复和跨连接投递去重不属于本版验收。
+两个 Protocol 的类型声明本身不证明运行时行为。正常排队、背压、身份绑定和单次调用的部分效果通过实际接收器及公开 Agent 调用验证；严格乱序/丢包恢复和跨连接投递去重不属于本版验收。
 兼容验证包含思考包时序、文字与音频的消息 ID、音频失败终包、TTS 独立文件块/演唱文件片段、触摸 normal 恢复及私密日记的归属和去重。
 
 当前领域测试为 `server/tests/domain/test_realization_contract.py`，同时由 `test_handle_input_contract.py` 验证 MESSAGE_END 在快照中的使用。在 server 目录运行 `python -m pytest tests/domain -q`。这些测试验证公开值与协议声明，不验证真实 sink 或客户端投递。

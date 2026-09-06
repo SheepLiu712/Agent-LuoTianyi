@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 import src.domain.agent as d
-from src.agent.outputs.drafts import MessageEndDraft
+from src.agent.processing.output_drafts import MessageEndDraft
 from routing_support import full_output
 from plan_emission_support import draft
 from routing_support import (Sink, completed, output, plan_and_context, request, settlement)  # noqa: F401
@@ -38,7 +38,7 @@ async def test_registered_handle_delivers_plan_and_settles_consumption(routed_ru
 
 
 @pytest.mark.parametrize("error,code,retryable", [
-    (TimeoutError("provider detail"), d.HandlingErrorCode.PROVIDER_TIMEOUT, True),
+    (TimeoutError("provider detail"), d.HandlingErrorCode.PROVIDER_TIMEOUT, False),
     (KeyError("business detail"), d.HandlingErrorCode.INTERNAL_ERROR, False),
     (ValueError("business detail"), d.HandlingErrorCode.INTERNAL_ERROR, False),
 ])
@@ -91,7 +91,7 @@ async def test_sink_rejection_is_stable_and_never_accepted(routed_runtime, side,
         assert report.action_results[0].status is d.ActionExecutionStatus.FAILED
         assert report.action_results[1].status is d.ActionExecutionStatus.NOT_STARTED
     assert report.error_code.name == expected
-    assert report.retryable is (side == "handle" and rejection is d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
+    assert report.retryable is False
 
 
 @pytest.mark.parametrize("change", [
