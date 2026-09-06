@@ -395,6 +395,7 @@ async def test_shutdown_waits_for_execution_owner_and_joiner(routed_runtime):
         release.set()
         left, right = await asyncio.wait_for(asyncio.gather(owner, waiter), 1)
         assert left == right and sink.values == []
+        runtime.shutdown_timeout_seconds = 1
         await runtime.shutdown()
         assert store.close_calls == 1
     finally:
