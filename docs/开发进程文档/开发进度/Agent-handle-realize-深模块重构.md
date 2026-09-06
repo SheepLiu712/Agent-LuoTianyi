@@ -1,20 +1,5 @@
 # Agent `handle_stimulus / realize_action_plan` 深模块重构进度
 
-### 2026-09-06 Request Ledger 结算日志时点修复 GREEN
-
-- 交付行为：移除处理器层尚未持久化时的完成日志，统一在公开 handle 确定最终报告后记录一次结算；终态提交失败只记录返回的依赖失败，不先宣称 completed。
-- commit 与 SPEC：账本契约已满足；初步 GREEN `e8a6b49a` 自审发现问题，日志 RED `3129691c` 复现 3 条结算日志（其中 1 条提前 completed），本记录所在 GREEN 修复，未改变领域或装配接口。
-- 验证及结果：完整命令 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **711 passed、2 skipped**；相关 Ruff、compileall 与 `git diff --check` 通过。原 44 项 Request Ledger RED 仍未修改。
-- 未验证范围：沿用下述 Request Ledger 首片的验证边界，没有新增生产数据库、跨进程首次并发登记或外部服务验收。
-
-### 2026-09-06 handle Request Ledger 持久幂等 GREEN
-
-- 交付行为：AgentRuntime 向角色门面注入现有数据库会话工厂；Request Ledger 用角色/请求复合主键登记处理权，以版本化确定 fingerprint 检查输入，提交完整 JSON 终态后返回。相同请求恢复报告、不同内容拒绝；同实例重复等待原处理，不同实例未结算占用保守拒绝。等待者取消不取消拥有者，拥有者取消保留占用；关闭等待所有已登记调用。存储错误记录稳定身份和隐藏正文的栈信息，结算失败保留已接收计划 ID。
-- interface spec：[handle 请求账本](../../项目说明/项目架构与接口（spec）/接口文档/agent/request-ledger.md)、门面和运行时接口均已定稿为当前事实；项目架构补充显式数据库注入与账本归属。公开构造和业务方法具有中文 docstring。
-- commit：SPEC `cfa5858e`，RED `8f9e25c4`；GREEN 为本记录所在提交。原 44 项 RED 测试未修改，额外 11 项真实数据库损坏注入属于首次通过的补回归。
-- 验证及结果：在 `server` 使用 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`，**710 passed、2 skipped**。聚焦原请求用例 44 passed、补充恢复用例 11 passed；相关 Ruff、compileall、`git diff --check` 通过。
-- 未验证范围：两个 world 真实网络探测跳过；没有跨进程同时首次登记争抢测试、真实业务处理器、外部能力或生产链验收。已验证临时 SQLite 的双实例争用及独立 Python 进程终态恢复。同步 SQL 调用期间的锁等待受注入引擎配置约束。此交付仅为 Request Ledger；没有实现 PlanEmitter outbox、ContextStore 或 Execution Ledger，不表示 #64 已全部解决。
-
 - 大目标：以两个有限 Agent interface 统一角色对刺激的认知决策与动作实现，逐步迁移聊天、玩偶和 world 调用链，并最终删除旧 AgentRuntime 业务代理和任意 Mapping 协议。
 - PRD：[`Agent-handle-realize-深模块重构.md`](../需求说明（PRD）/Agent-handle-realize-深模块重构.md)
 - 总体设计背景：[`Agent-handle-realize-深模块重构.md`](../设计文档/Agent-handle-realize-深模块重构.md)
@@ -23,6 +8,21 @@
 - 总体状态：进行中
 
 ## 已完成事实
+
+### 2026-09-06 Request Ledger 结算日志时点修复 GREEN
+
+- 交付行为：移除处理器层尚未持久化时的完成日志，统一在公开 handle 确定最终报告后记录一次结算；终态提交失败只记录返回的依赖失败，不先宣称 completed。
+- commit 与 SPEC：账本契约已满足；初步 GREEN `e8a6b49a` 自审发现问题，日志 RED `3129691c` 复现 3 条结算日志（其中 1 条提前 completed），GREEN `e14fb703` 修复，未改变领域或装配接口。
+- 验证及结果：完整命令 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **711 passed、2 skipped**；相关 Ruff、compileall 与 `git diff --check` 通过。原 44 项 Request Ledger RED 仍未修改。
+- 未验证范围：沿用下述 Request Ledger 首片的验证边界，没有新增生产数据库、跨进程首次并发登记或外部服务验收。
+
+### 2026-09-06 handle Request Ledger 持久幂等 GREEN
+
+- 交付行为：AgentRuntime 向角色门面注入现有数据库会话工厂；Request Ledger 用角色/请求复合主键登记处理权，以版本化确定 fingerprint 检查输入，提交完整 JSON 终态后返回。相同请求恢复报告、不同内容拒绝；同实例重复等待原处理，不同实例未结算占用保守拒绝。等待者取消不取消拥有者，拥有者取消保留占用；关闭等待所有已登记调用。存储错误记录稳定身份和隐藏正文的栈信息，结算失败保留已接收计划 ID。
+- interface spec：[handle 请求账本](../../项目说明/项目架构与接口（spec）/接口文档/agent/request-ledger.md)、门面和运行时接口均已定稿为当前事实；项目架构补充显式数据库注入与账本归属。公开构造和业务方法具有中文 docstring。
+- commit：SPEC `cfa5858e`，RED `8f9e25c4`；GREEN `e8a6b49a`。原 44 项 RED 测试未修改，额外 11 项真实数据库损坏注入属于首次通过的补回归。
+- 验证及结果：在 `server` 使用 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`，**710 passed、2 skipped**。聚焦原请求用例 44 passed、补充恢复用例 11 passed；相关 Ruff、compileall、`git diff --check` 通过。
+- 未验证范围：两个 world 真实网络探测跳过；没有跨进程同时首次登记争抢测试、真实业务处理器、外部能力或生产链验收。已验证临时 SQLite 的双实例争用及独立 Python 进程终态恢复。同步 SQL 调用期间的锁等待受注入引擎配置约束。此交付仅为 Request Ledger；没有实现 PlanEmitter outbox、ContextStore 或 Execution Ledger，不表示 #64 已全部解决。
 
 ### 2026-09-06 Agent 已注册路由、交付结算与在途关闭 GREEN
 
