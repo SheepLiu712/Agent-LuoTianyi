@@ -284,30 +284,38 @@ SPEC 的累计事实、取消可信返回与结算失败条目已覆盖，无新
 40 项执行用例全部通过；完整相关回归为 **795 passed、2 skipped**，相关 Ruff、compileall、diff 检查通过。
 
 
-## 输出序列与安全投递 RED（2026-09-06）
+## 输出生产者与持久序列 RED（2026-09-06）
 
-SPEC `cfd19773` 定义私有草稿、Agent 输出身份、连续序号、完整持久 payload 和恢复分流；
-`ed2fd6a4` 补充旧版账本缺少序列的兼容边界；`200e97c2` 区分首次 payload 丢失与已经 PREPARED 的恢复。
-三个 SPEC commit 已作者自审，UTF-8、围栏、相对链接和 diff 检查通过。公开测试入口仍为 realize_action_plan 与 AgentRuntime.shutdown。
+原完整目标 SPEC/48项测试固定在 `13e8732d`（SPEC `cfd19773`、`ed2fd6a4`、`200e97c2`；RED `8b9d9261`）。GREEN 作者只读估算完整实现需600–750行，触发每片500行门禁，因此本分支按 `11ccc9bf` / `d4d9ecc5` 锁定输出生产者完整行为：一次迁移草稿协议、Agent身份与连续序列、完整payload持久、正常投递、safe Handler重入同槽、UNKNOWN封闭和旧库兼容。两个修订SPEC已作者自审，接口文档只描述本片目标。
 
-新增 **48 项展开用例**：
+本片新增 **33项**：`test_output_sequences.py` 14项，`test_output_delivery_recovery.py` 6项，`test_output_storage_recovery.py` 13项。
 
-- `test_output_sequences.py`：14 项。四类输出的全部字段、Agent 身份、跨 Action 连续序号、并发 emit 串行、完成前缀跨 Runtime 续号、七类内容变化与旧槽冲突、safe FAILED/CANCELLED 重入先于 pending 投递、拒绝后同次重投复用槽、拒绝完整输出绕过身份分配。
-- `test_output_delivery_recovery.py`：18 项。可信完成不能丢失 pending；四类原 payload 仅投递恢复；有副作用失败/取消保留原结果；重入未 emit 旧 pending 不能进入下一行动；超时、错误回执及先确认后未知不可继续；恢复时修订/取消/路由准入；恢复所有权、等待者取消、shutdown 和拥有者取消清理；吞错仍记录不含正文的错误日志。
-- `test_output_storage_recovery.py`：16 项。PREPARED 后外部尝试标记失败、首次 payload 保存失败及一次性恢复、一次性/持续确认存储失败、旧账本四种历史、输出版本/payload/指纹/缺号/整行丢失，以及新 Python 进程中的原音频恢复和未知硬退出。
+- 序列测试覆盖四类完整内容、跨Action身份与连续编号、并发emit串行、重建后的完成前缀、七类内容冲突、safe FAILED/CANCELLED重入原槽、明确拒绝同次重投，以及拒绝完整AgentOutput绕过身份分配。
+- 交付测试覆盖UNKNOWN吞错仍停止、已确认后未知保留output_started、安全日志；可信COMPLETED吞掉REJECTED，或者safe重入没有再次emit旧pending，都不能开始下一Action、丢弃pending或重做完成Handler。本片这些未完成交付报告的retryable=False。
+- 存储测试覆盖真实版本一旧库的四种历史、首次payload保存持续/一次性故障、确认持续失败、版本/payload/指纹/缺号/输出整行丢失、未知进程硬退出。真实旧表DDL及公开调用生成的数据在fixtures，Runtime初始化前载入。
 
-工作目录 server，`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=no -rN`
-为 **43 failed、800 passed、2 skipped**。新增 48 项为 **43 failed、5 passed**；5 项首次通过是旧完整终态、首次 payload 保存持续/一次性失败、确认持续失败、未知进程硬退出的既有回归。两个跳过仍为 world 真实网络探测。
-Ruff 与 git diff --check 通过。没有产品实现、GREEN 或完成进度变更。
+工作目录server，`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent/test_output_sequences.py tests/agent/test_output_delivery_recovery.py tests/agent/test_output_storage_recovery.py -q --tb=no -rN`：**28 failed、5 passed**。
+完整相关命令 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=no -rN`：**28 failed、800 passed、2 skipped**。5项首次通过为旧完整终态、首次payload保存持续/一次性失败、确认持续失败、未知进程硬退出；两个跳过仍为world真实网络探测。
+Ruff、SPEC UTF-8/围栏/链接和git diff --check通过；没有产品代码、GREEN或完成进度修改。
+自审将新进程用例改名为 `test_fresh_python_process_does_not_take_unknown_action` 并删除未运行的safe_pending分支；定向复验为1 passed、12 deselected，未增加测试。
 
-RED 原因是实际缺失行为：序号仍由旧 Handler 提供且全部为 0、已存槽位不存在因而改内容没有冲突、可信完成吞掉拒绝后直接结束、UNKNOWN 被可信完成掩盖、已知回执一次提交失败后未补存、旧有输出的部分执行从 0 继续。没有导入、语法、环境或收集失败。
-部分后续断言必须在 GREEN 才能运行到：恢复取消/关闭测试先因首轮错误 retryable 失败；四字段综合样例先因序号失败；数据库损坏测试在旧版无输出表时不做破坏，通过公开重复调用错误成功证明目标缺失；PREPARED 故障钩子在旧版无该槽位写入时不触发，通过公开结果证明缺失。
+失败来自生产者序列仍为0、持久槽位缺失、可信完成掩盖REJECTED/UNKNOWN、旧部分执行猜测序号，以及未知输出历史未正确拒绝。不存在导入、语法、收集或环境失败。部分综合测试首先在序号或报告断言失败，后部payload/重建断言在GREEN才能运行到；损坏测试在当前没有输出表时不做破坏，通过公开重投错误成功证明目标缺失。
 
-`output_support.draft()` 仅在 RED 期间有旧协议构造桥：新私有草稿不存在时构造当前合法 AgentOutput，使公开 realize 确实进入旧行为，而非以 ModuleNotFoundError 作为 RED。GREEN 必须删除该分支、直接使用强类型草稿；桥中绑定身份不构成目标 Handler 的协议。旧数据夹具由 PR117 真实公开执行生成，初始化新版 Runtime 前载入，具体来源见 fixtures/README.md。
+`output_support.draft()` 只在RED保留旧合法AgentOutput构造桥，使公开realize进入旧行为，而非以缺少新草稿模块制造RED。GREEN删除该桥，直接使用最终草稿类型。旧routing_support.output及受控Handler统一迁移；保留外部sink、回执、效果、output_started和无重发断言。完整输出身份伪造不能被Helper静默去掉；应验证完整AgentOutput被拒绝。旧unknown_then_rejected分支首个UNKNOWN后不再真的发送第二槽位，新UNKNOWN历史重投为DEPENDENCY_UNAVAILABLE，首次保留已捕获错误映射。持续存储故障仍保持STARTED，不能补出空outbox+COMPLETED。旧SQL夹具不能用新版实现重建。
 
-GREEN 迁移注意：
+### 后续输出恢复切片的原测试定位
 
-- 原 routing_support.output 及 handler_dispatch、execution_idempotency、execution_storage_recovery、facade_inflight_shutdown 的受控 Handler 输出改为草稿；外部 sink/回执/报告断言保留。旧完整输出身份伪造用例改为验证完整 AgentOutput 被拒绝，不能让测试 Helper 把伪造字段静默去掉。
-- 旧 `unknown_then_rejected` 分支在首个 UNKNOWN 后不能真的发出第二槽位，仍保留 unknown 不可洗掉、无重发、output_started 和效果断言；新 UNKNOWN 重投统一 DEPENDENCY_UNAVAILABLE，首次保留实际错误映射。
-- Handler 可信返回并不覆盖未确认输出；旧测试若将这种情况视为 COMPLETED，应按目标 SPEC 改为未完成交付，并保留所有已知效果。确认一次提交失败且最终可信补存成功后，后续应读取已确认终态；持续存储失败仍不重做。
-- 不重建 SQL 夹具为新版格式；不删除生产路由为空、旧 get_character_runtime 兼容、取消清理与并发等待者的原有断言。
+完整源码与SPEC均可从 `13e8732d` 读取；以下17条原验收保留给独立输出恢复分支，不在本片声称已实现。其中15条从本片删除，另2条与本片基础保护重叠，最终33+17-2仍覆盖原48条：
+
+| 原文件 | 原函数与展开项 | 数量 |
+| --- | --- | --- |
+| test_output_delivery_recovery.py | test_completed_handler_with_rejected_output_cannot_start_next_action：retryable改回True | 1（重叠） |
+| test_output_delivery_recovery.py | test_safe_reentry_that_omits_pending_cannot_drop_it_or_begin_next_action：补回仅投递恢复后半 | 1（重叠） |
+| test_output_delivery_recovery.py | test_completed_action_recovers_original_payload_without_handler_reentry：四类输出 | 4 |
+| test_output_delivery_recovery.py | test_unsafe_failed_action_only_recovers_output_and_retains_original_failure：失败/取消 | 2 |
+| test_output_delivery_recovery.py | test_output_only_recovery_checks_current_admission_without_losing_facts：revision/cancel/route | 3 |
+| test_output_delivery_recovery.py | test_recovery_waiter_cancel_and_shutdown_wait_for_owned_sink | 1 |
+| test_output_delivery_recovery.py | test_recovery_owner_cancel_keeps_receipt_or_unknown_after_cleanup：可信/未知回执 | 2 |
+| test_output_storage_recovery.py | test_prepared_payload_survives_failure_before_external_attempt | 1 |
+| test_output_storage_recovery.py | test_output_storage_fault_preserves_known_receipt_and_final_settlement：ack_once | 1 |
+| test_output_storage_recovery.py | test_fresh_python_process_preserves_original_audio_and_never_takes_unknown_action：safe_pending | 1 |
