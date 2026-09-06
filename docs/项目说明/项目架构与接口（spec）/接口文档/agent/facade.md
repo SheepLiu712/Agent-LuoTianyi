@@ -48,6 +48,8 @@ async def realize_action_plan(
 
 ## realize 入口
 
+以下描述当前单次执行行为；持久身份、累计事实与安全继续的目标增量见 [Execution Ledger](execution-ledger.md)。增量实现后，账本的重投优先级与安全重试规则覆盖本节的单次入口和下节按错误码判定 retryable 的规则。
+
 1. 顶层参数类型错误抛出 `TypeError`；领域构造异常保持原约定。
 2. plan.target_character_id 必须等于绑定角色，plan.interaction_id 必须等于 execution_context.interaction_id。不匹配返回 `FAILED / CONTRACT_MISMATCH`。
 3. plan.basis_interaction_revision 必须等于 execution_context.current_interaction_revision，否则返回 `FAILED / STALE_INTERACTION`。
