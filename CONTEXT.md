@@ -24,6 +24,14 @@ _Avoid_: Connection, user session
 The role that organizes one kind of interaction around the Agent boundary, including ordering, deadlines, cancellation, output binding, and settlement. ChatStage, ToyStage, and WorldStage may use different state machines.
 _Avoid_: Global stage, universal BaseStage
 
+**Interaction Snapshot**:
+The immutable Chat, Toy, or World facts supplied to one handle request. Interaction ID identifies the continuous interaction; interaction revision identifies the Stage-owned decision basis within it. Input details are defined in [the handle input SPEC](docs/项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md), currently a draft without implementation.
+_Avoid_: Live Stage context, global state version, typing or image-selection state copies
+
+**Cancellation Token**:
+The shared mutable control object supplied with a handle request. Stage requests cancellation and Agent observes it. The first reason is retained: SUPERSEDED means the decision basis is outdated; NO_LONGER_NEEDED means handling is no longer required. Cancellation does not roll back accepted plans or committed effects.
+_Avoid_: Immutable cancellation snapshot, automatic pending consumption, resettable token
+
 **World**:
 The sandbox environment outside the Agent. It owns authoritative world and activity facts, produces normalized external events, and applies world-side effects; relative to the Agent it occupies a role analogous to the user in chat.
 _Avoid_: Agent mind, WorldStage, clock

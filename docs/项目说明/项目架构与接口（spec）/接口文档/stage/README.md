@@ -76,4 +76,6 @@ stage 负责一次交互如何流动：接收规范化输入、按用户串行�
 
 ## 依赖边界
 
+目标 handle 输入以 [handle 输入契约](../domain/handle-input.md)为准（SPEC 第一版，尚未实现）。stage 拥有 interaction 身份、单调修订号、pending、等待控制及取消决策；快照冻结调用时事实，令牌负责在调用期间通知取消。新刺激使旧判断过时时使用 `SUPERSEDED`；决定无需继续处理时使用 `NO_LONGER_NEEDED`。删除快照里的打字和选图状态副本不删除 stage 的等待流程或既有协调 Stimulus。
+
 目标依赖为 `Adapter -> stage -> agent_runtime -> agent`。当前 stage 仍直接使用部分 Agent 回复类型、SystemRuntime 和 capability 对象，这些属于迁移中的事实接口，不是鼓励新增的调用方式。

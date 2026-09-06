@@ -419,6 +419,8 @@ class Agent:
 
 ### 7.2 输入
 
+本节保留长期需求背景，当前版本的具体输入以 [handle 输入契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)为权威（2026-09-06 SPEC 第一版，尚未实现）：快照使用 Chat、Toy、World 三种变体；保留 `interaction_id`、`interaction_revision`、`supported_outputs` 和 Chat 的 `ConnectionState`；删除 `TypingState`、`ImageSelectionState`、`DeviceOutputLimits`，暂不建立 `ContactState`。取消令牌传入后仍由 stage 更新，至少表达是否取消及“过时 / 无需处理”两类原因。下文 Call、CharacterActivity 与连续接触描述不构成本版本输入要求；Stimulus 字段以 [Stimulus 契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/stimulus.md)为准，目标协议不含任意 payload 或公开持久化策略。
+
 ```python
 @dataclass(frozen=True)
 class HandleStimulusRequest:

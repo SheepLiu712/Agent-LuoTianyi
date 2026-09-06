@@ -187,6 +187,8 @@ async def handle_stimulus(
 
 #### `HandleStimulusRequest`
 
+本节输入字段的当前权威定义见 [handle 输入契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)（2026-09-06 SPEC 第一版，尚未实现）。`CancellationToken` 由 stage 更新，Agent 观察；当前取消原因只有 `SUPERSEDED`（过时）和 `NO_LONGER_NEEDED`（无需处理），首次原因保留，取消后不能复活。
+
 | 字段 | 类型 | 含义 | 约束 |
 | --- | --- | --- | --- |
 | `request_id` | `str` | 一次逻辑认知请求的稳定身份，也是安全重投键 | 非空；不能跨不同 interaction snapshot 复用 |
@@ -348,11 +350,11 @@ Stimulus 构造契约错误使用独立于 HandlingReport 运行时失败的最�
 
 | 变体 | 含义 | 专有字段（类型：含义） |
 | --- | --- | --- |
-| `ChatInteractionSnapshot` | 一段文字/图片/非 Realtime 语音聊天的交互事实 | `conversation_ref: SnapshotRef`：对话摘要和近期记录的受控引用；`response_deadline: Optional[datetime]`：当前聚合截止时间；`typing_state: TypingState`：最近输入长度与信号修订；`image_selection_state: ImageSelectionState`：当前选择流程与状态；`connection_state: ConnectionState`：仅描述输出通道是否可用 |
-| `ToyInteractionSnapshot` | 一台交互设备与角色之间的持续交互事实 | `device_id: str`：设备身份；`online: bool`：在线状态；`continuous_contact: Optional[ContactState]`：聚合后的持续接触；`device_output_limits: DeviceOutputLimits`：设备可呈现限制 |
+| `ChatInteractionSnapshot` | 一段文字/图片/非 Realtime 语音聊天的交互事实 | `conversation_ref: SnapshotRef`：对话摘要和近期记录的受控引用；`response_deadline: Optional[datetime]`：当前聚合截止时间；`connection_state: ConnectionState`：仅描述输出通道是否可用 |
+| `ToyInteractionSnapshot` | 一台交互设备与角色之间的持续交互事实 | `device_id: str`：设备身份；`online: bool`：在线状态；可呈现输出种类使用公共 `supported_outputs` |
 | `WorldInteractionSnapshot` | 同一人格与箱庭世界长期交互的事实快照 | `world_id: str`：箱庭身份；`world_revision: int`：所读权威 world 快照修订；`activity_id: Optional[str]`：当前相关活动；`activity_revision: Optional[int]`：所读活动状态修订；`planning_cycle_id: Optional[str]`：相关规划周期；`visible_world_ref: SnapshotRef`：Agent 可见 world 事实；`schedule_revision: int`：日程修订 |
 
-stage 只提供它拥有的交互事实。记忆、画像、关系、AttentionPlan、RecallResult、提示词和模型会话内容不属于 InteractionSnapshot。
+stage 只提供它拥有的交互事实。记忆、画像、关系、AttentionPlan、RecallResult、提示词和模型会话内容不属于 InteractionSnapshot。2026-09-06 输入 SPEC 保留 `interaction_id` 与 `interaction_revision` 的不同职责，删除 `TypingState`、`ImageSelectionState`、`DeviceOutputLimits`，暂不建立 `ContactState`；字段约束以 [handle 输入契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)为准。
 
 #### `ActionPlanSink`
 
