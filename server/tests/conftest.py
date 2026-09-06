@@ -5,6 +5,9 @@ import pytest
 
 
 _ACTIVE_TEST_FILES = {
+    (Path(__file__).parent / "agent" / "test_facade_contract.py").resolve(),
+    (Path(__file__).parent / "agent_runtime" / "test_agent_lookup.py").resolve(),
+    (Path(__file__).parent / "agent_runtime" / "test_legacy_agent_access.py").resolve(),
     (Path(__file__).parent / "world" / "test_world_task_citywalk.py").resolve(),
     (Path(__file__).parent / "world" / "test_world_task_proactive_topic_check.py").resolve(),
     (Path(__file__).parent / "world" / "test_world_task_event_cleanup.py").resolve(),
