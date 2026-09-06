@@ -2,7 +2,7 @@
 import json
 
 import pytest
-from sqlalchemy import MetaData, Table, select, update
+from sqlalchemy import MetaData, Table, event, select, update
 
 import src.domain.agent as d
 from routing_support import Sink, plan_and_context, request, settlement
@@ -66,3 +66,36 @@ async def test_corrupt_persisted_record_refuses_replay_without_reprocessing(
         assert report.error_code is d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
         assert report.retryable is False
     assert sink.values == []
+
+
+@pytest.mark.asyncio
+async def test_commit_failure_logs_only_the_returned_failed_settlement(routed_runtime, runtime_dependencies, caplog):
+    from src.utils.logger import get_logger
+
+    kwargs, _ = runtime_dependencies
+    sessions = kwargs["database_manager"].open_sql_session
+    reject_settlement = False
+
+    def before_commit(session):
+        if reject_settlement:
+            raise RuntimeError("commit unavailable")
+
+    async def handle(req, plans):
+        nonlocal reject_settlement
+        result = await _deliver(req, plans)
+        reject_settlement = True
+        return result
+
+    runtime, _ = routed_runtime(handle=handle)
+    logger = get_logger("src.agent.facade")
+    logger.addHandler(caplog.handler)
+    event.listen(sessions, "before_commit", before_commit)
+    try:
+        report = await runtime.get_agent().handle_stimulus(request(), Sink())
+        assert report.error_code is d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
+        settlements = [record.getMessage() for record in caplog.records if "Agent settlement" in record.getMessage()]
+        assert len(settlements) == 1
+        assert "status=failed" in settlements[0]
+    finally:
+        event.remove(sessions, "before_commit", before_commit)
+        logger.removeHandler(caplog.handler)

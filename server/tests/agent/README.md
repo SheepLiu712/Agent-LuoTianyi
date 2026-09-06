@@ -1,5 +1,12 @@
 # Agent 门面入口测试
 
+## Request Ledger 结算日志 RED（2026-09-06）
+
+对 GREEN `e8a6b49a` 自审时发现：终态提交失败之前，旧处理器层已经记录 COMPLETED，
+随后外层又重复记录 FAILED。新增公开 handle + SQL 提交失败 + 日志接收器用例，要求
+仅记录最终返回的失败结算；`-m pytest tests/agent/test_request_storage_recovery.py -k logs_only -q --tb=short`
+实跑 **1 failed**，实际出现 3 条结算日志，第一条错误宣称 completed。
+
 ## Request Ledger GREEN（2026-09-06）
 
 SPEC `cfa5858e`、RED `8f9e25c4`；44 项原 RED 测试保持不变，GREEN 后全部通过。
