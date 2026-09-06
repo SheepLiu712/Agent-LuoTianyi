@@ -52,6 +52,91 @@ class Agent:
         self._execution_ledger = ExecutionLedger(character_id, sql_session_factory)
         self._executing: dict[str, tuple[str, asyncio.Future]] = {}
 
+    async def handle_stimulus(self, request: d.HandleStimulusRequest,
+                              plan_sink: d.ActionPlanSink) -> d.HandlingReport:
+        """校验并登记刺激，交付稳定计划并持久结算；重投读取终态或恢复原计划。
+
+        相同 ID 的不同内容拒绝；并发重复等待原调用，等待者取消不影响拥有者。
+        恢复仅交付已存计划，不重跑处理器；存储或未结算占用返回依赖失败。
+        参数错误抛 TypeError。协作取消保留已确认事实；认知任务取消保留占用，
+        恢复任务取消在清理及可信结算后释放恢复权，两者均传播 CancelledError。
+        """
+        if not isinstance(request, d.HandleStimulusRequest):
+            raise TypeError("request must be HandleStimulusRequest")
+        self._check_sink(plan_sink)
+        stimuli = (request.stimulus, *request.interaction.pending_stimuli)
+        error = None
+        status = d.HandlingRequestStatus.FAILED
+        if any(self._character_id not in item.target_character_ids for item in stimuli):
+            error = d.HandlingErrorCode.CONTRACT_SNAPSHOT_MISMATCH
+        elif not self._accepting:
+            error = d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
+        if error is not None:
+            report = self._handling_failure(request, status, error)
+            self._record(request.request_id, request.interaction.interaction_id, status, error)
+            return report
+        completion = self._begin_call()
+        report = None
+        try:
+            try:
+                identity = fingerprint(self._character_id, request)
+                state, stored_report = self._request_ledger.claim(request.request_id, identity)
+            except Exception as error:
+                report = self._storage_failure(request, error)
+                return report
+
+            # 已有请求读取终态、拒绝冲突、等待拥有者或恢复原计划，不重新认知。
+            if state != "owner":
+                report = await self._handle_existing_request(request, plan_sink, identity, state, stored_report)
+                return report
+
+            # 新请求取得处理权后才运行刺激处理器，并持久结算计划接收与消费事实。
+            report = await self._process_request(request, plan_sink, identity)
+            return report
+        finally:
+            try:
+                if report is not None:
+                    self._record(request.request_id, request.interaction.interaction_id,
+                                 report.request_status, report.error_code)
+            finally:
+                self._end_call(completion)
+
+    async def realize_action_plan(self, plan: d.ActionPlan, execution_context: d.ExecutionContext,
+                                  output_sink: d.AgentOutputSink) -> d.ExecutionReport:
+        """持久校验执行身份，预检全计划并顺序执行；重投跳过已完成行动。
+
+        可信无效果且无已确认/未知输出的失败允许原执行安全继续；存储失败或
+        未结算的开始状态阻止重做。相同执行的并发等待者共享拥有者报告。
+        输出由 Agent 绑定身份与连续序号，完整落库后串行投递；已有槽位只接受
+        原内容，未知接收禁止重发，未完成交付阻止后续行动。
+        已可信结算的行动仅恢复安全待投递原值；确认写入失败由最终结算补齐，
+        本次仍报告存储失败，不继续新行动。
+        类型错误抛 TypeError；任务取消在可信结果持久结算和清理后传播。
+        """
+        if not isinstance(plan, d.ActionPlan) or not isinstance(execution_context, d.ExecutionContext):
+            raise TypeError("plan and execution_context must be domain objects")
+        self._check_sink(output_sink)
+        context = execution_context
+        error = None
+        if plan.target_character_id != self._character_id or plan.interaction_id != context.interaction_id:
+            error = d.ExecutionErrorCode.CONTRACT_MISMATCH
+        elif not self._accepting:
+            error = d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
+        if error is not None:
+            report = self._execution_report(plan, context, d.ExecutionStatus.FAILED, error, [], False, False)
+        else:
+            completion = self._begin_call()
+            try:
+                report = await Execution(self, plan, context, output_sink).run()
+            except asyncio.CancelledError:
+                self._record(context.execution_id, context.interaction_id,
+                             d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED)
+                raise
+            finally:
+                self._end_call(completion)
+        self._record(context.execution_id, context.interaction_id, report.status, report.error_code)
+        return report
+
     def _stop_accepting(self) -> None:
         self._accepting = False
 
@@ -90,54 +175,24 @@ class Agent:
                                            self._error_code(cleanup_error, d.ExecutionErrorCode), cleanup_error)
             raise
 
-    async def handle_stimulus(self, request: d.HandleStimulusRequest,
-                              plan_sink: d.ActionPlanSink) -> d.HandlingReport:
-        """校验并登记刺激，交付稳定计划并持久结算；重投读取终态或恢复原计划。
-
-        相同 ID 的不同内容拒绝；并发重复等待原调用，等待者取消不影响拥有者。
-        恢复仅交付已存计划，不重跑处理器；存储或未结算占用返回依赖失败。
-        参数错误抛 TypeError。协作取消保留已确认事实；认知任务取消保留占用，
-        恢复任务取消在清理及可信结算后释放恢复权，两者均传播 CancelledError。
-        """
-        if not isinstance(request, d.HandleStimulusRequest):
-            raise TypeError("request must be HandleStimulusRequest")
-        self._check_sink(plan_sink)
-        stimuli = (request.stimulus, *request.interaction.pending_stimuli)
-        error = None
-        status = d.HandlingRequestStatus.FAILED
-        if any(self._character_id not in item.target_character_ids for item in stimuli):
-            error = d.HandlingErrorCode.CONTRACT_SNAPSHOT_MISMATCH
-        elif not self._accepting:
-            error = d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
-        if error is not None:
-            report = self._handling_failure(request, status, error)
-            self._record(request.request_id, request.interaction.interaction_id, status, error)
-            return report
-        completion = self._begin_call()
-        try:
-            report = await self._handle_registered(request, plan_sink)
-            self._record(request.request_id, request.interaction.interaction_id,
-                         report.request_status, report.error_code)
-            return report
-        finally:
-            self._end_call(completion)
-
-    def _storage_failure(self, request, error=None, emitted=()):
+    def _storage_failure(self, request: d.HandleStimulusRequest, error=None, emitted=()):
         code = d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
         if error is not None:
             self._record_exception(request.request_id, request.interaction.interaction_id, code, error)
         return self._handling_failure(request, d.HandlingRequestStatus.FAILED, code, emitted)
 
-    async def _handle_registered(self, request, sink):
-        try:
-            identity = fingerprint(self._character_id, request)
-            state, report = self._request_ledger.claim(request.request_id, identity)
-            if state in {"terminal", "recovery"}:
+    async def _handle_existing_request(
+        self, request: d.HandleStimulusRequest, sink: d.ActionPlanSink,
+        identity: str, state: str, report: d.HandlingReport | None,
+    ) -> d.HandlingReport:
+        """处理已有请求的重投；原计划恢复也不会重新运行刺激处理器。"""
+        if state in {"terminal", "recovery"}:
+            try:
                 self._validate_handling_report(request, report, report.emitted_plan_ids)
-                if state == "terminal":
-                    return report
-        except Exception as error:
-            return self._storage_failure(request, error)
+            except Exception as error:
+                return self._storage_failure(request, error)
+            if state == "terminal":
+                return report
         if state == "conflict":
             return self._handling_failure(request, d.HandlingRequestStatus.FAILED,
                                           d.HandlingErrorCode.CONTRACT_SNAPSHOT_MISMATCH)
@@ -147,17 +202,24 @@ class Agent:
                 return self._storage_failure(request)
             result = await asyncio.shield(active[1])
             return result if result is not None else self._storage_failure(request)
+        return await self._process_request(request, sink, identity, provisional=report)
+
+    async def _process_request(
+        self, request: d.HandleStimulusRequest, sink: d.ActionPlanSink, identity: str,
+        *, provisional: d.HandlingReport | None = None,
+    ) -> d.HandlingReport:
+        """在持有处理权时交付并结算；已有临时报告时只恢复计划，否则处理新请求。"""
         outcome = asyncio.get_running_loop().create_future()
         self._handling[request.request_id] = identity, outcome
         result, plans = None, None
         try:
             try:
                 plans = PlanEmitter(self._character_id, request, sink, self._request_ledger.outbox,
-                                    recovery=state == "recovery")
+                                    recovery=provisional is not None)
             except Exception as error:
                 return self._storage_failure(request, error)
-            if state == "recovery":
-                result = await self._recover(request, plans, report, identity)
+            if provisional is not None:
+                result = await self._recover(request, plans, provisional, identity)
             else:
                 result = plans.finish(await self._handle_once(request, plans))
             try:
@@ -165,7 +227,7 @@ class Agent:
             except Exception as error:
                 result = self._storage_failure(request, error, result.emitted_plan_ids)
                 return result
-            if state == "recovery" and request.cancellation.is_cancelled:
+            if provisional is not None and request.cancellation.is_cancelled:
                 result = replace(result, request_status=d.HandlingRequestStatus.CANCELLED,
                                  error_code=None, retryable=False)
             return result
@@ -175,7 +237,7 @@ class Agent:
             outcome.set_result(result)
             self._handling.pop(request.request_id)
 
-    async def _recover(self, request, plans, provisional, identity):
+    async def _recover(self, request: d.HandleStimulusRequest, plans: PlanEmitter, provisional, identity):
         if request.cancellation.is_cancelled:
             return provisional
         try:
@@ -253,42 +315,6 @@ class Agent:
             retained_pending_stimulus_ids=pending, emitted_plan_ids=tuple(emitted),
             reconsider_at=None, error_code=error, retryable=retryable,
         )
-
-    async def realize_action_plan(self, plan: d.ActionPlan, execution_context: d.ExecutionContext,
-                                  output_sink: d.AgentOutputSink) -> d.ExecutionReport:
-        """持久校验执行身份，预检全计划并顺序执行；重投跳过已完成行动。
-
-        可信无效果且无已确认/未知输出的失败允许原执行安全继续；存储失败或
-        未结算的开始状态阻止重做。相同执行的并发等待者共享拥有者报告。
-        输出由 Agent 绑定身份与连续序号，完整落库后串行投递；已有槽位只接受
-        原内容，未知接收禁止重发，未完成交付阻止后续行动。
-        已可信结算的行动仅恢复安全待投递原值；确认写入失败由最终结算补齐，
-        本次仍报告存储失败，不继续新行动。
-        类型错误抛 TypeError；任务取消在可信结果持久结算和清理后传播。
-        """
-        if not isinstance(plan, d.ActionPlan) or not isinstance(execution_context, d.ExecutionContext):
-            raise TypeError("plan and execution_context must be domain objects")
-        self._check_sink(output_sink)
-        context = execution_context
-        error = None
-        if plan.target_character_id != self._character_id or plan.interaction_id != context.interaction_id:
-            error = d.ExecutionErrorCode.CONTRACT_MISMATCH
-        elif not self._accepting:
-            error = d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
-        if error is not None:
-            report = self._execution_report(plan, context, d.ExecutionStatus.FAILED, error, [], False, False)
-        else:
-            completion = self._begin_call()
-            try:
-                report = await Execution(self, plan, context, output_sink).run()
-            except asyncio.CancelledError:
-                self._record(context.execution_id, context.interaction_id,
-                             d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED)
-                raise
-            finally:
-                self._end_call(completion)
-        self._record(context.execution_id, context.interaction_id, report.status, report.error_code)
-        return report
 
     @staticmethod
     def _action_result(action, status=d.ActionExecutionStatus.NOT_STARTED, error=None):

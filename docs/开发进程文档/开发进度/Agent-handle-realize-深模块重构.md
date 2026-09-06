@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-06 门面公共入口与请求分流整理
+
+- 交付内容：两个公共方法紧随 `__init__`；handle 入口直接登记请求，已有请求在 `_handle_existing_request` 处理后提前返回，新请求进入 `_process_request`。新处理和计划恢复共用处理权、交付及结算生命周期，原 `_handle_registered` 已删除；保留工作区已有的参数类型注解。
+- SPEC 检查：facade、request-ledger、plan-emitter 的现有契约已满足，公开接口与行为不变；纯内部重构不新增 SPEC 或 RED commit，使用既有行为回归验证。
+- commit：本记录所在 `codex/agent-facade-flow` 分支的 refactor 提交。
+- 验证及结果：server 下运行 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime -q --tb=short`，重构前 338 passed（65.62s），重构后 338 passed（46.21s）；Ruff 与 diff 检查通过。AST 确认类方法顺序为初始化、handle、realize，realize 及其他未调整方法保持原样；未修改测试。
+- 未验证范围：未运行完整 Server、外部服务或生产环境验收。
+
 ### 2026-09-06 原输出恢复与可信结算补齐 GREEN
 
 - 交付行为：可信完成或不安全失败行动的safe pending只投递原值，不重跑Handler；安全失败仍先重入Handler。恢复经过全计划准入与执行所有权，错误报告保留原效果及输出事实，失败不转换成业务完成。确认临时存储失败在最终可信结算补齐，本次仍停止新工作；首次payload保存失败保持未知，已有完整payload的尝试标记失败保留安全恢复值。
