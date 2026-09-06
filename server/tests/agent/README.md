@@ -100,3 +100,12 @@ SPEC：`4c031a4c`，在提交并自审路由调用、单次交付事实和关闭
 handle 不消费 pending，realize 所有行动仍 NOT_STARTED。
 `python -m pytest tests/agent/test_handler_dispatch.py -k cancel_before_worker -q --tb=short`
 为 2 failed：handle 错误消费 m2，realize 错误记录首行动完成；两者最终 CANCELLED 状态无法掩盖已启动业务的错误。
+
+## 处理器启动前检查 GREEN（2026-09-06）
+
+保持 `38322bd9` 两项 RED 不变，门面在拥有的任务实际开始时再次检查令牌。
+检查通过才创建业务协程；调度期间取消不调用处理器，handle 保留 pending，realize 保留 NOT_STARTED。
+调用登记发生在 worker 创建前，解除发生在 worker 正常退出或取消清理结束后。
+
+最终完整命令 `D:/Anaconda/envs/lty/python.exe -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`
+为 **655 passed、2 skipped**（agent/agent_runtime 共 110 项）。相关 Ruff 与 compileall 通过；测试没有改变原 RED 期望。

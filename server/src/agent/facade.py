@@ -12,6 +12,10 @@ class _DeliveryCancelled(Exception):
     """协作式取消，区别于调用任务收到的 CancelledError。"""
 
 
+class _HandlerNotStarted(_DeliveryCancelled):
+    """处理器任务调度后、业务调用前已取消，尚未开始任何行动。"""
+
+
 class _OutputIdentityError(ValueError):
     """处理器尝试交付不属于当前行动的输出。"""
 
@@ -126,9 +130,14 @@ class Agent:
         completion.set_result(None)
         self._inflight.discard(completion)
 
-    async def _call_handler(self, awaitable, call_id, interaction_id):
+    async def _call_handler(self, call, cancellation, call_id, interaction_id):
         # 门面拥有处理器任务；调用方重复取消不能再次取消其正在进行的清理。
-        worker = asyncio.create_task(awaitable)
+        async def run():
+            if cancellation.is_cancelled:
+                raise _HandlerNotStarted()
+            return await call()
+
+        worker = asyncio.create_task(run())
         try:
             return await asyncio.shield(worker)
         except asyncio.CancelledError:
@@ -182,7 +191,7 @@ class Agent:
         plans = _PlanDelivery(self._character_id, request, sink)
         try:
             try:
-                report = await self._call_handler(handler.handle(request, plans),
+                report = await self._call_handler(lambda: handler.handle(request, plans), request.cancellation,
                                                   request.request_id, request.interaction.interaction_id)
                 self._validate_handling_report(request, report, plans.accepted_ids)
                 if request.cancellation.is_cancelled:
@@ -274,11 +283,15 @@ class Agent:
                     break
                 outputs = _OutputDelivery(action.action_id, context, sink)
                 try:
-                    result = await self._call_handler(handler.realize(action, context, outputs),
+                    result = await self._call_handler(lambda: handler.realize(action, context, outputs),
+                                                      context.cancellation,
                                                       context.execution_id, context.interaction_id)
                     if (not isinstance(result, d.ActionResult) or result.action_id != action.action_id
                             or result.status is d.ActionExecutionStatus.NOT_STARTED):
                         raise ValueError("invalid action result")
+                except _HandlerNotStarted:
+                    status, error = d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED
+                    break
                 except _DeliveryCancelled:
                     result = self._action_result(action, d.ActionExecutionStatus.CANCELLED,
                                                  d.ExecutionErrorCode.CANCELLED)

@@ -14,8 +14,8 @@
 - 交付行为：AgentRuntime 为每角色装配两个独立空路由器；内部注册严格拒绝重复和非法键，门面通过两个业务接口调用已注册处理器。处理器获得单次受限 sink，计划/输出身份与回执校验、已确认事实、部分失败、行动顺序、协作取消及并发交互隔离均已实现。AgentRuntime 停止接受后等待在途处理器及清理，超时保留依赖供重试。
 - 关闭修复：门面拥有处理器任务，调用方 Task.cancel 只向处理器转发一次，重复取消继续等待异步或同步清理，避免线程仍使用资源时提前关闭。没有修改共享 asyncio helper。
 - interface spec：agent/facade.md、agent/handler-routing.md、agent_runtime/README.md 已按实现定稿；公开接口和路由协议提供中文 docstring。日志保存关联身份、稳定错误码、异常类型及栈位置，省略原异常正文和局部变量。
-- commit：SPEC `4c031a4c`，RED `d870214c`，初步 GREEN `d21a2aeb`；重复调用方取消 RED `f5765cee`，最终 GREEN 为本记录所在提交。
-- 验证及结果：原 69 项新增 RED 及原 38 项入口/兼容测试通过；补充的重复取消 RED 在初步 GREEN 上以关闭错误返回成功失败，修复后原断言保持不变并通过。`D:/Anaconda/envs/lty/python.exe -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 653 passed、2 skipped。相关产品代码与测试 Ruff、compileall、git diff --check 通过。`server/src` 的 get_agent 搜索仅剩方法定义，三处旧链路保持 get_character_runtime(...).conscious。
+- commit：SPEC `4c031a4c`，RED `d870214c`，初步 GREEN `d21a2aeb`；重复调用方取消 RED `f5765cee` / GREEN `4f822f6d`；处理器实际开始前取消 RED `38322bd9`，最终 GREEN 为本记录所在提交。
+- 验证及结果：原 69 项新增 RED 及原 38 项入口/兼容测试通过；补充的重复取消 RED 在初步 GREEN 上以关闭错误返回成功失败，修复后原断言保持不变并通过。另补 handle/realize 两项调度期间取消测试，先以错误消费/完成行动失败；处理器实际启动前检查令牌后通过。`D:/Anaconda/envs/lty/python.exe -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 655 passed、2 skipped。相关产品代码与测试 Ruff、compileall、git diff --check 通过。`server/src` 的 get_agent 搜索仅剩方法定义，三处旧链路保持 get_character_runtime(...).conscious。
 - 审核与验证范围：作者自审完成，尚未进行独立 PR 审核；本地测试使用受控内部处理器与接收器。两项真实网络探测跳过，未验证真实模型、capability、客户端、设备或生产服务器。本版生产处理器注册为空。
 
 ### 2026-09-06 Agent 空注册门面入口与旧查找迁移 GREEN
