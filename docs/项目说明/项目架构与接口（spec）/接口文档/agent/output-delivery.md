@@ -40,6 +40,8 @@ OutputDraft 表达以上四类的联合；字段含义与领域输出相同。�
 
 有效回执后本地确认提交失败，本次保留 output_started=True，停止本次新工作并报告 DEPENDENCY_UNAVAILABLE。若 Handler 最终返回可信结果，最终结算事务补存本次已经观察到的回执和结果；补存成功后后续调用读取该已确认事实，不多发送一次已知接收的输出。补存仍失败则持久 UNKNOWN 保守阻止重投，不把内存事实当作跨进程已完成。持久故障始终记录安全日志。
 
+完整 payload 首次保存失败和 PREPARED 已保存但 UNKNOWN 标记失败是两种情况。前者没有可恢复输出值，即使 Handler 吞错返回 COMPLETED、随后数据库恢复，也不能只保存该完成结果；保留未可信结算的 STARTED，后续 DEPENDENCY_UNAVAILABLE，不生成空 outbox 的成功终态。后者有持久完整值且能证明未调用外部 sink，最终可信结果可与该 PREPARED 保留，后续按仅投递规则恢复。本次报告均保留已观察效果并报告存储失败。
+
 output_started 仅表示该 execution 曾确认接收过输出，未知接收不会令其变 True。已有 confirmed 后又出现 UNKNOWN，仍保持 output_started=True。当前接收协议没有跨连接去重保证；本机制只重投可证明未接收的原值，不借任意 sink 声称恰好一次投递。
 
 ## 行动结算与恢复分流
