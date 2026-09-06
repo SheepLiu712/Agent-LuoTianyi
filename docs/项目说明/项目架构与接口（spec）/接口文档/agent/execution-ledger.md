@@ -1,12 +1,12 @@
 # Execution Ledger 与逐行动恢复契约
 
-状态：逐行动账本已实现；涉及输出草稿、持久槽位和连续序列的增量为[输出投递目标契约](output-delivery.md)，尚未实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
+状态：逐行动账本及[输出投递契约](output-delivery.md)已实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
 
 ## 所有权与装配
 
 `agent/ledgers/execution_ledger.py` 保存执行身份及逐行动事实，`_execution_codec.py` 校验持久事实；`agent/execution.py` 协调准入、按行动执行和受限输出。AgentRuntime 通过已有 `sql_session_factory` 装配参数注入 `database_manager.open_sql_session`，账本使用原数据库中的独立表，关闭自己创建的 SQLAlchemy Session。事务只覆盖登记、读取和结算，不跨越 Handler 或 sink 的 await。初始化失败沿用 AgentRuntime 初始化回滚。
 
-ActionHandler 的目标内部协议为 `realize(action, execution_context, outputs: OutputEmitter) -> ActionResult`。门面创建每行动受限 outputs；处理器提交强类型草稿，由 Agent 分配完整输出身份，不能取得外部 sink 或账本。生产路由保持为空。Agent 包只导出 Agent，业务方法仍为两个。
+ActionHandler 的内部协议为 `realize(action, execution_context, outputs: OutputEmitter) -> ActionResult`。门面创建每行动受限 outputs；处理器提交强类型草稿，由 Agent 分配完整输出身份，不能取得外部 sink 或账本。生产路由保持为空。Agent 包只导出 Agent，业务方法仍为两个。
 
 ## 身份与入口
 

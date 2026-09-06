@@ -1,6 +1,6 @@
 # 输出身份、持久序列与安全投递
 
-状态：目标契约，尚未实现。公开入口为 `Agent.realize_action_plan(plan, execution_context, output_sink) -> ExecutionReport`；领域输出、回执、错误和报告沿用 [realization](../domain/realization.md)。
+状态：已实现。公开入口为 `Agent.realize_action_plan(plan, execution_context, output_sink) -> ExecutionReport`；领域输出、回执、错误和报告沿用 [realization](../domain/realization.md)。
 
 ## 所有权和调用
 

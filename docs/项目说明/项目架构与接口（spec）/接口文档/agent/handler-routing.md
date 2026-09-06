@@ -1,6 +1,6 @@
 # Handler 路由契约
 
-状态：路由已实现；内部 plans 使用 [PlanEmitter](plan-emitter.md) 协议，outputs 改用 [OutputEmitter](output-delivery.md) 的增量为尚未实现的目标契约。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
+状态：路由已实现；内部 plans 使用 [PlanEmitter](plan-emitter.md)，outputs 使用 [OutputEmitter](output-delivery.md)。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
 
 ## 文件与所有权
 

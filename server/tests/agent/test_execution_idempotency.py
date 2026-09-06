@@ -28,8 +28,7 @@ def statuses(report):
 
 
 async def deliver(action, context, outputs):
-    await outputs.emit(output(action.action_id, execution_id=context.execution_id,
-                              interaction_id=context.interaction_id))
+    await outputs.emit(output())
     return completed(action, irreversible_effect_committed=True,
                      effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_POST, effect_id=action.action_id))
 
@@ -190,7 +189,7 @@ async def test_unsafe_failed_action_never_reexecutes_even_if_handler_claims_no_e
                     sink.callback = None
                 elif mode == "accepted_then_unknown":
                     sink.callback = sink_emit
-                await outputs.emit(output(action.action_id, sequence_no=sequence))
+                await outputs.emit(output())
             except (TimeoutError, d.SinkRejectedError):
                 pass
         return failure(action)

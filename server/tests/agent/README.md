@@ -325,3 +325,12 @@ Ruff、SPEC UTF-8/围栏/链接和git diff --check通过；没有产品代码、
 
 GREEN 候选整理时发现：外部 emit 抛 CancelledError 后，Handler 可以捕获取消并再次 emit 同值，候选错误重发 UNKNOWN 槽位。新增公开回归 test_handler_catching_delivery_task_cancel_cannot_reemit_unknown_slot，在尚未增加 UNKNOWN 状态入口保护的候选上运行 `-m pytest tests/agent/test_output_delivery_recovery.py -k catching_delivery_task_cancel -q --tb=short` 为 **1 failed、6 deselected**：外部实际收到两次 sequence=0，预期仅一次。测试导入修正后确认失败来自重复投递。既有 SPEC 的 UNKNOWN 不重投规则已覆盖。
 同时强化既有 UNKNOWN 重投回归，要求当前行动为 FAILED/DEPENDENCY_UNAVAILABLE；该强化在候选上首次通过，不伪造 RED。
+
+
+## 输出生产者与持久序列 GREEN（2026-09-06）
+
+SPEC `11ccc9bf` / `d4d9ecc5` 和 RED `9bb7e059` 已落实。Agent 创建四类内容草稿的输出生产者，在真实 SQLite 先持久完整 payload 和连续序号，再串行投递。新执行使用格式版本二和独立序列元数据，旧版本一历史按是否完整终态、是否曾有输出判定；不猜测旧序号。可信完成留有 pending 不重跑 Handler、不进入下一行动；safe FAILED/CANCELLED 重入时复用原槽，内容冲突和 UNKNOWN 均封闭后续工作。输出日志只保留身份、稳定码、类型及栈位置。
+
+旧受控 Handler 已统一改为草稿；完整输出伪造用例继续提交完整 AgentOutput 并断言 INTERNAL_ERROR，不删掉错误输入，也不静默去除身份。原外部回执、效果、output_started、取消、关闭、幂等和生产空路由断言保留。旧 SQL 夹具未重建。RED 桥接已删除。
+
+额外 RED `57d26032` 作者自审通过；UNKNOWN 状态在 emit 入口阻止被吞掉取消后的再次发送。34项输出用例及795项既有回归全部通过。最终工作目录server，`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **829 passed、2 skipped**；两个跳过仍为world真实网络探测。相关 Ruff、Agent compileall、7份Agent SPEC的UTF-8/围栏/相对链接和git diff --check通过。仅本地SQLite、受控Handler及sink验证；没有真实业务Handler、真实外部网络或生产库验收。

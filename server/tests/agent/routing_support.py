@@ -61,7 +61,7 @@ def completed(action, **changes):
     return d.ActionResult(**values)
 
 
-def output(action_id="a2", **changes):
+def full_output(action_id="a2", **changes):
     values = dict(interaction_id="i", execution_id="e", action_id=action_id, sequence_no=0,
                   delivery=d.OutputDelivery.CONVERSATION, text="输出")
     values.update(changes)
@@ -81,3 +81,9 @@ class Sink:
             return d.PlanReceipt(plan_id=value.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
         return d.OutputReceipt(execution_id=value.execution_id, sequence_no=value.sequence_no,
                                status=d.OutputAcceptanceStatus.ACCEPTED)
+
+
+def output():
+    """只提供内容，由 Agent 分配身份和序号。"""
+    from src.agent.outputs.drafts import TextFinalDraft
+    return TextFinalDraft(delivery=d.OutputDelivery.CONVERSATION, text="输出")

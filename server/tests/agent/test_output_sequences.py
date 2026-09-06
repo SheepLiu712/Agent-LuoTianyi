@@ -6,7 +6,7 @@ import pytest
 
 import src.domain.agent as d
 from output_support import accepted, draft, failed, fresh, reject, single
-from routing_support import Sink, completed, output, plan_and_context
+from routing_support import Sink, completed, full_output, plan_and_context
 
 pytestmark = pytest.mark.asyncio
 
@@ -172,7 +172,7 @@ async def test_safe_handler_reentry_reuses_pending_before_allocating_next_slot(r
 
 async def test_full_output_cannot_bypass_agent_identity_allocation(routed_runtime):
     async def handler(action, context, outputs):
-        await outputs.emit(output(action.action_id))
+        await outputs.emit(full_output(action.action_id))
         return completed(action)
 
     runtime, _ = routed_runtime(realize=handler)
