@@ -1,5 +1,28 @@
 # agent_runtime 对外接口
 
+## #63 装配与查找契约草案
+
+状态：尚未实现，与 [Agent 门面 SPEC](../agent/facade.md)共同构成本切片契约。下文“稳定入口”及“当前过渡接口”仍记录旧实现。
+
+- `AgentRuntime` 初始化时在 `server/src/agent_runtime` 内完成新 Agent 的装配，为每个启用角色缓存一个实例；依赖通过现有初始化参数显式传入。角色身份和内部协作者由运行时绑定。
+- `get_agent(character_id: str | None = None) -> Agent` 查找新门面。只有 `None` 使用默认角色；未知、禁用、空字符串或空白 ID 抛出 `KeyError`，其他非字符串参数抛出 `TypeError`。同一运行时内重复查找返回同一实例。
+- 初始化必须完成全部实例装配才对外发布运行时。重复处理器注册或依赖装配失败时抛出异常，按现有初始化回滚路径清理已创建资源和全局引用。
+- `shutdown()` 管理新 Agent 的接受状态和在途调用，具体行为见门面契约；关闭成功后查找仍可返回原门面，调用门面会被拒绝。
+
+兼容入口保持旧返回值和旧业务语义：
+
+| 入口 | 返回或委托对象 |
+| --- | --- |
+| `get_character_runtime(...)` | 现有 CharacterRuntime，其 conscious 为旧 LuoTianyiAgent |
+| `get_default_agent()` | 默认角色的旧 LuoTianyiAgent，通过已有 CharacterRuntime 获取 |
+| `SystemRuntime.agent` | 默认角色的旧 LuoTianyiAgent |
+| 现有 AgentRuntime 业务代理 | 仍委托现有角色运行时及旧实现 |
+| `AgentRegistry.get/all` | 保留现有旧意识对象注册表语义；新门面缓存由 AgentRuntime 持有 |
+
+旧 TopicReplier 获取意识对象的位置改用已有 `get_character_runtime(...).conscious`，其话题处理方法和默认角色回退行为保持原状。此调整不把旧业务方法复制到新 Agent。新门面与旧意识对象不是同一个实例，不能相互替换。
+
+契约测试覆盖初始化、缓存、严格角色查找、失败清理、关闭和上述兼容入口；现有关闭与初始化回滚测试中的适用场景一并回归。
+
 ## 模块职责
 
 `server/src/agent_runtime` 是角色工厂和运行时注册表。调用方用角色 ID 取得 Agent，不负责具体业务决策。目标用法是：

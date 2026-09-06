@@ -12,6 +12,8 @@
 >
 > 范围：记录 Agent 对外行为方向、Agent 内部 Handler / Skill 分层、内部状态变更和事后反思的总体设计背景；不代表这些 interface 已经实现
 
+> 2026-09-06：#63 门面与装配以 [Agent 门面 SPEC](../../项目说明/项目架构与接口（spec）/接口文档/agent/facade.md) 及 [AgentRuntime SPEC](../../项目说明/项目架构与接口（spec）/接口文档/agent_runtime/README.md) 为准。AgentRuntime 初始化直接装配 Agent，门面实现集中在 facade.py。
+
 ## 1. Problem Statement
 
 当前聊天、world 和后台任务能够分别调用话题提取、记忆、画像、日期、回复生成、TTS、唱歌、歌曲抓取和发布能力。调用方因此必须知道角色心智的内部步骤，`AgentRuntime` 也逐渐变成业务代理集合。增加一种刺激时，如果继续复制这种编排，每种刺激都会形成一条新的浅调用链，并可能绕过 Agent 形成第二套角色决策逻辑。当前 `world` 还同时承载外部世界、周期任务和 `WorldClock` 装配，尚未明确区分“世界事实从哪里产生”和“人格与世界的持续交互由谁协调”。
@@ -645,7 +647,6 @@ server/src/
 ├─ agent/
 │  ├─ __init__.py                   # 只导出 Agent façade 的公开类型；不重导出内部构造
 │  ├─ facade.py                     # 两个业务接口、校验、取消、观测与结算编排
-│  ├─ factory.py                    # 接收显式依赖并组装内部对象；SystemRuntime 调用
 │  ├─ handlers/
 │  │  ├─ stimulus/                  # handle 侧行为族
 │  │  │  ├─ router.py
@@ -734,14 +735,14 @@ SystemRuntime
 
 必须同时遵守以下限制：
 
-1. `agent/__init__.py` 只导出 façade 对外所需的 `Agent` 类型；`factory.py` 只由系统装配代码直接使用且不从包根重导出。外部模块不得从 `agent.handlers`、`agent.skills`、`agent.context`、`agent.planning`、`agent.ledgers` 或 `agent.reflection` 导入任何对象。
+1. `agent/__init__.py` 只导出 façade 对外所需的 `Agent` 类型；AgentRuntime 初始化时直接装配 Agent；不建立独立 factory 模块。外部模块不得从 `agent.handlers`、`agent.skills`、`agent.context`、`agent.planning`、`agent.ledgers` 或 `agent.reflection` 导入任何对象。
 2. stage/world/Adapter 只通过 `domain.agent` 构造协议对象并调用两个业务接口；`domain` 不反向依赖 `agent`、`stage`、`world`、`subconscious` 或 `capabilities`。
 3. Handler 只能依赖同层内部协议、scoped context、PlanEmitter 和按职责分组的 Skill；不得直接依赖 `CapabilityManager`、数据库、供应商 SDK、SystemRuntime 或外部 sink。
 4. Skill 不依赖 Handler、stage、PlanEmitter、ledger 或公开 report；认知、mutation、execution、reflection 四类 Skill 不相互偷渡副作用。确需组合时由上层 Handler 编排，或由一个拥有完整语义的不透明 Skill 在内部组合。
 5. `capabilities` 继续表示 TTS、图片理解、唱歌、动态等技术能力；`agent/skills` 表示“角色为什么、以何种语义使用能力”。二者不是一对一目录镜像。Skill adapter 可调用多个 capability/subconscious 对象，一个 capability 也可被多个 Skill adapter 以不同强类型契约复用。
 6. 不建立 `execute(skill_name: str, payload: dict)`、全局 Skill registry 或通用 `CALL_CAPABILITY`。`SkillSet` 是构造时注入的强类型聚合；仅把某个旧 manager 包一层同名代理不算完成迁移。
 7. `agent/context` 只存 interaction-scoped 临时工作集；长期记忆、用户画像、歌曲知识仍由 subconscious/相应存储拥有，权威 pending 与 revision 仍由 stage 拥有。检索到的长期记忆在 context 中只保存带来源、版本和 TTL 的证据引用或受控快照。
-8. 同一包内避免循环 import；共享值对象向 `domain.agent` 或拥有它的内部低层包下沉，不创建无所有权的 `common.py`/`utils.py`。`factory.py` 只装配，不包含行为分支；系统级对象生命周期仍由 `SystemRuntime.initialize()/shutdown()` 负责。
+8. 同一包内避免循环 import；共享值对象向 `domain.agent` 或拥有它的内部低层包下沉，不创建无所有权的 `common.py`/`utils.py`。AgentRuntime 负责角色实例装配和生命周期，不承载角色行为决策；系统级对象生命周期仍由 `SystemRuntime.initialize()/shutdown()` 负责。
 
 #### 6.1.3 Handler 与 Skill 的拆分判据
 
@@ -758,7 +759,7 @@ SystemRuntime
 | 阶段 | 对应工单 | 目录/依赖动作 | 完成信号 |
 | --- | --- | --- | --- |
 | 1. 公开协议 expand | 01、02 | 在 `domain` 中增加强类型协议；可先沿用现有文件，稳定后归入 `domain/agent` | 新旧实现都能依赖协议，但没有 Agent 内部类型进入协议 |
-| 2. façade 骨架 | 04 | 建立 `agent/facade.py`、`factory.py` 与 `handlers/*/router.py`；`SystemRuntime` 显式装配 | `get_agent` 只返回两接口 façade；尚未迁移的链可由受控内部适配调用旧实现 |
+| 2. façade 骨架 | 04 | 建立 `agent/facade.py`，AgentRuntime 初始化时装配；路由暂留门面内部 | `get_agent` 只返回两接口 façade；旧兼容入口继续取得旧意识对象；既有调用点仅调整取对象的位置 |
 | 3. 两个核心纵切 | 05、06 | 建立 `context/`、`planning/`、`ledgers/`，以及首个 stimulus/action Handler 和对应 Skill | 公开 seam 能完成幂等 handle/realize；ledger/context 不被外部 import |
 | 4. 认知与状态 Skill | 08、09、11、12 | 将 `main_chat.py`、`prompt_assembly.py`、`response_parser.py` 中的认知生成逐步收进 `skills/cognitive`；图片/语音走 typed adapter；显式记忆走 `skills/mutation` | stage 不再调用预处理/Recall/记忆业务代理，检索证据只进入 scoped context |
 | 5. Reflection | 13、14 | 建立 `reflection/`、`handlers/reflection`、`skills/reflection`，迁走 stage ReflectionWorker | settlement 只通知 coordinator；压缩/画像/日期/自动记忆不暴露给 stage |
