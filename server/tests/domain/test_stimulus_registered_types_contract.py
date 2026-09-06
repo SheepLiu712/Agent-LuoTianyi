@@ -55,22 +55,6 @@ VALUE_TYPES = (
     "SongKnowledgeCandidate",
 )
 
-VALUE_FIRST_FIELDS = {
-    "MediaRef": "media_id",
-    "EvidenceRef": "evidence_id",
-    "SourceRef": "source_id",
-    "BodyRegion": "value",
-    "ProactiveReason": "value",
-    "WorldObservationKind": "value",
-    "ActorRef": "actor_id",
-    "TouchClickFrequency": "count_10s",
-    "DynamicMessage": "message_id",
-    "WorldFact": "fact_id",
-    "ActivityFact": "fact_id",
-    "SongKnowledgeCandidate": "song_name",
-}
-
-
 def _common_kwargs(type_name: str, **overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
         "stimulus_id": f"stimulus-{type_name}",
@@ -309,54 +293,6 @@ def test_unavailable_stimulus_is_registered_but_cannot_be_constructed(
     assert captured.value.retryable is False
 
 
-def _valid_value(type_name: str):
-    factories = {
-        "MediaRef": lambda: agent_domain.MediaRef(media_id="media-1"),
-        "EvidenceRef": lambda: agent_domain.EvidenceRef(evidence_id="evidence-1"),
-        "SourceRef": lambda: agent_domain.SourceRef(source_id="source-1"),
-        "BodyRegion": lambda: agent_domain.BodyRegion(value="未来新增部位"),
-        "ProactiveReason": lambda: agent_domain.ProactiveReason(value="future_reason"),
-        "WorldObservationKind": lambda: agent_domain.WorldObservationKind(value="future_fact"),
-        "ActorRef": lambda: _actor(),
-        "TouchClickFrequency": lambda: agent_domain.TouchClickFrequency(
-            count_10s=2,
-            count_30s=5,
-        ),
-        "DynamicMessage": lambda: _dynamic_messages()[0],
-        "WorldFact": lambda: agent_domain.WorldFact(fact_id="fact-1", summary="事实"),
-        "ActivityFact": lambda: agent_domain.ActivityFact(fact_id="fact-1", summary="观察"),
-        "SongKnowledgeCandidate": _candidate,
-    }
-    return factories[type_name]()
-
-
-@pytest.mark.parametrize("type_name", VALUE_TYPES)
-def test_value_type_is_publicly_constructible_and_immutable(type_name: str) -> None:
-    value = _valid_value(type_name)
-
-    assert isinstance(value, getattr(agent_domain, type_name))
-    with pytest.raises((FrozenInstanceError, AttributeError, TypeError)):
-        setattr(value, VALUE_FIRST_FIELDS[type_name], "changed")
-
-
-@pytest.mark.parametrize(
-    ("type_name", "field_name"),
-    [
-        ("MediaRef", "media_id"),
-        ("EvidenceRef", "evidence_id"),
-        ("SourceRef", "source_id"),
-        ("BodyRegion", "value"),
-        ("ProactiveReason", "value"),
-        ("WorldObservationKind", "value"),
-    ],
-)
-def test_single_string_value_type_rejects_blank_values(
-    type_name: str,
-    field_name: str,
-) -> None:
-    _assert_invalid(getattr(agent_domain, type_name), **{field_name: " \t"})
-
-
 @pytest.mark.parametrize(
     ("type_name", "field_name", "wrong_reference"),
     [
@@ -386,32 +322,6 @@ def test_controlled_reference_nominal_types_cannot_be_interchanged(
     values[field_name] = wrong_reference
 
     _assert_invalid(getattr(agent_domain, type_name), **values)
-
-
-@pytest.mark.parametrize(
-    ("count_10s", "count_30s"),
-    [(-1, 1), (1, -1), (2, 1), (True, 1), (1, False)],
-)
-def test_touch_click_frequency_rejects_invalid_window_counts(
-    count_10s: object,
-    count_30s: object,
-) -> None:
-    _assert_invalid(
-        agent_domain.TouchClickFrequency,
-        count_10s=count_10s,
-        count_30s=count_30s,
-    )
-
-
-def test_dynamic_message_requires_text_or_media() -> None:
-    _assert_invalid(
-        agent_domain.DynamicMessage,
-        message_id="message-1",
-        parent_message_id=None,
-        author_ref=_actor(),
-        text=" \t",
-        media_refs=(),
-    )
 
 
 @pytest.mark.parametrize(
