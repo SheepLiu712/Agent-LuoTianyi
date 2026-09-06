@@ -19,7 +19,23 @@
 - `register_interval_action(...)`：注册按固定间隔执行的任务。
 - `register_daily_action(...)`：注册每天指定时刻执行的任务。
 - `start()`、`await stop()`：控制调度循环。
-- `is_running()`：查询调度器状态。
+- `is_running`：只读属性，查询调度器是否处于运行状态。
+
+### 调度与注册行为
+
+`WorldRuntime.initialize_modules()` 根据配置创建任务并向时钟注册，重复调用不重复注册。citywalk、学歌、B 站事件和日记按角色展开；QQ 凭据刷新、VCPedia、动态互动、主动提醒和过期事件清理各注册一个。学歌按可用 singing manager 展开，QQ 凭据刷新要求存在学歌任务；B 站 UID 映射存在时只包含映射中的角色。动态互动使用默认角色。
+
+citywalk、学歌、B 站事件、日记支持总开关及角色覆盖；QQ 凭据刷新和动态互动支持总开关。VCPedia、主动提醒和过期事件清理当前始终注册。调度参数来自传入配置的 `clock_config` 及任务自身的默认值。
+
+`WorldClock.register_daily_action(name, hour, minute, action)` 使用服务器本地时间，每天在下一次指定时刻运行；恰好到达指定时刻时安排到次日。`register_interval_action(name, interval_seconds, action, run_immediately=False)` 默认先等待一个周期；立即运行开启时先执行一次。周期等待从上一次执行结束后开始。
+
+同一调度类别中同名注册替换旧循环；`start()` 重复调用不重复启动。action 可同步或异步，普通执行异常被隔离，不停止其他任务或自身后续周期。`last_results` 保存每个名称最近一次成功结果。
+
+`await stop()` 取消并等待所拥有的任务。超过 `stop_timeout_seconds` 仍有同步工作未停止时抛出 `RuntimeError`，保留任务供再次关闭；停止成功后可以再次调用。`is_running` 为假只表示停止调度，不保证同步工作已结束。`WorldRuntime.stop_background_services()` 传播时钟关闭失败。
+
+`WorldRuntime.start_background_services()` 同时启动时钟和事件初始化；`ensure_holidays()` 属于启动初始化，不注册为时钟 action。
+
+上述行为通过 `server/tests/world` 的公开入口回归测试验证，任务业务执行使用 Fake，不连接外部服务。
 
 ### `WorldTask`
 
