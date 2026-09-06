@@ -88,3 +88,10 @@
 - commit 或 PR：SPEC `00ef610b`；RED `812bb249`；GREEN 为分支 `codex/agent-03-handling-report-contract` 上本记录所在提交。
 - 验证及结果：使用 `D:/Anaconda/envs/lty/python.exe`，工作目录 `server`。RED 为 94 failed，全部源于公开能力尚未实现；本次保持测试不变，`-m pytest tests/domain/test_handling_report_contract.py -q` 为 94 passed，`-m pytest tests/domain -q` 为 328 passed、0 skipped，包含原有 234 项领域用例。`-m ruff check src/domain/agent tests/domain/test_handling_report_contract.py tests/conftest.py`、`-m compileall -q src/domain/agent` 和 `git diff --check` 通过。
 - 未验证范围：未运行完整 Server/客户端测试、真实设备、外部服务或生产环境；本次只验证报告领域对象，未接入 Agent handle、计划 sink、stage 结算或运行时重试链路。
+
+### 2026-09-06 HandlingReport 接口文档事实化整理
+
+- 交付内容：报告接口页聚焦公开名称、字段含义、构造约束、稳定错误和实际测试入口；移除重复验收清单，明确构造器只校验报告内部关系。domain 索引补齐报告导出；相关 domain、agent、stage 接口页移除迁移要求和待补测试清单。
+- commit 或 PR：分支 `codex/agent-03-handling-report-contract`，本记录所在文档整理提交。
+- 验证及结果：公开字段和枚举与实现核对、构造示例执行、UTF-8、相对链接和 `git diff --check` 检查通过。产品代码与测试未修改；工作区没有未跟踪临时文件，RED/GREEN 证据保存在仓库外。
+- 未验证范围：本次为文档整理，没有新增运行时验收或他人审核结果。

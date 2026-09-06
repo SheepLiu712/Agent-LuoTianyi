@@ -2,9 +2,9 @@
 
 ## 模块职责
 
-`server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。按照目标架构，其他业务模块最终只应调用 Agent 提供的少量接口，不应直接操作 subconscious 或 capabilities。
+`server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。
 
-当前实现还没有独立的“薄外壳”类；实际入口是 `LuoTianyiAgent`。下面记录当前确实可被其他模块调用的接口。
+当前入口是 `LuoTianyiAgent`，下面记录其公开接口。
 
 ## 对外接口
 
@@ -41,21 +41,13 @@
 - `OneSentenceChat(sound_content, expression, tone, content, uuid)`：一条可显示、可朗读的文字回复。
 - `SongSegmentChat(lyrics, song, segment, uuid)`：一段歌曲回复。
 
-这些类型目前是事实接口，但后续应迁入稳定的领域协议或由 Agent 外壳隐藏。
-
 ## 正常与异常行为
 
 - 正常调用顺序是先由 `agent_runtime.get_agent(character_id)` 取得 Agent，再调用上述接口。
 - 规划、记忆、模型、唱歌和语音调用可能产生模型请求、数据库写入、文件读取或音频生成等副作用。
-- 依赖未注入、模型返回无法解析或能力执行失败时会传播异常；调用方应在 stage/Adapter 边界转换为可观察的失败结果。
+- 依赖未注入、模型返回无法解析或能力执行失败时会传播异常。
 - 流式语音生成器可能在迭代过程中失败，不能只在创建生成器时判定成功。
 
 ## 使用示例
 
-假设 stage 已经整理出一个完整话题：它先调用 `agent_runtime.get_agent("luotianyi")`，再让 Agent 规划并实现回复。stage 只负责排队、超时和发送，不需要知道 Agent 内部用了哪些记忆检索器或语音服务。
-
-## 应覆盖的契约场景
-
-- 使用 Fake subconscious/capability 时，给定同一话题能从公开规划接口得到可实现的回复计划。
-- 没有记忆或歌曲事实时仍能正常回复；依赖未注入时 `ensure_dependencies()` 明确失败。
-- `sing(...)` 无可用歌曲时返回 `None`；流式语音在中途失败时把错误交给调用者处理。
+stage 整理出完整话题后，通过 `agent_runtime.get_agent("luotianyi")` 取得 Agent，再调用话题规划与回复接口。

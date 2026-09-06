@@ -1,14 +1,10 @@
 # HandlingReport 类型契约
 
-> 状态：已实现，公开入口为 `src.domain.agent`。
->
-> 来源：[工单 1 / GitHub #60](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/60)。
-
-`HandlingReport` 是一次 handle 的处理报告，分别记录请求的结束状态、已考察 pending 的处理结果、已接受计划的身份和重评时间。类型归属 `domain`，公开导入路径为 `src.domain.agent`。
+`src.domain.agent` 提供不可变的 `HandlingReport`，保存调用方传入的请求结束状态、pending 处理结果、计划身份和重评时间，并校验报告内部的字段关系。
 
 ## 公开入口
 
-本契约定义五个公开名称：
+以下名称从 `src.domain.agent` 导入：
 
 - `HandlingReport`。
 - `HandlingRequestStatus`。
@@ -26,7 +22,7 @@
 | `request_status` | `HandlingRequestStatus` | 请求的结束状态；对应枚举实例 |
 | `trigger_stimulus_id` | `str` | 触发请求的刺激身份；非空白 |
 | `basis_interaction_revision` | `int` | 判断依据的交互修订号；非负整数，拒绝 `bool` |
-| `considered_pending_stimulus_ids` | `tuple[str, ...]` | 本轮实际考察的 pending 身份，按输入快照中的顺序记录 |
+| `considered_pending_stimulus_ids` | `tuple[str, ...]` | 本轮考察的 pending 身份序列；构造保留传入顺序 |
 | `consumed_pending_stimulus_ids` | `tuple[str, ...]` | considered 中已完成语义处理的身份，按 considered 中的相对顺序记录 |
 | `retained_pending_stimulus_ids` | `tuple[str, ...]` | considered 中仍需重新判断的身份，按 considered 中的相对顺序记录 |
 | `emitted_plan_ids` | `tuple[str, ...]` | 本次请求已被接受的计划身份，按首次接受顺序记录 |
@@ -36,7 +32,7 @@
 
 四个身份元组均允许为空，元素必须为非空白字符串，同一元组内不得重复。不同身份域独立，例如计划 ID 与刺激 ID 使用相同字符串不影响构造。
 
-`request_id`、trigger 和 revision 分别对应[输入请求](handle-input.md)的身份、`stimulus.stimulus_id` 和 `interaction.interaction_revision`。这些字段以及 considered 的来源和计划接受情况表达报告事实；直接构造器的输入只有上表字段，校验范围是报告自身的类型、数值和内部关系。
+`request_id`、trigger 和 revision 的含义分别对应[输入请求](handle-input.md)的身份、`stimulus.stimulus_id` 和 `interaction.interaction_revision`。构造器只接收上表字段，校验报告自身的类型、数值和内部关系；considered 的来源及计划接受情况由传入值表达。
 
 ## 请求状态与 pending 划分
 
@@ -120,24 +116,9 @@ report = HandlingReport(
 )
 ```
 
-## 契约验证入口
+## 验证
 
 测试从 `src.domain.agent` 的上述五个公开名称观察行为，测试文件归属 `server/tests/domain/test_handling_report_contract.py`。
-
-| 场景 | 可观察结果 |
-| --- | --- |
-| 显式构造合法报告；尝试修改字段 | 字段和值保持完整；修改被拒绝 |
-| 缺参、多参、位置参数、错误字段类型 | 稳定构造错误 |
-| 空身份、空白身份、负数或布尔 revision、非布尔 retryable | 稳定构造错误；合法非空白字符串原样保留 |
-| 身份元组为空、重复，或传入列表 | 空元组合法；重复和错误集合类型被拒绝 |
-| C 未被完全划分、D/R 重叠、存在外部身份、子序列逆序 | 稳定构造错误 |
-| 三种状态分别记录全部保留、全部消费、部分消费和空 considered | 合法划分均可表达；状态不代替消费结果 |
-| 协调 trigger 不在 considered 中；计划数量不同 | 合法构造，原有身份和顺序保留 |
-| FAILED 缺少失败码，其他状态携带失败码 | 稳定构造错误 |
-| CONTRACT 类失败携带 consumed；其他失败携带合法部分消费 | 前者被拒绝；后者合法 |
-| retained 为空但有重评时间、无时区时间、已经到期的带时区时间 | 前两者被拒绝；到期时间配合非空 retained 合法 |
-| 同状态/划分下分别传入 True 和 False | retryable 原样保留 |
-| 多个报告共享相同合法元组 | 构造不修改输入，报告字段保持不可变 |
 
 在 `server` 目录运行：
 
