@@ -76,4 +76,4 @@ stage 负责一次交互如何流动：接收规范化输入、按用户串行�
 
 ## 依赖边界
 
-目标依赖为 `Adapter -> stage -> agent_runtime -> agent`。当前 stage 仍直接使用部分 Agent 回复类型、SystemRuntime 和 capability 对象，这些属于迁移中的事实接口，不是鼓励新增的调用方式。
+当前 stage 直接使用部分 Agent 回复类型、SystemRuntime 和 capability 对象。

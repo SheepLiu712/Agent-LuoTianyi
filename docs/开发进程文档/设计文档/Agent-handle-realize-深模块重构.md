@@ -187,6 +187,8 @@ async def handle_stimulus(
 
 #### `HandleStimulusRequest`
 
+本节输入字段的当前权威定义见 [handle 输入契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)（2026-09-06 输入领域类型已实现，Agent/stage 生产链未接入）。`CancellationToken` 由 stage 更新，Agent 观察；当前取消原因只有 `SUPERSEDED`（过时）和 `NO_LONGER_NEEDED`（无需处理），首次原因保留，取消后不能复活。
+
 | 字段 | 类型 | 含义 | 约束 |
 | --- | --- | --- | --- |
 | `request_id` | `str` | 一次逻辑认知请求的稳定身份，也是安全重投键 | 非空；不能跨不同 interaction snapshot 复用 |
@@ -310,7 +312,7 @@ Stimulus 构造契约错误使用独立于 HandlingReport 运行时失败的最�
 | `DynamicObserved` | world/Adapter 观察到一条对角色有意义的动态内容 | `dynamic_id: str`：平台无关身份；`author_ref: ActorRef`：作者引用；`text: str`：正文；`media_refs: tuple[MediaRef, ...]`：媒体；`revision: int`：内容版本 | World |
 | `DiaryPlanningDue` | 角色的日记规划时点到达 | `local_date: date`：日记归属日期；`timezone: ZoneInfo`：日期解释时区；`trigger_id: str`：调度触发身份 | World |
 | `WorldObservation` | world 提供一项已规范化、可能影响角色的外部事实 | `observation_kind: WorldObservationKind`：事实种类；`fact: WorldFact`：规范化事实；`evidence_refs: tuple[EvidenceRef, ...]`：证据；`world_revision: int`：事实快照修订 | World |
-| `DailyPlanningDue` | 角色每日规划时点到达 | `local_date: date`：规划日期；`timezone: ZoneInfo`：日期解释时区；`schedule_revision: int`：现有日程修订；`world_snapshot_ref: SnapshotRef`：可见 world 快照 | World |
+| `DailyPlanningDue` | 角色每日规划时点到达 | 当前为不可构造占位类型，不承诺字段；以 Stimulus 权威契约为准，删除原通用 world 快照引用草案 | World |
 | `ActivityDue` | 一个已计划角色活动到达开始条件 | `activity_id: str`：活动身份；`activity_plan_revision: int`：活动计划修订；`due_at: datetime`：到期时间 | World |
 | `ActivityStarted` | world 已确认一个角色活动开始 | `activity_id: str`：活动身份；`started_at: datetime`：实际开始时间；`activity_revision: int`：活动状态修订 | World |
 | `ActivityObservation` | 活动进行中产生一项归一化观察 | `activity_id: str`：活动身份；`observation: ActivityFact`：活动事实；`activity_revision: int`：活动状态修订 | World |
@@ -348,11 +350,11 @@ Stimulus 构造契约错误使用独立于 HandlingReport 运行时失败的最�
 
 | 变体 | 含义 | 专有字段（类型：含义） |
 | --- | --- | --- |
-| `ChatInteractionSnapshot` | 一段文字/图片/非 Realtime 语音聊天的交互事实 | `conversation_ref: SnapshotRef`：对话摘要和近期记录的受控引用；`response_deadline: Optional[datetime]`：当前聚合截止时间；`typing_state: TypingState`：最近输入长度与信号修订；`image_selection_state: ImageSelectionState`：当前选择流程与状态；`connection_state: ConnectionState`：仅描述输出通道是否可用 |
-| `ToyInteractionSnapshot` | 一台交互设备与角色之间的持续交互事实 | `device_id: str`：设备身份；`online: bool`：在线状态；`continuous_contact: Optional[ContactState]`：聚合后的持续接触；`device_output_limits: DeviceOutputLimits`：设备可呈现限制 |
-| `WorldInteractionSnapshot` | 同一人格与箱庭世界长期交互的事实快照 | `world_id: str`：箱庭身份；`world_revision: int`：所读权威 world 快照修订；`activity_id: Optional[str]`：当前相关活动；`activity_revision: Optional[int]`：所读活动状态修订；`planning_cycle_id: Optional[str]`：相关规划周期；`visible_world_ref: SnapshotRef`：Agent 可见 world 事实；`schedule_revision: int`：日程修订 |
+| `ChatInteractionSnapshot` | 一段文字/图片/非 Realtime 语音聊天的交互事实 | `response_deadline: Optional[datetime]`：当前聚合截止时间；`connection_state: ConnectionState`：仅描述输出通道是否可用 |
+| `ToyInteractionSnapshot` | 一台交互设备与角色之间的持续交互事实 | `device_id: str`：设备身份；`online: bool`：在线状态；可呈现输出种类使用公共 `supported_outputs` |
+| `WorldInteractionSnapshot` | 同一人格与箱庭世界长期交互的事实快照 | `world_id: str`：箱庭身份；`world_revision: int`：所读权威 world 快照修订；`activity_id: Optional[str]`：当前相关活动；`activity_revision: Optional[int]`：所读活动状态修订；`planning_cycle_id: Optional[str]`：相关规划周期；`schedule_revision: int`：日程修订 |
 
-stage 只提供它拥有的交互事实。记忆、画像、关系、AttentionPlan、RecallResult、提示词和模型会话内容不属于 InteractionSnapshot。
+stage 只提供它拥有的交互事实。记忆、画像、关系、AttentionPlan、RecallResult、提示词和模型会话内容不属于 InteractionSnapshot。2026-09-06 输入 SPEC 保留 `interaction_id` 与 `interaction_revision` 的不同职责，删除 `TypingState`、`ImageSelectionState`、`DeviceOutputLimits`，暂不建立 `ContactState`；字段约束以 [handle 输入契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)为准。
 
 #### `ActionPlanSink`
 
@@ -483,7 +485,7 @@ async def realize_action_plan(
 | Action | 含义 | 专有字段（类型：含义） | 实现结果 |
 | --- | --- | --- | --- |
 | `Say` | 角色向当前 interaction 表达一段已经决定的内容，并可使用 TTS 或已选定的预制音频，同时改变表情 | `content: str`：可显示文本；`sound_content: Optional[str]`：送入 TTS 的文本；`prepared_audio_ref: Optional[MediaRef]`：已经选定、可授权读取的预制音频；`tone: Tone`：语气；`expression: Optional[ChangeExpression]`：与说话同时实现的表情；`delivery: OutputDelivery`：普通对话或瞬时反应 | 产生可选 TEXT、可选 AUDIO、可选 EXPRESSION 输出；`sound_content` 与 `prepared_audio_ref` 不能同时填写；`content` 为空时必须有预制音频 |
-| `Sing` | 角色演唱一个已确定的歌曲片段，并可同步改变表情 | `song_id: str`：歌曲身份；`segment_id: str`：可演唱片段；`bridge_text: Optional[str]`：演唱前后衔接文本；`expression: Optional[ChangeExpression]`：与演唱同时实现的表情 | 产生 SONG_STATE、AUDIO、可选 TEXT/EXPRESSION 输出 |
+| `Sing` | 角色演唱一个已确定的歌曲片段，并可同步改变表情 | `song_id: str`：歌曲身份；`segment_id: str`：可演唱片段；`bridge_text: Optional[str]`：演唱前后衔接文本；`expression: Optional[ChangeExpression]`：与演唱同时实现的表情 | 产生 AUDIO、可选 TEXT/EXPRESSION 输出 |
 | `PerformMotion` | 角色执行一个独立、已注册的可见动作 | `motion_id: str`：动作身份；`parameters: MotionParameters`：该动作的强类型参数；`duration_ms: Optional[int]`：建议时长 | 产生 MOTION 输出 |
 | `TransitionActivity` | 请求 world 对一个角色活动进行有修订保护的状态迁移 | `activity_id: str`：活动身份；`target_state: ActivityState`：目标状态；`expected_activity_revision: int`：并发保护修订；`reason: ActivityTransitionReason`：语义原因 | world Adapter 查询权威 activity revision 后提交状态变化，不经过 output sink |
 | `WriteDiary` | 持久化并按策略发布一篇已决定的日记 | `local_date: date`：归属日期；`title: str`：标题；`body: str`：正文；`visibility: Visibility`：可见范围；`dedup_key: str`：重复执行保护键 | 产生日记持久化/发布效果 |
@@ -554,7 +556,6 @@ class AgentOutputSink(Protocol):
 | `AUDIO_END` | 一次音频输出结束标记 | `total_chunks: int`：总块数；`duration_ms: Optional[int]`：可选时长；`summary: Optional[str]`：观测摘要 |
 | `EXPRESSION` | 与 `Say` / `Sing` 同一 Action 实现的表情变化 | `expression_id: str`：表情；`intensity: Optional[float]`：强度；`duration_ms: Optional[int]`：建议时长 |
 | `MOTION` | 一个独立动作的通道无关表示 | `motion_id: str`：动作；`parameters: MotionParameters`：强类型参数 |
-| `SONG_STATE` | 演唱开始、结束或失败的状态 | `song_id: str`：歌曲；`segment_id: str`：片段；`state: SongPlaybackState`：状态 |
 
 
 output sink 在创建时绑定 stage 和 interaction：
@@ -883,6 +884,8 @@ Skill 设计规则：
 
 #### `InteractionContextStore`
 
+2026-09-06 输入契约修订：对话工作上下文归 Agent 内部所有，按 `(character_id, interaction_id)` 隔离，统一组织当前使用的历史对话、摘要及 Recall 结果，并管理保留、压缩和清理。清理临时上下文不删除会话或长期记忆正本；一次 handle 取消也不等于 interaction 结束。下表保留已有临时认知字段的设计背景，不是完整上下文 schema，也不要求向 stage 暴露内部访问器。输入快照删除对话/world 内容引用，不建立通用 `SnapshotRef` 或快照持久化/解析服务。
+
 façade 先按角色和 interaction 创建 scoped accessor，Handler 不接触全局 store：
 
 ```python
@@ -1037,12 +1040,13 @@ class ReflectionHandler(Protocol):
 | `interaction_id` | `str` | 证据所属 interaction | 与 ledger 一致 |
 | `origin_request_id` | `str` | 触发结算的 handle 请求 | 与 Request Ledger 一致 |
 | `source_stimulus_ids` | `tuple[str, ...]` | 允许作为反思证据的刺激 | 只含实际 consumed 的内容，以及 ReflectionPolicy 明确允许的非内容事实；不能把所有 considered/retained 刺激自动当成证据 |
-| `evidence_snapshot_ref` | `SnapshotRef` | 对话/事件证据的受控、版本化引用 | 不携带完整 stage 或连接 |
 | `completed_effects` | `tuple[SettledEffect, ...]` | 实际完成的 plan/action/output 摘要 | 不把 NOT_STARTED 行动当成事实 |
 | `allowed_kinds` | `frozenset[ReflectionKind]` | 本 job 允许执行的反思步骤 | 最小权限；Handler 不自行扩大 |
 | `idempotency_key` | `str` | job 接受和 step 去重键 | 同一结算事实稳定 |
 | `attempt` | `int` | 当前投递次数 | 正整数；不参与语义判断 |
 | `created_at` | `datetime` | job 首次创建时间 | 带时区 |
+
+2026-09-06 修订删除了上述 job 草案中的 `evidence_snapshot_ref: SnapshotRef`。反思确实需要的证据及其保留期限应由 Agent 内部反思契约定义，不依赖交互输入快照存储；本次不另造证据引用类型或承诺后台反思已具备证据恢复能力。
 
 | `ReflectionReport` 字段 | 类型 | 含义 | 约束 |
 | --- | --- | --- | --- |

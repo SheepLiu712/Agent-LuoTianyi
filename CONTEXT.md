@@ -24,6 +24,14 @@ _Avoid_: Connection, user session
 The role that organizes one kind of interaction around the Agent boundary, including ordering, deadlines, cancellation, output binding, and settlement. ChatStage, ToyStage, and WorldStage may use different state machines.
 _Avoid_: Global stage, universal BaseStage
 
+**Interaction Snapshot**:
+The immutable Chat, Toy, or World facts supplied directly with one handle request; no snapshot registry, persistence, or generic SnapshotRef is required. Interaction ID identifies the continuous interaction; interaction revision identifies the Stage-owned decision basis within it. Input details are defined in [the handle input SPEC](docs/项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md), implemented as domain values and a cancellation token; Agent/Stage runtime integration remains pending.
+_Avoid_: Live Stage context, global state version, typing or image-selection state copies
+
+**Cancellation Token**:
+The shared mutable control object supplied with a handle request. Stage requests cancellation and Agent observes it. The first reason is retained: SUPERSEDED means the decision basis is outdated; NO_LONGER_NEEDED means handling is no longer required. Cancellation does not roll back accepted plans or committed effects.
+_Avoid_: Immutable cancellation snapshot, automatic pending consumption, resettable token
+
 **World**:
 The sandbox environment outside the Agent. It owns authoritative world and activity facts, produces normalized external events, and applies world-side effects; relative to the Agent it occupies a role analogous to the user in chat.
 _Avoid_: Agent mind, WorldStage, clock
@@ -53,7 +61,7 @@ The character's internal act of retrieving memories relevant to the current stim
 _Avoid_: Context returned to stage, RecallCompleted stimulus
 
 **Interaction Cognitive Context**:
-The character's short-lived attention and unfinished cognitive intent within one interaction.
+The Agent-owned working context scoped by character and interaction, including selected conversation history, summaries, recalled memory results, attention, and unfinished cognitive intent. Conversation fragments and related recall results share retention, compression, and cleanup management. Cleanup does not delete durable conversation or memory records; cancelling one handle does not end the interaction.
 _Avoid_: Chat queue, connection state, user profile
 
 **Character State**:

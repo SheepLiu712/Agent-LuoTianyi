@@ -419,6 +419,8 @@ class Agent:
 
 ### 7.2 输入
 
+本节保留长期需求背景，当前版本的具体输入以 [handle 输入契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)为权威（2026-09-06 输入领域类型已实现，Agent/stage 生产链未接入）：快照使用 Chat、Toy、World 三种变体；保留 `interaction_id`、`interaction_revision`、`supported_outputs` 和 Chat 的 `ConnectionState`；删除 `TypingState`、`ImageSelectionState`、`DeviceOutputLimits`，暂不建立 `ContactState`。取消令牌传入后仍由 stage 更新，至少表达是否取消及“过时 / 无需处理”两类原因。下文 Call、CharacterActivity 与连续接触描述不构成本版本输入要求；Stimulus 字段以 [Stimulus 契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/stimulus.md)为准，目标协议不含任意 payload 或公开持久化策略。
+
 ```python
 @dataclass(frozen=True)
 class HandleStimulusRequest:
@@ -465,12 +467,14 @@ InteractionSnapshot = (
 
 各变体再携带自己的必要事实：
 
-- Chat：近期对话或摘要、消息聚合状态；
+- Chat：消息聚合期限和连接可用状态；历史对话、摘要及 Recall 工作上下文归 Agent 内部管理；
 - Call：通话状态、用户是否正在说话、供应商无关的 `realtime_session_ref`；
 - Toy：设备可用输出和当前连续接触状态；
 - CharacterActivity：角色活动、world 状态和既有日程，不携带某个用户的私有上下文。
 
 `character_id` 不重复放入请求，因为 Agent 已由 `get_agent(character_id)` 确定。请求也不能携带 WebSocket、CallStream、SystemRuntime、CapabilityManager 或任意上下文字典。
+
+对话片段与它们唤起的记忆检索结果由 Agent 统一管理工作上下文生命周期，按角色与 interaction 隔离；清理工作上下文不删除长期正本。输入快照直接按值传递，不持久化，不包含 `conversation_ref`、`visible_world_ref` 或通用 `SnapshotRef`。当前所需 world 内容由已定义的强类型刺激携带；额外事实需先确定消费者与决策用途。
 
 ### 7.3 计划输出端口
 
@@ -632,8 +636,7 @@ class AgentOutput:
 - `AUDIO_CHUNK` / `AUDIO_END`；
 - `EXPRESSION`；
 - `MOTION`；
-- `HAPTIC`；
-- `SONG_STATE`。
+- `HAPTIC`。
 
 不同 stage 绑定不同 sink 实现，再由 sink 委托对应的协议 Adapter：
 
