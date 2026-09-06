@@ -4,6 +4,8 @@ import asyncio
 from typing import Any, Dict, TYPE_CHECKING
 
 from src.agent import Agent
+from src.agent.handlers.action.router import ActionRouter
+from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
 from src.agent_runtime.agent_registry import AgentRegistry
@@ -27,7 +29,7 @@ if TYPE_CHECKING:
 
 
 class AgentRuntime:
-    """管理角色运行时，并直接提供聊天管线需要调用的 Agent 接口。"""
+    """装配角色门面及旧角色运行时，管理查找和关闭生命周期。"""
 
     def __init__(
         self,
@@ -70,7 +72,10 @@ class AgentRuntime:
 
             self.default_character_id = self.character_registry.default_character_id
             self._agents = {
-                character_id: Agent(character_id=character_id)
+                character_id: Agent(
+                    character_id=character_id,
+                    stimulus_router=StimulusRouter(()), action_router=ActionRouter(()),
+                )
                 for character_id in self.character_runtimes
             }
             set_agent_runtime(self)
@@ -95,12 +100,27 @@ class AgentRuntime:
             clear_agent_runtime(self)
 
     async def shutdown(self) -> None:
-        """停止门面接受新工作，关闭资源；超时保留关闭任务供重试，成功后幂等。"""
+        """停止接受并等待门面调用退出后关闭资源，成功后幂等。
+
+        在途等待超时抛 RuntimeError 并保留依赖，重试继续等待；调用方取消
+        关闭不取消业务工作。资源关闭任务同样保留所有权供后续关闭重试。
+        """
         for agent in getattr(self, "_agents", {}).values():
             agent._stop_accepting()
         async with self._shutdown_lock:
             if self._shutdown_complete:
                 return
+            inflight = tuple(
+                completion for agent in getattr(self, "_agents", {}).values()
+                for completion in agent._inflight
+            )
+            if inflight:
+                # asyncio.wait 超时或被取消均不取消业务调用的完成信号。
+                _, pending = await asyncio.wait(
+                    inflight, timeout=self.shutdown_timeout_seconds,
+                )
+                if pending:
+                    raise RuntimeError("Agent calls are still running")
             close = getattr(self.vector_store, "close", None)
             if close is not None:
                 shutdown_task = getattr(self, "_shutdown_task", None)
@@ -396,11 +416,13 @@ _agent_runtime: AgentRuntime | None = None
 
 
 def set_agent_runtime(runtime: AgentRuntime | None) -> None:
+    """设置旧调用链使用的全局运行时引用；None 表示清除引用。"""
     global _agent_runtime
     _agent_runtime = runtime
 
 
 def clear_agent_runtime(expected: AgentRuntime | None = None) -> bool:
+    """清除匹配的全局引用；被其他实例替换时返回 False，清除后返回 True。"""
     global _agent_runtime
     if expected is not None and _agent_runtime is not expected:
         return False
