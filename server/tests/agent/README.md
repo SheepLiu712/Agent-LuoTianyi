@@ -274,3 +274,11 @@ Agent、AgentRuntime 和相关测试 Ruff、Agent compileall、git diff --check�
 对初步 GREEN 执行 `-m pytest tests/agent/test_execution_idempotency.py tests/agent/test_execution_storage_recovery.py -k "cancelled_owner_waiter or cancel_cleanup_settlement_failure" -q --tb=short`
 为 **2 failed、38 deselected**；失败分别为丢失 output_started，以及当前项错误 NOT_STARTED。
 SPEC 的累计事实、取消可信返回与结算失败条目已覆盖，无新增公开接口。测试仅经公开 realize 和 SQL 提交故障边界观察。
+
+
+## Execution Ledger 取消等待者事实 GREEN（2026-09-06）
+
+保持 RED `f0fdf077` 不变。拥有者清理后给等待者发布最新执行事实；结算提交失败的当前项
+保留已知效果并标为 FAILED / DEPENDENCY_UNAVAILABLE，只有持久完成前缀转换为 ALREADY_COMPLETED。
+取消清理中的存储错误日志使用 DEPENDENCY_UNAVAILABLE。
+40 项执行用例全部通过；完整相关回归为 **795 passed、2 skipped**，相关 Ruff、compileall、diff 检查通过。

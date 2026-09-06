@@ -7,7 +7,7 @@ from traceback import walk_tb
 from sqlalchemy.orm import Session
 
 import src.domain.agent as d
-from src.agent.execution import Execution, _HandlerNotStarted, _OutputIdentityError
+from src.agent.execution import Execution, _HandlerNotStarted, _OutputIdentityError, _StorageError
 from src.agent.ledgers.execution_ledger import ExecutionLedger
 from src.agent.handlers.action.router import ActionHandler, ActionRouter
 from src.agent.handlers.stimulus.router import StimulusHandler, StimulusRouter
@@ -87,7 +87,7 @@ class Agent:
                 cleanup_error = worker.exception()
                 if cleanup_error is not None:
                     self._record_exception(call_id, interaction_id,
-                                           d.ExecutionErrorCode.INTERNAL_ERROR, cleanup_error)
+                                           self._error_code(cleanup_error, d.ExecutionErrorCode), cleanup_error)
             raise
 
     async def handle_stimulus(self, request: d.HandleStimulusRequest,
@@ -301,6 +301,8 @@ class Agent:
     def _error_code(error, enum):
         if enum is d.HandlingErrorCode:
             return handling_error(error)
+        if isinstance(error, _StorageError):
+            return enum.DEPENDENCY_UNAVAILABLE
         if isinstance(error, d.SinkRejectedError):
             if error.code.name in {"STALE_INTERACTION", "SINK_CLOSED", "BACKPRESSURE_TIMEOUT"}:
                 return enum[error.code.name]

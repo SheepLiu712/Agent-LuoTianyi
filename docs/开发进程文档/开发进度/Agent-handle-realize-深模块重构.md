@@ -9,6 +9,13 @@
 
 ## 已完成事实
 
+### 2026-09-06 Execution Ledger 取消等待者事实 GREEN
+
+- 交付行为：拥有者任务取消并完成清理后，给并发等待者发布最新完成前缀、效果与已确认输出，避免使用加入前快照；清理中返回可信结果但结算失败时保留当前效果，以 FAILED / DEPENDENCY_UNAVAILABLE 表达未完成持久化，不冒充 ALREADY_COMPLETED。相关存储错误日志使用稳定依赖错误码。
+- SPEC 与 commit：Execution Ledger 既有取消、累计事实和结算失败契约已满足。初步 GREEN `94c295a3` 作者自审复现问题，RED `f0fdf077` 两项均失败；本记录所在提交为修复 GREEN，原 RED 断言未变。
+- 验证及结果：40 项执行测试全部通过；完整相关命令 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **795 passed、2 skipped**。相关 Ruff、compileall、diff 检查通过。
+- 未验证范围：沿用执行账本切片的真实临时 SQLite 与受控协作者边界，没有新增真实外部能力、生产数据库或客户端验收；两个 world 网络探测仍跳过。
+
 ### 2026-09-06 Execution Ledger 逐行动持久恢复 GREEN
 
 - 交付行为：公开 realize 校验完整计划身份并用角色/execution 复合主键仲裁；持久标记行动开始、可信结果及独立累计的未知/已确认输出。重投跳过已完成前缀，仅继续可信无效果且无已确认或未知输出的未完成行动；完成前缀带有输出和效果仍可继续后续安全行动。并发同执行加入同一拥有者，任务取消清理正常返回的可信结果在传播取消前持久结算。

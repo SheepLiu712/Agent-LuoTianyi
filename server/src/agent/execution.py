@@ -75,6 +75,7 @@ class Execution:
         self.agent, self.plan, self.context, self.sink = agent, plan, context, sink
         self.ledger = agent._execution_ledger
         self.facts = [ActionFact() for _ in plan.actions]
+        self._failed_settlement_index = None
 
     def report(self, error=None, results=None, retryable=False):
         status = (d.ExecutionStatus.CANCELLED if error is d.ExecutionErrorCode.CANCELLED
@@ -88,6 +89,13 @@ class Execution:
         if error is not None:
             self.agent._record_exception(self.context.execution_id, self.context.interaction_id,
                                          d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE, error)
+        if results is None:
+            results = completed_prefix(self.facts[:self._failed_settlement_index])
+            index = len(results)
+            if index < len(self.facts) and self.facts[index].started:
+                known = self.facts[index].result or self.agent._action_result(self.plan.actions[index])
+                results.append(replace(known, status=d.ActionExecutionStatus.FAILED,
+                                       error_code=d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE))
         return self.report(d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE, results)
 
     def save(self):
@@ -151,6 +159,10 @@ class Execution:
         result = None
         try:
             result = await self.actions(handlers)
+        except asyncio.CancelledError:
+            # 拥有者发布清理后的最新事实，等待者不使用加入时的旧快照。
+            result = self.unavailable()
+            raise
         finally:
             try:
                 self.ledger.release(self.context.execution_id)
@@ -180,9 +192,13 @@ class Execution:
                         or result.status is d.ActionExecutionStatus.NOT_STARTED):
                     raise ValueError("invalid action result")
                 fact.result = result
-                if outputs.error is not None:
-                    raise outputs.error
-                self.save()  # 在拥有的 worker 内提交，取消清理正常返回也保存可信结果。
+                try:
+                    if outputs.error is not None:
+                        raise outputs.error
+                    self.save()  # 在拥有的 worker 内提交，取消清理正常返回也保存可信结果。
+                except _StorageError:
+                    self._failed_settlement_index = index
+                    raise
                 return result
 
             try:
