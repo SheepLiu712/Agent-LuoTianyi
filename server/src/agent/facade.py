@@ -1,10 +1,15 @@
 """角色门面：校验、内部路由、单次交付结算及在途调用所有权。"""
 import asyncio
+from collections.abc import Callable
 from dataclasses import replace
+
+from sqlalchemy.orm import Session
 
 import src.domain.agent as d
 from src.agent.handlers.action.router import ActionHandler, ActionRouter
 from src.agent.handlers.stimulus.router import StimulusHandler, StimulusRouter
+from src.agent.ledgers._request_codec import fingerprint
+from src.agent.ledgers.request_ledger import RequestLedger
 from src.utils.logger import get_logger
 
 
@@ -100,15 +105,20 @@ class Agent:
     """角色的两接口业务门面，内部委托已注册处理器并结算接收与效果事实。
 
     AgentRuntime 装配角色私有路由并管理接受状态；生产注册表为空。
-    请求、交互、接收器和报告属于单次调用，不共享当前用户状态。
+    请求账本保存终态，同身份重投不重复处理；接收器只属于单次调用。
     """
 
-    __slots__ = ("_character_id", "_accepting", "_logger", "_stimulus_router", "_action_router", "_inflight")
+    __slots__ = ("_character_id", "_accepting", "_logger", "_stimulus_router", "_action_router",
+                 "_inflight", "_request_ledger", "_handling")
 
     def __init__(self, *, character_id: str,
+                 sql_session_factory: Callable[[], Session],
                  stimulus_router: StimulusRouter[StimulusHandler] | None = None,
                  action_router: ActionRouter[ActionHandler] | None = None) -> None:
-        """绑定角色并注入内部路由；省略路由使用空表，空白角色抛 ValueError。"""
+        """绑定角色、会话工厂和内部路由；空白角色抛 ValueError，账本初始化失败向上传播。
+
+        会话工厂由运行时注入并用于现有数据库，省略路由使用空注册表。
+        """
         if not isinstance(character_id, str) or not character_id.strip():
             raise ValueError("Agent requires a nonblank character_id")
         self._character_id = character_id
@@ -117,6 +127,8 @@ class Agent:
         self._stimulus_router = stimulus_router if stimulus_router is not None else StimulusRouter(())
         self._action_router = action_router if action_router is not None else ActionRouter(())
         self._inflight: set[asyncio.Future] = set()
+        self._request_ledger = RequestLedger(character_id, sql_session_factory)
+        self._handling: dict[str, tuple[str, asyncio.Future]] = {}
 
     def _stop_accepting(self) -> None:
         self._accepting = False
@@ -158,10 +170,11 @@ class Agent:
 
     async def handle_stimulus(self, request: d.HandleStimulusRequest,
                               plan_sink: d.ActionPlanSink) -> d.HandlingReport:
-        """校验并路由刺激，通过本次 plan_sink 交付计划，返回消费及接收事实。
+        """校验并登记刺激，首次调用交付计划、持久化结算；相同请求重投读取终态。
 
-        参数类型错误抛 TypeError；入口拒绝保留全部 pending。协作者错误转为
-        稳定失败报告，协作取消保留已确认事实；任务取消在处理器清理后传播。
+        相同 ID 的不同内容拒绝；并发重复等待原调用，等待者取消不影响拥有者。
+        存储或未结算占用返回依赖失败；参数错误抛 TypeError。协作取消保留已确认
+        事实，拥有者任务取消在清理后传播并保留占用，不允许重新执行处理器。
         """
         if not isinstance(request, d.HandleStimulusRequest):
             raise TypeError("request must be HandleStimulusRequest")
@@ -173,7 +186,60 @@ class Agent:
             error = d.HandlingErrorCode.CONTRACT_SNAPSHOT_MISMATCH
         elif not self._accepting:
             error = d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
-        elif request.cancellation.is_cancelled:
+        if error is not None:
+            report = self._handling_failure(request, status, error)
+            self._record(request.request_id, request.interaction.interaction_id, status, error)
+            return report
+        completion = self._begin_call()
+        try:
+            report = await self._handle_registered(request, plan_sink)
+            self._record(request.request_id, request.interaction.interaction_id,
+                         report.request_status, report.error_code)
+            return report
+        finally:
+            self._end_call(completion)
+
+    def _storage_failure(self, request, error=None, emitted=()):
+        code = d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
+        if error is not None:
+            self._record_exception(request.request_id, request.interaction.interaction_id, code, error)
+        return self._handling_failure(request, d.HandlingRequestStatus.FAILED, code, emitted)
+
+    async def _handle_registered(self, request, sink):
+        try:
+            identity = fingerprint(self._character_id, request)
+            state, report = self._request_ledger.claim(request.request_id, identity)
+            if state == "terminal":
+                self._validate_handling_report(request, report, report.emitted_plan_ids)
+                return report
+        except Exception as error:
+            return self._storage_failure(request, error)
+        if state == "conflict":
+            return self._handling_failure(request, d.HandlingRequestStatus.FAILED,
+                                          d.HandlingErrorCode.CONTRACT_SNAPSHOT_MISMATCH)
+        if state == "occupied":
+            active = self._handling.get(request.request_id)
+            if active is None or active[0] != identity:
+                return self._storage_failure(request)
+            result = await asyncio.shield(active[1])
+            return result if result is not None else self._storage_failure(request)
+        outcome = asyncio.get_running_loop().create_future()
+        self._handling[request.request_id] = identity, outcome
+        result = None
+        try:
+            result = await self._handle_once(request, sink)
+            try:
+                self._request_ledger.settle(request.request_id, identity, result)
+            except Exception as error:
+                result = self._storage_failure(request, error, result.emitted_plan_ids)
+            return result
+        finally:
+            outcome.set_result(result)
+            self._handling.pop(request.request_id)
+
+    async def _handle_once(self, request, plan_sink):
+        status, error = d.HandlingRequestStatus.FAILED, None
+        if request.cancellation.is_cancelled:
             status = d.HandlingRequestStatus.CANCELLED
         else:
             try:
@@ -183,11 +249,9 @@ class Agent:
             else:
                 return await self._handle(request, plan_sink, handler)
         report = self._handling_failure(request, status, error)
-        self._record(request.request_id, request.interaction.interaction_id, status, error)
         return report
 
     async def _handle(self, request, sink, handler):
-        completion = self._begin_call()
         plans = _PlanDelivery(self._character_id, request, sink)
         try:
             try:
@@ -205,8 +269,6 @@ class Agent:
                 self._record_exception(request.request_id, request.interaction.interaction_id, code, error)
                 report = self._handling_failure(request, d.HandlingRequestStatus.FAILED,
                                                 code, plans.accepted_ids, _retryable(code))
-            self._record(request.request_id, request.interaction.interaction_id,
-                         report.request_status, report.error_code)
             return report
         except asyncio.CancelledError:
             self._record(request.request_id, request.interaction.interaction_id,
@@ -214,7 +276,6 @@ class Agent:
             raise
         finally:
             plans.close()
-            self._end_call(completion)
 
     @staticmethod
     def _validate_handling_report(request, report, accepted_ids):

@@ -1,5 +1,60 @@
 # Agent 门面入口测试
 
+## Request Ledger 结算日志 GREEN（2026-09-06）
+
+保持 RED `3129691c` 不变，移除处理器和存储失败分支的提前/重复结算日志；公开 handle
+在最终报告确定后记录一次结束状态。完整相关回归实跑 **711 passed、2 skipped**，
+包含 44 项请求幂等、11 项损坏恢复补回归及 1 项日志 RED。Ruff、compileall 和 diff 检查通过。
+
+## Request Ledger 结算日志 RED（2026-09-06）
+
+对 GREEN `e8a6b49a` 自审时发现：终态提交失败之前，旧处理器层已经记录 COMPLETED，
+随后外层又重复记录 FAILED。新增公开 handle + SQL 提交失败 + 日志接收器用例，要求
+仅记录最终返回的失败结算；`-m pytest tests/agent/test_request_storage_recovery.py -k logs_only -q --tb=short`
+实跑 **1 failed**，实际出现 3 条结算日志，第一条错误宣称 completed。
+
+## Request Ledger GREEN（2026-09-06）
+
+SPEC `cfa5858e`、RED `8f9e25c4`；44 项原 RED 测试保持不变，GREEN 后全部通过。
+真实 SQL 数据库按角色和请求 ID 仲裁占用、持久化完整终态；门面合并同实例在途调用，
+重复读取不会重新交付，取消与关闭仍等待拥有的工作。会话工厂由 AgentRuntime 注入。
+
+新增 `test_request_storage_recovery.py` 的 11 项补回归，通过 SQL 外部存储边界注入
+未知记录/报告版本、损坏 fingerprint/JSON、缺失字段、非法状态或身份集合、错误请求/
+触发刺激/修订/pending，观察公开 handle 拒绝且不再次交付。它们对初步 GREEN 首次执行即通过，
+不记作新 RED。注入代码依赖账本存储格式以模拟损坏，不断言内部 SQL 查询次数。
+
+实际验证（工作目录 `server`）：
+
+- `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：**710 passed、2 skipped**。
+- 新请求幂等原用例 **44 passed**，新增存储恢复用例 **11 passed**；两个跳过项为 world 真实网络探测。
+- 相关 Agent、AgentRuntime、测试及 conftest 的 Ruff、产品 compileall、`git diff --check` 均通过。
+
+已有独立 Python 子进程读取终态和同数据库双实例争用证据；未运行跨进程同时首次插入的争抢测试、
+真实业务 Handler、外部能力或生产数据库验收。同步 SQL 的锁等待仍受注入数据库引擎配置约束。
+
+## Request Ledger RED（2026-09-06）
+
+SPEC：`agent/request-ledger.md`，提交 `cfa5858e`。`test_request_idempotency.py` 通过公开 handle、AgentRuntime 初始化及 shutdown 验证 44 个展开用例：
+
+| 场景 | 数量 | 测试目的 |
+| --- | ---: | --- |
+| 终态与实例重建 | 8 | 成功、部分消费、失败、取消、零计划的报告值稳定，已确认计划不再次交付，reconsider_at 和 retryable 原样恢复 |
+| 聊天请求语义变更 | 16 | 同 request_id 的触发锚点、正文、来源、时间、客户端 ID、ephemeral、快照身份/修订/用户/时间/时区/期限/连接/输出集合、pending 顺序和正文变化被拒绝 |
+| 取消与集合身份 | 2 | 新令牌不参与 fingerprint，已完成报告优先于后来的取消；预取消形成终态 |
+| 玩偶和世界事实 | 7 | device、online、world、活动修订、规划周期及日程修订参与身份 |
+| 未支持刺激和装配失败 | 2 | 未支持刺激终态在重新注册后仍可恢复；数据库初始化失败回滚资源 |
+| 并发与占用 | 4 | 取消重复等待者不取消首调用、不重复交付；冲突不等待；另一实例拒绝活动占用并在终态后读取；首调用取消后等待者及重建实例不接管 |
+| 角色和请求隔离 | 1 | 不同 request_id 和不同角色独立结算 |
+| 存储故障 | 2 | 读写依赖不可用不进入处理器；终态提交失败保留已接收计划 ID，重建后拒绝重跑；日志关联身份并隐藏异常正文 |
+| 生命周期和进程恢复 | 2 | 关闭等待首调用和重复等待者，不提前释放依赖；独立 Python 进程读取同一临时 SQLite 中的终态 |
+
+测试装配给真实 AgentRuntime 注入具有 `open_sql_session` 的数据库替身，该方法返回真实临时 SQLite SQLAlchemy Session；未模拟 ledger，不查询私有表或算法。所有临时引擎结束时 dispose，子进程有超时和返回码检查。
+
+实跑：`D:/Anaconda/envs/lty/python.exe -m pytest tests/agent/test_request_idempotency.py -q --tb=no` 为 **42 failed、2 passed**。失败来自尚无请求账本导致的重复交付、错误接受冲突、未恢复终态及未使用数据库；活动冲突/被取消拥有者的等待超时是目标等待行为缺失，不是测试环境失败。两项首次通过的是同实例零计划结果值和角色/请求隔离，作为既有回归，不伪造 RED。
+
+连同 Agent、AgentRuntime、domain、world、system 回归为 **42 failed、657 passed、2 skipped**；两项真实 world 网络探测保持跳过。Ruff 通过。没有产品实现变更，也不表示 #64 完成。JSON 损坏和未知版本行的精确恢复、跨进程同时争抢尚无自动化测试证据；代码审查须核对唯一约束、版本与解码失败的保守处理。计划 outbox 不属于这组测试。
+
 对应 SPEC：`docs/项目说明/项目架构与接口（spec）/接口文档/agent/facade.md`，SPEC commit `d5303223`。
 
 ## 测试目的

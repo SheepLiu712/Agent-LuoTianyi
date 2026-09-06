@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from src.agent_runtime import agent_runtime as runtime_module
 
@@ -31,6 +33,8 @@ class VectorStore:
 
 @pytest.fixture
 def runtime_dependencies(monkeypatch, tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'agent-ledger.sqlite'}")
+    sessions = sessionmaker(bind=engine)
     store = VectorStore()
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: store)
     monkeypatch.setattr(runtime_module, "clear_vector_store", lambda expected: True)
@@ -61,9 +65,10 @@ def runtime_dependencies(monkeypatch, tmp_path):
         llm_service=SimpleNamespace(register_llm_module=lambda *args: SimpleNamespace(
             prompt_template=SimpleNamespace(get_variables=lambda: []),
         )),
-        capability_manager=object(), database_manager=object(),
+        capability_manager=object(), database_manager=SimpleNamespace(open_sql_session=sessions),
     ), store
     runtime_module.set_agent_runtime(previous)
+    engine.dispose()
 
 
 @pytest_asyncio.fixture

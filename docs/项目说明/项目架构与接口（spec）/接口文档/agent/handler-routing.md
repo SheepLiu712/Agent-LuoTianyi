@@ -23,6 +23,8 @@ server/src/
 
 两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产注册集合为空，装配由 AgentRuntime 初始化完成。
 
+该文件树采用 #63 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定。文件树只列当前路由涉及的文件，具体业务处理器不在本轮创建。
+
 Router 是 Agent 内部模块。AgentRuntime 仅在显式装配位置直接导入两个 router 类型；stage、world、Adapter 及其他业务调用方不导入它们。Agent 对外不增加注册、查询处理器或第三个业务方法。
 
 ## 内部接口
@@ -72,11 +74,41 @@ class ActionRouter(Generic[HandlerT]):
 
 枚举中已有成员不表示已注册，更不表示已有真实业务实现。本版生产两个注册集合均为空。
 
+### 选择范围与调用流程
+
+一次 handle 只根据触发刺激选择一个处理器。`pending_stimuli` 是交给该处理器理解和结算的输入，不逐项再次路由，也不因 pending 含有其他 kind 而调用其他处理器。`InteractionKind` 不参与路由键；处理器接收完整请求，并以 `UNSUPPORTED_INTERACTION` 表达不支持的交互。
+
+一次 realize 先解析计划中全部行动，再按原顺序逐项调用处理器。因此，计划的后续行动未注册时，前面的行动也不会开始；同一个处理器被多个行动匹配时，仍然按每项行动分别调用，不合并行动。
+
+```text
+handle_stimulus(request, plan_sink)
+  -> 门面入口检查
+  -> StimulusRouter.resolve(request.stimulus.kind)
+  -> handler.handle(request, 本次受限 plans)
+  -> 门面核对并返回 HandlingReport
+
+realize_action_plan(plan, execution_context, output_sink)
+  -> 门面入口检查
+  -> 为 plan.actions 全部解析 ActionRouter
+  -> 按行动顺序 await handler.realize(action, execution_context, 本项受限 outputs)
+  -> 门面核对并返回 ExecutionReport
+```
+
+上述流程说明进入路由后的选择和调用关系。门面各项入口检查及提前返回的完整顺序以 [门面契约](facade.md) 为准。
+
+| 协作者 | 负责的事实 |
+| --- | --- |
+| AgentRuntime | 为每个角色构造注册集合、路由器和 Agent，注入依赖并管理生命周期 |
+| Router | 校验注册键的唯一性，按精确枚举键返回处理器引用 |
+| Agent 门面 | 校验调用身份，调用已解析处理器，管理取消、交付回执与报告结算 |
+| StimulusHandler | 理解触发刺激及 pending，判断交互适用性，交付计划并报告消费结果 |
+| ActionHandler | 实现单项行动，交付输出并报告实际效果 |
+
 ## 与门面和运行时的衔接
 
 AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；装配参数只供运行时和模块内测试使用，不从门面暴露 router。默认生产装配显式使用空注册序列。任一 router 构造失败时，AgentRuntime 初始化失败，沿用已有初始化清理规则，不发布半成品运行时。
 
-门面保持既有参数、角色、交互、修订、接受状态及预取消检查顺序。入口检查通过后才查询 router：
+门面完成其契约规定的入口检查后才查询 router；路由器不自行重复这些检查：
 
 | 入口 | 查询方式 | 未注册的公开结果 |
 | --- | --- | --- |

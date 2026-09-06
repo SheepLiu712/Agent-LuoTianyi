@@ -38,7 +38,7 @@ class AgentRuntime:
         capability_manager: "CapabilityManager",
         database_manager: "DatabaseManager",
     ) -> None:
-        """初始化启用角色的门面、旧意识、潜意识、预处理器和注册表。"""
+        """初始化启用角色及注册表，为门面注入数据库会话工厂；初始化失败回滚资源。"""
         self.logger = get_logger(__name__)
         self.config = config
         self.llm_service = llm_service
@@ -74,6 +74,7 @@ class AgentRuntime:
             self._agents = {
                 character_id: Agent(
                     character_id=character_id,
+                    sql_session_factory=database_manager.open_sql_session,
                     stimulus_router=StimulusRouter(()), action_router=ActionRouter(()),
                 )
                 for character_id in self.character_runtimes
