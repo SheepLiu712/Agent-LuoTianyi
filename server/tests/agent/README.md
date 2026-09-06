@@ -1,5 +1,27 @@
 # Agent 门面入口测试
 
+## Request Ledger RED（2026-09-06）
+
+SPEC：`agent/request-ledger.md`，提交 `cfa5858e`。`test_request_idempotency.py` 通过公开 handle、AgentRuntime 初始化及 shutdown 验证 44 个展开用例：
+
+| 场景 | 数量 | 测试目的 |
+| --- | ---: | --- |
+| 终态与实例重建 | 8 | 成功、部分消费、失败、取消、零计划的报告值稳定，已确认计划不再次交付，reconsider_at 和 retryable 原样恢复 |
+| 聊天请求语义变更 | 16 | 同 request_id 的触发锚点、正文、来源、时间、客户端 ID、ephemeral、快照身份/修订/用户/时间/时区/期限/连接/输出集合、pending 顺序和正文变化被拒绝 |
+| 取消与集合身份 | 2 | 新令牌不参与 fingerprint，已完成报告优先于后来的取消；预取消形成终态 |
+| 玩偶和世界事实 | 7 | device、online、world、活动修订、规划周期及日程修订参与身份 |
+| 未支持刺激和装配失败 | 2 | 未支持刺激终态在重新注册后仍可恢复；数据库初始化失败回滚资源 |
+| 并发与占用 | 4 | 取消重复等待者不取消首调用、不重复交付；冲突不等待；另一实例拒绝活动占用并在终态后读取；首调用取消后等待者及重建实例不接管 |
+| 角色和请求隔离 | 1 | 不同 request_id 和不同角色独立结算 |
+| 存储故障 | 2 | 读写依赖不可用不进入处理器；终态提交失败保留已接收计划 ID，重建后拒绝重跑；日志关联身份并隐藏异常正文 |
+| 生命周期和进程恢复 | 2 | 关闭等待首调用和重复等待者，不提前释放依赖；独立 Python 进程读取同一临时 SQLite 中的终态 |
+
+测试装配给真实 AgentRuntime 注入具有 `open_sql_session` 的数据库替身，该方法返回真实临时 SQLite SQLAlchemy Session；未模拟 ledger，不查询私有表或算法。所有临时引擎结束时 dispose，子进程有超时和返回码检查。
+
+实跑：`D:/Anaconda/envs/lty/python.exe -m pytest tests/agent/test_request_idempotency.py -q --tb=no` 为 **42 failed、2 passed**。失败来自尚无请求账本导致的重复交付、错误接受冲突、未恢复终态及未使用数据库；活动冲突/被取消拥有者的等待超时是目标等待行为缺失，不是测试环境失败。两项首次通过的是同实例零计划结果值和角色/请求隔离，作为既有回归，不伪造 RED。
+
+连同 Agent、AgentRuntime、domain、world、system 回归为 **42 failed、657 passed、2 skipped**；两项真实 world 网络探测保持跳过。Ruff 通过。没有产品实现变更，也不表示 #64 完成。JSON 损坏和未知版本行的精确恢复、跨进程同时争抢尚无自动化测试证据；代码审查须核对唯一约束、版本与解码失败的保守处理。计划 outbox 不属于这组测试。
+
 对应 SPEC：`docs/项目说明/项目架构与接口（spec）/接口文档/agent/facade.md`，SPEC commit `d5303223`。
 
 ## 测试目的

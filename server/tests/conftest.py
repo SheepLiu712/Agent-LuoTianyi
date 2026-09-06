@@ -5,6 +5,7 @@ import pytest
 
 
 _ACTIVE_TEST_FILES = {
+    (Path(__file__).parent / "agent" / "test_request_idempotency.py").resolve(),
     (Path(__file__).parent / "system" / "test_system_runtime_shutdown.py").resolve(),
     (Path(__file__).parent / "agent" / "test_handler_registration.py").resolve(),
     (Path(__file__).parent / "agent" / "test_handler_dispatch.py").resolve(),
