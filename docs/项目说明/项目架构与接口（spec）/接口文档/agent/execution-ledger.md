@@ -22,7 +22,7 @@ ActionHandler 的目标内部协议为 `realize(action, execution_context, outpu
 
 数据库原子取得执行权，随后按计划顺序处理每项 Action。登记内容包含格式版本、计划指纹、运行占用、逐行动状态、可信 ActionResult 和逐行动输出事实。可信事实使用显式 JSON/标量编码，解码只接受已知类型和字段，不动态加载类型。账本保存恢复需要的效果引用，不保存令牌、Handler、sink 或协程。
 
-每项行动在调用业务处理器前持久标记 STARTED。可信返回必须是属于当前 action_id 的有效 ActionResult，不能是 NOT_STARTED。单项结算提交成功后才能开始下一个行动，完成报告也必须在结算成功后返回。成功结算的 COMPLETED/ALREADY_COMPLETED 在同 execution 重投时均报告 ALREADY_COMPLETED，原输出和外部效果不重做；从第一个允许安全开始的未完成行动继续。
+每项行动在调用业务处理器前持久标记 STARTED。可信返回必须是属于当前 action_id 的有效 ActionResult，不能是 NOT_STARTED。单项结算提交成功且本行动输出均已确认后才能开始下一个行动，完成报告也必须在结算和交付成功后返回。成功结算的 COMPLETED/ALREADY_COMPLETED 在同 execution 重投时均报告 ALREADY_COMPLETED，原输出和外部效果不重做；从第一个允许安全开始的未完成行动继续。
 
 | 行动事实 | 同 execution 的安全继续 |
 | --- | --- |
@@ -35,7 +35,7 @@ ActionHandler 的目标内部协议为 `realize(action, execution_context, outpu
 
 可信无效果失败的 retryable 表示原 execution 可安全继续，而非错误码属于某个固定集合；取消后使用新令牌也能继续。已完成前缀的效果与输出不阻止后续安全行动重试。普通异常、超时、伪造返回或任务取消都不能证明本行动无副作用，即使 output_started=False 也不自动重跑。首次普通异常仍按门面稳定错误映射报告本次失败，retryable=False；后续读取未知 STARTED 时返回依赖不可用。未知行动报告为 FAILED/DEPENDENCY_UNAVAILABLE，后续 NOT_STARTED，不把“没有可信效果引用”解释为效果不存在。
 
-失败或取消立即停止启动后续行动。可信返回的 FAILED/CANCELLED 保留真实 effect_ref、不可逆标记和输出事实。处理器返回完成后令牌取消，保留该完成事实，整体 CANCELLED、后续 NOT_STARTED；若仍有未开始行动则 retryable=True，新令牌从其继续。调度期间令牌取消且业务处理器尚未进入时，当前行动可恢复为 NOT_STARTED。
+失败或取消立即停止启动后续行动。可信返回的 FAILED/CANCELLED 保留真实 effect_ref、不可逆标记和输出事实。处理器返回完成且本行动没有未确认输出后令牌取消，保留该完成事实，整体 CANCELLED、后续 NOT_STARTED；若仍有未开始行动则 retryable=True，新令牌从其继续。调度期间令牌取消且业务处理器尚未进入时，当前行动可恢复为 NOT_STARTED。
 
 ## 输出事实与重试安全
 
