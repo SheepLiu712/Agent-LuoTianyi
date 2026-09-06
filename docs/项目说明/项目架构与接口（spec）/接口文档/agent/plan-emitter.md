@@ -61,7 +61,9 @@ sink 等待返回后，先保存成功回执，再检查协作取消；取消不
 
 内部草稿、ordinal 或重投内容冲突映射 INTERNAL_ERROR，保留已确认计划和可信消费事实。外部异常沿用门面错误映射；有持久待重投项时 retryable=True，全部确认或永久拒绝后 False。存储失败且无可信可恢复状态时 retryable=False。
 
-通过 `utils/logger.py` 记录 character_id、request_id、interaction_id、plan_id、ordinal、稳定错误码、异常类型及不含局部变量的栈位置。日志省略协作者异常原文、计划正文、刺激正文、完整序列化数据及连接凭据。处理器捕获 emit 异常不应使投递错误消失于日志。
+通过 `utils/logger.py` 记录 character_id、request_id、interaction_id、plan_id、ordinal、稳定错误码、异常类型及栈位置（文件名、行号和函数名）。日志不格式化 traceback 源码行、局部变量或原异常链，省略协作者异常原文、计划正文、刺激正文、完整序列化数据及连接凭据。源码中的异常字面量同样不得进入日志；仅替换异常消息不满足这一约定。处理器捕获 emit 异常不应使投递错误消失于日志。
+
+从公开 handle 验证：接收器在带有字面量的源码行抛出异常，并携带原始 cause；处理器捕获 emit 异常并返回合法消费结算。报告保留失败状态、错误码和消费事实；格式化后的实际日志保留投递身份、异常类型及接收器栈位置，不包含源码行、异常正文或 cause 正文。
 
 ## 验证入口
 

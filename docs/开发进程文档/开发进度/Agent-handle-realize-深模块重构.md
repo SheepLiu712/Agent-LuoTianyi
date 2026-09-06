@@ -17,6 +17,13 @@
 - 验证及结果：server中使用 `D:/Anaconda/envs/lty/python.exe -X utf8`，相关agent、agent_runtime、domain、world、system测试 **829 passed、2 skipped**，其中34项输出用例。Ruff、compileall、Agent SPEC UTF-8/围栏/相对链接及diff检查通过；旧SQL夹具未修改。
 - 未验证范围：两个world真实网络探测跳过；没有真实业务Handler、外部接收器、客户端播放或生产库验收；本地验证不表示完整#65或业务Say已经实现。
 
+### 2026-09-06 PlanEmitter 日志源码隔离 GREEN
+
+- 交付行为：投递失败日志从 traceback 提取文件、行号和函数名，保留角色、request、interaction、plan、ordinal、稳定错误码与异常类型；日志不传递原 traceback，不格式化源码、局部变量或原异常链。处理器捕获投递异常仍留下诊断记录，公开失败报告与消费事实保持正确。
+- interface spec：[PlanEmitter](../../项目说明/项目架构与接口（spec）/接口文档/agent/plan-emitter.md) 已按实现定稿；没有新增公开接口或改变投递恢复行为。
+- commit：SPEC `c6c4a8cc`、RED `5a4fc167`；GREEN 为 `codex/agent-plan-log-errors` 分支上本记录所在提交，原 RED 断言保持不变。
+- 验证及结果：实现前日志用例实跑 1 failed，失败原因是输出含异常源码字面量；实现后 PlanEmitter 聚焦 45 passed。server 下 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **796 passed、2 skipped**。相关 Ruff、compileall、git diff --check 与修改文档的 UTF-8、围栏、相对链接检查通过。
+- 未验证范围：使用真实 utils logger、临时 SQLite 和受控协作者；两个 world 网络探测仍跳过。没有运行真实业务 Handler、外部队列、生产数据库或客户端验收。
 
 ### 2026-09-06 Execution Ledger 取消等待者事实 GREEN
 
