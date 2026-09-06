@@ -636,8 +636,7 @@ class AgentOutput:
 - `AUDIO_CHUNK` / `AUDIO_END`；
 - `EXPRESSION`；
 - `MOTION`；
-- `HAPTIC`；
-- `SONG_STATE`。
+- `HAPTIC`。
 
 不同 stage 绑定不同 sink 实现，再由 sink 委托对应的协议 Adapter：
 

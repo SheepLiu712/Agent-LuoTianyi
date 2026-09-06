@@ -485,7 +485,7 @@ async def realize_action_plan(
 | Action | 含义 | 专有字段（类型：含义） | 实现结果 |
 | --- | --- | --- | --- |
 | `Say` | 角色向当前 interaction 表达一段已经决定的内容，并可使用 TTS 或已选定的预制音频，同时改变表情 | `content: str`：可显示文本；`sound_content: Optional[str]`：送入 TTS 的文本；`prepared_audio_ref: Optional[MediaRef]`：已经选定、可授权读取的预制音频；`tone: Tone`：语气；`expression: Optional[ChangeExpression]`：与说话同时实现的表情；`delivery: OutputDelivery`：普通对话或瞬时反应 | 产生可选 TEXT、可选 AUDIO、可选 EXPRESSION 输出；`sound_content` 与 `prepared_audio_ref` 不能同时填写；`content` 为空时必须有预制音频 |
-| `Sing` | 角色演唱一个已确定的歌曲片段，并可同步改变表情 | `song_id: str`：歌曲身份；`segment_id: str`：可演唱片段；`bridge_text: Optional[str]`：演唱前后衔接文本；`expression: Optional[ChangeExpression]`：与演唱同时实现的表情 | 产生 SONG_STATE、AUDIO、可选 TEXT/EXPRESSION 输出 |
+| `Sing` | 角色演唱一个已确定的歌曲片段，并可同步改变表情 | `song_id: str`：歌曲身份；`segment_id: str`：可演唱片段；`bridge_text: Optional[str]`：演唱前后衔接文本；`expression: Optional[ChangeExpression]`：与演唱同时实现的表情 | 产生 AUDIO、可选 TEXT/EXPRESSION 输出 |
 | `PerformMotion` | 角色执行一个独立、已注册的可见动作 | `motion_id: str`：动作身份；`parameters: MotionParameters`：该动作的强类型参数；`duration_ms: Optional[int]`：建议时长 | 产生 MOTION 输出 |
 | `TransitionActivity` | 请求 world 对一个角色活动进行有修订保护的状态迁移 | `activity_id: str`：活动身份；`target_state: ActivityState`：目标状态；`expected_activity_revision: int`：并发保护修订；`reason: ActivityTransitionReason`：语义原因 | world Adapter 查询权威 activity revision 后提交状态变化，不经过 output sink |
 | `WriteDiary` | 持久化并按策略发布一篇已决定的日记 | `local_date: date`：归属日期；`title: str`：标题；`body: str`：正文；`visibility: Visibility`：可见范围；`dedup_key: str`：重复执行保护键 | 产生日记持久化/发布效果 |
@@ -556,7 +556,6 @@ class AgentOutputSink(Protocol):
 | `AUDIO_END` | 一次音频输出结束标记 | `total_chunks: int`：总块数；`duration_ms: Optional[int]`：可选时长；`summary: Optional[str]`：观测摘要 |
 | `EXPRESSION` | 与 `Say` / `Sing` 同一 Action 实现的表情变化 | `expression_id: str`：表情；`intensity: Optional[float]`：强度；`duration_ms: Optional[int]`：建议时长 |
 | `MOTION` | 一个独立动作的通道无关表示 | `motion_id: str`：动作；`parameters: MotionParameters`：强类型参数 |
-| `SONG_STATE` | 演唱开始、结束或失败的状态 | `song_id: str`：歌曲；`segment_id: str`：片段；`state: SongPlaybackState`：状态 |
 
 
 output sink 在创建时绑定 stage 和 interaction：

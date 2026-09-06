@@ -147,7 +147,6 @@ Agent 可以统一管理对话片段及相关记忆检索结果的相关性、�
 | `AUDIO_END` | `audio_end` | 音频结束标记 |
 | `EXPRESSION` | `expression` | 表情 |
 | `MOTION` | `motion` | 动作 |
-| `SONG_STATE` | `song_state` | 演唱状态 |
 
 连接状态与支持类型职责不同：前者表示当前可达性，后者表示通道能呈现什么。断开时不要求强制清空支持集合；构造器不建立 `kind + connection + supported_outputs` 组合白名单。空支持集合也不禁止 Agent 认知或生成不经输出通道执行的计划。实际输出仍需由执行边界校验，快照不能保证后续连接仍然可用。
 
