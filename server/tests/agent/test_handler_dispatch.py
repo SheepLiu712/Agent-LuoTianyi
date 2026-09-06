@@ -407,3 +407,35 @@ async def test_handler_error_logs_identity_and_stable_code(routed_runtime, caplo
     assert "luotianyi" in records and "interaction_id=i" in records
     assert "fake-provider-error" in records or any(record.exc_info for record in caplog.records)
     assert "你好" not in records
+
+
+@pytest.mark.parametrize("side", ["handle", "realize"])
+async def test_cancel_before_worker_starts_does_not_invoke_handler(routed_runtime, side):
+    calls = []
+
+    async def handle(req, plans):
+        calls.append("handle")
+        return settlement(req)
+
+    async def realize(action, ctx, outputs):
+        calls.append(action.action_id)
+        return completed(action)
+
+    runtime, _ = routed_runtime(handle, realize)
+    req = request()
+    plan, context = plan_and_context()
+    token = req.cancellation if side == "handle" else context.cancellation
+    # 门面校验同步完成；已排队的取消先于新建处理器任务执行。
+    asyncio.get_running_loop().call_soon(token.cancel, d.CancellationReason.SUPERSEDED)
+    sink = Sink()
+    if side == "handle":
+        report = await runtime.get_agent().handle_stimulus(req, sink)
+        assert report.request_status is d.HandlingRequestStatus.CANCELLED
+        assert report.consumed_pending_stimulus_ids == ()
+        assert report.retained_pending_stimulus_ids == ("m2", "m1")
+    else:
+        report = await runtime.get_agent().realize_action_plan(plan, context, sink)
+        assert report.status is d.ExecutionStatus.CANCELLED
+        assert all(result.status is d.ActionExecutionStatus.NOT_STARTED for result in report.action_results)
+    assert calls == []
+    assert sink.values == []

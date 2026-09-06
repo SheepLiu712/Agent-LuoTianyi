@@ -92,3 +92,11 @@ SPEC：`4c031a4c`，在提交并自审路由调用、单次交付事实和关闭
 
 生产路由器装配为空；成功处理与输出使用内部协议的受控协作者验证，没有运行真实业务 Handler、模型或能力。
 两项真实网络探测仍跳过。作者自审与后续独立 PR 审核分别记录。
+
+## 处理器实际启动前取消 RED（2026-09-06）
+
+对 `4f822f6d` 提交自审时，用事件循环已排队的令牌取消实证：门面同步入口检查后、
+新建处理器任务实际开始前，令牌可以已取消。新增 handle/realize 两项回归要求不调用处理器，
+handle 不消费 pending，realize 所有行动仍 NOT_STARTED。
+`python -m pytest tests/agent/test_handler_dispatch.py -k cancel_before_worker -q --tb=short`
+为 2 failed：handle 错误消费 m2，realize 错误记录首行动完成；两者最终 CANCELLED 状态无法掩盖已启动业务的错误。
