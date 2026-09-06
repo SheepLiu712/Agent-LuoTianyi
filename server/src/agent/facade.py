@@ -203,7 +203,6 @@ class Agent:
         code = d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
         if error is not None:
             self._record_exception(request.request_id, request.interaction.interaction_id, code, error)
-        self._record(request.request_id, request.interaction.interaction_id, d.HandlingRequestStatus.FAILED, code)
         return self._handling_failure(request, d.HandlingRequestStatus.FAILED, code, emitted)
 
     async def _handle_registered(self, request, sink):
@@ -250,7 +249,6 @@ class Agent:
             else:
                 return await self._handle(request, plan_sink, handler)
         report = self._handling_failure(request, status, error)
-        self._record(request.request_id, request.interaction.interaction_id, status, error)
         return report
 
     async def _handle(self, request, sink, handler):
@@ -271,8 +269,6 @@ class Agent:
                 self._record_exception(request.request_id, request.interaction.interaction_id, code, error)
                 report = self._handling_failure(request, d.HandlingRequestStatus.FAILED,
                                                 code, plans.accepted_ids, _retryable(code))
-            self._record(request.request_id, request.interaction.interaction_id,
-                         report.request_status, report.error_code)
             return report
         except asyncio.CancelledError:
             self._record(request.request_id, request.interaction.interaction_id,

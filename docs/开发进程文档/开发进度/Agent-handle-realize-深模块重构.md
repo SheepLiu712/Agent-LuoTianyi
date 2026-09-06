@@ -1,5 +1,12 @@
 # Agent `handle_stimulus / realize_action_plan` 深模块重构进度
 
+### 2026-09-06 Request Ledger 结算日志时点修复 GREEN
+
+- 交付行为：移除处理器层尚未持久化时的完成日志，统一在公开 handle 确定最终报告后记录一次结算；终态提交失败只记录返回的依赖失败，不先宣称 completed。
+- commit 与 SPEC：账本契约已满足；初步 GREEN `e8a6b49a` 自审发现问题，日志 RED `3129691c` 复现 3 条结算日志（其中 1 条提前 completed），本记录所在 GREEN 修复，未改变领域或装配接口。
+- 验证及结果：完整命令 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **711 passed、2 skipped**；相关 Ruff、compileall 与 `git diff --check` 通过。原 44 项 Request Ledger RED 仍未修改。
+- 未验证范围：沿用下述 Request Ledger 首片的验证边界，没有新增生产数据库、跨进程首次并发登记或外部服务验收。
+
 ### 2026-09-06 handle Request Ledger 持久幂等 GREEN
 
 - 交付行为：AgentRuntime 向角色门面注入现有数据库会话工厂；Request Ledger 用角色/请求复合主键登记处理权，以版本化确定 fingerprint 检查输入，提交完整 JSON 终态后返回。相同请求恢复报告、不同内容拒绝；同实例重复等待原处理，不同实例未结算占用保守拒绝。等待者取消不取消拥有者，拥有者取消保留占用；关闭等待所有已登记调用。存储错误记录稳定身份和隐藏正文的栈信息，结算失败保留已接收计划 ID。

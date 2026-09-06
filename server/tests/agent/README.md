@@ -1,5 +1,11 @@
 # Agent 门面入口测试
 
+## Request Ledger 结算日志 GREEN（2026-09-06）
+
+保持 RED `3129691c` 不变，移除处理器和存储失败分支的提前/重复结算日志；公开 handle
+在最终报告确定后记录一次结束状态。完整相关回归实跑 **711 passed、2 skipped**，
+包含 44 项请求幂等、11 项损坏恢复补回归及 1 项日志 RED。Ruff、compileall 和 diff 检查通过。
+
 ## Request Ledger 结算日志 RED（2026-09-06）
 
 对 GREEN `e8a6b49a` 自审时发现：终态提交失败之前，旧处理器层已经记录 COMPLETED，
