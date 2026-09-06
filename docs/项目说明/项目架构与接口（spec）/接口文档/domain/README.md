@@ -11,7 +11,7 @@
 - [Stimulus 领域契约](stimulus.md)：当前总 SPEC 已登记的 22 个 Stimulus 类型名的权威 interface；其中 15 种定义为可构造，7 种只占位且当前统一拒绝构造。文档定义公共字段、专有字段、依赖值类型、稳定错误和公开测试 seam。
 - [handle 输入契约](handle-input.md)：提供不可变请求、Chat/Toy/World 快照、共享取消令牌、枚举及稳定构造错误。
 - [HandlingReport 类型契约](handling-report.md)：提供不可变报告、请求状态、pending 身份划分、计划身份、重评时间及稳定错误。
-- [计划与 realization 契约草案](realization.md)：issue #61 的待评审类型与接口建议，尚未实现；包含当前行为覆盖和字段精简建议。
+- [计划与 realization 契约](realization.md)：issue #61 已确认、尚未实现的目标类型与接口，包含 stage 消费的开始思考计划、消息终止输出及本版顺序执行约定。
 - `src.domain.agent`：Agent 强类型领域协议的公开导入路径。提供抽象 `Stimulus`、22 个具体类型、`StimulusKind`、`StimulusSource`、领域值类型及稳定构造错误；其中 15 个具体类型可构造，7 个占位类型统一返回 `CONTRACT_STIMULUS_UNAVAILABLE`。该包不导出 `PersistPolicy`。同时提供三种 `InteractionSnapshot`、`HandleStimulusRequest`、`CancellationToken`、`HandlingReport` 及相关枚举和稳定错误。
 - 旧 `src.domain.stimulus.Stimulus`：当前生产链仍使用的 Mapping 协议，提供 `targets_character()`、`should_persist_conversation()` 和 `can_be_memory_candidate()`。它及其 `SourceChannel`、`StimulusModality`、`PersistPolicy` 在迁移期保持可用，但不构成新 `src.domain.agent` 协议的一部分。
 - `ActionPlan`：Agent 对一次刺激给出的动作计划，包含目标角色和一组 `PlannedAction`。

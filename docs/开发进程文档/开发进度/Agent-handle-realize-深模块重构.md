@@ -110,3 +110,12 @@
 - commit 或 PR：`codex/agent-04-realization-contract` 分支上的本记录所在 SPEC 草案提交。
 - 验证及结果：按 `c523b2a6` 的实际代码核对聊天、触摸、语音、演唱、日记、动态和学歌入口；阅读现有音频终包测试，未运行它们。新增文档 UTF-8、代码围栏、相对链接及 `git diff --check` 静态检查通过。草案阶段 RED/GREEN 不适用。
 - 未验证范围：没有产品代码或测试实现，没有接入 Agent、sink 或外部服务；没有验证真实播放、设备、生产环境或完成他人评审。远程工单未修改。
+
+### 2026-09-06 realization SPEC 会话结论落实
+
+- 交付内容：将 realization 文档更新为已确认、尚未实现的目标契约；增加由 stage 直接消费的 StartThinking 独立计划，明确其处理结算与业务执行的区别；以 MessageEndOutput/MESSAGE_END 替代音频结束草案，覆盖纯文字、正常音频、错误和取消终包；说明 ExecutionContext 的创建/使用位置，消除 SinkRejectedError 的措辞歧义，保留成功回执与拒绝异常两条路径。
+- 顺序约定：本版保持计划、行动和输出的正常顺序，沿用客户端终止包及播放队列实现表情恢复；严格乱序检测、丢包恢复和跨连接投递去重不作为本版要求。未新增播放完成回执。
+- interface spec：[`domain/realization.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md)；同步 domain 索引、核对记录及 PRD/历史总体设计的权威指向。
+- commit 或 PR：`codex/agent-04-realization-contract` 分支上的本记录所在 SPEC 修订提交；没有新增 RED/GREEN commit。
+- 验证及结果：本轮文档 UTF-8、代码围栏、新增相对链接、关键契约词项和 `git diff --check` 静态检查通过。文档修订的运行时 RED/GREEN 不适用。
+- 未验证范围：未修改产品代码、测试或远程工单；未运行客户端播放、真实依赖或生产环境验收。

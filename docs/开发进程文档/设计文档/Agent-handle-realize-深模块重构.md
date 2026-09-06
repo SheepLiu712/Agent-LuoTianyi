@@ -1,5 +1,7 @@
 # Agent `handle_stimulus / realize_action_plan` 深模块重构总体设计背景
 
+> 2026-09-06 计划与执行的当前目标契约见 [realization SPEC](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md)。本轮明确 StartThinking 由 stage 直接消费、MessageEndOutput 替代音频终止输出，严格乱序/丢包恢复不属于本版交付；下文保留历史设计，不覆盖这些已确认修订。
+
 > 状态：总体设计基线已冻结；不再作为行为切片的当前 interface spec
 >
 > 日期：2026-09-04
