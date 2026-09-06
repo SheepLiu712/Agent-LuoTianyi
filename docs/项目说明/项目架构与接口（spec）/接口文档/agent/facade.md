@@ -1,6 +1,6 @@
 # Agent 两接口门面契约
 
-状态：门面、逐行动账本及[输出身份与持久序列](output-delivery.md)已实现。本文记录门面入口校验、内部处理器调用、交付结算与生命周期行为；领域对象以 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md) 为准。
+状态：门面、逐行动账本及[输出契约](output-delivery.md)中的仅投递恢复与结算补齐已实现。本文记录门面入口校验、内部处理器调用、交付结算与生命周期行为；领域对象以 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md) 为准。
 
 ## 模块与实例
 
@@ -51,9 +51,9 @@ async def realize_action_plan(
 持久身份、逐行动事实和安全继续以 [Execution Ledger](execution-ledger.md) 为准。
 
 1. 顶层参数类型错误抛出 TypeError；角色和 plan/context 交互身份不匹配返回 FAILED / CONTRACT_MISMATCH。运行时停止接受则返回 DEPENDENCY_UNAVAILABLE；这些检查不读取执行历史。
-2. 匹配执行的完成或不安全失败终态优先于本次 revision、令牌和路由检查。完成项返回 ALREADY_COMPLETED，原输出和效果不重复。相同 execution_id 的不同完整计划返回 CONTRACT_MISMATCH；报告不携带原计划事实。
-3. 新执行及可安全继续的执行，检查 basis_interaction_revision 与 current_interaction_revision 一致、令牌未取消，以及全计划均有已注册处理器；对应拒绝为 STALE_INTERACTION、CANCELLED、UNSUPPORTED_ACTION。StartThinking 传入 realize 返回 UNSUPPORTED_ACTION。
-4. 首次准入拒绝不占用执行，全部行动 NOT_STARTED。恢复准入拒绝保留完成前缀及累计输出事实，其余为本次 NOT_STARTED；不覆盖原有安全失败结算。所有准入拒绝均 retryable=False，不执行新行动或调用 sink。
+2. 匹配执行没有可恢复 pending 的完成或不安全失败终态优先于本次 revision、令牌和路由检查。完成项返回 ALREADY_COMPLETED，原输出和效果不重复。相同 execution_id 的不同完整计划返回 CONTRACT_MISMATCH；报告不携带原计划事实。
+3. 新执行、可安全继续的行动及仅投递恢复，检查 basis_interaction_revision 与 current_interaction_revision 一致、令牌未取消，以及全计划均有已注册处理器；对应拒绝为 STALE_INTERACTION、CANCELLED、UNSUPPORTED_ACTION。StartThinking 传入 realize 返回 UNSUPPORTED_ACTION。
+4. 首次准入拒绝不占用执行，全部行动 NOT_STARTED。恢复准入拒绝保留可信完成项及累计输出事实；仅投递恢复的原失败项按本次拒绝投影并保留效果，安全 Handler 重入及尚未开始项为 NOT_STARTED；不覆盖账本原业务结算，具体规则见输出投递契约。所有准入拒绝均 retryable=False，不执行新行动或调用 sink。
 5. 原子取得执行权后，持久登记单项开始、顺序调用处理器，提交可信 ActionResult 且本行动输出均已确认后才开始下一项。失败或取消立即停止后续行动；完成前缀的效果不阻止后续无效果、无已确认或未知输出的可信失败重试。未可信结算的开始状态禁止自动重做。
 
 执行身份取自 context，计划身份取自 plan。output_started 表示累计已确认接收；False 不证明未知投递没有发生。输出保持正常调用顺序及 MessageEndOutput 的位置，sink 回执不代表播放完成。

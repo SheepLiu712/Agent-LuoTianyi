@@ -62,6 +62,44 @@ class Execution:
                 return results[:index]
         return results
 
+    def output_only(self, index):
+        """可信完成或不可重做的行动，仅恢复其安全待投递输出。"""
+        fact = self.facts[index]
+        return (fact.result is not None and not fact.unknown and self.pending(index) is not None
+                and (fact.complete or not fact.safe))
+
+    def admission(self, error):
+        """准入仅投影本次报告，保留恢复行动的效果及原持久结算。"""
+        results = self.prefix()
+        index = len(results)
+        if index < len(self.facts) and self.output_only(index):
+            result = self.facts[index].result
+            if self.facts[index].complete:
+                result = replace(result, status=d.ActionExecutionStatus.ALREADY_COMPLETED)
+            else:
+                result = self.project(result, error)
+            results.append(result)
+        return self.report(error, results)
+
+    @staticmethod
+    def project(result, error):
+        """以本次失败或取消投影行动，保留已知效果而不修改账本事实。"""
+        status = (d.ActionExecutionStatus.CANCELLED if error is d.ExecutionErrorCode.CANCELLED
+                  else d.ActionExecutionStatus.FAILED)
+        return replace(result, status=status, error_code=error)
+
+    def settle(self, index, outputs):
+        """可信结果与内存已确认回执一起提交；本次存储失败仍向上报告。"""
+        try:
+            if outputs.payload_lost:
+                raise outputs.error
+            self.save()
+            if isinstance(outputs.error, _StorageError):
+                raise outputs.error
+        except _StorageError:
+            self._failed_settlement_index = index
+            raise
+
     def historical(self):
         """终态优先于本次准入；未知开始不解释为安全的无效果失败。"""
         prefix = self.prefix()
@@ -70,10 +108,8 @@ class Execution:
         fact = self.facts[len(prefix)]
         if fact.unknown or (fact.started and fact.result is None):
             return self.unavailable()
-        if fact.complete and self.pending(len(prefix)):
-            result = replace(fact.result, status=d.ActionExecutionStatus.FAILED,
-                             error_code=d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE)
-            return self.report(result.error_code, [*prefix, result])
+        if self.output_only(len(prefix)):
+            return None
         if not fact.safe:
             result = fact.result or self.agent._action_result(
                 self.plan.actions[len(prefix)], d.ActionExecutionStatus.FAILED,
@@ -110,13 +146,13 @@ class Execution:
             if terminal is not None:
                 return terminal
             if self.plan.basis_interaction_revision != self.context.current_interaction_revision:
-                return self.report(d.ExecutionErrorCode.STALE_INTERACTION)
+                return self.admission(d.ExecutionErrorCode.STALE_INTERACTION)
             if self.context.cancellation.is_cancelled:
-                return self.report(d.ExecutionErrorCode.CANCELLED)
+                return self.admission(d.ExecutionErrorCode.CANCELLED)
             try:
                 handlers = tuple(self.agent._action_router.resolve(action.kind) for action in self.plan.actions)
             except KeyError:
-                return self.report(d.ExecutionErrorCode.UNSUPPORTED_ACTION)
+                return self.admission(d.ExecutionErrorCode.UNSUPPORTED_ACTION)
             try:
                 if self.ledger.claim(self.context.execution_id, payload, self.facts, new=state == "missing", legacy=slots is None):
                     break
@@ -150,46 +186,53 @@ class Execution:
         results = self.prefix()
         for index in range(len(results), len(self.facts)):
             action, fact = self.plan.actions[index], self.facts[index]
+            recovery = self.output_only(index)
             if self.context.cancellation.is_cancelled:
+                if recovery:
+                    return self.admission(d.ExecutionErrorCode.CANCELLED)
                 return self.report(d.ExecutionErrorCode.CANCELLED, results, retryable=True)
             outputs = OutputEmitter(self, index)
+            previous = replace(fact)
 
             async def execute():
+                if recovery:
+                    try:
+                        await outputs._recover()
+                    except _StorageError:
+                        self.settle(index, outputs)
+                    except (d.SinkRejectedError, _DeliveryCancelled):
+                        pass
+                    return (replace(fact.result, status=d.ActionExecutionStatus.ALREADY_COMPLETED)
+                            if fact.complete else fact.result)
                 result = await handlers[index].realize(action, self.context, outputs)
                 if (type(result) is not d.ActionResult or result.action_id != action.action_id
                         or result.status is d.ActionExecutionStatus.NOT_STARTED):
                     raise ValueError("invalid action result")
                 fact.result = result
-                try:
-                    if isinstance(outputs.error, _StorageError):
-                        raise outputs.error
-                    self.save()  # 在拥有的 worker 内提交，取消清理正常返回也保存可信结果。
-                except _StorageError:
-                    self._failed_settlement_index = index
-                    raise
+                self.settle(index, outputs)  # 取消清理正常返回也在拥有的 worker 内持久结算。
                 return result
 
             try:
-                fact.started, fact.result = True, None
-                self.save()
+                if not recovery:
+                    fact.started, fact.result = True, None
+                    self.save()
                 result = await self.agent._call_handler(execute, self.context.cancellation,
                                                        self.context.execution_id, self.context.interaction_id)
             except _HandlerNotStarted:
-                fact.started = False
+                fact.started, fact.result = previous.started, previous.result
                 try:
                     self.save()
                 except _StorageError as error:
                     return self.unavailable(error, results)
-                return self.report(d.ExecutionErrorCode.CANCELLED, results, retryable=True)
+                return (self.admission(d.ExecutionErrorCode.CANCELLED) if recovery else
+                        self.report(d.ExecutionErrorCode.CANCELLED, results, retryable=True))
             except Exception as error:
                 code = (d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE if isinstance(error, _StorageError)
                         else d.ExecutionErrorCode.CANCELLED if isinstance(error, _DeliveryCancelled)
                         else outputs.code or self.agent._error_code(error, d.ExecutionErrorCode))
                 self.agent._record_exception(self.context.execution_id, self.context.interaction_id, code, error)
                 result = fact.result or self.agent._action_result(action)
-                status = (d.ActionExecutionStatus.CANCELLED if code is d.ExecutionErrorCode.CANCELLED
-                          else d.ActionExecutionStatus.FAILED)
-                result = replace(result, status=status, error_code=code)
+                result = self.project(result, code)
                 return self.report(code, [*results, result])
             finally:
                 outputs.close()
@@ -197,13 +240,11 @@ class Execution:
             delivery_failed = outputs.error is not None and not isinstance(outputs.error, _DeliveryCancelled)
             if delivery_failed or fact.unknown or (fact.complete and self.pending(index)):
                 code = outputs.code or d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
-                status = (d.ActionExecutionStatus.CANCELLED if code is d.ExecutionErrorCode.CANCELLED
-                          else d.ActionExecutionStatus.FAILED)
-                result = replace(result, status=status, error_code=code)
-                return self.report(code, [*results, result])
+                result = self.project(result, code)
+                return self.report(code, [*results, result], retryable=not delivery_failed and not fact.unknown)
             results.append(result)
             if result.error_code is not None:
-                return self.report(result.error_code, results, retryable=fact.safe)
+                return self.report(result.error_code, results, retryable=fact.safe or self.pending(index) is not None)
             if self.context.cancellation.is_cancelled:
                 return self.report(d.ExecutionErrorCode.CANCELLED, results, retryable=index + 1 < len(self.facts))
         return self.report(results=results)

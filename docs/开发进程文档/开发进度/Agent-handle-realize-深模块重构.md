@@ -9,6 +9,15 @@
 
 ## 已完成事实
 
+### 2026-09-06 原输出恢复与可信结算补齐 GREEN
+
+- 交付行为：可信完成或不安全失败行动的safe pending只投递原值，不重跑Handler；安全失败仍先重入Handler。恢复经过全计划准入与执行所有权，错误报告保留原效果及输出事实，失败不转换成业务完成。确认临时存储失败在最终可信结算补齐，本次仍停止新工作；首次payload保存失败保持未知，已有完整payload的尝试标记失败保留安全恢复值。
+- interface spec：[输出投递契约](../../项目说明/项目架构与接口（spec）/接口文档/agent/output-delivery.md)、execution-ledger、facade、handler-routing已定稿为实现事实，项目架构及中文docstring同步。
+- commit与SPEC：SPEC `a1c44e5e`、RED `1e44947c`均已作者自审；本记录所在 `codex/agent-output-recovery` 提交为GREEN，87项RED未改。`4d60a521`、`aff3bc6d`由独立测试作者修订最终资源清理预算，保留所有在途等待断言；Execution和PlanEmitter实际复现短预算抖动，Request Ledger为同形审计修订。
+- 验证及结果：四个输出文件87 passed；server使用 `D:/Anaconda/envs/lty/python.exe -X utf8` 执行相关agent、agent_runtime、domain、world、system回归883 passed、2 skipped。Ruff、compileall、7份Agent SPEC UTF-8/围栏/链接和diff检查通过。包括真实临时SQLite故障、独立Python进程原音频恢复、UNKNOWN封闭、恢复等待者及重复取消清理。
+- 未验证范围：两个world真实网络探测跳过；没有真实业务Handler、客户端播放、外部接收器或生产数据库验收；不表示#65业务Say已实现。
+
+
 ### 2026-09-06 确认输出后取消的可信结果 GREEN
 
 - 交付行为：输出确认后协作取消不再覆盖处理器可信ActionResult；已完成项保留完成及效果，整体取消并只允许后续未开始行动继续；可信失败保留实际失败原因。UNKNOWN、未确认输出、持久故障和内容冲突仍阻断后续工作。

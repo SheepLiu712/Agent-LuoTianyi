@@ -362,3 +362,48 @@ PR #119 独立 SPEC 审查的 RED `c2897f54` 两例要求确认输出后取消�
 保持三项 RED 不变；执行协调器仅将协作取消与交付故障区分，可信行动结果继续参与正常结算。UNKNOWN、未确认槽位、存储失败、内容冲突保护保留。现有execution-ledger和handler-routing SPEC已覆盖，不新增接口或修改契约。
 
 三个输出文件 **37 passed**。最终server目录命令 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **833 passed、2 skipped**；Ruff、Agent compileall、git diff --check通过。首轮完整回归曾在既有关闭测试的20ms最终资源关闭超时失败，原样定向复跑及两轮完整回归通过，没有修改该测试。真实网络探测仍跳过，未运行真实Handler或生产依赖。
+
+## 原输出恢复与结算补齐 SPEC / RED（2026-09-06）
+
+基线为已合并 PR119 的 `e2bf72d9`，独立分支 `codex/agent-output-recovery`。
+SPEC `a1c44e5e` 已提交并作者自审：仅投递恢复、可信结果分流、最终回执补齐、
+恢复准入的报告投影与原业务结算保留、恢复所有权和取消清理；公开接口/domain 字段不变。
+静态估算产品实现增改160–230行，仍受500行门禁约束。本阶段产品实现未修改。
+
+从 `13e8732d` 按函数恢复原17项定位中的15项、更新2项重叠期望，再参数化补充：
+
+- `test_output_delivery_recovery.py`：四类原 payload 恢复和后续行动连续序号；不可逆效果或仅confirmed导致的不安全FAILED/CANCELLED只补投；明确拒绝每次只尝试一次；revision、取消、当前/后续行动缺路由的准入；恢复未知错误的报告投影及效果保留。
+- `test_output_storage_recovery.py`：恢复ack_once及新Python进程safe_pending分支；完成/失败结果的首次及恢复ack临时/永久故障；PREPARED或旧REJECTED完整值已存后，UNKNOWN标记提交失败的恢复。原unknown_crash分支断言保留。
+- `test_output_recovery_lifecycle.py`：取消/不取消等待者共享拥有者事实，另一Runtime不能接管；在途shutdown超时保留依赖；owner重复取消等待sink清理；清理未知、有效回执及确认临时/永久提交失败。任务释放后恢复充裕关闭预算，不用最终资源关闭的调度抖动证明RED。
+- 新生命周期文件加入根conftest启用清单；测试不查询私有映射，仅通过realize/shutdown、外部sink和SQL会话故障观察结果。原SQL夹具、草稿/domain、A的UNKNOWN及3项确认后取消回归未改。
+
+正确工作目录为 `server`，运行时为 `D:/Anaconda/envs/lty/python.exe -X utf8`：
+
+1. `-m pytest tests/agent/test_output_sequences.py tests/agent/test_output_delivery_recovery.py tests/agent/test_output_storage_recovery.py tests/agent/test_output_recovery_lifecycle.py --collect-only -q -p no:cacheprovider`：**87 tests collected**。
+2. 同四文件 `-q -p no:cacheprovider --tb=short --show-capture=no`：**49 failed、38 passed，20.44s**。
+3. `-m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q -p no:cacheprovider --tb=line --show-capture=no`：**49 failed、834 passed、2 skipped，70.13s**；仅上述49项目标失败，两个world真实网络探测跳过，另有一项第三方pkg_resources弃用警告。
+4. 四个输出测试文件及根conftest的Ruff、git diff --check通过；SPEC UTF-8、代码围栏和相对链接检查通过。
+
+相对A新增50个展开项，另2项原期望改变，共52项本片验证。其中49项真实失败；
+新增 `failed-prepare`、`failed-prepare_once`、`failed-ack_persistent` 三项首次通过，是补回归，不伪造RED。
+49项失败分别来自恢复资格仍为False、可信完成的原输出未补投、当前准入仍被旧终态掩盖、
+恢复未知场景零sink尝试、ack_once未补齐持久确认，以及已有完整payload仍无法恢复。
+部分综合用例首先在retryable、状态/错误码或接收次数断言失败；其后payload保真、
+后续序号、重建零重发及取消/关闭清理断言尚未运行到，必须在GREEN完整复验。
+其中恢复中的SQL故障尚未实际进入注入点，当前RED只证明缺少恢复入口，不宣称已验证故障补齐。
+首次collect误从仓库根目录运行导致导入错误，已改为server目录重新收集成功；该环境错误不计入RED。
+
+作者自审边界：本提交只含测试、启用清单和本记录；未改产品代码或追加完成进度。
+A的交付测试除两项已确认期望变更外，经AST比较保持原样；没有导入桥、私有结构断言或放宽原UNKNOWN保护。
+本轮尚无GREEN，没有真实业务Handler、外部接收器、生产库或客户端验收。
+
+
+## 原输出恢复与结算补齐 GREEN（2026-09-06）
+
+SPEC `a1c44e5e` 与 RED `1e44947c` 已落实；87项输出验收未改。Execution在全计划准入及原子占用后，对可信完成或不安全失败只恢复安全槽位的原payload；safe FAILED/CANCELLED仍先重入Handler。补投成功保留原业务失败或跳过已完成行动继续，UNKNOWN和未可信STARTED保持封闭。
+
+OutputEmitter复用既有持久投递路径。已确认回执的本地提交临时失败时，最终可信结果（恢复时使用已存结果）原子补齐回执和结算；本次仍报告DEPENDENCY_UNAVAILABLE，不开始新行动。完整payload已存但UNKNOWN标记失败时恢复原safe状态；首次payload保存失败不允许补出空完成。恢复任务由门面拥有，重复取消只转发一次，清理返回有效回执先保存，再传播取消。
+
+四个输出文件 **87 passed，22.81s**。首次完整回归的旧Execution关闭测试、再次回归的旧PlanEmitter关闭测试，均在owner/waiter结束后的最终资源关闭沿用20ms预算而超时。独立测试作者提交 `4d60a521` 与 `aff3bc6d`，只在业务等待断言已完成后恢复1s清理预算；Request Ledger同形路径为审计修订，不伪造失败证据。前半在途超时、资源保留与取消断言均保留，87项RED未变。
+
+最终server目录执行 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：**883 passed、2 skipped，72.86s**。两个跳过仍为world真实网络探测；另有第三方pkg_resources弃用警告。相关Ruff、Agent compileall、7份Agent SPEC UTF-8/代码围栏/相对链接及git diff --check通过。四份接口SPEC已定稿为事实，公开realize及新增私有协调方法具有中文docstring。没有新增领域字段、数据库格式或真实Handler；只验证本地SQLite、独立Python进程和受控接收器，不代表真实外部服务或生产库验收。
