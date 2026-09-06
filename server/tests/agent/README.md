@@ -1,5 +1,24 @@
 # Agent 门面入口测试
 
+## PlanEmitter 日志源码隔离 GREEN（2026-09-06）
+
+SPEC `c6c4a8cc`、RED `5a4fc167`。实现前重新运行
+`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent/test_plan_logging.py -q --tb=short --show-capture=no`
+为 **1 failed**：原日志格式化 traceback 时包含接收器抛异常的源码字面量。
+保持 RED 原断言，PlanEmitter 现在从 traceback 提取文件、行号和函数名，日志不携带
+原 traceback、源码行、局部变量或原始异常链；处理器捕获异常仍记录投递身份、稳定错误码和类型。
+
+实际验证（工作目录 `server`）：
+
+- `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent/test_plan_logging.py tests/agent/test_plan_emission.py tests/agent/test_plan_delivery_recovery.py -q --tb=short`：**45 passed**。
+- `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：**796 passed、2 skipped**，一个第三方 pkg_resources 弃用警告。
+- Agent、AgentRuntime 和上述测试目录及 conftest 的 Ruff、Agent/AgentRuntime compileall、git diff --check 通过。
+- 修改文档的 UTF-8、代码围栏和相对链接检查通过。
+
+验证使用真实 utils logger、临时 SQLite 与受控协作者。两个 world 网络探测仍跳过；
+没有运行真实业务 Handler、外部队列、生产数据库或客户端验收。GREEN 为
+`codex/agent-plan-log-errors` 分支上本记录所在提交；独立 PR 审核由后续审查记录证明。
+
 ## 已知回执结算补齐 SPEC / RED 修正（2026-09-06）
 
 SPEC 修正 `d7db3897` 在原 SPEC `2194c0a9` 上明确：有效回执已经确定接收，本地 ack 写入失败不能降级为未知接收。保存报告的事务原子补齐 emitter 实际校验的回执，成功后终态保留 FAILED / DEPENDENCY_UNAVAILABLE 和原计划 ID、retryable=False，重建 Agent 不再交付该计划；补齐或结算失败则保留占用。作者自审确认没有信任 Handler 自报 ID，也没有改变真正未知结果的恢复。
