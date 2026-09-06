@@ -2,56 +2,19 @@
 import asyncio
 from collections.abc import Callable
 from dataclasses import replace
+from traceback import walk_tb
 
 from sqlalchemy.orm import Session
 
 import src.domain.agent as d
+from src.agent.execution import Execution, _HandlerNotStarted, _OutputIdentityError
+from src.agent.ledgers.execution_ledger import ExecutionLedger
 from src.agent.handlers.action.router import ActionHandler, ActionRouter
 from src.agent.handlers.stimulus.router import StimulusHandler, StimulusRouter
 from src.agent.ledgers._request_codec import fingerprint
 from src.agent.ledgers.request_ledger import RequestLedger
-from src.agent.planning.emitter import PlanEmitter, _DeliveryCancelled, _check_cancellation, handling_error
+from src.agent.planning.emitter import PlanEmitter, _DeliveryCancelled, handling_error
 from src.utils.logger import get_logger
-
-
-class _HandlerNotStarted(_DeliveryCancelled):
-    """处理器任务调度后、业务调用前已取消，尚未开始任何行动。"""
-
-
-class _OutputIdentityError(ValueError):
-    """处理器尝试交付不属于当前行动的输出。"""
-
-
-class _OutputDelivery:
-    """限制单项行动的输出身份，独立记录已确认输出事实。"""
-
-    def __init__(self, action_id, context, sink):
-        self._action_id = action_id
-        self._context = context
-        self._sink = sink
-        self.started = False
-
-    async def emit(self, output: d.AgentOutput) -> d.OutputReceipt:
-        if self._sink is None:
-            raise RuntimeError("output delivery is closed")
-        _check_cancellation(self._context.cancellation)
-        if (not isinstance(output, d.AgentOutput)
-                or output.execution_id != self._context.execution_id
-                or output.interaction_id != self._context.interaction_id
-                or output.action_id != self._action_id):
-            raise _OutputIdentityError("output does not match action")
-        receipt = await self._sink.emit(output)
-        if (not isinstance(receipt, d.OutputReceipt)
-                or receipt.execution_id != output.execution_id
-                or receipt.sequence_no != output.sequence_no):
-            raise ValueError("invalid output receipt")
-        self.started = True
-        _check_cancellation(self._context.cancellation)
-        return receipt
-
-    def close(self):
-        self._sink = None
-        self._context = None
 
 
 def _retryable(error):
@@ -66,7 +29,7 @@ class Agent:
     """
 
     __slots__ = ("_character_id", "_accepting", "_logger", "_stimulus_router", "_action_router",
-                 "_inflight", "_request_ledger", "_handling")
+                 "_inflight", "_request_ledger", "_handling", "_execution_ledger", "_executing")
 
     def __init__(self, *, character_id: str,
                  sql_session_factory: Callable[[], Session],
@@ -86,6 +49,8 @@ class Agent:
         self._inflight: set[asyncio.Future] = set()
         self._request_ledger = RequestLedger(character_id, sql_session_factory)
         self._handling: dict[str, tuple[str, asyncio.Future]] = {}
+        self._execution_ledger = ExecutionLedger(character_id, sql_session_factory)
+        self._executing: dict[str, tuple[str, asyncio.Future]] = {}
 
     def _stop_accepting(self) -> None:
         self._accepting = False
@@ -291,82 +256,35 @@ class Agent:
 
     async def realize_action_plan(self, plan: d.ActionPlan, execution_context: d.ExecutionContext,
                                   output_sink: d.AgentOutputSink) -> d.ExecutionReport:
-        """整份计划预检后顺序执行，向本次 output_sink 投递并返回逐行动结果。
+        """持久校验执行身份，预检全计划并顺序执行；重投跳过已完成行动。
 
-        身份、修订、关闭及路由拒绝均不开始行动。失败或取消停止后续行动，
-        保留已确认输出与效果；参数错误抛 TypeError，任务取消在清理后传播。
+        可信无效果且无已确认/未知输出的失败允许原执行安全继续；存储失败或
+        未结算的开始状态阻止重做。相同执行的并发等待者共享拥有者报告。
+        类型错误抛 TypeError；任务取消在可信结果持久结算和清理后传播。
         """
         if not isinstance(plan, d.ActionPlan) or not isinstance(execution_context, d.ExecutionContext):
             raise TypeError("plan and execution_context must be domain objects")
         self._check_sink(output_sink)
         context = execution_context
-        status = d.ExecutionStatus.FAILED
+        error = None
         if plan.target_character_id != self._character_id or plan.interaction_id != context.interaction_id:
             error = d.ExecutionErrorCode.CONTRACT_MISMATCH
-        elif plan.basis_interaction_revision != context.current_interaction_revision:
-            error = d.ExecutionErrorCode.STALE_INTERACTION
         elif not self._accepting:
             error = d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
-        elif context.cancellation.is_cancelled:
-            status, error = d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED
+        if error is not None:
+            report = self._execution_report(plan, context, d.ExecutionStatus.FAILED, error, [], False, False)
         else:
+            completion = self._begin_call()
             try:
-                handlers = tuple(self._action_router.resolve(action.kind) for action in plan.actions)
-            except KeyError:
-                error = d.ExecutionErrorCode.UNSUPPORTED_ACTION
-            else:
-                return await self._realize(plan, context, output_sink, handlers)
-        report = self._execution_report(plan, context, status, error, [], False, False)
-        self._record(context.execution_id, context.interaction_id, status, error)
+                report = await Execution(self, plan, context, output_sink).run()
+            except asyncio.CancelledError:
+                self._record(context.execution_id, context.interaction_id,
+                             d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED)
+                raise
+            finally:
+                self._end_call(completion)
+        self._record(context.execution_id, context.interaction_id, report.status, report.error_code)
         return report
-
-    async def _realize(self, plan, context, sink, handlers):
-        completion = self._begin_call()
-        results = []
-        started = False
-        status, error = d.ExecutionStatus.COMPLETED, None
-        try:
-            for action, handler in zip(plan.actions, handlers):
-                if context.cancellation.is_cancelled:
-                    status, error = d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED
-                    break
-                outputs = _OutputDelivery(action.action_id, context, sink)
-                try:
-                    result = await self._call_handler(lambda: handler.realize(action, context, outputs),
-                                                      context.cancellation,
-                                                      context.execution_id, context.interaction_id)
-                    if (not isinstance(result, d.ActionResult) or result.action_id != action.action_id
-                            or result.status is d.ActionExecutionStatus.NOT_STARTED):
-                        raise ValueError("invalid action result")
-                except _HandlerNotStarted:
-                    status, error = d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED
-                    break
-                except _DeliveryCancelled:
-                    result = self._action_result(action, d.ActionExecutionStatus.CANCELLED,
-                                                 d.ExecutionErrorCode.CANCELLED)
-                except Exception as exception:
-                    code = self._error_code(exception, d.ExecutionErrorCode)
-                    self._record_exception(context.execution_id, context.interaction_id, code, exception)
-                    result = self._action_result(action, d.ActionExecutionStatus.FAILED, code)
-                finally:
-                    started = started or outputs.started
-                    outputs.close()
-                results.append(result)
-                if result.status in (d.ActionExecutionStatus.FAILED, d.ActionExecutionStatus.CANCELLED):
-                    status, error = d.ExecutionStatus(result.status.value), result.error_code
-                    break
-                if context.cancellation.is_cancelled:
-                    status, error = d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED
-                    break
-            report = self._execution_report(plan, context, status, error, results, started, _retryable(error))
-            self._record(context.execution_id, context.interaction_id, status, error)
-            return report
-        except asyncio.CancelledError:
-            self._record(context.execution_id, context.interaction_id,
-                         d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED)
-            raise
-        finally:
-            self._end_call(completion)
 
     @staticmethod
     def _action_result(action, status=d.ActionExecutionStatus.NOT_STARTED, error=None):
@@ -401,12 +319,14 @@ class Agent:
             raise TypeError("sink must provide emit")
 
     def _record_exception(self, call_id, interaction_id, code, error):
-        # 原异常可能包含模型输入或密钥；保留栈位置和类型，不保存其正文及局部变量。
+        # traceback 的源码行也可能含密钥字面量；仅记录位置、类型，不格式化源码。
         safe_error = RuntimeError("Collaborator exception message omitted")
+        locations = [(frame.f_code.co_filename, line, frame.f_code.co_name)
+                     for frame, line in walk_tb(error.__traceback__)]
         self._logger.error(
-            "Agent collaborator failed character_id=%s call_id=%s interaction_id=%s error_code=%s type=%s",
+            "Agent collaborator failed character_id=%s call_id=%s interaction_id=%s error_code=%s type=%s stack=%s",
             self._character_id, call_id, interaction_id, code.value, type(error).__name__,
-            exc_info=(RuntimeError, safe_error, error.__traceback__),
+            locations, exc_info=(RuntimeError, safe_error, None),
         )
 
     def _record(self, call_id, interaction_id, status, error) -> None:

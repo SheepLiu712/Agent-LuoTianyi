@@ -249,3 +249,17 @@ SPEC 为 `25458406`，取消清理可信返回补充为 `15f7b06c`；两个 comm
 失败均来自公开行为缺失：重复执行而非 ALREADY_COMPLETED、内容冲突未拒绝、错误 retryable、历史前缀丢失、重复 sink 投递、忽略存储故障及进程恢复；拥有者取消后等待者继续挂起产生的有界等待超时同样是目标缺失。没有导入、语法或环境错误。
 
 数据库结构只用于外部故障注入，不断言 SQL 查询步骤；初始无执行表时不会产生反射失败，由公开重投错误行为证明 RED。后台任务均显式释放并回收，新进程有超时且关闭引擎。Ruff 与 `git diff --check` 通过。没有产品代码、完成进度或 GREEN 记录。
+
+
+## Execution Ledger 逐行动恢复 GREEN（2026-09-06）
+
+SPEC `25458406` / `15f7b06c` 与 RED `c7694619` 保持；38 项新增测试未改动。
+Agent 在同一数据库登记执行完整计划身份、运行占用、每项开始/可信结算和累计输出事实，
+同实例合并在途调用，重复执行跳过已完成前缀，只有可信且无效果/未知输出的未完成行动安全继续。
+取消清理正常返回的结果在受控 worker 内持久化；存储错误即使被处理器吞掉也阻止继续。
+日志去除 traceback 源码行，只保留类型和栈位置，避免异常字面量泄漏。
+
+在 server 运行 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：
+**793 passed、2 skipped**；包含38项新增执行用例，两个跳过仍为 world 真实网络探测。
+Agent、AgentRuntime 和相关测试 Ruff、Agent compileall、git diff --check，以及 Agent SPEC 的 UTF-8、围栏和相对链接校验通过。
+独立 Python 进程完成/硬退出恢复和真实临时 SQLite 故障已验证；真实业务 Handler、外部服务、生产数据库未验证。

@@ -8,7 +8,7 @@
 
 计划草稿、稳定身份与持久投递恢复见 [PlanEmitter 契约](plan-emitter.md)。
 
-执行账本与逐行动安全恢复的目标契约见 [Execution Ledger](execution-ledger.md)。
+执行账本与逐行动安全恢复的当前契约见 [Execution Ledger](execution-ledger.md)。
 
 ## 模块职责
 

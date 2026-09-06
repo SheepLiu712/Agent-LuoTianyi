@@ -1,10 +1,10 @@
 # Execution Ledger 与逐行动恢复契约
 
-状态：目标契约，尚未实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
+状态：已实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
 
 ## 所有权与装配
 
-`agent/ledgers/execution_ledger.py` 保存执行身份及逐行动事实；私有编码辅助模块放在同目录。AgentRuntime 通过已有 `sql_session_factory` 装配参数注入 `database_manager.open_sql_session`，账本使用原数据库中的独立表，关闭自己创建的 SQLAlchemy Session。事务只覆盖登记、读取和结算，不跨越 Handler 或 sink 的 await。初始化失败沿用 AgentRuntime 初始化回滚。
+`agent/ledgers/execution_ledger.py` 保存执行身份及逐行动事实，`_execution_codec.py` 校验持久事实；`agent/execution.py` 协调准入、按行动执行和受限输出。AgentRuntime 通过已有 `sql_session_factory` 装配参数注入 `database_manager.open_sql_session`，账本使用原数据库中的独立表，关闭自己创建的 SQLAlchemy Session。事务只覆盖登记、读取和结算，不跨越 Handler 或 sink 的 await。初始化失败沿用 AgentRuntime 初始化回滚。
 
 ActionHandler 保持 `realize(action, execution_context, outputs: AgentOutputSink) -> ActionResult`。门面创建每行动受限 outputs；处理器不能取得外部 sink 或账本。生产路由保持为空。Agent 包只导出 Agent，业务方法仍为两个。
 
@@ -14,7 +14,7 @@ ActionHandler 保持 `realize(action, execution_context, outputs: AgentOutputSin
 
 相同键不同指纹返回 `FAILED / CONTRACT_MISMATCH / retryable=False`，不调用 Handler/sink、不覆盖原记录，不把原计划的行动和效果泄漏到冲突报告。不同角色可独立使用相同 execution_id；不同 execution_id 独立执行。
 
-顶层类型错误抛 TypeError；绑定角色或 plan/context 交互身份错误，以及运行时停止接受时，沿用门面的入口拒绝，不读取其他执行事实。接受状态通过后先读取匹配执行，再检查当前 revision、令牌和全计划路由。首次执行的修订过期、预取消、任一行动未注册均零行动、零输出，不占用该 execution；预取消报告保持 retryable=False，换新令牌仍可首次执行。
+顶层类型错误抛 TypeError；计划包含编码白名单以外的具体类型时返回 INTERNAL_ERROR、无投递；绑定角色或 plan/context 交互身份错误，以及运行时停止接受时，沿用门面的入口拒绝，不读取其他执行事实。接受状态通过后先读取匹配执行，再检查当前 revision、令牌和全计划路由。首次执行的修订过期、预取消、任一行动未注册均零行动、零输出，不占用该 execution；预取消报告保持 retryable=False，换新令牌仍可首次执行。
 
 已有匹配记录全部已完成，或者已有不可安全继续的可信失败时，直接读取既有终态；完成项转换为 ALREADY_COMPLETED，保留 effect_ref、不可逆标记和累计 output_started，retryable=False。新的 revision、令牌或路由集合不改变已经发生的终态事实。对于仍可安全继续的执行，准入拒绝只阻止本次新动作：旧 revision 返回 STALE_INTERACTION，未注册返回 UNSUPPORTED_ACTION，预取消返回 CANCELLED；完成前缀仍为 ALREADY_COMPLETED，其余为本次 NOT_STARTED，retryable=False。存储中原可信失败保留，准入拒绝不覆盖它；后续合法调用仍可从该安全位置继续。output_started 表示已确认接收事实，False 不证明未知输出没有发生。
 
@@ -52,7 +52,7 @@ SinkRejectedError 表示此次明确没有新增接收；可清除此轮新产�
 
 拥有者 task 取消沿用门面受控清理与 CancelledError 传播规则，重复取消只向处理器转发一次。若处理器在取消清理中正常返回可信 ActionResult，先持久保存该结果，再向拥有者传播 CancelledError；已完成行动以后不重做。无可信结果的在执行行动保持未知；并发等待者取得依赖不可用报告，不接管任务。所有已进入账本的调用及等待者计入运行时在途集合；shutdown 停止接受后等待清理与结算，超时保留依赖供后续关闭重试。
 
-登记、读取、开始标记或结算失败均返回 DEPENDENCY_UNAVAILABLE/retryable=False。登记/开始失败不开始外部工作；结算失败保留已知事实并阻止重做。未知版本、损坏 JSON、计划指纹或行动身份不一致、非法状态组合均拒绝恢复，不丢弃记录重建。使用 utils/logger.py 记录角色、execution、interaction、稳定错误码、异常类型和无局部变量的栈位置，省略异常原文及计划正文。
+登记、读取、开始标记或结算失败均返回 DEPENDENCY_UNAVAILABLE/retryable=False。登记/开始失败不开始外部工作；结算失败保留已知事实并阻止重做。未知版本、损坏 JSON、计划指纹或行动身份不一致、非法状态组合均拒绝恢复，不丢弃记录重建。使用 utils/logger.py 记录角色、execution、interaction、稳定错误码、异常类型和栈文件、行号和函数名，省略源码行、局部变量、异常原文及计划正文。
 
 ## 公开验证
 
