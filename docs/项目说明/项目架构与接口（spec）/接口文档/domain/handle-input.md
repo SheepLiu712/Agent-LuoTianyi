@@ -93,7 +93,7 @@ InteractionSnapshot = (
 | `TEXT_DELTA` | `text_delta` | 增量文字 |
 | `TEXT_FINAL` | `text_final` | 最终文字 |
 | `AUDIO_CHUNK` | `audio_chunk` | 音频块 |
-| `AUDIO_END` | `audio_end` | 音频结束标记 |
+| `MESSAGE_END` | `message_end` | 消息结束标记，纯文字和音频消息均适用 |
 | `EXPRESSION` | `expression` | 表情 |
 | `MOTION` | `motion` | 动作 |
 

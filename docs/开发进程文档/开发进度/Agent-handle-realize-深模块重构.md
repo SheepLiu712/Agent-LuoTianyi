@@ -119,3 +119,11 @@
 - commit 或 PR：`codex/agent-04-realization-contract` 分支上的本记录所在 SPEC 修订提交；没有新增 RED/GREEN commit。
 - 验证及结果：本轮文档 UTF-8、代码围栏、新增相对链接、关键契约词项和 `git diff --check` 静态检查通过。文档修订的运行时 RED/GREEN 不适用。
 - 未验证范围：未修改产品代码、测试或远程工单；未运行客户端播放、真实依赖或生产环境验收。
+
+### 2026-09-06 realization 领域契约 RED / GREEN
+
+- 交付行为：`src.domain.agent` 新增 42 个公开类型，包含七种 Action、ActionPlan、执行上下文、四种具体输出、两个 sink Protocol/回执、执行报告和值/错误枚举。实现显式关键字构造、不可变值和稳定错误、StartThinking 独立首计划、Say 音频互斥、私密发布归属、消息终止组合及部分执行结果校验。公开类型、方法和属性均有中文 docstring；AgentOutputKind 及快照测试改用 MESSAGE_END。
+- interface spec：[`domain/realization.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md)；同步 handle 输入枚举文档。SPEC commit `17ee66a1` 已满足，本轮未增加接口。
+- commit 或 PR：RED `aa0fd0a5`；GREEN 为 `codex/agent-04-realization-contract` 分支上本记录所在提交。
+- 验证及结果：使用 `D:/Anaconda/envs/lty/python.exe`，工作目录 server。RED 的 `-m pytest tests/domain -q --tb=no -rN` 为 103 failed、326 passed，其中 101 项为新协议缺失，2 项为已确认的输出枚举更名；没有收集或导入错误。保持 RED 测试不变，GREEN 领域测试为 429 passed；Ruff、compileall 通过。静态检查确认 42 个新增公开类型及其公开方法/属性具有中文 docstring。
+- 未验证范围：没有实现实际接收器、Agent 门面/执行器、stage 思考通知消费、消息终包发送、客户端播放或真实持久效果；没有运行完整 Server、客户端、外部服务或生产验收。Protocol 声明与领域值测试不构成这些运行时行为的证明。

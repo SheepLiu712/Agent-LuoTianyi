@@ -1,8 +1,8 @@
 # 计划与 realization 领域契约
 
-> 状态：2026-09-06 讨论修订版，已确认，尚未实现。
+> 状态：2026-09-06 领域类型、构造校验及两个 Protocol 声明已实现；接收器、Agent 和客户端运行链尚未接入。
 >
-> 对应 [issue #61](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/61)。本文为本轮目标契约；当前代码保持原状，直到对应实现交付。
+> 对应 [issue #61](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/61)。字段和构造规则描述当前实现；stage 消费、执行、投递和客户端映射是运行时接入契约，不表示本轮已实现这些行为。
 >
 > 当前行为依据与风险见 [本轮核对记录](../../../../开发进程文档/设计文档/Issue-61-realization-契约核对.md)。输入沿用 [handle 输入契约](handle-input.md)，处理结算沿用 [HandlingReport](handling-report.md)。
 
@@ -159,7 +159,7 @@ current_interaction_revision 是开始执行时的事实，覆盖计划接收后
 ## 7. AgentOutput
 
 AgentOutput 为不可直接构造的抽象基类。具体输出通过固定 kind 对应 AgentOutputKind，内容直接作为具体类型的字段，避免可任意搭配的 kind/content 二元组。
-本轮目标枚举将 `AUDIO_END=audio_end` 替换为 `MESSAGE_END=message_end`，适用于 InteractionSnapshot.supported_outputs；其余已有成员保持不变。当前代码尚未进行这一替换。
+AgentOutputKind 使用 `MESSAGE_END=message_end` 表示消息结束，适用于 InteractionSnapshot.supported_outputs；该枚举不再提供 AUDIO_END。
 
 | 公共字段 | 类型 | 含义 |
 | --- | --- | --- |
@@ -261,3 +261,5 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 从 `src.domain.agent` 的公开构造器验证合法值、字段缺失/多余、不可变性、Say 音频互斥、计划身份唯一、报告内部关系及错误分类。
 两个 Protocol 的类型声明本身不证明运行时行为。正常排队、背压、身份绑定和持久效果幂等通过实际接收器及公开 Agent 调用验证；严格乱序/丢包恢复和跨连接投递去重不属于本版验收。
 兼容验证包含思考包时序、文字与音频的消息 ID、音频失败终包、TTS 独立文件块/演唱文件片段、触摸 normal 恢复及私密日记的归属和去重。
+
+当前领域测试为 `server/tests/domain/test_realization_contract.py`，同时由 `test_handle_input_contract.py` 验证 MESSAGE_END 在快照中的使用。在 server 目录运行 `python -m pytest tests/domain -q`。这些测试验证公开值与协议声明，不验证真实 sink 或客户端投递。
