@@ -358,6 +358,37 @@ def test_single_string_value_type_rejects_blank_values(
 
 
 @pytest.mark.parametrize(
+    ("type_name", "field_name", "wrong_reference"),
+    [
+        (
+            "ImageMessage",
+            "media_ref",
+            agent_domain.EvidenceRef(evidence_id="evidence-not-media"),
+        ),
+        (
+            "WorldObservation",
+            "evidence_refs",
+            (agent_domain.MediaRef(media_id="media-not-evidence"),),
+        ),
+        (
+            "SongKnowledgeDiscovered",
+            "source_ref",
+            agent_domain.MediaRef(media_id="media-not-source"),
+        ),
+    ],
+)
+def test_controlled_reference_nominal_types_cannot_be_interchanged(
+    type_name: str,
+    field_name: str,
+    wrong_reference: object,
+) -> None:
+    values = _valid_stimulus_kwargs(type_name)
+    values[field_name] = wrong_reference
+
+    _assert_invalid(getattr(agent_domain, type_name), **values)
+
+
+@pytest.mark.parametrize(
     ("count_10s", "count_30s"),
     [(-1, 1), (1, -1), (2, 1), (True, 1), (1, False)],
 )
