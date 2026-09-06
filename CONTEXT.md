@@ -25,7 +25,7 @@ The role that organizes one kind of interaction around the Agent boundary, inclu
 _Avoid_: Global stage, universal BaseStage
 
 **Interaction Snapshot**:
-The immutable Chat, Toy, or World facts supplied directly with one handle request; no snapshot registry, persistence, or generic SnapshotRef is required. Interaction ID identifies the continuous interaction; interaction revision identifies the Stage-owned decision basis within it. Input details are defined in [the handle input SPEC](docs/项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md), currently a draft without implementation.
+The immutable Chat, Toy, or World facts supplied directly with one handle request; no snapshot registry, persistence, or generic SnapshotRef is required. Interaction ID identifies the continuous interaction; interaction revision identifies the Stage-owned decision basis within it. Input details are defined in [the handle input SPEC](docs/项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md), implemented as domain values and a cancellation token; Agent/Stage runtime integration remains pending.
 _Avoid_: Live Stage context, global state version, typing or image-selection state copies
 
 **Cancellation Token**:

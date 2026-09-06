@@ -1,6 +1,6 @@
 # handle 输入契约
 
-> 状态：SPEC 修订版，待评审；本文新增类型尚未实现，不代表 Agent handle 已可调用。
+> 状态：输入领域类型已实现并通过 98 项公开契约测试，待他人评审；Agent handle 及 stage 生产链尚未接入。
 >
 > 日期：2026-09-06
 >
@@ -222,7 +222,7 @@ Agent 可以统一管理对话片段及相关记忆检索结果的相关性、�
 
 ## 7. 验收场景与测试入口
 
-领域契约测试以 `src.domain.agent` 的公开构造器、字段和 `cancel` 为入口，预期放入 `server/tests/domain/test_handle_input_contract.py`。不测试私有 helper，也不需要模型、数据库或真实连接。
+领域契约测试以 `src.domain.agent` 的公开构造器、字段和 `cancel` 为入口，位于 `server/tests/domain/test_handle_input_contract.py`。不测试私有 helper，也不需要模型、数据库或真实连接。
 
 | 场景 | 可观察结果 |
 | --- | --- |
@@ -245,7 +245,7 @@ Agent 可以统一管理对话片段及相关记忆检索结果的相关性、�
 
 以下场景需要未来真实 Agent/stage 公开入口验证，不能用领域对象测试宣称通过：预取消不启动工作；Recall/模型迟到结果不提交；新 revision 拒绝旧计划；同 request ID 的输入冲突；断线和重连期间的 pending 结算；Agent 工作上下文的 interaction 隔离、历史与 Recall 统一保留/清理、取消不误删上下文以及清理不删除持久化正本；Stimulus 资源引用的授权读取。
 
-本次为文档交付，运行时 Red/Green 不适用。评审验证采用字段逐项核对、Markdown 相对链接检查及 `git diff --check`；未建立新类型或运行时行为测试。
+输入领域类型已从 `src.domain.agent` 提供，构造器及 token 的 RED/GREEN 证据见 [开发进度](../../../../开发进程文档/开发进度/Agent-handle-realize-深模块重构.md)。98 项公开输入契约测试及 234 项领域回归通过；这不代表上述 Agent/stage 运行时场景已实现或验证。
 
 ## 8. 阅读验收
 

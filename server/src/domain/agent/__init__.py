@@ -1,3 +1,14 @@
+from ._handle_input_contract import HandleInputErrorCode, InvalidHandleInputError
+from .handle_input import CancellationReason, CancellationToken, HandleStimulusRequest
+from .interaction_snapshot import (
+    AgentOutputKind,
+    ChatInteractionSnapshot,
+    ConnectionState,
+    InteractionKind,
+    InteractionSnapshot,
+    ToyInteractionSnapshot,
+    WorldInteractionSnapshot,
+)
 from ._stimulus_contract import InvalidStimulusError, StimulusErrorCode
 from .stimulus import (
     ActivityDue,
@@ -43,6 +54,18 @@ from .stimulus_values import (
 )
 
 __all__ = (
+    "AgentOutputKind",
+    "CancellationReason",
+    "CancellationToken",
+    "ChatInteractionSnapshot",
+    "ConnectionState",
+    "HandleInputErrorCode",
+    "HandleStimulusRequest",
+    "InteractionKind",
+    "InteractionSnapshot",
+    "InvalidHandleInputError",
+    "ToyInteractionSnapshot",
+    "WorldInteractionSnapshot",
     "ActivityDue",
     "ActivityEnded",
     "ActivityFact",

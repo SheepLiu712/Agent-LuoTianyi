@@ -187,7 +187,7 @@ async def handle_stimulus(
 
 #### `HandleStimulusRequest`
 
-本节输入字段的当前权威定义见 [handle 输入契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)（2026-09-06 SPEC 修订版，尚未实现）。`CancellationToken` 由 stage 更新，Agent 观察；当前取消原因只有 `SUPERSEDED`（过时）和 `NO_LONGER_NEEDED`（无需处理），首次原因保留，取消后不能复活。
+本节输入字段的当前权威定义见 [handle 输入契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)（2026-09-06 输入领域类型已实现，Agent/stage 生产链未接入）。`CancellationToken` 由 stage 更新，Agent 观察；当前取消原因只有 `SUPERSEDED`（过时）和 `NO_LONGER_NEEDED`（无需处理），首次原因保留，取消后不能复活。
 
 | 字段 | 类型 | 含义 | 约束 |
 | --- | --- | --- | --- |
