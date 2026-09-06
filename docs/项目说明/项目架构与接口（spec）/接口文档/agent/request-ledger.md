@@ -1,12 +1,14 @@
 # handle 请求账本契约
 
-状态：目标契约。业务入口仍为 `Agent.handle_stimulus(request, plan_sink)`，输入和结果使用现有 domain 类型。
+状态：已实现。业务入口为 `Agent.handle_stimulus(request, plan_sink)`，输入和结果使用现有 domain 类型。
 
 ## 装配与持久化
 
-`agent/ledgers/request_ledger.py` 拥有 Request Ledger；JSON 编码辅助代码位于同目录的私有模块。AgentRuntime 初始化时为角色门面注入 `database_manager.open_sql_session`，Agent 构造新增仅供装配使用的必填关键字参数 `sql_session_factory: Callable[[], Session]`。账本使用该工厂创建并关闭 SQLAlchemy Session，在原数据库中创建自己的表；初始化失败使运行时初始化失败，沿用已有回滚。
+`agent/ledgers/request_ledger.py` 拥有 Request Ledger；JSON 编码辅助代码位于同目录的私有模块。AgentRuntime 初始化时为角色门面注入 `database_manager.open_sql_session`，Agent 构造提供仅供装配使用的必填关键字参数 `sql_session_factory: Callable[[], Session]`。账本使用该工厂创建并关闭 SQLAlchemy Session，在原数据库中创建自己的表；初始化失败使运行时初始化失败，沿用已有回滚。
 
 事务只覆盖本地登记、读取和结算，不能跨越 Handler 或 sink 的 await。唯一键为 `(character_id, request_id)`，数据库唯一约束保证不同 Agent、不同 Runtime 或不同进程争用时只有一个获得处理权。账本只保存版本化 fingerprint、处理占用和完整终态报告，不保存刺激原文、取消令牌、Handler、sink 或协程。字段使用显式 JSON 与标量编码，不使用 pickle。账本不从 Agent 包导出，也不提供 stage 查询入口。AgentRuntime 保持顶层位置和原兼容入口。
+
+数据库操作通过同步 Session 执行，其间事件循环需要等待 SQL 返回；数据库锁等待时长由注入引擎的超时设置决定。Handler 与接收器调用期间不持有 SQL 事务。
 
 ## 请求身份
 

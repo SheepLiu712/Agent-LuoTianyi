@@ -1,5 +1,25 @@
 # Agent 门面入口测试
 
+## Request Ledger GREEN（2026-09-06）
+
+SPEC `cfa5858e`、RED `8f9e25c4`；44 项原 RED 测试保持不变，GREEN 后全部通过。
+真实 SQL 数据库按角色和请求 ID 仲裁占用、持久化完整终态；门面合并同实例在途调用，
+重复读取不会重新交付，取消与关闭仍等待拥有的工作。会话工厂由 AgentRuntime 注入。
+
+新增 `test_request_storage_recovery.py` 的 11 项补回归，通过 SQL 外部存储边界注入
+未知记录/报告版本、损坏 fingerprint/JSON、缺失字段、非法状态或身份集合、错误请求/
+触发刺激/修订/pending，观察公开 handle 拒绝且不再次交付。它们对初步 GREEN 首次执行即通过，
+不记作新 RED。注入代码依赖账本存储格式以模拟损坏，不断言内部 SQL 查询次数。
+
+实际验证（工作目录 `server`）：
+
+- `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：**710 passed、2 skipped**。
+- 新请求幂等原用例 **44 passed**，新增存储恢复用例 **11 passed**；两个跳过项为 world 真实网络探测。
+- 相关 Agent、AgentRuntime、测试及 conftest 的 Ruff、产品 compileall、`git diff --check` 均通过。
+
+已有独立 Python 子进程读取终态和同数据库双实例争用证据；未运行跨进程同时首次插入的争抢测试、
+真实业务 Handler、外部能力或生产数据库验收。同步 SQL 的锁等待仍受注入数据库引擎配置约束。
+
 ## Request Ledger RED（2026-09-06）
 
 SPEC：`agent/request-ledger.md`，提交 `cfa5858e`。`test_request_idempotency.py` 通过公开 handle、AgentRuntime 初始化及 shutdown 验证 44 个展开用例：
