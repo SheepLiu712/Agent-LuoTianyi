@@ -34,6 +34,8 @@ async def realize_action_plan(
 
 ## handle 入口
 
+请求身份、持久终态重投和并发处理的目标增量见 [handle 请求账本契约](request-ledger.md)。该增量将账本查询放在角色与接受状态检查之后、首次取消与路由检查之前；已有终态优先于新令牌的取消状态。
+
 1. 参数必须符合已有领域类型。对象构造时的字段、schema_version 校验仍使用领域构造异常；构造失败不会进入 Agent，也不会产生报告。传入错误的顶层参数类型属于调用错误，抛出 `TypeError`。
 2. 进入业务处理前，确认触发刺激及所有 pending 的目标角色集合包含绑定角色。失败返回 `FAILED / CONTRACT_SNAPSHOT_MISMATCH`。快照没有角色字段，角色校验使用刺激的 target_character_ids；handle 的 interaction_id 取自快照。
 3. 对有效请求，先检查运行时是否接受工作，再检查调用令牌；已经取消的请求返回 `CANCELLED`，`error_code=None`。两种取消原因都保留在原令牌中，Agent 不改写调用方令牌。
