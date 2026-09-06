@@ -11,10 +11,11 @@ StimulusErrorCode = Literal[
     "CONTRACT_UNSUPPORTED_SCHEMA",
     "CONTRACT_STIMULUS_UNAVAILABLE",
 ]
+"""刺激构造失败码：字段非法、结构版本不受支持或登记类型不可构造。"""
 
 
 class InvalidStimulusError(ValueError):
-    """A stable construction failure for the public Stimulus contract."""
+    """刺激或其值对象构造失败；code 标识原因，retryable 固定为 False。"""
 
     def __init__(self, message: str, *, code: StimulusErrorCode) -> None:
         super().__init__(message)

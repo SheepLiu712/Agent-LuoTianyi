@@ -9,13 +9,15 @@ from inspect import Signature, signature
 
 
 class HandleInputErrorCode(str, Enum):
+    """handle 输入的稳定错误码，分别标识快照、请求和取消令牌契约错误。"""
+
     CONTRACT_INVALID_INTERACTION = "CONTRACT_INVALID_INTERACTION"
     CONTRACT_INVALID_HANDLE_REQUEST = "CONTRACT_INVALID_HANDLE_REQUEST"
     CONTRACT_INVALID_CANCELLATION = "CONTRACT_INVALID_CANCELLATION"
 
 
 class InvalidHandleInputError(ValueError):
-    """A rejected input with a stable, read-only error code."""
+    """handle 输入校验失败，通过只读 code 属性提供稳定错误码。"""
 
     def __init__(self, message: str, *, code: HandleInputErrorCode) -> None:
         super().__init__(message)
@@ -23,6 +25,7 @@ class InvalidHandleInputError(ValueError):
 
     @property
     def code(self) -> HandleInputErrorCode:
+        """返回快照、请求或取消令牌校验失败的分类。"""
         return self._code
 
 

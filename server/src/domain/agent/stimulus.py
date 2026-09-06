@@ -1,3 +1,5 @@
+"""刺激的公共字段、具体事实类型及已登记的占位类型。"""
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -36,7 +38,7 @@ from .stimulus_values import (
 
 
 class StimulusKind(str, Enum):
-    """Stable discriminator for every registered Stimulus type."""
+    """已登记刺激类型的稳定判别值，由具体类型固定。"""
 
     TEXT_MESSAGE = "text_message"
     IMAGE_MESSAGE = "image_message"
@@ -63,7 +65,7 @@ class StimulusKind(str, Enum):
 
 
 class StimulusSource(str, Enum):
-    """Supplier-independent semantic origin of a Stimulus fact."""
+    """刺激的语义来源：用户、设备、世界或交互流程。"""
 
     USER = "user"
     DEVICE = "device"
@@ -72,7 +74,7 @@ class StimulusSource(str, Enum):
 
 
 class DynamicTargetKind(str, Enum):
-    """The kind of dynamic message that currently needs a decision."""
+    """本次动态观察的判断目标：原帖或评论。"""
 
     POST = "post"
     COMMENT = "comment"
@@ -80,7 +82,13 @@ class DynamicTargetKind(str, Enum):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class Stimulus(ABC, metaclass=_StimulusMeta):
-    """Immutable common fields shared by every typed Stimulus."""
+    """刺激的不可变公共字段；抽象基类不能直接构造。
+
+    stimulus_id 标识事实，schema_version 当前仅接受整数 1，occurred_at
+    记录带时区的发生时间。source、目标角色、可选用户及 ephemeral 均显式传入；
+    ephemeral 表示事实是否仅在当前交互窗口内有意义。
+    具体类型以关键字参数构造，非法字段抛出 InvalidStimulusError。
+    """
 
     _constructible: ClassVar[bool] = True
 
@@ -95,7 +103,7 @@ class Stimulus(ABC, metaclass=_StimulusMeta):
     @property
     @abstractmethod
     def kind(self) -> StimulusKind:
-        """Return the fixed discriminator selected by the concrete type."""
+        """返回具体刺激类型固定的判别值。"""
 
     def __post_init__(self) -> None:
         _validate_common_fields(
@@ -111,6 +119,8 @@ class Stimulus(ABC, metaclass=_StimulusMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TextMessage(Stimulus):
+    """文本消息，包含非空白正文和客户端消息 ID；保留正文原值。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.TEXT_MESSAGE
 
     text: str
@@ -124,6 +134,8 @@ class TextMessage(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ImageMessage(Stimulus):
+    """图片消息，包含媒体引用、可选说明文字和客户端消息 ID。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.IMAGE_MESSAGE
 
     media_ref: MediaRef
@@ -139,6 +151,8 @@ class ImageMessage(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class VoiceMessage(Stimulus):
+    """已结束的录音消息；媒体引用和非空白转写文本至少提供一种。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.VOICE_MESSAGE
 
     media_ref: MediaRef | None
@@ -156,6 +170,8 @@ class VoiceMessage(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class UserTyping(Stimulus):
+    """用户正在输入的协调信号，text_length 记录非负文本长度。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.USER_TYPING
 
     text_length: int
@@ -167,16 +183,22 @@ class UserTyping(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ImageSelectionOpened(Stimulus):
+    """用户打开图片选择界面的协调信号，仅携带刺激公共字段。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.IMAGE_SELECTION_OPENED
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ImageSelectionClosed(Stimulus):
+    """用户关闭图片选择界面的协调信号，仅携带刺激公共字段。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.IMAGE_SELECTION_CLOSED
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TouchInteraction(Stimulus):
+    """客户端 Live2D 触摸事实，包含至少一个部位和可选的点击频率统计。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.TOUCH_INTERACTION
 
     body_regions: tuple[BodyRegion, ...]
@@ -190,6 +212,8 @@ class TouchInteraction(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ProactivePromptDue(Stimulus):
+    """主动提示到期事实，包含原因、带时区的到期时间、去重键和事实引用。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.PROACTIVE_PROMPT_DUE
 
     reason: ProactiveReason
@@ -207,11 +231,19 @@ class ProactivePromptDue(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class InteractionDeadline(Stimulus):
+    """交互已到强制重评时点的协调信号，仅携带刺激公共字段。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.INTERACTION_DEADLINE
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DynamicObserved(Stimulus):
+    """一次动态线程观察，包含有序消息、本次判断目标及非负修订号。
+
+    首条消息是 ID 等于 dynamic_id 的原帖，后续评论的父消息必须已出现。
+    消息 ID 唯一；target_message_id 必须存在且与原帖或评论的目标类型一致。
+    """
+
     kind: ClassVar[StimulusKind] = StimulusKind.DYNAMIC_OBSERVED
 
     dynamic_id: str
@@ -253,6 +285,8 @@ class DynamicObserved(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DiaryPlanningDue(Stimulus):
+    """日记规划到期事实，以本地日期、ZoneInfo 时区和触发 ID 表达。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.DIARY_PLANNING_DUE
 
     local_date: date
@@ -269,6 +303,8 @@ class DiaryPlanningDue(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WorldObservation(Stimulus):
+    """世界观察，包含观察类别、规范化事实、证据引用和非负世界修订号。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.WORLD_OBSERVATION
 
     observation_kind: WorldObservationKind
@@ -286,6 +322,8 @@ class WorldObservation(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ActivityObservation(Stimulus):
+    """活动内观察，包含活动 ID、规范化事实和非负活动修订号。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.ACTIVITY_OBSERVATION
 
     activity_id: str
@@ -301,6 +339,8 @@ class ActivityObservation(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SongKnowledgeDiscovered(Stimulus):
+    """发现一首歌的知识候选，包含来源、外部歌曲 ID、修订号和抓取时间。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.SONG_KNOWLEDGE_DISCOVERED
 
     source_ref: SourceRef
@@ -320,6 +360,8 @@ class SongKnowledgeDiscovered(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SongLearned(Stimulus):
+    """歌曲学习完成事实，包含学习任务 ID、歌曲 ID 和带时区的完成时间。"""
+
     kind: ClassVar[StimulusKind] = StimulusKind.SONG_LEARNED
 
     learning_job_id: str
@@ -334,36 +376,50 @@ class SongLearned(Stimulus):
 
 
 class ToyVibration(Stimulus):
+    """玩偶振动占位类型；构造抛出 CONTRACT_STIMULUS_UNAVAILABLE 错误。"""
+
     _constructible = False
     kind = StimulusKind.TOY_VIBRATION
 
 
 class DeviceConnected(Stimulus):
+    """设备连接占位类型；构造抛出 CONTRACT_STIMULUS_UNAVAILABLE 错误。"""
+
     _constructible = False
     kind = StimulusKind.DEVICE_CONNECTED
 
 
 class DeviceDisconnected(Stimulus):
+    """设备断开占位类型；构造抛出 CONTRACT_STIMULUS_UNAVAILABLE 错误。"""
+
     _constructible = False
     kind = StimulusKind.DEVICE_DISCONNECTED
 
 
 class DailyPlanningDue(Stimulus):
+    """每日规划到期占位类型；构造抛出 CONTRACT_STIMULUS_UNAVAILABLE 错误。"""
+
     _constructible = False
     kind = StimulusKind.DAILY_PLANNING_DUE
 
 
 class ActivityDue(Stimulus):
+    """计划活动到达开始条件的占位类型；构造抛出 CONTRACT_STIMULUS_UNAVAILABLE 错误。"""
+
     _constructible = False
     kind = StimulusKind.ACTIVITY_DUE
 
 
 class ActivityStarted(Stimulus):
+    """活动开始占位类型；构造抛出 CONTRACT_STIMULUS_UNAVAILABLE 错误。"""
+
     _constructible = False
     kind = StimulusKind.ACTIVITY_STARTED
 
 
 class ActivityEnded(Stimulus):
+    """活动结束占位类型；构造抛出 CONTRACT_STIMULUS_UNAVAILABLE 错误。"""
+
     _constructible = False
     kind = StimulusKind.ACTIVITY_ENDED
 

@@ -1,3 +1,8 @@
+"""刺激使用的不可变引用、语义代码和复合事实值。
+
+所有值对象以显式关键字参数构造，字段不合法时抛出 InvalidStimulusError。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,6 +21,8 @@ from ._stimulus_contract import (
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class MediaRef(metaclass=_ContractValueMeta):
+    """媒体资源的受控引用，仅保存非空白 media_id。"""
+
     media_id: str
 
     def __post_init__(self) -> None:
@@ -24,6 +31,8 @@ class MediaRef(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EvidenceRef(metaclass=_ContractValueMeta):
+    """事实证据的受控引用，仅保存非空白 evidence_id。"""
+
     evidence_id: str
 
     def __post_init__(self) -> None:
@@ -32,6 +41,8 @@ class EvidenceRef(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SourceRef(metaclass=_ContractValueMeta):
+    """外部知识来源的受控引用，仅保存非空白 source_id。"""
+
     source_id: str
 
     def __post_init__(self) -> None:
@@ -40,6 +51,8 @@ class SourceRef(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BodyRegion(metaclass=_ContractValueMeta):
+    """规范化的触摸部位代码，value 为非空白字符串。"""
+
     value: str
 
     def __post_init__(self) -> None:
@@ -48,6 +61,8 @@ class BodyRegion(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ProactiveReason(metaclass=_ContractValueMeta):
+    """规范化的主动提示原因代码，value 为非空白字符串。"""
+
     value: str
 
     def __post_init__(self) -> None:
@@ -56,6 +71,8 @@ class ProactiveReason(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WorldObservationKind(metaclass=_ContractValueMeta):
+    """规范化的世界观察类别代码，value 为非空白字符串。"""
+
     value: str
 
     def __post_init__(self) -> None:
@@ -64,6 +81,8 @@ class WorldObservationKind(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ActorRef(metaclass=_ContractValueMeta):
+    """平台无关的动态作者身份，包含非空白 ID 和可选的非空白显示名称。"""
+
     actor_id: str
     display_name: str | None
 
@@ -74,6 +93,8 @@ class ActorRef(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class TouchClickFrequency(metaclass=_ContractValueMeta):
+    """最近 10 秒和 30 秒的非负点击次数，10 秒计数不得大于 30 秒计数。"""
+
     count_10s: int
     count_30s: int
 
@@ -86,6 +107,11 @@ class TouchClickFrequency(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DynamicMessage(metaclass=_ContractValueMeta):
+    """动态原帖或评论，包含身份、父消息、作者和内容。
+
+    parent_message_id 为 None 表示无父消息；非空白正文与媒体引用至少有一种。
+    """
+
     message_id: str
     parent_message_id: str | None
     author_ref: ActorRef
@@ -105,6 +131,8 @@ class DynamicMessage(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WorldFact(metaclass=_ContractValueMeta):
+    """规范化的世界事实，包含非空白事实 ID 和摘要。"""
+
     fact_id: str
     summary: str
 
@@ -115,6 +143,8 @@ class WorldFact(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ActivityFact(metaclass=_ContractValueMeta):
+    """规范化的活动内事实，包含非空白事实 ID 和摘要。"""
+
     fact_id: str
     summary: str
 
@@ -125,6 +155,11 @@ class ActivityFact(metaclass=_ContractValueMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SongKnowledgeCandidate(metaclass=_ContractValueMeta):
+    """单首歌曲的规范化资料：歌名、上传者、歌手、介绍、歌词及歌词关键词。
+
+    歌名和介绍必须非空白；上传者与歌词可为 None，歌手和关键词元组可为空。
+    """
+
     song_name: str
     uploader: str | None
     singers: tuple[str, ...]

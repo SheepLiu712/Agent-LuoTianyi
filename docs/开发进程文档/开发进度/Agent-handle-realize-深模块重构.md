@@ -95,3 +95,10 @@
 - commit 或 PR：分支 `codex/agent-03-handling-report-contract`，本记录所在文档整理提交。
 - 验证及结果：公开字段和枚举与实现核对、构造示例执行、UTF-8、相对链接和 `git diff --check` 检查通过。产品代码与测试未修改；工作区没有未跟踪临时文件，RED/GREEN 证据保存在仓库外。
 - 未验证范围：本次为文档整理，没有新增运行时验收或他人审核结果。
+
+### 2026-09-06 Agent 领域公开类型中文说明
+
+- 交付内容：为 `server/src/domain/agent` 的 55 个公开类补齐中文 docstring，为 `StimulusErrorCode` 和 `InteractionSnapshot` 两个类型别名补充源码说明；说明现有字段含义、关键构造约束、取消状态及结算关系，标明七个占位类型的构造失败行为。
+- SPEC 检查：现有 `domain/stimulus.md`、`domain/handle-input.md` 和 `domain/handling-report.md` 已满足，本次仅补充源码文档。运行时 RED/GREEN 不适用；未创建 SPEC、RED 或 GREEN commit。
+- 验证及结果：使用 `D:/Anaconda/envs/lty/python.exe`，在 `server` 目录运行 `-m pytest tests/domain -q` 为 328 passed；`-m ruff check src/domain/agent`、`-m compileall -q src/domain/agent` 和 `git diff --check` 通过。静态检查确认所有公开类均有自身的中文 docstring，两个别名均有中文源码说明；移除文档字符串后，八个 Python 文件的语法树与 HEAD 一致。作者已核对说明与当前实现和接口契约。
+- 未验证范围：未运行完整 Server、客户端或生产链路验收；没有新增他人代码审查结果。

@@ -1,3 +1,5 @@
+"""Agent 领域契约的公开入口：刺激、交互快照、处理请求、取消信号和结算报告。"""
+
 from ._handle_input_contract import HandleInputErrorCode, InvalidHandleInputError
 from .handle_input import CancellationReason, CancellationToken, HandleStimulusRequest
 from .handling_report import (

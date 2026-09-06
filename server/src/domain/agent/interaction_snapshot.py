@@ -1,4 +1,10 @@
-"""Immutable interaction facts passed directly from stage to Agent."""
+"""由 stage 直接传入 Agent 的不可变交互事实快照。
+
+快照以显式关键字参数构造，非法字段抛出 InvalidHandleInputError。
+interaction_id 标识持续交互，interaction_revision 标识其非负修订号。
+pending_stimuli 保留待处理刺激的顺序，ID 唯一且排除输入协调和期限信号。
+now 带时区，timezone 为 ZoneInfo，supported_outputs 是允许为空的输出种类集合。
+"""
 
 from __future__ import annotations
 
@@ -20,17 +26,23 @@ from .stimulus import Stimulus, StimulusKind
 
 
 class InteractionKind(str, Enum):
+    """交互快照的场景判别值：聊天、玩偶或世界。"""
+
     CHAT = "chat"
     TOY = "toy"
     WORLD = "world"
 
 
 class ConnectionState(str, Enum):
+    """聊天通道在快照时刻的连接状态：已连接或已断开。"""
+
     CONNECTED = "connected"
     DISCONNECTED = "disconnected"
 
 
 class AgentOutputKind(str, Enum):
+    """交互支持的输出种类：增量或完整文本、音频块或结束信号、表情及动作。"""
+
     TEXT_DELTA = "text_delta"
     TEXT_FINAL = "text_final"
     AUDIO_CHUNK = "audio_chunk"
@@ -82,7 +94,10 @@ class _InteractionFacts(metaclass=_HandleInputMeta):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ChatInteractionSnapshot(_InteractionFacts):
-    """Chat timing and channel availability; cognitive context stays inside Agent."""
+    """聊天交互的不可变快照，在公共事实上记录响应期限和连接状态。
+
+    response_deadline 为 None 或带时区的时间，connection_state 使用连接状态枚举。
+    """
 
     kind: ClassVar[InteractionKind] = InteractionKind.CHAT
     response_deadline: datetime | None
@@ -96,7 +111,7 @@ class ChatInteractionSnapshot(_InteractionFacts):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ToyInteractionSnapshot(_InteractionFacts):
-    """Device identity and availability, without device-specific control limits."""
+    """玩偶交互的不可变快照，在公共事实上记录非空白 device_id 和布尔 online。"""
 
     kind: ClassVar[InteractionKind] = InteractionKind.TOY
     device_id: str
@@ -110,7 +125,11 @@ class ToyInteractionSnapshot(_InteractionFacts):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class WorldInteractionSnapshot(_InteractionFacts):
-    """World/activity identities and revisions, with facts carried by stimuli."""
+    """世界交互的不可变快照，记录世界、活动、规划周期的身份及相应修订号。
+
+    world_revision 与 schedule_revision 为非负整数；activity_id 和
+    activity_revision 同时存在或同时为 None，planning_cycle_id 可为 None。
+    """
 
     kind: ClassVar[InteractionKind] = InteractionKind.WORLD
     world_id: str
@@ -132,3 +151,4 @@ class WorldInteractionSnapshot(_InteractionFacts):
 
 
 InteractionSnapshot = ChatInteractionSnapshot | ToyInteractionSnapshot | WorldInteractionSnapshot
+"""聊天、玩偶与世界三种具体快照的联合类型。"""
