@@ -23,6 +23,8 @@ OutputDraft 表达以上四类的联合；字段含义与领域输出相同。�
 
 槽位先保存完整规范 payload 和指纹，再调用外部 sink。编码有明确版本及类型白名单，保存所有身份、呈现方式和具体字段，audio data 使用无损字节编码；不使用 repr、pickle 或按存储字符串动态导入。槽位分配与 next_sequence 更新原子提交，失败不会先发出输出。读历史时验证版本、完整字段、指纹、行动身份及顺序、连续序号和状态关系；损坏记录返回 DEPENDENCY_UNAVAILABLE/retryable=False，不删除后重建。
 
+旧版 Execution Ledger 只有逐行动 confirmed/unknown 布尔值，没有完整输出与 next_sequence。旧记录全部可信完成且无未知输出时，可读取 ALREADY_COMPLETED 终态并保留 output_started，不要求重建输出。旧记录尚需继续，且曾有 confirmed/unknown 输出时，无法确定下一序号，返回 DEPENDENCY_UNAVAILABLE/retryable=False、无新行动及输出；不能把空 outbox 当作从未输出。旧记录没有任何 confirmed/unknown，且行动原本允许安全继续时，可以从 sequence=0 开始。新版持久格式必须可识别其输出序列完整性，不能仅凭当前 outbox 是否为空判断旧历史。
+
 每次 emit 串行执行，包括同一 Handler 并发提交的 emit。一个槽位未确认时不能开始后续槽位。新草稿优先匹配当前行动既有的安全 pending 槽位：同内容投递原存储值，不重新生成输出；不同内容返回 CONTRACT_MISMATCH、retryable=False，不覆盖旧值或调用 sink。冲突封闭本次后续输出和行动，即使 Handler 吞错也不能跳过该槽位。确认成功后才允许分配下一槽位；已确认槽位始终保留其原内容。
 
 ## 投递事实
