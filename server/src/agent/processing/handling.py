@@ -70,4 +70,3 @@ class Handling:
             or tuple(i for i in pending if i in report.considered_pending_stimulus_ids) != report.considered_pending_stimulus_ids
         ):
             raise ValueError("invalid handler settlement")
-

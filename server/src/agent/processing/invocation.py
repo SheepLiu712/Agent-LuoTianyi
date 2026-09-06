@@ -64,4 +64,3 @@ async def call_handler(
                     call_id, interaction_id, agent._error_code(cleanup_error, d.ExecutionErrorCode), cleanup_error
                 )
         raise
-
