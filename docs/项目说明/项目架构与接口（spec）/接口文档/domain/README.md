@@ -8,16 +8,9 @@
 
 ### 输入与响应
 
-- `src.domain.agent`：当前 Agent 强类型领域协议的公开导入路径。当前实现公开 `TextMessage`、`StimulusKind`、`StimulusSource` 和迁移期兼容的 `PersistPolicy`；目标 interface 将从强类型 Stimulus 构造参数和该包公开导出中移除 `PersistPolicy`。
-- `TextMessage`：用户已提交的一条完整文字消息。当前实现的构造字段仍包含 `persist_policy: PersistPolicy`；这是 PR #90 已实现、等待后续 TDD 迁移的当前事实。目标构造字段为 `stimulus_id: str`、`schema_version: int`、`occurred_at: datetime`、`source: StimulusSource`、`target_character_ids: tuple[str, ...]`、`user_id: str | None`、`ephemeral: bool`、`text: str` 和 `client_msg_id: str`。调用方通过选择 `TextMessage` 提供刺激类型，`kind` 固定为 `StimulusKind.TEXT_MESSAGE`，不由 Agent 根据内容猜测。
-- `StimulusKind.TEXT_MESSAGE`：当前已实现强类型 Stimulus 的稳定判别值。
-- `StimulusSource.USER`：表示该领域事实由用户行为产生，不表示 WebSocket、HTTP 等传输通道。
-- `PersistPolicy`：当前旧 Stimulus 与 PR #90 强类型切片仍共用的四成员枚举。它只用于描述迁移期当前实现，不再属于目标 `domain.agent` Stimulus interface；尚未迁移的旧生产调用方继续使用，直到对应链路把持久化判断收进 Agent 并由最终 contract 工单删除兼容导出。
-- `Stimulus`：系统收到的一次刺激。主要字段为 `source_channel`、`modality`、`payload`、`text`、`sender_user_id`、`target_character_ids`、`client_msg_id`、`persist_policy` 和 `ephemeral`。
-- `SourceChannel`、`StimulusModality`、`PersistPolicy`：分别限定刺激来自哪里、是什么形式、允许怎样持久化。
-- `Stimulus.targets_character(character_id)`：判断刺激是否发给指定角色。
-- `Stimulus.should_persist_conversation()`：判断是否应写入对话记录。
-- `Stimulus.can_be_memory_candidate()`：判断是否允许进入长期记忆候选流程。
+- [Stimulus 领域契约](stimulus.md)：当前总 SPEC 已登记的 22 个 Stimulus 类型名的权威 interface；其中 15 种定义为可构造，7 种只占位且当前统一拒绝构造。文档定义公共字段、专有字段、依赖值类型、稳定错误和公开测试 seam。
+- `src.domain.agent`：Agent 强类型领域协议的公开导入路径。当前已实现抽象 `Stimulus`、当前总 SPEC 登记的 22 个具体类型、完整 `StimulusKind`、`StimulusSource`、构造所需领域值类型及三类稳定构造错误；其中 15 个具体类型可构造，7 个占位类型统一返回 `CONTRACT_STIMULUS_UNAVAILABLE`。目标包不导出 `PersistPolicy`。`InteractionSnapshot`、`HandleStimulusRequest`、`CancellationToken` 和 `HandlingReport` 尚未实现，不能当作当前代码能力。
+- 旧 `src.domain.stimulus.Stimulus`：当前生产链仍使用的 Mapping 协议，提供 `targets_character()`、`should_persist_conversation()` 和 `can_be_memory_candidate()`。它及其 `SourceChannel`、`StimulusModality`、`PersistPolicy` 在迁移期保持可用，但不构成新 `src.domain.agent` 协议的一部分。
 - `ActionPlan`：Agent 对一次刺激给出的动作计划，包含目标角色和一组 `PlannedAction`。
 - `PlannedAction`：一个待执行动作；`ActionType` 包含说话、唱歌、表情、动作、写记忆、调用能力和不回复等类型。
 - `ResponseEnvelope`：向指定渠道和用户发送的通用响应包装。
@@ -55,12 +48,9 @@
 ## 正常与异常行为
 
 - 创建这些对象只做字段校验和默认值生成，不产生外部副作用。
-- `TextMessage` 构造后不可变，不提供任意 `payload` 扩展口，并逐项保留调用方提供的公共字段和文字消息专有字段。
-- 当前契约测试只锁定 PR #90 的合法样例：`source=USER`、迁移期 `persist_policy=CONVERSATION_AND_MEMORY_CANDIDATE`、`ephemeral=False`。这些是该样例的输入，不是 `TextMessage` 的唯一合法 source/ephemeral 组合，也不应扩展成组合矩阵。
-- **目标 interface**：非法 Stimulus 构造将直接抛出公开 `InvalidStimulusError(ValueError)`；字段自身或变体结构非法时 `code="CONTRACT_INVALID_STIMULUS"`，整数但不受支持的 schema 版本时 `code="CONTRACT_UNSUPPORTED_SCHEMA"`，两者的 `retryable=False`。合法字段之间不做 source/kind/ephemeral 白名单校验；构造失败发生在 handle 前，不产生 `HandlingReport`。该异常与 `StimulusErrorCode` 尚未在当前源码实现，不能提前用于业务代码。
+- 15 种可构造 Stimulus 与 7 种占位 Stimulus 的正常/拒绝行为、字段校验和稳定错误以[专用契约](stimulus.md)为准；生产调用方仍按后续迁移切片逐个接入。
 - 枚举值和字段名属于跨模块协议；修改时必须先更新 spec 和消费者测试。
-- 目标强类型 Stimulus 不携带 `PersistPolicy`。外部调用方显式提供刺激类型、source 和 interaction 生命周期字段；Agent 在 handle 内部决定会话记录和长期记忆候选，并对同一稳定刺激保证幂等。
-- 构造参数不合法时由 dataclass、枚举或 Pydantic 抛出类型/校验异常，调用方不应静默吞掉。
+- 旧 Stimulus 的持久化判断和目标强类型 Stimulus 的构造错误属于两套迁移期 interface，调用方不得混用。
 
 ## 使用示例
 
@@ -68,8 +58,6 @@
 
 ## 应覆盖的契约场景
 
-- `TextMessage` 从 `src.domain.agent` 构造后固定为 `TEXT_MESSAGE`，逐项保留目标公开字段、拒绝赋值修改且不存在 `payload`；source 和 ephemeral 的合法字段值不因组合少见而被构造器拒绝。
-- 迁移期继续验证旧路径与当前 PR #90 路径导出的 `PersistPolicy` 是同一个四成员枚举对象；目标强类型 Stimulus 迁移完成后，改为验证 `src.domain.agent` 不再要求或公开该类型。
+- 目标 Stimulus 只按[专用契约](stimulus.md)列出的公开 seam 验证，不通过实现细节增加总 SPEC 未登记的未来变体。
 - 迁移期旧 `Stimulus` 在不同 `PersistPolicy` 下，`should_persist_conversation()` 和 `can_be_memory_candidate()` 返回预期结果；该测试不构成目标强类型 Stimulus 必须暴露策略的依据。
 - `AgentState.with_updates(...)` 返回新对象且不修改原状态。
-- 未指定目标角色、时间或 ID 时，默认值稳定且可序列化。
