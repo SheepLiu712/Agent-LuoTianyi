@@ -374,6 +374,7 @@ async def test_shutdown_waits_for_owner_and_duplicate_before_releasing_dependenc
         left, right = await asyncio.wait_for(asyncio.gather(first, second), 1)
         assert left == right
         assert duplicate_sink.values == []
+        runtime.shutdown_timeout_seconds = 1
         await runtime.shutdown()
         assert store.close_calls == 1
     finally:

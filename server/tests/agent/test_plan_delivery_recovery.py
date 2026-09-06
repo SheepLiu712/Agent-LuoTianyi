@@ -342,6 +342,7 @@ async def test_concurrent_recovery_has_one_owner_and_shutdown_retains_dependenci
         first_report, second_report = await asyncio.gather(owner, waiter)
         assert first_report == second_report
         assert unused.values == [] and seen == original.values
+        runtime.shutdown_timeout_seconds = 1
         await runtime.shutdown()
     finally:
         release.set()
