@@ -214,7 +214,7 @@ async def test_recovery_checks_fingerprint_and_current_token_without_overwriting
 
 
 @pytest.mark.asyncio
-async def test_ack_commit_failure_keeps_same_plan_available_for_recovery(routed_runtime, runtime_dependencies):
+async def test_ack_commit_failure_settlement_saves_receipt_without_redelivery(routed_runtime, runtime_dependencies):
     kwargs, _ = runtime_dependencies
     sessions = kwargs["database_manager"].open_sql_session
     fail_next = False
@@ -234,13 +234,15 @@ async def test_ack_commit_failure_keeps_same_plan_available_for_recovery(routed_
     try:
         report = await runtime.get_agent().handle_stimulus(request(), Sink(receive))
         assert len(seen) == 1
+        assert report.request_status is d.HandlingRequestStatus.FAILED
         assert report.error_code is d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
         assert report.emitted_plan_ids == (seen[0].plan_id,)
+        assert report.retryable is False
         replacement, _ = routed_runtime(handle=one_plan)
         sink = Sink()
         recovered = await replacement.get_agent().handle_stimulus(request(), sink)
-        assert sink.values == seen
-        assert recovered.emitted_plan_ids == (seen[0].plan_id,) and recovered.retryable is False
+        assert sink.values == []
+        assert recovered == report
     finally:
         event.remove(sessions, "before_commit", before_commit)
 

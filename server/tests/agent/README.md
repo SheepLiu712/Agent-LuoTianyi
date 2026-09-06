@@ -1,5 +1,14 @@
 # Agent 门面入口测试
 
+## 已知回执结算补齐 SPEC / RED 修正（2026-09-06）
+
+SPEC 修正 `d7db3897` 在原 SPEC `2194c0a9` 上明确：有效回执已经确定接收，本地 ack 写入失败不能降级为未知接收。保存报告的事务原子补齐 emitter 实际校验的回执，成功后终态保留 FAILED / DEPENDENCY_UNAVAILABLE 和原计划 ID、retryable=False，重建 Agent 不再交付该计划；补齐或结算失败则保留占用。作者自审确认没有信任 Handler 自报 ID，也没有改变真正未知结果的恢复。
+
+本次修正原 RED `5ec6537a` 的 `test_ack_commit_failure_settlement_saves_receipt_without_redelivery`：外部已确认、一次 ack commit 失败而最终保存成功后，新实例重投必须零 emit，返回与首次相同的持久失败报告。原来要求再次 emit 的断言会诱导重复已知接收，已删除。永久结算失败保留占用由现有 `test_report_commit_failure_preserves_accepted_ids_and_blocks_reprocessing` 覆盖。
+
+实际命令（server 目录）：`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent/test_plan_delivery_recovery.py::test_ack_commit_failure_settlement_saves_receipt_without_redelivery tests/agent/test_request_idempotency.py::test_report_commit_failure_preserves_accepted_ids_and_blocks_reprocessing -q --tb=short --show-capture=no` 为 **1 failed、1 passed**。修改用例仍先因旧实现不接受 draft、sink 没有收到计划而失败，尚未到达 ack/结算分支，不把此 RED 声称为已验证原子补齐。Ruff 和 diff 检查通过。作者自审只修改文档与该测试，不含产品实现或完成记录。
+
+
 ## PlanEmitter SPEC / RED（2026-09-06）
 
 SPEC commit `2194c0a9`：内部 ActionPlanDraft、连续 ordinal、稳定计划身份、持久 outbox、请求 provisional/终态和只恢复投递的公开重投契约。作者自审检查了 source 可为空、合法部分消费不丢失、恢复预取消不改写 provisional、永久拒绝的最终错误码以及 PR115 旧数据库终态兼容。业务方法及 domain 字段没有增加。
