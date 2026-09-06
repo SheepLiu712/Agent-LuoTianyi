@@ -23,7 +23,9 @@ server/src/
 
 两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产注册集合为空，装配由 AgentRuntime 初始化完成。
 
-该文件树采用 #63 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定。文件树列出路由涉及的文件。
+该文件树采用 [#63](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/63) 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定，直接位于 `agent_runtime/agent_runtime.py`。文件树只列出路由涉及的文件；两个 `router.py` 中定义注册器和处理器协议，当前没有具体业务 Handler 文件。
+
+注册、解析和调用分为三个步骤：AgentRuntime 构造每角色注册集合；Router 保存集合并按键返回对象；门面调用该对象的异步方法。Router 本身不执行聊天、触摸或 world 行为。处理器对象与路由键不是一一对应：一个行为族对象可以绑定多个不同 kind，因此注册不同刺激不要求分别建立文件或类。
 
 Router 是 Agent 内部模块。AgentRuntime 仅在显式装配位置直接导入两个 router 类型；stage、world、Adapter 及其他业务调用方不导入它们。Agent 对外不增加注册、查询处理器或第三个业务方法。
 
@@ -163,6 +165,6 @@ Agent 在通过入口检查、开始调用处理器前登记该调用，直到�
 | 修改构造所用列表 | 原 router 解析结果不变 |
 | 两个不同 router 注册相同 kind | 各自返回自己的对象，无全局串扰 |
 | 调用 resolve | 无处理器调用、副作用或异步任务 |
-| 无真实 Handler 的生产装配 | 保持既有门面 38 项测试及旧链 get_character_runtime 兼容行为 |
+| 无真实 Handler 的生产装配 | 合法且未取消的首次调用返回对应 UNSUPPORTED 报告；旧链继续通过 get_character_runtime 取得兼容对象 |
 
 契约测试覆盖成功处理器调用、错误与回执校验、等待中取消、并发交互隔离、在途关闭超时重试。测试证据见 `server/tests/agent/README.md`。
