@@ -1,28 +1,38 @@
 from __future__ import annotations
 
-from abc import ABC, ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
-from inspect import Signature, signature
-from typing import ClassVar, Literal, NoReturn
+from typing import ClassVar
 from zoneinfo import ZoneInfo
 
-
-StimulusErrorCode = Literal[
-    "CONTRACT_INVALID_STIMULUS",
-    "CONTRACT_UNSUPPORTED_SCHEMA",
-    "CONTRACT_STIMULUS_UNAVAILABLE",
-]
-
-
-class InvalidStimulusError(ValueError):
-    """A stable construction failure for the public Stimulus contract."""
-
-    def __init__(self, message: str, *, code: StimulusErrorCode) -> None:
-        super().__init__(message)
-        self.code = code
-        self.retryable: Literal[False] = False
+from ._stimulus_contract import (
+    InvalidStimulusError,
+    _StimulusMeta,
+    _raise_invalid,
+    _require_aware_datetime,
+    _require_instance,
+    _require_nonblank_string,
+    _require_nonnegative_int,
+    _require_optional_instance,
+    _require_optional_nonblank_string,
+    _require_string_tuple,
+    _require_tuple_of,
+)
+from .stimulus_values import (
+    ActivityFact,
+    BodyRegion,
+    DynamicMessage,
+    EvidenceRef,
+    MediaRef,
+    ProactiveReason,
+    SongKnowledgeCandidate,
+    SourceRef,
+    TouchClickFrequency,
+    WorldFact,
+    WorldObservationKind,
+)
 
 
 class StimulusKind(str, Enum):
@@ -66,179 +76,6 @@ class DynamicTargetKind(str, Enum):
 
     POST = "post"
     COMMENT = "comment"
-
-
-def _public_constructor_signature(cls: type) -> Signature:
-    parameters = tuple(signature(cls.__init__).parameters.values())[1:]
-    return Signature(parameters=parameters)
-
-
-class _ContractValueMeta(type):
-    @property
-    def __signature__(cls) -> Signature:
-        return _public_constructor_signature(cls)
-
-    def __call__(cls, *args: object, **kwargs: object):
-        try:
-            return super().__call__(*args, **kwargs)
-        except InvalidStimulusError:
-            raise
-        except TypeError as error:
-            raise InvalidStimulusError(
-                "Invalid value-object fields",
-                code="CONTRACT_INVALID_STIMULUS",
-            ) from error
-
-
-class _StimulusMeta(ABCMeta):
-    @property
-    def __signature__(cls) -> Signature:
-        return _public_constructor_signature(cls)
-
-    def __call__(cls, *args: object, **kwargs: object):
-        if not cls._constructible:
-            raise InvalidStimulusError(
-                "This Stimulus type is registered but unavailable",
-                code="CONTRACT_STIMULUS_UNAVAILABLE",
-            )
-        if cls.__abstractmethods__:
-            return super().__call__(*args, **kwargs)
-        try:
-            return super().__call__(*args, **kwargs)
-        except InvalidStimulusError:
-            raise
-        except TypeError as error:
-            raise InvalidStimulusError(
-                "Invalid or missing Stimulus fields",
-                code="CONTRACT_INVALID_STIMULUS",
-            ) from error
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class MediaRef(metaclass=_ContractValueMeta):
-    media_id: str
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.media_id)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class EvidenceRef(metaclass=_ContractValueMeta):
-    evidence_id: str
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.evidence_id)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SourceRef(metaclass=_ContractValueMeta):
-    source_id: str
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.source_id)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class BodyRegion(metaclass=_ContractValueMeta):
-    value: str
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.value)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ProactiveReason(metaclass=_ContractValueMeta):
-    value: str
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.value)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class WorldObservationKind(metaclass=_ContractValueMeta):
-    value: str
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.value)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ActorRef(metaclass=_ContractValueMeta):
-    actor_id: str
-    display_name: str | None
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.actor_id)
-        _require_optional_nonblank_string(self.display_name)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class TouchClickFrequency(metaclass=_ContractValueMeta):
-    count_10s: int
-    count_30s: int
-
-    def __post_init__(self) -> None:
-        _require_nonnegative_int(self.count_10s)
-        _require_nonnegative_int(self.count_30s)
-        if self.count_10s > self.count_30s:
-            _raise_invalid()
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class DynamicMessage(metaclass=_ContractValueMeta):
-    message_id: str
-    parent_message_id: str | None
-    author_ref: ActorRef
-    text: str
-    media_refs: tuple[MediaRef, ...]
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.message_id)
-        _require_optional_nonblank_string(self.parent_message_id)
-        _require_instance(self.author_ref, ActorRef)
-        if not isinstance(self.text, str):
-            _raise_invalid()
-        _require_tuple_of(self.media_refs, MediaRef)
-        if not self.text.strip() and not self.media_refs:
-            _raise_invalid()
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class WorldFact(metaclass=_ContractValueMeta):
-    fact_id: str
-    summary: str
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.fact_id)
-        _require_nonblank_string(self.summary)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class ActivityFact(metaclass=_ContractValueMeta):
-    fact_id: str
-    summary: str
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.fact_id)
-        _require_nonblank_string(self.summary)
-
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class SongKnowledgeCandidate(metaclass=_ContractValueMeta):
-    song_name: str
-    uploader: str | None
-    singers: tuple[str, ...]
-    introduction: str
-    lyrics: str | None
-    lyric_keywords: tuple[str, ...]
-
-    def __post_init__(self) -> None:
-        _require_nonblank_string(self.song_name)
-        _require_optional_nonblank_string(self.uploader)
-        _require_string_tuple(self.singers)
-        _require_nonblank_string(self.introduction)
-        _require_optional_nonblank_string(self.lyrics)
-        _require_string_tuple(self.lyric_keywords)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -555,73 +392,3 @@ def _validate_common_fields(
     _require_optional_nonblank_string(user_id)
     if type(ephemeral) is not bool:
         _raise_invalid()
-
-
-def _is_nonblank_string(value: object) -> bool:
-    return isinstance(value, str) and bool(value.strip())
-
-
-def _require_nonblank_string(value: object) -> None:
-    if not _is_nonblank_string(value):
-        _raise_invalid()
-
-
-def _require_optional_nonblank_string(value: object) -> None:
-    if value is not None:
-        _require_nonblank_string(value)
-
-
-def _require_nonnegative_int(value: object) -> None:
-    if type(value) is not int or value < 0:
-        _raise_invalid()
-
-
-def _require_aware_datetime(value: object) -> None:
-    if not isinstance(value, datetime):
-        _raise_invalid()
-    try:
-        aware = value.tzinfo is not None and value.utcoffset() is not None
-    except (OverflowError, TypeError, ValueError):
-        aware = False
-    if not aware:
-        _raise_invalid()
-
-
-def _require_instance(value: object, expected_type: type) -> None:
-    if not isinstance(value, expected_type):
-        _raise_invalid()
-
-
-def _require_optional_instance(value: object, expected_type: type) -> None:
-    if value is not None:
-        _require_instance(value, expected_type)
-
-
-def _require_tuple_of(
-    value: object,
-    member_type: type,
-    *,
-    allow_empty: bool = True,
-) -> None:
-    if type(value) is not tuple:
-        _raise_invalid()
-    if not allow_empty and not value:
-        _raise_invalid()
-    if any(not isinstance(member, member_type) for member in value):
-        _raise_invalid()
-
-
-def _require_string_tuple(value: object, *, allow_empty: bool = True) -> None:
-    if type(value) is not tuple:
-        _raise_invalid()
-    if not allow_empty and not value:
-        _raise_invalid()
-    if any(not _is_nonblank_string(member) for member in value):
-        _raise_invalid()
-
-
-def _raise_invalid() -> NoReturn:
-    raise InvalidStimulusError(
-        "Invalid Stimulus contract field",
-        code="CONTRACT_INVALID_STIMULUS",
-    )
