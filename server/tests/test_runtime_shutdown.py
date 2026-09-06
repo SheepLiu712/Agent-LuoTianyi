@@ -18,7 +18,6 @@ from src.system.admin.admin_shell import AdminShell
 from src.system.admin.runtime_supervisor import RuntimeSupervisor
 from src.system.system_runtime import SystemRuntime
 from src.utils.llm.client_llm_executor import ClientLLMExecutor
-from src.world.world_clock import WorldClock
 
 
 class FakeWebSocket:
@@ -188,44 +187,6 @@ async def test_system_runtime_shutdown_is_ordered_idempotent_and_retryable():
 
     assert calls == ["world", "world", "chat", "agent", "capability", "database"]
     assert runtime._shutdown_complete is True
-
-
-@pytest.mark.asyncio
-async def test_world_clock_stop_is_bounded_and_retains_owned_sync_task_for_retry():
-    import threading
-
-    started = threading.Event()
-    release = threading.Event()
-    calls = 0
-
-    def blocking_action():
-        nonlocal calls
-        calls += 1
-        started.set()
-        release.wait(timeout=2)
-
-    clock = WorldClock()
-    clock.stop_timeout_seconds = 0.02
-    clock.register_interval_action(
-        "blocking",
-        interval_seconds=60,
-        action=blocking_action,
-        run_immediately=True,
-    )
-    clock.start()
-    assert await asyncio.to_thread(started.wait, 1)
-
-    with pytest.raises(RuntimeError, match="still stopping"):
-        await clock.stop()
-
-    assert calls == 1
-    assert clock._tasks
-
-    release.set()
-    await clock.stop()
-
-    assert calls == 1
-    assert clock._tasks == {}
 
 
 @pytest.mark.asyncio

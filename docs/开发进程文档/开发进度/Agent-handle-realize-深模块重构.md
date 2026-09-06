@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-06 WorldClock 调度注册基线与关闭重试 GREEN
+
+- 交付行为：通过公开 WorldClock/WorldRuntime 入口冻结九类任务注册、角色展开、配置与启用条件、本地每日时间、立即执行、同名替换、失败隔离和关闭行为；将适用的旧 world 任务测试迁至 `server/tests/world` 并恢复默认执行。WorldClock 重试关闭时只等待已请求取消的任务，不重复取消同步线程的清理等待。
+- interface spec：[`world/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/world/README.md)，SPEC commit `ca546227`；没有新增公开接口。
+- commit 或 PR：RED `a14018e2`，旧测试整理 `07aa2a50`，GREEN 为 `codex/world-clock-baseline` 分支本记录所在提交。
+- 验证及结果：原 RED 稳定复现第二次关闭错误返回成功；保持失败测试不变，`D:/Anaconda/envs/lty/python.exe -m pytest tests/world tests/domain -q` 为 544 passed、2 skipped。world 为 115 passed，domain 为 429 passed。WorldClock 和 world 测试及默认执行配置 Ruff 通过；迁移前后测试函数清单一致，未遗漏或复制测试。其他新增调度测试及恢复的旧测试属于既有行为回归，无伪造 RED。
+- 未验证范围：两项真实 VCPedia/B 站探测仍跳过；未验证完整服务器、客户端或生产环境。已有任务业务测试不代表九类任务的完整业务契约已经审核；作者自审不替代独立 code review。
+
 ### 2026-09-05 Agent 深模块需求与总体设计基线
 
 - 交付内容：确定 Agent 只保留 `handle_stimulus` 与 `realize_action_plan` 两个业务 interface，明确 Agent、stage、Adapter、world、subconscious、capabilities 和 AgentRuntime 的职责与迁移边界，并发布实现工单 #60—#89。

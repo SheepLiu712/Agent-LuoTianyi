@@ -19,7 +19,6 @@ from src.system.admin.llm_config_editor import apply_llm_config_draft, build_llm
 from src.system.observability import ObservabilityService
 from src.system.admin.admin_interface import _collect_llm_api_key_names
 from src.utils.helpers import apply_env_variables
-from src.world.world_runtime import WorldRuntime
 
 
 def minimal_config(tmp_path: Path) -> dict:
@@ -364,32 +363,6 @@ def test_supervisor_reports_busy_transition_states(tmp_path):
         assert supervisor.status()["busy"] is False
     finally:
         observability.close()
-
-
-def test_world_runtime_skips_disabled_optional_tasks():
-    character_runtime = SimpleNamespace()
-    runtime = WorldRuntime(
-        {
-            "citywalk": {"enabled": False},
-            "bili_dynamic_fetcher": {"enabled": False},
-            "auto_song_learner": {"enabled": False},
-        }
-    )
-    runtime.system_runtime = SimpleNamespace(
-        agent_runtime=SimpleNamespace(
-            get_character_runtime=lambda _character_id: character_runtime,
-        ),
-        capability_manager=SimpleNamespace(singing=None),
-        llm_service=SimpleNamespace(register_llm_module=lambda *args, **kwargs: object()),
-        database_manager=SimpleNamespace(event_store=SimpleNamespace(purge_expired_events=lambda: 0)),
-    )
-
-    runtime.initialize_modules()
-
-    task_names = [task.get_task_name() for task in runtime.tasks]
-    assert "try_citywalk" not in task_names
-    assert "bili_event_update" not in task_names
-    assert not any(name.startswith("learn_sing_songs") for name in task_names)
 
 
 def test_server_main_runtime_dependency_reports_not_ready(tmp_path):

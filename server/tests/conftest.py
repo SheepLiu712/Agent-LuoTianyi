@@ -5,6 +5,16 @@ import pytest
 
 
 _ACTIVE_TEST_FILES = {
+    (Path(__file__).parent / "world" / "test_world_task_citywalk.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_task_proactive_topic_check.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_task_event_cleanup.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_task_vcpedia_new_songs.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_task_bili_event_update.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_task_learn_sing_songs.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_task_diary.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_task_dynamics.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_clock.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_runtime.py").resolve(),
     (Path(__file__).parent / "domain" / "test_realization_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_stimulus_text_message_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_stimulus_registered_types_contract.py").resolve(),
