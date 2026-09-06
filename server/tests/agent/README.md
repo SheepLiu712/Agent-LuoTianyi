@@ -1,5 +1,28 @@
 # Agent 门面入口测试
 
+## PlanEmitter SPEC / RED（2026-09-06）
+
+SPEC commit `2194c0a9`：内部 ActionPlanDraft、连续 ordinal、稳定计划身份、持久 outbox、请求 provisional/终态和只恢复投递的公开重投契约。作者自审检查了 source 可为空、合法部分消费不丢失、恢复预取消不改写 provisional、永久拒绝的最终错误码以及 PR115 旧数据库终态兼容。业务方法及 domain 字段没有增加。
+
+新增 42 个展开用例：
+
+- `test_plan_emission.py`：零/单/多计划及身份字段、已确认 ordinal 的同值重投与改内容/改来源/非法 ordinal 拒绝、非法草稿、空来源 StartThinking 首计划、角色隔离、接收后取消、失效 emitter、捕获异常后仍有日志、同次并发草稿顺序。
+- `test_plan_delivery_recovery.py`：超时/普通异常/错回执/背压后的重建恢复、合法部分消费、确认前缀不重复交付、永久拒绝终态、待确认槽位阻止新计划及同槽位正向重试、当前令牌和 fingerprint 校验、outbox/确认写入故障、恢复取消清理后重新获得处理权、恢复并发与 shutdown、认知尚未结算时禁止接管、新 Python 进程恢复完整六种业务 Action 并验证终态零交付。
+- `fixtures/request_ledger_v1.sql` 由 PR115 的公开 handle 对人工样例生成，恢复旧数据库后先断言历史终态不交付，再验证新计划与旧记录共存；不通过表名或私有 SQL 步骤断言行为。
+
+实际验证（工作目录 `server`）：
+
+- `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent/test_plan_emission.py tests/agent/test_plan_delivery_recovery.py -q --tb=no -rN`：**41 failed、1 passed**。零计划为补回归，既有实现已支持。
+- `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=line --show-capture=no`：**41 failed、712 passed、2 skipped**，两项真实网络探测仍跳过；只有上述新行为失败。原 711 项回归单独运行同样通过。
+- 新测试、辅助样例与 conftest 的 Ruff 通过；`git diff --check` 通过。
+
+RED 失败首先表现为旧 `_PlanDelivery` 拒绝内部 draft，产生 FAILED/空交付，或 Handler 捕获后仍错误返回 COMPLETED。因此这些 RED 证明缺少目标协议和投递行为，**不代表已经逐项运行到恢复分支**；GREEN 后完整断言才验证持久化、恢复和并发。没有依赖导入、语法、测试环境或生产网络错误制造失败。
+
+作者自审：只修改测试/样例/测试启用清单，未修改产品代码或追加实现完成记录。测试从公开 handle/shutdown 观察输出和报告；SQLAlchemy 故障钩子只作用于外部数据库提交。持久 Fake 接收器明确拥有自己的去重记录，证明可识别重复的效果，不声称任意新 sink 都恰好一次。SQLite 连接、引擎与异步任务均释放。
+
+GREEN 迁移旧测试时，内部 Handler 改为构造 Draft，报告计划 ID 从真实 PlanReceipt 或首次 sink 接收取得；保留原身份冲突、取消、消费、重投和关闭断言，不复制计划 ID/fingerprint 算法，也不能删除难适配场景。移除本轮 draft helper 中仅用于 RED 的缺失类型 fallback。真实生产 Handler、Say 实现、真实接收队列与外部服务均未验证。
+
+
 ## Request Ledger 结算日志 GREEN（2026-09-06）
 
 保持 RED `3129691c` 不变，移除处理器和存储失败分支的提前/重复结算日志；公开 handle
