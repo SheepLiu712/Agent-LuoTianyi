@@ -1,6 +1,6 @@
 # Execution Ledger 与逐行动恢复契约
 
-状态：逐行动账本已实现；涉及输出草稿、持久槽位和仅投递恢复的增量为[输出投递目标契约](output-delivery.md)，尚未实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
+状态：逐行动账本已实现；涉及输出草稿、持久槽位和连续序列的增量为[输出投递目标契约](output-delivery.md)，尚未实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
 
 ## 所有权与装配
 
@@ -16,7 +16,7 @@ ActionHandler 的目标内部协议为 `realize(action, execution_context, outpu
 
 顶层类型错误抛 TypeError；计划包含编码白名单以外的具体类型时返回 INTERNAL_ERROR、无投递；绑定角色或 plan/context 交互身份错误，以及运行时停止接受时，沿用门面的入口拒绝，不读取其他执行事实。接受状态通过后先读取匹配执行，再检查当前 revision、令牌和全计划路由。首次执行的修订过期、预取消、任一行动未注册均零行动、零输出，不占用该 execution；预取消报告保持 retryable=False，换新令牌仍可首次执行。
 
-已有匹配记录全部已完成，或者已有不可安全继续的可信失败，且没有可恢复输出时，直接读取既有终态；完成项转换为 ALREADY_COMPLETED，保留 effect_ref、不可逆标记和累计 output_started，retryable=False。新的 revision、令牌或路由集合不改变已经发生的终态事实。有 safe pending 的恢复仍经过当前准入。对于仍可安全继续的执行，准入拒绝只阻止本次新动作：旧 revision 返回 STALE_INTERACTION，未注册返回 UNSUPPORTED_ACTION，预取消返回 CANCELLED；完成前缀仍为 ALREADY_COMPLETED，其余为本次 NOT_STARTED，retryable=False。存储中原可信失败保留，准入拒绝不覆盖它；后续合法调用仍可从该安全位置继续。output_started 表示已确认接收事实，False 不证明未知输出没有发生。
+已有匹配记录全部已完成，或者已有不可安全继续的可信失败，且没有未完成交付时，直接读取既有终态；完成项转换为 ALREADY_COMPLETED，保留 effect_ref、不可逆标记和累计 output_started，retryable=False。新的 revision、令牌或路由集合不改变已经发生的终态事实。可重入 Handler 的 safe pending 仍经过当前准入。对于仍可安全继续的执行，准入拒绝只阻止本次新动作：旧 revision 返回 STALE_INTERACTION，未注册返回 UNSUPPORTED_ACTION，预取消返回 CANCELLED；完成前缀仍为 ALREADY_COMPLETED，其余为本次 NOT_STARTED，retryable=False。存储中原可信失败保留，准入拒绝不覆盖它；后续合法调用仍可从该安全位置继续。output_started 表示已确认接收事实，False 不证明未知输出没有发生。
 
 ## 持久执行与恢复
 
@@ -27,9 +27,9 @@ ActionHandler 的目标内部协议为 `realize(action, execution_context, outpu
 | 行动事实 | 同 execution 的安全继续 |
 | --- | --- |
 | NOT_STARTED | 可在准入检查通过后开始 |
-| COMPLETED / ALREADY_COMPLETED | 保留结果，跳过 Handler；safe pending 先按输出契约补投，UNKNOWN 不重投 |
+| COMPLETED / ALREADY_COMPLETED | 保留结果，跳过 Handler；safe pending 表示未完成交付、retryable=False，不启动下一行动；UNKNOWN 不重投 |
 | 可信 FAILED/CANCELLED，未提交效果且本行动没有已确认或未知输出 | 允许再次执行该行动；已有 safe pending 由重入 Handler 同内容复用 |
-| 可信 FAILED/CANCELLED，已有不可逆效果或已确认输出 | 不重做 Handler；有 safe pending 时仅补投，保留原失败 |
+| 可信 FAILED/CANCELLED，已有不可逆效果或已确认输出 | 不重做 Handler、不补投；保留原失败和 pending，retryable=False |
 | 存在未知输出 | DEPENDENCY_UNAVAILABLE、retryable=False，不重投、不重做 |
 | STARTED，缺少可信结算 | 无法证明未发生效果，DEPENDENCY_UNAVAILABLE、retryable=False，不接管执行 |
 
@@ -43,7 +43,7 @@ ActionHandler 的目标内部协议为 `realize(action, execution_context, outpu
 
 SinkRejectedError 表示此次明确没有新增接收；可清除此轮新产生的未知标记，但不能清除更早的已确认或未知投递。普通异常、超时、错误回执、投递中 task 取消均保留未知状态。处理器吞掉投递异常并返回“无效果失败”不能使未知输出变得可重试。未知输出不得因外部接收器没有确认而自动重投。多个 emit 的已确认及未知事实是累计关系，后一轮拒绝不能覆盖前一轮。
 
-已确认回执的本地写入失败时，本次报告保留已观察到的 output_started=True，但禁止继续行动；最终可信结算可补存本次已知回执，补存仍失败时持久未知状态阻止以后重做。单项结算失败同样保留本次可信效果与接收事实，整体以 DEPENDENCY_UNAVAILABLE 表达无法安全结算；必要时将本项状态改为 FAILED 以符合报告状态关系，不能宣称完成已持久化。
+已确认回执的本地写入失败时，本次报告保留已观察到的 output_started=True，但禁止继续行动；持久未知状态阻止以后重做，不把本次内存已知回执视为已持久确认。单项结算失败同样保留本次可信效果与接收事实，整体以 DEPENDENCY_UNAVAILABLE 表达无法安全结算；必要时将本项状态改为 FAILED 以符合报告状态关系，不能宣称完成已持久化。
 
 ## 并发、取消、存储失败
 

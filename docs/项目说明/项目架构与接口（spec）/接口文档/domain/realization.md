@@ -1,6 +1,6 @@
 # 计划与 realization 领域契约
 
-> 状态：2026-09-06 领域类型、构造校验及两个 Protocol 声明已实现；Agent 门面、请求账本和逐行动执行账本见 [Agent 接口](../agent/facade.md)，输出生产与恢复增量见 [输出投递目标契约](../agent/output-delivery.md)。
+> 状态：2026-09-06 领域类型、构造校验及两个 Protocol 声明已实现；Agent 门面、请求账本和逐行动执行账本见 [Agent 接口](../agent/facade.md)，输出生产与持久序列增量见 [输出投递目标契约](../agent/output-delivery.md)。
 >
 > 对应 [issue #61](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/61)。字段和构造规则描述当前实现；stage 消费、执行、投递和客户端映射是运行时接入契约，不表示本轮已实现这些行为。
 >
@@ -236,7 +236,7 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 6. output_started 是调用方记录的“该 execution 是否曾有输出被接收”；action_results 未携带输出列表，不能由其状态推导。retryable 表示原 execution 是否可安全继续，不表示可以换 ID 从头执行。
 
 构造器只验证以上内部关系。action_results 是否完整对应原 plan、效果是否真实提交、重试是否重复输出，需要输入计划及 ledger/sink 验证。
-同一 execution 重试复用原行动身份，已完成行动报告 ALREADY_COMPLETED；已接收的输出保持身份及内容，不重新生成后复用同一序号。存在可证明未接收的持久输出时，retryable 可以只表示恢复原输出；不能由此推断可重跑已有副作用的行动。UNKNOWN 接收不作为可安全重投的依据。
+同一 execution 重试复用原行动身份，已完成行动报告 ALREADY_COMPLETED；已接收的输出保持身份及内容，不重新生成后复用同一序号。retryable 表示行动可安全继续，已有副作用的行动不从头重做；UNKNOWN 接收不作为可安全重投的依据。
 
 ## 10. 当前客户端行为的覆盖边界
 
