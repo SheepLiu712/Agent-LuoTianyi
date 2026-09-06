@@ -1,6 +1,6 @@
 # PlanEmitter 与计划投递恢复契约
 
-状态：计划投递与恢复已实现；错误日志的源码行隔离为本次修复目标。公开入口保持 `Agent.handle_stimulus(request, plan_sink)`；结果使用现有 HandlingReport，外部接收器使用现有 ActionPlanSink。
+状态：已实现。公开入口保持 `Agent.handle_stimulus(request, plan_sink)`；结果使用现有 HandlingReport，外部接收器使用现有 ActionPlanSink。
 
 ## 所有权与内部输入
 

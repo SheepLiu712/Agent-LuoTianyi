@@ -1,6 +1,7 @@
 """本次处理的草稿封装、持久投递及原计划恢复。"""
 import asyncio
 from dataclasses import dataclass, replace
+from traceback import walk_tb
 
 import src.domain.agent as d
 from src.agent.ledgers.plan_outbox import PlanSlot
@@ -149,13 +150,15 @@ class PlanEmitter:
         return replace(report, **changes)
 
     def _failed(self, error, ordinal):
+        """保存投递失败；日志只携带身份、错误类型及栈位置，隔离源码和异常链。"""
         self._error = handling_error(error)
-        safe_error = RuntimeError("Collaborator exception message omitted")
+        locations = [(frame.f_code.co_filename, line, frame.f_code.co_name)
+                     for frame, line in walk_tb(error.__traceback__)]
         get_logger(__name__).error(
-            "Plan delivery failed character_id=%s request_id=%s interaction_id=%s plan_id=%s ordinal=%s error_code=%s type=%s",
+            "Plan delivery failed character_id=%s request_id=%s interaction_id=%s plan_id=%s ordinal=%s error_code=%s type=%s stack=%s",
             self._character_id, self._request.request_id, self._request.interaction.interaction_id,
             plan_id(self._character_id, self._request.request_id, ordinal), ordinal, self._error.name,
-            type(error).__name__, exc_info=(RuntimeError, safe_error, error.__traceback__))
+            type(error).__name__, locations)
 
     def close(self):
         """结束本次作用域并释放接收器及请求引用。"""
