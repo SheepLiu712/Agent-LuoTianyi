@@ -1,4 +1,5 @@
 """公开 realize 的未完成交付阻断、未知接收和输出日志。"""
+import asyncio
 from dataclasses import replace
 
 import pytest
@@ -8,6 +9,31 @@ from output_support import accepted, draft, failed, fresh, no_reentry, reject, s
 from routing_support import Sink, completed, plan_and_context
 
 pytestmark = pytest.mark.asyncio
+
+
+async def test_handler_catching_delivery_task_cancel_cannot_reemit_unknown_slot(routed_runtime):
+    attempts = []
+
+    async def receiver(value):
+        attempts.append(value)
+        if len(attempts) == 1:
+            raise asyncio.CancelledError()
+        return accepted(value)
+
+    async def handler(action, context, outputs):
+        for _ in range(2):
+            try:
+                await outputs.emit(draft("TextFinal", action, context))
+            except (asyncio.CancelledError, Exception):
+                pass
+        return completed(action)
+
+    runtime, _ = routed_runtime(realize=handler)
+    plan, context = single()
+    report = await runtime.get_agent().realize_action_plan(plan, context, Sink(receiver))
+    assert len(attempts) == 1
+    assert report.error_code is d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
+    assert not report.retryable and not report.output_started
 
 
 async def pending_completed(action, context, outputs):
@@ -102,6 +128,8 @@ async def test_unknown_delivery_remains_blocked_even_when_handler_returns_comple
     report = await replacement.get_agent().realize_action_plan(plan, fresh(context), sink)
     assert report.error_code is d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE and not report.retryable
     assert report.output_started is first.output_started and sink.values == []
+    assert report.action_results[0].status is d.ActionExecutionStatus.FAILED
+    assert report.action_results[0].error_code is d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
 
 
 async def test_caught_output_rejection_still_logs_identity_without_payload(routed_runtime, caplog):

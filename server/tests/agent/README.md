@@ -319,3 +319,9 @@ Ruff、SPEC UTF-8/围栏/链接和git diff --check通过；没有产品代码、
 | test_output_storage_recovery.py | test_prepared_payload_survives_failure_before_external_attempt | 1 |
 | test_output_storage_recovery.py | test_output_storage_fault_preserves_known_receipt_and_final_settlement：ack_once | 1 |
 | test_output_storage_recovery.py | test_fresh_python_process_preserves_original_audio_and_never_takes_unknown_action：safe_pending | 1 |
+
+
+## 输出取消被处理器捕获 RED（2026-09-06）
+
+GREEN 候选整理时发现：外部 emit 抛 CancelledError 后，Handler 可以捕获取消并再次 emit 同值，候选错误重发 UNKNOWN 槽位。新增公开回归 test_handler_catching_delivery_task_cancel_cannot_reemit_unknown_slot，在尚未增加 UNKNOWN 状态入口保护的候选上运行 `-m pytest tests/agent/test_output_delivery_recovery.py -k catching_delivery_task_cancel -q --tb=short` 为 **1 failed、6 deselected**：外部实际收到两次 sequence=0，预期仅一次。测试导入修正后确认失败来自重复投递。既有 SPEC 的 UNKNOWN 不重投规则已覆盖。
+同时强化既有 UNKNOWN 重投回归，要求当前行动为 FAILED/DEPENDENCY_UNAVAILABLE；该强化在候选上首次通过，不伪造 RED。
