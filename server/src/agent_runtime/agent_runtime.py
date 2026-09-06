@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, TYPE_CHECKING
 
+from src.agent import Agent
 from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
 from src.agent_runtime.agent_registry import AgentRegistry
@@ -68,6 +69,10 @@ class AgentRuntime:
             )
 
             self.default_character_id = self.character_registry.default_character_id
+            self._agents = {
+                character_id: Agent(character_id=character_id)
+                for character_id in self.character_runtimes
+            }
             set_agent_runtime(self)
         except BaseException:
             try:
@@ -90,7 +95,9 @@ class AgentRuntime:
             clear_agent_runtime(self)
 
     async def shutdown(self) -> None:
-        """Release AgentRuntime-owned resources exactly once after success."""
+        """停止门面接受新工作，关闭资源；超时保留关闭任务供重试，成功后幂等。"""
+        for agent in getattr(self, "_agents", {}).values():
+            agent._stop_accepting()
         async with self._shutdown_lock:
             if self._shutdown_complete:
                 return
@@ -170,9 +177,19 @@ class AgentRuntime:
         for runtime in self.character_runtimes.values():
             runtime.ensure_dependencies()
 
-    def get_agent(self, character_id: str | None = None) -> LuoTianyiAgent:
-        """获取指定角色的意识 Agent，未指定时返回默认角色。"""
-        return self.agent_registry.get(character_id or self.default_character_id)
+    def get_agent(self, character_id: str | None = None) -> Agent:
+        """返回角色的缓存门面；仅 None 选择默认角色。
+
+        未知、禁用或空白 ID 抛出 KeyError，非字符串 ID 抛出 TypeError。
+        关闭后仍返回同一门面，但门面拒绝接受新工作。
+        """
+        if character_id is None:
+            character_id = self.default_character_id
+        if not isinstance(character_id, str):
+            raise TypeError("character_id must be str or None")
+        if not character_id.strip():
+            raise KeyError(character_id)
+        return self._agents[character_id]
 
     def get_character_runtime(self, character_id: str | None = None) -> CharacterRuntime:
         """获取指定角色的完整运行时，包括意识、潜意识和角色档案。"""
@@ -400,4 +417,4 @@ def get_agent_runtime() -> AgentRuntime:
 
 def get_default_agent() -> LuoTianyiAgent:
     """返回默认角色的意识 Agent。"""
-    return get_agent_runtime().get_agent()
+    return get_agent_runtime().get_character_runtime().conscious

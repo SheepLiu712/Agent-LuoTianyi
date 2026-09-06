@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-06 Agent 空注册门面入口与旧查找迁移 GREEN
+
+- 交付行为：`src.agent.Agent` 提供两个异步业务方法及中文 docstring，校验角色、交互、修订、参数和预取消，空注册返回 UNSUPPORTED；AgentRuntime 初始化组装每角色门面、严格查找并在关闭时停止接受。TopicReplier、SystemRuntime.agent、get_default_agent 三处旧调用改从 get_character_runtime 取得旧意识对象。
+- interface spec：agent/facade.md 与 agent_runtime/README.md；SPEC `d5303223`，RED `0601a6d2`，GREEN 为本记录所在提交。
+- 验证及结果：原 38 项 RED 测试保持不变，GREEN 38 passed；与 domain/world 合并 582 passed、2 skipped。5 项旧初始化回滚测试通过。门面、AgentRuntime 及新增测试 Ruff、git diff --check 通过，作者自审完成。
+- 未验证范围：#63 已注册处理器路由、处理中取消、部分结算和在途关闭尚未实现；未验证真实模型、设备或生产链。额外解除暂缓运行的系统关闭测试因 CapabilityManager 测试替身缺少 _stop_lock 失败，该既有测试问题未修复。不将本轮入口 GREEN 记作 #63 完成。
+
+
 ### 2026-09-06 WorldClock 调度注册基线与关闭重试 GREEN
 
 - 交付行为：通过公开 WorldClock/WorldRuntime 入口冻结九类任务注册、角色展开、配置与启用条件、本地每日时间、立即执行、同名替换、失败隔离和关闭行为；将适用的旧 world 任务测试迁至 `server/tests/world` 并恢复默认执行。WorldClock 重试关闭时只等待已请求取消的任务，不重复取消同步线程的清理等待。

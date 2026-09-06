@@ -1,4 +1,4 @@
-# Agent 门面 RED
+# Agent 门面入口测试
 
 对应 SPEC：`docs/项目说明/项目架构与接口（spec）/接口文档/agent/facade.md`，SPEC commit `d5303223`。
 
@@ -37,3 +37,11 @@ D:/Anaconda/envs/lty/python.exe -m ruff check tests/agent tests/agent_runtime te
 离线装配保留真实 AgentRuntime、CharacterRegistry、AgentRegistry、CharacterRuntime、LuoTianyiAgent 和 MainChat；向量存储、LLM 服务和旧潜意识等协作者使用受控替身，角色资源写入 pytest 临时目录。不会调用真实模型、capability 或生产数据库。
 
 本轮证明空生产注册版本的入口与兼容契约。已注册处理器的成功路由、重复注册、处理中取消、sink 拒绝后的部分结算、在途处理器关闭超时尚无测试证据；这些场景需要内部测试装配支持，不能把当前空注册拒绝测试算作覆盖。版本构造约束由现有 domain 测试覆盖。
+
+## GREEN 证据
+
+RED commit `0601a6d2`，本轮保持其 38 项测试不变。实现空注册门面、严格角色查找及三个旧调用点迁移后，新增测试 38 passed；与 domain/world 合并运行 582 passed、2 skipped。上述 Ruff 命令及门面/AgentRuntime 产品文件检查通过，git diff --check 通过。
+
+通过单次 pytest 插件解除两个指定旧测试文件的全局暂缓标记：`test_runtime_initialization_rollback.py` 为 5 passed；`test_system_runtime_shutdown.py` 为 1 failed，原因是旧测试用 object.__new__ 构造 CapabilityManager，缺少其关闭锁 _stop_lock。该关闭逻辑未在本轮改变，失败未修复；没有修改默认暂缓策略。
+
+原有未覆盖场景仍未实现，本轮 GREEN 仅指这组入口与兼容测试，不表示 #63 全部契约已经交付。

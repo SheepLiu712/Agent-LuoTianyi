@@ -1,6 +1,6 @@
 # Agent 两接口门面契约
 
-状态：#63 SPEC 草案，尚未实现。本文定义本切片的公开行为；领域对象以 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md) 为准。
+状态：#63 的空注册门面入口、运行时缓存与旧入口迁移已实现。已注册处理器路由、处理中的取消及部分结算仍是未实现的契约草案，不能视为可用行为。本文定义本切片的公开行为；领域对象以 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md) 为准。
 
 ## 模块与实例
 

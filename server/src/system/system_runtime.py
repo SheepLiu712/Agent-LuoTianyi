@@ -313,7 +313,7 @@ class SystemRuntime:
     # Properties for convenient access to subsystems
     @property
     def agent(self):
-        return self.agent_runtime.get_agent()
+        return self.agent_runtime.get_character_runtime().conscious
 
     @property
     def websocket_service(self):

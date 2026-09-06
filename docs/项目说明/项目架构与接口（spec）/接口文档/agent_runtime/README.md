@@ -1,13 +1,13 @@
 # agent_runtime 对外接口
 
-## #63 装配与查找契约草案
+## #63 装配与查找契约
 
-状态：尚未实现，与 [Agent 门面 SPEC](../agent/facade.md)共同构成本切片契约。下文“稳定入口”及“当前过渡接口”仍记录旧实现。
+状态：空注册门面的装配、查找与兼容入口已实现。已注册处理器的装配冲突、在途工作等待见 [Agent 门面 SPEC](../agent/facade.md) 中尚未实现的契约。
 
 - `AgentRuntime` 初始化时在 `server/src/agent_runtime` 内完成新 Agent 的装配，为每个启用角色缓存一个实例；依赖通过现有初始化参数显式传入。角色身份和内部协作者由运行时绑定。
 - `get_agent(character_id: str | None = None) -> Agent` 查找新门面。只有 `None` 使用默认角色；未知、禁用、空字符串或空白 ID 抛出 `KeyError`，其他非字符串参数抛出 `TypeError`。同一运行时内重复查找返回同一实例。
-- 初始化必须完成全部实例装配才对外发布运行时。重复处理器注册或依赖装配失败时抛出异常，按现有初始化回滚路径清理已创建资源和全局引用。
-- `shutdown()` 管理新 Agent 的接受状态和在途调用，具体行为见门面契约；关闭成功后查找仍可返回原门面，调用门面会被拒绝。
+- 初始化必须完成全部实例装配才对外发布运行时。依赖装配失败时抛出异常，按现有初始化回滚路径清理已创建资源和全局引用。
+- `shutdown()` 首先停止新 Agent 接受工作，再执行现有资源关闭；当前空注册入口不创建在途异步工作；关闭成功后查找仍可返回原门面，调用门面会被拒绝。
 
 兼容入口保持旧返回值和旧业务语义：
 
@@ -38,7 +38,7 @@ agent = agent_runtime.get_agent(character_id)
 - `AgentRuntime(config, llm_service, capability_manager, database_manager)`：创建运行时容器。
 - `wire_dependencies(...)`：补充运行所需依赖。
 - `ensure_dependencies()`：验证注册表、角色和服务已经就绪。
-- `get_agent(character_id=None) -> LuoTianyiAgent`：按角色 ID 返回 Agent；省略 ID 时使用默认角色。
+- `get_agent(character_id=None) -> Agent`：按角色 ID 返回 Agent；省略 ID 时使用默认角色。
 - `await shutdown()`：关闭角色运行时并释放相关资源。
 
 `get_agent` 是业务调用首选且应逐步收敛为唯一取 Agent 的入口。角色不存在时抛出 `KeyError`，而不是悄悄换成另一个角色。
