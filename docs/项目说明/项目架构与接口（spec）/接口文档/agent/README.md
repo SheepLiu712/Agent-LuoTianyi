@@ -62,6 +62,6 @@
 
 ## 目标接口（尚未实现）
 
-`handle_stimulus(request, plan_sink)` 的请求结构以 [handle 输入契约](../domain/handle-input.md)为准。stage 传入不可变交互快照和同一枚可变取消令牌；Agent 观察取消并停止后续工作，不读取 stage 内部状态。该输入 SPEC 尚未实现，也不代表 plan sink 或 HandlingReport 已建立完整契约。
+`handle_stimulus(request, plan_sink)` 的请求结构以 [handle 输入契约](../domain/handle-input.md)为准。stage 传入不可变交互快照和同一枚可变取消令牌；Agent 观察取消并停止后续工作，不读取 stage 内部状态。对话工作上下文由 Agent 按角色和 interaction 隔离，并统一管理历史片段、摘要与 Recall 结果的临时生命周期；清理不删除长期正本。该输入 SPEC 尚未实现，也不代表 plan sink 或 HandlingReport 已建立完整契约。
 
 目标是再给 `LuoTianyiAgent` 包一层只暴露有限方法的外壳，例如统一的 `handle_stimulus(...)`。该方法当前不存在，任何代码都不能把它当成已经可用的接口。迁移完成前，以本页“当前对外接口”为准。
