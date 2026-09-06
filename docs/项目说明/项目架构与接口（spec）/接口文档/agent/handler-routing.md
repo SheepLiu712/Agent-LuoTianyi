@@ -1,6 +1,6 @@
 # Handler 路由契约
 
-状态：路由已实现；内部 plans 使用 [PlanEmitter](plan-emitter.md)，outputs 使用 [OutputEmitter](output-delivery.md)。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
+状态：路由已实现；仅投递恢复的准入及拥有者清理为输出契约的目标增量。内部 plans 使用 [PlanEmitter](plan-emitter.md)，outputs 使用 [OutputEmitter](output-delivery.md)。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
 
 ## 文件与所有权
 
@@ -127,7 +127,7 @@ AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；�
 | 入口 | 查询方式 | 未注册的公开结果 |
 | --- | --- | --- |
 | handle_stimulus | 用触发刺激 kind 查询 StimulusRouter | FAILED / UNSUPPORTED_STIMULUS，pending 全部 retained，consumed 和 emitted_plan_ids 为空 |
-| realize_action_plan | 按计划行动顺序逐项查询 ActionRouter | 新工作中任一项未注册则 FAILED / UNSUPPORTED_ACTION；已有完成前缀保留，其余 NOT_STARTED，不产生新的输出或效果 |
+| realize_action_plan | 按计划行动顺序逐项查询 ActionRouter | 新工作中任一项未注册则 FAILED / UNSUPPORTED_ACTION；已有可信完成及效果保留；输出恢复的原失败项按拒绝投影，尚未开始项 NOT_STARTED，不产生新的输出或效果 |
 
 门面只将 resolve 的“合法枚举未注册”KeyError 转成上述结果；不能用包住整个处理流程的 KeyError 捕获来误吞业务错误。路由器的构造异常属于启动错误，不包装为 HandlingReport 或 ExecutionReport。
 
@@ -157,6 +157,8 @@ class ActionHandler(Protocol):
 - ActionResult 必须匹配当前 action_id，且不能用 NOT_STARTED 冒充已调用的结果；无效返回转 INTERNAL_ERROR。已完成行动按原顺序保留，失败或取消停止后续行动。返回的 effect_ref 与 irreversible_effect_committed 是内部处理器已确认的事实，失败或取消不能清除它们。
 - 行动等待返回时令牌取消：已返回 COMPLETED/ALREADY_COMPLETED 的效果仍为完成；整体报告为 CANCELLED，后续行动 NOT_STARTED。行动返回 FAILED 优先保留实际失败，不能用晚到取消掩盖。处理器返回 CANCELLED 时整体同样取消。
 - 处理器内部 KeyError 是 INTERNAL_ERROR，不能误判为路由缺失。TimeoutError 和 SinkRejectedError 按门面错误表转换；通过 utils/logger.py 记录调用身份、稳定错误码、异常类型及无局部变量的栈位置，省略协作者异常原文。
+
+仅投递恢复仍预检全计划路由，但不调用已可信结算的 Handler；Agent 持有恢复 sink worker，并按输出契约保存回执及原业务结算。
 
 ## 在途调用与关闭
 
