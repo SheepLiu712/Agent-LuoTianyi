@@ -193,7 +193,9 @@ class Execution:
                 return self.report(code, [*results, result])
             finally:
                 outputs.close()
-            if outputs.error is not None or fact.unknown or (fact.complete and self.pending(index)):
+            # 协作取消不改写可信行动结果；未知与未确认输出仍独立阻断推进。
+            delivery_failed = outputs.error is not None and not isinstance(outputs.error, _DeliveryCancelled)
+            if delivery_failed or fact.unknown or (fact.complete and self.pending(index)):
                 code = outputs.code or d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
                 status = (d.ActionExecutionStatus.CANCELLED if code is d.ExecutionErrorCode.CANCELLED
                           else d.ActionExecutionStatus.FAILED)

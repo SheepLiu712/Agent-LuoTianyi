@@ -353,3 +353,12 @@ SPEC `11ccc9bf` / `d4d9ecc5` 和 RED `9bb7e059` 已落实。Agent 创建四类�
 旧受控 Handler 已统一改为草稿；完整输出伪造用例继续提交完整 AgentOutput 并断言 INTERNAL_ERROR，不删掉错误输入，也不静默去除身份。原外部回执、效果、output_started、取消、关闭、幂等和生产空路由断言保留。旧 SQL 夹具未重建。RED 桥接已删除。
 
 额外 RED `57d26032` 作者自审通过；UNKNOWN 状态在 emit 入口阻止被吞掉取消后的再次发送。34项输出用例及795项既有回归全部通过。最终工作目录server，`D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **829 passed、2 skipped**；两个跳过仍为world真实网络探测。相关 Ruff、Agent compileall、7份Agent SPEC的UTF-8/围栏/相对链接和git diff --check通过。仅本地SQLite、受控Handler及sink验证；没有真实业务Handler、真实外部网络或生产库验收。
+
+
+## 确认输出后取消的可信结果 GREEN（2026-09-06）
+
+PR #119 独立 SPEC 审查的 RED `c2897f54` 两例要求确认输出后取消仍保留当前 COMPLETED，按后续行动决定 retryable，重建后只继续未开始行动。相邻 RED `57074619` 一例要求处理器可信 FAILED 优先于晚到协作取消。两个测试提交均由 RED 作者自审，分别实证2 failed和1 failed/2 passed。
+
+保持三项 RED 不变；执行协调器仅将协作取消与交付故障区分，可信行动结果继续参与正常结算。UNKNOWN、未确认槽位、存储失败、内容冲突保护保留。现有execution-ledger和handler-routing SPEC已覆盖，不新增接口或修改契约。
+
+三个输出文件 **37 passed**。最终server目录命令 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short` 为 **833 passed、2 skipped**；Ruff、Agent compileall、git diff --check通过。首轮完整回归曾在既有关闭测试的20ms最终资源关闭超时失败，原样定向复跑及两轮完整回归通过，没有修改该测试。真实网络探测仍跳过，未运行真实Handler或生产依赖。
