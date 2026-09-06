@@ -26,9 +26,17 @@ class OutputEmitter:
         self._lock = asyncio.Lock()
         self.error = None
         self.code = None
+        self.payload_lost = False
 
     async def emit(self, draft: OutputDraft) -> d.OutputReceipt:
         """校验草稿并持久投递；明确拒绝可同值重试，其余错误封闭本次输出。"""
+        return await self._deliver(draft)
+
+    async def _recover(self) -> d.OutputReceipt:
+        """由执行协调器投递已有槽位的原值，不分配身份或再次生成内容。"""
+        return await self._deliver(None, recovery=True)
+
+    async def _deliver(self, draft, *, recovery=False):
         async with self._lock:
             execution = self._execution
             if execution is None:
@@ -43,7 +51,7 @@ class OutputEmitter:
                 _check_cancellation(context.cancellation)
                 if pending and pending.state == "UNKNOWN":
                     raise _UnknownDelivery("output receipt unknown")
-                output = bind(draft, context, action_id, sequence)
+                output = pending.output if recovery else bind(draft, context, action_id, sequence)
                 payload = encode(output)
                 if pending and payload != encode(pending.output):
                     raise _ContentConflict("output slot content changed")
@@ -51,11 +59,18 @@ class OutputEmitter:
                     try:
                         pending = execution.ledger.outbox.prepare(context.execution_id, output)
                     except Exception as error:
+                        self.payload_lost = True
                         raise OutputStorageError("output prepare failed") from error
                     execution.slots.append(pending)
                 fact = execution.facts[self._index]
+                prior_state, prior_unknown = pending.state, fact.unknown
                 pending.state, fact.unknown = "UNKNOWN", True
-                execution.save()
+                try:
+                    execution.save()
+                except OutputStorageError:
+                    # 外部调用尚未开始，最终结算只能保存原本已持久的安全槽位。
+                    pending.state, fact.unknown = prior_state, prior_unknown
+                    raise
                 try:
                     receipt = await execution.sink.emit(pending.output)
                 except d.SinkRejectedError:

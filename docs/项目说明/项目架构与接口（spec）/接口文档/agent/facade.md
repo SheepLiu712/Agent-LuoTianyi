@@ -1,6 +1,6 @@
 # Agent 两接口门面契约
 
-状态：门面、逐行动账本及输出生产者已实现；[输出契约](output-delivery.md)中的仅投递恢复与结算补齐为尚未实现的目标增量。本文记录门面入口校验、内部处理器调用、交付结算与生命周期行为；领域对象以 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md) 为准。
+状态：门面、逐行动账本及[输出契约](output-delivery.md)中的仅投递恢复与结算补齐已实现。本文记录门面入口校验、内部处理器调用、交付结算与生命周期行为；领域对象以 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md) 为准。
 
 ## 模块与实例
 

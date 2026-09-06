@@ -1,6 +1,6 @@
 # 输出身份、持久序列与安全投递
 
-状态：输出生产者与持久序列已实现；本文的仅投递恢复及最终结算补齐为目标契约，尚未实现。公开入口为 `Agent.realize_action_plan(plan, execution_context, output_sink) -> ExecutionReport`；领域输出、回执、错误和报告沿用 [realization](../domain/realization.md)。
+状态：输出生产者、持久序列、仅投递恢复及最终结算补齐已实现。公开入口为 `Agent.realize_action_plan(plan, execution_context, output_sink) -> ExecutionReport`；领域输出、回执、错误和报告沿用 [realization](../domain/realization.md)。
 
 ## 所有权和调用
 

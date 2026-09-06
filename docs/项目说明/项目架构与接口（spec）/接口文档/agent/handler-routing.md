@@ -1,6 +1,6 @@
 # Handler 路由契约
 
-状态：路由已实现；仅投递恢复的准入及拥有者清理为输出契约的目标增量。内部 plans 使用 [PlanEmitter](plan-emitter.md)，outputs 使用 [OutputEmitter](output-delivery.md)。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
+状态：路由及仅投递恢复的准入与拥有者清理已实现。内部 plans 使用 [PlanEmitter](plan-emitter.md)，outputs 使用 [OutputEmitter](output-delivery.md)。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
 
 ## 文件与所有权
 

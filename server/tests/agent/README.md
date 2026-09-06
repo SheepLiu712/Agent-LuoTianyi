@@ -396,3 +396,14 @@ SPEC `a1c44e5e` 已提交并作者自审：仅投递恢复、可信结果分流�
 作者自审边界：本提交只含测试、启用清单和本记录；未改产品代码或追加完成进度。
 A的交付测试除两项已确认期望变更外，经AST比较保持原样；没有导入桥、私有结构断言或放宽原UNKNOWN保护。
 本轮尚无GREEN，没有真实业务Handler、外部接收器、生产库或客户端验收。
+
+
+## 原输出恢复与结算补齐 GREEN（2026-09-06）
+
+SPEC `a1c44e5e` 与 RED `1e44947c` 已落实；87项输出验收未改。Execution在全计划准入及原子占用后，对可信完成或不安全失败只恢复安全槽位的原payload；safe FAILED/CANCELLED仍先重入Handler。补投成功保留原业务失败或跳过已完成行动继续，UNKNOWN和未可信STARTED保持封闭。
+
+OutputEmitter复用既有持久投递路径。已确认回执的本地提交临时失败时，最终可信结果（恢复时使用已存结果）原子补齐回执和结算；本次仍报告DEPENDENCY_UNAVAILABLE，不开始新行动。完整payload已存但UNKNOWN标记失败时恢复原safe状态；首次payload保存失败不允许补出空完成。恢复任务由门面拥有，重复取消只转发一次，清理返回有效回执先保存，再传播取消。
+
+四个输出文件 **87 passed，22.81s**。首次完整回归的旧Execution关闭测试、再次回归的旧PlanEmitter关闭测试，均在owner/waiter结束后的最终资源关闭沿用20ms预算而超时。独立测试作者提交 `4d60a521` 与 `aff3bc6d`，只在业务等待断言已完成后恢复1s清理预算；Request Ledger同形路径为审计修订，不伪造失败证据。前半在途超时、资源保留与取消断言均保留，87项RED未变。
+
+最终server目录执行 `D:/Anaconda/envs/lty/python.exe -X utf8 -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system -q --tb=short`：**883 passed、2 skipped，72.86s**。两个跳过仍为world真实网络探测；另有第三方pkg_resources弃用警告。相关Ruff、Agent compileall、7份Agent SPEC UTF-8/代码围栏/相对链接及git diff --check通过。四份接口SPEC已定稿为事实，公开realize及新增私有协调方法具有中文docstring。没有新增领域字段、数据库格式或真实Handler；只验证本地SQLite、独立Python进程和受控接收器，不代表真实外部服务或生产库验收。

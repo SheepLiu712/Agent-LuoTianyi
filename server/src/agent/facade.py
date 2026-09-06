@@ -262,6 +262,8 @@ class Agent:
         未结算的开始状态阻止重做。相同执行的并发等待者共享拥有者报告。
         输出由 Agent 绑定身份与连续序号，完整落库后串行投递；已有槽位只接受
         原内容，未知接收禁止重发，未完成交付阻止后续行动。
+        已可信结算的行动仅恢复安全待投递原值；确认写入失败由最终结算补齐，
+        本次仍报告存储失败，不继续新行动。
         类型错误抛 TypeError；任务取消在可信结果持久结算和清理后传播。
         """
         if not isinstance(plan, d.ActionPlan) or not isinstance(execution_context, d.ExecutionContext):

@@ -1,6 +1,6 @@
 # Execution Ledger 与逐行动恢复契约
 
-状态：逐行动账本与输出生产者已实现；[输出投递契约](output-delivery.md)中的仅投递恢复和最终结算补齐为目标增量，尚未实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
+状态：逐行动账本及[输出投递契约](output-delivery.md)中的仅投递恢复和最终结算补齐已实现。公开入口保持 `Agent.realize_action_plan(plan, execution_context, output_sink)`，输入、输出和错误使用现有 domain 类型。
 
 ## 所有权与装配
 
