@@ -121,3 +121,47 @@ async def test_repeated_shutdown_keeps_cancelled_call_owned_sync_cleanup(routed_
     finally:
         release.set()
         await asyncio.gather(call, return_exceptions=True)
+
+
+async def test_repeated_caller_cancellation_cannot_release_sync_dependencies(routed_runtime):
+    import threading
+    from src.utils.asyncio_helpers import run_sync_owned
+
+    started, release, finished = threading.Event(), threading.Event(), threading.Event()
+
+    def work():
+        started.set()
+        try:
+            release.wait(5)
+        finally:
+            finished.set()
+
+    async def handle(req, plans):
+        await run_sync_owned(work)
+        return settlement(req)
+
+    runtime, store = routed_runtime(handle=handle)
+    runtime.shutdown_timeout_seconds = 0.05
+    call = asyncio.create_task(runtime.get_agent().handle_stimulus(request(), Sink()))
+    try:
+        assert await asyncio.to_thread(started.wait, 0.5)
+        call.cancel()
+        # 一个事件循环轮次将首次取消送入 run_sync_owned 的清理等待。
+        await asyncio.sleep(0)
+        call.cancel()
+        await asyncio.sleep(0)
+        with pytest.raises(RuntimeError):
+            await runtime.shutdown()
+        assert store.close_calls == 0
+        assert not finished.is_set()
+        assert not call.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        assert await asyncio.to_thread(finished.wait, 1)
+        runtime.shutdown_timeout_seconds = 1
+        await runtime.shutdown()
+        assert store.close_calls == 1
+    finally:
+        release.set()
+        await asyncio.gather(call, return_exceptions=True)

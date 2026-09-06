@@ -66,3 +66,13 @@ SPEC：`4c031a4c`，在提交并自审路由调用、单次交付事实和关闭
 - Ruff 检查新增测试、父 conftest 与该恢复测试通过；git diff --check 通过。
 
 作者自审：SPEC 先于 RED；断言观察报告、sink 接收结果和资源释放边界，不读取路由私有映射；普通协作者 KeyError 不得冒充路由缺失。sink 接收后取消、非法 Handler 报告保留既有回执、重复 shutdown 等待同步清理均有独立测试。真实模型、能力、设备、生产链和持久账本未验证。
+
+## 重复调用方取消 RED（2026-09-06）
+
+初步 GREEN `d21a2aeb` 通过上述 69 项新增测试，完整相关回归为 652 passed、2 skipped。
+自审进一步发现调用方连续两次 Task.cancel 可击穿 run_sync_owned 的同步线程清理等待。
+新增 `test_repeated_caller_cancellation_cannot_release_sync_dependencies` 从公开门面启动受控同步工作，
+首次取消进入清理等待后再次取消，要求 runtime.shutdown 仍超时且不释放依赖；释放同步工作后才能关闭。
+
+对初步 GREEN 执行 `python -m pytest tests/agent/test_facade_inflight_shutdown.py::test_repeated_caller_cancellation_cannot_release_sync_dependencies -q --tb=short`
+结果为 1 failed：关闭未抛 RuntimeError，错误返回成功。测试不读取私有任务或改动通用 asyncio helper。
