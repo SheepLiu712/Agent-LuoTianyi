@@ -174,5 +174,3 @@ async def test_caught_output_rejection_still_logs_identity_without_payload(route
     finally:
         for logger in loggers:
             logger.removeHandler(caplog.handler)
-
-
