@@ -1,6 +1,6 @@
 # Handler 路由契约
 
-状态：已实现。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
+状态：路由已实现；内部 plans 协议按 [PlanEmitter](plan-emitter.md) 更新为目标契约。本文记录 Agent 内部的处理器注册、查找和调用；业务入口继续使用 [Agent 门面](facade.md) 的两个方法。
 
 ## 文件与所有权
 
@@ -126,16 +126,16 @@ AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；�
 ```python
 class StimulusHandler(Protocol):
     async def handle(self, request: HandleStimulusRequest,
-                     plans: ActionPlanSink) -> HandlingReport: ...
+                     plans: PlanEmitter) -> HandlingReport: ...
 
 class ActionHandler(Protocol):
     async def realize(self, action: Action, execution_context: ExecutionContext,
                       outputs: AgentOutputSink) -> ActionResult: ...
 ```
 
-`plans`、`outputs` 是门面为本次调用创建的受限交付对象，保留现有 sink 协议。它们不能取得其他调用的 sink，不把外部 sink 原对象传给处理器。处理器正常返回后，交付对象失效；保留它再调用不会产生输出。处理器不能启动脱离调用生命周期的工作；拥有的异步任务或同步线程在返回或传播任务取消前必须完成清理。
+`plans` 是接收 ActionPlanDraft 的内部 PlanEmitter，按 [计划投递契约](plan-emitter.md) 分配身份并保存投递事实；`outputs` 保留 AgentOutputSink 协议。二者都是门面为本次调用创建的受限交付对象。它们不能取得其他调用的 sink，不把外部 sink 原对象传给处理器。处理器正常返回后，交付对象失效；保留它再调用不会产生输出。处理器不能启动脱离调用生命周期的工作；拥有的异步任务或同步线程在返回或传播任务取消前必须完成清理。
 
-- plans 校验 plan 的角色、origin_request_id、interaction_id、basis_interaction_revision 和 source_stimulus_ids（只能来自触发刺激及 pending）；不匹配在外部交付前失败。成功回执必须是 PlanReceipt 且 plan_id 匹配。只将已确认接收的计划 ID 按首次接收顺序记录；ACCEPTED 和 ALREADY_ACCEPTED 均表示已确认接收。
+- plans 接收完整 draft，由门面固定角色、请求、交互与修订，校验 source_stimulus_ids 只能来自触发刺激及 pending；根据 ordinal 保存计划，再进行投递。报告只记录已确认接收的计划 ID，恢复及失败事实以 PlanEmitter 契约为准。
 - outputs 校验输出的 execution_id、interaction_id、action_id 与当前行动一致；成功回执必须是 OutputReceipt 且 execution_id、sequence_no 匹配。首次有效回执后 output_started=True。回执不匹配属于 INTERNAL_ERROR；输入输出身份不匹配属于 CONTRACT_MISMATCH。
 - 两个交付对象在调用外部 sink 前检查取消，sink 等待返回后先保存已确认接收事实，再检查取消。取消后不开始下一次交付。每次调用结束后释放 sink 引用。
 - handle 正常返回的 HandlingReport 必须匹配请求、触发刺激、修订，considered 必须是 pending 的有序子集，emitted_plan_ids 必须等于真实回执记录。不合法的处理器结果转 INTERNAL_ERROR，pending 全部 retained，保留真实 emitted_plan_ids，不接受伪造消费。合法报告的消费和保留事实原样结算；令牌已取消时改为 CANCELLED/error_code=None，保留合法结算事实。

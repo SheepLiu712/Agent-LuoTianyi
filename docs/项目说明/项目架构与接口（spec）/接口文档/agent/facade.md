@@ -44,7 +44,7 @@ async def realize_action_plan(
 
 入口拒绝时不调用模型、capability 或 sink。报告的 considered 和 retained 都按快照顺序包含全部 pending ID；consumed 和 emitted_plan_ids 为空，reconsider_at 为 None。输入不匹配、不支持和已取消的入口结果均为 `retryable=False`。
 
-处理开始后的计划通过 plan_sink 按正常产生顺序交付；报告只记入已成功接收的计划 ID。取消或失败不抹掉此前成功接收的计划及已形成的结算事实。Agent 不直接修改 stage 的 pending 集合。
+处理器通过内部 PlanEmitter 提交完整草稿，稳定计划和持久投递恢复见 [PlanEmitter 契约](plan-emitter.md)（本次目标行为）。处理开始后的计划通过 plan_sink 按正常产生顺序交付；报告只记入已成功接收的计划 ID。取消或失败不抹掉此前成功接收的计划及已形成的结算事实。Agent 不直接修改 stage 的 pending 集合。
 
 ## realize 入口
 
@@ -60,7 +60,7 @@ async def realize_action_plan(
 
 ## 错误、取消与关闭
 
-- sink 明确拒绝沿用 `SinkRejectedError`；不将拒绝记作成功接收。STALE_INTERACTION、SINK_CLOSED、BACKPRESSURE_TIMEOUT 映射为同名处理或执行错误码，其中只有 BACKPRESSURE_TIMEOUT 的 retryable=True。IDENTITY_MISMATCH、CONTENT_CONFLICT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中映射为 CONTRACT_MISMATCH；UNSUPPORTED_OUTPUT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中保留同名码。这些错误的 retryable=False。
+- sink 明确拒绝沿用 `SinkRejectedError`；不将拒绝记作成功接收。STALE_INTERACTION、SINK_CLOSED、BACKPRESSURE_TIMEOUT 映射为同名处理或执行错误码，其中 BACKPRESSURE_TIMEOUT 的 retryable=True；持久待重投计划的 retryable 以 PlanEmitter 契约为准。IDENTITY_MISMATCH、CONTENT_CONFLICT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中映射为 CONTRACT_MISMATCH；UNSUPPORTED_OUTPUT 在 handle 中映射为 INTERNAL_ERROR，在 realize 中保留同名码。这些错误的 retryable=False。
 - 协作者抛出的 `TimeoutError` 转为 `PROVIDER_TIMEOUT`，retryable=True；未分类的普通异常转为 `INTERNAL_ERROR`，retryable=False。失败报告保留已经确认的输出、计划和效果，异常类型、调用身份和无局部变量的栈位置留在内部日志，协作者异常原文被省略。
 - 协作式取消在进入处理器前、每次等待返回后以及启动下一次计划交付或行动前检查。已经发起的外部效果不能因令牌取消被描述为未发生。
 - 调用任务本身收到 `asyncio.CancelledError` 时，在清理该调用拥有的工作后传播取消，不包装为 INTERNAL_ERROR，也不承诺一定返回报告。

@@ -1,12 +1,12 @@
 # handle 请求账本契约
 
-状态：已实现。业务入口为 `Agent.handle_stimulus(request, plan_sink)`，输入和结果使用现有 domain 类型。
+状态：请求幂等已实现；与 [PlanEmitter](plan-emitter.md) 联动的可恢复 outbox 为本次目标契约。业务入口为 `Agent.handle_stimulus(request, plan_sink)`，输入和结果使用现有 domain 类型。
 
 ## 装配与持久化
 
 `agent/ledgers/request_ledger.py` 拥有 Request Ledger；JSON 编码辅助代码位于同目录的私有模块。AgentRuntime 初始化时为角色门面注入 `database_manager.open_sql_session`，Agent 构造提供仅供装配使用的必填关键字参数 `sql_session_factory: Callable[[], Session]`。账本使用该工厂创建并关闭 SQLAlchemy Session，在原数据库中创建自己的表；初始化失败使运行时初始化失败，沿用已有回滚。
 
-事务只覆盖本地登记、读取和结算，不能跨越 Handler 或 sink 的 await。唯一键为 `(character_id, request_id)`，数据库唯一约束保证不同 Agent、不同 Runtime 或不同进程争用时只有一个获得处理权。账本只保存版本化 fingerprint、处理占用和完整终态报告，不保存刺激原文、取消令牌、Handler、sink 或协程。字段使用显式 JSON 与标量编码，不使用 pickle。账本不从 Agent 包导出，也不提供 stage 查询入口。AgentRuntime 保持顶层位置和原兼容入口。
+事务只覆盖本地登记、读取和结算，不能跨越 Handler 或 sink 的 await。唯一键为 `(character_id, request_id)`，数据库唯一约束保证不同 Agent、不同 Runtime 或不同进程争用时只有一个获得处理权。请求记录保存版本化 fingerprint、处理占用和完整报告；计划 outbox 保存恢复必需的完整计划及接收事实。原刺激正文、取消令牌、Handler、sink 或协程不持久化。字段使用显式 JSON 与标量编码，不使用 pickle。账本不从 Agent 包导出，也不提供 stage 查询入口。AgentRuntime 保持顶层位置和原兼容入口。
 
 数据库操作通过同步 Session 执行，其间事件循环需要等待 SQL 返回；数据库锁等待时长由注入引擎的超时设置决定。Handler 与接收器调用期间不持有 SQL 事务。
 
@@ -22,11 +22,11 @@ fingerprint 包含绑定角色以及请求的全部不可变语义：触发刺�
 
 参数类型、目标角色和运行时接受状态检查先于账本；拒绝时不占用请求。之后进行 fingerprint 查找或原子登记，再检查首次调用的取消令牌与刺激路由。已存在终态时，即使此次传入新的已取消令牌，也返回原终态报告，不重新交付、不重新消费。运行时停止接受后仍按既有规则拒绝新调用，不能借重投绕过关闭。
 
-获得处理权后，原有处理器路由、计划交付及报告校验继续适用。正常返回、业务失败、协作取消、预取消和未支持刺激均保存完整终态。必须在提交成功后才向调用方返回该报告；后续相同请求读取同一值，包括状态、逐 ID 消费、计划 ID 顺序、reconsider_at、错误码和 retryable。retryable 表示依赖错误属性，不授权同一已结算请求重新执行 Handler。
+获得处理权后，原有处理器路由、计划交付及报告校验继续适用。没有可恢复计划的正常返回、业务失败、协作取消、预取消和未支持刺激均保存完整终态；有待重投计划时保存可信 provisional report，按 [PlanEmitter](plan-emitter.md) 的恢复规则结算。必须在提交成功后才向调用方返回该报告；后续相同请求读取同一值，包括状态、逐 ID 消费、计划 ID 顺序、reconsider_at、错误码和 retryable。已终态报告的 retryable 不授权重新执行 Handler；可恢复报告的 retryable=True 仅授权重投持久计划。
 
 同一 Agent 的并发相同请求等待同一次处理并获得相同报告；不同 fingerprint 立即冲突，不等待错误请求。等待者自己的 task 取消只取消等待，不能取消拥有处理权的调用或其他等待者，也不能更改其令牌。拥有处理权的调用 task 取消沿用门面清理后传播规则，不能让等待者接管并重新运行 Handler；未形成终态的等待者获得下述占用拒绝。
 
-没有本地在途拥有者、但数据库已存在非终态占用时，返回 `FAILED / DEPENDENCY_UNAVAILABLE / retryable=False`，不运行 Handler、不调用 sink、不删除或覆盖占用。此规则也适用于另一个 Agent/Runtime/进程争用同一未结算请求。占用者完成后，再次重投可读取其终态。进程重启不能凭时间或内存为空推断旧请求没有产生外部效果；缺少终态时的拒绝报告只表达无法安全继续，不证明历史上没有计划被接收。
+没有本地在途拥有者、且数据库仅有处理或恢复占用而没有可领取的恢复状态时，返回 `FAILED / DEPENDENCY_UNAVAILABLE / retryable=False`，不运行 Handler、不调用 sink、不删除或覆盖占用。此规则也适用于另一个 Agent/Runtime/进程争用同一未结算请求。占用者完成后，再次重投可读取其终态。进程重启不能凭时间或内存为空推断旧请求没有产生外部效果；缺少终态时的拒绝报告只表达无法安全继续，不证明历史上没有计划被接收。
 
 所有已进入账本的调用，包括等待同一次结果的调用，都计入 AgentRuntime 的在途所有权。关闭期间已登记等待者可以取得既有结果；未完成前不得释放数据库依赖。关闭超时、调用方反复取消及重试保持原关闭契约。
 
