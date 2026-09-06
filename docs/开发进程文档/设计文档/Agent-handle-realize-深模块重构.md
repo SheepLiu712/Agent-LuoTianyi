@@ -385,6 +385,8 @@ Agent/PlanEmitter 在每次 emit 前检查 cancellation，并把生成决定时�
 
 #### `HandlingReport`
 
+本节保留总体设计背景；字段、稳定枚举和构造约束的权威定义见 [HandlingReport 类型契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handling-report.md)。
+
 | 字段 | 类型 | 含义 | 约束 |
 | --- | --- | --- | --- |
 | `request_id` | `str` | 被报告的 handle 请求身份 | 与输入一致 |

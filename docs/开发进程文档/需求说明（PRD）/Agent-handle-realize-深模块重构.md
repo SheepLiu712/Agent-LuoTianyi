@@ -133,7 +133,7 @@ Agent 根据当前刺激和上下文检索出相关记忆的内部认知过程�
         |                  |
  sink.emit              return
  0..N 个完整            HandlingReport
- ActionPlan             CONSUMED / DEFERRED /
+ ActionPlan             COMPLETED /
         |               CANCELLED / FAILED
         v                  |
   stage 计划队列           stage 结算刺激
@@ -497,44 +497,18 @@ class ActionPlanSink(Protocol):
 
 ### 7.4 最终处理报告
 
-```python
-@dataclass(frozen=True)
-class HandlingReport:
-    status: HandlingStatus
-    resolved_stimulus_ids: tuple[str, ...]
-    retained_stimulus_ids: tuple[str, ...]
-    emitted_plan_ids: tuple[str, ...]
-    reconsider_at: datetime | None
-    error_code: str | None
-    retryable: bool
-```
+`HandlingReport` 将请求的结束状态与内容处理结果分开表达。字段、枚举和构造行为以 [HandlingReport 类型契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handling-report.md) 为准；领域类型及构造校验已实现。
 
-`status` 为：
+- `request_status` 为 `COMPLETED`、`CANCELLED` 或 `FAILED`。
+- considered 表示实际考察的 pending，consumed 和 retained 是它的互斥且完整的划分。
+- 请求正常结束后可以仍有 retained 内容；取消或失败时也可以已有 consumed 内容。
+- `emitted_plan_ids` 表达本次已经接受的计划；`reconsider_at` 表达 retained 内容的定时重评时间。
 
-- `CONSUMED`：本次认知处理已经完成，不需要基于同一批输入再次判断；
-- `DEFERRED`：需要等待 Agent 外部的新信息或时间条件，stage 保留刺激；
-- `CANCELLED`：stage 或系统取消了尚未完成的认知处理；
-- `FAILED`：认知处理因稳定、可观测的错误结束。
+下文场景中的“COMPLETED + consumed”和“COMPLETED + retained”是状态与内容结果的组合简写，具体报告使用权威契约中的完整字段。
 
-`resolved_stimulus_ids` 表示 Agent 不再需要重新理解的刺激，不等于 stage 此刻就能物理删除它们。`retained_stimulus_ids` 表示以后仍要重新判断的刺激。二者不能重叠。
+全部保留内容以等待外部输入的场景不输出计划；正在等待 Agent 内部 Recall 时，本次 handle 保持存活。零计划且内容已完成认知时可直接结算；已有计划时，还需结合相关 ExecutionReport 结算。取消或失败保留已经接受的计划事实，已经发生可见输出或不可回滚效果时不能自动从头重放。
 
-`emitted_plan_ids` 必须与本次实际成功交给 sink 的计划一致，使 stage 能等待这些计划各自的 `ExecutionReport`。`reconsider_at` 只用于 `DEFERRED`；`error_code` 和 `retryable` 只用于 `FAILED`。
-
-所有输出计划的 `origin_request_id` 必须等于本次 `request_id`，`plan_ordinal` 必须从 0 连续递增；计划引用的 `source_stimulus_ids` 必须来自本次请求可见的 pending stimuli。违反这些约束时 sink 明确拒绝。
-
-#### CONSUMED
-
-如果没有输出计划，stage 可以立即提交 `resolved_stimulus_ids` 已消费。如果已经输出计划，stage 先预留相关刺激，直到本次 handle 已结束并且所有相关计划都有最终 `ExecutionReport`，再按执行结果提交或释放。
-
-#### DEFERRED
-
-只用于信息不足、等待用户继续输入、等待 stage 截止时间或其他 Agent 外部条件。stage 保留刺激，在新刺激到达或 `reconsider_at` 到期时重新调用。
-
-`DEFERRED` 不能同时输出 ActionPlan、产生用户可见输出或长期副作用。如果 Agent 已经启动并仍在等待自己的 Recall，它应保持本次 `handle_stimulus` 存活，而不是返回 `DEFERRED`。
-
-#### CANCELLED / FAILED
-
-报告必须列出取消或失败前已经成功输出的计划。stage 结合这些计划的 `ExecutionReport` 判断是否能够安全重试；只要已经产生可见输出或不可回滚的持久副作用，就不能自动从头重放整次刺激。
+计划的 `origin_request_id` 对应本次请求，`plan_ordinal` 从 0 连续递增，`source_stimulus_ids` 来自本次请求可见的 pending。计划与报告记录的已接受计划身份一致。
 
 ### 7.5 内部允许行为
 
@@ -558,11 +532,11 @@ class HandlingReport:
 - 操作 stage 的 pending、timer、连接或播放状态；
 - 通过 `RealtimeMediaIngress` 发送原始音频，或直接持有供应商 WebSocket；
 - 把 Recall 的完成包装成 `RecallCompleted` 等 Stimulus 再调用公开 interface；
-- 把未知刺激、非法 payload 或内部错误伪装成 `CONSUMED`。
+- 把未知刺激、非法 payload 或内部错误伪装成 `COMPLETED + consumed`。
 
 ### 7.6 未知刺激
 
-已知但角色决定不回应的刺激返回无计划的 `CONSUMED`。未知 kind、版本不兼容或非法 payload 属于接口错误，必须失败并记录，不能静默消费。
+已知但角色决定不回应的刺激返回无计划的 `COMPLETED + consumed`。未知 kind、版本不兼容或非法 payload 属于接口错误，必须失败并记录，不能静默消费。
 
 ## 8. Interface 二：`realize_action_plan`
 
@@ -753,13 +727,13 @@ Recall 始终发生在 Agent 内部。为了观测和排错，可以记录召回
 
 当一次回复需要较慢的进一步记忆查询时，`handle_stimulus` 自己持有并等待该内部任务：
 
-```python
+```text
 async def handle_stimulus(request, plans):
     quick_recall = await subconscious.fast_recall(request)
 
     if quick_recall.is_sufficient:
         await plans.emit(await build_final_reply(request, quick_recall))
-        return HandlingReport.consumed(...)
+        return 正常完成的报告（COMPLETED，填写已消费内容和已接受计划）
 
     recall_task = subconscious.start_deep_recall(request)
     await plans.emit(ActionPlan.say("让我想想……"))
@@ -767,7 +741,7 @@ async def handle_stimulus(request, plans):
     recalled_memory = await recall_task
     request.cancellation.raise_if_cancelled()
     await plans.emit(await build_final_reply(request, recalled_memory))
-    return HandlingReport.consumed(...)
+    return 正常完成的报告（COMPLETED，填写已消费内容和已接受计划）
 ```
 
 这里的 `recall_task`、future、回调或 `RecallResult` 都是 Agent 内部实现。它们完成后直接唤醒仍在等待的 coroutine，不能转换成 `RecallCompleted` Stimulus 交给 stage，也不能递归调用公开的 `handle_stimulus`。
@@ -799,12 +773,7 @@ async def handle_stimulus(request, plans):
 
 “2 秒后强制回复”不是角色行动，而是 stage 调度：
 
-```python
-HandlingReport.deferred(
-    retained_stimulus_ids=(...),
-    reconsider_at=now + timedelta(seconds=2),
-)
-```
+报告中的 `request_status=COMPLETED`，considered 全部进入 retained，consumed 和 emitted plan IDs 为空，`reconsider_at` 表示两秒后的重评时间。
 
 到期后 stage 产生 `InteractionDeadline` 逻辑刺激并再次调用 `handle_stimulus`。
 
@@ -855,7 +824,7 @@ ActionPlan[
 | 长期记忆和状态 | 决定写入内容与原因 | 幂等提交 | — |
 | VCPedia 歌曲发现 | 判断是否接受知识、是否请求学习 | 通过 subconscious 写入歌曲知识或创建学习任务 | world 负责抓取、校验来源和规范化数据，不直接写角色记忆 |
 | 歌曲学习技术流程 | 根据 `SongLearned` 决定记忆、动态和后续日记意图 | 记录学习经历并实现已决定的动作 | capability/world 执行下载、分离、训练等长任务并报告结果 |
-| 2 秒等待 | 返回 DEFERRED，且不输出计划 | — | stage 设置截止时间 |
+| 2 秒等待 | 返回 COMPLETED + retained，且不输出计划 | — | stage 设置截止时间 |
 | 未来日程 | 生成 CreateSchedule | 持久写入 scheduler | scheduler 到期产生刺激 |
 | 电话开始说话 | 理解打断并调整策略 | 可实现后续计划 | stage 立即停止播放 |
 | 通话结束 | 决定是否形成记忆 | 可以执行无通道输出的持久动作 | stage 立即关闭资源 |
@@ -865,9 +834,9 @@ ActionPlan[
 ### 13.1 连续聊天
 
 ```text
-消息 A -> handle -> DEFERRED(2s，不输出计划)
+消息 A -> handle -> COMPLETED + retained(2s，不输出计划)
 消息 B -> handle(pending A+B)
--> emit 正式回复计划 -> CONSUMED
+-> emit 正式回复计划 -> COMPLETED + consumed
 stage 预留 A/B -> realize -> 文字/表情/音频
 handle 已结束且执行成功 -> stage 提交 A/B 已消费
 ```
@@ -885,12 +854,12 @@ handle 已结束且执行成功 -> stage 提交 A/B 已消费
 -> CallStage 立即停止本地播放并取消过期输出
 -> UserSpeechStarted
 -> handle_stimulus
--> 无计划 CONSUMED，或 emit[短反应/状态变化] 后 CONSUMED
+-> 无计划 COMPLETED + consumed，或 emit[短反应/状态变化] 后 COMPLETED + consumed
 
 供应商确认用户回合结束
 -> Realtime Adapter 规范化为 VoiceUtteranceFinal(turn_id, transcript/media_ref)
 -> handle 通过 Agent 内部 RealtimeTurnPort 读取该回合的回复语义事件
--> emit[正式回复计划] -> CONSUMED
+-> emit[正式回复计划] -> COMPLETED + consumed
 -> realize 产生 AgentOutput
 -> CallAgentOutputSink
 -> Call Adapter 按 /call_ws 协议发送文字、音频或控制消息
@@ -903,7 +872,7 @@ CallStage 不解析供应商的回复内容、工具调用或角色意图；否�
 ```text
 DailyPlanningDue
 -> handle 读取角色状态和 world 条件
--> emit[CreateSchedule x N] -> CONSUMED
+-> emit[CreateSchedule x N] -> COMPLETED + consumed
 -> realize 写入日程
 -> ActivityDue
 -> handle 决定开始或调整活动
@@ -916,7 +885,7 @@ DailyPlanningDue
 -> Adapter 去抖并聚合为 ToyVibration
 -> stage
 -> handle 快速路径
--> 无计划 CONSUMED，或 emit[短句/声音/设备动作] 后 CONSUMED
+-> 无计划 COMPLETED + consumed，或 emit[短句/声音/设备动作] 后 COMPLETED + consumed
 -> realize
 ```
 
@@ -930,7 +899,7 @@ TextMessage
 -> deep recall 在 Agent 内部完成，不产生 Stimulus
 -> handle 检查 cancellation 和交互版本
 -> emit 完整正式回复计划
--> handle 返回 CONSUMED
+-> handle 返回 COMPLETED + consumed
 -> stage 等待两个计划的 ExecutionReport 后结算原刺激
 ```
 
@@ -977,9 +946,9 @@ world 保存抓取游标、缓存和错误；Agent 不直接操作数据库，�
 
 - handle 开始时，刺激仍保存在 stage 的 pending 中；
 - sink 接受某个计划时，stage 预留该计划的 `source_stimulus_ids`；
-- `CONSUMED` 且没有输出计划：立即提交 `resolved_stimulus_ids` 已消费；
-- `CONSUMED` 且输出了计划：等待本次 handle 结束以及所有相关计划都有最终 `ExecutionReport` 后再结算；
-- `DEFERRED`：保留 `retained_stimulus_ids` 并设置重新判断条件；
+- `COMPLETED + consumed` 且没有输出计划：立即提交 `consumed_pending_stimulus_ids` 已消费；
+- `COMPLETED + consumed` 且输出了计划：等待本次 handle 结束以及所有相关计划都有最终 `ExecutionReport` 后再结算；
+- `COMPLETED + retained`：保留 `retained_pending_stimulus_ids` 并设置重新判断条件；
 - `CANCELLED` 或 `FAILED`：结合已经接收计划的执行结果决定释放还是提交，不能假设整次调用没有发生；
 - 所有计划都在首次可见输出和不可回滚副作用前失败：可以释放预留并按报告决定是否重试；
 - 任一计划已经产生可见输出或不可回滚副作用：相关刺激视为已消费，不自动从头重放；
@@ -1007,8 +976,8 @@ world 保存抓取游标、缓存和错误；Agent 不直接操作数据库，�
 
 ### 14.5 错误
 
-- 信息不足或等待外部条件：`DEFERRED`，并且没有输出计划；
-- 已知刺激但角色不行动：无计划的 `CONSUMED`；
+- 信息不足或等待外部条件：`COMPLETED + retained`，并且没有输出计划；
+- 已知刺激但角色不行动：无计划的 `COMPLETED + consumed`；
 - 未知刺激或非法 payload：接口错误；
 - Recall、模型或只读能力不可用：handle 返回 `FAILED`，并按是否已经输出计划及重试安全性填写报告；
 - 执行能力不可用：`ExecutionReport.status` 为 `FAILED`；
@@ -1030,7 +999,7 @@ world 保存抓取游标、缓存和错误；Agent 不直接操作数据库，�
 1. **PRD PR（当前）**：确认场景、术语、状态归属、stage 家族和两个 Agent interface；不改代码。
 2. **interface spec PR**：锁定 HandleStimulusRequest、四种 InteractionSnapshot、ActionPlanSink、HandlingReport、ActionPlan、ExecutionContext、AgentOutputSink、AgentOutput、ExecutionReport、两个 Realtime 端口，以及歌曲刺激和 Action；明确顺序、背压、拒绝、关闭和错误行为。
 3. **Agent façade 与领域类型 PR**：先写公开 façade、强类型 Stimulus/HandlingReport/Action 的契约测试，再补最小实现；façade 可以暂时委托现有内部逻辑，但不能复制一套新业务行为。
-4. **文字 handle 切片**：把一个真实聊天调用方迁移到 `get_agent(character_id)` 和 `handle_stimulus`，覆盖无计划 `CONSUMED`、`DEFERRED` 与单计划输出；同一 PR 删除该调用方对旧 Agent 内部对象的直接依赖。
+4. **文字 handle 切片**：把一个真实聊天调用方迁移到 `get_agent(character_id)` 和 `handle_stimulus`，覆盖无计划 `COMPLETED + consumed`、`COMPLETED + retained` 与单计划输出；同一 PR 删除该调用方对旧 Agent 内部对象的直接依赖。
 5. **Say realization 切片**：迁移文字、TTS、流式输出、ChatAgentOutputSink、取消和部分失败，并删除该路径的直接 speech 调用。
 6. **渐进计划切片**：覆盖临时计划、内部慢 Recall、正式计划、取消和迟到结果丢弃。
 7. **触摸/玩偶切片**：迁移低延迟感知、ToyStage 与 ToyAgentOutputSink，不引入原始采样。
@@ -1073,7 +1042,7 @@ world 保存抓取游标、缓存和错误；Agent 不直接操作数据库，�
 - 业务代码不再直接调用角色 speech、singing、diary、dynamic 等能力；
 - 强类型刺激覆盖当前聊天以及电话、玩偶、每日规划和活动事件；
 - `SongKnowledgeDiscovered` 和 `SongLearned` 覆盖知识接受、学习任务、记忆、动态和后续日记链路；
-- 零计划、单计划、多计划、DEFERRED、取消、迟到 Recall、重试、部分输出和重复执行都有 interface 级测试；
+- 零计划、单计划、多计划、COMPLETED + retained、取消、迟到 Recall、重试、部分输出和重复执行都有 interface 级测试；
 - 四种 InteractionSnapshot 的隔离、每种 AgentOutputSink 的通道绑定与关闭行为都有契约测试；
 - Realtime 两个端口共享一次供应商会话，但媒体背压、语义事件、取消和关闭职责有独立契约测试；
 - 同一角色的多用户、多交互测试不会串用私有记忆或认知上下文；
@@ -1093,7 +1062,7 @@ world 保存抓取游标、缓存和错误；Agent 不直接操作数据库，�
 10. AgentOutput 是通道无关的；每个 stage 绑定自己的 AgentOutputSink，再委托对应 Adapter 完成协议发送。
 11. 电话原始 PCM 经 CallStage 和 `RealtimeMediaIngress` 进入供应商；Agent 通过内部 `RealtimeTurnPort` 处理供应商回合语义。
 12. stage 先执行电话打断、通话关闭等实时控制，再取消过期 handle，并把相应逻辑刺激交给 Agent。
-13. 2 秒强制回复属于 `DEFERRED` 和 stage 截止时间；未来活动属于持久 Schedule Action。
+13. 2 秒强制回复属于 `COMPLETED + retained` 和 stage 截止时间；未来活动属于持久 Schedule Action。
 14. 原始音频帧和高频传感器数据不进入 Agent。
 15. VCPedia 抓取和学习工件属于运行数据；角色歌曲知识与学习经历由 Agent 决定、由 subconscious 持久化。
 16. 新 Stimulus 和 Action 使用强类型；不得依赖任意 payload 扩展协议。
