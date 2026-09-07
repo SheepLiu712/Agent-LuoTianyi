@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
 
 from src.domain.memory_context import MemoryHit
 
@@ -145,31 +144,23 @@ class ConversationSnapshot:
 
 
 @dataclass(frozen=True)
-class CompactionPolicy:
-    """未压缩条数超过 threshold 时生成总结，保留最后 keep_recent 条。"""
+class ConversationCompaction:
+    """外部生成的压缩结果，记录生成依据和被覆盖的对话 ID。"""
 
-    threshold: int = 60
-    keep_recent: int = 30
+    previous_summary: ConversationSummary
+    covered_entry_ids: tuple[str, ...]
+    summary: ConversationSummary
 
     def __post_init__(self) -> None:
-        if not 0 <= self.keep_recent <= self.threshold:
-            raise ValueError("压缩阈值须满足 0 <= keep_recent <= threshold")
-
-
-@dataclass(frozen=True)
-class CompactionResult:
-    """本次是否完成压缩，以及操作后的对话上下文。"""
-
-    compacted: bool
-    snapshot: ConversationSnapshot
-
-
-class ConversationSummarizer(Protocol):
-    """对话总结能力；由调用方注入模型及提示词配置。"""
-
-    async def summarize(self, snapshot: ConversationSnapshot) -> ConversationSummary:
-        """根据旧总结与待压缩对话生成新总结，失败时抛出异常。"""
-        ...
+        if not isinstance(self.previous_summary, ConversationSummary) or not isinstance(self.summary, ConversationSummary):
+            raise TypeError("原总结和新总结应为 ConversationSummary")
+        _check_terms(self.covered_entry_ids)
+        if not self.covered_entry_ids or any(not value.strip() for value in self.covered_entry_ids):
+            raise ValueError("被覆盖的对话 ID 不能为空")
+        if len(set(self.covered_entry_ids)) != len(self.covered_entry_ids):
+            raise ValueError("被覆盖的对话 ID 不能重复")
+        if not isinstance(self.summary.text, str) or not self.summary.text.strip():
+            raise ValueError("新总结不能为空")
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.agent.context import (
-    ContextFactory, CompactionPolicy, ConversationEntry, ConversationSummary,
+    ContextFactory, ConversationCompaction, ConversationEntry, ConversationSummary,
     ImageContent, JargonExplanation, RecallEntry, RecalledMemoryContext,
     SongContent, TextContent, UserPreferences, UserProfile,
 )
@@ -133,60 +133,79 @@ async def test_history_round_trip_and_character_isolation(database):
     assert other.conversation.read().entries == ()
 
 
-class Summarizer:
-    async def summarize(self, snapshot):
-        self.snapshot = snapshot
-        return ConversationSummary("新的总结")
+def compaction_for(snapshot, covered=1, text="新的总结"):
+    return ConversationCompaction(snapshot.summary,
+                                 tuple(e.entry_id for e in snapshot.entries[:covered]),
+                                 ConversationSummary(text))
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("keep", [0, 1])
-async def test_compact_preserves_history_and_only_summarizes_removed_entries(database, keep):
-    summarizer = Summarizer()
-    context = await factory(database, summarizer=summarizer,
-                            policy=CompactionPolicy(2, keep)).get("i", user_id="u")
-    assert not (await context.conversation.compact()).compacted
+async def test_compact_preserves_history_and_uncovered_entries(database, keep):
+    contexts = factory(database)
+    context = await contexts.get("i", user_id="u")
     entries = tuple(entry(i) for i in range(3))
     await context.conversation.append(entries)
-    result = await context.conversation.compact()
-    assert result.compacted
-    assert summarizer.snapshot.entries == (entries[:-keep] if keep else entries)
-    assert result.snapshot.entries == (entries[-keep:] if keep else ())
-    assert result.snapshot.summary.text == "新的总结"
+    result = compaction_for(context.conversation.read(), 3 - keep)
+    assert await context.conversation.compact(result) is None
+    assert context.conversation.read().entries == (entries[-keep:] if keep else ())
+    assert context.conversation.read().summary == result.summary
     assert len(database.get_history_from_db("u", 0, 10, "luotianyi")) == 3
+    await contexts.release("i")
+    database._redis.delete("user_context:u:luotianyi")
+    restored = await contexts.get("i", user_id="u")
+    assert restored.conversation.read().summary == result.summary
+    assert restored.conversation.read().entries == (entries[-keep:] if keep else ())
 
 
 @pytest.mark.asyncio
-async def test_failed_summary_keeps_old_window(database):
-    class Failed:
-        async def summarize(self, snapshot):
-            raise RuntimeError("summary failed")
-    context = await factory(database, summarizer=Failed(), policy=CompactionPolicy(0, 0)).get("i", user_id="u")
-    await context.conversation.append((entry(1),))
-    before = context.conversation.read()
-    with pytest.raises(RuntimeError):
-        await context.conversation.compact()
-    assert context.conversation.read() == before
-    assert database.get_conversation_context_state("u")["context_count"] == 1
-
-
-@pytest.mark.asyncio
-async def test_append_during_compaction_is_preserved(database):
-    started, proceed = asyncio.Event(), asyncio.Event()
-    class Paused:
-        async def summarize(self, snapshot):
-            started.set()
-            await proceed.wait()
-            return ConversationSummary("总结")
-    contexts = factory(database, summarizer=Paused(), policy=CompactionPolicy(1, 1))
-    context = await contexts.get("i", user_id="u")
+async def test_append_after_external_snapshot_is_preserved(database):
+    context = await factory(database).get("i", user_id="u")
     await context.conversation.append((entry(1), entry(2)))
-    compact = asyncio.create_task(context.conversation.compact())
-    await asyncio.wait_for(started.wait(), timeout=5)
-    append = asyncio.create_task(context.conversation.append((entry(3),)))
-    proceed.set()
-    await asyncio.gather(compact, append)
+    result = compaction_for(context.conversation.read())
+    await context.conversation.append((entry(3),))
+    await context.conversation.compact(result)
     assert [e.entry_id for e in context.conversation.read().entries] == ["2", "3"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ids", [("2",), ("2", "1"), ("1", "missing"), ("1", "2", "3")])
+async def test_compaction_rejects_non_prefix_records(database, ids):
+    context = await factory(database).get("i", user_id="u")
+    await context.conversation.append((entry(1), entry(2)))
+    before = context.conversation.read()
+    result = ConversationCompaction(before.summary, ids, ConversationSummary("总结"))
+    with pytest.raises(ValueError):
+        await context.conversation.compact(result)
+    assert context.conversation.read() == before
+    assert database.get_conversation_context_state("u")["summary"] == ""
+
+
+@pytest.mark.asyncio
+async def test_compaction_rejects_changed_summary_from_another_interaction(database):
+    contexts = factory(database)
+    a = await contexts.get("a", user_id="u")
+    await a.conversation.append((entry(1), entry(2)))
+    stale = ConversationCompaction(ConversationSummary(), ("2",), ConversationSummary("过时总结"))
+    b = await contexts.get("b", user_id="u")
+    await b.conversation.compact(compaction_for(b.conversation.read()))
+    with pytest.raises(ValueError):
+        await a.conversation.compact(stale)
+    assert database.get_conversation_context_state("u")["summary"] == "新的总结"
+
+
+@pytest.mark.asyncio
+async def test_none_is_handled_by_caller_and_is_not_a_compaction(database):
+    context = await factory(database).get("i", user_id="u")
+    with pytest.raises(TypeError):
+        await context.conversation.compact(None)
+    assert context.conversation.read().entries == ()
+
+
+@pytest.mark.parametrize("ids,text", [((), "总结"), (("1", "1"), "总结"), (("",), "总结"), (("1",), " ")])
+def test_compaction_requires_complete_result(ids, text):
+    with pytest.raises(ValueError):
+        ConversationCompaction(ConversationSummary(), ids, ConversationSummary(text))
 
 
 def test_recall_stimulus_cleanup_and_generic_removal():
@@ -254,26 +273,6 @@ def test_database_profile_update_reports_missing_user(database):
 
 
 @pytest.mark.asyncio
-async def test_cancelled_summary_does_not_write_and_allows_release(database):
-    started = asyncio.Event()
-    class Paused:
-        async def summarize(self, snapshot):
-            started.set()
-            await asyncio.Future()
-    contexts = factory(database, summarizer=Paused(), policy=CompactionPolicy(0, 0))
-    context = await contexts.get("i", user_id="u")
-    await context.conversation.append((entry(1),))
-    task = asyncio.create_task(context.conversation.compact())
-    await asyncio.wait_for(started.wait(), 5)
-    task.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await task
-    assert context.conversation.read().entries == (entry(1),)
-    assert database.get_conversation_context_state("u")["summary"] == ""
-    await asyncio.wait_for(contexts.release("i"), 5)
-
-
-@pytest.mark.asyncio
 async def test_release_waits_for_creation_even_if_get_is_cancelled(database, monkeypatch):
     started, proceed = threading.Event(), threading.Event()
     original = database.get_user_description
@@ -296,7 +295,7 @@ async def test_release_waits_for_creation_even_if_get_is_cancelled(database, mon
 
 @pytest.mark.asyncio
 async def test_failed_append_and_failed_summary_save_preserve_window(database, monkeypatch):
-    context = await factory(database, summarizer=Summarizer(), policy=CompactionPolicy(0, 0)).get("i", user_id="u")
+    context = await factory(database).get("i", user_id="u")
     await context.conversation.append((entry(1),))
     before = context.conversation.read()
     monkeypatch.setattr(database, "add_conversations", lambda *args, **kwargs: [])
@@ -305,7 +304,7 @@ async def test_failed_append_and_failed_summary_save_preserve_window(database, m
     assert context.conversation.read() == before
     monkeypatch.setattr(database, "compact_conversation_context", lambda *args, **kwargs: False)
     with pytest.raises(RuntimeError):
-        await context.conversation.compact()
+        await context.conversation.compact(compaction_for(before))
     assert context.conversation.read() == before
 
 

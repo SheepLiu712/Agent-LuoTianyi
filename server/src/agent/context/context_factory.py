@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from ._lifecycle import _complete
 from .interaction_context import InteractionContext
-from .models import CompactionPolicy, ContextIdentity, ConversationSummarizer
+from .models import ContextIdentity
 
 if TYPE_CHECKING:
     from src.system.database.services.conversation_service import ConversationService
@@ -16,16 +16,12 @@ class ContextFactory:
 
     def __init__(
         self, *, character_id: str, database: "ConversationService",
-        summarizer: ConversationSummarizer | None = None,
-        policy: CompactionPolicy = CompactionPolicy(),
     ) -> None:
-        """绑定 character_id、数据库服务 database，以及总结能力和压缩策略。"""
+        """绑定角色 character_id 和数据库服务 database。"""
         if not isinstance(character_id, str) or not character_id.strip():
             raise ValueError("角色标识不能为空")
         self._character_id = character_id
         self._database = database
-        self._summarizer = summarizer
-        self._policy = policy
         self._contexts: dict[str, InteractionContext] = {}
         self._lock = asyncio.Lock()
         self._user_locks: dict[str | None, asyncio.Lock] = {}
@@ -54,7 +50,6 @@ class ContextFactory:
                     return context
             context = await asyncio.to_thread(
                 InteractionContext, identity=identity, database=self._database,
-                summarizer=self._summarizer, policy=self._policy,
             )
             context._state.lock = self._user_locks.setdefault(identity.user_id, asyncio.Lock())
             self._contexts[identity.interaction_id] = context

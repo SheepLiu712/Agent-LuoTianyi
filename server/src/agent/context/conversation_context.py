@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 from ._lifecycle import _Lifecycle, _complete
 from ._storage import _Storage
 from .models import (
-    CompactionPolicy, CompactionResult, ContextIdentity, ConversationEntry, ConversationSnapshot,
-    ConversationSummarizer, ConversationSummary,
+    ConversationCompaction, ContextIdentity, ConversationEntry, ConversationSnapshot,
+    ConversationSummary,
 )
 
 if TYPE_CHECKING:
@@ -19,13 +19,10 @@ class ConversationContext:
 
     def __init__(
         self, *, snapshot: ConversationSnapshot, identity: ContextIdentity,
-        database: "ConversationService", summarizer: ConversationSummarizer | None = None,
-        policy: CompactionPolicy = CompactionPolicy(),
+        database: "ConversationService",
     ) -> None:
-        """以 snapshot 初始化窗口，绑定 identity、database、总结能力及压缩策略。"""
+        """以 snapshot 初始化窗口，绑定 identity、database。"""
         self._snapshot = snapshot
-        self._summarizer = summarizer
-        self._policy = policy
         self._state = _Lifecycle()
         self._storage = _Storage(database, identity)
 
@@ -42,9 +39,25 @@ class ConversationContext:
             self._require_storage()
             await _complete(self._append(entries))
 
-    async def compact(self) -> CompactionResult:
-        """超过阈值时总结较早对话并保存；返回是否压缩及最新窗口。"""
-        return await self._compact()
+    async def compact(self, compaction: ConversationCompaction) -> None:
+        """验证并保存外部压缩结果，保留未覆盖的记录及完整历史。
+
+        compaction 必须包含原总结、连续前缀记录 ID 和新总结；
+        原总结或记录不匹配时抛 ValueError，保存失败时抛 RuntimeError。
+        """
+        if not isinstance(compaction, ConversationCompaction):
+            raise TypeError("compaction 应为 ConversationCompaction")
+        async with self._state.lock:
+            storage = self._require_storage()
+            snapshot, count = await _complete(asyncio.to_thread(storage.load_conversation))
+            covered = compaction.covered_entry_ids
+            prefix = tuple(entry.entry_id for entry in snapshot.entries[:len(covered)])
+            if snapshot.summary != compaction.previous_summary or prefix != covered:
+                raise ValueError("压缩依据与当前对话上下文不匹配")
+            keep = count - len(covered)
+            if keep < 0:
+                raise ValueError("被覆盖的对话数超过当前窗口条数")
+            await _complete(self._save_summary(compaction.summary, keep, count))
 
     def _require_storage(self) -> _Storage:
         self._state.check()
@@ -56,23 +69,6 @@ class ConversationContext:
             await asyncio.to_thread(self._storage.append, entries)
             self._snapshot, _ = await asyncio.to_thread(self._storage.load_conversation)
 
-    async def _compact(self) -> CompactionResult:
-        async with self._state.lock:
-            storage = self._require_storage()
-            snapshot, count = await _complete(asyncio.to_thread(storage.load_conversation))
-            if count <= self._policy.threshold:
-                self._snapshot = snapshot
-                return CompactionResult(False, snapshot)
-            if self._summarizer is None:
-                raise RuntimeError("未配置对话总结能力")
-            keep = self._policy.keep_recent
-            older = snapshot.entries[:-keep] if keep else snapshot.entries
-            summary = await self._summarizer.summarize(ConversationSnapshot(snapshot.summary, older))
-            if not isinstance(summary, ConversationSummary) or not summary.text.strip():
-                raise ValueError("总结能力必须返回非空 ConversationSummary")
-            return await _complete(self._save_summary(summary, keep, count))
-
-    async def _save_summary(self, summary: ConversationSummary, keep: int, count: int) -> CompactionResult:
+    async def _save_summary(self, summary: ConversationSummary, keep: int, count: int) -> None:
         await asyncio.to_thread(self._storage.compact, summary, keep, count)
         self._snapshot, _ = await asyncio.to_thread(self._storage.load_conversation)
-        return CompactionResult(True, self._snapshot)

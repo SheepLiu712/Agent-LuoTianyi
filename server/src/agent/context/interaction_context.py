@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from ._lifecycle import _Lifecycle, _complete
 from ._storage import _Storage
 from .conversation_context import ConversationContext
-from .models import CompactionPolicy, ContextIdentity, ConversationSummarizer, ConversationSnapshot, UserContextSnapshot
+from .models import ContextIdentity, ConversationSnapshot, UserContextSnapshot
 from .recalled_memory_context import RecalledMemoryContext
 from .user_context import UserContext
 
@@ -18,12 +18,10 @@ class InteractionContext:
 
     def __init__(
         self, *, identity: ContextIdentity, database: "ConversationService",
-        summarizer: ConversationSummarizer | None = None,
-        policy: CompactionPolicy = CompactionPolicy(),
     ) -> None:
         """从 database 同步加载 identity 的资料及对话，并建立空召回缓存。
 
-        summarizer 和 policy 控制对话压缩；异步代码应通过 ContextFactory.get 创建。
+        异步代码应通过 ContextFactory.get 创建。
         """
         self._identity = identity
         self._state = _Lifecycle()
@@ -33,7 +31,6 @@ class InteractionContext:
         self._user = UserContext(snapshot=user_snapshot, identity=identity, database=database)
         self._conversation = ConversationContext(
             snapshot=conversation_snapshot, identity=identity, database=database,
-            summarizer=summarizer, policy=policy,
         )
         self._recalled_memory = RecalledMemoryContext()
         for part in (self._user, self._conversation, self._recalled_memory):

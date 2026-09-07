@@ -4,8 +4,8 @@ from .context_factory import ContextFactory
 from .conversation_context import ConversationContext
 from .interaction_context import InteractionContext
 from .models import (
-    AudioContent, CompactionPolicy, CompactionResult, ContextIdentity,
-    ConversationEntry, ConversationSnapshot, ConversationSummarizer,
+    AudioContent, ConversationCompaction, ContextIdentity,
+    ConversationEntry, ConversationSnapshot,
     ConversationSummary, ImageContent, JargonExplanation, RecallEntry,
     SongContent, TextContent, UserContextSnapshot, UserPreferences, UserProfile,
 )
@@ -16,7 +16,7 @@ __all__ = [
     "ContextFactory", "InteractionContext", "UserContext", "ConversationContext",
     "RecalledMemoryContext", "ContextIdentity", "UserProfile", "UserPreferences",
     "UserContextSnapshot", "ConversationEntry", "ConversationSummary",
-    "ConversationSnapshot", "ConversationSummarizer", "CompactionPolicy",
-    "CompactionResult", "TextContent", "ImageContent", "AudioContent", "SongContent",
+    "ConversationSnapshot", "ConversationCompaction",
+    "TextContent", "ImageContent", "AudioContent", "SongContent",
     "RecallEntry", "JargonExplanation",
 ]

@@ -21,8 +21,6 @@
 factory = ContextFactory(
     character_id="luotianyi",
     database=database_manager.conversation_service,
-    summarizer=summary_service,
-    policy=CompactionPolicy(threshold=60, keep_recent=30),
 )
 context = await factory.get("interaction-id", user_id="user-id")
 await factory.release("interaction-id")
@@ -55,15 +53,21 @@ await factory.release("interaction-id")
 
 - `read() -> ConversationSnapshot`：返回总结和近期对话元组。
 - `append(entries: tuple[ConversationEntry, ...]) -> None`：保存正式对话后从数据库刷新窗口。
-- `compact() -> CompactionResult`：重新读取窗口，超过阈值时生成并保存总结，再刷新窗口。
+- `compact(compaction: ConversationCompaction) -> None`：验证外部生成的压缩结果，保存总结并刷新窗口。
 
 `ConversationEntry` 包含记录 ID、服务器本地时间、发言来源和内容。数据库时间精度为秒。内容使用 `TextContent`、`ImageContent`、`AudioContent` 或 `SongContent`；图片位置、关键词、曲名和片段名称均有明确字段。
 
-`ConversationSnapshot` 由 `ConversationSummary` 和记录元组组成。`ConversationSummarizer.summarize(snapshot)` 接收旧总结与本次要移出近期窗口的记录，返回新的 `ConversationSummary`。最近 `keep_recent` 条保留在窗口中，不进入此次总结输入。
+`ConversationSnapshot` 由 `ConversationSummary` 和记录元组组成。`ConversationCompaction` 包含：
 
-`CompactionResult` 包含 `compacted` 和最终 `snapshot`。未超过阈值时返回 `compacted=False`；超过阈值但未配置总结能力时抛出异常。总结失败、空总结或数据库保存失败均抛出异常。压缩仅更新总结和近期窗口条数，完整历史仍然保留。
+- `previous_summary: ConversationSummary`：生成新总结时使用的原总结。
+- `covered_entry_ids: tuple[str, ...]`：本次总结覆盖的对话 ID，按窗口顺序排列，非空且不重复。
+- `summary: ConversationSummary`：非空的新总结。
 
-同一工厂内，同一用户的资料写入、对话追加及压缩顺序执行。压缩期间发起的追加等待压缩结束后保存。取消总结计算不会提交新总结；数据库操作已经开始时，取消调用者会等待操作及内存同步结束，再传播取消异常。
+调用方决定是否压缩并生成结果。无需压缩时返回 `None`，调用方跳过 `compact`；`compact` 只接受完整的 `ConversationCompaction`。
+
+应用前，context 重新读取数据库窗口，检查原总结相同、覆盖记录匹配当前窗口的连续前缀。不匹配时抛出 `ValueError`；数据库保存失败时抛出 `RuntimeError`。压缩仅更新总结和近期窗口条数，保留未覆盖的记录及完整历史，包括结果生成期间追加的消息。
+
+同一工厂内，同一用户的资料写入、对话追加及压缩应用顺序执行。数据库操作已经开始时，取消调用者会等待操作及内存同步结束，再传播取消异常。
 
 ## 召回记忆
 
