@@ -83,8 +83,15 @@ class SystemRuntime:
             world = WorldRuntime(config.get("world", {}))
 
             # 7. 初始化 Agent 运行时
+            agent_config = dict(config.get("agent_runtime", {}))
+            skills_config = dict(agent_config.get("skills", {}))
+            skills_config.setdefault(
+                "conversation_compaction",
+                config.get("chat_session_manager", {}).get("conversation_service", {}),
+            )
+            agent_config["skills"] = skills_config
             agent_runtime = AgentRuntime(
-                config.get("agent_runtime", {}),
+                agent_config,
                 llm_service,
                 capability_manager,
                 database_manager,
@@ -138,6 +145,7 @@ class SystemRuntime:
             database_manager=self.database_manager,
             llm_service=self.llm_service,
             capability_manager=self.capability_manager,
+            skills=self.agent_runtime.skills,
         )
         self.client_llm_executor.bind(self.chat_session_manager.chat_stream_manager)
         self.world.wire_dependencies(system_runtime=self)

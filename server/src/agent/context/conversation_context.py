@@ -18,13 +18,13 @@ class ConversationContext:
     """由 InteractionContext 创建、负责对话追加和压缩的上下文。"""
 
     def __init__(
-        self, *, snapshot: ConversationSnapshot, identity: ContextIdentity,
-        database: "ConversationService",
+        self, *, identity: ContextIdentity,
+        database: "ConversationService", snapshot: ConversationSnapshot | None = None,
     ) -> None:
-        """以 snapshot 初始化窗口，绑定 identity、database。"""
-        self._snapshot = snapshot
+        """绑定 identity、database；省略 snapshot 时同步加载数据库窗口。"""
         self._state = _Lifecycle()
         self._storage = _Storage(database, identity)
+        self._snapshot = snapshot if snapshot is not None else self._storage.load_conversation()[0]
 
     def read(self) -> ConversationSnapshot:
         """返回旧总结和按时间排列的近期对话。"""

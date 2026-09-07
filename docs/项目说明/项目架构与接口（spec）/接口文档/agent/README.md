@@ -65,3 +65,5 @@
 ## 使用示例
 
 stage 整理出完整话题后，通过 `agent_runtime.get_character_runtime("luotianyi").conscious` 取得 Agent，再调用话题规划与回复接口。
+
+对话压缩技能、共享装配和旧链路接入见 [对话压缩技能](conversation-compaction.md)。
