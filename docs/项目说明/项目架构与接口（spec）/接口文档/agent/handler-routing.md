@@ -21,7 +21,7 @@ server/src/
             └── router.py         # ActionRouter
 ```
 
-两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产刺激注册集合为空；行动注册 SAY 的 TTS 处理器，装配由 AgentRuntime 初始化完成。
+两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产刺激注册集合为空；行动注册 SAY 音频处理器，装配由 AgentRuntime 初始化完成。
 
 该文件树采用 [#63](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/63) 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定，直接位于 `agent_runtime/agent_runtime.py`。文件树只列出路由涉及的文件；两个 `router.py` 中定义注册器和处理器协议，当前没有具体业务 Handler 文件。
 
@@ -33,7 +33,7 @@ server/src/
 | 角色装配位置 | `agent_runtime/agent_runtime.py` 初始化；采用会话确认的装配方式，替代工单原文的 `agent/factory.py` |
 | 刺激路由键 | `StimulusKind`；沿用当前门面契约及总体设计的行为族路由，替代工单原文的 `StimulusKind + InteractionKind` |
 | 行动路由键 | `ActionKind`；`START_THINKING` 的归属见下文 |
-| 处理器实现状态 | 两个 router 中有结构协议；生产行动路由注册 SayHandler，支持 SAY 的 TTS 分支 |
+| 处理器实现状态 | 两个 router 中有结构协议；生产行动路由注册 SayHandler，支持 SAY 的 TTS 和预制音频分支 |
 
 这里的目录约定确定路由器的归属。结构协议描述调用形状，注册集合表示已有可调用的业务实现；注册 SAY 不代表旧聊天、触摸或 world 已迁移到新门面。
 

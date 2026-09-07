@@ -187,7 +187,7 @@ async def test_shared_skill_selects_character_voice():
 
 
 @pytest.mark.asyncio
-async def test_non_tts_say_is_rejected_before_output(runtime):
+async def test_text_only_say_is_rejected_before_output(runtime):
     plan, context = say_plan()
     plan = replace(plan, actions=(replace(plan.actions[0], sound_content=None),))
     sink = Sink()
@@ -256,3 +256,135 @@ async def test_server_stream_lock_wait_is_cancellable():
             await asyncio.wait_for(task, 2)
     finally:
         server._synthesize_lock.release()
+
+
+@pytest.fixture
+def prepared_manifest(tmp_path):
+    import json
+    import wave
+    audio = tmp_path / "voice.wav"
+    with wave.open(str(audio), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16000)
+        output.writeframes(b"\x00\x00" * 100)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"name": "voice", "audio_path": "voice.wav", "text": "资源文字",
+                                    "expression": ""}]), encoding="utf-8")
+    return manifest, audio
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delivery,text,expression", [
+    (d.OutputDelivery.CONVERSATION, "计划文字", "happy"),
+    (d.OutputDelivery.CONVERSATION, "", None),
+    (d.OutputDelivery.EPHEMERAL_REACTION, "不会显示", "happy"),
+    (d.OutputDelivery.EPHEMERAL_REACTION, "", None),
+])
+async def test_prepared_say_delivery_and_complete_file(runtime_dependencies, prepared_manifest,
+                                                      delivery, text, expression):
+    kwargs, _ = runtime_dependencies
+    manifest, audio = prepared_manifest
+    kwargs["config"]["prepared_speech"] = {"manifest": str(manifest)}
+    module = Module()
+    kwargs["capability_manager"].speech.tts_module["luotianyi"] = module
+    runtime = AgentRuntime(**kwargs)
+    try:
+        plan, context = say_plan()
+        action = replace(plan.actions[0], content=text, sound_content=None,
+                         prepared_audio_ref=d.MediaRef(media_id="voice"), delivery=delivery,
+                         expression=d.ChangeExpression(expression_id=expression) if expression else None)
+        plan = replace(plan, actions=(action,))
+        sink = Sink()
+        report = await runtime.get_agent().realize_action_plan(plan, context, sink)
+        assert report.status is d.ExecutionStatus.COMPLETED
+        expected = []
+        if delivery is d.OutputDelivery.CONVERSATION and text:
+            expected.append(d.AgentOutputKind.TEXT_FINAL)
+            assert sink.values[0].text == text
+        if expression:
+            expected.append(d.AgentOutputKind.EXPRESSION)
+        expected.extend([d.AgentOutputKind.AUDIO_CHUNK, d.AgentOutputKind.MESSAGE_END])
+        assert [out.kind for out in sink.values] == expected
+        assert all(out.delivery is delivery for out in sink.values)
+        assert sink.values[-2].data == audio.read_bytes()
+        assert sink.values[-2].framing is d.AudioFraming.COMPLETE_FILE
+        assert sink.values[-1].status is d.MessageEndStatus.COMPLETED
+        assert module.calls == []
+        assert [out.sequence_no for out in sink.values] == list(range(len(expected)))
+    finally:
+        await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["deleted", "empty", "corrupt", "unknown"])
+async def test_prepared_audio_is_read_at_execution_and_fails_before_output(runtime_dependencies, prepared_manifest, failure):
+    kwargs, _ = runtime_dependencies
+    manifest, audio = prepared_manifest
+    kwargs["config"]["prepared_speech"] = {"manifest": str(manifest)}
+    runtime = AgentRuntime(**kwargs)
+    try:
+        if failure == "deleted":
+            audio.unlink()
+        elif failure == "empty":
+            audio.write_bytes(b"")
+        elif failure == "corrupt":
+            audio.write_bytes(b"not a wav")
+        plan, context = say_plan()
+        action = replace(plan.actions[0], sound_content=None,
+                         prepared_audio_ref=d.MediaRef(media_id="unknown" if failure == "unknown" else "voice"))
+        sink = Sink()
+        report = await runtime.get_agent().realize_action_plan(replace(plan, actions=(action,)), context, sink)
+        assert report.error_code is (d.ExecutionErrorCode.AUDIO_EMPTY if failure == "empty"
+                                     else d.ExecutionErrorCode.AUDIO_GENERATION_FAILED)
+        assert sink.values == []
+    finally:
+        await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_tts_ephemeral_delivery_suppresses_text_and_preserves_terminal_flag(runtime_dependencies):
+    kwargs, _ = runtime_dependencies
+    kwargs["capability_manager"].speech.tts_module["luotianyi"] = Module()
+    runtime = AgentRuntime(**kwargs)
+    try:
+        plan, context = say_plan()
+        plan = replace(plan, actions=(replace(plan.actions[0], delivery=d.OutputDelivery.EPHEMERAL_REACTION),))
+        sink = Sink()
+        report = await runtime.get_agent().realize_action_plan(plan, context, sink)
+        assert report.status is d.ExecutionStatus.COMPLETED
+        assert not any(isinstance(out, d.TextFinalOutput) for out in sink.values)
+        assert all(out.delivery is d.OutputDelivery.EPHEMERAL_REACTION for out in sink.values)
+        assert isinstance(sink.values[-1], d.MessageEndOutput)
+    finally:
+        await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_prepared_read_cancellation_stops_all_delivery(runtime_dependencies, prepared_manifest, monkeypatch):
+    kwargs, _ = runtime_dependencies
+    manifest, _ = prepared_manifest
+    kwargs["config"]["prepared_speech"] = {"manifest": str(manifest)}
+    runtime = AgentRuntime(**kwargs)
+    started, proceed = threading.Event(), threading.Event()
+    read = runtime.prepared_speech._read_audio
+    def delayed(name):
+        started.set()
+        assert proceed.wait(3)
+        return read(name)
+    monkeypatch.setattr(runtime.prepared_speech, "_read_audio", delayed)
+    try:
+        plan, context = say_plan()
+        plan = replace(plan, actions=(replace(plan.actions[0], sound_content=None,
+                        prepared_audio_ref=d.MediaRef(media_id="voice")),))
+        sink = Sink()
+        task = asyncio.create_task(runtime.get_agent().realize_action_plan(plan, context, sink))
+        assert await asyncio.to_thread(started.wait, 2)
+        context.cancellation.cancel(d.CancellationReason.NO_LONGER_NEEDED)
+        proceed.set()
+        report = await task
+        assert report.status is d.ExecutionStatus.CANCELLED
+        assert sink.values == []
+    finally:
+        proceed.set()
+        await runtime.shutdown()

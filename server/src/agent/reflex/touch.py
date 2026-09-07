@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from src.domain.chat import ChatInputEvent, ChatInputEventType
 from src.utils.logger import get_logger
+from src.resources.prepared_speech import load_prepared_speech
 
 if TYPE_CHECKING:
     from src.system.user_interface.types import ChatResponse
@@ -29,10 +30,17 @@ class TouchFastReplyBuilder:
         self.touch_voice_dir = Path(configured_dir) if configured_dir else None
         self.probability = float(self.config.get("probability", TOUCH_FAST_REPLY_PROBABILITY))
         self._voice_to_expression: dict[str, str] | None = None
+        self._prepared_expressions: dict[Path, str] | None = None
+        if self.config.get("manifest"):
+            catalog = {entry.name: entry for entry in load_prepared_speech(self.config["manifest"])}
+            selected = [catalog[name] for name in self.config["resource_names"]]
+            if not selected or any(entry.text for entry in selected):
+                raise ValueError("触摸语音必须选择无文字的预制资源")
+            self._prepared_expressions = {entry.audio_path: entry.expression for entry in selected}
 
     def ensure_dependencies(self) -> None:
         """检查触摸快速回复资源已经按角色配置。"""
-        if self.touch_voice_dir is None:
+        if self.touch_voice_dir is None and self._prepared_expressions is None:
             raise RuntimeError("TouchFastReplyBuilder dependency is missing: touch_voice_dir")
 
     def should_use_fast_path(self) -> bool:
@@ -77,6 +85,8 @@ class TouchFastReplyBuilder:
         ]
 
     def _pick_audio_file(self) -> Path | None:
+        if self._prepared_expressions is not None:
+            return random.choice(tuple(self._prepared_expressions))
         if self.touch_voice_dir is None:
             logger.warning("Touch voice directory is not configured for this character")
             return None
@@ -95,6 +105,8 @@ class TouchFastReplyBuilder:
         return random.choice(files)
 
     def _expression_for(self, audio_path: Path) -> str | None:
+        if self._prepared_expressions is not None:
+            return self._prepared_expressions[audio_path]
         mapping = self._load_voice_to_expression()
         return mapping.get(audio_path.stem) or mapping.get(audio_path.name) or "normal"
 

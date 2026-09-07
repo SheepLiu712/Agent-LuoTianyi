@@ -68,4 +68,4 @@ stage 整理出完整话题后，通过 `agent_runtime.get_character_runtime("lu
 
 对话压缩技能、共享装配和旧链路接入见 [对话压缩技能](conversation-compaction.md)。
 
-语音生成、异步 TTS 适配和 SAY 的 TTS 分支见 [Speaking 接口](speaking.md)。
+语音生成、异步 TTS 适配和 SAY 的 TTS 和预制音频分支见 [Speaking 接口](speaking.md)。

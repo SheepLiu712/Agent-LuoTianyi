@@ -4,6 +4,8 @@ Agent 主动发言活动的创建器。
 
 from __future__ import annotations
 
+from src.resources.prepared_speech import load_prepared_speech
+
 import asyncio
 import base64
 import json
@@ -110,7 +112,7 @@ class ProactiveTopicMaker:
                         uuid=item_uuid,
                         text=item["text"],
                         audio=audio,
-                        expression="normal",
+                        expression=item.get("expression", "normal"),
                         is_final_package=True,
                     )
                 )
@@ -455,6 +457,16 @@ class ProactiveTopicMaker:
 
         activity_res = self.config.get("activity_res", {})
         first_login_cfg = activity_res.get(ActivityType.FIRST_LOGIN.value, {})
+
+        if first_login_cfg.get("manifest"):
+            catalog = {entry.name: entry for entry in load_prepared_speech(first_login_cfg["manifest"])}
+            for name in first_login_cfg["resource_names"]:
+                entry = catalog[name]
+                self.first_login_res.append({
+                    "text": entry.text, "audio_path": str(entry.audio_path), "expression": entry.expression,
+                    "response_line": OneSentenceChat(content=entry.text, tone="normal", expression=entry.expression),
+                })
+            return
 
         raw_texts = first_login_cfg.get("text", [])
         if isinstance(raw_texts, str):

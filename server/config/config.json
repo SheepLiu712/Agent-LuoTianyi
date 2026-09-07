@@ -271,13 +271,10 @@
             "silence_trigger_cooldown_seconds": 180,
             "activity_res": {
                 "first_login": {
-                    "text": [
-                        "你好呀，我是洛天依！",
-                        "欢迎来到这里，今天想聊点什么呢？"
-                    ],
-                    "audio_path": [
-                        "res/tts/luotianyi/static_audio/first_greet_1.wav",
-                        "res/tts/luotianyi/static_audio/first_greet_2.wav"
+                    "manifest": "res/agent/prepared_speech/manifest.json",
+                    "resource_names": [
+                        "first_greet_1",
+                        "first_greet_2"
                     ]
                 }
             },
@@ -303,6 +300,9 @@
         }
     },
     "agent_runtime": {
+        "prepared_speech": {
+            "manifest": "res/agent/prepared_speech/manifest.json"
+        },
         "character_registry": {
             "characters": {
                 "luotianyi": {
@@ -317,7 +317,8 @@
                     "reflex": {
                         "touch": {
                             "fast_reply": {
-                                "touch_voice_dir": "res/agent/touch_voice",
+                                "manifest": "res/agent/prepared_speech/manifest.json",
+                                "resource_names": ["touch_voice1", "touch_voice2", "touch_voice3", "touch_voice4", "touch_voice5", "touch_voice6", "touch_voice7", "touch_voice8"],
                                 "probability": 1.0
                             }
                         }
