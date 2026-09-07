@@ -118,7 +118,8 @@ class UserStore:
         finally:
             db.close()
 
-    def update_user_description(self, user_id: str, new_description: str, commit: bool = True) -> None:
+    def update_user_description(self, user_id: str, new_description: str, commit: bool = True) -> bool:
+        """更新 user_id 的画像描述；commit 控制提交，返回是否写入成功。"""
         db = self._get_session()
         try:
             def _write() -> bool:
@@ -133,9 +134,11 @@ class UserStore:
             updated = run_sql_write(_write)
             if updated:
                 self.redis.setex(f"user_description:{user_id}", 3600, new_description)
+            return updated
         except Exception as e:
             logger.error(f"update_user_description error: {e}")
             db.rollback()
+            return False
         finally:
             db.close()
 

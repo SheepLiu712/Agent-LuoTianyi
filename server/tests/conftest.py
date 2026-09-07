@@ -5,6 +5,7 @@ import pytest
 
 
 _ACTIVE_TEST_FILES = {
+    (Path(__file__).parent / "agent" / "test_context.py").resolve(),
     (Path(__file__).parent / "agent" / "test_output_sequences.py").resolve(),
     (Path(__file__).parent / "agent" / "test_output_delivery_failure.py").resolve(),
     (Path(__file__).parent / "agent" / "test_execution_isolation.py").resolve(),

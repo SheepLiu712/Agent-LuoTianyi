@@ -12,6 +12,8 @@
 
 输出草稿、Agent 分配的连续序号及失败停止行为见 [输出交付契约](output-delivery.md)。
 
+交互上下文的创建、用户资料、近期对话和召回缓存见 [Context 接口](context.md)。
+
 ## 模块职责
 
 `server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。
