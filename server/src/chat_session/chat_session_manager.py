@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
+from src.agent.skills import Skills
+from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+
 from .dependency.activity_context_provider import ActivityContextProvider
 from .call_stream_manager import CallStreamManager
 from .dependency.conversation_service import ConversationService
@@ -72,11 +75,15 @@ class ChatSessionManager:
         database_manager: "DatabaseManager",
         llm_service: "LLMService",
         capability_manager,
+        skills: Skills,
     ) -> None:
         """向聊天会话模块及其子模块派发依赖。"""
         self.database_manager = database_manager
         self.llm_service = llm_service
-        self.conversation_service.wire_dependencies(database=database_manager, llm_service=llm_service)
+        self.conversation_service.wire_dependencies(
+            database=database_manager, llm_service=llm_service,
+            conversation_compaction=skills.get(ConversationCompactionSkill),
+        )
         self.global_speaking_worker.wire_dependencies(capabilities=capability_manager)
         self.proactive_topic_maker.configure(
             conversation_service=self.conversation_service,

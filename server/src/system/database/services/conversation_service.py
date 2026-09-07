@@ -156,11 +156,11 @@ class ConversationService:
             return False
         return self.user_store.save_user_preferences(user_id, preferences)
 
-    def update_user_description(self, user_id: str, new_description: str, commit: bool = True) -> None:
-        """更新用户画像描述，同时更新 Redis 缓存。"""
+    def update_user_description(self, user_id: str, new_description: str, commit: bool = True) -> bool:
+        """更新 user_id 的画像；commit 控制提交，返回是否写入成功。"""
         if self.user_store is None:
-            return
-        self.user_store.update_user_description(user_id, new_description, commit=commit)
+            return False
+        return self.user_store.update_user_description(user_id, new_description, commit=commit)
 
     def get_user_description(self, user_id: str) -> Optional[str]:
         """获取用户画像描述。"""
@@ -383,7 +383,11 @@ class ConversationService:
                         pipe.watch(redis_key)
                         raw_data: ContextInfo = self._decode_redis_value(pipe.get(redis_key))
                         if raw_data:
-                            raw_data.conversations.extend(new_convs)
+                            raw_data = ContextInfo(
+                                summary=raw_data.summary,
+                                conversations=[*raw_data.conversations, *new_convs],
+                                context_count=(raw_data.context_count or 0) + len(new_convs),
+                            )
                             pipe.multi()
                             pipe.setex(redis_key, 3600, raw_data)
                             pipe.execute()

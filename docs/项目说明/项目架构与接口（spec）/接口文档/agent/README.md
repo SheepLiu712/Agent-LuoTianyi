@@ -12,6 +12,8 @@
 
 输出草稿、Agent 分配的连续序号及失败停止行为见 [输出交付契约](output-delivery.md)。
 
+交互上下文的创建、用户资料、近期对话和召回缓存见 [Context 接口](context.md)。
+
 ## 模块职责
 
 `server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。
@@ -63,3 +65,5 @@
 ## 使用示例
 
 stage 整理出完整话题后，通过 `agent_runtime.get_character_runtime("luotianyi").conscious` 取得 Agent，再调用话题规划与回复接口。
+
+对话压缩技能、共享装配和旧链路接入见 [对话压缩技能](conversation-compaction.md)。

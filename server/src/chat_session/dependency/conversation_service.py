@@ -6,6 +6,8 @@ import time
 from typing import TYPE_CHECKING, Any, List, Optional
 from uuid import uuid4
 
+from src.agent.context import ContextIdentity, ConversationContext
+from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.main_chat import ContextType as ResponseLineType
 from src.agent.main_chat import OneResponseLine, OneSentenceChat, SongSegmentChat
 from src.domain.chat import ChatInputEvent, ChatInputEventType
@@ -17,7 +19,6 @@ from src.utils.asyncio_helpers import run_sync_owned
 if TYPE_CHECKING:
     from src.system.database.database_service import DatabaseManager
     from src.utils.llm_service import LLMService
-    from src.utils.llm.llm_module import LLMModule
 
 
 @dataclass
@@ -54,39 +55,26 @@ class ConversationService:
         self.llm_service = llm_service
         self.logger = get_logger("ConversationService")
 
-        self.raw_conversation_context_limit = self.config.get("raw_conversation_context_limit", 60)
-        self.forget_conversation_days = self.config.get("forget_conversation_days", 10)
-        self.not_zip_conversation_count = self.config.get("not_zip_conversation_count", 30)
         self.context_stale_after_days = self.config.get("context_stale_after_days", 5)
-        self.summary_llm = self._create_summary_llm()
+        self._compaction: ConversationCompactionSkill | None = None
 
     def wire_dependencies(
         self,
         *,
         database: "DatabaseManager",
         llm_service: "LLMService",
+        conversation_compaction: ConversationCompactionSkill,
     ) -> None:
-        """更新会话服务依赖，并按需注册摘要 LLM。"""
+        """绑定数据库及 AgentRuntime 创建的共享压缩技能。"""
         self.database = database
         self.llm_service = llm_service
-        if self.summary_llm is None:
-            self.summary_llm = self._create_summary_llm()
+        self._compaction = conversation_compaction
         self.ensure_dependencies()
 
     def ensure_dependencies(self) -> None:
         """检查会话服务依赖已经初始化。"""
         if self.database is None:
             raise RuntimeError("ConversationService dependency is missing: database")
-
-    def _create_summary_llm(self) -> "LLMModule" | None:
-        module_config = self.config.get("llm_module")
-        if not module_config or self.llm_service is None:
-            return None
-        try:
-            return self.llm_service.register_llm_module("conversation_context_summary", module_config)
-        except Exception as e:
-            self.logger.warning(f"Failed to register conversation summary LLM module: {e}")
-            return None
 
     async def persist_user_event(
         self,
@@ -268,49 +256,22 @@ class ConversationService:
         character_id: str = "luotianyi",
         snapshot: ConversationContextSnapshot | None = None,
     ) -> ConversationContextSnapshot | None:
-        '''
-        根据需要压缩对话上下文
-        '''
-        context_count = await run_sync_owned(
-            self.database.conversation_service.get_context_count,
-            user_id,
-            character_id,
+        """使用共享技能生成并应用压缩，返回刷新后的旧格式快照。
+
+        snapshot 参数保留兼容；压缩依据从数据库重新加载。
+        无需压缩返回 None，失败向调用方传播。
+        """
+        if self._compaction is None:
+            raise RuntimeError("未绑定共享对话压缩技能")
+        context = await run_sync_owned(
+            ConversationContext,
+            identity=ContextIdentity(character_id, f"legacy-compaction:{user_id}", user_id),
+            database=self.database.conversation_service,
         )
-        if context_count <= self.raw_conversation_context_limit:
+        result = await self._compaction.compact(context)
+        if result is None:
             return None
-
-        snapshot = snapshot or await self.get_context_snapshot(user_id, character_id=character_id, ts_type="date")
-        if self.summary_llm is None:
-            self.logger.warning("Conversation context is too long, but summary LLM is unavailable")
-            return None
-
-        recent_conversation = snapshot.recent_conversation
-        if not recent_conversation:
-            recent_conversation = self._format_conversations(snapshot.conversations, ts_type="date")
-
-        new_summary = await self.summary_llm.generate_response(
-            forget_conversation_days=self.forget_conversation_days,
-            current_date=datetime.now().strftime("%Y-%m-%d"),
-            current_summary=snapshot.summary,
-            recent_conversation="\n".join(recent_conversation),
-        )
-
-        updated = await run_sync_owned(
-            self.database.conversation_service.compact_conversation_context,
-            user_id,
-            new_summary.strip(),
-            self.not_zip_conversation_count,
-            context_count,
-            character_id,
-        )
-        if not updated:
-            self.logger.warning(
-                "Skipped context compaction for "
-                f"user_id={user_id}, character_id={character_id}; "
-                f"context_count={context_count}, keep_recent_count={self.not_zip_conversation_count}. "
-                "Context state changed before summary could be written."
-            )
-            return None
+        await context.compact(result)
         return await self.get_context_snapshot(user_id, character_id=character_id, ts_type="date")
 
 
