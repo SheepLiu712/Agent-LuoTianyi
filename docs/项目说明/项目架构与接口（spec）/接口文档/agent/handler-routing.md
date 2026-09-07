@@ -21,7 +21,7 @@ server/src/
             └── router.py         # ActionRouter
 ```
 
-两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产注册集合为空，装配由 AgentRuntime 初始化完成。
+两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产刺激注册集合为空；行动注册 SAY 的 TTS 处理器，装配由 AgentRuntime 初始化完成。
 
 该文件树采用 [#63](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/63) 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定，直接位于 `agent_runtime/agent_runtime.py`。文件树只列出路由涉及的文件；两个 `router.py` 中定义注册器和处理器协议，当前没有具体业务 Handler 文件。
 
@@ -33,9 +33,9 @@ server/src/
 | 角色装配位置 | `agent_runtime/agent_runtime.py` 初始化；采用会话确认的装配方式，替代工单原文的 `agent/factory.py` |
 | 刺激路由键 | `StimulusKind`；沿用当前门面契约及总体设计的行为族路由，替代工单原文的 `StimulusKind + InteractionKind` |
 | 行动路由键 | `ActionKind`；`START_THINKING` 的归属见下文 |
-| 处理器实现状态 | 两个 router 中有结构协议；生产注册集合为空，没有具体业务 Handler |
+| 处理器实现状态 | 两个 router 中有结构协议；生产行动路由注册 SayHandler，支持 SAY 的 TTS 分支 |
 
-这里的目录约定确定路由器的归属。结构协议描述调用形状，空注册集合表示没有可调用的业务实现；二者不代表聊天、触摸或 world 已迁移到新门面。
+这里的目录约定确定路由器的归属。结构协议描述调用形状，注册集合表示已有可调用的业务实现；注册 SAY 不代表旧聊天、触摸或 world 已迁移到新门面。
 
 注册、解析和调用分为三个步骤：AgentRuntime 构造每角色注册集合；Router 保存集合并按键返回对象；门面调用该对象的异步方法。Router 本身不执行聊天、触摸或 world 行为。处理器对象与路由键不是一一对应：一个行为族对象可以绑定多个不同 kind，因此注册不同刺激不要求分别建立文件或类。
 
@@ -86,7 +86,7 @@ class ActionRouter(Generic[HandlerT]):
 
 行动路由使用每项 `action.kind`。`START_THINKING` 由 stage 消费，ActionRouter 构造时注册该键抛出 `ValueError`；以该键查找仍属于未注册，抛出 `KeyError`。
 
-枚举中已有成员不表示已注册，更不表示已有真实业务实现。本版生产两个注册集合均为空。
+枚举中已有成员不表示已注册，更不表示已有真实业务实现。生产 StimulusRouter 为空，ActionRouter 注册 ActionKind.SAY。
 
 ### 选择范围与调用流程
 
@@ -120,7 +120,7 @@ realize_action_plan(plan, execution_context, output_sink)
 
 ## 与门面和运行时的衔接
 
-AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；装配参数只供运行时和模块内测试使用，不从门面暴露 router。默认生产装配显式使用空注册序列。任一 router 构造失败时，AgentRuntime 初始化失败，沿用已有初始化清理规则，不发布半成品运行时。
+AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；装配参数只供运行时和模块内测试使用，不从门面暴露 router。生产装配为每个角色注册 SayHandler，共用 SpeakingSkill；刺激注册序列仍为空。任一 router 构造失败时，AgentRuntime 初始化失败，沿用已有初始化清理规则，不发布半成品运行时。
 
 门面完成其契约规定的入口检查后才查询 router；路由器不自行重复这些检查：
 
@@ -131,7 +131,7 @@ AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；�
 
 门面只将 resolve 的“合法枚举未注册”KeyError 转成上述结果；不能用包住整个处理流程的 KeyError 捕获来误吞业务错误。路由器的构造异常属于启动错误，不包装为 HandlingReport 或 ExecutionReport。
 
-路由器只解析；门面负责调用解析结果并结算。Agent 构造接受仅供装配使用的关键字参数 `stimulus_router`、`action_router`；省略时为空表。AgentRuntime 显式传入每角色独立的空路由器。
+路由器只解析；门面负责调用解析结果并结算。Agent 构造接受仅供装配使用的关键字参数 `stimulus_router`、`action_router`；省略时为空表。AgentRuntime 显式传入每角色独立的路由器，行动侧注册 SAY。
 
 ## 内部处理器调用与结算事实
 

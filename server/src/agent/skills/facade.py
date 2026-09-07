@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING, TypeVar, cast
 
+from src.agent.skills.expression.speaking import SpeakingSkill
+from src.capabilities.speech.streaming import AsyncTTS
+
 from .conversation.compaction import ConversationCompactionSkill
 
 if TYPE_CHECKING:
@@ -15,9 +18,12 @@ SkillT = TypeVar("SkillT")
 class Skills:
     """持有一个 AgentRuntime 内所有角色共享的技能实例。"""
 
-    def __init__(self, config: dict[str, Any], llm_service: LLMService) -> None:
-        """按 config 的技能分组初始化实例，并派发模型依赖 llm_service。"""
+    def __init__(self, config: dict[str, Any], llm_service: LLMService, *, tts_engine: AsyncTTS) -> None:
+        """按 config 的技能分组初始化实例，并派发 llm_service 和已初始化的 tts_engine。"""
+        if not isinstance(config, dict):
+            raise TypeError("skills 必须是字典")
         self._skills: dict[type, object] = {
+            SpeakingSkill: SpeakingSkill(config.get("speaking", {}), tts_engine),
             ConversationCompactionSkill: ConversationCompactionSkill(
                 config.get("conversation_compaction", {}), llm_service,
             ),

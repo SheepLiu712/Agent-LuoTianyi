@@ -4,6 +4,10 @@ import asyncio
 from typing import Any, Dict, TYPE_CHECKING
 
 from src.agent.skills import Skills
+from src.agent.skills.expression.speaking import SpeakingSkill
+from src.agent.handlers.action.say import SayHandler
+from src.capabilities.speech.streaming import AsyncTTS
+from src.domain.agent import ActionKind
 from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.router import StimulusRouter
@@ -51,7 +55,8 @@ class AgentRuntime:
         self.shutdown_timeout_seconds = DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS
         self.vector_store = self._initialize_vector_store(self.config["agent"])
         try:
-            self.skills = Skills(self.config.get("skills", {}), llm_service)
+            self.skills = Skills(self.config.get("skills", {}), llm_service,
+                                 tts_engine=AsyncTTS(capability_manager.speech))
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -76,7 +81,9 @@ class AgentRuntime:
             self._agents = {
                 character_id: Agent(
                     character_id=character_id,
-                    stimulus_router=StimulusRouter(()), action_router=ActionRouter(()),
+                    stimulus_router=StimulusRouter(()),
+                    action_router=ActionRouter(((ActionKind.SAY, SayHandler(
+                        character_id, self.skills.get(SpeakingSkill))),)),
                 )
                 for character_id in self.character_runtimes
             }

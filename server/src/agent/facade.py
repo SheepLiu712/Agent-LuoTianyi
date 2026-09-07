@@ -15,7 +15,7 @@ from src.utils.logger import get_logger
 class Agent:
     """角色的两接口业务门面，内部委托已注册处理器并结算接收与效果事实。
 
-    AgentRuntime 装配角色私有路由并管理接受状态；生产注册表为空。
+    AgentRuntime 装配角色私有路由并管理接受状态；生产行动路由已注册 SAY 的 TTS 分支。
     每次调用独立处理；失败记录日志并结束，接收器只属于本次调用。
     """
 

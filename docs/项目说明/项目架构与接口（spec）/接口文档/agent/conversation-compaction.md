@@ -42,7 +42,7 @@ async def compact(
 
 ## 共享技能门面
 
-`server/src/agent/skills/facade.py` 提供 `Skills(config, llm_service)`，由 `AgentRuntime` 初始化一次。`config` 为 `agent_runtime.skills` 配置，门面按技能名称派发配置，并显式注入每个技能所需的依赖。
+`server/src/agent/skills/facade.py` 提供 `Skills(config, llm_service, *, tts_engine)`，由 `AgentRuntime` 初始化一次。`config` 为 `agent_runtime.skills` 配置，门面按技能名称派发配置，并显式注入每个技能所需的依赖。
 
 `get(skill_type: type[SkillT]) -> SkillT` 按类型精确查询已初始化的技能，返回共享原实例，不执行技能。非类型参数抛 `TypeError`，未注册类型抛 `KeyError`。调用方可以通过返回类型获得对应技能的接口提示。
 

@@ -50,7 +50,7 @@ StartThinking 由 stage 消费，不能注册为 Agent 行动处理器。`output
 
 ## 生命周期与代码位置
 
-`processing/` 包含 Handling、Execution、call_handler、两种 emitter、输出草稿和计划身份工具。路由仍在 `handlers/stimulus/router.py` 和 `handlers/action/router.py`，详见 [路由契约](handler-routing.md)。生产注册集合为空。
+`processing/` 包含 Handling、Execution、call_handler、两种 emitter、输出草稿和计划身份工具。路由仍在 `handlers/stimulus/router.py` 和 `handlers/action/router.py`，详见 [路由契约](handler-routing.md)。生产行动路由已注册 SAY 的 TTS 分支，刺激注册集合仍为空。
 
 AgentRuntime.shutdown 停止新工作后，有界等待在途调用与清理退出，再释放资源。等待超时抛 RuntimeError 并保留依赖；后续 shutdown 可继续等待。进程终止后，不恢复未完成的门面调用。
 

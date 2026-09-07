@@ -1,9 +1,11 @@
+import threading
 import os
 import json
 from typing import Dict, Any, Generator
 from src.utils.logger import get_logger
 from src.utils.asyncio_helpers import run_sync_owned
 from src.capabilities.speech.tts_server import TTSServer
+from src.capabilities.speech.stream_errors import TTSStreamCancelled
 
 class ReferenceAudio:
     def __init__(self, audio_path: str, lyrics: str) -> None:
@@ -150,9 +152,10 @@ class TTSModule:
             self.logger.error(f"TTS Request failed: {e}")
             raise
 
-    def stream_synthesize_speech_with_tone(self, text: str, tone: str) -> Generator[bytes, None, None]:
+    def stream_synthesize_speech_with_tone(self, text: str, tone: str, *,
+                                          cancel_event: threading.Event | None = None) -> Generator[bytes, None, None]:
         """
-        根据指定语气流式合成语音，返回可直接拼接写入文件的 bytes 片段生成器。
+        根据指定语气流式合成语音，返回可直接拼接写入文件的 bytes 片段生成器；cancel_event 仅取消本次请求。
         """
         ref_audio_name = self.tone_reference_audio_projection.get(tone)
         if not ref_audio_name:
@@ -162,9 +165,10 @@ class TTSModule:
             else:
                 raise ValueError("No reference audio available.")
 
-        return self.stream_synthesize_speech(text, ref_audio_name)
+        return self.stream_synthesize_speech(text, ref_audio_name, cancel_event=cancel_event)
 
-    def stream_synthesize_speech(self, text: str, ref_audio_key: str) -> Generator[bytes, None, None]:
+    def stream_synthesize_speech(self, text: str, ref_audio_key: str, *,
+                                cancel_event: threading.Event | None = None) -> Generator[bytes, None, None]:
         """
         流式合成语音的核心方法，返回 bytes 片段生成器。
         """
@@ -180,10 +184,13 @@ class TTSModule:
                 spk_audio_path=ref_audio_obj.audio_path,
                 prompt_audio_path=ref_audio_obj.audio_path,
                 prompt_audio_text=ref_audio_obj.lyrics,
+                cancel_event=cancel_event,
             ):
                 if chunk:
                     yield chunk
             self._debug(f"Streaming TTS synthesis successful for text: {text[:20]}...")
+        except TTSStreamCancelled:
+            raise
         except Exception as e:
             self.logger.error(f"Streaming TTS Request failed: {e}")
             raise

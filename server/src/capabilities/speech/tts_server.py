@@ -1,4 +1,6 @@
 import io
+from contextlib import contextmanager
+from .stream_errors import TTSStreamCancelled
 import os
 import time
 import atexit
@@ -555,7 +557,9 @@ class TTSServer:
         prompt_audio_path: str,
         prompt_audio_text: str,
         timeout: int = 600,
+        cancel_event: threading.Event | None = None,
     ) -> Generator[bytes, None, None]:
+        """流式合成字节；cancel_event 中断本次等待，不停止共享工作进程。"""
         self._begin_request()
         try:
             if not self.server_process or not self.server_process.is_alive():
@@ -564,7 +568,7 @@ class TTSServer:
             if not self.request_queue or not self.response_queue:
                 raise RuntimeError("gsv_tts worker queues are not initialized")
 
-            with self._synthesize_lock:
+            with self._stream_lock(cancel_event):
                 self._request_counter += 1
                 request_id = f"req-{self._request_counter}"
 
@@ -580,7 +584,7 @@ class TTSServer:
                 )
 
                 while True:
-                    response = self._wait_for_response(request_id=request_id, timeout=timeout)
+                    response = self._wait_for_response(request_id=request_id, timeout=timeout, cancel_event=cancel_event)
                     if not response.get("ok"):
                         error = response.get("error", "unknown error")
                         tb = response.get("traceback")
@@ -596,6 +600,20 @@ class TTSServer:
                         break
         finally:
             self._end_request()
+
+    @contextmanager
+    def _stream_lock(self, cancel_event: threading.Event | None):
+        while not self._synthesize_lock.acquire(timeout=0.1):
+            if cancel_event is not None and cancel_event.is_set():
+                raise TTSStreamCancelled()
+            if self._stopping:
+                raise RuntimeError("gsv_tts worker is stopping")
+        try:
+            if cancel_event is not None and cancel_event.is_set():
+                raise TTSStreamCancelled()
+            yield
+        finally:
+            self._synthesize_lock.release()
 
     def _wait_for_worker_ready(self, timeout: int) -> bool:
         if not self.ready_event:
@@ -619,9 +637,12 @@ class TTSServer:
 
         return True
 
-    def _wait_for_response(self, request_id: str, timeout: int) -> Dict[str, Any]:
+    def _wait_for_response(self, request_id: str, timeout: int,
+                           cancel_event: threading.Event | None = None) -> Dict[str, Any]:
         start_time = time.time()
         while (time.time() - start_time) < timeout:
+            if cancel_event is not None and cancel_event.is_set():
+                raise TTSStreamCancelled()
             if self._stopping or (self.stop_event is not None and self.stop_event.is_set()):
                 raise RuntimeError("gsv_tts worker is stopping")
             if self.server_process and not self.server_process.is_alive():

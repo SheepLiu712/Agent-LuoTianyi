@@ -143,7 +143,7 @@ def test_skills_returns_same_instance_and_dispatches_config():
     from src.agent.skills import Skills
     llm = LLM()
     module_config = {"model": "specific-model"}
-    skills = Skills({"conversation_compaction": {"llm_module": module_config}}, llm)
+    skills = Skills({"conversation_compaction": {"llm_module": module_config}}, llm, tts_engine=SimpleNamespace())
     assert skills.get(ConversationCompactionSkill) is skills.get(ConversationCompactionSkill)
     assert llm.registrations == [("conversation_context_summary", module_config)]
     with pytest.raises(KeyError):

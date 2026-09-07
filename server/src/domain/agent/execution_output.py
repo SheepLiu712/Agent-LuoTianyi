@@ -71,6 +71,6 @@ class MessageEndOutput(AgentOutput):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ExpressionOutput(AgentOutput):
-    """同一说话或演唱行动的表情输出，包括消息终止后的 normal 恢复。"""
+    """同一说话或演唱行动附带的表情输出。"""
     kind: ClassVar[AgentOutputKind] = AgentOutputKind.EXPRESSION
     expression: ChangeExpression

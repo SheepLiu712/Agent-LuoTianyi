@@ -190,8 +190,8 @@ Agent 生产者按发送顺序从零分配 sequence_no，文字、音频及表�
 TextFinalOutput 只表示文字定稿。每个已开始投递的 Say/Sing 消息在通道可用时以一个 MessageEndOutput 结束，包括纯文字、正常音频、空音频和生成失败的消息。
 MessageEndOutput 表示该消息不会再追加文字或音频，Adapter 将其转换为既有 `is_final_package=True`；FAILED 映射到 `audio_error=True` 及对应错误码：EMPTY_AUDIO 对应 TTS_EMPTY，GENERATION_FAILED 对应 TTS_STREAM_ERROR。
 客户端沿用终止包与播放队列机制，播完该消息后才执行后续包。MessageEndOutput 本身不声称客户端已经播放完成。
-正常路径先输出文字、表情和音频，随后终止该消息；失败前尚未发出的显示文本仍应保留。取消时通道仍可用则发送 CANCELLED 终止，Adapter 映射为 audio_error=True、error_code=CANCELLED，避免客户端保存被截断的音频；该外部错误码由终止状态得出，MessageEndOutput.error_code 仍为 None。通道已关闭则由本地关闭流程清理，不宣称终止包已送达。
-同一 Action 在消息终止后仍可输出恢复 normal 的表情，这属于后续控制包，不再追加上一条消息的内容。
+正常路径先输出文字、表情和音频，随后终止该消息；失败前尚未发出的显示文本仍应保留。当前 SAY 处理器取消时停止交付并清理语音流。OutputEmitter 在取消后拒绝继续发送，因此该路径不补发终止包，也不宣称客户端已收到终止通知。
+SAY 结束后不自动恢复表情；表情恢复由另一个行动计划表达。
 
 当前输出枚举中的 TEXT_DELTA、MOTION 已存在；本轮不增加其具体输出构造类型，保留现有枚举成员。
 
@@ -252,7 +252,7 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 
 开始思考通过第 3.0 节的 StartThinking 计划通知 stage，结束思考由 stage 根据对应 handle 的完成、失败或取消清理，发送既有 waiting 状态。
 
-触摸恢复 normal 使用同一 Action 的 ExpressionOutput，顺序为音频及表情、MessageEndOutput、ExpressionOutput(normal)。客户端收到终止包后等待播放结束，再执行恢复表情包。本版沿用这一机制，不增加播放完成回执。
+SAY 的 TTS 分支输出文字、可选表情、音频及 MessageEndOutput，不追加 normal 恢复包。
 
 业务计划依次调用 realize，计划内 Action 依次执行，AgentOutput 依次发送。本版保持正常路径的顺序和终止包位置；严格乱序检测、丢包恢复和跨连接重投去重留待后续，不能把现有队列行为描述为这些可靠性保证。
 
@@ -260,6 +260,6 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 
 从 `src.domain.agent` 的公开构造器验证合法值、字段缺失/多余、不可变性、Say 音频互斥、计划身份唯一、报告内部关系及错误分类。
 两个 Protocol 的类型声明本身不证明运行时行为。正常排队、背压、身份绑定和单次调用的部分效果通过实际接收器及公开 Agent 调用验证；严格乱序/丢包恢复和跨连接投递去重不属于本版验收。
-兼容验证包含思考包时序、文字与音频的消息 ID、音频失败终包、TTS 独立文件块/演唱文件片段、触摸 normal 恢复及私密日记的归属和去重。
+兼容验证包含思考包时序、文字与音频的消息 ID、音频失败终包、TTS 文件片段、SAY 结束不恢复表情及私密日记的归属和去重。
 
 当前领域测试为 `server/tests/domain/test_realization_contract.py`，同时由 `test_handle_input_contract.py` 验证 MESSAGE_END 在快照中的使用。在 server 目录运行 `python -m pytest tests/domain -q`。这些测试验证公开值与协议声明，不验证真实 sink 或客户端投递。
