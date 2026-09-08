@@ -90,10 +90,10 @@ def test_facade_exports_only_agent_and_has_two_documented_business_methods(runti
     assert set(getattr(agent_package, "__all__", ())) == {"Agent"}
     assert isinstance(agent, agent_package.Agent)
     methods = {name for name, value in inspect.getmembers(type(agent), callable) if not name.startswith("_")}
-    assert methods == {"handle_stimulus", "realize_action_plan"}
+    assert methods == {"handle_stimulus", "realize_action_plan", "is_handle_interruptible", "is_realize_interruptible"}
     for name in methods:
         method = getattr(agent, name)
-        assert inspect.iscoroutinefunction(method)
+        assert inspect.iscoroutinefunction(method) is (name in {"handle_stimulus", "realize_action_plan"})
         assert any("\u4e00" <= char <= "\u9fff" for char in (inspect.getdoc(method) or ""))
     for name in ("mind", "capabilities", "database_manager", "conscious", "character_runtime", "main_chat"):
         assert not hasattr(agent, name)
@@ -128,8 +128,8 @@ async def test_handle_pre_cancelled_retains_reason_and_pending(runtime, reason):
     ({}, d.ExecutionErrorCode.UNSUPPORTED_ACTION),
     ({"target_character_id": "miku"}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
     ({"interaction_id": "another"}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
-    ({"basis_interaction_revision": 2}, d.ExecutionErrorCode.STALE_INTERACTION),
-    ({"basis_interaction_revision": 4}, d.ExecutionErrorCode.STALE_INTERACTION),
+    ({"basis_interaction_revision": 2}, d.ExecutionErrorCode.UNSUPPORTED_ACTION),
+    ({"basis_interaction_revision": 4}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
 ])
 async def test_execution_preflight_rejects_whole_plan(runtime, change, code):
     plan, context = plan_and_context()

@@ -152,7 +152,7 @@ execution_id 标识本次计划执行，用于输出关联和日志；调用方�
 context 保存传入的同一 CancellationToken；独立于原 handle 的取消令牌。
 current_interaction_revision 是开始执行时的事实，覆盖计划接收后排队期间的变化，因此与 plan.basis_interaction_revision 含义不同。
 
-表达型行动要求启动时修订匹配，执行中继续通过 cancellation 和绑定 sink 阻止失效输出。
+计划依据修订不能晚于执行时的当前修订；较早的修订不自动使计划失效。Stage 根据 Agent 的交互中断状态发布取消信号，通过 cancellation 和绑定 sink 阻止失效输出。
 持久行动是否开始取决于该行动的接受及取消边界；已经提交的效果保留在报告里。
 构造器不查询当前 stage，也不自行验证另一对象或持久数据。
 

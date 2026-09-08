@@ -19,6 +19,15 @@ class OutputEmitter:
         self.error = None
         self.code = None
 
+    def set_interruptible(self, interruptible: bool) -> None:
+        """设置当前 realize 是否允许普通刺激打断；SAY 保持 False。已取消或关闭则拒绝。"""
+        if type(interruptible) is not bool:
+            raise TypeError("interruptible must be bool")
+        if self._execution is None:
+            raise RuntimeError("output emitter is closed")
+        _check_cancellation(self._execution.context.cancellation)
+        self._execution.interruption.allowed = interruptible
+
     async def emit(self, draft: OutputDraft) -> d.OutputReceipt:
         """校验并顺序交付一份输出，返回接收确认；首次失败后拒绝继续交付。"""
         async with self._lock:

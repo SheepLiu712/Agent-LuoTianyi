@@ -4,6 +4,15 @@ This glossary defines the project-specific language used when describing a chara
 
 ## Language
 
+**消息投递完成**：
+本次消息的内容及必要的终止通知已交给连接发送；它与客户端播放完成是两个不同的事实。
+
+**输出投递接受**：
+输出已被接收并进入待发送流程，但尚未确认发送完成；接受结果与后续的发送成功、失败或取消分开表达。
+
+**消息终止通知**：
+标记一条消息不再有后续内容的通知。取消时可以不携带正文和音频，但仍属于原消息及原呈现方式，不表示撤回已播放的内容。
+
 **Stimulus**:
 A logical event that may be perceived by a character, after raw protocol messages and sensor samples have been normalized and aggregated.
 _Avoid_: Raw event, packet, sensor sample

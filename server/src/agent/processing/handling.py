@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import src.domain.agent as d
 from .plan_emitter import PlanEmitter, _DeliveryCancelled
 from .invocation import call_handler
+from .interruptibility import _CallInterruptibility
 
 if TYPE_CHECKING:
     from src.agent.facade import Agent
@@ -15,9 +16,10 @@ class Handling:
     """管理一次刺激处理，处理结束后关闭本次计划交付器。"""
 
     def __init__(self, agent: "Agent", request: d.HandleStimulusRequest,
-                 sink: d.ActionPlanSink) -> None:
+                 sink: d.ActionPlanSink, interruption: _CallInterruptibility | None = None) -> None:
         """绑定角色门面、当前请求及本次计划接收器。"""
         self.agent, self.request, self.sink = agent, request, sink
+        self.interruption = interruption
 
     async def run(self) -> d.HandlingReport:
         """检查取消状态并选择处理器，交付计划后返回本次处理报告。"""
@@ -32,7 +34,7 @@ class Handling:
             error = d.HandlingErrorCode.UNSUPPORTED_STIMULUS
             return self.agent._handling_failure(request, status, error)
 
-        plan_emitter = PlanEmitter(self.agent._character_id, request, self.sink)
+        plan_emitter = PlanEmitter(self.agent._character_id, request, self.sink, self.interruption)
         try:
             try:
                 report = await call_handler(
@@ -44,7 +46,13 @@ class Handling:
                 )
                 self._validate_handling_report(request, report, plan_emitter.accepted_ids)
                 if request.cancellation.is_cancelled:
-                    report = replace(report, request_status=d.HandlingRequestStatus.CANCELLED, error_code=None, retryable=False)
+                    # 尚未交付计划的过时提取结果不能消费输入；保留原消息以便重新等待。
+                    if (request.cancellation.reason is d.CancellationReason.SUPERSEDED
+                            and self.interruption is not None and self.interruption.allowed
+                            and not plan_emitter.accepted_ids):
+                        report = self.agent._handling_failure(request, d.HandlingRequestStatus.CANCELLED, None)
+                    else:
+                        report = replace(report, request_status=d.HandlingRequestStatus.CANCELLED, error_code=None, retryable=False)
             except _DeliveryCancelled:
                 report = self.agent._handling_failure(request, d.HandlingRequestStatus.CANCELLED, None, plan_emitter.accepted_ids)
             except Exception as error:

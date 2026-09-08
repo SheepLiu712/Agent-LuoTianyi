@@ -56,6 +56,7 @@ _COORDINATION_KINDS = frozenset({
     StimulusKind.IMAGE_SELECTION_OPENED,
     StimulusKind.IMAGE_SELECTION_CLOSED,
     StimulusKind.INTERACTION_DEADLINE,
+    StimulusKind.INTERACTION_ENDING,
 })
 
 

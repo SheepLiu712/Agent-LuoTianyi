@@ -33,7 +33,7 @@ async def realize_action_plan(self, plan: ActionPlan, context: ExecutionContext,
 1. 检查计划、执行上下文及 sink.emit；错误类型抛 TypeError。
 2. 检查角色和交互身份匹配，否则返回 FAILED / CONTRACT_MISMATCH；停止接受时返回 DEPENDENCY_UNAVAILABLE。
 3. 登记本次在途调用，执行 `await Execution(self, plan, context, output_sink).run()`。
-4. 检查计划依据修订与当前修订一致、令牌未取消，并预先解析全部行动的处理器。分别以 STALE_INTERACTION、CANCELLED、UNSUPPORTED_ACTION 拒绝；全部行动保持 NOT_STARTED。
+4. 检查计划依据修订不晚于当前修订、令牌未取消，并预先解析全部行动的处理器。分别以 CONTRACT_MISMATCH、CANCELLED、UNSUPPORTED_ACTION 拒绝；全部行动保持 NOT_STARTED。
 5. 按计划顺序执行行动。每项使用独立 OutputEmitter，输出序号在本次执行内跨行动从零连续递增。
 6. 校验 ActionResult 的类型、action_id 和状态。失败或取消停止后续行动，保留已返回的效果与已完成结果，剩余行动为 NOT_STARTED。
 7. 关闭当前 emitter，返回 ExecutionReport；门面结束在途登记并记录结果。
@@ -57,3 +57,16 @@ AgentRuntime.shutdown 停止新工作后，有界等待在途调用与清理退�
 ## 验证
 
 从两个公开入口和运行时生命周期验证准入、计划及输出顺序、部分结果、错误、取消和关闭。当前测试说明见 `server/tests/agent/README.md`；旧持久化、重复调用合并和重放测试已移除。
+
+## 按交互查询中断状态
+
+- `is_handle_interruptible(interaction_id: str) -> bool`：当前 handle 是否允许普通刺激打断。
+- `is_realize_interruptible(interaction_id: str) -> bool`：当前 realize 是否允许普通刺激打断。
+
+两项查询同步返回，不修改状态。没有对应调用时返回 False；调用开始时默认 False。状态按交互、handle/realize 分别隔离，完成、异常及任务取消后移除。同一交互存在多个同类调用时，仅全部允许中断才返回 True。交互 ID 必须为非空白字符串。
+
+内部 handler 通过 PlanEmitter.set_interruptible 或 OutputEmitter.set_interruptible 更新当前调用的状态。提取阶段可设 True；开始回复生成前设 False。设置状态时检查取消令牌，已经过时的提取不能通过关闭中断许可而继续生成回复。每个行动开始时 realize 恢复默认 False；SAY 不打开中断许可。
+
+普通输入由 Stage 查询状态后决定是否发布 SUPERSEDED。不可中断不限制断线、终止时的 NO_LONGER_NEEDED 或任务取消。协作取消不强制中止在途 LLM 调用，但会阻止后续计划交付。允许中断的提取被 SUPERSEDED 且未交付计划时，保留全部 pending，不接受其消费结果。生命周期取消仍保留 handler 已完成的合法消费事实。
+
+计划依据修订可以早于执行时的当前修订。新输入造成的修订增长不自动使已接收计划失效；取消令牌及 sink 控制计划和输出是否仍有效。

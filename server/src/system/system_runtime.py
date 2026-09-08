@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from typing import Dict
 
 from src.agent_runtime import AgentRuntime
+from src.adapter.websocket import WebSocketAdapter
+from src.stage import StageManager
 from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.capabilities import CapabilityManager
 from src.chat_session import ChatSessionManager
@@ -35,6 +37,8 @@ class SystemRuntime:
     client_llm_executor: ClientLLMExecutor
     observability: ObservabilityService
     owns_observability: bool = field(default=True)
+    chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
+    stage_manager: StageManager | None = None
     _shutdown_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _shutdown_complete: bool = field(default=False, init=False, repr=False)
     _shutdown_completed_stages: set[str] = field(default_factory=set, init=False, repr=False)
@@ -109,7 +113,12 @@ class SystemRuntime:
                 client_llm_executor=client_llm_executor,
                 observability=observability,
                 owns_observability=owns_observability,
+                chat_adapter=WebSocketAdapter(config.get("chat_adapter", {}),
+                                              default_character_id=agent_runtime.default_character_id),
             )
+
+            runtime.stage_manager = StageManager(get_agent=agent_runtime.get_agent, adapter=runtime.chat_adapter,
+                                                 config=config.get("stage_manager", {}))
 
             runtime._wire_dependencies()
             runtime._start_background_services()
@@ -191,6 +200,7 @@ class SystemRuntime:
                 uninstall_observability_log_handler()
 
         shutdown_steps: tuple[tuple[str, callable | None], ...] = (
+            ("chat stages", runtime.stage_manager.close if runtime is not None and runtime.stage_manager is not None else None),
             ("world runtime", world.stop_background_services if world is not None else None),
             (
                 "chat session manager",
@@ -251,6 +261,7 @@ class SystemRuntime:
             shutdown_steps = (
                 ("world runtime", self.world.stop_background_services),
                 ("chat sessions", self.chat_session_manager.stop_background_services),
+                ("chat stages", self.stage_manager.close if self.stage_manager is not None else None),
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),
                 ("capability manager", self.capability_manager.stop),
                 ("database manager", self.database_manager.shutdown),

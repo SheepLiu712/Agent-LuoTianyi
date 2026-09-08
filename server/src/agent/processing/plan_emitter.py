@@ -6,6 +6,7 @@ from traceback import walk_tb
 import src.domain.agent as d
 from src.utils.logger import get_logger
 from .plan_identity import encode_plan, plan_id
+from .interruptibility import _CallInterruptibility
 
 
 class _DeliveryCancelled(Exception):
@@ -35,13 +36,23 @@ class PlanEmitter:
     """为本次调用分配计划序号，顺序交付并记录已确认接收的计划标识。"""
 
     def __init__(self, character_id: str, request: d.HandleStimulusRequest,
-                 sink: d.ActionPlanSink) -> None:
+                 sink: d.ActionPlanSink, interruption: _CallInterruptibility | None = None) -> None:
         """绑定角色、请求和本次调用使用的计划接收器。"""
         self._character_id, self._request, self._sink = character_id, request, sink
         self._lock = asyncio.Lock()
         self._accepted_ids: list[str] = []
         self._error = None
         self._failure = None
+        self._interruption = interruption if interruption is not None else _CallInterruptibility()
+
+    def set_interruptible(self, interruptible: bool) -> None:
+        """设置本次 handle 是否允许普通刺激打断；提取时设 True，开始生成回复前设 False。已取消或关闭则拒绝。"""
+        if type(interruptible) is not bool:
+            raise TypeError("interruptible must be bool")
+        if self._sink is None:
+            raise RuntimeError("plan emitter is closed")
+        _check_cancellation(self._request.cancellation)
+        self._interruption.allowed = interruptible
 
     @property
     def accepted_ids(self) -> list[str]:

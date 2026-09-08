@@ -10,6 +10,9 @@ from src.capabilities.speech.streaming import AsyncTTS
 from src.domain.agent import ActionKind
 from src.resources.prepared_speech import PreparedSpeechResources
 from src.agent import Agent
+from src.agent.context import ContextFactory
+from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
+from src.domain.agent import StimulusKind
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.luotianyi_agent import LuoTianyiAgent
@@ -80,10 +83,15 @@ class AgentRuntime:
             )
 
             self.default_character_id = self.character_registry.default_character_id
+            self.contexts = {
+                character_id: ContextFactory(character_id=character_id, database=database_manager.conversation_service)
+                for character_id in self.character_runtimes
+            }
             self._agents = {
                 character_id: Agent(
                     character_id=character_id,
-                    stimulus_router=StimulusRouter(()),
+                    stimulus_router=StimulusRouter(((StimulusKind.INTERACTION_ENDING,
+                                                    InteractionEndingHandler(self.contexts[character_id])),)),
                     action_router=ActionRouter(((ActionKind.SAY, SayHandler(
                         character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),)),
                 )

@@ -5,18 +5,20 @@ import src.domain.agent as d
 from src.agent.processing.plan_emitter import _DeliveryCancelled
 from src.agent.processing.output_emitter import OutputEmitter
 from .invocation import call_handler, _HandlerNotStarted
+from .interruptibility import _CallInterruptibility
 
 
 class Execution:
     """管理一次计划执行的内存状态，不读取历史执行或恢复输出。"""
 
     def __init__(self, agent, plan: d.ActionPlan, context: d.ExecutionContext,
-                 sink: d.AgentOutputSink) -> None:
+                 sink: d.AgentOutputSink, interruption: _CallInterruptibility | None = None) -> None:
         """绑定门面、完整计划、执行上下文和本次输出接收器。"""
         self.agent, self.plan, self.context, self.sink = agent, plan, context, sink
         self.results: list[d.ActionResult] = []
         self.next_sequence = 0
         self.output_started = False
+        self.interruption = interruption if interruption is not None else _CallInterruptibility()
 
     def report(self, error: d.ExecutionErrorCode | None = None) -> d.ExecutionReport:
         """返回本次结果，未执行行动标记为未开始，且不要求调用者重试。"""
@@ -27,8 +29,8 @@ class Execution:
 
     async def run(self) -> d.ExecutionReport:
         """检查版本和取消状态，确认全部行动具有处理器后顺序执行。"""
-        if self.plan.basis_interaction_revision != self.context.current_interaction_revision:
-            return self.report(d.ExecutionErrorCode.STALE_INTERACTION)
+        if self.plan.basis_interaction_revision > self.context.current_interaction_revision:
+            return self.report(d.ExecutionErrorCode.CONTRACT_MISMATCH)
         if self.context.cancellation.is_cancelled:
             return self.report(d.ExecutionErrorCode.CANCELLED)
         try:
@@ -36,6 +38,7 @@ class Execution:
         except KeyError:
             return self.report(d.ExecutionErrorCode.UNSUPPORTED_ACTION)
         for action, handler in zip(self.plan.actions, handlers):
+            self.interruption.allowed = False
             if self.context.cancellation.is_cancelled:
                 return self.report(d.ExecutionErrorCode.CANCELLED)
             outputs = OutputEmitter(self, action.action_id)

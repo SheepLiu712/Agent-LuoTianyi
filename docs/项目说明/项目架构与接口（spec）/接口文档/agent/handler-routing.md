@@ -21,7 +21,7 @@ server/src/
             └── router.py         # ActionRouter
 ```
 
-两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产刺激注册集合为空；行动注册 SAY 音频处理器，装配由 AgentRuntime 初始化完成。
+两个 router 模块及各级包位于以上路径。各 handlers 包的 `__init__.py` 不重导出内部类型。生产刺激注册 INTERACTION_ENDING；行动注册 SAY 音频处理器，装配由 AgentRuntime 初始化完成。
 
 该文件树采用 [#63](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/63) 的两个路由模块位置；装配遵循已确定的 AgentRuntime 初始化约定，直接位于 `agent_runtime/agent_runtime.py`。文件树只列出路由涉及的文件；两个 `router.py` 中定义注册器和处理器协议，当前没有具体业务 Handler 文件。
 
@@ -86,7 +86,7 @@ class ActionRouter(Generic[HandlerT]):
 
 行动路由使用每项 `action.kind`。`START_THINKING` 由 stage 消费，ActionRouter 构造时注册该键抛出 `ValueError`；以该键查找仍属于未注册，抛出 `KeyError`。
 
-枚举中已有成员不表示已注册，更不表示已有真实业务实现。生产 StimulusRouter 为空，ActionRouter 注册 ActionKind.SAY。
+枚举中已有成员不表示已注册，更不表示已有真实业务实现。生产 StimulusRouter 注册 StimulusKind.INTERACTION_ENDING，ActionRouter 注册 ActionKind.SAY。
 
 ### 选择范围与调用流程
 
@@ -120,7 +120,7 @@ realize_action_plan(plan, execution_context, output_sink)
 
 ## 与门面和运行时的衔接
 
-AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；装配参数只供运行时和模块内测试使用，不从门面暴露 router。生产装配为每个角色注册 SayHandler，共用 SpeakingSkill；刺激注册序列仍为空。任一 router 构造失败时，AgentRuntime 初始化失败，沿用已有初始化清理规则，不发布半成品运行时。
+AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；装配参数只供运行时和模块内测试使用，不从门面暴露 router。生产装配为每个角色注册 SayHandler，共用 SpeakingSkill；刺激侧注册 InteractionEndingHandler。任一 router 构造失败时，AgentRuntime 初始化失败，沿用已有初始化清理规则，不发布半成品运行时。
 
 门面完成其契约规定的入口检查后才查询 router；路由器不自行重复这些检查：
 
@@ -152,7 +152,7 @@ class ActionHandler(Protocol):
 - plans 接收完整 draft，由门面固定角色、请求、交互与修订，校验 source_stimulus_ids 只能来自触发刺激及 pending；按本次 ordinal 构造完整计划并交付。报告只记录已确认接收的计划 ID，失败停止行为以 PlanEmitter 契约为准。
 - outputs 构造当前行动绑定的领域输出；成功回执必须是 OutputReceipt 且 execution_id、sequence_no 匹配。有效回执后记录累计 output_started=True；交付失败阻止后续行动。确认不匹配属于 INTERNAL_ERROR，不能跳过后继续发送。
 - 两个交付对象在调用外部 sink 前检查取消，sink 等待返回后先保存已确认接收事实，再检查取消。取消后不开始下一次交付。每次调用结束后释放 sink 引用。
-- handle 正常返回的 HandlingReport 必须匹配请求、触发刺激、修订，considered 必须是 pending 的有序子集，emitted_plan_ids 必须等于真实回执记录。不合法的处理器结果转 INTERNAL_ERROR，pending 全部 retained，保留真实 emitted_plan_ids，不接受伪造消费。合法报告的消费和保留事实原样结算；令牌已取消时改为 CANCELLED/error_code=None，保留合法结算事实。
+- handle 正常返回的 HandlingReport 必须匹配请求、触发刺激、修订，considered 必须是 pending 的有序子集，emitted_plan_ids 必须等于真实回执记录。不合法的处理器结果转 INTERNAL_ERROR，pending 全部 retained，保留真实 emitted_plan_ids，不接受伪造消费。合法报告按真实消费结算。令牌已取消时改为 CANCELLED/error_code=None；若允许中断的提取被 SUPERSEDED 且尚未交付计划，则保留请求中的全部 pending；生命周期取消仍保留合法消费事实。
 - 处理器抛异常时，尚无已返回的消费事实，pending 全部 retained；已确认接收的计划仍写入报告。失败处理器也可正常返回合法的 FAILED 报告来表达已确认的部分结算。
 - ActionResult 必须匹配当前 action_id，且不能用 NOT_STARTED 冒充已调用的结果；无效返回转 INTERNAL_ERROR。已完成行动按原顺序保留，失败或取消停止后续行动。返回的 effect_ref 与 irreversible_effect_committed 是内部处理器已确认的事实，失败或取消不能清除它们。
 - 行动等待返回时令牌取消：已返回 COMPLETED/ALREADY_COMPLETED 的效果仍为完成；整体报告为 CANCELLED，后续行动 NOT_STARTED。行动返回 FAILED 优先保留实际失败，不能用晚到取消掩盖。处理器返回 CANCELLED 时整体同样取消。
@@ -177,6 +177,10 @@ Agent 通过入口检查后登记本次在途调用，处理器和交付器清�
 | 修改构造所用列表 | 原 router 解析结果不变 |
 | 两个不同 router 注册相同 kind | 各自返回自己的对象，无全局串扰 |
 | 调用 resolve | 无处理器调用、副作用或异步任务 |
-| 无真实 Handler 的生产装配 | 合法且未取消的首次调用返回对应 UNSUPPORTED 报告；旧链继续通过 get_character_runtime 取得兼容对象 |
+| 未注册类别的生产调用 | 合法且未取消的首次调用返回对应 UNSUPPORTED 报告；旧链继续通过 get_character_runtime 取得兼容对象 |
 
 契约测试覆盖成功处理器调用、错误与回执校验、等待中取消、并发交互隔离、在途关闭超时重试。测试证据见 `server/tests/agent/README.md`。
+
+## 交互结束处理
+
+刺激路由登记 `INTERACTION_ENDING -> InteractionEndingHandler`。处理器调用当前角色 ContextFactory.release 释放已有交互上下文，返回 HandlingReport，不产生行动计划。

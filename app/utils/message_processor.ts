@@ -529,14 +529,16 @@ export class MessageProcessor {
   }
 
   private isDuplicatePacket(convUuid: string, payload: AgentMessagePayload): boolean {
-    // 签名覆盖 text/audio/expression/is_final_package：同一 uuid 的合法分片内容互不相同，
-    // 只有服务端 at-least-once 重发的完全相同的分片才会命中同一签名。
-    const signature = [
+    // 新包用消息内序号区分内容相同的合法音频块；旧服务端没有序号时保留原判断。
+    const signature = typeof payload.packet_sequence === 'number'
+      && Number.isSafeInteger(payload.packet_sequence) && payload.packet_sequence >= 0
+      ? `sequence:${payload.packet_sequence}`
+      : `content:${[
       payload.text || '',
       payload.audio || '',
       payload.expression || '',
       payload.is_final_package ? 'F' : '',
-    ].join('|');
+    ].join('|')}`;
 
     let seen = this.seenPacketsByUuid.get(convUuid);
     if (!seen) {

@@ -27,6 +27,7 @@ class ChatResponse(BaseModel):
     error_code: str | None = None
     display_in_chat: bool = True
     is_ephemeral: bool = False
+    packet_sequence: int | None = None
 
 class LoginRequest(BaseModel):
     username: str

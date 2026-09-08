@@ -234,3 +234,7 @@ StimulusErrorCode = Literal[
 10. 当前公开协议中不存在 Call/Realtime、`VoiceUtteranceFinal`、`UserJoinedActivity`、`ActivityInterrupted` 或玩偶触摸类型。
 
 测试不导入私有构造 helper，不以当前生产者常用值推导组合白名单，也不测试本文件权威范围外的未来 Stimulus。
+
+## InteractionEnding
+
+`InteractionEnding` 是 Stage 终止交互前发送的可构造刺激，kind=INTERACTION_ENDING。除刺激公共字段外，携带 `reason: InteractionEndingReason`，取值 USER_LEFT 或 SHUTDOWN。它不进入交互快照的 pending_stimuli。

@@ -33,7 +33,7 @@ AgentRuntime 直接装配角色身份和路由器；新 Agent 门面不接收数
 agent = agent_runtime.get_agent(character_id)
 ```
 
-路由装配见 [Handler 路由 SPEC](../agent/handler-routing.md)：AgentRuntime 显式构造每角色的两个空路由器并注入 Agent。
+路由装配见 [Handler 路由 SPEC](../agent/handler-routing.md)：AgentRuntime 构造每角色的路由器并注入 Agent：刺激路由登记 InteractionEndingHandler，行动路由登记 SayHandler。每个角色的 ContextFactory 由运行时装配并交给结束处理器。
 
 ## 稳定入口
 
@@ -80,7 +80,7 @@ agent = agent_runtime.get_agent(character_id)
 
 ## 使用示例
 
-调用 `get_agent("luotianyi")` 取得绑定该角色的门面后，可以调用其两个业务方法。生产路由表为空，合法请求返回对应 UNSUPPORTED 报告。旧聊天通过 `get_character_runtime(...).conscious` 及现有运行时业务代理完成处理。
+调用 `get_agent("luotianyi")` 取得绑定该角色的门面后，可以调用其两个业务方法。生产路由支持交互结束刺激及 SAY 的 TTS、预制音频分支；未登记的刺激或行动返回对应 UNSUPPORTED 报告。旧聊天通过 `get_character_runtime(...).conscious` 及现有运行时业务代理完成处理。
 
 ## 已覆盖的契约场景
 

@@ -32,8 +32,8 @@
 | `subconscious` | [潜意识](subconscious/README.md) | `server/src/subconscious` |
 | `capabilities` | [角色能力](capabilities/README.md) | `server/src/capabilities` |
 | `agent_runtime` | [角色工厂与注册](agent_runtime/README.md) | `server/src/agent_runtime` |
-| `stage` | [持续交互流程](stage/README.md) | 当前为 `server/src/chat_session` |
-| Adapter | [外部协议适配](adapter/README.md) | 当前主要为 `server/src/system/user_interface` 和 `server/src/legacy` |
+| `stage` | [持续交互流程](stage/README.md) | `server/src/stage`；兼容链路为 `server/src/chat_session` |
+| Adapter | [外部协议适配](adapter/README.md) | `server/src/adapter/websocket`；连接接入仍在 `system/user_interface` |
 | `world` | [箱庭世界和周期任务](world/README.md) | `server/src/world` |
 | `system` | [系统组装和基础设施](system/README.md) | `server/src/system` |
 | `utils` | [通用工具](utils/README.md) | `server/src/utils` |

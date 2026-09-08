@@ -74,6 +74,7 @@ def test_agent_domain_exports_registered_contract_without_persistence_policy() -
         "DEVICE_DISCONNECTED": "device_disconnected",
         "PROACTIVE_PROMPT_DUE": "proactive_prompt_due",
         "INTERACTION_DEADLINE": "interaction_deadline",
+        "INTERACTION_ENDING": "interaction_ending",
         "DYNAMIC_OBSERVED": "dynamic_observed",
         "DIARY_PLANNING_DUE": "diary_planning_due",
         "WORLD_OBSERVATION": "world_observation",

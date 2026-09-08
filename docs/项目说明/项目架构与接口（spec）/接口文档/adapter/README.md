@@ -1,70 +1,41 @@
-# Adapter 对外接口
+# WebSocket adapter 接口
 
-## 模块职责
+源码位于 `server/src/adapter/websocket`。SystemRuntime 创建一个共享 WebSocketAdapter，StageManager 持有同一实例；adapter 按交互保存 Stage 与连接的绑定，按实际连接管理投递队列。
 
-Adapter 把 WebSocket、HTTP、设备或电话等外部协议转换成系统内部数据，并把系统响应转换回外部协议。它负责鉴权、协议校验、ACK/NACK 和连接管理，不负责组织角色回复。
+## 公共接口
 
-当前实现分布在 `server/src/system/user_interface`、`server/server_main.py` 以及 `server/src/legacy` 的协议转换函数中，尚未合并为顶层 `adapter` 代码目录。
+构造：`WebSocketAdapter(config: dict | None = None, *, default_character_id: str = "luotianyi")`。私有配置类型校验每条连接的容量：`max_outputs=256`、`max_bytes=16777216`、`max_messages=64`，均为正整数。呈现状态控制任务也有数量上限。
 
-## 当前公开接口
+- `submit_output(output: StageOutput) -> asyncio.Future[None]`：同步接受业务输出或控制命令，返回实际发送结果。无连接、类型不支持或容量不足时抛出 `SinkRejectedError`。Future 成功表示服务端发送完成；取消表示输出被丢弃；异常表示发送失败。
+- `receive_event(connection: WebSocketConnection, event: WSMessage) -> bool`：以认证身份转换事件，按绑定找到全部目标 Stage，再向其 `stimulus_input_sink` 投递。全部目标可接收才入队。无目标绑定或非法字段抛出 ValueError；容量或生命周期不允许接收时返回 False。
+- `await bind(stage: ChatStage, connection: WebSocketConnection) -> None`：校验用户身份并绑定；重绑先停止旧执行、清理旧投递，再通知 Stage 上线。
+- `await disconnect(stage: ChatStage, connection: WebSocketConnection | None = None) -> None`：拆除绑定，通知 Stage 离线，结算待发送输出并等待在途发送退出。指定 connection 时只解除这一连接；旧断线通知不会解除新连接。最后一个绑定移除后释放连接投递任务。
+- `supports_input(event: WSMessage) -> bool`：识别文本和打字业务事件。
 
-### `WebSocketService`
+绑定和拆除操作在调用者取消后仍完成已经开始的生命周期变更。adapter 不另设 send_agent_state、cancel_execution、release 或 close 公共方法。
 
-- `await try_recv_client_msg(connection) -> WSMessage | None`：接收并解析一条客户端消息。
-- `await handle_auth_event(...)`：处理 WebSocket 鉴权事件。
-- `try_accept_chat_event(...) -> ChatEventAcceptance`：校验一条聊天事件是否应进入流水线。
-- `is_chat_related_event(...)`：判断是否为聊天相关事件。
-- `convert_to_stimulus(...) -> Stimulus`：把外部消息转换成领域刺激。
-- `convert_to_chat_input_event(...) -> ChatInputEvent`：转换为当前 stage 接收的聊天事件。
-- `await send_system_ready_event(...)`、`await send_agent_state_event(...)`、`await send_error_event(...)`：发送系统状态。
-- `await send_ack_event(...)`、`await send_nack_event(...)`、`await send_duplicate_ack_event(...)`：发送消息接收结果。
-- 消息 ID 和重复消息检查方法：保证重试幂等。
-- `await handle_ping_event(...)`：处理连接心跳。
+## 输入协议
 
-### `WebSocketConnection`
+`_input.py` 负责输入转换。文本兼容 user_text、user_message、message、chat_message、chat，依次取 message、text、content 的首个非空字符串，清理首尾空白，最多 20,000 字符。user_typing 转成 UserTyping，text_length 为 0 至 100,000 的整数。
 
-- 保存当前连接、用户身份和认证状态。
-- `set_user(...)`、`await auth(...)`：在鉴权成功后绑定用户。
+认证用户身份来自 connection；payload 不能覆盖身份。文本 ephemeral=false，打字 ephemeral=true，source=USER。顶层 client_msg_id 非空白且不超过 128 字符。刺激 ID 由认证用户和客户端消息 ID 生成。合法非负毫秒 ts 转为 UTC 时间，省略时使用当前时间。
 
-### `UserInterface`
+目标兼容 target_character_ids、target_characters、character_ids、target_character_id、character_id；最多八个目标，每项最多 64 字符。省略目标时使用构造时指定的默认角色。
 
-供 REST 路由调用的业务边界包括：
+`WebSocketService.try_accept_stimulus_event(connection, event, *, adapter)` 保留网络侧的接收状态、客户端重试去重；重复事件不再次交给 adapter。心跳、认证等连接维护事件不进入 adapter。生产 `/chat_ws` 当前仍使用旧 ChatStream，输入落库也沿用旧流程。
 
-- 公钥取得和密码解密。
-- 注册、登录、自动登录、密码重置。
-- 用户偏好读取和修改。
-- 历史记录、历史图片读取。
-- 动态列表、评论、未读数量和已读标记。
+## 输出和控制
 
-具体 HTTP 路径由 `server_main.py` 注册；路由应只做参数/响应转换，再调用这些接口或 SystemRuntime 中的服务。
+`StageOutput` 定义在 `src/domain/stage`，包括：
 
-### 协议数据
+- `AgentOutput`：支持 TextFinalOutput、ExpressionOutput、AudioChunkOutput、MessageEndOutput。
+- `AgentPresentationChanged(interaction_id, state)`：转成 `agent_state_changed`，state 为 thinking 或 waiting。
+- `CancelDelivery(interaction_id, execution_id)`：同步标记该执行取消，丢弃未发送内容，返回等待取消收尾的 Future。
 
-- `WSMessage(event_type, payload, client_msg_id, ts, reply_to)`：解析后的客户端消息。
-- `WSEventType`：WebSocket 事件类型枚举。
-- `ChatResponse`：发送给客户端的聊天响应，含文本、音频、表情、最终包标记、音频错误、显示/临时标记等字段。
+`_protocol.py` 转换业务字段，`_delivery.py` 组装 ChatResponse。音频每包最多 48 KiB 原始字节，Base64 编码后发送。消息 UUID 来自交互、执行、行动身份；packet_sequence 在每条消息内从零递增。
 
-### legacy 转换函数
+同一连接按完整消息顺序投递，一条消息的终止包之后才能发送下一条消息。不同连接独立。CONVERSATION 显示并保留聊天内容；EPHEMERAL_REACTION 不输出文字，使用 display_in_chat=false、is_ephemeral=true。结束不自动恢复表情。
 
-- `validate_ws_chat_message(...)`：检查旧 WebSocket 消息格式和大小。
-- `ws_message_to_stimulus(...) -> Stimulus | None`：旧协议转换为领域刺激；非聊天事件返回 `None`。
-- `stimulus_to_chat_input_event(...) -> ChatInputEvent | None`：领域刺激转换为当前 stage 输入；无法映射为聊天事件时返回 `None`。
-- `is_chat_related_ws_message(...)`：判断旧消息是否属于聊天输入。
+取消不会中断正在发送的单包。已经开始且尚未终止的消息，在当前包结束后发送文字、音频、表情均为空的终止包，error_code=TTS_CANCELLED。尚未开始的消息直接移除。该终止包位于后续消息之前。
 
-## 正常与异常行为
-
-- 合法消息转换为 `Stimulus`/`ChatInputEvent` 后交给 stage；Adapter 不直接调用 subconscious 或 capability。
-- 协议字段、类型、消息大小或目标角色不合法时抛出校验异常，或向客户端发送 NACK/错误事件。
-- 未认证消息不得进入用户聊天流。
-- ACK 表示服务器已接受该客户端消息，不等于 Agent 已经生成回复。
-- 网络断开、重复 ID、认证失败和发送失败是预期分支，必须有显式行为和测试。
-
-## 使用示例
-
-客户端重发同一个 `client_msg_id` 时，Adapter 识别重复并返回重复确认，不再次把消息送进 stage。新消息通过校验后转换成内部输入，stage 完成处理后，Adapter 再将 `ChatResponse` 编码为 WebSocket 事件。
-
-## 应覆盖的契约场景
-
-- 同一 `client_msg_id` 重发只进入 stage 一次，并收到可识别的重复 ACK。
-- 未认证、字段错误、超长文本、超限图片和未知事件都在 Adapter 边界被拒绝。
-- 连接断开时发送失败不会被记录成已送达；重新连接后的新消息仍可正常鉴权和入队。
+已明确提交的失败终止包保留 TTS_EMPTY 或 TTS_STREAM_ERROR。单包发送限时十秒，发送失败标记连接失效、结束待投递 Future，不重发。Future 不表示客户端已播放完成。

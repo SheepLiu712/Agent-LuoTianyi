@@ -188,3 +188,5 @@ python -m pytest tests/domain -q
 ```
 
 已完成验证记录见 [开发进度](../../../../开发进程文档/开发进度/Agent-handle-realize-深模块重构.md)。
+
+交互结束协调刺激 `InteractionEnding` 与回复期限一样，不允许出现在 pending_stimuli 中。

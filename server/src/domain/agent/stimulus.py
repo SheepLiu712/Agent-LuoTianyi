@@ -52,6 +52,7 @@ class StimulusKind(str, Enum):
     DEVICE_DISCONNECTED = "device_disconnected"
     PROACTIVE_PROMPT_DUE = "proactive_prompt_due"
     INTERACTION_DEADLINE = "interaction_deadline"
+    INTERACTION_ENDING = "interaction_ending"
     DYNAMIC_OBSERVED = "dynamic_observed"
     DIARY_PLANNING_DUE = "diary_planning_due"
     WORLD_OBSERVATION = "world_observation"
@@ -234,6 +235,25 @@ class InteractionDeadline(Stimulus):
     """交互已到强制重评时点的协调信号，仅携带刺激公共字段。"""
 
     kind: ClassVar[StimulusKind] = StimulusKind.INTERACTION_DEADLINE
+
+
+class InteractionEndingReason(str, Enum):
+    """交互结束原因：用户离线超时或服务器关闭。"""
+
+    USER_LEFT = "user_left"
+    SHUTDOWN = "shutdown"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class InteractionEnding(Stimulus):
+    """Stage 结束交互前发送的通知，供 Agent 保存并释放交互状态。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.INTERACTION_ENDING
+    reason: InteractionEndingReason
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_instance(self.reason, InteractionEndingReason)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
