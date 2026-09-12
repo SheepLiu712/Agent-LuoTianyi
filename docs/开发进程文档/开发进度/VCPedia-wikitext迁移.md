@@ -29,15 +29,13 @@
 - 当前依赖清单实际仅新增未锁版本的 `mwparserfromhell`，不采用下方历史记录的版本范围；本次未安装或升级依赖，也未执行联网依赖漏洞审计。两个内部文件现合计 495 行，旧“约 300 行”仅是历史阶段体量；整体作为用户授权的完整数据通道基线提交，不拆成仅列表或缺详情的半迁移。
 - 未验证：本次未联网；历史真实 requests 挑战后 curl HTTP 403 尚无成功验证。真实 API/详情/入库、curl 通过挑战、未知模板/Lua/动态渲染及全站等价、全 Server/LLM/GPU/生产环境均未验收。既有缓存写入缺失、批次无限制和嵌套事件循环 LLM 问题未改动，不构成本目标已交付的证据。
 
-### 2026-09-09 修复独立审查发现的 tabs 标题作用域泄漏（本地未提交）
-
+### 2026-09-09 修复独立审查发现的 tabs 标题作用域泄漏
 - HEAD 旧公开入口核准 4 个人工匹配 HTML/wikitext 样例。`{{tabs|text1=<h2>歌词</h2>}}<poem>外部歌词</poem>` 恢复旧 `lyrics/spaced_lyrics=""`；简介不采外部正文、标题不跨页签，tabs 内有正文和歌词仍正常采集。标题发现不再展平参数到父级；每个参数独立递归，保留参数内 wiki 标题必要重解析。仅改内部解析器及公开入口回归，不改 API/反爬或公开 interface。
 - 实际命令统一前缀 `conda run -n lty --cwd server python -m pytest`，选项 `-q --tb=short -p no:cacheprovider`。`tests/world -k tabs_heading_keeps_parameter_sibling_scope`，basetemp `data/test_outputs/tabs-scope-red-1`：**3 failed, 1 passed，5.30s**，均为泄漏输出断言失败；修复后 `tests/world -k 'tabs_heading_keeps_parameter_sibling_scope or compat2_global_headers'`，basetemp `data/test_outputs/tabs-scope-green-1`：**8 passed，3.96s**。
 - 原四组 `tests/world tests/test_world_task_vcpedia_new_songs.py tests/test_world_runtime_config.py tests/test_world_task_event_cleanup.py -k 'not live'`，独立 basetemp `data/test_outputs/tabs-scope-regression-1`：**116 passed, 1 deselected，6.01s**。同范围 collect-only，独立 basetemp `data/test_outputs/tabs-scope-collect-1`：**116/117 collected，4.89s**；逐项确认原 112 个选中 ID 全保留，仅新增四例。conda lty compileall（抓取包与上述测试）、`git diff --check` 通过。
 - 完成 Red/Green 作者自审：仅恢复标题局部同级边界，未增加通用 DOM 层；自审不替代独立审核。保留已有改动，无 commit/push/PR。未联网或重测性能；真实 API/curl 成功、全站等价、未知模板/Lua/动态渲染及全 Server/生产环境仍未验证。
 
-### 2026-09-09 继续取消前兼容修复与内部优化（本地未提交）
-
+### 2026-09-09 继续取消前兼容修复与内部优化
 - 接手实测四组离线基线 **89 passed, 1 deselected，5.64s**：取消前已留下四类修复和 14 个测试，全部保留，不回退制造 Red。重新运行仓库外 HEAD 校准脚本，通过旧公开入口核验 **8 个详情、4 个列表 HTML 样例**；人工匹配 wikitext，不是真实站点采样。显式/容器内标题仍返回 Song、正文及完整歌词；noinclude 两条、includeonly 一条、onlyinclude 三条；简介不采额外 div/直接 table；列表甲乙丙、简介甲乙丙丁均与旧输出一致。
 - 补发现 tabs 参数标题为 Text 的遗漏：公开入口 focused Red **1 failed, 3 passed，5.39s**，实际为 Person/空简介/空歌词；仅在模板展开边界恢复必要重解析后，四类 focused Green **15 passed，4.15s**。对应命令前缀 `conda run -n lty --cwd server python -m pytest tests/world`，分别使用 `-k compat2_global_headers` / `-k compat2`，`-q --tb=short -p no:cacheprovider`，独立 `--basetemp=data/test_outputs/resume-header-red-1` / `resume-fix-green-1`。原有四类修复本次为补回归，未将临时目录存在当成历史 Red 证据。
 - 修复自审后再优化：复用已解析节点，保留模板标题必要重解析；歌词首 p 之后复制局部树再移除 br，不改共享树；首 p/table/poem/infobox 使用惰性标签查找，保留递归顺序与空容器停止；标题清理复用、模板名每阶段共用一次规范化结果、参数/属性消除重复查询，保留 Songbox 后创作者的两阶段覆盖，无全局缓存或通用 DOM 引擎。每份 HTTP 正文仅 JSON 解码一次，403 挑战优先、合法 JSON 中 Anubis 不误判、原 HTTP raise 优先；null/其他非对象仍失败，curl 兜底与列表抛错/详情 None 不变。
@@ -46,8 +44,7 @@
 - SPEC 已满足，沿用原入口，未新增 interface 文档/网络 marker/汇总歌词/目标标题/创作者摘要。已按 code-review-and-quality 完成修复与优化自审，不替代独立审核。分支仍为 `refactor/vcpedia-wikitext`，无 commit/push/PR，故无 SPEC/Red/Green commit。
 - 未验证：未重复联网，已知真实 curl 403 不变；真实 API/curl 成功、全站等价、未知模板/Lua/动态渲染、全 Server/LLM/GPU/生产环境未验证。
 
-### 2026-09-09 同包内部命名与类型整理（本地未提交）
-
+### 2026-09-09 同包内部命名与类型整理
 - SPEC 已满足；仅机械改名与注解，Red 不适用。两个内部文件现为 `server/src/world/get_new_songs/wiki_api.py`、`server/src/world/get_new_songs/wikitext_parser.py`；两个 fetcher 同步调用 `fetch_wikitext`、`parse_song_titles`、`parse_details`，文件内部 helper 保持原名。不新增公开 interface 或接口文档。
 - 类型沿用 typing 风格：请求入口接收字符串 base_url/title、`Callable[..., Response]` 和数值秒数 `float`（兼容现有 int），返回 str；列表接收 str，返回 `List[str]`；详情接收 source/title 两个 str，返回 `Dict[str, Union[str, Dict[str, str], List[str]]]`。不引入 Protocol、TypedDict 或新数据模型；Callable 的省略号保留 requests.get/Session.get 的关键字调用方式，不声称静态检查其关键字签名。
 - 本次真实前后命令均为 `conda run -n lty --cwd server python -m pytest tests/world tests/test_world_task_vcpedia_new_songs.py tests/test_world_runtime_config.py tests/test_world_task_event_cleanup.py -k 'not live' -q --tb=short -p no:cacheprovider --basetemp=data/test_outputs/naming-{before,after}-run-20260909`（分别展开 before/after 执行）：改前 **75 passed, 1 deselected in 8.09s**，改后 **75 passed, 1 deselected in 4.71s**。
@@ -56,8 +53,7 @@
 - 作者自审：按 code-review-and-quality 五轴核对改前源码副本与改后独立 diff，仅文件名、函数名、导入和注解变化，函数体逻辑无变动；旧源码路径/名称引用无残留，新入口无同名定义冲突。未改输出、异常处理、反爬、API 请求、解析、依赖或测试；历史文件引用仅更新当前定位，不生成历史新运行。自审不替代独立审核。
 - 分支仍为 `refactor/vcpedia-wikitext`，原有未提交改动保留，无 commit/push/PR/合并，无 SPEC/Red/Green commit。未重复联网；已知真实 curl HTTP 403 不变，真实 API/curl 成功、全站等价、未知模板/Lua/动态渲染、全 Server/LLM/GPU/生产环境及静态类型检查器均未验证。
 
-### 2026-09-09 修复独立审查的四项确定兼容差异（本地未提交）
-
+### 2026-09-09 修复独立审查的四项确定兼容差异
 - SPEC 已满足：已读取 AGENTS、开发守则、spec-tdd-pr-guard、迁移 PRD、原抓取说明与 world 接口。沿用 `VCPediaFetcher.fetch_entity_description` 和 `do_one_song`，不新增接口文档、不改变旧外部语义。全部已有未提交改动保留；分支仍为 `refactor/vcpedia-wikitext`，无 commit/push/PR/合并，也无 SPEC/Red/Green commit。
 - 交付：恢复显式 `Tabs`/`tabLabelTop` 容器首个 div.poem、首 p 与停止查找规则（空 Tabs 也停止，不任意递归汇总）；保留普通命名空间及前导冒号可见链接的文案，区分文件嵌入/分类声明；使用 mwparserfromhell 本地源码节点恢复显式 infobox、简介 div 首 table、歌词首 table 的旧选择和双列/单列行提取，保留 br、隐藏行、图片行和 navbox 停止语义；span 内 br 无分隔，不同 span 间仍为空格。
 - HEAD 对照：仓库外临时脚本 `check_head.py` 使用 `git show HEAD:server/src/world/get_new_songs/vcpedia_fetcher.py` 加载旧实现，只替换 requests 外部响应，调用旧公开入口核对完整返回值。最终 **6 个歌词、2 个链接、7 个表格样例全部匹配**。测试中的 HTML/wikitext 是人工对应 fixture，不是真实站点采样；期望不来自新解析器。
@@ -80,8 +76,7 @@
 - 作者自审：已加载 code-review-and-quality，核对 HEAD 选择/停止规则、测试外部边界和资源隔离；产品修正仅在 `server/src/world/get_new_songs/wikitext_parser.py`（按当前文件定位，历史验证未重跑），没有新增依赖、网络 HTML fallback、远程模板展开或通用 DOM 层。API+wikitext 与全站反爬 curl 保留不动。`git diff --check` 通过；原已有 tracked diff 文件及未跟踪文件保留。自审不替代更新后独立审核。
 - 未验证：本次不重复联网，最新真实结果仍为 requests 挑战后 curl HTTP 403（见下条记录）；真实 API 成功、真实详情/入库、curl 成功通过挑战、全站等价、未知模板/Lua/动态渲染、全 Server/LLM/GPU/生产环境均未验证。`-k 'not live'` 仅本次测试选择，没有新增 real_network marker、开关或永久跳过规则。
 
-### 2026-09-09 删除迁移网络门禁并直接联网验证（本地未提交）
-
+### 2026-09-09 删除迁移网络门禁并直接联网验证
 - 按用户明确要求覆盖本次外网默认标记规则：删除迁移新增的外网 marker、启用选项和跳过逻辑，conftest 恢复 HEAD 的真实 LLM 配置（含环境变量启用及原跳过说明）。真实测试本体保留，没有增加替代网络限制。PRD 同步直接运行方式；下文 skipped/未联网为各历史阶段事实，不代表当前配置或本次结果。
 - SPEC 已满足：沿用 world 任务入口，不改变产品代码、公开接口、批次、缓存策略、调度或反爬行为。配置清理的运行时 Red 不适用；缓存隔离属于旧测试最小修正，不伪造产品 Red。
 - 隔离修正：旧测试设置的 crawler.output_dir 并非实际缓存配置，已改为 tmp_path 下的 crawler.data_dir 与 crawler.vcpedia.output_dir；SQLite 和关键词目录仍使用 tmp_path。测试恢复真实 0.8 秒节流，不再 monkeypatch sleep；数据库全局绑定由 monkeypatch 恢复，临时 engine 在 finally dispose。关闭 LLM，没有调用模型或修改生产数据。
@@ -93,8 +88,7 @@
 - 作者自审：已加载 code-review-and-quality，核对本次配置删除、缓存/数据库/关键词隔离、错误真实性及最小差异；未修改其余既有未提交产品实现。分支仍为 refactor/vcpedia-wikitext，无 commit/push/PR/合并，无本次 SPEC/Red/Green commit；自审不替代他人审核。
 - 未验证范围：真实 API 成功响应、真实详情解析与入库、curl 成功通过挑战、全站与旧实现行为等价均未验证；全 Server、真实 LLM/GPU 和生产环境未运行。此次联网失败不得表述为迁移验收通过；既有产品批次无上限等问题未修改。
 
-### 2026-09-09 恢复可确定的旧抓取输出（本地未提交）
-
+### 2026-09-09 恢复可确定的旧抓取输出
 - 依据：读取 AGENTS、开发守则、spec-tdd-pr-guard、原抓取说明、world 接口及 HEAD 两个旧抓取实现。沿用现有入口，不创建接口契约文档；PRD 补充恢复原行为验收。此记录取代下文历史迁移测试对“目标标题、汇总歌词、追加创作者简介”等行为的认可，不抹去历史实现事实。
 - 可信对照：测试文件内 LIST_SOURCE/LIST_HTML 和 HEAD_DETAIL_CASES 为人工匹配的源码/渲染 HTML，不是真实站点采样。在 conda lty/server cwd 下用 `git show HEAD:server/src/world/get_new_songs/{daily_new_song_fetcher,vcpedia_fetcher}.py` 加载旧实现，只替换 requests 外部网络响应，实际调用两个旧公开入口。核验结果为 `HEAD detail: 5 matched`、`HEAD list: matched`；包括旧无简介时的 `[""]` 输出，不把新实现当期望。
 - 交付：列表恢复显示名、去星号、显示名去重及旧文本/链接过滤；不增加全局目标映射，旧显示名抓错问题保持原状。详情恢复 h2 歌词分类、Person 不额外返回 short_summary、创作者不追加 summary、简介 h3 截断及“截至…收藏”删除、不汇总多版本/标题外歌词、最后歌词 h2 后首个 poem/p 的 span 优先与 br 无分隔格式。过滤明确的 image/width/style 等展示控制参数。API 共享反爬/curl 实现未修改，两个入口挑战及失败回归保留。

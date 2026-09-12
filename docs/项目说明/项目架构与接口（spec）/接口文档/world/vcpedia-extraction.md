@@ -27,7 +27,7 @@ inline 可选 `skip_if` 为非空参数名到非空字符串列表的非空对�
 
 ## 缺失补提
 
-内部一次得到独立结果及临时缺失清单，不持久化 requested/metadata。明确空业务字段（含 staff 非空角色的空值）、已确认歌曲缺简介/歌词为缺口。仅在已进入明确简介/歌词正文的取文路径中，未能处理的非空正文槽内容标记对应 needed 布尔值；页外未知模板、资料/控制参数、空调用及已配置跳过项本身不构成缺口。Ruby 等含表层的结构只提交实际采用分支的缺口：表层非空时不因未采用的注音内容标记，表层为空而回退取注音时按注音的实际取文结果标记。未完成目标不因别处候选非空而清除；保留既有单字段首成功返回行为，源码顺序不表示主版本，不增加选首失败即空、拼接全部歌词或版本标签。可选补提仍只按 requested 字段及类型合并，允许替换已标记不完整的单字段；完整且未请求的字段不覆盖，原源码保留作材料，不向模型指示主次。未知参数仍不盲拼，不新增模板专用解释规则。
+内部一次得到独立结果及临时缺失清单，不持久化 requested/metadata。明确空业务字段（含 staff 非空角色的空值）、已确认歌曲缺简介/歌词为缺口。仅在已进入明确简介/歌词正文的取文路径中，未能处理的非空正文槽内容标记对应 needed 布尔值；页外未知模板、资料/控制参数、空调用及已配置跳过项本身不构成缺口。Ruby 等含表层的结构只提交实际采用分支的缺口：表层非空时不因未采用的注音内容标记，表层为空而回退取注音时按注音的实际取文结果标记。未完成目标不因别处候选非空而清除；保留既有单字段首成功返回行为，源码顺序不表示主版本，不增加选首失败即空、拼接全部歌词或版本标签。可选补提仍只按 requested 字段及类型合并，允许替换已标记不完整的单字段；完整且未请求的字段不覆盖，材料为一次字形转换并剔除计数统计后的源码文本，不向模型指示主次。未知参数仍不盲拼，不新增模板专用解释规则。
 
 新抓取 Song 保持原摘要时机（不受 short_summary 展示参数影响）：use_llm=true 且 llm_module 可用时独立生成一次纯文本摘要。完整页仅1次摘要；仍有缺项且 extraction_llm_module 可用时先1次 JSON 补提、仅合并缺口，再以合并后的 song_data 生成1次摘要，共2次。补提失败仍执行摘要；摘要失败取已合并简介前100字符，不二次转换。Person 保持已有可选缺项补提，不新增摘要或分类。关闭模型或缓存命中均0次模型调用。
 
@@ -35,7 +35,7 @@ crawler.llm_module 与可选 crawler.extraction_llm_module 是两个显式完整
 
 VCPediaFetcher(config, llm_module=None, *, extraction_llm_module=None) 与 sync_daily_new_songs(config, llm_module=None, *, extraction_llm_module=None) 仅增加 keyword-only 注入；task.initialize 注册两配置，run_once 显式传递。LLMService/LLMModule 没有 per-call prompt override，复用原注册与 generate_response API。补提 cfg 缺省不注册、不主动读取额外补提文件；补提 cfg 存在时其 prompt_name 必须可加载，PromptManager 仍逐文件容错跳过坏文件，但 task.initialize 不为该配置做局部降级，prompt 缺失或损坏即直接失败。
 
-独立补提 prompt 只请求 needed 信息框字符串字典、summary 字符串数组、lyrics 原文字符串，不请求 short_summary；提供正向示例及材料不足填 null 示例。输入 song_data、needed、materials 均必填，materials.text 为一次字形转换后的源码文本。响应只解析 JSON 对象与字段类型，坏 JSON/null/异常/超时保持规则值继续摘要；只合并请求的缺项。补提新字段及新摘要各沿已有保护转换一次，不覆盖已有字段，不做语义判卷。source_extraction 只收集材料与合并，不调用模型；必要嵌入先于模型，程序渲染后直接合并（`rendered=True`，保持站点字形），渲染文本不作为模型材料——材料只含源码文本，模型的价值在读源码而非重读已渲染制品——因而不改变其预算。材料在转换后、截断前按既有计数政策剔除不可展开的统计：散文行移除含计数模板的完整句子（同简介政策），以 `|` 起的模板参数行仅移除含计数模板的分句（同其他资料政策），判据为模板名后缀 `count`；因此材料不含计数模板，成就表述随统计句一并移除，其他非计数模板照旧。`source_extraction.material_text(source)` 是唯一材料构造入口，collect_materials 与 `scripts/vcpedia_prompt_lab.py` 都经它取材料。
+独立补提 prompt 只请求 needed 信息框字符串字典、summary 字符串数组、lyrics 原文字符串，不请求 short_summary；提供正向示例及材料不足填 null 示例。输入 song_data、needed、materials 均必填，materials.text 为一次字形转换后的源码文本。响应只解析 JSON 对象与字段类型，坏 JSON/null/异常/超时保持规则值继续摘要；只合并请求的缺项。补提新字段按材料同一次转换的结果作为最终文本合入，不做第二次转换；新摘要沿已有保护转换一次。已标记不完整的请求字段可被替换，完整且未请求的字段不覆盖，不做语义判卷。source_extraction 只收集材料与合并，不调用模型；必要嵌入先于模型，程序渲染后直接合并（保持站点字形，不再二次转换），渲染文本不作为模型材料——材料只含源码文本，模型的价值在读源码而非重读已渲染制品——因而不改变其预算。材料在转换后、截断前按既有计数政策剔除不可展开的统计：散文行移除含计数模板的完整句子（同简介政策），以 `|` 起的模板参数行仅移除含计数模板的分句（同其他资料政策），判据为模板名后缀 `count`；因此材料不含计数模板，成就表述随统计句一并移除，其他非计数模板照旧。`source_extraction.material_text(source)` 是唯一材料构造入口，collect_materials 与 `scripts/vcpedia_prompt_lab.py` 都经它取材料。
 
 仅明确目标区域的 Embed/嵌入/嵌入片段/CollectCodeData 允许局部 parse 完整调用；归属只由章节及已知正文槽传递，page 等普通参数里的“歌词/简介”不授权，局部标题不跨兄弟参数，无法归属则不获取并保留规则缺口；最多两片，去重且不递归渲染结果，单片8000字符、总文本12000字符保护。原材料与模型响应最多24000字符；失败保持本地结果。不建立通用 unknown renderer。HTTP 挑战与 curl 沿既有通道。标题 page 请求仍 GET；仅局部 render_fragment 使用 POST，UTF-8 表单编码正文放 request body，curl 以 `--data-binary @-` stdin 传输并带 `Content-Type: application/x-www-form-urlencoded`，不把长源码放 URL/argv；原 HTTP 状态、challenge、write-out 校验不变。
 
