@@ -106,7 +106,7 @@ def field_diff(before: dict, after: dict) -> dict:
 
 
 def run_live(prompt_dir: Path, prompt_name: str, variables: dict, data: dict, needed: dict,
-             provider_override: str | None = None):
+             provider_override: str | None = None, temperature: float | None = None):
     """Call the configured provider once through the project's own registration path."""
     from src.system.admin.config_store import ConfigStore
     from src.system.admin.secret_store import SecretStore
@@ -130,6 +130,8 @@ def run_live(prompt_dir: Path, prompt_name: str, variables: dict, data: dict, ne
     # this falls back to has use_json=false, so force it instead of measuring the wrong thing.
     module_cfg["llm"]["use_json"] = True
     module_cfg["llm"]["enable_thinking"] = False
+    if temperature is not None:
+        module_cfg["llm"].setdefault("params", {})["temperature"] = temperature
     provider = module_cfg["llm"]["name"]
     service_cfg = copy.deepcopy(config["llm_service"])
     providers = service_cfg.get("available_llms") or {}
@@ -145,6 +147,7 @@ def run_live(prompt_dir: Path, prompt_name: str, variables: dict, data: dict, ne
     service_cfg["prompt_manager"] = {"template_dir": str(prompt_dir)}
     service = LLMService(service_cfg)
     module = service.register_llm_module(MODULE_NAME, module_cfg)
+    effective = {key: module.params.get(key) for key in ("temperature", "max_tokens", "top_p") if key in module.params}
     if any(secret in value for value in variables.values() if isinstance(value, str)):
         raise SystemExit("材料中包含 provider 凭据；已中止，避免外发")
     response = asyncio.run(module.generate_response(**variables))
@@ -159,31 +162,41 @@ def run_live(prompt_dir: Path, prompt_name: str, variables: dict, data: dict, ne
         merge_missing(data, parsed, needed)
     return {"response": response, "parsed": parsed, "usage": usage,
             "merged_diff": field_diff(before, data), "merged": data,
-            "provider": provider, "base": base, "module": module_cfg}
+            "provider": provider, "base": base, "effective_params": effective, "module": module_cfg}
 
 
-def apply_drop(data: dict, needed: dict, spec: str) -> None:
-    """Simulate a gap page by removing fields, since frozen material is complete."""
+def apply_field_spec(data: dict, needed: dict, spec: str, *, remove: bool) -> None:
+    """Apply a comma list like ``lyrics,summary,infobox:UP主``.
+
+    ``remove=True`` simulates a gap page; ``remove=False`` only requests the field while
+    keeping its content, which exercises "complete the missing part" instructions.
+    """
     for item in (part.strip() for part in spec.split(",")):
         if not item:
             continue
         if item == "lyrics":
-            data["lyrics"] = ""
-            data.pop("spaced_lyrics", None)
+            if remove:
+                data["lyrics"] = ""
+                data.pop("spaced_lyrics", None)
             needed["lyrics"] = True
         elif item == "summary":
-            data["summary"] = []
+            if remove:
+                data["summary"] = []
             needed["summary"] = True
         elif item == "infobox":
-            data["infobox"] = {}
-            needed["infobox"] = []
+            if remove:
+                data["infobox"] = {}
+                needed["infobox"] = []
+            else:
+                needed["infobox"] = list(data.get("infobox", {}))
         elif item.startswith("infobox:"):
             key = item.split(":", 1)[1]
-            data.setdefault("infobox", {}).pop(key, None)
+            if remove:
+                data.setdefault("infobox", {}).pop(key, None)
             if key not in needed["infobox"]:
                 needed["infobox"].append(key)
         else:
-            raise SystemExit(f"无法识别的 --drop 项：{item}（可用 lyrics / summary / infobox / infobox:字段名）")
+            raise SystemExit(f"无法识别的字段项：{item}（可用 lyrics / summary / infobox / infobox:字段名）")
 
 
 def main() -> int:
@@ -194,10 +207,13 @@ def main() -> int:
     parser.add_argument("--prompt-b", type=Path, help="第二个提示词，用于 A/B 对比")
     parser.add_argument("--title", help="覆盖 parse_details 使用的标题")
     parser.add_argument("--needed", help='覆盖缺项，例如 {"infobox":["UP主"],"summary":true,"lyrics":true}')
-    parser.add_argument("--drop", help="制造缺项：lyrics,summary,infobox,infobox:字段名（冻结材料本身是完整的）")
+    parser.add_argument("--drop", help="制造缺项并清空该字段：lyrics,summary,infobox,infobox:字段名")
+    parser.add_argument("--request", help="只请求该字段、保留已有内容：lyrics,summary,infobox,infobox:字段名")
     parser.add_argument("--dry-run", action="store_true",
                         help="只本地渲染提示词，不调用模型（默认会真实调用）")
     parser.add_argument("--provider", help="覆盖 provider 名（默认取配置里的 extraction_llm_module 或回退 llm_module）")
+    parser.add_argument("--temperature", type=float,
+                        help="固定采样温度；低于默认值时 A/B 才可归因（provider 默认常为 0.7）")
     parser.add_argument("--out", type=Path, help="产物目录（默认 data/test_outputs/prompt-lab/<时间戳>）")
     args = parser.parse_args()
 
@@ -206,15 +222,18 @@ def main() -> int:
     logging.disable(logging.CRITICAL)
 
     from src.world.get_new_songs.wikitext_parser import parse_details
+    from src.world.get_new_songs.source_extraction import material_text
 
     source, title = load_material(args.material, args.title)
     parsed = parse_details(source, title, with_missing=True)
     data, needed = parsed if isinstance(parsed, tuple) else (parsed, {})
     if args.drop:
-        apply_drop(data, needed, args.drop)
+        apply_field_spec(data, needed, args.drop, remove=True)
+    if args.request:
+        apply_field_spec(data, needed, args.request, remove=False)
     if args.needed:
         needed = json.loads(args.needed)
-    materials = {"raw": source[:24000]}
+    materials = {"text": material_text(source)}
     variables = {"song_data": json.dumps(data, ensure_ascii=False),
                  "needed": json.dumps(needed, ensure_ascii=False),
                  "materials": json.dumps(materials, ensure_ascii=False)}
@@ -226,7 +245,7 @@ def main() -> int:
     print(f"缺项: {json.dumps(needed, ensure_ascii=False)}")
     if not any(needed.values()):
         print("  提示：该材料没有缺项，生产路径不会调用模型；用 --drop lyrics,summary 造出缺项再迭代提示词")
-    print(f"材料键: {sorted(materials)}（渲染片段由程序本地合并，不作为模型材料）")
+    print(f"材料键: {sorted(materials)}（已做一次字形转换：受保护字形定稿、LC/nowiki 标记已去）")
     print(f"明文提示词字符数: {len(variables['song_data']) + len(variables['needed']) + len(variables['materials'])}")
     print()
 
@@ -269,7 +288,7 @@ def main() -> int:
         run_data = copy.deepcopy(data)
         try:
             result = run_live(payload["dir"], payload["name"], variables, run_data,
-                              copy.deepcopy(needed), args.provider)
+                              copy.deepcopy(needed), args.provider, args.temperature)
         except Exception as exc:  # a failed call must not lose the other side of the A/B
             print(f"    失败：{type(exc).__name__}: {exc}")
             report["runs"][label] = {"error": f"{type(exc).__name__}: {exc}"}
@@ -281,6 +300,7 @@ def main() -> int:
             json.dumps(result["merged"], ensure_ascii=False, indent=2), encoding="utf-8")
         usage = result["usage"]
         print(f"    provider: {result['provider']}（基准配置：{result['base']}）")
+        print(f"    生效采样: {json.dumps(result['effective_params'], ensure_ascii=False)}")
         print(f"    usage: prompt={usage.get('prompt_tokens', '?')} completion={usage.get('completion_tokens', '?')}"
               f" total={usage.get('total_tokens', '?')}")
         print()

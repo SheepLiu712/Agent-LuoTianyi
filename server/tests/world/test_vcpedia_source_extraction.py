@@ -224,16 +224,21 @@ def test_text_conversion_plain_fields_and_lc_fallback(http, tmp_path):
     assert http.calls[0]["page"] == ["龍頁"]
 
 
-def test_text_conversion_model_new_fields_once_and_raw_unchanged(http, tmp_path):
+def test_material_is_normalized_and_model_answer_stored_verbatim(http, tmp_path):
     http.source = '{{VOCALOID Songbox|演唱=-{樂師}-|UP主=|简介=繁體-{臺灣}-介紹|歌词=}}'
-    model = Model({"infobox": {"UP主": "龍-{臺}-<nowiki>{{夢}}-{灣}-</nowiki>"},
-        "lyrics": "繁體-{樂聲}-<nowiki>夢，\n[[龍]]</nowiki>"})
+    model = Model({"infobox": {"UP主": "龙臺夢灣"}, "lyrics": "繁体乐声夢，\n龍"})
     data = crawler(tmp_path, model).fetch_entity_description("夢與樂")
-    assert data["infobox"] == {"演唱": "樂師", "UP主": "龙臺{{夢}}-{灣}-"}
-    assert data["lyrics"] == "繁体樂聲夢，\n[[龍]]"
-    assert data["spaced_lyrics"] == "繁体樂聲夢，\n[[龍]]"
+    # 本地路径：LC 保护字形保持原文用字，其余转 zh-cn
+    assert data["infobox"]["演唱"] == "樂師"
+    # 材料已由程序规范化，模型答案即最终用字，合并时不再转换
+    assert data["infobox"]["UP主"] == "龙臺夢灣"
+    assert data["lyrics"] == "繁体乐声夢，\n龍"
+    assert data["spaced_lyrics"] == "繁体乐声夢\n龍"     # spaced 形式按标点断行
     assert data["short_summary"] == "繁体臺灣介绍"
-    assert {"needed": json.loads(model.calls[0]["needed"]), "materials": json.loads(model.calls[0]["materials"]), "existing": json.loads(model.calls[0]["song_data"])}["materials"]["raw"] == http.source
+    material = json.loads(model.calls[0]["materials"])["text"]
+    # 材料已做一次字形转换：LC 覆盖的字形定稿、标记已去，其余已转 zh-cn
+    assert "简介=繁体臺灣介绍" in material
+    assert "-{" not in material and "nowiki" not in material.lower()
 
 
 @pytest.mark.parametrize("response", ["繁體-{臺灣}-<nowiki>{{夢}}[[龍]]</nowiki>", TimeoutError("offline")], ids=["model", "fallback"])
@@ -260,13 +265,17 @@ def test_text_conversion_rendered_fragment_keeps_site_glyphs(http, tmp_path):
     assert data["lyrics"] == "繁體-{臺灣}-{{夢}}[[龍]]"
 
 
-def test_structural_normalization_requested_keys_and_raw_preserved(http, tmp_path):
+def test_structural_normalization_requested_keys_and_material_converted(http, tmp_path):
     http.source = '{{VOCALOID Songbox|作詞=|異體欄=|演唱=樂師|UP主=龍作者|简介=繁體介紹|歌词=夢裡的聲音}}'
-    model = Model({"infobox": {"作詞": "詞師", "異體欄": "原樣"}})
+    # 材料已转 zh-cn，模型照抄材料因此返回简体值
+    model = Model({"infobox": {"作詞": "词师", "異體欄": "原样"}})
     data = crawler(tmp_path, model).fetch_entity_description("夢與樂")
     payload = {"needed": json.loads(model.calls[0]["needed"]), "materials": json.loads(model.calls[0]["materials"]), "existing": json.loads(model.calls[0]["song_data"])}
     assert payload["needed"]["infobox"] == ["作词", "異體欄"]
-    assert payload["materials"]["raw"] == http.source
+    material = payload["materials"]["text"]
+    assert "简介=繁体介绍" in material                 # 材料已做一次字形转换
+    assert "{{VOCALOID Songbox|" in material           # 原有标记保留，是否照抄由提示词约束
+    assert "-{" not in material                        # 字形标记随转换去除
     assert data["infobox"] == {"演唱": "乐师", "UP主": "龙作者", "作词": "词师", "異體欄": "原样"}
 
 
@@ -420,7 +429,38 @@ def test_rendered_fragment_is_never_passed_to_the_model_as_material(http, tmp_pa
     data = crawler(tmp_path, model).fetch_entity_description("星空")
     assert data["lyrics"] == "完整第一行（和声）\n完整第二行"
     assert json.loads(model.calls[0]["needed"])["lyrics"] is False
-    assert set(json.loads(model.calls[0]["materials"])) == {"raw"}
+    assert set(json.loads(model.calls[0]["materials"])) == {"text"}
+
+
+@pytest.mark.parametrize("songbox,kept", [
+    ('{{VOCALOID Songbox|歌曲名称=测试曲|演唱=|UP主=甲|再生={{bilibiliCount|id=av1}}'
+     '|其他资料=2012年12月19日投稿原版，再生数为{{bilibiliCount|id=av1}}}}', "|UP主=甲"),
+    ('{{VOCALOID Songbox\n|歌曲名称 = 测试曲\n|演唱 = \n|UP主 = 甲\n'
+     '|再生 = {{bilibiliCount|id=av1}}\n'
+     '|其他资料 = 2012年12月19日投稿原版，再生数为{{bilibiliCount|id=av1}}\n}}', "|UP主 = 甲"),
+    # The real shape: a tabs wrapper whose parameter value spans many lines.
+    ('{{tabs/core\n|label1 = 原版\n|text1 =\n{{VOCALOID Songbox\n|歌曲名称 = 测试曲\n|演唱 = \n'
+     '|UP主 = 甲\n|再生 = {{bilibiliCount|id=av1}}\n'
+     '|其他资料 = 2012年12月19日投稿原版，再生数为{{bilibiliCount|id=av1}}\n}}\n}}', "|UP主 = 甲")])
+def test_material_drops_statistics_the_program_cannot_expand(http, tmp_path, songbox, kept):
+    """Unresolvable counts leave the material: whole sentence in prose, counted clause in params."""
+    http.source = (songbox + '\n'
+                   '== 简介 ==\n'
+                   "《'''测试曲'''》是[[甲]]于2012年12月19日投稿的歌曲。"
+                   '[[VOCALOID中文殿堂曲|殿堂曲]]，截至现在已有{{bilibiliCount|id=av1}}次观看，'
+                   '{{bilibiliCount|id=av1|type=4}}人收藏。\n'
+                   '{{黑幕|隐藏说明}}\n'
+                   '== 歌词 ==\n<poem>第一行\n第二行</poem>')
+    model = Model({"infobox": {"UP主": "甲"}})
+    crawler(tmp_path, model).fetch_entity_description("测试曲")
+    material = json.loads(model.calls[0]["materials"])["text"]
+    assert "《'''测试曲'''》是[[甲]]于2012年12月19日投稿的歌曲。" in material
+    assert "殿堂曲" not in material
+    assert "次观看" not in material and "人收藏" not in material and "bilibiliCount" not in material
+    assert kept in material
+    assert "2012年12月19日投稿原版" in material
+    assert "{{黑幕|隐藏说明}}" in material
+    assert "<poem>第一行\n第二行</poem>" in material
 
 
 def test_public_input_and_response_budgets(http, tmp_path):
@@ -429,7 +469,7 @@ def test_public_input_and_response_budgets(http, tmp_path):
     model = Model({})
     data = crawler(tmp_path, model, private_secret="DO_NOT_SEND").fetch_entity_description("星空")
     payload = {"needed": json.loads(model.calls[0]["needed"]), "materials": json.loads(model.calls[0]["materials"]), "existing": json.loads(model.calls[0]["song_data"])}
-    assert len(payload["materials"]["raw"]) == 24000
+    assert len(payload["materials"]["text"]) == 24000
     assert "DO_NOT_SEND" not in json.dumps(model.calls[0])
 
 
@@ -600,7 +640,8 @@ def test_task_real_registration_uses_independent_prompts_and_settings(http, tmp_
         assert 'short_summary' not in extra_prompt and '材料不足' in extra_prompt
         objects = [json.loads(line) for line in extra_prompt.splitlines() if line.startswith('{')]
         assert {'infobox': ['UP主'], 'summary': True, 'lyrics': True} in objects
-        assert any(obj.get('raw') == http.source for obj in objects)
+        materials_object = next(obj for obj in objects if "text" in obj)
+        assert materials_object["text"] and "歌词" in materials_object["text"]
         assert any(obj.get('lyrics', 'absent') is None for obj in objects)
     assert set(service.llm_modules) == ({'song_knowledge_crawler', 'song_knowledge_extractor'} if extraction else {'song_knowledge_crawler'})
 
@@ -855,7 +896,10 @@ def test_target_gap_survives_nonempty_lyrics(http, tmp_path, body):
     data = crawler(tmp_path, model).fetch_entity_description('缺口')
     assert data['lyrics'] == ('Japanese words' if 'Japanese' in body else '开头结尾')
     assert json.loads(model.calls[0]['needed']) == {'infobox': [], 'summary': False, 'lyrics': True}
-    assert json.loads(model.calls[0]['materials'])['raw'] == http.source
+    material = json.loads(model.calls[0]['materials'])['text']
+    # 材料是转换后的源码：歌词区域可见，字形标记已去
+    assert '歌词' in material
+    assert '-{' not in material
     assert json.loads(model.calls[0]['song_data'])['lyrics'] == data['lyrics']
 
 
@@ -1001,18 +1045,28 @@ def test_ruby_gaps_follow_selected_text(http, tmp_path, markup, base, reading, e
     assert len(model.calls) == (2 if needed else 1)
     if needed:
         assert json.loads(model.calls[0]['needed']) == {'infobox': [], 'summary': False, 'lyrics': True}
-        assert json.loads(model.calls[0]['materials'])['raw'] == http.source
+        material = json.loads(model.calls[0]['materials'])['text']
+        assert material and '歌词' in material
+        assert '-{' not in material
     else:
         assert set(model.calls[0]) == {'song_data'}
 
 
-def test_extraction_prompt_does_not_assign_source_order_priority():
+def test_extraction_prompt_keeps_only_documented_contract():
+    """The supplement prompt is checked for its documented shape, never for wording.
+
+    Spec 补提契约要求：输入变量 song_data/needed/materials 均必填、不请求 short_summary、
+    提供正向示例与"材料不足填 null"示例。措辞、以及模型是否照抄标记或统计句这类行为，
+    都不在这里断言——行为是非确定性的，由 scripts/vcpedia_prompt_lab.py 真实调用验证。
+    """
     service = LLMService({'prompt_manager': {'template_dir': 'res/agent/prompts'}})
-    prompt = service.prompt_manager.get_template('song_knowledge_extraction_prompt').render(
-        song_data='{}', needed='{}', materials='{}')
-    assert '按源码顺序采用第一候选' not in prompt
-    assert '未请求的已有字段保持' in prompt
-    assert '不表示主次' in prompt
+    template = service.prompt_manager.get_template('song_knowledge_extraction_prompt')
+    assert sorted(template.get_variables()) == ['materials', 'needed', 'song_data']
+    prompt = template.render(song_data='{}', needed='{}', materials='{}')
+    assert 'short_summary' not in prompt
+    objects = [json.loads(line) for line in prompt.splitlines() if line.startswith('{')]
+    assert any(isinstance(obj.get('infobox'), dict) for obj in objects)
+    assert any(obj.get('lyrics', 'absent') is None for obj in objects)
 
 
 def test_configuration_template_declares_independent_optional_modules():

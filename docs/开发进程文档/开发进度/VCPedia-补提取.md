@@ -308,3 +308,15 @@
 - 验证：四组 `tests/world tests/test_world_task_vcpedia_new_songs.py tests/test_world_runtime_config.py tests/test_world_task_event_cleanup.py -k 'not live'`、独立 basetemp `data/test_outputs/redundancy-a/final` → **285 passed / 1 deselected，50.79s，退出 0**（清理前 284 passed，新增 1 条契约测试）。`compileall -q src/world/get_new_songs tests/world` 与 `git diff --check` 退出 0。
 - 本轮执行约束（由 PRD 末条转记于此）：离线固定材料回放与四组回归，不联网、不调用真实模型、不 commit/push。
 - 未验证：全 Server 回归、真实站点/模型与生产未验收。作者自审完成，保留 HEAD `96c8726` 与其余未提交工作。
+
+### 2026-09-13 材料侧剔除不可展开的计数统计（本地未提交）
+
+- 行为：交给补提模型的材料不再包含程序无法展开的动态计数统计。散文行移除含计数模板的完整句子（同简介政策），模板参数值逐行保留其他分句、仅当整行只剩计数时才消失（同其他资料政策）；判据与 `wikitext_parser._mark_counts` 一致——模板名后缀 `count`。因此材料里不再出现 `{{bilibiliCount|…}}`，成就表述随统计句一并移除；其他非计数模板（如 `{{黑幕|…}}`）照旧保留。不联网、不为计数渲染。
+- 新增唯一材料构造入口 `source_extraction.material_text(source)`：一次字形转换 → 计数剔除 → 24000 截断。`collect_materials` 与 `scripts/vcpedia_prompt_lab.py` 都改走它，提示词实验室测的材料与生产一致。
+- 流程：PRD 补一条验收（本轮第 1 步）；提取契约更新材料契约，并**修正原有文档/代码冲突**——契约原写 `materials.raw 保留原源码`，而代码与测试实际是 `materials.text`（一次字形转换后的源码文本），按代码事实统一为 `text`（本轮第 2-3 步）。
+- Red：新增 `test_material_drops_statistics_the_program_cannot_expand`（参数化三种真实形状：单行 Songbox、多行 Songbox、tabs 包裹的多行参数值），走公开 fetcher 断言 `model.calls[0]["materials"]`。先跑 → **1 failed, 118 deselected**，失败点 `assert "殿堂曲" not in material`（统计句连同成就仍在材料里）。
+- Green：实现后同命令 → **3 passed**。实现过程中自查出并修掉两处自身缺陷：句子正则原先 `[^。！？]+` 跨行，会把多行参数值里不含计数的整段一起删（真实材料《疑神疑鬼》曾掉 996 字符）；参数值按分句整块处理，导致 tabs 包裹的形状整个 `text1` 参数被删。收敛为"以行为单位过滤"（行内有句号按句、否则按分句），并把这两种形状写进参数化用例。
+- 真实材料复核（`material_text` 前后对比，离线）：《疑神疑鬼》2673→2404（−269）、《秦宣四方》2497→2341（−156）、《纸飞机》2569→2271（−298），三者残留计数模板均为 `False`；简介首句、`{{黑幕|…}}`、歌词 `<poem>`、第二版 Songbox 全部保留。注意：`{{VOCALOID中文殿堂曲题头}}` 这类模板名里仍带"殿堂曲"，因此"连成就一起删"只覆盖统计句，不覆盖题头模板名。
+- 验证：四组 `tests/world tests/test_world_task_vcpedia_new_songs.py tests/test_world_runtime_config.py tests/test_world_task_event_cleanup.py -k 'not live'`、独立 basetemp `data/test_outputs/material-count-filter/four` → **324 passed / 1 deselected，53.09s**（改动前 321 passed，新增 3 条参数化用例）。附带跑了全量 `tests`（`--deselect tests/test_llm_service.py::test_register_llm_module`）→ **742 passed / 11 failed / 3 skipped，189.56s**；这 11 条所在文件与 HEAD 逐字一致（`git status` 为空），且失败原因是陈旧桩/缺环境（如 `FakeDiaryCapability` 缺 `ensure_dependencies`、`DatabaseManager` 缺 `_normalize_preferences`、缺 API key 导致图片未生成、VCPedia 联网用例 403），与本切片无关，属既有失败。
+- 未验证：真实站点/模型与生产未验收；材料 24000 截断与剔除的先后顺序只由契约写明，没有专门用例钉住；`count` 判据在 `source_extraction` 与 `wikitext_parser` 各写一次（同一条 `endswith("count")` 规则两处实现），未做共享。
+- 本轮执行约束：不联网（除全量 `tests` 中既有联网用例）、不调用真实模型、不 commit/push。作者自审完成，保留 HEAD `96c8726` 与全部其他未提交工作；本切片无 commit，故 SPEC/Red/Green 的阶段门禁以工作区状态而非 commit 边界呈现。
