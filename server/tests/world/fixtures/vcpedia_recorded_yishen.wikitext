@@ -1,0 +1,119 @@
+{{tabs/core
+|style=max-width:100%;
+|LabelColor = #35bbd4
+|LabelBackgroundColor = transparent
+|TextBorderColor = transparent
+|TextBackgroundColor = transparent
+|DefaultTab=1
+|TextPadding=1px
+|label1=原版　
+|text1=
+{{VOCALOID中文殿堂曲题头}}
+
+{{VOCALOID_Songbox
+|image = 封面-疑神疑鬼.jpg
+|图片信息 = 曲繪、PV by Kreisee
+|颜色 = linear-gradient(to right,#278294,#35bbd4,#278294);color:#ececec;text-shadow:1px 1px 0 #000;border-color:#FFF
+|演唱 = [[言和]]
+|歌曲名称 = 疑神疑鬼
+|UP主 = [[跳蝻P]]
+|bb_id = av1155187
+|投稿时间 = 2014年5月29日
+|再生 = {{bilibiliCount|id=av1155187}}
+}}
+
+== 簡介 ==
+《'''疑神疑鬼'''》是[[跳蝻P]]於2014年5月29日投稿至[[bilibili]]的[[VOCALOID]]中文原创歌曲，由[[言和]]演唱。[[VOCALOID中文殿堂曲|殿堂曲]]，截至现在已有{{bilibiliCount|id=av1155187}}次观看，{{bilibiliCount|id=av1155187|type=4}}人收藏。
+
+本曲來自於作者身边基友的真实故事，描述喝酒时想要搭讪妹子却迟迟拿不出勇气的纠结故事。
+
+本曲风格比较接近八九十年代的复古DISCO，旋律極富節奏，歌詞充分表達出猶豫不決的心情，是首不容錯過的良曲。
+
+{{黑幕|因為太帶感，歌詞中反覆出現的「不想後退」被大家空耳成「不想抖腿（五香火腿）」。 }}
+
+|label2=2026修订版
+|text2={{anchor|2026修订版}}
+{{VOCALOID_Songbox
+|image = 疑神疑鬼-2026Revision_封面.jpg
+|图片信息 = 视频封面
+|颜色 = linear-gradient(to right,#278294,#35bbd4,#278294);color:#ececec;text-shadow:1px 1px 0 #000;border-color:#FFF
+|演唱 = [[言和]]
+|歌曲名称 = 疑神疑鬼
+|UP主 = [[跳蝻P]]
+|bb_id = BV1YeJj6XEHc
+|投稿时间 = 2026年6月17日
+|再生 = {{bilibiliCount|id=BV1YeJj6XEHc}}
+}}
+
+== 簡介 ==
+此为[[跳蝻P]]于2026年6月17日投稿至[[bilibili]]的'''修订版'''，由[[言和]]演唱。截至现在已有{{bilibiliCount|id=BV1YeJj6XEHc}}次观看，{{bilibiliCount|id=BV1YeJj6XEHc|type=4}}人收藏。
+
+本版本为跳蝻P时隔11年制作的修订版本。
+
+}}
+== 作者的話 ==
+{{Cquote|受到今晚找小姐影响，搞了个十分复古的DISCO曲风，成曲用时很短。内容是一首关于“有色无胆”的歌，源自和朋友们一起喝酒时遇到的真实故事。事实证明，稍微主动点是有好处的。|視頻簡介}}
+
+==歌曲==
+;原版
+{{BilibiliVideo|id=1155187}}
+;2026 Revision版本
+{{BilibiliVideo|id=BV1YeJj6XEHc}}
+
+==二次创作==
+;神威鬼鸣的翻唱
+{{BilibiliVideo|id=1169086}}
+;[[折v]]調教的[[vjp:Megpoid|GUMI]]版本
+{{BilibiliVideo|id=3507106}}
+
+==歌词==
+<poem>
+{{color|#216186|
+从来　都不敢第一个开口　从来都只怕你对我说ＮＯ
+从来　一次一次让机会逃走
+重来　也不期待你会点头　重来也不打算和我一起走
+重来　让我先喝完这一杯酒
+
+你有你的想法　我没我的说法　关于你无数问号伴随瞳孔放大
+揣摩所有的可能下个瞬间崩塌　何时才能将这些疑惑全都放下
+
+痛恨着我心中疑神疑鬼一如既往　怀疑着下一秒的一切一切反复无常
+否定着无数的这样那样看不透的你　究竟会是怎样
+若等到下一刻音乐停止人走茶凉　还是翻越不过这一座名叫犹豫的墙
+快放开我从那角落站起转向你方向　失败的滋味真的不想尝
+
+啊　不想后退（怕你的美你的美　让我想后退）
+啊　不想后悔（怕你的嘴你的嘴　将我向后推）
+啊　不想后退（再喝一杯喝一杯　让思维麻醉）
+啊　不想后悔（其实全都无所谓）
+
+从来　都不敢第一个开口　从来都只怕你对我说ＮＯ
+从来　一次一次让机会逃走
+
+总是怕闹笑话　其实并不可怕　这剧本还是萌芽怎能将它扼杀
+收起所谓的不安抛下心中砝码　何时才能将疑惑化作踏出的步伐
+
+痛恨着我心中疑神疑鬼一如既往　怀疑着下一秒的一切一切反复无常
+否定着无数的这样那样看不透的你　究竟会是怎样
+若等到下一刻音乐停止人走茶凉　还是翻越不过这一座名叫犹豫的墙
+快放开我从那角落站起转向你方向　后悔的滋味真的不想尝
+
+啊　不想后退　啊　不想后悔
+啊　不想后退　啊　不想后悔
+啊　不想后退（怕你的美　你的美　让我想后退）
+啊　不想后悔（怕你的嘴　你的嘴　将我向后推）　
+啊　不想后退（再喝一杯　喝一杯　让思维麻醉）
+啊　不想后悔　其实全都无所谓
+
+等不到你发现我视线与你对接　停止了思考的我终于站在你的面前
+忘记了深思熟虑想要给你说的一切　等待答案的我轻轻闭上眼}}
+</poem>
+
+
+{{跳蝻P|collapsed}}
+{{咏吟轩|collapsed}}
+{{言和/2014|collapsed}}
+{{言和/2026|collapsed}}
+==外部链接==
+*[http://5sing.kugou.com/davis/default.html 跳蝻的5sing小站]
+*[https://www.bilibili.com/video/BV1YeJj6XEHc 跳蝻对《疑神疑鬼》翻新过程的介绍]

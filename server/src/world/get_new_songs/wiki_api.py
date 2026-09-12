@@ -35,12 +35,26 @@ def _is_challenge(status, body, decode_error):
 def fetch_wikitext(
     base_url: str, title: str, get: Callable[..., Response], timeout: float
 ) -> str:
-    url = base_url.rstrip("/") + "/api.php?" + urlencode({
-        "action": "parse", "prop": "wikitext", "redirects": 1,
-        "format": "json", "page": title,
-    })
-    response = get(url, headers={"User-Agent": _USER_AGENT},
-                   timeout=timeout, allow_redirects=True)
+    return _fetch_parse(base_url, {"action": "parse", "prop": "wikitext", "redirects": 1,
+                                  "format": "json", "page": title}, get, timeout)
+
+
+def render_fragment(base_url, title, source, post, timeout):
+    return _fetch_parse(base_url, {"action": "parse", "prop": "text", "format": "json",
+                                  "text": source, "title": title,
+                                  "contentmodel": "wikitext"}, post, timeout, post=True)
+
+
+def _fetch_parse(base_url, params, request, timeout, *, post=False):
+    encoded = urlencode(params)
+    url = base_url.rstrip("/") + "/api.php" + ("" if post else "?" + encoded)
+    headers = {"User-Agent": _USER_AGENT}
+    payload = {}
+    if post:
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        payload["data"] = encoded.encode("utf-8")
+    response = request(url, headers=headers, timeout=timeout,
+                       allow_redirects=True, **payload)
     body = response.text
     document, decode_error = _decode_body(body)
     if _is_challenge(response.status_code, body, decode_error):
@@ -48,11 +62,16 @@ def fetch_wikitext(
         if not curl:
             raise RuntimeError("VCPedia challenge: curl is unavailable")
         _LOG.warning("VCPedia API requests 命中反爬挑战，尝试 curl 兜底")
+        args = [curl, "-sS", "-L", "--fail", "--max-time", str(timeout),
+                "--user-agent", _USER_AGENT, "--write-out", "\n%{http_code}"]
+        stdin = {}
+        if post:
+            args.extend(["--header", "Content-Type: application/x-www-form-urlencoded",
+                         "--data-binary", "@-"])
+            stdin["input"] = encoded
         result = subprocess.run(
-            [curl, "-sS", "-L", "--fail", "--max-time", str(timeout),
-             "--user-agent", _USER_AGENT, "--write-out", "\n%{http_code}", url],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            check=False, timeout=timeout + 5,
+            args + [url], capture_output=True, text=True, encoding="utf-8", errors="replace",
+            check=False, timeout=timeout + 5, **stdin,
         )
         if result.returncode:
             raise RuntimeError(f"curl fallback failed: {result.stderr.strip()}")
@@ -69,9 +88,9 @@ def fetch_wikitext(
     if not isinstance(document, dict) or "error" in document:
         raise ValueError("VCPedia API error response")
     parsed = document.get("parse")
-    source = parsed.get("wikitext") if isinstance(parsed, dict) else None
+    source = parsed.get(params["prop"]) if isinstance(parsed, dict) else None
     if isinstance(source, dict):
         source = source.get("*")
     if not isinstance(source, str):
-        raise ValueError("VCPedia API response has no string wikitext")
+        raise ValueError(f"VCPedia API response has no string {params['prop']}")
     return source

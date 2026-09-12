@@ -518,6 +518,14 @@
                         "enable_thinking": false
                     },
                     "prompt_name": "song_knowledge_crawler_prompt"
+                },
+                "extraction_llm_module": {
+                    "llm": {
+                        "name": "qwen3.5-plus",
+                        "enable_thinking": false,
+                        "use_json": true
+                    },
+                    "prompt_name": "song_knowledge_extraction_prompt"
                 }
             }
         },

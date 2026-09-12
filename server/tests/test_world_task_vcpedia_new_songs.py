@@ -56,7 +56,7 @@ def test_vcpedia_initialize_skips_when_llm_disabled():
 def test_vcpedia_run_once_reports_counts(monkeypatch):
     calls = {}
 
-    def sync_daily_new_songs(config, llm_module=None):
+    def sync_daily_new_songs(config, llm_module=None, *, extraction_llm_module=None):
         calls["config"] = config
         calls["llm_module"] = llm_module
         return {"added": ["A", "B"], "failed": ["C"]}
@@ -74,7 +74,7 @@ def test_vcpedia_run_once_reports_counts(monkeypatch):
 
 
 def test_vcpedia_run_once_returns_failure_on_exception(monkeypatch):
-    def sync_daily_new_songs(config, llm_module=None):
+    def sync_daily_new_songs(config, llm_module=None, *, extraction_llm_module=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(task_module, "sync_daily_new_songs", sync_daily_new_songs)

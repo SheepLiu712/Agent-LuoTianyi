@@ -3,7 +3,7 @@
 - 大目标：仅迁移新歌抓取的内部 API/wikitext 实现，外部接口与行为保持不变；直接沿用原有抓取说明，不新增兼容契约。
 - PRD：[VCPedia-wikitext迁移](../需求说明（PRD）/VCPedia-wikitext迁移.md)
 - 原有抓取说明：[项目架构中的 get_new_songs](../../项目说明/项目架构与接口（spec）/项目架构.md)，以及上述 world 文档的新歌使用示例。
-- 总体状态：进行中；兼容迁移基线已完成本地离线验证，由 `refactor/vcpedia-wikitext` 本次基线 commit 收录；未合并，owner 目标尚未交付，尚未证明全站外部行为等价。
+- 总体状态：进行中；兼容迁移基线已完成本地离线验证，由 `refactor/vcpedia-wikitext` 本次基线 commit 收录；未合并，本目标尚未交付，尚未证明全站外部行为等价。
 
 ## 已完成
 
@@ -19,7 +19,7 @@
 
 ### 2026-09-09 兼容迁移基线提交前验证
 
-- 范围：按用户明确授权，将既有两个 fetcher、内部 `wiki_api.py`/`wikitext_parser.py`、requirements、公开入口回归与两个固定语料、真实测试隔离、PRD 和本进度记录作为一个完整 baseline commit 收录。未开始 owner 新功能，未修改产品实现、测试或公开 interface；没有补造过去 SPEC/Red/Green commit。
+- 范围：按用户明确授权，将既有两个 fetcher、内部 `wiki_api.py`/`wikitext_parser.py`、requirements、公开入口回归与两个固定语料、真实测试隔离、PRD 和本进度记录作为一个完整 baseline commit 收录。本次未夹带补提取新功能，未修改产品实现、测试或公开 interface；没有补造过去 SPEC/Red/Green commit。
 - SPEC 检查：沿用原项目架构与 world 接口说明，现有入口不扩大；本次仅冻结已有兼容迁移，不新增接口文档、网络 marker 或启用开关。历史条目中的 HEAD 均指各条目执行时迁移前版本，不指本基线提交后的 HEAD；历史 Red/Green 运行记录并非独立提交历史。
 - commit 定位：分支 `refactor/vcpedia-wikitext`，本次标题 `refactor(world): 将 VCPedia 抓取迁移至 wikitext`。本条写于提交前，不编造 hash；提交事实以 Git 历史为准，不代表已 push、PR、合并或发布。
 - 实际回归：`conda run -n lty --cwd server python -m pytest tests/world tests/test_world_task_vcpedia_new_songs.py tests/test_world_runtime_config.py tests/test_world_task_event_cleanup.py -k 'not live' -q --tb=short -p no:cacheprovider --basetemp=data/test_outputs/baseline-commit-regression-20260909-1` → **116 passed, 1 deselected in 5.80s**。
@@ -27,7 +27,7 @@
 - 实际静态检查：`conda run -n lty --cwd server python -m compileall -q src/world/get_new_songs tests/world tests/test_world_task_vcpedia_new_songs.py tests/test_world_runtime_config.py tests/test_world_task_event_cleanup.py`、`git diff --check` 均通过。
 - 提交前只读自审：逐项读取当前 diff 与全部 7 个可列出的 untracked 文件，核对内部入口引用、失败语义、临时数据库/关键词/缓存隔离及 curl 超时和无 shell 调用；未发现本次新增的确定安全或兼容阻断。只明确暂存迁移的 11 个文件，缓存、日志、本机配置、生产配置不纳入；根 `.pytest_cache` 权限警告保留，不尝试修改其权限或内容。自审不替代他人审核。
 - 当前依赖清单实际仅新增未锁版本的 `mwparserfromhell`，不采用下方历史记录的版本范围；本次未安装或升级依赖，也未执行联网依赖漏洞审计。两个内部文件现合计 495 行，旧“约 300 行”仅是历史阶段体量；整体作为用户授权的完整数据通道基线提交，不拆成仅列表或缺详情的半迁移。
-- 未验证：本次未联网；历史真实 requests 挑战后 curl HTTP 403 尚无成功验证。真实 API/详情/入库、curl 通过挑战、未知模板/Lua/动态渲染及全站等价、全 Server/LLM/GPU/生产环境均未验收。既有缓存写入缺失、批次无限制和嵌套事件循环 LLM 问题未改动，不作为 owner 目标已交付的证据。
+- 未验证：本次未联网；历史真实 requests 挑战后 curl HTTP 403 尚无成功验证。真实 API/详情/入库、curl 通过挑战、未知模板/Lua/动态渲染及全站等价、全 Server/LLM/GPU/生产环境均未验收。既有缓存写入缺失、批次无限制和嵌套事件循环 LLM 问题未改动，不构成本目标已交付的证据。
 
 ### 2026-09-09 修复独立审查发现的 tabs 标题作用域泄漏（本地未提交）
 

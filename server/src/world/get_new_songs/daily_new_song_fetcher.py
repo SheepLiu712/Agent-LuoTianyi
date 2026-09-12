@@ -7,7 +7,7 @@ from typing import Dict, Any, List
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 from .wiki_api import fetch_wikitext
-from .wikitext_parser import parse_song_titles
+from .wikitext_parser import parse_song_candidates
 from src.world.get_new_songs.vcpedia_fetcher import VCPediaFetcher
 from src.subconscious.music_knowledge.song_database import init_song_db, get_song_session, Song
 
@@ -21,10 +21,14 @@ SONG_LYRIC_KEYWORDS_FILE = KNOWLEDGE_DIR / "song_lyric_keywords.txt"
 
 def fetch_song_list_from_template(url: str, timeout: int = 20) -> List[str]:
     """Return ordered link display names as before; API failures propagate."""
+    return [display for display, _ in _fetch_candidates(url, timeout)]
+
+
+def _fetch_candidates(url, timeout=20):
     parsed = urlsplit(url)
     title = parse_qs(parsed.query).get('title', [unquote(parsed.path.lstrip('/'))])[0]
     source = fetch_wikitext(f'{parsed.scheme}://{parsed.netloc}', title, requests.get, timeout)
-    return parse_song_titles(source)
+    return parse_song_candidates(source)
 
 
 def _safe_song_name(name: str) -> str:
@@ -93,13 +97,14 @@ def _append_keywords_to_files(song_name: str, spaced_lyrics: str) -> None:
             for line in lyric_keywords:
                 lyric_file.write(f"{line}\n")
 
-def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False) -> bool:
+def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False, *, source_title=None) -> bool:
     if db and _song_exists(db, song_name) and not update:
         logger.info(f"已存在，跳过: {song_name}")
         return False
 
     logger.info(f"开始抓取并入库: {song_name}")
-    data = fetcher.fetch_entity_description(song_name)
+    data = (fetcher.fetch_entity_description(song_name, source_title=source_title)
+            if source_title is not None else fetcher.fetch_entity_description(song_name))
     if not data:
         return False
 
@@ -138,7 +143,8 @@ def do_one_song(db, fetcher: VCPediaFetcher, song_name, update = False) -> bool:
 
     return True
 
-def sync_daily_new_songs(song_knowledge_config: Dict[str, Any], llm_module: Any | None = None) -> Dict[str, List[str]]:
+def sync_daily_new_songs(song_knowledge_config: Dict[str, Any], llm_module: Any | None = None,
+                         *, extraction_llm_module: Any | None = None) -> Dict[str, List[str]]:
     song_db_cfg = song_knowledge_config.get("song_database", {})
     if not song_db_cfg:
         raise ValueError("缺少 knowledge.song_database 配置")
@@ -153,11 +159,12 @@ def sync_daily_new_songs(song_knowledge_config: Dict[str, Any], llm_module: Any 
     added: List[str] = []
     failed: List[str] = []
     try:
-        songs = fetch_song_list_from_template(TEMPLATE_URL)
-        fetcher = VCPediaFetcher(crawler_cfg, llm_module=llm_module)
+        songs = _fetch_candidates(TEMPLATE_URL)
+        fetcher = VCPediaFetcher(crawler_cfg, llm_module=llm_module,
+                                 extraction_llm_module=extraction_llm_module)
 
-        for i, song_name in enumerate(songs, start=1):
-            if do_one_song(db, fetcher, song_name):
+        for song_name, target in songs:
+            if do_one_song(db, fetcher, song_name, source_title=target):
                 added.append(song_name)
             else:
                 failed.append(song_name)

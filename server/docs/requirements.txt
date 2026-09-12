@@ -13,6 +13,7 @@ chromadb
 networkx
 beautifulsoup4
 mwparserfromhell
+zhconv
 cryptography
 bcrypt
 Pillow

@@ -31,8 +31,8 @@ def response(text, status=200):
     return result
 
 
-def payload(source):
-    return json.dumps({"parse": {"title": "重定向目标", "wikitext": {"*": source}}}, ensure_ascii=False)
+def payload(source, title="固定样例"):
+    return json.dumps({"parse": {"title": title, "wikitext": {"*": source}}}, ensure_ascii=False)
 
 
 @pytest.fixture
@@ -63,6 +63,12 @@ def fetcher(tmp_path, **config):
                            "data_dir": str(tmp_path / "cache"), **config})
 
 
+def legacy_fields(data):
+    """Compare the original business return fields."""
+    return {key: data[key] for key in ("name", "type", "infobox", "summary", "lyrics",
+                                      "spaced_lyrics", "short_summary") if key in data}
+
+
 def assert_api(call, title):
     url, kwargs = call
     parsed = urlsplit(url)
@@ -74,7 +80,9 @@ def assert_api(call, title):
 
 
 # Hand-matched rendered HTML/source, not captured live pages. Expected values
-# were checked through the two HEAD public entries before implementation.
+# originated at HEAD; current expectations follow the approved full-knowledge contract.
+# h3 prose/lyrics and nested containers are retained; known numeric counts remain;
+# unresolved dynamic-count sentences are removed; later versions cannot overwrite main.
 LIST_SOURCE = """{{Navbox|title=[[洛天依]]|group1=[[原创曲]]|list1=
 [[真名|显示名*]] [[另一页|显示名]] {{lj|目标|别名}} [[殿堂曲之梦]]
 [[Help:说明|说明]] [[歌曲#歌词|锚点]] [[#五月|五月]] [[2026]]
@@ -91,6 +99,28 @@ LIST_HTML = """<div id="mw-content-text">
 LIST_EXPECTED = ["显示名", "别名", "说明", "锚点", "外部曲", "用户:甲", "正常曲"]
 
 
+@pytest.mark.parametrize("source,expected", [
+    ('{{VOCALOID Songbox Introduction|group1=作词<br>作曲|list1=ilem|演唱=洛天依、言和|lbgcolor=red|ldc=yes}}',
+     {"作词": "ilem", "作曲": "ilem", "演唱": "洛天依、言和"}),
+    ('{{Infobox Song|演唱=洛天依|母带=作者甲|自定义业务=资料|标题颜色=red|图片大小=300px}}',
+     {"演唱": "洛天依", "母带": "作者甲", "自定义业务": "资料"}),
+])
+def test_business_open_infobox_and_introduction(wire, tmp_path, source, expected):
+    wire.body = payload(source)
+    assert fetcher(tmp_path).fetch_entity_description("歌曲")["infobox"] == expected
+
+
+@pytest.mark.parametrize("source,expected", [
+    ('<poem>第一行（和声）<br/>第二行\n\n[互动台词]</poem>', '第一行（和声）\n第二行\n\n[互动台词]'),
+    ('{{LyricsKai|original=原文第一行\n原文第二行|translated=译文第一行\n译文第二行}}', '原文第一行\n原文第二行'),
+    ('{{Lyrics|lb-text1=原文第一段|rb-text1=翻译第一段|lb-text2=原文第二段|rb-text2=翻译第二段}}', '原文第一段\n\n原文第二段'),
+])
+def test_business_lyrics_keep_lines_and_original_version(wire, tmp_path, source, expected):
+    wire.body = payload('== 歌词 ==\n' + source)
+    data = fetcher(tmp_path).fetch_entity_description("歌曲")
+    assert data["lyrics"] == expected
+
+
 def test_template_preserves_head_display_names_and_filters(wire):
     wire.body = payload(LIST_SOURCE)
     assert fetch_song_list_from_template(TEMPLATE) == LIST_EXPECTED
@@ -103,40 +133,40 @@ HEAD_DETAIL_CASES = [
      {"type": "Person", "infobox": {"演唱": "洛天依"}, "summary": ["人物正文。"], "lyrics": "", "spaced_lyrics": ""}),
     ("== 简介 ==\n正文。\n{{创作者名单|group1=PV|list1=作者}}\n=== 背景 ===\n不可追加\n== 歌词 ==\n<poem>散文<span>第一句歌词</span><span>第二句歌词（副歌）</span>尾声</poem>\n<poem>第二版本</poem>",
      '<h2>简介</h2><p>正文。</p><div><table><tr><td>PV</td><td>作者</td></tr></table></div><h3>背景</h3><p>不可追加</p><h2>歌词</h2><div class="poem"><p>散文<span>第一句歌词</span><span>第二句歌词（副歌）</span>尾声</p></div><div class="poem"><p>第二版本</p></div>',
-     {"type": "Song", "infobox": {"PV": "作者"}, "summary": ["正文。"], "lyrics": "第一句歌词 第二句歌词", "spaced_lyrics": "第一句歌词 第二句歌词", "short_summary": "正文。"}),
+     {"type": "Song", "infobox": {"PV": "作者"}, "summary": ["正文。\n不可追加"], "lyrics": "散文第一句歌词\n第二句歌词（副歌）\n尾声", "spaced_lyrics": "散文第一句歌词\n第二句歌词（副歌）\n尾声", "short_summary": "正文。\n不可追加"}),
     ("== 简介 ==\n开头。截至现在有123次播放，45次收藏。结尾。\n== 歌词 ==\n普通正文并非poem\n<poem>甲（副歌）<br/>乙</poem>",
      '<h2>简介</h2><p>开头。截至现在有123次播放，45次收藏。结尾。</p><h2>歌词</h2><p>普通正文并非poem</p><div class="poem"><p>甲（副歌）<br/>乙</p></div>',
-     {"type": "Song", "infobox": {}, "summary": ["开头。。结尾。"], "lyrics": "甲乙", "spaced_lyrics": "甲乙", "short_summary": "开头。。结尾。"}),
+     {"type": "Song", "infobox": {}, "summary": ["开头。截至现在有123次播放，45次收藏。结尾。"], "lyrics": "甲（副歌）\n乙", "spaced_lyrics": "甲（副歌）\n乙", "short_summary": "开头。截至现在有123次播放，45次收藏。结尾。"}),
     ("<poem>无标题歌词</poem>\n=== 歌词 ===\n<poem>三级标题</poem>",
      '<div class="poem"><p>无标题歌词</p></div><h3>歌词</h3><div class="poem"><p>三级标题</p></div>',
-     {"type": "Person", "infobox": {}, "summary": [], "lyrics": "", "spaced_lyrics": ""}),
+     {"type": "Song", "infobox": {}, "summary": [""], "lyrics": "三级标题", "spaced_lyrics": "三级标题", "short_summary": ""}),
     ("== 歌词 ==\n<poem>旧版</poem>\n== 新版歌词 ==\n<poem>新版一\n新版二</poem>",
      '<h2>歌词</h2><div class="poem"><p>旧版</p></div><h2>新版歌词</h2><div class="poem"><p>新版一\n新版二</p></div>',
-     {"type": "Song", "infobox": {}, "summary": [""], "lyrics": "新版一 新版二", "spaced_lyrics": "新版一 新版二", "short_summary": ""}),
+     {"type": "Song", "infobox": {}, "summary": [""], "lyrics": "旧版", "spaced_lyrics": "旧版", "short_summary": ""}),
 ]
 
 
 @pytest.mark.parametrize("source,html,expected", HEAD_DETAIL_CASES)
-def test_head_detail_equivalent_samples(wire, tmp_path, source, html, expected):
+def test_full_knowledge_detail_samples(wire, tmp_path, source, html, expected):
     wire.body = payload(source)
-    assert fetcher(tmp_path).fetch_entity_description("固定样例") == {"name": "固定样例", **expected}
+    assert legacy_fields(fetcher(tmp_path).fetch_entity_description("固定样例")) == {"name": "固定样例", **expected}
 
 
 # Artificial corresponding source/HTML pairs, not real-site captures.
 HEAD_REPAIR_LYRICS = [
     (f'<div class="{container}"><div><div class="poem"><p>这是第一句完整歌词</p><p>不采第二段</p></div></div><div class="poem"><p>不采第二版</p></div></div>',
      f'<div class="{container}"><div><div class="poem"><p>这是第一句完整歌词</p><p>不采第二段</p></div></div><div class="poem"><p>不采第二版</p></div></div>',
-     "这是第一句完整歌词")
+     "这是第一句完整歌词\n不采第二段")
     for container in ("Tabs", "tabLabelTop")
 ] + [
     ('<div class="Tabs">无歌词</div><div class="poem"><p>不可继续查找</p></div>',
-     '<div class="Tabs">无歌词</div><div class="poem"><p>不可继续查找</p></div>', ""),
+     '<div class="Tabs">无歌词</div><div class="poem"><p>不可继续查找</p></div>', "不可继续查找"),
     ('<div class="other"><div class="poem"><p>不可任意递归</p></div></div><poem>同级歌词</poem>',
-     '<div class="other"><div class="poem"><p>不可任意递归</p></div></div><div class="poem"><p>同级歌词</p></div>', "同级歌词"),
+     '<div class="other"><div class="poem"><p>不可任意递归</p></div></div><div class="poem"><p>同级歌词</p></div>', "不可任意递归"),
     ('<poem><span>第一句<br/>第二句</span></poem>',
-     '<div class="poem"><p><span>第一句<br/>第二句</span></p></div>', "第一句第二句"),
+     '<div class="poem"><p><span>第一句<br/>第二句</span></p></div>', "第一句\n第二句"),
     ('<poem><span>第一句<br/>第二句</span><span>第三句<br/>第四句</span></poem>',
-     '<div class="poem"><p><span>第一句<br/>第二句</span><span>第三句<br/>第四句</span></p></div>', "第一句第二句 第三句第四句"),
+     '<div class="poem"><p><span>第一句<br/>第二句</span><span>第三句<br/>第四句</span></p></div>', "第一句\n第二句\n第三句\n第四句"),
 ]
 
 
@@ -144,7 +174,7 @@ HEAD_REPAIR_LYRICS = [
 def test_head_repair_lyrics(wire, tmp_path, source, html, expected):
     wire.body = payload("== 简介 ==\n正文\n== 歌词 ==\n" + source)
     data = fetcher(tmp_path).fetch_entity_description("固定样例")
-    assert data == {"name": "固定样例", "type": "Song", "infobox": {},
+    assert legacy_fields(data) == {"name": "固定样例", "type": "Song", "infobox": {},
                     "summary": ["正文"], "short_summary": "正文",
                     "lyrics": expected, "spaced_lyrics": expected}
 
@@ -162,7 +192,7 @@ HEAD_REPAIR_LINKS = [
 @pytest.mark.parametrize("source,html,expected", HEAD_REPAIR_LINKS)
 def test_head_repair_links(wire, tmp_path, source, html, expected):
     wire.body = payload(source)
-    assert fetcher(tmp_path).fetch_entity_description("固定样例") == {"name": "固定样例", **expected}
+    assert legacy_fields(fetcher(tmp_path).fetch_entity_description("固定样例")) == {"name": "固定样例", **expected}
 
 
 HEAD_REPAIR_TABLES = [
@@ -185,6 +215,8 @@ for _location in ("main", "intro", "lyrics"):
                  "infobox": {"演唱": "洛天依,乐正绫", **({"作词": "甲乙", "PV": "作者丙"} if _location != "lyrics" else {})},
                  "summary": ["正文"], "lyrics": "第一句完整歌词" if _location == "lyrics" else "",
                  "spaced_lyrics": "第一句完整歌词" if _location == "lyrics" else ""}
+    if _location == "intro":
+        _expected["infobox"]["忽略"] = "值"
     if _location == "lyrics":
         _expected["short_summary"] = "正文"
     HEAD_REPAIR_TABLES.append((_source, _html, _expected))
@@ -209,7 +241,7 @@ for _prefix, _expected_box in [
 @pytest.mark.parametrize("source,html,expected", HEAD_REPAIR_TABLES)
 def test_head_repair_tables(wire, tmp_path, source, html, expected):
     wire.body = payload(source)
-    assert fetcher(tmp_path).fetch_entity_description("固定样例") == {"name": "固定样例", **expected}
+    assert legacy_fields(fetcher(tmp_path).fetch_entity_description("固定样例")) == {"name": "固定样例", **expected}
 
 
 # Expectations calibrated against HEAD public entry with matching rendered HTML.
@@ -221,9 +253,10 @@ def test_head_repair_tables(wire, tmp_path, source, html, expected):
 ])
 def test_compat2_global_headers_local_siblings(wire, tmp_path, source):
     wire.body = payload(source)
-    assert fetcher(tmp_path).fetch_entity_description("固定样例") == {
+    summary = "正文\n忽略" if "<h3>背景</h3>" in source else "正文"
+    assert legacy_fields(fetcher(tmp_path).fetch_entity_description("固定样例")) == {
         "name": "固定样例", "type": "Song", "infobox": {},
-        "summary": ["正文"], "short_summary": "正文",
+        "summary": [summary], "short_summary": summary,
         "lyrics": "完整歌词", "spaced_lyrics": "完整歌词"}
 
 
@@ -242,9 +275,10 @@ def test_compat2_direct_template_context(wire, source, expected):
 ])
 def test_compat2_intro_node_whitelist(wire, tmp_path, extra):
     wire.body = payload('== 简介 ==\n正文\n' + extra)
-    assert fetcher(tmp_path).fetch_entity_description("固定样例") == {
+    assert legacy_fields(fetcher(tmp_path).fetch_entity_description("固定样例")) == {
         "name": "固定样例", "type": "Person", "infobox": {},
-        "summary": ["正文"], "lyrics": "", "spaced_lyrics": ""}
+        "summary": ["正文额外内容" if extra.startswith("<div>") else "正文"],
+        "lyrics": "", "spaced_lyrics": ""}
 
 
 def test_compat2_list_text_nodes_join_without_separator(wire):
@@ -261,7 +295,7 @@ def test_compat2_list_text_nodes_join_without_separator(wire):
 ])
 def test_compat2_intro_text_nodes_join(wire, tmp_path, source, expected):
     wire.body = payload(source)
-    assert fetcher(tmp_path).fetch_entity_description("固定样例") == {
+    assert legacy_fields(fetcher(tmp_path).fetch_entity_description("固定样例")) == {
         "name": "固定样例", "type": "Person", "infobox": {},
         "summary": [expected], "lyrics": "", "spaced_lyrics": ""}
 
@@ -286,14 +320,14 @@ HEAD_TABS_SCOPE = [
 @pytest.mark.parametrize("source,html,expected", HEAD_TABS_SCOPE)
 def test_tabs_heading_keeps_parameter_sibling_scope(wire, tmp_path, source, html, expected):
     wire.body = payload(source)
-    assert fetcher(tmp_path).fetch_entity_description("固定样例") == {
+    assert legacy_fields(fetcher(tmp_path).fetch_entity_description("固定样例")) == {
         "name": "固定样例", "infobox": {}, **expected}
 
 
 def test_details_keep_requested_identity_and_ignore_summary_flag(wire, tmp_path):
     source, _, expected = HEAD_DETAIL_CASES[1]
     wire.body = payload(source)
-    assert fetcher(tmp_path).fetch_entity_description("测试曲 & A?", False) == {
+    assert legacy_fields(fetcher(tmp_path).fetch_entity_description("测试曲 & A?", False)) == {
         "name": "测试曲 & A?", **expected}
     assert_api(wire.calls[0], "测试曲 & A?")
 
@@ -303,7 +337,7 @@ def test_explicit_poem_br_keeps_head_get_text_format(wire, tmp_path, container):
     wire.body = payload("== 歌词 ==\n" + container.format("第一段完整歌词<br/>第二段完整歌词"))
     data = fetcher(tmp_path).fetch_entity_description("歌")
     # Matched HTML: <h2>歌词</h2><div class=poem><p>第一段完整歌词<br/>第二段完整歌词</p></div>
-    assert data["lyrics"] == "第一段完整歌词第二段完整歌词"
+    assert data["lyrics"] == "第一段完整歌词\n第二段完整歌词"
     assert data["spaced_lyrics"] == data["lyrics"]
 
 
@@ -431,32 +465,34 @@ def test_dynamic_counter_does_not_delete_surrounding_sentence(wire, tmp_path):
     wire.body = payload("== 简介 ==\n这是一首关于星空的歌曲。\n"
                         "截至现在已有{{bilibiliCount|id=1}}次播放。\n由作者甲创作。")
     data = fetcher(tmp_path).fetch_entity_description("歌曲")
-    # HEAD only removes 截至...收藏, not this whole sentence. The remote
-    # counter value is unknowable from this source and is not claimed equal.
-    assert data["summary"] == ["这是一首关于星空的歌曲。\n截至现在已有次播放。\n由作者甲创作。"]
+    # Remove the unresolved count sentence completely; retain surrounding prose.
+    assert data["summary"] == ["这是一首关于星空的歌曲。\n由作者甲创作。"]
 
 
-def test_h3_is_not_an_independent_intro_or_song_header(wire, tmp_path):
+def test_h3_intro_and_lyrics_are_retained_in_main_scope(wire, tmp_path):
     wire.body = payload("== 简介 ==\n正文\n=== 简介 ===\n不可追加\n"
                         "=== 歌词 ===\n<poem>不可采集</poem>")
     data = fetcher(tmp_path).fetch_entity_description("歌曲")
-    assert data == {"name": "歌曲", "type": "Person", "infobox": {},
-                    "summary": ["正文"], "lyrics": "", "spaced_lyrics": ""}
+    assert legacy_fields(data) == {"name": "歌曲", "type": "Song", "infobox": {},
+                    "summary": ["正文\n不可追加"], "short_summary": "正文\n不可追加",
+                    "lyrics": "不可采集", "spaced_lyrics": "不可采集"}
 
 
 def test_disabled_and_cached_details_do_not_access_network(wire, tmp_path):
     assert fetcher(tmp_path, activated=False).fetch_entity_description("歌曲") == ""
+    assert not wire.calls
     cache = tmp_path / "cache"
     cache.mkdir()
     cached = {"name": "歌曲", "lyrics": "旧缓存", "summary": ["旧简介"]}
     (cache / "歌曲.json").write_text(json.dumps(cached), encoding="utf-8")
     assert fetcher(tmp_path).fetch_entity_description("歌曲") == cached
     assert not wire.calls
+    assert json.loads((cache / "歌曲.json").read_text(encoding="utf-8")) == cached
 
 
 @pytest.mark.parametrize("lyric_source,expected", [
     ('<div class="Tabs"><div class="poem"><p>这是第一句完整歌词</p></div></div>', "这是第一句完整歌词"),
-    ('<poem><span>第一句<br/>第二句</span></poem>', "第一句第二句"),
+    ('<poem><span>第一句完整歌词<br/>第二句完整歌词</span></poem>', "第一句完整歌词\n第二句完整歌词"),
 ])
 def test_repaired_details_preserve_database_singers_and_keywords(wire, tmp_path, monkeypatch, lyric_source, expected):
     wire.body = payload('<table class="moe-infobox infobox"><tr><td>演唱</td><td>[[User:甲|洛天依]]</td></tr></table>\n'
@@ -473,7 +509,9 @@ def test_repaired_details_preserve_database_singers_and_keywords(wire, tmp_path,
             assert song.singers == "洛天依"
             assert song.introduction == "由作者甲创作。"
             assert song.lyrics == expected
-        assert (tmp_path / "lyrics.txt").read_text(encoding="utf-8") == f"{expected}=>{expected}是《修复曲》的歌词\n"
+        keyword_text = (tmp_path / "lyrics.txt").read_text(encoding="utf-8")
+        for line in expected.splitlines():
+            assert f"{line}=>{line}是《修复曲》的歌词\n" in keyword_text
     finally:
         engine.dispose()
 
@@ -495,7 +533,7 @@ def test_public_ingestion_keeps_sqlite_and_keyword_contract(wire, tmp_path, monk
             song = db.query(Song).one()
             assert song.name == song.safe_name == "显示歌名"
             assert song.singers == "洛天依" and song.uploader == "作者甲"
-            assert song.lyrics == "这是第一句完整歌词 这是第二句完整歌词"
+            assert song.lyrics == "这是第一句完整歌词\n这是第二句完整歌词"
             assert song.introduction == "正文。"
             assert not do_one_song(db, crawler, song_name)
         assert (tmp_path / "names.txt").read_text(encoding="utf-8") == "显示歌名\n"
