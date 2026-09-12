@@ -114,5 +114,3 @@ def test_fixed_infobox_never_leaks_dynamic_counts(replay):
     crawler, page, _ = replay
     data = crawler.fetch_entity_description(page["title"])
     assert "再生数为" not in str(data["infobox"])
-
-

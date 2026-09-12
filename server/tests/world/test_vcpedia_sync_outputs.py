@@ -101,5 +101,3 @@ def test_list_content_slots_share_target_display(outputs, sync_wire, monkeypatch
     assert daily.fetch_song_list_from_template(daily.TEMPLATE_URL) == ["甲♡"]
     assert daily.sync_daily_new_songs(sync_wire.config)["added"] == ["甲♡"]
     assert sync_wire.calls[-1] == "甲页面"
-
-
