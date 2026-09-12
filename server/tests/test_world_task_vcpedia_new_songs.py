@@ -8,6 +8,7 @@ server_root = str(Path(__file__).resolve().parent.parent)
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
+import src.subconscious.music_knowledge.song_database as song_database
 import src.world.get_new_songs.task as task_module
 import src.world.get_new_songs.daily_new_song_fetcher as fetcher_module
 from src.utils.helpers import load_config
@@ -93,19 +94,25 @@ def test_vcpedia_run_once_fetches_live_songs_and_writes_result(monkeypatch, tmp_
         "db_file": "knowledge_db.db",
     }
     task_config.setdefault("crawler", {})
-    task_config["crawler"]["output_dir"] = str(tmp_path / "crawled_data")
+    task_config["crawler"]["data_dir"] = str(tmp_path / "crawled_data")
+    task_config["crawler"].setdefault("vcpedia", {})["output_dir"] = str(tmp_path / "crawled_data")
     task_config["crawler"]["use_llm"] = False
 
     keyword_dir = tmp_path / "keywords"
     monkeypatch.setattr(fetcher_module, "KNOWLEDGE_DIR", keyword_dir)
     monkeypatch.setattr(fetcher_module, "SONG_NAME_KEYWORDS_FILE", keyword_dir / "song_name_keywords.txt")
     monkeypatch.setattr(fetcher_module, "SONG_LYRIC_KEYWORDS_FILE", keyword_dir / "song_lyric_keywords.txt")
-    monkeypatch.setattr(fetcher_module.time, "sleep", lambda _seconds: None)
 
     task = VCPediaNewSongTask(task_config)
     task.initialize(SimpleNamespace(llm_service=None))
 
-    result = task.run_once()
+    monkeypatch.setattr(song_database, "engine", None)
+    monkeypatch.setattr(song_database, "SessionLocal", None)
+    try:
+        result = task.run_once()
+    finally:
+        if song_database.engine is not None:
+            song_database.engine.dispose()
     payload = {
         "ok": result.ok,
         "message": result.message,
