@@ -1,0 +1,20 @@
+# VCPedia 规则提取与可选补提取
+
+## 目标与边界
+
+在 `96c8726` 兼容迁移基线上，仅简化并改善 wikitext 提取。最新收缩授权替代此前未提交的扩大设计，公开行为以 [提取契约](../../项目说明/项目架构与接口（spec）/接口文档/world/vcpedia-extraction.md) 为准。
+
+## 验收
+
+- 信息框、简介和歌词独立提取；首个 Songbox 只决定信息框，不限制页面公共正文。简介取第一个完整简介候选，歌词保留既有首成功候选选择（不以源码顺序判断主次）；tabs 普通递归且标题不泄漏到外层，不建立 scope/main/version/derivative 或名称评分体系。
+- 已稳定模板描述存于 `server/config/vcpedia_templates.json` UTF-8 JSON 规则配置（不属于知识库），支持不改代码调整名字/别名、既有取文槽、容器/歌词槽与字段别名；固定 kind、启动校验、只读一次加载，不新增模板能力或网络指令，默认输出与迁移前同输入逐字段一致。配置使用说明见提取契约“模板资源配置”。TextHover 以参数1作为可见文字，参数2替代文本不作为知识正文，参数4为 pic 时整体排除，位置/标签控制不泄漏。验收以仓库内冻结材料的离线回放为准（`server/tests/world/fixtures/`）；不解码歌词中的摩斯电码，不顺带修复 font 或第二 PV。
+- 信息框开放业务键，保留 staff group/list 和已确认内容参数。zhconv 普通 convert(..., 'zh-hans') 只规范结构比较和已知字段键，不叠加 zh-cn 地区词替换；普通输出正文、信息框值、简介、歌词及短摘要使用 zhconv zh-cn。普通无标志 LC 解包保护字形；闭合 nowiki 内全部文字、标记和换行原样保留且不执行，仅去外标签。source、请求 title、链接 target、页面身份和 data.name 不变；已渲染局部 HTML 保持站点字形，不二次转换已完成字段或摘要 fallback。不支持 R/A/H、未闭合等扩展。
+- 保留全文、标准 markup/ruby、歌词换行、括号及和声；原文与译文不混合。不恢复破坏性歌词正则；spaced_lyrics 保证原下游 split 可消费，不修改 query/linker/存储 schema。
+- 规则结果及缺失清单各产生一次。未知模板本身不是缺失证据；已进入明确目标正文而无法完成取文时记录该字段缺口，不能被别处非空隐藏，不新增模板专用适配或版本体系；新 Song 独立摘要，完整页1次；缺项且显式补提模块可用时先JSON补提合并再1次摘要，共2次。补提失败不妨摘要，摘要失败沿原100字fallback；Person不新增摘要。
+- 仅目标文本区域承载外部内容的 Embed/嵌入/嵌入片段/CollectCodeData 可小预算局部 parse，未知模板不通用渲染。保留原请求挑战后的 curl 通道。
+- 日常列表 target 请求/display 保存不变。crawler.llm_module 与可选 extraction_llm_module 两个完整配置独立注册，无继承或隐式派生，use_llm统一控制；只原配置不自动补提。原摘要prompt恢复HEAD纯文本，补提独立prompt/JSON/provider引用；task不覆盖参数或隐藏client委托，补提配置缺省不注册且不影响原摘要；补提配置存在时其prompt为部署必需要件，缺失或损坏即初始化失败，不做局部降级。
+- 缓存读写及不自动写回、SQL 删除后新增、关键词追加、added/failed、失败返回和历史 Person fallback 均保持基线。不新增人物判别或歌曲入库类型门禁。
+
+此前的版本/来源元数据持久化、缓存 schema/extractor/TTL/哈希、失败文件、批次期限、SQL upsert、关键词补偿/原子替换/长窗口均退役，不是验收要求。
+
+实现归属 world/get_new_songs，复用 LLMService。
