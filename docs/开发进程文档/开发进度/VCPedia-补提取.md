@@ -298,3 +298,11 @@
 - 复审来源与验证镜像：`data/test_outputs/precommit-review-random-20260912/REVIEW-committed.md`（缓存 21 + 随机 10 配对回放、两组公开入口探针、四组回归 324 passed / 1 deselected）。
 - 验证：受影响测试 `pytest tests/world/test_vcpedia_fixed_acceptance.py tests/world/test_vcpedia_sync_outputs.py -q` 通过；`compileall -q src/world/get_new_songs tests/world` 退出 0。
 - 未验证：真实站点/模型与生产未验收。作者自审完成，不替代他人审核。
+
+### 2026-09-13 真实模型补提恢复验证（Foxy／社畜烧酒）
+
+- 行为验证问题："模型能否恢复缺口字段"此前只有 null stub 证据。现以真实 provider 各调用 1 次补提提示词验证：`scripts/vcpedia_prompt_lab.py --material file:<冻结源码> --title <标题>`，走 SecretStore→ConfigStore→LLMService→register_llm_module 正式链路，use_json=True、enable_thinking=False、生产默认采样（temperature 0.7）。
+- 结果：《Foxy》恢复 1056 字符/52 行，与同响应 HTML 歌词表层**忽略空白逐字相等**；《社畜烧酒》恢复 445 字符/28 行，忽略空白与源码着色竖线后与 HTML 表层逐字相等——唯一差异是模型保留了 `交叉颜色N` 的 `|畜|` 行内着色标记（提示词要求不写 wiki 语法，模型未剥离；对 spaced_lyrics 消费仅引入含 `|` 的分段）。两首均无旧实现式的重复。usage 合计 prompt 3349 / completion 771 tokens。
+- 环境：本地 config 未启用 `extraction_llm_module`，实验室按设计回退 `llm_module`（dsv4-flash）并强制提取契约参数；正式部署启用补提配置时走专用配置，行为契约不受影响。
+- 产物：`data/test_outputs/prompt-lab/20260913-013724`、`20260913-013750`；判卷脚本与结论 `data/test_outputs/precommit-review-random-20260912/model_verdict.py`、`model-verdict.json`。
+- 未验证：其余缺口页（Sharing The World 首候选、jk/font 缺字、refn 误报）未逐页真实模型验证；真实站点与生产未验收。
