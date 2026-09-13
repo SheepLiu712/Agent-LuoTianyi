@@ -39,19 +39,21 @@ def _type_name(value):
 
 def fingerprint(character_id, request):
     """哈希全部不可变请求语义，排除作为键的请求 ID 和可变令牌。"""
-    encoded = _json([1, character_id, _type_name(request), _value(request.stimulus), _value(request.interaction)])
+    encoded = _json([1, character_id, _type_name(request), _value(request.stimulus), _value(request.interaction), _value(request.purpose), _value(request.prepared_inputs)])
     return "v1:" + sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def encode_report(report):
     values = {f.name: getattr(report, f.name) for f in fields(report)}
-    values["reconsider_at"] = _value(report.reconsider_at)
-    return _json({"version": 1, "report": values})
+    prepared = report.preprocessed_input
+    values["preprocessed_input"] = None if prepared is None else {
+        f.name: getattr(prepared, f.name) for f in fields(prepared)}
+    return _json({"version": 3, "report": values})
 
 
 def decode_report(payload):
     data = json.loads(payload)
-    if type(data) is not dict or set(data) != {"version", "report"} or type(data["version"]) is not int or data["version"] != 1:
+    if type(data) is not dict or set(data) != {"version", "report"} or type(data["version"]) is not int or data["version"] != 3:
         raise ValueError("unknown report format")
     values = data["report"]
     if type(values) is not dict or set(values) != {f.name for f in fields(d.HandlingReport)}:
@@ -64,14 +66,8 @@ def decode_report(payload):
         if type(values[name]) is not list:
             raise ValueError("invalid report identities")
         values[name] = tuple(values[name])
-    stamp = values["reconsider_at"]
-    if stamp is not None:
-        if type(stamp) is not list or len(stamp) != 4 or stamp[0] != "datetime" or type(stamp[3]) is not int:
-            raise ValueError("invalid report timestamp")
-        instant = datetime.fromisoformat(stamp[1])
-        if stamp[2] is not None:
-            instant = instant.astimezone(ZoneInfo(stamp[2]))
-        values["reconsider_at"] = instant.replace(fold=stamp[3])
-        if _value(values["reconsider_at"]) != stamp:
-            raise ValueError("inconsistent report timestamp")
+    prepared = values["preprocessed_input"]
+    if prepared is not None:
+        prepared["conversation_entry_ids"] = tuple(prepared["conversation_entry_ids"])
+        values["preprocessed_input"] = d.PreprocessedInput(**prepared)
     return d.HandlingReport(**values)

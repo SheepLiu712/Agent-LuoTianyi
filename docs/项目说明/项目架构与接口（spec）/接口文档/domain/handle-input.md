@@ -1,5 +1,6 @@
 # handle 输入契约
 
+
 本文记录 `src.domain.agent` 已提供的请求、交互快照、取消令牌及构造错误。Stimulus 的结构见 [Stimulus 契约](stimulus.md)。
 
 ## 公开入口
@@ -188,3 +189,13 @@ python -m pytest tests/domain -q
 ```
 
 已完成验证记录见 [开发进度](../../../../开发进程文档/开发进度/Agent-handle-realize-深模块重构.md)。
+
+交互结束协调刺激 `InteractionEnding` 与回复期限一样，不允许出现在 pending_stimuli 中。
+
+## 处理用途与预处理结果
+
+HandleStimulusRequest 增加 `purpose: HandlePurpose = PROCESS` 和 `prepared_inputs: tuple[PreprocessedInput, ...] = ()`。HandlePurpose 包含 PROCESS、REFLECT，必须传枚举实例。prepared_inputs 按 pending_stimuli 顺序提供，不得重复或包含范围外刺激。
+
+`PreprocessedInput(*, stimulus_id: str, text: str | None, conversation_entry_ids: tuple[str, ...] = ())` 为不可变数据类型。stimulus_id 非空白；text 为理解后的文本，允许 None；conversation_entry_ids 为已保存对话记录 ID，元素非空白且不重复。非法构造使用 CONTRACT_INVALID_HANDLE_REQUEST。
+
+单条预处理结果由 HandlingReport.preprocessed_input 返回；Stage 保存后，将本批结果随期限请求传给回复 handler。该数据对象不代替数据库写入。

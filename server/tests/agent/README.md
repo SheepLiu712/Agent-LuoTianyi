@@ -3,6 +3,7 @@
 当前测试通过公开的 `handle_stimulus`、`realize_action_plan` 和运行时生命周期观察行为。
 每次调用独立处理；失败停止后续交付，保留已完成结果，报告不要求调用者重试。
 
+- `test_handling_preparation.py`：Stage 显式指定输入范围、Agent 不保留跨调用准备状态，以及独立 reflection 路由。
 - `test_facade_contract.py`：入口类型、角色、取消及准入检查。
 - `test_handler_registration.py`、`test_handler_dispatch.py`：路由、处理报告、顺序执行、部分效果及错误日志。
 - `test_facade_inflight_shutdown.py`：关闭等待、取消传播和处理器清理。

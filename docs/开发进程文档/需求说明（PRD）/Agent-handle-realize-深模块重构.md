@@ -1,5 +1,7 @@
 # Agent `handle_stimulus / realize_action_plan` 深模块重构 PRD
 
+> 2026-09-13 交互职责方向已修订，见 [Agent 深模块重构总 SPEC](../设计文档/Agent-handle-realize-深模块重构.md)。Stage 接管输入处理状态、context 生命周期、批次、等待策略及认知维护触发；Agent 保留两个认知/执行业务入口。下文与此冲突的旧方案不再作为目标验收依据。编排已迁移，真实聊天 handler 仍为占位。
+
 > 2026-09-06 本轮计划与执行契约以 [realization SPEC](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md) 为准：StartThinking 计划由 stage 消费，其余业务行动交给 realize；MessageEndOutput 表达消息结束；本版沿用正常顺序执行与终止包机制。下文历史计划、输出和严格投递描述不扩大该版本接口范围。
 
 > 状态：待评审

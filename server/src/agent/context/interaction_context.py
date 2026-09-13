@@ -21,7 +21,7 @@ class InteractionContext:
     ) -> None:
         """从 database 同步加载 identity 的资料及对话，并建立空召回缓存。
 
-        异步代码应通过 ContextFactory.get 创建。
+        异步代码应通过 ContextFactory.create 创建。
         """
         self._identity = identity
         self._state = _Lifecycle()

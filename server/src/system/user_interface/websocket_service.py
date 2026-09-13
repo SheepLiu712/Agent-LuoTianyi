@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from enum import Enum
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Any, Dict
 import time
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
@@ -16,6 +16,7 @@ from src.domain.chat import ChatInputEvent
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
+    from src.adapter.websocket import WebSocketAdapter
     from src.chat_session.chat_pipeline.chat_stream import ChatStream
     from src.system.database.database_service import DatabaseManager
 
@@ -334,6 +335,34 @@ class WebSocketService:
         self.mark_client_message_accepted(websocket_connection, event)
         return ChatEventAcceptance.ACCEPTED
 
+    def try_accept_stimulus_event(
+        self,
+        connection: "WebSocketConnection",
+        event: WSMessage,
+        *,
+        adapter: "WebSocketAdapter",
+    ) -> ChatEventAcceptance:
+        """向新刺激入口投递 event，返回接收状态；认证、校验及去重均在入队前完成。
+
+        connection 是已认证连接，adapter 使用绑定关系查找目标 Stage 并同步入队。
+        连接维护事件不会进入 adapter；重复消息不会再次转换或投递。
+        """
+        if event.event_type not in {"user_text", "user_message", "message", "chat_message", "chat", "user_typing"}:
+            return ChatEventAcceptance.UNSUPPORTED
+        if connection.is_closed or not connection.user_uuid or not self.has_valid_client_message_id(event):
+            return ChatEventAcceptance.BAD_MESSAGE
+        try:
+            duplicate = self.is_duplicate_client_message(connection, event)
+            if duplicate:
+                return ChatEventAcceptance.DUPLICATE
+            accepted = adapter.receive_event(connection, event)
+        except (KeyError, TypeError, ValueError):
+            return ChatEventAcceptance.BAD_MESSAGE
+        if not accepted:
+            return ChatEventAcceptance.OVERLOADED
+        self.mark_client_message_accepted(connection, event)
+        return ChatEventAcceptance.ACCEPTED
+
     @staticmethod
     def _validate_chat_event_targets(
         chat_stream: "ChatStream",
@@ -401,6 +430,31 @@ class WebSocketConnection:
         self.last_ping_time: int | None = None
         self.client_mode: dict = {"types": []}
         self.capabilities: set[str] = set()
+        self._send_lock = asyncio.Lock()
+        self._closed = False
+
+    @property
+    def is_closed(self) -> bool:
+        """返回本连接是否已断开或发送失败；旧连接不会自动关联到重连后的 socket。"""
+        return self._closed
+
+    async def send_event(self, event_type: str, payload: dict[str, Any]) -> None:
+        """将 event_type 和 payload 封装为事件并串行发送；单包限时十秒，失败抛出且不重试。"""
+        async with self._send_lock:
+            if self._closed:
+                raise ConnectionError("WebSocket connection is closed")
+            try:
+                await asyncio.wait_for(self.websocket.send_json({
+                    "type": event_type, "ts": int(time.time() * 1000), "payload": payload,
+                }), timeout=10.0)
+            except BaseException:
+                # 发送被中断时交付结果也不确定，禁止继续使用这条连接发送。
+                self._closed = True
+                raise
+
+    def mark_disconnected(self) -> None:
+        """由连接接入层标记断开，使旧连接上的业务输出立即失效。"""
+        self._closed = True
 
     def set_user(self, user_uuid: str, user_name: str):
         self.user_uuid = user_uuid

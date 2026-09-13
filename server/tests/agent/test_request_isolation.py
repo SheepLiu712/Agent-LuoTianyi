@@ -1,6 +1,5 @@
 """不同请求和角色的单次处理互相隔离。"""
 from dataclasses import replace
-from datetime import timedelta
 
 import pytest
 
@@ -16,7 +15,7 @@ async def deliver(req, plans):
                    interaction_id=req.interaction.interaction_id,
                    basis_interaction_revision=req.interaction.interaction_revision)
     receipt = await plans.emit(draft(actions=plan.actions, sources=plan.source_stimulus_ids))
-    return settlement(req, emitted=(receipt.plan_id,), reconsider_at=req.interaction.now + timedelta(seconds=7))
+    return settlement(req, emitted=(receipt.plan_id,), consumed=())
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 # HandlingReport 类型契约
 
-`src.domain.agent` 提供不可变的 `HandlingReport`，保存调用方传入的请求结束状态、pending 处理结果、计划身份和重评时间，并校验报告内部的字段关系。
+
+`src.domain.agent` 提供不可变的 `HandlingReport`，保存调用方传入的请求结束状态、pending 处理结果、计划身份和单条预处理结果，并校验报告内部的字段关系。
 
 ## 公开入口
 
@@ -12,7 +13,7 @@
 - `InvalidHandlingReportError`。
 - `HandlingReportErrorCode`。
 
-`HandlingReport` 使用不可变值对象和仅限关键字的直接构造器。下表是完整构造参数，所有字段均须显式传入，包括空元组、`None` 和 `False`。合法值原样保存，字符串不裁剪，集合不转换、排序或去重。两个报告在全部字段相等时值相等。
+`HandlingReport` 使用不可变值对象和仅限关键字的直接构造器。下表是完整构造参数，除 preprocessed_input 默认为 None 外，其余字段均须显式传入，包括空元组、`None` 和 `False`。合法值原样保存，字符串不裁剪，集合不转换、排序或去重。两个报告在全部字段相等时值相等。
 
 ## 字段
 
@@ -26,7 +27,6 @@
 | `consumed_pending_stimulus_ids` | `tuple[str, ...]` | considered 中已完成语义处理的身份，按 considered 中的相对顺序记录 |
 | `retained_pending_stimulus_ids` | `tuple[str, ...]` | considered 中仍需重新判断的身份，按 considered 中的相对顺序记录 |
 | `emitted_plan_ids` | `tuple[str, ...]` | 本次请求已被接受的计划身份，按首次接受顺序记录 |
-| `reconsider_at` | `datetime \| None` | retained 内容的定时重评时间；有值时带时区，`None` 表示没有定时重评时间 |
 | `error_code` | `HandlingErrorCode \| None` | 请求失败的稳定原因；`FAILED` 时必填，其他状态必须为 `None` |
 | `retryable` | `bool` | 只接受布尔值；当前 Agent 返回 False，不要求调用者重投 |
 
@@ -57,7 +57,7 @@ consumed 和 retained 各自必须是 considered 的有序子序列。遗漏 con
 
 `emitted_plan_ids` 与状态、消费比例独立；正常结束、取消和失败都能记录零个或多个已经接受的计划。计划 ID 的存在不等于计划已执行成功。
 
-`reconsider_at` 有值时 retained 必须非空，时间满足 `tzinfo is not None` 且 `utcoffset() is not None`。允许已经到期的时间；时间校验只依赖字段本身。retained 非空时，时间可以为 `None`。三种状态均适用该规则。
+`preprocessed_input: PreprocessedInput | None = None` 保存单条输入的预处理结果。构造器验证类型，Agent 与 Stage 验证 stimulus_id 与触发刺激匹配。回复计时由 Stage 管理。
 
 `retryable` 是显式事实，构造器保留其布尔值；它与状态、计划数量和 retained 数量没有推导关系。
 
@@ -95,10 +95,9 @@ consumed 和 retained 各自必须是 considered 的有序子序列。遗漏 con
 
 ## 构造示例
 
-以下示例展示公开构造形式：请求正常结束，M1 已处理，M2 保留到指定时间。
+以下示例展示公开构造形式：请求正常结束，M1 已处理，M2 保留待后续处理。
 
 ```python
-from datetime import datetime, timezone
 from src.domain.agent import HandlingReport, HandlingRequestStatus
 
 report = HandlingReport(
@@ -110,7 +109,6 @@ report = HandlingReport(
     consumed_pending_stimulus_ids=("M1",),
     retained_pending_stimulus_ids=("M2",),
     emitted_plan_ids=("plan-1",),
-    reconsider_at=datetime(2026, 9, 6, 8, 0, tzinfo=timezone.utc),
     error_code=None,
     retryable=False,
 )
@@ -118,7 +116,7 @@ report = HandlingReport(
 
 ## 验证
 
-测试从 `src.domain.agent` 的上述五个公开名称观察行为，测试文件归属 `server/tests/domain/test_handling_report_contract.py`。
+测试从 `src.domain.agent` 的上述公开名称观察行为，测试文件归属 `server/tests/domain/test_handling_report_contract.py`。
 
 在 `server` 目录运行：
 

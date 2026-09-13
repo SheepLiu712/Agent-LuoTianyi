@@ -12,15 +12,16 @@ class StimulusHandler(Protocol):
     """处理单次刺激，使用本次受限计划接收器并返回真实结算。"""
 
     async def handle(self, request: HandleStimulusRequest, plans: PlanEmitter) -> HandlingReport:
-        """处理请求并交付计划；返回结算，异常及任务取消由门面处理。"""
+        """处理 Stage 指定的输入范围并交付计划；预处理和落库通过本次 plans.context 访问上下文。"""
         ...
 
 
 class StimulusRouter(Generic[HandlerT]):
     """保存角色私有的刺激注册快照，只解析、不执行处理器。"""
 
-    def __init__(self, registrations: Iterable[tuple[StimulusKind, HandlerT]]) -> None:
+    def __init__(self, registrations: Iterable[tuple[StimulusKind, HandlerT]], *, reflection_handler: HandlerT | None = None) -> None:
         """消费二元组序列；非法项抛 TypeError，重复类别抛 ValueError。"""
+        self._reflection_handler = reflection_handler
         self._handlers: dict[StimulusKind, HandlerT] = {}
         for registration in registrations:
             if not isinstance(registration, tuple) or len(registration) != 2:
@@ -37,3 +38,9 @@ class StimulusRouter(Generic[HandlerT]):
         if not isinstance(kind, StimulusKind):
             raise TypeError("kind must be StimulusKind")
         return self._handlers[kind]
+
+    def resolve_reflection(self) -> HandlerT:
+        """返回认知维护处理器；未注册时抛 KeyError。"""
+        if self._reflection_handler is None:
+            raise KeyError("reflection")
+        return self._reflection_handler

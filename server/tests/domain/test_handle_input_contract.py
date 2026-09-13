@@ -457,3 +457,30 @@ async def test_another_task_on_the_same_loop_observes_published_cancellation():
         if not observer.done():
             observer.cancel()
         await asyncio.gather(observer, return_exceptions=True)
+
+
+@pytest.mark.parametrize("fields", [
+    {"stimulus_id": " "}, {"text": {}}, {"conversation_entry_ids": ["entry"]},
+    {"conversation_entry_ids": ("entry", "entry")}, {"conversation_entry_ids": ("",)},
+])
+def test_preprocessed_input_rejects_invalid_identity_and_untyped_data(fields):
+    values = dict(stimulus_id="message-1", text=None, conversation_entry_ids=())
+    values.update(fields)
+    with pytest.raises(domain.InvalidHandleInputError):
+        domain.PreprocessedInput(**values)
+
+
+def test_request_preserves_preprocessed_input_order_and_explicit_reflection():
+    a, b = _stimulus(stimulus_id="a"), _stimulus(stimulus_id="b")
+    prepared = tuple(domain.PreprocessedInput(stimulus_id=s.stimulus_id, text=s.text,
+        conversation_entry_ids=("record-" + s.stimulus_id,)) for s in (a, b))
+    values = dict(stimulus=_stimulus("InteractionDeadline"), interaction=_snapshot(pending_stimuli=(a, b)))
+    request = _request(**values, purpose=domain.HandlePurpose.REFLECT, prepared_inputs=prepared)
+    assert request.prepared_inputs == prepared
+    assert request.purpose is domain.HandlePurpose.REFLECT
+    for invalid in (prepared[::-1], prepared + prepared[:1],
+                    (domain.PreprocessedInput(stimulus_id="unknown", text=None),), list(prepared)):
+        with pytest.raises(domain.InvalidHandleInputError):
+            _request(**values, prepared_inputs=invalid)
+    with pytest.raises(domain.InvalidHandleInputError):
+        _request(**values, purpose="reflect")

@@ -32,3 +32,7 @@ Agent 从本次 ExecutionContext 和当前 Action 绑定 interaction_id、execut
 ## 验证
 
 公开 realize 测试覆盖完整字段、跨行动连续序号、并发发送顺序、非法完整输出拒绝、交付失败停止、取消、部分效果和日志。已移除数据库故障、原内容恢复、重启恢复和历史去重测试。
+
+## 执行中断许可
+
+`OutputEmitter.set_interruptible(interruptible: bool) -> None` 更新当前 realize 是否允许普通刺激打断。每个行动开始时默认 False，SAY 保持 False。非法布尔参数、已关闭的 emitter 或已取消的执行不能更新状态。许可不限制生命周期取消。

@@ -9,6 +9,8 @@ from src.agent.handlers.action.router import ActionHandler, ActionRouter
 from src.agent.handlers.stimulus.router import StimulusHandler, StimulusRouter
 from src.agent.processing.plan_emitter import handling_error
 from src.agent.processing.handling import Handling
+from src.agent.context import InteractionContext
+from src.agent.processing.interruptibility import _InteractionInterruptibility
 from src.utils.logger import get_logger
 
 
@@ -19,7 +21,7 @@ class Agent:
     每次调用独立处理；失败记录日志并结束，接收器只属于本次调用。
     """
 
-    __slots__ = ("_character_id", "_accepting", "_logger", "_stimulus_router", "_action_router", "_inflight")
+    __slots__ = ("_character_id", "_accepting", "_logger", "_stimulus_router", "_action_router", "_inflight", "_interruptibility")
 
     def __init__(
         self,
@@ -37,16 +39,21 @@ class Agent:
         self._stimulus_router = stimulus_router if stimulus_router is not None else StimulusRouter(())
         self._action_router = action_router if action_router is not None else ActionRouter(())
         self._inflight: set[asyncio.Future] = set()
+        self._interruptibility = _InteractionInterruptibility()
 
-    async def handle_stimulus(self, request: d.HandleStimulusRequest, plan_sink: d.ActionPlanSink) -> d.HandlingReport:
+    async def handle_stimulus(self, request: d.HandleStimulusRequest, plan_sink: d.ActionPlanSink, *, context: InteractionContext | None = None) -> d.HandlingReport:
         """校验刺激并调用处理器，按顺序交付计划，返回本次处理报告。
 
+        context 是 Stage 为本次调用借出的交互上下文，可省略；Agent 不跨调用保存它。
         失败后记录日志并停止交付，不保存或恢复请求。类型错误抛 TypeError；
         协作取消返回取消报告，任务取消等待处理器清理后传播 CancelledError。
         """
         if not isinstance(request, d.HandleStimulusRequest):
             raise TypeError("request must be HandleStimulusRequest")
         self._check_sink(plan_sink)
+        if context is not None and (context.identity.interaction_id != request.interaction.interaction_id
+                or context.identity.character_id != self._character_id or context.identity.user_id != request.interaction.user_id):
+            raise ValueError("context does not match request")
         stimuli = (request.stimulus, *request.interaction.pending_stimuli)
         error = None
         status = d.HandlingRequestStatus.FAILED
@@ -62,7 +69,8 @@ class Agent:
         completion = self._begin_call()
         report = None
         try:
-            report = await Handling(self, request, plan_sink).run()
+            with self._interruptibility.track(request.interaction.interaction_id, "handle", request.request_id) as interruption:
+                report = await Handling(self, request, plan_sink, interruption, context).run()
             return report
         finally:  # 所有路径都会走finally
             try:
@@ -94,7 +102,8 @@ class Agent:
 
         completion = self._begin_call()
         try:
-            report = await Execution(self, plan, context, output_sink).run()
+            with self._interruptibility.track(context.interaction_id, "realize") as interruption:
+                report = await Execution(self, plan, context, output_sink, interruption).run()
         except asyncio.CancelledError:
             self._record(
                 context.execution_id, context.interaction_id, d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED
@@ -104,6 +113,14 @@ class Agent:
             self._end_call(completion)
         self._record(context.execution_id, context.interaction_id, report.status, report.error_code)
         return report
+
+    def is_handle_interruptible(self, interaction_id: str, request_id: str | None = None) -> bool:
+        """返回指定交互、请求是否允许普通刺激打断；省略 request_id 时要求所有在途 handle 均允许。无调用为 False。"""
+        return self._interruptibility.allows(interaction_id, "handle", request_id)
+
+    def is_realize_interruptible(self, interaction_id: str) -> bool:
+        """返回 interaction_id 当前 realize 是否允许普通刺激打断；无调用时为 False，不限制生命周期取消。"""
+        return self._interruptibility.allows(interaction_id, "realize")
 
     def _stop_accepting(self) -> None:
         self._accepting = False
@@ -129,7 +146,7 @@ class Agent:
             consumed_pending_stimulus_ids=(),
             retained_pending_stimulus_ids=pending,
             emitted_plan_ids=tuple(emitted),
-            reconsider_at=None,
+
             error_code=error,
             retryable=retryable,
         )

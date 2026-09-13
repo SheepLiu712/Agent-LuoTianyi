@@ -218,7 +218,7 @@
 ### 2026-09-06 Issue #61 realization SPEC 草案与现行行为核对
 
 - 交付内容：完成 ActionPlan、Action、两个 sink/receipt、ExecutionContext、输出和执行报告的第一版待评审草案；逐项核对总设计中的用途与重复信息，记录思考提示、私密发布归属、音频异常终包、音频分块、表情恢复及活动/日程范围等风险。新增和精简建议均未标为已确认契约。
-- interface spec：[`domain/realization.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md)；依据与风险见 [`Issue-61-realization-契约核对.md`](../设计文档/Issue-61-realization-契约核对.md)。
+- interface spec：[`domain/realization.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md)；依据与风险见 [总 SPEC](../设计文档/Agent-handle-realize-深模块重构.md)。
 - commit 或 PR：`codex/agent-04-realization-contract` 分支上的本记录所在 SPEC 草案提交。
 - 验证及结果：按 `c523b2a6` 的实际代码核对聊天、触摸、语音、演唱、日记、动态和学歌入口；阅读现有音频终包测试，未运行它们。新增文档 UTF-8、代码围栏、相对链接及 `git diff --check` 静态检查通过。草案阶段 RED/GREEN 不适用。
 - 未验证范围：没有产品代码或测试实现，没有接入 Agent、sink 或外部服务；没有验证真实播放、设备、生产环境或完成他人评审。远程工单未修改。

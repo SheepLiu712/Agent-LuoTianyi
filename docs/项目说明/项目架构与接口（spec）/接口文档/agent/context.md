@@ -1,5 +1,7 @@
 # 交互上下文
 
+> 总体职责见 [Agent 深模块重构总 SPEC](../../../../开发进程文档/设计文档/Agent-handle-realize-深模块重构.md)。context 由 Stage 持有，Agent 在单次调用中借用。
+
 `server/src/agent/context` 提供交互上下文的创建、读取、更新和释放。数据库服务负责用户资料、正式对话和对话总结的读写；上下文持有当前交互使用的数据及召回缓存。
 
 ## 文件与类型
@@ -22,14 +24,15 @@ factory = ContextFactory(
     character_id="luotianyi",
     database=database_manager.conversation_service,
 )
-context = await factory.get("interaction-id", user_id="user-id")
-await factory.release("interaction-id")
+context = await factory.create("interaction-id", user_id="user-id")
+await context.close()
 ```
 
-- 一个 `ContextFactory` 绑定一个角色，在一个事件循环内使用。
-- `get(interaction_id, *, user_id) -> InteractionContext`：已有交互返回同一实例，首次访问在工作线程中完成构造。构造失败不缓存半成品。相同交互不能更换用户。
-- `find(interaction_id) -> InteractionContext | None`：只查找已创建且未关闭的实例。
-- `release(interaction_id) -> None`：等待创建和正在进行的数据操作结束，关闭并移除实例。不存在时无影响。
+- 一个 `ContextFactory` 绑定一个角色，在一个事件循环内使用，由 AgentRuntime.context_factories 装配。
+- `create(interaction_id: str, *, user_id: str | None) -> InteractionContext`：异步加载并返回新实例；相同 ID 再次调用也创建新对象，不提供 get/find/release 或交互缓存。
+- Stage 通过 ChatStage.create 调用 factory，独占持有返回对象。重连取得原 Stage，因此复用其 context；最终结束由 Stage 等待处理收尾后调用 context.close。
+- 创建取消时等待加载结束并关闭未交付对象，再传播 CancelledError；构造失败不返回半成品。
+- 同一创建模块创建的同用户上下文共用数据操作锁，锁索引使用弱引用，不延长 context 生命周期。
 - `InteractionContext.__init__` 同步加载画像、偏好、对话总结及近期记录，自动建立空召回缓存。
 - `close() -> None` 清空三部分内存并关闭实例；重复关闭无影响。关闭后的读取和更新抛出 `RuntimeError`。
 

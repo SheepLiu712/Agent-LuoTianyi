@@ -36,7 +36,7 @@ def _fields(status="COMPLETED", **overrides):
         trigger_stimulus_id="deadline-1", basis_interaction_revision=7,
         considered_pending_stimulus_ids=("M2", "M1", "M3"),
         consumed_pending_stimulus_ids=("M2", "M3"), retained_pending_stimulus_ids=("M1",),
-        emitted_plan_ids=("plan-2", "plan-1"), reconsider_at=PAST,
+        emitted_plan_ids=("plan-2", "plan-1"),
         error_code=_public("HandlingErrorCode").INTERNAL_ERROR if status == "FAILED" else None,
         retryable=False,
     )
@@ -126,11 +126,11 @@ def test_equal_reports_compare_by_all_field_values():
         trigger_stimulus_id="M2", basis_interaction_revision=8,
         considered_pending_stimulus_ids=("M2", "M1", "M3", "M4"),
         consumed_pending_stimulus_ids=("M2",), retained_pending_stimulus_ids=("M1", "M3"),
-        emitted_plan_ids=("other-plan",), reconsider_at=None, retryable=True,
+        emitted_plan_ids=("other-plan",), retryable=True,
     )
     # Use independent valid changes; partitions are checked as one related change.
     for field in ("request_id", "request_status", "trigger_stimulus_id",
-                  "basis_interaction_revision", "emitted_plan_ids", "reconsider_at", "retryable"):
+                  "basis_interaction_revision", "emitted_plan_ids", "retryable"):
         assert original != _report(**{field: alternatives[field]})
     assert original != _report(consumed_pending_stimulus_ids=("M2",),
                                retained_pending_stimulus_ids=("M1", "M3"))
@@ -194,7 +194,7 @@ def test_pending_partition_requires_exact_disjoint_coverage_and_relative_order(c
 def test_empty_considered_cannot_settle_any_content(field):
     """没有考察内容时，不能消费或保留外部身份。"""
     fields = _fields(considered_pending_stimulus_ids=(), consumed_pending_stimulus_ids=(),
-                     retained_pending_stimulus_ids=(), reconsider_at=None)
+                     retained_pending_stimulus_ids=(), )
     fields[field] = ("M1",)
     _invalid(fields)
 
@@ -212,7 +212,7 @@ def test_every_status_accepts_empty_full_retained_full_consumed_and_partial_resu
     """请求状态与四种合法内容划分独立。"""
     report = _report(status, considered_pending_stimulus_ids=considered,
                      consumed_pending_stimulus_ids=consumed, retained_pending_stimulus_ids=retained,
-                     reconsider_at=None, emitted_plan_ids=())
+                     emitted_plan_ids=())
     assert report.request_status is getattr(_public("HandlingRequestStatus"), status)
     assert (report.considered_pending_stimulus_ids, report.consumed_pending_stimulus_ids,
             report.retained_pending_stimulus_ids) == (considered, consumed, retained)
@@ -240,7 +240,7 @@ def test_retryable_is_preserved_independently_of_status_and_plans(status, retrya
     assert _report(status, retryable=retryable).retryable is retryable
     assert _report(status, retryable=retryable, emitted_plan_ids=(),
                    consumed_pending_stimulus_ids=("M2", "M1", "M3"),
-                   retained_pending_stimulus_ids=(), reconsider_at=None).retryable is retryable
+                   retained_pending_stimulus_ids=(), ).retryable is retryable
 
 
 @pytest.mark.parametrize("status", ("COMPLETED", "CANCELLED"))
@@ -277,19 +277,8 @@ def test_runtime_failure_can_preserve_partial_consumption(name):
     assert report.emitted_plan_ids == ("plan-2", "plan-1")
 
 
-@pytest.mark.parametrize("value", ["2000-01-01", PAST.replace(tzinfo=None), PAST.replace(tzinfo=NoOffset())])
-def test_reconsider_time_requires_datetime_with_effective_timezone(value):
-    """重评时间必须为具有有效时区偏移的 datetime。"""
-    _invalid(_fields(reconsider_at=value))
 
 
-@pytest.mark.parametrize("status", STATUSES)
-def test_reconsider_time_is_optional_and_may_already_be_due(status):
-    """有 retained 时，三种状态都接受空时间和已到期的带时区时间。"""
-    assert _report(status, reconsider_at=None).reconsider_at is None
-    assert _report(status, reconsider_at=PAST).reconsider_at == PAST
-    _invalid(_fields(status, consumed_pending_stimulus_ids=("M2", "M1", "M3"),
-                     retained_pending_stimulus_ids=()))
 
 
 def test_construction_error_code_is_readonly_and_not_a_runtime_failure():

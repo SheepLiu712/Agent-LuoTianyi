@@ -211,6 +211,8 @@ async def chat_ws(websocket: WebSocket):
         gcsm.ws_lost_connection(ws_connection)
         system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
         logger.error(f"Error in /chat_ws: {e}")
+    finally:
+        ws_connection.mark_disconnected()
 
 
 @app.get("/auth/public_key")

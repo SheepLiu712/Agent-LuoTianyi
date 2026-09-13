@@ -1,20 +1,12 @@
-# Agent `handle_stimulus / realize_action_plan` 深模块重构总体设计背景
+# Agent `handle_stimulus / realize_action_plan` 深模块重构总 SPEC
 
-> 2026-09-06 计划与执行的当前目标契约见 [realization SPEC](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md)。本轮明确 StartThinking 由 stage 直接消费、MessageEndOutput 替代音频终止输出，严格乱序/丢包恢复不属于本版交付；下文保留历史设计，不覆盖这些已确认修订。
+日期：2026-09-13。
 
-> 状态：总体设计背景；2026-09-06 已修订为单次处理与失败停止，具体接口以接口 SPEC 为准
->
-> 日期：2026-09-06
->
-> 来源：[`Agent-handle-realize-深模块重构 PRD`](../需求说明（PRD）/Agent-handle-realize-深模块重构.md)
->
-> 当前权威契约：[`Server 模块接口文档`](../../项目说明/项目架构与接口（spec）/接口文档/README.md)。行为切片只更新对应模块的 interface 文档；本文保留架构背景、跨切片边界和历史设计取舍。
->
-> 范围：记录 Agent 对外行为方向、Agent 内部 Handler / Skill 分层、内部状态变更和事后反思的总体设计背景；不代表这些 interface 已经实现
+本文件是本次重构唯一的总体设计文档，包含跨模块职责、交互编排、迁移范围与验收要求。具体公开类型与当前实现事实见 [Server 接口文档](../../项目说明/项目架构与接口（spec）/接口文档/README.md)。需求背景见 [PRD](../需求说明（PRD）/Agent-handle-realize-深模块重构.md)。
 
-> 2026-09-06：#63 门面与装配以 [Agent 门面 SPEC](../../项目说明/项目架构与接口（spec）/接口文档/agent/facade.md) 及 [AgentRuntime SPEC](../../项目说明/项目架构与接口（spec）/接口文档/agent_runtime/README.md) 为准。AgentRuntime 初始化直接装配 Agent，门面实现位于 facade.py；路由增量按 [Handler 路由 SPEC](../../项目说明/项目架构与接口（spec）/接口文档/agent/handler-routing.md) 建立 handlers/stimulus/router.py 与 handlers/action/router.py，生产注册集合为空。
+当前状态：Stage 编排及上下文所有权已迁移；聊天预处理、批量回复和 reflection handler 仍为占位，生产聊天继续使用旧 ChatStream。第 4 节记录当前交互设计，后续章节中的尚未迁移能力是总体目标，不代表已有实现。
 
-> 当前处理决定：门面、Handling、Execution 和 emitter 不依赖 Request/Execution Ledger 或 outbox；不提供幂等重投、自动重发或进程恢复。失败记录日志并停止后续执行，retryable=False。业务存储、通知及外部长任务的独立生命周期不由本次决定取消。
+门面、Handling、Execution 和 emitter 不依赖 Ledger 或 outbox；失败记录日志并停止，不要求幂等重投、自动重发或进程恢复。
 
 ## 1. Problem Statement
 
@@ -42,7 +34,7 @@ Agent 内部采用 Handler、Skill、上下文存储 三层协作：
 - Action Handler 负责某一种强类型 Action 的实现链；
 - Reflection Handler 负责已结算交互的异步认知维护；
 - Skill 提供可被多个 Handler 复用的语义能力；
-- `InteractionContextStore` 保存 interaction 级临时认知状态；
+- Stage 持有的 `InteractionContext` 保存交互级临时认知状态；
 - Handling 和 Execution 管理本次调用的计划、行动与输出结果；
 - `PlanEmitter` 隔离 Handler 与外部 plan sink，并集中保证本次计划身份、顺序和失败停止。
 
@@ -71,50 +63,95 @@ Agent 内部采用 Handler、Skill、上下文存储 三层协作：
 19. 作为审核者，我希望仅从本 spec 就能判断一项工作属于 handle、realize、reflection、stage、Adapter、capability 还是 world。
 20. 作为多角色运行时维护者，我希望共享 capability 总是显式接收角色身份，以便全局能力实例不会保存某个角色或用户的可变状态。
 
-## 4. 模块职责与协作
+## 4. 模块职责与交互编排
 
-### 4.1 模块归属
+### 4.1 职责与所有权
 
-| 模块 | 本设计中的含义与职责 | 明确不负责 |
-| --- | --- | --- |
-| `domain` | 定义强类型 Stimulus、InteractionSnapshot、ActionPlan、报告和通道无关输出，是跨模块共享的语义语言 | 模型、数据库、网络、调度实现 |
-| `agent` | 对外门面；Stimulus/Action/Reflection Handler；内部 Skill 编排；interaction context、请求/执行/反思账本 | 外部协议、连接、stage 队列 |
-| `subconscious` | 记忆、画像、关系、注意力、知识和角色认知状态的深实现 | 被 stage/world 直接调用 |
-| `capabilities` | 图片理解、ASR、TTS、唱歌、动作、发布等可复用技术能力 | 决定角色是否行动和说什么 |
-| `agent_runtime` | Agent 创建、装配、注册、查找、缓存和关闭 | 话题、记忆、画像、日期、TTS 等业务代理 |
-| `stage` | 管理一种持续交互的状态机。ChatStage 管用户—人格交互，ToyStage 管设备—人格交互，WorldStage 管箱庭世界—人格交互；共同负责 pending、截止时间、取消、背压、输出路由和刺激结算 | Recall、角色语义、画像、记忆写入、反思和权威 world 状态 |
-| Adapter | 校验外部协议并转换为领域对象，或把 AgentOutput 编码为外部协议 | 持续交互状态和角色决策 |
-| `world` | Agent 之外的箱庭环境和事件源，处于类似聊天中“用户”的位置；维护权威 world/活动事实，执行机械环境推进、抓取和 world 侧效果，并把稳定事实交给 WorldStage | 调用 Agent、维护 Agent pending、生成角色回复或决定角色是否接纳某项知识 |
-| `world_clock` | `world` 内部的通用时间驱动实现；登记每日/间隔任务并在到期时唤醒 world task | 理解“为什么到期”、构造角色语义、维护 WorldStage 状态或直接调用 Agent |
-| `system` | 顶层组装、数据库、观测和生命周期 | 具体角色业务 |
+Stage 接替旧 pipeline 的交互控制：管理输入关联、预处理状态、回复批次、等待、取消、计划队列和生命周期。Agent 通过 handle_stimulus 和 realize_action_plan 提供认知与执行能力；handler 决定怎样理解输入、回应什么以及如何反思。
 
-### 4.2 外部 seam
+| 模块 | 职责 |
+| --- | --- |
+| Stage | 持有本交互 context、原始输入及预处理结果、计时修订、回复尝试、任务和 sink；决定调用范围与时机 |
+| Agent / AgentRuntime | 角色共享的路由、技能和依赖；管理单次处理与执行的契约及清理 |
+| 预处理 handler | 单条刺激的理解及落库；完成后返回类型化预处理结果 |
+| 回复 handler | 对 InteractionDeadline 携带的有序批次进行注意力选择、认知判断及回复生成，交付计划和消费报告 |
+| reflection handler | 决定并实施记忆更新、画像更新或上下文压缩 |
+| StageManager | 创建、重连复用、离线超时回收和系统关闭 |
+| adapter | 共享的连接绑定、协议转换、投递；不决定回复内容及批次 |
+| database_service | 数据读写与事务；不决定回复调度 |
 
-```text
-ChatStage / ToyStage / WorldStage
-    -> AgentRuntime.get_agent(character_id)
-    -> Agent.handle_stimulus(request, plan_sink)
-    -> Agent.realize_action_plan(plan, execution_context, output_sink)
-```
+ContextFactory.create 每次创建新 context，不索引交互实例。Stage 独占持有并在结束后关闭；重连复用原 Stage/context。AgentRuntime 按角色装配创建模块，StageManager 注入 ChatStage.create。构造失败或创建取消要关闭未交付的 context。
 
-这两个 Agent 方法是业务调用者和未来 interface 测试共同使用的最高 seam。`ActionPlanSink` 和 `AgentOutputSink` 是每次调用显式传入的协作 interface，不是第三、第四个 Agent 业务方法。
+Agent 不保存 pending 归属、回复批次和调度修订，不通过 interaction ID 恢复隐含状态。Stage 每次显式传 context，handler 经 plans.context 借用，不能释放它。
 
-### 4.3 内部处理流程
+### 4.2 类型化输入与结果
 
-```text
-stage -> Agent.handle_stimulus -> Handling.run
-  -> StimulusRouter -> StimulusHandler -> PlanEmitter -> ActionPlanSink
-  -> 本次 HandlingReport
-stage -> Agent.realize_action_plan -> Execution.run
-  -> 全部 ActionRouter 预检 -> 逐项 ActionHandler -> OutputEmitter -> AgentOutputSink
-  -> 本次 ExecutionReport
-```
+HandleStimulusRequest 的 purpose=PROCESS 按刺激类型路由，purpose=REFLECT 独立路由反思。原始内容请求只携带自身 pending；期限请求携带固定、有序批次及 prepared_inputs；反思请求携带本次 consumed 的部分。
 
-两个流程和交付器位于 agent/processing，共用 invocation.call_handler 管理任务取消和清理等待。门面管理准入、在途登记及日志。每次调用独立处理，不读取历史报告、不合并重复调用、不恢复进程终止前的工作。投递失败记录日志并停止后续交付；已发生效果保留，retryable=False。
+PreprocessedInput 包含 stimulus_id、理解后的 text（允许 None）和已保存的 conversation_entry_ids。HandlingReport.preprocessed_input 返回单条结果。回复消费用 considered、consumed、retained 表达，计划通过 ActionPlanSink 立即交付；报告不安排计时。
 
-临时认知上下文、长期业务存储和事后反思保持各自职责，不依赖请求或执行恢复账本。
+原始 Stimulus 保持不变。图片理解是机器生成信息，不能冒充用户原话。context、预处理结果和待回复状态均随 Stage 生命周期管理。
 
-### 4.4 `WorldStage` 与定时事件
+### 4.3 事件流程与文件结构
+
+`stage/chat_stage.py` 保存编排方法，`stage/_models.py` 保存输入与回复尝试的内部数据，`stage/_sinks.py` 接收计划和输出，`stage/_config.py` 校验配置。五个事件入口为：
+
+| 方法 | 状态变化与调用 |
+| --- | --- |
+| `_on_raw_stimulus` | 登记内容并启动单条 handle；新内容取消旧回复及其计划；协调信号调整等待；触摸独立处理 |
+| `_on_preprocessing_finished` | 根据请求身份保存结果、标记 READY，全部就绪时计算期限；失败记录日志并退出该输入 |
+| `_on_deadline(revision)` | 检查修订和就绪条件，冻结批次并标记 REPLYING，向 Agent 投递 InteractionDeadline |
+| `_on_reply_finished` | 删除可信报告 consumed 的输入与召回记录，恢复未消费输入；取消的晚返回失效 |
+| `_on_execution_finished` | 移除已结束计划关联；回复及其全部计划结束后清理尝试，发起认知维护 |
+
+状态更新同步完成，不在其中等待 LLM、VLM 或数据库。每个异步任务返回后调用相应完成入口；任务用独立 request_id、取消令牌和接收器关联。所有这些短状态变化在同一事件循环执行。
+
+输入状态为 PREPROCESSING → READY → REPLYING。已消费项移除；取消回复时未消费项回到 READY，保留预处理结果；失败预处理移除并记日志，不伪造已消费。接收序号和字典插入顺序固定输入位置，完成顺序不改变回复顺序。
+
+### 4.4 等待策略与刺激耦合
+
+1. 新文本、图片、语音使旧期限失效，并取消已有回复尝试及其相关计划。
+2. 所有内容预处理完成（完整 handler 中包括落库）后，普通期限从最后完成时起算，默认等待 1 秒。
+3. 继续打字延后至信号到达后至少 10 秒；打开选图为至少 60 秒；关闭选图为至少 1 秒；输入清空在准备完成后立即触发。
+4. 协调信号不能绕过全部内容就绪条件，也不取消正在生成的回复。新内容清除此前的额外等待。
+5. 计时回调携带 Stage 修订，过期或已触发的回调不能形成第二次回复。慢图片 A、快文本 B 最终仍以 A、B 为批次，等待从 A 完成后起算。
+6. 成功报告保留部分输入时重新安排普通等待；失败记录错误，停止自动重试。
+
+容量由 max_stimuli、max_plans 限制，普通/打字/选图等待分别由 response_wait、typing_wait、image_selection_wait 配置。
+
+### 4.5 计划执行、取消与触摸
+
+回复产生的计划立即进入执行队列，不等待完整报告。realize 串行运行：Agent 完成投递并提交必要收尾信号后才执行下一计划，不等待网络 Future 或客户端播放。
+
+新内容取消完整回复尝试及其排队和在途计划。这是本轮明确采用的规则，替代旧链路仅在提取阶段使结果失效的方式。取消设置令牌，撤销未执行计划，阻止晚到计划及输出，取消任务并等待清理。已消费或落库的事实不回滚；只有尚未消费输入重新参与回复。
+
+触摸独立进入 handle，可以在文本生成等待时产出反馈，但不抢占正在 realize 的 SAY。打字、选图不取消回复。单条预处理不因后续内容到达而取消。
+
+每个执行使用独立 ExecutionContext，复用 Stage 唯一 agent_output_sink。Stage 通过 CancelDelivery 通知 adapter 收尾；空结束包不等于电话场景的强制停止播放。StartThinking 转为呈现状态，最后一个思考请求结束才发送 WAITING。
+
+### 4.6 持久化与反思
+
+预处理 handler 通过 context 公共接口完成理解和持久化后返回结果；Stage 只保存结果和更新就绪状态，不重复写数据库。reflection 同样由 handler 计算并通过类型化接口更新 context。
+
+本轮占位 handler 尚未进行数据库写入。Stage 已保证回复材料按到达顺序组织；实际并行 handler 的历史写入顺序必须在落库迁移时另行验证，不能把回复批次有序视为数据库有序的证明。耗时认知维护应读取固定依据，应用压缩或画像更新时校验适用范围，不能覆盖期间新增的内容。
+
+成功回复报告及全部关联计划结束后，Stage 以本次 consumed 内容发起 REFLECT，不阻塞已交付输出。当前执行结束钩子只负责关联清理，不将 ExecutionReport 传给反思；具体执行结果相关策略尚未扩展。反思失败记录日志，不回滚回复。召回记忆按刺激 ID 清理，避免全量删除并行调用的数据。
+
+### 4.7 生命周期
+
+断线取消并等待 handle、realize 清理，保留 READY 的未消费输入和 context，移除未完成预处理项，不自动重放。重连复用原对象，后续刺激重新驱动调度。
+
+离线超时或关闭时，StageManager 发起终止：停止接入和计时 → 取消并等待普通任务 → 使用新令牌投递 InteractionEnding（携带剩余已准备输入）→ 等待结束处理或超时清理 → 关闭 context。结束 handler 不负责 context 释放。
+
+### 4.8 迁移状态与验收
+
+`agent/handlers/stimulus/chat.py` 提供 ChatPreprocessingHandler、ChatReplyHandler、ChatReflectionHandler 三个占位实现。预处理返回文本或空的图片/语音理解结果及空记录 ID；回复消费整批但不生成计划；反思返回空维护结果。真实 VLM、数据库写入、注意力选择和回复生成需分别填入对应 handler。
+
+已迁移类型、调用上下文、输入状态、并行预处理、有序聚合、期限、取消和执行清理。原 Agent 输入归属及报告调度机制已移除。生产 ChatStream 入口保持不变；完成真实 handler 后再验证生产协议切换。
+
+验收覆盖慢图片与快文本的顺序、最后完成后等待、打字及选图等待、旧计时失效、新内容取消回复与计划、取消清理期间的隔离、触摸独立处理、部分消费、失败不重试、反思在关联执行结束后触发、断线重连及 context 最终释放。占位测试证明编排控制流，不代表实际认知行为已经迁移。
+
+### 4.9 `WorldStage` 与定时事件
 
 `WorldStage` 是人格与箱庭世界之间唯一的持续交互 stage，逻辑上属于 `stage`，不属于 `world` 或 Agent。目标实例作用域为 `(character_id, world_id)`；在单世界部署中可以退化为每个 character 一个长期实例。活动 ID、规划周期和歌曲任务只是该交互中的领域对象，不为每次活动重新创建一套人格交互。
 
@@ -417,43 +454,11 @@ Skill 设计规则：
 
 共享的是 Skill interface 和语义，不是强迫所有刺激依次经过相同步骤。
 
-### 6.6 InteractionContextStore 与单次调用状态
+### 6.6 交互上下文与单次调用状态
 
-#### `InteractionContextStore`
+ContextFactory 创建 InteractionContext，Stage 持有并关闭。Agent 在 handle_stimulus 调用中借用 context，handler 经 plans.context 读取和更新。输入归属、预处理结果、回复批次和计时修订统一由 Stage 管理，详见第 4 节；不建立 Agent 内部交互上下文注册表。
 
-2026-09-06 输入契约修订：对话工作上下文归 Agent 内部所有，按 `(character_id, interaction_id)` 隔离，统一组织当前使用的历史对话、摘要及 Recall 结果，并管理保留、压缩和清理。清理临时上下文不删除会话或长期记忆正本；一次 handle 取消也不等于 interaction 结束。下表保留已有临时认知字段的设计背景，不是完整上下文 schema，也不要求向 stage 暴露内部访问器。输入快照删除对话/world 内容引用，不建立通用 `SnapshotRef` 或快照持久化/解析服务。
-
-façade 先按角色和 interaction 创建 scoped accessor，Handler 不接触全局 store：
-
-```python
-class ScopedInteractionContext(Protocol):
-    async def read(self) -> InteractionCognitiveContext:
-        ...
-
-    async def compare_and_set(
-        self,
-        expected_context_revision: int,
-        update: InteractionContextUpdate,
-    ) -> InteractionCognitiveContext:
-        ...
-```
-
-| 上下文字段 | 类型 | 含义 | 约束 |
-| --- | --- | --- | --- |
-| `scope` | `InteractionScope` | `(character_id, interaction_id)` 隔离键 | 不以 user_id 单独作为 key |
-| `context_revision` | `int` | Agent 内部临时认知上下文的修订 | 单调递增；写入使用 compare-and-set；不得与 stage 的 interaction revision 混用 |
-| `attention_focus` | `Optional[AttentionFocus]` | interaction 内当前关注对象 | 只保存受控语义引用 |
-| `pending_clarifications` | `tuple[PendingClarification, ...]` | 适合在当前 interaction 后续刺激中考虑的待澄清项 | 与长期关系层待澄清区分；有 TTL |
-| `unfinished_intents` | `tuple[InteractionIntent, ...]` | 当前 interaction 尚未结束的认知意图 | interaction 结束或过期时清理 |
-| `expires_at` | `datetime` | 临时上下文自动失效时间 | 带时区；不得无限保存原始内容 |
-
-stage 的 pending、deadline 和连接状态不写入这里；它们始终以 InteractionSnapshot 为准。用户画像、关系、长期记忆和歌曲知识由 subconscious 的长期存储负责。
-
-#### 单次调用状态
-
-Handling 保存本次已接收计划标识；Execution 保存本次行动结果、输出序号和接收标志。调用结束后不把这些状态保存为重投依据。
-
-agent/ledgers 源码仍保留，但当前业务流程不创建或调用它。已有数据库记录未被本次调整删除。
+Handling 保存本次已接收计划标识；Execution 保存本次行动结果、输出序号和接收标志。调用结束后不把这些状态保存为重投依据。agent/ledgers 源码仍保留，当前流程不创建或调用它。
 
 ### 6.7 Agent 自有状态变更与歌曲链路
 
@@ -508,82 +513,9 @@ Recall future、callback 和结果不转换为 `RecallCompleted` Stimulus，不�
 
 ### 6.9 Post-Interaction Reflection
 
-#### `ReflectionCoordinator` 与 `ReflectionHandler`
+Stage 决定何时发起认知维护，通过 purpose=REFLECT 调用同一个 handle_stimulus 入口。reflection handler 决定是否需要记忆更新、画像更新、日期检查或上下文压缩，并通过 skill 与 context 的类型化接口实施。触发、执行收尾和生命周期规则统一见第 4 节。
 
-`ReflectionCoordinator` 负责“在什么结算时点检查反思条件、是否已调度、如何重试和排序”；`ReflectionPolicy` 负责“当前 Agent 自有状态是否满足某项反思条件”；`ReflectionHandler` 负责“对一份已固定证据执行已选定的反思 Skill”。三者不合并为 Action Handler，也不暴露给 stage。
-
-Reflection 的目标证据来源是实际处理报告和业务存储，不依赖请求或执行账本。设计流程是：
-
-```text
-Agent façade 完成 handle，或 realizer 形成新的可结算执行事实
-    -> 发出内部 settlement notice
-    -> ReflectionCoordinator 接收实际处理与执行结果
-    -> ReflectionPolicy 查询对话长度、画像策略、日期证据等 Agent 自有状态
-    -> 无满足条件的 step：只记录 policy 已检查
-    -> 有满足条件的 step：构造一次幂等 ReflectionJob
-```
-
-| settlement 情况 | Coordinator 取得的事实 | Policy 如何决定 |
-| --- | --- | --- |
-| `COMPLETED` 且消费了内容、没有计划 | 处理报告中的 consumed pending 和已确认内部变更 | 按证据种类判断记忆、日期等步骤；协调信号本身通常不产生反思 |
-| `COMPLETED` 且发出计划 | 等相关 plan 有最终 ExecutionReport 后读取实际输出和效果 | 只反思真实完成内容，不把 `NOT_STARTED` Action 当成事实 |
-| `CANCELLED` / `FAILED` | 查询取消/失败前是否已有 consumed 内容、可见输出或不可逆效果 | 只有真实发生内容满足某项 policy 时才创建 job |
-| pending 全部 retained | 没有完成式内容证据 | 不创建本轮完成式反思；等待以后 settlement |
-
-上下文压缩的条件是 Conversation Context Store 中的消息/token 数量或策略估算超过阈值，不是请求结束本身。一次内容 settlement 只是安全的检查时点：`ReflectionPolicy` 读取固定 context revision，超过阈值才把 `ContextCompaction` 加入 allowed kinds；未超过就跳过。画像更新、重要日期检查和自动记忆整理同样由各自 policy 根据证据决定。
-
-```python
-class ReflectionHandler(Protocol):
-    async def handle(self, job: ReflectionJob) -> ReflectionReport:
-        ...
-```
-
-| `ReflectionJob` 字段 | 类型 | 含义 | 约束 |
-| --- | --- | --- | --- |
-| `reflection_job_id` | `str` | 一次结算事实的稳定内部任务身份 | 重投不变化 |
-| `schema_version` | `int` | job 结构版本 | 不兼容版本明确失败 |
-| `character_id` | `str` | 被维护认知状态的角色 | 不能为空 |
-| `user_id` | `Optional[str]` | 相关关系/画像用户 | 无用户活动为空；不能回退默认用户 |
-| `interaction_id` | `str` | 证据所属 interaction | 与实际交互一致 |
-| `origin_request_id` | `str` | 触发结算的 handle 请求 | 与处理请求一致 |
-| `source_stimulus_ids` | `tuple[str, ...]` | 允许作为反思证据的刺激 | 只含实际 consumed 的内容，以及 ReflectionPolicy 明确允许的非内容事实；不能把所有 considered/retained 刺激自动当成证据 |
-| `completed_effects` | `tuple[SettledEffect, ...]` | 实际完成的 plan/action/output 摘要 | 不把 NOT_STARTED 行动当成事实 |
-| `allowed_kinds` | `frozenset[ReflectionKind]` | 本 job 允许执行的反思步骤 | 最小权限；Handler 不自行扩大 |
-| `idempotency_key` | `str` | job 接受和 step 去重键 | 同一结算事实稳定 |
-| `attempt` | `int` | 当前投递次数 | 正整数；不参与语义判断 |
-| `created_at` | `datetime` | job 首次创建时间 | 带时区 |
-
-2026-09-06 修订删除了上述 job 草案中的 `evidence_snapshot_ref: SnapshotRef`。反思确实需要的证据及其保留期限应由 Agent 内部反思契约定义，不依赖交互输入快照存储；本次不另造证据引用类型或承诺后台反思已具备证据恢复能力。
-
-| `ReflectionReport` 字段 | 类型 | 含义 | 约束 |
-| --- | --- | --- | --- |
-| `reflection_job_id` | `str` | 被报告的内部 job | 与输入一致 |
-| `step_results` | `tuple[ReflectionStepResult, ...]` | 每个允许步骤的真实结果 | 包含 completed/skipped/failed 与稳定原因 |
-| `retryable` | `bool` | 未完成步骤是否可用同一 job 安全重试 | 已完成 step 不重复提交 |
-
-| `ReflectionStepResult` 字段 | 类型 | 含义 | 约束 |
-| --- | --- | --- | --- |
-| `kind` | `ReflectionKind` | 被执行或跳过的反思步骤 | 必须来自 job 的 allowed kinds |
-| `status` | `ReflectionStepStatus` | `COMPLETED`、`SKIPPED` 或 `FAILED` | 只能报告真实状态 |
-| `error_code` | `Optional[ReflectionErrorCode]` | 稳定失败或跳过原因 | 不包含异常堆栈或敏感内容 |
-| `committed_revision` | `Optional[int]` | 成功写入后由目标存储返回的专有修订 | 只在实际写入且该存储提供 revision 时填写；不解释成全局 StateVersion |
-
-Reflection Handler 第一版可组织：自动对话/事件记忆整理、上下文压缩、用户画像更新、重要日期/生日/纪念日检查，以及必要的内部关系/注意力摘要更新。它不能产生 ActionPlan、AgentOutput 或新 Stimulus，也不能递归 handle。
-
-#### 执行和可靠性
-
-- 交互路径只等待 ReflectionCoordinator 可靠接受或记录待提交，不等待具体反思 Skill 完成；
-- 已接受 job 使用至少一次投递，各 reflection step 自己幂等；
-- 同一 `(reflection_job_id, reflection_kind)` 最多成功提交一次；
-- 关系相关 job 按 `(character_id, user_id)` 有序；无用户活动按 `(character_id, interaction_id)` 有序；不同 key 可以并行；
-- 需要 user 的画像和日期 Skill 在 `user_id` 为空时明确跳过；
-- 队列容量有界。容量满或持久接受失败必须记录稳定事件与重试状态，不能静默丢弃，也不能把已成功回复改报为失败；
-- shutdown 停止接受新 job 后，已接受 job 必须完成、超时后可靠保留，或让 shutdown 明确失败以供重试；
-- 管理与观测界面可以查看积压、失败和重试，但不增加 Agent 业务方法。
-
-ImportantDateReview 只能把用户明确表达且字段充分的日期标成 confirmed。模型推测或歧义结果只能成为按 `(character_id, user_id)` 隔离、带 TTL 的内部 `PendingClarification`，不能直接写成已确认纪念日。Reflection 不得从后台直接向通道发问；后续合适的 Stimulus Handler 可读取待澄清项并决定是否形成追问计划。普通反思完成本身不产生 Stimulus。
-
-自动记忆整理必须依据 evidence key 识别同一事实是否已经由 `IntentionalMemoryCommit`、`SongKnowledgeAcceptance` 或 `LearnedSongExperienceCommit` 写入，避免生成语义重复记录。
+当前 ChatReflectionHandler 为占位，不修改状态。后续真实实现应依据已消费内容和可靠业务证据，不能把未执行行动当成事实；对并行变化校验更新依据，避免覆盖新内容。失败记录日志，不回滚已交付回复，也不建立幂等重投和后台自动重发链路。
 
 ### 6.10 行为边界总表
 

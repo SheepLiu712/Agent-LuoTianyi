@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
 from enum import Enum
 from inspect import Signature, signature
 
-from ._handle_input_contract import _aware, _nonblank, _revision
+from .handle_input import PreprocessedInput
+from ._handle_input_contract import _nonblank, _revision
 
 
 class HandlingRequestStatus(str, Enum):
@@ -90,8 +90,8 @@ class HandlingReport(metaclass=_ReportMeta):
     consumed_pending_stimulus_ids 与 retained_pending_stimulus_ids 必须互斥、
     合起来覆盖 considered，且各自保持其中的相对顺序；所有 ID 元组内部唯一。
 
-    emitted_plan_ids 保留计划被接收的顺序。reconsider_at 为 None 或带时区的
-    重评时间，提供时间时 retained 必须非空。FAILED 必须附 HandlingErrorCode，
+    emitted_plan_ids 保留计划被接收的顺序；preprocessed_input 保存单条输入的预处理结果。
+    FAILED 必须附 HandlingErrorCode，
     其他状态的 error_code 为 None；输入契约错误要求 consumed 为空。
     retryable 是调用方显式提供的布尔值。
 
@@ -106,11 +106,12 @@ class HandlingReport(metaclass=_ReportMeta):
     consumed_pending_stimulus_ids: tuple[str, ...]
     retained_pending_stimulus_ids: tuple[str, ...]
     emitted_plan_ids: tuple[str, ...]
-    reconsider_at: datetime | None
     error_code: HandlingErrorCode | None
     retryable: bool
+    preprocessed_input: PreprocessedInput | None = None
 
     def __post_init__(self) -> None:
+        _require(self.preprocessed_input is None or isinstance(self.preprocessed_input, PreprocessedInput), "preprocessed_input")
         _require(_nonblank(self.request_id), "request_id")
         _require(isinstance(self.request_status, HandlingRequestStatus), "request_status")
         _require(_nonblank(self.trigger_stimulus_id), "trigger_stimulus_id")
@@ -136,8 +137,6 @@ class HandlingReport(metaclass=_ReportMeta):
                 "settlement order",
             )
 
-        if self.reconsider_at is not None:
-            _require(bool(retained) and _aware(self.reconsider_at), "reconsider_at")
         if self.request_status is HandlingRequestStatus.FAILED:
             _require(isinstance(self.error_code, HandlingErrorCode), "error_code")
         else:

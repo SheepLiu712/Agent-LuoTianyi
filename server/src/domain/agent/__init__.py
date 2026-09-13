@@ -1,7 +1,7 @@
 """Agent 领域契约的公开入口：刺激、交互快照、处理请求、取消信号和结算报告。"""
 
 from ._handle_input_contract import HandleInputErrorCode, InvalidHandleInputError
-from .handle_input import CancellationReason, CancellationToken, HandleStimulusRequest
+from .handle_input import CancellationReason, CancellationToken, HandleStimulusRequest, HandlePurpose, PreprocessedInput
 from .handling_report import (
     HandlingErrorCode,
     HandlingReport,
@@ -34,6 +34,8 @@ from .stimulus import (
     ImageSelectionClosed,
     ImageSelectionOpened,
     InteractionDeadline,
+    InteractionEnding,
+    InteractionEndingReason,
     ProactivePromptDue,
     SongKnowledgeDiscovered,
     SongLearned,
@@ -168,6 +170,8 @@ __all__ = (
     "ConnectionState",
     "HandleInputErrorCode",
     "HandleStimulusRequest",
+    "HandlePurpose",
+    "PreprocessedInput",
     "HandlingErrorCode",
     "HandlingReport",
     "HandlingReportErrorCode",
@@ -198,6 +202,8 @@ __all__ = (
     "ImageSelectionOpened",
     "InvalidStimulusError",
     "InteractionDeadline",
+    "InteractionEnding",
+    "InteractionEndingReason",
     "MediaRef",
     "ProactivePromptDue",
     "ProactiveReason",

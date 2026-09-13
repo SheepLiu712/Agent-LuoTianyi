@@ -48,7 +48,7 @@ def settlement(req, *, emitted=(), consumed=("m2",), **changes):
         request_status=d.HandlingRequestStatus.COMPLETED,
         considered_pending_stimulus_ids=("m2", "m1"), consumed_pending_stimulus_ids=consumed,
         retained_pending_stimulus_ids=tuple(i for i in ("m2", "m1") if i not in consumed),
-        emitted_plan_ids=emitted, reconsider_at=None, error_code=None, retryable=False,
+        emitted_plan_ids=emitted, error_code=None, retryable=False,
     )
     values.update(changes)
     return d.HandlingReport(**values)

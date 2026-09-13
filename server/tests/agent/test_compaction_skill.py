@@ -34,7 +34,7 @@ def skill(llm, keep=1):
 async def test_skill_generates_result_without_mutating_context(database, keep):
     llm = LLM()
     compactor = skill(llm, keep)
-    context = await factory(database).get("i", user_id="u")
+    context = await factory(database).create("i", user_id="u")
     await context.conversation.append((entry(1), entry(2)))
     assert await compactor.compact(context.conversation) is None
     assert llm.calls == []
@@ -56,7 +56,7 @@ async def test_legacy_entry_applies_shared_skill_and_refreshes_snapshot(database
     assert len(llm.registrations) == 1
     legacy.wire_dependencies(database=legacy.database, llm_service=llm, conversation_compaction=compactor)
     assert await legacy.compress_context_if_needed("u") is None
-    context = await factory(database).get("i", user_id="u")
+    context = await factory(database).create("i", user_id="u")
     await context.conversation.append((entry(1), entry(2), entry(3)))
     result = await legacy.compress_context_if_needed("u")
     assert result.summary == "新总结"
@@ -73,7 +73,7 @@ async def test_model_failure_does_not_write(database, failure):
             if failure == "exception":
                 raise RuntimeError("model failed")
             return " "
-    context = await factory(database).get("i", user_id="u")
+    context = await factory(database).create("i", user_id="u")
     await context.conversation.append((entry(1), entry(2), entry(3)))
     before = context.conversation.read()
     with pytest.raises((ValueError, RuntimeError)):
@@ -88,9 +88,9 @@ async def test_shared_skill_keeps_concurrent_contexts_separate(database):
             await asyncio.sleep(0)
             return kwargs["recent_conversation"]
     compactor = skill(Echo())
-    a = await factory(database).get("a", user_id="u")
+    a = await factory(database).create("a", user_id="u")
     from src.agent.context import ContextFactory
-    b = await ContextFactory(character_id="miku", database=database).get("b", user_id="u")
+    b = await ContextFactory(character_id="miku", database=database).create("b", user_id="u")
     await a.conversation.append((entry(1), entry(2), entry(3)))
     await b.conversation.append((entry(4), entry(5), entry(6)))
     ra, rb = await asyncio.gather(compactor.compact(a.conversation), compactor.compact(b.conversation))
@@ -128,7 +128,7 @@ async def test_append_while_skill_generates_summary_survives_application(databas
             started.set()
             await proceed.wait()
             return "总结"
-    context = await factory(database).get("i", user_id="u")
+    context = await factory(database).create("i", user_id="u")
     await context.conversation.append((entry(1), entry(2), entry(3)))
     task = asyncio.create_task(skill(Paused()).compact(context.conversation))
     await asyncio.wait_for(started.wait(), 5)

@@ -15,6 +15,7 @@ export interface ChatMessage {
 }
 
 export interface AgentMessagePayload {
+  packet_sequence?: number | null;
   uuid?: string;
   text?: string;
   audio?: string | null;

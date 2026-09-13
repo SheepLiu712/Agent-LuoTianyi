@@ -1,5 +1,6 @@
 # Agent 两接口门面契约
 
+
 状态：当前工作区已实现单次处理流程。领域对象见 [handle 输入](../domain/handle-input.md)、[处理报告](../domain/handling-report.md) 和 [计划与执行](../domain/realization.md)。
 
 ## 实例与装配
@@ -8,32 +9,34 @@
 
 ```python
 async def handle_stimulus(self, request: HandleStimulusRequest,
-                          plan_sink: ActionPlanSink) -> HandlingReport: ...
+                          plan_sink: ActionPlanSink, *,
+                          context: InteractionContext | None = None) -> HandlingReport: ...
 
 async def realize_action_plan(self, plan: ActionPlan, context: ExecutionContext,
                               output_sink: AgentOutputSink) -> ExecutionReport: ...
 ```
 
-请求、上下文和 sink 属于本次调用，不保存在共享 Agent 的当前用户或当前交互字段中。每次调用独立处理，不查历史报告、不合并重复调用、不恢复旧计划或输出。相同标识再次调用也会独立处理，调用方不能据此假定不会重复产生效果。两类报告的 `retryable` 均为 False。
+请求、上下文和 sink 属于本次调用，不保存在共享 Agent 的当前用户或当前交互字段中。每次调用独立处理，不查历史报告、不合并重复调用、不恢复旧计划或输出。输入范围由调用者确定，Agent 不维护 pending 归属或调度修订。两类报告的 `retryable` 均为 False。
 
 ## handle 流程
 
 1. 检查请求类型和 sink.emit；错误类型抛 TypeError。
 2. 检查触发刺激和全部 pending 的目标角色包含绑定角色，否则返回 FAILED / CONTRACT_SNAPSHOT_MISMATCH。
 3. 检查 Agent 是否接受工作；关闭期间返回 FAILED / DEPENDENCY_UNAVAILABLE。
-4. 登记本次在途调用，执行 `await Handling(self, request, plan_sink).run()`。
-5. Handling 先检查取消，再按触发刺激的 kind 查找一个处理器。已取消返回 CANCELLED / error_code=None；未注册返回 FAILED / UNSUPPORTED_STIMULUS。
-6. 创建本次 PlanEmitter，调用处理器，校验并整理 HandlingReport，最后关闭 emitter。
-7. 门面记录结果日志，并解除在途登记。
+4. 登记本次在途调用，执行 `await Handling(self, request, plan_sink, context=context).run()`。
+5. Handling 检查取消；PROCESS 按刺激 kind 路由，REFLECT 通过 resolve_reflection 路由。未注册返回 UNSUPPORTED_STIMULUS。
+6. 创建 PlanEmitter，异步调用 handler.handle；处理器通过 plans.context 借用本交互上下文。
+7. 校验报告身份、pending 范围、预处理结果身份和实际交付计划，关闭 emitter。
+8. 门面记录结果日志，并解除在途登记。
 
-入口失败或处理器没有返回合法报告时，considered 和 retained 包含按快照顺序排列的全部 pending，consumed 为空。处理期间已经确认接收的计划标识仍保留。合法报告的消费事实保持不变；交付失败不能被处理器捕获异常后返回的成功报告掩盖。Agent 不直接修改 stage 的 pending。
+入口失败时，considered 和 retained 包含原快照 pending；开始处理后失败则只包含本次负责的 pending。两种情况 consumed 均为空。处理期间已经确认接收的计划标识仍保留。合法报告的消费事实保持不变；交付失败不能被处理器捕获异常后返回的成功报告掩盖。Agent 不直接修改 stage 的 pending。
 
 ## realize 流程
 
 1. 检查计划、执行上下文及 sink.emit；错误类型抛 TypeError。
 2. 检查角色和交互身份匹配，否则返回 FAILED / CONTRACT_MISMATCH；停止接受时返回 DEPENDENCY_UNAVAILABLE。
 3. 登记本次在途调用，执行 `await Execution(self, plan, context, output_sink).run()`。
-4. 检查计划依据修订与当前修订一致、令牌未取消，并预先解析全部行动的处理器。分别以 STALE_INTERACTION、CANCELLED、UNSUPPORTED_ACTION 拒绝；全部行动保持 NOT_STARTED。
+4. 检查计划依据修订不晚于当前修订、令牌未取消，并预先解析全部行动的处理器。分别以 CONTRACT_MISMATCH、CANCELLED、UNSUPPORTED_ACTION 拒绝；全部行动保持 NOT_STARTED。
 5. 按计划顺序执行行动。每项使用独立 OutputEmitter，输出序号在本次执行内跨行动从零连续递增。
 6. 校验 ActionResult 的类型、action_id 和状态。失败或取消停止后续行动，保留已返回的效果与已完成结果，剩余行动为 NOT_STARTED。
 7. 关闭当前 emitter，返回 ExecutionReport；门面结束在途登记并记录结果。
@@ -50,10 +53,30 @@ StartThinking 由 stage 消费，不能注册为 Agent 行动处理器。`output
 
 ## 生命周期与代码位置
 
-`processing/` 包含 Handling、Execution、call_handler、两种 emitter、输出草稿和计划身份工具。路由仍在 `handlers/stimulus/router.py` 和 `handlers/action/router.py`，详见 [路由契约](handler-routing.md)。生产行动路由已注册 SAY 的 TTS 和预制音频分支，刺激注册集合仍为空。
+`processing/` 包含 Handling、Execution、call_handler、两种 emitter、输出草稿和计划身份工具。路由仍在 `handlers/stimulus/router.py` 和 `handlers/action/router.py`，详见 [路由契约](handler-routing.md)。生产行动路由已注册 SAY 的 TTS 和预制音频分支，刺激侧登记聊天预处理、批量回复、reflection 占位处理器及 InteractionEndingHandler。
 
 AgentRuntime.shutdown 停止新工作后，有界等待在途调用与清理退出，再释放资源。等待超时抛 RuntimeError 并保留依赖；后续 shutdown 可继续等待。进程终止后，不恢复未完成的门面调用。
 
 ## 验证
 
 从两个公开入口和运行时生命周期验证准入、计划及输出顺序、部分结果、错误、取消和关闭。当前测试说明见 `server/tests/agent/README.md`；旧持久化、重复调用合并和重放测试已移除。
+
+## 按交互查询中断状态
+
+- `is_handle_interruptible(interaction_id: str, request_id: str | None = None) -> bool`：指定请求是否允许普通刺激打断；省略 request_id 时要求该交互所有在途 handle 都允许。
+- `is_realize_interruptible(interaction_id: str) -> bool`：当前 realize 是否允许普通刺激打断。
+
+两项查询同步返回，不修改状态。没有对应调用时返回 False；调用开始时默认 False。状态按交互、请求及 handle/realize 分别隔离，完成、异常及任务取消后移除。同一交互存在多个同类调用时，仅全部允许中断才返回 True。交互 ID 必须为非空白字符串。
+
+内部 handler 通过 PlanEmitter.set_interruptible 或 OutputEmitter.set_interruptible 更新当前调用的状态。提取阶段可设 True；开始回复生成前设 False。设置状态时检查取消令牌，已经过时的提取不能通过关闭中断许可而继续生成回复。每个行动开始时 realize 恢复默认 False；SAY 不打开中断许可。
+
+当前 ChatStage 自行按内容输入取消回复尝试，不查询这两项兼容状态。不可中断不限制断线、终止时的 NO_LONGER_NEEDED 或任务取消。协作取消不强制中止在途 LLM 调用，但会阻止后续计划交付。允许中断的提取被 SUPERSEDED 且未交付计划时，保留全部 pending，不接受其消费结果。生命周期取消仍保留 handler 已完成的合法消费事实。
+
+计划依据修订可以早于执行时的当前修订。新输入造成的修订增长不自动使已接收计划失效；取消令牌及 sink 控制计划和输出是否仍有效。
+
+
+## 上下文与输入范围
+
+context 为可选的单次调用参数；提供时验证用户、角色及交互身份。Stage 总是提供它，Handler 经 plans.context 读取和更新；调用结束后 emitter 释放引用。Agent 不持有交互上下文注册表。
+
+原始内容调用只携带自身输入；期限调用携带有序的待回复批次和 prepared_inputs；REFLECT 调用携带已消费部分。相同输入再次直接提交 Agent 会再次处理，输入生命周期由 Stage 负责。

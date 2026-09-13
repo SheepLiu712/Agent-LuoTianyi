@@ -1,5 +1,7 @@
 # Server 模块接口文档
 
+> 2026-09-13 新目标：[Agent 深模块重构总 SPEC](../../../开发进程文档/设计文档/Agent-handle-realize-深模块重构.md)。本目录模块页面仍记录当前源码事实，不能将目标设计视为已经存在的接口。
+
 本目录记录 Server 各顶层模块被其他模块调用的 interface。目录结构按照[开发守则](../../../开发进程文档/开发守则.md)中的目标架构组织，接口内容则以当前工作区代码为准。
 
 ## 阅读约定
@@ -32,8 +34,8 @@
 | `subconscious` | [潜意识](subconscious/README.md) | `server/src/subconscious` |
 | `capabilities` | [角色能力](capabilities/README.md) | `server/src/capabilities` |
 | `agent_runtime` | [角色工厂与注册](agent_runtime/README.md) | `server/src/agent_runtime` |
-| `stage` | [持续交互流程](stage/README.md) | 当前为 `server/src/chat_session` |
-| Adapter | [外部协议适配](adapter/README.md) | 当前主要为 `server/src/system/user_interface` 和 `server/src/legacy` |
+| `stage` | [持续交互流程](stage/README.md) | `server/src/stage`；兼容链路为 `server/src/chat_session` |
+| Adapter | [外部协议适配](adapter/README.md) | `server/src/adapter/websocket`；连接接入仍在 `system/user_interface` |
 | `world` | [箱庭世界和周期任务](world/README.md) | `server/src/world` |
 | `system` | [系统组装和基础设施](system/README.md) | `server/src/system` |
 | `utils` | [通用工具](utils/README.md) | `server/src/utils` |
