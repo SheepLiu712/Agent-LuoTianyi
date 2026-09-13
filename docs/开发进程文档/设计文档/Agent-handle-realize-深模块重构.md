@@ -125,7 +125,7 @@ PreprocessedInput 包含 stimulus_id、理解后的 text（允许 None）和已�
 
 新内容取消完整回复尝试及其排队和在途计划。这是本轮明确采用的规则，替代旧链路仅在提取阶段使结果失效的方式。取消设置令牌，撤销未执行计划，阻止晚到计划及输出，取消任务并等待清理。已消费或落库的事实不回滚；只有尚未消费输入重新参与回复。
 
-触摸独立进入 handle，可以在文本生成等待时产出反馈，但不抢占正在 realize 的 SAY。打字、选图不取消回复。单条预处理不因后续内容到达而取消。
+触摸独立进入 handle，可以在文本生成等待时产出反馈，但不抢占正在 realize 的 SAY。成功触摸由 handler 交付瞬时 SAY 计划和随后独立的 normal 表情恢复计划；SAY 不自动恢复。快速资源缺失、读取失败或未命中时报错并丢弃，不转普通话题。打字、选图不取消回复。单条预处理不因后续内容到达而取消。
 
 每个执行使用独立 ExecutionContext，复用 Stage 唯一 agent_output_sink。Stage 通过 CancelDelivery 通知 adapter 收尾；空结束包不等于电话场景的强制停止播放。StartThinking 转为呈现状态，最后一个思考请求结束才发送 WAITING。
 
@@ -386,7 +386,7 @@ Handler 是 Agent 内部“针对一类输入采取哪条流程”的模块。�
 | --- | --- | --- | --- |
 | `ConversationTurnHandler` | 对已提交的文字、图片或非 Realtime 语音形成正式认知与回应；Chat 聚合期限到达时基于全部 pending 强制完成同一流程 | `TextMessage`、`ImageMessage`、`VoiceMessage`、Chat 中的 `InteractionDeadline` | 预处理/多模态理解 → Recall → Attention → 内容生成 → 计划 |
 | `InteractionCoordinationHandler` | 根据非内容协调信号决定继续等待还是重评全部 pending | `UserTyping`、`ImageSelectionOpened/Closed` | 等待策略 → completed report（保留 pending）或要求 stage 在新 revision 重评 |
-| `TouchInteractionHandler` | 处理 Chat/Toy 的低延迟触摸反应及普通回复回退 | `TouchInteraction` | 快速候选/Attention → 瞬时计划；失败或未命中时复用普通内容 Skill |
+| `TouchInteractionHandler` | 处理 Chat/Toy 的低延迟触摸反应及独立表情恢复 | `TouchInteraction` | 快速预制资源 → 瞬时 SAY 计划 → 独立恢复表情计划；失败或未命中时报错并丢弃 |
 | `DeviceInteractionHandler` | 处理已由 Adapter 去抖/聚合的设备连接、断开与振动事实 | `ToyVibration`、`DeviceConnected`、`DeviceDisconnected` | 设备事实 → 可选 Attention/短内容 → 表达或动作计划 |
 | `ProactiveContentHandler` | 处理主动提醒、动态和日记规划 | `ProactivePromptDue`、`DynamicObserved`、`DiaryPlanningDue` | Recall/事实 → 是否表达 → 内容生成 → 计划 |
 | `ActivityHandler` | 处理 world 事实、每日规划和已实现的活动生命周期 | `WorldObservation`、`DailyPlanningDue`、`ActivityDue/Started/Observation/Ended` | world 事实 → 状态/日程 Recall → 决策 → 活动/日程计划 |
@@ -591,7 +591,7 @@ Stage 决定何时发起认知维护，通过 purpose=REFLECT 调用同一个 ha
 ### 8.2 功能兼容总则
 
 - 重构不以“架构更干净”为由改变当前用户可观察行为。相同的有效输入、时钟条件、角色配置和外部依赖结果，应得到等价的文字、音频、表情、动态、日记、事件、歌曲资源和持久状态；随机行为以相同概率、候选集合和去重规则验收，不要求固定抽中同一项；
-- 当前的等待、超时、合并、过期结果丢弃、触摸合流、主动消息去重、world task 跳过/失败和后续周期继续运行语义必须保留；
+- 当前的等待、超时、合并、过期结果丢弃、触摸快速输出及失败丢弃、主动消息去重、world task 跳过/失败和后续周期继续运行语义必须保留；
 - 允许替换内部对象和队列，但不允许丢失当前链路中的副作用，也不允许因迁移重复回复、重复发布、重复创建日程、重复记忆或重复学歌；
 - 本节中的“目标链路”表示最终模块协作路径。纯机械 world 任务不会因为由 `WorldClock` 唤醒就自动成为 Stimulus；只有形成了需要角色感知或决定的稳定事实时，才经 stage 进入 Agent。
 
@@ -621,9 +621,9 @@ Stage 决定何时发起认知维护，通过 purpose=REFLECT 调用同一个 ha
 
 | 当前分支 | 必须保持的行为 | 目标链路 |
 | --- | --- | --- |
-| 快速反射命中 | 当前角色配置概率为 1.0；从该角色 `touch_voice_dir` 的受支持音频中随机选择，读取对应表情映射，立即播放；不显示聊天气泡、不写会话记录。非 `normal` 表情在反应结束后恢复 `normal` | `TouchInteraction -> handle -> Say(prepared_audio_ref, delivery=EPHEMERAL_REACTION, expression) -> realize -> AUDIO/EXPRESSION` |
-| 快速资源缺失、读取失败或概率未命中 | 不吞掉触摸，转入普通角色回复链 | `TouchInteraction -> handle` 内改走内容生成 Skill，再输出普通 `Say` 计划 |
-| 多次快速触摸排队 | 尚未开始处理时，新触摸更新同一个待处理触摸；已有触摸正在处理时，后续触摸被忽略，不能无限堆积 | 合并/忽略规则由 stage 的触摸 pending 策略维护，Agent 不暴露触摸队列 |
+| 快速反射命中 | 当前角色配置概率为 1.0；从该角色 `touch_voice_dir` 的受支持音频中随机选择，读取对应表情映射，立即播放；不显示聊天气泡、不写会话记录。非 `normal` 表情在反应结束后恢复 `normal` | `TouchInteraction -> handle` 先交付瞬时 SAY 计划，再交付独立的 normal 表情恢复 ActionPlan；Stage 顺序 realize，SAY 本身不默认恢复 |
+| 快速资源缺失、读取失败或概率未命中 | 报告失败、记录错误并丢弃本次触摸，不进入普通话题或调用 LLM 兜底，不自动重试 | handler／realize 按失败阶段返回结果；Stage 结束本次处理，不建立降级回复 |
+| 旧触摸降级队列 | 旧普通话题降级分支的合并／忽略规则不再作为迁移要求；快速分支失败直接退出 | 仍受 Stage 通用容量限制，不重建旧降级话题队列 |
 | 触摸输入内容 | 当前 `touchArea/touch_area` 与点击频率继续被校验、归一化为角色可理解的身体区域、动作、强度/频率事实；供应商原始字段不进入 Handler | Adapter 产生强类型 `TouchInteraction`；Agent 只看领域字段 |
 
 快速反射仍然必须经过两个 Agent interface：handle 决定选用哪段反射和表情，realize 才输出预制音频及表情。它可以绕过慢聊天内容生成，但不能绕过 Agent façade。
@@ -675,7 +675,7 @@ Stage 决定何时发起认知维护，通过 purpose=REFLECT 调用同一个 ha
 - 一份生产调用图或自动依赖扫描，证明没有 Agent 内部类型、AgentRuntime 业务代理、`CharacterRuntime` 或绕过 realize 的角色表达 capability 外部生产调用；
 - 从公开两个 interface 观察零计划、单计划、多计划、取消、旧 revision 拒绝、部分执行和失败停止；
 - 从聊天入口观察 8.3 的所有信号、普通超时和重新思考，不通过私有 Handler 测试替代；
-- 从触摸与登录入口观察预制音频、表情、持久化/非持久化、合并与通知去重；
+- 从触摸与登录入口观察预制音频、表情及独立恢复、持久化/非持久化、失败丢弃与通知去重；
 - 从可控时钟逐项触发 8.6 的九类 action，核对外部效果以及纯机械/角色认知边界；
 - 对仍需真实网络、LLM、TTS、唱歌模型或设备的部分单独记录人工/环境验收，不能用 Fake 通过宣称真实依赖已验证。
 
@@ -756,7 +756,7 @@ expand 阶段允许目标 interface 与旧实现暂时并存，但新调用方�
 | [12 显式记忆](../../../.scratch/agent-handle-realize/issues/12-intentional-memory.md) | 05、08 | IntentionalMemoryCommit 先写后承诺、实际提交结果和失败报告 |
 | [13 settlement 反思](../../../.scratch/agent-handle-realize/issues/13-reflection-settlement-and-memory.md) | 05、06、08、12 | Coordinator/Policy/Handler 可靠调度自动记忆和重要日期检查 |
 | [14 压缩与画像反思](../../../.scratch/agent-handle-realize/issues/14-reflection-compaction-and-profile.md) | 13 | 上下文阈值/CAS、画像更新和 ChatStage ReflectionWorker 退出 |
-| [15 触摸反应](../../../.scratch/agent-handle-realize/issues/15-touch-reaction.md) | 05、06、07 | 快速预制音频/表情、瞬时非持久输出、失败回退和触摸合流 |
+| [15 触摸反应](../../../.scratch/agent-handle-realize/issues/15-touch-reaction.md) | 05、06、07 | 快速预制音频/表情、瞬时非持久输出、独立表情恢复和失败丢弃 |
 | [16 首次登录欢迎](../../../.scratch/agent-handle-realize/issues/16-first-login-proactive.md) | 05、06、07 | 两条有序持久欢迎、预制音频、历史同步时点和登录去重 |
 | [17 到期事件主动提醒](../../../.scratch/agent-handle-realize/issues/17-due-event-proactive.md) | 03、08、16 | 当天登录与 300 秒周期提醒的过滤、claim、合并/随机选择及失败释放 |
 | [18 ToyStage](../../../.scratch/agent-handle-realize/issues/18-toy-stage.md) | 05、06 | 设备连接/断开、聚合振动、Touch 与 PerformMotion 的完整 Toy 链 |
