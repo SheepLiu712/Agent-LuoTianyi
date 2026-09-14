@@ -120,6 +120,9 @@ class ChatReplyHandler:
             item.text.strip() for item in request.prepared_inputs if item.text and item.text.strip())
         drafts: tuple = ()
         if reply_topic:
+            await plans.emit(ActionPlanDraft(
+                source_stimulus_ids=pending,
+                actions=(d.StartThinking(action_id=f"{request.request_id}-thinking"),)))
             identity = plans.context.identity
             snapshot = plans.context.conversation.read()
             plans.set_interruptible(True)

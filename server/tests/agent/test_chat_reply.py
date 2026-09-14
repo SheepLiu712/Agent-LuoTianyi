@@ -70,8 +70,11 @@ async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
     ctx = context()
     sink = Sink()
     report = await agent(composer).handle_stimulus(deadline_request(), sink, context=ctx)
-    plan = sink.values[0]
+    thinking, plan = sink.values
+    assert [action.kind for action in thinking.actions] == [d.ActionKind.START_THINKING]
+    assert thinking.plan_ordinal == 0
     assert isinstance(plan, d.ActionPlan)
+    assert plan.plan_ordinal == 1
     kinds = [action.kind for action in plan.actions]
     assert kinds == [d.ActionKind.SAY, d.ActionKind.SING]
     assert plan.actions[0].content == "你好呀"
