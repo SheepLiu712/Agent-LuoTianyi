@@ -16,6 +16,7 @@ _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "agent" / "test_speaking.py").resolve(),
     (Path(__file__).parent / "agent" / "test_restore_expression.py").resolve(),
     (Path(__file__).parent / "agent" / "test_touch_interaction.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_touch_resources.py").resolve(),
     (Path(__file__).parent / "agent" / "test_compaction_skill.py").resolve(),
     (Path(__file__).parent / "agent" / "test_context.py").resolve(),
     (Path(__file__).parent / "agent" / "test_output_sequences.py").resolve(),

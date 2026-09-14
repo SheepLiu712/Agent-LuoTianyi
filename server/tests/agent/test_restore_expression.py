@@ -1,4 +1,4 @@
-"""独立表情恢复行动只交付一个表情输出。"""
+"""独立表情恢复行动交付表情及其正常终止。"""
 
 from types import SimpleNamespace
 
@@ -12,7 +12,7 @@ from src.agent.processing.output_emitter import OutputEmitter
 pytestmark = pytest.mark.asyncio
 
 
-async def test_restore_expression_emits_only_requested_ephemeral_expression():
+async def test_restore_expression_emits_expression_then_terminal_output():
     action = d.RestoreExpression(
         action_id="restore",
         expression_id="normal",
@@ -46,7 +46,7 @@ async def test_restore_expression_emits_only_requested_ephemeral_expression():
         irreversible_effect_committed=False,
         effect_ref=None,
     )
-    assert len(sink.values) == 1
+    assert len(sink.values) == 2
     assert sink.values[0] == d.ExpressionOutput(
         interaction_id="interaction",
         execution_id="execution",
@@ -54,6 +54,15 @@ async def test_restore_expression_emits_only_requested_ephemeral_expression():
         sequence_no=0,
         delivery=d.OutputDelivery.EPHEMERAL_REACTION,
         expression=d.ChangeExpression(expression_id="normal"),
+    )
+    assert sink.values[1] == d.MessageEndOutput(
+        interaction_id="interaction",
+        execution_id="execution",
+        action_id="restore",
+        sequence_no=1,
+        delivery=d.OutputDelivery.EPHEMERAL_REACTION,
+        status=d.MessageEndStatus.COMPLETED,
+        error_code=None,
     )
 
 

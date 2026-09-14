@@ -193,6 +193,7 @@ MessageEndOutput 表示该消息不会再追加文字或音频，Adapter 将其�
 客户端沿用终止包与播放队列机制，播完该消息后才执行后续包。MessageEndOutput 本身不声称客户端已经播放完成。
 正常路径先输出文字、表情和音频，随后终止该消息；失败前尚未发出的显示文本仍应保留。当前 SAY 处理器取消时停止交付并清理语音流。OutputEmitter 在取消后拒绝继续发送，因此该路径不补发终止包，也不宣称客户端已收到终止通知。
 SAY 结束后不自动恢复表情；表情恢复由另一个行动计划表达。
+RestoreExpression 依次输出目标 ExpressionOutput 和正常 MessageEndOutput，自行关闭该行动的消息；Stage 与 Adapter 不检查 Action 类型或使用专用分帧参数。
 
 当前输出枚举中的 TEXT_DELTA、MOTION 已存在；本轮不增加其具体输出构造类型，保留现有枚举成员。
 
@@ -254,7 +255,7 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 开始思考通过第 3.0 节的 StartThinking 计划通知 stage，结束思考由 stage 根据对应 handle 的完成、失败或取消清理，发送既有 waiting 状态。
 
 SAY 的 TTS 分支输出文字、可选表情、音频及 MessageEndOutput，不追加 normal 恢复包。
-触摸 handler 先交付预制音频的瞬时 Say 计划，再交付独立 RestoreExpression 计划；前者的 MessageEndOutput 先于 normal 表情输出。资源缺失、读取失败或快速分支未命中时返回 FAILED、记录错误并丢弃，不进入普通话题、LLM 兜底或自动重试。
+触摸 handler 先按旧链已知身体区域及频率策略准入（最近 10 秒最多 8 次、30 秒最多 16 次），再从 manifest 登记的无文字预制资源中选择可由 PreparedSpeechResources 解析的音频。成功时先交付瞬时 Say，再交付独立 RestoreExpression；触摸音频终包先于 normal 表情，恢复行动随后自行发送终包，不等待客户端播放确认。未知区域、频率超限、资源缺失、读取失败或快速分支未命中时返回 FAILED、记录错误并丢弃，不进入普通话题、LLM 兜底或自动重试。
 
 业务计划依次调用 realize，计划内 Action 依次执行，AgentOutput 依次发送。本版保持正常路径的顺序和终止包位置；严格乱序检测、丢包恢复和跨连接重投去重留待后续，不能把现有队列行为描述为这些可靠性保证。
 
@@ -268,26 +269,7 @@ SAY 的 TTS 分支输出文字、可选表情、音频及 MessageEndOutput，不
 
 ## 目标接口（草案，待评审，未实现）
 
-以下为 Issue #74、#79 所需的新增 Action 的**目标**契约。**当前源码未实现**，不得按“当前接口”调用；确认后需同步本页、总 SPEC 7.14 与 `plan_identity._types` 白名单。
-
-### `RestoreExpression`（对应 Issue #74 触摸表情恢复）
-
-```python
-class ActionKind(str, Enum):
-    ...
-    RESTORE_EXPRESSION = "restore_expression"
-
-@dataclass(frozen=True, slots=True, kw_only=True)
-class RestoreExpression(Action):
-    kind: ClassVar[ActionKind] = ActionKind.RESTORE_EXPRESSION
-    expression_id: str            # 目标领域表情代码；触摸恢复为 "normal"
-    delivery: OutputDelivery      # 触摸为 EPHEMERAL_REACTION
-```
-
-- **调用者**：触摸 handler 在交付瞬时 SAY 计划后，作为**独立** `ActionPlan` 交付（SAY 不隐含恢复）。
-- **实现**：对应 action handler 输出 `ExpressionDraft(delivery, ChangeExpression(expression_id))`；无需新增输出类型。
-- **冲突提示**：本提案把表情恢复提升为独立 Action，与总 SPEC 7.14「`ChangeExpression` 只保留为 `Say`/`Sing` 内嵌值对象；没有独立 Action」**冲突**，须先修订 7.14 再实现。
-- **失败行为**：沿用 `ExecutionErrorCode`；失败停止后续行动，不隐式重试。
+以下只保留 Issue #79 尚未实现的日程 Action 目标契约。Issue #74 的 RestoreExpression 已成为本页第 3.1、7、10 节描述的当前接口事实。
 
 ### `CreateSchedule` / `CancelSchedule`（对应 Issue #79，范围待确认）
 
@@ -309,6 +291,5 @@ class CancelSchedule(Action):
 
 ### 未决问题
 
-1. 是否同意修订总 SPEC 7.14 并新增 `ActionKind.RESTORE_EXPRESSION`？
-2. 日程 Action 是否需要 `CancelSchedule`、`schedule_id` 的形态与 scheduler 归属？
+1. 日程 Action 是否需要 `CancelSchedule`、`schedule_id` 的形态与 scheduler 归属？
 3. 新 Action 的 `delivery` 语义（恢复固定瞬时，还是随调用方）。

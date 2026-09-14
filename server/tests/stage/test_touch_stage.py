@@ -68,17 +68,19 @@ async def test_touch_audio_end_precedes_restore_and_never_becomes_chat_record(tm
             ephemeral=True,
         ))
         assert accepted is True
-        await until(lambda: len(socket.events) >= 4)
+        await until(lambda: len(socket.events) >= 5)
         packets = [event["payload"] for event in socket.events if event["type"] == "agent_message"]
         assert [packet["expression"] for packet in packets if packet["expression"]] == ["happy", "normal"]
-        end_index = next(index for index, packet in enumerate(packets) if packet["is_final_package"])
+        end_indices = [index for index, packet in enumerate(packets) if packet["is_final_package"]]
         restore_index = next(index for index, packet in enumerate(packets) if packet["expression"] == "normal")
-        assert end_index < restore_index
+        assert len(end_indices) == 2
+        assert end_indices[0] < restore_index < end_indices[1]
         assert all(packet["text"] == "" for packet in packets)
         assert all(packet["is_ephemeral"] is True for packet in packets)
         assert all(packet["display_in_chat"] is False for packet in packets)
         assert stage._pending == {}
         await asyncio.sleep(0)
-        assert packets[-1]["expression"] == "normal"
+        assert packets[restore_index]["expression"] == "normal"
+        assert packets[-1]["is_final_package"] is True
     finally:
         await cleanup(stage, adapter)

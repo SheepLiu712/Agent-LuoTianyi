@@ -430,8 +430,8 @@ class ChatStage:
                 self._executing_plan = None
                 self._on_execution_finished(plan, report)
 
-    def _send(self, output: StageOutput, *, standalone: bool = False) -> asyncio.Future[None]:
-        return self._adapter.submit_output(output, standalone=standalone)
+    def _send(self, output: StageOutput) -> asyncio.Future[None]:
+        return self._adapter.submit_output(output)
 
     def _send_control(self, output: StageOutput) -> None:
         try:

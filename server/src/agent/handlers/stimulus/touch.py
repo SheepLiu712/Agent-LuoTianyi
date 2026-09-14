@@ -5,14 +5,14 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.expression.touch import TouchReaction
+from src.agent.skills.expression.touch import TouchPolicy, TouchReaction
 from src.utils.logger import get_logger
 
 
 class TouchReactionSelector(Protocol):
     """选择一次可交付的触摸预制反应。"""
 
-    def choose(self) -> TouchReaction | None:
+    def choose(self, stimulus: d.TouchInteraction) -> TouchReaction | None:
         """返回反应；资源不可用或快速分支未命中时返回 None。"""
         ...
 
@@ -20,9 +20,10 @@ class TouchReactionSelector(Protocol):
 class TouchInteractionHandler:
     """把一次触摸转换为瞬时 SAY 及随后独立恢复计划。"""
 
-    def __init__(self, reactions: TouchReactionSelector) -> None:
+    def __init__(self, reactions: TouchReactionSelector, policy: TouchPolicy | None = None) -> None:
         """绑定角色触摸资源选择技能。"""
         self._reactions = reactions
+        self._policy = policy or TouchPolicy()
 
     async def handle(
         self,
@@ -32,7 +33,19 @@ class TouchInteractionHandler:
         """成功时顺序交付两个计划，失败时记录并丢弃本次触摸。"""
         if not isinstance(request.stimulus, d.TouchInteraction):
             raise TypeError("TouchInteractionHandler 只处理 TouchInteraction")
-        reaction = self._reactions.choose()
+        if not self._policy.allows(request.stimulus):
+            get_logger(__name__).warning(
+                "Touch interaction rejected request_id=%s stimulus_id=%s",
+                request.request_id,
+                request.stimulus.stimulus_id,
+            )
+            return self._report(
+                request,
+                plans,
+                status=d.HandlingRequestStatus.FAILED,
+                error_code=d.HandlingErrorCode.UNSUPPORTED_INTERACTION,
+            )
+        reaction = self._reactions.choose(request.stimulus)
         if reaction is None:
             get_logger(__name__).error(
                 "Touch reaction unavailable request_id=%s stimulus_id=%s",

@@ -1,12 +1,12 @@
 """独立表情恢复行动的输出实现。"""
 
 import src.domain.agent as d
-from src.agent.processing.output_drafts import ExpressionDraft
+from src.agent.processing.output_drafts import ExpressionDraft, MessageEndDraft
 from src.agent.processing.output_emitter import OutputEmitter
 
 
 class RestoreExpressionHandler:
-    """把独立恢复行动实现为唯一一份表情输出。"""
+    """把独立恢复行动实现为表情输出及其消息终止。"""
 
     async def realize(
         self,
@@ -28,6 +28,11 @@ class RestoreExpressionHandler:
         await outputs.emit(ExpressionDraft(
             expression=d.ChangeExpression(expression_id=action.expression_id),
             delivery=action.delivery,
+        ))
+        await outputs.emit(MessageEndDraft(
+            delivery=action.delivery,
+            status=d.MessageEndStatus.COMPLETED,
+            error_code=None,
         ))
         return d.ActionResult(
             action_id=action.action_id,

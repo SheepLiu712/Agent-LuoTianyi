@@ -621,7 +621,7 @@ Stage 决定何时发起认知维护，通过 purpose=REFLECT 调用同一个 ha
 
 | 当前分支 | 必须保持的行为 | 目标链路 |
 | --- | --- | --- |
-| 快速反射命中 | 当前角色配置概率为 1.0；从该角色 `touch_voice_dir` 的受支持音频中随机选择，读取对应表情映射，立即播放；不显示聊天气泡、不写会话记录。非 `normal` 表情在反应结束后恢复 `normal` | `TouchInteraction -> handle` 先交付瞬时 SAY 计划，再交付独立的 normal 表情恢复 ActionPlan；Stage 顺序 realize，SAY 本身不默认恢复 |
+| 快速反射命中 | 当前角色配置概率为 1.0；从该角色 manifest 登记的无文字预制音频中随机选择，读取对应表情映射，立即播放；不显示聊天气泡、不写会话记录。非 `normal` 表情在反应结束后恢复 `normal` | `TouchInteraction -> handle` 先按已知区域及 10/30 秒频率上限 8/16 次准入，再交付瞬时 SAY 计划和独立 normal 表情恢复 ActionPlan；两个 action handler 各自发送终包，Stage 只顺序 realize，SAY 本身不默认恢复 |
 | 快速资源缺失、读取失败或概率未命中 | 报告失败、记录错误并丢弃本次触摸，不进入普通话题或调用 LLM 兜底，不自动重试 | handler／realize 按失败阶段返回结果；Stage 结束本次处理，不建立降级回复 |
 | 旧触摸降级队列 | 旧普通话题降级分支的合并／忽略规则不再作为迁移要求；快速分支失败直接退出 | 仍受 Stage 通用容量限制，不重建旧降级话题队列 |
 | 触摸输入内容 | 当前 `touchArea/touch_area` 与点击频率继续被校验、归一化为角色可理解的身体区域、动作、强度/频率事实；供应商原始字段不进入 Handler | Adapter 产生强类型 `TouchInteraction`；Agent 只看领域字段 |

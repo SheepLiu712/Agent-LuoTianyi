@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -12,11 +11,19 @@ import src.domain.agent as d
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.stimulus.touch import TouchInteractionHandler
 from src.agent.processing.plan_emitter import PlanEmitter
-from src.agent.skills.expression.touch import TouchReaction, TouchReactionSkill
+from src.agent.skills.expression.touch import (
+    TouchPolicy,
+    TouchReaction,
+    TouchReactionSkill,
+)
 from src.agent_runtime.agent_runtime import AgentRuntime
 
 
-def touch_request() -> d.HandleStimulusRequest:
+def touch_request(
+    *,
+    regions: tuple[str, ...] = ("head",),
+    frequency: d.TouchClickFrequency | None = None,
+) -> d.HandleStimulusRequest:
     stimulus = d.TouchInteraction(
         stimulus_id="touch",
         schema_version=1,
@@ -25,8 +32,8 @@ def touch_request() -> d.HandleStimulusRequest:
         target_character_ids=("luotianyi",),
         user_id="user",
         ephemeral=True,
-        body_regions=(d.BodyRegion(value="head"),),
-        click_frequency=None,
+        body_regions=tuple(d.BodyRegion(value=value) for value in regions),
+        click_frequency=frequency,
     )
     interaction = d.ChatInteractionSnapshot(
         interaction_id="interaction",
@@ -55,7 +62,7 @@ def touch_request() -> d.HandleStimulusRequest:
 class ReactionSkill:
     reaction: TouchReaction | None
 
-    def choose(self) -> TouchReaction | None:
+    def choose(self, stimulus: d.TouchInteraction) -> TouchReaction | None:
         return self.reaction
 
 
@@ -121,37 +128,81 @@ async def test_touch_handler_failure_logs_and_discards_without_plan(caplog):
     assert any("Touch reaction unavailable" in record.getMessage() for record in caplog.records)
 
 
-def test_touch_skill_wraps_legacy_builder_selection_and_expression(tmp_path, monkeypatch):
+def test_touch_skill_rejects_directory_only_configuration(tmp_path):
+    with pytest.raises(ValueError, match="manifest"):
+        TouchReactionSkill({"touch_voice_dir": str(tmp_path), "probability": 1.0})
+
+
+@pytest.mark.asyncio
+async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatch):
+    import json
+    import wave
+
     audio = tmp_path / "voice.wav"
-    audio.write_bytes(b"audio")
-    (tmp_path / "voice_to_expression.json").write_text(
-        '{"voice": "happy"}',
-        encoding="utf-8",
-    )
-    skill = TouchReactionSkill({"touch_voice_dir": str(tmp_path), "probability": 1.0})
+    with wave.open(str(audio), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16000)
+        output.writeframes(b"\x00\x00" * 10)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{
+        "name": "voice",
+        "audio_path": "voice.wav",
+        "text": "",
+        "expression": "happy",
+    }]), encoding="utf-8")
+    skill = TouchReactionSkill({
+        "manifest": str(manifest),
+        "resource_names": ["voice"],
+        "probability": 1.0,
+    })
     monkeypatch.setattr("src.agent.reflex.touch.random.choice", lambda files: next(iter(files)))
 
-    reaction = skill.choose()
+    reaction = skill.choose(touch_request().stimulus)
 
     assert reaction == TouchReaction(
         audio_ref=d.MediaRef(media_id="voice"),
         expression_id="happy",
     )
+    from src.resources.prepared_speech import PreparedSpeechResources
+
+    assert (await PreparedSpeechResources(
+        {"manifest": str(manifest)}).read_audio("voice")).data == audio.read_bytes()
 
 
-@pytest.mark.parametrize("mode", ["miss", "missing", "unreadable"])
-def test_touch_skill_returns_none_when_fast_resource_cannot_be_used(tmp_path, monkeypatch, mode):
-    audio = tmp_path / "voice.wav"
-    audio.write_bytes(b"audio")
-    skill = TouchReactionSkill({"touch_voice_dir": str(tmp_path), "probability": 1.0})
-    if mode == "miss":
-        monkeypatch.setattr(skill._builder, "should_use_fast_path", lambda: False)
-    elif mode == "missing":
-        audio.unlink()
-    else:
-        monkeypatch.setattr(Path, "read_bytes", lambda self: (_ for _ in ()).throw(OSError("failed")))
+@pytest.mark.parametrize("regions,frequency", [
+    (("unknown",), None),
+    (("head",), d.TouchClickFrequency(count_10s=9, count_30s=9)),
+    (("head",), d.TouchClickFrequency(count_10s=8, count_30s=17)),
+])
+def test_touch_policy_rejects_unknown_region_and_throttled_frequency(regions, frequency):
+    assert TouchPolicy().allows(touch_request(regions=regions, frequency=frequency).stimulus) is False
 
-    assert skill.choose() is None
+
+def test_touch_policy_allows_legacy_region_with_frequency_at_limit():
+    frequency = d.TouchClickFrequency(count_10s=8, count_30s=16)
+    assert TouchPolicy().allows(touch_request(regions=("head", "辫子"), frequency=frequency).stimulus) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("regions,frequency", [
+    (("unknown",), None),
+    (("head",), d.TouchClickFrequency(count_10s=9, count_30s=9)),
+])
+async def test_touch_handler_rejected_policy_fails_and_discards(regions, frequency):
+    request = touch_request(regions=regions, frequency=frequency)
+    sink = Sink()
+    plans = PlanEmitter("luotianyi", request, sink)
+    handler = TouchInteractionHandler(ReactionSkill(TouchReaction(
+        audio_ref=d.MediaRef(media_id="touch_voice"), expression_id="happy")))
+
+    report = await handler.handle(request, plans)
+
+    assert report.request_status is d.HandlingRequestStatus.FAILED
+    assert report.error_code is d.HandlingErrorCode.UNSUPPORTED_INTERACTION
+    assert report.retryable is False
+    assert report.emitted_plan_ids == ()
+    assert sink.values == []
 
 
 @pytest.mark.asyncio
@@ -197,3 +248,16 @@ async def test_production_runtime_registers_touch_and_restore_without_chat_dupli
         )
     finally:
         await runtime.shutdown()
+
+
+def test_production_runtime_rejects_directory_only_touch_resources(runtime_dependencies, tmp_path):
+    kwargs, _ = runtime_dependencies
+    kwargs["config"]["character_registry"]["characters"]["luotianyi"]["reflex"] = {
+        "touch": {"fast_reply": {
+            "touch_voice_dir": str(tmp_path),
+            "probability": 1.0,
+        }},
+    }
+
+    with pytest.raises(ValueError, match="manifest-backed"):
+        AgentRuntime(**kwargs)
