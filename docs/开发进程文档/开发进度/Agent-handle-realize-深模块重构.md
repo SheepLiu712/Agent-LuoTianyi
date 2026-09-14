@@ -9,6 +9,15 @@
 
 ## 已完成事实
 
+### 2026-09-14 过期事件清理不变量验证（28）GREEN
+
+- 交付行为：为 `EventStore.purge_expired_events` 补充不变量测试——`end_datetime < today` 才失活、`end` 当天保留；仅 `start_datetime` 的事件保留一天缓冲；`is_recurring` / `source=user` / 仅 `date_mmdd` 的事件不清除；重复清理只计本次实际失活（幂等）；已 inactive 不计数；清理后失效 due 事件缓存。任务层保持「无 event_store 时 skipped、有 store 时返回 purged」。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #87 为验证工单，无运行时行为变化；记录为验证切片，不制造人工 Red。
+- commit 或 PR：分支 `test/world-28-event-cleanup`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_event_cleanup.py -q` 为 9 passed；`python -m pytest tests/world -q` 为 121 passed、2 skipped。
+- 未验证范围：未运行真实外部服务或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
+
 ### 2026-09-06 门面公共入口与请求分流整理
 
 - 交付内容：两个公共方法紧随 `__init__`；handle 入口直接登记请求，已有请求在 `_handle_existing_request` 处理后提前返回，新请求进入 `_process_request`。新处理和计划恢复共用处理权、交付及结算生命周期，原 `_handle_registered` 已删除；保留工作区已有的参数类型注解。
