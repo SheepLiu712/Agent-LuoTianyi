@@ -1,7 +1,7 @@
 # Stage 接口
 
 
-新聊天交互实现位于 `server/src/stage`，按用户与角色管理一个 ChatStage。生产 `/chat_ws` 仍使用 `src/chat_session` 的兼容聊天链路。
+新聊天交互实现位于 `server/src/stage`，按用户与角色管理一个 ChatStage。生产 `/chat_ws` 在认证成功后通过 StageManager 连接默认角色的 ChatStage，并把聊天业务事件交给共享 WebSocketAdapter；旧 ChatStream 不再拥有该入口的连接和聊天事件。
 
 ## ChatStage
 
@@ -59,7 +59,7 @@ StageState 为 ONLINE、OFFLINE、TERMINATING、TERMINATED。初始为 OFFLINE�
 
 离线超时发送 reason=USER_LEFT 的 InteractionEnding；服务器关闭使用 SHUTDOWN。结束刺激不进入 pending。结束 handler 在 AgentRuntime 中登记，确认结束并返回报告，不释放 context，也不产生客户端行动。Stage 在普通任务及结束处理收尾后调用 context.close；结束处理超时或失败也进入关闭流程。
 
-SystemRuntime 创建共享 adapter 和 StageManager，并在 AgentRuntime、能力及数据库关闭前关闭 StageManager。StageManager 是新链路的生命周期入口；旧 GCSM 继续管理 ChatStream。
+SystemRuntime 创建共享 adapter 和 StageManager，并在 AgentRuntime、能力及数据库关闭前关闭 StageManager。生产 `/chat_ws` 对每个已认证连接调用 `await StageManager.connect(connection, default_character_id)`，在路由 `finally` 中调用 `await StageManager.disconnect(connection)`；断线后保留期内同一用户和角色重连复用原 Stage、context、interaction_id 与两个 sink。旧 GCSM 仍服务尚未迁移的兼容调用者，但不再接收生产聊天 WebSocket 的业务事件。
 
 ## 兼容聊天链路
 

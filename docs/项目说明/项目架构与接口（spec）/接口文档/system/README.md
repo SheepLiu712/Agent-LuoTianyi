@@ -18,6 +18,7 @@
 
 - `agent`：默认 Agent 的兼容入口。
 - `websocket_service`：WebSocket Adapter 服务。
+- `chat_adapter` / `stage_manager`：生产聊天的共享协议 adapter 与连接/交互生命周期入口；`stage_manager` 缺失时生产聊天和首次登录明确失败，不静默回退旧链。
 - `gcsm` / `chat_stream_manager`：聊天流管理器。
 - `conversation_service`：stage 对话上下文服务。
 - `activity_maker`：主动话题组件。
@@ -37,10 +38,10 @@
 
 - `agent_runtime.prepared_speech.manifest`：现有预制语音清单路径。清单条目以名称提供 `audio_path`、`text` 和 `expression`；首次欢迎使用同条目的文字与音频引用，但表达固定为 `normal`，不采用 manifest 的 expression。
 - `agent_runtime.proactive.first_login.prepared_names`：按发送顺序配置恰好两个预制语音名称，例如 `["first_greet_1", "first_greet_2"]`。`AgentRuntime` 解析该列表并注入首次登录 handler；handler 不读取文件系统。
-- 首次登录的 Stage/Agent 接口使用 `ProactivePromptDue(reason=ProactiveReason("first_login"))`：调用方通过 `StageManager.record_login(user_id, character_id, ...)` 按 `(user_id, character_id)` 记录一次事实，每个已启用角色各消费一次；对应 ChatStage 完成连接绑定后开始约 1 秒同步窗口，再进入真实 `handle_stimulus` 链路。handle 容量已满时保留 pending 并延后重试，不越过 `max_stimuli` 也不丢弃。生产认证与 WebSocket 接线由 #66 负责，本切片不修改 `server_main`、`UserInterface` 或 `SystemRuntime` 的生产入口。
+- 首次登录的 Stage/Agent 接口使用 `ProactivePromptDue(reason=ProactiveReason("first_login"))`：`UserInterface.login/auto_login` 在认证结果的 `elapsed_from_last_login is None` 时，直接调用 `StageManager.record_login(user_id, default_character_id, elapsed_from_last_login=None)`，按 `(user_id, character_id)` 记录一次事实；对应 ChatStage 完成连接绑定后开始约 1 秒同步窗口，再进入真实 `handle_stimulus` 链路。handle 容量已满时保留 pending 并延后重试，不越过 `max_stimuli` 也不丢弃。`elapsed_from_last_login is not None` 的回访登录继续调用兼容 `chat_session_manager.on_user_login(...)`，不会进入首次登录 Agent 链。
 - 每个名称独立形成一个 `Say(prepared_audio_ref=MediaRef(name), expression="normal", delivery=CONVERSATION)` 计划，显示文字取 manifest，并以 `source=agent` 追加到交互对话。名称缺失时该条返回稳定失败并记录错误，不静默跳过。
 - `RETURN_LOGIN` 久别问候仍保持关闭；非首次登录不会由本配置触发欢迎。
-- 迁移期间旧生产链仍读取 `chat_session_manager.proactive_topic_maker.activity_res.first_login` 的 `manifest` 与 `resource_names`；该旧配置与新 `agent_runtime.proactive.first_login.prepared_names` 并存，直到 #66 切换生产接线后再处理旧入口收缩。
+- 旧 `chat_session_manager.proactive_topic_maker.activity_res.first_login` 配置仍为兼容代码保留；生产首次登录已经使用 `agent_runtime.proactive.first_login.prepared_names` 的 Stage/Agent 路径，回访登录仍保留旧 `on_user_login` 行为且不恢复 `RETURN_LOGIN`。
 
 ## 管理运行时
 
