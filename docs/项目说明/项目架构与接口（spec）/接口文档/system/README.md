@@ -77,3 +77,45 @@ FastAPI lifespan 启动时调用 `SystemRuntime.initialize(config)`，之后路�
 ## 当前导出注意事项
 
 `server/src/system/__init__.py` 当前尝试从不存在的 `src.chat_session.conversation` 延迟导出 `ConversationService`。修复前应从实际定义模块导入，不要依赖该包级名称。
+
+## 目标配置字段（草案，待评审，未实现）
+
+以下为 Issue #71（12 显式记忆）、#75（16 首次登录）、#76（17 周期提醒）所需的**目标**配置字段草案。按开发守则，跨模块配置字段属公开接口，需先定 spec；**当前均未实现**，不得直接写入生产 `config.json` 并假定生效。
+
+### `proactive.first_login.prepared_names`（对应 Issue #75）
+
+```jsonc
+{
+  "prepared_speech": { "manifest": "<manifest>" },   // 已有：音频清单
+  "proactive": { "first_login": { "prepared_names": ["welcome_1", "welcome_2"] } }
+}
+```
+
+- 文案与表情取自 manifest 中该名称的 `PreparedSpeech.text/expression`，避免文案与音频不一致；
+- 名称不在 manifest → 该条失败并记录，不静默跳过；
+- `RETURN_LOGIN`（久别问候）保持关闭的开关位置待定。
+
+### `memory.explicit_intent`（对应 Issue #71，过渡期方案）
+
+```jsonc
+{ "memory": { "explicit_intent": { "enabled": true, "phrases": ["请记住", "记住", "记一下"] } } }
+```
+
+- 作为**过渡期**意图识别（关键词 allowlist）；待总 SPEC 6.4 的模型工具调用落地后应替换；
+- 命中后必须「先写后承诺」；失败保留刺激并返回 `FAILED`，不承诺成功；
+- 未决：短语表是否入配置、是否需要开关、显式记忆的幂等键。
+
+### `proactive.idle_threshold_seconds`（对应 Issue #76）
+
+```jsonc
+{ "proactive": { "idle_threshold_seconds": 30 } }
+```
+
+- 仅对空闲 ≥ 阈值的活跃聊天流检查提醒；由 ChatStage 持有；
+- 与 `DueEventProvider`（见 [stage 接口](../stage/README.md)）的 claim/release 配合。
+
+### 未决问题
+
+1. 是否采纳上述键名与层级（`proactive` / `memory`）？
+2. 过渡期关键词方案是否接受，替换条件是什么？
+3. 这些字段由谁校验（`SystemRuntime` 启动配置检查还是各模块私有配置类型）？
