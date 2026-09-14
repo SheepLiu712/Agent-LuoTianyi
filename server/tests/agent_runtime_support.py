@@ -65,7 +65,13 @@ def runtime_dependencies(monkeypatch, tmp_path):
         llm_service=SimpleNamespace(register_llm_module=lambda *args: SimpleNamespace(
             prompt_template=SimpleNamespace(get_variables=lambda: []),
         )),
-        capability_manager=SimpleNamespace(speech=SimpleNamespace(tts_module={}), singing=SimpleNamespace()), database_manager=SimpleNamespace(open_sql_session=sessions, conversation_service=object()),
+        capability_manager=SimpleNamespace(
+            speech=SimpleNamespace(tts_module={}),
+            singing=SimpleNamespace(),
+            media_resolver=SimpleNamespace(resolve=lambda media_ref: None),
+            image_understanding=SimpleNamespace(describe_image=lambda image_data_uri: None),
+        ),
+        database_manager=SimpleNamespace(open_sql_session=sessions, conversation_service=object()),
     ), store
     runtime_module.set_agent_runtime(previous)
     engine.dispose()

@@ -4,7 +4,7 @@ import asyncio
 from typing import Any, Dict, TYPE_CHECKING
 
 from src.agent.skills import Skills
-from src.agent.skills.cognitive import ResponseCompositionSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive import ImagePreprocessingSkill, ResponseCompositionSkill, TextPreprocessingSkill
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.handlers.action.say import SayHandler
@@ -65,9 +65,11 @@ class AgentRuntime:
         try:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
             self.skills = Skills(self.config.get("skills", {}), llm_service,
-                                 tts_engine=AsyncTTS(capability_manager.speech),
-                                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
-                                 singing=capability_manager.singing)
+                                  tts_engine=AsyncTTS(capability_manager.speech),
+                                  preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
+                                  singing=capability_manager.singing,
+                                  media_resolver=capability_manager.media_resolver,
+                                  image_understanding=capability_manager.image_understanding)
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -106,7 +108,9 @@ class AgentRuntime:
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
                             self.skills.get(ResponseCompositionSkill),
                             self.skills.get(TextPreprocessingSkill))),
-                        *((kind, ChatPreprocessingHandler(self.skills.get(TextPreprocessingSkill))) for kind in (
+                        *((kind, ChatPreprocessingHandler(
+                            self.skills.get(TextPreprocessingSkill),
+                            self.skills.get(ImagePreprocessingSkill))) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
                             StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),

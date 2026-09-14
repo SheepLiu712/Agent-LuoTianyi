@@ -172,6 +172,9 @@
                 "params": {}
             }
         },
+        "media_resolution": {
+            "root": "data/media"
+        },
         "dynamic": {
             "dynamic_composer": {
                 "llm_module": {

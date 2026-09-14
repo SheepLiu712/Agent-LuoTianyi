@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-14 图片预处理落库与混合输入顺序（09）GREEN
+
+- 交付行为：新增 capabilities 侧 `MediaResolver` / `ResolvedMedia` 窄端口、永久 `PermanentMediaStore`、生产 `FilesystemMediaResolver` 和显式失败的未配置实现。WebSocket Adapter 复用现有 `user_image` 的 base64/MIME 协议，在构造 Stimulus 前永久保存原始字节，以认证用户和 client message 身份生成可重复的 UUID `MediaRef`；Agent 不保存媒体且只接触该引用。CapabilityManager、AgentRuntime、Skills 构造注入 `ImagePreprocessingSkill`；Handler 解析、校验、理解后一次写入用户媒体事实与系统机器描述事实，返回两个记录 ID 的 `PreprocessedInput`，不 emit、不消费。没有真实生产者的语音仍不接 ASR。
+- 永久性、顺序与失败：媒体目录无 TTL、过期或自动清理；resolver 拒绝未知、空内容、非图片 MIME、损坏元数据和路径穿越。对话事实时间按 Stage 接收 revision 排序，图片内部媒体先于机器描述；新 context 持久化使用带微秒 ISO 时间，旧链路可继续写秒级格式。`datetime.fromisoformat` 和已修订的旧展示格式化器兼容两种格式，因此 DB/context 读取保持 A/B。失败在 VLM 前退出，不消费、不阻塞后续文本，也不回滚既有事实。
+- interface spec：[`capabilities/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/capabilities/README.md) 已记录端口、稳定失败和未决存储策略；[`system/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/system/README.md) 已记录 `capabilities.media_resolution` 装配事实。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent tests/stage tests/domain tests/adapter -q` 为 **718 passed**（2 条既有依赖弃用 warning）；新增 adapter/resolver/时间格式聚焦测试为 **36 passed**。触及文件 Ruff 与 `git diff --check` 通过；08 链既有 agent/stage/domain/adapter 测试未修改且继续通过。
+- 未决与未验证：仍未选择持久化时的授权主体、大小/分块、解析/理解超时及图片/语音端口长期复用策略；未实现 ASR。未运行真实 VLM、生产目录权限/磁盘耗尽、生产数据库、客户端/真机、GPU 或完整 Server 外部链路。
+
 ### 2026-09-14 批次回复的演唱决定接入（08c-2）GREEN
 
 - 交付行为：`ChatReplyHandler` 在批次回复中执行演唱决定——用 `TextPreprocessingSkill.extract_terms` 从本批文本提取演唱尝试；从近期对话的 `SongContent` 记录推导「最近已唱片段」作为排除集；两者传入回复生成技能用于选择片段。生成演唱草稿时取回片段歌词并写入 `source=agent` 的 `SongContent` 记录（文本为「唱了《歌》+歌词」）。`ResponseCompositionSkill.compose` 新增 `excluded_segments` 参数并回填 `ReplyDraft.lyrics`。

@@ -1,27 +1,34 @@
 """通过 adapter 公共接口验证真实 SAY、协议兼容、隔离和断线收尾。"""
 import asyncio
 import base64
-from dataclasses import replace
 import io
 import json
-from types import SimpleNamespace
 import wave
+from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
-import pytest
 
 import src.domain.agent as d
-from src.domain.stage import AgentPresentationChanged, AgentPresentationState, CancelDelivery
 from src.adapter.websocket import WebSocketAdapter
 from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.capabilities.speech.streaming import AsyncTTS
+from src.domain.stage import (
+    AgentPresentationChanged,
+    AgentPresentationState,
+    CancelDelivery,
+)
 from src.resources.prepared_speech import PreparedSpeechResources
 from src.system.user_interface.types import WSMessage
-from src.system.user_interface.websocket_service import ChatEventAcceptance, WebSocketConnection, WebSocketService
+from src.system.user_interface.websocket_service import (
+    ChatEventAcceptance,
+    WebSocketConnection,
+    WebSocketService,
+)
 
 
 class Socket:
@@ -305,6 +312,56 @@ async def test_input_targets_are_atomic_and_use_authenticated_identity():
         adapter.receive_event(connection, WSMessage(event_type="user_text", client_msg_id="bad", payload={"text": "hi", "target_character_ids": ["missing"]}))
     for endpoint in (stage, other):
         await adapter.disconnect(endpoint)
+
+
+@pytest.mark.asyncio
+async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_path):
+    _, connection, adapter, stage = await setup_output(WebSocketAdapter({
+        "media_store": {"root": str(tmp_path / "media")},
+    }))
+    image = b"permanent-image"
+    event = WSMessage(
+        event_type="user_image",
+        client_msg_id="image-one",
+        payload={
+            "image_base64": base64.b64encode(image).decode("ascii"),
+            "mime_type": "image/png",
+            "caption": "看这里",
+        },
+    )
+
+    assert adapter.receive_event(connection, event)
+
+    stimulus = stage.stimuli[0]
+    assert isinstance(stimulus, d.ImageMessage)
+    assert stimulus.caption == "看这里"
+    assert stimulus.media_ref.media_id
+    media_dir = tmp_path / "media" / stimulus.media_ref.media_id
+    assert (media_dir / "content.bin").read_bytes() == image
+    assert json.loads((media_dir / "metadata.json").read_text(encoding="utf-8")) == {
+        "mime_type": "image/png",
+    }
+    assert adapter.receive_event(connection, event)
+    assert stage.stimuli[1].media_ref == stimulus.media_ref
+    await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_image_persistence_conflict_prevents_stimulus_delivery(tmp_path):
+    _, connection, adapter, stage = await setup_output(WebSocketAdapter({
+        "media_store": {"root": str(tmp_path / "media")},
+    }))
+    common = {"mime_type": "image/png"}
+    first = WSMessage(event_type="user_image", client_msg_id="same", payload={
+        **common, "image_base64": base64.b64encode(b"first").decode("ascii")})
+    conflict = WSMessage(event_type="user_image", client_msg_id="same", payload={
+        **common, "image_base64": base64.b64encode(b"other").decode("ascii")})
+
+    assert adapter.receive_event(connection, first)
+    with pytest.raises(ValueError, match="content conflict"):
+        adapter.receive_event(connection, conflict)
+    assert len(stage.stimuli) == 1
+    await adapter.disconnect(stage)
 
 
 @pytest.mark.asyncio

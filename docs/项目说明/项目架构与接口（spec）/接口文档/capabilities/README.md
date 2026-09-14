@@ -11,7 +11,15 @@
 - `wire_dependencies(...)`：注入数据库、模型和世界服务等依赖。
 - `ensure_dependencies()`：检查各能力是否可用。
 - `async stop()`：停止仍在运行的能力和后台资源。
-- 属性 `speech`、`singing`、`image_understanding`、`dynamics`、`diary`：取得具体能力对象。它们是当前事实接口，但会扩大耦合面，新增代码应优先通过 Agent 使用。
+- 属性 `speech`、`singing`、`image_understanding`、`media_resolver`、`dynamics`、`diary`：取得具体能力对象。它们是当前事实接口，但会扩大耦合面，新增代码应优先通过 Agent 使用。
+
+### `MediaResolver`
+
+- 端口位于 `server/src/capabilities/media_resolution/`；`resolve(media_ref: MediaRef) -> ResolvedMedia` 只接受名义 `media_id`，返回 `ResolvedMedia(data: bytes, mime_type: str)`，不把本地路径、URL、凭据或供应商对象送入 Agent。
+- `ResolvedMedia` 是不可变值；解析是只读、可重复的操作。AgentRuntime 只把该窄端口注入图片认知技能，Handler 不直接访问 CapabilityManager、SystemRuntime 或存储。
+- `FilesystemMediaResolver` 从配置的永久媒体根目录读取 `<media_id>/content.bin` 和 `metadata.json`；只接受 UUID 形式的 media_id，拒绝未知、空内容、非图片 MIME、损坏元数据和路径穿越。媒体引用永久有效，没有 TTL、过期或清理状态。
+- `UnconfiguredMediaResolver` 仍是缺省实现：`ensure_dependencies()` 是无操作，`resolve()` 稳定抛出 `MEDIA_RESOLVER_NOT_CONFIGURED`，不会把缺少存储配置伪装成空内容成功。
+- 当前错误分类为 `MEDIA_UNKNOWN`、`MEDIA_UNAUTHORIZED`、`MEDIA_EMPTY` 与 `MEDIA_UNSUPPORTED_TYPE`；图片技能在调用 VLM 前拒绝空内容和非 `image/*` MIME。
 
 ### `SpeechCapability`
 
@@ -49,6 +57,7 @@
 - 动态和日记能力会写数据库或调用外部平台，调用方必须把“生成成功”和“发布成功”区分开。
 - `sing` 返回 `None` 表示没有可用音频；模型、网络、配置或资源错误可能抛出异常。
 - `say_stream` 的错误可能在迭代期间发生。
+- MediaResolver 未配置、引用未知/未授权、内容为空或 MIME 非图片时明确失败；失败不进入图片理解能力。
 - 停机时应调用 `CapabilityManager.stop()`，避免遗留后台任务和模型资源。
 
 ## 使用示例
@@ -60,6 +69,14 @@
 - 语音成功、初始化失败、流式生成中断分别产生明确结果。
 - 不可演唱歌曲返回 `None`，可演唱歌曲返回非空音频且歌词查询与片段一致。
 - 同一日记来源重复调用不会重复发布；生成成功但发布失败时返回失败和原因。
+- MediaResolver 的未配置、未知、未授权、空内容和非图片 MIME 均为稳定失败，且 VLM 不应在解析/校验失败后执行。
+
+## 尚未解决的媒体存储策略
+
+- 授权主体尚未选择：按用户、角色、二者组合或全局校验仍待书面决策。
+- 大文件分块、大小限制和解析/理解超时上限尚未确定。
+- 图片与语音是否长期复用同一解析端口尚未确定；当前没有接入 ASR。
+- 已决定媒体永久保存且引用不失效；不执行 TTL、过期或自动清理。生产配置缺少媒体根目录时图片输入会明确失败，不产生不可解析的引用。
 
 ## 当前导出注意事项
 
