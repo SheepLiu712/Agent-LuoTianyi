@@ -32,9 +32,18 @@ class ImagePreprocessingSkill:
         self._media_resolver = media_resolver
         self._understanding = understanding
 
-    async def understand(self, media_ref: MediaRef) -> tuple[ResolvedMedia, str]:
+    async def understand(
+        self,
+        media_ref: MediaRef,
+        *,
+        owner_user_id: str,
+    ) -> tuple[ResolvedMedia, str]:
         """返回已解析媒体和非空机器描述；非法媒体不会进入视觉能力。"""
-        media = await asyncio.to_thread(self._media_resolver.resolve, media_ref)
+        media = await asyncio.to_thread(
+            self._media_resolver.resolve,
+            media_ref,
+            owner_user_id=owner_user_id,
+        )
         self._validate(media_ref, media)
         encoded = base64.b64encode(media.data).decode("ascii")
         description = await self._understanding.describe_image(

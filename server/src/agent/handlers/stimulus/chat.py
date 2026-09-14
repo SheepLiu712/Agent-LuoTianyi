@@ -6,7 +6,12 @@ from uuid import uuid4
 from typing_extensions import assert_never
 
 import src.domain.agent as d
-from src.agent.context.models import ConversationEntry, ImageContent, SongContent, TextContent
+from src.agent.context.models import (
+    ConversationEntry,
+    ImageContent,
+    SongContent,
+    TextContent,
+)
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.cognitive import (
     ImagePreprocessingSkill,
@@ -60,7 +65,13 @@ class ChatPreprocessingHandler:
             case d.ImageMessage():
                 if self._image_understanding is None:
                     raise RuntimeError("Image preprocessing skill is not configured")
-                media, description = await self._image_understanding.understand(stimulus.media_ref)
+                owner_user_id = request.interaction.user_id
+                if owner_user_id is None:
+                    raise RuntimeError("Image stimulus requires an authenticated user")
+                media, description = await self._image_understanding.understand(
+                    stimulus.media_ref,
+                    owner_user_id=owner_user_id,
+                )
                 machine_text = f"[图片理解]: {description}"
                 terms = self._text_understanding.extract_terms(machine_text)
                 media_entry = ConversationEntry(

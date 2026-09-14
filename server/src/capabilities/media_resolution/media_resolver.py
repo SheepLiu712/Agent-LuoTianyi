@@ -20,6 +20,7 @@ class MediaResolutionErrorCode(str, Enum):
     UNAUTHORIZED = "MEDIA_UNAUTHORIZED"
     EMPTY = "MEDIA_EMPTY"
     UNSUPPORTED_TYPE = "MEDIA_UNSUPPORTED_TYPE"
+    TOO_LARGE = "MEDIA_TOO_LARGE"
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ class MediaResolutionError(Exception):
 class MediaResolver(Protocol):
     """只读、幂等地解析受控媒体引用。"""
 
-    def resolve(self, media_ref: MediaRef) -> ResolvedMedia: ...
+    def resolve(self, media_ref: MediaRef, *, owner_user_id: str) -> ResolvedMedia: ...
 
 
 class UnconfiguredMediaResolver:
@@ -53,7 +54,7 @@ class UnconfiguredMediaResolver:
     def __init__(self, config: dict | None = None) -> None:
         self._config = dict(config or {})
 
-    def resolve(self, media_ref: MediaRef) -> ResolvedMedia:
+    def resolve(self, media_ref: MediaRef, *, owner_user_id: str) -> ResolvedMedia:
         """拒绝解析，避免把缺省能力伪装成空媒体成功。"""
         raise MediaResolutionError(
             code=MediaResolutionErrorCode.NOT_CONFIGURED,
@@ -73,20 +74,14 @@ class FilesystemMediaResolver:
             raise ValueError("media_resolution.root must be a non-empty path")
         self._root = Path(root).resolve()
 
-    def resolve(self, media_ref: MediaRef) -> ResolvedMedia:
+    def resolve(self, media_ref: MediaRef, *, owner_user_id: str) -> ResolvedMedia:
         """读取完整媒体；未知、空内容、非图片或非法 ID 均稳定失败。"""
         media_dir = self._media_dir(media_ref)
-        content_path = media_dir / "content.bin"
         metadata_path = media_dir / "metadata.json"
-        if not content_path.is_file() or not metadata_path.is_file():
+        content_path = media_dir / "content.bin"
+        if not metadata_path.is_file() or not content_path.is_file():
             raise MediaResolutionError(
                 code=MediaResolutionErrorCode.UNKNOWN,
-                media_id=media_ref.media_id,
-            )
-        data = content_path.read_bytes()
-        if not data:
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.EMPTY,
                 media_id=media_ref.media_id,
             )
         try:
@@ -96,12 +91,43 @@ class FilesystemMediaResolver:
                 code=MediaResolutionErrorCode.UNKNOWN,
                 media_id=media_ref.media_id,
             ) from None
-        mime_type = metadata.get("mime_type") if isinstance(metadata, dict) else None
+        if not isinstance(metadata, dict):
+            raise MediaResolutionError(
+                code=MediaResolutionErrorCode.UNKNOWN,
+                media_id=media_ref.media_id,
+            )
+        stored_owner = metadata.get("owner_user_id")
+        if not isinstance(stored_owner, str) or not stored_owner.strip():
+            raise MediaResolutionError(
+                code=MediaResolutionErrorCode.UNKNOWN,
+                media_id=media_ref.media_id,
+            )
+        if stored_owner != owner_user_id:
+            raise MediaResolutionError(
+                code=MediaResolutionErrorCode.UNAUTHORIZED,
+                media_id=media_ref.media_id,
+            )
+        mime_type = metadata.get("mime_type")
         if not isinstance(mime_type, str) or not mime_type.startswith("image/"):
             raise MediaResolutionError(
                 code=MediaResolutionErrorCode.UNSUPPORTED_TYPE,
                 media_id=media_ref.media_id,
             )
+        try:
+            data = content_path.read_bytes()
+        except OSError:
+            raise MediaResolutionError(
+                code=MediaResolutionErrorCode.UNKNOWN,
+                media_id=media_ref.media_id,
+            ) from None
+        if not data:
+            raise MediaResolutionError(
+                code=MediaResolutionErrorCode.EMPTY,
+                media_id=media_ref.media_id,
+            )
+        from .image_validation import validate_image_content
+
+        validate_image_content(data, mime_type, media_ref.media_id)
         return ResolvedMedia(data=data, mime_type=mime_type)
 
     def ensure_dependencies(self) -> None:

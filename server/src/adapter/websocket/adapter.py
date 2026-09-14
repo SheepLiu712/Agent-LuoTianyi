@@ -13,7 +13,7 @@ from src.system.user_interface.types import WSMessage
 from src.utils.owned_operation import complete_owned
 
 from ._delivery import _ConnectionDelivery, _DeliveryConfig, completion
-from ._input import _INPUT_EVENTS, convert_input
+from ._input import _INPUT_EVENTS, materialize_image, prepare_input
 
 if TYPE_CHECKING:
     from src.stage.chat_stage import ChatStage
@@ -67,16 +67,17 @@ class WebSocketAdapter:
             raise d.SinkRejectedError("unsupported output", code=d.SinkRejectionCode.UNSUPPORTED_OUTPUT)
         return delivery.submit(output)
 
-    def receive_event(self, connection: WebSocketConnection, event: WSMessage) -> bool:
+    async def receive_event(self, connection: WebSocketConnection, event: WSMessage) -> bool:
         """将已认证业务 event 转为刺激并交给已绑定 Stage；全部目标可接收才投递，否则返回 False。"""
         if connection.is_closed or not connection.user_uuid:
             raise ValueError("authenticated live connection required")
-        stimulus = convert_input(
+        candidate = prepare_input(
             event,
             connection.user_uuid,
             self._default_character_id,
             self._media_store,
         )
+        stimulus = candidate.stimulus
         stages = {binding.stage.character_id: binding.stage for binding in self._routes.values()
                   if binding.connection is connection}
         if any(target not in stages for target in stimulus.target_character_ids):
@@ -85,6 +86,10 @@ class WebSocketAdapter:
         # 同一事件循环内检查与入队之间无 await，避免多角色部分接收。
         if not all(sink.can_accept(stimulus) for sink in sinks):
             return False
+        if candidate.image_base64 is not None:
+            if self._media_store is None:
+                raise ValueError("media store is not configured")
+            await asyncio.to_thread(materialize_image, candidate, self._media_store)
         for sink in sinks:
             sink.submit(stimulus)
         return True

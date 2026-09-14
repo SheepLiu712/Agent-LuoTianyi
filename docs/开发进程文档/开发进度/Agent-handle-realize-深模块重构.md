@@ -15,7 +15,14 @@
 - 永久性、顺序与失败：媒体目录无 TTL、过期或自动清理；resolver 拒绝未知、空内容、非图片 MIME、损坏元数据和路径穿越。对话事实时间按 Stage 接收 revision 排序，图片内部媒体先于机器描述；新 context 持久化使用带微秒 ISO 时间，旧链路可继续写秒级格式。`datetime.fromisoformat` 和已修订的旧展示格式化器兼容两种格式，因此 DB/context 读取保持 A/B。失败在 VLM 前退出，不消费、不阻塞后续文本，也不回滚既有事实。
 - interface spec：[`capabilities/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/capabilities/README.md) 已记录端口、稳定失败和未决存储策略；[`system/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/system/README.md) 已记录 `capabilities.media_resolution` 装配事实。
 - 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent tests/stage tests/domain tests/adapter -q` 为 **718 passed**（2 条既有依赖弃用 warning）；新增 adapter/resolver/时间格式聚焦测试为 **36 passed**。触及文件 Ruff 与 `git diff --check` 通过；08 链既有 agent/stage/domain/adapter 测试未修改且继续通过。
-- 未决与未验证：仍未选择持久化时的授权主体、大小/分块、解析/理解超时及图片/语音端口长期复用策略；未实现 ASR。未运行真实 VLM、生产目录权限/磁盘耗尽、生产数据库、客户端/真机、GPU 或完整 Server 外部链路。
+- 未决与未验证：授权主体已在下述审查修复中收敛为认证上传用户；仍未决定大文件分块、解析/理解超时及图片/语音端口长期复用策略，未实现 ASR。未运行真实 VLM、生产目录权限/磁盘耗尽、生产数据库、客户端/真机、GPU 或完整 Server 外部链路。
+
+#### 2026-09-15 对抗审查修复（09）
+
+- 授权边界：此前提案把授权主体留作未决；本轮按 Issue #68 的越权拒绝要求建立保守默认——媒体归认证上传用户所有。metadata 持久 `owner_user_id`，principal-scoped resolver 要求当前 `owner_user_id`，跨用户在读取字节和 VLM 前返回 `MEDIA_UNAUTHORIZED`。
+- 准入与限制：Adapter 先解析信封并创建窄引用候选，验证所有目标 Stage 存在且 `can_accept` 后才物化图片；`max_encoded_bytes` 在 base64 解码前检查，`max_bytes` 在永久写入前检查，超限为 `MEDIA_TOO_LARGE` 且无最终目录。解码、Pillow 完整验证和文件 I/O 经 `asyncio.to_thread` 离开事件循环。
+- 原子与内容：永久写入使用唯一 staging 目录，完整写入后单次目录 rename 发布；并发重放相同内容复用，冲突拒绝，残缺/损坏目录稳定为 `MEDIA_UNKNOWN`。存储与 resolver 都用 Pillow 完整解码，坏图片为 `MEDIA_UNKNOWN`，实际格式与声明 MIME 不一致为 `MEDIA_UNSUPPORTED_TYPE`。
+- 验证：聚焦授权/准入/线程/原子/内容及既有 Stage 用例 `python -m pytest tests/agent/test_media_resolution.py tests/agent/test_chat_preprocessing.py tests/adapter/test_websocket_adapter.py tests/stage/test_chat_stage.py tests/stage/test_concurrent_handling.py -q` 为 **73 passed**；完整 `python -m pytest tests/agent tests/stage tests/domain tests/adapter -q` 为 **726 passed**、2 条既有依赖弃用 warning。新媒体模块全规则 Ruff、触及旧文件的 import/undefined-name Ruff 及 `git diff --check` 通过。未验证真实 VLM、生产磁盘故障/权限、跨进程崩溃注入和客户端真机。
 
 ### 2026-09-14 批次回复的演唱决定接入（08c-2）GREEN
 

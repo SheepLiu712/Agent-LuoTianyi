@@ -1,5 +1,6 @@
 """受控媒体引用解析端口。"""
 
+from .image_validation import validate_image_content
 from .media_resolver import (
     FilesystemMediaResolver,
     MediaResolutionError,
@@ -18,4 +19,5 @@ __all__ = [
     "PermanentMediaStore",
     "ResolvedMedia",
     "UnconfiguredMediaResolver",
+    "validate_image_content",
 ]

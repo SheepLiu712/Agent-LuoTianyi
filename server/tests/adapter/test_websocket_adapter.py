@@ -4,11 +4,14 @@ import base64
 import io
 import json
 import wave
+from io import BytesIO
+from threading import get_ident
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, WebSocket
 from fastapi.testclient import TestClient
+from PIL import Image
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
@@ -16,6 +19,10 @@ from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.skills.expression.speaking import SpeakingSkill
+from src.capabilities.media_resolution import (
+    MediaResolutionError,
+    MediaResolutionErrorCode,
+)
 from src.capabilities.speech.streaming import AsyncTTS
 from src.domain.stage import (
     AgentPresentationChanged,
@@ -101,6 +108,12 @@ def wav_bytes():
     with wave.open(stream, "wb") as audio:
         audio.setparams((1, 2, 24000, 0, "NONE", "not compressed"))
         audio.writeframes(b"\x00\x01" * 60000)
+    return stream.getvalue()
+
+
+def png_bytes():
+    stream = BytesIO()
+    Image.new("RGB", (1, 1)).save(stream, format="PNG")
     return stream.getvalue()
 
 
@@ -301,15 +314,15 @@ async def test_input_targets_are_atomic_and_use_authenticated_identity():
     event = WSMessage(event_type="user_text", client_msg_id="one", payload={"text": "你好",
                       "target_character_ids": ["luotianyi", "miku"], "user_id": "forged"})
     other.available = False
-    assert not adapter.receive_event(connection, event)
+    assert not await adapter.receive_event(connection, event)
     assert not stage.stimuli and not other.stimuli
     other.available = True
-    assert adapter.receive_event(connection, event)
+    assert await adapter.receive_event(connection, event)
     assert stage.stimuli[0] is other.stimuli[0]
     assert stage.stimuli[0].user_id == "user"
     assert stage.stimuli[0].occurred_at.tzinfo is not None
     with pytest.raises(ValueError):
-        adapter.receive_event(connection, WSMessage(event_type="user_text", client_msg_id="bad", payload={"text": "hi", "target_character_ids": ["missing"]}))
+        await adapter.receive_event(connection, WSMessage(event_type="user_text", client_msg_id="bad", payload={"text": "hi", "target_character_ids": ["missing"]}))
     for endpoint in (stage, other):
         await adapter.disconnect(endpoint)
 
@@ -319,7 +332,7 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
     _, connection, adapter, stage = await setup_output(WebSocketAdapter({
         "media_store": {"root": str(tmp_path / "media")},
     }))
-    image = b"permanent-image"
+    image = png_bytes()
     event = WSMessage(
         event_type="user_image",
         client_msg_id="image-one",
@@ -330,7 +343,7 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
         },
     )
 
-    assert adapter.receive_event(connection, event)
+    assert await adapter.receive_event(connection, event)
 
     stimulus = stage.stimuli[0]
     assert isinstance(stimulus, d.ImageMessage)
@@ -340,8 +353,9 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
     assert (media_dir / "content.bin").read_bytes() == image
     assert json.loads((media_dir / "metadata.json").read_text(encoding="utf-8")) == {
         "mime_type": "image/png",
+        "owner_user_id": "user",
     }
-    assert adapter.receive_event(connection, event)
+    assert await adapter.receive_event(connection, event)
     assert stage.stimuli[1].media_ref == stimulus.media_ref
     await adapter.disconnect(stage)
 
@@ -352,15 +366,103 @@ async def test_image_persistence_conflict_prevents_stimulus_delivery(tmp_path):
         "media_store": {"root": str(tmp_path / "media")},
     }))
     common = {"mime_type": "image/png"}
+    first_image = png_bytes()
+    other_image = BytesIO()
+    Image.new("RGB", (2, 1)).save(other_image, format="PNG")
     first = WSMessage(event_type="user_image", client_msg_id="same", payload={
-        **common, "image_base64": base64.b64encode(b"first").decode("ascii")})
+        **common, "image_base64": base64.b64encode(first_image).decode("ascii")})
     conflict = WSMessage(event_type="user_image", client_msg_id="same", payload={
-        **common, "image_base64": base64.b64encode(b"other").decode("ascii")})
+        **common, "image_base64": base64.b64encode(other_image.getvalue()).decode("ascii")})
 
-    assert adapter.receive_event(connection, first)
+    assert await adapter.receive_event(connection, first)
     with pytest.raises(ValueError, match="content conflict"):
-        adapter.receive_event(connection, conflict)
+        await adapter.receive_event(connection, conflict)
     assert len(stage.stimuli) == 1
+    await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_image_is_not_materialized_when_target_is_missing_or_overloaded(tmp_path):
+    root = tmp_path / "media"
+    _, connection, adapter, stage = await setup_output(WebSocketAdapter({
+        "media_store": {"root": str(root), "max_bytes": 1024},
+    }))
+    encoded = base64.b64encode(png_bytes()).decode("ascii")
+    missing = WSMessage(event_type="user_image", client_msg_id="missing", payload={
+        "image_base64": encoded, "mime_type": "image/png", "target_character_ids": ["miku"],
+    })
+    with pytest.raises(ValueError, match="not bound"):
+        await adapter.receive_event(connection, missing)
+    stage.available = False
+    overloaded = WSMessage(event_type="user_image", client_msg_id="overloaded", payload={
+        "image_base64": encoded, "mime_type": "image/png",
+    })
+    assert not await adapter.receive_event(connection, overloaded)
+    assert not list(root.iterdir())
+    await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_oversize_and_invalid_image_are_rejected_without_persistence(tmp_path):
+    root = tmp_path / "media"
+    _, connection, adapter, stage = await setup_output(WebSocketAdapter({
+        "media_store": {"root": str(root), "max_bytes": 32},
+    }))
+    oversize = WSMessage(event_type="user_image", client_msg_id="large", payload={
+        "image_base64": base64.b64encode(b"x" * 33).decode("ascii"), "mime_type": "image/png",
+    })
+    with pytest.raises(MediaResolutionError) as too_large:
+        await adapter.receive_event(connection, oversize)
+    assert too_large.value.code is MediaResolutionErrorCode.TOO_LARGE
+    invalid = WSMessage(event_type="user_image", client_msg_id="invalid", payload={
+        "image_base64": base64.b64encode(b"not an image").decode("ascii"), "mime_type": "image/png",
+    })
+    with pytest.raises(MediaResolutionError) as invalid_image:
+        await adapter.receive_event(connection, invalid)
+    assert invalid_image.value.code is MediaResolutionErrorCode.UNKNOWN
+    assert not list(root.iterdir())
+    await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_mime_mismatch_is_rejected_before_persistence(tmp_path):
+    root = tmp_path / "media"
+    _, connection, adapter, stage = await setup_output(WebSocketAdapter({
+        "media_store": {"root": str(root), "max_bytes": 1024},
+    }))
+    event = WSMessage(event_type="user_image", client_msg_id="mismatch", payload={
+        "image_base64": base64.b64encode(png_bytes()).decode("ascii"), "mime_type": "image/jpeg",
+    })
+
+    with pytest.raises(MediaResolutionError) as mismatch:
+        await adapter.receive_event(connection, event)
+    assert mismatch.value.code is MediaResolutionErrorCode.UNSUPPORTED_TYPE
+
+    assert not list(root.iterdir())
+    await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_image_persistence_runs_off_event_loop_thread(tmp_path, monkeypatch):
+    _, connection, adapter, stage = await setup_output(WebSocketAdapter({
+        "media_store": {"root": str(tmp_path / "media"), "max_bytes": 1024},
+    }))
+    event_loop_thread = get_ident()
+    observed_threads = []
+    original = adapter._media_store.persist_image
+
+    def record_thread(**kwargs):
+        observed_threads.append(get_ident())
+        return original(**kwargs)
+
+    monkeypatch.setattr(adapter._media_store, "persist_image", record_thread)
+    event = WSMessage(event_type="user_image", client_msg_id="thread", payload={
+        "image_base64": base64.b64encode(png_bytes()).decode("ascii"), "mime_type": "image/png",
+    })
+
+    assert await adapter.receive_event(connection, event)
+
+    assert observed_threads and observed_threads[0] != event_loop_thread
     await adapter.disconnect(stage)
 
 
@@ -370,15 +472,15 @@ async def test_service_dedup_overload_typing_and_maintenance_bypass():
     service = WebSocketService()
     event = WSMessage(event_type="user_typing", client_msg_id="typing", payload={"text_length": 4})
     stage.available = False
-    assert service.try_accept_stimulus_event(connection, event, adapter=adapter) is ChatEventAcceptance.OVERLOADED
+    assert await service.try_accept_stimulus_event(connection, event, adapter=adapter) is ChatEventAcceptance.OVERLOADED
     stage.available = True
-    assert service.try_accept_stimulus_event(connection, event, adapter=adapter) is ChatEventAcceptance.ACCEPTED
-    assert service.try_accept_stimulus_event(connection, event, adapter=adapter) is ChatEventAcceptance.DUPLICATE
+    assert await service.try_accept_stimulus_event(connection, event, adapter=adapter) is ChatEventAcceptance.ACCEPTED
+    assert await service.try_accept_stimulus_event(connection, event, adapter=adapter) is ChatEventAcceptance.DUPLICATE
     assert len(stage.stimuli) == 1 and isinstance(stage.stimuli[0], d.UserTyping)
     assert stage.stimuli[0].text_length == 4
     bad = WSMessage(event_type="user_typing", client_msg_id="bad", payload={"text_length": True})
-    assert service.try_accept_stimulus_event(connection, bad, adapter=adapter) is ChatEventAcceptance.BAD_MESSAGE
-    assert service.try_accept_stimulus_event(connection, WSMessage(event_type="heartbeat", payload={}), adapter=object()) is ChatEventAcceptance.UNSUPPORTED
+    assert await service.try_accept_stimulus_event(connection, bad, adapter=adapter) is ChatEventAcceptance.BAD_MESSAGE
+    assert await service.try_accept_stimulus_event(connection, WSMessage(event_type="heartbeat", payload={}), adapter=object()) is ChatEventAcceptance.UNSUPPORTED
     await adapter.disconnect(stage)
 
 
@@ -423,7 +525,7 @@ def test_real_fastapi_websocket_prepared_say(tmp_path):
         await adapter.bind(stage, connection)
         try:
             event = WSMessage(**await websocket.receive_json())
-            assert adapter.receive_event(connection, event)
+            assert await adapter.receive_event(connection, event)
             assert stage.stimuli[0].text == "你好"
             port = OutputPort(adapter)
             context = d.ExecutionContext(execution_id="execution", interaction_id="interaction",

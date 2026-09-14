@@ -173,7 +173,9 @@
             }
         },
         "media_resolution": {
-            "root": "data/media"
+            "root": "data/media",
+            "max_bytes": 6291456,
+            "max_encoded_bytes": 8388608
         },
         "dynamic": {
             "dynamic_composer": {

@@ -1,18 +1,22 @@
 """聊天 pipeline 的准备、聚合、取消、执行及维护流程。"""
 import asyncio
 from dataclasses import replace
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from test_chat_stage import RecordingAgent, cleanup, plan, report, setup, stimulus, take
+
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.handlers.stimulus.chat import (
+    ChatPreprocessingHandler,
+    ChatReflectionHandler,
+)
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler, ChatReflectionHandler
 from src.agent.processing.plan_emitter import ActionPlanDraft
 from src.agent.skills.cognitive import ImagePreprocessingSkill
 from src.capabilities.media_resolution import ResolvedMedia
-from test_chat_stage import setup, cleanup, stimulus, report, plan, take, RecordingAgent
 
 
 async def until(predicate):
@@ -73,7 +77,7 @@ async def test_slow_image_fast_text_preserve_order_and_wait_after_last_completio
 async def test_real_preprocessing_persists_slow_image_before_fast_text_in_read_order():
     gate = asyncio.Event()
     class Resolver:
-        def resolve(self, media_ref):
+        def resolve(self, media_ref, *, owner_user_id):
             return ResolvedMedia(data=b"image", mime_type="image/png")
     class Vision:
         async def describe_image(self, image_data_uri):
@@ -129,7 +133,7 @@ async def test_real_preprocessing_persists_slow_image_before_fast_text_in_read_o
 @pytest.mark.asyncio
 async def test_failed_real_image_preprocessing_drops_only_image_and_keeps_written_text(caplog):
     class Resolver:
-        def resolve(self, media_ref):
+        def resolve(self, media_ref, *, owner_user_id):
             raise RuntimeError("image failed")
     class Vision:
         async def describe_image(self, image_data_uri):

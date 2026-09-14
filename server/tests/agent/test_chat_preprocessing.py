@@ -29,8 +29,8 @@ class _Resolver:
         self.error = error
         self.refs = []
 
-    def resolve(self, media_ref):
-        self.refs.append(media_ref)
+    def resolve(self, media_ref, *, owner_user_id):
+        self.refs.append((media_ref, owner_user_id))
         if self.error is not None:
             raise self.error
         return self.media
@@ -137,7 +137,7 @@ async def test_image_retains_media_identity_and_separates_machine_description():
 
     report = await runtime.handle_stimulus(image_request(), Sink(), context=ctx)
 
-    assert resolver.refs == [d.MediaRef(media_id="image")]
+    assert resolver.refs == [(d.MediaRef(media_id="image"), "u")]
     assert understanding.calls == ["data:image/png;base64,aW1hZ2U="]
     assert [(entry.source, type(entry.content).__name__) for entry in ctx.conversation.entries] == [
         ("user", "ImageContent"), ("system", "TextContent")]
