@@ -9,6 +9,16 @@
 
 ## 已完成事实
 
+### 2026-09-14 真实聊天链路结算与取消验收（10）GREEN
+
+- 交付行为：新增 `tests/stage/test_chat_reply_settlement.py`，用真实 `Agent`（文本预处理 + 批次回复 + 反思 + SAY 执行）经真实 `ChatStage` 验证：(a) 文本批次经期限触发后完成「预处理→回复→执行→结算」，pending 清空且 `user`/`agent` 记录按序落库；(b) 回复执行在途时到达新内容，旧回复被取消并丢弃，新批次重新回复并最终结算。
+- interface spec：无新增或改变公开接口；本切片仅测试与测试夹具（假 context 的 `conversation` 补 `read()`）。
+- Red/Green：Issue #69 是验证工单，无新增运行时行为，记录为验证切片；不制造人工 Red。
+- commit 或 PR：分支 `feat/agent-10-settlement-verification`（堆叠在 08c 之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/stage/test_chat_reply_settlement.py -q` 为 2 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 832 passed、2 skipped。
+- 与 #69 验收项对照：取消（本切片真实链路覆盖）、部分消费（由既有 `tests/stage/test_concurrent_handling.py` 的按 ID 保留用例覆盖）、晚返回丢弃（由既有 stale deadline 用例覆盖）。本切片新增的是真实 handler 链路上的结算与取消证据。
+- 未验证范围：尚未接入生产路由（#66），未运行真实 LLM/TTS/GPU、真机或生产数据库。
+
 ### 2026-09-14 批次回复的演唱决定接入（08c-2）GREEN
 
 - 交付行为：`ChatReplyHandler` 在批次回复中执行演唱决定——用 `TextPreprocessingSkill.extract_terms` 从本批文本提取演唱尝试；从近期对话的 `SongContent` 记录推导「最近已唱片段」作为排除集；两者传入回复生成技能用于选择片段。生成演唱草稿时取回片段歌词并写入 `source=agent` 的 `SongContent` 记录（文本为「唱了《歌》+歌词」）。`ResponseCompositionSkill.compose` 新增 `excluded_segments` 参数并回填 `ReplyDraft.lyrics`。
