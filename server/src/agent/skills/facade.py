@@ -9,6 +9,7 @@ from src.capabilities.speech.streaming import AsyncTTS
 
 from .cognitive import TextPreprocessingSkill
 from .conversation.compaction import ConversationCompactionSkill
+from .expression.singing import SingingSkill
 
 if TYPE_CHECKING:
     from src.utils.llm_service import LLMService
@@ -20,8 +21,8 @@ class Skills:
     """持有一个 AgentRuntime 内所有角色共享的技能实例。"""
 
     def __init__(self, config: dict[str, Any], llm_service: LLMService, *, tts_engine: AsyncTTS,
-                 preprocessing_config: dict[str, Any] | None = None) -> None:
-        """按 config 的技能分组初始化实例，并派发 llm_service 和已初始化的 tts_engine。"""
+                 preprocessing_config: dict[str, Any] | None = None, singing: object = None) -> None:
+        """按 config 的技能分组初始化实例，并派发 llm_service、tts_engine 与演唱能力。"""
         if not isinstance(config, dict):
             raise TypeError("skills 必须是字典")
         self._skills: dict[type, object] = {
@@ -30,6 +31,7 @@ class Skills:
                 config.get("conversation_compaction", {}), llm_service,
             ),
             TextPreprocessingSkill: TextPreprocessingSkill(preprocessing_config),
+            SingingSkill: SingingSkill(config.get("singing", {}), singing),
         }
 
     def get(self, skill_type: type[SkillT]) -> SkillT:

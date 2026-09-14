@@ -5,8 +5,10 @@ from typing import Any, Dict, TYPE_CHECKING
 
 from src.agent.skills import Skills
 from src.agent.skills.cognitive import TextPreprocessingSkill
+from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.action.sing import SingHandler
 from src.capabilities.speech.streaming import AsyncTTS
 from src.domain.agent import ActionKind
 from src.resources.prepared_speech import PreparedSpeechResources
@@ -64,7 +66,8 @@ class AgentRuntime:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
             self.skills = Skills(self.config.get("skills", {}), llm_service,
                                  tts_engine=AsyncTTS(capability_manager.speech),
-                                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}))
+                                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
+                                 singing=capability_manager.singing)
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -101,8 +104,12 @@ class AgentRuntime:
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
                             StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),
                     ), reflection_handler=ChatReflectionHandler()),
-                    action_router=ActionRouter(((ActionKind.SAY, SayHandler(
-                        character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),)),
+                    action_router=ActionRouter((
+                        (ActionKind.SAY, SayHandler(
+                            character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
+                        (ActionKind.SING, SingHandler(
+                            character_id, self.skills.get(SingingSkill))),
+                    )),
                 )
                 for character_id in self.character_runtimes
             }

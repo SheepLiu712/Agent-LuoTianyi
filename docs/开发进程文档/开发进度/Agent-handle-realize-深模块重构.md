@@ -9,6 +9,16 @@
 
 ## 已完成事实
 
+### 2026-09-14 演唱行动 SING 渲染（08b）GREEN
+
+- 交付行为：注册 `ActionKind.SING` 的真实处理器 `SingHandler`。对既定的 `Sing(song_id, segment_id, expression)` 以 `CONVERSATION` 呈现方式输出「表情 → 完整音频块（`COMPLETE_FILE`）→ 消息结束（COMPLETED）」；片段不可用或无音频时输出 FAILED 终止包并返回 `AUDIO_EMPTY`，生成异常返回 `AUDIO_GENERATION_FAILED`，超时返回 `PROVIDER_TIMEOUT`。处理器不选择歌曲或片段、不恢复 `SONG_STATE`。
+- interface spec：无新增或扩大公开 interface；复用 `Sing`、`AudioChunkDraft`、`ExpressionDraft`、`MessageEndDraft`。新增内部技能 `SingingSkill`（`agent/skills/expression/singing.py`）包装 `SingingCapability.sing` 并在 executor 中调用，由 `Skills` 装配。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-08b-sing-handler`（堆叠在 08a 之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`（Python 3.10，pytest 9.1.1）。`python -m pytest tests/agent/test_singing.py -q` 为 5 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 826 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
+- 附带更新：`test_facade_contract.py::test_execution_preflight_rejects_whole_plan` 原以「SING 未注册」制造整计划拒绝，改为使用仍未实现的 `WRITE_DIARY` 保持同一语义；`tests/agent_runtime_support.py` 的 capability_manager 增加 singing 替身；`test_compaction_skill.py` 的 `Skills` 构造补 `singing`。
+- 未验证范围：未运行真实演唱音频、TTS、GPU、真机或生产数据库；歌曲/片段选择、最近已唱排除与歌词记录仍属 handle 侧（08c）；生产聊天仍走旧 ChatStream。
+
 ### 2026-09-14 文本预处理落库（08a）GREEN
 
 - 交付行为：`TextMessage` 经 `ChatPreprocessingHandler` 提取歌曲实体关键词，并借 `plans.context.conversation.append` 落库一条 `source=user` 的正式对话记录，返回 `PreprocessedInput.conversation_entry_ids`；本次不交付计划、不消费 pending。缺少 context 时返回 `FAILED / INTERNAL_ERROR`，不静默跳过落库。图片、语音、typing、选图与触摸仍保持占位行为。
