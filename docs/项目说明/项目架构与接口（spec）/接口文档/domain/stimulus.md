@@ -238,3 +238,39 @@ StimulusErrorCode = Literal[
 ## InteractionEnding
 
 `InteractionEnding` 是 Stage 终止交互前发送的可构造刺激，kind=INTERACTION_ENDING。除刺激公共字段外，携带 `reason: InteractionEndingReason`，取值 USER_LEFT 或 SHUTDOWN。它不进入交互快照的 pending_stimuli。
+
+## 目标接口（草案，待评审，未实现）
+
+以下为 Issue #79（20 每日规划与活动日程）所需的**目标** Stimulus 类型草案。当前 `DailyPlanningDue` 与活动类刺激是**拒绝构造的占位类型**（任意直接构造返回 `CONTRACT_STIMULUS_UNAVAILABLE`）；本草案给出候选契约，**未实现**，且 20 的范围本身待负责人确认（Issue #79 带 `question` 标签）。
+
+### 若范围选 A（仅每日规划）
+
+```python
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DailyPlanningDue(Stimulus):
+    kind: ClassVar[StimulusKind] = StimulusKind.DAILY_PLANNING_DUE
+    planning_cycle_id: str          # 非空
+    due_at: datetime                # 带时区
+    fact_refs: tuple[EvidenceRef, ...]
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ActivityDue(Stimulus):
+    kind: ClassVar[StimulusKind] = StimulusKind.ACTIVITY_DUE
+    activity_id: str
+    activity_revision: int          # 非负
+    due_at: datetime                # 带时区
+```
+
+- **字段约束**：时间为带时区；标识非空；引用为受控引用，不携带本地路径、URL 凭据或供应商对象。
+- **接口变化提示**：把占位类型改为可构造属**公开领域接口变化**。实现时需同时更新本页、[domain 索引](README.md) 的「22 类型 / 15 可构造」计数、`src.domain.agent.__init__` 导出与 `tests/domain` 契约测试。
+- **来源**：由 scheduler 到期投递；`ProactivePromptDue` / `InteractionDeadline` 不得被保存为 `future_stimulus`（见 [realization](realization.md) 的对象约束）。
+
+### 若范围选 B（含活动生命周期）
+
+再追加 `ActivityStarted` / `ActivityObservation` / `ActivityEnded` 等类型。**本轮明确不含** `UserJoinedActivity`、`ActivityInterrupted`（总 SPEC 明确不在本版）。
+
+### 未决问题
+
+1. 范围选 A、B 还是 C（不做）？
+2. 活动是否一律经 `WorldStage`（见 [stage 接口](../stage/README.md)）？
+3. 时间与时区语义（服务器本地 vs 角色时区）与 `planning_cycle_id` 生成规则。
