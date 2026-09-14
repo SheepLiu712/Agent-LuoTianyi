@@ -4,7 +4,7 @@ import asyncio
 from typing import Any, Dict, TYPE_CHECKING
 
 from src.agent.skills import Skills
-from src.agent.skills.cognitive import TextPreprocessingSkill
+from src.agent.skills.cognitive import ResponseCompositionSkill, TextPreprocessingSkill
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.handlers.action.say import SayHandler
@@ -82,6 +82,11 @@ class AgentRuntime:
                 database_manager=database_manager,
             )
 
+            self.skills.register(ResponseCompositionSkill, ResponseCompositionSkill(
+                self.config.get("reply_composition", {}),
+                lambda character_id: self.character_runtimes[character_id],
+            ))
+
             self.agent_registry = AgentRegistry(
                 self.config.get("agent_registry", {}),
                 self.character_registry,
@@ -98,7 +103,8 @@ class AgentRuntime:
                     character_id=character_id,
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
-                        (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
+                        (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
+                            self.skills.get(ResponseCompositionSkill))),
                         *((kind, ChatPreprocessingHandler(self.skills.get(TextPreprocessingSkill))) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,

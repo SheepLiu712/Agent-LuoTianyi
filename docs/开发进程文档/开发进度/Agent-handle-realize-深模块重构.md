@@ -9,6 +9,16 @@
 
 ## 已完成事实
 
+### 2026-09-14 到期批次回复生成与落库（08c-1）GREEN
+
+- 交付行为：`InteractionDeadline` 批次的 `ChatReplyHandler` 从 `prepared_inputs` 组装回复话题、渲染近期历史，经回复生成技能召回记忆并生成回复草稿，按接收顺序交付一个 `ActionPlan`（有序 `Say`/`Sing` 行动），并落库对应的 `source=agent` 正式对话记录；报告按 ID 消费本批（`consumed` 等于本批 pending）。
+- interface spec：无新增或扩大公开 interface；复用 `ActionPlanDraft`、`Say`、`Sing`、`PreprocessedInput` 与 `context.conversation.append`。新增内部技能 `ResponseCompositionSkill`（`agent/skills/cognitive/response_composition.py`），包装 `mind.search_memory_context_for_topic`、`mind.build_sing_plan_for_topic` 与 `conscious.generate_topic_reply_for_pipeline`；`Skills` 新增内部 `register()` 以装配需要运行时依赖的技能。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-08c-reply-composition`（堆叠在 08b 之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent/test_chat_reply.py -q` 为 3 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 829 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
+- 明确不包含（留待 08c-2）：本切片未接入「提取/注意力选择」——旧 `extract_topics`/`plan_topic_turn` 依赖 `UnreadMessage`/`ExtractedTopic`，而 SPEC A7 禁止新调用方依赖这些旧类型；因此本切片以「整批作为一个回复话题」生成。`sing_attempts` 暂传空、最近已唱排除与歌词记录未接入。
+- 未验证范围：未运行真实 LLM/TTS/GPU、真机或生产数据库；生产聊天仍走旧 ChatStream。
+
 ### 2026-09-14 演唱行动 SING 渲染（08b）GREEN
 
 - 交付行为：注册 `ActionKind.SING` 的真实处理器 `SingHandler`。对既定的 `Sing(song_id, segment_id, expression)` 以 `CONVERSATION` 呈现方式输出「表情 → 完整音频块（`COMPLETE_FILE`）→ 消息结束（COMPLETED）」；片段不可用或无音频时输出 FAILED 终止包并返回 `AUDIO_EMPTY`，生成异常返回 `AUDIO_GENERATION_FAILED`，超时返回 `PROVIDER_TIMEOUT`。处理器不选择歌曲或片段、不恢复 `SONG_STATE`。

@@ -1,11 +1,12 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
+from dataclasses import replace
 from datetime import datetime
 from uuid import uuid4
 
 import src.domain.agent as d
-from src.agent.context.models import ConversationEntry, TextContent
-from src.agent.processing.plan_emitter import PlanEmitter
-from src.agent.skills.cognitive import TextPreprocessingSkill
+from src.agent.context.models import ConversationEntry, SongContent, TextContent
+from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
+from src.agent.skills.cognitive import ResponseCompositionSkill, TextPreprocessingSkill
 from src.utils.enum_type import ConversationSource
 
 
@@ -49,12 +50,76 @@ class ChatPreprocessingHandler:
         return _report(request, prepared=prepared)
 
 
+def _render_history(snapshot) -> str:
+    """把已压缩总结与近期对话渲染成生成提示使用的历史文本。"""
+    lines = []
+    if snapshot.summary.text:
+        lines.append(snapshot.summary.text)
+    lines.extend(f"{entry.source}: {entry.content.text}" for entry in snapshot.entries)
+    return "\n".join(lines)
+
+
+def _reply_actions(request: d.HandleStimulusRequest, drafts) -> tuple[d.Action, ...]:
+    """把回复草稿按序转成 Say/Sing 行动；空白且演唱的草稿被丢弃。"""
+    actions: list[d.Action] = []
+    for index, draft in enumerate(drafts):
+        action_id = f"{request.request_id}-r{index}"
+        expression = d.ChangeExpression(expression_id=draft.expression) if draft.expression else None
+        if draft.sing is not None:
+            actions.append(d.Sing(action_id=action_id, song_id=draft.sing[0],
+                                  segment_id=draft.sing[1], expression=expression))
+        elif draft.content.strip():
+            actions.append(d.Say(action_id=action_id, content=draft.content,
+                                 sound_content=draft.sound_content or None, prepared_audio_ref=None,
+                                 tone=d.Tone(value=draft.tone or "normal"), expression=expression,
+                                 delivery=d.OutputDelivery.CONVERSATION))
+    return tuple(actions)
+
+
+def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
+    """把回复草稿转成 agent 侧正式对话记录。"""
+    entries: list[ConversationEntry] = []
+    for draft in drafts:
+        if draft.sing is not None:
+            song, segment = draft.sing
+            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
+                source=ConversationSource.AGENT.value,
+                content=SongContent(f"唱了《{song}》", song, segment)))
+        elif draft.content.strip():
+            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
+                source=ConversationSource.AGENT.value, content=TextContent(draft.content)))
+    return tuple(entries)
+
+
 class ChatReplyHandler:
-    """超时触发的批次回复占位；当前消费本批输入，不生成回复内容。"""
+    """到期批次回复：生成回复、落库并交付有序 Say/Sing 计划。"""
+
+    def __init__(self, composition: ResponseCompositionSkill) -> None:
+        """注入回复生成技能；不负责歌曲/片段的最终校验与播放。"""
+        self._composition = composition
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
-        """结算 request 的整批输入；注意力选择与回复生成逻辑尚未接入。"""
-        return _report(request, consume=True)
+        """按接收顺序把整批输入作为一次回复：召回→生成→落库→交付计划，并按 ID 消费。"""
+        pending = tuple(s.stimulus_id for s in request.interaction.pending_stimuli)
+        reply_topic = "\n".join(
+            item.text.strip() for item in request.prepared_inputs if item.text and item.text.strip())
+        drafts: tuple = ()
+        if reply_topic:
+            identity = plans.context.identity
+            plans.set_interruptible(True)
+            drafts = await self._composition.compose(
+                character_id=identity.character_id, user_id=identity.user_id,
+                reply_topic=reply_topic,
+                conversation_history=_render_history(plans.context.conversation.read()),
+                memory_queries=(reply_topic,), sing_attempts=())
+            plans.set_interruptible(False)
+        actions = _reply_actions(request, drafts)
+        if actions:
+            entries = _reply_entries(drafts)
+            if entries:
+                await plans.context.conversation.append(entries)
+            await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=actions))
+        return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
 
 
 class ChatReflectionHandler:

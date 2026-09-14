@@ -39,3 +39,9 @@ class Skills:
         if not isinstance(skill_type, type):
             raise TypeError("skill_type 应为技能类型")
         return cast(SkillT, self._skills[skill_type])
+
+    def register(self, skill_type: type[SkillT], instance: SkillT) -> None:
+        """注册或替换一个共享技能实例，供需要运行时装配的依赖使用。"""
+        if not isinstance(skill_type, type):
+            raise TypeError("skill_type 应为技能类型")
+        self._skills[skill_type] = instance
