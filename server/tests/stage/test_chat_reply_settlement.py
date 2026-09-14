@@ -26,6 +26,19 @@ class _Understanding:
         return ()
 
 
+class _NoReflection:
+    async def consolidate_memories(self, **kwargs):
+        return {}
+
+    async def update_profile(self, **kwargs):
+        return None
+
+
+class _NoCompaction:
+    async def compact(self, conversation_context):
+        return None
+
+
 class _Composer:
     def __init__(self, drafts):
         self.drafts = drafts
@@ -54,7 +67,7 @@ def build_agent(composer, execute):
         (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding())),
         (d.StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(composer, _Understanding())),
         (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())],
-        reflection_handler=ChatReflectionHandler()),
+        reflection_handler=ChatReflectionHandler(_NoReflection(), _NoCompaction())),
         action_router=ActionRouter([(d.ActionKind.SAY, execute)]))
 
 

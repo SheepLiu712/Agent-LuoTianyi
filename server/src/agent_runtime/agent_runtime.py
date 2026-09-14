@@ -5,6 +5,8 @@ from typing import Any, Dict, TYPE_CHECKING
 
 from src.agent.skills import Skills
 from src.agent.skills.cognitive import ResponseCompositionSkill, TextPreprocessingSkill
+from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.reflection import ReflectionSkill
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.handlers.action.say import SayHandler
@@ -86,6 +88,10 @@ class AgentRuntime:
                 self.config.get("reply_composition", {}),
                 lambda character_id: self.character_runtimes[character_id],
             ))
+            self.skills.register(ReflectionSkill, ReflectionSkill(
+                self.config.get("reflection", {}),
+                lambda character_id: self.character_runtimes[character_id],
+            ))
 
             self.agent_registry = AgentRegistry(
                 self.config.get("agent_registry", {}),
@@ -110,7 +116,9 @@ class AgentRuntime:
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
                             StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),
-                    ), reflection_handler=ChatReflectionHandler()),
+                    ), reflection_handler=ChatReflectionHandler(
+                        self.skills.get(ReflectionSkill),
+                        self.skills.get(ConversationCompactionSkill))),
                     action_router=ActionRouter((
                         (ActionKind.SAY, SayHandler(
                             character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
