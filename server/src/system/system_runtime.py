@@ -2,25 +2,31 @@
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Final
 
-from src.agent_runtime import AgentRuntime
 from src.adapter.websocket import WebSocketAdapter
-from src.stage import StageManager
+from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.capabilities import CapabilityManager
 from src.chat_session import ChatSessionManager
 from src.chat_session import chat_stream_manager as chat_stream_manager_module
+from src.domain.stage import StageState
+from src.stage import StageManager, WorldStage
 from src.system.database import DatabaseManager, set_default_database_manager
 from src.system.observability import ObservabilityService, set_observability_service
 from src.system.user_interface import UserInterface
-from src.utils.llm_service import LLMService
 from src.utils.llm.client_llm_executor import ClientLLMExecutor
-from src.utils.logger import get_logger, install_observability_log_handler, uninstall_observability_log_handler
+from src.utils.llm_service import LLMService
+from src.utils.logger import (
+    get_logger,
+    install_observability_log_handler,
+    uninstall_observability_log_handler,
+)
 from src.world import WorldRuntime
 
 
 logger = get_logger(__name__)
+DEFAULT_WORLD_ID: Final = "default"
 
 
 @dataclass
@@ -39,6 +45,10 @@ class SystemRuntime:
     owns_observability: bool = field(default=True)
     chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
     stage_manager: StageManager | None = None
+    default_world_id: str = DEFAULT_WORLD_ID
+    world_stage_config: dict = field(default_factory=dict, repr=False)
+    _world_stages: dict[tuple[str, str], WorldStage] = field(default_factory=dict, init=False, repr=False)
+    _world_stage_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _shutdown_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     _shutdown_complete: bool = field(default=False, init=False, repr=False)
     _shutdown_completed_stages: set[str] = field(default_factory=set, init=False, repr=False)
@@ -114,7 +124,9 @@ class SystemRuntime:
                 observability=observability,
                 owns_observability=owns_observability,
                 chat_adapter=WebSocketAdapter(config.get("chat_adapter", {}),
-                                              default_character_id=agent_runtime.default_character_id),
+                                               default_character_id=agent_runtime.default_character_id),
+                default_world_id=str(config.get("world", {}).get("world_id", DEFAULT_WORLD_ID)),
+                world_stage_config=config.get("world_stage", {}),
             )
 
             runtime.stage_manager = StageManager(get_agent=agent_runtime.get_agent, adapter=runtime.chat_adapter,
@@ -201,6 +213,7 @@ class SystemRuntime:
                 uninstall_observability_log_handler()
 
         shutdown_steps: tuple[tuple[str, callable | None], ...] = (
+            ("world stages", runtime.close_world_stages if runtime is not None else None),
             ("chat stages", runtime.stage_manager.close if runtime is not None and runtime.stage_manager is not None else None),
             ("world runtime", world.stop_background_services if world is not None else None),
             (
@@ -262,6 +275,7 @@ class SystemRuntime:
             shutdown_steps = (
                 ("world runtime", self.world.stop_background_services),
                 ("chat sessions", self.chat_session_manager.stop_background_services),
+                ("world stages", self.close_world_stages),
                 ("chat stages", self.stage_manager.close if self.stage_manager is not None else None),
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),
                 ("capability manager", self.capability_manager.stop),
@@ -329,6 +343,37 @@ class SystemRuntime:
         self.chat_session_manager.ensure_dependencies()
         self.world.ensure_dependencies()
         self.user_interface.ensure_dependencies()
+
+    def get_agent(self, character_id: str | None = None):
+        """通过显式拥有的 AgentRuntime 返回角色门面。"""
+        return self.agent_runtime.get_agent(character_id)
+
+    async def get_world_stage(
+        self, character_id: str | None = None, world_id: str | None = None,
+    ) -> WorldStage:
+        """取得或创建角色与世界作用域唯一的长期 WorldStage。"""
+        selected_character = character_id or self.agent_runtime.default_character_id
+        selected_world = world_id or self.default_world_id
+        key = (selected_character, selected_world)
+        async with self._world_stage_lock:
+            stage = self._world_stages.get(key)
+            if stage is None or stage.state is StageState.TERMINATED:
+                stage = await WorldStage.create(
+                    character_id=selected_character, world_id=selected_world,
+                    agent=self.get_agent(selected_character),
+                    context_factory=self.agent_runtime.context_factories[selected_character],
+                    config=self.world_stage_config,
+                )
+                self._world_stages[key] = stage
+            return stage
+
+    async def close_world_stages(self) -> None:
+        """移出并关闭全部长期 WorldStage。"""
+        async with self._world_stage_lock:
+            stages = tuple(self._world_stages.values())
+            self._world_stages.clear()
+        if stages:
+            await asyncio.gather(*(stage.close() for stage in stages))
 
     # Properties for convenient access to subsystems
     @property

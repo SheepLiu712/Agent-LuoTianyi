@@ -13,6 +13,7 @@ from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler, ChatReflectionHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
+from src.agent.handlers.stimulus.world_activity import WorldActivityHandler
 from src.domain.agent import StimulusKind
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.router import StimulusRouter
@@ -94,6 +95,12 @@ class AgentRuntime:
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
+                        (StimulusKind.WORLD_OBSERVATION, WorldActivityHandler()),
+                        (StimulusKind.ACTIVITY_OBSERVATION, WorldActivityHandler()),
+                        (StimulusKind.DYNAMIC_OBSERVED, WorldActivityHandler()),
+                        (StimulusKind.DIARY_PLANNING_DUE, WorldActivityHandler()),
+                        (StimulusKind.SONG_KNOWLEDGE_DISCOVERED, WorldActivityHandler()),
+                        (StimulusKind.SONG_LEARNED, WorldActivityHandler()),
                         *((kind, ChatPreprocessingHandler()) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,

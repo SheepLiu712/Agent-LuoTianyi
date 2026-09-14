@@ -60,6 +60,20 @@ StageState 为 ONLINE、OFFLINE、TERMINATING、TERMINATED。初始为 OFFLINE�
 
 SystemRuntime 创建共享 adapter 和 StageManager，并在 AgentRuntime、能力及数据库关闭前关闭 StageManager。StageManager 是新链路的生命周期入口；旧 GCSM 继续管理 ChatStream。
 
+## WorldStage 与 WorldFactSink
+
+`WorldStage` 位于 `server/src/stage/world_stage.py`，是作用域为 `(character_id, world_id)` 的长期交互实例，不是每个事实创建一次的 runner。`SystemRuntime.get_world_stage(character_id=None, world_id=None)` 通过显式 registry 取得或创建实例；省略世界 ID 时使用配置 `world.world_id`，未配置时为 `DEFAULT_WORLD_ID="default"`。相同作用域复用同一实例，不同角色或世界相互隔离。
+
+异步创建：`await WorldStage.create(*, character_id, world_id, agent, context_factory, config=None, timezone_name="Asia/Shanghai") -> WorldStage`。Stage 创建一个 `user_id=None` 的长期 `InteractionContext`，持有稳定 `interaction_id`，每次接收事实递增 `interaction_revision`。
+
+`WorldFactSink` 是 world 任务可依赖的唯一正常事实投递端口：`await submit(fact: Stimulus) -> bool`。它只接受来源为 `WORLD`、无用户、目标包含本角色、ID 未重复且容量允许的强类型事实。成功提交立即把事实按接收顺序放入 pending，并从当前 pending 构造 `WorldInteractionSnapshot` 调用 `Agent.handle_stimulus`；结算只按报告明确给出的 `consumed_pending_stimulus_ids` 删除事实。
+
+WorldStage 从事实复制 owner 的权威 revision：`WorldObservation.world_revision` 更新快照的世界修订，`ActivityObservation.activity_id/activity_revision` 更新活动身份与修订；Stage 只拥有 interaction revision，不代替 world/activity/schedule owner 校验权威状态。当前 AgentRuntime 将 `WORLD_OBSERVATION` 和 `ACTIVITY_OBSERVATION` 注册到 `WorldActivityHandler`；Handler 只收到 domain request/snapshot、受控事实引用和 `plans.context`，不取得 EventStore、WorldRuntime 或 world task。
+
+每次 handle 使用独立取消令牌和受限 plan sink。plan 必须匹配 request、interaction、角色、ordinal 及 request 的 interaction revision；Stage 已接收更新事实时，旧 request 的 plan 以 `STALE_INTERACTION` 拒绝。计划进入同一个长期 execution worker，始终一次只调用一个 `Agent.realize_action_plan`。
+
+世界交互没有即时客户端通道，`supported_outputs` 为空；realize 使用 `NoChannelOutputSink`，任何 `AgentOutput` 都明确以 `SINK_CLOSED` 拒绝，不能静默当作成功。`await WorldStage.close()` 停止接收，以 `NO_LONGER_NEEDED` 取消在途 handle 和 execution，取消长期 worker，清空队列并关闭 context；`SystemRuntime.close_world_stages()` 在 AgentRuntime shutdown 前关闭 registry 中全部实例。
+
 ## 兼容聊天链路
 
 ### `ChatSessionManager`

@@ -9,6 +9,13 @@
 
 ## 已完成事实
 
+### 2026-09-14 长期 WorldStage 与世界事实投递（#78）
+
+- 交付行为：新增按 `(character_id, world_id)` 长期复用的 WorldStage 与异步 `WorldFactSink`；Stage 持有 interaction/pending/cancellation、按 ID 结算事实，以同一长期 worker 串行执行计划，并在无实时通道时由 `NoChannelOutputSink` 明确拒绝输出。AgentRuntime 注册世界/活动事实 Handler，SystemRuntime 显式拥有 registry、`get_agent` 与关闭顺序；未迁移现有 world task，也未改变 WorldClock。
+- interface spec：[`stage/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/stage/README.md) 已记录当前接口、revision 归属、作用域复用和关闭事实。
+- 验证及结果：在 `server` 使用 `conda run -n agent python -m pytest tests/stage tests/world -q`，142 passed、2 skipped；新增聚焦用例覆盖事实顺序、旧 interaction revision、同 worker 串行、无通道拒绝、关闭取消及 registry 复用/隔离。新增产品模块的 basedpyright error 级检查、聚焦 Ruff、compileall 与 `git diff --check` 通过。
+- 未验证范围：四个既有 world 任务仍走兼容链路，真实网络探测两项按现有标记跳过；本切片不包含每日规划、活动 scheduler、歌曲/动态/日记任务迁移或生产外部通道验收。
+
 ### 2026-09-06 门面公共入口与请求分流整理
 
 - 交付内容：两个公共方法紧随 `__init__`；handle 入口直接登记请求，已有请求在 `_handle_existing_request` 处理后提前返回，新请求进入 `_process_request`。新处理和计划恢复共用处理权、交付及结算生命周期，原 `_handle_registered` 已删除；保留工作区已有的参数类型注解。
