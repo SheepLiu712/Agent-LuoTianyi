@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-15 明确记忆请求与成功承诺边界（12）GREEN
+
+- 交付行为：cognitive 层的 `ExplicitMemoryIntentSkill` 按 `agent.memory.explicit_intent` 配置和旧默认短语识别明确记忆请求；`ChatReplyHandler` 在同一 handle 内先等待内部 `IntentionalMemoryCommit` 通过既有 `MemoryWriter` 写入私有长期记忆，确认存储标识后才交付表示已记住的 `Say`。失败返回 `FAILED / INTERNAL_ERROR`，保留本批 pending、`retryable=False`，不交付成功承诺。
+- 隔离与幂等：提交始终使用 `plans.context.identity` 的非空 `character_id/user_id`；向量证据补充角色归属，业务证据去重按角色、用户和内容复用现有存储规则。同一输入重投返回既有标识且不新增记忆；未恢复 request/mutation ledger、outbox、自动重试或新 Memory Action。
+- interface spec：新增内部 `ExplicitMemoryIntentSkill`、`IntentionalMemoryCommit` 与 `MemoryCommitRevision`；记忆仍是 Agent 内部状态变更，不进入 `ActionPlan`。`memory.explicit_intent.{enabled,phrases}` 从草案更新为当前配置事实。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`；见本切片提交验证记录。
+- 未验证范围：未运行真实 LLM、生产向量库/数据库、TTS/GPU、真机；生产聊天是否切换到新门面仍由既有迁移切片负责。
+
 ### 2026-09-14 批次回复的开始思考信号（11a）GREEN
 
 - 交付行为：`ChatReplyHandler` 在有可回复内容时先交付一个仅含 `StartThinking` 的首计划（ordinal 0），再进入生成并交付正式回复计划。Stage 的 `_PlanSink` 消费该计划并发出 THINKING 呈现，最后一个思考请求结束时发出 WAITING（既有 Stage 行为）。无可回复内容时不产生思考信号。

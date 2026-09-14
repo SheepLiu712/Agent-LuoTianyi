@@ -335,6 +335,14 @@
                 }
             },
             "memory": {
+                "explicit_intent": {
+                    "enabled": true,
+                    "phrases": [
+                        "请记住",
+                        "记住",
+                        "记一下"
+                    ]
+                },
                 "vector_store": {
                     "store_type": "chroma",
                     "embedding_model": {

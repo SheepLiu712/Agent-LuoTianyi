@@ -75,9 +75,9 @@ FastAPI lifespan 启动时调用 `SystemRuntime.initialize(config)`，之后路�
 
 `server/src/system/__init__.py` 当前尝试从不存在的 `src.chat_session.conversation` 延迟导出 `ConversationService`。修复前应从实际定义模块导入，不要依赖该包级名称。
 
-## 目标配置字段（草案，待评审，未实现）
+## 配置字段
 
-以下为 Issue #71（12 显式记忆）、#75（16 首次登录）、#76（17 周期提醒）所需的**目标**配置字段草案。按开发守则，跨模块配置字段属公开接口，需先定 spec；**当前均未实现**，不得直接写入生产 `config.json` 并假定生效。
+`agent_runtime.agent.memory.explicit_intent` 已实现；其余字段仍是 Issue #75（16 首次登录）、#76（17 周期提醒）的目标草案。
 
 ### `proactive.first_login.prepared_names`（对应 Issue #75）
 
@@ -100,7 +100,8 @@ FastAPI lifespan 启动时调用 `SystemRuntime.initialize(config)`，之后路�
 
 - 作为**过渡期**意图识别（关键词 allowlist）；待总 SPEC 6.4 的模型工具调用落地后应替换；
 - 命中后必须「先写后承诺」；失败保留刺激并返回 `FAILED`，不承诺成功；
-- 未决：短语表是否入配置、是否需要开关、显式记忆的幂等键。
+- `enabled` 控制识别开关；`phrases` 是可扩展短语表，旧默认短语始终兼容；
+- 幂等性沿用长期记忆存储的业务证据去重，按 `(character_id, user_id, content)` 隔离，不维护 request/mutation ledger。
 
 ### `proactive.idle_threshold_seconds`（对应 Issue #76）
 
