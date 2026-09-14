@@ -53,6 +53,14 @@ class StageManager:
         self._lock = asyncio.Lock()
         self._closed = False
         self._closing: asyncio.Task[None] | None = None
+        self._pending_first_login_users: set[str] = set()
+
+    def record_login(self, user_id: str, *, elapsed_from_last_login: float | None) -> None:
+        """记录认证登录；当前仅首次登录进入新 Stage 主动刺激链。"""
+        if not isinstance(user_id, str) or not user_id.strip():
+            raise ValueError("user_id must be nonblank")
+        if elapsed_from_last_login is None:
+            self._pending_first_login_users.add(user_id)
 
     async def connect(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
         """取得或创建 connection 用户与 character_id 的 Stage，完成绑定后返回；保留期内复用原实例。"""
@@ -88,6 +96,9 @@ class StageManager:
                 self._schedule_expiry(stage)
                 raise
             self._connections[stage] = connection
+            if key[0] in self._pending_first_login_users:
+                self._pending_first_login_users.remove(key[0])
+                stage.schedule_first_login()
             return stage
 
     async def _disconnect(self, connection: WebSocketConnection) -> None:

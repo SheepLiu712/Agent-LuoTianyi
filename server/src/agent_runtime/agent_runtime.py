@@ -13,6 +13,7 @@ from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler, ChatReflectionHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
+from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.domain.agent import StimulusKind
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.router import StimulusRouter
@@ -61,6 +62,9 @@ class AgentRuntime:
         self.vector_store = self._initialize_vector_store(self.config["agent"])
         try:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
+            first_login_names = self._first_login_prepared_names(
+                self.config.get("proactive", {})
+            )
             self.skills = Skills(self.config.get("skills", {}), llm_service,
                                  tts_engine=AsyncTTS(capability_manager.speech))
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
@@ -93,6 +97,10 @@ class AgentRuntime:
                     character_id=character_id,
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+                        (StimulusKind.PROACTIVE_PROMPT_DUE, FirstLoginHandler(
+                            prepared_names=first_login_names,
+                            prepared_speech=self.prepared_speech,
+                        )),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
                         *((kind, ChatPreprocessingHandler()) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
@@ -401,6 +409,29 @@ class AgentRuntime:
                 capability_manager=capability_manager,
             )
         return character_runtimes
+
+    @staticmethod
+    def _first_login_prepared_names(config: Dict[str, Any]) -> tuple[str, ...]:
+        """读取 proactive.first_login.prepared_names；配置存在时要求恰好两项。"""
+        if not isinstance(config, dict):
+            raise TypeError("proactive must be a dictionary")
+        first_login = config.get("first_login")
+        if first_login is None:
+            return ()
+        if not isinstance(first_login, dict):
+            raise TypeError("proactive.first_login must be a dictionary")
+        names = first_login.get("prepared_names")
+        if not isinstance(names, list):
+            raise TypeError("proactive.first_login.prepared_names must be a list")
+        if (
+            len(names) != 2
+            or any(not isinstance(name, str) or not name.strip() for name in names)
+            or len(set(names)) != len(names)
+        ):
+            raise ValueError(
+                "proactive.first_login.prepared_names must contain two unique nonblank names"
+            )
+        return tuple(names)
 
     @staticmethod
     def _initialize_vector_store(agent_config: Dict[str, Any]) -> Any:

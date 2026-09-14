@@ -9,6 +9,13 @@
 
 ## 已完成事实
 
+### 2026-09-14 首次登录欢迎接入真实 handler（#75）
+
+- 交付行为：本切片在 Stage/Agent 边界提供首次登录接收 seam：调用方用 `StageManager.record_login(...)` 记录事实，ChatStage 完成连接绑定后开始约 1 秒同步窗口，以 `ProactivePromptDue(reason=first_login)` 调用真实 `handle_stimulus`。`FirstLoginHandler` 按 `agent_runtime.proactive.first_login.prepared_names` 顺序从共享 `PreparedSpeechResources` 取得同源文字、表情与受控音频引用，逐条持久化 `source=agent` 对话并各交付一个 CONVERSATION Say 计划；Say realization 产出完整音频和 message-end final package。缺失名称返回依赖失败并记录名称；`RETURN_LOGIN` 仍关闭。
+- 配置与范围：使用现有 `agent_runtime.prepared_speech.manifest` 加 `agent_runtime.proactive.first_login.prepared_names`。生产接线（`server_main`、`UserInterface`、`SystemRuntime.record_user_login`）明确留给 #66，本切片不接管认证/WebSocket 生产入口；旧 `chat_session_manager.proactive_topic_maker.activity_res.first_login` 配置和读取器继续保留并服务当前生产链。也不包含到期事件提醒、周期 claim、WorldStage、MediaResolver 或触摸动作。
+- 验证及结果：server 下运行 `conda run -n agent python -m pytest tests/stage tests/agent -q` 为 **237 passed**；`conda run -n agent python -m pytest tests/system tests/adapter -q` 为 **24 passed、1 个既有 Starlette/httpx 弃用警告**。相关 Python 文件 compileall 通过；LSP 因工具工作区固定在主 checkout，拒绝诊断隔离 worktree 路径，已记录为未验证项。
+- 未验证范围：未连接真实生产数据库或客户端播放器；预制 WAV 通过临时真实文件和完整 Adapter/Stage/Agent/Say 链验证，未执行外部 TTS、LLM 或网络调用。
+
 ### 2026-09-06 门面公共入口与请求分流整理
 
 - 交付内容：两个公共方法紧随 `__init__`；handle 入口直接登记请求，已有请求在 `_handle_existing_request` 处理后提前返回，新请求进入 `_process_request`。新处理和计划恢复共用处理权、交付及结算生命周期，原 `_handle_registered` 已删除；保留工作区已有的参数类型注解。
