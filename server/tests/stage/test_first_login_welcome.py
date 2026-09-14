@@ -105,8 +105,8 @@ async def test_first_login_waits_for_ready_then_emits_two_persistent_final_packa
         get_context_factory=lambda _: factory,
         config={"stage": {"first_login_wait": 0.04}},
     )
-    manager.record_login("user", elapsed_from_last_login=None)
-    manager.record_login("user", elapsed_from_last_login=None)
+    manager.record_login("user", "luotianyi", elapsed_from_last_login=None)
+    manager.record_login("user", "luotianyi", elapsed_from_last_login=None)
     await asyncio.sleep(0.05)
     assert factory.context is None
 
@@ -138,8 +138,8 @@ async def test_first_login_waits_for_ready_then_emits_two_persistent_final_packa
     second = packets[finals[0] + 1 : finals[1] + 1]
     assert first[0]["text"] == "欢迎一"
     assert second[0]["text"] == "欢迎二"
-    assert any(packet["expression"] == "smile" for packet in first)
-    assert any(packet["expression"] == "happy" for packet in second)
+    assert any(packet["expression"] == "normal" for packet in first)
+    assert any(packet["expression"] == "normal" for packet in second)
     assert b"".join(base64.b64decode(packet["audio"]) for packet in first) == first_audio
     assert b"".join(base64.b64decode(packet["audio"]) for packet in second) == second_audio
     assert factory.context is not None
@@ -189,7 +189,7 @@ async def test_return_login_remains_disabled_after_stage_connection():
         get_context_factory=lambda _: factory,
         config={"stage": {"first_login_wait": 0.02}},
     )
-    manager.record_login("user", elapsed_from_last_login=5 * 24 * 60 * 60)
+    manager.record_login("user", "luotianyi", elapsed_from_last_login=5 * 24 * 60 * 60)
 
     # When: the Stage becomes ready and more than the welcome delay elapses.
     await manager.connect(WebSocketConnection(Socket(), "user", "用户"), "luotianyi")

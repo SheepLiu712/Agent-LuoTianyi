@@ -58,7 +58,7 @@ class FirstLoginHandler:
 
             await plans.context.conversation.append((ConversationEntry(
                 entry_id=str(uuid4()),
-                timestamp=datetime.now(),
+                timestamp=datetime.now(),  # noqa: DTZ005 - conversation storage uses local naive timestamps
                 source="agent",
                 content=TextContent(prepared.text),
             ),))
@@ -70,7 +70,7 @@ class FirstLoginHandler:
                     sound_content=None,
                     prepared_audio_ref=d.MediaRef(media_id=name),
                     tone=d.Tone(value="normal"),
-                    expression=d.ChangeExpression(expression_id=prepared.expression),
+                    expression=d.ChangeExpression(expression_id="normal"),
                     delivery=d.OutputDelivery.CONVERSATION,
                 ),),
             ))
