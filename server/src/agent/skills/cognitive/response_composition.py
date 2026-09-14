@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Protocol
 
 from src.agent.main_chat import SongSegmentChat
@@ -24,6 +24,7 @@ class _Conscious(Protocol):
 class _Runtime(Protocol):
     mind: _Mind
     conscious: _Conscious
+    capability_manager: Any
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class ReplyDraft:
     tone: str
     expression: str | None
     sing: tuple[str, str] | None = None
+    lyrics: str = ""
 
 
 class ResponseCompositionSkill:
@@ -48,8 +50,9 @@ class ResponseCompositionSkill:
 
     async def compose(self, *, character_id: str, user_id: str, reply_topic: str,
                       conversation_history: str, memory_queries: tuple[str, ...] = (),
-                      sing_attempts: tuple[str, ...] = ()) -> tuple[ReplyDraft, ...]:
-        """按话题召回记忆、可选选择演唱片段，并生成有序回复草稿。"""
+                      sing_attempts: tuple[str, ...] = (),
+                      excluded_segments: set[tuple[str, str]] | None = None) -> tuple[ReplyDraft, ...]:
+        """按话题召回记忆、按最近已唱排除选择演唱片段，并生成有序回复草稿。"""
         runtime = self._runtime_provider(character_id)
         memory_hits: list[str] = []
         if memory_queries:
@@ -58,14 +61,24 @@ class ResponseCompositionSkill:
                 memory_hits = context.render_for_prompt()
         sing_plan = None
         if sing_attempts:
-            candidate = await runtime.mind.build_sing_plan_for_topic(list(sing_attempts))
+            candidate = await runtime.mind.build_sing_plan_for_topic(
+                list(sing_attempts), excluded_segments=excluded_segments)
             if candidate and candidate[1]:
                 sing_plan = candidate
         lines = await runtime.conscious.generate_topic_reply_for_pipeline(
             user_id=user_id, topic_content=reply_topic, memory_hits=memory_hits,
             fact_hits=None, sing_plan=sing_plan, conversation_history=conversation_history,
         )
-        return tuple(_draft(line) for line in lines)
+        drafts = []
+        for line in lines:
+            draft = _draft(line)
+            if draft.sing is not None:
+                song, segment = draft.sing
+                lyrics = runtime.capability_manager.singing.get_segment_lyrics(
+                    character_id, song, segment)
+                draft = replace(draft, lyrics=lyrics or "")
+            drafts.append(draft)
+        return tuple(drafts)
 
 
 def _draft(line: Any) -> ReplyDraft:

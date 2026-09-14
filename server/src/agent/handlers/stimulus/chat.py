@@ -50,6 +50,16 @@ class ChatPreprocessingHandler:
         return _report(request, prepared=prepared)
 
 
+def _recent_sung_segments(snapshot) -> set[tuple[str, str]]:
+    """从近期对话中取出已演唱的歌曲片段，用于本次演唱排除。"""
+    sung: set[tuple[str, str]] = set()
+    for entry in snapshot.entries:
+        content = entry.content
+        if isinstance(content, SongContent) and content.segment:
+            sung.add((content.song, content.segment))
+    return sung
+
+
 def _render_history(snapshot) -> str:
     """把已压缩总结与近期对话渲染成生成提示使用的历史文本。"""
     lines = []
@@ -82,9 +92,10 @@ def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
     for draft in drafts:
         if draft.sing is not None:
             song, segment = draft.sing
+            text = f"{draft.content}\n{draft.lyrics}".strip() if draft.lyrics else draft.content
             entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
                 source=ConversationSource.AGENT.value,
-                content=SongContent(f"唱了《{song}》", song, segment)))
+                content=SongContent(text, song, segment)))
         elif draft.content.strip():
             entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
                 source=ConversationSource.AGENT.value, content=TextContent(draft.content)))
@@ -94,9 +105,11 @@ def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
 class ChatReplyHandler:
     """到期批次回复：生成回复、落库并交付有序 Say/Sing 计划。"""
 
-    def __init__(self, composition: ResponseCompositionSkill) -> None:
-        """注入回复生成技能；不负责歌曲/片段的最终校验与播放。"""
+    def __init__(self, composition: ResponseCompositionSkill,
+                 understanding: TextPreprocessingSkill) -> None:
+        """注入回复生成技能与文本预处理技能（用于演唱尝试线索）。"""
         self._composition = composition
+        self._understanding = understanding
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """按接收顺序把整批输入作为一次回复：召回→生成→落库→交付计划，并按 ID 消费。"""
@@ -106,12 +119,14 @@ class ChatReplyHandler:
         drafts: tuple = ()
         if reply_topic:
             identity = plans.context.identity
+            snapshot = plans.context.conversation.read()
             plans.set_interruptible(True)
             drafts = await self._composition.compose(
                 character_id=identity.character_id, user_id=identity.user_id,
-                reply_topic=reply_topic,
-                conversation_history=_render_history(plans.context.conversation.read()),
-                memory_queries=(reply_topic,), sing_attempts=())
+                reply_topic=reply_topic, conversation_history=_render_history(snapshot),
+                memory_queries=(reply_topic,),
+                sing_attempts=self._understanding.extract_terms(reply_topic),
+                excluded_segments=_recent_sung_segments(snapshot))
             plans.set_interruptible(False)
         actions = _reply_actions(request, drafts)
         if actions:

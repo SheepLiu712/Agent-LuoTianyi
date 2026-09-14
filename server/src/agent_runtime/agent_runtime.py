@@ -104,7 +104,8 @@ class AgentRuntime:
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
-                            self.skills.get(ResponseCompositionSkill))),
+                            self.skills.get(ResponseCompositionSkill),
+                            self.skills.get(TextPreprocessingSkill))),
                         *((kind, ChatPreprocessingHandler(self.skills.get(TextPreprocessingSkill))) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,

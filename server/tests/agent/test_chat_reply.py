@@ -1,12 +1,13 @@
 """到期批次回复：生成、落库与 Say/Sing 计划交付。"""
 from dataclasses import replace
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
 
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.context import SongContent, TextContent
+from src.agent.context import ConversationEntry, SongContent, TextContent
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.main_chat import OneSentenceChat, SongSegmentChat
@@ -37,6 +38,14 @@ def deadline_request():
     return replace(request(), prepared_inputs=(prepared,))
 
 
+class _Understanding:
+    def __init__(self, terms=()):
+        self.terms = tuple(terms)
+
+    def extract_terms(self, text):
+        return self.terms
+
+
 class Composer:
     def __init__(self, drafts):
         self.drafts = drafts
@@ -47,9 +56,9 @@ class Composer:
         return self.drafts
 
 
-def agent(composer):
+def agent(composer, understanding=None):
     return Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.TEXT_MESSAGE, ChatReplyHandler(composer))]))
+        (d.StimulusKind.TEXT_MESSAGE, ChatReplyHandler(composer, understanding or _Understanding()))]))
 
 
 @pytest.mark.asyncio
@@ -123,10 +132,25 @@ class _Conscious:
                 SongSegmentChat(song="歌", segment="副歌")]
 
 
+class _Singing:
+    def __init__(self):
+        self.calls = []
+
+    def get_segment_lyrics(self, character_id, song, segment):
+        self.calls.append((character_id, song, segment))
+        return "歌词一行"
+
+
+class _Capabilities:
+    def __init__(self):
+        self.singing = _Singing()
+
+
 class _Runtime:
     def __init__(self):
         self.mind = _Mind()
         self.conscious = _Conscious()
+        self.capability_manager = _Capabilities()
 
 
 @pytest.mark.asyncio
@@ -146,3 +170,18 @@ async def test_response_composition_skill_recalls_and_maps_drafts():
     assert runtime.conscious.kwargs["memory_hits"] == ["记忆1"]
     assert runtime.conscious.kwargs["sing_plan"] == ("歌", "副歌")
     assert runtime.conscious.kwargs["conversation_history"] == "历史"
+    assert drafts[1].lyrics == "歌词一行"
+    assert runtime.capability_manager.singing.calls == [("luotianyi", "歌", "副歌")]
+
+
+@pytest.mark.asyncio
+async def test_reply_passes_sing_attempts_and_recent_exclusion():
+    composer = Composer(())
+    ctx = context()
+    ctx.conversation.entries.append(ConversationEntry(
+        entry_id="p1", timestamp=datetime.now(), source="agent",
+        content=SongContent("唱了《歌》", "歌", "副歌")))
+    await agent(composer, _Understanding(("《歌》",))).handle_stimulus(
+        deadline_request(), Sink(), context=ctx)
+    assert composer.calls[0]["sing_attempts"] == ("《歌》",)
+    assert composer.calls[0]["excluded_segments"] == {("歌", "副歌")}
