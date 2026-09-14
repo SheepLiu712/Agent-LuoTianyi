@@ -66,11 +66,13 @@ SystemRuntime 创建共享 adapter 和 StageManager，并在 AgentRuntime、能�
 
 异步创建：`await WorldStage.create(*, character_id, world_id, agent, context_factory, config=None, timezone_name="Asia/Shanghai") -> WorldStage`。Stage 创建一个 `user_id=None` 的长期 `InteractionContext`，持有稳定 `interaction_id`，每次接收事实递增 `interaction_revision`。
 
-`WorldFactSink` 是 world 任务可依赖的唯一正常事实投递端口：`await submit(fact: Stimulus) -> bool`。它只接受来源为 `WORLD`、无用户、目标包含本角色、ID 未重复且容量允许的强类型事实。成功提交立即把事实按接收顺序放入 pending，并从当前 pending 构造 `WorldInteractionSnapshot` 调用 `Agent.handle_stimulus`；结算只按报告明确给出的 `consumed_pending_stimulus_ids` 删除事实。
+`WorldFactSink` 是 world 任务可依赖的唯一正常事实投递端口：`await submit(fact: Stimulus) -> bool`。它只接受来源为 `WORLD`、无用户、目标包含本角色、ID 未重复、属于 `WorldActivityHandler` 已登记 kind 且 pending/handle 容量均未达到 `max_stimuli` 的强类型事实；该 kind 集合由 handler 模块定义，并被 AgentRuntime 注册与 Stage ingress 共同使用。成功提交立即把事实按接收顺序放入 pending，并从当前 pending 构造 `WorldInteractionSnapshot` 调用 `Agent.handle_stimulus`。
 
-WorldStage 从事实复制 owner 的权威 revision：`WorldObservation.world_revision` 更新快照的世界修订，`ActivityObservation.activity_id/activity_revision` 更新活动身份与修订；Stage 只拥有 interaction revision，不代替 world/activity/schedule owner 校验权威状态。当前 AgentRuntime 将 `WORLD_OBSERVATION` 和 `ACTIVITY_OBSERVATION` 注册到 `WorldActivityHandler`；Handler 只收到 domain request/snapshot、受控事实引用和 `plans.context`，不取得 EventStore、WorldRuntime 或 world task。
+WorldStage 从事实复制 owner 的权威 revision，但不允许快照倒退：`WorldObservation.world_revision` 小于当前 world revision 时在修改任何 Stage 状态前拒绝；`ActivityObservation` 只有在 `activity_id` 相同时比较 revision 并拒绝较小值，不同 `activity_id` 表示显式活动切换，可从新的 owner revision 开始。Stage 只拥有 interaction revision，不代替 world/activity/schedule owner 执行业务 CAS。当前 AgentRuntime 将 world/activity 行为族的登记 kind 注册到 `WorldActivityHandler`；Handler 只收到 domain request/snapshot、受控事实引用和 `plans.context`，不取得 EventStore、WorldRuntime 或 world task。
 
-每次 handle 使用独立取消令牌和受限 plan sink。plan 必须匹配 request、interaction、角色、ordinal 及 request 的 interaction revision；Stage 已接收更新事实时，旧 request 的 plan 以 `STALE_INTERACTION` 拒绝。计划进入同一个长期 execution worker，始终一次只调用一个 `Agent.realize_action_plan`。
+每次 handle 使用独立取消令牌和受限 plan sink。plan 必须匹配 origin request、interaction、目标角色和连续 ordinal，且 plan ID 不得重复；新事实只增加 Stage revision，不自动取消或废弃仍在途的旧 request，只有具体 world 策略显式取消、Stage 关闭或身份不匹配才拒绝后续 plan。`close()` 仍以 `NO_LONGER_NEEDED` 取消在途工作。报告继续满足 `consumed ∪ retained = considered` 且二者互斥；正常报告只删除明确 consumed，非重试 `FAILED` 报告额外把其 trigger fact 终态移出 pending，避免永久滞留，并且不自动重试。
+
+计划进入同一个长期 execution worker，始终一次只调用一个 `Agent.realize_action_plan`。worker 检查返回的 `ExecutionReport`：非 `COMPLETED` 状态记录 plan ID 与稳定 error code，并通过构造时可选的窄回调 `on_execution_finished(plan, report)` 交付完成 receipt，供后续 owner slice 回写业务状态；当前 Stage 不重试执行。
 
 世界交互没有即时客户端通道，`supported_outputs` 为空；realize 使用 `NoChannelOutputSink`，任何 `AgentOutput` 都明确以 `SINK_CLOSED` 拒绝，不能静默当作成功。`await WorldStage.close()` 停止接收，以 `NO_LONGER_NEEDED` 取消在途 handle 和 execution，取消长期 worker，清空队列并关闭 context；`SystemRuntime.close_world_stages()` 在 AgentRuntime shutdown 前关闭 registry 中全部实例。
 
