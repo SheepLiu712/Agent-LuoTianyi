@@ -265,3 +265,50 @@ SAY 的 TTS 分支输出文字、可选表情、音频及 MessageEndOutput，不
 兼容验证包含思考包时序、文字与音频的消息 ID、音频失败终包、TTS 文件片段、SAY 结束不恢复表情及私密日记的归属和去重。
 
 当前领域测试为 `server/tests/domain/test_realization_contract.py`，同时由 `test_handle_input_contract.py` 验证 MESSAGE_END 在快照中的使用。在 server 目录运行 `python -m pytest tests/domain -q`。这些测试验证公开值与协议声明，不验证真实 sink 或客户端投递。
+
+## 目标接口（草案，待评审，未实现）
+
+以下为 Issue #74、#79 所需的新增 Action 的**目标**契约。**当前源码未实现**，不得按“当前接口”调用；确认后需同步本页、总 SPEC 7.14 与 `plan_identity._types` 白名单。
+
+### `RestoreExpression`（对应 Issue #74 触摸表情恢复）
+
+```python
+class ActionKind(str, Enum):
+    ...
+    RESTORE_EXPRESSION = "restore_expression"
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RestoreExpression(Action):
+    kind: ClassVar[ActionKind] = ActionKind.RESTORE_EXPRESSION
+    expression_id: str            # 目标领域表情代码；触摸恢复为 "normal"
+    delivery: OutputDelivery      # 触摸为 EPHEMERAL_REACTION
+```
+
+- **调用者**：触摸 handler 在交付瞬时 SAY 计划后，作为**独立** `ActionPlan` 交付（SAY 不隐含恢复）。
+- **实现**：对应 action handler 输出 `ExpressionDraft(delivery, ChangeExpression(expression_id))`；无需新增输出类型。
+- **冲突提示**：本提案把表情恢复提升为独立 Action，与总 SPEC 7.14「`ChangeExpression` 只保留为 `Say`/`Sing` 内嵌值对象；没有独立 Action」**冲突**，须先修订 7.14 再实现。
+- **失败行为**：沿用 `ExecutionErrorCode`；失败停止后续行动，不隐式重试。
+
+### `CreateSchedule` / `CancelSchedule`（对应 Issue #79，范围待确认）
+
+```python
+class CreateSchedule(Action):
+    kind: ClassVar[ActionKind] = ActionKind.CREATE_SCHEDULE
+    due_at: datetime            # 带时区
+    future_stimulus: Stimulus   # 强类型变体；语义 source 由调用方显式填写
+    dedup_key: str
+
+class CancelSchedule(Action):
+    kind: ClassVar[ActionKind] = ActionKind.CANCEL_SCHEDULE
+    schedule_id: str
+```
+
+- **实现**：realize 写入持久 scheduler；到期由 scheduler 投递 `future_stimulus`；scheduler 不改写来源。
+- **约束**：`ProactivePromptDue` / `InteractionDeadline` 不得直接作为 `future_stimulus` 保存，必须由拥有 pending 的 stage 在收到到期事实后构造。
+- **状态**：范围待确认（Issue #79 带 `question` 标签）；本页只记录候选契约，不代表已决定。
+
+### 未决问题
+
+1. 是否同意修订总 SPEC 7.14 并新增 `ActionKind.RESTORE_EXPRESSION`？
+2. 日程 Action 是否需要 `CancelSchedule`、`schedule_id` 的形态与 scheduler 归属？
+3. 新 Action 的 `delivery` 语义（恢复固定瞬时，还是随调用方）。

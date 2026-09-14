@@ -116,3 +116,50 @@ SystemRuntime 创建共享 adapter 和 StageManager，并在 AgentRuntime、能�
 - 停止流时会取消其拥有的任务；多个关闭错误可能聚合后抛出。
 - 连接丢失不会自动等于删除用户会话，重连窗口和最终清理由管理器负责。
 - 持久化、模型调用和语音生成都有副作用。
+
+## 目标接口（草案，待评审，未实现）
+
+以下为 Issue #78（19 WorldStage）与 Issue #76（17 周期主动提醒）所需的**目标** stage 接口。**当前源码未实现**（`server/src/stage` 目前只有 `ChatStage`），不得按“当前接口”调用；确认后需同步本页与总 SPEC 4.9。
+
+### `WorldStage`（对应 Issue #78）
+
+```python
+class WorldStage:
+    @classmethod
+    async def create(cls, *, character_id: str, world_id: str, agent, context_factory,
+                     config: dict | None = None) -> "WorldStage": ...
+```
+
+- 作用域 `(character_id, world_id)`；长期持有该角色与一个箱庭世界的持续交互，不用 one-shot runner。
+- 持有 pending、`interaction_revision`、`WorldInteractionSnapshot`、handle 取消、plan sink、串行 execution worker、受限 world output sink（无即时通道时明确拒绝）。
+- 只做交互协调：不解释抓取/供应商数据，不拥有权威 world/activity/schedule 状态（revision 由各 owner 校验）。
+- `world`/`world_clock` 不 import façade 或 Agent 内部；`SystemRuntime` 显式装配其 registry 与 `get_agent`。
+
+### `WorldFactSink`（world → WorldStage 的窄投递端口）
+
+```python
+class WorldFactSink(Protocol):
+    async def submit(self, fact: d.Stimulus) -> bool: ...
+```
+
+- world 任务只提交**规范化、强类型**事实（如 `WorldObservation`）；不直接调用 Agent。
+
+### `DueEventProvider`（对应 Issue #76）
+
+```python
+class DueEventProvider(Protocol):
+    def list_due(self, *, character_id: str, user_id: str, now) -> tuple[DueEvent, ...]: ...
+    def claim(self, event_id: str, *, user_id: str, character_id: str, trigger_key: str) -> bool: ...
+    def release(self, event_id: str, *, user_id: str, character_id: str, trigger_key: str) -> None: ...
+```
+
+- ChatStage 仅对「活跃且空闲 ≥ 阈值（默认 30 秒）」的流检查；claim 成功后构造 `ProactivePromptDue` 调 `handle`。
+- claim 后入队失败或取消 → `release`，保证后续登录/周期可重试；成功 claim 防止登录路径与周期检查重复提醒。
+- `world_clock` 只唤醒扫描（每 300 秒），不构造角色回复。
+
+### 未决问题
+
+1. `world_id` 的来源与多世界装配方式。
+2. 无即时通道时 world 输出的支持/拒绝策略与 `output_started` 语义。
+3. 计划执行复用同一串行 worker，还是每次 plan 一个 execution。
+4. `trigger_key` 生成规则与空闲阈值配置键/默认值放置层级。
