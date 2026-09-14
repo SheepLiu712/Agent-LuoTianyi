@@ -9,6 +9,15 @@
 
 ## 已完成事实
 
+### 2026-09-14 QQ 凭据维护不变量验证（26）GREEN
+
+- 交付行为：为 `QQMusicCredentialRefreshTask` 补充不变量测试——默认 21600 秒周期且启动立即执行；共享凭据路径按规范化去重只检查一次；无已初始化凭据时 skipped（`credential_count=0`）；多文件按文件数计数；部分失败返回 failure 并记录 `failed_characters`；`ensure_dependencies` 要求 `system_runtime` 与非空学歌任务；任务不持有 `agent_runtime`，保持纯机械。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #85 为验证工单，无运行时行为变化；不制造人工 Red。
+- commit 或 PR：分支 `test/world-26-qq-credential`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_learn_sing_songs.py -q` 为 58 passed；`python -m pytest tests/world -q` 为 120 passed、2 skipped。
+- 未验证范围：未运行真实 QQ Music 网络刷新或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
+
 ### 2026-09-06 门面公共入口与请求分流整理
 
 - 交付内容：两个公共方法紧随 `__init__`；handle 入口直接登记请求，已有请求在 `_handle_existing_request` 处理后提前返回，新请求进入 `_process_request`。新处理和计划恢复共用处理权、交付及结算生命周期，原 `_handle_registered` 已删除；保留工作区已有的参数类型注解。
