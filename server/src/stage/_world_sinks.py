@@ -8,9 +8,6 @@ import src.domain.agent as d
 
 class _WorldStagePort(Protocol):
     @property
-    def interaction_revision(self) -> int: ...
-
-    @property
     def interaction_id(self) -> str: ...
 
     @property
@@ -55,15 +52,13 @@ class _WorldPlanSink:
 
     async def emit(self, plan: d.ActionPlan) -> d.PlanReceipt:
         request, stage = self._request, self._stage
-        if (self.closed or request.cancellation.is_cancelled
-                or request.interaction.interaction_revision != stage.interaction_revision):
+        if self.closed or request.cancellation.is_cancelled:
             raise d.SinkRejectedError(
                 "request is stale", code=d.SinkRejectionCode.STALE_INTERACTION,
             )
         if (plan.origin_request_id != request.request_id
                 or plan.interaction_id != stage.interaction_id
                 or plan.target_character_id != stage.character_id
-                or plan.basis_interaction_revision != request.interaction.interaction_revision
                 or plan.plan_id in self.ids or plan.plan_ordinal != len(self.ids)):
             raise d.SinkRejectedError(
                 "plan identity mismatch", code=d.SinkRejectionCode.IDENTITY_MISMATCH,

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, final
 from uuid import uuid4
@@ -9,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
 from src.agent.context import ContextFactory, InteractionContext
+from src.agent.handlers.stimulus.world_activity import WORLD_ACTIVITY_STIMULUS_KINDS
 from src.domain.stage import StageState
 from src.utils.logger import get_logger
 
@@ -24,6 +26,9 @@ if TYPE_CHECKING:
     from src.agent.facade import Agent
 
 
+ExecutionFinishedCallback = Callable[[d.ActionPlan, d.ExecutionReport], None]
+
+
 @final
 class WorldStage:
     """长期协调一个角色在一个世界中的事实处理与串行计划执行。"""
@@ -32,6 +37,7 @@ class WorldStage:
         self, *, character_id: str, world_id: str, agent: Agent,
         context: InteractionContext, config: dict[str, int | float] | None = None,
         timezone_name: str = "Asia/Shanghai",
+        on_execution_finished: ExecutionFinishedCallback | None = None,
     ) -> None:
         if any(not isinstance(value, str) or not value.strip() for value in (character_id, world_id)):
             raise ValueError("character_id and world_id must be nonblank")
@@ -57,6 +63,7 @@ class WorldStage:
         )
         self._execution: d.ExecutionContext | None = None
         self._output_sink = NoChannelOutputSink()
+        self._on_execution_finished = on_execution_finished
         self._fact_sink = _WorldFactSink(self)
         self._closed = asyncio.Event()
         self._worker = asyncio.create_task(self._execution_worker(), name="world-stage-execution")
@@ -67,12 +74,14 @@ class WorldStage:
         cls, *, character_id: str, world_id: str, agent: Agent,
         context_factory: ContextFactory, config: dict[str, int | float] | None = None,
         timezone_name: str = "Asia/Shanghai",
+        on_execution_finished: ExecutionFinishedCallback | None = None,
     ) -> WorldStage:
         """创建并接管无用户世界上下文；构造失败时关闭上下文。"""
         context = await context_factory.create(str(uuid4()), user_id=None)
         try:
             return cls(character_id=character_id, world_id=world_id, agent=agent,
-                       context=context, config=config, timezone_name=timezone_name)
+                       context=context, config=config, timezone_name=timezone_name,
+                       on_execution_finished=on_execution_finished)
         except BaseException:
             await context.close()
             raise
@@ -113,7 +122,11 @@ class WorldStage:
         if (not isinstance(fact, d.Stimulus) or self._state is not StageState.ONLINE
                 or fact.source is not d.StimulusSource.WORLD or fact.user_id is not None
                 or self.character_id not in fact.target_character_ids
-                or fact.stimulus_id in self._pending or len(self._handles) >= self._config.max_stimuli):
+                or fact.kind not in WORLD_ACTIVITY_STIMULUS_KINDS
+                or fact.stimulus_id in self._pending
+                or len(self._pending) >= self._config.max_stimuli
+                or len(self._handles) >= self._config.max_stimuli
+                or not self._owner_revision_is_current(fact)):
             return False
         self._revision += 1
         self._apply_owner_revision(fact)
@@ -127,6 +140,16 @@ class WorldStage:
         self._handles[request.request_id] = task
         task.add_done_callback(lambda done: self._handle_done(request.request_id, done))
         return True
+
+    def _owner_revision_is_current(self, fact: d.Stimulus) -> bool:
+        match fact:
+            case d.WorldObservation(world_revision=revision):
+                return revision >= self._world_revision
+            case d.ActivityObservation(activity_id=activity_id, activity_revision=revision):
+                return activity_id != self._activity_id or self._activity_revision is None \
+                    or revision >= self._activity_revision
+            case _:
+                return True
 
     def _apply_owner_revision(self, fact: d.Stimulus) -> None:
         match fact:
@@ -173,6 +196,8 @@ class WorldStage:
             raise ValueError("handling report does not match request")
         for stimulus_id in report.consumed_pending_stimulus_ids:
             self._pending.pop(stimulus_id, None)
+        if report.request_status is d.HandlingRequestStatus.FAILED and not report.retryable:
+            self._pending.pop(request.stimulus.stimulus_id, None)
 
     def _handle_done(self, request_id: str, task: asyncio.Task[None]) -> None:
         self._handles.pop(request_id, None)
@@ -201,7 +226,14 @@ class WorldStage:
                     current_interaction_revision=self._revision, cancellation=d.CancellationToken(),
                 )
                 self._execution = context
-                await self._agent.realize_action_plan(plan, context, self._output_sink)
+                report = await self._agent.realize_action_plan(plan, context, self._output_sink)
+                if report.status is not d.ExecutionStatus.COMPLETED:
+                    self._logger.error(
+                        "WorldStage realize stopped plan=%s code=%s",
+                        plan.plan_id, report.error_code,
+                    )
+                if self._on_execution_finished is not None:
+                    self._on_execution_finished(plan, report)
             except asyncio.CancelledError:
                 raise
             except Exception:

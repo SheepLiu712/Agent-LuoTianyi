@@ -1,107 +1,18 @@
 """长期 WorldStage 的事实结算、计划串行与关闭行为。"""
 import asyncio
-from datetime import datetime, timezone
-from types import SimpleNamespace
-from uuid import uuid4
 
 import pytest
+from world_stage_fakes import (
+    RecordingAgent,
+    action_plan,
+    create_stage,
+    handling_report,
+    world_observation,
+)
 
 import src.domain.agent as d
-from src.agent.context import RecalledMemoryContext
 from src.domain.stage import StageState
-from src.stage import NoChannelOutputSink, WorldStage
-
-
-def world_observation(*, stimulus_id: str | None = None, revision: int = 1) -> d.WorldObservation:
-    return d.WorldObservation(
-        stimulus_id=stimulus_id or str(uuid4()), schema_version=1,
-        occurred_at=datetime.now(timezone.utc), source=d.StimulusSource.WORLD,
-        target_character_ids=("luotianyi",), user_id=None, ephemeral=False,
-        observation_kind=d.WorldObservationKind(value="weather"),
-        fact=d.WorldFact(fact_id=str(uuid4()), summary="晴朗"), evidence_refs=(),
-        world_revision=revision,
-    )
-
-
-def handling_report(request: d.HandleStimulusRequest, *, plans: tuple[str, ...] = ()) -> d.HandlingReport:
-    pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
-    consumed = (request.stimulus.stimulus_id,)
-    return d.HandlingReport(
-        request_id=request.request_id, trigger_stimulus_id=request.stimulus.stimulus_id,
-        basis_interaction_revision=request.interaction.interaction_revision,
-        request_status=d.HandlingRequestStatus.COMPLETED,
-        considered_pending_stimulus_ids=pending, consumed_pending_stimulus_ids=consumed,
-        retained_pending_stimulus_ids=tuple(item for item in pending if item not in consumed),
-        emitted_plan_ids=plans, error_code=None, retryable=False,
-    )
-
-
-def action_plan(request: d.HandleStimulusRequest, ordinal: int = 0) -> d.ActionPlan:
-    return d.ActionPlan(
-        plan_id=str(uuid4()), origin_request_id=request.request_id, plan_ordinal=ordinal,
-        target_character_id="luotianyi", interaction_id=request.interaction.interaction_id,
-        basis_interaction_revision=request.interaction.interaction_revision,
-        source_stimulus_ids=(request.stimulus.stimulus_id,),
-        actions=(d.Say(action_id=str(uuid4()), content="你好", sound_content=None,
-                       prepared_audio_ref=None, tone=d.Tone(value="normal"), expression=None,
-                       delivery=d.OutputDelivery.CONVERSATION),),
-    )
-
-
-class ContextFactory:
-    def __init__(self) -> None:
-        self.created = []
-
-    async def create(self, interaction_id: str, *, user_id: str | None):
-        context = SimpleNamespace(
-            identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id,
-                                     character_id="luotianyi"),
-            recalled_memory=RecalledMemoryContext(), closed=False,
-        )
-
-        async def close() -> None:
-            context.closed = True
-
-        context.close = close
-        self.created.append(context)
-        return context
-
-
-class RecordingAgent:
-    def __init__(self) -> None:
-        self.requests: asyncio.Queue[d.HandleStimulusRequest] = asyncio.Queue()
-        self.executions = []
-        self.handle_gate: asyncio.Event | None = None
-        self.realize_gate: asyncio.Event | None = None
-        self.active_realizations = 0
-        self.max_active_realizations = 0
-
-    async def handle_stimulus(self, request, sink, *, context=None):
-        self.requests.put_nowait(request)
-        if self.handle_gate is not None:
-            await self.handle_gate.wait()
-        return handling_report(request)
-
-    async def realize_action_plan(self, plan, context, sink):
-        self.executions.append((plan, context, sink))
-        self.active_realizations += 1
-        self.max_active_realizations = max(self.max_active_realizations, self.active_realizations)
-        try:
-            if self.realize_gate is not None:
-                await self.realize_gate.wait()
-            return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
-        finally:
-            self.active_realizations -= 1
-
-
-async def create_stage(agent: RecordingAgent | None = None):
-    factory = ContextFactory()
-    actual_agent = agent or RecordingAgent()
-    stage = await WorldStage.create(
-        character_id="luotianyi", world_id="default", agent=actual_agent,
-        context_factory=factory,
-    )
-    return stage, actual_agent, factory
+from src.stage import NoChannelOutputSink
 
 
 @pytest.mark.asyncio
@@ -124,33 +35,6 @@ async def test_world_facts_keep_order_and_settle_by_stimulus_id():
     await stage.wait_idle()
     assert stage.pending_stimuli == ()
     assert first_request.interaction.interaction_revision < second_request.interaction.interaction_revision
-    await stage.close()
-
-
-@pytest.mark.asyncio
-async def test_stale_handle_plan_is_rejected_after_new_fact_revision():
-    emitted = asyncio.Event()
-    release = asyncio.Event()
-
-    class StaleAgent(RecordingAgent):
-        async def handle_stimulus(self, request, sink, *, context=None):
-            self.requests.put_nowait(request)
-            if request.stimulus.stimulus_id == first.stimulus_id:
-                emitted.set()
-                await release.wait()
-                with pytest.raises(d.SinkRejectedError) as error:
-                    await sink.emit(action_plan(request))
-                assert error.value.code is d.SinkRejectionCode.STALE_INTERACTION
-            return handling_report(request)
-
-    first, second = world_observation(revision=1), world_observation(revision=2)
-    stage, agent, _ = await create_stage(StaleAgent())
-    assert await stage.fact_sink.submit(first)
-    await emitted.wait()
-    assert await stage.fact_sink.submit(second)
-    release.set()
-    await stage.wait_idle()
-    assert agent.executions == []
     await stage.close()
 
 

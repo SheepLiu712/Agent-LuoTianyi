@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-
 _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "agent" / "test_handling_preparation.py").resolve(),
     (Path(__file__).parent / "stage" / "test_concurrent_handling.py").resolve(),
     (Path(__file__).parent / "agent" / "test_interruptibility.py").resolve(),
     (Path(__file__).parent / "stage" / "test_chat_stage.py").resolve(),
     (Path(__file__).parent / "stage" / "test_world_stage.py").resolve(),
+    (Path(__file__).parent / "stage" / "test_world_stage_contracts.py").resolve(),
     (Path(__file__).parent / "adapter" / "test_websocket_adapter.py").resolve(),
     (Path(__file__).parent / "test_websocket_delivery.py").resolve(),
     (Path(__file__).parent / "test_websocket_auth_limits.py").resolve(),
