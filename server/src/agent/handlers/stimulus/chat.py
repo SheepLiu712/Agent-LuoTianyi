@@ -6,8 +6,13 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.agent.context.models import ConversationEntry, SongContent, TextContent
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.cognitive import ResponseCompositionSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive import (
+    ExplicitMemoryIntentSkill,
+    ResponseCompositionSkill,
+    TextPreprocessingSkill,
+)
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.agent.skills.reflection import ReflectionSkill
 from src.utils.enum_type import ConversationSource
 
@@ -36,7 +41,7 @@ class ChatPreprocessingHandler:
             terms = self._understanding.extract_terms(stimulus.text)
             entry = ConversationEntry(
                 entry_id=str(uuid4()),
-                timestamp=datetime.now(),
+                timestamp=datetime.now(),  # noqa: DTZ005 - 存储契约要求服务器本地朴素时间。
                 source=ConversationSource.USER.value,
                 content=TextContent(stimulus.text, terms),
             )
@@ -95,11 +100,11 @@ def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
         if draft.sing is not None:
             song, segment = draft.sing
             text = f"{draft.content}\n{draft.lyrics}".strip() if draft.lyrics else draft.content
-            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
+            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),  # noqa: DTZ005
                 source=ConversationSource.AGENT.value,
                 content=SongContent(text, song, segment)))
         elif draft.content.strip():
-            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
+            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),  # noqa: DTZ005
                 source=ConversationSource.AGENT.value, content=TextContent(draft.content)))
     return tuple(entries)
 
@@ -108,16 +113,45 @@ class ChatReplyHandler:
     """到期批次回复：生成回复、落库并交付有序 Say/Sing 计划。"""
 
     def __init__(self, composition: ResponseCompositionSkill,
-                 understanding: TextPreprocessingSkill) -> None:
-        """注入回复生成技能与文本预处理技能（用于演唱尝试线索）。"""
+                 understanding: TextPreprocessingSkill,
+                 memory_intent: ExplicitMemoryIntentSkill | None = None,
+                 memory_commit: IntentionalMemoryCommit | None = None) -> None:
+        """注入回复生成、文本预处理以及可选的明确记忆识别与提交技能。"""
         self._composition = composition
         self._understanding = understanding
+        self._memory_intent = memory_intent
+        self._memory_commit = memory_commit
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """按接收顺序把整批输入作为一次回复：召回→生成→落库→交付计划，并按 ID 消费。"""
         pending = tuple(s.stimulus_id for s in request.interaction.pending_stimuli)
         reply_topic = "\n".join(
             item.text.strip() for item in request.prepared_inputs if item.text and item.text.strip())
+        memory_content = (
+            self._memory_intent.detect(reply_topic)
+            if reply_topic and self._memory_intent is not None
+            else None
+        )
+        if memory_content is not None:
+            identity = plans.context.identity
+            if identity.user_id is None or self._memory_commit is None:
+                return replace(
+                    _report(request), request_status=d.HandlingRequestStatus.FAILED,
+                    error_code=d.HandlingErrorCode.INTERNAL_ERROR,
+                )
+            await self._memory_commit.commit(
+                character_id=identity.character_id,
+                user_id=identity.user_id,
+                content=memory_content,
+            )
+            action = d.Say(
+                action_id=f"{request.request_id}-memory-ack",
+                content="我记住了。", sound_content="我记住了。", prepared_audio_ref=None,
+                tone=d.Tone(value="normal"), expression=None,
+                delivery=d.OutputDelivery.CONVERSATION,
+            )
+            await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=(action,)))
+            return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
         drafts: tuple = ()
         if reply_topic:
             await plans.emit(ActionPlanDraft(
