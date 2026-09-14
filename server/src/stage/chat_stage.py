@@ -3,27 +3,32 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
-from collections.abc import Callable
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
+from src.agent.context import ContextFactory, InteractionContext
 from src.domain.stage import (
-    AgentPresentationChanged, AgentPresentationState, CancelDelivery,
-    StageOutput, StageState, StageTerminationResult,
+    AgentPresentationChanged,
+    AgentPresentationState,
+    CancelDelivery,
+    StageOutput,
+    StageState,
+    StageTerminationResult,
 )
 from src.utils.logger import get_logger
-from src.agent.context import ContextFactory, InteractionContext
+
 from ._config import _StageConfig
-from ._models import _PendingInput, _InputStatus, _ReplyAttempt
+from ._models import _InputStatus, _PendingInput, _ReplyAttempt
 from ._sinks import StimulusInputSink, _AgentOutputSink, _PlanSink
 
 if TYPE_CHECKING:
-    from src.agent.facade import Agent
     from src.adapter.websocket import WebSocketAdapter
+    from src.agent.facade import Agent
 
 
 _CONTENT = (d.TextMessage, d.ImageMessage, d.VoiceMessage)
@@ -477,6 +482,9 @@ class ChatStage:
         self._first_login_timer = None
         if not self._first_login_pending or self._state is not StageState.ONLINE:
             return
+        if len(self._handles) >= self._config.max_stimuli:
+            self._schedule_first_login()
+            return
         self._first_login_pending = False
         stimulus = d.ProactivePromptDue(
             **self._stage_stimulus_fields(),
@@ -488,8 +496,15 @@ class ChatStage:
         self._launch_handle(self._make_request(stimulus), lambda request, report: None)
 
     def _stage_stimulus_fields(self) -> dict:
-        return dict(stimulus_id=str(uuid4()), schema_version=1, occurred_at=datetime.now(timezone.utc),
-                    source=d.StimulusSource.STAGE, target_character_ids=(self.character_id,), user_id=self.user_id, ephemeral=True)
+        return {
+            "stimulus_id": str(uuid4()),
+            "schema_version": 1,
+            "occurred_at": datetime.now(timezone.utc),
+            "source": d.StimulusSource.STAGE,
+            "target_character_ids": (self.character_id,),
+            "user_id": self.user_id,
+            "ephemeral": True,
+        }
 
     def _invalidate_deadline(self) -> None:
         self._schedule_revision += 1

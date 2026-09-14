@@ -2,21 +2,22 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from src.domain.agent import InteractionEndingReason
 from src.agent.context import ContextFactory
+from src.domain.agent import InteractionEndingReason
 from src.domain.stage import StageState
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
+
 from .chat_stage import ChatStage
 
 if TYPE_CHECKING:
-    from src.agent.facade import Agent
     from src.adapter.websocket import WebSocketAdapter
+    from src.agent.facade import Agent
     from src.system.user_interface.websocket_service import WebSocketConnection
 
 
@@ -25,7 +26,7 @@ class _ManagerConfig:
     offline_timeout: float
 
     @classmethod
-    def from_dict(cls, config: dict) -> "_ManagerConfig":
+    def from_dict(cls, config: dict) -> _ManagerConfig:
         if not isinstance(config, dict):
             raise TypeError("stage manager config must be a dictionary")
         timeout = config.get("offline_timeout", 60.0)
@@ -53,14 +54,23 @@ class StageManager:
         self._lock = asyncio.Lock()
         self._closed = False
         self._closing: asyncio.Task[None] | None = None
-        self._pending_first_login_users: set[str] = set()
+        self._pending_first_logins: set[tuple[str, str]] = set()
 
-    def record_login(self, user_id: str, *, elapsed_from_last_login: float | None) -> None:
-        """记录认证登录；当前仅首次登录进入新 Stage 主动刺激链。"""
-        if not isinstance(user_id, str) or not user_id.strip():
-            raise ValueError("user_id must be nonblank")
+    def record_login(
+        self,
+        user_id: str,
+        character_id: str,
+        *,
+        elapsed_from_last_login: float | None,
+    ) -> None:
+        """记录目标角色的认证登录；当前仅首次登录进入新 Stage 主动刺激链。"""
+        if any(
+            not isinstance(value, str) or not value.strip()
+            for value in (user_id, character_id)
+        ):
+            raise ValueError("user_id and character_id must be nonblank")
         if elapsed_from_last_login is None:
-            self._pending_first_login_users.add(user_id)
+            self._pending_first_logins.add((user_id, character_id))
 
     async def connect(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
         """取得或创建 connection 用户与 character_id 的 Stage，完成绑定后返回；保留期内复用原实例。"""
@@ -96,8 +106,8 @@ class StageManager:
                 self._schedule_expiry(stage)
                 raise
             self._connections[stage] = connection
-            if key[0] in self._pending_first_login_users:
-                self._pending_first_login_users.remove(key[0])
+            if key in self._pending_first_logins:
+                self._pending_first_logins.remove(key)
                 stage.schedule_first_login()
             return stage
 
