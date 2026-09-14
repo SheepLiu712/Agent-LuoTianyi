@@ -64,3 +64,29 @@
 ## 当前导出注意事项
 
 `server/src/capabilities/__init__.py` 当前的导入与 `__all__` 不一致：实际导入了 `CapabilityManager`，但 `__all__` 中含未定义的 `CapabilityRegistry` 且漏掉 `CapabilityManager`。修复前不要把星号导入结果当成稳定协议。
+
+## 目标接口（草案，待评审，未实现）
+
+以下为 Issue #68（09 图片预处理落库）所需的**媒体引用解析**端口草案。**当前源码未实现**，不得按“当前接口”调用；确认后需同步本页、`system` 装配说明与总 SPEC 4.2。
+
+### `MediaResolver`（对应 Issue #68）
+
+```python
+@dataclass(frozen=True)
+class ResolvedMedia:
+    data: bytes
+    mime_type: str
+
+class MediaResolver(Protocol):
+    def resolve(self, media_ref: MediaRef) -> ResolvedMedia: ...
+```
+
+- **调用者**：Agent 的图片/语音理解技能（构造时注入）；Adapter 仍只把外部消息转成携带 `MediaRef` 的 Stimulus。
+- **输入/输出**：名义 `media_id` → 编码字节与 MIME；**不返回**本地路径、URL 凭据或供应商对象。
+- **副作用**：只读，无持久化、无网络写。
+- **正常行为**：按 `media_id` 返回内容与 MIME。
+- **异常行为**：未知 / 过期 / 未授权 → 稳定、可分类的错误；内容为空 → 明确失败，不静默返回空。
+- **归属备选**：A. capabilities 提供并由 `SystemRuntime` 装配（倾向）；B. Adapter 解析后写受控缓存，Agent 只读引用；C. 预处理阶段外部解析落库。
+- **未决问题**：授权主体（用户/角色）；TTL 与清理；大小/超时上限；图片与语音是否复用同一端口；解析失败时 09 的行为（按现行「不自动重试」应为 `FAILED/INTERNAL_ERROR` 并丢弃该输入）。
+
+> 与 capabilities 现有 `image_understanding.describe_image(image_base64)` 的关系：`MediaResolver` 只负责“取到内容”，理解仍由 `image_understanding` 完成，二者不是同一职责。
