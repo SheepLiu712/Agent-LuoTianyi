@@ -287,12 +287,16 @@ Stage 侧已实现，本切片以真实 handler 复验并补证据：
 
 ### 16 首次登录欢迎到真实 handler（#75）
 
-- 连接建立、ChatStage 就绪后再处理登录刺激（避免与历史消息拉取混在一起）。
-- 首登（`elapsed_from_last_login is None`）：Stage 计时约 1 秒后，`emit` 两条有序 `Say(prepared_audio_ref=..., expression="normal", delivery=CONVERSATION)`，并用 `plans.context.conversation.append(...)` 持久化欢迎语；每条都是 final package。
+> **归属（owner 反馈）**：首次登录的**反馈是 Agent 的行为**，Stage 只负责编排 Agent、不实现具体行为。Stage 只做「何时触发」（就绪判定与计时）并投递登录事实；欢迎的内容、条数、顺序、表情与落库都由 Agent handler 决定，Stage 不感知。
+
+- 连接建立、ChatStage 就绪后再触发登录刺激（避免与历史消息拉取混在一起）；Stage 只做就绪判定与计时，不决定问候内容。
+- 首登（`elapsed_from_last_login is None`）：**Agent 侧首次登录 handler** `emit` 两条有序 `Say(prepared_audio_ref=..., expression="normal", delivery=CONVERSATION)`，并用 `plans.context.conversation.append(...)` 持久化欢迎语；每条都是 final package。读写都在 Agent 侧完成，Stage 不参与。
 - 迁移自 `chat_session/dependency/proactive_topic_maker.py` 的 FIRST_LOGIN 分支；`RETURN_LOGIN`（久别问候）保持关闭，不因迁移复活。
-- 测试：`tests/stage`（延迟与时点、两条有序、持久化）。
+- 测试：`tests/agent`（两条有序、持久化、文案来自 manifest）+ `tests/stage`（触发时点；Stage 侧不含欢迎行为分支）。
 
 ### 17 登录与周期提醒 claim/空闲规则（#76）
+
+> **归属（owner 反馈）**：Stage 只做编排——唤醒扫描、候选过滤、claim/释放、构造强类型刺激（`ProactivePromptDue`）后交给 Agent；提醒内容与表达由 Agent handler 决定，Stage 不实现具体行为。
 
 - `world/clock` 每 300 秒只做唤醒扫描（`world/proactive_topic_task.py`），不再直接调 `ProactiveTopicMaker` / `TopicReplier`。
 - ChatStage 拥有活跃流与空闲阈值（默认 30 秒）：扫描到期 event，过滤其它角色与 personal 用户、排除已按 `(event_id, user_id, character_id, trigger_key)` 通知的记录；每个候选随机取一，原子 claim 后构造 `ProactivePromptDue` → `handle`。
