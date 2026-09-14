@@ -1,6 +1,17 @@
 """世界与活动事实的受控处理入口。"""
+from typing import Final
+
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import PlanEmitter
+
+WORLD_ACTIVITY_STIMULUS_KINDS: Final = (
+    d.StimulusKind.WORLD_OBSERVATION,
+    d.StimulusKind.ACTIVITY_OBSERVATION,
+    d.StimulusKind.DYNAMIC_OBSERVED,
+    d.StimulusKind.DIARY_PLANNING_DUE,
+    d.StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
+    d.StimulusKind.SONG_LEARNED,
+)
 
 
 class WorldActivityHandler:
