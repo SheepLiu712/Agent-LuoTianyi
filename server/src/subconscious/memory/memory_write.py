@@ -6,18 +6,16 @@ Memory Write Module
 """
 
 import json
-from typing import List, Dict, Any
-from src.utils.logger import get_logger
-from src.system.database.vector_store import VectorStore, Document
-from src.utils.llm.llm_module import LLMModule
 import time
-from src.utils.asyncio_helpers import run_sync_owned
+from typing import TYPE_CHECKING, Any
+
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
-
 from src.domain.memory_type import MemoryUpdateCommand
-
-from typing import TYPE_CHECKING
+from src.system.database.vector_store import Document, VectorStore
+from src.utils.asyncio_helpers import run_sync_owned
+from src.utils.llm.llm_module import LLMModule
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.system.database.services.memory_store import MemoryStore
@@ -27,7 +25,7 @@ logger = get_logger("MemoryWriter")
 
 
 class MemoryWriter:
-    def __init__(self, config: Dict[str, Any], llm_module: LLMModule):
+    def __init__(self, config: dict[str, Any], llm_module: LLMModule):
         self.config = config
         self.llm = llm_module
 
@@ -38,7 +36,7 @@ class MemoryWriter:
         user_id: str,
         history: str,
         current_dialogue: str = "",
-        related_memories: List[str] | None = None,
+        related_memories: list[str] | None = None,
         owner_character_id: str = "luotianyi",
         commit: bool = True
     ):
@@ -55,7 +53,7 @@ class MemoryWriter:
         # then write only non-duplicate items.
         user_items = memory_payload.get("user_memory", [])
         event_items = memory_payload.get("event_memory", [])
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "payload": memory_payload,
             "items": [],
         }
@@ -126,8 +124,8 @@ class MemoryWriter:
         self,
         history: str,
         current_dialogue: str,
-        related_memories: List[str],
-    ) -> Dict[str, Any]:
+        related_memories: list[str],
+    ) -> dict[str, Any]:
         """
         使用 LLM 从对话历史中提取有价值的记忆内容。
 
@@ -153,7 +151,7 @@ class MemoryWriter:
             payload = self._parse_memory_json_response(response)
             logger.debug(f"Memory extraction payload: {payload}")
             return payload
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 旧 LLM 边界将任意提取失败降级为空载荷。
             if response:
                 logger.warning(
                     "Error generating memory payload: "
@@ -163,7 +161,7 @@ class MemoryWriter:
                 logger.warning(f"Error generating memory payload: {e}")
             return empty_payload
 
-    def _response_excerpt(self, response: str, limit: int = 1000) -> Dict[str, Any]:
+    def _response_excerpt(self, response: str, limit: int = 1000) -> dict[str, Any]:
         raw = str(response or "")
         if len(raw) <= limit * 2:
             return {
@@ -176,7 +174,7 @@ class MemoryWriter:
             "suffix": raw[-limit:],
         }
 
-    def _parse_memory_json_response(self, response: str) -> Dict[str, List[str]]:
+    def _parse_memory_json_response(self, response: str) -> dict[str, list[str]]:
         """解析 LLM 返回的 JSON，兼容 ```json 代码块包装。"""
         raw = (response or "").strip()
 
@@ -190,16 +188,16 @@ class MemoryWriter:
 
         data = json.loads(raw)
         if not isinstance(data, dict):
-            raise ValueError("memory payload must be a JSON object")
+            raise TypeError("memory payload must be a JSON object")
 
         user_memory = data.get("user_memory", [])
         event_memory = data.get("event_memory", [])
 
         if not isinstance(user_memory, list) or not isinstance(event_memory, list):
-            raise ValueError("user_memory/event_memory must be lists")
+            raise TypeError("user_memory/event_memory must be lists")
 
-        def _clean_items(items: List[Any]) -> List[str]:
-            cleaned: List[str] = []
+        def _clean_items(items: list[Any]) -> list[str]:
+            cleaned: list[str] = []
             for item in items:
                 text = str(item or "").strip()
                 if text:
@@ -221,15 +219,33 @@ class MemoryWriter:
         commit: bool = True,
     ) -> bool:
         """写入用户长期记忆：若存在相似记忆则跳过。"""
+        _, committed = await self.commit_user_memory(
+            vector_store=vector_store, memory_store=memory_store, user_id=user_id,
+            content=content, owner_character_id=owner_character_id, commit=commit,
+        )
+        return committed
+
+    async def commit_user_memory(
+        self,
+        vector_store: VectorStore,
+        memory_store: "MemoryStore",
+        user_id: str,
+        content: str,
+        owner_character_id: str = "luotianyi",
+        commit: bool = True,
+    ) -> tuple[str, bool]:
+        """写入用户事实或返回现有向量标识；第二项表示本次是否新写入。"""
         text = (content or "").strip()
         if not text:
-            return False
+            return "", False
 
         threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
-        is_dup = await self._has_similar_user_memory(vector_store, user_id, text, threshold)
-        if is_dup:
+        existing_id = await self._similar_user_memory_id(
+            vector_store, user_id, text, threshold, owner_character_id,
+        )
+        if existing_id is not None:
             logger.debug(f"Skip duplicate user_memory for user {user_id}: {text[:50]}")
-            return False
+            return existing_id, False
 
         today = time.strftime("%Y-%m-%d")
         doc = Document(
@@ -240,12 +256,13 @@ class MemoryWriter:
                 "event_date": today,
                 "memory_type": "user_memory",
                 "user_id": user_id,
+                "owner_character_id": owner_character_id,
             },
         )
         ids = await run_sync_owned(vector_store.add_documents, [doc])
         update_cmd = MemoryUpdateCommand(type="write_user_memory", content=text, uuid=ids[0] if ids else None)
         await run_sync_owned(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
-        await run_sync_owned(
+        record_id = await run_sync_owned(
             memory_store.write_agent_memory_record,
             DomainMemoryRecord(
                 owner_character_id=owner_character_id,
@@ -262,7 +279,11 @@ class MemoryWriter:
             embedding_ids=ids or [],
             commit=commit,
         )
-        return True
+        if not record_id:
+            raise RuntimeError("canonical memory commit failed")
+        if not ids:
+            raise RuntimeError("memory vector commit returned no identifier")
+        return ids[0], True
 
     async def write_event_memory(
         self,
@@ -322,15 +343,31 @@ class MemoryWriter:
         user_id: str,
         content: str,
         threshold: float,
+        owner_character_id: str = "luotianyi",
     ) -> bool:
+        return await self._similar_user_memory_id(
+            vector_store, user_id, content, threshold, owner_character_id,
+        ) is not None
+
+    async def _similar_user_memory_id(
+        self, vector_store: VectorStore, user_id: str, content: str, threshold: float,
+        owner_character_id: str,
+    ) -> str | None:
+        """返回相似用户事实的现有向量标识，没有命中时返回 None。"""
         results = await vector_store.search(user_id, content, k=5)
         for doc, score in results:
             metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
             if metadata.get("memory_type") != "user_memory":
                 continue
+            stored_owner = metadata.get("owner_character_id")
+            if stored_owner not in (None, owner_character_id):
+                continue
+            if stored_owner is None and owner_character_id != "luotianyi":
+                continue
             if score >= threshold:
-                return True
-        return False
+                identifier = str(getattr(doc, "id", "") or "")
+                return identifier or self._normalize_text(doc.get_content())
+        return None
 
     async def _is_same_day_duplicate_event_memory(
         self,
@@ -356,7 +393,7 @@ class MemoryWriter:
         self,
         vector_store: VectorStore,
         user_id: str,
-        items: List[str],
+        items: list[str],
     ) -> set:
         """Batch check: collect all existing user_memory text in one search pass."""
         seen = set()
@@ -379,7 +416,7 @@ class MemoryWriter:
         self,
         vector_store: VectorStore,
         user_id: str,
-        items: List[str],
+        items: list[str],
         event_date: str,
     ) -> set:
         """Batch check: collect all same-day event_memory text in one search pass."""
@@ -387,7 +424,6 @@ class MemoryWriter:
         if not items:
             return seen
         results = await vector_store.search(user_id, items[0], k=20)
-        target_norm = None
         for doc, _ in results:
             metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
             if metadata.get("memory_type") != "event_memory":
