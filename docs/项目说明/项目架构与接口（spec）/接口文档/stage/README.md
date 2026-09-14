@@ -53,6 +53,7 @@ StageState 为 ONLINE、OFFLINE、TERMINATING、TERMINATED。初始为 OFFLINE�
 `StageManager(*, get_agent: Callable[[str], Agent], adapter: WebSocketAdapter, get_context_factory: Callable[[str], ContextFactory], config: dict | None = None)` 持有所有 Stage。私有配置类型校验 `offline_timeout=60.0` 为非负有限秒数；`stage` 子配置原样交给 ChatStage。
 
 - `await connect(connection, character_id) -> ChatStage`：取得或创建 Stage，并完成 adapter 绑定。
+- `record_login(user_id, character_id, *, elapsed_from_last_login) -> None`：按 `(user_id, character_id)` 记录登录事实；首次登录 marker 对重复记录幂等，每个目标角色的 Stage 只消费一次。Stage 就绪后的同步窗口到期时若 handle 数已达 `max_stimuli`，保留 marker 并重新计时，容量可用后再投递 `ProactivePromptDue(first_login)`。
 - `await disconnect(connection) -> None`：标记连接失效、解除该连接当前绑定，并启动离线回收计时；不影响已重连的 Stage。
 - `await close() -> None`：停止接入，取消回收计时，终止全部 Stage，等待已经开始的回收及投递清理。
 
