@@ -108,6 +108,10 @@ class StageContextFactory:
         from src.agent.context import RecalledMemoryContext
         context.recalled_memory = RecalledMemoryContext()
         context.close = close
+        entries = []
+        async def append(values):
+            entries.extend(values)
+        context.conversation = SimpleNamespace(append=append, entries=entries)
         self.created.append(context)
         return context
 

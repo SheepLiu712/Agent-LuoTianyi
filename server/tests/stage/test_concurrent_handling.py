@@ -24,6 +24,11 @@ def ids(req):
     return tuple(s.stimulus_id for s in req.interaction.pending_stimuli)
 
 
+class _Understanding:
+    def extract_terms(self, text):
+        return ()
+
+
 def touch():
     return stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="head"),), click_frequency=None)
 
@@ -289,7 +294,7 @@ async def test_real_agent_context_access_plan_delivery_and_reflection_after_exec
             return d.ActionResult(action_id=action.action_id, status=d.ActionExecutionStatus.COMPLETED,
                 error_code=None, irreversible_effect_committed=False, effect_ref=None)
     agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.TEXT_MESSAGE, Preprocess()), (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
+        (d.StimulusKind.TEXT_MESSAGE, Preprocess(_Understanding())), (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
         (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())], reflection_handler=Reflect()),
         action_router=ActionRouter([(d.ActionKind.SAY, Execute())]))
     stage, _, adapter, _, _ = await setup(agent)

@@ -9,6 +9,17 @@
 
 ## 已完成事实
 
+### 2026-09-14 文本预处理落库（08a）GREEN
+
+- 交付行为：`TextMessage` 经 `ChatPreprocessingHandler` 提取歌曲实体关键词，并借 `plans.context.conversation.append` 落库一条 `source=user` 的正式对话记录，返回 `PreprocessedInput.conversation_entry_ids`；本次不交付计划、不消费 pending。缺少 context 时返回 `FAILED / INTERNAL_ERROR`，不静默跳过落库。图片、语音、typing、选图与触摸仍保持占位行为。
+- interface spec：无新增或扩大公开 interface；复用现有 `PreprocessedInput`、`InteractionContext.conversation`（`agent/context`），SPEC 已满足，无 SPEC commit。
+- 内部衔接：新增 `agent/skills/cognitive/TextPreprocessingSkill`（包装 `SongEntityLinker`），由 `Skills` 装配并注入 handler；`AgentRuntime` 传入 `agent.preprocessing` 配置。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片不制造人工失败测试，记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-08a-text-preprocessing`（本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`（Python 3.10，pytest 9.1.1）。`python -m pytest tests/agent/test_chat_preprocessing.py -q` 为 3 passed；`python -m pytest tests/agent tests/stage -q --tb=short` 为 236 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 821 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
+- 未验证范围：未运行真实 LLM/VLM/TTS、真机或生产数据库；批量回复（08c）与 Sing action handler（08b）尚未实现；生产聊天仍走旧 ChatStream（#66）。
+- 附带更新：`test_handling_preparation.py` 的“预处理不落库”占位断言随迁移改为“已落库且两次调用 id 不同”；`test_chat_stage.py` 的假 context 补 `conversation.append`；`test_concurrent_handling.py` 的 handler 子类注入预处理替身。
+
 ### 2026-09-06 门面公共入口与请求分流整理
 
 - 交付内容：两个公共方法紧随 `__init__`；handle 入口直接登记请求，已有请求在 `_handle_existing_request` 处理后提前返回，新请求进入 `_process_request`。新处理和计划恢复共用处理权、交付及结算生命周期，原 `_handle_registered` 已删除；保留工作区已有的参数类型注解。

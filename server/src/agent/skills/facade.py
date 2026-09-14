@@ -7,6 +7,7 @@ from typing import Any, TYPE_CHECKING, TypeVar, cast
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.capabilities.speech.streaming import AsyncTTS
 
+from .cognitive import TextPreprocessingSkill
 from .conversation.compaction import ConversationCompactionSkill
 
 if TYPE_CHECKING:
@@ -18,7 +19,8 @@ SkillT = TypeVar("SkillT")
 class Skills:
     """持有一个 AgentRuntime 内所有角色共享的技能实例。"""
 
-    def __init__(self, config: dict[str, Any], llm_service: LLMService, *, tts_engine: AsyncTTS) -> None:
+    def __init__(self, config: dict[str, Any], llm_service: LLMService, *, tts_engine: AsyncTTS,
+                 preprocessing_config: dict[str, Any] | None = None) -> None:
         """按 config 的技能分组初始化实例，并派发 llm_service 和已初始化的 tts_engine。"""
         if not isinstance(config, dict):
             raise TypeError("skills 必须是字典")
@@ -27,6 +29,7 @@ class Skills:
             ConversationCompactionSkill: ConversationCompactionSkill(
                 config.get("conversation_compaction", {}), llm_service,
             ),
+            TextPreprocessingSkill: TextPreprocessingSkill(preprocessing_config),
         }
 
     def get(self, skill_type: type[SkillT]) -> SkillT:

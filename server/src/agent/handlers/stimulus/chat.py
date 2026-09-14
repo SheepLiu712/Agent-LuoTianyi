@@ -1,6 +1,12 @@
-"""聊天处理占位：验证编排契约，不调用模型、不写库、不生成用户输出。"""
+"""聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
+from datetime import datetime
+from uuid import uuid4
+
 import src.domain.agent as d
+from src.agent.context.models import ConversationEntry, TextContent
 from src.agent.processing.plan_emitter import PlanEmitter
+from src.agent.skills.cognitive import TextPreprocessingSkill
+from src.utils.enum_type import ConversationSource
 
 
 def _report(request: d.HandleStimulusRequest, *, consume: bool = False,
@@ -14,15 +20,32 @@ def _report(request: d.HandleStimulusRequest, *, consume: bool = False,
 
 
 class ChatPreprocessingHandler:
-    """单刺激预处理和落库的占位入口；当前只返回原始文本，不执行持久化。"""
+    """单刺激预处理和落库；预处理完成不等于消费输入。"""
+
+    def __init__(self, understanding: TextPreprocessingSkill) -> None:
+        """注入文本语义预处理技能，用于提取歌曲实体等对话与检索线索。"""
+        self._understanding = understanding
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
-        """返回 request 的预处理占位结果；真实处理可通过 plans.context 使用本交互上下文。"""
+        """文本先理解并落库，再返回 READY 结果；不交付计划，不消费本批输入。"""
         stimulus = request.stimulus
-        prepared = None
-        if isinstance(stimulus, (d.TextMessage, d.ImageMessage, d.VoiceMessage)):
-            prepared = d.PreprocessedInput(stimulus_id=stimulus.stimulus_id,
-                text=stimulus.text if isinstance(stimulus, d.TextMessage) else None)
+        if isinstance(stimulus, d.TextMessage):
+            terms = self._understanding.extract_terms(stimulus.text)
+            entry = ConversationEntry(
+                entry_id=str(uuid4()),
+                timestamp=datetime.now(),
+                source=ConversationSource.USER.value,
+                content=TextContent(stimulus.text, terms),
+            )
+            await plans.context.conversation.append((entry,))
+            prepared = d.PreprocessedInput(
+                stimulus_id=stimulus.stimulus_id, text=stimulus.text,
+                conversation_entry_ids=(entry.entry_id,),
+            )
+        elif isinstance(stimulus, (d.ImageMessage, d.VoiceMessage)):
+            prepared = d.PreprocessedInput(stimulus_id=stimulus.stimulus_id, text=None)
+        else:
+            prepared = None
         return _report(request, prepared=prepared)
 
 
