@@ -56,6 +56,7 @@ class _Message:
     done: asyncio.Future[None]
     items: deque[_Item] = field(default_factory=deque)
     accepted_end: bool = False
+    standalone: bool = False
     cancelled: bool = False
     started: bool = False
     ended: bool = False
@@ -74,7 +75,7 @@ class _ConnectionDelivery:
         self.task: asyncio.Task[None] | None = None
         self.closed = False
 
-    def submit(self, output: d.AgentOutput) -> asyncio.Future[None]:
+    def submit(self, output: d.AgentOutput, *, standalone: bool = False) -> asyncio.Future[None]:
         if self.closed or self.connection.is_closed:
             raise d.SinkRejectedError("connection is closed", code=d.SinkRejectionCode.SINK_CLOSED)
         key = (output.interaction_id, output.execution_id, output.action_id)
@@ -86,7 +87,7 @@ class _ConnectionDelivery:
                 or (message is None and len(self.messages) >= self.config.max_messages)):
             raise d.SinkRejectedError("connection output queue is full", code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
         if message is None:
-            message = _Message(key, output.delivery, completion(f"message={key}"))
+            message = _Message(key, output.delivery, completion(f"message={key}"), standalone=standalone)
             self.messages.append(message)
             self.by_key[key] = message
         future = completion(f"interaction={key[0]} execution={key[1]} sequence={output.sequence_no}")
@@ -196,7 +197,7 @@ class _ConnectionDelivery:
                 finally:
                     message.current = None
                     self._release(item)
-                if message.ended:
+                if message.ended or (message.standalone and not message.items):
                     self._finish(message)
         except Exception as error:
             get_logger(__name__).exception("WebSocket connection delivery stopped")

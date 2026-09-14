@@ -84,6 +84,14 @@ class Sing(Action):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class RestoreExpression(Action):
+    """独立恢复目标表情，并按指定呈现方式交付。"""
+    kind: ClassVar[ActionKind] = ActionKind.RESTORE_EXPRESSION
+    expression_id: str
+    delivery: OutputDelivery
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class WriteDiary(Action):
     """指定用户的当日日记正文，表达私密且禁止评论的日记发布决定。"""
     kind: ClassVar[ActionKind] = ActionKind.WRITE_DIARY

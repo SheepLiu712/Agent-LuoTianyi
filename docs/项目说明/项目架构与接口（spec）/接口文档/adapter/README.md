@@ -6,7 +6,7 @@
 
 构造：`WebSocketAdapter(config: dict | None = None, *, default_character_id: str = "luotianyi")`。私有配置类型校验每条连接的容量：`max_outputs=256`、`max_bytes=16777216`、`max_messages=64`，均为正整数。呈现状态控制任务也有数量上限。
 
-- `submit_output(output: StageOutput) -> asyncio.Future[None]`：同步接受业务输出或控制命令，返回实际发送结果。无连接、类型不支持或容量不足时抛出 `SinkRejectedError`。Future 成功表示服务端发送完成；取消表示输出被丢弃；异常表示发送失败。
+- `submit_output(output: StageOutput, *, standalone: bool = False) -> asyncio.Future[None]`：同步接受业务输出或控制命令，返回实际发送结果。`standalone` 只供独立表情恢复行动使用；无连接、类型不支持或容量不足时抛出 `SinkRejectedError`。Future 成功表示服务端发送完成；取消表示输出被丢弃；异常表示发送失败。
 - `receive_event(connection: WebSocketConnection, event: WSMessage) -> bool`：以认证身份转换事件，按绑定找到全部目标 Stage，再向其 `stimulus_input_sink` 投递。全部目标可接收才入队。无目标绑定或非法字段抛出 ValueError；容量或生命周期不允许接收时返回 False。
 - `await bind(stage: ChatStage, connection: WebSocketConnection) -> None`：校验用户身份并绑定；重绑先停止旧执行、清理旧投递，再通知 Stage 上线。
 - `await disconnect(stage: ChatStage, connection: WebSocketConnection | None = None) -> None`：拆除绑定，通知 Stage 离线，结算待发送输出并等待在途发送退出。指定 connection 时只解除这一连接；旧断线通知不会解除新连接。最后一个绑定移除后释放连接投递任务。
@@ -35,6 +35,8 @@
 `_protocol.py` 转换业务字段，`_delivery.py` 组装 ChatResponse。音频每包最多 48 KiB 原始字节，Base64 编码后发送。消息 UUID 来自交互、执行、行动身份；packet_sequence 在每条消息内从零递增。
 
 同一连接按完整消息顺序投递，一条消息的终止包之后才能发送下一条消息。不同连接独立。CONVERSATION 显示并保留聊天内容；EPHEMERAL_REACTION 不输出文字，使用 display_in_chat=false、is_ephemeral=true。结束不自动恢复表情。
+
+`standalone=True` 的独立表情恢复输出在没有剩余 item 时立即结束该消息，不等待 `MessageEndOutput`；`Say`/`Sing` 内嵌表情仍与原消息分组并等待既有终止包。本标记只改变服务端投递队列的消息结束判断，不改变 WebSocket payload 或协议字段。
 
 取消不会中断正在发送的单包。已经开始且尚未终止的消息，在当前包结束后发送文字、音频、表情均为空的终止包，error_code=TTS_CANCELLED。尚未开始的消息直接移除。该终止包位于后续消息之前。
 

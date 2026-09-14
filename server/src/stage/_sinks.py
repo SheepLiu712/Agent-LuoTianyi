@@ -66,7 +66,11 @@ class _AgentOutputSink:
         identity = (output.execution_id, output.action_id, output.delivery)
         if self.active is not None and self.active != identity:
             raise d.SinkRejectedError("previous message has no end", code=d.SinkRejectionCode.CONTENT_CONFLICT)
-        self.stage._send(output)
-        self.active = None if isinstance(output, d.MessageEndOutput) else identity
+        plan = self.stage._executing_plan
+        standalone = (isinstance(output, d.ExpressionOutput) and plan is not None
+                      and any(isinstance(action, d.RestoreExpression) and action.action_id == output.action_id
+                              for action in plan.actions))
+        self.stage._send(output, standalone=standalone)
+        self.active = None if standalone or isinstance(output, d.MessageEndOutput) else identity
         return d.OutputReceipt(execution_id=output.execution_id, sequence_no=output.sequence_no,
                                status=d.OutputAcceptanceStatus.ACCEPTED)

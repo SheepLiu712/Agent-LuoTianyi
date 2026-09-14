@@ -546,7 +546,7 @@ Stage 决定何时发起认知维护，通过 purpose=REFLECT 调用同一个 ha
 11. 打断权在 stage；Agent 只通过 cancellation 协作停止。PlanEmitter 不读取 stage 状态，stage-bound plan sink 校验 `basis_interaction_revision`。
 12. `UserTyping`、`ImageSelectionOpened`、`ImageSelectionClosed` 是协调刺激：其 request 可以完成，同时 consumed pending 为空、retained 包含全部待处理内容。
 13. `UserJoinedActivity`、`ActivityInterrupted`、Call/Realtime 刺激和 `CallInteractionSnapshot` 不在当前版本。
-14. `ChangeExpression` 只保留为 `Say`/`Sing` 内嵌值对象；没有独立 Action。`Say` 和 `Sing` 都可以同时产生表情输出。
+14. `ChangeExpression` 保留为表情输出值对象；`Say`/`Sing` 可内嵌它，同时允许独立 `RestoreExpression` Action 只用于显式表情恢复。`Say` 不隐含恢复。
 15. `HAPTIC` 和 `PerformHaptic` 不存在；当前触摸反馈继续使用音频、文字和表情。
 16. Agent 自有的记忆、知识、经验和状态变更不进入 ActionPlan；`RecordIntentionalMemory`、`UpsertSongKnowledge`、`RecordLearnedSong` 改为内部强类型状态变更 Skill。
 17. `RequestSongLearning` 保留为 Action，因为它启动外部、持久、可恢复的长任务，经 realize 提交并报告本次结果。
@@ -818,7 +818,7 @@ expand 阶段允许目标 interface 与旧实现暂时并存，但新调用方�
 10. `interaction_revision`、`activity_revision`、`schedule_revision` 分别由谁拥有和校验？
 11. 打断的决定、即时通道控制、Agent 协作取消和迟到计划拒绝分别发生在哪里？
 12. 每个 Stimulus 和 Action 的含义、字段类型与字段用途是否能仅从表格读出？
-13. 为什么 `ChangeExpression` 不是独立 Action，而 `Say`/`Sing` 仍能同时改变表情？
+13. 为什么 `ChangeExpression` 仍是值对象，而显式恢复使用独立 `RestoreExpression` Action，且 `Say`/`Sing` 仍能内嵌表情？
 14. 为什么当前触摸反馈不需要 `HAPTIC` 输出？
 15. 为什么三类记忆/知识写入留在 Agent 内，而 `RequestSongLearning` 仍要经过 realize？
 16. 哪些抓取/模型过程在 Agent 外，哪一刻才形成 `SongKnowledgeDiscovered` 或 `SongLearned`？

@@ -19,7 +19,7 @@
 | 分组 | 名称 |
 | --- | --- |
 | 计划 | `ActionPlan`、`Action`、`ActionKind` |
-| 具体行动 | `StartThinking`、`Say`、`Sing`、`WriteDiary`、`PublishDynamic`、`ReplyDynamic`、`RequestSongLearning` |
+| 具体行动 | `StartThinking`、`Say`、`Sing`、`RestoreExpression`、`WriteDiary`、`PublishDynamic`、`ReplyDynamic`、`RequestSongLearning` |
 | 行动值 | `Tone`、`ChangeExpression`、`DynamicReplyTarget`、`DynamicSource`、`Visibility`、`OutputDelivery` |
 | 接收协议 | `ActionPlanSink`、`PlanReceipt`、`PlanAcceptanceStatus`、`AgentOutputSink`、`OutputReceipt`、`OutputAcceptanceStatus` |
 | 执行输入 | `ExecutionContext` |
@@ -44,7 +44,7 @@
 ## 3. Action 与值对象
 
 `Action` 为不可直接构造的抽象基类，公共字段只有 `action_id: str`，具体类型提供固定 `kind: ActionKind`。
-本轮 ActionKind 为 `START_THINKING=start_thinking`、`SAY=say`、`SING=sing`、`WRITE_DIARY=write_diary`、`PUBLISH_DYNAMIC=publish_dynamic`、`REPLY_DYNAMIC=reply_dynamic`、`REQUEST_SONG_LEARNING=request_song_learning`。
+本轮 ActionKind 为 `START_THINKING=start_thinking`、`SAY=say`、`SING=sing`、`RESTORE_EXPRESSION=restore_expression`、`WRITE_DIARY=write_diary`、`PUBLISH_DYNAMIC=publish_dynamic`、`REPLY_DYNAMIC=reply_dynamic`、`REQUEST_SONG_LEARNING=request_song_learning`。
 
 ### 3.0 处理开始通知
 
@@ -67,6 +67,7 @@ plan sink 校验并接收通知后，由 stage 直接消费、发送既有 `agen
 | `OutputDelivery` | 枚举 | `CONVERSATION=conversation`、`EPHEMERAL_REACTION=ephemeral_reaction` |
 | `Say` | `content: str`、`sound_content: str \| None`、`prepared_audio_ref: MediaRef \| None`、`tone: Tone`、`expression: ChangeExpression \| None`、`delivery: OutputDelivery` | 显示文本、TTS 文本、预制媒体、语气、表情和呈现方式 |
 | `Sing` | `song_id: str`、`segment_id: str`、`expression: ChangeExpression \| None` | 已确定的歌曲与片段；采用 CONVERSATION 呈现 |
+| `RestoreExpression` | `expression_id: str`、`delivery: OutputDelivery` | 独立恢复目标表情；当前触摸使用 `normal` 和 `EPHEMERAL_REACTION` |
 
 `Say.sound_content` 非 None 时必须非空白，且与 `prepared_audio_ref` 互斥。
 `content` 必须是字符串；空白显示文本只在提供预制音频时合法。两个音频来源均为 None 时是纯文字表达，不隐式从 content 再生成 TTS 文本。
@@ -253,6 +254,7 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 开始思考通过第 3.0 节的 StartThinking 计划通知 stage，结束思考由 stage 根据对应 handle 的完成、失败或取消清理，发送既有 waiting 状态。
 
 SAY 的 TTS 分支输出文字、可选表情、音频及 MessageEndOutput，不追加 normal 恢复包。
+触摸 handler 先交付预制音频的瞬时 Say 计划，再交付独立 RestoreExpression 计划；前者的 MessageEndOutput 先于 normal 表情输出。资源缺失、读取失败或快速分支未命中时返回 FAILED、记录错误并丢弃，不进入普通话题、LLM 兜底或自动重试。
 
 业务计划依次调用 realize，计划内 Action 依次执行，AgentOutput 依次发送。本版保持正常路径的顺序和终止包位置；严格乱序检测、丢包恢复和跨连接重投去重留待后续，不能把现有队列行为描述为这些可靠性保证。
 

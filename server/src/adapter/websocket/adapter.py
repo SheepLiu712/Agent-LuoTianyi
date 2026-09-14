@@ -36,8 +36,8 @@ class WebSocketAdapter:
         self._connections: dict[WebSocketConnection, _ConnectionDelivery] = {}
         self._binding_lock = asyncio.Lock()
 
-    def submit_output(self, output: StageOutput) -> asyncio.Future[None]:
-        """接收业务输出或控制信号，返回实际投递结果 Future；无绑定或容量不足立即抛 SinkRejectedError。"""
+    def submit_output(self, output: StageOutput, *, standalone: bool = False) -> asyncio.Future[None]:
+        """接收业务输出或控制信号；standalone 仅用于独立表情行动。"""
         binding = self._routes.get(output.interaction_id)
         if binding is None or binding.connection.is_closed:
             raise d.SinkRejectedError("interaction is offline", code=d.SinkRejectionCode.SINK_CLOSED)
@@ -57,7 +57,7 @@ class WebSocketAdapter:
                 "agent_state_changed", {"state": output.state.value}))
         if type(output) not in (d.TextFinalOutput, d.ExpressionOutput, d.AudioChunkOutput, d.MessageEndOutput):
             raise d.SinkRejectedError("unsupported output", code=d.SinkRejectionCode.UNSUPPORTED_OUTPUT)
-        return delivery.submit(output)
+        return delivery.submit(output, standalone=standalone)
 
     def receive_event(self, connection: WebSocketConnection, event: WSMessage) -> bool:
         """将已认证业务 event 转为刺激并交给已绑定 Stage；全部目标可接收才投递，否则返回 False。"""

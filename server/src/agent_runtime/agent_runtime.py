@@ -6,6 +6,7 @@ from typing import Any, Dict, TYPE_CHECKING
 from src.agent.skills import Skills
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.capabilities.speech.streaming import AsyncTTS
 from src.domain.agent import ActionKind
 from src.resources.prepared_speech import PreparedSpeechResources
@@ -13,6 +14,8 @@ from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler, ChatReflectionHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
+from src.agent.handlers.stimulus.touch import TouchInteractionHandler
+from src.agent.skills.expression.touch import TouchReactionSkill
 from src.domain.agent import StimulusKind
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.router import StimulusRouter
@@ -94,13 +97,18 @@ class AgentRuntime:
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
+                        (StimulusKind.TOUCH_INTERACTION, TouchInteractionHandler(TouchReactionSkill(
+                            self.character_registry.get(character_id).reflex.get("touch", {}).get("fast_reply", {})))),
                         *((kind, ChatPreprocessingHandler()) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
-                            StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),
+                            StimulusKind.IMAGE_SELECTION_CLOSED)),
                     ), reflection_handler=ChatReflectionHandler()),
-                    action_router=ActionRouter(((ActionKind.SAY, SayHandler(
-                        character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),)),
+                    action_router=ActionRouter((
+                        (ActionKind.SAY, SayHandler(
+                            character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
+                        (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
+                    )),
                 )
                 for character_id in self.character_runtimes
             }

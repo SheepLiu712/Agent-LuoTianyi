@@ -9,6 +9,13 @@
 
 ## 已完成事实
 
+### 2026-09-14 触摸预制反应与独立表情恢复（#74）
+
+- 交付行为：新增公开 `RestoreExpression` Action 及生产 action handler；触摸 handler 包装旧 `TouchFastReplyBuilder` 的概率、随机音频和表情映射，成功时依次交付瞬时预制音频 SAY 与独立 `normal` 恢复计划。瞬时音频无聊天文字、不进入 pending/对话记录；资源缺失、读取失败或快速分支未命中返回 `FAILED / DEPENDENCY_UNAVAILABLE`，记录错误并丢弃，不走普通话题、LLM 兜底或重试。
+- 生产接入：`TOUCH_INTERACTION` 从聊天预处理注册移出并绑定专用 handler；`RESTORE_EXPRESSION` 加入领域导出、计划白名单与生产 ActionRouter。Stage/adapter 仅把该独立表情行动按 standalone 输出投递，保持 SAY 内嵌表情与消息终包现有语义。
+- 验证及结果：server 下运行 `conda run -n agent python -m pytest tests/domain tests/agent tests/stage -q`，结果 **676 passed、1 warning（17.60s）**；warning 为既有 `test_handle_input_contract.py` 使用 zip 参数化的 PytestRemovedIn10Warning。
+- 未验证范围：未运行完整 Server、真实客户端播放确认、生产资源目录、真实 LLM/TTS/GPU 或外部服务；本切片不删除仍供旧生产入口使用的 `try_handle_reflex`，只保证新触摸路径不调用该旁路。
+
 ### 2026-09-06 门面公共入口与请求分流整理
 
 - 交付内容：两个公共方法紧随 `__init__`；handle 入口直接登记请求，已有请求在 `_handle_existing_request` 处理后提前返回，新请求进入 `_process_request`。新处理和计划恢复共用处理权、交付及结算生命周期，原 `_handle_registered` 已删除；保留工作区已有的参数类型注解。
