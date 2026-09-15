@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pytest
 
-
 _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "agent" / "test_handling_preparation.py").resolve(),
     (Path(__file__).parent / "agent" / "test_chat_preprocessing.py").resolve(),

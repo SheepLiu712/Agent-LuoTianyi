@@ -70,6 +70,31 @@
 - 验证及结果：工作目录 `server`，conda 环境 `agent`（Python 3.10，pytest 9.1.1）。`python -m pytest tests/agent/test_chat_preprocessing.py -q` 为 3 passed；`python -m pytest tests/agent tests/stage -q --tb=short` 为 236 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 821 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
 - 未验证范围：未运行真实 LLM/VLM/TTS、真机或生产数据库；批量回复（08c）与 Sing action handler（08b）尚未实现；生产聊天仍走旧 ChatStream（#66）。
 - 附带更新：`test_handling_preparation.py` 的“预处理不落库”占位断言随迁移改为“已落库且两次调用 id 不同”；`test_chat_stage.py` 的假 context 补 `conversation.append`；`test_concurrent_handling.py` 的 handler 子类注入预处理替身。
+### 2026-09-14 QQ 凭据维护不变量验证（26）GREEN
+
+- 交付行为：为 `QQMusicCredentialRefreshTask` 补充不变量测试——默认 21600 秒周期且启动立即执行；共享凭据路径按规范化去重只检查一次；无已初始化凭据时 skipped（`credential_count=0`）；多文件按文件数计数；部分失败返回 failure 并记录 `failed_characters`；`ensure_dependencies` 要求 `system_runtime` 与非空学歌任务；任务不持有 `agent_runtime`，保持纯机械。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #85 为验证工单，无运行时行为变化；不制造人工 Red。
+- commit 或 PR：分支 `test/world-26-qq-credential`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_learn_sing_songs.py -q` 为 58 passed；`python -m pytest tests/world -q` 为 120 passed、2 skipped。
+- 未验证范围：未运行真实 QQ Music 网络刷新或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
+### 2026-09-14 B 站事件同步不变量验证（27）GREEN
+
+- 交付行为：补充 `BiliEventUpdateTask` / `BiliEventUpdater` 不变量测试——cookie 无效时 `fetch_and_update_events` 明确抛错、任务转为 failure 且不抛出；无新动态返回零计数；解析事件规范化（`event_type` 映射、`source` 默认 `bilibili`、`is_recurring`/`is_personal` 默认 False）；`updated` 只计 `add_event` 实际创建的事件（重复来源不重复计数）；缺少 `event_store` 抛错；任务不持有 `agent_runtime`，保持机械边界。
+- 发现（记录，不在本切片修复）：cookie 校验之后 `fetch_and_update_events` 的抓取/解析异常被吞掉并返回零计数，任务据此报告成功。这与「失败不假报成功」不变量存在张力，建议另开缺陷切片处理。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #86 为验证工单，无运行时行为变化；不制造人工 Red。
+- commit 或 PR：分支 `test/world-27-bili-event-update`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_bili_event_update.py -q` 为 12 passed；`python -m pytest tests/world -q` 为 123 passed、2 skipped。
+- 未验证范围：未运行真实 B 站网络抓取、VLM/LLM 或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
+### 2026-09-14 过期事件清理不变量验证（28）GREEN
+
+- 交付行为：为 `EventStore.purge_expired_events` 补充不变量测试——`end_datetime < today` 才失活、`end` 当天保留；仅 `start_datetime` 的事件保留一天缓冲；`is_recurring` / `source=user` / 仅 `date_mmdd` 的事件不清除；重复清理只计本次实际失活（幂等）；已 inactive 不计数；清理后失效 due 事件缓存。任务层保持「无 event_store 时 skipped、有 store 时返回 purged」。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #87 为验证工单，无运行时行为变化；记录为验证切片，不制造人工 Red。
+- commit 或 PR：分支 `test/world-28-event-cleanup`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_event_cleanup.py -q` 为 9 passed；`python -m pytest tests/world -q` 为 121 passed、2 skipped。
+- 未验证范围：未运行真实外部服务或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
 
 ### 2026-09-06 门面公共入口与请求分流整理
 

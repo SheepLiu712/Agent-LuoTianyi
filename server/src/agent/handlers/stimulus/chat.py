@@ -1,6 +1,6 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import src.domain.agent as d
@@ -36,7 +36,7 @@ class ChatPreprocessingHandler:
             terms = self._understanding.extract_terms(stimulus.text)
             entry = ConversationEntry(
                 entry_id=str(uuid4()),
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
                 source=ConversationSource.USER.value,
                 content=TextContent(stimulus.text, terms),
             )
@@ -95,11 +95,15 @@ def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
         if draft.sing is not None:
             song, segment = draft.sing
             text = f"{draft.content}\n{draft.lyrics}".strip() if draft.lyrics else draft.content
-            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
+            entries.append(ConversationEntry(
+                entry_id=str(uuid4()),
+                timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
                 source=ConversationSource.AGENT.value,
                 content=SongContent(text, song, segment)))
         elif draft.content.strip():
-            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
+            entries.append(ConversationEntry(
+                entry_id=str(uuid4()),
+                timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
                 source=ConversationSource.AGENT.value, content=TextContent(draft.content)))
     return tuple(entries)
 
