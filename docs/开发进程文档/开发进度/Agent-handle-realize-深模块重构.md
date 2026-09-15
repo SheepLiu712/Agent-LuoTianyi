@@ -11,8 +11,8 @@
 
 ### 2026-09-15 明确记忆请求与成功承诺边界（12）GREEN
 
-- 交付行为：cognitive 层的 `ExplicitMemoryIntentSkill` 按 `agent.memory.explicit_intent` 配置和旧默认短语识别明确记忆请求；`ChatReplyHandler` 在同一 handle 内先等待内部 `IntentionalMemoryCommit` 通过既有 `MemoryWriter` 写入私有长期记忆，确认存储标识后才交付表示已记住的 `Say`。失败返回 `FAILED / INTERNAL_ERROR`，保留本批 pending、`retryable=False`，不交付成功承诺。
-- 隔离与幂等：提交始终使用 `plans.context.identity` 的非空 `character_id/user_id`；向量证据补充角色归属，业务证据去重按角色、用户和内容复用现有存储规则。同一输入重投返回既有标识且不新增记忆；未恢复 request/mutation ledger、outbox、自动重试或新 Memory Action。
+- 交付行为：cognitive 层的 `ExplicitMemoryIntentSkill` 按 `agent.memory.explicit_intent` 配置和旧默认短语逐条识别明确记忆请求；`ChatReplyHandler` 在同一 handle 内先等待内部 `IntentionalMemoryCommit` 通过既有 `MemoryWriter` 写入私有长期记忆，且返回非空规范记忆 `record_id` 后才经回复组合 seam 交付表示已记住的 `Say`。提交异常或空标识返回 `FAILED / INTERNAL_ERROR`，保留本批 pending、`retryable=False`，不交付成功承诺。
+- 隔离与幂等：提交始终使用 `plans.context.identity` 的非空 `character_id/user_id`；向量证据补充角色归属，向量命中必须反查到规范记忆正本才算已提交，孤儿向量不会触发成功承诺。同一输入重投在反查到既有正本时返回同一规范 `record_id` 且不新增记忆；批次中未命中显式记忆的文本继续进入普通回复主题。业务唯一性仍停留在既有存储边界的确定性正本 ID 和查重规则内，未引入 schema 级唯一约束，因此并发 check-then-insert 的残余竞态未在本切片扩展处理；未恢复 request/mutation ledger、outbox、自动重试、重复调用合并或新 Memory Action。
 - interface spec：新增内部 `ExplicitMemoryIntentSkill`、`IntentionalMemoryCommit` 与 `MemoryCommitRevision`；记忆仍是 Agent 内部状态变更，不进入 `ActionPlan`。`memory.explicit_intent.{enabled,phrases}` 从草案更新为当前配置事实。
 - 验证及结果：工作目录 `server`，conda 环境 `agent`；见本切片提交验证记录。
 - 未验证范围：未运行真实 LLM、生产向量库/数据库、TTS/GPU、真机；生产聊天是否切换到新门面仍由既有迁移切片负责。

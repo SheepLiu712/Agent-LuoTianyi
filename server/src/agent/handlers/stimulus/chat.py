@@ -112,6 +112,13 @@ def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
     return tuple(entries)
 
 
+def _failed_memory_report(request: d.HandleStimulusRequest) -> d.HandlingReport:
+    return replace(
+        _report(request), request_status=d.HandlingRequestStatus.FAILED,
+        error_code=d.HandlingErrorCode.INTERNAL_ERROR,
+    )
+
+
 class ChatReplyHandler:
     """到期批次回复：生成回复、落库并交付有序 Say/Sing 计划。"""
 
@@ -128,29 +135,42 @@ class ChatReplyHandler:
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """按接收顺序把整批输入作为一次回复：召回→生成→落库→交付计划，并按 ID 消费。"""
         pending = tuple(s.stimulus_id for s in request.interaction.pending_stimuli)
-        reply_topic = "\n".join(
-            item.text.strip() for item in request.prepared_inputs if item.text and item.text.strip())
-        memory_content = (
-            self._memory_intent.detect(reply_topic)
-            if reply_topic and self._memory_intent is not None
-            else None
-        )
-        if memory_content is not None:
+        prepared_texts = tuple(
+            (item, item.text.strip()) for item in request.prepared_inputs if item.text and item.text.strip())
+        memory_items: list[tuple[d.PreprocessedInput, str]] = []
+        reply_parts: list[str] = []
+        if self._memory_intent is not None:
+            for item, text in prepared_texts:
+                memory_content = self._memory_intent.detect(text)
+                if memory_content is None:
+                    reply_parts.append(text)
+                else:
+                    memory_items.append((item, memory_content))
+        else:
+            reply_parts.extend(text for _, text in prepared_texts)
+        if memory_items:
             identity = plans.context.identity
             if identity.user_id is None or self._memory_commit is None:
-                return replace(
-                    _report(request), request_status=d.HandlingRequestStatus.FAILED,
-                    error_code=d.HandlingErrorCode.INTERNAL_ERROR,
+                return _failed_memory_report(request)
+            committed_contents: list[str] = []
+            for _, memory_content in memory_items:
+                revision = await self._memory_commit.commit(
+                    character_id=identity.character_id,
+                    user_id=identity.user_id,
+                    content=memory_content,
                 )
-            await self._memory_commit.commit(
-                character_id=identity.character_id,
-                user_id=identity.user_id,
-                content=memory_content,
-            )
+                if not revision.identifier.strip():
+                    return _failed_memory_report(request)
+                committed_contents.append(memory_content)
+            memory_summary = "；".join(committed_contents)
+            normal_topic = "\n".join(reply_parts)
+            reply_topic = f"{_MEMORY_ACK_REPLY_TOPIC_PREFIX}：{memory_summary}"
+            if normal_topic:
+                reply_topic = f"{reply_topic}\n{normal_topic}"
             drafts = await self._composition.compose(
                 character_id=identity.character_id,
                 user_id=identity.user_id,
-                reply_topic=f"{_MEMORY_ACK_REPLY_TOPIC_PREFIX}：{memory_content}",
+                reply_topic=reply_topic,
                 conversation_history=_render_history(plans.context.conversation.read()),
                 memory_queries=(),
                 sing_attempts=(),
@@ -158,6 +178,7 @@ class ChatReplyHandler:
             )
             await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=_reply_actions(request, drafts)))
             return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
+        reply_topic = "\n".join(reply_parts)
         drafts: tuple = ()
         if reply_topic:
             await plans.emit(ActionPlanDraft(

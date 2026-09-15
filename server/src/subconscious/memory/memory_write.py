@@ -5,9 +5,12 @@ Memory Write Module
 核心在于将非结构化的对话流转化为结构化、易于检索的知识片段。
 """
 
+from __future__ import annotations
+
 import json
 import time
 from typing import TYPE_CHECKING, Any
+from uuid import NAMESPACE_URL, uuid5
 
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
@@ -24,6 +27,18 @@ if TYPE_CHECKING:
 logger = get_logger("MemoryWriter")
 
 
+_LEGACY_OWNER_CHARACTER_ID = "luotianyi"
+_USER_FACT_NAMESPACE = "agent-luotianyi:user-fact"
+
+
+class CanonicalMemoryCommitError(RuntimeError):
+    """规范记忆正本未可靠提交时抛出。"""
+
+
+class MemoryVectorCommitError(RuntimeError):
+    """向量投影未返回可链接标识时抛出。"""
+
+
 class MemoryWriter:
     def __init__(self, config: dict[str, Any], llm_module: LLMModule):
         self.config = config
@@ -32,7 +47,7 @@ class MemoryWriter:
     async def process_interaction(
         self,
         vector_store: VectorStore,
-        memory_store: "MemoryStore",
+        memory_store: MemoryStore,
         user_id: str,
         history: str,
         current_dialogue: str = "",
@@ -61,7 +76,7 @@ class MemoryWriter:
         if user_items:
             # Single de-dup pass for all user memory items
             seen_texts = await self._batch_check_user_memory_dups(
-                vector_store, user_id, user_items
+                vector_store, user_id, user_items, owner_character_id,
             )
             for content in user_items:
                 text = (content or "").strip()
@@ -212,7 +227,7 @@ class MemoryWriter:
     async def write_user_memory(
         self,
         vector_store: VectorStore,
-        memory_store: "MemoryStore",
+        memory_store: MemoryStore,
         user_id: str,
         content: str,
         owner_character_id: str = "luotianyi",
@@ -228,26 +243,59 @@ class MemoryWriter:
     async def commit_user_memory(
         self,
         vector_store: VectorStore,
-        memory_store: "MemoryStore",
+        memory_store: MemoryStore,
         user_id: str,
         content: str,
         owner_character_id: str = "luotianyi",
         commit: bool = True,
     ) -> tuple[str, bool]:
-        """写入用户事实或返回现有向量标识；第二项表示本次是否新写入。"""
+        """写入用户事实或返回现有规范记录标识；第二项表示本次是否新写入。"""
         text = (content or "").strip()
         if not text:
             return "", False
 
         threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
         existing_id = await self._similar_user_memory_id(
-            vector_store, user_id, text, threshold, owner_character_id,
+            vector_store, memory_store, user_id, text, threshold, owner_character_id,
         )
         if existing_id is not None:
             logger.debug(f"Skip duplicate user_memory for user {user_id}: {text[:50]}")
             return existing_id, False
 
         today = time.strftime("%Y-%m-%d")
+        record_id = self._user_fact_record_id(owner_character_id, user_id, text)
+        record = DomainMemoryRecord(
+            id=record_id,
+            owner_character_id=owner_character_id,
+            subject_user_id=user_id,
+            memory_type=MemoryType.USER_FACT,
+            visibility=MemoryVisibility.PRIVATE,
+            source="chat",
+            content=text,
+        )
+        written_record_id = await run_sync_owned(
+            memory_store.write_agent_memory_record,
+            record,
+            chunk_texts=[],
+            embedding_ids=[],
+            commit=commit,
+        )
+        if not written_record_id:
+            existing_record = await run_sync_owned(memory_store.get_agent_memory_record, record_id)
+            if existing_record is not None and await run_sync_owned(
+                memory_store.agent_memory_record_has_embeddings, record_id,
+            ):
+                return record_id, False
+            raise CanonicalMemoryCommitError("canonical memory commit failed")
+
+        update_cmd = MemoryUpdateCommand(type="write_user_memory", content=text, uuid=None)
+        try:
+            await run_sync_owned(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
+        except Exception:
+            if commit:
+                await run_sync_owned(memory_store.delete_agent_memory_record, record_id, commit=commit)
+            raise
+
         doc = Document(
             content=text,
             metadata={
@@ -259,36 +307,32 @@ class MemoryWriter:
                 "owner_character_id": owner_character_id,
             },
         )
-        ids = await run_sync_owned(vector_store.add_documents, [doc])
-        update_cmd = MemoryUpdateCommand(type="write_user_memory", content=text, uuid=ids[0] if ids else None)
-        await run_sync_owned(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
-        record_id = await run_sync_owned(
-            memory_store.write_agent_memory_record,
-            DomainMemoryRecord(
-                owner_character_id=owner_character_id,
-                subject_user_id=user_id,
-                memory_type=MemoryType.USER_FACT,
-                visibility=MemoryVisibility.PRIVATE,
-                source="chat",
-                content=text,
-                metadata={
-                    "legacy_update_type": update_cmd.type,
-                    "legacy_vector_ids": ids or [],
-                },
-            ),
-            embedding_ids=ids or [],
-            commit=commit,
-        )
-        if not record_id:
-            raise RuntimeError("canonical memory commit failed")
+        ids: list[str] = []
+        try:
+            ids = await run_sync_owned(vector_store.add_documents, [doc])
+            if not ids:
+                raise MemoryVectorCommitError("memory vector commit returned no identifier")
+            await run_sync_owned(
+                memory_store.link_agent_memory_embeddings,
+                record_id,
+                chunk_texts=[text],
+                embedding_ids=ids,
+                commit=commit,
+            )
+        except Exception:
+            if ids:
+                await run_sync_owned(vector_store.delete_documents, ids)
+            if commit:
+                await run_sync_owned(memory_store.delete_agent_memory_record, record_id, commit=commit)
+            raise
         if not ids:
-            raise RuntimeError("memory vector commit returned no identifier")
-        return ids[0], True
+            raise MemoryVectorCommitError("memory vector commit returned no identifier")
+        return record_id, True
 
     async def write_event_memory(
         self,
         vector_store: VectorStore,
-        memory_store: "MemoryStore",
+        memory_store: MemoryStore,
         user_id: str,
         content: str,
         owner_character_id: str = "luotianyi",
@@ -346,27 +390,31 @@ class MemoryWriter:
         owner_character_id: str = "luotianyi",
     ) -> bool:
         return await self._similar_user_memory_id(
-            vector_store, user_id, content, threshold, owner_character_id,
+            vector_store, None, user_id, content, threshold, owner_character_id,
         ) is not None
 
     async def _similar_user_memory_id(
-        self, vector_store: VectorStore, user_id: str, content: str, threshold: float,
+        self, vector_store: VectorStore, memory_store: MemoryStore | None,
+        user_id: str, content: str, threshold: float,
         owner_character_id: str,
     ) -> str | None:
-        """返回相似用户事实的现有向量标识，没有命中时返回 None。"""
-        results = await vector_store.search(user_id, content, k=5)
+        """返回相似用户事实的现有规范记录标识，没有命中时返回 None。"""
+        where = self._user_memory_where(user_id, owner_character_id)
+        results = await vector_store.search(user_id, content, k=5, where=where)
         for doc, score in results:
             metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
             if metadata.get("memory_type") != "user_memory":
                 continue
-            stored_owner = metadata.get("owner_character_id")
-            if stored_owner not in (None, owner_character_id):
-                continue
-            if stored_owner is None and owner_character_id != "luotianyi":
+            if not self._owner_matches(metadata.get("owner_character_id"), owner_character_id):
                 continue
             if score >= threshold:
                 identifier = str(getattr(doc, "id", "") or "")
-                return identifier or self._normalize_text(doc.get_content())
+                if not identifier or memory_store is None:
+                    continue
+                record = await run_sync_owned(memory_store.get_agent_memory_record_by_embedding_id, identifier)
+                if record is None:
+                    continue
+                return record.id
         return None
 
     async def _is_same_day_duplicate_event_memory(
@@ -394,6 +442,7 @@ class MemoryWriter:
         vector_store: VectorStore,
         user_id: str,
         items: list[str],
+        owner_character_id: str,
     ) -> set:
         """Batch check: collect all existing user_memory text in one search pass."""
         seen = set()
@@ -401,10 +450,14 @@ class MemoryWriter:
             return seen
         # Search with the first item — it's representative enough to catch most duplicates.
         threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
-        results = await vector_store.search(user_id, items[0], k=20)
+        results = await vector_store.search(
+            user_id, items[0], k=20, where=self._user_memory_where(user_id, owner_character_id),
+        )
         for doc, score in results:
             metadata = doc.get_metadata() if hasattr(doc, "get_metadata") else {}
             if metadata.get("memory_type") != "user_memory":
+                continue
+            if not self._owner_matches(metadata.get("owner_character_id"), owner_character_id):
                 continue
             if score >= threshold:
                 content = doc.get_content() if hasattr(doc, "get_content") else ""
@@ -438,3 +491,24 @@ class MemoryWriter:
 
     def _normalize_text(self, text: str) -> str:
         return " ".join((text or "").strip().split())
+
+    def _user_fact_record_id(self, owner_character_id: str, user_id: str, content: str) -> str:
+        key = "\x1f".join((owner_character_id, user_id, self._normalize_text(content)))
+        return str(uuid5(NAMESPACE_URL, f"{_USER_FACT_NAMESPACE}:{key}"))
+
+    def _owner_matches(self, stored_owner: Any, owner_character_id: str) -> bool:
+        if stored_owner == owner_character_id:
+            return True
+        return stored_owner is None and owner_character_id == _LEGACY_OWNER_CHARACTER_ID
+
+    def _user_memory_where(self, user_id: str, owner_character_id: str) -> dict[str, Any]:
+        if owner_character_id == _LEGACY_OWNER_CHARACTER_ID:
+            return {
+                "user_id": user_id,
+                "memory_type": "user_memory",
+            }
+        return {
+            "user_id": user_id,
+            "memory_type": "user_memory",
+            "owner_character_id": owner_character_id,
+        }

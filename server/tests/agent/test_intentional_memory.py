@@ -12,7 +12,7 @@ from src.agent.handlers.stimulus.chat import (
 )
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import ExplicitMemoryIntentSkill, ReplyDraft
-from src.agent.skills.mutation import IntentionalMemoryCommit
+from src.agent.skills.mutation import IntentionalMemoryCommit, MemoryCommitRevision
 
 
 class _Conversation:
@@ -25,9 +25,7 @@ class _Conversation:
 
 class _Context:
     def __init__(self, *, user_id="u"):
-        self.identity = type("Identity", (), {
-            "interaction_id": "i", "user_id": user_id, "character_id": "luotianyi",
-        })()
+        self.identity = type("Identity", (), {"interaction_id": "i", "user_id": user_id, "character_id": "luotianyi"})()
         self.conversation = _Conversation()
 
 
@@ -56,14 +54,17 @@ class _Composer:
 
 class _Intent:
     def detect(self, text):
-        marker = "请记住"
-        return text.split(marker, 1)[1].strip(" ：:，,") if marker in text else None
+        for marker in ("请记住", "记一下"):
+            if marker in text:
+                return text.split(marker, 1)[1].strip(" ：:，,")
+        return None
 
 
 class _Commit:
-    def __init__(self, events, *, failure=None):
+    def __init__(self, events, *, failure=None, blank_identifier=False):
         self.events = events
         self.failure = failure
+        self.blank_identifier = blank_identifier
         self.calls = []
         self._revisions = {}
 
@@ -72,7 +73,10 @@ class _Commit:
         self.events.append("commit")
         if self.failure is not None:
             raise self.failure
-        return self._revisions.setdefault((character_id, user_id, content), "memory-revision-1")
+        if self.blank_identifier:
+            return MemoryCommitRevision(identifier="", committed=False)
+        identifier = self._revisions.setdefault((character_id, user_id, content), "memory-revision-1")
+        return MemoryCommitRevision(identifier=identifier, committed=True)
 
 
 def _deadline(text="请记住我喜欢乌龙茶", *, user_id="u"):
@@ -82,11 +86,19 @@ def _deadline(text="请记住我喜欢乌龙茶", *, user_id="u"):
     return replace(value, interaction=interaction, prepared_inputs=(prepared,))
 
 
+def _batch_deadline(texts, *, user_id="u"):
+    value = request()
+    interaction = replace(value.interaction, user_id=user_id)
+    prepared = tuple(
+        d.PreprocessedInput(stimulus_id=stimulus.stimulus_id, text=text, conversation_entry_ids=(f"e{index}",))
+        for index, (stimulus, text) in enumerate(zip(interaction.pending_stimuli, texts), start=1)
+    )
+    return replace(value, interaction=interaction, prepared_inputs=prepared)
+
+
 def _agent(commit, *, composer=None):
     handler = ChatReplyHandler(composer or _Composer(), _Understanding(), _Intent(), commit)
-    return Agent(character_id="luotianyi", stimulus_router=StimulusRouter((
-        (d.StimulusKind.TEXT_MESSAGE, handler),
-    )))
+    return Agent(character_id="luotianyi", stimulus_router=StimulusRouter(((d.StimulusKind.TEXT_MESSAGE, handler),)))
 
 
 @pytest.mark.asyncio
@@ -156,6 +168,24 @@ async def test_write_failure_emits_no_promise_and_retains_pending():
 
 
 @pytest.mark.asyncio
+async def test_blank_commit_identifier_emits_no_promise_and_retains_pending():
+    events = []
+    sink = Sink()
+
+    report = await _agent(_Commit(events, blank_identifier=True)).handle_stimulus(
+        _deadline(), sink, context=_Context(),
+    )
+
+    assert events == ["commit"]
+    assert sink.values == []
+    assert report.request_status is d.HandlingRequestStatus.FAILED
+    assert report.error_code is d.HandlingErrorCode.INTERNAL_ERROR
+    assert report.retained_pending_stimulus_ids == ("m2", "m1")
+    assert report.consumed_pending_stimulus_ids == ()
+    assert report.retryable is False
+
+
+@pytest.mark.asyncio
 async def test_redelivery_reuses_memory_revision_without_duplicate_side_effect():
     events = []
     commit = _Commit(events)
@@ -170,6 +200,46 @@ async def test_redelivery_reuses_memory_revision_without_duplicate_side_effect()
         ("luotianyi", "u", "我喜欢乌龙茶"),
         ("luotianyi", "u", "我喜欢乌龙茶"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_batch_memory_intent_is_detected_per_item_and_keeps_unmatched_reply():
+    events = []
+    commit = _Commit(events)
+    composer = _Composer(events)
+    sink = Sink()
+
+    report = await _agent(commit, composer=composer).handle_stimulus(
+        _batch_deadline(("请记住我喜欢茶", "今天天气如何")), sink, context=_Context(),
+    )
+
+    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    assert commit.calls == [("luotianyi", "u", "我喜欢茶")]
+    assert len(composer.calls) == 1
+    assert composer.calls[0]["reply_topic"].startswith(_MEMORY_ACK_REPLY_TOPIC_PREFIX)
+    assert "我喜欢茶" in composer.calls[0]["reply_topic"]
+    assert "今天天气如何" in composer.calls[0]["reply_topic"]
+    assert sink.values[0].source_stimulus_ids == ("m2", "m1")
+    assert report.consumed_pending_stimulus_ids == ("m2", "m1")
+
+
+@pytest.mark.asyncio
+async def test_multiple_memory_intents_in_batch_commit_each_item():
+    events = []
+    commit = _Commit(events)
+    composer = _Composer(events)
+
+    report = await _agent(commit, composer=composer).handle_stimulus(
+        _batch_deadline(("请记住我喜欢茶", "记一下我讨厌迟到")), Sink(), context=_Context(),
+    )
+
+    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    assert commit.calls == [
+        ("luotianyi", "u", "我喜欢茶"),
+        ("luotianyi", "u", "我讨厌迟到"),
+    ]
+    assert "我喜欢茶" in composer.calls[0]["reply_topic"]
+    assert "我讨厌迟到" in composer.calls[0]["reply_topic"]
 
 
 @pytest.mark.asyncio
@@ -205,7 +275,7 @@ class _Writer:
 
     async def commit_user_memory(self, **kwargs):
         self.calls.append(kwargs)
-        return "vector-7", False
+        return "record-7", False
 
 
 @pytest.mark.asyncio
@@ -217,13 +287,12 @@ async def test_commit_skill_wraps_memory_writer_and_preserves_identity():
         "memory_store": "records",
         "owner_character_id": "miku",
     })()
-    runtime = type("Runtime", (), {"mind": type("Mind", (), {"memory": memory})()})()
 
-    revision = await IntentionalMemoryCommit(lambda character_id: runtime).commit(
+    revision = await IntentionalMemoryCommit(lambda character_id: memory).commit(
         character_id="miku", user_id="user-2", content="喜欢抹茶",
     )
 
-    assert revision.identifier == "vector-7"
+    assert revision.identifier == "record-7"
     assert revision.committed is False
     assert writer.calls == [{
         "vector_store": "vectors",
@@ -232,3 +301,21 @@ async def test_commit_skill_wraps_memory_writer_and_preserves_identity():
         "content": "喜欢抹茶",
         "owner_character_id": "miku",
     }]
+
+
+@pytest.mark.asyncio
+async def test_commit_skill_rejects_owner_character_mismatch():
+    writer = _Writer()
+    memory = type("Memory", (), {
+        "memory_writer": writer,
+        "vector_store": "vectors",
+        "memory_store": "records",
+        "owner_character_id": "miku",
+    })()
+
+    commit = IntentionalMemoryCommit(lambda character_id: memory)
+
+    with pytest.raises(RuntimeError, match="owner character mismatch"):
+        await commit.commit(character_id="luotianyi", user_id="user-2", content="喜欢抹茶")
+
+    assert writer.calls == []

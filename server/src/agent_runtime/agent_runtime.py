@@ -106,7 +106,7 @@ class AgentRuntime:
                 lambda character_id: self.character_runtimes[character_id],
             ))
             self.skills.register(IntentionalMemoryCommit, IntentionalMemoryCommit(
-                lambda character_id: self.character_runtimes[character_id],
+                lambda character_id: self.character_runtimes[character_id].mind.memory,
             ))
 
             self.agent_registry = AgentRegistry(
