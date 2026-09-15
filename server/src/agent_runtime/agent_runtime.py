@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, Any
 from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
+from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.action.sing import SingHandler
 from src.agent.handlers.action.song_learning import RequestSongLearningHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
@@ -19,8 +21,11 @@ from src.agent.handlers.stimulus.citywalk import (
     CitywalkObservationHandler,
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
+from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.handlers.stimulus.song_knowledge import SongKnowledgeHandler
 from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
+from src.agent.handlers.stimulus.touch import TouchInteractionHandler
 from src.agent.handlers.stimulus.world_activity import (
     WORLD_ACTIVITY_STIMULUS_KINDS,
     WorldActivityHandler,
@@ -28,10 +33,24 @@ from src.agent.handlers.stimulus.world_activity import (
 from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
 from src.agent.skills import Skills
-from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
+from src.agent.skills.cognitive import (
+    ExplicitMemoryIntentSkill,
+    ImagePreprocessingSkill,
+    ResponseCompositionSkill,
+    TextPreprocessingSkill,
+)
+from src.agent.skills.cognitive.learned_song_experience import (
+    LearnedSongExperienceSkill,
+)
+from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
+from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
+from src.agent.skills.expression.touch import TouchPolicy, TouchReactionSkill
+from src.agent.skills.knowledge.song_acceptance import SongKnowledgeAcceptanceSkill
+from src.agent.skills.mutation import IntentionalMemoryCommit
+from src.agent.skills.reflection import ReflectionSkill
 from src.agent_runtime.agent_registry import AgentRegistry
 from src.agent_runtime.character_registry import CharacterRegistry
 from src.agent_runtime.character_runtime import CharacterRuntime
@@ -82,12 +101,25 @@ class AgentRuntime:
         self.vector_store = self._initialize_vector_store(self.config["agent"])
         try:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
+            first_login_names = self._first_login_prepared_names(
+                self.config.get("proactive", {})
+            )
             self.skills = Skills(self.config.get("skills", {}), llm_service,
-                                 tts_engine=AsyncTTS(capability_manager.speech))
-            # 动态发布按来源身份落库；角色上下文由能力自身的装配提供
-            self.dynamic_publishing = DynamicPublishingSkill(capability_manager.dynamics)
+                                 tts_engine=AsyncTTS(capability_manager.speech),
+                                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
+                                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
+                                 reply_composition_config=self.config.get("reply_composition", {}),
+                                 singing=capability_manager.singing,
+                                 media_resolver=capability_manager.media_resolver,
+                                 image_understanding=capability_manager.image_understanding)
             # 角色自身经验写入需要按角色持有记忆门面，供 LearnSing 等分支使用
             self.character_memories: dict[str, SubconsciousMemory] = {}
+            # 动态发布按来源身份落库；角色上下文由能力自身的装配提供
+            self.dynamic_publishing = DynamicPublishingSkill(capability_manager.dynamics)
+            # 歌曲知识接纳使用与记忆查询相同的 agent.song_knowledge 配置，保证读写同一知识库
+            self.song_knowledge = SongKnowledgeAcceptanceSkill(
+                self.config.get("agent", {}).get("song_knowledge", {})
+            )
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -101,6 +133,18 @@ class AgentRuntime:
                 capability_manager=capability_manager,
                 database_manager=database_manager,
             )
+
+            self.skills.register(ResponseCompositionSkill, ResponseCompositionSkill(
+                self.skills.reply_composition_config,
+                lambda character_id: self.character_runtimes[character_id],
+            ))
+            self.skills.register(ReflectionSkill, ReflectionSkill(
+                self.config.get("reflection", {}),
+                lambda character_id: self.character_runtimes[character_id],
+            ))
+            self.skills.register(IntentionalMemoryCommit, IntentionalMemoryCommit(
+                lambda character_id: self.character_runtimes[character_id].mind.memory,
+            ))
 
             self.agent_registry = AgentRegistry(
                 self.config.get("agent_registry", {}),
@@ -121,22 +165,44 @@ class AgentRuntime:
                     character_id=character_id,
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
-                        (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
-                        *((kind, world_activity) for kind in WORLD_ACTIVITY_STIMULUS_KINDS
-                          if kind is not StimulusKind.SONG_LEARNED),
+                        (StimulusKind.PROACTIVE_PROMPT_DUE, FirstLoginHandler(
+                            prepared_names=first_login_names,
+                            prepared_speech=self.prepared_speech,
+                        )),
+                        (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
+                            self.skills.get(ResponseCompositionSkill),
+                             self.skills.get(TextPreprocessingSkill),
+                             self.skills.get(ExplicitMemoryIntentSkill),
+                             self.skills.get(IntentionalMemoryCommit))),
+                        (StimulusKind.TOUCH_INTERACTION, TouchInteractionHandler(
+                            *self._touch_reaction(character_id))),
+                        (StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
+                         SongKnowledgeHandler(self.song_knowledge)),
                         (StimulusKind.SONG_LEARNED, SongLearnedHandler(
                             character_id,
                             LearnedSongExperienceSkill(self.character_memories.get(character_id)),
                             self.dynamic_publishing,
                             SongLearningDispatchSkill(self._singing_manager(character_id)))),
-                        *((kind, ChatPreprocessingHandler()) for kind in (
+                        *((kind, world_activity) for kind in WORLD_ACTIVITY_STIMULUS_KINDS
+                          if kind not in (
+                              StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
+                              StimulusKind.SONG_LEARNED,
+                          )),
+                        *((kind, ChatPreprocessingHandler(
+                            self.skills.get(TextPreprocessingSkill),
+                            self.skills.get(ImagePreprocessingSkill))) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
-                            StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),
-                    ), reflection_handler=ChatReflectionHandler()),
+                            StimulusKind.IMAGE_SELECTION_CLOSED)),
+                    ), reflection_handler=ChatReflectionHandler(
+                        self.skills.get(ReflectionSkill),
+                        self.skills.get(ConversationCompactionSkill))),
                     action_router=ActionRouter((
                         (ActionKind.SAY, SayHandler(
                             character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
+                        (ActionKind.SING, SingHandler(
+                            character_id, self.skills.get(SingingSkill))),
+                        (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
                         (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(
                             character_id, self.dynamic_publishing)),
                         (ActionKind.REQUEST_SONG_LEARNING, RequestSongLearningHandler(
@@ -404,6 +470,12 @@ class AgentRuntime:
         managers = getattr(singing, "singing_manager", None) or {}
         return managers.get(character_id)
 
+    def _touch_reaction(self, character_id: str) -> tuple[TouchReactionSkill, TouchPolicy]:
+        """按角色 touch.fast_reply 配置构造触摸资源选择技能与准入策略。"""
+        fast_reply = (self.character_registry.get(character_id)
+                      .reflex.get("touch", {}).get("fast_reply", {}))
+        return TouchReactionSkill(fast_reply), TouchPolicy.from_config(fast_reply.get("policy"))
+
     def _build_character_runtimes(
         self,
         *,
@@ -450,6 +522,29 @@ class AgentRuntime:
                 capability_manager=capability_manager,
             )
         return character_runtimes
+
+    @staticmethod
+    def _first_login_prepared_names(config: dict[str, Any]) -> tuple[str, ...]:
+        """读取 proactive.first_login.prepared_names；配置存在时要求恰好两项。"""
+        if not isinstance(config, dict):
+            raise TypeError("proactive must be a dictionary")
+        first_login = config.get("first_login")
+        if first_login is None:
+            return ()
+        if not isinstance(first_login, dict):
+            raise TypeError("proactive.first_login must be a dictionary")
+        names = first_login.get("prepared_names")
+        if not isinstance(names, list):
+            raise TypeError("proactive.first_login.prepared_names must be a list")
+        if (
+            len(names) != 2
+            or any(not isinstance(name, str) or not name.strip() for name in names)
+            or len(set(names)) != len(names)
+        ):
+            raise ValueError(
+                "proactive.first_login.prepared_names must contain two unique nonblank names"
+            )
+        return tuple(names)
 
     @staticmethod
     def _initialize_vector_store(agent_config: dict[str, Any]) -> Any:

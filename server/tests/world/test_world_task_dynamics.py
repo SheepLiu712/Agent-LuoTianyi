@@ -11,7 +11,9 @@ from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.stimulus.citywalk import CitywalkObservationHandler
 from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
 from src.agent.processing.plan_emitter import PlanEmitter
-from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
+from src.agent.skills.cognitive.learned_song_experience import (
+    LearnedSongExperienceSkill,
+)
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.capabilities.dynamic import DynamicCapability

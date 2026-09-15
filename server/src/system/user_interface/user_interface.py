@@ -110,9 +110,20 @@ class UserInterface:
         )
         if auth_result:
             user_uuid = auth_result["user_uuid"]
-            await system_runtime.chat_session_manager.on_user_login(
-                user_uuid, auth_result["elapsed_from_last_login"]
-            )
+            elapsed_from_last_login = auth_result["elapsed_from_last_login"]
+            if elapsed_from_last_login is None:
+                if system_runtime.stage_manager is None:
+                    raise RuntimeError("StageManager is required for first-login dispatch")
+                system_runtime.stage_manager.record_login(
+                    user_uuid,
+                    system_runtime.agent_runtime.default_character_id,
+                    elapsed_from_last_login=elapsed_from_last_login,
+                )
+            else:
+                await system_runtime.chat_session_manager.on_user_login(
+                    user_uuid,
+                    elapsed_from_last_login,
+                )
             background_tasks.add_task(
                 system_runtime.database_manager.conversation_service.prefill_buffer,
                 user_uuid,
@@ -187,10 +198,20 @@ class UserInterface:
                 system_runtime.database_manager.conversation_service.prefill_buffer,
                 user_uuid,
             )
-            await system_runtime.chat_session_manager.on_user_login(
-                user_uuid,
-                auth_result["elapsed_from_last_login"],
-            )
+            elapsed_from_last_login = auth_result["elapsed_from_last_login"]
+            if elapsed_from_last_login is None:
+                if system_runtime.stage_manager is None:
+                    raise RuntimeError("StageManager is required for first-login dispatch")
+                system_runtime.stage_manager.record_login(
+                    user_uuid,
+                    system_runtime.agent_runtime.default_character_id,
+                    elapsed_from_last_login=elapsed_from_last_login,
+                )
+            else:
+                await system_runtime.chat_session_manager.on_user_login(
+                    user_uuid,
+                    elapsed_from_last_login,
+                )
             return {
                 "login_token": auth_result["login_token"],
                 "message_token": auth_result["message_token"],

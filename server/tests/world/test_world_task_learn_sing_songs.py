@@ -444,6 +444,76 @@ def test_qq_music_credential_refresh_task_deduplicates_shared_file(tmp_path):
     assert task.get_task_params() == {"interval_seconds": 3600, "run_immediately": True}
 
 
+def test_qq_music_credential_refresh_defaults_to_six_hours_immediate():
+    task = QQMusicCredentialRefreshTask([])
+
+    assert task.get_task_type() == "interval"
+    assert task.get_task_params() == {"interval_seconds": 21600, "run_immediately": True}
+
+
+def test_qq_music_credential_refresh_skips_without_initialized_credential():
+    learner = SimpleNamespace(_credential_file=None, check_qq_credential=lambda: True)
+    task = QQMusicCredentialRefreshTask(
+        [SimpleNamespace(character_id="luotianyi", auto_song_learner=learner)])
+    task.initialize(SimpleNamespace())
+
+    result = task.run_once()
+
+    assert result.ok is True
+    assert result.skipped is True
+    assert result.data["credential_count"] == 0
+    assert "no initialized" in result.message
+
+
+def test_qq_music_credential_refresh_reports_failed_characters_and_count(tmp_path):
+    def make(character_id, filename, ok):
+        learner = SimpleNamespace(
+            _credential_file=tmp_path / filename,
+            check_qq_credential=lambda: ok,
+        )
+        return SimpleNamespace(character_id=character_id, auto_song_learner=learner)
+
+    task = QQMusicCredentialRefreshTask([
+        make("luotianyi", "a.json", True),
+        make("miku", "b.json", False),
+    ])
+    task.initialize(SimpleNamespace())
+
+    result = task.run_once()
+
+    assert result.ok is False
+    assert result.data["credential_count"] == 2
+    assert result.data["failed_characters"] == ["miku"]
+
+
+def test_qq_music_credential_refresh_success_counts_distinct_files(tmp_path):
+    def make(character_id, filename):
+        learner = SimpleNamespace(
+            _credential_file=tmp_path / filename,
+            check_qq_credential=lambda: True,
+        )
+        return SimpleNamespace(character_id=character_id, auto_song_learner=learner)
+
+    task = QQMusicCredentialRefreshTask([make("luotianyi", "a.json"), make("miku", "b.json")])
+    task.initialize(SimpleNamespace())
+
+    result = task.run_once()
+
+    assert result.ok is True
+    assert result.skipped is False
+    assert result.data["credential_count"] == 2
+
+
+def test_qq_music_credential_refresh_requires_dependencies_and_stays_mechanical():
+    task = QQMusicCredentialRefreshTask([])
+    with pytest.raises(RuntimeError):
+        task.ensure_dependencies()
+    task.initialize(SimpleNamespace())
+    with pytest.raises(RuntimeError):
+        task.ensure_dependencies()
+    assert not hasattr(task, "agent_runtime")
+
+
 def test_learn_sing_songs_run_once_reloads_singing_library_for_learned_songs():
     learner = SimpleNamespace(
         check_qq_credential=lambda: True,

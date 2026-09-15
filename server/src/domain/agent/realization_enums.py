@@ -7,6 +7,7 @@ class ActionKind(str, Enum):
     START_THINKING = "start_thinking"
     SAY = "say"
     SING = "sing"
+    RESTORE_EXPRESSION = "restore_expression"
     WRITE_DIARY = "write_diary"
     PUBLISH_DYNAMIC = "publish_dynamic"
     REPLY_DYNAMIC = "reply_dynamic"
