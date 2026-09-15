@@ -22,6 +22,7 @@ _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "stage" / "test_first_login_scheduling.py").resolve(),
     (Path(__file__).parent / "stage" / "test_world_stage.py").resolve(),
     (Path(__file__).parent / "stage" / "test_world_stage_contracts.py").resolve(),
+    (Path(__file__).parent / "stage" / "test_world_settlement_wiring.py").resolve(),
     (Path(__file__).parent / "adapter" / "test_websocket_adapter.py").resolve(),
     (Path(__file__).parent / "adapter" / "test_production_stage_wiring.py").resolve(),
     (Path(__file__).parent / "test_websocket_delivery.py").resolve(),

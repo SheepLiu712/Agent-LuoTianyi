@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Dict, Final
+from typing import Final
 
 from src.adapter.websocket import WebSocketAdapter
 from src.agent_runtime import AgentRuntime
@@ -53,7 +53,7 @@ class SystemRuntime:
     _shutdown_completed_stages: set[str] = field(default_factory=set, init=False, repr=False)
 
     @classmethod
-    async def initialize(cls, config: Dict, observability: ObservabilityService | None = None) -> "SystemRuntime":
+    async def initialize(cls, config: dict, observability: ObservabilityService | None = None) -> SystemRuntime:
         owns_observability = observability is None
         database_manager: DatabaseManager | None = None
         capability_manager: CapabilityManager | None = None
@@ -186,13 +186,13 @@ class SystemRuntime:
     async def _rollback_failed_initialization(
         cls,
         *,
-        runtime: "SystemRuntime | None",
-        world: "WorldRuntime | None",
-        database_manager: "DatabaseManager | None",
-        capability_manager: "CapabilityManager | None",
-        chat_session_manager: "ChatSessionManager | None",
-        agent_runtime: "AgentRuntime | None",
-        observability: "ObservabilityService | None",
+        runtime: SystemRuntime | None,
+        world: WorldRuntime | None,
+        database_manager: DatabaseManager | None,
+        capability_manager: CapabilityManager | None,
+        chat_session_manager: ChatSessionManager | None,
+        agent_runtime: AgentRuntime | None,
+        observability: ObservabilityService | None,
         owns_observability: bool,
     ) -> None:
         """在初始化失败的情况下，尝试回滚初始化失败的系统运行时，关闭已启动的后台服务和资源。"""
@@ -247,10 +247,10 @@ class SystemRuntime:
     @staticmethod
     def _clear_global_references(
         *,
-        runtime: "SystemRuntime | None",
-        database_manager: "DatabaseManager | None",
-        chat_session_manager: "ChatSessionManager | None",
-        agent_runtime: "AgentRuntime | None",
+        runtime: SystemRuntime | None,
+        database_manager: DatabaseManager | None,
+        chat_session_manager: ChatSessionManager | None,
+        agent_runtime: AgentRuntime | None,
     ) -> None:
         '''将已经连接的引用清理掉，避免在系统运行时关闭后仍然被引用。'''
         global _system_runtime
@@ -360,11 +360,16 @@ class SystemRuntime:
         async with self._world_stage_lock:
             stage = self._world_stages.get(key)
             if stage is None or stage.state is StageState.TERMINATED:
+                settlements = getattr(getattr(self, "world", None), "settlements", None)
                 stage = await WorldStage.create(
                     character_id=selected_character, world_id=selected_world,
                     agent=self.get_agent(selected_character),
                     context_factory=self.agent_runtime.context_factories[selected_character],
                     config=self.world_stage_config,
+                    on_handling_settled=(
+                        settlements.on_handling_settled if settlements is not None else None),
+                    on_execution_finished=(
+                        settlements.on_execution_finished if settlements is not None else None),
                 )
                 self._world_stages[key] = stage
             return stage
@@ -421,7 +426,7 @@ def set_system_runtime(runtime: SystemRuntime | None) -> None:
     _system_runtime = runtime
 
 
-async def init_system_runtime(config: Dict) -> SystemRuntime:
+async def init_system_runtime(config: dict) -> SystemRuntime:
     global _system_runtime
     _system_runtime = await SystemRuntime.initialize(config)
     return _system_runtime

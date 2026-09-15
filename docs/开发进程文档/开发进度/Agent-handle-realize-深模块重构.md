@@ -9,6 +9,13 @@
 
 ## 已完成事实
 
+### 2026-09-15 世界侧结算端口（21/24/25 共同前置）
+
+- 交付行为：新增 `world/world_settlements.py` 的 `WorldSettlementRouter`，由 `WorldRuntime` 持有（`WorldRuntime.settlements`），在 `SystemRuntime.get_world_stage` 创建实例时接到 `WorldStage`；`WorldStage` **新增**可选窄回调 `on_handling_settled(request, report)`（在报告通过一致性校验并应用到 pending 之后调用），既有 `on_execution_finished` 语义不变。任务在投递事实前按刺激 ID 登记订阅者，随后收到 `FactHandlingOutcome`（`request_status`/`consumed`/`error_code`/`plan_ids`，`ignored` 表示明确处理但无计划）与 `FactPlanOutcome`（计划、执行报告与已提交 `EffectRef`）；多计划事实按 `emitted_plan_ids` 计数，最后一个计划结算后自动撤销登记，投递被拒用 `discard` 撤销。订阅者异常与未匹配结算只计数并记录，不打断 Stage。
+- interface spec：`接口文档/stage/README.md` 记录新回调的调用时机与语义；`接口文档/world/README.md` 记录端口的登记、回执与清理契约。实施依据为 [World 链路迁移实施规格（21-25）](../../设计文档/World链路迁移实施规格（21-25）.md) 的 N1 裁决（选项 A，不改 #152 既有成员语义）。
+- 验证及结果：在 `server` 使用 `conda run -n agent python -m pytest tests/stage tests/world tests/agent tests/agent_runtime tests/domain tests/system tests/adapter -q` → **837 passed、2 skipped**（2 skip 为既有真实网络探测）；新增 `tests/stage/test_world_settlement_wiring.py` 8 项用例，覆盖无计划结算即撤销登记、失败不消费、多计划按序结算与最后撤销、未匹配计数、订阅者异常隔离、非法/重复登记与幂等 discard，以及真 `WorldStage` 装配下处理结算与执行结算（含 `EffectRef`）到达订阅者。新增文件 Ruff 通过，`git diff --check` 干净。
+- 未验证范围：本切片只是端口与装配，不含任何 world 任务的迁移（21/23/24/25 消费该端口）；`DiaryPlanningDue` 目标用户字段（N2）与 24 的 ignore 语义落地仍在各自切片内验证。
+
 ### 2026-09-15 生产聊天连接接入 Stage（#66）
 
 - 交付行为：生产 `/chat_ws` 在认证后用默认角色调用 `StageManager.connect`，聊天业务事件经同步 `WebSocketService.try_accept_stimulus_event` 和共享 `WebSocketAdapter` 转为领域 Stimulus 投递给 ChatStage，ACK/NACK、认证、心跳、客户端模型响应和接入限流仍留在 user_interface；路由 `finally` 统一调用 `StageManager.disconnect`，保留期内重连复用同一 Stage/context/interaction。首次登录由 `UserInterface.login/auto_login` 直接调用 `StageManager.record_login(user_id, character_id, elapsed_from_last_login=None)`，回访登录继续使用旧 `chat_session_manager.on_user_login`，未恢复 `RETURN_LOGIN`。
