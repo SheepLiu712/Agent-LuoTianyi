@@ -15,7 +15,7 @@ from src.agent.context import ContextFactory
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler, ChatReflectionHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.touch import TouchInteractionHandler
-from src.agent.skills.expression.touch import TouchReactionSkill
+from src.agent.skills.expression.touch import TouchPolicy, TouchReactionSkill
 from src.domain.agent import StimulusKind
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.router import StimulusRouter
@@ -97,8 +97,8 @@ class AgentRuntime:
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
-                        (StimulusKind.TOUCH_INTERACTION, TouchInteractionHandler(TouchReactionSkill(
-                            self.character_registry.get(character_id).reflex.get("touch", {}).get("fast_reply", {})))),
+                        (StimulusKind.TOUCH_INTERACTION, TouchInteractionHandler(
+                            *self._touch_reaction(character_id))),
                         *((kind, ChatPreprocessingHandler()) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
@@ -363,6 +363,12 @@ class AgentRuntime:
         """根据最近对话上下文更新用户画像摘要。"""
         runtime = self.get_character_runtime(character_id)
         return await runtime.mind.update_user_profile_by_context(user_id=user_id, context=context)
+
+    def _touch_reaction(self, character_id: str) -> tuple[TouchReactionSkill, TouchPolicy]:
+        """按角色 touch.fast_reply 配置构造触摸资源选择技能与准入策略。"""
+        fast_reply = (self.character_registry.get(character_id)
+                      .reflex.get("touch", {}).get("fast_reply", {}))
+        return TouchReactionSkill(fast_reply), TouchPolicy.from_config(fast_reply.get("policy"))
 
     def _build_character_runtimes(
         self,

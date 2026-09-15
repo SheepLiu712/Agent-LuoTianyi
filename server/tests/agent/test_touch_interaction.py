@@ -184,6 +184,43 @@ def test_touch_policy_allows_legacy_region_with_frequency_at_limit():
     assert TouchPolicy().allows(touch_request(regions=("head", "辫子"), frequency=frequency).stimulus) is True
 
 
+def test_touch_policy_defaults_apply_when_config_absent():
+    default = TouchPolicy.from_config(None)
+
+    assert default == TouchPolicy()
+    assert TouchPolicy.from_config({}) == TouchPolicy()
+    assert default.allows(touch_request(
+        regions=("头", "辫子"),
+        frequency=d.TouchClickFrequency(count_10s=8, count_30s=16),
+    ).stimulus) is True
+
+
+def test_touch_policy_config_override_changes_limits_and_regions():
+    strict = TouchPolicy.from_config({"max_touches_10s": 1, "allowed_regions": ["head"]})
+
+    assert strict.allows(touch_request(
+        regions=("head",),
+        frequency=d.TouchClickFrequency(count_10s=2, count_30s=2),
+    ).stimulus) is False
+    assert strict.allows(touch_request(regions=("辫子",)).stimulus) is False
+    assert strict.allows(touch_request(regions=("head",)).stimulus) is True
+
+
+@pytest.mark.parametrize("config", [
+    {"max_touches_10s": 0},
+    {"max_touches_30s": -1},
+    {"max_touches_10s": "8"},
+    {"max_touches_30s": True},
+    {"allowed_regions": []},
+    {"allowed_regions": "head"},
+    {"allowed_regions": ["  "]},
+    ["not", "a", "mapping"],
+])
+def test_touch_policy_invalid_config_is_rejected(config):
+    with pytest.raises((TypeError, ValueError)):
+        TouchPolicy.from_config(config)
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("regions,frequency", [
     (("unknown",), None),

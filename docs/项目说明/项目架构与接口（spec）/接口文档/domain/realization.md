@@ -255,7 +255,7 @@ ExecutionErrorCode 为 `CONTRACT_MISMATCH`、`UNSUPPORTED_ACTION`、`UNSUPPORTED
 开始思考通过第 3.0 节的 StartThinking 计划通知 stage，结束思考由 stage 根据对应 handle 的完成、失败或取消清理，发送既有 waiting 状态。
 
 SAY 的 TTS 分支输出文字、可选表情、音频及 MessageEndOutput，不追加 normal 恢复包。
-触摸 handler 先按旧链已知身体区域及频率策略准入（最近 10 秒最多 8 次、30 秒最多 16 次），再从 manifest 登记的无文字预制资源中选择可由 PreparedSpeechResources 解析的音频。成功时先交付瞬时 Say，再交付独立 RestoreExpression；触摸音频终包先于 normal 表情，恢复行动随后自行发送终包，不等待客户端播放确认。未知区域、频率超限、资源缺失、读取失败或快速分支未命中时返回 FAILED、记录错误并丢弃，不进入普通话题、LLM 兜底或自动重试。
+触摸 handler 先按旧链已知身体区域及频率策略准入（**默认**最近 10 秒最多 8 次、30 秒最多 16 次；区域集合与两个上限可由角色配置 `reflex.touch.fast_reply.policy` 覆盖），再从 manifest 登记的无文字预制资源中选择可由 PreparedSpeechResources 解析的音频。成功时先交付瞬时 Say，再交付独立 RestoreExpression；触摸音频终包先于 normal 表情，恢复行动随后自行发送终包，不等待客户端播放确认。未知区域、频率超限、资源缺失、读取失败或快速分支未命中时返回 FAILED、记录错误并丢弃，不进入普通话题、LLM 兜底或自动重试。
 
 业务计划依次调用 realize，计划内 Action 依次执行，AgentOutput 依次发送。本版保持正常路径的顺序和终止包位置；严格乱序检测、丢包恢复和跨连接重投去重留待后续，不能把现有队列行为描述为这些可靠性保证。
 

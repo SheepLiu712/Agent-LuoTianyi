@@ -11,10 +11,11 @@
 
 ### 2026-09-14 触摸预制反应与独立表情恢复（#74）
 
-- 交付行为：新增公开 `RestoreExpression` Action 及生产 action handler；触摸 handler 先按旧区域别名和 10/30 秒频率策略准入（上限 8/16 次），再包装旧 `TouchFastReplyBuilder` 的概率、manifest 随机音频和表情映射，成功时依次交付瞬时预制音频 SAY 与独立 `normal` 恢复计划。未知区域、频率超限、资源缺失、读取失败或快速分支未命中均返回非重试 `FAILED`、记录错误并丢弃，不走普通话题或 LLM 兜底。
+- 交付行为：新增公开 `RestoreExpression` Action 及生产 action handler；触摸 handler 先按旧区域别名和 10/30 秒频率策略准入（**默认**上限 8/16 次，区域集合与两个上限可由角色配置 `reflex.touch.fast_reply.policy` 覆盖），再包装旧 `TouchFastReplyBuilder` 的概率、manifest 随机音频和表情映射，成功时依次交付瞬时预制音频 SAY 与独立 `normal` 恢复计划。未知区域、频率超限、资源缺失、读取失败或快速分支未命中均返回非重试 `FAILED`、记录错误并丢弃，不走普通话题或 LLM 兜底。
 - 生产接入：`TOUCH_INTERACTION` 从聊天预处理注册移出并绑定专用 handler；`RESTORE_EXPRESSION` 加入领域导出、计划白名单与生产 ActionRouter。触摸资源必须由 manifest 登记，使 MediaRef 可由 PreparedSpeechResources 解析；恢复 handler 在表情后提交正常消息终包，Stage/adapter 不检查 Action 类型且无专用分帧参数。
 - 验证及结果：server 下运行 `conda run -n agent python -m pytest tests/domain tests/agent tests/stage -q`，审查修复后结果 **684 passed、1 warning（32.28s）**；warning 为既有 `test_handle_input_contract.py` 使用 zip 参数化的 PytestRemovedIn10Warning。
 - 未验证范围：未运行完整 Server、真实客户端播放确认、生产资源目录、真实 LLM/TTS/GPU 或外部服务；本切片不删除仍供旧生产入口使用的 `try_handle_reflex`，只保证新触摸路径不调用该旁路。
+- 复审修复（2026-09-15）：把触摸准入策略从写死常量改为**配置驱动**——新增角色配置 `reflex.touch.fast_reply.policy`（`allowed_regions` / `max_touches_10s` / `max_touches_30s`，缺省即旧值），由 `AgentRuntime` 在构造阶段校验（类型问题 `TypeError`、取值问题 `ValueError`）；频率窗口本身仍由领域 `TouchClickFrequency` 固定，故不提供窗口配置。验证：`conda run -n agent python -m pytest tests/domain tests/agent tests/stage -q` → **694 passed**；推迟文件 `tests/test_agent_reflex.py -q --noconftest` 与基座一致（1 passed）；本切片 own 文件 `ruff check` 通过，`agent_runtime.py` 余项均为既有基线。
 
 ### 2026-09-06 门面公共入口与请求分流整理
 
