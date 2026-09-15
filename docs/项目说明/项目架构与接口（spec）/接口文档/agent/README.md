@@ -16,6 +16,15 @@
 
 世界事实的处理：`SONG_KNOWLEDGE_DISCOVERED` 由 `SongKnowledgeHandler` 接纳——调用共享技能按名称/safe name 幂等写入既有歌曲知识与关键词索引，知识与索引在同一幂等边界内（关键词写入失败回滚知识行），不产生计划或外部效果；其余世界/活动事实仍由占位处理器按事实 ID 结算。
 
+### 当前内部认知与状态变更技能
+
+- `ExplicitMemoryIntentSkill.detect(text) -> str | None`：在 cognitive 层按 `memory.explicit_intent` 短语 allowlist 提取明确记忆正文；不在 Stage 或 Adapter 判定。
+- `IntentionalMemoryCommit.commit(character_id, user_id, content) -> MemoryCommitRevision`：通过既有 `MemoryWriter` 路径幂等提交私有长期记忆并返回存储标识；它是内部状态变更技能，不是 Action。
+- `ChatReplyHandler` 命中明确记忆意图时，在同一 handle 中先等待提交，再交付仅含确认 `Say` 的计划；提交异常返回 `FAILED / INTERNAL_ERROR`、保留 pending、`retryable=False`，且不交付成功确认。
+- `ResponseCompositionSkill.compose_staged(...) -> ComposedResponse`：召回慢时先返回配置的临时草稿，正式草稿留待调用方 `await formal()`；不新增公开 Stimulus/Action。详见 [慢召回两段式回复](slow-recall-reply.md)。
+
+召回慢时的临时计划与正式计划、取消与迟到结果处理，以及 `agent_runtime.reply_composition.slow_recall` 配置见 [慢召回两段式回复](slow-recall-reply.md)。
+
 ## 模块职责
 
 `server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。

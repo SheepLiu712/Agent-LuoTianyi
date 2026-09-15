@@ -79,17 +79,18 @@ class TextContent:
 
 @dataclass(frozen=True)
 class ImageContent:
-    """图片描述、文件位置、媒体类型及关键词。"""
+    """图片说明、受控媒体身份、兼容文件位置、媒体类型及关键词。"""
 
     text: str
     image_client_path: str | None = None
     image_server_path: str | None = None
     mime_type: str | None = None
     terms: tuple[str, ...] = ()
+    media_id: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.text, str) or any(value is not None and not isinstance(value, str)
-                for value in (self.image_client_path, self.image_server_path, self.mime_type)):
+                for value in (self.image_client_path, self.image_server_path, self.mime_type, self.media_id)):
             raise TypeError("图片文字和位置字段应为字符串")
         _check_terms(self.terms)
 

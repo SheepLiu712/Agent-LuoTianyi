@@ -265,7 +265,7 @@ class ConversationService:
                     conversations=[
                         {
                             "uuid": conv.uuid,
-                            "timestamp": conv.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                            "timestamp": conv.timestamp.isoformat(sep=" ", timespec="microseconds"),
                             "source": conv.source,
                             "content": conv.content,
                             "type": conv.type,
@@ -334,7 +334,7 @@ class ConversationService:
                 new_convs_local: List[Dict[str, Any]] = []
                 for item in conversation_data:
                     try:
-                        ts = datetime.strptime(item.timestamp, "%Y-%m-%d %H:%M:%S")
+                        ts = datetime.fromisoformat(item.timestamp)
                     except ValueError:
                         ts = datetime.now()
 

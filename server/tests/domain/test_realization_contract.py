@@ -10,7 +10,7 @@ import src.domain.agent as domain
 
 
 ENUMS = {
-    "ActionKind": "start_thinking say sing write_diary publish_dynamic reply_dynamic request_song_learning",
+    "ActionKind": "start_thinking say sing restore_expression write_diary publish_dynamic reply_dynamic request_song_learning",
     "OutputDelivery": "conversation ephemeral_reaction",
     "Visibility": "global private",
     "PlanAcceptanceStatus": "accepted already_accepted",
@@ -26,7 +26,7 @@ ENUMS = {
     "RealizationContractErrorCode": "CONTRACT_INVALID_ACTION CONTRACT_INVALID_PLAN CONTRACT_INVALID_EXECUTION_CONTEXT CONTRACT_INVALID_OUTPUT CONTRACT_INVALID_RECEIPT CONTRACT_INVALID_EXECUTION_REPORT CONTRACT_INVALID_VALUE",
 }
 CASES = (
-    "Tone ChangeExpression DynamicReplyTarget DynamicSource StartThinking Say Sing WriteDiary "
+    "Tone ChangeExpression DynamicReplyTarget DynamicSource StartThinking Say Sing RestoreExpression WriteDiary "
     "PublishDynamic ReplyDynamic RequestSongLearning ActionPlan ExecutionContext PlanReceipt "
     "OutputReceipt TextFinalOutput AudioChunkOutput MessageEndOutput ExpressionOutput EffectRef "
     "ActionResult ExecutionReport"
@@ -89,6 +89,8 @@ def fields(name):
                             tone=make("Tone"), expression=make("ChangeExpression"),
                             delivery=member("OutputDelivery", "CONVERSATION")),
         "Sing": lambda: dict(song_id="song", segment_id="verse", expression=None),
+        "RestoreExpression": lambda: dict(expression_id="normal",
+                                            delivery=member("OutputDelivery", "EPHEMERAL_REACTION")),
         "WriteDiary": lambda: dict(owner_user_id="u", local_date=date(2026, 9, 6), body="日记"),
         "PublishDynamic": lambda: dict(body="动态", media_refs=(), visibility=member("Visibility", "GLOBAL"),
                                        owner_user_id=None, source=make("DynamicSource"), allow_comment=True),
@@ -103,7 +105,7 @@ def make(name, **changes):
 
 
 def error_code(name):
-    if name in "StartThinking Say Sing WriteDiary PublishDynamic ReplyDynamic RequestSongLearning".split():
+    if name in "StartThinking Say Sing RestoreExpression WriteDiary PublishDynamic ReplyDynamic RequestSongLearning".split():
         return "CONTRACT_INVALID_ACTION"
     if name.endswith("Output"):
         return "CONTRACT_INVALID_OUTPUT"
@@ -168,6 +170,7 @@ def test_abstract_bases_and_fixed_kinds():
         with pytest.raises(TypeError):
             public(name)()
     for name, kind in {"StartThinking": "START_THINKING", "Say": "SAY", "Sing": "SING",
+                       "RestoreExpression": "RESTORE_EXPRESSION",
                        "WriteDiary": "WRITE_DIARY", "PublishDynamic": "PUBLISH_DYNAMIC",
                        "ReplyDynamic": "REPLY_DYNAMIC", "RequestSongLearning": "REQUEST_SONG_LEARNING",
                        "TextFinalOutput": "TEXT_FINAL", "AudioChunkOutput": "AUDIO_CHUNK",

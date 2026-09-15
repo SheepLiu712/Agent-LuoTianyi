@@ -13,6 +13,7 @@
 - `start_background_services()`：启动 WorldClock 和世界后台任务。
 - `await stop_background_services()`：停止调度器及其拥有的任务。
 - `ensure_dependencies()`：在启动前检查配置和依赖。
+- `settlements: WorldSettlementRouter`：世界事实的结算端口。任务在投递前按刺激 ID 登记订阅者，随后收到处理结算（`FactHandlingOutcome`：是否消费、是否产生计划、失败原因；`ignored` 表示明确处理但没有计划）与执行结算（`FactPlanOutcome`：计划结果与已提交 `EffectRef`）。投递被拒用 `discard(stimulus_id)` 撤销登记；未匹配结算与订阅者异常只计数并记录，不打断 Stage。`SystemRuntime` 在创建 `WorldStage` 时把该端口交给 Stage 的两个结算回调。
 
 ### `WorldClock`
 
