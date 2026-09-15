@@ -8,7 +8,7 @@ import json
 import src.domain.agent as d
 
 _types = {cls.__name__: cls for cls in (
-    d.ActionPlan, d.StartThinking, d.Say, d.Sing, d.WriteDiary, d.PublishDynamic,
+    d.ActionPlan, d.StartThinking, d.Say, d.Sing, d.RestoreExpression, d.WriteDiary, d.PublishDynamic,
     d.ReplyDynamic, d.RequestSongLearning, d.MediaRef, d.Tone, d.ChangeExpression,
     d.DynamicSource, d.DynamicReplyTarget, d.OutputDelivery, d.Visibility,
 )}

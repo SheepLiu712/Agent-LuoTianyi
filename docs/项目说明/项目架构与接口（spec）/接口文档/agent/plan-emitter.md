@@ -30,6 +30,10 @@ Handler 提交完整、不可变的行动草稿；角色、请求、交互、依
 
 `set_interruptible(interruptible: bool) -> None` 设置当前 handle 对普通刺激的中断许可。默认 False；提取开始前设 True，决定进入回复生成前设 False。不是 bool 时抛 TypeError，已关闭时抛 RuntimeError，已取消时终止交付流程。中断许可通过 Agent 按 interaction 查询。
 
+## 同一次调用内的多份计划
+
+一次 handle 可以交付多份彼此独立的完整计划，序号连续。回复路径在召回慢时按 `StartThinking`（0）、临时回复（1）、正式回复（2）的顺序交付；每份计划各自完整且可独立实现，后交付的计划不修改先前计划，所有计划共享同一 `basis_interaction_revision`。详见 [慢召回两段式回复](slow-recall-reply.md)。
+
 ## 本次交互上下文
 
 `context: InteractionContext` 属性返回门面在本次调用中借用的上下文，供 handler 执行预处理持久化及认知更新。未提供上下文或 emitter 已关闭时抛 RuntimeError；close 释放引用。它的生命周期由 Stage 管理。

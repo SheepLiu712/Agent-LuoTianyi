@@ -1,16 +1,22 @@
 """聊天 pipeline 的准备、聚合、取消、执行及维护流程。"""
 import asyncio
 from dataclasses import replace
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from test_chat_stage import RecordingAgent, cleanup, plan, report, setup, stimulus, take
+
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.handlers.stimulus.chat import (
+    ChatPreprocessingHandler,
+    ChatReflectionHandler,
+)
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler, ChatReflectionHandler
 from src.agent.processing.plan_emitter import ActionPlanDraft
-from test_chat_stage import setup, cleanup, stimulus, report, plan, take, RecordingAgent
+from src.agent.skills.cognitive import ImagePreprocessingSkill
+from src.capabilities.media_resolution import ResolvedMedia
 
 
 async def until(predicate):
@@ -22,6 +28,24 @@ async def until(predicate):
 
 def ids(req):
     return tuple(s.stimulus_id for s in req.interaction.pending_stimuli)
+
+
+class _Understanding:
+    def extract_terms(self, text):
+        return ()
+
+
+class _NoReflection:
+    async def consolidate_memories(self, **kwargs):
+        return {}
+
+    async def update_profile(self, **kwargs):
+        return None
+
+
+class _NoCompaction:
+    async def compact(self, conversation_context):
+        return None
 
 
 def touch():
@@ -59,6 +83,101 @@ async def test_slow_image_fast_text_preserve_order_and_wait_after_last_completio
         await until(lambda: not stage._pending)
     finally:
         gate.set()
+        await cleanup(stage, adapter)
+
+
+@pytest.mark.asyncio
+async def test_real_preprocessing_persists_slow_image_before_fast_text_in_read_order():
+    gate = asyncio.Event()
+    class Resolver:
+        def resolve(self, media_ref, *, owner_user_id):
+            return ResolvedMedia(data=b"image", mime_type="image/png")
+    class Vision:
+        async def describe_image(self, image_data_uri):
+            await gate.wait()
+            return "一只白猫"
+    class Conversation:
+        def __init__(self):
+            self.entries = []
+        async def append(self, entries):
+            self.entries.extend(entries)
+            self.entries.sort(key=lambda entry: entry.timestamp)
+        def read(self):
+            return SimpleNamespace(entries=tuple(self.entries))
+    understanding = _Understanding()
+    handler = ChatPreprocessingHandler(
+        understanding, ImagePreprocessingSkill(Resolver(), Vision()))
+    replies = asyncio.Queue()
+    class Reply:
+        async def handle(self, req, plans):
+            replies.put_nowait(req)
+            return report(req, consumed=ids(req))
+    agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
+        (d.StimulusKind.IMAGE_MESSAGE, handler),
+        (d.StimulusKind.TEXT_MESSAGE, handler),
+        (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
+    ]))
+    stage, _, adapter, _, _ = await setup(agent, {"response_wait": 0.04})
+    stage.context.conversation = Conversation()
+    image = stimulus(
+        d.ImageMessage, media_ref=d.MediaRef(media_id="image"),
+        caption=None, client_msg_id="image")
+    text = stimulus(occurred_at=image.occurred_at)
+    try:
+        stage.stimulus_input_sink.submit(image)
+        stage.stimulus_input_sink.submit(text)
+        await until(lambda: any(entry.content.text == "你好" for entry in stage.context.conversation.entries))
+        await asyncio.sleep(0.06)
+        assert replies.empty() and stage._deadline is None
+        finished = datetime.now(timezone.utc)
+        gate.set()
+        req = await take(replies)
+        assert datetime.now(timezone.utc) >= finished + timedelta(seconds=0.035)
+        assert tuple(item.stimulus_id for item in req.prepared_inputs) == (
+            image.stimulus_id, text.stimulus_id)
+        snapshot = stage.context.conversation.read()
+        assert [entry.content.text for entry in snapshot.entries] == [
+            "", "[图片理解]: 一只白猫", "你好"]
+    finally:
+        gate.set()
+        await cleanup(stage, adapter)
+
+
+@pytest.mark.asyncio
+async def test_failed_real_image_preprocessing_drops_only_image_and_keeps_written_text(caplog):
+    class Resolver:
+        def resolve(self, media_ref, *, owner_user_id):
+            raise RuntimeError("image failed")
+    class Vision:
+        async def describe_image(self, image_data_uri):
+            raise AssertionError("vision must not execute")
+    handler = ChatPreprocessingHandler(
+        _Understanding(), ImagePreprocessingSkill(Resolver(), Vision()))
+    replies = asyncio.Queue()
+    class Reply:
+        async def handle(self, req, plans):
+            replies.put_nowait(req)
+            return report(req, consumed=ids(req))
+    agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
+        (d.StimulusKind.IMAGE_MESSAGE, handler),
+        (d.StimulusKind.TEXT_MESSAGE, handler),
+        (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
+    ]))
+    stage, _, adapter, _, _ = await setup(agent)
+    image = stimulus(
+        d.ImageMessage, media_ref=d.MediaRef(media_id="image"),
+        caption=None, client_msg_id="image")
+    text = stimulus()
+    try:
+        stage.stimulus_input_sink.submit(image)
+        stage.stimulus_input_sink.submit(text)
+        req = await take(replies)
+        assert ids(req) == (text.stimulus_id,)
+        assert len(stage.context.conversation.entries) == 1
+        assert stage.context.conversation.entries[0].content.text == "你好"
+        assert any("Stage preprocessing failed" in record.message for record in caplog.records)
+        await until(lambda: not stage._pending)
+    finally:
         await cleanup(stage, adapter)
 
 
@@ -289,8 +408,9 @@ async def test_real_agent_context_access_plan_delivery_and_reflection_after_exec
             return d.ActionResult(action_id=action.action_id, status=d.ActionExecutionStatus.COMPLETED,
                 error_code=None, irreversible_effect_committed=False, effect_ref=None)
     agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.TEXT_MESSAGE, Preprocess()), (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
-        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())], reflection_handler=Reflect()),
+        (d.StimulusKind.TEXT_MESSAGE, Preprocess(_Understanding())), (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
+        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())],
+        reflection_handler=Reflect(_NoReflection(), _NoCompaction())),
         action_router=ActionRouter([(d.ActionKind.SAY, Execute())]))
     stage, _, adapter, _, _ = await setup(agent)
     try:

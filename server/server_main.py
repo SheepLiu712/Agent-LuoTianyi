@@ -168,7 +168,7 @@ async def chat_ws(websocket: WebSocket):
                         ws_connection.client_mode = {"types": [raw_types.strip()]}
 
             if websocket_service.is_chat_related_event(event):
-                acceptance = websocket_service.try_accept_stimulus_event(
+                acceptance = await websocket_service.try_accept_stimulus_event(
                     ws_connection,
                     event,
                     adapter=system_runtime.chat_adapter,
