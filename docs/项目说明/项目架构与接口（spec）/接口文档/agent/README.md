@@ -14,6 +14,12 @@
 
 交互上下文的创建、用户资料、近期对话和召回缓存见 [Context 接口](context.md)。
 
+### 当前内部认知与状态变更技能
+
+- `ExplicitMemoryIntentSkill.detect(text) -> str | None`：在 cognitive 层按 `memory.explicit_intent` 短语 allowlist 提取明确记忆正文；不在 Stage 或 Adapter 判定。
+- `IntentionalMemoryCommit.commit(character_id, user_id, content) -> MemoryCommitRevision`：通过既有 `MemoryWriter` 路径幂等提交私有长期记忆并返回存储标识；它是内部状态变更技能，不是 Action。
+- `ChatReplyHandler` 命中明确记忆意图时，在同一 handle 中先等待提交，再交付仅含确认 `Say` 的计划；提交异常返回 `FAILED / INTERNAL_ERROR`、保留 pending、`retryable=False`，且不交付成功确认。
+
 ## 模块职责
 
 `server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。

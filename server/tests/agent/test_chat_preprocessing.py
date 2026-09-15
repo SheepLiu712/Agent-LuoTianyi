@@ -44,8 +44,6 @@ class _ImageUnderstanding:
     async def describe_image(self, image_data_uri):
         self.calls.append(image_data_uri)
         return self.description
-
-
 class _Conversation:
     def __init__(self):
         self.entries = []

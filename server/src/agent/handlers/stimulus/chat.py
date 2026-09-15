@@ -1,6 +1,7 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from typing import Final
 from uuid import uuid4
 
 from typing_extensions import assert_never
@@ -14,13 +15,17 @@ from src.agent.context.models import (
 )
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.cognitive import (
+    ExplicitMemoryIntentSkill,
     ImagePreprocessingSkill,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
 )
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.agent.skills.reflection import ReflectionSkill
 from src.utils.enum_type import ConversationSource
+
+_MEMORY_ACK_REPLY_TOPIC_PREFIX: Final = "刚刚已经把这条用户长期记忆提交完成，请用角色口吻简短确认"
 
 
 def _report(request: d.HandleStimulusRequest, *, consume: bool = False,
@@ -163,20 +168,76 @@ def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
     return tuple(entries)
 
 
+def _failed_memory_report(request: d.HandleStimulusRequest) -> d.HandlingReport:
+    return replace(
+        _report(request), request_status=d.HandlingRequestStatus.FAILED,
+        error_code=d.HandlingErrorCode.INTERNAL_ERROR,
+    )
 class ChatReplyHandler:
     """到期批次回复：生成回复、落库并交付有序 Say/Sing 计划。"""
 
     def __init__(self, composition: ResponseCompositionSkill,
-                 understanding: TextPreprocessingSkill) -> None:
-        """注入回复生成技能与文本预处理技能（用于演唱尝试线索）。"""
+                 understanding: TextPreprocessingSkill,
+                 memory_intent: ExplicitMemoryIntentSkill | None = None,
+                 memory_commit: IntentionalMemoryCommit | None = None) -> None:
+        """注入回复生成、文本预处理以及可选的明确记忆识别与提交技能。"""
         self._composition = composition
         self._understanding = understanding
+        self._memory_intent = memory_intent
+        self._memory_commit = memory_commit
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """按接收顺序把整批输入作为一次回复：召回→生成→落库→交付计划，并按 ID 消费。"""
         pending = tuple(s.stimulus_id for s in request.interaction.pending_stimuli)
-        reply_topic = "\n".join(
-            item.text.strip() for item in request.prepared_inputs if item.text and item.text.strip())
+        prepared_texts = tuple(
+            (item, item.text.strip()) for item in request.prepared_inputs if item.text and item.text.strip())
+        memory_items: list[tuple[d.PreprocessedInput, str]] = []
+        reply_parts: list[str] = []
+        if self._memory_intent is not None:
+            for item, text in prepared_texts:
+                memory_content = self._memory_intent.detect(text)
+                if memory_content is None:
+                    reply_parts.append(text)
+                else:
+                    memory_items.append((item, memory_content))
+        else:
+            reply_parts.extend(text for _, text in prepared_texts)
+        if memory_items:
+            identity = plans.context.identity
+            if identity.user_id is None or self._memory_commit is None:
+                return _failed_memory_report(request)
+            committed_contents: list[str] = []
+            for _, memory_content in memory_items:
+                revision = await self._memory_commit.commit(
+                    character_id=identity.character_id,
+                    user_id=identity.user_id,
+                    content=memory_content,
+                )
+                if not revision.identifier.strip():
+                    return _failed_memory_report(request)
+                committed_contents.append(memory_content)
+            memory_summary = "；".join(committed_contents)
+            normal_topic = "\n".join(reply_parts)
+            reply_topic = f"{_MEMORY_ACK_REPLY_TOPIC_PREFIX}：{memory_summary}"
+            if normal_topic:
+                reply_topic = f"{reply_topic}\n{normal_topic}"
+            drafts = await self._composition.compose(
+                character_id=identity.character_id,
+                user_id=identity.user_id,
+                reply_topic=reply_topic,
+                conversation_history=_render_history(plans.context.conversation.read()),
+                memory_queries=(),
+                sing_attempts=(),
+                excluded_segments=set(),
+            )
+            actions = _reply_actions(request, drafts)
+            if actions:
+                entries = _reply_entries(drafts)
+                if entries:
+                    await plans.context.conversation.append(entries)
+                await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=actions))
+            return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
+        reply_topic = "\n".join(reply_parts)
         drafts: tuple = ()
         if reply_topic:
             await plans.emit(ActionPlanDraft(

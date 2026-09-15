@@ -19,6 +19,7 @@ from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
 from src.agent.skills import Skills
 from src.agent.skills.cognitive import (
+    ExplicitMemoryIntentSkill,
     ImagePreprocessingSkill,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
@@ -26,6 +27,7 @@ from src.agent.skills.cognitive import (
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
+from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.agent.skills.reflection import ReflectionSkill
 from src.agent_runtime.agent_registry import AgentRegistry
 from src.agent_runtime.character_registry import CharacterRegistry
@@ -80,6 +82,7 @@ class AgentRuntime:
             self.skills = Skills(self.config.get("skills", {}), llm_service,
                                   tts_engine=AsyncTTS(capability_manager.speech),
                                   preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
+                                  explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
                                   singing=capability_manager.singing,
                                   media_resolver=capability_manager.media_resolver,
                                   image_understanding=capability_manager.image_understanding)
@@ -105,6 +108,9 @@ class AgentRuntime:
                 self.config.get("reflection", {}),
                 lambda character_id: self.character_runtimes[character_id],
             ))
+            self.skills.register(IntentionalMemoryCommit, IntentionalMemoryCommit(
+                lambda character_id: self.character_runtimes[character_id].mind.memory,
+            ))
 
             self.agent_registry = AgentRegistry(
                 self.config.get("agent_registry", {}),
@@ -124,7 +130,9 @@ class AgentRuntime:
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
                             self.skills.get(ResponseCompositionSkill),
-                            self.skills.get(TextPreprocessingSkill))),
+                            self.skills.get(TextPreprocessingSkill),
+                            self.skills.get(ExplicitMemoryIntentSkill),
+                            self.skills.get(IntentionalMemoryCommit))),
                         *((kind, ChatPreprocessingHandler(
                             self.skills.get(TextPreprocessingSkill),
                             self.skills.get(ImagePreprocessingSkill))) for kind in (

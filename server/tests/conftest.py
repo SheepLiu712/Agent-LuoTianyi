@@ -9,6 +9,8 @@ _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "agent" / "test_media_resolution.py").resolve(),
     (Path(__file__).parent / "agent" / "test_singing.py").resolve(),
     (Path(__file__).parent / "agent" / "test_chat_reply.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_intentional_memory.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_intentional_memory_storage.py").resolve(),
     (Path(__file__).parent / "stage" / "test_chat_reply_settlement.py").resolve(),
     (Path(__file__).parent / "agent" / "test_chat_reflection.py").resolve(),
     (Path(__file__).parent / "stage" / "test_concurrent_handling.py").resolve(),
