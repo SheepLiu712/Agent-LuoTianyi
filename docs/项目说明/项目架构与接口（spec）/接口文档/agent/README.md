@@ -14,7 +14,7 @@
 
 交互上下文的创建、用户资料、近期对话和召回缓存见 [Context 接口](context.md)。
 
-世界事实的处理：`WORLD_OBSERVATION` 按 `observation_kind.value` 分派到已登记分支——`citywalk_completed` 由 `CitywalkObservationHandler` 生成角色化正文并交付 `PublishDynamic` 计划；未登记类别仍按事实 ID 结算，不产生计划。`PUBLISH_DYNAMIC` 由 `PublishDynamicHandler` 经共享动态技能按来源身份幂等发布，成功报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<dynamic_id>)`，失败返回稳定错误码且不声称已提交效果。`SONG_KNOWLEDGE_DISCOVERED` 由专用 `SongKnowledgeHandler` 接纳——调用共享技能按名称/safe name 幂等写入既有歌曲知识与关键词索引，知识与索引在同一幂等边界内（关键词写入失败回滚知识行），不产生计划或外部效果。
+世界事实的处理：`WORLD_OBSERVATION` 按 `observation_kind.value` 分派到已登记分支——`citywalk_completed` 由 `CitywalkObservationHandler` 生成角色化正文并交付 `PublishDynamic` 计划；未登记类别仍按事实 ID 结算，不产生计划。`SONG_KNOWLEDGE_DISCOVERED` 由专用 `SongKnowledgeHandler` 接纳——调用共享技能按名称/safe name 幂等写入既有歌曲知识与关键词索引，知识与索引在同一幂等边界内（关键词写入失败回滚知识行），不产生计划或外部效果。`SONG_LEARNED` 由 `SongLearnedHandler` 处理：先经 `LearnedSongExperienceSkill` 把「学会」写入角色自身事件记忆（作用域为角色 ID，同日同内容由既有去重保证幂等，写入失败只记录、不回滚学会事实），再按唱歌能力提供的唱段/歌词材料生成正文并交付 `PublishDynamic` 计划。`PUBLISH_DYNAMIC` 由 `PublishDynamicHandler` 经共享动态技能按来源身份幂等发布，成功报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<dynamic_id>)`，失败返回稳定错误码且不声称已提交效果；`REQUEST_SONG_LEARNING` 由 `RequestSongLearningHandler` 经共享技能加入愿望清单，成功报告 `EffectRef(kind=SONG_LEARNING_JOB, ...)`，重复请求为 `ALREADY_COMPLETED`。
 
 ### 当前内部认知与状态变更技能
 

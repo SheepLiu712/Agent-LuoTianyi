@@ -236,7 +236,7 @@ class SystemRuntime:
                 continue
             try:
                 await stop()
-            except BaseException as error:
+            except BaseException as error:  # noqa: BLE001 - rollback must continue through all owned resources
                 errors.append(f"{name}: {type(error).__name__}: {error}")
 
         if errors:
@@ -297,7 +297,7 @@ class SystemRuntime:
                     await stop()
                 except asyncio.CancelledError:
                     raise
-                except Exception as error:
+                except Exception as error:  # noqa: BLE001 - lifecycle boundary aggregates dependency failures
                     errors.append(f"{name}: {type(error).__name__}: {error}")
                     break
                 else:

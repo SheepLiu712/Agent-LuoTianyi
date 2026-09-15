@@ -67,7 +67,7 @@ def runtime_dependencies(monkeypatch, tmp_path):
         )),
         "capability_manager": SimpleNamespace(
             speech=SimpleNamespace(tts_module={}),
-            singing=SimpleNamespace(),
+            singing=SimpleNamespace(singing_manager={}),
             dynamics=SimpleNamespace(),
             media_resolver=SimpleNamespace(resolve=lambda media_ref: None),
             image_understanding=SimpleNamespace(describe_image=lambda image_data_uri: None),

@@ -8,19 +8,26 @@ from types import SimpleNamespace
 
 import pytest
 
-
-from src.world.learn_sing_songs.task import LearnSingSongsTask
-from src.world.learn_sing_songs.qq_music_credential_refresh_task import QQMusicCredentialRefreshTask
-from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner, WishlistManager
+import src.domain.agent as d
+from src.world.learn_sing_songs.auto_song_learner import (
+    AutoSongLearner,
+    WishlistManager,
+)
+from src.world.learn_sing_songs.qq_music_credential_refresh_task import (
+    QQMusicCredentialRefreshTask,
+)
 from src.world.learn_sing_songs.song_learner.src.pipeline import download_qq_song
 from src.world.learn_sing_songs.song_learner.src.pipeline.download_qq_song import (
     get_song_singer_names,
     longest_common_subsequence_length,
     rank_songs_by_title,
-    safe_name as qq_safe_name,
     title_matches,
     validate_song_singers,
 )
+from src.world.learn_sing_songs.song_learner.src.pipeline.download_qq_song import (
+    safe_name as qq_safe_name,
+)
+from src.world.learn_sing_songs.task import LearnSingSongsTask
 
 
 class FakeEventStore:
@@ -287,18 +294,17 @@ def test_learn_sing_songs_initialize_sets_event_store_and_learner(monkeypatch):
     learner = object()
     monkeypatch.setattr(task, "_build_auto_song_learner", lambda: learner)
     event_store = object()
-    character_runtime = object()
     runtime = SimpleNamespace(
         database_manager=SimpleNamespace(event_store=event_store),
-        agent_runtime=SimpleNamespace(get_character_runtime=lambda character_id: character_runtime),
+        agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
     )
 
     task.initialize(runtime)
 
     assert task.system_runtime is runtime
     assert task.event_store is event_store
-    assert task.character_runtime is character_runtime
     assert task.auto_song_learner is learner
+    assert not hasattr(task, "character_runtime")
 
 
 def test_learn_sing_songs_build_learner_skips_without_wishlist():
@@ -343,7 +349,7 @@ def test_learn_sing_songs_run_once_skips_without_learner():
     task = LearnSingSongsTask({})
     task._init_error = "missing learner"
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
 
     assert result.ok is True
     assert result.skipped is True
@@ -358,7 +364,7 @@ def test_learn_sing_songs_run_once_records_result_without_learned():
     task = LearnSingSongsTask({})
     task.auto_song_learner = learner
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
 
     assert result.ok is True
     assert result.data["credential_ok"] is True
@@ -377,7 +383,7 @@ def test_learn_sing_songs_run_once_writes_event_for_learned_songs():
     task.auto_song_learner = learner
     task.event_store = event_store
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
 
     assert result.ok is True
     assert result.data["credential_ok"] is True
@@ -398,7 +404,7 @@ def test_learn_sing_songs_run_once_does_not_start_with_unrefreshable_credential(
     task = LearnSingSongsTask({})
     task.auto_song_learner = learner
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
 
     assert result.ok is True
     assert result.skipped is True
@@ -519,41 +525,58 @@ def test_learn_sing_songs_run_once_reloads_singing_library_for_learned_songs():
     task.auto_song_learner = learner
     task.system_runtime = SimpleNamespace(capability_manager=SimpleNamespace(singing=singing))
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
 
     assert result.ok is True
     assert calls == ["luotianyi"]
 
 
-def test_learn_sing_songs_passes_full_lyrics_to_dynamic_capability():
+class FakeFactSink:
+    def __init__(self, accept=True):
+        self.facts = []
+        self.accept = accept
+
+    async def submit(self, fact):
+        self.facts.append(fact)
+        return self.accept
+
+
+def fact_sink_runtime(sink, *, character_id="luotianyi"):
+    async def get_world_stage(character_id=None, world_id=None):
+        return SimpleNamespace(fact_sink=sink)
+
+    return SimpleNamespace(
+        agent_runtime=SimpleNamespace(default_character_id=character_id),
+        get_world_stage=get_world_stage,
+        capability_manager=SimpleNamespace(
+            singing=SimpleNamespace(reload_songs=lambda *_: None, tag_song_emotions=lambda *_: []),
+        ),
+    )
+
+
+def test_learn_sing_songs_submits_song_learned_facts():
     learner = SimpleNamespace(
         check_qq_credential=lambda: True,
         try_learn_pending=lambda: SimpleNamespace(learned=["Song A"], abandoned=[], awaiting=[]),
     )
-    captured = {}
-
-    class FakeCharacterRuntime:
-        async def publish_learned_song_dynamic(self, **kwargs):
-            captured.update(kwargs)
-            return {"dynamic_id": "dynamic-song-a", "content": "learned song dynamic"}
-
-    manager = SimpleNamespace(
-        character_name="洛天依",
-        can_i_sing_song=lambda song_name: ("Song A", ["主歌", "副歌"]),
-        get_full_lyrics=lambda song_name: "第一句歌词\n第二句歌词\n副歌歌词",
-    )
-    task = LearnSingSongsTask({}, character_id="luotianyi", singing_manager=manager)
+    sink = FakeFactSink()
+    task = LearnSingSongsTask({}, character_id="luotianyi")
     task.auto_song_learner = learner
-    task.character_runtime = FakeCharacterRuntime()
-    task.system_runtime = SimpleNamespace(capability_manager=SimpleNamespace(singing=SimpleNamespace(reload_songs=lambda *_: None)))
+    task.system_runtime = fact_sink_runtime(sink)
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
 
     assert result.ok is True
-    assert result.data["dynamic_ids"] == ["dynamic-song-a"]
-    assert captured["song_name"] == "Song A"
-    assert captured["segment_description"] == "主歌"
-    assert captured["lyrics"] == "第一句歌词\n第二句歌词\n副歌歌词"
+    assert result.data["submitted_count"] == 1
+    assert len(sink.facts) == 1
+    fact = sink.facts[0]
+    assert isinstance(fact, d.SongLearned)
+    assert fact.song_id == "Song A"
+    assert fact.source is d.StimulusSource.WORLD
+    assert fact.user_id is None
+    assert fact.target_character_ids == ("luotianyi",)
+    assert fact.learning_job_id.startswith("luotianyi:")
+    assert fact.completed_at.tzinfo is not None
 
 
 def test_learn_sing_songs_deduplicates_learned_songs_before_side_effects():
@@ -566,34 +589,17 @@ def test_learn_sing_songs_deduplicates_learned_songs_before_side_effects():
         ),
     )
     event_store = FakeEventStore()
-    published = []
-
-    class FakeCharacterRuntime:
-        async def publish_learned_song_dynamic(self, **kwargs):
-            published.append(kwargs["song_name"])
-            return {"dynamic_id": f"dynamic-{kwargs['song_name']}"}
-
-    manager = SimpleNamespace(
-        can_i_sing_song=lambda song_name: (song_name, ["主歌"]),
-        get_full_lyrics=lambda _song_name: "歌词",
-    )
-    task = LearnSingSongsTask({}, character_id="luotianyi", singing_manager=manager)
+    sink = FakeFactSink()
+    task = LearnSingSongsTask({}, character_id="luotianyi")
     task.auto_song_learner = learner
     task.event_store = event_store
-    task.character_runtime = FakeCharacterRuntime()
-    task.system_runtime = SimpleNamespace(
-        capability_manager=SimpleNamespace(
-            singing=SimpleNamespace(
-                reload_songs=lambda *_: None,
-                tag_song_emotions=lambda *_: [],
-            )
-        )
-    )
+    task.system_runtime = fact_sink_runtime(sink)
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
 
     assert result.data["learned"] == ["Song A", "Song B"]
-    assert published == ["Song A", "Song B"]
+    assert [fact.song_id for fact in sink.facts] == ["Song A", "Song B"]
+    assert result.data["submitted_count"] == 2
     assert event_store.events[0]["description"] == "Song A、Song B"
 
 
@@ -607,23 +613,17 @@ def test_learn_sing_songs_already_learned_wins_over_learned_result():
             awaiting=[],
         ),
     )
-    published = []
-
-    class FakeCharacterRuntime:
-        async def publish_learned_song_dynamic(self, **kwargs):
-            published.append(kwargs["song_name"])
-            return {"dynamic_id": "unexpected"}
-
+    sink = FakeFactSink()
     task = LearnSingSongsTask({})
     task.auto_song_learner = learner
-    task.character_runtime = FakeCharacterRuntime()
+    task.system_runtime = fact_sink_runtime(sink)
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
 
     assert result.data["learned"] == []
     assert result.data["already_learned"] == ["song a"]
-    assert result.data["dynamic_ids"] == []
-    assert published == []
+    assert result.data["submitted_count"] == 0
+    assert sink.facts == []
 
 
 def test_learn_sing_songs_write_learned_event_skips_without_store():

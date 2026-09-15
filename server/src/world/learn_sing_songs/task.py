@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
-from typing import Any, Dict, TYPE_CHECKING
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
+import src.domain.agent as d
 from src.system.database.event_models import UnifiedEventType
 from src.utils.helpers import get_unified_song_name
 from src.utils.logger import get_logger
@@ -11,34 +12,31 @@ from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
+    from src.capabilities.singing.singing_manager import SingingManager
+    from src.stage.world_stage import WorldStage
+    from src.system.database.services.event_store import EventStore
     from src.system.system_runtime import SystemRuntime
     from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
-    from src.system.database.services.event_store import EventStore
-    from src.capabilities.singing.singing_manager import SingingManager
-    from src.agent_runtime.character_runtime import CharacterRuntime
 
 
 class LearnSingSongsTask(WorldTask):
     base_task_name = "learn_sing_songs"
 
-    def __init__(self, config: Dict[str, Any] | None = None, character_id: str = "luotianyi", singing_manager: "SingingManager" | None = None) -> None:
+    def __init__(self, config: dict[str, Any] | None = None, character_id: str = "luotianyi", singing_manager: SingingManager | None = None) -> None:
         self.character_id = character_id
         self.singing_manager = singing_manager
         self.character_name: str = getattr(singing_manager, "character_name", "洛天依")
         super().__init__(f"{self.base_task_name}:{character_id}", config)
         self.logger = get_logger(__name__)
-        self.system_runtime: "SystemRuntime" | None = None
-        self.event_store: "EventStore" | None = None
-        self.character_runtime: "CharacterRuntime" | None = None
-        self.auto_song_learner: "AutoSongLearner" | None = None
+        self.system_runtime: SystemRuntime | None = None
+        self.event_store: EventStore | None = None
+        self.auto_song_learner: AutoSongLearner | None = None
         self._init_error: str = ""
 
-    def initialize(self, system_runtime: "SystemRuntime") -> None:
+    def initialize(self, system_runtime: SystemRuntime) -> None:
         self.system_runtime = system_runtime
         database_manager = getattr(system_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
-        agent_runtime = getattr(system_runtime, "agent_runtime", None)
-        self.character_runtime = agent_runtime.get_character_runtime(self.character_id) if agent_runtime is not None else None
         self.auto_song_learner = self._build_auto_song_learner()
 
     def ensure_dependencies(self) -> None:
@@ -52,7 +50,8 @@ class LearnSingSongsTask(WorldTask):
         if missing:
             raise RuntimeError(f"LearnSingSongsTask dependencies are missing: {', '.join(missing)}")
 
-    def run_once(self) -> WorldTaskResult:
+    async def run_once(self) -> WorldTaskResult:
+        """执行一次学歌；本任务不生成角色内容，只投递已验证的学会事实。"""
         if self.auto_song_learner is None:
             return WorldTaskResult.skipped_result(
                 self.task_name,
@@ -86,13 +85,11 @@ class LearnSingSongsTask(WorldTask):
         awaiting = list(getattr(result, "awaiting", []) or [])
 
         if learned and self.event_store is not None:
-            asyncio.run(self._write_learned_event(learned))
+            await self._write_learned_event(learned)
         if learned:
             self._reload_singing_library()
-            self._tag_learned_songs(learned)
-            published_dynamic_ids = self._publish_learned_dynamics(learned)
-        else:
-            published_dynamic_ids = []
+            await self._tag_learned_songs(learned)
+        submitted = await self._submit_learned(learned)
 
         return WorldTaskResult.success(
             self.task_name,
@@ -102,7 +99,51 @@ class LearnSingSongsTask(WorldTask):
             already_learned=already_learned,
             abandoned=abandoned,
             awaiting=awaiting,
-            dynamic_ids=published_dynamic_ids,
+            submitted_count=submitted,
+        )
+
+    async def _submit_learned(self, learned: list[str]) -> int:
+        """把已验证的新学会歌曲逐首投递为世界事实，返回被受理的数量。"""
+        if not learned:
+            return 0
+        stage, character_id = await self._world_stage()
+        if stage is None:
+            self.logger.warning("WorldStage 不可用，%d 首已学会歌曲本次未投递", len(learned))
+            return 0
+        job_id = f"{self.character_id}:{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        submitted = 0
+        for song_name in learned:
+            fact = self._build_learned_fact(character_id, job_id, song_name)
+            if await stage.fact_sink.submit(fact):
+                submitted += 1
+            else:
+                self.logger.warning("已学会歌曲事实被 WorldStage 拒绝：%s", song_name)
+        return submitted
+
+    async def _world_stage(self) -> tuple[WorldStage | None, str]:
+        """取得本角色长期 WorldStage；运行时不支持时返回 None。"""
+        system_runtime = self.system_runtime
+        agent_runtime = getattr(system_runtime, "agent_runtime", None)
+        character_id = str(getattr(agent_runtime, "default_character_id", None) or self.character_id)
+        get_world_stage = getattr(system_runtime, "get_world_stage", None)
+        if not callable(get_world_stage):
+            return None, character_id
+        return await get_world_stage(character_id), character_id
+
+    def _build_learned_fact(self, character_id: str, job_id: str, song_name: str) -> d.SongLearned:
+        """把一次已验证的学会结果包装成强类型世界事实。"""
+        now = datetime.now(timezone.utc)
+        return d.SongLearned(
+            stimulus_id=str(uuid4()),
+            schema_version=1,
+            occurred_at=now,
+            source=d.StimulusSource.WORLD,
+            target_character_ids=(character_id,),
+            user_id=None,
+            ephemeral=False,
+            learning_job_id=job_id,
+            song_id=song_name,
+            completed_at=now,
         )
 
     @staticmethod
@@ -118,7 +159,7 @@ class LearnSingSongsTask(WorldTask):
             unique.append(display_name)
         return unique
 
-    def _build_auto_song_learner(self) -> "AutoSongLearner" | None:
+    def _build_auto_song_learner(self) -> AutoSongLearner | None:
         try:
             from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
 
@@ -170,7 +211,7 @@ class LearnSingSongsTask(WorldTask):
         except Exception as exc:
             self.logger.warning(f"Failed to reload singing library after learning songs: {exc}")
 
-    def _tag_learned_songs(self, learned: list[str]) -> None:
+    async def _tag_learned_songs(self, learned: list[str]) -> None:
         if self.system_runtime is None:
             return
         singing = getattr(getattr(self.system_runtime, "capability_manager", None), "singing", None)
@@ -179,67 +220,7 @@ class LearnSingSongsTask(WorldTask):
             return
         for song_name in learned:
             try:
-                tags = asyncio.run(tag_song(self.character_id, song_name))
+                tags = await tag_song(self.character_id, song_name)
                 self.logger.info(f"Song emotion tags generated: {song_name} -> {tags}")
             except Exception as exc:
                 self.logger.warning(f"Failed to tag learned song emotions for {song_name}: {exc}")
-
-    def _publish_learned_dynamics(self, learned: list[str]) -> list[str]:
-        if self.character_runtime is None:
-            return []
-        published: list[str] = []
-        for song_name in learned:
-            material = self._collect_learned_song_material(song_name)
-            try:
-                result = asyncio.run(
-                    self.character_runtime.publish_learned_song_dynamic(
-                        song_name=song_name,
-                        segment_description=material.get("segment_description", ""),
-                        lyrics=material.get("lyrics", ""),
-                    )
-                )
-                dynamic_id = result.get("dynamic_id")
-                if dynamic_id and result.get("created", True):
-                    published.append(str(dynamic_id))
-            except Exception as exc:
-                self.logger.warning(f"Failed to publish learned-song dynamic for {song_name}: {exc}")
-        return published
-
-    def _collect_learned_song_material(self, song_name: str) -> dict[str, str]:
-        manager = self.singing_manager
-        if manager is None:
-            return {"song_name": song_name, "segment_description": "", "lyrics": ""}
-
-        correct_song_name = song_name
-        segment_description = ""
-        try:
-            resolved_name, segments = manager.can_i_sing_song(song_name)
-            if resolved_name:
-                correct_song_name = resolved_name
-            if segments:
-                segment_description = str(segments[0])
-        except Exception as exc:
-            self.logger.warning(f"Failed to resolve learned song segments for {song_name}: {exc}")
-
-        lyrics = ""
-        get_full_lyrics = getattr(manager, "get_full_lyrics", None)
-        if callable(get_full_lyrics):
-            try:
-                lyrics = str(get_full_lyrics(correct_song_name or song_name) or "").strip()
-            except Exception as exc:
-                self.logger.warning(f"Failed to read full lyrics for {song_name}: {exc}")
-
-        if not lyrics and segment_description:
-            get_segment_lyrics = getattr(manager, "get_segment_lyrics", None)
-            if callable(get_segment_lyrics):
-                try:
-                    lyrics = str(get_segment_lyrics(correct_song_name or song_name, segment_description) or "").strip()
-                except Exception as exc:
-                    self.logger.warning(f"Failed to read segment lyrics for {song_name}: {exc}")
-
-        return {
-            "song_name": correct_song_name or song_name,
-            "segment_description": segment_description,
-            "lyrics": lyrics,
-        }
-

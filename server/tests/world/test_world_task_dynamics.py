@@ -9,8 +9,13 @@ import pytest
 import src.domain.agent as d
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.stimulus.citywalk import CitywalkObservationHandler
+from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
 from src.agent.processing.plan_emitter import PlanEmitter
+from src.agent.skills.cognitive.learned_song_experience import (
+    LearnedSongExperienceSkill,
+)
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
+from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.capabilities.dynamic import DynamicCapability
 from src.system.database.database_service import DatabaseManager
 from src.system.database.sql_database import InviteCode
@@ -29,6 +34,28 @@ class PlanSink:
     async def emit(self, plan):
         self.plans.append(plan)
         return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
+
+
+class FakeFactSink:
+    """记录世界事实并一律受理。"""
+
+    def __init__(self):
+        self.facts = []
+
+    async def submit(self, fact):
+        self.facts.append(fact)
+        return True
+
+
+class FakeMemory:
+    """记录学会经验写入，默认成功。"""
+
+    def __init__(self):
+        self.calls = []
+
+    async def write_event_memory(self, *, user_id, content, commit=True):
+        self.calls.append((user_id, content))
+        return True
 
 
 @pytest.fixture(scope="function")
@@ -161,6 +188,7 @@ def test_citywalk_completion_publishes_global_dynamic(db_manager: DatabaseManage
 
 
 def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
+    """学会新歌后由 Agent 侧写经验并发布动态，world 只投递学会事实。"""
     _add_invite_code(db_manager, "INVITE6")
     user = _register_and_login(db_manager, "songuser", "INVITE6")
 
@@ -171,6 +199,7 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
         return "今天学会了《告死鸟》，下次可以唱给你听。"
 
     dynamic_capability.generate_world_dynamic_content = fake_generate_world_dynamic_content
+    publishing = DynamicPublishingSkill(dynamic_capability)
 
     class FakeLearner:
         def check_qq_credential(self):
@@ -187,30 +216,64 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
         def reload_songs(self, character_id: str):
             return character_id
 
-    class FakeCharacterRuntime:
-        async def publish_learned_song_dynamic(self, **kwargs):
-            return await dynamic_capability.publish_learned_song_dynamic(
-                character_id="luotianyi",
-                character_name="洛天依",
-                character_persona="",
-                speaking_style="",
-                **kwargs,
-            )
+        async def tag_song_emotions(self, character_id: str, song_name: str):
+            return []
+
+        def can_i_sing_song(self, song_name: str):
+            return song_name, ["主歌"]
+
+        def get_full_lyrics(self, song_name: str):
+            return "第一句歌词"
+
+    sink = FakeFactSink()
+
+    async def get_world_stage(character_id=None, world_id=None):
+        return SimpleNamespace(fact_sink=sink)
 
     task = LearnSingSongsTask({}, character_id="luotianyi", singing_manager=None)
     task.system_runtime = SimpleNamespace(
+        agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
+        get_world_stage=get_world_stage,
         capability_manager=SimpleNamespace(
-            dynamics=dynamic_capability,
-            singing=FakeSinging(),
+            dynamics=dynamic_capability, singing=FakeSinging(),
         ),
     )
     task.event_store = FakeEventStore()
-    task.character_runtime = FakeCharacterRuntime()
     task.auto_song_learner = FakeLearner()
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
     assert result.ok is True
-    assert result.data["dynamic_ids"]
+    assert result.data["submitted_count"] == 1
+
+    fact = sink.facts[0]
+    request = d.HandleStimulusRequest(
+        request_id="req", stimulus=fact,
+        interaction=d.WorldInteractionSnapshot(
+            interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
+            now=fact.occurred_at, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(),
+            world_id="default", world_revision=1, activity_id=None, activity_revision=None,
+            planning_cycle_id=None, schedule_revision=0,
+        ),
+        cancellation=d.CancellationToken(),
+    )
+    plan_sink = PlanSink()
+    handling = asyncio.run(
+        SongLearnedHandler(
+            "luotianyi",
+            LearnedSongExperienceSkill(FakeMemory()),
+            publishing,
+            SongLearningDispatchSkill(FakeSinging()),
+        ).handle(request, PlanEmitter(character_id="luotianyi", request=request, sink=plan_sink))
+    )
+    plan = plan_sink.plans[0]
+    action_result = asyncio.run(PublishDynamicHandler("luotianyi", publishing).realize(
+        plan.actions[0],
+        d.ExecutionContext(execution_id="e", interaction_id="wi", current_interaction_revision=1,
+                           cancellation=d.CancellationToken()),
+        None,
+    ))
+    assert handling.request_status is d.HandlingRequestStatus.COMPLETED
+    assert action_result.effect_ref.kind is d.EffectKind.DYNAMIC_POST
 
     feed = db_manager.dynamic_store.list_dynamics_for_user(user["user_uuid"])
     assert feed["items"][0]["source_type"] == "song_learned"
