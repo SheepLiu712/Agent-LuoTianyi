@@ -9,6 +9,17 @@
 
 ## 已完成事实
 
+### 2026-09-14 回复结算后的反思接入（13/14）GREEN
+
+- 交付行为：`ChatReflectionHandler` 从空占位改为真实反思——以本次已消费输入与近期 `source=agent` 回复拼成依据，经反思技能沉淀长期记忆；按阈值调用共享压缩技能生成并提交上下文压缩；随后更新用户画像（`summary` + `recent_conversation`）。不交付计划、不消费输入、不产生用户可见输出。
+- interface spec：无新增或扩大公开 interface；复用 `mind.write_topic_memories`、`ConversationCompactionSkill.compact`、`mind.update_user_profile_by_context`。新增内部技能 `ReflectionSkill`（`agent/skills/reflection/consolidation.py`）。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-13-reflection`（堆叠在 MediaRef 端口提案之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent/test_chat_reflection.py -q` 为 2 passed；`python -m pytest tests/agent tests/stage -q` 为 249 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 834 passed、2 skipped。相关文件 LSP 诊断无报错。
+- 测试夹具更新：`ChatReflectionHandler` 构造改为注入（反思 + 压缩），`test_handling_preparation.py`、`test_concurrent_handling.py`、`test_chat_reply_settlement.py` 传入 no-op 替身；假 context 的 `conversation` 补 `read()`。
+- 明确不包含：日期识别未接入（旧 `detect_dates_for_topic` 依赖 `ExtractedTopic`，SPEC A7 禁止新调用方依赖）；`related_memories` 暂为空（注意力链尚未接入）。
+- 未验证范围：未运行真实 LLM/GPU、真机或生产数据库；生产聊天仍走旧 ChatStream。
+
 ### 2026-09-14 真实聊天链路结算与取消验收（10）GREEN
 
 - 交付行为：新增 `tests/stage/test_chat_reply_settlement.py`，用真实 `Agent`（文本预处理 + 批次回复 + 反思 + SAY 执行）经真实 `ChatStage` 验证：(a) 文本批次经期限触发后完成「预处理→回复→执行→结算」，pending 清空且 `user`/`agent` 记录按序落库；(b) 回复执行在途时到达新内容，旧回复被取消并丢弃，新批次重新回复并最终结算。

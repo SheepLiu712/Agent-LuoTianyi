@@ -1,16 +1,20 @@
 """聊天 pipeline 的准备、聚合、取消、执行及维护流程。"""
 import asyncio
 from dataclasses import replace
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from test_chat_stage import RecordingAgent, cleanup, plan, report, setup, stimulus, take
+
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.handlers.stimulus.chat import (
+    ChatPreprocessingHandler,
+    ChatReflectionHandler,
+)
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler, ChatReflectionHandler
 from src.agent.processing.plan_emitter import ActionPlanDraft
-from test_chat_stage import setup, cleanup, stimulus, report, plan, take, RecordingAgent
 
 
 async def until(predicate):
@@ -27,6 +31,19 @@ def ids(req):
 class _Understanding:
     def extract_terms(self, text):
         return ()
+
+
+class _NoReflection:
+    async def consolidate_memories(self, **kwargs):
+        return {}
+
+    async def update_profile(self, **kwargs):
+        return None
+
+
+class _NoCompaction:
+    async def compact(self, conversation_context):
+        return None
 
 
 def touch():
@@ -295,7 +312,8 @@ async def test_real_agent_context_access_plan_delivery_and_reflection_after_exec
                 error_code=None, irreversible_effect_committed=False, effect_ref=None)
     agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
         (d.StimulusKind.TEXT_MESSAGE, Preprocess(_Understanding())), (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
-        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())], reflection_handler=Reflect()),
+        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())],
+        reflection_handler=Reflect(_NoReflection(), _NoCompaction())),
         action_router=ActionRouter([(d.ActionKind.SAY, Execute())]))
     stage, _, adapter, _, _ = await setup(agent)
     try:
