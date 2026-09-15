@@ -1,24 +1,49 @@
 """WebSocket 业务输入的内部校验和刺激转换。"""
 
-from datetime import datetime, timezone
+import base64
+import binascii
 import json
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
 import src.domain.agent as d
+from src.capabilities.media_resolution import (
+    MediaResolutionError,
+    MediaResolutionErrorCode,
+    PermanentMediaStore,
+)
 from src.system.user_interface.types import WSMessage
 
 _TEXT_EVENTS = frozenset({"user_text", "user_message", "message", "chat_message", "chat"})
-_INPUT_EVENTS = _TEXT_EVENTS | {"user_typing"}
-_TARGET_KEYS = ("target_character_ids", "target_characters", "character_ids",
-                "target_character_id", "character_id")
+_INPUT_EVENTS = _TEXT_EVENTS | {"user_typing", "user_image"}
+_TARGET_KEYS = (
+    "target_character_ids", "target_characters", "character_ids",
+    "target_character_id", "character_id",
+)
 
 
-def convert_input(event: WSMessage, user_id: str, default_character_id: str) -> d.Stimulus:
-    """用认证 user_id 和默认角色，将 event 转为文本或打字刺激；非法输入抛出 ValueError。"""
+@dataclass(frozen=True)
+class PreparedInput:
+    """无需媒体物化即可完成准入判断的候选刺激。"""
+
+    stimulus: d.Stimulus
+    image_base64: str | None = None
+    mime_type: str | None = None
+
+
+def prepare_input(
+    event: WSMessage,
+    user_id: str,
+    default_character_id: str,
+    media_store: PermanentMediaStore | None = None,
+) -> PreparedInput:
+    """校验输入信封并创建准入候选；不解码或写入图片。"""
     if event.event_type not in _INPUT_EVENTS:
         raise ValueError("unsupported business event")
     if not isinstance(event.payload, dict):
-        raise ValueError("payload must be an object")
+        raise TypeError("payload must be an object")
     if not isinstance(event.client_msg_id, str) or not event.client_msg_id.strip() or len(event.client_msg_id) > 128:
         raise ValueError("invalid client_msg_id")
     payload = event.payload
@@ -32,30 +57,116 @@ def convert_input(event: WSMessage, user_id: str, default_character_id: str) -> 
     if any(not isinstance(item, str) or not item.strip() or len(item) > 64 for item in raw_targets):
         raise ValueError("invalid target character")
     targets = tuple(dict.fromkeys(item.strip() for item in raw_targets))
-    if event.ts is None:
-        occurred_at = datetime.now(timezone.utc)
-    else:
-        if type(event.ts) is not int or event.ts < 0:
-            raise ValueError("invalid timestamp")
-        try:
-            occurred_at = datetime.fromtimestamp(event.ts / 1000, timezone.utc)
-        except (OverflowError, OSError, ValueError) as error:
-            raise ValueError("invalid timestamp") from error
+    occurred_at = _occurred_at(event.ts)
     typing = event.event_type == "user_typing"
-    values = dict(
-        stimulus_id=str(uuid5(NAMESPACE_URL, json.dumps(["websocket-input", user_id, event.client_msg_id]))),
-        schema_version=1, occurred_at=occurred_at, source=d.StimulusSource.USER,
-        target_character_ids=targets, user_id=user_id, ephemeral=typing,
-    )
+    values = {
+        "stimulus_id": str(uuid5(
+            NAMESPACE_URL,
+            json.dumps(["websocket-input", user_id, event.client_msg_id]),
+        )),
+        "schema_version": 1,
+        "occurred_at": occurred_at,
+        "source": d.StimulusSource.USER,
+        "target_character_ids": targets,
+        "user_id": user_id,
+        "ephemeral": typing,
+    }
     if typing:
         length = payload.get("text_length")
         if type(length) is not int or not 0 <= length <= 100_000:
             raise ValueError("invalid text_length")
-        return d.UserTyping(**values, text_length=length)
+        return PreparedInput(d.UserTyping(**values, text_length=length))
+    if event.event_type == "user_image":
+        if media_store is None:
+            raise ValueError("media store is not configured")
+        image_base64 = payload.get("image_base64")
+        mime_type = payload.get("mime_type")
+        if not isinstance(image_base64, str) or not image_base64.strip():
+            raise ValueError("invalid image_base64")
+        if not isinstance(mime_type, str) or not mime_type.startswith("image/"):
+            raise ValueError("invalid image mime_type")
+        media_ref = media_store.mint_ref(
+            user_id=user_id,
+            client_msg_id=event.client_msg_id,
+        )
+        if len(image_base64.encode("utf-8")) > media_store.max_encoded_bytes:
+            raise MediaResolutionError(
+                code=MediaResolutionErrorCode.TOO_LARGE,
+                media_id=media_ref.media_id,
+            )
+        caption = payload.get("caption")
+        if caption is not None and (not isinstance(caption, str) or not caption.strip()):
+            raise ValueError("invalid image caption")
+        stimulus = d.ImageMessage(
+            **values,
+            media_ref=media_ref,
+            caption=caption.strip() if isinstance(caption, str) else None,
+            client_msg_id=event.client_msg_id,
+        )
+        return PreparedInput(stimulus, image_base64.strip(), mime_type.lower())
     text = next((payload[key].strip() for key in ("message", "text", "content")
                  if isinstance(payload.get(key), str) and payload[key].strip()), "")
     if not text or len(text) > 20_000:
         raise ValueError("invalid text")
     if "is_proactive" in payload and type(payload["is_proactive"]) is not bool:
         raise ValueError("invalid is_proactive")
-    return d.TextMessage(**values, text=text, client_msg_id=event.client_msg_id)
+    return PreparedInput(d.TextMessage(
+        **values,
+        text=text,
+        client_msg_id=event.client_msg_id,
+    ))
+
+
+def materialize_image(candidate: PreparedInput, media_store: PermanentMediaStore) -> None:
+    """解码、校验并永久写入已通过 Stage 准入的图片。"""
+    if candidate.image_base64 is None or candidate.mime_type is None:
+        return
+    encoded = candidate.image_base64
+    if encoded.startswith("data:"):
+        match = re.fullmatch(r"data:([^;,]+);base64,(.*)", encoded, flags=re.DOTALL)
+        if match is None or match.group(1).lower() != candidate.mime_type:
+            raise ValueError("image data URI does not match mime_type")
+        encoded = match.group(2)
+    encoded = "".join(encoded.split())
+    encoded += "=" * (-len(encoded) % 4)
+    try:
+        image_data = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as error:
+        image = candidate.stimulus
+        media_id = image.media_ref.media_id if isinstance(image, d.ImageMessage) else "invalid"
+        raise MediaResolutionError(
+            code=MediaResolutionErrorCode.UNKNOWN,
+            media_id=media_id,
+        ) from error
+    if len(image_data) > media_store.max_bytes:
+        image = candidate.stimulus
+        media_id = image.media_ref.media_id if isinstance(image, d.ImageMessage) else "invalid"
+        raise MediaResolutionError(
+            code=MediaResolutionErrorCode.TOO_LARGE,
+            media_id=media_id,
+        )
+    image = candidate.stimulus
+    if not isinstance(image, d.ImageMessage):
+        raise TypeError("materialized media must belong to an image stimulus")
+    media_store.persist_image(
+        media_ref=image.media_ref,
+        owner_user_id=image.user_id or "",
+        data=image_data,
+        mime_type=candidate.mime_type,
+    )
+
+
+def convert_input(event: WSMessage, user_id: str, default_character_id: str) -> d.Stimulus:
+    """兼容文本与打字的同步转换；图片必须经 Adapter 的异步物化路径。"""
+    return prepare_input(event, user_id, default_character_id).stimulus
+
+
+def _occurred_at(timestamp: int | None) -> datetime:
+    if timestamp is None:
+        return datetime.now(timezone.utc)
+    if type(timestamp) is not int or timestamp < 0:
+        raise ValueError("invalid timestamp")
+    try:
+        return datetime.fromtimestamp(timestamp / 1000, timezone.utc)
+    except (OverflowError, OSError, ValueError) as error:
+        raise ValueError("invalid timestamp") from error

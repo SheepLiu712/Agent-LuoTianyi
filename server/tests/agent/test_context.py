@@ -131,6 +131,24 @@ async def test_history_round_trip_and_character_isolation(database):
     assert other.conversation.read().entries == ()
 
 
+@pytest.mark.asyncio
+async def test_conversation_read_orders_parallel_appends_by_fact_time(database):
+    contexts = factory(database)
+    context = await contexts.create("i", user_id="u")
+    earlier = entry(1, ImageContent("", mime_type="image/png", media_id="image"))
+    later = entry(2)
+
+    await context.conversation.append((later,))
+    await context.conversation.append((earlier,))
+
+    assert context.conversation.read().entries == (earlier, later)
+    assert [item.content for item in database.get_history_from_db("u", 0, 2)] == [
+        earlier.content.text, later.content.text]
+    database._redis.delete("user_context:u:luotianyi")
+    restored = await contexts.create("restored", user_id="u")
+    assert restored.conversation.read().entries == (earlier, later)
+
+
 def compaction_for(snapshot, covered=1, text="新的总结"):
     return ConversationCompaction(snapshot.summary,
                                  tuple(e.entry_id for e in snapshot.entries[:covered]),

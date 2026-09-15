@@ -11,6 +11,9 @@
 ### 生命周期
 
 - `await SystemRuntime.initialize(config, observability=None) -> SystemRuntime`：按配置创建数据库、模型、能力、Agent、stage、Adapter 和 world，并连接依赖、启动后台服务。
+- `config.capabilities.media_resolution.root`：同一永久媒体根目录同时传给 WebSocket Adapter 的 `PermanentMediaStore` 和 CapabilityManager 的 `FilesystemMediaResolver`。Adapter 先构造只含永久 UUID 引用的候选 `ImageMessage`，验证目标 Stage 存在且可接收后，才在线程池中解码、验证并发布媒体目录；Agent 只接触引用。省略 root 时 resolver 明确失败，Adapter 拒绝图片输入。
+- 默认配置将目录设为 `data/media`，`max_encoded_bytes=8388608`、`max_bytes=6291456`。每个永久 UUID 目录包含 `content.bin` 与 `metadata.json`，metadata 保存 MIME 和认证上传用户。编码/解码超限返回 `MEDIA_TOO_LARGE`，且不产生最终媒体目录。
+- 发布先写唯一 staging 目录，再以一次目录 rename 发布完整身份；并发相同内容复用，冲突内容拒绝，残缺或损坏的已有身份稳定按 `MEDIA_UNKNOWN` 处理。永久媒体不设 TTL、过期或自动清理；大文件分块和超时策略仍未决定。
 - `ensure_dependencies()`：检查运行时各部分是否已经正确装配。
 - `await shutdown()`：按所有权顺序停止后台任务和服务，清理进程级引用。
 
@@ -32,6 +35,15 @@
 - `set_system_runtime(runtime)`：设置默认运行时。
 - `get_system_runtime() -> SystemRuntime`：未初始化时抛出异常。
 - `get_system_runtime_optional() -> SystemRuntime | None`：允许未初始化。
+
+## 首次登录欢迎配置
+
+- `agent_runtime.prepared_speech.manifest`：现有预制语音清单路径。清单条目以名称提供 `audio_path`、`text` 和 `expression`；首次欢迎使用同条目的文字与音频引用，但表达固定为 `normal`，不采用 manifest 的 expression。
+- `agent_runtime.proactive.first_login.prepared_names`：按发送顺序配置恰好两个预制语音名称，例如 `["first_greet_1", "first_greet_2"]`。`AgentRuntime` 解析该列表并注入首次登录 handler；handler 不读取文件系统。
+- 首次登录的 Stage/Agent 接口使用 `ProactivePromptDue(reason=ProactiveReason("first_login"))`：调用方通过 `StageManager.record_login(user_id, character_id, ...)` 按 `(user_id, character_id)` 记录一次事实，每个已启用角色各消费一次；对应 ChatStage 完成连接绑定后开始约 1 秒同步窗口，再进入真实 `handle_stimulus` 链路。handle 容量已满时保留 pending 并延后重试，不越过 `max_stimuli` 也不丢弃。生产认证与 WebSocket 接线由 #66 负责，本切片不修改 `server_main`、`UserInterface` 或 `SystemRuntime` 的生产入口。
+- 每个名称独立形成一个 `Say(prepared_audio_ref=MediaRef(name), expression="normal", delivery=CONVERSATION)` 计划，显示文字取 manifest，并以 `source=agent` 追加到交互对话。名称缺失时该条返回稳定失败并记录错误，不静默跳过。
+- `RETURN_LOGIN` 久别问候仍保持关闭；非首次登录不会由本配置触发欢迎。
+- 迁移期间旧生产链仍读取 `chat_session_manager.proactive_topic_maker.activity_res.first_login` 的 `manifest` 与 `resource_names`；该旧配置与新 `agent_runtime.proactive.first_login.prepared_names` 并存，直到 #66 切换生产接线后再处理旧入口收缩。
 
 ## 管理运行时
 
@@ -99,9 +111,9 @@ FastAPI lifespan 启动时调用 `SystemRuntime.initialize(config)`，之后路�
 - **校验时点**：`policy` 不是映射、上限不是正整数、区域集合为空或含空白项，都会在**运行时构造阶段**抛错（类型问题 `TypeError`、取值问题 `ValueError`），不会延迟到触摸到达时才发现。
 - **拒绝语义不变**：未知区域或频率超限 → `FAILED` + `UNSUPPORTED_INTERACTION`、`retryable=False`、不产计划、不兜底、不重试。
 
-## 目标配置字段（草案，待评审，未实现）
+## 配置字段
 
-以下为 Issue #71（12 显式记忆）、#75（16 首次登录）、#76（17 周期提醒）所需的**目标**配置字段草案。按开发守则，跨模块配置字段属公开接口，需先定 spec；**当前均未实现**，不得直接写入生产 `config.json` 并假定生效。
+`agent_runtime.agent.memory.explicit_intent` 已实现；其余字段仍是 Issue #75（16 首次登录）、#76（17 周期提醒）的目标草案。
 
 ### `proactive.first_login.prepared_names`（对应 Issue #75）
 
@@ -112,7 +124,7 @@ FastAPI lifespan 启动时调用 `SystemRuntime.initialize(config)`，之后路�
 }
 ```
 
-- 文案与表情取自 manifest 中该名称的 `PreparedSpeech.text/expression`，避免文案与音频不一致；
+- 文案取自 manifest 中该名称的 `PreparedSpeech.text`，表情固定为 `normal`；
 - 名称不在 manifest → 该条失败并记录，不静默跳过；
 - `RETURN_LOGIN`（久别问候）保持关闭的开关位置待定。
 
@@ -124,7 +136,8 @@ FastAPI lifespan 启动时调用 `SystemRuntime.initialize(config)`，之后路�
 
 - 作为**过渡期**意图识别（关键词 allowlist）；待总 SPEC 6.4 的模型工具调用落地后应替换；
 - 命中后必须「先写后承诺」；失败保留刺激并返回 `FAILED`，不承诺成功；
-- 未决：短语表是否入配置、是否需要开关、显式记忆的幂等键。
+- `enabled` 控制识别开关；`phrases` 是可扩展短语表，旧默认短语始终兼容；
+- 幂等性沿用长期记忆存储的业务证据去重，按 `(character_id, user_id, content)` 隔离，不维护 request/mutation ledger。
 
 ### `proactive.idle_threshold_seconds`（对应 Issue #76）
 
