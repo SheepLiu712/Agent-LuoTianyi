@@ -9,6 +9,13 @@
 
 ## 已完成事实
 
+### 2026-09-15 学歌派发、完成事实与学会后行为迁移（#82）
+
+- 交付行为：`LearnSingSongsTask` 去掉 `CharacterRuntime` 依赖与动态发布，只保留凭据检查与刷新、愿望清单状态、下载/清理/模型处理、工件校验、媒体库刷新、情绪标签、通知文件、`new_song` 事件与 `already learned` 去重；`run_once` 改为 async，**只有工件验证通过**的新学会歌曲逐首投递 `SongLearned`（`learning_job_id`=`角色:本次任务时刻`、`song_id`=统一歌名、`completed_at` 带时区），结果改报 `submitted_count`。Agent 侧新增 `SongLearnedHandler`（先写角色经验再交付 `PublishDynamic` 计划）、`LearnedSongExperienceSkill`（经验写入角色自身事件记忆，作用域为角色 ID；同日同内容由既有事件记忆去重保证幂等；写入失败只记录、不回滚学会事实）、`SongLearningDispatchSkill`（愿望清单派发 + 唱段/歌词材料读取）与 `RequestSongLearningHandler`（成功 `EffectRef(SONG_LEARNING_JOB, ...)`，重复请求 `ALREADY_COMPLETED`，能力缺失 `DEPENDENCY_UNAVAILABLE`，不等待完整学习）。
+- interface spec：`接口文档/world/README.md` 的「世界事实投递（21–25 迁移中）」新增学歌条；`接口文档/agent/README.md` 记录 `SONG_LEARNED` 分支、经验技能与两个行动处理器；`接口文档/domain/realization.md` 记录 `RequestSongLearning` 已有生产 handler。
+- 验证及结果：`conda run -n agent python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` → **856 passed、2 skipped**（本分支基线 846 → +10；2 skip 为既有真实网络探测）。新增 `tests/agent/test_song_learned.py` 10 项（经验写入与非法参数、handler 交付发布计划/空正文失败/经验失败仍发布、派发成功/重复/能力缺失/取消、材料回落）与 world 侧学歌用例改写（事实字段、去重后逐首投递、`already learned` 不投递、旧 `dynamic_ids` 断言移除）；`tests/world/test_world_task_dynamics.py` 的学歌端到端用例改为 world→Agent→真实动态落库。
+- 未验证范围：真实 QQ 凭据、下载、模型工件校验与唱段/歌词材料仍按运行环境条件人工验收；经验记忆使用「角色 ID 作为记忆作用域」的约定已在此记录，如需改为独立作用域需 owner 裁决。本切片不含动态互动（24）与日记（25）。
+
 ### 2026-09-15 citywalk 角色决策与动态发布迁移（#80）
 
 - 交付行为：`CitywalkTask` 去掉 `CharacterRuntime` 依赖（含 `profile.display_name`，角色名改读配置），只保留概率抽样、地图/环境推进、报告生成、`travel` 事件与报告回写；散步成功后投递 `WorldObservation`（`observation_kind.value=citywalk_completed`、`fact_id=citywalk:<报告路径>`、`summary` 取报告叙述或目的地/经过地点/时长摘要、`world_revision` 取完成时刻），并按其 N1 结算端口登记回写订阅者。Agent 侧新增 `CitywalkObservationHandler`（`WORLD_OBSERVATION` 按 `observation_kind.value` 分派；生成角色化正文并交付 `PublishDynamic` 计划）、`PublishDynamicHandler`（成功报告 `EffectRef(DYNAMIC_POST, dynamic_id)`，失败 `DEPENDENCY_UNAVAILABLE`，取消 `CANCELLED`）与共享技能 `DynamicPublishingSkill`（文案生成 + 按来源身份幂等发布）。报告 `dynamic_id`／`dynamic_content`／`diary_text` 由结算回执写回；发布失败不撤销散步事实。

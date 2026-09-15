@@ -8,6 +8,7 @@ from src.agent.context import ContextFactory
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.action.song_learning import RequestSongLearningHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReflectionHandler,
@@ -19,6 +20,7 @@ from src.agent.handlers.stimulus.citywalk import (
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
 from src.agent.handlers.stimulus.world_activity import (
     WORLD_ACTIVITY_STIMULUS_KINDS,
     WorldActivityHandler,
@@ -26,7 +28,9 @@ from src.agent.handlers.stimulus.world_activity import (
 from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
 from src.agent.skills import Skills
+from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
+from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent_runtime.agent_registry import AgentRegistry
 from src.agent_runtime.character_registry import CharacterRegistry
@@ -82,6 +86,8 @@ class AgentRuntime:
                                  tts_engine=AsyncTTS(capability_manager.speech))
             # 动态发布按来源身份落库；角色上下文由能力自身的装配提供
             self.dynamic_publishing = DynamicPublishingSkill(capability_manager.dynamics)
+            # 角色自身经验写入需要按角色持有记忆门面，供 LearnSing 等分支使用
+            self.character_memories: dict[str, SubconsciousMemory] = {}
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -116,7 +122,13 @@ class AgentRuntime:
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
-                        *((kind, world_activity) for kind in WORLD_ACTIVITY_STIMULUS_KINDS),
+                        *((kind, world_activity) for kind in WORLD_ACTIVITY_STIMULUS_KINDS
+                          if kind is not StimulusKind.SONG_LEARNED),
+                        (StimulusKind.SONG_LEARNED, SongLearnedHandler(
+                            character_id,
+                            LearnedSongExperienceSkill(self.character_memories.get(character_id)),
+                            self.dynamic_publishing,
+                            SongLearningDispatchSkill(self._singing_manager(character_id)))),
                         *((kind, ChatPreprocessingHandler()) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
@@ -127,6 +139,9 @@ class AgentRuntime:
                             character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
                         (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(
                             character_id, self.dynamic_publishing)),
+                        (ActionKind.REQUEST_SONG_LEARNING, RequestSongLearningHandler(
+                            character_id,
+                            SongLearningDispatchSkill(self._singing_manager(character_id)))),
                     )),
                 )
                 for character_id in self.character_runtimes
@@ -383,6 +398,12 @@ class AgentRuntime:
         runtime = self.get_character_runtime(character_id)
         return await runtime.mind.update_user_profile_by_context(user_id=user_id, context=context)
 
+    def _singing_manager(self, character_id: str):
+        """返回该角色的唱歌管理器；能力未装配时返回 None。"""
+        singing = getattr(self.capability_manager, "singing", None)
+        managers = getattr(singing, "singing_manager", None) or {}
+        return managers.get(character_id)
+
     def _build_character_runtimes(
         self,
         *,
@@ -404,6 +425,7 @@ class AgentRuntime:
                 vector_store=self.vector_store,
                 owner_character_id=profile.character_id,
             )
+            self.character_memories[profile.character_id] = memory
             mind = CharacterSubconscious(
                 agent_config,
                 database_manager=database_manager,
