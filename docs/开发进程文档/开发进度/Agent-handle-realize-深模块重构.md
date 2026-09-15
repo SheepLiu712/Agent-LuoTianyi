@@ -17,6 +17,20 @@
 - 验证及结果：工作目录 `server`，conda 环境 `agent`；见本切片提交验证记录。
 - 未验证范围：未运行真实 LLM、生产向量库/数据库、TTS/GPU、真机；生产聊天是否切换到新门面仍由既有迁移切片负责。
 
+### 2026-09-14 图片预处理落库与混合输入顺序（09）GREEN
+
+- 交付行为：新增 capabilities 侧 `MediaResolver` / `ResolvedMedia` 窄端口、永久 `PermanentMediaStore`、生产 `FilesystemMediaResolver` 和显式失败的未配置实现。WebSocket Adapter 复用现有 `user_image` 的 base64/MIME 协议，在构造 Stimulus 前永久保存原始字节，以认证用户和 client message 身份生成可重复的 UUID `MediaRef`；Agent 不保存媒体且只接触该引用。CapabilityManager、AgentRuntime、Skills 构造注入 `ImagePreprocessingSkill`；Handler 解析、校验、理解后一次写入用户媒体事实与系统机器描述事实，返回两个记录 ID 的 `PreprocessedInput`，不 emit、不消费。没有真实生产者的语音仍不接 ASR。
+- 永久性、顺序与失败：媒体目录无 TTL、过期或自动清理；resolver 拒绝未知、空内容、非图片 MIME、损坏元数据和路径穿越。对话事实时间按 Stage 接收 revision 排序，图片内部媒体先于机器描述；新 context 持久化使用带微秒 ISO 时间，旧链路可继续写秒级格式。`datetime.fromisoformat` 和已修订的旧展示格式化器兼容两种格式，因此 DB/context 读取保持 A/B。失败在 VLM 前退出，不消费、不阻塞后续文本，也不回滚既有事实。
+- interface spec：[`capabilities/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/capabilities/README.md) 已记录端口、稳定失败和未决存储策略；[`system/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/system/README.md) 已记录 `capabilities.media_resolution` 装配事实。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent tests/stage tests/domain tests/adapter -q` 为 **718 passed**（2 条既有依赖弃用 warning）；新增 adapter/resolver/时间格式聚焦测试为 **36 passed**。触及文件 Ruff 与 `git diff --check` 通过；08 链既有 agent/stage/domain/adapter 测试未修改且继续通过。
+- 未决与未验证：授权主体已在下述审查修复中收敛为认证上传用户；仍未决定大文件分块、解析/理解超时及图片/语音端口长期复用策略，未实现 ASR。未运行真实 VLM、生产目录权限/磁盘耗尽、生产数据库、客户端/真机、GPU 或完整 Server 外部链路。
+
+#### 2026-09-15 对抗审查修复（09）
+
+- 授权边界：此前提案把授权主体留作未决；本轮按 Issue #68 的越权拒绝要求建立保守默认——媒体归认证上传用户所有。metadata 持久 `owner_user_id`，principal-scoped resolver 要求当前 `owner_user_id`，跨用户在读取字节和 VLM 前返回 `MEDIA_UNAUTHORIZED`。
+- 准入与限制：Adapter 先解析信封并创建窄引用候选，验证所有目标 Stage 存在且 `can_accept` 后才物化图片；`max_encoded_bytes` 在 base64 解码前检查，`max_bytes` 在永久写入前检查，超限为 `MEDIA_TOO_LARGE` 且无最终目录。解码、Pillow 完整验证和文件 I/O 经 `asyncio.to_thread` 离开事件循环。
+- 原子与内容：永久写入使用唯一 staging 目录，完整写入后单次目录 rename 发布；并发重放相同内容复用，冲突拒绝，残缺/损坏目录稳定为 `MEDIA_UNKNOWN`。存储与 resolver 都用 Pillow 完整解码，坏图片为 `MEDIA_UNKNOWN`，实际格式与声明 MIME 不一致为 `MEDIA_UNSUPPORTED_TYPE`。
+- 验证：聚焦授权/准入/线程/原子/内容及既有 Stage 用例 `python -m pytest tests/agent/test_media_resolution.py tests/agent/test_chat_preprocessing.py tests/adapter/test_websocket_adapter.py tests/stage/test_chat_stage.py tests/stage/test_concurrent_handling.py -q` 为 **73 passed**；完整 `python -m pytest tests/agent tests/stage tests/domain tests/adapter -q` 为 **726 passed**、2 条既有依赖弃用 warning。新媒体模块全规则 Ruff、触及旧文件的 import/undefined-name Ruff 及 `git diff --check` 通过。未验证真实 VLM、生产磁盘故障/权限、跨进程崩溃注入和客户端真机。
 ### 2026-09-14 批次回复的开始思考信号（11a）GREEN
 
 - 交付行为：`ChatReplyHandler` 在有可回复内容时先交付一个仅含 `StartThinking` 的首计划（ordinal 0），再进入生成并交付正式回复计划。Stage 的 `_PlanSink` 消费该计划并发出 THINKING 呈现，最后一个思考请求结束时发出 WAITING（既有 Stage 行为）。无可回复内容时不产生思考信号。
@@ -88,6 +102,31 @@
 - 验证及结果：工作目录 `server`，conda 环境 `agent`（Python 3.10，pytest 9.1.1）。`python -m pytest tests/agent/test_chat_preprocessing.py -q` 为 3 passed；`python -m pytest tests/agent tests/stage -q --tb=short` 为 236 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 821 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
 - 未验证范围：未运行真实 LLM/VLM/TTS、真机或生产数据库；批量回复（08c）与 Sing action handler（08b）尚未实现；生产聊天仍走旧 ChatStream（#66）。
 - 附带更新：`test_handling_preparation.py` 的“预处理不落库”占位断言随迁移改为“已落库且两次调用 id 不同”；`test_chat_stage.py` 的假 context 补 `conversation.append`；`test_concurrent_handling.py` 的 handler 子类注入预处理替身。
+### 2026-09-14 QQ 凭据维护不变量验证（26）GREEN
+
+- 交付行为：为 `QQMusicCredentialRefreshTask` 补充不变量测试——默认 21600 秒周期且启动立即执行；共享凭据路径按规范化去重只检查一次；无已初始化凭据时 skipped（`credential_count=0`）；多文件按文件数计数；部分失败返回 failure 并记录 `failed_characters`；`ensure_dependencies` 要求 `system_runtime` 与非空学歌任务；任务不持有 `agent_runtime`，保持纯机械。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #85 为验证工单，无运行时行为变化；不制造人工 Red。
+- commit 或 PR：分支 `test/world-26-qq-credential`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_learn_sing_songs.py -q` 为 58 passed；`python -m pytest tests/world -q` 为 120 passed、2 skipped。
+- 未验证范围：未运行真实 QQ Music 网络刷新或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
+### 2026-09-14 B 站事件同步不变量验证（27）GREEN
+
+- 交付行为：补充 `BiliEventUpdateTask` / `BiliEventUpdater` 不变量测试——cookie 无效时 `fetch_and_update_events` 明确抛错、任务转为 failure 且不抛出；无新动态返回零计数；解析事件规范化（`event_type` 映射、`source` 默认 `bilibili`、`is_recurring`/`is_personal` 默认 False）；`updated` 只计 `add_event` 实际创建的事件（重复来源不重复计数）；缺少 `event_store` 抛错；任务不持有 `agent_runtime`，保持机械边界。
+- 发现（记录，不在本切片修复）：cookie 校验之后 `fetch_and_update_events` 的抓取/解析异常被吞掉并返回零计数，任务据此报告成功。这与「失败不假报成功」不变量存在张力，建议另开缺陷切片处理。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #86 为验证工单，无运行时行为变化；不制造人工 Red。
+- commit 或 PR：分支 `test/world-27-bili-event-update`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_bili_event_update.py -q` 为 12 passed；`python -m pytest tests/world -q` 为 123 passed、2 skipped。
+- 未验证范围：未运行真实 B 站网络抓取、VLM/LLM 或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
+### 2026-09-14 过期事件清理不变量验证（28）GREEN
+
+- 交付行为：为 `EventStore.purge_expired_events` 补充不变量测试——`end_datetime < today` 才失活、`end` 当天保留；仅 `start_datetime` 的事件保留一天缓冲；`is_recurring` / `source=user` / 仅 `date_mmdd` 的事件不清除；重复清理只计本次实际失活（幂等）；已 inactive 不计数；清理后失效 due 事件缓存。任务层保持「无 event_store 时 skipped、有 store 时返回 purged」。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #87 为验证工单，无运行时行为变化；记录为验证切片，不制造人工 Red。
+- commit 或 PR：分支 `test/world-28-event-cleanup`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_event_cleanup.py -q` 为 9 passed；`python -m pytest tests/world -q` 为 121 passed、2 skipped。
+- 未验证范围：未运行真实外部服务或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
 
 ### 2026-09-06 门面公共入口与请求分流整理
 

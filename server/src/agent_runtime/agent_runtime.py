@@ -20,6 +20,7 @@ from src.agent.reflex import CharacterReflex
 from src.agent.skills import Skills
 from src.agent.skills.cognitive import (
     ExplicitMemoryIntentSkill,
+    ImagePreprocessingSkill,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
 )
@@ -79,10 +80,12 @@ class AgentRuntime:
         try:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
             self.skills = Skills(self.config.get("skills", {}), llm_service,
-                                 tts_engine=AsyncTTS(capability_manager.speech),
-                                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
-                                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
-                                 singing=capability_manager.singing)
+                                  tts_engine=AsyncTTS(capability_manager.speech),
+                                  preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
+                                  explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
+                                  singing=capability_manager.singing,
+                                  media_resolver=capability_manager.media_resolver,
+                                  image_understanding=capability_manager.image_understanding)
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -130,7 +133,9 @@ class AgentRuntime:
                             self.skills.get(TextPreprocessingSkill),
                             self.skills.get(ExplicitMemoryIntentSkill),
                             self.skills.get(IntentionalMemoryCommit))),
-                        *((kind, ChatPreprocessingHandler(self.skills.get(TextPreprocessingSkill))) for kind in (
+                        *((kind, ChatPreprocessingHandler(
+                            self.skills.get(TextPreprocessingSkill),
+                            self.skills.get(ImagePreprocessingSkill))) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
                             StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),
@@ -150,7 +155,7 @@ class AgentRuntime:
         except BaseException:
             try:
                 self._abort_initialization()
-            except Exception as cleanup_error:  # noqa: BLE001 - 初始化边界必须回滚后重抛原异常。
+            except RuntimeError as cleanup_error:
                 self.logger.error(
                     f"AgentRuntime initialization rollback failed: {cleanup_error}"
                 )
@@ -197,7 +202,7 @@ class AgentRuntime:
                     self._shutdown_task = shutdown_task
                 cancellation: asyncio.CancelledError | None = None
                 try:
-                    _, pending = await wait_for_owned_tasks(
+                    _done, pending = await wait_for_owned_tasks(
                         (shutdown_task,),
                         timeout_seconds=getattr(
                             self,
@@ -207,7 +212,7 @@ class AgentRuntime:
                     )
                 except asyncio.CancelledError as error:
                     cancellation = error
-                    _, pending = await asyncio.shield(
+                    _done, pending = await asyncio.shield(
                         wait_for_owned_tasks(
                             (shutdown_task,),
                             timeout_seconds=getattr(

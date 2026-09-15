@@ -7,7 +7,7 @@
 构造：`WebSocketAdapter(config: dict | None = None, *, default_character_id: str = "luotianyi")`。私有配置类型校验每条连接的容量：`max_outputs=256`、`max_bytes=16777216`、`max_messages=64`，均为正整数。呈现状态控制任务也有数量上限。
 
 - `submit_output(output: StageOutput) -> asyncio.Future[None]`：同步接受业务输出或控制命令，返回实际发送结果。无连接、类型不支持或容量不足时抛出 `SinkRejectedError`。Future 成功表示服务端发送完成；取消表示输出被丢弃；异常表示发送失败。
-- `receive_event(connection: WebSocketConnection, event: WSMessage) -> bool`：以认证身份转换事件，按绑定找到全部目标 Stage，再向其 `stimulus_input_sink` 投递。全部目标可接收才入队。无目标绑定或非法字段抛出 ValueError；容量或生命周期不允许接收时返回 False。
+- `await receive_event(connection: WebSocketConnection, event: WSMessage) -> bool`：以认证身份先构造不含原始字节的候选刺激，按绑定找到全部目标 Stage 并检查全部 sink 可接收；图片仅在准入成功后在线程池解码、验证和永久发布，再向 sink 投递。无目标绑定或非法字段抛出 ValueError/稳定媒体错误；容量或生命周期不允许接收时返回 False，且不物化媒体。
 - `await bind(stage: ChatStage, connection: WebSocketConnection) -> None`：校验用户身份并绑定；重绑先停止旧执行、清理旧投递，再通知 Stage 上线。
 - `await disconnect(stage: ChatStage, connection: WebSocketConnection | None = None) -> None`：拆除绑定，通知 Stage 离线，结算待发送输出并等待在途发送退出。指定 connection 时只解除这一连接；旧断线通知不会解除新连接。最后一个绑定移除后释放连接投递任务。
 - `supports_input(event: WSMessage) -> bool`：识别文本和打字业务事件。
@@ -16,13 +16,13 @@
 
 ## 输入协议
 
-`_input.py` 负责输入转换。文本兼容 user_text、user_message、message、chat_message、chat，依次取 message、text、content 的首个非空字符串，清理首尾空白，最多 20,000 字符。user_typing 转成 UserTyping，text_length 为 0 至 100,000 的整数。
+`_input.py` 负责输入转换。文本兼容 user_text、user_message、message、chat_message、chat，依次取 message、text、content 的首个非空字符串，清理首尾空白，最多 20,000 字符。user_typing 转成 UserTyping，text_length 为 0 至 100,000 的整数。user_image 沿用现有 image_base64、mime_type 和可选 caption 字段；编码/解码体积、完整图片解码及 MIME 一致性在永久发布前校验。
 
 认证用户身份来自 connection；payload 不能覆盖身份。文本 ephemeral=false，打字 ephemeral=true，source=USER。顶层 client_msg_id 非空白且不超过 128 字符。刺激 ID 由认证用户和客户端消息 ID 生成。合法非负毫秒 ts 转为 UTC 时间，省略时使用当前时间。
 
 目标兼容 target_character_ids、target_characters、character_ids、target_character_id、character_id；最多八个目标，每项最多 64 字符。省略目标时使用构造时指定的默认角色。
 
-`WebSocketService.try_accept_stimulus_event(connection, event, *, adapter)` 保留网络侧的接收状态、客户端重试去重；重复事件不再次交给 adapter。心跳、认证等连接维护事件不进入 adapter。生产 `/chat_ws` 当前仍使用旧 ChatStream，输入落库也沿用旧流程。
+`await WebSocketService.try_accept_stimulus_event(connection, event, *, adapter)` 保留网络侧的接收状态、客户端重试去重；重复事件不再次交给 adapter。心跳、认证等连接维护事件不进入 adapter。生产 `/chat_ws` 当前仍使用旧 ChatStream，输入落库也沿用旧流程。
 
 ## 输出和控制
 

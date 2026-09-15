@@ -2,16 +2,19 @@
 import asyncio
 
 import pytest
+from test_chat_stage import cleanup, setup, stimulus
 
 import src.domain.agent as d
 from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.chat import (
-    ChatPreprocessingHandler, ChatReflectionHandler, ChatReplyHandler)
+    ChatPreprocessingHandler,
+    ChatReflectionHandler,
+    ChatReplyHandler,
+)
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import ReplyDraft
-from test_chat_stage import cleanup, setup, stimulus
 
 
 async def until(predicate):

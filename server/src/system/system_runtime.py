@@ -1,24 +1,27 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
 from typing import Dict
 
-from src.agent_runtime import AgentRuntime
 from src.adapter.websocket import WebSocketAdapter
-from src.stage import StageManager
+from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.capabilities import CapabilityManager
 from src.chat_session import ChatSessionManager
 from src.chat_session import chat_stream_manager as chat_stream_manager_module
+from src.stage import StageManager
 from src.system.database import DatabaseManager, set_default_database_manager
 from src.system.observability import ObservabilityService, set_observability_service
 from src.system.user_interface import UserInterface
-from src.utils.llm_service import LLMService
 from src.utils.llm.client_llm_executor import ClientLLMExecutor
-from src.utils.logger import get_logger, install_observability_log_handler, uninstall_observability_log_handler
+from src.utils.llm_service import LLMService
+from src.utils.logger import (
+    get_logger,
+    install_observability_log_handler,
+    uninstall_observability_log_handler,
+)
 from src.world import WorldRuntime
-
 
 logger = get_logger(__name__)
 
@@ -113,8 +116,11 @@ class SystemRuntime:
                 client_llm_executor=client_llm_executor,
                 observability=observability,
                 owns_observability=owns_observability,
-                chat_adapter=WebSocketAdapter(config.get("chat_adapter", {}),
-                                              default_character_id=agent_runtime.default_character_id),
+                chat_adapter=WebSocketAdapter({
+                    **config.get("chat_adapter", {}),
+                    "media_store": config.get("capabilities", {}).get("media_resolution", {}),
+                },
+                                               default_character_id=agent_runtime.default_character_id),
             )
 
             runtime.stage_manager = StageManager(get_agent=agent_runtime.get_agent, adapter=runtime.chat_adapter,

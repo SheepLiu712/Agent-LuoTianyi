@@ -5,9 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from src.agent.skills.expression.speaking import SpeakingSkill
+from src.capabilities.media_resolution import MediaResolver
 from src.capabilities.speech.streaming import AsyncTTS
 
-from .cognitive import ExplicitMemoryIntentSkill, TextPreprocessingSkill
+from .cognitive import (
+    ExplicitMemoryIntentSkill,
+    ImagePreprocessingSkill,
+    ImageUnderstandingCapability,
+    TextPreprocessingSkill,
+)
 from .conversation.compaction import ConversationCompactionSkill
 from .expression.singing import SingingSkill
 
@@ -23,7 +29,9 @@ class Skills:
     def __init__(self, config: dict[str, Any], llm_service: LLMService, *, tts_engine: AsyncTTS,
                  preprocessing_config: dict[str, Any] | None = None,
                  explicit_memory_config: dict[str, Any] | None = None,
-                 singing: object = None) -> None:
+                 singing: object = None,
+                 media_resolver: MediaResolver | None = None,
+                 image_understanding: ImageUnderstandingCapability | None = None) -> None:
         """按 config 的技能分组初始化实例，并派发 llm_service、tts_engine 与演唱能力。"""
         if not isinstance(config, dict):
             raise TypeError("skills 必须是字典")
@@ -36,6 +44,9 @@ class Skills:
             ExplicitMemoryIntentSkill: ExplicitMemoryIntentSkill(explicit_memory_config),
             SingingSkill: SingingSkill(config.get("singing", {}), singing),
         }
+        if media_resolver is not None and image_understanding is not None:
+            self._skills[ImagePreprocessingSkill] = ImagePreprocessingSkill(
+                media_resolver, image_understanding)
 
     def get(self, skill_type: type[SkillT]) -> SkillT:
         """按技能类型返回共享实例；非类型参数抛 TypeError，未注册类型抛 KeyError。"""

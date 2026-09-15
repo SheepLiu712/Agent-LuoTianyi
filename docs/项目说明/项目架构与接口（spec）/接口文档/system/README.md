@@ -11,6 +11,9 @@
 ### 生命周期
 
 - `await SystemRuntime.initialize(config, observability=None) -> SystemRuntime`：按配置创建数据库、模型、能力、Agent、stage、Adapter 和 world，并连接依赖、启动后台服务。
+- `config.capabilities.media_resolution.root`：同一永久媒体根目录同时传给 WebSocket Adapter 的 `PermanentMediaStore` 和 CapabilityManager 的 `FilesystemMediaResolver`。Adapter 先构造只含永久 UUID 引用的候选 `ImageMessage`，验证目标 Stage 存在且可接收后，才在线程池中解码、验证并发布媒体目录；Agent 只接触引用。省略 root 时 resolver 明确失败，Adapter 拒绝图片输入。
+- 默认配置将目录设为 `data/media`，`max_encoded_bytes=8388608`、`max_bytes=6291456`。每个永久 UUID 目录包含 `content.bin` 与 `metadata.json`，metadata 保存 MIME 和认证上传用户。编码/解码超限返回 `MEDIA_TOO_LARGE`，且不产生最终媒体目录。
+- 发布先写唯一 staging 目录，再以一次目录 rename 发布完整身份；并发相同内容复用，冲突内容拒绝，残缺或损坏的已有身份稳定按 `MEDIA_UNKNOWN` 处理。永久媒体不设 TTL、过期或自动清理；大文件分块和超时策略仍未决定。
 - `ensure_dependencies()`：检查运行时各部分是否已经正确装配。
 - `await shutdown()`：按所有权顺序停止后台任务和服务，清理进程级引用。
 

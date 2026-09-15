@@ -6,6 +6,7 @@ import pytest
 _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "agent" / "test_handling_preparation.py").resolve(),
     (Path(__file__).parent / "agent" / "test_chat_preprocessing.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_media_resolution.py").resolve(),
     (Path(__file__).parent / "agent" / "test_singing.py").resolve(),
     (Path(__file__).parent / "agent" / "test_chat_reply.py").resolve(),
     (Path(__file__).parent / "agent" / "test_intentional_memory.py").resolve(),
@@ -51,6 +52,7 @@ _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "domain" / "test_stimulus_value_types_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_handle_input_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_handling_report_contract.py").resolve(),
+    (Path(__file__).parent / "domain" / "test_conversation_timestamp_formats.py").resolve(),
 }
 _DEFERRED_TEST_REASON = "现有 Server 测试暂由项目负责人统一处理"
 
