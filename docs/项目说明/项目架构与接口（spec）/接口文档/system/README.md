@@ -87,6 +87,30 @@ FastAPI lifespan 启动时调用 `SystemRuntime.initialize(config)`，之后路�
 
 `server/src/system/__init__.py` 当前尝试从不存在的 `src.chat_session.conversation` 延迟导出 `ConversationService`。修复前应从实际定义模块导入，不要依赖该包级名称。
 
+## 角色触摸准入配置（当前事实）
+
+触摸快速反应的准入由**角色配置** `reflex.touch.fast_reply.policy` 决定；`AgentRuntime` 在构造阶段读取并校验，缺省时沿用默认策略：
+
+```jsonc
+{
+  "character_registry": { "characters": { "luotianyi": { "reflex": { "touch": { "fast_reply": {
+    "manifest": "<prepared_speech manifest>",
+    "resource_names": ["touch_voice1", "..."],
+    "policy": {
+      "allowed_regions": ["head", "辫子", "..."],
+      "max_touches_10s": 8,
+      "max_touches_30s": 16
+    }
+  } } } } } } }
+}
+```
+
+- `allowed_regions`（可选）：允许的身体区域别名；默认沿用旧链别名集合（`head`/`body`/`legs`/`hands`/`头`/`辫子`/`耳机`/`袖`/`左腿`/`右腿`/`身体`/`裙子`/`8`/`左手`/`右手`）。
+- `max_touches_10s` / `max_touches_30s`（可选）：10 秒 / 30 秒聚合点击次数上限，默认 `8` / `16`。
+- **频率窗口本身不可配置**：`TouchClickFrequency` 的 `count_10s`/`count_30s` 由领域类型固定（客户端按 10/30 秒聚合上报），配置只影响**上限**与**区域**。
+- **校验时点**：`policy` 不是映射、上限不是正整数、区域集合为空或含空白项，都会在**运行时构造阶段**抛错（类型问题 `TypeError`、取值问题 `ValueError`），不会延迟到触摸到达时才发现。
+- **拒绝语义不变**：未知区域或频率超限 → `FAILED` + `UNSUPPORTED_INTERACTION`、`retryable=False`、不产计划、不兜底、不重试。
+
 ## 配置字段
 
 `agent_runtime.agent.memory.explicit_intent` 已实现；其余字段仍是 Issue #75（16 首次登录）、#76（17 周期提醒）的目标草案。

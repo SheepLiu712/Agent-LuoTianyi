@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.agent import Agent
 from src.agent.context import ContextFactory
+from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.action.sing import SingHandler
@@ -16,6 +17,7 @@ from src.agent.handlers.stimulus.chat import (
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.handlers.stimulus.touch import TouchInteractionHandler
 from src.agent.handlers.stimulus.world_activity import (
     WORLD_ACTIVITY_STIMULUS_KINDS,
     WorldActivityHandler,
@@ -32,6 +34,7 @@ from src.agent.skills.cognitive import (
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
+from src.agent.skills.expression.touch import TouchPolicy, TouchReactionSkill
 from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.agent.skills.reflection import ReflectionSkill
 from src.agent_runtime.agent_registry import AgentRegistry
@@ -143,16 +146,18 @@ class AgentRuntime:
                         )),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
                             self.skills.get(ResponseCompositionSkill),
-                            self.skills.get(TextPreprocessingSkill),
-                            self.skills.get(ExplicitMemoryIntentSkill),
-                            self.skills.get(IntentionalMemoryCommit))),
+                             self.skills.get(TextPreprocessingSkill),
+                             self.skills.get(ExplicitMemoryIntentSkill),
+                             self.skills.get(IntentionalMemoryCommit))),
+                        (StimulusKind.TOUCH_INTERACTION, TouchInteractionHandler(
+                            *self._touch_reaction(character_id))),
                         *((kind, WorldActivityHandler()) for kind in WORLD_ACTIVITY_STIMULUS_KINDS),
                         *((kind, ChatPreprocessingHandler(
                             self.skills.get(TextPreprocessingSkill),
                             self.skills.get(ImagePreprocessingSkill))) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
-                            StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),
+                            StimulusKind.IMAGE_SELECTION_CLOSED)),
                     ), reflection_handler=ChatReflectionHandler(
                         self.skills.get(ReflectionSkill),
                         self.skills.get(ConversationCompactionSkill))),
@@ -161,6 +166,7 @@ class AgentRuntime:
                             character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
                         (ActionKind.SING, SingHandler(
                             character_id, self.skills.get(SingingSkill))),
+                        (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
                     )),
                 )
                 for character_id in self.character_runtimes
@@ -416,6 +422,12 @@ class AgentRuntime:
         """根据最近对话上下文更新用户画像摘要。"""
         runtime = self.get_character_runtime(character_id)
         return await runtime.mind.update_user_profile_by_context(user_id=user_id, context=context)
+
+    def _touch_reaction(self, character_id: str) -> tuple[TouchReactionSkill, TouchPolicy]:
+        """按角色 touch.fast_reply 配置构造触摸资源选择技能与准入策略。"""
+        fast_reply = (self.character_registry.get(character_id)
+                      .reflex.get("touch", {}).get("fast_reply", {}))
+        return TouchReactionSkill(fast_reply), TouchPolicy.from_config(fast_reply.get("policy"))
 
     def _build_character_runtimes(
         self,

@@ -15,7 +15,7 @@
 
 - `context: InteractionContext`：本交互独占持有的上下文，保留期内重连复用。
 - `stimulus_input_sink: StimulusInputSink`：唯一刺激接收器。`can_accept(stimulus) -> bool` 检查当前可接收性；`submit(stimulus) -> bool` 同步入队，不等待 Agent。
-- `agent_output_sink: AgentOutputSink`：唯一输出接收器。`await emit(output) -> OutputReceipt` 校验当前执行和消息身份后交给 adapter；成功结果表示入队，实际发送结果由 adapter 的 Future 表达。
+- `agent_output_sink: AgentOutputSink`：唯一输出接收器。`await emit(output) -> OutputReceipt` 校验当前执行和消息身份后交给 adapter；成功结果表示入队，实际发送结果由 adapter 的 Future 表达。Stage 不检查具体 Action 类型，也不发明消息分帧规则。
 - `await connection_changed(state: ConnectionState) -> None`：应用连接状态。断线停止当前 handle 和 realize，等待 Agent 清理，清空调度队列及计时器，保留已完成预处理且未消费的 pending；未完成预处理的输入退出当前流程。
 - `await terminate(reason: InteractionEndingReason) -> StageTerminationResult`：停止普通工作，使用新的取消令牌向 Agent 发送 InteractionEnding，返回结束处理报告或失败说明。同一次结束请求共享结果。
 - 只读身份与状态：`interaction_id`、`user_id`、`character_id`、`state`。
@@ -40,7 +40,7 @@ ChatStage 持有 context、按接收顺序排列的待回复输入、每条输�
 
 取消回复会保留尚未消费输入的预处理结果，撤销该尝试未执行的计划，并取消当前相关 realize。等待取消清理结束后再开始下一次回复；已经确认消费的输入不会因播放被取消而重新加入。失败回复记录日志，不自动重试；成功但保留输入的回复重新安排普通等待。
 
-realize 按计划交付顺序串行。上一轮 Agent 返回并提交必要收尾信号后才开始下一轮，不等待网络 Future 或客户端播放。触摸可以在文本 handle 等待时产生反馈计划，但不会并行抢占另一个 realize。取消及未关闭的输出经 CancelDelivery 收尾；过期执行不能继续提交输出。
+realize 按计划交付顺序串行。上一轮 Agent 返回并提交必要收尾信号后才开始下一轮，不等待网络 Future 或客户端播放。触摸可以在文本 handle 等待时产生反馈计划，但不会并行抢占另一个 realize。独立表情恢复由 action handler 在表情后提交正常 `MessageEndOutput`，沿用通用消息分组；不改变 WebSocket payload 或协议。取消及未关闭的输出经 CancelDelivery 收尾；过期执行不能继续提交输出。
 
 StartThinking 由 Stage 转为呈现状态；最后一个思考请求结束时发送 WAITING。成功回复的报告和全部关联计划均结束后，Stage 以本次 consumed 输入发起 REFLECT；执行报告目前只用于结束关联，不携带给 reflection。占位 reflection 不产生副作用。
 
