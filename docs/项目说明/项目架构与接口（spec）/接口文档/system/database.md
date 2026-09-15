@@ -53,6 +53,9 @@
 
 - `write_memory_update(...)`：保存记忆变更命令。
 - `write_agent_memory_record(...)`：保存 Agent 长期记忆并返回记录 ID。
+- `link_agent_memory_embeddings(...)`：为已提交的规范记忆补写向量 chunk 投影。
+- `delete_agent_memory_record(...)`：删除规范记忆及其 chunk，供严格提交路径在投影失败时补偿。
+- `agent_memory_record_has_embeddings(...)`：判断规范记忆是否已有向量投影。
 - 按记录 ID 或 embedding ID 读取记忆。
 - 读取近期记忆更新缓存。
 
