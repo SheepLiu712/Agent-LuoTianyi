@@ -1,12 +1,17 @@
 """输入归属由 Stage 指定，Agent 不维护跨调用的准备状态。"""
 from dataclasses import replace
 from types import SimpleNamespace
+
 import pytest
+from routing_support import Sink, request
+
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.handlers.stimulus.chat import (
+    ChatPreprocessingHandler,
+    ChatReflectionHandler,
+)
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReflectionHandler
-from routing_support import Sink, request
 
 
 class _Understanding:

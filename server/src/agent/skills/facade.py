@@ -5,9 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from src.agent.skills.expression.speaking import SpeakingSkill
+from src.capabilities.media_resolution import MediaResolver
 from src.capabilities.speech.streaming import AsyncTTS
 
-from .cognitive import ExplicitMemoryIntentSkill, TextPreprocessingSkill
+from .cognitive import (
+    ExplicitMemoryIntentSkill,
+    ImagePreprocessingSkill,
+    ImageUnderstandingCapability,
+    TextPreprocessingSkill,
+)
 from .conversation.compaction import ConversationCompactionSkill
 from .expression.singing import SingingSkill
 
@@ -22,9 +28,11 @@ class Skills:
 
     def __init__(self, config: dict[str, Any], llm_service: LLMService, *, tts_engine: AsyncTTS,
                  preprocessing_config: dict[str, Any] | None = None,
-                 explicit_memory_config: dict[str, Any] | None = None,
-                 reply_composition_config: dict[str, Any] | None = None,
-                 singing: object = None) -> None:
+                  explicit_memory_config: dict[str, Any] | None = None,
+                  reply_composition_config: dict[str, Any] | None = None,
+                  singing: object = None,
+                  media_resolver: MediaResolver | None = None,
+                  image_understanding: ImageUnderstandingCapability | None = None) -> None:
         """按 config 的技能分组初始化实例，并派发 llm_service、tts_engine 与演唱能力。
 
         reply_composition_config 由运行时在注册回复生成技能时取回，保证慢召回
@@ -44,6 +52,9 @@ class Skills:
             ExplicitMemoryIntentSkill: ExplicitMemoryIntentSkill(explicit_memory_config),
             SingingSkill: SingingSkill(config.get("singing", {}), singing),
         }
+        if media_resolver is not None and image_understanding is not None:
+            self._skills[ImagePreprocessingSkill] = ImagePreprocessingSkill(
+                media_resolver, image_understanding)
 
     @property
     def reply_composition_config(self) -> dict[str, Any]:

@@ -1,10 +1,13 @@
+import asyncio
+import time
 from collections import OrderedDict
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Dict
-import time
+
 from fastapi import WebSocket, WebSocketDisconnect
-import asyncio
-from src.system.user_interface.types import WSEventType, WSMessage
+
+from src.capabilities.media_resolution import MediaResolutionError
+from src.domain.chat import ChatInputEvent
 from src.domain.stimulus import Stimulus
 from src.legacy.chat_input_adapter import (
     is_chat_related_ws_message,
@@ -12,7 +15,7 @@ from src.legacy.chat_input_adapter import (
     validate_ws_chat_message,
     ws_message_to_stimulus,
 )
-from src.domain.chat import ChatInputEvent
+from src.system.user_interface.types import WSEventType, WSMessage
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -335,7 +338,7 @@ class WebSocketService:
         self.mark_client_message_accepted(websocket_connection, event)
         return ChatEventAcceptance.ACCEPTED
 
-    def try_accept_stimulus_event(
+    async def try_accept_stimulus_event(
         self,
         connection: "WebSocketConnection",
         event: WSMessage,
@@ -347,7 +350,7 @@ class WebSocketService:
         connection 是已认证连接，adapter 使用绑定关系查找目标 Stage 并同步入队。
         连接维护事件不会进入 adapter；重复消息不会再次转换或投递。
         """
-        if event.event_type not in {"user_text", "user_message", "message", "chat_message", "chat", "user_typing"}:
+        if event.event_type not in {"user_text", "user_message", "message", "chat_message", "chat", "user_typing", "user_image"}:
             return ChatEventAcceptance.UNSUPPORTED
         if connection.is_closed or not connection.user_uuid or not self.has_valid_client_message_id(event):
             return ChatEventAcceptance.BAD_MESSAGE
@@ -355,8 +358,8 @@ class WebSocketService:
             duplicate = self.is_duplicate_client_message(connection, event)
             if duplicate:
                 return ChatEventAcceptance.DUPLICATE
-            accepted = adapter.receive_event(connection, event)
-        except (KeyError, TypeError, ValueError):
+            accepted = await adapter.receive_event(connection, event)
+        except (KeyError, MediaResolutionError, TypeError, ValueError):
             return ChatEventAcceptance.BAD_MESSAGE
         if not accepted:
             return ChatEventAcceptance.OVERLOADED
