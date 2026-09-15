@@ -1,9 +1,10 @@
 """到期批次回复：生成、落库与 Say/Sing 计划交付。"""
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
@@ -12,7 +13,6 @@ from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.main_chat import OneSentenceChat, SongSegmentChat
 from src.agent.skills.cognitive import ReplyDraft, ResponseCompositionSkill
-from routing_support import Sink, request
 
 
 class _Conversation:
@@ -182,7 +182,9 @@ async def test_reply_passes_sing_attempts_and_recent_exclusion():
     composer = Composer(())
     ctx = context()
     ctx.conversation.entries.append(ConversationEntry(
-        entry_id="p1", timestamp=datetime.now(), source="agent",
+        entry_id="p1",
+        timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
+        source="agent",
         content=SongContent("唱了《歌》", "歌", "副歌")))
     await agent(composer, _Understanding(("《歌》",))).handle_stimulus(
         deadline_request(), Sink(), context=ctx)

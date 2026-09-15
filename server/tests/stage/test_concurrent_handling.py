@@ -1,16 +1,20 @@
 """聊天 pipeline 的准备、聚合、取消、执行及维护流程。"""
 import asyncio
 from dataclasses import replace
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
+from test_chat_stage import RecordingAgent, cleanup, plan, report, setup, stimulus, take
+
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.handlers.stimulus.chat import (
+    ChatPreprocessingHandler,
+    ChatReflectionHandler,
+)
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler, ChatReflectionHandler
 from src.agent.processing.plan_emitter import ActionPlanDraft
-from test_chat_stage import setup, cleanup, stimulus, report, plan, take, RecordingAgent
 
 
 async def until(predicate):
