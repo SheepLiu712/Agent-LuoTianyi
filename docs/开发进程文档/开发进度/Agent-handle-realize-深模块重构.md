@@ -9,6 +9,16 @@
 
 ## 已完成事实
 
+### 2026-09-14 批次回复的开始思考信号（11a）GREEN
+
+- 交付行为：`ChatReplyHandler` 在有可回复内容时先交付一个仅含 `StartThinking` 的首计划（ordinal 0），再进入生成并交付正式回复计划。Stage 的 `_PlanSink` 消费该计划并发出 THINKING 呈现，最后一个思考请求结束时发出 WAITING（既有 Stage 行为）。无可回复内容时不产生思考信号。
+- interface spec：无新增或扩大公开 interface；复用 `StartThinking`、`ActionPlanDraft` 与 `_PlanSink` 既有消费行为。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-11-thinking-signals`（依赖 #132 的 `chat.py`，堆叠）。
+- 验证及结果：`python -m pytest tests/agent/test_chat_reply.py tests/stage/test_chat_reply_settlement.py -q` 为 6 passed；白名单回归 834 passed、2 skipped。相关文件 LSP 无报错。
+- 明确不包含（留待 11b）：慢 Recall 的「先临时完整计划、再正式计划」策略未实现，需要真实的慢召回信号来源。
+- 未验证范围：未运行真实 LLM/TTS/GPU、真机或生产数据库；生产聊天仍走旧 ChatStream。
+
 ### 2026-09-14 回复结算后的反思接入（13/14）GREEN
 
 - 交付行为：`ChatReflectionHandler` 从空占位改为真实反思——以本次已消费输入与近期 `source=agent` 回复拼成依据，经反思技能沉淀长期记忆；按阈值调用共享压缩技能生成并提交上下文压缩；随后更新用户画像（`summary` + `recent_conversation`）。不交付计划、不消费输入、不产生用户可见输出。
