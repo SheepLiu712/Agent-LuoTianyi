@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-15 慢 Recall 的多计划回复策略（11b）GREEN
+
+- 交付行为：`ResponseCompositionSkill` 新增内部两段式入口 `compose_staged`，返回 `ComposedResponse(provisional, pending)`——召回超过配置阈值仍未返回时给出一条完整的临时草稿，正式草稿留待调用方 `await formal()`；`compose` 的既有一次性语义不变。`ChatReplyHandler` 据此在同一 handle 内先交付临时计划（ordinal 1，紧随 ordinal 0 的 `StartThinking`），再等待正式结果并交付正式计划（ordinal 2）。两份计划各自完整、可独立实现（均为可直接播放的 `Say`），`plan_id` 与行动标识彼此独立（临时 `-t{n}`、正式 `-r{n}`），正式计划不修改也不引用临时计划，且两者携带相同的 `basis_interaction_revision` 与 `source_stimulus_ids`。交付正式计划前重新检查 `request.cancellation` 与交互依据修订：已取消或修订推进则不交付，迟到的召回结果被丢弃。临时计划交付失败按既有失败停止语义处理，不再调用 sink、不生成正式结果、`retryable=False`，无重试或补偿。
+- 隔离与幂等：召回 future 全程留在本次 handle 内，不经公开接口回流，因此未新增 `RecallCompleted` 刺激或任何公开 Stimulus/Action，也不会递归进入处理器。召回命中经 `plans.context.recalled_memory` 按触发刺激 ID 归属写入 Stage 借出的 `InteractionContext`，由 Stage 在结算时按刺激清理；不存在 Agent 全局召回注册表，结果不跨用户或跨角色。`formal()` 可重复调用并返回同一结果，不重复生成。未引入 ledger、outbox 或自动重试。
+- interface spec：新增 [`慢召回两段式回复`](../../项目说明/项目架构与接口（spec）/接口文档/agent/slow-recall-reply.md)，记录内部 `ComposedResponse`/`ComposedReply`/`compose_staged` 契约、两段计划的交付顺序与取消语义；`plan-emitter.md` 补充「同一次调用内的多份计划」；`agent/README.md` 增加索引。新增配置事实 `agent_runtime.reply_composition.slow_recall.{provisional_after_seconds,provisional_text,provisional_sound_content,provisional_tone,provisional_expression}`，用户可见的临时文案只来自该配置，处理器与技能内无字面文案；配置经 `AgentRuntime` 读入后由 `Skills.reply_composition_config` 交给技能。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent tests/stage tests/domain -q` 为 702 passed；新增 `tests/agent/test_slow_recall_staged_reply.py`（8 passed，已登记 `_ACTIVE_TEST_FILES`），覆盖两份独立完整计划与连续序号、同一依据修订、召回按触发刺激归属、取消阻断正式计划并丢弃迟到结果、sink 失败停止且不重试、无 `RecallCompleted` 且不递归、配置驱动的临时文案及快召回/未配置时不产生临时草稿。延后文件以 `--noconftest` 与基线 worktree 对照，双方均为 39 passed，无新增失败。触及文件 `ruff check` 剩 6 项均为基线既有（`DTZ005`/`I001`），并顺带消除基线的一处 `UP035`；`git diff --check` 无输出。
+- 未验证范围：未运行真实 LLM、生产向量库/数据库、TTS/GPU、真机；生产聊天是否切换到新门面仍由既有迁移切片负责。
+
 ### 2026-09-15 明确记忆请求与成功承诺边界（12）GREEN
 
 - 交付行为：cognitive 层的 `ExplicitMemoryIntentSkill` 按 `agent.memory.explicit_intent` 配置和旧默认短语逐条识别明确记忆请求；`ChatReplyHandler` 在同一 handle 内先等待内部 `IntentionalMemoryCommit` 通过既有 `MemoryWriter` 写入私有长期记忆，且返回非空规范记忆 `record_id` 后才经回复组合 seam 交付表示已记住的 `Say`。提交异常或空标识返回 `FAILED / INTERNAL_ERROR`，保留本批 pending、`retryable=False`，不交付成功承诺。

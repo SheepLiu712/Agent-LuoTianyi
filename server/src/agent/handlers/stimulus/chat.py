@@ -5,7 +5,12 @@ from typing import Final
 from uuid import uuid4
 
 import src.domain.agent as d
-from src.agent.context.models import ConversationEntry, SongContent, TextContent
+from src.agent.context.models import (
+    ConversationEntry,
+    RecallEntry,
+    SongContent,
+    TextContent,
+)
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.cognitive import (
     ExplicitMemoryIntentSkill,
@@ -79,11 +84,14 @@ def _render_history(snapshot) -> str:
     return "\n".join(lines)
 
 
-def _reply_actions(request: d.HandleStimulusRequest, drafts) -> tuple[d.Action, ...]:
-    """把回复草稿按序转成 Say/Sing 行动；空白且演唱的草稿被丢弃。"""
+def _reply_actions(request: d.HandleStimulusRequest, drafts, *, prefix: str = "r") -> tuple[d.Action, ...]:
+    """把回复草稿按序转成 Say/Sing 行动；空白且演唱的草稿被丢弃。
+
+    prefix 区分同一请求内不同阶段的计划，避免临时与正式行动标识冲突。
+    """
     actions: list[d.Action] = []
     for index, draft in enumerate(drafts):
-        action_id = f"{request.request_id}-r{index}"
+        action_id = f"{request.request_id}-{prefix}{index}"
         expression = d.ChangeExpression(expression_id=draft.expression) if draft.expression else None
         if draft.sing is not None:
             actions.append(d.Sing(action_id=action_id, song_id=draft.sing[0],
@@ -110,6 +118,22 @@ def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
             entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
                 source=ConversationSource.AGENT.value, content=TextContent(draft.content)))
     return tuple(entries)
+
+
+def _attach_recall(plans: PlanEmitter, request: d.HandleStimulusRequest, hits) -> None:
+    """把本次召回命中挂到触发刺激上；重复标识直接跳过，不影响回复交付。"""
+    stimulus_id = request.stimulus.stimulus_id
+    entries = tuple(
+        RecallEntry(entry_id=f"{request.request_id}-recall{index}", stimulus_id=stimulus_id, content=hit)
+        for index, hit in enumerate(hits)
+    )
+    if entries:
+        plans.context.recalled_memory.append(entries)
+
+
+def _may_emit_formal(request: d.HandleStimulusRequest, basis: int) -> bool:
+    """正式计划只在未取消且依据修订未变时交付，保证与临时计划同依据。"""
+    return not request.cancellation.is_cancelled and request.interaction.interaction_revision == basis
 
 
 def _failed_memory_report(request: d.HandleStimulusRequest) -> d.HandlingReport:
@@ -179,28 +203,44 @@ class ChatReplyHandler:
             await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=_reply_actions(request, drafts)))
             return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
         reply_topic = "\n".join(reply_parts)
-        drafts: tuple = ()
-        if reply_topic:
-            await plans.emit(ActionPlanDraft(
-                source_stimulus_ids=pending,
-                actions=(d.StartThinking(action_id=f"{request.request_id}-thinking"),)))
-            identity = plans.context.identity
-            snapshot = plans.context.conversation.read()
-            plans.set_interruptible(True)
-            drafts = await self._composition.compose(
-                character_id=identity.character_id, user_id=identity.user_id,
-                reply_topic=reply_topic, conversation_history=_render_history(snapshot),
-                memory_queries=(reply_topic,),
-                sing_attempts=self._understanding.extract_terms(reply_topic),
-                excluded_segments=_recent_sung_segments(snapshot))
-            plans.set_interruptible(False)
-        actions = _reply_actions(request, drafts)
-        if actions:
-            entries = _reply_entries(drafts)
-            if entries:
-                await plans.context.conversation.append(entries)
-            await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=actions))
+        if not reply_topic:
+            return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
+        await plans.emit(ActionPlanDraft(
+            source_stimulus_ids=pending,
+            actions=(d.StartThinking(action_id=f"{request.request_id}-thinking"),)))
+        identity = plans.context.identity
+        snapshot = plans.context.conversation.read()
+        basis = request.interaction.interaction_revision
+        plans.set_interruptible(True)
+        staged = await self._composition.compose_staged(
+            character_id=identity.character_id, user_id=identity.user_id,
+            reply_topic=reply_topic, conversation_history=_render_history(snapshot),
+            memory_queries=(reply_topic,),
+            sing_attempts=self._understanding.extract_terms(reply_topic),
+            excluded_segments=_recent_sung_segments(snapshot))
+        plans.set_interruptible(False)
+        if staged.provisional:
+            await self._deliver(plans, request, pending, staged.provisional, prefix="t")
+        if not staged.awaits_formal:
+            return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
+        formal = await staged.formal()
+        if not _may_emit_formal(request, basis):
+            return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
+        _attach_recall(plans, request, formal.memory_hits)
+        await self._deliver(plans, request, pending, formal.drafts, prefix="r")
         return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
+
+    @staticmethod
+    async def _deliver(plans: PlanEmitter, request: d.HandleStimulusRequest,
+                       pending: tuple[str, ...], drafts, *, prefix: str) -> None:
+        """把一组草稿落库并作为一份独立完整计划交付；无可交付行动时不产生计划。"""
+        actions = _reply_actions(request, drafts, prefix=prefix)
+        if not actions:
+            return
+        entries = _reply_entries(drafts)
+        if entries:
+            await plans.context.conversation.append(entries)
+        await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=actions))
 
 
 def _reflection_dialogue(request: d.HandleStimulusRequest, snapshot) -> str:

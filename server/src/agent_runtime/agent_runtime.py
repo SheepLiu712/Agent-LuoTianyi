@@ -82,6 +82,7 @@ class AgentRuntime:
                                  tts_engine=AsyncTTS(capability_manager.speech),
                                  preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
                                  explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
+                                 reply_composition_config=self.config.get("reply_composition", {}),
                                  singing=capability_manager.singing)
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
@@ -98,7 +99,7 @@ class AgentRuntime:
             )
 
             self.skills.register(ResponseCompositionSkill, ResponseCompositionSkill(
-                self.config.get("reply_composition", {}),
+                self.skills.reply_composition_config,
                 lambda character_id: self.character_runtimes[character_id],
             ))
             self.skills.register(ReflectionSkill, ReflectionSkill(
