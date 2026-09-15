@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.agent import Agent
 from src.agent.context import ContextFactory
+from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
@@ -13,6 +14,10 @@ from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReflectionHandler,
     ChatReplyHandler,
+)
+from src.agent.handlers.stimulus.citywalk import (
+    CITYWALK_OBSERVATION_KIND,
+    CitywalkObservationHandler,
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
@@ -33,6 +38,7 @@ from src.agent.skills.cognitive import (
     TextPreprocessingSkill,
 )
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.touch import TouchPolicy, TouchReactionSkill
@@ -100,6 +106,8 @@ class AgentRuntime:
                                  singing=capability_manager.singing,
                                  media_resolver=capability_manager.media_resolver,
                                  image_understanding=capability_manager.image_understanding)
+            # 动态发布按来源身份落库；角色上下文由能力自身的装配提供
+            self.dynamic_publishing = DynamicPublishingSkill(capability_manager.dynamics)
             # 歌曲知识接纳使用与记忆查询相同的 agent.song_knowledge 配置，保证读写同一知识库
             self.song_knowledge = SongKnowledgeAcceptanceSkill(
                 self.config.get("agent", {}).get("song_knowledge", {})
@@ -141,14 +149,17 @@ class AgentRuntime:
                 character_id: ContextFactory(character_id=character_id, database=database_manager.conversation_service)
                 for character_id in self.character_runtimes
             }
+            world_activity = WorldActivityHandler(branches={
+                CITYWALK_OBSERVATION_KIND: CitywalkObservationHandler(self.dynamic_publishing),
+            })
             self._agents = {
                 character_id: Agent(
-                    character_id=character_id,
-                    stimulus_router=StimulusRouter((
-                        (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
-                        (StimulusKind.PROACTIVE_PROMPT_DUE, FirstLoginHandler(
-                            prepared_names=first_login_names,
-                            prepared_speech=self.prepared_speech,
+                        character_id=character_id,
+                        stimulus_router=StimulusRouter((
+                            (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+                            (StimulusKind.PROACTIVE_PROMPT_DUE, FirstLoginHandler(
+                                prepared_names=first_login_names,
+                                prepared_speech=self.prepared_speech,
                         )),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
                             self.skills.get(ResponseCompositionSkill),
@@ -157,10 +168,10 @@ class AgentRuntime:
                              self.skills.get(IntentionalMemoryCommit))),
                         (StimulusKind.TOUCH_INTERACTION, TouchInteractionHandler(
                             *self._touch_reaction(character_id))),
-                        (StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
-                         SongKnowledgeHandler(self.song_knowledge)),
-                        *((kind, WorldActivityHandler()) for kind in WORLD_ACTIVITY_STIMULUS_KINDS
-                          if kind is not StimulusKind.SONG_KNOWLEDGE_DISCOVERED),
+                            (StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
+                             SongKnowledgeHandler(self.song_knowledge)),
+                            *((kind, world_activity) for kind in WORLD_ACTIVITY_STIMULUS_KINDS
+                              if kind is not StimulusKind.SONG_KNOWLEDGE_DISCOVERED),
                         *((kind, ChatPreprocessingHandler(
                             self.skills.get(TextPreprocessingSkill),
                             self.skills.get(ImagePreprocessingSkill))) for kind in (
@@ -173,10 +184,12 @@ class AgentRuntime:
                     action_router=ActionRouter((
                         (ActionKind.SAY, SayHandler(
                             character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
-                        (ActionKind.SING, SingHandler(
-                            character_id, self.skills.get(SingingSkill))),
-                        (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
-                    )),
+                            (ActionKind.SING, SingHandler(
+                                character_id, self.skills.get(SingingSkill))),
+                            (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
+                            (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(
+                                character_id, self.dynamic_publishing)),
+                        )),
                 )
                 for character_id in self.character_runtimes
             }

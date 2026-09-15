@@ -9,6 +9,12 @@
 
 ## 已完成事实
 
+### 2026-09-15 citywalk 角色决策与动态发布迁移（#80）
+
+- 交付行为：`CitywalkTask` 去掉 `CharacterRuntime` 依赖（含 `profile.display_name`，角色名改读配置），只保留概率抽样、地图/环境推进、报告生成、`travel` 事件与报告回写；散步成功后投递 `WorldObservation`（`observation_kind.value=citywalk_completed`、`fact_id=citywalk:<报告路径>`、`summary` 取报告叙述或目的地/经过地点/时长摘要、`world_revision` 取完成时刻），并按其 N1 结算端口登记回写订阅者。Agent 侧新增 `CitywalkObservationHandler`（`WORLD_OBSERVATION` 按 `observation_kind.value` 分派；生成角色化正文并交付 `PublishDynamic` 计划）、`PublishDynamicHandler`（成功报告 `EffectRef(DYNAMIC_POST, dynamic_id)`，失败 `DEPENDENCY_UNAVAILABLE`，取消 `CANCELLED`）与共享技能 `DynamicPublishingSkill`（文案生成 + 按来源身份幂等发布）。报告 `dynamic_id`／`dynamic_content`／`diary_text` 由结算回执写回；发布失败不撤销散步事实。
+- interface spec：`接口文档/world/README.md` 新增「世界事实投递（21–25 迁移中）」记录 citywalk 事实字段与回写口径；`接口文档/agent/README.md` 记录观察分支与 `PUBLISH_DYNAMIC` 处理器行为；`接口文档/domain/realization.md` 记录 `PublishDynamic` 已有生产 handler 与效果引用。
+- 验证及结果：`conda run -n agent python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` → **846 passed、2 skipped**（本分支基线 837 → +9；2 skip 为既有真实网络探测）。新增 `tests/agent/test_citywalk_observation.py` 6 项（分支交付 PublishDynamic、生成失败不交付计划、按类别分派、发布成功/失败/取消三类结算）与 world 侧 citywalk 用例改写（事实字段、被拒丢弃、回执回写报告、摘要回落、无 `character_runtime`）；`tests/world/test_world_task_dynamics.py` 的 citywalk 端到端用例改为 world→Agent→真实动态落库并断言来源身份与回写。新增文件 Ruff 通过；`citywalk/task.py` 保留既有 `BLE001`/`DTZ005` 风格项。
+- 未验证范围：真实高德地图、报告生成模型与动态文案模型的端到端效果仍按运行环境条件人工验收；本切片不含学歌（23）、动态互动（24）与日记（25）。
 ### 2026-09-15 VCPedia 候选知识接纳迁移（#81）
 
 - 交付行为：VCPedia 任务改为只做抓取、字段规范化、来源检查与来源去重，产出强类型 `SongKnowledgeDiscovered`（来源 `vcpedia`、外部歌曲标识、由规范化内容派生的修订号、供应商无关的 `SongKnowledgeCandidate`），逐条经长期 `WorldStage` 的 `WorldFactSink.submit(...)` 投递；world 不再写入歌曲知识或关键词索引。Agent 侧新增 `SongKnowledgeHandler` 与共享技能 `SongKnowledgeAcceptanceSkill`：按名称/safe name 幂等接纳，知识与关键词索引在同一幂等边界内写入（关键词写入失败回滚知识行），不产生任何 ActionPlan 或外部效果；`already learned`/候选不等于学歌请求的语义保持不变。

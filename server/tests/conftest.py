@@ -28,6 +28,7 @@ _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "test_websocket_delivery.py").resolve(),
     (Path(__file__).parent / "test_websocket_auth_limits.py").resolve(),
     (Path(__file__).parent / "agent" / "test_speaking.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_citywalk_observation.py").resolve(),
     (Path(__file__).parent / "agent" / "test_song_knowledge_acceptance.py").resolve(),
     (Path(__file__).parent / "agent" / "test_restore_expression.py").resolve(),
     (Path(__file__).parent / "agent" / "test_touch_interaction.py").resolve(),

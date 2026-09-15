@@ -1,5 +1,6 @@
 """世界与活动事实的受控处理入口。"""
-from typing import Final
+from collections.abc import Mapping
+from typing import Final, Protocol
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import PlanEmitter
@@ -14,13 +15,33 @@ WORLD_ACTIVITY_STIMULUS_KINDS: Final = (
 )
 
 
+class WorldObservationBranch(Protocol):
+    """按 `observation_kind` 处理一类世界观察。"""
+
+    async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
+        """处理本次观察并交付计划或明确结算。"""
+        ...
+
+
 class WorldActivityHandler:
-    """消费已规范化的世界或活动事实，不取得 world owner 或存储对象。"""
+    """消费已规范化的世界或活动事实，不取得 world owner 或存储对象。
+
+    未登记分支的观察类别仍按事实 ID 结算（占位行为），已登记分支承担真实认知。
+    """
+
+    def __init__(self, branches: Mapping[str, WorldObservationBranch] | None = None) -> None:
+        """按 `observation_kind.value` 登记世界观察分支。"""
+        self._branches = dict(branches or {})
 
     async def handle(
         self, request: d.HandleStimulusRequest, plans: PlanEmitter,
     ) -> d.HandlingReport:
-        """按事实 ID 结算当前刺激；后续认知只可从 request 与 plans.context 扩展。"""
+        """按观察类别分派；无分支时结算当前刺激，不产生计划。"""
+        stimulus = request.stimulus
+        if isinstance(stimulus, d.WorldObservation):
+            branch = self._branches.get(stimulus.observation_kind.value)
+            if branch is not None:
+                return await branch.handle(request, plans)
         _ = plans
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
         consumed = (request.stimulus.stimulus_id,)
