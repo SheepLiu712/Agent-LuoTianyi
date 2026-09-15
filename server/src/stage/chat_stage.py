@@ -3,27 +3,32 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
-from collections.abc import Callable
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
+from src.agent.context import ContextFactory, InteractionContext
 from src.domain.stage import (
-    AgentPresentationChanged, AgentPresentationState, CancelDelivery,
-    StageOutput, StageState, StageTerminationResult,
+    AgentPresentationChanged,
+    AgentPresentationState,
+    CancelDelivery,
+    StageOutput,
+    StageState,
+    StageTerminationResult,
 )
 from src.utils.logger import get_logger
-from src.agent.context import ContextFactory, InteractionContext
+
 from ._config import _StageConfig
-from ._models import _PendingInput, _InputStatus, _ReplyAttempt
+from ._models import _InputStatus, _PendingInput, _ReplyAttempt
 from ._sinks import StimulusInputSink, _AgentOutputSink, _PlanSink
 
 if TYPE_CHECKING:
-    from src.agent.facade import Agent
     from src.adapter.websocket import WebSocketAdapter
+    from src.agent.facade import Agent
 
 
 _CONTENT = (d.TextMessage, d.ImageMessage, d.VoiceMessage)
@@ -70,6 +75,8 @@ class ChatStage:
         self._deadline: datetime | None = None
         self._schedule_revision = 0
         self._timer: asyncio.TimerHandle | None = None
+        self._first_login_timer: asyncio.TimerHandle | None = None
+        self._first_login_pending = False
         self._termination: asyncio.Task[StageTerminationResult] | None = None
         self._stimulus_sink = StimulusInputSink(self)
         self._output_sink = _AgentOutputSink(self)
@@ -119,6 +126,16 @@ class ChatStage:
         self._state = StageState.ONLINE if state is d.ConnectionState.CONNECTED else StageState.OFFLINE
         if self._state is StageState.OFFLINE:
             await self._stop_work()
+        elif self._first_login_pending:
+            self._schedule_first_login()
+
+    def schedule_first_login(self) -> None:
+        """记录首次登录，并在 Stage 已上线后从当前时刻开始同步窗口计时。"""
+        if self._state in (StageState.TERMINATING, StageState.TERMINATED):
+            raise ValueError("stage is ending")
+        self._first_login_pending = True
+        if self._state is StageState.ONLINE:
+            self._schedule_first_login()
 
     async def terminate(self, reason: d.InteractionEndingReason) -> StageTerminationResult:
         """停止普通工作，向 Agent 发送 reason 对应的结束刺激；返回处理报告或失败说明。"""
@@ -453,9 +470,41 @@ class ChatStage:
         delay = max(0.0, (deadline - datetime.now(timezone.utc)).total_seconds())
         self._timer = asyncio.get_running_loop().call_later(delay, self._on_deadline, self._schedule_revision)
 
+    def _schedule_first_login(self) -> None:
+        if self._first_login_timer is not None:
+            return
+        self._first_login_timer = asyncio.get_running_loop().call_later(
+            self._config.first_login_wait,
+            self._on_first_login_due,
+        )
+
+    def _on_first_login_due(self) -> None:
+        self._first_login_timer = None
+        if not self._first_login_pending or self._state is not StageState.ONLINE:
+            return
+        if len(self._handles) >= self._config.max_stimuli:
+            self._schedule_first_login()
+            return
+        self._first_login_pending = False
+        stimulus = d.ProactivePromptDue(
+            **self._stage_stimulus_fields(),
+            reason=d.ProactiveReason(value="first_login"),
+            due_at=datetime.now(timezone.utc),
+            dedup_key=f"first-login:{self.user_id}:{self.character_id}",
+            fact_refs=(),
+        )
+        self._launch_handle(self._make_request(stimulus), lambda request, report: None)
+
     def _stage_stimulus_fields(self) -> dict:
-        return dict(stimulus_id=str(uuid4()), schema_version=1, occurred_at=datetime.now(timezone.utc),
-                    source=d.StimulusSource.STAGE, target_character_ids=(self.character_id,), user_id=self.user_id, ephemeral=True)
+        return {
+            "stimulus_id": str(uuid4()),
+            "schema_version": 1,
+            "occurred_at": datetime.now(timezone.utc),
+            "source": d.StimulusSource.STAGE,
+            "target_character_ids": (self.character_id,),
+            "user_id": self.user_id,
+            "ephemeral": True,
+        }
 
     def _invalidate_deadline(self) -> None:
         self._schedule_revision += 1
@@ -464,6 +513,9 @@ class ChatStage:
     async def _stop_work(self) -> None:
         self._scheduling = False
         self._invalidate_deadline()
+        if self._first_login_timer is not None:
+            self._first_login_timer.cancel()
+            self._first_login_timer = None
         self._plans.clear()
         for context in (*self._requests.values(), self._execution):
             if context is not None:
