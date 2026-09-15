@@ -37,6 +37,14 @@ citywalk、学歌、B 站事件、日记支持总开关及角色覆盖；QQ 凭�
 
 上述行为通过 `server/tests/world` 的公开入口回归测试验证，任务业务执行使用 Fake，不连接外部服务。
 
+### 世界事实投递（21–25 迁移中）
+
+迁移中的世界任务只投递规范化事实，不再直接写入知识或调用角色能力：
+
+- VCPedia 新歌任务（`sync_new_song_knowledge`）：抓取、字段规范化、来源检查与来源去重留在 world；每个候选产出 `SongKnowledgeDiscovered`（`source_ref=vcpedia`、外部歌曲标识、由规范化内容派生的修订号、供应商无关的歌曲资料 `SongKnowledgeCandidate`），经该角色长期 `WorldStage` 的 `fact_sink.submit(...)` 投递。任务不再写入歌曲知识或关键词索引。
+- 结果统计为 `discovered_count`／`submitted_count`／`rejected_count`／`skipped_existing_count`／`fetch_failed_count`，不报告 `added`（知识是否写入由 Agent 侧接纳决定）。
+- `WorldStage` 不可用或事实被拒时记录候选并在返回中计入 `rejected_count`，不降级为直接写入知识、不重试。
+
 ### `WorldTask`
 
 - `initialize(system_runtime)`：绑定运行环境。
