@@ -9,6 +9,12 @@
 
 ## 已完成事实
 
+### 2026-09-14 长期 WorldStage 与世界事实投递（#78）
+
+- 交付行为：新增按 `(character_id, world_id)` 长期复用的 WorldStage 与异步 `WorldFactSink`；Stage 持有 interaction/pending/cancellation、按 ID 结算事实，以同一长期 worker 串行执行计划，并在无实时通道时由 `NoChannelOutputSink` 明确拒绝输出。AgentRuntime 注册世界/活动事实 Handler，SystemRuntime 显式拥有 registry、`get_agent` 与关闭顺序；未迁移现有 world task，也未改变 WorldClock。
+- interface spec：[`stage/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/stage/README.md) 已记录当前接口、revision 归属、作用域复用和关闭事实。
+- 验证及结果：在 `server` 使用 `conda run -n agent python -m pytest tests/stage tests/world -q`，142 passed、2 skipped；新增聚焦用例覆盖事实顺序、旧 interaction revision、同 worker 串行、无通道拒绝、关闭取消及 registry 复用/隔离。新增产品模块的 basedpyright error 级检查、聚焦 Ruff、compileall 与 `git diff --check` 通过。
+- 未验证范围：四个既有 world 任务仍走兼容链路，真实网络探测两项按现有标记跳过；本切片不包含每日规划、活动 scheduler、歌曲/动态/日记任务迁移或生产外部通道验收。
 ### 2026-09-15 慢 Recall 的多计划回复策略（11b）GREEN
 
 - 交付行为：`ResponseCompositionSkill` 新增内部两段式入口 `compose_staged`，返回 `ComposedResponse(provisional, pending)`——召回超过配置阈值仍未返回时给出一条完整的临时草稿，正式草稿留待调用方 `await formal()`；`compose` 的既有一次性语义不变。`ChatReplyHandler` 据此在同一 handle 内先交付临时计划（ordinal 1，紧随 ordinal 0 的 `StartThinking`），再等待正式结果并交付正式计划（ordinal 2）。两份计划各自完整、可独立实现（均为可直接播放的 `Say`），`plan_id` 与行动标识彼此独立（临时 `-t{n}`、正式 `-r{n}`），正式计划不修改也不引用临时计划，且两者携带相同的 `basis_interaction_revision` 与 `source_stimulus_ids`。交付正式计划前重新检查 `request.cancellation` 与交互依据修订：已取消或修订推进则不交付，迟到的召回结果被丢弃。临时计划交付失败按既有失败停止语义处理，不再调用 sink、不生成正式结果、`retryable=False`，无重试或补偿。

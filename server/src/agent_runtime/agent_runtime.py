@@ -15,6 +15,10 @@ from src.agent.handlers.stimulus.chat import (
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.handlers.stimulus.world_activity import (
+    WORLD_ACTIVITY_STIMULUS_KINDS,
+    WorldActivityHandler,
+)
 from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
 from src.agent.skills import Skills
@@ -134,6 +138,7 @@ class AgentRuntime:
                             self.skills.get(TextPreprocessingSkill),
                             self.skills.get(ExplicitMemoryIntentSkill),
                             self.skills.get(IntentionalMemoryCommit))),
+                        *((kind, WorldActivityHandler()) for kind in WORLD_ACTIVITY_STIMULUS_KINDS),
                         *((kind, ChatPreprocessingHandler(
                             self.skills.get(TextPreprocessingSkill),
                             self.skills.get(ImagePreprocessingSkill))) for kind in (
@@ -156,7 +161,7 @@ class AgentRuntime:
         except BaseException:
             try:
                 self._abort_initialization()
-            except Exception as cleanup_error:  # noqa: BLE001 - 初始化边界必须回滚后重抛原异常。
+            except Exception as cleanup_error:  # noqa: BLE001 - initialization boundary must preserve cleanup logging
                 self.logger.error(
                     f"AgentRuntime initialization rollback failed: {cleanup_error}"
                 )
@@ -203,7 +208,7 @@ class AgentRuntime:
                     self._shutdown_task = shutdown_task
                 cancellation: asyncio.CancelledError | None = None
                 try:
-                    _, pending = await wait_for_owned_tasks(
+                    _done, pending = await wait_for_owned_tasks(
                         (shutdown_task,),
                         timeout_seconds=getattr(
                             self,
@@ -213,7 +218,7 @@ class AgentRuntime:
                     )
                 except asyncio.CancelledError as error:
                     cancellation = error
-                    _, pending = await asyncio.shield(
+                    _done, pending = await asyncio.shield(
                         wait_for_owned_tasks(
                             (shutdown_task,),
                             timeout_seconds=getattr(
