@@ -1,6 +1,7 @@
 # World 链路迁移实施规格（21–25）
 
 - 状态：**实施规格，21–25 的实现依据**。提案见同目录各《…规格（提案）.md》；本文档在实现前把提案的「未决问题」定稿为可执行决定，并冻结接口。
+- **裁决记录（2026-09-15）**：三个停点已由 owner 裁决——**N1 = 选项 A**（新增 world 侧结算端口，不再改动 #152）、**N2 = 选项 (a)**（给 `DiaryPlanningDue` 增加目标用户字段）、**N3 = 推荐口径**（world 报候选/抓取失败，接纳结果走结算）。
 - 关联工单：[#80](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/80)（21 citywalk）、[#81](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/81)（22 VCPedia）、[#82](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/82)（23 学歌）、[#83](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/83)（24 动态互动）、[#84](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/84)（25 日记）
 - 共同依赖：[#78](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/78)（19 WorldStage），已由 PR [#152](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/152) 实现。
 - 范围：**21、22、23、24、25**；**不含 20**（Issue #79 带 `question`，本版取「不做」，见 §9）。
@@ -31,7 +32,7 @@
 | --- | --- | --- |
 | `WorldObservation` | `observation_kind: WorldObservationKind(value)`、`fact: WorldFact(fact_id, summary)`、`evidence_refs: tuple[EvidenceRef(evidence_id), ...]`、`world_revision: int` | 21 |
 | `DynamicObserved` | `dynamic_id`、`target_message_id`、`target_kind: DynamicTargetKind`（`post`/`comment`）、`messages: tuple[DynamicMessage(message_id, parent_message_id, author_ref: ActorRef(actor_id, display_name), text, media_refs), ...]`、`revision: int`。约束：首条 `message_id == dynamic_id` 且无父；后续父消息必须已出现；`target_message_id` 唯一存在且与 `target_kind` 一致 | 24 |
-| `DiaryPlanningDue` | `local_date: date`、`timezone: ZoneInfo`、`trigger_id: str` | 25（见 §5 N2） |
+| `DiaryPlanningDue` | `local_date: date`、`timezone: ZoneInfo`、`trigger_id: str`、**`owner_user_id: str`（本次新增，N2 已裁决）** | 25 |
 | `SongKnowledgeDiscovered` | `source_ref: SourceRef(source_id)`、`external_song_id`、`revision: int`、`candidate: SongKnowledgeCandidate(song_name, uploader, singers, introduction, lyrics, lyric_keywords)`、`fetched_at: aware datetime` | 22 |
 | `SongLearned` | `learning_job_id`、`song_id`、`completed_at: aware datetime` | 23 |
 | `ActivityObservation` | `activity_id`、`observation: ActivityFact(fact_id, summary)`、`activity_revision` | 本批不用（属 20） |
@@ -98,7 +99,7 @@
 - **Agent 侧**：新增 `handlers/stimulus/song_knowledge.py`（并在 `world_activity` 分派表登记）+ skill `SongKnowledgeAcceptance`：
   名称/safe name 已存在 → **跳过**；缺介绍 → **失败且不提交半份**；知识与关键词索引在**同一幂等边界**内写入，按「外部来源＋歌曲标识＋修订」幂等。
 - **不自动学歌**：候选**不等于**学歌请求；如需 `RequestSongLearning` 必须由明确决策产生（本切片不产生）。
-- **统计语义**：见 §5 N3。
+- **统计语义（N3 已裁决）**：world 结果报「候选产出数 / 抓取与规范化失败数」（`discovered`／`fetch_failed`），**不再声称** `added`（知识写入已移入 Agent）。接纳成功数由 §4 结算端口在 Agent 侧观测；「成功必须对应实际知识与关键词可查」由接纳技能的同一幂等边界保证。
 - **测试**：`tests/world/test_world_task_vcpedia_new_songs.py`（候选产出/节流/失败统计）+ Agent 侧（幂等接纳、已存在跳过、缺介绍失败、关键词可查）。
 
 ### 23 学歌派发、完成事实与学会后行为（#82）
@@ -128,14 +129,14 @@
 ### 25 日记筛选、生成与私密发布（#84）
 
 - **world 保留**：00:00 调度、当日每用户对话统计、`≥50` 入选、当天已有日记排除、超 20 人随机取 20、每日唯一。
-- **投递**：每个入选用户一条 `DiaryPlanningDue(local_date, timezone, trigger_id)`；目标用户如何到达 Agent 见 §5 N2。
+- **投递**：每个入选用户一条 `DiaryPlanningDue(local_date, timezone, trigger_id, owner_user_id)`；**已裁决 N2=(a)**：`DiaryPlanningDue` 增加 `owner_user_id: str`（非空白校验）字段，目标用户由此显式传到 Agent，不再依赖 `Stimulus.user_id`（`_receive` 仍要求其为 `None`）。
 - **Agent 侧**：生成正文 → `WriteDiary(owner_user_id, local_date, body)`，由 realize 发布为 private、不可评论的动态；沿用现有 source identity（`source_type="diary"`、`author=character`）与用户隔离，不建独立日记表。
 - **结算**：逐用户 created/failed 来自 §4 结算端口，失败不标成 created。
 - **测试**：`tests/world/test_world_task_diary.py`（阈值/上限/去重/LLM 不可用跳过）+ Agent/stage 侧（private 发布、用户隔离、当日去重）。
 
 ---
 
-## 4. 结算与业务状态回写（N1，**待 owner 裁决**）
+## 4. 结算与业务状态回写（N1，**已裁决：选项 A**）
 
 问题：19 只提供了 `on_execution_finished(plan, report)` 这一个回调，且**只有产生计划时才会触发**。本批需要两类结算：
 
@@ -154,28 +155,29 @@
 
 ---
 
-## 5. 停点（必须先停下说明并取得 owner 裁决）
+## 5. 接口裁决记录（owner 已裁决，实施时按此执行）
 
-| 编号 | 议题 | 说明与建议 |
+| 编号 | 议题 | 裁决与执行口径 |
 | --- | --- | --- |
-| **N1** | §4 结算端口 | 推荐选项 A。范围：`stage` 侧回调 + world 侧 receipt router（新端口需登记进 `接口文档/stage/README.md`） |
-| **N2** | **25 的目标用户无法到达 Agent** | `DiaryPlanningDue` 只有 `local_date`/`timezone`/`trigger_id`，而 `WorldStage._receive` 要求 `user_id is None` ⇒ 现在无法把「给哪个用户写日记」传进 handler。两条出路：(a) 给 `DiaryPlanningDue` 增加目标用户字段（**扩公开领域类型**）；(b) 放宽 `_receive` 允许**用户作用域**的世界事实带 `user_id`（**改 19 的受理规则**）。二者都要 owner 裁决；不建议用 `trigger_id` 编码用户身份（脆弱且语义错位） |
-| **N3** | 22 的 added/failed 语义 | 迁移后「知识是否真的写入」由 Agent 侧接纳决定，world 不能再声称 `added`。建议 world 报 `discovered`/`fetch_failed`（候选与抓取失败），接纳结果走 §4 结算并由 Agent 侧观测；如需保留字面 `added`，须与 owner 确认口径 |
+| **N1** | 世界侧结算端口 | **采纳选项 A**：`SystemRuntime` 装配 `WorldStage` 时挂 world 侧结算回调；world 侧新增 receipt router，按 `source_stimulus_ids`／刺激 kind 分派给提交事实的任务。范围：`stage` 侧新增结算回调（**不改 #152 现有成员语义**）+ world 侧 router + 注册 API；新端口登记进 `接口文档/stage/README.md`。结算需同时覆盖 handle 结果（用于 24 的 `ignored`）与执行结果（`EffectRef`／失败原因／正文） |
+| **N2** | 25 的目标用户 | **采纳选项 (a)**：`DiaryPlanningDue` 增加 `owner_user_id: str`（非空白）。不改 19 的 `_receive` 受理规则（世界事实仍 `user_id is None`）。属公开领域类型**扩大**，已获批准；实现时同步 `接口文档/domain/stimulus.md` |
+| **N3** | 22 的统计语义 | **采纳推荐口径**：world 报 `discovered`／`fetch_failed`，不声称 `added`；接纳结果由 N1 结算在 Agent 侧观测 |
 
 ---
 
 ## 6. 实施顺序与 PR 堆叠
 
 ```text
-22 VCPedia 候选接纳（无 N1/N2 依赖，可立即开工）
-21 citywalk（需 N1 才能回写报告 dynamic_id）
+22 VCPedia 候选接纳（不依赖 N1/N2，先开工）
+N1 世界侧结算端口（21/24/25 的共同前置，独立小 PR，堆叠在 #152 之上）
+21 citywalk（叠 N1，回写报告 dynamic_id）
   └─► 23 学歌（叠 21）
-24 动态互动（需 N1，且依赖 N1 承载 ignore 结算）
-25 日记（需 N1 + N2）
+24 动态互动（叠 N1，ignore 结算走 N1）
+25 日记（叠 N1；含 DiaryPlanningDue 目标用户字段）
 ```
 
 - 每个切片一个工作树（基线 `impl/agent-19-world-stage` 尖端）、一个分支、一个 PR。
-- 21 与 22 可并行；23 堆叠在 21 之后；24/25 在 N1 定案后开工。
+- N1 作为独立小 PR 先行（21/24/25 都堆叠其上）；22 与 N1 可并行；23 堆叠在 21 之后。
 - 全部完成后才进入 29 的删除阶段（本批不删旧入口之外的任何东西）。
 
 ---
