@@ -32,8 +32,11 @@ class Socket:
 
 
 def stimulus(cls=d.TextMessage, **fields):
-    common = dict(stimulus_id=str(uuid4()), schema_version=1, occurred_at=datetime.now(timezone.utc),
-                  source=d.StimulusSource.USER, target_character_ids=("luotianyi",), user_id="user", ephemeral=False)
+    common = {
+        "stimulus_id": str(uuid4()), "schema_version": 1,
+        "occurred_at": datetime.now(timezone.utc), "source": d.StimulusSource.USER,
+        "target_character_ids": ("luotianyi",), "user_id": "user", "ephemeral": False,
+    }
     if cls is d.TextMessage:
         common.update(text="你好", client_msg_id=str(uuid4()))
     common.update(fields)
@@ -108,10 +111,14 @@ class StageContextFactory:
         from src.agent.context import RecalledMemoryContext
         context.recalled_memory = RecalledMemoryContext()
         context.close = close
+        from src.agent.context import ConversationSnapshot
         entries = []
         async def append(values):
             entries.extend(values)
-        context.conversation = SimpleNamespace(append=append, entries=entries)
+        context.conversation = SimpleNamespace(
+            append=append, entries=entries,
+            read=lambda: ConversationSnapshot(entries=tuple(entries)),
+        )
         self.created.append(context)
         return context
 
@@ -327,7 +334,9 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
         wav.writeframes(b"\x00\x01" * 120)
     (tmp_path / "hello.wav").write_bytes(data.getvalue())
     manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps([dict(name="hello", audio_path="hello.wav", text="你好", expression="normal")]), encoding="utf-8")
+    manifest.write_text(json.dumps([{
+        "name": "hello", "audio_path": "hello.wav", "text": "你好", "expression": "normal",
+    }]), encoding="utf-8")
     class TextHandler:
         async def handle(self, request, plans):
             if isinstance(request.stimulus, d.TextMessage):

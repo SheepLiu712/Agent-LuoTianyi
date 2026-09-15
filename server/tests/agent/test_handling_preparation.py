@@ -1,12 +1,17 @@
 """输入归属由 Stage 指定，Agent 不维护跨调用的准备状态。"""
 from dataclasses import replace
 from types import SimpleNamespace
+
 import pytest
+from routing_support import Sink, request
+
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.handlers.stimulus.chat import (
+    ChatPreprocessingHandler,
+    ChatReflectionHandler,
+)
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReflectionHandler
-from routing_support import Sink, request
 
 
 class _Understanding:
@@ -14,13 +19,29 @@ class _Understanding:
         return ()
 
 
+class _NoReflection:
+    async def consolidate_memories(self, **kwargs):
+        return {}
+
+    async def update_profile(self, **kwargs):
+        return None
+
+
+class _NoCompaction:
+    async def compact(self, conversation_context):
+        return None
+
+
 def context():
+    from src.agent.context import ConversationSnapshot
     value = SimpleNamespace(identity=SimpleNamespace(
         interaction_id="i", user_id="u", character_id="luotianyi"))
     entries = []
     async def append(values):
         entries.extend(values)
-    value.conversation = SimpleNamespace(append=append, entries=entries)
+    value.conversation = SimpleNamespace(
+        append=append, entries=entries,
+        read=lambda: ConversationSnapshot(entries=tuple(entries)))
     return value
 
 
@@ -28,7 +49,7 @@ def context():
 async def test_agent_processes_explicit_inputs_without_caching_ownership():
     agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
         (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding()))],
-        reflection_handler=ChatReflectionHandler()))
+        reflection_handler=ChatReflectionHandler(_NoReflection(), _NoCompaction())))
     first = await agent.handle_stimulus(request(), Sink(), context=context())
     second = await agent.handle_stimulus(replace(request(), request_id="second"), Sink(), context=context())
     assert first.preprocessed_input.text == second.preprocessed_input.text == "你好"

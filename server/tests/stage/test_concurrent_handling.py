@@ -35,6 +35,19 @@ class _Understanding:
         return ()
 
 
+class _NoReflection:
+    async def consolidate_memories(self, **kwargs):
+        return {}
+
+    async def update_profile(self, **kwargs):
+        return None
+
+
+class _NoCompaction:
+    async def compact(self, conversation_context):
+        return None
+
+
 def touch():
     return stimulus(d.TouchInteraction, body_regions=(d.BodyRegion(value="head"),), click_frequency=None)
 
@@ -396,7 +409,8 @@ async def test_real_agent_context_access_plan_delivery_and_reflection_after_exec
                 error_code=None, irreversible_effect_committed=False, effect_ref=None)
     agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
         (d.StimulusKind.TEXT_MESSAGE, Preprocess(_Understanding())), (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
-        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())], reflection_handler=Reflect()),
+        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())],
+        reflection_handler=Reflect(_NoReflection(), _NoCompaction())),
         action_router=ActionRouter([(d.ActionKind.SAY, Execute())]))
     stage, _, adapter, _, _ = await setup(agent)
     try:

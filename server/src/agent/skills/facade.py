@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from src.agent.skills.expression.speaking import SpeakingSkill
+from src.capabilities.media_resolution import MediaResolver
 from src.capabilities.speech.streaming import AsyncTTS
 
-from .cognitive import ImagePreprocessingSkill, ImageUnderstandingCapability, TextPreprocessingSkill
-from src.capabilities.media_resolution import MediaResolver
+from .cognitive import (
+    ImagePreprocessingSkill,
+    ImageUnderstandingCapability,
+    TextPreprocessingSkill,
+)
 from .conversation.compaction import ConversationCompactionSkill
 from .expression.singing import SingingSkill
 

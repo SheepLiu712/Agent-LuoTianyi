@@ -1,6 +1,6 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from typing_extensions import assert_never
@@ -18,6 +18,8 @@ from src.agent.skills.cognitive import (
     ResponseCompositionSkill,
     TextPreprocessingSkill,
 )
+from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.reflection import ReflectionSkill
 from src.utils.enum_type import ConversationSource
 
 
@@ -148,11 +150,15 @@ def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
         if draft.sing is not None:
             song, segment = draft.sing
             text = f"{draft.content}\n{draft.lyrics}".strip() if draft.lyrics else draft.content
-            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
+            entries.append(ConversationEntry(
+                entry_id=str(uuid4()),
+                timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
                 source=ConversationSource.AGENT.value,
                 content=SongContent(text, song, segment)))
         elif draft.content.strip():
-            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
+            entries.append(ConversationEntry(
+                entry_id=str(uuid4()),
+                timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
                 source=ConversationSource.AGENT.value, content=TextContent(draft.content)))
     return tuple(entries)
 
@@ -173,6 +179,9 @@ class ChatReplyHandler:
             item.text.strip() for item in request.prepared_inputs if item.text and item.text.strip())
         drafts: tuple = ()
         if reply_topic:
+            await plans.emit(ActionPlanDraft(
+                source_stimulus_ids=pending,
+                actions=(d.StartThinking(action_id=f"{request.request_id}-thinking"),)))
             identity = plans.context.identity
             snapshot = plans.context.conversation.read()
             plans.set_interruptible(True)
@@ -192,9 +201,41 @@ class ChatReplyHandler:
         return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
 
 
+def _reflection_dialogue(request: d.HandleStimulusRequest, snapshot) -> str:
+    """把本次已消费的用户输入与近期 agent 回复拼成记忆提炼依据。"""
+    lines = [f"user: {item.text}" for item in request.prepared_inputs
+             if item.text and item.text.strip()]
+    lines.extend(f"agent: {entry.content.text}" for entry in snapshot.entries
+                 if entry.source == ConversationSource.AGENT.value)
+    return "\n".join(lines)
+
+
 class ChatReflectionHandler:
-    """回复结算后的认知维护占位，不执行记忆或画像更新。"""
+    """回复结算后的认知维护：记忆沉淀、上下文压缩与用户画像更新。"""
+
+    def __init__(self, reflection: ReflectionSkill, compaction: ConversationCompactionSkill) -> None:
+        """注入反思技能与共享压缩技能；不产生用户可见输出。"""
+        self._reflection = reflection
+        self._compaction = compaction
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
-        """确认 request 的维护触发，不交付行动计划或修改 context。"""
+        """依次沉淀记忆、按阈值压缩上下文、更新画像；不交付计划也不消费输入。"""
+        context = plans.context
+        identity = context.identity
+        if identity.user_id is None:
+            return _report(request)
+        snapshot = context.conversation.read()
+        dialogue = _reflection_dialogue(request, snapshot)
+        if dialogue:
+            await self._reflection.consolidate_memories(
+                character_id=identity.character_id, user_id=identity.user_id,
+                current_dialogue=dialogue, conversation_history=_render_history(snapshot))
+        compaction = await self._compaction.compact(context.conversation)
+        if compaction is not None:
+            await context.conversation.compact(compaction)
+        if snapshot.summary.text or snapshot.entries:
+            await self._reflection.update_profile(
+                character_id=identity.character_id, user_id=identity.user_id,
+                summary=snapshot.summary.text,
+                recent_conversation=[f"{entry.source}: {entry.content.text}" for entry in snapshot.entries])
         return _report(request)
