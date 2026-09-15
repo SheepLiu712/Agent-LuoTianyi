@@ -317,6 +317,7 @@ Stage 侧已实现，本切片以真实 handler 复验并补证据：
 - `SystemRuntime` 显式装配 WorldStage registry 与 `get_agent`（不经 service locator）；`world_runtime`/`world_clock` 只负责事实与唤醒，不 import façade 或 Agent 内部；权威 world/activity/schedule revision 留在 owner，Action 提交点由 owner Adapter 校验。
 - memory/context 只存带来源/版本/TTL 的受控证据，不成为 world 镜像。
 - 测试：`tests/stage`（scope 复用/隔离、事实顺序、旧 revision、无输出支持、关闭）+ `tests/world`。
+- 2026-09-15 review 收口：新事实不自动废弃未取消的旧 handle plan；pending 与 handle 同受 `max_stimuli` 限制，ingress/AgentRuntime 共享 handler 登记 kind；非重试 `FAILED` trigger 终态移出 pending；world revision 与同 activity revision 禁止倒退，不同 activity ID 视为切换；execution 非完成记录 plan/error 并经窄 callback 交付 receipt，不重试。
 
 ### 20 每日规划与活动日程（#79，范围待确认）
 

@@ -5,11 +5,22 @@ import pytest
 
 _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "agent" / "test_handling_preparation.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_chat_preprocessing.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_media_resolution.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_singing.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_chat_reply.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_intentional_memory.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_slow_recall_staged_reply.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_intentional_memory_storage.py").resolve(),
+    (Path(__file__).parent / "stage" / "test_chat_reply_settlement.py").resolve(),
+    (Path(__file__).parent / "agent" / "test_chat_reflection.py").resolve(),
     (Path(__file__).parent / "stage" / "test_concurrent_handling.py").resolve(),
     (Path(__file__).parent / "agent" / "test_interruptibility.py").resolve(),
     (Path(__file__).parent / "stage" / "test_chat_stage.py").resolve(),
     (Path(__file__).parent / "stage" / "test_first_login_welcome.py").resolve(),
     (Path(__file__).parent / "stage" / "test_first_login_scheduling.py").resolve(),
+    (Path(__file__).parent / "stage" / "test_world_stage.py").resolve(),
+    (Path(__file__).parent / "stage" / "test_world_stage_contracts.py").resolve(),
     (Path(__file__).parent / "adapter" / "test_websocket_adapter.py").resolve(),
     (Path(__file__).parent / "test_websocket_delivery.py").resolve(),
     (Path(__file__).parent / "test_websocket_auth_limits.py").resolve(),
@@ -41,12 +52,14 @@ _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "world" / "test_world_task_dynamics.py").resolve(),
     (Path(__file__).parent / "world" / "test_world_clock.py").resolve(),
     (Path(__file__).parent / "world" / "test_world_runtime.py").resolve(),
+    (Path(__file__).parent / "world" / "test_world_stage_registry.py").resolve(),
     (Path(__file__).parent / "domain" / "test_realization_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_stimulus_text_message_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_stimulus_registered_types_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_stimulus_value_types_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_handle_input_contract.py").resolve(),
     (Path(__file__).parent / "domain" / "test_handling_report_contract.py").resolve(),
+    (Path(__file__).parent / "domain" / "test_conversation_timestamp_formats.py").resolve(),
 }
 _DEFERRED_TEST_REASON = "现有 Server 测试暂由项目负责人统一处理"
 

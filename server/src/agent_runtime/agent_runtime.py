@@ -1,31 +1,53 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from src.agent.skills import Skills
-from src.agent.skills.expression.speaking import SpeakingSkill
-from src.agent.handlers.action.say import SayHandler
-from src.capabilities.speech.streaming import AsyncTTS
-from src.domain.agent import ActionKind
-from src.resources.prepared_speech import PreparedSpeechResources
 from src.agent import Agent
 from src.agent.context import ContextFactory
-from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler, ChatReplyHandler, ChatReflectionHandler
+from src.agent.handlers.action.router import ActionRouter
+from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.action.sing import SingHandler
+from src.agent.handlers.stimulus.chat import (
+    ChatPreprocessingHandler,
+    ChatReflectionHandler,
+    ChatReplyHandler,
+)
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
-from src.domain.agent import StimulusKind
-from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.handlers.stimulus.world_activity import (
+    WORLD_ACTIVITY_STIMULUS_KINDS,
+    WorldActivityHandler,
+)
 from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
+from src.agent.skills import Skills
+from src.agent.skills.cognitive import (
+    ExplicitMemoryIntentSkill,
+    ImagePreprocessingSkill,
+    ResponseCompositionSkill,
+    TextPreprocessingSkill,
+)
+from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.expression.singing import SingingSkill
+from src.agent.skills.expression.speaking import SpeakingSkill
+from src.agent.skills.mutation import IntentionalMemoryCommit
+from src.agent.skills.reflection import ReflectionSkill
 from src.agent_runtime.agent_registry import AgentRegistry
 from src.agent_runtime.character_registry import CharacterRegistry
 from src.agent_runtime.character_runtime import CharacterRuntime
+from src.capabilities.speech.streaming import AsyncTTS
+from src.domain.agent import ActionKind, StimulusKind
+from src.resources.prepared_speech import PreparedSpeechResources
 from src.subconscious.character_mind import CharacterSubconscious
 from src.subconscious.memory import SubconsciousMemory
 from src.subconscious.preprocessing import ChatPreprocessor
-from src.system.database.vector_store import clear_vector_store, get_vector_store, init_vector_store
+from src.system.database.vector_store import (
+    clear_vector_store,
+    get_vector_store,
+    init_vector_store,
+)
 from src.utils.asyncio_helpers import (
     DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
     run_sync_owned,
@@ -44,10 +66,10 @@ class AgentRuntime:
 
     def __init__(
         self,
-        config: Dict[str, Any],
-        llm_service: "LLMService",
-        capability_manager: "CapabilityManager",
-        database_manager: "DatabaseManager",
+        config: dict[str, Any],
+        llm_service: LLMService,
+        capability_manager: CapabilityManager,
+        database_manager: DatabaseManager,
     ) -> None:
         """初始化启用角色及注册表，为门面注入数据库会话工厂；初始化失败回滚资源。"""
         self.logger = get_logger(__name__)
@@ -66,7 +88,13 @@ class AgentRuntime:
                 self.config.get("proactive", {})
             )
             self.skills = Skills(self.config.get("skills", {}), llm_service,
-                                 tts_engine=AsyncTTS(capability_manager.speech))
+                                 tts_engine=AsyncTTS(capability_manager.speech),
+                                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
+                                  explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
+                                  reply_composition_config=self.config.get("reply_composition", {}),
+                                  singing=capability_manager.singing,
+                                  media_resolver=capability_manager.media_resolver,
+                                  image_understanding=capability_manager.image_understanding)
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -80,6 +108,18 @@ class AgentRuntime:
                 capability_manager=capability_manager,
                 database_manager=database_manager,
             )
+
+            self.skills.register(ResponseCompositionSkill, ResponseCompositionSkill(
+                self.skills.reply_composition_config,
+                lambda character_id: self.character_runtimes[character_id],
+            ))
+            self.skills.register(ReflectionSkill, ReflectionSkill(
+                self.config.get("reflection", {}),
+                lambda character_id: self.character_runtimes[character_id],
+            ))
+            self.skills.register(IntentionalMemoryCommit, IntentionalMemoryCommit(
+                lambda character_id: self.character_runtimes[character_id].mind.memory,
+            ))
 
             self.agent_registry = AgentRegistry(
                 self.config.get("agent_registry", {}),
@@ -101,14 +141,27 @@ class AgentRuntime:
                             prepared_names=first_login_names,
                             prepared_speech=self.prepared_speech,
                         )),
-                        (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
-                        *((kind, ChatPreprocessingHandler()) for kind in (
+                        (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
+                            self.skills.get(ResponseCompositionSkill),
+                            self.skills.get(TextPreprocessingSkill),
+                            self.skills.get(ExplicitMemoryIntentSkill),
+                            self.skills.get(IntentionalMemoryCommit))),
+                        *((kind, WorldActivityHandler()) for kind in WORLD_ACTIVITY_STIMULUS_KINDS),
+                        *((kind, ChatPreprocessingHandler(
+                            self.skills.get(TextPreprocessingSkill),
+                            self.skills.get(ImagePreprocessingSkill))) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
                             StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),
-                    ), reflection_handler=ChatReflectionHandler()),
-                    action_router=ActionRouter(((ActionKind.SAY, SayHandler(
-                        character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),)),
+                    ), reflection_handler=ChatReflectionHandler(
+                        self.skills.get(ReflectionSkill),
+                        self.skills.get(ConversationCompactionSkill))),
+                    action_router=ActionRouter((
+                        (ActionKind.SAY, SayHandler(
+                            character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
+                        (ActionKind.SING, SingHandler(
+                            character_id, self.skills.get(SingingSkill))),
+                    )),
                 )
                 for character_id in self.character_runtimes
             }
@@ -116,7 +169,7 @@ class AgentRuntime:
         except BaseException:
             try:
                 self._abort_initialization()
-            except Exception as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 - initialization boundary must preserve cleanup logging
                 self.logger.error(
                     f"AgentRuntime initialization rollback failed: {cleanup_error}"
                 )
@@ -163,7 +216,7 @@ class AgentRuntime:
                     self._shutdown_task = shutdown_task
                 cancellation: asyncio.CancelledError | None = None
                 try:
-                    done, pending = await wait_for_owned_tasks(
+                    _done, pending = await wait_for_owned_tasks(
                         (shutdown_task,),
                         timeout_seconds=getattr(
                             self,
@@ -173,7 +226,7 @@ class AgentRuntime:
                     )
                 except asyncio.CancelledError as error:
                     cancellation = error
-                    done, pending = await asyncio.shield(
+                    _done, pending = await asyncio.shield(
                         wait_for_owned_tasks(
                             (shutdown_task,),
                             timeout_seconds=getattr(
@@ -199,9 +252,9 @@ class AgentRuntime:
     def wire_dependencies(
         self,
         *,
-        llm_service: "LLMService",
-        capability_manager: "CapabilityManager",
-        database_manager: "DatabaseManager",
+        llm_service: LLMService,
+        capability_manager: CapabilityManager,
+        database_manager: DatabaseManager,
     ) -> None:
         """记录运行时外部依赖，并检查角色子运行时。"""
         self.llm_service = llm_service
@@ -368,9 +421,9 @@ class AgentRuntime:
         self,
         *,
         agent_config: dict[str, Any],
-        llm_service: "LLMService",
-        capability_manager: "CapabilityManager",
-        database_manager: "DatabaseManager",
+        llm_service: LLMService,
+        capability_manager: CapabilityManager,
+        database_manager: DatabaseManager,
     ) -> dict[str, CharacterRuntime]:
         """为每个启用角色创建潜意识、意识 Agent 和角色运行时对象。"""
         character_runtimes: dict[str, CharacterRuntime] = {}
@@ -411,7 +464,7 @@ class AgentRuntime:
         return character_runtimes
 
     @staticmethod
-    def _first_login_prepared_names(config: Dict[str, Any]) -> tuple[str, ...]:
+    def _first_login_prepared_names(config: dict[str, Any]) -> tuple[str, ...]:
         """读取 proactive.first_login.prepared_names；配置存在时要求恰好两项。"""
         if not isinstance(config, dict):
             raise TypeError("proactive must be a dictionary")
@@ -434,7 +487,7 @@ class AgentRuntime:
         return tuple(names)
 
     @staticmethod
-    def _initialize_vector_store(agent_config: Dict[str, Any]) -> Any:
+    def _initialize_vector_store(agent_config: dict[str, Any]) -> Any:
         """根据 Agent 配置初始化并返回共享向量存储。"""
         vector_cfg = agent_config.get("memory", {}).get("vector_store", {})
         if vector_cfg:
@@ -442,7 +495,7 @@ class AgentRuntime:
         return get_vector_store()
 
     @staticmethod
-    def _register_character_llm_modules(llm_service: "LLMService", character_id: str, agent_config: Dict[str, Any]) -> dict[str, Any]:
+    def _register_character_llm_modules(llm_service: LLMService, character_id: str, agent_config: dict[str, Any]) -> dict[str, Any]:
         """为指定角色注册聊天、话题提取、记忆写入等 LLM 模块。"""
         modules: dict[str, Any] = {
             "topic_extractor": llm_service.register_llm_module(
