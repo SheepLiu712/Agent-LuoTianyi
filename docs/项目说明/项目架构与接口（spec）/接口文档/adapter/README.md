@@ -22,7 +22,7 @@
 
 目标兼容 target_character_ids、target_characters、character_ids、target_character_id、character_id；最多八个目标，每项最多 64 字符。省略目标时使用构造时指定的默认角色。
 
-`await WebSocketService.try_accept_stimulus_event(connection, event, *, adapter)` 保留网络侧的接收状态、客户端重试去重；重复事件不再次交给 adapter。心跳、认证等连接维护事件不进入 adapter。生产 `/chat_ws` 当前仍使用旧 ChatStream，输入落库也沿用旧流程。
+`await WebSocketService.try_accept_stimulus_event(connection, event, *, adapter)` 保留网络侧的接收状态、客户端重试去重；重复事件不再次交给 adapter。心跳、认证等连接维护事件不进入 adapter。生产 `/chat_ws` 已在认证和连接绑定完成后等待该入口；ACK/NACK 仍由 `user_interface` 根据返回的接收状态发送，adapter 不承担认证、限流或业务判断。
 
 ## 输出和控制
 

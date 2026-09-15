@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-15 生产聊天连接接入 Stage（#66）
+
+- 交付行为：生产 `/chat_ws` 在认证后用默认角色调用 `StageManager.connect`，聊天业务事件经同步 `WebSocketService.try_accept_stimulus_event` 和共享 `WebSocketAdapter` 转为领域 Stimulus 投递给 ChatStage，ACK/NACK、认证、心跳、客户端模型响应和接入限流仍留在 user_interface；路由 `finally` 统一调用 `StageManager.disconnect`，保留期内重连复用同一 Stage/context/interaction。首次登录由 `UserInterface.login/auto_login` 直接调用 `StageManager.record_login(user_id, character_id, elapsed_from_last_login=None)`，回访登录继续使用旧 `chat_session_manager.on_user_login`，未恢复 `RETURN_LOGIN`。
+- interface spec：[`adapter`](../../项目说明/项目架构与接口（spec）/接口文档/adapter/README.md)、[`stage`](../../项目说明/项目架构与接口（spec）/接口文档/stage/README.md)、[`system`](../../项目说明/项目架构与接口（spec）/接口文档/system/README.md)。
+- 验证及结果：`tests/adapter/test_production_stage_wiring.py` 从生产路由证明连接、事件转刺激、Agent 输出回包、断线后重连复用同一 interaction；`tests/system/test_login_stage_routing.py` 证明两种认证入口仅迁移首次登录、回访登录保持兼容路径。`conda run -n agent python -m pytest tests/stage tests/adapter tests/system tests/agent_runtime -q` 为 **71 passed、1 个既有 Starlette/httpx 弃用警告**；新增测试 Ruff、触及生产文件排除其既有全文件告警后的 Ruff、compileall 与 `git diff --check` 通过。LSP 因工具工作区固定在主 checkout，拒绝诊断隔离 worktree 路径。
+- 集成注意：本基线的 `try_accept_stimulus_event` 与 `receive_event` 为同步接口。若 slice-09 PR #155 先合入 `refactor/agent`，本分支 rebase 后必须把生产调用点适配为 `await ...`，并重新运行 adapter↔Stage 生产集成测试。
+- 未验证范围：未连接真实客户端、生产数据库、LLM、TTS 或外部网络；聊天文本 handler 的真实认知与落库属于后续切片，不由本接线事实宣称完成。
+
 ### 2026-09-14 触摸预制反应与独立表情恢复（#74）
 
 - 交付行为：新增公开 `RestoreExpression` Action 及生产 action handler；触摸 handler 先按旧区域别名和 10/30 秒频率策略准入（**默认**上限 8/16 次，区域集合与两个上限可由角色配置 `reflex.touch.fast_reply.policy` 覆盖），再包装旧 `TouchFastReplyBuilder` 的概率、manifest 随机音频和表情映射，成功时依次交付瞬时预制音频 SAY 与独立 `normal` 恢复计划。未知区域、频率超限、资源缺失、读取失败或快速分支未命中均返回非重试 `FAILED`、记录错误并丢弃，不走普通话题或 LLM 兜底。
