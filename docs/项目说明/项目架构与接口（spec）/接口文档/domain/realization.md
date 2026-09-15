@@ -97,6 +97,8 @@ PublishDynamic 的 `source` 同时携带当前动态页面使用的来源信息�
 
 `PublishDynamic` 已有生产 action handler：经共享动态技能按来源身份幂等落库，成功时报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<dynamic_id>)`；发布失败返回 `DEPENDENCY_UNAVAILABLE` 且不声称已提交效果。它只提交持久效果，不投递聊天输出（world 链路没有实时输出通道）。
 `RequestSongLearning` 已有生产 action handler：经共享技能把歌曲加入唱歌能力的愿望清单（`add_wished_song` 自身按歌名去重），成功报告 `EffectRef(kind=SONG_LEARNING_JOB, effect_id=<歌曲标识>)`，重复请求返回 `ALREADY_COMPLETED`；能力不可用返回 `DEPENDENCY_UNAVAILABLE`。派发不等待完整学习流程。
+
+`ReplyDynamic` 已有生产 action handler：经共享动态技能按目标身份发布评论（`parent_comment_id=None` 表示回复原帖），成功报告 `EffectRef(kind=DYNAMIC_COMMENT, effect_id=<评论标识>)`；发布失败返回 `DEPENDENCY_UNAVAILABLE` 且不声称已提交效果。它只提交持久效果，不投递聊天输出。
 ReplyDynamic 使用 execution/action 标识关联本次执行，不增加平行的任意 dedup_key；Agent 不提供重投去重。
 RequestSongLearning 的执行结果通过 EffectRef 返回实际任务身份；提交 Action 本身不表示歌曲已经学会。
 

@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-15 动态回复与记忆、业务状态结算（#83）
+
+- 交付行为：`DynamicInteractionTask` 删除 `CharacterRuntime` 依赖、模型可用性检查与内容生成；保留 600s 调度、待回复/待记忆目标的批量上限（10/20 与 10/20）、`dynamic_store` 的 reply/memory 状态列、来源唯一性防重复；**同时待回复又待记忆的同一目标一轮只投递一条** `DynamicObserved`（结构化线程 + 线程消息数作为该动态的单调修订号），回复与记忆共享同一条事实。状态只由 N1 结算写入：`replied` 仅在实际提交 `DYNAMIC_COMMENT` 效果时写，`ignored` 表示 Agent 明确不回复（含线程中已存在角色回复），`failed` 来自处理/执行失败，`written` 表示 Agent 已完成记忆方面处理；未结算保持 `pending`，投递被拒只记录不重试。
+- Agent 侧：新增 `DynamicObservedHandler`（先独立提交记忆再读线程决定回复/忽略，线程重复回复防护，模型不可用明确失败）、`DynamicReplySkill`（按结构化线程还原生成视图、复用既有 `replier` 生成、按目标身份发布评论）、`DynamicTopicMemorySkill`（记忆写入 + 记忆轨迹事件，与回复解耦）、`ReplyDynamicHandler`（成功 `EffectRef(DYNAMIC_COMMENT, <评论 id>)`，失败 `DEPENDENCY_UNAVAILABLE` 不声称已提交）；`AgentRuntime` 注册 `DYNAMIC_OBSERVED` 与 `REPLY_DYNAMIC`，`WorldRuntime` 把结算路由交给动态互动任务。
+- interface spec：`接口文档/world/README.md` 新增「动态互动」条；`接口文档/agent/README.md` 记录 `DYNAMIC_OBSERVED` 分支；`接口文档/domain/realization.md` 记录 `ReplyDynamic` 已有生产 handler。
+- 验证及结果：`conda run -n agent python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` → **868 passed、2 skipped**（本分支基线 856 → +12；2 skip 为既有真实网络探测）。world 侧改写为选择/上限/事实形状/未结算保持 pending/结算驱动回写/显式忽略/失败双方面/记忆方面单列共 6 项；新增 `tests/agent/test_dynamic_interaction.py` 7 项（原帖回复计划与评论效果、评论明确忽略、评论回复父节点与归属、线程已有角色回复不重复发布、模型不可用明确失败但记忆照常、记忆失败不阻塞回复、发布失败不声称效果）。
+- 未验证范围与已知收窄：回复生成输入来自事实的结构化线程（原帖正文、有序评论与作者显示名）与角色上下文，**不再包含 world 侧的 `user_description`／`preferences` 等用户画像富化**——这些是世界侧存储富化，Agent 侧无既有公开读取路径；记忆列 `written` 表示 Agent 已完成记忆方面处理，记忆内部「抽取为空」与「写入异常」不再由 world 细分（异常在 Agent 侧记录与轨迹中可见）。以上两点需 owner 裁决是否补一个能力层读取接口或扩展结算载体，本切片不擅自扩大公开接口。本切片不含日记（25）。
+
 ### 2026-09-15 学歌派发、完成事实与学会后行为迁移（#82）
 
 - 交付行为：`LearnSingSongsTask` 去掉 `CharacterRuntime` 依赖与动态发布，只保留凭据检查与刷新、愿望清单状态、下载/清理/模型处理、工件校验、媒体库刷新、情绪标签、通知文件、`new_song` 事件与 `already learned` 去重；`run_once` 改为 async，**只有工件验证通过**的新学会歌曲逐首投递 `SongLearned`（`learning_job_id`=`角色:本次任务时刻`、`song_id`=统一歌名、`completed_at` 带时区），结果改报 `submitted_count`。Agent 侧新增 `SongLearnedHandler`（先写角色经验再交付 `PublishDynamic` 计划）、`LearnedSongExperienceSkill`（经验写入角色自身事件记忆，作用域为角色 ID；同日同内容由既有事件记忆去重保证幂等；写入失败只记录、不回滚学会事实）、`SongLearningDispatchSkill`（愿望清单派发 + 唱段/歌词材料读取）与 `RequestSongLearningHandler`（成功 `EffectRef(SONG_LEARNING_JOB, ...)`，重复请求 `ALREADY_COMPLETED`，能力缺失 `DEPENDENCY_UNAVAILABLE`，不等待完整学习）。

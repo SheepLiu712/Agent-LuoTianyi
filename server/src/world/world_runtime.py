@@ -84,7 +84,9 @@ class WorldRuntime:
         self.bili_event_update_task = self.bili_event_update_tasks[0] if self.bili_event_update_tasks else None
         self.dynamic_interaction_task = (
             DynamicInteractionTask(
-                self._character_task_config("dynamic_interaction", self._default_character_id())
+                self._character_task_config("dynamic_interaction", self._default_character_id()),
+                character_id=self._default_character_id(),
+                settlements=self.settlements,
             )
             if self._task_enabled("dynamic_interaction")
             else None
