@@ -117,7 +117,7 @@ async def chat_ws(websocket: WebSocket):
 
     logger.info("WebSocket client connected to /chat_ws")
     websocket_service = system_runtime.websocket_service  # WebSocketService 实例
-    gcsm = system_runtime.gcsm  # 全局聊天流管理器实例
+    stage_manager = getattr(system_runtime, "stage_manager", None)
     try:
         await websocket_service.send_system_ready_event(websocket)
     except WebSocketDisconnect:
@@ -132,9 +132,10 @@ async def chat_ws(websocket: WebSocket):
         )
         if not authenticated:
             return
-        chat_stream = await gcsm.get_or_register_chat_stream(
-            ws_connection, system_runtime=system_runtime
-        )  # 根据ws连接获取对应的聊天流实例，内部会根据用户UUID进行管理
+        if stage_manager is None:
+            raise RuntimeError("StageManager is required for production chat connections")
+        character_id = system_runtime.agent_runtime.default_character_id
+        await stage_manager.connect(ws_connection, character_id)
         while True:
             event = await websocket_service.try_recv_client_msg(ws_connection)
             if event is None:
@@ -167,10 +168,10 @@ async def chat_ws(websocket: WebSocket):
                         ws_connection.client_mode = {"types": [raw_types.strip()]}
 
             if websocket_service.is_chat_related_event(event):
-                acceptance = websocket_service.try_accept_chat_event(
+                acceptance = await websocket_service.try_accept_stimulus_event(
                     ws_connection,
                     event,
-                    chat_stream,
+                    adapter=system_runtime.chat_adapter,
                 )
                 if acceptance == ChatEventAcceptance.DUPLICATE:
                     await websocket_service.send_duplicate_ack_event(ws_connection, event)
@@ -204,15 +205,14 @@ async def chat_ws(websocket: WebSocket):
                     continue
                 await websocket_service.send_ack_event(ws_connection, event)
     except WebSocketDisconnect:
-        gcsm.ws_lost_connection(ws_connection)
         system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
         logger.info("WebSocket client disconnected from /chat_ws")
     except Exception as e:
-        gcsm.ws_lost_connection(ws_connection)
         system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
         logger.error(f"Error in /chat_ws: {e}")
     finally:
-        ws_connection.mark_disconnected()
+        if stage_manager is not None:
+            await stage_manager.disconnect(ws_connection)
 
 
 @app.get("/auth/public_key")

@@ -1,20 +1,21 @@
 from __future__ import annotations
 
-from typing import Any,  List, Callable, Dict, Optional, TYPE_CHECKING
-from datetime import datetime
 import json
+from collections.abc import Callable
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
 
-from src.utils.logger import get_logger
-from src.utils.llm_service import LLMModule, LLMService
+from src.domain import MemoryUpdateCommand
+from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.system.database.redis_buffer import RedisBuffer
 from src.system.database.sql_database import (
     AgentMemoryRecord,
     MemoryChunkRecord,
     MemoryUpdateRecord,
 )
-from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
-from src.domain import MemoryUpdateCommand
 from src.system.database.sql_writer import run_sql_write
+from src.utils.llm_service import LLMService
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -25,11 +26,11 @@ class MemoryStore:
     """
 
     def __init__(
-        self, 
-        config: Dict[str, Any], 
-        sql_session_factory: Callable[[], Any], 
+        self,
+        config: dict[str, Any],
+        sql_session_factory: Callable[[], Any],
         redis_buffer: RedisBuffer,
-        llm_module: Optional[Any] = None
+        llm_module: Any | None = None
     ):
         self.config = config
         self.logger = get_logger(__name__)
@@ -78,7 +79,7 @@ class MemoryStore:
                 record = MemoryUpdateRecord(
                     user_id=user_id,
                     update_command=json.dumps(cmd_to_dict, ensure_ascii=False),
-                    created_at=datetime.now(),
+                    created_at=datetime.now(),  # noqa: DTZ005 - 既有 SQLite schema 使用本地 naive 时间。
                 )
                 db.add(record)
                 if commit:
@@ -97,6 +98,7 @@ class MemoryStore:
         except Exception as e:
             self.logger.error(f"write_memory_update error: {e}")
             db.rollback()
+            raise
         finally:
             db.close()
 
@@ -104,12 +106,12 @@ class MemoryStore:
         self,
         memory_record: DomainMemoryRecord,
         *,
-        chunk_texts: Optional[List[str]] = None,
-        embedding_ids: Optional[List[str]] = None,
+        chunk_texts: list[str] | None = None,
+        embedding_ids: list[str] | None = None,
         commit: bool = True,
     ) -> str:
         """持久化一条规范的记忆记录及其可选的向量 chunk。"""
-        chunk_texts = chunk_texts or [memory_record.content]
+        chunk_texts = [memory_record.content] if chunk_texts is None else chunk_texts
         embedding_ids = embedding_ids or []
 
         db = self._new_session()
@@ -150,14 +152,79 @@ class MemoryStore:
                 return row.id
 
             return run_sql_write(_write)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - 旧公开 API 以空字符串表示正本写入失败。
             self.logger.error(f"write_agent_memory_record error: {e}")
             db.rollback()
             return ""
         finally:
             db.close()
 
-    def get_agent_memory_record(self, memory_record_id: str) -> Optional[DomainMemoryRecord]:
+    def link_agent_memory_embeddings(
+        self,
+        memory_record_id: str,
+        *,
+        chunk_texts: list[str] | None = None,
+        embedding_ids: list[str] | None = None,
+        commit: bool = True,
+    ) -> None:
+        """为已提交的规范记忆补写向量 chunk 投影。"""
+        chunk_texts = chunk_texts or []
+        embedding_ids = embedding_ids or []
+        db = self._new_session()
+        try:
+            def _write() -> None:
+                for index, chunk_text in enumerate(chunk_texts):
+                    text = (chunk_text or "").strip()
+                    if not text:
+                        continue
+                    db.add(MemoryChunkRecord(
+                        memory_record_id=memory_record_id,
+                        chunk_text=text,
+                        chunk_type="content",
+                        embedding_id=embedding_ids[index] if index < len(embedding_ids) else None,
+                    ))
+                if commit:
+                    db.commit()
+
+            run_sql_write(_write)
+        except Exception as e:
+            self.logger.error(f"link_agent_memory_embeddings error: {e}")
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def delete_agent_memory_record(self, memory_record_id: str, *, commit: bool = True) -> None:
+        """删除一条规范记忆及其 chunk，用于投影失败补偿。"""
+        db = self._new_session()
+        try:
+            def _write() -> None:
+                row = db.query(AgentMemoryRecord).filter(AgentMemoryRecord.id == memory_record_id).first()
+                if row is not None:
+                    db.delete(row)
+                if commit:
+                    db.commit()
+
+            run_sql_write(_write)
+        except Exception as e:
+            self.logger.error(f"delete_agent_memory_record error: {e}")
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def agent_memory_record_has_embeddings(self, memory_record_id: str) -> bool:
+        """检查规范记忆是否已链接至少一个向量投影。"""
+        db = self._new_session()
+        try:
+            return db.query(MemoryChunkRecord).filter(
+                MemoryChunkRecord.memory_record_id == memory_record_id,
+                MemoryChunkRecord.embedding_id.isnot(None),
+            ).first() is not None
+        finally:
+            db.close()
+
+    def get_agent_memory_record(self, memory_record_id: str) -> DomainMemoryRecord | None:
         """根据 ID 读取一条记忆记录。"""
         db = self._new_session()
         try:
@@ -169,7 +236,7 @@ class MemoryStore:
         finally:
             db.close()
 
-    def get_agent_memory_record_by_embedding_id(self, embedding_id: str) -> Optional[DomainMemoryRecord]:
+    def get_agent_memory_record_by_embedding_id(self, embedding_id: str) -> DomainMemoryRecord | None:
         """根据向量索引 embedding_id 反查规范记忆记录。"""
         db = self._new_session()
         try:
@@ -182,8 +249,8 @@ class MemoryStore:
 
     def get_agent_memory_records_by_embedding_ids(
         self,
-        embedding_ids: List[str],
-    ) -> Dict[str, DomainMemoryRecord]:
+        embedding_ids: list[str],
+    ) -> dict[str, DomainMemoryRecord]:
         """批量根据向量索引 ID 反查规范记忆记录。
 
         返回值以 embedding_id 为键，避免记忆层为了每个向量命中反复打开
@@ -227,7 +294,7 @@ class MemoryStore:
 
         try:
             metadata = json.loads(row.meta_data or "{}")
-        except Exception:
+        except json.JSONDecodeError:
             metadata = {}
 
         return DomainMemoryRecord(
@@ -248,7 +315,7 @@ class MemoryStore:
             metadata=metadata,
         )
 
-    def _load_recent_memory_updates(self, user_id: str) -> List[Dict[str, Any]]:
+    def _load_recent_memory_updates(self, user_id: str) -> list[dict[str, Any]]:
         db = self._new_session()
         try:
             rows = (
@@ -265,7 +332,7 @@ class MemoryStore:
         finally:
             db.close()
 
-    def get_recent_memory_update_from_buffer(self, user_id: str) -> List[MemoryUpdateCommand]:
+    def get_recent_memory_update_from_buffer(self, user_id: str) -> list[MemoryUpdateCommand]:
         """从 Redis 获取最近记忆更新列表。"""
         redis = self._ensure_redis()
         redis_key = f"user_recent_memory_update:{user_id}"
