@@ -14,6 +14,7 @@ from src.agent.handlers.stimulus.chat import (
     ChatReplyHandler,
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
+from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.handlers.stimulus.world_activity import (
     WORLD_ACTIVITY_STIMULUS_KINDS,
@@ -83,6 +84,9 @@ class AgentRuntime:
         self.vector_store = self._initialize_vector_store(self.config["agent"])
         try:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
+            first_login_names = self._first_login_prepared_names(
+                self.config.get("proactive", {})
+            )
             self.skills = Skills(self.config.get("skills", {}), llm_service,
                                  tts_engine=AsyncTTS(capability_manager.speech),
                                  preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
@@ -133,6 +137,10 @@ class AgentRuntime:
                     character_id=character_id,
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+                        (StimulusKind.PROACTIVE_PROMPT_DUE, FirstLoginHandler(
+                            prepared_names=first_login_names,
+                            prepared_speech=self.prepared_speech,
+                        )),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
                             self.skills.get(ResponseCompositionSkill),
                             self.skills.get(TextPreprocessingSkill),
@@ -454,6 +462,29 @@ class AgentRuntime:
                 capability_manager=capability_manager,
             )
         return character_runtimes
+
+    @staticmethod
+    def _first_login_prepared_names(config: dict[str, Any]) -> tuple[str, ...]:
+        """读取 proactive.first_login.prepared_names；配置存在时要求恰好两项。"""
+        if not isinstance(config, dict):
+            raise TypeError("proactive must be a dictionary")
+        first_login = config.get("first_login")
+        if first_login is None:
+            return ()
+        if not isinstance(first_login, dict):
+            raise TypeError("proactive.first_login must be a dictionary")
+        names = first_login.get("prepared_names")
+        if not isinstance(names, list):
+            raise TypeError("proactive.first_login.prepared_names must be a list")
+        if (
+            len(names) != 2
+            or any(not isinstance(name, str) or not name.strip() for name in names)
+            or len(set(names)) != len(names)
+        ):
+            raise ValueError(
+                "proactive.first_login.prepared_names must contain two unique nonblank names"
+            )
+        return tuple(names)
 
     @staticmethod
     def _initialize_vector_store(agent_config: dict[str, Any]) -> Any:

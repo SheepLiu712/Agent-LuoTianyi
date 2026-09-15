@@ -36,6 +36,15 @@
 - `get_system_runtime() -> SystemRuntime`：未初始化时抛出异常。
 - `get_system_runtime_optional() -> SystemRuntime | None`：允许未初始化。
 
+## 首次登录欢迎配置
+
+- `agent_runtime.prepared_speech.manifest`：现有预制语音清单路径。清单条目以名称提供 `audio_path`、`text` 和 `expression`；首次欢迎使用同条目的文字与音频引用，但表达固定为 `normal`，不采用 manifest 的 expression。
+- `agent_runtime.proactive.first_login.prepared_names`：按发送顺序配置恰好两个预制语音名称，例如 `["first_greet_1", "first_greet_2"]`。`AgentRuntime` 解析该列表并注入首次登录 handler；handler 不读取文件系统。
+- 首次登录的 Stage/Agent 接口使用 `ProactivePromptDue(reason=ProactiveReason("first_login"))`：调用方通过 `StageManager.record_login(user_id, character_id, ...)` 按 `(user_id, character_id)` 记录一次事实，每个已启用角色各消费一次；对应 ChatStage 完成连接绑定后开始约 1 秒同步窗口，再进入真实 `handle_stimulus` 链路。handle 容量已满时保留 pending 并延后重试，不越过 `max_stimuli` 也不丢弃。生产认证与 WebSocket 接线由 #66 负责，本切片不修改 `server_main`、`UserInterface` 或 `SystemRuntime` 的生产入口。
+- 每个名称独立形成一个 `Say(prepared_audio_ref=MediaRef(name), expression="normal", delivery=CONVERSATION)` 计划，显示文字取 manifest，并以 `source=agent` 追加到交互对话。名称缺失时该条返回稳定失败并记录错误，不静默跳过。
+- `RETURN_LOGIN` 久别问候仍保持关闭；非首次登录不会由本配置触发欢迎。
+- 迁移期间旧生产链仍读取 `chat_session_manager.proactive_topic_maker.activity_res.first_login` 的 `manifest` 与 `resource_names`；该旧配置与新 `agent_runtime.proactive.first_login.prepared_names` 并存，直到 #66 切换生产接线后再处理旧入口收缩。
+
 ## 管理运行时
 
 ### `AdminShell`
@@ -91,7 +100,7 @@ FastAPI lifespan 启动时调用 `SystemRuntime.initialize(config)`，之后路�
 }
 ```
 
-- 文案与表情取自 manifest 中该名称的 `PreparedSpeech.text/expression`，避免文案与音频不一致；
+- 文案取自 manifest 中该名称的 `PreparedSpeech.text`，表情固定为 `normal`；
 - 名称不在 manifest → 该条失败并记录，不静默跳过；
 - `RETURN_LOGIN`（久别问候）保持关闭的开关位置待定。
 

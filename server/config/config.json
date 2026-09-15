@@ -308,6 +308,14 @@
         "prepared_speech": {
             "manifest": "res/agent/prepared_speech/manifest.json"
         },
+        "proactive": {
+            "first_login": {
+                "prepared_names": [
+                    "first_greet_1",
+                    "first_greet_2"
+                ]
+            }
+        },
         "reply_composition": {
             "slow_recall": {
                 "provisional_after_seconds": 1.5,
