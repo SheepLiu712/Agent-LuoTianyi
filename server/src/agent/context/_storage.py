@@ -62,7 +62,10 @@ class _Storage:
         data = self.database.get_conversation_context_state(
             self.identity.user_id, character_id=self.identity.character_id,
         )
-        entries = tuple(_decode_entry(item) for item in data["conversations"])
+        entries = tuple(sorted(
+            (_decode_entry(item) for item in data["conversations"]),
+            key=lambda entry: entry.timestamp,
+        ))
         return ConversationSnapshot(ConversationSummary(data["summary"]), entries), data["context_count"]
 
     def append(self, entries: tuple[ConversationEntry, ...]) -> None:
@@ -90,14 +93,14 @@ def _decode_entry(item: dict) -> ConversationEntry:
         content = TextContent(text, tuple(data.get("terms") or ()))
     elif kind == "image":
         content = ImageContent(text, data.get("image_client_path"), data.get("image_server_path"),
-                               data.get("mime_type"), tuple(data.get("terms") or ()))
+                               data.get("mime_type"), tuple(data.get("terms") or ()), data.get("media_id"))
     elif kind == "audio":
         content = AudioContent(text)
     elif kind == "sing":
         content = SongContent(text, data["song"], data.get("segment"))
     else:
         raise ValueError(f"不支持的历史对话类型：{kind}")
-    return ConversationEntry(item["uuid"], datetime.strptime(item["timestamp"], "%Y-%m-%d %H:%M:%S"),
+    return ConversationEntry(item["uuid"], datetime.fromisoformat(item["timestamp"]),
                              item["source"], content)
 
 
@@ -106,5 +109,5 @@ def _encode_entry(entry: ConversationEntry) -> ConversationItem:
     kinds = {TextContent: "text", ImageContent: "image", AudioContent: "audio", SongContent: "sing"}
     data = asdict(content)
     text = data.pop("text")
-    return ConversationItem(entry.entry_id, entry.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                            entry.source, kinds[type(content)], text, data or None)
+    return ConversationItem(entry.entry_id, entry.timestamp.isoformat(sep=" ", timespec="microseconds"),
+                             entry.source, kinds[type(content)], text, data or None)

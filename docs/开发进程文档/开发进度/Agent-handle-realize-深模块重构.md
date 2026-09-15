@@ -15,6 +15,12 @@
 - interface spec：`接口文档/world/README.md` 新增「世界事实投递（21–25 迁移中）」记录 citywalk 事实字段与回写口径；`接口文档/agent/README.md` 记录观察分支与 `PUBLISH_DYNAMIC` 处理器行为；`接口文档/domain/realization.md` 记录 `PublishDynamic` 已有生产 handler 与效果引用。
 - 验证及结果：`conda run -n agent python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` → **846 passed、2 skipped**（本分支基线 837 → +9；2 skip 为既有真实网络探测）。新增 `tests/agent/test_citywalk_observation.py` 6 项（分支交付 PublishDynamic、生成失败不交付计划、按类别分派、发布成功/失败/取消三类结算）与 world 侧 citywalk 用例改写（事实字段、被拒丢弃、回执回写报告、摘要回落、无 `character_runtime`）；`tests/world/test_world_task_dynamics.py` 的 citywalk 端到端用例改为 world→Agent→真实动态落库并断言来源身份与回写。新增文件 Ruff 通过；`citywalk/task.py` 保留既有 `BLE001`/`DTZ005` 风格项。
 - 未验证范围：真实高德地图、报告生成模型与动态文案模型的端到端效果仍按运行环境条件人工验收；本切片不含学歌（23）、动态互动（24）与日记（25）。
+### 2026-09-15 VCPedia 候选知识接纳迁移（#81）
+
+- 交付行为：VCPedia 任务改为只做抓取、字段规范化、来源检查与来源去重，产出强类型 `SongKnowledgeDiscovered`（来源 `vcpedia`、外部歌曲标识、由规范化内容派生的修订号、供应商无关的 `SongKnowledgeCandidate`），逐条经长期 `WorldStage` 的 `WorldFactSink.submit(...)` 投递；world 不再写入歌曲知识或关键词索引。Agent 侧新增 `SongKnowledgeHandler` 与共享技能 `SongKnowledgeAcceptanceSkill`：按名称/safe name 幂等接纳，知识与关键词索引在同一幂等边界内写入（关键词写入失败回滚知识行），不产生任何 ActionPlan 或外部效果；`already learned`/候选不等于学歌请求的语义保持不变。
+- interface spec：`接口文档/world/README.md` 新增「世界事实投递（21–25 迁移中）」记录投递事实与统计口径；`接口文档/agent/README.md` 记录接纳处理器与技能的归属与幂等边界。统计口径按实施规格 N3 裁决改为 `discovered`/`skipped_existing`/`fetch_failed` 与 `submitted`/`rejected`，不再声称 `added`。
+- 验证及结果：`conda run -n agent python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` → **840 passed、2 skipped**。新增 9 项 agent 侧用例（幂等写入与关键词可查、二次接纳跳过且不重复、关键词失败回滚知识、处理器四类结算与非法刺激拒绝、空白介绍由领域类型拒绝）与 2 项 world 侧用例（候选投递为世界事实、收集阶段不写入任何知识）；既有 world 任务用例改写为新统计口径。新增与改动文件 Ruff 通过。
+- 未验证范围：真实 VCPedia 抓取、反爬兜底与 LLM 结构化仍依赖运行环境的 `activated`/网络条件，按既有真实探测口径验收；本切片不含 citywalk/学歌/动态/日记迁移（21/23/24/25）与执行结算端口（N1）。
 
 ### 2026-09-15 世界侧结算端口（21/24/25 共同前置）
 
@@ -23,12 +29,165 @@
 - 验证及结果：在 `server` 使用 `conda run -n agent python -m pytest tests/stage tests/world tests/agent tests/agent_runtime tests/domain tests/system tests/adapter -q` → **837 passed、2 skipped**（2 skip 为既有真实网络探测）；新增 `tests/stage/test_world_settlement_wiring.py` 8 项用例，覆盖无计划结算即撤销登记、失败不消费、多计划按序结算与最后撤销、未匹配计数、订阅者异常隔离、非法/重复登记与幂等 discard，以及真 `WorldStage` 装配下处理结算与执行结算（含 `EffectRef`）到达订阅者。新增文件 Ruff 通过，`git diff --check` 干净。
 - 未验证范围：本切片只是端口与装配，不含任何 world 任务的迁移（21/23/24/25 消费该端口）；`DiaryPlanningDue` 目标用户字段（N2）与 24 的 ignore 语义落地仍在各自切片内验证。
 
+### 2026-09-15 生产聊天连接接入 Stage（#66）
+
+- 交付行为：生产 `/chat_ws` 在认证后用默认角色调用 `StageManager.connect`，聊天业务事件经同步 `WebSocketService.try_accept_stimulus_event` 和共享 `WebSocketAdapter` 转为领域 Stimulus 投递给 ChatStage，ACK/NACK、认证、心跳、客户端模型响应和接入限流仍留在 user_interface；路由 `finally` 统一调用 `StageManager.disconnect`，保留期内重连复用同一 Stage/context/interaction。首次登录由 `UserInterface.login/auto_login` 直接调用 `StageManager.record_login(user_id, character_id, elapsed_from_last_login=None)`，回访登录继续使用旧 `chat_session_manager.on_user_login`，未恢复 `RETURN_LOGIN`。
+- interface spec：[`adapter`](../../项目说明/项目架构与接口（spec）/接口文档/adapter/README.md)、[`stage`](../../项目说明/项目架构与接口（spec）/接口文档/stage/README.md)、[`system`](../../项目说明/项目架构与接口（spec）/接口文档/system/README.md)。
+- 验证及结果：`tests/adapter/test_production_stage_wiring.py` 从生产路由证明连接、事件转刺激、Agent 输出回包、断线后重连复用同一 interaction；`tests/system/test_login_stage_routing.py` 证明两种认证入口仅迁移首次登录、回访登录保持兼容路径。`conda run -n agent python -m pytest tests/stage tests/adapter tests/system tests/agent_runtime -q` 为 **71 passed、1 个既有 Starlette/httpx 弃用警告**；新增测试 Ruff、触及生产文件排除其既有全文件告警后的 Ruff、compileall 与 `git diff --check` 通过。LSP 因工具工作区固定在主 checkout，拒绝诊断隔离 worktree 路径。
+- 集成注意：本基线的 `try_accept_stimulus_event` 与 `receive_event` 为同步接口。若 slice-09 PR #155 先合入 `refactor/agent`，本分支 rebase 后必须把生产调用点适配为 `await ...`，并重新运行 adapter↔Stage 生产集成测试。
+- 未验证范围：未连接真实客户端、生产数据库、LLM、TTS 或外部网络；聊天文本 handler 的真实认知与落库属于后续切片，不由本接线事实宣称完成。
+
+### 2026-09-14 触摸预制反应与独立表情恢复（#74）
+
+- 交付行为：新增公开 `RestoreExpression` Action 及生产 action handler；触摸 handler 先按旧区域别名和 10/30 秒频率策略准入（**默认**上限 8/16 次，区域集合与两个上限可由角色配置 `reflex.touch.fast_reply.policy` 覆盖），再包装旧 `TouchFastReplyBuilder` 的概率、manifest 随机音频和表情映射，成功时依次交付瞬时预制音频 SAY 与独立 `normal` 恢复计划。未知区域、频率超限、资源缺失、读取失败或快速分支未命中均返回非重试 `FAILED`、记录错误并丢弃，不走普通话题或 LLM 兜底。
+- 生产接入：`TOUCH_INTERACTION` 从聊天预处理注册移出并绑定专用 handler；`RESTORE_EXPRESSION` 加入领域导出、计划白名单与生产 ActionRouter。触摸资源必须由 manifest 登记，使 MediaRef 可由 PreparedSpeechResources 解析；恢复 handler 在表情后提交正常消息终包，Stage/adapter 不检查 Action 类型且无专用分帧参数。
+- 验证及结果：server 下运行 `conda run -n agent python -m pytest tests/domain tests/agent tests/stage -q`，审查修复后结果 **684 passed、1 warning（32.28s）**；warning 为既有 `test_handle_input_contract.py` 使用 zip 参数化的 PytestRemovedIn10Warning。
+- 未验证范围：未运行完整 Server、真实客户端播放确认、生产资源目录、真实 LLM/TTS/GPU 或外部服务；本切片不删除仍供旧生产入口使用的 `try_handle_reflex`，只保证新触摸路径不调用该旁路。
+- 复审修复（2026-09-15）：把触摸准入策略从写死常量改为**配置驱动**——新增角色配置 `reflex.touch.fast_reply.policy`（`allowed_regions` / `max_touches_10s` / `max_touches_30s`，缺省即旧值），由 `AgentRuntime` 在构造阶段校验（类型问题 `TypeError`、取值问题 `ValueError`）；频率窗口本身仍由领域 `TouchClickFrequency` 固定，故不提供窗口配置。验证：`conda run -n agent python -m pytest tests/domain tests/agent tests/stage -q` → **694 passed**；推迟文件 `tests/test_agent_reflex.py -q --noconftest` 与基座一致（1 passed）；本切片 own 文件 `ruff check` 通过，`agent_runtime.py` 余项均为既有基线。
+### 2026-09-15 首次登录欢迎评审修正（#75）
+
+- 修正事实：首次欢迎的两条 `Say` 表情固定为 `normal`，不再采用 manifest expression；登录 pending 按 `(user_id, character_id)` 幂等记录，使同一首次登录的每个目标角色各接收一次且重连不重放；首次登录到期时若 handle 数达到 `max_stimuli`，保留 pending 并延后重试，不超量启动或静默丢弃。
+- 边界保持：Stage 仍只负责就绪、计时、容量准入及投递 `ProactivePromptDue(first_login)`，欢迎文案、顺序、表达和持久化仍由 Agent handler 拥有；生产认证/WebSocket 接线继续留给 #66，`RETURN_LOGIN` 继续关闭，旧 `activity_res.first_login` 配置保持不变。
+- 验证及结果：server 下运行 `conda run -n agent python -m pytest tests/stage tests/agent tests/system tests/adapter -q` 为 **263 passed、1 个既有 Starlette/httpx 弃用警告**；触及文件 Ruff 与 compileall 通过，`git diff --check` 通过。LSP 因工具工作区固定在主 checkout，拒绝诊断隔离 worktree 路径。
+
+### 2026-09-14 首次登录欢迎接入真实 handler（#75）
+
+- 交付行为：本切片在 Stage/Agent 边界提供首次登录接收 seam：调用方用 `StageManager.record_login(user_id, character_id, ...)` 按角色记录事实，同一登录为每个启用角色各保留一个幂等 marker；ChatStage 完成连接绑定后开始约 1 秒同步窗口，以 `ProactivePromptDue(reason=first_login)` 调用真实 `handle_stimulus`。到期时 handle 容量已满则保留 pending 并延后重试，不突破 `max_stimuli`。`FirstLoginHandler` 按 `agent_runtime.proactive.first_login.prepared_names` 顺序从共享 `PreparedSpeechResources` 取得同源文字与受控音频引用，逐条持久化 `source=agent` 对话并各交付一个 expression 固定为 `normal` 的 CONVERSATION Say 计划；Say realization 产出完整音频和 message-end final package。缺失名称返回依赖失败并记录名称；`RETURN_LOGIN` 仍关闭。
+- 配置与范围：使用现有 `agent_runtime.prepared_speech.manifest` 加 `agent_runtime.proactive.first_login.prepared_names`。生产接线（`server_main`、`UserInterface`、`SystemRuntime.record_user_login`）明确留给 #66，本切片不接管认证/WebSocket 生产入口；旧 `chat_session_manager.proactive_topic_maker.activity_res.first_login` 配置和读取器继续保留并服务当前生产链。也不包含到期事件提醒、周期 claim、WorldStage、MediaResolver 或触摸动作。
+- 验证及结果：server 下运行 `conda run -n agent python -m pytest tests/stage tests/agent -q` 为 **237 passed**；`conda run -n agent python -m pytest tests/system tests/adapter -q` 为 **24 passed、1 个既有 Starlette/httpx 弃用警告**。相关 Python 文件 compileall 通过；LSP 因工具工作区固定在主 checkout，拒绝诊断隔离 worktree 路径，已记录为未验证项。
+- 未验证范围：未连接真实生产数据库或客户端播放器；预制 WAV 通过临时真实文件和完整 Adapter/Stage/Agent/Say 链验证，未执行外部 TTS、LLM 或网络调用。
 ### 2026-09-14 长期 WorldStage 与世界事实投递（#78）
 
 - 交付行为：新增按 `(character_id, world_id)` 长期复用的 WorldStage 与异步 `WorldFactSink`；Stage 持有 interaction/pending/cancellation、按 ID 结算事实，以同一长期 worker 串行执行计划，并在无实时通道时由 `NoChannelOutputSink` 明确拒绝输出。AgentRuntime 注册世界/活动事实 Handler，SystemRuntime 显式拥有 registry、`get_agent` 与关闭顺序；未迁移现有 world task，也未改变 WorldClock。
 - interface spec：[`stage/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/stage/README.md) 已记录当前接口、revision 归属、作用域复用和关闭事实。
 - 验证及结果：在 `server` 使用 `conda run -n agent python -m pytest tests/stage tests/world -q`，142 passed、2 skipped；新增聚焦用例覆盖事实顺序、旧 interaction revision、同 worker 串行、无通道拒绝、关闭取消及 registry 复用/隔离。新增产品模块的 basedpyright error 级检查、聚焦 Ruff、compileall 与 `git diff --check` 通过。
 - 未验证范围：四个既有 world 任务仍走兼容链路，真实网络探测两项按现有标记跳过；本切片不包含每日规划、活动 scheduler、歌曲/动态/日记任务迁移或生产外部通道验收。
+### 2026-09-15 慢 Recall 的多计划回复策略（11b）GREEN
+
+- 交付行为：`ResponseCompositionSkill` 新增内部两段式入口 `compose_staged`，返回 `ComposedResponse(provisional, pending)`——召回超过配置阈值仍未返回时给出一条完整的临时草稿，正式草稿留待调用方 `await formal()`；`compose` 的既有一次性语义不变。`ChatReplyHandler` 据此在同一 handle 内先交付临时计划（ordinal 1，紧随 ordinal 0 的 `StartThinking`），再等待正式结果并交付正式计划（ordinal 2）。两份计划各自完整、可独立实现（均为可直接播放的 `Say`），`plan_id` 与行动标识彼此独立（临时 `-t{n}`、正式 `-r{n}`），正式计划不修改也不引用临时计划，且两者携带相同的 `basis_interaction_revision` 与 `source_stimulus_ids`。交付正式计划前重新检查 `request.cancellation` 与交互依据修订：已取消或修订推进则不交付，迟到的召回结果被丢弃。临时计划交付失败按既有失败停止语义处理，不再调用 sink、不生成正式结果、`retryable=False`，无重试或补偿。
+- 隔离与幂等：召回 future 全程留在本次 handle 内，不经公开接口回流，因此未新增 `RecallCompleted` 刺激或任何公开 Stimulus/Action，也不会递归进入处理器。召回命中经 `plans.context.recalled_memory` 按触发刺激 ID 归属写入 Stage 借出的 `InteractionContext`，由 Stage 在结算时按刺激清理；不存在 Agent 全局召回注册表，结果不跨用户或跨角色。`formal()` 可重复调用并返回同一结果，不重复生成。未引入 ledger、outbox 或自动重试。
+- interface spec：新增 [`慢召回两段式回复`](../../项目说明/项目架构与接口（spec）/接口文档/agent/slow-recall-reply.md)，记录内部 `ComposedResponse`/`ComposedReply`/`compose_staged` 契约、两段计划的交付顺序与取消语义；`plan-emitter.md` 补充「同一次调用内的多份计划」；`agent/README.md` 增加索引。新增配置事实 `agent_runtime.reply_composition.slow_recall.{provisional_after_seconds,provisional_text,provisional_sound_content,provisional_tone,provisional_expression}`，用户可见的临时文案只来自该配置，处理器与技能内无字面文案；配置经 `AgentRuntime` 读入后由 `Skills.reply_composition_config` 交给技能。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent tests/stage tests/domain -q` 为 702 passed；新增 `tests/agent/test_slow_recall_staged_reply.py`（8 passed，已登记 `_ACTIVE_TEST_FILES`），覆盖两份独立完整计划与连续序号、同一依据修订、召回按触发刺激归属、取消阻断正式计划并丢弃迟到结果、sink 失败停止且不重试、无 `RecallCompleted` 且不递归、配置驱动的临时文案及快召回/未配置时不产生临时草稿。延后文件以 `--noconftest` 与基线 worktree 对照，双方均为 39 passed，无新增失败。触及文件 `ruff check` 剩 6 项均为基线既有（`DTZ005`/`I001`），并顺带消除基线的一处 `UP035`；`git diff --check` 无输出。
+- 未验证范围：未运行真实 LLM、生产向量库/数据库、TTS/GPU、真机；生产聊天是否切换到新门面仍由既有迁移切片负责。
+
+### 2026-09-15 明确记忆请求与成功承诺边界（12）GREEN
+
+- 交付行为：cognitive 层的 `ExplicitMemoryIntentSkill` 按 `agent.memory.explicit_intent` 配置和旧默认短语逐条识别明确记忆请求；`ChatReplyHandler` 在同一 handle 内先等待内部 `IntentionalMemoryCommit` 通过既有 `MemoryWriter` 写入私有长期记忆，且返回非空规范记忆 `record_id` 后才经回复组合 seam 交付表示已记住的 `Say`。提交异常或空标识返回 `FAILED / INTERNAL_ERROR`，保留本批 pending、`retryable=False`，不交付成功承诺。
+- 隔离与幂等：提交始终使用 `plans.context.identity` 的非空 `character_id/user_id`；向量证据补充角色归属，向量命中必须反查到规范记忆正本才算已提交，孤儿向量不会触发成功承诺。同一输入重投在反查到既有正本时返回同一规范 `record_id` 且不新增记忆；批次中未命中显式记忆的文本继续进入普通回复主题。业务唯一性仍停留在既有存储边界的确定性正本 ID 和查重规则内，未引入 schema 级唯一约束，因此并发 check-then-insert 的残余竞态未在本切片扩展处理；未恢复 request/mutation ledger、outbox、自动重试、重复调用合并或新 Memory Action。
+- interface spec：新增内部 `ExplicitMemoryIntentSkill`、`IntentionalMemoryCommit` 与 `MemoryCommitRevision`；记忆仍是 Agent 内部状态变更，不进入 `ActionPlan`。`memory.explicit_intent.{enabled,phrases}` 从草案更新为当前配置事实。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`；见本切片提交验证记录。
+- 未验证范围：未运行真实 LLM、生产向量库/数据库、TTS/GPU、真机；生产聊天是否切换到新门面仍由既有迁移切片负责。
+
+### 2026-09-14 图片预处理落库与混合输入顺序（09）GREEN
+
+- 交付行为：新增 capabilities 侧 `MediaResolver` / `ResolvedMedia` 窄端口、永久 `PermanentMediaStore`、生产 `FilesystemMediaResolver` 和显式失败的未配置实现。WebSocket Adapter 复用现有 `user_image` 的 base64/MIME 协议，在构造 Stimulus 前永久保存原始字节，以认证用户和 client message 身份生成可重复的 UUID `MediaRef`；Agent 不保存媒体且只接触该引用。CapabilityManager、AgentRuntime、Skills 构造注入 `ImagePreprocessingSkill`；Handler 解析、校验、理解后一次写入用户媒体事实与系统机器描述事实，返回两个记录 ID 的 `PreprocessedInput`，不 emit、不消费。没有真实生产者的语音仍不接 ASR。
+- 永久性、顺序与失败：媒体目录无 TTL、过期或自动清理；resolver 拒绝未知、空内容、非图片 MIME、损坏元数据和路径穿越。对话事实时间按 Stage 接收 revision 排序，图片内部媒体先于机器描述；新 context 持久化使用带微秒 ISO 时间，旧链路可继续写秒级格式。`datetime.fromisoformat` 和已修订的旧展示格式化器兼容两种格式，因此 DB/context 读取保持 A/B。失败在 VLM 前退出，不消费、不阻塞后续文本，也不回滚既有事实。
+- interface spec：[`capabilities/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/capabilities/README.md) 已记录端口、稳定失败和未决存储策略；[`system/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/system/README.md) 已记录 `capabilities.media_resolution` 装配事实。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent tests/stage tests/domain tests/adapter -q` 为 **718 passed**（2 条既有依赖弃用 warning）；新增 adapter/resolver/时间格式聚焦测试为 **36 passed**。触及文件 Ruff 与 `git diff --check` 通过；08 链既有 agent/stage/domain/adapter 测试未修改且继续通过。
+- 未决与未验证：授权主体已在下述审查修复中收敛为认证上传用户；仍未决定大文件分块、解析/理解超时及图片/语音端口长期复用策略，未实现 ASR。未运行真实 VLM、生产目录权限/磁盘耗尽、生产数据库、客户端/真机、GPU 或完整 Server 外部链路。
+
+#### 2026-09-15 对抗审查修复（09）
+
+- 授权边界：此前提案把授权主体留作未决；本轮按 Issue #68 的越权拒绝要求建立保守默认——媒体归认证上传用户所有。metadata 持久 `owner_user_id`，principal-scoped resolver 要求当前 `owner_user_id`，跨用户在读取字节和 VLM 前返回 `MEDIA_UNAUTHORIZED`。
+- 准入与限制：Adapter 先解析信封并创建窄引用候选，验证所有目标 Stage 存在且 `can_accept` 后才物化图片；`max_encoded_bytes` 在 base64 解码前检查，`max_bytes` 在永久写入前检查，超限为 `MEDIA_TOO_LARGE` 且无最终目录。解码、Pillow 完整验证和文件 I/O 经 `asyncio.to_thread` 离开事件循环。
+- 原子与内容：永久写入使用唯一 staging 目录，完整写入后单次目录 rename 发布；并发重放相同内容复用，冲突拒绝，残缺/损坏目录稳定为 `MEDIA_UNKNOWN`。存储与 resolver 都用 Pillow 完整解码，坏图片为 `MEDIA_UNKNOWN`，实际格式与声明 MIME 不一致为 `MEDIA_UNSUPPORTED_TYPE`。
+- 验证：聚焦授权/准入/线程/原子/内容及既有 Stage 用例 `python -m pytest tests/agent/test_media_resolution.py tests/agent/test_chat_preprocessing.py tests/adapter/test_websocket_adapter.py tests/stage/test_chat_stage.py tests/stage/test_concurrent_handling.py -q` 为 **73 passed**；完整 `python -m pytest tests/agent tests/stage tests/domain tests/adapter -q` 为 **726 passed**、2 条既有依赖弃用 warning。新媒体模块全规则 Ruff、触及旧文件的 import/undefined-name Ruff 及 `git diff --check` 通过。未验证真实 VLM、生产磁盘故障/权限、跨进程崩溃注入和客户端真机。
+### 2026-09-14 批次回复的开始思考信号（11a）GREEN
+
+- 交付行为：`ChatReplyHandler` 在有可回复内容时先交付一个仅含 `StartThinking` 的首计划（ordinal 0），再进入生成并交付正式回复计划。Stage 的 `_PlanSink` 消费该计划并发出 THINKING 呈现，最后一个思考请求结束时发出 WAITING（既有 Stage 行为）。无可回复内容时不产生思考信号。
+- interface spec：无新增或扩大公开 interface；复用 `StartThinking`、`ActionPlanDraft` 与 `_PlanSink` 既有消费行为。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-11-thinking-signals`（依赖 #132 的 `chat.py`，堆叠）。
+- 验证及结果：`python -m pytest tests/agent/test_chat_reply.py tests/stage/test_chat_reply_settlement.py -q` 为 6 passed；白名单回归 834 passed、2 skipped。相关文件 LSP 无报错。
+- 明确不包含（留待 11b）：慢 Recall 的「先临时完整计划、再正式计划」策略未实现，需要真实的慢召回信号来源。
+- 未验证范围：未运行真实 LLM/TTS/GPU、真机或生产数据库；生产聊天仍走旧 ChatStream。
+
+### 2026-09-14 回复结算后的反思接入（13/14）GREEN
+
+- 交付行为：`ChatReflectionHandler` 从空占位改为真实反思——以本次已消费输入与近期 `source=agent` 回复拼成依据，经反思技能沉淀长期记忆；按阈值调用共享压缩技能生成并提交上下文压缩；随后更新用户画像（`summary` + `recent_conversation`）。不交付计划、不消费输入、不产生用户可见输出。
+- interface spec：无新增或扩大公开 interface；复用 `mind.write_topic_memories`、`ConversationCompactionSkill.compact`、`mind.update_user_profile_by_context`。新增内部技能 `ReflectionSkill`（`agent/skills/reflection/consolidation.py`）。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-13-reflection`（堆叠在 MediaRef 端口提案之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent/test_chat_reflection.py -q` 为 2 passed；`python -m pytest tests/agent tests/stage -q` 为 249 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 834 passed、2 skipped。相关文件 LSP 诊断无报错。
+- 测试夹具更新：`ChatReflectionHandler` 构造改为注入（反思 + 压缩），`test_handling_preparation.py`、`test_concurrent_handling.py`、`test_chat_reply_settlement.py` 传入 no-op 替身；假 context 的 `conversation` 补 `read()`。
+- 明确不包含：日期识别未接入（旧 `detect_dates_for_topic` 依赖 `ExtractedTopic`，SPEC A7 禁止新调用方依赖）；`related_memories` 暂为空（注意力链尚未接入）。
+- 未验证范围：未运行真实 LLM/GPU、真机或生产数据库；生产聊天仍走旧 ChatStream。
+
+### 2026-09-14 真实聊天链路结算与取消验收（10）GREEN
+
+- 交付行为：新增 `tests/stage/test_chat_reply_settlement.py`，用真实 `Agent`（文本预处理 + 批次回复 + 反思 + SAY 执行）经真实 `ChatStage` 验证：(a) 文本批次经期限触发后完成「预处理→回复→执行→结算」，pending 清空且 `user`/`agent` 记录按序落库；(b) 回复执行在途时到达新内容，旧回复被取消并丢弃，新批次重新回复并最终结算。
+- interface spec：无新增或改变公开接口；本切片仅测试与测试夹具（假 context 的 `conversation` 补 `read()`）。
+- Red/Green：Issue #69 是验证工单，无新增运行时行为，记录为验证切片；不制造人工 Red。
+- commit 或 PR：分支 `feat/agent-10-settlement-verification`（堆叠在 08c 之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/stage/test_chat_reply_settlement.py -q` 为 2 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 832 passed、2 skipped。
+- 与 #69 验收项对照：取消（本切片真实链路覆盖）、部分消费（由既有 `tests/stage/test_concurrent_handling.py` 的按 ID 保留用例覆盖）、晚返回丢弃（由既有 stale deadline 用例覆盖）。本切片新增的是真实 handler 链路上的结算与取消证据。
+- 未验证范围：尚未接入生产路由（#66），未运行真实 LLM/TTS/GPU、真机或生产数据库。
+
+### 2026-09-14 批次回复的演唱决定接入（08c-2）GREEN
+
+- 交付行为：`ChatReplyHandler` 在批次回复中执行演唱决定——用 `TextPreprocessingSkill.extract_terms` 从本批文本提取演唱尝试；从近期对话的 `SongContent` 记录推导「最近已唱片段」作为排除集；两者传入回复生成技能用于选择片段。生成演唱草稿时取回片段歌词并写入 `source=agent` 的 `SongContent` 记录（文本为「唱了《歌》+歌词」）。`ResponseCompositionSkill.compose` 新增 `excluded_segments` 参数并回填 `ReplyDraft.lyrics`。
+- interface spec：无新增或扩大公开 interface；`TextPreprocessingSkill.extract_terms`、`build_sing_plan_for_topic(excluded_segments=...)`、`capability.singing.get_segment_lyrics` 均为现有能力。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：与 08c-1 同属 PR 分支 `feat/agent-08c-reply-composition`（本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent/test_chat_reply.py -q` 为 4 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 830 passed、2 skipped。相关文件 LSP 诊断无报错。
+- 明确不包含（留待 08c-3）：仍未接入「提取/注意力选择」（旧 `extract_topics`/`plan_topic_turn` 依赖 `UnreadMessage`/`ExtractedTopic`，SPEC A7 禁止新调用方依赖）；正式检索替换候选时按刺激 ID 清理尚未实现。
+- 未验证范围：未运行真实 LLM/TTS/演唱音频、GPU、真机或生产数据库；生产聊天仍走旧 ChatStream。
+
+### 2026-09-14 到期批次回复生成与落库（08c-1）GREEN
+
+- 交付行为：`InteractionDeadline` 批次的 `ChatReplyHandler` 从 `prepared_inputs` 组装回复话题、渲染近期历史，经回复生成技能召回记忆并生成回复草稿，按接收顺序交付一个 `ActionPlan`（有序 `Say`/`Sing` 行动），并落库对应的 `source=agent` 正式对话记录；报告按 ID 消费本批（`consumed` 等于本批 pending）。
+- interface spec：无新增或扩大公开 interface；复用 `ActionPlanDraft`、`Say`、`Sing`、`PreprocessedInput` 与 `context.conversation.append`。新增内部技能 `ResponseCompositionSkill`（`agent/skills/cognitive/response_composition.py`），包装 `mind.search_memory_context_for_topic`、`mind.build_sing_plan_for_topic` 与 `conscious.generate_topic_reply_for_pipeline`；`Skills` 新增内部 `register()` 以装配需要运行时依赖的技能。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-08c-reply-composition`（堆叠在 08b 之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent/test_chat_reply.py -q` 为 3 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 829 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
+- 明确不包含（留待 08c-2）：本切片未接入「提取/注意力选择」——旧 `extract_topics`/`plan_topic_turn` 依赖 `UnreadMessage`/`ExtractedTopic`，而 SPEC A7 禁止新调用方依赖这些旧类型；因此本切片以「整批作为一个回复话题」生成。`sing_attempts` 暂传空、最近已唱排除与歌词记录未接入。
+- 未验证范围：未运行真实 LLM/TTS/GPU、真机或生产数据库；生产聊天仍走旧 ChatStream。
+
+### 2026-09-14 演唱行动 SING 渲染（08b）GREEN
+
+- 交付行为：注册 `ActionKind.SING` 的真实处理器 `SingHandler`。对既定的 `Sing(song_id, segment_id, expression)` 以 `CONVERSATION` 呈现方式输出「表情 → 完整音频块（`COMPLETE_FILE`）→ 消息结束（COMPLETED）」；片段不可用或无音频时输出 FAILED 终止包并返回 `AUDIO_EMPTY`，生成异常返回 `AUDIO_GENERATION_FAILED`，超时返回 `PROVIDER_TIMEOUT`。处理器不选择歌曲或片段、不恢复 `SONG_STATE`。
+- interface spec：无新增或扩大公开 interface；复用 `Sing`、`AudioChunkDraft`、`ExpressionDraft`、`MessageEndDraft`。新增内部技能 `SingingSkill`（`agent/skills/expression/singing.py`）包装 `SingingCapability.sing` 并在 executor 中调用，由 `Skills` 装配。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-08b-sing-handler`（堆叠在 08a 之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`（Python 3.10，pytest 9.1.1）。`python -m pytest tests/agent/test_singing.py -q` 为 5 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 826 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
+- 附带更新：`test_facade_contract.py::test_execution_preflight_rejects_whole_plan` 原以「SING 未注册」制造整计划拒绝，改为使用仍未实现的 `WRITE_DIARY` 保持同一语义；`tests/agent_runtime_support.py` 的 capability_manager 增加 singing 替身；`test_compaction_skill.py` 的 `Skills` 构造补 `singing`。
+- 未验证范围：未运行真实演唱音频、TTS、GPU、真机或生产数据库；歌曲/片段选择、最近已唱排除与歌词记录仍属 handle 侧（08c）；生产聊天仍走旧 ChatStream。
+
+### 2026-09-14 文本预处理落库（08a）GREEN
+
+- 交付行为：`TextMessage` 经 `ChatPreprocessingHandler` 提取歌曲实体关键词，并借 `plans.context.conversation.append` 落库一条 `source=user` 的正式对话记录，返回 `PreprocessedInput.conversation_entry_ids`；本次不交付计划、不消费 pending。缺少 context 时返回 `FAILED / INTERNAL_ERROR`，不静默跳过落库。图片、语音、typing、选图与触摸仍保持占位行为。
+- interface spec：无新增或扩大公开 interface；复用现有 `PreprocessedInput`、`InteractionContext.conversation`（`agent/context`），SPEC 已满足，无 SPEC commit。
+- 内部衔接：新增 `agent/skills/cognitive/TextPreprocessingSkill`（包装 `SongEntityLinker`），由 `Skills` 装配并注入 handler；`AgentRuntime` 传入 `agent.preprocessing` 配置。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片不制造人工失败测试，记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-08a-text-preprocessing`（本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`（Python 3.10，pytest 9.1.1）。`python -m pytest tests/agent/test_chat_preprocessing.py -q` 为 3 passed；`python -m pytest tests/agent tests/stage -q --tb=short` 为 236 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 821 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
+- 未验证范围：未运行真实 LLM/VLM/TTS、真机或生产数据库；批量回复（08c）与 Sing action handler（08b）尚未实现；生产聊天仍走旧 ChatStream（#66）。
+- 附带更新：`test_handling_preparation.py` 的“预处理不落库”占位断言随迁移改为“已落库且两次调用 id 不同”；`test_chat_stage.py` 的假 context 补 `conversation.append`；`test_concurrent_handling.py` 的 handler 子类注入预处理替身。
+### 2026-09-14 QQ 凭据维护不变量验证（26）GREEN
+
+- 交付行为：为 `QQMusicCredentialRefreshTask` 补充不变量测试——默认 21600 秒周期且启动立即执行；共享凭据路径按规范化去重只检查一次；无已初始化凭据时 skipped（`credential_count=0`）；多文件按文件数计数；部分失败返回 failure 并记录 `failed_characters`；`ensure_dependencies` 要求 `system_runtime` 与非空学歌任务；任务不持有 `agent_runtime`，保持纯机械。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #85 为验证工单，无运行时行为变化；不制造人工 Red。
+- commit 或 PR：分支 `test/world-26-qq-credential`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_learn_sing_songs.py -q` 为 58 passed；`python -m pytest tests/world -q` 为 120 passed、2 skipped。
+- 未验证范围：未运行真实 QQ Music 网络刷新或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
+### 2026-09-14 B 站事件同步不变量验证（27）GREEN
+
+- 交付行为：补充 `BiliEventUpdateTask` / `BiliEventUpdater` 不变量测试——cookie 无效时 `fetch_and_update_events` 明确抛错、任务转为 failure 且不抛出；无新动态返回零计数；解析事件规范化（`event_type` 映射、`source` 默认 `bilibili`、`is_recurring`/`is_personal` 默认 False）；`updated` 只计 `add_event` 实际创建的事件（重复来源不重复计数）；缺少 `event_store` 抛错；任务不持有 `agent_runtime`，保持机械边界。
+- 发现（记录，不在本切片修复）：cookie 校验之后 `fetch_and_update_events` 的抓取/解析异常被吞掉并返回零计数，任务据此报告成功。这与「失败不假报成功」不变量存在张力，建议另开缺陷切片处理。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #86 为验证工单，无运行时行为变化；不制造人工 Red。
+- commit 或 PR：分支 `test/world-27-bili-event-update`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_bili_event_update.py -q` 为 12 passed；`python -m pytest tests/world -q` 为 123 passed、2 skipped。
+- 未验证范围：未运行真实 B 站网络抓取、VLM/LLM 或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
+### 2026-09-14 过期事件清理不变量验证（28）GREEN
+
+- 交付行为：为 `EventStore.purge_expired_events` 补充不变量测试——`end_datetime < today` 才失活、`end` 当天保留；仅 `start_datetime` 的事件保留一天缓冲；`is_recurring` / `source=user` / 仅 `date_mmdd` 的事件不清除；重复清理只计本次实际失活（幂等）；已 inactive 不计数；清理后失效 due 事件缓存。任务层保持「无 event_store 时 skipped、有 store 时返回 purged」。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #87 为验证工单，无运行时行为变化；记录为验证切片，不制造人工 Red。
+- commit 或 PR：分支 `test/world-28-event-cleanup`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_event_cleanup.py -q` 为 9 passed；`python -m pytest tests/world -q` 为 121 passed、2 skipped。
+- 未验证范围：未运行真实外部服务或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
 
 ### 2026-09-06 门面公共入口与请求分流整理
 

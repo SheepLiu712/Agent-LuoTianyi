@@ -14,7 +14,16 @@
 
 交互上下文的创建、用户资料、近期对话和召回缓存见 [Context 接口](context.md)。
 
-世界事实的处理：`WORLD_OBSERVATION` 按 `observation_kind.value` 分派到已登记分支——`citywalk_completed` 由 `CitywalkObservationHandler` 生成角色化正文并交付 `PublishDynamic` 计划；未登记类别仍按事实 ID 结算，不产生计划。`PUBLISH_DYNAMIC` 由 `PublishDynamicHandler` 经共享动态技能按来源身份幂等发布，成功报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<dynamic_id>)`，失败返回稳定错误码且不声称已提交效果。
+世界事实的处理：`WORLD_OBSERVATION` 按 `observation_kind.value` 分派到已登记分支——`citywalk_completed` 由 `CitywalkObservationHandler` 生成角色化正文并交付 `PublishDynamic` 计划；未登记类别仍按事实 ID 结算，不产生计划。`PUBLISH_DYNAMIC` 由 `PublishDynamicHandler` 经共享动态技能按来源身份幂等发布，成功报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<dynamic_id>)`，失败返回稳定错误码且不声称已提交效果。`SONG_KNOWLEDGE_DISCOVERED` 由专用 `SongKnowledgeHandler` 接纳——调用共享技能按名称/safe name 幂等写入既有歌曲知识与关键词索引，知识与索引在同一幂等边界内（关键词写入失败回滚知识行），不产生计划或外部效果。
+
+### 当前内部认知与状态变更技能
+
+- `ExplicitMemoryIntentSkill.detect(text) -> str | None`：在 cognitive 层按 `memory.explicit_intent` 短语 allowlist 提取明确记忆正文；不在 Stage 或 Adapter 判定。
+- `IntentionalMemoryCommit.commit(character_id, user_id, content) -> MemoryCommitRevision`：通过既有 `MemoryWriter` 路径幂等提交私有长期记忆并返回存储标识；它是内部状态变更技能，不是 Action。
+- `ChatReplyHandler` 命中明确记忆意图时，在同一 handle 中先等待提交，再交付仅含确认 `Say` 的计划；提交异常返回 `FAILED / INTERNAL_ERROR`、保留 pending、`retryable=False`，且不交付成功确认。
+- `ResponseCompositionSkill.compose_staged(...) -> ComposedResponse`：召回慢时先返回配置的临时草稿，正式草稿留待调用方 `await formal()`；不新增公开 Stimulus/Action。详见 [慢召回两段式回复](slow-recall-reply.md)。
+
+召回慢时的临时计划与正式计划、取消与迟到结果处理，以及 `agent_runtime.reply_composition.slow_recall` 配置见 [慢召回两段式回复](slow-recall-reply.md)。
 
 ## 模块职责
 

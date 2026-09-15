@@ -40,10 +40,14 @@ citywalk、学歌、B 站事件、日记支持总开关及角色覆盖；QQ 凭�
 
 ### 世界事实投递（21–25 迁移中）
 
-迁移中的世界任务只投递规范化事实，不再直接调用角色能力或写入角色内容：
+迁移中的世界任务只投递规范化事实，不再直接写入知识、调用角色能力或写入角色内容：
 
 - citywalk（`try_citywalk:{character_id}`）：概率抽样、地图/环境推进、报告生成、`travel` 事件与报告回写留在 world；散步成功后投递 `WorldObservation`，其 `observation_kind.value` 为 `citywalk_completed`、`fact.fact_id` 为 `citywalk:<报告路径>`、`fact.summary` 为报告叙述（缺叙述时由目的地/经过地点/时长拼出）、`world_revision` 取完成时刻。任务不再 import `CharacterRuntime`，也不再生成动态正文。
 - 报告回写：动态身份与正文由结算回执（`FactPlanOutcome` 的 `DYNAMIC_POST` 效果与计划内 `PublishDynamic.body`）写回报告的 `dynamic_id`／`dynamic_content`／`diary_text`；发布失败只记录日志，不撤销散步事实与报告。
+
+- VCPedia 新歌任务（`sync_new_song_knowledge`）：抓取、字段规范化、来源检查与来源去重留在 world；每个候选产出 `SongKnowledgeDiscovered`（`source_ref=vcpedia`、外部歌曲标识、由规范化内容派生的修订号、供应商无关的歌曲资料 `SongKnowledgeCandidate`），经该角色长期 `WorldStage` 的 `fact_sink.submit(...)` 投递。任务不再写入歌曲知识或关键词索引。
+- 结果统计为 `discovered_count`／`submitted_count`／`rejected_count`／`skipped_existing_count`／`fetch_failed_count`，不报告 `added`（知识是否写入由 Agent 侧接纳决定）。
+- `WorldStage` 不可用或事实被拒时记录候选并在返回中计入 `rejected_count`，不降级为直接写入知识、不重试。
 
 ### `WorldTask`
 
