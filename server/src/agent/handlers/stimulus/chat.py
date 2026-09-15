@@ -1,12 +1,23 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
+from typing_extensions import assert_never
+
 import src.domain.agent as d
-from src.agent.context.models import ConversationEntry, SongContent, TextContent
+from src.agent.context.models import (
+    ConversationEntry,
+    ImageContent,
+    SongContent,
+    TextContent,
+)
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.agent.skills.cognitive import ResponseCompositionSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive import (
+    ImagePreprocessingSkill,
+    ResponseCompositionSkill,
+    TextPreprocessingSkill,
+)
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.reflection import ReflectionSkill
 from src.utils.enum_type import ConversationSource
@@ -25,30 +36,74 @@ def _report(request: d.HandleStimulusRequest, *, consume: bool = False,
 class ChatPreprocessingHandler:
     """单刺激预处理和落库；预处理完成不等于消费输入。"""
 
-    def __init__(self, understanding: TextPreprocessingSkill) -> None:
-        """注入文本语义预处理技能，用于提取歌曲实体等对话与检索线索。"""
-        self._understanding = understanding
+    def __init__(
+        self,
+        text_understanding: TextPreprocessingSkill,
+        image_understanding: ImagePreprocessingSkill | None = None,
+    ) -> None:
+        """注入文本线索提取与可选的受控图片理解技能。"""
+        self._text_understanding = text_understanding
+        self._image_understanding = image_understanding
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """文本先理解并落库，再返回 READY 结果；不交付计划，不消费本批输入。"""
         stimulus = request.stimulus
-        if isinstance(stimulus, d.TextMessage):
-            terms = self._understanding.extract_terms(stimulus.text)
-            entry = ConversationEntry(
-                entry_id=str(uuid4()),
-                timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
-                source=ConversationSource.USER.value,
-                content=TextContent(stimulus.text, terms),
-            )
-            await plans.context.conversation.append((entry,))
-            prepared = d.PreprocessedInput(
-                stimulus_id=stimulus.stimulus_id, text=stimulus.text,
-                conversation_entry_ids=(entry.entry_id,),
-            )
-        elif isinstance(stimulus, (d.ImageMessage, d.VoiceMessage)):
-            prepared = d.PreprocessedInput(stimulus_id=stimulus.stimulus_id, text=None)
-        else:
-            prepared = None
+        fact_time = request.interaction.now.replace(tzinfo=None) + timedelta(
+            microseconds=request.interaction.interaction_revision * 10)
+        match stimulus:
+            case d.TextMessage():
+                terms = self._text_understanding.extract_terms(stimulus.text)
+                entry = ConversationEntry(
+                    entry_id=str(uuid4()),
+                    timestamp=fact_time,
+                    source=ConversationSource.USER.value,
+                    content=TextContent(stimulus.text, terms),
+                )
+                await plans.context.conversation.append((entry,))
+                prepared = d.PreprocessedInput(
+                    stimulus_id=stimulus.stimulus_id, text=stimulus.text,
+                    conversation_entry_ids=(entry.entry_id,),
+                )
+            case d.ImageMessage():
+                if self._image_understanding is None:
+                    raise RuntimeError("Image preprocessing skill is not configured")
+                owner_user_id = request.interaction.user_id
+                if owner_user_id is None:
+                    raise RuntimeError("Image stimulus requires an authenticated user")
+                media, description = await self._image_understanding.understand(
+                    stimulus.media_ref,
+                    owner_user_id=owner_user_id,
+                )
+                machine_text = f"[图片理解]: {description}"
+                terms = self._text_understanding.extract_terms(machine_text)
+                media_entry = ConversationEntry(
+                    entry_id=str(uuid4()),
+                    timestamp=fact_time,
+                    source=ConversationSource.USER.value,
+                    content=ImageContent(
+                        text=stimulus.caption or "",
+                        mime_type=media.mime_type,
+                        media_id=stimulus.media_ref.media_id,
+                    ),
+                )
+                description_entry = ConversationEntry(
+                    entry_id=str(uuid4()),
+                    timestamp=fact_time + timedelta(microseconds=1),
+                    source=ConversationSource.SYSTEM.value,
+                    content=TextContent(machine_text, terms),
+                )
+                await plans.context.conversation.append((media_entry, description_entry))
+                prepared = d.PreprocessedInput(
+                    stimulus_id=stimulus.stimulus_id,
+                    text=machine_text,
+                    conversation_entry_ids=(media_entry.entry_id, description_entry.entry_id),
+                )
+            case d.VoiceMessage():
+                prepared = d.PreprocessedInput(stimulus_id=stimulus.stimulus_id, text=None)
+            case d.UserTyping() | d.ImageSelectionOpened() | d.ImageSelectionClosed() | d.TouchInteraction():
+                prepared = None
+            case unreachable:
+                assert_never(unreachable)
         return _report(request, prepared=prepared)
 
 
