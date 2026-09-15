@@ -12,7 +12,12 @@ from src.agent.context import ConversationEntry, SongContent, TextContent
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.main_chat import OneSentenceChat, SongSegmentChat
-from src.agent.skills.cognitive import ReplyDraft, ResponseCompositionSkill
+from src.agent.skills.cognitive import (
+    ComposedReply,
+    ComposedResponse,
+    ReplyDraft,
+    ResponseCompositionSkill,
+)
 
 
 class _Conversation:
@@ -47,13 +52,22 @@ class _Understanding:
 
 
 class Composer:
-    def __init__(self, drafts):
+    def __init__(self, drafts, provisional=None):
         self.drafts = drafts
+        self.provisional = provisional
         self.calls = []
 
     async def compose(self, **kwargs):
         self.calls.append(kwargs)
         return self.drafts
+
+    async def compose_staged(self, **kwargs):
+        self.calls.append(kwargs)
+
+        async def formal():
+            return ComposedReply(drafts=self.drafts)
+
+        return ComposedResponse(provisional=self.provisional, pending=formal)
 
 
 def agent(composer, understanding=None):

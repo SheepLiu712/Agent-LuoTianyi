@@ -308,6 +308,15 @@
         "prepared_speech": {
             "manifest": "res/agent/prepared_speech/manifest.json"
         },
+        "reply_composition": {
+            "slow_recall": {
+                "provisional_after_seconds": 1.5,
+                "provisional_text": "让我想想之前聊过的事情，稍等我一下下～",
+                "provisional_sound_content": "让我想想之前聊过的事情，稍等我一下下",
+                "provisional_tone": "tender",
+                "provisional_expression": "温柔脸"
+            }
+        },
         "character_registry": {
             "characters": {
                 "luotianyi": {

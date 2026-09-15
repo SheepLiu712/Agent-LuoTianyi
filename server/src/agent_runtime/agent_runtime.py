@@ -80,9 +80,10 @@ class AgentRuntime:
         try:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
             self.skills = Skills(self.config.get("skills", {}), llm_service,
-                                  tts_engine=AsyncTTS(capability_manager.speech),
-                                  preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
+                                 tts_engine=AsyncTTS(capability_manager.speech),
+                                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
                                   explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
+                                  reply_composition_config=self.config.get("reply_composition", {}),
                                   singing=capability_manager.singing,
                                   media_resolver=capability_manager.media_resolver,
                                   image_understanding=capability_manager.image_understanding)
@@ -101,7 +102,7 @@ class AgentRuntime:
             )
 
             self.skills.register(ResponseCompositionSkill, ResponseCompositionSkill(
-                self.config.get("reply_composition", {}),
+                self.skills.reply_composition_config,
                 lambda character_id: self.character_runtimes[character_id],
             ))
             self.skills.register(ReflectionSkill, ReflectionSkill(
@@ -155,7 +156,7 @@ class AgentRuntime:
         except BaseException:
             try:
                 self._abort_initialization()
-            except RuntimeError as cleanup_error:
+            except Exception as cleanup_error:  # noqa: BLE001 - 初始化边界必须回滚后重抛原异常。
                 self.logger.error(
                     f"AgentRuntime initialization rollback failed: {cleanup_error}"
                 )
@@ -202,7 +203,7 @@ class AgentRuntime:
                     self._shutdown_task = shutdown_task
                 cancellation: asyncio.CancelledError | None = None
                 try:
-                    _done, pending = await wait_for_owned_tasks(
+                    _, pending = await wait_for_owned_tasks(
                         (shutdown_task,),
                         timeout_seconds=getattr(
                             self,
@@ -212,7 +213,7 @@ class AgentRuntime:
                     )
                 except asyncio.CancelledError as error:
                     cancellation = error
-                    _done, pending = await asyncio.shield(
+                    _, pending = await asyncio.shield(
                         wait_for_owned_tasks(
                             (shutdown_task,),
                             timeout_seconds=getattr(

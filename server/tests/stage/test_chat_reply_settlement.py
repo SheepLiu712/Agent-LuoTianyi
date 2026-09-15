@@ -14,7 +14,7 @@ from src.agent.handlers.stimulus.chat import (
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import ReplyDraft
+from src.agent.skills.cognitive import ComposedReply, ComposedResponse, ReplyDraft
 
 
 async def until(predicate):
@@ -50,6 +50,14 @@ class _Composer:
     async def compose(self, **kwargs):
         self.calls += 1
         return self.drafts
+
+    async def compose_staged(self, **kwargs):
+        self.calls += 1
+
+        async def formal():
+            return ComposedReply(drafts=self.drafts)
+
+        return ComposedResponse(provisional=None, pending=formal)
 
 
 class _Execute:
