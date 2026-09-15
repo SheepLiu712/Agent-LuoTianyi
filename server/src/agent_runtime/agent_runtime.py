@@ -17,6 +17,7 @@ from src.agent.handlers.stimulus.chat import (
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.agent.handlers.stimulus.song_knowledge import SongKnowledgeHandler
 from src.agent.handlers.stimulus.touch import TouchInteractionHandler
 from src.agent.handlers.stimulus.world_activity import (
     WORLD_ACTIVITY_STIMULUS_KINDS,
@@ -35,6 +36,7 @@ from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.touch import TouchPolicy, TouchReactionSkill
+from src.agent.skills.knowledge.song_acceptance import SongKnowledgeAcceptanceSkill
 from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.agent.skills.reflection import ReflectionSkill
 from src.agent_runtime.agent_registry import AgentRegistry
@@ -93,11 +95,15 @@ class AgentRuntime:
             self.skills = Skills(self.config.get("skills", {}), llm_service,
                                  tts_engine=AsyncTTS(capability_manager.speech),
                                  preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
-                                  explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
-                                  reply_composition_config=self.config.get("reply_composition", {}),
-                                  singing=capability_manager.singing,
-                                  media_resolver=capability_manager.media_resolver,
-                                  image_understanding=capability_manager.image_understanding)
+                                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
+                                 reply_composition_config=self.config.get("reply_composition", {}),
+                                 singing=capability_manager.singing,
+                                 media_resolver=capability_manager.media_resolver,
+                                 image_understanding=capability_manager.image_understanding)
+            # 歌曲知识接纳使用与记忆查询相同的 agent.song_knowledge 配置，保证读写同一知识库
+            self.song_knowledge = SongKnowledgeAcceptanceSkill(
+                self.config.get("agent", {}).get("song_knowledge", {})
+            )
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -151,7 +157,10 @@ class AgentRuntime:
                              self.skills.get(IntentionalMemoryCommit))),
                         (StimulusKind.TOUCH_INTERACTION, TouchInteractionHandler(
                             *self._touch_reaction(character_id))),
-                        *((kind, WorldActivityHandler()) for kind in WORLD_ACTIVITY_STIMULUS_KINDS),
+                        (StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
+                         SongKnowledgeHandler(self.song_knowledge)),
+                        *((kind, WorldActivityHandler()) for kind in WORLD_ACTIVITY_STIMULUS_KINDS
+                          if kind is not StimulusKind.SONG_KNOWLEDGE_DISCOVERED),
                         *((kind, ChatPreprocessingHandler(
                             self.skills.get(TextPreprocessingSkill),
                             self.skills.get(ImagePreprocessingSkill))) for kind in (

@@ -14,6 +14,8 @@
 
 交互上下文的创建、用户资料、近期对话和召回缓存见 [Context 接口](context.md)。
 
+世界事实的处理：`SONG_KNOWLEDGE_DISCOVERED` 由 `SongKnowledgeHandler` 接纳——调用共享技能按名称/safe name 幂等写入既有歌曲知识与关键词索引，知识与索引在同一幂等边界内（关键词写入失败回滚知识行），不产生计划或外部效果；其余世界/活动事实仍由占位处理器按事实 ID 结算。
+
 ### 当前内部认知与状态变更技能
 
 - `ExplicitMemoryIntentSkill.detect(text) -> str | None`：在 cognitive 层按 `memory.explicit_intent` 短语 allowlist 提取明确记忆正文；不在 Stage 或 Adapter 判定。

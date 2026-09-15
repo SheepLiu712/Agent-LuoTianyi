@@ -9,6 +9,13 @@
 
 ## 已完成事实
 
+### 2026-09-15 VCPedia 候选知识接纳迁移（#81）
+
+- 交付行为：VCPedia 任务改为只做抓取、字段规范化、来源检查与来源去重，产出强类型 `SongKnowledgeDiscovered`（来源 `vcpedia`、外部歌曲标识、由规范化内容派生的修订号、供应商无关的 `SongKnowledgeCandidate`），逐条经长期 `WorldStage` 的 `WorldFactSink.submit(...)` 投递；world 不再写入歌曲知识或关键词索引。Agent 侧新增 `SongKnowledgeHandler` 与共享技能 `SongKnowledgeAcceptanceSkill`：按名称/safe name 幂等接纳，知识与关键词索引在同一幂等边界内写入（关键词写入失败回滚知识行），不产生任何 ActionPlan 或外部效果；`already learned`/候选不等于学歌请求的语义保持不变。
+- interface spec：`接口文档/world/README.md` 新增「世界事实投递（21–25 迁移中）」记录投递事实与统计口径；`接口文档/agent/README.md` 记录接纳处理器与技能的归属与幂等边界。统计口径按实施规格 N3 裁决改为 `discovered`/`skipped_existing`/`fetch_failed` 与 `submitted`/`rejected`，不再声称 `added`。
+- 验证及结果：`conda run -n agent python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` → **840 passed、2 skipped**。新增 9 项 agent 侧用例（幂等写入与关键词可查、二次接纳跳过且不重复、关键词失败回滚知识、处理器四类结算与非法刺激拒绝、空白介绍由领域类型拒绝）与 2 项 world 侧用例（候选投递为世界事实、收集阶段不写入任何知识）；既有 world 任务用例改写为新统计口径。新增与改动文件 Ruff 通过。
+- 未验证范围：真实 VCPedia 抓取、反爬兜底与 LLM 结构化仍依赖运行环境的 `activated`/网络条件，按既有真实探测口径验收；本切片不含 citywalk/学歌/动态/日记迁移（21/23/24/25）与执行结算端口（N1）。
+
 ### 2026-09-15 世界侧结算端口（21/24/25 共同前置）
 
 - 交付行为：新增 `world/world_settlements.py` 的 `WorldSettlementRouter`，由 `WorldRuntime` 持有（`WorldRuntime.settlements`），在 `SystemRuntime.get_world_stage` 创建实例时接到 `WorldStage`；`WorldStage` **新增**可选窄回调 `on_handling_settled(request, report)`（在报告通过一致性校验并应用到 pending 之后调用），既有 `on_execution_finished` 语义不变。任务在投递事实前按刺激 ID 登记订阅者，随后收到 `FactHandlingOutcome`（`request_status`/`consumed`/`error_code`/`plan_ids`，`ignored` 表示明确处理但无计划）与 `FactPlanOutcome`（计划、执行报告与已提交 `EffectRef`）；多计划事实按 `emitted_plan_ids` 计数，最后一个计划结算后自动撤销登记，投递被拒用 `discard` 撤销。订阅者异常与未匹配结算只计数并记录，不打断 Stage。
