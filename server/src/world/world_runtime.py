@@ -13,6 +13,7 @@ from src.world.learn_sing_songs.qq_music_credential_refresh_task import QQMusicC
 from src.world.learn_sing_songs.task import LearnSingSongsTask
 from src.world.proactive_topic_task import ProactiveTopicCheckTask
 from src.world.world_clock import WorldClock
+from src.world.world_settlements import WorldSettlementRouter
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -32,6 +33,7 @@ class WorldRuntime:
         self.logger = get_logger(__name__)
 
         self.world_clock = WorldClock()
+        self.settlements = WorldSettlementRouter()
         self.citywalk_task: CitywalkTask | None = None
         self.citywalk_tasks: List[CitywalkTask] = []
         self.learn_sing_songs_task: LearnSingSongsTask | None = None

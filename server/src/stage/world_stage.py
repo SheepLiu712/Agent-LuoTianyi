@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 
 ExecutionFinishedCallback = Callable[[d.ActionPlan, d.ExecutionReport], None]
+HandlingSettledCallback = Callable[[d.HandleStimulusRequest, d.HandlingReport], None]
 
 
 @final
@@ -38,6 +39,7 @@ class WorldStage:
         context: InteractionContext, config: dict[str, int | float] | None = None,
         timezone_name: str = "Asia/Shanghai",
         on_execution_finished: ExecutionFinishedCallback | None = None,
+        on_handling_settled: HandlingSettledCallback | None = None,
     ) -> None:
         if any(not isinstance(value, str) or not value.strip() for value in (character_id, world_id)):
             raise ValueError("character_id and world_id must be nonblank")
@@ -64,6 +66,7 @@ class WorldStage:
         self._execution: d.ExecutionContext | None = None
         self._output_sink = NoChannelOutputSink()
         self._on_execution_finished = on_execution_finished
+        self._on_handling_settled = on_handling_settled
         self._fact_sink = _WorldFactSink(self)
         self._closed = asyncio.Event()
         self._worker = asyncio.create_task(self._execution_worker(), name="world-stage-execution")
@@ -75,13 +78,15 @@ class WorldStage:
         context_factory: ContextFactory, config: dict[str, int | float] | None = None,
         timezone_name: str = "Asia/Shanghai",
         on_execution_finished: ExecutionFinishedCallback | None = None,
+        on_handling_settled: HandlingSettledCallback | None = None,
     ) -> WorldStage:
         """创建并接管无用户世界上下文；构造失败时关闭上下文。"""
         context = await context_factory.create(str(uuid4()), user_id=None)
         try:
             return cls(character_id=character_id, world_id=world_id, agent=agent,
                        context=context, config=config, timezone_name=timezone_name,
-                       on_execution_finished=on_execution_finished)
+                       on_execution_finished=on_execution_finished,
+                       on_handling_settled=on_handling_settled)
         except BaseException:
             await context.close()
             raise
@@ -198,6 +203,8 @@ class WorldStage:
             self._pending.pop(stimulus_id, None)
         if report.request_status is d.HandlingRequestStatus.FAILED and not report.retryable:
             self._pending.pop(request.stimulus.stimulus_id, None)
+        if self._on_handling_settled is not None:
+            self._on_handling_settled(request, report)
 
     def _handle_done(self, request_id: str, task: asyncio.Task[None]) -> None:
         self._handles.pop(request_id, None)

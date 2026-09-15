@@ -358,11 +358,16 @@ class SystemRuntime:
         async with self._world_stage_lock:
             stage = self._world_stages.get(key)
             if stage is None or stage.state is StageState.TERMINATED:
+                settlements = getattr(getattr(self, "world", None), "settlements", None)
                 stage = await WorldStage.create(
                     character_id=selected_character, world_id=selected_world,
                     agent=self.get_agent(selected_character),
                     context_factory=self.agent_runtime.context_factories[selected_character],
                     config=self.world_stage_config,
+                    on_handling_settled=(
+                        settlements.on_handling_settled if settlements is not None else None),
+                    on_execution_finished=(
+                        settlements.on_execution_finished if settlements is not None else None),
                 )
                 self._world_stages[key] = stage
             return stage
