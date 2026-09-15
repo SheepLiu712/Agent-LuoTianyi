@@ -6,9 +6,12 @@ from routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.handlers.stimulus.chat import ChatReplyHandler
+from src.agent.handlers.stimulus.chat import (
+    _MEMORY_ACK_REPLY_TOPIC_PREFIX,
+    ChatReplyHandler,
+)
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import ExplicitMemoryIntentSkill
+from src.agent.skills.cognitive import ExplicitMemoryIntentSkill, ReplyDraft
 from src.agent.skills.mutation import IntentionalMemoryCommit
 
 
@@ -34,8 +37,21 @@ class _Understanding:
 
 
 class _Composer:
+    def __init__(self, events=None):
+        self.events = events
+        self.calls = []
+
     async def compose(self, **kwargs):
-        pytest.fail("明确记忆请求不得交给普通回复生成")
+        self.calls.append(kwargs)
+        if self.events is not None:
+            self.events.append("compose")
+            return (ReplyDraft(
+                content="compose-memory-ack",
+                sound_content="compose-memory-ack-sound",
+                tone="gentle",
+                expression="smile",
+            ),)
+        pytest.fail("普通回复生成只允许由明确记忆确认路径按提示调用")
 
 
 class _Intent:
@@ -66,8 +82,8 @@ def _deadline(text="请记住我喜欢乌龙茶", *, user_id="u"):
     return replace(value, interaction=interaction, prepared_inputs=(prepared,))
 
 
-def _agent(commit):
-    handler = ChatReplyHandler(_Composer(), _Understanding(), _Intent(), commit)
+def _agent(commit, *, composer=None):
+    handler = ChatReplyHandler(composer or _Composer(), _Understanding(), _Intent(), commit)
     return Agent(character_id="luotianyi", stimulus_router=StimulusRouter((
         (d.StimulusKind.TEXT_MESSAGE, handler),
     )))
@@ -81,13 +97,44 @@ async def test_acknowledgement_is_emitted_after_memory_commit():
         events.append("promise")
         return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
 
-    report = await _agent(_Commit(events)).handle_stimulus(
+    report = await _agent(_Commit(events), composer=_Composer(events)).handle_stimulus(
         _deadline(), Sink(observe), context=_Context(),
     )
 
-    assert events == ["commit", "promise"]
+    assert events == ["commit", "compose", "promise"]
     assert report.request_status is d.HandlingRequestStatus.COMPLETED
     assert report.consumed_pending_stimulus_ids == ("m2", "m1")
+
+
+@pytest.mark.asyncio
+async def test_memory_acknowledgement_uses_composition_hint_after_commit():
+    events = []
+    composer = _Composer(events)
+    sink = Sink()
+
+    report = await _agent(_Commit(events), composer=composer).handle_stimulus(
+        _deadline(), sink, context=_Context(),
+    )
+
+    assert events == ["commit", "compose"]
+    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    assert len(sink.values) == 1
+    action = sink.values[0].actions[0]
+    assert isinstance(action, d.Say)
+    assert action.content == "compose-memory-ack"
+    assert action.sound_content == "compose-memory-ack-sound"
+    assert action.tone.value == "gentle"
+    assert action.expression == d.ChangeExpression(expression_id="smile")
+    assert len(composer.calls) == 1
+    compose_call = composer.calls[0]
+    assert compose_call["character_id"] == "luotianyi"
+    assert compose_call["user_id"] == "u"
+    assert compose_call["reply_topic"].startswith(_MEMORY_ACK_REPLY_TOPIC_PREFIX)
+    assert compose_call["reply_topic"].endswith("我喜欢乌龙茶")
+    assert compose_call["conversation_history"] == ""
+    assert compose_call["memory_queries"] == ()
+    assert compose_call["sing_attempts"] == ()
+    assert compose_call["excluded_segments"] == set()
 
 
 @pytest.mark.asyncio
@@ -112,7 +159,7 @@ async def test_write_failure_emits_no_promise_and_retains_pending():
 async def test_redelivery_reuses_memory_revision_without_duplicate_side_effect():
     events = []
     commit = _Commit(events)
-    handler = _agent(commit)
+    handler = _agent(commit, composer=_Composer(events))
 
     first = await handler.handle_stimulus(_deadline(), Sink(), context=_Context())
     second = await handler.handle_stimulus(_deadline(), Sink(), context=_Context())
@@ -129,15 +176,18 @@ async def test_redelivery_reuses_memory_revision_without_duplicate_side_effect()
 async def test_missing_user_identity_never_defaults_to_another_user():
     events = []
     commit = _Commit(events)
+    sink = Sink()
 
     report = await _agent(commit).handle_stimulus(
-        _deadline(user_id=None), Sink(), context=_Context(user_id=None),
+        _deadline(user_id=None), sink, context=_Context(user_id=None),
     )
 
     assert commit.calls == []
+    assert sink.values == []
     assert report.request_status is d.HandlingRequestStatus.FAILED
     assert report.error_code is d.HandlingErrorCode.INTERNAL_ERROR
     assert report.retained_pending_stimulus_ids == ("m2", "m1")
+    assert report.consumed_pending_stimulus_ids == ()
 
 
 def test_explicit_intent_config_extends_legacy_phrases_and_can_disable_detection():

@@ -1,6 +1,7 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
 from dataclasses import replace
 from datetime import datetime
+from typing import Final
 from uuid import uuid4
 
 import src.domain.agent as d
@@ -15,6 +16,8 @@ from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.agent.skills.reflection import ReflectionSkill
 from src.utils.enum_type import ConversationSource
+
+_MEMORY_ACK_REPLY_TOPIC_PREFIX: Final = "刚刚已经把这条用户长期记忆提交完成，请用角色口吻简短确认"
 
 
 def _report(request: d.HandleStimulusRequest, *, consume: bool = False,
@@ -41,7 +44,7 @@ class ChatPreprocessingHandler:
             terms = self._understanding.extract_terms(stimulus.text)
             entry = ConversationEntry(
                 entry_id=str(uuid4()),
-                timestamp=datetime.now(),  # noqa: DTZ005 - 存储契约要求服务器本地朴素时间。
+                timestamp=datetime.now(),
                 source=ConversationSource.USER.value,
                 content=TextContent(stimulus.text, terms),
             )
@@ -100,11 +103,11 @@ def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
         if draft.sing is not None:
             song, segment = draft.sing
             text = f"{draft.content}\n{draft.lyrics}".strip() if draft.lyrics else draft.content
-            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),  # noqa: DTZ005
+            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
                 source=ConversationSource.AGENT.value,
                 content=SongContent(text, song, segment)))
         elif draft.content.strip():
-            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),  # noqa: DTZ005
+            entries.append(ConversationEntry(entry_id=str(uuid4()), timestamp=datetime.now(),
                 source=ConversationSource.AGENT.value, content=TextContent(draft.content)))
     return tuple(entries)
 
@@ -144,13 +147,16 @@ class ChatReplyHandler:
                 user_id=identity.user_id,
                 content=memory_content,
             )
-            action = d.Say(
-                action_id=f"{request.request_id}-memory-ack",
-                content="我记住了。", sound_content="我记住了。", prepared_audio_ref=None,
-                tone=d.Tone(value="normal"), expression=None,
-                delivery=d.OutputDelivery.CONVERSATION,
+            drafts = await self._composition.compose(
+                character_id=identity.character_id,
+                user_id=identity.user_id,
+                reply_topic=f"{_MEMORY_ACK_REPLY_TOPIC_PREFIX}：{memory_content}",
+                conversation_history=_render_history(plans.context.conversation.read()),
+                memory_queries=(),
+                sing_attempts=(),
+                excluded_segments=set(),
             )
-            await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=(action,)))
+            await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=_reply_actions(request, drafts)))
             return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
         drafts: tuple = ()
         if reply_topic:
