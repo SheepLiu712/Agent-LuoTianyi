@@ -193,7 +193,7 @@ class WorldRuntime:
             config = self._character_task_config("citywalk", character_id)
             if not config.get("enabled", True):
                 continue
-            tasks.append(CitywalkTask(config, character_id=character_id))
+            tasks.append(CitywalkTask(config, character_id=character_id, settlements=self.settlements))
         return tasks
 
     def _build_learn_sing_songs_tasks(self) -> List[LearnSingSongsTask]:

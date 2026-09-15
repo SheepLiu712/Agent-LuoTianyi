@@ -1,13 +1,34 @@
 import asyncio
+import json
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
 import pytest
+
+import src.domain.agent as d
+from src.agent.handlers.action.dynamic import PublishDynamicHandler
+from src.agent.handlers.stimulus.citywalk import CitywalkObservationHandler
+from src.agent.processing.plan_emitter import PlanEmitter
+from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.capabilities.dynamic import DynamicCapability
 from src.system.database.database_service import DatabaseManager
 from src.system.database.sql_database import InviteCode
-from src.world.dynamic_interaction.task import DynamicInteractionTask
 from src.world.citywalk.task import CitywalkTask
+from src.world.dynamic_interaction.task import DynamicInteractionTask
 from src.world.learn_sing_songs.task import LearnSingSongsTask
+from src.world.world_settlements import WorldSettlementRouter
+
+
+class PlanSink:
+    """记录交付计划并返回确认回执。"""
+
+    def __init__(self):
+        self.plans = []
+
+    async def emit(self, plan):
+        self.plans.append(plan)
+        return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
 
 
 @pytest.fixture(scope="function")
@@ -40,7 +61,8 @@ def _register_and_login(db_manager: DatabaseManager, username: str, invite_code:
     return result
 
 
-def test_citywalk_task_publishes_global_dynamic(db_manager: DatabaseManager, tmp_path: Path):
+def test_citywalk_completion_publishes_global_dynamic(db_manager: DatabaseManager, tmp_path: Path):
+    """散步完成后由 Agent 侧决定并发布动态，world 只投递事实。"""
     _add_invite_code(db_manager, "INVITE5")
     user = _register_and_login(db_manager, "cityuser", "INVITE5")
 
@@ -51,10 +73,12 @@ def test_citywalk_task_publishes_global_dynamic(db_manager: DatabaseManager, tmp
         return "今天在上海的武康路散步，风很舒服。"
 
     dynamic_capability.generate_world_dynamic_content = fake_generate_world_dynamic_content
+    publishing = DynamicPublishingSkill(dynamic_capability)
 
     report_path = tmp_path / "citywalk_20260704_120000.json"
     report_path.write_text(
-        '{"overview": {"city": "上海", "selected_destination": "武康路"}, "diary_text": "今天慢慢走了很多路，也看了不少风景。"}',
+        '{"overview": {"city": "上海", "selected_destination": "武康路"}, '
+        '"diary_text": "今天慢慢走了很多路，也看了不少风景。"}',
         encoding="utf-8",
     )
 
@@ -66,34 +90,74 @@ def test_citywalk_task_publishes_global_dynamic(db_manager: DatabaseManager, tmp
         async def add_event(self, payload):
             return payload
 
-    class FakeCharacterRuntime:
-        profile = SimpleNamespace(character_id="luotianyi", display_name="洛天依")
+    class FakeFactSink:
+        def __init__(self):
+            self.facts = []
 
-        async def publish_citywalk_dynamic(self, **kwargs):
-            return await dynamic_capability.publish_citywalk_dynamic(
-                character_id="luotianyi",
-                character_name="洛天依",
-                character_persona="",
-                speaking_style="",
-                **kwargs,
-            )
+        async def submit(self, fact):
+            self.facts.append(fact)
+            return True
 
-    task = CitywalkTask({"daily_run_probability": 1.0})
+    sink = FakeFactSink()
+
+    async def get_world_stage(character_id=None, world_id=None):
+        return SimpleNamespace(fact_sink=sink)
+
+    router = WorldSettlementRouter()
+    task = CitywalkTask({"daily_run_probability": 1.0}, settlements=router)
     task.system_runtime = SimpleNamespace(
         capability_manager=SimpleNamespace(dynamics=dynamic_capability),
+        agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
+        get_world_stage=get_world_stage,
     )
     task.database_manager = db_manager
     task.event_store = FakeEventStore()
-    task.character_runtime = FakeCharacterRuntime()
     task.citywalk_service = FakeCitywalkService()
 
-    result = task.run_once()
+    result = asyncio.run(task.run_once())
     assert result.ok is True
-    assert result.data["dynamic_id"]
+    assert result.data["observation_submitted"] is True
+
+    fact = sink.facts[0]
+    request = d.HandleStimulusRequest(
+        request_id="req", stimulus=fact,
+        interaction=d.WorldInteractionSnapshot(
+            interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
+            now=fact.occurred_at, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(),
+            world_id="default", world_revision=fact.world_revision, activity_id=None,
+            activity_revision=None, planning_cycle_id=None, schedule_revision=0,
+        ),
+        cancellation=d.CancellationToken(),
+    )
+    plan_sink = PlanSink()
+    handling = asyncio.run(
+        CitywalkObservationHandler(publishing).handle(
+            request, PlanEmitter(character_id="luotianyi", request=request, sink=plan_sink),
+        )
+    )
+    assert handling.request_status is d.HandlingRequestStatus.COMPLETED
+    plan = plan_sink.plans[0]
+
+    action_result = asyncio.run(PublishDynamicHandler("luotianyi", publishing).realize(
+        plan.actions[0],
+        d.ExecutionContext(execution_id="e", interaction_id="wi", current_interaction_revision=1,
+                           cancellation=d.CancellationToken()),
+        None,
+    ))
+    assert action_result.effect_ref.kind is d.EffectKind.DYNAMIC_POST
 
     feed = db_manager.dynamic_store.list_dynamics_for_user(user["user_uuid"])
     assert feed["items"][0]["source_type"] == "citywalk"
     assert feed["items"][0]["content"]  # 内容不为空
+
+    router.on_handling_settled(request, handling)
+    router.on_execution_finished(plan, d.ExecutionReport(
+        execution_id="e", plan_id=plan.plan_id, status=d.ExecutionStatus.COMPLETED,
+        action_results=(action_result,), output_started=False, error_code=None, retryable=False,
+    ))
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["dynamic_id"] == action_result.effect_ref.effect_id
+    assert report["dynamic_content"] == "今天在上海的武康路散步，风很舒服。"
 
 
 def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):

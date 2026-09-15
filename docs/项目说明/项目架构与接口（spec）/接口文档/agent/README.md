@@ -14,6 +14,8 @@
 
 交互上下文的创建、用户资料、近期对话和召回缓存见 [Context 接口](context.md)。
 
+世界事实的处理：`WORLD_OBSERVATION` 按 `observation_kind.value` 分派到已登记分支——`citywalk_completed` 由 `CitywalkObservationHandler` 生成角色化正文并交付 `PublishDynamic` 计划；未登记类别仍按事实 ID 结算，不产生计划。`PUBLISH_DYNAMIC` 由 `PublishDynamicHandler` 经共享动态技能按来源身份幂等发布，成功报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<dynamic_id>)`，失败返回稳定错误码且不声称已提交效果。
+
 ## 模块职责
 
 `server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。

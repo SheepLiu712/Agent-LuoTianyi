@@ -5,12 +5,17 @@ from typing import TYPE_CHECKING, Any
 
 from src.agent import Agent
 from src.agent.context import ContextFactory
+from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReflectionHandler,
     ChatReplyHandler,
+)
+from src.agent.handlers.stimulus.citywalk import (
+    CITYWALK_OBSERVATION_KIND,
+    CitywalkObservationHandler,
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
@@ -21,6 +26,7 @@ from src.agent.handlers.stimulus.world_activity import (
 from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
 from src.agent.skills import Skills
+from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent_runtime.agent_registry import AgentRegistry
 from src.agent_runtime.character_registry import CharacterRegistry
@@ -74,6 +80,8 @@ class AgentRuntime:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
             self.skills = Skills(self.config.get("skills", {}), llm_service,
                                  tts_engine=AsyncTTS(capability_manager.speech))
+            # 动态发布按来源身份落库；角色上下文由能力自身的装配提供
+            self.dynamic_publishing = DynamicPublishingSkill(capability_manager.dynamics)
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -99,20 +107,27 @@ class AgentRuntime:
                 character_id: ContextFactory(character_id=character_id, database=database_manager.conversation_service)
                 for character_id in self.character_runtimes
             }
+            world_activity = WorldActivityHandler(branches={
+                CITYWALK_OBSERVATION_KIND: CitywalkObservationHandler(self.dynamic_publishing),
+            })
             self._agents = {
                 character_id: Agent(
                     character_id=character_id,
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
                         (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
-                        *((kind, WorldActivityHandler()) for kind in WORLD_ACTIVITY_STIMULUS_KINDS),
+                        *((kind, world_activity) for kind in WORLD_ACTIVITY_STIMULUS_KINDS),
                         *((kind, ChatPreprocessingHandler()) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
                             StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),
                     ), reflection_handler=ChatReflectionHandler()),
-                    action_router=ActionRouter(((ActionKind.SAY, SayHandler(
-                        character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),)),
+                    action_router=ActionRouter((
+                        (ActionKind.SAY, SayHandler(
+                            character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
+                        (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(
+                            character_id, self.dynamic_publishing)),
+                    )),
                 )
                 for character_id in self.character_runtimes
             }
