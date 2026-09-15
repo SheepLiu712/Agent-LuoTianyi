@@ -9,6 +9,56 @@
 
 ## 已完成事实
 
+### 2026-09-14 真实聊天链路结算与取消验收（10）GREEN
+
+- 交付行为：新增 `tests/stage/test_chat_reply_settlement.py`，用真实 `Agent`（文本预处理 + 批次回复 + 反思 + SAY 执行）经真实 `ChatStage` 验证：(a) 文本批次经期限触发后完成「预处理→回复→执行→结算」，pending 清空且 `user`/`agent` 记录按序落库；(b) 回复执行在途时到达新内容，旧回复被取消并丢弃，新批次重新回复并最终结算。
+- interface spec：无新增或改变公开接口；本切片仅测试与测试夹具（假 context 的 `conversation` 补 `read()`）。
+- Red/Green：Issue #69 是验证工单，无新增运行时行为，记录为验证切片；不制造人工 Red。
+- commit 或 PR：分支 `feat/agent-10-settlement-verification`（堆叠在 08c 之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/stage/test_chat_reply_settlement.py -q` 为 2 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 832 passed、2 skipped。
+- 与 #69 验收项对照：取消（本切片真实链路覆盖）、部分消费（由既有 `tests/stage/test_concurrent_handling.py` 的按 ID 保留用例覆盖）、晚返回丢弃（由既有 stale deadline 用例覆盖）。本切片新增的是真实 handler 链路上的结算与取消证据。
+- 未验证范围：尚未接入生产路由（#66），未运行真实 LLM/TTS/GPU、真机或生产数据库。
+
+### 2026-09-14 批次回复的演唱决定接入（08c-2）GREEN
+
+- 交付行为：`ChatReplyHandler` 在批次回复中执行演唱决定——用 `TextPreprocessingSkill.extract_terms` 从本批文本提取演唱尝试；从近期对话的 `SongContent` 记录推导「最近已唱片段」作为排除集；两者传入回复生成技能用于选择片段。生成演唱草稿时取回片段歌词并写入 `source=agent` 的 `SongContent` 记录（文本为「唱了《歌》+歌词」）。`ResponseCompositionSkill.compose` 新增 `excluded_segments` 参数并回填 `ReplyDraft.lyrics`。
+- interface spec：无新增或扩大公开 interface；`TextPreprocessingSkill.extract_terms`、`build_sing_plan_for_topic(excluded_segments=...)`、`capability.singing.get_segment_lyrics` 均为现有能力。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：与 08c-1 同属 PR 分支 `feat/agent-08c-reply-composition`（本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent/test_chat_reply.py -q` 为 4 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 830 passed、2 skipped。相关文件 LSP 诊断无报错。
+- 明确不包含（留待 08c-3）：仍未接入「提取/注意力选择」（旧 `extract_topics`/`plan_topic_turn` 依赖 `UnreadMessage`/`ExtractedTopic`，SPEC A7 禁止新调用方依赖）；正式检索替换候选时按刺激 ID 清理尚未实现。
+- 未验证范围：未运行真实 LLM/TTS/演唱音频、GPU、真机或生产数据库；生产聊天仍走旧 ChatStream。
+
+### 2026-09-14 到期批次回复生成与落库（08c-1）GREEN
+
+- 交付行为：`InteractionDeadline` 批次的 `ChatReplyHandler` 从 `prepared_inputs` 组装回复话题、渲染近期历史，经回复生成技能召回记忆并生成回复草稿，按接收顺序交付一个 `ActionPlan`（有序 `Say`/`Sing` 行动），并落库对应的 `source=agent` 正式对话记录；报告按 ID 消费本批（`consumed` 等于本批 pending）。
+- interface spec：无新增或扩大公开 interface；复用 `ActionPlanDraft`、`Say`、`Sing`、`PreprocessedInput` 与 `context.conversation.append`。新增内部技能 `ResponseCompositionSkill`（`agent/skills/cognitive/response_composition.py`），包装 `mind.search_memory_context_for_topic`、`mind.build_sing_plan_for_topic` 与 `conscious.generate_topic_reply_for_pipeline`；`Skills` 新增内部 `register()` 以装配需要运行时依赖的技能。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-08c-reply-composition`（堆叠在 08b 之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent/test_chat_reply.py -q` 为 3 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 829 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
+- 明确不包含（留待 08c-2）：本切片未接入「提取/注意力选择」——旧 `extract_topics`/`plan_topic_turn` 依赖 `UnreadMessage`/`ExtractedTopic`，而 SPEC A7 禁止新调用方依赖这些旧类型；因此本切片以「整批作为一个回复话题」生成。`sing_attempts` 暂传空、最近已唱排除与歌词记录未接入。
+- 未验证范围：未运行真实 LLM/TTS/GPU、真机或生产数据库；生产聊天仍走旧 ChatStream。
+
+### 2026-09-14 演唱行动 SING 渲染（08b）GREEN
+
+- 交付行为：注册 `ActionKind.SING` 的真实处理器 `SingHandler`。对既定的 `Sing(song_id, segment_id, expression)` 以 `CONVERSATION` 呈现方式输出「表情 → 完整音频块（`COMPLETE_FILE`）→ 消息结束（COMPLETED）」；片段不可用或无音频时输出 FAILED 终止包并返回 `AUDIO_EMPTY`，生成异常返回 `AUDIO_GENERATION_FAILED`，超时返回 `PROVIDER_TIMEOUT`。处理器不选择歌曲或片段、不恢复 `SONG_STATE`。
+- interface spec：无新增或扩大公开 interface；复用 `Sing`、`AudioChunkDraft`、`ExpressionDraft`、`MessageEndDraft`。新增内部技能 `SingingSkill`（`agent/skills/expression/singing.py`）包装 `SingingCapability.sing` 并在 executor 中调用，由 `Skills` 装配。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-08b-sing-handler`（堆叠在 08a 之上，本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`（Python 3.10，pytest 9.1.1）。`python -m pytest tests/agent/test_singing.py -q` 为 5 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 826 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
+- 附带更新：`test_facade_contract.py::test_execution_preflight_rejects_whole_plan` 原以「SING 未注册」制造整计划拒绝，改为使用仍未实现的 `WRITE_DIARY` 保持同一语义；`tests/agent_runtime_support.py` 的 capability_manager 增加 singing 替身；`test_compaction_skill.py` 的 `Skills` 构造补 `singing`。
+- 未验证范围：未运行真实演唱音频、TTS、GPU、真机或生产数据库；歌曲/片段选择、最近已唱排除与歌词记录仍属 handle 侧（08c）；生产聊天仍走旧 ChatStream。
+
+### 2026-09-14 文本预处理落库（08a）GREEN
+
+- 交付行为：`TextMessage` 经 `ChatPreprocessingHandler` 提取歌曲实体关键词，并借 `plans.context.conversation.append` 落库一条 `source=user` 的正式对话记录，返回 `PreprocessedInput.conversation_entry_ids`；本次不交付计划、不消费 pending。缺少 context 时返回 `FAILED / INTERNAL_ERROR`，不静默跳过落库。图片、语音、typing、选图与触摸仍保持占位行为。
+- interface spec：无新增或扩大公开 interface；复用现有 `PreprocessedInput`、`InteractionContext.conversation`（`agent/context`），SPEC 已满足，无 SPEC commit。
+- 内部衔接：新增 `agent/skills/cognitive/TextPreprocessingSkill`（包装 `SongEntityLinker`），由 `Skills` 装配并注入 handler；`AgentRuntime` 传入 `agent.preprocessing` 配置。
+- Red/Green：Issue #67 明确不要求 SPEC→RED→GREEN 与阶段提交；本切片不制造人工失败测试，记录为单次 Green 候选。
+- commit 或 PR：分支 `feat/agent-08a-text-preprocessing`（本记录所在提交）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`（Python 3.10，pytest 9.1.1）。`python -m pytest tests/agent/test_chat_preprocessing.py -q` 为 3 passed；`python -m pytest tests/agent tests/stage -q --tb=short` 为 236 passed；`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` 为 821 passed、2 skipped（2 skip 为 world 真实网络探测）。相关文件 LSP 诊断无报错。
+- 未验证范围：未运行真实 LLM/VLM/TTS、真机或生产数据库；批量回复（08c）与 Sing action handler（08b）尚未实现；生产聊天仍走旧 ChatStream（#66）。
+- 附带更新：`test_handling_preparation.py` 的“预处理不落库”占位断言随迁移改为“已落库且两次调用 id 不同”；`test_chat_stage.py` 的假 context 补 `conversation.append`；`test_concurrent_handling.py` 的 handler 子类注入预处理替身。
 ### 2026-09-14 QQ 凭据维护不变量验证（26）GREEN
 
 - 交付行为：为 `QQMusicCredentialRefreshTask` 补充不变量测试——默认 21600 秒周期且启动立即执行；共享凭据路径按规范化去重只检查一次；无已初始化凭据时 skipped（`credential_count=0`）；多文件按文件数计数；部分失败返回 failure 并记录 `failed_characters`；`ensure_dependencies` 要求 `system_runtime` 与非空学歌任务；任务不持有 `agent_runtime`，保持纯机械。
