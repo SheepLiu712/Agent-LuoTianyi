@@ -1,12 +1,17 @@
 from __future__ import annotations
-import asyncio
-from typing import Any, Dict, TYPE_CHECKING
 
-from src.capabilities.dynamic import DynamicCapability
+import asyncio
+from typing import TYPE_CHECKING, Any, Dict
+
 from src.capabilities.diary import DiaryCapability
+from src.capabilities.dynamic import DynamicCapability
+from src.capabilities.image_understanding import ImageUnderstanding
+from src.capabilities.media_resolution import (
+    FilesystemMediaResolver,
+    UnconfiguredMediaResolver,
+)
 from src.capabilities.singing import SingingCapability
 from src.capabilities.speech import SpeechCapability
-from src.capabilities.image_understanding import ImageUnderstanding
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -51,6 +56,14 @@ class CapabilityManager:
                 self.config.get("image_understanding", {})
             )
             self.image_understanding.create_vlm_module(llm_service)
+
+            self.logger.info("Start initializing Media Resolver Capability...")
+            media_config = self.config.get("media_resolution", {})
+            self.media_resolver = (
+                FilesystemMediaResolver(media_config)
+                if isinstance(media_config, dict) and media_config.get("root")
+                else UnconfiguredMediaResolver(media_config)
+            )
         except BaseException:
             speech = getattr(self, "speech", None)
             if speech is not None:
@@ -78,6 +91,7 @@ class CapabilityManager:
             "dynamics": self.dynamics,
             "diary": self.diary,
             "image_understanding": self.image_understanding,
+            "media_resolver": self.media_resolver,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
@@ -87,6 +101,7 @@ class CapabilityManager:
         self.dynamics.ensure_dependencies()
         self.diary.ensure_dependencies()
         self.image_understanding.ensure_dependencies()
+        self.media_resolver.ensure_dependencies()
 
     async def stop(self) -> None:
         """Stop owned capability resources exactly once after a successful attempt."""

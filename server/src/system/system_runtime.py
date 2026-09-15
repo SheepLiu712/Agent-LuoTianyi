@@ -24,7 +24,6 @@ from src.utils.logger import (
 )
 from src.world import WorldRuntime
 
-
 logger = get_logger(__name__)
 DEFAULT_WORLD_ID: Final = "default"
 
@@ -123,7 +122,10 @@ class SystemRuntime:
                 client_llm_executor=client_llm_executor,
                 observability=observability,
                 owns_observability=owns_observability,
-                chat_adapter=WebSocketAdapter(config.get("chat_adapter", {}),
+                chat_adapter=WebSocketAdapter({
+                    **config.get("chat_adapter", {}),
+                    "media_store": config.get("capabilities", {}).get("media_resolution", {}),
+                },
                                                default_character_id=agent_runtime.default_character_id),
                 default_world_id=str(config.get("world", {}).get("world_id", DEFAULT_WORLD_ID)),
                 world_stage_config=config.get("world_stage", {}),

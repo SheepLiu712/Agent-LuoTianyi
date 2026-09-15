@@ -1,19 +1,19 @@
 """Stage 的公开接入、调度、取消与生命周期行为。"""
 import asyncio
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 import src.domain.agent as d
-from src.domain.stage import StageState
 from src.adapter.websocket import WebSocketAdapter
-from src.stage import ChatStage, StageManager
 from src.agent import Agent
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
+from src.domain.stage import StageState
+from src.stage import ChatStage, StageManager
 from src.system.user_interface.types import WSMessage
 from src.system.user_interface.websocket_service import WebSocketConnection
 
@@ -32,8 +32,11 @@ class Socket:
 
 
 def stimulus(cls=d.TextMessage, **fields):
-    common = dict(stimulus_id=str(uuid4()), schema_version=1, occurred_at=datetime.now(timezone.utc),
-                  source=d.StimulusSource.USER, target_character_ids=("luotianyi",), user_id="user", ephemeral=False)
+    common = {
+        "stimulus_id": str(uuid4()), "schema_version": 1,
+        "occurred_at": datetime.now(timezone.utc), "source": d.StimulusSource.USER,
+        "target_character_ids": ("luotianyi",), "user_id": "user", "ephemeral": False,
+    }
     if cls is d.TextMessage:
         common.update(text="你好", client_msg_id=str(uuid4()))
     common.update(fields)
@@ -108,6 +111,14 @@ class StageContextFactory:
         from src.agent.context import RecalledMemoryContext
         context.recalled_memory = RecalledMemoryContext()
         context.close = close
+        from src.agent.context import ConversationSnapshot
+        entries = []
+        async def append(values):
+            entries.extend(values)
+        context.conversation = SimpleNamespace(
+            append=append, entries=entries,
+            read=lambda: ConversationSnapshot(entries=tuple(entries)),
+        )
         self.created.append(context)
         return context
 
@@ -227,7 +238,7 @@ async def test_manager_reconnect_old_disconnect_and_offline_expiry():
     ending = await take(agent.requests)
     assert ending.interaction.interaction_id == other.interaction_id
     assert isinstance(ending.stimulus, d.InteractionEnding)
-    assert adapter.receive_event(new, WSMessage(event_type="user_text", client_msg_id="new", payload={"text": "你好"}))
+    assert await adapter.receive_event(new, WSMessage(event_type="user_text", client_msg_id="new", payload={"text": "你好"}))
     await take(agent.requests)
     await manager.close()
     assert stage.state is other.state is StageState.TERMINATED
@@ -311,6 +322,7 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
     import io
     import json
     import wave
+
     from src.agent.handlers.action.router import ActionRouter
     from src.agent.handlers.action.say import SayHandler
     from src.agent.processing.plan_emitter import ActionPlanDraft
@@ -322,7 +334,9 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
         wav.writeframes(b"\x00\x01" * 120)
     (tmp_path / "hello.wav").write_bytes(data.getvalue())
     manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps([dict(name="hello", audio_path="hello.wav", text="你好", expression="normal")]), encoding="utf-8")
+    manifest.write_text(json.dumps([{
+        "name": "hello", "audio_path": "hello.wav", "text": "你好", "expression": "normal",
+    }]), encoding="utf-8")
     class TextHandler:
         async def handle(self, request, plans):
             if isinstance(request.stimulus, d.TextMessage):
@@ -336,7 +350,7 @@ async def test_real_adapter_stage_agent_prepared_say_chain(tmp_path):
         (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
     ]), action_router=ActionRouter([(d.ActionKind.SAY, SayHandler("luotianyi", object(), PreparedSpeechResources({"manifest": str(manifest)})))]))
     stage, _, adapter, connection, socket = await setup(agent)
-    assert adapter.receive_event(connection, WSMessage(event_type="user_text", client_msg_id="one", payload={"text": "你好"}))
+    assert await adapter.receive_event(connection, WSMessage(event_type="user_text", client_msg_id="one", payload={"text": "你好"}))
     async def terminal():
         while not any(p["type"] == "agent_message" and p["payload"]["is_final_package"] for p in socket.events):
             await asyncio.sleep(0)

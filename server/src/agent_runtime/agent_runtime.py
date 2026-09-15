@@ -7,6 +7,7 @@ from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.action.sing import SingHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReflectionHandler,
@@ -21,7 +22,17 @@ from src.agent.handlers.stimulus.world_activity import (
 from src.agent.luotianyi_agent import LuoTianyiAgent
 from src.agent.reflex import CharacterReflex
 from src.agent.skills import Skills
+from src.agent.skills.cognitive import (
+    ExplicitMemoryIntentSkill,
+    ImagePreprocessingSkill,
+    ResponseCompositionSkill,
+    TextPreprocessingSkill,
+)
+from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
+from src.agent.skills.mutation import IntentionalMemoryCommit
+from src.agent.skills.reflection import ReflectionSkill
 from src.agent_runtime.agent_registry import AgentRegistry
 from src.agent_runtime.character_registry import CharacterRegistry
 from src.agent_runtime.character_runtime import CharacterRuntime
@@ -73,7 +84,13 @@ class AgentRuntime:
         try:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
             self.skills = Skills(self.config.get("skills", {}), llm_service,
-                                 tts_engine=AsyncTTS(capability_manager.speech))
+                                 tts_engine=AsyncTTS(capability_manager.speech),
+                                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
+                                  explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
+                                  reply_composition_config=self.config.get("reply_composition", {}),
+                                  singing=capability_manager.singing,
+                                  media_resolver=capability_manager.media_resolver,
+                                  image_understanding=capability_manager.image_understanding)
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
                 self.config.get("agent", {}).get("preprocessing", {}),
@@ -87,6 +104,18 @@ class AgentRuntime:
                 capability_manager=capability_manager,
                 database_manager=database_manager,
             )
+
+            self.skills.register(ResponseCompositionSkill, ResponseCompositionSkill(
+                self.skills.reply_composition_config,
+                lambda character_id: self.character_runtimes[character_id],
+            ))
+            self.skills.register(ReflectionSkill, ReflectionSkill(
+                self.config.get("reflection", {}),
+                lambda character_id: self.character_runtimes[character_id],
+            ))
+            self.skills.register(IntentionalMemoryCommit, IntentionalMemoryCommit(
+                lambda character_id: self.character_runtimes[character_id].mind.memory,
+            ))
 
             self.agent_registry = AgentRegistry(
                 self.config.get("agent_registry", {}),
@@ -104,15 +133,27 @@ class AgentRuntime:
                     character_id=character_id,
                     stimulus_router=StimulusRouter((
                         (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
-                        (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler()),
+                        (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
+                            self.skills.get(ResponseCompositionSkill),
+                            self.skills.get(TextPreprocessingSkill),
+                            self.skills.get(ExplicitMemoryIntentSkill),
+                            self.skills.get(IntentionalMemoryCommit))),
                         *((kind, WorldActivityHandler()) for kind in WORLD_ACTIVITY_STIMULUS_KINDS),
-                        *((kind, ChatPreprocessingHandler()) for kind in (
+                        *((kind, ChatPreprocessingHandler(
+                            self.skills.get(TextPreprocessingSkill),
+                            self.skills.get(ImagePreprocessingSkill))) for kind in (
                             StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
                             StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
                             StimulusKind.IMAGE_SELECTION_CLOSED, StimulusKind.TOUCH_INTERACTION)),
-                    ), reflection_handler=ChatReflectionHandler()),
-                    action_router=ActionRouter(((ActionKind.SAY, SayHandler(
-                        character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),)),
+                    ), reflection_handler=ChatReflectionHandler(
+                        self.skills.get(ReflectionSkill),
+                        self.skills.get(ConversationCompactionSkill))),
+                    action_router=ActionRouter((
+                        (ActionKind.SAY, SayHandler(
+                            character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
+                        (ActionKind.SING, SingHandler(
+                            character_id, self.skills.get(SingingSkill))),
+                    )),
                 )
                 for character_id in self.character_runtimes
             }
