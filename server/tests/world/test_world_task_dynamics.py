@@ -10,8 +10,10 @@ import src.domain.agent as d
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.stimulus.citywalk import CitywalkObservationHandler
 from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
-from src.agent.processing.plan_emitter import PlanEmitter
-from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
+from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
+from src.agent.skills.cognitive.learned_song_experience import (
+    LearnedSongExperienceSkill,
+)
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.capabilities.dynamic import DynamicCapability
@@ -325,134 +327,240 @@ def test_learned_song_dynamic_is_idempotent_by_character_and_song(
     assert len(learned_items) == 1
 
 
-def test_dynamic_interaction_task_replies_and_updates_status(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE7")
-    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+def _build_dynamic_task(
+    db_manager: DatabaseManager,
+    sink: "FakeFactSink",
+    *,
+    router: WorldSettlementRouter | None = None,
+    config: dict | None = None,
+) -> DynamicInteractionTask:
+    """构造只依赖 system_runtime/database 的动态互动任务，不提供 CharacterRuntime。"""
 
+    async def get_world_stage(character_id=None, world_id=None):
+        return SimpleNamespace(fact_sink=sink)
+
+    task = DynamicInteractionTask(config or {}, settlements=router or WorldSettlementRouter())
+    task.initialize(SimpleNamespace(
+        database_manager=db_manager,
+        agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
+        get_world_stage=get_world_stage,
+    ))
+    return task
+
+
+def _dynamic_observation_request(fact: d.DynamicObserved) -> d.HandleStimulusRequest:
+    """按事实构造一次处理请求，供结算回调使用。"""
+    return d.HandleStimulusRequest(
+        request_id="req", stimulus=fact,
+        interaction=d.WorldInteractionSnapshot(
+            interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
+            now=fact.occurred_at, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(),
+            world_id="default", world_revision=fact.revision, activity_id=None,
+            activity_revision=None, planning_cycle_id=None, schedule_revision=0,
+        ),
+        cancellation=d.CancellationToken(),
+    )
+
+
+def _handling_report(
+    fact: d.DynamicObserved, *, status: d.HandlingRequestStatus = d.HandlingRequestStatus.COMPLETED,
+    plan_ids: tuple[str, ...] = (), error_code: d.HandlingErrorCode | None = None,
+) -> d.HandlingReport:
+    """构造处理结算：无计划且被消费即「明确忽略」。"""
+    consumed = (fact.stimulus_id,) if status is not d.HandlingRequestStatus.FAILED else ()
+    return d.HandlingReport(
+        request_id="req", trigger_stimulus_id=fact.stimulus_id, basis_interaction_revision=1,
+        request_status=status, considered_pending_stimulus_ids=(fact.stimulus_id,),
+        consumed_pending_stimulus_ids=consumed,
+        retained_pending_stimulus_ids=(
+            () if consumed else (fact.stimulus_id,)
+        ),
+        emitted_plan_ids=plan_ids, error_code=error_code, retryable=False,
+    )
+
+
+def _create_user_post(db_manager: DatabaseManager, auth: dict, content: str) -> str:
     ok, _, created = db_manager.dynamic_store.create_dynamic(
         author_type="user",
         author_id=auth["user_uuid"],
         owner_user_id=auth["user_uuid"],
         visibility="private",
-        content="今天其实有点紧张，不过也算坚持下来了。",
+        content=content,
         source_type="user_post",
     )
     assert ok is True
-    dynamic_id = created["id"]
+    return created["id"]
 
-    dynamic_capability = DynamicCapability()
-    dynamic_capability.wire_dependencies(database_manager=db_manager)
 
-    class FakeReplier:
-        def ensure_llm(self) -> bool:
-            return True
+def test_dynamic_interaction_submits_one_observation_per_pending_target(
+    db_manager: DatabaseManager,
+):
+    """world 只投递结构化事实：同一目标一轮只投递一次，且不依赖 CharacterRuntime。"""
+    _add_invite_code(db_manager, "INVITE7")
+    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    dynamic_id = _create_user_post(db_manager, auth, "今天其实有点紧张，不过也算坚持下来了。")
 
-        async def generate_reply_for_post(self, item, **kwargs):
-            return "我看到你很努力地撑过来了，辛苦啦。"
-
-        async def generate_reply_for_comment(self, item, **kwargs):
-            return {"should_reply": False, "reply": ""}
-
-    class FakeCharacterRuntime:
-        capability_manager = SimpleNamespace(dynamics=dynamic_capability)
-
-        async def generate_dynamic_reply_for_post(self, item):
-            return await dynamic_capability.replier.generate_reply_for_post(item, character_name="洛天依")
-
-        async def generate_dynamic_reply_for_comment(self, item):
-            return await dynamic_capability.replier.generate_reply_for_comment(item, character_name="洛天依")
-
-        def publish_dynamic_comment(self, **kwargs):
-            return dynamic_capability.publish_agent_comment(character_id="luotianyi", **kwargs)
-
-    class FakeAgentRuntime:
-        async def write_topic_memories(self, **kwargs):
-            return {"payload": {"user_memory": [], "event_memory": []}, "items": []}
-
-    task = DynamicInteractionTask({})
-    task.system_runtime = SimpleNamespace()
-    task.database_manager = db_manager
-    dynamic_capability.replier = FakeReplier()
-    task.character_runtime = FakeCharacterRuntime()
-    task.agent_runtime = FakeAgentRuntime()
+    sink = FakeFactSink()
+    task = _build_dynamic_task(db_manager, sink)
 
     result = asyncio.run(task.run_once())
+
     assert result.ok is True
-    assert result.data["reply_replied"] == 1
+    assert result.data["reply_processed"] == 1
+    assert result.data["memory_processed"] == 1
+    assert not hasattr(task, "character_runtime")
+    assert len(sink.facts) == 1  # 回复与记忆两方面共享同一条事实
+
+    fact = sink.facts[0]
+    assert fact.dynamic_id == dynamic_id
+    assert fact.target_message_id == dynamic_id
+    assert fact.target_kind is d.DynamicTargetKind.POST
+    assert fact.messages[0].message_id == dynamic_id
+    assert fact.messages[0].parent_message_id is None
+    assert fact.messages[0].author_ref.actor_id == auth["user_uuid"]
+    assert fact.revision == len(fact.messages)
+
+
+def test_dynamic_interaction_keeps_pending_until_settlement(db_manager: DatabaseManager):
+    """未收到结算时世界侧不猜测状态：目标保持 pending，并计入本轮的未结算数。"""
+    _add_invite_code(db_manager, "INVITE7")
+    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    dynamic_id = _create_user_post(db_manager, auth, "刚刚把这段话写下来了。")
+
+    sink = FakeFactSink()
+    task = _build_dynamic_task(db_manager, sink)
+    result = asyncio.run(task.run_once())
+
+    assert result.data["reply_pending"] == 1
+    assert result.data["memory_pending"] == 1
+    feed = db_manager.dynamic_store.list_dynamics_for_user(auth["user_uuid"])
+    target = next(item for item in feed["items"] if item["id"] == dynamic_id)
+    assert target["reply_status"] == "pending"
+    assert target["memory_status"] == "pending"
+
+
+def test_dynamic_interaction_writes_status_from_settlement_only(db_manager: DatabaseManager):
+    """只有实际提交的评论效果才写 replied；处理完成即记忆方面已处理。"""
+    _add_invite_code(db_manager, "INVITE7")
+    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    dynamic_id = _create_user_post(db_manager, auth, "今天把该做的事都做完了。")
+
+    sink = FakeFactSink()
+    router = WorldSettlementRouter()
+    task = _build_dynamic_task(db_manager, sink, router=router)
+    asyncio.run(task.run_once())
+    fact = sink.facts[0]
+
+    request = _dynamic_observation_request(fact)
+    plan_sink = PlanSink()
+    action = d.ReplyDynamic(
+        action_id="a1", body="我看到你坚持下来了，辛苦啦。",
+        target=d.DynamicReplyTarget(dynamic_id=dynamic_id, parent_comment_id=None),
+        owner_user_id=auth["user_uuid"],
+    )
+    receipt = asyncio.run(PlanEmitter(character_id="luotianyi", request=request, sink=plan_sink).emit(
+        ActionPlanDraft(source_stimulus_ids=(fact.stimulus_id,), actions=(action,)),
+    ))
+    router.on_handling_settled(request, _handling_report(fact, plan_ids=(receipt.plan_id,)))
+    router.on_execution_finished(plan_sink.plans[0], d.ExecutionReport(
+        execution_id="e", plan_id=receipt.plan_id, status=d.ExecutionStatus.COMPLETED,
+        action_results=(d.ActionResult(
+            action_id="a1", status=d.ActionExecutionStatus.COMPLETED, error_code=None,
+            irreversible_effect_committed=True,
+            effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_COMMENT, effect_id="comment-1"),
+        ),),
+        output_started=False, error_code=None, retryable=False,
+    ))
 
     feed = db_manager.dynamic_store.list_dynamics_for_user(auth["user_uuid"])
     target = next(item for item in feed["items"] if item["id"] == dynamic_id)
     assert target["reply_status"] == "replied"
-    ok, _, comments = db_manager.dynamic_store.list_dynamic_comments_for_user(auth["user_uuid"], dynamic_id)
-    assert ok is True
-    assert comments["items"][0]["author_type"] == "agent"
-    assert "辛苦" in comments["items"][0]["content"]
+    assert target["memory_status"] == "written"
 
 
-def test_dynamic_interaction_task_processes_memory_status(db_manager: DatabaseManager):
-    _add_invite_code(db_manager, "INVITE8")
-    auth = _register_and_login(db_manager, "memoryuser", "INVITE8")
+def test_dynamic_interaction_records_explicit_ignore(db_manager: DatabaseManager):
+    """明确不回复时由处理结算写 ignored，而不是把「计划被接受」当发布成功。"""
+    _add_invite_code(db_manager, "INVITE7")
+    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    dynamic_id = _create_user_post(db_manager, auth, "今天想在评论区安静一会儿。")
 
-    ok, _, created = db_manager.dynamic_store.create_dynamic(
-        author_type="user",
-        author_id=auth["user_uuid"],
-        owner_user_id=auth["user_uuid"],
-        visibility="private",
-        content="我最近开始重新练吉他了。",
-        source_type="user_post",
-    )
-    assert ok is True
-    dynamic_id = created["id"]
+    sink = FakeFactSink()
+    router = WorldSettlementRouter()
+    task = _build_dynamic_task(db_manager, sink, router=router)
+    asyncio.run(task.run_once())
+    fact = sink.facts[0]
 
-    dynamic_capability = DynamicCapability()
-    dynamic_capability.wire_dependencies(database_manager=db_manager)
-
-    class FakeReplier:
-        def ensure_llm(self) -> bool:
-            return True
-
-        async def generate_reply_for_post(self, item, **kwargs):
-            return "我看到你很努力地撑过来了，辛苦啦。"
-
-        async def generate_reply_for_comment(self, item, **kwargs):
-            return {"should_reply": False, "reply": ""}
-
-    class FakeCharacterRuntime:
-        capability_manager = SimpleNamespace(dynamics=dynamic_capability)
-
-        async def generate_dynamic_reply_for_post(self, item):
-            return await dynamic_capability.replier.generate_reply_for_post(item, character_name="洛天依")
-
-        async def generate_dynamic_reply_for_comment(self, item):
-            return await dynamic_capability.replier.generate_reply_for_comment(item, character_name="洛天依")
-
-        def publish_dynamic_comment(self, **kwargs):
-            return dynamic_capability.publish_agent_comment(character_id="luotianyi", **kwargs)
-
-    class FakeAgentRuntime:
-        async def write_topic_memories(self, **kwargs):
-            return {
-                "payload": {"user_memory": ["用户最近重新开始练吉他"], "event_memory": []},
-                "items": [
-                    {
-                        "memory_type": "user_memory",
-                        "content": "用户最近重新开始练吉他",
-                        "status": "written",
-                    }
-                ],
-            }
-
-    task = DynamicInteractionTask({})
-    task.system_runtime = SimpleNamespace()
-    task.database_manager = db_manager
-    dynamic_capability.replier = FakeReplier()
-    task.character_runtime = FakeCharacterRuntime()
-    task.agent_runtime = FakeAgentRuntime()
-
-    result = asyncio.run(task.run_once())
-    assert result.ok is True
-    assert result.data["memory_written"] == 1
+    router.on_handling_settled(_dynamic_observation_request(fact), _handling_report(fact))
 
     feed = db_manager.dynamic_store.list_dynamics_for_user(auth["user_uuid"])
     target = next(item for item in feed["items"] if item["id"] == dynamic_id)
+    assert target["reply_status"] == "ignored"
     assert target["memory_status"] == "written"
+
+
+def test_dynamic_interaction_failure_marks_both_aspects_failed(db_manager: DatabaseManager):
+    """处理失败时回复与记忆两个方面都不得停留在 pending。"""
+    _add_invite_code(db_manager, "INVITE7")
+    auth = _register_and_login(db_manager, "replyuser", "INVITE7")
+    dynamic_id = _create_user_post(db_manager, auth, "今天有点累。")
+
+    sink = FakeFactSink()
+    router = WorldSettlementRouter()
+    task = _build_dynamic_task(db_manager, sink, router=router)
+    asyncio.run(task.run_once())
+    fact = sink.facts[0]
+
+    router.on_handling_settled(_dynamic_observation_request(fact), _handling_report(
+        fact, status=d.HandlingRequestStatus.FAILED,
+        error_code=d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE,
+    ))
+
+    feed = db_manager.dynamic_store.list_dynamics_for_user(auth["user_uuid"])
+    target = next(item for item in feed["items"] if item["id"] == dynamic_id)
+    assert target["reply_status"] == "failed"
+    assert target["memory_status"] == "failed"
+
+
+def test_dynamic_interaction_marks_memory_only_target_written(db_manager: DatabaseManager):
+    """已回复的目标只承担记忆方面：结算后只写记忆列，不重复投递回复。"""
+    _add_invite_code(db_manager, "INVITE8")
+    auth = _register_and_login(db_manager, "memoryuser", "INVITE8")
+    dynamic_id = _create_user_post(db_manager, auth, "我最近开始重新练吉他了。")
+    assert db_manager.dynamic_store.update_dynamic_post_reply_state(
+        dynamic_id, status="replied", error=None,
+    ) is True
+
+    sink = FakeFactSink()
+    router = WorldSettlementRouter()
+    task = _build_dynamic_task(db_manager, sink, router=router)
+
+    result = asyncio.run(task.run_once())
+
+    assert result.data["reply_processed"] == 0
+    assert result.data["memory_processed"] == 1
+    assert len(sink.facts) == 1
+
+    router.on_handling_settled(_dynamic_observation_request(sink.facts[0]), _handling_report(sink.facts[0]))
+
+    feed = db_manager.dynamic_store.list_dynamics_for_user(auth["user_uuid"])
+    target = next(item for item in feed["items"] if item["id"] == dynamic_id)
+    assert target["reply_status"] == "replied"
+    assert target["memory_status"] == "written"
+
+
+def test_dynamic_interaction_limits_targets_per_pass(db_manager: DatabaseManager):
+    """批量上限仍然由 world 决定：正文与评论各自按配置取件。"""
+    _add_invite_code(db_manager, "INVITE9")
+    auth = _register_and_login(db_manager, "limituser", "INVITE9")
+    for index in range(3):
+        _create_user_post(db_manager, auth, f"第 {index} 条动态正文。")
+
+    sink = FakeFactSink()
+    task = _build_dynamic_task(
+        db_manager, sink, config={"reply_post_limit": 2, "memory_post_limit": 2},
+    )
+    result = asyncio.run(task.run_once())
+
+    assert result.data["reply_processed"] == 2
+    assert result.data["memory_processed"] == 2
+    assert len(sink.facts) == 2
