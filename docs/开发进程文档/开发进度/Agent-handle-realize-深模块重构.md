@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-14 QQ 凭据维护不变量验证（26）GREEN
+
+- 交付行为：为 `QQMusicCredentialRefreshTask` 补充不变量测试——默认 21600 秒周期且启动立即执行；共享凭据路径按规范化去重只检查一次；无已初始化凭据时 skipped（`credential_count=0`）；多文件按文件数计数；部分失败返回 failure 并记录 `failed_characters`；`ensure_dependencies` 要求 `system_runtime` 与非空学歌任务；任务不持有 `agent_runtime`，保持纯机械。
+- interface spec：无新增或改变；纯验证切片。
+- Red/Green：Issue #85 为验证工单，无运行时行为变化；不制造人工 Red。
+- commit 或 PR：分支 `test/world-26-qq-credential`（基于上游 `refactor/agent` 干净基座，不堆叠）。
+- 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/world/test_world_task_learn_sing_songs.py -q` 为 58 passed；`python -m pytest tests/world -q` 为 120 passed、2 skipped。
+- 未验证范围：未运行真实 QQ Music 网络刷新或生产数据库。本条记录与已堆叠 PR 的进度文档插入位置相同，合并时需按序处理。
 ### 2026-09-14 B 站事件同步不变量验证（27）GREEN
 
 - 交付行为：补充 `BiliEventUpdateTask` / `BiliEventUpdater` 不变量测试——cookie 无效时 `fetch_and_update_events` 明确抛错、任务转为 failure 且不抛出；无新动态返回零计数；解析事件规范化（`event_type` 映射、`source` 默认 `bilibili`、`is_recurring`/`is_personal` 默认 False）；`updated` 只计 `add_event` 实际创建的事件（重复来源不重复计数）；缺少 `event_store` 抛错；任务不持有 `agent_runtime`，保持机械边界。
