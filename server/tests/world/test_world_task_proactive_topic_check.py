@@ -2,7 +2,6 @@ from types import SimpleNamespace
 
 import pytest
 
-
 from src.world.proactive_topic_task import ProactiveTopicCheckTask
 
 
@@ -26,16 +25,14 @@ def test_proactive_topic_check_initialize_sets_runtime():
 
 
 @pytest.mark.asyncio
-async def test_proactive_topic_check_runs_periodic_checks():
+async def test_proactive_topic_check_only_wakes_stage_scan():
     calls = []
 
-    class FakeMaker:
-        async def run_periodic_checks(self):
+    class StageManager:
+        async def scan_due_events(self):
             calls.append("run")
 
-    runtime = SimpleNamespace(
-        chat_session_manager=SimpleNamespace(proactive_topic_maker=FakeMaker())
-    )
+    runtime = SimpleNamespace(stage_manager=StageManager())
     task = ProactiveTopicCheckTask()
     task.initialize(runtime)
 

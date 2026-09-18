@@ -27,7 +27,7 @@ class PlanSink:
         )
 
 
-def first_login_request() -> d.HandleStimulusRequest:
+def first_login_request(reason: str = "first_login") -> d.HandleStimulusRequest:
     stimulus = d.ProactivePromptDue(
         stimulus_id="first-login",
         schema_version=1,
@@ -36,7 +36,7 @@ def first_login_request() -> d.HandleStimulusRequest:
         target_character_ids=("luotianyi",),
         user_id="user",
         ephemeral=True,
-        reason=d.ProactiveReason(value="first_login"),
+        reason=d.ProactiveReason(value=reason),
         due_at=datetime.now(timezone.utc),
         dedup_key="first-login:user:luotianyi",
         fact_refs=(),
@@ -122,3 +122,42 @@ async def test_runtime_injects_configured_names_into_real_handler(runtime_depend
         assert handler._prepared_names == ("welcome_1", "welcome_2")
     finally:
         await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_due_reminder_enters_conversation_and_emits_say_plan():
+    # Given: a non-first-login due fact reaches the real proactive handler.
+    handler = FirstLoginHandler(
+        prepared_names=(),
+        prepared_speech=PreparedSpeechResources({}),
+    )
+    agent = Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),)),
+    )
+    sink = PlanSink()
+    entries = []
+
+    async def append(values) -> None:
+        entries.extend(values)
+
+    context = SimpleNamespace(
+        identity=SimpleNamespace(
+            interaction_id="interaction",
+            character_id="luotianyi",
+            user_id="user",
+        ),
+        conversation=SimpleNamespace(append=append),
+    )
+
+    # When: Agent handles the reminder through its public handle entrypoint.
+    report = await agent.handle_stimulus(
+        first_login_request("holiday"), sink, context=context,
+    )
+
+    # Then: cognition persists one agent turn and emits a normal Say plan for realization.
+    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    assert len(entries) == 1
+    assert len(sink.values) == 1
+    assert len(sink.values[0].actions) == 1
+    assert isinstance(sink.values[0].actions[0], d.Say)

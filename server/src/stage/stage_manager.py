@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -14,6 +15,7 @@ from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
 from .chat_stage import ChatStage
+from .due_events import DueEventProvider
 
 if TYPE_CHECKING:
     from src.adapter.websocket import WebSocketAdapter
@@ -24,6 +26,7 @@ if TYPE_CHECKING:
 @dataclass(frozen=True)
 class _ManagerConfig:
     offline_timeout: float
+    return_user_threshold_seconds: float
 
     @classmethod
     def from_dict(cls, config: dict) -> _ManagerConfig:
@@ -32,21 +35,26 @@ class _ManagerConfig:
         timeout = config.get("offline_timeout", 60.0)
         if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout < 0:
             raise ValueError("offline_timeout must be finite and nonnegative")
-        return cls(offline_timeout=timeout)
+        return_threshold = config.get("return_user_threshold_seconds", 5 * 24 * 60 * 60)
+        if type(return_threshold) not in (int, float) or not math.isfinite(return_threshold) or return_threshold <= 0:
+            raise ValueError("return_user_threshold_seconds must be positive and finite")
+        return cls(offline_timeout=timeout, return_user_threshold_seconds=return_threshold)
 
 
 class StageManager:
     """按用户与角色管理 Stage，持有共享 adapter 及离线回收任务。"""
 
     def __init__(self, *, get_agent: Callable[[str], Agent], adapter: WebSocketAdapter,
-                 get_context_factory: Callable[[str], ContextFactory],
-                 config: dict | None = None) -> None:
+                  get_context_factory: Callable[[str], ContextFactory],
+                  due_event_provider: DueEventProvider | None = None,
+                  config: dict | None = None) -> None:
         """使用 get_agent 与 get_context_factory 取得角色门面和上下文创建依赖；config.offline_timeout 为离线保留秒数，stage 子配置直接下传。"""
         config = {} if config is None else config
         self._config = _ManagerConfig.from_dict(config)
         self._stage_config = config.get("stage", {})
         self._get_agent, self._adapter = get_agent, adapter
         self._get_context_factory = get_context_factory
+        self._due_event_provider = due_event_provider
         self._stages: dict[tuple[str, str], ChatStage] = {}
         self._connections: dict[ChatStage, WebSocketConnection] = {}
         self._expiry: dict[ChatStage, asyncio.Task[None]] = {}
@@ -55,6 +63,7 @@ class StageManager:
         self._closed = False
         self._closing: asyncio.Task[None] | None = None
         self._pending_first_logins: set[tuple[str, str]] = set()
+        self._pending_regular_logins: set[tuple[str, str]] = set()
 
     def record_login(
         self,
@@ -62,15 +71,41 @@ class StageManager:
         character_id: str,
         *,
         elapsed_from_last_login: float | None,
-    ) -> None:
-        """记录目标角色的认证登录；当前仅首次登录进入新 Stage 主动刺激链。"""
+    ) -> bool:
+        """记录目标角色的认证登录；返回是否由 Stage 主动链接管。"""
         if any(
             not isinstance(value, str) or not value.strip()
             for value in (user_id, character_id)
         ):
             raise ValueError("user_id and character_id must be nonblank")
         if elapsed_from_last_login is None:
-            self._pending_first_logins.add((user_id, character_id))
+            key = (user_id, character_id)
+            stage = self._stages.get(key)
+            if stage is not None and stage.state is StageState.ONLINE:
+                stage.schedule_first_login()
+            else:
+                self._pending_first_logins.add(key)
+            return True
+        now = time.localtime()
+        seconds_since_midnight = now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec
+        if seconds_since_midnight <= elapsed_from_last_login < self._config.return_user_threshold_seconds:
+            key = (user_id, character_id)
+            stage = self._stages.get(key)
+            if stage is not None and stage.state is StageState.ONLINE:
+                stage.schedule_login_reminders()
+            else:
+                self._pending_regular_logins.add(key)
+            return True
+        return False
+
+    async def scan_due_events(self) -> int:
+        """唤醒在线 Stage；每个 Stage 自行执行空闲检查与单项选择。"""
+        async with self._lock:
+            stages = tuple(self._connections)
+        sent = 0
+        for stage in stages:
+            sent += int(await stage.dispatch_due_events(merge_all=False))
+        return sent
 
     async def connect(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
         """取得或创建 connection 用户与 character_id 的 Stage，完成绑定后返回；保留期内复用原实例。"""
@@ -95,7 +130,8 @@ class StageManager:
             if stage is None or stage.state in (StageState.TERMINATING, StageState.TERMINATED):
                 stage = await ChatStage.create(user_id=key[0], character_id=key[1], agent=self._get_agent(character_id),
                                   adapter=self._adapter, config=self._stage_config,
-                                  context_factory=self._get_context_factory(character_id))
+                                  context_factory=self._get_context_factory(character_id),
+                                  due_event_provider=self._due_event_provider)
                 self._stages[key] = stage
             timer = self._expiry.pop(stage, None)
             if timer is not None:
@@ -109,6 +145,9 @@ class StageManager:
             if key in self._pending_first_logins:
                 self._pending_first_logins.remove(key)
                 stage.schedule_first_login()
+            if key in self._pending_regular_logins:
+                self._pending_regular_logins.remove(key)
+                stage.schedule_login_reminders()
             return stage
 
     async def _disconnect(self, connection: WebSocketConnection) -> None:
