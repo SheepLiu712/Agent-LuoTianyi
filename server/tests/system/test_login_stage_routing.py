@@ -24,14 +24,6 @@ class StageManager:
         return True
 
 
-class LegacyLoginManager:
-    def __init__(self) -> None:
-        self.logins: list[tuple[str, float]] = []
-
-    async def on_user_login(self, user_id: str, elapsed_from_last_login: float) -> None:
-        self.logins.append((user_id, elapsed_from_last_login))
-
-
 class CredentialService:
     def __init__(self, elapsed_from_last_login: float | None) -> None:
         self.elapsed_from_last_login = elapsed_from_last_login
@@ -53,7 +45,6 @@ class CredentialService:
 
 def runtime(elapsed_from_last_login: float | None):
     stage_manager = StageManager()
-    legacy = LegacyLoginManager()
     database = SimpleNamespace(
         credential_service=CredentialService(elapsed_from_last_login),
         conversation_service=SimpleNamespace(prefill_buffer=lambda _user_id: None),
@@ -61,9 +52,8 @@ def runtime(elapsed_from_last_login: float | None):
     return SimpleNamespace(
         database_manager=database,
         stage_manager=stage_manager,
-        chat_session_manager=legacy,
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
-    ), stage_manager, legacy
+    ), stage_manager
 
 
 @pytest.mark.asyncio
@@ -73,7 +63,7 @@ async def test_first_login_records_stage_fact_without_legacy_dispatch(
     method: str,
 ) -> None:
     # Given: authentication reports that the account has never logged in.
-    system_runtime, stage_manager, legacy = runtime(None)
+    system_runtime, stage_manager = runtime(None)
     user_interface = UserInterface(system_runtime.database_manager)
     monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
     request = LoginRequest(username="alice", password="secret") if method == "login" else AutoLoginRequest(username="alice", token="token")
@@ -83,17 +73,16 @@ async def test_first_login_records_stage_fact_without_legacy_dispatch(
 
     # Then: only the character-scoped Stage first-login seam receives the fact.
     assert stage_manager.logins == [("user", "luotianyi", None)]
-    assert legacy.logins == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", ["login", "auto_login"])
-async def test_return_login_stays_on_legacy_dispatch(
+async def test_return_login_does_not_enter_first_daily_login_dispatch(
     monkeypatch: pytest.MonkeyPatch,
     method: str,
 ) -> None:
     # Given: authentication reports a previous successful login.
-    system_runtime, stage_manager, legacy = runtime(60.0)
+    system_runtime, stage_manager = runtime(60.0)
     user_interface = UserInterface(system_runtime.database_manager)
     monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
     request = LoginRequest(username="alice", password="secret") if method == "login" else AutoLoginRequest(username="alice", token="token")
@@ -101,9 +90,8 @@ async def test_return_login_stays_on_legacy_dispatch(
     # When: the returning account authenticates.
     await getattr(user_interface, method)(request, BackgroundTasks(), system_runtime, None)
 
-    # Then: the existing return-login path remains authoritative.
+    # Then: the ordinary login does not create a first-daily-login Stage fact.
     assert stage_manager.logins == []
-    assert legacy.logins == [("user", 60.0)]
 
 
 @pytest.mark.asyncio
@@ -113,7 +101,7 @@ async def test_first_ordinary_login_today_routes_to_stage_claim_path(
     method: str,
 ) -> None:
     # Given: the previous login was yesterday, so this is today's first ordinary login.
-    system_runtime, stage_manager, legacy = runtime(24 * 60 * 60)
+    system_runtime, stage_manager = runtime(24 * 60 * 60)
     user_interface = UserInterface(system_runtime.database_manager)
     monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
     request = LoginRequest(username="alice", password="secret") if method == "login" else AutoLoginRequest(username="alice", token="token")
@@ -123,4 +111,3 @@ async def test_first_ordinary_login_today_routes_to_stage_claim_path(
 
     # Then: Stage receives the login fact and the legacy topic maker is not invoked.
     assert stage_manager.logins == [("user", "luotianyi", 24 * 60 * 60)]
-    assert legacy.logins == []

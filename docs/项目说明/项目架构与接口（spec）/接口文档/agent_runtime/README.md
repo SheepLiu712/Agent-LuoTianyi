@@ -12,17 +12,7 @@ AgentRuntime 直接装配角色身份和路由器；新 Agent 门面不接收数
 - 初始化必须完成全部实例装配才对外发布运行时。依赖装配失败时抛出异常，按现有初始化回滚路径清理已创建资源和全局引用。
 - `shutdown()` 首先停止新 Agent 接受工作，再有界等待已接受的门面调用退出，然后执行现有资源关闭；等待超时保留依赖并抛 RuntimeError，重试继续等待；关闭成功后查找仍可返回原门面，调用门面会被拒绝。
 
-兼容入口保持旧返回值和旧业务语义：
-
-| 入口 | 返回或委托对象 |
-| --- | --- |
-| `get_character_runtime(...)` | 现有 CharacterRuntime，其 conscious 为旧 LuoTianyiAgent |
-| `get_default_agent()` | 默认角色的旧 LuoTianyiAgent，通过已有 CharacterRuntime 获取 |
-| `SystemRuntime.agent` | 默认角色的旧 LuoTianyiAgent |
-| 现有 AgentRuntime 业务代理 | 仍委托现有角色运行时及旧实现 |
-| `AgentRegistry.get/all` | 保留现有旧意识对象注册表语义；新门面缓存由 AgentRuntime 持有 |
-
-旧 TopicReplier 获取意识对象的位置改用已有 `get_character_runtime(...).conscious`，其话题处理方法和默认角色回退行为保持原状。此调整不把旧业务方法复制到新 Agent。新门面与旧意识对象不是同一个实例，不能相互替换。
+`get_character_runtime(...)` 仍是运行时内部按角色取得 `CharacterRuntime` 的装配接口；`AgentRegistry.get/all` 仍保存意识对象。#88 已删除 `get_default_agent()`、`SystemRuntime.agent` 和八个旧业务代理，不再提供默认意识对象或 TopicReplier 的公共旁路。
 
 契约测试覆盖初始化、缓存、严格角色查找、失败清理、关闭和上述兼容入口；现有关闭与初始化回滚测试中的适用场景一并回归。
 
@@ -52,19 +42,13 @@ agent = agent_runtime.get_agent(character_id)
 
 - `set_agent_runtime(runtime)`：设置进程级 AgentRuntime。
 - `get_agent_runtime() -> AgentRuntime`：取得已设置的运行时；未设置时抛出 `ValueError`。
-- `get_default_agent() -> LuoTianyiAgent`：取得默认角色 Agent。
 - `clear_agent_runtime()`：清除进程级引用。
 
 这些全局函数供旧代码及测试取得或清理进程级运行时引用。
 
 ## 当前过渡接口
 
-以下方法由旧调用链使用：
-
-- `get_character_runtime(character_id=None) -> CharacterRuntime`、`get_state(...)`。
-- `preprocess_chat_event(...)`、`try_handle_reflex(...)`、`extract_topic(...)`。
-- `plan_topic_turn(...)`、`realize_topic_plan(...)`、`write_topic_memories(...)`。
-- `detect_dates_for_topic(...)`、`update_user_profile_by_context(...)`。
+仍保留 `get_character_runtime(character_id=None) -> CharacterRuntime` 与 `get_state(...)` 供运行时内部技能和注册表装配；业务调用必须经 `get_agent()` 返回的两接口门面。
 
 注册表类型：
 
@@ -81,7 +65,7 @@ agent = agent_runtime.get_agent(character_id)
 
 ## 使用示例
 
-调用 `get_agent("luotianyi")` 取得绑定该角色的门面后，可以调用其两个业务方法。生产路由支持交互结束刺激及 SAY 的 TTS、预制音频分支；未登记的刺激或行动返回对应 UNSUPPORTED 报告。旧聊天通过 `get_character_runtime(...).conscious` 及现有运行时业务代理完成处理。
+调用 `get_agent("luotianyi")` 取得绑定该角色的门面后，可以调用其两个业务方法。生产路由支持交互结束刺激及 SAY 的 TTS、预制音频分支；未登记的刺激或行动返回对应 UNSUPPORTED 报告。
 
 ## 已覆盖的契约场景
 

@@ -6,7 +6,7 @@
 
 `ConversationCompactionSkill(config: dict[str, Any], llm_service: LLMService)` 读取配置并注册名为 `conversation_context_summary` 的模型。`AgentRuntime` 创建 `Skills` 门面，由门面创建一个技能实例，所有角色共用；实例不持有用户、交互或对话快照。
 
-配置来自 `agent_runtime.skills.conversation_compaction`。系统装配时，该项不存在则使用现有 `chat_session_manager.conversation_service` 配置。
+配置来自 `agent_runtime.skills.conversation_compaction`。系统装配兼容旧配置时，该项不存在则读取 `chat_session_manager.conversation_service` 配置值；这只是配置回退，不会构造旧会话管理器。
 
 | 配置键 | 含义 | 默认值 |
 | --- | --- | --- |
@@ -32,13 +32,9 @@ async def compact(
 
 技能不更新 context，不写数据库。调用方拿到非空结果后调用 `conversation_context.compact(result)`，由 context 验证并应用。模型未配置、调用失败、返回空白或非文字结果时抛出异常。任务取消向调用方传播。
 
-## 现有聊天链路
+## 当前调用链
 
-`SystemRuntime` 将 `AgentRuntime.skills` 注入 `ChatSessionManager`，后者通过 `skills.get(ConversationCompactionSkill)` 取得共享实例，交给旧 `ConversationService`。旧会话服务不再注册总结模型。
-
-旧 `compress_context_if_needed` 从数据库构造临时 `ConversationContext`，调用共享技能并应用结果，然后返回旧格式快照；无需压缩返回 `None`。原 `snapshot` 参数保留兼容，生成压缩的依据重新从数据库读取。
-
-`ReflectionWorker` 保持原调用位置：压缩成功后继续更新画像；异常进入其现有日志处理。完整历史保留，结果生成期间新增的记录由 context 在应用时保留。
+`AgentRuntime.skills` 持有共享 `ConversationCompactionSkill`；Context/handler 侧按需取得技能并应用 `ConversationCompaction`。旧 `ChatSessionManager`、会话包装服务和 `ReflectionWorker` 已删除，底层 `database_manager.conversation_service` 继续保存完整历史与上下文状态。
 
 ## 共享技能门面
 

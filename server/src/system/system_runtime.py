@@ -8,8 +8,6 @@ from src.adapter.websocket import WebSocketAdapter
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.capabilities import CapabilityManager
-from src.chat_session import ChatSessionManager
-from src.chat_session import chat_stream_manager as chat_stream_manager_module
 from src.domain.stage import StageState
 from src.stage import StageManager, WorldStage
 from src.system.database import DatabaseManager, set_default_database_manager
@@ -38,7 +36,6 @@ class SystemRuntime:
     database_manager: DatabaseManager
     agent_runtime: AgentRuntime
     capability_manager: CapabilityManager
-    chat_session_manager: ChatSessionManager
     llm_service: LLMService
     client_llm_executor: ClientLLMExecutor
     observability: ObservabilityService
@@ -58,7 +55,6 @@ class SystemRuntime:
         owns_observability = observability is None
         database_manager: DatabaseManager | None = None
         capability_manager: CapabilityManager | None = None
-        chat_session_manager: ChatSessionManager | None = None
         world: WorldRuntime | None = None
         agent_runtime: AgentRuntime | None = None
         runtime: SystemRuntime | None = None
@@ -86,17 +82,10 @@ class SystemRuntime:
             # 4. 初始化能力管理器。SpeechCapability 会在这里启动 TTS worker。
             capability_manager = CapabilityManager(config.get("capabilities", {}), llm_service)
 
-            # 5. 初始化聊天会话管理器
-            chat_session_manager = ChatSessionManager(
-                config.get("chat_session_manager", {}),
-                llm_service,
-                database_manager,
-            )
-
-            # 6. 初始化箱庭世界运行时
+            # 5. 初始化箱庭世界运行时
             world = WorldRuntime(config.get("world", {}))
 
-            # 7. 初始化 Agent 运行时
+            # 6. 初始化 Agent 运行时
             agent_config = dict(config.get("agent_runtime", {}))
             skills_config = dict(agent_config.get("skills", {}))
             skills_config.setdefault(
@@ -111,14 +100,13 @@ class SystemRuntime:
                 database_manager,
             )
 
-            # 8. 组装系统运行时
+            # 7. 组装系统运行时
             runtime = cls(
                 user_interface=UserInterface(database_manager),
                 world=world,
                 database_manager=database_manager,
                 agent_runtime=agent_runtime,
                 capability_manager=capability_manager,
-                chat_session_manager=chat_session_manager,
                 llm_service=llm_service,
                 client_llm_executor=client_llm_executor,
                 observability=observability,
@@ -154,7 +142,6 @@ class SystemRuntime:
                 world=world,
                 database_manager=database_manager,
                 capability_manager=capability_manager,
-                chat_session_manager=chat_session_manager,
                 agent_runtime=agent_runtime,
                 observability=observability,
                 owns_observability=owns_observability,
@@ -173,13 +160,6 @@ class SystemRuntime:
             capability_manager=self.capability_manager,
             database_manager=self.database_manager,
         )
-        self.chat_session_manager.wire_dependencies(
-            database_manager=self.database_manager,
-            llm_service=self.llm_service,
-            capability_manager=self.capability_manager,
-            skills=self.agent_runtime.skills,
-        )
-        self.client_llm_executor.bind(self.chat_session_manager.chat_stream_manager)
         self.world.wire_dependencies(system_runtime=self)
         self.user_interface.wire_dependencies(database_manager=self.database_manager)
         self.ensure_dependencies()
@@ -187,7 +167,6 @@ class SystemRuntime:
     def _start_background_services(self) -> None:
         """启动所有后台服务。"""
         self.ensure_dependencies()
-        self.chat_session_manager.start_background_services()
         self.world.start_background_services()
 
     @classmethod
@@ -198,7 +177,6 @@ class SystemRuntime:
         world: WorldRuntime | None,
         database_manager: DatabaseManager | None,
         capability_manager: CapabilityManager | None,
-        chat_session_manager: ChatSessionManager | None,
         agent_runtime: AgentRuntime | None,
         observability: ObservabilityService | None,
         owns_observability: bool,
@@ -210,7 +188,6 @@ class SystemRuntime:
             cls._clear_global_references(
                 runtime=runtime,
                 database_manager=database_manager,
-                chat_session_manager=chat_session_manager,
                 agent_runtime=agent_runtime,
             )
 
@@ -226,10 +203,6 @@ class SystemRuntime:
             ("world stages", runtime.close_world_stages if runtime is not None else None),
             ("chat stages", runtime.stage_manager.close if runtime is not None and runtime.stage_manager is not None else None),
             ("world runtime", world.stop_background_services if world is not None else None),
-            (
-                "chat session manager",
-                chat_session_manager.stop_background_services if chat_session_manager is not None else None,
-            ),
             (
                 "agent runtime",
                 getattr(agent_runtime, "shutdown", None) if agent_runtime is not None else None,
@@ -257,7 +230,6 @@ class SystemRuntime:
         *,
         runtime: SystemRuntime | None,
         database_manager: DatabaseManager | None,
-        chat_session_manager: ChatSessionManager | None,
         agent_runtime: AgentRuntime | None,
     ) -> None:
         '''将已经连接的引用清理掉，避免在系统运行时关闭后仍然被引用。'''
@@ -269,10 +241,6 @@ class SystemRuntime:
         if database_manager is not None:
             # The runtime is the sole owner of the legacy database singleton.
             set_default_database_manager(None)
-        if chat_session_manager is not None:
-            manager = getattr(chat_session_manager, "chat_stream_manager", None)
-            if chat_stream_manager_module.chat_stream_manager is manager:
-                chat_stream_manager_module.chat_stream_manager = None
 
     ########## 关闭逻辑 ##########
 
@@ -284,7 +252,6 @@ class SystemRuntime:
             errors: list[str] = []
             shutdown_steps = (
                 ("world runtime", self.world.stop_background_services),
-                ("chat sessions", self.chat_session_manager.stop_background_services),
                 ("world stages", self.close_world_stages),
                 ("chat stages", self.stage_manager.close if self.stage_manager is not None else None),
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),
@@ -320,7 +287,6 @@ class SystemRuntime:
         self._clear_global_references(
             runtime=self,
             database_manager=self.database_manager,
-            chat_session_manager=self.chat_session_manager,
             agent_runtime=self.agent_runtime,
         )
 
@@ -339,7 +305,6 @@ class SystemRuntime:
             "database_manager": self.database_manager,
             "agent_runtime": self.agent_runtime,
             "capability_manager": self.capability_manager,
-            "chat_session_manager": self.chat_session_manager,
             "llm_service": self.llm_service,
             "observability": self.observability,
         }
@@ -350,7 +315,6 @@ class SystemRuntime:
         self.database_manager.ensure_dependencies()
         self.capability_manager.ensure_dependencies()
         self.agent_runtime.ensure_dependencies()
-        self.chat_session_manager.ensure_dependencies()
         self.world.ensure_dependencies()
         self.user_interface.ensure_dependencies()
 
@@ -392,32 +356,8 @@ class SystemRuntime:
 
     # Properties for convenient access to subsystems
     @property
-    def agent(self):
-        return self.agent_runtime.get_character_runtime().conscious
-
-    @property
     def websocket_service(self):
         return self.user_interface.websocket_service
-
-    @property
-    def gcsm(self):
-        return self.chat_session_manager.chat_stream_manager
-
-    @property
-    def chat_stream_manager(self):
-        return self.chat_session_manager.chat_stream_manager
-
-    @property
-    def conversation_service(self):
-        return self.chat_session_manager.conversation_service
-
-    @property
-    def activity_maker(self):
-        return self.chat_session_manager.proactive_topic_maker
-
-    @property
-    def global_speaking_worker(self):
-        return self.chat_session_manager.global_speaking_worker
 
     @property
     def capabilities(self):

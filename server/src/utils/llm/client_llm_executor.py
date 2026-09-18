@@ -104,7 +104,7 @@ class ClientLLMExecutor:
         self._user_connections: Dict[str, Any] = {}
 
     def bind(self, stream_manager: Any) -> None:
-        """绑定 ChatStreamManager，用于按 user_id 找到在线连接。"""
+        """绑定在线连接查询器，用于按 user_id 找到客户端连接。"""
         self._stream_manager = stream_manager
 
     def _get_live_connection(self, user_id: Optional[str]):

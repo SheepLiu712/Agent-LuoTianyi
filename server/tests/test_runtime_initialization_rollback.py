@@ -12,7 +12,6 @@ if server_root not in sys.path:
 
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
-from src.chat_session import chat_session_manager as chat_session_module
 from src.system import system_runtime as runtime_module
 from src.system.database import vector_store as vector_store_module
 from src.system.database.vector_store import ChromaVectorStore
@@ -41,6 +40,7 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     class FakeDatabase:
         def __init__(self, _config):
             calls.append("database_created")
+            self.event_store = object()
 
         def wire_dependencies(self, **_kwargs):
             pass
@@ -64,24 +64,6 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
         async def stop(self):
             calls.append("tts_stopped")
 
-    class FakeChatSessions:
-        def __init__(self, _config, _llm, _database):
-            self.chat_stream_manager = object()
-            runtime_module.chat_stream_manager_module.chat_stream_manager = self.chat_stream_manager
-
-        def wire_dependencies(self, **_kwargs):
-            pass
-
-        def ensure_dependencies(self):
-            pass
-
-        def start_background_services(self):
-            calls.append("chat_started")
-
-        async def stop_background_services(self):
-            calls.append("chat_stop_attempted")
-            raise RuntimeError("chat cleanup failed")
-
     class FakeWorld:
         def __init__(self, _config):
             pass
@@ -100,7 +82,11 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
 
     class FakeAgentRuntime:
         def __init__(self, *_args):
-            pass
+            self.default_character_id = "luotianyi"
+            self.context_factories = {"luotianyi": object()}
+
+        def get_agent(self, _character_id=None):
+            return object()
 
         def wire_dependencies(self, **_kwargs):
             pass
@@ -134,7 +120,6 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     monkeypatch.setattr(runtime_module, "LLMService", FakeLLM)
     monkeypatch.setattr(runtime_module, "DatabaseManager", FakeDatabase)
     monkeypatch.setattr(runtime_module, "CapabilityManager", FakeCapability)
-    monkeypatch.setattr(runtime_module, "ChatSessionManager", FakeChatSessions)
     monkeypatch.setattr(runtime_module, "WorldRuntime", FakeWorld)
     monkeypatch.setattr(runtime_module, "AgentRuntime", FakeAgentRuntime)
     monkeypatch.setattr(runtime_module, "UserInterface", FailingUserInterface)
@@ -155,42 +140,13 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     with pytest.raises(RuntimeError, match="late initialization failure"):
         await runtime_module.SystemRuntime.initialize({})
 
-    assert calls.index("chat_started") < calls.index("rsa_generation_failed")
     assert calls.index("world_started") < calls.index("rsa_generation_failed")
-    assert calls.index("world_stopped") < calls.index("chat_stop_attempted")
-    assert calls.index("chat_stop_attempted") < calls.index("tts_stopped")
+    assert calls.index("world_stopped") < calls.index("tts_stopped")
     assert calls.index("tts_stopped") < calls.index("database_stopped")
     assert database_ref["value"] is None
     assert observability_ref["value"] is None
-    assert runtime_module.chat_stream_manager_module.chat_stream_manager is None
     assert "observability_closed" in calls
     assert "observability_handler_uninstalled" in calls
-
-
-def test_chat_session_constructor_clears_published_manager_on_late_failure(monkeypatch):
-    class Dependency:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def configure(self, **_kwargs):
-            pass
-
-    class FailingCallManager:
-        def __init__(self, *_args, **_kwargs):
-            raise RuntimeError("call manager failed")
-
-    monkeypatch.setattr(chat_session_module, "ConversationService", Dependency)
-    monkeypatch.setattr(chat_session_module, "GlobalSpeakingWorker", Dependency)
-    monkeypatch.setattr(chat_session_module, "ProactiveTopicMaker", Dependency)
-    monkeypatch.setattr(chat_session_module, "ActivityContextProvider", Dependency)
-    monkeypatch.setattr(chat_session_module, "ChatStreamManager", Dependency)
-    monkeypatch.setattr(chat_session_module, "CallStreamManager", FailingCallManager)
-    monkeypatch.setattr(chat_session_module.chat_stream_manager_module, "chat_stream_manager", None)
-
-    with pytest.raises(RuntimeError, match="call manager failed"):
-        chat_session_module.ChatSessionManager({}, object(), object())
-
-    assert chat_session_module.chat_stream_manager_module.chat_stream_manager is None
 
 
 @pytest.mark.asyncio

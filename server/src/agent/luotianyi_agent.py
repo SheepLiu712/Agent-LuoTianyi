@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 from src.agent.main_chat import MainChat, OneResponseLine
 from src.utils.logger import get_logger
-from src.subconscious.attention import TopicAttentionPlan
 from src.agent.response_realizer import ResponseRealizer, UserExpressionContext
 from src.domain import CharacterProfile, CharacterName
 
@@ -22,7 +21,6 @@ if TYPE_CHECKING:
     from src.system.database import DatabaseManager
     from src.subconscious.character_mind import CharacterSubconscious
     from src.utils.llm.llm_module import LLMModule
-    from src.domain.chat import ExtractedTopic
 
 
 class LuoTianyiAgent:
@@ -76,21 +74,6 @@ class LuoTianyiAgent:
         """供 TopicReplier (或其他组件) 查找歌曲信息的代理方法"""
         return await self.mind.search_song_facts_for_topic(constraints)
 
-    async def plan_topic_turn_for_pipeline(
-        self,
-        user_id: str,
-        topic: "ExtractedTopic",
-        conversation_history: str,
-        external_context: Optional[str] = None,
-    ) -> TopicAttentionPlan:
-        """Build a conscious attention plan for one legacy chat topic."""
-        return await self.mind.plan_topic_turn(
-            user_id=user_id,
-            topic=topic,
-            conversation_history=conversation_history,
-            external_context=external_context,
-        )
-
     async def search_memory_context_for_topic(
         self,
         user_id: str,
@@ -103,18 +86,6 @@ class LuoTianyiAgent:
             queries=queries,
             similarity_threshold=similarity_threshold,
             k=k,
-        )
-
-    async def realize_topic_plan_for_pipeline(
-        self,
-        user_id: str,
-        plan: TopicAttentionPlan,
-    ) -> List[OneResponseLine]:
-        """Realize a conscious plan into legacy response line objects."""
-        user_context = self._load_user_expression_context(user_id)
-        return await self.response_realizer.realize_topic_plan(
-            plan=plan,
-            user_context=user_context,
         )
 
     async def _search_fact_constraints_for_topic(self, fact_constraints: List[str]) -> List[str]:
@@ -265,21 +236,6 @@ class LuoTianyiAgent:
             fact_hits=fact_hits or [],
             memory_hits=memory_hits or [],
             sing_plan=sing_plan,
-        )
-
-    async def write_topic_memories_for_pipeline(
-        self,
-        user_id: str,
-        current_dialogue: str,
-        related_memories: Optional[List[str]] = None,
-        conversation_history: Optional[str] = None,  # cached context; reads from Redis if None
-    ) -> dict:
-        """供 TopicReplier 调用：在单个 topic 回复完成后异步提取并写入记忆。"""
-        return await self.mind.write_topic_memories(
-            user_id=user_id,
-            current_dialogue=current_dialogue,
-            related_memories=related_memories,
-            conversation_history=conversation_history,
         )
 
     async def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:

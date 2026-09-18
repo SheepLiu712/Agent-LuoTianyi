@@ -2,7 +2,6 @@
 
 import asyncio
 import inspect
-import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -21,7 +20,6 @@ from src.utils.llm.client_llm_executor import (
     ClientLLMUnavailable,
     _looks_like_key_error,
 )
-from src.chat_session.chat_stream_manager import ChatStreamManager
 from src.utils.llm.llm_api_interface import LLMAPIInterface
 from src.utils.llm.llm_module import LLMModule
 from src.utils.llm_service import LLMService
@@ -310,21 +308,6 @@ async def test_clear_user_fails_pending(executor, fake_ws):
     executor.clear_user("u1", stream.ws_connection)
     with pytest.raises(ClientLLMUnavailable):
         await task
-
-
-def test_ws_lost_connection_ignores_stale_connection():
-    manager = ChatStreamManager({}, None, None, None, None)
-    device_a = SimpleNamespace(websocket=FakeWebSocket(), user_uuid="u1")
-    stream = FakeStream(device_a, client_mode={"types": ["对话模型"]})
-    manager.user_streams[("u1", "luotianyi")] = stream
-
-    device_b = SimpleNamespace(websocket=FakeWebSocket(), user_uuid="u1")
-    stream.reconnect(device_b, client_mode={"types": []})
-    assert manager.ws_lost_connection(device_a) is False
-    assert stream.ws_connection is device_b
-
-    assert manager.ws_lost_connection(device_b) is True
-    assert stream.ws_connection is None
 
 
 @pytest.mark.asyncio

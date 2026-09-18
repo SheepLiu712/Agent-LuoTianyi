@@ -33,9 +33,6 @@ def test_system_runtime_shutdown_releases_capabilities_before_database():
         ),
         agent_runtime=SimpleNamespace(),
         capability_manager=capability_manager,
-        chat_session_manager=SimpleNamespace(
-            stop_background_services=lambda: record_async("chat_sessions"),
-        ),
         llm_service=SimpleNamespace(),
         observability=SimpleNamespace(),
         client_llm_executor=ClientLLMExecutor(),
@@ -44,4 +41,4 @@ def test_system_runtime_shutdown_releases_capabilities_before_database():
 
     asyncio.run(runtime.shutdown())
 
-    assert calls == ["world", "chat_sessions", "tts_server", "database"]
+    assert calls == ["world", "tts_server", "database"]
