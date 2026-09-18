@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-15 日记筛选、生成与私密发布（#84）
+
+- 交付行为：`DiaryTask` 删除 `CharacterRuntime` 依赖、模型可用性检查（`ensure_llm`）与直接发布调用；保留 00:00 调度、当日每用户对话统计、`≥50` 入选、当天已有日记排除、超 20 人随机取 20、每日唯一；`run_once` 为 async，对每个入选用户投递一条 `DiaryPlanningDue(local_date, timezone, trigger_id, owner_user_id)`（`user_id=None`），结算只来自 N1 端口：`created` 仅在实际提交日记动态效果时计，失败计 `failed`，未结算保持 `pending`，投递被拒只记录不重试；结果报 `diaries_created`/`diaries_failed`/`diaries_pending`。领域类型按 owner 裁决 N2 扩大：`DiaryPlanningDue` 新增非空 `owner_user_id`。
+- Agent 侧：新增 `DiaryPlanningDueHandler`（生成正文→交付 `WriteDiary` 计划；素材为空或正文为空则明确失败）、`WriteDiaryHandler`（private、禁止评论、`source_type="diary"`、`source_id` 沿用 `diary:{character_id}:{user_id}:{date}` → `EffectRef(DYNAMIC_POST)`，失败 `DEPENDENCY_UNAVAILABLE` 不声称已提交）、`DiaryWritingSkill`（复用 `DiaryCapability` 的素材收集与日记提示词，能力新增 `generate_diary_body` 只生成不发布）；`AgentRuntime` 注册 `DIARY_PLANNING_DUE` 与 `WRITE_DIARY`，`WorldRuntime` 把结算路由交给日记任务。
+- interface spec：`接口文档/domain/stimulus.md` 记录 `DiaryPlanningDue.owner_user_id`（N2）；`接口文档/world/README.md` 新增「日记」条；`接口文档/agent/README.md` 记录日记分支与两个处理器；`接口文档/domain/realization.md` 记录 `WriteDiary` 已有生产 handler。
+- 验证及结果：`conda run -n agent python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q` → **1015 passed、2 skipped**（上一基线 1010 → +5；2 skip 为既有真实网络探测）。改写 `tests/world/test_world_task_diary.py`（阈值/上限/去重/模型不可用不再由 world 跳过/事实形状/结算驱动计数，且不再依赖 `CharacterRuntime`），新增 `tests/agent/test_diary_writing.py`（private 与禁止评论、按用户隔离、同来源幂等、空正文失败、发布失败不冒充效果），领域契约测试补 `owner_user_id` 非空白校验。
+- 未验证范围：真实日记模型生成质量与当日对话素材充分性按运行环境人工验收；不含 29/30 收尾。
+
 ### 2026-09-15 动态回复与记忆、业务状态结算（#83）
 
 - 交付行为：`DynamicInteractionTask` 删除 `CharacterRuntime` 依赖、模型可用性检查与内容生成；保留 600s 调度、待回复/待记忆目标的批量上限（10/20 与 10/20）、`dynamic_store` 的 reply/memory 状态列、来源唯一性防重复；**同时待回复又待记忆的同一目标一轮只投递一条** `DynamicObserved`（结构化线程 + 线程消息数作为该动态的单调修订号），回复与记忆共享同一条事实。状态只由 N1 结算写入：`replied` 仅在实际提交 `DYNAMIC_COMMENT` 效果时写，`ignored` 表示 Agent 明确不回复（含线程中已存在角色回复），`failed` 来自处理/执行失败，`written` 表示 Agent 已完成记忆方面处理；未结算保持 `pending`，投递被拒只记录不重试。

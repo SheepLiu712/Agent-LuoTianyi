@@ -305,13 +305,14 @@ class DynamicObserved(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DiaryPlanningDue(Stimulus):
-    """日记规划到期事实，以本地日期、ZoneInfo 时区和触发 ID 表达。"""
+    """日记规划到期事实，显式包含目标用户、本地日期、时区和触发 ID。"""
 
     kind: ClassVar[StimulusKind] = StimulusKind.DIARY_PLANNING_DUE
 
     local_date: date
     timezone: ZoneInfo
     trigger_id: str
+    owner_user_id: str
 
     def __post_init__(self) -> None:
         Stimulus.__post_init__(self)
@@ -319,6 +320,7 @@ class DiaryPlanningDue(Stimulus):
             _raise_invalid()
         _require_instance(self.timezone, ZoneInfo)
         _require_nonblank_string(self.trigger_id)
+        _require_nonblank_string(self.owner_user_id)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

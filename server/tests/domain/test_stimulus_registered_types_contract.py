@@ -150,6 +150,7 @@ def _valid_stimulus_kwargs(type_name: str) -> dict[str, object]:
             "local_date": date(2026, 9, 5),
             "timezone": SHANGHAI,
             "trigger_id": "diary-trigger-1",
+            "owner_user_id": "user-1",
         },
         "WorldObservation": lambda: {
             "observation_kind": agent_domain.WorldObservationKind(value="citywalk"),
@@ -378,6 +379,7 @@ def test_dynamic_observed_rejects_an_invalid_thread_structure(
         ("TouchInteraction", {"body_regions": ()}),
         ("DiaryPlanningDue", {"local_date": OCCURRED_AT}),
         ("DiaryPlanningDue", {"timezone": timezone.utc}),
+        ("DiaryPlanningDue", {"owner_user_id": " \t"}),
         ("WorldObservation", {"world_revision": -1}),
         ("ActivityObservation", {"activity_revision": True}),
         ("SongKnowledgeDiscovered", {"revision": -1}),
@@ -422,6 +424,7 @@ def test_current_interface_rejects_fields_owned_by_other_or_future_modules(
         ("ProactivePromptDue", "reason"),
         ("DynamicObserved", "messages"),
         ("DiaryPlanningDue", "local_date"),
+        ("DiaryPlanningDue", "owner_user_id"),
         ("WorldObservation", "fact"),
         ("ActivityObservation", "observation"),
         ("SongKnowledgeDiscovered", "candidate"),

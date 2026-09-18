@@ -192,35 +192,16 @@ class DiaryCapability:
             if existing is not None and existing.get("owner_user_id") == user_id:
                 return True, "日记已存在", existing
 
-        user_name = self._get_user_name(user_id)
-        user_description = self._get_user_description(user_id)
-        user_preferences = self._get_user_preferences(user_id)
-
-        # ── 收集素材（异步：需要查数据库） ──
-        materials = await self._collect_materials(
+        diary_text = await self.generate_diary_body(
             user_id=user_id,
             character_id=character_id,
+            character_name=character_name,
+            character_persona=character_persona,
+            speaking_style=speaking_style,
             target_date=target_date,
         )
-
-        # ── 调用 LLM 生成日记 ──
-        try:
-            result = await self._diary_llm.generate_response(
-                character_name=character_name,
-                user_name=user_name,
-                diary_date=target_date,
-                user_description=user_description,
-                user_preferences=user_preferences,
-                conversation_materials=materials,
-                character_persona=character_persona or "一个温柔体贴的虚拟歌手",
-                speaking_style=speaking_style or "温柔、细腻、有画面感，像在跟老朋友轻声诉说",
-            )
-            diary_text = self._parse_diary_result(result, target_date=target_date)
-            if diary_text is None or diary_text.strip() == "":
-                return False, "日记格式解析失败", None
-        except Exception as exc:
-            self.logger.error(f"Diary generation LLM call failed: {exc}")
-            return False, f"日记生成失败: {str(exc)}", None
+        if not diary_text:
+            return False, "日记生成失败", None
 
         # ── 通过 DynamicCapability 发布为 Agent 动态 ──
         try:
@@ -245,6 +226,40 @@ class DiaryCapability:
         except Exception as exc:
             self.logger.error(f"DynamicCapability call failed: {exc}")
             return False, f"日记发布失败: {str(exc)}", None
+
+    async def generate_diary_body(
+        self,
+        *,
+        user_id: str,
+        character_id: str,
+        character_name: str,
+        character_persona: str,
+        speaking_style: str,
+        target_date: str,
+    ) -> str:
+        """复用既有素材与提示词生成日记正文，不执行发布效果。"""
+        if self._diary_llm is None or self.database_manager is None:
+            return ""
+        materials = await self._collect_materials(
+            user_id=user_id, character_id=character_id, target_date=target_date,
+        )
+        if not materials.strip() or materials == "今天没有特别的互动记录。":
+            return ""
+        try:
+            result = await self._diary_llm.generate_response(
+                character_name=character_name,
+                user_name=self._get_user_name(user_id),
+                diary_date=target_date,
+                user_description=self._get_user_description(user_id),
+                user_preferences=self._get_user_preferences(user_id),
+                conversation_materials=materials,
+                character_persona=character_persona or "一个温柔体贴的虚拟歌手",
+                speaking_style=speaking_style or "温柔、细腻、有画面感，像在跟老朋友轻声诉说",
+            )
+        except Exception as exc:
+            self.logger.error(f"Diary generation LLM call failed: {exc}")
+            return ""
+        return self._parse_diary_result(result, target_date=target_date) or ""
 
     # ────────────────────── 素材收集 ──────────────────────
 
