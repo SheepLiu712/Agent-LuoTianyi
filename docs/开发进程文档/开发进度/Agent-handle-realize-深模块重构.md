@@ -9,6 +9,15 @@
 
 ## 已完成事实
 
+### 2026-09-15 旧入口与旁路清理（#88）
+
+- owner 决策：18/20 判定为超范围（本次重构不引入完全的新功能）；主动提醒边界采纳 Stage 侧 `DueEventProvider` 窄端口（选项 A）。
+- 执行前证据：旧会话 `ConversationService` 只是包装器，持久化最终委托同一 `database_manager.conversation_service`；旧 `ProactiveTopicMaker` 与 `EventStoreDueEventProvider` 使用同一 `database_manager.event_store`，通知身份均为 `(event_id, user_id, trigger_key, character_id)`。
+- Batch 1：删除 `ExecutionLedger`、`RequestLedger`、`PlanOutbox` 三个无生产实例模块及无调用者 `get_GCSM()`；公共 `interrupt/query/cancel/wait` 核对未发现旧会话无调用者 API，`WorldStage.wait_idle` 等真实在用接口保留。回归 **1023 passed、2 skipped**。
+- Batch 2：切断登录回退与旧后台绑定，删除 `chat_pipeline/*`、`ProactiveTopicMaker`、无剩余调用者的 `GlobalSpeakingWorker`、`ChatSessionManager`、`ChatStreamManager`、SystemRuntime 构造/访问器，以及 AgentRuntime 八个旧业务代理和默认 conscious locator；保留 `database_manager.conversation_service`、EventStore、Stage 端口及新 `ResponseCompositionSkill` 仍调用的 `generate_topic_reply_for_pipeline`。回归 **1018 passed、2 skipped**；减少 5 项均来自删除的活跃旧链测试 `tests/agent_runtime/test_legacy_agent_access.py`。
+- 延迟测试：改动前合并运行相关文件为 **125 passed、2 failed、13 errors**；改动后存续相关文件为 **68 passed、13 errors**。13 个 error 两边均因 `--noconftest` 禁用 `tests/agent_runtime/conftest.py` fixture；改动前两项失败位于随后删除/裁剪的旧链覆盖。纯旧链测试文件随实现删除，混合文件仅移除旧对象用例并保留 ClientLLM、TTS、运行时关闭/回滚断言。
+- 未验证范围：未连接真实客户端、真实 LLM/TTS/GPU、生产数据库或外部网络；全量 Ruff 仍报告触及历史文件的既有风格债，删除相关生产符号的引用扫描为零。
+
 ### 2026-09-15 登录与周期提醒的 claim 与空闲规则（#76）
 
 - 交付行为：新增 Stage 侧 `DueEvent`/`DueEventProvider(list_due/claim/release)`，由 `SystemRuntime` 用 EventStore 适配器装配；候选在 claim 前过滤支持类型、角色、个人用户与已通知状态。当天首次普通登录合并所有成功 claim 的到期事实；world 每 300 秒只唤醒 Stage 扫描，ChatStage 按 30 秒空闲阈值、每流随机一项投递。登录与周期共享 `(event_id,user_id,character_id,trigger_key)` 原子 claim；处理失败、无计划、取消、离线或执行失败 release，全部计划成功后保留 claim。

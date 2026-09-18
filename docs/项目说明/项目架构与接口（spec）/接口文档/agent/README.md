@@ -33,7 +33,7 @@
 
 `server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。
 
-旧聊天使用 `LuoTianyiAgent`，下面记录其兼容接口。
+`LuoTianyiAgent` 仍作为 `CharacterRuntime.conscious` 的内部协作者；业务入口统一由 `Agent` 门面提供。
 
 ## 对外接口
 
@@ -43,12 +43,9 @@
 
 ### 话题规划与回复
 
-- `await plan_topic_turn_for_pipeline(user_id, topic, conversation_history, external_context=None) -> TopicAttentionPlan`：为一个完整话题生成注意力和回复计划。
-- `await realize_topic_plan_for_pipeline(user_id, plan) -> list[OneResponseLine]`：把计划实现为文字或歌曲回复行。
-- `await generate_topic_reply_for_pipeline(user_id, topic_content, memory_hits=None, fact_hits=None, sing_plan=None, conversation_history=None) -> list[OneResponseLine]`：兼容现有流水线的一步式回复入口。
+- `await generate_topic_reply_for_pipeline(user_id, topic_content, memory_hits=None, fact_hits=None, sing_plan=None, conversation_history=None) -> list[OneResponseLine]`：由内部 `ResponseCompositionSkill` 使用的一步式回复协作者。
 - `await search_song_facts_for_topic(constraints) -> list[str]`：查询与话题约束有关的歌曲事实。
 - `await search_memory_context_for_topic(user_id, queries, threshold=0.8, k=3) -> MemoryContext`：查询用户相关记忆。
-- `await write_topic_memories_for_pipeline(...) -> dict`：根据本轮话题和回复决定并写入记忆。
 
 ### 唱歌和语音
 
@@ -72,14 +69,14 @@
 
 ## 正常与异常行为
 
-- 正常调用顺序是先由 `agent_runtime.get_character_runtime(character_id).conscious` 取得 Agent，再调用上述接口。
+- 外部业务调用不得取得 `conscious`；Stage、world 与 adapter 只调用 `Agent.handle_stimulus` / `Agent.realize_action_plan`。
 - 规划、记忆、模型、唱歌和语音调用可能产生模型请求、数据库写入、文件读取或音频生成等副作用。
 - 依赖未注入、模型返回无法解析或能力执行失败时会传播异常。
 - 流式语音生成器可能在迭代过程中失败，不能只在创建生成器时判定成功。
 
 ## 使用示例
 
-stage 整理出完整话题后，通过 `agent_runtime.get_character_runtime("luotianyi").conscious` 取得 Agent，再调用话题规划与回复接口。
+回复 handler 通过运行时注入的内部 skill 协作者完成回复生成，不暴露新的公共业务入口。
 
 对话压缩技能、共享装配和旧链路接入见 [对话压缩技能](conversation-compaction.md)。
 

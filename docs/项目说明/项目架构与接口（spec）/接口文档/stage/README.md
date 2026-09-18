@@ -60,7 +60,7 @@ StageState 为 ONLINE、OFFLINE、TERMINATING、TERMINATED。初始为 OFFLINE�
 
 离线超时发送 reason=USER_LEFT 的 InteractionEnding；服务器关闭使用 SHUTDOWN。结束刺激不进入 pending。结束 handler 在 AgentRuntime 中登记，确认结束并返回报告，不释放 context，也不产生客户端行动。Stage 在普通任务及结束处理收尾后调用 context.close；结束处理超时或失败也进入关闭流程。
 
-SystemRuntime 创建共享 adapter 和 StageManager，并在 AgentRuntime、能力及数据库关闭前关闭 StageManager。生产 `/chat_ws` 对每个已认证连接调用 `await StageManager.connect(connection, default_character_id)`，在路由 `finally` 中调用 `await StageManager.disconnect(connection)`；断线后保留期内同一用户和角色重连复用原 Stage、context、interaction_id 与两个 sink。旧 GCSM 仍服务尚未迁移的兼容调用者，但不再接收生产聊天 WebSocket 的业务事件。
+SystemRuntime 创建共享 adapter 和 StageManager，并在 AgentRuntime、能力及数据库关闭前关闭 StageManager。生产 `/chat_ws` 对每个已认证连接调用 `await StageManager.connect(connection, default_character_id)`，在路由 `finally` 中调用 `await StageManager.disconnect(connection)`；断线后保留期内同一用户和角色重连复用原 Stage、context、interaction_id 与两个 sink。旧 GCSM、ChatSessionManager 与 chat_pipeline 已删除。
 
 ### `DueEventProvider` 与主动提醒
 
@@ -174,61 +174,11 @@ WorldStage 从事实复制 owner 的权威 revision，但不允许快照倒退�
 
 世界交互没有即时客户端通道，`supported_outputs` 为空；realize 使用 `NoChannelOutputSink`，任何 `AgentOutput` 都明确以 `SINK_CLOSED` 拒绝，不能静默当作成功。`await WorldStage.close()` 停止接收，以 `NO_LONGER_NEEDED` 取消在途 handle 和 execution，取消长期 worker，清空队列并关闭 context；`SystemRuntime.close_world_stages()` 在 AgentRuntime shutdown 前关闭 registry 中全部实例。
 
-## 兼容聊天链路
-
-### `ChatSessionManager`
-
-- `wire_dependencies(...)`、`ensure_dependencies()`：注入并检查会话所需服务。
-- `start_background_services()`、`stop_background_services()`：启动或停止全局说话队列、主动话题等后台服务。
-- `on_user_login(user_id, ...)`：处理登录后的会话级初始化。
-- 当前公开属性：`chat_stream_manager`、`call_stream_manager`、`conversation_service`、`global_speaking_worker`、`proactive_topic_maker`、`activity_context_provider`。
-
-### `ChatStreamManager`
-
-- `await get_or_register_chat_stream(ws_connection, character=None, system_runtime=None) -> ChatStream`：按用户取得或建立聊天流。
-- `get_stream_by_user_uuid(user_uuid) -> ChatStream | None`：查找活动聊天流。
-- `iter_active_streams()`：遍历当前活动流。
-- `ws_lost_connection(...)`：通知连接丢失并进入清理或重连等待。
-- `start_cleanup_task()`、`await stop_cleanup_task()`、`await cleanup_expired_streams()`：管理过期流清理任务。
-- `await stop_all_streams()`：停止全部聊天流。
-- `get_GCSM()`：取得全局 ChatStreamManager 的兼容入口。
-
-### `ChatStream`
-
-- `await feed_event(event)`：将规范化输入放入该用户的串行流水线；流正在关闭时抛出 `RuntimeError`。
-- `try_feed_event(event) -> bool`：尝试入队，不能接收时返回 `False`。
-- `await feed_response(response)`：把响应放入发送阶段。
-- `await start_if_needed()`、`await initialize_context()`、`await stop()`、`clean_up()`：控制单个流生命周期。
-- `await reconnect(...)`、`lost_connection()`、`owns_connection(...)`：管理 WebSocket 所有权和重连。
-- 上下文读取、空闲状态和 `record_sung_segment(...)`：供回复及主动话题逻辑使用。
-
-### `ConversationService`
-
-- `await persist_user_event(...)`：按持久化策略保存用户输入。
-- `await persist_agent_replies(...)`：保存可进入对话历史的 Agent 回复。
-- `await initialize_context_snapshot(...)`、`await get_context_snapshot(...)`、`await get_context(...)`：建立和读取当前对话上下文。
-- 上下文快照包含用户、角色、摘要、最近对话、条数和版本，并可转换为提示词数据。
-- `await compress_context_if_needed(...)`：在上下文过长时生成摘要并收缩窗口。
-
-### 全局说话队列
-
-- `await GlobalSpeakingWorker.enqueue(job)`：加入 `SpeakingJob`。
-- `start_if_needed()`、`await stop()`：按需启动和停止串行语音工作器。
-- `SpeakingJob`：包含待说内容、角色 ID 和完成回调等信息。
-
-该队列在所有用户之间串行执行语音生成，避免 GPT-SoVITS 并发导致显存溢出。
-
-### 主动话题与通话占位
-
-- `ProactiveTopicMaker.configure(...)`、`dispatch_action(...)`、`run_periodic_checks()`、`on_user_login(...)`：生成并派发主动消息。
-- `CallStreamManager.wire_dependencies(...)`、`ensure_dependencies()`、`start_background_services()`、`stop_background_services()`：当前只是生命周期占位，尚未提供可用的 `CallStream`。
-
 ## 正常与异常行为
 
-- 同一用户的输入按顺序处理；不同用户有各自 ChatStream，但语音生成使用全局串行队列。
+- 同一用户与角色的输入由同一 ChatStage 按接收顺序处理。
 - 入队成功只代表已接收，不代表 Agent 回复、语音或发送已经成功。
-- 停止流时会取消其拥有的任务；多个关闭错误可能聚合后抛出。
-- 连接丢失不会自动等于删除用户会话，重连窗口和最终清理由管理器负责。
+- 连接丢失时 Stage 取消在途工作并进入保留窗口；重连与最终回收由 StageManager 负责。
 - 持久化、模型调用和语音生成都有副作用。
 
 ## 目标接口（剩余草案）

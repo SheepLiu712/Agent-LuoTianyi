@@ -1,14 +1,14 @@
 # Agent 重构交接清单
 
-日期：2026-09-13。代码基线：`refactor/agent`，`dce6aaa0`。
+日期：2026-09-18。代码基线：`refactor/agent`，`9ed8d1c`。
 
-建议交接时将下面各项作为验收清单。**基线是当前 `refactor/agent`：生产聊天仍走旧 ChatStream；新 ChatStage 已有编排流程，但聊天 handler 仍占位；WorldStage 尚未实现。**以下根据源码核对，未重新运行测试。
+建议交接时将下面各项作为验收清单。生产聊天与 world 行为已进入 Stage/Agent 两接口链；#88 已删除旧 ChatSessionManager、ChatStreamManager 与 chat_pipeline。下面保留的旧行为说明仅作迁移证据，不是当前可调用入口。
 
 本文是交接检查记录。总体设计以[总 SPEC](../设计文档/Agent-handle-realize-深模块重构.md)为准，具体接口事实见[接口文档](../../项目说明/项目架构与接口（spec）/接口文档/README.md)。
 
 ## ① ChatStream 的输入行为与迁移不变量
 
-旧链路主要阅读：[IngressHelper](../../../server/src/chat_session/chat_pipeline/ingress_helper.py)、[TopicPlanner](../../../server/src/chat_session/chat_pipeline/topic_planner.py)、[TopicReplier](../../../server/src/chat_session/chat_pipeline/topic_replier.py)。
+旧链路源码已在 #88 删除；本节是删除前行为归档，当前实现以 Stage、handler 与 skill 为准。
 
 | 输入或场景 | 当前旧链路行为 | 交接验收项 |
 |---|---|---|
@@ -132,7 +132,7 @@ World 共同验收项：
 | capabilities / resources | TTS 等技术能力、资源目录与读取、重型处理适配 | 不决定何时回复、消费什么输入 |
 | database_service | 查询、存储、事务和数据约束 | 不决定角色反应及回复时机 |
 | world / WorldClock | 外部事实、任务状态、环境推进、周期唤醒 | 当前仍存在直调旧角色能力的路径，需逐项迁移 |
-| SystemRuntime / AgentRuntime | 顶层依赖和生命周期装配／角色 Agent、handler、skill 装配 | 兼容业务代理暂存，但不能继续扩展为新的正式调用路径 |
+| SystemRuntime / AgentRuntime | 顶层依赖和生命周期装配／角色 Agent、handler、skill 装配 | 旧业务代理与动态 locator 已删除，不得重新引入 |
 
 接手者尤其需要守住这几条：
 

@@ -20,7 +20,6 @@ from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.adapter.websocket import WebSocketAdapter
-    from src.chat_session.chat_pipeline.chat_stream import ChatStream
     from src.system.database.database_service import DatabaseManager
 
 
@@ -314,7 +313,7 @@ class WebSocketService:
         self,
         websocket_connection: "WebSocketConnection",
         event: WSMessage,
-        chat_stream: "ChatStream",
+        chat_stream: Any,
     ) -> ChatEventAcceptance:
         """Convert and enqueue atomically with respect to event-loop tasks."""
         if not self.has_valid_client_message_id(event):
@@ -368,7 +367,7 @@ class WebSocketService:
 
     @staticmethod
     def _validate_chat_event_targets(
-        chat_stream: "ChatStream",
+        chat_stream: Any,
         chat_event: ChatInputEvent | None,
     ) -> None:
         if chat_event is None:

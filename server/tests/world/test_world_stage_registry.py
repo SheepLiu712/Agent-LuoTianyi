@@ -49,7 +49,7 @@ def runtime() -> SystemRuntime:
         agent_runtime=SimpleNamespace(
             default_character_id="luotianyi", get_agent=lambda character_id=None: agent,
             context_factories={"luotianyi": ContextFactory()},
-        ), capability_manager=SimpleNamespace(), chat_session_manager=SimpleNamespace(),
+        ), capability_manager=SimpleNamespace(),
         llm_service=SimpleNamespace(), client_llm_executor=SimpleNamespace(),
         observability=SimpleNamespace(), owns_observability=False,
     )

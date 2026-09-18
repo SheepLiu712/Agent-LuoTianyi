@@ -1,38 +1,36 @@
 from __future__ import annotations
 
 import asyncio
-import time
-from typing import TYPE_CHECKING, Optional
 import os
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Header, Request
+import time
+from typing import TYPE_CHECKING
+
+from fastapi import BackgroundTasks, HTTPException, Request
 from fastapi.responses import StreamingResponse
+
+from .account import decrypt_password, generate_keys, get_public_key_pem
+from .rate_limits import enforce_rate_limit
 from .types import (
-    RegisterRequest,
-    LoginRequest,
     AutoLoginRequest,
-    HistoryRequest,
+    DynamicCommentCreateRequest,
+    DynamicCommentListRequest,
+    DynamicCreateRequest,
+    DynamicListRequest,
+    DynamicReadMarkRequest,
+    DynamicUnreadRequest,
     ImageRequest,
-    ResetAccountRequest,
-    WSEventType,
+    LoginRequest,
     PreferenceGetRequest,
     PreferenceOverwriteRequest,
-    DynamicListRequest,
-    DynamicCreateRequest,
-    DynamicCommentListRequest,
-    DynamicCommentCreateRequest,
-    DynamicUnreadRequest,
-    DynamicReadMarkRequest,
+    RegisterRequest,
+    ResetAccountRequest,
 )
-
-from .account import get_public_key_pem, decrypt_password, generate_keys
-from .websocket_service import WebSocketService
 from .user_conversation_helper import UserConversationHelper
-from .rate_limits import enforce_rate_limit
+from .websocket_service import WebSocketService
 
 if TYPE_CHECKING:
-    from src.system.system_runtime import SystemRuntime
     from src.system.database import DatabaseManager
+    from src.system.system_runtime import SystemRuntime
 
 class UserInterface:
     def __init__(self, database_manager: "DatabaseManager"):
@@ -113,19 +111,13 @@ class UserInterface:
             user_uuid = auth_result["user_uuid"]
             elapsed_from_last_login = auth_result["elapsed_from_last_login"]
             seconds_since_midnight = self._seconds_since_midnight()
-            stage_owned = elapsed_from_last_login is None or elapsed_from_last_login >= seconds_since_midnight
-            if stage_owned:
+            if elapsed_from_last_login is None or elapsed_from_last_login >= seconds_since_midnight:
                 if system_runtime.stage_manager is None:
                     raise RuntimeError("StageManager is required for login dispatch")
-                stage_owned = system_runtime.stage_manager.record_login(
+                system_runtime.stage_manager.record_login(
                     user_uuid,
                     system_runtime.agent_runtime.default_character_id,
                     elapsed_from_last_login=elapsed_from_last_login,
-                )
-            if elapsed_from_last_login is not None and not stage_owned:
-                await system_runtime.chat_session_manager.on_user_login(
-                    user_uuid,
-                    elapsed_from_last_login,
                 )
             background_tasks.add_task(
                 system_runtime.database_manager.conversation_service.prefill_buffer,
@@ -203,19 +195,13 @@ class UserInterface:
             )
             elapsed_from_last_login = auth_result["elapsed_from_last_login"]
             seconds_since_midnight = self._seconds_since_midnight()
-            stage_owned = elapsed_from_last_login is None or elapsed_from_last_login >= seconds_since_midnight
-            if stage_owned:
+            if elapsed_from_last_login is None or elapsed_from_last_login >= seconds_since_midnight:
                 if system_runtime.stage_manager is None:
                     raise RuntimeError("StageManager is required for login dispatch")
-                stage_owned = system_runtime.stage_manager.record_login(
+                system_runtime.stage_manager.record_login(
                     user_uuid,
                     system_runtime.agent_runtime.default_character_id,
                     elapsed_from_last_login=elapsed_from_last_login,
-                )
-            if elapsed_from_last_login is not None and not stage_owned:
-                await system_runtime.chat_session_manager.on_user_login(
-                    user_uuid,
-                    elapsed_from_last_login,
                 )
             return {
                 "login_token": auth_result["login_token"],
