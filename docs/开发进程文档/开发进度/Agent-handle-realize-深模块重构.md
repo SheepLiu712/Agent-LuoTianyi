@@ -9,6 +9,14 @@
 
 ## 已完成事实
 
+### 2026-09-15 #89 验收：行为不变量与架构边界
+
+- 交付物：`docs/开发进程文档/设计文档/行为不变量验收记录（#89）.md` + `server/scripts/check_architecture_boundaries.py`（只读静态检查，退出码 0 = 通过）。
+- 静态边界：B1 业务入口唯一（全仓仅 4 处调用点，全在 `stage/chat_stage.py:444/502`、`stage/world_stage.py:181/236`）；B2 world 不运行时依赖 Agent/Stage（TYPE_CHECKING 例外）；B3 handler 无基础设施直连；B4 action 层无自造副作用（4 个 handler 全 `EffectRef`）；B5 world 无实时输出；B6 旧代理零残留；B7 已知偏差不扩散。7/7 PASS。
+- 行为回归：白名单全量 **1018 passed / 2 skipped**（2 skipped = 既有真实网络探测）。
+- 已知偏差 F1（记录、冻结，非本次引入）：5 个 world 模块经 `getattr(system_runtime, "agent_runtime")` 只读 7 处属性（`world_runtime.py:257/267`、`citywalk/task.py:171/220`、`dynamic_interaction/task.py:288`、`get_new_songs/task.py:96`、`learn_sing_songs/task.py:126`）；与 `9ed8d1c` 逐文件计数完全一致，只读不调用业务方法，建议独立工单改为 world 侧配置 + 显式端口。
+- 逐链路（§2–§18）全部标注「已验收」并给出白名单用例；QQ 凭据刷新（27）仅装配/调度层可验，真实路径归人工验收。
+
 ### 2026-09-15 #89 验收前置：行为不变量与副作用清单
 
 - 交付物：`docs/开发进程文档/设计文档/行为不变量与副作用清单（#89 验收前置）.md`。
