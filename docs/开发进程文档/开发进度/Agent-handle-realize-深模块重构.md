@@ -9,6 +9,13 @@
 
 ## 已完成事实
 
+### 2026-09-15 登录与周期提醒的 claim 与空闲规则（#76）
+
+- 交付行为：新增 Stage 侧 `DueEvent`/`DueEventProvider(list_due/claim/release)`，由 `SystemRuntime` 用 EventStore 适配器装配；候选在 claim 前过滤支持类型、角色、个人用户与已通知状态。当天首次普通登录合并所有成功 claim 的到期事实；world 每 300 秒只唤醒 Stage 扫描，ChatStage 按 30 秒空闲阈值、每流随机一项投递。登录与周期共享 `(event_id,user_id,character_id,trigger_key)` 原子 claim；处理失败、无计划、取消、离线或执行失败 release，全部计划成功后保留 claim。
+- Agent 与边界：到期提醒构造成 `ProactivePromptDue`，内容与输出继续唯一经过 `handle_stimulus`／`realize_action_plan`；#75 的 `first_login` 预制欢迎分支未改变。`ProactiveTopicCheckTask` 不再调用旧 `ProactiveTopicMaker`／`TopicReplier`，维护包不进入 handler。
+- 配置与测试：生效键为 `world.proactive_topic_check.clock_config.params.interval_seconds=300`、`stage_manager.stage.proactive_idle_seconds=30`、`stage_manager.stage.login_reminder_wait=1`、`stage_manager.return_user_threshold_seconds=432000`。新增 `tests/stage/test_proactive_due_dispatch.py` 并登记白名单，更新 world 唤醒和登录路由回归；完整套件与 ruff 结果见本切片交付报告。
+- 取舍：按提案选项 A 实现最小公开窄端口；`trigger_key` 直接沿用 EventStore 到期查询返回值。新增接口请 owner 复核；未引入 Ledger/outbox/重投/进程恢复，也未经过 WorldStage。
+
 ### 2026-09-15 日记筛选、生成与私密发布（#84）
 
 - 交付行为：`DiaryTask` 删除 `CharacterRuntime` 依赖、模型可用性检查（`ensure_llm`）与直接发布调用；保留 00:00 调度、当日每用户对话统计、`≥50` 入选、当天已有日记排除、超 20 人随机取 20、每日唯一；`run_once` 为 async，对每个入选用户投递一条 `DiaryPlanningDue(local_date, timezone, trigger_id, owner_user_id)`（`user_id=None`），结算只来自 N1 端口：`created` 仅在实际提交日记动态效果时计，失败计 `failed`，未结算保持 `pending`，投递被拒只记录不重试；结果报 `diaries_created`/`diaries_failed`/`diaries_pending`。领域类型按 owner 裁决 N2 扩大：`DiaryPlanningDue` 新增非空 `owner_user_id`。

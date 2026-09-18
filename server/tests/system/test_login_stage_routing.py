@@ -19,8 +19,9 @@ class StageManager:
         character_id: str,
         *,
         elapsed_from_last_login: float | None,
-    ) -> None:
+    ) -> bool:
         self.logins.append((user_id, character_id, elapsed_from_last_login))
+        return True
 
 
 class LegacyLoginManager:
@@ -103,3 +104,23 @@ async def test_return_login_stays_on_legacy_dispatch(
     # Then: the existing return-login path remains authoritative.
     assert stage_manager.logins == []
     assert legacy.logins == [("user", 60.0)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["login", "auto_login"])
+async def test_first_ordinary_login_today_routes_to_stage_claim_path(
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+) -> None:
+    # Given: the previous login was yesterday, so this is today's first ordinary login.
+    system_runtime, stage_manager, legacy = runtime(24 * 60 * 60)
+    user_interface = UserInterface(system_runtime.database_manager)
+    monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
+    request = LoginRequest(username="alice", password="secret") if method == "login" else AutoLoginRequest(username="alice", token="token")
+
+    # When: authentication succeeds through either supported endpoint.
+    await getattr(user_interface, method)(request, BackgroundTasks(), system_runtime, None)
+
+    # Then: Stage receives the login fact and the legacy topic maker is not invoked.
+    assert stage_manager.logins == [("user", "luotianyi", 24 * 60 * 60)]
+    assert legacy.logins == []

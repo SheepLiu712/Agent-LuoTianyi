@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
@@ -12,11 +12,11 @@ if TYPE_CHECKING:
 class ProactiveTopicCheckTask(WorldTask):
     task_name = "proactive_topic_check"
 
-    def __init__(self, config: Dict[str, Any] | None = None) -> None:
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
         super().__init__(self.task_name, config)
-        self.system_runtime: "SystemRuntime" | None = None
+        self.system_runtime: SystemRuntime | None = None
 
-    def initialize(self, system_runtime: "SystemRuntime") -> None:
+    def initialize(self, system_runtime: SystemRuntime) -> None:
         self.system_runtime = system_runtime
 
     def ensure_dependencies(self) -> None:
@@ -28,5 +28,8 @@ class ProactiveTopicCheckTask(WorldTask):
     async def run_once(self) -> WorldTaskResult:
         if self.system_runtime is None:
             return WorldTaskResult.skipped_result(self.task_name, "system runtime is unavailable")
-        await self.system_runtime.chat_session_manager.proactive_topic_maker.run_periodic_checks()
-        return WorldTaskResult.success(self.task_name, "proactive topic check completed")
+        stage_manager = self.system_runtime.stage_manager
+        if stage_manager is None:
+            return WorldTaskResult.skipped_result(self.task_name, "stage manager is unavailable")
+        sent = await stage_manager.scan_due_events()
+        return WorldTaskResult.success(self.task_name, f"woke chat stages; dispatched={sent}")

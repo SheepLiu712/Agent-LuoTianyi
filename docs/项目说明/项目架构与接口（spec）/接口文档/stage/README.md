@@ -50,16 +50,25 @@ StartThinking 由 Stage 转为呈现状态；最后一个思考请求结束时�
 
 StageState 为 ONLINE、OFFLINE、TERMINATING、TERMINATED。初始为 OFFLINE，adapter.bind 通知上线。离线保留期内重连复用 Stage、interaction_id、pending 和 sink；已经开始终止的交互不会重新上线。
 
-`StageManager(*, get_agent: Callable[[str], Agent], adapter: WebSocketAdapter, get_context_factory: Callable[[str], ContextFactory], config: dict | None = None)` 持有所有 Stage。私有配置类型校验 `offline_timeout=60.0` 为非负有限秒数；`stage` 子配置原样交给 ChatStage。
+`StageManager(*, get_agent: Callable[[str], Agent], adapter: WebSocketAdapter, get_context_factory: Callable[[str], ContextFactory], due_event_provider: DueEventProvider | None = None, config: dict | None = None)` 持有所有 Stage。私有配置类型校验 `offline_timeout=60.0` 为非负有限秒数；`stage` 子配置原样交给 ChatStage。
 
 - `await connect(connection, character_id) -> ChatStage`：取得或创建 Stage，并完成 adapter 绑定。
-- `record_login(user_id, character_id, *, elapsed_from_last_login) -> None`：按 `(user_id, character_id)` 记录登录事实；首次登录 marker 对重复记录幂等，每个目标角色的 Stage 只消费一次。Stage 就绪后的同步窗口到期时若 handle 数已达 `max_stimuli`，保留 marker 并重新计时，容量可用后再投递 `ProactivePromptDue(first_login)`。
+- `record_login(user_id, character_id, *, elapsed_from_last_login) -> bool`：按 `(user_id, character_id)` 记录登录事实并返回是否由 Stage 链接管；首次登录 marker 对重复记录幂等，每个目标角色的 Stage 只消费一次。Stage 就绪后的同步窗口到期时若 handle 数已达 `max_stimuli`，保留 marker 并重新计时，容量可用后再投递 `ProactivePromptDue(first_login)`；当天首次普通登录安排合并提醒。
+- `await scan_due_events() -> int`：由 world 时钟唤醒，遍历当前在线 Stage；每个 Stage 自己判断空闲并最多选择一项提醒，不经 WorldStage。
 - `await disconnect(connection) -> None`：标记连接失效、解除该连接当前绑定，并启动离线回收计时；不影响已重连的 Stage。
 - `await close() -> None`：停止接入，取消回收计时，终止全部 Stage，等待已经开始的回收及投递清理。
 
 离线超时发送 reason=USER_LEFT 的 InteractionEnding；服务器关闭使用 SHUTDOWN。结束刺激不进入 pending。结束 handler 在 AgentRuntime 中登记，确认结束并返回报告，不释放 context，也不产生客户端行动。Stage 在普通任务及结束处理收尾后调用 context.close；结束处理超时或失败也进入关闭流程。
 
 SystemRuntime 创建共享 adapter 和 StageManager，并在 AgentRuntime、能力及数据库关闭前关闭 StageManager。生产 `/chat_ws` 对每个已认证连接调用 `await StageManager.connect(connection, default_character_id)`，在路由 `finally` 中调用 `await StageManager.disconnect(connection)`；断线后保留期内同一用户和角色重连复用原 Stage、context、interaction_id 与两个 sink。旧 GCSM 仍服务尚未迁移的兼容调用者，但不再接收生产聊天 WebSocket 的业务事件。
+
+### `DueEventProvider` 与主动提醒
+
+`server/src/stage/due_events.py` 定义 `DueEvent` 不可变值类型与 `DueEventProvider` 窄端口：`list_due(character_id, user_id, now)`、`claim(event_id, user_id, character_id, trigger_key)`、`release(...)`。`SystemRuntime` 用 `EventStoreDueEventProvider` 装配 EventStore；Stage 不直接依赖数据库实现。claim 身份完整沿用 `(event_id, user_id, character_id, trigger_key)`，EventStore 唯一约束提供原子性。
+
+ChatStage 在 claim 前过滤支持类型（`holiday/travel/new_song/birthday/anniversary`）、角色、个人用户与 `is_notified`；周期路径要求在线、无 handle/pending/plan/realize 且空闲达到 `stage_manager.stage.proactive_idle_seconds`（默认 30 秒），每流随机选择一项。当天首次普通登录由 `StageManager.record_login` 记录，在 `login_reminder_wait`（默认 1 秒）后合并本次所有成功 claim 的事实为一个 `ProactivePromptDue`。处理报告失败、无计划、取消、离线清理或任一计划执行未完成都会 release；全部计划执行完成后保留 claim，登录与周期不会重复。
+
+生效配置：world 唤醒周期仍来自 `world.proactive_topic_check.clock_config.params.interval_seconds`（当前 300）；Stage 空闲阈值为 `stage_manager.stage.proactive_idle_seconds`（当前 30）；登录同步窗口为 `stage_manager.stage.login_reminder_wait`（当前 1）；长时回访边界为 `stage_manager.return_user_threshold_seconds`（当前 432000）。
 
 ## WorldStage 与 WorldFactSink
 
@@ -222,9 +231,9 @@ WorldStage 从事实复制 owner 的权威 revision，但不允许快照倒退�
 - 连接丢失不会自动等于删除用户会话，重连窗口和最终清理由管理器负责。
 - 持久化、模型调用和语音生成都有副作用。
 
-## 目标接口（草案，待评审，未实现）
+## 目标接口（剩余草案）
 
-以下为 Issue #78（19 WorldStage）与 Issue #76（17 周期主动提醒）所需的**目标** stage 接口。**当前源码未实现**（`server/src/stage` 目前只有 `ChatStage`），不得按“当前接口”调用；确认后需同步本页与总 SPEC 4.9。
+以下保留尚未完成的目标说明；WorldStage 与 DueEventProvider 已按上述当前事实实现。
 
 ### `WorldStage`（对应 Issue #78）
 
@@ -249,7 +258,7 @@ class WorldFactSink(Protocol):
 
 - world 任务只提交**规范化、强类型**事实（如 `WorldObservation`）；不直接调用 Agent。
 
-### `DueEventProvider`（对应 Issue #76）
+### `DueEventProvider`（对应 Issue #76，已实现）
 
 ```python
 class DueEventProvider(Protocol):
@@ -267,4 +276,4 @@ class DueEventProvider(Protocol):
 1. `world_id` 的来源与多世界装配方式。
 2. 无即时通道时 world 输出的支持/拒绝策略与 `output_started` 语义。
 3. 计划执行复用同一串行 worker，还是每次 plan 一个 execution。
-4. `trigger_key` 生成规则与空闲阈值配置键/默认值放置层级。
+4. owner 复核新增窄端口 A；`trigger_key` 当前直接沿用 EventStore 到期查询返回值，配置键落于上述 `stage_manager` 层。

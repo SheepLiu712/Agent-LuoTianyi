@@ -304,6 +304,14 @@
             }
         }
     },
+    "stage_manager": {
+        "offline_timeout": 60,
+        "return_user_threshold_seconds": 432000,
+        "stage": {
+            "proactive_idle_seconds": 30,
+            "login_reminder_wait": 1
+        }
+    },
     "agent_runtime": {
         "prepared_speech": {
             "manifest": "res/agent/prepared_speech/manifest.json"

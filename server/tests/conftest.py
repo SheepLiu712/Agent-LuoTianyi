@@ -20,6 +20,7 @@ _ACTIVE_TEST_FILES = {
     (Path(__file__).parent / "stage" / "test_chat_stage.py").resolve(),
     (Path(__file__).parent / "stage" / "test_first_login_welcome.py").resolve(),
     (Path(__file__).parent / "stage" / "test_first_login_scheduling.py").resolve(),
+    (Path(__file__).parent / "stage" / "test_proactive_due_dispatch.py").resolve(),
     (Path(__file__).parent / "stage" / "test_world_stage.py").resolve(),
     (Path(__file__).parent / "stage" / "test_world_stage_contracts.py").resolve(),
     (Path(__file__).parent / "stage" / "test_world_settlement_wiring.py").resolve(),

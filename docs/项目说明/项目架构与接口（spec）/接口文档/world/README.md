@@ -28,6 +28,8 @@
 
 citywalk、学歌、B 站事件、日记支持总开关及角色覆盖；QQ 凭据刷新和动态互动支持总开关。VCPedia、主动提醒和过期事件清理当前始终注册。调度参数来自传入配置的 `clock_config` 及任务自身的默认值。
 
+主动提醒任务 `ProactiveTopicCheckTask` 只按 `world.proactive_topic_check.clock_config` 唤醒 `StageManager.scan_due_events()`（当前间隔 300 秒）；它不读取候选、不 claim、不构造内容，也不调用 `ProactiveTopicMaker`／`TopicReplier`。聊天空闲、随机单项、claim/release 与 Agent 投递均归 ChatStage。
+
 `WorldClock.register_daily_action(name, hour, minute, action)` 使用服务器本地时间，每天在下一次指定时刻运行；恰好到达指定时刻时安排到次日。`register_interval_action(name, interval_seconds, action, run_immediately=False)` 默认先等待一个周期；立即运行开启时先执行一次。周期等待从上一次执行结束后开始。
 
 同一调度类别中同名注册替换旧循环；`start()` 重复调用不重复启动。action 可同步或异步，普通执行异常被隔离，不停止其他任务或自身后续周期。`last_results` 保存每个名称最近一次成功结果。

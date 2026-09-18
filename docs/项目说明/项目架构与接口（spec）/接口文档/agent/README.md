@@ -18,6 +18,8 @@
 
 `DIARY_PLANNING_DUE` 由 `DiaryPlanningDueHandler` 处理：按 `owner_user_id` 与 `local_date` 经共享日记技能（`DiaryWritingSkill`，复用既有素材收集与日记提示词）生成正文，交付 `WriteDiary(owner_user_id, local_date, body)` 计划；素材为空或正文生成为空时处理明确失败，不冒充已发布。`WRITE_DIARY` 由 `WriteDiaryHandler` 落库为私密、禁止评论的动态，成功报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<动态 id>)`，失败返回 `DEPENDENCY_UNAVAILABLE` 且不声称已提交效果。
 
+`PROACTIVE_PROMPT_DUE` 仍只经 Agent 两入口处理：`FirstLoginHandler` 保留 `reason=first_login` 的两条预制欢迎；其他受支持到期提醒由同一 handler 根据 Stage 提供的 `reason/due_at/dedup_key/fact_refs` 生成对话内容、写入会话并交付普通 `Say` 计划，随后由 `realize_action_plan` 输出。handler 不依赖 world 任务、EventStore、旧 `ProactiveTopicMaker` 或任何维护包。
+
 ### 当前内部认知与状态变更技能
 
 - `ExplicitMemoryIntentSkill.detect(text) -> str | None`：在 cognitive 层按 `memory.explicit_intent` 短语 allowlist 提取明确记忆正文；不在 Stage 或 Adapter 判定。

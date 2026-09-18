@@ -13,6 +13,7 @@ from src.chat_session import chat_stream_manager as chat_stream_manager_module
 from src.domain.stage import StageState
 from src.stage import StageManager, WorldStage
 from src.system.database import DatabaseManager, set_default_database_manager
+from src.system.due_event_provider import EventStoreDueEventProvider
 from src.system.observability import ObservabilityService, set_observability_service
 from src.system.user_interface import UserInterface
 from src.utils.llm.client_llm_executor import ClientLLMExecutor
@@ -131,9 +132,16 @@ class SystemRuntime:
                 world_stage_config=config.get("world_stage", {}),
             )
 
-            runtime.stage_manager = StageManager(get_agent=agent_runtime.get_agent, adapter=runtime.chat_adapter,
-                                                 get_context_factory=agent_runtime.context_factories.__getitem__,
-                                                 config=config.get("stage_manager", {}))
+            event_store = database_manager.event_store
+            if event_store is None:
+                raise RuntimeError("EventStore is required for due-event dispatch")
+            runtime.stage_manager = StageManager(
+                get_agent=agent_runtime.get_agent,
+                adapter=runtime.chat_adapter,
+                get_context_factory=agent_runtime.context_factories.__getitem__,
+                due_event_provider=EventStoreDueEventProvider(event_store),
+                config=config.get("stage_manager", {}),
+            )
 
             runtime._wire_dependencies()
             runtime._start_background_services()

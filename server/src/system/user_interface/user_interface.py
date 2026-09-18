@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING, Optional
 import os
 from contextlib import asynccontextmanager
@@ -111,15 +112,17 @@ class UserInterface:
         if auth_result:
             user_uuid = auth_result["user_uuid"]
             elapsed_from_last_login = auth_result["elapsed_from_last_login"]
-            if elapsed_from_last_login is None:
+            seconds_since_midnight = self._seconds_since_midnight()
+            stage_owned = elapsed_from_last_login is None or elapsed_from_last_login >= seconds_since_midnight
+            if stage_owned:
                 if system_runtime.stage_manager is None:
-                    raise RuntimeError("StageManager is required for first-login dispatch")
-                system_runtime.stage_manager.record_login(
+                    raise RuntimeError("StageManager is required for login dispatch")
+                stage_owned = system_runtime.stage_manager.record_login(
                     user_uuid,
                     system_runtime.agent_runtime.default_character_id,
                     elapsed_from_last_login=elapsed_from_last_login,
                 )
-            else:
+            if elapsed_from_last_login is not None and not stage_owned:
                 await system_runtime.chat_session_manager.on_user_login(
                     user_uuid,
                     elapsed_from_last_login,
@@ -199,15 +202,17 @@ class UserInterface:
                 user_uuid,
             )
             elapsed_from_last_login = auth_result["elapsed_from_last_login"]
-            if elapsed_from_last_login is None:
+            seconds_since_midnight = self._seconds_since_midnight()
+            stage_owned = elapsed_from_last_login is None or elapsed_from_last_login >= seconds_since_midnight
+            if stage_owned:
                 if system_runtime.stage_manager is None:
-                    raise RuntimeError("StageManager is required for first-login dispatch")
-                system_runtime.stage_manager.record_login(
+                    raise RuntimeError("StageManager is required for login dispatch")
+                stage_owned = system_runtime.stage_manager.record_login(
                     user_uuid,
                     system_runtime.agent_runtime.default_character_id,
                     elapsed_from_last_login=elapsed_from_last_login,
                 )
-            else:
+            if elapsed_from_last_login is not None and not stage_owned:
                 await system_runtime.chat_session_manager.on_user_login(
                     user_uuid,
                     elapsed_from_last_login,
@@ -218,6 +223,11 @@ class UserInterface:
                 "user_id": req.username,
             }
         raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    @staticmethod
+    def _seconds_since_midnight() -> float:
+        now = time.localtime()
+        return float(now.tm_hour * 3600 + now.tm_min * 60 + now.tm_sec)
 
     async def get_preference(
         self,
