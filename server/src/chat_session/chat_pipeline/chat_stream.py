@@ -338,12 +338,37 @@ class ChatStream:
         """用户重连时调用，更新 WebSocket 连接"""
         if self._closing:
             raise RuntimeError("Chat stream is stopping and cannot reconnect")
+        replaced = self.ws_connection
         self.logger.info(f"User {self.user_name} reconnected")
         self.ws_connection = new_ws_connection
         self.user_name = new_ws_connection.user_name if new_ws_connection else self.user_name
         self.connection_lost_time = None
         self.state = self.STATE_WAITING
         await self.start_if_needed()
+        # 单账号多端轮流使用：新连接接管聊天流后，主动通知并关闭被替代的旧连接，
+        # 避免旧设备停留在收不到任何回复的“僵尸连接”。复用 auth_error 事件，
+        # 让各端走既有的“鉴权被拒 → 停止重连 → 提示用户”链路。
+        if replaced is not None and replaced is not new_ws_connection:
+            await self._dismiss_replaced_connection(replaced)
+
+    async def _dismiss_replaced_connection(self, old_connection: "WebSocketConnection") -> None:
+        """向被接管的旧连接发送 auth_error(SESSION_REPLACED) 并关闭它。"""
+        ws_service = self.system_runtime.websocket_service if self.system_runtime else None
+        try:
+            if ws_service is not None:
+                event = ws_service._make_event(
+                    WSEventType.AUTH_ERROR,
+                    {
+                        "code": "SESSION_REPLACED",
+                        "message": "账号已在其他设备登录，本机会话已断开",
+                    },
+                )
+                await old_connection.websocket.send_json(event)
+            await old_connection.websocket.close()
+            self.logger.info("Dismissed replaced connection after takeover")
+        except Exception as e:
+            # 旧连接可能已自行断开，关闭失败不影响新连接
+            self.logger.debug(f"Failed to dismiss replaced connection: {e}")
 
     def _worker_task_bindings(self):
         return (
