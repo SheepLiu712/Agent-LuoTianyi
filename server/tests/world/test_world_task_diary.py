@@ -1,186 +1,211 @@
 import asyncio
-from datetime import datetime
+from datetime import date, datetime
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
+import src.domain.agent as d
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 from src.system.database.sql_database import Base, Conversation, DynamicPost, User
 from src.world.diary.task import DiaryTask
+from src.world.world_settlements import WorldSettlementRouter
+
+
+class FactSink:
+    def __init__(self, *, accepted: bool = True) -> None:
+        self.accepted = accepted
+        self.facts: list[d.DiaryPlanningDue] = []
+
+    async def submit(self, fact: d.DiaryPlanningDue) -> bool:
+        self.facts.append(fact)
+        return self.accepted
 
 
 def _diary_query_database():
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
-    session_factory = sessionmaker(bind=engine)
-    return engine, session_factory
+    return engine, sessionmaker(bind=engine)
 
 
-def test_diary_task_default_clock_config_is_daily():
+def _task(active_users: list[str], sink: FactSink, *, limit: int = 20,
+          router: WorldSettlementRouter | None = None) -> DiaryTask:
+    task = DiaryTask(
+        {"max_users_per_run": limit, "timezone": "Asia/Shanghai"},
+        character_id="luotianyi", settlements=router or WorldSettlementRouter(),
+    )
+    task.initialize(SimpleNamespace(
+        database_manager=SimpleNamespace(get_sql_session=lambda: None),
+        get_world_stage=lambda character_id: _stage(sink, character_id),
+    ))
+    task._find_active_users = lambda target_date: active_users
+    return task
+
+
+async def _stage(sink: FactSink, character_id: str):
+    assert character_id == "luotianyi"
+    return SimpleNamespace(fact_sink=sink)
+
+
+def _request(fact: d.DiaryPlanningDue) -> d.HandleStimulusRequest:
+    return d.HandleStimulusRequest(
+        request_id="req", stimulus=fact,
+        interaction=d.WorldInteractionSnapshot(
+            interaction_id="wi", interaction_revision=1, user_id=None,
+            pending_stimuli=(fact,), now=fact.occurred_at, timezone=fact.timezone,
+            supported_outputs=frozenset(), world_id="default", world_revision=1,
+            activity_id=None, activity_revision=None, planning_cycle_id=None,
+            schedule_revision=0,
+        ),
+        cancellation=d.CancellationToken(),
+    )
+
+
+def _handling(fact: d.DiaryPlanningDue, *, plan_id: str | None = "plan") -> d.HandlingReport:
+    return d.HandlingReport(
+        request_id="req", trigger_stimulus_id=fact.stimulus_id,
+        basis_interaction_revision=1, request_status=d.HandlingRequestStatus.COMPLETED,
+        considered_pending_stimulus_ids=(fact.stimulus_id,),
+        consumed_pending_stimulus_ids=(fact.stimulus_id,), retained_pending_stimulus_ids=(),
+        emitted_plan_ids=(plan_id,) if plan_id else (), error_code=None, retryable=False,
+    )
+
+
+def _execution(fact: d.DiaryPlanningDue, *, committed: bool) -> tuple[d.ActionPlan, d.ExecutionReport]:
+    action = d.WriteDiary(
+        action_id="action", owner_user_id=fact.owner_user_id,
+        local_date=fact.local_date, body="今天聊了很多值得记住的事情。",
+    )
+    plan = d.ActionPlan(
+        plan_id="plan", origin_request_id="req", plan_ordinal=1,
+        target_character_id="luotianyi", interaction_id="wi",
+        basis_interaction_revision=1, source_stimulus_ids=(fact.stimulus_id,),
+        actions=(action,),
+    )
+    result = d.ActionResult(
+        action_id=action.action_id,
+        status=(d.ActionExecutionStatus.COMPLETED if committed else d.ActionExecutionStatus.FAILED),
+        error_code=(None if committed else d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE),
+        irreversible_effect_committed=committed,
+        effect_ref=(d.EffectRef(kind=d.EffectKind.DYNAMIC_POST, effect_id="diary-1")
+                    if committed else None),
+    )
+    report = d.ExecutionReport(
+        execution_id="execution", plan_id=plan.plan_id,
+        status=(d.ExecutionStatus.COMPLETED if committed else d.ExecutionStatus.FAILED),
+        action_results=(result,), output_started=False,
+        error_code=(None if committed else d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE),
+        retryable=False,
+    )
+    return plan, report
+
+
+def test_diary_task_defaults_and_no_character_runtime_dependency():
     task = DiaryTask({}, character_id="luotianyi")
     assert task.get_task_type() == "daily"
-    params = task.get_task_params()
-    assert params.get("hour") == 0
-    assert params.get("minute") == 0
+    assert task.get_task_params() == {"hour": 0, "minute": 0}
+    assert task.min_daily_conversations == 50
+    assert task.max_users_per_run == 20
+    assert not hasattr(task, "character_runtime")
 
 
-def test_diary_task_name_includes_character_id():
-    task = DiaryTask({}, character_id="miku")
-    assert task.get_task_name() == "diary:miku"
-    assert task.character_id == "miku"
+def test_run_once_randomly_samples_and_submits_one_world_fact_per_user(monkeypatch):
+    users = [f"user-{index}" for index in range(25)]
+    sink = FactSink()
+    task = _task(users, sink, limit=20)
+    monkeypatch.setattr("src.world.diary.task.random.sample", lambda population, count: population[-count:])
+
+    result = asyncio.run(task.run_once())
+
+    assert [fact.owner_user_id for fact in sink.facts] == users[-20:]
+    assert result.data["selected_users_count"] == 20
+    assert result.data["diaries_pending"] == 20
+    assert {fact.trigger_id for fact in sink.facts} == {
+        f"diary:luotianyi:{date.today().isoformat()}"
+    }
+    for fact in sink.facts:
+        assert fact.source is d.StimulusSource.WORLD
+        assert fact.user_id is None
+        assert fact.target_character_ids == ("luotianyi",)
+        assert fact.occurred_at.tzinfo is not None
+        assert fact.timezone == ZoneInfo("Asia/Shanghai")
 
 
-def test_diary_task_config_overrides():
-    task = DiaryTask(
-        {"min_daily_conversations": 10, "max_users_per_run": 5},
-        character_id="luotianyi",
+def test_rejected_fact_is_not_retried_and_remains_pending():
+    sink = FactSink(accepted=False)
+    task = _task(["user-1"], sink)
+
+    result = asyncio.run(task.run_once())
+
+    assert len(sink.facts) == 1
+    assert result.data["facts_rejected"] == 1
+    assert result.data["diaries_pending"] == 1
+
+
+def test_settlement_maps_effect_to_created_and_failure_to_failed():
+    sink = FactSink()
+    router = WorldSettlementRouter()
+    task = _task(["user-created", "user-failed"], sink, router=router)
+    asyncio.run(task.run_once())
+
+    for fact, committed in zip(sink.facts, (True, False), strict=True):
+        request = _request(fact)
+        router.on_handling_settled(request, _handling(fact))
+        plan, report = _execution(fact, committed=committed)
+        router.on_execution_finished(plan, report)
+
+    assert task._outcomes == {"user-created": "created", "user-failed": "failed"}
+
+
+def test_model_availability_is_not_checked_by_world():
+    sink = FactSink()
+    runtime = SimpleNamespace(
+        database_manager=SimpleNamespace(get_sql_session=lambda: None),
+        capability_manager=SimpleNamespace(diary=SimpleNamespace(ensure_llm=lambda: False)),
+        get_world_stage=lambda character_id: _stage(sink, character_id),
     )
-    assert task.min_daily_conversations == 10
-    assert task.max_users_per_run == 5
-
-
-def test_run_once_randomly_samples_when_exceeding_limit(monkeypatch):
-    """活跃用户数超过上限时，应随机抽样而非固定取前 N 个。"""
-    selected = []
-
-    class FakeDiaryCapability:
-        def ensure_dependencies(self):
-            return True
-
-        async def generate_and_post_diary(self, **kwargs):
-            selected.append(kwargs["user_id"])
-            return True, "ok", None
-
-    class FakeCharacterRuntime:
-        def dynamic_context(self):
-            return SimpleNamespace(character_persona="人设", speaking_style="风格")
-
-    class FakeSystemRuntime:
-        class FakeAgentRuntime:
-            def get_character_runtime(self, character_id):
-                return FakeCharacterRuntime()
-
-        agent_runtime = FakeAgentRuntime()
-        capability_manager = SimpleNamespace(diary=FakeDiaryCapability())
-        database_manager = None
-
-    class FakeDatabaseManager:
-        def get_sql_session(self):
-            return None
-
-    task = DiaryTask({"max_users_per_run": 3}, character_id="luotianyi")
-    task.system_runtime = FakeSystemRuntime()
-    task.database_manager = FakeDatabaseManager()
-    task.character_runtime = FakeCharacterRuntime()
-
-    active_users = [f"user-{i}" for i in range(20)]
-    task._find_active_users = lambda target_date: active_users
-
-    # 控制随机边界，证明采用抽样结果而非固定取前 N 个。
-    def sample(population, count):
-        assert population == active_users
-        assert count == 3
-        return population[-count:]
-
-    monkeypatch.setattr("src.world.diary.task.random.sample", sample)
-    result = asyncio.run(task.run_once())
-    assert selected == active_users[-3:]
-    assert result.data["diaries_created"] == 3
-
-
-def test_run_once_all_users_when_below_limit():
-    selected = []
-
-    class FakeDiaryCapability:
-        def ensure_dependencies(self):
-            return True
-
-        async def generate_and_post_diary(self, **kwargs):
-            selected.append(kwargs["user_id"])
-            return True, "ok", None
-
-    class FakeCharacterRuntime:
-        def dynamic_context(self):
-            return SimpleNamespace(character_persona="", speaking_style="")
-
-    class FakeSystemRuntime:
-        class FakeAgentRuntime:
-            def get_character_runtime(self, character_id):
-                return FakeCharacterRuntime()
-
-        agent_runtime = FakeAgentRuntime()
-        capability_manager = SimpleNamespace(diary=FakeDiaryCapability())
-        database_manager = None
-
-    class FakeDatabaseManager:
-        def get_sql_session(self):
-            return None
-
-    task = DiaryTask({"max_users_per_run": 5}, character_id="luotianyi")
-    task.system_runtime = FakeSystemRuntime()
-    task.database_manager = FakeDatabaseManager()
-    task.character_runtime = FakeCharacterRuntime()
-
-    active_users = ["user-1", "user-2", "user-3"]
-    task._find_active_users = lambda target_date: active_users
+    task = DiaryTask({}, settlements=WorldSettlementRouter())
+    task.initialize(runtime)
+    task._find_active_users = lambda target_date: ["user-1"]
 
     result = asyncio.run(task.run_once())
-    assert set(selected) == set(active_users)
-    assert result.data.get("diaries_created") == 3
+
+    assert len(sink.facts) == 1
+    assert result.data["diaries_pending"] == 1
 
 
-def test_find_active_users_isolated_by_character_and_source_date():
+def test_find_active_users_applies_threshold_character_and_existing_diary_dedup():
     engine, session_factory = _diary_query_database()
-    target_date = "2026-07-16"
     session = session_factory()
     try:
-        session.add(User(uuid="user-1", username="user-1", password="hash"))
-        session.add(
-            Conversation(
-                uuid="conversation-1",
-                user_id="user-1",
-                character_id="miku",
-                timestamp=datetime(2026, 7, 16, 12, 0),
-                source="user",
-                type="text",
+        for user_id in ("eligible", "below", "has-diary"):
+            session.add(User(uuid=user_id, username=user_id, password="hash"))
+        for index in range(2):
+            session.add(Conversation(
+                uuid=f"eligible-{index}", user_id="eligible", character_id="luotianyi",
+                timestamp=datetime(2026, 7, 16, 12, index), source="user", type="text",
                 content="hello",
-            )
-        )
-        session.add(
-            DynamicPost(
-                id="luotianyi-diary",
-                author_type="agent",
-                author_id="luotianyi",
-                owner_user_id="user-1",
-                visibility="private",
-                content="other character diary",
-                source_type="diary",
-                source_id="diary:luotianyi:user-1:2026-07-16",
-                status="published",
-                created_at=datetime(2026, 7, 16, 23, 59),
-            )
-        )
+            ))
+            session.add(Conversation(
+                uuid=f"diary-{index}", user_id="has-diary", character_id="luotianyi",
+                timestamp=datetime(2026, 7, 16, 13, index), source="user", type="text",
+                content="hello",
+            ))
+        session.add(Conversation(
+            uuid="below-0", user_id="below", character_id="luotianyi",
+            timestamp=datetime(2026, 7, 16, 14, 0), source="user", type="text", content="hello",
+        ))
+        session.add(DynamicPost(
+            id="existing", author_type="agent", author_id="luotianyi",
+            owner_user_id="has-diary", visibility="private", content="diary",
+            source_type="diary", source_id="diary:luotianyi:has-diary:2026-07-16",
+            status="published", created_at=datetime(2026, 7, 16, 23, 59),
+        ))
         session.commit()
-
-        task = DiaryTask({"min_daily_conversations": 1}, character_id="miku")
+        task = DiaryTask({"min_daily_conversations": 2})
         task.database_manager = SimpleNamespace(get_sql_session=session_factory)
-        assert task._find_active_users(target_date) == ["user-1"]
 
-        session.add(
-            DynamicPost(
-                id="miku-diary",
-                author_type="agent",
-                author_id="miku",
-                owner_user_id="user-1",
-                visibility="private",
-                content="target diary",
-                source_type="diary",
-                source_id="diary:miku:user-1:2026-07-16",
-                status="published",
-                created_at=datetime(2026, 7, 17, 0, 1),
-            )
-        )
-        session.commit()
-
-        assert task._find_active_users(target_date) == []
+        assert task._find_active_users("2026-07-16") == ["eligible"]
     finally:
         session.close()
         engine.dispose()

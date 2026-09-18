@@ -12,6 +12,7 @@ from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.action.sing import SingHandler
 from src.agent.handlers.action.song_learning import RequestSongLearningHandler
+from src.agent.handlers.action.write_diary import WriteDiaryHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
     ChatReflectionHandler,
@@ -21,6 +22,7 @@ from src.agent.handlers.stimulus.citywalk import (
     CITYWALK_OBSERVATION_KIND,
     CitywalkObservationHandler,
 )
+from src.agent.handlers.stimulus.diary_due import DiaryPlanningDueHandler
 from src.agent.handlers.stimulus.dynamic_observed import DynamicObservedHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
@@ -46,6 +48,7 @@ from src.agent.skills.cognitive.learned_song_experience import (
     LearnedSongExperienceSkill,
 )
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.expression.diary_writing import DiaryWritingSkill
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
 from src.agent.skills.expression.singing import SingingSkill
@@ -185,7 +188,9 @@ class AgentRuntime:
                         (StimulusKind.DYNAMIC_OBSERVED, DynamicObservedHandler(
                             character_id,
                             self._dynamic_reply_skill(character_id),
-                            DynamicTopicMemorySkill(self.character_memories.get(character_id)))),
+                             DynamicTopicMemorySkill(self.character_memories.get(character_id)))),
+                        (StimulusKind.DIARY_PLANNING_DUE, DiaryPlanningDueHandler(
+                            self._diary_writing_skill(character_id))),
                         (StimulusKind.SONG_LEARNED, SongLearnedHandler(
                             character_id,
                             LearnedSongExperienceSkill(self.character_memories.get(character_id)),
@@ -194,6 +199,7 @@ class AgentRuntime:
                         *((kind, world_activity) for kind in WORLD_ACTIVITY_STIMULUS_KINDS
                           if kind not in (
                               StimulusKind.DYNAMIC_OBSERVED,
+                              StimulusKind.DIARY_PLANNING_DUE,
                               StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
                               StimulusKind.SONG_LEARNED,
                           )),
@@ -219,6 +225,8 @@ class AgentRuntime:
                             SongLearningDispatchSkill(self._singing_manager(character_id)))),
                         (ActionKind.REPLY_DYNAMIC, ReplyDynamicHandler(
                             character_id, self._dynamic_reply_skill(character_id))),
+                        (ActionKind.WRITE_DIARY, WriteDiaryHandler(
+                            self._diary_writing_skill(character_id))),
                     )),
                 )
                 for character_id in self.character_runtimes
@@ -482,6 +490,21 @@ class AgentRuntime:
         return DynamicReplySkill(
             self.capability_manager.dynamics,
             character_id=character_id, character_name=display_name,
+        )
+
+    def _diary_writing_skill(self, character_id: str) -> DiaryWritingSkill:
+        """按角色装配日记生成上下文与旧日记/动态能力。"""
+        runtime = self.character_runtimes.get(character_id)
+        profile = getattr(runtime, "profile", None)
+        display_name = str(getattr(profile, "display_name", "") or character_id)
+        main_chat = getattr(getattr(runtime, "conscious", None), "main_chat", None)
+        return DiaryWritingSkill(
+            getattr(self.capability_manager, "diary", None),
+            self.capability_manager.dynamics,
+            character_id=character_id,
+            character_name=display_name,
+            character_persona=str(getattr(main_chat, "character_persona", "") or ""),
+            speaking_style=str(getattr(main_chat, "speaking_style", "") or ""),
         )
 
     def _singing_manager(self, character_id: str):

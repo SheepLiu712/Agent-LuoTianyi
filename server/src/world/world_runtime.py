@@ -248,7 +248,9 @@ class WorldRuntime:
             config = self._character_task_config("diary", character_id)
             if not config.get("enabled", True):
                 continue
-            tasks.append(DiaryTask(config, character_id=character_id))
+            tasks.append(
+                DiaryTask(config, character_id=character_id, settlements=self.settlements)
+            )
         return tasks
 
     def _character_ids(self) -> list[str]:

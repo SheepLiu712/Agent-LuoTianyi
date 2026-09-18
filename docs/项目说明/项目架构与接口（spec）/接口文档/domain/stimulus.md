@@ -166,7 +166,7 @@ TextMessage(
 | `ProactivePromptDue` | `PROACTIVE_PROMPT_DUE` | `reason: ProactiveReason`；`due_at: datetime`；`dedup_key: str`；`fact_refs: tuple[EvidenceRef, ...]` | 时间带时区；dedup key 非空白；事实引用允许为空 |
 | `InteractionDeadline` | `INTERACTION_DEADLINE` | 无 | 只使用公共字段；表示 stage 已判定当前 interaction 到达强制重评时点 |
 | `DynamicObserved` | `DYNAMIC_OBSERVED` | `dynamic_id: str`；`target_message_id: str`；`target_kind: DynamicTargetKind`；`messages: tuple[DynamicMessage, ...]`；`revision: int` | 两个 ID 非空白；messages 至少一条且 message ID 唯一；target ID 在 messages 中恰好出现一次；revision 为非负整数 |
-| `DiaryPlanningDue` | `DIARY_PLANNING_DUE` | `local_date: date`；`timezone: ZoneInfo`；`trigger_id: str` | `local_date` 必须是 `date` 而非 `datetime`；trigger ID 非空白 |
+| `DiaryPlanningDue` | `DIARY_PLANNING_DUE` | `local_date: date`；`timezone: ZoneInfo`；`trigger_id: str`；`owner_user_id: str` | `local_date` 必须是 `date` 而非 `datetime`；trigger ID 非空白；**目标用户由 `owner_user_id` 显式携带**（owner 裁决 N2，世界事实的公共 `user_id` 仍为 `None`），实现见切片 25 |
 | `WorldObservation` | `WORLD_OBSERVATION` | `observation_kind: WorldObservationKind`；`fact: WorldFact`；`evidence_refs: tuple[EvidenceRef, ...]`；`world_revision: int` | revision 为非负整数；证据允许为空 |
 
 `ProactivePromptDue` 同时承载当前 EventStore 在事件前一天或当天产生的主动提醒：`reason` 表达提醒原因，`fact_refs` 指向需要读取的事件。它和 `InteractionDeadline` 都由拥有 interaction 的 stage 构造；底层 scheduler 或 world clock 可以唤醒拥有者，但不得覆盖原 `source` 或把 timer 对象放入 Stimulus。

@@ -1,6 +1,6 @@
 """从运行时取得门面，验证当前空注册版本的可观察契约。"""
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 import inspect
 from zoneinfo import ZoneInfo
 
@@ -124,23 +124,13 @@ async def test_handle_pre_cancelled_retains_reason_and_pending(runtime, reason):
     assert req.cancellation.reason is reason
 
 
-def _with_unregistered_action(plan):
-    """把第二个行动换成仍未实现的 WRITE_DIARY，用于整计划预检拒绝。"""
-    diary = d.WriteDiary(action_id="a1", owner_user_id="u", local_date=date(2026, 9, 14), body="日记")
-    return replace(plan, actions=(plan.actions[0], diary))
-
-
-@pytest.mark.parametrize("change,code,has_unregistered", [
-    ({}, d.ExecutionErrorCode.UNSUPPORTED_ACTION, True),
-    ({"target_character_id": "miku"}, d.ExecutionErrorCode.CONTRACT_MISMATCH, False),
-    ({"interaction_id": "another"}, d.ExecutionErrorCode.CONTRACT_MISMATCH, False),
-    ({"basis_interaction_revision": 2}, d.ExecutionErrorCode.UNSUPPORTED_ACTION, True),
-    ({"basis_interaction_revision": 4}, d.ExecutionErrorCode.CONTRACT_MISMATCH, False),
+@pytest.mark.parametrize("change,code", [
+    ({"target_character_id": "miku"}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
+    ({"interaction_id": "another"}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
+    ({"basis_interaction_revision": 4}, d.ExecutionErrorCode.CONTRACT_MISMATCH),
 ])
-async def test_execution_preflight_rejects_whole_plan(runtime, change, code, has_unregistered):
+async def test_execution_preflight_rejects_whole_plan(runtime, change, code):
     plan, context = plan_and_context()
-    if has_unregistered:
-        plan = _with_unregistered_action(plan)
     report = await facade(runtime).realize_action_plan(replace(plan, **change), context, RejectUnexpectedEmission())
     assert_execution_rejection(report, code)
 

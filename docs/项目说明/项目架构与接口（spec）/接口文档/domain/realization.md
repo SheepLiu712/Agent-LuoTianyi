@@ -93,6 +93,8 @@ plan sink 校验并接收通知后，由 stage 直接消费、发送既有 `agen
 
 WriteDiary 的效果是当前的私密日记动态：固定 private、禁止评论、来源为 diary，业务去重身份为角色、用户与日期。它与通用 PublishDynamic 的存储通道相同，但业务唯一性和发布规则不同。
 
+`WriteDiary` 已有生产 action handler：按角色发布私密（`PRIVATE`）、禁止评论、`source_type="diary"` 且业务去重身份为角色＋用户＋日期的日记动态，成功报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<动态 id>)`；发布失败返回 `DEPENDENCY_UNAVAILABLE` 且不声称已提交效果。它只提交持久效果，不投递聊天输出。
+
 PublishDynamic 的 `source` 同时携带当前动态页面使用的来源信息及业务身份，不再另设表达相同身份的 dedup_key。
 
 `PublishDynamic` 已有生产 action handler：经共享动态技能按来源身份幂等落库，成功时报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<dynamic_id>)`；发布失败返回 `DEPENDENCY_UNAVAILABLE` 且不声称已提交效果。它只提交持久效果，不投递聊天输出（world 链路没有实时输出通道）。
