@@ -86,6 +86,16 @@ class ActionExecutor:
                 exc.correlation_id,
                 started,
             ), exc.exit_code
+        except _Suppressed as exc:
+            return self._record(
+                action_id,
+                action,
+                "suppressed",
+                exc.data,
+                None,
+                exc.correlation_id,
+                started,
+            ), ExitCode.SUCCESS
         except ValueError as exc:
             return self._failure_record(
                 action_id, action, "INVALID_INPUT", str(exc), "input", started
@@ -126,6 +136,7 @@ class ActionExecutor:
             "image.select": self._select_image,
             "image.cancel": self._cancel_image,
             "image.send": self._send_image,
+            "touch.send": self._send_touch,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -311,6 +322,39 @@ class ActionExecutor:
             )
         return path
 
+    def _send_touch(self, params: dict) -> tuple[dict, str]:
+        session = self._require_session()
+        touch_area = params.get("touch_area")
+        if isinstance(touch_area, str):
+            if not touch_area.strip():
+                raise ValueError("touch_area must be a non-empty string or a non-empty list of strings")
+        elif isinstance(touch_area, list) and touch_area and all(
+            isinstance(item, str) and item.strip() for item in touch_area
+        ):
+            pass
+        else:
+            raise ValueError("touch_area must be a non-empty string or a non-empty list of strings")
+        click_frequency = params.get("click_frequency")
+        if click_frequency is not None and not isinstance(click_frequency, dict):
+            raise ValueError("click_frequency must be an object")
+        touch_meta = params.get("touch_meta")
+        if touch_meta is not None and not isinstance(touch_meta, dict):
+            raise ValueError("touch_meta must be an object")
+        if session.is_server_audio_active:
+            raise _Suppressed({"suppressed": True, "reason": "server_audio_active"})
+        request_id = params.get("client_msg_id") or f"c-{uuid.uuid4().hex[:12]}"
+        if not isinstance(request_id, str):
+            raise ValueError("client_msg_id must be a string")
+        ack = session.send_touch(
+            touch_area,
+            click_frequency=click_frequency,
+            touch_meta=touch_meta,
+            client_msg_id=request_id,
+            ack_timeout=_number(params, "ack_timeout", 10.0),
+        )
+        self._ensure_positive_ack(ack, correlation_id=request_id)
+        return {"ack": True}, request_id
+
     def _replay_audio(self, params: dict) -> tuple[dict, str]:
         reply_uuid = _required_string(params, "reply_uuid")
         session = self._require_session()
@@ -459,6 +503,13 @@ class _ActionFailure(Exception):
         self.exit_code = exit_code
         self.error = {"code": code, "message": message, "category": category}
         self.data = data or {}
+        self.correlation_id = correlation_id
+
+
+class _Suppressed(Exception):
+    def __init__(self, data, *, correlation_id=None):
+        super().__init__("suppressed")
+        self.data = data
         self.correlation_id = correlation_id
 
 

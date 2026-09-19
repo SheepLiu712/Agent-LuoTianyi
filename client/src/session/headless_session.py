@@ -121,6 +121,7 @@ class HeadlessSession:
         self._state = SessionState.NEW
         self._listeners: list[Callable[[SessionEvent], None]] = []
         self._replies: dict[str, _ReplyBuffer] = {}
+        self._server_audio_active = False
         self._install_transport_listeners()
 
     @property
@@ -130,6 +131,11 @@ class HeadlessSession:
         if state == SessionState.READY and not self._transport.is_ready():
             return SessionState.DISCONNECTED
         return state
+
+    @property
+    def is_server_audio_active(self) -> bool:
+        with self._condition:
+            return self._server_audio_active
 
     def connect(
         self,
@@ -234,6 +240,25 @@ class HeadlessSession:
             client_msg_id=client_msg_id,
         )
 
+    def send_touch(
+        self,
+        touch_area: str | list,
+        click_frequency: dict | None = None,
+        touch_meta: dict | None = None,
+        *,
+        client_msg_id: str | None = None,
+        ack_timeout: float = 10.0,
+    ) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.send_touch(
+            touch_area,
+            click_frequency=click_frequency,
+            touch_meta=touch_meta,
+            ack_timeout=ack_timeout,
+            client_msg_id=client_msg_id,
+        )
+
     def get_reply(self, reply_uuid: str) -> AggregatedReply | None:
         with self._condition:
             reply = self._replies.get(reply_uuid)
@@ -314,6 +339,7 @@ class HeadlessSession:
                     reply.audio.extend(base64.b64decode(message.audio))
                 except Exception:
                     pass
+                self._server_audio_active = True
             reply.audio_error = reply.audio_error or message.audio_error
             reply.error_code = message.error_code or reply.error_code
             reply.display_in_chat = reply.display_in_chat and message.display_in_chat
@@ -321,6 +347,7 @@ class HeadlessSession:
 
             if is_audio_terminal(message):
                 reply.complete = True
+                self._server_audio_active = False
                 if self._should_save_audio(reply):
                     reply.audio_path = self._save_audio(reply.uuid, bytes(reply.audio))
                 completed = reply.snapshot()
