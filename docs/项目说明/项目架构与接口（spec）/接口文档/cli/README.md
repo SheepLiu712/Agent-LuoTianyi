@@ -133,6 +133,18 @@
 - 门面增补（§2 当前 interface 的 S5 扩展）：`HeadlessSession.select_image()`、`cancel_image_selection()`、`send_image(image_path, *, client_msg_id, ack_timeout)`；编码失败抛 `SessionImageError`。
 - 真实链路依赖 S1 契约与部署一致性门槛；未满足时只交付客户端状态行为并显式标记 external skip。
 
+#### 1.8 触摸动作（目标，S6）
+
+| 动作 | 必需/可选参数 | 行为 |
+| --- | --- | --- |
+| `touch.send` | 必需 `touch_area`（非空字符串或非空字符串列表）；可选 `click_frequency`（对象）、`touch_meta`（对象）、`client_msg_id`、`ack_timeout` | 输入校验后：若会话处于"服务端音频活跃"等效状态则本地抑制并返回 `suppressed`；否则经当前客户端触摸发送能力发送并取得肯定 ACK |
+
+- 抑制语义（headless 等效）："服务端音频活跃"定义为*已收到某回复的音频包且该回复尚未收到终止包*；与产品客户端"音频播放期间抑制触摸"的可观察意图一致（无播放层时的等效口径）。抑制时不发送任何协议事件、不伪造 ACK 或回复；动作结果为 `status="suppressed"`、`data={"suppressed": true, "reason": "server_audio_active"}`、退出码 `0`。
+- 发送成功结果为 `{"ack": true}`；`ACK_REJECTED` / `TIMEOUT` 沿用 S3 语义。
+- 输入校验：`touch_area` 必须为非空字符串或非空字符串列表；`click_frequency` / `touch_meta` 必须为对象；违反为 `INVALID_INPUT`（退出码 3）。
+- 门面增补：`HeadlessSession.send_touch(touch_area, click_frequency=None, touch_meta=None, *, client_msg_id=None, ack_timeout=10.0)` 与只读属性 `is_server_audio_active`。
+- 真实链路依赖 S1 契约与部署一致性门槛；未满足时只交付本地抑制与客户端状态行为并显式标记 external skip。
+
 ### 2. 无 GUI 会话门面（当前 interface，S2 交付）
 
 #### 2.1 归属与调用者
