@@ -1,6 +1,6 @@
-# Server 模块接口文档
+# 模块接口文档（Server 与 CLI 工具链）
 
-本目录记录 Server 各顶层模块被其他模块调用的 interface。目录结构按照[开发守则](../../../开发进程文档/开发守则.md)中的目标架构组织，接口内容则以当前工作区代码为准。
+本目录记录各顶层模块被其他调用者使用的 interface：Server 模块清单见下表，客户端侧 CLI 端到端测试客户端见 `cli/`。目录结构按照[开发守则](../../../开发进程文档/开发守则.md)中的目标架构组织，接口内容则以当前工作区代码为准。
 
 ## 阅读约定
 
@@ -38,6 +38,9 @@
 | `system` | [系统组装和基础设施](system/README.md) | `server/src/system` |
 | `utils` | [通用工具](utils/README.md) | `server/src/utils` |
 | `legacy` | [迁移兼容接口](legacy/README.md) | `server/src/legacy` |
+| `cli` | [CLI 端到端测试客户端](cli/README.md) | `client/`（目标；当前无对应实现） |
+
+`cli` 为客户端侧工具链接口域；其对外契约当前均为**目标 interface**，随行为切片逐步落地。
 
 守则明确约定暂不创建 `base`，因此本目录也不创建空的 `base` 接口文档。
 
