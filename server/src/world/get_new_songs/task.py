@@ -18,6 +18,7 @@ class VCPediaNewSongTask(WorldTask):
         self.logger = get_logger(__name__)
         self.system_runtime: "SystemRuntime" | None = None
         self.llm_module: Any | None = None
+        self.extraction_llm_module: Any | None = None
 
     def initialize(self, system_runtime: "SystemRuntime") -> None:
         self.system_runtime = system_runtime
@@ -26,6 +27,11 @@ class VCPediaNewSongTask(WorldTask):
         llm_service = system_runtime.llm_service
         if module_cfg and llm_service is not None:
             self.llm_module = llm_service.register_llm_module("song_knowledge_crawler", module_cfg)
+        extraction_cfg = crawler_cfg.get("extraction_llm_module")
+        self.extraction_llm_module = None
+        if extraction_cfg and llm_service is not None:
+            self.extraction_llm_module = llm_service.register_llm_module(
+                "song_knowledge_extractor", extraction_cfg)
 
     def ensure_dependencies(self) -> None:
         """检查新歌知识同步任务的基础依赖。"""
@@ -35,7 +41,8 @@ class VCPediaNewSongTask(WorldTask):
 
     def run_once(self) -> WorldTaskResult:
         try:
-            result = sync_daily_new_songs(self.config, llm_module=self.llm_module)
+            result = sync_daily_new_songs(self.config, llm_module=self.llm_module,
+                                          extraction_llm_module=self.extraction_llm_module)
         except Exception as exc:
             self.logger.warning(f"VCPedia new song sync failed: {exc}")
             return WorldTaskResult.failure(self.task_name, str(exc))
