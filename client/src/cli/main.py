@@ -6,6 +6,7 @@ import sys
 
 from .actions import ActionExecutor, ExitCode
 from .output import serialize_record
+from ..utils.logger import set_console_stream
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -24,6 +25,7 @@ def main(argv=None, *, stdin=None, stdout=None, stderr=None) -> int:
     stdin = stdin or sys.stdin
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
+    set_console_stream(stderr)
     executor = ActionExecutor()
     final_exit = ExitCode.SUCCESS
     lines = [args.action] if args.action is not None else stdin
