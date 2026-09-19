@@ -23,3 +23,11 @@
 - commit 或 PR：分支 `feat/cli-e2e-s2-session-core`：`d34fbc3`（SPEC）/ `0f5332a`（Red）/ `a9460d4`（Green）。
 - 验证及结果：`cd client; python -m pytest tests/test_headless_session.py -q` → 7 passed；含 ACK/TTS 关联回归 → 21 passed；其余 client 用例 66 passed（3 个旧测试文件因既有导入问题无法收集，与本次改动无关）。
 - 未验证范围：真实服务端登录/鉴权、真实断线重连时序、GUI 迁移与冒烟、音频播放/设备、CLI 层、图片/触摸/动态/偏好。
+
+### 2026-09-20 S3 CLI 骨架与文本动作
+
+- 交付行为：无 GUI CLI 骨架（`client/cli.py` + `client/src/cli/`）：交互/非交互 JSONL 双模式、统一动作执行器、稳定退出码、集中脱敏与诊断日志改道 stderr（stdout 纯 JSONL）；动作 `session.connect` / `session.status` / `session.close` / `chat.send_text` / `reply.wait` / `reply.read`（文本断言 non_empty/contains/regex）；`reply` 输出预置媒体字段占位（供 S4 填充，不破坏 schema）。
+- interface spec：`docs/项目说明/项目架构与接口（spec）/接口文档/cli/README.md` §1（CLI 动作与机器输出）。
+- commit 或 PR：分支 `feat/cli-e2e-s3-cli-skeleton`：`f487eca`（SPEC）/ `dcdad99`（Red）/ `4aeefc7`（Green）。
+- 验证及结果：focused → 17 passed；新增日志改道回归 `tests/test_cli_log_stream.py` → 2 passed；client 回归 → 85 passed（排除 3 个既有收集失败文件）；子进程冒烟（真实连接失败路径）→ 退出码 4、stdout 仅 1 行合法 JSONL、诊断日志全部在 stderr、无凭据泄漏。
+- 未验证范围：真实服务端登录/鉴权与文本发送、真实 ACK/断线重连、真实 LLM/TTS、音频解码与重放、图片/触摸/动态/偏好、交互模式增强。
