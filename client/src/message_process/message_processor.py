@@ -20,6 +20,7 @@ from ..delivery_policy import (
 )
 from ..live2d import Live2dModel
 from ..network.event_types import AgentMessage, is_audio_terminal
+from ..utils.image_encoding import prepare_image_payload
 from ..utils import llm_key_storage
 from ..utils.llm_client import (
     build_chat_completions_payload,
@@ -524,26 +525,7 @@ class MessageProcessor:
         return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}", "drop": True}
 
     def _prepare_image_payload(self, image_path: str) -> dict:
-        try:
-            with open(image_path, "rb") as f:
-                image_data = f.read()
-            postfix = os.path.splitext(image_path)[1]
-            new_file_path = self._save_image_to_temp(image_data, postfix)
-        except Exception as exc:
-            return {"ok": False, "error": f"Failed to read image file: {exc}", "drop": True}
-
-        mime_type = "image/png"
-        if postfix.lower() in [".jpg", ".jpeg"]:
-            mime_type = "image/jpeg"
-        elif postfix.lower() == ".gif":
-            mime_type = "image/gif"
-
-        return {
-            "ok": True,
-            "image_base64": base64.b64encode(image_data).decode("utf-8"),
-            "mime_type": mime_type,
-            "image_client_path": new_file_path,
-        }
+        return prepare_image_payload(image_path)
     
     def _save_audio_to_temp(self, audio_data: bytes, uuid: str | None, postfix: str) -> str:
         try:
@@ -565,20 +547,6 @@ class MessageProcessor:
         except Exception as exc:
             self.logger.error(f"Failed to save audio to temp: {exc}")
             return ""
-
-    @staticmethod
-    def _save_image_to_temp(image_data: bytes, postfix: str) -> str:
-        cwd = os.getcwd()
-        new_file_path = os.path.join(
-            cwd,
-            "temp",
-            "images",
-            datetime.datetime.now().strftime("%Y%m%d%H%M%S") + postfix,
-        )
-        os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
-        with open(new_file_path, "wb") as f:
-            f.write(image_data)
-        return new_file_path
 
     @staticmethod
     def _is_terminal_send_error(error_text: str) -> bool:

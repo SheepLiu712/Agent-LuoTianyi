@@ -11,6 +11,7 @@ from typing import Callable
 
 from ..network.event_types import AgentMessage, is_audio_terminal
 from ..network.network_client import NetworkClient
+from ..utils.image_encoding import prepare_image_payload
 
 
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -65,6 +66,10 @@ class ReplyTimeoutError(SessionError):
 
 
 class SessionClosedError(SessionError):
+    pass
+
+
+class SessionImageError(SessionError):
     pass
 
 
@@ -195,6 +200,36 @@ class HeadlessSession:
             raise SessionNotReadyError("session is not ready")
         return self._network_client.send_chat(
             text,
+            ack_timeout=ack_timeout,
+            client_msg_id=client_msg_id,
+        )
+
+    def select_image(self, *, ack_timeout: float = 5.0) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.send_image_selecting(ack_timeout=ack_timeout)
+
+    def cancel_image_selection(self, *, ack_timeout: float = 5.0) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.send_image_selecting_cancel(ack_timeout=ack_timeout)
+
+    def send_image(
+        self,
+        image_path: str,
+        *,
+        client_msg_id: str,
+        ack_timeout: float = 10.0,
+    ) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        payload = prepare_image_payload(image_path)
+        if not payload.get("ok"):
+            raise SessionImageError(payload.get("error") or "image encoding failed")
+        return self._network_client.send_image(
+            image_base64=payload["image_base64"],
+            mime_type=payload["mime_type"],
+            image_client_path=payload["image_client_path"],
             ack_timeout=ack_timeout,
             client_msg_id=client_msg_id,
         )
