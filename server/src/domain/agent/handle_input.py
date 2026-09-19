@@ -62,13 +62,18 @@ class CancellationToken(metaclass=_HandleInputMeta):
         return True
 
 
-_CONTENT_TRIGGER_KINDS = frozenset({
-    StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
-})
+_CONTENT_TRIGGER_KINDS = frozenset(
+    {
+        StimulusKind.TEXT_MESSAGE,
+        StimulusKind.IMAGE_MESSAGE,
+        StimulusKind.VOICE_MESSAGE,
+    }
+)
 
 
 class HandlePurpose(str, Enum):
     """调用用途：PROCESS 按刺激类别处理，REFLECT 执行本次交互结算后的认知维护。"""
+
     PROCESS = "process"
     REFLECT = "reflect"
 
@@ -76,6 +81,7 @@ class HandlePurpose(str, Enum):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class PreprocessedInput(metaclass=_HandleInputMeta):
     """单条输入的预处理结果；text 是理解后的文本，conversation_entry_ids 是已保存记录的 ID。"""
+
     _error_code: ClassVar[HandleInputErrorCode] = HandleInputErrorCode.CONTRACT_INVALID_HANDLE_REQUEST
     stimulus_id: str
     text: str | None
@@ -85,8 +91,11 @@ class PreprocessedInput(metaclass=_HandleInputMeta):
         _require(_nonblank(self.stimulus_id), "stimulus_id", self._error_code)
         _require(self.text is None or isinstance(self.text, str), "text", self._error_code)
         ids = self.conversation_entry_ids
-        _require(isinstance(ids, tuple) and all(_nonblank(i) for i in ids)
-                 and len(set(ids)) == len(ids), "conversation_entry_ids", self._error_code)
+        _require(
+            isinstance(ids, tuple) and all(_nonblank(i) for i in ids) and len(set(ids)) == len(ids),
+            "conversation_entry_ids",
+            self._error_code,
+        )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -114,15 +123,19 @@ class HandleStimulusRequest(metaclass=_HandleInputMeta):
         _require(isinstance(self.interaction, InteractionSnapshot), "interaction", code)
         _require(isinstance(self.cancellation, CancellationToken), "cancellation", code)
         _require(isinstance(self.purpose, HandlePurpose), "purpose", code)
-        _require(isinstance(self.prepared_inputs, tuple) and all(isinstance(i, PreprocessedInput)
-                 for i in self.prepared_inputs), "prepared_inputs", code)
+        _require(
+            isinstance(self.prepared_inputs, tuple)
+            and all(isinstance(i, PreprocessedInput) for i in self.prepared_inputs),
+            "prepared_inputs",
+            code,
+        )
         ids = tuple(i.stimulus_id for i in self.prepared_inputs)
         pending_ids = tuple(i.stimulus_id for i in self.interaction.pending_stimuli)
-        _require(len(set(ids)) == len(ids) and tuple(i for i in pending_ids if i in ids) == ids,
-                 "prepared input order", code)
+        _require(
+            len(set(ids)) == len(ids) and tuple(i for i in pending_ids if i in ids) == ids, "prepared input order", code
+        )
         matching = tuple(
-            item for item in self.interaction.pending_stimuli
-            if item.stimulus_id == self.stimulus.stimulus_id
+            item for item in self.interaction.pending_stimuli if item.stimulus_id == self.stimulus.stimulus_id
         )
         if self.stimulus.kind in _CONTENT_TRIGGER_KINDS:
             _require(len(matching) == 1, "content trigger missing from pending", code)

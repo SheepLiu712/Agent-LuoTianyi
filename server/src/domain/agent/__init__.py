@@ -1,7 +1,41 @@
 """Agent 领域契约的公开入口：刺激、交互快照、处理请求、取消信号和结算报告。"""
 
 from ._handle_input_contract import HandleInputErrorCode, InvalidHandleInputError
-from .handle_input import CancellationReason, CancellationToken, HandleStimulusRequest, HandlePurpose, PreprocessedInput
+from ._realization_contract import (
+    InvalidRealizationContractError,
+    RealizationContractErrorCode,
+)
+from ._stimulus_contract import InvalidStimulusError, StimulusErrorCode
+from .action_plan import (
+    Action,
+    ActionPlan,
+    ChangeExpression,
+    DynamicReplyTarget,
+    DynamicSource,
+    PublishDynamic,
+    ReplyDynamic,
+    RequestSongLearning,
+    RestoreExpression,
+    Say,
+    Sing,
+    StartThinking,
+    Tone,
+    WriteDiary,
+)
+from .execution_output import (
+    AgentOutput,
+    AudioChunkOutput,
+    ExecutionContext,
+    ExpressionOutput,
+    MessageEndOutput,
+    TextFinalOutput,
+)
+from .execution_report import (
+    ActionResult,
+    EffectRef,
+    ExecutionReport,
+)
+from .handle_input import CancellationReason, CancellationToken, HandlePurpose, HandleStimulusRequest, PreprocessedInput
 from .handling_report import (
     HandlingErrorCode,
     HandlingReport,
@@ -18,7 +52,28 @@ from .interaction_snapshot import (
     ToyInteractionSnapshot,
     WorldInteractionSnapshot,
 )
-from ._stimulus_contract import InvalidStimulusError, StimulusErrorCode
+from .realization_enums import (
+    ActionExecutionStatus,
+    ActionKind,
+    AudioErrorCode,
+    AudioFraming,
+    EffectKind,
+    ExecutionErrorCode,
+    ExecutionStatus,
+    MessageEndStatus,
+    OutputAcceptanceStatus,
+    OutputDelivery,
+    PlanAcceptanceStatus,
+    Visibility,
+)
+from .realization_sinks import (
+    ActionPlanSink,
+    AgentOutputSink,
+    OutputReceipt,
+    PlanReceipt,
+    SinkRejectedError,
+    SinkRejectionCode,
+)
 from .stimulus import (
     ActivityDue,
     ActivityEnded,
@@ -62,62 +117,6 @@ from .stimulus_values import (
     TouchClickFrequency,
     WorldFact,
     WorldObservationKind,
-)
-
-from ._realization_contract import (
-    InvalidRealizationContractError,
-    RealizationContractErrorCode,
-)
-from .realization_enums import (
-    ActionKind,
-    OutputDelivery,
-    Visibility,
-    PlanAcceptanceStatus,
-    OutputAcceptanceStatus,
-    AudioFraming,
-    MessageEndStatus,
-    AudioErrorCode,
-    ExecutionStatus,
-    ActionExecutionStatus,
-    EffectKind,
-    ExecutionErrorCode,
-)
-from .action_plan import (
-    Tone,
-    ChangeExpression,
-    DynamicReplyTarget,
-    DynamicSource,
-    Action,
-    StartThinking,
-    Say,
-    Sing,
-    RestoreExpression,
-    WriteDiary,
-    PublishDynamic,
-    ReplyDynamic,
-    RequestSongLearning,
-    ActionPlan,
-)
-from .execution_output import (
-    ExecutionContext,
-    AgentOutput,
-    TextFinalOutput,
-    AudioChunkOutput,
-    MessageEndOutput,
-    ExpressionOutput,
-)
-from .realization_sinks import (
-    SinkRejectionCode,
-    SinkRejectedError,
-    PlanReceipt,
-    OutputReceipt,
-    ActionPlanSink,
-    AgentOutputSink,
-)
-from .execution_report import (
-    EffectRef,
-    ActionResult,
-    ExecutionReport,
 )
 
 __all__ = (
@@ -164,7 +163,6 @@ __all__ = (
     "EffectRef",
     "ActionResult",
     "ExecutionReport",
-
     "AgentOutputKind",
     "CancellationReason",
     "CancellationToken",

@@ -49,9 +49,15 @@ class UserPreferences:
     personality_text: str = ""
 
     def __post_init__(self) -> None:
-        if any(not isinstance(value, str) for value in (
-            self.relationship, self.speaking_style, self.custom_context, self.personality_text,
-        )):
+        if any(
+            not isinstance(value, str)
+            for value in (
+                self.relationship,
+                self.speaking_style,
+                self.custom_context,
+                self.personality_text,
+            )
+        ):
             raise TypeError("偏好的文字字段应为字符串")
         _check_terms(self.personality_traits)
 
@@ -89,8 +95,10 @@ class ImageContent:
     media_id: str | None = None
 
     def __post_init__(self) -> None:
-        if not isinstance(self.text, str) or any(value is not None and not isinstance(value, str)
-                for value in (self.image_client_path, self.image_server_path, self.mime_type, self.media_id)):
+        if not isinstance(self.text, str) or any(
+            value is not None and not isinstance(value, str)
+            for value in (self.image_client_path, self.image_server_path, self.mime_type, self.media_id)
+        ):
             raise TypeError("图片文字和位置字段应为字符串")
         _check_terms(self.terms)
 
@@ -153,7 +161,9 @@ class ConversationCompaction:
     summary: ConversationSummary
 
     def __post_init__(self) -> None:
-        if not isinstance(self.previous_summary, ConversationSummary) or not isinstance(self.summary, ConversationSummary):
+        if not isinstance(self.previous_summary, ConversationSummary) or not isinstance(
+            self.summary, ConversationSummary
+        ):
             raise TypeError("原总结和新总结应为 ConversationSummary")
         _check_terms(self.covered_entry_ids)
         if not self.covered_entry_ids or any(not value.strip() for value in self.covered_entry_ids):

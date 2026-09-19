@@ -16,7 +16,6 @@ from src.utils.llm.llm_api_interface import LLMContentInspectionError
 from src.utils.llm.llm_module import LLMModule
 from src.utils.logger import get_logger
 
-
 DEFAULT_LLM_TONE = "中性"
 DEFAULT_TTS_TONE = "normal"
 DEFAULT_EXPRESSION = "微笑脸"
@@ -129,7 +128,6 @@ class MainChat:
             song_cls=SongSegmentChat,
             default_response=self.default_response,
             tone_mapper=self._get_expressions_and_tts_tone,
-            logger=self.logger,
         )
 
     async def generate_response(
@@ -187,15 +185,10 @@ class MainChat:
                 return "[中性]这个话题不太合适，我们聊点别的吧"
             except Exception as e:
                 if attempt >= max_attempts:
-                    self.logger.error(
-                        "MainChat LLM failed after "
-                        f"{attempt} attempts ({type(e).__name__}): {e}"
-                    )
+                    self.logger.error("MainChat LLM failed after " f"{attempt} attempts ({type(e).__name__}): {e}")
                     break
                 self.logger.warning(
-                    "MainChat LLM request failed "
-                    f"({attempt}/{max_attempts}), retrying: "
-                    f"{type(e).__name__}: {e}"
+                    "MainChat LLM request failed " f"({attempt}/{max_attempts}), retrying: " f"{type(e).__name__}: {e}"
                 )
                 if retry_delay > 0:
                     await asyncio.sleep(retry_delay)
@@ -240,9 +233,7 @@ class MainChat:
 
         path = Path(static_variables_file)
         if not path.is_file():
-            raise FileNotFoundError(
-                f"Static variables file for character '{character_id}' was not found: {path}"
-            )
+            raise FileNotFoundError(f"Static variables file for character '{character_id}' was not found: {path}")
 
         try:
             with path.open("r", encoding="utf-8") as f:
@@ -252,14 +243,10 @@ class MainChat:
                 f"Static variables file for character '{character_id}' contains invalid JSON: {path}"
             ) from exc
         except OSError as exc:
-            raise OSError(
-                f"Failed to read static variables file for character '{character_id}': {path}"
-            ) from exc
+            raise OSError(f"Failed to read static variables file for character '{character_id}': {path}") from exc
 
         if not isinstance(static_vars, dict):
-            raise ValueError(
-                f"Static variables file for character '{character_id}' must contain a JSON object: {path}"
-            )
+            raise ValueError(f"Static variables file for character '{character_id}' must contain a JSON object: {path}")
 
         character_name = self._required_static_text(
             static_vars,
@@ -328,16 +315,14 @@ class MainChat:
                 mapping = json.load(f)
             if isinstance(mapping, dict):
                 self.llm_tone_to_tts_tone = {
-                    str(k).strip().lower(): str(v).strip()
-                    for k, v in mapping.get("llm_tone_to_tts_tone", {}).items()
+                    str(k).strip().lower(): str(v).strip() for k, v in mapping.get("llm_tone_to_tts_tone", {}).items()
                 }
                 self.llm_tone_to_l2d_expression = {
                     str(k).strip().lower(): str(v).strip()
                     for k, v in mapping.get("llm_tone_to_l2d_expression", {}).items()
                 }
                 self.llm_tone_aliases = {
-                    str(k).strip().lower(): str(v).strip().lower()
-                    for k, v in mapping.get("tone_aliases", {}).items()
+                    str(k).strip().lower(): str(v).strip().lower() for k, v in mapping.get("tone_aliases", {}).items()
                 }
         except Exception as e:
             self.logger.warning(f"Failed to load LLM tone mapping: {e}")
@@ -415,12 +400,12 @@ class MainChat:
             changed = False
             for prefix in sorted(TONE_MODIFIER_PREFIXES, key=len, reverse=True):
                 if stripped.startswith(prefix):
-                    stripped = stripped[len(prefix):]
+                    stripped = stripped[len(prefix) :]
                     changed = True
                     break
             for suffix in sorted(TONE_MODIFIER_SUFFIXES, key=len, reverse=True):
                 if stripped.endswith(suffix):
-                    stripped = stripped[:-len(suffix)]
+                    stripped = stripped[: -len(suffix)]
                     changed = True
                     break
         return stripped

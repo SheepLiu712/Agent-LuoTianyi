@@ -77,7 +77,11 @@ class SongKnowledgeAcceptanceSkill:
         self._database_ready = False
 
     async def accept(
-        self, *, source_ref: SourceRef, external_song_id: str, revision: int,
+        self,
+        *,
+        source_ref: SourceRef,
+        external_song_id: str,
+        revision: int,
         candidate: SongKnowledgeCandidate,
     ) -> SongAcceptanceResult:
         """接纳一个候选；阻塞的知识库与文件写入在工作线程内完成。
@@ -93,7 +97,8 @@ class SongKnowledgeAcceptanceSkill:
         result = await asyncio.to_thread(self._accept_sync, candidate)
         if result.status is SongAcceptanceStatus.ACCEPTED:
             return SongAcceptanceResult(
-                result.status, f"{source_ref.source_id}/{external_song_id}@{revision}",
+                result.status,
+                f"{source_ref.source_id}/{external_song_id}@{revision}",
             )
         return result
 
@@ -124,7 +129,8 @@ class SongKnowledgeAcceptanceSkill:
                 session.query(Song).filter(Song.uuid == row.uuid).delete()
                 session.commit()
                 return SongAcceptanceResult(
-                    SongAcceptanceStatus.FAILED, f"关键词索引写入失败：{error}",
+                    SongAcceptanceStatus.FAILED,
+                    f"关键词索引写入失败：{error}",
                 )
             return SongAcceptanceResult(SongAcceptanceStatus.ACCEPTED, song_name)
         except Exception as error:  # noqa: BLE001 - 单首歌失败不得影响其它候选
@@ -141,22 +147,13 @@ class SongKnowledgeAcceptanceSkill:
 
     @staticmethod
     def _exists(session, song_name: str, safe_name: str) -> bool:
-        return (
-            session.query(Song)
-            .filter((Song.name == song_name) | (Song.safe_name == safe_name))
-            .first()
-            is not None
-        )
+        return session.query(Song).filter((Song.name == song_name) | (Song.safe_name == safe_name)).first() is not None
 
     def _append_keywords(self, song_name: str, lyric_keywords: tuple[str, ...]) -> None:
         self._song_name_file.parent.mkdir(parents=True, exist_ok=True)
         with open(self._song_name_file, "a", encoding="utf-8") as name_file:
             name_file.write(f"{song_name}\n")
-        lines = [
-            f"{keyword}=>{keyword}是《{song_name}》的歌词"
-            for keyword in lyric_keywords
-            if keyword.strip()
-        ]
+        lines = [f"{keyword}=>{keyword}是《{song_name}》的歌词" for keyword in lyric_keywords if keyword.strip()]
         if not lines:
             return
         with open(self._lyric_file, "a", encoding="utf-8") as lyric_file:

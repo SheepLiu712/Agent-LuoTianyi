@@ -26,13 +26,19 @@ SkillT = TypeVar("SkillT")
 class Skills:
     """持有一个 AgentRuntime 内所有角色共享的技能实例。"""
 
-    def __init__(self, config: dict[str, Any], llm_service: LLMService, *, tts_engine: AsyncTTS,
-                 preprocessing_config: dict[str, Any] | None = None,
-                  explicit_memory_config: dict[str, Any] | None = None,
-                  reply_composition_config: dict[str, Any] | None = None,
-                  singing: object = None,
-                  media_resolver: MediaResolver | None = None,
-                  image_understanding: ImageUnderstandingCapability | None = None) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any],
+        llm_service: LLMService,
+        *,
+        tts_engine: AsyncTTS,
+        preprocessing_config: dict[str, Any] | None = None,
+        explicit_memory_config: dict[str, Any] | None = None,
+        reply_composition_config: dict[str, Any] | None = None,
+        singing: object = None,
+        media_resolver: MediaResolver | None = None,
+        image_understanding: ImageUnderstandingCapability | None = None,
+    ) -> None:
         """按 config 的技能分组初始化实例，并派发 llm_service、tts_engine 与演唱能力。
 
         reply_composition_config 由运行时在注册回复生成技能时取回，保证慢召回
@@ -46,15 +52,15 @@ class Skills:
         self._skills: dict[type, object] = {
             SpeakingSkill: SpeakingSkill(config.get("speaking", {}), tts_engine),
             ConversationCompactionSkill: ConversationCompactionSkill(
-                config.get("conversation_compaction", {}), llm_service,
+                config.get("conversation_compaction", {}),
+                llm_service,
             ),
             TextPreprocessingSkill: TextPreprocessingSkill(preprocessing_config),
             ExplicitMemoryIntentSkill: ExplicitMemoryIntentSkill(explicit_memory_config),
             SingingSkill: SingingSkill(config.get("singing", {}), singing),
         }
         if media_resolver is not None and image_understanding is not None:
-            self._skills[ImagePreprocessingSkill] = ImagePreprocessingSkill(
-                media_resolver, image_understanding)
+            self._skills[ImagePreprocessingSkill] = ImagePreprocessingSkill(media_resolver, image_understanding)
 
     @property
     def reply_composition_config(self) -> dict[str, Any]:

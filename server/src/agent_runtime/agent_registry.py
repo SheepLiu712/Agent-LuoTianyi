@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Mapping
 
 if TYPE_CHECKING:
     from src.agent.luotianyi_agent import LuoTianyiAgent
@@ -19,10 +19,7 @@ class AgentRegistry:
     ) -> None:
         self.config = config
         self.character_registry = character_registry
-        self._agents = {
-            character_id: runtime.conscious
-            for character_id, runtime in character_runtimes.items()
-        }
+        self._agents = {character_id: runtime.conscious for character_id, runtime in character_runtimes.items()}
 
     def get(self, character_id: str | None = None) -> LuoTianyiAgent:
         profile = self.character_registry.get(character_id)

@@ -25,15 +25,19 @@ class RestoreExpressionHandler:
                 irreversible_effect_committed=False,
                 effect_ref=None,
             )
-        await outputs.emit(ExpressionDraft(
-            expression=d.ChangeExpression(expression_id=action.expression_id),
-            delivery=action.delivery,
-        ))
-        await outputs.emit(MessageEndDraft(
-            delivery=action.delivery,
-            status=d.MessageEndStatus.COMPLETED,
-            error_code=None,
-        ))
+        await outputs.emit(
+            ExpressionDraft(
+                expression=d.ChangeExpression(expression_id=action.expression_id),
+                delivery=action.delivery,
+            )
+        )
+        await outputs.emit(
+            MessageEndDraft(
+                delivery=action.delivery,
+                status=d.MessageEndStatus.COMPLETED,
+                error_code=None,
+            )
+        )
         return d.ActionResult(
             action_id=action.action_id,
             status=d.ActionExecutionStatus.COMPLETED,

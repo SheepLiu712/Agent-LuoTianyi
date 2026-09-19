@@ -7,8 +7,7 @@ from typing import Any, Protocol
 
 
 class _SingingPort(Protocol):
-    def sing(self, character_id: str, song_name: str | None = None,
-             segment: str | None = None) -> bytes | None: ...
+    def sing(self, character_id: str, song_name: str | None = None, segment: str | None = None) -> bytes | None: ...
 
 
 class EmptySongAudioError(Exception):

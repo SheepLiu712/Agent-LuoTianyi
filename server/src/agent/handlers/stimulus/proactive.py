@@ -34,24 +34,32 @@ class FirstLoginHandler:
             raise TypeError("FirstLoginHandler requires ProactivePromptDue")
         if stimulus.reason.value != "first_login":
             content = self._reminder_content(stimulus)
-            await plans.context.conversation.append((ConversationEntry(
-                entry_id=str(uuid4()),
-                timestamp=datetime.now(),  # noqa: DTZ005 - conversation storage uses local naive timestamps
-                source="agent",
-                content=TextContent(content),
-            ),))
-            await plans.emit(ActionPlanDraft(
-                source_stimulus_ids=(stimulus.stimulus_id,),
-                actions=(d.Say(
-                    action_id=str(uuid4()),
-                    content=content,
-                    sound_content=None,
-                    prepared_audio_ref=None,
-                    tone=d.Tone(value="normal"),
-                    expression=d.ChangeExpression(expression_id="normal"),
-                    delivery=d.OutputDelivery.CONVERSATION,
-                ),),
-            ))
+            await plans.context.conversation.append(
+                (
+                    ConversationEntry(
+                        entry_id=str(uuid4()),
+                        timestamp=datetime.now(),  # noqa: DTZ005 - conversation storage uses local naive timestamps
+                        source="agent",
+                        content=TextContent(content),
+                    ),
+                )
+            )
+            await plans.emit(
+                ActionPlanDraft(
+                    source_stimulus_ids=(stimulus.stimulus_id,),
+                    actions=(
+                        d.Say(
+                            action_id=str(uuid4()),
+                            content=content,
+                            sound_content=None,
+                            prepared_audio_ref=None,
+                            tone=d.Tone(value="normal"),
+                            expression=d.ChangeExpression(expression_id="normal"),
+                            delivery=d.OutputDelivery.CONVERSATION,
+                        ),
+                    ),
+                )
+            )
             return self._report(request, plans)
 
         for name in self._prepared_names:
@@ -70,24 +78,32 @@ class FirstLoginHandler:
                     error_code=d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE,
                 )
 
-            await plans.context.conversation.append((ConversationEntry(
-                entry_id=str(uuid4()),
-                timestamp=datetime.now(),  # noqa: DTZ005 - conversation storage uses local naive timestamps
-                source="agent",
-                content=TextContent(prepared.text),
-            ),))
-            await plans.emit(ActionPlanDraft(
-                source_stimulus_ids=(stimulus.stimulus_id,),
-                actions=(d.Say(
-                    action_id=str(uuid4()),
-                    content=prepared.text,
-                    sound_content=None,
-                    prepared_audio_ref=d.MediaRef(media_id=name),
-                    tone=d.Tone(value="normal"),
-                    expression=d.ChangeExpression(expression_id="normal"),
-                    delivery=d.OutputDelivery.CONVERSATION,
-                ),),
-            ))
+            await plans.context.conversation.append(
+                (
+                    ConversationEntry(
+                        entry_id=str(uuid4()),
+                        timestamp=datetime.now(),  # noqa: DTZ005 - conversation storage uses local naive timestamps
+                        source="agent",
+                        content=TextContent(prepared.text),
+                    ),
+                )
+            )
+            await plans.emit(
+                ActionPlanDraft(
+                    source_stimulus_ids=(stimulus.stimulus_id,),
+                    actions=(
+                        d.Say(
+                            action_id=str(uuid4()),
+                            content=prepared.text,
+                            sound_content=None,
+                            prepared_audio_ref=d.MediaRef(media_id=name),
+                            tone=d.Tone(value="normal"),
+                            expression=d.ChangeExpression(expression_id="normal"),
+                            delivery=d.OutputDelivery.CONVERSATION,
+                        ),
+                    ),
+                )
+            )
 
         return self._report(request, plans)
 

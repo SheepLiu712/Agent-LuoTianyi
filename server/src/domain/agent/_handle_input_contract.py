@@ -50,6 +50,7 @@ class _HandleInputMeta(type):
 
 def _checked_arguments(code: HandleInputErrorCode):
     """Normalize argument-binding failures without swallowing implementation errors."""
+
     def decorate(method):
         method_signature = signature(method)
 

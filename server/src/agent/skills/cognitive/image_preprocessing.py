@@ -46,8 +46,7 @@ class ImagePreprocessingSkill:
         )
         self._validate(media_ref, media)
         encoded = base64.b64encode(media.data).decode("ascii")
-        description = await self._understanding.describe_image(
-            f"data:{media.mime_type};base64,{encoded}")
+        description = await self._understanding.describe_image(f"data:{media.mime_type};base64,{encoded}")
         if not isinstance(description, str) or not description.strip():
             raise MediaResolutionError(
                 code=MediaResolutionErrorCode.EMPTY,

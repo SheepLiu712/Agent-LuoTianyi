@@ -1,4 +1,5 @@
 """本次处理的草稿封装和顺序交付。"""
+
 import asyncio
 from dataclasses import dataclass, replace
 from traceback import walk_tb
@@ -6,8 +7,9 @@ from traceback import walk_tb
 import src.domain.agent as d
 from src.agent.context import InteractionContext
 from src.utils.logger import get_logger
-from .plan_identity import encode_plan, plan_id
+
 from .interruptibility import _CallInterruptibility
+from .plan_identity import encode_plan, plan_id
 
 
 class _DeliveryCancelled(Exception):
@@ -21,14 +23,20 @@ def _check_cancellation(token):
 
 def handling_error(error):
     if isinstance(error, d.SinkRejectedError) and error.code.name in {
-            "STALE_INTERACTION", "SINK_CLOSED", "BACKPRESSURE_TIMEOUT"}:
+        "STALE_INTERACTION",
+        "SINK_CLOSED",
+        "BACKPRESSURE_TIMEOUT",
+    }:
         return d.HandlingErrorCode[error.code.name]
-    return d.HandlingErrorCode.PROVIDER_TIMEOUT if isinstance(error, TimeoutError) else d.HandlingErrorCode.INTERNAL_ERROR
+    return (
+        d.HandlingErrorCode.PROVIDER_TIMEOUT if isinstance(error, TimeoutError) else d.HandlingErrorCode.INTERNAL_ERROR
+    )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ActionPlanDraft:
     """处理器提交的不可变来源和行动；emit 时按完整计划约束校验。"""
+
     source_stimulus_ids: tuple[str, ...]
     actions: tuple[d.Action, ...]
 
@@ -36,8 +44,14 @@ class ActionPlanDraft:
 class PlanEmitter:
     """为本次调用分配计划序号，顺序交付并记录已确认接收的计划标识。"""
 
-    def __init__(self, character_id: str, request: d.HandleStimulusRequest,
-                 sink: d.ActionPlanSink, interruption: _CallInterruptibility | None = None, context: InteractionContext | None = None) -> None:
+    def __init__(
+        self,
+        character_id: str,
+        request: d.HandleStimulusRequest,
+        sink: d.ActionPlanSink,
+        interruption: _CallInterruptibility | None = None,
+        context: InteractionContext | None = None,
+    ) -> None:
         """绑定角色、请求和本次调用使用的计划接收器。"""
         self._character_id, self._request, self._sink = character_id, request, sink
         self._context = context
@@ -71,9 +85,11 @@ class PlanEmitter:
     def _validate(self, plan):
         request = self._request
         sources = {s.stimulus_id for s in (request.stimulus, *request.interaction.pending_stimuli)}
-        if (plan.interaction_id != request.interaction.interaction_id
-                or plan.basis_interaction_revision != request.interaction.interaction_revision
-                or not set(plan.source_stimulus_ids).issubset(sources)):
+        if (
+            plan.interaction_id != request.interaction.interaction_id
+            or plan.basis_interaction_revision != request.interaction.interaction_revision
+            or not set(plan.source_stimulus_ids).issubset(sources)
+        ):
             raise ValueError("plan does not match request")
 
     async def emit(self, draft: ActionPlanDraft) -> d.PlanReceipt:
@@ -90,11 +106,14 @@ class PlanEmitter:
                     raise ValueError("invalid plan draft")
                 plan = d.ActionPlan(
                     plan_id=plan_id(self._character_id, self._request.request_id, selected),
-                    origin_request_id=self._request.request_id, plan_ordinal=selected,
+                    origin_request_id=self._request.request_id,
+                    plan_ordinal=selected,
                     target_character_id=self._character_id,
                     interaction_id=self._request.interaction.interaction_id,
                     basis_interaction_revision=self._request.interaction.interaction_revision,
-                    source_stimulus_ids=draft.source_stimulus_ids, actions=draft.actions)
+                    source_stimulus_ids=draft.source_stimulus_ids,
+                    actions=draft.actions,
+                )
                 self._validate(plan)
                 encode_plan(plan)
                 receipt = await self._sink.emit(plan)
@@ -125,13 +144,21 @@ class PlanEmitter:
     def _failed(self, error, ordinal):
         """保存投递失败；日志只携带身份、错误类型及栈位置，隔离源码和异常链。"""
         self._error = handling_error(error)
-        locations = [(frame.f_code.co_filename, line, frame.f_code.co_name)
-                     for frame, line in walk_tb(error.__traceback__)]
+        locations = [
+            (frame.f_code.co_filename, line, frame.f_code.co_name) for frame, line in walk_tb(error.__traceback__)
+        ]
         get_logger(__name__).error(
-            "Plan delivery failed character_id=%s request_id=%s interaction_id=%s plan_id=%s ordinal=%s error_code=%s type=%s stack=%s",
-            self._character_id, self._request.request_id, self._request.interaction.interaction_id,
-            plan_id(self._character_id, self._request.request_id, ordinal), ordinal, self._error.name,
-            type(error).__name__, locations)
+            "Plan delivery failed character_id=%s request_id=%s interaction_id=%s "
+            "plan_id=%s ordinal=%s error_code=%s type=%s stack=%s",
+            self._character_id,
+            self._request.request_id,
+            self._request.interaction.interaction_id,
+            plan_id(self._character_id, self._request.request_id, ordinal),
+            ordinal,
+            self._error.name,
+            type(error).__name__,
+            locations,
+        )
 
     def close(self):
         """结束本次作用域并释放接收器及请求引用。"""

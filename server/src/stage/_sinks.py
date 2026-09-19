@@ -1,7 +1,9 @@
 """Stage 拥有的刺激、计划和输出接收实现。"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
 import src.domain.agent as d
 from src.domain.stage import AgentPresentationChanged, AgentPresentationState
 
@@ -36,14 +38,19 @@ class _PlanSink:
         request, stage = self.request, self.stage
         if self.closed or request.cancellation.is_cancelled:
             raise d.SinkRejectedError("request is stale", code=d.SinkRejectionCode.STALE_INTERACTION)
-        if (plan.origin_request_id != request.request_id or plan.interaction_id != stage.interaction_id
-                or plan.target_character_id != stage.character_id
-                or plan.basis_interaction_revision != request.interaction.interaction_revision
-                or plan.plan_id in self.ids or plan.plan_ordinal != len(self.ids)):
+        if (
+            plan.origin_request_id != request.request_id
+            or plan.interaction_id != stage.interaction_id
+            or plan.target_character_id != stage.character_id
+            or plan.basis_interaction_revision != request.interaction.interaction_revision
+            or plan.plan_id in self.ids
+            or plan.plan_ordinal != len(self.ids)
+        ):
             raise d.SinkRejectedError("plan identity mismatch", code=d.SinkRejectionCode.IDENTITY_MISMATCH)
         if isinstance(plan.actions[0], d.StartThinking):
-            stage._send(AgentPresentationChanged(interaction_id=stage.interaction_id,
-                                                 state=AgentPresentationState.THINKING))
+            stage._send(
+                AgentPresentationChanged(interaction_id=stage.interaction_id, state=AgentPresentationState.THINKING)
+            )
             stage._thinking.add(request.request_id)
         else:
             stage._enqueue_plan(plan, request.cancellation)
@@ -59,7 +66,11 @@ class _AgentOutputSink:
     async def emit(self, output: d.AgentOutput) -> d.OutputReceipt:
         """接收当前执行的 output 并交给 adapter；返回值表示已入队，不表示网络发送完成。"""
         context = self.stage._execution
-        if context is None or output.interaction_id != self.stage.interaction_id or output.execution_id != context.execution_id:
+        if (
+            context is None
+            or output.interaction_id != self.stage.interaction_id
+            or output.execution_id != context.execution_id
+        ):
             raise d.SinkRejectedError("output execution mismatch", code=d.SinkRejectionCode.IDENTITY_MISMATCH)
         if context.cancellation.is_cancelled:
             raise d.SinkRejectedError("execution cancelled", code=d.SinkRejectionCode.STALE_INTERACTION)
@@ -68,5 +79,6 @@ class _AgentOutputSink:
             raise d.SinkRejectedError("previous message has no end", code=d.SinkRejectionCode.CONTENT_CONFLICT)
         self.stage._send(output)
         self.active = None if isinstance(output, d.MessageEndOutput) else identity
-        return d.OutputReceipt(execution_id=output.execution_id, sequence_no=output.sequence_no,
-                               status=d.OutputAcceptanceStatus.ACCEPTED)
+        return d.OutputReceipt(
+            execution_id=output.execution_id, sequence_no=output.sequence_no, status=d.OutputAcceptanceStatus.ACCEPTED
+        )

@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from enum import Enum
 from inspect import Signature, signature
 
-from .handle_input import PreprocessedInput
 from ._handle_input_contract import _nonblank, _revision
+from .handle_input import PreprocessedInput
 
 
 class HandlingRequestStatus(str, Enum):
@@ -74,11 +74,13 @@ def _identity_tuple(value: object, field: str) -> None:
     _require(len(set(value)) == len(value), field)
 
 
-_INPUT_CONTRACT_ERRORS = frozenset({
-    HandlingErrorCode.CONTRACT_INVALID_STIMULUS,
-    HandlingErrorCode.CONTRACT_UNSUPPORTED_SCHEMA,
-    HandlingErrorCode.CONTRACT_SNAPSHOT_MISMATCH,
-})
+_INPUT_CONTRACT_ERRORS = frozenset(
+    {
+        HandlingErrorCode.CONTRACT_INVALID_STIMULUS,
+        HandlingErrorCode.CONTRACT_UNSUPPORTED_SCHEMA,
+        HandlingErrorCode.CONTRACT_SNAPSHOT_MISMATCH,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -111,15 +113,20 @@ class HandlingReport(metaclass=_ReportMeta):
     preprocessed_input: PreprocessedInput | None = None
 
     def __post_init__(self) -> None:
-        _require(self.preprocessed_input is None or isinstance(self.preprocessed_input, PreprocessedInput), "preprocessed_input")
+        _require(
+            self.preprocessed_input is None or isinstance(self.preprocessed_input, PreprocessedInput),
+            "preprocessed_input",
+        )
         _require(_nonblank(self.request_id), "request_id")
         _require(isinstance(self.request_status, HandlingRequestStatus), "request_status")
         _require(_nonblank(self.trigger_stimulus_id), "trigger_stimulus_id")
         _require(_revision(self.basis_interaction_revision), "basis_interaction_revision")
         _require(type(self.retryable) is bool, "retryable")
         for field in (
-            "considered_pending_stimulus_ids", "consumed_pending_stimulus_ids",
-            "retained_pending_stimulus_ids", "emitted_plan_ids",
+            "considered_pending_stimulus_ids",
+            "consumed_pending_stimulus_ids",
+            "retained_pending_stimulus_ids",
+            "emitted_plan_ids",
         ):
             _identity_tuple(getattr(self, field), field)
 

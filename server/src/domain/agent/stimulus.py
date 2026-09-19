@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 
 from ._stimulus_contract import (
     InvalidStimulusError,
-    _StimulusMeta,
     _raise_invalid,
     _require_aware_datetime,
     _require_instance,
@@ -21,6 +20,7 @@ from ._stimulus_contract import (
     _require_optional_nonblank_string,
     _require_string_tuple,
     _require_tuple_of,
+    _StimulusMeta,
 )
 from .stimulus_values import (
     ActivityFact,

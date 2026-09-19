@@ -1,4 +1,5 @@
 """WorldStage 使用的事实、计划和无通道输出接收器。"""
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -32,7 +33,8 @@ class NoChannelOutputSink:
     async def emit(self, output: d.AgentOutput) -> d.OutputReceipt:
         """始终以 SINK_CLOSED 拒绝输出，不把世界输出静默丢弃。"""
         raise d.SinkRejectedError(
-            "world stage has no live output channel", code=d.SinkRejectionCode.SINK_CLOSED,
+            "world stage has no live output channel",
+            code=d.SinkRejectionCode.SINK_CLOSED,
         )
 
 
@@ -54,14 +56,19 @@ class _WorldPlanSink:
         request, stage = self._request, self._stage
         if self.closed or request.cancellation.is_cancelled:
             raise d.SinkRejectedError(
-                "request is stale", code=d.SinkRejectionCode.STALE_INTERACTION,
+                "request is stale",
+                code=d.SinkRejectionCode.STALE_INTERACTION,
             )
-        if (plan.origin_request_id != request.request_id
-                or plan.interaction_id != stage.interaction_id
-                or plan.target_character_id != stage.character_id
-                or plan.plan_id in self.ids or plan.plan_ordinal != len(self.ids)):
+        if (
+            plan.origin_request_id != request.request_id
+            or plan.interaction_id != stage.interaction_id
+            or plan.target_character_id != stage.character_id
+            or plan.plan_id in self.ids
+            or plan.plan_ordinal != len(self.ids)
+        ):
             raise d.SinkRejectedError(
-                "plan identity mismatch", code=d.SinkRejectionCode.IDENTITY_MISMATCH,
+                "plan identity mismatch",
+                code=d.SinkRejectionCode.IDENTITY_MISMATCH,
             )
         stage._enqueue_plan(plan, request.cancellation)
         self.ids.append(plan.plan_id)

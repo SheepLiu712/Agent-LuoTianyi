@@ -4,12 +4,12 @@ import base64
 import json
 import random
 from pathlib import Path
-from typing import Awaitable, Callable, Mapping, TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable, Mapping
 from uuid import uuid4
 
 from src.domain.chat import ChatInputEvent, ChatInputEventType
-from src.utils.logger import get_logger
 from src.resources.prepared_speech import load_prepared_speech
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.system.user_interface.types import ChatResponse
@@ -95,9 +95,7 @@ class TouchFastReplyBuilder:
             return None
 
         files = [
-            path
-            for path in self.touch_voice_dir.iterdir()
-            if path.is_file() and path.suffix.lower() in _AUDIO_SUFFIXES
+            path for path in self.touch_voice_dir.iterdir() if path.is_file() and path.suffix.lower() in _AUDIO_SUFFIXES
         ]
         if not files:
             logger.warning(f"No touch voice audio files found in {self.touch_voice_dir}")
@@ -122,9 +120,7 @@ class TouchFastReplyBuilder:
             raw = json.loads(mapping_path.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
                 self._voice_to_expression = {
-                    str(key): str(value)
-                    for key, value in raw.items()
-                    if str(key).strip() and str(value).strip()
+                    str(key): str(value) for key, value in raw.items() if str(key).strip() and str(value).strip()
                 }
             else:
                 self._voice_to_expression = {}

@@ -1,7 +1,9 @@
 """逐行动执行结果及其不可变汇总。"""
+
 from dataclasses import dataclass
 
-from ._realization_contract import RealizationContractErrorCode as _Code, _Value
+from ._realization_contract import RealizationContractErrorCode as _Code
+from ._realization_contract import _Value
 from .realization_enums import ActionExecutionStatus, EffectKind, ExecutionErrorCode, ExecutionStatus
 
 
@@ -16,6 +18,7 @@ def _status_error_valid(status, error):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EffectRef(_Value):
     """已提交动态、评论或学歌任务的稳定引用，仅保存类别和非空白身份。"""
+
     kind: EffectKind
     effect_id: str
 
@@ -26,6 +29,7 @@ class ActionResult(_Value):
 
     NOT_STARTED 没有已提交效果；提供效果引用时必须标明已提交。
     """
+
     _code = _Code.CONTRACT_INVALID_EXECUTION_REPORT
     action_id: str
     status: ActionExecutionStatus
@@ -47,6 +51,7 @@ class ExecutionReport(_Value):
 
     output_started 与 retryable 是显式事实；构造不验证外部投递或效果真实提交。
     """
+
     _code = _Code.CONTRACT_INVALID_EXECUTION_REPORT
     execution_id: str
     plan_id: str
@@ -71,11 +76,15 @@ class ExecutionReport(_Value):
             if stopped:
                 self._require(item.status is ActionExecutionStatus.NOT_STARTED, "Action after stop")
             if item.status in (ActionExecutionStatus.FAILED, ActionExecutionStatus.CANCELLED):
-                self._require(item.status.value == self.status.value and item.error_code is self.error_code,
-                              "Action and execution disagree")
+                self._require(
+                    item.status.value == self.status.value and item.error_code is self.error_code,
+                    "Action and execution disagree",
+                )
                 stopped = True
             elif item.status is ActionExecutionStatus.NOT_STARTED:
                 stopped = True
             if self.status is ExecutionStatus.COMPLETED:
-                self._require(item.status in (ActionExecutionStatus.COMPLETED, ActionExecutionStatus.ALREADY_COMPLETED),
-                              "Incomplete action in completed execution")
+                self._require(
+                    item.status in (ActionExecutionStatus.COMPLETED, ActionExecutionStatus.ALREADY_COMPLETED),
+                    "Incomplete action in completed execution",
+                )

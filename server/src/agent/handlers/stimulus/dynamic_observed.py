@@ -21,7 +21,10 @@ class DynamicObservedHandler:
     """
 
     def __init__(
-        self, character_id: str, reply: DynamicReplySkill, memory: DynamicTopicMemorySkill,
+        self,
+        character_id: str,
+        reply: DynamicReplySkill,
+        memory: DynamicTopicMemorySkill,
     ) -> None:
         self._character_id = character_id
         self._reply = reply
@@ -29,7 +32,9 @@ class DynamicObservedHandler:
         self._logger = get_logger(__name__)
 
     async def handle(
-        self, request: d.HandleStimulusRequest, plans: PlanEmitter,
+        self,
+        request: d.HandleStimulusRequest,
+        plans: PlanEmitter,
     ) -> d.HandlingReport:
         """处理一次动态观察；回复不可用或决定忽略时都不冒充已回复。"""
         stimulus = request.stimulus
@@ -39,14 +44,13 @@ class DynamicObservedHandler:
         if self._reply.already_replied(stimulus):
             self._logger.info(
                 "线程中已存在角色回复，不再重复发布 dynamic=%s target=%s",
-                stimulus.dynamic_id, stimulus.target_message_id,
+                stimulus.dynamic_id,
+                stimulus.target_message_id,
             )
-            return self._report(request, d.HandlingRequestStatus.COMPLETED, None,
-                                (stimulus.stimulus_id,))
+            return self._report(request, d.HandlingRequestStatus.COMPLETED, None, (stimulus.stimulus_id,))
         if not self._reply.available():
             self._logger.warning("动态回复模型不可用 dynamic=%s", stimulus.dynamic_id)
-            return self._report(request, d.HandlingRequestStatus.FAILED,
-                                d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
+            return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
         item = self._reply.build_item(stimulus)
         is_post = stimulus.target_kind is d.DynamicTargetKind.POST
         body = await self._reply.compose_for_post(item) if is_post else ""
@@ -57,33 +61,35 @@ class DynamicObservedHandler:
         if not should_reply or not body.strip():
             self._logger.info(
                 "明确忽略本次动态互动 dynamic=%s target=%s",
-                stimulus.dynamic_id, stimulus.target_message_id,
+                stimulus.dynamic_id,
+                stimulus.target_message_id,
             )
-            return self._report(request, d.HandlingRequestStatus.COMPLETED, None,
-                                (stimulus.stimulus_id,))
+            return self._report(request, d.HandlingRequestStatus.COMPLETED, None, (stimulus.stimulus_id,))
         action = d.ReplyDynamic(
             action_id=str(uuid4()),
             body=body,
             target=d.DynamicReplyTarget(
                 dynamic_id=stimulus.dynamic_id,
                 parent_comment_id=(
-                    stimulus.target_message_id
-                    if stimulus.target_kind is d.DynamicTargetKind.COMMENT else None
+                    stimulus.target_message_id if stimulus.target_kind is d.DynamicTargetKind.COMMENT else None
                 ),
             ),
             owner_user_id=self._reply.target_author_id(stimulus),
         )
-        receipt = await plans.emit(ActionPlanDraft(
-            source_stimulus_ids=(stimulus.stimulus_id,), actions=(action,),
-        ))
-        return self._report(request, d.HandlingRequestStatus.COMPLETED, None,
-                            (stimulus.stimulus_id,), plans=(receipt.plan_id,))
+        receipt = await plans.emit(
+            ActionPlanDraft(
+                source_stimulus_ids=(stimulus.stimulus_id,),
+                actions=(action,),
+            )
+        )
+        return self._report(
+            request, d.HandlingRequestStatus.COMPLETED, None, (stimulus.stimulus_id,), plans=(receipt.plan_id,)
+        )
 
     async def _write_memory(self, stimulus: d.DynamicObserved) -> None:
         """独立提交记忆；失败只记录，不影响回复方面。"""
         target = next(
-            (message for message in stimulus.messages
-             if message.message_id == stimulus.target_message_id),
+            (message for message in stimulus.messages if message.message_id == stimulus.target_message_id),
             stimulus.messages[0],
         )
         post = stimulus.messages[0]
@@ -103,8 +109,11 @@ class DynamicObservedHandler:
 
     @staticmethod
     def _report(
-        request: d.HandleStimulusRequest, status: d.HandlingRequestStatus,
-        error_code: d.HandlingErrorCode | None, consumed: tuple[str, ...], *,
+        request: d.HandleStimulusRequest,
+        status: d.HandlingRequestStatus,
+        error_code: d.HandlingErrorCode | None,
+        consumed: tuple[str, ...],
+        *,
         plans: tuple[str, ...] = (),
     ) -> d.HandlingReport:
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)

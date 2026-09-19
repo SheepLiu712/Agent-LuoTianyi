@@ -16,8 +16,9 @@ class PublishDynamicHandler:
         self._publishing = publishing
         self._logger = get_logger(__name__)
 
-    async def realize(self, action: d.Action, execution_context: d.ExecutionContext,
-                      outputs: OutputEmitter) -> d.ActionResult:
+    async def realize(
+        self, action: d.Action, execution_context: d.ExecutionContext, outputs: OutputEmitter
+    ) -> d.ActionResult:
         """发布动态并报告已提交效果；失败返回稳定错误码且不声称已提交。"""
         _ = outputs
         if not isinstance(action, d.PublishDynamic):
@@ -27,23 +28,38 @@ class PublishDynamicHandler:
         result = await self._publishing.publish(action, character_id=self._character_id)
         if result.ok and result.dynamic_id:
             return d.ActionResult(
-                action_id=action.action_id, status=d.ActionExecutionStatus.COMPLETED,
-                error_code=None, irreversible_effect_committed=True,
+                action_id=action.action_id,
+                status=d.ActionExecutionStatus.COMPLETED,
+                error_code=None,
+                irreversible_effect_committed=True,
                 effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_POST, effect_id=result.dynamic_id),
             )
         self._logger.error(
             "PUBLISH_DYNAMIC 失败 action_id=%s source=%s/%s",
-            action.action_id, action.source.source_type, action.source.source_id,
+            action.action_id,
+            action.source.source_type,
+            action.source.source_id,
         )
         return self._failed(
             action,
-            d.ExecutionErrorCode.CANCELLED if execution_context.cancellation.is_cancelled
-            else d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE,
+            (
+                d.ExecutionErrorCode.CANCELLED
+                if execution_context.cancellation.is_cancelled
+                else d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE
+            ),
         )
 
     @staticmethod
     def _failed(action: d.PublishDynamic, code: d.ExecutionErrorCode) -> d.ActionResult:
-        status = (d.ActionExecutionStatus.CANCELLED if code is d.ExecutionErrorCode.CANCELLED
-                  else d.ActionExecutionStatus.FAILED)
-        return d.ActionResult(action_id=action.action_id, status=status, error_code=code,
-                              irreversible_effect_committed=False, effect_ref=None)
+        status = (
+            d.ActionExecutionStatus.CANCELLED
+            if code is d.ExecutionErrorCode.CANCELLED
+            else d.ActionExecutionStatus.FAILED
+        )
+        return d.ActionResult(
+            action_id=action.action_id,
+            status=status,
+            error_code=code,
+            irreversible_effect_committed=False,
+            effect_ref=None,
+        )

@@ -1,8 +1,10 @@
 """一个用户与角色之间的刺激调度、计划执行和结束流程。"""
+
 from __future__ import annotations
 
 import asyncio
 import random
+import time
 from collections import deque
 from collections.abc import Callable
 from dataclasses import replace
@@ -35,19 +37,38 @@ if TYPE_CHECKING:
 
 _CONTENT = (d.TextMessage, d.ImageMessage, d.VoiceMessage)
 
-_COORDINATION = (d.UserTyping, d.ImageSelectionOpened, d.ImageSelectionClosed,
-                 d.InteractionDeadline, d.InteractionEnding)
-_SUPPORTED = frozenset({d.AgentOutputKind.TEXT_FINAL, d.AgentOutputKind.AUDIO_CHUNK,
-                       d.AgentOutputKind.EXPRESSION, d.AgentOutputKind.MESSAGE_END})
+_COORDINATION = (
+    d.UserTyping,
+    d.ImageSelectionOpened,
+    d.ImageSelectionClosed,
+    d.InteractionDeadline,
+    d.InteractionEnding,
+)
+_SUPPORTED = frozenset(
+    {
+        d.AgentOutputKind.TEXT_FINAL,
+        d.AgentOutputKind.AUDIO_CHUNK,
+        d.AgentOutputKind.EXPRESSION,
+        d.AgentOutputKind.MESSAGE_END,
+    }
+)
 
 
 class ChatStage:
     """持有交互上下文；并行预处理、有序聚合回复，串行执行计划并管理取消与结束。"""
 
-    def __init__(self, *, user_id: str, character_id: str, agent: Agent,
-                  adapter: WebSocketAdapter, context: InteractionContext, config: dict | None = None,
-                  timezone_name: str = "Asia/Shanghai",
-                  due_event_provider: DueEventProvider | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        user_id: str,
+        character_id: str,
+        agent: Agent,
+        adapter: WebSocketAdapter,
+        context: InteractionContext,
+        config: dict | None = None,
+        timezone_name: str = "Asia/Shanghai",
+        due_event_provider: DueEventProvider | None = None,
+    ) -> None:
         """接管 context 并绑定用户、角色与协作者；config 控制等待秒数、容量和终止期限。"""
         if any(not isinstance(value, str) or not value.strip() for value in (user_id, character_id)):
             raise ValueError("user_id and character_id must be nonblank")
@@ -94,16 +115,31 @@ class ChatStage:
         self._logger = get_logger(__name__)
 
     @classmethod
-    async def create(cls, *, user_id: str, character_id: str, agent: Agent,
-                      adapter: WebSocketAdapter, context_factory: ContextFactory,
-                      config: dict | None = None, timezone_name: str = "Asia/Shanghai",
-                      due_event_provider: DueEventProvider | None = None) -> ChatStage:
+    async def create(
+        cls,
+        *,
+        user_id: str,
+        character_id: str,
+        agent: Agent,
+        adapter: WebSocketAdapter,
+        context_factory: ContextFactory,
+        config: dict | None = None,
+        timezone_name: str = "Asia/Shanghai",
+        due_event_provider: DueEventProvider | None = None,
+    ) -> ChatStage:
         """通过 context_factory 加载新上下文，返回持有它的 Stage；构造失败时关闭上下文。"""
         context = await context_factory.create(str(uuid4()), user_id=user_id)
         try:
-            return cls(user_id=user_id, character_id=character_id, agent=agent, adapter=adapter,
-                       context=context, config=config, timezone_name=timezone_name,
-                       due_event_provider=due_event_provider)
+            return cls(
+                user_id=user_id,
+                character_id=character_id,
+                agent=agent,
+                adapter=adapter,
+                context=context,
+                config=config,
+                timezone_name=timezone_name,
+                due_event_provider=due_event_provider,
+            )
         except BaseException:
             await context.close()
             raise
@@ -168,14 +204,22 @@ class ChatStage:
         ):
             return False
         now = datetime.now(timezone.utc)
-        candidates = tuple(event for event in self._due_event_provider.list_due(
-            character_id=self.character_id, user_id=self.user_id, now=now,
-        ) if self._supports_due_event(event))
+        candidates = tuple(
+            event
+            for event in self._due_event_provider.list_due(
+                character_id=self.character_id,
+                user_id=self.user_id,
+                now=now,
+            )
+            if self._supports_due_event(event)
+        )
         selected = candidates if merge_all else ((random.choice(candidates),) if candidates else ())
         claimed = []
         for event in selected:
             if self._due_event_provider.claim(
-                event.event_id, user_id=self.user_id, character_id=self.character_id,
+                event.event_id,
+                user_id=self.user_id,
+                character_id=self.character_id,
                 trigger_key=event.trigger_key,
             ):
                 claimed.append(event)
@@ -186,8 +230,7 @@ class ChatStage:
             reason=d.ProactiveReason(value="+".join(event.reason for event in claimed)),
             due_at=min(event.due_at for event in claimed),
             dedup_key="|".join(
-                f"{event.event_id}:{self.user_id}:{self.character_id}:{event.trigger_key}"
-                for event in claimed
+                f"{event.event_id}:{self.user_id}:{self.character_id}:{event.trigger_key}" for event in claimed
             ),
             fact_refs=tuple(d.EvidenceRef(evidence_id=event.event_id) for event in claimed),
         )
@@ -228,13 +271,17 @@ class ChatStage:
         return self._state
 
     def _can_accept(self, stimulus: d.Stimulus) -> bool:
-        return (isinstance(stimulus, d.Stimulus) and not isinstance(stimulus, (d.InteractionEnding, d.InteractionDeadline))
-                and self._state is StageState.ONLINE and stimulus.user_id == self.user_id
-                and self.character_id in stimulus.target_character_ids
-                and len(self._handles) < self._config.max_stimuli
-                and (isinstance(stimulus, _COORDINATION) or len(self._pending) < self._config.max_stimuli)
-                and stimulus.stimulus_id not in self._pending
-                and all(item.stimulus.stimulus_id != stimulus.stimulus_id for item in self._requests.values()))
+        return (
+            isinstance(stimulus, d.Stimulus)
+            and not isinstance(stimulus, (d.InteractionEnding, d.InteractionDeadline))
+            and self._state is StageState.ONLINE
+            and stimulus.user_id == self.user_id
+            and self.character_id in stimulus.target_character_ids
+            and len(self._handles) < self._config.max_stimuli
+            and (isinstance(stimulus, _COORDINATION) or len(self._pending) < self._config.max_stimuli)
+            and stimulus.stimulus_id not in self._pending
+            and all(item.stimulus.stimulus_id != stimulus.stimulus_id for item in self._requests.values())
+        )
 
     def _receive(self, stimulus: d.Stimulus) -> bool:
         if not self._can_accept(stimulus):
@@ -267,20 +314,34 @@ class ChatStage:
         self._launch_handle(request, self._on_preprocessing_finished)
         self._refresh_deadline()
 
-    def _make_request(self, stimulus: d.Stimulus, pending: tuple[d.Stimulus, ...] = (),
-                      prepared: tuple[d.PreprocessedInput, ...] = (),
-                      purpose: d.HandlePurpose = d.HandlePurpose.PROCESS) -> d.HandleStimulusRequest:
-        return d.HandleStimulusRequest(request_id=str(uuid4()), stimulus=stimulus,
-            interaction=replace(self._snapshot(), pending_stimuli=pending), cancellation=d.CancellationToken(),
-            prepared_inputs=prepared, purpose=purpose)
+    def _make_request(
+        self,
+        stimulus: d.Stimulus,
+        pending: tuple[d.Stimulus, ...] = (),
+        prepared: tuple[d.PreprocessedInput, ...] = (),
+        purpose: d.HandlePurpose = d.HandlePurpose.PROCESS,
+    ) -> d.HandleStimulusRequest:
+        return d.HandleStimulusRequest(
+            request_id=str(uuid4()),
+            stimulus=stimulus,
+            interaction=replace(self._snapshot(), pending_stimuli=pending),
+            cancellation=d.CancellationToken(),
+            prepared_inputs=prepared,
+            purpose=purpose,
+        )
 
-    def _launch_handle(self, request: d.HandleStimulusRequest,
-                       completed: Callable[[d.HandleStimulusRequest, d.HandlingReport | None], None]) -> None:
+    def _launch_handle(
+        self,
+        request: d.HandleStimulusRequest,
+        completed: Callable[[d.HandleStimulusRequest, d.HandlingReport | None], None],
+    ) -> None:
         self._requests[request.request_id] = request
+
         async def run() -> None:
             report = await self._handle(request)
             if self._state is StageState.ONLINE and not request.cancellation.is_cancelled:
                 completed(request, report)
+
         task = asyncio.create_task(run(), name="stage-handle")
         self._handles[request.request_id] = task
         task.add_done_callback(lambda finished: self._handle_done(request.request_id, finished))
@@ -298,18 +359,29 @@ class ChatStage:
 
     def _failed_report(self, request: d.HandleStimulusRequest) -> d.HandlingReport:
         ids = tuple(s.stimulus_id for s in request.interaction.pending_stimuli)
-        return d.HandlingReport(request_id=request.request_id, trigger_stimulus_id=request.stimulus.stimulus_id,
+        return d.HandlingReport(
+            request_id=request.request_id,
+            trigger_stimulus_id=request.stimulus.stimulus_id,
             basis_interaction_revision=request.interaction.interaction_revision,
-            request_status=d.HandlingRequestStatus.FAILED, considered_pending_stimulus_ids=ids,
-            consumed_pending_stimulus_ids=(), retained_pending_stimulus_ids=ids, emitted_plan_ids=(),
-            error_code=d.HandlingErrorCode.INTERNAL_ERROR, retryable=False)
+            request_status=d.HandlingRequestStatus.FAILED,
+            considered_pending_stimulus_ids=ids,
+            consumed_pending_stimulus_ids=(),
+            retained_pending_stimulus_ids=ids,
+            emitted_plan_ids=(),
+            error_code=d.HandlingErrorCode.INTERNAL_ERROR,
+            retryable=False,
+        )
 
     def _on_preprocessing_finished(self, request: d.HandleStimulusRequest, report: d.HandlingReport | None) -> None:
         """按触发身份保存预处理结果，全部就绪后安排回复。"""
         entry = self._pending.get(request.stimulus.stimulus_id)
         if entry is None:
             return
-        if report is None or report.request_status is not d.HandlingRequestStatus.COMPLETED or report.preprocessed_input is None:
+        if (
+            report is None
+            or report.request_status is not d.HandlingRequestStatus.COMPLETED
+            or report.preprocessed_input is None
+        ):
             self._logger.error("Stage preprocessing failed stimulus=%s", entry.stimulus.stimulus_id)
             del self._pending[entry.stimulus.stimulus_id]
         else:
@@ -345,13 +417,20 @@ class ChatStage:
             for sid in attempt.input_ids:
                 if sid in self._pending and self._pending[sid].status is _InputStatus.REPLYING:
                     self._pending[sid].status = _InputStatus.READY
-            self._plans = deque((plan, token) for plan, token in self._plans
-                                if plan.origin_request_id != attempt.request.request_id)
+            self._plans = deque(
+                (plan, token) for plan, token in self._plans if plan.origin_request_id != attempt.request.request_id
+            )
             attempt.remaining_plans.intersection_update(
-                {self._executing_plan.plan_id} if self._executing_plan is not None else set())
-            if self._executing_plan is not None and self._executing_plan.origin_request_id == attempt.request.request_id:
+                {self._executing_plan.plan_id} if self._executing_plan is not None else set()
+            )
+            if (
+                self._executing_plan is not None
+                and self._executing_plan.origin_request_id == attempt.request.request_id
+            ):
                 self._execution.cancellation.cancel(d.CancellationReason.SUPERSEDED)
-                self._send_control(CancelDelivery(interaction_id=self.interaction_id, execution_id=self._execution.execution_id))
+                self._send_control(
+                    CancelDelivery(interaction_id=self.interaction_id, execution_id=self._execution.execution_id)
+                )
                 self._realizing.cancel()
             if not attempt.remaining_plans:
                 self._attempts.pop(attempt.request.request_id, None)
@@ -363,15 +442,22 @@ class ChatStage:
         self._timer = None
         self._deadline = None
         self._schedule_revision += 1
-        if self._reply is not None or not self._pending or any(e.status is not _InputStatus.READY for e in self._pending.values()):
+        if (
+            self._reply is not None
+            or not self._pending
+            or any(e.status is not _InputStatus.READY for e in self._pending.values())
+        ):
             return
         if len(self._handles) >= self._config.max_stimuli:
             self._logger.error("Stage reply capacity exceeded interaction=%s", self.interaction_id)
             self._scheduling = False
             return
         entries = tuple(self._pending.values())
-        request = self._make_request(d.InteractionDeadline(**self._stage_stimulus_fields()),
-            tuple(e.stimulus for e in entries), tuple(e.prepared for e in entries))
+        request = self._make_request(
+            d.InteractionDeadline(**self._stage_stimulus_fields()),
+            tuple(e.stimulus for e in entries),
+            tuple(e.prepared for e in entries),
+        )
         for entry in entries:
             entry.status = _InputStatus.REPLYING
         self._reply = _ReplyAttempt(request, tuple(e.stimulus.stimulus_id for e in entries))
@@ -408,9 +494,12 @@ class ChatStage:
         self.context.recalled_memory.remove_by_stimulus_id(attempt.request.stimulus.stimulus_id)
         if self._state is StageState.ONLINE and len(self._handles) < self._config.max_stimuli:
             consumed = set(attempt.report.consumed_pending_stimulus_ids)
-            request = self._make_request(attempt.request.stimulus,
+            request = self._make_request(
+                attempt.request.stimulus,
                 tuple(s for s in attempt.request.interaction.pending_stimuli if s.stimulus_id in consumed),
-                tuple(p for p in attempt.request.prepared_inputs if p.stimulus_id in consumed), d.HandlePurpose.REFLECT)
+                tuple(p for p in attempt.request.prepared_inputs if p.stimulus_id in consumed),
+                d.HandlePurpose.REFLECT,
+            )
             self._launch_handle(request, lambda request, report: None)
 
     def _on_execution_finished(self, plan: d.ActionPlan, report: d.ExecutionReport | None) -> None:
@@ -430,9 +519,13 @@ class ChatStage:
 
     def _snapshot(self) -> d.ChatInteractionSnapshot:
         return d.ChatInteractionSnapshot(
-            interaction_id=self.interaction_id, interaction_revision=self._revision,
-            user_id=self.user_id, pending_stimuli=tuple(e.stimulus for e in self._pending.values()),
-            now=datetime.now(timezone.utc), timezone=self._timezone, supported_outputs=_SUPPORTED,
+            interaction_id=self.interaction_id,
+            interaction_revision=self._revision,
+            user_id=self.user_id,
+            pending_stimuli=tuple(e.stimulus for e in self._pending.values()),
+            now=datetime.now(timezone.utc),
+            timezone=self._timezone,
+            supported_outputs=_SUPPORTED,
             response_deadline=self._deadline,
             connection_state=self._connection_state,
         )
@@ -443,13 +536,19 @@ class ChatStage:
         try:
             report = await self._agent.handle_stimulus(request, sink, context=self.context)
             pending_ids = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
-            if (report.request_id != request.request_id or report.trigger_stimulus_id != request.stimulus.stimulus_id
-                    or report.basis_interaction_revision != request.interaction.interaction_revision
-                    or report.emitted_plan_ids != tuple(sink.ids)
-                    or tuple(i for i in pending_ids if i in report.considered_pending_stimulus_ids)
-                    != report.considered_pending_stimulus_ids):
+            if (
+                report.request_id != request.request_id
+                or report.trigger_stimulus_id != request.stimulus.stimulus_id
+                or report.basis_interaction_revision != request.interaction.interaction_revision
+                or report.emitted_plan_ids != tuple(sink.ids)
+                or tuple(i for i in pending_ids if i in report.considered_pending_stimulus_ids)
+                != report.considered_pending_stimulus_ids
+            ):
                 raise ValueError("handling report does not match request")
-            if report.preprocessed_input is not None and report.preprocessed_input.stimulus_id != request.stimulus.stimulus_id:
+            if (
+                report.preprocessed_input is not None
+                and report.preprocessed_input.stimulus_id != request.stimulus.stimulus_id
+            ):
                 raise ValueError("preprocessing result identity mismatch")
             if report.request_status is d.HandlingRequestStatus.FAILED:
                 self._logger.error("Stage handle failed interaction=%s code=%s", self.interaction_id, report.error_code)
@@ -465,8 +564,9 @@ class ChatStage:
             was_thinking = request.request_id in self._thinking
             self._thinking.discard(request.request_id)
             if was_thinking and not self._thinking and self._state is StageState.ONLINE:
-                self._send_control(AgentPresentationChanged(interaction_id=self.interaction_id,
-                                                          state=AgentPresentationState.WAITING))
+                self._send_control(
+                    AgentPresentationChanged(interaction_id=self.interaction_id, state=AgentPresentationState.WAITING)
+                )
 
     def _enqueue_plan(self, plan: d.ActionPlan, token: d.CancellationToken) -> None:
         if self._state is not StageState.ONLINE:
@@ -482,8 +582,7 @@ class ChatStage:
             self._realizing.add_done_callback(lambda _: self._resume_execution())
 
     def _resume_execution(self) -> None:
-        if (self._plans and self._state is StageState.ONLINE
-                and (self._realizing is None or self._realizing.done())):
+        if self._plans and self._state is StageState.ONLINE and (self._realizing is None or self._realizing.done()):
             self._realizing = asyncio.create_task(self._realize_plans(), name="stage-realize")
             self._realizing.add_done_callback(lambda _: self._resume_execution())
 
@@ -492,8 +591,12 @@ class ChatStage:
             plan, token = self._plans.popleft()
             if token.is_cancelled:
                 continue
-            context = d.ExecutionContext(execution_id=str(uuid4()), interaction_id=self.interaction_id,
-                                         current_interaction_revision=self._revision, cancellation=d.CancellationToken())
+            context = d.ExecutionContext(
+                execution_id=str(uuid4()),
+                interaction_id=self.interaction_id,
+                current_interaction_revision=self._revision,
+                cancellation=d.CancellationToken(),
+            )
             self._execution = context
             self._executing_plan = plan
             report = None
@@ -502,7 +605,9 @@ class ChatStage:
                 report = await self._agent.realize_action_plan(plan, context, self.agent_output_sink)
                 cancelled = report.status is d.ExecutionStatus.CANCELLED
                 if report.status is not d.ExecutionStatus.COMPLETED:
-                    self._logger.error("Stage realize stopped interaction=%s code=%s", self.interaction_id, report.error_code)
+                    self._logger.error(
+                        "Stage realize stopped interaction=%s code=%s", self.interaction_id, report.error_code
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -510,7 +615,9 @@ class ChatStage:
                 self._logger.exception("Stage realize failed interaction=%s", self.interaction_id)
             finally:
                 if cancelled or self._output_sink.active is not None:
-                    self._send_control(CancelDelivery(interaction_id=self.interaction_id, execution_id=context.execution_id))
+                    self._send_control(
+                        CancelDelivery(interaction_id=self.interaction_id, execution_id=context.execution_id)
+                    )
                 self._output_sink.active = None
                 self._execution = None
                 self._executing_plan = None
@@ -542,8 +649,11 @@ class ChatStage:
     def _schedule_first_login(self) -> None:
         if self._first_login_timer is not None:
             return
+        # asyncio 允许定时器最多提前一个单调时钟分辨率触发；Windows 常为 15.625ms。
+        # 欢迎等待是“不早于”的产品语义，因此补偿该分辨率，避免 40ms 配置在约 31ms 时触发。
+        minimum_delay = self._config.first_login_wait + time.get_clock_info("monotonic").resolution
         self._first_login_timer = asyncio.get_running_loop().call_later(
-            self._config.first_login_wait,
+            minimum_delay,
             self._on_first_login_due,
         )
 
@@ -567,8 +677,10 @@ class ChatStage:
     def _schedule_login_reminders(self) -> None:
         if self._login_reminder_timer is not None:
             return
+        minimum_delay = self._config.login_reminder_wait + time.get_clock_info("monotonic").resolution
         self._login_reminder_timer = asyncio.get_running_loop().call_later(
-            self._config.login_reminder_wait, self._on_login_reminders_due,
+            minimum_delay,
+            self._on_login_reminders_due,
         )
 
     def _on_login_reminders_due(self) -> None:
@@ -580,7 +692,8 @@ class ChatStage:
             return
         self._login_reminder_pending = False
         self._login_reminder_dispatch = asyncio.create_task(
-            self.dispatch_due_events(merge_all=True), name="stage-login-reminders",
+            self.dispatch_due_events(merge_all=True),
+            name="stage-login-reminders",
         )
         self._login_reminder_dispatch.add_done_callback(
             lambda _: setattr(self, "_login_reminder_dispatch", None),
@@ -589,8 +702,13 @@ class ChatStage:
     def _can_dispatch_proactive(self, *, require_idle: bool = True) -> bool:
         if self._state is not StageState.ONLINE:
             return False
-        busy = bool(self._handles or self._pending or self._plans or self._executing_plan
-                    or (self._realizing is not None and not self._realizing.done()))
+        busy = bool(
+            self._handles
+            or self._pending
+            or self._plans
+            or self._executing_plan
+            or (self._realizing is not None and not self._realizing.done())
+        )
         if busy:
             return False
         idle_seconds = (datetime.now(timezone.utc) - self._last_activity_at).total_seconds()
@@ -598,12 +716,17 @@ class ChatStage:
 
     def _supports_due_event(self, event: DueEvent) -> bool:
         supported = {"holiday", "travel", "new_song", "birthday", "anniversary"}
-        return (event.reason in supported and event.character_id == self.character_id
-                and (not event.is_personal or event.target_user_id == self.user_id)
-                and not event.is_notified)
+        return (
+            event.reason in supported
+            and event.character_id == self.character_id
+            and (not event.is_personal or event.target_user_id == self.user_id)
+            and not event.is_notified
+        )
 
     def _on_proactive_handled(
-        self, request: d.HandleStimulusRequest, report: d.HandlingReport | None,
+        self,
+        request: d.HandleStimulusRequest,
+        report: d.HandlingReport | None,
     ) -> None:
         if report is None or report.request_status is not d.HandlingRequestStatus.COMPLETED:
             self._release_proactive_claims(request.request_id)
@@ -634,7 +757,9 @@ class ChatStage:
             return
         for event in claims:
             self._due_event_provider.release(
-                event.event_id, user_id=self.user_id, character_id=self.character_id,
+                event.event_id,
+                user_id=self.user_id,
+                character_id=self.character_id,
                 trigger_key=event.trigger_key,
             )
 
@@ -666,9 +791,11 @@ class ChatStage:
         for context in (*self._requests.values(), self._execution):
             if context is not None:
                 context.cancellation.cancel(d.CancellationReason.NO_LONGER_NEEDED)
-        tasks = [task for task in (*self._handles.values(), self._realizing,
-                                  self._login_reminder_dispatch)
-                 if task is not None and not task.done()]
+        tasks = [
+            task
+            for task in (*self._handles.values(), self._realizing, self._login_reminder_dispatch)
+            if task is not None and not task.done()
+        ]
         for task in tasks:
             task.cancel()
         if tasks:
@@ -690,9 +817,13 @@ class ChatStage:
         try:
             await self._stop_work()
             report = await asyncio.wait_for(
-                self._handle(self._make_request(d.InteractionEnding(reason=reason, **self._stage_stimulus_fields()),
-                    tuple(e.stimulus for e in self._pending.values()),
-                    tuple(e.prepared for e in self._pending.values()))),
+                self._handle(
+                    self._make_request(
+                        d.InteractionEnding(reason=reason, **self._stage_stimulus_fields()),
+                        tuple(e.stimulus for e in self._pending.values()),
+                        tuple(e.prepared for e in self._pending.values()),
+                    )
+                ),
                 timeout=self._config.termination_timeout,
             )
             if report is None or report.request_status is not d.HandlingRequestStatus.COMPLETED:

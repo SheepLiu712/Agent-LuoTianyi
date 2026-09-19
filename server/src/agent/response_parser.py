@@ -1,10 +1,12 @@
 ﻿from __future__ import annotations
 
+import logging
 import re
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Optional
 
 from src.agent.text_cleaning import build_sound_content
 from src.utils.helpers import get_unified_song_name
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.agent.main_chat import OneResponseLine, OneSentenceChat, SongSegmentChat
@@ -26,13 +28,12 @@ class StructuredResponseParser:
         song_cls: type["SongSegmentChat"],
         default_response: "OneResponseLine",
         tone_mapper: ToneMapper,
-        logger=None,
     ) -> None:
         self.sentence_cls = sentence_cls
         self.song_cls = song_cls
         self.default_response = default_response
         self.tone_mapper = tone_mapper
-        self.logger = logger
+        self._logger: logging.Logger = get_logger(__name__)
 
     def parse(
         self,
@@ -52,8 +53,7 @@ class StructuredResponseParser:
                 continue
 
             sing_match = self.sing_pattern.match(line)
-            if self.logger:
-                self.logger.debug(f"Parsing line: '{line}'")
+            self._logger.debug(f"Parsing line: '{line}'")
             if sing_match:
                 item = self._parse_sing_line(sing_match.group(1), sing_plan)
                 if item is not None:
@@ -72,8 +72,7 @@ class StructuredResponseParser:
         if structured_found:
             return results or [self.default_response]
 
-        if self.logger:
-            self.logger.warning("No structured format detected in LLM response, returning an empty text.")
+        self._logger.warning("No structured format detected in LLM response, returning an empty text.")
         return [self.default_response]
 
     def _strip_code_fence(self, response: str) -> str:
@@ -100,13 +99,7 @@ class StructuredResponseParser:
         return self.song_cls(song=song, segment=segment, lyrics="")
 
     def _clean_song_token(self, value: str) -> str:
-        return (
-            (value or "")
-            .strip()
-            .strip("<>《》")
-            .strip()
-            .strip("'\"“”‘’")
-        )
+        return (value or "").strip().strip("<>《》").strip().strip("'\"“”‘’")
 
     def _parse_tone_line(
         self,

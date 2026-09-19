@@ -25,13 +25,27 @@ class DueEventProvider(Protocol):
     """列出候选并按完整通知身份执行原子 claim/release。"""
 
     def list_due(
-        self, *, character_id: str, user_id: str, now: datetime,
+        self,
+        *,
+        character_id: str,
+        user_id: str,
+        now: datetime,
     ) -> tuple[DueEvent, ...]: ...
 
     def claim(
-        self, event_id: str, *, user_id: str, character_id: str, trigger_key: str,
+        self,
+        event_id: str,
+        *,
+        user_id: str,
+        character_id: str,
+        trigger_key: str,
     ) -> bool: ...
 
     def release(
-        self, event_id: str, *, user_id: str, character_id: str, trigger_key: str,
+        self,
+        event_id: str,
+        *,
+        user_id: str,
+        character_id: str,
+        trigger_key: str,
     ) -> None: ...

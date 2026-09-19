@@ -40,24 +40,33 @@ class CitywalkObservationHandler:
         )
         if not body.strip():
             self._logger.error("citywalk 动态正文生成为空，未交付计划 fact=%s", stimulus.fact.fact_id)
-            return self._report(request, d.HandlingRequestStatus.FAILED,
-                                d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
+            return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
         action = d.PublishDynamic(
-            action_id=str(uuid4()), body=body, media_refs=(), visibility=d.Visibility.GLOBAL,
+            action_id=str(uuid4()),
+            body=body,
+            media_refs=(),
+            visibility=d.Visibility.GLOBAL,
             owner_user_id=None,
             source=d.DynamicSource(source_type=CITYWALK_SOURCE_TYPE, source_id=stimulus.fact.fact_id),
             allow_comment=True,
         )
-        receipt = await plans.emit(ActionPlanDraft(
-            source_stimulus_ids=(stimulus.stimulus_id,), actions=(action,),
-        ))
-        return self._report(request, d.HandlingRequestStatus.COMPLETED, None,
-                            (stimulus.stimulus_id,), plans=(receipt.plan_id,))
+        receipt = await plans.emit(
+            ActionPlanDraft(
+                source_stimulus_ids=(stimulus.stimulus_id,),
+                actions=(action,),
+            )
+        )
+        return self._report(
+            request, d.HandlingRequestStatus.COMPLETED, None, (stimulus.stimulus_id,), plans=(receipt.plan_id,)
+        )
 
     @staticmethod
     def _report(
-        request: d.HandleStimulusRequest, status: d.HandlingRequestStatus,
-        error_code: d.HandlingErrorCode | None, consumed: tuple[str, ...], *,
+        request: d.HandleStimulusRequest,
+        status: d.HandlingRequestStatus,
+        error_code: d.HandlingErrorCode | None,
+        consumed: tuple[str, ...],
+        *,
         plans: tuple[str, ...] = (),
     ) -> d.HandlingReport:
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)

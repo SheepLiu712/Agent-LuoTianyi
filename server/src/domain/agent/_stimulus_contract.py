@@ -5,7 +5,6 @@ from datetime import datetime
 from inspect import Signature, signature
 from typing import Literal, NoReturn
 
-
 StimulusErrorCode = Literal[
     "CONTRACT_INVALID_STIMULUS",
     "CONTRACT_UNSUPPORTED_SCHEMA",

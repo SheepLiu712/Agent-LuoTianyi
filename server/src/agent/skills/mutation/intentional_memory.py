@@ -1,4 +1,5 @@
 """明确记忆请求的长期存储提交技能。"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -39,10 +40,7 @@ class MemoryOwnerMismatchError(RuntimeError):
     owner_character_id: str
 
     def __str__(self) -> str:
-        return (
-            "owner character mismatch: "
-            f"requested={self.requested_character_id} owner={self.owner_character_id}"
-        )
+        return "owner character mismatch: " f"requested={self.requested_character_id} owner={self.owner_character_id}"
 
 
 class IntentionalMemoryCommit:
@@ -53,7 +51,11 @@ class IntentionalMemoryCommit:
         self._memory_provider = memory_provider
 
     async def commit(
-        self, *, character_id: str, user_id: str, content: str,
+        self,
+        *,
+        character_id: str,
+        user_id: str,
+        content: str,
     ) -> MemoryCommitRevision:
         """提交一条私有用户事实；底层业务去重使重复调用无新副作用。"""
         memory = self._memory_provider(character_id)

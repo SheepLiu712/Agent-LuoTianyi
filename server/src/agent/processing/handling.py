@@ -1,13 +1,15 @@
 """单次刺激的处理器路由、计划交付和处理报告校验。"""
+
 import asyncio
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import src.domain.agent as d
-from .plan_emitter import PlanEmitter, _DeliveryCancelled
-from .invocation import call_handler
-from .interruptibility import _CallInterruptibility
 from src.agent.context import InteractionContext
+
+from .interruptibility import _CallInterruptibility
+from .invocation import call_handler
+from .plan_emitter import PlanEmitter, _DeliveryCancelled
 
 if TYPE_CHECKING:
     from src.agent.facade import Agent
@@ -16,8 +18,14 @@ if TYPE_CHECKING:
 class Handling:
     """管理一次刺激处理，处理结束后关闭本次计划交付器。"""
 
-    def __init__(self, agent: "Agent", request: d.HandleStimulusRequest,
-                 sink: d.ActionPlanSink, interruption: _CallInterruptibility | None = None, context: InteractionContext | None = None) -> None:
+    def __init__(
+        self,
+        agent: "Agent",
+        request: d.HandleStimulusRequest,
+        sink: d.ActionPlanSink,
+        interruption: _CallInterruptibility | None = None,
+        context: InteractionContext | None = None,
+    ) -> None:
         """绑定角色门面、当前请求及本次计划接收器。"""
         self.agent, self.request, self.sink = agent, request, sink
         self.interruption = interruption
@@ -31,8 +39,11 @@ class Handling:
             status = d.HandlingRequestStatus.CANCELLED
             return self.agent._handling_failure(request, status, error)
         try:
-            handler = (self.agent._stimulus_router.resolve_reflection() if request.purpose is d.HandlePurpose.REFLECT
-                       else self.agent._stimulus_router.resolve(request.stimulus.kind))
+            handler = (
+                self.agent._stimulus_router.resolve_reflection()
+                if request.purpose is d.HandlePurpose.REFLECT
+                else self.agent._stimulus_router.resolve(request.stimulus.kind)
+            )
         except KeyError:
             error = d.HandlingErrorCode.UNSUPPORTED_STIMULUS
             return self.agent._handling_failure(request, status, error)
@@ -50,27 +61,40 @@ class Handling:
                 self._validate_handling_report(request, report, plan_emitter.accepted_ids)
                 if request.cancellation.is_cancelled:
                     # 尚未交付计划的过时提取结果不能消费输入；保留原消息以便重新等待。
-                    if (request.cancellation.reason is d.CancellationReason.SUPERSEDED
-                            and self.interruption is not None and self.interruption.allowed
-                            and not plan_emitter.accepted_ids):
+                    if (
+                        request.cancellation.reason is d.CancellationReason.SUPERSEDED
+                        and self.interruption is not None
+                        and self.interruption.allowed
+                        and not plan_emitter.accepted_ids
+                    ):
                         report = self.agent._handling_failure(request, d.HandlingRequestStatus.CANCELLED, None)
                     else:
-                        report = replace(report, request_status=d.HandlingRequestStatus.CANCELLED, error_code=None, retryable=False)
+                        report = replace(
+                            report, request_status=d.HandlingRequestStatus.CANCELLED, error_code=None, retryable=False
+                        )
             except _DeliveryCancelled:
-                report = self.agent._handling_failure(request, d.HandlingRequestStatus.CANCELLED, None, plan_emitter.accepted_ids)
+                report = self.agent._handling_failure(
+                    request, d.HandlingRequestStatus.CANCELLED, None, plan_emitter.accepted_ids
+                )
             except Exception as error:
                 code = self.agent._error_code(error, d.HandlingErrorCode)
                 self.agent._record_exception(request.request_id, request.interaction.interaction_id, code, error)
-                report = self.agent._handling_failure(request, d.HandlingRequestStatus.FAILED, code, plan_emitter.accepted_ids)
+                report = self.agent._handling_failure(
+                    request, d.HandlingRequestStatus.FAILED, code, plan_emitter.accepted_ids
+                )
             return plan_emitter.finish(report)
         except asyncio.CancelledError:
-            self.agent._record(request.request_id, request.interaction.interaction_id, d.HandlingRequestStatus.CANCELLED, None)
+            self.agent._record(
+                request.request_id, request.interaction.interaction_id, d.HandlingRequestStatus.CANCELLED, None
+            )
             raise
         finally:
             plan_emitter.close()
 
     @staticmethod
-    def _validate_handling_report(request: d.HandleStimulusRequest, report: d.HandlingReport, accepted_ids: list[str]) -> None:
+    def _validate_handling_report(
+        request: d.HandleStimulusRequest, report: d.HandlingReport, accepted_ids: list[str]
+    ) -> None:
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
         if (
             not isinstance(report, d.HandlingReport)
@@ -78,8 +102,12 @@ class Handling:
             or report.trigger_stimulus_id != request.stimulus.stimulus_id
             or report.basis_interaction_revision != request.interaction.interaction_revision
             or report.emitted_plan_ids != tuple(accepted_ids)
-            or tuple(i for i in pending if i in report.considered_pending_stimulus_ids) != report.considered_pending_stimulus_ids
+            or tuple(i for i in pending if i in report.considered_pending_stimulus_ids)
+            != report.considered_pending_stimulus_ids
         ):
             raise ValueError("invalid handler settlement")
-        if report.preprocessed_input is not None and report.preprocessed_input.stimulus_id != request.stimulus.stimulus_id:
+        if (
+            report.preprocessed_input is not None
+            and report.preprocessed_input.stimulus_id != request.stimulus.stimulus_id
+        ):
             raise ValueError("preprocessing result does not match trigger")

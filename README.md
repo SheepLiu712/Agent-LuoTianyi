@@ -87,7 +87,14 @@ npx expo start                 # 启动 Expo 开发服务器
     ```bash
     setup.bat
     ```
-    推荐将服务端环境命名为 `lty`。脚本会询问 conda 环境名称，以及是否安装 GPU 版本的 PyTorch；如果没有 NVIDIA 显卡，请选择否。
+    推荐将服务端环境命名为 `lty`。脚本会询问 Conda 环境名称和 PyTorch 的 CPU/CUDA 构建；Python 运行依赖由 `server/pyproject.toml` 统一管理，脚本只补充 PyTorch wheel 源、FFmpeg 和 Playwright Chromium 等环境步骤。
+
+    如果已经准备好 Python 3.10、PyTorch 和 FFmpeg，也可以直接安装：
+    ```bash
+    python -m pip install -e ".[speech,song-learning]"
+    python -m playwright install chromium
+    ```
+    参与开发时再执行 `python -m pip install -e ".[dev]"`。当前采用仓库内 editable install，`config/`、`res/`、`data/` 不打入 wheel。
 
 3. 下载资源：
    - 联系开发者获取资源文件。至少需要TTS模型、角色资源、知识库等基础资源，缺失时对应功能无法启动或会在控制台配置检查中报错。

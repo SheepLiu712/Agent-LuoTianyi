@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Awaitable, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from src.agent.reflex.touch import TouchReflexResponder
 from src.domain.chat import ChatInputEvent, ChatInputEventType

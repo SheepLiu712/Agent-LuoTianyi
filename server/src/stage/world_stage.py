@@ -1,4 +1,5 @@
 """按角色与世界长期持有的事实处理和计划执行通道。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -35,15 +36,20 @@ class WorldStage:
     """长期协调一个角色在一个世界中的事实处理与串行计划执行。"""
 
     def __init__(
-        self, *, character_id: str, world_id: str, agent: Agent,
-        context: InteractionContext, config: dict[str, int | float] | None = None,
+        self,
+        *,
+        character_id: str,
+        world_id: str,
+        agent: Agent,
+        context: InteractionContext,
+        config: dict[str, int | float] | None = None,
         timezone_name: str = "Asia/Shanghai",
         on_execution_finished: ExecutionFinishedCallback | None = None,
         on_handling_settled: HandlingSettledCallback | None = None,
     ) -> None:
         if any(not isinstance(value, str) or not value.strip() for value in (character_id, world_id)):
             raise ValueError("character_id and world_id must be nonblank")
-        if (context.identity.character_id != character_id or context.identity.user_id is not None):
+        if context.identity.character_id != character_id or context.identity.user_id is not None:
             raise ValueError("context identity does not match world stage")
         self._character_id, self._world_id = character_id, world_id
         self._agent, self._context = agent, context
@@ -74,8 +80,13 @@ class WorldStage:
 
     @classmethod
     async def create(
-        cls, *, character_id: str, world_id: str, agent: Agent,
-        context_factory: ContextFactory, config: dict[str, int | float] | None = None,
+        cls,
+        *,
+        character_id: str,
+        world_id: str,
+        agent: Agent,
+        context_factory: ContextFactory,
+        config: dict[str, int | float] | None = None,
         timezone_name: str = "Asia/Shanghai",
         on_execution_finished: ExecutionFinishedCallback | None = None,
         on_handling_settled: HandlingSettledCallback | None = None,
@@ -83,10 +94,16 @@ class WorldStage:
         """创建并接管无用户世界上下文；构造失败时关闭上下文。"""
         context = await context_factory.create(str(uuid4()), user_id=None)
         try:
-            return cls(character_id=character_id, world_id=world_id, agent=agent,
-                       context=context, config=config, timezone_name=timezone_name,
-                       on_execution_finished=on_execution_finished,
-                       on_handling_settled=on_handling_settled)
+            return cls(
+                character_id=character_id,
+                world_id=world_id,
+                agent=agent,
+                context=context,
+                config=config,
+                timezone_name=timezone_name,
+                on_execution_finished=on_execution_finished,
+                on_handling_settled=on_handling_settled,
+            )
         except BaseException:
             await context.close()
             raise
@@ -124,21 +141,29 @@ class WorldStage:
         return self._worker
 
     def _receive(self, fact: d.Stimulus) -> bool:
-        if (not isinstance(fact, d.Stimulus) or self._state is not StageState.ONLINE
-                or fact.source is not d.StimulusSource.WORLD or fact.user_id is not None
-                or self.character_id not in fact.target_character_ids
-                or fact.kind not in WORLD_ACTIVITY_STIMULUS_KINDS
-                or fact.stimulus_id in self._pending
-                or len(self._pending) >= self._config.max_stimuli
-                or len(self._handles) >= self._config.max_stimuli
-                or not self._owner_revision_is_current(fact)):
+        if (
+            not isinstance(fact, d.Stimulus)
+            or self._state is not StageState.ONLINE
+            or fact.source is not d.StimulusSource.WORLD
+            or fact.user_id is not None
+            or self.character_id not in fact.target_character_ids
+            or fact.kind not in WORLD_ACTIVITY_STIMULUS_KINDS
+            or fact.stimulus_id in self._pending
+            or len(self._pending) >= self._config.max_stimuli
+            or len(self._handles) >= self._config.max_stimuli
+            or not self._owner_revision_is_current(fact)
+        ):
             return False
         self._revision += 1
         self._apply_owner_revision(fact)
         self._pending[fact.stimulus_id] = fact
         request = d.HandleStimulusRequest(
-            request_id=str(uuid4()), stimulus=fact, interaction=self._snapshot(),
-            cancellation=d.CancellationToken(), prepared_inputs=(), purpose=d.HandlePurpose.PROCESS,
+            request_id=str(uuid4()),
+            stimulus=fact,
+            interaction=self._snapshot(),
+            cancellation=d.CancellationToken(),
+            prepared_inputs=(),
+            purpose=d.HandlePurpose.PROCESS,
         )
         self._requests[request.request_id] = request
         task = asyncio.create_task(self._handle(request), name="world-stage-handle")
@@ -151,8 +176,11 @@ class WorldStage:
             case d.WorldObservation(world_revision=revision):
                 return revision >= self._world_revision
             case d.ActivityObservation(activity_id=activity_id, activity_revision=revision):
-                return activity_id != self._activity_id or self._activity_revision is None \
+                return (
+                    activity_id != self._activity_id
+                    or self._activity_revision is None
                     or revision >= self._activity_revision
+                )
             case _:
                 return True
 
@@ -167,12 +195,19 @@ class WorldStage:
 
     def _snapshot(self) -> d.WorldInteractionSnapshot:
         return d.WorldInteractionSnapshot(
-            interaction_id=self.interaction_id, interaction_revision=self._revision,
-            user_id=None, pending_stimuli=self.pending_stimuli,
-            now=datetime.now(timezone.utc), timezone=self._timezone, supported_outputs=frozenset(),
-            world_id=self.world_id, world_revision=self._world_revision,
-            activity_id=self._activity_id, activity_revision=self._activity_revision,
-            planning_cycle_id=self._planning_cycle_id, schedule_revision=self._schedule_revision,
+            interaction_id=self.interaction_id,
+            interaction_revision=self._revision,
+            user_id=None,
+            pending_stimuli=self.pending_stimuli,
+            now=datetime.now(timezone.utc),
+            timezone=self._timezone,
+            supported_outputs=frozenset(),
+            world_id=self.world_id,
+            world_revision=self._world_revision,
+            activity_id=self._activity_id,
+            activity_revision=self._activity_revision,
+            planning_cycle_id=self._planning_cycle_id,
+            schedule_revision=self._schedule_revision,
         )
 
     async def _handle(self, request: d.HandleStimulusRequest) -> None:
@@ -188,16 +223,20 @@ class WorldStage:
             sink.closed = True
 
     def _settle(
-        self, request: d.HandleStimulusRequest, report: d.HandlingReport,
+        self,
+        request: d.HandleStimulusRequest,
+        report: d.HandlingReport,
         emitted_plan_ids: tuple[str, ...],
     ) -> None:
         pending_ids = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
-        if (report.request_id != request.request_id
-                or report.trigger_stimulus_id != request.stimulus.stimulus_id
-                or report.basis_interaction_revision != request.interaction.interaction_revision
-                or report.emitted_plan_ids != emitted_plan_ids
-                or tuple(item for item in pending_ids if item in report.considered_pending_stimulus_ids)
-                != report.considered_pending_stimulus_ids):
+        if (
+            report.request_id != request.request_id
+            or report.trigger_stimulus_id != request.stimulus.stimulus_id
+            or report.basis_interaction_revision != request.interaction.interaction_revision
+            or report.emitted_plan_ids != emitted_plan_ids
+            or tuple(item for item in pending_ids if item in report.considered_pending_stimulus_ids)
+            != report.considered_pending_stimulus_ids
+        ):
             raise ValueError("handling report does not match request")
         for stimulus_id in report.consumed_pending_stimulus_ids:
             self._pending.pop(stimulus_id, None)
@@ -219,7 +258,8 @@ class WorldStage:
             self._plans.put_nowait((plan, token))
         except asyncio.QueueFull as error:
             raise d.SinkRejectedError(
-                "plan queue is full", code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT,
+                "plan queue is full",
+                code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT,
             ) from error
 
     async def _execution_worker(self) -> None:
@@ -229,15 +269,18 @@ class WorldStage:
                 if handle_token.is_cancelled or self._state is not StageState.ONLINE:
                     continue
                 context = d.ExecutionContext(
-                    execution_id=str(uuid4()), interaction_id=self.interaction_id,
-                    current_interaction_revision=self._revision, cancellation=d.CancellationToken(),
+                    execution_id=str(uuid4()),
+                    interaction_id=self.interaction_id,
+                    current_interaction_revision=self._revision,
+                    cancellation=d.CancellationToken(),
                 )
                 self._execution = context
                 report = await self._agent.realize_action_plan(plan, context, self._output_sink)
                 if report.status is not d.ExecutionStatus.COMPLETED:
                     self._logger.error(
                         "WorldStage realize stopped plan=%s code=%s",
-                        plan.plan_id, report.error_code,
+                        plan.plan_id,
+                        report.error_code,
                     )
                 if self._on_execution_finished is not None:
                     self._on_execution_finished(plan, report)

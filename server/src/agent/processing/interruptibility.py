@@ -1,7 +1,8 @@
 """按交互记录正在执行的处理是否允许被普通刺激打断。"""
+
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from collections.abc import Iterator
 
 
 @dataclass(eq=False)
@@ -22,7 +23,9 @@ class _InteractionInterruptibility:
         return bool(calls) and all(call.allowed for call in calls)
 
     @contextmanager
-    def track(self, interaction_id: str, operation: str, request_id: str | None = None) -> Iterator[_CallInterruptibility]:
+    def track(
+        self, interaction_id: str, operation: str, request_id: str | None = None
+    ) -> Iterator[_CallInterruptibility]:
         key = (interaction_id, operation)
         state = _CallInterruptibility(request_id=request_id)
         calls = self._active.setdefault(key, set())

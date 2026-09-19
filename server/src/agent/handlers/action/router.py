@@ -1,9 +1,9 @@
 """按行动类别登记并精确解析内部处理器。"""
+
 from collections.abc import Iterable
 from typing import Generic, Protocol, TypeVar
 
 from src.agent.processing.output_emitter import OutputEmitter
-
 from src.domain.agent import Action, ActionKind, ActionResult, ExecutionContext
 
 HandlerT = TypeVar("HandlerT")
@@ -12,8 +12,9 @@ HandlerT = TypeVar("HandlerT")
 class ActionHandler(Protocol):
     """实现单项行动，提交内容草稿并报告真实效果。"""
 
-    async def realize(self, action: Action, execution_context: ExecutionContext,
-                      outputs: OutputEmitter) -> ActionResult:
+    async def realize(
+        self, action: Action, execution_context: ExecutionContext, outputs: OutputEmitter
+    ) -> ActionResult:
         """执行行动并交付输出；返回效果，异常及任务取消由门面处理。"""
         ...
 

@@ -18,7 +18,9 @@ class LearnedSongExperienceSkill:
     async def commit(self, *, character_id: str, song_id: str, learning_job_id: str) -> bool:
         """写入一条学会经验；已有同日同内容记录时返回 False，不重复写入。"""
         for name, value in (
-            ("character_id", character_id), ("song_id", song_id), ("learning_job_id", learning_job_id),
+            ("character_id", character_id),
+            ("song_id", song_id),
+            ("learning_job_id", learning_job_id),
         ):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} 不能为空")

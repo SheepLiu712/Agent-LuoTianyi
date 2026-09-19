@@ -14,30 +14,42 @@ class DiaryPlanningDueHandler:
         self._writing = writing
 
     async def handle(
-        self, request: d.HandleStimulusRequest, plans: PlanEmitter,
+        self,
+        request: d.HandleStimulusRequest,
+        plans: PlanEmitter,
     ) -> d.HandlingReport:
         stimulus = request.stimulus
         if not isinstance(stimulus, d.DiaryPlanningDue):
             raise TypeError("DiaryPlanningDueHandler 只处理 DiaryPlanningDue")
         if not self._writing.available():
-            return self._report(request, d.HandlingRequestStatus.FAILED,
-                                d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)
-        body = (await self._writing.compose(
-            stimulus.owner_user_id, stimulus.local_date,
-        )).strip()
+            return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)
+        body = (
+            await self._writing.compose(
+                stimulus.owner_user_id,
+                stimulus.local_date,
+            )
+        ).strip()
         if not body:
-            return self._report(request, d.HandlingRequestStatus.FAILED,
-                                d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)
-        receipt = await plans.emit(ActionPlanDraft(
-            source_stimulus_ids=(stimulus.stimulus_id,),
-            actions=(d.WriteDiary(
-                action_id=str(uuid4()), owner_user_id=stimulus.owner_user_id,
-                local_date=stimulus.local_date, body=body,
-            ),),
-        ))
+            return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)
+        receipt = await plans.emit(
+            ActionPlanDraft(
+                source_stimulus_ids=(stimulus.stimulus_id,),
+                actions=(
+                    d.WriteDiary(
+                        action_id=str(uuid4()),
+                        owner_user_id=stimulus.owner_user_id,
+                        local_date=stimulus.local_date,
+                        body=body,
+                    ),
+                ),
+            )
+        )
         return self._report(
-            request, d.HandlingRequestStatus.COMPLETED, None,
-            consumed=(stimulus.stimulus_id,), plans=(receipt.plan_id,),
+            request,
+            d.HandlingRequestStatus.COMPLETED,
+            None,
+            consumed=(stimulus.stimulus_id,),
+            plans=(receipt.plan_id,),
         )
 
     @staticmethod

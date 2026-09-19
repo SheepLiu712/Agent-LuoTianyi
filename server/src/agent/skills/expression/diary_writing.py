@@ -58,7 +58,9 @@ class DiaryWritingSkill:
     def publish(self, action: d.WriteDiary) -> DiaryPublishResult:
         """按旧链来源身份幂等发布私密、不可评论的日记动态。"""
         source_id = DiaryCapability._diary_source_id(
-            self._character_id, action.owner_user_id, action.local_date.isoformat(),
+            self._character_id,
+            action.owner_user_id,
+            action.local_date.isoformat(),
         )
         ok, message, item = self._dynamics.publish_agent_dynamic(
             character_id=self._character_id,

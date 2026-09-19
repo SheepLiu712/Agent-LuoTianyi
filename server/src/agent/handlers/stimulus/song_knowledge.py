@@ -23,7 +23,9 @@ class SongKnowledgeHandler:
         self._logger = get_logger(__name__)
 
     async def handle(
-        self, request: d.HandleStimulusRequest, plans: PlanEmitter,
+        self,
+        request: d.HandleStimulusRequest,
+        plans: PlanEmitter,
     ) -> d.HandlingReport:
         """接纳候选：成功或已有项跳过时消费该刺激，失败与候选不完整时明确报告。"""
         _ = plans
@@ -39,21 +41,27 @@ class SongKnowledgeHandler:
         )
         if result.status is SongAcceptanceStatus.ACCEPTED:
             self._logger.info("歌曲知识已接纳：%s", result.detail)
-            return self._report(request, pending, d.HandlingRequestStatus.COMPLETED, None,
-                                consumed=(stimulus.stimulus_id,))
+            return self._report(
+                request, pending, d.HandlingRequestStatus.COMPLETED, None, consumed=(stimulus.stimulus_id,)
+            )
         if result.status is SongAcceptanceStatus.ALREADY_PRESENT:
             self._logger.info("歌曲知识已有项，跳过：%s", result.detail)
-            return self._report(request, pending, d.HandlingRequestStatus.COMPLETED, None,
-                                consumed=(stimulus.stimulus_id,))
+            return self._report(
+                request, pending, d.HandlingRequestStatus.COMPLETED, None, consumed=(stimulus.stimulus_id,)
+            )
         self._logger.error("歌曲知识接纳失败：%s", result.detail)
-        return self._report(request, pending, d.HandlingRequestStatus.FAILED,
-                            d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, consumed=())
+        return self._report(
+            request, pending, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, consumed=()
+        )
 
     @staticmethod
     def _report(
-        request: d.HandleStimulusRequest, pending: tuple[str, ...],
-        status: d.HandlingRequestStatus, error_code: d.HandlingErrorCode | None,
-        *, consumed: tuple[str, ...],
+        request: d.HandleStimulusRequest,
+        pending: tuple[str, ...],
+        status: d.HandlingRequestStatus,
+        error_code: d.HandlingErrorCode | None,
+        *,
+        consumed: tuple[str, ...],
     ) -> d.HandlingReport:
         return d.HandlingReport(
             request_id=request.request_id,

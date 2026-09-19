@@ -3,23 +3,22 @@
 
 实现洛天依角色扮演对话Agent的核心逻辑
 """
+
 from __future__ import annotations
 
-from typing import  List, Dict, Any, Optional, Tuple, Generator
 import json
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Generator, List, Optional, Tuple
 
 from src.agent.main_chat import MainChat, OneResponseLine
-from src.utils.logger import get_logger
 from src.agent.response_realizer import ResponseRealizer, UserExpressionContext
-from src.domain import CharacterProfile, CharacterName
-
+from src.domain import CharacterName, CharacterProfile
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.capabilities import CapabilityManager
-    from src.system.database import DatabaseManager
     from src.subconscious.character_mind import CharacterSubconscious
+    from src.system.database import DatabaseManager
     from src.utils.llm.llm_module import LLMModule
 
 
@@ -138,8 +137,8 @@ class LuoTianyiAgent:
         date_str 格式为 YYYY-MM-DD
         """
         try:
-            from pathlib import Path
             import json
+            from pathlib import Path
 
             reports_dir = Path("data/citywalk_reports")
             if not reports_dir.exists():
@@ -157,6 +156,7 @@ class LuoTianyiAgent:
                         continue
                     # ISO datetime
                     from datetime import datetime
+
                     try:
                         dt = datetime.fromisoformat(created)
                     except Exception:
@@ -178,8 +178,8 @@ class LuoTianyiAgent:
     async def get_citywalk_overview_by_date(self, date_str: str) -> dict | None:
         """返回指定日期的 citywalk overview（包含 city 和 selected_destination）"""
         try:
-            from pathlib import Path
             import json
+            from pathlib import Path
 
             reports_dir = Path("data/citywalk_reports")
             if not reports_dir.exists():
@@ -196,6 +196,7 @@ class LuoTianyiAgent:
                     if not created:
                         continue
                     from datetime import datetime
+
                     try:
                         dt = datetime.fromisoformat(created)
                     except Exception:
@@ -241,14 +242,14 @@ class LuoTianyiAgent:
     async def build_sing_plan_for_topic(self, sing_attempts: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """供 TopicReplier 调用的唱歌计划接口。返回 song|segment。"""
         return await self.mind.build_sing_plan_for_topic(sing_attempts)
-    
+
     def sing(self, song_name: str, segment: str) -> Optional[bytes]:
         """调用唱歌管理器生成歌曲片段的音频，并返回音频的Base64字符串"""
         return self.capabilities.singing.sing(self.character_id, song_name, segment)
-    
+
     async def tts_say(self, text: str, tone: str) -> str:
         return await self.capabilities.speech.say(self.character_id, text, tone)
-    
+
     def tts_say_stream(self, text: str, tone: str) -> Generator[str, None, None]:
         yield from self.capabilities.speech.say_stream(self.character_id, text, tone)
 

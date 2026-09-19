@@ -14,14 +14,21 @@ from src.domain.memory_context import MemoryHit
 
 class _Mind(Protocol):
     async def search_memory_context_for_topic(self, user_id: str, queries: list[str]): ...
-    async def build_sing_plan_for_topic(self, attempts: list[str], excluded_segments=None,
-                                        emotion_context: str = ""): ...
+    async def build_sing_plan_for_topic(
+        self, attempts: list[str], excluded_segments=None, emotion_context: str = ""
+    ): ...
 
 
 class _Conscious(Protocol):
-    async def generate_topic_reply_for_pipeline(self, user_id: str, topic_content: str,
-                                                memory_hits=None, fact_hits=None, sing_plan=None,
-                                                conversation_history=None): ...
+    async def generate_topic_reply_for_pipeline(
+        self,
+        user_id: str,
+        topic_content: str,
+        memory_hits=None,
+        fact_hits=None,
+        sing_plan=None,
+        conversation_history=None,
+    ): ...
 
 
 class _Runtime(Protocol):
@@ -33,6 +40,7 @@ class _Runtime(Protocol):
 @dataclass(frozen=True)
 class ReplyDraft:
     """一条已生成的回复草稿；sing 非空表示演唱，否则为说话。"""
+
     content: str
     sound_content: str
     tone: str
@@ -44,6 +52,7 @@ class ReplyDraft:
 @dataclass(frozen=True)
 class ComposedReply:
     """一次生成的完整回复草稿及其所依据的召回命中。"""
+
     drafts: tuple[ReplyDraft, ...] = ()
     memory_hits: tuple[MemoryHit, ...] = ()
 
@@ -55,6 +64,7 @@ class ComposedResponse:
     provisional 为 None 表示本次无需先行回复；awaits_formal 为 True 时调用方
     必须再 await formal() 取得正式草稿。该类型不出现在任何公开接口上。
     """
+
     provisional: tuple[ReplyDraft, ...] | None = None
     pending: Callable[[], Awaitable[ComposedReply]] | None = None
     _settled: ComposedReply | None = field(default=None, init=False, repr=False)
@@ -78,8 +88,7 @@ class ComposedResponse:
 class ResponseCompositionSkill:
     """包装角色潜意识的召回与意识的回复生成，输出与旧链路等价的回复草稿。"""
 
-    def __init__(self, config: dict[str, Any],
-                 runtime_provider: Callable[[str], _Runtime]) -> None:
+    def __init__(self, config: dict[str, Any], runtime_provider: Callable[[str], _Runtime]) -> None:
         """校验本层 config 并绑定按角色解析潜意识/意识的提供者。"""
         if not isinstance(config, dict):
             raise TypeError("reply_composition 必须是字典")
@@ -95,23 +104,40 @@ class ResponseCompositionSkill:
         )
         self._runtime_provider = runtime_provider
 
-    async def compose(self, *, character_id: str, user_id: str, reply_topic: str,
-                      conversation_history: str, memory_queries: tuple[str, ...] = (),
-                      sing_attempts: tuple[str, ...] = (),
-                      excluded_segments: set[tuple[str, str]] | None = None) -> tuple[ReplyDraft, ...]:
+    async def compose(
+        self,
+        *,
+        character_id: str,
+        user_id: str,
+        reply_topic: str,
+        conversation_history: str,
+        memory_queries: tuple[str, ...] = (),
+        sing_attempts: tuple[str, ...] = (),
+        excluded_segments: set[tuple[str, str]] | None = None,
+    ) -> tuple[ReplyDraft, ...]:
         """按话题召回记忆、按最近已唱排除选择演唱片段，并生成有序回复草稿。"""
         reply = await self._compose_reply(
-            character_id=character_id, user_id=user_id, reply_topic=reply_topic,
-            conversation_history=conversation_history, sing_attempts=sing_attempts,
+            character_id=character_id,
+            user_id=user_id,
+            reply_topic=reply_topic,
+            conversation_history=conversation_history,
+            sing_attempts=sing_attempts,
             excluded_segments=excluded_segments,
             recall=self._recall(character_id, user_id, memory_queries),
         )
         return reply.drafts
 
-    async def compose_staged(self, *, character_id: str, user_id: str, reply_topic: str,
-                             conversation_history: str, memory_queries: tuple[str, ...] = (),
-                             sing_attempts: tuple[str, ...] = (),
-                             excluded_segments: set[tuple[str, str]] | None = None) -> ComposedResponse:
+    async def compose_staged(
+        self,
+        *,
+        character_id: str,
+        user_id: str,
+        reply_topic: str,
+        conversation_history: str,
+        memory_queries: tuple[str, ...] = (),
+        sing_attempts: tuple[str, ...] = (),
+        excluded_segments: set[tuple[str, str]] | None = None,
+    ) -> ComposedResponse:
         """召回超时则先给出配置的临时草稿，正式草稿留待调用方继续 await。
 
         仅供处理器内部分阶段使用；不改变 compose 的既有语义。
@@ -120,9 +146,13 @@ class ResponseCompositionSkill:
 
         async def formal() -> ComposedReply:
             return await self._compose_reply(
-                character_id=character_id, user_id=user_id, reply_topic=reply_topic,
-                conversation_history=conversation_history, sing_attempts=sing_attempts,
-                excluded_segments=excluded_segments, recall=recall,
+                character_id=character_id,
+                user_id=user_id,
+                reply_topic=reply_topic,
+                conversation_history=conversation_history,
+                sing_attempts=sing_attempts,
+                excluded_segments=excluded_segments,
+                recall=recall,
             )
 
         if self._waits_for_slow_recall(memory_queries):
@@ -142,10 +172,17 @@ class ResponseCompositionSkill:
         runtime = self._runtime_provider(character_id)
         return await runtime.mind.search_memory_context_for_topic(user_id, list(memory_queries))
 
-    async def _compose_reply(self, *, character_id: str, user_id: str, reply_topic: str,
-                             conversation_history: str, sing_attempts: tuple[str, ...],
-                             excluded_segments: set[tuple[str, str]] | None,
-                             recall) -> ComposedReply:
+    async def _compose_reply(
+        self,
+        *,
+        character_id: str,
+        user_id: str,
+        reply_topic: str,
+        conversation_history: str,
+        sing_attempts: tuple[str, ...],
+        excluded_segments: set[tuple[str, str]] | None,
+        recall,
+    ) -> ComposedReply:
         runtime = self._runtime_provider(character_id)
         context = await recall
         memory_hits = context.render_for_prompt() if context is not None else []
@@ -153,20 +190,24 @@ class ResponseCompositionSkill:
         sing_plan = None
         if sing_attempts:
             candidate = await runtime.mind.build_sing_plan_for_topic(
-                list(sing_attempts), excluded_segments=excluded_segments)
+                list(sing_attempts), excluded_segments=excluded_segments
+            )
             if candidate and candidate[1]:
                 sing_plan = candidate
         lines = await runtime.conscious.generate_topic_reply_for_pipeline(
-            user_id=user_id, topic_content=reply_topic, memory_hits=memory_hits,
-            fact_hits=None, sing_plan=sing_plan, conversation_history=conversation_history,
+            user_id=user_id,
+            topic_content=reply_topic,
+            memory_hits=memory_hits,
+            fact_hits=None,
+            sing_plan=sing_plan,
+            conversation_history=conversation_history,
         )
         drafts = []
         for line in lines:
             draft = _draft(line)
             if draft.sing is not None:
                 song, segment = draft.sing
-                lyrics = runtime.capability_manager.singing.get_segment_lyrics(
-                    character_id, song, segment)
+                lyrics = runtime.capability_manager.singing.get_segment_lyrics(character_id, song, segment)
                 draft = replace(draft, lyrics=lyrics or "")
             drafts.append(draft)
         return ComposedReply(drafts=tuple(drafts), memory_hits=hits)
@@ -174,8 +215,9 @@ class ResponseCompositionSkill:
 
 def _draft(line: Any) -> ReplyDraft:
     if isinstance(line, SongSegmentChat):
-        return ReplyDraft(content=line.get_content(), sound_content="", tone="",
-                          expression=None, sing=(line.song, line.segment))
+        return ReplyDraft(
+            content=line.get_content(), sound_content="", tone="", expression=None, sing=(line.song, line.segment)
+        )
     content = getattr(line, "content", "") or ""
     sound = getattr(line, "sound_content", "") or ""
     if content and not sound:

@@ -16,8 +16,8 @@ from zoneinfo import ZoneInfo
 
 from ._handle_input_contract import (
     HandleInputErrorCode,
-    _HandleInputMeta,
     _aware,
+    _HandleInputMeta,
     _nonblank,
     _require,
     _revision,
@@ -51,13 +51,15 @@ class AgentOutputKind(str, Enum):
     MOTION = "motion"
 
 
-_COORDINATION_KINDS = frozenset({
-    StimulusKind.USER_TYPING,
-    StimulusKind.IMAGE_SELECTION_OPENED,
-    StimulusKind.IMAGE_SELECTION_CLOSED,
-    StimulusKind.INTERACTION_DEADLINE,
-    StimulusKind.INTERACTION_ENDING,
-})
+_COORDINATION_KINDS = frozenset(
+    {
+        StimulusKind.USER_TYPING,
+        StimulusKind.IMAGE_SELECTION_OPENED,
+        StimulusKind.IMAGE_SELECTION_CLOSED,
+        StimulusKind.INTERACTION_DEADLINE,
+        StimulusKind.INTERACTION_ENDING,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

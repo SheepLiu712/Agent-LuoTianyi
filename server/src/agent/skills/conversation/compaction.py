@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.agent.context import ConversationCompaction, ConversationContext, ConversationSummary
 
@@ -39,7 +39,9 @@ class _CompactionConfig:
             values[name] = value
         result = cls(**values)
         if result.not_zip_conversation_count > result.raw_conversation_context_limit:
-            raise ValueError("conversation_compaction.not_zip_conversation_count 不能超过 raw_conversation_context_limit")
+            raise ValueError(
+                "conversation_compaction.not_zip_conversation_count 不能超过 raw_conversation_context_limit"
+            )
         return result
 
 
@@ -50,8 +52,11 @@ class ConversationCompactionSkill:
         """从 config 读取压缩阈值与保留条数，通过 llm_service 注册总结模型。"""
         self._config = _CompactionConfig.from_dict(config)
         module_config = config.get("llm_module")
-        self._llm = (llm_service.register_llm_module("conversation_context_summary", module_config)
-                     if module_config is not None else None)
+        self._llm = (
+            llm_service.register_llm_module("conversation_context_summary", module_config)
+            if module_config is not None
+            else None
+        )
 
     async def compact(self, conversation_context: ConversationContext) -> ConversationCompaction | None:
         """读取 conversation_context 并生成压缩结果；未超过阈值返回 None。
@@ -63,9 +68,12 @@ class ConversationCompactionSkill:
             return None
         if self._llm is None:
             raise RuntimeError("未配置对话总结模型")
-        covered = snapshot.entries[:-self._config.not_zip_conversation_count] if self._config.not_zip_conversation_count else snapshot.entries
-        recent = "\n".join(f"[{entry.timestamp:%Y-%m-%d}]{entry.source}: {entry.content.text}"
-                           for entry in covered)
+        covered = (
+            snapshot.entries[: -self._config.not_zip_conversation_count]
+            if self._config.not_zip_conversation_count
+            else snapshot.entries
+        )
+        recent = "\n".join(f"[{entry.timestamp:%Y-%m-%d}]{entry.source}: {entry.content.text}" for entry in covered)
         summary = await self._llm.generate_response(
             forget_conversation_days=self._config.forget_conversation_days,
             current_date=datetime.now().strftime("%Y-%m-%d"),
@@ -74,5 +82,6 @@ class ConversationCompactionSkill:
         )
         if not isinstance(summary, str) or not summary.strip():
             raise ValueError("总结模型返回了空或非文字结果")
-        return ConversationCompaction(snapshot.summary, tuple(entry.entry_id for entry in covered),
-                                     ConversationSummary(summary.strip()))
+        return ConversationCompaction(
+            snapshot.summary, tuple(entry.entry_id for entry in covered), ConversationSummary(summary.strip())
+        )

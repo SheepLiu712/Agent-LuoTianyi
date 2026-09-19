@@ -1,17 +1,19 @@
 """完整输出的版本化白名单编码，音频使用无损 Base64。"""
+
+import json
 from base64 import b64decode, b64encode
 from dataclasses import fields
 from enum import Enum
-import json
 
 import src.domain.agent as d
 from src.agent.processing import output_drafts as drafts
 
-
 OUTPUTS = (d.TextFinalOutput, d.AudioChunkOutput, d.MessageEndOutput, d.ExpressionOutput)
 DRAFTS = (drafts.TextFinalDraft, drafts.AudioChunkDraft, drafts.MessageEndDraft, drafts.ExpressionDraft)
-_TYPES = {cls.__name__: cls for cls in (*OUTPUTS, d.ChangeExpression, d.OutputDelivery,
-                                       d.AudioFraming, d.MessageEndStatus, d.AudioErrorCode)}
+_TYPES = {
+    cls.__name__: cls
+    for cls in (*OUTPUTS, d.ChangeExpression, d.OutputDelivery, d.AudioFraming, d.MessageEndStatus, d.AudioErrorCode)
+}
 
 
 def bind(draft, context, action_id, sequence):
@@ -19,15 +21,24 @@ def bind(draft, context, action_id, sequence):
     if type(draft) not in DRAFTS:
         raise ValueError("invalid output draft")
     return OUTPUTS[DRAFTS.index(type(draft))](
-        interaction_id=context.interaction_id, execution_id=context.execution_id,
-        action_id=action_id, sequence_no=sequence,
-        **{field.name: getattr(draft, field.name) for field in fields(draft)})
+        interaction_id=context.interaction_id,
+        execution_id=context.execution_id,
+        action_id=action_id,
+        sequence_no=sequence,
+        **{field.name: getattr(draft, field.name) for field in fields(draft)},
+    )
 
 
 def _encode(value):
     if type(value) in _TYPES.values():
-        return [type(value).__name__, value.value if isinstance(value, Enum) else
-                {field.name: _encode(getattr(value, field.name)) for field in fields(value)}]
+        return [
+            type(value).__name__,
+            (
+                value.value
+                if isinstance(value, Enum)
+                else {field.name: _encode(getattr(value, field.name)) for field in fields(value)}
+            ),
+        ]
     if type(value) is bytes:
         return ["bytes", b64encode(value).decode("ascii")]
     if value is None or type(value) in (str, int):

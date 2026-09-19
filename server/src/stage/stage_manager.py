@@ -1,4 +1,5 @@
 """管理聊天 Stage 的创建、重连保留和离线回收。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -44,11 +45,19 @@ class _ManagerConfig:
 class StageManager:
     """按用户与角色管理 Stage，持有共享 adapter 及离线回收任务。"""
 
-    def __init__(self, *, get_agent: Callable[[str], Agent], adapter: WebSocketAdapter,
-                  get_context_factory: Callable[[str], ContextFactory],
-                  due_event_provider: DueEventProvider | None = None,
-                  config: dict | None = None) -> None:
-        """使用 get_agent 与 get_context_factory 取得角色门面和上下文创建依赖；config.offline_timeout 为离线保留秒数，stage 子配置直接下传。"""
+    def __init__(
+        self,
+        *,
+        get_agent: Callable[[str], Agent],
+        adapter: WebSocketAdapter,
+        get_context_factory: Callable[[str], ContextFactory],
+        due_event_provider: DueEventProvider | None = None,
+        config: dict | None = None,
+    ) -> None:
+        """使用 get_agent 与 get_context_factory 取得角色门面和上下文创建依赖。
+
+        config.offline_timeout 为离线保留秒数，stage 子配置直接下传。
+        """
         config = {} if config is None else config
         self._config = _ManagerConfig.from_dict(config)
         self._stage_config = config.get("stage", {})
@@ -73,10 +82,7 @@ class StageManager:
         elapsed_from_last_login: float | None,
     ) -> bool:
         """记录目标角色的认证登录；返回是否由 Stage 主动链接管。"""
-        if any(
-            not isinstance(value, str) or not value.strip()
-            for value in (user_id, character_id)
-        ):
+        if any(not isinstance(value, str) or not value.strip() for value in (user_id, character_id)):
             raise ValueError("user_id and character_id must be nonblank")
         if elapsed_from_last_login is None:
             key = (user_id, character_id)
@@ -128,10 +134,15 @@ class StageManager:
             key = (connection.user_uuid, character_id)
             stage = self._stages.get(key)
             if stage is None or stage.state in (StageState.TERMINATING, StageState.TERMINATED):
-                stage = await ChatStage.create(user_id=key[0], character_id=key[1], agent=self._get_agent(character_id),
-                                  adapter=self._adapter, config=self._stage_config,
-                                  context_factory=self._get_context_factory(character_id),
-                                  due_event_provider=self._due_event_provider)
+                stage = await ChatStage.create(
+                    user_id=key[0],
+                    character_id=key[1],
+                    agent=self._get_agent(character_id),
+                    adapter=self._adapter,
+                    config=self._stage_config,
+                    context_factory=self._get_context_factory(character_id),
+                    due_event_provider=self._due_event_provider,
+                )
                 self._stages[key] = stage
             timer = self._expiry.pop(stage, None)
             if timer is not None:
@@ -198,7 +209,9 @@ class StageManager:
         try:
             result = await stage.terminate(reason)
             if result.error is not None:
-                get_logger(__name__).error("Stage retirement failed interaction=%s error=%s", stage.interaction_id, result.error)
+                get_logger(__name__).error(
+                    "Stage retirement failed interaction=%s error=%s", stage.interaction_id, result.error
+                )
         finally:
             await self._adapter.disconnect(stage)
             self._connections.pop(stage, None)

@@ -40,10 +40,7 @@ class CharacterRegistry:
             if profile.default_target:
                 default_targets.append(character_id)
         if len(default_targets) > 1:
-            raise ValueError(
-                "Multiple default characters are configured: "
-                + ", ".join(default_targets)
-            )
+            raise ValueError("Multiple default characters are configured: " + ", ".join(default_targets))
         if default_targets:
             self.default_character_id = default_targets[0]
         if not self.characters:
@@ -55,13 +52,9 @@ class CharacterRegistry:
         try:
             default_profile = self.characters[self.default_character_id]
         except KeyError as exc:
-            raise ValueError(
-                f"Default character '{self.default_character_id}' is not configured."
-            ) from exc
+            raise ValueError(f"Default character '{self.default_character_id}' is not configured.") from exc
         if not default_profile.enabled:
-            raise ValueError(
-                f"Default character '{self.default_character_id}' must be enabled."
-            )
+            raise ValueError(f"Default character '{self.default_character_id}' must be enabled.")
 
     def get(self, character_id: str | None = None) -> CharacterProfile:
         resolved_id = character_id or self.default_character_id

@@ -1,8 +1,8 @@
 """按角色、文本和语调流式生成语音。"""
 
+from collections.abc import AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass
-from collections.abc import AsyncIterator
 from typing import Any
 
 from src.capabilities.speech.streaming import AsyncTTS
@@ -40,8 +40,9 @@ class SpeakingSkill:
         self._config = _SpeakingConfig.from_dict(config)
         self._tts = tts_engine
 
-    async def speak(self, *, character_id: str, text: str, tone: Tone,
-                    cancellation: CancellationToken) -> AsyncIterator[SpeakingAudioChunk]:
+    async def speak(
+        self, *, character_id: str, text: str, tone: Tone, cancellation: CancellationToken
+    ) -> AsyncIterator[SpeakingAudioChunk]:
         """按角色、朗读文本和语调生成音频；取消时释放本次流，空音频抛 EmptySpeechError。
 
         调用方提前停止消费时须关闭生成器；可使用 contextlib.aclosing。
@@ -53,8 +54,9 @@ class SpeakingSkill:
         if not isinstance(tone, Tone) or not isinstance(cancellation, CancellationToken):
             raise TypeError("tone 和 cancellation 必须使用领域类型")
         generated = False
-        async with aclosing(self._tts.stream(character_id=character_id, text=text, tone=tone.value,
-                                             cancellation=cancellation)) as stream:
+        async with aclosing(
+            self._tts.stream(character_id=character_id, text=text, tone=tone.value, cancellation=cancellation)
+        ) as stream:
             async for data in stream:
                 generated = True
                 yield SpeakingAudioChunk(data, AudioFraming.FILE_FRAGMENT)

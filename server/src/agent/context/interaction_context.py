@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from ._lifecycle import _Lifecycle, _complete
+from ._lifecycle import _complete, _Lifecycle
 from ._storage import _Storage
 from .conversation_context import ConversationContext
 from .models import ContextIdentity, ConversationSnapshot, UserContextSnapshot
@@ -17,7 +17,10 @@ class InteractionContext:
     """交互独有的用户资料、近期对话和召回记忆。"""
 
     def __init__(
-        self, *, identity: ContextIdentity, database: "ConversationService",
+        self,
+        *,
+        identity: ContextIdentity,
+        database: "ConversationService",
     ) -> None:
         """从 database 同步加载 identity 的资料及对话，并建立空召回缓存。
 
@@ -30,7 +33,9 @@ class InteractionContext:
         conversation_snapshot, _ = storage.load_conversation()
         self._user = UserContext(snapshot=user_snapshot, identity=identity, database=database)
         self._conversation = ConversationContext(
-            snapshot=conversation_snapshot, identity=identity, database=database,
+            snapshot=conversation_snapshot,
+            identity=identity,
+            database=database,
         )
         self._recalled_memory = RecalledMemoryContext()
         for part in (self._user, self._conversation, self._recalled_memory):

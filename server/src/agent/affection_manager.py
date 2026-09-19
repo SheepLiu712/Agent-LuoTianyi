@@ -63,9 +63,7 @@ class AffectionManager:
         if llm_config:
             try:
                 self._llm_client = LLMAPIFactory.create_interface(llm_config)
-                self.logger.info(
-                    f"好感度 LLM 客户端已初始化，模型: {llm_config.get('model')}"
-                )
+                self.logger.info(f"好感度 LLM 客户端已初始化，模型: {llm_config.get('model')}")
             except Exception as e:
                 self.logger.warning(f"好感度 LLM 客户端初始化失败: {e}，将使用默认值")
 
@@ -77,23 +75,17 @@ class AffectionManager:
             except Exception as e:
                 self.logger.warning(f"设置好感度 LLM 客户端失败: {e}")
 
-    async def analyze_affection(
-        self, user_message: str, current_score: int
-    ) -> Tuple[int, str]:
+    async def analyze_affection(self, user_message: str, current_score: int) -> Tuple[int, str]:
         """调用 LLM 分析用户消息，返回 (delta, reason)"""
         if self._llm_client is None:
             return 0, "LLM未初始化，不调整"
 
         level_cn, _ = self.get_level(current_score)
-        prompt = AFFECTION_ANALYSIS_PROMPT.format(
-            level_name=level_cn, level_score=current_score
-        )
+        prompt = AFFECTION_ANALYSIS_PROMPT.format(level_name=level_cn, level_score=current_score)
         user_prompt = f"用户消息：{user_message}"
 
         try:
-            response = await self._llm_client.generate_response(
-                f"{prompt}\n\n{user_prompt}", use_json=True
-            )
+            response = await self._llm_client.generate_response(f"{prompt}\n\n{user_prompt}", use_json=True)
             response_text = (response or {}).get("content", "") if isinstance(response, dict) else str(response)
             result = json.loads(response_text)
             delta = int(result.get("delta", 0))
@@ -158,9 +150,7 @@ class AffectionManager:
         today_total = self.get_today_net(db, user_id)
         remaining = DAILY_AFFECTION_CAP - today_total
         if remaining <= 0:
-            self.logger.info(
-                f"User {user_id} daily affection cap reached ({today_total}), skipping"
-            )
+            self.logger.info(f"User {user_id} daily affection cap reached ({today_total}), skipping")
             return 0, user.affection_score or 0, today_total
 
         # 按剩余额度缩放 delta
@@ -197,7 +187,5 @@ class AffectionManager:
 
         parts = [f"当前好感度：{score}（{level_cn}）"]
         if next_level:
-            parts.append(
-                f"距离下一等级（{next_level[0]}）还差 {next_level[2]} 好感度"
-            )
+            parts.append(f"距离下一等级（{next_level[0]}）还差 {next_level[2]} 好感度")
         return "（" + "，".join(parts) + "）"

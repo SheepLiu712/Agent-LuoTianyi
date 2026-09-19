@@ -1,10 +1,12 @@
 """为本次执行的输出绑定身份和连续序号，失败后停止交付。"""
+
 import asyncio
 from dataclasses import fields
-from src.utils.logger import get_logger
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import _check_cancellation, _DeliveryCancelled
+from src.utils.logger import get_logger
+
 from . import output_drafts as drafts
 from .output_drafts import OutputDraft
 
@@ -49,12 +51,18 @@ class OutputEmitter:
                     raise ValueError("invalid output draft")
                 sequence = execution.next_sequence
                 output = output_types[type(draft)](
-                    interaction_id=context.interaction_id, execution_id=context.execution_id,
-                    action_id=self._action_id, sequence_no=sequence,
-                    **{field.name: getattr(draft, field.name) for field in fields(draft)})
+                    interaction_id=context.interaction_id,
+                    execution_id=context.execution_id,
+                    action_id=self._action_id,
+                    sequence_no=sequence,
+                    **{field.name: getattr(draft, field.name) for field in fields(draft)},
+                )
                 receipt = await execution.sink.emit(output)
-                if (type(receipt) is not d.OutputReceipt or receipt.execution_id != context.execution_id
-                        or receipt.sequence_no != sequence):
+                if (
+                    type(receipt) is not d.OutputReceipt
+                    or receipt.execution_id != context.execution_id
+                    or receipt.sequence_no != sequence
+                ):
                     raise ValueError("invalid output receipt")
                 execution.output_started = True
                 execution.next_sequence += 1
@@ -73,8 +81,12 @@ class OutputEmitter:
                 get_logger(__name__).error(
                     "Output delivery failed character_id=%s execution_id=%s interaction_id=%s "
                     "action_id=%s sequence_no=%s error_code=%s",
-                    execution.plan.target_character_id, context.execution_id, context.interaction_id,
-                    self._action_id, execution.next_sequence, self.code.value,
+                    execution.plan.target_character_id,
+                    context.execution_id,
+                    context.interaction_id,
+                    self._action_id,
+                    execution.next_sequence,
+                    self.code.value,
                 )
                 raise
 

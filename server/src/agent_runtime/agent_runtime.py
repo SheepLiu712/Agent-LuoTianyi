@@ -108,29 +108,27 @@ class AgentRuntime:
         self.vector_store = self._initialize_vector_store(self.config["agent"])
         try:
             self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
-            first_login_names = self._first_login_prepared_names(
-                self.config.get("proactive", {})
+            first_login_names = self._first_login_prepared_names(self.config.get("proactive", {}))
+            self.skills = Skills(
+                self.config.get("skills", {}),
+                llm_service,
+                tts_engine=AsyncTTS(capability_manager.speech),
+                preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
+                explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
+                reply_composition_config=self.config.get("reply_composition", {}),
+                singing=capability_manager.singing,
+                media_resolver=capability_manager.media_resolver,
+                image_understanding=capability_manager.image_understanding,
             )
-            self.skills = Skills(self.config.get("skills", {}), llm_service,
-                                 tts_engine=AsyncTTS(capability_manager.speech),
-                                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
-                                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
-                                 reply_composition_config=self.config.get("reply_composition", {}),
-                                 singing=capability_manager.singing,
-                                 media_resolver=capability_manager.media_resolver,
-                                 image_understanding=capability_manager.image_understanding)
             # 角色自身经验写入需要按角色持有记忆门面，供 LearnSing 等分支使用
             self.character_memories: dict[str, SubconsciousMemory] = {}
             # 动态发布按来源身份落库；角色上下文由能力自身的装配提供
             self.dynamic_publishing = DynamicPublishingSkill(capability_manager.dynamics)
             # 歌曲知识接纳使用与记忆查询相同的 agent.song_knowledge 配置，保证读写同一知识库
-            self.song_knowledge = SongKnowledgeAcceptanceSkill(
-                self.config.get("agent", {}).get("song_knowledge", {})
-            )
+            self.song_knowledge = SongKnowledgeAcceptanceSkill(self.config.get("agent", {}).get("song_knowledge", {}))
             # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
             self.preprocessor = ChatPreprocessor(
-                self.config.get("agent", {}).get("preprocessing", {}),
-                capability_manager
+                self.config.get("agent", {}).get("preprocessing", {}), capability_manager
             )
 
             self.character_registry = CharacterRegistry(config.get("character_registry", {}))
@@ -141,17 +139,26 @@ class AgentRuntime:
                 database_manager=database_manager,
             )
 
-            self.skills.register(ResponseCompositionSkill, ResponseCompositionSkill(
-                self.skills.reply_composition_config,
-                lambda character_id: self.character_runtimes[character_id],
-            ))
-            self.skills.register(ReflectionSkill, ReflectionSkill(
-                self.config.get("reflection", {}),
-                lambda character_id: self.character_runtimes[character_id],
-            ))
-            self.skills.register(IntentionalMemoryCommit, IntentionalMemoryCommit(
-                lambda character_id: self.character_runtimes[character_id].mind.memory,
-            ))
+            self.skills.register(
+                ResponseCompositionSkill,
+                ResponseCompositionSkill(
+                    self.skills.reply_composition_config,
+                    lambda character_id: self.character_runtimes[character_id],
+                ),
+            )
+            self.skills.register(
+                ReflectionSkill,
+                ReflectionSkill(
+                    self.config.get("reflection", {}),
+                    lambda character_id: self.character_runtimes[character_id],
+                ),
+            )
+            self.skills.register(
+                IntentionalMemoryCommit,
+                IntentionalMemoryCommit(
+                    lambda character_id: self.character_runtimes[character_id].mind.memory,
+                ),
+            )
 
             self.agent_registry = AgentRegistry(
                 self.config.get("agent_registry", {}),
@@ -164,82 +171,155 @@ class AgentRuntime:
                 character_id: ContextFactory(character_id=character_id, database=database_manager.conversation_service)
                 for character_id in self.character_runtimes
             }
-            world_activity = WorldActivityHandler(branches={
-                CITYWALK_OBSERVATION_KIND: CitywalkObservationHandler(self.dynamic_publishing),
-            })
-            self._agents = {
-                character_id: Agent(
-                    character_id=character_id,
-                    stimulus_router=StimulusRouter((
-                        (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
-                        (StimulusKind.PROACTIVE_PROMPT_DUE, FirstLoginHandler(
-                            prepared_names=first_login_names,
-                            prepared_speech=self.prepared_speech,
-                        )),
-                        (StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(
-                            self.skills.get(ResponseCompositionSkill),
-                             self.skills.get(TextPreprocessingSkill),
-                             self.skills.get(ExplicitMemoryIntentSkill),
-                             self.skills.get(IntentionalMemoryCommit))),
-                        (StimulusKind.TOUCH_INTERACTION, TouchInteractionHandler(
-                            *self._touch_reaction(character_id))),
-                        (StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
-                         SongKnowledgeHandler(self.song_knowledge)),
-                        (StimulusKind.DYNAMIC_OBSERVED, DynamicObservedHandler(
-                            character_id,
-                            self._dynamic_reply_skill(character_id),
-                             DynamicTopicMemorySkill(self.character_memories.get(character_id)))),
-                        (StimulusKind.DIARY_PLANNING_DUE, DiaryPlanningDueHandler(
-                            self._diary_writing_skill(character_id))),
-                        (StimulusKind.SONG_LEARNED, SongLearnedHandler(
-                            character_id,
-                            LearnedSongExperienceSkill(self.character_memories.get(character_id)),
-                            self.dynamic_publishing,
-                            SongLearningDispatchSkill(self._singing_manager(character_id)))),
-                        *((kind, world_activity) for kind in WORLD_ACTIVITY_STIMULUS_KINDS
-                          if kind not in (
-                              StimulusKind.DYNAMIC_OBSERVED,
-                              StimulusKind.DIARY_PLANNING_DUE,
-                              StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
-                              StimulusKind.SONG_LEARNED,
-                          )),
-                        *((kind, ChatPreprocessingHandler(
-                            self.skills.get(TextPreprocessingSkill),
-                            self.skills.get(ImagePreprocessingSkill))) for kind in (
-                            StimulusKind.TEXT_MESSAGE, StimulusKind.IMAGE_MESSAGE, StimulusKind.VOICE_MESSAGE,
-                            StimulusKind.USER_TYPING, StimulusKind.IMAGE_SELECTION_OPENED,
-                            StimulusKind.IMAGE_SELECTION_CLOSED)),
-                    ), reflection_handler=ChatReflectionHandler(
-                        self.skills.get(ReflectionSkill),
-                        self.skills.get(ConversationCompactionSkill))),
-                    action_router=ActionRouter((
-                        (ActionKind.SAY, SayHandler(
-                            character_id, self.skills.get(SpeakingSkill), self.prepared_speech)),
-                        (ActionKind.SING, SingHandler(
-                            character_id, self.skills.get(SingingSkill))),
-                        (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
-                        (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(
-                            character_id, self.dynamic_publishing)),
-                        (ActionKind.REQUEST_SONG_LEARNING, RequestSongLearningHandler(
-                            character_id,
-                            SongLearningDispatchSkill(self._singing_manager(character_id)))),
-                        (ActionKind.REPLY_DYNAMIC, ReplyDynamicHandler(
-                            character_id, self._dynamic_reply_skill(character_id))),
-                        (ActionKind.WRITE_DIARY, WriteDiaryHandler(
-                            self._diary_writing_skill(character_id))),
-                    )),
-                )
-                for character_id in self.character_runtimes
-            }
+            self._agents = self._build_agents(first_login_names)
             set_agent_runtime(self)
         except BaseException:
             try:
                 self._abort_initialization()
             except Exception as cleanup_error:  # noqa: BLE001 - initialization boundary must preserve cleanup logging
-                self.logger.error(
-                    f"AgentRuntime initialization rollback failed: {cleanup_error}"
-                )
+                self.logger.error(f"AgentRuntime initialization rollback failed: {cleanup_error}")
             raise
+
+    def _build_agents(self, first_login_names: tuple[str, ...]) -> dict[str, Agent]:
+        """完整构造所有角色门面后一次性发布，避免暴露半装配状态。"""
+        world_activity = WorldActivityHandler(
+            branches={CITYWALK_OBSERVATION_KIND: CitywalkObservationHandler(self.dynamic_publishing)}
+        )
+        agents: dict[str, Agent] = {}
+        for character_id in self.character_runtimes:
+            agents[character_id] = self._build_agent(character_id, first_login_names, world_activity)
+        return agents
+
+    def _build_agent(
+        self,
+        character_id: str,
+        first_login_names: tuple[str, ...],
+        world_activity: WorldActivityHandler,
+    ) -> Agent:
+        """为一个角色装配私有路由；共享处理器只在其行为无角色状态时复用。"""
+        song_learning = SongLearningDispatchSkill(self._singing_manager(character_id))
+        return Agent(
+            character_id=character_id,
+            stimulus_router=self._build_stimulus_router(
+                character_id,
+                first_login_names,
+                world_activity,
+                song_learning,
+            ),
+            action_router=self._build_action_router(character_id, song_learning),
+        )
+
+    def _build_stimulus_router(
+        self,
+        character_id: str,
+        first_login_names: tuple[str, ...],
+        world_activity: WorldActivityHandler,
+        song_learning: SongLearningDispatchSkill,
+    ) -> StimulusRouter:
+        """登记一个角色可处理的刺激，并复用无状态的输入预处理器。"""
+        preprocessing = ChatPreprocessingHandler(
+            self.skills.get(TextPreprocessingSkill),
+            self.skills.get(ImagePreprocessingSkill),
+        )
+        registrations = [
+            (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+            (
+                StimulusKind.PROACTIVE_PROMPT_DUE,
+                FirstLoginHandler(
+                    prepared_names=first_login_names,
+                    prepared_speech=self.prepared_speech,
+                ),
+            ),
+            (
+                StimulusKind.INTERACTION_DEADLINE,
+                ChatReplyHandler(
+                    self.skills.get(ResponseCompositionSkill),
+                    self.skills.get(TextPreprocessingSkill),
+                    self.skills.get(ExplicitMemoryIntentSkill),
+                    self.skills.get(IntentionalMemoryCommit),
+                ),
+            ),
+            (
+                StimulusKind.TOUCH_INTERACTION,
+                TouchInteractionHandler(*self._touch_reaction(character_id)),
+            ),
+            (StimulusKind.SONG_KNOWLEDGE_DISCOVERED, SongKnowledgeHandler(self.song_knowledge)),
+            (
+                StimulusKind.DYNAMIC_OBSERVED,
+                DynamicObservedHandler(
+                    character_id,
+                    self._dynamic_reply_skill(character_id),
+                    DynamicTopicMemorySkill(self.character_memories.get(character_id)),
+                ),
+            ),
+            (
+                StimulusKind.DIARY_PLANNING_DUE,
+                DiaryPlanningDueHandler(self._diary_writing_skill(character_id)),
+            ),
+            (
+                StimulusKind.SONG_LEARNED,
+                SongLearnedHandler(
+                    character_id,
+                    LearnedSongExperienceSkill(self.character_memories.get(character_id)),
+                    self.dynamic_publishing,
+                    song_learning,
+                ),
+            ),
+        ]
+        reserved_world_kinds = {
+            StimulusKind.DYNAMIC_OBSERVED,
+            StimulusKind.DIARY_PLANNING_DUE,
+            StimulusKind.SONG_KNOWLEDGE_DISCOVERED,
+            StimulusKind.SONG_LEARNED,
+        }
+        registrations.extend(
+            (kind, world_activity) for kind in WORLD_ACTIVITY_STIMULUS_KINDS if kind not in reserved_world_kinds
+        )
+        registrations.extend(
+            (kind, preprocessing)
+            for kind in (
+                StimulusKind.TEXT_MESSAGE,
+                StimulusKind.IMAGE_MESSAGE,
+                StimulusKind.VOICE_MESSAGE,
+                StimulusKind.USER_TYPING,
+                StimulusKind.IMAGE_SELECTION_OPENED,
+                StimulusKind.IMAGE_SELECTION_CLOSED,
+            )
+        )
+        return StimulusRouter(
+            registrations,
+            reflection_handler=ChatReflectionHandler(
+                self.skills.get(ReflectionSkill),
+                self.skills.get(ConversationCompactionSkill),
+            ),
+        )
+
+    def _build_action_router(
+        self,
+        character_id: str,
+        song_learning: SongLearningDispatchSkill,
+    ) -> ActionRouter:
+        """登记一个角色可实现的行动。"""
+        return ActionRouter(
+            (
+                (
+                    ActionKind.SAY,
+                    SayHandler(character_id, self.skills.get(SpeakingSkill), self.prepared_speech),
+                ),
+                (ActionKind.SING, SingHandler(character_id, self.skills.get(SingingSkill))),
+                (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
+                (ActionKind.PUBLISH_DYNAMIC, PublishDynamicHandler(character_id, self.dynamic_publishing)),
+                (
+                    ActionKind.REQUEST_SONG_LEARNING,
+                    RequestSongLearningHandler(character_id, song_learning),
+                ),
+                (
+                    ActionKind.REPLY_DYNAMIC,
+                    ReplyDynamicHandler(character_id, self._dynamic_reply_skill(character_id)),
+                ),
+                (ActionKind.WRITE_DIARY, WriteDiaryHandler(self._diary_writing_skill(character_id))),
+            )
+        )
 
     def _abort_initialization(self) -> None:
         vector_store = getattr(self, "vector_store", None)
@@ -258,62 +338,84 @@ class AgentRuntime:
         在途等待超时抛 RuntimeError 并保留依赖，重试继续等待；调用方取消
         关闭不取消业务工作。资源关闭任务同样保留所有权供后续关闭重试。
         """
-        for agent in getattr(self, "_agents", {}).values():
-            agent._stop_accepting()
+        self._stop_accepting_agents()
         async with self._shutdown_lock:
             if self._shutdown_complete:
                 return
-            inflight = tuple(
-                completion for agent in getattr(self, "_agents", {}).values()
-                for completion in agent._inflight
+            await self._wait_for_inflight_calls()
+            await self._close_owned_vector_store()
+            self._finalize_shutdown()
+
+    def _stop_accepting_agents(self) -> None:
+        """先拒绝新调用，使后续在途快照只会收敛。"""
+        for agent in getattr(self, "_agents", {}).values():
+            agent._stop_accepting()
+
+    async def _wait_for_inflight_calls(self) -> None:
+        """等待当前门面调用完成；超时不取消业务调用。"""
+        inflight = tuple(
+            completion for agent in getattr(self, "_agents", {}).values() for completion in agent._inflight
+        )
+        if not inflight:
+            return
+        _, pending = await asyncio.wait(inflight, timeout=self.shutdown_timeout_seconds)
+        if pending:
+            raise RuntimeError("Agent calls are still running")
+
+    async def _close_owned_vector_store(self) -> None:
+        """关闭运行时拥有的向量库；关闭任务可跨超时或调用方取消继续完成。"""
+        close = getattr(self.vector_store, "close", None)
+        if close is None:
+            return
+        shutdown_task = getattr(self, "_shutdown_task", None)
+        if shutdown_task is None:
+            shutdown_task = asyncio.create_task(run_sync_owned(close))
+            self._shutdown_task = shutdown_task
+        cancellation = await self._wait_for_vector_store_close(shutdown_task)
+        try:
+            shutdown_task.result()
+        except BaseException:
+            self._shutdown_task = None
+            raise
+        if cancellation is not None:
+            raise cancellation
+
+    async def _wait_for_vector_store_close(
+        self,
+        shutdown_task: asyncio.Task,
+    ) -> asyncio.CancelledError | None:
+        """等待关闭任务；调用方取消时先替运行时收回任务结果。"""
+        cancellation: asyncio.CancelledError | None = None
+        try:
+            _done, pending = await wait_for_owned_tasks(
+                (shutdown_task,),
+                timeout_seconds=getattr(
+                    self,
+                    "shutdown_timeout_seconds",
+                    DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+                ),
             )
-            if inflight:
-                # asyncio.wait 超时或被取消均不取消业务调用的完成信号。
-                _, pending = await asyncio.wait(
-                    inflight, timeout=self.shutdown_timeout_seconds,
+        except asyncio.CancelledError as error:
+            cancellation = error
+            _done, pending = await asyncio.shield(
+                wait_for_owned_tasks(
+                    (shutdown_task,),
+                    timeout_seconds=getattr(
+                        self,
+                        "shutdown_timeout_seconds",
+                        DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
+                    ),
                 )
-                if pending:
-                    raise RuntimeError("Agent calls are still running")
-            close = getattr(self.vector_store, "close", None)
-            if close is not None:
-                shutdown_task = getattr(self, "_shutdown_task", None)
-                if shutdown_task is None:
-                    shutdown_task = asyncio.create_task(run_sync_owned(close))
-                    self._shutdown_task = shutdown_task
-                cancellation: asyncio.CancelledError | None = None
-                try:
-                    _done, pending = await wait_for_owned_tasks(
-                        (shutdown_task,),
-                        timeout_seconds=getattr(
-                            self,
-                            "shutdown_timeout_seconds",
-                            DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
-                        ),
-                    )
-                except asyncio.CancelledError as error:
-                    cancellation = error
-                    _done, pending = await asyncio.shield(
-                        wait_for_owned_tasks(
-                            (shutdown_task,),
-                            timeout_seconds=getattr(
-                                self,
-                                "shutdown_timeout_seconds",
-                                DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS,
-                            ),
-                        )
-                    )
-                if pending:
-                    raise RuntimeError("Vector store close task is still running")
-                try:
-                    shutdown_task.result()
-                except BaseException:
-                    self._shutdown_task = None
-                    raise
-                if cancellation is not None:
-                    raise cancellation
-            clear_vector_store(self.vector_store)
-            clear_agent_runtime(self)
-            self._shutdown_complete = True
+            )
+        if pending:
+            raise RuntimeError("Vector store close task is still running")
+        return cancellation
+
+    def _finalize_shutdown(self) -> None:
+        """仅在所有拥有资源成功关闭后清除全局引用。"""
+        clear_vector_store(self.vector_store)
+        clear_agent_runtime(self)
+        self._shutdown_complete = True
 
     def wire_dependencies(
         self,
@@ -382,7 +484,8 @@ class AgentRuntime:
         display_name = str(getattr(profile, "display_name", "") or character_id)
         return DynamicReplySkill(
             self.capability_manager.dynamics,
-            character_id=character_id, character_name=display_name,
+            character_id=character_id,
+            character_name=display_name,
         )
 
     def _diary_writing_skill(self, character_id: str) -> DiaryWritingSkill:
@@ -408,8 +511,7 @@ class AgentRuntime:
 
     def _touch_reaction(self, character_id: str) -> tuple[TouchReactionSkill, TouchPolicy]:
         """按角色 touch.fast_reply 配置构造触摸资源选择技能与准入策略。"""
-        fast_reply = (self.character_registry.get(character_id)
-                      .reflex.get("touch", {}).get("fast_reply", {}))
+        fast_reply = self.character_registry.get(character_id).reflex.get("touch", {}).get("fast_reply", {})
         return TouchReactionSkill(fast_reply), TouchPolicy.from_config(fast_reply.get("policy"))
 
     def _build_character_runtimes(
@@ -477,9 +579,7 @@ class AgentRuntime:
             or any(not isinstance(name, str) or not name.strip() for name in names)
             or len(set(names)) != len(names)
         ):
-            raise ValueError(
-                "proactive.first_login.prepared_names must contain two unique nonblank names"
-            )
+            raise ValueError("proactive.first_login.prepared_names must contain two unique nonblank names")
         return tuple(names)
 
     @staticmethod
@@ -491,7 +591,9 @@ class AgentRuntime:
         return get_vector_store()
 
     @staticmethod
-    def _register_character_llm_modules(llm_service: LLMService, character_id: str, agent_config: dict[str, Any]) -> dict[str, Any]:
+    def _register_character_llm_modules(
+        llm_service: LLMService, character_id: str, agent_config: dict[str, Any]
+    ) -> dict[str, Any]:
         """为指定角色注册聊天、话题提取、记忆写入等 LLM 模块。"""
         modules: dict[str, Any] = {
             "topic_extractor": llm_service.register_llm_module(
@@ -513,7 +615,7 @@ class AgentRuntime:
             "date_detector": llm_service.register_llm_module(
                 f"{character_id}_date_detector",
                 agent_config["date_detector"]["llm_module"],
-            )
+            ),
         }
         return modules
 

@@ -1,4 +1,5 @@
 """按刺激类别登记并精确解析内部处理器。"""
+
 from collections.abc import Iterable
 from typing import Generic, Protocol, TypeVar
 
@@ -19,7 +20,9 @@ class StimulusHandler(Protocol):
 class StimulusRouter(Generic[HandlerT]):
     """保存角色私有的刺激注册快照，只解析、不执行处理器。"""
 
-    def __init__(self, registrations: Iterable[tuple[StimulusKind, HandlerT]], *, reflection_handler: HandlerT | None = None) -> None:
+    def __init__(
+        self, registrations: Iterable[tuple[StimulusKind, HandlerT]], *, reflection_handler: HandlerT | None = None
+    ) -> None:
         """消费二元组序列；非法项抛 TypeError，重复类别抛 ValueError。"""
         self._reflection_handler = reflection_handler
         self._handlers: dict[StimulusKind, HandlerT] = {}

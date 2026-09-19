@@ -1,9 +1,9 @@
 """执行事实的显式 JSON 编码和按计划校验，不动态加载存储类型。"""
-from dataclasses import asdict, dataclass, replace
+
 import json
+from dataclasses import asdict, dataclass, replace
 
 import src.domain.agent as d
-
 
 COMPLETED = (d.ActionExecutionStatus.COMPLETED, d.ActionExecutionStatus.ALREADY_COMPLETED)
 
@@ -11,6 +11,7 @@ COMPLETED = (d.ActionExecutionStatus.COMPLETED, d.ActionExecutionStatus.ALREADY_
 @dataclass
 class ActionFact:
     """单项行动的持久开始标记、可信返回和累计输出事实。"""
+
     started: bool = False
     result: d.ActionResult | None = None
     confirmed: bool = False
@@ -22,8 +23,11 @@ class ActionFact:
 
     @property
     def safe(self):
-        return self.complete or (not self.confirmed and not self.unknown and (
-            not self.started or (self.result is not None and not self.result.irreversible_effect_committed)))
+        return self.complete or (
+            not self.confirmed
+            and not self.unknown
+            and (not self.started or (self.result is not None and not self.result.irreversible_effect_committed))
+        )
 
 
 def encode_facts(facts):

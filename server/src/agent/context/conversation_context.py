@@ -3,10 +3,13 @@
 import asyncio
 from typing import TYPE_CHECKING
 
-from ._lifecycle import _Lifecycle, _complete
+from ._lifecycle import _complete, _Lifecycle
 from ._storage import _Storage
 from .models import (
-    ConversationCompaction, ContextIdentity, ConversationEntry, ConversationSnapshot,
+    ContextIdentity,
+    ConversationCompaction,
+    ConversationEntry,
+    ConversationSnapshot,
     ConversationSummary,
 )
 
@@ -18,8 +21,11 @@ class ConversationContext:
     """由 InteractionContext 创建、负责对话追加和压缩的上下文。"""
 
     def __init__(
-        self, *, identity: ContextIdentity,
-        database: "ConversationService", snapshot: ConversationSnapshot | None = None,
+        self,
+        *,
+        identity: ContextIdentity,
+        database: "ConversationService",
+        snapshot: ConversationSnapshot | None = None,
     ) -> None:
         """绑定 identity、database；省略 snapshot 时同步加载数据库窗口。"""
         self._state = _Lifecycle()
@@ -51,7 +57,7 @@ class ConversationContext:
             storage = self._require_storage()
             snapshot, count = await _complete(asyncio.to_thread(storage.load_conversation))
             covered = compaction.covered_entry_ids
-            prefix = tuple(entry.entry_id for entry in snapshot.entries[:len(covered)])
+            prefix = tuple(entry.entry_id for entry in snapshot.entries[: len(covered)])
             if snapshot.summary != compaction.previous_summary or prefix != covered:
                 raise ValueError("压缩依据与当前对话上下文不匹配")
             keep = count - len(covered)

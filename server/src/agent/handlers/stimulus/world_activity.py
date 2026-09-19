@@ -1,4 +1,5 @@
 """世界与活动事实的受控处理入口。"""
+
 from collections.abc import Mapping
 from typing import Final, Protocol
 
@@ -34,7 +35,9 @@ class WorldActivityHandler:
         self._branches = dict(branches or {})
 
     async def handle(
-        self, request: d.HandleStimulusRequest, plans: PlanEmitter,
+        self,
+        request: d.HandleStimulusRequest,
+        plans: PlanEmitter,
     ) -> d.HandlingReport:
         """按观察类别分派；无分支时结算当前刺激，不产生计划。"""
         stimulus = request.stimulus
@@ -46,10 +49,14 @@ class WorldActivityHandler:
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
         consumed = (request.stimulus.stimulus_id,)
         return d.HandlingReport(
-            request_id=request.request_id, trigger_stimulus_id=request.stimulus.stimulus_id,
+            request_id=request.request_id,
+            trigger_stimulus_id=request.stimulus.stimulus_id,
             basis_interaction_revision=request.interaction.interaction_revision,
             request_status=d.HandlingRequestStatus.COMPLETED,
-            considered_pending_stimulus_ids=pending, consumed_pending_stimulus_ids=consumed,
+            considered_pending_stimulus_ids=pending,
+            consumed_pending_stimulus_ids=consumed,
             retained_pending_stimulus_ids=tuple(item for item in pending if item not in consumed),
-            emitted_plan_ids=(), error_code=None, retryable=False,
+            emitted_plan_ids=(),
+            error_code=None,
+            retryable=False,
         )

@@ -1,4 +1,5 @@
 """realization 值对象的字段校验与构造错误。"""
+
 from abc import ABCMeta
 from dataclasses import fields
 from datetime import date
@@ -10,6 +11,7 @@ from typing import get_args, get_origin, get_type_hints
 
 class RealizationContractErrorCode(str, Enum):
     """值构造失败的分类；与执行失败及接收拒绝分别表达。"""
+
     CONTRACT_INVALID_ACTION = "CONTRACT_INVALID_ACTION"
     CONTRACT_INVALID_PLAN = "CONTRACT_INVALID_PLAN"
     CONTRACT_INVALID_EXECUTION_CONTEXT = "CONTRACT_INVALID_EXECUTION_CONTEXT"
@@ -21,6 +23,7 @@ class RealizationContractErrorCode(str, Enum):
 
 class InvalidRealizationContractError(ValueError):
     """构造参数或字段关系非法，通过只读 code 提供稳定分类。"""
+
     def __init__(self, message: str, *, code: RealizationContractErrorCode) -> None:
         self._code = code
         super().__init__(message)
@@ -74,5 +77,7 @@ class _Value(metaclass=_ValueMeta):
     def __post_init__(self):
         annotations = get_type_hints(type(self))
         for field in fields(self):
-            self._require(_valid(getattr(self, field.name), annotations[field.name],
-                                 blank=field.name in self._blank_fields), f"Invalid {field.name}")
+            self._require(
+                _valid(getattr(self, field.name), annotations[field.name], blank=field.name in self._blank_fields),
+                f"Invalid {field.name}",
+            )

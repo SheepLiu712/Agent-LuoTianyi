@@ -4,13 +4,13 @@ import asyncio
 from traceback import walk_tb
 
 import src.domain.agent as d
-from src.agent.processing.execution import Execution
+from src.agent.context import InteractionContext
 from src.agent.handlers.action.router import ActionHandler, ActionRouter
 from src.agent.handlers.stimulus.router import StimulusHandler, StimulusRouter
-from src.agent.processing.plan_emitter import handling_error
+from src.agent.processing.execution import Execution
 from src.agent.processing.handling import Handling
-from src.agent.context import InteractionContext
 from src.agent.processing.interruptibility import _InteractionInterruptibility
+from src.agent.processing.plan_emitter import handling_error
 from src.utils.logger import get_logger
 
 
@@ -21,14 +21,22 @@ class Agent:
     每次调用独立处理；失败记录日志并结束，接收器只属于本次调用。
     """
 
-    __slots__ = ("_character_id", "_accepting", "_logger", "_stimulus_router", "_action_router", "_inflight", "_interruptibility")
+    __slots__ = (
+        "_character_id",
+        "_accepting",
+        "_logger",
+        "_stimulus_router",
+        "_action_router",
+        "_inflight",
+        "_interruptibility",
+    )
 
     def __init__(
         self,
         *,
         character_id: str,
         stimulus_router: StimulusRouter[StimulusHandler] | None = None,
-        action_router: ActionRouter[ActionHandler] | None = None
+        action_router: ActionRouter[ActionHandler] | None = None,
     ) -> None:
         """绑定角色和内部路由；空白角色抛 ValueError，省略路由使用空注册表。"""
         if not isinstance(character_id, str) or not character_id.strip():
@@ -41,7 +49,13 @@ class Agent:
         self._inflight: set[asyncio.Future] = set()
         self._interruptibility = _InteractionInterruptibility()
 
-    async def handle_stimulus(self, request: d.HandleStimulusRequest, plan_sink: d.ActionPlanSink, *, context: InteractionContext | None = None) -> d.HandlingReport:
+    async def handle_stimulus(
+        self,
+        request: d.HandleStimulusRequest,
+        plan_sink: d.ActionPlanSink,
+        *,
+        context: InteractionContext | None = None,
+    ) -> d.HandlingReport:
         """校验刺激并调用处理器，按顺序交付计划，返回本次处理报告。
 
         context 是 Stage 为本次调用借出的交互上下文，可省略；Agent 不跨调用保存它。
@@ -51,8 +65,11 @@ class Agent:
         if not isinstance(request, d.HandleStimulusRequest):
             raise TypeError("request must be HandleStimulusRequest")
         self._check_sink(plan_sink)
-        if context is not None and (context.identity.interaction_id != request.interaction.interaction_id
-                or context.identity.character_id != self._character_id or context.identity.user_id != request.interaction.user_id):
+        if context is not None and (
+            context.identity.interaction_id != request.interaction.interaction_id
+            or context.identity.character_id != self._character_id
+            or context.identity.user_id != request.interaction.user_id
+        ):
             raise ValueError("context does not match request")
         stimuli = (request.stimulus, *request.interaction.pending_stimuli)
         error = None
@@ -69,13 +86,17 @@ class Agent:
         completion = self._begin_call()
         report = None
         try:
-            with self._interruptibility.track(request.interaction.interaction_id, "handle", request.request_id) as interruption:
+            with self._interruptibility.track(
+                request.interaction.interaction_id, "handle", request.request_id
+            ) as interruption:
                 report = await Handling(self, request, plan_sink, interruption, context).run()
             return report
         finally:  # 所有路径都会走finally
             try:
                 if report is not None:
-                    self._record(request.request_id, request.interaction.interaction_id, report.request_status, report.error_code)
+                    self._record(
+                        request.request_id, request.interaction.interaction_id, report.request_status, report.error_code
+                    )
             finally:
                 self._end_call(completion)
 
@@ -106,7 +127,10 @@ class Agent:
                 report = await Execution(self, plan, context, output_sink, interruption).run()
         except asyncio.CancelledError:
             self._record(
-                context.execution_id, context.interaction_id, d.ExecutionStatus.CANCELLED, d.ExecutionErrorCode.CANCELLED
+                context.execution_id,
+                context.interaction_id,
+                d.ExecutionStatus.CANCELLED,
+                d.ExecutionErrorCode.CANCELLED,
             )
             raise
         finally:
@@ -135,7 +159,13 @@ class Agent:
         self._inflight.discard(completion)
 
     @staticmethod
-    def _handling_failure(request: d.HandleStimulusRequest, status: d.HandlingRequestStatus, error: d.HandlingErrorCode, emitted: tuple[str, ...] = (), retryable: bool = False) -> d.HandlingReport:
+    def _handling_failure(
+        request: d.HandleStimulusRequest,
+        status: d.HandlingRequestStatus,
+        error: d.HandlingErrorCode,
+        emitted: tuple[str, ...] = (),
+        retryable: bool = False,
+    ) -> d.HandlingReport:
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
         return d.HandlingReport(
             request_id=request.request_id,
@@ -146,7 +176,6 @@ class Agent:
             consumed_pending_stimulus_ids=(),
             retained_pending_stimulus_ids=pending,
             emitted_plan_ids=tuple(emitted),
-
             error_code=error,
             retryable=retryable,
         )
@@ -154,7 +183,11 @@ class Agent:
     @staticmethod
     def _action_result(action, status=d.ActionExecutionStatus.NOT_STARTED, error=None):
         return d.ActionResult(
-            action_id=action.action_id, status=status, error_code=error, irreversible_effect_committed=False, effect_ref=None
+            action_id=action.action_id,
+            status=status,
+            error_code=error,
+            irreversible_effect_committed=False,
+            effect_ref=None,
         )
 
     def _execution_report(self, plan, context, status, error, results, started, retryable):
@@ -177,7 +210,11 @@ class Agent:
             if error.code.name in {"STALE_INTERACTION", "SINK_CLOSED", "BACKPRESSURE_TIMEOUT"}:
                 return enum[error.code.name]
             if enum is d.ExecutionErrorCode:
-                return enum.UNSUPPORTED_OUTPUT if error.code is d.SinkRejectionCode.UNSUPPORTED_OUTPUT else enum.CONTRACT_MISMATCH
+                return (
+                    enum.UNSUPPORTED_OUTPUT
+                    if error.code is d.SinkRejectionCode.UNSUPPORTED_OUTPUT
+                    else enum.CONTRACT_MISMATCH
+                )
         if isinstance(error, TimeoutError):
             return enum.PROVIDER_TIMEOUT
         return enum.INTERNAL_ERROR
@@ -190,7 +227,9 @@ class Agent:
     def _record_exception(self, call_id, interaction_id, code, error):
         # traceback 的源码行也可能含密钥字面量；仅记录位置、类型，不格式化源码。
         safe_error = RuntimeError("Collaborator exception message omitted")
-        locations = [(frame.f_code.co_filename, line, frame.f_code.co_name) for frame, line in walk_tb(error.__traceback__)]
+        locations = [
+            (frame.f_code.co_filename, line, frame.f_code.co_name) for frame, line in walk_tb(error.__traceback__)
+        ]
         self._logger.error(
             "Agent collaborator failed character_id=%s call_id=%s interaction_id=%s error_code=%s type=%s stack=%s",
             self._character_id,

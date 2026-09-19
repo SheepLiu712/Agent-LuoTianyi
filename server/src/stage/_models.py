@@ -1,4 +1,5 @@
 """聊天交互持有的输入状态和回复尝试。"""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum

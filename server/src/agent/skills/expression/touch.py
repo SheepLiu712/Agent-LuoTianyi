@@ -9,10 +9,25 @@ from src.agent.reflex.touch import TouchFastReplyBuilder
 from src.resources.prepared_speech import load_prepared_speech
 from src.utils.logger import get_logger
 
-_DEFAULT_REGIONS = frozenset({
-    "head", "body", "legs", "hands", "头", "辫子", "耳机", "袖",
-    "左腿", "右腿", "身体", "裙子", "8", "左手", "右手",
-})
+_DEFAULT_REGIONS = frozenset(
+    {
+        "head",
+        "body",
+        "legs",
+        "hands",
+        "头",
+        "辫子",
+        "耳机",
+        "袖",
+        "左腿",
+        "右腿",
+        "身体",
+        "裙子",
+        "8",
+        "左手",
+        "右手",
+    }
+)
 _DEFAULT_MAX_TOUCHES_10S = 8
 _DEFAULT_MAX_TOUCHES_30S = 16
 
@@ -36,8 +51,7 @@ def _regions(value: object, default: frozenset[str]) -> frozenset[str]:
         raise TypeError("touch policy allowed_regions must be a collection of region names")
     regions = tuple(value)
     if not regions or any(not isinstance(item, str) or not item.strip() for item in regions):
-        raise ValueError(
-            "touch policy allowed_regions must contain nonblank region names")
+        raise ValueError("touch policy allowed_regions must contain nonblank region names")
     return frozenset(regions)
 
 
@@ -54,8 +68,7 @@ class TouchPolicy:
     max_touches_30s: int = _DEFAULT_MAX_TOUCHES_30S
 
     def __post_init__(self) -> None:
-        if (isinstance(self.allowed_regions, (str, bytes))
-                or not isinstance(self.allowed_regions, Iterable)):
+        if isinstance(self.allowed_regions, (str, bytes)) or not isinstance(self.allowed_regions, Iterable):
             raise TypeError("touch policy allowed_regions must be a collection of region names")
         regions = tuple(self.allowed_regions)
         if not regions or any(not isinstance(item, str) or not item.strip() for item in regions):
@@ -77,10 +90,8 @@ class TouchPolicy:
         defaults = cls()
         return cls(
             allowed_regions=_regions(config.get("allowed_regions"), defaults.allowed_regions),
-            max_touches_10s=_positive_int(
-                config.get("max_touches_10s"), "max_touches_10s", defaults.max_touches_10s),
-            max_touches_30s=_positive_int(
-                config.get("max_touches_30s"), "max_touches_30s", defaults.max_touches_30s),
+            max_touches_10s=_positive_int(config.get("max_touches_10s"), "max_touches_10s", defaults.max_touches_10s),
+            max_touches_30s=_positive_int(config.get("max_touches_30s"), "max_touches_30s", defaults.max_touches_30s),
         )
 
     def allows(self, stimulus: d.TouchInteraction) -> bool:
@@ -89,8 +100,7 @@ class TouchPolicy:
             return False
         frequency = stimulus.click_frequency
         return frequency is None or (
-            frequency.count_10s <= self.max_touches_10s
-            and frequency.count_30s <= self.max_touches_30s
+            frequency.count_10s <= self.max_touches_10s and frequency.count_30s <= self.max_touches_30s
         )
 
 
@@ -113,8 +123,9 @@ class TouchReactionSkill:
         if manifest is not None and not isinstance(manifest, (str, Path)):
             raise ValueError("touch fast reply manifest must be a path")
         self._builder = TouchFastReplyBuilder(config)
-        self._media_ids = ({entry.audio_path: entry.name for entry in load_prepared_speech(manifest)}
-                           if manifest is not None else {})
+        self._media_ids = (
+            {entry.audio_path: entry.name for entry in load_prepared_speech(manifest)} if manifest is not None else {}
+        )
 
     def choose(self, stimulus: d.TouchInteraction) -> TouchReaction | None:
         """返回可读取的随机触摸资源；未命中或资源失败时返回 None。"""

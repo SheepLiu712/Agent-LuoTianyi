@@ -1,4 +1,5 @@
 """保存完整输出及其接收状态，并维护同一次执行内连续的输出序号。"""
+
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -8,6 +9,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 import src.domain.agent as d
 from src.agent.processing.plan_identity import plan_fingerprint
+
 from ._execution_codec import ActionFact
 from ._output_codec import decode, encode
 
@@ -19,15 +21,26 @@ class OutputStorageError(RuntimeError):
     直接传播编码、校验或数据库异常，不会统一将它们转换为此类型。
     """
 
+
 _metadata = MetaData()
-_heads = Table("agent_output_sequences", _metadata,
-    Column("character_id", String, primary_key=True), Column("execution_id", String, primary_key=True),
-    Column("next_sequence", Integer, nullable=False))
-_outputs = Table("agent_output_outbox", _metadata,
-    Column("character_id", String, primary_key=True), Column("execution_id", String, primary_key=True),
-    Column("sequence_no", Integer, primary_key=True), Column("version", Integer, nullable=False),
-    Column("payload_json", Text, nullable=False), Column("fingerprint", String, nullable=False),
-    Column("state", String, nullable=False))
+_heads = Table(
+    "agent_output_sequences",
+    _metadata,
+    Column("character_id", String, primary_key=True),
+    Column("execution_id", String, primary_key=True),
+    Column("next_sequence", Integer, nullable=False),
+)
+_outputs = Table(
+    "agent_output_outbox",
+    _metadata,
+    Column("character_id", String, primary_key=True),
+    Column("execution_id", String, primary_key=True),
+    Column("sequence_no", Integer, primary_key=True),
+    Column("version", Integer, nullable=False),
+    Column("payload_json", Text, nullable=False),
+    Column("fingerprint", String, nullable=False),
+    Column("state", String, nullable=False),
+)
 
 
 @dataclass
@@ -41,6 +54,7 @@ class Slot:
             接收器已明确拒绝；UNKNOWN 表示无法确定是否已接收；ACCEPTED
             表示接收器已经确认接收。接收确认不表示客户端已经播放或展示完毕。
     """
+
     output: d.AgentOutput
     state: str
 
@@ -103,11 +117,15 @@ class OutputOutbox:
             数据库异常直接传给调用者；已有相同角色和执行的序号记录时，
             数据库会报告唯一键冲突，不会重置已有序号。
         """
-        session.execute(insert(_heads).values(character_id=self.character_id,
-                                              execution_id=execution_id, next_sequence=0))
+        session.execute(
+            insert(_heads).values(character_id=self.character_id, execution_id=execution_id, next_sequence=0)
+        )
 
     def read(
-        self, session: Session, execution_id: str, plan: d.ActionPlan,
+        self,
+        session: Session,
+        execution_id: str,
+        plan: d.ActionPlan,
         facts: Sequence[ActionFact],
     ) -> list[Slot]:
         """按序号读取全部输出，并核对完整内容和行动执行记录。
@@ -131,8 +149,11 @@ class OutputOutbox:
                 直接传给调用者；缺少输出序号记录时不会自动初始化。
         """
         count = session.execute(select(_heads.c.next_sequence).where(self.key(_heads, execution_id))).scalar_one()
-        rows = session.execute(select(_outputs).where(self.key(_outputs, execution_id))
-                               .order_by(_outputs.c.sequence_no)).mappings().all()
+        rows = (
+            session.execute(select(_outputs).where(self.key(_outputs, execution_id)).order_by(_outputs.c.sequence_no))
+            .mappings()
+            .all()
+        )
         if type(count) is not int or count != len(rows):
             raise ValueError("invalid output sequence")
         slots, previous = [], 0
@@ -140,12 +161,18 @@ class OutputOutbox:
         for sequence, row in enumerate(rows):
             output = decode(row["payload_json"])
             index = action_ids.index(output.action_id)
-            if (row["version"] != 1 or row["sequence_no"] != sequence or output.sequence_no != sequence
-                    or output.execution_id != execution_id or output.interaction_id != plan.interaction_id
-                    or row["fingerprint"] != plan_fingerprint(row["payload_json"])
-                    or row["state"] not in {"PREPARED", "REJECTED", "UNKNOWN", "ACCEPTED"}
-                    or index < previous or not facts[index].started
-                    or (slots and slots[-1].state != "ACCEPTED")):
+            if (
+                row["version"] != 1
+                or row["sequence_no"] != sequence
+                or output.sequence_no != sequence
+                or output.execution_id != execution_id
+                or output.interaction_id != plan.interaction_id
+                or row["fingerprint"] != plan_fingerprint(row["payload_json"])
+                or row["state"] not in {"PREPARED", "REJECTED", "UNKNOWN", "ACCEPTED"}
+                or index < previous
+                or not facts[index].started
+                or (slots and slots[-1].state != "ACCEPTED")
+            ):
                 raise ValueError("invalid output history")
             slots.append(Slot(output, row["state"]))
             previous = index
@@ -175,13 +202,24 @@ class OutputOutbox:
         """
         payload = encode(output)
         with self.sessions() as session:
-            result = session.execute(update(_heads).where(self.key(_heads, execution_id),
-                _heads.c.next_sequence == output.sequence_no).values(next_sequence=output.sequence_no + 1))
+            result = session.execute(
+                update(_heads)
+                .where(self.key(_heads, execution_id), _heads.c.next_sequence == output.sequence_no)
+                .values(next_sequence=output.sequence_no + 1)
+            )
             if result.rowcount != 1:
                 raise ValueError("output sequence changed")
-            session.execute(insert(_outputs).values(character_id=self.character_id, execution_id=execution_id,
-                sequence_no=output.sequence_no, version=1, payload_json=payload,
-                fingerprint=plan_fingerprint(payload), state="PREPARED"))
+            session.execute(
+                insert(_outputs).values(
+                    character_id=self.character_id,
+                    execution_id=execution_id,
+                    sequence_no=output.sequence_no,
+                    version=1,
+                    payload_json=payload,
+                    fingerprint=plan_fingerprint(payload),
+                    state="PREPARED",
+                )
+            )
             session.commit()
         return Slot(output, "PREPARED")
 
@@ -204,7 +242,10 @@ class OutputOutbox:
                 调用者负责在失败时回滚事务，避免提交部分更新。
         """
         for slot in slots:
-            result = session.execute(update(_outputs).where(self.key(_outputs, execution_id),
-                _outputs.c.sequence_no == slot.output.sequence_no).values(state=slot.state))
+            result = session.execute(
+                update(_outputs)
+                .where(self.key(_outputs, execution_id), _outputs.c.sequence_no == slot.output.sequence_no)
+                .values(state=slot.state)
+            )
             if result.rowcount != 1:
                 raise ValueError("output slot missing")

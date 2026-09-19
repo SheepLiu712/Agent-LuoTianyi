@@ -59,26 +59,34 @@ class TouchInteractionHandler:
                 error_code=d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE,
             )
         source_ids = (request.stimulus.stimulus_id,)
-        await plans.emit(ActionPlanDraft(
-            source_stimulus_ids=source_ids,
-            actions=(d.Say(
-                action_id=str(uuid4()),
-                content="",
-                sound_content=None,
-                prepared_audio_ref=reaction.audio_ref,
-                tone=d.Tone(value="normal"),
-                expression=d.ChangeExpression(expression_id=reaction.expression_id),
-                delivery=d.OutputDelivery.EPHEMERAL_REACTION,
-            ),),
-        ))
-        await plans.emit(ActionPlanDraft(
-            source_stimulus_ids=source_ids,
-            actions=(d.RestoreExpression(
-                action_id=str(uuid4()),
-                expression_id="normal",
-                delivery=d.OutputDelivery.EPHEMERAL_REACTION,
-            ),),
-        ))
+        await plans.emit(
+            ActionPlanDraft(
+                source_stimulus_ids=source_ids,
+                actions=(
+                    d.Say(
+                        action_id=str(uuid4()),
+                        content="",
+                        sound_content=None,
+                        prepared_audio_ref=reaction.audio_ref,
+                        tone=d.Tone(value="normal"),
+                        expression=d.ChangeExpression(expression_id=reaction.expression_id),
+                        delivery=d.OutputDelivery.EPHEMERAL_REACTION,
+                    ),
+                ),
+            )
+        )
+        await plans.emit(
+            ActionPlanDraft(
+                source_stimulus_ids=source_ids,
+                actions=(
+                    d.RestoreExpression(
+                        action_id=str(uuid4()),
+                        expression_id="normal",
+                        delivery=d.OutputDelivery.EPHEMERAL_REACTION,
+                    ),
+                ),
+            )
+        )
         return self._report(request, plans)
 
     @staticmethod

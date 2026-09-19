@@ -1,17 +1,34 @@
 """稳定计划身份与显式白名单 JSON；不按存储中的名称动态导入类型。"""
+
+import json
 from dataclasses import fields, is_dataclass
 from datetime import date
 from enum import Enum
 from hashlib import sha256
-import json
 
 import src.domain.agent as d
 
-_types = {cls.__name__: cls for cls in (
-    d.ActionPlan, d.StartThinking, d.Say, d.Sing, d.RestoreExpression, d.WriteDiary, d.PublishDynamic,
-    d.ReplyDynamic, d.RequestSongLearning, d.MediaRef, d.Tone, d.ChangeExpression,
-    d.DynamicSource, d.DynamicReplyTarget, d.OutputDelivery, d.Visibility,
-)}
+_types = {
+    cls.__name__: cls
+    for cls in (
+        d.ActionPlan,
+        d.StartThinking,
+        d.Say,
+        d.Sing,
+        d.RestoreExpression,
+        d.WriteDiary,
+        d.PublishDynamic,
+        d.ReplyDynamic,
+        d.RequestSongLearning,
+        d.MediaRef,
+        d.Tone,
+        d.ChangeExpression,
+        d.DynamicSource,
+        d.DynamicReplyTarget,
+        d.OutputDelivery,
+        d.Visibility,
+    )
+}
 
 
 def _json(value):
@@ -25,8 +42,11 @@ def plan_id(character_id, request_id, ordinal):
 
 def _encode(value):
     if type(value) in _types.values():
-        payload = value.value if isinstance(value, Enum) else {
-            field.name: _encode(getattr(value, field.name)) for field in fields(value)}
+        payload = (
+            value.value
+            if isinstance(value, Enum)
+            else {field.name: _encode(getattr(value, field.name)) for field in fields(value)}
+        )
         return [type(value).__name__, payload]
     if type(value) is date:
         return ["date", value.isoformat()]

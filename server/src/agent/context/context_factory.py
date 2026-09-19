@@ -1,7 +1,8 @@
 """创建交互上下文，不保存交互实例或管理其生命周期。"""
+
 import asyncio
-from weakref import WeakValueDictionary
 from typing import TYPE_CHECKING
+from weakref import WeakValueDictionary
 
 from ._lifecycle import _complete
 from .interaction_context import InteractionContext

@@ -27,7 +27,11 @@ class DynamicReplySkill:
     """
 
     def __init__(
-        self, dynamics: DynamicCapability, *, character_id: str, character_name: str,
+        self,
+        dynamics: DynamicCapability,
+        *,
+        character_id: str,
+        character_name: str,
     ) -> None:
         for name, value in (("character_id", character_id), ("character_name", character_name)):
             if not isinstance(value, str) or not value.strip():
@@ -76,13 +80,15 @@ class DynamicReplySkill:
     async def compose_for_post(self, item: dict[str, Any]) -> str:
         """为动态原帖生成回复正文。"""
         return await self._dynamics.replier.generate_reply_for_post(
-            item, character_name=self._character_name,
+            item,
+            character_name=self._character_name,
         )
 
     async def compose_for_comment(self, item: dict[str, Any]) -> tuple[bool, str]:
         """为动态评论生成是否回复的判断与正文。"""
         decision = await self._dynamics.replier.generate_reply_for_comment(
-            item, character_name=self._character_name,
+            item,
+            character_name=self._character_name,
         )
         should_reply = bool(decision.get("should_reply"))
         body = str(decision.get("reply") or "").strip()
@@ -103,7 +109,9 @@ class DynamicReplySkill:
         if not ok:
             self._logger.warning(
                 "动态回复发布失败 dynamic=%s parent=%s: %s",
-                action.target.dynamic_id, action.target.parent_comment_id, message,
+                action.target.dynamic_id,
+                action.target.parent_comment_id,
+                message,
             )
         return DynamicReplyResult(ok=bool(ok), message=str(message), comment_id=comment_id)
 

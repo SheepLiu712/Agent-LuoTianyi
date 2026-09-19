@@ -24,8 +24,11 @@ class SongLearnedHandler:
     """记录学会经验并交付一个 PublishDynamic 计划。"""
 
     def __init__(
-        self, character_id: str, experience: LearnedSongExperienceSkill,
-        publishing: DynamicPublishingSkill, dispatch: SongLearningDispatchSkill,
+        self,
+        character_id: str,
+        experience: LearnedSongExperienceSkill,
+        publishing: DynamicPublishingSkill,
+        dispatch: SongLearningDispatchSkill,
     ) -> None:
         self._character_id = character_id
         self._experience = experience
@@ -43,33 +46,42 @@ class SongLearnedHandler:
         body = await self._publishing.compose(
             dynamic_type=SONG_LEARNED_SOURCE_TYPE,
             instruction=SONG_LEARNED_INSTRUCTION,
-            structured_context="\n".join((
-                f"新学会的歌曲：{stimulus.song_id}",
-                f"可唱唱段：{segment_description or '-'}",
-                f"唱段歌词：{lyrics or '-'}",
-            )),
+            structured_context="\n".join(
+                (
+                    f"新学会的歌曲：{stimulus.song_id}",
+                    f"可唱唱段：{segment_description or '-'}",
+                    f"唱段歌词：{lyrics or '-'}",
+                )
+            ),
         )
         if not body.strip():
             self._logger.error("学歌动态正文生成为空，未交付计划 song=%s", stimulus.song_id)
-            return self._report(request, d.HandlingRequestStatus.FAILED,
-                                d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
+            return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
         action = d.PublishDynamic(
-            action_id=str(uuid4()), body=body, media_refs=(), visibility=d.Visibility.GLOBAL,
+            action_id=str(uuid4()),
+            body=body,
+            media_refs=(),
+            visibility=d.Visibility.GLOBAL,
             owner_user_id=None,
             source=d.DynamicSource(source_type=SONG_LEARNED_SOURCE_TYPE, source_id=stimulus.song_id),
             allow_comment=True,
         )
-        receipt = await plans.emit(ActionPlanDraft(
-            source_stimulus_ids=(stimulus.stimulus_id,), actions=(action,),
-        ))
-        return self._report(request, d.HandlingRequestStatus.COMPLETED, None,
-                            (stimulus.stimulus_id,), plans=(receipt.plan_id,))
+        receipt = await plans.emit(
+            ActionPlanDraft(
+                source_stimulus_ids=(stimulus.stimulus_id,),
+                actions=(action,),
+            )
+        )
+        return self._report(
+            request, d.HandlingRequestStatus.COMPLETED, None, (stimulus.stimulus_id,), plans=(receipt.plan_id,)
+        )
 
     async def _record_experience(self, stimulus: d.SongLearned) -> None:
         """写入角色经验；失败只记录，不撤销已经成立的新学会事实。"""
         try:
             committed = await self._experience.commit(
-                character_id=self._character_id, song_id=stimulus.song_id,
+                character_id=self._character_id,
+                song_id=stimulus.song_id,
                 learning_job_id=stimulus.learning_job_id,
             )
         except Exception:
@@ -80,8 +92,11 @@ class SongLearnedHandler:
 
     @staticmethod
     def _report(
-        request: d.HandleStimulusRequest, status: d.HandlingRequestStatus,
-        error_code: d.HandlingErrorCode | None, consumed: tuple[str, ...], *,
+        request: d.HandleStimulusRequest,
+        status: d.HandlingRequestStatus,
+        error_code: d.HandlingErrorCode | None,
+        consumed: tuple[str, ...],
+        *,
         plans: tuple[str, ...] = (),
     ) -> d.HandlingReport:
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)

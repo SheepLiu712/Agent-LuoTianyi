@@ -60,6 +60,7 @@ class DynamicPublishingSkill:
         )
         dynamic_id = str(item.get("id") or "") or None if (ok and item) else None
         if not ok:
-            self._logger.warning("动态发布失败 source=%s/%s: %s",
-                                 action.source.source_type, action.source.source_id, message)
+            self._logger.warning(
+                "动态发布失败 source=%s/%s: %s", action.source.source_type, action.source.source_id, message
+            )
         return DynamicPublishResult(ok=bool(ok), message=str(message), dynamic_id=dynamic_id)

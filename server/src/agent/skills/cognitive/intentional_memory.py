@@ -1,4 +1,5 @@
 """明确记忆请求的过渡期短语识别。"""
+
 from __future__ import annotations
 
 from typing import Any, Final
@@ -16,25 +17,19 @@ class ExplicitMemoryIntentSkill:
             raise TypeError("memory.explicit_intent 必须是字典")
         self._enabled = values.get("enabled", True) is True
         configured = values.get("phrases", ())
-        if not isinstance(configured, (list, tuple)) or any(
-            not isinstance(item, str) for item in configured
-        ):
+        if not isinstance(configured, (list, tuple)) or any(not isinstance(item, str) for item in configured):
             raise TypeError("memory.explicit_intent.phrases 必须是字符串列表")
-        self._phrases = tuple(dict.fromkeys(
-            phrase.strip() for phrase in (*configured, *_LEGACY_PHRASES) if phrase.strip()
-        ))
+        self._phrases = tuple(
+            dict.fromkeys(phrase.strip() for phrase in (*configured, *_LEGACY_PHRASES) if phrase.strip())
+        )
 
     def detect(self, text: str) -> str | None:
         """命中首个短语时返回其后的非空记忆正文，否则返回 None。"""
         if not self._enabled:
             return None
-        matches = (
-            (text.find(phrase), phrase)
-            for phrase in self._phrases
-            if phrase in text
-        )
+        matches = ((text.find(phrase), phrase) for phrase in self._phrases if phrase in text)
         match = min(matches, default=None, key=lambda item: item[0])
         if match is None:
             return None
-        content = text[match[0] + len(match[1]):].strip(" \t\r\n：:，,。！!")
+        content = text[match[0] + len(match[1]) :].strip(" \t\r\n：:，,。！!")
         return content or None

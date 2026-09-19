@@ -1,20 +1,35 @@
 """本次调用的计划预检、顺序执行和失败报告。"""
+
+from __future__ import annotations
+
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import src.domain.agent as d
-from src.agent.processing.plan_emitter import _DeliveryCancelled
 from src.agent.processing.output_emitter import OutputEmitter
-from .invocation import call_handler, _HandlerNotStarted
+from src.agent.processing.plan_emitter import _DeliveryCancelled
+
 from .interruptibility import _CallInterruptibility
+from .invocation import _HandlerNotStarted, call_handler
+
+if TYPE_CHECKING:
+    from src.agent.facade import Agent
 
 
 class Execution:
     """管理一次计划执行的内存状态，不读取历史执行或恢复输出。"""
 
-    def __init__(self, agent, plan: d.ActionPlan, context: d.ExecutionContext,
-                 sink: d.AgentOutputSink, interruption: _CallInterruptibility | None = None) -> None:
+    def __init__(
+        self,
+        agent: Agent,
+        plan: d.ActionPlan,
+        context: d.ExecutionContext,
+        sink: d.AgentOutputSink,
+        interruption: _CallInterruptibility | None = None,
+    ) -> None:
         """绑定门面、完整计划、执行上下文和本次输出接收器。"""
-        self.agent, self.plan, self.context, self.sink = agent, plan, context, sink
+        self.agent: Agent = agent
+        self.plan, self.context, self.sink = plan, context, sink
         self.results: list[d.ActionResult] = []
         self.next_sequence = 0
         self.output_started = False
@@ -22,12 +37,17 @@ class Execution:
 
     def report(self, error: d.ExecutionErrorCode | None = None) -> d.ExecutionReport:
         """返回本次结果，未执行行动标记为未开始，且不要求调用者重试。"""
-        status = (d.ExecutionStatus.CANCELLED if error is d.ExecutionErrorCode.CANCELLED
-                  else d.ExecutionStatus.FAILED if error else d.ExecutionStatus.COMPLETED)
+        status = (
+            d.ExecutionStatus.CANCELLED
+            if error is d.ExecutionErrorCode.CANCELLED
+            else d.ExecutionStatus.FAILED if error else d.ExecutionStatus.COMPLETED
+        )
         return self.agent._execution_report(
-            self.plan, self.context, status, error, self.results, self.output_started, False)
+            self.plan, self.context, status, error, self.results, self.output_started, False
+        )
 
-    async def run(self) -> d.ExecutionReport:
+    # 行动执行是一条必须保持顺序和失败短路语义的事务流；拆分会分散这些不变量。
+    async def run(self) -> d.ExecutionReport:  # noqa: C901
         """检查版本和取消状态，确认全部行动具有处理器后顺序执行。"""
         if self.plan.basis_interaction_revision > self.context.current_interaction_revision:
             return self.report(d.ExecutionErrorCode.CONTRACT_MISMATCH)
@@ -46,30 +66,51 @@ class Execution:
             try:
                 result = await call_handler(
                     self.agent,
-                    lambda: handler.realize(action, self.context, outputs), self.context.cancellation,
-                    self.context.execution_id, self.context.interaction_id)
-                if (type(result) is not d.ActionResult or result.action_id != action.action_id
-                        or result.status is d.ActionExecutionStatus.NOT_STARTED):
+                    lambda: handler.realize(action, self.context, outputs),
+                    self.context.cancellation,
+                    self.context.execution_id,
+                    self.context.interaction_id,
+                )
+                if (
+                    type(result) is not d.ActionResult
+                    or result.action_id != action.action_id
+                    or result.status is d.ActionExecutionStatus.NOT_STARTED
+                ):
                     result = None
                     raise ValueError("invalid action result")
             except _HandlerNotStarted:
                 return self.report(d.ExecutionErrorCode.CANCELLED)
             except Exception as error:
-                code = (d.ExecutionErrorCode.CANCELLED if isinstance(error, _DeliveryCancelled)
-                        else outputs.code or self.agent._error_code(error, d.ExecutionErrorCode))
+                code = (
+                    d.ExecutionErrorCode.CANCELLED
+                    if isinstance(error, _DeliveryCancelled)
+                    else outputs.code or self.agent._error_code(error, d.ExecutionErrorCode)
+                )
                 self.agent._record_exception(self.context.execution_id, self.context.interaction_id, code, error)
                 result = result or self.agent._action_result(action)
-                self.results.append(replace(
-                    result, status=d.ActionExecutionStatus.CANCELLED if code is d.ExecutionErrorCode.CANCELLED
-                    else d.ActionExecutionStatus.FAILED, error_code=code))
+                self.results.append(
+                    replace(
+                        result,
+                        status=(
+                            d.ActionExecutionStatus.CANCELLED
+                            if code is d.ExecutionErrorCode.CANCELLED
+                            else d.ActionExecutionStatus.FAILED
+                        ),
+                        error_code=code,
+                    )
+                )
                 return self.report(code)
             finally:
                 outputs.close()
             if outputs.code is not None:
                 # 处理器捕获交付异常后返回，也不能抹掉失败或继续后续行动。
                 result = replace(
-                    result, status=d.ActionExecutionStatus.CANCELLED
-                    if outputs.code is d.ExecutionErrorCode.CANCELLED else d.ActionExecutionStatus.FAILED,
+                    result,
+                    status=(
+                        d.ActionExecutionStatus.CANCELLED
+                        if outputs.code is d.ExecutionErrorCode.CANCELLED
+                        else d.ActionExecutionStatus.FAILED
+                    ),
                     error_code=outputs.code,
                 )
             self.results.append(result)

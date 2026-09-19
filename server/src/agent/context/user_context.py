@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from ._lifecycle import _Lifecycle, _complete
+from ._lifecycle import _complete, _Lifecycle
 from ._storage import _Storage
 from .models import ContextIdentity, UserContextSnapshot, UserPreferences, UserProfile
 
@@ -15,8 +15,9 @@ if TYPE_CHECKING:
 class UserContext:
     """由 InteractionContext 创建的用户资料视图。"""
 
-    def __init__(self, *, snapshot: UserContextSnapshot, identity: ContextIdentity,
-                 database: "ConversationService") -> None:
+    def __init__(
+        self, *, snapshot: UserContextSnapshot, identity: ContextIdentity, database: "ConversationService"
+    ) -> None:
         """以 snapshot 初始化资料视图，使用 database 保存 identity 所属用户的资料。"""
         self._snapshot = snapshot
         self._state = _Lifecycle()
