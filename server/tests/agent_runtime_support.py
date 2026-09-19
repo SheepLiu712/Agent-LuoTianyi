@@ -18,9 +18,12 @@ class Dependency:
         pass
 
 
-class Mind(Dependency):
-    async def search_song_facts_for_topic(self, constraints):
-        return ["旧歌曲事实"]
+class ReplyGenerator(Dependency):
+    character_persona = "测试人格"
+    speaking_style = "自然"
+
+    async def generate(self, **kwargs):
+        return ()
 
 
 class VectorStore:
@@ -38,9 +41,8 @@ def runtime_dependencies(monkeypatch, tmp_path):
     store = VectorStore()
     monkeypatch.setattr(runtime_module, "get_vector_store", lambda: store)
     monkeypatch.setattr(runtime_module, "clear_vector_store", lambda expected: True)
-    for name in ("ChatPreprocessor", "SubconsciousMemory", "CharacterReflex"):
-        monkeypatch.setattr(runtime_module, name, Dependency)
-    monkeypatch.setattr(runtime_module, "CharacterSubconscious", Mind)
+    monkeypatch.setattr(runtime_module, "AgentMemory", Dependency)
+    monkeypatch.setattr(runtime_module, "CharacterReplyGenerator", ReplyGenerator)
     persona = tmp_path / "persona.json"
     persona.write_text(json.dumps({
         "character_name": "测试角色", "character_persona": "测试人格", "speaking_style": "自然",
@@ -51,9 +53,8 @@ def runtime_dependencies(monkeypatch, tmp_path):
     previous = runtime_module._agent_runtime
     config = {
         "agent": {
-            "topic_extractor": {"llm_module": {}},
             "memory": {"memory_writer": {"llm_module": {}}, "user_profile": {"llm_module": {}}},
-            "main_chat": {"llm_module": {}}, "date_detector": {"llm_module": {}},
+            "main_chat": {"llm_module": {}},
         },
         "character_registry": {"characters": {
             "luotianyi": profile | {"default_target": True}, "miku": dict(profile),

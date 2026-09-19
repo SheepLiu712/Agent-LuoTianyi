@@ -11,10 +11,10 @@ import json
 import time
 from typing import TYPE_CHECKING, Any
 
-from src.subconscious.memory.intentional_memory_commit import (
+from src.agent.skills.adapters.memory.intentional_commit import (
     IntentionalMemoryCommitMixin,
 )
-from src.subconscious.memory.memory_legacy_write import LegacyMemoryWriteMixin
+from src.agent.skills.adapters.memory.operations import MemoryOperationsMixin
 from src.system.database.vector_store import VectorStore
 from src.utils.llm.llm_module import LLMModule
 from src.utils.logger import get_logger
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 logger = get_logger("MemoryWriter")
 
 
-class MemoryWriter(IntentionalMemoryCommitMixin, LegacyMemoryWriteMixin):
+class MemoryWriter(IntentionalMemoryCommitMixin, MemoryOperationsMixin):
     def __init__(self, config: dict[str, Any], llm_module: LLMModule):
         self.config = config
         self.llm = llm_module
@@ -40,7 +40,7 @@ class MemoryWriter(IntentionalMemoryCommitMixin, LegacyMemoryWriteMixin):
         current_dialogue: str = "",
         related_memories: list[str] | None = None,
         owner_character_id: str = "luotianyi",
-        commit: bool = True
+        commit: bool = True,
     ):
         """
         分析最近的交互，提取有价值的信息存入记忆库。
@@ -63,16 +63,20 @@ class MemoryWriter(IntentionalMemoryCommitMixin, LegacyMemoryWriteMixin):
         if user_items:
             # Single de-dup pass for all user memory items
             seen_texts = await self._batch_check_user_memory_dups(
-                vector_store, user_id, user_items,
+                vector_store,
+                user_id,
+                user_items,
             )
             for content in user_items:
                 text = (content or "").strip()
                 if not text or text in seen_texts:
-                    result["items"].append({
-                        "memory_type": "user_memory",
-                        "content": text,
-                        "status": "skipped_duplicate_or_empty",
-                    })
+                    result["items"].append(
+                        {
+                            "memory_type": "user_memory",
+                            "content": text,
+                            "status": "skipped_duplicate_or_empty",
+                        }
+                    )
                     continue
                 seen_texts.add(text)
                 written = await self.write_user_memory(
@@ -83,27 +87,29 @@ class MemoryWriter(IntentionalMemoryCommitMixin, LegacyMemoryWriteMixin):
                     owner_character_id=owner_character_id,
                     commit=commit,
                 )
-                result["items"].append({
-                    "memory_type": "user_memory",
-                    "content": text,
-                    "status": "written" if written else "skipped",
-                })
+                result["items"].append(
+                    {
+                        "memory_type": "user_memory",
+                        "content": text,
+                        "status": "written" if written else "skipped",
+                    }
+                )
 
         if event_items:
             today = time.strftime("%Y-%m-%d")
-            seen_texts = await self._batch_check_event_memory_dups(
-                vector_store, user_id, event_items, today
-            )
+            seen_texts = await self._batch_check_event_memory_dups(vector_store, user_id, event_items, today)
             for content in event_items:
                 text = (content or "").strip()
                 normalized_text = self._normalize_text(text)
                 if not text or normalized_text in seen_texts:
-                    result["items"].append({
-                        "memory_type": "event_memory",
-                        "content": text,
-                        "status": "skipped_duplicate_or_empty",
-                        "event_date": today,
-                    })
+                    result["items"].append(
+                        {
+                            "memory_type": "event_memory",
+                            "content": text,
+                            "status": "skipped_duplicate_or_empty",
+                            "event_date": today,
+                        }
+                    )
                     continue
                 seen_texts.add(normalized_text)
                 written = await self.write_event_memory(
@@ -114,12 +120,14 @@ class MemoryWriter(IntentionalMemoryCommitMixin, LegacyMemoryWriteMixin):
                     owner_character_id=owner_character_id,
                     commit=commit,
                 )
-                result["items"].append({
-                    "memory_type": "event_memory",
-                    "content": text,
-                    "status": "written" if written else "skipped",
-                    "event_date": today,
-                })
+                result["items"].append(
+                    {
+                        "memory_type": "event_memory",
+                        "content": text,
+                        "status": "written" if written else "skipped",
+                        "event_date": today,
+                    }
+                )
         return result
 
     async def _extract_knowledge(

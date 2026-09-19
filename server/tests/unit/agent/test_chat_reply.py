@@ -8,10 +8,9 @@ from routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.context import ConversationEntry, SongContent, TextContent
+from src.agent.context import ConversationEntry, SongContent, TextContent, UserContextSnapshot
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.main_chat import OneSentenceChat, SongSegmentChat
 from src.agent.skills.cognitive import (
     ComposedReply,
     ComposedResponse,
@@ -35,6 +34,7 @@ def context(interaction_id="i", user_id="u", character_id="luotianyi"):
     value = SimpleNamespace(identity=SimpleNamespace(
         interaction_id=interaction_id, user_id=user_id, character_id=character_id))
     value.conversation = _Conversation()
+    value.user = SimpleNamespace(read=UserContextSnapshot)
     return value
 
 
@@ -120,75 +120,75 @@ async def test_empty_batch_consumes_without_plan_or_persistence():
     assert composer.calls == []
 
 
-class _Memory:
+class _Recall:
     def render_for_prompt(self):
         return ["记忆1"]
 
+    hits = ()
 
-class _Mind:
+
+class _Memory:
     def __init__(self):
         self.memory_queries = []
-        self.sing_attempts = []
 
     async def search_memory_context_for_topic(self, user_id, queries):
         self.memory_queries.append((user_id, tuple(queries)))
-        return _Memory()
+        return _Recall()
 
-    async def build_sing_plan_for_topic(self, attempts, excluded_segments=None, emotion_context=""):
-        self.sing_attempts.append(tuple(attempts))
-        return ("歌", "副歌")
-
-
-class _Conscious:
+class _Generator:
     def __init__(self):
         self.kwargs = None
 
-    async def generate_topic_reply_for_pipeline(self, **kwargs):
+    async def generate(self, **kwargs):
         self.kwargs = kwargs
-        return [OneSentenceChat(content="你好", tone="happy", expression="开心"),
-                SongSegmentChat(song="歌", segment="副歌")]
+        return (
+            ReplyDraft(content="你好", sound_content="你好", tone="happy", expression="开心"),
+            ReplyDraft(content="唱了《歌》", sound_content="", tone="", expression=None, sing=("歌", "副歌")),
+        )
 
 
 class _Singing:
     def __init__(self):
         self.calls = []
+        self.plan_calls = []
+
+    async def build_sing_plan(self, character_id, attempts, *, excluded_segments=None, emotion_context=""):
+        self.plan_calls.append((character_id, tuple(attempts), excluded_segments))
+        return ("歌", "副歌")
 
     def get_segment_lyrics(self, character_id, song, segment):
         self.calls.append((character_id, song, segment))
         return "歌词一行"
 
 
-class _Capabilities:
-    def __init__(self):
-        self.singing = _Singing()
-
-
-class _Runtime:
-    def __init__(self):
-        self.mind = _Mind()
-        self.conscious = _Conscious()
-        self.capability_manager = _Capabilities()
-
-
 @pytest.mark.asyncio
 async def test_response_composition_skill_recalls_and_maps_drafts():
-    runtime = _Runtime()
-    skill = ResponseCompositionSkill({}, lambda character_id: runtime)
-    drafts = await skill.compose(character_id="luotianyi", user_id="u", reply_topic="你好",
-                                 conversation_history="历史", memory_queries=("你好",),
-                                 sing_attempts=("《歌》",))
+    memory = _Memory()
+    singing = _Singing()
+    generator = _Generator()
+    skill = ResponseCompositionSkill(
+        {}, character_id="luotianyi", memory=memory, singing=singing, generator=generator
+    )
+    drafts = await skill.compose(
+        user_id="u",
+        user_context=UserContextSnapshot(),
+        reply_topic="你好",
+        conversation_history="历史",
+        memory_queries=("你好",),
+        sing_attempts=("《歌》",),
+    )
     assert [draft.sing for draft in drafts] == [None, ("歌", "副歌")]
     assert drafts[0].content == "你好"
     assert drafts[0].tone == "happy"
     assert drafts[0].expression == "开心"
     assert drafts[0].sound_content
-    assert runtime.mind.memory_queries == [("u", ("你好",))]
-    assert runtime.mind.sing_attempts == [("《歌》",)]
-    assert runtime.conscious.kwargs["memory_hits"] == ["记忆1"]
-    assert runtime.conscious.kwargs["sing_plan"] == ("歌", "副歌")
-    assert runtime.conscious.kwargs["conversation_history"] == "历史"
+    assert memory.memory_queries == [("u", ("你好",))]
+    assert singing.plan_calls == [("luotianyi", ("《歌》",), None)]
+    assert generator.kwargs["memory_hits"] == ["记忆1"]
+    assert generator.kwargs["sing_plan"] == ("歌", "副歌")
+    assert generator.kwargs["conversation_history"] == "历史"
     assert drafts[1].lyrics == "歌词一行"
-    assert runtime.capability_manager.singing.calls == [("luotianyi", "歌", "副歌")]
+    assert singing.calls == [("luotianyi", "歌", "副歌")]
 
 
 @pytest.mark.asyncio

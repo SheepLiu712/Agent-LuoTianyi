@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.subconscious.memory import SubconsciousMemory
+from src.agent.skills.adapters.memory import AgentMemory
 from src.system.observability import get_observability_service
 from src.utils.logger import get_logger
 
@@ -16,7 +16,7 @@ class DynamicTopicMemorySkill:
     写入结果（是否真的产生了记忆）只在这里判定，世界侧不再解读记忆返回值。
     """
 
-    def __init__(self, memory: SubconsciousMemory | None) -> None:
+    def __init__(self, memory: AgentMemory | None) -> None:
         self._memory = memory
         self._logger = get_logger(__name__)
 

@@ -255,9 +255,9 @@ class WorldRuntime:
 
     def _character_ids(self) -> list[str]:
         agent_runtime = getattr(self.system_runtime, "agent_runtime", None)
-        runtimes = getattr(agent_runtime, "character_runtimes", None)
-        if isinstance(runtimes, dict) and runtimes:
-            return [str(character_id) for character_id in runtimes.keys()]
+        character_ids = getattr(agent_runtime, "character_ids", None)
+        if isinstance(character_ids, tuple) and character_ids:
+            return [str(character_id) for character_id in character_ids]
         default_character_id = getattr(agent_runtime, "default_character_id", None)
         if default_character_id:
             return [str(default_character_id)]

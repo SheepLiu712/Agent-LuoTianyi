@@ -1,6 +1,15 @@
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, List
+
+
+@dataclass
+class ContextInfo:
+    """Conversation buffer state persisted by the database service."""
+
+    summary: str
+    conversations: List
+    context_count: int
 
 
 def timestamp_to_elapsed_time(timestamp: str) -> str:

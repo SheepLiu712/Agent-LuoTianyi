@@ -6,7 +6,6 @@ import pytest
 
 import src.domain.agent as agent_domain
 
-
 OCCURRED_AT = datetime(2026, 9, 5, 8, 30, tzinfo=timezone.utc)
 
 
@@ -242,21 +241,3 @@ def test_text_message_does_not_accept_caller_controlled_protocol_fields(
 
     with pytest.raises((TypeError, agent_domain.InvalidStimulusError)):
         agent_domain.TextMessage(**values)
-
-
-def test_legacy_stimulus_keeps_its_own_persistence_protocol() -> None:
-    from src.domain.stimulus import (
-        PersistPolicy,
-        SourceChannel,
-        Stimulus as LegacyStimulus,
-        StimulusModality,
-    )
-
-    legacy_stimulus = LegacyStimulus(
-        source_channel=SourceChannel.WEBSOCKET,
-        modality=StimulusModality.TEXT,
-        persist_policy=PersistPolicy.CONVERSATION_AND_MEMORY_CANDIDATE,
-    )
-
-    assert legacy_stimulus.should_persist_conversation() is True
-    assert legacy_stimulus.can_be_memory_candidate() is True

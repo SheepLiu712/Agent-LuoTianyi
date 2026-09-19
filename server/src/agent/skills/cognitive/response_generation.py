@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.agent.prompt_assembly import RealizationPromptAssembler
-from src.agent.response_parser import StructuredResponseParser
-from src.agent.text_cleaning import build_sound_content
+from src.agent.context.models import UserContextSnapshot
+from src.agent.skills.contracts import ReplyDraft
 from src.domain import CharacterProfile
-from src.utils.enum_type import ContextType
 from src.utils.llm.llm_api_interface import LLMContentInspectionError
 from src.utils.llm.llm_module import LLMModule
 from src.utils.logger import get_logger
+
+from ._prompt_assembly import RealizationPromptAssembler
+from ._response_parser import StructuredResponseParser
 
 DEFAULT_LLM_TONE = "中性"
 DEFAULT_TTS_TONE = "normal"
@@ -58,47 +58,8 @@ TONE_MODIFIER_SUFFIXES = (
 )
 
 
-@dataclass
-class OneResponseLine(ABC):
-    type: ContextType
-    uuid: str = ""
-
-    @abstractmethod
-    def get_content(self) -> str:
-        raise NotImplementedError("Subclasses of OneResponseLine must implement get_content()")
-
-
-@dataclass
-class SongSegmentChat(OneResponseLine):
-    type: ContextType = ContextType.SING
-    lyrics: str = ""
-    song: str = ""
-    segment: str = ""
-    uuid: str = ""
-
-    def get_content(self) -> str:
-        return f"唱了《{self.song}》"
-
-
-@dataclass
-class OneSentenceChat(OneResponseLine):
-    type: ContextType = ContextType.TEXT
-    sound_content: str = ""
-    expression: str = ""
-    tone: str = ""
-    content: str = ""
-    uuid: str = ""
-
-    def __post_init__(self) -> None:
-        if not self.sound_content and self.content:
-            self.sound_content = build_sound_content(self.content)
-
-    def get_content(self) -> str:
-        return self.content
-
-
-class MainChat:
-    """Realization backend for styled character replies."""
+class CharacterReplyGenerator:
+    """根据角色资料、用户上下文和召回证据生成回复草稿。"""
 
     def __init__(self, config: Dict[str, Any], llm_module: LLMModule, character_profile: CharacterProfile):
         self.logger = get_logger(__name__)
@@ -124,31 +85,27 @@ class MainChat:
         self._init_llm_tone_mapping()
         self.prompt_assembler = RealizationPromptAssembler()
         self.response_parser = StructuredResponseParser(
-            sentence_cls=OneSentenceChat,
-            song_cls=SongSegmentChat,
-            default_response=self.default_response,
+            default_draft=self.default_response,
             tone_mapper=self._get_expressions_and_tts_tone,
         )
 
-    async def generate_response(
+    async def generate(
         self,
         reply_topic: str,
-        user_nickname: str,
-        user_description: str,
-        preference_context: str = "",
+        user_context: UserContextSnapshot,
         conversation_history: str = "",
         fact_hits: Optional[List[str]] = None,
         memory_hits: Optional[List[str]] = None,
         sing_plan: Optional[Tuple[str, str]] = None,
-    ) -> List[OneResponseLine]:
+    ) -> tuple[ReplyDraft, ...]:
         prompt_input = self.prompt_assembler.build(
             character_name=self.character_name,
             character_persona=self.character_persona,
             speaking_style=self.speaking_style,
             reply_topic=reply_topic,
-            user_nickname=user_nickname,
-            user_description=user_description,
-            preference_context=preference_context,
+            user_nickname="你",
+            user_description=user_context.profile.description,
+            preference_context=self._build_preference_context(user_context),
             conversation_history=conversation_history,
             fact_hits=fact_hits,
             memory_hits=memory_hits,
@@ -181,22 +138,42 @@ class MainChat:
                     return response
                 raise RuntimeError("LLM returned an empty response")
             except LLMContentInspectionError as e:
-                self.logger.warning(f"MainChat LLM 内容审查失败，返回话题切换回复: {e}")
+                self.logger.warning(f"CharacterReplyGenerator LLM 内容审查失败，返回话题切换回复: {e}")
                 return "[中性]这个话题不太合适，我们聊点别的吧"
             except Exception as e:
                 if attempt >= max_attempts:
-                    self.logger.error("MainChat LLM failed after " f"{attempt} attempts ({type(e).__name__}): {e}")
+                    self.logger.error(
+                        "CharacterReplyGenerator LLM failed after " f"{attempt} attempts ({type(e).__name__}): {e}"
+                    )
                     break
                 self.logger.warning(
-                    "MainChat LLM request failed " f"({attempt}/{max_attempts}), retrying: " f"{type(e).__name__}: {e}"
+                    "CharacterReplyGenerator LLM request failed "
+                    f"({attempt}/{max_attempts}), retrying: "
+                    f"{type(e).__name__}: {e}"
                 )
                 if retry_delay > 0:
                     await asyncio.sleep(retry_delay)
 
         return failure_response
 
-    def _parse_response(self, response: str, sing_plan: Optional[Tuple[str, str]]) -> List[OneResponseLine]:
+    def _parse_response(self, response: str, sing_plan: Optional[Tuple[str, str]]) -> tuple[ReplyDraft, ...]:
         return self.response_parser.parse(response, sing_plan)
+
+    @staticmethod
+    def _build_preference_context(user_context: UserContextSnapshot) -> str:
+        preferences = user_context.preferences
+        parts: list[str] = []
+        if preferences.relationship:
+            parts.append(f"用户希望你是他的：{preferences.relationship}")
+        if preferences.speaking_style:
+            parts.append(f"用户希望你的表达风格偏向：{preferences.speaking_style}")
+        if preferences.personality_traits:
+            parts.append(f"用户希望你的性格特点：{'、'.join(preferences.personality_traits)}")
+        if preferences.custom_context:
+            parts.append(f"用户补充的上下文：{preferences.custom_context.replace('我', '用户')}")
+        if preferences.personality_text:
+            parts.append(f"用户补充的偏好：{preferences.personality_text}")
+        return "用户偏好设置：" + "；".join(parts) if parts else ""
 
     @staticmethod
     def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int:
@@ -307,7 +284,9 @@ class MainChat:
         path = Path(self.llm_tone_mapping_file)
         if not path.exists():
             self.logger.warning(f"LLM tone mapping file not found: {self.llm_tone_mapping_file}")
-            self.default_response = OneSentenceChat(expression=DEFAULT_EXPRESSION, tone=DEFAULT_TTS_TONE, content="")
+            self.default_response = ReplyDraft(
+                content="", sound_content="", expression=DEFAULT_EXPRESSION, tone=DEFAULT_TTS_TONE
+            )
             return
 
         try:
@@ -328,10 +307,11 @@ class MainChat:
             self.logger.warning(f"Failed to load LLM tone mapping: {e}")
 
         default_key = DEFAULT_LLM_TONE.lower()
-        self.default_response = OneSentenceChat(
+        self.default_response = ReplyDraft(
+            content="",
+            sound_content="",
             expression=self.llm_tone_to_l2d_expression.get(default_key, DEFAULT_EXPRESSION),
             tone=self.llm_tone_to_tts_tone.get(default_key, DEFAULT_TTS_TONE),
-            content="",
         )
 
     def _get_expressions_and_tts_tone(self, tone: str) -> Tuple[str, str]:

@@ -1,4 +1,4 @@
-"""通过真实运行时构造和查找验证门面身份及兼容对象隔离。"""
+"""通过真实运行时构造和查找验证 Agent 门面身份。"""
 import asyncio
 import threading
 
@@ -8,11 +8,10 @@ import src.domain.agent as d
 from src.agent_runtime import agent_runtime as runtime_module
 
 
-def test_lookup_returns_cached_facade_separate_from_legacy(runtime):
+def test_lookup_returns_cached_facade(runtime):
     default = runtime.get_agent()
     assert default is runtime.get_agent("luotianyi")
     assert default is not runtime.get_agent("miku")
-    assert default is not runtime.get_character_runtime().conscious
     assert callable(getattr(default, "handle_stimulus", None)), "get_agent 尚未返回两接口门面"
     assert callable(getattr(default, "realize_action_plan", None))
 
@@ -48,11 +47,10 @@ def test_lookup_rejects_non_string_identity(runtime, character_id):
         runtime.get_agent(character_id)
 
 
-async def test_legacy_registry_keeps_old_agent_and_callable_methods(runtime):
-    legacy = runtime.get_character_runtime().conscious
-    assert runtime.agent_registry.get() is legacy
-    assert runtime.agent_registry.all()["luotianyi"] is legacy
-    assert await legacy.search_song_facts_for_topic(["歌曲"]) == ["旧歌曲事实"]
+def test_runtime_exposes_no_legacy_character_object_graph(runtime):
+    assert not hasattr(runtime, "character_runtimes")
+    assert not hasattr(runtime, "agent_registry")
+    assert not hasattr(runtime, "get_character_runtime")
 
 
 async def test_shutdown_repeatedly_closes_owned_store_once(runtime, runtime_dependencies):

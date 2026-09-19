@@ -1,10 +1,10 @@
-from sqlalchemy import create_engine, Column, String, Text
-from sqlalchemy.orm import sessionmaker, declarative_base
-import uuid
 import os
-import json
+import uuid
 from typing import Dict
+
+from sqlalchemy import Column, String, Text, create_engine
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 Base = declarative_base()
 
@@ -44,10 +44,10 @@ def get_song_db():
     global SessionLocal
     if SessionLocal is None:
          # Fallback default path if not initialized explicitly
-        init_song_db(
-            db_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "res", "knowledge"),
-            db_file="knowledge_db.db"
-        )
+        init_song_db({
+            "db_folder": os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "res", "knowledge"),
+            "db_file": "knowledge_db.db",
+        })
     db = SessionLocal()
     try:
         yield db
@@ -59,10 +59,10 @@ def get_song_session() -> Session:
     global SessionLocal
     if SessionLocal is None:
          # Fallback default path if not initialized explicitly
-        init_song_db(
-            db_folder=os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "res", "knowledge"),
-            db_file="knowledge_db.db"
-        )
+        init_song_db({
+            "db_folder": os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "res", "knowledge"),
+            "db_file": "knowledge_db.db",
+        })
     return SessionLocal()
 
 

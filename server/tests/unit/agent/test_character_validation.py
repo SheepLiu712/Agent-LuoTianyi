@@ -9,11 +9,11 @@ server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.agent.main_chat import MainChat
+from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
 
 
-def load_static_variables(path: Path) -> MainChat:
-    main_chat = MainChat.__new__(MainChat)
+def load_static_variables(path: Path) -> CharacterReplyGenerator:
+    main_chat = CharacterReplyGenerator.__new__(CharacterReplyGenerator)
     main_chat.character_profile = SimpleNamespace(
         character_id="test-character",
         static_variables_file=str(path),

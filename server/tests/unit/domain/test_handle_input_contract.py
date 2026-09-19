@@ -8,7 +8,6 @@ from zoneinfo import ZoneInfo
 import pytest
 
 import src.domain.agent as domain
-from src.domain.stimulus import SourceChannel, Stimulus as LegacyStimulus, StimulusModality
 
 
 NOW = datetime(2026, 9, 6, 8, 0, tzinfo=timezone.utc)
@@ -263,17 +262,6 @@ def test_coordination_signal_cannot_be_pending_content(name):
     factory = _public("ChatInteractionSnapshot")
     fields = _snapshot_fields(pending_stimuli=(_stimulus(name),))
     _invalid("CONTRACT_INVALID_INTERACTION", lambda: factory(**fields))
-
-
-def test_legacy_mapping_stimulus_is_rejected_in_snapshot_and_request():
-    """目标输入不接收旧 Mapping 协议，不通过隐式兼容绕过强类型边界。"""
-    legacy = LegacyStimulus(source_channel=SourceChannel.WEBSOCKET, modality=StimulusModality.TEXT)
-    snapshot_factory = _public("ChatInteractionSnapshot")
-    fields = _snapshot_fields(pending_stimuli=(legacy,))
-    _invalid("CONTRACT_INVALID_INTERACTION", lambda: snapshot_factory(**fields))
-    request_factory = _public("HandleStimulusRequest")
-    fields = _request_fields(stimulus=legacy)
-    _invalid("CONTRACT_INVALID_HANDLE_REQUEST", lambda: request_factory(**fields))
 
 
 def test_disconnected_chat_keeps_supported_outputs_and_an_expired_deadline():

@@ -9,7 +9,7 @@ from src.world.get_new_songs.daily_new_song_fetcher import (
     collect_new_song_candidates,
 )
 from src.world.get_new_songs.task import VCPediaNewSongTask
-from src.subconscious.music_knowledge.song_database import (
+from src.capabilities.song_knowledge.database import (
     Song,
     get_song_session,
     init_song_db,

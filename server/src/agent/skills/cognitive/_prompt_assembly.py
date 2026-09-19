@@ -20,7 +20,7 @@ class RealizationPromptInput:
 
 
 class RealizationPromptAssembler:
-    """Builds prompt variables for the current MainChat realization backend."""
+    """Builds prompt variables for the character reply generator."""
 
     def build(
         self,

@@ -41,7 +41,14 @@ def test_wheel_contains_regular_and_namespace_packages(tmp_path: Path) -> None:
     assert {
         "server_main.py",
         "src/agent/facade.py",
+        "src/agent/skills/adapters/memory/facade.py",
+        "src/agent/skills/cognitive/response_generation.py",
+        "src/capabilities/song_knowledge/database.py",
         "src/world/get_new_songs/task.py",
         "src/world/learn_sing_songs/task.py",
         "src/world/types/task_result.py",
     } <= members
+    assert not any(
+        member.startswith(("src/chat_session/", "src/subconscious/", "src/legacy/"))
+        for member in members
+    )

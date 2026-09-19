@@ -74,7 +74,7 @@ def make_runtime(monkeypatch):
         runtime.world_clock = RecordingClock()
         system = SimpleNamespace(
             agent_runtime=SimpleNamespace(
-                character_runtimes={"luotianyi": object(), "miku": object()},
+                character_ids=("luotianyi", "miku"),
                 default_character_id="luotianyi",
             ),
             capability_manager=SimpleNamespace(singing=SimpleNamespace(

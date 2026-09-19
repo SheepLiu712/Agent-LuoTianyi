@@ -10,7 +10,7 @@ from src.agent.skills.knowledge.song_acceptance import (
     SongAcceptanceStatus,
     SongKnowledgeAcceptanceSkill,
 )
-from src.subconscious.music_knowledge.song_database import Song, get_song_session
+from src.capabilities.song_knowledge.database import Song, get_song_session
 
 SONG_NAME = "新歌"
 LYRIC_KEYWORDS = ("一句歌词", "两句歌词")

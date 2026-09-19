@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = get_logger("MemoryWriter")
 
 
-class LegacyMemoryWriteMixin:
+class MemoryOperationsMixin:
     """Preserve the pre-intentional-memory public write behavior."""
 
     config: dict[str, Any]
@@ -57,10 +57,15 @@ class LegacyMemoryWriteMixin:
         )
         ids = await run_sync_owned(vector_store.add_documents, [doc])
         update_cmd = MemoryUpdateCommand(
-            type="write_user_memory", content=text, uuid=ids[0] if ids else None,
+            type="write_user_memory",
+            content=text,
+            uuid=ids[0] if ids else None,
         )
         await run_sync_owned(
-            memory_store.write_memory_update, user_id, update_cmd, commit=commit,
+            memory_store.write_memory_update,
+            user_id,
+            update_cmd,
+            commit=commit,
         )
         await run_sync_owned(
             memory_store.write_agent_memory_record,
@@ -134,7 +139,11 @@ class LegacyMemoryWriteMixin:
         return True
 
     async def _has_similar_user_memory(
-        self, vector_store: VectorStore, user_id: str, content: str, threshold: float,
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        threshold: float,
     ) -> bool:
         results = await vector_store.search(user_id, content, k=5)
         for doc, score in results:
@@ -144,7 +153,11 @@ class LegacyMemoryWriteMixin:
         return False
 
     async def _is_same_day_duplicate_event_memory(
-        self, vector_store: VectorStore, user_id: str, content: str, event_date: str,
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        content: str,
+        event_date: str,
     ) -> bool:
         results = await vector_store.search(user_id, content, k=10)
         target = self._normalize_text(content)
@@ -175,7 +188,9 @@ class LegacyMemoryWriteMixin:
             results = await vector_store.search(user_id, items[0], k=20)
         else:
             results = await vector_store.search(
-                user_id, items[0], k=20,
+                user_id,
+                items[0],
+                k=20,
                 where=self._user_memory_where(user_id, owner_character_id),
             )
         for doc, score in results:
@@ -183,7 +198,8 @@ class LegacyMemoryWriteMixin:
             if metadata.get("memory_type") != "user_memory":
                 continue
             if owner_character_id is not None and not self._owner_matches(
-                metadata.get("owner_character_id"), owner_character_id,
+                metadata.get("owner_character_id"),
+                owner_character_id,
             ):
                 continue
             if score >= threshold:
@@ -193,7 +209,11 @@ class LegacyMemoryWriteMixin:
         return seen
 
     async def _batch_check_event_memory_dups(
-        self, vector_store: VectorStore, user_id: str, items: list[str], event_date: str,
+        self,
+        vector_store: VectorStore,
+        user_id: str,
+        items: list[str],
+        event_date: str,
     ) -> set:
         """Collect existing same-day event-memory text in one search pass."""
         seen = set()

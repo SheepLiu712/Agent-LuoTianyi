@@ -7,15 +7,7 @@ from typing import TYPE_CHECKING, Any, Dict
 from fastapi import WebSocket, WebSocketDisconnect
 
 from src.capabilities.media_resolution import MediaResolutionError
-from src.domain.chat import ChatInputEvent
-from src.domain.stimulus import Stimulus
-from src.legacy.chat_input_adapter import (
-    is_chat_related_ws_message,
-    stimulus_to_chat_input_event,
-    validate_ws_chat_message,
-    ws_message_to_stimulus,
-)
-from src.system.user_interface.types import WSEventType, WSMessage
+from src.system.user_interface.types import BUSINESS_INPUT_EVENTS, WSEventType, WSMessage
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
@@ -307,35 +299,7 @@ class WebSocketService:
             self._recent_client_messages.popitem(last=False)
 
     def is_chat_related_event(self, event: WSMessage) -> bool:
-        return is_chat_related_ws_message(event)
-
-    def try_accept_chat_event(
-        self,
-        websocket_connection: "WebSocketConnection",
-        event: WSMessage,
-        chat_stream: Any,
-    ) -> ChatEventAcceptance:
-        """Convert and enqueue atomically with respect to event-loop tasks."""
-        if not self.has_valid_client_message_id(event):
-            return ChatEventAcceptance.BAD_MESSAGE
-        try:
-            validate_ws_chat_message(event)
-            chat_event = self.convert_to_chat_input_event(
-                event,
-                sender_user_id=websocket_connection.user_uuid,
-                default_character_id=getattr(chat_stream, "character_id", None) or "luotianyi",
-            )
-            self._validate_chat_event_targets(chat_stream, chat_event)
-        except (KeyError, TypeError, ValueError):
-            return ChatEventAcceptance.BAD_MESSAGE
-        if chat_event is None:
-            return ChatEventAcceptance.UNSUPPORTED
-        if self.is_duplicate_client_message(websocket_connection, event):
-            return ChatEventAcceptance.DUPLICATE
-        if not chat_stream.try_feed_event(chat_event):
-            return ChatEventAcceptance.OVERLOADED
-        self.mark_client_message_accepted(websocket_connection, event)
-        return ChatEventAcceptance.ACCEPTED
+        return event.event_type in BUSINESS_INPUT_EVENTS
 
     async def try_accept_stimulus_event(
         self,
@@ -349,7 +313,7 @@ class WebSocketService:
         connection 是已认证连接，adapter 使用绑定关系查找目标 Stage 并同步入队。
         连接维护事件不会进入 adapter；重复消息不会再次转换或投递。
         """
-        if event.event_type not in {"user_text", "user_message", "message", "chat_message", "chat", "user_typing", "user_image"}:
+        if event.event_type not in BUSINESS_INPUT_EVENTS:
             return ChatEventAcceptance.UNSUPPORTED
         if connection.is_closed or not connection.user_uuid or not self.has_valid_client_message_id(event):
             return ChatEventAcceptance.BAD_MESSAGE
@@ -364,49 +328,6 @@ class WebSocketService:
             return ChatEventAcceptance.OVERLOADED
         self.mark_client_message_accepted(connection, event)
         return ChatEventAcceptance.ACCEPTED
-
-    @staticmethod
-    def _validate_chat_event_targets(
-        chat_stream: Any,
-        chat_event: ChatInputEvent | None,
-    ) -> None:
-        if chat_event is None:
-            return
-        payload = chat_event.payload or {}
-        raw_targets = payload.get("target_character_ids")
-        targets = (raw_targets,) if isinstance(raw_targets, str) else tuple(raw_targets or ())
-        system_runtime = getattr(chat_stream, "system_runtime", None)
-        agent_runtime = getattr(system_runtime, "agent_runtime", None)
-        registry = getattr(agent_runtime, "character_registry", None)
-        if registry is not None:
-            registry.resolve_targets(targets)
-
-    def convert_to_stimulus(
-        self,
-        event: WSMessage,
-        sender_user_id: str | None = None,
-        default_character_id: str = "luotianyi",
-    ) -> Stimulus | None:
-        return ws_message_to_stimulus(
-            event,
-            sender_user_id=sender_user_id,
-            default_character_id=default_character_id,
-        )
-
-    def convert_to_chat_input_event(
-        self,
-        event: WSMessage,
-        sender_user_id: str | None = None,
-        default_character_id: str = "luotianyi",
-    ) -> ChatInputEvent | None:
-        stimulus = self.convert_to_stimulus(
-            event,
-            sender_user_id=sender_user_id,
-            default_character_id=default_character_id,
-        )
-        if stimulus is None:
-            return None
-        return stimulus_to_chat_input_event(stimulus)
 
     def _make_event(self, event_type: WSEventType, payload: Dict, reply_to: str = None) -> Dict:
         event = {

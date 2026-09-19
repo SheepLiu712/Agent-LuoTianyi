@@ -7,7 +7,8 @@ server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.agent.main_chat import MainChat, OneSentenceChat
+from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
+from src.agent.skills.contracts import ReplyDraft
 
 
 class FakeLogger:
@@ -18,8 +19,8 @@ class FakeLogger:
         self.warnings.append(message)
 
 
-def build_main_chat_with_mapping() -> MainChat:
-    main_chat = MainChat.__new__(MainChat)
+def build_main_chat_with_mapping() -> CharacterReplyGenerator:
+    main_chat = CharacterReplyGenerator.__new__(CharacterReplyGenerator)
     main_chat.logger = FakeLogger()
     main_chat.llm_tone_to_tts_tone = {
         "中性": "happy",
@@ -75,7 +76,7 @@ def test_main_chat_tone_mapping_falls_back_for_empty_tone():
 
 
 def test_main_chat_tone_mapping_falls_back_when_mapping_is_missing():
-    main_chat = MainChat.__new__(MainChat)
+    main_chat = CharacterReplyGenerator.__new__(CharacterReplyGenerator)
     main_chat.logger = FakeLogger()
     main_chat.llm_tone_to_tts_tone = {}
     main_chat.llm_tone_to_l2d_expression = {}
@@ -194,8 +195,8 @@ def test_main_chat_tone_mapping_maps_extreme_fear():
     assert tts_tone == "sad"
 
 
-def test_one_sentence_chat_allows_default_tts_tone():
-    response = OneSentenceChat(content="你好", tone="normal", expression="微笑脸")
+def test_reply_draft_allows_default_tts_tone():
+    response = ReplyDraft(content="你好", sound_content="你好", tone="normal", expression="微笑脸")
 
     assert response.sound_content == "你好"
     assert response.tone == "normal"

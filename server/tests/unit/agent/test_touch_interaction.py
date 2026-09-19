@@ -116,7 +116,7 @@ async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatc
         "resource_names": ["voice"],
         "probability": 1.0,
     })
-    monkeypatch.setattr("src.agent.reflex.touch.random.choice", lambda files: next(iter(files)))
+    monkeypatch.setattr("src.agent.skills.expression._touch_resources.random.choice", lambda files: next(iter(files)))
 
     reaction = skill.choose(touch_request().stimulus)
 

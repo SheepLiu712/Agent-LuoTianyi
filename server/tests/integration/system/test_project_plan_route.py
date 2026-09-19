@@ -31,7 +31,7 @@ def test_project_plan_is_exposed_by_public_get_routes():
     matching_routes = {
         route.path: route
         for route in server_main.app.routes
-        if route.path in {"/project-plan", "/project-plan/"}
+        if getattr(route, "path", None) in {"/project-plan", "/project-plan/"}
     }
 
     assert set(matching_routes) == {"/project-plan", "/project-plan/"}

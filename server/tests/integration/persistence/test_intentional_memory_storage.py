@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.subconscious.memory.memory_write import MemoryWriter
+from src.agent.skills.adapters.memory.writer import MemoryWriter
 from src.system.database.vector_store import Document
 
 

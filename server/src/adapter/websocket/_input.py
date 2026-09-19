@@ -14,10 +14,10 @@ from src.capabilities.media_resolution import (
     MediaResolutionErrorCode,
     PermanentMediaStore,
 )
-from src.system.user_interface.types import WSMessage
+from src.system.user_interface.types import BUSINESS_INPUT_EVENTS, WSMessage
 
 _TEXT_EVENTS = frozenset({"user_text", "user_message", "message", "chat_message", "chat"})
-_INPUT_EVENTS = _TEXT_EVENTS | {"user_typing", "user_image"}
+_INPUT_EVENTS = BUSINESS_INPUT_EVENTS
 _TARGET_KEYS = (
     "target_character_ids", "target_characters", "character_ids",
     "target_character_id", "character_id",

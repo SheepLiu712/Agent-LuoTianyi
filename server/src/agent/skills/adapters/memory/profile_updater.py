@@ -4,12 +4,11 @@ User Profile Updater
 负责根据单个话题相关对话，判断并更新用户画像（user.description）。
 """
 
-from typing import Dict, Any
 import re
+from typing import Any, Dict
 
-from src.utils.logger import get_logger
 from src.utils.llm.llm_module import LLMModule
-
+from src.utils.logger import get_logger
 
 logger = get_logger("UserProfileUpdater")
 
@@ -30,7 +29,12 @@ class UserProfileUpdater:
         - 非空字符串：新的完整用户画像描述。
         """
         try:
-            history_str = "更早对话总结" + history.get("summary", "") + "\n最近对话：\n" + "\n".join(history.get("recent_conversation", []))
+            history_str = (
+                "更早对话总结"
+                + history.get("summary", "")
+                + "\n最近对话：\n"
+                + "\n".join(history.get("recent_conversation", []))
+            )
             response = await self.llm.generate_response(
                 history=history_str or "无",
                 current_profile=current_profile or "",

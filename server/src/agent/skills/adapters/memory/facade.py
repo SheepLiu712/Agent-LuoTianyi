@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.domain import MemoryContext, MemoryHit
 from src.system.database.vector_store import VectorStore
-from src.subconscious.memory.memory_write import MemoryWriter
-from src.subconscious.memory.user_profile_updater import UserProfileUpdater
+
+from .profile_updater import UserProfileUpdater
+from .writer import MemoryWriter
 
 if TYPE_CHECKING:
     from src.system.database import DatabaseManager
     from src.system.database.services.memory_store import MemoryStore
 
 
-class SubconsciousMemory:
-    """角色潜意识的记忆入口，负责召回、写入和用户画像更新。
+class AgentMemory:
+    """Agent 的长期记忆适配入口，负责召回、写入和用户画像更新。
 
     这一层只接收业务参数，不再接收 db/redis/session。底层数据库连接和
     缓存生命周期交给 DatabaseManager 与 MemoryStore 统一管理。
@@ -40,7 +41,7 @@ class SubconsciousMemory:
         )
 
     def ensure_dependencies(self) -> None:
-        """检查潜意识记忆子系统依赖已经初始化。"""
+        """检查 Agent 记忆适配器依赖已经初始化。"""
         required = {
             "database_manager": self.database_manager,
             "vector_store": self.vector_store,
@@ -49,9 +50,9 @@ class SubconsciousMemory:
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
-            raise RuntimeError(f"SubconsciousMemory dependencies are missing: {', '.join(missing)}")
+            raise RuntimeError(f"AgentMemory dependencies are missing: {', '.join(missing)}")
         if self.database_manager.memory_store is None:
-            raise RuntimeError("SubconsciousMemory dependency is missing: memory_store")
+            raise RuntimeError("AgentMemory dependency is missing: memory_store")
 
     @property
     def memory_store(self) -> "MemoryStore":
@@ -76,8 +77,23 @@ class SubconsciousMemory:
         if not queries:
             return MemoryContext()
 
-        candidate_hits: List[Tuple[float, str, str, Any, str]] = []
-        vector_ids: List[str] = []
+        candidate_hits = await self._search_candidates(user_id, queries, similarity_threshold, k)
+        vector_ids = [vector_id for _, _, vector_id, _, _ in candidate_hits if vector_id]
+        records_by_vector_id = await asyncio.to_thread(
+            self.memory_store.get_agent_memory_records_by_embedding_ids,
+            vector_ids,
+        )
+        scored_hits = self._materialize_hits(candidate_hits, records_by_vector_id)
+        return MemoryContext(self._top_distinct_hits(scored_hits, k))
+
+    async def _search_candidates(
+        self,
+        user_id: str,
+        queries: List[str],
+        similarity_threshold: float,
+        k: int,
+    ) -> List[Tuple[float, str, str, Any, str]]:
+        candidates: List[Tuple[float, str, str, Any, str]] = []
         for query in queries:
             q = (query or "").strip()
             if not q:
@@ -89,19 +105,17 @@ class SubconsciousMemory:
                 content = doc.get_content().strip() if hasattr(doc, "get_content") else ""
                 if not content:
                     continue
-
                 vector_id = str(getattr(doc, "id", "") or "")
-                if vector_id:
-                    vector_ids.append(vector_id)
-                candidate_hits.append((score, q, vector_id, doc, content))
+                candidates.append((score, q, vector_id, doc, content))
+        return candidates
 
-        records_by_vector_id = await asyncio.to_thread(
-            self.memory_store.get_agent_memory_records_by_embedding_ids,
-            vector_ids,
-        )
-
+    def _materialize_hits(
+        self,
+        candidates: List[Tuple[float, str, str, Any, str]],
+        records_by_vector_id: dict[str, Any],
+    ) -> List[Tuple[float, str, MemoryHit]]:
         scored_hits: List[Tuple[float, str, MemoryHit]] = []
-        for score, query, vector_id, doc, content in candidate_hits:
+        for score, query, vector_id, doc, content in candidates:
             record = records_by_vector_id.get(vector_id) if vector_id else None
             rendered = self._render_memory_hit(record, content, doc)
             dedup_key = record.id if record else vector_id or rendered
@@ -119,7 +133,10 @@ class SubconsciousMemory:
                     ),
                 )
             )
+        return scored_hits
 
+    @staticmethod
+    def _top_distinct_hits(scored_hits: List[Tuple[float, str, MemoryHit]], k: int) -> tuple[MemoryHit, ...]:
         scored_hits.sort(key=lambda item: item[0], reverse=True)
         hits: List[MemoryHit] = []
         seen_keys = set()
@@ -132,7 +149,7 @@ class SubconsciousMemory:
             hits.append(hit)
             if len(hits) >= k:
                 break
-        return MemoryContext(tuple(hits))
+        return tuple(hits)
 
     async def write_topic_memories(
         self,

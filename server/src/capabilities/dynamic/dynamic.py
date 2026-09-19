@@ -16,7 +16,7 @@ from src.capabilities.dynamic.dynamic_replier import DynamicReplier
 class DynamicCapability:
     """Publishing capability for agent/world generated dynamics and comments.
 
-    Also responsible for generating world dynamic content via LLM (moved from LuoTianyiAgent),
+    Also responsible for generating world dynamic content via LLM,
     and dynamic reply generation via DynamicReplier.
     """
 
@@ -308,7 +308,7 @@ class DynamicCapability:
         instruction: str,
         structured_context: str,
     ) -> str:
-        """为 world 事件生成角色动态文案（从 LuoTianyiAgent 移入）。
+        """为 world 事件生成角色动态文案。
 
         Args:
             dynamic_type: 动态类型，如 "citywalk" / "song_learned"

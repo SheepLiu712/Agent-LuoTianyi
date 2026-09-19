@@ -34,10 +34,10 @@ from src.agent.handlers.stimulus.world_activity import (
     WORLD_ACTIVITY_STIMULUS_KINDS,
     WorldActivityHandler,
 )
-from src.agent.luotianyi_agent import LuoTianyiAgent
-from src.agent.reflex import CharacterReflex
 from src.agent.skills import Skills
+from src.agent.skills.adapters.memory import AgentMemory
 from src.agent.skills.cognitive import (
+    CharacterReplyGenerator,
     ExplicitMemoryIntentSkill,
     ImagePreprocessingSkill,
     ResponseCompositionSkill,
@@ -58,15 +58,10 @@ from src.agent.skills.expression.touch import TouchPolicy, TouchReactionSkill
 from src.agent.skills.knowledge.song_acceptance import SongKnowledgeAcceptanceSkill
 from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.agent.skills.reflection import ReflectionSkill
-from src.agent_runtime.agent_registry import AgentRegistry
 from src.agent_runtime.character_registry import CharacterRegistry
-from src.agent_runtime.character_runtime import CharacterRuntime
 from src.capabilities.speech.streaming import AsyncTTS
 from src.domain.agent import ActionKind, StimulusKind
 from src.resources.prepared_speech import PreparedSpeechResources
-from src.subconscious.character_mind import CharacterSubconscious
-from src.subconscious.memory import SubconsciousMemory
-from src.subconscious.preprocessing import ChatPreprocessor
 from src.system.database.vector_store import (
     clear_vector_store,
     get_vector_store,
@@ -86,7 +81,7 @@ if TYPE_CHECKING:
 
 
 class AgentRuntime:
-    """装配角色门面及旧角色运行时，管理查找和关闭生命周期。"""
+    """装配角色 Agent 及其私有技能，管理查找和关闭生命周期。"""
 
     def __init__(
         self,
@@ -115,61 +110,34 @@ class AgentRuntime:
                 tts_engine=AsyncTTS(capability_manager.speech),
                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
-                reply_composition_config=self.config.get("reply_composition", {}),
                 singing=capability_manager.singing,
                 media_resolver=capability_manager.media_resolver,
                 image_understanding=capability_manager.image_understanding,
             )
-            # 角色自身经验写入需要按角色持有记忆门面，供 LearnSing 等分支使用
-            self.character_memories: dict[str, SubconsciousMemory] = {}
+            self.character_memories: dict[str, AgentMemory] = {}
+            self.reply_generators: dict[str, CharacterReplyGenerator] = {}
+            self.response_compositions: dict[str, ResponseCompositionSkill] = {}
+            self.reflections: dict[str, ReflectionSkill] = {}
             # 动态发布按来源身份落库；角色上下文由能力自身的装配提供
             self.dynamic_publishing = DynamicPublishingSkill(capability_manager.dynamics)
             # 歌曲知识接纳使用与记忆查询相同的 agent.song_knowledge 配置，保证读写同一知识库
             self.song_knowledge = SongKnowledgeAcceptanceSkill(self.config.get("agent", {}).get("song_knowledge", {}))
-            # 公用的预处理器，用于处理用户输入事件，例如图片理解、歌曲实体抽取和日期线索抽取
-            self.preprocessor = ChatPreprocessor(
-                self.config.get("agent", {}).get("preprocessing", {}), capability_manager
-            )
-
             self.character_registry = CharacterRegistry(config.get("character_registry", {}))
-            self.character_runtimes = self._build_character_runtimes(
+            self._build_character_skills(
                 agent_config=self.config["agent"],
                 llm_service=llm_service,
-                capability_manager=capability_manager,
                 database_manager=database_manager,
-            )
-
-            self.skills.register(
-                ResponseCompositionSkill,
-                ResponseCompositionSkill(
-                    self.skills.reply_composition_config,
-                    lambda character_id: self.character_runtimes[character_id],
-                ),
-            )
-            self.skills.register(
-                ReflectionSkill,
-                ReflectionSkill(
-                    self.config.get("reflection", {}),
-                    lambda character_id: self.character_runtimes[character_id],
-                ),
             )
             self.skills.register(
                 IntentionalMemoryCommit,
-                IntentionalMemoryCommit(
-                    lambda character_id: self.character_runtimes[character_id].mind.memory,
-                ),
-            )
-
-            self.agent_registry = AgentRegistry(
-                self.config.get("agent_registry", {}),
-                self.character_registry,
-                self.character_runtimes,
+                IntentionalMemoryCommit(lambda character_id: self.character_memories[character_id]),
             )
 
             self.default_character_id = self.character_registry.default_character_id
+            self.character_ids = tuple(self.character_memories)
             self.context_factories = {
                 character_id: ContextFactory(character_id=character_id, database=database_manager.conversation_service)
-                for character_id in self.character_runtimes
+                for character_id in self.character_ids
             }
             self._agents = self._build_agents(first_login_names)
             set_agent_runtime(self)
@@ -186,7 +154,7 @@ class AgentRuntime:
             branches={CITYWALK_OBSERVATION_KIND: CitywalkObservationHandler(self.dynamic_publishing)}
         )
         agents: dict[str, Agent] = {}
-        for character_id in self.character_runtimes:
+        for character_id in self.character_ids:
             agents[character_id] = self._build_agent(character_id, first_login_names, world_activity)
         return agents
 
@@ -233,7 +201,7 @@ class AgentRuntime:
             (
                 StimulusKind.INTERACTION_DEADLINE,
                 ChatReplyHandler(
-                    self.skills.get(ResponseCompositionSkill),
+                    self.response_compositions[character_id],
                     self.skills.get(TextPreprocessingSkill),
                     self.skills.get(ExplicitMemoryIntentSkill),
                     self.skills.get(IntentionalMemoryCommit),
@@ -289,7 +257,7 @@ class AgentRuntime:
         return StimulusRouter(
             registrations,
             reflection_handler=ChatReflectionHandler(
-                self.skills.get(ReflectionSkill),
+                self.reflections[character_id],
                 self.skills.get(ConversationCompactionSkill),
             ),
         )
@@ -424,33 +392,33 @@ class AgentRuntime:
         capability_manager: CapabilityManager,
         database_manager: DatabaseManager,
     ) -> None:
-        """记录运行时外部依赖，并检查角色子运行时。"""
+        """记录运行时外部依赖，并检查角色私有技能。"""
         self.llm_service = llm_service
         self.capability_manager = capability_manager
         self.database_manager = database_manager
         self.ensure_dependencies()
 
     def ensure_dependencies(self) -> None:
-        """检查 AgentRuntime 和所有角色运行时依赖已经初始化。"""
+        """检查 AgentRuntime 和所有角色私有技能依赖已经初始化。"""
         required = {
             "llm_service": self.llm_service,
             "capability_manager": self.capability_manager,
             "database_manager": self.database_manager,
             "vector_store": self.vector_store,
-            "preprocessor": self.preprocessor,
             "character_registry": self.character_registry,
-            "character_runtimes": self.character_runtimes,
-            "agent_registry": self.agent_registry,
+            "character_memories": self.character_memories,
+            "reply_generators": self.reply_generators,
+            "response_compositions": self.response_compositions,
+            "reflections": self.reflections,
             "default_character_id": self.default_character_id,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
             raise RuntimeError(f"AgentRuntime dependencies are missing: {', '.join(missing)}")
-        if not self.character_runtimes:
-            raise RuntimeError("AgentRuntime dependency is missing: character_runtimes")
-        self.preprocessor.ensure_dependencies()
-        for runtime in self.character_runtimes.values():
-            runtime.ensure_dependencies()
+        if not self.character_ids:
+            raise RuntimeError("AgentRuntime dependency is missing: character_ids")
+        for memory in self.character_memories.values():
+            memory.ensure_dependencies()
 
     def get_agent(self, character_id: str | None = None) -> Agent:
         """返回角色的缓存门面；仅 None 选择默认角色。
@@ -466,22 +434,10 @@ class AgentRuntime:
             raise KeyError(character_id)
         return self._agents[character_id]
 
-    def get_character_runtime(self, character_id: str | None = None) -> CharacterRuntime:
-        """获取指定角色的完整运行时，包括意识、潜意识和角色档案。"""
-        profile = self.character_registry.get(character_id or self.default_character_id)
-        try:
-            return self.character_runtimes[profile.character_id]
-        except KeyError as exc:
-            raise KeyError(f"No character runtime registered for {profile.character_id}") from exc
-
-    def get_state(self, character_id: str | None = None):
-        """获取指定角色当前潜意识状态的快照。"""
-        return self.get_character_runtime(character_id).mind.get_state()
-
     def _dynamic_reply_skill(self, character_id: str) -> DynamicReplySkill:
         """按角色构造动态回复技能；角色名取角色档案，缺失时回落角色 ID。"""
-        profile = getattr(self.character_runtimes.get(character_id), "profile", None)
-        display_name = str(getattr(profile, "display_name", "") or character_id)
+        profile = self.character_registry.get(character_id)
+        display_name = profile.display_name or character_id
         return DynamicReplySkill(
             self.capability_manager.dynamics,
             character_id=character_id,
@@ -489,18 +445,16 @@ class AgentRuntime:
         )
 
     def _diary_writing_skill(self, character_id: str) -> DiaryWritingSkill:
-        """按角色装配日记生成上下文与旧日记/动态能力。"""
-        runtime = self.character_runtimes.get(character_id)
-        profile = getattr(runtime, "profile", None)
-        display_name = str(getattr(profile, "display_name", "") or character_id)
-        main_chat = getattr(getattr(runtime, "conscious", None), "main_chat", None)
+        """按角色装配日记生成上下文与日记/动态能力。"""
+        profile = self.character_registry.get(character_id)
+        generator = self.reply_generators[character_id]
         return DiaryWritingSkill(
             getattr(self.capability_manager, "diary", None),
             self.capability_manager.dynamics,
             character_id=character_id,
-            character_name=display_name,
-            character_persona=str(getattr(main_chat, "character_persona", "") or ""),
-            speaking_style=str(getattr(main_chat, "speaking_style", "") or ""),
+            character_name=profile.display_name or character_id,
+            character_persona=generator.character_persona,
+            speaking_style=generator.speaking_style,
         )
 
     def _singing_manager(self, character_id: str):
@@ -514,21 +468,19 @@ class AgentRuntime:
         fast_reply = self.character_registry.get(character_id).reflex.get("touch", {}).get("fast_reply", {})
         return TouchReactionSkill(fast_reply), TouchPolicy.from_config(fast_reply.get("policy"))
 
-    def _build_character_runtimes(
+    def _build_character_skills(
         self,
         *,
         agent_config: dict[str, Any],
         llm_service: LLMService,
-        capability_manager: CapabilityManager,
         database_manager: DatabaseManager,
-    ) -> dict[str, CharacterRuntime]:
-        """为每个启用角色创建潜意识、意识 Agent 和角色运行时对象。"""
-        character_runtimes: dict[str, CharacterRuntime] = {}
+    ) -> None:
+        """为每个启用角色创建记忆、回复生成、编排和反思技能。"""
         for profile in self.character_registry.characters.values():
             if not profile.enabled:
                 continue
             llm_modules = self._register_character_llm_modules(llm_service, profile.character_id, agent_config)
-            memory = SubconsciousMemory(
+            memory = AgentMemory(
                 agent_config["memory"],
                 llm_modules,
                 database_manager=database_manager,
@@ -536,30 +488,20 @@ class AgentRuntime:
                 owner_character_id=profile.character_id,
             )
             self.character_memories[profile.character_id] = memory
-            mind = CharacterSubconscious(
-                agent_config,
-                database_manager=database_manager,
-                capability_manager=capability_manager,
-                memory=memory,
-                llm_modules=llm_modules,
-                character_profile=profile,
-            )
-            conscious = LuoTianyiAgent(
-                agent_config,
-                database_manager,
-                capability_manager,
+            generator = CharacterReplyGenerator(
+                agent_config["main_chat"],
                 llm_modules["main_chat"],
-                character_profile=profile,
-                mind=mind,
+                profile,
             )
-            character_runtimes[profile.character_id] = CharacterRuntime(
-                profile=profile,
-                conscious=conscious,
-                mind=mind,
-                reflex=CharacterReflex(profile),
-                capability_manager=capability_manager,
+            self.reply_generators[profile.character_id] = generator
+            self.response_compositions[profile.character_id] = ResponseCompositionSkill(
+                self.config.get("reply_composition", {}),
+                character_id=profile.character_id,
+                memory=memory,
+                singing=self.capability_manager.singing,
+                generator=generator,
             )
-        return character_runtimes
+            self.reflections[profile.character_id] = ReflectionSkill(self.config.get("reflection", {}), memory)
 
     @staticmethod
     def _first_login_prepared_names(config: dict[str, Any]) -> tuple[str, ...]:
@@ -594,12 +536,8 @@ class AgentRuntime:
     def _register_character_llm_modules(
         llm_service: LLMService, character_id: str, agent_config: dict[str, Any]
     ) -> dict[str, Any]:
-        """为指定角色注册聊天、话题提取、记忆写入等 LLM 模块。"""
+        """为指定角色注册回复生成、记忆写入和画像更新 LLM 模块。"""
         modules: dict[str, Any] = {
-            "topic_extractor": llm_service.register_llm_module(
-                f"{character_id}_topic_extractor",
-                agent_config["topic_extractor"]["llm_module"],
-            ),
             "memory_writer": llm_service.register_llm_module(
                 f"{character_id}_memory_writer",
                 agent_config["memory"]["memory_writer"]["llm_module"],
@@ -612,10 +550,6 @@ class AgentRuntime:
                 f"{character_id}_main_chat",
                 agent_config["main_chat"]["llm_module"],
             ),
-            "date_detector": llm_service.register_llm_module(
-                f"{character_id}_date_detector",
-                agent_config["date_detector"]["llm_module"],
-            ),
         }
         return modules
 
@@ -624,7 +558,7 @@ _agent_runtime: AgentRuntime | None = None
 
 
 def set_agent_runtime(runtime: AgentRuntime | None) -> None:
-    """设置旧调用链使用的全局运行时引用；None 表示清除引用。"""
+    """设置进程内 AgentRuntime 引用；None 表示清除引用。"""
     global _agent_runtime
     _agent_runtime = runtime
 

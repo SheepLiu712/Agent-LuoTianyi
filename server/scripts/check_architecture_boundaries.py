@@ -71,12 +71,12 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check(
         "B6-旧管线代理零残留",
-        "G1 已删旧代理不得残留",
-        ("agent", "stage", "system", "world", "subconscious", "adapter"),
-        r"_for_pipeline|try_handle_reflex|get_character_runtime\([^)]*\)\.conscious",
-        allow=(
-            "agent/luotianyi_agent.py",
-            "agent/skills/cognitive/response_composition.py",
+        "G1 已删旧包、旧领域输入和角色对象图不得残留",
+        ("",),
+        (
+            r"src\.(chat_session|subconscious|legacy)\b|src\.domain\.(chat|stimulus)\b|"
+            r"\b(LuoTianyiAgent|CharacterRuntime|AgentRegistry|ChatPreprocessor|SubconsciousMemory)\b|"
+            r"_for_pipeline|try_handle_reflex|get_character_runtime\([^)]*\)\.conscious"
         ),
     ),
     Check(

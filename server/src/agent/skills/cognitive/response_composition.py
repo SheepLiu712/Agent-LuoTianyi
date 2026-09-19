@@ -3,95 +3,60 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field, replace
+from collections.abc import Awaitable
+from dataclasses import replace
 from typing import Any, Protocol
 
-from src.agent.main_chat import SongSegmentChat
-from src.agent.text_cleaning import build_sound_content
-from src.domain.memory_context import MemoryHit
+from src.agent.context.models import UserContextSnapshot
+from src.agent.skills.contracts import ComposedReply, ComposedResponse, ReplyDraft
 
 
-class _Mind(Protocol):
+class _Memory(Protocol):
     async def search_memory_context_for_topic(self, user_id: str, queries: list[str]): ...
-    async def build_sing_plan_for_topic(
-        self, attempts: list[str], excluded_segments=None, emotion_context: str = ""
-    ): ...
 
 
-class _Conscious(Protocol):
-    async def generate_topic_reply_for_pipeline(
+class _Singing(Protocol):
+    async def build_sing_plan(
         self,
-        user_id: str,
-        topic_content: str,
-        memory_hits=None,
-        fact_hits=None,
-        sing_plan=None,
-        conversation_history=None,
+        character_id: str,
+        attempts: list[str],
+        *,
+        excluded_segments: set[tuple[str, str]] | None = None,
+        emotion_context: str = "",
     ): ...
 
-
-class _Runtime(Protocol):
-    mind: _Mind
-    conscious: _Conscious
-    capability_manager: Any
+    def get_segment_lyrics(self, character_id: str, song: str, segment: str) -> str: ...
 
 
-@dataclass(frozen=True)
-class ReplyDraft:
-    """一条已生成的回复草稿；sing 非空表示演唱，否则为说话。"""
-
-    content: str
-    sound_content: str
-    tone: str
-    expression: str | None
-    sing: tuple[str, str] | None = None
-    lyrics: str = ""
-
-
-@dataclass(frozen=True)
-class ComposedReply:
-    """一次生成的完整回复草稿及其所依据的召回命中。"""
-
-    drafts: tuple[ReplyDraft, ...] = ()
-    memory_hits: tuple[MemoryHit, ...] = ()
-
-
-@dataclass
-class ComposedResponse:
-    """两阶段生成的内部结果：可选临时草稿，以及是否仍需等待正式结果。
-
-    provisional 为 None 表示本次无需先行回复；awaits_formal 为 True 时调用方
-    必须再 await formal() 取得正式草稿。该类型不出现在任何公开接口上。
-    """
-
-    provisional: tuple[ReplyDraft, ...] | None = None
-    pending: Callable[[], Awaitable[ComposedReply]] | None = None
-    _settled: ComposedReply | None = field(default=None, init=False, repr=False)
-
-    @property
-    def awaits_formal(self) -> bool:
-        """返回是否还有尚未取得的正式结果。"""
-        return self.pending is not None
-
-    async def formal(self) -> ComposedReply:
-        """取得正式结果；已取得时返回同一结果，不重复生成。"""
-        if self._settled is None:
-            if self.pending is None:
-                self._settled = ComposedReply()
-            else:
-                pending, self.pending = self.pending, None
-                self._settled = await pending()
-        return self._settled
+class _ReplyGenerator(Protocol):
+    async def generate(
+        self,
+        *,
+        reply_topic: str,
+        user_context: UserContextSnapshot,
+        conversation_history: str,
+        fact_hits: list[str],
+        memory_hits: list[str],
+        sing_plan: tuple[str, str] | None,
+    ) -> tuple[ReplyDraft, ...]: ...
 
 
 class ResponseCompositionSkill:
-    """包装角色潜意识的召回与意识的回复生成，输出与旧链路等价的回复草稿。"""
+    """隐藏召回、选歌、角色化生成和歌词补全，只暴露回复草稿 interface。"""
 
-    def __init__(self, config: dict[str, Any], runtime_provider: Callable[[str], _Runtime]) -> None:
-        """校验本层 config 并绑定按角色解析潜意识/意识的提供者。"""
+    def __init__(
+        self,
+        config: dict[str, Any],
+        *,
+        character_id: str,
+        memory: _Memory,
+        singing: _Singing,
+        generator: _ReplyGenerator,
+    ) -> None:
         if not isinstance(config, dict):
             raise TypeError("reply_composition 必须是字典")
+        if not isinstance(character_id, str) or not character_id.strip():
+            raise ValueError("character_id 不能为空")
         slow = config.get("slow_recall", {})
         if not isinstance(slow, dict):
             raise TypeError("reply_composition.slow_recall 必须是字典")
@@ -102,52 +67,52 @@ class ResponseCompositionSkill:
             tone=str(slow.get("provisional_tone", "") or "").strip(),
             expression=(str(slow.get("provisional_expression", "") or "").strip() or None),
         )
-        self._runtime_provider = runtime_provider
+        self._character_id = character_id
+        self._memory = memory
+        self._singing = singing
+        self._generator = generator
 
     async def compose(
         self,
         *,
-        character_id: str,
         user_id: str,
+        user_context: UserContextSnapshot,
         reply_topic: str,
         conversation_history: str,
         memory_queries: tuple[str, ...] = (),
         sing_attempts: tuple[str, ...] = (),
         excluded_segments: set[tuple[str, str]] | None = None,
     ) -> tuple[ReplyDraft, ...]:
-        """按话题召回记忆、按最近已唱排除选择演唱片段，并生成有序回复草稿。"""
+        """按话题召回记忆、选择演唱片段，并生成有序回复草稿。"""
         reply = await self._compose_reply(
-            character_id=character_id,
             user_id=user_id,
+            user_context=user_context,
             reply_topic=reply_topic,
             conversation_history=conversation_history,
             sing_attempts=sing_attempts,
             excluded_segments=excluded_segments,
-            recall=self._recall(character_id, user_id, memory_queries),
+            recall=self._recall(user_id, memory_queries),
         )
         return reply.drafts
 
     async def compose_staged(
         self,
         *,
-        character_id: str,
         user_id: str,
+        user_context: UserContextSnapshot,
         reply_topic: str,
         conversation_history: str,
         memory_queries: tuple[str, ...] = (),
         sing_attempts: tuple[str, ...] = (),
         excluded_segments: set[tuple[str, str]] | None = None,
     ) -> ComposedResponse:
-        """召回超时则先给出配置的临时草稿，正式草稿留待调用方继续 await。
-
-        仅供处理器内部分阶段使用；不改变 compose 的既有语义。
-        """
-        recall = asyncio.ensure_future(self._recall(character_id, user_id, memory_queries))
+        """召回超时则先给出配置的临时草稿，正式草稿留待调用方继续 await。"""
+        recall = asyncio.ensure_future(self._recall(user_id, memory_queries))
 
         async def formal() -> ComposedReply:
             return await self._compose_reply(
-                character_id=character_id,
                 user_id=user_id,
+                user_context=user_context,
                 reply_topic=reply_topic,
                 conversation_history=conversation_history,
                 sing_attempts=sing_attempts,
@@ -163,69 +128,49 @@ class ResponseCompositionSkill:
         return ComposedResponse(provisional=None, pending=formal)
 
     def _waits_for_slow_recall(self, memory_queries: tuple[str, ...]) -> bool:
-        """只有配置了非空临时文案和正数等待时长的召回才分阶段。"""
         return bool(memory_queries) and self._provisional_after > 0 and bool(self._provisional.content)
 
-    async def _recall(self, character_id: str, user_id: str, memory_queries: tuple[str, ...]):
+    async def _recall(self, user_id: str, memory_queries: tuple[str, ...]):
         if not memory_queries:
             return None
-        runtime = self._runtime_provider(character_id)
-        return await runtime.mind.search_memory_context_for_topic(user_id, list(memory_queries))
+        return await self._memory.search_memory_context_for_topic(user_id, list(memory_queries))
 
     async def _compose_reply(
         self,
         *,
-        character_id: str,
         user_id: str,
+        user_context: UserContextSnapshot,
         reply_topic: str,
         conversation_history: str,
         sing_attempts: tuple[str, ...],
         excluded_segments: set[tuple[str, str]] | None,
-        recall,
+        recall: Awaitable,
     ) -> ComposedReply:
-        runtime = self._runtime_provider(character_id)
         context = await recall
         memory_hits = context.render_for_prompt() if context is not None else []
         hits = tuple(getattr(context, "hits", ()) or ()) if context is not None else ()
         sing_plan = None
         if sing_attempts:
-            candidate = await runtime.mind.build_sing_plan_for_topic(
-                list(sing_attempts), excluded_segments=excluded_segments
+            candidate = await self._singing.build_sing_plan(
+                self._character_id,
+                list(sing_attempts),
+                excluded_segments=excluded_segments,
             )
             if candidate and candidate[1]:
                 sing_plan = candidate
-        lines = await runtime.conscious.generate_topic_reply_for_pipeline(
-            user_id=user_id,
-            topic_content=reply_topic,
-            memory_hits=memory_hits,
-            fact_hits=None,
-            sing_plan=sing_plan,
+        drafts = await self._generator.generate(
+            reply_topic=reply_topic,
+            user_context=user_context,
             conversation_history=conversation_history,
+            memory_hits=memory_hits,
+            fact_hits=[],
+            sing_plan=sing_plan,
         )
-        drafts = []
-        for line in lines:
-            draft = _draft(line)
+        enriched: list[ReplyDraft] = []
+        for draft in drafts:
             if draft.sing is not None:
                 song, segment = draft.sing
-                lyrics = runtime.capability_manager.singing.get_segment_lyrics(character_id, song, segment)
+                lyrics = self._singing.get_segment_lyrics(self._character_id, song, segment)
                 draft = replace(draft, lyrics=lyrics or "")
-            drafts.append(draft)
-        return ComposedReply(drafts=tuple(drafts), memory_hits=hits)
-
-
-def _draft(line: Any) -> ReplyDraft:
-    if isinstance(line, SongSegmentChat):
-        return ReplyDraft(
-            content=line.get_content(), sound_content="", tone="", expression=None, sing=(line.song, line.segment)
-        )
-    content = getattr(line, "content", "") or ""
-    sound = getattr(line, "sound_content", "") or ""
-    if content and not sound:
-        sound = build_sound_content(content)
-    return ReplyDraft(
-        content=content,
-        sound_content=sound,
-        tone=getattr(line, "tone", "") or "",
-        expression=(getattr(line, "expression", "") or None),
-        sing=None,
-    )
+            enriched.append(draft)
+        return ComposedReply(drafts=tuple(enriched), memory_hits=hits)

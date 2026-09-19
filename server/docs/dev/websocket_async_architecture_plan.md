@@ -66,7 +66,7 @@
 - [src/agent/luotianyi_agent.py](src/agent/luotianyi_agent.py) - 从单次请求流程改为可重入任务流程，明确首包与后写入边界。
 - [src/agent/conversation_manager.py](src/agent/conversation_manager.py) - 上下文读取与摘要更新节流策略，避免并发竞争。
 - [src/agent/planner.py](src/agent/planner.py) - 接入快速决策信号、好感度/日程输入槽位。
-- [src/agent/main_chat.py](src/agent/main_chat.py) - 响应结构支持文本增量或分句输出，为分段 TTS 提供上游粒度。
+- `src/agent/skills/cognitive/response_generation.py` - 生成强类型回复草稿，为分段 TTS 提供上游粒度。
 - [src/memory/memory_manager.py](src/memory/memory_manager.py) - 检索与写回编排策略调整。
 - [src/memory/memory_search.py](src/memory/memory_search.py) - 去重机制升级、术语工具前置、上下文竞争覆盖。
 - [src/memory/memory_write.py](src/memory/memory_write.py) - 写入幂等、相似度判重、更新策略。

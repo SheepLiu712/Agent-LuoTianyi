@@ -9,8 +9,7 @@ from flashtext import KeywordProcessor
 class SongEntityLinker:
     """Fast song-name and lyric entity linker.
 
-    This belongs to the subconscious layer because it produces recall cues for
-    later planning/reply generation rather than a surface-level response.
+    This capability produces verified song cues for Agent text preprocessing.
     """
 
     def __init__(self, config: dict, songname_file: str | None = None, lyric_file: str | None = None):
@@ -20,10 +19,10 @@ class SongEntityLinker:
         configured_songname_file = config.get("songname_file")
         configured_lyric_file = config.get("lyric_file")
         self.songname_file = songname_file or configured_songname_file or str(
-            Path(__file__).resolve().parents[2] / "res" / "knowledge" / "song_name_keywords.txt"
+            Path(__file__).resolve().parents[3] / "res" / "knowledge" / "song_name_keywords.txt"
         )
         self.lyric_file = lyric_file or configured_lyric_file or str(
-            Path(__file__).resolve().parents[2] / "res" / "knowledge" / "song_lyric_keywords.txt"
+            Path(__file__).resolve().parents[3] / "res" / "knowledge" / "song_lyric_keywords.txt"
         )
         self._load_keywords_from_file()
 

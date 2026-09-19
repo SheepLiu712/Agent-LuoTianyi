@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from src.domain import ConversationItem
-from src.domain.chat import ContextInfo
+from src.domain.conversation_type import ContextInfo
 from src.system.database.redis_buffer import RedisBuffer, WatchError
 from src.system.database.sql_database import Conversation, ConversationContext, User
 from src.system.database.sql_writer import run_sql_write

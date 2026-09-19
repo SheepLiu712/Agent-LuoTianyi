@@ -7,7 +7,7 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
-from src.agent.context import ConversationSnapshot, RecalledMemoryContext
+from src.agent.context import ConversationSnapshot, RecalledMemoryContext, UserContextSnapshot
 from src.stage import ChatStage
 from src.system.user_interface.websocket_service import WebSocketConnection
 
@@ -149,6 +149,7 @@ class StageContextFactory:
             entries.extend(values)
 
         context.recalled_memory = RecalledMemoryContext()
+        context.user = SimpleNamespace(read=UserContextSnapshot)
         context.close = close
         context.conversation = SimpleNamespace(
             append=append,

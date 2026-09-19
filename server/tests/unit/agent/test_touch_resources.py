@@ -41,7 +41,7 @@ def test_touch_resource_probability_miss_returns_none(tmp_path, monkeypatch):
 @pytest.mark.parametrize("failure", ["deleted", "unreadable"])
 def test_touch_resource_read_failure_returns_none(tmp_path, monkeypatch, failure):
     skill, audio = configured_skill(tmp_path)
-    monkeypatch.setattr("src.agent.reflex.touch.random.choice", lambda files: next(iter(files)))
+    monkeypatch.setattr("src.agent.skills.expression._touch_resources.random.choice", lambda files: next(iter(files)))
     if failure == "deleted":
         audio.unlink()
     else:

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import src.domain.agent as d
-from src.agent.reflex.touch import TouchFastReplyBuilder
+from src.agent.skills.expression._touch_resources import TouchFastReplyBuilder
 from src.resources.prepared_speech import load_prepared_speech
 from src.utils.logger import get_logger
 
@@ -132,7 +132,7 @@ class TouchReactionSkill:
         if not self._builder.should_use_fast_path():
             get_logger(__name__).error("Touch fast path missed")
             return None
-        audio_path = self._builder._pick_audio_file()
+        audio_path = self._builder.pick_audio_file()
         if audio_path is None:
             return None
         try:
@@ -140,7 +140,7 @@ class TouchReactionSkill:
         except OSError:
             get_logger(__name__).exception("Touch voice read failed path=%s", audio_path)
             return None
-        expression_id = self._builder._expression_for(audio_path) or "normal"
+        expression_id = self._builder.expression_for(audio_path) or "normal"
         return TouchReaction(
             audio_ref=d.MediaRef(media_id=self._media_ids[audio_path]),
             expression_id=expression_id,

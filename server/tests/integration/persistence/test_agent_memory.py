@@ -10,9 +10,9 @@ if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.domain.memory_record import MemoryRecord, MemoryType, MemoryVisibility
-from src.subconscious.memory import SubconsciousMemory
-import src.subconscious.memory.memory_write as memory_write_module
-from src.subconscious.memory.memory_write import MemoryWriter
+from src.agent.skills.adapters.memory import AgentMemory
+import src.agent.skills.adapters.memory.writer as memory_write_module
+from src.agent.skills.adapters.memory.writer import MemoryWriter
 from src.system.database.database_service import DatabaseManager
 from src.system.database.vector_store import Document
 from src.utils.helpers import load_config
@@ -130,7 +130,7 @@ class FakeMemoryStore:
 
 
 class FakeDatabaseManager:
-    """测试用 DatabaseManager，只暴露 SubconsciousMemory 需要的接口。"""
+    """测试用 DatabaseManager，只暴露 AgentMemory 需要的接口。"""
 
     def __init__(self):
         self.memory_store = FakeMemoryStore()
@@ -186,7 +186,7 @@ def fake_vector_store():
 
 @pytest.fixture
 def fake_memory(memory_config, fake_llm_modules, fake_database_manager, fake_vector_store):
-    return SubconsciousMemory(
+    return AgentMemory(
         memory_config,
         fake_llm_modules,
         database_manager=fake_database_manager,
@@ -252,7 +252,7 @@ async def test_search_memory_context_reads_canonical_record_from_real_database(
         ),
         embedding_ids=[embedding_id],
     )
-    memory = SubconsciousMemory(
+    memory = AgentMemory(
         memory_config,
         fake_llm_modules,
         database_manager=real_database_manager,
@@ -362,7 +362,7 @@ async def test_write_topic_memories_with_fake_llm_writes_when_context_has_memory
         "memory_writer": FakeLLMModule(memory_responder),
         "user_profile_updater": FakeLLMModule("no_update"),
     }
-    memory = SubconsciousMemory(
+    memory = AgentMemory(
         memory_config,
         llm_modules,
         database_manager=fake_database_manager,
@@ -400,7 +400,7 @@ async def test_write_topic_memories_with_fake_llm_does_not_write_without_memory(
         "memory_writer": FakeLLMModule({"user_memory": [], "event_memory": []}),
         "user_profile_updater": FakeLLMModule("no_update"),
     }
-    memory = SubconsciousMemory(
+    memory = AgentMemory(
         memory_config,
         llm_modules,
         database_manager=fake_database_manager,
@@ -433,7 +433,7 @@ async def test_update_user_profile_with_fake_llm_updates_when_context_has_memory
         "memory_writer": FakeLLMModule({"user_memory": [], "event_memory": []}),
         "user_profile_updater": FakeLLMModule(profile_responder),
     }
-    memory = SubconsciousMemory(
+    memory = AgentMemory(
         memory_config,
         llm_modules,
         database_manager=fake_database_manager,
@@ -459,7 +459,7 @@ async def test_update_user_profile_with_fake_llm_keeps_profile_without_memory(me
         "memory_writer": FakeLLMModule({"user_memory": [], "event_memory": []}),
         "user_profile_updater": FakeLLMModule("no_update"),
     }
-    memory = SubconsciousMemory(
+    memory = AgentMemory(
         memory_config,
         llm_modules,
         database_manager=fake_database_manager,
@@ -481,7 +481,7 @@ async def test_update_user_profile_with_fake_llm_keeps_profile_without_memory(me
 @pytest.mark.asyncio
 async def test_write_topic_memories_with_real_llm_optional(memory_config, real_llm_modules, fake_database_manager, fake_vector_store):
     """真实 LLM：明显事实应能触发记忆写入；默认跳过。"""
-    memory = SubconsciousMemory(
+    memory = AgentMemory(
         memory_config,
         real_llm_modules,
         database_manager=fake_database_manager,
@@ -510,7 +510,7 @@ async def test_write_topic_memories_with_real_llm_optional(memory_config, real_l
 @pytest.mark.asyncio
 async def test_update_user_profile_with_real_llm_optional(memory_config, real_llm_modules, fake_database_manager, fake_vector_store):
     """真实 LLM：明显长期上下文应能更新画像；默认跳过。"""
-    memory = SubconsciousMemory(
+    memory = AgentMemory(
         memory_config,
         real_llm_modules,
         database_manager=fake_database_manager,

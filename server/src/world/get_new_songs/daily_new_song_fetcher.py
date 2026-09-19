@@ -16,7 +16,7 @@ import shutil
 import zlib
 from typing import Dict, Any, Optional, List, Set
 from src.world.get_new_songs.vcpedia_fetcher import VCPediaFetcher
-from src.subconscious.music_knowledge.song_database import init_song_db, get_song_session, Song
+from src.capabilities.song_knowledge import Song, get_song_session, init_song_db
 
 logger = get_logger("DailyNewSongFetcher")
 CURRENT_YEAR = datetime.datetime.now().year

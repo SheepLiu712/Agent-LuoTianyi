@@ -296,8 +296,8 @@ class ChatReplyHandler:
         if normal_topic:
             reply_topic = f"{reply_topic}\n{normal_topic}"
         drafts = await self._composition.compose(
-            character_id=identity.character_id,
             user_id=identity.user_id,
+            user_context=plans.context.user.read(),
             reply_topic=reply_topic,
             conversation_history=_render_history(plans.context.conversation.read()),
             memory_queries=(),
@@ -328,8 +328,8 @@ class ChatReplyHandler:
         basis = request.interaction.interaction_revision
         plans.set_interruptible(True)
         staged = await self._composition.compose_staged(
-            character_id=identity.character_id,
             user_id=identity.user_id,
+            user_context=plans.context.user.read(),
             reply_topic=reply_topic,
             conversation_history=_render_history(snapshot),
             memory_queries=(reply_topic,),

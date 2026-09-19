@@ -44,6 +44,11 @@ class WebSocketAdapter:
         self._connections: dict[WebSocketConnection, _ConnectionDelivery] = {}
         self._binding_lock = asyncio.Lock()
 
+    @staticmethod
+    def supports_input(event: WSMessage) -> bool:
+        """返回该协议适配器是否认识此业务输入类型。"""
+        return event.event_type in _INPUT_EVENTS
+
     def submit_output(self, output: StageOutput) -> asyncio.Future[None]:
         """接收业务输出或控制信号，返回实际投递结果 Future；无绑定或容量不足立即抛 SinkRejectedError。"""
         binding = self._routes.get(output.interaction_id)

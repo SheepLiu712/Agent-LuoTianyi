@@ -8,6 +8,7 @@ from routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.context import UserContextSnapshot
 from src.agent.context.recalled_memory_context import RecalledMemoryContext
 from src.agent.handlers.stimulus.chat import ChatReplyHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
@@ -36,6 +37,7 @@ def context(user_id="u", character_id="luotianyi"):
         interaction_id="i", user_id=user_id, character_id=character_id))
     value.conversation = _Conversation()
     value.recalled_memory = RecalledMemoryContext()
+    value.user = SimpleNamespace(read=UserContextSnapshot)
     return value
 
 
@@ -201,7 +203,7 @@ async def test_slow_recall_never_reenters_the_public_stimulus_interface():
     assert all(isinstance(plan, d.ActionPlan) for plan in sink.values)
 
 
-class _Mind:
+class _Memory:
     def __init__(self, delay):
         self.delay = delay
 
@@ -210,21 +212,27 @@ class _Mind:
             await asyncio.sleep(self.delay)
         return MemoryContext(hits=(MemoryHit(rendered_text="记忆1", score=0.9, query=queries[0]),))
 
-    async def build_sing_plan_for_topic(self, attempts, excluded_segments=None, emotion_context=""):
+class _Generator:
+    async def generate(self, **kwargs):
+        return (ReplyDraft(content="正式回复", sound_content="正式回复", tone="happy", expression="微笑脸"),)
+
+
+class _Singing:
+    async def build_sing_plan(self, *args, **kwargs):
         return None
 
-
-class _Conscious:
-    async def generate_topic_reply_for_pipeline(self, **kwargs):
-        return [SimpleNamespace(content="正式回复", sound_content="正式回复",
-                                tone="happy", expression="微笑脸")]
+    def get_segment_lyrics(self, *args, **kwargs):
+        return ""
 
 
-class _Runtime:
-    def __init__(self, delay):
-        self.mind = _Mind(delay)
-        self.conscious = _Conscious()
-        self.capability_manager = SimpleNamespace(singing=None)
+def _composition(config, delay):
+    return ResponseCompositionSkill(
+        config,
+        character_id="luotianyi",
+        memory=_Memory(delay),
+        singing=_Singing(),
+        generator=_Generator(),
+    )
 
 
 SLOW_RECALL_CONFIG = {
@@ -240,10 +248,10 @@ SLOW_RECALL_CONFIG = {
 
 @pytest.mark.asyncio
 async def test_skill_emits_configured_provisional_draft_only_when_recall_is_slow():
-    skill = ResponseCompositionSkill(SLOW_RECALL_CONFIG, lambda character_id: _Runtime(0.5))
+    skill = _composition(SLOW_RECALL_CONFIG, 0.5)
 
     staged = await skill.compose_staged(
-        character_id="luotianyi", user_id="u", reply_topic="你好",
+        user_id="u", user_context=UserContextSnapshot(), reply_topic="你好",
         conversation_history="", memory_queries=("你好",))
 
     assert staged.provisional is not None
@@ -261,13 +269,11 @@ async def test_skill_emits_configured_provisional_draft_only_when_recall_is_slow
 async def test_fast_recall_and_missing_config_produce_no_provisional_draft():
     patient = {"slow_recall": dict(SLOW_RECALL_CONFIG["slow_recall"],
                                    provisional_after_seconds=30)}
-    fast = await ResponseCompositionSkill(
-        patient, lambda character_id: _Runtime(0)).compose_staged(
-        character_id="luotianyi", user_id="u", reply_topic="你好",
+    fast = await _composition(patient, 0).compose_staged(
+        user_id="u", user_context=UserContextSnapshot(), reply_topic="你好",
         conversation_history="", memory_queries=("你好",))
-    unconfigured = await ResponseCompositionSkill(
-        {}, lambda character_id: _Runtime(0.2)).compose_staged(
-        character_id="luotianyi", user_id="u", reply_topic="你好",
+    unconfigured = await _composition({}, 0.2).compose_staged(
+        user_id="u", user_context=UserContextSnapshot(), reply_topic="你好",
         conversation_history="", memory_queries=("你好",))
 
     assert fast.provisional is None

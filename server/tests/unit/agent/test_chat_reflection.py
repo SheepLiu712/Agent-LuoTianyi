@@ -94,11 +94,11 @@ class _Mind:
         self.profiles = []
 
     async def write_topic_memories(self, user_id, current_dialogue, related_memories=None,
-                                   conversation_history=None):
-        self.memories.append((user_id, current_dialogue, conversation_history))
+                                   history=None, commit=True):
+        self.memories.append((user_id, current_dialogue, history))
         return {"written": True}
 
-    async def update_user_profile_by_context(self, user_id, context):
+    async def update_user_profile_by_context(self, user_id, context, commit=True):
         self.profiles.append((user_id, context))
         return "新"
 
@@ -106,7 +106,7 @@ class _Mind:
 @pytest.mark.asyncio
 async def test_reflection_skill_maps_memory_and_profile_calls():
     mind = _Mind()
-    skill = ReflectionSkill({}, lambda character_id: SimpleNamespace(mind=mind))
+    skill = ReflectionSkill({}, mind)
     await skill.consolidate_memories(character_id="luotianyi", user_id="u",
                                      current_dialogue="对话", conversation_history="历史")
     result = await skill.update_profile(character_id="luotianyi", user_id="u",

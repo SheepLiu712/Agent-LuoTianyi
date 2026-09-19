@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.subconscious.memory import SubconsciousMemory
+from src.agent.skills.adapters.memory import AgentMemory
 
 
 class LearnedSongExperienceSkill:
@@ -12,7 +12,7 @@ class LearnedSongExperienceSkill:
     同日同内容由既有事件记忆去重保证幂等，因此同一学习任务重投不会产生第二条经验。
     """
 
-    def __init__(self, memory: SubconsciousMemory | None) -> None:
+    def __init__(self, memory: AgentMemory | None) -> None:
         self._memory = memory
 
     async def commit(self, *, character_id: str, song_id: str, learning_job_id: str) -> bool:

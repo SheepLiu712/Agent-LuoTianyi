@@ -2,28 +2,31 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 
-class _Mind(Protocol):
+class _Memory(Protocol):
     async def write_topic_memories(
-        self, user_id: str, current_dialogue: str, related_memories=None, conversation_history=None
-    ): ...
-    async def update_user_profile_by_context(self, user_id: str, context: dict): ...
+        self,
+        user_id: str,
+        history: str,
+        current_dialogue: str = "",
+        related_memories: list[str] | None = None,
+        commit: bool = True,
+    ) -> dict[str, Any]: ...
 
-
-class _Runtime(Protocol):
-    mind: _Mind
+    async def update_user_profile_by_context(
+        self, user_id: str, context: dict[str, Any], commit: bool = True
+    ) -> str | None: ...
 
 
 class ReflectionSkill:
-    """包装角色潜意识的记忆写入与画像更新，只维护长期认知数据，不产生用户可见输出。"""
+    """通过注入的长期记忆实现沉淀与画像更新，不了解运行时聚合对象。"""
 
-    def __init__(self, config: dict[str, Any], runtime_provider: Callable[[str], _Runtime]) -> None:
-        """校验本层 config 并绑定按角色解析潜意识的提供者。"""
+    def __init__(self, config: dict[str, Any], memory: _Memory) -> None:
         if not isinstance(config, dict):
             raise TypeError("reflection 必须是字典")
-        self._runtime_provider = runtime_provider
+        self._memory = memory
 
     async def consolidate_memories(
         self,
@@ -34,20 +37,20 @@ class ReflectionSkill:
         conversation_history: str = "",
         related_memories: list[str] | None = None,
     ) -> dict[str, Any]:
-        """依据本次已结算对话提取并写入长期记忆，返回底层提交结果。"""
-        runtime = self._runtime_provider(character_id)
-        return await runtime.mind.write_topic_memories(
+        _ = character_id
+        return await self._memory.write_topic_memories(
             user_id=user_id,
+            history=conversation_history,
             current_dialogue=current_dialogue,
-            related_memories=related_memories,
-            conversation_history=conversation_history,
+            related_memories=related_memories or [],
+            commit=True,
         )
 
     async def update_profile(
         self, *, character_id: str, user_id: str, summary: str, recent_conversation: list[str]
     ) -> str | None:
-        """按当前对话总结与近期对话更新用户画像；无更新时返回 None。"""
-        runtime = self._runtime_provider(character_id)
-        return await runtime.mind.update_user_profile_by_context(
-            user_id=user_id, context={"summary": summary, "recent_conversation": list(recent_conversation)}
+        _ = character_id
+        return await self._memory.update_user_profile_by_context(
+            user_id=user_id,
+            context={"summary": summary, "recent_conversation": list(recent_conversation)},
         )

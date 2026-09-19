@@ -33,21 +33,37 @@ OUTPUTS_DIR = Path(
 )
 RESOURCE_ROOT = Path(os.environ.get("SONGLEARNER_RESOURCE_DIR", SERVER_ROOT / "res" / "song_learner"))
 
-clean_music_workflow = import_module("pipeline.clean_music_workflow")
 download_qq_song = import_module("pipeline.download_qq_song")
-make_clear_lrc = import_module("pipeline.make_clear_lrc")
-make_llm_lrc = import_module("pipeline.make_llm_lrc")
-make_song_json = import_module("pipeline.make_song_json")
-msaf_segment_boundaries = import_module("pipeline.msaf_segment_boundaries")
 workflow_status = import_module("pipeline.workflow_status")
 
-clean_audio_file = clean_music_workflow.clean_audio_file
 download_song_and_lyric = download_qq_song.download_song_and_lyric
-generate_clear_lrc = make_clear_lrc.generate_clear_lrc
-generate_llm_lrc = make_llm_lrc.generate_llm_lrc
-generate_song_json = make_song_json.generate_song_json
-generate_boundary_inst = msaf_segment_boundaries.generate_boundary_inst
 WorkflowStatus = workflow_status.WorkflowStatus
+
+
+def clean_audio_file(*args, **kwargs):
+    """仅在真正执行重型音频步骤时加载 PyTorch 分离流水线。"""
+    workflow = import_module("pipeline.clean_music_workflow")
+    return workflow.clean_audio_file(*args, **kwargs)
+
+
+def generate_boundary_inst(*args, **kwargs):
+    workflow = import_module("pipeline.msaf_segment_boundaries")
+    return workflow.generate_boundary_inst(*args, **kwargs)
+
+
+def generate_clear_lrc(*args, **kwargs):
+    workflow = import_module("pipeline.make_clear_lrc")
+    return workflow.generate_clear_lrc(*args, **kwargs)
+
+
+def generate_llm_lrc(*args, **kwargs):
+    workflow = import_module("pipeline.make_llm_lrc")
+    return workflow.generate_llm_lrc(*args, **kwargs)
+
+
+def generate_song_json(*args, **kwargs):
+    workflow = import_module("pipeline.make_song_json")
+    return workflow.generate_song_json(*args, **kwargs)
 
 ERROR_CODE_TABLE = {
     10: ("SL010", "startup", "参数、路径或工作流状态初始化失败"),

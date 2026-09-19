@@ -51,7 +51,12 @@ class IntentionalMemoryCommitMixin:
 
         threshold = float(self.config.get("user_memory_dedup_threshold", 0.72))
         existing_id = await self._similar_user_memory_id(
-            vector_store, memory_store, user_id, text, threshold, owner_character_id,
+            vector_store,
+            memory_store,
+            user_id,
+            text,
+            threshold,
+            owner_character_id,
         )
         if existing_id is not None:
             logger.debug(f"Skip duplicate user_memory for user {user_id}: {text[:50]}")
@@ -67,6 +72,20 @@ class IntentionalMemoryCommitMixin:
             source="chat",
             content=text,
         )
+        created = await self._write_canonical_record(memory_store, record, commit)
+        if not created:
+            return record_id, False
+
+        await self._write_update(memory_store, user_id, text, record_id, commit)
+        await self._project_record(vector_store, memory_store, record, commit)
+        return record_id, True
+
+    @staticmethod
+    async def _write_canonical_record(
+        memory_store: MemoryStore,
+        record: DomainMemoryRecord,
+        commit: bool,
+    ) -> bool:
         written_record_id = await run_sync_owned(
             memory_store.write_agent_memory_record,
             record,
@@ -74,14 +93,24 @@ class IntentionalMemoryCommitMixin:
             embedding_ids=[],
             commit=commit,
         )
-        if not written_record_id:
-            existing_record = await run_sync_owned(memory_store.get_agent_memory_record, record_id)
-            if existing_record is not None and await run_sync_owned(
-                memory_store.agent_memory_record_has_embeddings, record_id,
-            ):
-                return record_id, False
-            raise CanonicalMemoryCommitError("canonical memory commit failed")
+        if written_record_id:
+            return True
+        existing_record = await run_sync_owned(memory_store.get_agent_memory_record, record.id)
+        if existing_record is not None and await run_sync_owned(
+            memory_store.agent_memory_record_has_embeddings,
+            record.id,
+        ):
+            return False
+        raise CanonicalMemoryCommitError("canonical memory commit failed")
 
+    @staticmethod
+    async def _write_update(
+        memory_store: MemoryStore,
+        user_id: str,
+        text: str,
+        record_id: str,
+        commit: bool,
+    ) -> None:
         update_cmd = MemoryUpdateCommand(type="write_user_memory", content=text, uuid=None)
         try:
             await run_sync_owned(memory_store.write_memory_update, user_id, update_cmd, commit=commit)
@@ -90,16 +119,23 @@ class IntentionalMemoryCommitMixin:
                 await run_sync_owned(memory_store.delete_agent_memory_record, record_id, commit=commit)
             raise
 
+    @staticmethod
+    async def _project_record(
+        vector_store: VectorStore,
+        memory_store: MemoryStore,
+        record: DomainMemoryRecord,
+        commit: bool,
+    ) -> None:
         today = time.strftime("%Y-%m-%d")
         doc = Document(
-            content=text,
+            content=record.content,
             metadata={
                 "source": "memory_writer",
                 "timestamp": today,
                 "event_date": today,
                 "memory_type": "user_memory",
-                "user_id": user_id,
-                "owner_character_id": owner_character_id,
+                "user_id": record.subject_user_id,
+                "owner_character_id": record.owner_character_id,
             },
         )
         ids: list[str] = []
@@ -109,8 +145,8 @@ class IntentionalMemoryCommitMixin:
                 raise MemoryVectorCommitError("memory vector commit returned no identifier")
             await run_sync_owned(
                 memory_store.link_agent_memory_embeddings,
-                record_id,
-                chunk_texts=[text],
+                record.id,
+                chunk_texts=[record.content],
                 embedding_ids=ids,
                 commit=commit,
             )
@@ -118,9 +154,8 @@ class IntentionalMemoryCommitMixin:
             if ids:
                 await run_sync_owned(vector_store.delete_documents, ids)
             if commit:
-                await run_sync_owned(memory_store.delete_agent_memory_record, record_id, commit=commit)
+                await run_sync_owned(memory_store.delete_agent_memory_record, record.id, commit=commit)
             raise
-        return record_id, True
 
     async def _similar_user_memory_id(
         self,

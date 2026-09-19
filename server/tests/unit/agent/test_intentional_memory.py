@@ -6,6 +6,7 @@ from routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.context import UserContextSnapshot
 from src.agent.handlers.stimulus.chat import (
     _MEMORY_ACK_REPLY_TOPIC_PREFIX,
     ChatReplyHandler,
@@ -27,6 +28,7 @@ class _Context:
     def __init__(self, *, user_id="u"):
         self.identity = type("Identity", (), {"interaction_id": "i", "user_id": user_id, "character_id": "luotianyi"})()
         self.conversation = _Conversation()
+        self.user = type("User", (), {"read": UserContextSnapshot})()
 
 
 class _Understanding:
@@ -139,8 +141,8 @@ async def test_memory_acknowledgement_uses_composition_hint_after_commit():
     assert action.expression == d.ChangeExpression(expression_id="smile")
     assert len(composer.calls) == 1
     compose_call = composer.calls[0]
-    assert compose_call["character_id"] == "luotianyi"
     assert compose_call["user_id"] == "u"
+    assert compose_call["user_context"] == UserContextSnapshot()
     assert compose_call["reply_topic"].startswith(_MEMORY_ACK_REPLY_TOPIC_PREFIX)
     assert compose_call["reply_topic"].endswith("我喜欢乌龙茶")
     assert compose_call["conversation_history"] == ""

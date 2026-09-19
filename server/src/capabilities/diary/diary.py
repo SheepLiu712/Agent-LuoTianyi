@@ -158,8 +158,8 @@ class DiaryCapability:
             user_id: 目标用户 ID
             character_id: 角色 ID（默认 luotianyi）
             character_name: 角色显示名称（默认 洛天依）
-            character_persona: 角色人设描述，从 CharacterRuntime 获取
-            speaking_style: 角色表达风格，从 CharacterRuntime 获取
+            character_persona: 角色人设描述
+            speaking_style: 角色表达风格
             diary_date: 日记日期（YYYY-MM-DD），默认今天。支持为过去日期补写。
 
         Returns:

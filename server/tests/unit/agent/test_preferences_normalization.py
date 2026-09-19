@@ -1,28 +1,24 @@
-import json
-import sys
-from pathlib import Path
+"""角色回复生成器只消费已经规范化的用户上下文。"""
 
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
-
-from src.agent.luotianyi_agent import LuoTianyiAgent
+from src.agent.context.models import UserContextSnapshot, UserPreferences
+from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
 
 
-class FakeLogger:
-    def __init__(self):
-        self.warnings = []
+def test_reply_generator_renders_typed_preferences():
+    context = UserContextSnapshot(
+        preferences=UserPreferences(
+            relationship="伙伴",
+            speaking_style="简洁",
+            personality_traits=("温柔", "坦率"),
+            custom_context="我喜欢音乐",
+            personality_text="不要使用敬语",
+        )
+    )
 
-    def warning(self, message):
-        self.warnings.append(message)
+    rendered = CharacterReplyGenerator._build_preference_context(context)
 
-
-def test_agent_preference_context_accepts_double_encoded_json_without_warning():
-    agent = object.__new__(LuoTianyiAgent)
-    agent.logger = FakeLogger()
-    payload = json.dumps(json.dumps({"relationship": "伙伴"}, ensure_ascii=False), ensure_ascii=False)
-
-    context = agent._build_preference_context(payload)
-
-    assert "用户希望你是他的：伙伴" in context
-    assert agent.logger.warnings == []
+    assert "用户希望你是他的：伙伴" in rendered
+    assert "用户希望你的表达风格偏向：简洁" in rendered
+    assert "用户希望你的性格特点：温柔、坦率" in rendered
+    assert "用户喜欢音乐" in rendered
+    assert "不要使用敬语" in rendered

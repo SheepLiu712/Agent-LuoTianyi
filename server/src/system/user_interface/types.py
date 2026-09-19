@@ -1,5 +1,9 @@
 
 from pydantic import BaseModel
+
+BUSINESS_INPUT_EVENTS = frozenset(
+    {"user_text", "user_message", "message", "chat_message", "chat", "user_typing", "user_image"}
+)
 class ChatRequest(BaseModel):
     text: str
     username: str

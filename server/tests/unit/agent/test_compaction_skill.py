@@ -1,4 +1,4 @@
-"""共享压缩技能及旧聊天链路的迁移行为。"""
+"""共享对话压缩技能。"""
 
 import asyncio
 from types import SimpleNamespace
@@ -7,7 +7,6 @@ import pytest
 
 from context_support import database, entry, factory
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
-from src.chat_session.dependency.conversation_service import ConversationService
 
 
 class LLM:
@@ -45,23 +44,6 @@ async def test_skill_generates_result_without_mutating_context(database, keep):
     assert result.summary.text == "新总结"
     assert ("消息3" in llm.calls[0]["recent_conversation"]) is (keep == 0)
     assert context.conversation.read() == before
-    assert len(llm.registrations) == 1
-
-
-@pytest.mark.asyncio
-async def test_legacy_entry_applies_shared_skill_and_refreshes_snapshot(database):
-    llm = LLM()
-    compactor = skill(llm)
-    legacy = ConversationService({}, SimpleNamespace(conversation_service=database), llm)
-    assert len(llm.registrations) == 1
-    legacy.wire_dependencies(database=legacy.database, llm_service=llm, conversation_compaction=compactor)
-    assert await legacy.compress_context_if_needed("u") is None
-    context = await factory(database).create("i", user_id="u")
-    await context.conversation.append((entry(1), entry(2), entry(3)))
-    result = await legacy.compress_context_if_needed("u")
-    assert result.summary == "新总结"
-    assert [e["uuid"] for e in result.conversations] == ["3"]
-    assert len(database.get_history_from_db("u", 0, 10, "luotianyi")) == 3
     assert len(llm.registrations) == 1
 
 
@@ -113,7 +95,7 @@ async def test_runtime_registers_compaction_once_for_all_characters(runtime_depe
     kwargs["config"]["skills"] = {"conversation_compaction": {"llm_module": {"model": "test"}}}
     runtime = AgentRuntime(**kwargs)
     try:
-        assert len(runtime.character_runtimes) == 2
+        assert runtime.character_ids == ("luotianyi", "miku")
         assert calls.count("conversation_context_summary") == 1
         assert isinstance(runtime.skills.get(ConversationCompactionSkill), ConversationCompactionSkill)
     finally:
