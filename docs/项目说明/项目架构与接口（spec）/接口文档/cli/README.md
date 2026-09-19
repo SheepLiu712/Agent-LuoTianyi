@@ -81,6 +81,38 @@
 - redaction 在唯一序列化/诊断边界递归执行：键名大小写归一后命中 `password`、`token`、`authorization`、`audio_base64` 的值输出为 `"***"`；已知敏感值即使出现在普通字符串或异常消息中也替换为 `"***"`。
 - `session.connect` 可从进程环境读取 `password_env` 指定的变量；环境变量名可以输出，变量值必须登记为敏感值。命令行直接提供密码虽可用，但帮助、回显和输出均不得显示其值。
 
+#### 1.6 媒体回复与重放（目标，S4）
+
+- S4 只填充 S3 已发布的 reply 输出结构，不增加或删除 `reply.wait/read.data.audio` 字段：
+  - `available`：回复完整、非临时、无 `audio_error`，且索引文件存在、非空并可识别为音频时为 `true`；
+  - `byte_count`：索引文件当前字节数，不读取时为 `0`；
+  - `format`：由文件解码确认的格式小写名（S4 为 `wav`），不可识别时为 `null`；
+  - `reference`：仅输出文件名形式的本地引用，不输出绝对路径；无可用音频时为 `null`。
+- reply 输出保留按到达顺序聚合的 `expressions`。stdout、stderr 和 JSONL 均不得包含音频 Base64 正文。
+
+新增动作：
+
+| 动作 | 必需/可选参数 | 成功行为 |
+| --- | --- | --- |
+| `audio.replay` | 必需 `reply_uuid` | 只引用当前会话中已完整结束、非临时、无音频错误且已成功落盘的回复；校验文件格式后，由播放后端阻塞至正常结束，返回 `playback="completed"` 和与 reply 相同的音频元数据 |
+
+- 播放后端是无 GUI 的可替换 interface：`play(path: Path) -> PlaybackResult`。生产默认后端先解析 WAV，再使用当前平台已有播放能力；不得依赖 Qt、Live2D 或 GUI 播放状态。
+- `audio.replay` 失败均为 S3 退出码 `2`、`category="assertion"`，并使用以下稳定分类：
+
+| code | 条件 |
+| --- | --- |
+| `AUDIO_REPLY_NOT_FOUND` | 当前会话不存在指定回复 |
+| `AUDIO_NOT_READY` | 回复存在但尚未收到终止包 |
+| `AUDIO_EPHEMERAL` | `is_ephemeral=true` 或 `display_in_chat=false` |
+| `AUDIO_STREAM_FAILED` | 回复以 `audio_error=true` 结束；保留文本但不可重放 |
+| `AUDIO_FILE_MISSING` | 回复声称有落盘索引，但文件不存在或为空 |
+| `AUDIO_FORMAT_INVALID` | 文件存在但不能解码为支持的 WAV |
+| `DEVICE_UNAVAILABLE` | 文件合法，但默认播放后端没有可用设备或平台播放能力 |
+| `PLAYBACK_INTERRUPTED` | 播放已开始但未正常结束 |
+
+- 离线默认验收范围：索引规则、WAV 解码校验、媒体元数据、全部稳定失败分类，以及注入 Fake 后端时的“开始并正常结束”。
+- 真实设备上“播放开始并正常结束”属于 external 验收：要求可用输出设备和操作者显式启用；默认测试不得访问真实音频设备，也不得把 `device_unavailable` 伪装成成功。
+
 ### 2. 无 GUI 会话门面（当前 interface，S2 交付）
 
 #### 2.1 归属与调用者
