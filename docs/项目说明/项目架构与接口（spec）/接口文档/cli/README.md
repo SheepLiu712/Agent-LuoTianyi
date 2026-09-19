@@ -16,12 +16,70 @@
 
 > 各切片开始（SPEC 阶段）时在此逐项填写；只写本切片要交付的条目，不写未来切片。
 
-### 1. CLI 动作与机器输出（目标，待 S3 填写）
+### 1. CLI 动作与机器输出（目标，S3）
 
-- 动作名与语义：待填写
-- JSONL 记录字段（schema 版本 / 时间 / 会话 ID / 动作 ID / 事件类别 / 状态 / 耗时 / 关联 ID / 数据摘要 / 错误对象）：待填写
-- 进程退出码分类：待填写
-- 失败方式：待填写
+#### 1.1 入口与动作信封
+
+- 模块路径：`client/src/cli/`；可执行入口为 `client/cli.py`。实现只依赖 Python 标准库并复用 §2 的 `HeadlessSession`。
+- 非交互模式接收单个 JSON 动作或从 stdin 逐行接收 JSON 动作；交互模式仅增加 stderr 提示符，仍把每行 JSON 交给同一动作执行器，不形成第二套业务路径。
+- 输入信封：`{"action": str, "action_id": str?, "params": object?}`。缺失 `action_id` 时生成本进程内唯一 ID；`params` 默认 `{}`。未知字段允许忽略，未知动作、非对象输入、字段类型错误或缺少必需参数属于输入错误。
+- 一次进程只持有一个 `HeadlessSession`。除 `session.connect` 外的会话动作使用当前会话；进程结束时关闭会话。
+
+#### 1.2 S3 动作
+
+| 动作 | 必需/可选参数 | 成功行为 |
+| --- | --- | --- |
+| `session.connect` | `base_url`、`username`；`password` 或 `password_env` 二选一；可选 `verify_ssl`、`timeout` | 创建 `HeadlessSession` 并等待 ready；不得请求持久化凭据 |
+| `session.status` | 无 | 返回当前状态；尚未连接时返回 `new` |
+| `session.close` | 无 | 幂等关闭当前会话；未创建会话也成功 |
+| `chat.send_text` | 非空 `text`；可选 `client_msg_id`、`ack_timeout` | 调用 `HeadlessSession.send_text`；缺少 ID 时生成；只以肯定 ACK 判定该动作通过，不把 ACK 当作回复 |
+| `reply.wait` | `reply_uuid`；可选 `timeout`、`non_empty`、`contains`、`regex` | 等待完整回复，随后执行文本断言 |
+| `reply.read` | `reply_uuid`；可选 `non_empty`、`contains`、`regex` | 读取已聚合回复；不存在或未完成属于动作失败，完整回复执行文本断言 |
+
+- 文本断言针对 `texts` 按到达顺序以空字符串连接后的结果；`non_empty=true` 要求结果非空，`contains` 要求包含给定字符串，`regex` 使用 Python 正则搜索。断言不满足使用 `ASSERTION_FAILED`。
+- `reply.wait/read` 的 `data` 固定包含：`reply_uuid`、`text`、`texts`、`expressions`、`complete`、`audio`、`audio_error`、`error_code`、`display_in_chat`、`is_ephemeral`。`audio` 从 S3 起固定为 `{available, byte_count, format, reference}`；默认不输出 Base64 或绝对路径，S4 只填充这些既有字段。
+
+#### 1.3 JSONL 输出
+
+- schema 版本为字符串 `"1.0"`。stdout 只允许 UTF-8 JSON Lines；每个已解析动作恰好产生一条终态记录，stderr 只承载交互提示或经脱敏的诊断。
+- 终态记录字段：
+
+```json
+{
+  "schema_version": "1.0",
+  "timestamp": "RFC3339 UTC",
+  "session_id": "本进程稳定 ID",
+  "action_id": "输入或生成的动作 ID",
+  "action": "稳定动作名或 null",
+  "event": "action_result",
+  "status": "passed | failed | timed_out",
+  "duration_ms": 0,
+  "correlation_id": "client_msg_id/reply_uuid 或 null",
+  "data": {},
+  "error": null
+}
+```
+
+- 成功时 `error=null`；失败时 `data` 只保留已确认的非敏感证据。时间和耗时允许测试注入，但字段不可省略。
+- 稳定错误对象为 `{"code": str, "message": str, "category": "assertion | input | auth_transport | timeout"}`。S3 使用的稳定 code 至少包括：`INVALID_INPUT`、`UNKNOWN_ACTION`、`SESSION_NOT_READY`、`AUTH_OR_TRANSPORT_FAILED`、`ACK_REJECTED`、`REPLY_NOT_FOUND`、`ASSERTION_FAILED`、`TIMEOUT`。
+
+#### 1.4 退出码
+
+| 退出码 | 分类 | 例子 |
+| --- | --- | --- |
+| `0` | 全部动作通过 | 肯定 ACK、断言通过、正常关闭 |
+| `2` | 断言或可观察结果失败 | 文本断言失败、reply 不存在、否定 ACK |
+| `3` | 输入/配置错误 | JSON 非法、缺参、未知动作、正则非法 |
+| `4` | 认证/传输错误 | 登录失败、会话未 ready、连接或发送失败 |
+| `5` | 超时 | ready、ACK 或回复等待超时 |
+
+- 多动作进程继续处理后续合法输入；最终退出码取所有动作中数值最大的非零码。输入行无法解析时仍输出一条 `action=null` 的结构化失败记录。
+
+#### 1.5 凭据与敏感内容遮蔽
+
+- `password`、message/login token、`Authorization` 值和音频 Base64 不得出现在 stdout、stderr、稳定错误对象或未处理异常文本中。
+- redaction 在唯一序列化/诊断边界递归执行：键名大小写归一后命中 `password`、`token`、`authorization`、`audio_base64` 的值输出为 `"***"`；已知敏感值即使出现在普通字符串或异常消息中也替换为 `"***"`。
+- `session.connect` 可从进程环境读取 `password_env` 指定的变量；环境变量名可以输出，变量值必须登记为敏感值。命令行直接提供密码虽可用，但帮助、回显和输出均不得显示其值。
 
 ### 2. 无 GUI 会话门面（当前 interface，S2 交付）
 
