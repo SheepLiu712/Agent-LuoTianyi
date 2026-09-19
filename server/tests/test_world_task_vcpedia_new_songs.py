@@ -102,6 +102,7 @@ def test_vcpedia_run_once_fetches_live_songs_and_writes_result(monkeypatch, tmp_
     monkeypatch.setattr(fetcher_module, "KNOWLEDGE_DIR", keyword_dir)
     monkeypatch.setattr(fetcher_module, "SONG_NAME_KEYWORDS_FILE", keyword_dir / "song_name_keywords.txt")
     monkeypatch.setattr(fetcher_module, "SONG_LYRIC_KEYWORDS_FILE", keyword_dir / "song_lyric_keywords.txt")
+    monkeypatch.setattr(fetcher_module.time, "sleep", lambda _seconds: None)
 
     task = VCPediaNewSongTask(task_config)
     task.initialize(SimpleNamespace(llm_service=None))

@@ -9,7 +9,7 @@ from requests import Response
 
 from src.utils.logger import get_logger
 
-_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0 Safari/537.36"
+_USER_AGENT = "AgentLuo/1.0 (+https://github.com/SheepLiu712/Agent-LuoTianyi)"
 _LOG = get_logger(__name__)
 
 

@@ -7,6 +7,16 @@
 
 ## 已完成
 
+### 2026-09-19 上游 PR 审查修复：诚实 UA 与 live 测试节流隔离
+
+- 门禁审计：迁移 PRD 原先只要求保留挑战识别与 curl 兜底，未约束客户端身份；world 既有公开入口足够，不改变 Python interface、配置字段、数据库结构或任务报告。SPEC commit `b4c0abe` 增加诚实、可识别应用 User-Agent 以及 requests/curl 身份一致要求。
+- Red commit `ee2f07c` 从公开列表与详情入口检查 requests 请求头和 curl 参数。旧 Chrome 伪装 UA 下 focused 用例 **4 failed，4.84s**，四项均精确失败于实际值 `Mozilla/5.0 ... Chrome/122.0 ...` 与期望应用身份不一致；首次经 `conda run` 转发失败输出时触发 conda 自身 GBK `UnicodeEncodeError`，随后使用同一 `lty` 环境 Python 直接重跑取得有效 Red。
+- Green 将共享内部常量改为 `AgentLuo/1.0 (+https://github.com/SheepLiu712/Agent-LuoTianyi)`，requests 与 curl 继续复用同一常量，挑战识别、状态校验和 fallback 不变。focused 用例 **4 passed，3.36s**。
+- live 测试恢复对 `fetcher_module.time.sleep` 的 monkeypatch，仅取消测试中的每候选 0.8 秒等待，生产节流代码未改。真实任务用例 **1 passed，205.23s**，结果 `ok=true`、`added=371`、`failed=31`，不再因列表请求传输失败而整体退出。
+- 同日直接 A/B 诊断中，诚实 UA 与旧 Chrome UA 对模板 API 均返回 **HTTP 200、33655 bytes**；站点反爬结果具有时变性，因此不把旧 UA 当日也成功作为继续伪装浏览器的理由，验收以诚实身份契约和完整 live 任务通过为准。
+- 四组离线回归 `tests/world tests/test_world_task_vcpedia_new_songs.py tests/test_world_runtime_config.py tests/test_world_task_event_cleanup.py -k 'not live'`、禁 cacheprovider、独立 basetemp：**116 passed / 1 deselected，8.56s**；同范围 collect-only：**116/117 collected，1 deselected，4.75s**。抓取包与四组测试 `compileall`、`git diff --check` 通过。
+- 部署说明：`server/docs/requirements.txt` 已包含 `mwparserfromhell` 与 `zhconv`，`server/setup.bat` 会安装该清单；存量部署升级此分支前必须重新安装 Server requirements。此修复不处理 `crawler.activated` 层级，也不引入 `refactor/agent` 的事实投递与 Agent 接纳边界。
+
 ### 2026-09-09 兼容迁移基线提交前验证
 
 - 范围：按用户明确授权，将既有两个 fetcher、内部 `wiki_api.py`/`wikitext_parser.py`、requirements、公开入口回归与两个固定语料、真实测试隔离、PRD 和本进度记录作为一个完整 baseline commit 收录。未开始 owner 新功能，未修改产品实现、测试或公开 interface；没有补造过去 SPEC/Red/Green commit。
