@@ -1,8 +1,10 @@
 import json
+from io import StringIO
 
 import pytest
 
 from src.cli.actions import ActionExecutor, ExitCode, parse_action
+from src.cli.main import main
 from src.cli.output import Redactor, serialize_record
 from src.session import (
     AggregatedReply,
@@ -66,6 +68,19 @@ def _executor(session=None, *, env=None):
         environ=env or {},
         session_id="session-test",
     ), session
+
+
+def _connect(executor):
+    executor.execute(
+        {
+            "action": "session.connect",
+            "params": {
+                "base_url": "http://localhost:60030",
+                "username": "alice",
+                "password": "secret",
+            },
+        }
+    )
 
 
 @pytest.mark.parametrize(
@@ -135,6 +150,23 @@ def test_redactor_covers_nested_fields_strings_and_jsonl():
     for secret in ("plain-secret", "secret-token", "QUJDREVGRw=="):
         assert secret not in output
     assert json.loads(output)["password"] == "***"
+
+
+def test_noninteractive_entrypoint_keeps_stdout_jsonl_and_stderr_separate():
+    stdout = StringIO()
+    stderr = StringIO()
+
+    exit_code = main(
+        ["--action", json.dumps({"action": "session.connect", "params": {}})],
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert exit_code == ExitCode.INPUT_ERROR
+    lines = stdout.getvalue().splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["error"]["code"] == "INVALID_INPUT"
+    assert stderr.getvalue() == ""
 
 
 def test_session_lifecycle_uses_same_session_and_environment_password():
@@ -231,6 +263,7 @@ def test_send_text_reports_ack_success_rejection_and_timeout(
 )
 def test_reply_wait_and_read_apply_text_assertions(assertions):
     executor, _session = _executor(FakeSession(replies={"reply-1": _reply()}))
+    _connect(executor)
     wait_record, wait_exit = executor.execute(
         {
             "action": "reply.wait",
@@ -253,6 +286,7 @@ def test_reply_wait_and_read_apply_text_assertions(assertions):
 
 def test_reply_assertion_failure_and_timeout_have_distinct_exit_codes():
     executor, _session = _executor(FakeSession(replies={"reply-1": _reply("hello")}))
+    _connect(executor)
     failed, failed_exit = executor.execute(
         {
             "action": "reply.read",
