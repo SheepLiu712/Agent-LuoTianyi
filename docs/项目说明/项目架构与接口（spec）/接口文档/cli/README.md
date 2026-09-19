@@ -111,7 +111,27 @@
 | `PLAYBACK_INTERRUPTED` | 播放已开始但未正常结束 |
 
 - 离线默认验收范围：索引规则、WAV 解码校验、媒体元数据、全部稳定失败分类，以及注入 Fake 后端时的“开始并正常结束”。
-- 真实设备上“播放开始并正常结束”属于 external 验收：要求可用输出设备和操作者显式启用；默认测试不得访问真实音频设备，也不得把 `device_unavailable` 伪装成成功。
+- 真实设备上"播放开始并正常结束"属于 external 验收：要求可用输出设备和操作者显式启用；默认测试不得访问真实音频设备，也不得把 `device_unavailable` 伪装成成功。
+
+#### 1.7 图片动作（目标，S5）
+
+同一会话内保持"当前图片选择"状态；状态由 CLI 动作执行器会话级持有（与 PRD"会话包含当前图片选择"一致）。
+
+| 动作 | 必需/可选参数 | 成功行为 |
+| --- | --- | --- |
+| `image.select` | 必需 `path`；可选 `ack_timeout` | 先发送选择开始信号并取得肯定 ACK；再校验本地文件（可读、类型、大小），通过后记录当前选择；输出 `selected=true`、`reference`（仅文件名）、`mime_type`、`byte_count` |
+| `image.cancel` | 可选 `ack_timeout` | 发送取消信号并取得肯定 ACK 后清空当前选择；输出 `selected=false` |
+| `image.send` | 可选 `path`（显式路径覆盖当前选择）、`client_msg_id`、`ack_timeout` | 使用当前选择或显式路径，经当前客户端既有编码（读文件 → 临时副本 → Base64 → MIME）发送图片并取得肯定 ACK；输出 `ack=true` 与关联 ID |
+
+- 选择状态语义：选择失败（信号未 ACK 或本地校验未通过）时一并清空已有选择，避免误发旧文件；取消后 `image.send` 必须以 `IMAGE_NOT_SELECTED` 失败（不可误发之前选中的文件）；发送成功后保留当前选择（允许重复发送）。
+- 媒体规则来源：`client/src/utils/image_rules.py` 为客户端唯一规则来源，镜像服务端 `server/src/legacy/chat_input_adapter.py` 的 `ALLOWED_IMAGE_MIME_TYPES` 与 `MAX_IMAGE_BYTES`；`client/tests/test_image_rules_mirror.py` 读取服务端源码断言一致以防漂移。其他模块（含 CLI）不得另行维护独立常量。
+- 编码复用：`client/src/utils/image_encoding.py` 承载客户端既有图片编码管道（自 `MessageProcessor` 抽取并与 GUI 共用，不复制第二套）；MIME 映射覆盖 `jpg/jpeg/png/gif/bmp/webp`（与规则集合一致）。
+- 稳定失败分类：
+  - `IMAGE_FILE_NOT_FOUND` / `IMAGE_FILE_UNREADABLE` / `IMAGE_FILE_EMPTY` / `IMAGE_TYPE_UNSUPPORTED` / `IMAGE_NOT_SELECTED` → `category="input"`、退出码 3；
+  - `ACK_REJECTED`、`TIMEOUT` 沿用 S3 语义；发送失败不得自动改用新的 `client_msg_id` 重发。
+  - stdout、stderr 与 JSONL 不出现本地绝对路径（只输出 `reference` 文件名）。
+- 门面增补（§2 当前 interface 的 S5 扩展）：`HeadlessSession.select_image()`、`cancel_image_selection()`、`send_image(image_path, *, client_msg_id, ack_timeout)`；编码失败抛 `SessionImageError`。
+- 真实链路依赖 S1 契约与部署一致性门槛；未满足时只交付客户端状态行为并显式标记 external skip。
 
 ### 2. 无 GUI 会话门面（当前 interface，S2 交付）
 
