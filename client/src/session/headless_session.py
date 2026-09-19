@@ -286,6 +286,16 @@ class HeadlessSession:
             raise SessionNotReadyError("session is not ready")
         return self._network_client.mark_dynamics_read()
 
+    def get_preferences(self) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.get_preferences()
+
+    def overwrite_preferences(self, preferences: dict) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.overwrite_preferences(preferences)
+
     def get_reply(self, reply_uuid: str) -> AggregatedReply | None:
         with self._condition:
             reply = self._replies.get(reply_uuid)

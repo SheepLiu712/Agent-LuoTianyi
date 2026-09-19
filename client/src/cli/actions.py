@@ -63,6 +63,7 @@ class ActionExecutor:
         self._playback = playback_backend or DefaultPlaybackBackend()
         self._image_selection: dict | None = None
         self._dynamics_state: dict | None = None
+        self._preferences_snapshot: dict | None = None
         self.session_id = session_id or f"s-{uuid.uuid4().hex[:12]}"
         self.redactor = Redactor()
 
@@ -142,6 +143,9 @@ class ActionExecutor:
             "dynamics.read": self._read_dynamic,
             "dynamics.load": self._load_dynamics,
             "dynamics.post": self._post_dynamic,
+            "preferences.open": self._open_preferences,
+            "preferences.read": self._read_preferences,
+            "preferences.update": self._update_preferences,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -475,6 +479,58 @@ class ActionExecutor:
     @staticmethod
     def _dynamic_key(item: dict) -> str:
         return str(item.get("id") or item.get("dynamic_id") or "")
+
+    def _open_preferences(self, _params: dict) -> tuple[dict, None]:
+        session = self._require_session()
+        snapshot = dict(session.get_preferences())
+        self._preferences_snapshot = snapshot
+        return {"preferences": snapshot}, None
+
+    def _read_preferences(self, params: dict) -> tuple[dict, None]:
+        if self._preferences_snapshot is None:
+            return self._open_preferences(params)
+        return {"preferences": dict(self._preferences_snapshot)}, None
+
+    def _update_preferences(self, params: dict) -> tuple[dict, None]:
+        session = self._require_session()
+        values = params.get("values")
+        if not isinstance(values, dict):
+            raise ValueError("values must be an object")
+        replace = params.get("replace", False)
+        if not isinstance(replace, bool):
+            raise ValueError("replace must be a boolean")
+        if replace:
+            payload = dict(values)
+        else:
+            latest = dict(session.get_preferences())
+            payload = {**latest, **values}
+        response = session.overwrite_preferences(payload)
+        self._ensure_positive_ack(response, correlation_id=None)
+        reread = dict(session.get_preferences())
+        target_keys = list(values.keys())
+        mismatched = [key for key in target_keys if reread.get(key) != values.get(key)]
+        if mismatched:
+            diff = {
+                key: {"expected": values.get(key), "actual": reread.get(key)}
+                for key in mismatched
+            }
+            raise _ActionFailure(
+                ExitCode.ASSERTION_FAILED,
+                "PREFERENCES_NOT_CONFIRMED",
+                "preference update was not confirmed by re-read",
+                "assertion",
+                data={
+                    "updated_keys": target_keys,
+                    "mismatched_keys": mismatched,
+                    "diff": diff,
+                },
+            )
+        self._preferences_snapshot = reread
+        return {
+            "updated_keys": target_keys,
+            "confirmed": True,
+            "preferences": reread,
+        }, None
 
     def _replay_audio(self, params: dict) -> tuple[dict, str]:
         reply_uuid = _required_string(params, "reply_uuid")
