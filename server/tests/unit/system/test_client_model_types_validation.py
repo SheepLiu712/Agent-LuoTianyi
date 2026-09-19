@@ -108,7 +108,7 @@ def test_binding_referencing_missing_type_is_error(tmp_path, monkeypatch):
 
 def test_binding_kind_mismatch_is_error(tmp_path, monkeypatch):
     config = _base_config()
-    config["capabilities"]["image_understanding"]["vlm_module"]["vlm"]["client_model_type"] = "main_chat"
+    config["infrastructure"]["image_understanding"]["vlm_module"]["vlm"]["client_model_type"] = "main_chat"
     messages = _type_errors(_validator(tmp_path, monkeypatch).validate(config)).values()
     assert any("不能绑定到 vlm" in message for message in messages)
 

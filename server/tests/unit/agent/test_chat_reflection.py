@@ -1,4 +1,5 @@
 """回复结算后的反思：记忆沉淀、压缩与画像更新。"""
+
 from dataclasses import replace
 from datetime import datetime
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ from src.agent.handlers.stimulus.chat import ChatReflectionHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.reflection import ReflectionSkill
 from routing_support import Sink, request
+from skill_support import invocation
 
 
 class _Conversation:
@@ -30,8 +32,9 @@ class _Conversation:
 
 
 def context(interaction_id="i", user_id="u", character_id="luotianyi"):
-    value = SimpleNamespace(identity=SimpleNamespace(
-        interaction_id=interaction_id, user_id=user_id, character_id=character_id))
+    value = SimpleNamespace(
+        identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id, character_id=character_id)
+    )
     value.conversation = _Conversation()
     return value
 
@@ -41,11 +44,13 @@ class _Reflection:
         self.consolidated = []
         self.profiles = []
 
-    async def consolidate_memories(self, **kwargs):
+    async def consolidate_memories(self, skill_invocation, **kwargs):
+        kwargs["invocation"] = skill_invocation
         self.consolidated.append(kwargs)
         return {"ok": True}
 
-    async def update_profile(self, **kwargs):
+    async def update_profile(self, skill_invocation, **kwargs):
+        kwargs["invocation"] = skill_invocation
         self.profiles.append(kwargs)
         return "新画像"
 
@@ -66,21 +71,23 @@ def reflection_request():
 
 
 def agent(reflection, compaction):
-    return Agent(character_id="luotianyi", stimulus_router=StimulusRouter(
-        [], reflection_handler=ChatReflectionHandler(reflection, compaction)))
+    return Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter([], reflection_handler=ChatReflectionHandler(reflection, compaction)),
+    )
 
 
 @pytest.mark.asyncio
 async def test_reflection_consolidates_compacts_and_updates_profile():
     ctx = context()
-    await ctx.conversation.append((ConversationEntry(
-        entry_id="a1", timestamp=datetime.now(), source="agent", content=TextContent("你好呀")),))
+    await ctx.conversation.append(
+        (ConversationEntry(entry_id="a1", timestamp=datetime.now(), source="agent", content=TextContent("你好呀")),)
+    )
     reflection, compaction = _Reflection(), _Compaction()
-    report = await agent(reflection, compaction).handle_stimulus(
-        reflection_request(), Sink(), context=ctx)
+    report = await agent(reflection, compaction).handle_stimulus(reflection_request(), Sink(), context=ctx)
     assert reflection.consolidated[0]["current_dialogue"] == "user: 你好\nagent: 你好呀"
-    assert reflection.consolidated[0]["user_id"] == "u"
-    assert reflection.consolidated[0]["character_id"] == "luotianyi"
+    assert reflection.consolidated[0]["invocation"].user_id == "u"
+    assert reflection.consolidated[0]["invocation"].character_id == "luotianyi"
     assert compaction.calls == 1
     assert reflection.profiles[0]["summary"] == ""
     assert reflection.profiles[0]["recent_conversation"] == ["agent: 你好呀"]
@@ -93,8 +100,7 @@ class _Mind:
         self.memories = []
         self.profiles = []
 
-    async def write_topic_memories(self, user_id, current_dialogue, related_memories=None,
-                                   history=None, commit=True):
+    async def write_topic_memories(self, user_id, current_dialogue, related_memories=None, history=None, commit=True):
         self.memories.append((user_id, current_dialogue, history))
         return {"written": True}
 
@@ -106,11 +112,9 @@ class _Mind:
 @pytest.mark.asyncio
 async def test_reflection_skill_maps_memory_and_profile_calls():
     mind = _Mind()
-    skill = ReflectionSkill({}, mind)
-    await skill.consolidate_memories(character_id="luotianyi", user_id="u",
-                                     current_dialogue="对话", conversation_history="历史")
-    result = await skill.update_profile(character_id="luotianyi", user_id="u",
-                                        summary="总结", recent_conversation=["agent: 你好"])
+    skill = ReflectionSkill({}, {"luotianyi": mind})
+    await skill.consolidate_memories(invocation(), current_dialogue="对话", conversation_history="历史")
+    result = await skill.update_profile(invocation(), summary="总结", recent_conversation=["agent: 你好"])
     assert mind.memories == [("u", "对话", "历史")]
     assert mind.profiles == [("u", {"summary": "总结", "recent_conversation": ["agent: 你好"]})]
     assert result == "新"

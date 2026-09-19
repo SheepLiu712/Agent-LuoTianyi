@@ -10,7 +10,7 @@ from src.agent import Agent
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import ImagePreprocessingSkill, TextPreprocessingSkill
-from src.capabilities.media_resolution import MediaResolutionError, ResolvedMedia
+from src.infrastructure.media import MediaResolutionError, ResolvedMedia
 
 
 class _Understanding:

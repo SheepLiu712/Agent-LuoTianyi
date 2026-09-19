@@ -7,8 +7,8 @@ from typing import Final
 from src.adapter.websocket import WebSocketAdapter
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
-from src.capabilities import CapabilityManager
 from src.domain.stage import StageState
+from src.infrastructure.runtime import InfrastructureRuntime
 from src.stage import StageManager, WorldStage
 from src.system.database import DatabaseManager, set_default_database_manager
 from src.system.due_event_provider import EventStoreDueEventProvider
@@ -35,7 +35,7 @@ class SystemRuntime:
     world: WorldRuntime
     database_manager: DatabaseManager
     agent_runtime: AgentRuntime
-    capability_manager: CapabilityManager
+    infrastructure: InfrastructureRuntime
     llm_service: LLMService
     client_llm_executor: ClientLLMExecutor
     observability: ObservabilityService
@@ -54,7 +54,7 @@ class SystemRuntime:
     async def initialize(cls, config: dict, observability: ObservabilityService | None = None) -> SystemRuntime:
         owns_observability = observability is None
         database_manager: DatabaseManager | None = None
-        capability_manager: CapabilityManager | None = None
+        infrastructure: InfrastructureRuntime | None = None
         world: WorldRuntime | None = None
         agent_runtime: AgentRuntime | None = None
         runtime: SystemRuntime | None = None
@@ -79,8 +79,8 @@ class SystemRuntime:
             database_manager = DatabaseManager(config.get("database", {}))
             set_default_database_manager(database_manager)
 
-            # 4. 初始化能力管理器。SpeechCapability 会在这里启动 TTS worker。
-            capability_manager = CapabilityManager(config.get("capabilities", {}), llm_service)
+            # 4. 初始化共享基础设施。SpeechBackend 会在这里启动 TTS worker。
+            infrastructure = InfrastructureRuntime(config.get("infrastructure", {}), llm_service)
 
             # 5. 初始化箱庭世界运行时
             world = WorldRuntime(config.get("world", {}))
@@ -96,7 +96,7 @@ class SystemRuntime:
             agent_runtime = AgentRuntime(
                 agent_config,
                 llm_service,
-                capability_manager,
+                infrastructure,
                 database_manager,
             )
 
@@ -106,16 +106,18 @@ class SystemRuntime:
                 world=world,
                 database_manager=database_manager,
                 agent_runtime=agent_runtime,
-                capability_manager=capability_manager,
+                infrastructure=infrastructure,
                 llm_service=llm_service,
                 client_llm_executor=client_llm_executor,
                 observability=observability,
                 owns_observability=owns_observability,
-                chat_adapter=WebSocketAdapter({
-                    **config.get("chat_adapter", {}),
-                    "media_store": config.get("capabilities", {}).get("media_resolution", {}),
-                },
-                                               default_character_id=agent_runtime.default_character_id),
+                chat_adapter=WebSocketAdapter(
+                    {
+                        **config.get("chat_adapter", {}),
+                        "media_store": config.get("infrastructure", {}).get("media_resolution", {}),
+                    },
+                    default_character_id=agent_runtime.default_character_id,
+                ),
                 default_world_id=str(config.get("world", {}).get("world_id", DEFAULT_WORLD_ID)),
                 world_stage_config=config.get("world_stage", {}),
             )
@@ -141,7 +143,7 @@ class SystemRuntime:
                 runtime=runtime,
                 world=world,
                 database_manager=database_manager,
-                capability_manager=capability_manager,
+                infrastructure=infrastructure,
                 agent_runtime=agent_runtime,
                 observability=observability,
                 owns_observability=owns_observability,
@@ -152,12 +154,10 @@ class SystemRuntime:
         """把顶层模块依赖分发给各运行时模块。"""
         self.llm_service.ensure_dependencies()
         self.database_manager.wire_dependencies(llm_service=self.llm_service)
-        self.capability_manager.wire_dependencies(
-            database_manager=self.database_manager,
-        )
+        self.infrastructure.wire_dependencies()
         self.agent_runtime.wire_dependencies(
             llm_service=self.llm_service,
-            capability_manager=self.capability_manager,
+            infrastructure=self.infrastructure,
             database_manager=self.database_manager,
         )
         self.world.wire_dependencies(system_runtime=self)
@@ -176,7 +176,7 @@ class SystemRuntime:
         runtime: SystemRuntime | None,
         world: WorldRuntime | None,
         database_manager: DatabaseManager | None,
-        capability_manager: CapabilityManager | None,
+        infrastructure: InfrastructureRuntime | None,
         agent_runtime: AgentRuntime | None,
         observability: ObservabilityService | None,
         owns_observability: bool,
@@ -201,13 +201,16 @@ class SystemRuntime:
 
         shutdown_steps: tuple[tuple[str, callable | None], ...] = (
             ("world stages", runtime.close_world_stages if runtime is not None else None),
-            ("chat stages", runtime.stage_manager.close if runtime is not None and runtime.stage_manager is not None else None),
+            (
+                "chat stages",
+                runtime.stage_manager.close if runtime is not None and runtime.stage_manager is not None else None,
+            ),
             ("world runtime", world.stop_background_services if world is not None else None),
             (
                 "agent runtime",
                 getattr(agent_runtime, "shutdown", None) if agent_runtime is not None else None,
             ),
-            ("capability manager", capability_manager.stop if capability_manager is not None else None),
+            ("infrastructure", infrastructure.stop if infrastructure is not None else None),
             ("database manager", database_manager.shutdown if database_manager is not None else None),
             ("global references", _clear_refs),
             ("observability", _close_obs if (owns_observability and observability is not None) else None),
@@ -232,7 +235,7 @@ class SystemRuntime:
         database_manager: DatabaseManager | None,
         agent_runtime: AgentRuntime | None,
     ) -> None:
-        '''将已经连接的引用清理掉，避免在系统运行时关闭后仍然被引用。'''
+        """将已经连接的引用清理掉，避免在系统运行时关闭后仍然被引用。"""
         global _system_runtime
         if runtime is not None and _system_runtime is runtime:
             _system_runtime = None
@@ -255,7 +258,7 @@ class SystemRuntime:
                 ("world stages", self.close_world_stages),
                 ("chat stages", self.stage_manager.close if self.stage_manager is not None else None),
                 ("agent runtime", getattr(self.agent_runtime, "shutdown", None)),
-                ("capability manager", self.capability_manager.stop),
+                ("infrastructure", self.infrastructure.stop),
                 ("database manager", self.database_manager.shutdown),
                 ("global references", self._shutdown_clear_global_references),
                 ("observability", self._shutdown_observability),
@@ -304,7 +307,7 @@ class SystemRuntime:
             "world": self.world,
             "database_manager": self.database_manager,
             "agent_runtime": self.agent_runtime,
-            "capability_manager": self.capability_manager,
+            "infrastructure": self.infrastructure,
             "llm_service": self.llm_service,
             "observability": self.observability,
         }
@@ -313,7 +316,7 @@ class SystemRuntime:
             raise RuntimeError(f"SystemRuntime dependencies are missing: {', '.join(missing)}")
         self.llm_service.ensure_dependencies()
         self.database_manager.ensure_dependencies()
-        self.capability_manager.ensure_dependencies()
+        self.infrastructure.ensure_dependencies()
         self.agent_runtime.ensure_dependencies()
         self.world.ensure_dependencies()
         self.user_interface.ensure_dependencies()
@@ -323,7 +326,9 @@ class SystemRuntime:
         return self.agent_runtime.get_agent(character_id)
 
     async def get_world_stage(
-        self, character_id: str | None = None, world_id: str | None = None,
+        self,
+        character_id: str | None = None,
+        world_id: str | None = None,
     ) -> WorldStage:
         """取得或创建角色与世界作用域唯一的长期 WorldStage。"""
         selected_character = character_id or self.agent_runtime.default_character_id
@@ -334,14 +339,13 @@ class SystemRuntime:
             if stage is None or stage.state is StageState.TERMINATED:
                 settlements = getattr(getattr(self, "world", None), "settlements", None)
                 stage = await WorldStage.create(
-                    character_id=selected_character, world_id=selected_world,
+                    character_id=selected_character,
+                    world_id=selected_world,
                     agent=self.get_agent(selected_character),
                     context_factory=self.agent_runtime.context_factories[selected_character],
                     config=self.world_stage_config,
-                    on_handling_settled=(
-                        settlements.on_handling_settled if settlements is not None else None),
-                    on_execution_finished=(
-                        settlements.on_execution_finished if settlements is not None else None),
+                    on_handling_settled=(settlements.on_handling_settled if settlements is not None else None),
+                    on_execution_finished=(settlements.on_execution_finished if settlements is not None else None),
                 )
                 self._world_stages[key] = stage
             return stage
@@ -358,12 +362,6 @@ class SystemRuntime:
     @property
     def websocket_service(self):
         return self.user_interface.websocket_service
-
-    @property
-    def capabilities(self):
-        return self.capability_manager
-
-
 
 
 _system_runtime: SystemRuntime | None = None

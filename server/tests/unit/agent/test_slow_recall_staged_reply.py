@@ -1,4 +1,5 @@
 """慢召回的两段式回复：临时计划先行、正式计划随后（Issue #70）。"""
+
 import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
@@ -18,6 +19,7 @@ from src.agent.skills.cognitive import (
     ReplyDraft,
     ResponseCompositionSkill,
 )
+from skill_support import invocation
 from src.domain.memory_context import MemoryContext, MemoryHit
 
 
@@ -33,8 +35,7 @@ class _Conversation:
 
 
 def context(user_id="u", character_id="luotianyi"):
-    value = SimpleNamespace(identity=SimpleNamespace(
-        interaction_id="i", user_id=user_id, character_id=character_id))
+    value = SimpleNamespace(identity=SimpleNamespace(interaction_id="i", user_id=user_id, character_id=character_id))
     value.conversation = _Conversation()
     value.recalled_memory = RecalledMemoryContext()
     value.user = SimpleNamespace(read=UserContextSnapshot)
@@ -51,10 +52,8 @@ class _Understanding:
         return ()
 
 
-PROVISIONAL = ReplyDraft(content="稍等我想想", sound_content="稍等我想想",
-                         tone="tender", expression="温柔脸")
-FORMAL = ReplyDraft(content="我记得你喜欢乌龙茶", sound_content="我记得你喜欢乌龙茶",
-                    tone="happy", expression="微笑脸")
+PROVISIONAL = ReplyDraft(content="稍等我想想", sound_content="稍等我想想", tone="tender", expression="温柔脸")
+FORMAL = ReplyDraft(content="我记得你喜欢乌龙茶", sound_content="我记得你喜欢乌龙茶", tone="happy", expression="微笑脸")
 
 
 class _StagedComposer:
@@ -67,10 +66,10 @@ class _StagedComposer:
         self.gate = gate
         self.formal_calls = 0
 
-    async def compose(self, **kwargs):
+    async def compose(self, invocation, **kwargs):
         pytest.fail("两段式路径不得调用单段 compose")
 
-    async def compose_staged(self, **kwargs):
+    async def compose_staged(self, invocation, **kwargs):
         async def formal():
             self.formal_calls += 1
             if self.gate is not None:
@@ -81,15 +80,16 @@ class _StagedComposer:
 
 
 def agent(composer):
-    return Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.TEXT_MESSAGE, ChatReplyHandler(composer, _Understanding()))]))
+    return Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter([(d.StimulusKind.TEXT_MESSAGE, ChatReplyHandler(composer, _Understanding()))]),
+    )
 
 
 @pytest.mark.asyncio
 async def test_temporary_and_formal_are_two_complete_plans_with_consecutive_ordinals():
     sink = Sink()
-    report = await agent(_StagedComposer()).handle_stimulus(
-        deadline_request(), sink, context=context())
+    report = await agent(_StagedComposer()).handle_stimulus(deadline_request(), sink, context=context())
 
     thinking, temporary, formal = sink.values
     assert [plan.plan_ordinal for plan in sink.values] == [0, 1, 2]
@@ -123,8 +123,7 @@ async def test_recalled_memory_is_attached_to_the_triggering_stimulus():
     hits = (MemoryHit(rendered_text="喜欢乌龙茶", score=0.9, query="你好"),)
     ctx = context()
 
-    await agent(_StagedComposer(hits=hits)).handle_stimulus(
-        deadline_request(), Sink(), context=ctx)
+    await agent(_StagedComposer(hits=hits)).handle_stimulus(deadline_request(), Sink(), context=ctx)
 
     entries = ctx.recalled_memory.read()
     assert [entry.stimulus_id for entry in entries] == ["m2"]
@@ -139,8 +138,7 @@ async def test_cancellation_blocks_the_formal_plan_and_its_late_output():
     value = deadline_request()
     ctx = context()
 
-    task = asyncio.create_task(
-        agent(composer).handle_stimulus(value, sink, context=ctx))
+    task = asyncio.create_task(agent(composer).handle_stimulus(value, sink, context=ctx))
     while len(sink.values) < 2:
         await asyncio.sleep(0)
     value.cancellation.cancel(d.CancellationReason.SUPERSEDED)
@@ -149,9 +147,12 @@ async def test_cancellation_blocks_the_formal_plan_and_its_late_output():
     report = await task
 
     assert [plan.plan_ordinal for plan in sink.values] == [0, 1]
-    assert all(action.content != "我记得你喜欢乌龙茶"
-               for plan in sink.values for action in plan.actions
-               if isinstance(action, d.Say))
+    assert all(
+        action.content != "我记得你喜欢乌龙茶"
+        for plan in sink.values
+        for action in plan.actions
+        if isinstance(action, d.Say)
+    )
     assert composer.formal_calls == 1
     assert report.request_status is d.HandlingRequestStatus.CANCELLED
     assert report.emitted_plan_ids == tuple(plan.plan_id for plan in sink.values)
@@ -170,8 +171,7 @@ async def test_sink_failure_on_temporary_plan_stops_without_retry():
         return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
 
     composer = _StagedComposer()
-    report = await agent(composer).handle_stimulus(
-        deadline_request(), Sink(reject), context=context())
+    report = await agent(composer).handle_stimulus(deadline_request(), Sink(reject), context=context())
 
     assert [plan.plan_ordinal for plan in delivered] == [0, 1]
     assert composer.formal_calls == 0
@@ -191,8 +191,7 @@ async def test_slow_recall_never_reenters_the_public_stimulus_interface():
             return await super().handle(value, plans)
 
     handler = _Observed(_StagedComposer(), _Understanding())
-    facade = Agent(character_id="luotianyi",
-                   stimulus_router=StimulusRouter([(d.StimulusKind.TEXT_MESSAGE, handler)]))
+    facade = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.TEXT_MESSAGE, handler)]))
 
     await facade.handle_stimulus(deadline_request(), sink, context=context())
 
@@ -212,6 +211,7 @@ class _Memory:
             await asyncio.sleep(self.delay)
         return MemoryContext(hits=(MemoryHit(rendered_text="记忆1", score=0.9, query=queries[0]),))
 
+
 class _Generator:
     async def generate(self, **kwargs):
         return (ReplyDraft(content="正式回复", sound_content="正式回复", tone="happy", expression="微笑脸"),)
@@ -228,10 +228,9 @@ class _Singing:
 def _composition(config, delay):
     return ResponseCompositionSkill(
         config,
-        character_id="luotianyi",
-        memory=_Memory(delay),
+        memories={"luotianyi": _Memory(delay)},
         singing=_Singing(),
-        generator=_Generator(),
+        generators={"luotianyi": _Generator()},
     )
 
 
@@ -251,8 +250,12 @@ async def test_skill_emits_configured_provisional_draft_only_when_recall_is_slow
     skill = _composition(SLOW_RECALL_CONFIG, 0.5)
 
     staged = await skill.compose_staged(
-        user_id="u", user_context=UserContextSnapshot(), reply_topic="你好",
-        conversation_history="", memory_queries=("你好",))
+        invocation(),
+        user_context=UserContextSnapshot(),
+        reply_topic="你好",
+        conversation_history="",
+        memory_queries=("你好",),
+    )
 
     assert staged.provisional is not None
     assert staged.provisional[0].content == "配置的临时文案"
@@ -267,14 +270,21 @@ async def test_skill_emits_configured_provisional_draft_only_when_recall_is_slow
 
 @pytest.mark.asyncio
 async def test_fast_recall_and_missing_config_produce_no_provisional_draft():
-    patient = {"slow_recall": dict(SLOW_RECALL_CONFIG["slow_recall"],
-                                   provisional_after_seconds=30)}
+    patient = {"slow_recall": dict(SLOW_RECALL_CONFIG["slow_recall"], provisional_after_seconds=30)}
     fast = await _composition(patient, 0).compose_staged(
-        user_id="u", user_context=UserContextSnapshot(), reply_topic="你好",
-        conversation_history="", memory_queries=("你好",))
+        invocation(),
+        user_context=UserContextSnapshot(),
+        reply_topic="你好",
+        conversation_history="",
+        memory_queries=("你好",),
+    )
     unconfigured = await _composition({}, 0.2).compose_staged(
-        user_id="u", user_context=UserContextSnapshot(), reply_topic="你好",
-        conversation_history="", memory_queries=("你好",))
+        invocation(),
+        user_context=UserContextSnapshot(),
+        reply_topic="你好",
+        conversation_history="",
+        memory_queries=("你好",),
+    )
 
     assert fast.provisional is None
     assert unconfigured.provisional is None

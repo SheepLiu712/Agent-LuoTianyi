@@ -68,9 +68,7 @@ class WorldRuntime:
         self.citywalk_tasks = self._build_citywalk_tasks()
         self.citywalk_task = self.citywalk_tasks[0] if self.citywalk_tasks else None
         self.learn_sing_songs_tasks = self._build_learn_sing_songs_tasks()
-        self.learn_sing_songs_task = (
-            self.learn_sing_songs_tasks[0] if self.learn_sing_songs_tasks else None
-        )
+        self.learn_sing_songs_task = self.learn_sing_songs_tasks[0] if self.learn_sing_songs_tasks else None
         self.qq_music_credential_refresh_task = (
             QQMusicCredentialRefreshTask(
                 self.learn_sing_songs_tasks,
@@ -92,12 +90,8 @@ class WorldRuntime:
             else None
         )
         self.diary_tasks = self._build_diary_tasks()
-        self.proactive_topic_check_task = ProactiveTopicCheckTask(
-            self.config.get("proactive_topic_check", {})
-        )
-        self.expired_event_cleanup_task = ExpiredEventCleanupTask(
-            self.config.get("expired_event_cleanup", {})
-        )
+        self.proactive_topic_check_task = ProactiveTopicCheckTask(self.config.get("proactive_topic_check", {}))
+        self.expired_event_cleanup_task = ExpiredEventCleanupTask(self.config.get("expired_event_cleanup", {}))
 
         self.tasks: List["WorldTask"] = [
             *self.citywalk_tasks,
@@ -203,7 +197,7 @@ class WorldRuntime:
             return []
         if self.system_runtime is None:
             return []
-        singing = getattr(getattr(self.system_runtime, "capability_manager", None), "singing", None)
+        singing = getattr(getattr(self.system_runtime, "infrastructure", None), "singing", None)
         managers = getattr(singing, "singing_manager", None) or {}
         if not managers:
             self.logger.warning("No singing managers available; learn_sing_songs tasks skipped")
@@ -248,9 +242,7 @@ class WorldRuntime:
             config = self._character_task_config("diary", character_id)
             if not config.get("enabled", True):
                 continue
-            tasks.append(
-                DiaryTask(config, character_id=character_id, settlements=self.settlements)
-            )
+            tasks.append(DiaryTask(config, character_id=character_id, settlements=self.settlements))
         return tasks
 
     def _character_ids(self) -> list[str]:

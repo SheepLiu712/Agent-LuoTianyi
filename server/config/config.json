@@ -128,7 +128,7 @@
             }
         }
     },
-    "capabilities": {
+    "infrastructure": {
         "tts": {
             "luotianyi": {
                 "character_name": "luotianyi",
@@ -176,47 +176,6 @@
             "root": "data/media",
             "max_bytes": 6291456,
             "max_encoded_bytes": 8388608
-        },
-        "dynamic": {
-            "dynamic_composer": {
-                "llm_module": {
-                    "llm": {
-                        "name": "dsv4-flash",
-                        "enable_thinking": false,
-                        "use_json": false,
-                        "params": {},
-                        "client_model_type": ""
-                    },
-                    "prompt_name": "dynamic_post_prompt"
-                }
-            },
-            "dynamic_replier": {
-                "llm_module": {
-                    "label": "动态回复",
-                    "llm": {
-                        "name": "dsv4-flash",
-                        "enable_thinking": false,
-                        "use_json": true,
-                        "params": {},
-                        "client_model_type": "assistance"
-                    },
-                    "prompt_name": "dynamic_reply_prompt"
-                }
-            }
-        },
-        "diary": {
-            "diary_llm": {
-                "llm_module": {
-                    "llm": {
-                        "name": "dsv4-flash",
-                        "enable_thinking": false,
-                        "use_json": false,
-                        "params": {},
-                        "client_model_type": "assistance"
-                    },
-                    "prompt_name": "diary_prompt"
-                }
-            }
         }
     },
     "chat_session_manager": {
@@ -313,6 +272,49 @@
         }
     },
     "agent_runtime": {
+        "skills": {
+            "dynamic": {
+                "dynamic_composer": {
+                    "llm_module": {
+                        "llm": {
+                            "name": "dsv4-flash",
+                            "enable_thinking": false,
+                            "use_json": false,
+                            "params": {},
+                            "client_model_type": ""
+                        },
+                        "prompt_name": "dynamic_post_prompt"
+                    }
+                },
+                "dynamic_replier": {
+                    "llm_module": {
+                        "label": "动态回复",
+                        "llm": {
+                            "name": "dsv4-flash",
+                            "enable_thinking": false,
+                            "use_json": true,
+                            "params": {},
+                            "client_model_type": "assistance"
+                        },
+                        "prompt_name": "dynamic_reply_prompt"
+                    }
+                }
+            },
+            "diary": {
+                "diary_llm": {
+                    "llm_module": {
+                        "llm": {
+                            "name": "dsv4-flash",
+                            "enable_thinking": false,
+                            "use_json": false,
+                            "params": {},
+                            "client_model_type": "assistance"
+                        },
+                        "prompt_name": "diary_prompt"
+                    }
+                }
+            }
+        },
         "prepared_speech": {
             "manifest": "res/agent/prepared_speech/manifest.json"
         },

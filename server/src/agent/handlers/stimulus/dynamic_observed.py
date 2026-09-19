@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import uuid4
 
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
 from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
+from src.agent.skills.invocation import handling_invocation
 from src.utils.logger import get_logger
 
 DYNAMIC_MEMORY_TRACE_PREFIX = "dynamic"
@@ -40,8 +42,9 @@ class DynamicObservedHandler:
         stimulus = request.stimulus
         if not isinstance(stimulus, d.DynamicObserved):
             raise TypeError("DynamicObservedHandler 只处理 DynamicObserved")
-        await self._write_memory(stimulus)
-        if self._reply.already_replied(stimulus):
+        invocation = handling_invocation(request, plans.context)
+        await self._write_memory(invocation, stimulus)
+        if self._reply.already_replied(invocation, stimulus):
             self._logger.info(
                 "线程中已存在角色回复，不再重复发布 dynamic=%s target=%s",
                 stimulus.dynamic_id,
@@ -51,11 +54,11 @@ class DynamicObservedHandler:
         if not self._reply.available():
             self._logger.warning("动态回复模型不可用 dynamic=%s", stimulus.dynamic_id)
             return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE, ())
-        item = self._reply.build_item(stimulus)
+        item = self._reply.build_item(invocation, stimulus)
         is_post = stimulus.target_kind is d.DynamicTargetKind.POST
-        body = await self._reply.compose_for_post(item) if is_post else ""
+        body = await self._reply.compose_for_post(invocation, item) if is_post else ""
         if not is_post:
-            should_reply, body = await self._reply.compose_for_comment(item)
+            should_reply, body = await self._reply.compose_for_comment(invocation, item)
         else:
             should_reply = bool(body.strip())
         if not should_reply or not body.strip():
@@ -86,7 +89,7 @@ class DynamicObservedHandler:
             request, d.HandlingRequestStatus.COMPLETED, None, (stimulus.stimulus_id,), plans=(receipt.plan_id,)
         )
 
-    async def _write_memory(self, stimulus: d.DynamicObserved) -> None:
+    async def _write_memory(self, invocation, stimulus: d.DynamicObserved) -> None:
         """独立提交记忆；失败只记录，不影响回复方面。"""
         target = next(
             (message for message in stimulus.messages if message.message_id == stimulus.target_message_id),
@@ -97,7 +100,7 @@ class DynamicObservedHandler:
         source_context = f"{history}\n\n当前内容：\n{target.text}".strip()
         try:
             await self._memory.write(
-                user_id=target.author_ref.actor_id,
+                replace(invocation, user_id=target.author_ref.actor_id),
                 current_dialogue=f"user: {target.text}",
                 conversation_history=history,
                 trace_id=f"{DYNAMIC_MEMORY_TRACE_PREFIX}:{target.message_id}",

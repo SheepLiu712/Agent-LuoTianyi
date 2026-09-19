@@ -161,7 +161,7 @@ def test_model_availability_is_not_checked_by_world():
     sink = FactSink()
     runtime = SimpleNamespace(
         database_manager=SimpleNamespace(get_sql_session=lambda: None),
-        capability_manager=SimpleNamespace(diary=SimpleNamespace(ensure_llm=lambda: False)),
+        infrastructure=SimpleNamespace(diary=SimpleNamespace(ensure_llm=lambda: False)),
         get_world_stage=lambda character_id: _stage(sink, character_id),
     )
     task = DiaryTask({}, settlements=WorldSettlementRouter())

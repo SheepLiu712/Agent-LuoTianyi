@@ -11,6 +11,7 @@ from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.sing import SingHandler
 from src.agent.skills.expression.singing import EmptySongAudioError, SingingSkill
 from routing_support import Sink, plan_and_context
+from skill_support import invocation
 
 
 class Singing:
@@ -88,11 +89,11 @@ async def test_sing_generation_error_stops_plan():
 async def test_singing_skill_rejects_blank_identity():
     skill = SingingSkill({}, Singing())
     with pytest.raises(ValueError):
-        await skill.render(character_id="", song_id="歌曲", segment_id="副歌")
+        await skill.render(invocation(character_id=""), song_id="歌曲", segment_id="副歌")
 
 
 @pytest.mark.asyncio
 async def test_singing_skill_raises_when_unavailable():
     skill = SingingSkill({}, Singing(audio=None))
     with pytest.raises(EmptySongAudioError):
-        await skill.render(character_id="luotianyi", song_id="歌曲", segment_id="副歌")
+        await skill.render(invocation(), song_id="歌曲", segment_id="副歌")

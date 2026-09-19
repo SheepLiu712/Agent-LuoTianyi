@@ -1,8 +1,8 @@
 """
 系统动态发布器 — 供 admin 管理接口使用，发布系统公告类动态。
 
-从 DynamicCapability 拆出，因为系统动态属于运营管理范畴，
-而非角色的能力（capability）。
+从角色 Skill 中拆出，因为系统动态属于运营管理范畴，
+而非 Agent 的业务技能。
 """
 from __future__ import annotations
 

@@ -20,10 +20,10 @@ class _Understanding:
 
 
 class _NoReflection:
-    async def consolidate_memories(self, **kwargs):
+    async def consolidate_memories(self, invocation, **kwargs):
         return {}
 
-    async def update_profile(self, **kwargs):
+    async def update_profile(self, invocation, **kwargs):
         return None
 
 

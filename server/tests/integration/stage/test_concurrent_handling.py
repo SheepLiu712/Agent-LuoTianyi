@@ -16,7 +16,7 @@ from src.agent.handlers.stimulus.chat import (
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.processing.plan_emitter import ActionPlanDraft
 from src.agent.skills.cognitive import ImagePreprocessingSkill
-from src.capabilities.media_resolution import ResolvedMedia
+from src.infrastructure.media import ResolvedMedia
 
 
 async def until(predicate):
@@ -36,10 +36,10 @@ class _Understanding:
 
 
 class _NoReflection:
-    async def consolidate_memories(self, **kwargs):
+    async def consolidate_memories(self, invocation, **kwargs):
         return {}
 
-    async def update_profile(self, **kwargs):
+    async def update_profile(self, invocation, **kwargs):
         return None
 
 

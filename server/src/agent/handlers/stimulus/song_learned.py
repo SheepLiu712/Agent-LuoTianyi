@@ -11,6 +11,7 @@ from src.agent.skills.cognitive.learned_song_experience import (
 )
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
+from src.agent.skills.invocation import handling_invocation
 from src.utils.logger import get_logger
 
 SONG_LEARNED_SOURCE_TYPE = "song_learned"
@@ -41,9 +42,11 @@ class SongLearnedHandler:
         stimulus = request.stimulus
         if not isinstance(stimulus, d.SongLearned):
             raise TypeError("SongLearnedHandler 只处理 SongLearned")
-        await self._record_experience(stimulus)
-        segment_description, lyrics = self._dispatch.material(song_id=stimulus.song_id)
+        invocation = handling_invocation(request, plans.context)
+        await self._record_experience(invocation, stimulus)
+        segment_description, lyrics = self._dispatch.material(invocation, song_id=stimulus.song_id)
         body = await self._publishing.compose(
+            invocation,
             dynamic_type=SONG_LEARNED_SOURCE_TYPE,
             instruction=SONG_LEARNED_INSTRUCTION,
             structured_context="\n".join(
@@ -76,11 +79,11 @@ class SongLearnedHandler:
             request, d.HandlingRequestStatus.COMPLETED, None, (stimulus.stimulus_id,), plans=(receipt.plan_id,)
         )
 
-    async def _record_experience(self, stimulus: d.SongLearned) -> None:
+    async def _record_experience(self, invocation, stimulus: d.SongLearned) -> None:
         """写入角色经验；失败只记录，不撤销已经成立的新学会事实。"""
         try:
             committed = await self._experience.commit(
-                character_id=self._character_id,
+                invocation,
                 song_id=stimulus.song_id,
                 learning_job_id=stimulus.learning_job_id,
             )

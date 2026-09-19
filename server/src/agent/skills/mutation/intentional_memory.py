@@ -6,6 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
+from src.agent.skills.contracts import SkillInvocation
+
 
 @dataclass(frozen=True, slots=True)
 class MemoryCommitRevision:
@@ -52,12 +54,13 @@ class IntentionalMemoryCommit:
 
     async def commit(
         self,
+        invocation: SkillInvocation,
         *,
-        character_id: str,
-        user_id: str,
         content: str,
     ) -> MemoryCommitRevision:
         """提交一条私有用户事实；底层业务去重使重复调用无新副作用。"""
+        character_id = invocation.character_id
+        user_id = invocation.require_user_id()
         memory = self._memory_provider(character_id)
         if memory.owner_character_id != character_id:
             raise MemoryOwnerMismatchError(character_id, memory.owner_character_id)

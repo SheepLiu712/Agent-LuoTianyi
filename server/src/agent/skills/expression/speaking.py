@@ -5,8 +5,9 @@ from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any
 
-from src.capabilities.speech.streaming import AsyncTTS
-from src.domain.agent import AudioFraming, CancellationToken, Tone
+from src.agent.skills.contracts import SkillInvocation
+from src.domain.agent import AudioFraming, Tone
+from src.infrastructure.speech.streaming import AsyncTTS
 
 
 @dataclass(frozen=True)
@@ -40,22 +41,23 @@ class SpeakingSkill:
         self._config = _SpeakingConfig.from_dict(config)
         self._tts = tts_engine
 
-    async def speak(
-        self, *, character_id: str, text: str, tone: Tone, cancellation: CancellationToken
-    ) -> AsyncIterator[SpeakingAudioChunk]:
+    async def speak(self, invocation: SkillInvocation, *, text: str, tone: Tone) -> AsyncIterator[SpeakingAudioChunk]:
         """按角色、朗读文本和语调生成音频；取消时释放本次流，空音频抛 EmptySpeechError。
 
         调用方提前停止消费时须关闭生成器；可使用 contextlib.aclosing。
         """
-        if not isinstance(character_id, str) or not character_id.strip():
-            raise ValueError("character_id 不能为空")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("朗读文本不能为空")
-        if not isinstance(tone, Tone) or not isinstance(cancellation, CancellationToken):
-            raise TypeError("tone 和 cancellation 必须使用领域类型")
+        if not isinstance(tone, Tone):
+            raise TypeError("tone 必须使用领域类型")
         generated = False
         async with aclosing(
-            self._tts.stream(character_id=character_id, text=text, tone=tone.value, cancellation=cancellation)
+            self._tts.stream(
+                character_id=invocation.character_id,
+                text=text,
+                tone=tone.value,
+                cancellation=invocation.cancellation,
+            )
         ) as stream:
             async for data in stream:
                 generated = True

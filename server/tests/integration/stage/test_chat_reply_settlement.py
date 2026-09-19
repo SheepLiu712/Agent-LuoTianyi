@@ -30,10 +30,10 @@ class _Understanding:
 
 
 class _NoReflection:
-    async def consolidate_memories(self, **kwargs):
+    async def consolidate_memories(self, invocation, **kwargs):
         return {}
 
-    async def update_profile(self, **kwargs):
+    async def update_profile(self, invocation, **kwargs):
         return None
 
 
@@ -47,11 +47,11 @@ class _Composer:
         self.drafts = drafts
         self.calls = 0
 
-    async def compose(self, **kwargs):
+    async def compose(self, invocation, **kwargs):
         self.calls += 1
         return self.drafts
 
-    async def compose_staged(self, **kwargs):
+    async def compose_staged(self, invocation, **kwargs):
         self.calls += 1
 
         async def formal():

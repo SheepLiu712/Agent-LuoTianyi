@@ -19,11 +19,11 @@ from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
 from src.agent.skills.expression.speaking import SpeakingSkill
-from src.capabilities.media_resolution import (
+from src.infrastructure.media import (
     MediaResolutionError,
     MediaResolutionErrorCode,
 )
-from src.capabilities.speech.streaming import AsyncTTS
+from src.infrastructure.speech.streaming import AsyncTTS
 from src.domain.stage import (
     AgentPresentationChanged,
     AgentPresentationState,

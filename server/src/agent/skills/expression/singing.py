@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Protocol
 
+from src.agent.skills.contracts import SkillInvocation
+
 
 class _SingingPort(Protocol):
     def sing(self, character_id: str, song_name: str | None = None, segment: str | None = None) -> bytes | None: ...
@@ -23,12 +25,16 @@ class SingingSkill:
             raise TypeError("singing 必须是字典")
         self._singing = singing
 
-    async def render(self, *, character_id: str, song_id: str, segment_id: str) -> bytes:
+    async def render(self, invocation: SkillInvocation, *, song_id: str, segment_id: str) -> bytes:
         """在 executor 中渲染指定片段；身份为空抛 ValueError，不可用或无音频抛 EmptySongAudioError。"""
-        for name, value in (("character_id", character_id), ("song_id", song_id), ("segment_id", segment_id)):
+        for name, value in (
+            ("character_id", invocation.character_id),
+            ("song_id", song_id),
+            ("segment_id", segment_id),
+        ):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} 不能为空")
-        data = await asyncio.to_thread(self._singing.sing, character_id, song_id, segment_id)
+        data = await asyncio.to_thread(self._singing.sing, invocation.character_id, song_id, segment_id)
         if not data:
             raise EmptySongAudioError(f"{song_id}/{segment_id}")
         return data

@@ -7,6 +7,7 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.expression.diary_writing import DiaryWritingSkill
+from src.agent.skills.invocation import handling_invocation
 
 
 class DiaryPlanningDueHandler:
@@ -23,12 +24,8 @@ class DiaryPlanningDueHandler:
             raise TypeError("DiaryPlanningDueHandler 只处理 DiaryPlanningDue")
         if not self._writing.available():
             return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)
-        body = (
-            await self._writing.compose(
-                stimulus.owner_user_id,
-                stimulus.local_date,
-            )
-        ).strip()
+        invocation = handling_invocation(request, plans.context, user_id=stimulus.owner_user_id)
+        body = (await self._writing.compose(invocation, stimulus.local_date)).strip()
         if not body:
             return self._report(request, d.HandlingRequestStatus.FAILED, d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE)
         receipt = await plans.emit(

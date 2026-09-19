@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
 import src.domain.agent as d
-from src.capabilities.media_resolution import (
+from src.infrastructure.media import (
     MediaResolutionError,
     MediaResolutionErrorCode,
     PermanentMediaStore,

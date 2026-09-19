@@ -97,7 +97,7 @@ async def test_runtime_registers_compaction_once_for_all_characters(runtime_depe
     try:
         assert runtime.character_ids == ("luotianyi", "miku")
         assert calls.count("conversation_context_summary") == 1
-        assert isinstance(runtime.skills.get(ConversationCompactionSkill), ConversationCompactionSkill)
+        assert isinstance(runtime.skills.conversation_compaction, ConversationCompactionSkill)
     finally:
         await runtime.shutdown()
 
@@ -119,20 +119,6 @@ async def test_append_while_skill_generates_summary_survives_application(databas
     result = await task
     await context.conversation.compact(result)
     assert [e.entry_id for e in context.conversation.read().entries] == ["3", "4"]
-
-
-def test_skills_returns_same_instance_and_dispatches_config():
-    from src.agent.skills import Skills
-    llm = LLM()
-    module_config = {"model": "specific-model"}
-    skills = Skills({"conversation_compaction": {"llm_module": module_config}}, llm,
-                    tts_engine=SimpleNamespace(), singing=SimpleNamespace())
-    assert skills.get(ConversationCompactionSkill) is skills.get(ConversationCompactionSkill)
-    assert llm.registrations == [("conversation_context_summary", module_config)]
-    with pytest.raises(KeyError):
-        skills.get(str)
-    with pytest.raises(TypeError):
-        skills.get("conversation_compaction")
 
 
 @pytest.mark.parametrize("field", ["raw_conversation_context_limit", "not_zip_conversation_count", "forget_conversation_days"])

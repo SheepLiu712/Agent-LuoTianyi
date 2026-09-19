@@ -6,16 +6,16 @@ import asyncio
 import base64
 from typing import Protocol
 
-from src.capabilities.media_resolution import (
+from src.domain.agent import MediaRef
+from src.infrastructure.media import (
     MediaResolutionError,
     MediaResolutionErrorCode,
     MediaResolver,
     ResolvedMedia,
 )
-from src.domain.agent import MediaRef
 
 
-class ImageUnderstandingCapability(Protocol):
+class ImageUnderstandingPort(Protocol):
     """图片描述能力的最小调用面。"""
 
     async def describe_image(self, image_data_uri: str) -> str: ...
@@ -27,7 +27,7 @@ class ImagePreprocessingSkill:
     def __init__(
         self,
         media_resolver: MediaResolver,
-        understanding: ImageUnderstandingCapability,
+        understanding: ImageUnderstandingPort,
     ) -> None:
         self._media_resolver = media_resolver
         self._understanding = understanding

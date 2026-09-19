@@ -12,7 +12,7 @@ from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
-    from src.capabilities.singing.singing_manager import SingingManager
+    from src.infrastructure.singing.singing_manager import SingingManager
     from src.stage.world_stage import WorldStage
     from src.system.database.services.event_store import EventStore
     from src.system.system_runtime import SystemRuntime
@@ -22,7 +22,12 @@ if TYPE_CHECKING:
 class LearnSingSongsTask(WorldTask):
     base_task_name = "learn_sing_songs"
 
-    def __init__(self, config: dict[str, Any] | None = None, character_id: str = "luotianyi", singing_manager: SingingManager | None = None) -> None:
+    def __init__(
+        self,
+        config: dict[str, Any] | None = None,
+        character_id: str = "luotianyi",
+        singing_manager: SingingManager | None = None,
+    ) -> None:
         self.character_id = character_id
         self.singing_manager = singing_manager
         self.character_name: str = getattr(singing_manager, "character_name", "洛天依")
@@ -67,20 +72,10 @@ class LearnSingSongsTask(WorldTask):
             )
 
         result = self.auto_song_learner.try_learn_pending()
-        learned = self._deduplicate_song_names(
-            list(getattr(result, "learned", []) or [])
-        )
-        already_learned = self._deduplicate_song_names(
-            list(getattr(result, "already_learned", []) or [])
-        )
-        already_learned_keys = {
-            get_unified_song_name(song_name) for song_name in already_learned
-        }
-        learned = [
-            song_name
-            for song_name in learned
-            if get_unified_song_name(song_name) not in already_learned_keys
-        ]
+        learned = self._deduplicate_song_names(list(getattr(result, "learned", []) or []))
+        already_learned = self._deduplicate_song_names(list(getattr(result, "already_learned", []) or []))
+        already_learned_keys = {get_unified_song_name(song_name) for song_name in already_learned}
+        learned = [song_name for song_name in learned if get_unified_song_name(song_name) not in already_learned_keys]
         abandoned = list(getattr(result, "abandoned", []) or [])
         awaiting = list(getattr(result, "awaiting", []) or [])
 
@@ -202,7 +197,7 @@ class LearnSingSongsTask(WorldTask):
     def _reload_singing_library(self) -> None:
         if self.system_runtime is None:
             return
-        singing = getattr(getattr(self.system_runtime, "capability_manager", None), "singing", None)
+        singing = getattr(getattr(self.system_runtime, "infrastructure", None), "singing", None)
         reload_songs = getattr(singing, "reload_songs", None)
         if not callable(reload_songs):
             return
@@ -214,7 +209,7 @@ class LearnSingSongsTask(WorldTask):
     async def _tag_learned_songs(self, learned: list[str]) -> None:
         if self.system_runtime is None:
             return
-        singing = getattr(getattr(self.system_runtime, "capability_manager", None), "singing", None)
+        singing = getattr(getattr(self.system_runtime, "infrastructure", None), "singing", None)
         tag_song = getattr(singing, "tag_song_emotions", None)
         if not callable(tag_song):
             return

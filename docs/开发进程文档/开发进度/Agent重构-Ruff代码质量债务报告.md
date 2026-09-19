@@ -3,15 +3,15 @@
 ## 1. 基线与结论
 
 - **报告日期**：2026-09-19
-- **分支**：`qa/agent-acceptance-gates`
+- **分支**：`qa/contract_finish`
 - **代码基线**：`b7bbbf8210cdcb20a010b873a5a7b3273864dfcf`
 - **配置**：`server/pyproject.toml`
 - **Ruff**：`0.14.10`（配置要求 `==0.14.10`）
 - **Python 目标版本**：3.10
 - **行长上限**：120
 - **McCabe 圈复杂度上限**：10；复杂度大于 10 触发 `C901`
-- **扫描范围**：`src/agent`、`src/agent_runtime`、`src/domain/agent`、`src/stage`，共 110 个生产 Python 文件
-- **未扫描范围**：测试、其他 Server 模块、客户端及仓库其他语言；本报告不能证明这些范围通过 Ruff
+- **当前扫描范围**：`src/agent`、`src/agent_runtime`、`src/domain/agent`、`src/infrastructure`、`src/stage`、`src/system/system_runtime.py`，共 138 个生产 Python 文件
+- **未扫描范围**：测试、其他 `src/system` 模块、`src/world`、客户端及仓库其他语言；本报告不能证明这些范围通过 Ruff
 
 复现命令：
 
@@ -23,7 +23,7 @@ D:\Anaconda\envs\lty\python.exe -m ruff check server --statistics
 D:\Anaconda\envs\lty\python.exe -m ruff check . --statistics
 ```
 
-初始结果为 **98 errors / 49 个文件**。格式与复杂度逐项清偿后，当前 Ruff 门禁为 **PASS（0 errors）**。五项 `C901` 中四项通过职责拆分或去除无效可选分支降至阈值内；`Execution.run` 经审查保留，并使用唯一一处函数级 `# noqa: C901` 记录理由。没有使用全局 `ignore`、目录级忽略或债务基线文件隐藏问题。
+最初 110 文件范围的结果为 **98 errors / 49 个文件**。格式与复杂度逐项清偿后，Skill/基础设施收口又将门禁扩展到当前 138 个文件。当前 Ruff 门禁为 **PASS（0 errors）**。原五项 `C901` 中四项通过职责拆分或去除无效可选分支降至阈值内；扩围后又拆分了歌唱资源加载与音频切片，并逐项审查保留四个必须保持整体可见的语音生命周期状态机。当前共有五处函数级 `# noqa: C901`，均有紧邻的具体理由。没有使用全局 `ignore`、目录级忽略或债务基线文件隐藏问题。
 
 ## 2. 初始债务总览
 
@@ -57,9 +57,17 @@ D:\Anaconda\envs\lty\python.exe -m ruff check . --statistics
 - 本轮结构修改的针对性回归为 **45 passed / 3 skipped**。
 - 完整相关回归为 **1019 passed / 3 failed / 2 skipped**。其中两项失败均为日志已输出到 stdout、但 `caplog` 未捕获；在未格式化的 `b7bbbf82` 临时 worktree 中原样复跑同样失败。第三项是 Windows 事件循环计时粒度导致的 `0.04s` 延迟断言波动，当前与基线均可稳定复现约 `0.031s < 0.035s`。三项均不在本次结构修改路径上，记为既有测试夹具/时序局限。
 
+### 2.3 Skill/基础设施收口后的扩围结果
+
+- 门禁新增 `src/infrastructure` 与 `src/system/system_runtime.py`；Black 与 Ruff 对当前 138 个文件均通过。
+- `SingingManager.get_music_data` 拆出单曲加载，`get_song_segment` 拆出唱段查找与音频渲染；两者均降到复杂度阈值内。
+- `SpeechBackend.stop`、`AsyncTTS.stream`、`_run_gsv_worker`、`TTSServer._stop` 保留函数级例外：它们分别拥有完整的停止重试、可取消生成器、子进程协议、进程与队列释放状态机，拆开会分散资源所有权和清理顺序。
+- 全量回归更新为 **1289 passed / 17 skipped**；唯一警告来自 Starlette 对 AnyIO 类型别名的上游弃用提示。
+- 单元测试覆盖门禁为 **873 passed，59.13%**，高于 `fail_under = 40`。
+
 ## 3. 圈复杂度审查结论
 
-复杂度不超过 10 时门禁通过；复杂度 11 及以上必须先审查。初始五项现已全部完成审查。
+复杂度不超过 10 时门禁通过；复杂度 11 及以上必须先审查。初始五项和基础设施扩围项均已完成审查。
 
 | 文件与函数 | 初始复杂度 | 审查与处置结论 |
 |---|---:|---|
@@ -68,6 +76,12 @@ D:\Anaconda\envs\lty\python.exe -m ruff check . --statistics
 | `src/agent/response_parser.py` `StructuredResponseParser.parse` | 11 | 解析器自行创建具名 logger，移除没有真实替换需求的可选 logger 分支和构造参数，复杂度降至阈值内 |
 | `src/agent/skills/expression/song_learning.py` `material` | 11 | 增加唱歌管理器 `Protocol`，装配时一次校验四个 callable；运行时仍保留素材读取异常降级，复杂度降至阈值内 |
 | `src/agent_runtime/agent_runtime.py` `shutdown` | 11 | 拆为停止接收、等待在途调用、拥有式关闭向量库、最终清理四个生命周期步骤，复杂度降至阈值内 |
+| `src/infrastructure/singing/singing_manager.py` `get_music_data` | >10 | 拆出 `_load_song`，主流程只负责扫描、登记和错误隔离，复杂度降至阈值内 |
+| `src/infrastructure/singing/singing_manager.py` `get_song_segment` | 11 | 拆出 `_find_segment` 与 `_render_segment_audio`，复杂度降至阈值内 |
+| `src/infrastructure/speech/speech.py` `SpeechBackend.stop` | 15 | 保留；一次原子关闭要同时处理重试、取消、超时、错误聚合和幂等状态，函数级例外已说明 |
+| `src/infrastructure/speech/streaming.py` `AsyncTTS.stream` | 13 | 保留；同步生成器的待决读取、取消和关闭必须由同一异步生成器生命周期拥有，函数级例外已说明 |
+| `src/infrastructure/speech/tts_server.py` `_run_gsv_worker` | 21 | 保留；它是子进程启动、请求协议与退出的完整状态机，函数级例外已说明 |
+| `src/infrastructure/speech/tts_server.py` `TTSServer._stop` | 18 | 保留；进程终止升级与队列释放具有严格顺序和幂等要求，函数级例外已说明 |
 
 此外，虽未被 McCabe 报告，`AgentRuntime.__init__` 的巨大门面组装被确认为更重要的可维护性债务。本轮已提取 `_build_agents`、`_build_agent`、`_build_stimulus_router`、`_build_action_router` 四个内部装配步骤；所有角色完整构造后才一次性赋给 `self._agents`，并在单角色内复用无状态预处理处理器及同一个学歌派发技能。
 
@@ -213,13 +227,13 @@ D:\Anaconda\envs\lty\python.exe -m ruff check server --select I --fix
 2. **可读性批次**：处理 `E501`，优先五处长度超过 150 的行；不顺带改变行为。
 3. **结构批次（已完成）**：逐个审查五项 `C901`；四项拆分或消除无效分支，一项有理由保留。
 4. **复验（已完成）**：Ruff、Black 幂等检查、`compileall`、`git diff --check` 和针对性回归均已执行；完整回归中的三项既有夹具/时序问题已单列。
-5. **扩围**：当前重构范围清零并稳定后，再单独测量其他 Server 生产模块；不得把本报告的零债务结论外推到未扫描范围。
+5. **扩围（已完成本阶段）**：Skill 收口涉及的 `src/infrastructure` 与 `src/system/system_runtime.py` 已纳入；其他 Server 生产模块仍须单独测量，不得把本报告的零债务结论外推到未扫描范围。
 
 ## 8. 本阶段完成标准
 
 - [x] `D:\Anaconda\envs\lty\python.exe -m ruff check server` 退出码为 0。
 - [x] 47 项可机械修复问题全部清零，且没有使用 unsafe fix。
 - [x] 46 项行长问题清零。
-- [x] 五个复杂函数均有逐项结论；拆分后的职责清晰，保留项具有函数级 `C901` 例外和理由。
+- [x] 原五个复杂函数及基础设施扩围项均有逐项结论；拆分后的职责清晰，五个保留项具有函数级 `C901` 例外和理由。
 - [x] 未新增全局 ignore、目录级 C901/E501 ignore 或掩盖历史债务的宽泛 per-file ignore。
 - [x] 报告已更新为实际清偿后的计数和验收结果。

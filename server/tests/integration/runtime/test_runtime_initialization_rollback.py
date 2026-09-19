@@ -51,7 +51,7 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
         async def shutdown(self):
             calls.append("database_stopped")
 
-    class FakeCapability:
+    class FakeInfrastructure:
         def __init__(self, _config, _llm):
             calls.append("tts_started")
 
@@ -119,7 +119,7 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     monkeypatch.setattr(runtime_module, "ObservabilityService", FakeObservability)
     monkeypatch.setattr(runtime_module, "LLMService", FakeLLM)
     monkeypatch.setattr(runtime_module, "DatabaseManager", FakeDatabase)
-    monkeypatch.setattr(runtime_module, "CapabilityManager", FakeCapability)
+    monkeypatch.setattr(runtime_module, "InfrastructureRuntime", FakeInfrastructure)
     monkeypatch.setattr(runtime_module, "WorldRuntime", FakeWorld)
     monkeypatch.setattr(runtime_module, "AgentRuntime", FakeAgentRuntime)
     monkeypatch.setattr(runtime_module, "UserInterface", FailingUserInterface)

@@ -16,7 +16,7 @@ import shutil
 import zlib
 from typing import Dict, Any, Optional, List, Set
 from src.world.get_new_songs.vcpedia_fetcher import VCPediaFetcher
-from src.capabilities.song_knowledge import Song, get_song_session, init_song_db
+from src.infrastructure.song_knowledge import Song, get_song_session, init_song_db
 
 logger = get_logger("DailyNewSongFetcher")
 CURRENT_YEAR = datetime.datetime.now().year
@@ -66,6 +66,7 @@ def _fetch_html(url: str, headers: Dict[str, str], timeout: int) -> str:
         raise RuntimeError("curl fallback still got anti-bot challenge page")
     return html
 
+
 def fetch_song_list_from_template(url: str, timeout: int = 20) -> List[str]:
     """
     从模板页提取歌曲名（按页面出现顺序）。
@@ -85,14 +86,62 @@ def fetch_song_list_from_template(url: str, timeout: int = 20) -> List[str]:
 
     # 过滤关键词（模板结构词，不是歌曲）
     bad_exact: Set[str] = {
-        "原创曲", "非原创曲", "传说曲", "殿堂曲", "部分", "25万以上", "25万以下",
-        "模板文档", "查看", "编辑", "历史", "刷新",
-        "简体", "繁體", "大陆简体", "香港繁體", "臺灣正體", "不转换",
-        "跳转到导航", "跳转到搜索", "洛天依",
-        "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023", "2024", "2025", "2026",
-        "bilibili", "ACE Studio", "X studio", "VOCALOID中文殿堂曲", "ACE殿堂曲", "文档", "嵌入"
+        "原创曲",
+        "非原创曲",
+        "传说曲",
+        "殿堂曲",
+        "部分",
+        "25万以上",
+        "25万以下",
+        "模板文档",
+        "查看",
+        "编辑",
+        "历史",
+        "刷新",
+        "简体",
+        "繁體",
+        "大陆简体",
+        "香港繁體",
+        "臺灣正體",
+        "不转换",
+        "跳转到导航",
+        "跳转到搜索",
+        "洛天依",
+        "2012",
+        "2013",
+        "2014",
+        "2015",
+        "2016",
+        "2017",
+        "2018",
+        "2019",
+        "2020",
+        "2021",
+        "2022",
+        "2023",
+        "2024",
+        "2025",
+        "2026",
+        "bilibili",
+        "ACE Studio",
+        "X studio",
+        "VOCALOID中文殿堂曲",
+        "ACE殿堂曲",
+        "文档",
+        "嵌入",
     }
-    bad_contains = ["Template:", "模板:", "分类:", "Category:", "帮助", "首页", "随机页面", "最近更改", "殿堂曲", "传说曲"]
+    bad_contains = [
+        "Template:",
+        "模板:",
+        "分类:",
+        "Category:",
+        "帮助",
+        "首页",
+        "随机页面",
+        "最近更改",
+        "殿堂曲",
+        "传说曲",
+    ]
 
     # 只取内容区里的链接文本
     seen: Set[str] = set()
@@ -134,15 +183,12 @@ def fetch_song_list_from_template(url: str, timeout: int = 20) -> List[str]:
 
 
 def _safe_song_name(name: str) -> str:
-    return "".join([c for c in name if c.isalnum() or c in (' ', '-', '_')]).strip()
+    return "".join([c for c in name if c.isalnum() or c in (" ", "-", "_")]).strip()
 
 
 def _song_exists(db, song_name: str) -> bool:
     safe_name = _safe_song_name(song_name)
-    song = db.query(Song).filter(
-        (Song.name == song_name) |
-        (Song.safe_name == safe_name)
-    ).first()
+    song = db.query(Song).filter((Song.name == song_name) | (Song.safe_name == safe_name)).first()
     return song is not None
 
 
@@ -171,7 +217,7 @@ def _extract_song_fields(data: Dict[str, Any]) -> Dict[str, str]:
         "singers": singers,
         "introduction": short_summary,
         "lyrics": lyrics,
-        "spaced_lyrics": spaced_lyrics
+        "spaced_lyrics": spaced_lyrics,
     }
 
 
@@ -180,7 +226,7 @@ def _split_spaced_lyrics(spaced_lyrics: str) -> List[str]:
     ret = []
     for part in parts:
         cleaned = part.strip()
-        if len(cleaned) >=6 and len(cleaned) <= 50:
+        if len(cleaned) >= 6 and len(cleaned) <= 50:
             ret.append(cleaned)
     return ret
 
@@ -225,19 +271,22 @@ def _fetch_candidate(fetcher: VCPediaFetcher, song_name: str) -> Optional[NewSon
 
 def content_revision(candidate: NewSongCandidate) -> int:
     """由规范化内容派生出稳定的非负修订号；内容不变则修订号不变。"""
-    text = "\x00".join((
-        candidate.song_name,
-        candidate.uploader,
-        ",".join(candidate.singers),
-        candidate.introduction,
-        candidate.lyrics,
-        ",".join(candidate.lyric_keywords),
-    ))
+    text = "\x00".join(
+        (
+            candidate.song_name,
+            candidate.uploader,
+            ",".join(candidate.singers),
+            candidate.introduction,
+            candidate.lyrics,
+            ",".join(candidate.lyric_keywords),
+        )
+    )
     return zlib.crc32(text.encode("utf-8"))
 
 
 def collect_new_song_candidates(
-    song_knowledge_config: Dict[str, Any], llm_module: Any | None = None,
+    song_knowledge_config: Dict[str, Any],
+    llm_module: Any | None = None,
 ) -> Dict[str, Any]:
     """抓取、规范化并做来源检查；本函数不写入任何知识。
 

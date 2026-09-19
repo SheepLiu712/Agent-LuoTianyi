@@ -53,7 +53,7 @@ def credential_message(credential_file: Path) -> str:
 def run(args: argparse.Namespace) -> int:
     config = read_config()
     learner_cfg = get_nested(config, "world", "auto_song_learner", default={}) or {}
-    sing_cfg = get_nested(config, "capabilities", "sing", args.character_id, default={}) or {}
+    sing_cfg = get_nested(config, "infrastructure", "sing", "characters", args.character_id, default={}) or {}
 
     credential_file = resolve_server_path(
         args.credential_file
@@ -105,7 +105,11 @@ def run(args: argparse.Namespace) -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="按当前 AutoSongLearner 配置真实测试 QQ 音乐下载链路。")
     parser.add_argument("--song", default="告死鸟", help="歌曲名，默认：告死鸟")
-    parser.add_argument("--singer", default="", help="歌手名，默认读取 capabilities.sing.<character_id>.character_name")
+    parser.add_argument(
+        "--singer",
+        default="",
+        help="歌手名，默认读取 infrastructure.sing.characters.<character_id>.character_name",
+    )
     parser.add_argument("--character-id", default="luotianyi", help="角色 ID，默认 luotianyi")
     parser.add_argument("--credential-file", default="", help="覆盖 QQ 音乐 credential 文件路径")
     parser.add_argument("--output-dir", default="", help="覆盖测试下载输出目录")

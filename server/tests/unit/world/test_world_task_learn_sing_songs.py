@@ -9,10 +9,8 @@ from types import SimpleNamespace
 import pytest
 
 import src.domain.agent as d
-from src.world.learn_sing_songs.auto_song_learner import (
-    AutoSongLearner,
-    WishlistManager,
-)
+from src.infrastructure.singing.wishlist import WishlistManager
+from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
 from src.world.learn_sing_songs.qq_music_credential_refresh_task import (
     QQMusicCredentialRefreshTask,
 )
@@ -523,7 +521,7 @@ def test_learn_sing_songs_run_once_reloads_singing_library_for_learned_songs():
     singing = SimpleNamespace(reload_songs=lambda character_id: calls.append(character_id))
     task = LearnSingSongsTask({}, character_id="luotianyi")
     task.auto_song_learner = learner
-    task.system_runtime = SimpleNamespace(capability_manager=SimpleNamespace(singing=singing))
+    task.system_runtime = SimpleNamespace(infrastructure=SimpleNamespace(singing=singing))
 
     result = asyncio.run(task.run_once())
 
@@ -548,7 +546,7 @@ def fact_sink_runtime(sink, *, character_id="luotianyi"):
     return SimpleNamespace(
         agent_runtime=SimpleNamespace(default_character_id=character_id),
         get_world_stage=get_world_stage,
-        capability_manager=SimpleNamespace(
+        infrastructure=SimpleNamespace(
             singing=SimpleNamespace(reload_songs=lambda *_: None, tag_song_emotions=lambda *_: []),
         ),
     )

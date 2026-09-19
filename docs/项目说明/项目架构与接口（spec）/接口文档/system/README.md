@@ -10,8 +10,8 @@
 
 ### 生命周期
 
-- `await SystemRuntime.initialize(config, observability=None) -> SystemRuntime`：按配置创建数据库、模型、能力、Agent、stage、Adapter 和 world，并连接依赖、启动后台服务。
-- `config.capabilities.media_resolution.root`：同一永久媒体根目录同时传给 WebSocket Adapter 的 `PermanentMediaStore` 和 CapabilityManager 的 `FilesystemMediaResolver`。Adapter 先构造只含永久 UUID 引用的候选 `ImageMessage`，验证目标 Stage 存在且可接收后，才在线程池中解码、验证并发布媒体目录；Agent 只接触引用。省略 root 时 resolver 明确失败，Adapter 拒绝图片输入。
+- `await SystemRuntime.initialize(config, observability=None) -> SystemRuntime`：按配置创建数据库、模型、基础设施、Agent、stage、Adapter 和 world，并连接依赖、启动后台服务。
+- `config.infrastructure.media_resolution.root`：同一永久媒体根目录同时传给 WebSocket Adapter 的 `PermanentMediaStore` 和 `InfrastructureRuntime` 的 `FilesystemMediaResolver`。Adapter 先构造只含永久 UUID 引用的候选 `ImageMessage`，验证目标 Stage 存在且可接收后，才在线程池中解码、验证并发布媒体目录；Agent 只接触引用。省略 root 时 resolver 明确失败，Adapter 拒绝图片输入。
 - 默认配置将目录设为 `data/media`，`max_encoded_bytes=8388608`、`max_bytes=6291456`。每个永久 UUID 目录包含 `content.bin` 与 `metadata.json`，metadata 保存 MIME 和认证上传用户。编码/解码超限返回 `MEDIA_TOO_LARGE`，且不产生最终媒体目录。
 - 发布先写唯一 staging 目录，再以一次目录 rename 发布完整身份；并发相同内容复用，冲突内容拒绝，残缺或损坏的已有身份稳定按 `MEDIA_UNKNOWN` 处理。永久媒体不设 TTL、过期或自动清理；大文件分块和超时策略仍未决定。
 - `ensure_dependencies()`：检查运行时各部分是否已经正确装配。
@@ -21,7 +21,7 @@
 
 - `websocket_service`：WebSocket Adapter 服务。
 - `chat_adapter` / `stage_manager`：生产聊天的共享协议 adapter 与连接/交互生命周期入口；`stage_manager` 缺失时生产聊天和首次登录明确失败，不静默回退旧链。
-- `capabilities`：能力管理器兼容入口。
+- `infrastructure`：共享模型、媒体和音频资源的生命周期容器；业务代码应使用已注入的窄端口，不把它当服务定位器。
 
 这些属性方便现有代码迁移。新增代码应优先只注入真正需要的窄接口，避免把完整 `SystemRuntime` 传到业务模块。
 

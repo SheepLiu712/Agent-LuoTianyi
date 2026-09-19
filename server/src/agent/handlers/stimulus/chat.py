@@ -23,6 +23,7 @@ from src.agent.skills.cognitive import (
     TextPreprocessingSkill,
 )
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
+from src.agent.skills.invocation import handling_invocation
 from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.agent.skills.reflection import ReflectionSkill
 from src.utils.enum_type import ConversationSource
@@ -284,8 +285,7 @@ class ChatReplyHandler:
         committed_contents: list[str] = []
         for _, memory_content in memory_items:
             revision = await self._memory_commit.commit(
-                character_id=identity.character_id,
-                user_id=identity.user_id,
+                handling_invocation(request, plans.context),
                 content=memory_content,
             )
             if not revision.identifier.strip():
@@ -296,7 +296,7 @@ class ChatReplyHandler:
         if normal_topic:
             reply_topic = f"{reply_topic}\n{normal_topic}"
         drafts = await self._composition.compose(
-            user_id=identity.user_id,
+            handling_invocation(request, plans.context),
             user_context=plans.context.user.read(),
             reply_topic=reply_topic,
             conversation_history=_render_history(plans.context.conversation.read()),
@@ -323,12 +323,11 @@ class ChatReplyHandler:
                 source_stimulus_ids=pending, actions=(d.StartThinking(action_id=f"{request.request_id}-thinking"),)
             )
         )
-        identity = plans.context.identity
         snapshot = plans.context.conversation.read()
         basis = request.interaction.interaction_revision
         plans.set_interruptible(True)
         staged = await self._composition.compose_staged(
-            user_id=identity.user_id,
+            handling_invocation(request, plans.context),
             user_context=plans.context.user.read(),
             reply_topic=reply_topic,
             conversation_history=_render_history(snapshot),
@@ -382,15 +381,13 @@ class ChatReflectionHandler:
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """依次沉淀记忆、按阈值压缩上下文、更新画像；不交付计划也不消费输入。"""
         context = plans.context
-        identity = context.identity
-        if identity.user_id is None:
+        if context.identity.user_id is None:
             return _report(request)
         snapshot = context.conversation.read()
         dialogue = _reflection_dialogue(request, snapshot)
         if dialogue:
             await self._reflection.consolidate_memories(
-                character_id=identity.character_id,
-                user_id=identity.user_id,
+                handling_invocation(request, context),
                 current_dialogue=dialogue,
                 conversation_history=_render_history(snapshot),
             )
@@ -399,8 +396,7 @@ class ChatReflectionHandler:
             await context.conversation.compact(compaction)
         if snapshot.summary.text or snapshot.entries:
             await self._reflection.update_profile(
-                character_id=identity.character_id,
-                user_id=identity.user_id,
+                handling_invocation(request, context),
                 summary=snapshot.summary.text,
                 recent_conversation=[f"{entry.source}: {entry.content.text}" for entry in snapshot.entries],
             )

@@ -75,6 +75,7 @@ CHECKS: tuple[Check, ...] = (
         ("",),
         (
             r"src\.(chat_session|subconscious|legacy)\b|src\.domain\.(chat|stimulus)\b|"
+            r"src\.capabilities\b|\bCapabilityManager\b|\bcapability_manager\b|"
             r"\b(LuoTianyiAgent|CharacterRuntime|AgentRegistry|ChatPreprocessor|SubconsciousMemory)\b|"
             r"_for_pipeline|try_handle_reflex|get_character_runtime\([^)]*\)\.conscious"
         ),
@@ -91,6 +92,12 @@ CHECKS: tuple[Check, ...] = (
             "world/get_new_songs/task.py",
             "world/learn_sing_songs/task.py",
         ),
+    ),
+    Check(
+        "B8-infrastructure-保持中立",
+        "基础设施不反向 import agent / world / stage / system 业务层",
+        ("infrastructure",),
+        r"^\s*from\s+src\.(agent|world|stage|system)\b|^\s*import\s+src\.(agent|world|stage|system)\b",
     ),
 )
 

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Protocol
+
+from src.agent.skills.contracts import SkillInvocation
 
 
 class _Memory(Protocol):
@@ -23,23 +26,23 @@ class _Memory(Protocol):
 class ReflectionSkill:
     """通过注入的长期记忆实现沉淀与画像更新，不了解运行时聚合对象。"""
 
-    def __init__(self, config: dict[str, Any], memory: _Memory) -> None:
+    def __init__(self, config: dict[str, Any], memories: Mapping[str, _Memory]) -> None:
         if not isinstance(config, dict):
             raise TypeError("reflection 必须是字典")
-        self._memory = memory
+        if not memories:
+            raise ValueError("reflection 至少需要一个角色记忆适配器")
+        self._memories = dict(memories)
 
     async def consolidate_memories(
         self,
+        invocation: SkillInvocation,
         *,
-        character_id: str,
-        user_id: str,
         current_dialogue: str,
         conversation_history: str = "",
         related_memories: list[str] | None = None,
     ) -> dict[str, Any]:
-        _ = character_id
-        return await self._memory.write_topic_memories(
-            user_id=user_id,
+        return await self._memory_for(invocation.character_id).write_topic_memories(
+            user_id=invocation.require_user_id(),
             history=conversation_history,
             current_dialogue=current_dialogue,
             related_memories=related_memories or [],
@@ -47,10 +50,15 @@ class ReflectionSkill:
         )
 
     async def update_profile(
-        self, *, character_id: str, user_id: str, summary: str, recent_conversation: list[str]
+        self, invocation: SkillInvocation, *, summary: str, recent_conversation: list[str]
     ) -> str | None:
-        _ = character_id
-        return await self._memory.update_user_profile_by_context(
-            user_id=user_id,
+        return await self._memory_for(invocation.character_id).update_user_profile_by_context(
+            user_id=invocation.require_user_id(),
             context={"summary": summary, "recent_conversation": list(recent_conversation)},
         )
+
+    def _memory_for(self, character_id: str) -> _Memory:
+        try:
+            return self._memories[character_id]
+        except KeyError as error:
+            raise KeyError(f"角色 {character_id} 未配置记忆") from error

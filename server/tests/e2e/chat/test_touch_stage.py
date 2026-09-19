@@ -36,37 +36,56 @@ async def test_touch_audio_end_precedes_restore_and_never_becomes_chat_record(tm
         output.setframerate(16000)
         output.writeframes(b"\x00\x00" * 10)
     manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps([{
-        "name": "touch_voice",
-        "audio_path": "touch.wav",
-        "text": "",
-        "expression": "happy",
-    }]), encoding="utf-8")
+    manifest.write_text(
+        json.dumps(
+            [
+                {
+                    "name": "touch_voice",
+                    "audio_path": "touch.wav",
+                    "text": "",
+                    "expression": "happy",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
     prepared = PreparedSpeechResources({"manifest": str(manifest)})
-    touch = TouchInteractionHandler(TouchReactionSkill({
-        "manifest": str(manifest),
-        "resource_names": ["touch_voice"],
-        "probability": 1.0,
-    }))
+    touch = TouchInteractionHandler(
+        TouchReactionSkill(
+            {
+                "luotianyi": {
+                    "manifest": str(manifest),
+                    "resource_names": ["touch_voice"],
+                    "probability": 1.0,
+                }
+            }
+        )
+    )
     agent = Agent(
         character_id="luotianyi",
-        stimulus_router=StimulusRouter([
-            (d.StimulusKind.TOUCH_INTERACTION, touch),
-            (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
-        ]),
-        action_router=ActionRouter([
-            (d.ActionKind.SAY, SayHandler("luotianyi", None, prepared)),
-            (d.ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
-        ]),
+        stimulus_router=StimulusRouter(
+            [
+                (d.StimulusKind.TOUCH_INTERACTION, touch),
+                (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+            ]
+        ),
+        action_router=ActionRouter(
+            [
+                (d.ActionKind.SAY, SayHandler("luotianyi", None, prepared)),
+                (d.ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
+            ]
+        ),
     )
     stage, _, adapter, _, socket = await setup(agent)
     try:
-        accepted = stage.stimulus_input_sink.submit(stimulus(
-            d.TouchInteraction,
-            body_regions=(d.BodyRegion(value="head"),),
-            click_frequency=None,
-            ephemeral=True,
-        ))
+        accepted = stage.stimulus_input_sink.submit(
+            stimulus(
+                d.TouchInteraction,
+                body_regions=(d.BodyRegion(value="head"),),
+                click_frequency=None,
+                ephemeral=True,
+            )
+        )
         assert accepted is True
         await until(lambda: len(socket.events) >= 5)
         packets = [event["payload"] for event in socket.events if event["type"] == "agent_message"]

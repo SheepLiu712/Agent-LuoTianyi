@@ -20,12 +20,12 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from src.capabilities.song_knowledge import (
+from src.domain.agent import SongKnowledgeCandidate, SourceRef
+from src.infrastructure.song_knowledge import (
     Song,
     get_song_session,
     init_song_db,
 )
-from src.domain.agent import SongKnowledgeCandidate, SourceRef
 
 
 class SongAcceptanceStatus(str, Enum):

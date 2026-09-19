@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from src.agent.skills.adapters.memory import AgentMemory
+from src.agent.skills.contracts import SkillInvocation
 
 
 class LearnedSongExperienceSkill:
@@ -12,19 +15,21 @@ class LearnedSongExperienceSkill:
     同日同内容由既有事件记忆去重保证幂等，因此同一学习任务重投不会产生第二条经验。
     """
 
-    def __init__(self, memory: AgentMemory | None) -> None:
-        self._memory = memory
+    def __init__(self, memories: Mapping[str, AgentMemory]) -> None:
+        self._memories = dict(memories)
 
-    async def commit(self, *, character_id: str, song_id: str, learning_job_id: str) -> bool:
+    async def commit(self, invocation: SkillInvocation, *, song_id: str, learning_job_id: str) -> bool:
         """写入一条学会经验；已有同日同内容记录时返回 False，不重复写入。"""
         for name, value in (
-            ("character_id", character_id),
+            ("character_id", invocation.character_id),
             ("song_id", song_id),
             ("learning_job_id", learning_job_id),
         ):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} 不能为空")
-        if self._memory is None:
-            raise RuntimeError("角色记忆不可用，无法写入学会经验")
+        try:
+            memory = self._memories[invocation.character_id]
+        except KeyError as error:
+            raise RuntimeError("角色记忆不可用，无法写入学会经验") from error
         content = f"学会了新歌《{song_id}》（学习任务 {learning_job_id}）"
-        return await self._memory.write_event_memory(user_id=character_id, content=content)
+        return await memory.write_event_memory(user_id=invocation.character_id, content=content)

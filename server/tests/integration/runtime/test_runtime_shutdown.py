@@ -42,7 +42,7 @@ async def test_system_runtime_shutdown_is_ordered_idempotent_and_retryable():
         world=world,
         database_manager=database,
         agent_runtime=agent,
-        capability_manager=capability,
+        infrastructure=capability,
         llm_service=object(),
         observability=object(),
         client_llm_executor=ClientLLMExecutor(),

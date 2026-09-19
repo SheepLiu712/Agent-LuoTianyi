@@ -46,12 +46,12 @@ class RuntimeConfigValidator:
         "agent.memory_writer": "agent_runtime.agent.memory.memory_writer.llm_module",
         "agent.user_profile": "agent_runtime.agent.memory.user_profile.llm_module",
         "agent.date_detector": "agent_runtime.agent.date_detector.llm_module",
-        "capability.singing.song_emotion_tagger": "capabilities.sing.song_emotion_tagger",
-        "capability.diary": "capabilities.diary.diary_llm.llm_module",
+        "infrastructure.singing.song_emotion_tagger": "infrastructure.sing.song_emotion_tagger",
+        "skill.diary": "agent_runtime.skills.diary.diary_llm.llm_module",
     }
 
     CORE_VLM_MODULE_PATHS = {
-        "capability.image_understanding": "capabilities.image_understanding.vlm_module",
+        "infrastructure.image_understanding": "infrastructure.image_understanding.vlm_module",
     }
 
     CORE_RESOURCE_PATHS = {
@@ -364,14 +364,14 @@ class RuntimeConfigValidator:
             result.append(self._path_item("core", f"resource.{name}", raw))
         result.extend(self._validate_song_knowledge_resources(config))
 
-        tts_cfg = config.get("capabilities", {}).get("tts", {})
+        tts_cfg = config.get("infrastructure", {}).get("tts", {})
         if not tts_cfg:
             result.append(ValidationItem("core", "resource.tts", "error", "未配置 TTS"))
         for character, item in tts_cfg.items():
             for key in self.TTS_RESOURCE_KEYS:
                 result.append(self._path_item("core", f"resource.tts.{character}.{key}", item.get(key)))
 
-        sing_cfg = config.get("capabilities", {}).get("sing", {})
+        sing_cfg = config.get("infrastructure", {}).get("sing", {})
         characters_cfg = sing_cfg.get("characters")
         if not isinstance(characters_cfg, dict) or not characters_cfg:
             result.append(ValidationItem("core", "resource.sing.characters", "error", "未配置任何角色歌曲资源"))

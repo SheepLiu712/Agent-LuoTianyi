@@ -14,9 +14,10 @@ from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.cognitive.learned_song_experience import (
     LearnedSongExperienceSkill,
 )
+from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
-from src.capabilities.dynamic import DynamicCapability
+from src.agent.skills.expression._dynamic_operations import DynamicOperations
 from src.system.database.database_service import DatabaseManager
 from src.system.database.sql_database import InviteCode
 from src.world.citywalk.task import CitywalkTask
@@ -34,6 +35,18 @@ class PlanSink:
     async def emit(self, plan):
         self.plans.append(plan)
         return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
+
+
+NARRATIVES = {"luotianyi": CharacterNarrative(name="洛天依", persona="", speaking_style="")}
+
+
+def _publishing(dynamic_operations):
+    return DynamicPublishingSkill(dynamic_operations, NARRATIVES)
+
+
+def _emitter(request, sink):
+    context = SimpleNamespace(identity=SimpleNamespace(character_id="luotianyi", user_id=None, interaction_id="wi"))
+    return PlanEmitter(character_id="luotianyi", request=request, sink=sink, context=context)
 
 
 class FakeFactSink:
@@ -93,14 +106,14 @@ def test_citywalk_completion_publishes_global_dynamic(db_manager: DatabaseManage
     _add_invite_code(db_manager, "INVITE5")
     user = _register_and_login(db_manager, "cityuser", "INVITE5")
 
-    dynamic_capability = DynamicCapability()
-    dynamic_capability.wire_dependencies(database_manager=db_manager)
+    dynamic_operations = DynamicOperations()
+    dynamic_operations.wire_dependencies(database_manager=db_manager)
 
     async def fake_generate_world_dynamic_content(**kwargs):
         return "今天在上海的武康路散步，风很舒服。"
 
-    dynamic_capability.generate_world_dynamic_content = fake_generate_world_dynamic_content
-    publishing = DynamicPublishingSkill(dynamic_capability)
+    dynamic_operations.generate_world_dynamic_content = fake_generate_world_dynamic_content
+    publishing = _publishing(dynamic_operations)
 
     report_path = tmp_path / "citywalk_20260704_120000.json"
     report_path.write_text(
@@ -133,7 +146,6 @@ def test_citywalk_completion_publishes_global_dynamic(db_manager: DatabaseManage
     router = WorldSettlementRouter()
     task = CitywalkTask({"daily_run_probability": 1.0}, settlements=router)
     task.system_runtime = SimpleNamespace(
-        capability_manager=SimpleNamespace(dynamics=dynamic_capability),
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
         get_world_stage=get_world_stage,
     )
@@ -147,30 +159,47 @@ def test_citywalk_completion_publishes_global_dynamic(db_manager: DatabaseManage
 
     fact = sink.facts[0]
     request = d.HandleStimulusRequest(
-        request_id="req", stimulus=fact,
+        request_id="req",
+        stimulus=fact,
         interaction=d.WorldInteractionSnapshot(
-            interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
-            now=fact.occurred_at, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(),
-            world_id="default", world_revision=fact.world_revision, activity_id=None,
-            activity_revision=None, planning_cycle_id=None, schedule_revision=0,
+            interaction_id="wi",
+            interaction_revision=1,
+            user_id=None,
+            pending_stimuli=(fact,),
+            now=fact.occurred_at,
+            timezone=ZoneInfo("UTC"),
+            supported_outputs=frozenset(),
+            world_id="default",
+            world_revision=fact.world_revision,
+            activity_id=None,
+            activity_revision=None,
+            planning_cycle_id=None,
+            schedule_revision=0,
         ),
         cancellation=d.CancellationToken(),
     )
     plan_sink = PlanSink()
     handling = asyncio.run(
         CitywalkObservationHandler(publishing).handle(
-            request, PlanEmitter(character_id="luotianyi", request=request, sink=plan_sink),
+            request,
+            _emitter(request, plan_sink),
         )
     )
     assert handling.request_status is d.HandlingRequestStatus.COMPLETED
     plan = plan_sink.plans[0]
 
-    action_result = asyncio.run(PublishDynamicHandler("luotianyi", publishing).realize(
-        plan.actions[0],
-        d.ExecutionContext(execution_id="e", interaction_id="wi", current_interaction_revision=1,
-                           cancellation=d.CancellationToken()),
-        None,
-    ))
+    action_result = asyncio.run(
+        PublishDynamicHandler("luotianyi", publishing).realize(
+            plan.actions[0],
+            d.ExecutionContext(
+                execution_id="e",
+                interaction_id="wi",
+                current_interaction_revision=1,
+                cancellation=d.CancellationToken(),
+            ),
+            None,
+        )
+    )
     assert action_result.effect_ref.kind is d.EffectKind.DYNAMIC_POST
 
     feed = db_manager.dynamic_store.list_dynamics_for_user(user["user_uuid"])
@@ -178,10 +207,18 @@ def test_citywalk_completion_publishes_global_dynamic(db_manager: DatabaseManage
     assert feed["items"][0]["content"]  # 内容不为空
 
     router.on_handling_settled(request, handling)
-    router.on_execution_finished(plan, d.ExecutionReport(
-        execution_id="e", plan_id=plan.plan_id, status=d.ExecutionStatus.COMPLETED,
-        action_results=(action_result,), output_started=False, error_code=None, retryable=False,
-    ))
+    router.on_execution_finished(
+        plan,
+        d.ExecutionReport(
+            execution_id="e",
+            plan_id=plan.plan_id,
+            status=d.ExecutionStatus.COMPLETED,
+            action_results=(action_result,),
+            output_started=False,
+            error_code=None,
+            retryable=False,
+        ),
+    )
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["dynamic_id"] == action_result.effect_ref.effect_id
     assert report["dynamic_content"] == "今天在上海的武康路散步，风很舒服。"
@@ -192,14 +229,14 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
     _add_invite_code(db_manager, "INVITE6")
     user = _register_and_login(db_manager, "songuser", "INVITE6")
 
-    dynamic_capability = DynamicCapability()
-    dynamic_capability.wire_dependencies(database_manager=db_manager)
+    dynamic_operations = DynamicOperations()
+    dynamic_operations.wire_dependencies(database_manager=db_manager)
 
     async def fake_generate_world_dynamic_content(**kwargs):
         return "今天学会了《告死鸟》，下次可以唱给你听。"
 
-    dynamic_capability.generate_world_dynamic_content = fake_generate_world_dynamic_content
-    publishing = DynamicPublishingSkill(dynamic_capability)
+    dynamic_operations.generate_world_dynamic_content = fake_generate_world_dynamic_content
+    publishing = _publishing(dynamic_operations)
 
     class FakeLearner:
         def check_qq_credential(self):
@@ -240,8 +277,8 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
     task.system_runtime = SimpleNamespace(
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
         get_world_stage=get_world_stage,
-        capability_manager=SimpleNamespace(
-            dynamics=dynamic_capability, singing=FakeSinging(),
+        infrastructure=SimpleNamespace(
+            singing=FakeSinging(),
         ),
     )
     task.event_store = FakeEventStore()
@@ -253,12 +290,22 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
 
     fact = sink.facts[0]
     request = d.HandleStimulusRequest(
-        request_id="req", stimulus=fact,
+        request_id="req",
+        stimulus=fact,
         interaction=d.WorldInteractionSnapshot(
-            interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
-            now=fact.occurred_at, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(),
-            world_id="default", world_revision=1, activity_id=None, activity_revision=None,
-            planning_cycle_id=None, schedule_revision=0,
+            interaction_id="wi",
+            interaction_revision=1,
+            user_id=None,
+            pending_stimuli=(fact,),
+            now=fact.occurred_at,
+            timezone=ZoneInfo("UTC"),
+            supported_outputs=frozenset(),
+            world_id="default",
+            world_revision=1,
+            activity_id=None,
+            activity_revision=None,
+            planning_cycle_id=None,
+            schedule_revision=0,
         ),
         cancellation=d.CancellationToken(),
     )
@@ -266,18 +313,24 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
     handling = asyncio.run(
         SongLearnedHandler(
             "luotianyi",
-            LearnedSongExperienceSkill(FakeMemory()),
+            LearnedSongExperienceSkill({"luotianyi": FakeMemory()}),
             publishing,
-            SongLearningDispatchSkill(FakeSinging()),
-        ).handle(request, PlanEmitter(character_id="luotianyi", request=request, sink=plan_sink))
+            SongLearningDispatchSkill(SimpleNamespace(singing_manager={"luotianyi": FakeSinging()})),
+        ).handle(request, _emitter(request, plan_sink))
     )
     plan = plan_sink.plans[0]
-    action_result = asyncio.run(PublishDynamicHandler("luotianyi", publishing).realize(
-        plan.actions[0],
-        d.ExecutionContext(execution_id="e", interaction_id="wi", current_interaction_revision=1,
-                           cancellation=d.CancellationToken()),
-        None,
-    ))
+    action_result = asyncio.run(
+        PublishDynamicHandler("luotianyi", publishing).realize(
+            plan.actions[0],
+            d.ExecutionContext(
+                execution_id="e",
+                interaction_id="wi",
+                current_interaction_revision=1,
+                cancellation=d.CancellationToken(),
+            ),
+            None,
+        )
+    )
     assert handling.request_status is d.HandlingRequestStatus.COMPLETED
     assert action_result.effect_ref.kind is d.EffectKind.DYNAMIC_POST
 
@@ -291,18 +344,18 @@ def test_learned_song_dynamic_is_idempotent_by_character_and_song(
 ):
     _add_invite_code(db_manager, "INVITE6B")
     user = _register_and_login(db_manager, "songuser2", "INVITE6B")
-    dynamic_capability = DynamicCapability()
-    dynamic_capability.wire_dependencies(database_manager=db_manager)
+    dynamic_operations = DynamicOperations()
+    dynamic_operations.wire_dependencies(database_manager=db_manager)
     compose_calls = []
 
     async def fake_compose(**kwargs):
         compose_calls.append(kwargs["song_name"])
         return f"学会了《{kwargs['song_name']}》"
 
-    dynamic_capability.compose_learned_song_dynamic_content = fake_compose
+    dynamic_operations.compose_learned_song_dynamic_content = fake_compose
 
     first = asyncio.run(
-        dynamic_capability.publish_learned_song_dynamic(
+        dynamic_operations.publish_learned_song_dynamic(
             character_id="luotianyi",
             character_name="洛天依",
             character_persona="",
@@ -311,7 +364,7 @@ def test_learned_song_dynamic_is_idempotent_by_character_and_song(
         )
     )
     second = asyncio.run(
-        dynamic_capability.publish_learned_song_dynamic(
+        dynamic_operations.publish_learned_song_dynamic(
             character_id="luotianyi",
             character_name="洛天依",
             character_persona="",
@@ -326,9 +379,7 @@ def test_learned_song_dynamic_is_idempotent_by_character_and_song(
     assert compose_calls == ["告死鸟"]
     feed = db_manager.dynamic_store.list_dynamics_for_user(user["user_uuid"])
     learned_items = [
-        item
-        for item in feed["items"]
-        if item["source_type"] == "song_learned" and item["source_id"] == "告死鸟"
+        item for item in feed["items"] if item["source_type"] == "song_learned" and item["source_id"] == "告死鸟"
     ]
     assert len(learned_items) == 1
 
@@ -346,42 +397,60 @@ def _build_dynamic_task(
         return SimpleNamespace(fact_sink=sink)
 
     task = DynamicInteractionTask(config or {}, settlements=router or WorldSettlementRouter())
-    task.initialize(SimpleNamespace(
-        database_manager=db_manager,
-        agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
-        get_world_stage=get_world_stage,
-    ))
+    task.initialize(
+        SimpleNamespace(
+            database_manager=db_manager,
+            agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
+            get_world_stage=get_world_stage,
+        )
+    )
     return task
 
 
 def _dynamic_observation_request(fact: d.DynamicObserved) -> d.HandleStimulusRequest:
     """按事实构造一次处理请求，供结算回调使用。"""
     return d.HandleStimulusRequest(
-        request_id="req", stimulus=fact,
+        request_id="req",
+        stimulus=fact,
         interaction=d.WorldInteractionSnapshot(
-            interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
-            now=fact.occurred_at, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(),
-            world_id="default", world_revision=fact.revision, activity_id=None,
-            activity_revision=None, planning_cycle_id=None, schedule_revision=0,
+            interaction_id="wi",
+            interaction_revision=1,
+            user_id=None,
+            pending_stimuli=(fact,),
+            now=fact.occurred_at,
+            timezone=ZoneInfo("UTC"),
+            supported_outputs=frozenset(),
+            world_id="default",
+            world_revision=fact.revision,
+            activity_id=None,
+            activity_revision=None,
+            planning_cycle_id=None,
+            schedule_revision=0,
         ),
         cancellation=d.CancellationToken(),
     )
 
 
 def _handling_report(
-    fact: d.DynamicObserved, *, status: d.HandlingRequestStatus = d.HandlingRequestStatus.COMPLETED,
-    plan_ids: tuple[str, ...] = (), error_code: d.HandlingErrorCode | None = None,
+    fact: d.DynamicObserved,
+    *,
+    status: d.HandlingRequestStatus = d.HandlingRequestStatus.COMPLETED,
+    plan_ids: tuple[str, ...] = (),
+    error_code: d.HandlingErrorCode | None = None,
 ) -> d.HandlingReport:
     """构造处理结算：无计划且被消费即「明确忽略」。"""
     consumed = (fact.stimulus_id,) if status is not d.HandlingRequestStatus.FAILED else ()
     return d.HandlingReport(
-        request_id="req", trigger_stimulus_id=fact.stimulus_id, basis_interaction_revision=1,
-        request_status=status, considered_pending_stimulus_ids=(fact.stimulus_id,),
+        request_id="req",
+        trigger_stimulus_id=fact.stimulus_id,
+        basis_interaction_revision=1,
+        request_status=status,
+        considered_pending_stimulus_ids=(fact.stimulus_id,),
         consumed_pending_stimulus_ids=consumed,
-        retained_pending_stimulus_ids=(
-            () if consumed else (fact.stimulus_id,)
-        ),
-        emitted_plan_ids=plan_ids, error_code=error_code, retryable=False,
+        retained_pending_stimulus_ids=(() if consumed else (fact.stimulus_id,)),
+        emitted_plan_ids=plan_ids,
+        error_code=error_code,
+        retryable=False,
     )
 
 
@@ -460,23 +529,37 @@ def test_dynamic_interaction_writes_status_from_settlement_only(db_manager: Data
     request = _dynamic_observation_request(fact)
     plan_sink = PlanSink()
     action = d.ReplyDynamic(
-        action_id="a1", body="我看到你坚持下来了，辛苦啦。",
+        action_id="a1",
+        body="我看到你坚持下来了，辛苦啦。",
         target=d.DynamicReplyTarget(dynamic_id=dynamic_id, parent_comment_id=None),
         owner_user_id=auth["user_uuid"],
     )
-    receipt = asyncio.run(PlanEmitter(character_id="luotianyi", request=request, sink=plan_sink).emit(
-        ActionPlanDraft(source_stimulus_ids=(fact.stimulus_id,), actions=(action,)),
-    ))
+    receipt = asyncio.run(
+        PlanEmitter(character_id="luotianyi", request=request, sink=plan_sink).emit(
+            ActionPlanDraft(source_stimulus_ids=(fact.stimulus_id,), actions=(action,)),
+        )
+    )
     router.on_handling_settled(request, _handling_report(fact, plan_ids=(receipt.plan_id,)))
-    router.on_execution_finished(plan_sink.plans[0], d.ExecutionReport(
-        execution_id="e", plan_id=receipt.plan_id, status=d.ExecutionStatus.COMPLETED,
-        action_results=(d.ActionResult(
-            action_id="a1", status=d.ActionExecutionStatus.COMPLETED, error_code=None,
-            irreversible_effect_committed=True,
-            effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_COMMENT, effect_id="comment-1"),
-        ),),
-        output_started=False, error_code=None, retryable=False,
-    ))
+    router.on_execution_finished(
+        plan_sink.plans[0],
+        d.ExecutionReport(
+            execution_id="e",
+            plan_id=receipt.plan_id,
+            status=d.ExecutionStatus.COMPLETED,
+            action_results=(
+                d.ActionResult(
+                    action_id="a1",
+                    status=d.ActionExecutionStatus.COMPLETED,
+                    error_code=None,
+                    irreversible_effect_committed=True,
+                    effect_ref=d.EffectRef(kind=d.EffectKind.DYNAMIC_COMMENT, effect_id="comment-1"),
+                ),
+            ),
+            output_started=False,
+            error_code=None,
+            retryable=False,
+        ),
+    )
 
     feed = db_manager.dynamic_store.list_dynamics_for_user(auth["user_uuid"])
     target = next(item for item in feed["items"] if item["id"] == dynamic_id)
@@ -516,10 +599,14 @@ def test_dynamic_interaction_failure_marks_both_aspects_failed(db_manager: Datab
     asyncio.run(task.run_once())
     fact = sink.facts[0]
 
-    router.on_handling_settled(_dynamic_observation_request(fact), _handling_report(
-        fact, status=d.HandlingRequestStatus.FAILED,
-        error_code=d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE,
-    ))
+    router.on_handling_settled(
+        _dynamic_observation_request(fact),
+        _handling_report(
+            fact,
+            status=d.HandlingRequestStatus.FAILED,
+            error_code=d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE,
+        ),
+    )
 
     feed = db_manager.dynamic_store.list_dynamics_for_user(auth["user_uuid"])
     target = next(item for item in feed["items"] if item["id"] == dynamic_id)
@@ -532,9 +619,14 @@ def test_dynamic_interaction_marks_memory_only_target_written(db_manager: Databa
     _add_invite_code(db_manager, "INVITE8")
     auth = _register_and_login(db_manager, "memoryuser", "INVITE8")
     dynamic_id = _create_user_post(db_manager, auth, "我最近开始重新练吉他了。")
-    assert db_manager.dynamic_store.update_dynamic_post_reply_state(
-        dynamic_id, status="replied", error=None,
-    ) is True
+    assert (
+        db_manager.dynamic_store.update_dynamic_post_reply_state(
+            dynamic_id,
+            status="replied",
+            error=None,
+        )
+        is True
+    )
 
     sink = FakeFactSink()
     router = WorldSettlementRouter()
@@ -563,7 +655,9 @@ def test_dynamic_interaction_limits_targets_per_pass(db_manager: DatabaseManager
 
     sink = FakeFactSink()
     task = _build_dynamic_task(
-        db_manager, sink, config={"reply_post_limit": 2, "memory_post_limit": 2},
+        db_manager,
+        sink,
+        config={"reply_post_limit": 2, "memory_post_limit": 2},
     )
     result = asyncio.run(task.run_once())
 

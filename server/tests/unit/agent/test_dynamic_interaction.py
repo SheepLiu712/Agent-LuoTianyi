@@ -1,6 +1,8 @@
 """动态观察事实的 Agent 侧回复决策、评论发布与记忆写入。"""
+
 import asyncio
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -9,6 +11,7 @@ from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
 from src.agent.handlers.stimulus.dynamic_observed import DynamicObservedHandler
 from src.agent.processing.plan_emitter import PlanEmitter
 from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
+from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
 
 CHARACTER_ID = "luotianyi"
@@ -17,8 +20,7 @@ REPLY_BODY = "我看到你坚持下来了，辛苦啦。"
 
 
 class FakeReplier:
-    def __init__(self, *, available=True, post_reply=REPLY_BODY,
-                 comment_decision=None, fail=False):
+    def __init__(self, *, available=True, post_reply=REPLY_BODY, comment_decision=None, fail=False):
         self.available = available
         self.post_reply = post_reply
         self.comment_decision = comment_decision or {"should_reply": True, "reply": REPLY_BODY}
@@ -58,18 +60,25 @@ class FakeDynamics:
 
 class FakeMemory:
     def __init__(self, *, items=None, fail=False):
-        self.items = items if items is not None else [
-            {"memory_type": "user_memory", "content": "用户坚持下来了", "status": "written"},
-        ]
+        self.items = (
+            items
+            if items is not None
+            else [
+                {"memory_type": "user_memory", "content": "用户坚持下来了", "status": "written"},
+            ]
+        )
         self.fail = fail
         self.calls = []
 
-    async def write_topic_memories(self, *, user_id, history, current_dialogue,
-                                   related_memories, commit=True):
-        self.calls.append({
-            "user_id": user_id, "history": history,
-            "current_dialogue": current_dialogue, "commit": commit,
-        })
+    async def write_topic_memories(self, *, user_id, history, current_dialogue, related_memories, commit=True):
+        self.calls.append(
+            {
+                "user_id": user_id,
+                "history": history,
+                "current_dialogue": current_dialogue,
+                "commit": commit,
+            }
+        )
         if self.fail:
             raise RuntimeError("memory unavailable")
         return {"payload": {"user_memory": []}, "items": self.items}
@@ -84,50 +93,87 @@ class Sink:
         return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
 
 
-def _message(message_id: str, *, text: str, actor_id: str = USER_ID,
-             name: str = "小明", parent: str | None = None) -> d.DynamicMessage:
+def _emitter(request, sink):
+    context = SimpleNamespace(identity=SimpleNamespace(character_id=CHARACTER_ID, user_id=None, interaction_id="wi"))
+    return PlanEmitter(character_id=CHARACTER_ID, request=request, sink=sink, context=context)
+
+
+def _message(
+    message_id: str, *, text: str, actor_id: str = USER_ID, name: str = "小明", parent: str | None = None
+) -> d.DynamicMessage:
     return d.DynamicMessage(
-        message_id=message_id, parent_message_id=parent,
+        message_id=message_id,
+        parent_message_id=parent,
         author_ref=d.ActorRef(actor_id=actor_id, display_name=name),
-        text=text, media_refs=(),
+        text=text,
+        media_refs=(),
     )
 
 
-def _observation(*, target_kind: d.DynamicTargetKind = d.DynamicTargetKind.POST,
-                 target_id: str | None = None,
-                 messages: tuple[d.DynamicMessage, ...] | None = None) -> d.DynamicObserved:
+def _observation(
+    *,
+    target_kind: d.DynamicTargetKind = d.DynamicTargetKind.POST,
+    target_id: str | None = None,
+    messages: tuple[d.DynamicMessage, ...] | None = None,
+) -> d.DynamicObserved:
     dynamic_id = "dyn-1"
     messages = messages or (_message(dynamic_id, text="今天其实有点紧张，不过也算坚持下来了。"),)
     return d.DynamicObserved(
-        stimulus_id=str(uuid4()), schema_version=1, occurred_at=datetime.now(timezone.utc),
-        source=d.StimulusSource.WORLD, target_character_ids=(CHARACTER_ID,), user_id=None,
-        ephemeral=False, dynamic_id=dynamic_id,
-        target_message_id=target_id or dynamic_id, target_kind=target_kind,
-        messages=messages, revision=len(messages),
+        stimulus_id=str(uuid4()),
+        schema_version=1,
+        occurred_at=datetime.now(timezone.utc),
+        source=d.StimulusSource.WORLD,
+        target_character_ids=(CHARACTER_ID,),
+        user_id=None,
+        ephemeral=False,
+        dynamic_id=dynamic_id,
+        target_message_id=target_id or dynamic_id,
+        target_kind=target_kind,
+        messages=messages,
+        revision=len(messages),
     )
 
 
 def _request(fact: d.DynamicObserved) -> d.HandleStimulusRequest:
     return d.HandleStimulusRequest(
-        request_id="req", stimulus=fact,
+        request_id="req",
+        stimulus=fact,
         interaction=d.WorldInteractionSnapshot(
-            interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
-            now=fact.occurred_at, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(),
-            world_id="default", world_revision=fact.revision, activity_id=None,
-            activity_revision=None, planning_cycle_id=None, schedule_revision=0,
+            interaction_id="wi",
+            interaction_revision=1,
+            user_id=None,
+            pending_stimuli=(fact,),
+            now=fact.occurred_at,
+            timezone=ZoneInfo("UTC"),
+            supported_outputs=frozenset(),
+            world_id="default",
+            world_revision=fact.revision,
+            activity_id=None,
+            activity_revision=None,
+            planning_cycle_id=None,
+            schedule_revision=0,
         ),
         cancellation=d.CancellationToken(),
     )
 
 
-def _handler(replier: FakeReplier, *, memory: FakeMemory | None = None,
-             publish_ok: bool = True):
+def _handler(replier: FakeReplier, *, memory: FakeMemory | None = None, publish_ok: bool = True):
     dynamics = FakeDynamics(replier, publish_ok=publish_ok)
-    reply = DynamicReplySkill(dynamics, character_id=CHARACTER_ID, character_name="洛天依")
+    reply = DynamicReplySkill(
+        dynamics,
+        {CHARACTER_ID: CharacterNarrative(name="洛天依", persona="", speaking_style="")},
+    )
     memory = memory if memory is not None else FakeMemory()
-    return DynamicObservedHandler(
-        CHARACTER_ID, reply, DynamicTopicMemorySkill(memory),
-    ), dynamics, memory, reply
+    return (
+        DynamicObservedHandler(
+            CHARACTER_ID,
+            reply,
+            DynamicTopicMemorySkill({CHARACTER_ID: memory}),
+        ),
+        dynamics,
+        memory,
+        reply,
+    )
 
 
 def test_post_observation_delivers_reply_and_publishes_comment():
@@ -138,9 +184,7 @@ def test_post_observation_delivers_reply_and_publishes_comment():
     request = _request(fact)
     sink = Sink()
 
-    handling = asyncio.run(
-        handler.handle(request, PlanEmitter(character_id=CHARACTER_ID, request=request, sink=sink))
-    )
+    handling = asyncio.run(handler.handle(request, _emitter(request, sink)))
 
     assert handling.request_status is d.HandlingRequestStatus.COMPLETED
     assert len(sink.plans) == 1
@@ -157,8 +201,12 @@ def test_post_observation_delivers_reply_and_publishes_comment():
     action_result = asyncio.run(
         ReplyDynamicHandler(CHARACTER_ID, reply).realize(
             action,
-            d.ExecutionContext(execution_id="e", interaction_id="wi",
-                               current_interaction_revision=1, cancellation=d.CancellationToken()),
+            d.ExecutionContext(
+                execution_id="e",
+                interaction_id="wi",
+                current_interaction_revision=1,
+                cancellation=d.CancellationToken(),
+            ),
             None,
         )
     )
@@ -166,7 +214,8 @@ def test_post_observation_delivers_reply_and_publishes_comment():
     assert first_plan.actions[0].action_id == action.action_id
     assert action_result.status is d.ActionExecutionStatus.COMPLETED
     assert action_result.effect_ref == d.EffectRef(
-        kind=d.EffectKind.DYNAMIC_COMMENT, effect_id="comment-1",
+        kind=d.EffectKind.DYNAMIC_COMMENT,
+        effect_id="comment-1",
     )
     assert dynamics.published[0]["parent_comment_id"] is None
     assert dynamics.published[0]["owner_user_id"] == USER_ID
@@ -177,7 +226,8 @@ def test_comment_observation_can_be_ignored_explicitly():
     replier = FakeReplier(comment_decision={"should_reply": False, "reply": ""})
     handler, _, memory, _ = _handler(replier)
     fact = _observation(
-        target_kind=d.DynamicTargetKind.COMMENT, target_id="comment-9",
+        target_kind=d.DynamicTargetKind.COMMENT,
+        target_id="comment-9",
         messages=(
             _message("dyn-1", text="今天其实有点紧张，不过也算坚持下来了。"),
             _message("comment-9", text="加油，慢慢来。", parent="dyn-1"),
@@ -186,9 +236,7 @@ def test_comment_observation_can_be_ignored_explicitly():
     request = _request(fact)
     sink = Sink()
 
-    handling = asyncio.run(
-        handler.handle(request, PlanEmitter(character_id=CHARACTER_ID, request=request, sink=sink))
-    )
+    handling = asyncio.run(handler.handle(request, _emitter(request, sink)))
 
     assert handling.request_status is d.HandlingRequestStatus.COMPLETED
     assert handling.emitted_plan_ids == ()
@@ -202,7 +250,8 @@ def test_comment_observation_replies_to_comment_parent():
     replier = FakeReplier()
     handler, _, _, _ = _handler(replier)
     fact = _observation(
-        target_kind=d.DynamicTargetKind.COMMENT, target_id="comment-9",
+        target_kind=d.DynamicTargetKind.COMMENT,
+        target_id="comment-9",
         messages=(
             _message("dyn-1", text="今天其实有点紧张，不过也算坚持下来了。"),
             _message("comment-9", text="加油，慢慢来。", actor_id="user-2", parent="dyn-1"),
@@ -211,9 +260,7 @@ def test_comment_observation_replies_to_comment_parent():
     request = _request(fact)
     sink = Sink()
 
-    asyncio.run(
-        handler.handle(request, PlanEmitter(character_id=CHARACTER_ID, request=request, sink=sink))
-    )
+    asyncio.run(handler.handle(request, _emitter(request, sink)))
 
     action = sink.plans[0].actions[0]
     assert action.target.parent_comment_id == "comment-9"
@@ -225,20 +272,18 @@ def test_existing_character_reply_is_not_published_again():
     replier = FakeReplier()
     handler, _, _, _ = _handler(replier)
     fact = _observation(
-        target_kind=d.DynamicTargetKind.COMMENT, target_id="comment-9",
+        target_kind=d.DynamicTargetKind.COMMENT,
+        target_id="comment-9",
         messages=(
             _message("dyn-1", text="今天其实有点紧张。"),
             _message("comment-9", text="加油，慢慢来。", actor_id="user-2", parent="dyn-1"),
-            _message("comment-10", text="谢谢你呀。", actor_id=CHARACTER_ID,
-                     name="洛天依", parent="comment-9"),
+            _message("comment-10", text="谢谢你呀。", actor_id=CHARACTER_ID, name="洛天依", parent="comment-9"),
         ),
     )
     request = _request(fact)
     sink = Sink()
 
-    handling = asyncio.run(
-        handler.handle(request, PlanEmitter(character_id=CHARACTER_ID, request=request, sink=sink))
-    )
+    handling = asyncio.run(handler.handle(request, _emitter(request, sink)))
 
     assert handling.request_status is d.HandlingRequestStatus.COMPLETED
     assert handling.emitted_plan_ids == ()
@@ -254,9 +299,7 @@ def test_unavailable_reply_model_fails_without_faking_success():
     request = _request(fact)
     sink = Sink()
 
-    handling = asyncio.run(
-        handler.handle(request, PlanEmitter(character_id=CHARACTER_ID, request=request, sink=sink))
-    )
+    handling = asyncio.run(handler.handle(request, _emitter(request, sink)))
 
     assert handling.request_status is d.HandlingRequestStatus.FAILED
     assert handling.error_code is d.HandlingErrorCode.DEPENDENCY_UNAVAILABLE
@@ -273,9 +316,7 @@ def test_memory_failure_does_not_block_reply():
     request = _request(fact)
     sink = Sink()
 
-    handling = asyncio.run(
-        handler.handle(request, PlanEmitter(character_id=CHARACTER_ID, request=request, sink=sink))
-    )
+    handling = asyncio.run(handler.handle(request, _emitter(request, sink)))
 
     assert handling.request_status is d.HandlingRequestStatus.COMPLETED
     assert len(handling.emitted_plan_ids) == 1
@@ -289,16 +330,18 @@ def test_reply_publish_failure_is_reported_without_effect():
     fact = _observation()
     request = _request(fact)
     sink = Sink()
-    asyncio.run(
-        handler.handle(request, PlanEmitter(character_id=CHARACTER_ID, request=request, sink=sink))
-    )
+    asyncio.run(handler.handle(request, _emitter(request, sink)))
 
     action = sink.plans[0].actions[0]
     action_result = asyncio.run(
         ReplyDynamicHandler(CHARACTER_ID, reply).realize(
             action,
-            d.ExecutionContext(execution_id="e", interaction_id="wi",
-                               current_interaction_revision=1, cancellation=d.CancellationToken()),
+            d.ExecutionContext(
+                execution_id="e",
+                interaction_id="wi",
+                current_interaction_revision=1,
+                cancellation=d.CancellationToken(),
+            ),
             None,
         )
     )

@@ -1,4 +1,5 @@
 """到期批次回复：生成、落库与 Say/Sing 计划交付。"""
+
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from src.agent.skills.cognitive import (
     ReplyDraft,
     ResponseCompositionSkill,
 )
+from skill_support import invocation
 
 
 class _Conversation:
@@ -31,8 +33,9 @@ class _Conversation:
 
 
 def context(interaction_id="i", user_id="u", character_id="luotianyi"):
-    value = SimpleNamespace(identity=SimpleNamespace(
-        interaction_id=interaction_id, user_id=user_id, character_id=character_id))
+    value = SimpleNamespace(
+        identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id, character_id=character_id)
+    )
     value.conversation = _Conversation()
     value.user = SimpleNamespace(read=UserContextSnapshot)
     return value
@@ -57,11 +60,13 @@ class Composer:
         self.provisional = provisional
         self.calls = []
 
-    async def compose(self, **kwargs):
+    async def compose(self, skill_invocation, **kwargs):
+        kwargs["invocation"] = skill_invocation
         self.calls.append(kwargs)
         return self.drafts
 
-    async def compose_staged(self, **kwargs):
+    async def compose_staged(self, skill_invocation, **kwargs):
+        kwargs["invocation"] = skill_invocation
         self.calls.append(kwargs)
 
         async def formal():
@@ -71,16 +76,22 @@ class Composer:
 
 
 def agent(composer, understanding=None):
-    return Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.TEXT_MESSAGE, ChatReplyHandler(composer, understanding or _Understanding()))]))
+    return Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(
+            [(d.StimulusKind.TEXT_MESSAGE, ChatReplyHandler(composer, understanding or _Understanding()))]
+        ),
+    )
 
 
 @pytest.mark.asyncio
 async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
-    composer = Composer((
-        ReplyDraft(content="你好呀", sound_content="你好呀", tone="happy", expression="开心"),
-        ReplyDraft(content="唱了《歌》", sound_content="", tone="", expression=None, sing=("歌", "副歌")),
-    ))
+    composer = Composer(
+        (
+            ReplyDraft(content="你好呀", sound_content="你好呀", tone="happy", expression="开心"),
+            ReplyDraft(content="唱了《歌》", sound_content="", tone="", expression=None, sing=("歌", "副歌")),
+        )
+    )
     ctx = context()
     sink = Sink()
     report = await agent(composer).handle_stimulus(deadline_request(), sink, context=ctx)
@@ -104,7 +115,7 @@ async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
     assert report.consumed_pending_stimulus_ids == ("m2", "m1")
     assert report.retained_pending_stimulus_ids == ()
     assert composer.calls[0]["reply_topic"] == "你好"
-    assert composer.calls[0]["user_id"] == "u"
+    assert composer.calls[0]["invocation"].user_id == "u"
 
 
 @pytest.mark.asyncio
@@ -112,8 +123,7 @@ async def test_empty_batch_consumes_without_plan_or_persistence():
     composer = Composer(())
     ctx = context()
     sink = Sink()
-    report = await agent(composer).handle_stimulus(
-        replace(request(), prepared_inputs=()), sink, context=ctx)
+    report = await agent(composer).handle_stimulus(replace(request(), prepared_inputs=()), sink, context=ctx)
     assert sink.values == []
     assert ctx.conversation.entries == []
     assert report.consumed_pending_stimulus_ids == ("m2", "m1")
@@ -134,6 +144,7 @@ class _Memory:
     async def search_memory_context_for_topic(self, user_id, queries):
         self.memory_queries.append((user_id, tuple(queries)))
         return _Recall()
+
 
 class _Generator:
     def __init__(self):
@@ -167,10 +178,10 @@ async def test_response_composition_skill_recalls_and_maps_drafts():
     singing = _Singing()
     generator = _Generator()
     skill = ResponseCompositionSkill(
-        {}, character_id="luotianyi", memory=memory, singing=singing, generator=generator
+        {}, memories={"luotianyi": memory}, singing=singing, generators={"luotianyi": generator}
     )
     drafts = await skill.compose(
-        user_id="u",
+        invocation(),
         user_context=UserContextSnapshot(),
         reply_topic="你好",
         conversation_history="历史",
@@ -195,12 +206,14 @@ async def test_response_composition_skill_recalls_and_maps_drafts():
 async def test_reply_passes_sing_attempts_and_recent_exclusion():
     composer = Composer(())
     ctx = context()
-    ctx.conversation.entries.append(ConversationEntry(
-        entry_id="p1",
-        timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
-        source="agent",
-        content=SongContent("唱了《歌》", "歌", "副歌")))
-    await agent(composer, _Understanding(("《歌》",))).handle_stimulus(
-        deadline_request(), Sink(), context=ctx)
+    ctx.conversation.entries.append(
+        ConversationEntry(
+            entry_id="p1",
+            timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
+            source="agent",
+            content=SongContent("唱了《歌》", "歌", "副歌"),
+        )
+    )
+    await agent(composer, _Understanding(("《歌》",))).handle_stimulus(deadline_request(), Sink(), context=ctx)
     assert composer.calls[0]["sing_attempts"] == ("《歌》",)
     assert composer.calls[0]["excluded_segments"] == {("歌", "副歌")}

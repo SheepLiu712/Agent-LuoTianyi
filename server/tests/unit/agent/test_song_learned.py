@@ -1,5 +1,7 @@
 """学会新歌事实的 Agent 侧经验写入、动态发布与学歌派发。"""
+
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import src.domain.agent as d
@@ -9,8 +11,10 @@ from src.agent.processing.plan_emitter import PlanEmitter
 from src.agent.skills.cognitive.learned_song_experience import (
     LearnedSongExperienceSkill,
 )
+from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
+from skill_support import invocation
 
 BODY = "今天学会了《Song A》，好想唱给你听！"
 
@@ -78,40 +82,69 @@ class Sink:
 def learned(song_id="Song A", learning_job_id="luotianyi:20260915120000"):
     now = datetime(2026, 9, 15, tzinfo=timezone.utc)
     return d.SongLearned(
-        stimulus_id="sl1", schema_version=1, occurred_at=now, source=d.StimulusSource.WORLD,
-        target_character_ids=("luotianyi",), user_id=None, ephemeral=False,
-        learning_job_id=learning_job_id, song_id=song_id, completed_at=now,
+        stimulus_id="sl1",
+        schema_version=1,
+        occurred_at=now,
+        source=d.StimulusSource.WORLD,
+        target_character_ids=("luotianyi",),
+        user_id=None,
+        ephemeral=False,
+        learning_job_id=learning_job_id,
+        song_id=song_id,
+        completed_at=now,
     )
 
 
 def request_for(fact):
     now = datetime(2026, 9, 15, tzinfo=timezone.utc)
     snapshot = d.WorldInteractionSnapshot(
-        interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
-        now=now, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(), world_id="default",
-        world_revision=1, activity_id=None, activity_revision=None,
-        planning_cycle_id=None, schedule_revision=0,
+        interaction_id="wi",
+        interaction_revision=1,
+        user_id=None,
+        pending_stimuli=(fact,),
+        now=now,
+        timezone=ZoneInfo("UTC"),
+        supported_outputs=frozenset(),
+        world_id="default",
+        world_revision=1,
+        activity_id=None,
+        activity_revision=None,
+        planning_cycle_id=None,
+        schedule_revision=0,
     )
     return d.HandleStimulusRequest(
-        request_id="req", stimulus=fact, interaction=snapshot, cancellation=d.CancellationToken(),
+        request_id="req",
+        stimulus=fact,
+        interaction=snapshot,
+        cancellation=d.CancellationToken(),
     )
 
 
 def handler(memory, dynamics, singing=None):
     return SongLearnedHandler(
         "luotianyi",
-        LearnedSongExperienceSkill(memory),
-        DynamicPublishingSkill(dynamics),
-        SongLearningDispatchSkill(singing or FakeSinging()),
+        LearnedSongExperienceSkill({"luotianyi": memory}),
+        DynamicPublishingSkill(
+            dynamics,
+            {"luotianyi": CharacterNarrative(name="洛天依", persona="", speaking_style="")},
+        ),
+        SongLearningDispatchSkill(_singing(singing or FakeSinging())),
     )
+
+
+def _singing(manager):
+    return SimpleNamespace(singing_manager={"luotianyi": manager})
 
 
 async def test_experience_is_written_once_per_learning_job():
     memory = FakeMemory()
-    skill = LearnedSongExperienceSkill(memory)
+    skill = LearnedSongExperienceSkill({"luotianyi": memory})
 
-    first = await skill.commit(character_id="luotianyi", song_id="Song A",
-                               learning_job_id="luotianyi:20260915120000")
+    first = await skill.commit(
+        invocation(user_id=None),
+        song_id="Song A",
+        learning_job_id="luotianyi:20260915120000",
+    )
     assert first is True
     assert memory.calls[0][0] == "luotianyi"
     assert "Song A" in memory.calls[0][1]
@@ -119,15 +152,14 @@ async def test_experience_is_written_once_per_learning_job():
 
 
 async def test_experience_skill_rejects_invalid_arguments():
-    skill = LearnedSongExperienceSkill(FakeMemory())
+    skill = LearnedSongExperienceSkill({"luotianyi": FakeMemory()})
 
-    for kwargs in (
-        {"character_id": " ", "song_id": "Song A", "learning_job_id": "job"},
-        {"character_id": "luotianyi", "song_id": "", "learning_job_id": "job"},
-        {"character_id": "luotianyi", "song_id": "Song A", "learning_job_id": " "},
+    for skill_invocation, kwargs in (
+        (invocation(user_id=None), {"song_id": "", "learning_job_id": "job"}),
+        (invocation(user_id=None), {"song_id": "Song A", "learning_job_id": " "}),
     ):
         try:
-            await skill.commit(**kwargs)
+            await skill.commit(skill_invocation, **kwargs)
         except ValueError:
             continue
         raise AssertionError(f"非法参数未被拒绝：{kwargs}")
@@ -185,7 +217,8 @@ async def test_song_learned_handler_fails_without_plan_when_body_is_empty():
 
 
 def emitter(request, sink):
-    return PlanEmitter(character_id="luotianyi", request=request, sink=sink)
+    context = SimpleNamespace(identity=SimpleNamespace(character_id="luotianyi", user_id=None, interaction_id="wi"))
+    return PlanEmitter(character_id="luotianyi", request=request, sink=sink, context=context)
 
 
 def action_for(song_id="Song A", dedup_key="dedup-1"):
@@ -197,13 +230,16 @@ def execution_context(cancelled=False):
     if cancelled:
         token.cancel(d.CancellationReason.SUPERSEDED)
     return d.ExecutionContext(
-        execution_id="e", interaction_id="i", current_interaction_revision=1, cancellation=token,
+        execution_id="e",
+        interaction_id="i",
+        current_interaction_revision=1,
+        cancellation=token,
     )
 
 
 async def test_request_song_learning_reports_submitted_job():
     singing = FakeSinging()
-    handler_ = RequestSongLearningHandler("luotianyi", SongLearningDispatchSkill(singing))
+    handler_ = RequestSongLearningHandler("luotianyi", SongLearningDispatchSkill(_singing(singing)))
 
     result = await handler_.realize(action_for(), execution_context(), None)
 
@@ -215,7 +251,7 @@ async def test_request_song_learning_reports_submitted_job():
 
 async def test_request_song_learning_marks_existing_wish_as_already_completed():
     singing = FakeSinging(requested=False)
-    handler_ = RequestSongLearningHandler("luotianyi", SongLearningDispatchSkill(singing))
+    handler_ = RequestSongLearningHandler("luotianyi", SongLearningDispatchSkill(_singing(singing)))
 
     result = await handler_.realize(action_for(), execution_context(), None)
 
@@ -236,7 +272,7 @@ async def test_request_song_learning_reports_missing_capability_as_dependency_fa
 
 async def test_request_song_learning_honours_cancellation():
     singing = FakeSinging()
-    handler_ = RequestSongLearningHandler("luotianyi", SongLearningDispatchSkill(singing))
+    handler_ = RequestSongLearningHandler("luotianyi", SongLearningDispatchSkill(_singing(singing)))
 
     result = await handler_.realize(action_for(), execution_context(cancelled=True), None)
 
@@ -245,13 +281,13 @@ async def test_request_song_learning_honours_cancellation():
 
 
 async def test_song_learning_dispatch_material_falls_back_without_capability():
-    assert SongLearningDispatchSkill(None).material(song_id="Song A") == ("", "")
+    assert SongLearningDispatchSkill(None).material(invocation(user_id=None), song_id="Song A") == ("", "")
 
 
 def test_song_learning_dispatch_rejects_malformed_capability():
     try:
         SongLearningDispatchSkill(object())
     except TypeError as error:
-        assert "add_wished_song" in str(error)
+        assert "singing_manager" in str(error)
         return
     raise AssertionError("缺少唱歌管理器方法的适配器未被拒绝")

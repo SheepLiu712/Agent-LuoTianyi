@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 
 import src.domain.agent as d
-from src.capabilities.diary.diary import DiaryCapability
-from src.capabilities.dynamic.dynamic import DynamicCapability
+from src.agent.skills.contracts import CharacterNarrative, SkillInvocation
+from src.agent.skills.expression._diary_operations import DiaryOperations
+from src.agent.skills.expression._dynamic_operations import DynamicOperations
 from src.utils.logger import get_logger
 
 
@@ -23,47 +25,42 @@ class DiaryWritingSkill:
 
     def __init__(
         self,
-        diary: DiaryCapability | None,
-        dynamics: DynamicCapability,
-        *,
-        character_id: str,
-        character_name: str,
-        character_persona: str = "",
-        speaking_style: str = "",
+        diary: DiaryOperations | None,
+        dynamics: DynamicOperations,
+        narratives: Mapping[str, CharacterNarrative],
     ) -> None:
         self._diary = diary
         self._dynamics = dynamics
-        self._character_id = character_id
-        self._character_name = character_name
-        self._character_persona = character_persona
-        self._speaking_style = speaking_style
+        self._narratives = dict(narratives)
         self._logger = get_logger(__name__)
 
     def available(self) -> bool:
         return self._diary is not None and self._diary.ensure_llm()
 
-    async def compose(self, owner_user_id: str, local_date: date) -> str:
+    async def compose(self, invocation: SkillInvocation, local_date: date) -> str:
         """生成指定用户和日期的正文；材料或模型不可用时返回空字符串。"""
         if self._diary is None:
             return ""
+        owner_user_id = invocation.require_user_id()
+        narrative = self._narrative_for(invocation.character_id)
         return await self._diary.generate_diary_body(
             user_id=owner_user_id,
-            character_id=self._character_id,
-            character_name=self._character_name,
-            character_persona=self._character_persona,
-            speaking_style=self._speaking_style,
+            character_id=invocation.character_id,
+            character_name=narrative.name,
+            character_persona=narrative.persona,
+            speaking_style=narrative.speaking_style,
             target_date=local_date.isoformat(),
         )
 
-    def publish(self, action: d.WriteDiary) -> DiaryPublishResult:
+    def publish(self, invocation: SkillInvocation, action: d.WriteDiary) -> DiaryPublishResult:
         """按旧链来源身份幂等发布私密、不可评论的日记动态。"""
-        source_id = DiaryCapability._diary_source_id(
-            self._character_id,
+        source_id = DiaryOperations._diary_source_id(
+            invocation.character_id,
             action.owner_user_id,
             action.local_date.isoformat(),
         )
         ok, message, item = self._dynamics.publish_agent_dynamic(
-            character_id=self._character_id,
+            character_id=invocation.character_id,
             content=action.body,
             source_type="diary",
             source_id=source_id,
@@ -76,3 +73,9 @@ class DiaryWritingSkill:
         if not ok:
             self._logger.warning("日记动态发布失败 source=%s: %s", source_id, message)
         return DiaryPublishResult(bool(ok), str(message), dynamic_id)
+
+    def _narrative_for(self, character_id: str) -> CharacterNarrative:
+        try:
+            return self._narratives[character_id]
+        except KeyError as error:
+            raise KeyError(f"角色 {character_id} 未配置叙事资料") from error

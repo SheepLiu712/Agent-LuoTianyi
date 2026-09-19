@@ -1,6 +1,6 @@
 # Server 模块接口文档
 
-> 2026-09-13 新目标：[Agent 深模块重构总 SPEC](../../../开发进程文档/设计文档/Agent-handle-realize-深模块重构.md)。本目录模块页面仍记录当前源码事实，不能将目标设计视为已经存在的接口。
+> Agent 深模块重构依据：[Agent 深模块重构总 SPEC](../../../开发进程文档/设计文档/Agent-handle-realize-深模块重构.md)。本目录记录 2026-09-19 收口后的当前接口。
 
 本目录记录 Server 各顶层模块被其他模块调用的 interface。目录结构按照[开发守则](../../../开发进程文档/开发守则.md)中的目标架构组织，接口内容则以当前工作区代码为准。
 
@@ -10,7 +10,7 @@
 - **目标 interface**：开发守则已经确定方向，但源码尚未实现；文档必须明确标成“目标”，不能当作当前可调用方法。
 - **内部实现**：仅在同一顶层模块内部使用，不在本文档中承诺稳定。
 - interface 不只包括方法名，还包括调用前提、输入输出、副作用和失败方式。
-- 本文档基于 2026-08-24 的当前工作区静态检查。接口变化时，修改代码的 PR 必须同步更新对应文档。
+- 本文档基于 2026-09-19 的当前工作区静态检查。接口变化时，修改代码的 PR 必须同步更新对应文档。
 
 ## 目标调用链
 
@@ -20,7 +20,8 @@
   -> stage
   -> agent_runtime.get_agent(character_id)
   -> Agent 的有限 interface
-  -> Agent 内部使用 subconscious 和 capabilities
+  -> Agent 内部使用共享 Skills
+  -> Skills 按需调用 infrastructure
 ```
 
 `SystemRuntime` 位于最外层，负责创建、连接和关闭这些模块。`domain` 提供共同的数据类型；`utils` 只提供无业务含义的通用工具。
@@ -31,15 +32,14 @@
 | --- | --- | --- |
 | `domain` | [领域对象](domain/README.md) | `server/src/domain` |
 | `agent` | [Agent 表意识](agent/README.md) | `server/src/agent` |
-| `subconscious` | [潜意识](subconscious/README.md) | `server/src/subconscious` |
-| `capabilities` | [角色能力](capabilities/README.md) | `server/src/capabilities` |
+| `agent.skills` | [共享角色技能](skills/README.md) | `server/src/agent/skills` |
+| `infrastructure` | [中立基础设施](infrastructure/README.md) | `server/src/infrastructure` |
 | `agent_runtime` | [角色工厂与注册](agent_runtime/README.md) | `server/src/agent_runtime` |
-| `stage` | [持续交互流程](stage/README.md) | `server/src/stage`；兼容链路为 `server/src/chat_session` |
+| `stage` | [持续交互流程](stage/README.md) | `server/src/stage` |
 | Adapter | [外部协议适配](adapter/README.md) | `server/src/adapter/websocket`；连接接入仍在 `system/user_interface` |
 | `world` | [箱庭世界和周期任务](world/README.md) | `server/src/world` |
 | `system` | [系统组装和基础设施](system/README.md) | `server/src/system` |
 | `utils` | [通用工具](utils/README.md) | `server/src/utils` |
-| `legacy` | [迁移兼容接口](legacy/README.md) | `server/src/legacy` |
 
 守则明确约定暂不创建 `base`，因此本目录也不创建空的 `base` 接口文档。
 

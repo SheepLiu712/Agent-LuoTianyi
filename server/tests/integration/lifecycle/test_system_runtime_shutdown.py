@@ -1,14 +1,14 @@
 import asyncio
 from types import SimpleNamespace
 
-from src.capabilities.capability_manager import CapabilityManager
-from src.capabilities.speech.speech import SpeechCapability
-from src.capabilities.speech.tts_module import TTSModule
+from src.infrastructure.runtime import InfrastructureRuntime
+from src.infrastructure.speech.speech import SpeechBackend
+from src.infrastructure.speech.tts_module import TTSModule
 from src.system.system_runtime import SystemRuntime
 from src.utils.llm.client_llm_executor import ClientLLMExecutor
 
 
-def test_system_runtime_shutdown_releases_capabilities_before_database():
+def test_system_runtime_shutdown_releases_infrastructure_before_database():
     calls: list[str] = []
 
     async def record_async(name: str) -> None:
@@ -16,12 +16,12 @@ def test_system_runtime_shutdown_releases_capabilities_before_database():
 
     tts_module = object.__new__(TTSModule)
     tts_module.tts_server = SimpleNamespace(stop=lambda: calls.append("tts_server"))
-    speech = SpeechCapability({})
+    speech = SpeechBackend({})
     speech.tts_module = {"luotianyi": tts_module}
-    capability_manager = object.__new__(CapabilityManager)
-    capability_manager.speech = speech
-    capability_manager._stop_lock = asyncio.Lock()
-    capability_manager._stopped = False
+    infrastructure = object.__new__(InfrastructureRuntime)
+    infrastructure.speech = speech
+    infrastructure._stop_lock = asyncio.Lock()
+    infrastructure._stopped = False
 
     runtime = SystemRuntime(
         user_interface=SimpleNamespace(),
@@ -32,7 +32,7 @@ def test_system_runtime_shutdown_releases_capabilities_before_database():
             shutdown=lambda: record_async("database"),
         ),
         agent_runtime=SimpleNamespace(),
-        capability_manager=capability_manager,
+        infrastructure=infrastructure,
         llm_service=SimpleNamespace(),
         observability=SimpleNamespace(),
         client_llm_executor=ClientLLMExecutor(),

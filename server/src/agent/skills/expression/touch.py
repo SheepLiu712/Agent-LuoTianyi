@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import src.domain.agent as d
+from src.agent.skills.contracts import SkillInvocation
 from src.agent.skills.expression._touch_resources import TouchFastReplyBuilder
 from src.resources.prepared_speech import load_prepared_speech
 from src.utils.logger import get_logger
@@ -113,26 +114,40 @@ class TouchReaction:
 
 
 class TouchReactionSkill:
-    """复用旧 builder 的概率、音频筛选与表情映射。"""
+    """共享所有角色的触摸策略和预制资源选择器。"""
 
-    def __init__(self, config: Mapping[str, object]) -> None:
-        """用角色 touch.fast_reply 配置构造旧选择器。"""
+    def __init__(self, configs: Mapping[str, Mapping[str, object]]) -> None:
+        """按角色配置一次性构造选择器；调用时由 SkillInvocation 选择。"""
+        self._resources = {character_id: self._build(config) for character_id, config in configs.items()}
+
+    @staticmethod
+    def _build(config: Mapping[str, object]) -> tuple[TouchFastReplyBuilder, dict[str, str], TouchPolicy]:
         manifest = config.get("manifest")
         if manifest is None and config.get("touch_voice_dir") is not None:
             raise ValueError("touch fast reply requires manifest-backed resources")
         if manifest is not None and not isinstance(manifest, (str, Path)):
             raise ValueError("touch fast reply manifest must be a path")
-        self._builder = TouchFastReplyBuilder(config)
-        self._media_ids = (
+        builder = TouchFastReplyBuilder(config)
+        media_ids = (
             {entry.audio_path: entry.name for entry in load_prepared_speech(manifest)} if manifest is not None else {}
         )
+        return builder, media_ids, TouchPolicy.from_config(config.get("policy"))
 
-    def choose(self, stimulus: d.TouchInteraction) -> TouchReaction | None:
+    def allows(self, invocation: SkillInvocation, stimulus: d.TouchInteraction) -> bool:
+        """按本次角色的策略判断快速反应是否允许。"""
+        resources = self._resources.get(invocation.character_id)
+        return resources is not None and resources[2].allows(stimulus)
+
+    def choose(self, invocation: SkillInvocation, stimulus: d.TouchInteraction) -> TouchReaction | None:
         """返回可读取的随机触摸资源；未命中或资源失败时返回 None。"""
-        if not self._builder.should_use_fast_path():
+        resources = self._resources.get(invocation.character_id)
+        if resources is None:
+            return None
+        builder, media_ids, _policy = resources
+        if not builder.should_use_fast_path():
             get_logger(__name__).error("Touch fast path missed")
             return None
-        audio_path = self._builder.pick_audio_file()
+        audio_path = builder.pick_audio_file()
         if audio_path is None:
             return None
         try:
@@ -140,8 +155,8 @@ class TouchReactionSkill:
         except OSError:
             get_logger(__name__).exception("Touch voice read failed path=%s", audio_path)
             return None
-        expression_id = self._builder.expression_for(audio_path) or "normal"
+        expression_id = builder.expression_for(audio_path) or "normal"
         return TouchReaction(
-            audio_ref=d.MediaRef(media_id=self._media_ids[audio_path]),
+            audio_ref=d.MediaRef(media_id=media_ids[audio_path]),
             expression_id=expression_id,
         )

@@ -11,6 +11,7 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
+from src.agent.skills.invocation import handling_invocation
 from src.utils.logger import get_logger
 
 CITYWALK_OBSERVATION_KIND = "citywalk_completed"
@@ -34,6 +35,7 @@ class CitywalkObservationHandler:
         if not isinstance(stimulus, d.WorldObservation):
             raise TypeError("CitywalkObservationHandler 只处理 WorldObservation")
         body = await self._publishing.compose(
+            handling_invocation(request, plans.context),
             dynamic_type=CITYWALK_SOURCE_TYPE,
             instruction=CITYWALK_INSTRUCTION,
             structured_context=stimulus.fact.summary,

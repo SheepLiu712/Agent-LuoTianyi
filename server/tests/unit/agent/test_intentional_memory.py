@@ -14,6 +14,7 @@ from src.agent.handlers.stimulus.chat import (
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import ExplicitMemoryIntentSkill, ReplyDraft
 from src.agent.skills.mutation import IntentionalMemoryCommit, MemoryCommitRevision
+from skill_support import invocation
 
 
 class _Conversation:
@@ -41,7 +42,8 @@ class _Composer:
         self.events = events
         self.calls = []
 
-    async def compose(self, **kwargs):
+    async def compose(self, skill_invocation, **kwargs):
+        kwargs["invocation"] = skill_invocation
         self.calls.append(kwargs)
         if self.events is not None:
             self.events.append("compose")
@@ -70,14 +72,17 @@ class _Commit:
         self.calls = []
         self._revisions = {}
 
-    async def commit(self, *, character_id, user_id, content):
-        self.calls.append((character_id, user_id, content))
+    async def commit(self, skill_invocation, *, content):
+        self.calls.append((skill_invocation.character_id, skill_invocation.user_id, content))
         self.events.append("commit")
         if self.failure is not None:
             raise self.failure
         if self.blank_identifier:
             return MemoryCommitRevision(identifier="", committed=False)
-        identifier = self._revisions.setdefault((character_id, user_id, content), "memory-revision-1")
+        identifier = self._revisions.setdefault(
+            (skill_invocation.character_id, skill_invocation.user_id, content),
+            "memory-revision-1",
+        )
         return MemoryCommitRevision(identifier=identifier, committed=True)
 
 
@@ -141,7 +146,7 @@ async def test_memory_acknowledgement_uses_composition_hint_after_commit():
     assert action.expression == d.ChangeExpression(expression_id="smile")
     assert len(composer.calls) == 1
     compose_call = composer.calls[0]
-    assert compose_call["user_id"] == "u"
+    assert compose_call["invocation"].user_id == "u"
     assert compose_call["user_context"] == UserContextSnapshot()
     assert compose_call["reply_topic"].startswith(_MEMORY_ACK_REPLY_TOPIC_PREFIX)
     assert compose_call["reply_topic"].endswith("我喜欢乌龙茶")
@@ -291,7 +296,7 @@ async def test_commit_skill_wraps_memory_writer_and_preserves_identity():
     })()
 
     revision = await IntentionalMemoryCommit(lambda character_id: memory).commit(
-        character_id="miku", user_id="user-2", content="喜欢抹茶",
+        invocation(character_id="miku", user_id="user-2"), content="喜欢抹茶"
     )
 
     assert revision.identifier == "record-7"
@@ -318,6 +323,6 @@ async def test_commit_skill_rejects_owner_character_mismatch():
     commit = IntentionalMemoryCommit(lambda character_id: memory)
 
     with pytest.raises(RuntimeError, match="owner character mismatch"):
-        await commit.commit(character_id="luotianyi", user_id="user-2", content="喜欢抹茶")
+        await commit.commit(invocation(user_id="user-2"), content="喜欢抹茶")
 
     assert writer.calls == []

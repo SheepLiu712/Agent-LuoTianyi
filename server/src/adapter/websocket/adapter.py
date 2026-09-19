@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import src.domain.agent as d
-from src.capabilities.media_resolution import PermanentMediaStore
+from src.infrastructure.media import PermanentMediaStore
 from src.domain.stage import AgentPresentationChanged, CancelDelivery, StageOutput
 from src.system.user_interface.types import WSMessage
 from src.utils.owned_operation import complete_owned

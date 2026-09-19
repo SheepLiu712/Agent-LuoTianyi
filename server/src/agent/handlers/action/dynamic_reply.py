@@ -5,6 +5,7 @@ from __future__ import annotations
 import src.domain.agent as d
 from src.agent.processing.output_emitter import OutputEmitter
 from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
+from src.agent.skills.invocation import execution_invocation
 from src.utils.logger import get_logger
 
 
@@ -28,7 +29,10 @@ class ReplyDynamicHandler:
             raise TypeError("ReplyDynamicHandler 只处理 ReplyDynamic")
         if execution_context.cancellation.is_cancelled:
             return self._failed(action, d.ExecutionErrorCode.CANCELLED)
-        result = self._reply.publish(action)
+        result = self._reply.publish(
+            execution_invocation(self._character_id, execution_context, user_id=action.owner_user_id),
+            action,
+        )
         if result.ok and result.comment_id:
             return d.ActionResult(
                 action_id=action.action_id,

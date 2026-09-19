@@ -6,7 +6,8 @@ import src.domain.agent as d
 from src.agent.processing.output_drafts import AudioChunkDraft, ExpressionDraft, MessageEndDraft, TextFinalDraft
 from src.agent.processing.output_emitter import OutputEmitter
 from src.agent.skills.expression.speaking import EmptySpeechError, SpeakingSkill
-from src.capabilities.speech.stream_errors import TTSStreamCancelled
+from src.agent.skills.invocation import execution_invocation
+from src.infrastructure.speech.stream_errors import TTSStreamCancelled
 from src.resources.prepared_speech import EmptyPreparedAudioError, PreparedSpeechResources
 from src.utils.logger import get_logger
 
@@ -72,10 +73,9 @@ class SayHandler:
         await self._emit_presentation(action, outputs)
         async with aclosing(
             self._speaking.speak(
-                character_id=self._character_id,
+                execution_invocation(self._character_id, execution_context),
                 text=action.sound_content,
                 tone=action.tone,
-                cancellation=execution_context.cancellation,
             )
         ) as stream:
             while True:

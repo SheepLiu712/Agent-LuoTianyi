@@ -19,6 +19,7 @@ class Dependency:
 
 
 class ReplyGenerator(Dependency):
+    character_name = "测试角色"
     character_persona = "测试人格"
     speaking_style = "自然"
 
@@ -66,10 +67,10 @@ def runtime_dependencies(monkeypatch, tmp_path):
         "llm_service": SimpleNamespace(register_llm_module=lambda *args: SimpleNamespace(
             prompt_template=SimpleNamespace(get_variables=list),
         )),
-        "capability_manager": SimpleNamespace(
+        "infrastructure": SimpleNamespace(
+            config={},
             speech=SimpleNamespace(tts_module={}),
             singing=SimpleNamespace(singing_manager={}),
-            dynamics=SimpleNamespace(),
             media_resolver=SimpleNamespace(resolve=lambda media_ref: None),
             image_understanding=SimpleNamespace(describe_image=lambda image_data_uri: None),
         ),

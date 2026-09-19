@@ -115,12 +115,14 @@ required-version = "==0.14.10"
 target-version = "py310"
 line-length = 120
 
-# 第一阶段只对 Agent 深模块重构的生产代码设置门禁。
+# Agent 深模块及本次 Skill/基础设施收口范围。
 include = [
     "src/agent/**/*.py",
     "src/agent_runtime/**/*.py",
     "src/domain/agent/**/*.py",
+    "src/infrastructure/**/*.py",
     "src/stage/**/*.py",
+    "src/system/system_runtime.py",
 ]
 
 [tool.ruff.lint]
@@ -146,14 +148,15 @@ max-complexity = 10
 [tool.black]
 target-version = ["py310"]
 line-length = 120
-# 与第一阶段 Ruff 门禁保持相同的 Agent 重构范围。
-include = 'src/(agent|agent_runtime|domain/agent|stage)/.*\.py$'
+# 与 Ruff 门禁保持相同的重构范围。
+include = 'src/(agent|agent_runtime|domain/agent|infrastructure|stage)/.*\.py$|src/system/system_runtime\.py$'
 
 [tool.coverage.run]
 source = [
     "src/agent",
     "src/agent_runtime",
     "src/domain/agent",
+    "src/infrastructure",
     "src/stage",
 ]
 

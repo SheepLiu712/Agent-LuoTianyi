@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from src.agent.skills.adapters.memory import AgentMemory
+from src.agent.skills.contracts import SkillInvocation
 from src.system.observability import get_observability_service
 from src.utils.logger import get_logger
 
@@ -16,14 +18,14 @@ class DynamicTopicMemorySkill:
     写入结果（是否真的产生了记忆）只在这里判定，世界侧不再解读记忆返回值。
     """
 
-    def __init__(self, memory: AgentMemory | None) -> None:
-        self._memory = memory
+    def __init__(self, memories: Mapping[str, AgentMemory]) -> None:
+        self._memories = dict(memories)
         self._logger = get_logger(__name__)
 
     async def write(
         self,
+        invocation: SkillInvocation,
         *,
-        user_id: str,
         current_dialogue: str,
         conversation_history: str,
         trace_id: str,
@@ -31,12 +33,15 @@ class DynamicTopicMemorySkill:
         topic_id: str,
     ) -> bool:
         """写一轮话题记忆；真正写入至少一条记忆时返回 True。"""
+        user_id = invocation.require_user_id()
         for name, value in (("user_id", user_id), ("current_dialogue", current_dialogue)):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} 不能为空")
-        if self._memory is None:
-            raise RuntimeError("角色记忆不可用，无法写入动态记忆")
-        result: dict[str, Any] = await self._memory.write_topic_memories(
+        try:
+            memory = self._memories[invocation.character_id]
+        except KeyError as error:
+            raise RuntimeError("角色记忆不可用，无法写入动态记忆") from error
+        result: dict[str, Any] = await memory.write_topic_memories(
             user_id=user_id,
             history=conversation_history or "",
             current_dialogue=current_dialogue,

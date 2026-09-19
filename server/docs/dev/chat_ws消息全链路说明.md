@@ -32,7 +32,7 @@
 
 - 外部认知调用只有 `handle_stimulus` 与 `realize_action_plan`，调用点只允许在 Stage。
 - WebSocket 层只接受 `src.domain.agent` 的强类型刺激，不提供旧 `ChatInputEvent` 或旧 `Stimulus` 转换入口。
-- Agent 记忆实现位于 `src/agent/skills/adapters/memory`；歌曲知识数据库与实体链接位于 `src/capabilities/song_knowledge`。
+- Agent 记忆实现位于 `src/agent/skills/adapters/memory`；歌曲知识数据库与实体链接位于 `src/infrastructure/song_knowledge`。
 - 架构扫描禁止重新引入 `src.chat_session`、`src.subconscious`、`src.legacy`、旧领域刺激或旧角色对象图。
 - wheel 打包测试同时验证新包存在、三个旧包不存在。
 

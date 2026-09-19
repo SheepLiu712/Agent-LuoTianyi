@@ -5,6 +5,7 @@ from __future__ import annotations
 import src.domain.agent as d
 from src.agent.processing.output_emitter import OutputEmitter
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
+from src.agent.skills.invocation import execution_invocation
 from src.utils.logger import get_logger
 
 
@@ -26,7 +27,10 @@ class RequestSongLearningHandler:
         if execution_context.cancellation.is_cancelled:
             return self._failed(action, d.ExecutionErrorCode.CANCELLED)
         try:
-            requested = self._dispatch.request(song_id=action.song_id)
+            requested = self._dispatch.request(
+                execution_invocation(self._character_id, execution_context),
+                song_id=action.song_id,
+            )
         except Exception:
             self._logger.exception("学歌派发失败 song=%s", action.song_id)
             return self._failed(action, d.ExecutionErrorCode.DEPENDENCY_UNAVAILABLE)

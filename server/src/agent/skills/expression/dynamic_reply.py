@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import src.domain.agent as d
-from src.capabilities.dynamic.dynamic import DynamicCapability
+from src.agent.skills.contracts import CharacterNarrative, SkillInvocation
+from src.agent.skills.expression._dynamic_operations import DynamicOperations
 from src.utils.logger import get_logger
 
 
@@ -28,38 +30,32 @@ class DynamicReplySkill:
 
     def __init__(
         self,
-        dynamics: DynamicCapability,
-        *,
-        character_id: str,
-        character_name: str,
+        dynamics: DynamicOperations,
+        narratives: Mapping[str, CharacterNarrative],
     ) -> None:
-        for name, value in (("character_id", character_id), ("character_name", character_name)):
-            if not isinstance(value, str) or not value.strip():
-                raise ValueError(f"{name} 不能为空")
         self._dynamics = dynamics
-        self._character_id = character_id
-        self._character_name = character_name
+        self._narratives = dict(narratives)
         self._logger = get_logger(__name__)
 
     def available(self) -> bool:
         """回复模型是否可用；不可用时回复方面明确失败，记忆方面不受影响。"""
         return bool(self._dynamics.replier.ensure_llm())
 
-    def build_item(self, observation: d.DynamicObserved) -> dict[str, Any]:
+    def build_item(self, invocation: SkillInvocation, observation: d.DynamicObserved) -> dict[str, Any]:
         """把一次动态观察还原为回复生成所需的条目视图。"""
         messages = observation.messages
         post = messages[0]
-        comments = [self._as_item(message) for message in messages[1:]]
+        comments = [self._as_item(invocation, message) for message in messages[1:]]
         target = next(
             (message for message in messages if message.message_id == observation.target_message_id),
             post,
         )
-        item = self._as_item(target)
+        item = self._as_item(invocation, target)
         item["username"] = item["author_name"]
         item["user_description"] = ""
         item["preferences"] = {}
         item["thread_comments"] = comments
-        item["dynamic"] = self._as_item(post)
+        item["dynamic"] = self._as_item(invocation, post)
         return item
 
     def target_author_id(self, observation: d.DynamicObserved) -> str:
@@ -69,32 +65,32 @@ class DynamicReplySkill:
                 return message.author_ref.actor_id
         return observation.messages[0].author_ref.actor_id
 
-    def already_replied(self, observation: d.DynamicObserved) -> bool:
+    def already_replied(self, invocation: SkillInvocation, observation: d.DynamicObserved) -> bool:
         """线程里是否已存在角色针对该目标的回复；存在时不得再次发布。"""
         return any(
-            message.author_ref.actor_id == self._character_id
+            message.author_ref.actor_id == invocation.character_id
             and message.parent_message_id == observation.target_message_id
             for message in observation.messages
         )
 
-    async def compose_for_post(self, item: dict[str, Any]) -> str:
+    async def compose_for_post(self, invocation: SkillInvocation, item: dict[str, Any]) -> str:
         """为动态原帖生成回复正文。"""
         return await self._dynamics.replier.generate_reply_for_post(
             item,
-            character_name=self._character_name,
+            character_name=self._narrative_for(invocation.character_id).name,
         )
 
-    async def compose_for_comment(self, item: dict[str, Any]) -> tuple[bool, str]:
+    async def compose_for_comment(self, invocation: SkillInvocation, item: dict[str, Any]) -> tuple[bool, str]:
         """为动态评论生成是否回复的判断与正文。"""
         decision = await self._dynamics.replier.generate_reply_for_comment(
             item,
-            character_name=self._character_name,
+            character_name=self._narrative_for(invocation.character_id).name,
         )
         should_reply = bool(decision.get("should_reply"))
         body = str(decision.get("reply") or "").strip()
         return should_reply and bool(body), body
 
-    def publish(self, action: d.ReplyDynamic) -> DynamicReplyResult:
+    def publish(self, invocation: SkillInvocation, action: d.ReplyDynamic) -> DynamicReplyResult:
         """按目标身份发布评论；已提交时返回评论身份。"""
         if not isinstance(action, d.ReplyDynamic):
             raise TypeError("action 必须是 ReplyDynamic")
@@ -102,7 +98,7 @@ class DynamicReplySkill:
             dynamic_id=action.target.dynamic_id,
             owner_user_id=action.owner_user_id,
             content=action.body,
-            character_id=self._character_id,
+            character_id=invocation.character_id,
             parent_comment_id=action.target.parent_comment_id,
         )
         comment_id = str((item or {}).get("id") or "") or None if ok else None
@@ -115,13 +111,19 @@ class DynamicReplySkill:
             )
         return DynamicReplyResult(ok=bool(ok), message=str(message), comment_id=comment_id)
 
-    def _as_item(self, message: d.DynamicMessage) -> dict[str, Any]:
+    def _as_item(self, invocation: SkillInvocation, message: d.DynamicMessage) -> dict[str, Any]:
         """把领域消息转换为能力层的条目视图，并标注角色自己的消息。"""
         actor_id = message.author_ref.actor_id
         return {
             "id": message.message_id,
             "content": message.text,
-            "author_type": "agent" if actor_id == self._character_id else "user",
+            "author_type": "agent" if actor_id == invocation.character_id else "user",
             "author_id": actor_id,
             "author_name": message.author_ref.display_name or actor_id,
         }
+
+    def _narrative_for(self, character_id: str) -> CharacterNarrative:
+        try:
+            return self._narratives[character_id]
+        except KeyError as error:
+            raise KeyError(f"角色 {character_id} 未配置叙事资料") from error

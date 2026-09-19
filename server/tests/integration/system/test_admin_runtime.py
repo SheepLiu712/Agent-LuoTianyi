@@ -76,7 +76,7 @@ def minimal_config(tmp_path: Path) -> dict:
         "chat_session_manager": {
             "conversation_service": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}
         },
-        "capabilities": {
+        "infrastructure": {
             "tts": {
                 "luotianyi": {
                     "reference_audio_dir": str(tmp_path / "ref_audio"),
@@ -93,11 +93,13 @@ def minimal_config(tmp_path: Path) -> dict:
                 "characters": {"luotianyi": {"resource_path": str(tmp_path / "sing")}},
             },
             "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
-            "diary": {
-                "diary_llm": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}
-            },
         },
         "agent_runtime": {
+            "skills": {
+                "diary": {
+                    "diary_llm": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}
+                }
+            },
             "character_registry": {
                 "characters": {
                     "luotianyi": {
@@ -196,7 +198,7 @@ def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
     assert "resource.song lyric keywords" in item_names
     assert "resource.sing.characters.luotianyi.resource_path" in item_names
     assert "resource.sing.song_emotion_tagger.resource_path" not in item_names
-    assert "llm_module.capability.singing.song_emotion_tagger" in item_names
+    assert "llm_module.infrastructure.singing.song_emotion_tagger" in item_names
     disabled_names = {item["name"] for item in result["world_disabled"]}
     assert {"citywalk", "bili_dynamic_fetcher", "auto_song_learner.qq_music"} <= disabled_names
 
@@ -263,7 +265,7 @@ def test_validator_rejects_flat_singing_character_config(tmp_path, monkeypatch):
     secret_store = SecretStore(tmp_path / "secrets.local.env")
     validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secret_store)
     config = minimal_config(tmp_path)
-    config["capabilities"]["sing"] = {
+    config["infrastructure"]["sing"] = {
         "luotianyi": {"resource_path": str(tmp_path / "sing")},
     }
 
@@ -500,17 +502,17 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
                 "interface_name": "main2" if binding["path"] == "agent_runtime.agent.main_chat.llm_module" else binding["interface_name"],
                 "enable_thinking": binding["path"] in {
                     "agent_runtime.agent.main_chat.llm_module",
-                    "capabilities.image_understanding.vlm_module",
+                    "infrastructure.image_understanding.vlm_module",
                 },
                 "use_json": binding["path"] in {
                     "agent_runtime.agent.main_chat.llm_module",
-                    "capabilities.image_understanding.vlm_module",
+                    "infrastructure.image_understanding.vlm_module",
                 },
                 "params": (
                     {"temperature": 0.1}
                     if binding["path"] == "agent_runtime.agent.main_chat.llm_module"
                     else {"max_tokens": 512}
-                    if binding["path"] == "capabilities.image_understanding.vlm_module"
+                    if binding["path"] == "infrastructure.image_understanding.vlm_module"
                     else binding.get("params", {})
                 ),
             }
@@ -527,7 +529,7 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
     assert main_chat_llm["enable_thinking"] is True
     assert main_chat_llm["use_json"] is True
     assert main_chat_llm["params"] == {"temperature": 0.1}
-    image_vlm_module = next_config["capabilities"]["image_understanding"]["vlm_module"]
+    image_vlm_module = next_config["infrastructure"]["image_understanding"]["vlm_module"]
     assert image_vlm_module["enable_thinking"] is True
     assert image_vlm_module["use_json"] is True
     assert image_vlm_module["params"] == {"max_tokens": 512}

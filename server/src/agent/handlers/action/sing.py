@@ -4,6 +4,7 @@ import src.domain.agent as d
 from src.agent.processing.output_drafts import AudioChunkDraft, ExpressionDraft, MessageEndDraft
 from src.agent.processing.output_emitter import OutputEmitter
 from src.agent.skills.expression.singing import EmptySongAudioError, SingingSkill
+from src.agent.skills.invocation import execution_invocation
 from src.utils.logger import get_logger
 
 
@@ -28,7 +29,9 @@ class SingHandler:
             await outputs.emit(ExpressionDraft(delivery=delivery, expression=action.expression))
         try:
             audio = await self._singing.render(
-                character_id=self._character_id, song_id=action.song_id, segment_id=action.segment_id
+                execution_invocation(self._character_id, execution_context),
+                song_id=action.song_id,
+                segment_id=action.segment_id,
             )
         except EmptySongAudioError:
             get_logger(__name__).warning(

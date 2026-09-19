@@ -77,7 +77,7 @@ def make_runtime(monkeypatch):
                 character_ids=("luotianyi", "miku"),
                 default_character_id="luotianyi",
             ),
-            capability_manager=SimpleNamespace(singing=SimpleNamespace(
+            infrastructure=SimpleNamespace(singing=SimpleNamespace(
                 singing_manager={name: object() for name in managers},
             )),
             database_manager=SimpleNamespace(event_store=event_store),
