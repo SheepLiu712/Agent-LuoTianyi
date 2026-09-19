@@ -40,6 +40,12 @@ class FakeWsTransport:
         self.stopped = True
         self._ready_event.clear()
 
+    def wait_until_ready(self, timeout):
+        return self._ready_event.wait(timeout)
+
+    def is_ready(self):
+        return self._ready_event.is_set()
+
 
 class FakeNetworkClient:
     def __init__(self, *, ready=True, login_result=(True, "ok"), auto_login_result=True):
