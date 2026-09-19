@@ -145,6 +145,22 @@
 - 门面增补：`HeadlessSession.send_touch(touch_area, click_frequency=None, touch_meta=None, *, client_msg_id=None, ack_timeout=10.0)` 与只读属性 `is_server_audio_active`。
 - 真实链路依赖 S1 契约与部署一致性门槛；未满足时只交付本地抑制与客户端状态行为并显式标记 external skip。
 
+#### 1.9 动态动作（目标，S7）
+
+会话级动态视图状态（CLI 执行器持有）：当前项目列表、下一页游标、是否还有更多、已见动态 ID 集合。
+
+| 动作 | 必需/可选参数 | 成功行为 |
+| --- | --- | --- |
+| `dynamics.open` | 可选 `limit` | 获取首屏成功后将 `items` 与游标存入视图；随后尝试标记已读（结果单独报告）；输出 `items`、`count`、`has_more`、`marked_read`（失败时附 `mark_error`，不抹掉首屏读取成功的证据） |
+| `dynamics.read` | 必需 `dynamic_id`；可选 `comment_limit` | 获取首批评论；若该动态在已加载视图中则一并输出帖子（否则 `post=null`）；输出 `dynamic_id`、`post`、`comments`、`comment_count` |
+| `dynamics.load` | 可选 `limit` | 使用服务端返回的游标取下一页并追加（按稳定 ID 去重，`id` 缺失时回退 `dynamic_id`）；`has_more=false` 时输出稳定 `end_of_feed=true` 成功态（不重复取页）；未打开视图时报 `DYNAMICS_NOT_OPENED` |
+| `dynamics.post` | 必需 `content`（非空） | 有副作用：创建动态后重新读取确认可见；输出 `content_length`、`preview`（前 80 字符）、`dynamic_id`（可得时）、`visible`；创建成功但不可见时报 `DYNAMICS_NOT_VISIBLE`；单次动作不自动重复发布 |
+
+- 分页只使用服务端返回的游标；`has_more=false` 是成功结束状态而非错误。
+- 失败分类：`DYNAMICS_NOT_OPENED`、`DYNAMICS_NOT_VISIBLE`、`INVALID_INPUT` → `category="input"`（不可见为 `assertion`）；`ACK_REJECTED`/`TIMEOUT` 沿用 S3 语义。
+- 门面增补：`HeadlessSession.get_dynamics(limit=50, cursor=None)`、`get_dynamic_comments(dynamic_id, limit=100, cursor=None)`、`create_dynamic(content)`、`mark_dynamics_read()`。
+- 外部运行前置：隔离测试账号、唯一数据前缀、清理步骤（计划 §5.5）；真实读取依赖受测部署可达。
+
 ### 2. 无 GUI 会话门面（当前 interface，S2 交付）
 
 #### 2.1 归属与调用者
