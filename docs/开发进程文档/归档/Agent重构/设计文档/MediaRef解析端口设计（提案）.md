@@ -2,7 +2,7 @@
 
 - 状态：**设计提案**。端口归属与 `media_ref` 永久性已由 owner 确认（见 §3.5）；本文仍只记录方案与影响，**不实现、不修改 interface 文档的当前事实、不接入生产**。
 - 关联工单：Issue [#68](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/68)（09 图片预处理落库）的前置设计
-- 相关规范：总 SPEC 第 4.2 节「受控领域引用」；[领域词汇](../../../CONTEXT.md) 的 Controlled Domain Reference；[接口文档阅读约定](../../项目说明/项目架构与接口（spec）/接口文档/README.md)
+- 相关规范：总 SPEC 第 4.2 节「受控领域引用」；[领域词汇](../../../../../CONTEXT.md) 的 Controlled Domain Reference；[接口文档阅读约定](../../../../项目说明/项目架构与接口（spec）/接口文档/README.md)
 
 ## 1. 要解决的问题
 

@@ -2,7 +2,7 @@
 
 日期：2026-09-13。
 
-本文件是本次重构唯一的总体设计文档，包含跨模块职责、交互编排、迁移范围与验收要求。具体公开类型与当前实现事实见 [Server 接口文档](../../项目说明/项目架构与接口（spec）/接口文档/README.md)。需求背景见 [PRD](../需求说明（PRD）/Agent-handle-realize-深模块重构.md)。
+本文件是本次重构唯一的总体设计文档，包含跨模块职责、交互编排、迁移范围与验收要求。具体公开类型与当前实现事实见 [Server 接口文档](../../../../项目说明/项目架构与接口（spec）/接口文档/README.md)。需求背景见 [PRD](../需求说明（PRD）/Agent-handle-realize-深模块重构.md)。
 
 当前状态：Stage 编排及上下文所有权已迁移；聊天预处理、批量回复和 reflection handler 仍为占位，生产聊天继续使用旧 ChatStream。第 4 节记录当前交互设计，后续章节中的尚未迁移能力是总体目标，不代表已有实现。
 
@@ -193,19 +193,19 @@ Agent 通过 `CreateSchedule` 创建的持久未来安排由 scheduler/world 保
 
 ### 5.2 handle_stimulus
 
-输入以 [handle 契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md) 为准；输出以 [HandlingReport](../../项目说明/项目架构与接口（spec）/接口文档/domain/handling-report.md) 为准。
+输入以 [handle 契约](../../../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md) 为准；输出以 [HandlingReport](../../../../项目说明/项目架构与接口（spec）/接口文档/domain/handling-report.md) 为准。
 
 门面检查类型、目标角色和接受状态后调用 Handling.run；先检查取消，再按触发刺激选择处理器。处理器交付零到多个完整计划，报告按 ID 保留消费结果及已接收计划。失败停止本次后续交付，不要求 stage 重投。source 由调用方提供，Agent 决定会话和记忆的业务持久化；交互快照不要求保存到数据库。
 
 ### 5.3 realize_action_plan
 
-计划、行动、上下文、输出和报告以 [realization 契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md) 为准。
+计划、行动、上下文、输出和报告以 [realization 契约](../../../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md) 为准。
 
 门面校验角色和交互身份后调用 Execution.run；检查修订、取消及全部路由后顺序执行行动，输出序号在本次执行中跨行动从零连续递增。失败停止后续行动，保留已返回的效果和已完成结果，剩余行动 NOT_STARTED。StartThinking 由 stage 消费，MessageEndOutput 保持正常发送位置，接收确认不表示播放完成。
 
 ### 5.4 错误和生命周期
 
-完整顺序和错误映射见 [门面契约](../../项目说明/项目架构与接口（spec）/接口文档/agent/facade.md)。两类报告 retryable=False；标识用于关联本次调用，不表示持久去重保障。ALREADY_ACCEPTED 和 ALREADY_COMPLETED 保留为领域值，不要求 Agent 保存历史或重发。
+完整顺序和错误映射见 [门面契约](../../../../项目说明/项目架构与接口（spec）/接口文档/agent/facade.md)。两类报告 retryable=False；标识用于关联本次调用，不表示持久去重保障。ALREADY_ACCEPTED 和 ALREADY_COMPLETED 保留为领域值，不要求 Agent 保存历史或重发。
 
 任务取消等待处理器清理后传播；shutdown 有界等待在途调用，超时保留依赖供后续关闭。进程终止后不恢复未完成调用。
 
@@ -376,7 +376,7 @@ SystemRuntime
 
 ### 6.2 PlanEmitter
 
-接口见 [计划交付契约](../../项目说明/项目架构与接口（spec）/接口文档/agent/plan-emitter.md)。Handler 提交完整草稿，emitter 绑定本次身份及连续序号并交付；成功确认后才发送下一份，首次失败后停止发送，结束时关闭。状态只保存在本次内存中。
+接口见 [计划交付契约](../../../../项目说明/项目架构与接口（spec）/接口文档/agent/plan-emitter.md)。Handler 提交完整草稿，emitter 绑定本次身份及连续序号并交付；成功确认后才发送下一份，首次失败后停止发送，结束时关闭。状态只保存在本次内存中。
 
 ### 6.3 Handler
 
@@ -738,40 +738,40 @@ expand 阶段允许目标 interface 与旧实现暂时并存，但新调用方�
 
 ## 10. 工单拆分与依赖
 
-下面的 Markdown 底稿位于 `.scratch/agent-handle-realize/issues/`。每个文件都包含来源优先级、范围、验收、验证、明确不包含和交接要求，并记录对应 GitHub Issue。用户已确认粒度与 blocker，30 个工单已一对一发布为 [#60](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/60) 至 [#89](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/89)：本地编号 `NN` 对应 Issue `#(NN + 59)`，Issue 正文中的 Blocked by 使用真实 Issue 编号。所有 Issue 均已应用 `ready-for-agent` 标签，并在正文中保留同名状态，供开发协作和自动化筛选使用。
+下面的 Markdown 底稿曾位于未纳入版本控制的 `.scratch/agent-handle-realize/issues/`，归档时不再保留这些失效的本地链接；各工单改为链接到持久化的 GitHub Issue。每个 Issue 都包含来源优先级、范围、验收、验证、明确不包含和交接要求。用户已确认粒度与 blocker，30 个工单已一对一发布为 [#60](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/60) 至 [#89](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/89)：本地编号 `NN` 对应 Issue `#(NN + 59)`，Issue 正文中的 Blocked by 使用真实 Issue 编号。所有 Issue 均已应用 `ready-for-agent` 标签，并在正文中保留同名状态，供开发协作和自动化筛选使用。
 
 | 工单 | Blocked by | 独立交付结果 |
 | --- | --- | --- |
-| [01 handle 输入与结算领域契约](../../../.scratch/agent-handle-realize/issues/01-handle-domain-contract.md) | 无 | expand：Stimulus、InteractionSnapshot、request、HandlingReport 的完整强类型协议 |
-| [02 计划与 realization 领域契约](../../../.scratch/agent-handle-realize/issues/02-realization-domain-contract.md) | 01 | expand：ActionPlan、两个 sink/receipt、Action、ExecutionContext、AgentOutput、ExecutionReport 的完整强类型协议 |
-| [03 冻结 WorldClock 基线](../../../.scratch/agent-handle-realize/issues/03-freeze-world-clock-baseline.md) | 无 | 九类注册、配置调度、错误隔离、同名替换与 shutdown 的回归证据 |
-| [04 两接口 Agent façade 与路由](../../../.scratch/agent-handle-realize/issues/04-agent-facade-and-routing.md) | 01、02 | `get_agent` 返回仅暴露两个业务方法的 façade，建立唯一 Handler 路由和稳定失败面 |
-| [05 handle 请求核心](../../../.scratch/agent-handle-realize/issues/05-handle-request-core.md) | 04 | 单次处理、PlanEmitter、InteractionContextStore 和逐 ID report |
-| [06 realization 执行核心](../../../.scratch/agent-handle-realize/issues/06-realization-execution-core.md) | 04 | 有序执行、Say/预制音频/表情输出和失败停止 |
-| [07 Chat 协调信号桥](../../../.scratch/agent-handle-realize/issues/07-chat-coordination-stage-bridge.md) | 05、06 | ChatStage 新 façade 桥及 typing/image-selection open/close 等待结算 |
-| [08 文字聊天与超时](../../../.scratch/agent-handle-realize/issues/08-chat-text-and-timeout.md) | 07 | 文本从 Adapter 到 Agent 输出的完整链、普通聚合期限、强制 timeout 和 Say/Sing |
-| [09 图片与非 Realtime 语音](../../../.scratch/agent-handle-realize/issues/09-chat-multimodal-input.md) | 08 | Image/Voice 的受控媒体、内部理解 Skill 和混合 pending |
-| [10 聊天失效与部分结算](../../../.scratch/agent-handle-realize/issues/10-chat-invalidation-and-settlement.md) | 07、08、09 | 旧判断取消、迟到 plan/report 拒绝、重新思考和逐 ID 部分消费 |
-| [11 慢 Recall 与多个计划](../../../.scratch/agent-handle-realize/issues/11-slow-recall-and-multi-plan.md) | 05、06、08、10 | 临时/正式完整计划、ordinal、Recall 续程、取消和请求恢复 |
-| [12 显式记忆](../../../.scratch/agent-handle-realize/issues/12-intentional-memory.md) | 05、08 | IntentionalMemoryCommit 先写后承诺、实际提交结果和失败报告 |
-| [13 settlement 反思](../../../.scratch/agent-handle-realize/issues/13-reflection-settlement-and-memory.md) | 05、06、08、12 | Coordinator/Policy/Handler 可靠调度自动记忆和重要日期检查 |
-| [14 压缩与画像反思](../../../.scratch/agent-handle-realize/issues/14-reflection-compaction-and-profile.md) | 13 | 上下文阈值/CAS、画像更新和 ChatStage ReflectionWorker 退出 |
-| [15 触摸反应](../../../.scratch/agent-handle-realize/issues/15-touch-reaction.md) | 05、06、07 | 快速预制音频/表情、瞬时非持久输出、独立表情恢复和失败丢弃 |
-| [16 首次登录欢迎](../../../.scratch/agent-handle-realize/issues/16-first-login-proactive.md) | 05、06、07 | 两条有序持久欢迎、预制音频、历史同步时点和登录去重 |
-| [17 到期事件主动提醒](../../../.scratch/agent-handle-realize/issues/17-due-event-proactive.md) | 03、08、16 | 当天登录与 300 秒周期提醒的过滤、claim、合并/随机选择及失败释放 |
-| [18 ToyStage](../../../.scratch/agent-handle-realize/issues/18-toy-stage.md) | 05、06 | 设备连接/断开、聚合振动、Touch 与 PerformMotion 的完整 Toy 链 |
-| [19 WorldStage 核心](../../../.scratch/agent-handle-realize/issues/19-world-stage-core.md) | 03、05、06 | 长期人格—箱庭 interaction、world 事实投递、pending/revision 和输出路由 |
-| [20 世界活动与日程](../../../.scratch/agent-handle-realize/issues/20-world-activity-planning.md) | 18、19 | DailyPlanning/Activity 生命周期及 Schedule/Transition/Motion Action |
-| [21 citywalk](../../../.scratch/agent-handle-realize/issues/21-citywalk-chain.md) | 19 | 04:00/概率、环境报告、travel event 与经 Agent 的动态发布 |
-| [22 VCPedia 候选知识](../../../.scratch/agent-handle-realize/issues/22-song-knowledge-discovery.md) | 05、19 | 抓取候选 Stimulus、Agent 接纳、知识/关键词索引幂等写入 |
-| [23 学歌生命周期](../../../.scratch/agent-handle-realize/issues/23-song-learning-lifecycle.md) | 06、19、21、22 | RequestSongLearning、机械任务、SongLearned、经验/event/通知/动态结算 |
-| [24 动态互动](../../../.scratch/agent-handle-realize/issues/24-dynamic-interaction.md) | 05、06、19 | DynamicObserved、reply/ignore、ReplyDynamic 和内部记忆状态 |
-| [25 日记](../../../.scratch/agent-handle-realize/issues/25-diary.md) | 05、06、19 | 00:00 筛选、DiaryPlanningDue、WriteDiary 与 private dynamic 去重 |
-| [26 QQ 凭据刷新](../../../.scratch/agent-handle-realize/issues/26-qq-credential-refresh.md) | 03 | 6 小时立即运行、凭据路径去重和纯机械边界回归 |
-| [27 B 站事件同步](../../../.scratch/agent-handle-realize/issues/27-bili-event-update.md) | 03 | 6 小时立即运行、抓取/模型解析/EventStore upsert 和纯 world 边界 |
-| [28 过期事件清理](../../../.scratch/agent-handle-realize/issues/28-expired-event-cleanup.md) | 03 | 00:00 失活规则、缓存一致性和纯 EventStore 边界 |
-| [29 删除旧入口与旁路](../../../.scratch/agent-handle-realize/issues/29-contract-old-agent-paths.md) | 07—25 全部迁移工单 | contract：删除旧代理、内部类型外泄、直接 capability 路径并通过依赖扫描 |
-| [30 集成验收](../../../.scratch/agent-handle-realize/issues/30-integrated-acceptance.md) | 26、27、28、29 | 从公开入口证明 A1—A9、全部用户链路和九类 clock action，更新最终文档 |
+| [01 handle 输入与结算领域契约](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/60) | 无 | expand：Stimulus、InteractionSnapshot、request、HandlingReport 的完整强类型协议 |
+| [02 计划与 realization 领域契约](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/61) | 01 | expand：ActionPlan、两个 sink/receipt、Action、ExecutionContext、AgentOutput、ExecutionReport 的完整强类型协议 |
+| [03 冻结 WorldClock 基线](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/62) | 无 | 九类注册、配置调度、错误隔离、同名替换与 shutdown 的回归证据 |
+| [04 两接口 Agent façade 与路由](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/63) | 01、02 | `get_agent` 返回仅暴露两个业务方法的 façade，建立唯一 Handler 路由和稳定失败面 |
+| [05 handle 请求核心](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/64) | 04 | 单次处理、PlanEmitter、InteractionContextStore 和逐 ID report |
+| [06 realization 执行核心](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/65) | 04 | 有序执行、Say/预制音频/表情输出和失败停止 |
+| [07 Chat 协调信号桥](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/66) | 05、06 | ChatStage 新 façade 桥及 typing/image-selection open/close 等待结算 |
+| [08 文字聊天与超时](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/67) | 07 | 文本从 Adapter 到 Agent 输出的完整链、普通聚合期限、强制 timeout 和 Say/Sing |
+| [09 图片与非 Realtime 语音](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/68) | 08 | Image/Voice 的受控媒体、内部理解 Skill 和混合 pending |
+| [10 聊天失效与部分结算](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/69) | 07、08、09 | 旧判断取消、迟到 plan/report 拒绝、重新思考和逐 ID 部分消费 |
+| [11 慢 Recall 与多个计划](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/70) | 05、06、08、10 | 临时/正式完整计划、ordinal、Recall 续程、取消和请求恢复 |
+| [12 显式记忆](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/71) | 05、08 | IntentionalMemoryCommit 先写后承诺、实际提交结果和失败报告 |
+| [13 settlement 反思](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/72) | 05、06、08、12 | Coordinator/Policy/Handler 可靠调度自动记忆和重要日期检查 |
+| [14 压缩与画像反思](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/73) | 13 | 上下文阈值/CAS、画像更新和 ChatStage ReflectionWorker 退出 |
+| [15 触摸反应](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/74) | 05、06、07 | 快速预制音频/表情、瞬时非持久输出、独立表情恢复和失败丢弃 |
+| [16 首次登录欢迎](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/75) | 05、06、07 | 两条有序持久欢迎、预制音频、历史同步时点和登录去重 |
+| [17 到期事件主动提醒](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/76) | 03、08、16 | 当天登录与 300 秒周期提醒的过滤、claim、合并/随机选择及失败释放 |
+| [18 ToyStage](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/77) | 05、06 | 设备连接/断开、聚合振动、Touch 与 PerformMotion 的完整 Toy 链 |
+| [19 WorldStage 核心](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/78) | 03、05、06 | 长期人格—箱庭 interaction、world 事实投递、pending/revision 和输出路由 |
+| [20 世界活动与日程](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/79) | 18、19 | DailyPlanning/Activity 生命周期及 Schedule/Transition/Motion Action |
+| [21 citywalk](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/80) | 19 | 04:00/概率、环境报告、travel event 与经 Agent 的动态发布 |
+| [22 VCPedia 候选知识](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/81) | 05、19 | 抓取候选 Stimulus、Agent 接纳、知识/关键词索引幂等写入 |
+| [23 学歌生命周期](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/82) | 06、19、21、22 | RequestSongLearning、机械任务、SongLearned、经验/event/通知/动态结算 |
+| [24 动态互动](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/83) | 05、06、19 | DynamicObserved、reply/ignore、ReplyDynamic 和内部记忆状态 |
+| [25 日记](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/84) | 05、06、19 | 00:00 筛选、DiaryPlanningDue、WriteDiary 与 private dynamic 去重 |
+| [26 QQ 凭据刷新](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/85) | 03 | 6 小时立即运行、凭据路径去重和纯机械边界回归 |
+| [27 B 站事件同步](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/86) | 03 | 6 小时立即运行、抓取/模型解析/EventStore upsert 和纯 world 边界 |
+| [28 过期事件清理](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/87) | 03 | 00:00 失活规则、缓存一致性和纯 EventStore 边界 |
+| [29 删除旧入口与旁路](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/88) | 07—25 全部迁移工单 | contract：删除旧代理、内部类型外泄、直接 capability 路径并通过依赖扫描 |
+| [30 集成验收](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/89) | 26、27、28、29 | 从公开入口证明 A1—A9、全部用户链路和九类 clock action，更新最终文档 |
 
 可立即开始的 frontier 只有 01 和 03。02 必须等待 01；04 必须等待 01/02；05 与 06 在 04 完成后可以并行。进入迁移阶段后，Chat、Toy、World 和三个纯机械 world task 可以沿各自 blocker 并行，但所有结果必须合入同一功能集成分支后再开始 29。
 

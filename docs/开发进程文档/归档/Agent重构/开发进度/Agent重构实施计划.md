@@ -8,7 +8,7 @@
 
 > 使用约定：规范的唯一来源是总 SPEC；工单状态与协作入口是 GitHub Issue。本文只是把**剩余工作**排成可执行批次和依赖顺序，是工作底稿，不代表已经完成、也不替代 Issue 状态。事实来自对基线源码的静态核对与 GitHub API 查询（2026-09-14），**未重新运行测试**。
 >
-> 本文件与[开发守则](../开发守则.md)的“进度文档只记录完成事实”约定不同：守则把未来计划归属 Issue。此处只为交接后集中排期临时收录计划；行为切片一旦交付，完成事实仍写入 [`Agent-handle-realize-深模块重构.md`](./Agent-handle-realize-深模块重构.md) 进度文档。
+> 本文件与[开发守则](../../../开发守则.md)的“进度文档只记录完成事实”约定不同：守则把未来计划归属 Issue。此处只为交接后集中排期临时收录计划；行为切片一旦交付，完成事实仍写入当前的 [`Agent-handle-realize-深模块重构.md`](../../../开发进度/Agent-handle-realize-深模块重构.md) 进度文档。
 
 ## 1. 当前状态快照
 
@@ -414,7 +414,7 @@ Stage 侧已实现，本切片以真实 handler 复验并补证据：
 
 规则：
 
-- 每张工单独立一个行为切片分支 + 一个聚焦 PR，base 为 `refactor/agent`；需要先立 Red seam 时按[堆叠 PR 审查规则](./堆叠PR审查规则.md)使用父子堆叠。
+- 每张工单独立一个行为切片分支 + 一个聚焦 PR，base 为 `refactor/agent`；需要先立 Red seam 时按[堆叠 PR 审查规则](../../工程流程/开发进度/堆叠PR审查规则.md)使用父子堆叠。
 - 不得在迁移工单里顺便实现 blocker，也不得提前删除仍有调用者的旧入口（删除只在 29）。
 - 进入 29 前，07—25 必须全部合入 `refactor/agent`。
 - 18（#77）与 20（#79）需先解除 `question` 标签、明确范围后再排期。
@@ -447,6 +447,6 @@ Stage 侧已实现，本切片以真实 handler 复验并补证据：
    - 白名单回归集：`python -m pytest tests/agent tests/agent_runtime tests/domain tests/world tests/system tests/stage tests/adapter -q`
 3. **标记**：只有 `real_llm`；用 `--run-real-llm` / `RUN_REAL_LLM_TESTS=1` 开启。不要引入未注册的 `slow` 标记。
 4. **PR 规模**：普通手写代码建议 ≤500 行；超过必须说明拆分理由。
-5. **文档同步**：interface 变化同步 `docs/项目说明/项目架构与接口（spec）/接口文档/`；架构边界变化同步 `项目架构.md`；行为切片完成后把**完成事实**追加到 [`Agent-handle-realize-深模块重构.md`](./Agent-handle-realize-深模块重构.md)，而不是写回本计划。
+5. **文档同步**：interface 变化同步 `docs/项目说明/项目架构与接口（spec）/接口文档/`；架构边界变化同步 `项目架构.md`；行为切片完成后把**完成事实**追加到当前的 [`Agent-handle-realize-深模块重构.md`](../../../开发进度/Agent-handle-realize-深模块重构.md)，而不是写回本计划。
 6. **不扩大范围**：Call/Realtime、`UserJoinedActivity`、`ActivityInterrupted` 不在本轮；不得顺手新增 Stimulus/Action/public interface。
 7. **GitHub 协作**：工单在 #60—#89；PR base 为 `refactor/agent`；Red→Green 可用父子堆叠（#95 规则）；PR 创建/更新不再自动触发 AI 审查，最终由人工审核。

@@ -1,6 +1,6 @@
 # Agent 重构不变量测试矩阵
 
-本文件把 `docs/开发进程文档/设计文档/行为不变量与副作用清单（#89 验收前置）.md` 的架构与业务不变量映射到当前自动化测试。单元测试提供局部行为与错误分支的密集证据；下面列出的集成或 E2E 用例负责跨组件边界的验收。
+本文件把 `docs/开发进程文档/设计文档/Agent架构与行为不变量.md` 的当前架构与业务不变量映射到自动化测试。单元测试提供局部行为与错误分支的密集证据；下面列出的集成或 E2E 用例负责跨模块 interface 的验收。
 
 ## 全局不变量
 
@@ -19,7 +19,7 @@
 
 ## 业务链路不变量
 
-| 前置清单章节 | 链路 | 集成 / E2E 主证据 |
+| 链路编号 | 链路 | 集成 / E2E 主证据 |
 |---|---|---|
 | §2 | 聊天主链 | `integration/stage/test_concurrent_handling.py`、`integration/stage/test_chat_reply_settlement.py`、`e2e/chat/test_production_stage_wiring.py` |
 | §3 | 交互控制与取消 | `integration/stage/test_chat_stage.py`、`integration/stage/test_concurrent_handling.py`、`integration/websocket/test_websocket_adapter.py`、`e2e/chat/test_touch_stage.py` |

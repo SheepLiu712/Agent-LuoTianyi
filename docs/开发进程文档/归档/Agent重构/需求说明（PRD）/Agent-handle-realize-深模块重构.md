@@ -2,7 +2,7 @@
 
 > 2026-09-13 交互职责方向已修订，见 [Agent 深模块重构总 SPEC](../设计文档/Agent-handle-realize-深模块重构.md)。Stage 接管输入处理状态、context 生命周期、批次、等待策略及认知维护触发；Agent 保留两个认知/执行业务入口。下文与此冲突的旧方案不再作为目标验收依据。编排已迁移，真实聊天 handler 仍为占位。
 
-> 2026-09-06 本轮计划与执行契约以 [realization SPEC](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md) 为准：StartThinking 计划由 stage 消费，其余业务行动交给 realize；MessageEndOutput 表达消息结束；本版沿用正常顺序执行与终止包机制。下文历史计划、输出和严格投递描述不扩大该版本接口范围。
+> 2026-09-06 本轮计划与执行契约以 [realization SPEC](../../../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md) 为准：StartThinking 计划由 stage 消费，其余业务行动交给 realize；MessageEndOutput 表达消息结束；本版沿用正常顺序执行与终止包机制。下文历史计划、输出和严格投递描述不扩大该版本接口范围。
 
 > 状态：待评审
 >
@@ -425,7 +425,7 @@ class Agent:
 
 ### 7.2 输入
 
-本节保留长期需求背景，当前版本的具体输入以 [handle 输入契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)为权威（2026-09-06 输入领域类型已实现，Agent/stage 生产链未接入）：快照使用 Chat、Toy、World 三种变体；保留 `interaction_id`、`interaction_revision`、`supported_outputs` 和 Chat 的 `ConnectionState`；删除 `TypingState`、`ImageSelectionState`、`DeviceOutputLimits`，暂不建立 `ContactState`。取消令牌传入后仍由 stage 更新，至少表达是否取消及“过时 / 无需处理”两类原因。下文 Call、CharacterActivity 与连续接触描述不构成本版本输入要求；Stimulus 字段以 [Stimulus 契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/stimulus.md)为准，目标协议不含任意 payload 或公开持久化策略。
+本节保留长期需求背景，当前版本的具体输入以 [handle 输入契约](../../../../项目说明/项目架构与接口（spec）/接口文档/domain/handle-input.md)为权威（2026-09-06 输入领域类型已实现，Agent/stage 生产链未接入）：快照使用 Chat、Toy、World 三种变体；保留 `interaction_id`、`interaction_revision`、`supported_outputs` 和 Chat 的 `ConnectionState`；删除 `TypingState`、`ImageSelectionState`、`DeviceOutputLimits`，暂不建立 `ContactState`。取消令牌传入后仍由 stage 更新，至少表达是否取消及“过时 / 无需处理”两类原因。下文 Call、CharacterActivity 与连续接触描述不构成本版本输入要求；Stimulus 字段以 [Stimulus 契约](../../../../项目说明/项目架构与接口（spec）/接口文档/domain/stimulus.md)为准，目标协议不含任意 payload 或公开持久化策略。
 
 ```python
 @dataclass(frozen=True)
@@ -503,7 +503,7 @@ class ActionPlanSink(Protocol):
 
 ### 7.4 最终处理报告
 
-`HandlingReport` 将请求的结束状态与内容处理结果分开表达。字段、枚举和构造行为以 [HandlingReport 类型契约](../../项目说明/项目架构与接口（spec）/接口文档/domain/handling-report.md) 为准；领域类型及构造校验已实现。
+`HandlingReport` 将请求的结束状态与内容处理结果分开表达。字段、枚举和构造行为以 [HandlingReport 类型契约](../../../../项目说明/项目架构与接口（spec）/接口文档/domain/handling-report.md) 为准；领域类型及构造校验已实现。
 
 - `request_status` 为 `COMPLETED`、`CANCELLED` 或 `FAILED`。
 - considered 表示实际考察的 pending，consumed 和 retained 是它的互斥且完整的划分。

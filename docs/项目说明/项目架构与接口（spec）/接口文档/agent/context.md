@@ -1,6 +1,6 @@
 # 交互上下文
 
-> 总体职责见 [Agent 深模块重构总 SPEC](../../../../开发进程文档/设计文档/Agent-handle-realize-深模块重构.md)。context 由 Stage 持有，Agent 在单次调用中借用。
+> 总体职责见 [Agent 架构与行为不变量](../../../../开发进程文档/设计文档/Agent架构与行为不变量.md)。context 由 Stage 持有，Agent 在单次调用中借用。
 
 `server/src/agent/context` 提供交互上下文的创建、读取、更新和释放。数据库服务负责用户资料、正式对话和对话总结的读写；上下文持有当前交互使用的数据及召回缓存。
 

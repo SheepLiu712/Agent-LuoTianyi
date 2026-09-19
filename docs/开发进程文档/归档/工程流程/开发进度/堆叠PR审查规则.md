@@ -1,6 +1,6 @@
 # 堆叠 PR 审查规则
 
-- 相关规范：[`开发守则`](../开发守则.md)、[`Spec、TDD 与小 PR 门禁`](../skills/spec-tdd-pr-guard/SKILL.md)、[`Agent 深模块 SPEC`](../设计文档/Agent-handle-realize-深模块重构.md)
+- 相关规范：[`开发守则`](../../../开发守则.md)、历史 Skill `spec-tdd-pr-guard`（未随仓库文档保留）、[`Agent 深模块 SPEC`](../../Agent重构/设计文档/Agent-handle-realize-深模块重构.md)
 - 当前阶段：流程规范
 - 总体状态：进行中
 - 最后更新：2026-09-05

@@ -4,7 +4,7 @@
 
 建议交接时将下面各项作为验收清单。生产聊天与 world 行为已进入 Stage/Agent 两接口链；#88 已删除旧 ChatSessionManager、ChatStreamManager 与 chat_pipeline。下面保留的旧行为说明仅作迁移证据，不是当前可调用入口。
 
-本文是交接检查记录。总体设计以[总 SPEC](../设计文档/Agent-handle-realize-深模块重构.md)为准，具体接口事实见[接口文档](../../项目说明/项目架构与接口（spec）/接口文档/README.md)。
+本文是交接检查记录。总体设计以[总 SPEC](../设计文档/Agent-handle-realize-深模块重构.md)为准，具体接口事实见[接口文档](../../../../项目说明/项目架构与接口（spec）/接口文档/README.md)。
 
 ## ① ChatStream 的输入行为与迁移不变量
 
@@ -91,7 +91,7 @@
 
 **不是所有 world task 都应该进入 WorldStage。**需要角色判断的事实进入它；抓取、凭据和数据库维护继续留在外部。
 
-下列时间来自当前仓库配置；迁移时应读取生效配置，不能写死。注册入口是 [WorldRuntime](../../../server/src/world/world_runtime.py)，基线测试在 [tests/world](../../../server/tests/world)。
+下列时间来自当前仓库配置；迁移时应读取生效配置，不能写死。注册入口是 [WorldRuntime](../../../../../server/src/world/world_runtime.py)，基线测试在 [tests/world](../../../../../server/tests/world)。
 
 | 当前行为 | 必须保持的结果 | 迁移后的归属与调用 |
 |---|---|---|

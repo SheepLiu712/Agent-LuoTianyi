@@ -1,17 +1,19 @@
 # Agent `handle_stimulus / realize_action_plan` 深模块重构进度
 
 - 大目标：以两个有限 Agent interface 统一角色对刺激的认知决策与动作实现，逐步迁移聊天、玩偶和 world 调用链，并最终删除旧 AgentRuntime 业务代理和任意 Mapping 协议。
-- PRD：[`Agent-handle-realize-深模块重构.md`](../需求说明（PRD）/Agent-handle-realize-深模块重构.md)
-- 总体设计背景：[`Agent-handle-realize-深模块重构.md`](../设计文档/Agent-handle-realize-深模块重构.md)
+- 当前架构约束：[`Agent架构与行为不变量.md`](../设计文档/Agent架构与行为不变量.md)
+- 历史 PRD：[`Agent-handle-realize-深模块重构.md`](../归档/Agent重构/需求说明（PRD）/Agent-handle-realize-深模块重构.md)
+- 历史总体 SPEC：[`Agent-handle-realize-深模块重构.md`](../归档/Agent重构/设计文档/Agent-handle-realize-深模块重构.md)
 - interface spec 索引：[`Server 模块接口文档`](../../项目说明/项目架构与接口（spec）/接口文档/README.md)
 - 对应工单：[GitHub #60—#89](https://github.com/SheepLiu712/Agent-LuoTianyi/issues?q=is%3Aissue%20number%3A60..89)
-- 总体状态：进行中
+- 总体状态：主体重构与 Contract 收口已完成；当前用于验收、质量门禁扩围和未验证边界收尾
+- 当前验证：默认全量 `1289 passed / 17 skipped`；单元测试覆盖率 `59.13%`；Ruff、Black 与架构门禁 B1–B8 通过（2026-09-19）
 
 ## 已完成事实
 
 ### 2026-09-15 #89 验收：行为不变量与架构边界
 
-- 交付物：`docs/开发进程文档/设计文档/行为不变量验收记录（#89）.md` + `server/scripts/check_architecture_boundaries.py`（只读静态检查，退出码 0 = 通过）。
+- 历史交付物：`docs/开发进程文档/归档/Agent重构/设计文档/行为不变量验收记录（#89）.md`；当前不变量见 `docs/开发进程文档/设计文档/Agent架构与行为不变量.md`。静态门禁仍由 `server/scripts/check_architecture_boundaries.py` 执行（退出码 0 = 通过）。
 - 静态边界：B1 业务入口唯一（全仓仅 4 处调用点，全在 `stage/chat_stage.py:444/502`、`stage/world_stage.py:181/236`）；B2 world 不运行时依赖 Agent/Stage（TYPE_CHECKING 例外）；B3 handler 无基础设施直连；B4 action 层无自造副作用（4 个 handler 全 `EffectRef`）；B5 world 无实时输出；B6 旧代理零残留；B7 已知偏差不扩散。7/7 PASS。
 - 行为回归：白名单全量 **1018 passed / 2 skipped**（2 skipped = 既有真实网络探测）。
 - 已知偏差 F1（记录、冻结，非本次引入）：5 个 world 模块经 `getattr(system_runtime, "agent_runtime")` 只读 7 处属性（`world_runtime.py:257/267`、`citywalk/task.py:171/220`、`dynamic_interaction/task.py:288`、`get_new_songs/task.py:96`、`learn_sing_songs/task.py:126`）；与 `9ed8d1c` 逐文件计数完全一致，只读不调用业务方法，建议独立工单改为 world 侧配置 + 显式端口。
@@ -19,7 +21,7 @@
 
 ### 2026-09-15 #89 验收前置：行为不变量与副作用清单
 
-- 交付物：`docs/开发进程文档/设计文档/行为不变量与副作用清单（#89 验收前置）.md`。
+- 历史交付物：`docs/开发进程文档/归档/Agent重构/设计文档/行为不变量与副作用清单（#89 验收前置）.md`。
   逐链路列全行为不变量与副作用（爬取／落库／LLM／发送／调度／文件／去重），并给出「旧架构实现 @9ed8d1c → 新实现位置 → 迁移 PR」对照。
 - 覆盖：§1 全局架构不变量 G1–G10；§2–§18 共 17 类链路（聊天主链、交互控制与取消、主动提醒、首登欢迎、反思与记忆、明确记忆意图、慢召回多计划、citywalk、VCPedia、学歌、动态互动、日记、B 站/QQ/清理、媒体链、输出与发送面、调度与生命周期、失败与部分效果）；附录 A 副作用矩阵、附录 B 旧→新映射、附录 C 未验证与风险（C1–C10）。
 - 用途：作为 #89 的唯一前置清单；每条不变量在 #89 中标注「已验收（测试名）」或「未验收（附 C 编号）」。
@@ -80,7 +82,7 @@
 ### 2026-09-15 世界侧结算端口（21/24/25 共同前置）
 
 - 交付行为：新增 `world/world_settlements.py` 的 `WorldSettlementRouter`，由 `WorldRuntime` 持有（`WorldRuntime.settlements`），在 `SystemRuntime.get_world_stage` 创建实例时接到 `WorldStage`；`WorldStage` **新增**可选窄回调 `on_handling_settled(request, report)`（在报告通过一致性校验并应用到 pending 之后调用），既有 `on_execution_finished` 语义不变。任务在投递事实前按刺激 ID 登记订阅者，随后收到 `FactHandlingOutcome`（`request_status`/`consumed`/`error_code`/`plan_ids`，`ignored` 表示明确处理但无计划）与 `FactPlanOutcome`（计划、执行报告与已提交 `EffectRef`）；多计划事实按 `emitted_plan_ids` 计数，最后一个计划结算后自动撤销登记，投递被拒用 `discard` 撤销。订阅者异常与未匹配结算只计数并记录，不打断 Stage。
-- interface spec：`接口文档/stage/README.md` 记录新回调的调用时机与语义；`接口文档/world/README.md` 记录端口的登记、回执与清理契约。实施依据为 [World 链路迁移实施规格（21-25）](../../设计文档/World链路迁移实施规格（21-25）.md) 的 N1 裁决（选项 A，不改 #152 既有成员语义）。
+- interface spec：`接口文档/stage/README.md` 记录新回调的调用时机与语义；`接口文档/world/README.md` 记录端口的登记、回执与清理契约。历史实施依据为 [World 链路迁移实施规格（21-25）](../归档/Agent重构/设计文档/World链路迁移实施规格（21-25）.md) 的 N1 裁决（选项 A，不改 #152 既有成员语义）。
 - 验证及结果：在 `server` 使用 `conda run -n agent python -m pytest tests/stage tests/world tests/agent tests/agent_runtime tests/domain tests/system tests/adapter -q` → **837 passed、2 skipped**（2 skip 为既有真实网络探测）；新增 `tests/stage/test_world_settlement_wiring.py` 8 项用例，覆盖无计划结算即撤销登记、失败不消费、多计划按序结算与最后撤销、未匹配计数、订阅者异常隔离、非法/重复登记与幂等 discard，以及真 `WorldStage` 装配下处理结算与执行结算（含 `EffectRef`）到达订阅者。新增文件 Ruff 通过，`git diff --check` 干净。
 - 未验证范围：本切片只是端口与装配，不含任何 world 任务的迁移（21/23/24/25 消费该端口）；`DiaryPlanningDue` 目标用户字段（N2）与 24 的 ignore 语义落地仍在各自切片内验证。
 
@@ -137,7 +139,7 @@
 
 - 交付行为：新增 capabilities 侧 `MediaResolver` / `ResolvedMedia` 窄端口、永久 `PermanentMediaStore`、生产 `FilesystemMediaResolver` 和显式失败的未配置实现。WebSocket Adapter 复用现有 `user_image` 的 base64/MIME 协议，在构造 Stimulus 前永久保存原始字节，以认证用户和 client message 身份生成可重复的 UUID `MediaRef`；Agent 不保存媒体且只接触该引用。CapabilityManager、AgentRuntime、Skills 构造注入 `ImagePreprocessingSkill`；Handler 解析、校验、理解后一次写入用户媒体事实与系统机器描述事实，返回两个记录 ID 的 `PreprocessedInput`，不 emit、不消费。没有真实生产者的语音仍不接 ASR。
 - 永久性、顺序与失败：媒体目录无 TTL、过期或自动清理；resolver 拒绝未知、空内容、非图片 MIME、损坏元数据和路径穿越。对话事实时间按 Stage 接收 revision 排序，图片内部媒体先于机器描述；新 context 持久化使用带微秒 ISO 时间，旧链路可继续写秒级格式。`datetime.fromisoformat` 和已修订的旧展示格式化器兼容两种格式，因此 DB/context 读取保持 A/B。失败在 VLM 前退出，不消费、不阻塞后续文本，也不回滚既有事实。
-- interface spec：[`capabilities/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/capabilities/README.md) 已记录端口、稳定失败和未决存储策略；[`system/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/system/README.md) 已记录 `capabilities.media_resolution` 装配事实。
+- interface spec：[`infrastructure/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/infrastructure/README.md) 已记录媒体解析端口与稳定失败，[`skills/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/skills/README.md) 已记录图片预处理 Skill；[`system/README.md`](../../项目说明/项目架构与接口（spec）/接口文档/system/README.md) 已记录 `infrastructure.media_resolution` 装配事实。
 - 验证及结果：工作目录 `server`，conda 环境 `agent`。`python -m pytest tests/agent tests/stage tests/domain tests/adapter -q` 为 **718 passed**（2 条既有依赖弃用 warning）；新增 adapter/resolver/时间格式聚焦测试为 **36 passed**。触及文件 Ruff 与 `git diff --check` 通过；08 链既有 agent/stage/domain/adapter 测试未修改且继续通过。
 - 未决与未验证：授权主体已在下述审查修复中收敛为认证上传用户；仍未决定大文件分块、解析/理解超时及图片/语音端口长期复用策略，未实现 ASR。未运行真实 VLM、生产目录权限/磁盘耗尽、生产数据库、客户端/真机、GPU 或完整 Server 外部链路。
 
@@ -453,7 +455,7 @@
 ### 2026-09-06 Issue #61 realization SPEC 草案与现行行为核对
 
 - 交付内容：完成 ActionPlan、Action、两个 sink/receipt、ExecutionContext、输出和执行报告的第一版待评审草案；逐项核对总设计中的用途与重复信息，记录思考提示、私密发布归属、音频异常终包、音频分块、表情恢复及活动/日程范围等风险。新增和精简建议均未标为已确认契约。
-- interface spec：[`domain/realization.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md)；依据与风险见 [总 SPEC](../设计文档/Agent-handle-realize-深模块重构.md)。
+- interface spec：[`domain/realization.md`](../../项目说明/项目架构与接口（spec）/接口文档/domain/realization.md)；历史依据与风险见 [总 SPEC](../归档/Agent重构/设计文档/Agent-handle-realize-深模块重构.md)。
 - commit 或 PR：`codex/agent-04-realization-contract` 分支上的本记录所在 SPEC 草案提交。
 - 验证及结果：按 `c523b2a6` 的实际代码核对聊天、触摸、语音、演唱、日记、动态和学歌入口；阅读现有音频终包测试，未运行它们。新增文档 UTF-8、代码围栏、相对链接及 `git diff --check` 静态检查通过。草案阶段 RED/GREEN 不适用。
 - 未验证范围：没有产品代码或测试实现，没有接入 Agent、sink 或外部服务；没有验证真实播放、设备、生产环境或完成他人评审。远程工单未修改。
