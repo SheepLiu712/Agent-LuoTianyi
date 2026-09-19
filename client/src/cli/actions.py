@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from .output import Redactor
+from .media import DefaultPlaybackBackend, PlaybackBackend, PlaybackResult, read_wav_format
 from ..session import (
     AggregatedReply,
     HeadlessSession,
@@ -52,10 +53,12 @@ class ActionExecutor:
         session_factory: Callable[..., HeadlessSession] = HeadlessSession,
         environ: dict[str, str] | None = None,
         session_id: str | None = None,
+        playback_backend: PlaybackBackend | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._environ = os.environ if environ is None else environ
         self._session: HeadlessSession | None = None
+        self._playback = playback_backend or DefaultPlaybackBackend()
         self.session_id = session_id or f"s-{uuid.uuid4().hex[:12]}"
         self.redactor = Redactor()
 
@@ -116,6 +119,7 @@ class ActionExecutor:
             "chat.send_text": self._send_text,
             "reply.wait": self._wait_reply,
             "reply.read": self._read_reply,
+            "audio.replay": self._replay_audio,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -205,6 +209,74 @@ class ActionExecutor:
             )
         return self._reply_result(reply, params), reply_uuid
 
+    def _replay_audio(self, params: dict) -> tuple[dict, str]:
+        reply_uuid = _required_string(params, "reply_uuid")
+        session = self._require_session()
+        reply = session.get_reply(reply_uuid)
+        if reply is None:
+            self._replay_failure("AUDIO_REPLY_NOT_FOUND", f"reply not found: {reply_uuid}", reply_uuid)
+        if not reply.complete:
+            self._replay_failure("AUDIO_NOT_READY", f"reply is not complete: {reply_uuid}", reply_uuid)
+        if reply.is_ephemeral or not reply.display_in_chat:
+            self._replay_failure("AUDIO_EPHEMERAL", f"reply is ephemeral: {reply_uuid}", reply_uuid)
+        if reply.audio_error:
+            self._replay_failure("AUDIO_STREAM_FAILED", f"reply audio stream failed: {reply_uuid}", reply_uuid)
+        path = Path(reply.audio_path) if reply.audio_path else None
+        if path is None or not path.exists() or path.stat().st_size == 0:
+            self._replay_failure("AUDIO_FILE_MISSING", f"audio file missing: {reply_uuid}", reply_uuid)
+        if read_wav_format(path) is None:
+            self._replay_failure(
+                "AUDIO_FORMAT_INVALID", f"audio file is not a decodable wav: {reply_uuid}", reply_uuid
+            )
+        result = self._playback.play(path)
+        if result == PlaybackResult.DEVICE_UNAVAILABLE:
+            self._replay_failure("DEVICE_UNAVAILABLE", "no available playback device", reply_uuid)
+        if result == PlaybackResult.INTERRUPTED:
+            self._replay_failure("PLAYBACK_INTERRUPTED", "playback was interrupted", reply_uuid)
+        return {
+            "reply_uuid": reply.uuid,
+            "playback": "completed",
+            "audio": self._audio_metadata(reply),
+        }, reply_uuid
+
+    def _replay_failure(self, code: str, message: str, reply_uuid: str) -> None:
+        raise _ActionFailure(
+            ExitCode.ASSERTION_FAILED,
+            code,
+            message,
+            "assertion",
+            correlation_id=reply_uuid,
+        )
+
+    def _audio_metadata(self, reply: AggregatedReply) -> dict:
+        empty = {"available": False, "byte_count": 0, "format": None, "reference": None}
+        path = Path(reply.audio_path) if reply.audio_path else None
+        if path is None:
+            return dict(empty)
+        if not path.exists() or path.stat().st_size == 0:
+            return dict(empty)
+        byte_count = path.stat().st_size
+        audio_format = read_wav_format(path)
+        eligible = (
+            reply.complete
+            and not reply.is_ephemeral
+            and reply.display_in_chat
+            and not reply.audio_error
+        )
+        if not eligible or audio_format is None:
+            return {
+                "available": False,
+                "byte_count": byte_count,
+                "format": audio_format,
+                "reference": None,
+            }
+        return {
+            "available": True,
+            "byte_count": byte_count,
+            "format": audio_format,
+            "reference": path.name,
+        }
+
     def _reply_result(self, reply: AggregatedReply, params: dict) -> dict:
         text = "".join(reply.texts)
         failure = None
@@ -234,20 +306,13 @@ class ActionExecutor:
                 "assertion",
                 correlation_id=reply.uuid,
             )
-        path = Path(reply.audio_path) if reply.audio_path else None
-        byte_count = path.stat().st_size if path and path.exists() else 0
         return {
             "reply_uuid": reply.uuid,
             "text": text,
             "texts": list(reply.texts),
             "expressions": list(reply.expressions),
             "complete": reply.complete,
-            "audio": {
-                "available": bool(path and byte_count),
-                "byte_count": byte_count,
-                "format": path.suffix.lstrip(".") or None if path else None,
-                "reference": path.name if path else None,
-            },
+            "audio": self._audio_metadata(reply),
             "audio_error": reply.audio_error,
             "error_code": reply.error_code,
             "display_in_chat": reply.display_in_chat,
