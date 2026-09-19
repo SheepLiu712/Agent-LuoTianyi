@@ -8,4 +8,10 @@
 
 ## 已完成
 
-（暂无：首个行为切片形成完整 Green 候选后，按《开发守则》格式追加完成事实。）
+### 2026-09-20 S1 服务端契约测试
+
+- 交付行为：三类事件（`user_touch` / `user_image_selecting` / `user_image_selecting_cancel`）从鉴权 WebSocket 入口的接纳语义（肯定 ACK / 重复 ACK / `BAD_MESSAGE` 否定 ACK / 未知事件静默）与确定性副作用（转换为 Stimulus 并进入 ingress）的契约测试。
+- interface spec：SPEC 已满足（复用既有协议，见 `server/docs/dev/统一事件协议.md`）；无契约变更。
+- commit 或 PR：分支 `feat/cli-e2e-s1-contract-tests`（本切片提交）。
+- 验证及结果：`cd server; python -m pytest tests/test_websocket_chat_input_contract.py -q` → 13 passed；回归 `tests/test_websocket_delivery.py tests/test_websocket_idempotency.py -q` → 20 passed（conda 环境 `agent`）。
+- 未验证范围：触摸 reflex 的业务回复、选图等待状态行为、真实 LLM/TTS；鉴权失败/超时与 OVERLOADED 由既有测试覆盖。
