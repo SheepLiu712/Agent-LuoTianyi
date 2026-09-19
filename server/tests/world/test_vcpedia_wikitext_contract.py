@@ -20,6 +20,7 @@ from src.subconscious.music_knowledge.song_database import Song
 
 FIXTURES = Path(__file__).parent / "fixtures"
 TEMPLATE = "https://vcpedia.cn/Template:%E6%B4%9B%E5%A4%A9%E4%BE%9D/2038"
+EXPECTED_USER_AGENT = "AgentLuo/1.0 (+https://github.com/SheepLiu712/Agent-LuoTianyi)"
 
 
 def response(text, status=200):
@@ -314,9 +315,10 @@ def test_both_entries_recover_challenge_through_curl(wire, tmp_path, entry, stat
     result = (fetch_song_list_from_template(TEMPLATE, 7) if entry == "list"
               else fetcher(tmp_path).fetch_entity_description("歌曲"))
     assert result == ["歌曲"] if entry == "list" else result["summary"] == ["正文"]
+    assert wire.calls[0][1]["headers"]["User-Agent"] == EXPECTED_USER_AGENT
     args, kwargs = wire.curls[0]
     assert "--max-time" in args and "--fail" in args
-    assert "--user-agent" in args
+    assert args[args.index("--user-agent") + 1] == EXPECTED_USER_AGENT
     assert kwargs.get("shell", False) is False
     assert_api((args[-1], {}), "Template:洛天依/2038" if entry == "list" else "歌曲")
 
