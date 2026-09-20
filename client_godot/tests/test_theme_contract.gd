@@ -13,7 +13,7 @@ const ICONS := {
 }
 const INK := Color("304553")
 const ACCENT := Color("66ccff")
-const TRANSPARENT := Color(0, 0, 0, 0)
+const TRANSPARENT := Color.TRANSPARENT
 # 期望的字体色，键为 "<type>|<name>"。
 const COLORS := {
 	"Label|font_color": INK,
@@ -117,7 +117,7 @@ func _run() -> void:
 		check(theme.get_icon(parts[1],parts[0]) != null,"icon exists: "+key)
 	check(theme.get_icon("grabber","HSlider") == load(ICONS["HSlider|grabber"]),"grabber icon uses slider dot asset")
 	for path: String in DOTS:
-		check(image_data(path) == dot_image(DOTS[path]).get_data(),"slider dot pixels match formula: "+path)
+		check(dot_pixels_match(path,DOTS[path]),"slider dot pixels match formula: "+path)
 	check(ProjectSettings.get_setting("gui/theme/custom","") == THEME_PATH,"project uses app theme")
 	check(differing_entries(theme_signature(theme),theme_signature(load("res://src/preview/preview_style.gd").make_theme())).is_empty(),"make_theme equals theme resource: "+str(differing_entries(theme_signature(theme),theme_signature(load("res://src/preview/preview_style.gd").make_theme()))))
 	var shader: Shader = load(SHADER_PATH)
@@ -143,12 +143,23 @@ func dot_image(color: Color) -> Image:
 			if Vector2(x-7.5,y-7.5).length() <= 6:
 				image.set_pixel(x,y,color)
 	return image
-func image_data(path: String) -> PackedByteArray:
-	var image := Image.new()
-	if image.load(path) != OK:
-		return PackedByteArray()
-	image.convert(Image.FORMAT_RGBA8)
-	return image.get_data()
+func dot_pixels_match(path: String,color: Color) -> bool:
+	var texture: Texture2D = load(path)
+	if texture == null:
+		return false
+	var image: Image = texture.get_image()
+	if image == null or image.get_width() != 16 or image.get_height() != 16:
+		return false
+	var expected := dot_image(color)
+	for y in 16:
+		for x in 16:
+			var actual := image.get_pixel(x,y)
+			var wanted := expected.get_pixel(x,y)
+			if actual.a != wanted.a:
+				return false
+			if wanted.a > 0 and (actual.r != wanted.r or actual.g != wanted.g or actual.b != wanted.b):
+				return false
+	return true
 func differing_entries(left: Dictionary,right: Dictionary) -> Array[String]:
 	var result: Array[String] = []
 	for key in left:
@@ -195,8 +206,9 @@ func box_signature(style: StyleBox) -> Array:
 func image_signature(texture: Texture2D) -> Array:
 	if texture == null:
 		return []
-	var image: Image = texture.get_image()
-	if image == null:
+	var source: Image = texture.get_image()
+	if source == null:
 		return []
+	var image: Image = source.duplicate(true) as Image
 	image.convert(Image.FORMAT_RGBA8)
 	return [image.get_width(),image.get_height(),image.get_data()]

@@ -23,6 +23,10 @@ window/size/viewport_height=800
 window/size/window_width_override=660
 window/size/window_height_override=800
 
+[gui]
+
+theme/custom="res://theme/app_theme.tres"
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"
