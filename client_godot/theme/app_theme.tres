@@ -410,3 +410,5 @@ TextEdit/colors/font_placeholder_color = Color(0.6039216, 0.68235296, 0.72156864
 TextEdit/colors/selection_color = Color(0.7176471, 0.9019608, 1, 1)
 TextEdit/styles/focus = SubResource("StyleBoxFlat_engfm")
 TextEdit/styles/normal = SubResource("StyleBoxFlat_p5jtr")
+
+DropdownItem/colors/font_selected_color = Color(0.4, 0.8, 1, 1)

@@ -23,7 +23,7 @@ func _run() -> void:
 	root.add_child(session)
 	var split := HSplitContainer.new()
 	root.add_child(split)
-	split.theme = preload("res://src/preview/preview_style.gd").make_theme()
+	split.theme = preload("res://theme/app_theme.tres")
 	split.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	if not ResourceLoader.exists(AVATAR_SCENE):
 		failures.append("avatar panel scene exists")

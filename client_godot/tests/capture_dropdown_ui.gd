@@ -9,7 +9,7 @@ func _initialize() -> void:
 func _run() -> void:
 	root.size = Vector2i(520,400)
 	root.content_scale_size = Vector2i.ZERO
-	root.theme = load("res://src/preview/preview_style.gd").make_theme()
+	root.theme = load("res://theme/app_theme.tres")
 	var menu = load("res://scenes/ui/unified_dropdown.tscn").instantiate()
 	root.add_child(menu)
 	menu.size = Vector2(220,42)

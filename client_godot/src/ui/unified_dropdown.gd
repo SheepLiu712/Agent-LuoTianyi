@@ -1,7 +1,6 @@
 extends Button
 ## Shared stable-ID selector / action menu. Popup details remain private.
 signal activated(id: String)
-const Style = preload("res://src/preview/preview_style.gd")
 const Item = preload("res://scenes/ui/dropdown_item.tscn")
 var action_menu := false:
 	set(value):
@@ -114,7 +113,7 @@ func open_menu() -> void:
 		var row := _buttons[index]
 		row.text = ("✓  " if not action_menu and row.get_meta("id") == _selected else "    ") + _label(row.get_meta("id"))
 		for state in ["font_color","font_focus_color","font_hover_color","font_pressed_color"]:
-			row.add_theme_color_override(state,Style.ACCENT if not action_menu and row.get_meta("id") == _selected else Color("353c43"))
+			row.add_theme_color_override(state,get_theme_color("font_selected_color", "DropdownItem") if not action_menu and row.get_meta("id") == _selected else Color("353c43"))
 		if row.get_meta("id") == _selected: _focus_index = index
 	if _focus_index >= 0: _buttons[_focus_index].grab_focus()
 

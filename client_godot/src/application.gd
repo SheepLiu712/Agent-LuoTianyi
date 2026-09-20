@@ -44,7 +44,7 @@ func _ready() -> void:
 		_log_problem.queue_free()
 		_exit_dialog.queue_free()
 		_resize_window(Vector2i(1200, 800), Vector2i(960, 640))
-		add_child(load("res://scenes/chat_preview.tscn").instantiate())
+		add_child(load("res://scenes/preview/chat_preview.tscn").instantiate())
 		return
 	_resize_window(Vector2i(660, 800), Vector2i(480, 640))
 	_log = Log.new("user://logs" if _layout_path == "user://window_layout.cfg" else _layout_path.get_base_dir().path_join("logs"))

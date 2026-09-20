@@ -119,7 +119,6 @@ func _run() -> void:
 	for path: String in DOTS:
 		check(dot_pixels_match(path,DOTS[path]),"slider dot pixels match formula: "+path)
 	check(ProjectSettings.get_setting("gui/theme/custom","") == THEME_PATH,"project uses app theme")
-	check(differing_entries(theme_signature(theme),theme_signature(load("res://src/preview/preview_style.gd").make_theme())).is_empty(),"make_theme equals theme resource: "+str(differing_entries(theme_signature(theme),theme_signature(load("res://src/preview/preview_style.gd").make_theme()))))
 	var shader: Shader = load(SHADER_PATH)
 	check(shader != null and shader.code.contains("smoothstep(0.47,0.5,length(UV-vec2(0.5)))"),"round avatar shader keeps circular mask")
 	print("Theme contract: ","PASS" if failures.is_empty() else "FAIL")
@@ -160,55 +159,3 @@ func dot_pixels_match(path: String,color: Color) -> bool:
 			if wanted.a > 0 and (actual.r != wanted.r or actual.g != wanted.g or actual.b != wanted.b):
 				return false
 	return true
-func differing_entries(left: Dictionary,right: Dictionary) -> Array[String]:
-	var result: Array[String] = []
-	for key in left:
-		if not right.has(key) or not same_value(left[key],right[key]):
-			result.append(key)
-	for key in right:
-		if not left.has(key):
-			result.append(key)
-	return result
-func same_value(left: Variant,right: Variant) -> bool:
-	if left is Array and right is Array:
-		if left.size() != right.size():
-			return false
-		for index in left.size():
-			if not same_value(left[index],right[index]):
-				return false
-		return true
-	return left == right
-func theme_signature(theme: Theme) -> Dictionary:
-	var result := {}
-	if theme == null:
-		return result
-	result["DefaultFontSize"] = theme.default_font_size
-	for type in theme.get_type_list():
-		var variation := String(theme.get_type_variation_base(type))
-		if not variation.is_empty():
-			result["%s|base_type" % type] = variation
-		for name in theme.get_color_list(type):
-			result["%s|color|%s" % [type,name]] = theme.get_color(name,type)
-		for name in theme.get_constant_list(type):
-			result["%s|constant|%s" % [type,name]] = theme.get_constant(name,type)
-		for name in theme.get_font_size_list(type):
-			result["%s|font_size|%s" % [type,name]] = theme.get_font_size(name,type)
-		for name in theme.get_stylebox_list(type):
-			result["%s|stylebox|%s" % [type,name]] = box_signature(theme.get_stylebox(name,type))
-		for name in theme.get_icon_list(type):
-			result["%s|icon|%s" % [type,name]] = image_signature(theme.get_icon(name,type))
-	return result
-func box_signature(style: StyleBox) -> Array:
-	if style is StyleBoxFlat:
-		var flat: StyleBoxFlat = style
-		return [flat.bg_color,flat.corner_radius_top_left,flat.corner_radius_top_right,flat.corner_radius_bottom_right,flat.corner_radius_bottom_left,flat.content_margin_left,flat.content_margin_top,flat.content_margin_right,flat.content_margin_bottom,flat.border_width_left,flat.border_width_top,flat.border_width_right,flat.border_width_bottom,flat.border_color]
-	return [style.get_class()] if style != null else []
-func image_signature(texture: Texture2D) -> Array:
-	if texture == null:
-		return []
-	var source: Image = texture.get_image()
-	if source == null:
-		return []
-	var image: Image = source.duplicate(true) as Image
-	image.convert(Image.FORMAT_RGBA8)
-	return [image.get_width(),image.get_height(),image.get_data()]

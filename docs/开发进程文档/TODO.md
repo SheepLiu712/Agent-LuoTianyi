@@ -45,4 +45,4 @@
 - [x] chat_view（含 image_overlay）场景化（2026-09-20 完成并验证）
 - [x] dynamics_window + dynamic_detail + 动态行组件场景化（2026-09-20 完成并验证）
 - [x] avatar_panel + avatar_preview + application 收尾（2026-09-20 完成并验证）
-- [ ] chat_preview 离线样板场景化并删除 preview_style.gd
+- [x] chat_preview 离线样板场景化并删除 preview_style.gd（2026-09-20 完成并验证）

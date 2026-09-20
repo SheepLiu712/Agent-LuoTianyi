@@ -460,3 +460,12 @@
 - Red：53d3e5c；不注入 setup() 实例化真实 main.tscn，观察完整启动日志归档位置，修复前 FAIL，修复后 PASS。
 - Green：本记录所在提交；test_default_user_storage.gd 纳入 check.ps1；loopback test_application_window.gd PASS（原生窗口尺寸恢复在 headless 下跳过）。
 - 作者自审：只恢复丢失的成员默认值；未读取私有字段作为测试结果。未验证公共服务器；仅本地提交。
+
+### 2026-09-20 界面场景化第十片——离线样板与主题收尾
+
+- 交付行为：chat_preview.tscn 迁至 scenes/preview，固定布局、空态与 FileDialog 均由场景提供，脚本只保留状态和动态组件实例化；删除 preview_style.gd 和旧场景，运行及截图消费者统一引用 app_theme.tres。
+- interface spec：客户端接口「离线样板场景化与主题收尾」。SPEC a1a8c8e；Red b80b4bd（新场景缺失时断言失败，无导入错误）；Green 为本记录所在提交。
+- 验证：独立工程 check.ps1 23 步通过；check_features.ps1 全部通过。test_preview_input 覆盖入树前固定节点、Enter/Shift+Enter、五场景切换、失败保留草稿、图片预览取消；主题、下拉、草稿窗口回归通过。
+- 视觉：五种模拟场景逐一 GPU 截图，同一独立用户目录、同机迁移前后比较，聊天区域 x≥540 均零差异；差异范围仅运动中的 Live2D。已查看日常聊天截图。
+- 作者自审：无 preview_style 运行时/测试引用；旧入口已删除，--preview/--scenario/--capture 保持可用。主题工厂比较测试随工厂删除，其余资源值测试保留。
+- 未验证范围：系统文件选择对话框的人工反复操作、IME、真实 OS DPI、公共服务器；未推送、未开 PR。

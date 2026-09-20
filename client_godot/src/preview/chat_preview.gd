@@ -1,18 +1,19 @@
 extends Control
-const Style = preload("res://src/preview/preview_style.gd")
 const Session = preload("res://src/preview/demo_session.gd")
-const AvatarPanel = preload("res://scenes/avatar/avatar_panel.tscn")
 const Bubble = preload("res://scenes/ui/message_bubble.tscn")
-const Composer = preload("res://src/preview/composer_input.gd")
 const ImageOverlay = preload("res://scenes/preview/image_overlay.tscn")
 var _session = Session.new()
-var _avatar = AvatarPanel.instantiate()
-var _split := HSplitContainer.new()
-var _scroll := ScrollContainer.new()
-var _messages := VBoxContainer.new()
-var _input = Composer.new()
-var _status := Label.new()
-var _latest := Button.new()
+@onready var _avatar = %AvatarPanel
+@onready var _split: HSplitContainer = %Split
+@onready var _scroll: ScrollContainer = %Scroll
+@onready var _messages: VBoxContainer = %Messages
+@onready var _input = %Input
+@onready var _status: Label = %Status
+@onready var _latest: Button = %Latest
+@onready var _empty: Label = %Empty
+@onready var _picker: FileDialog = %ImagePicker
+@onready var _expressions: OptionButton = %Expressions
+@onready var _scenarios: OptionButton = %Scenarios
 var _images: Dictionary = {}
 var _playing := false
 var _scenario := "conversation"
@@ -22,19 +23,21 @@ var _refresh_pending := false
 var _refresh_again := false
 
 func _ready() -> void:
-	theme = Style.make_theme()
-	var background := ColorRect.new()
-	background.color = Color("f5f8fa")
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(background)
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(_split)
-	_split.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_split.add_theme_constant_override("separation", 6)
-	_avatar.custom_minimum_size.x = 290
-	_split.add_child(_avatar)
-	_build_character_header()
-	_build_chat()
+	_expressions.item_selected.connect(func(index): _avatar.avatar.apply_expression(_expressions.get_item_text(index)))
+	_scenarios.item_selected.connect(func(index):
+		_change_scenario(["conversation", "empty", "disconnected", "error", "thinking"][index]))
+	_latest.pressed.connect(_to_latest)
+	%PickImage.pressed.connect(_pick_image)
+	%TogglePlay.pressed.connect(_toggle_play)
+	%Send.pressed.connect(_send)
+	_picker.file_selected.connect(func(path): _preview_image(Image.load_from_file(path)))
+	_input.send_requested.connect(_send)
+	_input.image_pasted.connect(_preview_image)
+	_input.text_changed.connect(func():
+		var lines: int = _input.get_line_count()
+		for line in _input.get_line_count():
+			lines += _input.get_line_wrap_count(line)
+		_input.custom_minimum_size.y = clampf(lines * 24 + 30, 92, 150))
 	var settings := ConfigFile.new()
 	if settings.load("user://preview_layout.cfg") == OK:
 		var ratio = settings.get_value("layout", "ratio", 0.45)
@@ -64,81 +67,6 @@ func _ready() -> void:
 			var result := get_viewport().get_texture().get_image().save_png(argument.trim_prefix("--capture="))
 			get_tree().quit(0 if result == OK else 1)
 
-func _build_character_header() -> void:
-	var header := VBoxContainer.new()
-	header.position = Vector2(24, 24)
-	header.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_avatar.add_child(header)
-	header.add_child(Style.label("洛天依", 25, Color("304d60")))
-	header.add_child(Style.label("把平凡的日子，慢慢说给我听。", 13, Color("526b7d")))
-	var choices := OptionButton.new()
-	var expressions := ["微笑脸", "温柔脸", "喜欢脸", "卖萌", "生气脸", "难过脸", "唱歌"]
-	for expression in expressions:
-		choices.add_item(expression)
-	header.add_child(choices)
-	choices.item_selected.connect(func(index): _avatar.avatar.apply_expression(expressions[index]))
-
-func _build_chat() -> void:
-	var margin := MarginContainer.new()
-	margin.custom_minimum_size.x = 410
-	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for side in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 22)
-	_split.add_child(margin)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 12)
-	margin.add_child(column)
-	var heading := HBoxContainer.new()
-	column.add_child(heading)
-	var title := Style.label("和天依聊聊", 23)
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	heading.add_child(title)
-	var scenarios := OptionButton.new()
-	for caption in ["日常聊天", "空白会话", "网络断开", "加载失败", "正在思考"]:
-		scenarios.add_item(caption)
-	heading.add_child(scenarios)
-	scenarios.item_selected.connect(func(index):
-		_change_scenario(["conversation", "empty", "disconnected", "error", "thinking"][index]))
-	column.add_child(Style.label("离线样板 · 未连接服务器", 12, Color("809ba7")))
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	column.add_child(_scroll)
-	_messages.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_messages.add_theme_constant_override("separation", 17)
-	_scroll.add_child(_messages)
-	_latest.text = "回到最新 ↓"
-	_latest.visible = false
-	_latest.pressed.connect(_to_latest)
-	column.add_child(_latest)
-	column.add_child(_status)
-	_status.add_theme_font_size_override("font_size", 12)
-	_status.add_theme_color_override("font_color", Color("7c969f"))
-	var tools := HBoxContainer.new()
-	tools.add_theme_constant_override("separation", 10)
-	column.add_child(tools)
-	tools.add_child(Style.button("＋ 图片", _pick_image))
-	tools.add_child(Style.button("▷ 模拟口型 / 停止", _toggle_play))
-	_input.placeholder_text = "想说些什么？"
-	_input.custom_minimum_size.y = 92
-	_input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	column.add_child(_input)
-	_input.send_requested.connect(_send)
-	_input.image_pasted.connect(_preview_image)
-	_input.text_changed.connect(func():
-		var lines := _input.get_line_count()
-		for line in _input.get_line_count():
-			lines += _input.get_line_wrap_count(line)
-		_input.custom_minimum_size.y = clampf(lines * 24 + 30, 92, 150))
-	var footer := HBoxContainer.new()
-	column.add_child(footer)
-	var hint := Style.label("Enter 发送 · Shift + Enter 换行", 11, Color("94a5af"))
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(hint)
-	var send := Style.button("发送  ↑", _send)
-	send.custom_minimum_size.x = 96
-	send.add_theme_stylebox_override("normal", Style.box(Color("bde5ed"), 9, 10))
-	footer.add_child(send)
-
 func _resize_split() -> void:
 	if _layout_ready:
 		_split.split_offset = roundi(size.x * _ratio)
@@ -161,13 +89,12 @@ func _refresh() -> void:
 	var follow := bar.value >= bar.max_value - bar.page - 24
 	var previous := bar.value
 	for child in _messages.get_children():
+		if child == _empty:
+			continue
 		_messages.remove_child(child)
 		child.queue_free()
-	if _session.get_messages().is_empty():
-		var empty := Style.label({"empty":"从一句问候开始", "disconnected":"连接暂时中断", "error":"暂时无法加载消息"}.get(_scenario, ""), 20, Color("839ca8"))
-		empty.custom_minimum_size.y = 240
-		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		_messages.add_child(empty)
+	_empty.visible = _session.get_messages().is_empty()
+	_empty.text = {"empty":"从一句问候开始", "disconnected":"连接暂时中断", "error":"暂时无法加载消息"}.get(_scenario, "")
 	for message in _session.get_messages():
 		message.demo = true
 		var bubble = Bubble.instantiate()
@@ -202,15 +129,7 @@ func _send() -> void:
 	get_tree().create_timer(0.7).timeout.connect(func(): _session.settle(id, true))
 
 func _pick_image() -> void:
-	var dialog := FileDialog.new()
-	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
-	dialog.access = FileDialog.ACCESS_FILESYSTEM
-	dialog.filters = PackedStringArray(["*.png, *.jpg, *.jpeg, *.webp ; 图片"])
-	dialog.use_native_dialog = true
-	add_child(dialog)
-	dialog.file_selected.connect(func(path): _preview_image(Image.load_from_file(path)); dialog.queue_free())
-	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered_ratio(0.7)
+	_picker.popup_centered_ratio(0.7)
 
 func _preview_image(image: Image) -> void:
 	if image == null or image.is_empty():

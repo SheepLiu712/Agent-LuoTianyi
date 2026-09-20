@@ -1,10 +1,8 @@
 ﻿extends Window
-const Style = preload("res://src/preview/preview_style.gd")
 var _discard := ConfirmationDialog.new()
 func _init() -> void:
 	visible = false
 func _ready() -> void:
-	theme = Style.make_theme()
 	_discard.title = "放弃未保存的修改？"
 	_discard.dialog_text = "关闭后，本窗口未保存的内容将被丢弃。"
 	_discard.ok_button_text = "放弃修改"
