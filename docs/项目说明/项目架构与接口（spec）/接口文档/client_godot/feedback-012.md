@@ -51,3 +51,5 @@ HistoryImages.store_local(id,bytes)->Error将已接受发送的图片放入当�
 ChatView增加场景ImageButton、Windows原生ImagePicker、AttachmentBar（缩略图/查看/移除）、ImageStatus。Ctrl+V和选图先成为一个待发附件并打开共用预览；关闭预览不发送，附件留在输入区可重新查看/移除。attachment_requested(provider,confirm)由Application接入现有ImagePresenter；预览“发送图片”只发附件，聊天发送键有附件时先发图片，再发非空文字；任一步拒绝保留尚未接受的内容。is_dirty包含附件。当前只接受单张待发附件，更换图片替换旧附件。
 
 ChatSession.set_image_selecting(active:bool)在ready时发送既有瞬时user_image_selecting/user_image_selecting_cancel，打开选择器/粘贴时开始，取消选择/移除时取消，成功发送由user_image完成选择。关闭原生文件选择器不丢已有附件；退出账号清附件与回调。通用图片窗确认按钮去掉“离线演示”固定文案，失败提示适用于正式/离线两种调用，不改变显式确认语义。
+
+ChatView.attachment_cleared通知Application在移除/发送接受后调用ImagePresenter.close_confirmation(source)，只关闭仍归属该source且具有确认操作的预览，不影响已转属或只读历史图片，防止主输入区发送后留下可重复确认的旧预览。
