@@ -349,3 +349,12 @@
 - agentluo-0.1.1.zip：43,172,555字节/14文件；SHA256 f22ec8da492c740244b9012a2f109a6ac4bcde254ac98658a91a52dc1bb9602d。verify_release_archive.py CRC/版本/逐文件字节比对PASS，两DLL与锁文件一致，0.1.0旧包哈希未变。
 - 最终PCK的角色/新UI资源加载、0.1.1版本、完整重放WASAPI实际混音PASS；动态追加滚底自动分页和不可评论输入回归PASS。
 - 截图/验证/提交/自审及未验证范围汇总：client_godot/artifacts/agentluo-011-acceptance.md。公共服务、真实系统DPI/Windows10/集显、人工听感与长期性能未验收；未推送合并或切换入口。
+
+### 2026-09-20 界面场景化首片——主题与材质资源化
+- 交付行为：主题与头像/滑块图形资源化，为后续把界面改为场景绘制提供共享主题与材质；外观、文案、字号、颜色与既有代码逐项等价，不改任何视图节点树。
+- interface：PRD「界面以场景绘制（方案 B）」；接口文档 client_godot/README.md「界面场景化：主题与材质资源（0.1.2 起）」。新增 res://theme/app_theme.tres（默认字体族/字号15、各type颜色与占位/选区/光标色、Button/OptionButton/MenuButton五态、PrimaryButton变体、TextEdit/LineEdit normal、PopupMenu panel/hover/v_separation、HSlider slider/grabber_area及三个grabber圆点图标）、res://assets/ui/round_avatar.gdshader、res://assets/ui/slider_dot{,_highlight,_disabled}.png；project.godot 增 [gui] theme/custom。
+- SPEC 5a28e7e；Red 697c61e（资源尚不存在，test_theme_contract 5 条失败）；Green 72cedba。preview_style.make_theme() 改为 res://theme/app_theme.tres 薄壳，avatar() 改引用外置 shader。
+- 验证：Godot 4.7.1（4.7.1.stable.official.a13da4feb）headless test_theme_contract.gd PASS，断言主题条目、make_theme() 与资源全签名相等、项目默认主题、grabber 圆点像素公式、头像 shader 掩码；scripts/check.ps1 20 步全绿；check_network.ps1 PASS。
+- 视觉：capture_dropdown_ui.gd 与 capture_voice_ui.gd 真实GPU截图成功。与基线差异已归因——下拉图差异为一整行悬停像素（基线无 hover），语音图差异全部落在左侧 Live2D 头像区且同代码两次运行同样出现，属运行态随机性，非本片回归。
+- 作者自审：diff 仅含主题/材质资源、make_theme 薄壳化、project.godot 增默认主题与测试自身修正，无视图节点树改动、无顺手改进；原有 project.godot 编辑器修改与两个 addons DLL 删除未纳入提交。
+- 未验证范围：check_accounts.ps1 与 check_features.ps1 因本机缺 fastapi 未运行（环境缺口，非代码失败）；未做人工多 DPI 复核；未推送、未开远程 PR。
