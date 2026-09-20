@@ -11,12 +11,14 @@ from typing import Callable
 
 from .output import Redactor
 from .media import DefaultPlaybackBackend, PlaybackBackend, PlaybackResult, read_wav_format
+from ..utils import image_rules
 from ..session import (
     AggregatedReply,
     HeadlessSession,
     ReplyTimeoutError,
     SessionClosedError,
     SessionConnectionError,
+    SessionImageError,
     SessionNotReadyError,
     SessionReadyTimeout,
     SessionState,
@@ -59,6 +61,7 @@ class ActionExecutor:
         self._environ = os.environ if environ is None else environ
         self._session: HeadlessSession | None = None
         self._playback = playback_backend or DefaultPlaybackBackend()
+        self._image_selection: dict | None = None
         self.session_id = session_id or f"s-{uuid.uuid4().hex[:12]}"
         self.redactor = Redactor()
 
@@ -120,6 +123,9 @@ class ActionExecutor:
             "reply.wait": self._wait_reply,
             "reply.read": self._read_reply,
             "audio.replay": self._replay_audio,
+            "image.select": self._select_image,
+            "image.cancel": self._cancel_image,
+            "image.send": self._send_image,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -172,20 +178,7 @@ class ActionExecutor:
             client_msg_id=request_id,
             ack_timeout=_number(params, "ack_timeout", 10.0),
         )
-        if not ack.get("ok"):
-            message = str(ack.get("error") or "server rejected input")
-            if "timeout" in message.lower():
-                raise _ActionFailure(
-                    ExitCode.TIMEOUT, "TIMEOUT", message, "timeout",
-                    correlation_id=request_id,
-                )
-            raise _ActionFailure(
-                ExitCode.ASSERTION_FAILED,
-                "ACK_REJECTED",
-                message,
-                "assertion",
-                correlation_id=request_id,
-            )
+        self._ensure_positive_ack(ack, correlation_id=request_id)
         return {"ack": True}, request_id
 
     def _wait_reply(self, params: dict) -> tuple[dict, str]:
@@ -208,6 +201,115 @@ class ActionExecutor:
                 correlation_id=reply_uuid,
             )
         return self._reply_result(reply, params), reply_uuid
+
+    def _ensure_positive_ack(self, ack: dict, *, correlation_id: str | None) -> None:
+        if ack.get("ok"):
+            return
+        message = str(ack.get("error") or "server rejected input")
+        if "timeout" in message.lower():
+            raise _ActionFailure(
+                ExitCode.TIMEOUT, "TIMEOUT", message, "timeout",
+                correlation_id=correlation_id,
+            )
+        raise _ActionFailure(
+            ExitCode.ASSERTION_FAILED,
+            "ACK_REJECTED",
+            message,
+            "assertion",
+            correlation_id=correlation_id,
+        )
+
+    def _select_image(self, params: dict) -> tuple[dict, None]:
+        session = self._require_session()
+        path_str = _required_string(params, "path")
+        ack = session.select_image(ack_timeout=_number(params, "ack_timeout", 5.0))
+        self._image_selection = None
+        self._ensure_positive_ack(ack, correlation_id=None)
+        path = self._validate_image_path(path_str)
+        self._image_selection = {
+            "path": str(path),
+            "mime_type": image_rules.detect_image_mime(str(path)),
+            "byte_count": path.stat().st_size,
+        }
+        return {
+            "selected": True,
+            "reference": path.name,
+            "mime_type": self._image_selection["mime_type"],
+            "byte_count": self._image_selection["byte_count"],
+        }, None
+
+    def _cancel_image(self, params: dict) -> tuple[dict, None]:
+        session = self._require_session()
+        ack = session.cancel_image_selection(ack_timeout=_number(params, "ack_timeout", 5.0))
+        self._ensure_positive_ack(ack, correlation_id=None)
+        self._image_selection = None
+        return {"selected": False}, None
+
+    def _send_image(self, params: dict) -> tuple[dict, str]:
+        session = self._require_session()
+        explicit = params.get("path")
+        if explicit is not None:
+            path = self._validate_image_path(_required_string(params, "path"))
+        elif self._image_selection is not None:
+            path = Path(self._image_selection["path"])
+        else:
+            raise _ActionFailure(
+                ExitCode.INPUT_ERROR,
+                "IMAGE_NOT_SELECTED",
+                "no image selected and no explicit path provided",
+                "input",
+            )
+        request_id = params.get("client_msg_id") or f"c-{uuid.uuid4().hex[:12]}"
+        if not isinstance(request_id, str):
+            raise ValueError("client_msg_id must be a string")
+        try:
+            ack = session.send_image(
+                str(path),
+                client_msg_id=request_id,
+                ack_timeout=_number(params, "ack_timeout", 10.0),
+            )
+        except SessionImageError as exc:
+            raise _ActionFailure(
+                ExitCode.INPUT_ERROR,
+                "IMAGE_FILE_UNREADABLE",
+                str(exc),
+                "input",
+            ) from exc
+        self._ensure_positive_ack(ack, correlation_id=request_id)
+        return {"ack": True}, request_id
+
+    def _validate_image_path(self, path_str: str) -> Path:
+        path = Path(path_str)
+        if not path.is_file():
+            raise _ActionFailure(
+                ExitCode.INPUT_ERROR,
+                "IMAGE_FILE_NOT_FOUND",
+                f"image file not found: {path.name}",
+                "input",
+            )
+        if path.stat().st_size == 0:
+            raise _ActionFailure(
+                ExitCode.INPUT_ERROR,
+                "IMAGE_FILE_EMPTY",
+                f"image file is empty: {path.name}",
+                "input",
+            )
+        mime_type = image_rules.detect_image_mime(str(path))
+        if mime_type is None or mime_type not in image_rules.ALLOWED_IMAGE_MIME_TYPES:
+            raise _ActionFailure(
+                ExitCode.INPUT_ERROR,
+                "IMAGE_TYPE_UNSUPPORTED",
+                f"unsupported image type: {path.name}",
+                "input",
+            )
+        if path.stat().st_size > image_rules.MAX_IMAGE_BYTES:
+            raise _ActionFailure(
+                ExitCode.INPUT_ERROR,
+                "IMAGE_TOO_LARGE",
+                f"image file too large: {path.name}",
+                "input",
+            )
+        return path
 
     def _replay_audio(self, params: dict) -> tuple[dict, str]:
         reply_uuid = _required_string(params, "reply_uuid")

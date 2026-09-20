@@ -39,3 +39,11 @@
 - commit 或 PR：分支 `feat/cli-e2e-s4-media-replay`：`85dc0cb`（SPEC）/ `5d0bbac`（Red）/ `3dd9eb2`（Green）。
 - 验证及结果：focused `tests/test_cli_media_replay.py` → 11 passed；S3+日志回归 → 19 passed；client 回归 → 96 passed（排除 3 个既有收集失败文件）。
 - 未验证范围：真实音频设备播放与"开始并正常结束"（external，需设备前置）、播放被中断的真实路径、非 WAV 格式支持。
+
+### 2026-09-20 S5 图片动作
+
+- 交付行为：`image.select` / `image.cancel` / `image.send` 状态机（选择信号先发、本地校验后记录、校验或 ACK 失败清空选择、取消后不可误发、显式路径覆盖当前选择、失败不自动改 ID 重发）；新增 `client/src/utils/image_rules.py`（镜像服务端媒体规则，含防漂移测试）与 `client/src/utils/image_encoding.py`（自 MessageProcessor 抽取共用编码管道，MIME 映射补齐 bmp/webp）；门面增补 `select_image` / `cancel_image_selection` / `send_image`（`SessionImageError`）。
+- interface spec：`docs/项目说明/项目架构与接口（spec）/接口文档/cli/README.md` §1.7。
+- commit 或 PR：分支 `feat/cli-e2e-s5-image-actions`：`dcbdbd5`（SPEC）/ `47b5af4`（Red）/ `6cc9d8a`（Green）。
+- 验证及结果：focused `tests/test_cli_image_actions.py` + `tests/test_image_rules_mirror.py` → 19 passed；client 回归 → 115 passed（排除 3 个既有收集失败文件）。
+- 未验证范围：真实服务端图片接纳与回复链路（依赖 S1 门槛与部署一致性）、图片内容解码（校验按扩展名与大小）、大文件真实发送时延、GUI 图片发送回归（编码管道已抽取共用，由既有测试与本次回归保护）。
