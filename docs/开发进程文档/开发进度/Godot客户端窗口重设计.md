@@ -68,3 +68,12 @@
 - 证据：[主界面](../../../client_godot/artifacts/window-redesign/agentluo-redesign-chat.png)、[发布浮层](../../../client_godot/artifacts/window-redesign/agentluo-011-dynamics-publish.png)、[最小设置](../../../client_godot/artifacts/window-redesign/agentluo-redesign-settings-minimum.png)、[本地验证汇总](../../../client_godot/artifacts/window-redesign/verification.md)。截图/JSON/检查日志保存在Git忽略的artifacts/window-redesign，源代码中保留可复运行的测试。
 - 作者自审：已核查场景/主题资源、行为diff、测试证据与文档一致；保留场景节点和行为脚本分离，未改服务端协议、release.json或旧发布包。本轮只有本地提交，无push/PR；作者自审不替代他人审核。
 - 未验证：Windows10、真实系统DPI切换、跨显示器及显示器移除、Windows贴靠动作、集显、长期性能/内存、真实中文输入法组合键、公共服务和安装发布包。模拟显示器矩形/内容缩放/截图不替代这些实机验收。
+
+### 2026-09-20 按既有规则交付0.1.2便携包
+
+- 用户在实现完成后要求打包；沿用已批准场景化版本0.1.2，将唯一版本来源release.json从0.1.1设为0.1.2。既有版本化构建SPEC满足，无公开接口变更；构建配置没有有意义的运行时Red，记为不适用，未修改打包脚本。
+- 执行scripts/build.ps1 -Package，Godot 4.7.1导入、Windows x64 release导出和导出EXE headless启动均PASS。生成[agentluo-0.1.2.zip](../../../client_godot/artifacts/agentluo-0.1.2.zip)，43,190,464字节（约41.19MiB），唯一顶层agentluo-0.1.2；包含EXE、PCK、两份原生DLL、release.json、PREVIEW.md和许可证，共14文件。0.1.0/0.1.1旧包保留。
+- tests/verify_release_archive.py验证ZIP CRC、版本命名、完整文件集合及每个文件SHA-256全部PASS；DLL与dependencies.lock.json一致。ZIP SHA-256：31da6c744b514f2236389e1a397d9e849b1dc144b31e8a5e72e3427ee247e9dc，旁附.zip.sha256。
+- 从ZIP解压至含中文和空格的临时路径，使用隔离APPDATA实际启动导出EXE；登录页与离线角色样板GPU截图成功，标题为agentluo 0.1.2。样板按墙钟运行31.2秒后通过原生WM_CLOSE正常退出，退出码0且无引擎错误。先前按--quit-after计数的短运行不计为30秒证据。
+- 证据保存在client_godot/artifacts/package-0.1.2（login.png、preview.png、validation.json、archive-validation.txt及运行日志）。未读取现有账号配置、未联调公共服务、未制作安装器或上传发布；Windows10、真实DPI、多屏、集显和长期性能边界仍沿用上条记录。
+- 作者自审：版本与实际ZIP/标题一致，包内字节与导出目录一致，旧包未覆盖；本次仅本地版本及交付记录提交。
