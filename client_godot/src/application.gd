@@ -13,6 +13,7 @@ const Audio = preload("res://src/media/reply_audio.gd")
 var _session: Node
 var _chat: Node
 var _chat_view: Control
+@onready var _chrome = %Chrome
 @onready var _split: HSplitContainer = %Split
 @onready var _center: CenterContainer = %Center
 @onready var _account_form = %AccountForm
@@ -40,11 +41,17 @@ func setup(account_session: Node = null, layout_path: String = "user://window_la
 
 func _ready() -> void:
 	get_window().title = preload("res://src/release_info.gd").title()
+	get_window().min_size = Vector2i(480,640)
+	get_window().size = Vector2i(660,800)
+	_chrome.configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),"compact")
 	if "--preview" in OS.get_cmdline_user_args():
 		_log_problem.queue_free()
 		_exit_dialog.queue_free()
 		_resize_window(Vector2i(1200, 800), Vector2i(960, 640))
-		add_child(load("res://scenes/preview/chat_preview.tscn").instantiate())
+		var preview = load("res://scenes/preview/chat_preview.tscn").instantiate()
+		add_child(preview)
+		preview.offset_top = 44
+		move_child(_chrome,get_child_count()-1)
 		return
 	_resize_window(Vector2i(660, 800), Vector2i(480, 640))
 	_log = Log.new("user://logs" if _layout_path == "user://window_layout.cfg" else _layout_path.get_base_dir().path_join("logs"))
@@ -55,6 +62,7 @@ func _ready() -> void:
 	_log_window = preload("res://scenes/ui/log_window.tscn").instantiate() as Window
 	_log_window.setup(_log)
 	add_child(_log_window)
+	_log_window.get_node("%Chrome").configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),"logs")
 	get_tree().auto_accept_quit = false
 	get_window().close_requested.connect(func(): _request_close("exit"))
 	_exit_dialog.confirmed.connect(func(): _finish_close(_exit_action))
@@ -182,17 +190,7 @@ func _resize_split() -> void:
 		_split.split_offset = roundi(size.x * _ratio)
 
 func _resize_window(target: Vector2i, minimum: Vector2i) -> void:
-	var window := get_window()
-	var center := window.position + window.size / 2
-	window.mode = Window.MODE_WINDOWED
-	window.min_size = minimum
-	window.size = target
-	if DisplayServer.get_name() != "headless":
-		var usable := DisplayServer.screen_get_usable_rect(window.current_screen)
-		var origin := center - window.size / 2
-		origin.x = clampi(origin.x, usable.position.x, maxi(usable.position.x, usable.end.x - window.size.x))
-		origin.y = clampi(origin.y, usable.position.y, maxi(usable.position.y, usable.end.y - window.size.y))
-		window.position = origin
+	_chrome.select_layout("expanded" if _expanded or "--preview" in OS.get_cmdline_user_args() else "compact",target,minimum)
 
 func _exit_tree() -> void:
 	if _engine_log != null:
@@ -223,6 +221,7 @@ func _open_settings(kind: String) -> void:
 		window.setup(_dynamics,_layout_path.get_base_dir().path_join("dynamics-window.cfg"))
 	_windows[kind] = window
 	add_child(window)
+	window.get_node("%Chrome").configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),kind)
 	window.tree_exited.connect(func():
 		if _windows.get(kind) == window:
 			_windows.erase(kind))

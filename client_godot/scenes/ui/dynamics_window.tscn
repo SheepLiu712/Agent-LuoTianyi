@@ -1,7 +1,9 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://src/ui/dynamics_window.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 content_margin_left = 16.0
@@ -21,6 +23,7 @@ corner_radius_top_right = 12
 corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
 
+
 [node name="DynamicsWindow" type="Window"]
 title = "天依的动态"
 size = Vector2i(1000, 780)
@@ -31,6 +34,7 @@ theme = ExtResource("2_theme")
 script = ExtResource("1_script")
 
 [node name="Panel" type="PanelContainer" parent="."]
+offset_top = 44.0
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -95,3 +99,6 @@ unique_name_in_owner = true
 text = "选择一条动态"
 horizontal_alignment = 1
 vertical_alignment = 1
+
+[node name="Chrome" parent="." instance=ExtResource("WindowChrome")]
+unique_name_in_owner = true

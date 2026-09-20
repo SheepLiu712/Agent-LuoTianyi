@@ -16,7 +16,6 @@ func _ready() -> void:
 		else:
 			queue_free())
 func open() -> void:
-	show()
-	grab_focus()
+	%Chrome.open_window()
 func is_dirty() -> bool:
 	return false

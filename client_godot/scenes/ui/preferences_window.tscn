@@ -1,8 +1,11 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://src/ui/preferences_window.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
+
+
+[ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
 
 [node name="PreferencesWindow" type="Window"]
 title = "相处模式"
@@ -12,7 +15,10 @@ visible = false
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
 
+force_native = true
+
 [node name="Margin" type="MarginContainer" parent="."]
+offset_top = 44.0
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -97,3 +103,5 @@ text = "重新加载"
 unique_name_in_owner = true
 theme_type_variation = &"PrimaryButton"
 text = "保存相处模式"
+[node name="Chrome" parent="." instance=ExtResource("WindowChrome")]
+unique_name_in_owner = true

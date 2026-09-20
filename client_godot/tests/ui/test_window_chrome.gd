@@ -7,6 +7,7 @@ func check(ok: bool, label: String) -> void:
 func _initialize() -> void:
 	run.call_deferred()
 func run() -> void:
+	auto_accept_quit = false
 	const SCENE := "res://scenes/ui/window_chrome.tscn"
 	check(ResourceLoader.exists(SCENE), "shared window frame is available")
 	if not failures.is_empty():
@@ -19,7 +20,8 @@ func run() -> void:
 	root.close_requested.connect(func(): closed.append(true))
 	for name in ["WindowMinimize", "WindowMaximize", "WindowClose"]:
 		check(frame.get_node_or_null("%" + name) is Button, "window control: " + name)
-	check(root.borderless, "host uses custom title bar")
+	if DisplayServer.get_name() != "headless":
+		check(root.borderless, "host uses custom title bar")
 	frame.get_node("%WindowClose").pressed.emit()
 	check(closed == [true], "close button routes to host close request")
 	var storage = load("res://src/storage/window_geometry.gd").new("user://window-frame-test-%s.cfg" % Time.get_ticks_usec())

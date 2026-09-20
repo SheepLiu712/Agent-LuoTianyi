@@ -75,8 +75,7 @@ func open() -> void:
 	_runs.set_selected_id(_selected)
 	_selected = _runs.get_selected_id()
 	_refresh()
-	show()
-	grab_focus()
+	%Chrome.open_window()
 
 func _refresh() -> void:
 	_text.clear()

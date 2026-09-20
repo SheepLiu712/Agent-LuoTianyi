@@ -1,7 +1,9 @@
-[gd_scene load_steps=4 format=3]
+[gd_scene load_steps=5 format=3]
 
 [ext_resource type="Script" path="res://src/ui/publish_window.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 content_margin_left = 18.0
@@ -9,6 +11,7 @@ content_margin_top = 18.0
 content_margin_right = 18.0
 content_margin_bottom = 18.0
 bg_color = Color(0.9607843, 0.972549, 0.9843137, 1)
+
 
 [node name="PublishWindow" type="Window"]
 title = "发布动态"
@@ -21,6 +24,7 @@ theme = ExtResource("2_theme")
 script = ExtResource("1_script")
 
 [node name="Panel" type="PanelContainer" parent="."]
+offset_top = 44.0
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -50,3 +54,5 @@ autowrap_mode = 3
 unique_name_in_owner = true
 theme_type_variation = &"PrimaryButton"
 text = "发布文字动态"
+[node name="Chrome" parent="." instance=ExtResource("WindowChrome")]
+unique_name_in_owner = true
