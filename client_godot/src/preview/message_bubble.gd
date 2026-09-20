@@ -35,6 +35,8 @@ func _ready() -> void:
 func configure(message: Dictionary, image_texture: Texture2D = null) -> void:
 	_system_message = message.role == "system"
 	if _system_message:
+		_avatar.hide()
+		_body.hide()
 		_system_label.text = message.text
 		_system_label.show()
 		return
