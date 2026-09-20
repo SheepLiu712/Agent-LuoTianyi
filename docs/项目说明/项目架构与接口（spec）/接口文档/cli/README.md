@@ -175,6 +175,7 @@
 - `INVALID_INPUT`：`values` 缺失或非对象、`replace` 非布尔。
 - `ACK_REJECTED` / `TIMEOUT` 沿用 S3 语义（覆盖接口拒绝）。
 - 门面增补：`HeadlessSession.get_preferences()`、`overwrite_preferences(preferences)`。
+- 响应归一化（S8b 修复，真实链路首测发现）：门面将覆盖接口响应归一化为 `{"ok": bool, "error": str|None}`。真实服务端成功返回 `{"status": "success"}`（无 `ok` 字段），修复前 CLI 会将其误判为 `ACK_REJECTED`（写入实际已生效）；失败时保留服务端/网络错误消息（含 timeout 词样时沿用 `TIMEOUT` 映射）。
 - 真实链路依赖受测部署可达；external 账号数据由夹具管理（计划 §5.5）。
 
 #### 1.11 场景引擎与报告（S9 交付）
