@@ -78,6 +78,7 @@ func _run() -> void:
 	check(root.size == Vector2i(1200, 800) and root.min_size == Vector2i(960, 640), "successful login expands window")
 	var composers: Array = app.find_children("*", "TextEdit", true, false)
 	check(composers.size() == 1 and composers[0].is_visible_in_tree(), "expanded window shows chat")
+	check(app.find_children("Driver", "", true, false).size() == 1, "expanded window renders avatar panel from scene")
 	check(not field(app, "服务器地址").is_visible_in_tree(), "expanded window hides account form")
 	var volumes: Array = app.find_children("*", "HSlider", true, false)
 	check(volumes.size() == 1 and volumes[0].value == 1.0, "invalid saved volume uses automatic playback default")

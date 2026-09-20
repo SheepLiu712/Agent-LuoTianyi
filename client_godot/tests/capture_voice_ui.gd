@@ -4,7 +4,7 @@ const Transport = preload("res://src/network/websocket_transport.gd")
 const Audio = preload("res://src/media/reply_audio.gd")
 const Cache = preload("res://src/storage/audio_cache.gd")
 const VIEW_SCENE := "res://scenes/ui/chat_view.tscn"
-const Avatar = preload("res://src/avatar/avatar_panel.gd")
+const AVATAR_SCENE := "res://scenes/avatar/avatar_panel.tscn"
 var failures: Array[String] = []
 
 func _initialize() -> void:
@@ -25,7 +25,12 @@ func _run() -> void:
 	root.add_child(split)
 	split.theme = preload("res://src/preview/preview_style.gd").make_theme()
 	split.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var avatar := Avatar.new()
+	if not ResourceLoader.exists(AVATAR_SCENE):
+		failures.append("avatar panel scene exists")
+		print(failures)
+		quit(1)
+		return
+	var avatar = load(AVATAR_SCENE).instantiate()
 	split.add_child(avatar)
 	avatar.custom_minimum_size.x = 290
 	if not ResourceLoader.exists(VIEW_SCENE):

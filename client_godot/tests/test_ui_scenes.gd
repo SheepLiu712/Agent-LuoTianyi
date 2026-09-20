@@ -362,6 +362,33 @@ const SCENES := {
 		},
 		"styleboxes": {"Margin/Column/CommentDraft": {"normal": [Color("f5f7fa"),8,12]},"Margin/Column/ReplyBox/ReplyDraft": {"normal": [Color("f5f7fa"),8,12]}},
 	},
+	"res://scenes/avatar/avatar_panel.tscn": {
+		"root": "AvatarPanel",
+		"type": "Control",
+		"script": "res://src/avatar/avatar_panel.gd",
+		"setup": "",
+		"unique": ["Driver","Error","Reset"],
+		"scripts": {"Driver": "res://src/avatar/avatar_driver.gd"},
+		"properties": {
+			"": {"clip_contents": true},
+			"Background": {
+				"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,
+				"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_COVERED,
+				"mouse_filter": Control.MOUSE_FILTER_IGNORE,
+			},
+			"Veil": {"color": Color(0.96,0.98,1.0,0.18),"mouse_filter": Control.MOUSE_FILTER_IGNORE},
+			"Error": {"position": Vector2(20,80),"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"mouse_filter": Control.MOUSE_FILTER_IGNORE},
+			"Reset": {"text": "重置位置","tooltip_text": "滚轮缩放 · 右键拖动"},
+		},
+	},
+	"res://scenes/avatar/avatar_preview.tscn": {
+		"root": "AvatarPreview",
+		"type": "Control",
+		"script": "res://src/avatar/avatar_preview.gd",
+		"setup": "",
+		"unique": ["Driver","Error","Reset"],
+		"properties": {"": {"clip_contents": true}},
+	},
 }
 var failures: Array[String] = []
 var _temp := ""
@@ -409,6 +436,10 @@ func check_scene(path: String,spec: Dictionary) -> void:
 		var owned := find_unique(instance,instance,name)
 		check(owned != null,"node %%%s is unique in scene owner: %s"%[name,path])
 		check(instance.get_node_or_null(NodePath("%"+name)) == owned,"%%%s resolves through unique name: %s"%[name,path])
+	for node_path: String in spec.get("scripts",{}):
+		var node: Node = instance if node_path.is_empty() else instance.get_node_or_null(NodePath(node_path))
+		var child: Script = node.get_script() if node != null else null
+		check(child != null and child.resource_path == spec["scripts"][node_path],"node %s script is %s: %s"%[node_path,spec["scripts"][node_path],path])
 	if spec.get("inject_layout",false):
 		instance.callv(spec["setup"],[null,_temp.path_join("window.cfg")])
 	root.add_child(instance)
