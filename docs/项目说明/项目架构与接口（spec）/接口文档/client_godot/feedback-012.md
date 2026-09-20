@@ -58,6 +58,8 @@ ChatView.attachment_cleared通知Application在移除/发送接受后调用Image
 
 用户明确选择恢复桌面系统标题栏及最小化/最大化/关闭，应用内使用Godot圆角。本条替代window-redesign.md的自绘标题栏/八边控件要求。WindowChrome保留几何持久化、布局切换、open_window和关闭保存协调；删除被替代的自绘标题栏/边缘缩放节点与输入脚本，由系统处理拖动、缩放、双击最大化、Alt+F4。宿主原有close_requested草稿规则不变。各界面移除为自绘标题栏预留的48px空白。
 
+恢复/重新打开普通窗口后，用Godot包含系统装饰的窗口矩形校正到当前显示器可用范围，避免旧版客户端区域坐标0把系统标题栏留在屏幕上方；不在用户拖动过程中反复改位置，最大化/最小化不参与此修正。几何存储仍使用Godot客户端位置与尺寸。
+
 原Python MainWindow为普通QWidget，外轮廓交由系统；此处同样不添加DWM扩展或SetWindowRgn。内部圆角采用用户文章 https://blog.csdn.net/datakimiko/article/details/156681420 的Panel+StyleBoxFlat方式，但节点/资源固定写在.tscn/.tres，禁止文章示例的Panel.new、_draw和逐像素纹理生成。
 
 UnifiedDropdown的PopupPanel改为嵌入所属Viewport，透明清屏背景，圆角由StyleBoxFlat绘制；不使用遮罩、裁切Shader或原生窗口区域。弹层按所属Viewport坐标及可见范围定位，长列表滚动、键盘/Esc/外部点击、移动/最小化收起规则保留。此Control/主题路径可用于手机界面，不依赖Windows圆角API；未执行移动端导出或硬件验收。
