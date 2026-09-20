@@ -30,3 +30,12 @@ PreferencesPage.setup(controller)、is_dirty()、save_changes()保存并读取�
 ## 动态内发布浮层
 
 `publish_overlay.tscn` 取代publish_window.tscn；根Control挂publish_overlay.gd，固定遮罩、居中卡片、PublishDraft/PublishButton/状态/取消/关闭及DiscardDialog均为场景节点。setup(controller)、published(id)、is_dirty()、open()和close_requested信号保留业务调用约定；open聚焦草稿；关闭/取消/Esc同一路径，非空或写入中需放弃确认，点击遮罩不关闭。取消确认保留文字和浮层；发布失败保留正文、成功发published并释放浮层。DynamicsWindow仍是独立原生窗口，只维护一个浮层，不新增原生发布窗口；关闭动态的dirty包含发布和所有已打开评论页，确认后释放整个子树。
+
+
+## 全局图片窗口与来源归属
+
+`ImagePresenter(geometry_path)` 为Application/离线入口各自唯一的非可见Node服务；`open_image(source:Window, provider:Callable, confirm:Callable=Callable()) -> Window` 从image_window.tscn创建或复用一个原生Window，provider每次调用返回Texture2D或null（null显示错误与重试），可选confirm只用于离线待发送图片，用户确认时返回bool，false保留预览、true关闭。不得后台自动发送。`close()`清空纹理/回调并隐藏。
+
+ImageWindow.present(source,provider,confirm)把窗口转属当前source；重用时换图重置适应窗口，保留已保存窗口几何。所有图片控件、错误/重试、适应/原始比例、缩放、关闭和离线确认按钮在场景里。窗口跟随当前source最小化/恢复；关闭来源销毁其图片窗，旧来源关闭不影响已转属图片；显式关闭回到来源窗口及此前焦点，不修改阅读位置。只保存窗口几何，不持久化图片来源/草稿/回调。
+
+ChatView新增image_requested(provider)信号，图片UI只向Application请求展示；失败时原图重试调用原会话图片接口。Application注入唯一presenter并在退出账号时清空。离线样板也改用同一ImagePresenter契约，其模拟图片确认继续保留失败反馈；旧image_overlay脚本及场景移除。
