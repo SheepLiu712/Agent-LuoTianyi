@@ -1,5 +1,9 @@
 extends MarginContainer
 signal image_requested(provider: Callable)
+signal attachment_requested(provider: Callable, confirm: Callable)
+signal attachment_cleared
+const Attachment = preload("res://src/media/image_attachment.gd")
+var _attachment: Dictionary = {}
 @onready var _margin: MarginContainer = %Margin
 @onready var _status: Label = %Status
 @onready var _history_status: Label = %HistoryStatus
@@ -22,7 +26,7 @@ func setup(session: Node) -> void:
 		_initialize()
 
 func is_dirty() -> bool:
-	return not _input.text.strip_edges().is_empty()
+	return not _input.text.strip_edges().is_empty() or not _attachment.is_empty()
 
 func _ready() -> void:
 	if _session == null:
@@ -42,6 +46,16 @@ func _initialize() -> void:
 	_latest.pressed.connect(_to_latest)
 	_unread.pressed.connect(_jump_reading)
 	_input.send_requested.connect(_send)
+	_input.image_pasted.connect(func(image):
+		_session.set_image_selecting(true)
+		_attach(Attachment.from_image(image)))
+	%ImageButton.pressed.connect(func():
+		_session.set_image_selecting(true)
+		%ImagePicker.popup_centered())
+	%ImagePicker.file_selected.connect(func(path): _attach(Attachment.from_file(path)))
+	%ImagePicker.canceled.connect(func(): _session.set_image_selecting(false))
+	%PreviewImage.pressed.connect(_preview_attachment)
+	%RemoveImage.pressed.connect(func(): _clear_attachment(true))
 	_input.text_changed.connect(func():
 		var lines: int = _input.get_line_count()
 		for line in _input.get_line_count():
@@ -61,8 +75,44 @@ func _initialize() -> void:
 
 func _send() -> void:
 	_session.note_read_interaction()
+	if not _attachment.is_empty() and not _confirm_attachment(null): return
 	if not _session.send_text(_input.text).is_empty():
 		_input.clear()
+
+func _attach(result: Dictionary) -> void:
+	%ImageStatus.show()
+	if not result.ok:
+		%ImageStatus.text = {"IMAGE_TOO_LARGE":"图片过大，请选择小于 6 MiB 的图片。", "IMAGE_DIMENSIONS":"图片尺寸过大（最多8192像素、1600万像素）。", "IMAGE_FORMAT":"支持 PNG、JPEG、WebP 和 BMP 图片。", "IMAGE_READ_FAILED":"图片无法读取，请检查文件后重试。"}.get(result.code,"图片格式无效或文件已损坏。")
+		_session.set_image_selecting(false)
+		return
+	_attachment = result
+	%AttachmentThumbnail.texture = result.texture
+	%AttachmentBar.show()
+	%ImageStatus.text = "图片待发送；关闭预览后仍保留，可查看或移除。"
+	_preview_attachment()
+
+func _preview_attachment() -> void:
+	if _attachment.is_empty(): return
+	var texture: Texture2D = _attachment.texture
+	attachment_requested.emit(func(): return texture, _confirm_attachment)
+
+func _confirm_attachment(_texture: Texture2D) -> bool:
+	if _attachment.is_empty(): return false
+	var id: String = _session.send_image(_attachment.bytes, _attachment.mime)
+	if id.is_empty():
+		%ImageStatus.text = "图片暂时无法发送，内容已保留；请检查连接后重试。"
+		return false
+	_clear_attachment(false)
+	return true
+
+func _clear_attachment(canceled: bool) -> void:
+	_attachment.clear()
+	%AttachmentThumbnail.texture = null
+	%AttachmentBar.hide()
+	%ImageStatus.text = ""
+	%ImageStatus.hide()
+	if canceled: _session.set_image_selecting(false)
+	attachment_cleared.emit()
 
 func _refresh() -> void:
 	var messages: Array[Dictionary] = _session.get_messages()

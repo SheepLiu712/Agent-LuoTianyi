@@ -113,6 +113,35 @@ tooltip_text = "回复语音自动播放；拖到最左侧静音"
 unique_name_in_owner = true
 text = "停止语音"
 
+[node name="AttachmentBar" type="HBoxContainer" parent="Margin/Column"]
+unique_name_in_owner = true
+visible = false
+theme_override_constants/separation = 8
+
+[node name="AttachmentThumbnail" type="TextureRect" parent="Margin/Column/AttachmentBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(48,48)
+expand_mode = 1
+stretch_mode = 5
+
+[node name="AttachmentLabel" type="Label" parent="Margin/Column/AttachmentBar"]
+text = "待发送图片"
+size_flags_horizontal = 3
+
+[node name="PreviewImage" type="Button" parent="Margin/Column/AttachmentBar"]
+unique_name_in_owner = true
+text = "查看"
+
+[node name="RemoveImage" type="Button" parent="Margin/Column/AttachmentBar"]
+unique_name_in_owner = true
+text = "移除"
+
+[node name="ImageStatus" type="Label" parent="Margin/Column"]
+unique_name_in_owner = true
+visible = false
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
 [node name="Input" type="TextEdit" parent="Margin/Column"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 96)
@@ -121,6 +150,11 @@ wrap_mode = 1
 script = ExtResource("5_composer")
 
 [node name="Footer" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="ImageButton" type="Button" parent="Margin/Column/Footer"]
+unique_name_in_owner = true
+text = "＋ 图片"
+tooltip_text = "选择图片，也可以在输入框中 Ctrl+V 粘贴"
 
 [node name="Hint" type="Label" parent="Margin/Column/Footer"]
 size_flags_horizontal = 3
@@ -133,3 +167,11 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(96, 0)
 theme_type_variation = &"PrimaryButton"
 text = "发送  ↑"
+
+[node name="ImagePicker" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "选择要发送的图片"
+file_mode = 0
+access = 2
+use_native_dialog = true
+filters = PackedStringArray("*.png,*.jpg,*.jpeg,*.webp,*.bmp ; 图片")

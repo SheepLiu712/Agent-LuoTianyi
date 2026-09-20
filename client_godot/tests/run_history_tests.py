@@ -3,7 +3,7 @@ import argparse, asyncio, json, os, struct, zlib, base64
 from pathlib import Path
 from aiohttp import web
 PROJECT = Path(__file__).resolve().parents[1]
-async def run(godot, script):
+async def run(godot, script, gpu=False):
     errors, requests, opened = [], {}, set()
     image_calls = {}
     def chunk(tag, data):
@@ -78,7 +78,7 @@ async def run(godot, script):
     await site.start()
     port=site._server.sockets[0].getsockname()[1]
     try:
-        proc=await asyncio.create_subprocess_exec(godot,'--headless','--path',str(PROJECT),'--script',script,env={**os.environ,'GODOT_TEST_SERVER':f'http://127.0.0.1:{port}'},stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+        proc=await asyncio.create_subprocess_exec(godot,*([] if gpu else ['--headless']),'--path',str(PROJECT),'--script',script,env={**os.environ,'GODOT_TEST_SERVER':f'http://127.0.0.1:{port}'},stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
         try: out,err=await asyncio.wait_for(proc.communicate(),40)
         except asyncio.TimeoutError:
             proc.kill(); await proc.wait(); raise
@@ -95,4 +95,5 @@ async def run(godot, script):
     finally: await runner.cleanup()
 if __name__=='__main__':
     parser=argparse.ArgumentParser(); parser.add_argument('--godot',required=True); parser.add_argument('--script',default='res://tests/test_history_sync.gd')
-    args=parser.parse_args(); asyncio.run(run(args.godot,args.script))
+    parser.add_argument('--gpu', action='store_true')
+    args=parser.parse_args(); asyncio.run(run(args.godot,args.script,args.gpu))

@@ -18,5 +18,8 @@ func open_image(source: Window, provider: Callable, confirm: Callable = Callable
 	return _window
 func close() -> void:
 	if is_instance_valid(_window): _window.close_image()
+func close_confirmation(source: Window) -> void:
+	if is_instance_valid(_window) and _window.get_parent() == source and _window.get_node("%ConfirmImage").visible:
+		_window.close_requested.emit()
 func _exit_tree() -> void:
 	if is_instance_valid(_window): _window.queue_free()

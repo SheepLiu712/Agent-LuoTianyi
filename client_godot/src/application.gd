@@ -168,6 +168,8 @@ func _account_changed(state: Dictionary) -> void:
 			_chat_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			_split.add_child(_chat_view)
 			_chat_view.image_requested.connect(func(provider): _images_presenter.open_image(get_window(),provider))
+			_chat_view.attachment_requested.connect(func(provider,confirm): _images_presenter.open_image(get_window(),provider,confirm))
+			_chat_view.attachment_cleared.connect(func(): _images_presenter.close_confirmation(get_window()))
 		if not _expanded:
 			_expanded = true
 			_split.dragger_visibility = SplitContainer.DRAGGER_VISIBLE

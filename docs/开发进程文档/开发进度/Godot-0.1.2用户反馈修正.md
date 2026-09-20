@@ -38,3 +38,10 @@
 - SPEC fcdbb46；静态样式/导出配置的Red不适用，Green为本记录提交。复制资源与client/res/gui原SVG/ICO的SHA-256一致；Godot导入、临时release导出及导出启动均PASS。直接读取导出EXE的PE图标资源，6帧全部与原ICO图片数据逐字节一致。
 - GPU capture_release_ui全流程PASS，新主界面截图已核查导航对齐/配色和标题栏原图标。临时导出位于隔离验证目录，未覆盖现有0.1.2交付包。
 - 作者自审：只变更Godot场景/主题和图标配置，无脚本创建UI；原项目图标文件不修改。
+
+## 2026-09-20 正式图片发送
+
+- 选图按钮/原生文件选择器、Ctrl+V、附件缩略图/查看/移除均接入正式ChatView，待发图片参与退出草稿保护；全局图片窗显式确认发送，关闭仍保留附件。主发送键先接受图片再发送文字，失败保留未接受内容。原图预览去掉离线固定文案。
+- 校验PNG/JPEG/WebP、BMP转PNG及剪贴板PNG，限制文件/协议包与解码像素；通过原user_image及瞬时选择/取消事件发送。图片与文字共用历史边界等待及原可靠队列，ACK保留稳定本地ID；图片接受发送后存入现有按账号图片缓存，未提交附件不落盘。
+- SPEC 96accf8、a8da89e；Red 6b42bc7；Green为本记录提交。test_image_attachment通过格式/文件/大小/MIME/像素校验；test_image_sending headless/GPU通过真实协议、历史屏障、图片回执、本地图预览、粘贴/移除/确认、失败留稿与退出清理。test_history_sync、test_history_media、test_ui_scenes、test_preview_input及GPU test_image_window均PASS。
+- 作者自审：沿用现有协议和outbox，不把选择成功当送达；不发送本机绝对文件路径，缓存缩略图仍有24张上限。当前图片格式范围已在使用说明明确，未验证公共服务真实图片处理或计费VLM。

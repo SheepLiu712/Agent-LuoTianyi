@@ -18,7 +18,7 @@ func _ready() -> void:
 	%ZoomIn.pressed.connect(func(): _zoom_by(1.25))
 	%ConfirmImage.pressed.connect(func():
 		if _confirm.is_valid() and _confirm.call(%Picture.texture): close_image()
-		else: %Feedback.text = "当前模拟场景无法发送，图片已保留。")
+		else: %Feedback.text = "图片暂时无法发送，请检查当前连接后重试。图片已保留。")
 	%ImageScroll.resized.connect(func(): if _fitting: _resize_image())
 
 func present(source: Window, provider: Callable, confirm: Callable = Callable()) -> void:

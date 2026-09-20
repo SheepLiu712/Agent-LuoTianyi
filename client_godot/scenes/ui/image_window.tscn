@@ -75,7 +75,7 @@ text = "原始比例"
 [node name="ConfirmImage" type="Button" parent="Body/Column/Toolbar"]
 unique_name_in_owner = true
 visible = false
-text = "发送图片 · 离线演示"
+text = "发送图片"
 theme_type_variation = &"PrimaryButton"
 
 [node name="CloseImage" type="Button" parent="Body/Column/Toolbar"]

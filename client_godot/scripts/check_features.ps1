@@ -2,7 +2,7 @@ param([string]$Godot, [Parameter(Mandatory=$true)][string]$Python)
 . (Join-Path $PSScriptRoot 'common.ps1')
 $engine = Resolve-Godot $Godot
 $groups = @{
-    'run_history_tests.py' = @('test_history_sync.gd', 'test_history_media.gd')
+    'run_history_tests.py' = @('test_history_sync.gd', 'test_history_media.gd', 'ui/test_image_sending.gd')
     'run_feature_tests.py' = @('test_preferences.gd', 'ui/test_unified_settings.gd', 'ui/test_model_cards.gd', 'test_application_drafts.gd', 'test_model_settings.gd', 'test_model_execution.gd')
     'run_dynamics_tests.py' = @('test_dynamics.gd', 'test_dynamics_window.gd', 'test_dynamics_detail.gd')
 }

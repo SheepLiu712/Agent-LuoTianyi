@@ -35,6 +35,14 @@ func stop() -> void:
 	_directory = ""
 func get_state(id: String) -> Dictionary:
 	return _states.get(id,{"status":"idle","texture":null,"code":""}).duplicate()
+func store_local(id: String, bytes: PackedByteArray) -> Error:
+	if id.is_empty() or _session.is_empty(): return ERR_UNCONFIGURED
+	var image := _decode(bytes)
+	if image == null: return ERR_INVALID_DATA
+	var result := _save(id, bytes)
+	if result != OK: _volatile[id] = image
+	_ready_image(id, image, "" if result == OK else "CACHE_WRITE_FAILED")
+	return result
 func ensure(id: String) -> void:
 	if id.is_empty() or _session.is_empty() or _states.has(id):
 		return

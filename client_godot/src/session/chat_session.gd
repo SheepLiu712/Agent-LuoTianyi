@@ -6,6 +6,7 @@ signal state_changed(state: Dictionary)
 signal expression_requested(command: String)
 signal mouth_changed(value: float)
 const Audio = preload("res://src/media/reply_audio.gd")
+const Attachment = preload("res://src/media/image_attachment.gd")
 var _transport: Node
 var _media: Node
 var _logger: RefCounted
@@ -60,10 +61,9 @@ func _init(transport: Node, logger: RefCounted = null, media: Node = null, histo
 			state_changed.emit(get_state()))
 	_reading = reading
 	changed.connect(_update_reading)
-	_images = images
-	if images != null:
-		add_child(images)
-		images.changed.connect(func(id,state): message_image_changed.emit(id,state))
+	_images = images if images != null else preload("res://src/storage/history_images.gd").new("user://images", logger)
+	add_child(_images)
+	_images.changed.connect(func(id,state): message_image_changed.emit(id,state))
 
 func start(session: Dictionary) -> Error:
 	stop()
@@ -89,7 +89,7 @@ func send_text(text: String) -> String:
 			_system_error("SEND_REJECTED")
 			return ""
 		id = "local-" + Crypto.new().generate_random_bytes(16).hex_encode()
-		_pending_history[id] = text
+		_pending_history[id] = {"type":"user_text","payload":{"message":text}}
 	else:
 		id = _transport.send_event("user_text", {"message":text, "llm_mode":{"types":_model_types()}}, true)
 	if id.is_empty():
@@ -102,6 +102,39 @@ func send_text(text: String) -> String:
 		_logger.record("message_queued", {"reply_id":id})
 	changed.emit()
 	return id
+
+func send_image(bytes: PackedByteArray, mime: String) -> String:
+	if _state.phase in ["idle", "auth_rejected"]: return ""
+	var attachment := Attachment.from_bytes(bytes, mime)
+	if not attachment.ok:
+		_system_error(attachment.code)
+		return ""
+	var payload := {"image_base64":Marshalls.raw_to_base64(bytes), "mime_type":mime, "image_client_path":"", "llm_mode":{"types":_model_types()}}
+	var id: String
+	if _waiting_history:
+		if _pending_history.size() >= 128:
+			_system_error("SEND_REJECTED")
+			return ""
+		id = "local-" + Crypto.new().generate_random_bytes(16).hex_encode()
+		_pending_history[id] = {"type":"user_image", "payload":payload}
+	else:
+		id = _transport.send_event("user_image", payload, true)
+	if id.is_empty():
+		_system_error("SEND_REJECTED")
+		return ""
+	var message := {"id":id,"role":"user","type":"image","text":"","status":"waiting_history" if _waiting_history else "queued","code":""}
+	_messages.append(message)
+	_by_id[id] = message
+	_images.store_local(id, bytes)
+	if _state.code in ["INVALID_IMAGE", "IMAGE_FORMAT", "IMAGE_DIMENSIONS", "IMAGE_TOO_LARGE", "SEND_REJECTED"]:
+		_state.code = ""
+		state_changed.emit(get_state())
+	if _logger != null: _logger.record("message_queued", {"reply_id":id})
+	changed.emit()
+	return id
+
+func set_image_selecting(active: bool) -> void:
+	if _state.phase == "ready": _transport.send_event("user_image_selecting" if active else "user_image_selecting_cancel", {}, false)
 
 func record_touch(areas: Array[String]) -> void:
 	if _state.phase != "ready" or _media.get_state().playing:
@@ -308,7 +341,9 @@ func skip_history() -> void:
 func _release_history_sends() -> void:
 	_waiting_history = false
 	for id in _pending_history:
-		var wire: String = _transport.send_event("user_text",{"message":_pending_history[id],"llm_mode":{"types":_model_types()}},true)
+		var pending: Dictionary = _pending_history[id]
+		pending.payload.llm_mode = {"types":_model_types()}
+		var wire: String = _transport.send_event(pending.type,pending.payload,true)
 		if wire.is_empty():
 			_by_id[id].status = "failed"
 			_by_id[id].code = "SEND_REJECTED"
