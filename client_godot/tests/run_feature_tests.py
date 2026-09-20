@@ -74,6 +74,10 @@ def run(godot,script,gpu=False):
                 if user=='legacy': prefs.pop('personality_traits'); prefs['#sym:personality_text']='开朗，认真'
                 self.reply(200,{'preferences':prefs}); return
             if self.path=='/preference/overwrite':
+                if user=='fail_once' and user not in writes:
+                    writes[user] = None
+                    self.reply(503,{})
+                    return
                 if user=='fail_load': errors.append('overwrote despite failed load')
                 if user=='fail_save': self.reply(503,{}); return
                 prefs=data['preferences']; writes[user]=prefs

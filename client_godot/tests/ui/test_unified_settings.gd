@@ -1,0 +1,68 @@
+extends SceneTree
+var failures: Array[String] = []
+func check(ok: bool, label: String) -> void:
+	if not ok:
+		failures.append(label)
+		print("FAIL: ",label)
+func _initialize() -> void:
+	run.call_deferred()
+func run() -> void:
+	const SCENE := "res://scenes/ui/settings_window.tscn"
+	check(ResourceLoader.exists(SCENE),"one settings window exposes both pages")
+	if not failures.is_empty():
+		quit(1)
+		return
+	var path := "user://unified-settings-%s" % Time.get_ticks_usec()
+	var scope := {"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"fail_once","message_token":"message-test"}
+	var models = load("res://src/session/model_settings.gd").new(load("res://src/network/json_request.gd").new(),load("res://src/storage/model_store.gd").new(ClassDB.instantiate("WindowsSecurity"),path))
+	root.add_child(models)
+	await models.start(scope)
+	var prefs = load("res://src/session/preferences_controller.gd").new(load("res://src/network/json_request.gd").new())
+	var window = load(SCENE).instantiate()
+	window.setup(prefs,models)
+	root.add_child(window)
+	await prefs.start(scope)
+	window.open()
+	var context: TextEdit = window.find_child("CustomContextField",true,false)
+	context.text = "保留跨页的草稿"
+	context.text_changed.emit()
+	window.select_page("models")
+	var name: LineEdit = window.find_child("ModelName",true,false)
+	name.text = "saved-local-model"
+	name.text_changed.emit(name.text)
+	var params: TextEdit = window.find_child("Params",true,false)
+	params.text = "["
+	params.text_changed.emit()
+	var result: Dictionary = await window.save_changes()
+	check(not result.ok and models.get_config("text-purpose").model != name.text and prefs.get_state().dirty,"invalid model prevents every write")
+	window.select_page("preferences")
+	check(context.text == "保留跨页的草稿","switching pages preserves drafts")
+	params.text = "{}"
+	params.text_changed.emit()
+	result = await window.save_changes()
+	check(not result.ok and models.get_config("text-purpose").model == "saved-local-model" and prefs.get_state().dirty,"partial failure retains failed page and successful model")
+	check(window.is_dirty(),"partial success cannot close as fully saved")
+	result = await window.save_changes()
+	check(result.ok and not window.is_dirty(),"retry saves only remaining changes")
+	context.text = "close guard"
+	context.text_changed.emit()
+	window.close_requested.emit()
+	var dialog: ConfirmationDialog = window.get_node("%UnsavedDialog")
+	check(dialog.visible,"dirty close opens a decision")
+	dialog.get_cancel_button().pressed.emit()
+	check(window.is_dirty(),"cancel retains edits")
+	window.get_node("%SaveAll").pressed.emit()
+	check(window.is_saving(),"save is tracked while awaiting server")
+	window.close_requested.emit()
+	await window.saving_finished
+	await process_frame
+	check(not is_instance_valid(window),"close while saving waits and closes only on success")
+	models.queue_free()
+	await process_frame
+	remove_folder(path)
+	print("Unified settings: ","PASS" if failures.is_empty() else "FAIL")
+	quit(0 if failures.is_empty() else 1)
+func remove_folder(path: String) -> void:
+	for folder in DirAccess.get_directories_at(path): remove_folder(path.path_join(folder))
+	for file in DirAccess.get_files_at(path): DirAccess.remove_absolute(path.path_join(file))
+	DirAccess.remove_absolute(path)
