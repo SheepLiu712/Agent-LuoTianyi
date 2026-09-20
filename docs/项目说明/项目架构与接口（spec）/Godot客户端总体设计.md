@@ -67,4 +67,6 @@ UI 固定节点与静态样式由 `.tscn` / `theme/app_theme.tres` 承载，脚�
 
 ## 窗口重设计的职责边界
 
-Application 仍是服务组装根；UI 窗口层负责自绘框架、几何、依附关系、统一关闭与草稿汇总，不接管业务协议。角色、媒体、会话、存储保持既有职责。WindowChrome 使用当前引擎 Window.start_drag/start_resize，不覆盖引擎回调、不新增原生扩展。窗口几何与草稿分离：只有几何持久化，草稿仅驻留会话内。现行增量契约见接口文档 client_godot/window-redesign.md，相关条目取代此前相冲突的旧窗口契约。
+Application 仍是服务组装根；UI 窗口层负责几何、依附关系、统一关闭与草稿汇总，不接管业务协议。2026-09-21用户选择恢复桌面系统窗框与三键，WindowChrome仅保留几何协调，内部界面/下拉使用Godot Panel及StyleBoxFlat圆角，不用遮罩或Windows圆角扩展。角色、媒体、会话、存储保持既有职责。窗口几何与草稿分离：只有几何持久化，草稿仅驻留会话内。最新契约见接口文档client_godot/feedback-012.md，取代window-redesign.md中已变更的自绘窗口与旧入口条目。
+
+磁盘查询以StorageService为唯一业务/UI依赖；GodotStorageService子类和StorageVolume原生适配封装平台API。容量/目录大小统一64位int bytes，未知为-1，UI不得显示成零占用。Windows适配已编译验证；POSIX分支及移动端注册/导出仍须在目标构建验收，不把跨平台控件和接口设计当作手机端已交付。
