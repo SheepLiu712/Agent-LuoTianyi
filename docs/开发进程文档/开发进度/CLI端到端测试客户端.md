@@ -71,3 +71,11 @@
 - commit 或 PR：分支 `feat/cli-e2e-s8-preferences-actions`：`53fb008`（SPEC）/ `ace6c7b`（Red）/ `3f4d1f6`（Green）。
 - 验证及结果：focused `tests/test_cli_preferences_actions.py` → 13 passed；client 回归 → 154 passed（排除 3 个既有收集失败文件）。
 - 未验证范围：真实偏好接口与账号数据（依赖受测部署与隔离账号）、嵌套字段合并语义（当前为顶层浅合并）。
+
+### 2026-09-20 S9 场景引擎与报告
+
+- 交付行为：`scenario.run`（`--scenario` 文件：动作信封数组 + `on_failure` 策略）；失败后默认仅继续只读白名单动作（其余 `skipped`、不贡献退出码），`on_failure="continue"` 时全量继续；终态→退出码矩阵（passed/suppressed/skipped=0、failed=2/3/4、timed_out=5，取最大非零）；每个动作后追加终态记录、场景结束追加 `scenario_result` 汇总；`--report` 默认脱敏元数据（`data_keys` 仅键名）、`--report-include-content` 显式包含完整脱敏 `data`；报告写入失败报 `REPORT_WRITE_FAILED`；场景文件容忍 UTF-8 BOM。
+- interface spec：`docs/项目说明/项目架构与接口（spec）/接口文档/cli/README.md` §1.11。
+- commit 或 PR：分支 `feat/cli-e2e-s9-scenario-report`：`e69a4ca`（SPEC）/ `30887e3`（Red）/ `77e2604`（Green）。
+- 验证及结果：focused `tests/test_cli_scenario.py` → 17 passed；client 回归 → 171 passed（排除 3 个既有收集失败文件）；子进程冒烟（2 动作场景 + 报告）→ 退出码 0、stdout 3 行合法 JSONL、报告结构正确。
+- 未验证范围：真实服务端动作混合场景；产物文件保留（图片/音频副本）未实现（如需可按 S9b 拆分）；报告清理策略由调用方负责。
