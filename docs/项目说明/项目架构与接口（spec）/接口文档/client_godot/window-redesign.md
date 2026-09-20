@@ -11,3 +11,12 @@
 `src/storage/window_geometry.gd` RefCounted：构造(path)；`read_layout(key, fallback:Rect2i, minimum:Vector2i, screens:Array[Rect2i]) -> Dictionary` 返回 rect/maximized；`write_layout(key, rect, maximized) -> Error` 合并其它布局键后写入，不覆盖其他窗口记录。此文件不包含用户内容或凭据。
 
 所有业务窗口具有自绘框架且 force_native=true；日志、动态 transient=false。关闭仍进入宿主已有close_requested，因此有草稿仍需确认，日志关闭只隐藏。测试经场景按钮检查请求与公开几何读写；GPU验证真实mode、拖拽/缩放、焦点和独立性。
+
+
+## 统一设置窗口
+
+`scenes/ui/settings_window.tscn` / `SettingsWindow` 为唯一设置Window，title=设置，原相处/模型独立Window及其脚本删除，替换为 `preferences_page.tscn` / `model_page.tscn` 的Control。`setup(preferences, models, executor=null)` 显式注入，测试可只注入一个控制器；`select_page("preferences"|"models")` 切换且保留草稿；`open()` 恢复并聚焦；`is_dirty()` 汇总；`is_saving()` 返回当前是否正在保存；`save_changes() -> Dictionary` 异步返回 `{ok, results}`，results按页面/模型用途记录ok/code。不改变PreferencesController和ModelSettings协议。
+
+PreferencesPage.setup(controller)、is_dirty()、save_changes()保存并读取控制器最终状态；ModelPage.setup(settings, executor=null)、is_dirty()、validate_changes()、save_changes()负责全部用途草稿。先逐用途解析JSON并validate，有任何非法草稿时整窗不开始写入；全部有效后按用途顺序保存模型，再保存相处偏好。模型保存成功更新该用途基线；失败不清草稿，仍保存其它独立项。DPAPI失败逐项询问明文，默认取消；拒绝只令该项失败。相处失败仍保留dirty。结果区列清失败页/用途和代码，不宣称事务回滚。
+
+底部保存修改保持窗口打开；关闭有修改时三操作为保存并关闭/放弃/取消，只有全部保存成功且没有dirty才自动关闭。保存期间禁用再次提交和编辑，关闭请求记为待关闭，完成失败则留窗；保存完成发出saving_finished(ok)供应用协调。SettingsWindow transient=true，跟随主窗最小化；重复打开models/preferences导航只切换同一窗口。现有手动模型测试仍单独确认额度，不包含在保存操作里。
