@@ -6,14 +6,14 @@ var _current := ""
 var _selector := preload("res://src/ui/unified_dropdown.gd").new()
 var _copy := preload("res://src/ui/unified_dropdown.gd").new()
 var _fields := {}
-var _enabled := CheckBox.new()
-var _json := CheckBox.new()
-var _thinking := CheckBox.new()
-var _params := TextEdit.new()
-var _status := Label.new()
-var _requirements := Label.new()
-var _save_button := Button.new()
-var _plain := ConfirmationDialog.new()
+@onready var _enabled: CheckBox = %Enabled
+@onready var _json: CheckBox = %Json
+@onready var _thinking: CheckBox = %Thinking
+@onready var _params: TextEdit = %Params
+@onready var _status: Label = %Status
+@onready var _requirements: Label = %Requirements
+@onready var _save_button: Button = %SaveButton
+@onready var _plain: ConfirmationDialog = %PlainDialog
 var _refreshing := false
 var _executor: Node
 var _test_button: Button
@@ -21,72 +21,33 @@ var _test_dialog: ConfirmationDialog
 var _test_snapshot := {}
 var _test_type := ""
 
-func _init(settings: Node,executor: Node = null) -> void:
+func setup(settings: Node,executor: Node = null) -> void:
 	_settings = settings
 	_executor = executor
-	title = "LLM / VLM 模型设置"
-	size = Vector2i(660,780)
-	min_size = Vector2i(520,600)
 
 func _ready() -> void:
 	super._ready()
-	var margin := MarginContainer.new()
-	add_child(margin)
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left","right","top","bottom"]:
-		margin.add_theme_constant_override("margin_"+side,18)
-	var scroll := ScrollContainer.new()
-	margin.add_child(scroll)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	var column := VBoxContainer.new()
-	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_theme_constant_override("separation",10)
-	scroll.add_child(column)
-	column.add_child(Style.label("每个用途独立配置，保存不会调用供应商",18))
+	var column: Node = %SelectorSlot.get_parent()
 	column.add_child(_selector)
+	column.move_child(_selector,%SelectorSlot.get_index())
+	%SelectorSlot.queue_free()
 	_selector.activated.connect(func(index): _select(index))
-	column.add_child(_requirements)
-	_requirements.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_enabled.text = "启用此用途的本地模型"
-	column.add_child(_enabled)
 	_enabled.toggled.connect(func(_value): _edit())
-	for pair in [["provider","服务商名称"],["base_url","Base URL（例如 https://example.com/v1）"],["api_key","API Key"],["model","模型名称"]]:
-		column.add_child(Style.label(pair[1],14))
-		var input := LineEdit.new()
-		input.name = "ModelName" if pair[0] == "model" else pair[0]
-		input.secret = pair[0] == "api_key"
-		_fields[pair[0]] = input
-		column.add_child(input)
-		input.text_changed.connect(func(_value): _edit())
-	_json.text = "声明支持 JSON 输出"
-	_thinking.text = "声明支持 thinking"
+	_fields = {"provider":%provider,"base_url":%base_url,"api_key":%api_key,"model":%ModelName}
+	for key in _fields:
+		_fields[key].text_changed.connect(func(_value): _edit())
 	for flag in [_json,_thinking]:
-		column.add_child(flag)
 		flag.toggled.connect(func(_value): _edit())
-	column.add_child(Style.label("高级 JSON 参数（非流式）",14))
-	_params.custom_minimum_size.y = 120
-	_params.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	_params.text_changed.connect(_edit)
-	column.add_child(_params)
-	var row := HBoxContainer.new()
-	column.add_child(row)
+	var row: Node = %CopySlot.get_parent()
 	row.add_child(_copy)
-	var copy_button := Button.new()
-	copy_button.text = "复制该用途配置"
-	row.add_child(copy_button)
-	copy_button.pressed.connect(_copy_selected)
-	_save_button.text = "保存当前用途"
-	Style.primary(_save_button)
-	column.add_child(_save_button)
+	row.move_child(_copy,%CopySlot.get_index())
+	%CopySlot.queue_free()
+	%CopyButton.pressed.connect(_copy_selected)
+	_save_button.pressed.connect(func(): _save(false))
 	if _executor != null:
-		_test_button = Button.new()
-		_test_button.text = "手动测试当前配置"
-		column.add_child(_test_button)
-		_test_dialog = ConfirmationDialog.new()
-		_test_dialog.title = "测试可能消耗供应商额度"
-		_test_dialog.dialog_text = "将使用当前草稿发送一次固定短输入，不发送聊天历史。成功仅表示本次请求可用。"
-		_test_dialog.cancel_button_text = "取消"
-		add_child(_test_dialog)
+		_test_button = %TestButton
+		_test_dialog = %TestDialog
 		_test_button.pressed.connect(func():
 			_test_snapshot = _config()
 			_test_type = _current
@@ -94,15 +55,11 @@ func _ready() -> void:
 				_test_dialog.popup_centered()
 				_test_dialog.get_cancel_button().grab_focus())
 		_test_dialog.confirmed.connect(_test)
-	_save_button.pressed.connect(func(): _save(false))
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	column.add_child(_status)
-	_plain.title = "密钥保护失败"
-	_plain.dialog_text = "Windows 未能保护 API Key。是否明确选择在本机以明文保存？默认取消保存。"
-	_plain.ok_button_text = "明文保存"
-	_plain.cancel_button_text = "取消保存"
-	add_child(_plain)
+	else:
+		%TestButton.visible = false
 	_plain.confirmed.connect(func(): _save(true))
+	if _settings == null:
+		return
 	_settings.changed.connect(_update)
 	_update(_settings.get_state())
 

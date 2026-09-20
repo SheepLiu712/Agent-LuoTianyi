@@ -438,8 +438,10 @@ DynamicDetail.refresh_comments() 由窗口调用，转交完整分页刷新并�
 
 `res://scenes/ui/model_window.tscn`：根 `Window`（名 `ModelWindow`）挂 `src/ui/model_window.gd`，依赖由 `setup(settings, executor)` 注入。场景提供 `MarginContainer`（四边 18）→ `ScrollContainer`（禁用横向滚动）→ `VBoxContainer`（间距 10）内的标题、选择器插入位、`%Requirements`、`%Enabled`「启用此用途的本地模型」、四组「14 号标签 + 输入框」（`%provider`、`%base_url`、`%api_key`（密文）、`%ModelName`）、`%Json`「声明支持 JSON 输出」、`%Thinking`「声明支持 thinking」、「高级 JSON 参数（非流式）」标签与 `%Params`（纵向最小高度 120，边界换行）、`%CopyRow`（复制插入位 + `%CopyButton`「复制该用途配置」）、`%SaveButton`「保存当前用途」（`PrimaryButton`）、`%TestButton`「手动测试当前配置」、`%Status`，以及窗口下的 `%PlainDialog`「密钥保护失败」与 `%TestDialog`「测试可能消耗供应商额度」；`_select`、`_edit`、`_config`、`_save`、`_copy_selected`、`_test` 与全部提示文案不变。
 
-`executor` 注入为 `null` 时（测试与未接入执行器的场景），`_ready()` 立即释放 `%TestButton` 与 `%TestDialog` 并把对应成员置空，节点集合与改造前一致；注入非空时二者参与布局与信号连接。
+`executor` 注入为 `null` 时（未接入执行器的路径），`_ready()` 把 `%TestButton` 置为不可见、把 `_test_button` 与 `_test_dialog` 成员置空，并且不连接任何测试信号；注入非空时二者参与布局，并连接「先固化草稿再弹确认框」与 `confirmed` 两个回调。`Container` 布局忽略不可见的 `Control`，`%TestDialog` 也保持 `AcceptDialog` 默认的不可见状态，因此渲染结果与改造前「两个节点根本未被创建」一致；`tests/capture_release_ui.gd` 的模型设置截图与改造前逐字节相同。
+
+两个窗口场景都允许不带依赖实例化，这是契约守卫 `tests/test_ui_scenes.gd` 与场景检查的前提：`PreferencesWindow` 在 `_controller` 为空时只完成基类初始化便返回，`ModelWindow` 仍按 `executor` 是否注入决定 `%TestButton` 的可见性、但在 `_settings` 为空时同样返回；两场景在无依赖时都不连接任何依赖信号，场景自身提供的属性仍然成立。生产路径固定按 `instantiate() → setup() → add_child()` 调用，因此 `_ready()` 执行时依赖总是已经注入。
 
 `UnifiedDropdown` 尚未节点化，窗口场景在需要非末位插入的位置提供一个不可见 `Control` 标记节点（`%SelectorSlot`、`%CopySlot`、`%RelationshipPresets`、`%SpeakingStylePresets`）：脚本把代码实例化的下拉加入父容器后用 `move_child` 移到标记所在位置并释放标记。标记不可见，`Container` 布局会忽略不可见的 `Control`，因此插入前后的布局与既有实现一致。
 
-从哪个 interface 验证：`tests/test_ui_scenes.gd` 按同一张表断言两个场景的存在性、根节点名与类型、根脚本、关键节点 `unique_name_in_owner` 与 `%Name` 解析、`setup()` 暴露且 `_init` 无参数，以及从代码搬入场景的属性、字号与样式盒取值；`tests/test_preferences.gd`、`tests/test_model_settings.gd`、`tests/test_application_drafts.gd` 从窗口的公开行为（脏草稿关窗确认、草稿参与关闭守卫、菜单打开独立窗口）回归。
+从哪个 interface 验证：`tests/test_ui_scenes.gd` 按同一张表断言两个场景的存在性、根节点名与类型、根脚本、关键节点 `unique_name_in_owner` 与 `%Name` 解析、`setup()` 暴露且 `_init` 无参数，以及从代码搬入场景的属性、字号、字体颜色覆盖与样式盒取值（两个窗口的「无依赖实例化」也因此被这条用例覆盖）；`tests/test_preferences.gd`、`tests/test_model_settings.gd`、`tests/test_application_drafts.gd` 从窗口的公开行为（脏草稿关窗确认、草稿参与关闭守卫、菜单打开独立窗口）回归。

@@ -1,0 +1,100 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/ui/preferences_window.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[node name="PreferencesWindow" type="Window"]
+title = "相处模式"
+size = Vector2i(600, 620)
+min_size = Vector2i(480, 520)
+visible = false
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Margin" type="MarginContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_bottom = 22
+
+[node name="Column" type="VBoxContainer" parent="Margin"]
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Margin/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 22
+text = "和天依相处的方式"
+
+[node name="RelationshipLabel" type="Label" parent="Margin/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "关系"
+
+[node name="RelationshipRow" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="RelationshipField" type="LineEdit" parent="Margin/Column/RelationshipRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+placeholder_text = "关系（可自定义）"
+
+[node name="RelationshipPresets" type="Control" parent="Margin/Column/RelationshipRow"]
+unique_name_in_owner = true
+visible = false
+
+[node name="SpeakingStyleLabel" type="Label" parent="Margin/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "表达风格"
+
+[node name="SpeakingStyleRow" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="SpeakingStyleField" type="LineEdit" parent="Margin/Column/SpeakingStyleRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+placeholder_text = "表达风格（可自定义）"
+
+[node name="SpeakingStylePresets" type="Control" parent="Margin/Column/SpeakingStyleRow"]
+unique_name_in_owner = true
+visible = false
+
+[node name="PersonalityLabel" type="Label" parent="Margin/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "性格关键词"
+
+[node name="PersonalityField" type="TextEdit" parent="Margin/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 80)
+placeholder_text = "用逗号、顿号或换行分隔"
+wrap_mode = 1
+
+[node name="CustomContextLabel" type="Label" parent="Margin/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "补充上下文"
+
+[node name="CustomContextField" type="TextEdit" parent="Margin/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 120)
+placeholder_text = "想让天依了解的相处背景"
+wrap_mode = 1
+
+[node name="Status" type="Label" parent="Margin/Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+
+[node name="Actions" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="Reload" type="Button" parent="Margin/Column/Actions"]
+unique_name_in_owner = true
+text = "重新加载"
+
+[node name="Save" type="Button" parent="Margin/Column/Actions"]
+unique_name_in_owner = true
+theme_type_variation = &"PrimaryButton"
+text = "保存相处模式"

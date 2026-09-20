@@ -1,38 +1,25 @@
 ﻿extends "res://src/ui/draft_window.gd"
 var _controller: Node
 var _fields: Dictionary = {}
-var _status := Label.new()
-var _save := Button.new()
-var _reload := Button.new()
+@onready var _status: Label = %Status
+@onready var _save: Button = %Save
+@onready var _reload: Button = %Reload
 var _refreshing := false
 var _presets: Array[Button] = []
-func _init(controller: Node) -> void:
+func setup(controller: Node) -> void:
 	_controller = controller
-	title = "相处模式"
-	size = Vector2i(600,620)
-	min_size = Vector2i(480,520)
 func _ready() -> void:
 	super._ready()
+	if _controller == null:
+		return
 	add_child(_controller)
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side in ["left","right","top","bottom"]:
-		margin.add_theme_constant_override("margin_"+side,22)
-	add_child(margin)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation",12)
-	margin.add_child(column)
-	column.add_child(Style.label("和天依相处的方式",22))
+	var lines := {"relationship":%RelationshipField,"speaking_style":%SpeakingStyleField}
+	var slots := {"relationship":%RelationshipPresets,"speaking_style":%SpeakingStylePresets}
+	var blocks := {"personality_text":%PersonalityField,"custom_context":%CustomContextField}
 	for pair in [["relationship","关系"],["speaking_style","表达风格"],["personality_text","性格关键词"],["custom_context","补充上下文"]]:
-		column.add_child(Style.label(pair[1],14))
 		if pair[0] in ["relationship","speaking_style"]:
-			var row := HBoxContainer.new()
-			column.add_child(row)
-			var input := LineEdit.new()
-			input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			input.placeholder_text = pair[1]+"（可自定义）"
+			var input: LineEdit = lines[pair[0]]
 			_fields[pair[0]] = input
-			row.add_child(input)
 			input.text_changed.connect(func(_text): _edit())
 			var presets := preload("res://src/ui/unified_dropdown.gd").new()
 			_presets.append(presets)
@@ -43,30 +30,20 @@ func _ready() -> void:
 			presets.set_items(options)
 			presets.set_meta("field",pair[0])
 			presets.set_meta("values",values)
+			var row: Node = slots[pair[0]].get_parent()
 			row.add_child(presets)
+			row.move_child(presets,slots[pair[0]].get_index())
+			slots[pair[0]].queue_free()
 			presets.activated.connect(func(id):
 				if id != "custom":
 					input.text = values[id]
 					_edit())
 		else:
-			var input := TextEdit.new()
-			input.placeholder_text = "用逗号、顿号或换行分隔" if pair[0] == "personality_text" else "想让天依了解的相处背景"
-			input.custom_minimum_size.y = 80 if pair[0] == "personality_text" else 120
-			input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+			var input: TextEdit = blocks[pair[0]]
 			_fields[pair[0]] = input
-			column.add_child(input)
 			input.text_changed.connect(_edit)
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	column.add_child(_status)
-	var actions := HBoxContainer.new()
-	column.add_child(actions)
-	_reload.text = "重新加载"
 	_reload.pressed.connect(_controller.reload)
-	actions.add_child(_reload)
-	_save.text = "保存相处模式"
-	Style.primary(_save)
 	_save.pressed.connect(_controller.save)
-	actions.add_child(_save)
 	_controller.changed.connect(_update)
 	_update(_controller.get_state())
 func is_dirty() -> bool:

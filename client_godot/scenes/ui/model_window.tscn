@@ -1,0 +1,134 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://src/ui/model_window.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[node name="ModelWindow" type="Window"]
+title = "LLM / VLM 模型设置"
+size = Vector2i(660, 780)
+min_size = Vector2i(520, 600)
+visible = false
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Margin" type="MarginContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="Scroll" type="ScrollContainer" parent="Margin"]
+horizontal_scroll_mode = 0
+
+[node name="Column" type="VBoxContainer" parent="Margin/Scroll"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 10
+
+[node name="Title" type="Label" parent="Margin/Scroll/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 18
+text = "每个用途独立配置，保存不会调用供应商"
+
+[node name="SelectorSlot" type="Control" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+visible = false
+
+[node name="Requirements" type="Label" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+
+[node name="Enabled" type="CheckBox" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+text = "启用此用途的本地模型"
+
+[node name="ProviderLabel" type="Label" parent="Margin/Scroll/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "服务商名称"
+
+[node name="provider" type="LineEdit" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+
+[node name="BaseUrlLabel" type="Label" parent="Margin/Scroll/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "Base URL（例如 https://example.com/v1）"
+
+[node name="base_url" type="LineEdit" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+
+[node name="ApiKeyLabel" type="Label" parent="Margin/Scroll/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "API Key"
+
+[node name="api_key" type="LineEdit" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+secret = true
+
+[node name="ModelLabel" type="Label" parent="Margin/Scroll/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "模型名称"
+
+[node name="ModelName" type="LineEdit" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+
+[node name="Json" type="CheckBox" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+text = "声明支持 JSON 输出"
+
+[node name="Thinking" type="CheckBox" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+text = "声明支持 thinking"
+
+[node name="ParamsLabel" type="Label" parent="Margin/Scroll/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "高级 JSON 参数（非流式）"
+
+[node name="Params" type="TextEdit" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 120)
+wrap_mode = 1
+
+[node name="CopyRow" type="HBoxContainer" parent="Margin/Scroll/Column"]
+
+[node name="CopySlot" type="Control" parent="Margin/Scroll/Column/CopyRow"]
+unique_name_in_owner = true
+visible = false
+
+[node name="CopyButton" type="Button" parent="Margin/Scroll/Column/CopyRow"]
+unique_name_in_owner = true
+text = "复制该用途配置"
+
+[node name="SaveButton" type="Button" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+theme_type_variation = &"PrimaryButton"
+text = "保存当前用途"
+
+[node name="TestButton" type="Button" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+text = "手动测试当前配置"
+
+[node name="Status" type="Label" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+
+[node name="PlainDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "密钥保护失败"
+dialog_text = "Windows 未能保护 API Key。是否明确选择在本机以明文保存？默认取消保存。"
+ok_button_text = "明文保存"
+cancel_button_text = "取消保存"
+
+[node name="TestDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "测试可能消耗供应商额度"
+dialog_text = "将使用当前草稿发送一次固定短输入，不发送聊天历史。成功仅表示本次请求可用。"
+cancel_button_text = "取消"
