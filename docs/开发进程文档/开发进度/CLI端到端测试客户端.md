@@ -98,4 +98,5 @@
   - 偏好：`preferences.update`（confirmed=true）→ `replace=true` 清理 → `preferences.open` 复核 `{}` → 4/4（S8b 修复后）；
   - 图片：`image.select`（3,385B PNG 校验）→ `image.send`（ACK）→ `reply.wait`（视觉回复"哇，这个红蓝配色的图看起来好醒目呀！"，8.8s，TTS 274,500B WAV 落盘）→ 4/4；
   - 触摸：`touch.send`（ACK）→ `reply.wait` 捕获服务端触摸反射（`touch-` UUID、空文本、`moemoe` 表情、`is_ephemeral=true`、`display_in_chat=false`；按 S4 语义 `audio.available=false` 属规范行为）→ 3/3。
+- 证据：`docs/开发进程文档/验证证据/CLI端到端测试客户端/`（7 组脱敏请求体 + 真实回复 JSONL + 首测缺陷复现；含复现步骤与图片生成脚本，凭据/账号/路径已脱敏，泄露自检 CLEAN）。
 - 未验证范围：`audio.replay` 真实设备播放；触摸"服务端音频活跃抑制"时序（需与音频流并发）；并发回复因果关联；各动作其余失败分类的受测部署覆盖。
