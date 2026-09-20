@@ -31,6 +31,7 @@ var _windows: Dictionary = {}
 @onready var _exit_dialog: Window = %ExitDialog
 var _exit_action := ""
 var _models: Node
+var _images_presenter: Node
 var _executor: Node
 var _dynamics: Node
 
@@ -54,6 +55,8 @@ func _ready() -> void:
 		move_child(_chrome,get_child_count()-1)
 		return
 	_resize_window(Vector2i(660, 800), Vector2i(480, 640))
+	_images_presenter = preload("res://src/ui/image_presenter.gd").new(_layout_path.get_base_dir().path_join("window-geometry.cfg"))
+	add_child(_images_presenter)
 	_log = Log.new("user://logs" if _layout_path == "user://window_layout.cfg" else _layout_path.get_base_dir().path_join("logs"))
 	_log.write_failed.connect(func(_error): _log_problem.text = "日志保存失败，打开日志可查看本次内存记录；磁盘归档可能不完整。")
 	_log.record("client_started")
@@ -156,6 +159,7 @@ func _account_changed(state: Dictionary) -> void:
 			_chat_view.logout_requested.connect(func(): _request_close("logout"))
 			_chat_view.log_requested.connect(_log_window.open)
 			_chat_view.settings_requested.connect(_open_settings)
+			_chat_view.image_requested.connect(func(provider): _images_presenter.open_image(get_window(),provider))
 		if not _expanded:
 			_expanded = true
 			_split.dragger_visibility = SplitContainer.DRAGGER_VISIBLE
@@ -244,6 +248,7 @@ func _finish_close(action: String) -> void:
 		_session.logout()
 
 func _close_windows() -> void:
+	if _images_presenter != null: _images_presenter.close()
 	for window in _windows.values():
 		if is_instance_valid(window):
 			window.hide()

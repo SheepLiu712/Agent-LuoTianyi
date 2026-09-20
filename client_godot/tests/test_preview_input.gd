@@ -67,14 +67,14 @@ func run() -> void:
 		image.fill(Color.BLUE)
 		editor.image_pasted.emit(image)
 		await process_frame
-		var overlays: Array[Node] = scene.find_children("ImageOverlay", "PanelContainer", true, false)
+		var overlays: Array[Node] = root.find_children("ImageWindow", "Window", true, false)
 		check(overlays.size() == 1, "pasted image opens one preview")
 		if overlays.size() == 1:
-			var close: Button = overlays[0].get_node("%Close")
+			var close: Button = overlays[0].get_node("%CloseImage")
 			check(close.text == "取消", "pending image can be canceled")
 			close.pressed.emit()
 			await process_frame
-			check(scene.find_children("ImageOverlay", "PanelContainer", true, false).is_empty(), "cancel removes image preview")
+			check(not overlays[0].visible, "cancel hides the reusable image preview")
 	await create_timer(1.0).timeout
 	scene.queue_free()
 	await process_frame

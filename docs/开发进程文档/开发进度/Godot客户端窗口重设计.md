@@ -37,3 +37,11 @@
 - 根因证据：窗口自身最小化后，仅切mode会使Godot报告visible=true而HWND缺少WS_VISIBLE；主窗最小化前就已经隐藏，并非主窗直接隐藏独立动态。
 - Red 7769920通过公开open()复现；Green为本提交，WindowChrome恢复最小化窗口时先hide再恢复mode/show，使原生可见表面重新建立。
 - GPU capture_dynamics_ui全部截图通过；真实HWND可见、非最小化、无owner、非TOOLWINDOW检查PASS。发布浮层在动态内部显示且未新增原生发布窗。作者已核查原生状态和实际测试输出；未把内容缩放当作真实系统DPI。
+
+### 2026-09-20 全局单例图片窗口
+
+- 交付：ImagePresenter创建/复用image_window.tscn，窗口转属当前来源，换图适应、原始比例、缩放、错误重试和关闭由场景控件提供；旧图片浮层资源删除。正式历史与离线待发送图片共用同一呈现约定，退出账号清回调与纹理。
+- SPEC 32e5b22；Red 8f3ed19（独立图片场景缺失）；Green为本记录所在提交。
+- 验证：test_image_window headless/GPU均PASS，覆盖单例转属、旧来源关闭不影响新来源、当前来源关闭释放、失败重试、原始比例、关闭释放纹理；GPU额外验证来源最小化/恢复。test_history_media真实loopback、test_preview_input、test_ui_scenes通过。
+- 作者自审：图片窗仅存几何，原始图片仍由会话接口/离线provider提供，无新增协议；confirm回调仅离线显式点击，未后台发送。所有可见控件在场景中，代码只绑定与实例化。
+- 未验证：实际系统DPI、Windows10、多屏硬件；仅本地提交。

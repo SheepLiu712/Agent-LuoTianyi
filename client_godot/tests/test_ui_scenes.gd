@@ -229,24 +229,9 @@ const SCENES := {
 			"ClearDialog": {"title": "清理语音缓存","dialog_text": "清理当前服务器、本账号保存的全部语音？\n聊天文字保留；已清理的语音将无法重放。","ok_button_text": "清理","cancel_button_text": "取消","visible": false},
 		},
 	},
-	"res://scenes/preview/image_overlay.tscn": {
-		"root": "ImageOverlay",
-		"type": "PanelContainer",
-		"script": "res://src/preview/image_overlay.gd",
-		"setup": "setup",
-		"unique": ["Title","ZoomOut","ZoomIn","Close","Scroll","Picture","Feedback","Confirm"],
-		"properties": {
-			"Column": {"theme_override_constants/separation": 12},
-			"Column/Bar/Title": {"theme_override_font_sizes/font_size": 19,"theme_override_colors/font_color": Color("344c59")},
-			"Column/Bar/ZoomOut": {"text": "－"},
-			"Column/Bar/ZoomIn": {"text": "＋"},
-			"Column/Bar/Close": {"text": "关闭"},
-			"Column/Scroll": {"size_flags_vertical": Control.SIZE_EXPAND_FILL},
-			"Column/Scroll/Picture": {"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED,"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"size_flags_vertical": Control.SIZE_EXPAND_FILL},
-			"Column/Feedback": {"visible": false,"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART},
-			"Column/Confirm": {"visible": false,"text": "发送图片 · 离线演示"},
-		},
-		"styleboxes": {"": {"panel": [Color("f7fafc"),16,20]}},
+	"res://scenes/ui/image_window.tscn": {
+		"root":"ImageWindow","type":"Window","script":"res://src/ui/image_window.gd","setup":"",
+		"unique":["ImageScroll","Picture","ImageError","RetryImage","ZoomIn","ZoomOut","FitImage","OriginalSize","CloseImage","ConfirmImage","Chrome"],
 	},
 	"res://scenes/ui/dynamics_window.tscn": {
 		"root": "DynamicsWindow",

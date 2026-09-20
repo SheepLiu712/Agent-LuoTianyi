@@ -2,7 +2,7 @@ extends MarginContainer
 signal logout_requested
 signal log_requested
 signal settings_requested(kind: String)
-const ImageOverlay = preload("res://scenes/preview/image_overlay.tscn")
+signal image_requested(provider: Callable)
 @onready var _margin: MarginContainer = %Margin
 @onready var _menu = %ChatMore
 @onready var _clear_dialog: Window = %ClearDialog
@@ -175,9 +175,7 @@ func _image_action(id: String, action: String) -> void:
 	if action == "retry":
 		_session.request_message_image(id,true)
 	else:
-		var texture: Texture2D = _session.preview_message_image(id)
-		if texture != null:
-			var overlay = ImageOverlay.instantiate()
-			overlay.setup(texture,false)
-			_margin.add_child(overlay)
-			overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		image_requested.emit(func():
+			var texture: Texture2D = _session.preview_message_image(id)
+			if texture == null: _session.request_message_image(id,true)
+			return texture)

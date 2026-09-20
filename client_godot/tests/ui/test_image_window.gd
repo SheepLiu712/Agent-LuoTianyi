@@ -35,6 +35,13 @@ func run() -> void:
 	check(image_window.get_node("%ImageError").visible,"failed load shows retryable error")
 	image_window.get_node("%RetryImage").pressed.emit()
 	check(not image_window.get_node("%ImageError").visible and image_window.get_node("%Picture").texture == texture,"retry loads through the same source")
+	if DisplayServer.get_name() != "headless":
+		second.mode = Window.MODE_MINIMIZED
+		await create_timer(.2).timeout
+		check(not image_window.visible,"image hides when current source minimizes")
+		second.open()
+		await create_timer(.2).timeout
+		check(image_window.visible,"image returns when source restores")
 	image_window.get_node("%OriginalSize").pressed.emit()
 	check(image_window.get_node("%Picture").custom_minimum_size == texture.get_size(),"original size uses image pixels")
 	image_window.close_requested.emit()

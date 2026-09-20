@@ -1,7 +1,8 @@
 extends Control
 const Session = preload("res://src/preview/demo_session.gd")
 const Bubble = preload("res://scenes/ui/message_bubble.tscn")
-const ImageOverlay = preload("res://scenes/preview/image_overlay.tscn")
+const ImagePresenter = preload("res://src/ui/image_presenter.gd")
+var _image_presenter: Node
 var _session = Session.new()
 @onready var _avatar = %AvatarPanel
 @onready var _split: HSplitContainer = %Split
@@ -23,6 +24,8 @@ var _refresh_pending := false
 var _refresh_again := false
 
 func _ready() -> void:
+	_image_presenter = ImagePresenter.new()
+	add_child(_image_presenter)
 	_expressions.item_selected.connect(func(index): _avatar.avatar.apply_expression(_expressions.get_item_text(index)))
 	_scenarios.item_selected.connect(func(index):
 		_change_scenario(["conversation", "empty", "disconnected", "error", "thinking"][index]))
@@ -139,24 +142,15 @@ func _preview_image(image: Image) -> void:
 
 func _open_image(texture: Texture2D, pending: bool) -> void:
 	_input.release_focus()
-	var overlay = ImageOverlay.instantiate()
-	overlay.setup(texture, pending)
-	add_child(overlay)
-	overlay.focus_mode = Control.FOCUS_ALL
-	overlay.grab_focus()
-	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	overlay.offset_left = 60
-	overlay.offset_right = -60
-	overlay.offset_top = 60
-	overlay.offset_bottom = -60
-	overlay.confirmed.connect(func(value):
-		var id: String = _session.submit_text("[图片]")
-		if id.is_empty():
-			overlay.feedback.text = "当前模拟场景无法发送，图片已保留。可取消后切换到日常聊天。"
-			return
-		_images[id] = value
-		overlay.queue_free()
-		_session.settle(id, true))
+	var confirm := Callable()
+	if pending:
+		confirm = func(value):
+			var id: String = _session.submit_text("[图片]")
+			if id.is_empty(): return false
+			_images[id] = value
+			_session.settle(id,true)
+			return true
+	_image_presenter.open_image(get_window(),func(): return texture,confirm)
 
 func _toggle_play() -> void:
 	_playing = not _playing

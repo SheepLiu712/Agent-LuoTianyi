@@ -1,0 +1,93 @@
+[gd_scene load_steps=5 format=3]
+[ext_resource type="Script" path="res://src/ui/image_window.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="chrome"]
+[sub_resource type="StyleBoxFlat" id="surface"]
+bg_color = Color(0.94,0.96,0.98,1)
+content_margin_left = 16.0
+content_margin_top = 16.0
+content_margin_right = 16.0
+content_margin_bottom = 16.0
+
+[node name="ImageWindow" type="Window"]
+title = "图片预览"
+size = Vector2i(900,720)
+min_size = Vector2i(600,460)
+visible = false
+force_native = true
+transient = true
+theme = ExtResource("theme")
+script = ExtResource("script")
+
+[node name="Body" type="PanelContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 44.0
+theme_override_styles/panel = SubResource("surface")
+
+[node name="Column" type="VBoxContainer" parent="Body"]
+theme_override_constants/separation = 12
+
+[node name="ImageScroll" type="ScrollContainer" parent="Body/Column"]
+unique_name_in_owner = true
+size_flags_vertical = 3
+
+[node name="Picture" type="TextureRect" parent="Body/Column/ImageScroll"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+size_flags_vertical = 3
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ImageError" type="Label" parent="Body/Column"]
+unique_name_in_owner = true
+visible = false
+text = "图片暂时无法读取，请重试。"
+horizontal_alignment = 1
+
+[node name="RetryImage" type="Button" parent="Body/Column"]
+unique_name_in_owner = true
+visible = false
+text = "重试读取图片"
+
+[node name="Feedback" type="Label" parent="Body/Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+
+[node name="Toolbar" type="HBoxContainer" parent="Body/Column"]
+theme_override_constants/separation = 8
+
+[node name="ZoomLabel" type="Label" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+
+[node name="ZoomOut" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+text = "－"
+tooltip_text = "缩小图片"
+
+[node name="ZoomIn" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+text = "＋"
+tooltip_text = "放大图片"
+
+[node name="FitImage" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+text = "适应窗口"
+
+[node name="OriginalSize" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+text = "原始比例"
+
+[node name="ConfirmImage" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+visible = false
+text = "发送图片 · 离线演示"
+theme_type_variation = &"PrimaryButton"
+
+[node name="CloseImage" type="Button" parent="Body/Column/Toolbar"]
+unique_name_in_owner = true
+text = "关闭"
+
+[node name="Chrome" parent="." instance=ExtResource("chrome")]
+unique_name_in_owner = true

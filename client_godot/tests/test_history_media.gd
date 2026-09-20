@@ -70,6 +70,9 @@ func _run() -> void:
 		quit(1)
 		return
 	var view = load(VIEW_SCENE).instantiate()
+	var presenter = load("res://src/ui/image_presenter.gd").new(directory+"/geometry.cfg")
+	root.add_child(presenter)
+	view.image_requested.connect(func(provider): presenter.open_image(root,provider))
 	view.setup(chat)
 	root.add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -81,7 +84,8 @@ func _run() -> void:
 	check(not preview_buttons.is_empty(),"real thumbnail offers preview")
 	if not preview_buttons.is_empty():
 		preview_buttons[0].pressed.emit()
-		check(view.find_children("*","Label",true,false).any(func(n): return n.text == "图片预览"),"image preview opens inside client")
+		check(root.find_children("ImageWindow","Window",true,false).any(func(n): return n.visible),"image preview opens in the shared window")
+	presenter.queue_free()
 	view.queue_free()
 	chat.queue_free()
 	await process_frame
