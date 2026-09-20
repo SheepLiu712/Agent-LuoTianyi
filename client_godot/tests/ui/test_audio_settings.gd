@@ -7,13 +7,22 @@ func check(ok: bool, label: String) -> void:
 		print("FAIL: ", label)
 func run() -> void:
 	var path := "user://audio-settings-%s" % Time.get_ticks_usec()
-	var audio = load("res://src/media/reply_audio.gd").new(null, Callable(), load("res://src/storage/audio_cache.gd").new(path))
+	var cache = load("res://src/storage/audio_cache.gd").new(path)
+	var audio = load("res://src/media/reply_audio.gd").new(null, Callable(), cache)
 	var session = load("res://src/session/chat_session.gd").new(load("res://src/network/websocket_transport.gd").new(), null, audio)
 	root.add_child(session)
 	audio.set_scope("http://audio-settings.test", "alice")
 	audio.append_reply_audio("cached", Marshalls.raw_to_base64(load("res://tests/support/audio_samples.gd").tone(0.1)), true)
+	audio.append_reply_audio("old", Marshalls.raw_to_base64(load("res://tests/support/audio_samples.gd").tone(0.1)), true)
+	var meta_path: String = cache.lookup("old").path.get_basename() + ".json"
+	var meta: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(meta_path))
+	meta.saved_at_unix = int(Time.get_unix_time_from_system()) - 40 * 86400
+	var file := FileAccess.open(meta_path, FileAccess.WRITE)
+	file.store_string(JSON.stringify(meta))
+	file.close()
 	var window = load("res://scenes/ui/settings_window.tscn").instantiate()
 	check(window.get_node_or_null("%AudioTab") is Button, "settings includes voice cache management")
+	check(window.get_node("%AudioPage").get_node_or_null("%OlderThanDays") is SpinBox, "user can choose cache age in days")
 	if failures.is_empty():
 		window.setup(null, null, null, session.clear_cache)
 		root.add_child(window)
@@ -31,6 +40,12 @@ func run() -> void:
 			window.get_texture().get_image().save_png("res://artifacts/audio-settings-confirm.png")
 		dialog.get_cancel_button().pressed.emit()
 		check(audio.get_message_audio("cached").available and not dialog.visible, "cancel preserves cache")
+		page.get_node("%ClearCache").pressed.emit()
+		check(dialog.dialog_text.contains("30"), "confirmation states the chosen day limit")
+		page.get_node("%OlderThanDays").value = 0
+		dialog.get_ok_button().pressed.emit()
+		await create_timer(0.1).timeout
+		check(not audio.get_message_audio("old").available and audio.get_message_audio("cached").available, "confirmation uses its frozen age and preserves recent cache")
 		page.get_node("%ClearCache").pressed.emit()
 		dialog.get_ok_button().pressed.emit()
 		await create_timer(0.1).timeout
