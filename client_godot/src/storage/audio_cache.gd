@@ -41,6 +41,9 @@ func set_scope(server: String, username: String) -> Error:
 func _path(id: String, extension: String) -> String:
 	return _directory.path_join(id.sha256_text() + extension)
 
+func get_directory() -> String:
+	return _directory
+
 func begin(id: String) -> Error:
 	if _directory.is_empty() or id.is_empty():
 		return ERR_UNCONFIGURED

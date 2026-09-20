@@ -9,6 +9,7 @@
 #include <cstring>
 #include <vector>
 #include "pcm_stream_decoder.h"
+#include "storage_volume.h"
 using namespace godot;
 
 namespace {
@@ -109,6 +110,7 @@ void initialize_security(ModuleInitializationLevel level) {
     if (level == MODULE_INITIALIZATION_LEVEL_SCENE) {
         ClassDB::register_class<WindowsSecurity>();
         ClassDB::register_class<PcmStreamDecoder>();
+        ClassDB::register_class<StorageVolume>();
     }
 }
 void terminate_security(ModuleInitializationLevel) {}

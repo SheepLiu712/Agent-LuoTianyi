@@ -1,4 +1,7 @@
 extends Control
+const StorageService = preload("res://src/storage/storage_service.gd")
+var _storage_service: StorageService
+var _audio_cache: RefCounted
 ## Composition root: owns account services and keeps the offline preview separate.
 const Api = preload("res://src/network/account_api.gd")
 const Store = preload("res://src/storage/credential_store.gd")
@@ -95,6 +98,8 @@ func _ready() -> void:
 	%AccountMenu.set_items([{"id":"logout","label":"退出登录"},{"id":"exit","label":"退出应用"}])
 	%AccountMenu.activated.connect(_request_close)
 	var cache = Cache.new(_layout_path.get_base_dir().path_join("audio"),_log)
+	_audio_cache = cache
+	_storage_service = preload("res://src/storage/godot_storage_service.gd").new()
 	var history = preload("res://src/session/history_sync.gd").new(preload("res://src/network/history_api.gd").new(),_log)
 	var reading = preload("res://src/storage/reading_position.gd").new(_layout_path.get_base_dir().path_join("reading"))
 	var images = preload("res://src/storage/history_images.gd").new(_layout_path.get_base_dir().path_join("images"),_log)
@@ -225,7 +230,7 @@ func _open_settings(kind: String) -> void:
 	if key == "settings":
 		controller = preload("res://src/session/preferences_controller.gd").new(preload("res://src/network/json_request.gd").new(),_log)
 		window = preload("res://scenes/ui/settings_window.tscn").instantiate()
-		window.setup(controller,_models,_executor,_chat.clear_cache)
+		window.setup(controller,_models,_executor,_chat.clear_cache,_storage_service,_audio_cache.get_directory())
 	else:
 		window = preload("res://scenes/ui/dynamics_window.tscn").instantiate()
 		window.setup(_dynamics,_layout_path.get_base_dir().path_join("dynamics-window.cfg"))

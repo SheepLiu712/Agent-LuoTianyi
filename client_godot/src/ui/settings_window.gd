@@ -1,25 +1,30 @@
 extends Window
+const StorageService = preload("res://src/storage/storage_service.gd")
 signal saving_finished(ok: bool)
 var _preferences: Node
 var _models: Node
 var _executor: Node
 var _clear_cache: Callable
+var _storage_service: StorageService
+var _cache_directory := ""
 var _saving := false
 var _close_after_save := false
 var _hidden_by_main := false
 @onready var _preferences_page = %PreferencesPage
 @onready var _model_page = %ModelPage
 
-func setup(preferences: Node, models: Node, executor: Node = null, clear_cache: Callable = Callable()) -> void:
+func setup(preferences: Node, models: Node, executor: Node = null, clear_cache: Callable = Callable(), storage_service: StorageService = null, cache_directory: String = "") -> void:
 	_preferences = preferences
 	_models = models
 	_executor = executor
 	_clear_cache = clear_cache
+	_storage_service = storage_service
+	_cache_directory = cache_directory
 
 func _ready() -> void:
 	_preferences_page.setup(_preferences)
 	_model_page.setup(_models,_executor)
-	%AudioPage.setup(_clear_cache)
+	%AudioPage.setup(_clear_cache, _storage_service, _cache_directory)
 	%AudioTab.disabled = not _clear_cache.is_valid()
 	%AudioTab.pressed.connect(func(): select_page("audio"))
 	%PreferencesTab.disabled = _preferences == null

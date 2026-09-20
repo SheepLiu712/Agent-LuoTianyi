@@ -2,6 +2,38 @@
 [ext_resource type="Script" path="res://src/ui/audio_settings_page.gd" id="script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="decision"]
+[sub_resource type="Gradient" id="track_gradient"]
+offsets = PackedFloat32Array(0, 0.72, 0.75, 0.99, 1)
+colors = PackedColorArray(1,1,1,0, 1,1,1,0, 1,1,1,1, 1,1,1,1, 1,1,1,0)
+[sub_resource type="GradientTexture2D" id="track_texture"]
+gradient = SubResource("track_gradient")
+width = 216
+height = 216
+fill = 1
+fill_from = Vector2(0.5,0.5)
+fill_to = Vector2(0.5,0)
+[sub_resource type="Gradient" id="progress_gradient"]
+offsets = PackedFloat32Array(0, 0.72, 0.75, 0.99, 1)
+colors = PackedColorArray(0,0.78,0.94,0, 0,0.78,0.94,0, 0,0.78,0.94,1, 0,0.78,0.94,1, 0,0.78,0.94,0)
+[sub_resource type="GradientTexture2D" id="progress_texture"]
+gradient = SubResource("progress_gradient")
+width = 216
+height = 216
+fill = 1
+fill_from = Vector2(0.5,0.5)
+fill_to = Vector2(0.5,0)
+[sub_resource type="StyleBoxFlat" id="marker"]
+bg_color = Color(0,0.78,0.94,1)
+corner_radius_top_left = 17
+corner_radius_top_right = 17
+corner_radius_bottom_left = 17
+corner_radius_bottom_right = 17
+[sub_resource type="StyleBoxFlat" id="ring_background"]
+bg_color = Color(0.92,0.955,0.985,1)
+corner_radius_top_left = 116
+corner_radius_top_right = 116
+corner_radius_bottom_left = 116
+corner_radius_bottom_right = 116
 [node name="AudioSettingsPage" type="MarginContainer"]
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -11,29 +43,93 @@ theme_override_constants/margin_right = 24
 theme_override_constants/margin_top = 24
 theme_override_constants/margin_bottom = 24
 script = ExtResource("script")
-[node name="Column" type="VBoxContainer" parent="."]
+[node name="Scroll" type="ScrollContainer" parent="."]
+horizontal_scroll_mode = 0
+size_flags_vertical = 3
+
+[node name="Column" type="VBoxContainer" parent="Scroll"]
+size_flags_horizontal = 3
 theme_override_constants/separation = 16
-[node name="Title" type="Label" parent="Column"]
+[node name="Title" type="Label" parent="Scroll/Column"]
 text = "语音缓存"
 theme_override_font_sizes/font_size = 22
-[node name="Description" type="Label" parent="Column"]
+[node name="Description" type="Label" parent="Scroll/Column"]
 text = "已接收的完整语音保存在这台电脑上，供消息重放。\n缓存按服务器和账号隔离，退出登录或重启后仍保留，不会自动清理。"
 autowrap_mode = 3
-[node name="Scope" type="Label" parent="Column"]
+[node name="UsageRow" type="HBoxContainer" parent="Scroll/Column"]
+theme_override_constants/separation = 16
+[node name="UsageRing" type="Control" parent="Scroll/Column/UsageRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(232,232)
+mouse_filter = 2
+[node name="RingBackdrop" type="Panel" parent="Scroll/Column/UsageRow/UsageRing"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("ring_background")
+[node name="UsageProgress" type="TextureProgressBar" parent="Scroll/Column/UsageRow/UsageRing"]
+unique_name_in_owner = true
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 8.0
+offset_top = 8.0
+offset_right = -8.0
+offset_bottom = -8.0
+mouse_filter = 2
+step = 0.0
+fill_mode = 4
+texture_under = SubResource("track_texture")
+texture_progress = SubResource("progress_texture")
+[node name="Center" type="CenterContainer" parent="Scroll/Column/UsageRow/UsageRing"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+[node name="Labels" type="VBoxContainer" parent="Scroll/Column/UsageRow/UsageRing/Center"]
+mouse_filter = 2
+[node name="UsagePercent" type="Label" parent="Scroll/Column/UsageRow/UsageRing/Center/Labels"]
+unique_name_in_owner = true
+text = "--%"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 28
+[node name="UsageState" type="Label" parent="Scroll/Column/UsageRow/UsageRing/Center/Labels"]
+unique_name_in_owner = true
+text = "存储空间扫描中"
+horizontal_alignment = 1
+theme_override_font_sizes/font_size = 12
+[node name="UsageMarker" type="Panel" parent="Scroll/Column/UsageRow/UsageRing"]
+unique_name_in_owner = true
+offset_left = 99.0
+offset_top = 7.0
+offset_right = 133.0
+offset_bottom = 41.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("marker")
+[node name="UsageDetails" type="Label" parent="Scroll/Column/UsageRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+size_flags_vertical = 4
+autowrap_mode = 3
+text = "正在读取本账号缓存与磁盘容量…"
+[node name="Scope" type="Label" parent="Scroll/Column"]
 text = "清理仅作用于当前服务器和账号。聊天文字保留，已经清理的语音将无法重放。正在播放的在线语音不会被打断。"
 autowrap_mode = 3
-[node name="ClearCache" type="Button" parent="Column"]
+[node name="Actions" type="HBoxContainer" parent="Scroll/Column"]
+theme_override_constants/separation = 8
+[node name="ClearCache" type="Button" parent="Scroll/Column/Actions"]
 unique_name_in_owner = true
 text = "清理本账号语音缓存…"
 size_flags_horizontal = 0
 custom_minimum_size = Vector2(0, 40)
-[node name="CacheStatus" type="Label" parent="Column"]
+[node name="RefreshUsage" type="Button" parent="Scroll/Column/Actions"]
+unique_name_in_owner = true
+text = "重新扫描"
+[node name="CacheStatus" type="Label" parent="Scroll/Column"]
 unique_name_in_owner = true
 autowrap_mode = 3
-[node name="Spacer" type="Control" parent="Column"]
+[node name="Spacer" type="Control" parent="Scroll/Column"]
 size_flags_vertical = 3
 mouse_filter = 2
-[node name="Hint" type="Label" parent="Column"]
+[node name="Hint" type="Label" parent="Scroll/Column"]
 text = "缓存清理是单独操作，不会随“保存全部修改”自动执行。"
 autowrap_mode = 3
 [node name="ClearDialog" parent="." instance=ExtResource("decision")]

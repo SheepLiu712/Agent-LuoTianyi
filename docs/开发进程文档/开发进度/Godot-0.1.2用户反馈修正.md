@@ -53,3 +53,11 @@
 - SPEC 79c8491；Red 12deb81；Green为本记录提交。GPU test_rounded_dropdown通过实际边角透明像素/正文不透明像素及窗口边界；capture_dropdown_ui在100/125/150%通过长菜单边界、定位、键盘和移动收起。长菜单最初超界8px，已按4px阴影修正。
 - 原生鼠标/键盘测试改为读取系统标题栏按钮矩形，测试三键、拖拽、双击最大化/还原、八向缩放、系统恢复与Alt+F4 PASS。首轮拖动位置断言失败，未计通过；相同产品代码复跑完整测试通过，该次输入偏差原因未定位。
 - GPU capture_release_ui通过主窗/动态/日志/设置联动与全部截图，原有可见性规则不变。未新增DWM或窗口裁切原生实现；未执行Android/iOS导出或硬件验收，不宣称客户端已完成手机移植。
+
+## 2026-09-21 StorageService与语音缓存占用圆环
+
+- 依用户五条原则新增统一StorageService，UI按注入路径调用接口，不直接访问OS/FileAccess/DirAccess/原生类。GodotStorageService子类负责目录统计与容量适配，未知directory/total/free为-1，真实空目录为0；字段均64位int bytes。统计不跟随符号链接，失败不把部分扫描当完整。
+- StorageVolume只读查询封装Windows GetDiskFreeSpaceEx，源码含POSIX statvfs分支；在现有扩展编译注册，Windows构建和查询已验证，POSIX/移动构建尚未实测。无法提供容量的平台返回-1，界面仍能显示已知缓存大小。
+- 圆环由场景TextureProgressBar、渐变纹理、圆角Panel指示点与Label组成，按参考图呈现。统计真实当前账号缓存目录/所在磁盘总容量，非零微量显示<0.01%，不可用显示--%，扫描和清理后刷新数据。
+- SPEC 2c1a527；Red 43ff989；Green为本记录提交。test_storage_service通过真实字节统计、64位容量、空目录和不可用-1；test_cache_usage_ring headless/GPU通过百分比/字节文案及未知态。test_windows_security、test_pcm_decoder、test_audio_settings回归PASS。
+- 原生DLL新SHA-256为b02cd546835d0f87f8b618a2b45951251de4213edb18dc7b7760d78069705f47，已同步依赖锁。作者自审确认未给UI新增平台查询、未用0掩盖不可用容量，旧交付包未覆盖。
