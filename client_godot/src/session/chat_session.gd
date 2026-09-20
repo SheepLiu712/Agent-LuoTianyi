@@ -321,8 +321,8 @@ func resume_replay() -> void:
 func stop_replay() -> void:
 	_media.stop_replay()
 
-func clear_cache() -> Error:
-	var result: Error = _media.clear_cache()
+func clear_cache(older_than_days: int = 0) -> Error:
+	var result: Error = _media.clear_cache(older_than_days)
 	if result != OK:
 		_system_error("CACHE_CLEAR_FAILED")
 	return result

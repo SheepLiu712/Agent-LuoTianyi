@@ -119,6 +119,7 @@ func _run() -> void:
 	settings.open()
 	settings.select_page("audio")
 	var page = settings.get_node("%AudioPage")
+	page.get_node("%OlderThanDays").value = 0
 	var menu = page.get_node("%ClearCache")
 	menu.pressed.emit()
 	var dialogs = page.find_children("*Dialog","Window",true,false)

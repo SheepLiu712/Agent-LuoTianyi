@@ -308,12 +308,13 @@ func stop_replay() -> void:
 		_log("replay_stopped",_replay.id)
 		_replay.stop()
 
-func clear_cache() -> Error:
+func clear_cache(older_than_days: int = 0) -> Error:
+	if older_than_days < 0: return ERR_INVALID_PARAMETER
 	stop_replay()
-	for item in _streams.values():
-		item.cache_suppressed = true
+	if older_than_days == 0:
+		for item in _streams.values(): item.cache_suppressed = true
 	var ids := _metadata.keys()
-	var result: Error = _cache.clear() if _cache != null else ERR_UNCONFIGURED
+	var result: Error = _cache.clear(older_than_days) if _cache != null else ERR_UNCONFIGURED
 	_metadata.clear()
 	_cache_errors.clear()
 	for id in ids:

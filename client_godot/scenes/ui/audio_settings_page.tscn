@@ -113,6 +113,26 @@ text = "正在读取本账号缓存与磁盘容量…"
 [node name="Scope" type="Label" parent="Scroll/Column"]
 text = "清理仅作用于当前服务器和账号。聊天文字保留，已经清理的语音将无法重放。正在播放的在线语音不会被打断。"
 autowrap_mode = 3
+[node name="AgeRow" type="HBoxContainer" parent="Scroll/Column"]
+theme_override_constants/separation = 8
+[node name="AgeLabel" type="Label" parent="Scroll/Column/AgeRow"]
+text = "清理"
+[node name="OlderThanDays" type="SpinBox" parent="Scroll/Column/AgeRow"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(120,40)
+min_value = 0.0
+max_value = 36500.0
+step = 1.0
+value = 30.0
+allow_greater = true
+rounded = true
+[node name="AgeSuffix" type="Label" parent="Scroll/Column/AgeRow"]
+text = "天之前的缓存"
+[node name="AgeHint" type="Label" parent="Scroll/Column"]
+text = "可自由输入天数；0 表示全部缓存。"
+tooltip_text = "依据本机缓存保存时间；旧记录使用文件修改时间，时间未知则保留。"
+theme_override_font_sizes/font_size = 12
+
 [node name="Actions" type="HBoxContainer" parent="Scroll/Column"]
 theme_override_constants/separation = 8
 [node name="ClearCache" type="Button" parent="Scroll/Column/Actions"]

@@ -20,7 +20,7 @@ func _initialize() -> void:
 		decoder.append(bytes)
 		var status: Dictionary = decoder.finish()
 		var wave: PackedFloat32Array = decoder.get_waveform(24)
-		for id in ["old", "recent", "legacy"]:
+		for id in ["old", "recent", "legacy", "boundary", "locked"]:
 			cache.begin(id)
 			cache.append(id, bytes)
 			cache.commit(id,status,wave)
@@ -29,6 +29,16 @@ func _initialize() -> void:
 		var meta: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(meta_path))
 		meta.saved_at_unix = clock[0] - 40 * 86400
 		write_json(meta_path, meta)
+		meta_path = cache.lookup("boundary").path.get_basename() + ".json"
+		meta = JSON.parse_string(FileAccess.get_file_as_string(meta_path))
+		meta.saved_at_unix = clock[0] - 30 * 86400
+		write_json(meta_path, meta)
+		var locked_path: String = cache.lookup("locked").path
+		meta_path = locked_path.get_basename() + ".json"
+		meta = JSON.parse_string(FileAccess.get_file_as_string(meta_path))
+		meta.saved_at_unix = clock[0] - 40 * 86400
+		write_json(meta_path, meta)
+		FileAccess.set_read_only_attribute(locked_path, true)
 		meta_path = cache.lookup("legacy").path.get_basename() + ".json"
 		meta = JSON.parse_string(FileAccess.get_file_as_string(meta_path))
 		meta.erase("saved_at_unix")
@@ -41,9 +51,11 @@ func _initialize() -> void:
 		cache.begin("receiving")
 		cache.append("receiving",bytes)
 		check(cache.clear(-1) == ERR_INVALID_PARAMETER and not cache.lookup("old").is_empty(), "negative days cannot delete cache")
-		check(cache.clear(30) == OK, "age-filtered clear succeeds")
+		check(cache.clear(30) != OK and not cache.lookup("locked").is_empty(), "partial deletion failure preserves the locked entry and reports error")
+		FileAccess.set_read_only_attribute(locked_path, false)
+		check(cache.clear(30) == OK and cache.lookup("locked").is_empty(), "retry clears only remaining eligible entries")
 		check(cache.lookup("old").is_empty() and cache.lookup("legacy").is_empty(), "old metadata and legacy modified-time entries are cleared")
-		check(not cache.lookup("recent").is_empty() and not other.lookup("other").is_empty(), "recent and other account entries are kept")
+		check(not cache.lookup("recent").is_empty() and not cache.lookup("boundary").is_empty() and not other.lookup("other").is_empty(), "recent, exact-boundary and other account entries are kept")
 		check(cache.commit("receiving",status,wave) == OK, "selective clear preserves an active receiving stream")
 		check(cache.clear(0) == OK and cache.lookup("recent").is_empty(), "zero days explicitly clears all current account cache")
 		other.clear()

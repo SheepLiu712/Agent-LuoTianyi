@@ -5,6 +5,7 @@ var _clearing := false
 var _storage: StorageService
 var _directory := ""
 var _scan_generation := 0
+var _pending_days := 0
 
 func setup(clear_cache: Callable, storage_service: StorageService = null, cache_directory: String = "") -> void:
 	_clear_cache = clear_cache
@@ -16,7 +17,7 @@ func setup(clear_cache: Callable, storage_service: StorageService = null, cache_
 
 func _ready() -> void:
 	%ClearCache.disabled = not _clear_cache.is_valid()
-	%ClearCache.pressed.connect(func(): %ClearDialog.popup_centered())
+	%ClearCache.pressed.connect(_request_clear)
 	%ClearDialog.confirmed.connect(_clear)
 	%RefreshUsage.pressed.connect(_refresh_usage)
 	%UsageRing.resized.connect(_position_marker)
@@ -24,16 +25,27 @@ func _ready() -> void:
 	_position_marker()
 	if visible: _refresh_usage()
 
+func _request_clear() -> void:
+	var days: float = %OlderThanDays.value
+	if not is_finite(days) or days < 0 or days > 1000000000000:
+		%CacheStatus.text = "请输入有效的非负整数天数。"
+		return
+	_pending_days = int(days)
+	%ClearDialog.dialog_text = ("清理当前服务器、本账号的全部语音缓存？" if _pending_days == 0 else "清理当前服务器、本账号 %s 天之前保存的语音缓存？" % _pending_days) + "\n聊天文字保留；已清理语音无法重放。本地重放将停止，在线声音继续。"
+	%ClearDialog.popup_centered()
+
 func _clear() -> void:
 	if _clearing or not _clear_cache.is_valid(): return
 	_clearing = true
 	%ClearCache.disabled = true
+	%OlderThanDays.editable = false
 	%CacheStatus.text = "正在清理…"
 	await get_tree().process_frame
-	var result: Error = _clear_cache.call()
+	var result: Error = _clear_cache.call(_pending_days)
 	_clearing = false
 	%ClearCache.disabled = false
-	%CacheStatus.text = "已清理本账号语音缓存，聊天文字已保留。" if result == OK else "部分语音未能清理，请关闭占用文件后重试。"
+	%OlderThanDays.editable = true
+	%CacheStatus.text = (("已清理本账号全部语音缓存。" if _pending_days == 0 else "已清理本账号 %s 天之前的语音缓存。" % _pending_days) + "聊天文字已保留。") if result == OK else "部分语音未能清理，请关闭占用文件后重试。"
 	_refresh_usage()
 
 func _refresh_usage() -> void:

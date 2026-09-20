@@ -61,3 +61,10 @@
 - 圆环由场景TextureProgressBar、渐变纹理、圆角Panel指示点与Label组成，按参考图呈现。统计真实当前账号缓存目录/所在磁盘总容量，非零微量显示<0.01%，不可用显示--%，扫描和清理后刷新数据。
 - SPEC 2c1a527；Red 43ff989；Green为本记录提交。test_storage_service通过真实字节统计、64位容量、空目录和不可用-1；test_cache_usage_ring headless/GPU通过百分比/字节文案及未知态。test_windows_security、test_pcm_decoder、test_audio_settings回归PASS。
 - 原生DLL新SHA-256为b02cd546835d0f87f8b618a2b45951251de4213edb18dc7b7760d78069705f47，已同步依赖锁。作者自审确认未给UI新增平台查询、未用0掩盖不可用容量，旧交付包未覆盖。
+
+## 2026-09-21 用户可选天数的缓存清理
+
+- 缓存页增加整数天数输入，默认30，可输入更大天数，0明确表示全部。确认文案冻结所选天数，取消不删除，清理后刷新圆环与字节统计；没有自动定时清理。
+- AudioCache/ReplyAudio/ChatSession沿用clear接口并增加可选天数参数，旧无参调用仍为全清。新增saved_at_unix元数据，旧记录使用文件修改时间；只删除严格早于截止时间的本账号完整缓存，未知时间保留。按天清理不终止当前缓存接收；全清保持原行为。清理停止本地重放，在线声音继续。
+- SPEC a5fe412；Red ac0c4e4；Green为本记录提交。test_cache_retention通过旧/近期/精确边界/旧格式修改时间、其他账号、正在接收、负数拒绝、只读文件部分失败与重试、0全清。GPU/headless test_audio_settings通过真实清理、确认天数冻结、近期缓存保留、全清；test_audio_cache、test_voice_replay回归PASS。
+- 作者自审：时间判断与文件删除留在存储模块，UI不读文件或调用平台接口；磁盘统计继续经StorageService，缓存清理不会隐式随设置保存执行。

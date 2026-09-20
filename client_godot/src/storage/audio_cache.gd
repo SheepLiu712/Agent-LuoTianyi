@@ -5,10 +5,12 @@ var _directory := ""
 var _logger: RefCounted
 var _pending: Dictionary = {}
 var _owned := RegEx.new()
+var _now_seconds: Callable
 
-func _init(root: String = "user://audio", logger: RefCounted = null) -> void:
+func _init(root: String = "user://audio", logger: RefCounted = null, now_seconds: Callable = Callable()) -> void:
 	_root = root.trim_suffix("/")
 	_logger = logger
+	_now_seconds = now_seconds
 	_owned.compile("^[0-9a-f]{64}\\.(part|audio|json|json\\.tmp)$")
 
 func set_scope(server: String, username: String) -> Error:
@@ -77,6 +79,7 @@ func commit(id: String, status: Dictionary, waveform: PackedFloat32Array) -> Err
 	var file: FileAccess = _pending[id]
 	var metadata := {"version":1, "sample_rate":status.get("sample_rate",0), "channels":status.get("channels",0),
 		"bits":status.get("bits",0), "frames":status.get("decoded_frames",0), "bytes":file.get_position(), "waveform":Array(waveform)}
+	metadata.saved_at_unix = _now()
 	var completed: bool = status.get("ok") is bool and status.ok and status.get("finished") is bool and status.finished
 	var same_size: bool = (status.get("input_bytes") is int or status.get("input_bytes") is float) and status.input_bytes == metadata.bytes
 	if not completed or not same_size or not _valid(metadata):
@@ -123,11 +126,15 @@ func lookup(id: String) -> Dictionary:
 		return {}
 	audio.close()
 	metadata.path = _path(id,".audio")
+	metadata.saved_at_unix = _saved_at(metadata, metadata.path)
 	metadata.duration = float(metadata.frames) / float(metadata.sample_rate)
 	metadata.waveform = PackedFloat32Array(metadata.waveform)
 	return metadata
 
 func _valid(data: Dictionary) -> bool:
+	if data.has("saved_at_unix"):
+		var saved: Variant = data.saved_at_unix
+		if not (saved is int or saved is float) or not is_finite(float(saved)) or saved < 0: return false
 	if not (data.get("version") is int or data.get("version") is float) or data.version != 1 or not data.get("waveform") is Array or data.waveform.size() != 24:
 		return false
 	for key in ["sample_rate","channels","bits","frames","bytes"]:
@@ -153,7 +160,9 @@ func abort_all() -> void:
 	for id in _pending.keys():
 		abort(id)
 
-func clear() -> Error:
+func clear(older_than_days: int = 0) -> Error:
+	if older_than_days < 0: return ERR_INVALID_PARAMETER
+	if older_than_days > 0: return _clear_older(older_than_days)
 	abort_all()
 	if _directory.is_empty():
 		return ERR_UNCONFIGURED
@@ -165,6 +174,44 @@ func clear() -> Error:
 				result = removed
 	if _logger != null:
 		_logger.record("cache_cleared",{"code":"OK" if result == OK else "CACHE_CLEAR_FAILED"})
+	return result
+
+func _now() -> int:
+	return int(_now_seconds.call()) if _now_seconds.is_valid() else int(Time.get_unix_time_from_system())
+
+func _saved_at(metadata: Dictionary, audio_path: String) -> int:
+	if metadata.has("saved_at_unix"): return int(metadata.saved_at_unix)
+	if not FileAccess.file_exists(audio_path): return -1
+	var modified := FileAccess.get_modified_time(audio_path)
+	return modified if modified > 0 else -1
+
+func _clear_older(days: int) -> Error:
+	if _directory.is_empty(): return ERR_UNCONFIGURED
+	var cutoff := float(_now()) - float(days) * 86400.0
+	var result := OK
+	for name in DirAccess.get_files_at(_directory):
+		if _owned.search(name) == null or not name.ends_with(".json"): continue
+		var manifest_path := _directory.path_join(name)
+		var file := FileAccess.open(manifest_path, FileAccess.READ)
+		if file == null:
+			result = FileAccess.get_open_error()
+			continue
+		if file.get_length() > 8192: continue
+		var parser := JSON.new()
+		var parsed := parser.parse(file.get_as_text())
+		file.close()
+		if parsed != OK or not parser.data is Dictionary or not _valid(parser.data): continue
+		var audio_path := manifest_path.get_basename() + ".audio"
+		var saved := _saved_at(parser.data, audio_path)
+		if saved < 0 or float(saved) >= cutoff: continue
+		if FileAccess.file_exists(audio_path):
+			var removed := DirAccess.remove_absolute(audio_path)
+			if removed != OK:
+				result = removed
+				continue
+		var removed := DirAccess.remove_absolute(manifest_path)
+		if removed != OK: result = removed
+	if _logger != null: _logger.record("cache_cleared", {"code":"OK" if result == OK else "CACHE_CLEAR_FAILED"})
 	return result
 
 func _error(id: String, result: Error) -> Error:

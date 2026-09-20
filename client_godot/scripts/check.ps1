@@ -34,3 +34,4 @@ Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/media/test_image_attachment.gd') 'image-attachment'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_storage_service.gd') 'storage-service'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_cache_usage_ring.gd') 'cache-usage-ring'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_cache_retention.gd') 'cache-retention'
