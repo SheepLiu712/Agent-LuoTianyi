@@ -36,7 +36,7 @@
 
 把 `client_godot` 全部可见界面从代码建树改为 `.tscn` 节点树 + 只做行为的脚本。逐切片交付，每片独立的 SPEC → Red → Green；已完成事实写入开发进度文档。
 
-- [ ] 主题与材质资源化（theme/app_theme.tres、round_avatar.gdshader、slider_dot_*.png）
+- [x] 主题与材质资源化（theme/app_theme.tres、round_avatar.gdshader、slider_dot_*.png），2026-09-20 完成并验证
 - [ ] publish_window 场景化
 - [ ] preferences_window + model_window 场景化
 - [ ] account_view + main.tscn 就地节点化

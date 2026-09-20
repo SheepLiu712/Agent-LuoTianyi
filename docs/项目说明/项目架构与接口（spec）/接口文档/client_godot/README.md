@@ -417,3 +417,17 @@ DynamicDetail.refresh_comments() 由窗口调用，转交完整分页刷新并�
 `res://assets/ui/round_avatar.gdshader` 承担 `Style.avatar()` 的圆形遮罩（透明遮罩 + 浅底 `vec3(0.91,0.97,1.0)` 混合，半径 0.47→0.5 平滑过渡）；`res://assets/ui/slider_dot.png`、`slider_dot_highlight.png`、`slider_dot_disabled.png` 是 HSlider 的三个 grabber 圆点，像素与原 16×16 逐像素公式一致（中心 (7.5,7.5)、半径 ≤ 6，颜色分别为 `#66ccff`、`#43b8f0`、`#b7c6d0`）。
 
 从哪个 interface 验证：`tests/test_theme_contract.gd` 断言资源存在、条目值与字面规格逐项一致、`make_theme()` 返回的主题与磁盘资源等价、Grabber 圆点像素与公式一致，并断言项目默认主题指向该资源；`scripts/check.ps1` 的导入与启动步骤验证资源可被实际导入。
+
+## 界面场景化：视图场景与 setup() 注入（0.1.2 起）
+
+视图场景放在 `res://scenes/ui/`（窗口与视图组件），入口场景仍留在 `res://scenes/` 根（`main.tscn` 与离线样板）。场景是提交里的文本 `.tscn`，不依赖在编辑器里手工搭建。
+
+视图场景契约：根节点类型等于该视图原来的基类（窗口类为 `Window`，`src/ui/draft_window.gd` 的子类沿用这条继承链），根节点挂原脚本；根显式设 `theme = res://theme/app_theme.tres`，独立原生窗口因此不再各自构造主题；节点名、层级、文案、尺寸、颜色、间距、`theme_override_*` 与 `theme_type_variation` 全部写在场景里，脚本只保留行为、信号、原生坐标换算、自绘与业务逻辑，不再用 `new()` 建树。场景里承担公开语义、会被外部代码或测试按名字查找的节点同时设 `unique_name_in_owner`，脚本统一用 `%Name` 绑定，不再由代码 `name =` 命名。
+
+依赖注入契约：视图不再有带参数的 `_init`。依赖改由公开方法 `setup(...)` 注入，调用顺序固定 `instantiate() → setup() → add_child()`，保证 `_ready()` 执行时依赖已就位；`setup()` 只保存依赖，不建节点、不发起 IO。消费点用 `preload("res://scenes/...tscn")` 常量引用场景。
+
+首个场景化视图是 `res://scenes/ui/publish_window.tscn`：根节点 `PublishWindow`（`Window`）挂 `src/ui/publish_window.gd`，依赖由 `setup(controller)` 注入。原 `_init(controller)` 里的 `title`「发布动态」、`visible = false`、`force_native`、`transient`、`size`（520×350）、`min_size`（400×300），以及 `PanelContainer` + `VBoxContainer` 内的标题「分享此刻的想法」（20 号字）、`PublishDraft`（`TextEdit`，占位「想和天依分享些什么？」、按边界换行、纵向扩展）、状态 `Label`（智能按词换行）与 `PublishButton`（`Button`，「发布文字动态」，`PrimaryButton` 变体）全部改由场景提供；脚本保留 `published(id)` 信号、`open()`、`is_dirty()`（正在写或草稿非空）与 `_publish()` 的发布、清空、关闭及失败文案行为，公开面不变。
+
+`src/ui/draft_window.gd` 保持纯脚本基类，不节点化：`open()`、`is_dirty()` 与「关闭前丢弃确认」仍由它提供，`Discard` 确认对话框仍由基类代码创建；草稿窗口类各自提供 `.tscn`，根节点挂各自脚本并沿用这条继承链，因此 `super._ready()` 仍会构造确认框。
+
+从哪个 interface 验证：`tests/test_ui_scenes.gd` 逐场景断言场景存在、根节点类型、根脚本、关键节点名与 `unique_name_in_owner`、脚本暴露 `setup()` 且不再要求 `_init` 参数，并断言本片从代码搬到场景的属性值不变；`tests/test_dynamics_window.gd`、`tests/test_dynamics_detail.gd`、`tests/test_application_drafts.gd` 从发布窗口的公开行为（草稿保留、发布成功选中新动态并关闭）回归。
