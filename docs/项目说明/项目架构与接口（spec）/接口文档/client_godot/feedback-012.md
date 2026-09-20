@@ -73,3 +73,11 @@ StorageVolume只做只读容量查询，返回total_bytes/free_bytes或-1。独�
 AudioCache.get_directory()->String提供当前账号缓存目录；Application组装StorageService并注入SettingsWindow.setup(...,clear_cache,storage_service=null,cache_directory="")，AudioSettingsPage.setup(clear_cache,storage_service=null,cache_directory="")只调用该统一接口。目录按账号隔离，退出关闭页；UI不自行寻找路径或选择平台。
 
 缓存页采用用户图片所示的场景圆环：TextureProgressBar圆形轨道、Godot渐变纹理资源、天依蓝Panel指示点、中间百分比和扫描状态。百分比=directory_bytes/total_bytes×100，小于0.01%的非零值明确显示“<0.01%”；无法读取显示“--%”，不显示0%。同时列缓存大小、磁盘总容量和可用容量，清理后重新扫描。所有可见控件预设在.tscn，脚本只更新数值/文字/指示点位置。
+
+## 按用户天数清理缓存（任务14）
+
+AudioCache.clear(older_than_days:int=0)->Error、ReplyAudio.clear_cache(older_than_days=0)、ChatSession.clear_cache(older_than_days=0)增加兼容的可选参数。0保留原全部清理；正整数只删除保存时间严格早于当前UTC时间减N×86400秒的本账号完整缓存及其元数据；负数拒绝且不删除。其他账号、未满足天数的缓存、正在接收的临时流保留。全清仍终止本次缓存写入并清临时流，在线声音继续；清理操作停止本地重放以释放文件占用。
+
+新缓存元数据增加saved_at_unix整数UTC秒，version=1兼容旧记录；旧记录缺少字段时以音频文件修改时间判定，时间未知/元数据无效不进行按天删除。AudioCache构造增加可选now_seconds:Callable时间源用于确定性测试，默认使用当前UTC时间。统计查询仍只走StorageService，业务/UI不自行访问文件或平台API。
+
+音频缓存页增加场景SpinBox天数输入，默认30、最小0、整数步长，可自行输入更大天数；明确注明“0表示全部缓存”。确认时显示并冻结选择的天数，取消不删除；清理后刷新占用圆环，部分失败明确提示，不将保留的新缓存误称为清理失败。不做定时或后台自动清理。
