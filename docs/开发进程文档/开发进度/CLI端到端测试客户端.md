@@ -47,3 +47,11 @@
 - commit 或 PR：分支 `feat/cli-e2e-s5-image-actions`：`dcbdbd5`（SPEC）/ `47b5af4`（Red）/ `6cc9d8a`（Green）。
 - 验证及结果：focused `tests/test_cli_image_actions.py` + `tests/test_image_rules_mirror.py` → 19 passed；client 回归 → 115 passed（排除 3 个既有收集失败文件）。
 - 未验证范围：真实服务端图片接纳与回复链路（依赖 S1 门槛与部署一致性）、图片内容解码（校验按扩展名与大小）、大文件真实发送时延、GUI 图片发送回归（编码管道已抽取共用，由既有测试与本次回归保护）。
+
+### 2026-09-20 S6 触摸动作
+
+- 交付行为：`touch.send`（输入校验 + "服务端音频活跃"等效状态下的本地抑制：`status="suppressed"`、不发送、不伪造 ACK/回复；ACK 拒绝/超时沿用 S3 语义）；门面增补 `send_touch` 与 `is_server_audio_active`（收到音频包置位、终止包复位）。
+- interface spec：`docs/项目说明/项目架构与接口（spec）/接口文档/cli/README.md` §1.8。
+- commit 或 PR：分支 `feat/cli-e2e-s6-touch-actions`：`34f010b`（SPEC）/ `4518e93`（Red）/ `31b4a59`（Green）。
+- 验证及结果：focused `tests/test_cli_touch_actions.py` → 13 passed；client 回归 → 128 passed（排除 3 个既有收集失败文件）。
+- 未验证范围：真实服务端触摸接纳/反应（依赖 S1 门槛与部署一致性）、真实播放期的抑制时序。
