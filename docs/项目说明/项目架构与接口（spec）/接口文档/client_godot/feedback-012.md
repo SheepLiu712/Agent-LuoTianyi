@@ -53,3 +53,11 @@ ChatView增加场景ImageButton、Windows原生ImagePicker、AttachmentBar（缩
 ChatSession.set_image_selecting(active:bool)在ready时发送既有瞬时user_image_selecting/user_image_selecting_cancel，打开选择器/粘贴时开始，取消选择/移除时取消，成功发送由user_image完成选择。关闭原生文件选择器不丢已有附件；退出账号清附件与回调。通用图片窗确认按钮去掉“离线演示”固定文案，失败提示适用于正式/离线两种调用，不改变显式确认语义。
 
 ChatView.attachment_cleared通知Application在移除/发送接受后调用ImagePresenter.close_confirmation(source)，只关闭仍归属该source且具有确认操作的预览，不影响已转属或只读历史图片，防止主输入区发送后留下可重复确认的旧预览。
+
+## 系统窗框与Godot内部圆角（2026-09-21用户选择）
+
+用户明确选择恢复桌面系统标题栏及最小化/最大化/关闭，应用内使用Godot圆角。本条替代window-redesign.md的自绘标题栏/八边控件要求。WindowChrome保留几何持久化、布局切换、open_window和关闭保存协调；删除被替代的自绘标题栏/边缘缩放节点与输入脚本，由系统处理拖动、缩放、双击最大化、Alt+F4。宿主原有close_requested草稿规则不变。各界面移除为自绘标题栏预留的48px空白。
+
+原Python MainWindow为普通QWidget，外轮廓交由系统；此处同样不添加DWM扩展或SetWindowRgn。内部圆角采用用户文章 https://blog.csdn.net/datakimiko/article/details/156681420 的Panel+StyleBoxFlat方式，但节点/资源固定写在.tscn/.tres，禁止文章示例的Panel.new、_draw和逐像素纹理生成。
+
+UnifiedDropdown的PopupPanel改为嵌入所属Viewport，透明清屏背景，圆角由StyleBoxFlat绘制；不使用遮罩、裁切Shader或原生窗口区域。弹层按所属Viewport坐标及可见范围定位，长列表滚动、键盘/Esc/外部点击、移动/最小化收起规则保留。此Control/主题路径可用于手机界面，不依赖Windows圆角API；未执行移动端导出或硬件验收。
