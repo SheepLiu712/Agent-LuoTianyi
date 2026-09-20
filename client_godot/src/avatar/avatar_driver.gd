@@ -11,6 +11,8 @@ var _base_mouth := -1.0
 var _elapsed := 0.0
 var _character_id := ""
 var _resource_id := ""
+var _expression_eyes: Dictionary = {}
+var _eye_base := Vector2.ONE
 
 
 func load_character(descriptor_path: String) -> Error:
@@ -78,8 +80,21 @@ func load_avatar(model_path: String,mapping_path: String = MAPPING_PATH) -> Erro
 	_parameters.clear()
 	for parameter in _model.call("get_parameters"):
 		_parameters[parameter.id] = parameter
+	_expression_eyes.clear()
+	for expression in references.get("Expressions", []):
+		var expression_data: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(model_path.get_base_dir().path_join(expression.File)))
+		var eyes := Vector2.ONE
+		for parameter in expression_data.get("Parameters", []):
+			var index := ["ParamEyeLOpen", "ParamEyeROpen"].find(parameter.get("Id", ""))
+			if index < 0: continue
+			match parameter.get("Blend", "Add"):
+				"Add": eyes[index] += float(parameter.Value)
+				"Multiply": eyes[index] *= float(parameter.Value)
+				"Overwrite": eyes[index] = float(parameter.Value)
+		_expression_eyes[expression.Name] = eyes.clamp(Vector2.ZERO, Vector2.ONE)
 	effects.connect("cubism_process", _apply_parameters)
 	_mouth_override = -1.0
+	_elapsed = 0.0
 	apply_expression("normal")
 	return OK
 
@@ -92,6 +107,7 @@ func apply_expression(command: String) -> bool:
 		return false
 	_model.call("start_expression", selected)
 	_expression = selected
+	_eye_base = _expression_eyes.get(selected, Vector2.ONE)
 	_base_mouth = float(_mapping.get("mouth_value_projection", {}).get(selected, -1.0))
 	return true
 
@@ -114,24 +130,25 @@ func set_mouth_openness(value: float) -> void:
 func get_status() -> Dictionary:
 	if not is_instance_valid(_model):
 		return {"loaded": false, "canvas_size": Vector2.ZERO,"character_id":"","resource_id":"",
-			"expression": "", "motion_groups": [], "mouth_openness": 0.0}
+			"expression": "", "motion_groups": [], "mouth_openness": 0.0, "eye_openness":Vector2.ZERO}
 	var mouth := _mouth_override if _mouth_override >= 0 else _base_mouth
 	if mouth < 0:
 		mouth = float(_parameters.ParamMouthOpenY.value) if _parameters.has("ParamMouthOpenY") else 0.0
 	return {"loaded": true, "canvas_size": _model.call("get_canvas_info").size_in_pixels,"character_id":_character_id,"resource_id":_resource_id,
 		"expression": _expression, "motion_groups": _model.call("get_motions").keys(),
-		"mouth_openness": mouth}
+		"mouth_openness": mouth, "eye_openness":Vector2(
+			float(_parameters.ParamEyeLOpen.value) if _parameters.has("ParamEyeLOpen") else 0.0,
+			float(_parameters.ParamEyeROpen.value) if _parameters.has("ParamEyeROpen") else 0.0)}
 
 
 func _apply_parameters(_source: Object, delta: float) -> void:
 	_elapsed += delta
 	# The bundled model has no EyeBlink group, so use its actual eye parameters.
 	var blink_phase := fmod(_elapsed, 4.5)
-	if blink_phase < 0.18:
-		var openness := absf(blink_phase - 0.09) / 0.09
-		for eye in ["ParamEyeLOpen", "ParamEyeROpen"]:
-			if _parameters.has(eye):
-				_parameters[eye].value = openness
+	var openness := absf(blink_phase - 4.41) / 0.09 if blink_phase > 4.32 else 1.0
+	for index in 2:
+		var eye: String = ["ParamEyeLOpen", "ParamEyeROpen"][index]
+		if _parameters.has(eye): _parameters[eye].value = _eye_base[index] * openness
 	var mouth := _mouth_override if _mouth_override >= 0 else _base_mouth
 	if mouth >= 0 and _parameters.has("ParamMouthOpenY"):
 		_parameters.ParamMouthOpenY.value = mouth
