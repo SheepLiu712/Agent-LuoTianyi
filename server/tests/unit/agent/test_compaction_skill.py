@@ -92,7 +92,7 @@ async def test_runtime_registers_compaction_once_for_all_characters(runtime_depe
         calls.append(name)
         return original(name, config)
     kwargs["llm_service"].register_llm_module = register
-    kwargs["config"]["skills"] = {"conversation_compaction": {"llm_module": {"model": "test"}}}
+    kwargs["config"].setdefault("skills", {})["conversation_compaction"] = {"llm_module": {"model": "test"}}
     runtime = AgentRuntime(**kwargs)
     try:
         assert runtime.character_ids == ("luotianyi", "miku")

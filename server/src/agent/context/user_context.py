@@ -9,7 +9,7 @@ from ._storage import _Storage
 from .models import ContextIdentity, UserContextSnapshot, UserPreferences, UserProfile
 
 if TYPE_CHECKING:
-    from src.system.database.services.conversation_service import ConversationService
+    from src.infrastructure.persistence.database.services.conversation_service import ConversationService
 
 
 class UserContext:

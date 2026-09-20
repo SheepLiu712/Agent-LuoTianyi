@@ -13,9 +13,9 @@ if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.agent.skills.expression._dynamic_operations import DynamicOperations
-from src.system.database.database_service import DatabaseManager
-from src.system.database.sql_database import InviteCode
-from src.system.user_interface.types import (
+from src.infrastructure.persistence.database.database_service import DatabaseManager
+from src.infrastructure.persistence.database.sql_database import InviteCode
+from src.web.http.types import (
     DynamicCommentCreateRequest,
     DynamicCommentListRequest,
     DynamicCreateRequest,
@@ -23,7 +23,7 @@ from src.system.user_interface.types import (
     DynamicReadMarkRequest,
     DynamicUnreadRequest,
 )
-from src.system.user_interface.user_interface import UserInterface
+from src.web.http import UserInterface
 
 
 def test_dynamic_operations_accept_nested_module_config_and_degrade_on_invalid_llm():
@@ -232,7 +232,7 @@ def test_system_dynamic_skips_memory_and_reply_and_disallows_comments(db_manager
     _add_invite_code(db_manager, "INVITE_SYSTEM")
     auth = _register_and_login(db_manager, "systemuser", "INVITE_SYSTEM")
 
-    from src.system.admin.system_dynamic_publisher import publish_system_dynamic
+    from src.application.admin.system_dynamic_publisher import publish_system_dynamic
 
     ok, _, dynamic = publish_system_dynamic(
         database_manager=db_manager,
@@ -264,7 +264,7 @@ def test_system_dynamic_skips_memory_and_reply_and_disallows_comments(db_manager
 
 
 def test_admin_create_system_dynamic_endpoint(db_manager: DatabaseManager, monkeypatch):
-    from src.system.admin import admin_interface
+    from src.web.admin import admin_interface
 
     shell = SimpleNamespace(
         runtime_supervisor=SimpleNamespace(
@@ -321,7 +321,7 @@ def test_admin_dynamic_time_filters(db_manager: DatabaseManager):
 
     session = db_manager.open_sql_session()
     try:
-        from src.system.database.sql_database import DynamicComment, DynamicPost
+        from src.infrastructure.persistence.database.sql_database import DynamicComment, DynamicPost
 
         post_row = session.query(DynamicPost).filter(DynamicPost.id == dynamic["id"]).first()
         comment_row = session.query(DynamicComment).filter(DynamicComment.dynamic_id == dynamic["id"]).first()
@@ -341,7 +341,9 @@ def test_admin_dynamic_time_filters(db_manager: DatabaseManager):
     assert feed["items"] == []
 
     older_cutoff = datetime.now() - timedelta(days=5)
-    feed = db_manager.dynamic_store.admin_list_dynamics(created_after=older_cutoff, created_before=datetime.now() - timedelta(days=1))
+    feed = db_manager.dynamic_store.admin_list_dynamics(
+        created_after=older_cutoff, created_before=datetime.now() - timedelta(days=1)
+    )
     assert [item["id"] for item in feed["items"]] == [dynamic["id"]]
 
     comments = db_manager.dynamic_store.admin_list_dynamic_comments(
@@ -522,14 +524,6 @@ def test_user_interface_dynamic_rejects_bad_token(db_manager: DatabaseManager):
     assert exc_info.value.status_code == 401
 
 
-
-
-
-
-
-
-
-
 def test_dynamic_pending_reply_items_include_thread_comments(db_manager: DatabaseManager):
     _add_invite_code(db_manager, "INVITE_THREAD")
     auth = _register_and_login(db_manager, "threaduser", "INVITE_THREAD")
@@ -601,8 +595,18 @@ def test_dynamic_replier_passes_thread_comments_to_llm():
         "preferences": {"relationship": "朋友"},
         "content": "今天去了海边。",
         "thread_comments": [
-            {"author_type": "agent", "author_name": "天依", "content": "海边听起来很舒服。", "created_at": "2026-07-06 10:00:00"},
-            {"author_type": "user", "author_name": "Dpon", "content": "但是风很大。", "created_at": "2026-07-06 10:01:00"},
+            {
+                "author_type": "agent",
+                "author_name": "天依",
+                "content": "海边听起来很舒服。",
+                "created_at": "2026-07-06 10:00:00",
+            },
+            {
+                "author_type": "user",
+                "author_name": "Dpon",
+                "content": "但是风很大。",
+                "created_at": "2026-07-06 10:01:00",
+            },
         ],
     }
 

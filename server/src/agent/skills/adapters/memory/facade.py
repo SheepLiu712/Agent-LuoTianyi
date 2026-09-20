@@ -4,14 +4,14 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Dict, List, Tuple
 
 from src.domain import MemoryContext, MemoryHit
-from src.system.database.vector_store import VectorStore
+from src.infrastructure.persistence.database.vector_store import VectorStore
 
 from .profile_updater import UserProfileUpdater
 from .writer import MemoryWriter
 
 if TYPE_CHECKING:
-    from src.system.database import DatabaseManager
-    from src.system.database.services.memory_store import MemoryStore
+    from src.infrastructure.persistence.database import DatabaseManager
+    from src.infrastructure.persistence.database.services.memory_store import MemoryStore
 
 
 class AgentMemory:

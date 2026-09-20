@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import src.domain.agent as d
-from src.infrastructure.singing.wishlist import WishlistManager
+from src.agent.skills.expression.singing import WishlistManager
 from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
 from src.world.learn_sing_songs.qq_music_credential_refresh_task import (
     QQMusicCredentialRefreshTask,
@@ -244,9 +244,7 @@ def test_qq_download_refreshes_and_retries_after_sdk_rejects_credential(monkeypa
     monkeypatch.setattr(
         download_qq_song,
         "qq_search_songs",
-        lambda *_args, **_kwargs: [
-            {"title": "Song A", "mid": "song-mid", "singer": [{"name": "洛天依"}]}
-        ],
+        lambda *_args, **_kwargs: [{"title": "Song A", "mid": "song-mid", "singer": [{"name": "洛天依"}]}],
     )
     monkeypatch.setattr(download_qq_song, "qq_fetch_mp3_url", lambda *_args, **_kwargs: "")
     monkeypatch.setattr(download_qq_song, "load_saved_credential", lambda *_args, **_kwargs: {"musicid": 123})
@@ -299,7 +297,7 @@ def test_learn_sing_songs_initialize_sets_event_store_and_learner(monkeypatch):
 
     task.initialize(runtime)
 
-    assert task.system_runtime is runtime
+    assert task.server_runtime is runtime
     assert task.event_store is event_store
     assert task.auto_song_learner is learner
     assert not hasattr(task, "character_runtime")
@@ -451,8 +449,7 @@ def test_qq_music_credential_refresh_defaults_to_six_hours_immediate():
 
 def test_qq_music_credential_refresh_skips_without_initialized_credential():
     learner = SimpleNamespace(_credential_file=None, check_qq_credential=lambda: True)
-    task = QQMusicCredentialRefreshTask(
-        [SimpleNamespace(character_id="luotianyi", auto_song_learner=learner)])
+    task = QQMusicCredentialRefreshTask([SimpleNamespace(character_id="luotianyi", auto_song_learner=learner)])
     task.initialize(SimpleNamespace())
 
     result = task.run_once()
@@ -471,10 +468,12 @@ def test_qq_music_credential_refresh_reports_failed_characters_and_count(tmp_pat
         )
         return SimpleNamespace(character_id=character_id, auto_song_learner=learner)
 
-    task = QQMusicCredentialRefreshTask([
-        make("luotianyi", "a.json", True),
-        make("miku", "b.json", False),
-    ])
+    task = QQMusicCredentialRefreshTask(
+        [
+            make("luotianyi", "a.json", True),
+            make("miku", "b.json", False),
+        ]
+    )
     task.initialize(SimpleNamespace())
 
     result = task.run_once()
@@ -519,9 +518,9 @@ def test_learn_sing_songs_run_once_reloads_singing_library_for_learned_songs():
     )
     calls = []
     singing = SimpleNamespace(reload_songs=lambda character_id: calls.append(character_id))
-    task = LearnSingSongsTask({}, character_id="luotianyi")
+    task = LearnSingSongsTask({}, character_id="luotianyi", singing_backend=singing)
     task.auto_song_learner = learner
-    task.system_runtime = SimpleNamespace(infrastructure=SimpleNamespace(singing=singing))
+    task.server_runtime = SimpleNamespace()
 
     result = asyncio.run(task.run_once())
 
@@ -544,11 +543,10 @@ def fact_sink_runtime(sink, *, character_id="luotianyi"):
         return SimpleNamespace(fact_sink=sink)
 
     return SimpleNamespace(
-        agent_runtime=SimpleNamespace(default_character_id=character_id),
-        get_world_stage=get_world_stage,
-        infrastructure=SimpleNamespace(
-            singing=SimpleNamespace(reload_songs=lambda *_: None, tag_song_emotions=lambda *_: []),
+        agent_runtime=SimpleNamespace(
+            default_character_id=character_id,
         ),
+        get_world_stage=get_world_stage,
     )
 
 
@@ -560,7 +558,7 @@ def test_learn_sing_songs_submits_song_learned_facts():
     sink = FakeFactSink()
     task = LearnSingSongsTask({}, character_id="luotianyi")
     task.auto_song_learner = learner
-    task.system_runtime = fact_sink_runtime(sink)
+    task.server_runtime = fact_sink_runtime(sink)
 
     result = asyncio.run(task.run_once())
 
@@ -591,7 +589,7 @@ def test_learn_sing_songs_deduplicates_learned_songs_before_side_effects():
     task = LearnSingSongsTask({}, character_id="luotianyi")
     task.auto_song_learner = learner
     task.event_store = event_store
-    task.system_runtime = fact_sink_runtime(sink)
+    task.server_runtime = fact_sink_runtime(sink)
 
     result = asyncio.run(task.run_once())
 
@@ -614,7 +612,7 @@ def test_learn_sing_songs_already_learned_wins_over_learned_result():
     sink = FakeFactSink()
     task = LearnSingSongsTask({})
     task.auto_song_learner = learner
-    task.system_runtime = fact_sink_runtime(sink)
+    task.server_runtime = fact_sink_runtime(sink)
 
     result = asyncio.run(task.run_once())
 
@@ -637,7 +635,9 @@ def test_auto_song_learner_builds_child_pythonpath(monkeypatch, tmp_path):
     monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
     monkeypatch.chdir(Path(__file__).resolve().parents[3])
 
-    wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
+    wishlist = WishlistManager(
+        str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
+    )
     learner = AutoSongLearner(
         {
             "songlearner_resource_dir": str(tmp_path / "song_learner_res"),
@@ -666,7 +666,9 @@ def test_auto_song_learner_formats_structured_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
     monkeypatch.chdir(Path(__file__).resolve().parents[3])
 
-    wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
+    wishlist = WishlistManager(
+        str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
+    )
     learner = AutoSongLearner(
         {
             "songlearner_resource_dir": str(tmp_path / "song_learner_res"),
@@ -689,7 +691,9 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
     monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
     monkeypatch.chdir(Path(__file__).resolve().parents[3])
 
-    wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
+    wishlist = WishlistManager(
+        str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
+    )
     wishlist.add("Song A")
     learner = AutoSongLearner(
         {
@@ -735,7 +739,9 @@ def test_auto_song_learner_records_redirected_wish_and_learned_target(monkeypatc
     monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
     monkeypatch.chdir(Path(__file__).resolve().parents[3])
 
-    wishlist = WishlistManager(str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None))
+    wishlist = WishlistManager(
+        str(tmp_path / "metadata.json"), SimpleNamespace(info=lambda *_: None, warning=lambda *_: None)
+    )
     wishlist.add("海")
     learner = AutoSongLearner(
         {

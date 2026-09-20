@@ -30,13 +30,13 @@
 | §8 | 慢召回多计划 | `integration/stage/test_chat_reply_settlement.py`、`integration/stage/test_concurrent_handling.py`；两计划的细粒度时序由 `unit/agent/test_slow_recall_staged_reply.py` 补充 |
 | §9 | citywalk | `integration/world/test_world_task_dynamics.py`、`integration/stage/test_world_settlement_wiring.py` |
 | §10 | VCPedia 候选知识 | `integration/agent/test_song_knowledge_acceptance.py`、`e2e/external/test_world_live.py`（显式启用） |
-| §11 | 学歌 | `integration/world/test_world_task_dynamics.py`、`e2e/external/test_infrastructure_singing.py`（显式启用） |
+| §11 | 学歌 | `integration/world/test_world_task_dynamics.py`、`e2e/external/test_agent_singing.py`（显式启用） |
 | §12 | 动态互动 | `integration/world/test_world_task_dynamics.py`、`integration/agent/test_dynamic_operations.py` |
 | §13 | 日记 | `integration/world/test_world_task_diary.py`、`integration/agent/test_diary_operations.py` |
 | §14 | B 站同步、QQ 凭据刷新、事件清理 | `integration/world/test_world_task_event_cleanup.py`、`integration/system/test_admin_runtime.py`、`e2e/external/test_world_live.py`（显式启用） |
-| §15 | 媒体链 | `integration/websocket/test_websocket_adapter.py`、`integration/stage/test_concurrent_handling.py`、`e2e/external/test_infrastructure_image_understanding.py`（显式启用） |
+| §15 | 媒体链 | `integration/websocket/test_websocket_adapter.py`、`integration/stage/test_concurrent_handling.py`、`e2e/external/test_agent_image_understanding.py`（显式启用） |
 | §16 | 输出与发送面 | `integration/agent/test_handler_dispatch.py`、`integration/websocket/test_websocket_adapter.py`、`e2e/chat/test_first_login_welcome.py`、`e2e/chat/test_touch_stage.py` |
-| §17 | 调度与生命周期 | `integration/lifecycle/test_facade_inflight_shutdown.py`、`integration/lifecycle/test_system_runtime_shutdown.py`、`integration/runtime/test_runtime_shutdown.py`、`integration/world/test_world_stage_registry.py` |
+| §17 | 调度与生命周期 | `integration/lifecycle/test_facade_inflight_shutdown.py`、`integration/lifecycle/test_server_runtime_shutdown.py`、`integration/runtime/test_runtime_shutdown.py`、`integration/world/test_world_stage_registry.py` |
 | §18 | 失败与部分效果语义 | `integration/agent/test_handler_dispatch.py`、`integration/stage/test_world_settlement_wiring.py`、`integration/world/test_world_task_dynamics.py` |
 
 外部 E2E 只证明具备环境时的真实依赖可用性，不会把默认跳过写成已通过。生产客户端播放、真实凭据和模型质量等人工边界仍按前置清单附录 C 管理。

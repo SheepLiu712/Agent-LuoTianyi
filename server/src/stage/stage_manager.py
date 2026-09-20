@@ -12,16 +12,16 @@ from typing import TYPE_CHECKING
 from src.agent.context import ContextFactory
 from src.domain.agent import InteractionEndingReason
 from src.domain.stage import StageState
+from src.domain.stage.due_events import DueEventProvider
 from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 
 from .chat_stage import ChatStage
-from .due_events import DueEventProvider
 
 if TYPE_CHECKING:
     from src.adapter.websocket import WebSocketAdapter
     from src.agent.facade import Agent
-    from src.system.user_interface.websocket_service import WebSocketConnection
+    from src.web.websocket.service import WebSocketConnection
 
 
 @dataclass(frozen=True)

@@ -1,16 +1,18 @@
 """按真实连接串行投递完整消息；跨消息保持播放终止位置。"""
+
 from __future__ import annotations
 
 import asyncio
+import json
 from collections import deque
 from dataclasses import dataclass, field
-import json
 from uuid import NAMESPACE_URL, uuid5
 
 import src.domain.agent as d
-from src.system.user_interface.types import ChatResponse
-from src.system.user_interface.websocket_service import WebSocketConnection
 from src.utils.logger import get_logger
+from src.web.websocket import ChatResponse
+from src.web.websocket.service import WebSocketConnection
+
 from ._protocol import payloads
 
 
@@ -24,8 +26,10 @@ class _DeliveryConfig:
     def from_dict(cls, config: dict) -> _DeliveryConfig:
         if not isinstance(config, dict):
             raise TypeError("adapter config must be a dictionary")
-        values = {key: config.get(key, default) for key, default in
-                  (("max_outputs", 256), ("max_bytes", 16 * 1024 * 1024), ("max_messages", 64))}
+        values = {
+            key: config.get(key, default)
+            for key, default in (("max_outputs", 256), ("max_bytes", 16 * 1024 * 1024), ("max_messages", 64))
+        }
         if any(type(value) is not int or value <= 0 for value in values.values()):
             raise ValueError("adapter queue limits must be positive integers")
         return cls(**values)
@@ -80,10 +84,15 @@ class _ConnectionDelivery:
         key = (output.interaction_id, output.execution_id, output.action_id)
         message = self.by_key.get(key)
         if message is not None and (message.accepted_end or message.cancelled or message.delivery != output.delivery):
-            raise d.SinkRejectedError("message already ended or delivery changed", code=d.SinkRejectionCode.CONTENT_CONFLICT)
+            raise d.SinkRejectedError(
+                "message already ended or delivery changed", code=d.SinkRejectionCode.CONTENT_CONFLICT
+            )
         size = len(output.data) if isinstance(output, d.AudioChunkOutput) else len(str(output).encode("utf-8"))
-        if (self.pending_outputs >= self.config.max_outputs or self.pending_bytes + size > self.config.max_bytes
-                or (message is None and len(self.messages) >= self.config.max_messages)):
+        if (
+            self.pending_outputs >= self.config.max_outputs
+            or self.pending_bytes + size > self.config.max_bytes
+            or (message is None and len(self.messages) >= self.config.max_messages)
+        ):
             raise d.SinkRejectedError("connection output queue is full", code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
         if message is None:
             message = _Message(key, output.delivery, completion(f"message={key}"))
@@ -153,7 +162,10 @@ class _ConnectionDelivery:
     async def _send(self, message: _Message, values: dict[str, object]) -> None:
         packet = ChatResponse(
             uuid=str(uuid5(NAMESPACE_URL, json.dumps(["agent-message", *message.key]))),
-            text="", audio="", expression="", is_final_package=False,
+            text="",
+            audio="",
+            expression="",
+            is_final_package=False,
             display_in_chat=message.delivery is d.OutputDelivery.CONVERSATION,
             is_ephemeral=message.delivery is d.OutputDelivery.EPHEMERAL_REACTION,
             packet_sequence=message.sequence,
@@ -167,43 +179,57 @@ class _ConnectionDelivery:
     async def _run(self) -> None:
         try:
             while self.messages and not self.closed:
-                message = self.messages[0]
-                if message.cancelled:
-                    if message.started and not message.ended:
-                        await self._send(message, {"is_final_package": True, "audio_error": True, "error_code": "TTS_CANCELLED"})
-                    self._finish(message)
-                    continue
-                if not message.items:
-                    self.changed.clear()
-                    await self.changed.wait()
-                    continue
-                item = message.items.popleft()
-                message.current = item
-                try:
-                    for values in payloads(item.output):
-                        if message.cancelled or self.closed:
-                            break
-                        await self._send(message, values)
-                    if not item.future.done():
-                        if message.cancelled or self.closed:
-                            item.future.cancel()
-                        else:
-                            item.future.set_result(None)
-                except Exception as error:
-                    if not item.future.done():
-                        item.future.set_exception(error)
-                    raise
-                finally:
-                    message.current = None
-                    self._release(item)
-                if message.ended:
-                    self._finish(message)
+                await self._deliver_next_message()
         except Exception as error:
-            get_logger(__name__).exception("WebSocket connection delivery stopped")
-            self.closed = True
-            self.connection.mark_disconnected()
-            for message in list(self.messages):
-                self._finish(message, error)
+            self._fail(error)
         except asyncio.CancelledError:
             self.disconnect()
             raise
+
+    async def _deliver_next_message(self) -> None:
+        message = self.messages[0]
+        if message.cancelled:
+            await self._finish_cancelled(message)
+            return
+        if not message.items:
+            self.changed.clear()
+            await self.changed.wait()
+            return
+        await self._deliver_item(message, message.items.popleft())
+        if message.ended:
+            self._finish(message)
+
+    async def _finish_cancelled(self, message: _Message) -> None:
+        if message.started and not message.ended:
+            await self._send(
+                message,
+                {"is_final_package": True, "audio_error": True, "error_code": "TTS_CANCELLED"},
+            )
+        self._finish(message)
+
+    async def _deliver_item(self, message: _Message, item: _Item) -> None:
+        message.current = item
+        try:
+            for values in payloads(item.output):
+                if message.cancelled or self.closed:
+                    break
+                await self._send(message, values)
+            if not item.future.done():
+                if message.cancelled or self.closed:
+                    item.future.cancel()
+                else:
+                    item.future.set_result(None)
+        except Exception as error:
+            if not item.future.done():
+                item.future.set_exception(error)
+            raise
+        finally:
+            message.current = None
+            self._release(item)
+
+    def _fail(self, error: Exception) -> None:
+        get_logger(__name__).exception("WebSocket connection delivery stopped")
+        self.closed = True
+        self.connection.mark_disconnected()
+        for message in list(self.messages):
+            self._finish(message, error)

@@ -20,15 +20,32 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Protocol
 
 from src.domain.music_type import WishEntry
-from src.infrastructure.singing.wishlist import WishlistManager
 from src.utils.logger import get_logger
 from src.utils.helpers import get_unified_song_name
 
 
 _SONGLEARNER_PATH_ADDED = False
+
+
+class SongLearningQueue(Protocol):
+    """Persistent queue operations required by the external learning pipeline."""
+
+    wished_songs: dict[str, WishEntry]
+
+    def get_pending(self) -> list[WishEntry]: ...
+
+    def mark_learned(self, safe_name: str) -> None: ...
+
+    def mark_redirected(self, requested_name: str, redirected_to: str, **kwargs) -> None: ...
+
+    def update_redirect_status(self, requested_name: str, redirected_status: str, reason: str = "") -> None: ...
+
+    def get_recently_learned(self) -> list[str]: ...
+
+    def _save(self) -> None: ...
 
 
 def _add_songlearner_to_path() -> None:
@@ -67,7 +84,7 @@ class AutoSongLearner:
         self,
         config: Dict[str, Any],
         character_name: str,
-        wishlist: WishlistManager,
+        wishlist: SongLearningQueue,
         *,
         resource_path: str | Path | None = None,
     ):

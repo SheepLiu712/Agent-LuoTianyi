@@ -13,8 +13,8 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.utils.llm.llm_module import LLMModule
-    from src.utils.llm_service import LLMService
+    from src.infrastructure.models.llm.module import LLMModule
+    from src.infrastructure.models.service import LLMService
 
 logger = get_logger(__name__)
 

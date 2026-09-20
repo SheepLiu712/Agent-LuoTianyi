@@ -1,11 +1,9 @@
 import asyncio
 import threading
-from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 
-from src.system.admin.auth import AdminAuthService
+from src.application.admin.auth import AdminAuthError, AdminAuthService
 
 
 @pytest.mark.asyncio
@@ -27,13 +25,7 @@ async def test_admin_password_work_is_bounded_without_blocking_event_loop(tmp_pa
 
     monkeypatch.setattr(auth, "_verify_password", slow_verify)
 
-    def response():
-        return SimpleNamespace(set_cookie=lambda *_args, **_kwargs: None)
-
-    workers = [
-        asyncio.create_task(auth.login_async("password", response()))
-        for _ in range(4)
-    ]
+    workers = [asyncio.create_task(auth.login_async("password")) for _ in range(4)]
     try:
         for _ in range(100):
             with entered_lock:
@@ -52,8 +44,8 @@ async def test_admin_password_work_is_bounded_without_blocking_event_loop(tmp_pa
             heartbeat_advanced = True
 
         heartbeat_task = asyncio.create_task(heartbeat())
-        with pytest.raises(HTTPException) as exc_info:
-            await auth.login_async("password", response())
+        with pytest.raises(AdminAuthError) as exc_info:
+            await auth.login_async("password")
         await heartbeat_task
 
         assert exc_info.value.status_code == 503

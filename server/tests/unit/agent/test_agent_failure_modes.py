@@ -12,7 +12,7 @@ from src.agent.skills.cognitive.response_generation import (
     DEFAULT_LLM_FAILURE_RESPONSE,
     CharacterReplyGenerator,
 )
-from src.utils.llm.llm_api_interface import LLMContentInspectionError
+from src.infrastructure.models.llm.interface import LLMContentInspectionError
 
 
 class RecordingLogger:

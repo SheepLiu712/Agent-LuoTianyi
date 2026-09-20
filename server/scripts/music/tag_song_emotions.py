@@ -12,9 +12,9 @@ SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-from src.infrastructure.singing import SingingBackend
+from src.agent.skills.expression.singing import SingingBackend
+from src.infrastructure.models.service import LLMService
 from src.utils.helpers import load_config
-from src.utils.llm_service import LLMService
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,7 +61,8 @@ def main() -> None:
     os.chdir(SERVER_ROOT)
     config = load_config(args.config)
     llm_service = LLMService(config.get("llm_service", {}))
-    singing = SingingBackend(config.get("infrastructure", {}).get("sing", {}), llm_service=llm_service)
+    singing_config = config.get("agent_runtime", {}).get("skills", {}).get("singing", {})
+    singing = SingingBackend(singing_config, llm_service=llm_service)
     updated = asyncio.run(
         tag_songs(
             singing,

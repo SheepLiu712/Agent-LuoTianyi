@@ -6,16 +6,16 @@ from types import SimpleNamespace
 
 import pytest
 
-
 server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.infrastructure import runtime as infrastructure_runtime_module
-from src.infrastructure.speech import speech as speech_module
-from src.infrastructure.speech import tts_module as tts_module_module
-from src.infrastructure.speech.speech import SpeechBackend
-from src.infrastructure.speech.tts_server import TTSServer
+from src.agent.skills.expression.speaking import backend as speech_module
+from src.agent.skills.expression.speaking import tts_module as tts_module_module
+from src.agent.skills.expression.speaking.backend import SpeechBackend
+from src.agent.skills.expression.speaking.tts_server import TTSServer
+
+
 def test_tts_server_refuses_restart_while_old_request_is_active(tmp_path):
     server = TTSServer(str(tmp_path / "tts.yaml"))
     server._active_requests = 1
@@ -154,26 +154,3 @@ def test_tts_module_factory_rolls_back_server_start_failure(monkeypatch):
         tts_module_module.init_tts_module({})
 
     assert events == ["server_start_attempted", "server_stopped"]
-
-
-def test_capability_construction_failure_rolls_back_speech(monkeypatch):
-    events = []
-
-    class FakeSpeech:
-        def __init__(self, _config):
-            events.append("speech_started")
-
-        def _abort_initialization(self):
-            events.append("speech_stopped")
-
-    class FailingSinging:
-        def __init__(self, *_args, **_kwargs):
-            raise RuntimeError("singing failed")
-
-    monkeypatch.setattr(infrastructure_runtime_module, "SpeechBackend", FakeSpeech)
-    monkeypatch.setattr(infrastructure_runtime_module, "SingingBackend", FailingSinging)
-
-    with pytest.raises(RuntimeError, match="singing failed"):
-        infrastructure_runtime_module.InfrastructureRuntime({}, object())
-
-    assert events == ["speech_started", "speech_stopped"]

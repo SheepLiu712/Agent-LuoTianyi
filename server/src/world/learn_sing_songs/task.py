@@ -5,18 +5,18 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import src.domain.agent as d
-from src.system.database.event_models import UnifiedEventType
+from src.infrastructure.persistence.database.event_models import UnifiedEventType
 from src.utils.helpers import get_unified_song_name
 from src.utils.logger import get_logger
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
-    from src.infrastructure.singing.singing_manager import SingingManager
+    from src.infrastructure.persistence.database.services.event_store import EventStore
+    from src.server_runtime import ServerRuntime
     from src.stage.world_stage import WorldStage
-    from src.system.database.services.event_store import EventStore
-    from src.system.system_runtime import SystemRuntime
     from src.world.learn_sing_songs.auto_song_learner import AutoSongLearner
+    from src.world.learn_sing_songs.ports import SingingBackendPort, SingingManagerPort
 
 
 class LearnSingSongsTask(WorldTask):
@@ -26,21 +26,23 @@ class LearnSingSongsTask(WorldTask):
         self,
         config: dict[str, Any] | None = None,
         character_id: str = "luotianyi",
-        singing_manager: SingingManager | None = None,
+        singing_manager: SingingManagerPort | None = None,
+        singing_backend: SingingBackendPort | None = None,
     ) -> None:
         self.character_id = character_id
         self.singing_manager = singing_manager
+        self.singing_backend = singing_backend
         self.character_name: str = getattr(singing_manager, "character_name", "洛天依")
         super().__init__(f"{self.base_task_name}:{character_id}", config)
         self.logger = get_logger(__name__)
-        self.system_runtime: SystemRuntime | None = None
+        self.server_runtime: ServerRuntime | None = None
         self.event_store: EventStore | None = None
         self.auto_song_learner: AutoSongLearner | None = None
         self._init_error: str = ""
 
-    def initialize(self, system_runtime: SystemRuntime) -> None:
-        self.system_runtime = system_runtime
-        database_manager = getattr(system_runtime, "database_manager", None)
+    def initialize(self, server_runtime: ServerRuntime) -> None:
+        self.server_runtime = server_runtime
+        database_manager = getattr(server_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
         self.auto_song_learner = self._build_auto_song_learner()
 
@@ -48,7 +50,7 @@ class LearnSingSongsTask(WorldTask):
         """检查学歌任务的基础依赖。"""
         super().ensure_dependencies()
         required = {
-            "system_runtime": self.system_runtime,
+            "server_runtime": self.server_runtime,
             "event_store": self.event_store,
         }
         missing = [name for name, value in required.items() if value is None]
@@ -117,10 +119,10 @@ class LearnSingSongsTask(WorldTask):
 
     async def _world_stage(self) -> tuple[WorldStage | None, str]:
         """取得本角色长期 WorldStage；运行时不支持时返回 None。"""
-        system_runtime = self.system_runtime
-        agent_runtime = getattr(system_runtime, "agent_runtime", None)
+        server_runtime = self.server_runtime
+        agent_runtime = getattr(server_runtime, "agent_runtime", None)
         character_id = str(getattr(agent_runtime, "default_character_id", None) or self.character_id)
-        get_world_stage = getattr(system_runtime, "get_world_stage", None)
+        get_world_stage = getattr(server_runtime, "get_world_stage", None)
         if not callable(get_world_stage):
             return None, character_id
         return await get_world_stage(character_id), character_id
@@ -195,10 +197,7 @@ class LearnSingSongsTask(WorldTask):
         )
 
     def _reload_singing_library(self) -> None:
-        if self.system_runtime is None:
-            return
-        singing = getattr(getattr(self.system_runtime, "infrastructure", None), "singing", None)
-        reload_songs = getattr(singing, "reload_songs", None)
+        reload_songs = getattr(self.singing_backend, "reload_songs", None)
         if not callable(reload_songs):
             return
         try:
@@ -207,10 +206,7 @@ class LearnSingSongsTask(WorldTask):
             self.logger.warning(f"Failed to reload singing library after learning songs: {exc}")
 
     async def _tag_learned_songs(self, learned: list[str]) -> None:
-        if self.system_runtime is None:
-            return
-        singing = getattr(getattr(self.system_runtime, "infrastructure", None), "singing", None)
-        tag_song = getattr(singing, "tag_song_emotions", None)
+        tag_song = getattr(self.singing_backend, "tag_song_emotions", None)
         if not callable(tag_song):
             return
         for song_name in learned:

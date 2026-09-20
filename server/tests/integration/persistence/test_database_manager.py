@@ -11,12 +11,12 @@ if server_root not in sys.path:
 
 import pytest
 
-from src.system.database.sql_database import (
+from src.infrastructure.persistence.database.sql_database import (
     init_sql_db, Base, User, InviteCode
 )
-from src.system.database.redis_buffer import init_redis_buffer
-from src.system.database.database_service import DatabaseManager
-from src.system.database.services.credential_service import _hash_password
+from src.infrastructure.persistence.database.redis_buffer import init_redis_buffer
+from src.infrastructure.persistence.database.database_service import DatabaseManager
+from src.infrastructure.persistence.database.services.credential_service import _hash_password
 from src.domain import ConversationItem
 
 
@@ -449,7 +449,7 @@ class TestConversations:
 # class TestRedisCache:
 #     def test_nickname_cache(self, db_manager):
 #         """昵称缓存写入和读取"""
-#         from src.system.database.sql_database import get_sql_session
+#         from src.infrastructure.persistence.database.sql_database import get_sql_session
 #         session = get_sql_session()
 #         user = User(uuid="cache-user", username="cacheuser",
 #                      password="hash", nickname="小明")
@@ -466,7 +466,7 @@ class TestConversations:
 
 #     def test_prefill_buffer_full(self, db_manager):
 #         """完整 prefill"""
-#         from src.system.database.sql_database import get_sql_session
+#         from src.infrastructure.persistence.database.sql_database import get_sql_session
 #         session = get_sql_session()
 #         user = User(
 #             uuid="full-user", username="fulluser",

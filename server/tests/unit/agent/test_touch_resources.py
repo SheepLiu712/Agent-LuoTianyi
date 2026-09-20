@@ -9,6 +9,7 @@ from touch_support import touch_request
 
 import src.domain.agent as d
 from src.agent.skills.expression.touch import TouchReactionSkill
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from skill_support import invocation
 
 
@@ -37,11 +38,11 @@ def configured_skill(tmp_path: Path) -> tuple[TouchReactionSkill, Path]:
         TouchReactionSkill(
             {
                 "luotianyi": {
-                    "manifest": str(manifest),
                     "resource_names": ["touch_voice"],
                     "probability": 1.0,
                 }
-            }
+            },
+            PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}}),
         ),
         audio,
     )

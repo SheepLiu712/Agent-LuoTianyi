@@ -11,8 +11,8 @@ import pytest
 import src.domain.agent as d
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.agent.skills.expression.speaking import SpeakingSkill, EmptySpeechError
-from src.infrastructure.speech.streaming import AsyncTTS
-from src.infrastructure.speech.stream_errors import TTSStreamCancelled
+from src.agent.skills.expression.speaking.streaming import AsyncTTS
+from src.agent.skills.expression.speaking.errors import TTSStreamCancelled
 from routing_support import Sink, plan_and_context
 from skill_support import invocation
 
@@ -53,8 +53,8 @@ def say_plan():
 async def test_production_say_route_outputs_expression_audio_and_end_without_restore(runtime_dependencies):
     kwargs, _ = runtime_dependencies
     module = Module()
-    kwargs["infrastructure"].speech.tts_module["luotianyi"] = module
     runtime = AgentRuntime(**kwargs)
+    runtime.skills.speaking._tts._speech.tts_module["luotianyi"] = module
     try:
         sink = Sink()
         plan, context = say_plan()
@@ -100,8 +100,8 @@ async def test_say_generation_failure_ends_message_and_stops_plan(
 ):
     kwargs, _ = runtime_dependencies
     module = Module(chunks, error)
-    kwargs["infrastructure"].speech.tts_module["luotianyi"] = module
     runtime = AgentRuntime(**kwargs)
+    runtime.skills.speaking._tts._speech.tts_module["luotianyi"] = module
     try:
         plan, context = say_plan()
         plan = replace(plan, actions=(*plan.actions, replace(plan.actions[0], action_id="later")))
@@ -120,8 +120,8 @@ async def test_say_generation_failure_ends_message_and_stops_plan(
 async def test_sink_failure_closes_stream_without_more_output(runtime_dependencies):
     kwargs, _ = runtime_dependencies
     module = Module()
-    kwargs["infrastructure"].speech.tts_module["luotianyi"] = module
     runtime = AgentRuntime(**kwargs)
+    runtime.skills.speaking._tts._speech.tts_module["luotianyi"] = module
 
     class FailedSink(Sink):
         async def emit(self, value):
@@ -231,7 +231,7 @@ async def test_text_only_say_is_rejected_before_output(runtime):
 @pytest.mark.asyncio
 async def test_server_request_cancellation_releases_lock_and_active_request():
     from queue import Queue
-    from src.infrastructure.speech.tts_server import TTSServer
+    from src.agent.skills.expression.speaking.tts_server import TTSServer
 
     server = object.__new__(TTSServer)
     server.server_process = SimpleNamespace(is_alive=lambda: True)
@@ -280,7 +280,7 @@ async def test_server_request_cancellation_releases_lock_and_active_request():
 
 @pytest.mark.asyncio
 async def test_server_stream_lock_wait_is_cancellable():
-    from src.infrastructure.speech.tts_server import TTSServer
+    from src.agent.skills.expression.speaking.tts_server import TTSServer
 
     server = object.__new__(TTSServer)
     server._synthesize_lock = threading.Lock()
@@ -335,10 +335,10 @@ async def test_prepared_say_delivery_and_complete_file(
 ):
     kwargs, _ = runtime_dependencies
     manifest, audio = prepared_manifest
-    kwargs["config"]["prepared_speech"] = {"manifest": str(manifest)}
+    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     module = Module()
-    kwargs["infrastructure"].speech.tts_module["luotianyi"] = module
     runtime = AgentRuntime(**kwargs)
+    runtime.skills.speaking._tts._speech.tts_module["luotianyi"] = module
     try:
         plan, context = say_plan()
         action = replace(
@@ -378,7 +378,7 @@ async def test_prepared_audio_is_read_at_execution_and_fails_before_output(
 ):
     kwargs, _ = runtime_dependencies
     manifest, audio = prepared_manifest
-    kwargs["config"]["prepared_speech"] = {"manifest": str(manifest)}
+    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     runtime = AgentRuntime(**kwargs)
     try:
         if failure == "deleted":
@@ -406,8 +406,8 @@ async def test_prepared_audio_is_read_at_execution_and_fails_before_output(
 @pytest.mark.asyncio
 async def test_tts_ephemeral_delivery_suppresses_text_and_preserves_terminal_flag(runtime_dependencies):
     kwargs, _ = runtime_dependencies
-    kwargs["infrastructure"].speech.tts_module["luotianyi"] = Module()
     runtime = AgentRuntime(**kwargs)
+    runtime.skills.speaking._tts._speech.tts_module["luotianyi"] = Module()
     try:
         plan, context = say_plan()
         plan = replace(plan, actions=(replace(plan.actions[0], delivery=d.OutputDelivery.EPHEMERAL_REACTION),))
@@ -425,17 +425,17 @@ async def test_tts_ephemeral_delivery_suppresses_text_and_preserves_terminal_fla
 async def test_prepared_read_cancellation_stops_all_delivery(runtime_dependencies, prepared_manifest, monkeypatch):
     kwargs, _ = runtime_dependencies
     manifest, _ = prepared_manifest
-    kwargs["config"]["prepared_speech"] = {"manifest": str(manifest)}
+    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     runtime = AgentRuntime(**kwargs)
     started, proceed = threading.Event(), threading.Event()
-    read = runtime.prepared_speech._read_audio
+    read = runtime.skills.prepared_speech._read_audio
 
-    def delayed(name):
+    def delayed(character_id, name):
         started.set()
         assert proceed.wait(3)
-        return read(name)
+        return read(character_id, name)
 
-    monkeypatch.setattr(runtime.prepared_speech, "_read_audio", delayed)
+    monkeypatch.setattr(runtime.skills.prepared_speech, "_read_audio", delayed)
     try:
         plan, context = say_plan()
         plan = replace(

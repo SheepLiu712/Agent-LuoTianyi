@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import src.domain.agent as d
-from src.system.database.event_models import UnifiedEventType
+from src.infrastructure.persistence.database.event_models import UnifiedEventType
 from src.utils.logger import get_logger
 from src.world.citywalk.errors import CitywalkError
 from src.world.types.task_result import WorldTaskResult
@@ -16,9 +16,9 @@ from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
     from src.stage.world_stage import WorldStage
-    from src.system.database import DatabaseManager
-    from src.system.database.services.event_store import EventStore
-    from src.system.system_runtime import SystemRuntime
+    from src.infrastructure.persistence.database import DatabaseManager
+    from src.infrastructure.persistence.database.services.event_store import EventStore
+    from src.server_runtime import ServerRuntime
     from src.world.world_settlements import (
         FactHandlingOutcome,
         FactPlanOutcome,
@@ -69,16 +69,16 @@ class CitywalkTask(WorldTask):
         self.character_id = character_id
         super().__init__(f"{self.base_task_name}:{character_id}", config)
         self.logger = get_logger(__name__)
-        self.system_runtime: SystemRuntime | None = None
+        self.server_runtime: ServerRuntime | None = None
         self.database_manager: DatabaseManager | None = None
         self.event_store: EventStore | None = None
         self.citywalk_service: Any | None = None
         self.settlements = settlements
         self.character_name = str(self.config.get("character_name", "洛天依"))
 
-    def initialize(self, system_runtime: SystemRuntime) -> None:
-        self.system_runtime = system_runtime
-        self.database_manager = getattr(system_runtime, "database_manager", None)
+    def initialize(self, server_runtime: ServerRuntime) -> None:
+        self.server_runtime = server_runtime
+        self.database_manager = getattr(server_runtime, "database_manager", None)
         self.event_store = getattr(self.database_manager, "event_store", None)
         self.citywalk_service = self._build_citywalk_service()
 
@@ -86,7 +86,7 @@ class CitywalkTask(WorldTask):
         """检查 citywalk 任务的基础依赖。"""
         super().ensure_dependencies()
         required = {
-            "system_runtime": self.system_runtime,
+            "server_runtime": self.server_runtime,
             "database_manager": self.database_manager,
             "event_store": self.event_store,
         }
@@ -167,10 +167,10 @@ class CitywalkTask(WorldTask):
 
     async def _world_stage(self) -> tuple[WorldStage | None, str]:
         """取得本角色长期 WorldStage；运行时不支持时返回 None。"""
-        system_runtime = self.system_runtime
-        agent_runtime = getattr(system_runtime, "agent_runtime", None)
+        server_runtime = self.server_runtime
+        agent_runtime = getattr(server_runtime, "agent_runtime", None)
         character_id = str(getattr(agent_runtime, "default_character_id", None) or self.character_id)
-        get_world_stage = getattr(system_runtime, "get_world_stage", None)
+        get_world_stage = getattr(server_runtime, "get_world_stage", None)
         if not callable(get_world_stage):
             return None, character_id
         return await get_world_stage(character_id), character_id
@@ -212,12 +212,12 @@ class CitywalkTask(WorldTask):
         return "；".join(parts) or "完成了一次城市散步"
 
     def _build_citywalk_service(self) -> Any | None:
-        if self.system_runtime is None:
+        if self.server_runtime is None:
             return None
         try:
             from src.world.citywalk.runtime_scheduler import CitywalkRuntimeService
 
-            agent_runtime = getattr(self.system_runtime, "agent_runtime", None)
+            agent_runtime = getattr(self.server_runtime, "agent_runtime", None)
             vector_store = getattr(agent_runtime, "vector_store", None)
             if vector_store is None:
                 self.logger.warning("Citywalk task skipped: vector store is unavailable.")
@@ -231,7 +231,7 @@ class CitywalkTask(WorldTask):
     def _build_llm_modules(self) -> Any:
         from src.world.citywalk.llm_modules import CitywalkLLMModules
 
-        llm_service = getattr(self.system_runtime, "llm_service", None)
+        llm_service = getattr(self.server_runtime, "llm_service", None)
         if llm_service is None:
             return None
 

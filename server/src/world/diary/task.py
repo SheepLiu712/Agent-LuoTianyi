@@ -18,8 +18,8 @@ from src.world.world_settlements import FactHandlingOutcome, FactPlanOutcome
 
 if TYPE_CHECKING:
     from src.stage.world_stage import WorldStage
-    from src.system.database import DatabaseManager
-    from src.system.system_runtime import SystemRuntime
+    from src.infrastructure.persistence.database import DatabaseManager
+    from src.server_runtime import ServerRuntime
     from src.world.world_settlements import WorldSettlementRouter
 
 
@@ -63,18 +63,18 @@ class DiaryTask(WorldTask):
         self.max_users_per_run = int(self.config.get("max_users_per_run", 20))
         self.timezone = ZoneInfo(str(self.config.get("timezone", "Asia/Shanghai")))
         self.settlements = settlements
-        self.system_runtime: SystemRuntime | None = None
+        self.server_runtime: ServerRuntime | None = None
         self.database_manager: DatabaseManager | None = None
         self._outcomes: dict[str, str] = {}
 
-    def initialize(self, system_runtime: SystemRuntime) -> None:
-        self.system_runtime = system_runtime
-        self.database_manager = getattr(system_runtime, "database_manager", None)
+    def initialize(self, server_runtime: ServerRuntime) -> None:
+        self.server_runtime = server_runtime
+        self.database_manager = getattr(server_runtime, "database_manager", None)
 
     def ensure_dependencies(self) -> None:
         super().ensure_dependencies()
         required = {
-            "system_runtime": self.system_runtime,
+            "server_runtime": self.server_runtime,
             "database_manager": self.database_manager,
         }
         missing = [name for name, value in required.items() if value is None]
@@ -143,7 +143,7 @@ class DiaryTask(WorldTask):
         return False
 
     async def _world_stage(self) -> WorldStage | None:
-        get_world_stage = getattr(self.system_runtime, "get_world_stage", None)
+        get_world_stage = getattr(self.server_runtime, "get_world_stage", None)
         if not callable(get_world_stage):
             return None
         return await get_world_stage(self.character_id)
@@ -158,7 +158,7 @@ class DiaryTask(WorldTask):
         sql_session = self.database_manager.get_sql_session()
         if sql_session is None:
             return []
-        from src.system.database.sql_database import Conversation, DynamicPost
+        from src.infrastructure.persistence.database.sql_database import Conversation, DynamicPost
 
         try:
             day_start = datetime.strptime(target_date, "%Y-%m-%d")

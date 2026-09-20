@@ -14,13 +14,16 @@ from src.infrastructure.media import (
     MediaResolutionErrorCode,
     PermanentMediaStore,
 )
-from src.system.user_interface.types import BUSINESS_INPUT_EVENTS, WSMessage
+from src.web.websocket import BUSINESS_INPUT_EVENTS, WSMessage
 
 _TEXT_EVENTS = frozenset({"user_text", "user_message", "message", "chat_message", "chat"})
 _INPUT_EVENTS = BUSINESS_INPUT_EVENTS
 _TARGET_KEYS = (
-    "target_character_ids", "target_characters", "character_ids",
-    "target_character_id", "character_id",
+    "target_character_ids",
+    "target_characters",
+    "character_ids",
+    "target_character_id",
+    "character_id",
 )
 
 
@@ -40,13 +43,28 @@ def prepare_input(
     media_store: PermanentMediaStore | None = None,
 ) -> PreparedInput:
     """校验输入信封并创建准入候选；不解码或写入图片。"""
+    payload = _validate_envelope(event)
+    targets = _target_characters(payload, default_character_id)
+    typing = event.event_type == "user_typing"
+    values = _stimulus_values(event, user_id, targets, ephemeral=typing)
+    if typing:
+        return _prepare_typing(payload, values)
+    if event.event_type == "user_image":
+        return _prepare_image(event, payload, values, user_id, media_store)
+    return _prepare_text(event, payload, values)
+
+
+def _validate_envelope(event: WSMessage) -> dict:
     if event.event_type not in _INPUT_EVENTS:
         raise ValueError("unsupported business event")
     if not isinstance(event.payload, dict):
         raise TypeError("payload must be an object")
     if not isinstance(event.client_msg_id, str) or not event.client_msg_id.strip() or len(event.client_msg_id) > 128:
         raise ValueError("invalid client_msg_id")
-    payload = event.payload
+    return event.payload
+
+
+def _target_characters(payload: dict, default_character_id: str) -> tuple[str, ...]:
     raw_targets = next((payload[key] for key in _TARGET_KEYS if key in payload), None)
     if raw_targets is None:
         raw_targets = [default_character_id]
@@ -56,65 +74,92 @@ def prepare_input(
         raise ValueError("invalid target characters")
     if any(not isinstance(item, str) or not item.strip() or len(item) > 64 for item in raw_targets):
         raise ValueError("invalid target character")
-    targets = tuple(dict.fromkeys(item.strip() for item in raw_targets))
-    occurred_at = _occurred_at(event.ts)
-    typing = event.event_type == "user_typing"
-    values = {
-        "stimulus_id": str(uuid5(
-            NAMESPACE_URL,
-            json.dumps(["websocket-input", user_id, event.client_msg_id]),
-        )),
+    return tuple(dict.fromkeys(item.strip() for item in raw_targets))
+
+
+def _stimulus_values(
+    event: WSMessage,
+    user_id: str,
+    targets: tuple[str, ...],
+    *,
+    ephemeral: bool,
+) -> dict:
+    return {
+        "stimulus_id": str(
+            uuid5(
+                NAMESPACE_URL,
+                json.dumps(["websocket-input", user_id, event.client_msg_id]),
+            )
+        ),
         "schema_version": 1,
-        "occurred_at": occurred_at,
+        "occurred_at": _occurred_at(event.ts),
         "source": d.StimulusSource.USER,
         "target_character_ids": targets,
         "user_id": user_id,
-        "ephemeral": typing,
+        "ephemeral": ephemeral,
     }
-    if typing:
-        length = payload.get("text_length")
-        if type(length) is not int or not 0 <= length <= 100_000:
-            raise ValueError("invalid text_length")
-        return PreparedInput(d.UserTyping(**values, text_length=length))
-    if event.event_type == "user_image":
-        if media_store is None:
-            raise ValueError("media store is not configured")
-        image_base64 = payload.get("image_base64")
-        mime_type = payload.get("mime_type")
-        if not isinstance(image_base64, str) or not image_base64.strip():
-            raise ValueError("invalid image_base64")
-        if not isinstance(mime_type, str) or not mime_type.startswith("image/"):
-            raise ValueError("invalid image mime_type")
-        media_ref = media_store.mint_ref(
-            user_id=user_id,
-            client_msg_id=event.client_msg_id,
+
+
+def _prepare_typing(payload: dict, values: dict) -> PreparedInput:
+    length = payload.get("text_length")
+    if type(length) is not int or not 0 <= length <= 100_000:
+        raise ValueError("invalid text_length")
+    return PreparedInput(d.UserTyping(**values, text_length=length))
+
+
+def _prepare_image(
+    event: WSMessage,
+    payload: dict,
+    values: dict,
+    user_id: str,
+    media_store: PermanentMediaStore | None,
+) -> PreparedInput:
+    if media_store is None:
+        raise ValueError("media store is not configured")
+    image_base64 = payload.get("image_base64")
+    mime_type = payload.get("mime_type")
+    if not isinstance(image_base64, str) or not image_base64.strip():
+        raise ValueError("invalid image_base64")
+    if not isinstance(mime_type, str) or not mime_type.startswith("image/"):
+        raise ValueError("invalid image mime_type")
+    media_ref = media_store.mint_ref(user_id=user_id, client_msg_id=event.client_msg_id)
+    if len(image_base64.encode("utf-8")) > media_store.max_encoded_bytes:
+        raise MediaResolutionError(
+            code=MediaResolutionErrorCode.TOO_LARGE,
+            media_id=media_ref.media_id,
         )
-        if len(image_base64.encode("utf-8")) > media_store.max_encoded_bytes:
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.TOO_LARGE,
-                media_id=media_ref.media_id,
-            )
-        caption = payload.get("caption")
-        if caption is not None and (not isinstance(caption, str) or not caption.strip()):
-            raise ValueError("invalid image caption")
-        stimulus = d.ImageMessage(
-            **values,
-            media_ref=media_ref,
-            caption=caption.strip() if isinstance(caption, str) else None,
-            client_msg_id=event.client_msg_id,
-        )
-        return PreparedInput(stimulus, image_base64.strip(), mime_type.lower())
-    text = next((payload[key].strip() for key in ("message", "text", "content")
-                 if isinstance(payload.get(key), str) and payload[key].strip()), "")
+    caption = payload.get("caption")
+    if caption is not None and (not isinstance(caption, str) or not caption.strip()):
+        raise ValueError("invalid image caption")
+    stimulus = d.ImageMessage(
+        **values,
+        media_ref=media_ref,
+        caption=caption.strip() if isinstance(caption, str) else None,
+        client_msg_id=event.client_msg_id,
+    )
+    return PreparedInput(stimulus, image_base64.strip(), mime_type.lower())
+
+
+def _prepare_text(event: WSMessage, payload: dict, values: dict) -> PreparedInput:
+    text = next(
+        (
+            payload[key].strip()
+            for key in ("message", "text", "content")
+            if isinstance(payload.get(key), str) and payload[key].strip()
+        ),
+        "",
+    )
     if not text or len(text) > 20_000:
         raise ValueError("invalid text")
     if "is_proactive" in payload and type(payload["is_proactive"]) is not bool:
         raise ValueError("invalid is_proactive")
-    return PreparedInput(d.TextMessage(
-        **values,
-        text=text,
-        client_msg_id=event.client_msg_id,
-    ))
+    return PreparedInput(
+        d.TextMessage(
+            **values,
+            text=text,
+            client_msg_id=event.client_msg_id,
+        )
+    )
 
 
 def materialize_image(candidate: PreparedInput, media_store: PermanentMediaStore) -> None:

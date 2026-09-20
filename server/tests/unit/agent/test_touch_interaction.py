@@ -110,8 +110,13 @@ async def test_touch_handler_failure_logs_and_discards_without_plan(caplog):
 
 
 def test_touch_skill_rejects_directory_only_configuration(tmp_path):
-    with pytest.raises(ValueError, match="manifest"):
-        TouchReactionSkill({"luotianyi": {"touch_voice_dir": str(tmp_path), "probability": 1.0}})
+    from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
+
+    with pytest.raises(ValueError, match="catalog.*luotianyi"):
+        TouchReactionSkill(
+            {"luotianyi": {"resource_names": ["voice"], "probability": 1.0}},
+            PreparedSpeechCatalog({}),
+        )
 
 
 @pytest.mark.asyncio
@@ -139,14 +144,17 @@ async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatc
         ),
         encoding="utf-8",
     )
+    from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
+
+    catalog = PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}})
     skill = TouchReactionSkill(
         {
             "luotianyi": {
-                "manifest": str(manifest),
                 "resource_names": ["voice"],
                 "probability": 1.0,
             }
-        }
+        },
+        catalog,
     )
     monkeypatch.setattr("src.agent.skills.expression._touch_resources.random.choice", lambda files: next(iter(files)))
 
@@ -156,9 +164,9 @@ async def test_touch_skill_manifest_reference_is_resolvable(tmp_path, monkeypatc
         audio_ref=d.MediaRef(media_id="voice"),
         expression_id="happy",
     )
-    from src.resources.prepared_speech import PreparedSpeechResources
+    from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 
-    assert (await PreparedSpeechResources({"manifest": str(manifest)}).read_audio("voice")).data == audio.read_bytes()
+    assert (await catalog.read_audio("luotianyi", "voice")).data == audio.read_bytes()
 
 
 @pytest.mark.parametrize(
@@ -282,11 +290,10 @@ async def test_production_runtime_registers_touch_and_restore_without_chat_dupli
         ),
         encoding="utf-8",
     )
-    kwargs["config"]["prepared_speech"] = {"manifest": str(manifest)}
+    kwargs["config"]["prepared_speech"] = {"characters": {"luotianyi": {"manifest": str(manifest)}}}
     kwargs["config"]["character_registry"]["characters"]["luotianyi"]["reflex"] = {
         "touch": {
             "fast_reply": {
-                "manifest": str(manifest),
                 "resource_names": ["touch_voice"],
                 "probability": 1.0,
             }
@@ -318,5 +325,5 @@ def test_production_runtime_rejects_directory_only_touch_resources(runtime_depen
         },
     }
 
-    with pytest.raises(ValueError, match="manifest-backed"):
+    with pytest.raises(ValueError, match="catalog"):
         AgentRuntime(**kwargs)

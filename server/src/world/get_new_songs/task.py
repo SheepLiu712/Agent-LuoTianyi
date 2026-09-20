@@ -16,7 +16,7 @@ from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
     from src.stage.world_stage import WorldStage
-    from src.system.system_runtime import SystemRuntime
+    from src.server_runtime import ServerRuntime
 
 SONG_KNOWLEDGE_SOURCE = "vcpedia"
 DEFAULT_CHARACTER_ID = "luotianyi"
@@ -28,22 +28,22 @@ class VCPediaNewSongTask(WorldTask):
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         super().__init__(self.task_name, config)
         self.logger = get_logger(__name__)
-        self.system_runtime: "SystemRuntime" | None = None
+        self.server_runtime: "ServerRuntime" | None = None
         self.llm_module: Any | None = None
 
-    def initialize(self, system_runtime: "SystemRuntime") -> None:
-        self.system_runtime = system_runtime
+    def initialize(self, server_runtime: "ServerRuntime") -> None:
+        self.server_runtime = server_runtime
         crawler_cfg = self.config.get("crawler", {})
         module_cfg = crawler_cfg.get("llm_module")
-        llm_service = system_runtime.llm_service
+        llm_service = server_runtime.llm_service
         if module_cfg and llm_service is not None:
             self.llm_module = llm_service.register_llm_module("song_knowledge_crawler", module_cfg)
 
     def ensure_dependencies(self) -> None:
         """检查新歌知识同步任务的基础依赖。"""
         super().ensure_dependencies()
-        if getattr(self, "system_runtime", None) is None:
-            raise RuntimeError("VCPediaNewSongTask dependency is missing: system_runtime")
+        if getattr(self, "server_runtime", None) is None:
+            raise RuntimeError("VCPediaNewSongTask dependency is missing: server_runtime")
 
     async def run_once(self) -> WorldTaskResult:
         """收集候选并投递为世界事实；本任务不写入知识。"""
@@ -92,10 +92,10 @@ class VCPediaNewSongTask(WorldTask):
 
     async def _world_stage(self) -> tuple["WorldStage | None", str]:
         """取得本角色长期 WorldStage；运行时不支持时返回 None。"""
-        system_runtime = self.system_runtime
-        agent_runtime = getattr(system_runtime, "agent_runtime", None)
+        server_runtime = self.server_runtime
+        agent_runtime = getattr(server_runtime, "agent_runtime", None)
         character_id = str(getattr(agent_runtime, "default_character_id", None) or DEFAULT_CHARACTER_ID)
-        get_world_stage = getattr(system_runtime, "get_world_stage", None)
+        get_world_stage = getattr(server_runtime, "get_world_stage", None)
         if not callable(get_world_stage):
             return None, character_id
         return await get_world_stage(character_id), character_id

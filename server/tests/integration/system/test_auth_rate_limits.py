@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException, Response
 
-from src.system.user_interface import rate_limits
+from src.web.http import rate_limits
 
 
 @pytest.fixture(autouse=True)
@@ -88,7 +88,7 @@ def test_admin_login_is_limited_across_rotating_ips():
 
 @pytest.mark.asyncio
 async def test_admin_login_endpoint_uses_stable_nonsecret_subject(monkeypatch):
-    from src.system.admin import admin_interface
+    from src.web.admin import admin_interface
 
     calls = []
 
@@ -96,8 +96,10 @@ async def test_admin_login_endpoint_uses_stable_nonsecret_subject(monkeypatch):
         calls.append((bucket, subject))
 
     class StubAuth:
-        async def login_async(self, password, response):
-            return {"ok": False}
+        session_ttl_seconds = 60
+
+        async def login_async(self, password):
+            return {"ok": True, "token": "session-token"}
 
     monkeypatch.setattr(admin_interface, "enforce_rate_limit", record_rate_limit)
     monkeypatch.setattr(

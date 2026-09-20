@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from src.agent.context import ConversationCompaction, ConversationContext, ConversationSummary
 
 if TYPE_CHECKING:
-    from src.utils.llm_service import LLMService
+    from src.infrastructure.models.service import LLMService
 
 
 @dataclass(frozen=True)

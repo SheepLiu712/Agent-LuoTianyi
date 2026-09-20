@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.system.admin import admin_interface
-from src.system.admin.runtime_supervisor import RuntimeSupervisor
+from src.web.admin import admin_interface
+from src.application.admin.runtime_supervisor import RuntimeSupervisor
 
 
 def _supervisor(tmp_path):

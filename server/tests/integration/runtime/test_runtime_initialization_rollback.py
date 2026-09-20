@@ -12,9 +12,9 @@ if server_root not in sys.path:
 
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
-from src.system import system_runtime as runtime_module
-from src.system.database import vector_store as vector_store_module
-from src.system.database.vector_store import ChromaVectorStore
+import src.server_runtime as runtime_module
+from src.infrastructure.persistence.database import vector_store as vector_store_module
+from src.infrastructure.persistence.database.vector_store import ChromaVectorStore
 
 
 @pytest.mark.asyncio
@@ -24,7 +24,7 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     observability_ref = {"value": None}
 
     class FakeObservability:
-        def __init__(self, _config):
+        def __init__(self, _config, **_kwargs):
             calls.append("observability_created")
 
         def close(self):
@@ -51,21 +51,12 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
         async def shutdown(self):
             calls.append("database_stopped")
 
-    class FakeInfrastructure:
-        def __init__(self, _config, _llm):
-            calls.append("tts_started")
-
-        def wire_dependencies(self, **_kwargs):
-            pass
-
+    class FakeMediaResolver:
         def ensure_dependencies(self):
             pass
 
-        async def stop(self):
-            calls.append("tts_stopped")
-
     class FakeWorld:
-        def __init__(self, _config):
+        def __init__(self, _config, **_kwargs):
             pass
 
         def wire_dependencies(self, **_kwargs):
@@ -81,9 +72,10 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
             calls.append("world_stopped")
 
     class FakeAgentRuntime:
-        def __init__(self, *_args):
+        def __init__(self, *_args, **_kwargs):
             self.default_character_id = "luotianyi"
             self.context_factories = {"luotianyi": object()}
+            self.singing_backend = object()
 
         def get_agent(self, _character_id=None):
             return object()
@@ -119,7 +111,7 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     monkeypatch.setattr(runtime_module, "ObservabilityService", FakeObservability)
     monkeypatch.setattr(runtime_module, "LLMService", FakeLLM)
     monkeypatch.setattr(runtime_module, "DatabaseManager", FakeDatabase)
-    monkeypatch.setattr(runtime_module, "InfrastructureRuntime", FakeInfrastructure)
+    monkeypatch.setattr(runtime_module, "create_media_resolver", lambda _config: FakeMediaResolver())
     monkeypatch.setattr(runtime_module, "WorldRuntime", FakeWorld)
     monkeypatch.setattr(runtime_module, "AgentRuntime", FakeAgentRuntime)
     monkeypatch.setattr(runtime_module, "UserInterface", FailingUserInterface)
@@ -135,14 +127,13 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
         "uninstall_observability_log_handler",
         lambda: calls.append("observability_handler_uninstalled"),
     )
-    monkeypatch.setattr(runtime_module, "_system_runtime", None)
+    monkeypatch.setattr(runtime_module, "_server_runtime", None)
 
     with pytest.raises(RuntimeError, match="late initialization failure"):
-        await runtime_module.SystemRuntime.initialize({})
+        await runtime_module.ServerRuntime.initialize({})
 
     assert calls.index("world_started") < calls.index("rsa_generation_failed")
-    assert calls.index("world_stopped") < calls.index("tts_stopped")
-    assert calls.index("tts_stopped") < calls.index("database_stopped")
+    assert calls.index("world_stopped") < calls.index("database_stopped")
     assert database_ref["value"] is None
     assert observability_ref["value"] is None
     assert "observability_closed" in calls

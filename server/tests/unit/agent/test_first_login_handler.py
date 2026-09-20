@@ -12,7 +12,7 @@ from src.agent.handlers.stimulus import proactive as proactive_module
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent_runtime import agent_runtime as runtime_module
-from src.resources.prepared_speech import PreparedSpeechResources
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 
 
 class PlanSink:
@@ -51,12 +51,14 @@ def first_login_request(reason: str = "first_login") -> d.HandleStimulusRequest:
             pending_stimuli=(),
             now=datetime.now(timezone.utc),
             timezone=ZoneInfo("Asia/Shanghai"),
-            supported_outputs=frozenset({
-                d.AgentOutputKind.TEXT_FINAL,
-                d.AgentOutputKind.AUDIO_CHUNK,
-                d.AgentOutputKind.EXPRESSION,
-                d.AgentOutputKind.MESSAGE_END,
-            }),
+            supported_outputs=frozenset(
+                {
+                    d.AgentOutputKind.TEXT_FINAL,
+                    d.AgentOutputKind.AUDIO_CHUNK,
+                    d.AgentOutputKind.EXPRESSION,
+                    d.AgentOutputKind.MESSAGE_END,
+                }
+            ),
             response_deadline=None,
             connection_state=d.ConnectionState.CONNECTED,
         ),
@@ -74,7 +76,7 @@ async def test_missing_prepared_name_fails_without_silent_skip(monkeypatch):
     monkeypatch.setattr(proactive_module, "get_logger", lambda _: logger)
     handler = FirstLoginHandler(
         prepared_names=("missing",),
-        prepared_speech=PreparedSpeechResources({}),
+        prepared_speech=PreparedSpeechCatalog({}),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -113,9 +115,7 @@ async def test_runtime_injects_configured_names_into_real_handler(runtime_depend
     # When: the production runtime assembles the stimulus router.
     runtime = runtime_module.AgentRuntime(**kwargs)
     try:
-        handler = runtime.get_agent()._stimulus_router.resolve(
-            d.StimulusKind.PROACTIVE_PROMPT_DUE
-        )
+        handler = runtime.get_agent()._stimulus_router.resolve(d.StimulusKind.PROACTIVE_PROMPT_DUE)
 
         # Then: the placeholder is replaced and configured order is retained.
         assert isinstance(handler, FirstLoginHandler)
@@ -129,7 +129,7 @@ async def test_due_reminder_enters_conversation_and_emits_say_plan():
     # Given: a non-first-login due fact reaches the real proactive handler.
     handler = FirstLoginHandler(
         prepared_names=(),
-        prepared_speech=PreparedSpeechResources({}),
+        prepared_speech=PreparedSpeechCatalog({}),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -152,7 +152,9 @@ async def test_due_reminder_enters_conversation_and_emits_say_plan():
 
     # When: Agent handles the reminder through its public handle entrypoint.
     report = await agent.handle_stimulus(
-        first_login_request("holiday"), sink, context=context,
+        first_login_request("holiday"),
+        sink,
+        context=context,
     )
 
     # Then: cognition persists one agent turn and emits a normal Say plan for realization.

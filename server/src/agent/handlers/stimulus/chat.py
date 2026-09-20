@@ -18,7 +18,7 @@ from src.agent.context.models import (
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.skills.cognitive import (
     ExplicitMemoryIntentSkill,
-    ImagePreprocessingSkill,
+    ImageUnderstandingSkill,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
 )
@@ -56,7 +56,7 @@ class ChatPreprocessingHandler:
     def __init__(
         self,
         text_understanding: TextPreprocessingSkill,
-        image_understanding: ImagePreprocessingSkill | None = None,
+        image_understanding: ImageUnderstandingSkill | None = None,
     ) -> None:
         """注入文本线索提取与可选的受控图片理解技能。"""
         self._text_understanding = text_understanding
@@ -85,7 +85,7 @@ class ChatPreprocessingHandler:
                 )
             case d.ImageMessage():
                 if self._image_understanding is None:
-                    raise RuntimeError("Image preprocessing skill is not configured")
+                    raise RuntimeError("Image understanding skill is not configured")
                 owner_user_id = request.interaction.user_id
                 if owner_user_id is None:
                     raise RuntimeError("Image stimulus requires an authenticated user")

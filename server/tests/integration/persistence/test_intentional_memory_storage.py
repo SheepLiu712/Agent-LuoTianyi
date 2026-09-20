@@ -3,7 +3,7 @@
 import pytest
 
 from src.agent.skills.adapters.memory.writer import MemoryWriter
-from src.system.database.vector_store import Document
+from src.infrastructure.persistence.database.vector_store import Document
 
 
 class _VectorStore:

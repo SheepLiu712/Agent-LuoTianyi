@@ -115,14 +115,21 @@ required-version = "==0.14.10"
 target-version = "py310"
 line-length = 120
 
-# Agent 深模块及本次 Skill/基础设施收口范围。
+# Agent 深模块及本次应用、Web、Adapter、Skill 与基础设施收口范围。
 include = [
+    "src/adapter/**/*.py",
     "src/agent/**/*.py",
     "src/agent_runtime/**/*.py",
+    "src/application/**/*.py",
     "src/domain/agent/**/*.py",
+    "src/domain/stage/**/*.py",
     "src/infrastructure/**/*.py",
+    "src/server_runtime.py",
     "src/stage/**/*.py",
-    "src/system/system_runtime.py",
+    "src/web/**/*.py",
+    "src/world/world_runtime.py",
+    "src/world/learn_sing_songs/ports.py",
+    "src/world/learn_sing_songs/task.py",
 ]
 
 [tool.ruff.lint]
@@ -149,15 +156,19 @@ max-complexity = 10
 target-version = ["py310"]
 line-length = 120
 # 与 Ruff 门禁保持相同的重构范围。
-include = 'src/(agent|agent_runtime|domain/agent|infrastructure|stage)/.*\.py$|src/system/system_runtime\.py$'
+include = 'src/(adapter|agent|agent_runtime|application|domain/(agent|stage)|infrastructure|stage|web)/.*\.py$|src/server_runtime\.py$|src/world/world_runtime\.py$|src/world/learn_sing_songs/(ports|task)\.py$'
 
 [tool.coverage.run]
 source = [
+    "src/adapter",
     "src/agent",
     "src/agent_runtime",
+    "src/application",
     "src/domain/agent",
+    "src/domain/stage",
     "src/infrastructure",
     "src/stage",
+    "src/web",
 ]
 
 [tool.coverage.report]

@@ -5,8 +5,8 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from src.system.database.sql_database import Base, InviteCode, User
-from src.system.user_interface import account
+from src.infrastructure.persistence.database.sql_database import Base, InviteCode, User
+from src.application.user import account
 
 
 @pytest.fixture
@@ -122,17 +122,8 @@ def test_legacy_registration_commit_failure_rolls_back_user_and_invite(
     assert ok is False
     verification_session = session_factory()
     try:
-        assert (
-            verification_session.query(User)
-            .filter_by(username="rollback-user")
-            .first()
-            is None
-        )
-        invite = (
-            verification_session.query(InviteCode)
-            .filter_by(code="LEGACY-ROLLBACK")
-            .one()
-        )
+        assert verification_session.query(User).filter_by(username="rollback-user").first() is None
+        invite = verification_session.query(InviteCode).filter_by(code="LEGACY-ROLLBACK").one()
         assert invite.is_used is False
         assert invite.user_id is None
     finally:

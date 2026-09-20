@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List
 
+from src.utils.logger import get_logger
 from src.world.bili_event_updater.task import BiliEventUpdateTask
 from src.world.citywalk.task import CitywalkTask
-from src.world.dynamic_interaction.task import DynamicInteractionTask
 from src.world.diary.task import DiaryTask
+from src.world.dynamic_interaction.task import DynamicInteractionTask
 from src.world.event_cleanup_task import ExpiredEventCleanupTask
 from src.world.get_new_songs.task import VCPediaNewSongTask
 from src.world.learn_sing_songs.qq_music_credential_refresh_task import QQMusicCredentialRefreshTask
@@ -14,10 +15,10 @@ from src.world.learn_sing_songs.task import LearnSingSongsTask
 from src.world.proactive_topic_task import ProactiveTopicCheckTask
 from src.world.world_clock import WorldClock
 from src.world.world_settlements import WorldSettlementRouter
-from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.system.system_runtime import SystemRuntime
+    from src.server_runtime import ServerRuntime
+    from src.world.learn_sing_songs.ports import SingingBackendPort
     from src.world.types.world_task import WorldTask
 
 
@@ -27,9 +28,12 @@ class WorldRuntime:
     def __init__(
         self,
         config: Dict[str, Any],
+        *,
+        singing_backend: SingingBackendPort | None = None,
     ) -> None:
         self.config = config or {}
-        self.system_runtime: "SystemRuntime | None" = None
+        self.singing_backend = singing_backend
+        self.server_runtime: "ServerRuntime | None" = None
         self.logger = get_logger(__name__)
 
         self.world_clock = WorldClock()
@@ -50,20 +54,20 @@ class WorldRuntime:
         self._startup_event_task: asyncio.Task | None = None
         self._modules_initialized = False
 
-    def set_system_runtime(self, system_runtime: "SystemRuntime") -> None:
-        self.system_runtime = system_runtime
+    def set_server_runtime(self, server_runtime: "ServerRuntime") -> None:
+        self.server_runtime = server_runtime
 
-    def wire_dependencies(self, *, system_runtime: "SystemRuntime") -> None:
+    def wire_dependencies(self, *, server_runtime: "ServerRuntime") -> None:
         """向世界运行时和任务模块派发系统依赖。"""
-        self.set_system_runtime(system_runtime)
+        self.set_server_runtime(server_runtime)
         self.initialize_modules()
         self.ensure_dependencies()
 
     def initialize_modules(self) -> None:
         if self._modules_initialized:
             return
-        if self.system_runtime is None:
-            raise RuntimeError("WorldRuntime requires system_runtime before module initialization.")
+        if self.server_runtime is None:
+            raise RuntimeError("WorldRuntime requires server_runtime before module initialization.")
 
         self.citywalk_tasks = self._build_citywalk_tasks()
         self.citywalk_task = self.citywalk_tasks[0] if self.citywalk_tasks else None
@@ -106,7 +110,7 @@ class WorldRuntime:
         ]
         self.tasks = [task for task in self.tasks if task is not None]
         for task in self.tasks:
-            task.initialize(self.system_runtime)
+            task.initialize(self.server_runtime)
             if hasattr(task, "ensure_dependencies"):
                 task.ensure_dependencies()
 
@@ -134,7 +138,7 @@ class WorldRuntime:
     def ensure_dependencies(self) -> None:
         """检查世界运行时和任务模块依赖已经初始化。"""
         required = {
-            "system_runtime": self.system_runtime,
+            "server_runtime": self.server_runtime,
             "world_clock": self.world_clock,
             "tasks": self.tasks,
         }
@@ -152,10 +156,10 @@ class WorldRuntime:
                 task.ensure_dependencies()
 
     async def _initialize_event_store(self) -> None:
-        if self.system_runtime is None:
+        if self.server_runtime is None:
             return
         try:
-            await self.system_runtime.database_manager.event_store.ensure_holidays()
+            await self.server_runtime.database_manager.event_store.ensure_holidays()
         except Exception as exc:
             self.logger.warning(f"Failed to ensure holidays: {exc}")
 
@@ -195,10 +199,7 @@ class WorldRuntime:
     def _build_learn_sing_songs_tasks(self) -> List[LearnSingSongsTask]:
         if not self._task_enabled("auto_song_learner"):
             return []
-        if self.system_runtime is None:
-            return []
-        singing = getattr(getattr(self.system_runtime, "infrastructure", None), "singing", None)
-        managers = getattr(singing, "singing_manager", None) or {}
+        managers = getattr(self.singing_backend, "singing_manager", None) or {}
         if not managers:
             self.logger.warning("No singing managers available; learn_sing_songs tasks skipped")
             return []
@@ -213,6 +214,7 @@ class WorldRuntime:
                     task_config,
                     character_id=character_id,
                     singing_manager=singing_manager,
+                    singing_backend=self.singing_backend,
                 )
             )
         return tasks
@@ -246,7 +248,7 @@ class WorldRuntime:
         return tasks
 
     def _character_ids(self) -> list[str]:
-        agent_runtime = getattr(self.system_runtime, "agent_runtime", None)
+        agent_runtime = getattr(self.server_runtime, "agent_runtime", None)
         character_ids = getattr(agent_runtime, "character_ids", None)
         if isinstance(character_ids, tuple) and character_ids:
             return [str(character_id) for character_id in character_ids]
@@ -256,7 +258,7 @@ class WorldRuntime:
         return ["luotianyi"]
 
     def _default_character_id(self) -> str:
-        agent_runtime = getattr(self.system_runtime, "agent_runtime", None)
+        agent_runtime = getattr(self.server_runtime, "agent_runtime", None)
         default_character_id = getattr(agent_runtime, "default_character_id", None)
         if default_character_id:
             return str(default_character_id)

@@ -8,6 +8,7 @@ from .media_resolver import (
     MediaResolver,
     ResolvedMedia,
     UnconfiguredMediaResolver,
+    create_media_resolver,
 )
 from .media_store import PermanentMediaStore
 
@@ -19,5 +20,6 @@ __all__ = [
     "PermanentMediaStore",
     "ResolvedMedia",
     "UnconfiguredMediaResolver",
+    "create_media_resolver",
     "validate_image_content",
 ]

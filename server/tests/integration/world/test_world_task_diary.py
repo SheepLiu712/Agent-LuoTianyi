@@ -7,7 +7,7 @@ import src.domain.agent as d
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.system.database.sql_database import Base, Conversation, DynamicPost, User
+from src.infrastructure.persistence.database.sql_database import Base, Conversation, DynamicPost, User
 from src.world.diary.task import DiaryTask
 from src.world.world_settlements import WorldSettlementRouter
 
@@ -161,7 +161,6 @@ def test_model_availability_is_not_checked_by_world():
     sink = FactSink()
     runtime = SimpleNamespace(
         database_manager=SimpleNamespace(get_sql_session=lambda: None),
-        infrastructure=SimpleNamespace(diary=SimpleNamespace(ensure_llm=lambda: False)),
         get_world_stage=lambda character_id: _stage(sink, character_id),
     )
     task = DiaryTask({}, settlements=WorldSettlementRouter())

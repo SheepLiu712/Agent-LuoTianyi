@@ -1,4 +1,5 @@
 """聊天交互的生命周期结果。"""
+
 from dataclasses import dataclass
 from enum import Enum
 

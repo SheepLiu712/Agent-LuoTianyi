@@ -6,7 +6,7 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.agent.context import ConversationEntry, TextContent
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
-from src.resources.prepared_speech import PreparedSpeechResources
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.utils.logger import get_logger
 
 
@@ -17,7 +17,7 @@ class FirstLoginHandler:
         self,
         *,
         prepared_names: tuple[str, ...],
-        prepared_speech: PreparedSpeechResources,
+        prepared_speech: PreparedSpeechCatalog,
     ) -> None:
         self._prepared_names = prepared_names
         self._prepared_speech = prepared_speech
@@ -64,7 +64,7 @@ class FirstLoginHandler:
 
         for name in self._prepared_names:
             try:
-                prepared = self._prepared_speech.get(name)
+                prepared = self._prepared_speech.get(plans.context.identity.character_id, name)
             except KeyError:
                 self._logger.error(
                     "First-login prepared speech missing name=%s request_id=%s",

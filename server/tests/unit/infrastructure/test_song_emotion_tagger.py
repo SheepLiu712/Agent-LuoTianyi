@@ -7,9 +7,7 @@ if server_root not in sys.path:
 
 import pytest
 
-from src.infrastructure.singing.song_emotion_tagger import SongEmotionTagger
-from src.infrastructure.singing.singing import SingingBackend
-from src.infrastructure.singing.singing_manager import SingingManager
+from src.agent.skills.expression.singing import SingingBackend, SingingManager, SongEmotionTagger
 from src.domain.music_type import SongMetadata, SongSegment
 
 

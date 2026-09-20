@@ -5,16 +5,16 @@ import time
 import pytest
 from jose import jwt
 
-from src.system.database.database_service import DatabaseManager
-from src.system.database.services import credential_service
-from src.system.database.services.credential_service import ALGORITHM
-from src.system.database.sql_database import InviteCode, User
-from src.system.database.utils import (
+from src.infrastructure.persistence.database.database_service import DatabaseManager
+from src.infrastructure.persistence.database.services import credential_service
+from src.infrastructure.persistence.database.services.credential_service import ALGORITHM
+from src.infrastructure.persistence.database.sql_database import InviteCode, User
+from src.infrastructure.persistence.database.utils import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
     MAX_MESSAGE_TOKEN_TTL_SECONDS,
     MIN_MESSAGE_TOKEN_TTL_SECONDS,
 )
-from src.system.user_interface.account import (
+from src.application.user.account import (
     check_message_token as check_legacy_message_token,
     generate_message_token as generate_legacy_message_token,
 )

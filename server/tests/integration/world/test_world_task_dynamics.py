@@ -18,8 +18,8 @@ from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.agent.skills.expression._dynamic_operations import DynamicOperations
-from src.system.database.database_service import DatabaseManager
-from src.system.database.sql_database import InviteCode
+from src.infrastructure.persistence.database.database_service import DatabaseManager
+from src.infrastructure.persistence.database.sql_database import InviteCode
 from src.world.citywalk.task import CitywalkTask
 from src.world.dynamic_interaction.task import DynamicInteractionTask
 from src.world.learn_sing_songs.task import LearnSingSongsTask
@@ -145,7 +145,7 @@ def test_citywalk_completion_publishes_global_dynamic(db_manager: DatabaseManage
 
     router = WorldSettlementRouter()
     task = CitywalkTask({"daily_run_probability": 1.0}, settlements=router)
-    task.system_runtime = SimpleNamespace(
+    task.server_runtime = SimpleNamespace(
         agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
         get_world_stage=get_world_stage,
     )
@@ -274,12 +274,12 @@ def test_learn_song_task_publishes_global_dynamic(db_manager: DatabaseManager):
         return SimpleNamespace(fact_sink=sink)
 
     task = LearnSingSongsTask({}, character_id="luotianyi", singing_manager=None)
-    task.system_runtime = SimpleNamespace(
-        agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
-        get_world_stage=get_world_stage,
-        infrastructure=SimpleNamespace(
-            singing=FakeSinging(),
+    task.server_runtime = SimpleNamespace(
+        agent_runtime=SimpleNamespace(
+            default_character_id="luotianyi",
+            skills=SimpleNamespace(singing=SimpleNamespace(backend=FakeSinging())),
         ),
+        get_world_stage=get_world_stage,
     )
     task.event_store = FakeEventStore()
     task.auto_song_learner = FakeLearner()
@@ -391,7 +391,7 @@ def _build_dynamic_task(
     router: WorldSettlementRouter | None = None,
     config: dict | None = None,
 ) -> DynamicInteractionTask:
-    """构造只依赖 system_runtime/database 的动态互动任务，不提供 CharacterRuntime。"""
+    """构造只依赖 server_runtime/database 的动态互动任务，不提供 CharacterRuntime。"""
 
     async def get_world_stage(character_id=None, world_id=None):
         return SimpleNamespace(fact_sink=sink)

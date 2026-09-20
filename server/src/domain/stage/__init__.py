@@ -1,6 +1,16 @@
-"""Stage 的通道无关输出与生命周期类型。"""
-from .output import AgentPresentationChanged, AgentPresentationState, CancelDelivery, StageOutput
-from .lifecycle import StageState, StageTerminationResult
+"""Stage 的通道无关输出、提醒端口与生命周期类型。"""
 
-__all__ = ["AgentPresentationChanged", "AgentPresentationState", "CancelDelivery",
-           "StageOutput", "StageState", "StageTerminationResult"]
+from .due_events import DueEvent, DueEventProvider
+from .lifecycle import StageState, StageTerminationResult
+from .output import AgentPresentationChanged, AgentPresentationState, CancelDelivery, StageOutput
+
+__all__ = [
+    "AgentPresentationChanged",
+    "AgentPresentationState",
+    "CancelDelivery",
+    "DueEvent",
+    "DueEventProvider",
+    "StageOutput",
+    "StageState",
+    "StageTerminationResult",
+]

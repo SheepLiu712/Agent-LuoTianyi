@@ -7,7 +7,7 @@ from pathlib import Path
 import src.domain.agent as d
 from src.agent.skills.contracts import SkillInvocation
 from src.agent.skills.expression._touch_resources import TouchFastReplyBuilder
-from src.resources.prepared_speech import load_prepared_speech
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.utils.logger import get_logger
 
 _DEFAULT_REGIONS = frozenset(
@@ -116,21 +116,30 @@ class TouchReaction:
 class TouchReactionSkill:
     """共享所有角色的触摸策略和预制资源选择器。"""
 
-    def __init__(self, configs: Mapping[str, Mapping[str, object]]) -> None:
+    def __init__(
+        self,
+        configs: Mapping[str, Mapping[str, object]],
+        prepared_speech: PreparedSpeechCatalog,
+    ) -> None:
         """按角色配置一次性构造选择器；调用时由 SkillInvocation 选择。"""
-        self._resources = {character_id: self._build(config) for character_id, config in configs.items()}
+        self._resources = {
+            character_id: self._build(character_id, config, prepared_speech)
+            for character_id, config in configs.items()
+            if config
+        }
 
     @staticmethod
-    def _build(config: Mapping[str, object]) -> tuple[TouchFastReplyBuilder, dict[str, str], TouchPolicy]:
-        manifest = config.get("manifest")
-        if manifest is None and config.get("touch_voice_dir") is not None:
-            raise ValueError("touch fast reply requires manifest-backed resources")
-        if manifest is not None and not isinstance(manifest, (str, Path)):
-            raise ValueError("touch fast reply manifest must be a path")
-        builder = TouchFastReplyBuilder(config)
-        media_ids = (
-            {entry.audio_path: entry.name for entry in load_prepared_speech(manifest)} if manifest is not None else {}
-        )
+    def _build(
+        character_id: str,
+        config: Mapping[str, object],
+        prepared_speech: PreparedSpeechCatalog,
+    ) -> tuple[TouchFastReplyBuilder, dict[object, str], TouchPolicy]:
+        try:
+            entries = prepared_speech.entries(character_id)
+        except KeyError:
+            raise ValueError(f"touch fast reply requires prepared speech catalog for {character_id}") from None
+        builder = TouchFastReplyBuilder(config, entries)
+        media_ids = {entry.audio_path: entry.name for entry in entries}
         return builder, media_ids, TouchPolicy.from_config(config.get("policy"))
 
     def allows(self, invocation: SkillInvocation, stimulus: d.TouchInteraction) -> bool:

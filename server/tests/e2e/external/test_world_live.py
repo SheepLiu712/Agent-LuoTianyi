@@ -11,7 +11,7 @@ import pytest
 
 import src.world.get_new_songs.daily_new_song_fetcher as fetcher_module
 from src.utils.helpers import load_config
-from src.utils.llm_service import LLMService
+from src.infrastructure.models.service import LLMService
 from src.world.get_new_songs.task import VCPediaNewSongTask
 from src.world.bili_event_updater.task import BiliEventUpdateTask
 

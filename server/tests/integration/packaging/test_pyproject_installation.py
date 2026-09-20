@@ -43,7 +43,7 @@ def test_wheel_contains_regular_and_namespace_packages(tmp_path: Path) -> None:
         "src/agent/facade.py",
         "src/agent/skills/adapters/memory/facade.py",
         "src/agent/skills/cognitive/response_generation.py",
-        "src/infrastructure/song_knowledge/database.py",
+        "src/infrastructure/persistence/song_knowledge.py",
         "src/world/get_new_songs/task.py",
         "src/world/learn_sing_songs/task.py",
         "src/world/types/task_result.py",

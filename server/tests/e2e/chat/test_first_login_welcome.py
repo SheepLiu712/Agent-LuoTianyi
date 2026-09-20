@@ -18,9 +18,9 @@ from src.agent.handlers.action.say import SayHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.resources.prepared_speech import PreparedSpeechResources
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.stage import StageManager
-from src.system.user_interface.websocket_service import WebSocketConnection
+from src.web.websocket.service import WebSocketConnection
 
 
 class Socket:
@@ -77,25 +77,36 @@ async def test_first_login_waits_for_ready_then_emits_two_persistent_final_packa
     (tmp_path / "one.wav").write_bytes(first_audio)
     (tmp_path / "two.wav").write_bytes(second_audio)
     manifest = tmp_path / "manifest.json"
-    manifest.write_text(json.dumps([
-        {"name": "welcome_1", "audio_path": "one.wav", "text": "欢迎一", "expression": "smile"},
-        {"name": "welcome_2", "audio_path": "two.wav", "text": "欢迎二", "expression": "happy"},
-    ]), encoding="utf-8")
-    resources = PreparedSpeechResources({"manifest": str(manifest)})
+    manifest.write_text(
+        json.dumps(
+            [
+                {"name": "welcome_1", "audio_path": "one.wav", "text": "欢迎一", "expression": "smile"},
+                {"name": "welcome_2", "audio_path": "two.wav", "text": "欢迎二", "expression": "happy"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    resources = PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}})
     handler = FirstLoginHandler(
         prepared_names=("welcome_1", "welcome_2"),
         prepared_speech=resources,
     )
     agent = Agent(
         character_id="luotianyi",
-        stimulus_router=StimulusRouter((
-            (d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),
-            (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
-        )),
-        action_router=ActionRouter(((
-            d.ActionKind.SAY,
-            SayHandler("luotianyi", SimpleNamespace(), resources),
-        ),)),
+        stimulus_router=StimulusRouter(
+            (
+                (d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),
+                (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+            )
+        ),
+        action_router=ActionRouter(
+            (
+                (
+                    d.ActionKind.SAY,
+                    SayHandler("luotianyi", SimpleNamespace(), resources),
+                ),
+            )
+        ),
     )
     adapter = WebSocketAdapter()
     factory = ContextFactory()
@@ -120,11 +131,9 @@ async def test_first_login_waits_for_ready_then_emits_two_persistent_final_packa
     assert socket.events == []
 
     async def two_final_packages() -> None:
-        while sum(
-            event["payload"]["is_final_package"]
-            for event in socket.events
-            if event["type"] == "agent_message"
-        ) < 2:
+        while (
+            sum(event["payload"]["is_final_package"] for event in socket.events if event["type"] == "agent_message") < 2
+        ):
             await asyncio.sleep(0)
 
     await asyncio.wait_for(two_final_packages(), 1)

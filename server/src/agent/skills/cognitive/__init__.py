@@ -2,10 +2,11 @@
 
 from src.agent.skills.contracts import ComposedReply, ComposedResponse, ReplyDraft
 
-from .image_preprocessing import ImagePreprocessingSkill, ImageUnderstandingPort
+from .image_understanding import ImageUnderstandingSkill
 from .intentional_memory import ExplicitMemoryIntentSkill
 from .response_composition import ResponseCompositionSkill
 from .response_generation import CharacterReplyGenerator
+from .song_entity_linker import SongEntityLinker
 from .text_preprocessing import TextPreprocessingSkill
 
 __all__ = [
@@ -13,9 +14,9 @@ __all__ = [
     "ComposedReply",
     "ComposedResponse",
     "ExplicitMemoryIntentSkill",
-    "ImagePreprocessingSkill",
-    "ImageUnderstandingPort",
+    "ImageUnderstandingSkill",
     "ReplyDraft",
     "ResponseCompositionSkill",
+    "SongEntityLinker",
     "TextPreprocessingSkill",
 ]

@@ -1,4 +1,5 @@
 """现有聊天包的内部字段映射，仅由共享 adapter 的投递流程使用。"""
+
 import base64
 from collections.abc import Iterator
 
@@ -13,7 +14,7 @@ def payloads(output: d.AgentOutput) -> Iterator[dict[str, object]]:
         yield {"expression": output.expression.expression_id}
     elif isinstance(output, d.AudioChunkOutput):
         for offset in range(0, len(output.data), 48 * 1024):
-            yield {"audio": base64.b64encode(output.data[offset:offset + 48 * 1024]).decode("ascii")}
+            yield {"audio": base64.b64encode(output.data[offset : offset + 48 * 1024]).decode("ascii")}
     elif isinstance(output, d.MessageEndOutput):
         error = None
         if output.status is d.MessageEndStatus.CANCELLED:

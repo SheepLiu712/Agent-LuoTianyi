@@ -5,7 +5,7 @@ import pytest
 
 
 import src.world.bili_event_updater.task as task_module
-from src.system.database.event_models import UnifiedEventType
+from src.infrastructure.persistence.database.event_models import UnifiedEventType
 from src.world.bili_event_updater.task import BiliEventUpdateTask
 from src.world.bili_event_updater.official_feed_fetcher import OfficialFeedFetcher
 from src.world.bili_event_updater.updater import BiliEventUpdater

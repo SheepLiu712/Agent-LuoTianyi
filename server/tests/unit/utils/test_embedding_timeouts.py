@@ -1,5 +1,5 @@
-from src.utils.llm import embedding as embedding_module
-from src.utils.llm.embedding import SiliconFlowEmbeddings
+from src.infrastructure.models.llm import embedding as embedding_module
+from src.infrastructure.models.llm.embedding import SiliconFlowEmbeddings
 
 
 def test_embedding_request_has_finite_connect_and_read_timeouts(monkeypatch):

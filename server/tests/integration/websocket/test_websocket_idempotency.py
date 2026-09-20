@@ -8,8 +8,9 @@ server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.system.user_interface.types import WSEventType, WSMessage
-from src.system.user_interface.websocket_service import WebSocketConnection, WebSocketService
+from src.web.websocket import WSEventType, WSMessage
+from src.web.websocket.service import WebSocketConnection, WebSocketService
+from src.adapter.websocket import WebSocketAdapter
 
 
 class FakeWebSocket:
@@ -28,26 +29,26 @@ def _message(client_msg_id: str) -> WSMessage:
     )
 
 
-def test_websocket_service_deduplicates_recent_client_message_per_user():
-    service = WebSocketService()
+def test_websocket_adapter_deduplicates_recent_client_message_per_user():
+    adapter = WebSocketAdapter()
     connection = WebSocketConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
 
-    assert service.is_duplicate_client_message(connection, _message("msg-1")) is False
-    assert service.is_duplicate_client_message(connection, _message("msg-1")) is False
-    assert service.mark_client_message_accepted(connection, _message("msg-1")) is True
-    assert service.is_duplicate_client_message(connection, _message("msg-1")) is True
-    assert service.is_duplicate_client_message(connection, _message("msg-2")) is False
+    assert adapter.is_duplicate_client_message(connection, _message("msg-1")) is False
+    assert adapter.is_duplicate_client_message(connection, _message("msg-1")) is False
+    assert adapter.mark_client_message_accepted(connection, _message("msg-1")) is True
+    assert adapter.is_duplicate_client_message(connection, _message("msg-1")) is True
+    assert adapter.is_duplicate_client_message(connection, _message("msg-2")) is False
 
 
-def test_websocket_service_dedup_cache_is_scoped_by_user():
-    service = WebSocketService()
+def test_websocket_adapter_dedup_cache_is_scoped_by_user():
+    adapter = WebSocketAdapter()
     user_a = WebSocketConnection(FakeWebSocket(), user_uuid="user-a", user_name="alice")
     user_b = WebSocketConnection(FakeWebSocket(), user_uuid="user-b", user_name="bob")
 
-    assert service.mark_client_message_accepted(user_a, _message("same-id")) is True
-    assert service.mark_client_message_accepted(user_b, _message("same-id")) is True
-    assert service.is_duplicate_client_message(user_a, _message("same-id")) is True
-    assert service.is_duplicate_client_message(user_b, _message("same-id")) is True
+    assert adapter.mark_client_message_accepted(user_a, _message("same-id")) is True
+    assert adapter.mark_client_message_accepted(user_b, _message("same-id")) is True
+    assert adapter.is_duplicate_client_message(user_a, _message("same-id")) is True
+    assert adapter.is_duplicate_client_message(user_b, _message("same-id")) is True
 
 
 @pytest.mark.asyncio

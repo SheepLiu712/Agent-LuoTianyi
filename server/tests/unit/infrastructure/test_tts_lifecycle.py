@@ -6,14 +6,12 @@ from types import SimpleNamespace
 
 import pytest
 
-
 server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.infrastructure.runtime import InfrastructureRuntime
-from src.infrastructure.speech.speech import SpeechBackend
-from src.infrastructure.speech.tts_server import TTSServer
+from src.agent.skills.expression.speaking.backend import SpeechBackend
+from src.agent.skills.expression.speaking.tts_server import TTSServer
 
 
 def make_speech(modules):
@@ -83,31 +81,6 @@ async def test_tts_stop_retries_only_failed_servers_and_preserves_shared_ownersh
 
     assert healthy_server.stop_calls == 1
     assert flaky_server.stop_calls == 2
-
-
-@pytest.mark.asyncio
-async def test_infrastructure_runtime_stop_is_idempotent_and_retryable():
-    class FlakySpeech:
-        def __init__(self):
-            self.stop_calls = 0
-
-        async def stop(self):
-            self.stop_calls += 1
-            if self.stop_calls == 1:
-                raise RuntimeError("speech stop failed")
-
-    manager = object.__new__(InfrastructureRuntime)
-    manager.speech = FlakySpeech()
-    manager._stop_lock = asyncio.Lock()
-    manager._stopped = False
-
-    with pytest.raises(RuntimeError, match="speech stop failed"):
-        await manager.stop()
-    await manager.stop()
-    await manager.stop()
-
-    assert manager.speech.stop_calls == 2
-    assert manager._stopped is True
 
 
 @pytest.mark.asyncio

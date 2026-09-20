@@ -5,17 +5,17 @@ from contextlib import aclosing
 import src.domain.agent as d
 from src.agent.processing.output_drafts import AudioChunkDraft, ExpressionDraft, MessageEndDraft, TextFinalDraft
 from src.agent.processing.output_emitter import OutputEmitter
+from src.agent.skills.expression.prepared_speech import EmptyPreparedAudioError, PreparedSpeechCatalog
 from src.agent.skills.expression.speaking import EmptySpeechError, SpeakingSkill
+from src.agent.skills.expression.speaking.errors import TTSStreamCancelled
 from src.agent.skills.invocation import execution_invocation
-from src.infrastructure.speech.stream_errors import TTSStreamCancelled
-from src.resources.prepared_speech import EmptyPreparedAudioError, PreparedSpeechResources
 from src.utils.logger import get_logger
 
 
 class SayHandler:
     """角色私有的 SAY 处理器，复用共享语音技能。"""
 
-    def __init__(self, character_id: str, speaking: SpeakingSkill, prepared_speech: PreparedSpeechResources) -> None:
+    def __init__(self, character_id: str, speaking: SpeakingSkill, prepared_speech: PreparedSpeechCatalog) -> None:
         """绑定角色 character_id、共享 speaking 技能及预制资源 prepared_speech。"""
         self._character_id = character_id
         self._speaking = speaking
@@ -39,7 +39,10 @@ class SayHandler:
         self, action: d.Say, context: d.ExecutionContext, outputs: OutputEmitter
     ) -> d.ActionResult:
         try:
-            audio = await self._prepared_speech.read_audio(action.prepared_audio_ref.media_id)
+            audio = await self._prepared_speech.read_audio(
+                self._character_id,
+                action.prepared_audio_ref.media_id,
+            )
         except Exception as error:
             get_logger(__name__).exception(
                 f"SAY prepared audio failed character_id={self._character_id} action_id={action.action_id}"

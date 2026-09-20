@@ -4,9 +4,9 @@ import pytest
 from fastapi import HTTPException
 
 import server_main
-from src.system.admin import admin_interface
-from src.system.admin.secret_store import SecretStore
-from src.system.user_interface.types import (
+from src.web.admin import admin_interface
+from src.infrastructure.config.secrets import SecretStore
+from src.web.http.types import (
     DynamicCommentListQuery,
     DynamicListQuery,
     DynamicUnreadQuery,

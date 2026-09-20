@@ -5,7 +5,7 @@ server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.system.observability.service import ObservabilityService
+from src.infrastructure.observability.service import ObservabilityService
 
 
 def test_observability_relative_db_path_uses_base_dir(tmp_path, monkeypatch):

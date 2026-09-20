@@ -21,7 +21,7 @@ def test_proactive_topic_check_initialize_sets_runtime():
 
     task.initialize(runtime)
 
-    assert task.system_runtime is runtime
+    assert task.server_runtime is runtime
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,6 @@ import pytest
 import src.world.world_runtime as runtime_module
 from src.world.world_runtime import WorldRuntime
 
-
 TASKS = {
     "citywalk": ("CitywalkTask", "try_citywalk", True),
     "auto_song_learner": ("LearnSingSongsTask", "learn_sing_songs", True),
@@ -38,9 +37,14 @@ class RecordingClock:
 
     def register_interval_action(self, name, interval_seconds, action, *, run_immediately=False):
         self.registrations.append(name)
-        self.actions[name] = ("interval", {
-            "interval_seconds": interval_seconds, "run_immediately": run_immediately,
-        }, action)
+        self.actions[name] = (
+            "interval",
+            {
+                "interval_seconds": interval_seconds,
+                "run_immediately": run_immediately,
+            },
+            action,
+        )
 
     def start(self):
         self.started = True
@@ -62,7 +66,7 @@ def make_runtime(monkeypatch):
     # 以公开 WorldTask 生命周期替换业务装配；真实构造函数及元数据方法不变。
     # 这里证明任务注册，不证明数据库、模型或任务业务初始化。
     def initialize(task, system):
-        task.system_runtime = system
+        task.server_runtime = system
 
     for class_name, _, _ in TASKS.values():
         cls = getattr(runtime_module, class_name)
@@ -70,19 +74,19 @@ def make_runtime(monkeypatch):
         monkeypatch.setattr(cls, "ensure_dependencies", lambda self: None)
 
     def make(config, *, managers=("luotianyi", "miku"), event_store=None):
-        runtime = WorldRuntime(deepcopy(config))
+        singing_backend = SimpleNamespace(
+            singing_manager={name: object() for name in managers},
+        )
+        runtime = WorldRuntime(deepcopy(config), singing_backend=singing_backend)
         runtime.world_clock = RecordingClock()
         system = SimpleNamespace(
             agent_runtime=SimpleNamespace(
                 character_ids=("luotianyi", "miku"),
                 default_character_id="luotianyi",
             ),
-            infrastructure=SimpleNamespace(singing=SimpleNamespace(
-                singing_manager={name: object() for name in managers},
-            )),
             database_manager=SimpleNamespace(event_store=event_store),
         )
-        runtime.set_system_runtime(system)
+        runtime.set_server_runtime(system)
         runtime.initialize_modules()
         return runtime
 
@@ -119,7 +123,7 @@ def test_all_nine_task_families_register_with_real_names_and_effective_schedules
             assert kind == expected["type"]
             assert params == expected["params"]
             assert action == task.run_once
-            assert task.system_runtime is runtime.system_runtime
+            assert task.server_runtime is runtime.server_runtime
     assert runtime.dynamic_interaction_task.character_id == "luotianyi"
     assert runtime.qq_music_credential_refresh_task.learn_sing_songs_tasks == runtime.learn_sing_songs_tasks
     before = list(runtime.world_clock.registrations)
@@ -127,10 +131,17 @@ def test_all_nine_task_families_register_with_real_names_and_effective_schedules
     assert runtime.world_clock.registrations == before
 
 
-@pytest.mark.parametrize("key", [
-    "citywalk", "auto_song_learner", "bili_dynamic_fetcher", "diary",
-    "qq_music_credential_refresh", "dynamic_interaction",
-])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "citywalk",
+        "auto_song_learner",
+        "bili_dynamic_fetcher",
+        "diary",
+        "qq_music_credential_refresh",
+        "dynamic_interaction",
+    ],
+)
 def test_disabled_optional_family_is_not_registered(make_runtime, world_config, key):
     config = enable_all(world_config)
     config[key]["enabled"] = False
@@ -172,12 +183,14 @@ def test_clock_config_overrides_reach_registration(make_runtime, world_config):
     config = enable_all(world_config)
     config["citywalk"]["clock_config"] = {"type": "daily", "params": {"hour": 4, "minute": 5}}
     config["proactive_topic_check"]["clock_config"] = {
-        "type": "interval", "params": {"interval_seconds": 120, "run_immediately": True},
+        "type": "interval",
+        "params": {"interval_seconds": 120, "run_immediately": True},
     }
     actions = make_runtime(config).world_clock.actions
     assert actions["try_citywalk:luotianyi"][:2] == ("daily", {"hour": 4, "minute": 5})
     assert actions["proactive_topic_check"][:2] == (
-        "interval", {"interval_seconds": 120, "run_immediately": True},
+        "interval",
+        {"interval_seconds": 120, "run_immediately": True},
     )
 
 

@@ -38,7 +38,7 @@ def sing_plan(expression=True):
 
 def agent(singing):
     return Agent(character_id="luotianyi", action_router=ActionRouter([
-        (d.ActionKind.SING, SingHandler("luotianyi", SingingSkill({}, singing)))]))
+        (d.ActionKind.SING, SingHandler("luotianyi", SingingSkill({}, backend=singing)))]))
 
 
 @pytest.mark.asyncio
@@ -87,13 +87,13 @@ async def test_sing_generation_error_stops_plan():
 
 @pytest.mark.asyncio
 async def test_singing_skill_rejects_blank_identity():
-    skill = SingingSkill({}, Singing())
+    skill = SingingSkill({}, backend=Singing())
     with pytest.raises(ValueError):
         await skill.render(invocation(character_id=""), song_id="歌曲", segment_id="副歌")
 
 
 @pytest.mark.asyncio
 async def test_singing_skill_raises_when_unavailable():
-    skill = SingingSkill({}, Singing(audio=None))
+    skill = SingingSkill({}, backend=Singing(audio=None))
     with pytest.raises(EmptySongAudioError):
         await skill.render(invocation(), song_id="歌曲", segment_id="副歌")

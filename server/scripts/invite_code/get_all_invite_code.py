@@ -12,7 +12,7 @@ SERVER_ROOT = Path(__file__).resolve().parents[2]
 if str(SERVER_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVER_ROOT))
 
-from src.system.database.sql_database import (  # noqa: E402
+from src.infrastructure.persistence.database.sql_database import (  # noqa: E402
     InviteCode,
     User,
     get_sql_session,

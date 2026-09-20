@@ -17,7 +17,7 @@ if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.agent.skills.expression._diary_operations import DiaryOperations
-from src.system.database.sql_database import (
+from src.infrastructure.persistence.database.sql_database import (
     Base,
     DynamicPost,
     User,

@@ -23,8 +23,8 @@ from src.world.world_settlements import (
 
 if TYPE_CHECKING:
     from src.stage.world_stage import WorldStage
-    from src.system.database import DatabaseManager
-    from src.system.system_runtime import SystemRuntime
+    from src.infrastructure.persistence.database import DatabaseManager
+    from src.server_runtime import ServerRuntime
 
 REPLY_ASPECT = "reply"
 MEMORY_ASPECT = "memory"
@@ -135,21 +135,21 @@ class DynamicInteractionTask(WorldTask):
         )
         super().__init__(self.task_name, merged_config)
         self.logger = get_logger(__name__)
-        self.system_runtime: SystemRuntime | None = None
+        self.server_runtime: ServerRuntime | None = None
         self.database_manager: DatabaseManager | None = None
         self.settlements = settlements
         self.character_id = str(character_id or merged_config.get("character_id", "luotianyi"))
         self._outcomes: dict[tuple[str, str], str] = {}
         self._submitted: dict[tuple[str, str], tuple[str, ...]] = {}
 
-    def initialize(self, system_runtime: SystemRuntime) -> None:
-        self.system_runtime = system_runtime
-        self.database_manager = getattr(system_runtime, "database_manager", None)
+    def initialize(self, server_runtime: ServerRuntime) -> None:
+        self.server_runtime = server_runtime
+        self.database_manager = getattr(server_runtime, "database_manager", None)
 
     def ensure_dependencies(self) -> None:
         super().ensure_dependencies()
         required = {
-            "system_runtime": self.system_runtime,
+            "server_runtime": self.server_runtime,
             "database_manager": self.database_manager,
         }
         missing = [name for name, value in required.items() if value is None]
@@ -284,10 +284,10 @@ class DynamicInteractionTask(WorldTask):
 
     async def _world_stage(self) -> WorldStage | None:
         """取得本角色长期 WorldStage；运行时不支持时返回 None。"""
-        system_runtime = self.system_runtime
-        agent_runtime = getattr(system_runtime, "agent_runtime", None)
+        server_runtime = self.server_runtime
+        agent_runtime = getattr(server_runtime, "agent_runtime", None)
         character_id = str(getattr(agent_runtime, "default_character_id", None) or self.character_id)
-        get_world_stage = getattr(system_runtime, "get_world_stage", None)
+        get_world_stage = getattr(server_runtime, "get_world_stage", None)
         if not callable(get_world_stage):
             return None
         return await get_world_stage(character_id)

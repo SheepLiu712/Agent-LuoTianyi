@@ -7,17 +7,17 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from src.system.admin.auth import AdminAuthService
-from src.system.admin.config_store import ConfigStore
-from src.system.admin.config_validator import RuntimeConfigValidator
-from src.system.admin.qq_music_credential_refresh import QQMusicCredentialRefreshService
-from src.system.admin import qq_music_credential_refresh as qq_refresh_module
-from src.system.admin.runtime_supervisor import RuntimeSupervisor
-from src.system.admin.secret_store import SecretStore
-from src.system.admin.admin_shell import init_admin_shell, shutdown_admin_shell
-from src.system.admin.llm_config_editor import apply_llm_config_draft, build_llm_config_view
-from src.system.observability import ObservabilityService
-from src.system.admin.admin_interface import _collect_llm_api_key_names
+from src.infrastructure.observability import ObservabilityService
+from src.application.admin import qq_music_credential_refresh as qq_refresh_module
+from src.web.admin.admin_interface import _collect_llm_api_key_names
+from src.application.admin.admin_shell import init_admin_shell, shutdown_admin_shell
+from src.application.admin.auth import AdminAuthError, AdminAuthService
+from src.infrastructure.config.store import ConfigStore
+from src.infrastructure.config.validation import RuntimeConfigValidator
+from src.infrastructure.config.model_editor import apply_llm_config_draft, build_llm_config_view
+from src.application.admin.qq_music_credential_refresh import QQMusicCredentialRefreshService
+from src.application.admin.runtime_supervisor import RuntimeSupervisor
+from src.infrastructure.config.secrets import SecretStore
 from src.utils.helpers import apply_env_variables
 
 
@@ -73,32 +73,29 @@ def minimal_config(tmp_path: Path) -> dict:
             "event_store": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
             "memory_store": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
         },
-        "chat_session_manager": {
-            "conversation_service": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}
-        },
-        "infrastructure": {
-            "tts": {
-                "luotianyi": {
-                    "reference_audio_dir": str(tmp_path / "ref_audio"),
-                    "reference_audio_lyrics": str(tmp_path / "lyrics.json"),
-                    "server_config_path": str(tmp_path / "tts.yaml"),
-                    "interface_config_path": str(tmp_path / "tts_interface.json"),
-                }
-            },
-            "sing": {
-                "song_emotion_tagger": {
-                    "llm": {"name": "main"},
-                    "prompt_name": "p",
-                },
-                "characters": {"luotianyi": {"resource_path": str(tmp_path / "sing")}},
-            },
-            "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
-        },
+        "chat_session_manager": {"conversation_service": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
+        "infrastructure": {},
         "agent_runtime": {
             "skills": {
-                "diary": {
-                    "diary_llm": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}
-                }
+                "singing": {
+                    "song_emotion_tagger": {
+                        "llm": {"name": "main"},
+                        "prompt_name": "p",
+                    },
+                    "characters": {"luotianyi": {"resource_path": str(tmp_path / "sing")}},
+                },
+                "speaking": {
+                    "characters": {
+                        "luotianyi": {
+                            "reference_audio_dir": str(tmp_path / "ref_audio"),
+                            "reference_audio_lyrics": str(tmp_path / "lyrics.json"),
+                            "server_config_path": str(tmp_path / "tts.yaml"),
+                            "interface_config_path": str(tmp_path / "tts_interface.json"),
+                        }
+                    }
+                },
+                "image_understanding": {"vlm_module": {"vlm": {"name": "vision"}, "prompt_name": "p"}},
+                "diary": {"diary_llm": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}}},
             },
             "character_registry": {
                 "characters": {
@@ -116,7 +113,6 @@ def minimal_config(tmp_path: Path) -> dict:
                     }
                 },
                 "memory": {
-                    "knowledge_graph": {"graph_data_dir": str(tmp_path / "knowledge")},
                     "memory_writer": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
                     "user_profile": {"llm_module": {"llm": {"name": "main"}, "prompt_name": "p"}},
                 },
@@ -147,14 +143,13 @@ def test_admin_auth_requires_setup_token_and_login(tmp_path):
     auth.setup(token, "password-123")
     assert auth.status()["configured"] is True
 
-    response = SimpleNamespace(set_cookie=lambda *args, **kwargs: None)
-    login_result = auth.login("password-123", response)
+    login_result = auth.login("password-123")
     assert login_result["ok"] is True
     assert login_result["token"]
 
     try:
-        auth.login("wrong-password", response)
-    except HTTPException as exc:
+        auth.login("wrong-password")
+    except AdminAuthError as exc:
         assert exc.status_code == 401
     else:
         raise AssertionError("bad admin password should fail")
@@ -165,19 +160,13 @@ def test_admin_require_admin_blocks_missing_session(tmp_path):
     token = (tmp_path / "setup_token.txt").read_text(encoding="utf-8").strip()
     auth.setup(token, "password-123")
 
-    response = SimpleNamespace(set_cookie=lambda *args, **kwargs: None)
-    login_result = auth.login("password-123", response)
+    login_result = auth.login("password-123")
 
-    with pytest.raises(HTTPException) as exc_info:
-        auth.require_admin(SimpleNamespace(headers={}, cookies={}))
+    with pytest.raises(AdminAuthError) as exc_info:
+        auth.require_admin(None)
     assert exc_info.value.status_code == 401
 
-    auth.require_admin(
-        SimpleNamespace(
-            headers={"authorization": f"Bearer {login_result['token']}"},
-            cookies={},
-        )
-    )
+    auth.require_admin(login_result["token"])
 
 
 def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
@@ -198,7 +187,7 @@ def test_validator_blocks_core_but_only_disables_world(tmp_path, monkeypatch):
     assert "resource.song lyric keywords" in item_names
     assert "resource.sing.characters.luotianyi.resource_path" in item_names
     assert "resource.sing.song_emotion_tagger.resource_path" not in item_names
-    assert "llm_module.infrastructure.singing.song_emotion_tagger" in item_names
+    assert "llm_module.skill.singing.song_emotion_tagger" in item_names
     disabled_names = {item["name"] for item in result["world_disabled"]}
     assert {"citywalk", "bili_dynamic_fetcher", "auto_song_learner.qq_music"} <= disabled_names
 
@@ -225,11 +214,7 @@ def test_validator_rejects_invalid_message_token_ttl(tmp_path, monkeypatch, valu
     result = validator.validate(config)
 
     assert result["core_ok"] is False
-    item = next(
-        item
-        for item in result["items"]
-        if item["name"] == "config.database.message_token_ttl_seconds"
-    )
+    item = next(item for item in result["items"] if item["name"] == "config.database.message_token_ttl_seconds")
     assert item["status"] == "error"
 
 
@@ -248,11 +233,7 @@ def test_validator_warns_and_uses_safe_default_when_message_token_ttl_is_missing
 
     result = validator.validate(config)
 
-    item = next(
-        item
-        for item in result["items"]
-        if item["name"] == "config.database.message_token_ttl_seconds"
-    )
+    item = next(item for item in result["items"] if item["name"] == "config.database.message_token_ttl_seconds")
     assert result["core_ok"] is True
     assert item["status"] == "warning"
     assert item["severity"] == "warning"
@@ -265,7 +246,7 @@ def test_validator_rejects_flat_singing_character_config(tmp_path, monkeypatch):
     secret_store = SecretStore(tmp_path / "secrets.local.env")
     validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secret_store)
     config = minimal_config(tmp_path)
-    config["infrastructure"]["sing"] = {
+    config["agent_runtime"]["skills"]["singing"] = {
         "luotianyi": {"resource_path": str(tmp_path / "sing")},
     }
 
@@ -386,6 +367,7 @@ def test_server_main_runtime_dependency_reports_not_ready(tmp_path):
 
 def test_admin_success_access_log_filter_keeps_user_and_errors():
     import logging
+
     from src.utils.logger import AdminSuccessAccessLogFilter
 
     access_filter = AdminSuccessAccessLogFilter()
@@ -425,6 +407,7 @@ def test_admin_success_access_log_filter_keeps_user_and_errors():
 
 def test_access_log_filter_redacts_sensitive_query_parameters():
     import logging
+
     from src.utils.logger import AdminSuccessAccessLogFilter
 
     access_filter = AdminSuccessAccessLogFilter()
@@ -461,6 +444,7 @@ def test_access_log_filter_redacts_sensitive_query_parameters():
 
 def test_access_log_filter_redacts_fallback_message():
     import logging
+
     from src.utils.logger import AdminSuccessAccessLogFilter
 
     access_filter = AdminSuccessAccessLogFilter()
@@ -492,28 +476,36 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
                 "api_key": "$QWEN_API_KEY",
                 "base_url": "https://example.invalid/v1",
                 "default_params": {"temperature": 0.3},
-                "default_params_text": "{\"temperature\": 0.3}",
+                "default_params_text": '{"temperature": 0.3}',
             }
         },
         "available_vlms": view["available_vlms"],
         "module_bindings": [
             {
                 **binding,
-                "interface_name": "main2" if binding["path"] == "agent_runtime.agent.main_chat.llm_module" else binding["interface_name"],
-                "enable_thinking": binding["path"] in {
+                "interface_name": (
+                    "main2"
+                    if binding["path"] == "agent_runtime.agent.main_chat.llm_module"
+                    else binding["interface_name"]
+                ),
+                "enable_thinking": binding["path"]
+                in {
                     "agent_runtime.agent.main_chat.llm_module",
-                    "infrastructure.image_understanding.vlm_module",
+                    "agent_runtime.skills.image_understanding.vlm_module",
                 },
-                "use_json": binding["path"] in {
+                "use_json": binding["path"]
+                in {
                     "agent_runtime.agent.main_chat.llm_module",
-                    "infrastructure.image_understanding.vlm_module",
+                    "agent_runtime.skills.image_understanding.vlm_module",
                 },
                 "params": (
                     {"temperature": 0.1}
                     if binding["path"] == "agent_runtime.agent.main_chat.llm_module"
-                    else {"max_tokens": 512}
-                    if binding["path"] == "infrastructure.image_understanding.vlm_module"
-                    else binding.get("params", {})
+                    else (
+                        {"max_tokens": 512}
+                        if binding["path"] == "agent_runtime.skills.image_understanding.vlm_module"
+                        else binding.get("params", {})
+                    )
                 ),
             }
             for binding in view["module_bindings"]
@@ -529,7 +521,7 @@ def test_llm_config_draft_updates_interfaces_and_bindings(tmp_path):
     assert main_chat_llm["enable_thinking"] is True
     assert main_chat_llm["use_json"] is True
     assert main_chat_llm["params"] == {"temperature": 0.1}
-    image_vlm_module = next_config["infrastructure"]["image_understanding"]["vlm_module"]
+    image_vlm_module = next_config["agent_runtime"]["skills"]["image_understanding"]["vlm_module"]
     assert image_vlm_module["enable_thinking"] is True
     assert image_vlm_module["use_json"] is True
     assert image_vlm_module["params"] == {"max_tokens": 512}

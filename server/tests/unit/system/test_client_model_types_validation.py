@@ -2,19 +2,16 @@
 
 import copy
 import os
-import sys
 from pathlib import Path
 
 import pytest
 
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
-
-from src.system.admin.config_validator import RuntimeConfigValidator
-from src.system.admin.llm_config_editor import apply_llm_config_draft
-from src.system.admin.secret_store import SecretStore
+from src.infrastructure.config.validation import RuntimeConfigValidator
+from src.infrastructure.config.model_editor import apply_llm_config_draft
+from src.infrastructure.config.secrets import SecretStore
 from src.utils.helpers import load_config
+
+server_root = str(Path(__file__).resolve().parents[3])
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -108,7 +105,7 @@ def test_binding_referencing_missing_type_is_error(tmp_path, monkeypatch):
 
 def test_binding_kind_mismatch_is_error(tmp_path, monkeypatch):
     config = _base_config()
-    config["infrastructure"]["image_understanding"]["vlm_module"]["vlm"]["client_model_type"] = "main_chat"
+    config["agent_runtime"]["skills"]["image_understanding"]["vlm_module"]["vlm"]["client_model_type"] = "main_chat"
     messages = _type_errors(_validator(tmp_path, monkeypatch).validate(config)).values()
     assert any("不能绑定到 vlm" in message for message in messages)
 

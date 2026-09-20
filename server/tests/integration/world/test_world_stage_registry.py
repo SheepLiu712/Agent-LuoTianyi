@@ -1,17 +1,17 @@
-"""SystemRuntime 对长期 WorldStage 的显式作用域装配。"""
+"""ServerRuntime 对长期 WorldStage 的显式作用域装配。"""
+
 from types import SimpleNamespace
 
 import pytest
 
 from src.stage import WorldStage
-from src.system.system_runtime import DEFAULT_WORLD_ID, SystemRuntime
+from src.server_runtime import DEFAULT_WORLD_ID, ServerRuntime
 
 
 class ContextFactory:
     async def create(self, interaction_id: str, *, user_id: str | None):
         context = SimpleNamespace(
-            identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id,
-                                     character_id="luotianyi"),
+            identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id, character_id="luotianyi"),
             closed=False,
         )
 
@@ -26,32 +26,41 @@ class Agent:
     async def handle_stimulus(self, request, sink, *, context=None):
         pending = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
         from src.domain.agent import HandlingReport, HandlingRequestStatus
+
         return HandlingReport(
-            request_id=request.request_id, trigger_stimulus_id=request.stimulus.stimulus_id,
+            request_id=request.request_id,
+            trigger_stimulus_id=request.stimulus.stimulus_id,
             basis_interaction_revision=request.interaction.interaction_revision,
             request_status=HandlingRequestStatus.COMPLETED,
             considered_pending_stimulus_ids=pending,
             consumed_pending_stimulus_ids=(request.stimulus.stimulus_id,),
-            retained_pending_stimulus_ids=tuple(
-                item for item in pending if item != request.stimulus.stimulus_id
-            ), emitted_plan_ids=(), error_code=None, retryable=False,
+            retained_pending_stimulus_ids=tuple(item for item in pending if item != request.stimulus.stimulus_id),
+            emitted_plan_ids=(),
+            error_code=None,
+            retryable=False,
         )
 
     async def realize_action_plan(self, plan, context, sink):
         raise AssertionError("no plans expected")
 
 
-def runtime() -> SystemRuntime:
+def runtime() -> ServerRuntime:
     agent = Agent()
-    return SystemRuntime(
-        user_interface=SimpleNamespace(), world=SimpleNamespace(),
+    return ServerRuntime(
+        user_interface=SimpleNamespace(),
+        websocket_service=SimpleNamespace(),
+        world=SimpleNamespace(),
         database_manager=SimpleNamespace(),
         agent_runtime=SimpleNamespace(
-            default_character_id="luotianyi", get_agent=lambda character_id=None: agent,
+            default_character_id="luotianyi",
+            get_agent=lambda character_id=None: agent,
             context_factories={"luotianyi": ContextFactory()},
-        ), infrastructure=SimpleNamespace(),
-        llm_service=SimpleNamespace(), client_llm_executor=SimpleNamespace(),
-        observability=SimpleNamespace(), owns_observability=False,
+        ),
+        media_resolver=SimpleNamespace(),
+        llm_service=SimpleNamespace(),
+        client_llm_executor=SimpleNamespace(),
+        observability=SimpleNamespace(),
+        owns_observability=False,
     )
 
 

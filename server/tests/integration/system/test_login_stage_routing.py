@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 from fastapi import BackgroundTasks
 
-from src.system.user_interface.types import AutoLoginRequest, LoginRequest
-from src.system.user_interface.user_interface import UserInterface
+from src.web.http.types import AutoLoginRequest, LoginRequest
+from src.web.http import UserInterface
 
 
 class StageManager:
@@ -49,11 +49,14 @@ def runtime(elapsed_from_last_login: float | None):
         credential_service=CredentialService(elapsed_from_last_login),
         conversation_service=SimpleNamespace(prefill_buffer=lambda _user_id: None),
     )
-    return SimpleNamespace(
-        database_manager=database,
-        stage_manager=stage_manager,
-        agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
-    ), stage_manager
+    return (
+        SimpleNamespace(
+            database_manager=database,
+            stage_manager=stage_manager,
+            agent_runtime=SimpleNamespace(default_character_id="luotianyi"),
+        ),
+        stage_manager,
+    )
 
 
 @pytest.mark.asyncio
@@ -63,13 +66,17 @@ async def test_first_login_records_stage_fact_without_legacy_dispatch(
     method: str,
 ) -> None:
     # Given: authentication reports that the account has never logged in.
-    system_runtime, stage_manager = runtime(None)
-    user_interface = UserInterface(system_runtime.database_manager)
+    server_runtime, stage_manager = runtime(None)
+    user_interface = UserInterface(server_runtime.database_manager)
     monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
-    request = LoginRequest(username="alice", password="secret") if method == "login" else AutoLoginRequest(username="alice", token="token")
+    request = (
+        LoginRequest(username="alice", password="secret")
+        if method == "login"
+        else AutoLoginRequest(username="alice", token="token")
+    )
 
     # When: either supported authentication endpoint succeeds.
-    await getattr(user_interface, method)(request, BackgroundTasks(), system_runtime, None)
+    await getattr(user_interface, method)(request, BackgroundTasks(), server_runtime, None)
 
     # Then: only the character-scoped Stage first-login seam receives the fact.
     assert stage_manager.logins == [("user", "luotianyi", None)]
@@ -82,13 +89,17 @@ async def test_return_login_does_not_enter_first_daily_login_dispatch(
     method: str,
 ) -> None:
     # Given: authentication reports a previous successful login.
-    system_runtime, stage_manager = runtime(60.0)
-    user_interface = UserInterface(system_runtime.database_manager)
+    server_runtime, stage_manager = runtime(60.0)
+    user_interface = UserInterface(server_runtime.database_manager)
     monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
-    request = LoginRequest(username="alice", password="secret") if method == "login" else AutoLoginRequest(username="alice", token="token")
+    request = (
+        LoginRequest(username="alice", password="secret")
+        if method == "login"
+        else AutoLoginRequest(username="alice", token="token")
+    )
 
     # When: the returning account authenticates.
-    await getattr(user_interface, method)(request, BackgroundTasks(), system_runtime, None)
+    await getattr(user_interface, method)(request, BackgroundTasks(), server_runtime, None)
 
     # Then: the ordinary login does not create a first-daily-login Stage fact.
     assert stage_manager.logins == []
@@ -101,13 +112,17 @@ async def test_first_ordinary_login_today_routes_to_stage_claim_path(
     method: str,
 ) -> None:
     # Given: the previous login was yesterday, so this is today's first ordinary login.
-    system_runtime, stage_manager = runtime(24 * 60 * 60)
-    user_interface = UserInterface(system_runtime.database_manager)
+    server_runtime, stage_manager = runtime(24 * 60 * 60)
+    user_interface = UserInterface(server_runtime.database_manager)
     monkeypatch.setattr(user_interface, "decrypt_user_password", lambda value: value)
-    request = LoginRequest(username="alice", password="secret") if method == "login" else AutoLoginRequest(username="alice", token="token")
+    request = (
+        LoginRequest(username="alice", password="secret")
+        if method == "login"
+        else AutoLoginRequest(username="alice", token="token")
+    )
 
     # When: authentication succeeds through either supported endpoint.
-    await getattr(user_interface, method)(request, BackgroundTasks(), system_runtime, None)
+    await getattr(user_interface, method)(request, BackgroundTasks(), server_runtime, None)
 
     # Then: Stage receives the login fact and the legacy topic maker is not invoked.
     assert stage_manager.logins == [("user", "luotianyi", 24 * 60 * 60)]

@@ -1,4 +1,5 @@
 """Stage 向外部通道提交的业务输出和控制信号。"""
+
 from dataclasses import dataclass
 from enum import Enum
 
@@ -34,8 +35,7 @@ class CancelDelivery:
     execution_id: str
 
     def __post_init__(self) -> None:
-        if any(not isinstance(value, str) or not value.strip()
-               for value in (self.interaction_id, self.execution_id)):
+        if any(not isinstance(value, str) or not value.strip() for value in (self.interaction_id, self.execution_id)):
             raise ValueError("interaction_id and execution_id must be nonblank")
 
 

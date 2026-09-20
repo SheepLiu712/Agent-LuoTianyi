@@ -7,7 +7,7 @@ User Profile Updater
 import re
 from typing import Any, Dict
 
-from src.utils.llm.llm_module import LLMModule
+from src.infrastructure.models.llm.module import LLMModule
 from src.utils.logger import get_logger
 
 logger = get_logger("UserProfileUpdater")

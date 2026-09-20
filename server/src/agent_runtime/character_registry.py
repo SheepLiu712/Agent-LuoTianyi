@@ -86,7 +86,6 @@ class CharacterRegistry:
             reflex={
                 "touch": {
                     "fast_reply": {
-                        "manifest": "res/agent/prepared_speech/manifest.json",
                         "resource_names": [f"touch_voice{i}" for i in range(1, 9)],
                     }
                 }
@@ -111,7 +110,6 @@ def get_default_character_registry() -> CharacterRegistry:
                     "reflex": {
                         "touch": {
                             "fast_reply": {
-                                "manifest": "res/agent/prepared_speech/manifest.json",
                                 "resource_names": [f"touch_voice{i}" for i in range(1, 9)],
                             }
                         }

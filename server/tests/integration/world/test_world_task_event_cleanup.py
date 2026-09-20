@@ -5,9 +5,9 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.system.database.redis_buffer import RedisBuffer
-from src.system.database.services.event_store import EventStore
-from src.system.database.sql_database import Base, Event
+from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
+from src.infrastructure.persistence.database.services.event_store import EventStore
+from src.infrastructure.persistence.database.sql_database import Base, Event
 from src.world.event_cleanup_task import ExpiredEventCleanupTask
 
 

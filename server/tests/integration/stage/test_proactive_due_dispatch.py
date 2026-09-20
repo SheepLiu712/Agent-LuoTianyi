@@ -9,7 +9,7 @@ import pytest
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
 from src.stage import DueEvent, StageManager
-from src.system.user_interface.websocket_service import WebSocketConnection
+from src.web.websocket.service import WebSocketConnection
 
 
 class Socket:

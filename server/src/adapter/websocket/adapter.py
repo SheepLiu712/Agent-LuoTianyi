@@ -1,23 +1,27 @@
 """所有聊天共享的协议转换、连接绑定和异步投递入口。"""
+
 from __future__ import annotations
 
 import asyncio
+import time
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import TYPE_CHECKING
 
 import src.domain.agent as d
-from src.infrastructure.media import PermanentMediaStore
 from src.domain.stage import AgentPresentationChanged, CancelDelivery, StageOutput
-from src.system.user_interface.types import WSMessage
+from src.infrastructure.media import MediaResolutionError, PermanentMediaStore
 from src.utils.owned_operation import complete_owned
+from src.web.websocket import WSMessage
 
 from ._delivery import _ConnectionDelivery, _DeliveryConfig, completion
 from ._input import _INPUT_EVENTS, materialize_image, prepare_input
 
 if TYPE_CHECKING:
     from src.stage.chat_stage import ChatStage
-    from src.system.user_interface.websocket_service import WebSocketConnection
+    from src.web.websocket import WebSocketConnection
 
 
 @dataclass
@@ -25,6 +29,16 @@ class _Binding:
     stage: ChatStage
     connection: WebSocketConnection
     controls: set[asyncio.Task[None]] = field(default_factory=set)
+
+
+class ChatEventAcceptance(str, Enum):
+    """Result of translating and submitting one authenticated chat event."""
+
+    ACCEPTED = "accepted"
+    DUPLICATE = "duplicate"
+    BAD_MESSAGE = "bad_message"
+    UNSUPPORTED = "unsupported"
+    OVERLOADED = "overloaded"
 
 
 class WebSocketAdapter:
@@ -35,19 +49,81 @@ class WebSocketAdapter:
         self._config = _DeliveryConfig.from_dict({} if config is None else config)
         media_config = (config or {}).get("media_store", {})
         self._media_store = (
-            PermanentMediaStore(media_config)
-            if isinstance(media_config, dict) and media_config.get("root")
-            else None
+            PermanentMediaStore(media_config) if isinstance(media_config, dict) and media_config.get("root") else None
         )
         self._default_character_id = default_character_id
         self._routes: dict[str, _Binding] = {}
         self._connections: dict[WebSocketConnection, _ConnectionDelivery] = {}
         self._binding_lock = asyncio.Lock()
+        self._recent_client_messages: OrderedDict[str, float] = OrderedDict()
+        self._recent_client_msg_ttl_seconds = 600.0
+        self._recent_client_msg_limit = 4096
 
     @staticmethod
     def supports_input(event: WSMessage) -> bool:
         """返回该协议适配器是否认识此业务输入类型。"""
         return event.event_type in _INPUT_EVENTS
+
+    async def try_accept_event(
+        self,
+        connection: WebSocketConnection,
+        event: WSMessage,
+    ) -> ChatEventAcceptance:
+        """Validate, deduplicate, translate, and submit one authenticated channel event."""
+        if not self.supports_input(event):
+            return ChatEventAcceptance.UNSUPPORTED
+        if connection.is_closed or not connection.user_uuid or not self.has_valid_client_message_id(event):
+            return ChatEventAcceptance.BAD_MESSAGE
+        try:
+            if self.is_duplicate_client_message(connection, event):
+                return ChatEventAcceptance.DUPLICATE
+            accepted = await self.receive_event(connection, event)
+        except (KeyError, MediaResolutionError, TypeError, ValueError):
+            return ChatEventAcceptance.BAD_MESSAGE
+        if not accepted:
+            return ChatEventAcceptance.OVERLOADED
+        self.mark_client_message_accepted(connection, event)
+        return ChatEventAcceptance.ACCEPTED
+
+    def is_duplicate_client_message(self, connection: WebSocketConnection, event: WSMessage) -> bool:
+        """Check accepted messages without marking a new event as accepted."""
+        key = self._client_message_key(connection, event)
+        if key is None:
+            return False
+        now = time.monotonic()
+        self._prune_recent_client_messages(now)
+        return key in self._recent_client_messages
+
+    def mark_client_message_accepted(self, connection: WebSocketConnection, event: WSMessage) -> bool:
+        """Record idempotency only after every target Stage accepted the event."""
+        key = self._client_message_key(connection, event)
+        if key is None:
+            return False
+        now = time.monotonic()
+        self._prune_recent_client_messages(now)
+        self._recent_client_messages[key] = now
+        self._recent_client_messages.move_to_end(key)
+        while len(self._recent_client_messages) > self._recent_client_msg_limit:
+            self._recent_client_messages.popitem(last=False)
+        return True
+
+    @staticmethod
+    def has_valid_client_message_id(event: WSMessage) -> bool:
+        return isinstance(event.client_msg_id, str) and 0 < len(event.client_msg_id) <= 128
+
+    def _client_message_key(self, connection: WebSocketConnection, event: WSMessage) -> str | None:
+        if not self.has_valid_client_message_id(event):
+            return None
+        owner = connection.user_uuid or connection.user_name or "anonymous"
+        return f"{owner}:{event.client_msg_id}"
+
+    def _prune_recent_client_messages(self, now: float) -> None:
+        expired_before = now - self._recent_client_msg_ttl_seconds
+        while self._recent_client_messages:
+            _, accepted_at = next(iter(self._recent_client_messages.items()))
+            if accepted_at >= expired_before:
+                break
+            self._recent_client_messages.popitem(last=False)
 
     def submit_output(self, output: StageOutput) -> asyncio.Future[None]:
         """接收业务输出或控制信号，返回实际投递结果 Future；无绑定或容量不足立即抛 SinkRejectedError。"""
@@ -58,16 +134,21 @@ class WebSocketAdapter:
         if isinstance(output, CancelDelivery):
             # 在返回前标记取消，下一轮 realize 可立即入队，无需等待网络收尾。
             futures = delivery.cancel(output.interaction_id, output.execution_id)
+
             async def cancel_done() -> None:
                 if futures:
                     await asyncio.gather(*futures)
+
             return self._control(binding, cancel_done)
         if isinstance(output, AgentPresentationChanged):
-            if sum(len(route.controls) for route in self._routes.values()
-                   if route.connection is binding.connection) >= self._config.max_outputs:
+            if (
+                sum(len(route.controls) for route in self._routes.values() if route.connection is binding.connection)
+                >= self._config.max_outputs
+            ):
                 raise d.SinkRejectedError("control queue is full", code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
-            return self._control(binding, lambda: binding.connection.send_event(
-                "agent_state_changed", {"state": output.state.value}))
+            return self._control(
+                binding, lambda: binding.connection.send_event("agent_state_changed", {"state": output.state.value})
+            )
         if type(output) not in (d.TextFinalOutput, d.ExpressionOutput, d.AudioChunkOutput, d.MessageEndOutput):
             raise d.SinkRejectedError("unsupported output", code=d.SinkRejectionCode.UNSUPPORTED_OUTPUT)
         return delivery.submit(output)
@@ -83,8 +164,11 @@ class WebSocketAdapter:
             self._media_store,
         )
         stimulus = candidate.stimulus
-        stages = {binding.stage.character_id: binding.stage for binding in self._routes.values()
-                  if binding.connection is connection}
+        stages = {
+            binding.stage.character_id: binding.stage
+            for binding in self._routes.values()
+            if binding.connection is connection
+        }
         if any(target not in stages for target in stimulus.target_character_ids):
             raise ValueError("target character is not bound to connection")
         sinks = [stages[target].stimulus_input_sink for target in stimulus.target_character_ids]
@@ -107,11 +191,6 @@ class WebSocketAdapter:
         """拆开 stage 的绑定并完成任务清理；给出 connection 时仅拆除该连接，避免旧断线通知影响重连。"""
         await complete_owned(self._unbind(stage, connection))
 
-    @staticmethod
-    def supports_input(event: WSMessage) -> bool:
-        """返回 event 是否属于文本或打字业务输入。"""
-        return event.event_type in _INPUT_EVENTS
-
     async def _bind(self, stage: ChatStage, connection: WebSocketConnection) -> None:
         async with self._binding_lock:
             if connection.is_closed or not connection.user_uuid or connection.user_uuid != stage.user_id:
@@ -126,8 +205,10 @@ class WebSocketAdapter:
                 await self._disconnect(old)
             if connection.is_closed:
                 raise ValueError("connection closed during binding")
-            if any(route.connection is connection and route.stage.character_id == stage.character_id
-                   for route in self._routes.values()):
+            if any(
+                route.connection is connection and route.stage.character_id == stage.character_id
+                for route in self._routes.values()
+            ):
                 raise ValueError("character already bound to connection")
             self._routes[stage.interaction_id] = _Binding(stage, connection)
             self._connections.setdefault(connection, _ConnectionDelivery(connection, self._config))
@@ -140,11 +221,16 @@ class WebSocketAdapter:
     async def _unbind(self, stage: ChatStage, connection: WebSocketConnection | None) -> None:
         async with self._binding_lock:
             binding = self._routes.get(stage.interaction_id)
-            if binding is not None and binding.stage is stage and (connection is None or binding.connection is connection):
+            if (
+                binding is not None
+                and binding.stage is stage
+                and (connection is None or binding.connection is connection)
+            ):
                 await self._disconnect(binding)
 
     def _control(self, binding: _Binding, operation: Callable[[], Awaitable[None]]) -> asyncio.Future[None]:
         result = completion(f"control interaction={binding.stage.interaction_id}")
+
         async def run() -> None:
             try:
                 await operation()
@@ -157,6 +243,7 @@ class WebSocketAdapter:
             else:
                 if not result.done():
                     result.set_result(None)
+
         task = asyncio.create_task(run(), name="websocket-control")
         binding.controls.add(task)
         task.add_done_callback(binding.controls.discard)

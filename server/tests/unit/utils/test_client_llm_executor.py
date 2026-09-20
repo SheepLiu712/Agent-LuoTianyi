@@ -13,18 +13,18 @@ server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.utils.llm.client_llm_executor import (
+from src.adapter.websocket.client_model_executor import (
     ClientLLMError,
     ClientLLMExecutor,
     ClientLLMTimeout,
     ClientLLMUnavailable,
     _looks_like_key_error,
 )
-from src.utils.llm.llm_api_interface import LLMAPIInterface
-from src.utils.llm.llm_module import LLMModule
-from src.utils.llm_service import LLMService
-from src.utils.vision.vlm_api_interface import VLMAPIInterface
-from src.utils.vision.vlm_module import VLMModule
+from src.infrastructure.models.llm.interface import LLMAPIInterface
+from src.infrastructure.models.llm.module import LLMModule
+from src.infrastructure.models.service import LLMService
+from src.infrastructure.models.vlm.interface import VLMAPIInterface
+from src.infrastructure.models.vlm.module import VLMModule
 
 
 class FakeWebSocket:
@@ -367,7 +367,7 @@ async def test_llm_module_delegate_none_falls_back_to_inner():
 @pytest.mark.asyncio
 async def test_llm_module_client_error_falls_back_with_notice(monkeypatch):
     monkeypatch.setattr(
-        "src.utils.llm.llm_module.get_trace_context",
+        "src.infrastructure.models.llm.module.get_trace_context",
         lambda: {"user_id": "u1"},
     )
     executor = FakeDelegateExecutor(error=ClientLLMError("HTTP 401 invalid api key"))
@@ -392,7 +392,7 @@ async def test_llm_module_client_error_falls_back_with_notice(monkeypatch):
 @pytest.mark.asyncio
 async def test_llm_module_timeout_falls_back_with_notice(monkeypatch):
     monkeypatch.setattr(
-        "src.utils.llm.llm_module.get_trace_context",
+        "src.infrastructure.models.llm.module.get_trace_context",
         lambda: {"user_id": "u1"},
     )
     executor = FakeDelegateExecutor(error=ClientLLMTimeout("timed out"))
@@ -454,7 +454,7 @@ async def test_vlm_module_delegates_with_image():
 @pytest.mark.asyncio
 async def test_vlm_module_client_error_falls_back_with_notice(monkeypatch):
     monkeypatch.setattr(
-        "src.utils.vision.vlm_module.get_trace_context",
+        "src.infrastructure.models.vlm.module.get_trace_context",
         lambda: {"user_id": "u1"},
     )
     executor = FakeDelegateExecutor(error=ClientLLMError("HTTP 503 overloaded"))
@@ -498,11 +498,11 @@ async def test_vlm_module_direct_connect_when_type_empty():
 
 def test_llm_service_does_not_wrap_interfaces(monkeypatch):
     monkeypatch.setattr(
-        "src.utils.llm_service.LLMAPIFactory.create_interface",
+        "src.infrastructure.models.service.LLMAPIFactory.create_interface",
         staticmethod(lambda config: FakeInner()),
     )
     monkeypatch.setattr(
-        "src.utils.llm_service.VLMAPIFactory.create_interface",
+        "src.infrastructure.models.service.VLMAPIFactory.create_interface",
         staticmethod(lambda config: FakeVLMInner()),
     )
     service = LLMService(
@@ -520,11 +520,11 @@ def test_llm_service_does_not_wrap_interfaces(monkeypatch):
 
 def test_llm_service_interfaces_are_llm_vlm_types(monkeypatch):
     monkeypatch.setattr(
-        "src.utils.llm_service.LLMAPIFactory.create_interface",
+        "src.infrastructure.models.service.LLMAPIFactory.create_interface",
         staticmethod(lambda config: FakeInner()),
     )
     monkeypatch.setattr(
-        "src.utils.llm_service.VLMAPIFactory.create_interface",
+        "src.infrastructure.models.service.VLMAPIFactory.create_interface",
         staticmethod(lambda config: FakeVLMInner()),
     )
     service = LLMService({"available_llms": {"a": {}}, "available_vlms": {"v": {}}})

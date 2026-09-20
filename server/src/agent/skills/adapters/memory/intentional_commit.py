@@ -9,12 +9,12 @@ from uuid import NAMESPACE_URL, uuid5
 from src.domain.memory_record import MemoryRecord as DomainMemoryRecord
 from src.domain.memory_record import MemoryType, MemoryVisibility
 from src.domain.memory_type import MemoryUpdateCommand
-from src.system.database.vector_store import Document, VectorStore
+from src.infrastructure.persistence.database.vector_store import Document, VectorStore
 from src.utils.asyncio_helpers import run_sync_owned
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.system.database.services.memory_store import MemoryStore
+    from src.infrastructure.persistence.database.services.memory_store import MemoryStore
 
 
 logger = get_logger("MemoryWriter")

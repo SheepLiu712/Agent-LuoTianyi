@@ -9,7 +9,7 @@ from src.world.get_new_songs.daily_new_song_fetcher import (
     collect_new_song_candidates,
 )
 from src.world.get_new_songs.task import VCPediaNewSongTask
-from src.infrastructure.song_knowledge.database import (
+from src.infrastructure.persistence import (
     Song,
     get_song_session,
     init_song_db,
@@ -33,7 +33,7 @@ class FakeFactSink:
         return self.accept
 
 
-def system_runtime(accept=True):
+def server_runtime(accept=True):
     stage = SimpleNamespace(fact_sink=FakeFactSink(accept))
     asked = []
 
@@ -84,9 +84,9 @@ def test_vcpedia_run_once_submits_candidates_as_world_facts(monkeypatch):
         return {"discovered": [candidate("A"), candidate("B")], "skipped_existing": ["C"], "fetch_failed": ["D"]}
 
     monkeypatch.setattr(task_module, "collect_new_song_candidates", collect)
-    runtime, stage, asked = system_runtime()
+    runtime, stage, asked = server_runtime()
     task = VCPediaNewSongTask({"crawler": {}})
-    task.system_runtime = runtime
+    task.server_runtime = runtime
     task.llm_module = "llm"
 
     result = asyncio.run(task.run_once())
@@ -116,9 +116,9 @@ def test_vcpedia_run_once_counts_rejected_candidates(monkeypatch):
         task_module, "collect_new_song_candidates",
         lambda config, llm_module=None: {"discovered": [candidate("A")], "skipped_existing": [], "fetch_failed": []},
     )
-    runtime, stage, _ = system_runtime(accept=False)
+    runtime, stage, _ = server_runtime(accept=False)
     task = VCPediaNewSongTask({"crawler": {}})
-    task.system_runtime = runtime
+    task.server_runtime = runtime
 
     result = asyncio.run(task.run_once())
 

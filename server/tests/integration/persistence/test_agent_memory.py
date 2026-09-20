@@ -13,10 +13,10 @@ from src.domain.memory_record import MemoryRecord, MemoryType, MemoryVisibility
 from src.agent.skills.adapters.memory import AgentMemory
 import src.agent.skills.adapters.memory.writer as memory_write_module
 from src.agent.skills.adapters.memory.writer import MemoryWriter
-from src.system.database.database_service import DatabaseManager
-from src.system.database.vector_store import Document
+from src.infrastructure.persistence.database.database_service import DatabaseManager
+from src.infrastructure.persistence.database.vector_store import Document
 from src.utils.helpers import load_config
-from src.utils.llm_service import LLMService
+from src.infrastructure.models.service import LLMService
 
 
 USER_ID = "memory-test-user"

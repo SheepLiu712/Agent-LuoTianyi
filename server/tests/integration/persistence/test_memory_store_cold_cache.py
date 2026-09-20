@@ -11,9 +11,9 @@ server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.system.database.services.memory_store import MemoryStore
-from src.system.database.redis_buffer import RedisBuffer
-from src.system.database.sql_database import Base, MemoryUpdateRecord
+from src.infrastructure.persistence.database.services.memory_store import MemoryStore
+from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
+from src.infrastructure.persistence.database.sql_database import Base, MemoryUpdateRecord
 
 
 def test_recent_memory_updates_are_loaded_from_sql_on_cold_cache():

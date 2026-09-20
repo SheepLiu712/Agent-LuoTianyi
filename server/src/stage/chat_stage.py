@@ -23,12 +23,12 @@ from src.domain.stage import (
     StageState,
     StageTerminationResult,
 )
+from src.domain.stage.due_events import DueEvent, DueEventProvider
 from src.utils.logger import get_logger
 
 from ._config import _StageConfig
 from ._models import _InputStatus, _PendingInput, _ReplyAttempt
 from ._sinks import StimulusInputSink, _AgentOutputSink, _PlanSink
-from .due_events import DueEvent, DueEventProvider
 
 if TYPE_CHECKING:
     from src.adapter.websocket import WebSocketAdapter

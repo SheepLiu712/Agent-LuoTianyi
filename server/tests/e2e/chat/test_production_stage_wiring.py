@@ -10,8 +10,8 @@ import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
 from src.agent.context import RecalledMemoryContext
 from src.stage import StageManager
-from src.system.user_interface.types import WSMessage
-from src.system.user_interface.websocket_service import (
+from src.web.websocket import WSMessage
+from src.web.websocket.service import (
     WebSocketConnection,
     WebSocketService,
 )
@@ -68,9 +68,7 @@ def completed_report(
         request_status=d.HandlingRequestStatus.COMPLETED,
         considered_pending_stimulus_ids=pending,
         consumed_pending_stimulus_ids=consumed,
-        retained_pending_stimulus_ids=tuple(
-            stimulus_id for stimulus_id in pending if stimulus_id not in consumed
-        ),
+        retained_pending_stimulus_ids=tuple(stimulus_id for stimulus_id in pending if stimulus_id not in consumed),
         preprocessed_input=preprocessed,
         emitted_plan_ids=emitted,
         error_code=None,
@@ -114,9 +112,7 @@ class ReplyingAgent:
                     actions=(action,),
                 )
             )
-            consumed = tuple(
-                stimulus.stimulus_id for stimulus in request.interaction.pending_stimuli
-            )
+            consumed = tuple(stimulus.stimulus_id for stimulus in request.interaction.pending_stimuli)
             return completed_report(request, consumed=consumed, emitted=(accepted.plan_id,))
         return completed_report(request)
 
@@ -206,11 +202,7 @@ async def test_production_chat_reconnect_reuses_stage_after_stimulus_output(
 
     # Then: both receive Agent output and both stimuli use the retained Stage interaction.
     for socket in (first, second):
-        packets = [
-            event["payload"]
-            for event in socket.events
-            if event.get("type") == "agent_message"
-        ]
+        packets = [event["payload"] for event in socket.events if event.get("type") == "agent_message"]
         assert any(packet["text"] == "收到" for packet in packets)
         assert any(packet["is_final_package"] for packet in packets)
     assert len(agent.text_interaction_ids) == 2

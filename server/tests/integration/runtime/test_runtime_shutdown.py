@@ -3,16 +3,15 @@ from pathlib import Path
 
 import pytest
 
-
 server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.system.admin import admin_shell as admin_shell_module
-from src.system.admin.admin_shell import AdminShell
-from src.system.admin.runtime_supervisor import RuntimeSupervisor
-from src.system.system_runtime import SystemRuntime
-from src.utils.llm.client_llm_executor import ClientLLMExecutor
+from src.application.admin import admin_shell as admin_shell_module
+from src.application.admin.admin_shell import AdminShell
+from src.application.admin.runtime_supervisor import RuntimeSupervisor
+from src.server_runtime import ServerRuntime
+from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 
 
 class OrderedAsyncService:
@@ -31,18 +30,18 @@ class OrderedAsyncService:
 
 
 @pytest.mark.asyncio
-async def test_system_runtime_shutdown_is_ordered_idempotent_and_retryable():
+async def test_server_runtime_shutdown_is_ordered_idempotent_and_retryable():
     calls = []
     world = OrderedAsyncService(calls, "world", "stop_background_services", failures=1)
     agent = OrderedAsyncService(calls, "agent", "shutdown")
-    capability = OrderedAsyncService(calls, "capability", "stop")
     database = OrderedAsyncService(calls, "database", "shutdown")
-    runtime = SystemRuntime(
+    runtime = ServerRuntime(
         user_interface=object(),
+        websocket_service=object(),
         world=world,
         database_manager=database,
         agent_runtime=agent,
-        infrastructure=capability,
+        media_resolver=object(),
         llm_service=object(),
         observability=object(),
         client_llm_executor=ClientLLMExecutor(),
@@ -57,7 +56,7 @@ async def test_system_runtime_shutdown_is_ordered_idempotent_and_retryable():
     await runtime.shutdown()
     await runtime.shutdown()
 
-    assert calls == ["world", "world", "agent", "capability", "database"]
+    assert calls == ["world", "world", "agent", "database"]
     assert runtime._shutdown_complete is True
 
 

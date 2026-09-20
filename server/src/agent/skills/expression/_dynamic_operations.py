@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING, Any, Optional
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.system.database import DatabaseManager
-    from src.utils.llm.llm_module import LLMModule
-    from src.utils.llm_service import LLMService
+    from src.infrastructure.models.llm.module import LLMModule
+    from src.infrastructure.models.service import LLMService
+    from src.infrastructure.persistence.database import DatabaseManager
 
 from src.agent.skills.expression._dynamic_replier import DynamicReplier
 

@@ -15,12 +15,12 @@ from src.agent.skills.adapters.memory.intentional_commit import (
     IntentionalMemoryCommitMixin,
 )
 from src.agent.skills.adapters.memory.operations import MemoryOperationsMixin
-from src.system.database.vector_store import VectorStore
-from src.utils.llm.llm_module import LLMModule
+from src.infrastructure.models.llm.module import LLMModule
+from src.infrastructure.persistence.database.vector_store import VectorStore
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.system.database.services.memory_store import MemoryStore
+    from src.infrastructure.persistence.database.services.memory_store import MemoryStore
 
 
 logger = get_logger("MemoryWriter")

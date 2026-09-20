@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.infrastructure.song_knowledge import SongEntityLinker
+from src.agent.skills.cognitive.song_entity_linker import SongEntityLinker
 
 
 class TextPreprocessingSkill:

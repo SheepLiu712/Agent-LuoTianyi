@@ -2,7 +2,7 @@
 
 import json
 
-from src.system.database.services.user_store import UserStore
+from src.infrastructure.persistence.database.services.user_store import UserStore
 
 
 def test_user_store_preferences_normalize_double_encoded_json():

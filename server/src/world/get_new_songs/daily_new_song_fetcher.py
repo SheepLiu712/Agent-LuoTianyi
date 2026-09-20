@@ -1,22 +1,18 @@
-import os
-import sys
-
-cwd = os.getcwd()
-sys.path.insert(0, str(cwd))
-
 import datetime
+import re
+import shutil
+import subprocess
+import time
+import zlib
 from dataclasses import dataclass
-from src.utils.logger import get_logger
+from typing import Any, Dict, List, Optional, Set
+
 import requests
 from bs4 import BeautifulSoup
-import re
-import time
-import subprocess
-import shutil
-import zlib
-from typing import Dict, Any, Optional, List, Set
+
+from src.infrastructure.persistence import Song, get_song_session, init_song_db
+from src.utils.logger import get_logger
 from src.world.get_new_songs.vcpedia_fetcher import VCPediaFetcher
-from src.infrastructure.song_knowledge import Song, get_song_session, init_song_db
 
 logger = get_logger("DailyNewSongFetcher")
 CURRENT_YEAR = datetime.datetime.now().year
@@ -147,39 +143,26 @@ def fetch_song_list_from_template(url: str, timeout: int = 20) -> List[str]:
     seen: Set[str] = set()
     songs: List[str] = []
 
-    for a in content.find_all("a"):
-        text = a.get_text(strip=True)
-        if not text:
-            continue
-
-        # 过滤：明显不是歌曲名的
-        if text in bad_exact:
-            continue
-        if any(x in text for x in bad_contains):
-            continue
-        # 过滤：纯数字/日期类
-        if text.isdigit():
-            continue
-        # 过滤：站内功能链接
-        href = a.get("href", "") or ""
-        if not href or href.startswith("#"):
-            continue
-        if "action=" in href:
-            continue
-        if "Template:" in href or "Category:" in href or "分类:" in href:
-            continue
-
-        # 去掉末尾星号标注（模板里翻唱曲可能带 *）
-        text = text.rstrip("*").strip()
-        if not text:
-            continue
-
-        if text not in seen:
+    for anchor in content.find_all("a"):
+        text = _song_text_from_link(anchor, bad_exact, bad_contains)
+        if text and text not in seen:
             seen.add(text)
             songs.append(text)
 
     logger.info(f"从模板页提取到 {len(songs)} 个条目（含歌曲/可能少量非歌曲，后续抓取失败会记录）。")
     return songs
+
+
+def _song_text_from_link(anchor: Any, bad_exact: Set[str], bad_contains: List[str]) -> str:
+    """Return a normalized song candidate, or an empty string for navigation links."""
+    text = anchor.get_text(strip=True)
+    if not text or text in bad_exact or any(marker in text for marker in bad_contains) or text.isdigit():
+        return ""
+    href = anchor.get("href", "") or ""
+    blocked_href_markers = ("action=", "Template:", "Category:", "分类:")
+    if not href or href.startswith("#") or any(marker in href for marker in blocked_href_markers):
+        return ""
+    return text.rstrip("*").strip()
 
 
 def _safe_song_name(name: str) -> str:

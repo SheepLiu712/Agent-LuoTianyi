@@ -7,7 +7,7 @@ from typing import Any
 
 from src.agent.skills.adapters.memory import AgentMemory
 from src.agent.skills.contracts import SkillInvocation
-from src.system.observability import get_observability_service
+from src.infrastructure.observability import get_observability_service
 from src.utils.logger import get_logger
 
 

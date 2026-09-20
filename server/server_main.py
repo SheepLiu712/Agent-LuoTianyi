@@ -10,14 +10,13 @@ os.chdir(current_dir)
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-from src.system.user_interface.types import (
+from src.web.http.types import (
     RegisterRequest,
     LoginRequest,
     AutoLoginRequest,
     HistoryQuery,
     ImageRequest,
     ResetAccountRequest,
-    WSEventType,
     PreferenceGetRequest,
     PreferenceOverwriteRequest,
     DynamicListRequest,
@@ -30,24 +29,26 @@ from src.system.user_interface.types import (
     DynamicUnreadQuery,
     DynamicReadMarkRequest,
 )
-from src.system.user_interface.websocket_service import ChatEventAcceptance, WebSocketConnection
-from src.system.admin import (
+from src.adapter.websocket import ChatEventAcceptance
+from src.application.admin import (
     get_admin_shell,
     init_admin_shell,
-    register_admin_ui,
     shutdown_admin_shell,
 )
+from src.web.admin import register_admin_ui
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger, install_access_log_filter
-from src.system.network_helper import (
+from src.web.http import (
     register_project_plan,
     require_bearer_token,
     runtime_not_ready_detail,
 )
+from src.web.websocket import WSEventType, WebSocketConnection
 
 from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
-    from src.system.system_runtime import SystemRuntime
+    from src.server_runtime import ServerRuntime
 
 logger = get_logger("server_main")
 config = load_config("config/config.json")
@@ -60,10 +61,10 @@ async def startup_event(app: FastAPI):
     logger.info("AdminShell 初始化完成，正在校验配置并启动系统运行时")
     runtime_status = await admin_shell.runtime_supervisor.start()
     if runtime_status.get("running"):
-        logger.info("配置校验通过，SystemRuntime 已自动启动")
+        logger.info("配置校验通过，ServerRuntime 已自动启动")
     else:
         logger.warning(
-            "SystemRuntime 未自动启动: state=%s, error=%s",
+            "ServerRuntime 未自动启动: state=%s, error=%s",
             runtime_status.get("state"),
             runtime_status.get("last_error"),
         )
@@ -74,11 +75,13 @@ async def startup_event(app: FastAPI):
         await shutdown_admin_shell()
         logger.info("AdminShell 已关闭")
 
+
 def get_runtime():
     runtime = get_admin_shell().runtime_supervisor.runtime
     if runtime is None:
         raise HTTPException(status_code=503, detail=runtime_not_ready_detail())
     return runtime
+
 
 app = FastAPI(lifespan=startup_event)
 
@@ -101,8 +104,8 @@ async def chat_ws(websocket: WebSocket):
         logger.info("WebSocket client disconnected before accept on /chat_ws")
         return
 
-    system_runtime: "SystemRuntime" = get_admin_shell().runtime_supervisor.runtime
-    if system_runtime is None:
+    server_runtime: "ServerRuntime" = get_admin_shell().runtime_supervisor.runtime
+    if server_runtime is None:
         try:
             await websocket.send_json(
                 {
@@ -116,8 +119,8 @@ async def chat_ws(websocket: WebSocket):
         return
 
     logger.info("WebSocket client connected to /chat_ws")
-    websocket_service = system_runtime.websocket_service  # WebSocketService 实例
-    stage_manager = getattr(system_runtime, "stage_manager", None)
+    websocket_service = server_runtime.websocket_service  # WebSocketService 实例
+    stage_manager = getattr(server_runtime, "stage_manager", None)
     try:
         await websocket_service.send_system_ready_event(websocket)
     except WebSocketDisconnect:
@@ -128,13 +131,13 @@ async def chat_ws(websocket: WebSocket):
     try:
         authenticated = await ws_connection.auth(
             websocket_service,
-            system_runtime.database_manager,
+            server_runtime.database_manager,
         )
         if not authenticated:
             return
         if stage_manager is None:
             raise RuntimeError("StageManager is required for production chat connections")
-        character_id = system_runtime.agent_runtime.default_character_id
+        character_id = server_runtime.agent_runtime.default_character_id
         await stage_manager.connect(ws_connection, character_id)
         while True:
             event = await websocket_service.try_recv_client_msg(ws_connection)
@@ -146,33 +149,23 @@ async def chat_ws(websocket: WebSocket):
                 continue
 
             if event.event_type == WSEventType.LLM_RESPONSE.value:
-                system_runtime.client_llm_executor.on_llm_response(event.payload)
+                server_runtime.client_llm_executor.on_llm_response(event.payload)
                 continue
 
-            if (
-                event.event_type in (WSEventType.USER_TEXT.value, WSEventType.USER_IMAGE.value)
-            ):
+            if event.event_type in (WSEventType.USER_TEXT.value, WSEventType.USER_IMAGE.value):
                 payload = event.payload if isinstance(event.payload, dict) else {}
                 llm_mode = payload.get("llm_mode")
                 if isinstance(llm_mode, dict):
                     raw_types = llm_mode.get("types")
                     if isinstance(raw_types, list):
                         ws_connection.client_mode = {
-                            "types": [
-                                str(t).strip()
-                                for t in raw_types
-                                if isinstance(t, str) and t.strip()
-                            ]
+                            "types": [str(t).strip() for t in raw_types if isinstance(t, str) and t.strip()]
                         }
                     elif isinstance(raw_types, str) and raw_types.strip():
                         ws_connection.client_mode = {"types": [raw_types.strip()]}
 
-            if websocket_service.is_chat_related_event(event):
-                acceptance = await websocket_service.try_accept_stimulus_event(
-                    ws_connection,
-                    event,
-                    adapter=system_runtime.chat_adapter,
-                )
+            if server_runtime.chat_adapter.supports_input(event):
+                acceptance = await server_runtime.chat_adapter.try_accept_event(ws_connection, event)
                 if acceptance == ChatEventAcceptance.DUPLICATE:
                     await websocket_service.send_duplicate_ack_event(ws_connection, event)
                     continue
@@ -205,10 +198,10 @@ async def chat_ws(websocket: WebSocket):
                     continue
                 await websocket_service.send_ack_event(ws_connection, event)
     except WebSocketDisconnect:
-        system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
+        server_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
         logger.info("WebSocket client disconnected from /chat_ws")
     except Exception as e:
-        system_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
+        server_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
         logger.error(f"Error in /chat_ws: {e}")
     finally:
         if stage_manager is not None:
@@ -216,26 +209,26 @@ async def chat_ws(websocket: WebSocket):
 
 
 @app.get("/auth/public_key")
-async def get_public_key(system_runtime = Depends(get_runtime)):
+async def get_public_key(server_runtime=Depends(get_runtime)):
     """
     获取用户登录加密密码时使用的公钥。客户端在登录或注册时使用该公钥加密密码后发送给服务器。
     """
-    return {"public_key": system_runtime.user_interface.get_public_key_pem()}
+    return {"public_key": server_runtime.user_interface.get_public_key_pem()}
 
 
 @app.get("/llm/client-model-types")
-async def get_client_model_types(system_runtime = Depends(get_runtime)):
+async def get_client_model_types(server_runtime=Depends(get_runtime)):
     """
     获取客户端委托需求。服务商、Base URL、模型和密钥均由客户端自行配置。
     """
-    return {"types": system_runtime.llm_service.get_client_model_types()}
+    return {"types": server_runtime.llm_service.get_client_model_types()}
 
 
 @app.post("/auth/auto_login")
 async def auto_login(
     req: AutoLoginRequest,
     background_tasks: BackgroundTasks,
-    system_runtime = Depends(get_runtime),
+    server_runtime=Depends(get_runtime),
     request: Request = None,
 ):
     """
@@ -249,15 +242,13 @@ async def auto_login(
     - 失败：HTTP 401 错误，{"detail": "登录失败，自动登录验证未通过"}
     """
     logger.info(f"Auto login request: {req.username}")
-    return await system_runtime.user_interface.auto_login(
-        req, background_tasks, system_runtime, request
-    )
+    return await server_runtime.user_interface.auto_login(req, background_tasks, server_runtime, request)
 
 
 @app.post("/auth/register")
 async def register(
     req: RegisterRequest,
-    system_runtime = Depends(get_runtime),
+    server_runtime=Depends(get_runtime),
     request: Request = None,
 ):
     """
@@ -272,15 +263,13 @@ async def register(
     - 失败：HTTP 400 错误，{"detail": "注册失败，失败原因"}
     """
     logger.info("Register request for username=%s", req.username)
-    return await system_runtime.user_interface.register(
-        req, system_runtime, request
-    )
+    return await server_runtime.user_interface.register(req, server_runtime, request)
 
 
 @app.post("/auth/reset_account")
 async def reset_account(
     req: ResetAccountRequest,
-    system_runtime = Depends(get_runtime),
+    server_runtime=Depends(get_runtime),
     request: Request = None,
 ):
     """以邀请码重置账号的用户名和密码。
@@ -294,16 +283,14 @@ async def reset_account(
     - 失败：HTTP 400 错误，{"detail": "失败原因"}
     """
     logger.info("Reset account request for username=%s", req.new_username)
-    return await system_runtime.user_interface.reset_account(
-        req, system_runtime, request
-    )
+    return await server_runtime.user_interface.reset_account(req, server_runtime, request)
 
 
 @app.post("/auth/login")
 async def login(
     req: LoginRequest,
     background_tasks: BackgroundTasks,
-    system_runtime = Depends(get_runtime),
+    server_runtime=Depends(get_runtime),
     request: Request = None,
 ):
     """
@@ -317,40 +304,38 @@ async def login(
     - 失败：HTTP 401 错误，{"detail": "用户名或密码错误"}
     """
     logger.info(f"Login request: {req.username}")
-    return await system_runtime.user_interface.login(
-        req, background_tasks, system_runtime, request
-    )
+    return await server_runtime.user_interface.login(req, background_tasks, server_runtime, request)
 
 
 @app.post("/preference/get")
 async def get_preference(
     req: PreferenceGetRequest,
-    system_runtime = Depends(get_runtime),
+    server_runtime=Depends(get_runtime),
 ):
     """获取偏好设置：委托到 UserInterface。"""
-    return await system_runtime.user_interface.get_preference(req, system_runtime)
+    return await server_runtime.user_interface.get_preference(req, server_runtime)
 
 
 @app.post("/preference/overwrite")
 async def overwrite_preference(
     req: PreferenceOverwriteRequest,
-    system_runtime = Depends(get_runtime),
+    server_runtime=Depends(get_runtime),
 ):
     """覆盖偏好设置：委托到 UserInterface。"""
-    return await system_runtime.user_interface.overwrite_preference(req, system_runtime)
+    return await server_runtime.user_interface.overwrite_preference(req, server_runtime)
 
 
 @app.get("/history")
 async def get_history(
     request: HistoryQuery = Depends(),
     authorization: str | None = Header(default=None),
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
     """获取聊天历史：委托到 UserInterface。"""
     logger.info(f"Server received: Get history request from {request.username}")
     token = require_bearer_token(authorization)
-    return await system_runtime.user_interface.get_history(
-        request.username, token, request.count, request.end_index, system_runtime
+    return await server_runtime.user_interface.get_history(
+        request.username, token, request.count, request.end_index, server_runtime
     )
 
 
@@ -358,7 +343,7 @@ async def get_history(
 async def list_dynamics(
     request: DynamicListQuery = Depends(),
     authorization: str | None = Header(default=None),
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
     token = require_bearer_token(authorization)
     req = DynamicListRequest(
@@ -367,34 +352,34 @@ async def list_dynamics(
         limit=request.limit,
         cursor=request.cursor,
     )
-    return await system_runtime.user_interface.list_dynamics(req, system_runtime)
+    return await server_runtime.user_interface.list_dynamics(req, server_runtime)
 
 
 @app.post("/dynamics")
 async def create_dynamic(
     request: DynamicCreateRequest,
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
-    return await system_runtime.user_interface.create_dynamic(request, system_runtime)
+    return await server_runtime.user_interface.create_dynamic(request, server_runtime)
 
 
 @app.get("/dynamics/unread")
 async def get_dynamic_unread(
     request: DynamicUnreadQuery = Depends(),
     authorization: str | None = Header(default=None),
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
     token = require_bearer_token(authorization)
     req = DynamicUnreadRequest(username=request.username, token=token)
-    return await system_runtime.user_interface.get_dynamic_unread(req, system_runtime)
+    return await server_runtime.user_interface.get_dynamic_unread(req, server_runtime)
 
 
 @app.post("/dynamics/read")
 async def mark_dynamic_read(
     request: DynamicReadMarkRequest,
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
-    return await system_runtime.user_interface.mark_dynamic_read(request, system_runtime)
+    return await server_runtime.user_interface.mark_dynamic_read(request, server_runtime)
 
 
 @app.get("/dynamics/{dynamic_id}/comments")
@@ -402,7 +387,7 @@ async def list_dynamic_comments(
     dynamic_id: str,
     request: DynamicCommentListQuery = Depends(),
     authorization: str | None = Header(default=None),
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
     token = require_bearer_token(authorization)
     req = DynamicCommentListRequest(
@@ -411,22 +396,22 @@ async def list_dynamic_comments(
         limit=request.limit,
         cursor=request.cursor,
     )
-    return await system_runtime.user_interface.list_dynamic_comments(dynamic_id, req, system_runtime)
+    return await server_runtime.user_interface.list_dynamic_comments(dynamic_id, req, server_runtime)
 
 
 @app.post("/dynamics/{dynamic_id}/comments")
 async def create_dynamic_comment(
     dynamic_id: str,
     request: DynamicCommentCreateRequest,
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
-    return await system_runtime.user_interface.create_dynamic_comment(dynamic_id, request, system_runtime)
+    return await server_runtime.user_interface.create_dynamic_comment(dynamic_id, request, server_runtime)
 
 
 @app.post("/get_image")
 async def get_image(
     request: ImageRequest,
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
     """
     获取图片接口。用户提供图片的服务器路径，服务器返回图片二进制数据。
@@ -440,13 +425,13 @@ async def get_image(
     - 失败：HTTP 400 错误，{"detail": "获取图片失败，失败原因"}
     """
     logger.info(f"Get image request from {request.username} for {request.uuid}")
-    return await system_runtime.user_interface.get_image(request, system_runtime)
+    return await server_runtime.user_interface.get_image(request, server_runtime)
 
 
 @app.post("/update_image_client_path")
 async def update_image_client_path(
     request: ImageRequest,
-    system_runtime: "SystemRuntime" = Depends(get_runtime),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
     """
     更新图片的客户端路径。用户提供图片的 UUID 和新的客户端路径，服务器更新数据库记录。
@@ -461,7 +446,7 @@ async def update_image_client_path(
     - 失败：HTTP 400 错误，{"detail": "更新失败，失败原因"}
     """
     logger.info(f"Update image client path request from {request.username} for {request.uuid}")
-    return await system_runtime.user_interface.update_image_client_path(request, system_runtime)
+    return await server_runtime.user_interface.update_image_client_path(request, server_runtime)
 
 
 if __name__ == "__main__":

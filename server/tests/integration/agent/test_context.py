@@ -13,10 +13,10 @@ from src.agent.context import (
     ImageContent, JargonExplanation, RecallEntry, RecalledMemoryContext,
     SongContent, TextContent, UserPreferences, UserProfile,
 )
-from src.system.database.redis_buffer import RedisBuffer
-from src.system.database.services.conversation_service import ConversationService
-from src.system.database.services.user_store import UserStore
-from src.system.database.sql_database import Base, User
+from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
+from src.infrastructure.persistence.database.services.conversation_service import ConversationService
+from src.infrastructure.persistence.database.services.user_store import UserStore
+from src.infrastructure.persistence.database.sql_database import Base, User
 
 
 @pytest.fixture

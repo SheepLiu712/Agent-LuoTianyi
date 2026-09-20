@@ -9,7 +9,7 @@ import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
 from src.agent.context import ConversationSnapshot, RecalledMemoryContext, UserContextSnapshot
 from src.stage import ChatStage
-from src.system.user_interface.websocket_service import WebSocketConnection
+from src.web.websocket.service import WebSocketConnection
 
 
 class Socket:

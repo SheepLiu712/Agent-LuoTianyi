@@ -1,4 +1,5 @@
 """门面契约的离线装配：真实 AgentRuntime，替换旧业务依赖及向量存储。"""
+
 import json
 from types import SimpleNamespace
 
@@ -45,34 +46,52 @@ def runtime_dependencies(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime_module, "AgentMemory", Dependency)
     monkeypatch.setattr(runtime_module, "CharacterReplyGenerator", ReplyGenerator)
     persona = tmp_path / "persona.json"
-    persona.write_text(json.dumps({
-        "character_name": "测试角色", "character_persona": "测试人格", "speaking_style": "自然",
-    }), encoding="utf-8")
+    persona.write_text(
+        json.dumps(
+            {
+                "character_name": "测试角色",
+                "character_persona": "测试人格",
+                "speaking_style": "自然",
+            }
+        ),
+        encoding="utf-8",
+    )
     tones = tmp_path / "tones.json"
     tones.write_text("{}", encoding="utf-8")
     profile = {"static_variables_file": str(persona), "llm_tone_mapping_file": str(tones)}
     previous = runtime_module._agent_runtime
     config = {
+        "skills": {
+            "singing": {
+                "characters": {
+                    "luotianyi": {"resource_path": str(tmp_path / "sing-luotianyi")},
+                    "miku": {"resource_path": str(tmp_path / "sing-miku")},
+                }
+            }
+        },
         "agent": {
             "memory": {"memory_writer": {"llm_module": {}}, "user_profile": {"llm_module": {}}},
             "main_chat": {"llm_module": {}},
         },
-        "character_registry": {"characters": {
-            "luotianyi": profile | {"default_target": True}, "miku": dict(profile),
-            "disabled": profile | {"enabled": False},
-        }},
+        "character_registry": {
+            "characters": {
+                "luotianyi": profile | {"default_target": True},
+                "miku": dict(profile),
+                "disabled": profile | {"enabled": False},
+            }
+        },
     }
     yield {
         "config": config,
-        "llm_service": SimpleNamespace(register_llm_module=lambda *args: SimpleNamespace(
-            prompt_template=SimpleNamespace(get_variables=list),
-        )),
-        "infrastructure": SimpleNamespace(
-            config={},
-            speech=SimpleNamespace(tts_module={}),
-            singing=SimpleNamespace(singing_manager={}),
-            media_resolver=SimpleNamespace(resolve=lambda media_ref: None),
-            image_understanding=SimpleNamespace(describe_image=lambda image_data_uri: None),
+        "llm_service": SimpleNamespace(
+            register_llm_module=lambda *args: SimpleNamespace(
+                prompt_template=SimpleNamespace(get_variables=list),
+            ),
+            register_vlm_module=lambda *args: SimpleNamespace(generate_response=None),
+        ),
+        "media_resolver": SimpleNamespace(
+            resolve=lambda media_ref, **kwargs: None,
+            ensure_dependencies=lambda: None,
         ),
         "database_manager": SimpleNamespace(open_sql_session=sessions, conversation_service=object()),
     }, store

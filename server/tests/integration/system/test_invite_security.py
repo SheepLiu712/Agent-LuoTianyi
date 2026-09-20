@@ -11,12 +11,12 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import inspect as sa_inspect
 
-from src.system.admin import admin_interface
-from src.system.database import sql_database
-from src.system.database.database_service import DatabaseManager
-from src.system.database.services import credential_service
-from src.system.database.services.credential_service import CredentialService
-from src.system.database.sql_database import InviteCode
+from src.web.admin import admin_interface
+from src.infrastructure.persistence.database import sql_database
+from src.infrastructure.persistence.database.database_service import DatabaseManager
+from src.infrastructure.persistence.database.services import credential_service
+from src.infrastructure.persistence.database.services.credential_service import CredentialService
+from src.infrastructure.persistence.database.sql_database import InviteCode
 
 
 @pytest.fixture
@@ -63,7 +63,10 @@ def test_registration_and_reset_enforce_enabled_and_usage_states(db_manager):
 
     assert db_manager.credential_service.reset_account("NOT-FOUND", "missing", "new-password")[0] is False
     assert db_manager.credential_service.reset_account(unused_reset_code, "unused", "new-password")[0] is False
-    assert db_manager.credential_service.reset_account(enabled_code, "owner-renamed", "new-password") == (True, "重置成功")
+    assert db_manager.credential_service.reset_account(enabled_code, "owner-renamed", "new-password") == (
+        True,
+        "重置成功",
+    )
 
     assert db_manager.credential_service.admin_set_invite_code_disabled(enabled_code, True) == (True, "已禁用")
     assert db_manager.credential_service.reset_account(enabled_code, "blocked-reset", "new-password")[0] is False
@@ -87,11 +90,13 @@ def test_generation_uses_ten_character_uppercase_alphanumeric_codes(db_manager):
 
 def test_database_collision_is_retried_without_preloading_codes(db_manager, monkeypatch):
     add_invite(db_manager, "database-owned-collision")
-    candidates = iter([
-        "database-owned-collision",
-        "database-owned-collision",
-        "fresh-secure-token",
-    ])
+    candidates = iter(
+        [
+            "database-owned-collision",
+            "database-owned-collision",
+            "fresh-secure-token",
+        ]
+    )
     calls = []
 
     def fake_generate_invite_code() -> str:
@@ -213,8 +218,7 @@ def test_existing_invite_migration_enables_once_and_preserves_later_admin_state(
     db_path = db_dir / "legacy.db"
     connection = sqlite3.connect(db_path)
     try:
-        connection.executescript(
-            """
+        connection.executescript("""
             CREATE TABLE invite_codes (
                 code VARCHAR NOT NULL PRIMARY KEY,
                 is_used BOOLEAN,
@@ -223,8 +227,7 @@ def test_existing_invite_migration_enables_once_and_preserves_later_admin_state(
                 user_id VARCHAR UNIQUE
             );
             INSERT INTO invite_codes (code, is_used) VALUES ('legacy-code', 0);
-            """
-        )
+            """)
         connection.commit()
     finally:
         connection.close()
@@ -246,8 +249,7 @@ def test_existing_invite_migration_enables_once_and_preserves_later_admin_state(
         assert session.query(InviteCode).filter_by(code="post-migration-code").one().disabled is True
         marker_count = session.execute(
             sql_database.text(
-                "SELECT COUNT(*) FROM schema_migrations "
-                "WHERE name = '2026-08-22-enable-all-invite-codes'"
+                "SELECT COUNT(*) FROM schema_migrations " "WHERE name = '2026-08-22-enable-all-invite-codes'"
             )
         ).scalar_one()
         assert marker_count == 1
@@ -277,21 +279,20 @@ def test_admin_invite_routes_keep_codes_in_request_bodies(monkeypatch):
             return True, "删除成功"
 
     shell = SimpleNamespace(
-        runtime_supervisor=SimpleNamespace(
-            runtime=SimpleNamespace(database_manager=FakeDatabaseManager())
-        )
+        runtime_supervisor=SimpleNamespace(runtime=SimpleNamespace(database_manager=FakeDatabaseManager()))
     )
     monkeypatch.setattr(admin_interface, "get_admin_shell", lambda: shell)
 
     assert asyncio.run(admin_interface.admin_disable_invite_code({"code": secret_code}))["ok"] is True
-    assert asyncio.run(admin_interface.admin_set_invite_code_disabled({"code": secret_code, "disabled": False}))["ok"] is True
+    assert (
+        asyncio.run(admin_interface.admin_set_invite_code_disabled({"code": secret_code, "disabled": False}))["ok"]
+        is True
+    )
     assert asyncio.run(admin_interface.admin_delete_invite_code({"code": secret_code}))["ok"] is True
     assert calls == [("disable", secret_code), ("set-disabled", secret_code, False), ("delete", secret_code)]
 
     invite_routes = [
-        route
-        for route in admin_interface.protected_router.routes
-        if "invite-codes" in getattr(route, "path", "")
+        route for route in admin_interface.protected_router.routes if "invite-codes" in getattr(route, "path", "")
     ]
     route_paths = {route.path for route in invite_routes}
     assert route_paths == {
@@ -304,9 +305,7 @@ def test_admin_invite_routes_keep_codes_in_request_bodies(monkeypatch):
     assert all("{code}" not in route.path for route in invite_routes)
     assert all("GET" not in (route.methods or set()) for route in invite_routes)
 
-    source = (Path(__file__).resolve().parents[3] / "res" / "admin_ui" / "src" / "main.tsx").read_text(
-        encoding="utf-8"
-    )
+    source = (Path(__file__).resolve().parents[3] / "res" / "admin_ui" / "src" / "main.tsx").read_text(encoding="utf-8")
     assert "encodeURIComponent(row.code)" not in source
     assert "/admin/api/invite-codes?" not in source
     assert "'/admin/api/invite-codes/set-disabled'," in source

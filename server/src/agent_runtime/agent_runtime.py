@@ -38,11 +38,11 @@ from src.agent.skills import SharedSkills
 from src.agent.skills.adapters.memory import AgentMemory
 from src.agent.skills.cognitive import CharacterReplyGenerator
 from src.agent.skills.contracts import CharacterNarrative
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent_runtime.character_registry import CharacterRegistry
 from src.domain.agent import ActionKind, StimulusKind
-from src.infrastructure.speech.streaming import AsyncTTS
-from src.resources.prepared_speech import PreparedSpeechResources
-from src.system.database.vector_store import (
+from src.infrastructure.media import MediaResolver
+from src.infrastructure.persistence.database.vector_store import (
     clear_vector_store,
     get_vector_store,
     init_vector_store,
@@ -55,26 +55,32 @@ from src.utils.asyncio_helpers import (
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.infrastructure.runtime import InfrastructureRuntime
-    from src.system.database import DatabaseManager
-    from src.utils.llm_service import LLMService
+    from src.agent.skills.expression.singing import SingingBackend
+    from src.infrastructure.models.service import LLMService
+    from src.infrastructure.persistence.database import DatabaseManager
 
 
 class AgentRuntime:
     """装配角色 Agent、共享技能及角色资源，管理查找和关闭生命周期。"""
 
+    @property
+    def singing_backend(self) -> SingingBackend:
+        """Expose the shared singing port only to the application composition root."""
+        return self.skills.singing.backend
+
     def __init__(
         self,
         config: dict[str, Any],
         llm_service: LLMService,
-        infrastructure: InfrastructureRuntime,
         database_manager: DatabaseManager,
+        *,
+        media_resolver: MediaResolver,
     ) -> None:
         """初始化启用角色及注册表，为门面注入数据库会话工厂；初始化失败回滚资源。"""
         self.logger = get_logger(__name__)
         self.config = config
         self.llm_service = llm_service
-        self.infrastructure = infrastructure
+        self.media_resolver = media_resolver
         self.database_manager = database_manager
         self._shutdown_lock = asyncio.Lock()
         self._shutdown_complete = False
@@ -82,9 +88,9 @@ class AgentRuntime:
         self.shutdown_timeout_seconds = DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS
         self.vector_store = self._initialize_vector_store(self.config["agent"])
         try:
-            self.prepared_speech = PreparedSpeechResources(self.config.get("prepared_speech", {}))
             first_login_names = self._first_login_prepared_names(self.config.get("proactive", {}))
             self.character_registry = CharacterRegistry(config.get("character_registry", {}))
+            prepared_speech = PreparedSpeechCatalog(self.config.get("prepared_speech", {}).get("characters", {}))
             self.character_memories: dict[str, AgentMemory] = {}
             self.reply_generators: dict[str, CharacterReplyGenerator] = {}
             self._build_character_resources(
@@ -107,20 +113,18 @@ class AgentRuntime:
             self.skills = SharedSkills(
                 self.config.get("skills", {}),
                 llm_service,
-                tts_engine=AsyncTTS(infrastructure.speech),
                 memories=self.character_memories,
                 reply_generators=self.reply_generators,
                 narratives=narratives,
                 touch_configs=touch_configs,
+                prepared_speech=prepared_speech,
                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
                 reply_composition_config=self.config.get("reply_composition", {}),
                 reflection_config=self.config.get("reflection", {}),
                 song_knowledge_config=self.config.get("agent", {}).get("song_knowledge", {}),
                 database_manager=database_manager,
-                singing=infrastructure.singing,
-                media_resolver=infrastructure.media_resolver,
-                image_understanding=infrastructure.image_understanding,
+                media_resolver=media_resolver,
             )
 
             self.default_character_id = self.character_registry.default_character_id
@@ -174,7 +178,7 @@ class AgentRuntime:
         """登记一个角色可处理的刺激，并复用无状态的输入预处理器。"""
         preprocessing = ChatPreprocessingHandler(
             self.skills.text_preprocessing,
-            self.skills.image_preprocessing,
+            self.skills.image_understanding,
         )
         registrations = [
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
@@ -182,7 +186,7 @@ class AgentRuntime:
                 StimulusKind.PROACTIVE_PROMPT_DUE,
                 FirstLoginHandler(
                     prepared_names=first_login_names,
-                    prepared_speech=self.prepared_speech,
+                    prepared_speech=self.skills.prepared_speech,
                 ),
             ),
             (
@@ -258,7 +262,7 @@ class AgentRuntime:
             (
                 (
                     ActionKind.SAY,
-                    SayHandler(character_id, self.skills.speaking, self.prepared_speech),
+                    SayHandler(character_id, self.skills.speaking, self.skills.prepared_speech),
                 ),
                 (ActionKind.SING, SingHandler(character_id, self.skills.singing)),
                 (ActionKind.RESTORE_EXPRESSION, RestoreExpressionHandler()),
@@ -276,6 +280,9 @@ class AgentRuntime:
         )
 
     def _abort_initialization(self) -> None:
+        skills = getattr(self, "skills", None)
+        if skills is not None:
+            skills.abort_initialization()
         vector_store = getattr(self, "vector_store", None)
         try:
             close = getattr(vector_store, "close", None)
@@ -297,6 +304,9 @@ class AgentRuntime:
             if self._shutdown_complete:
                 return
             await self._wait_for_inflight_calls()
+            skills = getattr(self, "skills", None)
+            if skills is not None:
+                await skills.stop()
             await self._close_owned_vector_store()
             self._finalize_shutdown()
 
@@ -375,21 +385,21 @@ class AgentRuntime:
         self,
         *,
         llm_service: LLMService,
-        infrastructure: InfrastructureRuntime,
         database_manager: DatabaseManager,
+        media_resolver: MediaResolver,
     ) -> None:
         """记录运行时外部依赖，并检查角色私有技能。"""
         self.llm_service = llm_service
-        self.infrastructure = infrastructure
         self.database_manager = database_manager
+        self.media_resolver = media_resolver
         self.ensure_dependencies()
 
     def ensure_dependencies(self) -> None:
         """检查 AgentRuntime 和所有角色私有技能依赖已经初始化。"""
         required = {
             "llm_service": self.llm_service,
-            "infrastructure": self.infrastructure,
             "database_manager": self.database_manager,
+            "media_resolver": self.media_resolver,
             "vector_store": self.vector_store,
             "character_registry": self.character_registry,
             "character_memories": self.character_memories,

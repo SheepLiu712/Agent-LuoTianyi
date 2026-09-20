@@ -3,9 +3,9 @@ from threading import Barrier
 
 import pytest
 
-from src.system.database.services import credential_service
-from src.system.database.database_service import DatabaseManager
-from src.system.database.sql_database import InviteCode, User
+from src.infrastructure.persistence.database.services import credential_service
+from src.infrastructure.persistence.database.database_service import DatabaseManager
+from src.infrastructure.persistence.database.sql_database import InviteCode, User
 
 
 @pytest.fixture

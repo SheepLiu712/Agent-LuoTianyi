@@ -82,7 +82,7 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check(
         "B7-已知偏差-不得扩散",
-        "G2 已知偏差（world 只读 system_runtime.agent_runtime 属性）不得扩大",
+        "G2 已知偏差（world 只读 server_runtime.agent_runtime 属性）不得扩大",
         ("world",),
         r'getattr\([^)]*"agent_runtime"[^)]*\)',
         allow=(
@@ -95,9 +95,22 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check(
         "B8-infrastructure-保持中立",
-        "基础设施不反向 import agent / world / stage / system 业务层",
+        "基础设施不反向 import agent / world / stage / adapter / application / web / server_runtime 业务层",
         ("infrastructure",),
-        r"^\s*from\s+src\.(agent|world|stage|system)\b|^\s*import\s+src\.(agent|world|stage|system)\b",
+        r"^\s*from\s+src\.(agent|world|stage|adapter|application|web|server_runtime)\b|"
+        r"^\s*import\s+src\.(agent|world|stage|adapter|application|web|server_runtime)\b",
+    ),
+    Check(
+        "B9-adapter-只做适配",
+        "Adapter 不承载 FastAPI 路由、物理网络服务或管理应用用例",
+        ("adapter",),
+        r"^\s*(from|import)\s+fastapi\b|\b(APIRouter|WebSocketService|AdminShell|RuntimeSupervisor)\b",
+    ),
+    Check(
+        "B10-application-传输无关",
+        "Application 不依赖 FastAPI 或 Web 传输实现",
+        ("application",),
+        r"^\s*(from|import)\s+fastapi\b|^\s*(from|import)\s+src\.web\b",
     ),
 )
 

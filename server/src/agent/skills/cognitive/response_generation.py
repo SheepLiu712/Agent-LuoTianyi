@@ -9,8 +9,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.agent.context.models import UserContextSnapshot
 from src.agent.skills.contracts import ReplyDraft
 from src.domain import CharacterProfile
-from src.utils.llm.llm_api_interface import LLMContentInspectionError
-from src.utils.llm.llm_module import LLMModule
+from src.infrastructure.models.llm.interface import LLMContentInspectionError
+from src.infrastructure.models.llm.module import LLMModule
 from src.utils.logger import get_logger
 
 from ._prompt_assembly import RealizationPromptAssembler

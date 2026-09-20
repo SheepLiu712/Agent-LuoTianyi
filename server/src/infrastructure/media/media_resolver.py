@@ -47,6 +47,14 @@ class MediaResolver(Protocol):
 
     def resolve(self, media_ref: MediaRef, *, owner_user_id: str) -> ResolvedMedia: ...
 
+    def ensure_dependencies(self) -> None: ...
+
+
+def create_media_resolver(config: dict | None = None) -> MediaResolver:
+    """Build the configured neutral media adapter without a runtime container."""
+    resolved = dict(config or {})
+    return FilesystemMediaResolver(resolved) if resolved.get("root") else UnconfiguredMediaResolver(resolved)
+
 
 class UnconfiguredMediaResolver:
     """尚无存储策略时使用的显式失败实现。"""

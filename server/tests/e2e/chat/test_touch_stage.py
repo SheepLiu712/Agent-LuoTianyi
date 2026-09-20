@@ -16,7 +16,7 @@ from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.handlers.stimulus.touch import TouchInteractionHandler
 from src.agent.skills.expression.touch import TouchReactionSkill
-from src.resources.prepared_speech import PreparedSpeechResources
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 
 
 async def until(predicate):
@@ -49,16 +49,16 @@ async def test_touch_audio_end_precedes_restore_and_never_becomes_chat_record(tm
         ),
         encoding="utf-8",
     )
-    prepared = PreparedSpeechResources({"manifest": str(manifest)})
+    prepared = PreparedSpeechCatalog({"luotianyi": {"manifest": str(manifest)}})
     touch = TouchInteractionHandler(
         TouchReactionSkill(
             {
                 "luotianyi": {
-                    "manifest": str(manifest),
                     "resource_names": ["touch_voice"],
                     "probability": 1.0,
                 }
-            }
+            },
+            prepared,
         )
     )
     agent = Agent(

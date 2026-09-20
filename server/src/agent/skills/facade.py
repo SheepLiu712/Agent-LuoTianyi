@@ -9,8 +9,7 @@ from src.agent.skills.adapters.memory import AgentMemory
 from src.agent.skills.cognitive import (
     CharacterReplyGenerator,
     ExplicitMemoryIntentSkill,
-    ImagePreprocessingSkill,
-    ImageUnderstandingPort,
+    ImageUnderstandingSkill,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
 )
@@ -23,6 +22,7 @@ from src.agent.skills.expression._dynamic_operations import DynamicOperations
 from src.agent.skills.expression.diary_writing import DiaryWritingSkill
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
@@ -31,11 +31,10 @@ from src.agent.skills.knowledge.song_acceptance import SongKnowledgeAcceptanceSk
 from src.agent.skills.mutation import IntentionalMemoryCommit
 from src.agent.skills.reflection import ReflectionSkill
 from src.infrastructure.media import MediaResolver
-from src.infrastructure.speech.streaming import AsyncTTS
 
 if TYPE_CHECKING:
-    from src.system.database import DatabaseManager
-    from src.utils.llm_service import LLMService
+    from src.infrastructure.models.service import LLMService
+    from src.infrastructure.persistence.database import DatabaseManager
 
 
 class SharedSkills:
@@ -51,20 +50,18 @@ class SharedSkills:
         config: dict[str, Any],
         llm_service: LLMService,
         *,
-        tts_engine: AsyncTTS,
         memories: Mapping[str, AgentMemory],
         reply_generators: Mapping[str, CharacterReplyGenerator],
         narratives: Mapping[str, CharacterNarrative],
         touch_configs: Mapping[str, Mapping[str, object]],
+        prepared_speech: PreparedSpeechCatalog,
         preprocessing_config: dict[str, Any] | None,
         explicit_memory_config: dict[str, Any] | None,
         reply_composition_config: dict[str, Any],
         reflection_config: dict[str, Any],
         song_knowledge_config: dict[str, Any],
         database_manager: DatabaseManager,
-        singing: object,
         media_resolver: MediaResolver | None = None,
-        image_understanding: ImageUnderstandingPort | None = None,
     ) -> None:
         if not isinstance(config, dict):
             raise TypeError("skills 必须是字典")
@@ -78,24 +75,24 @@ class SharedSkills:
         diary.create_llm_module(llm_service)
         diary.wire_dependencies(database_manager=database_manager, dynamic_operations=dynamics)
 
-        self.speaking = SpeakingSkill(config.get("speaking", {}), tts_engine)
-        self.singing = SingingSkill(config.get("singing", {}), singing)
+        self.speaking = SpeakingSkill(config.get("speaking", {}))
+        self.singing = SingingSkill(config.get("singing", {}), llm_service)
         self.conversation_compaction = ConversationCompactionSkill(
             config.get("conversation_compaction", {}),
             llm_service,
         )
         self.text_preprocessing = TextPreprocessingSkill(preprocessing_config)
         self.explicit_memory_intent = ExplicitMemoryIntentSkill(explicit_memory_config)
-        self.image_preprocessing = (
-            ImagePreprocessingSkill(media_resolver, image_understanding)
-            if media_resolver is not None and image_understanding is not None
+        self.image_understanding = (
+            ImageUnderstandingSkill(config.get("image_understanding", {}), media_resolver, llm_service)
+            if media_resolver is not None
             else None
         )
 
         self.response_composition = ResponseCompositionSkill(
             reply_composition_config,
             memories=memories,
-            singing=singing,
+            singing=self.singing.backend,
             generators=reply_generators,
         )
         self.reflection = ReflectionSkill(reflection_config, memories)
@@ -106,6 +103,15 @@ class SharedSkills:
         self.dynamic_publishing = DynamicPublishingSkill(dynamics, narratives)
         self.dynamic_reply = DynamicReplySkill(dynamics, narratives)
         self.diary_writing = DiaryWritingSkill(diary, dynamics, narratives)
-        self.song_learning = SongLearningDispatchSkill(singing)
-        self.touch_reaction = TouchReactionSkill(touch_configs)
+        self.song_learning = SongLearningDispatchSkill(self.singing.backend)
+        self.prepared_speech = prepared_speech
+        self.touch_reaction = TouchReactionSkill(touch_configs, prepared_speech)
         self.song_knowledge = SongKnowledgeAcceptanceSkill(song_knowledge_config)
+
+    async def stop(self) -> None:
+        """关闭由共享 Skill 拥有的长生命周期资源。"""
+        await self.speaking.stop()
+
+    def abort_initialization(self) -> None:
+        """同步回滚已启动但尚未发布的 Skill 资源。"""
+        self.speaking.abort_initialization()

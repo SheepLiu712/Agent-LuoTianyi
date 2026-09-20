@@ -1,4 +1,5 @@
 """文本和图片输入的预处理与落库：先落库再 READY，且不等于消费。"""
+
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -9,7 +10,7 @@ import src.domain.agent as d
 from src.agent import Agent
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent.skills.cognitive import ImagePreprocessingSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive import ImageUnderstandingSkill, TextPreprocessingSkill
 from src.infrastructure.media import MediaResolutionError, ResolvedMedia
 
 
@@ -41,9 +42,11 @@ class _ImageUnderstanding:
         self.description = description
         self.calls = []
 
-    async def describe_image(self, image_data_uri):
-        self.calls.append(image_data_uri)
-        return self.description
+    async def generate_response(self, *, image_base64):
+        self.calls.append(image_base64)
+        return {"content": self.description}
+
+
 class _Conversation:
     def __init__(self):
         self.entries = []
@@ -53,28 +56,41 @@ class _Conversation:
 
 
 def context(interaction_id="i", user_id="u", character_id="luotianyi"):
-    value = SimpleNamespace(identity=SimpleNamespace(
-        interaction_id=interaction_id, user_id=user_id, character_id=character_id))
+    value = SimpleNamespace(
+        identity=SimpleNamespace(interaction_id=interaction_id, user_id=user_id, character_id=character_id)
+    )
     value.conversation = _Conversation()
     return value
 
 
 def agent(terms=("《歌》是一首歌",)):
-    return Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding(terms), None))]))
+    return Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(
+            [(d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding(terms), None))]
+        ),
+    )
 
 
 def image_request(media_id="image", caption="看这个"):
     image = d.ImageMessage(
-        stimulus_id="image-stimulus", schema_version=1,
-        occurred_at=request().stimulus.occurred_at, source=d.StimulusSource.USER,
-        target_character_ids=("luotianyi",), user_id="u", ephemeral=False,
-        media_ref=d.MediaRef(media_id=media_id), caption=caption, client_msg_id="image-client",
+        stimulus_id="image-stimulus",
+        schema_version=1,
+        occurred_at=request().stimulus.occurred_at,
+        source=d.StimulusSource.USER,
+        target_character_ids=("luotianyi",),
+        user_id="u",
+        ephemeral=False,
+        media_ref=d.MediaRef(media_id=media_id),
+        caption=caption,
+        client_msg_id="image-client",
     )
     base = request()
     return d.HandleStimulusRequest(
-        request_id="image-request", stimulus=image,
-        interaction=replace_pending(base.interaction, image), cancellation=d.CancellationToken(),
+        request_id="image-request",
+        stimulus=image,
+        interaction=replace_pending(base.interaction, image),
+        cancellation=d.CancellationToken(),
     )
 
 
@@ -128,9 +144,10 @@ async def test_image_retains_media_identity_and_separates_machine_description():
     resolver = _Resolver()
     understanding = _ImageUnderstanding()
     handler = ChatPreprocessingHandler(
-        _Understanding(("白猫",)), ImagePreprocessingSkill(resolver, understanding))
-    runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.IMAGE_MESSAGE, handler)]))
+        _Understanding(("白猫",)),
+        ImageUnderstandingSkill({}, resolver, vlm_module=understanding),
+    )
+    runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.IMAGE_MESSAGE, handler)]))
     ctx = context()
 
     report = await runtime.handle_stimulus(image_request(), Sink(), context=ctx)
@@ -138,38 +155,42 @@ async def test_image_retains_media_identity_and_separates_machine_description():
     assert resolver.refs == [(d.MediaRef(media_id="image"), "u")]
     assert understanding.calls == ["data:image/png;base64,aW1hZ2U="]
     assert [(entry.source, type(entry.content).__name__) for entry in ctx.conversation.entries] == [
-        ("user", "ImageContent"), ("system", "TextContent")]
+        ("user", "ImageContent"),
+        ("system", "TextContent"),
+    ]
     media_entry, description_entry = ctx.conversation.entries
     assert media_entry.content.text == "看这个"
     assert media_entry.content.media_id == "image"
     assert media_entry.content.mime_type == "image/png"
-    assert description_entry.content.text == "[图片理解]: 一只白猫"
+    assert description_entry.content.text == "[图片理解]: [一张图片]:一只白猫"
     assert description_entry.content.terms == ("白猫",)
-    assert report.preprocessed_input.text == "[图片理解]: 一只白猫"
-    assert report.preprocessed_input.conversation_entry_ids == (
-        media_entry.entry_id, description_entry.entry_id)
+    assert report.preprocessed_input.text == "[图片理解]: [一张图片]:一只白猫"
+    assert report.preprocessed_input.conversation_entry_ids == (media_entry.entry_id, description_entry.entry_id)
     assert report.consumed_pending_stimulus_ids == ()
     assert report.emitted_plan_ids == ()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("error", [
-    MediaResolutionError(code="MEDIA_UNKNOWN", media_id="missing"),
-    MediaResolutionError(code="MEDIA_UNAUTHORIZED", media_id="private"),
-    MediaResolutionError(code="MEDIA_EMPTY", media_id="empty"),
-    MediaResolutionError(code="MEDIA_RESOLVER_NOT_CONFIGURED", media_id="image"),
-])
+@pytest.mark.parametrize(
+    "error",
+    [
+        MediaResolutionError(code="MEDIA_UNKNOWN", media_id="missing"),
+        MediaResolutionError(code="MEDIA_UNAUTHORIZED", media_id="private"),
+        MediaResolutionError(code="MEDIA_EMPTY", media_id="empty"),
+        MediaResolutionError(code="MEDIA_RESOLVER_NOT_CONFIGURED", media_id="image"),
+    ],
+)
 async def test_illegal_media_stops_before_image_understanding(error):
     resolver = _Resolver(error=error)
     understanding = _ImageUnderstanding()
     handler = ChatPreprocessingHandler(
-        _Understanding(), ImagePreprocessingSkill(resolver, understanding))
-    runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.IMAGE_MESSAGE, handler)]))
+        _Understanding(),
+        ImageUnderstandingSkill({}, resolver, vlm_module=understanding),
+    )
+    runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.IMAGE_MESSAGE, handler)]))
     ctx = context()
 
-    report = await runtime.handle_stimulus(
-        image_request(media_id=error.media_id), Sink(), context=ctx)
+    report = await runtime.handle_stimulus(image_request(media_id=error.media_id), Sink(), context=ctx)
 
     assert report.request_status is d.HandlingRequestStatus.FAILED
     assert report.error_code is d.HandlingErrorCode.INTERNAL_ERROR
@@ -186,8 +207,7 @@ def test_text_preprocessing_skill_returns_terms(monkeypatch):
         def extract_and_verify(self, text):
             return ["《歌》是一首歌"] if "歌" in text else []
 
-    monkeypatch.setattr(
-        "src.agent.skills.cognitive.text_preprocessing.SongEntityLinker", _Linker)
+    monkeypatch.setattr("src.agent.skills.cognitive.text_preprocessing.SongEntityLinker", _Linker)
     skill = TextPreprocessingSkill({"song_entity_linker": {"songname_file": "unused"}})
     assert skill.extract_terms("唱《歌》") == ("《歌》是一首歌",)
     assert skill.extract_terms("随便聊聊") == ()

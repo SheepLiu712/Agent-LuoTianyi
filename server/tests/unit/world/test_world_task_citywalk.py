@@ -28,7 +28,7 @@ class FakeFactSink:
         return self.accept
 
 
-def system_runtime(*, accept=True, event_store=None):
+def server_runtime(*, accept=True, event_store=None):
     stage = SimpleNamespace(fact_sink=FakeFactSink(accept))
 
     async def get_world_stage(character_id=None, world_id=None):
@@ -116,9 +116,9 @@ def test_citywalk_run_once_writes_travel_event():
 def test_citywalk_run_once_submits_world_observation(tmp_path):
     router = WorldSettlementRouter()
     report_path = write_report(tmp_path)
-    runtime, stage = system_runtime()
+    runtime, stage = server_runtime()
     task = CitywalkTask({"daily_run_probability": 1.0}, settlements=router)
-    task.system_runtime = runtime
+    task.server_runtime = runtime
     task.event_store = runtime.database_manager.event_store
     task.citywalk_service = SimpleNamespace(run_once=lambda: str(report_path))
 
@@ -141,9 +141,9 @@ def test_citywalk_run_once_submits_world_observation(tmp_path):
 def test_citywalk_dynamic_identity_is_written_back_from_settlement(tmp_path):
     router = WorldSettlementRouter()
     report_path = write_report(tmp_path)
-    runtime, stage = system_runtime()
+    runtime, stage = server_runtime()
     task = CitywalkTask({"daily_run_probability": 1.0}, settlements=router)
-    task.system_runtime = runtime
+    task.server_runtime = runtime
     task.event_store = runtime.database_manager.event_store
     task.citywalk_service = SimpleNamespace(run_once=lambda: str(report_path))
 
@@ -182,9 +182,9 @@ def test_citywalk_dynamic_identity_is_written_back_from_settlement(tmp_path):
 def test_citywalk_rejected_observation_is_reported_and_discarded(tmp_path):
     router = WorldSettlementRouter()
     report_path = write_report(tmp_path)
-    runtime, stage = system_runtime(accept=False)
+    runtime, stage = server_runtime(accept=False)
     task = CitywalkTask({"daily_run_probability": 1.0}, settlements=router)
-    task.system_runtime = runtime
+    task.server_runtime = runtime
     task.event_store = runtime.database_manager.event_store
     task.citywalk_service = SimpleNamespace(run_once=lambda: str(report_path))
 
@@ -262,7 +262,7 @@ def test_citywalk_build_llm_modules_registers_expected_modules():
 
     llm_service = FakeLLMService()
     task = CitywalkTask({"decision": {"llm": {"name": "test-model"}}})
-    task.system_runtime = SimpleNamespace(llm_service=llm_service)
+    task.server_runtime = SimpleNamespace(llm_service=llm_service)
 
     modules = task._build_llm_modules()
 
@@ -281,7 +281,7 @@ def test_citywalk_build_citywalk_service_skips_without_runtime():
 
 def test_citywalk_build_citywalk_service_skips_without_vector_store():
     task = CitywalkTask({})
-    task.system_runtime = SimpleNamespace(agent_runtime=SimpleNamespace(vector_store=None))
+    task.server_runtime = SimpleNamespace(agent_runtime=SimpleNamespace(vector_store=None))
 
     assert task._build_citywalk_service() is None
 
@@ -298,7 +298,7 @@ def test_citywalk_initialize_uses_runtime_dependencies(monkeypatch):
 
     task.initialize(runtime)
 
-    assert task.system_runtime is runtime
+    assert task.server_runtime is runtime
     assert task.event_store is event_store
     assert task.citywalk_service is built
     assert not hasattr(task, "character_runtime")

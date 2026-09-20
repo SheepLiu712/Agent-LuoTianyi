@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from src.system.user_interface.types import WSEventType, WSMessage
-from src.system.user_interface.websocket_service import WebSocketConnection, WebSocketService
+from src.web.websocket import WSEventType, WSMessage
+from src.web.websocket.service import WebSocketConnection, WebSocketService
 
 
 class FakeWebSocket:
