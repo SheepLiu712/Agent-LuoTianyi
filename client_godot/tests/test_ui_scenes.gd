@@ -96,8 +96,54 @@ const SCENES := {
 			"TestDialog": {"title": "测试可能消耗供应商额度","dialog_text": "将使用当前草稿发送一次固定短输入，不发送聊天历史。成功仅表示本次请求可用。","cancel_button_text": "取消"},
 		},
 	},
+	"res://scenes/ui/account_view.tscn": {
+		"root": "AccountForm",
+		"type": "PanelContainer",
+		"script": "res://src/ui/account_view.gd",
+		"setup": "setup",
+		"unique": ["Form","AccountMode","Server","Username","Password","Confirm","Invite","Remember","Submit","Cancel","Identity","Logout","Status","Logs"],
+		"properties": {
+			"Column": {"theme_override_constants/separation": 14},
+			"Column/Title": {"text": "和天依再见面","theme_override_font_sizes/font_size": 25,"theme_override_colors/font_color": Color("344c59")},
+			"Column/Subtitle": {"text": "登录你的账户，继续这段陪伴。","theme_override_font_sizes/font_size": 13,"theme_override_colors/font_color": Color("809ba7")},
+			"Column/Form": {"theme_override_constants/separation": 10},
+			"Column/Form/AccountMode": {"custom_minimum_size": Vector2(140,40),"alignment": HORIZONTAL_ALIGNMENT_LEFT,"clip_text": true},
+			"Column/Form/Server": {"placeholder_text": "服务器地址","tooltip_text": "例如 https://你的服务器地址；本地联调可使用 http://127.0.0.1:端口","custom_minimum_size": Vector2(0,40)},
+			"Column/Form/Username": {"placeholder_text": "用户名","tooltip_text": "用户名","secret": false},
+			"Column/Form/Password": {"placeholder_text": "密码","secret": true},
+			"Column/Form/Confirm": {"placeholder_text": "确认密码","secret": true,"visible": false},
+			"Column/Form/Invite": {"placeholder_text": "邀请码","secret": true,"visible": false},
+			"Column/Form/Remember": {"text": "下次自动登录"},
+			"Column/Form/Submit": {"text": "登录","theme_type_variation": &"PrimaryButton","custom_minimum_size": Vector2(0,42)},
+			"Column/Cancel": {"text": "取消请求","visible": false},
+			"Column/Identity": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"visible": false},
+			"Column/Logout": {"text": "退出登录","visible": false},
+			"Column/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"theme_override_font_sizes/font_size": 13,"theme_override_colors/font_color": Color("607f8d")},
+			"Column/Logs": {"text": "打开日志"},
+		},
+		"styleboxes": {
+			"": {"panel": [Color("ffffff"),18,28]},
+			"Column/Form/Password": {"normal": [Color("f0f5f7"),8,10]},
+		},
+	},
+	"res://scenes/main.tscn": {
+		"root": "AgentLuo",
+		"type": "Control",
+		"script": "res://src/application.gd",
+		"setup": "setup",
+		"inject_layout": true,
+		"unique": ["Split","Center","AccountForm","LogProblem","ExitDialog"],
+		"properties": {
+			"Split": {"dragger_visibility": SplitContainer.DRAGGER_HIDDEN_COLLAPSED},
+			"Split/Center": {"custom_minimum_size": Vector2(440,0),"size_flags_horizontal": Control.SIZE_EXPAND_FILL},
+			"Split/Center/AccountForm": {"custom_minimum_size": Vector2(390,0)},
+			"LogProblem": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"theme_override_colors/font_color": Color("b72a2a")},
+			"ExitDialog": {"title": "放弃未保存的内容？","dialog_text": "设置或动态窗口中有未保存的内容，确认放弃并继续？","ok_button_text": "放弃并继续","cancel_button_text": "取消"},
+		},
+	},
 }
 var failures: Array[String] = []
+var _temp := ""
 func check(value: bool,text: String) -> void:
 	if not value:
 		failures.append(text)
@@ -105,10 +151,20 @@ func check(value: bool,text: String) -> void:
 func _initialize() -> void:
 	_run.call_deferred()
 func _run() -> void:
+	_temp = "user://ui-scenes-test-%s" % Time.get_ticks_usec()
 	for path: String in SCENES:
 		await check_scene(path,SCENES[path])
+	remove_folder(_temp)
 	print("UI scenes: ","PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+func remove_folder(path: String) -> void:
+	if not DirAccess.dir_exists_absolute(path):
+		return
+	for folder in DirAccess.get_directories_at(path):
+		remove_folder(path.path_join(folder))
+	for file in DirAccess.get_files_at(path):
+		DirAccess.remove_absolute(path.path_join(file))
+	DirAccess.remove_absolute(path)
 func check_scene(path: String,spec: Dictionary) -> void:
 	check(ResourceLoader.exists(path),"scene exists: "+path)
 	if not ResourceLoader.exists(path):
@@ -131,10 +187,11 @@ func check_scene(path: String,spec: Dictionary) -> void:
 		var owned := find_unique(instance,instance,name)
 		check(owned != null,"node %%%s is unique in scene owner: %s"%[name,path])
 		check(instance.get_node_or_null(NodePath("%"+name)) == owned,"%%%s resolves through unique name: %s"%[name,path])
+	if spec.get("inject_layout",false):
+		instance.callv(spec["setup"],[null,_temp.path_join("window.cfg")])
 	root.add_child(instance)
 	await process_frame
-	if instance is Window:
-		check(instance.theme == load(THEME_PATH),"window root carries app theme: "+path)
+	check(instance.theme == load(THEME_PATH),"view root carries app theme: "+path)
 	check_properties(instance,spec.get("properties",{}),path)
 	check_styleboxes(instance,spec.get("styleboxes",{}),path)
 	instance.queue_free()
@@ -151,7 +208,7 @@ func check_properties(instance: Node,properties: Dictionary,path: String) -> voi
 			check(actual == expected,"%s.%s in %s is %s, got %s"%[node_path,property,path,expected,actual])
 func check_styleboxes(instance: Node,styleboxes: Dictionary,path: String) -> void:
 	for node_path: String in styleboxes:
-		var node: Node = instance.get_node_or_null(NodePath(node_path))
+		var node: Node = instance if node_path.is_empty() else instance.get_node_or_null(NodePath(node_path))
 		check(node != null,"node exists: %s in %s"%[node_path,path])
 		if node == null:
 			continue

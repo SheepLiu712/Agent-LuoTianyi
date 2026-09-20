@@ -1,5 +1,5 @@
 extends SceneTree
-const App = preload("res://src/application.gd")
+const APP_SCENE := "res://scenes/main.tscn"
 const Log = preload("res://src/storage/client_log.gd")
 var failures: Array[String] = []
 func check(value: bool, text: String) -> void:
@@ -9,14 +9,20 @@ func check(value: bool, text: String) -> void:
 func _initialize() -> void:
 	_run.call_deferred()
 func _run() -> void:
+	check(ResourceLoader.exists(APP_SCENE),"application scene exists")
+	if not ResourceLoader.exists(APP_SCENE):
+		print("Log window: ","FAIL")
+		quit(1)
+		return
 	var directory := "user://log-window-test-%s" % Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(directory)
 	var security = ClassDB.instantiate("WindowsSecurity")
 	var account = load("res://src/session/account_session.gd").new(load("res://src/network/account_api.gd").new(security),load("res://src/storage/credential_store.gd").new(security,directory+"/accounts"),directory+"/account.cfg")
-	var app = App.new(account,directory+"/layout.cfg")
+	var app = load(APP_SCENE).instantiate()
+	app.setup(account,directory+"/layout.cfg")
 	root.add_child(app)
 	await process_frame
-	var buttons := app.find_children("*","Button",true,false)
+	var buttons: Array = app.find_children("*","Button",true,false)
 	var open_button: Button
 	for button in buttons:
 		if button.text == "打开日志":
@@ -25,7 +31,7 @@ func _run() -> void:
 	if open_button != null:
 		open_button.pressed.emit()
 		await process_frame
-		var windows := app.find_children("*","Window",true,false).filter(func(w): return w.title.contains("日志"))
+		var windows: Array = app.find_children("*","Window",true,false).filter(func(w): return w.title.contains("日志"))
 		check(windows.size() == 1 and windows[0].visible,"one nonmodal log window opens")
 		if windows.size() == 1:
 			var window: Window = windows[0]

@@ -1,5 +1,5 @@
 extends SceneTree
-const App = preload("res://src/application.gd")
+const APP_SCENE := "res://scenes/main.tscn"
 const Session = preload("res://src/session/account_session.gd")
 const Store = preload("res://src/storage/credential_store.gd")
 const Api = preload("res://src/network/account_api.gd")
@@ -39,6 +39,11 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 func _run() -> void:
+	check(ResourceLoader.exists(APP_SCENE),"application scene exists")
+	if not ResourceLoader.exists(APP_SCENE):
+		print("Application window: ","FAIL")
+		quit(1)
+		return
 	var folder := "user://application-test-%s" % Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(folder)
 	var settings_path := folder + "/account.cfg"
@@ -49,7 +54,8 @@ func _run() -> void:
 	var layout := ConfigFile.new()
 	layout.set_value("audio", "volume", -1.0)
 	layout.save(folder + "/layout.cfg")
-	var app := App.new(session, folder + "/layout.cfg")
+	var app = load(APP_SCENE).instantiate()
+	app.setup(session, folder + "/layout.cfg")
 	root.add_child(app)
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await process_frame
@@ -70,10 +76,10 @@ func _run() -> void:
 	check(await until(func(): return not session.get_session().is_empty()), "real account login succeeds")
 	await process_frame
 	check(root.size == Vector2i(1200, 800) and root.min_size == Vector2i(960, 640), "successful login expands window")
-	var composers := app.find_children("*", "TextEdit", true, false)
+	var composers: Array = app.find_children("*", "TextEdit", true, false)
 	check(composers.size() == 1 and composers[0].is_visible_in_tree(), "expanded window shows chat")
 	check(not field(app, "服务器地址").is_visible_in_tree(), "expanded window hides account form")
-	var volumes := app.find_children("*", "HSlider", true, false)
+	var volumes: Array = app.find_children("*", "HSlider", true, false)
 	check(volumes.size() == 1 and volumes[0].value == 1.0, "invalid saved volume uses automatic playback default")
 	if volumes.size() == 1:
 		volumes[0].value = .35
@@ -97,7 +103,8 @@ func _run() -> void:
 	await process_frame
 	var restored = Session.new(Api.new(security), store, settings_path)
 	check(restored.get_login_defaults().server == endpoint, "saved custom server takes precedence")
-	var restored_app := App.new(restored, folder + "/layout.cfg")
+	var restored_app = load(APP_SCENE).instantiate()
+	restored_app.setup(restored, folder + "/layout.cfg")
 	root.add_child(restored_app)
 	await process_frame
 	field(restored_app, "密码").text = "synthetic-password"

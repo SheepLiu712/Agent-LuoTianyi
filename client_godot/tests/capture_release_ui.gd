@@ -1,4 +1,5 @@
 extends SceneTree
+const APP_SCENE := "res://scenes/main.tscn"
 var failures: Array[String] = []
 func _initialize() -> void:
 	_run.call_deferred()
@@ -6,11 +7,16 @@ func _run() -> void:
 	if DisplayServer.get_name() == "headless":
 		quit(2)
 		return
+	if not ResourceLoader.exists(APP_SCENE):
+		print("Release screenshots: ","FAIL: missing application scene")
+		quit(1)
+		return
 	var directory := "user://release-visual-%s"%Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(directory)
 	var security = ClassDB.instantiate("WindowsSecurity")
 	var account = load("res://src/session/account_session.gd").new(load("res://src/network/account_api.gd").new(security),load("res://src/storage/credential_store.gd").new(security,directory+"/tokens"),directory+"/account.cfg")
-	var app = load("res://src/application.gd").new(account,directory+"/window.cfg")
+	var app = load(APP_SCENE).instantiate()
+	app.setup(account,directory+"/window.cfg")
 	root.add_child(app)
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await create_timer(.4).timeout

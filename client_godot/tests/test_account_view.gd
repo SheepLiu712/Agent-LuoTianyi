@@ -1,5 +1,5 @@
 extends SceneTree
-const View = preload("res://src/ui/account_view.gd")
+const VIEW_SCENE := "res://scenes/ui/account_view.tscn"
 const Session = preload("res://src/session/account_session.gd")
 const Store = preload("res://src/storage/credential_store.gd")
 const Api = preload("res://src/network/account_api.gd")
@@ -33,12 +33,18 @@ func _initialize() -> void:
 	call_deferred("run")
 
 func run() -> void:
+	check(ResourceLoader.exists(VIEW_SCENE),"account view scene exists")
+	if not ResourceLoader.exists(VIEW_SCENE):
+		print("Account view: ","FAIL")
+		quit(1)
+		return
 	var folder := "user://account-view-test-%s" % Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(folder)
 	var security = ClassDB.instantiate("WindowsSecurity")
 	var session = Session.new(Api.new(security), Store.new(security, folder + "/tokens"), folder + "/account.cfg")
 	root.add_child(session)
-	var view := View.new(session)
+	var view = load(VIEW_SCENE).instantiate()
+	view.setup(session)
 	root.add_child(view)
 	view.size = Vector2(500, 650)
 	await process_frame

@@ -1,4 +1,5 @@
 ﻿extends SceneTree
+const APP_SCENE := "res://scenes/main.tscn"
 var failures: Array[String] = []
 func check(value: bool,text: String) -> void:
 	if not value:
@@ -7,11 +8,17 @@ func check(value: bool,text: String) -> void:
 func _initialize() -> void:
 	_run.call_deferred()
 func _run() -> void:
+	check(ResourceLoader.exists(APP_SCENE),"application scene exists")
+	if not ResourceLoader.exists(APP_SCENE):
+		print("Application drafts: ","FAIL")
+		quit(1)
+		return
 	var path := "user://draft-app-test-%s"%Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(path)
 	var security = ClassDB.instantiate("WindowsSecurity")
 	var session = load("res://src/session/account_session.gd").new(load("res://src/network/account_api.gd").new(security),load("res://src/storage/credential_store.gd").new(security,path+"/tokens"),path+"/account.cfg")
-	var app = load("res://src/application.gd").new(session,path+"/window.cfg")
+	var app = load(APP_SCENE).instantiate()
+	app.setup(session,path+"/window.cfg")
 	root.add_child(app)
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await process_frame
