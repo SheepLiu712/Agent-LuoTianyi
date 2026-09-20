@@ -19,7 +19,7 @@ var _chat_view: Control
 var _avatar: Control
 var _ratio := 0.45
 var _layout_ready := false
-var _layout_path: String
+var _layout_path := "user://window_layout.cfg"
 var _expanded := false
 var _expanded_size := Vector2i(1200, 800)
 var _log: RefCounted

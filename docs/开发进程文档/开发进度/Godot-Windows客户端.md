@@ -453,3 +453,10 @@
 - Red：6a8f1a3；公开 configure() 后检查可见内容，修复前 FAIL，修复后 PASS。
 - Green：本记录所在提交；新增 tests/ui/test_system_message_presentation.gd 纳入 check.ps1；test_virtual_history.gd 回归 PASS。
 - 作者自审：仅补回契约已有的两个隐藏操作；无伪造 Red。未验证公共服务；仅本地提交。
+
+### 2026-09-20 场景迁移回归修复：默认用户数据目录
+
+- 交付行为：主场景不调用 setup() 直接启动时，恢复 user://window_layout.cfg 默认布局路径，日志和关联缓存继续位于用户目录；已有注入路径优先级不变。SPEC 已由「account_view 与 main.tscn」默认路径条目满足。
+- Red：53d3e5c；不注入 setup() 实例化真实 main.tscn，观察完整启动日志归档位置，修复前 FAIL，修复后 PASS。
+- Green：本记录所在提交；test_default_user_storage.gd 纳入 check.ps1；loopback test_application_window.gd PASS（原生窗口尺寸恢复在 headless 下跳过）。
+- 作者自审：只恢复丢失的成员默认值；未读取私有字段作为测试结果。未验证公共服务器；仅本地提交。
