@@ -1,0 +1,34 @@
+{
+  "actions": [
+    {
+      "action": "session.connect",
+      "params": {
+        "base_url": "https://www-api.u3493359.nyat.app:11664",
+        "username": "cli_e2e_user",
+        "password": "<redacted-password>",
+        "timeout": 15
+      }
+    },
+    {
+      "action": "touch.send",
+      "params": {
+        "touch_area": [
+          "头",
+          "辫子"
+        ],
+        "click_frequency": {
+          "count_10s": 1,
+          "count_30s": 2
+        },
+        "ack_timeout": 15
+      }
+    },
+    {
+      "action": "reply.wait",
+      "params": {
+        "timeout": 60
+      }
+    }
+  ],
+  "on_failure": "stop_side_effects"
+}
