@@ -68,3 +68,8 @@
 - AudioCache/ReplyAudio/ChatSession沿用clear接口并增加可选天数参数，旧无参调用仍为全清。新增saved_at_unix元数据，旧记录使用文件修改时间；只删除严格早于截止时间的本账号完整缓存，未知时间保留。按天清理不终止当前缓存接收；全清保持原行为。清理停止本地重放，在线声音继续。
 - SPEC a5fe412；Red ac0c4e4；Green为本记录提交。test_cache_retention通过旧/近期/精确边界/旧格式修改时间、其他账号、正在接收、负数拒绝、只读文件部分失败与重试、0全清。GPU/headless test_audio_settings通过真实清理、确认天数冻结、近期缓存保留、全清；test_audio_cache、test_voice_replay回归PASS。
 - 作者自审：时间判断与文件删除留在存储模块，UI不读文件或调用平台接口；磁盘统计继续经StorageService，缓存清理不会隐式随设置保存执行。
+
+## 2026-09-21 模型刷新生命周期回归
+
+- 全功能回归发现校验失败后立即刷新时，延迟滚动回调仍持有已移出的旧卡片，报Must be an ancestor。增加节点有效性及当前滚动容器归属检查，旧卡片不再参与延迟定位。
+- 原卡片SPEC已满足，使用既有test_model_cards复现失败后修复；聚焦测试和check_features完整回归全部PASS，无新增公开接口。作者自审已核对延迟回调与卡片释放顺序。

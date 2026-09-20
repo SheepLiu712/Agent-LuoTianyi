@@ -83,7 +83,11 @@ func _reload() -> void:
 func _locate_error(id: String, code: String) -> void:
 	if _cards.has(id):
 		_cards[id].show_error("未保存：" + code)
-		%Scroll.ensure_control_visible.call_deferred(_cards[id])
+		_reveal_error_card.call_deferred(_cards[id])
+
+func _reveal_error_card(card: Control) -> void:
+	if is_instance_valid(card) and %Scroll.is_ancestor_of(card):
+		%Scroll.ensure_control_visible(card)
 
 func validate_changes() -> Dictionary:
 	var failures: Array = []
