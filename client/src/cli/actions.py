@@ -202,11 +202,15 @@ class ActionExecutor:
         return {"ack": True}, request_id
 
     def _wait_reply(self, params: dict) -> tuple[dict, str]:
-        reply_uuid = _required_string(params, "reply_uuid")
-        reply = self._require_session().wait_for_reply(
-            reply_uuid,
-            _number(params, "timeout", 30.0),
-        )
+        session = self._require_session()
+        timeout = _number(params, "timeout", 30.0)
+        explicit = params.get("reply_uuid")
+        if explicit is not None:
+            reply_uuid = _required_string(params, "reply_uuid")
+            reply = session.wait_for_reply(reply_uuid, timeout)
+        else:
+            reply = session.wait_for_next_reply(timeout)
+            reply_uuid = reply.uuid
         return self._reply_result(reply, params), reply_uuid
 
     def _read_reply(self, params: dict) -> tuple[dict, str]:

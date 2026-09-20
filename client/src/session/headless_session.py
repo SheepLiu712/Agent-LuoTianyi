@@ -121,6 +121,7 @@ class HeadlessSession:
         self._state = SessionState.NEW
         self._listeners: list[Callable[[SessionEvent], None]] = []
         self._replies: dict[str, _ReplyBuffer] = {}
+        self._completion_order: list[str] = []
         self._server_audio_active = False
         self._install_transport_listeners()
 
@@ -315,6 +316,22 @@ class HeadlessSession:
                     raise ReplyTimeoutError(f"reply {reply_uuid!r} did not complete")
                 self._condition.wait(remaining)
 
+    def wait_for_next_reply(self, timeout: float) -> AggregatedReply:
+        """等待调用时刻之后第一条新的完整回复（串行场景语义）。"""
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._condition:
+            start_index = len(self._completion_order)
+            while True:
+                if self._state == SessionState.CLOSED:
+                    raise SessionClosedError("session is closed")
+                if len(self._completion_order) > start_index:
+                    reply_uuid = self._completion_order[start_index]
+                    return self._replies[reply_uuid].snapshot()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ReplyTimeoutError("no new complete reply before timeout")
+                self._condition.wait(remaining)
+
     def audio_path_for(self, reply_uuid: str) -> str | None:
         reply = self.get_reply(reply_uuid)
         return reply.audio_path if reply else None
@@ -384,6 +401,7 @@ class HeadlessSession:
 
             if is_audio_terminal(message):
                 reply.complete = True
+                self._completion_order.append(reply.uuid)
                 self._server_audio_active = False
                 if self._should_save_audio(reply):
                     reply.audio_path = self._save_audio(reply.uuid, bytes(reply.audio))
