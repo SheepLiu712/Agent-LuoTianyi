@@ -1,5 +1,5 @@
 """Offline real HTTP/WS history contract; no public server or account data."""
-import argparse, asyncio, json, os, struct, zlib
+import argparse, asyncio, json, os, struct, zlib, base64
 from pathlib import Path
 from aiohttp import web
 PROJECT = Path(__file__).resolve().parents[1]
@@ -59,6 +59,14 @@ async def run(godot, script):
                 if user not in opened and user != 'skip': errors.append('business sent before first history boundary')
                 await ws.send_json({'type':'server_ack','reply_to':value['client_msg_id'],'payload':{'ok':True}})
                 await ws.send_json({'type':'agent_message','payload':{'uuid':'history-119','text':'live reply','is_final_package':True}})
+            elif kind == 'user_image':
+                if user not in opened: errors.append('image sent before first history boundary')
+                if payload.get('mime_type') != 'image/png' or payload.get('image_client_path') != '' or not base64.b64decode(payload.get('image_base64','')).startswith(b'\x89PNG\r\n\x1a\n'):
+                    errors.append('invalid image payload')
+                if payload.get('llm_mode') != {'types': []}: errors.append('missing image model capabilities')
+                await ws.send_json({'type':'server_ack','reply_to':value['client_msg_id'],'payload':{'ok':True}})
+            elif kind in ('user_image_selecting', 'user_image_selecting_cancel'):
+                await ws.send_json({'type':'server_ack','reply_to':value['client_msg_id'],'payload':{'ok':True}})
         return ws
     app=web.Application()
     app.router.add_get('/history',history)
