@@ -24,3 +24,10 @@
 - 验证：check.ps1 25项、check_features.ps1（含统一设置）全部PASS；真实GPU capture_release_ui PASS。曾有一次GPU启动超时，独立chrome GPU检查通过后重跑截图成功，不把超时记为通过。
 - 作者自审：保持DPAPI显式选择、原接口业务逻辑和草稿隔离；新增确认场景与设置页/宿主是本次完整切片所必需，场景迁移占主要diff，未改服务端。
 - 未验证：真实OS DPI、多屏硬件、Windows10、计费供应商和长期性能；仅本地提交。
+
+### 2026-09-20 动态内发布浮层
+
+- 交付：发布器改为动态窗口内部的场景浮层，含固定遮罩、正文、状态、关闭/取消/发布和场景确认框；不再创建原生发布窗。沿用controller.publish与published信号，父窗dirty仍汇总评论和发布草稿。
+- SPEC cbaf65e；Red f911260（原发布控件属于不同Window，测试真实失败）；Green为本记录所在提交。
+- 验证：test_dynamics_window、test_dynamics_detail、test_ui_scenes通过；成功发布选中、新旧草稿保留、失败显式提示均回归。作者自审确认所有UI是.tscn控件，遮罩外点击不触发关闭，Esc按当前层级请求关闭。
+- 未验证：公共动态服务、真实系统DPI与多屏硬件；仅本地提交。

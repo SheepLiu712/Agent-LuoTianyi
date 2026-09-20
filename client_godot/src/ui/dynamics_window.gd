@@ -19,7 +19,7 @@ var _ratio := .45
 var _selected := ""
 var _details := {}
 var _rows := {}
-var _publisher: Window
+var _publisher: Control
 var _refreshing := false
 var _initialized := false
 
@@ -125,7 +125,7 @@ func _refresh() -> void:
 
 func _open_publisher() -> void:
 	if not is_instance_valid(_publisher):
-		_publisher = load("res://scenes/ui/publish_window.tscn").instantiate()
+		_publisher = load("res://scenes/ui/publish_overlay.tscn").instantiate()
 		_publisher.setup(_controller)
 		add_child(_publisher)
 		_publisher.published.connect(func(id):

@@ -43,8 +43,9 @@ func _run() -> void:
 	for button in window.find_children("*","Button",true,false):
 		if button.text == "发布动态": button.pressed.emit()
 	await process_frame
-	var publisher: Window = window.find_children("*","Window",true,false).filter(func(w): return w.title == "发布动态")[0]
-	await capture(publisher,"publish")
+	var publisher: Control = window.find_child("PublishOverlay",true,false)
+	check(publisher != null and publisher.get_window() == window,"publisher is an in-window overlay")
+	await capture(window,"publish")
 	publisher.hide()
 	window.size = Vector2i(900,640)
 	await capture(window,"minimum")

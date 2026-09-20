@@ -4,39 +4,10 @@ const THEME_PATH := "res://theme/app_theme.tres"
 # unique_name_in_owner 的节点、从代码搬到场景后必须保持不变的属性，以及
 # 节点上的样式盒（背景色、圆角、内边距）。
 const SCENES := {
-	"res://scenes/ui/publish_window.tscn": {
-		"root": "PublishWindow",
-		"type": "Window",
-		"script": "res://src/ui/publish_window.gd",
-		"setup": "setup",
-		"unique": ["PublishDraft","PublishButton"],
-		"properties": {
-			"": {
-				"title": "发布动态",
-				"size": Vector2i(520,350),
-				"min_size": Vector2i(400,300),
-				"visible": false,
-				"transient": true,
-				"force_native": true,
-			},
-			"Panel/Column": {"theme_override_constants/separation": 12},
-			"Panel/Column/Title": {
-				"text": "分享此刻的想法",
-				"theme_override_font_sizes/font_size": 20,
-				"theme_override_colors/font_color": Color("344c59"),
-			},
-			"Panel/Column/PublishDraft": {
-				"placeholder_text": "想和天依分享些什么？",
-				"wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY,
-				"size_flags_vertical": Control.SIZE_EXPAND_FILL,
-			},
-			"Panel/Column/PublishStatus": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART},
-			"Panel/Column/PublishButton": {
-				"text": "发布文字动态",
-				"theme_type_variation": &"PrimaryButton",
-			},
-		},
-		"styleboxes": {"Panel": {"panel": [Color("f5f8fb"),0,18]}},
+	"res://scenes/ui/publish_overlay.tscn": {
+		"root":"PublishOverlay","type":"Control","script":"res://src/ui/publish_overlay.gd","setup":"setup",
+		"unique":["PublishDraft","PublishButton","PublishStatus","ClosePublish","CancelPublish","DiscardDialog"],
+		"properties": {"Center/Panel/Column/PublishDraft":{"placeholder_text":"想和天依分享些什么？","wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY}},
 	},
 	"res://scenes/ui/preferences_page.tscn": {
 		"root": "PreferencesPage",
