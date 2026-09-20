@@ -37,8 +37,9 @@ class UserConversationHelper:
         ret: dict[str, Any] = {"history": [], "start_index": start_index}
         for item in history_items:
             content = item.content
-            if item.type == ContextType.IMAGE.value and item.data:
-                content = item.data.get("image_client_path")
+            if item.type == ContextType.IMAGE.value:
+                # 图片理解文本只属于 Agent 上下文；用户历史只暴露图片缓存位置。
+                content = (item.data or {}).get("image_client_path") or ""
             ret["history"].append(
                 {
                     "uuid": item.uuid,

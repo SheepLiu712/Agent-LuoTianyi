@@ -122,7 +122,7 @@
 | 具体类型 | 固定 `kind` | 专有字段 | 结构约束 |
 | --- | --- | --- | --- |
 | `TextMessage` | `TEXT_MESSAGE` | `text: str`；`client_msg_id: str` | 两者非空白；保留原始正文，不自动 trim |
-| `ImageMessage` | `IMAGE_MESSAGE` | `media_ref: MediaRef`；`caption: str \| None`；`client_msg_id: str` | client ID 非空白；caption 非 `None` 时非空白 |
+| `ImageMessage` | `IMAGE_MESSAGE` | `media_ref: MediaRef`；`client_msg_id: str` | client ID 非空白；图片说明如有需要，使用独立 `TextMessage` |
 | `VoiceMessage` | `VOICE_MESSAGE` | `media_ref: MediaRef \| None`；`transcript: str \| None`；`client_msg_id: str` | client ID 非空白；media 与非空白 transcript 至少有一个 |
 | `UserTyping` | `USER_TYPING` | `text_length: int` | 必须为非负整数；`bool` 非法 |
 | `ImageSelectionOpened` | `IMAGE_SELECTION_OPENED` | 无 | 只使用公共字段 |

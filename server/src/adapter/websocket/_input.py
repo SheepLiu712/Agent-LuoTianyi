@@ -128,13 +128,9 @@ def _prepare_image(
             code=MediaResolutionErrorCode.TOO_LARGE,
             media_id=media_ref.media_id,
         )
-    caption = payload.get("caption")
-    if caption is not None and (not isinstance(caption, str) or not caption.strip()):
-        raise ValueError("invalid image caption")
     stimulus = d.ImageMessage(
         **values,
         media_ref=media_ref,
-        caption=caption.strip() if isinstance(caption, str) else None,
         client_msg_id=event.client_msg_id,
     )
     return PreparedInput(stimulus, image_base64.strip(), mime_type.lower())

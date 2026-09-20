@@ -24,8 +24,8 @@
 - `prefill_buffer(...)`、`get_conversation_context_state(...)`：建立并读取对话缓存。
 - `compact_conversation_context(...)`、`reset_conversation_context_if_stale(...)`：压缩或重置上下文。
 - `get_history_from_db(...)`、对话总数/上下文条数查询。
-- `get_image_server_path(...)`、`update_image_client_path(...)`：处理历史图片路径。
-- Agent context 新写入的对话时间戳使用 ISO 兼容的 `YYYY-MM-DD HH:MM:SS.ffffff`，旧链路仍可能写 `YYYY-MM-DD HH:MM:SS`；SQL `DateTime`、context 的 `datetime.fromisoformat` 及旧展示格式化器均兼容两种格式，因此同一表混用安全。永久媒体字节不写入对话表，而在 `capabilities.media_resolution.root/<media_id>/` 保存；对话只保留受控 `media_id` 和 MIME。
+- `get_image_media_id(...)`、`get_image_server_path(...)`、`update_image_client_path(...)`：优先按永久媒体 ID 读取历史图片，并兼容迁移前的服务器/客户端路径。
+- Agent context 新写入的对话时间戳使用 ISO 兼容的 `YYYY-MM-DD HH:MM:SS.ffffff`，旧链路仍可能写 `YYYY-MM-DD HH:MM:SS`；SQL `DateTime`、context 的 `datetime.fromisoformat` 及旧展示格式化器均兼容两种格式，因此同一表混用安全。永久媒体字节不写入对话表，而在 `infrastructure.media_resolution.root/<media_id>/` 保存。每张图片只对应一条 user/image Conversation：`content` 保存只供 Agent 使用的图片理解文本，元数据保存受控 `media_id`、MIME 和显示缓存信息；用户历史投影不暴露图片理解文本。
 
 ### `CredentialService`
 

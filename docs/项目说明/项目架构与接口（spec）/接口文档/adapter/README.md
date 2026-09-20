@@ -16,7 +16,7 @@
 
 ## 输入协议
 
-`_input.py` 负责输入转换。文本兼容 user_text、user_message、message、chat_message、chat，依次取 message、text、content 的首个非空字符串，清理首尾空白，最多 20,000 字符。user_typing 转成 UserTyping，text_length 为 0 至 100,000 的整数。user_image 沿用现有 image_base64、mime_type 和可选 caption 字段；编码/解码体积、完整图片解码及 MIME 一致性在永久发布前校验。
+`_input.py` 负责输入转换。文本兼容 user_text、user_message、message、chat_message、chat，依次取 message、text、content 的首个非空字符串，清理首尾空白，最多 20,000 字符。user_typing 转成 UserTyping，text_length 为 0 至 100,000 的整数。user_image 使用 image_base64 和 mime_type，不存在 caption；用户对图片的说明作为独立文本消息发送。编码/解码体积、完整图片解码及 MIME 一致性在永久发布前校验。
 
 认证用户身份来自 connection；payload 不能覆盖身份。文本 ephemeral=false，打字 ephemeral=true，source=USER。顶层 client_msg_id 非空白且不超过 128 字符。刺激 ID 由认证用户和客户端消息 ID 生成。合法非负毫秒 ts 转为 UTC 时间，省略时使用当前时间。
 

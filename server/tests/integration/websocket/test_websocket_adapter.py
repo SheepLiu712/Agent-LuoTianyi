@@ -19,18 +19,18 @@ from src.adapter.websocket import ChatEventAcceptance, WebSocketAdapter
 from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
+from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
 from src.agent.skills.expression.speaking import SpeakingSkill
-from src.infrastructure.media import (
-    MediaResolutionError,
-    MediaResolutionErrorCode,
-)
 from src.agent.skills.expression.speaking.streaming import AsyncTTS
 from src.domain.stage import (
     AgentPresentationChanged,
     AgentPresentationState,
     CancelDelivery,
 )
-from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
+from src.infrastructure.media import (
+    MediaResolutionError,
+    MediaResolutionErrorCode,
+)
 from src.web.websocket import WSMessage
 from src.web.websocket.service import WebSocketConnection
 
@@ -382,7 +382,6 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
         payload={
             "image_base64": base64.b64encode(image).decode("ascii"),
             "mime_type": "image/png",
-            "caption": "看这里",
         },
     )
 
@@ -390,7 +389,6 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
 
     stimulus = stage.stimuli[0]
     assert isinstance(stimulus, d.ImageMessage)
-    assert stimulus.caption == "看这里"
     assert stimulus.media_ref.media_id
     media_dir = tmp_path / "media" / stimulus.media_ref.media_id
     assert (media_dir / "content.bin").read_bytes() == image

@@ -8,7 +8,6 @@ import pytest
 
 import src.domain.agent as agent_domain
 
-
 OCCURRED_AT = datetime(2026, 9, 5, 9, 30, tzinfo=timezone.utc)
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -54,6 +53,7 @@ VALUE_TYPES = (
     "ActivityFact",
     "SongKnowledgeCandidate",
 )
+
 
 def _common_kwargs(type_name: str, **overrides: object) -> dict[str, object]:
     values: dict[str, object] = {
@@ -111,7 +111,6 @@ def _valid_stimulus_kwargs(type_name: str) -> dict[str, object]:
         },
         "ImageMessage": lambda: {
             "media_ref": agent_domain.MediaRef(media_id="media-image-1"),
-            "caption": "图片说明",
             "client_msg_id": "client-image-1",
         },
         "VoiceMessage": lambda: {
@@ -372,7 +371,6 @@ def test_dynamic_observed_rejects_an_invalid_thread_structure(
 @pytest.mark.parametrize(
     ("type_name", "updates"),
     [
-        ("ImageMessage", {"caption": " \t"}),
         ("VoiceMessage", {"media_ref": None, "transcript": None}),
         ("UserTyping", {"text_length": -1}),
         ("UserTyping", {"text_length": True}),

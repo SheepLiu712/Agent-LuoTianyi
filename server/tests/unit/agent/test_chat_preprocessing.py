@@ -72,7 +72,7 @@ def agent(terms=("《歌》是一首歌",)):
     )
 
 
-def image_request(media_id="image", caption="看这个"):
+def image_request(media_id="image"):
     image = d.ImageMessage(
         stimulus_id="image-stimulus",
         schema_version=1,
@@ -82,7 +82,6 @@ def image_request(media_id="image", caption="看这个"):
         user_id="u",
         ephemeral=False,
         media_ref=d.MediaRef(media_id=media_id),
-        caption=caption,
         client_msg_id="image-client",
     )
     base = request()
@@ -140,7 +139,7 @@ async def test_missing_context_fails_instead_of_silently_skipping_persistence():
 
 
 @pytest.mark.asyncio
-async def test_image_retains_media_identity_and_separates_machine_description():
+async def test_image_is_one_user_conversation_with_agent_only_description_text():
     resolver = _Resolver()
     understanding = _ImageUnderstanding()
     handler = ChatPreprocessingHandler(
@@ -156,16 +155,14 @@ async def test_image_retains_media_identity_and_separates_machine_description():
     assert understanding.calls == ["data:image/png;base64,aW1hZ2U="]
     assert [(entry.source, type(entry.content).__name__) for entry in ctx.conversation.entries] == [
         ("user", "ImageContent"),
-        ("system", "TextContent"),
     ]
-    media_entry, description_entry = ctx.conversation.entries
-    assert media_entry.content.text == "看这个"
+    media_entry = ctx.conversation.entries[0]
+    assert media_entry.content.text == "[图片理解]: [一张图片]:一只白猫"
     assert media_entry.content.media_id == "image"
     assert media_entry.content.mime_type == "image/png"
-    assert description_entry.content.text == "[图片理解]: [一张图片]:一只白猫"
-    assert description_entry.content.terms == ("白猫",)
+    assert media_entry.content.terms == ("白猫",)
     assert report.preprocessed_input.text == "[图片理解]: [一张图片]:一只白猫"
-    assert report.preprocessed_input.conversation_entry_ids == (media_entry.entry_id, description_entry.entry_id)
+    assert report.preprocessed_input.conversation_entry_ids == (media_entry.entry_id,)
     assert report.consumed_pending_stimulus_ids == ()
     assert report.emitted_plan_ids == ()
 

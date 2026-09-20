@@ -135,18 +135,16 @@ class TextMessage(Stimulus):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ImageMessage(Stimulus):
-    """图片消息，包含媒体引用、可选说明文字和客户端消息 ID。"""
+    """图片消息，包含媒体引用和客户端消息 ID；相邻文字作为独立消息发送。"""
 
     kind: ClassVar[StimulusKind] = StimulusKind.IMAGE_MESSAGE
 
     media_ref: MediaRef
-    caption: str | None
     client_msg_id: str
 
     def __post_init__(self) -> None:
         Stimulus.__post_init__(self)
         _require_instance(self.media_ref, MediaRef)
-        _require_optional_nonblank_string(self.caption)
         _require_nonblank_string(self.client_msg_id)
 
 

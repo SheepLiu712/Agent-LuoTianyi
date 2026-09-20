@@ -58,7 +58,7 @@ def touch():
 async def test_slow_image_fast_text_preserve_order_and_wait_after_last_completion():
     gate = asyncio.Event()
     replies = asyncio.Queue()
-    image = stimulus(d.ImageMessage, media_ref=d.MediaRef(media_id="image"), caption=None, client_msg_id="image")
+    image = stimulus(d.ImageMessage, media_ref=d.MediaRef(media_id="image"), client_msg_id="image")
     text = stimulus()
 
     async def handle(req, sink):
@@ -138,7 +138,7 @@ async def test_real_preprocessing_persists_slow_image_before_fast_text_in_read_o
     )
     stage, _, adapter, _, _ = await setup(agent, {"response_wait": 0.04})
     stage.context.conversation = Conversation()
-    image = stimulus(d.ImageMessage, media_ref=d.MediaRef(media_id="image"), caption=None, client_msg_id="image")
+    image = stimulus(d.ImageMessage, media_ref=d.MediaRef(media_id="image"), client_msg_id="image")
     text = stimulus(occurred_at=image.occurred_at)
     try:
         stage.stimulus_input_sink.submit(image)
@@ -152,7 +152,7 @@ async def test_real_preprocessing_persists_slow_image_before_fast_text_in_read_o
         assert datetime.now(timezone.utc) >= finished + timedelta(seconds=0.035)
         assert tuple(item.stimulus_id for item in req.prepared_inputs) == (image.stimulus_id, text.stimulus_id)
         snapshot = stage.context.conversation.read()
-        assert [entry.content.text for entry in snapshot.entries] == ["", "[图片理解]: [一张图片]:一只白猫", "你好"]
+        assert [entry.content.text for entry in snapshot.entries] == ["[图片理解]: [一张图片]:一只白猫", "你好"]
     finally:
         gate.set()
         await cleanup(stage, adapter)
@@ -192,7 +192,7 @@ async def test_failed_real_image_preprocessing_drops_only_image_and_keeps_writte
         ),
     )
     stage, _, adapter, _, _ = await setup(agent)
-    image = stimulus(d.ImageMessage, media_ref=d.MediaRef(media_id="image"), caption=None, client_msg_id="image")
+    image = stimulus(d.ImageMessage, media_ref=d.MediaRef(media_id="image"), client_msg_id="image")
     text = stimulus()
     try:
         stage.stimulus_input_sink.submit(image)

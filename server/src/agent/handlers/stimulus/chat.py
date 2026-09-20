@@ -100,22 +100,17 @@ class ChatPreprocessingHandler:
                     timestamp=fact_time,
                     source=ConversationSource.USER.value,
                     content=ImageContent(
-                        text=stimulus.caption or "",
+                        text=machine_text,
                         mime_type=media.mime_type,
+                        terms=terms,
                         media_id=stimulus.media_ref.media_id,
                     ),
                 )
-                description_entry = ConversationEntry(
-                    entry_id=str(uuid4()),
-                    timestamp=fact_time + timedelta(microseconds=1),
-                    source=ConversationSource.SYSTEM.value,
-                    content=TextContent(machine_text, terms),
-                )
-                await plans.context.conversation.append((media_entry, description_entry))
+                await plans.context.conversation.append((media_entry,))
                 prepared = d.PreprocessedInput(
                     stimulus_id=stimulus.stimulus_id,
                     text=machine_text,
-                    conversation_entry_ids=(media_entry.entry_id, description_entry.entry_id),
+                    conversation_entry_ids=(media_entry.entry_id,),
                 )
             case d.VoiceMessage():
                 prepared = d.PreprocessedInput(stimulus_id=stimulus.stimulus_id, text=None)

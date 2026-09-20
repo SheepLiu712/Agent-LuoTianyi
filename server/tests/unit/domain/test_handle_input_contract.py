@@ -9,7 +9,6 @@ import pytest
 
 import src.domain.agent as domain
 
-
 NOW = datetime(2026, 9, 6, 8, 0, tzinfo=timezone.utc)
 LOCAL_ZONE = ZoneInfo("Asia/Shanghai")
 SNAPSHOTS = ("ChatInteractionSnapshot", "ToyInteractionSnapshot", "WorldInteractionSnapshot")
@@ -25,22 +24,30 @@ def _public(name):
 
 def _stimulus(name="TextMessage", stimulus_id="message-1", **overrides):
     fields = dict(
-        stimulus_id=stimulus_id, schema_version=1, occurred_at=NOW,
-        source=domain.StimulusSource.USER, target_character_ids=("luotianyi",),
-        user_id="user-1", ephemeral=False,
+        stimulus_id=stimulus_id,
+        schema_version=1,
+        occurred_at=NOW,
+        source=domain.StimulusSource.USER,
+        target_character_ids=("luotianyi",),
+        user_id="user-1",
+        ephemeral=False,
     )
     content = {
         "TextMessage": dict(text="  你好  ", client_msg_id="client-1"),
         "ImageMessage": dict(
-            media_ref=domain.MediaRef(media_id="image-1"), caption=None, client_msg_id="client-1",
+            media_ref=domain.MediaRef(media_id="image-1"),
+            client_msg_id="client-1",
         ),
         "VoiceMessage": dict(media_ref=None, transcript="你好", client_msg_id="client-1"),
         "UserTyping": dict(text_length=4),
-        "ImageSelectionOpened": {}, "ImageSelectionClosed": {}, "InteractionDeadline": {},
+        "ImageSelectionOpened": {},
+        "ImageSelectionClosed": {},
+        "InteractionDeadline": {},
         "WorldObservation": dict(
             observation_kind=domain.WorldObservationKind(value="citywalk"),
             fact=domain.WorldFact(fact_id="fact-1", summary="到达公园"),
-            evidence_refs=(), world_revision=7,
+            evidence_refs=(),
+            world_revision=7,
         ),
     }
     fields.update(content[name])
@@ -50,8 +57,13 @@ def _stimulus(name="TextMessage", stimulus_id="message-1", **overrides):
 
 def _snapshot_fields(name="ChatInteractionSnapshot", **overrides):
     fields = dict(
-        interaction_id="interaction-1", interaction_revision=0, user_id="user-1",
-        pending_stimuli=(), now=NOW, timezone=LOCAL_ZONE, supported_outputs=frozenset(),
+        interaction_id="interaction-1",
+        interaction_revision=0,
+        user_id="user-1",
+        pending_stimuli=(),
+        now=NOW,
+        timezone=LOCAL_ZONE,
+        supported_outputs=frozenset(),
     )
     if name == "ChatInteractionSnapshot":
         fields.update(response_deadline=None, connection_state=_public("ConnectionState").CONNECTED)
@@ -59,8 +71,12 @@ def _snapshot_fields(name="ChatInteractionSnapshot", **overrides):
         fields.update(device_id="device-1", online=True)
     else:
         fields.update(
-            world_id="world-1", world_revision=7, activity_id=None, activity_revision=None,
-            planning_cycle_id=None, schedule_revision=3,
+            world_id="world-1",
+            world_revision=7,
+            activity_id=None,
+            activity_revision=None,
+            planning_cycle_id=None,
+            schedule_revision=3,
         )
     fields.update(overrides)
     return fields
@@ -73,8 +89,10 @@ def _snapshot(name="ChatInteractionSnapshot", **overrides):
 def _request_fields(**overrides):
     trigger = _stimulus()
     fields = dict(
-        request_id="request-1", stimulus=trigger,
-        interaction=_snapshot(pending_stimuli=(trigger,)), cancellation=_public("CancellationToken")(),
+        request_id="request-1",
+        stimulus=trigger,
+        interaction=_snapshot(pending_stimuli=(trigger,)),
+        cancellation=_public("CancellationToken")(),
     )
     fields.update(overrides)
     return fields
@@ -101,20 +119,33 @@ def _readonly(obj, field, replacement):
     assert getattr(obj, field) == original
 
 
-@pytest.mark.parametrize("name, expected", [
-    ("InteractionKind", {"CHAT": "chat", "TOY": "toy", "WORLD": "world"}),
-    ("ConnectionState", {"CONNECTED": "connected", "DISCONNECTED": "disconnected"}),
-    ("AgentOutputKind", {
-        "TEXT_DELTA": "text_delta", "TEXT_FINAL": "text_final", "AUDIO_CHUNK": "audio_chunk",
-        "MESSAGE_END": "message_end", "EXPRESSION": "expression", "MOTION": "motion",
-    }),
-    ("CancellationReason", {"SUPERSEDED": "superseded", "NO_LONGER_NEEDED": "no_longer_needed"}),
-    ("HandleInputErrorCode", {
-        "CONTRACT_INVALID_INTERACTION": "CONTRACT_INVALID_INTERACTION",
-        "CONTRACT_INVALID_HANDLE_REQUEST": "CONTRACT_INVALID_HANDLE_REQUEST",
-        "CONTRACT_INVALID_CANCELLATION": "CONTRACT_INVALID_CANCELLATION",
-    }),
-])
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("InteractionKind", {"CHAT": "chat", "TOY": "toy", "WORLD": "world"}),
+        ("ConnectionState", {"CONNECTED": "connected", "DISCONNECTED": "disconnected"}),
+        (
+            "AgentOutputKind",
+            {
+                "TEXT_DELTA": "text_delta",
+                "TEXT_FINAL": "text_final",
+                "AUDIO_CHUNK": "audio_chunk",
+                "MESSAGE_END": "message_end",
+                "EXPRESSION": "expression",
+                "MOTION": "motion",
+            },
+        ),
+        ("CancellationReason", {"SUPERSEDED": "superseded", "NO_LONGER_NEEDED": "no_longer_needed"}),
+        (
+            "HandleInputErrorCode",
+            {
+                "CONTRACT_INVALID_INTERACTION": "CONTRACT_INVALID_INTERACTION",
+                "CONTRACT_INVALID_HANDLE_REQUEST": "CONTRACT_INVALID_HANDLE_REQUEST",
+                "CONTRACT_INVALID_CANCELLATION": "CONTRACT_INVALID_CANCELLATION",
+            },
+        ),
+    ],
+)
 def test_handle_enums_have_only_specified_members_and_wire_values(name, expected):
     """锁定五类枚举的成员及协议值，输出类型不包含已删除的 SONG_STATE。"""
     assert {member.name: member.value for member in _public(name)} == expected
@@ -147,14 +178,22 @@ def test_world_snapshot_carries_observation_content_without_a_snapshot_store():
     """world 事实直接由已有强类型刺激传入，活动和各自修订号可独立表达。"""
     observation = _stimulus("WorldObservation", source=domain.StimulusSource.WORLD, user_id=None)
     snapshot = _snapshot(
-        "WorldInteractionSnapshot", pending_stimuli=(observation,), user_id=None,
-        interaction_revision=11, activity_id="activity-1", activity_revision=2,
+        "WorldInteractionSnapshot",
+        pending_stimuli=(observation,),
+        user_id=None,
+        interaction_revision=11,
+        activity_id="activity-1",
+        activity_revision=2,
         planning_cycle_id="cycle-1",
     )
     request = _request(stimulus=observation, interaction=snapshot)
     assert request.interaction.pending_stimuli[0].fact.summary == "到达公园"
-    assert (snapshot.interaction_revision, snapshot.world_revision, snapshot.activity_revision,
-            snapshot.schedule_revision) == (11, 7, 2, 3)
+    assert (
+        snapshot.interaction_revision,
+        snapshot.world_revision,
+        snapshot.activity_revision,
+        snapshot.schedule_revision,
+    ) == (11, 7, 2, 3)
     assert (snapshot.activity_id, snapshot.planning_cycle_id) == ("activity-1", "cycle-1")
 
 
@@ -174,8 +213,13 @@ def test_snapshot_fields_and_nested_input_collections_are_immutable(name):
     """冻结快照身份、版本、判别值与集合，禁止借嵌套输入改变旧判断依据。"""
     message = _stimulus()
     snapshot = _snapshot(name, pending_stimuli=(message,))
-    for field, value in (("interaction_id", "new"), ("interaction_revision", 2),
-                         ("kind", "other"), ("pending_stimuli", ()), ("supported_outputs", frozenset())):
+    for field, value in (
+        ("interaction_id", "new"),
+        ("interaction_revision", 2),
+        ("kind", "other"),
+        ("pending_stimuli", ()),
+        ("supported_outputs", frozenset()),
+    ):
         _readonly(snapshot, field, value)
     with pytest.raises(TypeError):
         snapshot.pending_stimuli[0] = _stimulus(stimulus_id="changed")
@@ -184,15 +228,26 @@ def test_snapshot_fields_and_nested_input_collections_are_immutable(name):
     _readonly(snapshot.pending_stimuli[0], "text", "改写消息")
 
 
-@pytest.mark.parametrize("field, value", [
-    ("interaction_id", " "), ("interaction_id", 1), ("interaction_revision", -1),
-    ("interaction_revision", True), ("user_id", " "), ("now", NOW.replace(tzinfo=None)),
-    ("timezone", "Asia/Shanghai"), ("timezone", timezone.utc),
-    ("pending_stimuli", []), ("pending_stimuli", ("message-1",)),
-    ("pending_stimuli", ({"stimulus_id": "message-1"},)),
-    ("supported_outputs", set()), ("supported_outputs", frozenset({"text_final"})),
-    ("response_deadline", NOW.replace(tzinfo=None)), ("connection_state", "connected"),
-])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("interaction_id", " "),
+        ("interaction_id", 1),
+        ("interaction_revision", -1),
+        ("interaction_revision", True),
+        ("user_id", " "),
+        ("now", NOW.replace(tzinfo=None)),
+        ("timezone", "Asia/Shanghai"),
+        ("timezone", timezone.utc),
+        ("pending_stimuli", []),
+        ("pending_stimuli", ("message-1",)),
+        ("pending_stimuli", ({"stimulus_id": "message-1"},)),
+        ("supported_outputs", set()),
+        ("supported_outputs", frozenset({"text_final"})),
+        ("response_deadline", NOW.replace(tzinfo=None)),
+        ("connection_state", "connected"),
+    ],
+)
 def test_snapshot_rejects_invalid_fields_without_coercion(field, value):
     """对身份、修订、时间、时区、集合及枚举的非法值返回稳定错误，不隐式转换。"""
     factory = _public("ChatInteractionSnapshot")
@@ -200,14 +255,19 @@ def test_snapshot_rejects_invalid_fields_without_coercion(field, value):
     _invalid("CONTRACT_INVALID_INTERACTION", lambda: factory(**fields))
 
 
-@pytest.mark.parametrize("name, field, value", [
-    ("ToyInteractionSnapshot", "device_id", " "), ("ToyInteractionSnapshot", "online", 1),
-    ("WorldInteractionSnapshot", "world_id", ""), ("WorldInteractionSnapshot", "world_revision", -1),
-    ("WorldInteractionSnapshot", "schedule_revision", True),
-    ("WorldInteractionSnapshot", "planning_cycle_id", " "),
-    ("WorldInteractionSnapshot", "activity_id", "activity-without-revision"),
-    ("WorldInteractionSnapshot", "activity_revision", 1),
-])
+@pytest.mark.parametrize(
+    "name, field, value",
+    [
+        ("ToyInteractionSnapshot", "device_id", " "),
+        ("ToyInteractionSnapshot", "online", 1),
+        ("WorldInteractionSnapshot", "world_id", ""),
+        ("WorldInteractionSnapshot", "world_revision", -1),
+        ("WorldInteractionSnapshot", "schedule_revision", True),
+        ("WorldInteractionSnapshot", "planning_cycle_id", " "),
+        ("WorldInteractionSnapshot", "activity_id", "activity-without-revision"),
+        ("WorldInteractionSnapshot", "activity_revision", 1),
+    ],
+)
 def test_variant_rejects_invalid_device_and_world_facts(name, field, value):
     """校验设备/world 专有字段，并拒绝缺少配对活动身份或修订号的快照。"""
     factory = _public(name)
@@ -223,12 +283,19 @@ def test_activity_revision_is_nonnegative_integer_when_activity_exists(revision)
     _invalid("CONTRACT_INVALID_INTERACTION", lambda: factory(**fields))
 
 
-@pytest.mark.parametrize("name, field", [
-    ("ChatInteractionSnapshot", "typing_state"), ("ChatInteractionSnapshot", "image_selection_state"),
-    ("ChatInteractionSnapshot", "conversation_ref"), ("ToyInteractionSnapshot", "continuous_contact"),
-    ("ToyInteractionSnapshot", "device_output_limits"), ("WorldInteractionSnapshot", "visible_world_ref"),
-    ("ChatInteractionSnapshot", "kind"), ("ChatInteractionSnapshot", "context"),
-])
+@pytest.mark.parametrize(
+    "name, field",
+    [
+        ("ChatInteractionSnapshot", "typing_state"),
+        ("ChatInteractionSnapshot", "image_selection_state"),
+        ("ChatInteractionSnapshot", "conversation_ref"),
+        ("ToyInteractionSnapshot", "continuous_contact"),
+        ("ToyInteractionSnapshot", "device_output_limits"),
+        ("WorldInteractionSnapshot", "visible_world_ref"),
+        ("ChatInteractionSnapshot", "kind"),
+        ("ChatInteractionSnapshot", "context"),
+    ],
+)
 def test_snapshot_rejects_deleted_fields_and_caller_supplied_kind(name, field):
     """拒绝旧字段、任意上下文入口和调用方传入的 kind，防止契约扩张。"""
     factory = _public(name)
@@ -269,7 +336,8 @@ def test_disconnected_chat_keeps_supported_outputs_and_an_expired_deadline():
     outputs = frozenset({_public("AgentOutputKind").AUDIO_CHUNK, _public("AgentOutputKind").MESSAGE_END})
     deadline = NOW - timedelta(seconds=1)
     snapshot = _snapshot(
-        supported_outputs=outputs, connection_state=_public("ConnectionState").DISCONNECTED,
+        supported_outputs=outputs,
+        connection_state=_public("ConnectionState").DISCONNECTED,
         response_deadline=deadline,
     )
     request = _request(stimulus=_stimulus("InteractionDeadline"), interaction=snapshot)
@@ -285,7 +353,9 @@ def test_content_trigger_matches_equal_pending_value_not_object_identity(name):
     trigger, pending = _stimulus(name), _stimulus(name)
     assert trigger is not pending
     request = _request(
-        request_id="  request-1  ", stimulus=trigger, interaction=_snapshot(pending_stimuli=(pending,)),
+        request_id="  request-1  ",
+        stimulus=trigger,
+        interaction=_snapshot(pending_stimuli=(pending,)),
     )
     assert request.request_id == "  request-1  "
     assert request.stimulus == request.interaction.pending_stimuli[0] == trigger
@@ -323,7 +393,9 @@ def test_valid_unusual_combination_is_not_rejected_or_rewritten():
     """不按刺激/交互/用户/输出的常见组合设白名单，也不改写来源或用户身份。"""
     trigger = _stimulus(source=domain.StimulusSource.WORLD, user_id="another-user")
     snapshot = _snapshot(
-        "WorldInteractionSnapshot", user_id=None, pending_stimuli=(trigger,),
+        "WorldInteractionSnapshot",
+        user_id=None,
+        pending_stimuli=(trigger,),
         supported_outputs=frozenset({_public("AgentOutputKind").EXPRESSION}),
     )
     request = _request(stimulus=trigger, interaction=snapshot)
@@ -332,11 +404,18 @@ def test_valid_unusual_combination_is_not_rejected_or_rewritten():
     assert request.interaction.user_id is None
 
 
-@pytest.mark.parametrize("field, value", [
-    ("request_id", " "), ("request_id", 1), ("stimulus", {"text": "你好"}),
-    ("interaction", {}), ("cancellation", None),
-    ("character_id", "luotianyi"), ("context", {}),
-])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("request_id", " "),
+        ("request_id", 1),
+        ("stimulus", {"text": "你好"}),
+        ("interaction", {}),
+        ("cancellation", None),
+        ("character_id", "luotianyi"),
+        ("context", {}),
+    ],
+)
 def test_request_rejects_invalid_or_extra_fields(field, value):
     """请求拒绝非法身份、字典伪装、缺失令牌以及额外角色/上下文字段。"""
     factory, fields = _public("HandleStimulusRequest"), _request_fields(**{field: value})
@@ -447,10 +526,16 @@ async def test_another_task_on_the_same_loop_observes_published_cancellation():
         await asyncio.gather(observer, return_exceptions=True)
 
 
-@pytest.mark.parametrize("fields", [
-    {"stimulus_id": " "}, {"text": {}}, {"conversation_entry_ids": ["entry"]},
-    {"conversation_entry_ids": ("entry", "entry")}, {"conversation_entry_ids": ("",)},
-])
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"stimulus_id": " "},
+        {"text": {}},
+        {"conversation_entry_ids": ["entry"]},
+        {"conversation_entry_ids": ("entry", "entry")},
+        {"conversation_entry_ids": ("",)},
+    ],
+)
 def test_preprocessed_input_rejects_invalid_identity_and_untyped_data(fields):
     values = dict(stimulus_id="message-1", text=None, conversation_entry_ids=())
     values.update(fields)
@@ -460,14 +545,22 @@ def test_preprocessed_input_rejects_invalid_identity_and_untyped_data(fields):
 
 def test_request_preserves_preprocessed_input_order_and_explicit_reflection():
     a, b = _stimulus(stimulus_id="a"), _stimulus(stimulus_id="b")
-    prepared = tuple(domain.PreprocessedInput(stimulus_id=s.stimulus_id, text=s.text,
-        conversation_entry_ids=("record-" + s.stimulus_id,)) for s in (a, b))
+    prepared = tuple(
+        domain.PreprocessedInput(
+            stimulus_id=s.stimulus_id, text=s.text, conversation_entry_ids=("record-" + s.stimulus_id,)
+        )
+        for s in (a, b)
+    )
     values = dict(stimulus=_stimulus("InteractionDeadline"), interaction=_snapshot(pending_stimuli=(a, b)))
     request = _request(**values, purpose=domain.HandlePurpose.REFLECT, prepared_inputs=prepared)
     assert request.prepared_inputs == prepared
     assert request.purpose is domain.HandlePurpose.REFLECT
-    for invalid in (prepared[::-1], prepared + prepared[:1],
-                    (domain.PreprocessedInput(stimulus_id="unknown", text=None),), list(prepared)):
+    for invalid in (
+        prepared[::-1],
+        prepared + prepared[:1],
+        (domain.PreprocessedInput(stimulus_id="unknown", text=None),),
+        list(prepared),
+    ):
         with pytest.raises(domain.InvalidHandleInputError):
             _request(**values, prepared_inputs=invalid)
     with pytest.raises(domain.InvalidHandleInputError):

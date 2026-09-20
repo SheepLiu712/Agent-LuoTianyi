@@ -676,6 +676,29 @@ class ConversationService:
         finally:
             db.close()
 
+    def get_image_media_id(self, user_id: str, conv_uuid: str) -> Optional[str]:
+        """获取图片对话记录引用的永久媒体 ID。"""
+        db = self._new_session()
+        try:
+            conv = (
+                db.query(Conversation)
+                .filter(
+                    Conversation.user_id == user_id,
+                    Conversation.uuid == conv_uuid,
+                    Conversation.type == "image",
+                )
+                .first()
+            )
+            if not conv or not conv.meta_data:
+                return None
+            try:
+                media_id = json.loads(conv.meta_data).get("media_id")
+            except (json.JSONDecodeError, TypeError):
+                return None
+            return media_id if isinstance(media_id, str) and media_id.strip() else None
+        finally:
+            db.close()
+
     def update_image_client_path(self, user_id: str, conv_uuid: str, new_client_path: str) -> bool:
         """更新图片的客户端路径。"""
         db = self._new_session()

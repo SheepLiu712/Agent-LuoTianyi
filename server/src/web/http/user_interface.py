@@ -10,6 +10,8 @@ from fastapi.responses import StreamingResponse
 
 from src.application.user.account import PasswordDecryptionError, decrypt_password, generate_keys, get_public_key_pem
 from src.application.user.user_conversation_helper import UserConversationHelper
+from src.domain.agent import MediaRef
+from src.infrastructure.media import MediaResolutionError
 from src.web.http.rate_limits import enforce_rate_limit
 from src.web.http.types import (
     AutoLoginRequest,
@@ -274,6 +276,19 @@ class UserInterface:
         )
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        media_id = server_runtime.database_manager.conversation_service.get_image_media_id(user_uuid, req.uuid)
+        if media_id is not None:
+            try:
+                media = await asyncio.to_thread(
+                    server_runtime.media_resolver.resolve,
+                    MediaRef(media_id=media_id),
+                    owner_user_id=user_uuid,
+                )
+            except MediaResolutionError as error:
+                raise HTTPException(status_code=400, detail="获取图片失败，图片不存在或无权限访问") from error
+            return StreamingResponse(iter((media.data,)), media_type=media.mime_type)
+
+        # 兼容迁移前只保存服务器文件路径的图片记录。
         image_server_path = server_runtime.database_manager.conversation_service.get_image_server_path(
             user_uuid, req.uuid
         )
