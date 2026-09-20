@@ -50,6 +50,7 @@ theme_override_constants/separation = 12
 
 [node name="NavChat" type="Button" parent="Workspace/Navigation/Items"]
 theme_type_variation = &"NavigationButton"
+alignment = 0
 unique_name_in_owner = true
 text = "聊天"
 custom_minimum_size = Vector2(80,48)
@@ -58,6 +59,7 @@ toggle_mode = true
 
 [node name="NavDynamics" type="Button" parent="Workspace/Navigation/Items"]
 theme_type_variation = &"NavigationButton"
+alignment = 0
 unique_name_in_owner = true
 text = "动态"
 custom_minimum_size = Vector2(80,48)
@@ -65,6 +67,7 @@ theme_override_font_sizes/font_size = 13
 
 [node name="NavSettings" type="Button" parent="Workspace/Navigation/Items"]
 theme_type_variation = &"NavigationButton"
+alignment = 0
 unique_name_in_owner = true
 text = "设置"
 custom_minimum_size = Vector2(80,48)
@@ -75,12 +78,14 @@ mouse_filter = 2
 
 [node name="NavLogs" type="Button" parent="Workspace/Navigation/Items"]
 theme_type_variation = &"NavigationButton"
+alignment = 0
 unique_name_in_owner = true
 text = "日志"
 custom_minimum_size = Vector2(80,44)
 
 [node name="AccountMenu" parent="Workspace/Navigation/Items" instance=ExtResource("AccountMenu")]
 theme_type_variation = &"NavigationButton"
+alignment = 0
 unique_name_in_owner = true
 text = "账号"
 

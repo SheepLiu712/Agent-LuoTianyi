@@ -403,7 +403,7 @@ content_margin_right = 16.0
 content_margin_bottom = 16.0
 
 [sub_resource type="StyleBoxFlat" id="NavigationNormal"]
-bg_color = Color(0.92,0.96,0.99,0.3)
+bg_color = Color(0.86,0.93,0.97,1)
 corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_left = 8
@@ -414,7 +414,7 @@ content_margin_right = 9.0
 content_margin_bottom = 9.0
 
 [sub_resource type="StyleBoxFlat" id="NavigationHover"]
-bg_color = Color(0.86,0.94,0.99,1)
+bg_color = Color(0.79,0.90,0.96,1)
 corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_left = 8
@@ -425,7 +425,7 @@ content_margin_right = 9.0
 content_margin_bottom = 9.0
 
 [sub_resource type="StyleBoxFlat" id="NavigationPressed"]
-bg_color = Color(0.72,0.9,1,1)
+bg_color = Color(0.68,0.86,0.96,1)
 corner_radius_top_left = 8
 corner_radius_top_right = 8
 corner_radius_bottom_left = 8

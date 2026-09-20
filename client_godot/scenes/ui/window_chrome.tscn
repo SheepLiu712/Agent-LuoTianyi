@@ -3,6 +3,7 @@
 [ext_resource type="Script" path="res://src/ui/window_chrome.gd" id="1"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2"]
 [ext_resource type="PackedScene" path="res://scenes/ui/frost_surface.tscn" id="Frost"]
+[ext_resource type="Texture2D" path="res://assets/ui/app_icon.svg" id="icon"]
 [sub_resource type="StyleBoxFlat" id="bar"]
 bg_color = Color(0.95, 0.98, 0.99, 0.96)
 content_margin_left = 18.0
@@ -33,11 +34,13 @@ theme_override_styles/panel = SubResource("bar")
 mouse_filter = 2
 theme_override_constants/separation = 12
 
-[node name="Brand" type="Label" parent="TitleBar/Row"]
-text = "洛"
+[node name="Brand" type="TextureRect" parent="TitleBar/Row"]
+custom_minimum_size = Vector2(24,24)
+size_flags_vertical = 4
 mouse_filter = 2
-theme_override_colors/font_color = Color(0.2,0.6,0.8,1)
-theme_override_font_sizes/font_size = 20
+texture = ExtResource("icon")
+expand_mode = 1
+stretch_mode = 5
 
 [node name="WindowTitle" type="Label" parent="TitleBar/Row"]
 unique_name_in_owner = true

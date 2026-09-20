@@ -31,3 +31,10 @@
 - SPEC bba8144；Red 7589cc1；Green为本记录提交。test_model_cards在GPU/loopback通过卡片数、独立展开/折叠留稿、必填校验、整窗保存与刷新；test_ui_scenes、test_editable_scene_children、test_unified_settings和test_model_settings回归PASS。
 - GPU截图artifacts/model-purpose-cards.png和model-purpose-expanded.png已核查；底部操作栏固定，长表单滚动。用途数量来自fixture，不把两卡写死为正式服务用途数。
 - 作者自审：卡片只负责控件绑定与信号，页面汇总草稿，ModelSettings保留存储/校验；没有供应商自动调用或服务端接口变更。
+
+## 2026-09-20 导航对齐与原项目图标
+
+- 五个主导航入口统一左对齐、相同内边距；普通/悬停/选中浅蓝底略加深，未读数字不改变文字起点。标题栏改用原项目SVG的TextureRect，运行窗口与Windows导出设置同步原项目SVG/ICO。
+- SPEC fcdbb46；静态样式/导出配置的Red不适用，Green为本记录提交。复制资源与client/res/gui原SVG/ICO的SHA-256一致；Godot导入、临时release导出及导出启动均PASS。直接读取导出EXE的PE图标资源，6帧全部与原ICO图片数据逐字节一致。
+- GPU capture_release_ui全流程PASS，新主界面截图已核查导航对齐/配色和标题栏原图标。临时导出位于隔离验证目录，未覆盖现有0.1.2交付包。
+- 作者自审：只变更Godot场景/主题和图标配置，无脚本创建UI；原项目图标文件不修改。
