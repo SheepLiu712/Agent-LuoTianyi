@@ -48,3 +48,12 @@ main.tscn的NavChat/NavDynamics/NavSettings/NavLogs/AccountMenu均为固定场�
 主窗关闭/退出账号汇总聊天输入、设置及动态草稿，只有一个ExitDialog，列名称而不回显敏感正文；返回继续编辑保留全部状态，放弃则关闭业务窗口并清草稿，日志不随退出账号关闭。设置正在保存时先等待saving_finished再重新判断，不并发销毁保存流程或自动发送文字。重复设置导航只恢复聚焦，不重置当前设置页。
 
 登录/注册/重置模式提供场景BackToLogin按钮，回到登录不触发网络操作；紧凑页用滚动容器承载较长表单。日志和动态独立，统一设置transient跟随主窗，所有窗口自绘关闭按钮仍请求同一关闭流程。
+
+
+## 现代主题、磨砂与可见控件约束
+
+主题新增AppSurface、TerminalSurface、WindowAction/WindowClose、NavigationButton，保留#66CCFF与15px正文、焦点描边和语义色。主要控件至少36px，主聊天边距24/间距16/头像40/输入最小96，气泡内边距16圆角12；日志工具栏浅色，RichTextLabel正文用深色TerminalSurface。相关UI场景测试更新已批准的字面规格，不沿用旧22px边距等约束。
+
+frost_surface.tscn 为ColorRect控件配合9采样高斯近似ShaderMaterial；只读取所在Viewport已绘制的应用画面。标题栏和导航使用浅色tint，发布遮罩使用深色tint；文字在其后绘制而保持清晰。headless、未知renderer或场景blur_enabled=false时去掉材质使用同配色实底。资源不采样桌面，无原生DWM依赖。效果与fallback均由固定控件承载。
+
+语音波形使用waveform_strip.tscn中的24个预置CenterContainer/ColorRect，替代_draw/draw_line；脚本仅依据values/progress更新可见、高度和已播色，保留已有数据字段。禁止产品UI脚本new控件、add_button或代码建树，重复内容仅实例化场景。补充测试检查材质/fallback、预置波形及主题语义；GPU截图与帧时间记录验证实际渲染，不把headless当视觉证据。
