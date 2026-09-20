@@ -61,3 +61,15 @@ ChatView.attachment_cleared通知Application在移除/发送接受后调用Image
 原Python MainWindow为普通QWidget，外轮廓交由系统；此处同样不添加DWM扩展或SetWindowRgn。内部圆角采用用户文章 https://blog.csdn.net/datakimiko/article/details/156681420 的Panel+StyleBoxFlat方式，但节点/资源固定写在.tscn/.tres，禁止文章示例的Panel.new、_draw和逐像素纹理生成。
 
 UnifiedDropdown的PopupPanel改为嵌入所属Viewport，透明清屏背景，圆角由StyleBoxFlat绘制；不使用遮罩、裁切Shader或原生窗口区域。弹层按所属Viewport坐标及可见范围定位，长列表滚动、键盘/Esc/外部点击、移动/最小化收起规则保留。此Control/主题路径可用于手机界面，不依赖Windows圆角API；未执行移动端导出或硬件验收。
+
+## 统一StorageService与缓存占用圆环（任务13）
+
+遵守用户磁盘查询五条原则：业务/UI只依赖统一StorageService，不直接使用OS/FileAccess/DirAccess/Java/Objective-C/GDExtension；平台差异仅在服务子类或原生插件。所有容量为64位int bytes；未知必须-1，不能伪造0。真实空目录为0 bytes、真实满盘可为0 free bytes。
+
+StorageService（src/storage/storage_service.gd，RefCounted）公开query_directory(path:String)->Dictionary，字段directory_bytes/total_bytes/free_bytes/file_count均为int，未知-1，另code:String描述错误。GodotStorageService为实现子类：用Godot文件接口统计该目录，平台卷容量委托原生StorageVolume.query(path)。禁止跟随目录符号链接递归，访问失败的目录大小为-1，不返回部分扫描结果冒充完整。容量不可用时仍可报告已成功统计的缓存大小。
+
+StorageVolume只做只读容量查询，返回total_bytes/free_bytes或-1。独立C++实现文件按平台选择Windows GetDiskFreeSpaceEx或POSIX statvfs；当前随既有Windows扩展编译，其他平台复用同接口和实现源码，需要在对应移动端构建注册，不宣称已完成手机打包/实测。缺少容量适配时GodotStorageService返回total_bytes=-1，UI正常工作并显示未知。
+
+AudioCache.get_directory()->String提供当前账号缓存目录；Application组装StorageService并注入SettingsWindow.setup(...,clear_cache,storage_service=null,cache_directory="")，AudioSettingsPage.setup(clear_cache,storage_service=null,cache_directory="")只调用该统一接口。目录按账号隔离，退出关闭页；UI不自行寻找路径或选择平台。
+
+缓存页采用用户图片所示的场景圆环：TextureProgressBar圆形轨道、Godot渐变纹理资源、天依蓝Panel指示点、中间百分比和扫描状态。百分比=directory_bytes/total_bytes×100，小于0.01%的非零值明确显示“<0.01%”；无法读取显示“--%”，不显示0%。同时列缓存大小、磁盘总容量和可用容量，清理后重新扫描。所有可见控件预设在.tscn，脚本只更新数值/文字/指示点位置。
