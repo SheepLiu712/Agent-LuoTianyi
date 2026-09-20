@@ -21,7 +21,14 @@ func key(shift: bool) -> void:
 	await process_frame
 
 func run() -> void:
-	var scene = load("res://scenes/chat_preview.tscn").instantiate()
+	const SCENE := "res://scenes/preview/chat_preview.tscn"
+	check(ResourceLoader.exists(SCENE), "offline preview has a scene in its module")
+	if not failures.is_empty():
+		quit(1)
+		return
+	var scene = load(SCENE).instantiate()
+	for name in ["Split", "AvatarPanel", "Expressions", "Scenarios", "Messages", "Empty", "Input", "ImagePicker"]:
+		check(scene.get_node_or_null("%" + name) != null, "preview layout exists before ready: " + name)
 	root.add_child(scene)
 	await process_frame
 	await process_frame
@@ -45,6 +52,29 @@ func run() -> void:
 		editor.text = " \n "
 		await key(false)
 		check(not editor.text.is_empty(), "blank input retained")
+		var scenarios: OptionButton = scene.get_node("%Scenarios")
+		for index in [1, 2, 3, 4, 0]:
+			scenarios.select(index)
+			scenarios.item_selected.emit(index)
+			await process_frame
+			await process_frame
+			check(scene.get_node("%Empty").visible == (index in [1, 2, 3]), "empty state visibility for scenario " + str(index))
+			if index in [2, 3]:
+				editor.text = "失败时保留草稿"
+				await key(false)
+				check(editor.text == "失败时保留草稿", "unavailable scenario retains draft")
+		var image := Image.create(8, 8, false, Image.FORMAT_RGBA8)
+		image.fill(Color.BLUE)
+		editor.image_pasted.emit(image)
+		await process_frame
+		var overlays: Array[Node] = scene.find_children("ImageOverlay", "PanelContainer", true, false)
+		check(overlays.size() == 1, "pasted image opens one preview")
+		if overlays.size() == 1:
+			var close: Button = overlays[0].get_node("%Close")
+			check(close.text == "取消", "pending image can be canceled")
+			close.pressed.emit()
+			await process_frame
+			check(scene.find_children("ImageOverlay", "PanelContainer", true, false).is_empty(), "cancel removes image preview")
 	await create_timer(1.0).timeout
 	scene.queue_free()
 	await process_frame
