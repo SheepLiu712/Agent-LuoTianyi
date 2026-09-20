@@ -39,7 +39,7 @@
 - [x] 主题与材质资源化（theme/app_theme.tres、round_avatar.gdshader、slider_dot_*.png），2026-09-20 完成并验证
 - [x] publish_window 场景化（2026-09-20 完成并验证）
 - [x] preferences_window + model_window 场景化（2026-09-20 完成并验证）
-- [ ] account_view + main.tscn 就地节点化
+- [x] account_view + main.tscn 就地节点化（2026-09-20 完成并验证）
 - [ ] log_window + unified_dropdown + dropdown_item 场景化
 - [ ] message_audio + message_bubble + virtual_message_list 场景化
 - [ ] chat_view（含 image_overlay）场景化
