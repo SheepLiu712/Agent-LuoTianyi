@@ -39,3 +39,15 @@ ModelSettings.reload()复用最近start的账号/服务器重新读取需求；s
 主导航五个入口统一左对齐，使用相同主题内边距；动态未读数字不改变文字起点。NavigationButton普通/悬停/选中背景比旧浅色版略深，字体保持深色，焦点描边保留。所有修改在.tscn和主题资源中。
 
 复用client/res/gui/icon.svg与icon.ico，复制到Godot资源目录并记录来源。项目运行图标、自绘标题栏TextureRect和Windows导出图标使用同一原项目图形，不继续用“洛”文字或Godot默认图标。此为静态资源/构建配置，无运行时Red；验证源资源哈希一致、Godot导入、GPU标题栏与导出图标。
+
+## 正式聊天图片发送
+
+ImageAttachment（src/media/image_attachment.gd）静态from_file(path)、from_image(Image)、from_bytes(bytes,mime)返回{ok,code,bytes,mime,texture}或{ok:false,code}。支持PNG/JPEG/WebP与BMP文件（BMP转PNG）、剪贴板图片转PNG；单图不超过服务端6MiB且为8MiB协议包预留4096字节，尺寸每边至多8192、总像素至多1600万；格式/大小/解码失败给明确错误，不排队。不读取SVG等非图片协议格式。
+
+ChatSession.send_image(bytes:PackedByteArray,mime:String)->String校验并通过既有durable user_image发送image_base64、mime_type、image_client_path=""、llm_mode.types；拒绝返回空串并报告错误。图片和文字共同服从首次历史屏障，先显示waiting_history气泡，放行后稳定本地ID关联wire ACK；现有可靠队列重试不换ID，最终uncertain不伪报成功。stop释放待发送数据，不跨账号恢复。
+
+HistoryImages.store_local(id,bytes)->Error将已接受发送的图片放入当前账号图片缓存，复用原24张缩略图上限及原图预览；写失败保留本次内存图片并显示CACHE_WRITE_FAILED。未确认的附件仅在ChatView本次内存驻留、不落盘；完成发送接受后才缓存。ChatSession默认构造图片缓存依赖，已注入实例优先。
+
+ChatView增加场景ImageButton、Windows原生ImagePicker、AttachmentBar（缩略图/查看/移除）、ImageStatus。Ctrl+V和选图先成为一个待发附件并打开共用预览；关闭预览不发送，附件留在输入区可重新查看/移除。attachment_requested(provider,confirm)由Application接入现有ImagePresenter；预览“发送图片”只发附件，聊天发送键有附件时先发图片，再发非空文字；任一步拒绝保留尚未接受的内容。is_dirty包含附件。当前只接受单张待发附件，更换图片替换旧附件。
+
+ChatSession.set_image_selecting(active:bool)在ready时发送既有瞬时user_image_selecting/user_image_selecting_cancel，打开选择器/粘贴时开始，取消选择/移除时取消，成功发送由user_image完成选择。关闭原生文件选择器不丢已有附件；退出账号清附件与回调。通用图片窗确认按钮去掉“离线演示”固定文案，失败提示适用于正式/离线两种调用，不改变显式确认语义。
