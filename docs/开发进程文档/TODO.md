@@ -42,7 +42,7 @@
 - [x] account_view + main.tscn 就地节点化（2026-09-20 完成并验证）
 - [x] log_window + unified_dropdown + dropdown_item 场景化（2026-09-20 完成并验证）
 - [x] message_audio + message_bubble + virtual_message_list 场景化（2026-09-20 完成并验证）
-- [ ] chat_view（含 image_overlay）场景化
+- [x] chat_view（含 image_overlay）场景化（2026-09-20 完成并验证）
 - [ ] dynamics_window + dynamic_detail + 动态行组件场景化
 - [ ] avatar_panel + avatar_preview + application 收尾
 - [ ] chat_preview 离线样板场景化并删除 preview_style.gd
