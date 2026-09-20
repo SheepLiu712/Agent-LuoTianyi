@@ -1,84 +1,49 @@
 ﻿extends ScrollContainer
-const Style = preload("res://src/preview/preview_style.gd")
+const CommentRow = preload("res://scenes/ui/dynamic_comment_row.tscn")
+@onready var _column: VBoxContainer = %Column
+@onready var _avatar: TextureRect = %Avatar
+@onready var _author: Label = %Author
+@onready var _created_at: Label = %CreatedAt
+@onready var _body: RichTextLabel = %Body
+@onready var _notice: Label = %Notice
+@onready var _draft: TextEdit = %CommentDraft
+@onready var _send: Button = %Send
+@onready var _comments: VBoxContainer = %Comments
+@onready var _reply_box: VBoxContainer = %ReplyBox
+@onready var _reply_label: Label = %ReplyLabel
+@onready var _reply_draft: TextEdit = %ReplyDraft
+@onready var _cancel: Button = %CancelReply
+@onready var _reply_send: Button = %ReplySend
+@onready var _status: Label = %Status
+@onready var _load: Button = %LoadMore
 var _controller: Node
 var _post: Dictionary
-var _column := VBoxContainer.new()
-var _body := RichTextLabel.new()
-var _comments := VBoxContainer.new()
-var _draft := TextEdit.new()
-var _reply_draft := TextEdit.new()
-var _reply_box := VBoxContainer.new()
-var _reply_label := Label.new()
-var _cancel := Button.new()
-var _send := Button.new()
-var _reply_send := Button.new()
-var _load := Button.new()
-var _status := Label.new()
-var _notice := Label.new()
 var _parent := ""
 var _rows := {}
 var _writing := false
 var _refresh_failed := false
+var _initialized := false
 
-func _init(controller: Node,post: Dictionary) -> void:
+func setup(controller: Node,post: Dictionary) -> void:
 	_controller = controller
 	_post = post.duplicate(true)
-	horizontal_scroll_mode = SCROLL_MODE_DISABLED
-	size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	size_flags_vertical = Control.SIZE_EXPAND_FILL
+	if is_node_ready(): _initialize()
 
 func _ready() -> void:
-	_column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_column.add_theme_constant_override("separation",14)
-	var margin := MarginContainer.new()
-	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for side in ["left","right","top","bottom"]: margin.add_theme_constant_override("margin_"+side,18)
-	add_child(margin)
-	margin.add_child(_column)
-	var header := HBoxContainer.new()
-	_column.add_child(header)
-	header.add_child(Style.avatar(avatar_path(_post),42))
-	var identity := VBoxContainer.new()
-	header.add_child(identity)
-	identity.add_child(Style.label(_post.author_name,18))
-	identity.add_child(Style.label(_post.created_at,12,Color("94999f")))
-	_body.fit_content = true
-	_body.scroll_active = false
-	_body.selection_enabled = true
-	_column.add_child(_body)
-	_column.add_child(_notice)
-	_notice.text = "此动态不可评论。"
-	_column.add_child(_draft)
-	_setup_input(_draft,"CommentDraft","写下你的留言…")
-	_send.text = "发送评论"
-	_send.size_flags_horizontal = Control.SIZE_SHRINK_END
-	Style.primary(_send)
+	if _controller == null: return
+	_initialize()
+
+func _initialize() -> void:
+	if _initialized: return
+	_initialized = true
+	_avatar.texture = load(avatar_path(_post))
+	_author.text = _post.author_name
+	_created_at.text = _post.created_at
 	_send.pressed.connect(func(): _submit(false))
-	_column.add_child(_send)
-	_column.add_child(HSeparator.new())
-	_column.add_child(Style.label("评论 · 仅你与天依可见",15,Color("818991")))
-	_column.add_child(_comments)
-	_comments.add_theme_constant_override("separation",16)
-	_column.add_child(_reply_box)
-	_reply_box.add_child(_reply_label)
-	_reply_box.add_child(_reply_draft)
-	_setup_input(_reply_draft,"ReplyDraft","写下回复…")
-	var actions := HBoxContainer.new()
-	_reply_box.add_child(actions)
-	_cancel.name = "CancelReply"
-	_cancel.text = "取消回复对象"
 	_cancel.pressed.connect(func():
 		_parent = ""
 		_place_reply())
-	actions.add_child(_cancel)
-	_reply_send.text = "发送回复"
-	Style.primary(_reply_send)
 	_reply_send.pressed.connect(func(): _submit(true))
-	actions.add_child(_reply_send)
-	_reply_box.hide()
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_column.add_child(_status)
-	_column.add_child(_load)
 	_load.pressed.connect(func():
 		if _refresh_failed:
 			_refresh_failed = false
@@ -90,13 +55,6 @@ func _ready() -> void:
 	_controller.changed.connect(update_comments)
 	update_post(_post)
 	update_comments()
-
-func _setup_input(input: TextEdit,node_name: String,hint: String) -> void:
-	input.name = node_name
-	input.placeholder_text = hint
-	input.custom_minimum_size.y = 90
-	input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	input.add_theme_stylebox_override("normal",Style.box(Color("f5f7fa"),8,12))
 
 func update_post(post: Dictionary) -> void:
 	_post = post.duplicate(true)
@@ -126,38 +84,16 @@ func update_comments() -> void:
 	for index in state.items.size():
 		var item: Dictionary = state.items[index]
 		if not _rows.has(item.id):
-			var row := VBoxContainer.new()
-			_comments.add_child(row)
-			_rows[item.id] = row
-			var line := HBoxContainer.new()
-			row.add_child(line)
-			line.add_child(Style.avatar(avatar_path(item),34))
-			var content := VBoxContainer.new()
-			content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			line.add_child(content)
-			content.add_child(Style.label(item.author_name,14,Color("65717d")))
-			var body := RichTextLabel.new()
-			body.fit_content = true
-			body.scroll_active = false
-			body.selection_enabled = true
+			var row = CommentRow.instantiate()
 			var target: String = str(item.get("parent_comment_id","") if item.get("parent_comment_id") != null else "")
-			body.text = ("回复 %s："%names.get(target,"较早评论") if not target.is_empty() else "")+item.content
-			content.add_child(body)
-			var footer := HBoxContainer.new()
-			content.add_child(footer)
-			var time := Style.label(relative_time(item.created_at),12,Color("94999f"))
-			time.tooltip_text = item.created_at
-			footer.add_child(time)
-			var reply := Style.button("回复",func():
+			row.setup(avatar_path(item),item.author_name,("回复 %s："%names.get(target,"较早评论") if not target.is_empty() else "")+item.content,relative_time(item.created_at),item.created_at,_post.allow_comment,func():
 				if _writing: return
 				_parent = item.id
 				_reply_label.text = "回复 "+item.author_name
 				_place_reply()
 				_reply_draft.grab_focus())
-			reply.flat = true
-			reply.disabled = not _post.allow_comment
-			footer.add_child(reply)
-			row.add_child(HSeparator.new())
+			_comments.add_child(row)
+			_rows[item.id] = row
 		_comments.move_child(_rows[item.id],index)
 
 func _place_reply() -> void:

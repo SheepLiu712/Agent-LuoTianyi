@@ -1,0 +1,97 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/ui/dynamics_window.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+content_margin_left = 16.0
+content_margin_top = 16.0
+content_margin_right = 16.0
+content_margin_bottom = 16.0
+bg_color = Color(0.960784316, 0.972549021, 0.984313726, 1)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_right"]
+content_margin_left = 0.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+bg_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[node name="DynamicsWindow" type="Window"]
+title = "天依的动态"
+size = Vector2i(1000, 780)
+min_size = Vector2i(900, 640)
+visible = false
+force_native = true
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Panel" type="PanelContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="Column" type="VBoxContainer" parent="Panel"]
+theme_override_constants/separation = 12
+
+[node name="Toolbar" type="HBoxContainer" parent="Panel/Column"]
+
+[node name="Unread" type="Label" parent="Panel/Column/Toolbar"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 20
+
+[node name="Publish" type="Button" parent="Panel/Column/Toolbar"]
+unique_name_in_owner = true
+text = "发布动态"
+
+[node name="Refresh" type="Button" parent="Panel/Column/Toolbar"]
+unique_name_in_owner = true
+text = "刷新"
+
+[node name="ReadAll" type="Button" parent="Panel/Column/Toolbar"]
+unique_name_in_owner = true
+text = "全部已读"
+
+[node name="Notice" type="Label" parent="Panel/Column"]
+unique_name_in_owner = true
+theme_override_font_sizes/font_size = 12
+autowrap_mode = 3
+
+[node name="Split" type="HSplitContainer" parent="Panel/Column"]
+unique_name_in_owner = true
+size_flags_vertical = 3
+
+[node name="Left" type="VBoxContainer" parent="Panel/Column/Split"]
+custom_minimum_size = Vector2(270, 0)
+
+[node name="ListScroll" type="ScrollContainer" parent="Panel/Column/Split/Left"]
+unique_name_in_owner = true
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="List" type="VBoxContainer" parent="Panel/Column/Split/Left/ListScroll"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_constants/separation = 5
+
+[node name="More" type="Button" parent="Panel/Column/Split/Left"]
+unique_name_in_owner = true
+
+[node name="Right" type="PanelContainer" parent="Panel/Column/Split"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(330, 0)
+theme_override_styles/panel = SubResource("StyleBoxFlat_right")
+
+[node name="Empty" type="Label" parent="Panel/Column/Split/Right"]
+unique_name_in_owner = true
+text = "选择一条动态"
+horizontal_alignment = 1
+vertical_alignment = 1

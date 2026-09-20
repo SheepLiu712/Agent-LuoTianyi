@@ -1,0 +1,61 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/ui/dynamics_post_row.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[node name="DynamicsPostRow" type="Button"]
+clip_contents = true
+custom_minimum_size = Vector2(0, 102)
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Content" type="HBoxContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 14.0
+offset_top = 14.0
+offset_right = -14.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Avatar" type="TextureRect" parent="Content"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(38, 38)
+size_flags_vertical = 0
+mouse_filter = 2
+expand_mode = 1
+stretch_mode = 5
+material = SubResource("ShaderMaterial_avatar")
+
+[node name="Labels" type="VBoxContainer" parent="Content"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Author" type="Label" parent="Content/Labels"]
+unique_name_in_owner = true
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.203921571, 0.298039228, 0.349019617, 1)
+theme_override_font_sizes/font_size = 14
+text_overrun_behavior = 3
+
+[node name="Meta" type="Label" parent="Content/Labels"]
+unique_name_in_owner = true
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.203921571, 0.298039228, 0.349019617, 1)
+theme_override_font_sizes/font_size = 11
+text_overrun_behavior = 3
+
+[node name="Excerpt" type="Label" parent="Content/Labels"]
+unique_name_in_owner = true
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.203921571, 0.298039228, 0.349019617, 1)
+theme_override_font_sizes/font_size = 14
+text_overrun_behavior = 3

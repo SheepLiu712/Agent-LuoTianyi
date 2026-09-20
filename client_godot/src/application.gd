@@ -221,7 +221,8 @@ func _open_settings(kind: String) -> void:
 		if _models.get_state().phase == "error":
 			_models.start(_session.get_session())
 	else:
-		window = preload("res://src/ui/dynamics_window.gd").new(_dynamics,_layout_path.get_base_dir().path_join("dynamics-window.cfg"))
+		window = preload("res://scenes/ui/dynamics_window.tscn").instantiate() as Window
+		window.setup(_dynamics,_layout_path.get_base_dir().path_join("dynamics-window.cfg"))
 	_windows[kind] = window
 	add_child(window)
 	window.tree_exited.connect(func():
