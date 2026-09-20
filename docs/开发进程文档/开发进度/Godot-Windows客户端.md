@@ -368,3 +368,13 @@
 - 视觉：真机 GPU 截图 capture_dynamics_ui.gd 产出 7 张 agentluo-011-dynamics-*.png，与改动前基线（1b7e770 独立 git worktree、同机同命令重跑）逐字节相同，含发布窗口截图。
 - 作者自审：diff 仅含本视图场景、其脚本改造、基类一行删除与契约测试；无顺手改进、无其它视图改动；两个 addons DLL 既存删除未纳入提交。
 - 未验证范围：未做人工多 DPI 复核；未推送、未开远程 PR。
+
+### 2026-09-20 界面场景化第三片——preferences_window 与 model_window 视图场景
+- 交付行为：相处模式窗口与 LLM / VLM 模型设置窗口改为「场景节点树 + 只做行为的脚本」。新增 res://scenes/ui/preferences_window.tscn（根 Window「PreferencesWindow」）与 res://scenes/ui/model_window.tscn（根 Window「ModelWindow」），两者根节点挂各自脚本与 app_theme.tres；标题、标签、输入框、状态、操作行、选择器插入位与窗口下的确认对话框全部写在场景里，原 _init 的 title / size / min_size、Style.label 的字号与字体颜色覆盖、Style.primary 的 PrimaryButton 变体、autowrap / 换行模式 / 最小高度 / 占位文本 / 密文与 size_flags 均由场景提供；脚本删除带参 _init 与建树代码，改 setup(controller) 与 setup(settings,executor) 注入并用 %Name 绑定。UnifiedDropdown 仍由代码创建，用场景里的不可见 Control 标记（%SelectorSlot、%CopySlot、%RelationshipPresets、%SpeakingStylePresets）配合 move_child 插位。published 类公开面不变，is_dirty()、open()、_update()、_save()、_copy_selected()、_test() 与全部提示文案保持原样。
+- interface spec：接口文档 client_godot/README.md「preferences_window 与 model_window（0.1.2 第三片）」。本片实测更正两处契约：一是 executor 为 null 时不释放 %TestButton / %TestDialog，而是把 %TestButton 置为不可见、把两个成员置空且不连接信号（queue_free 的节点在下一个 process_frame 之前就已被回收，契约用例会找不到节点）；二是两个窗口场景都必须能不带依赖实例化，_controller / _settings 为空时 _ready() 只完成基类初始化便返回、不连接依赖信号。
+- commit：SPEC c482a6e，Red a1d74e7，Green 5d5f8fe。
+- Red 证据：test_ui_scenes.gd 仅两条「scene exists」失败；run_feature_tests.py 的 test_preferences.gd 报「FAIL: preference window exposes draft protection」，test_model_settings.gd 报「FAIL: model settings window available」；test_application_drafts.gd 运行时报「ERROR: Cannot open file 'res://scenes/ui/model_window.tscn'」（src/application.gd:236）。全部只因目标场景尚未实现而失败。
+- 验证及结果：Godot 4.7.1 headless test_ui_scenes.gd PASS（断言两场景存在性、根节点名与类型、根脚本、setup() 暴露且 _init 无参数、关键节点 unique_name_in_owner 与 %Name 解析、搬入场景的属性 / 字号 / 字体颜色覆盖 / 样式盒）；test_preferences.gd、test_model_settings.gd、test_application_drafts.gd、test_application_window.gd 全部 PASS；scripts/check.ps1 21 步全绿；check_features.ps1、check_accounts.ps1、check_network.ps1 全部 PASS。
+- 视觉：真机 GPU 截图 capture_release_ui.gd 产出 7 张 agentluo-011-*.png，与改动前基线（c482a6e 独立 git worktree、同机同命令重跑）逐字节比对：login、models、preferences、dynamics、dynamics-scale-125、dynamics-scale-150 六张 SHA256 完全相同；logs 一张不参与比对，因为它在两份改动前基线之间同样不同（日志文本含时间戳，属既有随机性）。
+- 作者自审：diff 仅含两个视图场景、其脚本改造与 interface 文档契约更正；自审时发现并修回被漏写的 _plain.confirmed → _save(true) 连接与文件尾换行；无顺手改进、无其它视图改动；两个 addons DLL 既存删除未纳入提交。
+- 未验证范围：未做人工多 DPI 复核；未推送、未开远程 PR。
