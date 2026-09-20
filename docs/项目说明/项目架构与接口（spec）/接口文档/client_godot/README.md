@@ -521,3 +521,13 @@ DynamicDetail.refresh_comments() 由窗口调用，转交完整分页刷新并�
 消费点：`src/application.gd` 的 `const Avatar` 改指 `res://scenes/avatar/avatar_panel.tscn`，登录分支保持「`instantiate()` → `custom_minimum_size.x = 290` → `_split.add_child()` → `move_child(0)` → `show()` → `process_mode = PROCESS_MODE_INHERIT`」的顺序与取值，登出分支的 `hide()` / `queue_free()` / 置空不变；`src/preview/chat_preview.gd` 的 `AvatarPanel` 常量改指同一场景并 `instantiate()`（`custom_minimum_size.x = 290`、`_avatar.avatar.apply_expression` 与 `_avatar.avatar.set_mouth_openness` 的调用不变）；`tests/capture_voice_ui.gd` 的场景门禁与实例化改指该场景，两条 `avatar.avatar.*` 信号连接不变。
 
 从哪个 interface 验证：`tests/test_ui_scenes.gd` 增加两条契约——`avatar_panel.tscn`（场景存在性、根名与类型、根脚本、`_init` 无参数、`%Driver`/`%Error`/`%Reset` 的 `unique_name_in_owner` 与 `%Name` 解析、从代码搬入场景的 `clip_contents` 与背景纹理模式与遮罩颜色与错误 Label 与重置按钮属性、`%Driver` 挂 `avatar_driver.gd`、根带 `app_theme`）与 `avatar_preview.tscn`（场景存在性、继承根名 `AvatarPreview`、根类型与根脚本、`_init` 无参数、继承来的 `%Driver`/`%Error`/`%Reset` 与根带 `app_theme`）。`tests/test_application_window.gd` 从登录/登出相位回归（登录前与登出后角色区 `Node2D` 为空、登录后展开）；`tests/capture_voice_ui.gd` 从 1200×800、960×640、暂停与 125%/150% 内容缩放的截图和可见控件边界回归。
+
+### 离线样板场景化与主题收尾（0.1.2 第十片）
+
+本条是离线样板与主题来源的最终契约，替代上文迁移阶段保留 preview_style.gd 与旧样板路径的描述。公开业务接口、信号和两处不节点化例外不变。
+
+- 入口迁至 `res://scenes/preview/chat_preview.tscn`；旧 `scenes/chat_preview.tscn` 删除。Application 的 `--preview`、`--scenario=` 与 `--capture=` 参数保持不变，离线控制器不连接任何服务器，无需 setup()。
+- 场景根挂既有 chat_preview.gd 与 app_theme.tres；Background、Split、嵌套 AvatarPanel、角色标题/表情选择器、右侧 Margin/Column、标题/场景选择器、离线说明、Scroll/Messages、常驻但可隐藏的 Empty、Latest、Status、图片/模拟口型工具栏、Input、提示与发送按钮、原生文件选择器全部写入场景。原有颜色、字号、间距、45:55比例与输入交互保持不变。
+- 脚本以 %Name 绑定，保留场景切换、动态气泡场景实例化、图片浮层实例化、口型、输入增高、滚动跟随与配置读写。Empty 不再随刷新创建/销毁；选择文件取消后同一个场景内 FileDialog 可再次打开。
+- 删除 preview_style.gd 及其 uid。草稿窗口直接使用子场景已经绑定的 app_theme；下拉选中态颜色从主题资源取得；截图脚本直接加载同一主题。主题测试保留字面值与材质/图标契约，删除对已废弃工厂的比较。
+- 测试从场景进入树之前检查编辑器可见的布局，再经公开输入/选项信号验证五种模拟场景、失败保留草稿、图片取消、Enter/Shift+Enter；GPU 比对五种场景的聊天区域，Live2D 动画区域只做视觉核对。
