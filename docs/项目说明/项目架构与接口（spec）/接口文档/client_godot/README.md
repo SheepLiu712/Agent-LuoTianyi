@@ -430,4 +430,5 @@ DynamicDetail.refresh_comments() 由窗口调用，转交完整分页刷新并�
 
 `src/ui/draft_window.gd` 保持纯脚本基类，不节点化：`open()`、`is_dirty()` 与「关闭前丢弃确认」仍由它提供，`Discard` 确认对话框仍由基类代码创建；草稿窗口类各自提供 `.tscn`，根节点挂各自脚本并沿用这条继承链，因此 `super._ready()` 仍会构造确认框。
 
+场景属性与 `_init()` 的先后关系（实测契约）：`PackedScene` 实例化时先赋值场景里序列化的属性，再挂上根节点脚本并执行 `_init()`，因此 `_init()` 中的赋值会覆盖场景中的同名属性。为让场景成为属性唯一来源，`src/ui/draft_window.gd` 的 `_init()` 只保留 `visible = false`（四个草稿窗口的开窗默认值，与各自场景一致），不再赋值 `transient`（`Window.transient` 默认即为 `false`），发布窗口的 `transient = true` 因此由 `scenes/ui/publish_window.tscn` 生效。后续视图的场景根脚本同样不得在 `_init()` 里赋值由场景接管的属性。
 从哪个 interface 验证：`tests/test_ui_scenes.gd` 逐场景断言场景存在、根节点类型、根脚本、关键节点名与 `unique_name_in_owner`、脚本暴露 `setup()` 且不再要求 `_init` 参数，并断言本片从代码搬到场景的属性值不变；`tests/test_dynamics_window.gd`、`tests/test_dynamics_detail.gd`、`tests/test_application_drafts.gd` 从发布窗口的公开行为（草稿保留、发布成功选中新动态并关闭）回归。
