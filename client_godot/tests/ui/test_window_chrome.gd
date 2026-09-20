@@ -20,6 +20,11 @@ func run() -> void:
 	root.close_requested.connect(func(): closed.append(true))
 	if DisplayServer.get_name() != "headless":
 		check(not root.borderless, "host uses the system title bar and window controls")
+		root.position = Vector2i.ZERO
+		frame.open_window()
+		await create_timer(0.1).timeout
+		var work := DisplayServer.screen_get_usable_rect(root.current_screen)
+		check(work.encloses(Rect2i(root.get_position_with_decorations(),root.get_size_with_decorations())), "restored position includes the system title bar inside the work area")
 	check(frame.get_node_or_null("TitleBar") == null, "superseded custom controls are removed")
 	root.close_requested.emit()
 	check(closed == [true], "system close routes to host close request")
