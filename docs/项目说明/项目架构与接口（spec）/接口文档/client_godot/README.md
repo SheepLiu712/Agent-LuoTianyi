@@ -403,3 +403,17 @@ DynamicsController.refresh_comments(id) 异步从第一页按20条读取到末�
 DynamicDetail.refresh_comments() 由窗口调用，转交完整分页刷新并保留错误重试状态；同UI模块共享 avatar_path(item) 与 relative_time(raw) 展示助手，无网络或持久化副作用。Application 将动态布局路径与其他窗口配置放在同一注入数据目录，测试使用独立临时目录。
 
 构建打包契约：build.ps1 -Package 仅在ZIP已包含完整导出目录后发布最终版本名，存在正式包拒绝覆盖。临时归档失败返回失败，不打印交付成功或留下同名残缺正式包；验证测试检查CRC、版本、根目录及所有源文件逐字节一致。Windows短暂文件占用属于打包失败，不得误报可交付。
+
+## 界面场景化：主题与材质资源（0.1.2 起）
+
+界面场景化的首个切片只收敛样式来源，不改视图节点树，也不改任何公开方法与信号。
+
+`res://theme/app_theme.tres` 是唯一主题来源，内容等价于原 `Style.make_theme()`：`SystemFont` 字体族 `Microsoft YaHei UI`/`Microsoft YaHei`、默认字号 15；`Label`/`Button`/`OptionButton`/`LineEdit`/`TextEdit`/`RichTextLabel`/`PopupMenu`/`CheckBox` 字体色 `#304553`（`RichTextLabel` 另含默认色），`TextEdit` 占位色 `#9aaeb8`、`LineEdit` 占位色 `#8299a6`；`Button`/`OptionButton`/`MenuButton` 的 normal `#eef6fb`、hover `#dff3ff`、pressed `#b7e6ff`、disabled `#edf1f4`（圆角 8、内边距 9）与 focus 描边，字体四态 `#304553`、禁用 `#9aabb7`；`PrimaryButton` 为 `Button` 变体（normal `#66ccff`、hover `#8ad8ff`、pressed `#43b8f0`，圆角 9、内边距 10）；`TextEdit`/`LineEdit` normal 白底（圆角 8、内边距 12）、focus 描边、选区 `#b7e6ff`、光标 `#304553`；`PopupMenu` 面板白底（圆角 10、内边距 8）、hover `#dff3ff`（圆角 6、内边距 6）、`v_separation` 12；`HSlider` 轨道 `#dcecf5`、已填充区与高亮 `#66ccff`（圆角 2、内边距 2）、focus 描边与三个 grabber 圆点图标。焦点样式为透明底、圆角 8、`#66ccff` 两像素描边。
+
+`project.godot` 的 `gui/theme/custom` 指向该资源，作为全项目默认主题；视图场景根可显式挂同一资源，独立原生 `Window` 因此不再各自构造主题。
+
+`Style.make_theme()` 保留为对该资源的薄壳（`load` 并返回同一 `Theme`），不再在代码里构造主题；调用方原有的节点级 `add_theme_stylebox_override` 与 `theme_type_variation` 行为不变，外观不因共享同一 `Theme` 实例而改变。
+
+`res://assets/ui/round_avatar.gdshader` 承担 `Style.avatar()` 的圆形遮罩（透明遮罩 + 浅底 `vec3(0.91,0.97,1.0)` 混合，半径 0.47→0.5 平滑过渡）；`res://assets/ui/slider_dot.png`、`slider_dot_highlight.png`、`slider_dot_disabled.png` 是 HSlider 的三个 grabber 圆点，像素与原 16×16 逐像素公式一致（中心 (7.5,7.5)、半径 ≤ 6，颜色分别为 `#66ccff`、`#43b8f0`、`#b7c6d0`）。
+
+从哪个 interface 验证：`tests/test_theme_contract.gd` 断言资源存在、条目值与字面规格逐项一致、`make_theme()` 返回的主题与磁盘资源等价、Grabber 圆点像素与公式一致，并断言项目默认主题指向该资源；`scripts/check.ps1` 的导入与启动步骤验证资源可被实际导入。

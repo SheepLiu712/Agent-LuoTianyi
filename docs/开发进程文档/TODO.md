@@ -31,3 +31,18 @@
 - [ ] 委托画师和建模师，制作乐正绫的Live2D模型。
 - [ ] 修改服务端配置和运行时，使系统可以同时支持多个角色。
 - [ ] 构建与AgentLuo客户端体验一致的AgentLing客户端，使用户可以分别与天依和阿绫互动。
+
+## Godot 客户端界面场景化（方案 B，2026-09-20 用户确认）
+
+把 `client_godot` 全部可见界面从代码建树改为 `.tscn` 节点树 + 只做行为的脚本。逐切片交付，每片独立的 SPEC → Red → Green；已完成事实写入开发进度文档。
+
+- [ ] 主题与材质资源化（theme/app_theme.tres、round_avatar.gdshader、slider_dot_*.png）
+- [ ] publish_window 场景化
+- [ ] preferences_window + model_window 场景化
+- [ ] account_view + main.tscn 就地节点化
+- [ ] log_window + unified_dropdown + dropdown_item 场景化
+- [ ] message_audio + message_bubble + virtual_message_list 场景化
+- [ ] chat_view（含 image_overlay）场景化
+- [ ] dynamics_window + dynamic_detail + 动态行组件场景化
+- [ ] avatar_panel + avatar_preview + application 收尾
+- [ ] chat_preview 离线样板场景化并删除 preview_style.gd
