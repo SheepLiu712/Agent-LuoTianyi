@@ -23,3 +23,13 @@ Application把touched连接ChatSession.record_touch(areas:Array[String])->void�
 SettingsWindow.setup(preferences,models,executor=null,clear_cache:Callable=Callable())新增末尾可选注入，不改变旧调用。select_page增加audio；设置侧栏提供语音缓存页，替代聊天顶部CacheButton。AudioSettingsPage.setup(clear_cache:Callable)仅调用注入的ChatSession.clear_cache既有接口；无注入时禁用操作。页面说明只清当前服务器/账号完整语音、不删聊天文字、已清语音无法重放；单独清理按钮需确认，取消不清理，成功/失败留在页内明确报告，可重试。缓存操作不参与设置dirty或保存全部，不自动执行。退出账号销毁设置页，不能延续旧账号操作。
 
 DecisionDialog不再使用wrap_controls随子控件自动增高，避免文本初始窄宽换行把窗口撑出屏幕。保持固定初始尺寸、取消默认焦点、×/Esc等同取消；长正文由场景ScrollContainer承载，底部操作始终可见。嵌入式确认背景透明，圆角由Godot StyleBoxFlat提供，不创建矩形白底遮挡。GPU验收必须实际断言操作按钮在窗口与所属窗口可见范围内，不能只发pressed信号宣称可点。
+
+## 原客户端模型用途卡片
+
+ModelPage保留setup/is_dirty/validate_changes/save_changes公开接口，移除用途选择器单表单，改为滚动用途卡片列表。每个用途实例化model_purpose_card.tscn，标题/调用要求/说明常显，“使用自己的API Key”勾选后展开该用途字段，取消勾选收起但保留本次草稿。服务商/Base URL/Key/模型名/能力/高级参数均来自该卡片；不写死四个用途，使用服务器返回顺序。启用用途的provider同原端一样必填。
+
+同UI模块ModelPurposeCard.setup(purpose,draft,purposes,can_test=false)填入场景；set_draft(draft)、set_editable(enabled)、show_error(text)更新内容。edited(id,draft)/copy_requested(id,source_id)/test_requested(id,draft)由页面汇总。卡片不自行保存、不访问网络或密钥存储。错误定位对应卡片并滚动可见。
+
+原端的整页保存映射为现有整窗保存，仍先全量预校验、逐项更新成功基线、失败留稿；保存或手动测试中禁用编辑/刷新，手动供应商请求仍明确额度确认，不包含在保存里。原复制配置功能保留且按目标用途校验。
+
+ModelSettings.reload()复用最近start的账号/服务器重新读取需求；stop清空该上下文。UI“刷新需求列表”只在无修改且非测试/保存中可用，避免丢弃草稿；刷新失败明确显示错误并可重试。查询仍使用既有GET /llm/client-model-types，不改服务端协议。
