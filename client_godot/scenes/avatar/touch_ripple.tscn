@@ -13,6 +13,7 @@ corner_radius_bottom_left = 60
 corner_radius_bottom_right = 60
 anti_aliasing = true
 [node name="TouchRipple" type="Panel"]
+z_index = 1000
 offset_right = 120.0
 offset_bottom = 120.0
 pivot_offset = Vector2(60, 60)
