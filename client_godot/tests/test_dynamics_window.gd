@@ -41,6 +41,8 @@ func _run() -> void:
 	var send = window.find_child("PublishButton",true,false)
 	check(draft != null and send != null,"publish controls visible")
 	if draft != null:
+		check(draft.get_window() == window,"publishing stays inside its dynamics window")
+	if draft != null:
 		draft.text = "keep my draft"
 		draft.text_changed.emit()
 		send.pressed.emit()
