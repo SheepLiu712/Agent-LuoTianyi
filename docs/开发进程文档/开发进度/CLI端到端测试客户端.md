@@ -31,3 +31,11 @@
 - commit 或 PR：分支 `feat/cli-e2e-s3-cli-skeleton`：`f487eca`（SPEC）/ `dcdad99`（Red）/ `4aeefc7`（Green）。
 - 验证及结果：focused → 17 passed；新增日志改道回归 `tests/test_cli_log_stream.py` → 2 passed；client 回归 → 85 passed（排除 3 个既有收集失败文件）；子进程冒烟（真实连接失败路径）→ 退出码 4、stdout 仅 1 行合法 JSONL、诊断日志全部在 stderr、无凭据泄漏。
 - 未验证范围：真实服务端登录/鉴权与文本发送、真实 ACK/断线重连、真实 LLM/TTS、音频解码与重放、图片/触摸/动态/偏好、交互模式增强。
+
+### 2026-09-20 S4 媒体回复与重放
+
+- 交付行为：`audio.replay` 动作（资格校验 + 播放后端抽象 + 全部稳定失败分类：`AUDIO_REPLY_NOT_FOUND` / `AUDIO_NOT_READY` / `AUDIO_EPHEMERAL` / `AUDIO_STREAM_FAILED` / `AUDIO_FILE_MISSING` / `AUDIO_FORMAT_INVALID` / `DEVICE_UNAVAILABLE` / `PLAYBACK_INTERRUPTED`）；`reply.wait/read` 媒体字段最终语义（格式经解码确认、仅文件名引用、不输出 Base64 与绝对路径）。
+- interface spec：`docs/项目说明/项目架构与接口（spec）/接口文档/cli/README.md` §1.6。
+- commit 或 PR：分支 `feat/cli-e2e-s4-media-replay`：`85dc0cb`（SPEC）/ `5d0bbac`（Red）/ `3dd9eb2`（Green）。
+- 验证及结果：focused `tests/test_cli_media_replay.py` → 11 passed；S3+日志回归 → 19 passed；client 回归 → 96 passed（排除 3 个既有收集失败文件）。
+- 未验证范围：真实音频设备播放与"开始并正常结束"（external，需设备前置）、播放被中断的真实路径、非 WAV 格式支持。
