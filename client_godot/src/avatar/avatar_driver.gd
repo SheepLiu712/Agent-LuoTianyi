@@ -13,6 +13,9 @@ var _character_id := ""
 var _resource_id := ""
 var _expression_eyes: Dictionary = {}
 var _eye_base := Vector2.ONE
+var _gaze_target := Vector2.ZERO
+var _gaze := Vector2.ZERO
+var _touch_meshes: Dictionary = {}
 
 
 func load_character(descriptor_path: String) -> Error:
@@ -95,6 +98,13 @@ func load_avatar(model_path: String,mapping_path: String = MAPPING_PATH) -> Erro
 	effects.connect("cubism_process", _apply_parameters)
 	_mouth_override = -1.0
 	_elapsed = 0.0
+	_gaze = Vector2.ZERO
+	_gaze_target = Vector2.ZERO
+	_touch_meshes.clear()
+	var meshes: Dictionary = _model.call("get_meshes")
+	for area in _mapping.get("touch_meshes", {}):
+		for id in _mapping.touch_meshes[area]:
+			if meshes.has(id): _touch_meshes[meshes[id]] = area
 	apply_expression("normal")
 	return OK
 
@@ -127,22 +137,55 @@ func set_mouth_openness(value: float) -> void:
 		_mouth_override = -1.0 if value < 0 else clampf(value, 0.0, 1.0)
 
 
+func set_gaze(target: Vector2) -> void:
+	if target.is_finite(): _gaze_target = target.clamp(-Vector2.ONE, Vector2.ONE)
+
+
+func hit_test(local_position: Vector2) -> Array[String]:
+	var areas: Array[String] = []
+	if not local_position.is_finite(): return areas
+	for node: MeshInstance2D in _touch_meshes:
+		var area: String = _touch_meshes[node]
+		if areas.has(area) or not node.is_visible_in_tree() or node.modulate.a <= 0.01: continue
+		var point := node.to_local(to_global(local_position))
+		var bounds := node.mesh.get_aabb()
+		if not Rect2(Vector2(bounds.position.x, bounds.position.y), Vector2(bounds.size.x, bounds.size.y)).has_point(point): continue
+		var arrays := node.mesh.surface_get_arrays(0)
+		var vertices = arrays[Mesh.ARRAY_VERTEX]
+		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+		for index in range(0, indices.size(), 3):
+			var triangle := PackedVector2Array()
+			for offset in 3:
+				var vertex = vertices[indices[index + offset]]
+				triangle.append(Vector2(vertex.x, vertex.y))
+			if Geometry2D.is_point_in_polygon(point, triangle):
+				areas.append(area)
+				break
+	return areas
+
+
 func get_status() -> Dictionary:
 	if not is_instance_valid(_model):
 		return {"loaded": false, "canvas_size": Vector2.ZERO,"character_id":"","resource_id":"",
-			"expression": "", "motion_groups": [], "mouth_openness": 0.0, "eye_openness":Vector2.ZERO}
+			"expression": "", "motion_groups": [], "mouth_openness": 0.0, "eye_openness":Vector2.ZERO, "gaze":Vector2.ZERO}
 	var mouth := _mouth_override if _mouth_override >= 0 else _base_mouth
 	if mouth < 0:
 		mouth = float(_parameters.ParamMouthOpenY.value) if _parameters.has("ParamMouthOpenY") else 0.0
 	return {"loaded": true, "canvas_size": _model.call("get_canvas_info").size_in_pixels,"character_id":_character_id,"resource_id":_resource_id,
 		"expression": _expression, "motion_groups": _model.call("get_motions").keys(),
-		"mouth_openness": mouth, "eye_openness":Vector2(
+		"mouth_openness": mouth, "gaze":Vector2(
+			float(_parameters.ParamEyeBallX.value) if _parameters.has("ParamEyeBallX") else 0.0,
+			float(_parameters.ParamEyeBallY.value) if _parameters.has("ParamEyeBallY") else 0.0), "eye_openness":Vector2(
 			float(_parameters.ParamEyeLOpen.value) if _parameters.has("ParamEyeLOpen") else 0.0,
 			float(_parameters.ParamEyeROpen.value) if _parameters.has("ParamEyeROpen") else 0.0)}
 
 
 func _apply_parameters(_source: Object, delta: float) -> void:
 	_elapsed += delta
+	_gaze = _gaze.lerp(_gaze_target, 1.0 - pow(0.85, delta * 60.0))
+	for index in 2:
+		var parameter: String = ["ParamEyeBallX", "ParamEyeBallY"][index]
+		if _parameters.has(parameter): _parameters[parameter].value = _gaze[index]
 	# The bundled model has no EyeBlink group, so use its actual eye parameters.
 	var blink_phase := fmod(_elapsed, 4.5)
 	var openness := absf(blink_phase - 4.41) / 0.09 if blink_phase > 4.32 else 1.0

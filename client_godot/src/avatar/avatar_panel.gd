@@ -1,8 +1,10 @@
 extends Control
+signal touched(areas: Array[String])
 ## View owns pointer gestures; framing owns the persisted transform.
 const Driver = preload("res://src/avatar/avatar_driver.gd")
 const Framing = preload("res://src/avatar/avatar_framing.gd")
 const SETTINGS := "user://avatar_framing.cfg"
+const Ripple := preload("res://scenes/avatar/touch_ripple.tscn")
 @onready var avatar: Driver = %Driver
 @onready var _error_label: Label = %Error
 @onready var _reset_button: Button = %Reset
@@ -20,6 +22,7 @@ func _ready() -> void:
 	resized.connect(_layout_avatar)
 	_layout_avatar()
 	gui_input.connect(_handle_pointer)
+	mouse_exited.connect(func(): avatar.set_gaze(Vector2.ZERO))
 	_reset_button.visible = true
 	_reset_button.position = Vector2(18, size.y - 50)
 	_reset_button.pressed.connect(func():
@@ -37,7 +40,16 @@ func _layout_avatar() -> void:
 
 func _handle_pointer(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_RIGHT:
+		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+			var local := avatar.to_local(get_global_transform() * event.position)
+			var areas: Array[String] = avatar.hit_test(local)
+			if not areas.is_empty():
+				var ripple := Ripple.instantiate() as Control
+				ripple.position = event.position - Vector2(60, 60)
+				add_child(ripple)
+				touched.emit(areas)
+			accept_event()
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			_dragging = event.pressed
 			if not _dragging:
 				_save()
@@ -47,14 +59,17 @@ func _handle_pointer(event: InputEvent) -> void:
 			_layout_avatar()
 			_save()
 			accept_event()
-	elif event is InputEventMouseMotion and _dragging:
-		if not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
-			_dragging = false
-			_save()
-			return
-		framing.pan_by(event.relative, size)
-		_layout_avatar()
-		accept_event()
+	elif event is InputEventMouseMotion:
+		if size.x > 0 and size.y > 0:
+			avatar.set_gaze(Vector2(event.position.x / size.x * 2 - 1, 1 - event.position.y / size.y * 2))
+		if _dragging:
+			if not Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT):
+				_dragging = false
+				_save()
+				return
+			framing.pan_by(event.relative, size)
+			_layout_avatar()
+			accept_event()
 
 
 func _save() -> void:
@@ -63,6 +78,8 @@ func _save() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT and is_instance_valid(avatar):
+		avatar.set_gaze(Vector2.ZERO)
 	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT and _dragging:
 		_dragging = false
 		_save()

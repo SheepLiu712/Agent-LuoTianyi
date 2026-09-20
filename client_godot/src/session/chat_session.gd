@@ -21,6 +21,9 @@ var _wire_ids: Dictionary = {}
 var _reading: RefCounted
 var _images: Node
 var _models: Node
+var _touch_areas: Array[String] = []
+var _touch_count := 0
+var _last_touch_ms := -1000
 
 func _init(transport: Node, logger: RefCounted = null, media: Node = null, history: Node = null, reading: RefCounted = null, images: Node = null, models: Node = null) -> void:
 	_transport = transport
@@ -37,6 +40,9 @@ func _init(transport: Node, logger: RefCounted = null, media: Node = null, histo
 			message_audio_changed.emit(id,state))
 	_media.mouth_changed.connect(func(value): mouth_changed.emit(value))
 	_media.state_changed.connect(func(state):
+		if state.playing:
+			_touch_areas.clear()
+			_touch_count = 0
 		_state.speaking = state.playing
 		state_changed.emit(get_state()))
 	add_child(transport)
@@ -97,6 +103,25 @@ func send_text(text: String) -> String:
 	changed.emit()
 	return id
 
+func record_touch(areas: Array[String]) -> void:
+	if _state.phase != "ready" or _media.get_state().playing:
+		_touch_areas.clear()
+		_touch_count = 0
+		return
+	var valid := false
+	for area in areas:
+		if area in ["头", "手", "身体"]:
+			valid = true
+			if not _touch_areas.has(area): _touch_areas.append(area)
+	if not valid: return
+	_touch_count += 1
+	var now := Time.get_ticks_msec()
+	if now - _last_touch_ms < 1000: return
+	_transport.send_event("user_touch", {"touchArea":_touch_areas.duplicate(), "touchCount":_touch_count, "timeSinceLastSentTouch":(now - _last_touch_ms) / 1000.0}, false)
+	_last_touch_ms = now
+	_touch_count = 0
+	_touch_areas.clear()
+
 func get_messages() -> Array[Dictionary]:
 	return _messages.duplicate(true)
 
@@ -118,6 +143,9 @@ func stop_voice() -> void:
 	_media.stop_current()
 
 func stop() -> void:
+	_touch_areas.clear()
+	_touch_count = 0
+	_last_touch_ms = -1000
 	if _models != null:
 		_models.stop()
 	if _images != null:
@@ -145,6 +173,8 @@ func _connection_changed(connection: Dictionary) -> void:
 	_state.phase = connection.phase
 	_state.code = connection.code
 	if connection.phase != "ready":
+		_touch_areas.clear()
+		_touch_count = 0
 		_state.thinking = false
 		for id in _replies:
 			_finished[id] = true

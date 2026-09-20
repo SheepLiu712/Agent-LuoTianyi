@@ -155,6 +155,7 @@ func _account_changed(state: Dictionary) -> void:
 		%Navigation.show()
 		if _avatar == null:
 			_avatar = Avatar.instantiate() as Control
+			_avatar.touched.connect(_chat.record_touch)
 			_avatar.custom_minimum_size.x = 290
 			_split.add_child(_avatar)
 			_split.move_child(_avatar, 0)

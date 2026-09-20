@@ -1,0 +1,22 @@
+[gd_scene load_steps=3 format=3]
+[ext_resource type="Script" path="res://src/avatar/touch_ripple.gd" id="script"]
+[sub_resource type="StyleBoxFlat" id="ring"]
+draw_center = false
+border_width_left = 8
+border_width_top = 8
+border_width_right = 8
+border_width_bottom = 8
+border_color = Color(0.52, 0.53, 0.9, 1)
+corner_radius_top_left = 60
+corner_radius_top_right = 60
+corner_radius_bottom_left = 60
+corner_radius_bottom_right = 60
+anti_aliasing = true
+[node name="TouchRipple" type="Panel"]
+offset_right = 120.0
+offset_bottom = 120.0
+pivot_offset = Vector2(60, 60)
+scale = Vector2(0.01, 0.01)
+mouse_filter = 2
+theme_override_styles/panel = SubResource("ring")
+script = ExtResource("script")

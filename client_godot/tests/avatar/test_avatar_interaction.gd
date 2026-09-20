@@ -6,9 +6,15 @@ func check(ok: bool, label: String) -> void:
 		failures.append(label)
 		print("FAIL: ", label)
 func run() -> void:
+	if DisplayServer.get_name() == "headless":
+		print("Avatar interaction requires a graphical window; minimized windows intentionally suspend the avatar")
+		quit(2)
+		return
+	root.size = Vector2i(600, 800)
+	root.content_scale_size = Vector2i(600, 800)
+	root.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 	var panel = load("res://scenes/avatar/avatar_panel.tscn").instantiate()
 	root.add_child(panel)
-	panel.size = Vector2(600, 800)
 	await process_frame
 	var driver = panel.avatar
 	check(driver.has_method("set_gaze") and driver.has_method("hit_test") and panel.has_signal("touched"), "avatar exposes gaze and mesh touch")
@@ -32,6 +38,9 @@ func run() -> void:
 		panel.gui_input.emit(click)
 		check(touches.size() == 1 and touches[0].has("头"), "view converts displayed coordinates into model touch")
 		check(panel.find_children("TouchRipple*", "Panel", false, false).size() == 1, "touch produces a scene control ripple")
+		await create_timer(0.12).timeout
+		await RenderingServer.frame_post_draw
+		root.get_texture().get_image().save_png("res://artifacts/avatar-touch-feedback.png")
 		await create_timer(0.6).timeout
 		check(panel.find_children("TouchRipple*", "Panel", false, false).is_empty(), "ripple releases after fading")
 	panel.queue_free()
