@@ -7,8 +7,8 @@ func check(value: bool,text: String) -> void:
 func _initialize() -> void:
 	_run.call_deferred()
 func _run() -> void:
-	if not ResourceLoader.exists("res://src/ui/dynamics_window.gd"):
-		check(false,"dynamics window available")
+	if not ResourceLoader.exists("res://scenes/ui/dynamics_window.tscn"):
+		check(false,"dynamics window scene exists")
 		quit(1)
 		return
 	var controller = load("res://src/session/dynamics_controller.gd").new()
@@ -29,7 +29,8 @@ func _run() -> void:
 	await controller.start(scope)
 	await controller.refresh()
 	var layout_path := "user://dynamics-window-test-%s.cfg"%Time.get_ticks_usec()
-	var window = load("res://src/ui/dynamics_window.gd").new(controller,layout_path)
+	var window = load("res://scenes/ui/dynamics_window.tscn").instantiate()
+	window.setup(controller,layout_path)
 	root.add_child(window)
 	window.open()
 	await process_frame

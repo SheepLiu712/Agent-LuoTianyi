@@ -1,4 +1,5 @@
 extends SceneTree
+const WINDOW_SCENE := "res://scenes/ui/dynamics_window.tscn"
 var failures: Array[String] = []
 func check(ok: bool,label: String) -> void:
 	if not ok:
@@ -12,7 +13,14 @@ func _run() -> void:
 	await controller.start({"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"visual","message_token":"fixture-token"})
 	await controller.refresh()
 	var path := "user://dynamics-visual-%s.cfg"%Time.get_ticks_usec()
-	var window = load("res://src/ui/dynamics_window.gd").new(controller,path)
+	if not ResourceLoader.exists(WINDOW_SCENE):
+		check(false,"dynamics window scene exists")
+		controller.queue_free()
+		await process_frame
+		quit(1)
+		return
+	var window = load(WINDOW_SCENE).instantiate()
+	window.setup(controller,path)
 	root.add_child(window)
 	window.open()
 	window.position = Vector2i(100,100)

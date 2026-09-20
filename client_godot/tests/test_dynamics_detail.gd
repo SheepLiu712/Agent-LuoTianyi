@@ -11,17 +11,24 @@ func _run() -> void:
 	root.add_child(controller)
 	await controller.start({"server":OS.get_environment("GODOT_TEST_SERVER"),"username":"detail","message_token":"fixture-token"})
 	await controller.refresh()
-	var script = load("res://src/ui/dynamics_window.gd")
-	if not script.get_script_method_list().any(func(method): return method.name == "select_post"):
+	if not ResourceLoader.exists("res://scenes/ui/dynamics_window.tscn"):
+		check(false,"dynamics window scene exists")
+		controller.queue_free()
+		await process_frame
+		quit(1)
+		return
+	var scene: PackedScene = load("res://scenes/ui/dynamics_window.tscn")
+	var window = scene.instantiate()
+	window.setup(controller,"user://detail-test.cfg")
+	root.add_child(window)
+	window.open()
+	await process_frame
+	if not window.has_method("select_post"):
 		check(false,"two-pane selection available")
 		controller.queue_free()
 		await process_frame
 		quit(1)
 		return
-	var window = script.new(controller,"user://detail-test.cfg")
-	root.add_child(window)
-	window.open()
-	await process_frame
 	check(window.get_selected_id().is_empty(),"opening has no selection")
 	check(window.select_post("d0"),"select known post")
 	await create_timer(.15).timeout
@@ -75,7 +82,8 @@ func _run() -> void:
 	await process_frame
 	window.queue_free()
 	await process_frame
-	var restored = script.new(controller,"user://detail-test.cfg")
+	var restored = scene.instantiate()
+	restored.setup(controller,"user://detail-test.cfg")
 	root.add_child(restored)
 	restored.open()
 	await process_frame
