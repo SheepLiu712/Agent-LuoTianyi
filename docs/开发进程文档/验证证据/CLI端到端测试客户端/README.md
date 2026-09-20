@@ -5,7 +5,7 @@
 - 目标部署：`https://www-api.u3493359.nyat.app:11664`（release）
 - 测试账号：临时注册（邀请码注册）；本证据已脱敏（见文末）
 - 运行方式：`cd client && python cli.py --scenario <请求文件>`；stdout 为 UTF-8 JSONL 动作记录（`action_result` / `scenario_result`），诊断日志全部在 stderr
-- 覆盖：**全部 17 个 CLI 动作均完成真实链路验证**（含 `password_env` 凭据路径、显式 UUID 等待与真实设备重放）
+- 覆盖：**全部 17 个 CLI 动作均完成真实链路验证**（含 `password_env` 凭据路径、显式 UUID 等待、真实设备重放与触摸抑制时序）
 
 ## 目录
 
@@ -22,7 +22,7 @@
 2. 替换 `requests/*` 中的占位符：`cli_e2e_user` → 你的用户名；`<redacted-password>` → 你的密码；`<TEMP>/cli_e2e_image.png` → 本机图片路径（可用 `requests/07-image-generate.py` 生成同款 512×512 测试图：红圆 + 蓝方块 + 文字）。
 3. 逐条运行：
    - 场景：`python cli.py --scenario requests/0X-*.json > out.jsonl`
-   - 驱动：设置 `CLI_E2E_USER` / `CLI_E2E_PASSWORD` / `CLI_E2E_OUT` 后运行 `python requests/08-reply-read-audio-replay.driver.py`（在 `client/` 目录，或设置 `CLI_E2E_CLIENT_DIR`）
+   - 驱动：设置 `CLI_E2E_USER` / `CLI_E2E_PASSWORD` / `CLI_E2E_OUT` 后运行 `python requests/08-reply-read-audio-replay.driver.py`（回复读取/重放）或 `python requests/15-suppression.driver.py`（触摸抑制时序，可选 `CLI_E2E_MAX_TOUCHES`）（在 `client/` 目录，或设置 `CLI_E2E_CLIENT_DIR`）
 4. 对照 `responses/0X-*.jsonl`。
 
 ## 结果摘要
@@ -43,6 +43,7 @@
 | 12 | 偏好读取 | preferences.read（自动打开）/ status | ✅ `{}` |
 | 13 | 触摸多区域 | touch.send(["头","辫子"]) / reply.wait | ✅ ACK + 临时反射（`normal` 表情） |
 | 14 | 图片队列投递 | send(path) / reply.wait ×2 | ✅ 先投递队列中"红蓝配色"描述（281,738B）；本次图片新回复"咦，这张图好像刚刚见过呢！"（6.6s、225,000B） |
+| 15 | 触摸抑制时序（S6 补测） | send_text 触发 TTS 流式回复 → 连发 touch.send | ✅ 音频流式前 107 次触摸正常 ACK；**流式期间 3 次 `suppressed`**（`server_audio_active`、0ms、无协议事件、退出码 0）；随后 `reply.wait` 通过 |
 
 ## 观察：服务端回复为异步队列投递
 
