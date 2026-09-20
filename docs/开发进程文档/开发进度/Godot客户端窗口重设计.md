@@ -45,3 +45,11 @@
 - 验证：test_image_window headless/GPU均PASS，覆盖单例转属、旧来源关闭不影响新来源、当前来源关闭释放、失败重试、原始比例、关闭释放纹理；GPU额外验证来源最小化/恢复。test_history_media真实loopback、test_preview_input、test_ui_scenes通过。
 - 作者自审：图片窗仅存几何，原始图片仍由会话接口/离线provider提供，无新增协议；confirm回调仅离线显式点击，未后台发送。所有可见控件在场景中，代码只绑定与实例化。
 - 未验证：实际系统DPI、Windows10、多屏硬件；仅本地提交。
+
+### 2026-09-20 主导航与完整草稿汇总
+
+- 交付：左侧场景导航集中聊天/动态/统一设置/日志/账号，账号明确区分退出登录与退出应用；聊天顶部保留缓存入口，删除旧业务菜单转发路径。账户长表单滚动、注册/重置可明确返回登录。分栏按扣除导航后的可用宽度计算45:55。
+- 主窗一次汇总聊天输入、设置、动态发布/评论；取消保留全部，确认放弃才退出。设置正在保存先等待结果。退出登录保留已打开的日志，关闭其它业务窗；重复打开设置保留所选页面。
+- SPEC 44f8582；Red 4fcea0e（固定导航和聊天dirty契约缺失）；Green为本记录所在提交。
+- 验证：check.ps1 27项、check_accounts、check_features、check_network全部PASS；Application drafts从真实loopback登录验证一次性汇总、取消留稿、退出账号保留日志；GPU capture_release_ui PASS。修复退出过程中控制器发未读信号时导航节点已释放的生命周期问题，回归无引擎错误。
+- 作者自审：服务仍由Application注入，未新增全局service locator或协议；控件仅从场景取得。系统DPI、多屏与公共服务器未验证；仅本地提交。

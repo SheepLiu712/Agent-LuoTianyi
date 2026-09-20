@@ -19,7 +19,7 @@ func field(view: Node, hint: String) -> LineEdit:
 
 func button(view: Node, caption: String) -> void:
 	if caption == "退出登录":
-		for menu in view.find_children("ChatMore", "Button", true, false):
+		for menu in view.find_children("AccountMenu", "Button", true, false):
 			if menu.is_visible_in_tree():
 				menu.activated.emit("logout")
 				return

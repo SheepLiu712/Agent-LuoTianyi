@@ -32,6 +32,7 @@ func _initialize() -> void:
 		field.text_submitted.connect(func(_text): _send())
 	_mode.set_items([{"id":"login","label":"密码登录"},{"id":"register","label":"注册账户"},{"id":"reset","label":"邀请码重置账户"}])
 	_mode.activated.connect(func(_index): _apply_mode())
+	%BackToLogin.pressed.connect(func(): _mode.set_selected_id("login"); _apply_mode())
 	_submit.pressed.connect(_send)
 	_cancel.pressed.connect(_session.cancel)
 	_logout.pressed.connect(func():
@@ -46,6 +47,7 @@ func _initialize() -> void:
 	_apply_mode()
 
 func _apply_mode() -> void:
+	%BackToLogin.visible = _mode.get_selected_id() != "login"
 	_fields.confirm.visible = _mode.get_selected_id() != "login"
 	_fields.invite.visible = _mode.get_selected_id() != "login"
 	_remember.visible = _mode.get_selected_id() == "login"

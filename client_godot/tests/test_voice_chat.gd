@@ -113,15 +113,15 @@ func _run() -> void:
 	check(session.get_messages().any(func(message): return message.text == "voice-disconnect"), "disconnect preserves displayed voice text")
 	var logs := JSON.stringify(logger.read_entries())
 	check(logs.contains("audio_playback_started") and logs.contains("audio_playback_finished") and logs.contains("audio_error"), "network to playback has diagnostic trail")
-	var menu = view.find_child("ChatMore",true,false)
-	menu.activated.emit("cache")
+	var menu = view.get_node("%CacheButton")
+	menu.pressed.emit()
 	var dialogs = view.find_children("*Dialog","Window",true,false)
 	check(dialogs.size() == 1 and dialogs[0].visible,"clear cache requires confirmation")
 	if not dialogs.is_empty():
 		check(cache.lookup("voice-first").has("path"),"opening clear dialog does not delete cache")
 		dialogs[0].get_cancel_button().pressed.emit()
 		check(cache.lookup("voice-first").has("path"),"cancel keeps cache")
-		menu.activated.emit("cache")
+		menu.pressed.emit()
 		dialogs[0].confirmed.emit()
 		await process_frame
 		check(button(view,"重放") == null and cache.lookup("voice-first").is_empty(),"confirmed clear removes replay buttons but keeps text")

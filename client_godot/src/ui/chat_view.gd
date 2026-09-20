@@ -1,10 +1,6 @@
 extends MarginContainer
-signal logout_requested
-signal log_requested
-signal settings_requested(kind: String)
 signal image_requested(provider: Callable)
 @onready var _margin: MarginContainer = %Margin
-@onready var _menu = %ChatMore
 @onready var _clear_dialog: Window = %ClearDialog
 @onready var _status: Label = %Status
 @onready var _history_status: Label = %HistoryStatus
@@ -18,7 +14,6 @@ signal image_requested(provider: Callable)
 @onready var _stop_voice: Button = %StopVoice
 @onready var _input: TextEdit = %Input
 @onready var _send_button: Button = %Send
-@onready var _dynamics_button: Button = %Dynamics
 var _session: Node
 var _initialized := false
 
@@ -27,8 +22,8 @@ func setup(session: Node) -> void:
 	if is_node_ready():
 		_initialize()
 
-func set_dynamics_unread(count: int) -> void:
-	_dynamics_button.text = "动态" if count <= 0 else "动态 · "+("99+" if count > 99 else str(count))
+func is_dirty() -> bool:
+	return not _input.text.strip_edges().is_empty()
 
 func _ready() -> void:
 	if _session == null:
@@ -39,22 +34,9 @@ func _initialize() -> void:
 	if _initialized:
 		return
 	_initialized = true
-	_dynamics_button.pressed.connect(func(): settings_requested.emit("dynamics"))
-	_menu.action_menu = true
-	_menu.text = "更多 ···"
-	_menu.set_items([{ "id":"logs","label":"打开日志","disabled":_session.get_log_directory().is_empty()},{"id":"cache","label":"清理本账号语音缓存"},{"id":"preferences","label":"相处模式"},{"id":"models","label":"LLM / VLM 模型设置"},{"separator":true},{"id":"logout","label":"退出登录"}])
-	_menu.activated.connect(func(id):
-		if id == "logs":
-			log_requested.emit()
-		elif id == "cache":
-			_clear_dialog.popup_centered()
-			_clear_dialog.get_cancel_button().grab_focus()
-		elif id == "logout":
-			logout_requested.emit()
-		elif id == "preferences":
-			settings_requested.emit("preferences")
-		elif id == "models":
-			settings_requested.emit("models"))
+	%CacheButton.pressed.connect(func():
+		_clear_dialog.popup_centered()
+		_clear_dialog.get_cancel_button().grab_focus())
 	_clear_dialog.confirmed.connect(func(): _session.clear_cache())
 	_history_retry.pressed.connect(_session.retry_history)
 	_history_skip.pressed.connect(_session.skip_history)

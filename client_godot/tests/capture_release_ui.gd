@@ -23,14 +23,15 @@ func _run() -> void:
 	await capture(root,"agentluo-011-login")
 	await account.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"visual","password":"synthetic","request_token":false},false)
 	await create_timer(.5).timeout
-	var menu = app.find_child("ChatMore",true,false)
 	for item in [["logs","客户端日志","logs"],["preferences","设置","preferences"],["models","设置","models"]]:
-		menu.activated.emit(item[0])
+		app.get_node("%NavLogs" if item[0] == "logs" else "%NavSettings").pressed.emit()
 		await create_timer(.4).timeout
 		var windows: Array = app.find_children("*","Window",true,false).filter(func(n): return n.title.begins_with(item[1]))
 		if windows.is_empty():
 			failures.append("window missing: "+item[1])
 			continue
+		if item[0] != "logs":
+			windows[0].get_node("%ModelsTab" if item[0] == "models" else "%PreferencesTab").pressed.emit()
 		await capture(windows[0],"agentluo-011-"+item[2])
 		windows[0].hide()
 	var dynamics: Array = app.find_children("*","Button",true,false).filter(func(n): return n.text.begins_with("动态 ·"))

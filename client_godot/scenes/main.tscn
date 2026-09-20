@@ -9,6 +9,8 @@
 
 [ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
 
+[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="AccountMenu"]
+
 [node name="AgentLuo" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -19,29 +21,91 @@ grow_vertical = 2
 theme = ExtResource("2_theme")
 script = ExtResource("1_app")
 
-[node name="Split" type="HSplitContainer" parent="."]
-offset_top = 44.0
-unique_name_in_owner = true
-visible = false
-layout_mode = 1
-anchors_preset = 15
+[node name="Background" type="ColorRect" parent="."]
 anchor_right = 1.0
 anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+mouse_filter = 2
+color = Color(0.96,0.98,0.99,1)
+
+[node name="Workspace" type="HBoxContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 44.0
+theme_override_constants/separation = 0
+
+[node name="Navigation" type="MarginContainer" parent="Workspace"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(104,0)
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 16
+
+[node name="Items" type="VBoxContainer" parent="Workspace/Navigation"]
+theme_override_constants/separation = 12
+
+[node name="NavChat" type="Button" parent="Workspace/Navigation/Items"]
+unique_name_in_owner = true
+text = "聊天"
+custom_minimum_size = Vector2(80,48)
+button_pressed = true
+toggle_mode = true
+
+[node name="NavDynamics" type="Button" parent="Workspace/Navigation/Items"]
+unique_name_in_owner = true
+text = "动态"
+custom_minimum_size = Vector2(80,48)
+theme_override_font_sizes/font_size = 13
+
+[node name="NavSettings" type="Button" parent="Workspace/Navigation/Items"]
+unique_name_in_owner = true
+text = "设置"
+custom_minimum_size = Vector2(80,48)
+
+[node name="Spacer" type="Control" parent="Workspace/Navigation/Items"]
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="NavLogs" type="Button" parent="Workspace/Navigation/Items"]
+unique_name_in_owner = true
+text = "日志"
+custom_minimum_size = Vector2(80,44)
+
+[node name="AccountMenu" parent="Workspace/Navigation/Items" instance=ExtResource("AccountMenu")]
+unique_name_in_owner = true
+text = "账号"
+
+[node name="Split" type="HSplitContainer" parent="Workspace"]
+unique_name_in_owner = true
+visible = false
+size_flags_horizontal = 3
+size_flags_vertical = 3
 dragger_visibility = 2
 
-[node name="Center" type="CenterContainer" parent="Split"]
+[node name="Center" type="MarginContainer" parent="Workspace/Split"]
 unique_name_in_owner = true
-layout_mode = 2
-custom_minimum_size = Vector2(440, 0)
+custom_minimum_size = Vector2(440,0)
 size_flags_horizontal = 3
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 16
 
-[node name="AccountForm" parent="Split/Center" instance=ExtResource("3_account")]
+[node name="AccountScroll" type="ScrollContainer" parent="Workspace/Split/Center"]
+horizontal_scroll_mode = 0
+
+[node name="LoginCenter" type="CenterContainer" parent="Workspace/Split/Center/AccountScroll"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="AccountForm" parent="Workspace/Split/Center/AccountScroll/LoginCenter" instance=ExtResource("3_account")]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(390, 0)
+custom_minimum_size = Vector2(390,0)
 
 [node name="LogProblem" type="Label" parent="."]
+mouse_filter = 2
+offset_top = 44.0
 unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 10
@@ -54,9 +118,9 @@ theme_override_colors/font_color = Color(0.7176471, 0.16470589, 0.16470589, 1)
 unique_name_in_owner = true
 title = "放弃未保存的内容？"
 visible = false
-dialog_text = "设置或动态窗口中有未保存的内容，确认放弃并继续？"
+dialog_text = "退出将关闭所有窗口；尚未提交的内容不会保留。"
 ok_button_text = "放弃并继续"
-cancel_button_text = "取消"
+cancel_button_text = "返回继续编辑"
 
 [node name="SecurityError" type="Label" parent="."]
 unique_name_in_owner = true

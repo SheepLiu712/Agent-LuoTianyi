@@ -6,7 +6,6 @@ const Log = preload("res://src/storage/client_log.gd")
 var failures: Array[String] = []
 var expressions: Array[String] = []
 var thinking_seen := false
-var logout_seen := false
 
 func check(value: bool, description: String) -> void:
 	if not value:
@@ -40,7 +39,6 @@ func _run() -> void:
 	view.setup(session)
 	root.add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	view.logout_requested.connect(func(): logout_seen = true)
 	await process_frame
 	var inputs = view.find_children("*", "TextEdit", true, false)
 	check(inputs.size() == 1, "live chat exposes one composer")
@@ -75,14 +73,7 @@ func _run() -> void:
 	check(labels.any(func(label): return label.text == "第一句"), "actual response appears in visible bubble")
 	var captions = view.find_children("*", "Label", true, false)
 	check(not captions.any(func(label): return label.text.contains("演示")), "live delivery is not labelled simulated")
-	var menus = view.find_children("ChatMore", "Button", true, false)
-	check(menus.size() == 1, "chat exposes a compact more menu")
-	if menus.size() == 1:
-		var menu = menus[0]
-		check(menu.get_items().any(func(item): return item.get("id") == "logs" and item.label == "打开日志"), "logs accessible through menu")
-		check(menu.get_items().any(func(item): return item.get("id") == "logout" and item.label == "退出登录"), "logout accessible through menu")
-		menu.activated.emit("logout")
-	check(logout_seen, "logout request is exposed to application")
+	check(view.get_node_or_null("%CacheButton") is Button,"cache action stays available in chat")
 	session.stop()
 	check(session.get_messages().is_empty() and session.get_state().phase == "idle", "stop clears old account messages")
 	if inputs.size() == 1:

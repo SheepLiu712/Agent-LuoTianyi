@@ -44,6 +44,13 @@ theme_override_colors/font_color = Color(0.5019608, 0.60784316, 0.654902, 1)
 theme_override_font_sizes/font_size = 13
 text = "登录你的账户，继续这段陪伴。"
 
+[node name="BackToLogin" type="Button" parent="Column"]
+unique_name_in_owner = true
+visible = false
+text = "← 返回登录"
+flat = true
+size_flags_horizontal = 0
+
 [node name="Form" type="VBoxContainer" parent="Column"]
 unique_name_in_owner = true
 theme_override_constants/separation = 10

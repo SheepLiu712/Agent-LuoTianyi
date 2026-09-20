@@ -5,7 +5,6 @@
 [ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
 [ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
 [ext_resource type="Script" path="res://src/preview/composer_input.gd" id="5_composer"]
-[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="6_dropdown"]
 [ext_resource type="PackedScene" path="res://scenes/ui/virtual_message_list.tscn" id="7_messages"]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
@@ -56,12 +55,12 @@ theme_override_colors/font_color = Color(0.376470596, 0.498039216, 0.552941203, 
 theme_override_font_sizes/font_size = 13
 autowrap_mode = 3
 
-[node name="Dynamics" type="Button" parent="Margin/Column/Heading"]
+[node name="CacheButton" type="Button" parent="Margin/Column/Heading"]
 unique_name_in_owner = true
-text = "动态"
-
-[node name="ChatMore" parent="Margin/Column/Heading" instance=ExtResource("6_dropdown")]
-unique_name_in_owner = true
+text = "语音缓存"
+tooltip_text = "清理当前服务器、本账号的语音缓存"
+theme_override_font_sizes/font_size = 12
+custom_minimum_size = Vector2(0,36)
 
 [node name="SepTop" type="HSeparator" parent="Margin/Column"]
 

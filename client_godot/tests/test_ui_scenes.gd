@@ -101,11 +101,11 @@ const SCENES := {
 		"inject_layout": true,
 		"unique": ["Split","Center","AccountForm","LogProblem","ExitDialog"],
 		"properties": {
-			"Split": {"dragger_visibility": SplitContainer.DRAGGER_HIDDEN_COLLAPSED},
-			"Split/Center": {"custom_minimum_size": Vector2(440,0),"size_flags_horizontal": Control.SIZE_EXPAND_FILL},
-			"Split/Center/AccountForm": {"custom_minimum_size": Vector2(390,0)},
+			"%Split": {"dragger_visibility": SplitContainer.DRAGGER_HIDDEN_COLLAPSED},
+			"%Center": {"custom_minimum_size": Vector2(440,0),"size_flags_horizontal": Control.SIZE_EXPAND_FILL},
+			"%AccountForm": {"custom_minimum_size": Vector2(390,0)},
 			"LogProblem": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"theme_override_colors/font_color": Color("b72a2a")},
-			"ExitDialog": {"title": "放弃未保存的内容？","dialog_text": "设置或动态窗口中有未保存的内容，确认放弃并继续？","ok_button_text": "放弃并继续","cancel_button_text": "取消"},
+			"ExitDialog": {"title": "放弃未保存的内容？","dialog_text": "退出将关闭所有窗口；尚未提交的内容不会保留。","ok_button_text": "放弃并继续","cancel_button_text": "返回继续编辑"},
 		},
 	},
 	"res://scenes/ui/unified_dropdown.tscn": {
@@ -202,7 +202,7 @@ const SCENES := {
 		"type": "MarginContainer",
 		"script": "res://src/ui/chat_view.gd",
 		"setup": "setup",
-		"unique": ["Margin","Dynamics","ChatMore","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Empty","Latest","Unread","Volume","StopVoice","Input","Send","ClearDialog"],
+		"unique": ["Margin","CacheButton","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Empty","Latest","Unread","Volume","StopVoice","Input","Send","ClearDialog"],
 		"properties": {
 			"Background": {"color": Color("f5f8fb"),"mouse_filter": Control.MOUSE_FILTER_IGNORE},
 			"Margin": {"theme_override_constants/margin_left": 22,"theme_override_constants/margin_right": 22,"theme_override_constants/margin_top": 22,"theme_override_constants/margin_bottom": 22},
@@ -212,7 +212,6 @@ const SCENES := {
 			"Margin/Column/Heading/Identity": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL},
 			"Margin/Column/Heading/Identity/Title": {"text": "和天依聊聊","theme_override_font_sizes/font_size": 22,"theme_override_colors/font_color": Color("344c59")},
 			"Margin/Column/Heading/Identity/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"theme_override_font_sizes/font_size": 13,"theme_override_colors/font_color": Color("607f8d")},
-			"Margin/Column/Heading/Dynamics": {"text": "动态"},
 			"Margin/Column/HistoryRow/HistoryStatus": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"theme_override_font_sizes/font_size": 12},
 			"Margin/Column/HistoryRow/HistoryRetry": {"text": "重试历史"},
 			"Margin/Column/HistoryRow/HistorySkip": {"text": "跳过本次"},

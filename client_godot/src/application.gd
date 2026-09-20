@@ -15,8 +15,9 @@ var _chat: Node
 var _chat_view: Control
 @onready var _chrome = %Chrome
 @onready var _split: HSplitContainer = %Split
-@onready var _center: CenterContainer = %Center
+@onready var _center: MarginContainer = %Center
 @onready var _account_form = %AccountForm
+@onready var _nav_dynamics: Button = %NavDynamics
 var _avatar: Control
 var _ratio := 0.45
 var _layout_ready := false
@@ -30,6 +31,7 @@ var _engine_log: Logger
 var _windows: Dictionary = {}
 @onready var _exit_dialog: Window = %ExitDialog
 var _exit_action := ""
+var _waiting_save := false
 var _models: Node
 var _images_presenter: Node
 var _executor: Node
@@ -83,8 +85,15 @@ func _ready() -> void:
 	_dynamics = preload("res://src/session/dynamics_controller.gd").new(_log)
 	add_child(_dynamics)
 	_dynamics.unread_changed.connect(func(count):
-		if _chat_view != null:
-			_chat_view.set_dynamics_unread(count))
+		if is_instance_valid(_nav_dynamics):
+			_nav_dynamics.text = "动态" if count <= 0 else "动态 · " + ("99+" if count > 99 else str(count)))
+	%NavChat.pressed.connect(func(): %NavChat.button_pressed = true; _chrome.open_window())
+	%NavDynamics.pressed.connect(func(): _open_settings("dynamics"))
+	%NavSettings.pressed.connect(func(): _open_settings("settings"))
+	%NavLogs.pressed.connect(_log_window.open)
+	%AccountMenu.action_menu = true
+	%AccountMenu.set_items([{"id":"logout","label":"退出登录"},{"id":"exit","label":"退出应用"}])
+	%AccountMenu.activated.connect(_request_close)
 	var cache = Cache.new(_layout_path.get_base_dir().path_join("audio"),_log)
 	var history = preload("res://src/session/history_sync.gd").new(preload("res://src/network/history_api.gd").new(),_log)
 	var reading = preload("res://src/storage/reading_position.gd").new(_layout_path.get_base_dir().path_join("reading"))
@@ -119,11 +128,11 @@ func _ready() -> void:
 	_split.dragged.connect(func(_offset):
 		if not _expanded:
 			return
-		_ratio = _avatar.size.x / maxf(size.x, 1)
+		_ratio = _avatar.size.x / maxf(_split.size.x, 1)
 		settings.set_value("layout", "ratio", _ratio)
 		if settings.save(_layout_path) != OK:
 			push_warning("Window layout save failed"))
-	resized.connect(_resize_split)
+	_split.resized.connect(_resize_split)
 	await get_tree().process_frame
 	_layout_ready = true
 	_resize_split()
@@ -143,6 +152,7 @@ func _account_changed(state: Dictionary) -> void:
 	_log.record("account_state", {"phase":state.phase,"code":state.code})
 	if state.phase == "signed_in":
 		_center.hide()
+		%Navigation.show()
 		if _avatar == null:
 			_avatar = Avatar.instantiate() as Control
 			_avatar.custom_minimum_size.x = 290
@@ -156,9 +166,6 @@ func _account_changed(state: Dictionary) -> void:
 			_chat_view.custom_minimum_size.x = 440
 			_chat_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			_split.add_child(_chat_view)
-			_chat_view.logout_requested.connect(func(): _request_close("logout"))
-			_chat_view.log_requested.connect(_log_window.open)
-			_chat_view.settings_requested.connect(_open_settings)
 			_chat_view.image_requested.connect(func(provider): _images_presenter.open_image(get_window(),provider))
 		if not _expanded:
 			_expanded = true
@@ -181,6 +188,7 @@ func _account_changed(state: Dictionary) -> void:
 			_avatar.queue_free()
 			_avatar = null
 		_center.show()
+		%Navigation.hide()
 		if _expanded:
 			if get_window().mode == Window.MODE_WINDOWED:
 				_expanded_size = get_window().size
@@ -191,7 +199,7 @@ func _account_changed(state: Dictionary) -> void:
 
 func _resize_split() -> void:
 	if _layout_ready and _expanded:
-		_split.split_offset = roundi(size.x * _ratio)
+		_split.split_offset = roundi(_split.size.x * _ratio)
 
 func _resize_window(target: Vector2i, minimum: Vector2i) -> void:
 	_chrome.select_layout("expanded" if _expanded or "--preview" in OS.get_cmdline_user_args() else "compact",target,minimum)
@@ -204,10 +212,9 @@ func _exit_tree() -> void:
 		_log.finish()
 
 func _open_settings(kind: String) -> void:
-	if kind not in ["preferences","models","dynamics","settings"]: return
-	var key := "dynamics" if kind == "dynamics" else "settings"
+	if kind not in ["dynamics","settings"]: return
+	var key := kind
 	if _windows.has(key) and is_instance_valid(_windows[key]):
-		if key == "settings": _windows[key].select_page("models" if kind == "models" else "preferences")
 		_windows[key].open()
 		return
 	var controller: Node
@@ -224,17 +231,33 @@ func _open_settings(kind: String) -> void:
 	window.get_node("%Chrome").configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),key)
 	window.tree_exited.connect(func():
 		if _windows.get(key) == window: _windows.erase(key))
-	if key == "settings": window.select_page("models" if kind == "models" else "preferences")
 	window.open()
 	if controller != null: controller.start(_session.get_session())
 
 func _request_close(action: String) -> void:
-	for window in _windows.values():
+	if action not in ["exit","logout"]: return
+	var settings = _windows.get("settings")
+	if is_instance_valid(settings) and settings.is_saving():
+		_exit_action = action
+		if not _waiting_save:
+			_waiting_save = true
+			settings.saving_finished.connect(func(_ok):
+				_waiting_save = false
+				_request_close(_exit_action),CONNECT_ONE_SHOT)
+		return
+	var drafts: Array[String] = []
+	if is_instance_valid(_chat_view) and _chat_view.is_dirty(): drafts.append("聊天输入中的未发送文字")
+	for key in _windows:
+		var window = _windows[key]
 		if is_instance_valid(window) and window.is_dirty():
-			_exit_action = action
-			_exit_dialog.popup_centered()
-			_exit_dialog.get_cancel_button().grab_focus()
-			return
+			drafts.append("设置中的未保存修改" if key == "settings" else "动态发布或评论草稿")
+	if not drafts.is_empty():
+		_exit_action = action
+		_exit_dialog.title = "退出应用前请确认" if action == "exit" else "退出登录前请确认"
+		_exit_dialog.dialog_text = "以下内容尚未提交：\n• " + "\n• ".join(drafts) + "\n不会自动保存或发送。"
+		_exit_dialog.popup_centered()
+		_exit_dialog.get_cancel_button().grab_focus()
+		return
 	_finish_close(action)
 
 func _finish_close(action: String) -> void:

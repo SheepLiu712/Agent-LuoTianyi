@@ -24,59 +24,52 @@ func _run() -> void:
 	await process_frame
 	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"ui","password":"synthetic-password","request_token":false},false)
 	await process_frame
-	var menu = app.find_child("ChatMore",true,false)
-	check(menu.get_items().any(func(item): return item.get("id") == "preferences"),"chat menu exposes preferences")
-	var dynamics: Array = []
+	var menu = app.get_node("%AccountMenu")
+	check(menu.get_items().any(func(item): return item.id == "logout") and menu.get_items().any(func(item): return item.id == "exit"),"account separates logout and exit")
+	var dynamics = app.get_node("%NavDynamics")
 	for tick in 200:
-		dynamics = app.find_children("*","Button",true,false).filter(func(n): return n.text == "动态 · 99+")
-		if not dynamics.is_empty():
-			break
+		if dynamics.text == "动态 · 99+": break
 		await create_timer(.01).timeout
-	check(dynamics.size()==1,"permanent dynamics button displays capped unread")
-	if not dynamics.is_empty():
-		dynamics[0].pressed.emit()
-		await process_frame
-		for button in app.find_children("*","Button",true,false):
-			if button.text == "发布动态": button.pressed.emit()
-		await process_frame
-		var draft = app.find_child("PublishDraft",true,false)
-		check(draft != null,"dynamics opens from chat")
-		if draft != null:
-			draft.text = "unsaved dynamic"
-			draft.text_changed.emit()
-	menu.activated.emit("models")
+	check(dynamics.text == "动态 · 99+","navigation shows capped unread")
+	dynamics.pressed.emit()
 	await process_frame
-	check(app.find_children("*","Window",true,false).filter(func(n): return n.title == "设置").size()==1,"model menu opens shared settings")
-	if menu.get_items().any(func(item): return item.get("id") == "preferences"):
-		menu.activated.emit("preferences")
-		await create_timer(.15).timeout
-		var windows: Array = app.find_children("*","Window",true,false).filter(func(n): return n.title == "设置")
-		check(windows.size()==1,"preferences opens independent window")
-		if windows.size()==1:
-			menu.activated.emit("preferences")
-			check(app.find_children("*","Window",true,false).filter(func(n): return n.title == "设置").size()==1,"repeated open focuses same window")
-			var input: TextEdit = windows[0].find_children("*","TextEdit",true,false)[0]
-			var deadline := Time.get_ticks_msec()+2500
-			while not input.editable and Time.get_ticks_msec()<deadline:
-				await process_frame
-			input.text = "new draft"
-			input.text_changed.emit()
-			check(windows[0].is_dirty(),"loaded form accepts draft edit")
-			root.close_requested.emit()
-			var dialogs: Array = app.find_children("*Dialog","Window",true,false).filter(func(n): return n.visible)
-			check(not dialogs.is_empty(),"app exit asks before discarding settings")
-			if not dialogs.is_empty():
-				dialogs[0].get_cancel_button().pressed.emit()
-			menu.activated.emit("logout")
-			dialogs = app.find_children("*Dialog","Window",true,false).filter(func(n): return n.visible)
-			check(not session.get_session().is_empty() and not dialogs.is_empty(),"logout waits for draft decision")
-			if not dialogs.is_empty():
-				dialogs[0].get_cancel_button().pressed.emit()
-				check(windows[0].is_dirty(),"default cancel retains sensitive drafts")
-				menu.activated.emit("logout")
-				dialogs[0].get_ok_button().pressed.emit()
-				await process_frame
-				check(session.get_session().is_empty(),"confirmed discard completes logout")
+	app.find_child("DynamicsWindow",true,false).get_node("%Publish").pressed.emit()
+	await process_frame
+	var draft = app.find_child("PublishDraft",true,false)
+	check(draft != null,"publishing opens from dynamic navigation")
+	draft.text = "unsaved dynamic"
+	draft.text_changed.emit()
+	app.get_node("%NavLogs").pressed.emit()
+	var logs = app.find_child("LogWindow",true,false)
+	app.get_node("%NavSettings").pressed.emit()
+	await process_frame
+	var window = app.find_child("SettingsWindow",true,false)
+	check(window != null,"settings navigation opens unified window")
+	window.get_node("%ModelsTab").pressed.emit()
+	app.get_node("%NavSettings").pressed.emit()
+	check(app.find_children("SettingsWindow","Window",true,false).size() == 1 and window.get_node("%ModelPage").visible,"reopen preserves selected settings page and singleton")
+	window.get_node("%PreferencesTab").pressed.emit()
+	var input: TextEdit = window.find_child("CustomContextField",true,false)
+	var deadline := Time.get_ticks_msec()+2500
+	while not input.editable and Time.get_ticks_msec()<deadline: await process_frame
+	input.text = "new draft"
+	input.text_changed.emit()
+	check(window.is_dirty(),"loaded form accepts draft edit")
+	var chat = app.find_child("ChatView",true,false)
+	chat.get_node("%Input").text = "unsent chat draft"
+	root.close_requested.emit()
+	var dialog = app.get_node("%ExitDialog")
+	check(dialog.visible and dialog.dialog_text.contains("聊天") and dialog.dialog_text.contains("设置") and dialog.dialog_text.contains("动态"),"one exit prompt summarizes every draft")
+	dialog.get_cancel_button().pressed.emit()
+	check(chat.is_dirty() and window.is_dirty() and draft.text == "unsaved dynamic","cancel preserves every draft")
+	menu.activated.emit("logout")
+	check(not session.get_session().is_empty() and dialog.visible,"logout waits for decision")
+	dialog.get_cancel_button().pressed.emit()
+	menu.activated.emit("logout")
+	dialog.get_ok_button().pressed.emit()
+	await process_frame
+	check(session.get_session().is_empty(),"confirmed discard completes logout")
+	check(not is_instance_valid(window) and logs.visible,"logout closes business windows but preserves logs")
 	app.queue_free()
 	await process_frame
 	for folder in ["logs","reading"]:
