@@ -33,3 +33,9 @@ ModelPage保留setup/is_dirty/validate_changes/save_changes公开接口，移除
 原端的整页保存映射为现有整窗保存，仍先全量预校验、逐项更新成功基线、失败留稿；保存或手动测试中禁用编辑/刷新，手动供应商请求仍明确额度确认，不包含在保存里。原复制配置功能保留且按目标用途校验。
 
 ModelSettings.reload()复用最近start的账号/服务器重新读取需求；stop清空该上下文。UI“刷新需求列表”只在无修改且非测试/保存中可用，避免丢弃草稿；刷新失败明确显示错误并可重试。查询仍使用既有GET /llm/client-model-types，不改服务端协议。
+
+## 导航对齐与原项目图标
+
+主导航五个入口统一左对齐，使用相同主题内边距；动态未读数字不改变文字起点。NavigationButton普通/悬停/选中背景比旧浅色版略深，字体保持深色，焦点描边保留。所有修改在.tscn和主题资源中。
+
+复用client/res/gui/icon.svg与icon.ico，复制到Godot资源目录并记录来源。项目运行图标、自绘标题栏TextureRect和Windows导出图标使用同一原项目图形，不继续用“洛”文字或Godot默认图标。此为静态资源/构建配置，无运行时Red；验证源资源哈希一致、Godot导入、GPU标题栏与导出图标。
