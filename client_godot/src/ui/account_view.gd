@@ -1,68 +1,43 @@
 extends PanelContainer
 signal log_requested
-const Style = preload("res://src/preview/preview_style.gd")
 var _session: Node
-var _form := VBoxContainer.new()
-var _mode := preload("res://src/ui/unified_dropdown.gd").new()
 var _fields: Dictionary = {}
-var _remember := CheckBox.new()
-var _submit := Button.new()
-var _cancel := Button.new()
-var _status := Label.new()
-var _identity := Label.new()
-var _logout := Button.new()
+var _initialized := false
+@onready var _form: VBoxContainer = %Form
+@onready var _mode = %AccountMode
+@onready var _remember: CheckBox = %Remember
+@onready var _submit: Button = %Submit
+@onready var _cancel: Button = %Cancel
+@onready var _status: Label = %Status
+@onready var _identity: Label = %Identity
+@onready var _logout: Button = %Logout
+@onready var _logs: Button = %Logs
 
-func _init(session: Node) -> void:
+func setup(session: Node) -> void:
 	_session = session
+	if is_node_ready():
+		_initialize()
 
 func _ready() -> void:
-	theme = Style.make_theme()
-	add_theme_stylebox_override("panel", Style.box(Color("ffffff"), 18, 28))
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 14)
-	add_child(column)
-	column.add_child(Style.label("和天依再见面", 25))
-	column.add_child(Style.label("登录你的账户，继续这段陪伴。", 13, Color("809ba7")))
-	column.add_child(_form)
-	_form.add_theme_constant_override("separation", 10)
-	_mode.name = "AccountMode"
-	_mode.set_items([{"id":"login","label":"密码登录"},{"id":"register","label":"注册账户"},{"id":"reset","label":"邀请码重置账户"}])
-	_form.add_child(_mode)
-	_mode.activated.connect(func(_index): _apply_mode())
-	for item in [["server", "服务器地址"], ["username", "用户名"], ["password", "密码"], ["confirm", "确认密码"], ["invite", "邀请码"]]:
-		var field := LineEdit.new()
-		field.placeholder_text = item[1]
-		field.tooltip_text = "例如 https://你的服务器地址；本地联调可使用 http://127.0.0.1:端口" if item[0] == "server" else item[1]
-		field.secret = item[0] in ["password", "confirm", "invite"]
-		field.custom_minimum_size.y = 40
-		field.add_theme_stylebox_override("normal", Style.box(Color("f0f5f7"), 8, 10))
-		_fields[item[0]] = field
-		_form.add_child(field)
+	if _session == null:
+		return
+	_initialize()
+
+func _initialize() -> void:
+	if _initialized:
+		return
+	_initialized = true
+	_fields = {"server":%Server,"username":%Username,"password":%Password,"confirm":%Confirm,"invite":%Invite}
+	for field in _fields.values():
 		field.text_submitted.connect(func(_text): _send())
-	_remember.text = "下次自动登录"
-	_form.add_child(_remember)
-	_submit.custom_minimum_size.y = 42
-	Style.primary(_submit)
+	_mode.set_items([{"id":"login","label":"密码登录"},{"id":"register","label":"注册账户"},{"id":"reset","label":"邀请码重置账户"}])
+	_mode.activated.connect(func(_index): _apply_mode())
 	_submit.pressed.connect(_send)
-	_form.add_child(_submit)
-	_cancel.text = "取消请求"
 	_cancel.pressed.connect(_session.cancel)
-	_cancel.hide()
-	column.add_child(_cancel)
-	_identity.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_identity.hide()
-	column.add_child(_identity)
-	_logout.text = "退出登录"
-	_logout.hide()
 	_logout.pressed.connect(func():
 		_clear_secrets()
 		_session.logout())
-	column.add_child(_logout)
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.add_theme_font_size_override("font_size", 13)
-	_status.add_theme_color_override("font_color", Color("607f8d"))
-	column.add_child(_status)
-	column.add_child(Style.button("打开日志",func(): log_requested.emit()))
+	_logs.pressed.connect(func(): log_requested.emit())
 	var defaults: Dictionary = _session.get_login_defaults()
 	_fields.server.text = defaults.server
 	_fields.username.text = defaults.username

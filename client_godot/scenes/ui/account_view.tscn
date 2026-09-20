@@ -1,0 +1,128 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://src/ui/account_view.gd" id="1_script"]
+[ext_resource type="Script" path="res://src/ui/unified_dropdown.gd" id="2_dropdown"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="3_theme"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+content_margin_left = 28.0
+content_margin_top = 28.0
+content_margin_right = 28.0
+content_margin_bottom = 28.0
+bg_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 18
+corner_radius_top_right = 18
+corner_radius_bottom_right = 18
+corner_radius_bottom_left = 18
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_field"]
+content_margin_left = 10.0
+content_margin_top = 10.0
+content_margin_right = 10.0
+content_margin_bottom = 10.0
+bg_color = Color(0.9411765, 0.9607843, 0.96862745, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="AccountForm" type="PanelContainer"]
+theme = ExtResource("3_theme")
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+script = ExtResource("1_script")
+
+[node name="Column" type="VBoxContainer" parent="."]
+theme_override_constants/separation = 14
+
+[node name="Title" type="Label" parent="Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 25
+text = "和天依再见面"
+
+[node name="Subtitle" type="Label" parent="Column"]
+theme_override_colors/font_color = Color(0.5019608, 0.60784316, 0.654902, 1)
+theme_override_font_sizes/font_size = 13
+text = "登录你的账户，继续这段陪伴。"
+
+[node name="Form" type="VBoxContainer" parent="Column"]
+unique_name_in_owner = true
+theme_override_constants/separation = 10
+
+[node name="AccountMode" type="Button" parent="Column/Form"]
+unique_name_in_owner = true
+script = ExtResource("2_dropdown")
+
+[node name="Server" type="LineEdit" parent="Column/Form"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+tooltip_text = "例如 https://你的服务器地址；本地联调可使用 http://127.0.0.1:端口"
+theme_override_styles/normal = SubResource("StyleBoxFlat_field")
+placeholder_text = "服务器地址"
+
+[node name="Username" type="LineEdit" parent="Column/Form"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+tooltip_text = "用户名"
+theme_override_styles/normal = SubResource("StyleBoxFlat_field")
+placeholder_text = "用户名"
+
+[node name="Password" type="LineEdit" parent="Column/Form"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 40)
+tooltip_text = "密码"
+theme_override_styles/normal = SubResource("StyleBoxFlat_field")
+placeholder_text = "密码"
+secret = true
+
+[node name="Confirm" type="LineEdit" parent="Column/Form"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 40)
+tooltip_text = "确认密码"
+theme_override_styles/normal = SubResource("StyleBoxFlat_field")
+placeholder_text = "确认密码"
+secret = true
+
+[node name="Invite" type="LineEdit" parent="Column/Form"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 40)
+tooltip_text = "邀请码"
+theme_override_styles/normal = SubResource("StyleBoxFlat_field")
+placeholder_text = "邀请码"
+secret = true
+
+[node name="Remember" type="CheckBox" parent="Column/Form"]
+unique_name_in_owner = true
+text = "下次自动登录"
+
+[node name="Submit" type="Button" parent="Column/Form"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 42)
+theme_type_variation = &"PrimaryButton"
+text = "登录"
+
+[node name="Cancel" type="Button" parent="Column"]
+unique_name_in_owner = true
+visible = false
+text = "取消请求"
+
+[node name="Identity" type="Label" parent="Column"]
+unique_name_in_owner = true
+visible = false
+autowrap_mode = 3
+
+[node name="Logout" type="Button" parent="Column"]
+unique_name_in_owner = true
+visible = false
+text = "退出登录"
+
+[node name="Status" type="Label" parent="Column"]
+unique_name_in_owner = true
+theme_override_colors/font_color = Color(0.3764706, 0.49803922, 0.5529412, 1)
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 3
+
+[node name="Logs" type="Button" parent="Column"]
+unique_name_in_owner = true
+text = "打开日志"

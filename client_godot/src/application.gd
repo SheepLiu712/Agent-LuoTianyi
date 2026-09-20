@@ -3,7 +3,6 @@ extends Control
 const Api = preload("res://src/network/account_api.gd")
 const Store = preload("res://src/storage/credential_store.gd")
 const Session = preload("res://src/session/account_session.gd")
-const AccountView = preload("res://src/ui/account_view.gd")
 const Avatar = preload("res://src/avatar/avatar_panel.gd")
 const Chat = preload("res://src/session/chat_session.gd")
 const Transport = preload("res://src/network/websocket_transport.gd")
@@ -14,8 +13,9 @@ const Audio = preload("res://src/media/reply_audio.gd")
 var _session: Node
 var _chat: Node
 var _chat_view: Control
-var _split: HSplitContainer
-var _center: CenterContainer
+@onready var _split: HSplitContainer = %Split
+@onready var _center: CenterContainer = %Center
+@onready var _account_form = %AccountForm
 var _avatar: Control
 var _ratio := 0.45
 var _layout_ready := false
@@ -25,25 +25,24 @@ var _expanded_size := Vector2i(1200, 800)
 var _log: RefCounted
 var _log_window: Window
 var _engine_log: Logger
-var _log_problem := Label.new()
+@onready var _log_problem: Label = %LogProblem
 var _windows: Dictionary = {}
-var _exit_dialog := ConfirmationDialog.new()
+@onready var _exit_dialog: ConfirmationDialog = %ExitDialog
 var _exit_action := ""
 var _models: Node
 var _executor: Node
 var _dynamics: Node
 
-func _init(account_session: Node = null, layout_path: String = "user://window_layout.cfg") -> void:
+func setup(account_session: Node = null, layout_path: String = "user://window_layout.cfg") -> void:
 	_session = account_session
 	_layout_path = layout_path
 
 
 func _ready() -> void:
 	get_window().title = preload("res://src/release_info.gd").title()
-	theme = preload("res://src/preview/preview_style.gd").make_theme()
 	if "--preview" in OS.get_cmdline_user_args():
-		_log_problem.free()
-		_exit_dialog.free()
+		_log_problem.queue_free()
+		_exit_dialog.queue_free()
 		_resize_window(Vector2i(1200, 800), Vector2i(960, 640))
 		add_child(load("res://scenes/chat_preview.tscn").instantiate())
 		return
@@ -57,11 +56,6 @@ func _ready() -> void:
 	add_child(_log_window)
 	get_tree().auto_accept_quit = false
 	get_window().close_requested.connect(func(): _request_close("exit"))
-	_exit_dialog.title = "放弃未保存的内容？"
-	_exit_dialog.dialog_text = "设置或动态窗口中有未保存的内容，确认放弃并继续？"
-	_exit_dialog.ok_button_text = "放弃并继续"
-	_exit_dialog.cancel_button_text = "取消"
-	add_child(_exit_dialog)
 	_exit_dialog.confirmed.connect(func(): _finish_close(_exit_action))
 	_exit_dialog.canceled.connect(func(): _exit_action = "")
 	if not ClassDB.class_exists("WindowsSecurity"):
@@ -88,28 +82,15 @@ func _ready() -> void:
 	_executor = preload("res://src/session/model_executor.gd").new(_models,_log)
 	_chat = Chat.new(Transport.new(), _log, Audio.new(_log,Callable(),cache),history,reading,images,_executor)
 	add_child(_chat)
-	_split = HSplitContainer.new()
-	_center = CenterContainer.new()
 	_chat.expression_requested.connect(func(command):
 		if _avatar != null:
 			_avatar.avatar.apply_expression(command))
 	_chat.mouth_changed.connect(func(value):
 		if _avatar != null:
 			_avatar.avatar.set_mouth_openness(value))
-	add_child(_split)
-	_split.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_split.dragger_visibility = SplitContainer.DRAGGER_HIDDEN_COLLAPSED
-	_center.custom_minimum_size.x = 440
-	_center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_split.add_child(_center)
-	var form := AccountView.new(_session)
-	form.custom_minimum_size.x = 390
-	_center.add_child(form)
-	form.log_requested.connect(_log_window.open)
-	add_child(_log_problem)
-	_log_problem.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_log_problem.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	_log_problem.add_theme_color_override("font_color",Color("b72a2a"))
+	_split.show()
+	_account_form.setup(_session)
+	_account_form.log_requested.connect(_log_window.open)
 	_session.changed.connect(_account_changed)
 	var settings := ConfigFile.new()
 	if settings.load(_layout_path) == OK:
