@@ -3,7 +3,7 @@ const Session = preload("res://src/session/chat_session.gd")
 const Transport = preload("res://src/network/websocket_transport.gd")
 const Audio = preload("res://src/media/reply_audio.gd")
 const Cache = preload("res://src/storage/audio_cache.gd")
-const View = preload("res://src/ui/chat_view.gd")
+const VIEW_SCENE := "res://scenes/ui/chat_view.tscn"
 const Avatar = preload("res://src/avatar/avatar_panel.gd")
 var failures: Array[String] = []
 
@@ -28,7 +28,13 @@ func _run() -> void:
 	var avatar := Avatar.new()
 	split.add_child(avatar)
 	avatar.custom_minimum_size.x = 290
-	var view := View.new(session)
+	if not ResourceLoader.exists(VIEW_SCENE):
+		failures.append("chat view scene exists")
+		print(failures)
+		quit(1)
+		return
+	var view = load(VIEW_SCENE).instantiate()
+	view.setup(session)
 	view.custom_minimum_size.x = 440
 	split.add_child(view)
 	split.split_offset = 540

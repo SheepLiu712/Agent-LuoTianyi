@@ -1,4 +1,5 @@
 ﻿extends SceneTree
+const VIEW_SCENE := "res://scenes/ui/chat_view.tscn"
 var failures: Array[String] = []
 func check(value: bool,text: String) -> void:
 	if not value:
@@ -64,7 +65,12 @@ func _run() -> void:
 	check(chat.get_message_audio("history-119").available and not chat.get_message_audio("history-117").available,"history exposes only actual new-client voice cache")
 	check(not chat.get_audio_state().playing,"cached history never auto-plays")
 	root.size = Vector2i(1200,800)
-	var view = load("res://src/ui/chat_view.gd").new(chat)
+	check(ResourceLoader.exists(VIEW_SCENE),"chat view scene exists")
+	if not ResourceLoader.exists(VIEW_SCENE):
+		quit(1)
+		return
+	var view = load(VIEW_SCENE).instantiate()
+	view.setup(chat)
 	root.add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await process_frame

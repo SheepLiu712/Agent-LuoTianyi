@@ -1,7 +1,7 @@
 extends SceneTree
 const Transport = preload("res://src/network/websocket_transport.gd")
 const Session = preload("res://src/session/chat_session.gd")
-const View = preload("res://src/ui/chat_view.gd")
+const VIEW_SCENE := "res://scenes/ui/chat_view.tscn"
 const Audio = preload("res://src/media/reply_audio.gd")
 const Cache = preload("res://src/storage/audio_cache.gd")
 const Log = preload("res://src/storage/client_log.gd")
@@ -55,7 +55,12 @@ func _run() -> void:
 	check(await until(func(): return session.get_state().code == "AUDIO_ERROR"), "decode failure reported to UI")
 	check(session.get_messages().any(func(message): return message.text == "voice-bad"), "malformed audio preserves text")
 	root.size = Vector2i(1200,800)
-	var view := View.new(session)
+	check(ResourceLoader.exists(VIEW_SCENE),"chat view scene exists")
+	if not ResourceLoader.exists(VIEW_SCENE):
+		quit(1)
+		return
+	var view = load(VIEW_SCENE).instantiate()
+	view.setup(session)
 	root.add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await process_frame
@@ -83,7 +88,7 @@ func _run() -> void:
 		check(label.get_instance_id() == original and label.get_selected_text() == "voice-first","progress preserves bubble and selected text")
 		check(session.get_messages() == snapshot and expressions.size() == expression_count,"local replay creates no messages or expression events")
 		check(session.replay("missing") != OK,"session rejects undisplayed voice")
-	var sliders := view.find_children("*", "HSlider",true,false)
+	var sliders = view.find_children("*", "HSlider",true,false)
 	check(sliders.size() == 1, "chat exposes volume control")
 	if sliders.size() == 1:
 		sliders[0].value = .35
@@ -110,7 +115,7 @@ func _run() -> void:
 	check(logs.contains("audio_playback_started") and logs.contains("audio_playback_finished") and logs.contains("audio_error"), "network to playback has diagnostic trail")
 	var menu = view.find_child("ChatMore",true,false)
 	menu.activated.emit("cache")
-	var dialogs := view.find_children("*","ConfirmationDialog",true,false)
+	var dialogs = view.find_children("*","ConfirmationDialog",true,false)
 	check(dialogs.size() == 1 and dialogs[0].visible,"clear cache requires confirmation")
 	if not dialogs.is_empty():
 		check(cache.lookup("voice-first").has("path"),"opening clear dialog does not delete cache")

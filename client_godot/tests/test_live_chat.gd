@@ -1,7 +1,7 @@
 extends SceneTree
 const Transport = preload("res://src/network/websocket_transport.gd")
 const Session = preload("res://src/session/chat_session.gd")
-const View = preload("res://src/ui/chat_view.gd")
+const VIEW_SCENE := "res://scenes/ui/chat_view.tscn"
 const Log = preload("res://src/storage/client_log.gd")
 var failures: Array[String] = []
 var expressions: Array[String] = []
@@ -32,12 +32,17 @@ func _run() -> void:
 	check(session.start({"server":OS.get_environment("GODOT_TEST_SERVER") + "/prefix", "username":"conversation", "message_token":"message-test"}) == OK, "chat starts real transport")
 	check(await until(func(): return session.get_state().phase == "ready"), "chat reports authenticated connection")
 	check(session.send_text(" \n ").is_empty() and session.get_messages().is_empty(), "blank chat rejected")
-	var view := View.new(session)
+	check(ResourceLoader.exists(VIEW_SCENE),"chat view scene exists")
+	if not ResourceLoader.exists(VIEW_SCENE):
+		quit(1)
+		return
+	var view = load(VIEW_SCENE).instantiate()
+	view.setup(session)
 	root.add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	view.logout_requested.connect(func(): logout_seen = true)
 	await process_frame
-	var inputs := view.find_children("*", "TextEdit", true, false)
+	var inputs = view.find_children("*", "TextEdit", true, false)
 	check(inputs.size() == 1, "live chat exposes one composer")
 	if inputs.size() == 1:
 		var input: TextEdit = inputs[0]
@@ -66,11 +71,11 @@ func _run() -> void:
 	check(not log_text.contains("message-test") and not log_text.contains("第一句"), "chat logs exclude tokens and text")
 	await process_frame
 	await process_frame
-	var labels := view.find_children("*", "RichTextLabel", true, false)
+	var labels = view.find_children("*", "RichTextLabel", true, false)
 	check(labels.any(func(label): return label.text == "第一句"), "actual response appears in visible bubble")
-	var captions := view.find_children("*", "Label", true, false)
+	var captions = view.find_children("*", "Label", true, false)
 	check(not captions.any(func(label): return label.text.contains("演示")), "live delivery is not labelled simulated")
-	var menus := view.find_children("ChatMore", "Button", true, false)
+	var menus = view.find_children("ChatMore", "Button", true, false)
 	check(menus.size() == 1, "chat exposes a compact more menu")
 	if menus.size() == 1:
 		var menu = menus[0]
