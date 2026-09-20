@@ -25,3 +25,8 @@ PreferencesPage.setup(controller)、is_dirty()、save_changes()保存并读取�
 ### 确认界面全部场景化（用户补充要求）
 
 所有可见UI由Godot控件场景提供，不允许脚本new控件或add_button创建按钮；列表只实例化已有场景。`decision_dialog.tscn` 是内嵌的自绘 Window（非独立业务窗）：公开 dialog_text/ok_button_text/cancel_button_text/show_save 属性，confirmed/canceled/custom_action(action)信号，以及get_ok_button/get_cancel_button。沿用Window.popup_centered/hide，关闭×和Esc发canceled并隐藏，遮罩外点击不关闭；show_save时场景已有的保存并关闭按钮发custom_action("save")。默认焦点取消。替代代码创建的草稿确认框及现有ConfirmationDialog呈现，业务确认逻辑不变。
+
+
+## 动态内发布浮层
+
+`publish_overlay.tscn` 取代publish_window.tscn；根Control挂publish_overlay.gd，固定遮罩、居中卡片、PublishDraft/PublishButton/状态/取消/关闭及DiscardDialog均为场景节点。setup(controller)、published(id)、is_dirty()、open()和close_requested信号保留业务调用约定；open聚焦草稿；关闭/取消/Esc同一路径，非空或写入中需放弃确认，点击遮罩不关闭。取消确认保留文字和浮层；发布失败保留正文、成功发published并释放浮层。DynamicsWindow仍是独立原生窗口，只维护一个浮层，不新增原生发布窗口；关闭动态的dirty包含发布和所有已打开评论页，确认后释放整个子树。
