@@ -184,7 +184,53 @@ const SCENES := {
 			"Picker": {"file_mode": FileDialog.FILE_MODE_SAVE_FILE,"access": FileDialog.ACCESS_FILESYSTEM,"use_native_dialog": true},
 		},
 		"styleboxes": {"Panel": {"panel": [Color("111923"),0,14]}},
-	},}
+	},
+	"res://scenes/ui/message_audio.tscn": {
+		"root": "MessageAudio",
+		"type": "VBoxContainer",
+		"script": "res://src/ui/message_audio.gd",
+		"setup": "",
+		"unique": ["Row","Play","Wave","Time","Stop","Error"],
+		"properties": {
+			"Row": {"theme_override_constants/separation": 6},
+			"Row/Play": {"theme_override_font_sizes/font_size": 12},
+			"Row/Wave": {"custom_minimum_size": Vector2(96,26),"mouse_filter": Control.MOUSE_FILTER_IGNORE,"played_color": Color("66ccff"),"remaining_color": Color("9eb6c4")},
+			"Row/Time": {"theme_override_font_sizes/font_size": 11,"theme_override_colors/font_color": Color("304553")},
+			"Row/Stop": {"text": "停止","theme_override_font_sizes/font_size": 12},
+			"Error": {"text": "语音未能保存","theme_override_font_sizes/font_size": 12},
+		},
+	},
+	"res://scenes/ui/message_bubble.tscn": {
+		"root": "MessageBubble",
+		"type": "HBoxContainer",
+		"script": "res://src/preview/message_bubble.gd",
+		"setup": "",
+		"unique": ["System","Avatar","Body","Bubble","Content","Text","HistoryPicture","ImageButton","Picture","Caption"],
+		"properties": {
+			"": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"theme_override_constants/separation": 10},
+			"System": {"visible": false,"horizontal_alignment": HORIZONTAL_ALIGNMENT_CENTER,"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"theme_override_font_sizes/font_size": 12,"theme_override_colors/font_color": Color("8a9ba4")},
+			"Avatar": {"custom_minimum_size": Vector2(38,38),"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED,"size_flags_vertical": Control.SIZE_SHRINK_BEGIN},
+			"Body": {"theme_override_constants/separation": 5},
+			"Body/Bubble/Content/Text": {"fit_content": true,"selection_enabled": true,"scroll_active": false,"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART},
+			"Body/Bubble/Content/HistoryPicture": {"visible": false,"custom_minimum_size": Vector2(0,135),"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED},
+			"Body/Bubble/Content/ImageButton": {"visible": false,"text": "加载图片…"},
+			"Body/Bubble/Content/Picture": {"visible": false,"custom_minimum_size": Vector2(0,135),"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED,"mouse_default_cursor_shape": Control.CURSOR_POINTING_HAND},
+			"Body/Caption": {"visible": false,"horizontal_alignment": HORIZONTAL_ALIGNMENT_RIGHT,"theme_override_font_sizes/font_size": 11},
+		},
+		"styleboxes": {"Body/Bubble": {"panel": [Color("ffffff"),12,13]}},
+	},
+	"res://scenes/ui/virtual_message_list.tscn": {
+		"root": "VirtualMessageList",
+		"type": "ScrollContainer",
+		"script": "res://src/ui/virtual_message_list.gd",
+		"setup": "",
+		"unique": ["Canvas"],
+		"properties": {
+			"": {"horizontal_scroll_mode": ScrollContainer.SCROLL_MODE_DISABLED},
+			"Canvas": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL},
+		},
+	},
+}
 var failures: Array[String] = []
 var _temp := ""
 func check(value: bool,text: String) -> void:

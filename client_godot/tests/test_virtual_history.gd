@@ -7,11 +7,11 @@ func check(value: bool,text: String) -> void:
 func _initialize() -> void:
 	_run.call_deferred()
 func _run() -> void:
-	check(ResourceLoader.exists("res://src/ui/virtual_message_list.gd"),"history has virtual message list")
+	check(ResourceLoader.exists("res://scenes/ui/virtual_message_list.tscn"),"history has virtual message list")
 	if not failures.is_empty():
 		quit(1)
 		return
-	var list = load("res://src/ui/virtual_message_list.gd").new()
+	var list = load("res://scenes/ui/virtual_message_list.tscn").instantiate()
 	root.add_child(list)
 	list.size = Vector2(620,500)
 	var messages: Array[Dictionary] = []
