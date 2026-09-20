@@ -55,7 +55,13 @@ func _run() -> void:
 		check(data.contains("ENGINE_WARNING") and not data.contains("synthetic engine detail"),"engine warning captured without raw details")
 	var logger = Log.new(directory+"/logs")
 	logger.record("client_started")
-	var viewer = load("res://src/ui/log_window.gd").new(logger)
+	if not ResourceLoader.exists("res://scenes/ui/log_window.tscn"):
+		check(false,"log window scene available")
+		logger.finish()
+		quit(1)
+		return
+	var viewer = load("res://scenes/ui/log_window.tscn").instantiate()
+	viewer.setup(logger)
 	root.add_child(viewer)
 	viewer.open()
 	await process_frame

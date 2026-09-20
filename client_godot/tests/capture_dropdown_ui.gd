@@ -10,7 +10,7 @@ func _run() -> void:
 	root.size = Vector2i(520,400)
 	root.content_scale_size = Vector2i.ZERO
 	root.theme = load("res://src/preview/preview_style.gd").make_theme()
-	var menu = load("res://src/ui/unified_dropdown.gd").new()
+	var menu = load("res://scenes/ui/unified_dropdown.tscn").instantiate()
 	root.add_child(menu)
 	menu.size = Vector2(220,42)
 	menu.position = Vector2(260,330)

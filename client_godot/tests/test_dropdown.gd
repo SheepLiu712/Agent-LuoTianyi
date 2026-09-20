@@ -7,12 +7,12 @@ func check(value: bool,label: String) -> void:
 func _initialize() -> void:
 	_run.call_deferred()
 func _run() -> void:
-	if not ResourceLoader.exists("res://src/ui/unified_dropdown.gd"):
-		check(false,"shared dropdown available")
+	if not ResourceLoader.exists("res://scenes/ui/unified_dropdown.tscn"):
+		check(false,"shared dropdown scene available")
 		quit(1)
 		return
 	root.size = Vector2i(700,500)
-	var dropdown = load("res://src/ui/unified_dropdown.gd").new()
+	var dropdown = load("res://scenes/ui/unified_dropdown.tscn").instantiate()
 	root.add_child(dropdown)
 	dropdown.position = Vector2(30,30)
 	var actions: Array[String] = []

@@ -141,7 +141,50 @@ const SCENES := {
 			"ExitDialog": {"title": "放弃未保存的内容？","dialog_text": "设置或动态窗口中有未保存的内容，确认放弃并继续？","ok_button_text": "放弃并继续","cancel_button_text": "取消"},
 		},
 	},
-}
+	"res://scenes/ui/unified_dropdown.tscn": {
+		"root": "UnifiedDropdown",
+		"type": "Button",
+		"script": "res://src/ui/unified_dropdown.gd",
+		"setup": "",
+		"unique": ["Menu","Scroll","Rows"],
+		"properties": {
+			"": {"custom_minimum_size": Vector2(140,40),"alignment": HORIZONTAL_ALIGNMENT_LEFT,"clip_text": true},
+			"Menu": {"visible": false,"force_native": true},
+			"Menu/Scroll": {"horizontal_scroll_mode": ScrollContainer.SCROLL_MODE_DISABLED},
+			"Menu/Scroll/Rows": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"theme_override_constants/separation": 0},
+		},
+		"styleboxes": {"Menu": {"panel": [Color("ffffff"),10,6]}},
+	},
+	"res://scenes/ui/dropdown_item.tscn": {
+		"root": "DropdownItem",
+		"type": "Button",
+		"script": "res://src/ui/dropdown_item.gd",
+		"setup": "setup",
+		"unique": [],
+		"properties": {
+			"": {"custom_minimum_size": Vector2(0,42),"alignment": HORIZONTAL_ALIGNMENT_LEFT,"theme_override_colors/font_color": Color("353c43")},
+		},
+		"styleboxes": {"": {"normal": [Color("ffffff"),6,12],"hover": [Color("f0f2f4"),6,12]}},
+	},
+	"res://scenes/ui/log_window.tscn": {
+		"root": "LogWindow",
+		"type": "Window",
+		"script": "res://src/ui/log_window.gd",
+		"setup": "setup",
+		"unique": ["RunsDropdown","LevelDropdown","ModuleDropdown","Search","Text","Follow","CopyButton","ExportButton","Status","Picker"],
+		"properties": {
+			"": {"size": Vector2i(960,620),"min_size": Vector2i(660,400),"visible": false,"transient": false},
+			"Panel/Column/Filters/RunsDropdown": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL},
+			"Panel/Column/Search": {"placeholder_text": "搜索时间、活动或错误码"},
+			"Panel/Column/Text": {"selection_enabled": true,"size_flags_vertical": Control.SIZE_EXPAND_FILL,"theme_override_colors/default_color": Color("d6e5ee"),"theme_override_font_sizes/normal_font_size": 14},
+			"Panel/Column/Actions/Follow": {"text": "跟随最新","button_pressed": true,"theme_override_colors/font_color": Color("d6e5ee")},
+			"Panel/Column/Actions/CopyButton": {"text": "复制显示记录"},
+			"Panel/Column/Actions/ExportButton": {"text": "导出完整诊断 ZIP"},
+			"Panel/Column/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"theme_override_colors/font_color": Color("ffd58a")},
+			"Picker": {"file_mode": FileDialog.FILE_MODE_SAVE_FILE,"access": FileDialog.ACCESS_FILESYSTEM,"use_native_dialog": true},
+		},
+		"styleboxes": {"Panel": {"panel": [Color("111923"),0,14]}},
+	},}
 var failures: Array[String] = []
 var _temp := ""
 func check(value: bool,text: String) -> void:
@@ -181,7 +224,8 @@ func check_scene(path: String,spec: Dictionary) -> void:
 	check(instance.is_class(spec["type"]),"root node type is %s: %s"%[spec["type"],path])
 	var script: Script = instance.get_script()
 	check(script != null and script.resource_path == spec["script"],"root script is %s: %s"%[spec["script"],path])
-	check(script != null and script.get_script_method_list().any(func(method): return method.name == spec["setup"]),"script exposes %s(): %s"%[spec["setup"],path])
+	if not spec["setup"].is_empty():
+		check(script != null and script.get_script_method_list().any(func(method): return method.name == spec["setup"]),"script exposes %s(): %s"%[spec["setup"],path])
 	check(init_argument_count(script) == 0,"script needs no _init arguments: "+path)
 	for name in spec["unique"]:
 		var owned := find_unique(instance,instance,name)
