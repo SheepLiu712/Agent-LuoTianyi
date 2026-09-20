@@ -172,7 +172,8 @@ func _refresh() -> void:
 
 func _open_publisher() -> void:
 	if not is_instance_valid(_publisher):
-		_publisher = preload("res://src/ui/publish_window.gd").new(_controller)
+		_publisher = load("res://scenes/ui/publish_window.tscn").instantiate()
+		_publisher.setup(_controller)
 		add_child(_publisher)
 		_publisher.published.connect(func(id):
 			_update()
