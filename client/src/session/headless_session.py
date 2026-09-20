@@ -295,7 +295,19 @@ class HeadlessSession:
     def overwrite_preferences(self, preferences: dict) -> dict:
         if self.state != SessionState.READY:
             raise SessionNotReadyError("session is not ready")
-        return self._network_client.overwrite_preferences(preferences)
+        response = self._network_client.overwrite_preferences(preferences)
+        if not isinstance(response, dict):
+            return {"ok": False, "error": "invalid preference response"}
+        if response.get("ok") is True or response.get("status") == "success":
+            return {"ok": True}
+        return {
+            "ok": False,
+            "error": str(
+                response.get("error")
+                or response.get("message")
+                or "server rejected input"
+            ),
+        }
 
     def get_reply(self, reply_uuid: str) -> AggregatedReply | None:
         with self._condition:
