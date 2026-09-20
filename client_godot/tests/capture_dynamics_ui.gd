@@ -59,7 +59,7 @@ func _run() -> void:
 	window.mode = Window.MODE_MINIMIZED
 	await create_timer(.15).timeout
 	check(root.mode != Window.MODE_MINIMIZED,"minimizing dynamics leaves main window open")
-	window.mode = Window.MODE_WINDOWED
+	window.open()
 	await create_timer(.15).timeout
 	root.mode = Window.MODE_MINIMIZED
 	await create_timer(.3).timeout
