@@ -1,5 +1,7 @@
 # Godot 客户端 interface
 
+窗口重设计增量契约见 [window-redesign](window-redesign.md)，其明确条目替代下文冲突的旧窗口呈现。
+
 ## ModelStore 与 ModelSettings：按用途的本地模型配置
 
 `ModelStore(security,root="user://models")` RefCounted：`set_scope(server,username)`、`read(type_id) -> Dictionary`、`save(type_id,config,allow_plain=false) -> Dictionary`。目录按规范化服务器/账户哈希，用途文件按 type_id 哈希；只保存 enabled/provider/base_url/model/model_kind/model_capabilities/params 与受保护 api_key。DPAPI entropy 包含服务器/账号/用途；保护失败返回 PLAINTEXT_CONFIRMATION_REQUIRED，只有调用方明确 allow_plain 才写 api_key_plain，不自动降级。原子文件写入；解密失败 config 禁用并返回 KEY_UNAVAILABLE，不冒充空密钥成功。
