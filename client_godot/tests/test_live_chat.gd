@@ -73,7 +73,7 @@ func _run() -> void:
 	check(labels.any(func(label): return label.text == "第一句"), "actual response appears in visible bubble")
 	var captions = view.find_children("*", "Label", true, false)
 	check(not captions.any(func(label): return label.text.contains("演示")), "live delivery is not labelled simulated")
-	check(view.get_node_or_null("%CacheButton") is Button,"cache action stays available in chat")
+	check(view.get_node_or_null("%CacheButton") == null,"cache management has moved to settings")
 	session.stop()
 	check(session.get_messages().is_empty() and session.get_state().phase == "idle", "stop clears old account messages")
 	if inputs.size() == 1:

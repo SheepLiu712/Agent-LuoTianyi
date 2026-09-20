@@ -1,7 +1,6 @@
 extends MarginContainer
 signal image_requested(provider: Callable)
 @onready var _margin: MarginContainer = %Margin
-@onready var _clear_dialog: Window = %ClearDialog
 @onready var _status: Label = %Status
 @onready var _history_status: Label = %HistoryStatus
 @onready var _history_retry: Button = %HistoryRetry
@@ -34,10 +33,6 @@ func _initialize() -> void:
 	if _initialized:
 		return
 	_initialized = true
-	%CacheButton.pressed.connect(func():
-		_clear_dialog.popup_centered()
-		_clear_dialog.get_cancel_button().grab_focus())
-	_clear_dialog.confirmed.connect(func(): _session.clear_cache())
 	_history_retry.pressed.connect(_session.retry_history)
 	_history_skip.pressed.connect(_session.skip_history)
 	_scroll.audio_action.connect(_audio_action)

@@ -202,7 +202,7 @@ const SCENES := {
 		"type": "MarginContainer",
 		"script": "res://src/ui/chat_view.gd",
 		"setup": "setup",
-		"unique": ["Margin","CacheButton","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Empty","Latest","Unread","Volume","StopVoice","Input","Send","ClearDialog"],
+		"unique": ["Margin","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Empty","Latest","Unread","Volume","StopVoice","Input","Send"],
 		"properties": {
 			"Background": {"color": Color("f5f8fb"),"mouse_filter": Control.MOUSE_FILTER_IGNORE},
 			"Margin": {"theme_override_constants/margin_left": 24,"theme_override_constants/margin_right": 24,"theme_override_constants/margin_top": 24,"theme_override_constants/margin_bottom": 24},
@@ -225,7 +225,6 @@ const SCENES := {
 			"Margin/Column/Input": {"custom_minimum_size": Vector2(0,96),"placeholder_text": "想说些什么？","wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
 			"Margin/Column/Footer/Hint": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"text": "Enter 发送 · Shift + Enter 换行","theme_override_font_sizes/font_size": 11,"theme_override_colors/font_color": Color("94a5af")},
 			"Margin/Column/Footer/Send": {"custom_minimum_size": Vector2(96,0),"theme_type_variation": &"PrimaryButton","text": "发送  ↑"},
-			"ClearDialog": {"title": "清理语音缓存","dialog_text": "清理当前服务器、本账号保存的全部语音？\n聊天文字保留；已清理的语音将无法重放。","ok_button_text": "清理","cancel_button_text": "取消","visible": false},
 		},
 	},
 	"res://scenes/ui/image_window.tscn": {

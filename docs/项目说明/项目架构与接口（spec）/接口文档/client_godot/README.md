@@ -545,3 +545,6 @@ DynamicDetail.refresh_comments() 由窗口调用，转交完整分页刷新并�
 - main.tscn 常驻隐藏的 SecurityError Label 承载既有组件缺失文案，运行时只切换可见性。动态菜单分隔项实例化 dropdown_separator.tscn；公开稳定 ID、键盘导航及菜单行为不变。
 - 动态行普通/选中样式移入 app_theme.tres 的 DynamicsPost/normal 与 selected（白底/浅蓝底、圆角10、内边距10、选中左侧4px主题蓝）；脚本只选择资源。下拉默认/选中色、消息投递状态色与 INFO/WARN/ERROR 日志级别色同样从主题读取，字面颜色保持不变。
 - 测试在未入树、未注入业务依赖时核查真实下拉子场景、分隔线与隐藏错误提示；沿用设置草稿、模型、下拉交互和动态选择回归，GPU 对比设置与动态截图。
+
+
+0.1.2用户反馈后的角色交互与语音缓存呈现，以[反馈修正interface](feedback-012.md)为准；对应条目替代此前冲突的旧入口描述。

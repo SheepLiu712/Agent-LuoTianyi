@@ -223,7 +223,7 @@ func _open_settings(kind: String) -> void:
 	if key == "settings":
 		controller = preload("res://src/session/preferences_controller.gd").new(preload("res://src/network/json_request.gd").new(),_log)
 		window = preload("res://scenes/ui/settings_window.tscn").instantiate()
-		window.setup(controller,_models,_executor)
+		window.setup(controller,_models,_executor,_chat.clear_cache)
 	else:
 		window = preload("res://scenes/ui/dynamics_window.tscn").instantiate()
 		window.setup(_dynamics,_layout_path.get_base_dir().path_join("dynamics-window.cfg"))

@@ -7,7 +7,7 @@ min_size = Vector2i(480, 220)
 visible = false
 borderless = true
 unresizable = true
-wrap_controls = true
+transparent_bg = true
 transient = true
 exclusive = true
 theme = ExtResource("theme")
@@ -35,10 +35,14 @@ tooltip_text = "取消并关闭"
 flat = true
 custom_minimum_size = Vector2(36,36)
 
-[node name="Message" type="Label" parent="Panel/Column"]
+[node name="MessageScroll" type="ScrollContainer" parent="Panel/Column"]
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+
+[node name="Message" type="Label" parent="Panel/Column/MessageScroll"]
 unique_name_in_owner = true
 autowrap_mode = 3
-size_flags_vertical = 3
+size_flags_horizontal = 3
 
 [node name="Actions" type="HBoxContainer" parent="Panel/Column"]
 alignment = 2

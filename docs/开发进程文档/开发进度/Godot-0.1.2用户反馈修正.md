@@ -16,3 +16,10 @@
 - SPEC e116c42；Red 5601b16、c1946da；Green为本记录提交。GPU test_avatar_interaction通过真实网格头/手/身体与背景、视线跟随/回正、圆环出现/释放；loopback test_touch_delivery通过协议、冷却合并、在线语音抑制和重新登录清计数。
 - headless根窗口报告MODE_MINIMIZED，角色按产品规则停绘，因此完整视图交互测试仅用于GPU，不通过修改产品停绘规则迁就测试。眨眼基础测试仍可headless验证独立驱动。
 - 作者自审：未给旧资源加臆测HitArea或矩形热区，映射附Moc SHA-256及Core API来源，未新增原生扩展或改变服务端协议；可见反馈由场景控件绘制。
+
+## 2026-09-20 语音缓存迁入设置、确认白框修复
+
+- GPU复现旧确认框实际580×1073，取消按钮y=1011超出可见范围；根因为Window.wrap_controls与自动换行正文共同抬高窗口。取消wrap_controls、长正文放场景ScrollContainer后稳定580×240，底部操作可达。GPU test_decision_layout同时验证窗口/按钮范围和真实Esc输入。
+- 新增设置“语音缓存”页并删除聊天顶部缓存入口；清理通过Application注入既有ChatSession.clear_cache，确认/取消、处理中和结果均由场景控件承载。只清当前账号，不参与保存全部或dirty判断。
+- SPEC 0ac9c1d；Red 9becd67；Green为本记录提交。test_audio_settings headless/GPU均PASS，真实缓存文件验证取消保留/确认清理/结果文案；test_ui_scenes、test_voice_chat、test_unified_settings均PASS。GPU截图为artifacts/audio-settings-confirm.png。
+- 作者自审：原白框有真实尺寸复现，不以pressed信号可触发代替按钮可见性；无新的缓存存储或清理策略，不写其他账号数据。

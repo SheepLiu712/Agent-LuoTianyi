@@ -3,20 +3,25 @@ signal saving_finished(ok: bool)
 var _preferences: Node
 var _models: Node
 var _executor: Node
+var _clear_cache: Callable
 var _saving := false
 var _close_after_save := false
 var _hidden_by_main := false
 @onready var _preferences_page = %PreferencesPage
 @onready var _model_page = %ModelPage
 
-func setup(preferences: Node, models: Node, executor: Node = null) -> void:
+func setup(preferences: Node, models: Node, executor: Node = null, clear_cache: Callable = Callable()) -> void:
 	_preferences = preferences
 	_models = models
 	_executor = executor
+	_clear_cache = clear_cache
 
 func _ready() -> void:
 	_preferences_page.setup(_preferences)
 	_model_page.setup(_models,_executor)
+	%AudioPage.setup(_clear_cache)
+	%AudioTab.disabled = not _clear_cache.is_valid()
+	%AudioTab.pressed.connect(func(): select_page("audio"))
 	%PreferencesTab.disabled = _preferences == null
 	%ModelsTab.disabled = _models == null
 	%PreferencesTab.pressed.connect(func(): select_page("preferences"))
@@ -35,6 +40,8 @@ func _ready() -> void:
 func select_page(page: String) -> void:
 	_preferences_page.visible = page == "preferences"
 	_model_page.visible = page == "models"
+	%AudioPage.visible = page == "audio"
+	%AudioTab.button_pressed = page == "audio"
 	%PreferencesTab.button_pressed = page == "preferences"
 	%ModelsTab.button_pressed = page == "models"
 

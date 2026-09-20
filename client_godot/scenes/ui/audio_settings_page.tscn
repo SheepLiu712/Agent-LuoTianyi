@@ -1,0 +1,44 @@
+[gd_scene load_steps=4 format=3]
+[ext_resource type="Script" path="res://src/ui/audio_settings_page.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="decision"]
+[node name="AudioSettingsPage" type="MarginContainer"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme = ExtResource("theme")
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_bottom = 24
+script = ExtResource("script")
+[node name="Column" type="VBoxContainer" parent="."]
+theme_override_constants/separation = 16
+[node name="Title" type="Label" parent="Column"]
+text = "语音缓存"
+theme_override_font_sizes/font_size = 22
+[node name="Description" type="Label" parent="Column"]
+text = "已接收的完整语音保存在这台电脑上，供消息重放。\n缓存按服务器和账号隔离，退出登录或重启后仍保留，不会自动清理。"
+autowrap_mode = 3
+[node name="Scope" type="Label" parent="Column"]
+text = "清理仅作用于当前服务器和账号。聊天文字保留，已经清理的语音将无法重放。正在播放的在线语音不会被打断。"
+autowrap_mode = 3
+[node name="ClearCache" type="Button" parent="Column"]
+unique_name_in_owner = true
+text = "清理本账号语音缓存…"
+size_flags_horizontal = 0
+custom_minimum_size = Vector2(0, 40)
+[node name="CacheStatus" type="Label" parent="Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+[node name="Spacer" type="Control" parent="Column"]
+size_flags_vertical = 3
+mouse_filter = 2
+[node name="Hint" type="Label" parent="Column"]
+text = "缓存清理是单独操作，不会随“保存全部修改”自动执行。"
+autowrap_mode = 3
+[node name="ClearDialog" parent="." instance=ExtResource("decision")]
+unique_name_in_owner = true
+title = "清理语音缓存"
+dialog_text = "清理当前服务器、本账号保存的全部语音？\n聊天文字保留；已清理的语音将无法重放。"
+ok_button_text = "清理"
+cancel_button_text = "取消"

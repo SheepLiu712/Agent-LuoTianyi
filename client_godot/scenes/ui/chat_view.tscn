@@ -7,7 +7,6 @@
 [ext_resource type="Script" path="res://src/preview/composer_input.gd" id="5_composer"]
 [ext_resource type="PackedScene" path="res://scenes/ui/virtual_message_list.tscn" id="7_messages"]
 
-[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
 shader = ExtResource("3_shader")
@@ -54,13 +53,6 @@ unique_name_in_owner = true
 theme_override_colors/font_color = Color(0.376470596, 0.498039216, 0.552941203, 1)
 theme_override_font_sizes/font_size = 13
 autowrap_mode = 3
-
-[node name="CacheButton" type="Button" parent="Margin/Column/Heading"]
-unique_name_in_owner = true
-text = "语音缓存"
-tooltip_text = "清理当前服务器、本账号的语音缓存"
-theme_override_font_sizes/font_size = 12
-custom_minimum_size = Vector2(0,36)
 
 [node name="SepTop" type="HSeparator" parent="Margin/Column"]
 
@@ -141,11 +133,3 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(96, 0)
 theme_type_variation = &"PrimaryButton"
 text = "发送  ↑"
-
-[node name="ClearDialog" parent="." instance=ExtResource("Decision")]
-unique_name_in_owner = true
-title = "清理语音缓存"
-visible = false
-dialog_text = "清理当前服务器、本账号保存的全部语音？\n聊天文字保留；已清理的语音将无法重放。"
-ok_button_text = "清理"
-cancel_button_text = "取消"

@@ -113,9 +113,15 @@ func _run() -> void:
 	check(session.get_messages().any(func(message): return message.text == "voice-disconnect"), "disconnect preserves displayed voice text")
 	var logs := JSON.stringify(logger.read_entries())
 	check(logs.contains("audio_playback_started") and logs.contains("audio_playback_finished") and logs.contains("audio_error"), "network to playback has diagnostic trail")
-	var menu = view.get_node("%CacheButton")
+	var settings = load("res://scenes/ui/settings_window.tscn").instantiate()
+	settings.setup(null, null, null, session.clear_cache)
+	root.add_child(settings)
+	settings.open()
+	settings.select_page("audio")
+	var page = settings.get_node("%AudioPage")
+	var menu = page.get_node("%ClearCache")
 	menu.pressed.emit()
-	var dialogs = view.find_children("*Dialog","Window",true,false)
+	var dialogs = page.find_children("*Dialog","Window",true,false)
 	check(dialogs.size() == 1 and dialogs[0].visible,"clear cache requires confirmation")
 	if not dialogs.is_empty():
 		check(cache.lookup("voice-first").has("path"),"opening clear dialog does not delete cache")
@@ -123,11 +129,12 @@ func _run() -> void:
 		check(cache.lookup("voice-first").has("path"),"cancel keeps cache")
 		menu.pressed.emit()
 		dialogs[0].confirmed.emit()
-		await process_frame
+		await create_timer(0.1).timeout
 		check(button(view,"重放") == null and cache.lookup("voice-first").is_empty(),"confirmed clear removes replay buttons but keeps text")
 	check(session.get_messages().any(func(message): return message.text == "voice-first"),"clearing cache preserves chat text")
 	session.stop()
 	check(cache.lookup("voice-first").is_empty(),"logout closes cache scope")
+	settings.queue_free()
 	view.queue_free()
 	session.queue_free()
 	await process_frame

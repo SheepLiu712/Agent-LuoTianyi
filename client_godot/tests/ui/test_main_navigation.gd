@@ -18,7 +18,7 @@ func run() -> void:
 		check(not chat.is_dirty(),"empty composer is clean")
 		chat.get_node("%Input").text = "未发送草稿"
 		check(chat.is_dirty(),"unsent text participates in exit guard")
-	check(chat.get_node_or_null("%CacheButton") is Button,"chat cache action remains accessible")
+	check(chat.get_node_or_null("%CacheButton") == null,"cache management has moved to settings")
 	chat.queue_free()
 	await process_frame
 	print("Main navigation: ","PASS" if failures.is_empty() else "FAIL")

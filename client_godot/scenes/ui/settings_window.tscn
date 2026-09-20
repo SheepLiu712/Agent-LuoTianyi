@@ -5,6 +5,7 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/preferences_page.tscn" id="preferences"]
 [ext_resource type="PackedScene" path="res://scenes/ui/model_page.tscn" id="models"]
 [ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
+[ext_resource type="PackedScene" path="res://scenes/ui/audio_settings_page.tscn" id="audio"]
 
 [node name="SettingsWindow" type="Window"]
 title = "设置"
@@ -48,6 +49,12 @@ text = "模型配置"
 toggle_mode = true
 custom_minimum_size = Vector2(0, 40)
 
+[node name="AudioTab" type="Button" parent="Body/Column/Pages/Sidebar"]
+unique_name_in_owner = true
+text = "语音缓存"
+toggle_mode = true
+custom_minimum_size = Vector2(0, 40)
+
 [node name="Content" type="Control" parent="Body/Column/Pages"]
 size_flags_horizontal = 3
 size_flags_vertical = 3
@@ -56,6 +63,10 @@ size_flags_vertical = 3
 unique_name_in_owner = true
 
 [node name="ModelPage" parent="Body/Column/Pages/Content" instance=ExtResource("models")]
+unique_name_in_owner = true
+visible = false
+
+[node name="AudioPage" parent="Body/Column/Pages/Content" instance=ExtResource("audio")]
 unique_name_in_owner = true
 visible = false
 
