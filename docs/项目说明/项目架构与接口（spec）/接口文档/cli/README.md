@@ -1,6 +1,6 @@
 # CLI 端到端测试客户端契约
 
-- 状态：§1、§2 为**当前 interface**（§1 由 S3/S4/S5/S6/S7 交付，§2 由 S2 交付）；§3 待后续切片逐项落地
+- 状态：§1、§2 为**当前 interface**（§1 由 S3/S4/S5/S6/S7/S8 交付，§2 由 S2 交付）；§3 待后续切片逐项落地
 - 关联：PRD [CLI 端到端测试客户端规格](../../../开发进程文档/需求说明（PRD）/CLI端到端测试客户端规格.md)；实施计划 [CLI端到端测试客户端-可行性分析与实施计划](../../../开发进程文档/实施计划/CLI端到端测试客户端-可行性分析与实施计划.md)；Issue #175
 - 阅读约定：与 [`../README.md`](../README.md) 一致——只列跨调用者的稳定入口；每条记录"谁在调用 / 输入输出 / 调用后会发生什么 / 失败时会怎样"；未实现项必须标注"目标"。
 
@@ -160,6 +160,22 @@
 - 失败分类：`DYNAMICS_NOT_OPENED`、`DYNAMICS_NOT_VISIBLE`、`INVALID_INPUT` → `category="input"`（不可见为 `assertion`）；`ACK_REJECTED`/`TIMEOUT` 沿用 S3 语义。
 - 门面增补：`HeadlessSession.get_dynamics(limit=50, cursor=None)`、`get_dynamic_comments(dynamic_id, limit=100, cursor=None)`、`create_dynamic(content)`、`mark_dynamics_read()`。
 - 外部运行前置：隔离测试账号、唯一数据前缀、清理步骤（计划 §5.5）；真实读取依赖受测部署可达。
+
+#### 1.10 偏好动作（S8 交付）
+
+会话级偏好快照（CLI 执行器持有）。
+
+| 动作 | 必需/可选参数 | 成功行为 |
+| --- | --- | --- |
+| `preferences.open` | — | 从服务端读取完整偏好对象并保存为当前快照；输出 `preferences`（完整 JSON 对象） |
+| `preferences.read` | — | 输出当前快照；无快照时先自动执行打开（读取服务端）再输出 |
+| `preferences.update` | 必需 `values`（对象）；可选 `replace`（布尔，默认 false） | 默认"读取最新 → 按键浅合并 → 覆盖接口 → 重新读取 → 比较目标键"；`replace=true` 时以 `values` 完整覆盖；成功输出 `updated_keys`、`confirmed=true` 与重新读取后的 `preferences` |
+
+- 更新失败（目标键读回不一致）报 `PREFERENCES_NOT_CONFIRMED`（`category="assertion"`），数据中仅保留目标键的 `expected`/`actual` 差异摘要，不转储完整个人信息；失败时保留更新前快照（不更新会话快照）。
+- `INVALID_INPUT`：`values` 缺失或非对象、`replace` 非布尔。
+- `ACK_REJECTED` / `TIMEOUT` 沿用 S3 语义（覆盖接口拒绝）。
+- 门面增补：`HeadlessSession.get_preferences()`、`overwrite_preferences(preferences)`。
+- 真实链路依赖受测部署可达；external 账号数据由夹具管理（计划 §5.5）。
 
 ### 2. 无 GUI 会话门面（当前 interface，S2 交付）
 

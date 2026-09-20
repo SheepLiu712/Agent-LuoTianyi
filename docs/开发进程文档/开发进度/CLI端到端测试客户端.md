@@ -63,3 +63,11 @@
 - commit 或 PR：分支 `feat/cli-e2e-s7-dynamics-actions`：`a0ac9f9`（SPEC）/ `fcf7357`（Red）/ `6ff7217`（Green）。
 - 验证及结果：focused `tests/test_cli_dynamics_actions.py` → 13 passed；client 回归 → 141 passed（排除 3 个既有收集失败文件）。
 - 未验证范围：真实动态接口形状与分页行为（依赖受测部署可达性与隔离账号）、发布副作用的清理与重复运行策略（S9 场景层）。
+
+### 2026-09-20 S8 偏好动作
+
+- 交付行为：`preferences.open` / `read` / `update`（会话级快照；无快照时读取动作自动打开；默认按键浅合并、显式 `replace` 完整覆盖；覆盖后重新读取确认目标键，不一致报 `PREFERENCES_NOT_CONFIRMED` 且仅保留目标键差异摘要、失败保留更新前快照）；门面增补 `get_preferences` / `overwrite_preferences`。
+- interface spec：`docs/项目说明/项目架构与接口（spec）/接口文档/cli/README.md` §1.10。
+- commit 或 PR：分支 `feat/cli-e2e-s8-preferences-actions`：`53fb008`（SPEC）/ `ace6c7b`（Red）/ `3f4d1f6`（Green）。
+- 验证及结果：focused `tests/test_cli_preferences_actions.py` → 13 passed；client 回归 → 154 passed（排除 3 个既有收集失败文件）。
+- 未验证范围：真实偏好接口与账号数据（依赖受测部署与隔离账号）、嵌套字段合并语义（当前为顶层浅合并）。
