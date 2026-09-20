@@ -531,3 +531,13 @@ DynamicDetail.refresh_comments() 由窗口调用，转交完整分页刷新并�
 - 脚本以 %Name 绑定，保留场景切换、动态气泡场景实例化、图片浮层实例化、口型、输入增高、滚动跟随与配置读写。Empty 不再随刷新创建/销毁；选择文件取消后同一个场景内 FileDialog 可再次打开。
 - 删除 preview_style.gd 及其 uid。草稿窗口直接使用子场景已经绑定的 app_theme；下拉选中态颜色从主题资源取得；截图脚本直接加载同一主题。主题测试保留字面值与材质/图标契约，删除对已废弃工厂的比较。
 - 测试从场景进入树之前检查编辑器可见的布局，再经公开输入/选项信号验证五种模拟场景、失败保留草稿、图片取消、Enter/Shift+Enter；GPU 比对五种场景的聊天区域，Live2D 动画区域只做视觉核对。
+
+
+### 场景化遗漏修正：固定子视图与状态样式（0.1.2）
+
+本条替代第三/五片的临时插入位和代码分隔线、第八片代码构造选中 StyleBox 的过渡描述，落实 PRD 已授权的完整节点布局与资源样式；不增加业务公开方法或配置。
+
+- preferences_window 的 RelationshipPresets/SpeakingStylePresets、model_window 的 SelectorSlot/CopySlot 保留既有唯一节点名，改为内嵌 unified_dropdown.tscn，入树前即可在编辑器看到完整下拉布局。脚本只填选项、连接信号，不删除标记再插入静态节点。
+- main.tscn 常驻隐藏的 SecurityError Label 承载既有组件缺失文案，运行时只切换可见性。动态菜单分隔项实例化 dropdown_separator.tscn；公开稳定 ID、键盘导航及菜单行为不变。
+- 动态行普通/选中样式移入 app_theme.tres 的 DynamicsPost/normal 与 selected（白底/浅蓝底、圆角10、内边距10、选中左侧4px主题蓝）；脚本只选择资源。下拉默认/选中色与消息投递状态色同样从主题读取，字面颜色保持不变。
+- 测试在未入树、未注入业务依赖时核查真实下拉子场景、分隔线与隐藏错误提示；沿用设置草稿、模型、下拉交互和动态选择回归，GPU 对比设置与动态截图。
