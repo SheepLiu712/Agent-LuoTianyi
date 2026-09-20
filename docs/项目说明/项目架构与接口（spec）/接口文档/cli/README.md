@@ -1,6 +1,6 @@
 # CLI 端到端测试客户端契约
 
-- 状态：§1、§2 为**当前 interface**（§1 由 S3/S4/S5/S6/S7/S8 交付，§2 由 S2 交付）；§3 待后续切片逐项落地
+- 状态：§1、§2 为**当前 interface**（§1 由 S3-S9 交付，§2 由 S2 交付）；§3 保留为后续扩展占位
 - 关联：PRD [CLI 端到端测试客户端规格](../../../开发进程文档/需求说明（PRD）/CLI端到端测试客户端规格.md)；实施计划 [CLI端到端测试客户端-可行性分析与实施计划](../../../开发进程文档/实施计划/CLI端到端测试客户端-可行性分析与实施计划.md)；Issue #175
 - 阅读约定：与 [`../README.md`](../README.md) 一致——只列跨调用者的稳定入口；每条记录"谁在调用 / 输入输出 / 调用后会发生什么 / 失败时会怎样"；未实现项必须标注"目标"。
 
@@ -176,6 +176,44 @@
 - `ACK_REJECTED` / `TIMEOUT` 沿用 S3 语义（覆盖接口拒绝）。
 - 门面增补：`HeadlessSession.get_preferences()`、`overwrite_preferences(preferences)`。
 - 真实链路依赖受测部署可达；external 账号数据由夹具管理（计划 §5.5）。
+
+#### 1.11 场景引擎与报告（S9 交付）
+
+场景输入（JSON 文件，`--scenario`）：
+
+```json
+{
+  "actions": [{"action": "session.connect", "params": {}}, {"action": "session.status"}],
+  "on_failure": "stop_side_effects"
+}
+```
+
+- `actions`：非空数组，逐项为既有动作信封（`action`/`action_id?`/`params?`）；按顺序在同一会话内执行。
+- `on_failure`：可选，默认 `stop_side_effects`；另一值 `continue`。
+- 非法场景（文件缺失/非 JSON/非对象、`actions` 缺失或为空、条目缺有效动作名、`on_failure` 非法）→ 单条记录（`action="scenario.run"`、`status="failed"`、`error.code="INVALID_SCENARIO"`、`category="input"`）、退出码 3。
+
+失败策略：
+
+- 出现 `failed`/`timed_out` 后，默认仅继续执行**只读白名单**动作：`session.status`、`reply.read`、`reply.wait`、`preferences.read`、`dynamics.read`、`dynamics.load`、`audio.replay`、`session.close`；其余动作记为 `status="skipped"`（`data.reason="after_failure"`，不贡献退出码）。
+- `on_failure="continue"` 时不做跳过。
+
+终态 → 退出码矩阵：
+
+| 终态 | 退出码贡献 |
+| --- | --- |
+| `passed` / `suppressed` / `skipped` | 0 |
+| `failed`（断言=2 / 输入=3 / 认证传输=4，沿用 S3 分类） | 2 / 3 / 4 |
+| `timed_out` | 5 |
+
+- 场景最终退出码 = 各动作出现过的最大非零退出码（全为 0 则 0）。
+- 每个动作后追加一条终态记录；场景结束追加一条汇总记录：`action="scenario.run"`、`event="scenario_result"`、`status=passed|failed`、`data={action_count, passed, failed, timed_out, skipped, suppressed, exit_code}`。
+
+报告（`--report PATH`，可选）：
+
+- 单文件 JSON；默认只含脱敏结构化元数据：每个动作记录 `action`/`status`/`duration_ms`/`correlation_id`/`error` 与 `data_keys`（仅键名，不含内容值）；另含场景 `summary`、起止时间与最终 `exit_code`。
+- `--report-include-content` 显式开启后，动作记录改用 `data`（完整、经统一脱敏）替代 `data_keys`。
+- 保留与清理：只写该单文件、不产生其他产物；清理由调用方负责（报告路径由调用方指定）。写入失败时汇总记录附 `error.code="REPORT_WRITE_FAILED"`（`category="input"`）并计入退出码。
+- 报告与 stdout 均不得出现凭据、音频 Base64 或本地绝对路径。
 
 ### 2. 无 GUI 会话门面（当前 interface，S2 交付）
 
