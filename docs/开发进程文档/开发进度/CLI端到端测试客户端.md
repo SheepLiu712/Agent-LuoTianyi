@@ -87,3 +87,15 @@
 - commit 或 PR：分支 `feat/cli-e2e-s3b-next-reply`：`2be86a0`（SPEC）/ `28a5b17`（Red）/ `d00e264`（Green）/ `f31d5df`（编码修复）。
 - 验证及结果：focused 6 passed + 编码回归 1 passed；client 回归 178 passed；**真实服务器（release）全链路首测通过**：注册（邀请码）→ `session.connect` ready（1.26s）→ `chat.send_text` ACK（110ms）→ `reply.wait` 完整回复（文本"收到啦，CLI 端到端测试客户端你好呀！"、表情 ×4"卖萌"、TTS 音频 296,012 字节 WAV 落盘索引），退出码 0、stdout 纯 UTF-8 JSONL、日志全在 stderr。
 - 未验证范围：`audio.replay` 真实设备播放（本机可试听）；动态/偏好/图片/触摸的受测部署链路；并发回复因果关联。
+
+### 2026-09-20 真实链路扩展验证（动态/偏好/图片/触摸）+ S8b 修复
+
+- 交付行为：S8b——偏好覆盖响应归一化（门面将真实服务端 `{"status": "success"}` 成功形状与错误消息归一化为 `{"ok": bool, "error": str|None}`），修复真实链路把成功写入误判为 `ACK_REJECTED` 的问题。
+- interface spec：`docs/项目说明/项目架构与接口（spec）/接口文档/cli/README.md` §1.10（响应归一化条目）。
+- commit 或 PR：分支 `feat/cli-e2e-s3b-next-reply`：`da6fca0`（SPEC）/ `d66bfca`（Red）/ `c573ad1`（Green）；PR #185。
+- 验证及结果：focused 5 passed；client 回归 183 passed。真实服务器（release）扩展链路全部通过：
+  - 动态：`dynamics.open`（10 条真实动态、marked_read=true）/ `dynamics.read`（帖子+评论）/ `dynamics.load`（游标翻页+去重、has_more=true）/ `dynamics.post`（创建并 `visible=true`，账号私有可见）→ 6/6；
+  - 偏好：`preferences.update`（confirmed=true）→ `replace=true` 清理 → `preferences.open` 复核 `{}` → 4/4（S8b 修复后）；
+  - 图片：`image.select`（3,385B PNG 校验）→ `image.send`（ACK）→ `reply.wait`（视觉回复"哇，这个红蓝配色的图看起来好醒目呀！"，8.8s，TTS 274,500B WAV 落盘）→ 4/4；
+  - 触摸：`touch.send`（ACK）→ `reply.wait` 捕获服务端触摸反射（`touch-` UUID、空文本、`moemoe` 表情、`is_ephemeral=true`、`display_in_chat=false`；按 S4 语义 `audio.available=false` 属规范行为）→ 3/3。
+- 未验证范围：`audio.replay` 真实设备播放；触摸"服务端音频活跃抑制"时序（需与音频流并发）；并发回复因果关联；各动作其余失败分类的受测部署覆盖。
