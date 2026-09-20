@@ -28,6 +28,14 @@ func _run() -> void:
 	chat.get_node("%Send").pressed.emit()
 	await create_timer(2.8).timeout
 	await capture(root,"agentluo-redesign-chat")
+	var was_on_top := root.always_on_top
+	root.always_on_top = true
+	root.grab_focus()
+	await create_timer(0.1).timeout
+	var screenshot_output: Array = []
+	var screenshot_code := OS.execute(OS.get_environment("GODOT_TEST_PYTHON"),[ProjectSettings.globalize_path("res://tests/capture_native_window.py"),str(DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE,root.get_window_id())),str(OS.get_process_id()),ProjectSettings.globalize_path("res://artifacts/agentluo-native-frame.png")],screenshot_output,true)
+	root.always_on_top = was_on_top
+	if screenshot_code != 0: failures.append("native frame screenshot: " + str(screenshot_output))
 	await profile(root,"glass")
 	var glass_nodes: Array[Node] = app.find_children("*","ColorRect",true,false).filter(func(n): return n.get_script() != null and n.get_script().resource_path == "res://src/ui/frost_surface.gd")
 	var materials: Array = []

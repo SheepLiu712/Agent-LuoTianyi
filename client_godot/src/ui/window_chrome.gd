@@ -42,6 +42,7 @@ func _restore(default_size: Vector2i, minimum: Vector2i) -> void:
 	_maximized = state.maximized
 	if _maximized: _window.mode = Window.MODE_MAXIMIZED
 	_last = {"rect":_normal,"maximized":_maximized}
+	_clamp_visible_frame.call_deferred()
 
 func open_window() -> void:
 	if _window.mode == Window.MODE_MINIMIZED:
@@ -50,6 +51,16 @@ func open_window() -> void:
 		_window.mode = Window.MODE_MAXIMIZED if _maximized else Window.MODE_WINDOWED
 	_window.show()
 	_window.grab_focus()
+	_clamp_visible_frame.call_deferred()
+
+func _clamp_visible_frame() -> void:
+	if DisplayServer.get_name() == "headless" or not is_instance_valid(_window) or _window.is_embedded() or not _window.visible or _window.mode != Window.MODE_WINDOWED: return
+	var outer_position := _window.get_position_with_decorations()
+	var outer_size := _window.get_size_with_decorations()
+	var work := DisplayServer.screen_get_usable_rect(_window.current_screen)
+	var visible_position := Vector2i(clampi(outer_position.x, work.position.x, maxi(work.position.x, work.end.x - outer_size.x)), clampi(outer_position.y, work.position.y, maxi(work.position.y, work.end.y - outer_size.y)))
+	_window.position += visible_position - outer_position
+	_normal = Rect2i(_window.position, _window.size)
 
 func _process(delta: float) -> void:
 	if _window == null: return
