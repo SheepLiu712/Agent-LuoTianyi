@@ -51,9 +51,10 @@ func _run() -> void:
 	check(store.save("vision-purpose",malformed).ok,"fixture writes malformed stored configuration")
 	await settings.start(scope)
 	check(settings.get_config("vision-purpose").model_capabilities is Dictionary and not settings.get_config("vision-purpose").enabled,"bad persisted configuration safely disabled")
-	check(ResourceLoader.exists("res://src/ui/model_window.gd"),"model settings window available")
-	if ResourceLoader.exists("res://src/ui/model_window.gd"):
-		var window = load("res://src/ui/model_window.gd").new(settings)
+	check(ResourceLoader.exists("res://scenes/ui/model_window.tscn"),"model settings window available")
+	if ResourceLoader.exists("res://scenes/ui/model_window.tscn"):
+		var window = load("res://scenes/ui/model_window.tscn").instantiate()
+		window.setup(settings)
 		root.add_child(window)
 		window.open()
 		await process_frame

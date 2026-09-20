@@ -38,10 +38,11 @@ func _run() -> void:
 	controller.edit(fields)
 	await controller.save()
 	check(controller.get_state().dirty and controller.get_state().fields.custom_context == "retain draft","write error preserves draft")
-	check(ResourceLoader.exists("res://src/ui/preferences_window.gd"),"preference window exposes draft protection")
-	if ResourceLoader.exists("res://src/ui/preferences_window.gd"):
+	check(ResourceLoader.exists("res://scenes/ui/preferences_window.tscn"),"preference window exposes draft protection")
+	if ResourceLoader.exists("res://scenes/ui/preferences_window.tscn"):
 		var window_controller = load("res://src/session/preferences_controller.gd").new(load("res://src/network/json_request.gd").new())
-		var window = load("res://src/ui/preferences_window.gd").new(window_controller)
+		var window = load("res://scenes/ui/preferences_window.tscn").instantiate()
+		window.setup(window_controller)
 		root.add_child(window)
 		await window_controller.start(scope("ui"))
 		window_controller.edit({"custom_context":"window draft"})

@@ -230,9 +230,11 @@ func _open_settings(kind: String) -> void:
 	var window: Window
 	if kind == "preferences":
 		controller = preload("res://src/session/preferences_controller.gd").new(preload("res://src/network/json_request.gd").new(),_log)
-		window = preload("res://src/ui/preferences_window.gd").new(controller)
+		window = load("res://scenes/ui/preferences_window.tscn").instantiate() as Window
+		window.setup(controller)
 	elif kind == "models":
-		window = preload("res://src/ui/model_window.gd").new(_models,_executor)
+		window = load("res://scenes/ui/model_window.tscn").instantiate() as Window
+		window.setup(_models,_executor)
 		if _models.get_state().phase == "error":
 			_models.start(_session.get_session())
 	else:
