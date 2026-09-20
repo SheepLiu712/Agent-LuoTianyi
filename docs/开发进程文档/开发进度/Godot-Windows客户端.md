@@ -358,3 +358,13 @@
 - 视觉：capture_dropdown_ui.gd 与 capture_voice_ui.gd 真实GPU截图成功。与基线差异已归因——下拉图差异为一整行悬停像素（基线无 hover），语音图差异全部落在左侧 Live2D 头像区且同代码两次运行同样出现，属运行态随机性，非本片回归。
 - 作者自审：diff 仅含主题/材质资源、make_theme 薄壳化、project.godot 增默认主题与测试自身修正，无视图节点树改动、无顺手改进；原有 project.godot 编辑器修改与两个 addons DLL 删除未纳入提交。
 - 未验证范围：check_accounts.ps1 与 check_features.ps1 因本机缺 fastapi 未运行（环境缺口，非代码失败）；未做人工多 DPI 复核；未推送、未开远程 PR。
+
+### 2026-09-20 界面场景化第二片——publish_window 视图场景
+- 交付行为：发布动态窗口改为「场景节点树 + 只做行为的脚本」。新增 res://scenes/ui/publish_window.tscn（根 Window「PublishWindow」挂 src/ui/publish_window.gd 与 app_theme.tres），标题、草稿框 %PublishDraft、状态 %PublishStatus、发布按钮 %PublishButton 与面板样式全部写在场景里；脚本删除 _init(controller) 与建树代码，改 setup(controller) 注入并用 %Name 绑定。published(id)、open()、is_dirty()、发布/清空/关闭/失败文案行为与公开面不变。
+- interface spec：接口文档 client_godot/README.md「界面场景化：视图场景与 setup() 注入」；实测契约：场景属性先赋值、根脚本随后执行 _init()，_init() 赋值会覆盖场景同名属性，故 draft_window._init() 只保留 visible = false、不再赋值 transient（Window.transient 默认 false）。
+- commit：SPEC c2eb44b 与 87ee1b3，Red 35d0079，Green 6e3d976。
+- Red 证据：test_ui_scenes.gd 仅「scene exists: res://scenes/ui/publish_window.tscn」一条失败；run_dynamics_tests.py 报 Cannot open file 该场景（dynamics_window.gd:175）。两条都只因目标场景未实现而失败。
+- 验证及结果：Godot 4.7.1 headless test_ui_scenes.gd PASS，逐项断言场景存在、根名与类型、根脚本、关键节点 unique_name_in_owner 与 %Name 解析、setup() 暴露且 _init 无参数、搬入场景的属性与样式盒（背景色/圆角/内边距）与原代码相等、根挂主题。scripts/check.ps1 21 步全绿；check_features.ps1（含 Application drafts）、check_accounts.ps1、check_network.ps1 全部 PASS；run_dynamics_tests.py 的 test_dynamics_window.gd 与 test_dynamics_detail.gd PASS。
+- 视觉：真机 GPU 截图 capture_dynamics_ui.gd 产出 7 张 agentluo-011-dynamics-*.png，与改动前基线（1b7e770 独立 git worktree、同机同命令重跑）逐字节相同，含发布窗口截图。
+- 作者自审：diff 仅含本视图场景、其脚本改造、基类一行删除与契约测试；无顺手改进、无其它视图改动；两个 addons DLL 既存删除未纳入提交。
+- 未验证范围：未做人工多 DPI 复核；未推送、未开远程 PR。
