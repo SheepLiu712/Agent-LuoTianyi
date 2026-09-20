@@ -12,7 +12,7 @@ func _initialize() -> void:
 func run() -> void:
 	for entry in [
 		["preferences_page", ["RelationshipPresets", "SpeakingStylePresets"]],
-		["model_page", ["SelectorSlot", "CopySlot"]],
+		["model_purpose_card", ["CopySlot"]],
 	]:
 		var window: Node = load("res://scenes/ui/" + entry[0] + ".tscn").instantiate()
 		for name in entry[1]:

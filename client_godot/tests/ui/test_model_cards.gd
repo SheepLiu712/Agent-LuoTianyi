@@ -18,6 +18,10 @@ func run() -> void:
 	var cards = page.get_node_or_null("%Cards")
 	check(cards != null and cards.get_child_count() == 2, "every server purpose has its own card")
 	if failures.is_empty():
+		if DisplayServer.get_name() != "headless":
+			await create_timer(0.2).timeout
+			await RenderingServer.frame_post_draw
+			window.get_texture().get_image().save_png("res://artifacts/model-purpose-cards.png")
 		var first = cards.get_child(0)
 		var second = cards.get_child(1)
 		check(not first.get_node("%Fields").visible and not second.get_node("%Fields").visible, "disabled purposes begin collapsed")
@@ -33,6 +37,17 @@ func run() -> void:
 		var config: Dictionary = settings.get_config("vision-purpose")
 		config.merge({"enabled":true,"provider":"","base_url":"https://example.test/v1","api_key":"synthetic","model":"vision"},true)
 		check(not settings.validate("vision-purpose",config).ok, "provider is required like the original client")
+		if DisplayServer.get_name() != "headless":
+			await create_timer(0.2).timeout
+			await RenderingServer.frame_post_draw
+			window.get_texture().get_image().save_png("res://artifacts/model-purpose-expanded.png")
+		first.get_node("%Enabled").button_pressed = false
+		result = await window.save_changes()
+		check(result.ok and not window.is_dirty(), "whole-window save commits disabled draft without provider traffic")
+		page.get_node("%RefreshTypes").pressed.emit()
+		var deadline := Time.get_ticks_msec() + 2500
+		while settings.get_state().phase == "loading" and Time.get_ticks_msec() < deadline: await process_frame
+		check(cards.get_child_count() == 2 and settings.get_config("text-purpose").model == "draft-kept" and not window.is_dirty(), "refresh rebuilds requirements and retains saved configuration")
 	window.queue_free()
 	settings.queue_free()
 	await process_frame

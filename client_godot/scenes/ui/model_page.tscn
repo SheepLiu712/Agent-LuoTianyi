@@ -1,126 +1,42 @@
-[gd_scene load_steps=5 format=3]
-
-[ext_resource type="Script" path="res://src/ui/model_page.gd" id="1_script"]
-[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
-[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
-
-
-
+[gd_scene load_steps=4 format=3]
+[ext_resource type="Script" path="res://src/ui/model_page.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
-
 [node name="ModelPage" type="Control"]
-layout_mode = 3
-anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme = ExtResource("2_theme")
-script = ExtResource("1_script")
-
+theme = ExtResource("theme")
+script = ExtResource("script")
 [node name="Margin" type="MarginContainer" parent="."]
-anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
-theme_override_constants/margin_left = 18
-theme_override_constants/margin_top = 18
-theme_override_constants/margin_right = 18
-theme_override_constants/margin_bottom = 18
-
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
 [node name="Scroll" type="ScrollContainer" parent="Margin"]
+unique_name_in_owner = true
 horizontal_scroll_mode = 0
-
+follow_focus = true
 [node name="Column" type="VBoxContainer" parent="Margin/Scroll"]
 size_flags_horizontal = 3
-theme_override_constants/separation = 10
-
+theme_override_constants/separation = 16
 [node name="Title" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 18
-text = "每个用途独立配置，保存不会调用供应商"
-
-[node name="SelectorSlot" parent="Margin/Scroll/Column" instance=ExtResource("3_dropdown")]
-unique_name_in_owner = true
-
-[node name="Requirements" type="Label" parent="Margin/Scroll/Column"]
-unique_name_in_owner = true
+text = "LLM 模型设置"
+theme_override_font_sizes/font_size = 22
+[node name="Description" type="Label" parent="Margin/Scroll/Column"]
+text = "服务端只规定每类调用需要的模型和能力。服务商、Base URL、模型和 Key 由你配置，Key 不会上传到服务器。"
 autowrap_mode = 3
-
-[node name="Enabled" type="CheckBox" parent="Margin/Scroll/Column"]
+[node name="RefreshTypes" type="Button" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
-text = "启用此用途的本地模型"
-
-[node name="ProviderLabel" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
-text = "服务商名称"
-
-[node name="provider" type="LineEdit" parent="Margin/Scroll/Column"]
+text = "刷新需求列表"
+size_flags_horizontal = 8
+[node name="Cards" type="VBoxContainer" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
-
-[node name="BaseUrlLabel" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
-text = "Base URL（例如 https://example.com/v1）"
-
-[node name="base_url" type="LineEdit" parent="Margin/Scroll/Column"]
-unique_name_in_owner = true
-
-[node name="ApiKeyLabel" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
-text = "API Key"
-
-[node name="api_key" type="LineEdit" parent="Margin/Scroll/Column"]
-unique_name_in_owner = true
-secret = true
-
-[node name="ModelLabel" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
-text = "模型名称"
-
-[node name="ModelName" type="LineEdit" parent="Margin/Scroll/Column"]
-unique_name_in_owner = true
-
-[node name="Json" type="CheckBox" parent="Margin/Scroll/Column"]
-unique_name_in_owner = true
-text = "声明支持 JSON 输出"
-
-[node name="Thinking" type="CheckBox" parent="Margin/Scroll/Column"]
-unique_name_in_owner = true
-text = "声明支持 thinking"
-
-[node name="ParamsLabel" type="Label" parent="Margin/Scroll/Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 14
-text = "高级 JSON 参数（非流式）"
-
-[node name="Params" type="TextEdit" parent="Margin/Scroll/Column"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 120)
-wrap_mode = 1
-
-[node name="CopyRow" type="HBoxContainer" parent="Margin/Scroll/Column"]
-
-[node name="CopySlot" parent="Margin/Scroll/Column/CopyRow" instance=ExtResource("3_dropdown")]
-unique_name_in_owner = true
-
-[node name="CopyButton" type="Button" parent="Margin/Scroll/Column/CopyRow"]
-unique_name_in_owner = true
-text = "复制该用途配置"
-
-
-[node name="TestButton" type="Button" parent="Margin/Scroll/Column"]
-unique_name_in_owner = true
-text = "手动测试当前配置"
-
+theme_override_constants/separation = 16
 [node name="Status" type="Label" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
 autowrap_mode = 3
-
 [node name="PlainDialog" parent="." instance=ExtResource("Decision")]
 unique_name_in_owner = true
 title = "密钥保护失败"

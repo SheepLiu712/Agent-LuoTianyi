@@ -8,6 +8,7 @@ var _types: Dictionary = {}
 var _configs: Dictionary = {}
 var _state := {"phase":"idle","code":"","count":0}
 var _generation := 0
+var _scope: Dictionary = {}
 func _init(http: Node,store: RefCounted,logger: RefCounted = null) -> void:
 	_http = http
 	_store = store
@@ -15,6 +16,7 @@ func _init(http: Node,store: RefCounted,logger: RefCounted = null) -> void:
 	add_child(http)
 func start(session: Dictionary) -> void:
 	stop()
+	_scope = session.duplicate(true)
 	var generation := _generation
 	var base := Api.normalize_server(str(session.get("server","")))
 	_store.set_scope(base,session.get("username",""))
@@ -55,6 +57,8 @@ func start(session: Dictionary) -> void:
 			code = stored.code
 	_state = {"phase":"ready","code":code,"count":_types.size()}
 	_notify()
+func reload() -> void:
+	if not _scope.is_empty(): await start(_scope.duplicate(true))
 func get_types() -> Array[Dictionary]:
 	var result: Array[Dictionary] = []
 	for type in _types.values():
@@ -80,7 +84,7 @@ func validate(type_id: String,config: Dictionary) -> Dictionary:
 	if (config.params.has("stream") and (not config.params.stream is bool or config.params.stream != false)) or config.params.has("stream_options"):
 		return {"ok":false,"code":"STREAMING_NOT_SUPPORTED"}
 	if config.enabled:
-		if Api.normalize_server(config.base_url).is_empty() or config.api_key.strip_edges().is_empty() or config.model.strip_edges().is_empty():
+		if config.provider.strip_edges().is_empty() or Api.normalize_server(config.base_url).is_empty() or config.api_key.strip_edges().is_empty() or config.model.strip_edges().is_empty():
 			return {"ok":false,"code":"MODEL_FIELDS_REQUIRED"}
 		if (_types[type_id].requires_json and not config.model_capabilities.can_use_json) or (_types[type_id].requires_thinking and not config.model_capabilities.can_enable_thinking):
 			return {"ok":false,"code":"MODEL_CAPABILITY_MISMATCH"}
@@ -108,6 +112,7 @@ func copy_config(source: Dictionary,target_id: String) -> Dictionary:
 	result.model_kind = _types[target_id].model_kind
 	return result
 func stop() -> void:
+	_scope.clear()
 	_generation += 1
 	_http.cancel()
 	_store.set_scope("","")
