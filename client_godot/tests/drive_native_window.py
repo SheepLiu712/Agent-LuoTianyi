@@ -32,6 +32,21 @@ class MonitorInfo(ctypes.Structure):
     _fields_ = [("size", wintypes.DWORD), ("monitor", wintypes.RECT), ("work", wintypes.RECT), ("flags", wintypes.DWORD)]
 
 
+class TitleBarInfo(ctypes.Structure):
+    _fields_ = [("size", wintypes.DWORD), ("title", wintypes.RECT), ("states", wintypes.DWORD * 6), ("rectangles", wintypes.RECT * 6)]
+
+
+def system_button(index):
+    owned()
+    info = TitleBarInfo()
+    info.size = ctypes.sizeof(info)
+    u.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    u.SendMessageW(hwnd, 0x033F, 0, ctypes.addressof(info))
+    bounds = info.rectangles[index]
+    assert bounds.right > bounds.left and bounds.bottom > bounds.top, "system caption button must be present"
+    return ((bounds.left + bounds.right) / 2, (bounds.top + bounds.bottom) / 2)
+
+
 def fills_work_area():
     info = MonitorInfo()
     info.size = ctypes.sizeof(info)
@@ -113,7 +128,7 @@ try:
         click(current[0] + 180, current[1] + 22)
         time.sleep(.065)
         click(current[0] + 180, current[1] + 22)
-        # Borderless maximize uses work-area geometry and need not set WS_MAXIMIZE.
+        # System maximize is verified against the monitor work area.
         wait_for(lambda: fills_work_area() if expected else all(abs(a-b) < 8 for a,b in zip(rect(),normal)), "title double-click " + ("maximizes" if expected else "restores"))
         time.sleep(.2)
     for edge in ["NW", "N", "NE", "W", "E", "SW", "S", "SE"]:
@@ -134,21 +149,21 @@ try:
             assert abs(after[index] - before[index] - dy) < 8, "vertical edge resize " + edge
         checks.append("native resize " + edge)
     current = rect()
-    click(current[2] - 134, current[1] + 22)
+    click(*system_button(2))
     wait_for(lambda: u.IsIconic(hwnd), "minimize control")
     u.ShowWindow(hwnd, 9)
     u.SetForegroundWindow(hwnd)
     wait_for(lambda: u.IsWindowVisible(hwnd) and not u.IsIconic(hwnd), "system restore")
     time.sleep(.15)
     current = rect()
-    click(current[2] - 78, current[1] + 22)
+    click(*system_button(3))
     normal = current
     wait_for(fills_work_area, "maximize control")
     current = rect()
-    click(current[2] - 78, current[1] + 22)
+    click(*system_button(3))
     wait_for(lambda: all(abs(a-b) < 8 for a,b in zip(rect(),normal)), "restore control")
     current = rect()
-    click(current[2] - 22, current[1] + 22)
+    click(*system_button(5))
     time.sleep(.15)
     owned()
     u.keybd_event(0x12, 0, 0, 0)

@@ -21,7 +21,7 @@ script = ExtResource("script")
 theme_type_variation = &"AppSurface"
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = 48.0
+offset_top = 0.0
 
 [node name="Column" type="VBoxContainer" parent="Body"]
 theme_override_constants/separation = 8
@@ -95,7 +95,7 @@ unique_name_in_owner = true
 visible = false
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = 48.0
+offset_top = 0.0
 offset_bottom = -56.0
 focus_mode = 2
 

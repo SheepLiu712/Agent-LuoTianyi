@@ -31,7 +31,8 @@ script = ExtResource("1_script")
 [node name="Menu" type="PopupPanel" parent="."]
 unique_name_in_owner = true
 visible = false
-force_native = true
+force_native = false
+transparent_bg = true
 theme = ExtResource("2_theme")
 theme_override_styles/panel = SubResource("StyleBoxFlat_menu")
 

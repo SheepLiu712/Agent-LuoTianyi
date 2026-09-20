@@ -17,6 +17,7 @@ var _focus_index := -1
 var _owner_geometry := Rect2i()
 
 func _ready() -> void:
+	get_window().gui_embed_subwindows = true
 	_popup.window_input.connect(_key_input)
 	pressed.connect(func():
 		if is_menu_open(): close_menu()
@@ -91,24 +92,23 @@ func open_menu() -> void:
 	if disabled or not is_node_ready() or _buttons.is_empty(): return
 	var owner := get_window()
 	_owner_geometry = Rect2i(owner.position,owner.size)
-	var screen := DisplayServer.screen_get_usable_rect(owner.current_screen)
-	# Embedded canvas coordinates must be transformed to native screen pixels.
-	var transform := Transform2D(0,Vector2(owner.position))*owner.get_final_transform()*get_global_transform_with_canvas()
+	# Embedded popups use their owning viewport's logical coordinates on desktop and mobile.
+	var available: Vector2 = owner.get_visible_rect().size
+	var transform := get_global_transform_with_canvas()
 	var origin := Vector2i(transform * Vector2.ZERO)
 	var bottom := Vector2i(transform * Vector2(0,size.y))
-	var scale_y := transform.get_scale().y
-	var width := maxi(int(size.x * transform.get_scale().x),int(230*scale_y))
-	for row in _buttons:
-		width = maxi(width,int((row.get_combined_minimum_size().x+32)*scale_y))
-	width = mini(width,screen.size.x)
-	var height := mini(int(mini(_buttons.size()*42+24,420)*scale_y),screen.size.y)
+	var shadow: int = _popup.get_theme_stylebox("panel").shadow_size
+	var width := maxi(int(size.x), 230)
+	for row in _buttons: width = maxi(width, int(row.get_combined_minimum_size().x + 32))
+	width = mini(width, maxi(1, int(available.x) - shadow * 2))
+	var height := mini(mini(_buttons.size()*42 + 24, 420), maxi(1, int(available.y) - shadow * 2))
 	var y := bottom.y
-	if y + height > screen.end.y: y = origin.y-height
-	y = clampi(y,screen.position.y,screen.end.y-height)
+	if y + height + shadow > available.y: y = origin.y - height
+	y = clampi(y, shadow, maxi(shadow, int(available.y) - height - shadow))
 	_popup.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 	_popup.content_scale_size = Vector2i.ZERO
-	_popup.content_scale_factor = maxf(.5,scale_y)
-	_popup.popup(Rect2i(Vector2i(clampi(origin.x,screen.position.x,screen.end.x-width),y),Vector2i(width,height)))
+	_popup.content_scale_factor = 1.0
+	_popup.popup(Rect2i(Vector2i(clampi(origin.x, shadow, maxi(shadow, int(available.x) - width - shadow)), y), Vector2i(width,height)))
 	_focus_index = -1
 	for index in _buttons.size():
 		var row := _buttons[index]

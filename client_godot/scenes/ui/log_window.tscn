@@ -28,7 +28,7 @@ script = ExtResource("1_script")
 force_native = true
 
 [node name="Panel" type="PanelContainer" parent="."]
-offset_top = 48.0
+offset_top = 0.0
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0

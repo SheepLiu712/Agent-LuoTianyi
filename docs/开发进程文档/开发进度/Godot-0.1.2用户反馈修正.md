@@ -45,3 +45,11 @@
 - 校验PNG/JPEG/WebP、BMP转PNG及剪贴板PNG，限制文件/协议包与解码像素；通过原user_image及瞬时选择/取消事件发送。图片与文字共用历史边界等待及原可靠队列，ACK保留稳定本地ID；图片接受发送后存入现有按账号图片缓存，未提交附件不落盘。
 - SPEC 96accf8、a8da89e；Red 6b42bc7；Green为本记录提交。test_image_attachment通过格式/文件/大小/MIME/像素校验；test_image_sending headless/GPU通过真实协议、历史屏障、图片回执、本地图预览、粘贴/移除/确认、失败留稿与退出清理。test_history_sync、test_history_media、test_ui_scenes、test_preview_input及GPU test_image_window均PASS。
 - 作者自审：沿用现有协议和outbox，不把选择成功当送达；不发送本机绝对文件路径，缓存缩略图仍有24张上限。当前图片格式范围已在使用说明明确，未验证公共服务真实图片处理或计费VLM。
+
+## 2026-09-21 系统窗框与Godot圆角下拉
+
+- 用户选择恢复系统标题栏与三键，主窗及独立业务窗由系统提供窗框/外轮廓；WindowChrome仅保留几何与关闭协调，删除旧自绘标题栏和八方向控件，并移除各页48px预留。关闭仍进入原草稿检查。
+- 已阅读用户提供的CSDN文章，采用其Panel+StyleBoxFlat思路并保持场景资源化。下拉改为嵌入所属Viewport的PopupPanel、透明背景和StyleBoxFlat圆角，无遮罩/裁切Shader/原生区域；定位按逻辑坐标并为阴影预留边界，适配桌面内容缩放及未来手机Control布局。
+- SPEC 79c8491；Red 12deb81；Green为本记录提交。GPU test_rounded_dropdown通过实际边角透明像素/正文不透明像素及窗口边界；capture_dropdown_ui在100/125/150%通过长菜单边界、定位、键盘和移动收起。长菜单最初超界8px，已按4px阴影修正。
+- 原生鼠标/键盘测试改为读取系统标题栏按钮矩形，测试三键、拖拽、双击最大化/还原、八向缩放、系统恢复与Alt+F4 PASS。首轮拖动位置断言失败，未计通过；相同产品代码复跑完整测试通过，该次输入偏差原因未定位。
+- GPU capture_release_ui通过主窗/动态/日志/设置联动与全部截图，原有可见性规则不变。未新增DWM或窗口裁切原生实现；未执行Android/iOS导出或硬件验收，不宣称客户端已完成手机移植。

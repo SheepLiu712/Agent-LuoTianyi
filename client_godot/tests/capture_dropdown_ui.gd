@@ -23,9 +23,9 @@ func _run() -> void:
 	menu.open_menu()
 	await create_timer(.2).timeout
 	var popup: Window = menu.find_children("*","Window",true,false)[0]
-	check(screen.encloses(Rect2i(popup.position,popup.size)),"long menu clamped inside screen")
-	check(popup.position.y < root.position.y+330,"bottom edge opens upwards")
-	check(absi(popup.position.x-(root.position.x+260))<=1,"popup aligns with native trigger")
+	check(popup.is_embedded() and Rect2i(Vector2i.ZERO,root.size).encloses(Rect2i(popup.position,popup.size)),"long menu clamped inside owning viewport")
+	check(popup.position.y < 330,"bottom edge opens upwards")
+	check(absi(popup.position.x+4-260)<=1,"popup panel aligns with trigger; shadow extends outside panel")
 	await RenderingServer.frame_post_draw
 	popup.get_texture().get_image().save_png("res://artifacts/agentluo-011-dropdown.png")
 	var key := InputEventKey.new()
@@ -50,8 +50,8 @@ func _run() -> void:
 		await process_frame
 		menu.open_menu()
 		await create_timer(.2).timeout
-		check(screen.encloses(Rect2i(popup.position,popup.size)),"scaled menu stays on screen")
-		check(popup.size.x>=int(menu.size.x*factor),"scaled menu matches trigger physical width")
+		check(Rect2i(Vector2i.ZERO,Vector2i(root.get_visible_rect().size)).encloses(Rect2i(popup.position,popup.size)),"scaled menu stays inside viewport")
+		check(popup.size.x>=int(menu.size.x),"embedded menu matches trigger logical width")
 		await RenderingServer.frame_post_draw
 		popup.get_texture().get_image().save_png("res://artifacts/agentluo-011-dropdown-%s.png"%int(factor*100))
 		key.keycode = KEY_ESCAPE

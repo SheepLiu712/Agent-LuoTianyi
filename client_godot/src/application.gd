@@ -53,7 +53,7 @@ func _ready() -> void:
 		_resize_window(Vector2i(1200, 800), Vector2i(960, 640))
 		var preview = load("res://scenes/preview/chat_preview.tscn").instantiate()
 		add_child(preview)
-		preview.offset_top = 48
+		preview.offset_top = 0
 		move_child(_chrome,get_child_count()-1)
 		return
 	_resize_window(Vector2i(660, 800), Vector2i(480, 640))

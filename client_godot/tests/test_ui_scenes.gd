@@ -99,7 +99,7 @@ const SCENES := {
 		"unique": ["Menu","Scroll","Rows"],
 		"properties": {
 			"": {"custom_minimum_size": Vector2(140,40),"alignment": HORIZONTAL_ALIGNMENT_LEFT,"clip_text": true},
-			"Menu": {"visible": false,"force_native": true},
+			"Menu": {"visible": false,"force_native": false,"transparent_bg":true},
 			"Menu/Scroll": {"horizontal_scroll_mode": ScrollContainer.SCROLL_MODE_DISABLED},
 			"Menu/Scroll/Rows": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"theme_override_constants/separation": 0},
 		},

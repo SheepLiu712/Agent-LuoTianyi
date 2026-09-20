@@ -11,12 +11,12 @@ config_version=5
 [application]
 
 config/name="AgentLuo"
-config/icon="res://assets/ui/app_icon.svg"
-config/windows_native_icon="res://assets/ui/app_icon.ico"
 run/main_scene="res://scenes/main.tscn"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="AgentLuo-Godot"
 config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://assets/ui/app_icon.svg"
+config/windows_native_icon="res://assets/ui/app_icon.ico"
 
 [display]
 
