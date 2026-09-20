@@ -1,10 +1,11 @@
 extends "res://src/ui/draft_window.gd"
+const Dropdown = preload("res://scenes/ui/unified_dropdown.tscn")
 var _settings: Node
 var _types: Array = []
 var _drafts := {}
 var _current := ""
-var _selector := preload("res://src/ui/unified_dropdown.gd").new()
-var _copy := preload("res://src/ui/unified_dropdown.gd").new()
+var _selector
+var _copy
 var _fields := {}
 @onready var _enabled: CheckBox = %Enabled
 @onready var _json: CheckBox = %Json
@@ -27,6 +28,7 @@ func setup(settings: Node,executor: Node = null) -> void:
 
 func _ready() -> void:
 	super._ready()
+	_selector = Dropdown.instantiate()
 	var column: Node = %SelectorSlot.get_parent()
 	column.add_child(_selector)
 	column.move_child(_selector,%SelectorSlot.get_index())
@@ -39,6 +41,7 @@ func _ready() -> void:
 	for flag in [_json,_thinking]:
 		flag.toggled.connect(func(_value): _edit())
 	_params.text_changed.connect(_edit)
+	_copy = Dropdown.instantiate()
 	var row: Node = %CopySlot.get_parent()
 	row.add_child(_copy)
 	row.move_child(_copy,%CopySlot.get_index())

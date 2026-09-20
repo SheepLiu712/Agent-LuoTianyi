@@ -2,39 +2,21 @@ extends Button
 ## Shared stable-ID selector / action menu. Popup details remain private.
 signal activated(id: String)
 const Style = preload("res://src/preview/preview_style.gd")
-var action_menu := false
+const Item = preload("res://scenes/ui/dropdown_item.tscn")
+var action_menu := false:
+	set(value):
+		action_menu = value
+		custom_minimum_size.x = 90 if value else 140
 var _items: Array = []
 var _selected := ""
-var _popup := PopupPanel.new()
-var _scroll := ScrollContainer.new()
-var _rows := VBoxContainer.new()
+@onready var _popup: PopupPanel = %Menu
+@onready var _scroll: ScrollContainer = %Scroll
+@onready var _rows: VBoxContainer = %Rows
 var _buttons: Array[Button] = []
 var _focus_index := -1
 var _owner_geometry := Rect2i()
 
-func _init(actions: bool = false) -> void:
-	action_menu = actions
-	custom_minimum_size.y = 40
-	custom_minimum_size.x = 90 if actions else 140
-	alignment = HORIZONTAL_ALIGNMENT_LEFT
-	clip_text = true
-
 func _ready() -> void:
-	_popup.visible = false
-	_popup.force_native = true
-	add_child(_popup)
-	_popup.theme = Style.make_theme()
-	var panel := Style.box(Color.WHITE,10,6)
-	panel.border_color = Color("dce1e5")
-	panel.set_border_width_all(1)
-	panel.shadow_color = Color(0,0,0,.12)
-	panel.shadow_size = 4
-	_popup.add_theme_stylebox_override("panel",panel)
-	_popup.add_child(_scroll)
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_scroll.add_child(_rows)
-	_rows.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_rows.add_theme_constant_override("separation",0)
 	_popup.window_input.connect(_key_input)
 	pressed.connect(func():
 		if is_menu_open(): close_menu()
@@ -98,16 +80,9 @@ func _build() -> void:
 		if item.get("separator",false):
 			_rows.add_child(HSeparator.new())
 			continue
-		var row := Button.new()
-		row.text = item.label
-		row.set_meta("id",item.id)
-		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		row.custom_minimum_size.y = 42
-		row.disabled = item.get("disabled",false)
+		var row = Item.instantiate()
+		row.setup(item)
 		row.gui_input.connect(_key_input)
-		row.add_theme_stylebox_override("normal",Style.box(Color.WHITE,6,12))
-		row.add_theme_stylebox_override("hover",Style.box(Color("f0f2f4"),6,12))
-		row.add_theme_color_override("font_color",Color("353c43"))
 		row.pressed.connect(func(): _activate(item.id))
 		_rows.add_child(row)
 		_buttons.append(row)

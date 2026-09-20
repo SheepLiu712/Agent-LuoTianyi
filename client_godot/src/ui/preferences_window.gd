@@ -1,4 +1,5 @@
 ﻿extends "res://src/ui/draft_window.gd"
+const Dropdown = preload("res://scenes/ui/unified_dropdown.tscn")
 var _controller: Node
 var _fields: Dictionary = {}
 @onready var _status: Label = %Status
@@ -21,7 +22,7 @@ func _ready() -> void:
 			var input: LineEdit = lines[pair[0]]
 			_fields[pair[0]] = input
 			input.text_changed.connect(func(_text): _edit())
-			var presets := preload("res://src/ui/unified_dropdown.gd").new()
+			var presets = Dropdown.instantiate()
 			_presets.append(presets)
 			var values: Dictionary = {"friend":"朋友","confidant":"知己","idol":"偶像","partner":"搭档","family":"家人"} if pair[0] == "relationship" else {"lively":"活泼可爱","gentle":"温柔可人","quiet":"文静恬淡"}
 			var options: Array = [{"id":"custom","label":"自定义"}]

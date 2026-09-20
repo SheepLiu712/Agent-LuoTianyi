@@ -1,84 +1,55 @@
 ﻿extends Window
-const Style = preload("res://src/preview/preview_style.gd")
 var _logger: RefCounted
-var _runs := preload("res://src/ui/unified_dropdown.gd").new()
-var _search := LineEdit.new()
-var _module := preload("res://src/ui/unified_dropdown.gd").new()
-var _level := preload("res://src/ui/unified_dropdown.gd").new()
-var _follow := CheckBox.new()
-var _text := RichTextLabel.new()
-var _status := Label.new()
-var _picker := FileDialog.new()
+@onready var _runs = %RunsDropdown
+@onready var _level = %LevelDropdown
+@onready var _module = %ModuleDropdown
+@onready var _search: LineEdit = %Search
+@onready var _follow: CheckBox = %Follow
+@onready var _text: RichTextLabel = %Text
+@onready var _status: Label = %Status
+@onready var _picker: FileDialog = %Picker
+@onready var _copy: Button = %CopyButton
+@onready var _export: Button = %ExportButton
 var _selected := ""
 var _export_id := ""
+var _initialized := false
 
-func _init(logger: RefCounted) -> void:
+func setup(logger: RefCounted) -> void:
 	_logger = logger
-	title = "客户端日志 · " + preload("res://src/release_info.gd").title()
-	size = Vector2i(960,620)
-	min_size = Vector2i(660,400)
-	visible = false
-	transient = false
+	if is_node_ready():
+		_initialize()
 
 func _ready() -> void:
-	theme = Style.make_theme()
-	var panel := PanelContainer.new()
-	panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	panel.add_theme_stylebox_override("panel",Style.box(Color("111923"),0,14))
-	add_child(panel)
-	var column := VBoxContainer.new()
-	panel.add_child(column)
-	var filters := HBoxContainer.new()
-	column.add_child(filters)
-	_runs.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	filters.add_child(_runs)
+	title = "客户端日志 · " + preload("res://src/release_info.gd").title()
+	if _logger == null:
+		return
+	_initialize()
+
+func _initialize() -> void:
+	if _initialized:
+		return
+	_initialized = true
 	_runs.activated.connect(func(index):
 		_selected = index
 		_refresh())
 	_level.set_items([{"id":"all","label":"全部级别"},{"id":"INFO","label":"INFO"},{"id":"WARN","label":"WARN"},{"id":"ERROR","label":"ERROR"}])
-	filters.add_child(_level)
 	var modules: Array = [{"id":"all","label":"全部模块"}]
 	for module in _logger.MODULES:
 		modules.append({"id":module,"label":module})
 	_module.set_items(modules)
-	filters.add_child(_module)
 	_level.activated.connect(func(_index): _refresh())
 	_module.activated.connect(func(_index): _refresh())
-	_search.placeholder_text = "搜索时间、活动或错误码"
 	_search.text_changed.connect(func(_value): _refresh())
-	column.add_child(_search)
-	_text.selection_enabled = true
-	_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_text.add_theme_color_override("default_color",Color("d6e5ee"))
-	_text.add_theme_font_size_override("normal_font_size",14)
-	var mono := SystemFont.new()
-	mono.font_names = PackedStringArray(["Cascadia Mono","Consolas","Microsoft YaHei UI"])
-	_text.add_theme_font_override("normal_font",mono)
-	column.add_child(_text)
-	var actions := HBoxContainer.new()
-	column.add_child(actions)
-	_follow.text = "跟随最新"
-	_follow.add_theme_color_override("font_color",Color("d6e5ee"))
-	_follow.button_pressed = true
 	_follow.toggled.connect(func(value):
 		_text.scroll_following = value
 		if value:
 			_text.scroll_to_line(maxi(0,_text.get_line_count()-1)))
 	_text.scroll_following = true
-	actions.add_child(_follow)
-	actions.add_child(Style.button("复制显示记录",func(): DisplayServer.clipboard_set(_text.get_parsed_text())))
-	actions.add_child(Style.button("导出完整诊断 ZIP",func():
+	_copy.pressed.connect(func(): DisplayServer.clipboard_set(_text.get_parsed_text()))
+	_export.pressed.connect(func():
 		_export_id = _selected
 		_picker.current_file = "agentluo-diagnostics-" + _selected + ".zip"
-		_picker.popup_centered_ratio(.7)))
-	_status.add_theme_color_override("font_color",Color("ffd58a"))
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	column.add_child(_status)
-	_picker.file_mode = FileDialog.FILE_MODE_SAVE_FILE
-	_picker.access = FileDialog.ACCESS_FILESYSTEM
-	_picker.filters = PackedStringArray(["*.zip ; ZIP 诊断包"])
-	_picker.use_native_dialog = true
-	add_child(_picker)
+		_picker.popup_centered_ratio(.7))
 	_picker.file_selected.connect(func(path):
 		var error: Error = _logger.export_run(_export_id,path)
 		_status.text = "所选启动的完整诊断已导出（未上传）。" if error == OK else "导出失败（%s），请选择尚不存在且可写的文件。" % error)
@@ -87,7 +58,6 @@ func _ready() -> void:
 		if visible and _selected == _logger.get_run_id() and _matches(entry):
 			_append(entry))
 	_logger.write_failed.connect(func(_error): _status.text = "日志写盘失败，当前窗口仍可查看内存记录；归档可能不完整。")
-
 func open() -> void:
 	var options: Array = []
 	_selected = _logger.get_run_id() if _selected.is_empty() else _selected

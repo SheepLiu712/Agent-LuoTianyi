@@ -1,0 +1,45 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://src/ui/unified_dropdown.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_menu"]
+content_margin_left = 6.0
+content_margin_top = 6.0
+content_margin_right = 6.0
+content_margin_bottom = 6.0
+bg_color = Color(1, 1, 1, 1)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.8627451, 0.88235295, 0.8980392, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+shadow_color = Color(0, 0, 0, 0.12)
+shadow_size = 4
+
+[node name="UnifiedDropdown" type="Button"]
+custom_minimum_size = Vector2(140, 40)
+alignment = 0
+clip_text = true
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Menu" type="PopupPanel" parent="."]
+unique_name_in_owner = true
+visible = false
+force_native = true
+theme = ExtResource("2_theme")
+theme_override_styles/panel = SubResource("StyleBoxFlat_menu")
+
+[node name="Scroll" type="ScrollContainer" parent="Menu"]
+unique_name_in_owner = true
+horizontal_scroll_mode = 0
+
+[node name="Rows" type="VBoxContainer" parent="Menu/Scroll"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_constants/separation = 0

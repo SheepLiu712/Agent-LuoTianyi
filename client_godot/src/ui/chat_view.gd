@@ -4,6 +4,7 @@ signal log_requested
 signal settings_requested(kind: String)
 const Style = preload("res://src/preview/preview_style.gd")
 const Composer = preload("res://src/preview/composer_input.gd")
+const Dropdown = preload("res://scenes/ui/unified_dropdown.tscn")
 var _session: Node
 var _scroll = preload("res://src/ui/virtual_message_list.gd").new()
 var _input = Composer.new()
@@ -12,7 +13,7 @@ var _latest := Button.new()
 var _empty := Label.new()
 var _stop_voice: Button
 var _clear_dialog := ConfirmationDialog.new()
-var _menu := preload("res://src/ui/unified_dropdown.gd").new(true)
+var _menu
 var _history_status := Label.new()
 var _history_retry := Button.new()
 var _history_skip := Button.new()
@@ -43,6 +44,8 @@ func _ready() -> void:
 	_dynamics_button.text = "动态"
 	_dynamics_button.pressed.connect(func(): settings_requested.emit("dynamics"))
 	heading.add_child(_dynamics_button)
+	_menu = Dropdown.instantiate()
+	_menu.action_menu = true
 	_menu.text = "更多 ···"
 	heading.add_child(_menu)
 	_menu.name = "ChatMore"

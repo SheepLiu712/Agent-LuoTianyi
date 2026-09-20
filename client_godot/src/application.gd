@@ -52,7 +52,8 @@ func _ready() -> void:
 	_log.record("client_started")
 	_engine_log = preload("res://src/storage/engine_log_sink.gd").new(_log)
 	OS.add_logger(_engine_log)
-	_log_window = preload("res://src/ui/log_window.gd").new(_log)
+	_log_window = preload("res://scenes/ui/log_window.tscn").instantiate() as Window
+	_log_window.setup(_log)
 	add_child(_log_window)
 	get_tree().auto_accept_quit = false
 	get_window().close_requested.connect(func(): _request_close("exit"))

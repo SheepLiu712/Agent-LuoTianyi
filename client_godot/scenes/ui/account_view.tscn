@@ -1,7 +1,7 @@
 [gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://src/ui/account_view.gd" id="1_script"]
-[ext_resource type="Script" path="res://src/ui/unified_dropdown.gd" id="2_dropdown"]
+[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="2_dropdown"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="3_theme"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
@@ -48,9 +48,8 @@ text = "登录你的账户，继续这段陪伴。"
 unique_name_in_owner = true
 theme_override_constants/separation = 10
 
-[node name="AccountMode" type="Button" parent="Column/Form"]
+[node name="AccountMode" parent="Column/Form" instance=ExtResource("2_dropdown")]
 unique_name_in_owner = true
-script = ExtResource("2_dropdown")
 
 [node name="Server" type="LineEdit" parent="Column/Form"]
 unique_name_in_owner = true
