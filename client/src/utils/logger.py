@@ -15,6 +15,7 @@ import colorlog
 
 # 全局日志配置
 _LOGGER_INSTANCES: Dict[str, logging.Logger] = {}
+_CONSOLE_STREAM = None
 _DEFAULT_CONFIG = {
     "level": "DEBUG",
     "format": "{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} - {message}",
@@ -96,11 +97,30 @@ def _create_console_handler() -> logging.Handler:
         }
     )
     
-    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler = logging.StreamHandler(
+        _CONSOLE_STREAM if _CONSOLE_STREAM is not None else sys.stdout
+    )
     console_handler.setFormatter(color_formatter)
     console_handler.setLevel(getattr(logging, _DEFAULT_CONFIG["level"]))
     
     return console_handler
+
+
+def set_console_stream(stream: Optional[object] = None) -> None:
+    """重定向控制台日志输出流（默认 sys.stdout）。
+
+    非交互 CLI 需要保持 stdout 只有机器输出（JSONL），把诊断日志改到 stderr。
+    对已创建和之后新创建的控制台处理器同时生效。
+    """
+    global _CONSOLE_STREAM
+    _CONSOLE_STREAM = stream
+    target = stream if stream is not None else sys.stdout
+    for logger in _LOGGER_INSTANCES.values():
+        for handler in list(logger.handlers):
+            if isinstance(handler, logging.StreamHandler) and not isinstance(
+                handler, RotatingFileHandler
+            ):
+                handler.setStream(target)
 
 
 def _create_file_handler() -> logging.Handler:
