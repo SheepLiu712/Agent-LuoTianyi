@@ -46,7 +46,7 @@
 | 15 | 触摸抑制时序（S6 补测） | send_text 触发 TTS 流式回复 → 连发 touch.send | ✅ 音频流式前 107 次触摸正常 ACK；**流式期间 3 次 `suppressed`**（`server_audio_active`、0ms、无协议事件、退出码 0）；随后 `reply.wait` 通过 |
 | 16 | 音频失败分类 | 反射重放 / 文本回复重放 / 删除文件 / 覆盖垃圾 / 未知 UUID | ✅ `AUDIO_EPHEMERAL`、基线 `playback=completed`、`AUDIO_FILE_MISSING`、`AUDIO_FORMAT_INVALID`、`AUDIO_REPLY_NOT_FOUND` |
 | 17 | 并发关联观察 | 连续两条文本 → 三次 `reply.wait` | ✅ 两条回复按序到达（"草莓" → "浅蓝色"）；第三次 `TIMEOUT`（无多余回复） |
-| 18 | 失败分类批次（15 动作） | 未连接发送 / 未知 UUID / 越权状态 / 非法输入 / 服务端负 ACK / 错误密码 | ✅ `SESSION_NOT_READY`、`TIMEOUT`、`REPLY_NOT_FOUND`、`AUDIO_REPLY_NOT_FOUND`、`DYNAMICS_NOT_OPENED`、`INVALID_INPUT` ×5、`ACK_REJECTED` ×2（服务端 `[BAD_MESSAGE]`）、`AUTH_OR_TRANSPORT_FAILED`（exit 5 = 最大码） |
+| 18 | 失败分类批次（15 动作） | 未连接发送 / 未知 UUID / 越权状态 / 非法输入 / 服务端负 ACK / 错误密码 | ✅ `SESSION_NOT_READY`、`TIMEOUT`、`REPLY_NOT_FOUND`、`AUDIO_REPLY_NOT_FOUND`、`DYNAMICS_NOT_OPENED`、`INVALID_INPUT` ×4、`ACK_REJECTED` ×2（服务端 `[BAD_MESSAGE]`）、`AUTH_OR_TRANSPORT_FAILED`（exit 5 = 最大码） |
 | 19 | 不可达服务器 | connect → `https://127.0.0.1:9` | ✅ `AUTH_OR_TRANSPORT_FAILED`（exit 4） |
 | 20 | 会话关闭生命周期 | connect / close / status / close | ✅ 4/4：`closed` 状态 + 幂等关闭（exit 0） |
 | 21 | 非法场景文件 | `{"actions": "not-a-list"}` | ✅ `INVALID_SCENARIO`（exit 3） |
