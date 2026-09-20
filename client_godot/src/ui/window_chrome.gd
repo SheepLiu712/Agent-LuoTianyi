@@ -57,6 +57,8 @@ func _restore(default_size: Vector2i, minimum: Vector2i) -> void:
 
 func open_window() -> void:
 	if _window.mode == Window.MODE_MINIMIZED:
+		# Recreate the visible native surface: mode alone can leave a borderless HWND hidden.
+		_window.hide()
 		_window.mode = Window.MODE_MAXIMIZED if _maximized else Window.MODE_WINDOWED
 	_window.show()
 	_window.grab_focus()

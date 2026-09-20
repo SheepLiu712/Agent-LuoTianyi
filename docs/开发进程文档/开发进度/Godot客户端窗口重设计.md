@@ -31,3 +31,9 @@
 - SPEC cbaf65e；Red f911260（原发布控件属于不同Window，测试真实失败）；Green为本记录所在提交。
 - 验证：test_dynamics_window、test_dynamics_detail、test_ui_scenes通过；成功发布选中、新旧草稿保留、失败显式提示均回归。作者自审确认所有UI是.tscn控件，遮罩外点击不触发关闭，Esc按当前层级请求关闭。
 - 未验证：公共动态服务、真实系统DPI与多屏硬件；仅本地提交。
+
+### 2026-09-20 无边框窗口恢复修复与动态原生验收
+
+- 根因证据：窗口自身最小化后，仅切mode会使Godot报告visible=true而HWND缺少WS_VISIBLE；主窗最小化前就已经隐藏，并非主窗直接隐藏独立动态。
+- Red 7769920通过公开open()复现；Green为本提交，WindowChrome恢复最小化窗口时先hide再恢复mode/show，使原生可见表面重新建立。
+- GPU capture_dynamics_ui全部截图通过；真实HWND可见、非最小化、无owner、非TOOLWINDOW检查PASS。发布浮层在动态内部显示且未新增原生发布窗。作者已核查原生状态和实际测试输出；未把内容缩放当作真实系统DPI。
