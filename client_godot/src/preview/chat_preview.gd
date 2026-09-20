@@ -2,7 +2,7 @@ extends Control
 const Style = preload("res://src/preview/preview_style.gd")
 const Session = preload("res://src/preview/demo_session.gd")
 const AvatarPanel = preload("res://src/avatar/avatar_panel.gd")
-const Bubble = preload("res://src/preview/message_bubble.gd")
+const Bubble = preload("res://scenes/ui/message_bubble.tscn")
 const Composer = preload("res://src/preview/composer_input.gd")
 const ImageOverlay = preload("res://src/preview/image_overlay.gd")
 var _session = Session.new()
@@ -170,7 +170,7 @@ func _refresh() -> void:
 		_messages.add_child(empty)
 	for message in _session.get_messages():
 		message.demo = true
-		var bubble := Bubble.new()
+		var bubble = Bubble.instantiate()
 		_messages.add_child(bubble)
 		var texture: Texture2D = _images.get(message.id)
 		if message.has("image"):

@@ -1,0 +1,40 @@
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Script" path="res://src/ui/message_audio.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Script" path="res://src/ui/message_waveform.gd" id="3_wave"]
+
+[node name="MessageAudio" type="VBoxContainer"]
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Row" type="HBoxContainer" parent="."]
+unique_name_in_owner = true
+theme_override_constants/separation = 6
+
+[node name="Play" type="Button" parent="Row"]
+unique_name_in_owner = true
+theme_override_font_sizes/font_size = 12
+
+[node name="Wave" type="Control" parent="Row"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 26)
+mouse_filter = 2
+script = ExtResource("3_wave")
+played_color = Color(0.4, 0.8, 1, 1)
+remaining_color = Color(0.619607866, 0.713725507, 0.768627465, 1)
+
+[node name="Time" type="Label" parent="Row"]
+unique_name_in_owner = true
+theme_override_colors/font_color = Color(0.188235298, 0.270588249, 0.325490206, 1)
+theme_override_font_sizes/font_size = 11
+
+[node name="Stop" type="Button" parent="Row"]
+unique_name_in_owner = true
+text = "停止"
+theme_override_font_sizes/font_size = 12
+
+[node name="Error" type="Label" parent="."]
+unique_name_in_owner = true
+text = "语音未能保存"
+theme_override_font_sizes/font_size = 12

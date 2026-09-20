@@ -1,0 +1,99 @@
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Script" path="res://src/preview/message_bubble.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+[ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_own"]
+content_margin_left = 13.0
+content_margin_top = 13.0
+content_margin_right = 13.0
+content_margin_bottom = 13.0
+bg_color = Color(0.874509811, 0.952941179, 1, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_other"]
+content_margin_left = 13.0
+content_margin_top = 13.0
+content_margin_right = 13.0
+content_margin_bottom = 13.0
+bg_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_right = 12
+corner_radius_bottom_left = 12
+
+[node name="MessageBubble" type="HBoxContainer"]
+size_flags_horizontal = 3
+theme = ExtResource("2_theme")
+theme_override_constants/separation = 10
+script = ExtResource("1_script")
+own_style = SubResource("StyleBoxFlat_own")
+
+[node name="System" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.541176498, 0.607843161, 0.643137276, 1)
+theme_override_font_sizes/font_size = 12
+horizontal_alignment = 1
+
+[node name="Avatar" type="TextureRect" parent="."]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(38, 38)
+size_flags_vertical = 0
+texture = ExtResource("4_avatar")
+expand_mode = 1
+stretch_mode = 5
+material = SubResource("ShaderMaterial_avatar")
+
+[node name="Body" type="VBoxContainer" parent="."]
+unique_name_in_owner = true
+theme_override_constants/separation = 5
+
+[node name="Bubble" type="PanelContainer" parent="Body"]
+unique_name_in_owner = true
+theme_override_styles/panel = SubResource("StyleBoxFlat_other")
+
+[node name="Content" type="VBoxContainer" parent="Body/Bubble"]
+unique_name_in_owner = true
+
+[node name="Text" type="RichTextLabel" parent="Body/Bubble/Content"]
+unique_name_in_owner = true
+fit_content = true
+selection_enabled = true
+scroll_active = false
+autowrap_mode = 3
+
+[node name="HistoryPicture" type="TextureRect" parent="Body/Bubble/Content"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 135)
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ImageButton" type="Button" parent="Body/Bubble/Content"]
+unique_name_in_owner = true
+visible = false
+text = "加载图片…"
+
+[node name="Picture" type="TextureRect" parent="Body/Bubble/Content"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0, 135)
+mouse_default_cursor_shape = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Caption" type="Label" parent="Body"]
+unique_name_in_owner = true
+visible = false
+theme_override_font_sizes/font_size = 11
+horizontal_alignment = 2

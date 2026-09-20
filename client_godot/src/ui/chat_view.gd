@@ -6,7 +6,7 @@ const Style = preload("res://src/preview/preview_style.gd")
 const Composer = preload("res://src/preview/composer_input.gd")
 const Dropdown = preload("res://scenes/ui/unified_dropdown.tscn")
 var _session: Node
-var _scroll = preload("res://src/ui/virtual_message_list.gd").new()
+var _scroll = preload("res://scenes/ui/virtual_message_list.tscn").instantiate()
 var _input = Composer.new()
 var _status := Label.new()
 var _latest := Button.new()

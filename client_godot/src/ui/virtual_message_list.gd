@@ -4,8 +4,8 @@ signal interacted
 signal audio_action(id: String, action: String)
 signal image_opened(texture: Texture2D)
 signal image_action(id: String, action: String)
-const Bubble = preload("res://src/preview/message_bubble.gd")
-var _canvas := Control.new()
+const Bubble = preload("res://scenes/ui/message_bubble.tscn")
+@onready var _canvas: Control = %Canvas
 var _messages: Array[Dictionary] = []
 var _offsets: Array[float] = []
 var _heights: Dictionary = {}
@@ -17,9 +17,6 @@ var _laying := false
 var _visible: Array[String] = []
 
 func _ready() -> void:
-	horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_canvas.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	add_child(_canvas)
 	get_v_scroll_bar().value_changed.connect(func(_value):
 		if not _laying:
 			_render())
@@ -133,7 +130,7 @@ func _render() -> void:
 			var id: String = message.id
 			wanted[id] = true
 			if not _nodes.has(id):
-				var bubble := Bubble.new()
+				var bubble = Bubble.instantiate()
 				_canvas.add_child(bubble)
 				bubble.configure(message)
 				bubble.audio_action.connect(func(action): audio_action.emit(id,action))
