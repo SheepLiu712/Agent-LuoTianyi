@@ -3,7 +3,6 @@ const Style = preload("res://src/preview/preview_style.gd")
 var _discard := ConfirmationDialog.new()
 func _init() -> void:
 	visible = false
-	transient = false
 func _ready() -> void:
 	theme = Style.make_theme()
 	_discard.title = "放弃未保存的修改？"
