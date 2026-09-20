@@ -54,6 +54,15 @@ main.tscn的NavChat/NavDynamics/NavSettings/NavLogs/AccountMenu均为固定场�
 
 主题新增AppSurface、TerminalSurface、WindowAction/WindowClose、NavigationButton，保留#66CCFF与15px正文、焦点描边和语义色。主要控件至少36px，主聊天边距24/间距16/头像40/输入最小96，气泡内边距16圆角12；日志工具栏浅色，RichTextLabel正文用深色TerminalSurface。相关UI场景测试更新已批准的字面规格，不沿用旧22px边距等约束。
 
-frost_surface.tscn 为ColorRect控件配合9采样高斯近似ShaderMaterial；只读取所在Viewport已绘制的应用画面。标题栏和导航使用浅色tint，发布遮罩使用深色tint；文字在其后绘制而保持清晰。headless、未知renderer或场景blur_enabled=false时去掉材质使用同配色实底。资源不采样桌面，无原生DWM依赖。效果与fallback均由固定控件承载。
+frost_surface.tscn 为ColorRect控件配合屏幕纹理mipmap连续模糊ShaderMaterial；只读取所在Viewport已绘制的应用画面。标题栏和导航使用浅色tint，发布遮罩使用深色tint；文字在其后绘制而保持清晰。headless、未知renderer或场景blur_enabled=false时去掉材质使用同配色实底。资源不采样桌面，无原生DWM依赖。效果与fallback均由固定控件承载。
+
+设置窗口在最小720×640下，内容页可垂直滚动且不遮挡固定底部操作栏；相处页的补充上下文和重新加载操作仍可通过滚动/键盘焦点到达。滚动容器和表单均在场景中定义，不改设置控制器接口。
 
 语音波形使用waveform_strip.tscn中的24个预置CenterContainer/ColorRect，替代_draw/draw_line；脚本仅依据values/progress更新可见、高度和已播色，保留已有数据字段。禁止产品UI脚本new控件、add_button或代码建树，重复内容仅实例化场景。补充测试检查材质/fallback、预置波形及主题语义；GPU截图与帧时间记录验证实际渲染，不把headless当视觉证据。
+
+
+### 原生验证后的平台约束
+
+自绘标题栏统一48px；左键移动超过4px才调用系统拖拽，防止单击误启动拖动。无边框铺满屏幕时本引擎可能返回FULLSCREEN而非MAXIMIZED，框架统一识别为展开状态并保留原始矩形以还原。恢复最小化的子窗口先重建可见表面，主Window禁止hide，走mode恢复；所有关闭请求先保存几何再进入业务确认。
+
+本引擎的非模态transient不必对应Win32 GW_OWNER，不能依此代替行为验收。设置显式监听主窗mode并保存自身此前可见状态后隐藏/恢复；图片依据当前来源做同样联动。原生测试实际核查可见性；动态/日志仍核查无owner和独立任务栏资格。未增加DWM、原生扩展或引擎窗口回调覆盖。
