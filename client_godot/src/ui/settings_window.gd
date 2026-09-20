@@ -5,6 +5,7 @@ var _models: Node
 var _executor: Node
 var _saving := false
 var _close_after_save := false
+var _hidden_by_main := false
 @onready var _preferences_page = %PreferencesPage
 @onready var _model_page = %ModelPage
 
@@ -38,7 +39,18 @@ func select_page(page: String) -> void:
 	%ModelsTab.button_pressed = page == "models"
 
 func open() -> void:
+	_hidden_by_main = false
 	%Chrome.open_window()
+
+func _process(_delta: float) -> void:
+	%SaveAll.disabled = _saving or not is_dirty()
+	if get_tree().root.mode == Window.MODE_MINIMIZED:
+		if visible and mode != Window.MODE_MINIMIZED:
+			_hidden_by_main = true
+			hide()
+	elif _hidden_by_main:
+		_hidden_by_main = false
+		show()
 
 func is_dirty() -> bool:
 	return _saving or _preferences_page.is_dirty() or _model_page.is_dirty()
@@ -87,7 +99,12 @@ func _report(results: Array) -> void:
 	var successes := 0
 	for result in results:
 		if result.ok: successes += 1
-		else: errors.append("%s：%s" % [result.id,result.code])
+		else:
+			var label: String = result.id
+			if result.section == "models" and _models != null:
+				for purpose in _models.get_types():
+					if purpose.id == result.id: label = "模型配置 · " + purpose.name
+			errors.append("%s：%s" % [label,result.code])
 	%Result.text = "全部修改已保存。" if errors.is_empty() else "已保存 %s 项；未保存：%s。草稿已保留。" % [successes,"；".join(errors)]
 
 func _input(event: InputEvent) -> void:

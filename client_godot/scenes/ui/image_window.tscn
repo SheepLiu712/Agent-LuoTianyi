@@ -2,13 +2,6 @@
 [ext_resource type="Script" path="res://src/ui/image_window.gd" id="script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="chrome"]
-[sub_resource type="StyleBoxFlat" id="surface"]
-bg_color = Color(0.94,0.96,0.98,1)
-content_margin_left = 16.0
-content_margin_top = 16.0
-content_margin_right = 16.0
-content_margin_bottom = 16.0
-
 [node name="ImageWindow" type="Window"]
 title = "图片预览"
 size = Vector2i(900,720)
@@ -22,8 +15,8 @@ script = ExtResource("script")
 [node name="Body" type="PanelContainer" parent="."]
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = 44.0
-theme_override_styles/panel = SubResource("surface")
+offset_top = 48.0
+theme_type_variation = &"AppSurface"
 
 [node name="Column" type="VBoxContainer" parent="Body"]
 theme_override_constants/separation = 12

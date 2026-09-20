@@ -61,7 +61,7 @@ python client_godot/tests/run_security_interop.py --godot $env:GODOT_BIN
 
 正式聊天自动播放服务端 WAV/PCM 分片；同 UUID 聚合，后续回复等前一句实际播完再呈现。支持口型、音量保存、停止当前语音、错误及断线清理；完整语音以临时文件接收、成功终止及原生验证后提交，提供消息重放/暂停/继续/停止，波形来自原生 RMS，进度来自混音器消耗帧。在线语音抢占重放；停止在线声音不取消后续接收和缓存。原生 `PcmStreamDecoder` 与 `WindowsSecurity` 共用 DLL，按上面的 `build_security.py` 命令重建，需分发完整目录。
 
-登录前按钮或“更多 → 打开日志”打开独立终端窗口，默认实际目录 `%APPDATA%/AgentLuo-Godot/logs`；每次启动独立 JSONL/元数据，保留最近50次并保护仍运行实例，当前启动不截断。可搜索、筛选、复制与导出完整脱敏诊断 ZIP，不上传。用哈希 reply_id 关联 `reply_received → audio_received → audio_format/audio_decoded → audio_receive_finished → audio_playback_started/finished`（接收/播放可交错）。`audio_error` 的 code 定位错误，`audio_underrun` 记录供给不足；不会写入正文、token、密钥或 Base64。
+登录前按钮或左侧“日志”打开独立终端窗口，默认实际目录 `%APPDATA%/AgentLuo-Godot/logs`；每次启动独立 JSONL/元数据，保留最近50次并保护仍运行实例，当前启动不截断。可搜索、筛选、复制与导出完整脱敏诊断 ZIP，不上传。用哈希 reply_id 关联 `reply_received → audio_received → audio_format/audio_decoded → audio_receive_finished → audio_playback_started/finished`（接收/播放可交错）。`audio_error` 的 code 定位错误，`audio_underrun` 记录供给不足；不会写入正文、token、密钥或 Base64。
 
 `check.ps1` 增量解码及真实混音测试默认使用合成音频；`check_network.ps1` 还验证 loopback WebSocket 到播放器链路、顺序、隐藏音频、停止及断线。Windows 输出驱动验证可运行：
 
@@ -73,7 +73,7 @@ python client_godot/tests/run_security_interop.py --godot $env:GODOT_BIN
 
 未登录时仅显示 660×800 账户窗口，登录成功后展开角色和聊天，退出再收起。默认服务器沿用旧端 release_config.base_url；已保存的自定义地址优先。账户回归含窗口切换测试，原生窗口验证可运行 `run_account_tests.py --godot <exe> --script res://tests/test_application_window.gd --gpu`，仍仅连接本地 HTTP fixture。
 
-语音缓存在 user://audio 按规范化服务器、账户与 UUID 隔离，退出及重启保留，只能手动清理，无自动容量/时间淘汰。“更多 → 清理本账号语音缓存”有确认窗口；清理同时取消在途流的缓存写入，保留正在输出的声音与聊天文字。登录后全量同步历史，按 UUID 恢复新端本账号完整缓存的重放入口；不导入旧端缓存。日志记录 cache_committed/cache_error、replay_started/paused/resumed/stopped/finished/preempted，不写音频原文。
+语音缓存在 user://audio 按规范化服务器、账户与 UUID 隔离，退出及重启保留，只能手动清理，无自动容量/时间淘汰。聊天顶部“语音缓存”有确认窗口；清理同时取消在途流的缓存写入，保留正在输出的声音与聊天文字。登录后全量同步历史，按 UUID 恢复新端本账号完整缓存的重放入口；不导入旧端缓存。日志记录 cache_committed/cache_error、replay_started/paused/resumed/stopped/finished/preempted，不写音频原文。
 
 重放回归：`--headless --audio-driver WASAPI --path client_godot --script res://tests/test_voice_replay.gd`。真实 UI/角色截图：`tests/run_websocket_tests.py --godot <exe> --script res://tests/capture_voice_ui.gd --gpu`，只连接 loopback、使用合成语音，输出默认/最小/暂停/125%及150%内容缩放截图到 artifacts。内容缩放检查不能替代操作系统 DPI 切换与跨显示器验收。
 
@@ -85,4 +85,22 @@ release.json 是版本单一来源，界面/诊断/目录/ZIP 使用同一版本
 
 应用持有聊天/模型/动态控制器，Window 仅展示和编辑；未来页面切换不重连。角色入口 `assets/live2d/character.json` 分离身份与模型资源，加载失败保留原模型；实际平台能力仍是 Windows。详细使用说明见 PREVIEW.md，实际验收记录见开发进度，不将预留移动端/换装/箱庭视为已交付。
 
-0.1.1 动态为独立任务栏窗口，45:55列表/详情分区，完整正文、平铺私人评论、行内回复和独立发布窗；关闭聚合检查所有草稿。正式下拉共享稳定ID组件。原生验收：`tests/run_dynamics_tests.py --godot <exe> --gpu --script res://tests/capture_dynamics_ui.gd`；菜单GPU验收：Godot `--path client_godot --script res://tests/capture_dropdown_ui.gd`。这些测试验证真实HWND、缩放截图和本地接口，不验证公共服务或系统DPI切换。
+当前开发版的动态为独立任务栏窗口，45:55列表/详情分区，完整正文、平铺私人评论、行内回复和内嵌发布浮层；关闭聚合检查所有草稿。正式下拉共享稳定ID组件。原生验收：`tests/run_dynamics_tests.py --godot <exe> --gpu --script res://tests/capture_dynamics_ui.gd`；菜单GPU验收：Godot `--path client_godot --script res://tests/capture_dropdown_ui.gd`。这些测试验证真实HWND、缩放截图和本地接口，不验证公共服务或系统DPI切换。
+
+
+## 窗口重设计（当前开发分支）
+
+所有可见UI由Godot控件场景绘制，脚本只做行为和数据绑定，包括标题栏、确认按钮和24段语音波形。左侧导航集中聊天、动态、统一设置、日志、账号；设置保存全部修改，失败项留稿。主窗退出统一检查聊天/设置/动态草稿，不自动保存或发送。动态和日志独立于主窗最小化，设置跟随主窗；全局图片窗跟随当前来源。几何持久化但文字草稿只保留到本次运行结束。
+
+契约见[窗口重设计接口](../docs/项目说明/项目架构与接口（spec）/接口文档/client_godot/window-redesign.md)，实际验证见[窗口重设计进度](../docs/开发进程文档/开发进度/Godot客户端窗口重设计.md)。自绘标题栏使用原生拖拽/缩放；背景磨砂仅采样应用自己的画面，正文实底，日志内容区深色。系统文件选择器继续使用原生控件。
+
+原生鼠标/键盘验收（会操作其创建的测试窗口）：
+
+```powershell
+$env:GODOT_TEST_PYTHON = 'D:\anaconda\python.exe'
+& $env:GODOT_BIN --path client_godot --script res://tests/ui/test_native_window_controls.gd
+```
+
+`capture_release_ui.gd` 另生成主界面、最小尺寸、125/150/200%内容缩放、设置与日志截图，比较磨砂/实底的短时帧间隔，并用真实HWND核查动态/日志独立、设置跟随主窗。结果在artifacts，不等同系统DPI、多屏、Windows10或集显认证。版本仍由release.json决定，本轮源代码变更不自动覆盖已有发布包。
+
+设置最小尺寸的可见滚动验收：Godot `--path client_godot --script res://tests/ui/test_settings_layout.gd`，需要真实图形会话；验证720×640下表单底部可滚动到达且不覆盖保存/关闭栏。该测试不在headless检查中运行。

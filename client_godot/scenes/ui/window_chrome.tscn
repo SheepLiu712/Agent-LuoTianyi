@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" path="res://src/ui/window_chrome.gd" id="1"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2"]
+[ext_resource type="PackedScene" path="res://scenes/ui/frost_surface.tscn" id="Frost"]
 [sub_resource type="StyleBoxFlat" id="bar"]
 bg_color = Color(0.95, 0.98, 0.99, 0.96)
 content_margin_left = 18.0
@@ -22,9 +23,11 @@ script = ExtResource("1")
 [node name="TitleBar" type="PanelContainer" parent="."]
 unique_name_in_owner = true
 anchor_right = 1.0
-offset_bottom = 44.0
+offset_bottom = 48.0
 grow_horizontal = 2
 theme_override_styles/panel = SubResource("bar")
+
+[node name="Glass" parent="TitleBar" instance=ExtResource("Frost")]
 
 [node name="Row" type="HBoxContainer" parent="TitleBar"]
 mouse_filter = 2
@@ -44,6 +47,7 @@ text_overrun_behavior = 3
 theme_override_font_sizes/font_size = 13
 
 [node name="WindowMinimize" type="Button" parent="TitleBar/Row"]
+theme_type_variation = &"WindowAction"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(44,44)
 flat = true
@@ -51,6 +55,7 @@ text = "─"
 tooltip_text = "最小化"
 
 [node name="WindowMaximize" type="Button" parent="TitleBar/Row"]
+theme_type_variation = &"WindowAction"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(44,44)
 flat = true
@@ -58,6 +63,7 @@ text = "□"
 tooltip_text = "最大化"
 
 [node name="WindowClose" type="Button" parent="TitleBar/Row"]
+theme_type_variation = &"WindowClose"
 unique_name_in_owner = true
 custom_minimum_size = Vector2(44,44)
 flat = true

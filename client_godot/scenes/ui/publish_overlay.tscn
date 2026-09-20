@@ -2,29 +2,21 @@
 [ext_resource type="Script" path="res://src/ui/publish_overlay.gd" id="script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="decision"]
-[sub_resource type="StyleBoxFlat" id="panel"]
-bg_color = Color(0.98,0.99,1,1)
-corner_radius_top_left = 12
-corner_radius_top_right = 12
-corner_radius_bottom_left = 12
-corner_radius_bottom_right = 12
-content_margin_left = 24.0
-content_margin_top = 24.0
-content_margin_right = 24.0
-content_margin_bottom = 24.0
-
+[ext_resource type="PackedScene" path="res://scenes/ui/frost_surface.tscn" id="Frost"]
+[ext_resource type="Material" path="res://theme/frost_popup.tres" id="PopupGlass"]
 [node name="PublishOverlay" type="Control"]
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = 44.0
+offset_top = 48.0
 theme = ExtResource("theme")
 script = ExtResource("script")
 
-[node name="Shade" type="ColorRect" parent="."]
+[node name="Shade" parent="." instance=ExtResource("Frost")]
+material = ExtResource("PopupGlass")
 anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
-color = Color(0.15,0.22,0.3,0.25)
+color = Color(0.3,0.36,0.42,1)
 
 [node name="Center" type="CenterContainer" parent="."]
 anchor_right = 1.0
@@ -33,7 +25,7 @@ mouse_filter = 2
 
 [node name="Panel" type="PanelContainer" parent="Center"]
 custom_minimum_size = Vector2(560,400)
-theme_override_styles/panel = SubResource("panel")
+theme_type_variation = &"DialogSurface"
 
 [node name="Column" type="VBoxContainer" parent="Center/Panel"]
 theme_override_constants/separation = 16

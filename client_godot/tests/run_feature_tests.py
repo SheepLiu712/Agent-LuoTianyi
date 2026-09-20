@@ -1,5 +1,5 @@
 ﻿"""Offline authenticated settings API fixture; never contacts public/paid services."""
-import argparse, json, os, subprocess, threading, base64, hashlib, struct, time
+import argparse, json, os, subprocess, threading, base64, hashlib, struct, time, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 PROJECT=Path(__file__).resolve().parents[1]
@@ -30,6 +30,7 @@ def run(godot,script,gpu=False):
                 self.send_response(101); self.send_header('Upgrade','websocket'); self.send_header('Connection','Upgrade')
                 self.send_header('Sec-WebSocket-Accept',base64.b64encode(hashlib.sha1((self.headers['Sec-WebSocket-Key']+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()); self.end_headers()
                 self.connection.settimeout(3)
+                username = None
                 try:
                     while True:
                         head=self.rfile.read(2)
@@ -40,8 +41,18 @@ def run(godot,script,gpu=False):
                         assert size<65536
                         mask=self.rfile.read(4); body=self.rfile.read(size)
                         packet=json.loads(bytes(value^mask[i%4] for i,value in enumerate(body)))
+                        if packet['type']=='user_auth': username=packet['payload']['username']
                         if packet['type']=='llm_response': delegated.append(packet['payload']); continue
                         if packet['type']=='user_text':
+                            if username=='visual':
+                                from run_websocket_tests import tone
+                                messages=[{'type':'server_ack','payload':{'ok':True},'reply_to':packet['client_msg_id']},
+                                          {'type':'agent_message','payload':{'uuid':'redesign-voice','text':'辛苦啦，先让自己休息一下吧。\n我在这里陪着你，想说什么都可以。','audio':base64.b64encode(tone(2.4)).decode(),'is_final_package':True,'expression':'微笑脸'}}]
+                                for response in messages:
+                                    encoded=json.dumps(response).encode()
+                                    header=bytes([129,len(encoded)]) if len(encoded)<126 else (bytes([129,126])+struct.pack('!H',len(encoded)) if len(encoded)<65536 else bytes([129,127])+struct.pack('!Q',len(encoded)))
+                                    self.wfile.write(header+encoded);self.wfile.flush()
+                                continue
                             if 'text-purpose' not in packet['payload'].get('llm_mode',{}).get('types',[]): errors.append('missing model advertisement')
                             response={'type':'llm_request','payload':{'request_id':'ws-delegate','type':'text-purpose','model_kind':'llm','prompt':'offline ws','params':{},'use_json':True,'enable_thinking':False}}
                             encoded=json.dumps(response).encode(); self.wfile.write(bytes([129,126])+struct.pack('!H',len(encoded))+encoded); self.wfile.flush(); continue
@@ -89,7 +100,7 @@ def run(godot,script,gpu=False):
             self.reply(404,{})
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler); thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
     try:
-        result=subprocess.run([godot,*([] if gpu else ['--headless']),'--path',str(PROJECT),'--script',script],env={**os.environ,'GODOT_TEST_SERVER':f'http://127.0.0.1:{server.server_port}'},capture_output=True,text=True,encoding='utf8',errors='replace',timeout=40)
+        result=subprocess.run([godot,*([] if gpu else ['--headless']),'--path',str(PROJECT),'--script',script],env={**os.environ,'GODOT_TEST_PYTHON':sys.executable,'GODOT_TEST_SERVER':f'http://127.0.0.1:{server.server_port}'},capture_output=True,text=True,encoding='utf8',errors='replace',timeout=90 if gpu else 40)
         print(result.stdout); print(result.stderr)
         if result.returncode or 'ERROR:' in result.stdout+result.stderr or 'FAIL:' in result.stdout or ': PASS' not in result.stdout or errors: raise RuntimeError(str(errors) or 'feature test failed')
         if script.endswith('test_preferences.gd'): assert 'merge' in writes

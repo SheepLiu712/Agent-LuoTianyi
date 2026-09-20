@@ -2,7 +2,7 @@
 
 [ext_resource type="Script" path="res://src/ui/message_audio.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
-[ext_resource type="Script" path="res://src/ui/message_waveform.gd" id="3_wave"]
+[ext_resource type="PackedScene" path="res://scenes/ui/waveform_strip.tscn" id="3_wave"]
 
 [node name="MessageAudio" type="VBoxContainer"]
 theme = ExtResource("2_theme")
@@ -16,13 +16,8 @@ theme_override_constants/separation = 6
 unique_name_in_owner = true
 theme_override_font_sizes/font_size = 12
 
-[node name="Wave" type="Control" parent="Row"]
+[node name="Wave" parent="Row" instance=ExtResource("3_wave")]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(96, 26)
-mouse_filter = 2
-script = ExtResource("3_wave")
-played_color = Color(0.4, 0.8, 1, 1)
-remaining_color = Color(0.619607866, 0.713725507, 0.768627465, 1)
 
 [node name="Time" type="Label" parent="Row"]
 unique_name_in_owner = true

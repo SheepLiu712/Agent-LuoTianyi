@@ -22,19 +22,19 @@ color = Color(0.960784316, 0.972549021, 0.984313726, 1)
 
 [node name="Margin" type="MarginContainer" parent="."]
 unique_name_in_owner = true
-theme_override_constants/margin_left = 22
-theme_override_constants/margin_top = 22
-theme_override_constants/margin_right = 22
-theme_override_constants/margin_bottom = 22
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
 
 [node name="Column" type="VBoxContainer" parent="Margin"]
-theme_override_constants/separation = 12
+theme_override_constants/separation = 16
 
 [node name="Heading" type="HBoxContainer" parent="Margin/Column"]
-theme_override_constants/separation = 12
+theme_override_constants/separation = 16
 
 [node name="Avatar" type="TextureRect" parent="Margin/Column/Heading"]
-custom_minimum_size = Vector2(42, 42)
+custom_minimum_size = Vector2(40, 40)
 size_flags_vertical = 0
 texture = ExtResource("4_avatar")
 expand_mode = 1
@@ -123,7 +123,7 @@ text = "停止语音"
 
 [node name="Input" type="TextEdit" parent="Margin/Column"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 92)
+custom_minimum_size = Vector2(0, 96)
 placeholder_text = "想说些什么？"
 wrap_mode = 1
 script = ExtResource("5_composer")

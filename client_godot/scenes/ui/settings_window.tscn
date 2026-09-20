@@ -6,14 +6,6 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/model_page.tscn" id="models"]
 [ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
 
-[sub_resource type="StyleBoxFlat" id="surface"]
-bg_color = Color(0.96,0.98,0.99,1)
-content_margin_left = 16.0
-content_margin_top = 16.0
-content_margin_right = 16.0
-content_margin_bottom = 16.0
-
-
 [node name="SettingsWindow" type="Window"]
 title = "设置"
 size = Vector2i(880, 760)
@@ -25,10 +17,10 @@ theme = ExtResource("theme")
 script = ExtResource("script")
 
 [node name="Body" type="PanelContainer" parent="."]
-theme_override_styles/panel = SubResource("surface")
+theme_type_variation = &"AppSurface"
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = 44.0
+offset_top = 48.0
 
 [node name="Column" type="VBoxContainer" parent="Body"]
 theme_override_constants/separation = 8
@@ -92,7 +84,7 @@ unique_name_in_owner = true
 visible = false
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = 44.0
+offset_top = 48.0
 offset_bottom = -56.0
 focus_mode = 2
 

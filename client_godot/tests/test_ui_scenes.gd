@@ -22,18 +22,18 @@ const SCENES := {
 				"theme_override_constants/margin_top": 22,
 				"theme_override_constants/margin_bottom": 22,
 			},
-			"Margin/Column": {"theme_override_constants/separation": 12},
-			"Margin/Column/Title": {"text": "和天依相处的方式","theme_override_font_sizes/font_size": 22,"theme_override_colors/font_color": Color("344c59")},
-			"Margin/Column/RelationshipLabel": {"text": "关系","theme_override_font_sizes/font_size": 14,"theme_override_colors/font_color": Color("344c59")},
-			"Margin/Column/RelationshipRow/RelationshipField": {"placeholder_text": "关系（可自定义）","size_flags_horizontal": Control.SIZE_EXPAND_FILL},
-			"Margin/Column/SpeakingStyleLabel": {"text": "表达风格","theme_override_font_sizes/font_size": 14,"theme_override_colors/font_color": Color("344c59")},
-			"Margin/Column/SpeakingStyleRow/SpeakingStyleField": {"placeholder_text": "表达风格（可自定义）","size_flags_horizontal": Control.SIZE_EXPAND_FILL},
-			"Margin/Column/PersonalityLabel": {"text": "性格关键词","theme_override_font_sizes/font_size": 14,"theme_override_colors/font_color": Color("344c59")},
-			"Margin/Column/PersonalityField": {"placeholder_text": "用逗号、顿号或换行分隔","custom_minimum_size": Vector2(0,80),"wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
-			"Margin/Column/CustomContextLabel": {"text": "补充上下文","theme_override_font_sizes/font_size": 14,"theme_override_colors/font_color": Color("344c59")},
-			"Margin/Column/CustomContextField": {"placeholder_text": "想让天依了解的相处背景","custom_minimum_size": Vector2(0,120),"wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
-			"Margin/Column/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART},
-			"Margin/Column/Actions/Reload": {"text": "重新加载"},
+			"Margin/Scroll/Column": {"theme_override_constants/separation": 12},
+			"Margin/Scroll/Column/Title": {"text": "和天依相处的方式","theme_override_font_sizes/font_size": 22,"theme_override_colors/font_color": Color("344c59")},
+			"Margin/Scroll/Column/RelationshipLabel": {"text": "关系","theme_override_font_sizes/font_size": 14,"theme_override_colors/font_color": Color("344c59")},
+			"Margin/Scroll/Column/RelationshipRow/RelationshipField": {"placeholder_text": "关系（可自定义）","size_flags_horizontal": Control.SIZE_EXPAND_FILL},
+			"Margin/Scroll/Column/SpeakingStyleLabel": {"text": "表达风格","theme_override_font_sizes/font_size": 14,"theme_override_colors/font_color": Color("344c59")},
+			"Margin/Scroll/Column/SpeakingStyleRow/SpeakingStyleField": {"placeholder_text": "表达风格（可自定义）","size_flags_horizontal": Control.SIZE_EXPAND_FILL},
+			"Margin/Scroll/Column/PersonalityLabel": {"text": "性格关键词","theme_override_font_sizes/font_size": 14,"theme_override_colors/font_color": Color("344c59")},
+			"Margin/Scroll/Column/PersonalityField": {"placeholder_text": "用逗号、顿号或换行分隔","custom_minimum_size": Vector2(0,80),"wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
+			"Margin/Scroll/Column/CustomContextLabel": {"text": "补充上下文","theme_override_font_sizes/font_size": 14,"theme_override_colors/font_color": Color("344c59")},
+			"Margin/Scroll/Column/CustomContextField": {"placeholder_text": "想让天依了解的相处背景","custom_minimum_size": Vector2(0,120),"wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
+			"Margin/Scroll/Column/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART},
+			"Margin/Scroll/Column/Actions/Reload": {"text": "重新加载"},
 		},
 	},
 	"res://scenes/ui/model_page.tscn": {
@@ -144,13 +144,13 @@ const SCENES := {
 			"Panel/Column/Filters/RunsDropdown": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL},
 			"Panel/Column/Search": {"placeholder_text": "搜索时间、活动或错误码"},
 			"Panel/Column/Text": {"selection_enabled": true,"size_flags_vertical": Control.SIZE_EXPAND_FILL,"theme_override_colors/default_color": Color("d6e5ee"),"theme_override_font_sizes/normal_font_size": 14},
-			"Panel/Column/Actions/Follow": {"text": "跟随最新","button_pressed": true,"theme_override_colors/font_color": Color("d6e5ee")},
+			"Panel/Column/Actions/Follow": {"text": "跟随最新","button_pressed": true,"theme_override_colors/font_color": Color(0.19,0.27,0.33,1)},
 			"Panel/Column/Actions/CopyButton": {"text": "复制显示记录"},
 			"Panel/Column/Actions/ExportButton": {"text": "导出完整诊断 ZIP"},
-			"Panel/Column/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"theme_override_colors/font_color": Color("ffd58a")},
+			"Panel/Column/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"theme_override_colors/font_color": Color(0.55,0.4,0.22,1)},
 			"Picker": {"file_mode": FileDialog.FILE_MODE_SAVE_FILE,"access": FileDialog.ACCESS_FILESYSTEM,"use_native_dialog": true},
 		},
-		"styleboxes": {"Panel": {"panel": [Color("111923"),0,14]}},
+		"styleboxes": {"Panel": {"panel": [Color(0.97,0.985,0.995,1),12,16]}},
 	},
 	"res://scenes/ui/message_audio.tscn": {
 		"root": "MessageAudio",
@@ -176,7 +176,7 @@ const SCENES := {
 		"properties": {
 			"": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"theme_override_constants/separation": 10},
 			"System": {"visible": false,"horizontal_alignment": HORIZONTAL_ALIGNMENT_CENTER,"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"theme_override_font_sizes/font_size": 12,"theme_override_colors/font_color": Color("8a9ba4")},
-			"Avatar": {"custom_minimum_size": Vector2(38,38),"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED,"size_flags_vertical": Control.SIZE_SHRINK_BEGIN},
+			"Avatar": {"custom_minimum_size": Vector2(40,40),"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED,"size_flags_vertical": Control.SIZE_SHRINK_BEGIN},
 			"Body": {"theme_override_constants/separation": 5},
 			"Body/Bubble/Content/Text": {"fit_content": true,"selection_enabled": true,"scroll_active": false,"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART},
 			"Body/Bubble/Content/HistoryPicture": {"visible": false,"custom_minimum_size": Vector2(0,135),"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED},
@@ -184,7 +184,7 @@ const SCENES := {
 			"Body/Bubble/Content/Picture": {"visible": false,"custom_minimum_size": Vector2(0,135),"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED,"mouse_default_cursor_shape": Control.CURSOR_POINTING_HAND},
 			"Body/Caption": {"visible": false,"horizontal_alignment": HORIZONTAL_ALIGNMENT_RIGHT,"theme_override_font_sizes/font_size": 11},
 		},
-		"styleboxes": {"Body/Bubble": {"panel": [Color("ffffff"),12,13]}},
+		"styleboxes": {"Body/Bubble": {"panel": [Color("ffffff"),12,16]}},
 	},
 	"res://scenes/ui/virtual_message_list.tscn": {
 		"root": "VirtualMessageList",
@@ -205,10 +205,10 @@ const SCENES := {
 		"unique": ["Margin","CacheButton","Status","HistoryStatus","HistoryRetry","HistorySkip","Scroll","Empty","Latest","Unread","Volume","StopVoice","Input","Send","ClearDialog"],
 		"properties": {
 			"Background": {"color": Color("f5f8fb"),"mouse_filter": Control.MOUSE_FILTER_IGNORE},
-			"Margin": {"theme_override_constants/margin_left": 22,"theme_override_constants/margin_right": 22,"theme_override_constants/margin_top": 22,"theme_override_constants/margin_bottom": 22},
-			"Margin/Column": {"theme_override_constants/separation": 12},
-			"Margin/Column/Heading": {"theme_override_constants/separation": 12},
-			"Margin/Column/Heading/Avatar": {"custom_minimum_size": Vector2(42,42),"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED,"size_flags_vertical": Control.SIZE_SHRINK_BEGIN},
+			"Margin": {"theme_override_constants/margin_left": 24,"theme_override_constants/margin_right": 24,"theme_override_constants/margin_top": 24,"theme_override_constants/margin_bottom": 24},
+			"Margin/Column": {"theme_override_constants/separation": 16},
+			"Margin/Column/Heading": {"theme_override_constants/separation": 16},
+			"Margin/Column/Heading/Avatar": {"custom_minimum_size": Vector2(40,40),"expand_mode": TextureRect.EXPAND_IGNORE_SIZE,"stretch_mode": TextureRect.STRETCH_KEEP_ASPECT_CENTERED,"size_flags_vertical": Control.SIZE_SHRINK_BEGIN},
 			"Margin/Column/Heading/Identity": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL},
 			"Margin/Column/Heading/Identity/Title": {"text": "和天依聊聊","theme_override_font_sizes/font_size": 22,"theme_override_colors/font_color": Color("344c59")},
 			"Margin/Column/Heading/Identity/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART,"theme_override_font_sizes/font_size": 13,"theme_override_colors/font_color": Color("607f8d")},
@@ -222,7 +222,7 @@ const SCENES := {
 			"Margin/Column/AudioControls/VolumeLabel": {"text": "语音音量","theme_override_font_sizes/font_size": 12,"theme_override_colors/font_color": Color("344c59")},
 			"Margin/Column/AudioControls/Volume": {"min_value": 0.0,"max_value": 1.0,"step": 0.01,"custom_minimum_size": Vector2(110,0),"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"tooltip_text": "回复语音自动播放；拖到最左侧静音"},
 			"Margin/Column/AudioControls/StopVoice": {"text": "停止语音"},
-			"Margin/Column/Input": {"custom_minimum_size": Vector2(0,92),"placeholder_text": "想说些什么？","wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
+			"Margin/Column/Input": {"custom_minimum_size": Vector2(0,96),"placeholder_text": "想说些什么？","wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
 			"Margin/Column/Footer/Hint": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"text": "Enter 发送 · Shift + Enter 换行","theme_override_font_sizes/font_size": 11,"theme_override_colors/font_color": Color("94a5af")},
 			"Margin/Column/Footer/Send": {"custom_minimum_size": Vector2(96,0),"theme_type_variation": &"PrimaryButton","text": "发送  ↑"},
 			"ClearDialog": {"title": "清理语音缓存","dialog_text": "清理当前服务器、本账号保存的全部语音？\n聊天文字保留；已清理的语音将无法重放。","ok_button_text": "清理","cancel_button_text": "取消","visible": false},
@@ -419,7 +419,7 @@ func check_styleboxes(instance: Node,styleboxes: Dictionary,path: String) -> voi
 		for box_name: String in styleboxes[node_path]:
 			var expected: Array = styleboxes[node_path][box_name]
 			var label := "%s.%s in %s" % [node_path,box_name,path]
-			var box: StyleBox = node.get("theme_override_styles/"+box_name)
+			var box: StyleBox = node.call("get_theme_stylebox",box_name)
 			check(box is StyleBoxFlat,label+" is a StyleBoxFlat")
 			if not (box is StyleBoxFlat):
 				continue

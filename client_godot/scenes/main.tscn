@@ -11,6 +11,7 @@
 
 [ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="AccountMenu"]
 
+[ext_resource type="PackedScene" path="res://scenes/ui/frost_surface.tscn" id="Frost"]
 [node name="AgentLuo" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -30,7 +31,7 @@ color = Color(0.96,0.98,0.99,1)
 [node name="Workspace" type="HBoxContainer" parent="."]
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_top = 44.0
+offset_top = 48.0
 theme_override_constants/separation = 0
 
 [node name="Navigation" type="MarginContainer" parent="Workspace"]
@@ -42,10 +43,13 @@ theme_override_constants/margin_top = 16
 theme_override_constants/margin_right = 8
 theme_override_constants/margin_bottom = 16
 
+[node name="Glass" parent="Workspace/Navigation" instance=ExtResource("Frost")]
+
 [node name="Items" type="VBoxContainer" parent="Workspace/Navigation"]
 theme_override_constants/separation = 12
 
 [node name="NavChat" type="Button" parent="Workspace/Navigation/Items"]
+theme_type_variation = &"NavigationButton"
 unique_name_in_owner = true
 text = "聊天"
 custom_minimum_size = Vector2(80,48)
@@ -53,12 +57,14 @@ button_pressed = true
 toggle_mode = true
 
 [node name="NavDynamics" type="Button" parent="Workspace/Navigation/Items"]
+theme_type_variation = &"NavigationButton"
 unique_name_in_owner = true
 text = "动态"
 custom_minimum_size = Vector2(80,48)
 theme_override_font_sizes/font_size = 13
 
 [node name="NavSettings" type="Button" parent="Workspace/Navigation/Items"]
+theme_type_variation = &"NavigationButton"
 unique_name_in_owner = true
 text = "设置"
 custom_minimum_size = Vector2(80,48)
@@ -68,11 +74,13 @@ size_flags_vertical = 3
 mouse_filter = 2
 
 [node name="NavLogs" type="Button" parent="Workspace/Navigation/Items"]
+theme_type_variation = &"NavigationButton"
 unique_name_in_owner = true
 text = "日志"
 custom_minimum_size = Vector2(80,44)
 
 [node name="AccountMenu" parent="Workspace/Navigation/Items" instance=ExtResource("AccountMenu")]
+theme_type_variation = &"NavigationButton"
 unique_name_in_owner = true
 text = "账号"
 
@@ -105,7 +113,7 @@ custom_minimum_size = Vector2(390,0)
 
 [node name="LogProblem" type="Label" parent="."]
 mouse_filter = 2
-offset_top = 44.0
+offset_top = 48.0
 unique_name_in_owner = true
 layout_mode = 1
 anchors_preset = 10

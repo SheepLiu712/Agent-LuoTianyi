@@ -28,13 +28,13 @@ script = ExtResource("1_script")
 force_native = true
 
 [node name="Panel" type="PanelContainer" parent="."]
-offset_top = 44.0
+offset_top = 48.0
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+theme_type_variation = &"AppSurface"
 
 [node name="Column" type="VBoxContainer" parent="Panel"]
 
@@ -55,6 +55,7 @@ unique_name_in_owner = true
 placeholder_text = "搜索时间、活动或错误码"
 
 [node name="Text" type="RichTextLabel" parent="Panel/Column"]
+theme_type_variation = &"TerminalSurface"
 unique_name_in_owner = true
 size_flags_vertical = 3
 selection_enabled = true
@@ -68,7 +69,7 @@ theme_override_fonts/normal_font = SubResource("SystemFont_mono")
 unique_name_in_owner = true
 text = "跟随最新"
 button_pressed = true
-theme_override_colors/font_color = Color(0.8392157, 0.8980392, 0.93333334, 1)
+theme_override_colors/font_color = Color(0.19,0.27,0.33,1)
 
 [node name="CopyButton" type="Button" parent="Panel/Column/Actions"]
 unique_name_in_owner = true
@@ -80,7 +81,7 @@ text = "导出完整诊断 ZIP"
 
 [node name="Status" type="Label" parent="Panel/Column"]
 unique_name_in_owner = true
-theme_override_colors/font_color = Color(1, 0.8352941, 0.5411765, 1)
+theme_override_colors/font_color = Color(0.55,0.4,0.22,1)
 autowrap_mode = 3
 
 [node name="Picker" type="FileDialog" parent="."]

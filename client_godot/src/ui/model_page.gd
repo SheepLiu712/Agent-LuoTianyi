@@ -15,6 +15,7 @@ var _fields := {}
 @onready var _plain: Window = %PlainDialog
 signal plaintext_answer(allowed: bool)
 var _initialized := false
+var _testing := false
 var _refreshing := false
 var _executor: Node
 var _test_button: Button
@@ -75,6 +76,11 @@ func _as_draft(config: Dictionary) -> Dictionary:
 	return draft
 
 func _update(state: Dictionary) -> void:
+	var ready: bool = state.phase == "ready"
+	for field in _fields.values(): field.editable = ready
+	_params.editable = ready
+	for control in [_selector,_copy,_enabled,_json,_thinking,%CopyButton]: control.disabled = not ready
+	if _test_button != null: _test_button.disabled = not ready or _testing
 	if _types.is_empty() and state.phase == "ready":
 		_types = _settings.get_types()
 		var options: Array = []
@@ -173,9 +179,12 @@ func _copy_selected() -> void:
 	_status.text = "已复制为草稿；保存时按目标用途重新校验。"
 
 func _test() -> void:
+	if _testing: return
+	_testing = true
 	_test_button.disabled = true
 	_status.text = "正在测试…"
 	var result: Dictionary = await _executor.test_config(_test_type,_test_snapshot)
 	_test_snapshot.clear()
+	_testing = false
 	_test_button.disabled = false
 	_status.text = "本次请求成功；不代表已全面认证模型能力。" if result.ok else "测试失败（%s）。"%result.code

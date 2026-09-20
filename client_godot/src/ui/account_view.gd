@@ -85,6 +85,7 @@ func _update_state(state: Dictionary) -> void:
 	_identity.visible = signed_in
 	_logout.visible = signed_in
 	_mode.disabled = busy
+	%BackToLogin.disabled = busy
 	_remember.disabled = busy
 	_submit.disabled = busy
 	for field in _fields.values():

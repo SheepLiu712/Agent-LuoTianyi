@@ -10,7 +10,7 @@ var _zoom := 1.0
 
 func _ready() -> void:
 	close_requested.connect(close_image)
-	%CloseImage.pressed.connect(close_image)
+	%CloseImage.pressed.connect(func(): close_requested.emit())
 	%RetryImage.pressed.connect(_load_image)
 	%FitImage.pressed.connect(func(): _fitting = true; _resize_image())
 	%OriginalSize.pressed.connect(func(): _fitting = false; _zoom = 1; _resize_image())
@@ -35,8 +35,11 @@ func present(source: Window, provider: Callable, confirm: Callable = Callable())
 	%ConfirmImage.visible = confirm.is_valid()
 	%CloseImage.text = "取消" if confirm.is_valid() else "关闭"
 	_load_image()
-	%Chrome.open_window()
+	_reveal()
 	_resize_image.call_deferred()
+
+func _reveal() -> void:
+	%Chrome.open_window()
 
 func _load_image() -> void:
 	var texture: Texture2D = _provider.call() if _provider.is_valid() else null
@@ -85,9 +88,9 @@ func _process(_delta: float) -> void:
 			hide()
 	elif _hidden_by_source:
 		_hidden_by_source = false
-		%Chrome.open_window()
+		_reveal()
 
 func _input(event: InputEvent) -> void:
 	if visible and event.is_action_pressed("ui_cancel"):
 		get_viewport().set_input_as_handled()
-		close_image()
+		close_requested.emit()

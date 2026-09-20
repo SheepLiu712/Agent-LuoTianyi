@@ -9,25 +9,43 @@ var _normal := Rect2i()
 var _maximized := false
 var _last := {}
 var _quiet := 0.0
+var _drag_pending := false
+var _drag_origin := Vector2.ZERO
 
 func _ready() -> void:
 	_window = get_window()
 	_window.borderless = true
 	_window.gui_embed_subwindows = true
+	_window.close_requested.connect(_save)
 	_normal = Rect2i(_window.position,_window.size)
 	%WindowMinimize.pressed.connect(func(): _window.mode = Window.MODE_MINIMIZED)
 	_maximize.pressed.connect(_toggle_maximize)
 	%WindowClose.pressed.connect(func(): _window.close_requested.emit())
-	%TitleBar.gui_input.connect(func(event):
-		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-			if event.double_click: _toggle_maximize()
-			else: _window.start_drag()
-			accept_event())
+	%TitleBar.gui_input.connect(_title_input)
 	for edge in $Edges.get_children():
 		edge.gui_input.connect(func(event):
 			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and _window.mode == Window.MODE_WINDOWED:
 				_window.start_resize(edge.get_meta("edge"))
 				accept_event())
+
+func _title_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		_drag_pending = event.pressed and not event.double_click
+		_drag_origin = event.position
+		if event.pressed and event.double_click: _toggle_maximize()
+		accept_event()
+	elif event is InputEventMouseMotion and _drag_pending and Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		if event.position.distance_to(_drag_origin) >= 4:
+			_drag_pending = false
+			if _expanded_mode():
+				var fraction := clampf(event.position.x/maxf(%TitleBar.size.x,1),.1,.9)
+				_toggle_maximize()
+				_window.position = DisplayServer.mouse_get_position()-Vector2i(int(_normal.size.x*fraction),roundi(_drag_origin.y*_window.get_final_transform().get_scale().y))
+			_window.start_drag()
+			accept_event()
+
+func _expanded_mode() -> bool:
+	return _window.mode in [Window.MODE_MAXIMIZED,Window.MODE_FULLSCREEN,Window.MODE_EXCLUSIVE_FULLSCREEN]
 
 func configure(path: String, key: String) -> void:
 	_store = Geometry.new(path)
@@ -58,26 +76,30 @@ func _restore(default_size: Vector2i, minimum: Vector2i) -> void:
 func open_window() -> void:
 	if _window.mode == Window.MODE_MINIMIZED:
 		# Recreate the visible native surface: mode alone can leave a borderless HWND hidden.
-		_window.hide()
+		if _window != get_tree().root: _window.hide()
 		_window.mode = Window.MODE_MAXIMIZED if _maximized else Window.MODE_WINDOWED
 	_window.show()
 	_window.grab_focus()
 
 func _toggle_maximize() -> void:
-	if _window.mode == Window.MODE_MAXIMIZED:
+	if _expanded_mode():
 		_window.mode = Window.MODE_WINDOWED
+		_window.size = _normal.size
+		_window.position = _normal.position
+		_maximized = false
 	else:
 		_normal = Rect2i(_window.position,_window.size)
+		_maximized = true
 		_window.mode = Window.MODE_MAXIMIZED
 
 func _process(delta: float) -> void:
 	if _window == null: return
 	_title.text = _window.title
-	_maximize.text = "❐" if _window.mode == Window.MODE_MAXIMIZED else "□"
-	_maximize.tooltip_text = "还原" if _window.mode == Window.MODE_MAXIMIZED else "最大化"
+	_maximize.text = "❐" if _expanded_mode() else "□"
+	_maximize.tooltip_text = "还原" if _expanded_mode() else "最大化"
 	$Edges.visible = _window.mode == Window.MODE_WINDOWED
 	if not _window.visible or _window.mode == Window.MODE_MINIMIZED: return
-	_maximized = _window.mode == Window.MODE_MAXIMIZED
+	_maximized = _expanded_mode()
 	if not _maximized: _normal = Rect2i(_window.position,_window.size)
 	var current := {"rect":_normal,"maximized":_maximized}
 	if current != _last:
@@ -89,6 +111,7 @@ func _process(delta: float) -> void:
 
 func _save() -> void:
 	if _store != null and not _key.is_empty():
+		if _window != null and _window.mode != Window.MODE_MINIMIZED: _maximized = _expanded_mode()
 		if _window != null and _window.mode == Window.MODE_WINDOWED and _window.visible:
 			_normal = Rect2i(_window.position,_window.size)
 		var error: Error = _store.write_layout(_key,_normal,_maximized)

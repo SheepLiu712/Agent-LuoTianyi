@@ -9,10 +9,10 @@
 shader = ExtResource("3_shader")
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_own"]
-content_margin_left = 13.0
-content_margin_top = 13.0
-content_margin_right = 13.0
-content_margin_bottom = 13.0
+content_margin_left = 16.0
+content_margin_top = 16.0
+content_margin_right = 16.0
+content_margin_bottom = 16.0
 bg_color = Color(0.874509811, 0.952941179, 1, 1)
 corner_radius_top_left = 12
 corner_radius_top_right = 12
@@ -20,10 +20,10 @@ corner_radius_bottom_right = 12
 corner_radius_bottom_left = 12
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_other"]
-content_margin_left = 13.0
-content_margin_top = 13.0
-content_margin_right = 13.0
-content_margin_bottom = 13.0
+content_margin_left = 16.0
+content_margin_top = 16.0
+content_margin_right = 16.0
+content_margin_bottom = 16.0
 bg_color = Color(1, 1, 1, 1)
 corner_radius_top_left = 12
 corner_radius_top_right = 12
@@ -47,7 +47,7 @@ horizontal_alignment = 1
 
 [node name="Avatar" type="TextureRect" parent="."]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(38, 38)
+custom_minimum_size = Vector2(40, 40)
 size_flags_vertical = 0
 texture = ExtResource("4_avatar")
 expand_mode = 1

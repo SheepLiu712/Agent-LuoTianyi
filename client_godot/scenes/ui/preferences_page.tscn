@@ -27,72 +27,79 @@ theme_override_constants/margin_top = 22
 theme_override_constants/margin_right = 22
 theme_override_constants/margin_bottom = 22
 
-[node name="Column" type="VBoxContainer" parent="Margin"]
+[node name="Scroll" type="ScrollContainer" parent="Margin"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="Column" type="VBoxContainer" parent="Margin/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
 theme_override_constants/separation = 12
 
-[node name="Title" type="Label" parent="Margin/Column"]
+[node name="Title" type="Label" parent="Margin/Scroll/Column"]
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
 theme_override_font_sizes/font_size = 22
 text = "和天依相处的方式"
 
-[node name="RelationshipLabel" type="Label" parent="Margin/Column"]
+[node name="RelationshipLabel" type="Label" parent="Margin/Scroll/Column"]
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
 theme_override_font_sizes/font_size = 14
 text = "关系"
 
-[node name="RelationshipRow" type="HBoxContainer" parent="Margin/Column"]
+[node name="RelationshipRow" type="HBoxContainer" parent="Margin/Scroll/Column"]
 
-[node name="RelationshipField" type="LineEdit" parent="Margin/Column/RelationshipRow"]
+[node name="RelationshipField" type="LineEdit" parent="Margin/Scroll/Column/RelationshipRow"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 placeholder_text = "关系（可自定义）"
 
-[node name="RelationshipPresets" parent="Margin/Column/RelationshipRow" instance=ExtResource("3_dropdown")]
+[node name="RelationshipPresets" parent="Margin/Scroll/Column/RelationshipRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
 
-[node name="SpeakingStyleLabel" type="Label" parent="Margin/Column"]
+[node name="SpeakingStyleLabel" type="Label" parent="Margin/Scroll/Column"]
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
 theme_override_font_sizes/font_size = 14
 text = "表达风格"
 
-[node name="SpeakingStyleRow" type="HBoxContainer" parent="Margin/Column"]
+[node name="SpeakingStyleRow" type="HBoxContainer" parent="Margin/Scroll/Column"]
 
-[node name="SpeakingStyleField" type="LineEdit" parent="Margin/Column/SpeakingStyleRow"]
+[node name="SpeakingStyleField" type="LineEdit" parent="Margin/Scroll/Column/SpeakingStyleRow"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
 placeholder_text = "表达风格（可自定义）"
 
-[node name="SpeakingStylePresets" parent="Margin/Column/SpeakingStyleRow" instance=ExtResource("3_dropdown")]
+[node name="SpeakingStylePresets" parent="Margin/Scroll/Column/SpeakingStyleRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
 
-[node name="PersonalityLabel" type="Label" parent="Margin/Column"]
+[node name="PersonalityLabel" type="Label" parent="Margin/Scroll/Column"]
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
 theme_override_font_sizes/font_size = 14
 text = "性格关键词"
 
-[node name="PersonalityField" type="TextEdit" parent="Margin/Column"]
+[node name="PersonalityField" type="TextEdit" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 80)
 placeholder_text = "用逗号、顿号或换行分隔"
 wrap_mode = 1
 
-[node name="CustomContextLabel" type="Label" parent="Margin/Column"]
+[node name="CustomContextLabel" type="Label" parent="Margin/Scroll/Column"]
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
 theme_override_font_sizes/font_size = 14
 text = "补充上下文"
 
-[node name="CustomContextField" type="TextEdit" parent="Margin/Column"]
+[node name="CustomContextField" type="TextEdit" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
 custom_minimum_size = Vector2(0, 120)
 placeholder_text = "想让天依了解的相处背景"
 wrap_mode = 1
 
-[node name="Status" type="Label" parent="Margin/Column"]
+[node name="Status" type="Label" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
 autowrap_mode = 3
 
-[node name="Actions" type="HBoxContainer" parent="Margin/Column"]
+[node name="Actions" type="HBoxContainer" parent="Margin/Scroll/Column"]
 
-[node name="Reload" type="Button" parent="Margin/Column/Actions"]
+[node name="Reload" type="Button" parent="Margin/Scroll/Column/Actions"]
 unique_name_in_owner = true
 text = "重新加载"

@@ -51,7 +51,7 @@ func _initialize() -> void:
 		var lines: int = _input.get_line_count()
 		for line in _input.get_line_count():
 			lines += _input.get_line_wrap_count(line)
-		_input.custom_minimum_size.y = clampf(lines * 24 + 30, 92, 150))
+		_input.custom_minimum_size.y = clampf(lines * 24 + 32, 96, 160))
 	_volume.value = _session.get_audio_state().volume
 	_volume.value_changed.connect(func(value): _session.set_volume(value))
 	_stop_voice.pressed.connect(func(): _session.stop_voice())

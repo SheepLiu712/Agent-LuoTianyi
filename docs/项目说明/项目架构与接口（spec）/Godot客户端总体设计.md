@@ -62,7 +62,7 @@ DynamicsController 仍由 Application 持有；原生非附属 DynamicsWindow �
 
 ## 0.1.2 界面场景资源边界
 
-UI 固定节点与静态样式由 `.tscn` / `theme/app_theme.tres` 承载，脚本负责行为、数据绑定与运行时组件实例化。业务视图使用 `PackedScene.instantiate() → setup(...) → add_child()`，内嵌视图由父级就绪后注入并只初始化一次。主场景允许引擎直接启动，保留 `user://window_layout.cfg` 默认值；离线入口为 `scenes/preview/chat_preview.tscn`。草稿确认框与 Live2D 模型/特效节点是明确保留的代码建树例外。具体节点和失败行为以客户端 interface 为准，迁移前 `client_godot/architecture/` 系列仅保留为历史快照。
+UI 固定节点与静态样式由 `.tscn` / `theme/app_theme.tres` 承载，脚本负责行为、数据绑定与运行时组件实例化。业务视图使用 `PackedScene.instantiate() → setup(...) → add_child()`，内嵌视图由父级就绪后注入并只初始化一次。主场景允许引擎直接启动，保留 `user://window_layout.cfg` 默认值；离线入口为 `scenes/preview/chat_preview.tscn`。窗口重设计后确认框和波形也改为场景控件，只有非 UI 的 Live2D 模型/特效节点保留运行期创建。具体节点和失败行为以客户端 interface 为准，迁移前 `client_godot/architecture/` 系列仅保留为历史快照。
 
 
 ## 窗口重设计的职责边界

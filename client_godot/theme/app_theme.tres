@@ -369,6 +369,120 @@ corner_radius_bottom_left = 10
 border_width_left = 4
 border_color = Color(0.4, 0.8, 1, 1)
 
+[sub_resource type="StyleBoxFlat" id="AppSurface"]
+bg_color = Color(0.97,0.985,0.995,1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_left = 12
+corner_radius_bottom_right = 12
+content_margin_left = 16.0
+content_margin_top = 16.0
+content_margin_right = 16.0
+content_margin_bottom = 16.0
+
+[sub_resource type="StyleBoxFlat" id="DialogSurface"]
+bg_color = Color(0.985,0.992,1,1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_left = 12
+corner_radius_bottom_right = 12
+content_margin_left = 24.0
+content_margin_top = 24.0
+content_margin_right = 24.0
+content_margin_bottom = 24.0
+
+[sub_resource type="StyleBoxFlat" id="TerminalSurface"]
+bg_color = Color(0.06666667,0.09803922,0.13725491,1)
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_left = 12
+corner_radius_bottom_right = 12
+content_margin_left = 16.0
+content_margin_top = 16.0
+content_margin_right = 16.0
+content_margin_bottom = 16.0
+
+[sub_resource type="StyleBoxFlat" id="NavigationNormal"]
+bg_color = Color(0.92,0.96,0.99,0.3)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_left = 8
+corner_radius_bottom_right = 8
+content_margin_left = 9.0
+content_margin_top = 9.0
+content_margin_right = 9.0
+content_margin_bottom = 9.0
+
+[sub_resource type="StyleBoxFlat" id="NavigationHover"]
+bg_color = Color(0.86,0.94,0.99,1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_left = 8
+corner_radius_bottom_right = 8
+content_margin_left = 9.0
+content_margin_top = 9.0
+content_margin_right = 9.0
+content_margin_bottom = 9.0
+
+[sub_resource type="StyleBoxFlat" id="NavigationPressed"]
+bg_color = Color(0.72,0.9,1,1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_left = 8
+corner_radius_bottom_right = 8
+content_margin_left = 9.0
+content_margin_top = 9.0
+content_margin_right = 9.0
+content_margin_bottom = 9.0
+
+[sub_resource type="StyleBoxFlat" id="WindowNormal"]
+bg_color = Color(1,1,1,0)
+corner_radius_top_left = 0
+corner_radius_top_right = 0
+corner_radius_bottom_left = 0
+corner_radius_bottom_right = 0
+content_margin_left = 9.0
+content_margin_top = 9.0
+content_margin_right = 9.0
+content_margin_bottom = 9.0
+
+[sub_resource type="StyleBoxFlat" id="WindowHover"]
+bg_color = Color(0.87,0.94,0.98,1)
+corner_radius_top_left = 0
+corner_radius_top_right = 0
+corner_radius_bottom_left = 0
+corner_radius_bottom_right = 0
+content_margin_left = 9.0
+content_margin_top = 9.0
+content_margin_right = 9.0
+content_margin_bottom = 9.0
+
+[sub_resource type="StyleBoxFlat" id="CloseHover"]
+bg_color = Color(0.78,0.28,0.35,1)
+corner_radius_top_left = 0
+corner_radius_top_right = 0
+corner_radius_bottom_left = 0
+corner_radius_bottom_right = 0
+content_margin_left = 9.0
+content_margin_top = 9.0
+content_margin_right = 9.0
+content_margin_bottom = 9.0
+
+[sub_resource type="StyleBoxFlat" id="ScrollGrabber"]
+bg_color = Color(0.65,0.76,0.83,0.6)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_left = 4
+corner_radius_bottom_right = 4
+content_margin_left = 3.0
+content_margin_top = 3.0
+content_margin_right = 3.0
+content_margin_bottom = 3.0
+
+[sub_resource type="StyleBoxLine" id="Divider"]
+color = Color(0.8,0.87,0.92,0.65)
+thickness = 1
+
 [resource]
 default_font = SubResource("SystemFont_pul83")
 default_font_size = 15
@@ -444,3 +558,29 @@ DynamicsPost/styles/selected = SubResource("DynamicsPost_selected")
 LogEntry/colors/INFO = Color(0.8392157, 0.8980392, 0.93333334, 1)
 LogEntry/colors/WARN = Color(1, 0.8352941, 0.5411765, 1)
 LogEntry/colors/ERROR = Color(1, 0.54901963, 0.54901963, 1)
+
+AppSurface/base_type = &"PanelContainer"
+AppSurface/styles/panel = SubResource("AppSurface")
+PanelContainer/styles/panel = SubResource("AppSurface")
+DialogSurface/base_type = &"PanelContainer"
+DialogSurface/styles/panel = SubResource("DialogSurface")
+TerminalSurface/base_type = &"RichTextLabel"
+TerminalSurface/styles/normal = SubResource("TerminalSurface")
+WindowAction/base_type = &"Button"
+WindowAction/font_sizes/font_size = 20
+WindowAction/styles/normal = SubResource("WindowNormal")
+WindowAction/styles/hover = SubResource("WindowHover")
+WindowClose/base_type = &"Button"
+WindowClose/font_sizes/font_size = 20
+WindowClose/styles/normal = SubResource("WindowNormal")
+WindowClose/styles/hover = SubResource("CloseHover")
+WindowClose/colors/font_hover_color = Color(1,1,1,1)
+NavigationButton/base_type = &"Button"
+NavigationButton/font_sizes/font_size = 14
+NavigationButton/styles/normal = SubResource("NavigationNormal")
+NavigationButton/styles/hover = SubResource("NavigationHover")
+NavigationButton/styles/pressed = SubResource("NavigationPressed")
+HSeparator/styles/separator = SubResource("Divider")
+VScrollBar/styles/grabber = SubResource("ScrollGrabber")
+VScrollBar/styles/grabber_highlight = SubResource("ScrollGrabber")
+VScrollBar/styles/grabber_pressed = SubResource("ScrollGrabber")

@@ -4,7 +4,7 @@
 - PRD：[Godot Windows客户端](../需求说明（PRD）/Godot-Windows客户端.md)
 - 总体设计：[客户端总体设计](../../项目说明/项目架构与接口（spec）/Godot客户端总体设计.md)
 - interface：[窗口重设计](../../项目说明/项目架构与接口（spec）/接口文档/client_godot/window-redesign.md)
-- 总体状态：进行中
+- 总体状态：本地实现与可执行验证已完成；跨设备平台矩阵尚未全部验收（具体边界见末条记录）。
 
 ## 已完成
 
@@ -53,3 +53,18 @@
 - SPEC 44f8582；Red 4fcea0e（固定导航和聊天dirty契约缺失）；Green为本记录所在提交。
 - 验证：check.ps1 27项、check_accounts、check_features、check_network全部PASS；Application drafts从真实loopback登录验证一次性汇总、取消留稿、退出账号保留日志；GPU capture_release_ui PASS。修复退出过程中控制器发未读信号时导航节点已释放的生命周期问题，回归无引擎错误。
 - 作者自审：服务仍由Application注入，未新增全局service locator或协议；控件仅从场景取得。系统DPI、多屏与公共服务器未验证；仅本地提交。
+
+### 2026-09-20 视觉统一、原生交互与验证收尾
+
+- 交付：浅色场景标题栏/导航、主题圆角面板与焦点状态、实底聊天及表单、浅工具栏与深色日志正文。磨砂材质只采样应用Viewport；以屏幕纹理mipmap连续模糊修正发布遮罩的离散采样重影，无背景采样时使用同配色实底。波形替换为场景中24个预置控件，脚本只绑定数值。
+- 修复：设置720×640时相处页底部被固定操作栏遮挡，增加场景ScrollContainer与焦点跟随；滚动后重新加载可达，保存/关闭栏保持可见。全部可见UI、确认按钮和测试语音场景均从.tscn取得，独立只读审查未发现产品代码创建可见控件或旧窗口活跃引用。
+- SPEC bb94956，补充2822bbe；视觉Red 481a44c，最小布局Red 8249c5f；Green为本记录所在提交。最小布局测试初版headless无法反映可见原生窗口滚动，最终改为GPU专用，并在隔离副本再次验证旧场景FAIL、新场景PASS；不把headless布局结果作为视觉证据。
+- 原生修正：标题栏统一48px、移动4px后才开始系统拖动；兼容引擎无边框最大化报告FULLSCREEN的实际行为，保留还原矩形。最小化子窗口恢复时重新建立可见表面；主根窗口不能hide，单独恢复mode。关闭保存几何后进入宿主草稿流程。设置显式跟随主窗隐藏/恢复，不把transient或GW_OWNER当作行为证明。
+- 验证环境：Godot 4.7.1.stable.official.a13da4feb，Windows图形会话，Compatibility，NVIDIA RTX 4070 Laptop GPU；独立临时工程及AgentLuo-UI-Review-xpd5_wzy用户目录，无生产凭据/公共服务写入。
+- 自动化：check.ps1全部28项PASS；check_accounts/check_network在本切片回归PASS；相处布局修改后重跑check_features全部PASS（历史、媒体、动态、统一设置、主窗草稿、模型保存与委托）。统一设置包含全量预校验、部分失败/重试、取消及保存中关闭。
+- GPU：capture_release_ui、capture_dynamics_ui、capture_voice_ui、test_image_window、test_settings_layout均PASS；核查主窗默认/最小及125/150/200%内容缩放，设置、日志、动态发布与语音截图。实际HWND证明主窗最小化后动态/日志仍可见，设置隐藏并恢复；图片来源转属及随来源最小化/关闭通过。
+- 原生输入：test_native_window_controls通过真实鼠标/键盘验证拖动、双击最大化/还原、八方向缩放、最小化与系统恢复、最大化/还原按钮；关闭按钮与Alt+F4共收到两次同一路径请求。native-window-controls.json为ok=true。
+- 短时性能：1200×800各90帧，磨砂中位4.997ms/P95 5.152ms、实底中位5.016ms/P95 8.975ms；Godot静态分配均约71.4MB、绘制调用236/235。样本存在调度噪声，不据此宣称磨砂更快；不是进程总内存、显存或长期性能测量。
+- 证据：[主界面](../../../client_godot/artifacts/window-redesign/agentluo-redesign-chat.png)、[发布浮层](../../../client_godot/artifacts/window-redesign/agentluo-011-dynamics-publish.png)、[最小设置](../../../client_godot/artifacts/window-redesign/agentluo-redesign-settings-minimum.png)、[本地验证汇总](../../../client_godot/artifacts/window-redesign/verification.md)。截图/JSON/检查日志保存在Git忽略的artifacts/window-redesign，源代码中保留可复运行的测试。
+- 作者自审：已核查场景/主题资源、行为diff、测试证据与文档一致；保留场景节点和行为脚本分离，未改服务端协议、release.json或旧发布包。本轮只有本地提交，无push/PR；作者自审不替代他人审核。
+- 未验证：Windows10、真实系统DPI切换、跨显示器及显示器移除、Windows贴靠动作、集显、长期性能/内存、真实中文输入法组合键、公共服务和安装发布包。模拟显示器矩形/内容缩放/截图不替代这些实机验收。

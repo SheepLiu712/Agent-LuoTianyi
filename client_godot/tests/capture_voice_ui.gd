@@ -3,8 +3,7 @@ const Session = preload("res://src/session/chat_session.gd")
 const Transport = preload("res://src/network/websocket_transport.gd")
 const Audio = preload("res://src/media/reply_audio.gd")
 const Cache = preload("res://src/storage/audio_cache.gd")
-const VIEW_SCENE := "res://scenes/ui/chat_view.tscn"
-const AVATAR_SCENE := "res://scenes/avatar/avatar_panel.tscn"
+const CAPTURE_SCENE := "res://tests/scenes/voice_capture.tscn"
 var failures: Array[String] = []
 
 func _initialize() -> void:
@@ -21,27 +20,11 @@ func _run() -> void:
 	var directory := "user://capture-voice-%s" % Time.get_ticks_usec()
 	var session := Session.new(Transport.new(),null,Audio.new(null,Callable(),Cache.new(directory)))
 	root.add_child(session)
-	var split := HSplitContainer.new()
-	root.add_child(split)
-	split.theme = preload("res://theme/app_theme.tres")
-	split.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	if not ResourceLoader.exists(AVATAR_SCENE):
-		failures.append("avatar panel scene exists")
-		print(failures)
-		quit(1)
-		return
-	var avatar = load(AVATAR_SCENE).instantiate()
-	split.add_child(avatar)
-	avatar.custom_minimum_size.x = 290
-	if not ResourceLoader.exists(VIEW_SCENE):
-		failures.append("chat view scene exists")
-		print(failures)
-		quit(1)
-		return
-	var view = load(VIEW_SCENE).instantiate()
+	var split = load(CAPTURE_SCENE).instantiate()
+	var avatar = split.get_node("AvatarPanel")
+	var view = split.get_node("ChatView")
 	view.setup(session)
-	view.custom_minimum_size.x = 440
-	split.add_child(view)
+	root.add_child(split)
 	split.split_offset = 540
 	session.expression_requested.connect(avatar.avatar.apply_expression)
 	session.mouth_changed.connect(avatar.avatar.set_mouth_openness)

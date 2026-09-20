@@ -24,4 +24,3 @@ func update_state(state: Dictionary) -> void:
 	_time.text = "%.1f 秒" % state.duration if _status == "idle" else "%.1f/%.1f 秒" % [state.position,state.duration]
 	_wave.values = state.waveform
 	_wave.progress = state.position / state.duration if state.duration > 0 else 0.0
-	_wave.queue_redraw()
