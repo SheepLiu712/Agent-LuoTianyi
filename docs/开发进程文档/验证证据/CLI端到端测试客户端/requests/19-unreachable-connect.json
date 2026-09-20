@@ -1,0 +1,14 @@
+{
+  "actions": [
+    {
+      "action": "session.connect",
+      "params": {
+        "base_url": "https://127.0.0.1:9",
+        "username": "cli_e2e_user",
+        "password": "unreachable-probe",
+        "timeout": 5
+      }
+    }
+  ],
+  "on_failure": "continue"
+}

@@ -175,6 +175,7 @@
 - `INVALID_INPUT`：`values` 缺失或非对象、`replace` 非布尔。
 - `ACK_REJECTED` / `TIMEOUT` 沿用 S3 语义（覆盖接口拒绝）。
 - 门面增补：`HeadlessSession.get_preferences()`、`overwrite_preferences(preferences)`。
+- 响应归一化（S8b 修复，真实链路首测发现）：门面将覆盖接口响应归一化为 `{"ok": bool, "error": str|None}`。真实服务端成功返回 `{"status": "success"}`（无 `ok` 字段），修复前 CLI 会将其误判为 `ACK_REJECTED`（写入实际已生效）；失败时保留服务端/网络错误消息（含 timeout 词样时沿用 `TIMEOUT` 映射）。
 - 真实链路依赖受测部署可达；external 账号数据由夹具管理（计划 §5.5）。
 
 #### 1.11 场景引擎与报告（S9 交付）
@@ -214,6 +215,12 @@
 - `--report-include-content` 显式开启后，动作记录改用 `data`（完整、经统一脱敏）替代 `data_keys`。
 - 保留与清理：只写该单文件、不产生其他产物；清理由调用方负责（报告路径由调用方指定）。写入失败时汇总记录附 `error.code="REPORT_WRITE_FAILED"`（`category="input"`）并计入退出码。
 - 报告与 stdout 均不得出现凭据、音频 Base64 或本地绝对路径。
+
+#### 1.12 等待下一条完整回复（S3b 交付）
+
+- `reply.wait` 的 `reply_uuid` 变为**可选**：提供时保持 S3 语义（等待指定 UUID 的完整回复）；未提供时等待*调用时刻之后第一条新的完整回复*（PRD 串行语义："同一时刻只允许一个期待回复的动作"），并返回该回复的 `reply_uuid` 与聚合结果；超时沿用 `TIMEOUT`（退出码 5）。
+- 门面增补（§2 当前 interface 扩展）：`HeadlessSession.wait_for_next_reply(timeout)`——按完成顺序返回下一条完整回复；并发多条回复时因果关联不保证（与 PRD 口径一致，结果标记证据强度）。
+- 既有限制保留：服务端回复不携带原始客户端消息 ID，无法将回复与某次输入做确定性关联；串行使用是默认安全口径。
 
 ### 2. 无 GUI 会话门面（当前 interface，S2 交付）
 
