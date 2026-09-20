@@ -47,8 +47,12 @@ func run() -> void:
 	context.text = "close guard"
 	context.text_changed.emit()
 	window.close_requested.emit()
-	var dialog: ConfirmationDialog = window.get_node("%UnsavedDialog")
+	var dialog: Window = window.get_node("%UnsavedDialog")
 	check(dialog.visible,"dirty close opens a decision")
+	check(dialog.get_node("%SaveAndClose") is Button,"save-and-close control is authored in scene")
+	dialog.get_node("%CloseDecision").pressed.emit()
+	check(not dialog.visible and window.is_dirty(),"dialog close cancels without losing draft")
+	window.close_requested.emit()
 	dialog.get_cancel_button().pressed.emit()
 	check(window.is_dirty(),"cancel retains edits")
 	window.get_node("%SaveAll").pressed.emit()

@@ -115,7 +115,7 @@ func _run() -> void:
 	check(logs.contains("audio_playback_started") and logs.contains("audio_playback_finished") and logs.contains("audio_error"), "network to playback has diagnostic trail")
 	var menu = view.find_child("ChatMore",true,false)
 	menu.activated.emit("cache")
-	var dialogs = view.find_children("*","ConfirmationDialog",true,false)
+	var dialogs = view.find_children("*Dialog","Window",true,false)
 	check(dialogs.size() == 1 and dialogs[0].visible,"clear cache requires confirmation")
 	if not dialogs.is_empty():
 		check(cache.lookup("voice-first").has("path"),"opening clear dialog does not delete cache")

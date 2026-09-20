@@ -1,4 +1,4 @@
-extends "res://src/ui/draft_window.gd"
+extends Control
 var _settings: Node
 var _types: Array = []
 var _drafts := {}
@@ -12,21 +12,29 @@ var _fields := {}
 @onready var _params: TextEdit = %Params
 @onready var _status: Label = %Status
 @onready var _requirements: Label = %Requirements
-@onready var _save_button: Button = %SaveButton
-@onready var _plain: ConfirmationDialog = %PlainDialog
+@onready var _plain: Window = %PlainDialog
+signal plaintext_answer(allowed: bool)
+var _initialized := false
 var _refreshing := false
 var _executor: Node
 var _test_button: Button
-var _test_dialog: ConfirmationDialog
+var _test_dialog: Window
 var _test_snapshot := {}
 var _test_type := ""
 
 func setup(settings: Node,executor: Node = null) -> void:
 	_settings = settings
 	_executor = executor
+	if is_node_ready() and _settings != null: _initialize()
 
 func _ready() -> void:
-	super._ready()
+	%TestButton.visible = _executor != null
+	if _settings != null: _initialize()
+
+func _initialize() -> void:
+	if _initialized: return
+	_initialized = true
+	%TestButton.visible = _executor != null
 	_selector.activated.connect(func(index): _select(index))
 	_enabled.toggled.connect(func(_value): _edit())
 	_fields = {"provider":%provider,"base_url":%base_url,"api_key":%api_key,"model":%ModelName}
@@ -36,7 +44,6 @@ func _ready() -> void:
 		flag.toggled.connect(func(_value): _edit())
 	_params.text_changed.connect(_edit)
 	%CopyButton.pressed.connect(_copy_selected)
-	_save_button.pressed.connect(func(): _save(false))
 	if _executor != null:
 		_test_button = %TestButton
 		_test_dialog = %TestDialog
@@ -49,7 +56,8 @@ func _ready() -> void:
 		_test_dialog.confirmed.connect(_test)
 	else:
 		%TestButton.visible = false
-	_plain.confirmed.connect(func(): _save(true))
+	_plain.confirmed.connect(func(): plaintext_answer.emit(true))
+	_plain.canceled.connect(func(): plaintext_answer.emit(false))
 	if _settings == null:
 		return
 	_settings.changed.connect(_update)
@@ -67,7 +75,6 @@ func _as_draft(config: Dictionary) -> Dictionary:
 	return draft
 
 func _update(state: Dictionary) -> void:
-	_save_button.disabled = state.phase != "ready"
 	if _types.is_empty() and state.phase == "ready":
 		_types = _settings.get_types()
 		var options: Array = []
@@ -111,7 +118,8 @@ func _edit() -> void:
 
 func _config() -> Dictionary:
 	var config: Dictionary = _drafts.get(_current,{}).duplicate(true)
-	var parsed: Variant = JSON.parse_string(config.get("params_text",""))
+	var parser := JSON.new()
+	var parsed: Variant = parser.data if parser.parse(config.get("params_text","")) == OK else null
 	if not parsed is Dictionary:
 		_status.text = "高级参数必须是有效 JSON 对象。"
 		return {}
@@ -119,20 +127,42 @@ func _config() -> Dictionary:
 	config.params = parsed
 	return config
 
-func _save(allow_plain: bool) -> void:
-	var config := _config()
-	if config.is_empty():
-		return
-	var result: Dictionary = _settings.save(_current,config,allow_plain)
-	if result.ok:
-		_drafts[_current] = _as_draft(config)
-		_select(_selector.get_selected_id())
-		_status.text = "已保存；后续委托使用新配置。"
-	elif result.code == "PLAINTEXT_CONFIRMATION_REQUIRED":
-		_plain.popup_centered()
-		_plain.get_cancel_button().grab_focus()
-	else:
-		_status.text = "保存失败，草稿已保留（%s）。"%result.code
+func validate_changes() -> Dictionary:
+	var failures: Array = []
+	for id in _drafts:
+		if _drafts[id] == _as_draft(_settings.get_config(id)): continue
+		var config: Dictionary = _drafts[id].duplicate(true)
+		var parser := JSON.new()
+		var parsed: Variant = parser.data if parser.parse(config.params_text) == OK else null
+		var result := {"ok":false,"code":"INVALID_JSON"}
+		if parsed is Dictionary:
+			config.params = parsed
+			config.erase("params_text")
+			result = _settings.validate(id,config)
+		if not result.ok:
+			failures.append({"section":"models","id":id,"ok":false,"code":result.code})
+	return {"ok":failures.is_empty(),"results":failures}
+
+func save_changes() -> Dictionary:
+	var validation := validate_changes()
+	if not validation.ok: return validation
+	var results: Array = []
+	var all_ok := true
+	for id in _drafts:
+		if _drafts[id] == _as_draft(_settings.get_config(id)): continue
+		var config: Dictionary = _drafts[id].duplicate(true)
+		config.params = JSON.parse_string(config.params_text)
+		config.erase("params_text")
+		var result: Dictionary = _settings.save(id,config)
+		if result.code == "PLAINTEXT_CONFIRMATION_REQUIRED":
+			_plain.popup_centered()
+			_plain.get_cancel_button().grab_focus()
+			var allowed: bool = await plaintext_answer
+			if allowed: result = _settings.save(id,config,true)
+		if result.ok: _drafts[id] = _as_draft(config)
+		else: all_ok = false
+		results.append({"section":"models","id":id,"ok":result.ok,"code":result.code})
+	return {"ok":all_ok,"results":results}
 
 func _copy_selected() -> void:
 	if _current.is_empty() or _copy.get_selected_id().is_empty():

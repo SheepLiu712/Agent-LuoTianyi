@@ -5,7 +5,7 @@ signal settings_requested(kind: String)
 const ImageOverlay = preload("res://scenes/preview/image_overlay.tscn")
 @onready var _margin: MarginContainer = %Margin
 @onready var _menu = %ChatMore
-@onready var _clear_dialog: ConfirmationDialog = %ClearDialog
+@onready var _clear_dialog: Window = %ClearDialog
 @onready var _status: Label = %Status
 @onready var _history_status: Label = %HistoryStatus
 @onready var _history_retry: Button = %HistoryRetry

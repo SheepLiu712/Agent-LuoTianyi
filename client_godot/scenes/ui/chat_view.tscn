@@ -8,6 +8,8 @@
 [ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="6_dropdown"]
 [ext_resource type="PackedScene" path="res://scenes/ui/virtual_message_list.tscn" id="7_messages"]
 
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
+
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
 shader = ExtResource("3_shader")
 
@@ -141,7 +143,7 @@ custom_minimum_size = Vector2(96, 0)
 theme_type_variation = &"PrimaryButton"
 text = "发送  ↑"
 
-[node name="ClearDialog" type="ConfirmationDialog" parent="."]
+[node name="ClearDialog" parent="." instance=ExtResource("Decision")]
 unique_name_in_owner = true
 title = "清理语音缓存"
 visible = false

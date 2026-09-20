@@ -5,6 +5,8 @@
 
 [ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
 
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Discard"]
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 content_margin_left = 16.0
 content_margin_top = 16.0
@@ -101,4 +103,7 @@ horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="Chrome" parent="." instance=ExtResource("WindowChrome")]
+unique_name_in_owner = true
+
+[node name="DiscardDialog" parent="." instance=ExtResource("Discard")]
 unique_name_in_owner = true

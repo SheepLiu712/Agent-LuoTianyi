@@ -1,24 +1,24 @@
 [gd_scene load_steps=5 format=3]
 
-[ext_resource type="Script" path="res://src/ui/model_window.gd" id="1_script"]
+[ext_resource type="Script" path="res://src/ui/model_page.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
 
 
-[ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
 
-[node name="ModelWindow" type="Window"]
-title = "LLM / VLM 模型设置"
-size = Vector2i(660, 780)
-min_size = Vector2i(520, 600)
-visible = false
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
+
+[node name="ModelPage" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
 
-force_native = true
-
 [node name="Margin" type="MarginContainer" parent="."]
-offset_top = 44.0
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -112,10 +112,6 @@ unique_name_in_owner = true
 unique_name_in_owner = true
 text = "复制该用途配置"
 
-[node name="SaveButton" type="Button" parent="Margin/Scroll/Column"]
-unique_name_in_owner = true
-theme_type_variation = &"PrimaryButton"
-text = "保存当前用途"
 
 [node name="TestButton" type="Button" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
@@ -125,17 +121,15 @@ text = "手动测试当前配置"
 unique_name_in_owner = true
 autowrap_mode = 3
 
-[node name="PlainDialog" type="ConfirmationDialog" parent="."]
+[node name="PlainDialog" parent="." instance=ExtResource("Decision")]
 unique_name_in_owner = true
 title = "密钥保护失败"
 dialog_text = "Windows 未能保护 API Key。是否明确选择在本机以明文保存？默认取消保存。"
 ok_button_text = "明文保存"
 cancel_button_text = "取消保存"
 
-[node name="TestDialog" type="ConfirmationDialog" parent="."]
+[node name="TestDialog" parent="." instance=ExtResource("Decision")]
 unique_name_in_owner = true
 title = "测试可能消耗供应商额度"
 dialog_text = "将使用当前草稿发送一次固定短输入，不发送聊天历史。成功仅表示本次请求可用。"
 cancel_button_text = "取消"
-[node name="Chrome" parent="." instance=ExtResource("WindowChrome")]
-unique_name_in_owner = true

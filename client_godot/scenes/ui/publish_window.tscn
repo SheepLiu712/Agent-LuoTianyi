@@ -5,6 +5,8 @@
 
 [ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
 
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Discard"]
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 content_margin_left = 18.0
 content_margin_top = 18.0
@@ -55,4 +57,7 @@ unique_name_in_owner = true
 theme_type_variation = &"PrimaryButton"
 text = "发布文字动态"
 [node name="Chrome" parent="." instance=ExtResource("WindowChrome")]
+unique_name_in_owner = true
+
+[node name="DiscardDialog" parent="." instance=ExtResource("Discard")]
 unique_name_in_owner = true

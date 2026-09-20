@@ -1,17 +1,21 @@
-﻿extends "res://src/ui/draft_window.gd"
+extends Control
 var _controller: Node
 var _fields: Dictionary = {}
 @onready var _status: Label = %Status
-@onready var _save: Button = %Save
 @onready var _reload: Button = %Reload
+var _initialized := false
 var _refreshing := false
 var _presets: Array[Button] = []
 func setup(controller: Node) -> void:
 	_controller = controller
+	if is_node_ready() and _controller != null: _initialize()
 func _ready() -> void:
-	super._ready()
 	if _controller == null:
 		return
+	_initialize()
+func _initialize() -> void:
+	if _initialized: return
+	_initialized = true
 	add_child(_controller)
 	var lines := {"relationship":%RelationshipField,"speaking_style":%SpeakingStyleField}
 	var selectors := {"relationship":%RelationshipPresets,"speaking_style":%SpeakingStylePresets}
@@ -39,11 +43,10 @@ func _ready() -> void:
 			_fields[pair[0]] = input
 			input.text_changed.connect(_edit)
 	_reload.pressed.connect(_controller.reload)
-	_save.pressed.connect(_controller.save)
 	_controller.changed.connect(_update)
 	_update(_controller.get_state())
 func is_dirty() -> bool:
-	return _controller.get_state().dirty
+	return _controller != null and _controller.get_state().dirty
 func _edit() -> void:
 	if _refreshing:
 		return
@@ -66,8 +69,13 @@ func _update(state: Dictionary) -> void:
 		presets.set_selected_id("custom")
 		for id in values:
 			if values[id] == value: presets.set_selected_id(id)
-	_save.disabled = not state.can_save
 	_reload.disabled = state.phase in ["loading","saving"] or state.dirty
 	_status.text = {"idle":"", "loading":"正在读取相处偏好…", "saving":"正在合并服务器最新设置并保存…", "error":"加载失败，请重试。加载成功前不能保存。", "ready":"有未保存的修改。" if state.dirty else "已从服务器读取。"}.get(state.phase,"")
 	if state.phase == "ready" and state.code != "OK":
 		_status.text = "保存失败，输入已保留（%s）。"%state.code
+
+func save_changes() -> Dictionary:
+	if not is_dirty(): return {"ok":true,"results":[]}
+	await _controller.save()
+	var state: Dictionary = _controller.get_state()
+	return {"ok":not state.dirty,"results":[{"section":"preferences","id":"相处模式","ok":not state.dirty,"code":state.code}]}

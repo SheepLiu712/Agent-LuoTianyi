@@ -28,7 +28,7 @@ var _log_window: Window
 var _engine_log: Logger
 @onready var _log_problem: Label = %LogProblem
 var _windows: Dictionary = {}
-@onready var _exit_dialog: ConfirmationDialog = %ExitDialog
+@onready var _exit_dialog: Window = %ExitDialog
 var _exit_action := ""
 var _models: Node
 var _executor: Node
@@ -200,34 +200,29 @@ func _exit_tree() -> void:
 		_log.finish()
 
 func _open_settings(kind: String) -> void:
-	if _windows.has(kind) and is_instance_valid(_windows[kind]):
-		_windows[kind].open()
-		return
-	if kind not in ["preferences","models","dynamics"]:
+	if kind not in ["preferences","models","dynamics","settings"]: return
+	var key := "dynamics" if kind == "dynamics" else "settings"
+	if _windows.has(key) and is_instance_valid(_windows[key]):
+		if key == "settings": _windows[key].select_page("models" if kind == "models" else "preferences")
+		_windows[key].open()
 		return
 	var controller: Node
 	var window: Window
-	if kind == "preferences":
+	if key == "settings":
 		controller = preload("res://src/session/preferences_controller.gd").new(preload("res://src/network/json_request.gd").new(),_log)
-		window = load("res://scenes/ui/preferences_window.tscn").instantiate() as Window
-		window.setup(controller)
-	elif kind == "models":
-		window = load("res://scenes/ui/model_window.tscn").instantiate() as Window
-		window.setup(_models,_executor)
-		if _models.get_state().phase == "error":
-			_models.start(_session.get_session())
+		window = preload("res://scenes/ui/settings_window.tscn").instantiate()
+		window.setup(controller,_models,_executor)
 	else:
-		window = preload("res://scenes/ui/dynamics_window.tscn").instantiate() as Window
+		window = preload("res://scenes/ui/dynamics_window.tscn").instantiate()
 		window.setup(_dynamics,_layout_path.get_base_dir().path_join("dynamics-window.cfg"))
-	_windows[kind] = window
+	_windows[key] = window
 	add_child(window)
-	window.get_node("%Chrome").configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),kind)
+	window.get_node("%Chrome").configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),key)
 	window.tree_exited.connect(func():
-		if _windows.get(kind) == window:
-			_windows.erase(kind))
+		if _windows.get(key) == window: _windows.erase(key))
+	if key == "settings": window.select_page("models" if kind == "models" else "preferences")
 	window.open()
-	if controller != null:
-		controller.start(_session.get_session())
+	if controller != null: controller.start(_session.get_session())
 
 func _request_close(action: String) -> void:
 	for window in _windows.values():

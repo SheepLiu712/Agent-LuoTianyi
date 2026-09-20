@@ -1,5 +1,5 @@
-﻿extends Window
-var _discard := ConfirmationDialog.new()
+extends Window
+@onready var _discard: Window = %DiscardDialog
 func _init() -> void:
 	visible = false
 func _ready() -> void:
@@ -7,7 +7,6 @@ func _ready() -> void:
 	_discard.dialog_text = "关闭后，本窗口未保存的内容将被丢弃。"
 	_discard.ok_button_text = "放弃修改"
 	_discard.cancel_button_text = "取消"
-	add_child(_discard)
 	_discard.confirmed.connect(queue_free)
 	close_requested.connect(func():
 		if is_dirty():

@@ -24,7 +24,7 @@ func _run() -> void:
 	await account.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"visual","password":"synthetic","request_token":false},false)
 	await create_timer(.5).timeout
 	var menu = app.find_child("ChatMore",true,false)
-	for item in [["logs","客户端日志","logs"],["preferences","相处模式","preferences"],["models","LLM / VLM 模型设置","models"]]:
+	for item in [["logs","客户端日志","logs"],["preferences","设置","preferences"],["models","设置","models"]]:
 		menu.activated.emit(item[0])
 		await create_timer(.4).timeout
 		var windows: Array = app.find_children("*","Window",true,false).filter(func(n): return n.title.begins_with(item[1]))

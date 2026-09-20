@@ -7,6 +7,8 @@
 
 [ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
 
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
+
 [node name="AgentLuo" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -48,7 +50,7 @@ grow_horizontal = 2
 autowrap_mode = 3
 theme_override_colors/font_color = Color(0.7176471, 0.16470589, 0.16470589, 1)
 
-[node name="ExitDialog" type="ConfirmationDialog" parent="."]
+[node name="ExitDialog" parent="." instance=ExtResource("Decision")]
 unique_name_in_owner = true
 title = "放弃未保存的内容？"
 visible = false

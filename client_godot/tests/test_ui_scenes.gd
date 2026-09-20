@@ -38,14 +38,13 @@ const SCENES := {
 		},
 		"styleboxes": {"Panel": {"panel": [Color("f5f8fb"),0,18]}},
 	},
-	"res://scenes/ui/preferences_window.tscn": {
-		"root": "PreferencesWindow",
-		"type": "Window",
-		"script": "res://src/ui/preferences_window.gd",
+	"res://scenes/ui/preferences_page.tscn": {
+		"root": "PreferencesPage",
+		"type": "Control",
+		"script": "res://src/ui/preferences_page.gd",
 		"setup": "setup",
-		"unique": ["RelationshipField","RelationshipPresets","SpeakingStyleField","SpeakingStylePresets","PersonalityField","CustomContextField","Status","Reload","Save"],
+		"unique": ["RelationshipField","RelationshipPresets","SpeakingStyleField","SpeakingStylePresets","PersonalityField","CustomContextField","Status","Reload"],
 		"properties": {
-			"": {"title": "相处模式","size": Vector2i(600,620),"min_size": Vector2i(480,520),"visible": false},
 			"Margin": {
 				"theme_override_constants/margin_left": 22,
 				"theme_override_constants/margin_right": 22,
@@ -64,17 +63,15 @@ const SCENES := {
 			"Margin/Column/CustomContextField": {"placeholder_text": "想让天依了解的相处背景","custom_minimum_size": Vector2(0,120),"wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
 			"Margin/Column/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART},
 			"Margin/Column/Actions/Reload": {"text": "重新加载"},
-			"Margin/Column/Actions/Save": {"text": "保存相处模式","theme_type_variation": &"PrimaryButton"},
 		},
 	},
-	"res://scenes/ui/model_window.tscn": {
-		"root": "ModelWindow",
-		"type": "Window",
-		"script": "res://src/ui/model_window.gd",
+	"res://scenes/ui/model_page.tscn": {
+		"root": "ModelPage",
+		"type": "Control",
+		"script": "res://src/ui/model_page.gd",
 		"setup": "setup",
-		"unique": ["SelectorSlot","Requirements","Enabled","provider","base_url","api_key","ModelName","Json","Thinking","Params","CopySlot","CopyButton","SaveButton","TestButton","Status","PlainDialog","TestDialog"],
+		"unique": ["SelectorSlot","Requirements","Enabled","provider","base_url","api_key","ModelName","Json","Thinking","Params","CopySlot","CopyButton","TestButton","Status","PlainDialog","TestDialog"],
 		"properties": {
-			"": {"title": "LLM / VLM 模型设置","size": Vector2i(660,780),"min_size": Vector2i(520,600),"visible": false},
 			"Margin/Scroll": {"horizontal_scroll_mode": ScrollContainer.SCROLL_MODE_DISABLED},
 			"Margin/Scroll/Column": {"size_flags_horizontal": Control.SIZE_EXPAND_FILL,"theme_override_constants/separation": 10},
 			"Margin/Scroll/Column/Title": {"text": "每个用途独立配置，保存不会调用供应商","theme_override_font_sizes/font_size": 18,"theme_override_colors/font_color": Color("344c59")},
@@ -89,7 +86,6 @@ const SCENES := {
 			"Margin/Scroll/Column/ParamsLabel": {"text": "高级 JSON 参数（非流式）","theme_override_font_sizes/font_size": 14,"theme_override_colors/font_color": Color("344c59")},
 			"Margin/Scroll/Column/Params": {"custom_minimum_size": Vector2(0,120),"wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
 			"Margin/Scroll/Column/CopyRow/CopyButton": {"text": "复制该用途配置"},
-			"Margin/Scroll/Column/SaveButton": {"text": "保存当前用途","theme_type_variation": &"PrimaryButton"},
 			"Margin/Scroll/Column/TestButton": {"text": "手动测试当前配置","visible": false},
 			"Margin/Scroll/Column/Status": {"autowrap_mode": TextServer.AUTOWRAP_WORD_SMART},
 			"PlainDialog": {"title": "密钥保护失败","dialog_text": "Windows 未能保护 API Key。是否明确选择在本机以明文保存？默认取消保存。","ok_button_text": "明文保存","cancel_button_text": "取消保存"},
