@@ -18,12 +18,11 @@ func run() -> void:
 	await process_frame
 	var closed: Array[bool] = []
 	root.close_requested.connect(func(): closed.append(true))
-	for name in ["WindowMinimize", "WindowMaximize", "WindowClose"]:
-		check(frame.get_node_or_null("%" + name) is Button, "window control: " + name)
 	if DisplayServer.get_name() != "headless":
-		check(root.borderless, "host uses custom title bar")
-	frame.get_node("%WindowClose").pressed.emit()
-	check(closed == [true], "close button routes to host close request")
+		check(not root.borderless, "host uses the system title bar and window controls")
+	check(frame.get_node_or_null("TitleBar") == null, "superseded custom controls are removed")
+	root.close_requested.emit()
+	check(closed == [true], "system close routes to host close request")
 	var storage = load("res://src/storage/window_geometry.gd").new("user://window-frame-test-%s.cfg" % Time.get_ticks_usec())
 	var screens: Array[Rect2i] = [Rect2i(0,0,1280,800), Rect2i(-1920,0,1920,1080)]
 	check(storage.write_layout("main",Rect2i(4000,3000,1000,700),true) == OK, "geometry saves")
