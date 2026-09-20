@@ -51,3 +51,8 @@ visible = false
 dialog_text = "设置或动态窗口中有未保存的内容，确认放弃并继续？"
 ok_button_text = "放弃并继续"
 cancel_button_text = "取消"
+
+[node name="SecurityError" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+text = "凭据保护组件缺失，请重新解压完整程序。"

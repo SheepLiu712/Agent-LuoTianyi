@@ -113,17 +113,8 @@ func _update() -> void:
 
 func _select_style() -> void:
 	for id in _rows:
-		var box := StyleBoxFlat.new()
-		box.bg_color = Color("e3f5ff") if id==_selected else Color.WHITE
-		box.set_corner_radius_all(10)
-		box.content_margin_left = 10
-		box.content_margin_right = 10
-		box.content_margin_top = 10
-		box.content_margin_bottom = 10
-		if id == _selected:
-			box.border_color = Color("66ccff")
-			box.border_width_left = 4
-		_rows[id].add_theme_stylebox_override("normal",box)
+		var style := get_theme_stylebox("selected" if id == _selected else "normal", "DynamicsPost")
+		_rows[id].add_theme_stylebox_override("normal", style)
 
 func _refresh() -> void:
 	if _refreshing: return

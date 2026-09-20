@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://src/ui/preferences_window.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
 
 [node name="PreferencesWindow" type="Window"]
 title = "相处模式"
@@ -42,9 +43,8 @@ unique_name_in_owner = true
 size_flags_horizontal = 3
 placeholder_text = "关系（可自定义）"
 
-[node name="RelationshipPresets" type="Control" parent="Margin/Column/RelationshipRow"]
+[node name="RelationshipPresets" parent="Margin/Column/RelationshipRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
-visible = false
 
 [node name="SpeakingStyleLabel" type="Label" parent="Margin/Column"]
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
@@ -58,9 +58,8 @@ unique_name_in_owner = true
 size_flags_horizontal = 3
 placeholder_text = "表达风格（可自定义）"
 
-[node name="SpeakingStylePresets" type="Control" parent="Margin/Column/SpeakingStyleRow"]
+[node name="SpeakingStylePresets" parent="Margin/Column/SpeakingStyleRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
-visible = false
 
 [node name="PersonalityLabel" type="Label" parent="Margin/Column"]
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)

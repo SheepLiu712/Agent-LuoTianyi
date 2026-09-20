@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
 
 [ext_resource type="Script" path="res://src/ui/model_window.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
 
 [node name="ModelWindow" type="Window"]
 title = "LLM / VLM 模型设置"
@@ -34,9 +35,8 @@ theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
 theme_override_font_sizes/font_size = 18
 text = "每个用途独立配置，保存不会调用供应商"
 
-[node name="SelectorSlot" type="Control" parent="Margin/Scroll/Column"]
+[node name="SelectorSlot" parent="Margin/Scroll/Column" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
-visible = false
 
 [node name="Requirements" type="Label" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
@@ -99,9 +99,8 @@ wrap_mode = 1
 
 [node name="CopyRow" type="HBoxContainer" parent="Margin/Scroll/Column"]
 
-[node name="CopySlot" type="Control" parent="Margin/Scroll/Column/CopyRow"]
+[node name="CopySlot" parent="Margin/Scroll/Column/CopyRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
-visible = false
 
 [node name="CopyButton" type="Button" parent="Margin/Scroll/Column/CopyRow"]
 unique_name_in_owner = true

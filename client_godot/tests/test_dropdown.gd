@@ -21,7 +21,7 @@ func _run() -> void:
 	check(dropdown.get_selected_id()=="a","initial first available")
 	check(dropdown.set_selected_id("b") and actions.is_empty(),"programmatic selection is silent")
 	check(not dropdown.set_selected_id("off"),"disabled selection refused")
-	dropdown.set_items([{"id":"b","label":"改名"},{"id":"a","label":"同名"},{"id":"off","label":"禁用","disabled":true}])
+	dropdown.set_items([{"id":"b","label":"改名"},{"separator":true},{"id":"a","label":"同名"},{"id":"off","label":"禁用","disabled":true}])
 	check(dropdown.get_selected_id()=="b" and dropdown.text.contains("改名"),"reorder/rename keeps stable identity")
 	dropdown.open_menu()
 	await process_frame

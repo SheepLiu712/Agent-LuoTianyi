@@ -58,3 +58,8 @@ Application 持有账户、聊天、声音及业务控制器，桌面 Window 只
 ## 0.1.1 动态与下拉边界
 
 DynamicsController 仍由 Application 持有；原生非附属 DynamicsWindow 管理列表选择与各动态详情草稿/阅读位置，原生非模态 PublishWindow 归属动态窗口。关闭窗口不关闭应用会话；退出账户统一取消控制器请求并销毁窗口。评论全量刷新临时收集完整分页后一次合并；未读轮询只更新汇总提示。UnifiedDropdown 封装原生弹层、稳定ID、缩放和键盘行为，页面不访问弹层内部节点。两者均沿用既有服务端协议，不新增移动端或服务端实现。
+
+
+## 0.1.2 界面场景资源边界
+
+UI 固定节点与静态样式由 `.tscn` / `theme/app_theme.tres` 承载，脚本负责行为、数据绑定与运行时组件实例化。业务视图使用 `PackedScene.instantiate() → setup(...) → add_child()`，内嵌视图由父级就绪后注入并只初始化一次。主场景允许引擎直接启动，保留 `user://window_layout.cfg` 默认值；离线入口为 `scenes/preview/chat_preview.tscn`。草稿确认框与 Live2D 模型/特效节点是明确保留的代码建树例外。具体节点和失败行为以客户端 interface 为准，迁移前 `client_godot/architecture/` 系列仅保留为历史快照。

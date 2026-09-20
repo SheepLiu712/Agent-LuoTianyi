@@ -66,7 +66,7 @@ func update_message(message: Dictionary) -> void:
 		_caption.text = {"waiting_history":"等待历史同步…", "queued":"等待发送…", "sent":"已发送", "sending":"发送中…", "failed":"发送失败", "uncertain":"无法确认送达，请勿重复发送"}.get(message.status, "")
 		if message.get("demo", false):
 			_caption.text += " · 演示"
-		_caption.add_theme_color_override("font_color", Color("b57373") if message.status in ["failed", "uncertain"] else Color("93a6af"))
+		_caption.add_theme_color_override("font_color", get_theme_color("delivery_failed" if message.status in ["failed", "uncertain"] else "delivery_status", "MessageBubble"))
 
 func set_audio_state(state: Dictionary) -> void:
 	if _system_message:

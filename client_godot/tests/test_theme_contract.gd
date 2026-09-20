@@ -16,6 +16,13 @@ const ACCENT := Color("66ccff")
 const TRANSPARENT := Color.TRANSPARENT
 # 期望的字体色，键为 "<type>|<name>"。
 const COLORS := {
+	"DropdownItem|font_color": Color("353c43"),
+	"DropdownItem|font_selected_color": ACCENT,
+	"MessageBubble|delivery_failed": Color("b57373"),
+	"MessageBubble|delivery_status": Color("93a6af"),
+	"LogEntry|INFO": Color("d6e5ee"),
+	"LogEntry|WARN": Color("ffd58a"),
+	"LogEntry|ERROR": Color("ff8c8c"),
 	"Label|font_color": INK,
 	"Button|font_color": INK,
 	"OptionButton|font_color": INK,

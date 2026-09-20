@@ -24,3 +24,4 @@ Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--quit-after', '3', '--', '--preview') 'offline-preview'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_system_message_presentation.gd') 'system-message-presentation'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/application/test_default_user_storage.gd') 'default-user-storage'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_editable_scene_children.gd') 'editable-scene-children'

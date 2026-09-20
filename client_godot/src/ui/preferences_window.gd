@@ -1,5 +1,4 @@
 ﻿extends "res://src/ui/draft_window.gd"
-const Dropdown = preload("res://scenes/ui/unified_dropdown.tscn")
 var _controller: Node
 var _fields: Dictionary = {}
 @onready var _status: Label = %Status
@@ -15,14 +14,14 @@ func _ready() -> void:
 		return
 	add_child(_controller)
 	var lines := {"relationship":%RelationshipField,"speaking_style":%SpeakingStyleField}
-	var slots := {"relationship":%RelationshipPresets,"speaking_style":%SpeakingStylePresets}
+	var selectors := {"relationship":%RelationshipPresets,"speaking_style":%SpeakingStylePresets}
 	var blocks := {"personality_text":%PersonalityField,"custom_context":%CustomContextField}
 	for pair in [["relationship","关系"],["speaking_style","表达风格"],["personality_text","性格关键词"],["custom_context","补充上下文"]]:
 		if pair[0] in ["relationship","speaking_style"]:
 			var input: LineEdit = lines[pair[0]]
 			_fields[pair[0]] = input
 			input.text_changed.connect(func(_text): _edit())
-			var presets = Dropdown.instantiate()
+			var presets = selectors[pair[0]]
 			_presets.append(presets)
 			var values: Dictionary = {"friend":"朋友","confidant":"知己","idol":"偶像","partner":"搭档","family":"家人"} if pair[0] == "relationship" else {"lively":"活泼可爱","gentle":"温柔可人","quiet":"文静恬淡"}
 			var options: Array = [{"id":"custom","label":"自定义"}]
@@ -31,10 +30,6 @@ func _ready() -> void:
 			presets.set_items(options)
 			presets.set_meta("field",pair[0])
 			presets.set_meta("values",values)
-			var row: Node = slots[pair[0]].get_parent()
-			row.add_child(presets)
-			row.move_child(presets,slots[pair[0]].get_index())
-			slots[pair[0]].queue_free()
 			presets.activated.connect(func(id):
 				if id != "custom":
 					input.text = values[id]

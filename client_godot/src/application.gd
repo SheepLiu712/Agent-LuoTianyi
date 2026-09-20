@@ -60,9 +60,7 @@ func _ready() -> void:
 	_exit_dialog.confirmed.connect(func(): _finish_close(_exit_action))
 	_exit_dialog.canceled.connect(func(): _exit_action = "")
 	if not ClassDB.class_exists("WindowsSecurity"):
-		var error := Label.new()
-		error.text = "凭据保护组件缺失，请重新解压完整程序。"
-		add_child(error)
+		%SecurityError.show()
 		push_error("WindowsSecurity extension missing")
 		return
 	if _session == null:

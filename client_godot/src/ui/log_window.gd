@@ -93,7 +93,7 @@ func _matches(entry: Dictionary) -> bool:
 	return (_level.get_selected_id() == "all" or entry.level == _level.get_selected_id()) and (_module.get_selected_id() == "all" or entry.module == _module.get_selected_id()) and (_search.text.is_empty() or JSON.stringify(entry).to_lower().contains(_search.text.to_lower()))
 
 func _append(entry: Dictionary) -> void:
-	_text.push_color({"INFO":Color("d6e5ee"),"WARN":Color("ffd58a"),"ERROR":Color("ff8c8c")}[entry.level])
+	_text.push_color(get_theme_color(entry.level, "LogEntry"))
 	var metrics := entry.duplicate()
 	for key in ["time","level","module","message","event"]:
 		metrics.erase(key)

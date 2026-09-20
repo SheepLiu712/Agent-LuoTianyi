@@ -345,6 +345,30 @@ corner_radius_bottom_left = 8
 [sub_resource type="SystemFont" id="SystemFont_pul83"]
 font_names = PackedStringArray("Microsoft YaHei UI", "Microsoft YaHei")
 
+[sub_resource type="StyleBoxFlat" id="DynamicsPost_normal"]
+content_margin_left = 10.0
+content_margin_top = 10.0
+content_margin_right = 10.0
+content_margin_bottom = 10.0
+bg_color = Color(1, 1, 1, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+
+[sub_resource type="StyleBoxFlat" id="DynamicsPost_selected"]
+content_margin_left = 10.0
+content_margin_top = 10.0
+content_margin_right = 10.0
+content_margin_bottom = 10.0
+bg_color = Color(0.8901961, 0.9607843, 1, 1)
+corner_radius_top_left = 10
+corner_radius_top_right = 10
+corner_radius_bottom_right = 10
+corner_radius_bottom_left = 10
+border_width_left = 4
+border_color = Color(0.4, 0.8, 1, 1)
+
 [resource]
 default_font = SubResource("SystemFont_pul83")
 default_font_size = 15
@@ -412,3 +436,11 @@ TextEdit/styles/focus = SubResource("StyleBoxFlat_engfm")
 TextEdit/styles/normal = SubResource("StyleBoxFlat_p5jtr")
 
 DropdownItem/colors/font_selected_color = Color(0.4, 0.8, 1, 1)
+DropdownItem/colors/font_color = Color(0.20784314, 0.23529412, 0.2627451, 1)
+MessageBubble/colors/delivery_failed = Color(0.70980394, 0.4509804, 0.4509804, 1)
+MessageBubble/colors/delivery_status = Color(0.5764706, 0.6509804, 0.6862745, 1)
+DynamicsPost/styles/normal = SubResource("DynamicsPost_normal")
+DynamicsPost/styles/selected = SubResource("DynamicsPost_selected")
+LogEntry/colors/INFO = Color(0.8392157, 0.8980392, 0.93333334, 1)
+LogEntry/colors/WARN = Color(1, 0.8352941, 0.5411765, 1)
+LogEntry/colors/ERROR = Color(1, 0.54901963, 0.54901963, 1)

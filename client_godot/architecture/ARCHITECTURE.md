@@ -1,5 +1,9 @@
 # agentluo Godot 客户端架构分析（总览）
 
+> **历史快照说明（2026-09-20 场景化后）**：本文及本目录 01–10 篇描述的是 `42b5b1c`，作为迁移前架构背景保留。以下行号、脚本构造视图、三个薄场景与 preview_style.gd 的描述不代表当前实现。现行 UI 契约见 [客户端 interface](../../docs/项目说明/项目架构与接口（spec）/接口文档/client_godot/README.md) 中的场景化收尾条目；实际交付与验证见 [进度](../../docs/开发进程文档/开发进度/Godot-Windows客户端.md)。
+
+当前 UI 由 `scenes/main.tscn`、`scenes/ui/`、`scenes/avatar/`、`scenes/preview/` 的节点树承载，行为脚本以唯一节点名绑定；业务依赖通过 `instantiate() → setup() → add_child()` 注入，主场景无注入时保留用户目录默认值。主题唯一来源是 `theme/app_theme.tres`，旧 `preview_style.gd` 已删除。固定子视图内嵌，数据驱动的气泡、动态行、菜单项实例化对应场景；仅草稿确认框与 Live2D 模型/特效节点沿用已批准的运行时创建。
+
 | 项 | 内容 |
 | --- | --- |
 | 分析对象 | `client_godot/`（Godot 4.7.1 Windows x64 客户端） |

@@ -165,7 +165,7 @@ Style.make_theme() 统一账户与聊天控件的背景、文字、按钮、输�
 
 ## OfflinePreview：可运行视觉样板
 
-独立入口 `scenes/chat_preview.tscn`，由当前开发启动场景装配，始终显示“离线样板 · 未连接服务器”；正式产品菜单不提供此入口。UI 只调用离线控制器和 AvatarDriver，完全不发 HTTP/WebSocket 请求。
+独立入口 `scenes/preview/chat_preview.tscn`，由当前开发启动场景装配，始终显示“离线样板 · 未连接服务器”；正式产品菜单不提供此入口。UI 只调用离线控制器和 AvatarDriver，完全不发 HTTP/WebSocket 请求。
 
 `src/preview/demo_session.gd` 是离线样板控制器，继承 RefCounted，供样板 UI 和 headless 测试调用：
 
@@ -406,6 +406,8 @@ DynamicDetail.refresh_comments() 由窗口调用，转交完整分页刷新并�
 
 ## 界面场景化：主题与材质资源（0.1.2 起）
 
+以下第一至九片条目保留迁移背景；涉及过渡保留项（preview_style、旧样板路径、静态下拉占位、代码分隔线/状态样式）的描述，以文末「离线样板场景化与主题收尾」「场景化遗漏修正」为准。其余公开行为契约继续生效。
+
 界面场景化的首个切片只收敛样式来源，不改视图节点树，也不改任何公开方法与信号。
 
 `res://theme/app_theme.tres` 是唯一主题来源，内容等价于原 `Style.make_theme()`：`SystemFont` 字体族 `Microsoft YaHei UI`/`Microsoft YaHei`、默认字号 15；`Label`/`Button`/`OptionButton`/`LineEdit`/`TextEdit`/`RichTextLabel`/`PopupMenu`/`CheckBox` 字体色 `#304553`（`RichTextLabel` 另含默认色），`TextEdit` 占位色 `#9aaeb8`、`LineEdit` 占位色 `#8299a6`；`Button`/`OptionButton`/`MenuButton` 的 normal `#eef6fb`、hover `#dff3ff`、pressed `#b7e6ff`、disabled `#edf1f4`（圆角 8、内边距 9）与 focus 描边，字体四态 `#304553`、禁用 `#9aabb7`；`PrimaryButton` 为 `Button` 变体（normal `#66ccff`、hover `#8ad8ff`、pressed `#43b8f0`，圆角 9、内边距 10）；`TextEdit`/`LineEdit` normal 白底（圆角 8、内边距 12）、focus 描边、选区 `#b7e6ff`、光标 `#304553`；`PopupMenu` 面板白底（圆角 10、内边距 8）、hover `#dff3ff`（圆角 6、内边距 6）、`v_separation` 12；`HSlider` 轨道 `#dcecf5`、已填充区与高亮 `#66ccff`（圆角 2、内边距 2）、focus 描边与三个 grabber 圆点图标。焦点样式为透明底、圆角 8、`#66ccff` 两像素描边。
@@ -539,5 +541,5 @@ DynamicDetail.refresh_comments() 由窗口调用，转交完整分页刷新并�
 
 - preferences_window 的 RelationshipPresets/SpeakingStylePresets、model_window 的 SelectorSlot/CopySlot 保留既有唯一节点名，改为内嵌 unified_dropdown.tscn，入树前即可在编辑器看到完整下拉布局。脚本只填选项、连接信号，不删除标记再插入静态节点。
 - main.tscn 常驻隐藏的 SecurityError Label 承载既有组件缺失文案，运行时只切换可见性。动态菜单分隔项实例化 dropdown_separator.tscn；公开稳定 ID、键盘导航及菜单行为不变。
-- 动态行普通/选中样式移入 app_theme.tres 的 DynamicsPost/normal 与 selected（白底/浅蓝底、圆角10、内边距10、选中左侧4px主题蓝）；脚本只选择资源。下拉默认/选中色与消息投递状态色同样从主题读取，字面颜色保持不变。
+- 动态行普通/选中样式移入 app_theme.tres 的 DynamicsPost/normal 与 selected（白底/浅蓝底、圆角10、内边距10、选中左侧4px主题蓝）；脚本只选择资源。下拉默认/选中色、消息投递状态色与 INFO/WARN/ERROR 日志级别色同样从主题读取，字面颜色保持不变。
 - 测试在未入树、未注入业务依赖时核查真实下拉子场景、分隔线与隐藏错误提示；沿用设置草稿、模型、下拉交互和动态选择回归，GPU 对比设置与动态截图。
