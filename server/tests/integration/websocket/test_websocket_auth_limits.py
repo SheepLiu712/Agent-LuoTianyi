@@ -116,7 +116,7 @@ async def test_auth_negotiates_negative_ack_capability():
 
 @pytest.mark.asyncio
 async def test_chat_route_does_not_register_stream_after_auth_rejection(monkeypatch):
-    import server_main
+    from src.web.websocket import endpoint
 
     registrations = []
     runtime = SimpleNamespace(
@@ -129,7 +129,7 @@ async def test_chat_route_does_not_register_stream_after_auth_rejection(monkeypa
         database_manager=object(),
     )
     monkeypatch.setattr(
-        server_main,
+        endpoint,
         "get_admin_shell",
         lambda: SimpleNamespace(runtime_supervisor=SimpleNamespace(runtime=runtime)),
     )
@@ -139,6 +139,6 @@ async def test_chat_route_does_not_register_stream_after_auth_rejection(monkeypa
 
     monkeypatch.setattr(WebSocketConnection, "auth", reject_auth)
 
-    await server_main.chat_ws(FakeWebSocket())
+    await endpoint.chat_ws(FakeWebSocket())
 
     assert registrations == []

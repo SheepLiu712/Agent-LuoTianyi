@@ -23,14 +23,16 @@ Infrastructure 提供技术机制，不拥有角色行为，也不依赖 `agent`
 
 ### `src/web`
 
-- `http`：公开 HTTP 请求模型、限流、运行时访问和项目计划书注册。
-- `websocket`：Wire Message、物理连接、认证、心跳、ACK/NACK 和协议收发。
+- `bindings.py`：通过 `bind_web_interfaces(app, root_dir)` 一次性绑定全部 Web interface；服务器入口不单独了解任何路由。
+- `http`：公开 HTTP 路由、请求模型、限流、运行时访问和项目计划书注册。
+- `websocket`：聊天 endpoint、Wire Message、物理连接、认证、心跳、ACK/NACK 和协议收发。
 - `admin`：管理 HTTP 路由和管理 UI 注册。
 
 Web 承载 FastAPI 和 WebSocket 网络语义，不解释 Agent 行为，也不拥有 Stage 生命周期。
 
 ### `src/application`
 
+- `server_lifecycle.py`：拥有服务器整体的 `start()` / `stop()`；初始化和关闭 AdminShell，并要求 RuntimeSupervisor 启停 ServerRuntime。该 interface 可由 FastAPI、测试或未来其他主机直接调用。
 - `user`：账号安全、用户对话读取等用户用例。
 - `admin`：AdminShell、运行时管理、配置/密钥协作、QQ 音乐凭据刷新和系统动态发布。
 
@@ -63,6 +65,8 @@ Adapter 位于外部信道与 Agent/Stage seam 之间，只拥有语义转换和
 
 不再存在 `SystemRuntime` 或 `InfrastructureRuntime`。业务模块不得把组合根当作通用服务定位器；目前 WorldTask 仅使用其已有的数据库、Stage 查询等应用门面，角色唱歌能力通过 `SingingBackendPort` 显式注入。
 
+这里需要区分两个职责：`ServerRuntime` 仍是运行对象图的唯一组合根；`application.server_lifecycle.ServerLifecycle` 是进程级启停 interface。前者构造和关闭业务运行时，后者决定何时初始化 AdminShell、调用 RuntimeSupervisor 启停前者。FastAPI 不参与这套顺序。
+
 ## 依赖方向
 
 ```text
@@ -76,10 +80,16 @@ external client
       |                 |
     world --------------+
 
-server_runtime 构造并连接上述模块，本身不下沉为业务依赖。
+server_main -> web.bindings
+            -> run_server -> application.ServerLifecycle -> RuntimeSupervisor -> ServerRuntime
+                         +-> uvicorn.Server.serve
+
+ServerRuntime 构造并连接业务对象图，本身不下沉为业务依赖；Web 主机也不拥有服务器整体启停规则。
 ```
 
-允许业务模块依赖 `domain`。`infrastructure` 不得反向依赖业务层或外部 Adapter。静态边界由 `scripts/check_architecture_boundaries.py` 的 B1–B8 检查。
+正式进程入口固定为 `python server_main.py`。`run_server()` 在一个事件循环中执行 `ServerLifecycle.start()`、`uvicorn.Server.serve()` 和 finally 清理，并关闭 Uvicorn lifespan，避免生命周期被 Web 框架重复触发。直接运行 `uvicorn server_main:app` 不属于受支持的生产启动方式。
+
+允许业务模块依赖 `domain`。`infrastructure` 不得反向依赖业务层或外部 Adapter。静态边界由 `scripts/check_architecture_boundaries.py` 的 B1–B10 检查。
 
 ## 配置归属
 

@@ -3,8 +3,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-import server_main
 from src.web.admin import admin_interface
+from src.web.http import routes
+from src.web.http.runtime_access import require_bearer_token
 from src.infrastructure.config.secrets import SecretStore
 from src.web.http.types import (
     DynamicCommentListQuery,
@@ -53,10 +54,10 @@ async def test_user_get_routes_accept_tokens_only_from_bearer_header():
     assert "token" not in DynamicUnreadQuery.model_fields
     assert "token" not in DynamicCommentListQuery.model_fields
 
-    await server_main.get_history(HistoryQuery(username="alice"), "Bearer header-token", runtime)
-    await server_main.list_dynamics(DynamicListQuery(username="alice"), "Bearer header-token", runtime)
-    await server_main.get_dynamic_unread(DynamicUnreadQuery(username="alice"), "Bearer header-token", runtime)
-    await server_main.list_dynamic_comments(
+    await routes.get_history(HistoryQuery(username="alice"), "Bearer header-token", runtime)
+    await routes.list_dynamics(DynamicListQuery(username="alice"), "Bearer header-token", runtime)
+    await routes.get_dynamic_unread(DynamicUnreadQuery(username="alice"), "Bearer header-token", runtime)
+    await routes.list_dynamic_comments(
         "dynamic-id",
         DynamicCommentListQuery(username="alice"),
         "Bearer header-token",
@@ -74,7 +75,7 @@ async def test_user_get_routes_accept_tokens_only_from_bearer_header():
 @pytest.mark.parametrize("header", [None, "", "Basic token", "Bearer", "Bearer token extra"])
 def test_bearer_header_rejects_missing_or_malformed_values(header):
     with pytest.raises(HTTPException) as exc_info:
-        server_main.require_bearer_token(header)
+        require_bearer_token(header)
     assert exc_info.value.status_code == 401
 
 
@@ -85,16 +86,16 @@ async def test_register_and_reset_route_logs_do_not_contain_invite_code(monkeypa
     def record(message, *args):
         messages.append(message % args if args else message)
 
-    monkeypatch.setattr(server_main.logger, "info", record)
+    monkeypatch.setattr(routes.logger, "info", record)
     runtime = SimpleNamespace(user_interface=RecordingUserInterface())
     invite_code = "SECRET-INVITE-CODE"
 
-    await server_main.register(
+    await routes.register(
         RegisterRequest(username="alice", password="encrypted", invite_code=invite_code),
         runtime,
         None,
     )
-    await server_main.reset_account(
+    await routes.reset_account(
         ResetAccountRequest(
             invite_code=invite_code,
             new_username="alice-renamed",

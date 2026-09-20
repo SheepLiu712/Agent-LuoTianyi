@@ -349,13 +349,13 @@ def test_supervisor_reports_busy_transition_states(tmp_path):
 
 
 def test_server_main_runtime_dependency_reports_not_ready(tmp_path):
-    import server_main
+    from src.web.http.routes import get_runtime
 
     (tmp_path / "config.json").write_text("{}", encoding="utf-8")
     asyncio.run(init_admin_shell(root_dir=tmp_path, config_path="config.json"))
     try:
         try:
-            server_main.get_runtime()
+            get_runtime()
         except HTTPException as exc:
             assert exc.status_code == 503
             assert exc.detail["code"] == "SYSTEM_RUNTIME_NOT_READY"

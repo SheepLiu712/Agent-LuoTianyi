@@ -1,452 +1,43 @@
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, WebSocket, WebSocketDisconnect, Header, Request
-import uvicorn
+import asyncio
 import os
-import sys
 
-# Ensure src is importable
-current_dir = os.path.dirname(os.path.abspath(__file__))
-os.chdir(current_dir)
-if current_dir not in sys.path:
-    sys.path.append(current_dir)
+import uvicorn
+from fastapi import FastAPI
 
-from src.web.http.types import (
-    RegisterRequest,
-    LoginRequest,
-    AutoLoginRequest,
-    HistoryQuery,
-    ImageRequest,
-    ResetAccountRequest,
-    PreferenceGetRequest,
-    PreferenceOverwriteRequest,
-    DynamicListRequest,
-    DynamicListQuery,
-    DynamicCreateRequest,
-    DynamicCommentListRequest,
-    DynamicCommentListQuery,
-    DynamicCommentCreateRequest,
-    DynamicUnreadRequest,
-    DynamicUnreadQuery,
-    DynamicReadMarkRequest,
-)
-from src.adapter.websocket import ChatEventAcceptance
-from src.application.admin import (
-    get_admin_shell,
-    init_admin_shell,
-    shutdown_admin_shell,
-)
-from src.web.admin import register_admin_ui
+from src.application.server_lifecycle import ServerLifecycle
 from src.utils.helpers import load_config
 from src.utils.logger import get_logger, install_access_log_filter
-from src.web.http import (
-    register_project_plan,
-    require_bearer_token,
-    runtime_not_ready_detail,
-)
-from src.web.websocket import WSEventType, WebSocketConnection
+from src.web.bindings import bind_web_interfaces
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from src.server_runtime import ServerRuntime
-
+current_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(current_dir)
 logger = get_logger("server_main")
 config = load_config("config/config.json")
+server_lifecycle = ServerLifecycle(root_dir=current_dir)
+app = FastAPI()
+bind_web_interfaces(app, current_dir)
 
 
-@asynccontextmanager
-async def startup_event(app: FastAPI):
+async def run_server(
+    host: str,
+    port: int,
+    lifecycle: ServerLifecycle = server_lifecycle,
+) -> None:
+    """Run the application lifecycle and Uvicorn in one event loop."""
     install_access_log_filter()
-    admin_shell = await init_admin_shell(root_dir=current_dir)
-    logger.info("AdminShell 初始化完成，正在校验配置并启动系统运行时")
-    runtime_status = await admin_shell.runtime_supervisor.start()
-    if runtime_status.get("running"):
-        logger.info("配置校验通过，ServerRuntime 已自动启动")
-    else:
-        logger.warning(
-            "ServerRuntime 未自动启动: state=%s, error=%s",
-            runtime_status.get("state"),
-            runtime_status.get("last_error"),
+    web_server = uvicorn.Server(
+        uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            lifespan="off",
         )
+    )
+    await lifecycle.start()
     try:
-        yield
+        await web_server.serve()
     finally:
-        logger.info("正在关闭 AdminShell 和系统运行时")
-        await shutdown_admin_shell()
-        logger.info("AdminShell 已关闭")
-
-
-def get_runtime():
-    runtime = get_admin_shell().runtime_supervisor.runtime
-    if runtime is None:
-        raise HTTPException(status_code=503, detail=runtime_not_ready_detail())
-    return runtime
-
-
-app = FastAPI(lifespan=startup_event)
-
-# ——————————————————————————————————————————————————————————————————
-# 主要的 API 路由定义
-# ——————————————————————————————————————————————————————————————————
-
-# 注册管理后台的 UI 和路由
-register_admin_ui(app, current_dir)
-
-# 注册项目计划书页面
-register_project_plan(app, current_dir)
-
-
-@app.websocket("/chat_ws")
-async def chat_ws(websocket: WebSocket):
-    try:
-        await websocket.accept()
-    except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected before accept on /chat_ws")
-        return
-
-    server_runtime: "ServerRuntime" = get_admin_shell().runtime_supervisor.runtime
-    if server_runtime is None:
-        try:
-            await websocket.send_json(
-                {
-                    "type": "system_not_ready",
-                    "payload": runtime_not_ready_detail(),
-                }
-            )
-            await websocket.close(code=1013)
-        except WebSocketDisconnect:
-            logger.info("WebSocket client disconnected before system_not_ready on /chat_ws")
-        return
-
-    logger.info("WebSocket client connected to /chat_ws")
-    websocket_service = server_runtime.websocket_service  # WebSocketService 实例
-    stage_manager = getattr(server_runtime, "stage_manager", None)
-    try:
-        await websocket_service.send_system_ready_event(websocket)
-    except WebSocketDisconnect:
-        logger.info("WebSocket client disconnected before system_ready on /chat_ws")
-        return
-
-    ws_connection = WebSocketConnection(websocket=websocket, user_uuid=None, user_name=None)
-    try:
-        authenticated = await ws_connection.auth(
-            websocket_service,
-            server_runtime.database_manager,
-        )
-        if not authenticated:
-            return
-        if stage_manager is None:
-            raise RuntimeError("StageManager is required for production chat connections")
-        character_id = server_runtime.agent_runtime.default_character_id
-        await stage_manager.connect(ws_connection, character_id)
-        while True:
-            event = await websocket_service.try_recv_client_msg(ws_connection)
-            if event is None:
-                continue
-
-            if event.event_type == WSEventType.HB_PING.value:
-                await websocket_service.handle_ping_event(ws_connection, event)
-                continue
-
-            if event.event_type == WSEventType.LLM_RESPONSE.value:
-                server_runtime.client_llm_executor.on_llm_response(event.payload)
-                continue
-
-            if event.event_type in (WSEventType.USER_TEXT.value, WSEventType.USER_IMAGE.value):
-                payload = event.payload if isinstance(event.payload, dict) else {}
-                llm_mode = payload.get("llm_mode")
-                if isinstance(llm_mode, dict):
-                    raw_types = llm_mode.get("types")
-                    if isinstance(raw_types, list):
-                        ws_connection.client_mode = {
-                            "types": [str(t).strip() for t in raw_types if isinstance(t, str) and t.strip()]
-                        }
-                    elif isinstance(raw_types, str) and raw_types.strip():
-                        ws_connection.client_mode = {"types": [raw_types.strip()]}
-
-            if server_runtime.chat_adapter.supports_input(event):
-                acceptance = await server_runtime.chat_adapter.try_accept_event(ws_connection, event)
-                if acceptance == ChatEventAcceptance.DUPLICATE:
-                    await websocket_service.send_duplicate_ack_event(ws_connection, event)
-                    continue
-                if acceptance == ChatEventAcceptance.BAD_MESSAGE:
-                    await websocket_service.send_nack_event(
-                        ws_connection,
-                        event,
-                        code="BAD_MESSAGE",
-                        message="chat event payload is invalid",
-                        retryable=False,
-                    )
-                    continue
-                if acceptance == ChatEventAcceptance.UNSUPPORTED:
-                    await websocket_service.send_nack_event(
-                        ws_connection,
-                        event,
-                        code="UNSUPPORTED_EVENT",
-                        message="chat event type is not supported",
-                        retryable=False,
-                    )
-                    continue
-                if acceptance == ChatEventAcceptance.OVERLOADED:
-                    await websocket_service.send_nack_event(
-                        ws_connection,
-                        event,
-                        code="OVERLOADED",
-                        message="chat ingress queue is full",
-                        retryable=True,
-                    )
-                    continue
-                await websocket_service.send_ack_event(ws_connection, event)
-    except WebSocketDisconnect:
-        server_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
-        logger.info("WebSocket client disconnected from /chat_ws")
-    except Exception as e:
-        server_runtime.client_llm_executor.clear_user(ws_connection.user_uuid, ws_connection)
-        logger.error(f"Error in /chat_ws: {e}")
-    finally:
-        if stage_manager is not None:
-            await stage_manager.disconnect(ws_connection)
-
-
-@app.get("/auth/public_key")
-async def get_public_key(server_runtime=Depends(get_runtime)):
-    """
-    获取用户登录加密密码时使用的公钥。客户端在登录或注册时使用该公钥加密密码后发送给服务器。
-    """
-    return {"public_key": server_runtime.user_interface.get_public_key_pem()}
-
-
-@app.get("/llm/client-model-types")
-async def get_client_model_types(server_runtime=Depends(get_runtime)):
-    """
-    获取客户端委托需求。服务商、Base URL、模型和密钥均由客户端自行配置。
-    """
-    return {"types": server_runtime.llm_service.get_client_model_types()}
-
-
-@app.post("/auth/auto_login")
-async def auto_login(
-    req: AutoLoginRequest,
-    background_tasks: BackgroundTasks,
-    server_runtime=Depends(get_runtime),
-    request: Request = None,
-):
-    """
-    自动登录：用户提供用户名和上一次分配的自动登录 token，验证通过后发放新的 token。
-
-    请求参数：
-    - req.username: 用户名
-    - req.token: 上一次分配的自动登录 token
-    返回值：
-    - 成功：{"message": "登录成功", "user_id": req.username, "token": new_token}
-    - 失败：HTTP 401 错误，{"detail": "登录失败，自动登录验证未通过"}
-    """
-    logger.info(f"Auto login request: {req.username}")
-    return await server_runtime.user_interface.auto_login(req, background_tasks, server_runtime, request)
-
-
-@app.post("/auth/register")
-async def register(
-    req: RegisterRequest,
-    server_runtime=Depends(get_runtime),
-    request: Request = None,
-):
-    """
-    用户注册接口。用户提供用户名、密码和邀请码进行注册。
-
-    请求参数：
-    - req.username: 用户名
-    - req.password: 加密后的密码（Base64 编码）
-    - req.invite_code: 邀请码
-    返回值：
-    - 成功：{"message": "注册成功", "user_id": req.username}
-    - 失败：HTTP 400 错误，{"detail": "注册失败，失败原因"}
-    """
-    logger.info("Register request for username=%s", req.username)
-    return await server_runtime.user_interface.register(req, server_runtime, request)
-
-
-@app.post("/auth/reset_account")
-async def reset_account(
-    req: ResetAccountRequest,
-    server_runtime=Depends(get_runtime),
-    request: Request = None,
-):
-    """以邀请码重置账号的用户名和密码。
-
-    请求参数：
-    - req.invite_code: 已使用过的邀请码（关联到要重置的用户）
-    - req.new_username: 新的用户名
-    - req.new_password: 新的密码（Base64 加密后）
-    返回值：
-    - 成功：{"message": "重置成功"}
-    - 失败：HTTP 400 错误，{"detail": "失败原因"}
-    """
-    logger.info("Reset account request for username=%s", req.new_username)
-    return await server_runtime.user_interface.reset_account(req, server_runtime, request)
-
-
-@app.post("/auth/login")
-async def login(
-    req: LoginRequest,
-    background_tasks: BackgroundTasks,
-    server_runtime=Depends(get_runtime),
-    request: Request = None,
-):
-    """
-    用户登录接口。用户提供用户名和密码进行登录。
-
-    请求参数：
-    - req.username: 用户名
-    - req.password: 加密后的密码（Base64 编码）
-    返回值：
-    - 成功：{"login_token": auth_token, "message_token": message_token, "user_id": req.username}
-    - 失败：HTTP 401 错误，{"detail": "用户名或密码错误"}
-    """
-    logger.info(f"Login request: {req.username}")
-    return await server_runtime.user_interface.login(req, background_tasks, server_runtime, request)
-
-
-@app.post("/preference/get")
-async def get_preference(
-    req: PreferenceGetRequest,
-    server_runtime=Depends(get_runtime),
-):
-    """获取偏好设置：委托到 UserInterface。"""
-    return await server_runtime.user_interface.get_preference(req, server_runtime)
-
-
-@app.post("/preference/overwrite")
-async def overwrite_preference(
-    req: PreferenceOverwriteRequest,
-    server_runtime=Depends(get_runtime),
-):
-    """覆盖偏好设置：委托到 UserInterface。"""
-    return await server_runtime.user_interface.overwrite_preference(req, server_runtime)
-
-
-@app.get("/history")
-async def get_history(
-    request: HistoryQuery = Depends(),
-    authorization: str | None = Header(default=None),
-    server_runtime: "ServerRuntime" = Depends(get_runtime),
-):
-    """获取聊天历史：委托到 UserInterface。"""
-    logger.info(f"Server received: Get history request from {request.username}")
-    token = require_bearer_token(authorization)
-    return await server_runtime.user_interface.get_history(
-        request.username, token, request.count, request.end_index, server_runtime
-    )
-
-
-@app.get("/dynamics")
-async def list_dynamics(
-    request: DynamicListQuery = Depends(),
-    authorization: str | None = Header(default=None),
-    server_runtime: "ServerRuntime" = Depends(get_runtime),
-):
-    token = require_bearer_token(authorization)
-    req = DynamicListRequest(
-        username=request.username,
-        token=token,
-        limit=request.limit,
-        cursor=request.cursor,
-    )
-    return await server_runtime.user_interface.list_dynamics(req, server_runtime)
-
-
-@app.post("/dynamics")
-async def create_dynamic(
-    request: DynamicCreateRequest,
-    server_runtime: "ServerRuntime" = Depends(get_runtime),
-):
-    return await server_runtime.user_interface.create_dynamic(request, server_runtime)
-
-
-@app.get("/dynamics/unread")
-async def get_dynamic_unread(
-    request: DynamicUnreadQuery = Depends(),
-    authorization: str | None = Header(default=None),
-    server_runtime: "ServerRuntime" = Depends(get_runtime),
-):
-    token = require_bearer_token(authorization)
-    req = DynamicUnreadRequest(username=request.username, token=token)
-    return await server_runtime.user_interface.get_dynamic_unread(req, server_runtime)
-
-
-@app.post("/dynamics/read")
-async def mark_dynamic_read(
-    request: DynamicReadMarkRequest,
-    server_runtime: "ServerRuntime" = Depends(get_runtime),
-):
-    return await server_runtime.user_interface.mark_dynamic_read(request, server_runtime)
-
-
-@app.get("/dynamics/{dynamic_id}/comments")
-async def list_dynamic_comments(
-    dynamic_id: str,
-    request: DynamicCommentListQuery = Depends(),
-    authorization: str | None = Header(default=None),
-    server_runtime: "ServerRuntime" = Depends(get_runtime),
-):
-    token = require_bearer_token(authorization)
-    req = DynamicCommentListRequest(
-        username=request.username,
-        token=token,
-        limit=request.limit,
-        cursor=request.cursor,
-    )
-    return await server_runtime.user_interface.list_dynamic_comments(dynamic_id, req, server_runtime)
-
-
-@app.post("/dynamics/{dynamic_id}/comments")
-async def create_dynamic_comment(
-    dynamic_id: str,
-    request: DynamicCommentCreateRequest,
-    server_runtime: "ServerRuntime" = Depends(get_runtime),
-):
-    return await server_runtime.user_interface.create_dynamic_comment(dynamic_id, request, server_runtime)
-
-
-@app.post("/get_image")
-async def get_image(
-    request: ImageRequest,
-    server_runtime: "ServerRuntime" = Depends(get_runtime),
-):
-    """
-    获取图片接口。用户提供图片的服务器路径，服务器返回图片二进制数据。
-
-    请求参数：
-    - request.username: 用户名
-    - request.token: 认证 token
-    - request.uuid: 图片在服务器上的uuid
-    返回值：
-    - 成功：图片的二进制数据，Content-Type 根据图片类型设置
-    - 失败：HTTP 400 错误，{"detail": "获取图片失败，失败原因"}
-    """
-    logger.info(f"Get image request from {request.username} for {request.uuid}")
-    return await server_runtime.user_interface.get_image(request, server_runtime)
-
-
-@app.post("/update_image_client_path")
-async def update_image_client_path(
-    request: ImageRequest,
-    server_runtime: "ServerRuntime" = Depends(get_runtime),
-):
-    """
-    更新图片的客户端路径。用户提供图片的 UUID 和新的客户端路径，服务器更新数据库记录。
-
-    请求参数：
-    - request.username: 用户名
-    - request.token: 认证 token
-    - request.uuid: 图片对应的对话记录 UUID
-    - request.image_client_path: 图片在客户端的路径
-    返回值：
-    - 成功：{"message": "更新成功"}
-    - 失败：HTTP 400 错误，{"detail": "更新失败，失败原因"}
-    """
-    logger.info(f"Update image client path request from {request.username} for {request.uuid}")
-    return await server_runtime.user_interface.update_image_client_path(request, server_runtime)
+        await lifecycle.stop()
 
 
 if __name__ == "__main__":
@@ -458,6 +49,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("SERVER_PORT", "60030"))
     display_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
     admin_url = f"http://{display_host}:{port}/admin"
-    logger.info(f"控制台地址: {admin_url}")
+    logger.info("控制台地址: %s", admin_url)
     print(f"\nAgentLuo 控制台: {admin_url}\n", flush=True)
-    uvicorn.run(app, host=host, port=port)
+    asyncio.run(run_server(host, port))

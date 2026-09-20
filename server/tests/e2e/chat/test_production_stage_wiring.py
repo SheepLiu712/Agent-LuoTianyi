@@ -147,7 +147,7 @@ async def test_production_chat_reconnect_reuses_stage_after_stimulus_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Given: the production route owns a real shared adapter and Stage manager.
-    import server_main
+    from src.web.websocket import endpoint
 
     agent = ReplyingAgent()
     adapter = WebSocketAdapter()
@@ -167,7 +167,7 @@ async def test_production_chat_reconnect_reuses_stage_after_stimulus_output(
         client_llm_executor=SimpleNamespace(clear_user=lambda *_: None),
     )
     monkeypatch.setattr(
-        server_main,
+        endpoint,
         "get_admin_shell",
         lambda: SimpleNamespace(runtime_supervisor=SimpleNamespace(runtime=runtime)),
     )
@@ -197,8 +197,8 @@ async def test_production_chat_reconnect_reuses_stage_after_stimulus_output(
     # When: one authenticated connection chats, disconnects, then reconnects and chats again.
     first = Socket("first")
     second = Socket("second")
-    await server_main.chat_ws(first)
-    await server_main.chat_ws(second)
+    await endpoint.chat_ws(first)
+    await endpoint.chat_ws(second)
 
     # Then: both receive Agent output and both stimuli use the retained Stage interaction.
     for socket in (first, second):

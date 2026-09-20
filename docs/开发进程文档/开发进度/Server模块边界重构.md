@@ -137,6 +137,17 @@ server_runtime 只负责构造、注入、启动、回滚和关闭
 - 新增 B9–B10 静态边界门禁，禁止 Adapter 重新吸收 FastAPI 路由、物理网络服务或管理用例，并禁止 Application 依赖 FastAPI/Web 传输实现。
 - 全量验收为 1306 passed、17 skipped；重构统计范围行覆盖率 76.10%，Ruff、Black 和 B1–B10 门禁通过。
 
+### 2026-09-20 阶段 11——Web 绑定与服务器生命周期收口
+
+- 将公开 HTTP、WebSocket、Admin UI/API 和项目计划书的绑定统一收进 `src/web`；`bind_web_interfaces(app, root_dir)` 是组合根唯一需要调用的 Web 绑定 interface。
+- `server_main.py` 不再定义路由处理函数或 `startup_event`，只负责创建 FastAPI、接入 Web lifespan、调用一次 Web 绑定并启动 Uvicorn。
+- 新增与 Web 主机无关的 `application.server_lifecycle.ServerLifecycle`，通过 `start()` / `stop()` 初始化 AdminShell 并启停 ServerRuntime。
+- `server_main.run_server()` 在同一个事件循环内依次启动 ServerLifecycle、等待 `uvicorn.Server.serve()`、并在 `finally` 中释放服务器资源；FastAPI 不再拥有或触发服务器生命周期。
+- Uvicorn 显式使用 `lifespan="off"` 防止双重启停；正式启动入口固定为 `python server_main.py`，直接执行 `uvicorn server_main:app` 只会得到未启动 ServerRuntime 的 Web 应用。
+- HTTP 路由处理函数归入 `web/http/routes.py`，聊天 WebSocket endpoint 归入 `web/websocket/endpoint.py`；测试不再以 `server_main` 作为处理函数模块。
+- 新增静态约束，禁止 `server_main.py` 重新出现路由装饰器、直接 include router 或 `startup_event`。
+- 全量默认套件为 1308 passed、17 skipped；重构统计范围行覆盖率 76.07%，Ruff 和 B1–B10 架构门禁通过。
+
 ## 最终完成审计
 
 完成前必须逐项取得当前工作树证据：

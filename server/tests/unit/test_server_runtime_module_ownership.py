@@ -16,3 +16,15 @@ def test_agent_runtime_does_not_depend_on_an_infrastructure_container() -> None:
 
     assert "InfrastructureRuntime" not in source
     assert "self.infrastructure" not in source
+
+
+def test_server_main_delegates_all_web_binding_to_web_module() -> None:
+    source = (SERVER_ROOT / "server_main.py").read_text(encoding="utf-8")
+
+    assert source.count("bind_web_interfaces(app, current_dir)") == 1
+    assert "@app." not in source
+    assert "include_router" not in source
+    assert "startup_event" not in source
+    assert "FastAPI(lifespan=" not in source
+    assert "uvicorn.run(" not in source
+    assert "asyncio.run(run_server(host, port))" in source
