@@ -3,7 +3,7 @@ extends Control
 const Api = preload("res://src/network/account_api.gd")
 const Store = preload("res://src/storage/credential_store.gd")
 const Session = preload("res://src/session/account_session.gd")
-const Avatar = preload("res://src/avatar/avatar_panel.gd")
+const Avatar = preload("res://scenes/avatar/avatar_panel.tscn")
 const Chat = preload("res://src/session/chat_session.gd")
 const Transport = preload("res://src/network/websocket_transport.gd")
 const ChatView = preload("res://scenes/ui/chat_view.tscn")
@@ -135,7 +135,7 @@ func _account_changed(state: Dictionary) -> void:
 	if state.phase == "signed_in":
 		_center.hide()
 		if _avatar == null:
-			_avatar = Avatar.new()
+			_avatar = Avatar.instantiate() as Control
 			_avatar.custom_minimum_size.x = 290
 			_split.add_child(_avatar)
 			_split.move_child(_avatar, 0)

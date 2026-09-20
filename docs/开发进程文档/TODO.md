@@ -44,5 +44,5 @@
 - [x] message_audio + message_bubble + virtual_message_list 场景化（2026-09-20 完成并验证）
 - [x] chat_view（含 image_overlay）场景化（2026-09-20 完成并验证）
 - [x] dynamics_window + dynamic_detail + 动态行组件场景化（2026-09-20 完成并验证）
-- [ ] avatar_panel + avatar_preview + application 收尾
+- [x] avatar_panel + avatar_preview + application 收尾（2026-09-20 完成并验证）
 - [ ] chat_preview 离线样板场景化并删除 preview_style.gd

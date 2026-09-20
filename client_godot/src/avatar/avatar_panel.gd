@@ -3,31 +3,14 @@ extends Control
 const Driver = preload("res://src/avatar/avatar_driver.gd")
 const Framing = preload("res://src/avatar/avatar_framing.gd")
 const SETTINGS := "user://avatar_framing.cfg"
-var avatar = Driver.new()
+@onready var avatar: Driver = %Driver
+@onready var _error_label: Label = %Error
+@onready var _reset_button: Button = %Reset
 var framing = Framing.new()
 var _dragging := false
-var _error_label := Label.new()
 
 
 func _ready() -> void:
-	clip_contents = true
-	var background := TextureRect.new()
-	background.texture = load("res://assets/ui/bg2.jpg")
-	background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(background)
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var veil := ColorRect.new()
-	veil.color = Color(0.96, 0.98, 1.0, 0.18)
-	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(veil)
-	veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(avatar)
-	add_child(_error_label)
-	_error_label.position = Vector2(20, 80)
-	_error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_error_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	if avatar.load_character("res://assets/live2d/character.json") != OK:
 		_error_label.text = "角色加载失败，请检查资源是否完整。"
 		return
@@ -37,17 +20,13 @@ func _ready() -> void:
 	resized.connect(_layout_avatar)
 	_layout_avatar()
 	gui_input.connect(_handle_pointer)
-	var reset_button := Button.new()
-	reset_button.text = "重置位置"
-	reset_button.tooltip_text = "滚轮缩放 · 右键拖动"
-	add_child(reset_button)
-	reset_button.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
-	reset_button.position = Vector2(18, size.y - 50)
-	reset_button.pressed.connect(func():
+	_reset_button.visible = true
+	_reset_button.position = Vector2(18, size.y - 50)
+	_reset_button.pressed.connect(func():
 		framing.reset()
 		_layout_avatar()
 		_save())
-	resized.connect(func(): reset_button.position = Vector2(18, size.y - 50))
+	resized.connect(func(): _reset_button.position = Vector2(18, size.y - 50))
 
 
 func _layout_avatar() -> void:
