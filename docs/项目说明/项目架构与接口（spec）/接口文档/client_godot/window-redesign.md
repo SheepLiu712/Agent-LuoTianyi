@@ -39,3 +39,12 @@ PreferencesPage.setup(controller)、is_dirty()、save_changes()保存并读取�
 ImageWindow.present(source,provider,confirm)把窗口转属当前source；重用时换图重置适应窗口，保留已保存窗口几何。所有图片控件、错误/重试、适应/原始比例、缩放、关闭和离线确认按钮在场景里。窗口跟随当前source最小化/恢复；关闭来源销毁其图片窗，旧来源关闭不影响已转属图片；显式关闭回到来源窗口及此前焦点，不修改阅读位置。只保存窗口几何，不持久化图片来源/草稿/回调。
 
 ChatView新增image_requested(provider)信号，图片UI只向Application请求展示；失败时原图重试调用原会话图片接口。Application注入唯一presenter并在退出账号时清空。离线样板也改用同一ImagePresenter契约，其模拟图片确认继续保留失败反馈；旧image_overlay脚本及场景移除。
+
+
+## 主导航与一次性草稿汇总
+
+main.tscn的NavChat/NavDynamics/NavSettings/NavLogs/AccountMenu均为固定场景控件；登录后显示窄导航，登录前保留账户页日志入口。账号菜单只分退出登录/退出应用，动态/设置/日志入口移出聊天顶部。ChatView移除已被导航替代的logout_requested/log_requested/settings_requested/set_dynamics_unread，新增is_dirty()只观察未发送输入；聊天顶部保留明确的CacheButton及原有缓存确认逻辑。导航动态按钮显示99+上限，根Split按自身可用宽度恢复45:55。
+
+主窗关闭/退出账号汇总聊天输入、设置及动态草稿，只有一个ExitDialog，列名称而不回显敏感正文；返回继续编辑保留全部状态，放弃则关闭业务窗口并清草稿，日志不随退出账号关闭。设置正在保存时先等待saving_finished再重新判断，不并发销毁保存流程或自动发送文字。重复设置导航只恢复聚焦，不重置当前设置页。
+
+登录/注册/重置模式提供场景BackToLogin按钮，回到登录不触发网络操作；紧凑页用滚动容器承载较长表单。日志和动态独立，统一设置transient跟随主窗，所有窗口自绘关闭按钮仍请求同一关闭流程。
