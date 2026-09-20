@@ -2,60 +2,47 @@ extends MarginContainer
 signal logout_requested
 signal log_requested
 signal settings_requested(kind: String)
-const Style = preload("res://src/preview/preview_style.gd")
-const Composer = preload("res://src/preview/composer_input.gd")
-const Dropdown = preload("res://scenes/ui/unified_dropdown.tscn")
+const ImageOverlay = preload("res://scenes/preview/image_overlay.tscn")
+@onready var _margin: MarginContainer = %Margin
+@onready var _menu = %ChatMore
+@onready var _clear_dialog: ConfirmationDialog = %ClearDialog
+@onready var _status: Label = %Status
+@onready var _history_status: Label = %HistoryStatus
+@onready var _history_retry: Button = %HistoryRetry
+@onready var _history_skip: Button = %HistorySkip
+@onready var _scroll = %Scroll
+@onready var _empty: Label = %Empty
+@onready var _latest: Button = %Latest
+@onready var _unread: Button = %Unread
+@onready var _volume: HSlider = %Volume
+@onready var _stop_voice: Button = %StopVoice
+@onready var _input: TextEdit = %Input
+@onready var _send_button: Button = %Send
+@onready var _dynamics_button: Button = %Dynamics
 var _session: Node
-var _scroll = preload("res://scenes/ui/virtual_message_list.tscn").instantiate()
-var _input = Composer.new()
-var _status := Label.new()
-var _latest := Button.new()
-var _empty := Label.new()
-var _stop_voice: Button
-var _clear_dialog := ConfirmationDialog.new()
-var _menu
-var _history_status := Label.new()
-var _history_retry := Button.new()
-var _history_skip := Button.new()
-var _unread := Button.new()
-var _dynamics_button := Button.new()
+var _initialized := false
 
-func _init(session: Node) -> void:
+func setup(session: Node) -> void:
 	_session = session
+	if is_node_ready():
+		_initialize()
 
 func set_dynamics_unread(count: int) -> void:
 	_dynamics_button.text = "动态" if count <= 0 else "动态 · "+("99+" if count > 99 else str(count))
 
 func _ready() -> void:
-	theme = Style.make_theme()
-	for side in ["left", "right", "top", "bottom"]:
-		add_theme_constant_override("margin_" + side, 22)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 12)
-	add_child(column)
-	var heading := HBoxContainer.new()
-	heading.add_theme_constant_override("separation", 12)
-	column.add_child(heading)
-	heading.add_child(Style.avatar("res://assets/ui/tianyi_icon.png",42))
-	var identity := VBoxContainer.new()
-	identity.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	heading.add_child(identity)
-	identity.add_child(Style.label("和天依聊聊", 22))
-	_dynamics_button.text = "动态"
+	if _session == null:
+		return
+	_initialize()
+
+func _initialize() -> void:
+	if _initialized:
+		return
+	_initialized = true
 	_dynamics_button.pressed.connect(func(): settings_requested.emit("dynamics"))
-	heading.add_child(_dynamics_button)
-	_menu = Dropdown.instantiate()
 	_menu.action_menu = true
 	_menu.text = "更多 ···"
-	heading.add_child(_menu)
-	_menu.name = "ChatMore"
 	_menu.set_items([{ "id":"logs","label":"打开日志","disabled":_session.get_log_directory().is_empty()},{"id":"cache","label":"清理本账号语音缓存"},{"id":"preferences","label":"相处模式"},{"id":"models","label":"LLM / VLM 模型设置"},{"separator":true},{"id":"logout","label":"退出登录"}])
-	_clear_dialog.title = "清理语音缓存"
-	_clear_dialog.dialog_text = "清理当前服务器、本账号保存的全部语音？\n聊天文字保留；已清理的语音将无法重放。"
-	_clear_dialog.ok_button_text = "清理"
-	_clear_dialog.cancel_button_text = "取消"
-	add_child(_clear_dialog)
-	_clear_dialog.confirmed.connect(func(): _session.clear_cache())
 	_menu.activated.connect(func(id):
 		if id == "logs":
 			log_requested.emit()
@@ -68,76 +55,25 @@ func _ready() -> void:
 			settings_requested.emit("preferences")
 		elif id == "models":
 			settings_requested.emit("models"))
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.add_theme_font_size_override("font_size", 13)
-	_status.add_theme_color_override("font_color", Color("607f8d"))
-	identity.add_child(_status)
-	column.add_child(HSeparator.new())
-	var history_row := HBoxContainer.new()
-	column.add_child(history_row)
-	_history_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_history_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_history_status.add_theme_font_size_override("font_size",12)
-	history_row.add_child(_history_status)
-	_history_retry.text = "重试历史"
+	_clear_dialog.confirmed.connect(func(): _session.clear_cache())
 	_history_retry.pressed.connect(_session.retry_history)
-	history_row.add_child(_history_retry)
-	_history_skip.text = "跳过本次"
 	_history_skip.pressed.connect(_session.skip_history)
-	history_row.add_child(_history_skip)
-	var audio_controls := HBoxContainer.new()
-	audio_controls.add_child(Style.label("语音音量", 12))
-	var volume := HSlider.new()
-	volume.min_value = 0
-	volume.max_value = 1
-	volume.step = .01
-	volume.value = _session.get_audio_state().volume
-	volume.custom_minimum_size.x = 110
-	volume.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	volume.tooltip_text = "回复语音自动播放；拖到最左侧静音"
-	volume.value_changed.connect(func(value): _session.set_volume(value))
-	audio_controls.add_child(volume)
-	_stop_voice = Style.button("停止语音", func(): _session.stop_voice())
-	audio_controls.add_child(_stop_voice)
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	column.add_child(_scroll)
-	_empty.text = "从一句问候开始"
-	_empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	column.add_child(_empty)
 	_scroll.audio_action.connect(_audio_action)
 	_scroll.image_action.connect(_image_action)
 	_scroll.visible_messages.connect(_visible_audio)
 	_scroll.interacted.connect(_session.note_read_interaction)
-	_latest.text = "回到最新 ↓"
-	_latest.hide()
 	_latest.pressed.connect(_to_latest)
-	column.add_child(_latest)
-	_unread.text = "定位未读"
-	_unread.hide()
 	_unread.pressed.connect(_jump_reading)
-	column.add_child(_unread)
-	column.add_child(HSeparator.new())
-	column.add_child(audio_controls)
-	_input.placeholder_text = "想说些什么？"
-	_input.custom_minimum_size.y = 92
-	_input.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-	column.add_child(_input)
 	_input.send_requested.connect(_send)
 	_input.text_changed.connect(func():
 		var lines: int = _input.get_line_count()
 		for line in _input.get_line_count():
 			lines += _input.get_line_wrap_count(line)
 		_input.custom_minimum_size.y = clampf(lines * 24 + 30, 92, 150))
-	var footer := HBoxContainer.new()
-	column.add_child(footer)
-	var hint := Style.label("Enter 发送 · Shift + Enter 换行", 11, Color("94a5af"))
-	hint.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(hint)
-	var send := Style.button("发送  ↑", _send)
-	send.custom_minimum_size.x = 96
-	Style.primary(send)
-	footer.add_child(send)
+	_volume.value = _session.get_audio_state().volume
+	_volume.value_changed.connect(func(value): _session.set_volume(value))
+	_stop_voice.pressed.connect(func(): _session.stop_voice())
+	_send_button.pressed.connect(_send)
 	_session.message_audio_changed.connect(_audio_changed)
 	_session.message_image_changed.connect(func(id,state): _scroll.set_image_state(id,state))
 	_session.changed.connect(_refresh)
@@ -145,9 +81,6 @@ func _ready() -> void:
 	_state_changed(_session.get_state())
 	_refresh()
 	get_window().focus_entered.connect(_report_reading)
-
-func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO,size), Style.SURFACE)
 
 func _send() -> void:
 	_session.note_read_interaction()
@@ -244,6 +177,7 @@ func _image_action(id: String, action: String) -> void:
 	else:
 		var texture: Texture2D = _session.preview_message_image(id)
 		if texture != null:
-			var overlay = preload("res://src/preview/image_overlay.gd").new(texture,false)
-			add_child(overlay)
+			var overlay = ImageOverlay.instantiate()
+			overlay.setup(texture,false)
+			_margin.add_child(overlay)
 			overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

@@ -6,7 +6,7 @@ const Session = preload("res://src/session/account_session.gd")
 const Avatar = preload("res://src/avatar/avatar_panel.gd")
 const Chat = preload("res://src/session/chat_session.gd")
 const Transport = preload("res://src/network/websocket_transport.gd")
-const ChatView = preload("res://src/ui/chat_view.gd")
+const ChatView = preload("res://scenes/ui/chat_view.tscn")
 const Log = preload("res://src/storage/client_log.gd")
 const Cache = preload("res://src/storage/audio_cache.gd")
 const Audio = preload("res://src/media/reply_audio.gd")
@@ -142,7 +142,8 @@ func _account_changed(state: Dictionary) -> void:
 		_avatar.show()
 		_avatar.process_mode = Node.PROCESS_MODE_INHERIT
 		if _chat_view == null:
-			_chat_view = ChatView.new(_chat)
+			_chat_view = ChatView.instantiate() as Control
+			_chat_view.setup(_chat)
 			_chat_view.custom_minimum_size.x = 440
 			_chat_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			_split.add_child(_chat_view)

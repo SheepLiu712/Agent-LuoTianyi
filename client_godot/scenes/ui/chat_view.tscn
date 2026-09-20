@@ -1,0 +1,150 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Script" path="res://src/ui/chat_view.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+[ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
+[ext_resource type="Script" path="res://src/preview/composer_input.gd" id="5_composer"]
+[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="6_dropdown"]
+[ext_resource type="PackedScene" path="res://scenes/ui/virtual_message_list.tscn" id="7_messages"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[node name="ChatView" type="MarginContainer"]
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Background" type="ColorRect" parent="."]
+mouse_filter = 2
+color = Color(0.960784316, 0.972549021, 0.984313726, 1)
+
+[node name="Margin" type="MarginContainer" parent="."]
+unique_name_in_owner = true
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_bottom = 22
+
+[node name="Column" type="VBoxContainer" parent="Margin"]
+theme_override_constants/separation = 12
+
+[node name="Heading" type="HBoxContainer" parent="Margin/Column"]
+theme_override_constants/separation = 12
+
+[node name="Avatar" type="TextureRect" parent="Margin/Column/Heading"]
+custom_minimum_size = Vector2(42, 42)
+size_flags_vertical = 0
+texture = ExtResource("4_avatar")
+expand_mode = 1
+stretch_mode = 5
+material = SubResource("ShaderMaterial_avatar")
+
+[node name="Identity" type="VBoxContainer" parent="Margin/Column/Heading"]
+size_flags_horizontal = 3
+
+[node name="Title" type="Label" parent="Margin/Column/Heading/Identity"]
+theme_override_colors/font_color = Color(0.203921571, 0.298039228, 0.349019617, 1)
+theme_override_font_sizes/font_size = 22
+text = "和天依聊聊"
+
+[node name="Status" type="Label" parent="Margin/Column/Heading/Identity"]
+unique_name_in_owner = true
+theme_override_colors/font_color = Color(0.376470596, 0.498039216, 0.552941203, 1)
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 3
+
+[node name="Dynamics" type="Button" parent="Margin/Column/Heading"]
+unique_name_in_owner = true
+text = "动态"
+
+[node name="ChatMore" parent="Margin/Column/Heading" instance=ExtResource("6_dropdown")]
+unique_name_in_owner = true
+
+[node name="SepTop" type="HSeparator" parent="Margin/Column"]
+
+[node name="HistoryRow" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="HistoryStatus" type="Label" parent="Margin/Column/HistoryRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 12
+autowrap_mode = 3
+
+[node name="HistoryRetry" type="Button" parent="Margin/Column/HistoryRow"]
+unique_name_in_owner = true
+text = "重试历史"
+
+[node name="HistorySkip" type="Button" parent="Margin/Column/HistoryRow"]
+unique_name_in_owner = true
+text = "跳过本次"
+
+[node name="Scroll" parent="Margin/Column" instance=ExtResource("7_messages")]
+unique_name_in_owner = true
+size_flags_vertical = 3
+
+[node name="Empty" type="Label" parent="Margin/Column"]
+unique_name_in_owner = true
+text = "从一句问候开始"
+horizontal_alignment = 1
+
+[node name="Latest" type="Button" parent="Margin/Column"]
+unique_name_in_owner = true
+visible = false
+text = "回到最新 ↓"
+
+[node name="Unread" type="Button" parent="Margin/Column"]
+unique_name_in_owner = true
+visible = false
+text = "定位未读"
+
+[node name="SepBottom" type="HSeparator" parent="Margin/Column"]
+
+[node name="AudioControls" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="VolumeLabel" type="Label" parent="Margin/Column/AudioControls"]
+theme_override_colors/font_color = Color(0.203921571, 0.298039228, 0.349019617, 1)
+theme_override_font_sizes/font_size = 12
+text = "语音音量"
+
+[node name="Volume" type="HSlider" parent="Margin/Column/AudioControls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(110, 0)
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 1.0
+step = 0.01
+tooltip_text = "回复语音自动播放；拖到最左侧静音"
+
+[node name="StopVoice" type="Button" parent="Margin/Column/AudioControls"]
+unique_name_in_owner = true
+text = "停止语音"
+
+[node name="Input" type="TextEdit" parent="Margin/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 92)
+placeholder_text = "想说些什么？"
+wrap_mode = 1
+script = ExtResource("5_composer")
+
+[node name="Footer" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="Hint" type="Label" parent="Margin/Column/Footer"]
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.580392182, 0.647058845, 0.686274529, 1)
+theme_override_font_sizes/font_size = 11
+text = "Enter 发送 · Shift + Enter 换行"
+
+[node name="Send" type="Button" parent="Margin/Column/Footer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 0)
+theme_type_variation = &"PrimaryButton"
+text = "发送  ↑"
+
+[node name="ClearDialog" type="ConfirmationDialog" parent="."]
+unique_name_in_owner = true
+title = "清理语音缓存"
+visible = false
+dialog_text = "清理当前服务器、本账号保存的全部语音？\n聊天文字保留；已清理的语音将无法重放。"
+ok_button_text = "清理"
+cancel_button_text = "取消"

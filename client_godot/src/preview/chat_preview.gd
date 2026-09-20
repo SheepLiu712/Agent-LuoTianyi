@@ -4,7 +4,7 @@ const Session = preload("res://src/preview/demo_session.gd")
 const AvatarPanel = preload("res://src/avatar/avatar_panel.gd")
 const Bubble = preload("res://scenes/ui/message_bubble.tscn")
 const Composer = preload("res://src/preview/composer_input.gd")
-const ImageOverlay = preload("res://src/preview/image_overlay.gd")
+const ImageOverlay = preload("res://scenes/preview/image_overlay.tscn")
 var _session = Session.new()
 var _avatar = AvatarPanel.new()
 var _split := HSplitContainer.new()
@@ -220,7 +220,8 @@ func _preview_image(image: Image) -> void:
 
 func _open_image(texture: Texture2D, pending: bool) -> void:
 	_input.release_focus()
-	var overlay := ImageOverlay.new(texture, pending)
+	var overlay = ImageOverlay.instantiate()
+	overlay.setup(texture, pending)
 	add_child(overlay)
 	overlay.focus_mode = Control.FOCUS_ALL
 	overlay.grab_focus()

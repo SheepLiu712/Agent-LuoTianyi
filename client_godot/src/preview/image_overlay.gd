@@ -1,37 +1,43 @@
 extends PanelContainer
-const Style = preload("res://src/preview/preview_style.gd")
 signal confirmed(texture: Texture2D)
-var _picture := TextureRect.new()
-var _scroll := ScrollContainer.new()
-var _zoom := 1.0
+@onready var _title: Label = %Title
+@onready var _zoom_out: Button = %ZoomOut
+@onready var _zoom_in: Button = %ZoomIn
+@onready var _close: Button = %Close
+@onready var _picture: TextureRect = %Picture
+@onready var _feedback: Label = %Feedback
+@onready var _confirm: Button = %Confirm
 var feedback: Label
+var _texture: Texture2D
+var _pending := false
+var _zoom := 1.0
+var _initialized := false
 
-func _init(texture: Texture2D, pending: bool) -> void:
-	add_theme_stylebox_override("panel", Style.box(Color("f7fafc"), 16, 20))
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 12)
-	add_child(column)
-	var bar := HBoxContainer.new()
-	column.add_child(bar)
-	var heading := Style.label("待发送图片" if pending else "图片预览", 19)
-	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	bar.add_child(heading)
-	bar.add_child(Style.button("－", func(): _resize_image(0.8)))
-	bar.add_child(Style.button("＋", func(): _resize_image(1.25)))
-	bar.add_child(Style.button("取消" if pending else "关闭", queue_free))
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(_scroll)
-	_picture.texture = texture
-	_picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_picture.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_picture.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_scroll.add_child(_picture)
-	if pending:
-		feedback = Label.new()
-		feedback.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		column.add_child(feedback)
-		column.add_child(Style.button("发送图片 · 离线演示", func(): confirmed.emit(texture)))
+func setup(texture: Texture2D, pending: bool) -> void:
+	_texture = texture
+	_pending = pending
+	if is_node_ready():
+		_initialize()
+
+func _ready() -> void:
+	if _texture == null:
+		return
+	_initialize()
+
+func _initialize() -> void:
+	if _initialized:
+		return
+	_initialized = true
+	feedback = _feedback
+	_title.text = "待发送图片" if _pending else "图片预览"
+	_close.text = "取消" if _pending else "关闭"
+	_close.pressed.connect(queue_free)
+	_zoom_out.pressed.connect(func(): _resize_image(0.8))
+	_zoom_in.pressed.connect(func(): _resize_image(1.25))
+	_picture.texture = _texture
+	_feedback.visible = _pending
+	_confirm.visible = _pending
+	_confirm.pressed.connect(func(): confirmed.emit(_texture))
 	resized.connect(func(): _resize_image(1.0))
 
 func _resize_image(factor: float) -> void:
