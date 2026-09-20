@@ -20,3 +20,8 @@
 PreferencesPage.setup(controller)、is_dirty()、save_changes()保存并读取控制器最终状态；ModelPage.setup(settings, executor=null)、is_dirty()、validate_changes()、save_changes()负责全部用途草稿。先逐用途解析JSON并validate，有任何非法草稿时整窗不开始写入；全部有效后按用途顺序保存模型，再保存相处偏好。模型保存成功更新该用途基线；失败不清草稿，仍保存其它独立项。DPAPI失败逐项询问明文，默认取消；拒绝只令该项失败。相处失败仍保留dirty。结果区列清失败页/用途和代码，不宣称事务回滚。
 
 底部保存修改保持窗口打开；关闭有修改时三操作为保存并关闭/放弃/取消，只有全部保存成功且没有dirty才自动关闭。保存期间禁用再次提交和编辑，关闭请求记为待关闭，完成失败则留窗；保存完成发出saving_finished(ok)供应用协调。SettingsWindow transient=true，跟随主窗最小化；重复打开models/preferences导航只切换同一窗口。现有手动模型测试仍单独确认额度，不包含在保存操作里。
+
+
+### 确认界面全部场景化（用户补充要求）
+
+所有可见UI由Godot控件场景提供，不允许脚本new控件或add_button创建按钮；列表只实例化已有场景。`decision_dialog.tscn` 是内嵌的自绘 Window（非独立业务窗）：公开 dialog_text/ok_button_text/cancel_button_text/show_save 属性，confirmed/canceled/custom_action(action)信号，以及get_ok_button/get_cancel_button。沿用Window.popup_centered/hide，关闭×和Esc发canceled并隐藏，遮罩外点击不关闭；show_save时场景已有的保存并关闭按钮发custom_action("save")。默认焦点取消。替代代码创建的草稿确认框及现有ConfirmationDialog呈现，业务确认逻辑不变。
