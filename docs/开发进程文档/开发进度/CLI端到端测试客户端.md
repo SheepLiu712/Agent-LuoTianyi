@@ -55,3 +55,11 @@
 - commit 或 PR：分支 `feat/cli-e2e-s6-touch-actions`：`34f010b`（SPEC）/ `4518e93`（Red）/ `31b4a59`（Green）。
 - 验证及结果：focused `tests/test_cli_touch_actions.py` → 13 passed；client 回归 → 128 passed（排除 3 个既有收集失败文件）。
 - 未验证范围：真实服务端触摸接纳/反应（依赖 S1 门槛与部署一致性）、真实播放期的抑制时序。
+
+### 2026-09-20 S7 动态动作
+
+- 交付行为：`dynamics.open` / `read` / `load` / `post`（会话级视图状态：项目/游标/已见 ID；首屏成功后单独报告标记已读结果；按稳定 ID 去重追加；`has_more=false` → `end_of_feed` 成功态且不重复取页；发布后重新读取确认可见，不可见报 `DYNAMICS_NOT_VISIBLE`；单次动作不重复发布）；门面增补 `get_dynamics` / `get_dynamic_comments` / `create_dynamic` / `mark_dynamics_read`。
+- interface spec：`docs/项目说明/项目架构与接口（spec）/接口文档/cli/README.md` §1.9。
+- commit 或 PR：分支 `feat/cli-e2e-s7-dynamics-actions`：`a0ac9f9`（SPEC）/ `fcf7357`（Red）/ `6ff7217`（Green）。
+- 验证及结果：focused `tests/test_cli_dynamics_actions.py` → 13 passed；client 回归 → 141 passed（排除 3 个既有收集失败文件）。
+- 未验证范围：真实动态接口形状与分页行为（依赖受测部署可达性与隔离账号）、发布副作用的清理与重复运行策略（S9 场景层）。

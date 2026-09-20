@@ -259,6 +259,33 @@ class HeadlessSession:
             client_msg_id=client_msg_id,
         )
 
+    def get_dynamics(self, limit: int = 50, cursor: str | None = None) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.get_dynamics(limit=limit, cursor=cursor)
+
+    def get_dynamic_comments(
+        self,
+        dynamic_id: str,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.get_dynamic_comments(
+            dynamic_id, limit=limit, cursor=cursor
+        )
+
+    def create_dynamic(self, content: str) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.create_dynamic(content)
+
+    def mark_dynamics_read(self) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.mark_dynamics_read()
+
     def get_reply(self, reply_uuid: str) -> AggregatedReply | None:
         with self._condition:
             reply = self._replies.get(reply_uuid)

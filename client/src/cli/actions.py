@@ -62,6 +62,7 @@ class ActionExecutor:
         self._session: HeadlessSession | None = None
         self._playback = playback_backend or DefaultPlaybackBackend()
         self._image_selection: dict | None = None
+        self._dynamics_state: dict | None = None
         self.session_id = session_id or f"s-{uuid.uuid4().hex[:12]}"
         self.redactor = Redactor()
 
@@ -137,6 +138,10 @@ class ActionExecutor:
             "image.cancel": self._cancel_image,
             "image.send": self._send_image,
             "touch.send": self._send_touch,
+            "dynamics.open": self._open_dynamics,
+            "dynamics.read": self._read_dynamic,
+            "dynamics.load": self._load_dynamics,
+            "dynamics.post": self._post_dynamic,
         }
         handler = handlers.get(action)
         if handler is None:
@@ -354,6 +359,122 @@ class ActionExecutor:
         )
         self._ensure_positive_ack(ack, correlation_id=request_id)
         return {"ack": True}, request_id
+
+    def _open_dynamics(self, params: dict) -> tuple[dict, None]:
+        session = self._require_session()
+        page = session.get_dynamics(limit=_number(params, "limit", 50))
+        items = list(page.get("items") or [])
+        self._dynamics_state = {
+            "items": items,
+            "cursor": page.get("next_cursor"),
+            "has_more": bool(page.get("has_more")),
+            "seen": {self._dynamic_key(item) for item in items},
+        }
+        marked_read = True
+        mark_error = None
+        try:
+            mark = session.mark_dynamics_read()
+            if not mark.get("ok"):
+                marked_read = False
+                mark_error = str(mark.get("error") or "mark read failed")
+        except Exception as exc:
+            marked_read = False
+            mark_error = str(exc)
+        return {
+            "items": items,
+            "count": len(items),
+            "has_more": self._dynamics_state["has_more"],
+            "marked_read": marked_read,
+            "mark_error": mark_error,
+        }, None
+
+    def _read_dynamic(self, params: dict) -> tuple[dict, None]:
+        session = self._require_session()
+        dynamic_id = _required_string(params, "dynamic_id")
+        page = session.get_dynamic_comments(
+            dynamic_id, limit=_number(params, "comment_limit", 100)
+        )
+        comments = list(page.get("comments") or [])
+        post = None
+        if self._dynamics_state is not None:
+            for item in self._dynamics_state["items"]:
+                if self._dynamic_key(item) == dynamic_id:
+                    post = item
+                    break
+        return {
+            "dynamic_id": dynamic_id,
+            "post": post,
+            "comments": comments,
+            "comment_count": len(comments),
+        }, None
+
+    def _load_dynamics(self, params: dict) -> tuple[dict, None]:
+        session = self._require_session()
+        if self._dynamics_state is None:
+            raise _ActionFailure(
+                ExitCode.INPUT_ERROR,
+                "DYNAMICS_NOT_OPENED",
+                "dynamics view is not opened",
+                "input",
+            )
+        state = self._dynamics_state
+        appended = 0
+        if state["has_more"]:
+            page = session.get_dynamics(
+                limit=_number(params, "limit", 50), cursor=state["cursor"]
+            )
+            for item in page.get("items") or []:
+                key = self._dynamic_key(item)
+                if key in state["seen"]:
+                    continue
+                state["seen"].add(key)
+                state["items"].append(item)
+                appended += 1
+            state["cursor"] = page.get("next_cursor")
+            state["has_more"] = bool(page.get("has_more"))
+        return {
+            "appended": appended,
+            "count": len(state["items"]),
+            "has_more": state["has_more"],
+            "end_of_feed": not state["has_more"],
+            "items": list(state["items"]),
+        }, None
+
+    def _post_dynamic(self, params: dict) -> tuple[dict, None]:
+        session = self._require_session()
+        content = _required_string(params, "content")
+        response = session.create_dynamic(content)
+        self._ensure_positive_ack(response, correlation_id=None)
+        dynamic_id = response.get("dynamic_id") or response.get("id")
+        page = session.get_dynamics()
+        items = list(page.get("items") or [])
+        visible = False
+        for item in items:
+            if dynamic_id and self._dynamic_key(item) == dynamic_id:
+                visible = True
+                break
+            if not dynamic_id and item.get("content") == content:
+                visible = True
+                break
+        data = {
+            "content_length": len(content),
+            "preview": content[:80],
+            "dynamic_id": dynamic_id,
+            "visible": visible,
+        }
+        if not visible:
+            raise _ActionFailure(
+                ExitCode.ASSERTION_FAILED,
+                "DYNAMICS_NOT_VISIBLE",
+                "created dynamic is not visible in the latest feed",
+                "assertion",
+                data=data,
+            )
+        return data, None
+
+    @staticmethod
+    def _dynamic_key(item: dict) -> str:
+        return str(item.get("id") or item.get("dynamic_id") or "")
 
     def _replay_audio(self, params: dict) -> tuple[dict, str]:
         reply_uuid = _required_string(params, "reply_uuid")
