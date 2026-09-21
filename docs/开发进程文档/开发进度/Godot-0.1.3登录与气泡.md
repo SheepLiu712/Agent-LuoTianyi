@@ -4,7 +4,7 @@
 - PRD：[Godot客户端](../需求说明（PRD）/Godot-Windows客户端.md)。
 - 总体设计：[客户端总体设计](../../项目说明/项目架构与接口（spec）/Godot客户端总体设计.md)。
 - interface：[0.1.3契约](../../项目说明/项目架构与接口（spec）/接口文档/client_godot/release-013.md)。
-- 状态：进行中，仅本地提交。
+- 状态：本地实现、验收与Windows x64 0.1.3便携包交付完成；未推送/远端发布，未验证环境见下文。
 
 ## 已完成
 
@@ -56,3 +56,12 @@
 - 本机RTX 4070 Laptop、1200×800、90帧采样：应用内磨砂帧时间中位6.073ms/P95 7.549ms，实底6.064ms/P95 7.766ms；静态内存约74.4MB，绘制调用226/225。短样本只作为本机记录，不推断集显性能。
 - release.json改为已授权0.1.3，使用说明和测试入口同步，58个test_*.gd已核对。新增UID纳入，既有两项热重载DLL删除保持未暂存。未修改服务端/旧Python客户端，AccountSession/AccountView直接平台API检查为空。
 - Win10、真实系统DPI、多屏移除、集显、手机端、公共服务和长期性能未验收；四档测试是内容缩放。所有提交仅本地，未推送或发布。
+
+### 2026-09-21 Windows x64 0.1.3 本地交付
+
+- 发布候选a4b498d，沿用Godot 4.7.1.stable.official.a13da4feb及匹配Windows x64模板，通过scripts/build.ps1 -Package完成import/export/export-startup。构建与运行使用隔离APPDATA，未迁移真实用户资料。
+- 程序：`client_godot/dist/agentluo-0.1.3/agentluo.exe`；压缩包：`client_godot/artifacts/agentluo-0.1.3.zip`，43,464,276 bytes，SHA-256 `892be2712873c80932387bce0ea56d191ed0a09d50feafd79fb368ca54e038f9`。
+- verify_release_archive.py实际通过ZIP CRC、精确文件清单、全部14文件逐字节SHA-256及版本核验；包内含EXE/PCK、两项原生DLL、许可/资源说明、PREVIEW.md与release.json。逐文件记录在artifacts/release-013/package-manifest.json。图标资源与旧端原始ICO/SVG逐字节一致。
+- 原生导出程序实际显示480×690白色圆角登录窗口，运行标题agentluo 0.1.3；持续运行30秒后验证菜单截图、顶栏拖动(36,24)、边缘不可缩放、关闭按钮退出整个进程；native-export.json为PASS，运行日志无引擎错误，已查看native-export.png。
+- 保留全部既有交付包，未覆盖同名文件。SPEC/Red/Green及发布候选均已作者自审，本轮完成记录仅本地提交；未创建远端PR或推送，不以独立AI核验替代他人正式审核。
+- 本机与离线夹具结果不代表Win10、系统DPI、多屏、集显、手机端、公共服务、长时间运行或签名安装包验收。
