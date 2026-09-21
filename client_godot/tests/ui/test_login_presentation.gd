@@ -132,6 +132,8 @@ func run() -> void:
 	view.get_node("%HistoryPopup").hide()
 	press(view,"ResetLink")
 	view.get_node("%Password").text = "cancel must keep this draft"
+	press(view,"Submit")
+	var form_status: String = view.get_node("%Status").text
 	press(view,"MenuButton")
 	press(view,"SetServer")
 	view.get_node("%Server").text = OS.get_environment("GODOT_TEST_SERVER") + "/slow"
@@ -146,6 +148,7 @@ func run() -> void:
 	await create_timer(.6).timeout
 	check(session.get_login_defaults().server == OS.get_environment("GODOT_TEST_SERVER"), "cancelled editor never adopts its late address")
 	check(view.get_node("%Invite").visible and view.get_node("%Password").text == "cancel must keep this draft", "Esc only dismisses the temporary server editor")
+	check(view.get_node("%Status").text == form_status, "cancelled server verification preserves underlying form feedback")
 	press(view,"BackToLogin")
 	if DisplayServer.get_name() != "headless":
 		check(root.borderless and root.unresizable, "logout restores compact presentation")
