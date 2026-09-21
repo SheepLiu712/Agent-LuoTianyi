@@ -8,8 +8,11 @@ func _initialize() -> void:
 	run.call_deferred()
 func run() -> void:
 	var app: Node = load("res://scenes/main.tscn").instantiate()
-	for name in ["NavChat","NavDynamics","NavSettings","NavLogs","AccountMenu"]:
+	for name in ["NavChat","NavDynamics","NavSettings","NavLogs"]:
 		check(app.get_node_or_null("%"+name) is Button,"navigation is scene-authored: "+name)
+	check(app.get_node_or_null("%AccountMenu") == null,"account menu is removed from main navigation")
+	for name in ["NavChat","NavDynamics","NavSettings","NavLogs"]:
+		check(app.get_node("%"+name).alignment == HORIZONTAL_ALIGNMENT_CENTER,"navigation text is centered: " + name)
 	app.free()
 	var chat = load("res://scenes/ui/chat_view.tscn").instantiate()
 	root.add_child(chat)

@@ -24,8 +24,7 @@ func _run() -> void:
 	await process_frame
 	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"ui","password":"synthetic-password","request_token":false},false)
 	await process_frame
-	var menu = app.get_node("%AccountMenu")
-	check(menu.get_items().any(func(item): return item.id == "logout") and menu.get_items().any(func(item): return item.id == "exit"),"account separates logout and exit")
+	check(app.get_node_or_null("%AccountMenu") == null,"main navigation no longer owns account actions")
 	var dynamics = app.get_node("%NavDynamics")
 	for tick in 200:
 		if dynamics.text == "动态 · 99+": break
@@ -45,6 +44,13 @@ func _run() -> void:
 	await process_frame
 	var window = app.find_child("SettingsWindow",true,false)
 	check(window != null,"settings navigation opens unified window")
+	check(window.get_node_or_null("%LogoutButton") is Button,"settings provides logout action")
+	if window.get_node_or_null("%LogoutButton") == null:
+		app.queue_free()
+		await process_frame
+		print("Application drafts: FAIL")
+		quit(1)
+		return
 	window.get_node("%ModelsTab").pressed.emit()
 	app.get_node("%NavSettings").pressed.emit()
 	check(app.find_children("SettingsWindow","Window",true,false).size() == 1 and window.get_node("%ModelPage").visible,"reopen preserves selected settings page and singleton")
@@ -57,15 +63,17 @@ func _run() -> void:
 	check(window.is_dirty(),"loaded form accepts draft edit")
 	var chat = app.find_child("ChatView",true,false)
 	chat.get_node("%Input").text = "unsent chat draft"
+	var image := Image.create(4,4,false,Image.FORMAT_RGB8)
+	chat.get_node("%Input").image_pasted.emit(image)
 	root.close_requested.emit()
 	var dialog = app.get_node("%ExitDialog")
 	check(dialog.visible and dialog.dialog_text.contains("聊天") and dialog.dialog_text.contains("设置") and dialog.dialog_text.contains("动态"),"one exit prompt summarizes every draft")
 	dialog.get_cancel_button().pressed.emit()
-	check(chat.is_dirty() and window.is_dirty() and draft.text == "unsaved dynamic","cancel preserves every draft")
-	menu.activated.emit("logout")
+	check(chat.is_dirty() and window.is_dirty() and draft.text == "unsaved dynamic" and chat.get_node("%AttachmentBar").visible,"cancel preserves every draft")
+	window.get_node("%LogoutButton").pressed.emit()
 	check(not session.get_session().is_empty() and dialog.visible,"logout waits for decision")
 	dialog.get_cancel_button().pressed.emit()
-	menu.activated.emit("logout")
+	window.get_node("%LogoutButton").pressed.emit()
 	dialog.get_ok_button().pressed.emit()
 	await process_frame
 	check(session.get_session().is_empty(),"confirmed discard completes logout")

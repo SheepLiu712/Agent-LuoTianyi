@@ -23,6 +23,7 @@ func run() -> void:
 	root.add_child(window)
 	await prefs.start(scope)
 	window.open()
+	check(not window.get_node("%Result").visible and window.get_node("%Result").text.is_empty(),"no fixed footer explanation before saving")
 	var context: TextEdit = window.find_child("CustomContextField",true,false)
 	context.text = "保留跨页的草稿"
 	context.text_changed.emit()
@@ -34,6 +35,7 @@ func run() -> void:
 	params.text = "["
 	params.text_changed.emit()
 	var result: Dictionary = await window.save_changes()
+	check(window.get_node("%Result").visible,"validation failures remain visible")
 	check(not result.ok and models.get_config("text-purpose").model != name.text and prefs.get_state().dirty,"invalid model prevents every write")
 	window.select_page("preferences")
 	check(context.text == "保留跨页的草稿","switching pages preserves drafts")
@@ -44,8 +46,12 @@ func run() -> void:
 	check(window.is_dirty(),"partial success cannot close as fully saved")
 	result = await window.save_changes()
 	check(result.ok and not window.is_dirty(),"retry saves only remaining changes")
+	check(window.get_node("%Result").visible,"successful save remains visible")
 	context.text = "close guard"
 	context.text_changed.emit()
+	await process_frame
+	await process_frame
+	check(not window.get_node("%Result").visible,"editing clears stale save-success feedback")
 	window.close_requested.emit()
 	var dialog: Window = window.get_node("%UnsavedDialog")
 	check(dialog.visible,"dirty close opens a decision")
