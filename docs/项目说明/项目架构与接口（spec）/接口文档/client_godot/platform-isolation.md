@@ -68,3 +68,7 @@ ApplicationServices位于composition，只负责构造与挂接当前服务图�
 AccountLifecycle(chat,models,dynamics,appearance=null,world=null,devices=null)提供start(session)、stop()、get_context()。每次开始先结束旧范围，代次单调递增，模块仅收到scope_id/generation/character_id副本；停止幂等并隔离旧代次，不传认证字段给扩展。
 
 WindowCoordinator(host,dialog,images,geometry,settings_factory,dynamics_factory,chat_dirty)提供open(kind)、request_close(action)、close_all、dispose，以及exit_requested/logout_requested信号。工厂返回window及窗口就绪后执行的start Callable；协调器拥有窗口索引、汇总草稿、保存等待和取消流程，不发送协议或直接退出账号。账号退出/应用退出由Application接收信号并调用现有会话/场景树接口。只读日志仍由Application单独持有。
+
+### 历史图片默认依赖收尾
+
+HistoryImageSource为Node接口，提供changed(id,state)、start/stop、get_state/ensure/retry/preview/store_local。未注入实现时get_state为error/IMAGE_SOURCE_UNAVAILABLE、preview为null、store_local返回ERR_UNAVAILABLE，无磁盘或网络副作用。HistoryImages继承并实现既有行为；ApplicationServices继续注入真实实现。ChatSession不再在未注入时偷偷创建具体文件缓存，独立使用时明确缺少图片能力；正式产品图片行为不变。
