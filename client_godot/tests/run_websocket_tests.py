@@ -1,7 +1,7 @@
 """Real sockets on loopback; fixture rejects incompatible authentication and retry IDs."""
 import argparse
 import base64
-import io
+from support.wave_samples import tone
 import json
 import importlib.util
 import os
@@ -9,22 +9,10 @@ from pathlib import Path
 import subprocess
 import threading
 import sys
-import math
-import struct
-import wave
 from websockets.sync.server import serve
 from websockets.exceptions import ConnectionClosed
 
 PROJECT = Path(__file__).resolve().parents[1]
-
-
-def tone(seconds, rate=24000):
-    target = io.BytesIO()
-    with wave.open(target, "wb") as output:
-        output.setparams((1, 2, rate, 0, "NONE", "not compressed"))
-        output.writeframes(b"".join(struct.pack("<h", int(math.sin(i * math.tau * 440 / rate) * 8000))
-                                  for i in range(int(rate * seconds))))
-    return target.getvalue()
 
 
 def run(godot, script="res://tests/test_websocket_transport.gd", gpu=False):

@@ -26,3 +26,9 @@
 - 设置最小布局并入test_settings_control_states的GPU分支，四档缩放均实际滚动Reload并检查视口/底栏可达范围；保留原检查的布局稳定等待。圆角背景/像素检查并入capture_dropdown_ui，保留圆角截图、原键盘/边界/移动收起行为；headless明确退出2，不能冒充视觉通过。
 - 删除两个原GPU脚本及UID，更新README。Settings control states与Dropdown native screenshots独立GPU执行均PASS；已查看最小设置图确认Reload完整可见、底栏无覆盖。证据after-settings-gpu.log/after-dropdown-gpu.log位于artifacts/test-cleanup。
 - test_*.gd数量为53（原59）；未注册的其余GPU/原生验收保留。SPEC 1c29614；Red不适用，Green为本记录提交；作者自审确认没有把headless结果当GPU结果，产品资源未变。
+
+### 2026-09-21 Python夹具解耦与重复编排清理
+
+- server_crypto与tone原样迁入两个support模块，runner之间不再import。各Handler、超时、环境变量、命令行和错误判定保持原状，原服务端加密函数/旧端wire互验保留；可靠队列只在基础组直接执行。
+- 四组整理后检查均通过：base 31项、accounts互操作+4项、network 4项、features 14项；release与dynamics GPU链路通过。提取前后3组WAV样本字节完全一致；两个crypto实例生成不同密钥，导入支持模块未加载runner；Python语法检查通过（正确处理仓库既有UTF-8 BOM文件）。
+- SPEC 1c29614；Red不适用，Green为本记录提交。作者自审确认support没有服务启动/共享可变状态，波形样本不依赖WebSocket包，解密源码仍由文件相对仓库定位，不依赖运行目录。

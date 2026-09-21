@@ -7,7 +7,7 @@ def run(godot,script,gpu=False):
     reads, writes, errors = {}, {}, []
     provider_calls=[]
     delegated=[]
-    from run_security_interop import server_crypto
+    from support.interop_crypto import server_crypto
     crypto=server_crypto(); crypto.generate_keys()
     class Handler(BaseHTTPRequestHandler):
         protocol_version='HTTP/1.1'
@@ -45,7 +45,7 @@ def run(godot,script,gpu=False):
                         if packet['type']=='llm_response': delegated.append(packet['payload']); continue
                         if packet['type']=='user_text':
                             if username=='visual':
-                                from run_websocket_tests import tone
+                                from support.wave_samples import tone
                                 messages=[{'type':'server_ack','payload':{'ok':True},'reply_to':packet['client_msg_id']},
                                           {'type':'agent_message','payload':{'uuid':'redesign-voice','text':'辛苦啦，先让自己休息一下吧。\n我在这里陪着你，想说什么都可以。','audio':base64.b64encode(tone(2.4)).decode(),'is_final_package':True,'expression':'微笑脸'}}]
                                 for response in messages:

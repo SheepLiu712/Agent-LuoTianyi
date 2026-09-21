@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import threading
 import time
-from run_security_interop import server_crypto
+from support.interop_crypto import server_crypto
 
 PROJECT = Path(__file__).resolve().parents[1]
 
