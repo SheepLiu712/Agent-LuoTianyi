@@ -45,6 +45,14 @@ class DependencyBoundaries(unittest.TestCase):
             for path in (ROOT/'src'/directory).rglob('*.gd'):
                 self.assertNotRegex(path.read_text(encoding='utf-8'), r'(?:load|preload)\("res://src/preview/')
 
+    def test_consumers_do_not_create_concrete_platform_or_storage(self):
+        for directory in ['ui', 'session', 'avatar', 'preview']:
+            for path in (ROOT/'src'/directory).rglob('*.gd'):
+                source = path.read_text(encoding='utf-8')
+                self.assertNotRegex(source, r'(?:load|preload)\("res://src/platform/(?:godot_|windows_|native_|desktop_|cubism_)')
+                self.assertNotRegex(source, r'(?:load|preload)\("res://src/storage/(?:godot_|history_images|audio_cache|model_store|credential_store|reading_position)')
+                self.assert_no_calls([path], r'\bWindow\s*\.\s*MODE_|\bImage\s*\.\s*load_from_file')
+
 
 if __name__ == '__main__':
     unittest.main()
