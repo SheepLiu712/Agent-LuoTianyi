@@ -1,5 +1,7 @@
 [gd_scene load_steps=11 format=3]
 
+[ext_resource type="Resource" path="res://resources/platform/decoder.tres" id="isolation_decoder"]
+
 [ext_resource type="Resource" path="res://resources/platform/secrets.tres" id="isolation_secret_protection"]
 
 [ext_resource type="Resource" path="res://resources/platform/encryption.tres" id="isolation_password_encryption"]
@@ -36,6 +38,8 @@ window_system = ExtResource("isolation_window_system")
 password_encryption = ExtResource("isolation_password_encryption")
 
 secret_protection = ExtResource("isolation_secret_protection")
+
+decoder_factory = ExtResource("isolation_decoder")
 
 [node name="Background" type="ColorRect" parent="."]
 unique_name_in_owner = true

@@ -1,4 +1,8 @@
 extends Control
+@export var appearance: Resource = preload("res://src/extensions/appearance_service.gd").new()
+@export var world: Resource = preload("res://src/extensions/world_service.gd").new()
+@export var devices: Resource = preload("res://src/extensions/device_service.gd").new()
+@export var decoder_factory: Resource = preload("res://src/media/decoder_factory.gd").new()
 @export var secret_protection: Resource = preload("res://src/platform/secret_protection.gd").new()
 @export var password_encryption: Resource = preload("res://src/platform/password_encryption.gd").new()
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
@@ -82,12 +86,12 @@ func _ready() -> void:
 		%SecurityError.show()
 		%SecurityError.text = "认证加密组件不可用，暂时无法登录；日志和问题反馈仍可使用。"
 		return
-	_services.mount(self,_session,_layout_path,password_encryption,secret_protection)
+	_services.mount(self,_session,_layout_path,password_encryption,secret_protection,decoder_factory)
 	_session = _services.account
 	_models = _services.models
 	_dynamics = _services.dynamics
 	_chat = _services.chat
-	_lifecycle = preload("res://src/application/account_lifecycle.gd").new(_chat,_models,_dynamics)
+	_lifecycle = preload("res://src/application/account_lifecycle.gd").new(_chat,_models,_dynamics,appearance,world,devices)
 	_dynamics.unread_changed.connect(func(count):
 		if is_instance_valid(_nav_dynamics):
 			_nav_dynamics.text = "动态" if count <= 0 else "动态 · " + ("99+" if count > 99 else str(count)))

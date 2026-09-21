@@ -19,7 +19,7 @@ func _init(layout_path: String, runtime: Resource) -> void:
 	dynamics_settings = preload("res://src/storage/godot_settings_store.gd").new(layout_path.get_base_dir().path_join("dynamics-window.cfg"))
 	log = preload("res://src/storage/client_log.gd").new("user://logs" if layout_path == "user://window_layout.cfg" else layout_path.get_base_dir().path_join("logs"),2097152,runtime)
 
-func mount(host: Node, injected_account: Node, layout_path: String, encryption: Resource, secrets: Resource) -> void:
+func mount(host: Node, injected_account: Node, layout_path: String, encryption: Resource, secrets: Resource, decoder_factory: Resource) -> void:
 	var data_root := layout_path.get_base_dir()
 	var credentials = preload("res://src/storage/credential_store.gd").new(secrets,data_root.path_join("accounts"))
 	storage = preload("res://src/storage/godot_storage_service.gd").new(data_root.path_join("account.cfg"),credentials)
@@ -36,7 +36,7 @@ func mount(host: Node, injected_account: Node, layout_path: String, encryption: 
 	var reading = preload("res://src/storage/reading_position.gd").new(data_root.path_join("reading"))
 	var images = preload("res://src/storage/history_images.gd").new(data_root.path_join("images"),log)
 	executor = preload("res://src/session/model_executor.gd").new(models,log)
-	var audio = preload("res://src/media/reply_audio.gd").new(log,Callable(),cache,preload("res://src/platform/native_decoder_factory.gd").new())
+	var audio = preload("res://src/media/reply_audio.gd").new(log,Callable(),cache,decoder_factory)
 	chat = preload("res://src/session/chat_session.gd").new(preload("res://src/network/websocket_transport.gd").new(),log,audio,history,reading,images,executor)
 	host.add_child(chat)
 
