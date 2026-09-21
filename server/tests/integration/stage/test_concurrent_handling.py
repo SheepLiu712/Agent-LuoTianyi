@@ -291,6 +291,46 @@ async def test_new_content_cancels_reply_and_reuses_preprocessing_in_new_batch()
 
 
 @pytest.mark.asyncio
+async def test_new_content_does_not_cancel_non_interruptible_reply_handle():
+    reply_entered = asyncio.Event()
+    reply_gate = asyncio.Event()
+    replies = asyncio.Queue()
+
+    async def handle(req, sink):
+        if isinstance(req.stimulus, d.InteractionDeadline) and req.purpose is d.HandlePurpose.PROCESS:
+            replies.put_nowait(req)
+            if replies.qsize() == 1:
+                reply_entered.set()
+                await reply_gate.wait()
+            return report(req, consumed=ids(req))
+        return report(req)
+
+    class NonInterruptibleAgent(RecordingAgent):
+        def is_handle_interruptible(self, interaction_id, request_id=None):
+            return False
+
+    stage, _, adapter, _, _ = await setup(NonInterruptibleAgent(handle))
+    first, second = stimulus(), stimulus()
+    try:
+        stage.stimulus_input_sink.submit(first)
+        old = await take(replies)
+        await reply_entered.wait()
+        stage.stimulus_input_sink.submit(second)
+        await until(lambda: stage._pending[second.stimulus_id].prepared is not None)
+
+        assert not old.cancellation.is_cancelled
+        assert not stage._handles[old.request_id].done()
+
+        reply_gate.set()
+        new = await take(replies)
+        assert ids(new) == (second.stimulus_id,)
+        await until(lambda: not stage._pending)
+    finally:
+        reply_gate.set()
+        await cleanup(stage, adapter)
+
+
+@pytest.mark.asyncio
 async def test_new_content_cancels_active_and_queued_reply_plans_and_waits_cleanup():
     execution_cleanup, release = asyncio.Event(), asyncio.Event()
     calls, ends = [], []

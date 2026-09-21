@@ -7,7 +7,19 @@ from typing import Any
 from pydantic import BaseModel
 
 BUSINESS_INPUT_EVENTS = frozenset(
-    {"user_text", "user_message", "message", "chat_message", "chat", "user_typing", "user_image"}
+    {
+        "user_text",
+        "user_message",
+        "message",
+        "chat_message",
+        "chat",
+        "user_typing",
+        "user_image",
+        "user_voice",
+        "user_touch",
+        "user_image_selecting",
+        "user_image_selecting_cancel",
+    }
 )
 
 
@@ -41,6 +53,7 @@ class WSEventType(str, Enum):
 
     USER_MESSAGE = "user_message"
     USER_IMAGE = "user_image"
+    USER_VOICE = "user_voice"
     USER_TEXT = "user_text"
     USER_TYPING = "user_typing"
     USER_IMAGE_SELECTING = "user_image_selecting"

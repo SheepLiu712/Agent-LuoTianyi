@@ -10,15 +10,15 @@
 - `await receive_event(connection: WebSocketConnection, event: WSMessage) -> bool`：以认证身份先构造不含原始字节的候选刺激，按绑定找到全部目标 Stage 并检查全部 sink 可接收；图片仅在准入成功后在线程池解码、验证和永久发布，再向 sink 投递。无目标绑定或非法字段抛出 ValueError/稳定媒体错误；容量或生命周期不允许接收时返回 False，且不物化媒体。
 - `await bind(stage: ChatStage, connection: WebSocketConnection) -> None`：校验用户身份并绑定；重绑先停止旧执行、清理旧投递，再通知 Stage 上线。
 - `await disconnect(stage: ChatStage, connection: WebSocketConnection | None = None) -> None`：拆除绑定，通知 Stage 离线，结算待发送输出并等待在途发送退出。指定 connection 时只解除这一连接；旧断线通知不会解除新连接。最后一个绑定移除后释放连接投递任务。
-- `supports_input(event: WSMessage) -> bool`：识别文本和打字业务事件。
+- `supports_input(event: WSMessage) -> bool`：识别已登记的业务输入事件。`user_voice` 已登记但尚无 wire payload 协议，当前准入结果为 `BAD_MESSAGE`，不会构造刺激。
 
 绑定和拆除操作在调用者取消后仍完成已经开始的生命周期变更。adapter 不另设 send_agent_state、cancel_execution、release 或 close 公共方法。
 
 ## 输入协议
 
-`_input.py` 负责输入转换。文本兼容 user_text、user_message、message、chat_message、chat，依次取 message、text、content 的首个非空字符串，清理首尾空白，最多 20,000 字符。user_typing 转成 UserTyping，text_length 为 0 至 100,000 的整数。user_image 使用 image_base64 和 mime_type，不存在 caption；用户对图片的说明作为独立文本消息发送。编码/解码体积、完整图片解码及 MIME 一致性在永久发布前校验。
+`_input.py` 负责输入转换。文本兼容 user_text、user_message、message、chat_message、chat，依次取 message、text、content 的首个非空字符串，清理首尾空白，最多 20,000 字符。user_typing 转成 UserTyping，text_length 为 0 至 100,000 的整数。user_image 使用 image_base64 和 mime_type，不存在 caption；用户对图片的说明作为独立文本消息发送。编码/解码体积、完整图片解码及 MIME 一致性在永久发布前校验。user_touch 接受 `touch_area` 字符串或 `touchArea` 字符串数组，并把可选 `click_frequency.count_10s/count_30s` 转成 TouchInteraction。user_image_selecting 和 user_image_selecting_cancel 分别转成 ImageSelectionOpened 和 ImageSelectionClosed。user_voice 只保留为已知业务事件，待 wire payload 协议确定后再实现 VoiceMessage 转换。
 
-认证用户身份来自 connection；payload 不能覆盖身份。文本 ephemeral=false，打字 ephemeral=true，source=USER。顶层 client_msg_id 非空白且不超过 128 字符。刺激 ID 由认证用户和客户端消息 ID 生成。合法非负毫秒 ts 转为 UTC 时间，省略时使用当前时间。
+认证用户身份来自 connection；payload 不能覆盖身份。文本和图片 ephemeral=false，打字、触摸、图片选择开关 ephemeral=true，source=USER。顶层 client_msg_id 非空白且不超过 128 字符。刺激 ID 由认证用户和客户端消息 ID 生成。合法非负毫秒 ts 转为 UTC 时间，省略时使用当前时间。
 
 目标兼容 target_character_ids、target_characters、character_ids、target_character_id、character_id；最多八个目标，每项最多 64 字符。省略目标时使用构造时指定的默认角色。
 

@@ -45,12 +45,25 @@ def prepare_input(
     """校验输入信封并创建准入候选；不解码或写入图片。"""
     payload = _validate_envelope(event)
     targets = _target_characters(payload, default_character_id)
-    typing = event.event_type == "user_typing"
-    values = _stimulus_values(event, user_id, targets, ephemeral=typing)
-    if typing:
+    ephemeral = event.event_type in {
+        "user_typing",
+        "user_touch",
+        "user_image_selecting",
+        "user_image_selecting_cancel",
+    }
+    values = _stimulus_values(event, user_id, targets, ephemeral=ephemeral)
+    if event.event_type == "user_typing":
         return _prepare_typing(payload, values)
     if event.event_type == "user_image":
         return _prepare_image(event, payload, values, user_id, media_store)
+    if event.event_type == "user_touch":
+        return _prepare_touch(payload, values)
+    if event.event_type == "user_image_selecting":
+        return PreparedInput(d.ImageSelectionOpened(**values))
+    if event.event_type == "user_image_selecting_cancel":
+        return PreparedInput(d.ImageSelectionClosed(**values))
+    if event.event_type == "user_voice":
+        raise ValueError("user_voice protocol is not implemented")
     return _prepare_text(event, payload, values)
 
 
@@ -105,6 +118,35 @@ def _prepare_typing(payload: dict, values: dict) -> PreparedInput:
     if type(length) is not int or not 0 <= length <= 100_000:
         raise ValueError("invalid text_length")
     return PreparedInput(d.UserTyping(**values, text_length=length))
+
+
+def _prepare_touch(payload: dict, values: dict) -> PreparedInput:
+    raw_regions = payload.get("touch_area", payload.get("touchArea"))
+    if isinstance(raw_regions, str):
+        raw_regions = [raw_regions]
+    if not isinstance(raw_regions, (list, tuple)) or not 1 <= len(raw_regions) <= 16:
+        raise ValueError("invalid touch areas")
+    if any(not isinstance(region, str) or not region.strip() or len(region) > 64 for region in raw_regions):
+        raise ValueError("invalid touch area")
+    body_regions = tuple(d.BodyRegion(value=region) for region in dict.fromkeys(r.strip() for r in raw_regions))
+
+    raw_frequency = payload.get("click_frequency")
+    click_frequency = None
+    if raw_frequency is not None:
+        if not isinstance(raw_frequency, dict):
+            raise ValueError("invalid click frequency")
+        count_10s = raw_frequency.get("count_10s")
+        count_30s = raw_frequency.get("count_30s")
+        if type(count_10s) is not int or type(count_30s) is not int:
+            raise ValueError("invalid click frequency")
+        click_frequency = d.TouchClickFrequency(count_10s=count_10s, count_30s=count_30s)
+    return PreparedInput(
+        d.TouchInteraction(
+            **values,
+            body_regions=body_regions,
+            click_frequency=click_frequency,
+        )
+    )
 
 
 def _prepare_image(

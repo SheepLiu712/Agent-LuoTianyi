@@ -28,7 +28,7 @@ Handler 提交完整、不可变的行动草稿；角色、请求、交互、依
 
 ## 中断阶段声明
 
-`set_interruptible(interruptible: bool) -> None` 设置当前 handle 对普通刺激的中断许可。默认 False；提取开始前设 True，决定进入回复生成前设 False。不是 bool 时抛 TypeError，已关闭时抛 RuntimeError，已取消时终止交付流程。中断许可通过 Agent 按 interaction 查询。
+`set_interruptible(interruptible: bool) -> None` 设置当前 handle 对普通刺激的中断许可。默认 False；回复所需的提取和生成阶段可设 True，首个包含实际回复 action（`SAY` 或 `SING`）的计划形成时必须设 False。`StartThinking` 只是状态提示，不是回复 action。不是 bool 时抛 TypeError，已关闭时抛 RuntimeError，已取消时终止交付流程。中断许可通过 Agent 按 interaction 和 request 查询。
 
 ## 同一次调用内的多份计划
 

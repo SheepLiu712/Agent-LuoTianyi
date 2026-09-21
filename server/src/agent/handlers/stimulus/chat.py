@@ -313,6 +313,7 @@ class ChatReplyHandler:
         reply_topic = "\n".join(reply_parts)
         if not reply_topic:
             return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
+        plans.set_interruptible(True)
         await plans.emit(
             ActionPlanDraft(
                 source_stimulus_ids=pending, actions=(d.StartThinking(action_id=f"{request.request_id}-thinking"),)
@@ -320,7 +321,6 @@ class ChatReplyHandler:
         )
         snapshot = plans.context.conversation.read()
         basis = request.interaction.interaction_revision
-        plans.set_interruptible(True)
         staged = await self._composition.compose_staged(
             handling_invocation(request, plans.context),
             user_context=plans.context.user.read(),
@@ -330,7 +330,6 @@ class ChatReplyHandler:
             sing_attempts=self._understanding.extract_terms(reply_topic),
             excluded_segments=_recent_sung_segments(snapshot),
         )
-        plans.set_interruptible(False)
         if staged.provisional:
             await self._deliver(plans, request, pending, staged.provisional, prefix="t")
         if not staged.awaits_formal:
@@ -350,6 +349,8 @@ class ChatReplyHandler:
         actions = _reply_actions(request, drafts, prefix=prefix)
         if not actions:
             return
+        if actions:
+            plans.set_interruptible(False)
         entries = _reply_entries(drafts)
         if entries:
             await plans.context.conversation.append(entries)

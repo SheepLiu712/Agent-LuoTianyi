@@ -31,7 +31,7 @@ from src.infrastructure.media import (
     MediaResolutionError,
     MediaResolutionErrorCode,
 )
-from src.web.websocket import WSMessage
+from src.web.websocket import BUSINESS_INPUT_EVENTS, WSMessage
 from src.web.websocket.service import WebSocketConnection
 
 
@@ -581,6 +581,47 @@ async def test_adapter_dedup_overload_typing_and_maintenance_bypass():
         await adapter.try_accept_event(connection, WSMessage(event_type="heartbeat", payload={}))
         is ChatEventAcceptance.UNSUPPORTED
     )
+    await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_touch_and_image_selection_business_events_become_typed_stimuli():
+    _, connection, adapter, stage = await setup_output()
+    events = (
+        WSMessage(
+            event_type="user_touch",
+            client_msg_id="touch",
+            payload={
+                "touchArea": ["head", "hand", "head"],
+                "click_frequency": {"count_10s": 2, "count_30s": 5},
+            },
+        ),
+        WSMessage(event_type="user_image_selecting", client_msg_id="selecting", payload={}),
+        WSMessage(event_type="user_image_selecting_cancel", client_msg_id="closed", payload={}),
+    )
+
+    for event in events:
+        assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.ACCEPTED
+
+    touch, opened, closed = stage.stimuli
+    assert isinstance(touch, d.TouchInteraction)
+    assert tuple(region.value for region in touch.body_regions) == ("head", "hand")
+    assert touch.click_frequency == d.TouchClickFrequency(count_10s=2, count_30s=5)
+    assert isinstance(opened, d.ImageSelectionOpened)
+    assert isinstance(closed, d.ImageSelectionClosed)
+    assert all(stimulus.ephemeral for stimulus in stage.stimuli)
+    await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_voice_is_known_business_input_but_rejected_until_protocol_exists():
+    _, connection, adapter, stage = await setup_output()
+    event = WSMessage(event_type="user_voice", client_msg_id="voice", payload={})
+
+    assert "user_voice" in BUSINESS_INPUT_EVENTS
+    assert adapter.supports_input(event)
+    assert await adapter.try_accept_event(connection, event) is ChatEventAcceptance.BAD_MESSAGE
+    assert stage.stimuli == []
     await adapter.disconnect(stage)
 
 

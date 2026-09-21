@@ -68,7 +68,7 @@ AgentRuntime.shutdown 停止新工作后，有界等待在途调用与清理退�
 
 两项查询同步返回，不修改状态。没有对应调用时返回 False；调用开始时默认 False。状态按交互、请求及 handle/realize 分别隔离，完成、异常及任务取消后移除。同一交互存在多个同类调用时，仅全部允许中断才返回 True。交互 ID 必须为非空白字符串。
 
-内部 handler 通过 PlanEmitter.set_interruptible 或 OutputEmitter.set_interruptible 更新当前调用的状态。提取阶段可设 True；开始回复生成前设 False。设置状态时检查取消令牌，已经过时的提取不能通过关闭中断许可而继续生成回复。每个行动开始时 realize 恢复默认 False；SAY 不打开中断许可。
+内部 handler 通过 PlanEmitter.set_interruptible 或 OutputEmitter.set_interruptible 更新当前调用的状态。回复所需的提取和生成阶段可设 True；首个包含实际回复 action（SAY 或 SING）的回复计划形成时设 False。ChatStage 在取消活动中的 InteractionDeadline handle 前按 request 查询此许可；不允许打断时保留整个回复尝试。设置状态时检查取消令牌，已经过时的提取不能通过关闭中断许可而继续生成回复。每个行动开始时 realize 恢复默认 False；SAY 和 SING 都不打开中断许可。
 
 当前 ChatStage 自行按内容输入取消回复尝试，不查询这两项兼容状态。不可中断不限制断线、终止时的 NO_LONGER_NEEDED 或任务取消。协作取消不强制中止在途 LLM 调用，但会阻止后续计划交付。允许中断的提取被 SUPERSEDED 且未交付计划时，保留全部 pending，不接受其消费结果。生命周期取消仍保留 handler 已完成的合法消费事实。
 

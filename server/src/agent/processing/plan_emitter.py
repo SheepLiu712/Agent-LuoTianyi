@@ -69,7 +69,7 @@ class PlanEmitter:
         return self._context
 
     def set_interruptible(self, interruptible: bool) -> None:
-        """设置本次 handle 是否允许普通刺激打断；提取时设 True，开始生成回复前设 False。已取消或关闭则拒绝。"""
+        """设置本次 handle 是否允许普通刺激打断；回复处理在首个 SAY 形成时设 False。已取消或关闭则拒绝。"""
         if type(interruptible) is not bool:
             raise TypeError("interruptible must be bool")
         if self._sink is None:

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from routing_support import Sink, request
+from skill_support import invocation
 
 import src.domain.agent as d
 from src.agent import Agent
@@ -19,7 +20,6 @@ from src.agent.skills.cognitive import (
     ReplyDraft,
     ResponseCompositionSkill,
 )
-from skill_support import invocation
 from src.domain.memory_context import MemoryContext, MemoryHit
 
 
@@ -54,6 +54,7 @@ class _Understanding:
 
 PROVISIONAL = ReplyDraft(content="稍等我想想", sound_content="稍等我想想", tone="tender", expression="温柔脸")
 FORMAL = ReplyDraft(content="我记得你喜欢乌龙茶", sound_content="我记得你喜欢乌龙茶", tone="happy", expression="微笑脸")
+SING_ONLY = ReplyDraft(content="", sound_content="", tone="", expression=None, sing=("乌龙茶", "副歌"))
 
 
 class _StagedComposer:
@@ -158,6 +159,64 @@ async def test_cancellation_blocks_the_formal_plan_and_its_late_output():
     assert report.emitted_plan_ids == tuple(plan.plan_id for plan in sink.values)
     assert report.retryable is False
     assert ctx.recalled_memory.read() == ()
+
+
+@pytest.mark.asyncio
+async def test_handle_becomes_non_interruptible_when_first_say_is_ready():
+    compose_entered = asyncio.Event()
+    compose_gate = asyncio.Event()
+    formal_gate = asyncio.Event()
+
+    class ControlledComposer(_StagedComposer):
+        async def compose_staged(self, invocation, **kwargs):
+            compose_entered.set()
+            await compose_gate.wait()
+            return await super().compose_staged(invocation, **kwargs)
+
+    composer = ControlledComposer(gate=formal_gate)
+    facade = agent(composer)
+    sink = Sink()
+    value = deadline_request()
+    task = asyncio.create_task(facade.handle_stimulus(value, sink, context=context()))
+
+    await compose_entered.wait()
+    assert facade.is_handle_interruptible("i", value.request_id)
+
+    compose_gate.set()
+    while len(sink.values) < 2:
+        await asyncio.sleep(0)
+    assert isinstance(sink.values[1].actions[0], d.Say)
+    assert not facade.is_handle_interruptible("i", value.request_id)
+
+    formal_gate.set()
+    await task
+
+
+@pytest.mark.asyncio
+async def test_handle_becomes_non_interruptible_when_first_sing_is_ready():
+    formal_gate = asyncio.Event()
+    sing_emitted = asyncio.Event()
+    sink_release = asyncio.Event()
+
+    async def receive(plan):
+        sink.values.append(plan)
+        if any(isinstance(action, d.Sing) for action in plan.actions):
+            sing_emitted.set()
+            await sink_release.wait()
+        return d.PlanReceipt(plan_id=plan.plan_id, status=d.PlanAcceptanceStatus.ACCEPTED)
+
+    composer = _StagedComposer(provisional=(), formal=(SING_ONLY,), gate=formal_gate)
+    facade = agent(composer)
+    sink = Sink(receive)
+    value = deadline_request()
+    task = asyncio.create_task(facade.handle_stimulus(value, sink, context=context()))
+
+    formal_gate.set()
+    await sing_emitted.wait()
+    assert not facade.is_handle_interruptible("i", value.request_id)
+
+    sink_release.set()
+    await task
 
 
 @pytest.mark.asyncio

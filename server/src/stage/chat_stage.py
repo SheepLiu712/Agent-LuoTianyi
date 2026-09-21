@@ -409,9 +409,18 @@ class ChatStage:
 
     def _cancel_reply_attempts(self) -> None:
         for attempt in tuple(self._attempts.values()):
+            task = self._handles.get(attempt.request.request_id)
+            if (
+                task is not None
+                and not task.done()
+                and not self._agent.is_handle_interruptible(
+                    self.interaction_id,
+                    attempt.request.request_id,
+                )
+            ):
+                continue
             attempt.interrupted = True
             attempt.request.cancellation.cancel(d.CancellationReason.SUPERSEDED)
-            task = self._handles.get(attempt.request.request_id)
             if task is not None and not task.done():
                 task.cancel()
             for sid in attempt.input_ids:
