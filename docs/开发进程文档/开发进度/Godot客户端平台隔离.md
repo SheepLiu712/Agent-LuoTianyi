@@ -67,3 +67,10 @@
 
 - 用户授权清理、推送fork并向原项目提交PR。删除54,080,418 bytes的本地文件清单File report.txt、两份~热重载DLL、未使用的model.json和与正式入口逐字节相同的model.model3_copy.json；正式model.model3.json、原生DLL、许可、测试、预览与旧交付包保留。
 - 根/客户端gitignore新增精确生成物规则。检查正式模型及DLL仍存在、不被忽略；引用与加载入口核对完成。清理不改变业务/interface，运行时Red不适用；完整基础检查实际通过（artifacts/pr-cleanup-check.log）。作者自审确认project.godot的本地属性重排不混入提交。
+
+### 2026-09-21 上游PR候选复验
+
+- 从upstream/dev b367bb2建立独立feat/godot-client-013提交工作树，导入清理后的完整Godot子项目及必要契约/文档；开发分支历史不改写。原项目此前没有Godot工程，候选为完整子项目首次引入。
+- 验证客户端/聊天契约树与本地清理版本一致，server/client/app/.github差异为空；未含File report、热重载DLL、dist、artifacts或.godot缓存。检查高置信凭据特征未发现匹配。末尾空行检查发现旧语音测试多余空行，已在两个工作树一致整理。
+- 全新缓存第一次导入时，引擎在纹理缓存生成前加载全局主题报ctex缺失，保留cold-import.log；资源导入结束后完整基础、账户、网络、功能检查全部通过，7项架构检查通过。独立工作树登录与设置GPU复验通过。证据位于client_godot/artifacts/pr-submission；初次失败不计通过。
+- 未打包、未升级版本，用户project.godot属性重排仍留在原工作区。真实系统DPI、多屏、移动端等未验证范围不变。
