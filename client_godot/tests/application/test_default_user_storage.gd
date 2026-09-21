@@ -5,6 +5,8 @@ func _initialize() -> void:
 
 func run() -> void:
 	# Normal main-scene startup has no caller injecting setup().
+	if not DirAccess.dir_exists_absolute(ProjectSettings.globalize_path("user://logs")):
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("user://logs"))
 	var before := DirAccess.get_files_at("user://logs")
 	var app = load("res://scenes/main.tscn").instantiate()
 	root.add_child(app)
