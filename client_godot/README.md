@@ -103,7 +103,7 @@ $env:GODOT_TEST_PYTHON = 'D:\anaconda\python.exe'
 
 `capture_release_ui.gd` 另生成主界面、最小尺寸、125/150/200%内容缩放、设置与日志截图，比较磨砂/实底的短时帧间隔，并用真实HWND核查动态/日志独立、设置跟随主窗。结果在artifacts，不等同系统DPI、多屏、Windows10或集显认证。版本仍由release.json决定，本轮源代码变更不自动覆盖已有发布包。
 
-设置最小尺寸的可见滚动验收：Godot `--path client_godot --script res://tests/ui/test_settings_layout.gd`，需要真实图形会话；验证720×640下表单底部可滚动到达且不覆盖保存/关闭栏。该测试不在headless检查中运行。
+设置最小尺寸的可见滚动验收已并入`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`：验证720×640及四档内容缩放下表单底部可滚动到达且不覆盖固定操作栏。headless分支只检查状态，不能代替该GPU布局验收。
 
 0.1.2交付后的14项反馈修正见[进度记录](../docs/开发进程文档/开发进度/Godot-0.1.2用户反馈修正.md)。桌面使用系统窗框，内部下拉为嵌入式Godot圆角控件；语音缓存页提供StorageService占用圆环和按用户天数清理，未知容量显示“--%”。PNG/JPEG/WebP/BMP文件及Ctrl+V已接入正式图片预览/发送，未提交附件仅本次运行保留。
 

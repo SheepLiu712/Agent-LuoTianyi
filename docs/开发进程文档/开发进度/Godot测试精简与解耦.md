@@ -20,3 +20,9 @@
 - 回复音频和生命周期合为media/test_reply_audio，缓存持久化与天数清理合为storage/test_audio_cache，保留目标原UID。每组使用独立被测实例；生命周期时钟/信号集合不复用混音场景，缓存两组临时目录分开。clear(days)以真实调用验证，去掉参数数量反射。
 - 旧test_dynamics_window的写接口验证归入test_dynamics，发布失败/草稿/窗口生命周期归入test_dynamics_detail；两组重新创建控制器及窗口。详情几何文件从固定名称改为本次独占名称，消除跨运行依赖。
 - 删除三个被替代脚本及UID，更新check入口和音频README命令。四个合并目标分别独立运行PASS（真实Godot混音/缓存及本地动态HTTP夹具）。SPEC 1c29614；Red不适用，Green为本记录提交；作者自审确认原独有断言保留，产品代码不变。
+
+### 2026-09-21 GPU布局与圆角验证合并
+
+- 设置最小布局并入test_settings_control_states的GPU分支，四档缩放均实际滚动Reload并检查视口/底栏可达范围；保留原检查的布局稳定等待。圆角背景/像素检查并入capture_dropdown_ui，保留圆角截图、原键盘/边界/移动收起行为；headless明确退出2，不能冒充视觉通过。
+- 删除两个原GPU脚本及UID，更新README。Settings control states与Dropdown native screenshots独立GPU执行均PASS；已查看最小设置图确认Reload完整可见、底栏无覆盖。证据after-settings-gpu.log/after-dropdown-gpu.log位于artifacts/test-cleanup。
+- test_*.gd数量为53（原59）；未注册的其余GPU/原生验收保留。SPEC 1c29614；Red不适用，Green为本记录提交；作者自审确认没有把headless结果当GPU结果，产品资源未变。

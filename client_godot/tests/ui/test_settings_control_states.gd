@@ -95,12 +95,36 @@ func run() -> void:
 				var area := Rect2(Vector2.ZERO,window.get_visible_rect().size)
 				for name in ["LogoutButton","CloseSettings","SaveAll"]:
 					check(area.encloses(window.get_node("%"+name).get_global_rect()),"footer action fits at scale %s: %s" % [factor,name])
+				if logical.x == 720:
+					await check_minimum_preferences(window, factor)
 	window.queue_free()
 	models.queue_free()
 	await process_frame
 	remove_folder(path)
 	print("Settings control states: ","PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+
+func check_minimum_preferences(window: Window, factor: float) -> void:
+	window.select_page("preferences")
+	# Switching a hidden page queues its nested containers for layout, as in the
+	# original standalone layout check; scroll only after that layout is settled.
+	await create_timer(.2).timeout
+	var page: Control = window.get_node("%PreferencesPage")
+	var reload: Button = page.get_node("%Reload")
+	var scrolls := page.find_children("*", "ScrollContainer", true, false).filter(func(node): return node.is_ancestor_of(reload))
+	check(not scrolls.is_empty(), "minimum preferences has a scrollable form")
+	if not scrolls.is_empty():
+		var scroll: ScrollContainer = scrolls[0]
+		scroll.ensure_control_visible(reload)
+		await create_timer(.1).timeout
+		check(scroll.get_global_rect().encloses(reload.get_global_rect()), "reload is reachable at minimum size and scale %s" % factor)
+	var actions: Control = window.get_node("%SaveAll").get_parent()
+	check(reload.get_global_rect().end.y <= actions.get_global_rect().position.y, "scrolled form does not overlap fixed actions at scale %s" % factor)
+	check(Rect2(Vector2.ZERO, window.get_visible_rect().size).encloses(actions.get_global_rect()), "fixed actions fit minimum window at scale %s" % factor)
+	await capture(window, "settings-minimum-preferences-%s" % int(factor * 100))
+	window.select_page("models")
+	await process_frame
+
 func remove_folder(path: String) -> void:
 	if not DirAccess.dir_exists_absolute(path): return
 	for directory in DirAccess.get_directories_at(path): remove_folder(path.path_join(directory))

@@ -7,6 +7,10 @@ func check(ok: bool,label: String) -> void:
 func _initialize() -> void:
 	_run.call_deferred()
 func _run() -> void:
+	if DisplayServer.get_name() == "headless":
+		print("Dropdown visual checks require a GPU window")
+		quit(2)
+		return
 	root.size = Vector2i(520,400)
 	root.content_scale_size = Vector2i.ZERO
 	root.theme = load("res://theme/app_theme.tres")
@@ -27,7 +31,11 @@ func _run() -> void:
 	check(popup.position.y < 330,"bottom edge opens upwards")
 	check(absi(popup.position.x+4-260)<=1,"popup panel aligns with trigger; shadow extends outside panel")
 	await RenderingServer.frame_post_draw
-	popup.get_texture().get_image().save_png("res://artifacts/agentluo-011-dropdown.png")
+	var pixels := popup.get_texture().get_image()
+	check(popup.transparent_bg, "embedded menu has a transparent background")
+	check(pixels.get_pixel(0, 0).a < .2 and pixels.get_pixel(16, 16).a > .8, "Godot rounded corners are transparent and the panel is solid")
+	check(pixels.save_png("res://artifacts/agentluo-011-dropdown.png") == OK, "dropdown screenshot saved")
+	check(pixels.save_png("res://artifacts/godot-rounded-dropdown.png") == OK, "rounded-corner evidence saved")
 	var key := InputEventKey.new()
 	key.pressed = true
 	key.keycode = KEY_DOWN
