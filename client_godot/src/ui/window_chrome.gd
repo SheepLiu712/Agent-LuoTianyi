@@ -1,5 +1,6 @@
 extends Control
 const Geometry = preload("res://src/storage/window_geometry.gd")
+@export var login_mode := false
 var _window: Window
 var _store: RefCounted
 var _key := ""
@@ -10,10 +11,22 @@ var _quiet := 0.0
 
 func _ready() -> void:
 	_window = get_window()
-	_window.borderless = false
+	_apply_presentation()
 	_window.gui_embed_subwindows = true
 	_window.close_requested.connect(_save)
 	_normal = Rect2i(_window.position,_window.size)
+
+func set_login_mode(enabled: bool) -> void:
+	if login_mode != enabled: _save()
+	login_mode = enabled
+	_apply_presentation()
+
+func _apply_presentation() -> void:
+	if _window == null: return
+	_window.borderless = login_mode
+	_window.unresizable = login_mode
+	_window.transparent_bg = login_mode
+	if DisplayServer.get_name() != "headless": _window.transparent = login_mode
 func _expanded_mode() -> bool:
 	return _window.mode in [Window.MODE_MAXIMIZED,Window.MODE_FULLSCREEN,Window.MODE_EXCLUSIVE_FULLSCREEN]
 
@@ -34,6 +47,14 @@ func _restore(default_size: Vector2i, minimum: Vector2i) -> void:
 			screens.append(DisplayServer.screen_get_usable_rect(index))
 	var fallback := Rect2i(_window.position + (_window.size-default_size)/2,default_size)
 	var state: Dictionary = _store.read_layout(_key,fallback,minimum,screens) if _store != null else {"rect":fallback,"maximized":false}
+	if login_mode:
+		var extent := default_size
+		if not screens.is_empty():
+			var screen := screens[clampi(_window.current_screen,0,screens.size()-1)]
+			extent = Vector2i(mini(extent.x,screen.size.x),mini(extent.y,screen.size.y))
+		state.rect.size = extent
+		state.maximized = false
+		minimum = extent
 	_window.mode = Window.MODE_WINDOWED
 	_window.min_size = minimum
 	_window.size = state.rect.size

@@ -15,7 +15,7 @@ const SCENES := {
 		"root":"ModelPurposeCard","type":"PanelContainer","setup":"setup","unique":["PurposeTitle","Enabled","Requirements","Description","Fields","provider","base_url","api_key","ModelName","Json","Thinking","Params","CopySlot","CopyButton","TestButton","CardStatus"]
 	},
 	"res://scenes/ui/account_view.tscn": {
-		"root":"AccountForm","type":"PanelContainer","setup":"setup","unique":["Form","AccountMode","Server","Username","Password","Confirm","Invite","Remember","Submit","Cancel","Identity","Logout","Status","Logs"]
+		"root":"AccountForm","type":"PanelContainer","setup":"setup","unique":["Form","Server","Username","Password","Confirm","Invite","Remember","AutoLogin","Submit","Cancel","Status","Logs","MenuButton","CloseLogin","RegisterLink","ResetLink","HistoryButton","ServerDialog","SavedLogin","UsePassword"]
 	},
 	"res://scenes/main.tscn": {
 		"root":"AgentLuo","type":"Control","setup":"setup","unique":["Split","Center","AccountForm","LogProblem","ExitDialog"],
@@ -66,7 +66,7 @@ const SCENES := {
 }
 # Semantic requirements stay attached to public controls, independent of nesting.
 const PROPERTIES := {
-	"account_view": {"%Username":{"secret":false},"%Password":{"secret":true},"%Confirm":{"secret":true},"%Invite":{"secret":true},"%Submit":{"text":"登录"},"%Cancel":{"text":"取消请求"},"%Logout":{"text":"退出登录"},"%Logs":{"text":"打开日志"}},
+	"account_view": {"%Username":{"secret":false},"%Password":{"secret":true},"%Confirm":{"secret":true},"%Invite":{"secret":true},"%Submit":{"text":"登录"},"%Cancel":{"text":"取消请求"},"%RegisterLink":{"text":"注册账号"},"%ResetLink":{"text":"忘记密码"},"%Logs":{"text":"日志"}},
 	"model_purpose_card": {"%api_key":{"secret":true},"%Enabled":{"text":"使用自己的 API Key"}},
 	"preferences_page": {"%PersonalityField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%CustomContextField":{"wrap_mode":TextEdit.LINE_WRAPPING_BOUNDARY},"%Reload":{"text":"重新加载"}},
 	"log_window": {"%Text":{"selection_enabled":true},"%Picker":{"file_mode":FileDialog.FILE_MODE_SAVE_FILE,"access":FileDialog.ACCESS_FILESYSTEM,"use_native_dialog":true}},

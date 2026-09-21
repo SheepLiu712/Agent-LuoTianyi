@@ -22,11 +22,8 @@ func _run() -> void:
 	app.setup(account,directory+"/layout.cfg")
 	root.add_child(app)
 	await process_frame
-	var buttons: Array = app.find_children("*","Button",true,false)
-	var open_button: Button
-	for button in buttons:
-		if button.text == "打开日志":
-			open_button = button
+	app.get_node("%AccountForm").get_node("%MenuButton").pressed.emit()
+	var open_button: Button = app.get_node("%AccountForm").get_node("%Logs")
 	check(open_button != null,"login has open logs action")
 	if open_button != null:
 		open_button.pressed.emit()

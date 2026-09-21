@@ -62,18 +62,19 @@ func _run() -> void:
 	app.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await process_frame
 	await process_frame
-	check(root.size == Vector2i(660, 800) and root.min_size == Vector2i(480, 640), "login window is compact")
+	check(root.size == Vector2i(480, 690) and root.min_size == Vector2i(480, 690), "login window is fixed and compact")
 	check(app.find_children("*", "TextEdit", true, false).is_empty(), "signed-out window has no chat composer")
 	check(app.find_children("*", "Node2D", true, false).is_empty(), "first login does not create or render avatar")
-	check(field(app, "服务器地址").text == DEFAULT_SERVER, "default server visible in account form")
+	check(field(app, "服务器地址").text == DEFAULT_SERVER and not field(app, "服务器地址").is_visible_in_tree(), "default server is available only in its editor")
 	var endpoint := OS.get_environment("GODOT_TEST_SERVER")
-	field(app, "服务器地址").text = endpoint
+	await session.set_server(endpoint)
 	field(app, "用户名").text = "reject"
 	field(app, "密码").text = "synthetic-password"
 	button(app, "登录")
 	check(await until(func(): return field(app, "密码").editable), "failed login settles")
-	check(session.get_session().is_empty() and root.size == Vector2i(660, 800), "failed login stays compact")
+	check(session.get_session().is_empty() and root.size == Vector2i(480, 690), "failed login stays compact")
 	field(app, "用户名").text = "test"
+	field(app, "密码").text = "synthetic-password"
 	button(app, "登录")
 	check(await until(func(): return not session.get_session().is_empty()), "real account login succeeds")
 	await process_frame
@@ -92,7 +93,7 @@ func _run() -> void:
 	var windowed := root.mode == Window.MODE_WINDOWED
 	button(app, "退出登录")
 	await process_frame
-	check(root.size == Vector2i(660, 800) and field(app, "服务器地址").is_visible_in_tree(), "logout returns compact account window")
+	check(root.size == Vector2i(480, 690) and field(app, "用户名").is_visible_in_tree(), "logout returns compact account window")
 	check(app.find_children("*", "Node2D", true, false).is_empty(), "logout releases avatar drawing resources")
 	field(app, "密码").text = "synthetic-password"
 	button(app, "登录")

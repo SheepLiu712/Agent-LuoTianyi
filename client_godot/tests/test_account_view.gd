@@ -53,17 +53,16 @@ func run() -> void:
 	var password := input(view, "密码")
 	check(server != null and username != null and password != null, "account form is available")
 	if server != null and username != null and password != null:
-		server.text = OS.get_environment("GODOT_TEST_SERVER")
+		await session.set_server(OS.get_environment("GODOT_TEST_SERVER"))
 		username.text = "reject"
 		password.text = "synthetic-password"
 		press(view, "登录")
 		await create_timer(0.4).timeout
 		check(has_text(view, "用户名或密码错误"), "authentication rejection visible")
 		check(password.text == "synthetic-password", "failed login preserves draft")
-		var mode = view.find_child("AccountMode",true,false)
-		mode.set_selected_id("register")
-		mode.activated.emit("register")
+		view.select_mode("register")
 		username.text = "test"
+		password.text = "synthetic-password"
 		input(view, "确认密码").text = "different"
 		input(view, "邀请码").text = "invite-test"
 		press(view, "注册")
@@ -77,8 +76,8 @@ func run() -> void:
 		press(view, "登录")
 		await create_timer(0.4).timeout
 		check(not session.get_session().is_empty() and password.text.is_empty(), "successful login publishes session and clears password")
-		press(view, "退出登录")
-		check(session.get_session().is_empty() and server.is_visible_in_tree(), "logout restores account form")
+		session.logout()
+		check(session.get_session().is_empty() and username.is_visible_in_tree(), "logout restores account form")
 	view.queue_free()
 	session.queue_free()
 	await process_frame

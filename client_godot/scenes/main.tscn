@@ -22,6 +22,8 @@ theme = ExtResource("2_theme")
 script = ExtResource("1_app")
 
 [node name="Background" type="ColorRect" parent="."]
+unique_name_in_owner = true
+visible = false
 anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
@@ -89,25 +91,15 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 dragger_visibility = 2
 
-[node name="Center" type="MarginContainer" parent="Workspace/Split"]
+[node name="Center" type="MarginContainer" parent="."]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(440,0)
-size_flags_horizontal = 3
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 16
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 16
+anchor_right = 1.0
+anchor_bottom = 1.0
 
-[node name="AccountScroll" type="ScrollContainer" parent="Workspace/Split/Center"]
-horizontal_scroll_mode = 0
-
-[node name="LoginCenter" type="CenterContainer" parent="Workspace/Split/Center/AccountScroll"]
+[node name="AccountForm" parent="Center" instance=ExtResource("3_account")]
+unique_name_in_owner = true
 size_flags_horizontal = 3
 size_flags_vertical = 3
-
-[node name="AccountForm" parent="Workspace/Split/Center/AccountScroll/LoginCenter" instance=ExtResource("3_account")]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(390,0)
 
 [node name="LogProblem" type="Label" parent="."]
 mouse_filter = 2
@@ -133,5 +125,18 @@ unique_name_in_owner = true
 visible = false
 text = "凭据保护组件缺失，请重新解压完整程序。"
 
+[node name="AccountStorageWarning" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+mouse_filter = 2
+anchor_right = 1.0
+offset_left = 120.0
+offset_top = 3.0
+offset_right = -24.0
+autowrap_mode = 3
+theme_type_variation = &"AccountNotice"
+text = "本次登录有效，但本地登录状态未能保存或清除。下次可能需要输入密码，请查看日志。"
+
 [node name="Chrome" parent="." instance=ExtResource("WindowChrome")]
 unique_name_in_owner = true
+login_mode = true

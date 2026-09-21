@@ -1,134 +1,400 @@
 [gd_scene load_steps=6 format=3]
-
-[ext_resource type="Script" path="res://src/ui/account_view.gd" id="1_script"]
-[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="2_dropdown"]
-[ext_resource type="Theme" path="res://theme/app_theme.tres" id="3_theme"]
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
-content_margin_left = 28.0
-content_margin_top = 28.0
-content_margin_right = 28.0
-content_margin_bottom = 28.0
-bg_color = Color(1, 1, 1, 1)
-corner_radius_top_left = 18
-corner_radius_top_right = 18
-corner_radius_bottom_right = 18
-corner_radius_bottom_left = 18
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_field"]
-content_margin_left = 10.0
-content_margin_top = 10.0
-content_margin_right = 10.0
-content_margin_bottom = 10.0
-bg_color = Color(0.9411765, 0.9607843, 0.96862745, 1)
-corner_radius_top_left = 8
-corner_radius_top_right = 8
-corner_radius_bottom_right = 8
-corner_radius_bottom_left = 8
+[ext_resource type="Script" path="res://src/ui/account_view.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="Texture2D" path="res://assets/ui/login_portrait.png" id="portrait"]
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="decision"]
+[sub_resource type="InputEventKey" id="EscapeKey"]
+keycode = 4194305
+[sub_resource type="Shortcut" id="EscapeShortcut"]
+events = [SubResource("EscapeKey")]
 
 [node name="AccountForm" type="PanelContainer"]
-theme = ExtResource("3_theme")
-theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
-script = ExtResource("1_script")
+theme = ExtResource("theme")
+theme_type_variation = &"LoginSurface"
+script = ExtResource("script")
 
 [node name="Column" type="VBoxContainer" parent="."]
-theme_override_constants/separation = 14
+theme_override_constants/separation = 0
 
-[node name="Title" type="Label" parent="Column"]
-theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
-theme_override_font_sizes/font_size = 25
-text = "和天依再见面"
+[node name="Header" type="HBoxContainer" parent="Column"]
+custom_minimum_size = Vector2(0,56)
+theme_override_constants/separation = 8
 
-[node name="Subtitle" type="Label" parent="Column"]
-theme_override_colors/font_color = Color(0.5019608, 0.60784316, 0.654902, 1)
-theme_override_font_sizes/font_size = 13
-text = "登录你的账户，继续这段陪伴。"
+[node name="DragArea" type="Control" parent="Column/Header"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+mouse_filter = 0
 
-[node name="BackToLogin" type="Button" parent="Column"]
+[node name="MenuButton" type="Button" parent="Column/Header"]
+size_flags_vertical = 4
+unique_name_in_owner = true
+text = "≡"
+theme_type_variation = &"LoginIcon"
+custom_minimum_size = Vector2(48,48)
+toggle_mode = true
+tooltip_text = "菜单"
+
+[node name="CloseLogin" type="Button" parent="Column/Header"]
+size_flags_vertical = 4
+unique_name_in_owner = true
+text = "×"
+theme_type_variation = &"LoginIcon"
+custom_minimum_size = Vector2(48,48)
+tooltip_text = "退出应用"
+
+[node name="RightInset" type="Control" parent="Column/Header"]
+custom_minimum_size = Vector2(8,0)
+mouse_filter = 2
+
+[node name="BodyScroll" type="ScrollContainer" parent="Column"]
+unique_name_in_owner = true
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="FormMargin" type="MarginContainer" parent="Column/BodyScroll"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_type_variation = &"LoginFormMargin"
+
+[node name="Body" type="VBoxContainer" parent="Column/BodyScroll/FormMargin"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 0
+
+[node name="AvatarBlock" type="CenterContainer" parent="Column/BodyScroll/FormMargin/Body"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0,148)
+
+[node name="AvatarFrame" type="PanelContainer" parent="Column/BodyScroll/FormMargin/Body/AvatarBlock"]
+custom_minimum_size = Vector2(128,128)
+theme_type_variation = &"LoginAvatar"
+
+[node name="Portrait" type="TextureRect" parent="Column/BodyScroll/FormMargin/Body/AvatarBlock/AvatarFrame"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(112,112)
+texture = ExtResource("portrait")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="AvatarGap" type="Control" parent="Column/BodyScroll/FormMargin/Body"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0,20)
+mouse_filter = 2
+
+[node name="BackToLogin" type="Button" parent="Column/BodyScroll/FormMargin/Body"]
+unique_name_in_owner = true
+text = "← 返回登录"
+theme_type_variation = &"LoginLink"
+custom_minimum_size = Vector2(0,40)
+visible = false
+size_flags_horizontal = 0
+shortcut = SubResource("EscapeShortcut")
+
+[node name="ModeTitle" type="Label" parent="Column/BodyScroll/FormMargin/Body"]
 unique_name_in_owner = true
 visible = false
-text = "← 返回登录"
-flat = true
-size_flags_horizontal = 0
+text = "注册账号"
+horizontal_alignment = 1
+custom_minimum_size = Vector2(0,44)
 
-[node name="Form" type="VBoxContainer" parent="Column"]
+[node name="ModeHelp" type="Label" parent="Column/BodyScroll/FormMargin/Body"]
 unique_name_in_owner = true
-theme_override_constants/separation = 10
+visible = false
+text = "通过已使用的邀请码重置账号和密码"
+autowrap_mode = 3
+horizontal_alignment = 1
+custom_minimum_size = Vector2(0,40)
 
-[node name="AccountMode" parent="Column/Form" instance=ExtResource("2_dropdown")]
+[node name="Form" type="VBoxContainer" parent="Column/BodyScroll/FormMargin/Body"]
 unique_name_in_owner = true
+theme_override_constants/separation = 18
 
-[node name="Server" type="LineEdit" parent="Column/Form"]
-unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
-tooltip_text = "例如 https://你的服务器地址；本地联调可使用 http://127.0.0.1:端口"
-theme_override_styles/normal = SubResource("StyleBoxFlat_field")
-placeholder_text = "服务器地址"
+[node name="UsernameFrame" type="PanelContainer" parent="Column/BodyScroll/FormMargin/Body/Form"]
+theme_type_variation = &"LoginFieldPanel"
+custom_minimum_size = Vector2(0,60)
 
-[node name="Username" type="LineEdit" parent="Column/Form"]
+[node name="UsernameRow" type="HBoxContainer" parent="Column/BodyScroll/FormMargin/Body/Form/UsernameFrame"]
+theme_override_constants/separation = 0
+
+[node name="Username" type="LineEdit" parent="Column/BodyScroll/FormMargin/Body/Form/UsernameFrame/UsernameRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
-tooltip_text = "用户名"
-theme_override_styles/normal = SubResource("StyleBoxFlat_field")
+size_flags_horizontal = 3
+theme_type_variation = &"LoginAccountField"
 placeholder_text = "用户名"
+alignment = 1
+tooltip_text = "用户名"
 
-[node name="Password" type="LineEdit" parent="Column/Form"]
+[node name="HistoryButton" type="Button" parent="Column/BodyScroll/FormMargin/Body/Form/UsernameFrame/UsernameRow"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 40)
-tooltip_text = "密码"
-theme_override_styles/normal = SubResource("StyleBoxFlat_field")
+text = "⌄"
+theme_type_variation = &"LoginIcon"
+custom_minimum_size = Vector2(32,36)
+tooltip_text = "选择本机账号"
+
+[node name="Password" type="LineEdit" parent="Column/BodyScroll/FormMargin/Body/Form"]
+unique_name_in_owner = true
+visible = true
+custom_minimum_size = Vector2(0,60)
+theme_type_variation = &"LoginField"
+alignment = 1
 placeholder_text = "密码"
 secret = true
+secret_character = "●"
 
-[node name="Confirm" type="LineEdit" parent="Column/Form"]
+[node name="Confirm" type="LineEdit" parent="Column/BodyScroll/FormMargin/Body/Form"]
 unique_name_in_owner = true
 visible = false
-custom_minimum_size = Vector2(0, 40)
-tooltip_text = "确认密码"
-theme_override_styles/normal = SubResource("StyleBoxFlat_field")
+custom_minimum_size = Vector2(0,60)
+theme_type_variation = &"LoginField"
+alignment = 1
 placeholder_text = "确认密码"
 secret = true
+secret_character = "●"
 
-[node name="Invite" type="LineEdit" parent="Column/Form"]
+[node name="Invite" type="LineEdit" parent="Column/BodyScroll/FormMargin/Body/Form"]
 unique_name_in_owner = true
 visible = false
-custom_minimum_size = Vector2(0, 40)
-tooltip_text = "邀请码"
-theme_override_styles/normal = SubResource("StyleBoxFlat_field")
+custom_minimum_size = Vector2(0,60)
+theme_type_variation = &"LoginField"
+alignment = 1
 placeholder_text = "邀请码"
 secret = true
+secret_character = "●"
 
-[node name="Remember" type="CheckBox" parent="Column/Form"]
+[node name="SavedLogin" type="VBoxContainer" parent="Column/BodyScroll/FormMargin/Body/Form"]
 unique_name_in_owner = true
-text = "下次自动登录"
+visible = false
+custom_minimum_size = Vector2(0,60)
+theme_override_constants/separation = 0
 
-[node name="Submit" type="Button" parent="Column/Form"]
+[node name="SavedState" type="Label" parent="Column/BodyScroll/FormMargin/Body/Form/SavedLogin"]
+text = "已记住登录状态"
+horizontal_alignment = 1
+custom_minimum_size = Vector2(0,28)
+
+[node name="UsePassword" type="Button" parent="Column/BodyScroll/FormMargin/Body/Form/SavedLogin"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0, 42)
-theme_type_variation = &"PrimaryButton"
+text = "使用密码登录"
+theme_type_variation = &"LoginLink"
+custom_minimum_size = Vector2(0,32)
+
+[node name="Options" type="HBoxContainer" parent="Column/BodyScroll/FormMargin/Body/Form"]
+unique_name_in_owner = true
+theme_override_constants/separation = 0
+
+[node name="AutoLogin" type="CheckBox" parent="Column/BodyScroll/FormMargin/Body/Form/Options"]
+unique_name_in_owner = true
+text = "自动登录"
+theme_type_variation = &"LoginCheck"
+custom_minimum_size = Vector2(0,36)
+
+[node name="Gap" type="Control" parent="Column/BodyScroll/FormMargin/Body/Form/Options"]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="Remember" type="CheckBox" parent="Column/BodyScroll/FormMargin/Body/Form/Options"]
+unique_name_in_owner = true
+text = "记住登录状态"
+theme_type_variation = &"LoginCheck"
+custom_minimum_size = Vector2(0,36)
+
+[node name="SubmitMargin" type="MarginContainer" parent="Column/BodyScroll/FormMargin/Body/Form"]
+theme_override_constants/margin_top = 20
+
+[node name="Submit" type="Button" parent="Column/BodyScroll/FormMargin/Body/Form/SubmitMargin"]
+unique_name_in_owner = true
 text = "登录"
+theme_type_variation = &"LoginPrimary"
+custom_minimum_size = Vector2(0,60)
 
-[node name="Cancel" type="Button" parent="Column"]
+[node name="StatusArea" type="VBoxContainer" parent="Column/BodyScroll/FormMargin/Body"]
+custom_minimum_size = Vector2(0,72)
+theme_override_constants/separation = 4
+
+[node name="Status" type="Label" parent="Column/BodyScroll/FormMargin/Body/StatusArea"]
 unique_name_in_owner = true
-visible = false
+text = ""
+autowrap_mode = 3
+horizontal_alignment = 1
+
+[node name="Cancel" type="Button" parent="Column/BodyScroll/FormMargin/Body/StatusArea"]
+unique_name_in_owner = true
 text = "取消请求"
+theme_type_variation = &"LoginLink"
+custom_minimum_size = Vector2(0,32)
+visible = false
+shortcut = SubResource("EscapeShortcut")
 
-[node name="Identity" type="Label" parent="Column"]
+[node name="FeedbackAddress" type="LineEdit" parent="Column/BodyScroll/FormMargin/Body/StatusArea"]
 unique_name_in_owner = true
 visible = false
-autowrap_mode = 3
+editable = false
+text = "https://github.com/SheepLiu712/Agent-LuoTianyi"
+theme_type_variation = &"LoginServerField"
 
-[node name="Logout" type="Button" parent="Column"]
+[node name="FooterMargin" type="MarginContainer" parent="Column"]
+theme_override_constants/margin_bottom = 28
+theme_override_constants/margin_top = 8
+
+[node name="Footer" type="HBoxContainer" parent="Column/FooterMargin"]
 unique_name_in_owner = true
+alignment = 1
+theme_override_constants/separation = 8
+
+[node name="ResetLink" type="Button" parent="Column/FooterMargin/Footer"]
+unique_name_in_owner = true
+text = "忘记密码"
+theme_type_variation = &"LoginLink"
+custom_minimum_size = Vector2(0,40)
+
+[node name="Divider" type="Label" parent="Column/FooterMargin/Footer"]
+text = "|"
+
+[node name="RegisterLink" type="Button" parent="Column/FooterMargin/Footer"]
+unique_name_in_owner = true
+text = "注册账号"
+theme_type_variation = &"LoginLink"
+custom_minimum_size = Vector2(0,40)
+
+[node name="MenuPopup" type="PopupPanel" parent="."]
+unique_name_in_owner = true
+size = Vector2i(168,152)
 visible = false
-text = "退出登录"
+transparent_bg = true
+borderless = true
+unresizable = true
+theme = ExtResource("theme")
 
-[node name="Status" type="Label" parent="Column"]
+[node name="MenuItems" type="VBoxContainer" parent="MenuPopup"]
+theme_override_constants/separation = 2
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 160.0
+offset_bottom = 144.0
+
+[node name="SetServer" type="Button" parent="MenuPopup/MenuItems"]
 unique_name_in_owner = true
-theme_override_colors/font_color = Color(0.3764706, 0.49803922, 0.5529412, 1)
-theme_override_font_sizes/font_size = 13
+text = "设置服务器"
+theme_type_variation = &"LoginMenuItem"
+custom_minimum_size = Vector2(0,42)
+alignment = 0
+
+[node name="Logs" type="Button" parent="MenuPopup/MenuItems"]
+unique_name_in_owner = true
+text = "日志"
+theme_type_variation = &"LoginMenuItem"
+custom_minimum_size = Vector2(0,42)
+alignment = 0
+
+[node name="Feedback" type="Button" parent="MenuPopup/MenuItems"]
+unique_name_in_owner = true
+text = "问题反馈"
+theme_type_variation = &"LoginMenuItem"
+custom_minimum_size = Vector2(0,42)
+alignment = 0
+
+[node name="HistoryPopup" type="PopupPanel" parent="."]
+unique_name_in_owner = true
+size = Vector2i(360,220)
+visible = false
+transparent_bg = true
+borderless = true
+unresizable = true
+theme = ExtResource("theme")
+
+[node name="HistoryScroll" type="ScrollContainer" parent="HistoryPopup"]
+horizontal_scroll_mode = 0
+offset_left = 8.0
+offset_top = 8.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_right = -8.0
+offset_bottom = -8.0
+
+[node name="HistoryRows" type="VBoxContainer" parent="HistoryPopup/HistoryScroll"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_constants/separation = 4
+
+[node name="HistoryEmpty" type="Label" parent="HistoryPopup/HistoryScroll/HistoryRows"]
+unique_name_in_owner = true
+text = "暂无本机账号记录"
+horizontal_alignment = 1
+
+[node name="ServerDialog" type="Window" parent="."]
+unique_name_in_owner = true
+title = "设置服务器"
+size = Vector2i(416,280)
+min_size = Vector2i(320,260)
+visible = false
+borderless = true
+unresizable = true
+transparent_bg = true
+transient = true
+exclusive = true
+theme = ExtResource("theme")
+
+[node name="Panel" type="PanelContainer" parent="ServerDialog"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_type_variation = &"LoginDialog"
+
+[node name="ServerColumn" type="VBoxContainer" parent="ServerDialog/Panel"]
+theme_override_constants/separation = 12
+
+[node name="ServerHeader" type="HBoxContainer" parent="ServerDialog/Panel/ServerColumn"]
+
+[node name="ServerTitle" type="Label" parent="ServerDialog/Panel/ServerColumn/ServerHeader"]
+text = "设置服务器"
+size_flags_horizontal = 3
+
+[node name="ServerClose" type="Button" parent="ServerDialog/Panel/ServerColumn/ServerHeader"]
+unique_name_in_owner = true
+text = "×"
+theme_type_variation = &"LoginIcon"
+custom_minimum_size = Vector2(0,36)
+
+[node name="Server" type="LineEdit" parent="ServerDialog/Panel/ServerColumn"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0,48)
+theme_type_variation = &"LoginServerField"
+placeholder_text = "服务器地址"
+tooltip_text = "验证成功后才使用新服务器"
+
+[node name="ServerStatus" type="Label" parent="ServerDialog/Panel/ServerColumn"]
+unique_name_in_owner = true
 autowrap_mode = 3
+size_flags_vertical = 3
 
-[node name="Logs" type="Button" parent="Column"]
+[node name="ServerActions" type="HBoxContainer" parent="ServerDialog/Panel/ServerColumn"]
+theme_override_constants/separation = 8
+
+[node name="ServerDefault" type="Button" parent="ServerDialog/Panel/ServerColumn/ServerActions"]
 unique_name_in_owner = true
-text = "打开日志"
+text = "恢复默认"
+theme_type_variation = &"LoginLink"
+custom_minimum_size = Vector2(0,36)
+
+[node name="Gap" type="Control" parent="ServerDialog/Panel/ServerColumn/ServerActions"]
+size_flags_horizontal = 3
+
+[node name="ServerCancel" type="Button" parent="ServerDialog/Panel/ServerColumn/ServerActions"]
+unique_name_in_owner = true
+text = "取消"
+theme_type_variation = &"LoginLink"
+custom_minimum_size = Vector2(0,36)
+shortcut = SubResource("EscapeShortcut")
+
+[node name="ServerSave" type="Button" parent="ServerDialog/Panel/ServerColumn/ServerActions"]
+unique_name_in_owner = true
+text = "验证并保存"
+theme_type_variation = &"PrimaryButton"
+custom_minimum_size = Vector2(0,36)
+
+[node name="RemoveAccountDialog" parent="." instance=ExtResource("decision")]
+unique_name_in_owner = true
+title = "移除本机账号记录"
+ok_button_text = "移除记录"
+cancel_button_text = "取消"
+size = Vector2i(400,240)
+min_size = Vector2i(320,220)

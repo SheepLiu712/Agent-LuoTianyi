@@ -39,17 +39,19 @@ var _models: Node
 var _images_presenter: Node
 var _executor: Node
 var _dynamics: Node
+var _external_links: RefCounted
 
-func setup(account_session: Node = null, layout_path: String = "user://window_layout.cfg") -> void:
+func setup(account_session: Node = null, layout_path: String = "user://window_layout.cfg", external_links: RefCounted = null) -> void:
 	_session = account_session
 	_layout_path = layout_path
+	_external_links = external_links
 
 
 func _ready() -> void:
 	get_window().title = preload("res://src/release_info.gd").title()
-	get_window().min_size = Vector2i(480,640)
-	get_window().size = Vector2i(660,800)
-	_chrome.configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),"compact")
+	get_window().min_size = Vector2i(360,480)
+	get_window().size = Vector2i(480,690)
+	_chrome.configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),"login")
 	if "--preview" in OS.get_cmdline_user_args():
 		_log_problem.queue_free()
 		_exit_dialog.queue_free()
@@ -59,7 +61,7 @@ func _ready() -> void:
 		preview.offset_top = 0
 		move_child(_chrome,get_child_count()-1)
 		return
-	_resize_window(Vector2i(660, 800), Vector2i(480, 640))
+	_resize_window(Vector2i(480, 690), Vector2i(360, 480))
 	_images_presenter = preload("res://src/ui/image_presenter.gd").new(_layout_path.get_base_dir().path_join("window-geometry.cfg"))
 	add_child(_images_presenter)
 	_log = Log.new("user://logs" if _layout_path == "user://window_layout.cfg" else _layout_path.get_base_dir().path_join("logs"))
@@ -77,6 +79,10 @@ func _ready() -> void:
 	_exit_dialog.canceled.connect(func():
 		_exit_action = ""
 		_return_exit_dialog())
+	_account_form.log_requested.connect(_log_window.open)
+	_account_form.exit_requested.connect(func(): _request_close("exit"))
+	if _external_links == null: _external_links = preload("res://src/platform/godot_external_link_opener.gd").new()
+	_account_form.feedback_requested.connect(func(): _account_form.report_feedback_result(_external_links.open_project()))
 	if not ClassDB.class_exists("WindowsSecurity"):
 		%SecurityError.show()
 		push_error("WindowsSecurity extension missing")
@@ -114,7 +120,6 @@ func _ready() -> void:
 			_avatar.avatar.set_mouth_openness(value))
 	_split.show()
 	_account_form.setup(_session)
-	_account_form.log_requested.connect(_log_window.open)
 	_session.changed.connect(_account_changed)
 	var settings := ConfigFile.new()
 	if settings.load(_layout_path) == OK:
@@ -154,7 +159,8 @@ func _ready() -> void:
 		_session.resume()
 
 func _account_changed(state: Dictionary) -> void:
-	_log.record("account_state", {"phase":state.phase,"code":state.code})
+	_log.record("account_state", {"phase":state.phase,"code":"STORAGE_ERROR" if state.storage_error else state.code})
+	%AccountStorageWarning.visible = state.storage_error and state.phase == "signed_in"
 	if state.phase == "signed_in":
 		_center.hide()
 		%Navigation.show()
@@ -202,7 +208,7 @@ func _account_changed(state: Dictionary) -> void:
 				_expanded_size = get_window().size
 			_expanded = false
 			_split.dragger_visibility = SplitContainer.DRAGGER_HIDDEN_COLLAPSED
-			_resize_window(Vector2i(660, 800), Vector2i(480, 640))
+			_resize_window(Vector2i(480, 690), Vector2i(360, 480))
 	_resize_split()
 
 func _resize_split() -> void:
@@ -210,7 +216,10 @@ func _resize_split() -> void:
 		_split.split_offset = roundi(_split.size.x * _ratio)
 
 func _resize_window(target: Vector2i, minimum: Vector2i) -> void:
-	_chrome.select_layout("expanded" if _expanded or "--preview" in OS.get_cmdline_user_args() else "compact",target,minimum)
+	var expanded := _expanded or "--preview" in OS.get_cmdline_user_args()
+	_chrome.set_login_mode(not expanded)
+	%Background.visible = expanded
+	_chrome.select_layout("expanded" if expanded else "login",target,minimum)
 
 func _exit_tree() -> void:
 	if _engine_log != null:
@@ -279,6 +288,7 @@ func _finish_close(action: String) -> void:
 	_close_windows()
 	_exit_action = ""
 	if action == "exit":
+		if is_instance_valid(_session): _session.cancel()
 		get_tree().quit()
 	else:
 		_session.logout()

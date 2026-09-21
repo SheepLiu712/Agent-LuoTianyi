@@ -22,6 +22,8 @@ AccountForm.setup(session)保留注入；公开log_requested、feedback_requeste
 
 菜单只有设置服务器/日志/问题反馈，锚定右上按钮下方，点击外部/Esc收起。服务器弹层验证保存/恢复默认/取消，Esc取消在途验证且不能提交迟到结果，遮罩不关闭。请求期间禁用重复提交/改服务器，日志和反馈可用。浏览器服务ExternalLinkOpener.open_project()->Error由GodotExternalLinkOpener实现OS.shell_open固定项目URL；UI只发信号，不直接调用OS，失败显示可选择的URL与说明，不将浏览器能力放入StorageService。
 
+Application.setup(account_session=null,layout_path="user://window_layout.cfg",external_links=null)增加可选外部链接能力注入；未注入时组装Godot实现。AccountForm.report_feedback_result(error:Error)仅展示失败状态及场景预置的可复制项目地址，成功不增加弹窗。
+
 纯白实底、无渐变，主题蓝色操作与焦点，透明桌面窗口+StyleBoxFlat圆角外轮廓，无裁切遮罩/Windows圆角插件。默认480×690，固定尺寸、空白标题区域可用Window.start_drag拖动，双击不最大化。小屏将窗口限制到可用区，表单滚动、顶部控制可达。静态头像由既有Live2D默认睁眼头部导出为资源，不在登录页运行模型。
 
 WindowChrome.set_login_mode(enabled)管理未登录的borderless/transparent/transparent_bg/unresizable及恢复系统窗框；main场景/项目启动默认登录形态，避免首帧系统窗框/黑底。登录布局单独保存位置，不恢复旧compact最大化或尺寸；登录后恢复expanded几何与原最小尺寸，退出恢复登录形态。日志仍为独立系统窗口并跨登录保留。所有固定UI在tscn，样式在主题，脚本仅行为/布局绑定。
