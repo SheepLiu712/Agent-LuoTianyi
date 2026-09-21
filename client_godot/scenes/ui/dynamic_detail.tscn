@@ -84,11 +84,6 @@ text = "发送评论"
 
 [node name="CommentSep" type="HSeparator" parent="Margin/Column"]
 
-[node name="CommentTitle" type="Label" parent="Margin/Column"]
-theme_override_colors/font_color = Color(0.505882382, 0.53725493, 0.568627477, 1)
-theme_override_font_sizes/font_size = 15
-text = "评论 · 仅你与天依可见"
-
 [node name="Comments" type="VBoxContainer" parent="Margin/Column"]
 unique_name_in_owner = true
 theme_override_constants/separation = 16
@@ -119,6 +114,7 @@ theme_type_variation = &"PrimaryButton"
 text = "发送回复"
 
 [node name="Status" type="Label" parent="Margin/Column"]
+visible = false
 unique_name_in_owner = true
 autowrap_mode = 3
 

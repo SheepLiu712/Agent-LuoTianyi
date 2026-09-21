@@ -285,7 +285,6 @@ const SCENES := {
 			"Margin/Column/Notice": {"text": "此动态不可评论。"},
 			"Margin/Column/CommentDraft": {"placeholder_text": "写下你的留言…","custom_minimum_size": Vector2(0,90),"wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},
 			"Margin/Column/Send": {"text": "发送评论","size_flags_horizontal": Control.SIZE_SHRINK_END,"theme_type_variation": &"PrimaryButton"},
-			"Margin/Column/CommentTitle": {"text": "评论 · 仅你与天依可见","theme_override_font_sizes/font_size": 15,"theme_override_colors/font_color": Color("818991")},
 			"Margin/Column/Comments": {"theme_override_constants/separation": 16},
 			"Margin/Column/ReplyBox": {"visible": false},
 			"Margin/Column/ReplyBox/ReplyDraft": {"placeholder_text": "写下回复…","custom_minimum_size": Vector2(0,90),"wrap_mode": TextEdit.LINE_WRAPPING_BOUNDARY},

@@ -76,9 +76,9 @@ func update_comments() -> void:
 	_load.text = "加载中…" if state.busy else ("加载更多评论" if state.loaded else "加载评论")
 	if state.code not in ["","OK"]:
 		_load.text = "重试评论"
-		_status.text = "评论加载失败（%s），已保留现有内容。"%state.code
+		_set_status("评论加载失败（%s），已保留现有内容。"%state.code)
 	elif _status.text.begins_with("评论加载失败"):
-		_status.text = ""
+		_set_status("")
 	var names := {}
 	for item in state.items: names[item.id] = item.author_name
 	for index in state.items.size():
@@ -121,9 +121,13 @@ func _submit(reply: bool) -> void:
 		if reply:
 			_parent = ""
 			_place_reply()
-		_status.text = "评论已发送。"
+		_set_status("")
 	else:
-		_status.text = "发送结果不确定，请先刷新核实；草稿已保留。" if result.code in ["TIMEOUT","NETWORK_ERROR"] else "评论失败，草稿已保留（%s）。"%result.code
+		_set_status("发送结果不确定，请先刷新核实；草稿已保留。" if result.code in ["TIMEOUT","NETWORK_ERROR"] else "评论失败，草稿已保留（%s）。"%result.code)
+
+func _set_status(text: String) -> void:
+	_status.text = text
+	_status.visible = not text.is_empty()
 
 func refresh_comments() -> void:
 	await _controller.refresh_comments(_post.id)
