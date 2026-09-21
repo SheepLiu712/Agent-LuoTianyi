@@ -23,6 +23,7 @@ Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_voice_replay.gd') 'voice-replay'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--quit-after', '3', '--', '--preview') 'offline-preview'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_system_message_presentation.gd') 'system-message-presentation'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_bubble_sizing.gd') 'bubble-sizing'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/application/test_default_user_storage.gd') 'default-user-storage'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_window_chrome.gd') 'window-chrome'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_image_window.gd') 'image-window'

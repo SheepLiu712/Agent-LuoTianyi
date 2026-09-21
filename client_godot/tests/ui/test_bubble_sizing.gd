@@ -39,6 +39,9 @@ func run() -> void:
 	own.update_message(update)
 	await settle()
 	check(is_equal_approx(own.get_node("%Bubble").size.x,own_width), "long delivery status does not widen the text panel")
+	own.set_audio_state({"available":true,"code":"","status":"idle","blocked":false,"duration":2.4,"position":0.0,"waveform":PackedFloat32Array([.1,.5,.9])})
+	await settle()
+	check(is_equal_approx(own.get_node("%Bubble").size.x,own_width) and own.find_child("MessageAudio",true,false).size.x > own_width, "audio remains usable without widening short text")
 	short.get_node("%Text").select_all()
 	short.update_message(message("好呀"))
 	await settle()
@@ -61,6 +64,11 @@ func run() -> void:
 	check(short.get_node("%Bubble").size.x > short_width, "font changes recompute natural width")
 	if DisplayServer.get_name() != "headless":
 		DirAccess.make_dir_recursive_absolute("res://artifacts/release-013")
+		var y := 12.0
+		for view in [short,medium,long,own]:
+			view.position.y = y
+			y += view.get_combined_minimum_size().y + 16
+		root.size.y = ceili(y)
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png("res://artifacts/release-013/text-bubbles.png")
 	for view in [short,medium,long,own]: view.queue_free()

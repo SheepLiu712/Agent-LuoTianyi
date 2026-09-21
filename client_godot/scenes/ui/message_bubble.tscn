@@ -54,37 +54,42 @@ expand_mode = 1
 stretch_mode = 5
 material = SubResource("ShaderMaterial_avatar")
 
-[node name="Body" type="VBoxContainer" parent="."]
+[node name="Body" type="Control" parent="."]
 unique_name_in_owner = true
+size_flags_horizontal = 3
+
+[node name="MessageColumn" type="VBoxContainer" parent="Body"]
+unique_name_in_owner = true
+anchor_right = 1.0
 theme_override_constants/separation = 5
 
-[node name="Bubble" type="PanelContainer" parent="Body"]
+[node name="Bubble" type="PanelContainer" parent="Body/MessageColumn"]
 unique_name_in_owner = true
 theme_override_styles/panel = SubResource("StyleBoxFlat_other")
 
-[node name="Content" type="VBoxContainer" parent="Body/Bubble"]
+[node name="Content" type="VBoxContainer" parent="Body/MessageColumn/Bubble"]
 unique_name_in_owner = true
 
-[node name="Text" type="RichTextLabel" parent="Body/Bubble/Content"]
+[node name="Text" type="RichTextLabel" parent="Body/MessageColumn/Bubble/Content"]
 unique_name_in_owner = true
 fit_content = true
 selection_enabled = true
 scroll_active = false
 autowrap_mode = 3
 
-[node name="HistoryPicture" type="TextureRect" parent="Body/Bubble/Content"]
+[node name="HistoryPicture" type="TextureRect" parent="Body/MessageColumn/Bubble/Content"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(0, 135)
 expand_mode = 1
 stretch_mode = 5
 
-[node name="ImageButton" type="Button" parent="Body/Bubble/Content"]
+[node name="ImageButton" type="Button" parent="Body/MessageColumn/Bubble/Content"]
 unique_name_in_owner = true
 visible = false
 text = "加载图片…"
 
-[node name="Picture" type="TextureRect" parent="Body/Bubble/Content"]
+[node name="Picture" type="TextureRect" parent="Body/MessageColumn/Bubble/Content"]
 unique_name_in_owner = true
 visible = false
 custom_minimum_size = Vector2(0, 135)
@@ -92,7 +97,8 @@ mouse_default_cursor_shape = 2
 expand_mode = 1
 stretch_mode = 5
 
-[node name="Caption" type="Label" parent="Body"]
+[node name="Caption" type="Label" parent="Body/MessageColumn"]
+autowrap_mode = 3
 unique_name_in_owner = true
 visible = false
 theme_override_font_sizes/font_size = 11
