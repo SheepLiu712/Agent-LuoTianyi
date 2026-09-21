@@ -20,6 +20,16 @@ class DependencyBoundaries(unittest.TestCase):
                 hits.append(f'{path.relative_to(ROOT)}: {match.group()}')
         self.assertEqual(hits, [], '\n'.join(hits))
 
+    def assert_no_imports(self, paths, prefix):
+        # Check both quote styles so a boundary cannot be bypassed by changing
+        # load("...") to load('...').
+        pattern = rf"(?:load|preload)\s*\(\s*['\"]{re.escape(prefix)}"
+        hits = []
+        for path in paths:
+            if re.search(pattern, path.read_text(encoding='utf-8')):
+                hits.append(str(path.relative_to(ROOT)))
+        self.assertEqual(hits, [], '\n'.join(hits))
+
     def test_configuration_is_not_ui_or_framing_io(self):
         paths = [ROOT / 'src/application.gd', ROOT / 'src/avatar/avatar_framing.gd']
         paths += list((ROOT / 'src/ui').glob('*.gd')) + list((ROOT / 'src/preview').glob('*.gd'))
@@ -50,19 +60,24 @@ class DependencyBoundaries(unittest.TestCase):
 
     def test_storage_does_not_import_network(self):
         for path in (ROOT/'src/storage').rglob('*.gd'):
-            self.assertNotRegex(path.read_text(encoding='utf-8'), r'(?:load|preload)\("res://src/network/')
+            self.assert_no_imports([path], 'res://src/network/')
 
     def test_production_does_not_import_preview(self):
         for directory in ['ui', 'session', 'network', 'media', 'storage', 'avatar']:
             for path in (ROOT/'src'/directory).rglob('*.gd'):
-                self.assertNotRegex(path.read_text(encoding='utf-8'), r'(?:load|preload)\("res://src/preview/')
+                self.assert_no_imports([path], 'res://src/preview/')
 
     def test_consumers_do_not_create_concrete_platform_or_storage(self):
         for directory in ['domain', 'network', 'ui', 'session', 'avatar', 'preview', 'application']:
             for path in (ROOT/'src'/directory).rglob('*.gd'):
                 source = path.read_text(encoding='utf-8')
-                self.assertNotRegex(source, r'(?:load|preload)\("res://src/platform/(?:godot_|windows_|native_|desktop_|cubism_)')
-                self.assertNotRegex(source, r'(?:load|preload)\("res://src/storage/(?:godot_|history_images|audio_cache|model_store|credential_store|reading_position)')
+                self.assert_no_imports([path], 'res://src/platform/godot_')
+                self.assert_no_imports([path], 'res://src/platform/windows_')
+                self.assert_no_imports([path], 'res://src/platform/native_')
+                self.assert_no_imports([path], 'res://src/platform/desktop_')
+                self.assert_no_imports([path], 'res://src/platform/cubism_')
+                for storage_name in ['godot_', 'history_images', 'audio_cache', 'model_store', 'credential_store', 'reading_position']:
+                    self.assert_no_imports([path], 'res://src/storage/' + storage_name)
                 self.assert_no_calls([path], r'\bWindow\s*\.\s*MODE_|\bImage\s*\.\s*load_from_file')
 
 
