@@ -9,8 +9,11 @@ const PHASES := "saving first_loading first_failed idle connecting authenticatin
 const EXPLANATIONS := {"dynamics_state":"动态读取与写入状态", "settings_models":"模型配置状态", "settings_model_execution":"模型请求执行", "settings_preference":"相处偏好操作", "client_started":"客户端启动", "client_stopped":"客户端正常退出", "history_state":"历史同步状态", "account_state":"账户操作状态", "message_queued":"消息已进入发送队列", "message_delivery":"消息投递状态", "engine_error":"引擎报告异常（原始内容不写入日志）", "connection_state":"聊天连接状态变化", "reply_received":"收到回复分片", "system_error":"操作出现错误", "cache_committed":"完整语音已保存", "cache_error":"语音未能保存", "cache_cleared":"已执行语音缓存清理", "audio_received":"收到音频数据", "audio_format":"已识别音频格式", "audio_decoded":"音频解码完成", "audio_receive_finished":"音频接收结束", "audio_error":"音频处理失败", "audio_underrun":"音频缓冲暂时不足", "audio_playback_started":"开始播放在线语音", "audio_playback_finished":"在线语音播放结束", "replay_preempted":"在线语音打断本地重放", "replay_finished":"重放结束", "replay_started":"开始重放", "replay_paused":"重放已暂停", "replay_resumed":"继续重放", "replay_stopped":"重放已停止"}
 var _environment: Resource
 var _directory: String
+var _max_bytes: int
+var _max_entries: int
 var _token := RegEx.new()
 var _id_pattern := RegEx.new()
+var _metadata_tmp_pattern := RegEx.new()
 var _id: String
 var _entries: Array[Dictionary] = []
 var _started := Time.get_ticks_msec()
@@ -18,11 +21,19 @@ var _meta: Dictionary
 var _initialized := false
 var _closed := false
 
-func _init(directory: String = "user://logs", _legacy_max_bytes: int = 2097152, environment: Resource = null) -> void:
-	_environment = environment if environment != null else preload("res://src/platform/godot_runtime_environment.gd").new()
+func _init(directory: String = "user://logs", max_bytes: int = 2097152, environment: Variant = null, max_entries: int = 10000) -> void:
+	_environment = environment if environment is Resource else preload("res://src/platform/godot_runtime_environment.gd").new()
+	# Keep the historical three-argument form intact while allowing tests and
+	# constrained deployments to provide an explicit per-run entry limit.
+	if environment is int:
+		_max_entries = max(0, int(environment))
+	else:
+		_max_entries = max(0, max_entries)
+	_max_bytes = max(0, max_bytes)
 	_directory = directory
 	_token.compile("^[a-zA-Z0-9_]{1,64}$")
 	_id_pattern.compile("^[0-9]{20}_[0-9]+_[a-f0-9]{12}$")
+	_metadata_tmp_pattern.compile("^[0-9]{20}_[0-9]+_[a-f0-9]{12}\\.json\\.tmp$")
 	_id = "%020d_%d_%s" % [int(Time.get_unix_time_from_system() * 1000000), _environment.process_id(), Crypto.new().generate_random_bytes(6).hex_encode()]
 	_meta = {"id":_id, "started":Time.get_datetime_string_from_system(true) + "Z", "pid":_environment.process_id(), "closed":false, "complete":true,
 		"release":Release.get_info(), "engine":Engine.get_version_info().string, "os":_environment.os_name(), "architecture":Engine.get_architecture_name()}
@@ -45,20 +56,36 @@ func record(event: String, fields: Dictionary = {}) -> Error:
 		entry.module = fields.module
 	if fields.get("reply_id") is String:
 		entry.reply_id = fields.reply_id.sha256_text().left(12)
-	_entries.append(entry)
-	var error := _ensure_directory()
+	var serialized := JSON.stringify(entry).to_utf8_buffer()
+	var error := ERR_OUT_OF_MEMORY if _entries.size() >= _max_entries else OK
+	var limit_rejected := error == ERR_OUT_OF_MEMORY
+	if not limit_rejected:
+		error = _ensure_directory()
 	if error == OK:
 		var path := _path(_id, ".jsonl")
-		var file := FileAccess.open(path, FileAccess.READ_WRITE if FileAccess.file_exists(path) else FileAccess.WRITE)
-		if file == null:
-			error = FileAccess.get_open_error()
+		var existing_bytes := FileAccess.get_file_as_bytes(path).size() if FileAccess.file_exists(path) else 0
+		if _entries.size() >= _max_entries or existing_bytes + serialized.size() + 1 > _max_bytes:
+			error = ERR_OUT_OF_MEMORY
+			_meta.complete = false
+			limit_rejected = true
 		else:
-			file.seek_end()
-			file.store_line(JSON.stringify(entry))
-			file.flush()
-			error = file.get_error()
-			file.close()
+			var file := FileAccess.open(path, FileAccess.READ_WRITE if FileAccess.file_exists(path) else FileAccess.WRITE)
+			if file == null:
+				error = FileAccess.get_open_error()
+			else:
+				file.seek_end()
+				file.store_buffer(serialized)
+				file.store_8(10)
+				file.flush()
+				error = file.get_error()
+				file.close()
+	if error == OK:
+		_entries.append(entry)
 	if error != OK:
+		# Preserve the in-memory view on ordinary disk failures. Limit failures
+		# are deliberately rejected so the current run remains bounded.
+		if not limit_rejected:
+			_entries.append(entry)
 		_meta.complete = false
 		_save_metadata()
 		write_failed.emit(error)
@@ -159,6 +186,12 @@ func _ensure_directory() -> Error:
 	var error := DirAccess.make_dir_recursive_absolute(_directory)
 	if error != OK:
 		return error
+	for name in DirAccess.get_files_at(_directory):
+		if _metadata_tmp_pattern.search(name) == null:
+			continue
+		error = DirAccess.remove_absolute(_directory.path_join(name))
+		if error != OK:
+			return error
 	error = _save_metadata()
 	if error == OK:
 		_initialized = true
@@ -166,13 +199,18 @@ func _ensure_directory() -> Error:
 	return error
 
 func _save_metadata() -> Error:
-	var file := FileAccess.open(_path(_id, ".json"), FileAccess.WRITE)
+	var temporary := _path(_id, ".json.tmp")
+	var file := FileAccess.open(temporary, FileAccess.WRITE)
 	if file == null:
 		return FileAccess.get_open_error()
 	file.store_string(JSON.stringify(_meta))
 	file.flush()
 	var error := file.get_error()
 	file.close()
+	if error == OK:
+		error = DirAccess.rename_absolute(temporary, _path(_id, ".json"))
+	if error != OK and FileAccess.file_exists(temporary):
+		DirAccess.remove_absolute(temporary)
 	return error
 
 func _prune() -> void:

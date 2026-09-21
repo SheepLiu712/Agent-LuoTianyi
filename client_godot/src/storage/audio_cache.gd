@@ -33,11 +33,47 @@ func set_scope(server: String, username: String) -> Error:
 	if result != OK:
 		return result
 	_directory = target
+	result = _cleanup_incomplete_and_orphans()
+	if result != OK:
+		_directory = ""
+	return result
+
+func _cleanup_incomplete_and_orphans() -> Error:
+	var pairs: Dictionary = {}
 	for file in DirAccess.get_files_at(_directory):
-		if _owned.search(file) != null and (file.ends_with(".part") or file.ends_with(".tmp")):
-			result = DirAccess.remove_absolute(_directory.path_join(file))
+		if _owned.search(file) == null:
+			continue
+		var extension := ""
+		if file.ends_with(".part"):
+			extension = ".part"
+		elif file.ends_with(".json.tmp"):
+			extension = ".json.tmp"
+		elif file.ends_with(".audio"):
+			extension = ".audio"
+		elif file.ends_with(".json"):
+			extension = ".json"
+		if extension.is_empty():
+			continue
+		var stem := file.trim_suffix(extension)
+		if not pairs.has(stem):
+			pairs[stem] = {}
+		pairs[stem][extension] = file
+	for stem in pairs:
+		var files: Dictionary = pairs[stem]
+		var remove_names: Array[String] = []
+		for extension in [".part", ".json.tmp"]:
+			if files.has(extension):
+				remove_names.append(files[extension])
+		var has_audio := files.has(".audio")
+		var has_metadata := files.has(".json")
+		if has_audio != has_metadata:
+			if has_audio:
+				remove_names.append(files[".audio"])
+			if has_metadata:
+				remove_names.append(files[".json"])
+		for file in remove_names:
+			var result := DirAccess.remove_absolute(_directory.path_join(file))
 			if result != OK:
-				_directory = ""
 				return result
 	return OK
 

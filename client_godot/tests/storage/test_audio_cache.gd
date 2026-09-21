@@ -60,6 +60,19 @@ func test_persistence() -> void:
 	restored.set_scope("https://other.invalid", "B")
 	check(restored.lookup("one").is_empty(), "server isolation")
 	restored.set_scope("https://test.invalid", "B")
+	# A crash can leave only one half of a committed pair. Re-opening the
+	# scope must remove those orphans.
+	var orphan_scope := root.path_join(JSON.stringify(["https://test.invalid","B"]).sha256_text())
+	var orphan_audio := orphan_scope.path_join("orphan-audio".sha256_text() + ".audio")
+	var orphan_json := orphan_scope.path_join("orphan-json".sha256_text() + ".json")
+	var orphan_audio_file := FileAccess.open(orphan_audio, FileAccess.WRITE)
+	orphan_audio_file.store_8(1)
+	orphan_audio_file.close()
+	var orphan_json_file := FileAccess.open(orphan_json, FileAccess.WRITE)
+	orphan_json_file.store_string("{}")
+	orphan_json_file.close()
+	check(restored.set_scope("https://test.invalid", "B") == OK, "scope reopens with orphan cleanup")
+	check(not FileAccess.file_exists(orphan_audio) and not FileAccess.file_exists(orphan_json), "orphan audio/metadata halves removed")
 	entry = restored.lookup("one")
 	if not entry.is_empty():
 		var file := FileAccess.open(entry.path,FileAccess.WRITE)

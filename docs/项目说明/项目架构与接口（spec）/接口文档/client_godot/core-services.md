@@ -60,7 +60,7 @@ Application 在正常入口最早创建 ClientLog 并记录 client_started，退
 
 ## ClientLog 启动归档契约（替代旧三文件轮换）
 
-构造 `ClientLog(directory="user://logs", legacy_max_bytes=2097152, environment=null)`，第二参数仅保留调用兼容、无截断效果。`record(event, fields={}) -> Error` 保留原有白名单与 UUID 哈希；新增安全 level/module 枚举及数字 count/status/index/duration_ms。事件限字母数字下划线，不能传正文；phase/code 只保留已知状态与错误码，未知值改为 UNKNOWN，不把任意服务器字符串当安全错误码。每条包含时间、相对启动毫秒、级别、模块、事件及固定中文说明；持续 flush。首次记录创建唯一 run ID（时间/PID/随机），当前内存记录不会因写盘失败丢失；`write_failed(error)` 明确报告失败，`entry_added(entry)` 供实时视图。
+构造 `ClientLog(directory="user://logs", max_bytes=2097152, environment=null, max_entries=10000)`；每次启动的 JSONL 记录总字节数不得超过 `max_bytes`，记录数不得超过 `max_entries`，超限返回 `ERR_OUT_OF_MEMORY`、保留已有记录并标记该运行不完整。`record(event, fields={}) -> Error` 保留原有白名单与 UUID 哈希；新增安全 level/module 枚举及数字 count/status/index/duration_ms。事件限字母数字下划线，不能传正文；phase/code 只保留已知状态与错误码，未知值改为 UNKNOWN，不把任意服务器字符串当安全错误码。每条包含时间、相对启动毫秒、级别、模块、事件及固定中文说明；持续 flush。首次记录创建唯一 run ID（时间/PID/随机），当前内存记录不会因普通写盘失败丢失；`write_failed(error)` 明确报告失败，`entry_added(entry)` 供实时视图。运行元数据通过 `<run-id>.json.tmp` 写入并原子改名为 `<run-id>.json`，启动时清理目录中残留的元数据临时文件。
 
 `get_run_id() -> String`、`list_runs() -> Array[Dictionary]`（id/started/pid/closed/active/complete）和 `read_entries(run_id="") -> Array[Dictionary]` 供日志窗口；空 ID 表示当前启动、返回副本。历史 ID 仅从归档目录枚举、安全校验，不接受路径。未知/损坏行跳过且 complete=false，不将损坏文件当完整。`finish()` 幂等写 client_stopped 并更新关闭标记；关闭后 record 拒绝。无结束标記的退出被标识未正常结束。
 
@@ -95,7 +95,7 @@ Application 在正常入口最早创建 ClientLog 并记录 client_started，退
 - `lookup(id) -> Dictionary`：无可用缓存返回空字典；成功返回 path/sample_rate/channels/bits/frames/duration/waveform/bytes。元数据版本、范围、文件存在性和长度经验证，path 由本地命名构造，不信任文件中的路径。不开启或修改聊天正文存储。
 - `abort(id)` / `abort_all()`：关闭并移除在途临时文件，幂等；`clear() -> Error` 删除当前范围内自有缓存文件，部分失败返回 Error，不跨账户、不递归删除任意文件。会话层负责先停止重放与阻止当前流再次缓存。
 
-完整缓存仅 clear 手动删除，无容量/时间淘汰。set_scope 清理本目录未完成 .part/.json.tmp，不清理完整文件。记录 cache_committed/cache_error/cache_cleared，不记录账户或原始 UUID。验证独立临时目录中的跨实例恢复、隔离、未完成不可见、非法提交、文件损坏/不可写、清理及波形。
+完整缓存仅 clear 手动删除，无容量/时间淘汰。set_scope 清理本目录未完成 .part/.json.tmp，并删除缺少另一半的孤儿 `.audio`/`.json` 文件，但保留完整配对文件。记录 cache_committed/cache_error/cache_cleared，不记录账户或原始 UUID。验证独立临时目录中的跨实例恢复、隔离、未完成不可见、孤儿配对清理、非法提交、文件损坏/不可写、清理及波形。
 
 每次 append 上限 8 MiB，WAV 前置头累计上限 1 MiB，未读解码队列上限 128 MiB，单流时长上限 30 分钟。无效数值拒绝；未知辅助 chunk 按声明长度及偶数字节填充跳过。已知 data 结束后的尾部元数据不作为 PCM。每个 UUID 一个解码器，不猜测无头 PCM 中的采样率变化。
 
@@ -158,11 +158,13 @@ Application 在正常入口最早创建 ClientLog 并记录 client_started，退
 
 位置 `client_godot/native/windows_security.cpp`，GDExtension 类 `WindowsSecurity`，继承 RefCounted；由 Windows 能力实现创建，经 PasswordEncryption/SecretProtection 向调用者提供统一接口。只使用 Windows CNG/Crypt32，不启动外部进程，不访问磁盘或网络。
 
-所有调用返回 `{ok: bool, data: PackedByteArray, error: String}`；成功 error 为空，失败 data 为空，错误码不包含输入内容。
+WindowsSecurity 的原生调用返回 `{ok: bool, data: PackedByteArray, error: String, stage: String, native_code: int}`；成功 error 为空、native_code 为 0，失败 data 为空，错误码不包含输入内容。Windows 实现固定填充 `stage="native_code"`，native_code 为对应 Win32/CNG 失败码（输入校验失败时为 0），便于诊断而不泄露输入。
 
 - `encrypt_password(public_key_pem: String, password: String) -> Dictionary`：接收服务端 `/auth/public_key` 的 SubjectPublicKeyInfo PEM 和 UTF-8 密码，返回 RSA-OAEP 密文字节；OAEP 与 MGF1 均 SHA256，label 为空。调用方用 Base64 编码填入既有 password/new_password 字段。RSA 至少 2048 位，最大 8192 位；公钥字符串不超过 16 KiB；明文字节超出当前 OAEP 上限时返回 `INVALID_INPUT`。无效公钥 `INVALID_KEY`；CNG 失败 `ENCRYPTION_FAILED`。不使用 SHA1 降级。
 - `protect_secret(plain: PackedByteArray, scope: PackedByteArray) -> Dictionary`：当前 Windows 用户 DPAPI，禁止交互提示；scope 为规范化服务器/账户标识派生的额外熵，不能跨 scope 解密。plain 与 scope 各 1～65536 字节；失败 `INVALID_INPUT` 或 `PROTECT_FAILED`。
 - `unprotect_secret(cipher: PackedByteArray, scope: PackedByteArray) -> Dictionary`：相同用户及 scope 下恢复字节；篡改、不同 scope 或不同用户返回 `UNPROTECT_FAILED`，绝不降级为明文。cipher 最大 128 KiB，scope 同上。
+
+`windows_secret_protection.gd` 在 `WindowsSecurity` DLL 未加载或实例化失败时返回 `SECURITY_UNAVAILABLE`（data 为空），不调用通用失败实现或明文降级；认证调用方据此禁止登录，日志与反馈能力仍可用。
 
 C++ 临时明文缓冲在释放前清零；Windows 句柄和 DPAPI 输出无论成功失败都释放。GDScript 调用者仍负责及时释放自己的密码/密钥引用。此接口只转换字节，原子落盘、自动登录策略和 API key 明文选择由后续存储/业务接口承担。
 
@@ -182,7 +184,7 @@ C++ 临时明文缓冲在释放前清零；Windows 句柄和 DPAPI 输出无论�
 | auto_login | username,token | POST /auth/auto_login；非空 user_id/login_token/message_token |
 
 - 每次密码请求重新获取公钥，避免服务端重启/切换服务器后缓存错钥；不裁剪用户名或密码。只发送当前操作需要的字段，不透传未知字段。密码由原生层加密，再 Base64 编码。
-- 地址首尾空白和尾部 `/` 去除；无协议补 https；scheme/host 小写、默认端口去除，保留可选路径前缀。仅接受 http/https、合法端口、域名/IPv4/方括号 IPv6；拒绝 userinfo、query、fragment、反斜杠及路径内空白。无效返回空串。TLS 始终校验证书，不跟随重定向。
+- 地址首尾空白和尾部 `/` 去除；无协议补 https；scheme/host 小写、默认端口去除，保留可选路径前缀。仅接受 http/https、合法端口、域名/IPv4/方括号 IPv6；由纯数字标签组成的点分主机名必须是合法 IPv4，非法数字 IP 直接拒绝；拒绝 userinfo、query、fragment、反斜杠及路径内空白。无效返回空串。TLS 始终校验证书，不跟随重定向。
 - HTTPRequest 异步执行，单响应最多 64 KiB；JSON 非对象、缺字段、字段类型错误或 token 为空均返回 INVALID_RESPONSE。鉴权 401 返回 AUTH_REJECTED，其他非 200 为 HTTP_ERROR；公钥响应非成功为 PUBLIC_KEY_ERROR（取消/超时保持原错误）。无自动重试，防止账户写操作重复。
 - cancel() 可重复；取消公共密钥获取或提交后都结束等待，并使迟到回调不再建立会话。退出树也取消。此模块不保存 token、不触发 WebSocket、不写日志或本地配置。
 
@@ -230,9 +232,10 @@ ACK 超时 10 秒，图片选择/取消为 5 秒。持久消息首发后最多�
 
 ## ChatSession 与 ChatView：真实文字聊天
 
-`src/session/chat_session.gd`（Node）由真实 WebSocketTransport 构造并拥有其生命周期；应用在账户 signed_in 时调用 `start(account_session) -> Error`，退出或账户切换调用 `stop()`。UI 使用下列接口，不发送协议包：
+`src/session/chat_session.gd`（Node）由真实 WebSocketTransport 构造并拥有其生命周期；应用在账户 signed_in 时调用 `start(account_session) -> Error`，退出或账户切换调用 `stop()`。启动先验证 transport，再建立媒体/历史/模型作用域；任一失败会逆序停止并清理本次账户。缺少可选音频缓存不阻断文字聊天。UI 使用下列接口，不发送协议包：
 
 - `send_text(text) -> String`：拒绝纯空白/未登录，正常保留正文，发送 user_text，llm_mode.types 默认空列表；返回网络的稳定 ID，立即产生 user 消息，不等待回复。重连期间可排队；无法入队返回空串且保留输入。
+- `set_typing(active, text_length=0) -> Error`：ready 时发送瞬态 `user_typing`，payload 仅含 0～4096 的 `text_length`，不进入可靠队列；断线、发送正文和 stop 会清除 typing 状态。未 ready 时只更新本地状态，不阻断聊天。
 - `get_messages() -> Array[Dictionary]` 返回深拷贝；消息含 id/role/text/status/code（queued/sending/sent/failed/uncertain 或 received）。投递状态更新原消息，不增加气泡；DELIVERY_UNCERTAIN 明确显示“无法确认送达”，不提供换 ID 自动重发。
 - `get_state() -> Dictionary` 与 `state_changed(state)` 提供连接 phase/code、thinking 和系统提示；`changed` 表示消息内容/状态改变；`expression_requested(command)` 由应用连接 AvatarDriver。stop 关闭传输并清空消息、回复 UUID 和账户状态，不泄漏给下一账户。
 - 接收 agent_state_changed 的 thinking/waiting；agent_message 按 payload.uuid 合并。重复分片不增加气泡，非空 text 更新同 UUID 的正文，空尾包不清文字；display_in_chat=false 不出气泡，is_ephemeral 保留显示语义且禁止该流持久缓存。
