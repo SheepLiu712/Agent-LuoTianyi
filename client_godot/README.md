@@ -2,6 +2,8 @@
 
 功能基线：`79ae2c0`。当前为独立开发工程，实际完成范围见 [进度](../docs/开发进程文档/开发进度/Godot-Windows客户端.md)。尚未替换旧端，不读取旧端凭据。
 
+现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；2026-09-21整理后保留53个行为测试，旧文件迁移关系以该入口和测试契约为准。
+
 ## 构建
 
 使用 Godot **4.7.1 standard / Windows x64**。通过 Godot 的 Manage Export Templates 安装同版本模板，或将锁定模板包中的 Windows x64 文件和 version.txt 放入 `%APPDATA%/Godot/export_templates/4.7.1.stable/`。依赖来源和 SHA-256 见 `dependencies.lock.json`。
