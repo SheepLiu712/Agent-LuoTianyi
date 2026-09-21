@@ -1,4 +1,6 @@
 ﻿extends Window
+@export var files: Resource = preload("res://src/platform/file_interaction.gd").new()
+@export var input_service: Resource = preload("res://src/platform/input_service.gd").new()
 var _logger: RefCounted
 @onready var _runs = %RunsDropdown
 @onready var _level = %LevelDropdown
@@ -45,13 +47,14 @@ func _initialize() -> void:
 		if value:
 			_text.scroll_to_line(maxi(0,_text.get_line_count()-1)))
 	_text.scroll_following = true
-	_copy.pressed.connect(func(): DisplayServer.clipboard_set(_text.get_parsed_text()))
+	_copy.pressed.connect(func():
+		if input_service.copy_text(_text.get_parsed_text()) != OK: _status.text = "复制失败：剪贴板不可用。")
+	files.bind(_picker)
 	_export.pressed.connect(func():
 		_export_id = _selected
-		_picker.current_file = "agentluo-diagnostics-" + _selected + ".zip"
-		_picker.popup_centered_ratio(.7))
-	_picker.file_selected.connect(func(path):
-		var error: Error = _logger.export_run(_export_id,path)
+		files.select_export("agentluo-diagnostics-" + _selected + ".zip"))
+	files.export_selected.connect(func(target):
+		var error: Error = target.export_log(_logger,_export_id)
 		_status.text = "所选启动的完整诊断已导出（未上传）。" if error == OK else "导出失败（%s），请选择尚不存在且可写的文件。" % error)
 	close_requested.connect(hide)
 	_logger.entry_added.connect(func(entry):
@@ -98,3 +101,6 @@ func _append(entry: Dictionary) -> void:
 		metrics.erase(key)
 	_text.add_text("%s [%s] [%s] %s · %s %s\n" % [entry.time,entry.level,entry.module,entry.message,entry.event,JSON.stringify(metrics)])
 	_text.pop()
+
+func _exit_tree() -> void:
+	files.cancel()

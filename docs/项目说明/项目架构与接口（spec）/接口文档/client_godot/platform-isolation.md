@@ -13,7 +13,7 @@ UI → 应用协调/业务控制器 → 注入的能力接口 → Godot/平台�
 - SettingsStore：读取/写入指定逻辑设置组，返回 data 与 Error；实现保留旧 ConfigFile 格式及不同配置文件边界。UI只传设置值，不操作文件或平台路径。
 - InputService：读取剪贴板图片、复制文本、查询 IME 合成状态；不可用返回空图片/明确 Error/false，不吞掉普通文本粘贴。控件自身 has_ime_text 仍同时参与防误发。
 - FileInteraction：由场景提供原生 FileDialog，实现连接其选择/取消；图片结果为 `{ok,code,bytes,mime}`，失败/取消不清已有附件。导出目的地为受控句柄，日志写入由句柄交给存储实现，不让 UI 处理平台路径。请求取消及旧账号回调不得更新新页面。
-- ReadStream：read(size)、get_length/get_position、close；关闭幂等。缓存提供流而不向播放器暴露 FileAccess。播放器停止、失败和切账号必须关闭流。
+- ReadStream：get_buffer(size)、get_length/get_position、close；关闭幂等。缓存提供流而不向播放器暴露 FileAccess。播放器停止、失败和切账号必须关闭流。
 - PasswordEncryption.encrypt_password 与 SecretProtection.protect_secret/unprotect_secret 沿用现有字节结果契约；Windows 实现委托既有 DLL，缺失返回错误，不自动降级。认证不可用禁止登录，日志/反馈仍可访问。
 - DecoderFactory.create_decoder 返回统一 decoder（append/finish/read_frames/get_status/get_amplitude/get_waveform）；缺失返回 null。在线和重放均使用工厂，缺失仍保留聊天正文并完成错误生命周期。
 - AvatarDriver 保留 load_character/load_avatar/apply_expression/play_motion/set_mouth_openness/set_gaze/hit_test/get_status；Cubism 子实现负责资源和原生对象，失败不替换已有模型。UI只依赖项目驱动语义。
@@ -46,3 +46,9 @@ AppearanceService、WorldService、DeviceService 相互独立。共同提供 get
 ## 验证
 
 四组默认检查、设置/登录/下拉/气泡/角色/原生窗口 GPU 验证建立前后基线；能力替换通过 Fake 外部实现验证，不 mock 内部实现步骤。检查旧配置与 scope 哈希兼容、取消/资源释放、账号隔离、缺失能力局部降级。架构检查验证禁止调用/依赖方向及删除路径无引用。纯迁移使用回归及静态证据，不伪造 Red。Android、真实系统 DPI、多屏及公共服务未经真机验证不得声称支持。
+
+### 当前注入调用形式
+
+- SettingsStore.load_settings/save_settings()->Error、get_value(section,key,fallback)、set_value(section,key,value)。GodotSettingsStore保留原配置格式，临时文件成功后替换，不改变旧路径。AvatarFraming(settings=null) 的 load_settings/save_settings 不再接收路径；DynamicsWindow.setup(controller,settings_store=null)；场景默认资源以 resource_local_to_scene 隔离。
+- FileInteraction.bind(FileDialog)、select_image()、select_export(filename)、cancel()；image_selected(result)、export_selected(target)、canceled。ImageAttachment删除from_file，仅校验from_bytes/from_image；文件读取在ImageFileReader。导出目标export_log(logger,run_id)->Error，平台路径封装在目标内。
+- ReplyAudio(logger=null,clock=Callable(),cache=null,decoder_factory=null)，未注入工厂明确解码不可用；正式组装与真实音频测试显式注入工厂。AudioCache.open_stream(id)->RefCounted仅打开本账号已完整校验缓存，失败null；播放器拥有并关闭流。

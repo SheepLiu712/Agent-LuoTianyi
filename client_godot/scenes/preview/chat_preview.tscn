@@ -1,9 +1,14 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=8 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/preview.tres" id="isolation_settings"]
 
 [ext_resource type="Script" path="res://src/preview/chat_preview.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/avatar/avatar_panel.tscn" id="3_avatar"]
 [ext_resource type="Script" path="res://src/ui/composer_input.gd" id="4_composer"]
+[ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
+[ext_resource type="Resource" path="res://resources/platform/files.tres" id="isolation_files"]
+
 
 [sub_resource type="StyleBoxFlat" id="SendStyle"]
 content_margin_left = 10.0
@@ -16,6 +21,8 @@ corner_radius_top_right = 9
 corner_radius_bottom_right = 9
 corner_radius_bottom_left = 9
 
+
+
 [node name="ChatPreview" type="Control"]
 layout_mode = 3
 anchors_preset = 15
@@ -25,6 +32,10 @@ grow_horizontal = 2
 grow_vertical = 2
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
+
+files = ExtResource("isolation_files")
+
+settings = ExtResource("isolation_settings")
 
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1
@@ -172,6 +183,8 @@ custom_minimum_size = Vector2(0, 92)
 placeholder_text = "想说些什么？"
 wrap_mode = 1
 script = ExtResource("4_composer")
+
+input_service = ExtResource("isolation_input_service")
 
 [node name="Footer" type="HBoxContainer" parent="Split/Margin/Column"]
 

@@ -26,7 +26,7 @@ func test_details() -> void:
 	var layout_path := "user://detail-test-%s.cfg" % Time.get_ticks_usec()
 	var scene: PackedScene = load("res://scenes/ui/dynamics_window.tscn")
 	var window = scene.instantiate()
-	window.setup(controller,layout_path)
+	window.setup(controller,preload("res://src/storage/godot_settings_store.gd").new(layout_path))
 	root.add_child(window)
 	window.open()
 	await process_frame
@@ -90,7 +90,7 @@ func test_details() -> void:
 	window.queue_free()
 	await process_frame
 	var restored = scene.instantiate()
-	restored.setup(controller,layout_path)
+	restored.setup(controller,preload("res://src/storage/godot_settings_store.gd").new(layout_path))
 	root.add_child(restored)
 	restored.open()
 	await process_frame
@@ -111,7 +111,7 @@ func test_publish_failure() -> void:
 	await controller.refresh()
 	var layout_path := "user://dynamics-window-test-%s.cfg"%Time.get_ticks_usec()
 	var window = load("res://scenes/ui/dynamics_window.tscn").instantiate()
-	window.setup(controller,layout_path)
+	window.setup(controller,preload("res://src/storage/godot_settings_store.gd").new(layout_path))
 	root.add_child(window)
 	window.open()
 	await process_frame

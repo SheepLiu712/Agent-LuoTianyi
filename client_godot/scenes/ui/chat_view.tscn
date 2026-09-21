@@ -1,4 +1,4 @@
-[gd_scene load_steps=9 format=3]
+[gd_scene load_steps=10 format=3]
 
 [ext_resource type="Script" path="res://src/ui/chat_view.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
@@ -6,14 +6,21 @@
 [ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
 [ext_resource type="Script" path="res://src/ui/composer_input.gd" id="5_composer"]
 [ext_resource type="PackedScene" path="res://scenes/ui/virtual_message_list.tscn" id="7_messages"]
+[ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
+[ext_resource type="Resource" path="res://resources/platform/files.tres" id="isolation_files"]
+
 
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
 shader = ExtResource("3_shader")
 
+
+
 [node name="ChatView" type="MarginContainer"]
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
+
+files = ExtResource("isolation_files")
 
 [node name="Background" type="ColorRect" parent="."]
 mouse_filter = 2
@@ -148,6 +155,8 @@ custom_minimum_size = Vector2(0, 96)
 placeholder_text = "想说些什么？"
 wrap_mode = 1
 script = ExtResource("5_composer")
+
+input_service = ExtResource("isolation_input_service")
 
 [node name="Footer" type="HBoxContainer" parent="Margin/Column"]
 

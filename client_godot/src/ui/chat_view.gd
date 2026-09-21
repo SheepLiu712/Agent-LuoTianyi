@@ -1,4 +1,5 @@
 extends MarginContainer
+@export var files: Resource = preload("res://src/platform/file_interaction.gd").new()
 signal image_requested(provider: Callable)
 signal attachment_requested(provider: Callable, confirm: Callable)
 signal attachment_cleared
@@ -51,9 +52,10 @@ func _initialize() -> void:
 		_attach(Attachment.from_image(image)))
 	%ImageButton.pressed.connect(func():
 		_session.set_image_selecting(true)
-		%ImagePicker.popup_centered())
-	%ImagePicker.file_selected.connect(func(path): _attach(Attachment.from_file(path)))
-	%ImagePicker.canceled.connect(func(): _session.set_image_selecting(false))
+		files.select_image())
+	files.bind(%ImagePicker)
+	files.image_selected.connect(func(result): _attach(Attachment.from_bytes(result.bytes,result.mime) if result.ok else result))
+	files.canceled.connect(func(): _session.set_image_selecting(false))
 	%PreviewImage.pressed.connect(_preview_attachment)
 	%RemoveImage.pressed.connect(func(): _clear_attachment(true))
 	_input.text_changed.connect(func():
@@ -206,3 +208,6 @@ func _image_action(id: String, action: String) -> void:
 			var texture: Texture2D = _session.preview_message_image(id)
 			if texture == null: _session.request_message_image(id,true)
 			return texture)
+
+func _exit_tree() -> void:
+	files.cancel()

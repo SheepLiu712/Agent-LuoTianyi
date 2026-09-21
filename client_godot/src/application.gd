@@ -110,7 +110,7 @@ func _ready() -> void:
 	var reading = preload("res://src/storage/reading_position.gd").new(_layout_path.get_base_dir().path_join("reading"))
 	var images = preload("res://src/storage/history_images.gd").new(_layout_path.get_base_dir().path_join("images"),_log)
 	_executor = preload("res://src/session/model_executor.gd").new(_models,_log)
-	_chat = Chat.new(Transport.new(), _log, Audio.new(_log,Callable(),cache),history,reading,images,_executor)
+	_chat = Chat.new(Transport.new(), _log, Audio.new(_log,Callable(),cache,preload("res://src/platform/native_decoder_factory.gd").new()),history,reading,images,_executor)
 	add_child(_chat)
 	_chat.expression_requested.connect(func(command):
 		if _avatar != null:
@@ -121,8 +121,8 @@ func _ready() -> void:
 	_split.show()
 	_account_form.setup(_session)
 	_session.changed.connect(_account_changed)
-	var settings := ConfigFile.new()
-	if settings.load(_layout_path) == OK:
+	var settings = preload("res://src/storage/godot_settings_store.gd").new(_layout_path)
+	if settings.load_settings() == OK:
 		var ratio: Variant = settings.get_value("layout", "ratio", 0.45)
 		if (ratio is float or ratio is int) and is_finite(float(ratio)):
 			_ratio = clampf(float(ratio), 0.3, 0.6)
@@ -133,14 +133,14 @@ func _ready() -> void:
 		var volume: float = _chat.get_audio_state().volume
 		if settings.get_value("audio", "volume", 1.0) != volume:
 			settings.set_value("audio", "volume", volume)
-			if settings.save(_layout_path) != OK:
+			if settings.save_settings() != OK:
 				push_warning("Audio volume save failed"))
 	_split.dragged.connect(func(_offset):
 		if not _expanded:
 			return
 		_ratio = _avatar.size.x / maxf(_split.size.x, 1)
 		settings.set_value("layout", "ratio", _ratio)
-		if settings.save(_layout_path) != OK:
+		if settings.save_settings() != OK:
 			push_warning("Window layout save failed"))
 	_split.resized.connect(_resize_split)
 	await get_tree().process_frame
@@ -243,7 +243,7 @@ func _open_settings(kind: String) -> void:
 		window.logout_requested.connect(func(): _request_close("logout"))
 	else:
 		window = preload("res://scenes/ui/dynamics_window.tscn").instantiate()
-		window.setup(_dynamics,_layout_path.get_base_dir().path_join("dynamics-window.cfg"))
+		window.setup(_dynamics,preload("res://src/storage/godot_settings_store.gd").new(_layout_path.get_base_dir().path_join("dynamics-window.cfg")))
 	_windows[key] = window
 	add_child(window)
 	window.get_node("%Chrome").configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),key)

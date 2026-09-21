@@ -3,19 +3,6 @@ const MAX_BYTES := 6 * 1024 * 1024 - 4096
 const MAX_SIDE := 8192
 const MAX_PIXELS := 16000000
 
-static func from_file(path: String) -> Dictionary:
-	var file := FileAccess.open(path, FileAccess.READ)
-	if file == null: return {"ok":false,"code":"IMAGE_READ_FAILED"}
-	if file.get_length() > MAX_BYTES: return {"ok":false,"code":"IMAGE_TOO_LARGE"}
-	var bytes := file.get_buffer(file.get_length())
-	var mime: String = {"png":"image/png","jpg":"image/jpeg","jpeg":"image/jpeg","webp":"image/webp","bmp":"image/bmp"}.get(path.get_extension().to_lower(), "")
-	if mime == "image/bmp":
-		if bytes.size() < 26 or bytes.slice(0,2).get_string_from_ascii() != "BM": return {"ok":false,"code":"INVALID_IMAGE"}
-		var image := Image.new()
-		if image.load_bmp_from_buffer(bytes) != OK: return {"ok":false,"code":"INVALID_IMAGE"}
-		return from_image(image)
-	return from_bytes(bytes, mime)
-
 static func from_image(image: Image) -> Dictionary:
 	if image == null or image.is_empty(): return {"ok":false,"code":"INVALID_IMAGE"}
 	if not _dimensions_ok(image): return {"ok":false,"code":"IMAGE_DIMENSIONS"}
@@ -27,6 +14,10 @@ static func from_bytes(bytes: PackedByteArray, mime: String) -> Dictionary:
 	var image := Image.new()
 	var error := ERR_INVALID_DATA
 	match mime:
+		"image/bmp":
+			if bytes.size() < 26 or bytes.slice(0,2).get_string_from_ascii() != "BM": return {"ok":false,"code":"INVALID_IMAGE"}
+			if image.load_bmp_from_buffer(bytes) != OK: return {"ok":false,"code":"INVALID_IMAGE"}
+			return from_image(image)
 		"image/png":
 			if bytes.slice(0,8).hex_encode() != "89504e470d0a1a0a": return {"ok":false,"code":"INVALID_IMAGE"}
 			var width := (int(bytes[16]) << 24) | (int(bytes[17]) << 16) | (int(bytes[18]) << 8) | int(bytes[19])

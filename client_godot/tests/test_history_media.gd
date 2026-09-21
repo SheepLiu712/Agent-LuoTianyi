@@ -59,7 +59,7 @@ func _run() -> void:
 	cache.append("history-119",bytes)
 	check(cache.commit("history-119",decoder.get_status(),decoder.get_waveform(24)) == OK,"seed actual complete voice cache")
 	var history = load("res://src/session/history_sync.gd").new(load("res://src/network/history_api.gd").new())
-	var chat = load("res://src/session/chat_session.gd").new(load("res://src/network/websocket_transport.gd").new(),null,load("res://src/media/reply_audio.gd").new(null,Callable(),cache),history,null,script.new(directory+"/chat_images"))
+	var chat = load("res://src/session/chat_session.gd").new(load("res://src/network/websocket_transport.gd").new(),null,load("res://tests/support/native_reply_audio.gd").new(null,Callable(),cache),history,null,script.new(directory+"/chat_images"))
 	root.add_child(chat)
 	chat.start(scope)
 	check(await until(func(): return chat.get_history_state().phase == "complete"),"media messages restored from real history")

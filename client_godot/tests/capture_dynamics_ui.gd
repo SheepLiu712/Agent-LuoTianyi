@@ -20,7 +20,7 @@ func _run() -> void:
 		quit(1)
 		return
 	var window = load(WINDOW_SCENE).instantiate()
-	window.setup(controller,path)
+	window.setup(controller,preload("res://src/storage/godot_settings_store.gd").new(path))
 	root.add_child(window)
 	window.open()
 	window.position = Vector2i(100,100)

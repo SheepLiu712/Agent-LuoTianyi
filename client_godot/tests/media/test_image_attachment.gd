@@ -1,4 +1,5 @@
 extends SceneTree
+const Files = preload("res://src/storage/image_file_reader.gd")
 const Attachment = preload("res://src/media/image_attachment.gd")
 var failures: Array[String] = []
 func check(ok: bool, label: String) -> void:
@@ -13,9 +14,9 @@ func _initialize() -> void:
 		check(result.ok and result.texture.get_size() == Vector2(32,24), "supported format previews: " + pair[1])
 	var file_path := "user://image-input-test.png"
 	image.save_png(file_path)
-	check(Attachment.from_file(file_path).ok, "file picker path decodes the actual image")
+	check(Files.read(file_path).ok, "file picker path decodes the actual image")
 	DirAccess.remove_absolute(file_path)
-	check(Attachment.from_file(file_path).code == "IMAGE_READ_FAILED", "missing file gives explicit failure")
+	check(Files.read(file_path).code == "IMAGE_READ_FAILED", "missing file gives explicit failure")
 	check(Attachment.from_image(image).mime == "image/png", "clipboard uses PNG wire data")
 	var big := PackedByteArray()
 	big.resize(6 * 1024 * 1024)

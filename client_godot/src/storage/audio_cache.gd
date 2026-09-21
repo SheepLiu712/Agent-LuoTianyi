@@ -219,3 +219,8 @@ func _error(id: String, result: Error) -> Error:
 	if _logger != null:
 		_logger.record("cache_error",{"reply_id":id,"code":"CACHE_WRITE_FAILED"})
 	return result
+
+func open_stream(id: String) -> RefCounted:
+	if lookup(id).is_empty(): return null
+	var file := FileAccess.open(_path(id,".audio"),FileAccess.READ)
+	return preload("res://src/storage/godot_read_stream.gd").new(file) if file != null else null

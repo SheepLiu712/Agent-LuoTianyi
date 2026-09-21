@@ -1,10 +1,13 @@
-[gd_scene load_steps=7 format=3]
+[gd_scene load_steps=9 format=3]
 
 [ext_resource type="Script" path="res://src/ui/log_window.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
-
 [ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
+[ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
+[ext_resource type="Resource" path="res://resources/platform/files.tres" id="isolation_files"]
+
+
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
 content_margin_left = 14.0
@@ -17,6 +20,8 @@ bg_color = Color(0.06666667, 0.09803922, 0.13725491, 1)
 font_names = PackedStringArray("Cascadia Mono", "Consolas", "Microsoft YaHei UI")
 
 
+
+
 [node name="LogWindow" type="Window"]
 size = Vector2i(960, 620)
 min_size = Vector2i(660, 400)
@@ -26,6 +31,10 @@ theme = ExtResource("2_theme")
 script = ExtResource("1_script")
 
 force_native = true
+
+input_service = ExtResource("isolation_input_service")
+
+files = ExtResource("isolation_files")
 
 [node name="Panel" type="PanelContainer" parent="."]
 offset_top = 0.0

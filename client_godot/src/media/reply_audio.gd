@@ -6,6 +6,7 @@ signal playback_finished(id: String, code: String)
 signal mouth_changed(value: float)
 signal state_changed(state: Dictionary)
 
+var _decoder_factory: Resource
 var _cache: RefCounted
 var _metadata: Dictionary = {}
 var _cache_errors: Dictionary = {}
@@ -24,7 +25,8 @@ var _volume := 1.0
 var _skips := 0
 var _invalid_base64 := RegEx.new()
 
-func _init(logger: RefCounted = null, clock: Callable = Callable(), cache: RefCounted = null) -> void:
+func _init(logger: RefCounted = null, clock: Callable = Callable(), cache: RefCounted = null, decoder_factory: Resource = null) -> void:
+	_decoder_factory = decoder_factory if decoder_factory != null else preload("res://src/media/decoder_factory.gd").new()
 	_cache = cache
 	add_child(_replay)
 	_replay.changed.connect(func(): _notify_audio(_replay.id))
@@ -88,10 +90,10 @@ func append_reply_audio(id: String, encoded: String, final: bool, audio_error: b
 			if item.cache_started and not item.cache_suppressed and _cache.append(id,bytes) != OK:
 				_cache_failed(id)
 		if item.decoder == null:
-			if not ClassDB.class_exists("PcmStreamDecoder"):
+			item.decoder = _decoder_factory.create_decoder()
+			if item.decoder == null:
 				_fail(id, "DECODER_UNAVAILABLE")
 				return
-			item.decoder = ClassDB.instantiate("PcmStreamDecoder")
 		var status: Dictionary = item.decoder.append(bytes)
 		if not status.ok:
 			_fail(id, status.code)
@@ -284,7 +286,7 @@ func replay(id: String) -> Error:
 		_notify_audio(id)
 		return ERR_DOES_NOT_EXIST
 	stop_replay()
-	var result: Error = _replay.start(id,_metadata[id])
+	var result: Error = _replay.start(id,_metadata[id],_cache.open_stream(id),_decoder_factory)
 	if result != OK:
 		_cache_errors[id] = "REPLAY_FAILED"
 		_metadata[id] = {}

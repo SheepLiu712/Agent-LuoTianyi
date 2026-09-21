@@ -1,5 +1,7 @@
 [gd_scene load_steps=5 format=3]
 
+[ext_resource type="Resource" path="res://resources/platform/framing.tres" id="isolation_settings"]
+
 [ext_resource type="Script" path="res://src/avatar/avatar_panel.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="Texture2D" path="res://assets/ui/bg2.jpg" id="3_background"]
@@ -15,6 +17,8 @@ grow_horizontal = 2
 grow_vertical = 2
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
+
+settings = ExtResource("isolation_settings")
 
 [node name="Background" type="TextureRect" parent="."]
 layout_mode = 1

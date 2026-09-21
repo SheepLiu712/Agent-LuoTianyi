@@ -1,4 +1,8 @@
 extends RefCounted
+var _settings: Resource
+func _init(settings: Resource = null) -> void:
+	_settings = settings if settings != null else preload("res://src/storage/settings_store.gd").new()
+
 var _zoom := 1.2
 var _offset := Vector2.ZERO
 
@@ -26,16 +30,16 @@ func get_transform(panel: Vector2, canvas: Vector2) -> Transform2D:
 	return Transform2D(0.0, Vector2.ONE * factor, 0.0, panel * (Vector2(0.5, 0.5) + _offset))
 
 
-func save_settings(path: String) -> Error:
-	var config := ConfigFile.new()
+func save_settings() -> Error:
+	var config = _settings
 	config.set_value("framing", "zoom", _zoom)
 	config.set_value("framing", "offset", _offset)
-	return config.save(path)
+	return config.save_settings()
 
 
-func load_settings(path: String) -> Error:
-	var config := ConfigFile.new()
-	var result := config.load(path)
+func load_settings() -> Error:
+	var config = _settings
+	var result: Error = config.load_settings()
 	if result != OK:
 		return result if result == ERR_FILE_NOT_FOUND else ERR_INVALID_DATA
 	var zoom = config.get_value("framing", "zoom", null)

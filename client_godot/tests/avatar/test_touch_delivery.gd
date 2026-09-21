@@ -11,7 +11,7 @@ func until(predicate: Callable) -> void:
 	while not predicate.call() and Time.get_ticks_msec() < deadline: await process_frame
 func run() -> void:
 	var transport = load("res://src/network/websocket_transport.gd").new()
-	var audio = load("res://src/media/reply_audio.gd").new()
+	var audio = load("res://tests/support/native_reply_audio.gd").new()
 	var session = load("res://src/session/chat_session.gd").new(transport, null, audio)
 	root.add_child(session)
 	check(session.has_method("record_touch"), "session accepts avatar touches")

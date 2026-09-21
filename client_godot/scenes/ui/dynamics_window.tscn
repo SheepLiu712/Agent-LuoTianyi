@@ -1,5 +1,7 @@
 [gd_scene load_steps=6 format=3]
 
+[ext_resource type="Resource" path="res://resources/platform/dynamics.tres" id="isolation_settings"]
+
 [ext_resource type="Script" path="res://src/ui/dynamics_window.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 
@@ -34,6 +36,8 @@ visible = false
 force_native = true
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
+
+settings = ExtResource("isolation_settings")
 
 [node name="Panel" type="PanelContainer" parent="."]
 offset_top = 0.0

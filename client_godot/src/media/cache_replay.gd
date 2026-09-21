@@ -6,7 +6,7 @@ signal mouth_changed(value: float)
 var id := ""
 var status := "idle"
 var position := 0.0
-var _file: FileAccess
+var _file: RefCounted
 var _decoder: RefCounted
 var _player := AudioStreamPlayer.new()
 var _playback: AudioStreamGeneratorPlayback
@@ -20,12 +20,15 @@ func _init() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	add_child(_player)
 
-func start(reply_id: String, metadata: Dictionary) -> Error:
+func start(reply_id: String, metadata: Dictionary, stream: RefCounted, factory: Resource) -> Error:
 	stop()
-	_file = FileAccess.open(metadata.path,FileAccess.READ)
+	_file = stream
 	if _file == null:
 		return ERR_CANT_OPEN
-	_decoder = ClassDB.instantiate("PcmStreamDecoder")
+	_decoder = factory.create_decoder()
+	if _decoder == null:
+		stop()
+		return ERR_UNAVAILABLE
 	id = reply_id
 	_duration = metadata.duration
 	status = "playing"

@@ -14,7 +14,7 @@ const PostRow = preload("res://scenes/ui/dynamics_post_row.tscn")
 @onready var _refresh_button: Button = %Refresh
 @onready var _read_all: Button = %ReadAll
 var _controller: Node
-var _layout_path := "user://dynamics-window.cfg"
+@export var settings: Resource = preload("res://src/storage/settings_store.gd").new()
 var _ratio := .45
 var _selected := ""
 var _details := {}
@@ -23,9 +23,9 @@ var _publisher: Control
 var _refreshing := false
 var _initialized := false
 
-func setup(controller: Node,layout_path: String = "user://dynamics-window.cfg") -> void:
+func setup(controller: Node,settings_store: Resource = null) -> void:
 	_controller = controller
-	_layout_path = layout_path
+	if settings_store != null: settings = settings_store
 	if is_node_ready(): _initialize()
 
 func _ready() -> void:
@@ -36,8 +36,8 @@ func _ready() -> void:
 func _initialize() -> void:
 	if _initialized: return
 	_initialized = true
-	var config := ConfigFile.new()
-	if config.load(_layout_path) == OK:
+	var config = settings
+	if config.load_settings() == OK:
 		var saved: Variant = config.get_value("window","size",size)
 		if saved is Vector2i: size = saved.max(min_size)
 		var ratio: Variant = config.get_value("window","ratio",.45)
@@ -145,7 +145,7 @@ func _resize_split() -> void:
 
 func _save_layout() -> void:
 	if mode == Window.MODE_MINIMIZED: return
-	var config := ConfigFile.new()
+	var config = settings
 	config.set_value("window","size",size)
 	config.set_value("window","ratio",_ratio)
-	config.save(_layout_path)
+	config.save_settings()

@@ -1,5 +1,5 @@
 extends SceneTree
-const Audio = preload("res://src/media/reply_audio.gd")
+const Audio = preload("res://tests/support/native_reply_audio.gd")
 const Samples = preload("res://tests/support/audio_samples.gd")
 const Log = preload("res://src/storage/client_log.gd")
 var failures: Array[String] = []

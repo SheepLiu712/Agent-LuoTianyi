@@ -3,20 +3,21 @@ signal touched(areas: Array[String])
 ## View owns pointer gestures; framing owns the persisted transform.
 const Driver = preload("res://src/avatar/avatar_driver.gd")
 const Framing = preload("res://src/avatar/avatar_framing.gd")
-const SETTINGS := "user://avatar_framing.cfg"
+@export var settings: Resource = preload("res://src/storage/settings_store.gd").new()
 const Ripple := preload("res://scenes/avatar/touch_ripple.tscn")
 @onready var avatar: Driver = %Driver
 @onready var _error_label: Label = %Error
 @onready var _reset_button: Button = %Reset
-var framing = Framing.new()
+var framing: RefCounted
 var _dragging := false
 
 
 func _ready() -> void:
+	framing = Framing.new(settings)
 	if avatar.load_character("res://assets/live2d/character.json") != OK:
 		_error_label.text = "角色加载失败，请检查资源是否完整。"
 		return
-	var restored: Error = framing.load_settings(SETTINGS)
+	var restored: Error = framing.load_settings()
 	if restored != OK and restored != ERR_FILE_NOT_FOUND:
 		_error_label.text = "未能恢复角色位置，已使用默认构图。"
 	resized.connect(_layout_avatar)
@@ -73,7 +74,7 @@ func _handle_pointer(event: InputEvent) -> void:
 
 
 func _save() -> void:
-	if framing.save_settings(SETTINGS) != OK:
+	if framing.save_settings() != OK:
 		_error_label.text = "当前角色位置无法保存，重启后将恢复上次设置。"
 
 

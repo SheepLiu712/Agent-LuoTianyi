@@ -8,7 +8,7 @@ func check(ok: bool, label: String) -> void:
 func run() -> void:
 	var path := "user://audio-settings-%s" % Time.get_ticks_usec()
 	var cache = load("res://src/storage/audio_cache.gd").new(path)
-	var audio = load("res://src/media/reply_audio.gd").new(null, Callable(), cache)
+	var audio = load("res://tests/support/native_reply_audio.gd").new(null, Callable(), cache)
 	var session = load("res://src/session/chat_session.gd").new(load("res://src/network/websocket_transport.gd").new(), null, audio)
 	root.add_child(session)
 	audio.set_scope("http://audio-settings.test", "alice")

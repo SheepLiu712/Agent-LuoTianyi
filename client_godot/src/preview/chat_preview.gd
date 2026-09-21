@@ -1,4 +1,6 @@
 extends Control
+@export var settings: Resource = preload("res://src/storage/settings_store.gd").new()
+@export var files: Resource = preload("res://src/platform/file_interaction.gd").new()
 const Session = preload("res://src/preview/demo_session.gd")
 const Bubble = preload("res://scenes/ui/message_bubble.tscn")
 const ImagePresenter = preload("res://src/ui/image_presenter.gd")
@@ -33,7 +35,10 @@ func _ready() -> void:
 	%PickImage.pressed.connect(_pick_image)
 	%TogglePlay.pressed.connect(_toggle_play)
 	%Send.pressed.connect(_send)
-	_picker.file_selected.connect(func(path): _preview_image(Image.load_from_file(path)))
+	files.bind(_picker)
+	files.image_selected.connect(func(result):
+		var decoded: Dictionary = preload("res://src/media/image_attachment.gd").from_bytes(result.bytes,result.mime) if result.ok else result
+		_preview_image(decoded.texture.get_image() if decoded.ok else null))
 	_input.send_requested.connect(_send)
 	_input.image_pasted.connect(_preview_image)
 	_input.text_changed.connect(func():
@@ -41,15 +46,14 @@ func _ready() -> void:
 		for line in _input.get_line_count():
 			lines += _input.get_line_wrap_count(line)
 		_input.custom_minimum_size.y = clampf(lines * 24 + 30, 92, 150))
-	var settings := ConfigFile.new()
-	if settings.load("user://preview_layout.cfg") == OK:
+	if settings.load_settings() == OK:
 		var ratio = settings.get_value("layout", "ratio", 0.45)
 		if (ratio is float or ratio is int) and is_finite(float(ratio)):
 			_ratio = clampf(float(ratio), 0.3, 0.6)
 	_split.dragged.connect(func(_offset):
 		_ratio = _avatar.size.x / maxf(size.x, 1)
 		settings.set_value("layout", "ratio", _ratio)
-		if settings.save("user://preview_layout.cfg") != OK:
+		if settings.save_settings() != OK:
 			_status.text = "分区比例无法保存。")
 	resized.connect(_resize_split)
 	_session.changed.connect(_refresh)
@@ -132,7 +136,7 @@ func _send() -> void:
 	get_tree().create_timer(0.7).timeout.connect(func(): _session.settle(id, true))
 
 func _pick_image() -> void:
-	_picker.popup_centered_ratio(0.7)
+	files.select_image()
 
 func _preview_image(image: Image) -> void:
 	if image == null or image.is_empty():
@@ -161,3 +165,6 @@ func _toggle_play() -> void:
 func _process(_delta: float) -> void:
 	if _playing:
 		_avatar.avatar.set_mouth_openness(absf(sin(Time.get_ticks_msec() * 0.008)) * 0.8)
+
+func _exit_tree() -> void:
+	files.cancel()
