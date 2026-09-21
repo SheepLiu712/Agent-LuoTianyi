@@ -49,6 +49,7 @@ def run(godot,script,gpu=False):
             if data.get('token')!='fixture-token': errors.append('invalid write token')
             writes.append({'path':self.path,**data})
             if user=='fail-write': self.reply(503,{}); return
+            if user=='uncertain-write': self.connection.shutdown(2); self.connection.close(); return
             if self.path=='/dynamics/read': reads[user]=True; self.reply(200,{'ok':True}); return
             if self.path=='/dynamics': self.reply(200,{'item':{**post(99),'content':data['content']}}); return
             if self.path=='/dynamics/d0/comments': self.reply(200,{'item':{**comment(99),'content':data['content'],'parent_comment_id':data.get('parent_comment_id')}}); return
