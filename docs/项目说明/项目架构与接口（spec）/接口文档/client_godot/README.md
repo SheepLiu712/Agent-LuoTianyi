@@ -1,5 +1,7 @@
 # Godot 客户端 interface
 
+当前测试入口、解耦约束与旧UI搬迁断言替代关系见[测试契约](testing.md)。产品接口与场景化控件要求不变。
+
 窗口重设计增量契约见 [window-redesign](window-redesign.md)，其明确条目替代下文冲突的旧窗口呈现。
 
 ## ModelStore 与 ModelSettings：按用途的本地模型配置
