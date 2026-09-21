@@ -57,6 +57,10 @@ func run() -> void:
 	page.get_node("%Reload").pressed.emit()
 	check(await until(func(): return prefs.get_state().phase == "ready"),"retry restores editing")
 	check(page.get_node("%CustomContextField").editable,"loaded form becomes editable")
+	for pair in [["RelationshipField","RelationshipPresets"],["SpeakingStyleField","SpeakingStylePresets"]]:
+		var preset: Button = page.get_node("%"+pair[1])
+		check(preset.text.is_empty() and preset.icon != null, "preference current value is shown only in the input: " + pair[0])
+		check(not preset.tooltip_text.is_empty(), "icon-only preset has an accessible description")
 	page.get_node("%CustomContextField").text = "control state fixture"
 	page.get_node("%CustomContextField").text_changed.emit()
 	window.get_node("%SaveAll").pressed.emit()
