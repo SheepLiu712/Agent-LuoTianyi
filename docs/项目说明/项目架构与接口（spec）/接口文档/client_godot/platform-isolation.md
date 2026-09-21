@@ -72,3 +72,9 @@ WindowCoordinator(host,dialog,images,geometry,settings_factory,dynamics_factory,
 ### 历史图片默认依赖收尾
 
 HistoryImageSource为Node接口，提供changed(id,state)、start/stop、get_state/ensure/retry/preview/store_local。未注入实现时get_state为error/IMAGE_SOURCE_UNAVAILABLE、preview为null、store_local返回ERR_UNAVAILABLE，无磁盘或网络副作用。HistoryImages继承并实现既有行为；ApplicationServices继续注入真实实现。ChatSession不再在未注入时偷偷创建具体文件缓存，独立使用时明确缺少图片能力；正式产品图片行为不变。
+
+### 生命周期核验补充
+
+相同规范化服务器/账号/message_token的重复signed_in通知只刷新主视图状态，不重启业务/扩展、不递增代次；退出后重新登录或连接凭据改变才建立新代次。指纹仅内部使用，不传给扩展。
+
+退出确认显示后若设置开始保存，确认按钮必须重新检查并等待，不直接销毁窗口。旧确认内容因在途保存失效，等待结束后重新汇总；失败仍保留草稿并允许取消。无状态变化的普通退出仍只显示一次汇总确认。
