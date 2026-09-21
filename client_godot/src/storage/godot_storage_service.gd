@@ -1,10 +1,48 @@
 extends "res://src/storage/storage_service.gd"
 ## Platform APIs stay in this implementation; callers use StorageService only.
 var _volume: RefCounted
+var _profile_path: String
+var _credentials: RefCounted
 
-func _init() -> void:
+func _init(profile_path: String = "user://account.cfg", credentials: RefCounted = null) -> void:
+	_profile_path = profile_path
+	_credentials = credentials
+	if _credentials == null and ClassDB.class_exists("WindowsSecurity"):
+		_credentials = preload("res://src/storage/credential_store.gd").new(ClassDB.instantiate("WindowsSecurity"))
 	if ClassDB.class_exists("StorageVolume"):
 		_volume = ClassDB.instantiate("StorageVolume")
+
+func read_login_profile() -> Dictionary:
+	if not FileAccess.file_exists(_profile_path): return {"ok":true,"code":"OK","data":{}}
+	var file := FileAccess.open(_profile_path, FileAccess.READ)
+	if file == null: return {"ok":false,"code":"STORAGE_ERROR","data":{}}
+	var parser := JSON.new()
+	if parser.parse(file.get_as_text()) != OK or not parser.data is Dictionary:
+		return {"ok":false,"code":"INVALID_DATA","data":{}}
+	return {"ok":true,"code":"OK","data":parser.data}
+
+func write_login_profile(data: Dictionary) -> Error:
+	var error := DirAccess.make_dir_recursive_absolute(_profile_path.get_base_dir())
+	if error != OK: return error
+	var temporary := _profile_path + ".tmp"
+	var file := FileAccess.open(temporary, FileAccess.WRITE)
+	if file == null: return FileAccess.get_open_error()
+	file.store_string(JSON.stringify(data))
+	file.flush()
+	error = file.get_error()
+	file.close()
+	if error == OK: error = DirAccess.rename_absolute(temporary, _profile_path)
+	if error != OK: DirAccess.remove_absolute(temporary)
+	return error
+
+func read_login_token(server: String, username: String) -> Dictionary:
+	return _credentials.read(server, username) if _credentials != null else super.read_login_token(server, username)
+
+func save_login_token(server: String, username: String, token: String) -> Error:
+	return _credentials.save(server, username, token) if _credentials != null else ERR_UNAVAILABLE
+
+func forget_login_token(server: String, username: String) -> Error:
+	return _credentials.forget(server, username) if _credentials != null else ERR_UNAVAILABLE
 
 func query_directory(path: String) -> Dictionary:
 	var result := {"directory_bytes":-1,"total_bytes":-1,"free_bytes":-1,"file_count":-1,"code":"STORAGE_UNAVAILABLE"}

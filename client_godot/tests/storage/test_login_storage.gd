@@ -21,7 +21,8 @@ func run() -> void:
 	check(empty.ok and empty.data.is_empty(), "missing profile is a fresh install")
 	var profile := {"version":2,"server":"https://example.test","username":"alice","accounts":[]}
 	check(service.write_login_profile(profile) == OK, "profile writes atomically")
-	check(service.read_login_profile().data == profile, "profile round trip")
+	var restored: Dictionary = service.read_login_profile().data
+	check(int(restored.get("version", 0)) == 2 and restored.get("server") == profile.server and restored.get("username") == "alice" and restored.get("accounts") == [], "profile round trip")
 	check(service.save_login_token(profile.server, "alice", "PRIVATE_TOKEN") == OK, "protected credential saves")
 	check(service.save_login_token(profile.server, "bob", "OTHER_TOKEN") == OK, "other account saves independently")
 	check(service.read_login_token(profile.server, "alice").token == "PRIVATE_TOKEN", "protected credential restores")
