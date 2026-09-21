@@ -61,6 +61,11 @@ func run() -> void:
 		var preset: Button = page.get_node("%"+pair[1])
 		check(preset.text.is_empty() and preset.icon != null, "preference current value is shown only in the input: " + pair[0])
 		check(not preset.tooltip_text.is_empty(), "icon-only preset has an accessible description")
+		check(not preset.get_items().any(func(item): return item.id == "custom" or item.label == "自定义"), "preference menus contain presets only: " + pair[0])
+	var relationship: LineEdit = page.get_node("%RelationshipField")
+	relationship.text = "已有的关系描述"
+	relationship.text_changed.emit(relationship.text)
+	check(relationship.text == "已有的关系描述" and page.get_node("%RelationshipPresets").get_selected_id().is_empty(), "non-preset value is retained without falsely checking a preset")
 	page.get_node("%CustomContextField").text = "control state fixture"
 	page.get_node("%CustomContextField").text_changed.emit()
 	window.get_node("%SaveAll").pressed.emit()
