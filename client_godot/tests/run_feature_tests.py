@@ -1,5 +1,5 @@
 ﻿"""Offline authenticated settings API fixture; never contacts public/paid services."""
-import argparse, json, os, subprocess, threading, base64, hashlib, struct, time, sys
+import argparse, json, os, subprocess, tempfile, threading, base64, hashlib, struct, time, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 PROJECT=Path(__file__).resolve().parents[1]
@@ -113,9 +113,13 @@ def run(godot,script,gpu=False):
             self.reply(404,{})
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler); thread=threading.Thread(target=server.serve_forever,daemon=True); thread.start()
     try:
-        result=subprocess.run([godot,*([] if gpu else ['--headless']),'--path',str(PROJECT),'--script',script],env={**os.environ,'GODOT_TEST_PYTHON':sys.executable,'GODOT_TEST_SERVER':f'http://127.0.0.1:{server.server_port}'},capture_output=True,text=True,encoding='utf8',errors='replace',timeout=90 if gpu else 40)
-        print(result.stdout); print(result.stderr)
-        if result.returncode or 'ERROR:' in result.stdout+result.stderr or 'FAIL:' in result.stdout or ': PASS' not in result.stdout or errors: raise RuntimeError(str(errors) or 'feature test failed')
+        with tempfile.TemporaryDirectory(prefix='agentluo-feature-') as isolated:
+            appdata=os.path.join(isolated,'appdata'); local_appdata=os.path.join(isolated,'local_appdata')
+            os.makedirs(appdata); os.makedirs(local_appdata)
+            result=subprocess.run([godot,*([] if gpu else ['--headless']),'--path',str(PROJECT),'--script',script],env={**os.environ,'APPDATA':appdata,'LOCALAPPDATA':local_appdata,'GODOT_TEST_PYTHON':sys.executable,'GODOT_TEST_SERVER':f'http://127.0.0.1:{server.server_port}'},capture_output=True,text=True,encoding='utf8',errors='replace',timeout=90 if gpu else 40)
+        output=result.stdout+result.stderr
+        print(output)
+        if result.returncode != 0 or 'ERROR:' in output or 'FAIL:' in output or ': FAIL' in output or ': PASS' not in output or errors: raise RuntimeError(str(errors) or f'feature test failed (exit {result.returncode})')
         if script.endswith('test_preferences.gd'): assert 'merge' in writes
     finally: server.shutdown(); server.server_close(); thread.join(2)
     print('Offline feature API: PASS')

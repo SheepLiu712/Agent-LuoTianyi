@@ -24,7 +24,9 @@ $python = '<已安装测试依赖的python.exe>'
 | network | 4个WebSocket/真实聊天/语音/触摸上报测试；不重复直接执行可靠队列测试 |
 | features | 3个历史/图片、8个设置/退出/模型、3个动态测试，及扩展契约测试 |
 
-各组可独立运行，不依赖前一组生成状态；首次使用新检出应先完成Godot资源导入。`scripts/common.ps1`和各Python runner保留各自错误/超时判定，不能仅根据生成截图认定通过。
+各组可独立运行，不依赖前一组生成状态；首次使用新检出应先完成Godot资源导入。`check.ps1`把冷缓存导入作为独立阶段，随后才开始契约检查；`scripts/common.ps1`和各Python runner要求退出码为0、输出明确 `: PASS` 且不含 `FAIL:`/错误。每个runner为Godot进程创建一次性隔离的 `APPDATA` 与 `LOCALAPPDATA`，进程结束后清理，不能仅根据生成截图认定通过。
+
+需要单独采集冷导入证据时运行 `check.ps1 -ImportOnly`；已有独立导入证据可用 `check.ps1 -SkipImport` 直接运行检查。
 
 合并目标可单独执行：
 

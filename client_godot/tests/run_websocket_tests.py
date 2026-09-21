@@ -7,6 +7,7 @@ import importlib.util
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import threading
 import sys
 from websockets.sync.server import serve
@@ -19,6 +20,7 @@ def run(godot, script="res://tests/test_websocket_transport.gd", gpu=False):
     errors = []
     dropped_ids = []
     rejected_connections = []
+    typing_lengths = []
     lock = threading.Lock()
     replies = json.loads((PROJECT.parent / "contracts/chat/reply_events.json").read_text(encoding="utf-8"))
     # Consume the same wire fixtures with the existing Python client's real parser.
@@ -80,6 +82,12 @@ def run(godot, script="res://tests/test_websocket_transport.gd", gpu=False):
                     assert set(packet["payload"]["touchArea"]) <= {"头", "手", "身体"}
                     send("server_ack", {"ok": True}, packet["client_msg_id"])
                     send("touch_seen", packet["payload"])
+                elif packet["type"] == "user_typing":
+                    payload = packet["payload"]
+                    if set(payload) != {"text_length"} or not isinstance(payload["text_length"], int) or payload["text_length"] < 0:
+                        errors.append("typing payload mismatch")
+                    else:
+                        typing_lengths.append(payload["text_length"])
                 elif packet["type"] == "user_text":
                     if username == "drop":
                         with lock:
@@ -137,16 +145,28 @@ def run(godot, script="res://tests/test_websocket_transport.gd", gpu=False):
         thread.start()
         try:
             port = server.socket.getsockname()[1]
-            result = subprocess.run([godot, *([] if gpu else ["--headless"]), "--path", str(PROJECT), "--script",
-                                     script],
-                                    env={**os.environ, "GODOT_TEST_SERVER": f"http://127.0.0.1:{port}"},
-                                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=45)
-            print(result.stdout)
-            if result.returncode or "ERROR:" in result.stdout + result.stderr or errors:
-                raise RuntimeError("WebSocket contract failed: " + result.stderr + repr(errors))
+            # Keep each socket contract independent from persisted Godot
+            # credentials and per-user settings. Temporary roots are removed
+            # even when Godot times out or the fixture fails.
+            with tempfile.TemporaryDirectory(prefix="agentluo-websocket-") as isolated:
+                appdata = Path(isolated) / "appdata"
+                local_appdata = Path(isolated) / "localappdata"
+                appdata.mkdir()
+                local_appdata.mkdir()
+                result = subprocess.run([godot, *([] if gpu else ["--headless"]), "--path", str(PROJECT), "--script",
+                                         script],
+                                        env={**os.environ, "APPDATA": str(appdata), "LOCALAPPDATA": str(local_appdata),
+                                             "GODOT_TEST_SERVER": f"http://127.0.0.1:{port}"},
+                                        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=45)
+            output = result.stdout + result.stderr
+            print(output)
+            if result.returncode != 0 or "ERROR:" in output or "FAIL:" in output or ": FAIL" in output or ": PASS" not in output or errors:
+                raise RuntimeError("WebSocket contract failed (exit %s): %s %r" % (result.returncode, result.stderr, errors))
             if script == "res://tests/test_websocket_transport.gd":
                 assert len(dropped_ids) == 2, "expected original and retry"
                 assert len(rejected_connections) == 1, "rejected credentials reconnected"
+            if script == "res://tests/test_live_chat.gd":
+                assert typing_lengths == [2, 0], f"typing lengths not delivered: {typing_lengths}"
         finally:
             server.shutdown()
             thread.join(timeout=3)

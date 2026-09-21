@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import threading
 import time
 from support.interop_crypto import server_crypto
@@ -80,12 +81,26 @@ def run(godot, script="res://tests/test_account_api.gd", gpu=False):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        env = {**os.environ, "GODOT_TEST_SERVER": f"http://127.0.0.1:{server.server_port}"}
-        result = subprocess.run([godot, *([] if gpu else ["--headless"]), "--path", str(PROJECT), "--script", script],
-                                env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=40)
-        print(result.stdout)
-        if result.returncode or "ERROR:" in result.stdout + result.stderr or protocol_errors:
-            raise RuntimeError("Account contract failed: " + result.stderr)
+        # Every invocation receives disposable Windows user-data roots. A
+        # previous run must not satisfy this contract through persisted
+        # account history, credentials, or Godot settings.
+        with tempfile.TemporaryDirectory(prefix="agentluo-account-") as isolated:
+            appdata = Path(isolated) / "appdata"
+            local_appdata = Path(isolated) / "localappdata"
+            appdata.mkdir()
+            local_appdata.mkdir()
+            env = {
+                **os.environ,
+                "APPDATA": str(appdata),
+                "LOCALAPPDATA": str(local_appdata),
+                "GODOT_TEST_SERVER": f"http://127.0.0.1:{server.server_port}",
+            }
+            result = subprocess.run([godot, *([] if gpu else ["--headless"]), "--path", str(PROJECT), "--script", script],
+                                    env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=40)
+        output = result.stdout + result.stderr
+        print(output)
+        if result.returncode != 0 or "ERROR:" in output or "FAIL:" in output or ": FAIL" in output or ": PASS" not in output or protocol_errors:
+            raise RuntimeError("Account contract failed (exit %s): %s" % (result.returncode, result.stderr))
     finally:
         server.shutdown()
         server.server_close()

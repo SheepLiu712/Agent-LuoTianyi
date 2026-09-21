@@ -1,5 +1,5 @@
 """Offline real HTTP/WS history contract; no public server or account data."""
-import argparse, asyncio, json, os, struct, zlib, base64
+import argparse, asyncio, json, os, struct, zlib, base64, tempfile
 from pathlib import Path
 from aiohttp import web
 PROJECT = Path(__file__).resolve().parents[1]
@@ -78,13 +78,19 @@ async def run(godot, script, gpu=False):
     await site.start()
     port=site._server.sockets[0].getsockname()[1]
     try:
-        proc=await asyncio.create_subprocess_exec(godot,*([] if gpu else ['--headless']),'--path',str(PROJECT),'--script',script,env={**os.environ,'GODOT_TEST_SERVER':f'http://127.0.0.1:{port}'},stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
-        try: out,err=await asyncio.wait_for(proc.communicate(),40)
-        except asyncio.TimeoutError:
-            proc.kill(); await proc.wait(); raise
+        with tempfile.TemporaryDirectory(prefix='agentluo-history-') as isolated:
+            appdata = os.path.join(isolated, 'appdata')
+            local_appdata = os.path.join(isolated, 'local_appdata')
+            os.makedirs(appdata)
+            os.makedirs(local_appdata)
+            proc=await asyncio.create_subprocess_exec(godot,*([] if gpu else ['--headless']),'--path',str(PROJECT),'--script',script,env={**os.environ,'APPDATA':appdata,'LOCALAPPDATA':local_appdata,'GODOT_TEST_SERVER':f'http://127.0.0.1:{port}'},stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
+            try: out,err=await asyncio.wait_for(proc.communicate(),40)
+            except asyncio.TimeoutError:
+                proc.kill(); await proc.wait(); raise
         text=(out+err).decode('utf8',errors='replace')
         print(text)
-        if proc.returncode or 'ERROR:' in text or errors: raise RuntimeError(str(errors) or 'Godot history test failed')
+        if proc.returncode != 0 or 'ERROR:' in text or 'FAIL:' in text or ': FAIL' in text or ': PASS' not in text or errors:
+            raise RuntimeError(str(errors) or f'Godot history test failed (exit {proc.returncode})')
         if script.endswith('test_history_sync.gd'):
             if requests.get('normal') != [-1,70,20]: raise AssertionError(f'fixed boundary: {requests}')
             if requests.get('skip') != [-1]: raise AssertionError('skip reimported history')

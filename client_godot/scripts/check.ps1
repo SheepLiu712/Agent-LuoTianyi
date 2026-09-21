@@ -1,7 +1,15 @@
-param([string]$Godot)
+param([string]$Godot, [switch]$ImportOnly, [switch]$SkipImport)
 . (Join-Path $PSScriptRoot 'common.ps1')
 $engine = Resolve-Godot $Godot
-Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--editor', '--import') 'import'
+# Keep the cold-cache import as its own process and log.  A successful import
+# is a prerequisite for the checks below; none of the checks may accidentally
+# turn an import warning/error into a green result.
+if (-not $SkipImport) {
+    Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--editor', '--import') 'import'
+    Write-Host 'Cold import passed.'
+}
+if ($ImportOnly) { exit 0 }
+Write-Host 'Starting isolated contract checks.'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--quit-after', '3') 'startup'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_theme_contract.gd') 'theme-contract'
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_ui_scenes.gd') 'ui-scenes'
