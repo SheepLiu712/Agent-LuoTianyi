@@ -40,6 +40,8 @@ func click(button: Button) -> void:
 
 func inspect_dialog(dialog: Window, host: Window) -> void:
 	check(dialog.visible, "exit decision is visible")
+	check(dialog.title.contains("退出应用" if host == root else "退出登录"), "decision names the actual exit action")
+	check(dialog.dialog_text.contains("尚未提交") and dialog.dialog_text.contains("不会自动保存或发送"), "decision explains draft loss and no automatic submission")
 	check(dialog.get_parent().get_window() == host, "exit decision belongs to its triggering window")
 	if DisplayServer.get_name() != "headless":
 		await create_timer(.1).timeout

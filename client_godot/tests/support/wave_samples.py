@@ -12,4 +12,3 @@ def tone(seconds, rate=24000):
         output.writeframes(b"".join(struct.pack("<h", int(math.sin(i * math.tau * 440 / rate) * 8000))
                                   for i in range(int(rate * seconds))))
     return target.getvalue()
-

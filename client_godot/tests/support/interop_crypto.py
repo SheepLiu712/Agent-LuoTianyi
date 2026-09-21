@@ -22,4 +22,3 @@ def server_crypto():
                      base64=base64, HTTPException=HTTPException, logger=logging.getLogger("interop"))
     exec(compile(ast.Module(body=functions, type_ignores=[]), str(source), "exec"), namespace)
     return SimpleNamespace(**namespace)
-

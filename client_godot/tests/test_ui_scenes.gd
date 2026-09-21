@@ -81,6 +81,13 @@ const PROPERTIES := {
 	"message_audio": {"%Stop":{"text":"停止"},"%Error":{"text":"语音未能保存"}},
 }
 const DROPDOWNS := {"preferences_page":["RelationshipPresets","SpeakingStylePresets"],"model_purpose_card":["CopySlot"]}
+const INPUT_HINTS := {
+	"account_view":["Server","Username","Password","Confirm","Invite"],
+	"preferences_page":["RelationshipField","SpeakingStyleField","PersonalityField","CustomContextField"],
+	"publish_overlay":["PublishDraft"], "log_window":["Search"],
+	"chat_view":["Input"], "dynamic_detail":["CommentDraft","ReplyDraft"],
+}
+const TOOL_HINTS := {"account_view":["Server"], "chat_view":["Volume"], "avatar_panel":["Reset"]}
 var failures: Array[String] = []
 var _temp := ""
 
@@ -97,9 +104,11 @@ func run() -> void:
 	for path: String in SCENES:
 		await check_scene(path, SCENES[path])
 	var separator: PackedScene = load("res://scenes/ui/dropdown_separator.tscn")
-	var node := separator.instantiate()
-	check(node is HSeparator, "dropdown separator is authored in a reusable scene")
-	node.free()
+	check(separator != null, "dropdown separator scene loads")
+	if separator != null:
+		var node := separator.instantiate()
+		check(node is HSeparator, "dropdown separator is authored in a reusable scene")
+		if node != null: node.free()
 	remove_folder(_temp)
 	print("UI scenes: ", "PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
@@ -118,6 +127,8 @@ func check_scene(path: String, spec: Dictionary) -> void:
 		var control := instance.get_node_or_null("%" + name)
 		check(control != null and control.unique_name_in_owner, "authored public control %" + name + ": " + path)
 	var kind := path.get_file().get_basename()
+	for name in INPUT_HINTS.get(kind, []): check_hint(instance, name, "placeholder_text")
+	for name in TOOL_HINTS.get(kind, []): check_hint(instance, name, "tooltip_text")
 	for name in DROPDOWNS.get(kind, []):
 		var dropdown := instance.get_node_or_null("%" + name)
 		check(dropdown is Button and dropdown.scene_file_path == "res://scenes/ui/unified_dropdown.tscn", "editable dropdown before ready: " + name)
@@ -133,6 +144,13 @@ func check_scene(path: String, spec: Dictionary) -> void:
 	check(instance.theme == load(THEME_PATH), "view uses the shared theme: " + path)
 	instance.queue_free()
 	await process_frame
+
+func check_hint(instance: Node, name: String, property: String) -> void:
+	var control := instance.get_node_or_null("%" + name)
+	check(control != null, "hint control exists: %" + name)
+	if control != null:
+		var hint: Variant = control.get(property)
+		check(hint is String and not hint.strip_edges().is_empty(), "input/action remains explained: %" + name)
 
 func remove_folder(path: String) -> void:
 	if not DirAccess.dir_exists_absolute(path): return
