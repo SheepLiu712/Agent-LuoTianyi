@@ -1,8 +1,8 @@
 extends Node
+const ServerAddress = preload("res://src/domain/server_address.gd")
 signal changed
 signal unread_changed(count: int)
 const Http = preload("res://src/network/json_request.gd")
-const Api = preload("res://src/network/account_api.gd")
 var _session := {}
 var _logger: RefCounted
 var _timeout: float
@@ -29,7 +29,7 @@ func _ready() -> void:
 func start(session: Dictionary) -> void:
 	stop()
 	_session = session.duplicate(true)
-	_session.server = Api.normalize_server(str(session.get("server","")))
+	_session.server = ServerAddress.normalize(str(session.get("server","")))
 	_state.phase = "ready"
 	_timer.start()
 	await refresh_unread()

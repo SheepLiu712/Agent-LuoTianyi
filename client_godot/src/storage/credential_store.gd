@@ -1,4 +1,5 @@
 extends RefCounted
+const AccountScope = preload("res://src/domain/account_scope.gd")
 var _security: Object
 var _root: String
 
@@ -7,7 +8,7 @@ func _init(security: Object, root: String = "user://accounts") -> void:
 	_root = root.trim_suffix("/")
 
 func _scope(server: String, username: String) -> String:
-	return JSON.stringify([server, username]).sha256_text()
+	return AccountScope.key(server, username)
 
 func save(server: String, username: String, token: String) -> Error:
 	if server.is_empty() or username.is_empty() or token.is_empty():

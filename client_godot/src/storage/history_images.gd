@@ -1,6 +1,7 @@
 ﻿extends Node
+const AccountScope = preload("res://src/domain/account_scope.gd")
+const ServerAddress = preload("res://src/domain/server_address.gd")
 signal changed(id: String,state: Dictionary)
-const Api = preload("res://src/network/account_api.gd")
 var _root: String
 var _logger: RefCounted
 var _session: Dictionary = {}
@@ -16,11 +17,11 @@ func _init(root: String = "user://images",logger: RefCounted = null) -> void:
 	_logger = logger
 func start(session: Dictionary) -> void:
 	stop()
-	var server := Api.normalize_server(str(session.get("server","")))
+	var server := ServerAddress.normalize(str(session.get("server","")))
 	if server.is_empty() or not session.get("username") is String or not session.get("message_token") is String or session.username.is_empty() or session.message_token.is_empty():
 		return
 	_session = {"server":server,"username":session.username,"token":session.message_token}
-	_directory = _root.path_join(JSON.stringify([server,session.username]).sha256_text())
+	_directory = _root.path_join(AccountScope.key(server, session.username))
 func stop() -> void:
 	_generation += 1
 	for http in _active.values():

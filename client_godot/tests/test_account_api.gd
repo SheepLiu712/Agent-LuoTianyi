@@ -1,4 +1,5 @@
 extends SceneTree
+const ServerAddress = preload("res://src/domain/server_address.gd")
 const Api = preload("res://src/network/account_api.gd")
 var failures: Array[String] = []
 var _pending: Dictionary = {}
@@ -23,11 +24,11 @@ func run() -> void:
 		print("ENVIRONMENT: local HTTP fixture and WindowsSecurity required")
 		quit(2)
 		return
-	check(Api.normalize_server(" EXAMPLE.org:443/api/ ") == "https://example.org/api", "server canonicalization")
-	check(Api.normalize_server("http://127.0.0.1:80") == "http://127.0.0.1", "default HTTP port removed")
-	check(Api.normalize_server("https://[::1]:8443/") == "https://[::1]:8443", "IPv6 supported")
+	check(ServerAddress.normalize(" EXAMPLE.org:443/api/ ") == "https://example.org/api", "server canonicalization")
+	check(ServerAddress.normalize("http://127.0.0.1:80") == "http://127.0.0.1", "default HTTP port removed")
+	check(ServerAddress.normalize("https://[::1]:8443/") == "https://[::1]:8443", "IPv6 supported")
 	for invalid in ["", "ftp://host", "https://user:pass@host", "https://host?token=x", "https://host:99999", "https://host/a b"]:
-		check(Api.normalize_server(invalid).is_empty(), "unsafe address rejected")
+		check(ServerAddress.normalize(invalid).is_empty(), "unsafe address rejected")
 	var api = Api.new(ClassDB.instantiate("WindowsSecurity"), 0.15)
 	root.add_child(api)
 	var login: Dictionary = await api.request("login", server, {"username":"test", "password":"synthetic-password", "request_token":true, "ignored":"field"})

@@ -1,6 +1,6 @@
 extends Node
+const ServerAddress = preload("res://src/domain/server_address.gd")
 signal changed(state: Dictionary)
-const Api = preload("res://src/network/account_api.gd")
 const FIELDS := ["relationship","speaking_style","personality_text","custom_context"]
 var _http: Node
 var _logger: RefCounted
@@ -15,7 +15,7 @@ func _init(http: Node,logger: RefCounted = null) -> void:
 func start(session: Dictionary) -> void:
 	stop()
 	_session = session.duplicate(true)
-	_session.server = Api.normalize_server(str(session.get("server","")))
+	_session.server = ServerAddress.normalize(str(session.get("server","")))
 	await reload()
 func reload() -> void:
 	if _state.dirty or _state.phase in ["loading","saving"] or _session.is_empty():

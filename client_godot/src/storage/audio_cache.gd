@@ -1,5 +1,6 @@
 extends RefCounted
-const Api = preload("res://src/network/account_api.gd")
+const AccountScope = preload("res://src/domain/account_scope.gd")
+const ServerAddress = preload("res://src/domain/server_address.gd")
 var _root: String
 var _directory := ""
 var _logger: RefCounted
@@ -16,10 +17,10 @@ func _init(root: String = "user://audio", logger: RefCounted = null, now_seconds
 func set_scope(server: String, username: String) -> Error:
 	abort_all()
 	_directory = ""
-	var address := Api.normalize_server(server)
+	var address := ServerAddress.normalize(server)
 	if address.is_empty() or username.is_empty():
 		return ERR_INVALID_PARAMETER
-	var target := _root.path_join(JSON.stringify([address,username]).sha256_text())
+	var target := _root.path_join(AccountScope.key(server, username))
 	var ancestor := target
 	while not ancestor.is_empty():
 		if FileAccess.file_exists(ancestor):

@@ -1,7 +1,7 @@
 extends Node
+const ServerAddress = preload("res://src/domain/server_address.gd")
 signal completed(response: Dictionary)
 const Http = preload("res://src/network/json_request.gd")
-const Api = preload("res://src/network/account_api.gd")
 var _settings: Node
 var _logger: RefCounted
 var _timeout: float
@@ -99,7 +99,7 @@ func _execute(request: Dictionary,config: Dictionary) -> Dictionary:
 	_requests.append(http)
 	var started := Time.get_ticks_msec()
 	_log("sending","OK",str(request.type),0)
-	var result: Dictionary = await http.send(Api.normalize_server(config.base_url)+"/chat/completions",HTTPClient.METHOD_POST,body,["Authorization: Bearer "+config.api_key])
+	var result: Dictionary = await http.send(ServerAddress.normalize(config.base_url)+"/chat/completions",HTTPClient.METHOD_POST,body,["Authorization: Bearer "+config.api_key])
 	_requests.erase(http)
 	http.queue_free()
 	var answer := _parse(result,use_json)

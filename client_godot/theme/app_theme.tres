@@ -438,39 +438,6 @@ content_margin_top = 9.0
 content_margin_right = 9.0
 content_margin_bottom = 9.0
 
-[sub_resource type="StyleBoxFlat" id="WindowNormal"]
-bg_color = Color(1,1,1,0)
-corner_radius_top_left = 0
-corner_radius_top_right = 0
-corner_radius_bottom_left = 0
-corner_radius_bottom_right = 0
-content_margin_left = 9.0
-content_margin_top = 9.0
-content_margin_right = 9.0
-content_margin_bottom = 9.0
-
-[sub_resource type="StyleBoxFlat" id="WindowHover"]
-bg_color = Color(0.87,0.94,0.98,1)
-corner_radius_top_left = 0
-corner_radius_top_right = 0
-corner_radius_bottom_left = 0
-corner_radius_bottom_right = 0
-content_margin_left = 9.0
-content_margin_top = 9.0
-content_margin_right = 9.0
-content_margin_bottom = 9.0
-
-[sub_resource type="StyleBoxFlat" id="CloseHover"]
-bg_color = Color(0.78,0.28,0.35,1)
-corner_radius_top_left = 0
-corner_radius_top_right = 0
-corner_radius_bottom_left = 0
-corner_radius_bottom_right = 0
-content_margin_left = 9.0
-content_margin_top = 9.0
-content_margin_right = 9.0
-content_margin_bottom = 9.0
-
 [sub_resource type="StyleBoxFlat" id="ScrollGrabber"]
 bg_color = Color(0.65,0.76,0.83,0.6)
 corner_radius_top_left = 4
@@ -782,15 +749,6 @@ DialogSurface/base_type = &"PanelContainer"
 DialogSurface/styles/panel = SubResource("DialogSurface")
 TerminalSurface/base_type = &"RichTextLabel"
 TerminalSurface/styles/normal = SubResource("TerminalSurface")
-WindowAction/base_type = &"Button"
-WindowAction/font_sizes/font_size = 20
-WindowAction/styles/normal = SubResource("WindowNormal")
-WindowAction/styles/hover = SubResource("WindowHover")
-WindowClose/base_type = &"Button"
-WindowClose/font_sizes/font_size = 20
-WindowClose/styles/normal = SubResource("WindowNormal")
-WindowClose/styles/hover = SubResource("CloseHover")
-WindowClose/colors/font_hover_color = Color(1,1,1,1)
 NavigationButton/base_type = &"Button"
 NavigationButton/font_sizes/font_size = 14
 NavigationButton/styles/normal = SubResource("NavigationNormal")

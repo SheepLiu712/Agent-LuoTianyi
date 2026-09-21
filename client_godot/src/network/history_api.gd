@@ -1,6 +1,6 @@
 ﻿extends Node
+const ServerAddress = preload("res://src/domain/server_address.gd")
 signal _completed(response: Dictionary)
-const AccountApi = preload("res://src/network/account_api.gd")
 var _http: HTTPRequest
 var _timeout: float
 func _init(timeout: float = 15.0) -> void:
@@ -8,7 +8,7 @@ func _init(timeout: float = 15.0) -> void:
 func fetch_page(session: Dictionary, end_index: int = -1) -> Dictionary:
 	if _http != null:
 		return _failure("BUSY")
-	var server := AccountApi.normalize_server(str(session.get("server","")))
+	var server := ServerAddress.normalize(str(session.get("server","")))
 	if server.is_empty() or not session.get("username") is String or not session.get("message_token") is String or session.username.is_empty() or session.message_token.is_empty() or end_index < -1:
 		return _failure("INVALID_INPUT")
 	var http := HTTPRequest.new()

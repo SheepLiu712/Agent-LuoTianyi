@@ -1,10 +1,10 @@
 extends Node
+const ServerAddress = preload("res://src/domain/server_address.gd")
 signal state_changed(state: Dictionary)
 signal delivery_changed(id: String, state: String, code: String)
 signal event_received(event: Dictionary)
 signal system_error(code: String)
 const Outbox = preload("res://src/network/reliable_outbox.gd")
-const AccountApi = preload("res://src/network/account_api.gd")
 const MAX_PACKET := 8 * 1024 * 1024
 var _clock: Callable
 var _outbox = Outbox.new()
@@ -27,7 +27,7 @@ func start(session: Dictionary) -> Error:
 	for field in ["server", "username", "message_token"]:
 		if not session.get(field) is String or session[field].is_empty():
 			return ERR_INVALID_PARAMETER
-	var base := AccountApi.normalize_server(session.server)
+	var base := ServerAddress.normalize(session.server)
 	if base.is_empty() or not is_inside_tree():
 		return ERR_INVALID_PARAMETER
 	var fingerprint := JSON.stringify([base, session.username, session.message_token]).sha256_text()

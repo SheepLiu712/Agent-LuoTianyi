@@ -4,7 +4,7 @@
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
 [ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
-[ext_resource type="Script" path="res://src/preview/composer_input.gd" id="5_composer"]
+[ext_resource type="Script" path="res://src/ui/composer_input.gd" id="5_composer"]
 [ext_resource type="PackedScene" path="res://scenes/ui/virtual_message_list.tscn" id="7_messages"]
 
 

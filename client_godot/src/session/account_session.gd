@@ -1,6 +1,6 @@
 extends Node
+const ServerAddress = preload("res://src/domain/server_address.gd")
 signal changed(state: Dictionary)
-const Api = preload("res://src/network/account_api.gd")
 const StorageService = preload("res://src/storage/storage_service.gd")
 const DEFAULT_SERVER := "https://www-api.u3493359.nyat.app:11664"
 var _api: Node
@@ -30,7 +30,7 @@ func _load_profile() -> void:
 		_storage_error = true
 		_storage_ready = false
 		return
-	var server := Api.normalize_server(data.server)
+	var server := ServerAddress.normalize(data.server)
 	if not data.has("version") and data.get("remember") is bool:
 		var migrated := {"version":2,"server":DEFAULT_SERVER if server.is_empty() else server,"username":data.username,"accounts":[]}
 		if not data.username.is_empty():
@@ -50,7 +50,7 @@ func _load_profile() -> void:
 		if not entry is Dictionary or not entry.get("server") is String or not entry.get("username") is String or not entry.get("remember") is bool or not entry.get("auto_login") is bool or not (entry.get("last_used") is int or entry.get("last_used") is float):
 			_storage_ready = false
 			break
-		var address := Api.normalize_server(entry.server)
+		var address := ServerAddress.normalize(entry.server)
 		var key := JSON.stringify([address,entry.username])
 		if address.is_empty() or entry.username.is_empty() or keys.has(key) or not is_finite(float(entry.last_used)):
 			_storage_ready = false
@@ -67,7 +67,7 @@ func get_login_defaults() -> Dictionary:
 	return {"server":_profile.server,"username":_profile.username,"remember":entry.get("remember",false),"auto_login":entry.get("auto_login",false),"storage_error":_storage_error}
 
 func get_history(server: String = "") -> Array:
-	var address: String = _profile.server if server.is_empty() else Api.normalize_server(server)
+	var address: String = _profile.server if server.is_empty() else ServerAddress.normalize(server)
 	var entries: Array = _profile.accounts.filter(func(entry): return entry.server == address).duplicate(true)
 	entries.sort_custom(func(a,b): return float(a.last_used) > float(b.last_used))
 	return entries
@@ -121,7 +121,7 @@ func set_server(address: String) -> Dictionary:
 	if generation != _generation: response = _result(false, "CANCELLED")
 	if response.ok:
 		var profile := _profile.duplicate(true)
-		profile.server = Api.normalize_server(address)
+		profile.server = ServerAddress.normalize(address)
 		var history := get_history(profile.server)
 		profile.username = "" if history.is_empty() else history[0].username
 		if _persist(profile) != OK: response = _result(false, "STORAGE_ERROR", true)
@@ -143,7 +143,7 @@ func perform(operation: String, server: String, fields: Dictionary, remember: bo
 	response.storage_error = false
 	if generation != _generation: response = _result(false, "CANCELLED")
 	if response.ok:
-		var address := Api.normalize_server(server)
+		var address := ServerAddress.normalize(server)
 		var username: String = fields.get("username", fields.get("new_username", ""))
 		var profile := _profile.duplicate(true)
 		profile.server = address
@@ -164,7 +164,7 @@ func perform(operation: String, server: String, fields: Dictionary, remember: bo
 			_storage.forget_login_token(address, username)
 			_disable_memory(address, username)
 	elif operation == "auto_login" and response.code == "AUTH_REJECTED":
-		response.storage_error = _forget_options(Api.normalize_server(server), str(fields.get("username", ""))) != OK
+		response.storage_error = _forget_options(ServerAddress.normalize(server), str(fields.get("username", ""))) != OK
 	_emit(response.code, response.storage_error)
 	return response
 

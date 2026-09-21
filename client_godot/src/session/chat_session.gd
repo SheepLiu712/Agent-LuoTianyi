@@ -163,9 +163,6 @@ func get_state() -> Dictionary:
 	result.history = get_history_state()
 	return result
 
-func get_log_directory() -> String:
-	return _logger.get_directory() if _logger != null else ""
-
 func set_volume(value: float) -> void:
 	_media.set_volume(value)
 

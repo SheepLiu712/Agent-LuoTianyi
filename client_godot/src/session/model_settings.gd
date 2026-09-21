@@ -1,6 +1,6 @@
 ﻿extends Node
+const ServerAddress = preload("res://src/domain/server_address.gd")
 signal changed(state: Dictionary)
-const Api = preload("res://src/network/account_api.gd")
 var _http: Node
 var _store: RefCounted
 var _logger: RefCounted
@@ -18,7 +18,7 @@ func start(session: Dictionary) -> void:
 	stop()
 	_scope = session.duplicate(true)
 	var generation := _generation
-	var base := Api.normalize_server(str(session.get("server","")))
+	var base := ServerAddress.normalize(str(session.get("server","")))
 	_store.set_scope(base,session.get("username",""))
 	_state.phase = "loading"
 	_notify()
@@ -84,7 +84,7 @@ func validate(type_id: String,config: Dictionary) -> Dictionary:
 	if (config.params.has("stream") and (not config.params.stream is bool or config.params.stream != false)) or config.params.has("stream_options"):
 		return {"ok":false,"code":"STREAMING_NOT_SUPPORTED"}
 	if config.enabled:
-		if config.provider.strip_edges().is_empty() or Api.normalize_server(config.base_url).is_empty() or config.api_key.strip_edges().is_empty() or config.model.strip_edges().is_empty():
+		if config.provider.strip_edges().is_empty() or ServerAddress.normalize(config.base_url).is_empty() or config.api_key.strip_edges().is_empty() or config.model.strip_edges().is_empty():
 			return {"ok":false,"code":"MODEL_FIELDS_REQUIRED"}
 		if (_types[type_id].requires_json and not config.model_capabilities.can_use_json) or (_types[type_id].requires_thinking and not config.model_capabilities.can_enable_thinking):
 			return {"ok":false,"code":"MODEL_CAPABILITY_MISMATCH"}

@@ -1,6 +1,6 @@
 [gd_scene load_steps=8 format=3]
 
-[ext_resource type="Script" path="res://src/preview/message_bubble.gd" id="1_script"]
+[ext_resource type="Script" path="res://src/ui/message_bubble.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
 [ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]

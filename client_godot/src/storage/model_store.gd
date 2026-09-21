@@ -1,5 +1,5 @@
 ﻿extends RefCounted
-const Api = preload("res://src/network/account_api.gd")
+const ServerAddress = preload("res://src/domain/server_address.gd")
 var _security: Object
 var _root: String
 var _scope := ""
@@ -8,7 +8,7 @@ func _init(security: Object,root: String = "user://models") -> void:
 	_security = security
 	_root = root
 func set_scope(server: String,username: String) -> void:
-	var base := Api.normalize_server(server)
+	var base := ServerAddress.normalize(server)
 	_scope = "" if base.is_empty() or username.is_empty() else JSON.stringify([base,username])
 	_directory = "" if _scope.is_empty() else _root.path_join(_scope.sha256_text())
 func read(type_id: String) -> Dictionary:

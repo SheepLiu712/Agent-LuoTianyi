@@ -1,5 +1,6 @@
 ﻿extends RefCounted
-const Api = preload("res://src/network/account_api.gd")
+const AccountScope = preload("res://src/domain/account_scope.gd")
+const ServerAddress = preload("res://src/domain/server_address.gd")
 var _root: String
 var _path := ""
 var _messages: Array = []
@@ -11,10 +12,10 @@ func start(server: String, username: String) -> void:
 	_messages = []
 	_path = ""
 	_state = {"saved_id":"","target_id":"","pending":true,"manual":false,"located":false,"reason":""}
-	var base := Api.normalize_server(server)
+	var base := ServerAddress.normalize(server)
 	if base.is_empty() or username.is_empty():
 		return
-	_path = _root.path_join(JSON.stringify([base,username]).sha256_text()+".json")
+	_path = _root.path_join(AccountScope.key(server, username)+".json")
 	if FileAccess.file_exists(_path):
 		var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(_path))
 		if data is Dictionary and data.get("uuid") is String:

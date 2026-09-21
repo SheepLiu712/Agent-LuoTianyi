@@ -1,4 +1,5 @@
 extends Node
+const ServerAddress = preload("res://src/domain/server_address.gd")
 signal _http_finished(response: Dictionary)
 const FIELDS := {
 	"login":["username", "password"], "register":["username", "password", "invite_code"],
@@ -13,42 +14,10 @@ func _init(security: Object, timeout: float = 15.0) -> void:
 	_security = security
 	_timeout = maxf(timeout, 0.05)
 
-static func normalize_server(address: String) -> String:
-	var value := address.strip_edges()
-	if value.is_empty() or value.contains("\\"):
-		return ""
-	if not value.contains("://"):
-		value = "https://" + value
-	var expression := RegEx.new()
-	expression.compile("(?i)^(https?)://(\\[[0-9a-f:]+\\]|[a-z0-9][a-z0-9.-]*)(?::([0-9]{1,5}))?(/[^?#\\s]*)?$")
-	var matched := expression.search(value)
-	if matched == null:
-		return ""
-	var scheme := matched.get_string(1).to_lower()
-	var host := matched.get_string(2).to_lower()
-	if host.begins_with("["):
-		if not host.substr(1, host.length() - 2).is_valid_ip_address():
-			return ""
-	else:
-		for part in host.split("."):
-			if part.is_empty() or part.begins_with("-") or part.ends_with("-") or part.length() > 63:
-				return ""
-	var port := matched.get_string(3)
-	if not port.is_empty():
-		if int(port) < 1 or int(port) > 65535:
-			return ""
-		port = str(int(port))
-		if (scheme == "https" and port == "443") or (scheme == "http" and port == "80"):
-			port = ""
-	var path := matched.get_string(4)
-	while path.ends_with("/"):
-		path = path.left(-1)
-	return scheme + "://" + host + (":" + port if not port.is_empty() else "") + path
-
 func request(operation: String, server: String, fields: Dictionary) -> Dictionary:
 	if _busy:
 		return _failure("BUSY")
-	var base := normalize_server(server)
+	var base := ServerAddress.normalize(server)
 	if not FIELDS.has(operation) or base.is_empty() or not is_inside_tree():
 		return _failure("INVALID_INPUT")
 	var payload := {}
@@ -68,7 +37,7 @@ func request(operation: String, server: String, fields: Dictionary) -> Dictionar
 
 func probe_server(address: String) -> Dictionary:
 	if _busy: return _failure("BUSY")
-	var base := normalize_server(address)
+	var base := ServerAddress.normalize(address)
 	if base.is_empty() or not is_inside_tree(): return _failure("INVALID_INPUT")
 	_busy = true
 	var generation := _generation
