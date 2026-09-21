@@ -30,6 +30,12 @@ class DependencyBoundaries(unittest.TestCase):
     def test_media_does_not_open_files_or_native_classes(self):
         self.assert_no_calls((ROOT/'src/media').glob('*.gd'), r'\b(?:FileAccess|DirAccess|ClassDB)\b')
 
+    def test_platform_calls_are_behind_adapters(self):
+        paths = [ROOT/'src/application.gd']
+        for directory in ['ui', 'session', 'avatar', 'preview']:
+            paths += list((ROOT/'src'/directory).rglob('*.gd'))
+        self.assert_no_calls(paths, r'\b(?:OS|DisplayServer|ClassDB|FileAccess|DirAccess|ConfigFile|JavaClassWrapper|JavaScriptBridge)\b')
+
     def test_storage_does_not_import_network(self):
         for path in (ROOT/'src/storage').rglob('*.gd'):
             self.assertNotRegex(path.read_text(encoding='utf-8'), r'(?:load|preload)\("res://src/network/')
