@@ -3,20 +3,13 @@ extends Control
 @export var password_encryption: Resource = preload("res://src/platform/password_encryption.gd").new()
 @export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 @export var runtime: Resource = preload("res://src/platform/runtime_environment.gd").new()
-const StorageService = preload("res://src/storage/storage_service.gd")
-var _storage_service: StorageService
-var _audio_cache: RefCounted
-## Composition root: owns account services and keeps the offline preview separate.
-const Api = preload("res://src/network/account_api.gd")
-const Store = preload("res://src/storage/credential_store.gd")
-const Session = preload("res://src/session/account_session.gd")
+const Services = preload("res://src/composition/application_services.gd")
+var _services: RefCounted
+var _lifecycle: RefCounted
+var _coordinator: RefCounted
+## Application view: owns account services and keeps the offline preview separate.
 const Avatar = preload("res://scenes/avatar/avatar_panel.tscn")
-const Chat = preload("res://src/session/chat_session.gd")
-const Transport = preload("res://src/network/websocket_transport.gd")
 const ChatView = preload("res://scenes/ui/chat_view.tscn")
-const Log = preload("res://src/storage/client_log.gd")
-const Cache = preload("res://src/storage/audio_cache.gd")
-const Audio = preload("res://src/media/reply_audio.gd")
 var _session: Node
 var _chat: Node
 var _chat_view: Control
@@ -36,13 +29,9 @@ var _log: RefCounted
 var _log_window: Window
 var _engine_log: Logger
 @onready var _log_problem: Label = %LogProblem
-var _windows: Dictionary = {}
 @onready var _exit_dialog: Window = %ExitDialog
-var _exit_action := ""
-var _waiting_save := false
 var _models: Node
 var _images_presenter: Node
-var _executor: Node
 var _dynamics: Node
 var _external_links: RefCounted
 
@@ -54,7 +43,7 @@ func setup(account_session: Node = null, layout_path: String = "user://window_la
 
 func _ready() -> void:
 	get_window().title = preload("res://src/storage/release_info.gd").title()
-	_geometry = preload("res://src/storage/window_geometry.gd").new(_layout_path.get_base_dir().path_join("window-geometry.cfg"))
+	_geometry = Services.create_geometry(_layout_path)
 	_chrome.configure(_geometry,"login")
 	if "--preview" in runtime.arguments():
 		_log_problem.queue_free()
@@ -68,7 +57,8 @@ func _ready() -> void:
 	_resize_window(Vector2i(480, 690), Vector2i(360, 480))
 	_images_presenter = preload("res://src/ui/image_presenter.gd").new(_geometry,window_system)
 	add_child(_images_presenter)
-	_log = Log.new("user://logs" if _layout_path == "user://window_layout.cfg" else _layout_path.get_base_dir().path_join("logs"))
+	_services = Services.new(_layout_path,runtime)
+	_log = _services.log
 	_log.write_failed.connect(func(_error): _log_problem.text = "日志保存失败，打开日志可查看本次内存记录；磁盘归档可能不完整。")
 	_log.record("client_started")
 	_engine_log = preload("res://src/storage/engine_log_sink.gd").new(_log)
@@ -79,28 +69,25 @@ func _ready() -> void:
 	_log_window.get_node("%Chrome").configure(_geometry,"logs")
 	get_tree().auto_accept_quit = false
 	get_window().close_requested.connect(func(): _request_close("exit"))
-	_exit_dialog.confirmed.connect(func(): _finish_close(_exit_action))
-	_exit_dialog.canceled.connect(func():
-		_exit_action = ""
-		_return_exit_dialog())
+	_coordinator = preload("res://src/application/window_coordinator.gd").new(self,_exit_dialog,_images_presenter,_geometry,_services.create_settings,_services.create_dynamics,func(): return is_instance_valid(_chat_view) and _chat_view.is_dirty())
+	_coordinator.exit_requested.connect(func():
+		if is_instance_valid(_session): _session.cancel()
+		get_tree().quit())
+	_coordinator.logout_requested.connect(func(): _session.logout())
 	_account_form.log_requested.connect(_log_window.open)
 	_account_form.exit_requested.connect(func(): _request_close("exit"))
-	if _external_links == null: _external_links = preload("res://src/platform/godot_external_link_opener.gd").new()
+	if _external_links == null: _external_links = Services.external_links()
 	_account_form.feedback_requested.connect(func(): _account_form.report_feedback_result(_external_links.open_project()))
 	if not password_encryption.is_available():
 		%SecurityError.show()
 		%SecurityError.text = "认证加密组件不可用，暂时无法登录；日志和问题反馈仍可使用。"
 		return
-	var security = secret_protection
-	var data_root := _layout_path.get_base_dir()
-	_storage_service = preload("res://src/storage/godot_storage_service.gd").new(data_root.path_join("account.cfg"), Store.new(security, data_root.path_join("accounts")))
-	if _session == null:
-		_session = Session.new(Api.new(password_encryption), _storage_service)
-	add_child(_session)
-	_models = preload("res://src/session/model_settings.gd").new(preload("res://src/network/json_request.gd").new(),preload("res://src/storage/model_store.gd").new(secret_protection,_layout_path.get_base_dir().path_join("models")),_log)
-	add_child(_models)
-	_dynamics = preload("res://src/session/dynamics_controller.gd").new(_log)
-	add_child(_dynamics)
+	_services.mount(self,_session,_layout_path,password_encryption,secret_protection)
+	_session = _services.account
+	_models = _services.models
+	_dynamics = _services.dynamics
+	_chat = _services.chat
+	_lifecycle = preload("res://src/application/account_lifecycle.gd").new(_chat,_models,_dynamics)
 	_dynamics.unread_changed.connect(func(count):
 		if is_instance_valid(_nav_dynamics):
 			_nav_dynamics.text = "动态" if count <= 0 else "动态 · " + ("99+" if count > 99 else str(count)))
@@ -108,14 +95,6 @@ func _ready() -> void:
 	%NavDynamics.pressed.connect(func(): _open_settings("dynamics"))
 	%NavSettings.pressed.connect(func(): _open_settings("settings"))
 	%NavLogs.pressed.connect(_log_window.open)
-	var cache = Cache.new(_layout_path.get_base_dir().path_join("audio"),_log)
-	_audio_cache = cache
-	var history = preload("res://src/session/history_sync.gd").new(preload("res://src/network/history_api.gd").new(),_log)
-	var reading = preload("res://src/storage/reading_position.gd").new(_layout_path.get_base_dir().path_join("reading"))
-	var images = preload("res://src/storage/history_images.gd").new(_layout_path.get_base_dir().path_join("images"),_log)
-	_executor = preload("res://src/session/model_executor.gd").new(_models,_log)
-	_chat = Chat.new(Transport.new(), _log, Audio.new(_log,Callable(),cache,preload("res://src/platform/native_decoder_factory.gd").new()),history,reading,images,_executor)
-	add_child(_chat)
 	_chat.expression_requested.connect(func(command):
 		if _avatar != null:
 			_avatar.avatar.apply_expression(command))
@@ -125,7 +104,7 @@ func _ready() -> void:
 	_split.show()
 	_account_form.setup(_session)
 	_session.changed.connect(_account_changed)
-	var settings = preload("res://src/storage/godot_settings_store.gd").new(_layout_path)
+	var settings: Resource = _services.settings
 	if settings.load_settings() == OK:
 		var ratio: Variant = settings.get_value("layout", "ratio", 0.45)
 		if (ratio is float or ratio is int) and is_finite(float(ratio)):
@@ -189,14 +168,10 @@ func _account_changed(state: Dictionary) -> void:
 			_expanded = true
 			_split.dragger_visibility = SplitContainer.DRAGGER_VISIBLE
 			_resize_window(_expanded_size, Vector2i(960, 640))
-		_chat.start(_session.get_session())
-		_models.start(_session.get_session())
-		_dynamics.start(_session.get_session())
+		_lifecycle.start(_session.get_session())
 	else:
-		_close_windows()
-		_models.stop()
-		_dynamics.stop()
-		_chat.stop()
+		_coordinator.close_all()
+		_lifecycle.stop()
 		if _chat_view != null:
 			_chat_view.hide()
 			_chat_view.queue_free()
@@ -226,6 +201,8 @@ func _resize_window(target: Vector2i, minimum: Vector2i) -> void:
 	_chrome.select_layout("expanded" if expanded else "login",target,minimum)
 
 func _exit_tree() -> void:
+	if _coordinator != null: _coordinator.dispose()
+	if _lifecycle != null: _lifecycle.stop()
 	if _engine_log != null:
 		runtime.unregister_logger(_engine_log)
 		_engine_log.stop()
@@ -233,80 +210,7 @@ func _exit_tree() -> void:
 		_log.finish()
 
 func _open_settings(kind: String) -> void:
-	if kind not in ["dynamics","settings"]: return
-	var key := kind
-	if _windows.has(key) and is_instance_valid(_windows[key]):
-		_windows[key].open()
-		return
-	var controller: Node
-	var window: Window
-	if key == "settings":
-		controller = preload("res://src/session/preferences_controller.gd").new(preload("res://src/network/json_request.gd").new(),_log)
-		window = preload("res://scenes/ui/settings_window.tscn").instantiate()
-		window.setup(controller,_models,_executor,_chat.clear_cache,_storage_service,_audio_cache.get_directory())
-		window.logout_requested.connect(func(): _request_close("logout"))
-	else:
-		window = preload("res://scenes/ui/dynamics_window.tscn").instantiate()
-		window.setup(_dynamics,preload("res://src/storage/godot_settings_store.gd").new(_layout_path.get_base_dir().path_join("dynamics-window.cfg")))
-	_windows[key] = window
-	add_child(window)
-	window.get_node("%Chrome").configure(_geometry,key)
-	window.tree_exited.connect(func():
-		if _windows.get(key) == window: _windows.erase(key))
-	window.open()
-	if controller != null: controller.start(_session.get_session())
+	_coordinator.open(kind)
 
 func _request_close(action: String) -> void:
-	if action not in ["exit","logout"]: return
-	var settings = _windows.get("settings")
-	if is_instance_valid(settings) and settings.is_saving():
-		_exit_action = action
-		if not _waiting_save:
-			_waiting_save = true
-			settings.saving_finished.connect(func(_ok):
-				_waiting_save = false
-				_request_close(_exit_action),CONNECT_ONE_SHOT)
-		return
-	var drafts: Array[String] = []
-	if is_instance_valid(_chat_view) and _chat_view.is_dirty(): drafts.append("聊天输入中的未发送文字或图片")
-	for key in _windows:
-		var window = _windows[key]
-		if is_instance_valid(window) and window.is_dirty():
-			drafts.append("设置中的未保存修改" if key == "settings" else "动态发布或评论草稿")
-	if not drafts.is_empty():
-		_exit_action = action
-		_exit_dialog.hide()
-		var host: Node = settings if action == "logout" and is_instance_valid(settings) else self
-		if _exit_dialog.get_parent() != host:
-			_exit_dialog.reparent(host)
-		_exit_dialog.title = "退出应用前请确认" if action == "exit" else "退出登录前请确认"
-		_exit_dialog.dialog_text = "以下内容尚未提交：\n• " + "\n• ".join(drafts) + "\n不会自动保存或发送。"
-		_exit_dialog.popup_centered()
-		_exit_dialog.get_cancel_button().grab_focus()
-		return
-	_finish_close(action)
-
-func _finish_close(action: String) -> void:
-	if action not in ["exit","logout"]:
-		return
-	_close_windows()
-	_exit_action = ""
-	if action == "exit":
-		if is_instance_valid(_session): _session.cancel()
-		get_tree().quit()
-	else:
-		_session.logout()
-
-func _close_windows() -> void:
-	_return_exit_dialog()
-	if _images_presenter != null: _images_presenter.close()
-	for window in _windows.values():
-		if is_instance_valid(window):
-			window.hide()
-			window.queue_free()
-	_windows.clear()
-
-func _return_exit_dialog() -> void:
-	_exit_dialog.hide()
-	if _exit_dialog.get_parent() != self:
-		_exit_dialog.reparent(self)
+	if _coordinator != null: _coordinator.request_close(action)

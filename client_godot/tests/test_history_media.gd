@@ -72,7 +72,7 @@ func _run() -> void:
 		quit(1)
 		return
 	var view = load(VIEW_SCENE).instantiate()
-	var presenter = load("res://src/ui/image_presenter.gd").new(directory+"/geometry.cfg")
+	var presenter = load("res://src/ui/image_presenter.gd").new(load("res://src/storage/window_geometry.gd").new(directory+"/geometry.cfg"),load("res://src/platform/godot_window_system.gd").new())
 	root.add_child(presenter)
 	view.image_requested.connect(func(provider): presenter.open_image(root,provider))
 	view.setup(chat)

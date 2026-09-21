@@ -28,3 +28,10 @@
 - 基础组通过到window-chrome，图片转属触发exit/enter但不再次ready，发现宿主解绑后未重绑；改在enter_tree绑定后，image-window及后续全部基础项单独通过。账户组、登录/设置/退出GPU均通过。
 - 原生三键探针曾失败；将旧host在隔离脚本复现同样失败，确认是桌面置顶浮层及DWM恢复动画旧坐标。驱动只移动已校验归属的测试窗口，等待动画并拒绝点击其它HWND；最终platform-native-final.log验证拖动/双击/八方向/三键/系统关闭与Alt+F4共两次close_requested全部PASS。
 - 作者自审检查窗口信号解除与重新挂接、资源local_to_scene及不可用分支；移动/提取的既有驱动代码占本片主要体积，没有改角色算法或原生构建。不打包；Windows10、多屏、系统DPI、手机与公共服务未验证。
+
+### 2026-09-21 应用职责拆分
+
+- SPEC c9d41eb。ApplicationServices只构造服务图与窗口工厂；AccountLifecycle统一启动/停止账号业务；WindowCoordinator持有窗口复用、草稿汇总、保存等待与退出信号，Application只做主视图绑定及协调调用。
+- 保持既有Application.setup参数、日志默认目录、场景控件和退出行为。纯职责搬迁不制造Red，既有公开界面回归为保护。
+- 基础组与账户组实际通过。功能组首次运行因历史图片测试仍传旧ImagePresenter路径参数而超时；已定位并修正测试装配遗漏，完整功能组重跑通过；失败轮不计作通过。证据composition-*.log。作者自审检查各Node唯一创建者/父节点、日志退出标记及窗口工厂不提前启动请求。
+- 本片未增加未来业务，不打包；未验证环境沿用此前限制。
