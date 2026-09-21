@@ -74,7 +74,9 @@ func _ready() -> void:
 	get_tree().auto_accept_quit = false
 	get_window().close_requested.connect(func(): _request_close("exit"))
 	_exit_dialog.confirmed.connect(func(): _finish_close(_exit_action))
-	_exit_dialog.canceled.connect(func(): _exit_action = "")
+	_exit_dialog.canceled.connect(func():
+		_exit_action = ""
+		_return_exit_dialog())
 	if not ClassDB.class_exists("WindowsSecurity"):
 		%SecurityError.show()
 		push_error("WindowsSecurity extension missing")
@@ -259,6 +261,10 @@ func _request_close(action: String) -> void:
 			drafts.append("设置中的未保存修改" if key == "settings" else "动态发布或评论草稿")
 	if not drafts.is_empty():
 		_exit_action = action
+		_exit_dialog.hide()
+		var host: Node = settings if action == "logout" and is_instance_valid(settings) else self
+		if _exit_dialog.get_parent() != host:
+			_exit_dialog.reparent(host)
 		_exit_dialog.title = "退出应用前请确认" if action == "exit" else "退出登录前请确认"
 		_exit_dialog.dialog_text = "以下内容尚未提交：\n• " + "\n• ".join(drafts) + "\n不会自动保存或发送。"
 		_exit_dialog.popup_centered()
@@ -277,9 +283,15 @@ func _finish_close(action: String) -> void:
 		_session.logout()
 
 func _close_windows() -> void:
+	_return_exit_dialog()
 	if _images_presenter != null: _images_presenter.close()
 	for window in _windows.values():
 		if is_instance_valid(window):
 			window.hide()
 			window.queue_free()
 	_windows.clear()
+
+func _return_exit_dialog() -> void:
+	_exit_dialog.hide()
+	if _exit_dialog.get_parent() != self:
+		_exit_dialog.reparent(self)

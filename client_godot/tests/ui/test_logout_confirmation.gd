@@ -73,8 +73,9 @@ func run() -> void:
 	var dialog = app.get_node("%ExitDialog")
 	await inspect_dialog(dialog, settings)
 	if DisplayServer.get_name() != "headless":
+		DirAccess.make_dir_recursive_absolute(ARTIFACT.get_base_dir())
 		await RenderingServer.frame_post_draw
-		settings.get_texture().get_image().save_png(ARTIFACT)
+		check(settings.get_texture().get_image().save_png(ARTIFACT) == OK, "capture decision in settings")
 	await click(dialog.get_cancel_button())
 	check(not dialog.visible and settings.is_dirty() and not session.get_session().is_empty(), "cancel keeps account and draft")
 	settings.close_requested.emit()
