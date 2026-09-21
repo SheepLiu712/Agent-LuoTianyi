@@ -78,6 +78,7 @@ def run(godot,script,gpu=False):
                 if data.get('model')=='error': self.reply(503,{'error':'PRIVATE_PROVIDER_BODY'}); return
                 self.reply(200,{'choices':[{'message':{'content':'bad-json' if data.get('model')=='bad-json' else '{"answer":"ok"}'}}],'usage':{'total_tokens':3,'private':'DO_NOT_RETURN'}}); return
             if self.path=='/auth/login':
+                if data.get('username')=='visual_busy': time.sleep(.4)
                 if data.get('username')=='reject': self.reply(401,{}); return
                 self.reply(200,{'user_id':'ui-uuid','login_token':'login-test','message_token':'message-test'}); return
             if self.path=='/auth/auto_login':

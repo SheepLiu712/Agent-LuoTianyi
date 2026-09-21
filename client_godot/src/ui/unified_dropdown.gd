@@ -3,6 +3,7 @@ extends Button
 signal activated(id: String)
 const Item = preload("res://scenes/ui/dropdown_item.tscn")
 const SeparatorScene = preload("res://scenes/ui/dropdown_separator.tscn")
+@export var show_selected_label := true
 var action_menu := false:
 	set(value):
 		action_menu = value
@@ -65,7 +66,7 @@ func _available(id: String) -> bool:
 	return _items.any(func(item): return item.get("id","") == id and not item.get("separator",false) and not item.get("disabled",false))
 
 func _caption() -> void:
-	if action_menu: return
+	if action_menu or not show_selected_label: return
 	text = ""
 	for item in _items:
 		if item.get("id","") == _selected:

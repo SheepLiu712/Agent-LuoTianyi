@@ -65,14 +65,26 @@ size_flags_vertical = 3
 
 [node name="PreferencesPage" parent="Body/Column/PagesArea/Pages/Content" instance=ExtResource("preferences")]
 unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 
 [node name="ModelPage" parent="Body/Column/PagesArea/Pages/Content" instance=ExtResource("models")]
 unique_name_in_owner = true
 visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 
 [node name="AudioPage" parent="Body/Column/PagesArea/Pages/Content" instance=ExtResource("audio")]
 unique_name_in_owner = true
 visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 
 [node name="BusyBlocker" type="Control" parent="Body/Column/PagesArea"]
 unique_name_in_owner = true
@@ -105,6 +117,7 @@ theme_override_constants/separation = 12
 [node name="LogoutButton" type="Button" parent="Body/Column/Footer/Actions"]
 unique_name_in_owner = true
 text = "退出登录"
+custom_minimum_size = Vector2(150,40)
 
 [node name="Spacer" type="Control" parent="Body/Column/Footer/Actions"]
 size_flags_horizontal = 3

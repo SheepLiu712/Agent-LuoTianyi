@@ -101,9 +101,13 @@ func run() -> void:
 	view.get_node("%Invite").text = "private invite"
 	press(view,"BackToLogin")
 	check(view.get_node("%Username").text == "test" and view.get_node("%Password").text.is_empty() and view.get_node("%Invite").text.is_empty(), "back keeps name and clears secrets")
+	view.get_node("%Username").text = "visual_busy"
 	view.get_node("%Password").text = "synthetic-password"
 	view.get_node("%Remember").button_pressed = true
+	await capture("login-ready")
 	press(view,"Submit")
+	check(view.get_node("%Submit").disabled and not view.get_node("%Password").editable, "busy login still blocks duplicate input")
+	await capture("login-busy")
 	check(await until(func(): return not session.get_session().is_empty()), "login publishes the real session")
 	await process_frame
 	if DisplayServer.get_name() != "headless":
@@ -131,7 +135,7 @@ func run() -> void:
 	logs = app.find_child("LogWindow",true,false)
 	press(view,"Submit")
 	check(await until(func(): return not session.get_session().is_empty()), "manual remembered login succeeds from the page")
-	check(storage.read_login_token(OS.get_environment("GODOT_TEST_SERVER"),"test").token == "login-rotated", "page persists the rotated token")
+	check(storage.read_login_token(OS.get_environment("GODOT_TEST_SERVER"),"visual_busy").token == "login-rotated", "page persists the rotated token")
 	session.logout()
 	await process_frame
 	check(logs.visible and view.get_node("%Password").text.is_empty(), "logout restores login without closing logs or keeping passwords")

@@ -3,6 +3,7 @@
 [ext_resource type="Script" path="res://src/ui/preferences_page.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
+[ext_resource type="Texture2D" path="res://assets/ui/login_chevron.svg" id="chevron"]
 
 
 
@@ -56,6 +57,11 @@ placeholder_text = "关系（可自定义）"
 
 [node name="RelationshipPresets" parent="Margin/Scroll/Column/RelationshipRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(40,40)
+show_selected_label = false
+icon = ExtResource("chevron")
+icon_alignment = 1
+tooltip_text = "选择关系预设；也可在左侧直接输入"
 
 [node name="SpeakingStyleLabel" type="Label" parent="Margin/Scroll/Column"]
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
@@ -71,6 +77,11 @@ placeholder_text = "表达风格（可自定义）"
 
 [node name="SpeakingStylePresets" parent="Margin/Scroll/Column/SpeakingStyleRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(40,40)
+show_selected_label = false
+icon = ExtResource("chevron")
+icon_alignment = 1
+tooltip_text = "选择表达风格预设；也可在左侧直接输入"
 
 [node name="PersonalityLabel" type="Label" parent="Margin/Scroll/Column"]
 theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)

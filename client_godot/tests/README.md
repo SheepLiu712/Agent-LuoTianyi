@@ -1,6 +1,6 @@
 # Godot 测试入口
 
-当前有58个`test_*.gd`：55个由四组headless检查编排，3个仅用于图形/原生窗口验收。另有4个`capture_*.gd`视觉入口。目录表示模块职责，GPU能力由运行方式区分；未列入默认组不代表过时。
+当前有59个`test_*.gd`：55个由四组headless检查编排，4个仅用于图形/原生窗口验收。另有4个`capture_*.gd`视觉入口。目录表示模块职责，GPU能力由运行方式区分；未列入默认组不代表过时。
 
 完整契约及旧脚本迁移对照见[测试契约](../../docs/项目说明/项目架构与接口（spec）/接口文档/client_godot/testing.md)，完成事实见[进度](../../docs/开发进程文档/开发进度/Godot测试精简与解耦.md)。历史文档中的旧文件名不再作为当前运行入口。
 
@@ -42,6 +42,7 @@ $python = '<已安装测试依赖的python.exe>'
 | 脚本（相对tests） | 启动方式 | 验证内容 |
 | --- | --- | --- |
 | ui/test_settings_control_states.gd | run_feature_tests.py --gpu | 延迟/失败读取、重试、保存、六态开关、默认/最小及100/125/150/200%缩放；包含原最小布局Reload滚动验收 |
+| ui/test_settings_export_layout.gd | 源码直接GPU运行；或同版本引擎 `--main-pack <导出PCK> --script <本脚本绝对路径>`（验证目录放置导出的DLL） | 默认/最小尺寸、隐藏页面切换后的真实尺寸及标题可见性、退出登录与侧栏对齐；release EXE不执行外部script，另用原生输入实测 |
 | ui/test_login_presentation.gd | run_feature_tests.py --gpu | 纯白透明圆角、菜单、服务器取消、账号历史、记住状态、四档缩放与小屏 |
 | ui/test_bubble_sizing.gd、ui/test_image_bubble_sizing.gd | 直接Godot --script，可headless或GPU | 实际排版宽度、90%上限、图片原比例及长图延迟加载锚点 |
 | ui/test_logout_confirmation.gd | run_feature_tests.py --gpu | 鼠标触发、确认来源、取消焦点、实际退出提示、保存失败留稿 |

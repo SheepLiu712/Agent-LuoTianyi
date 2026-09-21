@@ -3,6 +3,8 @@
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
 [ext_resource type="Texture2D" path="res://assets/ui/login_portrait.png" id="portrait"]
 [ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="decision"]
+[ext_resource type="Texture2D" path="res://assets/ui/login_menu.svg" id="menu_icon"]
+[ext_resource type="Texture2D" path="res://assets/ui/login_chevron.svg" id="chevron"]
 [sub_resource type="InputEventKey" id="EscapeKey"]
 keycode = 4194305
 [sub_resource type="Shortcut" id="EscapeShortcut"]
@@ -28,7 +30,8 @@ mouse_filter = 0
 [node name="MenuButton" type="Button" parent="Column/Header"]
 size_flags_vertical = 4
 unique_name_in_owner = true
-text = "≡"
+icon = ExtResource("menu_icon")
+icon_alignment = 1
 theme_type_variation = &"LoginIcon"
 custom_minimum_size = Vector2(48,48)
 toggle_mode = true
@@ -43,7 +46,7 @@ custom_minimum_size = Vector2(48,48)
 tooltip_text = "退出应用"
 
 [node name="RightInset" type="Control" parent="Column/Header"]
-custom_minimum_size = Vector2(8,0)
+custom_minimum_size = Vector2(2,0)
 mouse_filter = 2
 
 [node name="BodyScroll" type="ScrollContainer" parent="Column"]
@@ -66,19 +69,19 @@ unique_name_in_owner = true
 custom_minimum_size = Vector2(0,148)
 
 [node name="AvatarFrame" type="PanelContainer" parent="Column/BodyScroll/FormMargin/Body/AvatarBlock"]
-custom_minimum_size = Vector2(128,128)
+custom_minimum_size = Vector2(120,120)
 theme_type_variation = &"LoginAvatar"
 
 [node name="Portrait" type="TextureRect" parent="Column/BodyScroll/FormMargin/Body/AvatarBlock/AvatarFrame"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(112,112)
+custom_minimum_size = Vector2(104,104)
 texture = ExtResource("portrait")
 expand_mode = 1
 stretch_mode = 5
 
 [node name="AvatarGap" type="Control" parent="Column/BodyScroll/FormMargin/Body"]
 unique_name_in_owner = true
-custom_minimum_size = Vector2(0,20)
+custom_minimum_size = Vector2(0,22)
 mouse_filter = 2
 
 [node name="BackToLogin" type="Button" parent="Column/BodyScroll/FormMargin/Body"]
@@ -116,6 +119,10 @@ custom_minimum_size = Vector2(0,60)
 [node name="UsernameRow" type="HBoxContainer" parent="Column/BodyScroll/FormMargin/Body/Form/UsernameFrame"]
 theme_override_constants/separation = 0
 
+[node name="Balance" type="Control" parent="Column/BodyScroll/FormMargin/Body/Form/UsernameFrame/UsernameRow"]
+custom_minimum_size = Vector2(32,0)
+mouse_filter = 2
+
 [node name="Username" type="LineEdit" parent="Column/BodyScroll/FormMargin/Body/Form/UsernameFrame/UsernameRow"]
 unique_name_in_owner = true
 size_flags_horizontal = 3
@@ -126,7 +133,8 @@ tooltip_text = "用户名"
 
 [node name="HistoryButton" type="Button" parent="Column/BodyScroll/FormMargin/Body/Form/UsernameFrame/UsernameRow"]
 unique_name_in_owner = true
-text = "⌄"
+icon = ExtResource("chevron")
+icon_alignment = 1
 theme_type_variation = &"LoginIcon"
 custom_minimum_size = Vector2(32,36)
 tooltip_text = "选择本机账号"
@@ -180,6 +188,7 @@ custom_minimum_size = Vector2(0,32)
 
 [node name="Options" type="HBoxContainer" parent="Column/BodyScroll/FormMargin/Body/Form"]
 unique_name_in_owner = true
+custom_minimum_size = Vector2(0,42)
 theme_override_constants/separation = 0
 
 [node name="AutoLogin" type="CheckBox" parent="Column/BodyScroll/FormMargin/Body/Form/Options"]
@@ -199,7 +208,7 @@ theme_type_variation = &"LoginCheck"
 custom_minimum_size = Vector2(0,36)
 
 [node name="SubmitMargin" type="MarginContainer" parent="Column/BodyScroll/FormMargin/Body/Form"]
-theme_override_constants/margin_top = 20
+theme_override_constants/margin_top = 18
 
 [node name="Submit" type="Button" parent="Column/BodyScroll/FormMargin/Body/Form/SubmitMargin"]
 unique_name_in_owner = true
@@ -233,7 +242,7 @@ text = "https://github.com/SheepLiu712/Agent-LuoTianyi"
 theme_type_variation = &"LoginServerField"
 
 [node name="FooterMargin" type="MarginContainer" parent="Column"]
-theme_override_constants/margin_bottom = 28
+theme_override_constants/margin_bottom = 38
 theme_override_constants/margin_top = 8
 
 [node name="Footer" type="HBoxContainer" parent="Column/FooterMargin"]
@@ -244,16 +253,18 @@ theme_override_constants/separation = 8
 [node name="ResetLink" type="Button" parent="Column/FooterMargin/Footer"]
 unique_name_in_owner = true
 text = "忘记密码"
-theme_type_variation = &"LoginLink"
+theme_type_variation = &"LoginFooterLink"
 custom_minimum_size = Vector2(0,40)
 
 [node name="Divider" type="Label" parent="Column/FooterMargin/Footer"]
-text = "|"
+text = "│"
+theme_override_colors/font_color = Color(0.82,0.84,0.86,1)
+theme_override_font_sizes/font_size = 16
 
 [node name="RegisterLink" type="Button" parent="Column/FooterMargin/Footer"]
 unique_name_in_owner = true
 text = "注册账号"
-theme_type_variation = &"LoginLink"
+theme_type_variation = &"LoginFooterLink"
 custom_minimum_size = Vector2(0,40)
 
 [node name="MenuPopup" type="PopupPanel" parent="."]

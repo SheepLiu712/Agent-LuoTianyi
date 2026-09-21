@@ -4,6 +4,9 @@
 [ext_resource type="Texture2D" path="res://assets/ui/slider_dot_disabled.png" id="2_b6qua"]
 [ext_resource type="Texture2D" path="res://assets/ui/slider_dot_highlight.png" id="3_dhbrt"]
 
+[ext_resource type="Texture2D" path="res://assets/ui/login_check_off.svg" id="login_off"]
+[ext_resource type="Texture2D" path="res://assets/ui/login_check_on.svg" id="login_on"]
+
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_a3vsb"]
 content_margin_left = 9.0
 content_margin_top = 9.0
@@ -656,6 +659,41 @@ border_width_top = 1
 border_width_bottom = 1
 border_color = Color(0.88,0.93,0.96,1)
 
+[sub_resource type="SystemFont" id="LoginRegularFont"]
+font_names = PackedStringArray("Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "sans-serif")
+font_weight = 400
+
+[sub_resource type="SystemFont" id="LoginButtonFont"]
+font_names = PackedStringArray("Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans CJK SC", "sans-serif")
+font_weight = 400
+
+[sub_resource type="StyleBoxFlat" id="LoginAccountPanel"]
+bg_color = Color(1,1,1,1)
+content_margin_left = 12.0
+content_margin_right = 12.0
+content_margin_top = 0.0
+content_margin_bottom = 0.0
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_left = 12
+corner_radius_bottom_right = 12
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.86,0.88,0.90,1)
+
+[sub_resource type="StyleBoxFlat" id="LoginPrimaryDisabled"]
+bg_color = Color(0.62,0.85,1,1)
+content_margin_left = 12.0
+content_margin_right = 12.0
+content_margin_top = 12.0
+content_margin_bottom = 12.0
+corner_radius_top_left = 12
+corner_radius_top_right = 12
+corner_radius_bottom_left = 12
+corner_radius_bottom_right = 12
+
 [resource]
 default_font = SubResource("SystemFont_pul83")
 default_font_size = 15
@@ -784,14 +822,14 @@ LoginSurface/styles/panel = SubResource("LoginSurface")
 LoginDialog/base_type = &"PanelContainer"
 LoginDialog/styles/panel = SubResource("LoginDialog")
 LoginFieldPanel/base_type = &"PanelContainer"
-LoginFieldPanel/styles/panel = SubResource("LoginField")
+LoginFieldPanel/styles/panel = SubResource("LoginAccountPanel")
 LoginField/base_type = &"LineEdit"
-LoginField/font_sizes/font_size = 22
+LoginField/font_sizes/font_size = 24
 LoginField/styles/normal = SubResource("LoginField")
 LoginField/styles/read_only = SubResource("LoginField")
 LoginField/styles/focus = SubResource("CheckFocus")
 LoginAccountField/base_type = &"LineEdit"
-LoginAccountField/font_sizes/font_size = 22
+LoginAccountField/font_sizes/font_size = 24
 LoginAccountField/styles/normal = SubResource("LoginClear")
 LoginAccountField/styles/read_only = SubResource("LoginClear")
 LoginAccountField/styles/focus = SubResource("CheckFocus")
@@ -801,7 +839,7 @@ LoginServerField/styles/normal = SubResource("LoginField")
 LoginServerField/styles/read_only = SubResource("LoginField")
 LoginServerField/styles/focus = SubResource("CheckFocus")
 LoginPrimary/base_type = &"Button"
-LoginPrimary/font_sizes/font_size = 23
+LoginPrimary/font_sizes/font_size = 24
 LoginPrimary/styles/normal = SubResource("LoginPrimary")
 LoginPrimary/styles/hover = SubResource("LoginPrimary")
 LoginPrimary/styles/pressed = SubResource("CheckSelected")
@@ -819,8 +857,8 @@ LoginLink/styles/pressed = SubResource("CheckSelected")
 LoginCheck/base_type = &"CheckBox"
 LoginCheck/styles/normal = SubResource("LoginClear")
 LoginCheck/styles/pressed = SubResource("LoginClear")
-LoginCheck/styles/hover = SubResource("LoginHover")
-LoginCheck/styles/hover_pressed = SubResource("LoginHover")
+LoginCheck/styles/hover = SubResource("LoginClear")
+LoginCheck/styles/hover_pressed = SubResource("LoginClear")
 LoginCheck/styles/focus = SubResource("CheckFocus")
 LoginMenuItem/base_type = &"Button"
 LoginMenuItem/font_sizes/font_size = 17
@@ -838,8 +876,55 @@ LoginCompactMargin/constants/margin_left = 20
 LoginCompactMargin/constants/margin_right = 20
 LoginIcon/colors/font_hover_pressed_color = Color(0.1882352941,0.2705882353,0.3254901961,1)
 LoginLink/colors/font_hover_pressed_color = Color(0.1882352941,0.2705882353,0.3254901961,1)
-LoginPrimary/colors/font_hover_pressed_color = Color(0.1882352941,0.2705882353,0.3254901961,1)
+LoginPrimary/colors/font_hover_pressed_color = Color(1,1,1,1)
 LoginMenuItem/colors/font_hover_pressed_color = Color(0.1882352941,0.2705882353,0.3254901961,1)
 AccountNotice/base_type = &"Label"
 AccountNotice/font_sizes/font_size = 12
 AccountNotice/colors/font_color = Color(0.717647,0.164706,0.164706,1)
+
+LoginField/fonts/font = SubResource("LoginRegularFont")
+LoginField/colors/font_color = Color(0,0,0,1)
+LoginField/colors/font_uneditable_color = Color(0,0,0,1)
+LoginField/colors/font_placeholder_color = Color(0.6,0.6,0.6,1)
+
+LoginAccountField/fonts/font = SubResource("LoginRegularFont")
+LoginAccountField/colors/font_color = Color(0,0,0,1)
+LoginAccountField/colors/font_uneditable_color = Color(0,0,0,1)
+LoginAccountField/colors/font_placeholder_color = Color(0.6,0.6,0.6,1)
+
+LoginCheck/styles/disabled = SubResource("LoginClear")
+LoginCheck/colors/font_disabled_color = Color(0.6,0.6,0.6,1)
+LoginCheck/colors/icon_disabled_color = Color(1,1,1,1)
+
+LoginLink/styles/disabled = SubResource("LoginClear")
+LoginLink/colors/font_disabled_color = Color(0.086275,0.541176,0.760784,1)
+LoginLink/colors/icon_disabled_color = Color(1,1,1,1)
+
+LoginIcon/styles/disabled = SubResource("LoginClear")
+LoginIcon/colors/font_disabled_color = Color(0.1882353,0.27058825,0.3254902,1)
+LoginIcon/colors/icon_disabled_color = Color(1,1,1,1)
+
+LoginCheck/fonts/font = SubResource("LoginRegularFont")
+LoginCheck/font_sizes/font_size = 18
+LoginCheck/constants/h_separation = 6
+LoginCheck/colors/font_color = Color(0.6,0.6,0.6,1)
+LoginCheck/colors/font_pressed_color = Color(0.6,0.6,0.6,1)
+LoginCheck/colors/font_hover_color = Color(0.6,0.6,0.6,1)
+LoginCheck/colors/font_hover_pressed_color = Color(0.6,0.6,0.6,1)
+LoginCheck/colors/font_focus_color = Color(0.6,0.6,0.6,1)
+LoginCheck/colors/checkbox_checked_color = Color(1,1,1,1)
+LoginCheck/colors/checkbox_unchecked_color = Color(1,1,1,1)
+LoginCheck/icons/checked = ExtResource("login_on")
+LoginCheck/icons/unchecked = ExtResource("login_off")
+LoginCheck/icons/checked_disabled = ExtResource("login_on")
+LoginCheck/icons/unchecked_disabled = ExtResource("login_off")
+LoginFooterLink/base_type = &"LoginLink"
+LoginFooterLink/fonts/font = SubResource("LoginRegularFont")
+LoginFooterLink/font_sizes/font_size = 20
+LoginPrimary/fonts/font = SubResource("LoginButtonFont")
+LoginPrimary/colors/font_color = Color(1,1,1,1)
+LoginPrimary/colors/font_hover_color = Color(1,1,1,1)
+LoginPrimary/colors/font_pressed_color = Color(1,1,1,1)
+LoginPrimary/colors/font_focus_color = Color(1,1,1,1)
+LoginPrimary/colors/font_disabled_color = Color(1,1,1,1)
+LoginPrimary/styles/disabled = SubResource("LoginPrimaryDisabled")
