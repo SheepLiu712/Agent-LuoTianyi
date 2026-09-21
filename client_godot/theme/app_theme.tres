@@ -499,6 +499,50 @@ corner_radius_top_right = 12
 corner_radius_bottom_left = 12
 corner_radius_bottom_right = 12
 
+[sub_resource type="StyleBoxFlat" id="ReadOnlyInput"]
+bg_color = Color(0.9333333333333333, 0.9607843137254902, 0.9764705882352941, 1)
+content_margin_left = 12.0
+content_margin_top = 12.0
+content_margin_right = 12.0
+content_margin_bottom = 12.0
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.8352941176470589, 0.8941176470588236, 0.9294117647058824, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_left = 8
+corner_radius_bottom_right = 8
+
+[sub_resource type="StyleBoxFlat" id="CheckSelected"]
+bg_color = Color(0.8509803921568627, 0.9450980392156862, 1.0, 1)
+content_margin_left = 9.0
+content_margin_top = 9.0
+content_margin_right = 9.0
+content_margin_bottom = 9.0
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_left = 8
+corner_radius_bottom_right = 8
+
+[sub_resource type="StyleBoxFlat" id="CheckFocus"]
+bg_color = Color(1.0, 1.0, 1.0, 1)
+draw_center = false
+content_margin_left = 0.0
+content_margin_top = 0.0
+content_margin_right = 0.0
+content_margin_bottom = 0.0
+border_width_left = 2
+border_width_top = 2
+border_width_right = 2
+border_width_bottom = 2
+border_color = Color(0.08627450980392157, 0.5411764705882353, 0.7607843137254902, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_left = 8
+corner_radius_bottom_right = 8
+
 [resource]
 default_font = SubResource("SystemFont_pul83")
 default_font_size = 15
@@ -603,3 +647,21 @@ VScrollBar/styles/grabber_pressed = SubResource("ScrollGrabber")
 
 ModelCard/base_type = &"PanelContainer"
 ModelCard/styles/panel = SubResource("ModelCard")
+
+LineEdit/styles/read_only = SubResource("ReadOnlyInput")
+TextEdit/styles/read_only = SubResource("ReadOnlyInput")
+LineEdit/colors/font_uneditable_color = Color(0.3176470588235294, 0.4196078431372549, 0.47843137254901963, 1)
+TextEdit/colors/font_readonly_color = Color(0.3176470588235294, 0.4196078431372549, 0.47843137254901963, 1)
+CheckBox/styles/normal = SubResource("StyleBoxFlat_ykw30")
+CheckBox/styles/hover = SubResource("StyleBoxFlat_vu46x")
+CheckBox/styles/disabled = SubResource("StyleBoxFlat_a3vsb")
+CheckBox/styles/pressed = SubResource("CheckSelected")
+CheckBox/styles/hover_pressed = SubResource("CheckSelected")
+CheckBox/styles/focus = SubResource("CheckFocus")
+CheckBox/colors/font_pressed_color = Color(0.18823529411764706, 0.27058823529411763, 0.3254901960784314, 1)
+CheckBox/colors/font_hover_color = Color(0.18823529411764706, 0.27058823529411763, 0.3254901960784314, 1)
+CheckBox/colors/font_hover_pressed_color = Color(0.18823529411764706, 0.27058823529411763, 0.3254901960784314, 1)
+CheckBox/colors/font_focus_color = Color(0.18823529411764706, 0.27058823529411763, 0.3254901960784314, 1)
+CheckBox/colors/font_disabled_color = Color(0.44313725490196076, 0.5294117647058824, 0.5882352941176471, 1)
+CheckBox/colors/checkbox_checked_color = Color(0.08627450980392157, 0.5411764705882353, 0.7607843137254902, 1)
+CheckBox/colors/checkbox_unchecked_color = Color(0.3764705882352941, 0.4980392156862745, 0.5529411764705883, 1)
