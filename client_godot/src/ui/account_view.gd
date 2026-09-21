@@ -13,6 +13,8 @@ var _checking_server := false
 var _syncing := false
 var _manual_password := false
 var _removing := ""
+var _menu_trigger: RefCounted
+var _history_trigger: RefCounted
 @onready var _form: VBoxContainer = %Form
 @onready var _remember: CheckBox = %Remember
 @onready var _automatic: CheckBox = %AutoLogin
@@ -24,6 +26,8 @@ func setup(session: Node) -> void:
 	if is_node_ready(): _initialize()
 
 func _ready() -> void:
+	_menu_trigger = preload("res://src/ui/popup_trigger.gd").new(%MenuButton,%MenuPopup)
+	_history_trigger = preload("res://src/ui/popup_trigger.gd").new(%HistoryButton,%HistoryPopup)
 	%CloseLogin.pressed.connect(func(): exit_requested.emit())
 	%DragArea.gui_input.connect(_drag_window)
 	%MenuButton.pressed.connect(_open_menu)
@@ -174,7 +178,7 @@ func _update_state(state: Dictionary) -> void:
 	_apply_mode()
 
 func _open_menu() -> void:
-	if %MenuPopup.visible: %MenuPopup.hide(); return
+	if not _menu_trigger.should_open(): return
 	%HistoryPopup.hide()
 	var available := get_window().get_visible_rect().size
 	var bottom: Vector2 = %MenuButton.get_global_transform_with_canvas() * Vector2(0,%MenuButton.size.y)
@@ -192,6 +196,7 @@ func _popup(window: Window, position: Vector2, requested: Vector2i) -> void:
 
 func _open_history() -> void:
 	if _busy: return
+	if not _history_trigger.should_open(): return
 	%MenuPopup.hide()
 	for child in %HistoryRows.get_children():
 		if child != %HistoryEmpty:

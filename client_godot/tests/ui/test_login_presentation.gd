@@ -17,6 +17,16 @@ func until(predicate: Callable) -> bool:
 	return predicate.call()
 func press(view: Node, name: String) -> void:
 	view.get_node("%" + name).pressed.emit()
+func click_control(control: Control) -> void:
+	for down in [true,false]:
+		var event := InputEventMouseButton.new()
+		event.button_index = MOUSE_BUTTON_LEFT
+		event.pressed = down
+		event.position = control.get_global_rect().get_center()
+		event.global_position = event.position
+		root.push_input(event,true)
+		await process_frame
+	await create_timer(.15).timeout
 func capture(label: String) -> void:
 	if DisplayServer.get_name() == "headless": return
 	await create_timer(.15).timeout
@@ -69,6 +79,10 @@ func run() -> void:
 	check(view.get_node("%RegisterLink").visible and view.get_node("%ResetLink").visible, "bottom register and forgotten-password links are visible")
 	await capture("login-default")
 	if DisplayServer.get_name() != "headless":
+		for pair in [["MenuButton","MenuPopup"],["HistoryButton","HistoryPopup"]]:
+			for expected in [true,false,true,false]:
+				await click_control(view.get_node("%"+pair[0]))
+				check(view.get_node("%"+pair[1]).visible == expected, "login trigger clicks alternate: " + pair[0])
 		check(root.borderless and root.transparent and root.transparent_bg and root.unresizable, "login uses a fixed transparent native window")
 		check(root.size == Vector2i(480,690), "compact login has the approved default dimensions")
 		var pixels := root.get_texture().get_image()

@@ -16,13 +16,14 @@ var _selected := ""
 var _buttons: Array[Button] = []
 var _focus_index := -1
 var _owner_geometry := Rect2i()
+var _trigger: RefCounted
 
 func _ready() -> void:
 	get_window().gui_embed_subwindows = true
 	_popup.window_input.connect(_key_input)
+	_trigger = preload("res://src/ui/popup_trigger.gd").new(self,_popup)
 	pressed.connect(func():
-		if is_menu_open(): close_menu()
-		else: open_menu())
+		if _trigger.should_open(): open_menu())
 	_build()
 
 func set_items(items: Array) -> Error:

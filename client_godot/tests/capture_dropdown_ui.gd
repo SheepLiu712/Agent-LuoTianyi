@@ -38,6 +38,13 @@ func _run() -> void:
 	check(not menu.is_menu_open(), "outside click closes menu")
 	await click(Vector2(70,50))
 	check(menu.is_menu_open(), "click after outside dismissal opens normally")
+	var escape := InputEventKey.new()
+	escape.pressed = true
+	escape.keycode = KEY_ESCAPE
+	menu.get_node("%Menu").push_input(escape)
+	await process_frame
+	await click(Vector2(70,50))
+	check(menu.is_menu_open(), "click after Esc opens normally")
 	menu.close_menu()
 	await process_frame
 	menu.size = Vector2(220,42)
