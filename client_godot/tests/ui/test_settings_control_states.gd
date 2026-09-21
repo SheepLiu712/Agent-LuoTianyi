@@ -20,12 +20,16 @@ func readonly_fields(window: Window, label: String) -> void:
 		var field: Control = window.get_node("%PreferencesPage").get_node("%"+name)
 		check(not field.editable,label+" keeps editing disabled: "+name)
 		var style: StyleBox = field.get_theme_stylebox("read_only")
-		check(style is StyleBoxFlat and style.bg_color.get_luminance() > .85,label+" has a light read-only surface: "+name)
+		check(style is StyleBoxFlat and style.bg_color.is_equal_approx(Color.WHITE),label+" keeps the same white surface while read-only: "+name)
 		if DisplayServer.get_name() != "headless":
 			var image := window.get_texture().get_image()
 			var point := window.get_final_transform() * field.get_global_transform_with_canvas() * Vector2(field.size.x-24,field.size.y*.5)
 			point = point.clamp(Vector2.ZERO,Vector2(image.get_size())-Vector2.ONE)
-			check(image.get_pixelv(Vector2i(point)).get_luminance() > .85,label+" actually renders a light field: "+name)
+			check(image.get_pixelv(Vector2i(point)).get_luminance() > .99,label+" actually renders a white field: "+name)
+	for name in ["RelationshipPresets","SpeakingStylePresets","Reload"]:
+		var button: Button = window.get_node("%PreferencesPage").get_node("%"+name)
+		check(button.disabled == (name != "Reload" or label != "failed load"), label+" preserves action availability: "+name)
+		check(button.get_theme_stylebox("disabled").bg_color.is_equal_approx(button.get_theme_stylebox("normal").bg_color), label+" does not gray the action background: "+name)
 func run() -> void:
 	DirAccess.make_dir_recursive_absolute(ARTIFACTS)
 	FileAccess.open(ARTIFACTS+"/.gdignore",FileAccess.WRITE).close()
