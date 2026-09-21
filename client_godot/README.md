@@ -2,7 +2,7 @@
 
 功能基线：`79ae2c0`。当前为独立开发工程，实际完成范围见 [进度](../docs/开发进程文档/开发进度/Godot-Windows客户端.md)。尚未替换旧端，不读取旧端凭据。
 
-现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；2026-09-21整理后保留53个行为测试，旧文件迁移关系以该入口和测试契约为准。
+现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；0.1.3新增必要回归后共58个行为测试，旧文件迁移关系以该入口和测试契约为准。
 
 ## 构建
 
@@ -73,7 +73,7 @@ python client_godot/tests/run_security_interop.py --godot $env:GODOT_BIN
 
 该命令会向本机默认音频设备播放短合成音；AudioEffectCapture 检查非零混音输出及静音，不等同人工听感或真实服务验收。
 
-未登录时仅显示 660×800 账户窗口，登录成功后展开角色和聊天，退出再收起。默认服务器沿用旧端 release_config.base_url；已保存的自定义地址优先。账户回归含窗口切换测试，原生窗口验证可运行 `run_account_tests.py --godot <exe> --script res://tests/test_application_window.gd --gpu`，仍仅连接本地 HTTP fixture。
+未登录时显示480×690白色圆角账户窗口，登录成功后展开角色和聊天，退出再收起。默认服务器沿用旧端 release_config.base_url；已保存的自定义地址优先。账户回归含窗口切换测试，原生窗口验证可运行 `run_feature_tests.py --godot <exe> --script res://tests/test_application_window.gd --gpu`，仍仅连接本地 HTTP fixture。
 
 语音缓存在 user://audio 按规范化服务器、账户与 UUID 隔离，退出及重启保留，只能手动清理，无自动容量/时间淘汰。设置中的“语音缓存”有确认窗口；清理同时取消在途流的缓存写入，保留正在输出的声音与聊天文字。登录后全量同步历史，按 UUID 恢复新端本账号完整缓存的重放入口；不导入旧端缓存。日志记录 cache_committed/cache_error、replay_started/paused/resumed/stopped/finished/preempted，不写音频原文。
 
@@ -92,7 +92,7 @@ release.json 是版本单一来源，界面/诊断/目录/ZIP 使用同一版本
 
 ## 窗口重设计（当前开发分支）
 
-所有可见UI由Godot控件场景绘制，脚本只做行为和数据绑定，包括确认按钮和24段语音波形；桌面窗框与三键使用系统原生实现。左侧仅聊天、动态、设置、日志四个居中入口；退出登录位于设置底部左侧，右侧关闭/保存全部修改，失败项留稿。退出应用使用主窗系统关闭按钮，统一检查聊天/设置/动态草稿，不自动保存或发送。动态和日志独立于主窗最小化，设置跟随主窗；全局图片窗跟随当前来源。几何持久化但文字草稿只保留到本次运行结束。
+所有可见UI由Godot控件场景绘制，脚本只做行为和数据绑定，包括确认按钮和24段语音波形；登录后桌面窗框与三键使用系统原生实现，未登录采用透明窗口与Godot白色圆角面板。左侧仅聊天、动态、设置、日志四个居中入口；退出登录位于设置底部左侧，右侧关闭/保存全部修改，失败项留稿。退出应用使用主窗系统关闭按钮，统一检查聊天/设置/动态草稿，不自动保存或发送。动态和日志独立于主窗最小化，设置跟随主窗；全局图片窗跟随当前来源。几何持久化但文字草稿只保留到本次运行结束。
 
 契约见[窗口重设计接口](../docs/项目说明/项目架构与接口（spec）/接口文档/client_godot/window-redesign.md)，实际验证见[窗口重设计进度](../docs/开发进程文档/开发进度/Godot客户端窗口重设计.md)。用户反馈后恢复系统标题栏、拖拽/缩放，内部下拉采用Godot圆角控件；背景磨砂仅采样应用自己的画面，正文实底，日志内容区深色。系统文件选择器继续使用原生控件。
 
@@ -112,3 +112,5 @@ $env:GODOT_TEST_PYTHON = 'D:\anaconda\python.exe'
 GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及既有本地API测试依赖；Pillow仅用于测试，不进入客户端运行依赖。磁盘查询的Windows实现已实测，移动端需复用StorageService接口并在目标构建注册容量适配，当前不宣称完成Android/iOS移植。
 
 界面精简与状态修正见[完成记录](../docs/开发进程文档/开发进度/Godot界面精简与状态修正.md)。读取/保存中的设置输入框保持浅色只读；API/JSON/thinking开关采用浅蓝选中底、深色文字和深蓝焦点。可运行`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`复验延迟/失败加载与100/125/150/200%内容缩放，证据保存在`artifacts/ui-refinement/`。
+
+0.1.3登录与气泡契约见[interface](../docs/项目说明/项目架构与接口（spec）/接口文档/client_godot/release-013.md)，实际验证与包信息见[进度](../docs/开发进程文档/开发进度/Godot-0.1.3登录与气泡.md)。登录GPU验收使用`run_feature_tests.py --godot <exe> --script res://tests/ui/test_login_presentation.gd --gpu`；气泡使用`--script res://tests/ui/test_bubble_sizing.gd`与`test_image_bubble_sizing.gd`，可独立headless/GPU运行。

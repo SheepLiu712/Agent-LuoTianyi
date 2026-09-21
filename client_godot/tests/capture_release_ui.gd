@@ -4,6 +4,7 @@ var failures: Array[String] = []
 func _initialize() -> void:
 	_run.call_deferred()
 func _run() -> void:
+	root.content_scale_size = Vector2i.ZERO
 	if DisplayServer.get_name() == "headless":
 		quit(2)
 		return
@@ -56,7 +57,7 @@ func _run() -> void:
 	for item in [["logs","客户端日志","logs"],["preferences","设置","preferences"],["models","设置","models"]]:
 		app.get_node("%NavLogs" if item[0] == "logs" else "%NavSettings").pressed.emit()
 		await create_timer(.4).timeout
-		var windows: Array = app.find_children("*","Window",true,false).filter(func(n): return n.title.begins_with(item[1]))
+		var windows: Array = app.find_children("*","Window",true,false).filter(func(n): return n.name == ("LogWindow" if item[0] == "logs" else "SettingsWindow"))
 		if windows.is_empty():
 			failures.append("window missing: "+item[1])
 			continue
