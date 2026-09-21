@@ -30,7 +30,7 @@ function Resolve-Godot([string]$Path) {
     return $resolved
 }
 
-function Invoke-GodotChecked([string]$Executable, [string[]]$Arguments, [string]$LogName, [switch]$RequirePass) {
+function Invoke-GodotChecked([string]$Executable, [string[]]$Arguments, [string]$LogName, [switch]$RequirePass, [switch]$UseHostUserData) {
     $logDirectory = Join-Path $ProjectRoot 'artifacts'
     New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
     # A GUI-subsystem export does not expose stdout like the editor console.
@@ -50,12 +50,15 @@ function Invoke-GodotChecked([string]$Executable, [string[]]$Arguments, [string]
     $startInfo.RedirectStandardError = $true
     # Never let a check inherit the developer's account/cache.  This also
     # makes every direct Godot check as reproducible as the Python runners.
-    $userDataRoot = Join-Path ([IO.Path]::GetTempPath()) ("agentluo-godot-" + [Guid]::NewGuid().ToString('N'))
-    $appData = Join-Path $userDataRoot 'appdata'
-    $localAppData = Join-Path $userDataRoot 'localappdata'
-    New-Item -ItemType Directory -Force -Path $appData, $localAppData | Out-Null
-    $startInfo.EnvironmentVariables['APPDATA'] = $appData
-    $startInfo.EnvironmentVariables['LOCALAPPDATA'] = $localAppData
+    $userDataRoot = $null
+    if (-not $UseHostUserData) {
+        $userDataRoot = Join-Path ([IO.Path]::GetTempPath()) ("agentluo-godot-" + [Guid]::NewGuid().ToString('N'))
+        $appData = Join-Path $userDataRoot 'appdata'
+        $localAppData = Join-Path $userDataRoot 'localappdata'
+        New-Item -ItemType Directory -Force -Path $appData, $localAppData | Out-Null
+        $startInfo.EnvironmentVariables['APPDATA'] = $appData
+        $startInfo.EnvironmentVariables['LOCALAPPDATA'] = $localAppData
+    }
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $startInfo
     $exitCode = -1
@@ -72,7 +75,7 @@ function Invoke-GodotChecked([string]$Executable, [string[]]$Arguments, [string]
         $stderr.Result | Set-Content -LiteralPath $stderrLog -Encoding UTF8
     } finally {
         $process.Dispose()
-        if (Test-Path -LiteralPath $userDataRoot) { Remove-Item -LiteralPath $userDataRoot -Recurse -Force -ErrorAction SilentlyContinue }
+        if ($userDataRoot -and (Test-Path -LiteralPath $userDataRoot)) { Remove-Item -LiteralPath $userDataRoot -Recurse -Force -ErrorAction SilentlyContinue }
     }
     $text = @(($engineLog, $stdoutLog, $stderrLog) | ForEach-Object {
         if (Test-Path -LiteralPath $_) { Get-Content -LiteralPath $_ -Raw -Encoding UTF8 }

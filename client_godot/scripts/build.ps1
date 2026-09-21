@@ -21,7 +21,7 @@ $temporaryZip = $null
 try {
     $executable = Join-Path $temporaryDirectory 'agentluo.exe'
     Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--editor', '--import') 'import'
-    Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--export-release', 'Windows Desktop', $executable) 'export'
+    Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--export-release', 'Windows Desktop', $executable) 'export' -UseHostUserData
     if (-not (Test-Path -LiteralPath $executable) -or -not (Test-Path -LiteralPath (Join-Path $temporaryDirectory 'agentluo.pck'))) {
         throw 'Export did not produce agentluo.exe and agentluo.pck.'
     }
