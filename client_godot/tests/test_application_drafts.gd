@@ -78,16 +78,29 @@ func _run() -> void:
 	await process_frame
 	check(session.get_session().is_empty(),"confirmed discard completes logout")
 	check(not is_instance_valid(window) and logs.visible,"logout closes business windows but preserves logs")
+	await session.perform("login",OS.get_environment("GODOT_TEST_SERVER"),{"username":"slow_save","password":"synthetic-password","request_token":false},false)
+	app.get_node("%NavSettings").pressed.emit()
+	window = app.find_child("SettingsWindow",true,false)
+	input = window.find_child("CustomContextField",true,false)
+	deadline = Time.get_ticks_msec()+2500
+	while not input.editable and Time.get_ticks_msec()<deadline: await process_frame
+	check(not app.find_child("ChatView",true,false).is_dirty(),"relogin does not restore prior text or image drafts")
+	input.text = "save before logout"
+	input.text_changed.emit()
+	window.get_node("%SaveAll").pressed.emit()
+	check(window.is_saving() and window.get_node("%Result").visible,"save exposes processing feedback")
+	window.get_node("%LogoutButton").pressed.emit()
+	check(not session.get_session().is_empty(),"logout waits for an in-flight save")
+	deadline = Time.get_ticks_msec()+3000
+	while not session.get_session().is_empty() and Time.get_ticks_msec()<deadline: await process_frame
+	await process_frame
+	check(session.get_session().is_empty() and not is_instance_valid(window) and logs.visible,"completed save permits logout and keeps logs")
 	app.queue_free()
 	await process_frame
-	for folder in ["logs","reading"]:
-		if not DirAccess.dir_exists_absolute(path+"/"+folder):
-			continue
-		for file in DirAccess.get_files_at(path+"/"+folder):
-			DirAccess.remove_absolute(path+"/"+folder+"/"+file)
-		DirAccess.remove_absolute(path+"/"+folder)
-	for file in DirAccess.get_files_at(path):
-		DirAccess.remove_absolute(path+"/"+file)
-	DirAccess.remove_absolute(path)
+	remove_folder(path)
 	print("Application drafts: ","PASS" if failures.is_empty() else "FAIL")
 	quit(0 if failures.is_empty() else 1)
+func remove_folder(path: String) -> void:
+	for folder in DirAccess.get_directories_at(path): remove_folder(path.path_join(folder))
+	for file in DirAccess.get_files_at(path): DirAccess.remove_absolute(path.path_join(file))
+	DirAccess.remove_absolute(path)

@@ -94,9 +94,6 @@ func _ready() -> void:
 	%NavDynamics.pressed.connect(func(): _open_settings("dynamics"))
 	%NavSettings.pressed.connect(func(): _open_settings("settings"))
 	%NavLogs.pressed.connect(_log_window.open)
-	%AccountMenu.action_menu = true
-	%AccountMenu.set_items([{"id":"logout","label":"退出登录"},{"id":"exit","label":"退出应用"}])
-	%AccountMenu.activated.connect(_request_close)
 	var cache = Cache.new(_layout_path.get_base_dir().path_join("audio"),_log)
 	_audio_cache = cache
 	_storage_service = preload("res://src/storage/godot_storage_service.gd").new()
@@ -231,6 +228,7 @@ func _open_settings(kind: String) -> void:
 		controller = preload("res://src/session/preferences_controller.gd").new(preload("res://src/network/json_request.gd").new(),_log)
 		window = preload("res://scenes/ui/settings_window.tscn").instantiate()
 		window.setup(controller,_models,_executor,_chat.clear_cache,_storage_service,_audio_cache.get_directory())
+		window.logout_requested.connect(func(): _request_close("logout"))
 	else:
 		window = preload("res://scenes/ui/dynamics_window.tscn").instantiate()
 		window.setup(_dynamics,_layout_path.get_base_dir().path_join("dynamics-window.cfg"))
@@ -254,7 +252,7 @@ func _request_close(action: String) -> void:
 				_request_close(_exit_action),CONNECT_ONE_SHOT)
 		return
 	var drafts: Array[String] = []
-	if is_instance_valid(_chat_view) and _chat_view.is_dirty(): drafts.append("聊天输入中的未发送文字")
+	if is_instance_valid(_chat_view) and _chat_view.is_dirty(): drafts.append("聊天输入中的未发送文字或图片")
 	for key in _windows:
 		var window = _windows[key]
 		if is_instance_valid(window) and window.is_dirty():

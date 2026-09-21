@@ -19,10 +19,12 @@ func field(view: Node, hint: String) -> LineEdit:
 
 func button(view: Node, caption: String) -> void:
 	if caption == "退出登录":
-		for menu in view.find_children("AccountMenu", "Button", true, false):
-			if menu.is_visible_in_tree():
-				menu.activated.emit("logout")
-				return
+		view.get_node("%NavSettings").pressed.emit()
+		var settings = view.find_child("SettingsWindow",true,false)
+		check(settings != null and settings.get_node_or_null("%LogoutButton") != null,"logout exists in settings")
+		if settings != null and settings.get_node_or_null("%LogoutButton") != null:
+			settings.get_node("%LogoutButton").pressed.emit()
+		return
 	for node in view.find_children("*", "Button", true, false):
 		if node.text == caption and node.is_visible_in_tree():
 			node.pressed.emit()
