@@ -83,3 +83,15 @@ AudioCache.clear(older_than_days:int=0)->Error、ReplyAudio.clear_cache(older_th
 新缓存元数据增加saved_at_unix整数UTC秒，version=1兼容旧记录；旧记录缺少字段时以音频文件修改时间判定，时间未知/元数据无效不进行按天删除。AudioCache构造增加可选now_seconds:Callable时间源用于确定性测试，默认使用当前UTC时间。统计查询仍只走StorageService，业务/UI不自行访问文件或平台API。
 
 音频缓存页增加场景SpinBox天数输入，默认30、最小0、整数步长，可自行输入更大天数；明确注明“0表示全部缓存”。确认时显示并冻结选择的天数，取消不删除；清理后刷新占用圆环，部分失败明确提示，不将保留的新缓存误称为清理失败。不做定时或后台自动清理。
+
+## 界面精简与状态修正（2026-09-21用户批准）
+
+此节替代此前主导航五入口左对齐、账号菜单及设置固定底部说明。
+
+- DynamicDetail删除CommentTitle及其占位；评论/回复成功以新增内容和输入清空体现，不再显示“评论已发送”或替代弹窗。状态区无文字时隐藏，加载/失败/结果不确定/重试提示保留，评论隐私规则不变。
+- 主导航仅聊天/动态/设置/日志，按钮文字水平居中，保留现有尺寸/底色。删除AccountMenu装配。SettingsWindow新增logout_requested()信号，底部左侧LogoutButton点击只发请求，由Application转入既有_request_close("logout")，不由UI直接登出；退出应用仅经系统窗口关闭流程。保存中等待、全部草稿汇总、取消留稿、退出登录保留日志与账号隔离沿用。
+- 设置底部采用状态行与操作行：Result初始为空且隐藏，操作行左侧退出登录、右侧关闭/保存全部。保存中显示处理中，完成显示成功/失败；再次编辑清除过期成功提示。状态行不挤压按钮，BusyBlocker归属页面区域，不再用固定底部像素偏移覆盖可变高度底栏。
+- 统一主题补齐LineEdit/TextEdit的read_only样式与对应只读文字颜色，加载、失败和保存期间保持浅色实底且不可编辑；保留加载/失败说明。CheckBox完整定义normal/pressed/hover/hover_pressed/disabled/focus及对应字体色；焦点描边#168AC2、选中底#D9F1FF、深色文字#304553，API/JSON/thinking开关一致，避免白字浅底。
+- 可见控件仍固定写在.tscn，样式集中app_theme.tres。此次不扩展StorageService或服务端协议，不新增业务/UI平台直接调用；既有其他平台调用另立问题迁移。
+
+验证通过真实loopback延迟/失败偏好读取及保存，覆盖加载中/失败/恢复、开关全部状态、默认/最小和100/125/150/200%内容缩放。新的退出入口须验证无草稿、文字/图片/设置/动态草稿、取消与保存中请求，不能仅检查信号存在。
