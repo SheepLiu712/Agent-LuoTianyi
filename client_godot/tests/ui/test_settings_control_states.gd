@@ -66,10 +66,10 @@ func run() -> void:
 		check(preset.text.is_empty() and preset.icon != null, "preference current value is shown only in the input: " + pair[0])
 		check(not preset.tooltip_text.is_empty(), "icon-only preset has an accessible description")
 		check(not preset.get_items().any(func(item): return item.id == "custom" or item.label == "自定义"), "preference menus contain presets only: " + pair[0])
-	var relationship: LineEdit = page.get_node("%RelationshipField")
-	relationship.text = "已有的关系描述"
-	relationship.text_changed.emit(relationship.text)
-	check(relationship.text == "已有的关系描述" and page.get_node("%RelationshipPresets").get_selected_id().is_empty(), "non-preset value is retained without falsely checking a preset")
+		check(not page.get_node("%"+pair[0]).editable, "ready relationship and style reject manual input: " + pair[0])
+	page.get_node("%RelationshipPresets").activated.emit("friend")
+	page.get_node("%SpeakingStylePresets").activated.emit("gentle")
+	check(page.get_node("%RelationshipField").text == "朋友" and page.get_node("%SpeakingStyleField").text == "温柔可人" and prefs.get_state().dirty, "preset choices still update readonly values and the draft")
 	page.get_node("%CustomContextField").text = "control state fixture"
 	page.get_node("%CustomContextField").text_changed.emit()
 	window.get_node("%SaveAll").pressed.emit()
