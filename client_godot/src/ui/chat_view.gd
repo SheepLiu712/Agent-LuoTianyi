@@ -60,6 +60,7 @@ func _initialize() -> void:
 	%PreviewImage.pressed.connect(_preview_attachment)
 	%RemoveImage.pressed.connect(func(): _clear_attachment(true))
 	_input.text_changed.connect(func():
+		_session.set_typing(not _input.text.is_empty(), _input.text.length())
 		var lines: int = _input.get_line_count()
 		for line in _input.get_line_count():
 			lines += _input.get_line_wrap_count(line)
@@ -78,6 +79,7 @@ func _initialize() -> void:
 
 func _send() -> void:
 	_session.note_read_interaction()
+	_session.set_typing(false)
 	if not _attachment.is_empty() and not _confirm_attachment(null): return
 	if not _session.send_text(_input.text).is_empty():
 		_input.clear()

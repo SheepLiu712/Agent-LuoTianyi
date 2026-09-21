@@ -1,5 +1,6 @@
 extends Node
 const ServerAddress = preload("res://src/domain/server_address.gd")
+const Attachment = preload("res://src/media/image_attachment.gd")
 signal completed(response: Dictionary)
 const Http = preload("res://src/network/json_request.gd")
 var _settings: Node
@@ -79,6 +80,10 @@ func _execute(request: Dictionary,config: Dictionary) -> Dictionary:
 	var image: Variant = request.get("image_base64","")
 	if not image is String or (not image.is_empty() and config.model_kind != "vlm"):
 		return _failure("MODEL_KIND_MISMATCH")
+	if not image.is_empty():
+		var image_check: Dictionary = Attachment.from_data_uri(image)
+		if not image_check.ok:
+			return _failure(image_check.code)
 	var params: Dictionary = request.get("params",{}).duplicate(true)
 	params.merge(config.params,true)
 	if (params.has("stream") and (not params.stream is bool or params.stream)) or params.has("stream_options"):

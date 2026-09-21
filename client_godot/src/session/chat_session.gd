@@ -25,6 +25,7 @@ var _models: Node
 var _touch_areas: Array[String] = []
 var _touch_count := 0
 var _last_touch_ms := -1000
+var _typing := false
 
 func _init(transport: Node, logger: RefCounted = null, media: Node = null, history: Node = null, reading: RefCounted = null, images: Node = null, models: Node = null) -> void:
 	_transport = transport
@@ -67,22 +68,43 @@ func _init(transport: Node, logger: RefCounted = null, media: Node = null, histo
 
 func start(session: Dictionary) -> Error:
 	stop()
+	# Validate and establish the transport before starting account-scoped
+	# history, media or model services.  A failed transport must leave no
+	# account resources running.
+	var transport_result: Error = _transport.start(session)
+	if transport_result != OK:
+		_transport.stop()
+		return transport_result
 	if _models != null:
 		_models.start()
 	if _reading != null:
 		_reading.start(session.get("server",""),session.get("username",""))
 	if _images != null:
 		_images.start(session)
-	_media.set_scope(session.get("server",""),session.get("username",""))
-	var result: Error = _transport.start(session)
-	if result == OK and _history != null:
+	var scope_result: Error = _media.set_scope(session.get("server",""),session.get("username",""))
+	if scope_result != OK:
+		stop()
+		return scope_result
+	if _history != null:
 		_waiting_history = true
 		_history.start(session)
-	return result
+	return OK
+
+func set_typing(active: bool, text_length: int = 0) -> Error:
+	var next := active and text_length > 0
+	if next == _typing and (not next or text_length == 0):
+		return OK
+	_typing = next
+	if _state.phase != "ready":
+		return OK
+	var length := clampi(text_length, 0, 4096) if next else 0
+	var id: String = _transport.send_event("user_typing", {"text_length":length}, false)
+	return OK if not id.is_empty() else ERR_UNAVAILABLE
 
 func send_text(text: String) -> String:
 	if text.strip_edges().is_empty() or _state.phase in ["idle","auth_rejected"]:
 		return ""
+	set_typing(false)
 	var id: String
 	if _waiting_history:
 		if _pending_history.size() >= 128 or text.to_utf8_buffer().size() > 8*1024*1024-1024:
@@ -173,6 +195,9 @@ func stop_voice() -> void:
 	_media.stop_current()
 
 func stop() -> void:
+	if _typing and _state.phase == "ready":
+		_transport.send_event("user_typing", {"text_length":0}, false)
+	_typing = false
 	_touch_areas.clear()
 	_touch_count = 0
 	_last_touch_ms = -1000
@@ -203,6 +228,7 @@ func _connection_changed(connection: Dictionary) -> void:
 	_state.phase = connection.phase
 	_state.code = connection.code
 	if connection.phase != "ready":
+		_typing = false
 		_touch_areas.clear()
 		_touch_count = 0
 		_state.thinking = false

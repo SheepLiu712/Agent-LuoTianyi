@@ -172,7 +172,11 @@ func _account_changed(state: Dictionary) -> void:
 			_expanded = true
 			_split.dragger_visibility = SplitContainer.DRAGGER_VISIBLE
 			_resize_window(_expanded_size, Vector2i(960, 640))
-		_lifecycle.start(_session.get_session())
+		var lifecycle_result: Error = _lifecycle.start(_session.get_session())
+		if lifecycle_result != OK:
+			_log.record("account_state", {"phase":"signed_out", "code":"ACCOUNT_START_FAILED"})
+			_session.logout()
+			return
 	else:
 		_coordinator.close_all()
 		_lifecycle.stop()

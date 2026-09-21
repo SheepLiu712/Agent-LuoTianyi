@@ -43,9 +43,23 @@ func _run() -> void:
 	check(responses.one.get("usage") == {"total_tokens":3},"only token usage metrics returned")
 	executor.submit(request)
 	var image_request := request.duplicate(true)
-	image_request.merge({"request_id":"image","type":"vision-purpose","model_kind":"vlm","image_base64":"data:image/png;base64,AA=="},true)
+	var fixture_image := Image.create(2, 2, false, Image.FORMAT_RGB8)
+	fixture_image.fill(Color("66ccff"))
+	image_request.merge({"request_id":"image","type":"vision-purpose","model_kind":"vlm","image_base64":"data:image/png;base64," + Marshalls.raw_to_base64(fixture_image.save_png_to_buffer())},true)
 	executor.submit(image_request)
 	await wait_for("image")
+	var external_image := image_request.duplicate(true)
+	external_image.request_id = "external-image"
+	external_image.image_base64 = "https://example.invalid/image.png"
+	executor.submit(external_image)
+	await wait_for("external-image")
+	check(responses["external-image"].get("error") == "IMAGE_FORMAT", "model rejects external image URL")
+	var malformed_image := image_request.duplicate(true)
+	malformed_image.request_id = "malformed-image"
+	malformed_image.image_base64 = "data:image/png;base64,not-base64!"
+	executor.submit(malformed_image)
+	await wait_for("malformed-image")
+	check(responses["malformed-image"].get("error") == "IMAGE_FORMAT", "model rejects malformed image data URI")
 	var http = load("res://src/network/json_request.gd").new()
 	root.add_child(http)
 	var stats: Dictionary = await http.send(base+"/provider-stats",HTTPClient.METHOD_GET)

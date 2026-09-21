@@ -265,7 +265,9 @@ func set_scope(server: String, username: String) -> Error:
 	reset()
 	_metadata.clear()
 	_cache_errors.clear()
-	return _cache.set_scope(server,username) if _cache != null else ERR_UNCONFIGURED
+	# A cache is optional for text chat.  Lack of the replay capability must
+	# not make the transport/account session fail to start.
+	return _cache.set_scope(server,username) if _cache != null else OK
 
 func get_message_audio(id: String) -> Dictionary:
 	if not _metadata.has(id):

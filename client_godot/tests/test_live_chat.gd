@@ -30,6 +30,7 @@ func _run() -> void:
 	session.state_changed.connect(func(state): thinking_seen = thinking_seen or state.thinking)
 	check(session.start({"server":OS.get_environment("GODOT_TEST_SERVER") + "/prefix", "username":"conversation", "message_token":"message-test"}) == OK, "chat starts real transport")
 	check(await until(func(): return session.get_state().phase == "ready"), "chat reports authenticated connection")
+	check(session.set_typing(true, 2) == OK and session.set_typing(false) == OK, "typing is a transient chat event")
 	check(session.send_text(" \n ").is_empty() and session.get_messages().is_empty(), "blank chat rejected")
 	check(ResourceLoader.exists(VIEW_SCENE),"chat view scene exists")
 	if not ResourceLoader.exists(VIEW_SCENE):
