@@ -31,6 +31,14 @@ func run() -> void:
 		check(candidate.get_node_or_null("%" + name) != null, "scene authors " + name)
 	check(candidate.has_method("select_mode") and candidate.has_signal("feedback_requested"), "account view exposes navigation and feedback")
 	check(candidate.get_node_or_null("%AccountMode") == null, "old account-mode dropdown is removed")
+	var option: CheckBox = candidate.get_node("%AutoLogin")
+	var circle := option.get_theme_icon("unchecked").get_image()
+	check(circle.get_width() == 24 and circle.get_height() == 24 and circle.get_pixel(0,0).a < .1 and circle.get_pixel(12,12).a < .1, "login checkbox is a 24px hollow circle, not a square")
+	check(option.get_theme_font_size("font_size") == 18, "login options use reference-sized regular text")
+	for control_name in ["AutoLogin","Remember","ResetLink","RegisterLink","HistoryButton"]:
+		var control: Control = candidate.get_node("%"+control_name)
+		check(control.get_theme_stylebox("disabled").bg_color.a == 0, "busy state keeps transparent control background: " + control_name)
+		check(control.get_theme_color("font_disabled_color").is_equal_approx(control.get_theme_color("font_color")), "busy state preserves text color: " + control_name)
 	candidate.free()
 	if not failures.is_empty():
 		quit(1)
