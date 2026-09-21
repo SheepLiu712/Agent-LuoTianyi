@@ -2,7 +2,7 @@
 
 功能基线：`79ae2c0`。当前为独立开发工程，实际完成范围见 [进度](../docs/开发进程文档/开发进度/Godot-Windows客户端.md)。尚未替换旧端，不读取旧端凭据。
 
-现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；0.1.3新增必要回归后共58个行为测试，旧文件迁移关系以该入口和测试契约为准。
+现行测试分组、单脚本与GPU命令见[测试入口](tests/README.md)；脚本清单与覆盖迁移以该入口和测试契约为准。
 
 ## 构建
 
@@ -114,3 +114,9 @@ GPU原生窗框截图需要安装`tests/requirements-visual.txt`中的Pillow及�
 界面精简与状态修正见[完成记录](../docs/开发进程文档/开发进度/Godot界面精简与状态修正.md)。读取/保存中的设置输入框保持浅色只读；API/JSON/thinking开关采用浅蓝选中底、深色文字和深蓝焦点。可运行`run_feature_tests.py --godot <exe> --script res://tests/ui/test_settings_control_states.gd --gpu`复验延迟/失败加载与100/125/150/200%内容缩放，证据保存在`artifacts/ui-refinement/`。
 
 0.1.3登录与气泡契约见[interface](../docs/项目说明/项目架构与接口（spec）/接口文档/client_godot/release-013.md)，实际验证与包信息见[进度](../docs/开发进程文档/开发进度/Godot-0.1.3登录与气泡.md)。登录GPU验收使用`run_feature_tests.py --godot <exe> --script res://tests/ui/test_login_presentation.gd --gpu`；气泡使用`--script res://tests/ui/test_bubble_sizing.gd`与`test_image_bubble_sizing.gd`，可独立headless/GPU运行。
+
+## 平台隔离与扩展
+
+[当前接口索引](../docs/项目说明/项目架构与接口（spec）/接口文档/client_godot/README.md)区分现行契约与历史迁移快照。普通UI/业务只使用能力接口，composition负责构造，application负责账号/窗口生命周期；平台实现位于platform及各存储实现中。共享输入框和气泡现在位于src/ui，两个预览入口保留。
+
+三个extensions接口默认NOT_IMPLEMENTED，无产品入口，不表示已经支持换装、箱庭或设备互联。Android仍需实现安全/模型/音频等后端、移动宿主与权限，不能用桌面验证代替手机验收。本轮版本保持0.1.3，只有源码修改，不生成或覆盖ZIP。

@@ -11,3 +11,6 @@ foreach ($script in @('test_application_window.gd', 'ui/test_login_presentation.
     & $Python (Join-Path $ProjectRoot 'tests/run_feature_tests.py') --godot $engine --script "res://tests/$script"
     if ($LASTEXITCODE -ne 0) { throw "Application account check failed: $script" }
 }
+
+& $Python (Join-Path $ProjectRoot 'tests/test_dependency_boundaries.py')
+if ($LASTEXITCODE -ne 0) { throw 'Client dependency boundaries failed.' }

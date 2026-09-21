@@ -1,6 +1,6 @@
 # Godot 测试入口
 
-当前有59个`test_*.gd`：55个由四组headless检查编排，4个仅用于图形/原生窗口验收。另有4个`capture_*.gd`视觉入口。目录表示模块职责，GPU能力由运行方式区分；未列入默认组不代表过时。
+测试包括四组headless检查以及显式图形/原生窗口验收；各组脚本清单以对应check脚本为准。另有capture视觉入口。目录表示模块职责，GPU能力由运行方式区分；未列入默认组不代表过时。
 
 完整契约及旧脚本迁移对照见[测试契约](../../docs/项目说明/项目架构与接口（spec）/接口文档/client_godot/testing.md)，完成事实见[进度](../../docs/开发进程文档/开发进度/Godot测试精简与解耦.md)。历史文档中的旧文件名不再作为当前运行入口。
 
@@ -19,10 +19,10 @@ $python = '<已安装测试依赖的python.exe>'
 
 | 分组 | 当前内容 |
 | --- | --- |
-| check | 导入、启动、离线样板及31个Godot测试，共34项；无需Python，包含可靠队列与凭据基础检查 |
+| check | 导入、启动、离线样板及Godot模块测试；无需Python，包含可靠队列与凭据基础检查 |
 | accounts | 原服务端加密互操作及6个账户协议/会话/历史/UI/Application测试；整应用用完整HTTP/WebSocket夹具 |
 | network | 4个WebSocket/真实聊天/语音/触摸上报测试；不重复直接执行可靠队列测试 |
-| features | 3个历史/图片、8个设置/退出/模型、3个动态测试，共14个 |
+| features | 3个历史/图片、8个设置/退出/模型、3个动态测试，及扩展契约测试 |
 
 各组可独立运行，不依赖前一组生成状态；首次使用新检出应先完成Godot资源导入。`scripts/common.ps1`和各Python runner保留各自错误/超时判定，不能仅根据生成截图认定通过。
 
@@ -66,3 +66,13 @@ Python runner入口统一带`--godot $engine --script res://tests/<脚本> --gpu
 - 失败、取消、账号隔离及资源释放场景独立创建对象/时钟/信号记录/临时目录。不要为减少文件数把不同层的测试串成依赖前置步骤的大流程。
 - 移动`.gd`时一起移动其UID；删除已替代测试时删除对应UID和执行入口。现行命令同步更新，历史完成记录保留并链接本页。
 - 图形检查输出在artifacts；本次整理的前后日志在artifacts/test-cleanup。未实测的平台或外部服务必须明确记录。
+
+## 平台隔离新增验证
+
+- `test_dependency_boundaries.py`：在账户检查执行；可独立用Python运行，检查实际代码标记（忽略注释/字符串）、依赖方向和普通消费者不创建具体平台/存储实现。
+- `media/test_capability_failures.gd`：基础组，缺失解码器终止一次、队列可结束、失败重放关闭读取流。
+- `application/test_platform_degradation.gd`：基础组，无认证仍可开日志、无模型明确反馈。
+- `application/test_extension_contracts.gd`：功能组，本地账户夹具；三个默认接口拒绝、无假完成，真实应用切账号时上下文隔离和停止。
+- `support/native_reply_audio.gd`只装配真实播放器和真实原生工厂，没有复制播放器实现。媒体消费者不再依赖隐式ClassDB创建。
+
+本轮前后日志在`artifacts/isolation-baseline`。原生驱动等待DWM动画、只移动自身测试窗口并校验点击目标，避免桌面浮层抢占导致误判。无需打包即可进行本轮源码回归；系统DPI、Android、多屏和公共服务仍须单独验收。

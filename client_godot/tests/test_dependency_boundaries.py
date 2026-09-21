@@ -1,6 +1,7 @@
 """Source-level architecture contracts, independent of renderer/native plugins."""
 from pathlib import Path
 import re
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,7 +33,7 @@ class DependencyBoundaries(unittest.TestCase):
 
     def test_platform_calls_are_behind_adapters(self):
         paths = [ROOT/'src/application.gd']
-        for directory in ['ui', 'session', 'avatar', 'preview']:
+        for directory in ['ui', 'session', 'avatar', 'preview', 'application']:
             paths += list((ROOT/'src'/directory).rglob('*.gd'))
         self.assert_no_calls(paths, r'\b(?:OS|DisplayServer|ClassDB|FileAccess|DirAccess|ConfigFile|JavaClassWrapper|JavaScriptBridge)\b')
 
@@ -46,7 +47,7 @@ class DependencyBoundaries(unittest.TestCase):
                 self.assertNotRegex(path.read_text(encoding='utf-8'), r'(?:load|preload)\("res://src/preview/')
 
     def test_consumers_do_not_create_concrete_platform_or_storage(self):
-        for directory in ['ui', 'session', 'avatar', 'preview']:
+        for directory in ['ui', 'session', 'avatar', 'preview', 'application']:
             for path in (ROOT/'src'/directory).rglob('*.gd'):
                 source = path.read_text(encoding='utf-8')
                 self.assertNotRegex(source, r'(?:load|preload)\("res://src/platform/(?:godot_|windows_|native_|desktop_|cubism_)')
@@ -55,4 +56,4 @@ class DependencyBoundaries(unittest.TestCase):
 
 
 if __name__ == '__main__':
-    unittest.main()
+    unittest.main(testRunner=unittest.TextTestRunner(stream=sys.stdout))

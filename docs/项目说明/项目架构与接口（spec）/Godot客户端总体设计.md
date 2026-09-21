@@ -72,3 +72,9 @@ UI 固定节点与静态样式由 `.tscn` / `theme/app_theme.tres` 承载，脚�
 Application 仍是服务组装根；UI 窗口层负责几何、依附关系、统一关闭与草稿汇总，不接管业务协议。2026-09-21用户选择恢复桌面系统窗框与三键，WindowChrome仅保留几何协调，内部界面/下拉使用Godot Panel及StyleBoxFlat圆角，不用遮罩或Windows圆角扩展。角色、媒体、会话、存储保持既有职责。窗口几何与草稿分离：只有几何持久化，草稿仅驻留会话内。最新契约见接口文档client_godot/feedback-012.md，取代window-redesign.md中已变更的自绘窗口与旧入口条目。
 
 磁盘查询以StorageService为唯一业务/UI依赖；GodotStorageService子类和StorageVolume原生适配封装平台API。容量/目录大小统一64位int bytes，未知为-1，UI不得显示成零占用。Windows适配已编译验证；POSIX分支及移动端注册/导出仍须在目标构建验收，不把跨平台控件和接口设计当作手机端已交付。
+
+## 平台隔离后的现行边界
+
+服务图由ApplicationServices构造，账号业务由AccountLifecycle启停，WindowCoordinator统一处理草稿和业务窗口。主视图不直接访问文件、系统窗口API或原生插件；具体能力通过场景资源/构造注入。StorageService继续负责登录存储与容量，其余能力按职责独立，禁止全局服务定位器。当前契约见[平台隔离](接口文档/client_godot/platform-isolation.md)。
+
+AppearanceService/WorldService/DeviceService只有代码接口和不可用默认实现；账号退出统一停止，上下文不含认证材料。无新页面、服务端协议或设备连接。Windows原生DLL保留，Android/iOS实现和移动布局尚未交付。
