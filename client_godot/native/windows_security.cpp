@@ -7,17 +7,20 @@
 #include <bcrypt.h>
 #include <wincrypt.h>
 #include <cstring>
+#include <cstdint>
 #include <vector>
 #include "pcm_stream_decoder.h"
 #include "storage_volume.h"
 using namespace godot;
 
 namespace {
-Dictionary result(const char *error, const PackedByteArray &data = PackedByteArray()) {
+Dictionary result(const char *error, const PackedByteArray &data = PackedByteArray(), int64_t native_code = 0) {
     Dictionary value;
     value["ok"] = error[0] == '\0';
     value["error"] = error;
     value["data"] = data;
+    value["stage"] = "native_code";
+    value["native_code"] = native_code;
     return value;
 }
 struct KeyHandle {
@@ -48,7 +51,7 @@ Dictionary dpapi(const PackedByteArray &input, const PackedByteArray &scope, boo
     const BOOL ok = decrypt
         ? CryptUnprotectData(&source, nullptr, &entropy, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output.value)
         : CryptProtectData(&source, L"AgentLuo", &entropy, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output.value);
-    if (!ok) return result(decrypt ? "UNPROTECT_FAILED" : "PROTECT_FAILED");
+    if (!ok) return result(decrypt ? "UNPROTECT_FAILED" : "PROTECT_FAILED", PackedByteArray(), GetLastError());
     PackedByteArray bytes;
     bytes.resize(output.value.cbData);
     if (output.value.cbData) std::memcpy(bytes.ptrw(), output.value.pbData, output.value.cbData);
@@ -71,34 +74,40 @@ public:
         if (encoded.length() > 16384) return result("INVALID_KEY");
         DWORD size = 0;
         if (!CryptStringToBinaryA(encoded.get_data(), static_cast<DWORD>(encoded.length()),
-                CRYPT_STRING_BASE64HEADER, nullptr, &size, nullptr, nullptr)) return result("INVALID_KEY");
+                CRYPT_STRING_BASE64HEADER, nullptr, &size, nullptr, nullptr)) return result("INVALID_KEY", PackedByteArray(), GetLastError());
         std::vector<BYTE> der(size);
         if (!CryptStringToBinaryA(encoded.get_data(), static_cast<DWORD>(encoded.length()),
-                CRYPT_STRING_BASE64HEADER, der.data(), &size, nullptr, nullptr)) return result("INVALID_KEY");
+                CRYPT_STRING_BASE64HEADER, der.data(), &size, nullptr, nullptr)) return result("INVALID_KEY", PackedByteArray(), GetLastError());
         CERT_PUBLIC_KEY_INFO *info = nullptr;
         DWORD info_size = 0;
         if (!CryptDecodeObjectEx(X509_ASN_ENCODING, X509_PUBLIC_KEY_INFO, der.data(), size,
-                CRYPT_DECODE_ALLOC_FLAG, nullptr, &info, &info_size)) return result("INVALID_KEY");
+                CRYPT_DECODE_ALLOC_FLAG, nullptr, &info, &info_size)) return result("INVALID_KEY", PackedByteArray(), GetLastError());
         KeyHandle key;
         const bool is_rsa = info->Algorithm.pszObjId && std::strcmp(info->Algorithm.pszObjId, szOID_RSA_RSA) == 0;
         const BOOL imported = is_rsa && CryptImportPublicKeyInfoEx2(X509_ASN_ENCODING, info, 0, nullptr, &key.value);
+        const DWORD import_error = imported ? ERROR_SUCCESS : GetLastError();
         LocalFree(info);
-        if (!imported) return result("INVALID_KEY");
+        if (!imported) return result("INVALID_KEY", PackedByteArray(), import_error);
         DWORD bits = 0, copied = 0;
-        if (BCryptGetProperty(key.value, BCRYPT_KEY_LENGTH, reinterpret_cast<PUCHAR>(&bits),
-                sizeof(bits), &copied, 0) < 0 || bits < 2048 || bits > 8192) return result("INVALID_KEY");
+        const NTSTATUS property_status = BCryptGetProperty(key.value, BCRYPT_KEY_LENGTH, reinterpret_cast<PUCHAR>(&bits),
+                sizeof(bits), &copied, 0);
+        if (property_status < 0 || bits < 2048 || bits > 8192) {
+            return result("INVALID_KEY", PackedByteArray(), property_status < 0 ? static_cast<int64_t>(property_status) : 0);
+        }
         PasswordBytes plain(password);
         if (plain.value.length() > bits / 8 - 2 * 32 - 2) return result("INVALID_INPUT");
         BCRYPT_OAEP_PADDING_INFO padding{BCRYPT_SHA256_ALGORITHM, nullptr, 0};
         ULONG required = 0;
         auto *bytes = reinterpret_cast<PUCHAR>(plain.value.ptrw());
         const ULONG length = static_cast<ULONG>(plain.value.length());
-        if (BCryptEncrypt(key.value, bytes, length, &padding, nullptr, 0, nullptr, 0,
-                &required, BCRYPT_PAD_OAEP) < 0) return result("ENCRYPTION_FAILED");
+        const NTSTATUS size_status = BCryptEncrypt(key.value, bytes, length, &padding, nullptr, 0, nullptr, 0,
+                &required, BCRYPT_PAD_OAEP);
+        if (size_status < 0) return result("ENCRYPTION_FAILED", PackedByteArray(), static_cast<int64_t>(size_status));
         PackedByteArray cipher;
         cipher.resize(required);
-        if (BCryptEncrypt(key.value, bytes, length, &padding, nullptr, 0, cipher.ptrw(), required,
-                &required, BCRYPT_PAD_OAEP) < 0) return result("ENCRYPTION_FAILED");
+        const NTSTATUS encrypt_status = BCryptEncrypt(key.value, bytes, length, &padding, nullptr, 0, cipher.ptrw(), required,
+                &required, BCRYPT_PAD_OAEP);
+        if (encrypt_status < 0) return result("ENCRYPTION_FAILED", PackedByteArray(), static_cast<int64_t>(encrypt_status));
         cipher.resize(required);
         return result("", cipher);
     }

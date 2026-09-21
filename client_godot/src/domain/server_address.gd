@@ -21,6 +21,17 @@ static func normalize(address: String) -> String:
 		for part in host.split("."):
 			if part.is_empty() or part.begins_with("-") or part.ends_with("-") or part.length() > 63:
 				return ""
+		# A dotted host made entirely of decimal labels is an IPv4 literal,
+		# rather than a DNS name. Reject malformed numeric literals instead of
+		# letting them pass the hostname grammar and fail later in the request.
+		if host.contains("."):
+			var numeric_host := true
+			for part in host.split("."):
+				if not part.is_valid_int():
+					numeric_host = false
+					break
+			if numeric_host and not host.is_valid_ip_address():
+				return ""
 	var port := matched.get_string(3)
 	if not port.is_empty():
 		if int(port) < 1 or int(port) > 65535:

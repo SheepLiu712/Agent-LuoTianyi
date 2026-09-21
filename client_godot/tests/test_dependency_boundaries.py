@@ -33,9 +33,20 @@ class DependencyBoundaries(unittest.TestCase):
 
     def test_platform_calls_are_behind_adapters(self):
         paths = [ROOT/'src/application.gd']
-        for directory in ['ui', 'session', 'avatar', 'preview', 'application']:
+        for directory in ['domain', 'network', 'ui', 'session', 'avatar', 'preview', 'application']:
             paths += list((ROOT/'src'/directory).rglob('*.gd'))
         self.assert_no_calls(paths, r'\b(?:OS|DisplayServer|ClassDB|FileAccess|DirAccess|ConfigFile|JavaClassWrapper|JavaScriptBridge)\b')
+
+    def test_domain_and_network_do_not_import_platform(self):
+        paths = list((ROOT / 'src' / 'domain').rglob('*.gd'))
+        paths += list((ROOT / 'src' / 'network').rglob('*.gd'))
+        self.assert_no_calls(paths, r'(?:load|preload)\("res://src/platform/')
+
+    def test_business_consumers_do_not_instantiate_native_extensions(self):
+        paths = []
+        for directory in ['domain', 'network', 'ui', 'session', 'media', 'avatar', 'preview', 'application']:
+            paths += list((ROOT / 'src' / directory).rglob('*.gd'))
+        self.assert_no_calls(paths, r'\bClassDB\s*\.\s*(?:class_exists|instantiate)\s*\(')
 
     def test_storage_does_not_import_network(self):
         for path in (ROOT/'src/storage').rglob('*.gd'):
@@ -47,7 +58,7 @@ class DependencyBoundaries(unittest.TestCase):
                 self.assertNotRegex(path.read_text(encoding='utf-8'), r'(?:load|preload)\("res://src/preview/')
 
     def test_consumers_do_not_create_concrete_platform_or_storage(self):
-        for directory in ['ui', 'session', 'avatar', 'preview', 'application']:
+        for directory in ['domain', 'network', 'ui', 'session', 'avatar', 'preview', 'application']:
             for path in (ROOT/'src'/directory).rglob('*.gd'):
                 source = path.read_text(encoding='utf-8')
                 self.assertNotRegex(source, r'(?:load|preload)\("res://src/platform/(?:godot_|windows_|native_|desktop_|cubism_)')

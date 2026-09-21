@@ -14,7 +14,7 @@ UI → 应用协调/业务控制器 → 注入的能力接口 → Godot/平台�
 - InputService：读取剪贴板图片、复制文本、查询 IME 合成状态；不可用返回空图片/明确 Error/false，不吞掉普通文本粘贴。控件自身 has_ime_text 仍同时参与防误发。
 - FileInteraction：由场景提供原生 FileDialog，实现连接其选择/取消；图片结果为 `{ok,code,bytes,mime}`，失败/取消不清已有附件。导出目的地为受控句柄，日志写入由句柄交给存储实现，不让 UI 处理平台路径。请求取消及旧账号回调不得更新新页面。
 - ReadStream：get_buffer(size)、get_length/get_position、close；关闭幂等。缓存提供流而不向播放器暴露 FileAccess。播放器停止、失败和切账号必须关闭流。
-- PasswordEncryption.encrypt_password 与 SecretProtection.protect_secret/unprotect_secret 沿用现有字节结果契约；Windows 实现委托既有 DLL，缺失返回错误，不自动降级。认证不可用禁止登录，日志/反馈仍可访问。
+- PasswordEncryption.encrypt_password 与 SecretProtection.protect_secret/unprotect_secret 沿用现有字节结果契约；Windows 实现委托既有 DLL，不自动降级。SecretProtection 在 DLL 缺失时返回 `SECURITY_UNAVAILABLE`；原生安全结果带 `stage="native_code"` 与 `native_code` 诊断整数；认证不可用禁止登录，日志/反馈仍可访问。
 - DecoderFactory.create_decoder 返回统一 decoder（append/finish/read_frames/get_status/get_amplitude/get_waveform）；缺失返回 null。在线和重放均使用工厂，缺失仍保留聊天正文并完成错误生命周期。
 - AvatarDriver 保留 load_character/load_avatar/apply_expression/play_motion/set_mouth_openness/set_gaze/hit_test/get_status；Cubism 子实现负责资源和原生对象，失败不替换已有模型。UI只依赖项目驱动语义。
 - WindowHost 负责桌面窗口外观、模式、屏幕范围、焦点、拖动和原生归属；窗口协调负责复用、草稿和图片来源。RuntimeEnvironment 负责启动参数、headless、日志注册和运行环境信息；平台选择仅发生在组装实现。
@@ -65,7 +65,7 @@ AvatarDriver成为项目接口，CubismAvatarDriver为具体实现，场景的Dr
 
 ApplicationServices位于composition，只负责构造与挂接当前服务图、设置/动态窗口工厂及配置实例；不处理登录决策或草稿确认。Application保留setup(account_session,layout_path,external_links)启动注入兼容，但将路径交给组装模块，不再直接构造网络/平台实现。
 
-AccountLifecycle(chat,models,dynamics,appearance=null,world=null,devices=null)提供start(session)、stop()、get_context()。每次开始先结束旧范围，代次单调递增，模块仅收到scope_id/generation/character_id副本；停止幂等并隔离旧代次，不传认证字段给扩展。
+AccountLifecycle(chat,models,dynamics,appearance=null,world=null,devices=null)提供`start(session) -> Error`、`stop()`、`get_context()`。每次开始先结束旧范围，先验证 ChatSession transport，再启动其他控制器；失败时逆序回滚并清除账号作用域。代次单调递增，模块仅收到scope_id/generation/character_id副本；停止幂等并隔离旧代次，不传认证字段给扩展。Appearance/World/Device 返回 ERR_UNAVAILABLE 时作为可选能力缺失继续登录，其他启动错误阻止本次激活。
 
 WindowCoordinator(host,dialog,images,geometry,settings_factory,dynamics_factory,chat_dirty)提供open(kind)、request_close(action)、close_all、dispose，以及exit_requested/logout_requested信号。工厂返回window及窗口就绪后执行的start Callable；协调器拥有窗口索引、汇总草稿、保存等待和取消流程，不发送协议或直接退出账号。账号退出/应用退出由Application接收信号并调用现有会话/场景树接口。只读日志仍由Application单独持有。
 

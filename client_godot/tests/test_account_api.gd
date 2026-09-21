@@ -27,7 +27,7 @@ func run() -> void:
 	check(ServerAddress.normalize(" EXAMPLE.org:443/api/ ") == "https://example.org/api", "server canonicalization")
 	check(ServerAddress.normalize("http://127.0.0.1:80") == "http://127.0.0.1", "default HTTP port removed")
 	check(ServerAddress.normalize("https://[::1]:8443/") == "https://[::1]:8443", "IPv6 supported")
-	for invalid in ["", "ftp://host", "https://user:pass@host", "https://host?token=x", "https://host:99999", "https://host/a b"]:
+	for invalid in ["", "ftp://host", "https://user:pass@host", "https://host?token=x", "https://host:99999", "https://host/a b", "https://999.1.1.1", "https://1.2.3.999", "https://1.2.3.4.5"]:
 		check(ServerAddress.normalize(invalid).is_empty(), "unsafe address rejected")
 	var api = Api.new(ClassDB.instantiate("WindowsSecurity"), 0.15)
 	root.add_child(api)
