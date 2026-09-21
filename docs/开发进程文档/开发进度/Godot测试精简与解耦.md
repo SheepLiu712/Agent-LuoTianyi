@@ -14,3 +14,9 @@
 - editable_scene_children的下拉子场景来源、SecurityError与分隔场景检查迁入test_ui_scenes；动态选中样式迁入test_theme_contract，原脚本/UID及入口删除。主题保留当前色彩/圆角/状态需求，移除固定Windows字体、Shader源码和纹理生成算法镜像。
 - 修改前四组基线全部通过：base 34项、accounts互操作+4项、network 5项、features 15项；设置布局、圆角下拉、完整下拉、设置状态和动态GPU均PASS。基线日志位于client_godot/artifacts/test-cleanup/before-*.log。
 - 整理后test_ui_scenes和test_theme_contract逐项独立执行PASS；作者自审对照迁移表，场景、主题及产品脚本均未修改。GPU基线只代表本机Compatibility/NVIDIA环境，不代表手机或系统DPI验收。
+
+### 2026-09-21 音频、缓存和动态按职责合并
+
+- 回复音频和生命周期合为media/test_reply_audio，缓存持久化与天数清理合为storage/test_audio_cache，保留目标原UID。每组使用独立被测实例；生命周期时钟/信号集合不复用混音场景，缓存两组临时目录分开。clear(days)以真实调用验证，去掉参数数量反射。
+- 旧test_dynamics_window的写接口验证归入test_dynamics，发布失败/草稿/窗口生命周期归入test_dynamics_detail；两组重新创建控制器及窗口。详情几何文件从固定名称改为本次独占名称，消除跨运行依赖。
+- 删除三个被替代脚本及UID，更新check入口和音频README命令。四个合并目标分别独立运行PASS（真实Godot混音/缓存及本地动态HTTP夹具）。SPEC 1c29614；Red不适用，Green为本记录提交；作者自审确认原独有断言保留，产品代码不变。

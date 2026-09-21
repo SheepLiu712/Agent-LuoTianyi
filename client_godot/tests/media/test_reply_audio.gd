@@ -32,6 +32,12 @@ func _initialize() -> void:
 	_run.call_deferred()
 
 func _run() -> void:
+	await test_mixer()
+	await test_lifecycle()
+	print("Reply audio mixer and lifecycle: ", "PASS" if failures.is_empty() else "FAIL")
+	quit(0 if failures.is_empty() else 1)
+
+func test_mixer() -> void:
 	AudioServer.add_bus_effect(0, capture)
 	var directory := "user://audio-test-%s" % Time.get_ticks_usec()
 	var logger = Log.new(directory)
@@ -95,5 +101,68 @@ func _run() -> void:
 	for file in DirAccess.get_files_at(directory):
 		DirAccess.remove_absolute(directory.path_join(file))
 	DirAccess.remove_absolute(directory)
-	print("Reply audio mixer: ", "PASS" if failures.is_empty() else "FAIL")
-	quit(0 if failures.is_empty() else 1)
+
+func test_lifecycle() -> void:
+	var clock: Array[int] = [0]
+	var lifecycle_received: Array[String] = []
+	var lifecycle_played: Array[String] = []
+	var lifecycle_codes: Dictionary = {}
+	var audio := Audio.new(null,func(): return clock[0])
+	root.add_child(audio)
+	audio.receive_finished.connect(func(id, _code): lifecycle_received.append(id))
+	audio.playback_finished.connect(func(id, code): lifecycle_played.append(id); lifecycle_codes[id] = code)
+	audio.append_reply_audio("text", "", true)
+	audio.play_reply("text")
+	await process_frame
+	await process_frame
+	audio.append_reply_audio("text", "", true)
+	audio.play_reply("text")
+	await process_frame
+	await process_frame
+	check(lifecycle_received.count("text") == 1 and lifecycle_played.count("text") == 1, "completed UUID rejects duplicate termination")
+	audio.append_reply_audio("bad", "A===", true)
+	audio.play_reply("bad")
+	audio.stop_current()
+	await process_frame
+	await process_frame
+	check(lifecycle_codes.get("bad") == "INVALID_BASE64", "stop does not overwrite decode error")
+	audio.append_reply_audio("timeout", "", false)
+	audio.play_reply("timeout")
+	clock[0] = 60001
+	await process_frame
+	await process_frame
+	check(lifecycle_codes.get("timeout") == "AUDIO_TIMEOUT", "missing continuation terminates at 60 seconds")
+	audio.reset()
+	for i in 16:
+		audio.append_reply_audio("queue-%s" % i, "", false)
+	audio.append_reply_audio("overflow", "", true)
+	check(lifecycle_codes.get("overflow") == "BUFFER_LIMIT", "17th pending reply rejected")
+	audio.append_reply_audio("queue-0", "", true)
+	audio.play_reply("queue-0")
+	await process_frame
+	await process_frame
+	audio.append_reply_audio("overflow", "", true)
+	audio.play_reply("overflow")
+	await process_frame
+	await process_frame
+	check(lifecycle_played.count("overflow") == 1 and lifecycle_received.count("overflow") == 1, "rejected UUID cannot restart after capacity frees")
+	audio.reset()
+	var header := Samples.tone(0)
+	header.encode_u32(40,0xffffffff)
+	var pcm := PackedByteArray()
+	pcm.resize(2*1024*1024)
+	var encoded := Marshalls.raw_to_base64(pcm)
+	for i in 8:
+		var id := "memory-%s" % i
+		audio.append_reply_audio(id,Marshalls.raw_to_base64(header),false)
+		audio.append_reply_audio(id,encoded,false)
+		audio.append_reply_audio(id,encoded,false)
+	audio.append_reply_audio("memory-7",encoded,false)
+	check(lifecycle_received.has("memory-7"), "aggregate memory bound fails receiving stream")
+	audio.play_reply("memory-7")
+	await process_frame
+	await process_frame
+	check(lifecycle_codes.get("memory-7") == "BUFFER_LIMIT", "aggregate decoder buffers bounded across UUIDs")
+	audio.reset()
+	audio.queue_free()
+	await process_frame

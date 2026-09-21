@@ -66,7 +66,7 @@ python client_godot/tests/run_security_interop.py --godot $env:GODOT_BIN
 `check.ps1` 增量解码及真实混音测试默认使用合成音频；`check_network.ps1` 还验证 loopback WebSocket 到播放器链路、顺序、隐藏音频、停止及断线。Windows 输出驱动验证可运行：
 
 ```powershell
-& $env:GODOT_BIN --headless --audio-driver WASAPI --verbose --path client_godot --script res://tests/test_reply_audio.gd
+& $env:GODOT_BIN --headless --audio-driver WASAPI --verbose --path client_godot --script res://tests/media/test_reply_audio.gd
 ```
 
 该命令会向本机默认音频设备播放短合成音；AudioEffectCapture 检查非零混音输出及静音，不等同人工听感或真实服务验收。
