@@ -115,6 +115,22 @@ func run() -> void:
 	await inspect_dialog(dialog, settings)
 	await click(dialog.get_cancel_button())
 	check(settings.is_dirty() and field.text == "failed save must retain this" and not session.get_session().is_empty(), "failed-save logout cancellation preserves draft and account")
+	# A public save request may arrive after the original close snapshot.
+	settings.get_node("%LogoutButton").pressed.emit()
+	settings.save_changes()
+	dialog.get_ok_button().pressed.emit()
+	check(not session.get_session().is_empty(), "confirmation rechecks a save started after the close request")
+	if session.get_session().is_empty():
+		app.queue_free()
+		await process_frame
+		remove_folder(path)
+		print("Logout confirmation: FAIL")
+		quit(1)
+		return
+	check(await until(func(): return not settings.is_saving()), "save after confirmation settles before exit")
+	await inspect_dialog(dialog, settings)
+	await click(dialog.get_cancel_button())
+	check(settings.is_dirty() and not session.get_session().is_empty(), "cancel after invalidated confirmation preserves failed draft")
 	app.queue_free()
 	await process_frame
 	remove_folder(path)
