@@ -72,6 +72,11 @@ func request_close(action: String) -> void:
 func _confirmed() -> void:
 	var action := _action
 	if _disposed or action not in ["exit","logout"]: return
+	var settings = _windows.get("settings")
+	if is_instance_valid(settings) and settings.is_saving():
+		_return_dialog()
+		request_close(action)
+		return
 	close_all()
 	_action = ""
 	if action == "exit": exit_requested.emit()

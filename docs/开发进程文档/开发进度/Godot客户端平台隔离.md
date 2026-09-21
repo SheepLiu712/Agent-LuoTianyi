@@ -47,3 +47,9 @@
 
 - SPEC 240641b、Red 943bee6：扩展架构守卫发现ChatSession在未注入时仍创建具体文件图片缓存。改为HistoryImageSource不可用接口，正式组装继续注入HistoryImages，独立会话不再隐式访问磁盘。
 - 七项架构守卫及真实HTTP历史图片/账号切换/缓存恢复/聊天原图回归通过（image-source-green.log），原图片算法未改。作者自审确认没有删除消息或更改线上协议。
+
+### 2026-09-21 独立核验后的生命周期边界修正
+
+- 独立只读核验发现重复signed_in重启及确认显示后新保存竞争。SPEC f7ff7c2，Red 9ca5539：通过真实set_login_options复现扩展重复启停；通过设置公开save_changes复现确认后立刻登出并在迟到保存中访问已销毁控件。
+- AccountLifecycle按账号scope及连接令牌的内部指纹抑制同会话重复启动；指纹不暴露给扩展。WindowCoordinator在确认时重新检查保存，失效确认先等待再重新汇总。
+- 两个聚焦回归实际由Red转Green，包含跨账号上下文、幂等停止、保存失败后取消仍保留账号和草稿，lifecycle-green-*.log通过。作者自审检查无新协议、无认证信息进入扩展。
