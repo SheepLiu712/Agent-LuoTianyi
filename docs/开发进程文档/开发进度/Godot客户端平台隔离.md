@@ -86,7 +86,7 @@
 - 交付行为：语音缓存启动时清理孤儿配对；ClientLog 实际执行单次字节/条数上限并原子替换运行元数据；WindowsSecurity 返回受控 native stage/code，DLL 缺失明确为 SECURITY_UNAVAILABLE；非法纯数字点分 IP 被拒绝。测试 runner 隔离 APPDATA/LOCALAPPDATA、严格检查退出码/FAIL/PASS，冷导入与契约检查分离，发布构建使用全新目录和锁定哈希校验。
 - interface：`ChatSession.start(session) -> Error`、`ChatSession.set_typing(active,text_length=0) -> Error`、`AccountLifecycle.start(session) -> Error`；客户端核心服务、平台隔离和日志/缓存契约已同步。
 - 提交：`33f349e`（原生安全与地址）、`f23b7df`（锁定安全 DLL）、`92e7f67`（账户/图片生命周期）、`a3166cc`（缓存/日志）、`5aed027`（测试/发布编排）、`27f8abb`（回归入口）。这些提交均在本地 `fix/godot-pr186-feedback`，未推送远程。
-- 验证：Godot 4.7.1 冷导入及基础检查通过；账户、网络、功能检查通过；模型执行、历史图片、音频缓存、客户端日志、Windows CNG/DPAPI 与 Python 解密互操作通过；依赖边界 9/9、Python 编译和 `git diff --check` 通过。新增生命周期和 typing 回归首次作为补回归测试运行，未伪造 Red 证据。
+- 验证：Godot 4.7.1 冷导入及基础检查通过；账户、网络、功能检查通过；模型执行、历史图片、音频缓存、客户端日志、Windows CNG/DPAPI 与 Python 解密互操作通过；依赖边界 9/9（含单双引号加载路径）、Python 编译和 `git diff --check` 通过。新增生命周期和 typing 回归首次作为补回归测试运行，未伪造 Red 证据。
 - 未处理：N1 的 PR 阶段祖先链/巨型提交例外、动态窗口状态、图片按钮键盘操作、登录窗框和主题集中度仍未在本切片处理。未验证 Windows 10、真实系统 DPI、多屏、手机端、公共服务和长期运行性能。用户现有 `client_godot/project.godot` 属性改动未纳入提交。
 
 ### 2026-09-22 导出模板隔离修正
