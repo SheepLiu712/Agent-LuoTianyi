@@ -9,6 +9,7 @@ var _fields: Dictionary = {}
 var _initialized := false
 var _mode := "login"
 var _busy := false
+var _checking_server := false
 var _syncing := false
 var _manual_password := false
 var _removing := ""
@@ -167,8 +168,9 @@ func _update_state(state: Dictionary) -> void:
 	%Cancel.visible = _busy and not %ServerDialog.visible
 	if state.code in ["SERVER_CHANGED","ACCOUNT_SELECTED","ACCOUNT_REMOVED","LOGGED_OUT"]: _sync_selected()
 	if state.phase == "signed_in": _clear_secrets()
-	_status.text = _error_text(state.code)
-	if state.storage_error: _status.text = _error_text("STORAGE_ERROR")
+	if not _checking_server or state.code == "SERVER_CHANGED":
+		_status.text = _error_text(state.code)
+		if state.storage_error: _status.text = _error_text("STORAGE_ERROR")
 	_apply_mode()
 
 func _open_menu() -> void:
@@ -227,7 +229,9 @@ func _open_server() -> void:
 func _save_server() -> void:
 	if _busy: return
 	%ServerStatus.text = "正在验证服务器…"
+	_checking_server = true
 	var response: Dictionary = await _session.set_server(%Server.text)
+	_checking_server = false
 	if not %ServerDialog.visible: return
 	if response.ok: %ServerDialog.hide()
 	else: %ServerStatus.text = _error_text(response.code,response.get("status",0))
