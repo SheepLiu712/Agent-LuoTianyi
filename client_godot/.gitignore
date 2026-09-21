@@ -8,3 +8,4 @@ native/.sconsign*
 native/godot-cpp/
 addons/windows_security/bin/*.lib
 addons/windows_security/bin/*.exp
+addons/**/bin/~*.dll

@@ -16,6 +16,9 @@ venv/
 Thumbs.db
 .DS_Store
 
+# Local filesystem inventory (not project source)
+/File report.txt
+
 songlearner/
 
 # Logs
