@@ -936,3 +936,13 @@ LoginPrimary/styles/disabled = SubResource("LoginPrimaryDisabled")
 
 DropdownPopup/base_type = &"PopupPanel"
 DropdownPopup/styles/panel = SubResource("LoginPopup")
+PreferenceLineEdit/base_type = &"LineEdit"
+PreferenceLineEdit/styles/read_only = SubResource("StyleBoxFlat_rckq1")
+PreferenceLineEdit/colors/font_uneditable_color = Color(0.1882353,0.27058825,0.3254902,1)
+PreferenceTextEdit/base_type = &"TextEdit"
+PreferenceTextEdit/styles/read_only = SubResource("StyleBoxFlat_p5jtr")
+PreferenceTextEdit/colors/font_readonly_color = Color(0.1882353,0.27058825,0.3254902,1)
+PreferenceButton/base_type = &"Button"
+PreferenceButton/styles/disabled = SubResource("StyleBoxFlat_ykw30")
+PreferenceButton/colors/font_disabled_color = Color(0.1882353,0.27058825,0.3254902,1)
+PreferenceButton/colors/icon_disabled_color = Color(1,1,1,1)

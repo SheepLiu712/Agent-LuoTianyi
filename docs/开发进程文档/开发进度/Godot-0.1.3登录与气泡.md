@@ -104,3 +104,9 @@
 
 - SPEC 3160daf，Red a6090c9实际复现两个“自定义”项及非预设值错误选中。移除菜单项和对应旧分支，增加静默清除选择；已保存值和直接输入保持，不自动替换成其它预设。
 - GPU设置状态/加载失败/保存/四档缩放、下拉基础行为均PASS；重新导出后原生鼠标打开关系和风格菜单，已无“自定义”，关闭/再打开及退出PASS，进程持续30秒。证据在artifacts/preset-menu-update。Green为本记录提交，已自审，无服务端变更。
+
+### 2026-09-21 设置加载时灰白切换修正
+
+- 根因：PreferencesController加载期间phase=loading，PreferencesPage将输入editable设为false、按钮disabled设为true；主题ReadOnlyInput为#EEF5F9灰蓝底且带边框，与normal纯白无边框不同。服务端响应后phase=ready恢复普通样式，形成先灰后白；不是渲染未完成或窗口失焦。
+- SPEC 9778ad1；Red d48b4e3通过本地延迟/失败/保存接口实际复现四个字段及三个按钮的状态颜色差异。相处页增加专用主题变体：只读与普通字段共用白底/文字色，预设和重新加载保持底色；原editable/disabled与状态提示逻辑不变，失败仍允许重试。
+- GPU加载/失败/保存/恢复编辑、默认/最小窗口及四档内容缩放PASS；实际采样白底亮度>0.99，同时断言输入不可编辑，证明没有通过提前解锁掩盖问题。已查看settings-loading/settings-saving截图，修正限定相处页。Green为本记录提交，已作者自审。

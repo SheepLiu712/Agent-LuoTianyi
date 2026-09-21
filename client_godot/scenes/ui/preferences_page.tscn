@@ -52,11 +52,13 @@ text = "关系"
 
 [node name="RelationshipField" type="LineEdit" parent="Margin/Scroll/Column/RelationshipRow"]
 unique_name_in_owner = true
+theme_type_variation = &"PreferenceLineEdit"
 size_flags_horizontal = 3
 placeholder_text = "关系（可自定义）"
 
 [node name="RelationshipPresets" parent="Margin/Scroll/Column/RelationshipRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
+theme_type_variation = &"PreferenceButton"
 custom_minimum_size = Vector2(40,40)
 show_selected_label = false
 icon = ExtResource("chevron")
@@ -72,11 +74,13 @@ text = "表达风格"
 
 [node name="SpeakingStyleField" type="LineEdit" parent="Margin/Scroll/Column/SpeakingStyleRow"]
 unique_name_in_owner = true
+theme_type_variation = &"PreferenceLineEdit"
 size_flags_horizontal = 3
 placeholder_text = "表达风格（可自定义）"
 
 [node name="SpeakingStylePresets" parent="Margin/Scroll/Column/SpeakingStyleRow" instance=ExtResource("3_dropdown")]
 unique_name_in_owner = true
+theme_type_variation = &"PreferenceButton"
 custom_minimum_size = Vector2(40,40)
 show_selected_label = false
 icon = ExtResource("chevron")
@@ -90,6 +94,7 @@ text = "性格关键词"
 
 [node name="PersonalityField" type="TextEdit" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
+theme_type_variation = &"PreferenceTextEdit"
 custom_minimum_size = Vector2(0, 80)
 placeholder_text = "用逗号、顿号或换行分隔"
 wrap_mode = 1
@@ -101,6 +106,7 @@ text = "补充上下文"
 
 [node name="CustomContextField" type="TextEdit" parent="Margin/Scroll/Column"]
 unique_name_in_owner = true
+theme_type_variation = &"PreferenceTextEdit"
 custom_minimum_size = Vector2(0, 120)
 placeholder_text = "想让天依了解的相处背景"
 wrap_mode = 1
@@ -113,4 +119,5 @@ autowrap_mode = 3
 
 [node name="Reload" type="Button" parent="Margin/Scroll/Column/Actions"]
 unique_name_in_owner = true
+theme_type_variation = &"PreferenceButton"
 text = "重新加载"
