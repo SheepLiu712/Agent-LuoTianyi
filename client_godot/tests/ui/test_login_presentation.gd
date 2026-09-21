@@ -42,6 +42,8 @@ func run() -> void:
 	check(candidate.has_method("select_mode") and candidate.has_signal("feedback_requested"), "account view exposes navigation and feedback")
 	check(candidate.get_node_or_null("%AccountMode") == null, "old account-mode dropdown is removed")
 	root.add_child(candidate)
+	for field in ["Username","Password","Confirm"]:
+		check(candidate.get_node("%"+field).get_theme_stylebox("focus") is StyleBoxEmpty, "login focus keeps only the caret: " + field)
 	var option: CheckBox = candidate.get_node("%AutoLogin")
 	var circle := option.get_theme_icon("unchecked").get_image()
 	check(circle.get_width() == 24 and circle.get_height() == 24 and circle.get_pixel(0,0).a < .1 and circle.get_pixel(12,12).a < .1, "login checkbox is a 24px hollow circle, not a square")
@@ -77,6 +79,25 @@ func run() -> void:
 	var view: Control = app.get_node("%AccountForm")
 	check(not view.get_node("%Server").is_visible_in_tree(), "server address is not part of the login form")
 	check(view.get_node("%RegisterLink").visible and view.get_node("%ResetLink").visible, "bottom register and forgotten-password links are visible")
+	var password: LineEdit = view.get_node("%Password")
+	password.text = "Ab_123!"
+	password.text_changed.emit(password.text)
+	password.text = "Ab_123!中文"
+	password.text_changed.emit(password.text)
+	check(password.text == "Ab_123!" and view.get_node("%Status").text.contains("英文"), "Chinese password insertion is rejected with a visible reason")
+	password.text = "mixed中文paste"
+	password.text_changed.emit(password.text)
+	check(password.text == "Ab_123!", "invalid paste restores the entire previous password")
+	view.select_mode("register")
+	var confirm: LineEdit = view.get_node("%Confirm")
+	confirm.text = "中文"
+	confirm.text_changed.emit(confirm.text)
+	check(confirm.text.is_empty(), "confirmation uses the same password alphabet")
+	view.select_mode("login")
+	password.text = "中文"
+	password.text_changed.emit(password.text)
+	check(password.text.is_empty(), "cleared secrets are not resurrected by invalid input")
+	view.select_mode("login")
 	await capture("login-default")
 	if DisplayServer.get_name() != "headless":
 		for pair in [["MenuButton","MenuPopup"],["HistoryButton","HistoryPopup"]]:
