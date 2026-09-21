@@ -41,7 +41,7 @@ func run() -> void:
 	var folder := "user://account-view-test-%s" % Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(folder)
 	var security = ClassDB.instantiate("WindowsSecurity")
-	var session = Session.new(Api.new(security), Store.new(security, folder + "/tokens"), folder + "/account.cfg")
+	var session = Session.new(Api.new(security), load("res://src/storage/godot_storage_service.gd").new(folder + "/account.cfg", Store.new(security, folder + "/tokens")))
 	root.add_child(session)
 	var view = load(VIEW_SCENE).instantiate()
 	view.setup(session)

@@ -17,7 +17,7 @@ func _run() -> void:
 	var directory := "user://log-window-test-%s" % Time.get_ticks_usec()
 	DirAccess.make_dir_recursive_absolute(directory)
 	var security = ClassDB.instantiate("WindowsSecurity")
-	var account = load("res://src/session/account_session.gd").new(load("res://src/network/account_api.gd").new(security),load("res://src/storage/credential_store.gd").new(security,directory+"/accounts"),directory+"/account.cfg")
+	var account = load("res://src/session/account_session.gd").new(load("res://src/network/account_api.gd").new(security), load("res://src/storage/godot_storage_service.gd").new(directory+"/account.cfg", load("res://src/storage/credential_store.gd").new(security,directory+"/accounts")))
 	var app = load(APP_SCENE).instantiate()
 	app.setup(account,directory+"/layout.cfg")
 	root.add_child(app)

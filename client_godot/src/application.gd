@@ -81,9 +81,11 @@ func _ready() -> void:
 		%SecurityError.show()
 		push_error("WindowsSecurity extension missing")
 		return
+	var security = ClassDB.instantiate("WindowsSecurity")
+	var data_root := _layout_path.get_base_dir()
+	_storage_service = preload("res://src/storage/godot_storage_service.gd").new(data_root.path_join("account.cfg"), Store.new(security, data_root.path_join("accounts")))
 	if _session == null:
-		var security = ClassDB.instantiate("WindowsSecurity")
-		_session = Session.new(Api.new(security), Store.new(security))
+		_session = Session.new(Api.new(security), _storage_service)
 	add_child(_session)
 	_models = preload("res://src/session/model_settings.gd").new(preload("res://src/network/json_request.gd").new(),preload("res://src/storage/model_store.gd").new(ClassDB.instantiate("WindowsSecurity"),_layout_path.get_base_dir().path_join("models")),_log)
 	add_child(_models)
@@ -98,7 +100,6 @@ func _ready() -> void:
 	%NavLogs.pressed.connect(_log_window.open)
 	var cache = Cache.new(_layout_path.get_base_dir().path_join("audio"),_log)
 	_audio_cache = cache
-	_storage_service = preload("res://src/storage/godot_storage_service.gd").new()
 	var history = preload("res://src/session/history_sync.gd").new(preload("res://src/network/history_api.gd").new(),_log)
 	var reading = preload("res://src/storage/reading_position.gd").new(_layout_path.get_base_dir().path_join("reading"))
 	var images = preload("res://src/storage/history_images.gd").new(_layout_path.get_base_dir().path_join("images"),_log)

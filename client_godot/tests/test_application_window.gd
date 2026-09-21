@@ -51,7 +51,7 @@ func _run() -> void:
 	var settings_path := folder + "/account.cfg"
 	var security = ClassDB.instantiate("WindowsSecurity")
 	var store = Store.new(security, folder + "/tokens")
-	var session = Session.new(Api.new(security), store, settings_path)
+	var session = Session.new(Api.new(security), load("res://src/storage/godot_storage_service.gd").new(settings_path, store))
 	check(session.get_login_defaults().server == DEFAULT_SERVER, "fresh account uses legacy release server")
 	var layout := ConfigFile.new()
 	layout.set_value("audio", "volume", -1.0)
@@ -104,7 +104,7 @@ func _run() -> void:
 	button(app, "退出登录")
 	app.queue_free()
 	await process_frame
-	var restored = Session.new(Api.new(security), store, settings_path)
+	var restored = Session.new(Api.new(security), load("res://src/storage/godot_storage_service.gd").new(settings_path, store))
 	check(restored.get_login_defaults().server == endpoint, "saved custom server takes precedence")
 	var restored_app = load(APP_SCENE).instantiate()
 	restored_app.setup(restored, folder + "/layout.cfg")
@@ -121,7 +121,7 @@ func _run() -> void:
 	var file := FileAccess.open(settings_path, FileAccess.WRITE)
 	file.store_string(JSON.stringify({"server":"", "username":"test", "remember":true}))
 	file.close()
-	var empty_config = Session.new(Api.new(security), store, settings_path)
+	var empty_config = Session.new(Api.new(security), load("res://src/storage/godot_storage_service.gd").new(settings_path, store))
 	check(empty_config.get_login_defaults().server == DEFAULT_SERVER and not empty_config.get_login_defaults().remember, "empty saved server falls back without auto login")
 	empty_config.free()
 	DirAccess.remove_absolute(settings_path)

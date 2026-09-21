@@ -66,6 +66,21 @@ func request(operation: String, server: String, fields: Dictionary) -> Dictionar
 	_busy = false
 	return response
 
+func probe_server(address: String) -> Dictionary:
+	if _busy: return _failure("BUSY")
+	var base := normalize_server(address)
+	if base.is_empty() or not is_inside_tree(): return _failure("INVALID_INPUT")
+	_busy = true
+	var generation := _generation
+	var response := await _exchange(base + "/auth/public_key", HTTPClient.METHOD_GET)
+	_busy = false
+	if generation != _generation: return _failure("CANCELLED")
+	if not response.ok:
+		return response if response.code in ["TIMEOUT", "CANCELLED"] else _failure("PUBLIC_KEY_ERROR", response.status)
+	if not response.data.get("public_key") is String or response.data.public_key.is_empty():
+		return _failure("PUBLIC_KEY_ERROR", response.status)
+	return {"ok":true,"code":"OK","status":response.status,"data":{"server":base}}
+
 func _perform(operation: String, base: String, payload: Dictionary, generation: int) -> Dictionary:
 	if operation != "auto_login":
 		var public_key: Dictionary = await _exchange(base + "/auth/public_key", HTTPClient.METHOD_GET)

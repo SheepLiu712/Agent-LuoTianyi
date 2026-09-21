@@ -67,7 +67,7 @@ func _send() -> void:
 		fields.invite_code = _fields.invite.text
 	else:
 		fields = {"new_username":_fields.username.text, "new_password":_fields.password.text, "invite_code":_fields.invite.text}
-	var response: Dictionary = await _session.perform(operation, _fields.server.text, fields, _remember.button_pressed)
+	var response: Dictionary = await _session.perform(operation, _fields.server.text, fields, _remember.button_pressed, _remember.button_pressed)
 	if response.ok:
 		_clear_secrets()
 		if operation != "login":

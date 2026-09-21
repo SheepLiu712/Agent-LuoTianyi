@@ -84,6 +84,18 @@ func run() -> void:
 	check(not session.get_login_defaults().remember and not session.get_login_defaults().auto_login and not storage.read_login_token(server, "alice").ok, "expired credential falls back to password")
 	session.queue_free()
 	await process_frame
+	storage.write_login_profile({"version":2,"server":server,"username":"busy","accounts":[{"server":server,"username":"busy","remember":true,"auto_login":true,"last_used":1}]})
+	storage.save_login_token(server, "busy", "login-test")
+	session = fresh(storage, security)
+	check((await session.resume()).code == "HTTP_ERROR" and storage.read_login_token(server, "busy").ok and session.get_login_defaults().remember, "temporary service failure preserves remembered login")
+	FileAccess.set_read_only_attribute(path + "/account.cfg", true)
+	result = await session.set_server(server + "/alternate")
+	check(not result.ok and result.storage_error and session.get_login_defaults().server == server, "local save failure preserves the previous server")
+	FileAccess.set_read_only_attribute(path + "/account.cfg", false)
+	storage.forget_login_token(server, "busy")
+	check((await session.login_saved("busy")).code == "CREDENTIAL_UNAVAILABLE" and not session.get_login_defaults().remember, "unavailable credential returns to password mode")
+	session.queue_free()
+	await process_frame
 	# Migrate the existing single-account config without changing its credential key.
 	var legacy = Storage.new(path + "/legacy.cfg", Tokens.new(security, path + "/legacy-tokens"))
 	legacy.write_login_profile({"server":server,"username":"test","remember":true})
