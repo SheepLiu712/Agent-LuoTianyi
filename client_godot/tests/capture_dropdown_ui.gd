@@ -6,6 +6,16 @@ func check(ok: bool,label: String) -> void:
 		print("FAIL: ",label)
 func _initialize() -> void:
 	_run.call_deferred()
+func click(point: Vector2) -> void:
+	for down in [true,false]:
+		var event := InputEventMouseButton.new()
+		event.button_index = MOUSE_BUTTON_LEFT
+		event.pressed = down
+		event.position = point
+		event.global_position = point
+		root.push_input(event,true)
+		await process_frame
+	await create_timer(.15).timeout
 func _run() -> void:
 	if DisplayServer.get_name() == "headless":
 		print("Dropdown visual checks require a GPU window")
@@ -16,6 +26,20 @@ func _run() -> void:
 	root.theme = load("res://theme/app_theme.tres")
 	var menu = load("res://scenes/ui/unified_dropdown.tscn").instantiate()
 	root.add_child(menu)
+	menu.position = Vector2(30,30)
+	menu.set_items([{"id":"a","label":"选项 A"},{"id":"b","label":"选项 B"}])
+	await create_timer(.2).timeout
+	for expected in [true,false,true,false]:
+		await click(Vector2(70,50))
+		check(menu.is_menu_open() == expected, "repeated trigger clicks alternate open and closed")
+	check(menu.get_selected_id() == "a", "trigger toggling never activates an item")
+	await click(Vector2(70,50))
+	await click(Vector2(480,300))
+	check(not menu.is_menu_open(), "outside click closes menu")
+	await click(Vector2(70,50))
+	check(menu.is_menu_open(), "click after outside dismissal opens normally")
+	menu.close_menu()
+	await process_frame
 	menu.size = Vector2(220,42)
 	menu.position = Vector2(260,330)
 	var options: Array = []
