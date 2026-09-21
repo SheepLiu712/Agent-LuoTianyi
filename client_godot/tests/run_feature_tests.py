@@ -80,12 +80,15 @@ def run(godot,script,gpu=False):
             if data.get('token')!='message-test': errors.append('wrong preference token'); self.reply(401,{}); return
             if self.path=='/preference/get':
                 reads[user]=reads.get(user,0)+1
+                if user=='ui_retry':
+                    time.sleep(.8)
+                    if reads[user]==1: self.reply(503,{}); return
                 if user=='fail_load': self.reply(503,{}); return
                 prefs={'relationship':'知己','speaking_style':'' if reads[user]==1 else '文静恬淡','personality_traits':['真诚','安静'],'#sym:personality_text':'old ignored','custom_context':'original','unknown':'old' if reads[user]==1 else 'new'}
                 if user=='legacy': prefs.pop('personality_traits'); prefs['#sym:personality_text']='开朗，认真'
                 self.reply(200,{'preferences':prefs}); return
             if self.path=='/preference/overwrite':
-                if user=='slow_save': time.sleep(.4)
+                if user in ('slow_save','ui_retry'): time.sleep(.4)
                 if user=='fail_once' and user not in writes:
                     writes[user] = None
                     self.reply(503,{})
