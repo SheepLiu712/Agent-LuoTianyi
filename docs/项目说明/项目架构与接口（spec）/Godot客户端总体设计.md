@@ -1,5 +1,7 @@
 # Godot 客户端总体设计
 
+0.1.3用户批准未登录窗口使用透明窗口与Godot白色圆角面板，登录后仍恢复系统窗框。登录资料/令牌平台读写纳入StorageService实现，AccountSession不直接读写文件；浏览器打开为独立注入的平台能力。具体新旧契约替代见[0.1.3 interface](接口文档/client_godot/release-013.md)，其他历史平台迁移不随本轮扩展。
+
 本文规定已授权目标的架构边界，不表示所有模块已实现。当前可用接口以 [interface](接口文档/client_godot/README.md) 为准；交付事实以 [进度](../../开发进程文档/开发进度/Godot-Windows客户端.md) 为准。
 
 ## 产品与技术基线
