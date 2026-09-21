@@ -67,6 +67,17 @@ func run() -> void:
 		check(not preset.tooltip_text.is_empty(), "icon-only preset has an accessible description")
 		check(not preset.get_items().any(func(item): return item.id == "custom" or item.label == "自定义"), "preference menus contain presets only: " + pair[0])
 		check(not page.get_node("%"+pair[0]).editable, "ready relationship and style reject manual input: " + pair[0])
+		if DisplayServer.get_name() != "headless":
+			var field: LineEdit = page.get_node("%"+pair[0])
+			var previous := field.text
+			field.grab_focus()
+			var typed := InputEventKey.new()
+			typed.pressed = true
+			typed.keycode = KEY_X
+			typed.unicode = 88
+			window.push_input(typed,true)
+			await process_frame
+			check(field.text == previous, "keyboard typing cannot replace the preset: " + pair[0])
 	page.get_node("%RelationshipPresets").activated.emit("friend")
 	page.get_node("%SpeakingStylePresets").activated.emit("gentle")
 	check(page.get_node("%RelationshipField").text == "朋友" and page.get_node("%SpeakingStyleField").text == "温柔可人" and prefs.get_state().dirty, "preset choices still update readonly values and the draft")

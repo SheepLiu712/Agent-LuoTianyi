@@ -24,7 +24,6 @@ func _initialize() -> void:
 		if pair[0] in ["relationship","speaking_style"]:
 			var input: LineEdit = lines[pair[0]]
 			_fields[pair[0]] = input
-			input.text_changed.connect(func(_text): _edit())
 			var presets = selectors[pair[0]]
 			_presets.append(presets)
 			var values: Dictionary = {"friend":"朋友","confidant":"知己","idol":"偶像","partner":"搭档","family":"家人"} if pair[0] == "relationship" else {"lively":"活泼可爱","gentle":"温柔可人","quiet":"文静恬淡"}
@@ -59,7 +58,7 @@ func _update(state: Dictionary) -> void:
 		var value: String = state.fields.get(key,"")
 		if _fields[key].text != value:
 			_fields[key].text = value
-		_fields[key].editable = state.phase == "ready"
+		_fields[key].editable = state.phase == "ready" and key not in ["relationship","speaking_style"]
 	_refreshing = false
 	for presets in _presets:
 		presets.disabled = state.phase != "ready"

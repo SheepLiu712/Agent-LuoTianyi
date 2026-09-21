@@ -110,3 +110,9 @@
 - 根因：PreferencesController加载期间phase=loading，PreferencesPage将输入editable设为false、按钮disabled设为true；主题ReadOnlyInput为#EEF5F9灰蓝底且带边框，与normal纯白无边框不同。服务端响应后phase=ready恢复普通样式，形成先灰后白；不是渲染未完成或窗口失焦。
 - SPEC 9778ad1；Red d48b4e3通过本地延迟/失败/保存接口实际复现四个字段及三个按钮的状态颜色差异。相处页增加专用主题变体：只读与普通字段共用白底/文字色，预设和重新加载保持底色；原editable/disabled与状态提示逻辑不变，失败仍允许重试。
 - GPU加载/失败/保存/恢复编辑、默认/最小窗口及四档内容缩放PASS；实际采样白底亮度>0.99，同时断言输入不可编辑，证明没有通过提前解锁掩盖问题。已查看settings-loading/settings-saving截图，修正限定相处页。Green为本记录提交，已作者自审。
+
+### 2026-09-21 关系/风格只允许选择预设（不打包）
+
+- 用户进一步明确禁止手动自定义，并要求修改后不用打包。SPEC 8274126；Red ac4ad4d实际因加载完成后两项仍可编辑失败。场景默认只读，状态更新也不再启用这两项；移除手动输入绑定和“可自定义”提示。性格关键词/补充上下文仍按加载状态允许编辑。
+- GPU向两个字段实际派发键盘输入，内容保持不变；预设选择仍更新显示与草稿，统一保存回归PASS，加载/失败/保存/四档内容缩放PASS。日志为artifacts/settings-loading-fix/presets-only-green.log与settings-regression.log。作者自审确认仅限制这两项UI输入，不改服务端，也不静默改写已有非预设值。
+- Green为本记录提交。此最终修改仅源码与测试，不生成交付包；之前ZIP不包含本条修改。删除本轮失败构建产生的22字节空ZIP，旧有效包均保留。编辑器产生的project.godot属性重排与热重载DLL差异未纳入提交。
