@@ -4,7 +4,7 @@
 
 以本文件明确交付的契约替代 README 中冲突的旧窗口呈现。业务协议不变。
 
-## 自绘窗口框架与几何
+## 自绘窗口框架与几何（自绘部分已被系统窗框替代）
 
 `scenes/ui/window_chrome.tscn` 为可复用 Control，提供 WindowMinimize/WindowMaximize/WindowClose 三个唯一命名按钮及八个缩放区域。宿主仍为主 SceneTree Window 或业务 Window，设置 borderless；按钮通过宿主 mode 与 close_requested 统一走原有关闭检查。标题栏左键调用 Window.start_drag，双击切换最大化，窗口化状态的八边调用 Window.start_resize。无鼠标事件不得发起系统拖拽。
 
@@ -17,7 +17,7 @@
 
 ## 统一设置窗口
 
-`scenes/ui/settings_window.tscn` / `SettingsWindow` 为唯一设置Window，title=设置，原相处/模型独立Window及其脚本删除，替换为 `preferences_page.tscn` / `model_page.tscn` 的Control。`setup(preferences, models, executor=null)` 显式注入，测试可只注入一个控制器；`select_page("preferences"|"models")` 切换且保留草稿；`open()` 恢复并聚焦；`is_dirty()` 汇总；`is_saving()` 返回当前是否正在保存；`save_changes() -> Dictionary` 异步返回 `{ok, results}`，results按页面/模型用途记录ok/code。不改变PreferencesController和ModelSettings协议。
+`scenes/ui/settings_window.tscn` / `SettingsWindow` 为唯一设置Window，title=设置，原相处/模型独立Window及其脚本删除，替换为 `preferences_page.tscn` / `model_page.tscn` 的Control。当前`setup(preferences, models, executor=null, clear_cache=Callable(), storage_service=null, cache_directory="")`显式注入，测试可只注入一个控制器；`select_page("preferences"|"models"|"audio")`切换且保留草稿，缓存页不参与设置dirty及保存；`open()`恢复并聚焦；`is_dirty()`汇总；`is_saving()`返回当前是否正在保存；`save_changes() -> Dictionary`异步返回`{ok, results}`，results按页面/模型用途记录ok/code。新增`logout_requested()`由底部退出登录发出，Application接入统一退出；UI不直接登出。不改变PreferencesController和ModelSettings协议。缓存依赖及状态呈现细节见[反馈修正](feedback-012.md)。
 
 PreferencesPage.setup(controller)、is_dirty()、save_changes()保存并读取控制器最终状态；ModelPage.setup(settings, executor=null)、is_dirty()、validate_changes()、save_changes()负责全部用途草稿。先逐用途解析JSON并validate，有任何非法草稿时整窗不开始写入；全部有效后按用途顺序保存模型，再保存相处偏好。模型保存成功更新该用途基线；失败不清草稿，仍保存其它独立项。DPAPI失败逐项询问明文，默认取消；拒绝只令该项失败。相处失败仍保留dirty。结果区列清失败页/用途和代码，不宣称事务回滚。
 
@@ -45,11 +45,11 @@ ChatView新增image_requested(provider)信号，图片UI只向Application请求�
 
 ## 主导航与一次性草稿汇总
 
-main.tscn的NavChat/NavDynamics/NavSettings/NavLogs/AccountMenu均为固定场景控件；登录后显示窄导航，登录前保留账户页日志入口。账号菜单只分退出登录/退出应用，动态/设置/日志入口移出聊天顶部。ChatView移除已被导航替代的logout_requested/log_requested/settings_requested/set_dynamics_unread，新增is_dirty()只观察未发送输入；聊天顶部保留明确的CacheButton及原有缓存确认逻辑。导航动态按钮显示99+上限，根Split按自身可用宽度恢复45:55。
+main.tscn的NavChat/NavDynamics/NavSettings/NavLogs为四个文字居中的固定场景控件；登录后显示窄导航，登录前保留账户页日志入口。AccountMenu及装配已删除，退出登录仅由设置底部请求；退出应用使用主窗系统关闭。ChatView移除已被导航替代的logout_requested/log_requested/settings_requested/set_dynamics_unread，is_dirty()观察未发送文字及图片附件；原CacheButton已由设置语音缓存页替代。导航动态按钮显示99+上限，根Split按自身可用宽度恢复45:55。
 
 主窗关闭/退出账号汇总聊天输入、设置及动态草稿，只有一个ExitDialog，列名称而不回显敏感正文；返回继续编辑保留全部状态，放弃则关闭业务窗口并清草稿，日志不随退出账号关闭。设置正在保存时先等待saving_finished再重新判断，不并发销毁保存流程或自动发送文字。重复设置导航只恢复聚焦，不重置当前设置页。
 
-登录/注册/重置模式提供场景BackToLogin按钮，回到登录不触发网络操作；紧凑页用滚动容器承载较长表单。日志和动态独立，统一设置transient跟随主窗，所有窗口自绘关闭按钮仍请求同一关闭流程。
+登录/注册/重置模式提供场景BackToLogin按钮，回到登录不触发网络操作；紧凑页用滚动容器承载较长表单。日志和动态独立，统一设置transient跟随主窗，系统关闭与应用内关闭入口请求同一关闭流程。
 
 
 ## 现代主题、磨砂与可见控件约束
@@ -63,7 +63,7 @@ frost_surface.tscn 为ColorRect控件配合屏幕纹理mipmap连续模糊ShaderM
 语音波形使用waveform_strip.tscn中的24个预置CenterContainer/ColorRect，替代_draw/draw_line；脚本仅依据values/progress更新可见、高度和已播色，保留已有数据字段。禁止产品UI脚本new控件、add_button或代码建树，重复内容仅实例化场景。补充测试检查材质/fallback、预置波形及主题语义；GPU截图与帧时间记录验证实际渲染，不把headless当视觉证据。
 
 
-### 原生验证后的平台约束
+### 原生验证后的平台约束（自绘操作记录已被系统窗框替代）
 
 自绘标题栏统一48px；左键移动超过4px才调用系统拖拽，防止单击误启动拖动。无边框铺满屏幕时本引擎可能返回FULLSCREEN而非MAXIMIZED，框架统一识别为展开状态并保留原始矩形以还原。恢复最小化的子窗口先重建可见表面，主Window禁止hide，走mode恢复；所有关闭请求先保存几何再进入业务确认。
 
