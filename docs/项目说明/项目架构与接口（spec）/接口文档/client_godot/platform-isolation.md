@@ -60,3 +60,11 @@ WindowChrome通过场景注入WindowHost资源：attach(window,login)、configur
 RuntimeEnvironment提供arguments/is_headless/register_logger/unregister_logger/capture/process_id/process_running/os_name；Godot实现封装系统访问。PasswordEncryption.is_available用于禁止不可用认证；SecretProtection独立注入凭据和模型存储。GodotStorageService不再隐式创建WindowsSecurity，未传credentials时令牌能力不可用；正常组装显式注入。
 
 AvatarDriver成为项目接口，CubismAvatarDriver为具体实现，场景的Driver节点提供实现。原公开语义保持；ReleaseInfo作为随包资源读取实现归入storage，版本来源仍为release.json。
+
+### 应用组装与生命周期
+
+ApplicationServices位于composition，只负责构造与挂接当前服务图、设置/动态窗口工厂及配置实例；不处理登录决策或草稿确认。Application保留setup(account_session,layout_path,external_links)启动注入兼容，但将路径交给组装模块，不再直接构造网络/平台实现。
+
+AccountLifecycle(chat,models,dynamics,appearance=null,world=null,devices=null)提供start(session)、stop()、get_context()。每次开始先结束旧范围，代次单调递增，模块仅收到scope_id/generation/character_id副本；停止幂等并隔离旧代次，不传认证字段给扩展。
+
+WindowCoordinator(host,dialog,images,geometry,settings_factory,dynamics_factory,chat_dirty)提供open(kind)、request_close(action)、close_all、dispose，以及exit_requested/logout_requested信号。工厂返回window及窗口就绪后执行的start Callable；协调器拥有窗口索引、汇总草稿、保存等待和取消流程，不发送协议或直接退出账号。账号退出/应用退出由Application接收信号并调用现有会话/场景树接口。只读日志仍由Application单独持有。
