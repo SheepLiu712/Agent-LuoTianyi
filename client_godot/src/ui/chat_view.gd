@@ -1,4 +1,5 @@
 extends MarginContainer
+@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 @export var files: Resource = preload("res://src/platform/file_interaction.gd").new()
 signal image_requested(provider: Callable)
 signal attachment_requested(provider: Callable, confirm: Callable)
@@ -198,7 +199,7 @@ func _jump_reading() -> void:
 
 func _report_reading() -> void:
 	if is_inside_tree():
-		_session.report_visible_messages(_scroll.get_visible_ids(),is_visible_in_tree() and get_window().has_focus() and get_window().mode != Window.MODE_MINIMIZED)
+		_session.report_visible_messages(_scroll.get_visible_ids(),is_visible_in_tree() and window_system.focused(get_window()))
 
 func _image_action(id: String, action: String) -> void:
 	if action == "retry":

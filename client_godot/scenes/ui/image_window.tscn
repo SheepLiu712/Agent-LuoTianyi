@@ -1,4 +1,6 @@
 [gd_scene load_steps=5 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
 [ext_resource type="Script" path="res://src/ui/image_window.gd" id="script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
 [ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="chrome"]
@@ -11,6 +13,8 @@ force_native = true
 transient = true
 theme = ExtResource("theme")
 script = ExtResource("script")
+
+window_system = ExtResource("isolation_window_system")
 
 [node name="Body" type="PanelContainer" parent="."]
 anchor_right = 1.0

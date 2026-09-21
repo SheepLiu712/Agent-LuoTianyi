@@ -1,7 +1,10 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/runtime.tres" id="isolation_runtime"]
 
 [ext_resource type="PackedScene" path="res://scenes/avatar/avatar_panel.tscn" id="1_base"]
 [ext_resource type="Script" path="res://src/avatar/avatar_preview.gd" id="2_script"]
 
 [node name="AvatarPreview" instance=ExtResource("1_base")]
 script = ExtResource("2_script")
+runtime = ExtResource("isolation_runtime")

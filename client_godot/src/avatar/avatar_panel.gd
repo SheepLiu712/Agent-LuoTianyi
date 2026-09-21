@@ -1,4 +1,5 @@
 extends Control
+@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 signal touched(areas: Array[String])
 ## View owns pointer gestures; framing owns the persisted transform.
 const Driver = preload("res://src/avatar/avatar_driver.gd")
@@ -87,6 +88,6 @@ func _notification(what: int) -> void:
 
 
 func _process(_delta: float) -> void:
-	var minimized := get_window().mode == Window.MODE_MINIMIZED
+	var minimized: bool = window_system.minimized(get_window())
 	avatar.visible = not minimized
 	avatar.process_mode = Node.PROCESS_MODE_DISABLED if minimized else Node.PROCESS_MODE_INHERIT

@@ -1,4 +1,6 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene load_steps=4 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
 
 [ext_resource type="Script" path="res://src/ui/unified_dropdown.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
@@ -9,6 +11,8 @@ alignment = 0
 clip_text = true
 theme = ExtResource("2_theme")
 script = ExtResource("1_script")
+
+window_system = ExtResource("isolation_window_system")
 
 [node name="Menu" type="PopupPanel" parent="."]
 unique_name_in_owner = true

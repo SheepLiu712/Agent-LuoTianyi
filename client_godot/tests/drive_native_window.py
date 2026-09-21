@@ -38,6 +38,8 @@ class TitleBarInfo(ctypes.Structure):
 
 def system_button(index):
     owned()
+    # DWM may still return the pre-animation accessibility rectangle after restore.
+    time.sleep(.35)
     info = TitleBarInfo()
     info.size = ctypes.sizeof(info)
     u.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
@@ -81,7 +83,9 @@ def wait_for(predicate, label):
 
 def click(x, y):
     owned()
+    assert u.WindowFromPoint(wintypes.POINT(int(x), int(y))) == hwnd, "refuse input to an unrelated window"
     u.SetCursorPos(int(x), int(y))
+    time.sleep(.1)
     u.mouse_event(2, 0, 0, 0, 0)
     time.sleep(.035)
     u.mouse_event(4, 0, 0, 0, 0)
@@ -148,6 +152,10 @@ try:
             index = 1 if dy < 0 else 3
             assert abs(after[index] - before[index] - dy) < 8, "vertical edge resize " + edge
         checks.append("native resize " + edge)
+    # Move only our owned window away from top-edge third-party desktop overlays.
+    current = rect()
+    u.SetWindowPos(hwnd, None, 40, 260, current[2]-current[0], current[3]-current[1], 0x0044)
+    time.sleep(.2)
     current = rect()
     click(*system_button(2))
     wait_for(lambda: u.IsIconic(hwnd), "minimize control")

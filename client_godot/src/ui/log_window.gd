@@ -22,7 +22,7 @@ func setup(logger: RefCounted) -> void:
 		_initialize()
 
 func _ready() -> void:
-	title = "客户端日志 · " + preload("res://src/release_info.gd").title()
+	title = "客户端日志 · " + preload("res://src/storage/release_info.gd").title()
 	if _logger == null:
 		return
 	_initialize()

@@ -37,3 +37,4 @@ Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_cache_usage_ring.gd') 'cache-usage-ring'
 
 Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/media/test_capability_failures.gd') 'capability-failures'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/application/test_platform_degradation.gd') 'platform-degradation'

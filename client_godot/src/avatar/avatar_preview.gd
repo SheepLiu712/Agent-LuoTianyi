@@ -1,4 +1,5 @@
 extends "res://src/avatar/avatar_panel.gd"
+@export var runtime: Resource = preload("res://src/platform/runtime_environment.gd").new()
 ## Isolated graphical smoke scene, usable from the exported executable.
 
 
@@ -8,9 +9,9 @@ func _ready() -> void:
 		push_error("Avatar load failed")
 		get_tree().quit(1)
 		return
-	for argument in OS.get_cmdline_user_args():
+	for argument in runtime.arguments():
 		if argument.begins_with("--capture="):
 			await get_tree().create_timer(2.0).timeout
 			await RenderingServer.frame_post_draw
-			var saved := get_viewport().get_texture().get_image().save_png(argument.trim_prefix("--capture="))
+			var saved: Error = runtime.capture(get_viewport(),argument.trim_prefix("--capture="))
 			get_tree().quit(0 if saved == OK else 1)

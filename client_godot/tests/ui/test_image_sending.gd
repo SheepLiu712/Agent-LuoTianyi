@@ -20,7 +20,7 @@ func run() -> void:
 	view.setup(chat)
 	root.add_child(view)
 	view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var presenter = load("res://src/ui/image_presenter.gd").new(directory + "/window.cfg")
+	var presenter = load("res://src/ui/image_presenter.gd").new(load("res://src/storage/window_geometry.gd").new(directory + "/window.cfg"),load("res://src/platform/godot_window_system.gd").new())
 	root.add_child(presenter)
 	check(chat.has_method("send_image") and view.get_node_or_null("%ImageButton") != null, "live chat offers image sending")
 	if failures.is_empty():

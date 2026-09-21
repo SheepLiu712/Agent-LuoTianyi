@@ -1,6 +1,9 @@
 extends Control
+@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
+@export var runtime: Resource = preload("res://src/platform/runtime_environment.gd").new()
 @export var settings: Resource = preload("res://src/storage/settings_store.gd").new()
 @export var files: Resource = preload("res://src/platform/file_interaction.gd").new()
+@export var geometry_store: Resource
 const Session = preload("res://src/preview/demo_session.gd")
 const Bubble = preload("res://scenes/ui/message_bubble.tscn")
 const ImagePresenter = preload("res://src/ui/image_presenter.gd")
@@ -26,7 +29,7 @@ var _refresh_pending := false
 var _refresh_again := false
 
 func _ready() -> void:
-	_image_presenter = ImagePresenter.new()
+	_image_presenter = ImagePresenter.new(geometry_store,window_system)
 	add_child(_image_presenter)
 	_expressions.item_selected.connect(func(index): _avatar.avatar.apply_expression(_expressions.get_item_text(index)))
 	_scenarios.item_selected.connect(func(index):
@@ -64,14 +67,14 @@ func _ready() -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 	_scroll.scroll_vertical = 0
-	for argument in OS.get_cmdline_user_args():
+	for argument in runtime.arguments():
 		if argument.begins_with("--scenario="):
 			_change_scenario(argument.trim_prefix("--scenario="))
-	for argument in OS.get_cmdline_user_args():
+	for argument in runtime.arguments():
 		if argument.begins_with("--capture="):
 			await get_tree().create_timer(2.0).timeout
 			await RenderingServer.frame_post_draw
-			var result := get_viewport().get_texture().get_image().save_png(argument.trim_prefix("--capture="))
+			var result: Error = runtime.capture(get_viewport(),argument.trim_prefix("--capture="))
 			get_tree().quit(0 if result == OK else 1)
 
 func _resize_split() -> void:

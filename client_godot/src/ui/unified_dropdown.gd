@@ -1,4 +1,5 @@
 extends Button
+@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 ## Shared stable-ID selector / action menu. Popup details remain private.
 signal activated(id: String)
 const Item = preload("res://scenes/ui/dropdown_item.tscn")
@@ -97,7 +98,7 @@ func _build() -> void:
 func open_menu() -> void:
 	if disabled or not is_node_ready() or _buttons.is_empty(): return
 	var owner := get_window()
-	_owner_geometry = Rect2i(owner.position,owner.size)
+	_owner_geometry = window_system.geometry(owner)
 	# Embedded popups use their owning viewport's logical coordinates on desktop and mobile.
 	var available: Vector2 = owner.get_visible_rect().size
 	var transform := get_global_transform_with_canvas()
@@ -162,5 +163,5 @@ func _key_input(event: InputEvent) -> void:
 func _process(_delta: float) -> void:
 	if not is_menu_open(): return
 	var owner := get_window()
-	if not is_visible_in_tree() or disabled or owner.mode == Window.MODE_MINIMIZED or Rect2i(owner.position,owner.size) != _owner_geometry:
+	if not is_visible_in_tree() or disabled or window_system.minimized(owner) or window_system.geometry(owner) != _owner_geometry:
 		close_menu()

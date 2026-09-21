@@ -1,4 +1,8 @@
 extends Control
+@export var secret_protection: Resource = preload("res://src/platform/secret_protection.gd").new()
+@export var password_encryption: Resource = preload("res://src/platform/password_encryption.gd").new()
+@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
+@export var runtime: Resource = preload("res://src/platform/runtime_environment.gd").new()
 const StorageService = preload("res://src/storage/storage_service.gd")
 var _storage_service: StorageService
 var _audio_cache: RefCounted
@@ -24,6 +28,7 @@ var _chat_view: Control
 var _avatar: Control
 var _ratio := 0.45
 var _layout_ready := false
+var _geometry: Resource
 var _layout_path := "user://window_layout.cfg"
 var _expanded := false
 var _expanded_size := Vector2i(1200, 800)
@@ -48,11 +53,10 @@ func setup(account_session: Node = null, layout_path: String = "user://window_la
 
 
 func _ready() -> void:
-	get_window().title = preload("res://src/release_info.gd").title()
-	get_window().min_size = Vector2i(360,480)
-	get_window().size = Vector2i(480,690)
-	_chrome.configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),"login")
-	if "--preview" in OS.get_cmdline_user_args():
+	get_window().title = preload("res://src/storage/release_info.gd").title()
+	_geometry = preload("res://src/storage/window_geometry.gd").new(_layout_path.get_base_dir().path_join("window-geometry.cfg"))
+	_chrome.configure(_geometry,"login")
+	if "--preview" in runtime.arguments():
 		_log_problem.queue_free()
 		_exit_dialog.queue_free()
 		_resize_window(Vector2i(1200, 800), Vector2i(960, 640))
@@ -62,17 +66,17 @@ func _ready() -> void:
 		move_child(_chrome,get_child_count()-1)
 		return
 	_resize_window(Vector2i(480, 690), Vector2i(360, 480))
-	_images_presenter = preload("res://src/ui/image_presenter.gd").new(_layout_path.get_base_dir().path_join("window-geometry.cfg"))
+	_images_presenter = preload("res://src/ui/image_presenter.gd").new(_geometry,window_system)
 	add_child(_images_presenter)
 	_log = Log.new("user://logs" if _layout_path == "user://window_layout.cfg" else _layout_path.get_base_dir().path_join("logs"))
 	_log.write_failed.connect(func(_error): _log_problem.text = "日志保存失败，打开日志可查看本次内存记录；磁盘归档可能不完整。")
 	_log.record("client_started")
 	_engine_log = preload("res://src/storage/engine_log_sink.gd").new(_log)
-	OS.add_logger(_engine_log)
+	runtime.register_logger(_engine_log)
 	_log_window = preload("res://scenes/ui/log_window.tscn").instantiate() as Window
 	_log_window.setup(_log)
 	add_child(_log_window)
-	_log_window.get_node("%Chrome").configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),"logs")
+	_log_window.get_node("%Chrome").configure(_geometry,"logs")
 	get_tree().auto_accept_quit = false
 	get_window().close_requested.connect(func(): _request_close("exit"))
 	_exit_dialog.confirmed.connect(func(): _finish_close(_exit_action))
@@ -83,17 +87,17 @@ func _ready() -> void:
 	_account_form.exit_requested.connect(func(): _request_close("exit"))
 	if _external_links == null: _external_links = preload("res://src/platform/godot_external_link_opener.gd").new()
 	_account_form.feedback_requested.connect(func(): _account_form.report_feedback_result(_external_links.open_project()))
-	if not ClassDB.class_exists("WindowsSecurity"):
+	if not password_encryption.is_available():
 		%SecurityError.show()
-		push_error("WindowsSecurity extension missing")
+		%SecurityError.text = "认证加密组件不可用，暂时无法登录；日志和问题反馈仍可使用。"
 		return
-	var security = ClassDB.instantiate("WindowsSecurity")
+	var security = secret_protection
 	var data_root := _layout_path.get_base_dir()
 	_storage_service = preload("res://src/storage/godot_storage_service.gd").new(data_root.path_join("account.cfg"), Store.new(security, data_root.path_join("accounts")))
 	if _session == null:
-		_session = Session.new(Api.new(security), _storage_service)
+		_session = Session.new(Api.new(password_encryption), _storage_service)
 	add_child(_session)
-	_models = preload("res://src/session/model_settings.gd").new(preload("res://src/network/json_request.gd").new(),preload("res://src/storage/model_store.gd").new(ClassDB.instantiate("WindowsSecurity"),_layout_path.get_base_dir().path_join("models")),_log)
+	_models = preload("res://src/session/model_settings.gd").new(preload("res://src/network/json_request.gd").new(),preload("res://src/storage/model_store.gd").new(secret_protection,_layout_path.get_base_dir().path_join("models")),_log)
 	add_child(_models)
 	_dynamics = preload("res://src/session/dynamics_controller.gd").new(_log)
 	add_child(_dynamics)
@@ -147,15 +151,15 @@ func _ready() -> void:
 	_layout_ready = true
 	_resize_split()
 	var capture := ""
-	for argument in OS.get_cmdline_user_args():
+	for argument in runtime.arguments():
 		if argument.begins_with("--capture="):
 			capture = argument.trim_prefix("--capture=")
 	if not capture.is_empty():
 		await get_tree().create_timer(1.0).timeout
 		await RenderingServer.frame_post_draw
-		var saved := get_viewport().get_texture().get_image().save_png(capture)
+		var saved: Error = runtime.capture(get_viewport(),capture)
 		get_tree().quit(0 if saved == OK else 1)
-	elif DisplayServer.get_name() != "headless":
+	elif not runtime.is_headless():
 		_session.resume()
 
 func _account_changed(state: Dictionary) -> void:
@@ -204,8 +208,8 @@ func _account_changed(state: Dictionary) -> void:
 		_center.show()
 		%Navigation.hide()
 		if _expanded:
-			if get_window().mode == Window.MODE_WINDOWED:
-				_expanded_size = get_window().size
+			if window_system.windowed(get_window()):
+				_expanded_size = window_system.geometry(get_window()).size
 			_expanded = false
 			_split.dragger_visibility = SplitContainer.DRAGGER_HIDDEN_COLLAPSED
 			_resize_window(Vector2i(480, 690), Vector2i(360, 480))
@@ -216,14 +220,14 @@ func _resize_split() -> void:
 		_split.split_offset = roundi(_split.size.x * _ratio)
 
 func _resize_window(target: Vector2i, minimum: Vector2i) -> void:
-	var expanded := _expanded or "--preview" in OS.get_cmdline_user_args()
+	var expanded: bool = _expanded or "--preview" in runtime.arguments()
 	_chrome.set_login_mode(not expanded)
 	%Background.visible = expanded
 	_chrome.select_layout("expanded" if expanded else "login",target,minimum)
 
 func _exit_tree() -> void:
 	if _engine_log != null:
-		OS.remove_logger(_engine_log)
+		runtime.unregister_logger(_engine_log)
 		_engine_log.stop()
 	if _log != null:
 		_log.finish()
@@ -246,7 +250,7 @@ func _open_settings(kind: String) -> void:
 		window.setup(_dynamics,preload("res://src/storage/godot_settings_store.gd").new(_layout_path.get_base_dir().path_join("dynamics-window.cfg")))
 	_windows[key] = window
 	add_child(window)
-	window.get_node("%Chrome").configure(_layout_path.get_base_dir().path_join("window-geometry.cfg"),key)
+	window.get_node("%Chrome").configure(_geometry,key)
 	window.tree_exited.connect(func():
 		if _windows.get(key) == window: _windows.erase(key))
 	window.open()

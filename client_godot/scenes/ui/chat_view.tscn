@@ -1,4 +1,6 @@
-[gd_scene load_steps=10 format=3]
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
 
 [ext_resource type="Script" path="res://src/ui/chat_view.gd" id="1_script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
@@ -21,6 +23,8 @@ theme = ExtResource("2_theme")
 script = ExtResource("1_script")
 
 files = ExtResource("isolation_files")
+
+window_system = ExtResource("isolation_window_system")
 
 [node name="Background" type="ColorRect" parent="."]
 mouse_filter = 2

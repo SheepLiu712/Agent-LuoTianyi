@@ -1,6 +1,6 @@
 extends SceneTree
 
-const Driver = preload("res://src/avatar/avatar_driver.gd")
+const Driver = preload("res://src/platform/cubism_avatar_driver.gd")
 const MODEL = "res://assets/live2d/luo/model.model3.json"
 var failures: Array[String] = []
 

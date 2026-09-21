@@ -1,4 +1,10 @@
-[gd_scene load_steps=8 format=3]
+[gd_scene load_steps=12 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/geometry.tres" id="isolation_geometry_store"]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+
+[ext_resource type="Resource" path="res://resources/platform/runtime.tres" id="isolation_runtime"]
 
 [ext_resource type="Resource" path="res://resources/platform/preview.tres" id="isolation_settings"]
 
@@ -36,6 +42,12 @@ script = ExtResource("1_script")
 files = ExtResource("isolation_files")
 
 settings = ExtResource("isolation_settings")
+
+runtime = ExtResource("isolation_runtime")
+
+window_system = ExtResource("isolation_window_system")
+
+geometry_store = ExtResource("isolation_geometry_store")
 
 [node name="Background" type="ColorRect" parent="."]
 layout_mode = 1

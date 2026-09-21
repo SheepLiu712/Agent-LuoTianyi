@@ -52,3 +52,11 @@ AppearanceService、WorldService、DeviceService 相互独立。共同提供 get
 - SettingsStore.load_settings/save_settings()->Error、get_value(section,key,fallback)、set_value(section,key,value)。GodotSettingsStore保留原配置格式，临时文件成功后替换，不改变旧路径。AvatarFraming(settings=null) 的 load_settings/save_settings 不再接收路径；DynamicsWindow.setup(controller,settings_store=null)；场景默认资源以 resource_local_to_scene 隔离。
 - FileInteraction.bind(FileDialog)、select_image()、select_export(filename)、cancel()；image_selected(result)、export_selected(target)、canceled。ImageAttachment删除from_file，仅校验from_bytes/from_image；文件读取在ImageFileReader。导出目标export_log(logger,run_id)->Error，平台路径封装在目标内。
 - ReplyAudio(logger=null,clock=Callable(),cache=null,decoder_factory=null)，未注入工厂明确解码不可用；正式组装与真实音频测试显式注入工厂。AudioCache.open_stream(id)->RefCounted仅打开本账号已完整校验缓存，失败null；播放器拥有并关闭流。
+
+### 桌面宿主与原生实现
+
+WindowChrome通过场景注入WindowHost资源：attach(window,login)、configure(geometry_store,key)、select_layout、open_window、tick、save、detach。进入/退出场景树时绑定/解除窗口信号，图片转属重新进入时必须重新绑定。WindowSystem提供minimized/windowed/geometry/focus/focused/drag/reparent_image，UI不读取系统窗口模式或改变原生归属。嵌入浮层的逻辑坐标及Godot控件布局仍属于UI。
+
+RuntimeEnvironment提供arguments/is_headless/register_logger/unregister_logger/capture/process_id/process_running/os_name；Godot实现封装系统访问。PasswordEncryption.is_available用于禁止不可用认证；SecretProtection独立注入凭据和模型存储。GodotStorageService不再隐式创建WindowsSecurity，未传credentials时令牌能力不可用；正常组装显式注入。
+
+AvatarDriver成为项目接口，CubismAvatarDriver为具体实现，场景的Driver节点提供实现。原公开语义保持；ReleaseInfo作为随包资源读取实现归入storage，版本来源仍为release.json。

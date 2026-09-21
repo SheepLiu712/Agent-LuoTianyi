@@ -1,6 +1,9 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/window_host.tres" id="isolation_host"]
 [ext_resource type="Script" path="res://src/ui/window_chrome.gd" id="script"]
 [node name="WindowChrome" type="Control"]
 visible = false
 mouse_filter = 2
 script = ExtResource("script")
+host = ExtResource("isolation_host")

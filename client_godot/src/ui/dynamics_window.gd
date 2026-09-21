@@ -1,4 +1,5 @@
 ﻿extends "res://src/ui/draft_window.gd"
+@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 const Detail = preload("res://src/ui/dynamic_detail.gd")
 const DetailScene = preload("res://scenes/ui/dynamic_detail.tscn")
 const PostRow = preload("res://scenes/ui/dynamics_post_row.tscn")
@@ -144,7 +145,7 @@ func _resize_split() -> void:
 	_split.split_offset = int(_split.size.x*_ratio)
 
 func _save_layout() -> void:
-	if mode == Window.MODE_MINIMIZED: return
+	if window_system.minimized(self): return
 	var config = settings
 	config.set_value("window","size",size)
 	config.set_value("window","ratio",_ratio)

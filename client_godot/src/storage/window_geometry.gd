@@ -1,6 +1,6 @@
-extends RefCounted
-var path: String
-func _init(file_path: String) -> void:
+extends Resource
+@export var path: String
+func _init(file_path: String = "user://window-geometry.cfg") -> void:
 	path = file_path
 func read_layout(key: String, fallback: Rect2i, minimum: Vector2i, screens: Array[Rect2i]) -> Dictionary:
 	var config := ConfigFile.new()

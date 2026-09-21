@@ -1,12 +1,13 @@
 extends RefCounted
 signal entry_added(entry: Dictionary)
 signal write_failed(error: int)
-const Release = preload("res://src/release_info.gd")
+const Release = preload("res://src/storage/release_info.gd")
 const METRICS := ["has_audio", "audio_chars", "bytes", "frames", "sample_rate", "channels", "bits", "final", "audio_error", "queued", "volume", "latency_ms", "skips", "count", "status", "index", "duration_ms"]
 const MODULES := ["app", "account", "network", "message", "audio", "cache", "history", "settings", "dynamics", "engine"]
 const CODES := "OK UNKNOWN INVALID_INPUT INVALID_RESPONSE BUSY CANCELLED TIMEOUT NETWORK_ERROR HTTP_ERROR AUTH_REJECTED PUBLIC_KEY_ERROR ENCRYPTION_ERROR CREDENTIAL_UNAVAILABLE NO_SAVED_LOGIN LOGGED_OUT PENDING SEND_REJECTED DELIVERY_UNCERTAIN TRANSPORT_STOPPED ACK_TIMEOUT DISCONNECTED CONNECT_TIMEOUT AUTH_TIMEOUT INVALID_BASE64 AUDIO_ERROR AUDIO_TIMEOUT BUFFER_LIMIT DECODER_UNAVAILABLE PLAYBACK_FAILED REPLAY_FAILED CACHE_WRITE_FAILED CACHE_CLEAR_FAILED INVALID_WAV UNSUPPORTED_FORMAT TRUNCATED_AUDIO EMPTY_AUDIO STREAM_FINISHED STOPPED INTERRUPTED ENGINE_ERROR ENGINE_WARNING HISTORY_FAILED HISTORY_INVALID HISTORY_DUPLICATE MODEL_ERROR MODEL_DISABLED MODEL_INVALID SAVE_FAILED INVALID_JSON MODEL_BUSY UNKNOWN_MODEL_TYPE INVALID_CONFIG MODEL_KIND_MISMATCH MODEL_CAPABILITY_MISMATCH MODEL_FIELDS_REQUIRED STREAMING_NOT_SUPPORTED PLAINTEXT_CONFIRMATION_REQUIRED KEY_UNAVAILABLE NOT_FOUND COMMENT_NOT_ALLOWED INVALID_REPLY_TARGET"
 const PHASES := "saving first_loading first_failed idle connecting authenticating ready reconnecting auth_rejected signed_out signed_in busy queued sending sent failed uncertain loading complete error skipped playing paused stopped"
 const EXPLANATIONS := {"dynamics_state":"动态读取与写入状态", "settings_models":"模型配置状态", "settings_model_execution":"模型请求执行", "settings_preference":"相处偏好操作", "client_started":"客户端启动", "client_stopped":"客户端正常退出", "history_state":"历史同步状态", "account_state":"账户操作状态", "message_queued":"消息已进入发送队列", "message_delivery":"消息投递状态", "engine_error":"引擎报告异常（原始内容不写入日志）", "connection_state":"聊天连接状态变化", "reply_received":"收到回复分片", "system_error":"操作出现错误", "cache_committed":"完整语音已保存", "cache_error":"语音未能保存", "cache_cleared":"已执行语音缓存清理", "audio_received":"收到音频数据", "audio_format":"已识别音频格式", "audio_decoded":"音频解码完成", "audio_receive_finished":"音频接收结束", "audio_error":"音频处理失败", "audio_underrun":"音频缓冲暂时不足", "audio_playback_started":"开始播放在线语音", "audio_playback_finished":"在线语音播放结束", "replay_preempted":"在线语音打断本地重放", "replay_finished":"重放结束", "replay_started":"开始重放", "replay_paused":"重放已暂停", "replay_resumed":"继续重放", "replay_stopped":"重放已停止"}
+var _environment: Resource
 var _directory: String
 var _token := RegEx.new()
 var _id_pattern := RegEx.new()
@@ -17,13 +18,14 @@ var _meta: Dictionary
 var _initialized := false
 var _closed := false
 
-func _init(directory: String = "user://logs", _legacy_max_bytes: int = 2097152) -> void:
+func _init(directory: String = "user://logs", _legacy_max_bytes: int = 2097152, environment: Resource = null) -> void:
+	_environment = environment if environment != null else preload("res://src/platform/godot_runtime_environment.gd").new()
 	_directory = directory
 	_token.compile("^[a-zA-Z0-9_]{1,64}$")
 	_id_pattern.compile("^[0-9]{20}_[0-9]+_[a-f0-9]{12}$")
-	_id = "%020d_%d_%s" % [int(Time.get_unix_time_from_system() * 1000000), OS.get_process_id(), Crypto.new().generate_random_bytes(6).hex_encode()]
-	_meta = {"id":_id, "started":Time.get_datetime_string_from_system(true) + "Z", "pid":OS.get_process_id(), "closed":false, "complete":true,
-		"release":Release.get_info(), "engine":Engine.get_version_info().string, "os":OS.get_name(), "architecture":Engine.get_architecture_name()}
+	_id = "%020d_%d_%s" % [int(Time.get_unix_time_from_system() * 1000000), _environment.process_id(), Crypto.new().generate_random_bytes(6).hex_encode()]
+	_meta = {"id":_id, "started":Time.get_datetime_string_from_system(true) + "Z", "pid":_environment.process_id(), "closed":false, "complete":true,
+		"release":Release.get_info(), "engine":Engine.get_version_info().string, "os":_environment.os_name(), "architecture":Engine.get_architecture_name()}
 
 func record(event: String, fields: Dictionary = {}) -> Error:
 	if _closed or _token.search(event) == null:
@@ -90,7 +92,7 @@ func list_runs() -> Array[Dictionary]:
 		var data: Variant = JSON.parse_string(FileAccess.get_file_as_string(_path(id, ".json")))
 		if not data is Dictionary or data.get("id") != id or not data.get("pid") is float and not data.get("pid") is int:
 			continue
-		data.active = not data.get("closed",false) and OS.is_process_running(int(data.pid))
+		data.active = not data.get("closed",false) and _environment.process_running(int(data.pid))
 		data.complete = data.get("complete",false) and _read_archive(id).complete
 		runs.append(data)
 	runs.sort_custom(func(a,b): return a.id > b.id)
@@ -122,7 +124,7 @@ func export_run(run_id: String, destination_zip: String) -> Error:
 		readable += "%s [%s] [%s] %s (%s) %s\n" % [entry.time,entry.level,entry.module,entry.message,entry.event,entry.get("code", "")]
 	# Do not export arbitrary on-disk metadata, paths or environment variables.
 	var summary := {"release":metadata.get("release",Release.get_info()), "engine":Engine.get_version_info().string,
-		"os":OS.get_name(), "architecture":Engine.get_architecture_name(), "closed":metadata.get("closed",false),
+		"os":_environment.os_name(), "architecture":Engine.get_architecture_name(), "closed":metadata.get("closed",false),
 		"complete":metadata.get("complete",false) and read.complete, "count":read.entries.size()}
 	var zip := ZIPPacker.new()
 	var error := zip.open(destination_zip)

@@ -1,4 +1,5 @@
 extends PanelContainer
+@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 signal log_requested
 signal feedback_requested
 signal exit_requested
@@ -263,7 +264,7 @@ func report_feedback_result(error: Error) -> void:
 
 func _drag_window(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and not event.double_click:
-		get_window().start_drag()
+		window_system.drag(get_window())
 
 func _layout_form() -> void:
 	%FormMargin.theme_type_variation = &"LoginCompactMargin" if size.x < 440 else &"LoginFormMargin"

@@ -1,4 +1,5 @@
 extends Window
+@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 const StorageService = preload("res://src/storage/storage_service.gd")
 signal saving_finished(ok: bool)
 signal logout_requested
@@ -61,8 +62,8 @@ func _process(_delta: float) -> void:
 	var dirty := is_dirty()
 	%SaveAll.disabled = _saving or not dirty
 	if _result_kind == "success" and dirty and not _saving: _set_result("", "")
-	if get_tree().root.mode == Window.MODE_MINIMIZED:
-		if visible and mode != Window.MODE_MINIMIZED:
+	if window_system.minimized(get_tree().root):
+		if visible and not window_system.minimized(self):
 			_hidden_by_main = true
 			hide()
 	elif _hidden_by_main:

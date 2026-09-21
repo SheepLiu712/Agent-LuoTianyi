@@ -7,8 +7,6 @@ var _credentials: RefCounted
 func _init(profile_path: String = "user://account.cfg", credentials: RefCounted = null) -> void:
 	_profile_path = profile_path
 	_credentials = credentials
-	if _credentials == null and ClassDB.class_exists("WindowsSecurity"):
-		_credentials = preload("res://src/storage/credential_store.gd").new(ClassDB.instantiate("WindowsSecurity"))
 	if ClassDB.class_exists("StorageVolume"):
 		_volume = ClassDB.instantiate("StorageVolume")
 

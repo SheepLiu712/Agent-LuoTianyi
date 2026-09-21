@@ -10,7 +10,7 @@ func check(ok: bool, label: String) -> void:
 		print("FAIL: ", label)
 
 func run() -> void:
-	var driver = load("res://src/avatar/avatar_driver.gd").new()
+	var driver = load("res://src/platform/cubism_avatar_driver.gd").new()
 	root.add_child(driver)
 	check(driver.load_character("res://assets/live2d/character.json") == OK, "real character loads")
 	check(driver.get_status().has("eye_openness"), "driver reports actual eye openness")

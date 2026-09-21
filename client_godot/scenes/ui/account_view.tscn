@@ -1,4 +1,6 @@
-[gd_scene load_steps=6 format=3]
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
 [ext_resource type="Script" path="res://src/ui/account_view.gd" id="script"]
 [ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
 [ext_resource type="Texture2D" path="res://assets/ui/login_portrait.png" id="portrait"]
@@ -14,6 +16,8 @@ events = [SubResource("EscapeKey")]
 theme = ExtResource("theme")
 theme_type_variation = &"LoginSurface"
 script = ExtResource("script")
+
+window_system = ExtResource("isolation_window_system")
 
 [node name="Column" type="VBoxContainer" parent="."]
 theme_override_constants/separation = 0

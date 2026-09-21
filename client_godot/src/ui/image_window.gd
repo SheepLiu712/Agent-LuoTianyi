@@ -1,4 +1,5 @@
 extends Window
+@export var window_system: Resource = preload("res://src/platform/window_system.gd").new()
 var _source: WeakRef
 var _previous_focus: WeakRef
 var _provider: Callable
@@ -73,8 +74,8 @@ func close_image() -> void:
 	_provider = Callable()
 	_confirm = Callable()
 	var source = _source.get_ref() if _source != null else null
-	if is_instance_valid(source) and source.mode != Window.MODE_MINIMIZED:
-		source.grab_focus()
+	if is_instance_valid(source) and not window_system.minimized(source):
+		window_system.focus(source)
 		var control = _previous_focus.get_ref() if _previous_focus != null else null
 		if is_instance_valid(control) and control.is_visible_in_tree(): control.grab_focus()
 
@@ -82,8 +83,8 @@ func _process(_delta: float) -> void:
 	if not _active: return
 	var source = _source.get_ref() if _source != null else null
 	if not is_instance_valid(source): close_image(); return
-	if source.mode == Window.MODE_MINIMIZED:
-		if not _hidden_by_source and mode != Window.MODE_MINIMIZED:
+	if window_system.minimized(source):
+		if not _hidden_by_source and not window_system.minimized(self):
 			_hidden_by_source = true
 			hide()
 	elif _hidden_by_source:
