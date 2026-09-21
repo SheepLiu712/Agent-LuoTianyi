@@ -99,7 +99,8 @@ func open_menu() -> void:
 	var transform := get_global_transform_with_canvas()
 	var origin := Vector2i(transform * Vector2.ZERO)
 	var bottom := Vector2i(transform * Vector2(0,size.y))
-	var shadow: int = _popup.get_theme_stylebox("panel").shadow_size
+	var panel: StyleBoxFlat = _popup.get_theme_stylebox("panel")
+	var shadow := panel.shadow_size + ceili(maxf(absf(panel.shadow_offset.x),absf(panel.shadow_offset.y)))
 	var width := maxi(int(size.x), 230)
 	for row in _buttons: width = maxi(width, int(row.get_combined_minimum_size().x + 32))
 	width = mini(width, maxi(1, int(available.x) - shadow * 2))

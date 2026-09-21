@@ -60,7 +60,7 @@ func _run() -> void:
 	var popup: Window = menu.find_children("*","Window",true,false)[0]
 	check(popup.is_embedded() and Rect2i(Vector2i.ZERO,root.size).encloses(Rect2i(popup.position,popup.size)),"long menu clamped inside owning viewport")
 	check(popup.position.y < 330,"bottom edge opens upwards")
-	check(absi(popup.position.x+4-260)<=1,"popup panel aligns with trigger; shadow extends outside panel")
+	check(absi(popup.position.x+popup.get_theme_stylebox("panel").shadow_size-260)<=1,"popup panel aligns with trigger; shadow extends outside panel")
 	await RenderingServer.frame_post_draw
 	var pixels := popup.get_texture().get_image()
 	check(popup.transparent_bg, "embedded menu has a transparent background")

@@ -100,6 +100,10 @@ func run() -> void:
 	view.select_mode("login")
 	await capture("login-default")
 	if DisplayServer.get_name() != "headless":
+		view.get_node("%Username").grab_focus()
+		await capture("login-account-focus")
+		view.get_node("%Password").grab_focus()
+		await capture("login-password-focus")
 		for pair in [["MenuButton","MenuPopup"],["HistoryButton","HistoryPopup"]]:
 			for expected in [true,false,true,false]:
 				await click_control(view.get_node("%"+pair[0]))

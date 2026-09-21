@@ -625,7 +625,10 @@ border_width_left = 1
 border_width_top = 1
 border_width_right = 1
 border_width_bottom = 1
-border_color = Color(0.85,0.88,0.91,1)
+border_color = Color(0.90,0.91,0.92,1)
+shadow_color = Color(0,0,0,0.055)
+shadow_size = 8
+shadow_offset = Vector2(0,2)
 
 [sub_resource type="StyleBoxFlat" id="LoginDialog"]
 bg_color = Color(1,1,1,1)
@@ -693,6 +696,8 @@ corner_radius_top_left = 12
 corner_radius_top_right = 12
 corner_radius_bottom_left = 12
 corner_radius_bottom_right = 12
+
+[sub_resource type="StyleBoxEmpty" id="LoginNoFocus"]
 
 [resource]
 default_font = SubResource("SystemFont_pul83")
@@ -827,12 +832,12 @@ LoginField/base_type = &"LineEdit"
 LoginField/font_sizes/font_size = 24
 LoginField/styles/normal = SubResource("LoginField")
 LoginField/styles/read_only = SubResource("LoginField")
-LoginField/styles/focus = SubResource("CheckFocus")
+LoginField/styles/focus = SubResource("LoginNoFocus")
 LoginAccountField/base_type = &"LineEdit"
 LoginAccountField/font_sizes/font_size = 24
 LoginAccountField/styles/normal = SubResource("LoginClear")
 LoginAccountField/styles/read_only = SubResource("LoginClear")
-LoginAccountField/styles/focus = SubResource("CheckFocus")
+LoginAccountField/styles/focus = SubResource("LoginNoFocus")
 LoginServerField/base_type = &"LineEdit"
 LoginServerField/font_sizes/font_size = 15
 LoginServerField/styles/normal = SubResource("LoginField")
@@ -928,3 +933,6 @@ LoginPrimary/colors/font_pressed_color = Color(1,1,1,1)
 LoginPrimary/colors/font_focus_color = Color(1,1,1,1)
 LoginPrimary/colors/font_disabled_color = Color(1,1,1,1)
 LoginPrimary/styles/disabled = SubResource("LoginPrimaryDisabled")
+
+DropdownPopup/base_type = &"PopupPanel"
+DropdownPopup/styles/panel = SubResource("LoginPopup")

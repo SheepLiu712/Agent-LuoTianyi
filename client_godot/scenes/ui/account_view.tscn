@@ -129,7 +129,6 @@ size_flags_horizontal = 3
 theme_type_variation = &"LoginAccountField"
 placeholder_text = "用户名"
 alignment = 1
-tooltip_text = "用户名"
 
 [node name="HistoryButton" type="Button" parent="Column/BodyScroll/FormMargin/Body/Form/UsernameFrame/UsernameRow"]
 unique_name_in_owner = true
@@ -148,6 +147,7 @@ alignment = 1
 placeholder_text = "密码"
 secret = true
 secret_character = "●"
+virtual_keyboard_type = 6
 
 [node name="Confirm" type="LineEdit" parent="Column/BodyScroll/FormMargin/Body/Form"]
 unique_name_in_owner = true
@@ -158,6 +158,7 @@ alignment = 1
 placeholder_text = "确认密码"
 secret = true
 secret_character = "●"
+virtual_keyboard_type = 6
 
 [node name="Invite" type="LineEdit" parent="Column/BodyScroll/FormMargin/Body/Form"]
 unique_name_in_owner = true

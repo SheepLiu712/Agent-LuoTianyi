@@ -4,6 +4,9 @@ signal feedback_requested
 signal exit_requested
 const Session = preload("res://src/session/account_session.gd")
 const HistoryRow = preload("res://scenes/ui/login_account_row.tscn")
+const PASSWORD_HINT := "密码只允许英文字母、数字和英文符号，不接受中文或其他字符。"
+var _password_drafts := {"password":"", "confirm":""}
+var _password_carets := {"password":0, "confirm":0}
 var _session: Node
 var _fields: Dictionary = {}
 var _initialized := false
@@ -43,6 +46,8 @@ func _initialize() -> void:
 	_fields = {"server":%Server,"username":%Username,"password":%Password,"confirm":%Confirm,"invite":%Invite}
 	for name in ["username","password","confirm","invite"]:
 		_fields[name].text_submitted.connect(func(_text): _send())
+	for name in ["password","confirm"]:
+		_fields[name].text_changed.connect(func(value): _password_changed(name,value))
 	_fields.username.text_changed.connect(_username_changed)
 	_submit.pressed.connect(_send)
 	%Cancel.pressed.connect(_session.cancel)
@@ -124,6 +129,8 @@ func _username_changed(_text: String) -> void:
 	var entry := _remembered()
 	_remember.set_pressed_no_signal(entry.get("remember",false))
 	_automatic.set_pressed_no_signal(entry.get("auto_login",false))
+	_password_drafts.password = ""
+	_password_carets.password = 0
 	_fields.password.clear()
 	_manual_password = false
 	_apply_mode()
@@ -144,6 +151,10 @@ func _options_changed(automatic_source: bool) -> void:
 func _send() -> void:
 	if _busy: return
 	var operation := _mode
+	for name in (["password"] if operation == "login" else ["password","confirm"]):
+		if not _ascii_password(_fields[name].text):
+			_status.text = PASSWORD_HINT
+			return
 	if operation != "login" and _fields.password.text != _fields.confirm.text:
 		_status.text = "两次输入的密码不一致。"
 		return
@@ -258,7 +269,25 @@ func _layout_form() -> void:
 	%FormMargin.theme_type_variation = &"LoginCompactMargin" if size.x < 440 else &"LoginFormMargin"
 
 func _clear_secrets() -> void:
+	_password_drafts = {"password":"", "confirm":""}
+	_password_carets = {"password":0, "confirm":0}
 	for field in ["password","confirm","invite"]: _fields[field].clear()
+
+func _password_changed(field: String, value: String) -> void:
+	if _ascii_password(value):
+		_password_drafts[field] = value
+		_password_carets[field] = _fields[field].caret_column
+		if _status.text == PASSWORD_HINT: _status.text = ""
+	else:
+		_fields[field].text = _password_drafts[field]
+		_fields[field].caret_column = _password_carets[field]
+		_status.text = PASSWORD_HINT
+
+static func _ascii_password(value: String) -> bool:
+	for index in value.length():
+		var code := value.unicode_at(index)
+		if code < 32 or code > 126: return false
+	return true
 
 static func _error_text(code: String, status: int = 0) -> String:
 	return {"OK":"登录成功。", "LOGGED_OUT":"已退出登录。", "PENDING":"正在处理…", "CANCELLED":"请求已取消。",
