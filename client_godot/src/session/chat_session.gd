@@ -61,7 +61,7 @@ func _init(transport: Node, logger: RefCounted = null, media: Node = null, histo
 			state_changed.emit(get_state()))
 	_reading = reading
 	changed.connect(_update_reading)
-	_images = images if images != null else preload("res://src/storage/history_images.gd").new("user://images", logger)
+	_images = images if images != null else preload("res://src/storage/history_image_source.gd").new()
 	add_child(_images)
 	_images.changed.connect(func(id,state): message_image_changed.emit(id,state))
 

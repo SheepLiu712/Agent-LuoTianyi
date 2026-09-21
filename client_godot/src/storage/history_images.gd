@@ -1,7 +1,6 @@
-﻿extends Node
+extends "res://src/storage/history_image_source.gd"
 const AccountScope = preload("res://src/domain/account_scope.gd")
 const ServerAddress = preload("res://src/domain/server_address.gd")
-signal changed(id: String,state: Dictionary)
 var _root: String
 var _logger: RefCounted
 var _session: Dictionary = {}
