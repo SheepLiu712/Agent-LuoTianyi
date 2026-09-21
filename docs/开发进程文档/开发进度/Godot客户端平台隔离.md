@@ -74,3 +74,8 @@
 - 验证客户端/聊天契约树与本地清理版本一致，server/client/app/.github差异为空；未含File report、热重载DLL、dist、artifacts或.godot缓存。检查高置信凭据特征未发现匹配。末尾空行检查发现旧语音测试多余空行，已在两个工作树一致整理。
 - 全新缓存第一次导入时，引擎在纹理缓存生成前加载全局主题报ctex缺失，保留cold-import.log；资源导入结束后完整基础、账户、网络、功能检查全部通过，7项架构检查通过。独立工作树登录与设置GPU复验通过。证据位于client_godot/artifacts/pr-submission；初次失败不计通过。
 - 未打包、未升级版本，用户project.godot属性重排仍留在原工作区。真实系统DPI、多屏、移动端等未验证范围不变。
+
+### 2026-09-21 推送与原项目PR
+
+- 已推送到Hun1Bk/Agent-LuoTianyi的feat/godot-client-013分支，并向SheepLiu712/Agent-LuoTianyi的dev创建[PR #186](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/186)，创建时head为7bc091b，状态open、非draft。
+- 本次PR使用基于upstream/dev的干净完整客户端提交，不改写本地开发分支或已有远程分支历史。未自动合并、未打包；本条只补充远程提交事实，运行源码与上述已验证候选一致。
