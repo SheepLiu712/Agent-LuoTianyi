@@ -57,6 +57,10 @@ func set_selected_id(id: String) -> bool:
 func get_selected_id() -> String:
 	return _selected
 
+func clear_selection() -> void:
+	_selected = ""
+	_caption()
+
 func set_item_enabled(id: String, enabled: bool) -> void:
 	var items := get_items()
 	for item in items:

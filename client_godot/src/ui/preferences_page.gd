@@ -28,16 +28,15 @@ func _initialize() -> void:
 			var presets = selectors[pair[0]]
 			_presets.append(presets)
 			var values: Dictionary = {"friend":"朋友","confidant":"知己","idol":"偶像","partner":"搭档","family":"家人"} if pair[0] == "relationship" else {"lively":"活泼可爱","gentle":"温柔可人","quiet":"文静恬淡"}
-			var options: Array = [{"id":"custom","label":"自定义"}]
+			var options: Array = []
 			for id in values:
 				options.append({"id":id,"label":values[id]})
 			presets.set_items(options)
 			presets.set_meta("field",pair[0])
 			presets.set_meta("values",values)
 			presets.activated.connect(func(id):
-				if id != "custom":
-					input.text = values[id]
-					_edit())
+				input.text = values[id]
+				_edit())
 		else:
 			var input: TextEdit = blocks[pair[0]]
 			_fields[pair[0]] = input
@@ -66,7 +65,7 @@ func _update(state: Dictionary) -> void:
 		presets.disabled = state.phase != "ready"
 		var values: Dictionary = presets.get_meta("values")
 		var value: String = _fields[presets.get_meta("field")].text
-		presets.set_selected_id("custom")
+		presets.clear_selection()
 		for id in values:
 			if values[id] == value: presets.set_selected_id(id)
 	_reload.disabled = state.phase in ["loading","saving"] or state.dirty
