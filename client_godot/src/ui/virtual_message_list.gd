@@ -15,10 +15,14 @@ var _total := 0.0
 var _width := 0.0
 var _laying := false
 var _visible: Array[String] = []
+var _restore_pending := false
+var _restore_queued := false
+var _pending_anchor: Dictionary = {}
+var _pending_follow := false
 
 func _ready() -> void:
 	get_v_scroll_bar().value_changed.connect(func(_value):
-		if not _laying:
+		if not _laying and not _restore_pending:
 			_render())
 	get_v_scroll_bar().gui_input.connect(_user_input)
 	gui_input.connect(_user_input)
@@ -54,10 +58,18 @@ func get_visible_ids() -> Array[String]:
 func get_reading_anchor() -> Dictionary:
 	if _messages.is_empty() or _offsets.is_empty():
 		return {"id":"","offset":0.0}
+	if _restore_pending and not _pending_follow and _indices.has(_pending_anchor.get("id","")):
+		return _pending_anchor.duplicate()
+	if _restore_pending and _pending_follow:
+		var target := maxf(0,_total-size.y)
+		var target_index := _at(target)
+		return {"id":_messages[target_index].id,"offset":target-_offsets[target_index]}
 	var index := _at(float(scroll_vertical))
 	return {"id":_messages[index].id,"offset":float(scroll_vertical)-_offsets[index]}
 
 func is_at_latest() -> bool:
+	if _messages.is_empty(): return true
+	if _restore_pending: return _pending_follow
 	return float(scroll_vertical) >= _total-size.y-24
 
 func set_audio_state(id: String, state: Dictionary) -> void:
@@ -70,10 +82,12 @@ func set_image_state(id: String, state: Dictionary) -> void:
 
 func _user_input(event: InputEvent) -> void:
 	if (event is InputEventMouseButton and event.pressed) or event is InputEventPanGesture or (event is InputEventKey and event.pressed):
+		_restore_pending = false
 		interacted.emit()
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP,MOUSE_BUTTON_WHEEL_DOWN] and get_global_rect().has_point(get_global_mouse_position()):
+		_restore_pending = false
 		interacted.emit()
 
 func _resized() -> void:
@@ -102,6 +116,9 @@ func _layout(anchor: Dictionary, follow: bool) -> void:
 	if not is_inside_tree():
 		return
 	_laying = true
+	_pending_anchor = anchor.duplicate()
+	_pending_follow = follow
+	_restore_pending = true
 	_offsets.clear()
 	_total = 0
 	for message in _messages:
@@ -116,6 +133,29 @@ func _layout(anchor: Dictionary, follow: bool) -> void:
 		scroll_vertical = maxi(0,roundi(_total-size.y))
 	elif _indices.has(anchor.get("id","")):
 		scroll_vertical = roundi(_offsets[_indices[anchor.id]]+anchor.offset)
+	_laying = false
+	_render()
+	if not _restore_queued:
+		_restore_queued = true
+		_defer_scroll_restore.call_deferred()
+
+func _defer_scroll_restore() -> void:
+	# A changed canvas minimum queues a parent ScrollContainer sort. Restore
+	# after that sort, which can otherwise clamp to the old scroll range.
+	_finish_scroll_restore.call_deferred()
+
+func _finish_scroll_restore() -> void:
+	_restore_queued = false
+	if not _restore_pending or not is_inside_tree(): return
+	_laying = true
+	var bar := get_v_scroll_bar()
+	bar.max_value = maxf(_total,size.y)
+	bar.page = size.y
+	if _pending_follow:
+		scroll_vertical = maxi(0,roundi(_total-size.y))
+	elif _indices.has(_pending_anchor.get("id","")):
+		scroll_vertical = roundi(_offsets[_indices[_pending_anchor.id]]+_pending_anchor.offset)
+	_restore_pending = false
 	_laying = false
 	_render()
 

@@ -32,6 +32,13 @@ func run() -> void:
 		check(picture.size.distance_to(expected) <= 1.5, "image uses original ratio, width limit and no upscaling: " + id)
 		check(row.get_node("%Bubble").size.x <= 620*.9+1, "image panel fits its row")
 		if dimensions.y == 2400: check(picture.size.y >= 2399, "long image has no height cap")
+		row.size.x = 360
+		await settle()
+		expected = Vector2(dimensions) * minf(1,(minf(360*.9,360-50)-32)/dimensions.x)
+		check(picture.size.distance_to(expected) <= 1.5, "resizing recomputes proportional preview: " + id)
+		row.set_image_state({"status":"error","texture":null,"original_size":Vector2i.ZERO,"code":"NETWORK_ERROR"})
+		await settle()
+		check(not picture.visible and not row.get_node("%ImageButton").disabled and row.get_node("%ImageButton").text.contains("重试"), "failure retains a reachable retry action")
 		row.queue_free()
 		await process_frame
 	var direct: Control = Bubble.instantiate()
@@ -58,6 +65,7 @@ func run() -> void:
 	list.set_image_state("19",images.get_state(str(Vector2i(100,2400))))
 	await settle()
 	check(list.get_reading_anchor().id == anchor.id and absf(list.get_reading_anchor().offset-anchor.offset) < 2, "late long image preserves the reading anchor below it")
+	check(list.get_visible_ids().has(anchor.id) and not list.get_visible_ids().has("19"), "visible rows agree with the restored anchor")
 	list.queue_free()
 	images.queue_free()
 	await process_frame

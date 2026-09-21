@@ -57,11 +57,13 @@ material = SubResource("ShaderMaterial_avatar")
 [node name="Body" type="Control" parent="."]
 unique_name_in_owner = true
 size_flags_horizontal = 3
+mouse_filter = 2
 
 [node name="MessageColumn" type="VBoxContainer" parent="Body"]
 unique_name_in_owner = true
 anchor_right = 1.0
 theme_override_constants/separation = 5
+mouse_filter = 2
 
 [node name="Bubble" type="PanelContainer" parent="Body/MessageColumn"]
 unique_name_in_owner = true
@@ -80,7 +82,7 @@ autowrap_mode = 3
 [node name="HistoryPicture" type="TextureRect" parent="Body/MessageColumn/Bubble/Content"]
 unique_name_in_owner = true
 visible = false
-custom_minimum_size = Vector2(0, 135)
+size_flags_horizontal = 4
 expand_mode = 1
 stretch_mode = 5
 
@@ -92,7 +94,7 @@ text = "加载图片…"
 [node name="Picture" type="TextureRect" parent="Body/MessageColumn/Bubble/Content"]
 unique_name_in_owner = true
 visible = false
-custom_minimum_size = Vector2(0, 135)
+size_flags_horizontal = 4
 mouse_default_cursor_shape = 2
 expand_mode = 1
 stretch_mode = 5

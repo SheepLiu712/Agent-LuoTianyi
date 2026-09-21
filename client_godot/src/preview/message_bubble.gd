@@ -22,6 +22,7 @@ var _system_message := false
 var _is_image := false
 var _image_status := "idle"
 var _layout_pending := false
+var _original_size := Vector2i.ZERO
 
 func _ready() -> void:
 	_image_button.pressed.connect(func(): image_action.emit("retry" if _image_status == "error" else "preview"))
@@ -58,6 +59,7 @@ func configure(message: Dictionary, image_texture: Texture2D = null) -> void:
 		_image_button.show()
 	if image_texture != null:
 		_picture.texture = image_texture
+		_original_size = Vector2i(image_texture.get_size())
 		_picture.show()
 	update_message(message)
 
@@ -71,7 +73,12 @@ func _resize_bubble() -> void:
 	var natural := font.get_multiline_string_size(_text.text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 	var has_picture := _is_image or _picture.visible
 	var width := minf(maximum, ceilf(natural + padding))
-	if has_picture: width = minf(maximum, maxf(140, size.x * .76))
+	if has_picture and _original_size.x > 0 and _original_size.y > 0:
+		var factor := minf(1, maxf(1,maximum-padding) / _original_size.x)
+		var preview_size := Vector2(_original_size) * factor
+		_history_picture.custom_minimum_size = preview_size
+		_picture.custom_minimum_size = preview_size
+		width = minf(maximum,maxf(width,preview_size.x+padding))
 	_text.visible = not _text.text.is_empty()
 	_bubble.visible = _text.visible or has_picture
 	_bubble.size_flags_horizontal = Control.SIZE_SHRINK_END if _own else Control.SIZE_SHRINK_BEGIN
@@ -87,6 +94,7 @@ func _sync_height() -> void:
 	# The wrapper contributes height, not its descendants' minimum width. This
 	# lets a previously wide message shrink when the history viewport narrows.
 	_body.custom_minimum_size.y = _column.get_combined_minimum_size().y
+	_column.offset_bottom = _body.custom_minimum_size.y
 
 func update_message(message: Dictionary) -> void:
 	if not _system_message and _text.text != message.text:
@@ -113,8 +121,12 @@ func set_image_state(state: Dictionary) -> void:
 		return
 	_image_status = state.status
 	_history_picture.texture = state.texture
+	_original_size = state.get("original_size",Vector2i.ZERO)
+	if _original_size == Vector2i.ZERO and state.texture != null:
+		_original_size = Vector2i(state.texture.get_size())
 	_history_picture.visible = state.status == "ready"
 	_image_button.disabled = state.status in ["idle","loading"]
 	_image_button.text = {"idle":"加载图片…","loading":"正在下载图片…","ready":"打开原图","error":"图片加载失败 · 重试"}.get(state.status,"")
 	if state.code == "CACHE_WRITE_FAILED":
 		_image_button.text += " · 未能缓存"
+	_queue_layout()

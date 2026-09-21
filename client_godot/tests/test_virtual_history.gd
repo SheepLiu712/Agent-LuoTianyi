@@ -48,6 +48,9 @@ func _run() -> void:
 	for _frame in 12:
 		await process_frame
 	check(list.get_visible_ids().has("999"),"return latest reaches end")
+	var empty: Array[Dictionary] = []
+	list.set_messages(empty)
+	check(list.get_reading_anchor().id.is_empty() and list.is_at_latest() and list.get_visible_ids().is_empty(), "clearing history immediately clears anchor and visible IDs")
 	list.queue_free()
 	await process_frame
 	print("Virtual history list: ","PASS" if failures.is_empty() else "FAIL")

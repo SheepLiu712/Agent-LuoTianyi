@@ -395,7 +395,7 @@ func request_message_image(id: String, retry: bool = false) -> void:
 			_images.ensure(id)
 
 func get_message_image(id: String) -> Dictionary:
-	return _images.get_state(id) if _images != null else {"status":"idle","texture":null,"code":""}
+	return _images.get_state(id) if _images != null else {"status":"idle","texture":null,"original_size":Vector2i.ZERO,"code":""}
 
 func preview_message_image(id: String) -> Texture2D:
 	return _images.preview(id) if _images != null and _by_id.get(id,{}).get("type") == "image" else null

@@ -34,7 +34,7 @@ func stop() -> void:
 	_session.clear()
 	_directory = ""
 func get_state(id: String) -> Dictionary:
-	return _states.get(id,{"status":"idle","texture":null,"code":""}).duplicate()
+	return _states.get(id,{"status":"idle","texture":null,"original_size":Vector2i.ZERO,"code":""}).duplicate()
 func store_local(id: String, bytes: PackedByteArray) -> Error:
 	if id.is_empty() or _session.is_empty(): return ERR_UNCONFIGURED
 	var image := _decode(bytes)
@@ -53,7 +53,7 @@ func ensure(id: String) -> void:
 			_ready_image(id,cached,"")
 			return
 		DirAccess.remove_absolute(path)
-	_states[id] = {"status":"loading","texture":null,"code":""}
+	_states[id] = {"status":"loading","texture":null,"original_size":Vector2i.ZERO,"code":""}
 	changed.emit(id,get_state(id))
 	_queue.append(id)
 	_pump()
@@ -106,7 +106,7 @@ func _ready_image(id: String,image: Image,code: String) -> void:
 	var scale := minf(1.0,480.0/maxi(image.get_width(),image.get_height()))
 	if scale<1:
 		thumb.resize(maxi(1,int(image.get_width()*scale)),maxi(1,int(image.get_height()*scale)))
-	_states[id] = {"status":"ready","texture":ImageTexture.create_from_image(thumb),"code":code}
+	_states[id] = {"status":"ready","texture":ImageTexture.create_from_image(thumb),"original_size":image.get_size(),"code":code}
 	_recent.erase(id)
 	_recent.append(id)
 	while _recent.size()>24:
@@ -117,7 +117,7 @@ func _ready_image(id: String,image: Image,code: String) -> void:
 	if _logger != null:
 		_logger.record("history_image",{"reply_id":id,"code":"OK" if code.is_empty() else code})
 func _error(id: String,code: String) -> void:
-	_states[id] = {"status":"error","texture":null,"code":code}
+	_states[id] = {"status":"error","texture":null,"original_size":Vector2i.ZERO,"code":code}
 	changed.emit(id,get_state(id))
 	if _logger != null:
 		_logger.record("history_image_error",{"reply_id":id,"code":code})
