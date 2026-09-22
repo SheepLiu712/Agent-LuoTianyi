@@ -22,11 +22,11 @@ config/windows_native_icon="res://assets/ui/app_icon.ico"
 
 window/size/viewport_width=480
 window/size/viewport_height=690
+window/size/resizable=false
+window/size/borderless=true
+window/size/transparent=true
 window/size/window_width_override=480
 window/size/window_height_override=690
-window/size/borderless=true
-window/size/resizable=false
-window/size/transparent=true
 window/per_pixel_transparency/allowed=true
 
 [gui]

@@ -20,6 +20,7 @@ var _started := Time.get_ticks_msec()
 var _meta: Dictionary
 var _initialized := false
 var _closed := false
+var _archive_bytes := -1
 
 func _init(directory: String = "user://logs", max_bytes: int = 2097152, environment: Variant = null, max_entries: int = 10000) -> void:
 	_environment = environment if environment is Resource else preload("res://src/platform/godot_runtime_environment.gd").new()
@@ -63,8 +64,9 @@ func record(event: String, fields: Dictionary = {}) -> Error:
 		error = _ensure_directory()
 	if error == OK:
 		var path := _path(_id, ".jsonl")
-		var existing_bytes := FileAccess.get_file_as_bytes(path).size() if FileAccess.file_exists(path) else 0
-		if _entries.size() >= _max_entries or existing_bytes + serialized.size() + 1 > _max_bytes:
+		if _archive_bytes < 0:
+			_archive_bytes = _jsonl_size(path)
+		if _entries.size() >= _max_entries or _archive_bytes + serialized.size() + 1 > _max_bytes:
 			error = ERR_OUT_OF_MEMORY
 			_meta.complete = false
 			limit_rejected = true
@@ -72,6 +74,7 @@ func record(event: String, fields: Dictionary = {}) -> Error:
 			var file := FileAccess.open(path, FileAccess.READ_WRITE if FileAccess.file_exists(path) else FileAccess.WRITE)
 			if file == null:
 				error = FileAccess.get_open_error()
+				_archive_bytes = -1
 			else:
 				file.seek_end()
 				file.store_buffer(serialized)
@@ -79,6 +82,10 @@ func record(event: String, fields: Dictionary = {}) -> Error:
 				file.flush()
 				error = file.get_error()
 				file.close()
+				if error == OK:
+					_archive_bytes += serialized.size() + 1
+				else:
+					_archive_bytes = -1
 	if error == OK:
 		_entries.append(entry)
 	if error != OK:
@@ -236,6 +243,16 @@ func _prune() -> void:
 
 func _path(id: String, suffix: String) -> String:
 	return _directory.path_join(id + suffix)
+
+func _jsonl_size(path: String) -> int:
+	if not FileAccess.file_exists(path):
+		return 0
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return 0
+	var size := file.get_length()
+	file.close()
+	return size
 
 func _module(event: String) -> String:
 	for module in MODULES:
