@@ -5,7 +5,20 @@ $engine = Resolve-Godot $Godot
 # is a prerequisite for the checks below; none of the checks may accidentally
 # turn an import warning/error into a green result.
 if (-not $SkipImport) {
-    Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--editor', '--import') 'import'
+    $importArguments = @('--headless', '--path', $ProjectRoot, '--editor', '--import')
+    try {
+        Invoke-GodotChecked $engine $importArguments 'import'
+    } catch {
+        # On a completely cold cache Godot can parse the global theme before
+        # the first imported slider texture has been materialized. Retry only
+        # that known transient signature; persistent or unrelated import
+        # failures must still fail the check.
+        $importError = $_.Exception.Message
+        $coldThemeRace = $importError -match 'Unable to open file: res://\.godot/imported/[^\r\n]*\.ctex' -and $importError -match 'app_theme\.tres.*(Parse Error|non-existent resource)'
+        if (-not $coldThemeRace) { throw }
+        Write-Warning 'Cold import encountered the known theme texture generation race; retrying once.'
+        Invoke-GodotChecked $engine $importArguments 'import-retry'
+    }
     Write-Host 'Cold import passed.'
 }
 if ($ImportOnly) { exit 0 }
