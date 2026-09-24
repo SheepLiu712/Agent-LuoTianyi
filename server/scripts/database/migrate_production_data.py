@@ -172,7 +172,7 @@ def _create_sqlite_snapshot(source_db: Path, snapshot_db: Path) -> None:
 
 def _run_local_schema_migration(local_data: Path) -> None:
     sys.path.insert(0, str(SERVER_ROOT))
-    from src.system.database import sql_database
+    from src.infrastructure.persistence.database import sql_database
 
     sql_database.init_sql_db(
         str(local_data / "database"),
@@ -219,7 +219,7 @@ def _column_default_value(table_name: str, column: Any) -> Any:
 
 def _add_missing_model_columns(target_db: Path) -> None:
     sys.path.insert(0, str(SERVER_ROOT))
-    from src.system.database.sql_database import Base
+    from src.infrastructure.persistence.database.sql_database import Base
 
     conn = _connect(target_db)
     try:

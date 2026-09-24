@@ -6,7 +6,7 @@ from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
-    from src.system.system_runtime import SystemRuntime
+    from src.server_runtime import ServerRuntime
     from src.world.learn_sing_songs.task import LearnSingSongsTask
 
 
@@ -34,15 +34,15 @@ class QQMusicCredentialRefreshTask(WorldTask):
 
         super().__init__(self.base_task_name, task_config)
         self.learn_sing_songs_tasks = list(learn_sing_songs_tasks)
-        self.system_runtime: "SystemRuntime | None" = None
+        self.server_runtime: "ServerRuntime | None" = None
 
-    def initialize(self, system_runtime: "SystemRuntime") -> None:
-        self.system_runtime = system_runtime
+    def initialize(self, server_runtime: "ServerRuntime") -> None:
+        self.server_runtime = server_runtime
 
     def ensure_dependencies(self) -> None:
         super().ensure_dependencies()
-        if self.system_runtime is None:
-            raise RuntimeError("QQMusicCredentialRefreshTask dependency is missing: system_runtime")
+        if self.server_runtime is None:
+            raise RuntimeError("QQMusicCredentialRefreshTask dependency is missing: server_runtime")
         if not self.learn_sing_songs_tasks:
             raise RuntimeError("QQMusicCredentialRefreshTask dependency is missing: learn_sing_songs_tasks")
 

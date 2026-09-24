@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
-from src.system.database.event_models import UnifiedEventType
+from src.infrastructure.persistence.database.event_models import UnifiedEventType
 from src.utils.logger import get_logger
 from src.world.bili_event_updater.event_parser import EventParser
 from src.world.bili_event_updater.official_feed_fetcher import OfficialFeedFetcher
 
 
 if TYPE_CHECKING:
-    from src.system.database.services.event_store import EventStore
+    from src.infrastructure.persistence.database.services.event_store import EventStore
 
 class BiliEventUpdater:
     """Fetch Bilibili dynamics, parse them, and upsert schedule events."""

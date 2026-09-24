@@ -6,8 +6,8 @@ from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
-    from src.system.system_runtime import SystemRuntime
-    from src.system.database.services.event_store import EventStore
+    from src.server_runtime import ServerRuntime
+    from src.infrastructure.persistence.database.services.event_store import EventStore
 
 
 class ExpiredEventCleanupTask(WorldTask):
@@ -17,8 +17,8 @@ class ExpiredEventCleanupTask(WorldTask):
         super().__init__(self.task_name, config)
         self.event_store: "EventStore" | None = None
 
-    def initialize(self, system_runtime: "SystemRuntime") -> None:
-        database_manager = getattr(system_runtime, "database_manager", None)
+    def initialize(self, server_runtime: "ServerRuntime") -> None:
+        database_manager = getattr(server_runtime, "database_manager", None)
         self.event_store = getattr(database_manager, "event_store", None)
 
     def ensure_dependencies(self) -> None:

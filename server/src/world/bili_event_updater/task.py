@@ -8,7 +8,7 @@ from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
-    from src.system.system_runtime import SystemRuntime
+    from src.server_runtime import ServerRuntime
 
 
 class BiliEventUpdateTask(WorldTask):
@@ -18,13 +18,13 @@ class BiliEventUpdateTask(WorldTask):
         self.character_id = character_id
         super().__init__(f"{self.base_task_name}:{character_id}", config)
         self.logger = get_logger(__name__)
-        self.system_runtime: "SystemRuntime" | None = None
+        self.server_runtime: "ServerRuntime" | None = None
         self.updater: Optional[BiliEventUpdater] = None
 
-    def initialize(self, system_runtime: "SystemRuntime") -> None:
-        self.system_runtime = system_runtime
-        event_store = system_runtime.database_manager.event_store
-        llm_service = system_runtime.llm_service
+    def initialize(self, server_runtime: "ServerRuntime") -> None:
+        self.server_runtime = server_runtime
+        event_store = server_runtime.database_manager.event_store
+        llm_service = server_runtime.llm_service
         llm_module = None
         vlm_module = None
         if llm_service is not None:
@@ -45,7 +45,7 @@ class BiliEventUpdateTask(WorldTask):
         """检查 B 站事件更新任务依赖。"""
         super().ensure_dependencies()
         required = {
-            "system_runtime": self.system_runtime,
+            "server_runtime": self.server_runtime,
             "updater": self.updater,
         }
         missing = [name for name, value in required.items() if value is None]

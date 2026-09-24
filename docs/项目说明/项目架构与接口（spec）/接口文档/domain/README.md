@@ -2,17 +2,18 @@
 
 ## 模块职责
 
-`server/src/domain` 只定义跨模块传递的数据和领域词汇，不访问数据库、网络、模型或文件。其他模块可以依赖 `domain`；`domain` 不应反向依赖它们。
+`server/src/domain` 定义跨模块传递的数据和领域词汇，不访问数据库、网络、模型或文件。
 
 ## 对外接口
 
 ### 输入与响应
 
-- `Stimulus`：系统收到的一次刺激。主要字段为 `source_channel`、`modality`、`payload`、`text`、`sender_user_id`、`target_character_ids`、`client_msg_id`、`persist_policy` 和 `ephemeral`。
-- `SourceChannel`、`StimulusModality`、`PersistPolicy`：分别限定刺激来自哪里、是什么形式、允许怎样持久化。
-- `Stimulus.targets_character(character_id)`：判断刺激是否发给指定角色。
-- `Stimulus.should_persist_conversation()`：判断是否应写入对话记录。
-- `Stimulus.can_be_memory_candidate()`：判断是否允许进入长期记忆候选流程。
+- [Stimulus 领域契约](stimulus.md)：当前总 SPEC 已登记的 22 个 Stimulus 类型名的权威 interface；其中 15 种定义为可构造，7 种只占位且当前统一拒绝构造。文档定义公共字段、专有字段、依赖值类型、稳定错误和公开测试 seam。
+- [handle 输入契约](handle-input.md)：提供不可变请求、Chat/Toy/World 快照、共享取消令牌、枚举及稳定构造错误。
+- [HandlingReport 类型契约](handling-report.md)：提供不可变报告、请求状态、pending 身份划分、计划身份、重评时间及稳定错误。
+- [计划与 realization 契约](realization.md)：提供 Action、ActionPlan、ExecutionContext、AgentOutput、执行报告、两个 sink Protocol 及回执和稳定错误。值构造校验已实现，stage/Agent/客户端运行链尚未接入。
+- `src.domain.agent`：Agent 强类型领域协议的公开导入路径。提供抽象 `Stimulus`、22 个具体类型、`StimulusKind`、`StimulusSource`、领域值类型及稳定构造错误；其中 15 个具体类型可构造，7 个占位类型统一返回 `CONTRACT_STIMULUS_UNAVAILABLE`。该包不导出 `PersistPolicy`。同时提供三种 `InteractionSnapshot`、`HandleStimulusRequest`、`CancellationToken`、`HandlingReport` 及相关枚举和稳定错误。
+- 旧 `src.domain.stimulus.Stimulus`：当前生产链仍使用的 Mapping 协议，提供 `targets_character()`、`should_persist_conversation()` 和 `can_be_memory_candidate()`。它及其 `SourceChannel`、`StimulusModality`、`PersistPolicy` 在迁移期保持可用，但不构成新 `src.domain.agent` 协议的一部分。
 - `ActionPlan`：Agent 对一次刺激给出的动作计划，包含目标角色和一组 `PlannedAction`。
 - `PlannedAction`：一个待执行动作；`ActionType` 包含说话、唱歌、表情、动作、写记忆、调用能力和不回复等类型。
 - `ResponseEnvelope`：向指定渠道和用户发送的通用响应包装。
@@ -45,21 +46,18 @@
 - `MyTool`、`ToolFunction`、`ToolOneParameter`：模型工具调用的声明数据。
 - `PlanningStep`、`ReplyIntensity`、`SingingAction`：当前规划和回复实现共享的计划步骤、强度与演唱动作数据。
 
-完整公开名称以 `server/src/domain/__init__.py` 的导出为准。
+根路径完整公开名称以 `server/src/domain/__init__.py` 的导出为准；Agent 强类型领域协议当前从 `src.domain.agent` 导入。
 
 ## 正常与异常行为
 
 - 创建这些对象只做字段校验和默认值生成，不产生外部副作用。
-- 枚举值和字段名属于跨模块协议；修改时必须先更新 spec 和消费者测试。
-- `Stimulus` 默认不持久化。调用方必须显式选择 `PersistPolicy`，不能仅凭消息来源猜测。
-- 构造参数不合法时由 dataclass、枚举或 Pydantic 抛出类型/校验异常，调用方不应静默吞掉。
+- 15 种可构造 Stimulus 与 7 种占位 Stimulus 的正常/拒绝行为、字段校验和稳定错误见[专用契约](stimulus.md)。
+- 旧 Stimulus 提供持久化判断方法；`src.domain.agent` 的强类型 Stimulus 提供字段校验和构造错误。
 
 ## 使用示例
 
-假设 WebSocket 收到一条文字消息：Adapter 先生成 `Stimulus`，stage 根据其持久化策略保存消息，再把规范化输入交给 Agent；Agent 的结果最终可用 `ActionPlan` 或现有回复对象表达。整个过程中，各模块共享的是这里的数据，而不是彼此的内部对象。
+调用方构造 `TextMessage`，将其放入交互快照的 `pending_stimuli`，再以相同内容作为 `HandleStimulusRequest.stimulus`。请求保存不可变快照，并持有调用方传入的同一枚 `CancellationToken`；具体构造示例见 [handle 输入契约](handle-input.md)。
 
-## 应覆盖的契约场景
+## 验证
 
-- 不同 `PersistPolicy` 下，`should_persist_conversation()` 和 `can_be_memory_candidate()` 返回预期结果。
-- `AgentState.with_updates(...)` 返回新对象且不修改原状态。
-- 未指定目标角色、时间或 ID 时，默认值稳定且可序列化。
+`server/tests/domain` 包含 Stimulus、handle 输入和 HandlingReport 的公开契约测试。各专用接口页提供对应测试入口与运行命令。

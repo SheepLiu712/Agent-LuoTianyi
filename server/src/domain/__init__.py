@@ -1,19 +1,8 @@
-"""Core domain objects for the agent runtime.
-
-These types describe the future cognitive runtime without forcing the legacy
-chat pipeline to change all at once.
-"""
+"""Core domain objects for the Agent runtime."""
 
 from src.domain.action import ActionPlan, ActionType, PlannedAction, ResponseEnvelope
 from src.domain.agent_state import AgentState
 from src.domain.character import CharacterProfile, CharacterName
-from src.domain.chat import (
-    ChatInputEvent,
-    ChatInputEventType,
-    ExtractedTopic,
-    UnreadMessage,
-    UnreadMessageSnapshot,
-)
 from src.domain.conversation_type import ConversationItem, KnowledgeItem, SpeakingCommand
 from src.domain.memory_context import MemoryContext, MemoryHit
 from src.domain.memory_record import MemoryRecord, MemoryType, MemoryVisibility
@@ -27,12 +16,6 @@ from src.domain.memory_type import (
 )
 from src.domain.music_type import OneLyricLine, SongMetadata, SongSegment, WishEntry
 from src.domain.planner_type import PlanningStep, ReplyIntensity, SingingAction
-from src.domain.stimulus import (
-    PersistPolicy,
-    SourceChannel,
-    Stimulus,
-    StimulusModality,
-)
 from src.domain.tool_type import MyTool, ToolFunction, ToolOneParameter
 
 __all__ = [
@@ -40,11 +23,8 @@ __all__ = [
     "ActionType",
     "AgentState",
     "CharacterProfile",
-    "ChatInputEvent",
-    "ChatInputEventType",
     "ConversationItem",
     "Entity",
-    "ExtractedTopic",
     "GraphEntityType",
     "GraphNode",
     "GraphRelationType",
@@ -57,7 +37,6 @@ __all__ = [
     "MemoryVisibility",
     "MyTool",
     "OneLyricLine",
-    "PersistPolicy",
     "PlanningStep",
     "PlannedAction",
     "Relation",
@@ -66,14 +45,9 @@ __all__ = [
     "SingingAction",
     "SongMetadata",
     "SongSegment",
-    "SourceChannel",
     "SpeakingCommand",
-    "Stimulus",
-    "StimulusModality",
     "ToolFunction",
     "ToolOneParameter",
-    "UnreadMessage",
-    "UnreadMessageSnapshot",
     "WishEntry",
     "CharacterName",
 ]

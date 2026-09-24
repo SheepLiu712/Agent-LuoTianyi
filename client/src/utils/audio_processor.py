@@ -1,6 +1,5 @@
 import soundfile as sf
 import numpy as np
-import winsound
 import base64
 from .logger import get_logger
 import io
@@ -177,8 +176,6 @@ def save_to_wav(wav_data: bytes) -> str:
     logger.info(f"Saved WAV file to {output_path}")
     return output_path
 
-HAS_WINSOUND = True
-
 class AudioPlayerStream:
     """
     流式音频播放器。
@@ -328,50 +325,3 @@ def calculate_amplitude_from_chunk(data: bytes, samplerate: int, channels: int, 
     # Simple boost
     rms = np.clip(rms * 5 - 1, -1, 1) # simple scaling
     return rms
-
-def play_audio(wav_data: bytes):
-    """
-    播放音频数据的函数占位符。
-    实际实现应根据项目需求使用适当的音频播放库。
-    
-    Args:
-        wav_data: 音频数据的字节流
-    """
-    if HAS_WINSOUND:
-        try:
-            # winsound.SND_MEMORY 指示第一个参数是内存中的数据
-            # winsound.SND_NODEFAULT 如果找不到声音，不播放系统默认声音
-            winsound.PlaySound(wav_data, winsound.SND_MEMORY | winsound.SND_NODEFAULT)
-            logger.info("Audio playback finished.")
-        except Exception as e:
-            logger.error(f"Error playing sound: {e}")
-    else:
-        # 非 Windows 环境或者是需要跨平台时的备选方案 (需要安装 pyaudio)
-        try:
-            import pyaudio
-            import wave
-            import io
-            
-            logger.info("Using PyAudio for playback...")
-            with wave.open(io.BytesIO(wav_data), 'rb') as wf:
-                p = pyaudio.PyAudio()
-                stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
-                                channels=wf.getnchannels(),
-                                rate=wf.getframerate(),
-                                output=True)
-                
-                chunk = 1024
-                data = wf.readframes(chunk)
-                while len(data) > 0:
-                    stream.write(data)
-                    data = wf.readframes(chunk)
-                
-                stream.stop_stream()
-                stream.close()
-                p.terminate()
-            logger.info("Audio playback finished.")
-        except ImportError:
-            logger.warning("'winsound' not available (not Windows?) and 'pyaudio' not installed.")
-            logger.warning("Cannot play audio directly.")
-        except Exception as e:
-            logger.error(f"Error utilizing PyAudio: {e}")

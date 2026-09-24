@@ -1,10 +1,39 @@
 # agent 对外接口
 
+## 两接口门面
+
+[#63 门面契约](facade.md)记录 `Agent` 的两接口、入口校验、处理器调用、交付结算及关闭等待行为。`get_agent()` 返回新门面，下文记录通过 `get_character_runtime(...).conscious` 取得的旧 `LuoTianyiAgent` 兼容接口。
+
+路由的文件结构、内部注册和解析接口见 [Handler 路由 SPEC](handler-routing.md)。
+
+计划草稿、身份绑定与单次顺序交付见 [PlanEmitter 契约](plan-emitter.md)。
+
+单次处理与行动执行集中于 `agent/processing`，流程见 [门面契约](facade.md)。
+
+输出草稿、Agent 分配的连续序号及失败停止行为见 [输出交付契约](output-delivery.md)。
+
+交互上下文的创建、用户资料、近期对话和召回缓存见 [Context 接口](context.md)。
+
+世界事实的处理：`WORLD_OBSERVATION` 按 `observation_kind.value` 分派到已登记分支——`citywalk_completed` 由 `CitywalkObservationHandler` 生成角色化正文并交付 `PublishDynamic` 计划；未登记类别仍按事实 ID 结算，不产生计划。`SONG_KNOWLEDGE_DISCOVERED` 由专用 `SongKnowledgeHandler` 接纳——调用共享技能按名称/safe name 幂等写入既有歌曲知识与关键词索引，知识与索引在同一幂等边界内（关键词写入失败回滚知识行），不产生计划或外部效果。`DYNAMIC_OBSERVED` 由 `DynamicObservedHandler` 处理：先经 `DynamicTopicMemorySkill` 独立提交话题记忆（失败只记录，不影响回复方面），再读结构化线程决定回复或明确忽略——原帖总是回复、评论按模型判断，**线程中已存在角色回复时不再重复发布**；回复交付 `ReplyDynamic(target=DynamicReplyTarget(dynamic_id, parent_comment_id), owner_user_id=<目标作者>, body)` 计划，忽略与「已回复」都经处理结算表达而不产生计划；回复模型不可用时处理明确失败（`DEPENDENCY_UNAVAILABLE`），不冒充已回复。`SONG_LEARNED` 由 `SongLearnedHandler` 处理：先经 `LearnedSongExperienceSkill` 把「学会」写入角色自身事件记忆（作用域为角色 ID，同日同内容由既有去重保证幂等，写入失败只记录、不回滚学会事实），再按唱歌能力提供的唱段/歌词材料生成正文并交付 `PublishDynamic` 计划。`PUBLISH_DYNAMIC` 由 `PublishDynamicHandler` 经共享动态技能按来源身份幂等发布，成功报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<dynamic_id>)`，失败返回稳定错误码且不声称已提交效果；`REPLY_DYNAMIC` 由 `ReplyDynamicHandler` 经共享动态技能发布评论，只有真正提交 `DYNAMIC_COMMENT` 效果才算已回复；`REQUEST_SONG_LEARNING` 由 `RequestSongLearningHandler` 经共享技能加入愿望清单，成功报告 `EffectRef(kind=SONG_LEARNING_JOB, ...)`，重复请求为 `ALREADY_COMPLETED`。
+
+`DIARY_PLANNING_DUE` 由 `DiaryPlanningDueHandler` 处理：按 `owner_user_id` 与 `local_date` 经共享日记技能（`DiaryWritingSkill`，复用既有素材收集与日记提示词）生成正文，交付 `WriteDiary(owner_user_id, local_date, body)` 计划；素材为空或正文生成为空时处理明确失败，不冒充已发布。`WRITE_DIARY` 由 `WriteDiaryHandler` 落库为私密、禁止评论的动态，成功报告 `EffectRef(kind=DYNAMIC_POST, effect_id=<动态 id>)`，失败返回 `DEPENDENCY_UNAVAILABLE` 且不声称已提交效果。
+
+`PROACTIVE_PROMPT_DUE` 仍只经 Agent 两入口处理：`FirstLoginHandler` 保留 `reason=first_login` 的两条预制欢迎；其他受支持到期提醒由同一 handler 根据 Stage 提供的 `reason/due_at/dedup_key/fact_refs` 生成对话内容、写入会话并交付普通 `Say` 计划，随后由 `realize_action_plan` 输出。handler 不依赖 world 任务、EventStore、旧 `ProactiveTopicMaker` 或任何维护包。
+
+### 当前内部认知与状态变更技能
+
+- `ExplicitMemoryIntentSkill.detect(text) -> str | None`：在 cognitive 层按 `memory.explicit_intent` 短语 allowlist 提取明确记忆正文；不在 Stage 或 Adapter 判定。
+- `IntentionalMemoryCommit.commit(character_id, user_id, content) -> MemoryCommitRevision`：通过既有 `MemoryWriter` 路径幂等提交私有长期记忆并返回存储标识；它是内部状态变更技能，不是 Action。
+- `ChatReplyHandler` 命中明确记忆意图时，在同一 handle 中先等待提交，再交付仅含确认 `Say` 的计划；提交异常返回 `FAILED / INTERNAL_ERROR`、保留 pending、`retryable=False`，且不交付成功确认。
+- `ResponseCompositionSkill.compose_staged(...) -> ComposedResponse`：召回慢时先返回配置的临时草稿，正式草稿留待调用方 `await formal()`；不新增公开 Stimulus/Action。详见 [慢召回两段式回复](slow-recall-reply.md)。
+
+召回慢时的临时计划与正式计划、取消与迟到结果处理，以及 `agent_runtime.reply_composition.slow_recall` 配置见 [慢召回两段式回复](slow-recall-reply.md)。
+
 ## 模块职责
 
-`server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。按照目标架构，其他业务模块最终只应调用 Agent 提供的少量接口，不应直接操作 subconscious 或 capabilities。
+`server/src/agent` 负责角色如何理解上下文、组织回复并决定动作。
 
-当前实现还没有独立的“薄外壳”类；实际入口是 `LuoTianyiAgent`。下面记录当前确实可被其他模块调用的接口。
+`LuoTianyiAgent` 仍作为 `CharacterRuntime.conscious` 的内部协作者；业务入口统一由 `Agent` 门面提供。
 
 ## 对外接口
 
@@ -14,12 +43,9 @@
 
 ### 话题规划与回复
 
-- `await plan_topic_turn_for_pipeline(user_id, topic, conversation_history, external_context=None) -> TopicAttentionPlan`：为一个完整话题生成注意力和回复计划。
-- `await realize_topic_plan_for_pipeline(user_id, plan) -> list[OneResponseLine]`：把计划实现为文字或歌曲回复行。
-- `await generate_topic_reply_for_pipeline(user_id, topic_content, memory_hits=None, fact_hits=None, sing_plan=None, conversation_history=None) -> list[OneResponseLine]`：兼容现有流水线的一步式回复入口。
+- `await generate_topic_reply_for_pipeline(user_id, topic_content, memory_hits=None, fact_hits=None, sing_plan=None, conversation_history=None) -> list[OneResponseLine]`：由内部 `ResponseCompositionSkill` 使用的一步式回复协作者。
 - `await search_song_facts_for_topic(constraints) -> list[str]`：查询与话题约束有关的歌曲事实。
 - `await search_memory_context_for_topic(user_id, queries, threshold=0.8, k=3) -> MemoryContext`：查询用户相关记忆。
-- `await write_topic_memories_for_pipeline(...) -> dict`：根据本轮话题和回复决定并写入记忆。
 
 ### 唱歌和语音
 
@@ -41,25 +67,17 @@
 - `OneSentenceChat(sound_content, expression, tone, content, uuid)`：一条可显示、可朗读的文字回复。
 - `SongSegmentChat(lyrics, song, segment, uuid)`：一段歌曲回复。
 
-这些类型目前是事实接口，但后续应迁入稳定的领域协议或由 Agent 外壳隐藏。
-
 ## 正常与异常行为
 
-- 正常调用顺序是先由 `agent_runtime.get_agent(character_id)` 取得 Agent，再调用上述接口。
+- 外部业务调用不得取得 `conscious`；Stage、world 与 adapter 只调用 `Agent.handle_stimulus` / `Agent.realize_action_plan`。
 - 规划、记忆、模型、唱歌和语音调用可能产生模型请求、数据库写入、文件读取或音频生成等副作用。
-- 依赖未注入、模型返回无法解析或能力执行失败时会传播异常；调用方应在 stage/Adapter 边界转换为可观察的失败结果。
+- 依赖未注入、模型返回无法解析或能力执行失败时会传播异常。
 - 流式语音生成器可能在迭代过程中失败，不能只在创建生成器时判定成功。
 
 ## 使用示例
 
-假设 stage 已经整理出一个完整话题：它先调用 `agent_runtime.get_agent("luotianyi")`，再让 Agent 规划并实现回复。stage 只负责排队、超时和发送，不需要知道 Agent 内部用了哪些记忆检索器或语音服务。
+回复 handler 通过运行时注入的内部 skill 协作者完成回复生成，不暴露新的公共业务入口。
 
-## 应覆盖的契约场景
+对话压缩技能、共享装配和旧链路接入见 [对话压缩技能](conversation-compaction.md)。
 
-- 使用 Fake subconscious/capability 时，给定同一话题能从公开规划接口得到可实现的回复计划。
-- 没有记忆或歌曲事实时仍能正常回复；依赖未注入时 `ensure_dependencies()` 明确失败。
-- `sing(...)` 无可用歌曲时返回 `None`；流式语音在中途失败时把错误交给调用者处理。
-
-## 目标接口（尚未实现）
-
-目标是再给 `LuoTianyiAgent` 包一层只暴露有限方法的外壳，例如统一的 `handle_stimulus(...)`。该方法当前不存在，任何代码都不能把它当成已经可用的接口。迁移完成前，以本页“当前对外接口”为准。
+语音生成、异步 TTS 适配和 SAY 的 TTS 和预制音频分支见 [Speaking 接口](speaking.md)。
