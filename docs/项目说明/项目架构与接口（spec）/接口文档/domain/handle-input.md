@@ -194,7 +194,7 @@ python -m pytest tests/domain -q
 
 ## 处理用途与预处理结果
 
-HandleStimulusRequest 增加 `purpose: HandlePurpose = PROCESS` 和 `prepared_inputs: tuple[PreprocessedInput, ...] = ()`。HandlePurpose 包含 PROCESS、REFLECT，必须传枚举实例。prepared_inputs 按 pending_stimuli 顺序提供，不得重复或包含范围外刺激。
+HandleStimulusRequest 保留 `purpose: HandlePurpose = PROCESS` 和 `prepared_inputs: tuple[PreprocessedInput, ...] = ()`。HandlePurpose 目前只有 PROCESS；认知维护由 `REFLECTION` action plan 表达，不再构造 REFLECT stimulus。prepared_inputs 按 pending_stimuli 顺序提供，不得重复或包含范围外刺激。
 
 `PreprocessedInput(*, stimulus_id: str, text: str | None, conversation_entry_ids: tuple[str, ...] = ())` 为不可变数据类型。stimulus_id 非空白；text 为理解后的文本，允许 None；conversation_entry_ids 为已保存对话记录 ID，元素非空白且不重复。非法构造使用 CONTRACT_INVALID_HANDLE_REQUEST。
 

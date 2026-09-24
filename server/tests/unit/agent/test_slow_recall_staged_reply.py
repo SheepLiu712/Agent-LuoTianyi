@@ -92,14 +92,15 @@ async def test_temporary_and_formal_are_two_complete_plans_with_consecutive_ordi
     sink = Sink()
     report = await agent(_StagedComposer()).handle_stimulus(deadline_request(), sink, context=context())
 
-    thinking, temporary, formal = sink.values
-    assert [plan.plan_ordinal for plan in sink.values] == [0, 1, 2]
+    thinking, temporary, formal, reflection = sink.values
+    assert [plan.plan_ordinal for plan in sink.values] == [0, 1, 2, 3]
     assert [action.kind for action in thinking.actions] == [d.ActionKind.START_THINKING]
     # 两份计划各自完整且可独立实现：都只含可直接播放的 Say。
     assert [action.kind for action in temporary.actions] == [d.ActionKind.SAY]
     assert [action.kind for action in formal.actions] == [d.ActionKind.SAY]
     assert temporary.actions[0].content == "稍等我想想"
     assert formal.actions[0].content == "我记得你喜欢乌龙茶"
+    assert isinstance(reflection.actions[0], d.Reflection)
     # 正式计划不修改临时计划：两者身份、行动标识彼此独立。
     assert temporary.plan_id != formal.plan_id
     assert temporary.actions[0].action_id != formal.actions[0].action_id

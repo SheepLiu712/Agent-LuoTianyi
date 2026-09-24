@@ -6,10 +6,10 @@ from stage_support import cleanup, setup, stimulus
 
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
-    ChatReflectionHandler,
     ChatReplyHandler,
 )
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
@@ -74,12 +74,12 @@ class _Execute:
 
 
 def build_agent(composer, execute):
+    reflection = ReflectionActionHandler("luotianyi", _NoReflection(), _NoCompaction())
     return Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
         (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding())),
         (d.StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(composer, _Understanding())),
-        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())],
-        reflection_handler=ChatReflectionHandler(_NoReflection(), _NoCompaction())),
-        action_router=ActionRouter([(d.ActionKind.SAY, execute)]))
+        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())]),
+        action_router=ActionRouter([(d.ActionKind.SAY, execute), (d.ActionKind.REFLECTION, reflection)]))
 
 
 def drafts():

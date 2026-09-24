@@ -95,7 +95,7 @@ async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
     ctx = context()
     sink = Sink()
     report = await agent(composer).handle_stimulus(deadline_request(), sink, context=ctx)
-    thinking, plan = sink.values
+    thinking, plan, reflection = sink.values
     assert [action.kind for action in thinking.actions] == [d.ActionKind.START_THINKING]
     assert thinking.plan_ordinal == 0
     assert isinstance(plan, d.ActionPlan)
@@ -107,6 +107,9 @@ async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
     assert plan.actions[0].expression.expression_id == "开心"
     assert plan.actions[1].song_id == "歌" and plan.actions[1].segment_id == "副歌"
     assert plan.source_stimulus_ids == ("m2", "m1")
+    assert reflection.plan_ordinal == 2
+    assert isinstance(reflection.actions[0], d.Reflection)
+    assert reflection.actions[0].prepared_inputs == deadline_request().prepared_inputs
     assert [entry.source for entry in ctx.conversation.entries] == ["agent", "agent"]
     assert isinstance(ctx.conversation.entries[0].content, TextContent)
     assert ctx.conversation.entries[0].content.text == "你好呀"
@@ -124,7 +127,8 @@ async def test_empty_batch_consumes_without_plan_or_persistence():
     ctx = context()
     sink = Sink()
     report = await agent(composer).handle_stimulus(replace(request(), prepared_inputs=()), sink, context=ctx)
-    assert sink.values == []
+    assert len(sink.values) == 1
+    assert isinstance(sink.values[0].actions[0], d.Reflection)
     assert ctx.conversation.entries == []
     assert report.consumed_pending_stimulus_ids == ("m2", "m1")
     assert composer.calls == []

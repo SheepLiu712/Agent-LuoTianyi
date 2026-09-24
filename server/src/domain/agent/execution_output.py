@@ -24,6 +24,7 @@ class ExecutionContext(_Value):
     interaction_id: str
     current_interaction_revision: int
     cancellation: CancellationToken
+    interaction_context: object | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -32,7 +32,7 @@ ChatStage 持有 context、按接收顺序排列的待回复输入、每条输�
 | `_on_preprocessing_finished` | 将有效 `preprocessed_input` 写入对应输入，标记就绪并计算期限；失败记录日志并移除该输入。 |
 | `_on_deadline(revision)` | 验证计时修订及全部输入已就绪，冻结有序批次，创建 InteractionDeadline 请求并启动回复。 |
 | `_on_reply_finished` | 依据可信报告移除 consumed 输入及其召回记忆；保留未消费输入。被取消请求的晚返回不参与结算。 |
-| `_on_execution_finished` | 移除回复尝试中的已结束计划；回复报告与全部计划均结束后，完成尝试清理并发起 REFLECT 调用。 |
+| `_on_execution_finished` | 移除回复尝试中的已结束计划；回复报告与全部计划均结束后，完成尝试清理。认知维护已经由 InteractionDeadline handler 追加为最后一个 `REFLECTION` action plan。 |
 
 所有状态转换方法同步执行；耗时处理交给独立异步任务，任务返回后调用相应完成方法。每个 handle 使用独立 request_id、令牌与计划接收器。回复期间产出的计划立即入队，不等待完整 HandlingReport。
 
@@ -42,9 +42,9 @@ ChatStage 持有 context、按接收顺序排列的待回复输入、每条输�
 
 realize 按计划交付顺序串行。上一轮 Agent 返回并提交必要收尾信号后才开始下一轮，不等待网络 Future 或客户端播放。触摸可以在文本 handle 等待时产生反馈计划，但不会并行抢占另一个 realize。独立表情恢复由 action handler 在表情后提交正常 `MessageEndOutput`，沿用通用消息分组；不改变 WebSocket payload 或协议。取消及未关闭的输出经 CancelDelivery 收尾；过期执行不能继续提交输出。
 
-StartThinking 由 Stage 转为呈现状态；最后一个思考请求结束时发送 WAITING。成功回复的报告和全部关联计划均结束后，Stage 以本次 consumed 输入发起 REFLECT；执行报告目前只用于结束关联，不携带给 reflection。占位 reflection 不产生副作用。
+StartThinking 由 Stage 转为呈现状态；最后一个思考请求结束时发送 WAITING。InteractionDeadline handler 在所有可见回复计划之后追加 `REFLECTION` action plan，Stage 只按计划顺序 realize，不再创建认知 stimulus。
 
-原始内容 handler 返回 `PreprocessedInput`；完整业务实现中的理解与持久化在该 handler 内完成。当前 ChatPreprocessingHandler 只返回文本或空的图片/语音理解结果，记录 ID 为空；ChatReplyHandler 只消费整批输入，不生成回复；ChatReflectionHandler 不修改上下文。
+原始内容 handler 返回 `PreprocessedInput`；完整业务实现中的理解与持久化在该 handler 内完成。ChatReplyHandler 消费整批输入、生成可见回复并追加最后的 `REFLECTION` action plan；ReflectionActionHandler 在 realize 阶段完成记忆提取、上下文压缩和用户画像更新。
 
 ## 生命周期与管理
 

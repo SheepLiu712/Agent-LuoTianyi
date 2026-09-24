@@ -19,7 +19,7 @@
 | 分组 | 名称 |
 | --- | --- |
 | 计划 | `ActionPlan`、`Action`、`ActionKind` |
-| 具体行动 | `StartThinking`、`Say`、`Sing`、`RestoreExpression`、`WriteDiary`、`PublishDynamic`、`ReplyDynamic`、`RequestSongLearning` |
+| 具体行动 | `StartThinking`、`Say`、`Sing`、`RestoreExpression`、`WriteDiary`、`PublishDynamic`、`ReplyDynamic`、`RequestSongLearning`、`Reflection` |
 | 行动值 | `Tone`、`ChangeExpression`、`DynamicReplyTarget`、`DynamicSource`、`Visibility`、`OutputDelivery` |
 | 接收协议 | `ActionPlanSink`、`PlanReceipt`、`PlanAcceptanceStatus`、`AgentOutputSink`、`OutputReceipt`、`OutputAcceptanceStatus` |
 | 执行输入 | `ExecutionContext` |
@@ -44,7 +44,7 @@
 ## 3. Action 与值对象
 
 `Action` 为不可直接构造的抽象基类，公共字段只有 `action_id: str`，具体类型提供固定 `kind: ActionKind`。
-本轮 ActionKind 为 `START_THINKING=start_thinking`、`SAY=say`、`SING=sing`、`RESTORE_EXPRESSION=restore_expression`、`WRITE_DIARY=write_diary`、`PUBLISH_DYNAMIC=publish_dynamic`、`REPLY_DYNAMIC=reply_dynamic`、`REQUEST_SONG_LEARNING=request_song_learning`。
+本轮 ActionKind 为 `START_THINKING=start_thinking`、`SAY=say`、`SING=sing`、`RESTORE_EXPRESSION=restore_expression`、`WRITE_DIARY=write_diary`、`PUBLISH_DYNAMIC=publish_dynamic`、`REPLY_DYNAMIC=reply_dynamic`、`REQUEST_SONG_LEARNING=request_song_learning`、`REFLECTION=reflection`。
 
 ### 3.0 处理开始通知
 
@@ -52,7 +52,7 @@
 
 该通知使用本请求的首个计划（plan_ordinal=0），actions 只包含一个 StartThinking；同一请求最多产生一个这种计划。后续业务计划接着编号，状态通知与业务行动不能混在一个计划中。
 ActionPlan 构造器验证包含 StartThinking 时的单行动和 ordinal=0 约束；跨计划的次数与顺序属于运行时约定。
-plan sink 校验并接收通知后，由 stage 直接消费、发送既有 `agent_state_changed(thinking)`，不等待语音执行队列。它不调用 realize，不生成 ExecutionContext、AgentOutput 或 ExecutionReport。其余六种业务 Action 仍交给 realize。
+plan sink 校验并接收通知后，由 stage 直接消费、发送既有 `agent_state_changed(thinking)`，不等待语音执行队列。它不调用 realize，不生成 ExecutionContext、AgentOutput 或 ExecutionReport。其余业务 Action（包括最后执行的 `Reflection`）仍交给 realize。
 若将这种通知计划误传给 realize，执行边界以 UNSUPPORTED_ACTION 拒绝，不把它当作已完成的业务行动。
 
 已接收的通知计划也记入 HandlingReport.emitted_plan_ids；是否有待执行的业务计划依据计划内容判断，不能仅凭该字段非空推断。不为已由 stage 消费的通知等待 ExecutionReport。
@@ -153,12 +153,15 @@ ExecutionContext(
     interaction_id: str,
     current_interaction_revision: int,
     cancellation: CancellationToken,
+    interaction_context: object | None = None,
 )
 ```
 
 execution_id 标识本次计划执行，用于输出关联和日志；调用方为不同执行分配不同标识，Agent 不查询历史绑定或合并重复调用。
 context 保存传入的同一 CancellationToken；独立于原 handle 的取消令牌。
 current_interaction_revision 是开始执行时的事实，覆盖计划接收后排队期间的变化，因此与 plan.basis_interaction_revision 含义不同。
+
+`interaction_context` 是由拥有交互上下文的 Stage 注入的 opaque 运行时对象；聊天 `Reflection` realizer 用它访问会话、画像和召回状态，WorldStage 等无交互上下文的执行保持 `None`。
 
 计划依据修订不能晚于执行时的当前修订；较早的修订不自动使计划失效。Stage 根据 Agent 的交互中断状态发布取消信号，通过 cancellation 和绑定 sink 阻止失效输出。
 持久行动是否开始取决于该行动的接受及取消边界；已经提交的效果保留在报告里。

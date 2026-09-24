@@ -7,6 +7,7 @@ from src.agent import Agent
 from src.agent.context import ContextFactory
 from src.agent.handlers.action.dynamic import PublishDynamicHandler
 from src.agent.handlers.action.dynamic_reply import ReplyDynamicHandler
+from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
@@ -15,7 +16,6 @@ from src.agent.handlers.action.song_learning import RequestSongLearningHandler
 from src.agent.handlers.action.write_diary import WriteDiaryHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
-    ChatReflectionHandler,
     ChatReplyHandler,
 )
 from src.agent.handlers.stimulus.citywalk import (
@@ -245,13 +245,7 @@ class AgentRuntime:
                 StimulusKind.IMAGE_SELECTION_CLOSED,
             )
         )
-        return StimulusRouter(
-            registrations,
-            reflection_handler=ChatReflectionHandler(
-                self.skills.reflection,
-                self.skills.conversation_compaction,
-            ),
-        )
+        return StimulusRouter(registrations)
 
     def _build_action_router(
         self,
@@ -276,6 +270,14 @@ class AgentRuntime:
                     ReplyDynamicHandler(character_id, self.skills.dynamic_reply),
                 ),
                 (ActionKind.WRITE_DIARY, WriteDiaryHandler(character_id, self.skills.diary_writing)),
+                (
+                    ActionKind.REFLECTION,
+                    ReflectionActionHandler(
+                        character_id,
+                        self.skills.reflection,
+                        self.skills.conversation_compaction,
+                    ),
+                ),
             )
         )
 

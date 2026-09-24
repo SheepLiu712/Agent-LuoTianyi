@@ -24,7 +24,7 @@ AgentRuntime 直接装配角色身份和路由器；新 Agent 门面不接收数
 agent = agent_runtime.get_agent(character_id)
 ```
 
-路由装配见 [Handler 路由 SPEC](../agent/handler-routing.md)：AgentRuntime 构造每角色的路由器并注入 Agent：刺激路由登记 InteractionEndingHandler，以及文本、图片、语音、打字、选图、触摸的 ChatPreprocessingHandler，占位期限回复 ChatReplyHandler 和独立的 ChatReflectionHandler。行动路由登记 SayHandler。每个角色的 ContextFactory 由运行时装配在 context_factories 中，仅提供 create。SystemRuntime 向 StageManager 注入按角色取得创建模块的函数；结束处理器不再接收 factory。
+路由装配见 [Handler 路由 SPEC](../agent/handler-routing.md)：AgentRuntime 构造每角色的路由器并注入 Agent：刺激路由登记 InteractionEndingHandler，以及文本、图片、语音、打字、选图、触摸的 ChatPreprocessingHandler 和期限回复 ChatReplyHandler；行动路由登记 SayHandler、ReflectionActionHandler 及其他角色能力。每个角色的 ContextFactory 由运行时装配在 context_factories 中，仅提供 create。SystemRuntime 向 StageManager 注入按角色取得创建模块的函数；结束处理器不再接收 factory。
 
 ## 稳定入口
 

@@ -24,7 +24,7 @@ async def realize_action_plan(self, plan: ActionPlan, context: ExecutionContext,
 2. 检查触发刺激和全部 pending 的目标角色包含绑定角色，否则返回 FAILED / CONTRACT_SNAPSHOT_MISMATCH。
 3. 检查 Agent 是否接受工作；关闭期间返回 FAILED / DEPENDENCY_UNAVAILABLE。
 4. 登记本次在途调用，执行 `await Handling(self, request, plan_sink, context=context).run()`。
-5. Handling 检查取消；PROCESS 按刺激 kind 路由，REFLECT 通过 resolve_reflection 路由。未注册返回 UNSUPPORTED_STIMULUS。
+5. Handling 检查取消；PROCESS 按刺激 kind 路由。认知维护由 `REFLECTION` action 的 realizer 执行，不再存在 REFLECT stimulus 路由。未注册返回 UNSUPPORTED_STIMULUS。
 6. 创建 PlanEmitter，异步调用 handler.handle；处理器通过 plans.context 借用本交互上下文。
 7. 校验报告身份、pending 范围、预处理结果身份和实际交付计划，关闭 emitter。
 8. 门面记录结果日志，并解除在途登记。
@@ -53,7 +53,7 @@ StartThinking 由 stage 消费，不能注册为 Agent 行动处理器。`output
 
 ## 生命周期与代码位置
 
-`processing/` 包含 Handling、Execution、call_handler、两种 emitter、输出草稿和计划身份工具。路由仍在 `handlers/stimulus/router.py` 和 `handlers/action/router.py`，详见 [路由契约](handler-routing.md)。生产行动路由已注册 SAY 的 TTS 和预制音频分支，刺激侧登记聊天预处理、批量回复、reflection 占位处理器及 InteractionEndingHandler。
+`processing/` 包含 Handling、Execution、call_handler、两种 emitter、输出草稿和计划身份工具。路由仍在 `handlers/stimulus/router.py` 和 `handlers/action/router.py`，详见 [路由契约](handler-routing.md)。生产行动路由已注册 SAY 的 TTS 和预制音频分支、`REFLECTION` 认知维护以及其他角色能力；刺激侧登记聊天预处理、批量回复和 InteractionEndingHandler。
 
 AgentRuntime.shutdown 停止新工作后，有界等待在途调用与清理退出，再释放资源。等待超时抛 RuntimeError 并保留依赖；后续 shutdown 可继续等待。进程终止后，不恢复未完成的门面调用。
 
@@ -79,4 +79,4 @@ AgentRuntime.shutdown 停止新工作后，有界等待在途调用与清理退�
 
 context 为可选的单次调用参数；提供时验证用户、角色及交互身份。Stage 总是提供它，Handler 经 plans.context 读取和更新；调用结束后 emitter 释放引用。Agent 不持有交互上下文注册表。
 
-原始内容调用只携带自身输入；期限调用携带有序的待回复批次和 prepared_inputs；REFLECT 调用携带已消费部分。相同输入再次直接提交 Agent 会再次处理，输入生命周期由 Stage 负责。
+原始内容调用只携带自身输入；期限调用携带有序的待回复批次和 prepared_inputs，并在同一 handle 内追加 `REFLECTION` action plan。相同输入再次直接提交 Agent 会再次处理，输入生命周期由 Stage 负责。

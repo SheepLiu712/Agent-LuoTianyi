@@ -20,6 +20,8 @@ _types = {
         d.PublishDynamic,
         d.ReplyDynamic,
         d.RequestSongLearning,
+        d.Reflection,
+        d.PreprocessedInput,
         d.MediaRef,
         d.Tone,
         d.ChangeExpression,

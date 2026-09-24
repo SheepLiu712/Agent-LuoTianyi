@@ -91,7 +91,7 @@ class ActionRouter(Generic[HandlerT]):
 
 ### 选择范围与调用流程
 
-PROCESS 调用根据触发刺激选择一个处理器；REFLECT 调用使用独立反思处理器。`pending_stimuli` 是交给该处理器理解和结算的输入，不逐项再次路由，也不因 pending 含有其他 kind 而调用其他处理器。`InteractionKind` 不参与路由键；处理器接收完整请求，并以 `UNSUPPORTED_INTERACTION` 表达不支持的交互。
+PROCESS 调用根据触发刺激选择一个处理器；认知维护由同一 InteractionDeadline handler 追加 `REFLECTION` action plan，再由 ActionRouter 选择 realizer。`pending_stimuli` 是交给该处理器理解和结算的输入，不逐项再次路由，也不因 pending 含有其他 kind 而调用其他处理器。`InteractionKind` 不参与路由键；处理器接收完整请求，并以 `UNSUPPORTED_INTERACTION` 表达不支持的交互。
 
 一次 realize 先解析计划中全部行动，再按原顺序逐项调用处理器。因此，计划的后续行动未注册时，前面的行动也不会开始；同一个处理器被多个行动匹配时，仍然按每项行动分别调用，不合并行动。
 
@@ -121,7 +121,7 @@ realize_action_plan(plan, execution_context, output_sink)
 
 ## 与门面和运行时的衔接
 
-AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；装配参数只供运行时和模块内测试使用，不从门面暴露 router。生产装配为每个角色注册 SayHandler，共用 SpeakingSkill；刺激侧注册 InteractionEndingHandler 及聊天预处理、期限回复、reflection 占位处理器。任一 router 构造失败时，AgentRuntime 初始化失败，沿用已有初始化清理规则，不发布半成品运行时。
+AgentRuntime 创建每角色 router，并通过 Agent 的装配参数传入；装配参数只供运行时和模块内测试使用，不从门面暴露 router。生产装配为每个角色注册 SayHandler、ReflectionActionHandler 及其他角色能力；刺激侧注册 InteractionEndingHandler 及聊天预处理、期限回复。任一 router 构造失败时，AgentRuntime 初始化失败，沿用已有初始化清理规则，不发布半成品运行时。
 
 门面完成其契约规定的入口检查后才查询 router；路由器不自行重复这些检查：
 
@@ -149,7 +149,7 @@ class ActionHandler(Protocol):
                       outputs: OutputEmitter) -> ActionResult: ...
 ```
 
-handle 接收 Stage 选定的输入范围和 prepared_inputs，通过 plans.context 使用本次借用的上下文。StimulusRouter 的可选 reflection_handler 参数独立登记反思处理器；resolve_reflection 返回它，缺少登记时抛 KeyError。
+handle 接收 Stage 选定的输入范围和 prepared_inputs，通过 plans.context 使用本次借用的上下文。认知维护不再作为 StimulusRouter 的特殊路由；InteractionDeadline handler 通过 ActionPlanSink 追加 `REFLECTION` action，交由 ActionRouter 的 ReflectionActionHandler realize。
 
 `plans` 是接收 ActionPlanDraft 的内部 PlanEmitter，按 [计划投递契约](plan-emitter.md) 分配身份并在本次内存中记录接收结果；`outputs` 是接收四类 OutputDraft 的私有 OutputEmitter，由 Agent 绑定身份并分配连续 sequence。二者都是门面为本次调用创建的受限交付对象。它们不能取得其他调用的 sink，不把外部 sink 原对象传给处理器。处理器正常返回后，交付对象失效；保留它再调用不会产生输出。处理器不能启动脱离调用生命周期的工作；拥有的异步任务或同步线程在返回或传播任务取消前必须完成清理。
 
@@ -191,4 +191,4 @@ Agent 通过入口检查后登记本次在途调用，处理器和交付器清�
 
 ## 聊天占位处理器
 
-`handlers/stimulus/chat.py` 提供 ChatPreprocessingHandler、ChatReplyHandler、ChatReflectionHandler。第一项生成单条 PreprocessedInput，不调用模型或保存数据库；第二项消费完整期限批次，不产出计划；第三项返回完成报告，不修改状态。预处理和持久化、批量回复生成、reflection 的业务扩展分别放在这三项中。
+`handlers/stimulus/chat.py` 提供 ChatPreprocessingHandler、ChatReplyHandler。第一项生成单条 PreprocessedInput 并完成输入预处理；第二项消费完整期限批次、生成回复计划并追加最后的 `REFLECTION` action。`handlers/action/reflection.py` 的 ReflectionActionHandler 在 realize 中完成记忆提取、上下文压缩和用户画像更新。

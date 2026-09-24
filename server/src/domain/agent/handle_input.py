@@ -72,10 +72,9 @@ _CONTENT_TRIGGER_KINDS = frozenset(
 
 
 class HandlePurpose(str, Enum):
-    """调用用途：PROCESS 按刺激类别处理，REFLECT 执行本次交互结算后的认知维护。"""
+    """调用用途：PROCESS 按刺激类别处理；认知维护通过 Reflection action 执行。"""
 
     PROCESS = "process"
-    REFLECT = "reflect"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -14,6 +14,7 @@ class ActionKind(str, Enum):
     PUBLISH_DYNAMIC = "publish_dynamic"
     REPLY_DYNAMIC = "reply_dynamic"
     REQUEST_SONG_LEARNING = "request_song_learning"
+    REFLECTION = "reflection"
 
 
 class OutputDelivery(str, Enum):

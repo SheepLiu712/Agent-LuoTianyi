@@ -485,7 +485,6 @@ class ChatStage:
         for sid in attempt.input_ids:
             if sid in consumed:
                 self._pending.pop(sid, None)
-                self.context.recalled_memory.remove_by_stimulus_id(sid)
             elif sid in self._pending:
                 self._pending[sid].status = _InputStatus.READY
                 self._pending[sid].ready_at = datetime.now(timezone.utc)
@@ -500,16 +499,6 @@ class ChatStage:
         self._attempts.pop(attempt.request.request_id, None)
         if attempt.interrupted or attempt.report.request_status is not d.HandlingRequestStatus.COMPLETED:
             return
-        self.context.recalled_memory.remove_by_stimulus_id(attempt.request.stimulus.stimulus_id)
-        if self._state is StageState.ONLINE and len(self._handles) < self._config.max_stimuli:
-            consumed = set(attempt.report.consumed_pending_stimulus_ids)
-            request = self._make_request(
-                attempt.request.stimulus,
-                tuple(s for s in attempt.request.interaction.pending_stimuli if s.stimulus_id in consumed),
-                tuple(p for p in attempt.request.prepared_inputs if p.stimulus_id in consumed),
-                d.HandlePurpose.REFLECT,
-            )
-            self._launch_handle(request, lambda request, report: None)
 
     def _on_execution_finished(self, plan: d.ActionPlan, report: d.ExecutionReport | None) -> None:
         """登记计划已经结束，推进所属回复尝试的清理和维护。"""
@@ -605,6 +594,7 @@ class ChatStage:
                 interaction_id=self.interaction_id,
                 current_interaction_revision=self._revision,
                 cancellation=d.CancellationToken(),
+                interaction_context=self.context,
             )
             self._execution = context
             self._executing_plan = plan

@@ -10,9 +10,9 @@ from stage_support import RecordingAgent, cleanup, plan, report, setup, stimulus
 
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.handlers.stimulus.chat import (
     ChatPreprocessingHandler,
-    ChatReflectionHandler,
 )
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.processing.plan_emitter import ActionPlanDraft
@@ -62,8 +62,6 @@ async def test_slow_image_fast_text_preserve_order_and_wait_after_last_completio
     text = stimulus()
 
     async def handle(req, sink):
-        if req.purpose is d.HandlePurpose.REFLECT:
-            return report(req)
         if req.stimulus is image:
             await gate.wait()
         if isinstance(req.stimulus, d.InteractionDeadline):
@@ -483,12 +481,23 @@ async def test_real_agent_context_access_plan_delivery_and_reflection_after_exec
             assert req.prepared_inputs[0].text == "你好"
             events.append("reply")
             accepted = await plans.emit(ActionPlanDraft(source_stimulus_ids=ids(req), actions=plan(req).actions))
-            return report(req, consumed=ids(req), plans=(accepted.plan_id,))
+            reflection = await plans.emit(
+                ActionPlanDraft(
+                    source_stimulus_ids=ids(req),
+                    actions=(
+                        d.Reflection(
+                            action_id=f"{req.request_id}-reflection",
+                            prepared_inputs=req.prepared_inputs,
+                        ),
+                    ),
+                )
+            )
+            return report(req, consumed=ids(req), plans=(accepted.plan_id, reflection.plan_id))
 
-    class Reflect(ChatReflectionHandler):
-        async def handle(self, req, plans):
+    class Reflect(ReflectionActionHandler):
+        async def realize(self, action, context, outputs):
             events.append("reflection")
-            return await super().handle(req, plans)
+            return await super().realize(action, context, outputs)
 
     from src.agent.handlers.action.router import ActionRouter
     from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
@@ -513,9 +522,13 @@ async def test_real_agent_context_access_plan_delivery_and_reflection_after_exec
                 (d.StimulusKind.INTERACTION_DEADLINE, Reply()),
                 (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
             ],
-            reflection_handler=Reflect(_NoReflection(), _NoCompaction()),
         ),
-        action_router=ActionRouter([(d.ActionKind.SAY, Execute())]),
+        action_router=ActionRouter(
+            [
+                (d.ActionKind.SAY, Execute()),
+                (d.ActionKind.REFLECTION, Reflect("luotianyi", _NoReflection(), _NoCompaction())),
+            ]
+        ),
     )
     stage, _, adapter, _, _ = await setup(agent)
     try:

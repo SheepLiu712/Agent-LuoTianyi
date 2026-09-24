@@ -7,6 +7,7 @@ from typing import ClassVar
 
 from ._realization_contract import RealizationContractErrorCode as _Code
 from ._realization_contract import _Value
+from .handle_input import PreprocessedInput
 from .realization_enums import ActionKind, OutputDelivery, Visibility
 from .stimulus_values import MediaRef
 
@@ -148,6 +149,17 @@ class RequestSongLearning(Action):
     kind: ClassVar[ActionKind] = ActionKind.REQUEST_SONG_LEARNING
     song_id: str
     dedup_key: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Reflection(Action):
+    """完成一次 InteractionDeadline 后的认知维护行动。"""
+
+    kind: ClassVar[ActionKind] = ActionKind.REFLECTION
+    prepared_inputs: tuple[PreprocessedInput, ...]
+
+    def __post_init__(self):
+        _Value.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

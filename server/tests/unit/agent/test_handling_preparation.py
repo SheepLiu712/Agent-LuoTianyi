@@ -7,29 +7,13 @@ from routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
-from src.agent.handlers.stimulus.chat import (
-    ChatPreprocessingHandler,
-    ChatReflectionHandler,
-)
+from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 
 
 class _Understanding:
     def extract_terms(self, text):
         return ()
-
-
-class _NoReflection:
-    async def consolidate_memories(self, invocation, **kwargs):
-        return {}
-
-    async def update_profile(self, invocation, **kwargs):
-        return None
-
-
-class _NoCompaction:
-    async def compact(self, conversation_context):
-        return None
 
 
 def context():
@@ -48,14 +32,10 @@ def context():
 @pytest.mark.asyncio
 async def test_agent_processes_explicit_inputs_without_caching_ownership():
     agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding()))],
-        reflection_handler=ChatReflectionHandler(_NoReflection(), _NoCompaction())))
+        (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding()))]))
     first = await agent.handle_stimulus(request(), Sink(), context=context())
     second = await agent.handle_stimulus(replace(request(), request_id="second"), Sink(), context=context())
     assert first.preprocessed_input.text == second.preprocessed_input.text == "你好"
     assert first.preprocessed_input.conversation_entry_ids != second.preprocessed_input.conversation_entry_ids
     assert not hasattr(agent, "_handling_states")
     assert first.consumed_pending_stimulus_ids == ()
-    reflected = await agent.handle_stimulus(replace(request(), purpose=d.HandlePurpose.REFLECT), Sink(), context=context())
-    assert reflected.request_status is d.HandlingRequestStatus.COMPLETED
-    assert reflected.preprocessed_input is None

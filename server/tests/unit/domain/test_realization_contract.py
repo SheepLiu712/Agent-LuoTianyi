@@ -10,7 +10,7 @@ import src.domain.agent as domain
 
 
 ENUMS = {
-    "ActionKind": "start_thinking say sing restore_expression write_diary publish_dynamic reply_dynamic request_song_learning",
+    "ActionKind": "start_thinking say sing restore_expression write_diary publish_dynamic reply_dynamic request_song_learning reflection",
     "OutputDelivery": "conversation ephemeral_reaction",
     "Visibility": "global private",
     "PlanAcceptanceStatus": "accepted already_accepted",
@@ -27,7 +27,7 @@ ENUMS = {
 }
 CASES = (
     "Tone ChangeExpression DynamicReplyTarget DynamicSource StartThinking Say Sing RestoreExpression WriteDiary "
-    "PublishDynamic ReplyDynamic RequestSongLearning ActionPlan ExecutionContext PlanReceipt "
+    "PublishDynamic ReplyDynamic RequestSongLearning Reflection ActionPlan ExecutionContext PlanReceipt "
     "OutputReceipt TextFinalOutput AudioChunkOutput MessageEndOutput ExpressionOutput EffectRef "
     "ActionResult ExecutionReport"
 ).split()
@@ -67,6 +67,8 @@ def fields(name):
     if name == "ExecutionContext":
         return dict(execution_id="e", interaction_id="i", current_interaction_revision=0,
                     cancellation=domain.CancellationToken())
+    if name == "PreprocessedInput":
+        return dict(stimulus_id="m2", text="你好", conversation_entry_ids=("e1",))
     if name == "PlanReceipt":
         return dict(plan_id="p", status=member("PlanAcceptanceStatus", "ACCEPTED"))
     if name == "OutputReceipt":
@@ -96,6 +98,7 @@ def fields(name):
                                        owner_user_id=None, source=make("DynamicSource"), allow_comment=True),
         "ReplyDynamic": lambda: dict(target=make("DynamicReplyTarget"), owner_user_id="u", body="评论"),
         "RequestSongLearning": lambda: dict(song_id="song", dedup_key="learn-song"),
+        "Reflection": lambda: dict(prepared_inputs=(make("PreprocessedInput"),)),
     }
     return base | extra[name]()
 
@@ -105,7 +108,7 @@ def make(name, **changes):
 
 
 def error_code(name):
-    if name in "StartThinking Say Sing RestoreExpression WriteDiary PublishDynamic ReplyDynamic RequestSongLearning".split():
+    if name in "StartThinking Say Sing RestoreExpression WriteDiary PublishDynamic ReplyDynamic RequestSongLearning Reflection".split():
         return "CONTRACT_INVALID_ACTION"
     if name.endswith("Output"):
         return "CONTRACT_INVALID_OUTPUT"

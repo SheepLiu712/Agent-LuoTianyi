@@ -32,7 +32,7 @@ Handler 提交完整、不可变的行动草稿；角色、请求、交互、依
 
 ## 同一次调用内的多份计划
 
-一次 handle 可以交付多份彼此独立的完整计划，序号连续。回复路径在召回慢时按 `StartThinking`（0）、临时回复（1）、正式回复（2）的顺序交付；每份计划各自完整且可独立实现，后交付的计划不修改先前计划，所有计划共享同一 `basis_interaction_revision`。详见 [慢召回两段式回复](slow-recall-reply.md)。
+一次 handle 可以交付多份彼此独立的完整计划，序号连续。回复路径在召回慢时按 `StartThinking`（0）、临时回复（1）、正式回复（2）、`Reflection`（3）的顺序交付；`Reflection` 是最后一个 action plan，由对应 realizer 完成认知维护。每份计划各自完整且可独立实现，后交付的计划不修改先前计划，所有计划共享同一 `basis_interaction_revision`。详见 [慢召回两段式回复](slow-recall-reply.md)。
 
 ## 本次交互上下文
 

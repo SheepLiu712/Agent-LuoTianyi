@@ -20,11 +20,8 @@ class StimulusHandler(Protocol):
 class StimulusRouter(Generic[HandlerT]):
     """保存角色私有的刺激注册快照，只解析、不执行处理器。"""
 
-    def __init__(
-        self, registrations: Iterable[tuple[StimulusKind, HandlerT]], *, reflection_handler: HandlerT | None = None
-    ) -> None:
+    def __init__(self, registrations: Iterable[tuple[StimulusKind, HandlerT]]) -> None:
         """消费二元组序列；非法项抛 TypeError，重复类别抛 ValueError。"""
-        self._reflection_handler = reflection_handler
         self._handlers: dict[StimulusKind, HandlerT] = {}
         for registration in registrations:
             if not isinstance(registration, tuple) or len(registration) != 2:
@@ -41,9 +38,3 @@ class StimulusRouter(Generic[HandlerT]):
         if not isinstance(kind, StimulusKind):
             raise TypeError("kind must be StimulusKind")
         return self._handlers[kind]
-
-    def resolve_reflection(self) -> HandlerT:
-        """返回认知维护处理器；未注册时抛 KeyError。"""
-        if self._reflection_handler is None:
-            raise KeyError("reflection")
-        return self._reflection_handler

@@ -120,7 +120,7 @@ async def test_acknowledgement_is_emitted_after_memory_commit():
         _deadline(), Sink(observe), context=_Context(),
     )
 
-    assert events == ["commit", "compose", "promise"]
+    assert events == ["commit", "compose", "promise", "promise"]
     assert report.request_status is d.HandlingRequestStatus.COMPLETED
     assert report.consumed_pending_stimulus_ids == ("m2", "m1")
 
@@ -137,13 +137,14 @@ async def test_memory_acknowledgement_uses_composition_hint_after_commit():
 
     assert events == ["commit", "compose"]
     assert report.request_status is d.HandlingRequestStatus.COMPLETED
-    assert len(sink.values) == 1
+    assert len(sink.values) == 2
     action = sink.values[0].actions[0]
     assert isinstance(action, d.Say)
     assert action.content == "compose-memory-ack"
     assert action.sound_content == "compose-memory-ack-sound"
     assert action.tone.value == "gentle"
     assert action.expression == d.ChangeExpression(expression_id="smile")
+    assert isinstance(sink.values[1].actions[0], d.Reflection)
     assert len(composer.calls) == 1
     compose_call = composer.calls[0]
     assert compose_call["invocation"].user_id == "u"

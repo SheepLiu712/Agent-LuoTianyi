@@ -39,11 +39,7 @@ class Handling:
             status = d.HandlingRequestStatus.CANCELLED
             return self.agent._handling_failure(request, status, error)
         try:
-            handler = (
-                self.agent._stimulus_router.resolve_reflection()
-                if request.purpose is d.HandlePurpose.REFLECT
-                else self.agent._stimulus_router.resolve(request.stimulus.kind)
-            )
+            handler = self.agent._stimulus_router.resolve(request.stimulus.kind)
         except KeyError:
             error = d.HandlingErrorCode.UNSUPPORTED_STIMULUS
             return self.agent._handling_failure(request, status, error)

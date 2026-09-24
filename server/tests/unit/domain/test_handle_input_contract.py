@@ -543,7 +543,7 @@ def test_preprocessed_input_rejects_invalid_identity_and_untyped_data(fields):
         domain.PreprocessedInput(**values)
 
 
-def test_request_preserves_preprocessed_input_order_and_explicit_reflection():
+def test_request_preserves_preprocessed_input_order_for_action_reflection():
     a, b = _stimulus(stimulus_id="a"), _stimulus(stimulus_id="b")
     prepared = tuple(
         domain.PreprocessedInput(
@@ -552,9 +552,9 @@ def test_request_preserves_preprocessed_input_order_and_explicit_reflection():
         for s in (a, b)
     )
     values = dict(stimulus=_stimulus("InteractionDeadline"), interaction=_snapshot(pending_stimuli=(a, b)))
-    request = _request(**values, purpose=domain.HandlePurpose.REFLECT, prepared_inputs=prepared)
+    request = _request(**values, prepared_inputs=prepared)
     assert request.prepared_inputs == prepared
-    assert request.purpose is domain.HandlePurpose.REFLECT
+    assert request.purpose is domain.HandlePurpose.PROCESS
     for invalid in (
         prepared[::-1],
         prepared + prepared[:1],
@@ -563,5 +563,3 @@ def test_request_preserves_preprocessed_input_order_and_explicit_reflection():
     ):
         with pytest.raises(domain.InvalidHandleInputError):
             _request(**values, prepared_inputs=invalid)
-    with pytest.raises(domain.InvalidHandleInputError):
-        _request(**values, purpose="reflect")
