@@ -499,7 +499,7 @@ class ChatWidget(QWidget):
                 background-color: #DDDDDD;
             }
             QToolTip {
-                background-color: #66ccff;
+                background-color: #66CCFF;
                 color: #000000;
                 border: 1px solid #76797C;
                 padding: 1px;
@@ -608,7 +608,7 @@ class ChatWidget(QWidget):
                 border-radius: 4px;
             }
             QSlider::add-page:vertical {
-                background: #66ccff;
+                background: #66CCFF;
                 border-radius: 4px;
             }
             QSlider::handle:vertical {

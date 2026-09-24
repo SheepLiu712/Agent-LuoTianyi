@@ -355,9 +355,9 @@ class CustomTextEdit(QTextEdit):
         
         # 设置菜单样式（也可以在全局设置）
         menu.setStyleSheet("""
-            QMenu { background-color: white; border: 1px solid #88EDFF; }
+            QMenu { background-color: white; border: 1px solid #66CCFF; }
             QMenu::item { color: black; padding: 5px 20px; }
-            QMenu::item:selected { background-color: #88EDFF; }
+            QMenu::item:selected { background-color: #66CCFF; }
         """)
 
         # 添加自定义行为
@@ -393,7 +393,7 @@ class ChatTextBubble(ChatBubble):
         self.text_edit.setText(self.text)
         
         # Style
-        bg_color = "#FFFFFF" if self.is_user else "#88EDFF"
+        bg_color = "#FFFFFF" if self.is_user else "#66CCFF"
         text_color = "#000000"
         
         style = f"""
