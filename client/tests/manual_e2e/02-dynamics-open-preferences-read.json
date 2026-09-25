@@ -1,0 +1,23 @@
+{
+  "actions": [
+    {
+      "action": "session.connect",
+      "params": {
+        "base_url": "https://example.invalid",
+        "username": "cli_e2e_user",
+        "password": "<redacted-password>",
+        "timeout": 15
+      }
+    },
+    {
+      "action": "preferences.open"
+    },
+    {
+      "action": "dynamics.open",
+      "params": {
+        "limit": 10
+      }
+    }
+  ],
+  "on_failure": "stop_side_effects"
+}

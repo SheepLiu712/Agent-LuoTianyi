@@ -47,6 +47,21 @@ describe('MessageProcessor TTS terminal contract', () => {
     mockAppState.currentState = 'active';
   });
 
+  it('keeps equal audio chunks with different packet sequences and drops a repeated sequence', async () => {
+    mockAppState.currentState = 'background';
+    const feed = jest.fn();
+    const processor = new MessageProcessor({} as NetworkClient, fakeBinder(), feed);
+    for (const sequence of [0, 1, 1]) {
+      processor.onAgentMessage({ uuid: 'same-audio', audio: 'YXVkaW8=',
+        packet_sequence: sequence, is_final_package: false });
+    }
+    processor.onAgentMessage({ uuid: 'same-audio', audio: '', packet_sequence: 2,
+      is_final_package: true, audio_error: true, error_code: 'TTS_CANCELLED' });
+    await drainIncoming(processor);
+    expect(feed.mock.calls).toEqual([['YXVkaW8=', false], ['YXVkaW8=', false], ['', true]]);
+    expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+  });
+
   it('finishes a zero-chunk error and preserves the server text', async () => {
     const binder = fakeBinder();
     const feedServerAudioChunk = jest.fn();

@@ -1,1 +1,0 @@
-{"schema_version":"1.0","timestamp":"2026-09-20T05:39:17.052482Z","session_id":"s-3e1867c1988f","action_id":"a-093efcd89b48","action":"scenario.run","event":"action_result","status":"failed","duration_ms":0,"correlation_id":null,"data":{},"error":{"code":"INVALID_SCENARIO","message":"scenario.actions must be a non-empty list","category":"input"}}

@@ -1,0 +1,32 @@
+{
+  "actions": [
+    {
+      "action": "session.connect",
+      "params": {
+        "base_url": "https://example.invalid",
+        "username": "cli_e2e_user",
+        "password": "<redacted-password>",
+        "timeout": 15
+      }
+    },
+    {
+      "action": "dynamics.open",
+      "params": {
+        "limit": 5
+      }
+    },
+    {
+      "action": "dynamics.read",
+      "params": {
+        "dynamic_id": "6cf2b81c-8925-4737-b968-74c9d5cc67a4"
+      }
+    },
+    {
+      "action": "dynamics.load",
+      "params": {
+        "limit": 5
+      }
+    }
+  ],
+  "on_failure": "stop_side_effects"
+}

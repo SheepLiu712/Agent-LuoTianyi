@@ -2,7 +2,7 @@ import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from src.system.database.vector_store import Document, VectorStore
+from src.infrastructure.persistence.database.vector_store import Document, VectorStore
 from src.utils.logger import get_logger
 from src.world.citywalk.types import CitywalkSessionResult
 

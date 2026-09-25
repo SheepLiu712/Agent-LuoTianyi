@@ -1,0 +1,32 @@
+{
+  "actions": [
+    {
+      "action": "session.connect",
+      "params": {
+        "base_url": "https://example.invalid",
+        "username": "cli_e2e_user",
+        "password": "<redacted-password>",
+        "timeout": 15
+      }
+    },
+    {
+      "action": "preferences.update",
+      "params": {
+        "values": {
+          "cli_e2e_probe": "ok-2026-09-20"
+        }
+      }
+    },
+    {
+      "action": "preferences.update",
+      "params": {
+        "values": {},
+        "replace": true
+      }
+    },
+    {
+      "action": "preferences.open"
+    }
+  ],
+  "on_failure": "stop_side_effects"
+}

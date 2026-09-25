@@ -53,10 +53,10 @@ function normalizeHref(href) {
 
   const clean = href.replace(/^\.\//, "");
   const githubDocs = {
-    "TODO.md":
-      "https://github.com/SheepLiu712/Agent-LuoTianyi/blob/main/docs/TODO.md",
-    "开发指引.md":
-      "https://github.com/SheepLiu712/Agent-LuoTianyi/blob/main/docs/%E5%BC%80%E5%8F%91%E6%8C%87%E5%BC%95.md",
+    "../../TODO.md":
+      "https://github.com/SheepLiu712/Agent-LuoTianyi/blob/dev/docs/TODO.md",
+    "../../开发守则.md":
+      "https://github.com/SheepLiu712/Agent-LuoTianyi/blob/dev/docs/%E5%BC%80%E5%8F%91%E5%AE%88%E5%88%99.md",
   };
 
   return githubDocs[clean] ?? href;

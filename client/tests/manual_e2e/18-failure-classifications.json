@@ -1,0 +1,121 @@
+{
+  "actions": [
+    {
+      "action": "chat.send_text",
+      "params": {
+        "text": "x"
+      }
+    },
+    {
+      "action": "session.connect",
+      "params": {
+        "base_url": "https://example.invalid",
+        "username": "cli_e2e_user",
+        "password": "<redacted-password>",
+        "timeout": 15
+      }
+    },
+    {
+      "action": "reply.wait",
+      "params": {
+        "reply_uuid": "00000000-0000-4000-8000-000000000000",
+        "timeout": 1
+      }
+    },
+    {
+      "action": "reply.read",
+      "params": {
+        "reply_uuid": "00000000-0000-4000-8000-000000000000"
+      }
+    },
+    {
+      "action": "audio.replay",
+      "params": {
+        "reply_uuid": "00000000-0000-4000-8000-000000000000"
+      }
+    },
+    {
+      "action": "dynamics.load",
+      "params": {
+        "limit": 5
+      }
+    },
+    {
+      "action": "touch.send",
+      "params": {
+        "touch_area": "   "
+      }
+    },
+    {
+      "action": "image.select",
+      "params": {
+        "path": "<TEMP>\\cli_e2e_missing.png"
+      }
+    },
+    {
+      "action": "image.send",
+      "params": {
+        "path": "<TEMP>\\cli_e2e_note.txt"
+      }
+    },
+    {
+      "action": "preferences.update",
+      "params": {
+        "values": "not-an-object"
+      }
+    },
+    {
+      "action": "chat.send_text",
+      "params": {
+        "text": ""
+      }
+    },
+    {
+      "action": "dynamics.post",
+      "params": {
+        "content": ""
+      }
+    },
+    {
+      "action": "touch.send",
+      "params": {
+        "touch_area": "头",
+        "client_msg_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "action": "touch.send",
+      "params": {
+        "touch_area": [
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头",
+          "头"
+        ]
+      }
+    },
+    {
+      "action": "session.connect",
+      "params": {
+        "base_url": "https://example.invalid",
+        "username": "cli_e2e_user",
+        "password": "wrong-password-for-auth-failure",
+        "timeout": 15
+      }
+    }
+  ],
+  "on_failure": "continue"
+}

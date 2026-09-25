@@ -38,15 +38,28 @@ AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天
 ### 二、安装流程
 1. 克隆项目仓库：
    ```bash
-   git clone https://github.com/SheepLiu712/Agent-LuoTianyi-server.git
-   cd Agent-LuoTianyi-server
+   git clone https://github.com/SheepLiu712/Agent-LuoTianyi.git
+   cd Agent-LuoTianyi/server
    ```
 
-2. 确保conda已安装，随后运行安装脚本（在命令行中运行，或者双击运行快速启动脚本）
+2. 确保 Conda 已安装，随后运行安装脚本（可以在命令行运行或双击）：
     ```bash
     setup.bat
     ```
-    注意，该脚本运行过程需要进行两次输入。第一次输入是确定conda环境的名称，第二次输入是确认是否安装GPU版本的pytorch（如果你的电脑没有NVIDIA显卡，请选择否）
+    脚本会询问 Conda 环境名以及 PyTorch 的 CPU/CUDA 构建。它只负责 `pyproject.toml` 无法表达的环境步骤：创建 Python 3.10 环境、选择 PyTorch wheel 源、安装 FFmpeg 和 Playwright Chromium；其余 Python 依赖统一来自 `pyproject.toml`。
+
+    需要手动安装时，可在已准备好 Python 3.10、PyTorch 和 FFmpeg 的环境中执行：
+    ```bash
+    python -m pip install -e ".[speech,song-learning]"
+    python -m playwright install chromium
+    ```
+
+    开发、测试和风格检查工具使用独立依赖组：
+    ```bash
+    python -m pip install -e ".[dev]"
+    ```
+
+    当前安装形态是**从仓库 checkout 进行 editable install**。`config/`、`res/` 和 `data/` 是部署资源或运行数据，不打进 Python wheel；因此安装完成后仍应从 `server` 目录启动。
 
 3. 设置环境变量：
     - 根据config中所需要的api_key，配置对应的api密钥为环境变量。
@@ -64,6 +77,7 @@ AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天
 - 运行redis服务（如果你已经安装了redis，并且将其添加到了环境变量中，可以直接在命令行中运行 `redis-server` 来启动服务）
 - 在命令行中启动对应conda环境，运行以下命令启动服务：
   ```bash
+  cd Agent-LuoTianyi/server
   python server_main.py
   ```
 - 打开sakurafrp的隧道接入公网（如果需要公网访问的话）

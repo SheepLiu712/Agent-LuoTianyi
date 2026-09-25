@@ -37,6 +37,12 @@ git clone https://github.com/SheepLiu712/Agent-Luotianyi-client
 2. 进入项目目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
 3. 运行`main.py`启动客户端。
 
+### 无 GUI 的 CLI 调试入口
+
+在 `client/` 目录运行 `python cli.py --interactive`，逐行输入 JSON 动作；也可使用 `--action '<JSON>'` 或 `--scenario <JSON 文件>`。标准输出为 JSONL 结果，诊断写入标准错误。连接动作需要受测服务地址、账号和密码；可通过 `password_env` 指定环境变量名，避免把密码写入场景文件。
+
+动作与验收范围见[当前 CLI spec](../docs/开发进程文档/CLI端到端测试客户端-spec.md)，可复用的人工试运行输入见[manual_e2e](tests/manual_e2e/README.md)。这些输入默认指向无效示例地址，运行前需填入独立测试环境的信息。
+
 ## 📜 许可证和版权
 本项目基于 [MIT 许可证](LICENSE) 开源。
 

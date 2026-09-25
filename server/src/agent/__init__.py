@@ -1,5 +1,5 @@
-"""
-Agent核心逻辑模块
+"""角色业务的两接口门面。"""
 
-包含洛天依Agent的主要逻辑和对话管理功能
-"""
+from .facade import Agent
+
+__all__ = ["Agent"]

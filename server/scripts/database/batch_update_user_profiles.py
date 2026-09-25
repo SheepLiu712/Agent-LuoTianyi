@@ -12,10 +12,10 @@ if str(REPO_ROOT) not in sys.path:
 
 from sqlalchemy.orm import Session
 
-from src.system.database.sql_database import Conversation, User, get_sql_session, init_sql_db
-from src.subconscious.memory.user_profile_updater import UserProfileUpdater
+from src.infrastructure.persistence.database.sql_database import Conversation, User, get_sql_session, init_sql_db
+from src.agent.skills.adapters.memory.profile_updater import UserProfileUpdater
+from src.infrastructure.models.service import LLMService
 from src.utils.helpers import load_config
-from src.utils.llm.prompt_manager import PromptManager
 
 
 def _chunk_items(items, chunk_size: int):
@@ -91,8 +91,10 @@ async def main() -> None:
     config = load_config("config/config.json", default_config={})
     init_sql_db(config.get("database", {}).get("sql_db_folder", "data/database"), config.get("database", {}).get("sql_db_file", "luotianyi.db"))
 
-    prompt_manager = PromptManager(config.get("prompt_manager", {}))
-    updater = UserProfileUpdater(config.get("memory_manager", {}).get("user_profile", {}), prompt_manager)
+    profile_config = config.get("agent_runtime", {}).get("agent", {}).get("memory", {}).get("user_profile", {})
+    llm_service = LLMService(config.get("llm_service", {}))
+    llm_module = llm_service.register_llm_module("batch_user_profile_update", profile_config.get("llm_module", {}))
+    updater = UserProfileUpdater(profile_config, llm_module)
 
     session = get_sql_session()
     try:

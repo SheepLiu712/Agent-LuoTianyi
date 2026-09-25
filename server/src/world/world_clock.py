@@ -42,6 +42,7 @@ class WorldClock:
         self._interval_actions: Dict[str, _IntervalAction] = {}
         self._daily_actions: Dict[str, _DailyAction] = {}
         self._tasks: Dict[str, asyncio.Task] = {}
+        self._stopping_tasks: set[asyncio.Task] = set()
         self._stop_event: Optional[asyncio.Event] = None
         self.last_results: Dict[str, Any] = {}
         self.stop_timeout_seconds = DEFAULT_OWNED_TASK_STOP_TIMEOUT_SECONDS
@@ -96,7 +97,10 @@ class WorldClock:
             self._stop_event.set()
         task_items = list(self._tasks.items())
         for _, task in task_items:
-            cancel_task_once(task)
+            # 重试关闭时继续等待，重复取消会中断同步工作的清理等待。
+            if task not in self._stopping_tasks:
+                cancel_task_once(task)
+                self._stopping_tasks.add(task)
         done, pending = await wait_for_owned_tasks(
             (task for _, task in task_items),
             timeout_seconds=self.stop_timeout_seconds,
@@ -112,6 +116,7 @@ class WorldClock:
             except Exception as error:
                 errors.append(f"{key}: {type(error).__name__}: {error}")
             finally:
+                self._stopping_tasks.discard(task)
                 if self._tasks.get(key) is task:
                     self._tasks.pop(key, None)
         if pending:

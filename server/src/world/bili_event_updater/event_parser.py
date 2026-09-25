@@ -9,13 +9,13 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import requests
 
-from src.system.database.event_models import UnifiedEventType
+from src.infrastructure.persistence.database.event_models import UnifiedEventType
 from .types import OfficialDynamic
 from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
-    from src.utils.llm.llm_module import LLMModule
-    from src.utils.vision.vlm_module import VLMModule
+    from src.infrastructure.models.llm.module import LLMModule
+    from src.infrastructure.models.vlm.module import VLMModule
 
 
 

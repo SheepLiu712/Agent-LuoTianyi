@@ -25,11 +25,11 @@ Agent-LuoTianyi/
 ├─ server/       # FastAPI服务端，负责对话、记忆、TTS、world任务和管理控制台
 ├─ client/       # PySide桌面客户端
 ├─ app/          # Expo / React Native移动端App
-├─ docs/         # 开发指引、设计文档、TODO和评审记录
+├─ docs/         # 代码地图、开发守则、spec 模板和 TODO
 └─ README.md     # 项目首页说明
 ```
 
-如果你希望参与开发，请优先阅读 [开发指引](docs/开发指引.md)。其中说明了服务端架构、功能应该放在哪个模块、PR要求和贡献规范。
+如果你希望参与开发，请先阅读 [代码地图](docs/代码地图.md)，定位子项目、源码目录与模块职责；开发流程和贡献规范见 [开发守则](docs/开发守则.md)。
 
 ### 🎞️展示视频
 
@@ -87,7 +87,14 @@ npx expo start                 # 启动 Expo 开发服务器
     ```bash
     setup.bat
     ```
-    推荐将服务端环境命名为 `lty`。脚本会询问 conda 环境名称，以及是否安装 GPU 版本的 PyTorch；如果没有 NVIDIA 显卡，请选择否。
+    推荐将服务端环境命名为 `lty`。脚本会询问 Conda 环境名称和 PyTorch 的 CPU/CUDA 构建；Python 运行依赖由 `server/pyproject.toml` 统一管理，脚本只补充 PyTorch wheel 源、FFmpeg 和 Playwright Chromium 等环境步骤。
+
+    如果已经准备好 Python 3.10、PyTorch 和 FFmpeg，也可以直接安装：
+    ```bash
+    python -m pip install -e ".[speech,song-learning]"
+    python -m playwright install chromium
+    ```
+    参与开发时再执行 `python -m pip install -e ".[dev]"`。当前采用仓库内 editable install，`config/`、`res/`、`data/` 不打入 wheel。
 
 3. 下载资源：
    - 联系开发者获取资源文件。至少需要TTS模型、角色资源、知识库等基础资源，缺失时对应功能无法启动或会在控制台配置检查中报错。
@@ -146,7 +153,7 @@ npx expo start                 # 启动 Expo 开发服务器
 运行中如果遇到依赖缺失或资源文件缺失，可以私信作者，或者提交 issue。
 
 ## 🤝 参与贡献
-欢迎提交功能、修复、测试、文档和资源相关PR。开发前请阅读 [开发指引](docs/开发指引.md)，路线图和详细TODO见 [TODO](docs/TODO.md)。
+欢迎提交功能、修复、测试、文档和资源相关PR。开发前请阅读 [开发守则](docs/开发守则.md)，路线图和详细TODO见 [TODO](docs/TODO.md)。
 
 ## 📜 许可证和版权
 
@@ -216,10 +223,4 @@ npx expo start                 # 启动 Expo 开发服务器
 9. 修复了已知的bug
 
 ## 路线图
-- [x] v0.3.x: 动态功能更新（动态 v0.3.0、每日日记 v0.3.1）
-- [ ] v0.4.x: 电话功能更新
-- [ ] v0.5.x: 重构回复链路，明确工具调用；
-- [ ] v0.6.x: 记忆和知识库更新
-- [ ] v1.0.x: 多角色支持
-
-详细TODO见 [docs/TODO.md](docs/TODO.md)。
+后续版本和任务以 [TODO](docs/TODO.md) 为准；已发布版本的更新记录见上文。
