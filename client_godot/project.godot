@@ -1,0 +1,40 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="AgentLuo"
+run/main_scene="res://scenes/main.tscn"
+config/use_custom_user_dir=true
+config/custom_user_dir_name="AgentLuo-Godot"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+config/icon="res://assets/ui/app_icon.svg"
+config/windows_native_icon="res://assets/ui/app_icon.ico"
+
+[display]
+
+window/size/viewport_width=480
+window/size/viewport_height=690
+window/size/resizable=false
+window/size/borderless=true
+window/size/transparent=true
+window/size/window_width_override=480
+window/size/window_height_override=690
+window/per_pixel_transparency/allowed=true
+
+[gui]
+
+theme/custom="res://theme/app_theme.tres"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.953, 0.965, 0.969, 1)

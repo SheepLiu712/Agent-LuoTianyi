@@ -1,0 +1,148 @@
+[gd_scene load_steps=9 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+[ext_resource type="Script" path="res://src/ui/settings_window.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="chrome"]
+[ext_resource type="PackedScene" path="res://scenes/ui/preferences_page.tscn" id="preferences"]
+[ext_resource type="PackedScene" path="res://scenes/ui/model_page.tscn" id="models"]
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
+[ext_resource type="PackedScene" path="res://scenes/ui/audio_settings_page.tscn" id="audio"]
+
+[node name="SettingsWindow" type="Window"]
+title = "设置"
+size = Vector2i(880, 760)
+min_size = Vector2i(720, 640)
+visible = false
+force_native = true
+transient = true
+theme = ExtResource("theme")
+script = ExtResource("script")
+
+window_system = ExtResource("isolation_window_system")
+
+[node name="Body" type="PanelContainer" parent="."]
+theme_type_variation = &"AppSurface"
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 0.0
+
+[node name="Column" type="VBoxContainer" parent="Body"]
+theme_override_constants/separation = 8
+
+[node name="PagesArea" type="Control" parent="Body/Column"]
+size_flags_vertical = 3
+
+[node name="Pages" type="HBoxContainer" parent="Body/Column/PagesArea"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="Sidebar" type="VBoxContainer" parent="Body/Column/PagesArea/Pages"]
+custom_minimum_size = Vector2(150, 0)
+theme_override_constants/separation = 8
+
+[node name="Heading" type="Label" parent="Body/Column/PagesArea/Pages/Sidebar"]
+text = "  偏好与配置"
+custom_minimum_size = Vector2(0, 48)
+
+[node name="PreferencesTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar"]
+unique_name_in_owner = true
+text = "相处模式"
+toggle_mode = true
+custom_minimum_size = Vector2(0, 40)
+
+[node name="ModelsTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar"]
+unique_name_in_owner = true
+text = "模型配置"
+toggle_mode = true
+custom_minimum_size = Vector2(0, 40)
+
+[node name="AudioTab" type="Button" parent="Body/Column/PagesArea/Pages/Sidebar"]
+unique_name_in_owner = true
+text = "语音缓存"
+toggle_mode = true
+custom_minimum_size = Vector2(0, 40)
+
+[node name="Content" type="Control" parent="Body/Column/PagesArea/Pages"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="PreferencesPage" parent="Body/Column/PagesArea/Pages/Content" instance=ExtResource("preferences")]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="ModelPage" parent="Body/Column/PagesArea/Pages/Content" instance=ExtResource("models")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="AudioPage" parent="Body/Column/PagesArea/Pages/Content" instance=ExtResource("audio")]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="BusyBlocker" type="Control" parent="Body/Column/PagesArea"]
+unique_name_in_owner = true
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+focus_mode = 2
+
+[node name="Footer" type="VBoxContainer" parent="Body/Column"]
+theme_override_constants/separation = 8
+custom_minimum_size = Vector2(0,56)
+
+[node name="ResultScroll" type="ScrollContainer" parent="Body/Column/Footer"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(0,44)
+horizontal_scroll_mode = 0
+
+[node name="Result" type="Label" parent="Body/Column/Footer/ResultScroll"]
+unique_name_in_owner = true
+visible = false
+size_flags_horizontal = 3
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
+[node name="Actions" type="HBoxContainer" parent="Body/Column/Footer"]
+custom_minimum_size = Vector2(0,40)
+theme_override_constants/separation = 12
+
+[node name="LogoutButton" type="Button" parent="Body/Column/Footer/Actions"]
+unique_name_in_owner = true
+text = "退出登录"
+custom_minimum_size = Vector2(150,40)
+
+[node name="Spacer" type="Control" parent="Body/Column/Footer/Actions"]
+size_flags_horizontal = 3
+mouse_filter = 2
+
+[node name="CloseSettings" type="Button" parent="Body/Column/Footer/Actions"]
+unique_name_in_owner = true
+text = "关闭"
+
+[node name="SaveAll" type="Button" parent="Body/Column/Footer/Actions"]
+unique_name_in_owner = true
+text = "保存全部修改"
+theme_type_variation = &"PrimaryButton"
+
+[node name="UnsavedDialog" parent="." instance=ExtResource("Decision")]
+unique_name_in_owner = true
+show_save = true
+title = "设置尚未保存"
+dialog_text = "可以保存全部修改后关闭，或放弃本窗口尚未保存的修改。"
+ok_button_text = "放弃修改"
+cancel_button_text = "取消"
+
+[node name="Chrome" parent="." instance=ExtResource("chrome")]
+unique_name_in_owner = true

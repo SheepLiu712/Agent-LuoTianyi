@@ -1,0 +1,162 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/decoder.tres" id="isolation_decoder"]
+
+[ext_resource type="Resource" path="res://resources/platform/secrets.tres" id="isolation_secret_protection"]
+
+[ext_resource type="Resource" path="res://resources/platform/encryption.tres" id="isolation_password_encryption"]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+
+[ext_resource type="Resource" path="res://resources/platform/runtime.tres" id="isolation_runtime"]
+
+[ext_resource type="Script" path="res://src/application.gd" id="1_app"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/account_view.tscn" id="3_account"]
+
+
+[ext_resource type="PackedScene" path="res://scenes/ui/window_chrome.tscn" id="WindowChrome"]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
+
+
+[ext_resource type="PackedScene" path="res://scenes/ui/frost_surface.tscn" id="Frost"]
+[node name="AgentLuo" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_app")
+
+runtime = ExtResource("isolation_runtime")
+
+window_system = ExtResource("isolation_window_system")
+
+password_encryption = ExtResource("isolation_password_encryption")
+
+secret_protection = ExtResource("isolation_secret_protection")
+
+decoder_factory = ExtResource("isolation_decoder")
+
+[node name="Background" type="ColorRect" parent="."]
+unique_name_in_owner = true
+visible = false
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+color = Color(0.96,0.98,0.99,1)
+
+[node name="Workspace" type="HBoxContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 0.0
+theme_override_constants/separation = 0
+
+[node name="Navigation" type="MarginContainer" parent="Workspace"]
+unique_name_in_owner = true
+visible = false
+custom_minimum_size = Vector2(106,0)
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 16
+
+[node name="Glass" parent="Workspace/Navigation" instance=ExtResource("Frost")]
+
+[node name="Items" type="VBoxContainer" parent="Workspace/Navigation"]
+theme_override_constants/separation = 12
+
+[node name="NavChat" type="Button" parent="Workspace/Navigation/Items"]
+theme_type_variation = &"NavigationButton"
+alignment = 1
+unique_name_in_owner = true
+text = "聊天"
+custom_minimum_size = Vector2(80,48)
+button_pressed = true
+toggle_mode = true
+
+[node name="NavDynamics" type="Button" parent="Workspace/Navigation/Items"]
+theme_type_variation = &"NavigationButton"
+alignment = 1
+unique_name_in_owner = true
+text = "动态"
+custom_minimum_size = Vector2(80,48)
+theme_override_font_sizes/font_size = 13
+
+[node name="NavSettings" type="Button" parent="Workspace/Navigation/Items"]
+theme_type_variation = &"NavigationButton"
+alignment = 1
+unique_name_in_owner = true
+text = "设置"
+custom_minimum_size = Vector2(80,48)
+
+[node name="Spacer" type="Control" parent="Workspace/Navigation/Items"]
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="NavLogs" type="Button" parent="Workspace/Navigation/Items"]
+theme_type_variation = &"NavigationButton"
+alignment = 1
+unique_name_in_owner = true
+text = "日志"
+custom_minimum_size = Vector2(80,44)
+
+[node name="Split" type="HSplitContainer" parent="Workspace"]
+unique_name_in_owner = true
+visible = false
+size_flags_horizontal = 3
+size_flags_vertical = 3
+dragger_visibility = 2
+
+[node name="Center" type="MarginContainer" parent="."]
+unique_name_in_owner = true
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="AccountForm" parent="Center" instance=ExtResource("3_account")]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+size_flags_vertical = 3
+
+[node name="LogProblem" type="Label" parent="."]
+mouse_filter = 2
+offset_top = 0.0
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+grow_horizontal = 2
+autowrap_mode = 3
+theme_override_colors/font_color = Color(0.7176471, 0.16470589, 0.16470589, 1)
+
+[node name="ExitDialog" parent="." instance=ExtResource("Decision")]
+unique_name_in_owner = true
+title = "放弃未保存的内容？"
+visible = false
+dialog_text = "退出将关闭所有窗口；尚未提交的内容不会保留。"
+ok_button_text = "放弃并继续"
+cancel_button_text = "返回继续编辑"
+
+[node name="SecurityError" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+text = "凭据保护组件缺失，请重新解压完整程序。"
+
+[node name="AccountStorageWarning" type="Label" parent="."]
+unique_name_in_owner = true
+visible = false
+mouse_filter = 2
+anchor_right = 1.0
+offset_left = 120.0
+offset_top = 3.0
+offset_right = -24.0
+autowrap_mode = 3
+theme_type_variation = &"AccountNotice"
+text = "本次登录有效，但本地登录状态未能保存或清除。下次可能需要输入密码，请查看日志。"
+
+[node name="Chrome" parent="." instance=ExtResource("WindowChrome")]
+unique_name_in_owner = true
+login_mode = true

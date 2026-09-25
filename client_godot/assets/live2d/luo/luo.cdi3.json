@@ -1,0 +1,484 @@
+{
+    "Version": 3,
+    "Parameters": [
+        {
+            "Name": "天钿出现",
+            "Id": "Param53"
+        },
+        {
+            "Name": "麦克风出现",
+            "Id": "Param54"
+        },
+        {
+            "Name": "右手摸胸口",
+            "Id": "Param55"
+        },
+        {
+            "Name": "抬小臂",
+            "Id": "Param3"
+        },
+        {
+            "Name": "出左拳",
+            "Id": "Param98"
+        },
+        {
+            "Name": "捂嘴",
+            "Id": "Param96"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param97"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param4"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param5"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param6"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param7"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param8"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param9"
+        },
+        {
+            "Name": "伸长袖子",
+            "Id": "Param10"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param11"
+        },
+        {
+            "Name": "手捧爱心",
+            "Id": "Param12"
+        },
+        {
+            "Name": "歪头+爱心出现",
+            "Id": "Param13"
+        },
+        {
+            "Name": "泪眼",
+            "Id": "Param67"
+        },
+        {
+            "Name": "呆呆眼",
+            "Id": "Param68"
+        },
+        {
+            "Name": "小洛包眼",
+            "Id": "Param70"
+        },
+        {
+            "Name": "三角眼",
+            "Id": "Param69"
+        },
+        {
+            "Name": "眯眼笑",
+            "Id": "Param88"
+        },
+        {
+            "Name": "右爱心出现",
+            "Id": "Param65"
+        },
+        {
+            "Name":"左爱心出现",
+            "Id": "Param66"
+        },
+        {
+            "Name": "生气标记",
+            "Id": "Param60"
+        },
+        {
+            "Name": "左生气云",
+            "Id": "Param63"
+        },
+        {
+            "Name": "右生气云",
+            "Id": "Param64"
+        },
+        {
+            "Name": "问号",
+            "Id": "Param61"
+        },
+        {
+            "Name":"未知",
+            "Id": "Param62"
+        },
+        {
+            "Name":"黑脸",
+            "Id": "Param87"
+        },
+        {
+            "Name": "失去高光",
+            "Id": "Param77"
+        },
+        {
+            "Name": "音符1",
+            "Id": "Param90"
+        },
+        {
+            "Name":"音符2",
+            "Id": "Param91"
+        },
+        {
+            "Name": "音符3",
+            "Id": "Param92"
+        },
+        {
+            "Name": "音符4",
+            "Id": "Param93"
+        },
+        {
+            "Name": "未知",
+            "Id": "ParamAngleX"
+        },
+        {
+            "Name": "展开共鸣翼",
+            "Id": "Param14"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param94"
+        },
+        {
+            "Name": "抬头低头",
+            "Id": "ParamAngleY"
+        },
+        {
+            "Name": "左右歪头",
+            "Id": "ParamAngleZ"
+        },
+        {
+            "Name": "左右跳",
+            "Id": "Param95"
+        },
+        {
+            "Name": "未知",
+            "Id": "ParamBodyAngleX"
+        },
+        {
+            "Name": "身体上下抖",
+            "Id": "ParamBodyAngleY"
+        },
+        {
+            "Name": "身体左右歪",
+            "Id": "ParamBodyAngleZ"
+        },
+        {
+            "Name": "左眼打开",
+            "Id": "ParamEyeLOpen"
+        },
+        {
+            "Name": "左眼微笑",
+            "Id": "ParamEyeLSmile"
+        },
+        {
+            "Name": "右眼打开",
+            "Id": "ParamEyeROpen"
+        },
+        {
+            "Name": "右眼微笑",
+            "Id": "ParamEyeRSmile"
+        },
+        {
+            "Name": "眼球X",
+            "Id": "ParamEyeBallX"
+        },
+        {
+            "Name": "眼球Y",
+            "Id": "ParamEyeBallY"
+        },
+        {
+            "Name": "眉毛向下",
+            "Id": "Param89"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param56"
+        },
+        {
+            "Name": "流口水",
+            "Id": "Param57"
+        },
+        {
+            "Name": "嘟嘴",
+            "Id": "Param58"
+        },
+        {
+            "Name": "脸变小",
+            "Id": "Param59"
+        },
+        {
+            "Name": "微笑",
+            "Id": "ParamMouthForm"
+        },
+        {
+            "Name": "嘴巴开合",
+            "Id": "ParamMouthOpenY"
+        },
+        {
+            "Name": "未知",
+            "Id": "ParamCheek"
+        },
+        {
+            "Name": "呼吸",
+            "Id": "ParamBreath"
+        },
+        {
+            "Name": "前发",
+            "Id": "ParamHairFront"
+        },
+        {
+            "Name": "侧发",
+            "Id": "ParamHairSide"
+        },
+        {
+            "Name": "后发",
+            "Id": "ParamHairBack"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param72"
+        },
+        {
+            "Name": "未知",
+            "Id": "Param71"
+        },
+        {
+            "Name": "右眼高光变形A",
+            "Id": "Param73"
+        },
+        {
+            "Name": "右眼高光变形B",
+            "Id": "Param74"
+        },
+        {
+            "Name": "左眼高光变形A",
+            "Id": "Param75"
+        },
+        {
+            "Name": "左眼高光变形B",
+            "Id": "Param76"
+        },
+        {
+            "Name": "右眼底高光上下",
+            "Id": "Param78"
+        },
+        {
+            "Name": "右眼底高光左右",
+            "Id": "Param79"
+        },
+        {
+            "Name": "左眼底高光上下",
+            "Id": "Param80"
+        },
+        {
+            "Name": "左眼底高光左右",
+            "Id": "Param81"
+        },
+        {
+            "Name": "瞳仁左右变窄",
+            "Id": "Param82"
+        },
+        {
+            "Name": "瞳仁上下变宽",
+            "Id": "Param83"
+        },
+        {
+            "Name": "前发摆动A",
+            "Id": "Param38"
+        },
+        {
+            "Name": "前发摆动B",
+            "Id": "Param39"
+        },
+        {
+            "Name": "头发高光左右",
+            "Id": "Param40"
+        },
+        {
+            "Name": "头发上下",
+            "Id": "Param45"
+        },
+        {
+            "Name": "前发变窄",
+            "Id": "Param46"
+        },
+        {
+            "Id": "Param47"
+        },
+        {
+            "Id": "Param41"
+        },
+        {
+            "Id": "Param42"
+        },
+        {
+            "Id": "Param43"
+        },
+        {
+            "Id": "Param44"
+        },
+        {
+            "Id": "Param48"
+        },
+        {
+            "Id": "Param49"
+        },
+        {
+            "Id": "Param50"
+        },
+        {
+            "Id": "Param51"
+        },
+        {
+            "Name": "8运动",
+            "Id": "Param52"
+        },
+        {
+            "Id": "Param23"
+        },
+        {
+            "Id": "Param24"
+        },
+        {
+            "Id": "Param25"
+        },
+        {
+            "Id": "Param26"
+        },
+        {
+            "Id": "Param27"
+        },
+        {
+            "Id": "Param28"
+        },
+        {
+            "Id": "Param29"
+        },
+        {
+            "Id": "Param30"
+        },
+        {
+            "Id": "Param31"
+        },
+        {
+            "Id": "Param32"
+        },
+        {
+            "Id": "Param33"
+        },
+        {
+            "Id": "Param34"
+        },
+        {
+            "Id": "Param35"
+        },
+        {
+            "Id": "Param36"
+        },
+        {
+            "Id": "Param37"
+        },
+        {
+            "Id": "Param22"
+        },
+        {
+            "Id": "Param"
+        },
+        {
+            "Id": "Param2"
+        },
+        {
+            "Id": "Param15"
+        },
+        {
+            "Id": "Param16"
+        },
+        {
+            "Id": "Param20"
+        },
+        {
+            "Id": "Param21"
+        },
+        {
+            "Id": "Param17"
+        },
+        {
+            "Id": "Param18"
+        },
+        {
+            "Id": "Param19"
+        },
+        {
+            "Id": "Param84"
+        },
+        {
+            "Id": "Param85"
+        },
+        {
+            "Id": "Param86"
+        },
+        {
+            "Id": "Param_Angle_Rotation32"
+        },
+        {
+            "Id": "Param_Angle_Rotation33"
+        },
+        {
+            "Id": "Param_Angle_Rotation34"
+        },
+        {
+            "Id": "Param_Angle_Rotation35"
+        },
+        {
+            "Id": "Param_Angle_Rotation36"
+        },
+        {
+            "Id": "Param_Angle_Rotation37"
+        },
+        {
+            "Id": "Param_Angle_Rotation38"
+        },
+        {
+            "Id": "Param_Angle_Rotation39"
+        },
+        {
+            "Id": "Param_Angle_Rotation41"
+        },
+        {
+            "Id": "Param_Angle_Rotation42"
+        },
+        {
+            "Id": "Param_Angle_Rotation43"
+        },
+        {
+            "Id": "Param_Angle_Rotation44"
+        },
+        {
+            "Id": "Param_Angle_Rotation45"
+        },
+        {
+            "Id": "Param_Angle_Rotation46"
+        },
+        {
+            "Id": "Param_Angle_Rotation47"
+        },
+        {
+            "Id": "Param_Angle_Rotation48"
+        }
+    ]
+}

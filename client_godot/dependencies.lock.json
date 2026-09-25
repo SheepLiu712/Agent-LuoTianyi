@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "feature_baseline": "79ae2c0",
+  "engine": {
+    "version": "4.7.1",
+    "version_output": "4.7.1.stable.official.a13da4feb",
+    "edition": "standard",
+    "architecture": "x86_64",
+    "executable_sha256": "323f9c4cc5db674e98815cdd8e69da007d5efc779abedc8c0e42883b7fdea12a",
+    "url": "https://github.com/godotengine/godot/releases/download/4.7.1-stable/Godot_v4.7.1-stable_win64.exe.zip"
+  },
+  "export_templates": {
+    "version": "4.7.1.stable",
+    "sha256": "86409db6200b6f8fd3230989c2d2002851f3dd18acf11d7bdbafddf5a0dd0f72",
+    "url": "https://github.com/godotengine/godot/releases/download/4.7.1-stable/Godot_v4.7.1-stable_export_templates.tpz"
+  },
+  "gd_cubism": {
+    "version": "0.9.1",
+    "commit": "60e9c61ed20d08ec19b2cb80fb492ce6344927c6",
+    "url": "https://github.com/MizunagiKB/gd_cubism.git",
+    "godot_cpp_commit": "fbbf9ec4efd8f1055d00edb8d926eef8ba4c2cce",
+    "binary_sha256": "6260d821ac3fa049c198b1976a7ba0ab3c57cb23f256cf3140dea5a2bfa209a2"
+  },
+  "cubism_sdk": {
+    "version": "5-r.1",
+    "url": "https://cubism.live2d.com/sdk-native/bin/CubismSdkForNative-5-r.1.zip",
+    "sha256": "073f623fc3fb06c192e68bb5287fdb9dab1952164c2a956dec6d4b45fd342ffb"
+  },
+  "windows_security": {
+    "binary_sha256": "a949b18b56e642a4ab3879503b88fe47d79c0cdc9ec0f74c24a6b0b12cbc1ab4",
+    "source": "native/windows_security.cpp",
+    "audio_sources": ["native/pcm_stream_decoder.h", "native/pcm_stream_decoder.cpp"],
+    "storage_sources": ["native/storage_volume.h", "native/storage_volume.cpp"],
+    "system_libraries": ["bcrypt", "crypt32"],
+    "msvc_version": "14.44.35207"
+  },
+  "native_build": {
+    "python": "3.11.9",
+    "python_url": "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip",
+    "python_sha256": "009d6bf7e3b2ddca3d784fa09f90fe54336d5b60f0e0f305c37f400bf83cfd3b",
+    "scons": "4.7.0",
+    "msvc_family": "14.3",
+    "configuration": "platform=windows arch=x86_64 target=template_release"
+  }
+}

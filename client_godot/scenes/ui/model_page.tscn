@@ -1,0 +1,51 @@
+[gd_scene load_steps=4 format=3]
+[ext_resource type="Script" path="res://src/ui/model_page.gd" id="script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/decision_dialog.tscn" id="Decision"]
+[node name="ModelPage" type="Control"]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme = ExtResource("theme")
+script = ExtResource("script")
+[node name="Margin" type="MarginContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 16
+[node name="Scroll" type="ScrollContainer" parent="Margin"]
+unique_name_in_owner = true
+horizontal_scroll_mode = 0
+follow_focus = true
+[node name="Column" type="VBoxContainer" parent="Margin/Scroll"]
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+[node name="Title" type="Label" parent="Margin/Scroll/Column"]
+text = "LLM 模型设置"
+theme_override_font_sizes/font_size = 22
+[node name="Description" type="Label" parent="Margin/Scroll/Column"]
+text = "服务端只规定每类调用需要的模型和能力。服务商、Base URL、模型和 Key 由你配置，Key 不会上传到服务器。"
+autowrap_mode = 3
+[node name="RefreshTypes" type="Button" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+text = "刷新需求列表"
+size_flags_horizontal = 8
+[node name="Cards" type="VBoxContainer" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+theme_override_constants/separation = 16
+[node name="Status" type="Label" parent="Margin/Scroll/Column"]
+unique_name_in_owner = true
+autowrap_mode = 3
+[node name="PlainDialog" parent="." instance=ExtResource("Decision")]
+unique_name_in_owner = true
+title = "密钥保护失败"
+dialog_text = "Windows 未能保护 API Key。是否明确选择在本机以明文保存？默认取消保存。"
+ok_button_text = "明文保存"
+cancel_button_text = "取消保存"
+
+[node name="TestDialog" parent="." instance=ExtResource("Decision")]
+unique_name_in_owner = true
+title = "测试可能消耗供应商额度"
+dialog_text = "将使用当前草稿发送一次固定短输入，不发送聊天历史。成功仅表示本次请求可用。"
+cancel_button_text = "取消"

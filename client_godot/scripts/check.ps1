@@ -1,0 +1,61 @@
+param([string]$Godot, [switch]$ImportOnly, [switch]$SkipImport)
+. (Join-Path $PSScriptRoot 'common.ps1')
+$engine = Resolve-Godot $Godot
+# Keep the cold-cache import as its own process and log.  A successful import
+# is a prerequisite for the checks below; none of the checks may accidentally
+# turn an import warning/error into a green result.
+if (-not $SkipImport) {
+    $importArguments = @('--headless', '--path', $ProjectRoot, '--editor', '--import')
+    try {
+        Invoke-GodotChecked $engine $importArguments 'import'
+    } catch {
+        # On a completely cold cache Godot can parse the global theme before
+        # the first imported slider texture has been materialized. Retry only
+        # that known transient signature; persistent or unrelated import
+        # failures must still fail the check.
+        $importError = $_.Exception.Message
+        $coldThemeRace = $importError -match 'Unable to open file: res://\.godot/imported/[^\r\n]*\.ctex' -and $importError -match 'app_theme\.tres.*(Parse Error|non-existent resource)'
+        if (-not $coldThemeRace) { throw }
+        Write-Warning 'Cold import encountered the known theme texture generation race; retrying once.'
+        Invoke-GodotChecked $engine $importArguments 'import-retry'
+    }
+    Write-Host 'Cold import passed.'
+}
+if ($ImportOnly) { exit 0 }
+Write-Host 'Starting isolated contract checks.'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--quit-after', '3') 'startup'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_theme_contract.gd') 'theme-contract'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_ui_scenes.gd') 'ui-scenes'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_avatar_driver.gd') 'avatar-contract'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/avatar/test_eye_restoration.gd') 'avatar-eyes'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_avatar_framing.gd') 'framing-contract'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_demo_session.gd') 'preview-contract'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_preview_input.gd') 'preview-input'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_windows_security.gd') 'windows-security'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_pcm_decoder.gd') 'pcm-decoder'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/media/test_reply_audio.gd') 'reply-audio'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_audio_cache.gd') 'audio-cache'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_reliable_outbox.gd') 'reliable-outbox'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_client_log.gd') 'client-log'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_log_window.gd') 'log-window'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_dropdown.gd') 'unified-dropdown'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_virtual_history.gd') 'virtual-history'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_reading_position.gd') 'reading-position'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/test_voice_replay.gd') 'voice-replay'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--quit-after', '3', '--', '--preview') 'offline-preview'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_system_message_presentation.gd') 'system-message-presentation'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_bubble_sizing.gd') 'bubble-sizing'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_image_bubble_sizing.gd') 'image-bubble-sizing'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/application/test_default_user_storage.gd') 'default-user-storage'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_window_chrome.gd') 'window-chrome'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_image_window.gd') 'image-window'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_main_navigation.gd') 'main-navigation'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_visual_surfaces.gd') 'visual-surfaces'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_audio_settings.gd') 'audio-settings'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/media/test_image_attachment.gd') 'image-attachment'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_storage_service.gd') 'storage-service'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/storage/test_login_storage.gd') 'login-storage'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/ui/test_cache_usage_ring.gd') 'cache-usage-ring'
+
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/media/test_capability_failures.gd') 'capability-failures'
+Invoke-GodotChecked $engine @('--headless', '--path', $ProjectRoot, '--script', 'res://tests/application/test_platform_degradation.gd') 'platform-degradation'

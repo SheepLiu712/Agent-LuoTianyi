@@ -1,0 +1,190 @@
+[gd_scene load_steps=11 format=3]
+
+[ext_resource type="Resource" path="res://resources/platform/windows.tres" id="isolation_window_system"]
+
+[ext_resource type="Script" path="res://src/ui/chat_view.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+[ext_resource type="Texture2D" path="res://assets/ui/tianyi_icon.png" id="4_avatar"]
+[ext_resource type="Script" path="res://src/ui/composer_input.gd" id="5_composer"]
+[ext_resource type="PackedScene" path="res://scenes/ui/virtual_message_list.tscn" id="7_messages"]
+[ext_resource type="Resource" path="res://resources/platform/input.tres" id="isolation_input_service"]
+[ext_resource type="Resource" path="res://resources/platform/files.tres" id="isolation_files"]
+
+
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+
+
+[node name="ChatView" type="MarginContainer"]
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+files = ExtResource("isolation_files")
+
+window_system = ExtResource("isolation_window_system")
+
+[node name="Background" type="ColorRect" parent="."]
+mouse_filter = 2
+color = Color(0.960784316, 0.972549021, 0.984313726, 1)
+
+[node name="Margin" type="MarginContainer" parent="."]
+unique_name_in_owner = true
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 24
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 24
+
+[node name="Column" type="VBoxContainer" parent="Margin"]
+theme_override_constants/separation = 16
+
+[node name="Heading" type="HBoxContainer" parent="Margin/Column"]
+theme_override_constants/separation = 16
+
+[node name="Avatar" type="TextureRect" parent="Margin/Column/Heading"]
+custom_minimum_size = Vector2(40, 40)
+size_flags_vertical = 0
+texture = ExtResource("4_avatar")
+expand_mode = 1
+stretch_mode = 5
+material = SubResource("ShaderMaterial_avatar")
+
+[node name="Identity" type="VBoxContainer" parent="Margin/Column/Heading"]
+size_flags_horizontal = 3
+
+[node name="Title" type="Label" parent="Margin/Column/Heading/Identity"]
+theme_override_colors/font_color = Color(0.203921571, 0.298039228, 0.349019617, 1)
+theme_override_font_sizes/font_size = 22
+text = "和天依聊聊"
+
+[node name="Status" type="Label" parent="Margin/Column/Heading/Identity"]
+unique_name_in_owner = true
+theme_override_colors/font_color = Color(0.376470596, 0.498039216, 0.552941203, 1)
+theme_override_font_sizes/font_size = 13
+autowrap_mode = 3
+
+[node name="SepTop" type="HSeparator" parent="Margin/Column"]
+
+[node name="HistoryRow" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="HistoryStatus" type="Label" parent="Margin/Column/HistoryRow"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_font_sizes/font_size = 12
+autowrap_mode = 3
+
+[node name="HistoryRetry" type="Button" parent="Margin/Column/HistoryRow"]
+unique_name_in_owner = true
+text = "重试历史"
+
+[node name="HistorySkip" type="Button" parent="Margin/Column/HistoryRow"]
+unique_name_in_owner = true
+text = "跳过本次"
+
+[node name="Scroll" parent="Margin/Column" instance=ExtResource("7_messages")]
+unique_name_in_owner = true
+size_flags_vertical = 3
+
+[node name="Empty" type="Label" parent="Margin/Column"]
+unique_name_in_owner = true
+text = "从一句问候开始"
+horizontal_alignment = 1
+
+[node name="Latest" type="Button" parent="Margin/Column"]
+unique_name_in_owner = true
+visible = false
+text = "回到最新 ↓"
+
+[node name="Unread" type="Button" parent="Margin/Column"]
+unique_name_in_owner = true
+visible = false
+text = "定位未读"
+
+[node name="SepBottom" type="HSeparator" parent="Margin/Column"]
+
+[node name="AudioControls" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="VolumeLabel" type="Label" parent="Margin/Column/AudioControls"]
+theme_override_colors/font_color = Color(0.203921571, 0.298039228, 0.349019617, 1)
+theme_override_font_sizes/font_size = 12
+text = "语音音量"
+
+[node name="Volume" type="HSlider" parent="Margin/Column/AudioControls"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(110, 0)
+size_flags_horizontal = 3
+min_value = 0.0
+max_value = 1.0
+step = 0.01
+tooltip_text = "回复语音自动播放；拖到最左侧静音"
+
+[node name="StopVoice" type="Button" parent="Margin/Column/AudioControls"]
+unique_name_in_owner = true
+text = "停止语音"
+
+[node name="AttachmentBar" type="HBoxContainer" parent="Margin/Column"]
+unique_name_in_owner = true
+visible = false
+theme_override_constants/separation = 8
+
+[node name="AttachmentThumbnail" type="TextureRect" parent="Margin/Column/AttachmentBar"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(48,48)
+expand_mode = 1
+stretch_mode = 5
+
+[node name="AttachmentLabel" type="Label" parent="Margin/Column/AttachmentBar"]
+text = "待发送图片"
+size_flags_horizontal = 3
+
+[node name="PreviewImage" type="Button" parent="Margin/Column/AttachmentBar"]
+unique_name_in_owner = true
+text = "查看"
+
+[node name="RemoveImage" type="Button" parent="Margin/Column/AttachmentBar"]
+unique_name_in_owner = true
+text = "移除"
+
+[node name="ImageStatus" type="Label" parent="Margin/Column"]
+unique_name_in_owner = true
+visible = false
+autowrap_mode = 3
+theme_override_font_sizes/font_size = 12
+
+[node name="Input" type="TextEdit" parent="Margin/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 96)
+placeholder_text = "想说些什么？"
+wrap_mode = 1
+script = ExtResource("5_composer")
+
+input_service = ExtResource("isolation_input_service")
+
+[node name="Footer" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="ImageButton" type="Button" parent="Margin/Column/Footer"]
+unique_name_in_owner = true
+text = "＋ 图片"
+tooltip_text = "选择图片，也可以在输入框中 Ctrl+V 粘贴"
+
+[node name="Hint" type="Label" parent="Margin/Column/Footer"]
+size_flags_horizontal = 3
+theme_override_colors/font_color = Color(0.580392182, 0.647058845, 0.686274529, 1)
+theme_override_font_sizes/font_size = 11
+text = "Enter 发送 · Shift + Enter 换行"
+
+[node name="Send" type="Button" parent="Margin/Column/Footer"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(96, 0)
+theme_type_variation = &"PrimaryButton"
+text = "发送  ↑"
+
+[node name="ImagePicker" type="FileDialog" parent="."]
+unique_name_in_owner = true
+title = "选择要发送的图片"
+file_mode = 0
+access = 2
+use_native_dialog = true
+filters = PackedStringArray("*.png,*.jpg,*.jpeg,*.webp,*.bmp ; 图片")

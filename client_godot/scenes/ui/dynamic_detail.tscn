@@ -1,0 +1,122 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://src/ui/dynamic_detail.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_input"]
+content_margin_left = 12.0
+content_margin_top = 12.0
+content_margin_right = 12.0
+content_margin_bottom = 12.0
+bg_color = Color(0.960784316, 0.968627453, 0.980392158, 1)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
+
+[node name="DynamicDetail" type="ScrollContainer"]
+size_flags_horizontal = 3
+size_flags_vertical = 3
+horizontal_scroll_mode = 0
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Margin" type="MarginContainer" parent="."]
+size_flags_horizontal = 3
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="Column" type="VBoxContainer" parent="Margin"]
+unique_name_in_owner = true
+size_flags_horizontal = 3
+theme_override_constants/separation = 14
+
+[node name="Header" type="HBoxContainer" parent="Margin/Column"]
+
+[node name="Avatar" type="TextureRect" parent="Margin/Column/Header"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(42, 42)
+size_flags_vertical = 0
+expand_mode = 1
+stretch_mode = 5
+material = SubResource("ShaderMaterial_avatar")
+
+[node name="Identity" type="VBoxContainer" parent="Margin/Column/Header"]
+
+[node name="Author" type="Label" parent="Margin/Column/Header/Identity"]
+unique_name_in_owner = true
+theme_override_colors/font_color = Color(0.203921571, 0.298039228, 0.349019617, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="CreatedAt" type="Label" parent="Margin/Column/Header/Identity"]
+unique_name_in_owner = true
+theme_override_colors/font_color = Color(0.580392182, 0.600000024, 0.623529434, 1)
+theme_override_font_sizes/font_size = 12
+
+[node name="Body" type="RichTextLabel" parent="Margin/Column"]
+unique_name_in_owner = true
+fit_content = true
+selection_enabled = true
+scroll_active = false
+
+[node name="Notice" type="Label" parent="Margin/Column"]
+unique_name_in_owner = true
+text = "此动态不可评论。"
+
+[node name="CommentDraft" type="TextEdit" parent="Margin/Column"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 90)
+theme_override_styles/normal = SubResource("StyleBoxFlat_input")
+placeholder_text = "写下你的留言…"
+wrap_mode = 1
+
+[node name="Send" type="Button" parent="Margin/Column"]
+unique_name_in_owner = true
+size_flags_horizontal = 8
+theme_type_variation = &"PrimaryButton"
+text = "发送评论"
+
+[node name="CommentSep" type="HSeparator" parent="Margin/Column"]
+
+[node name="Comments" type="VBoxContainer" parent="Margin/Column"]
+unique_name_in_owner = true
+theme_override_constants/separation = 16
+
+[node name="ReplyBox" type="VBoxContainer" parent="Margin/Column"]
+unique_name_in_owner = true
+visible = false
+
+[node name="ReplyLabel" type="Label" parent="Margin/Column/ReplyBox"]
+unique_name_in_owner = true
+
+[node name="ReplyDraft" type="TextEdit" parent="Margin/Column/ReplyBox"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(0, 90)
+theme_override_styles/normal = SubResource("StyleBoxFlat_input")
+placeholder_text = "写下回复…"
+wrap_mode = 1
+
+[node name="Actions" type="HBoxContainer" parent="Margin/Column/ReplyBox"]
+
+[node name="CancelReply" type="Button" parent="Margin/Column/ReplyBox/Actions"]
+unique_name_in_owner = true
+text = "取消回复对象"
+
+[node name="ReplySend" type="Button" parent="Margin/Column/ReplyBox/Actions"]
+unique_name_in_owner = true
+theme_type_variation = &"PrimaryButton"
+text = "发送回复"
+
+[node name="Status" type="Label" parent="Margin/Column"]
+visible = false
+unique_name_in_owner = true
+autowrap_mode = 3
+
+[node name="LoadMore" type="Button" parent="Margin/Column"]
+unique_name_in_owner = true
