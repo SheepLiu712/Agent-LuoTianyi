@@ -13,8 +13,8 @@ from src.agent_runtime.agent_runtime import AgentRuntime
 from src.agent.skills.expression.speaking import SpeakingSkill, EmptySpeechError
 from src.agent.skills.expression.speaking.streaming import AsyncTTS
 from src.agent.skills.expression.speaking.errors import TTSStreamCancelled
-from routing_support import Sink, plan_and_context
-from skill_support import invocation
+from support.routing_support import Sink, plan_and_context
+from support.skill_support import invocation
 
 
 class Module:

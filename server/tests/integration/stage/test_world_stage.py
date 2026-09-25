@@ -2,7 +2,7 @@
 import asyncio
 
 import pytest
-from world_stage_fakes import (
+from support.world_stage_fakes import (
     RecordingAgent,
     action_plan,
     create_stage,

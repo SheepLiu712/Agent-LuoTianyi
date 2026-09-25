@@ -2,7 +2,7 @@
 import pytest
 
 import src.domain.agent as d
-from routing_support import router_type
+from support.routing_support import router_type
 
 
 @pytest.mark.parametrize("side,kinds", [

@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from routing_support import Sink
+from support.routing_support import Sink
 
 import src.domain.agent as d
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler

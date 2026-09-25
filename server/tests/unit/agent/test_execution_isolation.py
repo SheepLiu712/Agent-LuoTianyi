@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 import src.domain.agent as d
-from routing_support import Sink, completed, output, plan_and_context
+from support.routing_support import Sink, completed, output, plan_and_context
 
 pytestmark = pytest.mark.asyncio
 

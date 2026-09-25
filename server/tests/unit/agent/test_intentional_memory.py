@@ -2,7 +2,7 @@
 from dataclasses import replace
 
 import pytest
-from routing_support import Sink, request
+from support.routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
@@ -14,7 +14,7 @@ from src.agent.handlers.stimulus.chat import (
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import ExplicitMemoryIntentSkill, ReplyDraft
 from src.agent.skills.mutation import IntentionalMemoryCommit, MemoryCommitRevision
-from skill_support import invocation
+from support.skill_support import invocation
 
 
 class _Conversation:

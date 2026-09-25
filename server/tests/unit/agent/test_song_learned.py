@@ -14,7 +14,7 @@ from src.agent.skills.cognitive.learned_song_experience import (
 from src.agent.skills.contracts import CharacterNarrative
 from src.agent.skills.expression.dynamic_publishing import DynamicPublishingSkill
 from src.agent.skills.expression.song_learning import SongLearningDispatchSkill
-from skill_support import invocation
+from support.skill_support import invocation
 
 BODY = "今天学会了《Song A》，好想唱给你听！"
 

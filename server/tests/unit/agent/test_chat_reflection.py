@@ -15,7 +15,7 @@ from src.agent.context import (
 )
 from src.agent.handlers.action.reflection import ReflectionActionHandler
 from src.agent.skills.reflection import ReflectionSkill
-from skill_support import invocation
+from support.skill_support import invocation
 
 
 class _Conversation:

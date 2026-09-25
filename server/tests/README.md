@@ -1,6 +1,6 @@
 # 服务端测试分层与门禁
 
-测试按验证边界分为三层。测试文件只能放在 `unit/`、`integration/` 或 `e2e/`；跨目录复用的纯测试构造器放在 `tests/*_support.py`。
+测试按验证边界分为三层。测试文件只能放在 `unit/`、`integration/` 或 `e2e/`；跨目录复用的测试构造器、fake 与 fixture 放在 `tests/support/`，由测试通过 `from support.<模块> import ...` 导入。
 
 ## 分层规则
 

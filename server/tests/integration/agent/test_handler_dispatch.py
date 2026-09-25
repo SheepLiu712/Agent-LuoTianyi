@@ -6,9 +6,9 @@ import pytest
 
 import src.domain.agent as d
 from src.agent.processing.output_drafts import MessageEndDraft
-from routing_support import full_output
-from plan_emission_support import draft
-from routing_support import (Sink, completed, output, plan_and_context, request, settlement)  # noqa: F401
+from support.routing_support import full_output
+from support.plan_emission_support import draft
+from support.routing_support import (Sink, completed, output, plan_and_context, request, settlement)  # noqa: F401
 
 
 async def test_registered_handle_delivers_plan_and_settles_consumption(routed_runtime):

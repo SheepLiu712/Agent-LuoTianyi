@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 
 import pytest
-from routing_support import Sink
-from touch_support import touch_request
+from support.routing_support import Sink
+from support.touch_support import touch_request
 
 import src.domain.agent as d
 from src.agent.handlers.action.restore_expression import RestoreExpressionHandler
@@ -16,7 +16,7 @@ from src.agent.skills.expression.touch import (
     TouchReactionSkill,
 )
 from src.agent_runtime.agent_runtime import AgentRuntime
-from skill_support import invocation
+from support.skill_support import invocation
 
 
 @dataclass(frozen=True, slots=True)

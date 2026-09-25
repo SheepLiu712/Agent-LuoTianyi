@@ -10,8 +10,8 @@ for import_root in (TEST_ROOT, SERVER_ROOT):
     if str(import_root) not in sys.path:
         sys.path.insert(0, str(import_root))
 
-from agent_runtime_support import runtime, runtime_dependencies  # noqa: E402,F401
-from routing_support import routed_runtime  # noqa: E402,F401
+from support.agent_runtime_support import runtime, runtime_dependencies  # noqa: E402,F401
+from support.routing_support import routed_runtime  # noqa: E402,F401
 from src.utils.logger import get_logger  # noqa: E402
 
 

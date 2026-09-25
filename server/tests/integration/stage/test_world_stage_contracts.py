@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
-from world_stage_fakes import (
+from support.world_stage_fakes import (
     RecordingAgent,
     action_plan,
     activity_observation,

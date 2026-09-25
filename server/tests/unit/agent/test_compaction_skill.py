@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from context_support import database, entry, factory
+from support.context_support import database, entry, factory
 from src.agent.skills.conversation.compaction import ConversationCompactionSkill
 
 

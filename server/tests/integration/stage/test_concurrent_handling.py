@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
-from stage_support import RecordingAgent, cleanup, plan, report, setup, stimulus, take
+from support.stage_support import RecordingAgent, cleanup, plan, report, setup, stimulus, take
 
 import src.domain.agent as d
 from src.agent import Agent

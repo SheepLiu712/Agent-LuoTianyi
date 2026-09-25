@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-from routing_support import Sink, request
+from support.routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
@@ -18,7 +18,7 @@ from src.agent.skills.cognitive import (
     ReplyDraft,
     ResponseCompositionSkill,
 )
-from skill_support import invocation
+from support.skill_support import invocation
 
 
 class _Conversation:

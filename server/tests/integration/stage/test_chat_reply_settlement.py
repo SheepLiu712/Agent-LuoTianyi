@@ -2,7 +2,7 @@
 import asyncio
 
 import pytest
-from stage_support import cleanup, setup, stimulus
+from support.stage_support import cleanup, setup, stimulus
 
 import src.domain.agent as d
 from src.agent import Agent

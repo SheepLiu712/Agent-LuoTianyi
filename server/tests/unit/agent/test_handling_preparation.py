@@ -3,7 +3,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from routing_support import Sink, request
+from support.routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent

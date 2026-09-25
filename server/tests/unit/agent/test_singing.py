@@ -10,8 +10,8 @@ from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.sing import SingHandler
 from src.agent.skills.expression.singing import EmptySongAudioError, SingingSkill
-from routing_support import Sink, plan_and_context
-from skill_support import invocation
+from support.routing_support import Sink, plan_and_context
+from support.skill_support import invocation
 
 
 class Singing:
