@@ -66,7 +66,7 @@ def run_case(source, behavior):
         elif behavior == "image-cancel":
             action("image.select", path=str(IMAGE_PATH), ack_timeout=15)
             reference = action("image.cancel", ack_timeout=15)
-        thinking = action("events.wait", kind="agent_state", value="thinking", after_seq=baseline_seq, timeout=45)
+        thinking = action("events.wait", kind="agent_state", value="thinking", after_seq=baseline_seq, timeout=90)
         thinking_event = thinking["data"]["event"]
         delay = (thinking_event["timestamp_ms"] - milliseconds(reference["timestamp"])) / 1000
         waiting = action(

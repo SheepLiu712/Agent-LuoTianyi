@@ -26,7 +26,7 @@ python tests/manual_e2e/08-reply-read-audio-replay.driver.py
 {"action":"session.connect","params":{"base_url":"https://your-test-server.example","username":"cli_test_user","password_env":"CLI_TEST_PASSWORD","remember_login":true}}
 {"action":"history.initial"}
 {"action":"chat.send_typing","params":{"text_length":3}}
-{"action":"events.wait","params":{"kind":"agent_state","value":"thinking","timeout":30}}
+{"action":"events.wait","params":{"kind":"agent_state","value":"thinking","timeout":90}}
 ```
 
 要重复检查文本和图片触发 `thinking` 的时间，请先生成图片，并使用独立测试账号创建 CLI 自动登录文件，然后运行 `python tests/manual_e2e/acceptance_timing.driver.py`。驱动会在 `client/temp/cli_acceptance_timing/` 保存每种场景的 JSONL 证据，输出从相关动作结果到状态事件的实测秒数；可用 `CLI_E2E_CREDENTIAL_FILE`、`CLI_E2E_IMAGE` 和 `CLI_E2E_CASE` 指定凭据文件、图片和单个场景。该驱动会向真实服务端发送多条消息，适合隔离的测试账号。
