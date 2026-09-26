@@ -10,10 +10,12 @@ from typing import Any
 import pytest
 
 import src.world.get_new_songs.daily_new_song_fetcher as fetcher_module
-from src.utils.helpers import load_config
+from src.agent.skills.knowledge.song_acceptance import SongAcceptanceStatus, SongKnowledgeAcceptanceSkill
 from src.infrastructure.models.service import LLMService
-from src.world.get_new_songs.task import VCPediaNewSongTask
+from src.infrastructure.persistence import Song, get_song_session
+from src.utils.helpers import load_config
 from src.world.bili_event_updater.task import BiliEventUpdateTask
+from src.world.get_new_songs.task import VCPediaNewSongTask
 
 VCPEDIA_OUTPUT_FILE = Path("data/test_outputs/vcpedia_new_songs_latest.json")
 BILI_OUTPUT_FILE = Path("data/test_outputs/bili_event_update_latest.json")
@@ -60,18 +62,20 @@ def _write_capture_file(payload: dict[str, Any]) -> None:
 async def test_vcpedia_run_once_fetches_live_songs_and_writes_result(monkeypatch, tmp_path):
     config = load_config("config/config.json")
     task_config = copy.deepcopy(config["world"]["song_knowledge"])
+    knowledge_dir = tmp_path / "knowledge"
     task_config["song_database"] = {
-        "db_folder": str(tmp_path / "knowledge"),
+        "db_folder": str(knowledge_dir),
         "db_file": "knowledge_db.db",
     }
     task_config.setdefault("crawler", {})
     task_config["crawler"]["output_dir"] = str(tmp_path / "crawled_data")
+    task_config["crawler"]["data_dir"] = str(tmp_path / "uncached_data")
     task_config["crawler"]["use_llm"] = False
 
-    keyword_dir = tmp_path / "keywords"
-    monkeypatch.setattr(fetcher_module, "KNOWLEDGE_DIR", keyword_dir)
-    monkeypatch.setattr(fetcher_module, "SONG_NAME_KEYWORDS_FILE", keyword_dir / "song_name_keywords.txt")
-    monkeypatch.setattr(fetcher_module, "SONG_LYRIC_KEYWORDS_FILE", keyword_dir / "song_lyric_keywords.txt")
+    # Fetch the real template, then bound this external probe to a few real pages.
+    sampled_songs = fetcher_module.fetch_song_list_from_template(fetcher_module.TEMPLATE_URL)[:3]
+    assert sampled_songs, "VCPedia template returned no song links"
+    monkeypatch.setattr(fetcher_module, "fetch_song_list_from_template", lambda _url: sampled_songs)
     monkeypatch.setattr(fetcher_module.time, "sleep", lambda _seconds: None)
 
     submitted_facts: list[Any] = []
@@ -113,9 +117,25 @@ async def test_vcpedia_run_once_fetches_live_songs_and_writes_result(monkeypatch
     assert payload["discovered_count"] == len(payload["discovered"])
     assert payload["submitted_count"] == len(submitted_facts)
     assert payload["rejected_count"] == 0
-    assert payload["discovered"] or payload["skipped_existing"] or payload["fetch_failed"], (
-        f"No songs were fetched; see {VCPEDIA_OUTPUT_FILE}"
+    assert submitted_facts, f"No song pages produced an accepted candidate; see {VCPEDIA_OUTPUT_FILE}"
+
+    # World dispatches a fact; the Agent-owned acceptance skill persists it.
+    fact = submitted_facts[0]
+    skill = SongKnowledgeAcceptanceSkill({**task_config, "knowledge_dir": str(knowledge_dir)})
+    accepted = await skill.accept(
+        source_ref=fact.source_ref,
+        external_song_id=fact.external_song_id,
+        revision=fact.revision,
+        candidate=fact.candidate,
     )
+    assert accepted.status is SongAcceptanceStatus.ACCEPTED
+    session = get_song_session()
+    try:
+        assert session.query(Song).filter(Song.name == fact.candidate.song_name).one()
+    finally:
+        session.close()
+    keywords = (knowledge_dir / "song_name_keywords.txt").read_text(encoding="utf-8").splitlines()
+    assert fact.candidate.song_name in keywords
 
 
 @pytest.mark.asyncio
