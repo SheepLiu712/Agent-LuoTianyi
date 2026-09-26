@@ -78,9 +78,10 @@ def test_vcpedia_initialize_skips_when_llm_disabled():
 def test_vcpedia_run_once_submits_candidates_as_world_facts(monkeypatch):
     calls = {}
 
-    def collect(config, llm_module=None):
+    def collect(config, llm_module=None, *, extraction_llm_module=None):
         calls["config"] = config
         calls["llm_module"] = llm_module
+        calls["extraction_llm_module"] = extraction_llm_module
         return {"discovered": [candidate("A"), candidate("B")], "skipped_existing": ["C"], "fetch_failed": ["D"]}
 
     monkeypatch.setattr(task_module, "collect_new_song_candidates", collect)
@@ -114,7 +115,9 @@ def test_vcpedia_run_once_submits_candidates_as_world_facts(monkeypatch):
 def test_vcpedia_run_once_counts_rejected_candidates(monkeypatch):
     monkeypatch.setattr(
         task_module, "collect_new_song_candidates",
-        lambda config, llm_module=None: {"discovered": [candidate("A")], "skipped_existing": [], "fetch_failed": []},
+        lambda config, llm_module=None, *, extraction_llm_module=None: {
+            "discovered": [candidate("A")], "skipped_existing": [], "fetch_failed": []
+        },
     )
     runtime, stage, _ = server_runtime(accept=False)
     task = VCPediaNewSongTask({"crawler": {}})
@@ -129,7 +132,7 @@ def test_vcpedia_run_once_counts_rejected_candidates(monkeypatch):
 
 
 def test_vcpedia_run_once_returns_failure_on_exception(monkeypatch):
-    def collect(config, llm_module=None):
+    def collect(config, llm_module=None, *, extraction_llm_module=None):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(task_module, "collect_new_song_candidates", collect)
@@ -157,7 +160,7 @@ def test_collect_new_song_candidates_skips_existing_and_writes_no_knowledge(monk
     _seed_existing_song(str(db_folder), "旧歌")
 
     class FakeFetcher:
-        def __init__(self, config, llm_module=None):
+        def __init__(self, config, llm_module=None, *, extraction_llm_module=None):
             pass
 
         def fetch_entity_description(self, song_name):

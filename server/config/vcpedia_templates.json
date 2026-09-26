@@ -1,0 +1,30 @@
+{
+  "description": "既有模板描述；参数列表按优先级，源码参数仍按原顺序消费。新增 kind 需代码支持。",
+  "templates": [
+    {"kind": "inline", "names": ["lj"], "text_params": ["2", "1"]},
+    {"kind": "inline", "names": ["color", "colored", "颜色", "fontcolor"], "text_params": ["2"]},
+    {"kind": "inline", "names": ["黑幕", "胡话", "cquote", "center", "nowrap", "dead"], "text_params": ["1"]},
+    {"kind": "inline", "names": ["TextHover"], "text_params": ["1"], "skip_if": {"4": ["pic"]}},
+    {"kind": "ruby", "names": ["ruby", "注音"]},
+    {"kind": "utawari", "names": ["utawari"]},
+    {"kind": "multiline", "names": ["multiline lyric", "歌词并列", "歌词并列/伴唱", "歌词并列/重唱", "交叉颜色", "交叉颜色f"]},
+    {"kind": "break", "names": ["br", "clear"]},
+    {"kind": "staff", "names": ["创作者名单", "creator", "creators", "制作人员", "staff", "vocaloid songbox introduction"], "group_prefix": "group", "list_prefix": "list", "exclude_params": ["ldc", "author", "授权信息", "anchor"]},
+    {"kind": "songbox", "names": ["infobox song", "infobox songex"], "contains": ["songbox"], "body_params": ["简介", "歌词"]},
+    {"kind": "tabs", "names": ["tabs", "tabs/core"], "body_prefixes": ["tab", "text", "content", "内容"], "label_prefixes": ["bt", "label"]},
+    {"kind": "wrapper", "names": ["toggle", "hide", "隐藏"], "body_params": ["content", "内容", "2"]},
+    {"kind": "embed", "names": ["embed", "嵌入", "嵌入片段", "collectcodedata"]},
+    {"kind": "lyrics", "names": ["歌词", "lyrics", "lyricskai", "lyric"], "original_params": ["original", "歌词", "1"], "translated_params": ["translated"], "original_prefix": "lb-text", "translated_prefix": "rb-text"}
+  ],
+  "field_aliases": {
+    "singer": "演唱", "singers": "演唱", "vocal": "演唱", "歌手": "演唱",
+    "uploader": "UP主", "up主": "UP主", "lyricist": "作词", "lyrics": "作词",
+    "composer": "作曲", "music": "作曲", "arranger": "编曲", "arrangement": "编曲",
+    "illustrator": "曲绘", "illustration": "曲绘", "pv": "PV", "tuning": "调教"
+  },
+  "known_fields": ["演唱", "演唱者", "歌手", "UP主", "投稿者", "发布者", "P主", "作词", "作曲", "编曲", "作编曲", "PV", "曲绘", "调教", "歌曲名称", "歌曲名", "投稿时间", "其他资料", "再生"],
+  "presentation_params": ["image", "图片", "width", "图片大小", "图片信息", "tabs", "class", "background", "背景色", "border", "state", "title", "caption", "reverse", "总高度", "预览名称", "align", "float", "size", "alt"],
+  "presentation_contains": ["style", "color", "colour", "颜色", "样式"],
+  "field_exclude_params": ["简介", "歌词", "视频"],
+  "role_priority": ["演唱", "作词", "作曲", "编曲", "作编曲", "PV", "UP主", "曲绘"]
+}
