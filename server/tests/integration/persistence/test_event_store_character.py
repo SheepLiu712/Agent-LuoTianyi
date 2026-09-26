@@ -1,15 +1,20 @@
 import asyncio
 import sqlite3
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.infrastructure.persistence.database.services.event_store import EventStore
-from src.infrastructure.persistence.database.sql_database import Event, EventNotification, get_sql_session, init_sql_db
+from src.infrastructure.persistence.database.services.event_store import EventStore  # noqa: E402
+from src.infrastructure.persistence.database.sql_database import (  # noqa: E402
+    Event,
+    EventNotification,
+    get_sql_session,
+    init_sql_db,
+)
 
 
 class NoopRedis:
@@ -42,7 +47,8 @@ def test_init_sql_db_migrates_existing_notifications_table_with_character_column
     conn = sqlite3.connect(db_path)
     try:
         conn.execute(
-            "CREATE TABLE event_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id VARCHAR NOT NULL, user_id VARCHAR NOT NULL, trigger_key VARCHAR NOT NULL)"
+            "CREATE TABLE event_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, event_id VARCHAR NOT NULL, "
+            "user_id VARCHAR NOT NULL, trigger_key VARCHAR NOT NULL)"
         )
         conn.commit()
     finally:
@@ -99,7 +105,7 @@ def test_event_store_deduplicates_only_within_same_character(tmp_path):
 
     db = get_sql_session()
     try:
-        events = db.query(Event).filter(Event.title == "Concert A", Event.is_active == True).all()
+        events = db.query(Event).filter(Event.title == "Concert A", Event.is_active.is_(True)).all()
         by_character = {event.character: event.id for event in events}
     finally:
         db.close()
@@ -108,6 +114,35 @@ def test_event_store_deduplicates_only_within_same_character(tmp_path):
     assert second_id is not None
     assert duplicate_id is None
     assert by_character == {"luotianyi": first_id, "miku": second_id}
+
+
+def test_event_store_replay_normalizes_aware_datetimes_and_keeps_local_reminder_date(tmp_path):
+    init_sql_db(str(tmp_path), "events.db")
+    store = EventStore({}, get_sql_session, NoopRedis())
+    beijing = timezone(timedelta(hours=8))
+    event = {
+        "title": "创作激励计划",
+        "event_type": "general",
+        "start_datetime": datetime(2026, 9, 25, 0, 0, tzinfo=beijing),
+        "end_datetime": datetime(2026, 11, 30, 23, 59, tzinfo=beijing),
+        "source": "bilibili",
+    }
+
+    first_id = asyncio.run(store.add_event(event))
+    duplicate_id = asyncio.run(store.add_event(event))
+    db = get_sql_session()
+    try:
+        rows = db.query(Event).filter(Event.title == event["title"]).all()
+        stored = rows[0]
+        assert stored.start_datetime == datetime(2026, 9, 25, 0)
+        assert stored.end_datetime == datetime(2026, 11, 30, 23, 59)
+    finally:
+        db.close()
+
+    assert first_id is not None
+    assert duplicate_id is None
+    assert len(rows) == 1
+    assert store.get_events_due_for_trigger(character="luotianyi", today=date(2026, 9, 25))
 
 
 def test_event_store_writes_default_character(tmp_path):
@@ -192,15 +227,7 @@ def test_event_notification_claim_is_atomic_and_releasable(tmp_path):
     init_sql_db(str(tmp_path), "events.db")
     store = EventStore({}, get_sql_session, NoopRedis())
 
-    assert store.try_claim_notification(
-        "event-claim", "user-1", "day_of_event", "luotianyi"
-    ) is True
-    assert store.try_claim_notification(
-        "event-claim", "user-1", "day_of_event", "luotianyi"
-    ) is False
-    assert store.release_notification_claim(
-        "event-claim", "user-1", "day_of_event", "luotianyi"
-    ) is True
-    assert store.try_claim_notification(
-        "event-claim", "user-1", "day_of_event", "luotianyi"
-    ) is True
+    assert store.try_claim_notification("event-claim", "user-1", "day_of_event", "luotianyi") is True
+    assert store.try_claim_notification("event-claim", "user-1", "day_of_event", "luotianyi") is False
+    assert store.release_notification_claim("event-claim", "user-1", "day_of_event", "luotianyi") is True
+    assert store.try_claim_notification("event-claim", "user-1", "day_of_event", "luotianyi") is True
