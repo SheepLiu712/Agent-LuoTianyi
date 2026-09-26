@@ -1,0 +1,4 @@
+# 设置 CLI_E2E_BASE_URL、CLI_E2E_USER、CLI_E2E_PASSWORD 后运行
+/login --timeout "15"
+/touch "头" --count10 2 --count30 3 --ack-timeout "15"
+/reply --timeout "60"

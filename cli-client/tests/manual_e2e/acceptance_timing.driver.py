@@ -11,6 +11,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from driver_support import slash_command
 
 CLI_ROOT = Path(__file__).resolve().parents[2]
 CREDENTIAL_FILE = os.environ.get("CLI_E2E_CREDENTIAL_FILE", "temp/cli_auto_login.json")
@@ -25,7 +26,7 @@ def milliseconds(timestamp):
 def run_case(source, behavior):
     name = f"{source}-{behavior}"
     process = subprocess.Popen(
-        [sys.executable, "cli.py"],
+        [sys.executable, "cli.py", "--jsonl"],
         cwd=CLI_ROOT,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -36,7 +37,7 @@ def run_case(source, behavior):
     records = []
 
     def action(name, **params):
-        process.stdin.write(json.dumps({"action": name, "params": params}, ensure_ascii=False) + "\n")
+        process.stdin.write(slash_command(name, params) + "\n")
         process.stdin.flush()
         record = json.loads(process.stdout.readline())
         records.append(record)

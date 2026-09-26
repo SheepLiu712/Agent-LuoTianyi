@@ -14,7 +14,7 @@ def test_cli_starts_without_desktop_source_on_python_path(tmp_path):
         "from pathlib import Path; "
         "root = Path(sys.argv[1]); "
         "sys.path.insert(0, str(root)); "
-        "sys.argv = [str(root / 'cli.py'), '--action', '{\"action\":\"session.status\"}']; "
+        "sys.argv = [str(root / 'cli.py'), '--command', '/status', '--jsonl']; "
         "runpy.run_path(sys.argv[0], run_name='__main__')"
     )
     result = subprocess.run(

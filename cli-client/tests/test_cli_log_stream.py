@@ -56,7 +56,7 @@ def test_main_keeps_stdout_jsonl_only(monkeypatch):
     saved_default = logger_module._CONSOLE_STREAM
     try:
         code = cli_main.main(
-            ["--action", '{"action":"session.status"}'],
+            ["--command", "/status", "--jsonl"],
             stdout=out,
             stderr=err,
         )

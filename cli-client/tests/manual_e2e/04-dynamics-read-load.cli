@@ -1,0 +1,5 @@
+# 设置 CLI_E2E_BASE_URL、CLI_E2E_USER、CLI_E2E_PASSWORD 后运行
+/login --timeout "15"
+/dynamics "5"
+/dynamic "6cf2b81c-8925-4737-b968-74c9d5cc67a4"
+/more "5"

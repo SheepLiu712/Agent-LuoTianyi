@@ -68,10 +68,13 @@ def _invalid_scenario(executor, emit, message: str) -> int:
 def _validate_scenario(source):
     if source is None:
         raise ValueError("scenario source is missing or unreadable")
-    try:
-        scenario = json.loads(source)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"invalid scenario JSON: {exc}") from exc
+    if isinstance(source, dict):
+        scenario = source
+    else:
+        try:
+            scenario = json.loads(source)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid scenario JSON: {exc}") from exc
     if not isinstance(scenario, dict):
         raise ValueError("scenario must be a JSON object")
     actions = scenario.get("actions")

@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from driver_support import slash_command
 
 CLI_ROOT = Path(os.environ.get("CLI_E2E_ROOT", os.getcwd()))
 if not (CLI_ROOT / "cli.py").exists():
@@ -32,7 +33,7 @@ MAX_TOUCHES = int(os.environ.get("CLI_E2E_MAX_TOUCHES", "200"))
 TARGET_SUPPRESSED = 3
 
 proc = subprocess.Popen(
-    [sys.executable, "cli.py"],
+    [sys.executable, "cli.py", "--jsonl"],
     cwd=CLI_ROOT,
     stdin=subprocess.PIPE,
     stdout=subprocess.PIPE,
@@ -46,10 +47,7 @@ records = []
 
 
 def send(action, params=None):
-    payload = {"action": action}
-    if params is not None:
-        payload["params"] = params
-    proc.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    proc.stdin.write(slash_command(action, params) + "\n")
     proc.stdin.flush()
 
 

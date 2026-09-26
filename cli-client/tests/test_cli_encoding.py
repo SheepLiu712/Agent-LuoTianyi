@@ -8,10 +8,10 @@ CLIENT_DIR = Path(__file__).resolve().parents[1]
 
 def test_cli_stdio_is_utf8_for_redirected_streams():
     """重定向/管道场景下 JSONL 必须为 UTF-8（Windows 默认本地编码会损坏中文）。"""
-    payload = json.dumps({"action": "中文测试"}, ensure_ascii=False).encode("utf-8")
+    payload = '/未知命令 "中文测试"'.encode("utf-8")
 
     result = subprocess.run(
-        [sys.executable, "cli.py"],
+        [sys.executable, "cli.py", "--jsonl"],
         cwd=CLIENT_DIR,
         input=payload + b"\n",
         capture_output=True,
@@ -23,6 +23,6 @@ def test_cli_stdio_is_utf8_for_redirected_streams():
     lines = [line for line in stdout_text.splitlines() if line.strip()]
     assert len(lines) == 1
     record = json.loads(lines[0])
-    assert record["error"]["code"] == "UNKNOWN_ACTION"
-    assert "中文测试" in record["error"]["message"]
+    assert record["error"]["code"] == "INVALID_COMMAND"
+    assert "未知命令" in record["error"]["message"]
     result.stderr.decode("utf-8")

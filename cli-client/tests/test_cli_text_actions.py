@@ -158,7 +158,7 @@ def test_noninteractive_entrypoint_keeps_stdout_jsonl_and_stderr_separate():
     stderr = StringIO()
 
     exit_code = main(
-        ["--action", json.dumps({"action": "session.connect", "params": {}})],
+        ["--command", "/login", "--jsonl"],
         stdout=stdout,
         stderr=stderr,
     )
@@ -166,7 +166,7 @@ def test_noninteractive_entrypoint_keeps_stdout_jsonl_and_stderr_separate():
     assert exit_code == ExitCode.INPUT_ERROR
     lines = stdout.getvalue().splitlines()
     assert len(lines) == 1
-    assert json.loads(lines[0])["error"]["code"] == "INVALID_INPUT"
+    assert json.loads(lines[0])["error"]["code"] == "INVALID_COMMAND"
     assert stderr.getvalue() == ""
 
 

@@ -326,11 +326,11 @@ def test_main_wiring_runs_scenario_file(tmp_path, monkeypatch):
     import cli_client.cli.main as cli_main
 
     monkeypatch.setattr(cli_main, "ActionExecutor", FakeExecutor)
-    scenario_file = tmp_path / "scenario.json"
-    scenario_file.write_text(json.dumps({"actions": [{"action": "session.status"}]}), encoding="utf-8")
+    scenario_file = tmp_path / "scenario.cli"
+    scenario_file.write_text("/status\n", encoding="utf-8")
     out, err = _io_sinks()
 
-    code = cli_main.main(["--scenario", str(scenario_file)], stdout=out, stderr=err)
+    code = cli_main.main(["--script", str(scenario_file), "--jsonl"], stdout=out, stderr=err)
 
     lines = [line for line in out.getvalue().splitlines() if line.strip()]
     assert len(lines) == 2  # action + summary
@@ -339,11 +339,31 @@ def test_main_wiring_runs_scenario_file(tmp_path, monkeypatch):
     assert code == 0
 
     out2, err2 = _io_sinks()
-    missing_code = cli_main.main(["--scenario", str(tmp_path / "missing.json")], stdout=out2, stderr=err2)
+    missing_code = cli_main.main(["--script", str(tmp_path / "missing.cli"), "--jsonl"], stdout=out2, stderr=err2)
     lines2 = [line for line in out2.getvalue().splitlines() if line.strip()]
     assert len(lines2) == 1
-    assert json.loads(lines2[0])["error"]["code"] == "INVALID_SCENARIO"
+    assert json.loads(lines2[0])["error"]["code"] == "INVALID_COMMAND"
     assert missing_code == ExitCode.INPUT_ERROR
+
+
+def test_script_failure_policy_is_explicit(tmp_path, monkeypatch):
+    import cli_client.cli.main as cli_main
+
+    script = tmp_path / "failure.cli"
+    script.write_text('/text "first"\n/text "second"\n', encoding="utf-8")
+    executor = FakeExecutor({"chat.send_text": ("failed", ExitCode.ASSERTION_FAILED, {})})
+    monkeypatch.setattr(cli_main, "ActionExecutor", lambda: executor)
+
+    out, err = _io_sinks()
+    code = cli_main.main(["--script", str(script), "--jsonl"], stdout=out, stderr=err)
+    assert code == ExitCode.ASSERTION_FAILED
+    assert executor.executed == ["chat.send_text"]
+
+    executor = FakeExecutor({"chat.send_text": ("failed", ExitCode.ASSERTION_FAILED, {})})
+    out, err = _io_sinks()
+    code = cli_main.main(["--script", str(script), "--continue-on-failure", "--jsonl"], stdout=out, stderr=err)
+    assert code == ExitCode.ASSERTION_FAILED
+    assert executor.executed == ["chat.send_text", "chat.send_text"]
 
 
 def _io_sinks():

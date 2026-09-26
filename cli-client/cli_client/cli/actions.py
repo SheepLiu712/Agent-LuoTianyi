@@ -8,11 +8,10 @@ from datetime import datetime, timezone
 from enum import IntEnum
 from pathlib import Path
 from typing import Callable
+from urllib.parse import unquote, urlsplit
 
-from .auth_store import CredentialStoreError, load_login, save_login
-from .media import DefaultPlaybackBackend, PlaybackBackend, PlaybackResult, read_wav_format
-from .output import Redactor
-from ..utils import image_rules
+import requests
+
 from ..session import (
     AggregatedReply,
     HeadlessSession,
@@ -24,6 +23,15 @@ from ..session import (
     SessionReadyTimeout,
     SessionState,
 )
+from ..utils import image_rules
+from .auth_store import CredentialStoreError, load_login, save_login
+from .media import (
+    DefaultPlaybackBackend,
+    PlaybackBackend,
+    PlaybackResult,
+    read_wav_format,
+)
+from .output import Redactor
 
 
 class ExitCode(IntEnum):
@@ -507,7 +515,18 @@ class ActionExecutor:
         return {"ack": True}, request_id
 
     def _validate_image_path(self, path_str: str) -> Path:
-        path = Path(path_str)
+        uri = urlsplit(path_str)
+        if uri.scheme in ("http", "https"):
+            path = self._download_image(path_str, uri.path)
+        elif uri.scheme == "file":
+            local_path = unquote(uri.path)
+            if uri.netloc and uri.netloc != "localhost":
+                local_path = f"//{uri.netloc}{local_path}"
+            if os.name == "nt" and len(local_path) >= 3 and local_path[0] == "/" and local_path[2] == ":":
+                local_path = local_path[1:]
+            path = Path(local_path)
+        else:
+            path = Path(path_str)
         if not path.is_file():
             raise _ActionFailure(
                 ExitCode.INPUT_ERROR,
@@ -538,6 +557,28 @@ class ActionExecutor:
                 "input",
             )
         return path
+
+    @staticmethod
+    def _download_image(uri: str, uri_path: str) -> Path:
+        suffix = Path(unquote(uri_path)).suffix.lower()
+        if image_rules.detect_image_mime(f"image{suffix}") not in image_rules.ALLOWED_IMAGE_MIME_TYPES:
+            raise ValueError("image URI needs a supported file extension")
+        destination = Path.cwd() / "temp" / "cli_images" / f"{uuid.uuid4().hex}{suffix}"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with requests.get(uri, stream=True, timeout=15) as response:
+                response.raise_for_status()
+                with destination.open("wb") as output:
+                    size = 0
+                    for chunk in response.iter_content(chunk_size=65536):
+                        size += len(chunk)
+                        if size > image_rules.MAX_IMAGE_BYTES:
+                            raise ValueError("image URI exceeds the size limit")
+                        output.write(chunk)
+            return destination
+        except (requests.RequestException, OSError, ValueError) as exc:
+            destination.unlink(missing_ok=True)
+            raise ValueError(f"could not load image URI: {exc}") from exc
 
     def _send_touch(self, params: dict) -> tuple[dict, str]:
         session = self._require_session()
