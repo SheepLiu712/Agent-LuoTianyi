@@ -19,9 +19,7 @@ class FakeExecutor:
     def execute(self, raw):
         action = raw["action"]
         self.executed.append(action)
-        status, exit_code, data = self.outcomes.get(
-            action, ("passed", ExitCode.SUCCESS, {})
-        )
+        status, exit_code, data = self.outcomes.get(action, ("passed", ExitCode.SUCCESS, {}))
         record = {
             "schema_version": "1.0",
             "timestamp": "2026-09-20T00:00:00Z",
@@ -33,9 +31,7 @@ class FakeExecutor:
             "duration_ms": 1,
             "correlation_id": None,
             "data": data,
-            "error": None
-            if exit_code == 0
-            else {"code": "X", "message": "boom", "category": "assertion"},
+            "error": None if exit_code == 0 else {"code": "X", "message": "boom", "category": "assertion"},
         }
         return record, exit_code
 
@@ -103,6 +99,41 @@ def test_failure_skips_side_effect_and_continues_readonly():
     assert summary["data"]["failed"] == 1
     assert summary["data"]["skipped"] == 1
     assert summary["data"]["passed"] == 2
+    assert exit_code == ExitCode.ASSERTION_FAILED
+
+
+def test_failure_keeps_new_history_and_event_diagnostics():
+    executor = FakeExecutor({"chat.send_text": ("failed", ExitCode.ASSERTION_FAILED, {})})
+    records, exit_code = _run(
+        executor,
+        {
+            "actions": [
+                {"action": "chat.send_text", "params": {"text": "hi"}},
+                {"action": "history.initial"},
+                {"action": "history.load"},
+                {"action": "events.read"},
+                {"action": "events.wait", "params": {"kind": "agent_state", "timeout": 1}},
+                {"action": "chat.send_typing", "params": {"text_length": 0}},
+            ]
+        },
+    )
+
+    assert executor.executed == [
+        "chat.send_text",
+        "history.initial",
+        "history.load",
+        "events.read",
+        "events.wait",
+    ]
+    assert [record["status"] for record in records] == [
+        "failed",
+        "passed",
+        "passed",
+        "passed",
+        "passed",
+        "skipped",
+        "failed",
+    ]
     assert exit_code == ExitCode.ASSERTION_FAILED
 
 
@@ -274,9 +305,7 @@ class FakeSession:
 
 def test_real_executor_suppressed_counts_as_success():
     session = FakeSession(audio_active=True)
-    executor = ActionExecutor(
-        session_factory=lambda **_kwargs: session, session_id="s-real"
-    )
+    executor = ActionExecutor(session_factory=lambda **_kwargs: session, session_id="s-real")
     executor._session = session
 
     records, exit_code = _run(
@@ -298,9 +327,7 @@ def test_main_wiring_runs_scenario_file(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cli_main, "ActionExecutor", FakeExecutor)
     scenario_file = tmp_path / "scenario.json"
-    scenario_file.write_text(
-        json.dumps({"actions": [{"action": "session.status"}]}), encoding="utf-8"
-    )
+    scenario_file.write_text(json.dumps({"actions": [{"action": "session.status"}]}), encoding="utf-8")
     out, err = _io_sinks()
 
     code = cli_main.main(["--scenario", str(scenario_file)], stdout=out, stderr=err)
@@ -312,9 +339,7 @@ def test_main_wiring_runs_scenario_file(tmp_path, monkeypatch):
     assert code == 0
 
     out2, err2 = _io_sinks()
-    missing_code = cli_main.main(
-        ["--scenario", str(tmp_path / "missing.json")], stdout=out2, stderr=err2
-    )
+    missing_code = cli_main.main(["--scenario", str(tmp_path / "missing.json")], stdout=out2, stderr=err2)
     lines2 = [line for line in out2.getvalue().splitlines() if line.strip()]
     assert len(lines2) == 1
     assert json.loads(lines2[0])["error"]["code"] == "INVALID_SCENARIO"

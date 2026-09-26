@@ -8,7 +8,7 @@ from dataclasses import dataclass
 class _StageConfig:
     response_wait: float = 1.0
     typing_wait: float = 10.0
-    image_selection_wait: float = 60.0
+    image_selection_wait: float = 30.0
     first_login_wait: float = 1.0
     login_reminder_wait: float = 1.0
     proactive_idle_seconds: float = 30.0
@@ -28,7 +28,7 @@ class _StageConfig:
                 ("termination_timeout", 30.0),
                 ("response_wait", 1.0),
                 ("typing_wait", 10.0),
-                ("image_selection_wait", 60.0),
+                ("image_selection_wait", 30.0),
                 ("first_login_wait", 1.0),
                 ("login_reminder_wait", 1.0),
                 ("proactive_idle_seconds", 30.0),

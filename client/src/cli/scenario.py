@@ -14,10 +14,13 @@ from pathlib import Path
 
 from .actions import ExitCode
 
-
 READ_ONLY_ACTIONS = frozenset(
     {
         "session.status",
+        "history.initial",
+        "history.load",
+        "events.read",
+        "events.wait",
         "reply.read",
         "reply.wait",
         "preferences.read",
@@ -147,11 +150,7 @@ def run_scenario(
     failed_once = False
     for envelope in actions:
         action = envelope["action"].strip()
-        if (
-            failed_once
-            and on_failure == "stop_side_effects"
-            and action not in READ_ONLY_ACTIONS
-        ):
+        if failed_once and on_failure == "stop_side_effects" and action not in READ_ONLY_ACTIONS:
             skipped = _record(executor, action, "skipped", {"reason": "after_failure"}, None)
             emit(skipped)
             counts["skipped"] += 1

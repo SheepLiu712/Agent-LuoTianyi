@@ -210,7 +210,7 @@ async def test_failed_real_image_preprocessing_drops_only_image_and_keeps_writte
     "cls,fields,delay",
     [
         (d.UserTyping, {"text_length": 3}, 10),
-        (d.ImageSelectionOpened, {}, 60),
+        (d.ImageSelectionOpened, {}, 30),
         (d.ImageSelectionClosed, {}, 1),
         (d.UserTyping, {"text_length": 0}, 0),
     ],

@@ -55,6 +55,7 @@ class FakeNetworkClient:
         self.login_calls = []
         self.auto_login_calls = []
         self.sent = []
+        self.history_calls = []
 
     def login(self, username, password, request_token=False):
         self.login_calls.append((username, password, request_token))
@@ -64,8 +65,16 @@ class FakeNetworkClient:
         self.auto_login_calls.append((username, token))
         return self.auto_login_result
 
+    def get_history(self, count, end_index):
+        self.history_calls.append((count, end_index))
+        return [], 0
+
     def send_chat(self, text, is_proactive=False, ack_timeout=10.0, client_msg_id=None):
         self.sent.append((text, is_proactive, ack_timeout, client_msg_id))
+        return {"ok": True, "request_id": client_msg_id, "error": None}
+
+    def send_typing(self, text_length, ack_timeout=10.0, client_msg_id=None):
+        self.sent.append(("typing", text_length, ack_timeout, client_msg_id))
         return {"ok": True, "request_id": client_msg_id, "error": None}
 
 
@@ -108,8 +117,36 @@ def test_connect_waits_for_ready_and_send_text_delegates_ack_contract(tmp_path):
 
     assert session.state == SessionState.READY
     assert network.login_calls == [("alice", "secret", False)]
+    assert network.history_calls == [(20, -1)]
+    assert session.initial_history[2] == 1
     assert network.sent == [("hello", False, 2.5, "msg-1")]
     assert ack == {"ok": True, "request_id": "msg-1", "error": None}
+
+
+def test_state_and_completed_reply_are_available_as_timestamped_events(tmp_path):
+    network = FakeNetworkClient()
+    session = HeadlessSession("http://localhost:60030", network_client=network, audio_output_dir=tmp_path)
+    session.connect("alice", "secret", timeout=0.1)
+    network.ws_transport.state_listener("thinking")
+    network.ws_transport.listener(_message(text="欢迎", expression="smile", final=True))
+
+    events = session.read_events(after_seq=0)
+    assert any(event["kind"] == "agent_state" and event["value"] == "thinking" for event in events)
+    completed = session.wait_for_event("reply_completed", after_seq=0, timeout=0.1)
+    assert completed["data"]["text"] == "欢迎"
+    assert completed["timestamp_ms"] > 0
+
+
+def test_typing_signal_accepts_zero_and_positive_lengths(tmp_path):
+    network = FakeNetworkClient()
+    session = HeadlessSession("http://localhost:60030", network_client=network, audio_output_dir=tmp_path)
+    session.connect("alice", "secret", timeout=0.1)
+    assert session.send_typing(3, client_msg_id="typing-1")["ok"] is True
+    assert session.send_typing(0, client_msg_id="typing-2")["ok"] is True
+    assert network.sent == [
+        ("typing", 3, 10.0, "typing-1"),
+        ("typing", 0, 10.0, "typing-2"),
+    ]
 
 
 def test_connect_reports_login_failure_and_ready_timeout_without_credentials(tmp_path):
@@ -223,6 +260,10 @@ def test_failed_or_ephemeral_audio_completes_without_audio_index(tmp_path, messa
     reply = session.wait_for_reply("reply-1", timeout=0.1)
     assert reply.complete is True
     assert reply.audio_path is None
+    assert reply.audio_byte_count > 0
+    completed = session.wait_for_event("reply_completed", after_seq=0, timeout=0.1)
+    assert completed["data"]["audio_received"] is True
+    assert completed["data"]["audio_saved"] is False
     assert session.audio_path_for("reply-1") is None
     assert list(tmp_path.iterdir()) == []
 

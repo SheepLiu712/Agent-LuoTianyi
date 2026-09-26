@@ -13,7 +13,6 @@ from ..network.event_types import AgentMessage, is_audio_terminal
 from ..network.network_client import NetworkClient
 from ..utils.image_encoding import prepare_image_payload
 
-
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -43,6 +42,7 @@ class AggregatedReply:
     error_code: str | None
     display_in_chat: bool
     is_ephemeral: bool
+    audio_byte_count: int = 0
 
 
 class SessionError(RuntimeError):
@@ -97,6 +97,7 @@ class _ReplyBuffer:
             error_code=self.error_code,
             display_in_chat=self.display_in_chat,
             is_ephemeral=self.is_ephemeral,
+            audio_byte_count=len(self.audio),
         )
 
 
@@ -112,17 +113,19 @@ class HeadlessSession:
         self._network_client = network_client or NetworkClient(
             base_url,
             verify_ssl=verify_ssl,
+            persist_credentials=False,
         )
         self._transport = self._network_client.ws_transport
-        self._audio_output_dir = Path(
-            audio_output_dir or Path.cwd() / "temp" / "tts_output"
-        )
+        self._audio_output_dir = Path(audio_output_dir or Path.cwd() / "temp" / "tts_output")
         self._condition = threading.Condition(threading.RLock())
         self._state = SessionState.NEW
         self._listeners: list[Callable[[SessionEvent], None]] = []
         self._replies: dict[str, _ReplyBuffer] = {}
         self._completion_order: list[str] = []
         self._server_audio_active = False
+        self._initial_history: tuple[list, int, int] = ([], -1, 0)
+        self._events: list[dict] = []
+        self._event_seq = 0
         self._install_transport_listeners()
 
     @property
@@ -138,24 +141,38 @@ class HeadlessSession:
         with self._condition:
             return self._server_audio_active
 
+    @property
+    def login_token(self) -> str | None:
+        return self._network_client.login_token
+
+    @property
+    def initial_history(self) -> tuple[list, int, int]:
+        with self._condition:
+            items, start_index, attempts = self._initial_history
+            return list(items), start_index, attempts
+
     def connect(
         self,
         username: str,
         password: str,
         *,
         timeout: float = 10.0,
+        request_token: bool = False,
     ) -> None:
         self._begin_connect()
         success, message = self._network_client.login(
             username,
             password,
-            request_token=False,
+            request_token=request_token,
         )
         if not success:
             self._set_state(SessionState.AUTH_FAILED)
             safe_message = (message or "login failed").replace(password, "***")
             raise SessionConnectionError(safe_message)
         self._wait_until_ready(timeout)
+
+    def register(self, username: str, password: str, invite_code: str) -> tuple[bool, str]:
+        return self._network_client.register(username, password, invite_code)
 
     def connect_with_token(
         self,
@@ -207,6 +224,21 @@ class HeadlessSession:
             raise SessionNotReadyError("session is not ready")
         return self._network_client.send_chat(
             text,
+            ack_timeout=ack_timeout,
+            client_msg_id=client_msg_id,
+        )
+
+    def send_typing(
+        self,
+        text_length: int,
+        *,
+        client_msg_id: str,
+        ack_timeout: float = 10.0,
+    ) -> dict:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.send_typing(
+            text_length,
             ack_timeout=ack_timeout,
             client_msg_id=client_msg_id,
         )
@@ -265,6 +297,11 @@ class HeadlessSession:
             raise SessionNotReadyError("session is not ready")
         return self._network_client.get_dynamics(limit=limit, cursor=cursor)
 
+    def get_history(self, count: int = 20, end_index: int = -1) -> tuple[list, int]:
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        return self._network_client.get_history(count, end_index)
+
     def get_dynamic_comments(
         self,
         dynamic_id: str,
@@ -273,9 +310,7 @@ class HeadlessSession:
     ) -> dict:
         if self.state != SessionState.READY:
             raise SessionNotReadyError("session is not ready")
-        return self._network_client.get_dynamic_comments(
-            dynamic_id, limit=limit, cursor=cursor
-        )
+        return self._network_client.get_dynamic_comments(dynamic_id, limit=limit, cursor=cursor)
 
     def create_dynamic(self, content: str) -> dict:
         if self.state != SessionState.READY:
@@ -302,17 +337,46 @@ class HeadlessSession:
             return {"ok": True}
         return {
             "ok": False,
-            "error": str(
-                response.get("error")
-                or response.get("message")
-                or "server rejected input"
-            ),
+            "error": str(response.get("error") or response.get("message") or "server rejected input"),
         }
 
     def get_reply(self, reply_uuid: str) -> AggregatedReply | None:
         with self._condition:
             reply = self._replies.get(reply_uuid)
             return reply.snapshot() if reply else None
+
+    def read_events(self, after_seq: int = 0, kind: str | None = None) -> list[dict]:
+        with self._condition:
+            return [
+                dict(event)
+                for event in self._events
+                if event["seq"] > after_seq and (kind is None or event["kind"] == kind)
+            ]
+
+    def wait_for_event(
+        self,
+        kind: str,
+        *,
+        after_seq: int = 0,
+        timeout: float = 30.0,
+        value: str | None = None,
+        contains: str | None = None,
+    ) -> dict:
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._condition:
+            while True:
+                for event in self._events:
+                    if event["seq"] <= after_seq or event["kind"] != kind:
+                        continue
+                    if value is not None and event["value"] != value:
+                        continue
+                    if contains is not None and contains not in event["value"]:
+                        continue
+                    return dict(event)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ReplyTimeoutError(f"no matching {kind} event before timeout")
+                self._condition.wait(remaining)
 
     def wait_for_reply(self, reply_uuid: str, timeout: float) -> AggregatedReply:
         deadline = time.monotonic() + max(0.0, timeout)
@@ -373,6 +437,12 @@ class HeadlessSession:
             self._set_state(SessionState.DISCONNECTED)
             raise SessionReadyTimeout("WebSocket did not become ready before timeout")
         self._set_state(SessionState.READY)
+        getter = getattr(self._network_client, "get_history", None)
+        if getter is not None:
+            items, start_index = getter(20, -1)
+            with self._condition:
+                self._initial_history = (list(items), start_index, 1)
+            self._publish(SessionEvent("history_loaded", {"count": len(items), "start_index": start_index}))
 
     def _set_state(self, state: SessionState) -> None:
         with self._condition:
@@ -444,9 +514,45 @@ class HeadlessSession:
 
     def _publish(self, event: SessionEvent) -> None:
         with self._condition:
+            observed = self._event_record(event)
+            if observed is not None:
+                self._event_seq += 1
+                observed["seq"] = self._event_seq
+                observed["timestamp_ms"] = int(time.time() * 1000)
+                self._events.append(observed)
+                if len(self._events) > 1000:
+                    del self._events[:-1000]
+                self._condition.notify_all()
             listeners = tuple(self._listeners)
         for listener in listeners:
             try:
                 listener(event)
             except Exception:
                 pass
+
+    @staticmethod
+    def _event_record(event: SessionEvent) -> dict | None:
+        if event.kind == "state":
+            return {"kind": "state", "value": event.data.value}
+        if event.kind in ("agent_state", "system_message"):
+            return {"kind": event.kind, "value": str(event.data)}
+        if event.kind == "history_loaded":
+            return {"kind": event.kind, "value": "loaded", "data": dict(event.data)}
+        if event.kind == "reply_completed":
+            reply = event.data
+            text = "".join(reply.texts)
+            return {
+                "kind": event.kind,
+                "value": text,
+                "data": {
+                    "reply_uuid": reply.uuid,
+                    "text": text,
+                    "expressions": list(reply.expressions),
+                    "audio_saved": bool(reply.audio_path),
+                    "audio_received": reply.audio_byte_count > 0,
+                    "audio_byte_count": reply.audio_byte_count,
+                    "is_ephemeral": reply.is_ephemeral,
+                    "display_in_chat": reply.display_in_chat,
+                },
+            }
+        return None

@@ -15,7 +15,7 @@ class FakeSession:
         self.mark_calls = 0
         self.mark_result = {"ok": True}
         self.created = []
-        self.create_result = {"ok": True, "dynamic_id": "d-new"}
+        self.create_result = {"ok": True, "item": {"id": "d-new"}}
         self.get_calls = []
         self.comment_calls = []
 
@@ -29,7 +29,7 @@ class FakeSession:
         return dict(
             self.comments.get(
                 dynamic_id,
-                {"comments": [], "next_cursor": None, "has_more": False},
+                {"ok": True, "items": [], "next_cursor": None, "has_more": False},
             )
         )
 
@@ -137,6 +137,21 @@ def test_dynamics_load_without_open_is_rejected():
     assert session.get_calls == []
 
 
+def test_dynamics_load_failure_keeps_existing_view():
+    session = FakeSession()
+    session.pages["__first__"] = {"items": [{"id": "d1"}], "next_cursor": "c1", "has_more": True}
+    session.pages["c1"] = {"ok": False, "message": "temporarily unavailable"}
+    executor = _executor(session)
+    assert _action(executor, "dynamics.open")[1] == ExitCode.SUCCESS
+
+    record, exit_code = _action(executor, "dynamics.load")
+
+    assert exit_code == ExitCode.AUTH_TRANSPORT_ERROR
+    assert record["error"]["code"] == "DYNAMICS_LOAD_FAILED"
+    assert [item["id"] for item in executor._dynamics_state["items"]] == ["d1"]
+    assert executor._dynamics_state["cursor"] == "c1"
+
+
 def test_dynamics_read_returns_comments_and_loaded_post():
     session = FakeSession()
     session.pages["__first__"] = {
@@ -145,7 +160,8 @@ def test_dynamics_read_returns_comments_and_loaded_post():
         "has_more": False,
     }
     session.comments["d1"] = {
-        "comments": [{"id": "c1", "content": "hi"}],
+        "ok": True,
+        "items": [{"id": "c1", "content": "hi"}],
         "next_cursor": None,
         "has_more": False,
     }
@@ -164,7 +180,8 @@ def test_dynamics_read_returns_comments_and_loaded_post():
 def test_dynamics_read_without_loaded_view_outputs_post_null():
     session = FakeSession()
     session.comments["d9"] = {
-        "comments": [],
+        "ok": True,
+        "items": [],
         "next_cursor": None,
         "has_more": False,
     }

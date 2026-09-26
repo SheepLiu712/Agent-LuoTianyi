@@ -8,7 +8,6 @@ from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
 from ..safety import credential
 
-
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
@@ -17,13 +16,14 @@ def _is_safe_uuid(value: str | None) -> bool:
 
 
 class NetworkClient:
-    def __init__(self, base_url: str | None = None, verify_ssl: bool = True):
+    def __init__(self, base_url: str | None = None, verify_ssl: bool = True, *, persist_credentials: bool = True):
         self.logger = get_logger(self.__class__.__name__)
         if not base_url:
             raise ValueError("Base URL is required. Please check config/config.json")
 
         self.base_url = base_url.rstrip("/")
         self.verify_ssl = True
+        self.persist_credentials = persist_credentials
 
         self.user_id: str | None = None
         self.message_token: str | None = None
@@ -57,10 +57,11 @@ class NetworkClient:
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
 
-            if request_token:
-                credential.save_credentials(self.user_id, self.login_token, True)
-            else:
-                credential.save_credentials(self.user_id, None, False)
+            if self.persist_credentials:
+                if request_token:
+                    credential.save_credentials(self.user_id, self.login_token, True)
+                else:
+                    credential.save_credentials(self.user_id, None, False)
 
             self.ws_transport.start()
             return True, msg
@@ -76,7 +77,8 @@ class NetworkClient:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
-            credential.save_credentials(self.user_id, self.login_token, True)
+            if self.persist_credentials:
+                credential.save_credentials(self.user_id, self.login_token, True)
             self.ws_transport.start()
             return True
         except Exception as exc:
@@ -96,8 +98,9 @@ class NetworkClient:
         except Exception as exc:
             return False, str(exc)
 
-
-    def send_chat(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0, client_msg_id: str | None = None):
+    def send_chat(
+        self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0, client_msg_id: str | None = None
+    ):
         if not self.user_id or not self.message_token:
             return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
 
@@ -130,7 +133,7 @@ class NetworkClient:
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
-        
+
     def send_typing(self, text_length: int, ack_timeout: float = 10.0, client_msg_id: str | None = None):
         if not self.user_id or not self.message_token:
             return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
@@ -479,7 +482,6 @@ class NetworkClient:
             self.logger.error(f"标记动态已读失败: {exc}")
             return {"ok": False, "message": str(exc)}
 
-
     def network_set_message_listener(
         self,
         listener: Callable[[dict], None] | None,
@@ -513,7 +515,7 @@ class NetworkClient:
             modified_history.append(item)
 
         return modified_history
-    
+
     def _get_image_from_server(self, item: ConversationItem) -> ConversationItem:
         try:
             if not _is_safe_uuid(item.uuid):
@@ -547,7 +549,6 @@ class NetworkClient:
                 f.write(resp.content)
 
             item.content = new_file_path
-            
 
             payload.update({"image_client_path": item.content})
             update_resp = self.session.post(

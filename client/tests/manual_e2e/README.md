@@ -18,3 +18,15 @@ python tests/manual_e2e/08-reply-read-audio-replay.driver.py
 ```
 
 `18-failure-classifications.json`、`19-unreachable-connect.json` 和 `21-invalid-scenario.json` 用于观察预期失败分类。`reply.wait` 等待下一条完整回复；服务端没有把原始客户端消息 ID 稳定附到回复时，下一条回复可能属于更早的输入，应结合内容断言判断。
+
+本轮注册、自动登录、历史和时序验收使用以下动作。密码与确认密码建议通过同一个环境变量提供，不要放入 JSON 文件；邀请码也只在调用时提供。`session.connect` 的 `remember_login` 默认是 `false`，设为 `true` 才会在 `client/temp/cli_auto_login.json` 保存 CLI 专用的加密令牌。`history.initial` 显示连接时自动发起的那一次历史加载，`events.wait` 可使用 `kind`、`value`、`contains`、`after_seq` 和 `timeout` 限定目标事件。
+
+```json
+{"action":"account.register","params":{"base_url":"https://your-test-server.example","username":"cli_test_user","password_env":"CLI_TEST_PASSWORD","password_confirm_env":"CLI_TEST_PASSWORD","invite_code":"<invite-code>"}}
+{"action":"session.connect","params":{"base_url":"https://your-test-server.example","username":"cli_test_user","password_env":"CLI_TEST_PASSWORD","remember_login":true}}
+{"action":"history.initial"}
+{"action":"chat.send_typing","params":{"text_length":3}}
+{"action":"events.wait","params":{"kind":"agent_state","value":"thinking","timeout":30}}
+```
+
+要重复检查文本和图片触发 `thinking` 的时间，请先生成图片，并使用独立测试账号创建 CLI 自动登录文件，然后运行 `python tests/manual_e2e/acceptance_timing.driver.py`。驱动会在 `client/temp/cli_acceptance_timing/` 保存每种场景的 JSONL 证据，输出从相关动作结果到状态事件的实测秒数；可用 `CLI_E2E_CREDENTIAL_FILE`、`CLI_E2E_IMAGE` 和 `CLI_E2E_CASE` 指定凭据文件、图片和单个场景。该驱动会向真实服务端发送多条消息，适合隔离的测试账号。

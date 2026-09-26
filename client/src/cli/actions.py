@@ -9,8 +9,9 @@ from enum import IntEnum
 from pathlib import Path
 from typing import Callable
 
-from .output import Redactor
+from .auth_store import CredentialStoreError, load_login, save_login
 from .media import DefaultPlaybackBackend, PlaybackBackend, PlaybackResult, read_wav_format
+from .output import Redactor
 from ..utils import image_rules
 from ..session import (
     AggregatedReply,
@@ -74,53 +75,70 @@ class ActionExecutor:
         try:
             action, action_id, params = parse_action(raw)
             data, correlation_id = self._dispatch(action, params)
-            return self._record(
-                action_id, action, "passed", data, None, correlation_id, started
-            ), ExitCode.SUCCESS
+            return self._record(action_id, action, "passed", data, None, correlation_id, started), ExitCode.SUCCESS
         except _ActionFailure as exc:
             status = "timed_out" if exc.exit_code == ExitCode.TIMEOUT else "failed"
-            return self._record(
-                action_id,
-                action,
-                status,
-                exc.data,
-                exc.error,
-                exc.correlation_id,
-                started,
-            ), exc.exit_code
+            return (
+                self._record(
+                    action_id,
+                    action,
+                    status,
+                    exc.data,
+                    exc.error,
+                    exc.correlation_id,
+                    started,
+                ),
+                exc.exit_code,
+            )
         except _Suppressed as exc:
-            return self._record(
-                action_id,
-                action,
-                "suppressed",
-                exc.data,
-                None,
-                exc.correlation_id,
-                started,
-            ), ExitCode.SUCCESS
+            return (
+                self._record(
+                    action_id,
+                    action,
+                    "suppressed",
+                    exc.data,
+                    None,
+                    exc.correlation_id,
+                    started,
+                ),
+                ExitCode.SUCCESS,
+            )
         except ValueError as exc:
-            return self._failure_record(
-                action_id, action, "INVALID_INPUT", str(exc), "input", started
-            ), ExitCode.INPUT_ERROR
+            return (
+                self._failure_record(action_id, action, "INVALID_INPUT", str(exc), "input", started),
+                ExitCode.INPUT_ERROR,
+            )
         except (ReplyTimeoutError, SessionReadyTimeout) as exc:
-            return self._failure_record(
-                action_id, action, "TIMEOUT", str(exc), "timeout", started,
-                status="timed_out",
-            ), ExitCode.TIMEOUT
+            return (
+                self._failure_record(
+                    action_id,
+                    action,
+                    "TIMEOUT",
+                    str(exc),
+                    "timeout",
+                    started,
+                    status="timed_out",
+                ),
+                ExitCode.TIMEOUT,
+            )
         except (SessionConnectionError, SessionNotReadyError, SessionClosedError) as exc:
             code = "SESSION_NOT_READY" if isinstance(exc, SessionNotReadyError) else "AUTH_OR_TRANSPORT_FAILED"
-            return self._failure_record(
-                action_id, action, code, str(exc), "auth_transport", started
-            ), ExitCode.AUTH_TRANSPORT_ERROR
+            return (
+                self._failure_record(action_id, action, code, str(exc), "auth_transport", started),
+                ExitCode.AUTH_TRANSPORT_ERROR,
+            )
         except Exception as exc:
-            return self._failure_record(
-                action_id,
-                action,
-                "AUTH_OR_TRANSPORT_FAILED",
-                str(exc),
-                "auth_transport",
-                started,
-            ), ExitCode.AUTH_TRANSPORT_ERROR
+            return (
+                self._failure_record(
+                    action_id,
+                    action,
+                    "AUTH_OR_TRANSPORT_FAILED",
+                    str(exc),
+                    "auth_transport",
+                    started,
+                ),
+                ExitCode.AUTH_TRANSPORT_ERROR,
+            )
 
     def close(self) -> None:
         if self._session is not None:
@@ -128,10 +146,17 @@ class ActionExecutor:
 
     def _dispatch(self, action: str, params: dict) -> tuple[dict, str | None]:
         handlers = {
+            "account.register": self._register,
             "session.connect": self._connect,
+            "session.auto_connect": self._auto_connect,
             "session.status": self._status,
             "session.close": self._close,
+            "history.initial": self._initial_history,
+            "history.load": self._load_history,
+            "events.read": self._read_events,
+            "events.wait": self._wait_event,
             "chat.send_text": self._send_text,
+            "chat.send_typing": self._send_typing,
             "reply.wait": self._wait_reply,
             "reply.read": self._read_reply,
             "audio.replay": self._replay_audio,
@@ -157,6 +182,44 @@ class ActionExecutor:
             )
         return handler(params)
 
+    def _register(self, params: dict) -> tuple[dict, None]:
+        base_url = _required_string(params, "base_url")
+        username = _required_string(params, "username")
+        password = params.get("password")
+        if password is None and isinstance(params.get("password_env"), str):
+            password = self._environ.get(params["password_env"])
+        confirmation = params.get("password_confirm")
+        if confirmation is None and isinstance(params.get("password_confirm_env"), str):
+            confirmation = self._environ.get(params["password_confirm_env"])
+        if not isinstance(password, str) or not password:
+            raise ValueError("password or password_env is required")
+        self.redactor.add_secret(password)
+        if not isinstance(confirmation, str) or not confirmation:
+            raise ValueError("password_confirm or password_confirm_env is required")
+        self.redactor.add_secret(confirmation)
+        if password != confirmation:
+            raise _ActionFailure(
+                ExitCode.INPUT_ERROR,
+                "PASSWORD_MISMATCH",
+                "passwords do not match",
+                "input",
+            )
+        invite_code = _required_string(params, "invite_code")
+        self.redactor.add_secret(invite_code)
+        session = self._session_factory(base_url=base_url, verify_ssl=True)
+        try:
+            success, message = session.register(username, password, invite_code)
+        finally:
+            session.close()
+        if not success:
+            raise _ActionFailure(
+                ExitCode.ASSERTION_FAILED,
+                "REGISTRATION_FAILED",
+                str(message),
+                "assertion",
+            )
+        return {"registered": True, "username": username}, None
+
     def _connect(self, params: dict) -> tuple[dict, None]:
         base_url = _required_string(params, "base_url")
         username = _required_string(params, "username")
@@ -175,8 +238,60 @@ class ActionExecutor:
             base_url=base_url,
             verify_ssl=verify_ssl,
         )
-        self._session.connect(username, password, timeout=timeout)
+        remember_login = params.get("remember_login", False)
+        if not isinstance(remember_login, bool):
+            raise ValueError("remember_login must be a boolean")
+        if remember_login:
+            self._session.connect(username, password, timeout=timeout, request_token=True)
+            token = self._session.login_token
+            if not token:
+                raise _ActionFailure(
+                    ExitCode.AUTH_TRANSPORT_ERROR,
+                    "AUTO_LOGIN_TOKEN_MISSING",
+                    "server did not issue an auto-login token",
+                    "auth_transport",
+                )
+            self.redactor.add_secret(token)
+            try:
+                save_login(self._credential_file(params), base_url, username, token)
+            except CredentialStoreError as exc:
+                raise _ActionFailure(
+                    ExitCode.INPUT_ERROR,
+                    "CREDENTIAL_STORAGE_UNAVAILABLE",
+                    str(exc),
+                    "input",
+                ) from exc
+        else:
+            self._session.connect(username, password, timeout=timeout)
         return {"state": self._session.state.value}, None
+
+    def _auto_connect(self, params: dict) -> tuple[dict, None]:
+        try:
+            base_url, username, token = load_login(self._credential_file(params))
+        except CredentialStoreError as exc:
+            raise _ActionFailure(
+                ExitCode.INPUT_ERROR,
+                "SAVED_LOGIN_UNAVAILABLE",
+                str(exc),
+                "input",
+            ) from exc
+        self.redactor.add_secret(token)
+        self._session = self._session_factory(base_url=base_url, verify_ssl=True)
+        self._session.connect_with_token(username, token, timeout=_number(params, "timeout", 10.0))
+        replacement = self._session.login_token or token
+        self.redactor.add_secret(replacement)
+        if replacement != token:
+            save_login(self._credential_file(params), base_url, username, replacement)
+        return {"state": self._session.state.value, "automatic": True}, None
+
+    @staticmethod
+    def _credential_file(params: dict) -> Path:
+        raw = params.get("credential_file")
+        if raw is None:
+            return Path.cwd() / "temp" / "cli_auto_login.json"
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("credential_file must be a non-empty path")
+        return Path(raw)
 
     def _status(self, _params: dict) -> tuple[dict, None]:
         state = self._session.state if self._session else SessionState.NEW
@@ -186,6 +301,77 @@ class ActionExecutor:
         if self._session:
             self._session.close()
         return {"state": SessionState.CLOSED.value}, None
+
+    def _initial_history(self, _params: dict) -> tuple[dict, None]:
+        items, start_index, attempts = self._require_session().initial_history
+        return self._history_data(items, start_index, attempts), None
+
+    def _load_history(self, params: dict) -> tuple[dict, None]:
+        count = params.get("count", 20)
+        end_index = params.get("end_index", -1)
+        if type(count) is not int or not 1 <= count <= 200:
+            raise ValueError("count must be an integer between 1 and 200")
+        if type(end_index) is not int:
+            raise ValueError("end_index must be an integer")
+        items, start_index = self._require_session().get_history(count, end_index)
+        if start_index < 0:
+            raise _ActionFailure(
+                ExitCode.AUTH_TRANSPORT_ERROR,
+                "HISTORY_LOAD_FAILED",
+                "history could not be loaded",
+                "auth_transport",
+            )
+        return self._history_data(items, start_index, 1), None
+
+    @staticmethod
+    def _history_data(items: list, start_index: int, attempts: int) -> dict:
+        return {
+            "loaded": start_index >= 0,
+            "load_count": attempts,
+            "start_index": start_index,
+            "items": [
+                {
+                    "timestamp": item.timestamp,
+                    "source": item.source,
+                    "type": item.type,
+                    "content": item.content,
+                    "uuid": item.uuid,
+                }
+                for item in items
+            ],
+        }
+
+    def _read_events(self, params: dict) -> tuple[dict, None]:
+        after_seq = self._after_seq(params)
+        kind = params.get("kind")
+        if kind is not None and (not isinstance(kind, str) or not kind):
+            raise ValueError("kind must be a non-empty string")
+        events = self._require_session().read_events(after_seq=after_seq, kind=kind)
+        return {"events": events, "count": len(events)}, None
+
+    def _wait_event(self, params: dict) -> tuple[dict, None]:
+        kind = _required_string(params, "kind")
+        value = params.get("value")
+        contains = params.get("contains")
+        if value is not None and not isinstance(value, str):
+            raise ValueError("value must be a string")
+        if contains is not None and not isinstance(contains, str):
+            raise ValueError("contains must be a string")
+        event = self._require_session().wait_for_event(
+            kind,
+            after_seq=self._after_seq(params),
+            timeout=_number(params, "timeout", 30.0),
+            value=value,
+            contains=contains,
+        )
+        return {"event": event}, None
+
+    @staticmethod
+    def _after_seq(params: dict) -> int:
+        after_seq = params.get("after_seq", 0)
+        if type(after_seq) is not int or after_seq < 0:
+            raise ValueError("after_seq must be a non-negative integer")
+        return after_seq
 
     def _send_text(self, params: dict) -> tuple[dict, str]:
         session = self._require_session()
@@ -200,6 +386,21 @@ class ActionExecutor:
         )
         self._ensure_positive_ack(ack, correlation_id=request_id)
         return {"ack": True}, request_id
+
+    def _send_typing(self, params: dict) -> tuple[dict, str]:
+        length = params.get("text_length")
+        if type(length) is not int or not 0 <= length <= 100_000:
+            raise ValueError("text_length must be an integer between 0 and 100000")
+        request_id = params.get("client_msg_id") or f"c-{uuid.uuid4().hex[:12]}"
+        if not isinstance(request_id, str):
+            raise ValueError("client_msg_id must be a string")
+        ack = self._require_session().send_typing(
+            length,
+            client_msg_id=request_id,
+            ack_timeout=_number(params, "ack_timeout", 10.0),
+        )
+        self._ensure_positive_ack(ack, correlation_id=request_id)
+        return {"ack": True, "text_length": length}, request_id
 
     def _wait_reply(self, params: dict) -> tuple[dict, str]:
         session = self._require_session()
@@ -232,7 +433,10 @@ class ActionExecutor:
         message = str(ack.get("error") or "server rejected input")
         if "timeout" in message.lower():
             raise _ActionFailure(
-                ExitCode.TIMEOUT, "TIMEOUT", message, "timeout",
+                ExitCode.TIMEOUT,
+                "TIMEOUT",
+                message,
+                "timeout",
                 correlation_id=correlation_id,
             )
         raise _ActionFailure(
@@ -341,8 +545,10 @@ class ActionExecutor:
         if isinstance(touch_area, str):
             if not touch_area.strip():
                 raise ValueError("touch_area must be a non-empty string or a non-empty list of strings")
-        elif isinstance(touch_area, list) and touch_area and all(
-            isinstance(item, str) and item.strip() for item in touch_area
+        elif (
+            isinstance(touch_area, list)
+            and touch_area
+            and all(isinstance(item, str) and item.strip() for item in touch_area)
         ):
             pass
         else:
@@ -371,6 +577,13 @@ class ActionExecutor:
     def _open_dynamics(self, params: dict) -> tuple[dict, None]:
         session = self._require_session()
         page = session.get_dynamics(limit=_number(params, "limit", 50))
+        if page.get("ok") is False:
+            raise _ActionFailure(
+                ExitCode.AUTH_TRANSPORT_ERROR,
+                "DYNAMICS_LOAD_FAILED",
+                str(page.get("message") or "dynamic feed could not be loaded"),
+                "auth_transport",
+            )
         items = list(page.get("items") or [])
         self._dynamics_state = {
             "items": items,
@@ -399,10 +612,15 @@ class ActionExecutor:
     def _read_dynamic(self, params: dict) -> tuple[dict, None]:
         session = self._require_session()
         dynamic_id = _required_string(params, "dynamic_id")
-        page = session.get_dynamic_comments(
-            dynamic_id, limit=_number(params, "comment_limit", 100)
-        )
-        comments = list(page.get("comments") or [])
+        page = session.get_dynamic_comments(dynamic_id, limit=_number(params, "comment_limit", 100))
+        if page.get("ok") is False:
+            raise _ActionFailure(
+                ExitCode.AUTH_TRANSPORT_ERROR,
+                "DYNAMICS_READ_FAILED",
+                str(page.get("message") or "dynamic comments could not be loaded"),
+                "auth_transport",
+            )
+        comments = list(page.get("items") or [])
         post = None
         if self._dynamics_state is not None:
             for item in self._dynamics_state["items"]:
@@ -428,9 +646,14 @@ class ActionExecutor:
         state = self._dynamics_state
         appended = 0
         if state["has_more"]:
-            page = session.get_dynamics(
-                limit=_number(params, "limit", 50), cursor=state["cursor"]
-            )
+            page = session.get_dynamics(limit=_number(params, "limit", 50), cursor=state["cursor"])
+            if page.get("ok") is False:
+                raise _ActionFailure(
+                    ExitCode.AUTH_TRANSPORT_ERROR,
+                    "DYNAMICS_LOAD_FAILED",
+                    str(page.get("message") or "dynamic feed could not be loaded"),
+                    "auth_transport",
+                )
             for item in page.get("items") or []:
                 key = self._dynamic_key(item)
                 if key in state["seen"]:
@@ -453,8 +676,16 @@ class ActionExecutor:
         content = _required_string(params, "content")
         response = session.create_dynamic(content)
         self._ensure_positive_ack(response, correlation_id=None)
-        dynamic_id = response.get("dynamic_id") or response.get("id")
+        created = response.get("item") if isinstance(response.get("item"), dict) else {}
+        dynamic_id = created.get("id") or response.get("dynamic_id") or response.get("id")
         page = session.get_dynamics()
+        if page.get("ok") is False:
+            raise _ActionFailure(
+                ExitCode.AUTH_TRANSPORT_ERROR,
+                "DYNAMICS_LOAD_FAILED",
+                str(page.get("message") or "created dynamic could not be verified"),
+                "auth_transport",
+            )
         items = list(page.get("items") or [])
         visible = False
         for item in items:
@@ -514,10 +745,7 @@ class ActionExecutor:
         target_keys = list(values.keys())
         mismatched = [key for key in target_keys if reread.get(key) != values.get(key)]
         if mismatched:
-            diff = {
-                key: {"expected": values.get(key), "actual": reread.get(key)}
-                for key in mismatched
-            }
+            diff = {key: {"expected": values.get(key), "actual": reread.get(key)} for key in mismatched}
             raise _ActionFailure(
                 ExitCode.ASSERTION_FAILED,
                 "PREFERENCES_NOT_CONFIRMED",
@@ -552,9 +780,7 @@ class ActionExecutor:
         if path is None or not path.exists() or path.stat().st_size == 0:
             self._replay_failure("AUDIO_FILE_MISSING", f"audio file missing: {reply_uuid}", reply_uuid)
         if read_wav_format(path) is None:
-            self._replay_failure(
-                "AUDIO_FORMAT_INVALID", f"audio file is not a decodable wav: {reply_uuid}", reply_uuid
-            )
+            self._replay_failure("AUDIO_FORMAT_INVALID", f"audio file is not a decodable wav: {reply_uuid}", reply_uuid)
         result = self._playback.play(path)
         if result == PlaybackResult.DEVICE_UNAVAILABLE:
             self._replay_failure("DEVICE_UNAVAILABLE", "no available playback device", reply_uuid)
@@ -564,6 +790,8 @@ class ActionExecutor:
             "reply_uuid": reply.uuid,
             "playback": "completed",
             "audio": self._audio_metadata(reply),
+            "audio_received": reply.audio_byte_count > 0,
+            "audio_byte_count": reply.audio_byte_count,
         }, reply_uuid
 
     def _replay_failure(self, code: str, message: str, reply_uuid: str) -> None:
@@ -584,12 +812,7 @@ class ActionExecutor:
             return dict(empty)
         byte_count = path.stat().st_size
         audio_format = read_wav_format(path)
-        eligible = (
-            reply.complete
-            and not reply.is_ephemeral
-            and reply.display_in_chat
-            and not reply.audio_error
-        )
+        eligible = reply.complete and not reply.is_ephemeral and reply.display_in_chat and not reply.audio_error
         if not eligible or audio_format is None:
             return {
                 "available": False,
