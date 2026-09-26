@@ -1,0 +1,3 @@
+# 设置 CLI_E2E_BASE_URL、CLI_E2E_USER、CLI_E2E_PASSWORD 后运行
+/login --timeout "15"
+/post "【CLI-E2E-0920】端到端测试动态：你好呀～这是一条来自 CLI 测试客户端的消息，用于验证动态创建与可见性，可忽略。"

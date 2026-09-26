@@ -1,0 +1,4 @@
+# 设置 CLI_E2E_BASE_URL、CLI_E2E_USER、CLI_E2E_PASSWORD 后运行
+/login --timeout "15"
+/text "今天过得怎么样呀？用一两句话说说你现在的心情吧～" --ack-timeout "15"
+/reply --timeout "150" --non-empty

@@ -7,10 +7,17 @@ from typing import Callable
 
 import websockets
 
-from .event_types import build_event, normalize_agent_message, normalize_error_message, parse_server_message, WSEventType, WSMessage, AgentMessage, AgentStateMessage
+from .event_types import (
+    build_event,
+    normalize_agent_message,
+    normalize_error_message,
+    parse_server_message,
+    WSEventType,
+    WSMessage,
+    AgentMessage,
+)
 from ..utils.logger import get_logger
 from ..utils.tls import create_default_ssl_context
-
 
 WS_CLIENT_CAPABILITIES = ("negative_ack_v1",)
 
@@ -54,8 +61,8 @@ class WsTransport:
         self._lock = threading.Lock()
         self._submit_lock = threading.Lock()
         self._ack_waiter: dict | None = None
-        self._agent_message_listener: Callable[[AgentMessage], None] | None = None # 收到的消息发送到哪里
-        self._agent_state_listener: Callable[[bool], None] | None = None # agent状态变化的监听器
+        self._agent_message_listener: Callable[[AgentMessage], None] | None = None  # 收到的消息发送到哪里
+        self._agent_state_listener: Callable[[bool], None] | None = None  # agent状态变化的监听器
         self._client_mode = {"types": []}  # 服务端当前客户端委托类型列表（随连接重置）
         self._system_message_listener: Callable[[str], None] | None = None
         self._llm_request_listener: Callable[[dict], object] | None = None
@@ -64,7 +71,6 @@ class WsTransport:
 
         self.logger = get_logger(self.__class__.__name__)
 
-        
         self._ws = None
         self._stop_event = threading.Event()
         self._ready_event = threading.Event()
@@ -166,8 +172,10 @@ class WsTransport:
             ack_timeout=ack_timeout,
             client_msg_id=client_msg_id,
         )
-    
-    def submit_typing_event(self, text_length: int, ack_timeout: float = 10.0, client_msg_id: str | None = None) -> dict:
+
+    def submit_typing_event(
+        self, text_length: int, ack_timeout: float = 10.0, client_msg_id: str | None = None
+    ) -> dict:
         return self._submit_user_event(
             WSEventType.USER_TYPING,
             payload={"text_length": text_length},
@@ -205,6 +213,7 @@ class WsTransport:
     def submit_image_selecting_cancel(self, ack_timeout: float = 5.0) -> dict:
         """发送图片选择取消的事件，服务端重置等待时间。"""
         return self._submit_user_event(WSEventType.USER_IMAGE_SELECTING_CANCEL, payload={}, ack_timeout=ack_timeout)
+
     def _submit_user_event(
         self,
         event_type: WSEventType,
@@ -288,7 +297,6 @@ class WsTransport:
     def _send_event(self, event: WSMessage) -> bool:
         if not self._ready_event.is_set() or not self._loop:
             return False
-        
 
         async def _send() -> None:
             if not self._ws:
@@ -348,7 +356,7 @@ class WsTransport:
                 )
                 self.logger.debug("WebSocket connection closed, retrying...")
                 await asyncio.sleep(reconnect_delay)
-                reconnect_delay = min(reconnect_delay * 2, 30) # 指数退避，最大30秒
+                reconnect_delay = min(reconnect_delay * 2, 30)  # 指数退避，最大30秒
             finally:
                 self._ws = None
                 self._connected_event.clear()
@@ -440,7 +448,6 @@ class WsTransport:
                 continue
 
             if event_type == WSEventType.HB_PONG:
-                ping_id = msg.payload.get("ping_id")
                 continue
 
             if event_type == WSEventType.LLM_REQUEST:
@@ -451,7 +458,6 @@ class WsTransport:
                 state = msg.payload.get("state", "waiting")
                 self._emit_agent_state(state)
                 continue
-
 
             if event_type in (WSEventType.SERVER_ERROR, WSEventType.AUTH_ERROR):
                 error_msg = normalize_error_message(msg)
@@ -603,7 +609,6 @@ class WsTransport:
             self._system_message_listener(text)
         except Exception:
             pass
-
 
     @staticmethod
     def _build_ws_url(base_url: str) -> str:

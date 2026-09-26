@@ -702,7 +702,7 @@
             "clock_config": {
                 "type": "interval",
                 "params": {
-                    "interval_seconds": 600,
+                    "interval_seconds": 240,
                     "run_immediately": false
                 }
             },

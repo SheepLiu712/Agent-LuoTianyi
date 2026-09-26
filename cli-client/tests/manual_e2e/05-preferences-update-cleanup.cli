@@ -1,0 +1,5 @@
+# 设置 CLI_E2E_BASE_URL、CLI_E2E_USER、CLI_E2E_PASSWORD 后运行
+/login --timeout "15"
+/set-preference "cli_e2e_probe=ok-2026-09-20"
+/clear-preferences
+/preferences

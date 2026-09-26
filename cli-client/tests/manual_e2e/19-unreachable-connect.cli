@@ -1,0 +1,2 @@
+# 设置 CLI_E2E_BASE_URL、CLI_E2E_USER、CLI_E2E_PASSWORD 后运行
+/login "cli_e2e_user" --url "https://127.0.0.1:9" --timeout "5"

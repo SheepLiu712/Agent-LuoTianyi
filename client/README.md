@@ -37,6 +37,10 @@ git clone https://github.com/SheepLiu712/Agent-Luotianyi-client
 2. 进入项目目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
 3. 运行`main.py`启动客户端。
 
+### 无 GUI 的 CLI 调试客户端
+
+独立 CLI 位于项目根目录的 [cli-client](../cli-client/README.md)，有自己的依赖、配置说明、代码与测试；桌面端不需要安装它。
+
 ## 📜 许可证和版权
 本项目基于 [MIT 许可证](LICENSE) 开源。
 
