@@ -1,6 +1,6 @@
 """客户端图片媒体规则（单一来源，镜像服务端规则；勿在其他模块重复定义）。
 
-来源：server/src/legacy/chat_input_adapter.py 的 ALLOWED_IMAGE_MIME_TYPES 与 MAX_IMAGE_BYTES。
+来源：服务端媒体配置与 src/infrastructure/media/image_validation.py 的解码格式。
 防漂移：client/tests/test_image_rules_mirror.py 读取服务端源码断言一致。
 """
 
