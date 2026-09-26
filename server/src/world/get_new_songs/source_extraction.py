@@ -1,21 +1,23 @@
 """Collect missing-field materials and merge business values; never call a model."""
 import re
+
 import mwparserfromhell as mw
-from mwparserfromhell.nodes import Heading, Tag, Template, Text
 from bs4 import BeautifulSoup
+from mwparserfromhell.nodes import Heading, Tag, Template
 
 from src.utils.logger import get_logger
 
 from .template_rules import descriptor, field_key, structure, template_name
-from .wikitext_parser import is_embed
-from .wiki_api import render_fragment
 from .text_conversion import convert_text, spaced_from
-
+from .wiki_api import render_fragment
+from .wikitext_parser import NON_CONTENT_TAGS, heading_section, is_embed, sectioned_code
 
 _MARKUP = re.compile(r"\[\[|'''|\{\{")
 _COUNT_MARK = "\ufff0"
 _SENTENCE = re.compile(r"[^。！？\n]+[。！？]?|\n")
 _CLAUSE = re.compile(r"[，,；;]")
+
+_NEEDED_BY_SECTION = {"简介": "summary", "歌词": "lyrics"}
 
 
 def _mark_counts(code):
@@ -91,74 +93,118 @@ def merge_missing(data, result, needed):
     means the model wrote markup rather than business text; it is reported, not silently
     rewritten.
     """
+    _merge_infobox(data, result, needed)
+    _merge_prose(data, result, needed)
+
+
+def _merge_infobox(data, result, needed):
     box = result.get("infobox")
-    if isinstance(box, dict):
-        box = {field_key(k): v for k, v in box.items() if isinstance(k, str)}
-        for key in needed["infobox"][:]:
-            if isinstance(box.get(key), str) and box[key].strip():
-                data["infobox"][key] = box[key]
-                needed["infobox"].remove(key)
+    if not isinstance(box, dict):
+        return
+    box = {field_key(k): v for k, v in box.items() if isinstance(k, str)}
+    for key in needed["infobox"][:]:
+        if isinstance(box.get(key), str) and box[key].strip():
+            data["infobox"][key] = box[key]
+            needed["infobox"].remove(key)
+
+
+def _merge_prose(data, result, needed):
     for key in ("summary", "lyrics"):
         value = result.get(key)
-        valid = (isinstance(value, list) and all(isinstance(x, str) for x in value)
-                 and any(value)) if key == "summary" else isinstance(value, str) and bool(value.strip())
-        if needed[key] and valid:
-            items = [value] if isinstance(value, str) else list(value)
-            if any(_MARKUP.search(item) for item in items if isinstance(item, str)):
-                get_logger(__name__).warning(
-                    "Supplement answer for %s carries wiki markup although the material is "
-                    "normalized; the model rewrote instead of copying", key)
-            if any(convert_text(item) != item for item in items if isinstance(item, str)):
-                get_logger(__name__).warning(
-                    "Supplement answer for %s still holds unconverted glyphs; the material is "
-                    "already zh-cn, so the model changed the text", key)
-            data[key] = value
-            needed[key] = False
-            if key == "lyrics":
-                data["spaced_lyrics"] = spaced_from(value)
+        if not needed[key] or not _usable_answer(value, list_form=key == "summary"):
+            continue
+        _warn_suspicious_answer([item for item in ([value] if isinstance(value, str) else list(value))
+                                 if isinstance(item, str)], key)
+        data[key] = value
+        needed[key] = False
+        if key == "lyrics":
+            data["spaced_lyrics"] = spaced_from(value)
+
+
+def _usable_answer(value, *, list_form):
+    if list_form:
+        return isinstance(value, list) and all(isinstance(x, str) for x in value) and any(value)
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _warn_suspicious_answer(items, key):
+    """The material is normalized business text; markup or unconverted glyphs mean
+    the model rewrote instead of copying."""
+    logger = get_logger(__name__)
+    if any(_MARKUP.search(item) for item in items):
+        logger.warning("Supplement answer for %s carries wiki markup although the material is "
+                       "normalized; the model rewrote instead of copying", key)
+    if any(convert_text(item) != item for item in items):
+        logger.warning("Supplement answer for %s still holds unconverted glyphs; the material is "
+                       "already zh-cn, so the model changed the text", key)
+
+
+def _needed_section(heading):
+    """Which needed field a heading can fill: summary, lyrics, or none."""
+    return _NEEDED_BY_SECTION.get(heading_section(heading), "")
+
+
+def _inherited_section(rule, key, context):
+    """Section a template parameter is searched under: documented slots keep their
+    own or the surrounding section, everything else starts fresh."""
+    kind = rule.get("kind")
+    if kind == "songbox" and key in rule["body_params"]:
+        return _needed_section(key)
+    if (kind == "wrapper" and key in rule["body_params"]) or (
+            kind == "tabs" and any(re.fullmatch(re.escape(p) + r"\d+", key) for p in rule["body_prefixes"])):
+        return context
+    return ""
+
+
+def _embed_candidates(code, context=""):
+    """Yield (embed template, section) for every embed call, in source order."""
+    for node in sectioned_code(code).nodes:
+        if isinstance(node, Heading):
+            context = _needed_section(node.title)
+        elif isinstance(node, Tag):
+            tag = str(node.tag).lower()
+            if re.fullmatch(r"h[1-6]", tag):
+                context = _needed_section(node.contents)
+            elif tag not in NON_CONTENT_TAGS and node.contents:
+                subcode = mw.parse(str(node.contents)) if tag == "section" else node.contents
+                yield from _embed_candidates(subcode, context)
+        elif isinstance(node, Template):
+            if is_embed(node):
+                yield node, context
+            else:
+                rule = descriptor(template_name(node.name))
+                if rule.get("kind") not in {"inline", "staff"}:
+                    for param in node.params:
+                        key = structure(param.name).strip().casefold()
+                        yield from _embed_candidates(param.value, _inherited_section(rule, key, context))
 
 
 def _target_fragments(source, needed):
+    """Embed calls whose rendered fragment could fill a needed field, in source order."""
     selected = []
-    def target(title):
-        title = structure(title)
-        return "summary" if "简介" in title or "VOCALOID原创作者" in title else "lyrics" if "歌词" in title else ""
-
-    def walk(code, context=""):
-        if any(isinstance(n, Text) and re.search(r"(?m)^=", str(n)) for n in code.nodes):
-            code = mw.parse(str(code))
-        for node in code.nodes:
-            if isinstance(node, Heading):
-                context = target(node.title)
-            elif isinstance(node, Tag):
-                tag = str(node.tag).lower()
-                if re.fullmatch(r"h[1-6]", tag):
-                    context = target(node.contents)
-                elif tag not in {"nowiki", "ref", "references", "script", "style", "includeonly"} and node.contents:
-                    walk(mw.parse(str(node.contents)) if tag == "section" else node.contents, context)
-            elif isinstance(node, Template):
-                call = str(node)
-                if is_embed(node):
-                    if (context and needed[context] and node.params and len(call) <= 8000
-                            and not any(call in parent for parent, _ in selected)):
-                        selected.append((call, [context]))
-                    continue
-                rule = descriptor(template_name(node.name))
-                kind = rule.get("kind")
-                if kind in {"inline", "staff"}:
-                    continue
-                for param in node.params:
-                    key = structure(param.name).strip().casefold()
-                    inherited = ""
-                    if kind == "songbox" and key in rule["body_params"]:
-                        inherited = target(key)
-                    elif kind == "wrapper" and key in rule["body_params"]:
-                        inherited = context
-                    elif kind == "tabs" and any(re.fullmatch(re.escape(p) + r"\d+", key) for p in rule["body_prefixes"]):
-                        inherited = context
-                    walk(param.value, inherited)
-    walk(mw.parse(source))
+    for node, context in _embed_candidates(mw.parse(source)):
+        call = str(node)
+        if (context and needed[context] and node.params and len(call) <= 8000
+                and not any(call in parent for parent, _ in selected)):
+            selected.append((call, [context]))
     return selected[:2]
+
+
+def _rendered_fragment(base_url, title, call, post, limit):
+    """Render one embed call through the site and return its cleaned text.
+
+    Script/style/nav chrome goes, br becomes a newline, and the result is cut to
+    the remaining budget.
+    """
+    if post is None:
+        raise RuntimeError("Optional fragment POST transport is unavailable")
+    html = render_fragment(base_url, title, call, post, 10)
+    soup = BeautifulSoup(html[:100000], "html.parser")
+    for node in soup.select("script, style, nav, .navbox, .reference, .mw-editsection"):
+        node.decompose()
+    for br in soup.find_all("br"):
+        br.replace_with("\n")
+    return soup.get_text("\n", strip=True)[:limit]
 
 
 def collect_materials(data, needed, source, base_url, title, get, *, post=None):
@@ -176,15 +222,7 @@ def collect_materials(data, needed, source, base_url, title, get, *, post=None):
     remaining = 12000
     for call, targets in _target_fragments(source, needed):
         try:
-            if post is None:
-                raise RuntimeError("Optional fragment POST transport is unavailable")
-            html = render_fragment(base_url, title, call, post, 10)
-            soup = BeautifulSoup(html[:100000], "html.parser")
-            for node in soup.select("script, style, nav, .navbox, .reference, .mw-editsection"):
-                node.decompose()
-            for br in soup.find_all("br"):
-                br.replace_with("\n")
-            text = soup.get_text("\n", strip=True)[:remaining]
+            text = _rendered_fragment(base_url, title, call, post, remaining)
             if text:
                 remaining -= len(text)
                 merge_missing(data, {key: [text] if key == "summary" else text for key in targets}, needed)

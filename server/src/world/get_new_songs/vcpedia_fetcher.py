@@ -1,22 +1,22 @@
+import asyncio
+import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import requests
 
 cwd = os.getcwd()
 sys.path.insert(0, str(cwd))
 
-import requests
-import json
-import os
-import re
-import asyncio
-from typing import Dict, Any, Optional, List
-from pathlib import Path
-from src.utils.logger import get_logger
-from src.utils.helpers import load_config
-from src.world.get_new_songs.wiki_api import fetch_wikitext, user_agent
-from src.world.get_new_songs.wikitext_parser import parse_details
-from src.world.get_new_songs.source_extraction import collect_materials, merge_missing
-from src.world.get_new_songs.text_conversion import convert_text
+from src.utils.logger import get_logger  # noqa: E402
+from src.world.get_new_songs.source_extraction import collect_materials, merge_missing  # noqa: E402
+from src.world.get_new_songs.text_conversion import convert_text  # noqa: E402
+from src.world.get_new_songs.wiki_api import fetch_wikitext, user_agent  # noqa: E402
+from src.world.get_new_songs.wikitext_parser import parse_details  # noqa: E402
+
 
 class VCPediaFetcher:
     def __init__(self, config: Dict[str, Any], llm_module: Any | None = None,
@@ -37,11 +37,12 @@ class VCPediaFetcher:
         self.data_dir = Path(config.get("data_dir", "data/crawled_data"))
         # Default save directory
         self.default_save_dir = Path(crawler_config.get("output_dir", "data/crawled_data"))
-        
+
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": user_agent()})
 
-    def fetch_entity_description(self, entity_name: str, short_summary: bool = True, *, source_title: str | None = None) -> Dict[str, Any]:
+    def fetch_entity_description(self, entity_name: str, short_summary: bool = True,
+                                 *, source_title: str | None = None) -> Dict[str, Any]:
         """
         Fetch entity description from cache or VCPedia.
         Returns the complete detail dict; disabled returns empty string, failure None.
@@ -71,9 +72,9 @@ class VCPediaFetcher:
                     return data
             except Exception as e:
                 self.logger.error(f"Error parsing {entity_name}: {e}")
-        
+
         return None
-    
+
     @staticmethod
     def _call_model(module, **kwargs):
         def run():
@@ -118,7 +119,7 @@ class VCPediaFetcher:
     def _check_cache(self, entity_name: str) -> Optional[Dict[str, Any]]:
         # Normalize name for filename
         safe_name = "".join([c for c in entity_name if c.isalnum() or c in (' ', '-', '_')]).strip()
-        
+
         file_path = self.data_dir / f"{safe_name}.json"
         if file_path.exists():
             try:
@@ -138,12 +139,12 @@ class VCPediaFetcher:
 
     def _save_data(self, data: Dict[str, Any]):
         save_dir = self.default_save_dir
-        
+
         save_dir.mkdir(parents=True, exist_ok=True)
-        
+
         safe_title = "".join([c for c in data['name'] if c.isalnum() or c in (' ', '-', '_')]).strip()
         file_path = save_dir / f"{safe_title}.json"
-        
+
         try:
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)

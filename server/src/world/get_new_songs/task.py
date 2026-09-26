@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict
 from uuid import uuid4
 
 import src.domain.agent as d
@@ -15,8 +15,8 @@ from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
-    from src.stage.world_stage import WorldStage
     from src.server_runtime import ServerRuntime
+    from src.stage.world_stage import WorldStage
 
 SONG_KNOWLEDGE_SOURCE = "vcpedia"
 DEFAULT_CHARACTER_ID = "luotianyi"
