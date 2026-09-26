@@ -244,8 +244,16 @@ class UserInterface:
         )
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        relationship = req.preferences.get("relationship", "")
+        if not isinstance(relationship, str):
+            raise HTTPException(status_code=422, detail="relationship 必须是字符串")
         if not server_runtime.database_manager.conversation_service.save_user_preferences(user_uuid, req.preferences):
             raise HTTPException(status_code=404, detail="未找到该用户")
+        if server_runtime.stage_manager is not None:
+            await server_runtime.stage_manager.propose_relationship(
+                user_uuid,
+                relationship,
+            )
         return {"status": "success", "message": "Preferences overwritten successfully"}
 
     async def get_history(

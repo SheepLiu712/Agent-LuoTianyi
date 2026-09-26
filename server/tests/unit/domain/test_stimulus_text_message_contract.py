@@ -84,6 +84,7 @@ def test_agent_domain_exports_registered_contract_without_persistence_policy() -
         "ACTIVITY_ENDED": "activity_ended",
         "SONG_KNOWLEDGE_DISCOVERED": "song_knowledge_discovered",
         "SONG_LEARNED": "song_learned",
+        "NEW_RELATIONSHIP_PROPOSE": "new_relationship_propose",
     }
     assert {item.name: item.value for item in agent_domain.StimulusSource} == {
         "USER": "user",

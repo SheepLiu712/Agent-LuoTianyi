@@ -16,6 +16,7 @@ CONSTRUCTIBLE_STIMULI = (
     ("ImageMessage", "IMAGE_MESSAGE"),
     ("VoiceMessage", "VOICE_MESSAGE"),
     ("UserTyping", "USER_TYPING"),
+    ("NewRelationshipPropose", "NEW_RELATIONSHIP_PROPOSE"),
     ("ImageSelectionOpened", "IMAGE_SELECTION_OPENED"),
     ("ImageSelectionClosed", "IMAGE_SELECTION_CLOSED"),
     ("TouchInteraction", "TOUCH_INTERACTION"),
@@ -119,6 +120,7 @@ def _valid_stimulus_kwargs(type_name: str) -> dict[str, object]:
             "client_msg_id": "client-voice-1",
         },
         "UserTyping": lambda: {"text_length": 12},
+        "NewRelationshipPropose": lambda: {"relationship": "朋友"},
         "ImageSelectionOpened": lambda: {},
         "ImageSelectionClosed": lambda: {},
         "TouchInteraction": lambda: {
@@ -237,6 +239,7 @@ def test_agent_domain_exports_the_registered_stimulus_contract() -> None:
         "ACTIVITY_ENDED": "activity_ended",
         "SONG_KNOWLEDGE_DISCOVERED": "song_knowledge_discovered",
         "SONG_LEARNED": "song_learned",
+        "NEW_RELATIONSHIP_PROPOSE": "new_relationship_propose",
     }
     assert {item.name: item.value for item in agent_domain.DynamicTargetKind} == {
         "POST": "post",
@@ -276,6 +279,12 @@ def test_constructible_stimulus_constructor_is_keyword_only(
     assert "kind" not in parameters
     assert "payload" not in parameters
     assert "persist_policy" not in parameters
+
+
+def test_relationship_proposal_can_clear_the_saved_relationship() -> None:
+    values = _valid_stimulus_kwargs("NewRelationshipPropose")
+    values["relationship"] = ""
+    assert agent_domain.NewRelationshipPropose(**values).relationship == ""
 
 
 @pytest.mark.parametrize(("type_name", "kind_name"), UNAVAILABLE_STIMULI)
@@ -374,6 +383,7 @@ def test_dynamic_observed_rejects_an_invalid_thread_structure(
         ("VoiceMessage", {"media_ref": None, "transcript": None}),
         ("UserTyping", {"text_length": -1}),
         ("UserTyping", {"text_length": True}),
+        ("NewRelationshipPropose", {"relationship": None}),
         ("TouchInteraction", {"body_regions": ()}),
         ("DiaryPlanningDue", {"local_date": OCCURRED_AT}),
         ("DiaryPlanningDue", {"timezone": timezone.utc}),
@@ -418,6 +428,7 @@ def test_current_interface_rejects_fields_owned_by_other_or_future_modules(
         ("ImageMessage", "media_ref"),
         ("VoiceMessage", "client_msg_id"),
         ("UserTyping", "text_length"),
+        ("NewRelationshipPropose", "relationship"),
         ("TouchInteraction", "body_regions"),
         ("ProactivePromptDue", "reason"),
         ("DynamicObserved", "messages"),

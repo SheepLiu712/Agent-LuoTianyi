@@ -26,6 +26,7 @@ from src.agent.handlers.stimulus.diary_due import DiaryPlanningDueHandler
 from src.agent.handlers.stimulus.dynamic_observed import DynamicObservedHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
+from src.agent.handlers.stimulus.relationship import NewRelationshipProposeHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.handlers.stimulus.song_knowledge import SongKnowledgeHandler
 from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
@@ -182,6 +183,7 @@ class AgentRuntime:
         )
         registrations = [
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+            (StimulusKind.NEW_RELATIONSHIP_PROPOSE, NewRelationshipProposeHandler()),
             (
                 StimulusKind.PROACTIVE_PROMPT_DUE,
                 FirstLoginHandler(

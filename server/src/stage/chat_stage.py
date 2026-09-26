@@ -197,6 +197,20 @@ class ChatStage:
         if self._state is StageState.ONLINE:
             self._schedule_login_reminders()
 
+    async def propose_relationship(self, relationship: str) -> None:
+        """把已保存的用户关系提议交给 Agent，并等待当前上下文完成更新。"""
+        if self._state in (StageState.TERMINATING, StageState.TERMINATED):
+            raise ValueError("stage is ending")
+        stimulus = d.NewRelationshipPropose(
+            **{**self._stage_stimulus_fields(), "source": d.StimulusSource.USER},
+            relationship=relationship,
+        )
+        self._revision += 1
+        self._last_activity_at = datetime.now(timezone.utc)
+        report = await self._handle(self._make_request(stimulus))
+        if report is None or report.request_status is not d.HandlingRequestStatus.COMPLETED:
+            raise RuntimeError("relationship proposal was not handled")
+
     async def dispatch_due_events(self, *, merge_all: bool) -> bool:
         """在流空闲时筛选、claim 并向 Agent 投递一个或合并后的到期事实。"""
         if self._due_event_provider is None or not self._can_dispatch_proactive(

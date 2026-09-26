@@ -113,6 +113,18 @@ class StageManager:
             sent += int(await stage.dispatch_due_events(merge_all=False))
         return sent
 
+    async def propose_relationship(self, user_id: str, relationship: str) -> int:
+        """将已保存的关系提议投递给用户当前及离线保留中的全部 Stage。"""
+        async with self._lock:
+            stages = tuple(
+                stage
+                for (owner_id, _), stage in self._stages.items()
+                if owner_id == user_id and stage.state not in (StageState.TERMINATING, StageState.TERMINATED)
+            )
+            for stage in stages:
+                await stage.propose_relationship(relationship)
+            return len(stages)
+
     async def connect(self, connection: WebSocketConnection, character_id: str) -> ChatStage:
         """取得或创建 connection 用户与 character_id 的 Stage，完成绑定后返回；保留期内复用原实例。"""
         return await complete_owned(self._connect(connection, character_id))

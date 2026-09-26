@@ -44,6 +44,14 @@ class UserContext:
             self._state.check()
             await _complete(self._update(preferences))
 
+    async def refresh_preferences(self) -> UserPreferences:
+        """从已保存的偏好刷新当前交互快照，保留其他字段与较新的关系变更。"""
+        async with self._state.lock:
+            self._state.check()
+            preferences = await _complete(asyncio.to_thread(self._storage.load_preferences))
+            self._snapshot = replace(self._snapshot, preferences=preferences)
+            return preferences
+
     async def _update(self, value: UserProfile | UserPreferences) -> None:
         if isinstance(value, UserProfile):
             await asyncio.to_thread(self._storage.save_profile, value)

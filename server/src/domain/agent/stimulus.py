@@ -63,6 +63,7 @@ class StimulusKind(str, Enum):
     ACTIVITY_ENDED = "activity_ended"
     SONG_KNOWLEDGE_DISCOVERED = "song_knowledge_discovered"
     SONG_LEARNED = "song_learned"
+    NEW_RELATIONSHIP_PROPOSE = "new_relationship_propose"
 
 
 class StimulusSource(str, Enum):
@@ -178,6 +179,19 @@ class UserTyping(Stimulus):
     def __post_init__(self) -> None:
         Stimulus.__post_init__(self)
         _require_nonnegative_int(self.text_length)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NewRelationshipPropose(Stimulus):
+    """用户提出新的关系；当前版本默认接受，空字符串表示清除关系。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.NEW_RELATIONSHIP_PROPOSE
+
+    relationship: str
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_instance(self.relationship, str)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
