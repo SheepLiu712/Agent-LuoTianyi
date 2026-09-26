@@ -65,13 +65,14 @@ async def test_vcpedia_run_once_fetches_live_songs_and_writes_result(monkeypatch
         "db_file": "knowledge_db.db",
     }
     task_config.setdefault("crawler", {})
-    task_config["crawler"]["output_dir"] = str(tmp_path / "crawled_data")
+    # 缓存目录是 crawler.data_dir 与 crawler.vcpedia.output_dir，不是顶层的 output_dir；
+    # 两者都必须指向临时目录，否则本用例会把缓存写进仓库的 data/crawled_data。
+    task_config["crawler"]["data_dir"] = str(tmp_path / "crawled_data")
+    task_config["crawler"].setdefault("vcpedia", {})["output_dir"] = str(tmp_path / "crawled_data")
     task_config["crawler"]["use_llm"] = False
-
-    keyword_dir = tmp_path / "keywords"
-    monkeypatch.setattr(fetcher_module, "KNOWLEDGE_DIR", keyword_dir)
-    monkeypatch.setattr(fetcher_module, "SONG_NAME_KEYWORDS_FILE", keyword_dir / "song_name_keywords.txt")
-    monkeypatch.setattr(fetcher_module, "SONG_LYRIC_KEYWORDS_FILE", keyword_dir / "song_lyric_keywords.txt")
+    # 关键词文件由 Agent 侧接纳时写入，本用例的候选不再由 world 侧落盘，
+    # 因此不再 monkeypatch KNOWLEDGE_DIR / SONG_*_KEYWORDS_FILE（这些常量已随
+    # "world 只投递事实" 的改造移除）。
     monkeypatch.setattr(fetcher_module.time, "sleep", lambda _seconds: None)
 
     submitted_facts: list[Any] = []
