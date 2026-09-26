@@ -37,13 +37,9 @@ git clone https://github.com/SheepLiu712/Agent-Luotianyi-client
 2. 进入项目目录并运行setup.bat，按照提示创建并激活conda环境，安装依赖。
 3. 运行`main.py`启动客户端。
 
-### 无 GUI 的 CLI 调试入口
+### 无 GUI 的 CLI 调试客户端
 
-在 `client/` 目录运行 `python cli.py --interactive`，逐行输入 JSON 动作；也可使用 `--action '<JSON>'` 或 `--scenario <JSON 文件>`。标准输出为 JSONL 结果，诊断写入标准错误。连接动作需要受测服务地址、账号和密码；可通过 `password_env` 指定环境变量名，避免把密码写入场景文件。
-
-账号验收可使用 `account.register`（`base_url`、`username`、`password_env`、`password_confirm_env`、`invite_code`）。`session.connect` 加 `remember_login: true` 后，将登录令牌加密保存在 CLI 专用的 `temp/cli_auto_login.json`，随后可用 `session.auto_connect` 无密码重连；它不会改动 GUI 的登录存储。连接进入 ready 后会自动加载一次聊天历史，`history.initial` 可读取这次加载结果。`chat.send_typing` 可传入 `text_length`；`events.read` 和 `events.wait` 可观察 `agent_state` 与 `reply_completed`。详细输入见 [manual_e2e](tests/manual_e2e/README.md)。
-
-动作与验收范围见[当前 CLI spec](../docs/开发进程文档/CLI端到端测试客户端-spec.md)，可复用的人工试运行输入见[manual_e2e](tests/manual_e2e/README.md)。这些输入默认指向无效示例地址，运行前需填入独立测试环境的信息。
+独立 CLI 位于项目根目录的 [cli-client](../cli-client/README.md)，有自己的依赖、配置说明、代码与测试；桌面端不需要安装它。
 
 ## 📜 许可证和版权
 本项目基于 [MIT 许可证](LICENSE) 开源。

@@ -109,7 +109,7 @@ def _create_console_handler() -> logging.Handler:
 def set_console_stream(stream: Optional[object] = None) -> None:
     """重定向控制台日志输出流（默认 sys.stdout）。
 
-    非交互 CLI 需要保持 stdout 只有机器输出（JSONL），把诊断日志改到 stderr。
+    允许调用方将控制台日志重定向到指定输出流。
     对已创建和之后新创建的控制台处理器同时生效。
     """
     global _CONSOLE_STREAM

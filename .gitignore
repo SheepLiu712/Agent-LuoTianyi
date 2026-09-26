@@ -39,4 +39,3 @@ server/config/admin_setup_token.txt
 server/config/qq_music_credential.json
 bili_cookie.txt
 config/bili_cookie.txt
-client/config/cli_e2e_credentials.local.json

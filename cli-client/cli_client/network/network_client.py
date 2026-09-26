@@ -6,7 +6,6 @@ from . import AuthApi, WsTransport
 from ..types import ConversationItem
 from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
-from ..safety import credential
 
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -56,11 +55,6 @@ class NetworkClient:
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
 
-            if request_token:
-                credential.save_credentials(self.user_id, self.login_token, True)
-            else:
-                credential.save_credentials(self.user_id, None, False)
-
             self.ws_transport.start()
             return True, msg
         except Exception as exc:
@@ -75,7 +69,6 @@ class NetworkClient:
             self.user_id = data.get("user_id")
             self.login_token = data.get("login_token")
             self.message_token = data.get("message_token")
-            credential.save_credentials(self.user_id, self.login_token, True)
             self.ws_transport.start()
             return True
         except Exception as exc:
