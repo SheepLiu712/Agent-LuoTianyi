@@ -400,43 +400,6 @@ async def trace_detail(
     return get_admin_shell().observability.get_trace_detail(trace_id)
 
 
-@protected_router.get("/memory/summary")
-async def memory_summary(
-    days: int = Query(default=7, ge=1, le=90),
-) -> dict[str, Any]:
-    return get_admin_shell().observability.get_memory_trace_summary(days=days)
-
-
-@protected_router.get("/memory/events")
-async def memory_events(
-    days: int = Query(default=7, ge=1, le=90),
-    limit: int = Query(default=200, ge=1, le=1000),
-    trace_id: str | None = None,
-    event_type: str | None = None,
-    annotation_state: str | None = None,
-) -> list[dict[str, Any]]:
-    return get_admin_shell().observability.get_memory_trace_events(
-        days=days,
-        limit=limit,
-        trace_id=trace_id,
-        event_type=event_type,
-        annotation_state=annotation_state,
-    )
-
-
-@protected_router.post("/memory/events/{event_id}/annotation")
-async def annotate_memory_event(
-    event_id: int,
-    payload: dict[str, Any] = Body(default_factory=dict),
-) -> dict[str, Any]:
-    return get_admin_shell().observability.annotate_memory_trace_event(
-        event_id,
-        label=str(payload.get("label") or "").strip(),
-        notes=str(payload.get("notes") or "").strip() or None,
-        annotator=str(payload.get("annotator") or "").strip() or None,
-    )
-
-
 @protected_router.get("/logs")
 async def logs(
     limit: int = Query(default=100, ge=1, le=1000),

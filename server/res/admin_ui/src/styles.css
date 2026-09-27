@@ -374,31 +374,11 @@ button {
   grid-template-columns: minmax(220px, 1fr) 170px 170px 170px 190px 190px;
 }
 
-.memory-filter-row {
-  grid-template-columns: 1fr 180px;
-  margin-top: 12px;
-}
-
-.memory-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .sub-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin: -6px 0 16px;
-}
-
-.memory-tabs button {
-  border: 1px solid #cad6df;
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: #ffffff;
-  color: #365161;
-  cursor: pointer;
 }
 
 .sub-tabs button {
@@ -410,8 +390,6 @@ button {
   cursor: pointer;
 }
 
-.memory-tabs button.active,
-.memory-tabs button:hover,
 .sub-tabs button.active,
 .sub-tabs button:hover {
   background: #2f5d7c;
@@ -799,18 +777,13 @@ button {
 }
 
 .filter-row input,
-.filter-row select,
-.annotation-row input {
+.filter-row select {
   min-width: 0;
   border: 1px solid #cad6df;
   border-radius: 6px;
   padding: 8px 10px;
   color: #1f2933;
   background: #ffffff;
-}
-
-.memory-event-panel .panel-content {
-  max-height: calc(100vh - 320px);
 }
 
 .dynamic-card-list,
@@ -932,37 +905,6 @@ button {
   font-size: 12px;
 }
 
-.memory-event-list {
-  display: grid;
-  gap: 12px;
-}
-
-.memory-event-card {
-  border: 1px solid #d9e2ea;
-  border-radius: 8px;
-  padding: 12px;
-  background: #ffffff;
-}
-
-.memory-event-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.memory-event-head > div:first-child {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.memory-event-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
 .read-block {
   border: 1px solid #edf1f5;
   border-radius: 6px;
@@ -989,32 +931,6 @@ button {
   font-size: 12px;
 }
 
-.annotation-row {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) repeat(auto-fit, minmax(76px, max-content));
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.annotation-row button {
-  border: 1px solid #cad6df;
-  border-radius: 6px;
-  padding: 8px 10px;
-  background: #f7fafc;
-  color: #1f2933;
-  cursor: pointer;
-}
-
-.annotation-row button:hover {
-  background: #eaf1f6;
-}
-
-.annotation-row button:disabled {
-  cursor: wait;
-  opacity: 0.6;
-}
-
-.memory-event-meta,
 .empty-state {
   margin-top: 8px;
   color: #778592;

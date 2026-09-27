@@ -12,8 +12,6 @@ from src.agent.skills.expression.dynamic_reply import DynamicReplySkill
 from src.agent.skills.invocation import handling_invocation
 from src.utils.logger import get_logger
 
-DYNAMIC_MEMORY_TRACE_PREFIX = "dynamic"
-
 
 class DynamicObservedHandler:
     """读结构化线程决定回复或明确忽略，并独立写入记忆。
@@ -97,15 +95,11 @@ class DynamicObservedHandler:
         )
         post = stimulus.messages[0]
         history = "" if post.message_id == target.message_id else f"动态正文：{post.text}"
-        source_context = f"{history}\n\n当前内容：\n{target.text}".strip()
         try:
             await self._memory.write(
                 replace(invocation, user_id=target.author_ref.actor_id),
                 current_dialogue=f"user: {target.text}",
                 conversation_history=history,
-                trace_id=f"{DYNAMIC_MEMORY_TRACE_PREFIX}:{target.message_id}",
-                source_context=source_context,
-                topic_id=target.message_id,
             )
         except Exception:
             self._logger.exception("动态记忆写入失败 target=%s", target.message_id)

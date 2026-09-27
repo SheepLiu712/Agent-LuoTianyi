@@ -1,3 +1,4 @@
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -58,6 +59,46 @@ def insert_llm_call(
             "{}",
         ),
     )
+
+
+def test_legacy_memory_traces_are_removed_without_deleting_llm_metrics(tmp_path):
+    db_path = tmp_path / "metrics.sqlite3"
+    service = ObservabilityService({"db_path": str(db_path)})
+    try:
+        insert_llm_call(
+            service,
+            ts="2999-01-01T00:00:00.000+00:00",
+            module_name="luotianyi_memory_writer",
+            total_tokens=100,
+            latency_ms=1000,
+        )
+    finally:
+        service.close()
+
+    with sqlite3.connect(db_path) as db:
+        db.executescript("""
+            CREATE TABLE memory_trace_events (id INTEGER PRIMARY KEY, content_text TEXT);
+            CREATE TABLE memory_trace_annotations (id INTEGER PRIMARY KEY, event_id INTEGER);
+            INSERT INTO memory_trace_events VALUES (1, 'old trace');
+            INSERT INTO memory_trace_annotations VALUES (1, 1);
+            CREATE TRIGGER block_memory_trace_writes_until_restart
+                BEFORE INSERT ON memory_trace_events
+                BEGIN SELECT RAISE(IGNORE); END;
+        """)
+
+    service = ObservabilityService({"db_path": str(db_path)})
+    try:
+        with sqlite3.connect(db_path) as db:
+            tables = {
+                name
+                for (name,) in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+            assert "memory_trace_events" not in tables
+            assert "memory_trace_annotations" not in tables
+            assert db.execute("SELECT COUNT(*) FROM llm_call_metrics").fetchone()[0] == 1
+            assert db.execute("PRAGMA freelist_count").fetchone()[0] == 0
+    finally:
+        service.close()
 
 
 def test_llm_summary_days_has_module_and_time_buckets(tmp_path):
