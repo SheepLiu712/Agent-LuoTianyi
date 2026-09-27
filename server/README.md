@@ -82,6 +82,22 @@ AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天
   ```
 - 打开sakurafrp的隧道接入公网（如果需要公网访问的话）
 
+### 四、迁移到 `E:\server`
+
+从当前 `server` 目录迁移运行文件和数据时，先预览复制范围：
+
+```powershell
+./scripts/deploy_to_e_server.ps1 -PlanOnly
+```
+
+停止所有正在运行的 `server_main.py` 进程后执行：
+
+```powershell
+./scripts/deploy_to_e_server.ps1
+```
+
+脚本复制 `src/`、`config/`、运行资源 `res/`、持久数据 `data/`、管理后台构建产物和安装入口。它不会复制 `__pycache__`、虚拟环境、Node 依赖、测试输出或日志，也不会删除目标目录里的文件。默认要求 `E:\server` 不存在或为空；复制中断后可用 `-Resume` 续传。迁移包含数据库与 WAL 文件，因此复制期间必须保持服务停止。Conda/Python 依赖、FFmpeg、Playwright Chromium 及系统环境变量需在目标运行环境中单独配置。
+
 ## 📜 许可证和版权
 
 本项目基于 [MIT 许可证](LICENSE) 开源。
