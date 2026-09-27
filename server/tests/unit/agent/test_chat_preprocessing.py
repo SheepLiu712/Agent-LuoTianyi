@@ -118,7 +118,7 @@ async def test_text_message_is_persisted_before_ready_and_not_consumed():
     assert entry.content.terms == ("《歌》是一首歌",)
     assert isinstance(entry.timestamp, datetime) and entry.timestamp.tzinfo is None
     assert entry.timestamp == (
-        request().interaction.now.replace(tzinfo=None)
+        request().interaction.now.astimezone().replace(tzinfo=None)
         + timedelta(microseconds=request().interaction.interaction_revision * 10)
     )
     assert report.preprocessed_input.stimulus_id == "m2"
@@ -161,6 +161,10 @@ async def test_image_is_one_user_conversation_with_agent_only_description_text()
     assert media_entry.content.media_id == "image"
     assert media_entry.content.mime_type == "image/png"
     assert media_entry.content.terms == ("白猫",)
+    assert media_entry.timestamp == (
+        image_request().interaction.now.astimezone().replace(tzinfo=None)
+        + timedelta(microseconds=image_request().interaction.interaction_revision * 10)
+    )
     assert report.preprocessed_input.text == "[图片理解]: [一张图片]:一只白猫"
     assert report.preprocessed_input.conversation_entry_ids == (media_entry.entry_id,)
     assert report.consumed_pending_stimulus_ids == ()

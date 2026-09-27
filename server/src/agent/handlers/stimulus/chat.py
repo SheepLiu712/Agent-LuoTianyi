@@ -63,7 +63,9 @@ class ChatPreprocessingHandler:
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """文本先理解并落库，再返回 READY 结果；不交付计划，不消费本批输入。"""
         stimulus = request.stimulus
-        fact_time = request.interaction.now.replace(tzinfo=None) + timedelta(
+        # Conversation timestamps are stored as naive server-local time. Agent replies
+        # use the same convention, so convert the UTC interaction clock first.
+        fact_time = request.interaction.now.astimezone().replace(tzinfo=None) + timedelta(
             microseconds=request.interaction.interaction_revision * 10
         )
         match stimulus:
@@ -164,6 +166,16 @@ def _reply_actions(request: d.HandleStimulusRequest, drafts, *, prefix: str = "r
                 )
             )
     return tuple(actions)
+
+
+def _deliverable_drafts(drafts):
+    """只保留能够由 Say/Sing 处理器执行的草稿。"""
+    return tuple(
+        draft
+        for draft in drafts
+        if (draft.sing is not None and draft.sing[0].strip() and draft.sing[1].strip())
+        or (draft.sing is None and draft.content.strip() and draft.sound_content.strip())
+    )
 
 
 def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
@@ -368,12 +380,13 @@ class ChatReplyHandler:
         plans: PlanEmitter, request: d.HandleStimulusRequest, pending: tuple[str, ...], drafts, *, prefix: str
     ) -> None:
         """把一组草稿落库并作为一份独立完整计划交付；无可交付行动时不产生计划。"""
-        actions = _reply_actions(request, drafts, prefix=prefix)
+        deliverable = _deliverable_drafts(drafts)
+        actions = _reply_actions(request, deliverable, prefix=prefix)
         if not actions:
             return
         if actions:
             plans.set_interruptible(False)
-        entries = _reply_entries(drafts)
+        entries = _reply_entries(deliverable)
         if entries:
             await plans.context.conversation.append(entries)
         await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=actions))

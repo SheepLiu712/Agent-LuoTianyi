@@ -242,7 +242,7 @@ class Agent:
         )
 
     def _record(self, call_id, interaction_id, status, error) -> None:
-        if error is None:
+        if error is None or error is d.ExecutionErrorCode.CANCELLED:
             return
         self._logger.error(
             "Agent settlement character_id=%s call_id=%s interaction_id=%s status=%s error_code=%s",
