@@ -174,13 +174,13 @@
 
 - **状态**：完整 `VoiceMessage` 已进入 Agent 预处理，永久媒体可由所有者身份解析。
 - **输入**：音频包含清晰语音、明确情绪、无语音声音，或语音与显著声音的组合。
-- **输出**：使用 `qwen3.8-omni-flash` 得到结构化结果，由服务端确定性构造非空音频描述，并以 `PreprocessedInput.text` 投递给后续 Agent；说话内容尽量逐字保留，只有情绪明确时才描述情绪，无文字时描述声音。上下文格式符合“上下文规范”小节。
+- **输出**：使用 `qwen3.8-omni-flash` 得到同时包含 `transcript`、`emotion`、`sound_description` 三个键的结构化结果，每个值为字符串或 `null`；由服务端转换为 `AudioUnderstandingResult`，派生 `AudioUnderstandingStatus.UNDERSTOOD`，再通过唯一的 `render_audio_context` 方法确定性构造非空音频描述，并以 `PreprocessedInput.text` 投递给后续 Agent。说话内容尽量逐字保留，只有情绪明确时才描述情绪，无文字时描述声音。
 
 #### AC-23 音频理解重试与降级
 
 - **状态**：音频理解请求超时、网络或供应商报错，或返回空白/不可解析的结构化结果。
 - **输入**：第一次模型调用失败。
-- **输出**：等待 1 秒后重试一次，每次调用最多 20 秒；第二次仍失败时将音频描述设为 `[音频]听不清`，视为预处理成功并在 1 秒后允许 Stage 回复。已发送气泡保持成功，不因理解降级改为发送失败；日志不记录音频、Base64、完整转写或完整描述。
+- **输出**：等待 1 秒后重试一次，每次调用最多 20 秒；第二次仍失败时构造 `AudioUnderstandingStatus.NOT_UNDERSTOOD`，三个理解字段均为 `None`，由 `render_audio_context` 生成 `[音频]听不清`，视为预处理成功并在 1 秒后允许 Stage 回复。已发送气泡保持成功，不因理解降级改为发送失败；日志不记录音频、Base64、完整转写或完整描述。
 
 #### AC-24 必要配置失败
 
@@ -274,7 +274,7 @@ sequenceDiagram
     A->>W: user_voice phase=finalize
     W->>W: 组装并完整校验
     W->>M: 原子持久化音频
-    W->>S: VoiceMessage(media_ref)
+    W->>S: VoiceMessage(media_ref, message_uuid)
     W-->>A: server_ack(finalize)
     S->>G: 预处理 VoiceMessage
     G->>M: 按 owner 解析音频
@@ -442,7 +442,7 @@ sequenceDiagram
 
 - `begin` ACK：上传会话已经建立或同参数重放已确认，`VoiceRecordingCommitted` 已被 Stage 接纳。
 - `chunk` ACK：该索引字节已通过边界校验并保存到上传会话。
-- `finalize` ACK：完整音频已校验并原子进入永久媒体库，且恰好一个 `VoiceMessage` 已被 Stage 接纳。
+- `finalize` ACK：完整音频已校验并原子进入永久媒体库，且恰好一个 `VoiceMessage` 已被 Stage 接纳；payload 同时返回稳定的 `message_uuid` 和服务端解析的 `duration_ms`，供客户端把乐观气泡与历史记录关联。它不返回内部 `media_id`。
 - `abort` ACK：未完成上传已被清理或本来就不存在；已 finalize 时返回永久冲突。
 
 建议 NACK 码：
@@ -470,6 +470,7 @@ VoiceRecordingCancelled(recording_id: str)
 VoiceRecordingCommitted(upload_id: str)
 VoiceUploadFailed(upload_id: str, reason: str)
 VoiceMessage(
+    message_uuid: str,
     media_ref: MediaRef,
     transcript: str | None,
     client_msg_id: str,
@@ -481,9 +482,10 @@ VoiceMessage(
 
 1. 协调 Stimulus 不进入正式对话历史，也不作为 Agent 上下文文本。
 2. 本版本 App 上传的 `VoiceMessage.media_ref` 必须存在，`transcript` 在进入预处理前为 `None`。
-3. `VoiceMessage.client_msg_id` 使用逻辑 `upload_id`，而不是某个分片操作 ID。
-4. `VoiceUploadFailed.reason` 仅使用稳定类别，不包含原始异常、路径或音频内容。
-5. 为未来 v1.0 本地理解保留 `transcript` 字段，但本版本不信任客户端提交的理解结果。
+3. `VoiceMessage.message_uuid` 是服务端按用户、角色和逻辑 `upload_id` 确定性生成的合法 UUID，也是后续 `ConversationEntry.entry_id`。
+4. `VoiceMessage.client_msg_id` 使用逻辑 `upload_id`，而不是某个分片操作 ID。
+5. `VoiceUploadFailed.reason` 仅使用稳定类别，不包含原始异常、路径或音频内容。
+6. 为未来 v1.0 本地理解保留 `transcript` 字段，但本版本不信任客户端提交的理解结果。
 
 #### 7. 媒体库接口
 
@@ -528,7 +530,24 @@ class AudioModelModule:
 
 `AudioModelModule` 复用 Infrastructure 现有模型配置、prompt、客户端委托、调用观测和响应解析模式。生产 Adapter 使用阿里云 `qwen3.8-omni-flash`，测试向 Skill 注入离线假模块。本功能不要求重构现有 `VLMModule`；图片和音频先统一基础设施层的生命周期和约定，而不是强制共用一个媒体参数接口。
 
-Agent 内部拥有以下业务结果，不把它放入 Infrastructure：
+模型必须输出以下完整 JSON 结构；三个键都必须存在，即使值为 `null`：
+
+```json
+{
+  "transcript": "今晚一起吃饭吧。",
+  "emotion": null,
+  "sound_description": "随后响起短促的掌声。"
+}
+```
+
+字段约束：
+
+1. `transcript`：尽量逐字的说话内容；没有可识别语言时为 `null`。
+2. `emotion`：仅描述声音中能够明确识别的说话情绪；不明确或没有说话时为 `null`。
+3. `sound_description`：独立描述有意义的非语言声音，不重复转写内容；没有时为 `null`。
+4. 缺少任一键、出现非字符串且非 `null` 的值、三个值全部空白，或 `transcript=null` 但 `emotion` 非空，均视为不可解析结果并触发重试。
+
+Agent 内部把模型响应转换为以下业务结果，不把它放入 Infrastructure：
 
 ```python
 @dataclass(frozen=True)
@@ -538,7 +557,7 @@ class AudioUnderstandingResult:
     sound_description: str | None
 ```
 
-结构化结果必须满足 `transcript` 或 `sound_description` 至少一个为非空白字符串；`emotion` 只有模型判断明确时才非空。`AudioUnderstandingSkill` 负责：
+有效结果必须满足 `transcript` 或 `sound_description` 至少一个为非空白字符串；`emotion` 不单独构成“已理解”。理解状态不是模型输出字段，由 `AudioUnderstandingSkill` 根据校验结果派生。`AudioUnderstandingSkill` 负责：
 
 1. 用 `request.user_id` 解析 owner-bound `MediaRef` 并要求 `expected_kind="audio"`。
 2. 将音频编码为受控 Data URI，调用 `AudioModelModule`，并把统一响应解析成 `AudioUnderstandingResult`。
@@ -552,14 +571,82 @@ class AudioUnderstandingResult:
 
 #### 9. 上下文规范
 
-最终进入 Agent 上下文的文本由服务端按以下规则构造：
+音频理解状态是 Agent context 的领域枚举，只有两个值：
+
+```python
+class AudioUnderstandingStatus(str, Enum):
+    UNDERSTOOD = "understood"
+    NOT_UNDERSTOOD = "not_understood"
+```
+
+`AudioContent` 在内存中必须持有枚举，而不是字符串。`transcript`、`emotion`、`sound_description` 都是必传关键字参数，允许显式传入 `None`，不允许通过省略字段表达未知：
+
+```python
+@dataclass(frozen=True, kw_only=True)
+class AudioContent:
+    media_id: str
+    mime_type: str
+    duration_ms: int
+    understanding_status: AudioUnderstandingStatus
+    transcript: str | None
+    emotion: str | None
+    sound_description: str | None
+    text: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "text",
+            render_audio_context(
+                status=self.understanding_status,
+                transcript=self.transcript,
+                emotion=self.emotion,
+                sound_description=self.sound_description,
+            ),
+        )
+```
+
+构造不变量：
+
+1. `UNDERSTOOD` 必须至少具有非空白 `transcript` 或 `sound_description`。
+2. `emotion` 只有在 `transcript` 非空时才允许非空。
+3. `NOT_UNDERSTOOD` 必须令 `transcript`、`emotion`、`sound_description` 全部为 `None`。
+4. `text` 只能由 `render_audio_context` 派生，调用方不能单独传入，避免结构化字段与上下文文本不一致。
+
+`render_audio_context` 是唯一的上下文拼接方法，属于 Agent context，不属于模型 Adapter：
+
+```python
+def render_audio_context(
+    *,
+    status: AudioUnderstandingStatus,
+    transcript: str | None,
+    emotion: str | None,
+    sound_description: str | None,
+) -> str:
+    if status is AudioUnderstandingStatus.NOT_UNDERSTOOD:
+        return "[音频]听不清"
+
+    clauses: list[str] = []
+    if transcript:
+        if emotion:
+            clauses.append(f"用户带着{emotion}的情绪说：“{transcript}”")
+        else:
+            clauses.append(f"用户说：“{transcript}”")
+    if sound_description:
+        clauses.append(sound_description)
+    return "[音频]" + "；".join(clauses)
+```
+
+Skill 在调用该方法前负责去除字段首尾空白，并保证 `sound_description` 是可独立拼接的客观短句。转写和声音描述各自保留必要标点；拼接方法只插入分号，不擅自改写字段内容。
+
+最终进入 Agent 上下文的文本示例：
 
 | 输入类别 | 规范文本 |
 | --- | --- |
 | 清晰语音，无明确情绪 | `[音频]用户说：“今晚一起吃饭吧。”` |
 | 清晰语音，有明确情绪 | `[音频]用户带着生气的情绪说：“别再这样了。”` |
 | 无可识别文字 | `[音频]一段连续的猫叫声，背景中有轻微风声。` |
-| 语音与有意义声音混合 | `[音频]用户笑着说：“成功啦。”，随后响起掌声。` |
+| 语音与有意义声音混合 | `[音频]用户带着开心的情绪说：“成功啦。”；随后响起掌声。` |
 | 两次理解失败 | `[音频]听不清` |
 
 规范化要求：
@@ -572,7 +659,52 @@ class AudioUnderstandingResult:
 
 #### 10. 对话数据和历史响应
 
-数据库继续使用既有 conversation 表，不保存 Base64 或音频字节。音频记录目标结构为：
+数据库继续使用既有 conversation 表，不保存 Base64 或音频字节。现有 `Conversation.uuid` 是全局字符串主键，能够保存标准 UUID 字符串；语音消息使用服务端 UUIDv5 作为稳定逻辑身份：
+
+```python
+message_uuid = str(
+    uuid5(
+        NAMESPACE_URL,
+        json.dumps(
+            ["conversation-audio", user_id, character_id, upload_id],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    )
+)
+```
+
+该身份包含用户、角色和逻辑上传 ID，不直接采用客户端 UUID，因此不同用户或角色复用同一 `upload_id` 不会产生主键冲突。Adapter 在 `VoiceMessage` 中携带此 `message_uuid`，Agent 不重复实现 UUID 算法。
+
+`ChatPreprocessingHandler` 在理解完成或降级完成后按以下方式构造唯一的正式对话：
+
+```python
+audio = AudioContent(
+    media_id=stimulus.media_ref.media_id,
+    mime_type=resolved_media.mime_type,
+    duration_ms=stimulus.duration_ms,
+    understanding_status=status,
+    transcript=result.transcript,
+    emotion=result.emotion,
+    sound_description=result.sound_description,
+)
+entry = ConversationEntry(
+    entry_id=stimulus.message_uuid,
+    timestamp=fact_time,
+    source=ConversationSource.USER.value,
+    content=audio,
+)
+await plans.context.conversation.append((entry,))
+prepared = PreprocessedInput(
+    stimulus_id=stimulus.stimulus_id,
+    text=audio.text,
+    conversation_entry_ids=(entry.entry_id,),
+)
+```
+
+`fact_time` 使用 Stage/Agent 的服务端事实时间，不信任客户端 `ts`。模型失败时仍构造 `AudioContent`，只是传入 `NOT_UNDERSTOOD` 和三个 `None` 字段。
+
+音频记录目标结构为：
 
 | 字段 | 存储位置 | 说明 |
 | --- | --- | --- |
@@ -581,10 +713,35 @@ class AudioUnderstandingResult:
 | `media_id` | `meta_data` | 指向永久媒体库 |
 | `mime_type` | `meta_data` | 固定 `audio/mp4` |
 | `duration_ms` | `meta_data` | 服务端解析值 |
-| `understanding_status` | `meta_data` | `understood` 或 `fallback_unclear` |
+| `understanding_status` | `meta_data` | `AudioUnderstandingStatus` 入库时转换为 `understood` 或 `not_understood` |
 | `transcript` | `meta_data` | 可空；内部审计/后续能力使用 |
 | `emotion` | `meta_data` | 可空；只保存明确情绪 |
 | `sound_description` | `meta_data` | 可空；无文字或混合声音使用 |
+
+存储转换必须显式处理枚举和空值：
+
+```python
+ConversationItem(
+    uuid=entry.entry_id,
+    timestamp=entry.timestamp.isoformat(sep=" ", timespec="microseconds"),
+    source=entry.source,
+    type="audio",
+    content=entry.content.text,
+    data={
+        "media_id": entry.content.media_id,
+        "mime_type": entry.content.mime_type,
+        "duration_ms": entry.content.duration_ms,
+        "understanding_status": entry.content.understanding_status.value,
+        "transcript": entry.content.transcript,
+        "emotion": entry.content.emotion,
+        "sound_description": entry.content.sound_description,
+    },
+)
+```
+
+从数据库恢复上下文时，`_decode_entry` 必须将字符串重新构造成 `AudioUnderstandingStatus`，再构造 `AudioContent`；由其重新派生的 `text` 必须与数据库 `content` 相同，不同则视为持久数据不一致，不能静默使用其中一份。
+
+`ConversationService.add_conversations` 需要补充基于全局 `uuid` 的幂等语义：不存在时插入并增加计数；已存在且 `user_id`、`character_id`、`type=audio`、`media_id` 相同则返回成功但不重复增加计数；已存在但这些身份字段不同则返回稳定冲突。当前实现遇到重复主键会失败，因此这是本功能必须实现的目标行为，而不是当前已经具备的能力。
 
 普通历史接口对 `type=audio` 只返回：
 
@@ -685,8 +842,8 @@ stateDiagram-v2
 1. **App 逻辑测试**：权限各状态、草稿保留、80 dp 双向阈值、单次触觉、0.5 秒、30 秒两区域、约 80 ms metering 平滑、后台/导航/异常清理、音频优先级、乐观气泡、按需下载、并发下载合并、单播放和 100 MiB LRU。
 2. **WebSocket/Assembler 集成测试**：成功、乱序、缺片、重复同字节、同索引冲突、非法 Base64、MIME/容器/编码错误、大小/分片限制、拼接总长度、实际时长、服务端摘要生成、TTL、跨用户隔离、全局过载、断线续传、ACK 丢失、手工重试仍只有一个 `VoiceMessage`。
 3. **Stage 测试**：语音开始 40 秒、提交 15 秒、取消/失败/理解完成 1 秒、图片打开 60 秒；可打断和不可打断；恢复旧 pending；预处理阻塞；旧输入与语音合批；降级结果不丢失。
-4. **Agent 测试**：清晰语音、明确情绪、纯声音、混合声音、空白/坏结构、超时、一次重试、最终降级；断言规范文本和内部元数据，不断言供应商自由文本的逐字内容。
-5. **媒体、历史与重置测试**：owner、kind、原子发布、历史脱敏、Bearer 下载、跨用户拒绝、删除后不可访问、图片与语音同时清理、部分失败报告和幂等重试。
+4. **Agent 测试**：清晰语音、明确情绪、纯声音、混合声音、缺键、错误类型、空白结构、超时、一次重试、最终降级；覆盖 `AudioUnderstandingStatus` 两个枚举值和非法字段组合，逐项断言 `render_audio_context` 的拼接结果、`AudioContent.text` 与 `PreprocessedInput.text`，不要求供应商自由文本逐字固定。
+5. **媒体、对话、历史与重置测试**：owner、kind、原子发布、确定性 `message_uuid`、`ConversationEntry` 构造、枚举入库/出库、数据库 content 与重新渲染文本一致、同身份重复写不增加计数、身份冲突失败、历史脱敏、Bearer 下载、跨用户拒绝、删除后不可访问、图片与语音同时清理、部分失败报告和幂等重试。
 6. **离线端到端测试**：使用假模型运行 AC-27，必须等待服务端回复并自动校验是否符合预期。
 7. **外部模型可选测试**：显式环境开关启用真实 `qwen3.8-omni-flash`，至少覆盖清晰语音、纯声音和带明显情绪语音；只断言结构、非空和关键类别，不要求精确文本；默认 CI 不运行。
 8. **Android 真机手工验收**：权限首次/永久拒绝、深浅色、弱网/重连、上滑返回、30 秒、后台中断、录音时来消息、历史懒下载、播放互斥和缓存淘汰。
