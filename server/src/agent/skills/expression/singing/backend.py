@@ -65,6 +65,20 @@ class SingingBackend:
         for manager in self.singing_manager.values():
             manager.reload_songs()
 
+    def get_song_names(self, character_id: str | None = None) -> tuple[str, ...]:
+        """返回指定角色或全部角色曲库中的稳定歌名与展示标题。"""
+        managers = (self._get_manager(character_id),) if character_id else tuple(self.singing_manager.values())
+        names: list[str] = []
+        seen: set[str] = set()
+        for manager in managers:
+            for metadata in manager.all_songs.values():
+                for value in (metadata.song_name, metadata.title):
+                    name = str(value or "").strip()
+                    if name and name not in seen:
+                        seen.add(name)
+                        names.append(name)
+        return tuple(names)
+
     async def build_sing_plan(
         self,
         character_id: str | List[str],

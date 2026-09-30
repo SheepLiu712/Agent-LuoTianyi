@@ -77,6 +77,7 @@ class Say(Action):
     tone: Tone
     expression: ChangeExpression | None
     delivery: OutputDelivery
+    message_id: str | None = None
 
     def __post_init__(self):
         _Value.__post_init__(self)
@@ -89,9 +90,12 @@ class Sing(Action):
     """演唱已确定的歌曲片段，可附带表情；衔接语由有序 Say 表达。"""
 
     kind: ClassVar[ActionKind] = ActionKind.SING
+    _blank_fields = ("content",)
     song_id: str
     segment_id: str
     expression: ChangeExpression | None
+    content: str = ""
+    message_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

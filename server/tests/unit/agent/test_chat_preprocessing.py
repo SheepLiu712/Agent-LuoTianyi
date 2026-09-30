@@ -11,6 +11,7 @@ from src.agent import Agent
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import ImageUnderstandingSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive.song_entity_linker import SongEntityLinker
 from src.infrastructure.media import MediaResolutionError, ResolvedMedia
 
 
@@ -202,8 +203,9 @@ async def test_illegal_media_stops_before_image_understanding(error):
 
 def test_text_preprocessing_skill_returns_terms(monkeypatch):
     class _Linker:
-        def __init__(self, config):
+        def __init__(self, config, *, song_names=()):
             self.config = config
+            self.song_names = tuple(song_names)
 
         def extract_and_verify(self, text):
             return ["《歌》是一首歌"] if "歌" in text else []
@@ -214,3 +216,23 @@ def test_text_preprocessing_skill_returns_terms(monkeypatch):
     assert skill.extract_terms("随便聊聊") == ()
     with pytest.raises(TypeError):
         skill.extract_terms(None)
+
+
+def test_song_entity_linker_prefers_complete_quoted_title_over_keyword_substring(tmp_path):
+    song_names = tmp_path / "song_names.txt"
+    lyrics = tmp_path / "lyrics.txt"
+    song_names.write_text("别\n", encoding="utf-8")
+    lyrics.write_text("", encoding="utf-8")
+    linker = SongEntityLinker({}, str(song_names), str(lyrics))
+
+    assert linker.extract_and_verify("请你现在唱《死别》给我听") == ["《死别》是一首歌"]
+
+
+def test_song_entity_linker_uses_singing_catalog_for_unquoted_song_title(tmp_path):
+    song_names = tmp_path / "song_names.txt"
+    lyrics = tmp_path / "lyrics.txt"
+    song_names.write_text("别\n", encoding="utf-8")
+    lyrics.write_text("", encoding="utf-8")
+    linker = SongEntityLinker({}, str(song_names), str(lyrics), song_names=("死别",))
+
+    assert linker.extract_and_verify("请唱死别") == ["《死别》是一首歌"]

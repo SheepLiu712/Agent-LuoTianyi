@@ -106,6 +106,7 @@ async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
     assert plan.actions[0].tone.value == "happy"
     assert plan.actions[0].expression.expression_id == "开心"
     assert plan.actions[1].song_id == "歌" and plan.actions[1].segment_id == "副歌"
+    assert plan.actions[1].content == "唱了《歌》"
     assert plan.source_stimulus_ids == ("m2", "m1")
     assert reflection.plan_ordinal == 2
     assert isinstance(reflection.actions[0], d.Reflection)
@@ -115,6 +116,9 @@ async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
     assert ctx.conversation.entries[0].content.text == "你好呀"
     assert isinstance(ctx.conversation.entries[1].content, SongContent)
     assert ctx.conversation.entries[1].content.song == "歌"
+    assert [action.message_id for action in plan.actions] == [
+        entry.entry_id for entry in ctx.conversation.entries
+    ]
     assert report.consumed_pending_stimulus_ids == ("m2", "m1")
     assert report.retained_pending_stimulus_ids == ()
     assert composer.calls[0]["reply_topic"] == "你好"

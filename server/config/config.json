@@ -334,7 +334,7 @@
         },
         "reply_composition": {
             "slow_recall": {
-                "provisional_after_seconds": 1.5,
+                "provisional_after_seconds": 3.5,
                 "provisional_text": "让我想想之前聊过的事情，稍等我一下下～",
                 "provisional_sound_content": "让我想想之前聊过的事情，稍等我一下下",
                 "provisional_tone": "tender",

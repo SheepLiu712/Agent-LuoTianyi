@@ -140,18 +140,33 @@ def _render_history(snapshot) -> str:
     return "\n".join(lines)
 
 
-def _reply_actions(request: d.HandleStimulusRequest, drafts, *, prefix: str = "r") -> tuple[d.Action, ...]:
+def _reply_actions(
+    request: d.HandleStimulusRequest,
+    drafts,
+    message_ids: tuple[str, ...],
+    *,
+    prefix: str = "r",
+) -> tuple[d.Action, ...]:
     """把回复草稿按序转成 Say/Sing 行动；空白且演唱的草稿被丢弃。
 
     prefix 区分同一请求内不同阶段的计划，避免临时与正式行动标识冲突。
     """
     actions: list[d.Action] = []
-    for index, draft in enumerate(drafts):
+    if len(drafts) != len(message_ids):
+        raise ValueError("reply drafts and message ids must stay aligned")
+    for index, (draft, message_id) in enumerate(zip(drafts, message_ids)):
         action_id = f"{request.request_id}-{prefix}{index}"
         expression = d.ChangeExpression(expression_id=draft.expression) if draft.expression else None
         if draft.sing is not None:
             actions.append(
-                d.Sing(action_id=action_id, song_id=draft.sing[0], segment_id=draft.sing[1], expression=expression)
+                d.Sing(
+                    action_id=action_id,
+                    song_id=draft.sing[0],
+                    segment_id=draft.sing[1],
+                    expression=expression,
+                    content=_reply_text(draft),
+                    message_id=message_id,
+                )
             )
         elif draft.content.strip():
             actions.append(
@@ -163,6 +178,7 @@ def _reply_actions(request: d.HandleStimulusRequest, drafts, *, prefix: str = "r
                     tone=d.Tone(value=draft.tone or "normal"),
                     expression=expression,
                     delivery=d.OutputDelivery.CONVERSATION,
+                    message_id=message_id,
                 )
             )
     return tuple(actions)
@@ -178,19 +194,23 @@ def _deliverable_drafts(drafts):
     )
 
 
+def _reply_text(draft) -> str:
+    """返回实时呈现与历史记录共用的回复正文。"""
+    return f"{draft.content}\n{draft.lyrics}".strip() if draft.lyrics else draft.content
+
+
 def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
     """把回复草稿转成 agent 侧正式对话记录。"""
     entries: list[ConversationEntry] = []
     for draft in drafts:
         if draft.sing is not None:
             song, segment = draft.sing
-            text = f"{draft.content}\n{draft.lyrics}".strip() if draft.lyrics else draft.content
             entries.append(
                 ConversationEntry(
                     entry_id=str(uuid4()),
                     timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
                     source=ConversationSource.AGENT.value,
-                    content=SongContent(text, song, segment),
+                    content=SongContent(_reply_text(draft), song, segment),
                 )
             )
         elif draft.content.strip():
@@ -217,7 +237,7 @@ def _attach_recall(plans: PlanEmitter, request: d.HandleStimulusRequest, hits) -
 
 
 def _may_emit_formal(request: d.HandleStimulusRequest, basis: int) -> bool:
-    """正式计划只在未取消且依据修订未变时交付，保证与临时计划同依据。"""
+    """正式计划只在未取消且依据修订未变时交付。"""
     return not request.cancellation.is_cancelled and request.interaction.interaction_revision == basis
 
 
@@ -343,7 +363,7 @@ class ChatReplyHandler:
         pending: tuple[str, ...],
         reply_parts: list[str],
     ) -> d.HandlingReport:
-        """生成可抢占的临时回复与正式回复，并在有效交互版本上交付。"""
+        """等待召回完成后生成并交付一轮正式回复。"""
         reply_topic = "\n".join(reply_parts)
         if not reply_topic:
             return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
@@ -364,8 +384,6 @@ class ChatReplyHandler:
             sing_attempts=self._understanding.extract_terms(reply_topic),
             excluded_segments=_recent_sung_segments(snapshot),
         )
-        if staged.provisional:
-            await self._deliver(plans, request, pending, staged.provisional, prefix="t")
         if not staged.awaits_formal:
             return replace(_report(request, consume=True), emitted_plan_ids=tuple(plans.accepted_ids))
         formal = await staged.formal()
@@ -381,12 +399,11 @@ class ChatReplyHandler:
     ) -> None:
         """把一组草稿落库并作为一份独立完整计划交付；无可交付行动时不产生计划。"""
         deliverable = _deliverable_drafts(drafts)
-        actions = _reply_actions(request, deliverable, prefix=prefix)
+        entries = _reply_entries(deliverable)
+        actions = _reply_actions(request, deliverable, tuple(entry.entry_id for entry in entries), prefix=prefix)
         if not actions:
             return
-        if actions:
-            plans.set_interruptible(False)
-        entries = _reply_entries(deliverable)
+        plans.set_interruptible(False)
         if entries:
             await plans.context.conversation.append(entries)
         await plans.emit(ActionPlanDraft(source_stimulus_ids=pending, actions=actions))

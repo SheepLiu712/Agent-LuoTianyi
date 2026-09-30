@@ -1,4 +1,4 @@
-"""慢召回的两段式回复：临时计划先行、正式计划随后（Issue #70）。"""
+"""慢召回只在完成后交付一轮正式回复。"""
 
 import asyncio
 from dataclasses import replace
@@ -88,29 +88,25 @@ def agent(composer):
 
 
 @pytest.mark.asyncio
-async def test_temporary_and_formal_are_two_complete_plans_with_consecutive_ordinals():
+async def test_provisional_draft_is_not_delivered_and_formal_reply_is_the_only_reply_plan():
     sink = Sink()
-    report = await agent(_StagedComposer()).handle_stimulus(deadline_request(), sink, context=context())
+    composer = _StagedComposer()
+    report = await agent(composer).handle_stimulus(deadline_request(), sink, context=context())
 
-    thinking, temporary, formal, reflection = sink.values
-    assert [plan.plan_ordinal for plan in sink.values] == [0, 1, 2, 3]
+    thinking, formal, reflection = sink.values
+    assert [plan.plan_ordinal for plan in sink.values] == [0, 1, 2]
     assert [action.kind for action in thinking.actions] == [d.ActionKind.START_THINKING]
-    # 两份计划各自完整且可独立实现：都只含可直接播放的 Say。
-    assert [action.kind for action in temporary.actions] == [d.ActionKind.SAY]
     assert [action.kind for action in formal.actions] == [d.ActionKind.SAY]
-    assert temporary.actions[0].content == "稍等我想想"
     assert formal.actions[0].content == "我记得你喜欢乌龙茶"
     assert isinstance(reflection.actions[0], d.Reflection)
-    # 正式计划不修改临时计划：两者身份、行动标识彼此独立。
-    assert temporary.plan_id != formal.plan_id
-    assert temporary.actions[0].action_id != formal.actions[0].action_id
-    assert temporary.source_stimulus_ids == formal.source_stimulus_ids == ("m2", "m1")
+    assert formal.source_stimulus_ids == ("m2", "m1")
+    assert composer.formal_calls == 1
     assert report.request_status is d.HandlingRequestStatus.COMPLETED
     assert report.emitted_plan_ids == tuple(plan.plan_id for plan in sink.values)
 
 
 @pytest.mark.asyncio
-async def test_both_plans_carry_the_same_basis_interaction_revision():
+async def test_all_emitted_plans_carry_the_same_basis_interaction_revision():
     sink = Sink()
     value = deadline_request()
 
@@ -141,14 +137,14 @@ async def test_cancellation_blocks_the_formal_plan_and_its_late_output():
     ctx = context()
 
     task = asyncio.create_task(agent(composer).handle_stimulus(value, sink, context=ctx))
-    while len(sink.values) < 2:
+    while composer.formal_calls < 1:
         await asyncio.sleep(0)
     value.cancellation.cancel(d.CancellationReason.SUPERSEDED)
     # 召回在取消之后才返回：迟到结果必须被丢弃。
     gate.set()
     report = await task
 
-    assert [plan.plan_ordinal for plan in sink.values] == [0, 1]
+    assert [plan.plan_ordinal for plan in sink.values] == [0]
     assert all(
         action.content != "我记得你喜欢乌龙茶"
         for plan in sink.values
@@ -184,12 +180,17 @@ async def test_handle_becomes_non_interruptible_when_first_say_is_ready():
     assert facade.is_handle_interruptible("i", value.request_id)
 
     compose_gate.set()
+    while composer.formal_calls < 1:
+        await asyncio.sleep(0)
+    assert len(sink.values) == 1
+    assert facade.is_handle_interruptible("i", value.request_id)
+
+    formal_gate.set()
     while len(sink.values) < 2:
         await asyncio.sleep(0)
     assert isinstance(sink.values[1].actions[0], d.Say)
     assert not facade.is_handle_interruptible("i", value.request_id)
 
-    formal_gate.set()
     await task
 
 
@@ -221,7 +222,7 @@ async def test_handle_becomes_non_interruptible_when_first_sing_is_ready():
 
 
 @pytest.mark.asyncio
-async def test_sink_failure_on_temporary_plan_stops_without_retry():
+async def test_sink_failure_on_formal_plan_stops_without_retry():
     delivered = []
 
     async def reject(plan):
@@ -234,7 +235,7 @@ async def test_sink_failure_on_temporary_plan_stops_without_retry():
     report = await agent(composer).handle_stimulus(deadline_request(), Sink(reject), context=context())
 
     assert [plan.plan_ordinal for plan in delivered] == [0, 1]
-    assert composer.formal_calls == 0
+    assert composer.formal_calls == 1
     assert report.request_status is d.HandlingRequestStatus.FAILED
     assert report.error_code is d.HandlingErrorCode.SINK_CLOSED
     assert report.retryable is False

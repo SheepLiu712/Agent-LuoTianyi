@@ -65,7 +65,7 @@ if ($destination.Equals(([System.IO.Path]::GetPathRoot($destinationFull)).TrimEn
 }
 
 $requiredPaths = @(
-    'server_main.py', 'pyproject.toml', 'README.md', 'setup.bat',
+    'server_main.py', 'start_server.bat', 'pyproject.toml', 'README.md', 'setup.bat',
     'scripts/install_windows.bat', 'src', 'config/config.json',
     'res/admin_ui/admin_static/index.html', 'data'
 )
@@ -119,7 +119,9 @@ foreach ($relativePath in @('src', 'config', 'res', 'data')) {
 }
 Copy-RuntimeTree -RelativePath 'res/admin_ui/admin_static' -ExcludedDirectories $commonExcludedDirectories -ExcludedFiles $excludedFiles
 
-foreach ($relativePath in @('server_main.py', 'pyproject.toml', 'README.md', 'setup.bat', 'scripts/install_windows.bat')) {
+foreach ($relativePath in @(
+    'server_main.py', 'start_server.bat', 'pyproject.toml', 'README.md', 'setup.bat', 'scripts/install_windows.bat'
+)) {
     Write-Host "Copying $relativePath ..."
     if (-not $PlanOnly) {
         $targetFile = Join-Path $destination $relativePath

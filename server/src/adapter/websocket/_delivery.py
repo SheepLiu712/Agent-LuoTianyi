@@ -58,6 +58,7 @@ class _Message:
     key: tuple[str, str, str]
     delivery: d.OutputDelivery
     done: asyncio.Future[None]
+    message_id: str | None = None
     items: deque[_Item] = field(default_factory=deque)
     accepted_end: bool = False
     cancelled: bool = False
@@ -87,6 +88,8 @@ class _ConnectionDelivery:
             raise d.SinkRejectedError(
                 "message already ended or delivery changed", code=d.SinkRejectionCode.CONTENT_CONFLICT
             )
+        if message is not None and message.message_id != output.message_id:
+            raise d.SinkRejectedError("message identity changed", code=d.SinkRejectionCode.CONTENT_CONFLICT)
         size = len(output.data) if isinstance(output, d.AudioChunkOutput) else len(str(output).encode("utf-8"))
         if (
             self.pending_outputs >= self.config.max_outputs
@@ -95,7 +98,7 @@ class _ConnectionDelivery:
         ):
             raise d.SinkRejectedError("connection output queue is full", code=d.SinkRejectionCode.BACKPRESSURE_TIMEOUT)
         if message is None:
-            message = _Message(key, output.delivery, completion(f"message={key}"))
+            message = _Message(key, output.delivery, completion(f"message={key}"), output.message_id)
             self.messages.append(message)
             self.by_key[key] = message
         future = completion(f"interaction={key[0]} execution={key[1]} sequence={output.sequence_no}")
@@ -161,7 +164,7 @@ class _ConnectionDelivery:
 
     async def _send(self, message: _Message, values: dict[str, object]) -> None:
         packet = ChatResponse(
-            uuid=str(uuid5(NAMESPACE_URL, json.dumps(["agent-message", *message.key]))),
+            uuid=message.message_id or str(uuid5(NAMESPACE_URL, json.dumps(["agent-message", *message.key]))),
             text="",
             audio="",
             expression="",

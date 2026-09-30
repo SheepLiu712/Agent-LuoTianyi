@@ -81,7 +81,10 @@ class SharedSkills:
             config.get("conversation_compaction", {}),
             llm_service,
         )
-        self.text_preprocessing = TextPreprocessingSkill(preprocessing_config)
+        self.text_preprocessing = TextPreprocessingSkill(
+            preprocessing_config,
+            song_names=self.singing.song_names(),
+        )
         self.explicit_memory_intent = ExplicitMemoryIntentSkill(explicit_memory_config)
         self.image_understanding = (
             ImageUnderstandingSkill(config.get("image_understanding", {}), media_resolver, llm_service)

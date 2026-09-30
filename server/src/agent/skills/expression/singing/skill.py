@@ -16,6 +16,8 @@ if TYPE_CHECKING:
 class _SingingPort(Protocol):
     def sing(self, character_id: str, song_name: str | None = None, segment: str | None = None) -> bytes | None: ...
 
+    def get_song_names(self, character_id: str | None = None) -> tuple[str, ...]: ...
+
 
 class EmptySongAudioError(Exception):
     """指定片段不可演唱，或没有产生任何音频。"""
@@ -40,6 +42,10 @@ class SingingSkill:
     def backend(self) -> _SingingPort:
         """Expose the owned backend to adjacent Agent skills and world jobs."""
         return self._singing
+
+    def song_names(self) -> tuple[str, ...]:
+        """返回所有角色曲库中的歌曲名称，供输入实体链接复用。"""
+        return self._singing.get_song_names()
 
     async def render(self, invocation: SkillInvocation, *, song_id: str, segment_id: str) -> bytes:
         """在 executor 中渲染指定片段；身份为空抛 ValueError，不可用或无音频抛 EmptySongAudioError。"""

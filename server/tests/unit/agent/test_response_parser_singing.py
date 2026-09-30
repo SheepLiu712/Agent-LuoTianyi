@@ -5,8 +5,8 @@ server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-from src.agent.skills.cognitive._response_parser import StructuredResponseParser
-from src.agent.skills.contracts import ReplyDraft
+from src.agent.skills.cognitive._response_parser import StructuredResponseParser  # noqa: E402
+from src.agent.skills.contracts import ReplyDraft  # noqa: E402
 
 
 def build_parser() -> StructuredResponseParser:
@@ -32,6 +32,7 @@ def test_sing_intent_is_kept_without_a_plan():
     assert len(items) == 1
     assert isinstance(items[0], ReplyDraft)
     assert items[0].sing == ("歌曲A", "")
+    assert items[0].expression == "sing"
 
 
 def test_matching_sing_plan_keeps_its_preferred_segment():
@@ -40,3 +41,4 @@ def test_matching_sing_plan_keeps_its_preferred_segment():
     assert len(items) == 1
     assert isinstance(items[0], ReplyDraft)
     assert items[0].sing == ("歌曲A", "段落2")
+    assert items[0].expression == "sing"
