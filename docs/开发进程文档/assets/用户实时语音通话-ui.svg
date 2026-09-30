@@ -129,12 +129,7 @@
   <text x="910" y="1093" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="15" fill="#42636d">Live2D 区域</text>
   <line x1="665" y1="1198" x2="1155" y2="1198" stroke="#d7dce1"/>
   <rect x="864" y="1230" width="253" height="54" rx="18" fill="#c6e8ed"/>
-  <g transform="translate(890 1257)" fill="none" stroke="#2c6873" stroke-width="2.5" stroke-linecap="round">
-    <path d="M-4-10c-5 4-5 16 0 20"/>
-    <path d="M2-14c-8 6-8 22 0 28"/>
-    <path d="M8-18c-11 8-11 28 0 36"/>
-  </g>
-  <text x="918" y="1263" class="chat-text">[语音通话] 05:23</text>
+  <text x="888" y="1263" class="chat-text">[语音通话] 05:23</text>
   <rect x="919" y="1303" width="198" height="50" rx="18" fill="#c6e8ed"/>
   <text x="943" y="1334" class="chat-text">[语音通话] 已取消</text>
   <rect x="919" y="1372" width="198" height="50" rx="18" fill="#c6e8ed"/>

@@ -40,13 +40,33 @@
 
 **状态**：同一用户与同一角色已有活动 `chat_ws` 或 `call_ws` 交互。  
 **输入**：任意设备再次发起聊天或通话。  
-**输出**：服务端原子地拒绝新交互，不抢占已有交互，不允许聊天和通话并存。
+**输出**：服务端原子地拒绝新交互，不抢占已有交互，不允许聊天和通话并存。唯一例外是当前已绑定聊天客户端预先登记、并由同一 `client_request_id` 关联的主动切换；该切换必须先完整回收旧 ChatStage，再创建 CallStage，任意其他设备不得借此终止已有聊天。
 
 ### AC-02 权限与呼叫建立
 
 **状态**：首次进入通话页。  
 **输入**：用户允许麦克风权限。  
-**输出**：客户端断开 `chat_ws`，建立独立 `call_ws`，由 `web` 模块完成鉴权，然后发送带 `client_request_id` 的 `call.start`。
+**输出**：客户端生成 `client_request_id`，先通过仍已鉴权且已绑定的 `chat_ws` 发送 `call.switch_prepare`；收到 `call.switch_ready` 后断开 `chat_ws`，建立独立 `call_ws`，由 `web` 模块完成鉴权，然后使用同一 `client_request_id` 发送 `call.start`。不存在 ChatStage 时可以省略准备信号。
+
+**状态**：WebSocket Adapter 收到 `call.switch_prepare`。  
+**输入**：已鉴权且当前绑定同一用户、同一角色 ChatStage 的 `chat_ws`，以及尚未使用的 `client_request_id`。  
+**输出**：StageManager 建立一次性、短期的 `CallTransitionIntent`，绑定 `user_id`、`character_id`、ChatStage `interaction_id` 和 `client_request_id`，然后返回 `call.switch_ready`。准备信号本身不创建呼叫账本、不终止 ChatStage；来自未绑定连接、其他角色或重复身份的请求被拒绝。
+
+**状态**：`call.start` 命中同一用户、同一角色的现有 ChatStage。  
+**输入**：与 `CallTransitionIntent` 完全匹配的 `client_request_id`。  
+**输出**：StageManager 原子地消费切换意图、以 `client_request_id` 建立 `PREPARING` 状态的呼叫账本并生成稳定 `call_id`，然后把旧 ChatStage 从可复用集合移除，以新增的 `InteractionEndingReason.SWITCH_TO_CALL` 立即终止。此时 `PREPARING` 包含回收旧聊天资源的阶段，但尚未创建 CallStage。终止过程取消正在进行的 handle/realize、回复期限、未完成输出和未执行计划；`READY` pending 不再产生聊天回复，其已经形成的正式 Conversation 事实参与结束认知维护；尚未完成预处理且未形成正式事实的输入被取消并丢弃。结束处理完成或超时后必须关闭旧 InteractionContext，随后才允许把交互所有权交给 CallStage。
+
+**状态**：旧 ChatStage 的结束认知维护达到终止期限。  
+**输入**：`SWITCH_TO_CALL` 结束处理尚未完成。  
+**输出**：取消结束处理并关闭旧 InteractionContext，认知维护进度保持原值，已落库 Conversation 事实由以后创建的聊天上下文重试维护；不得为了等待维护而让旧 ChatStage 与 CallStage 同时存活。若剩余呼叫准备时间足够则继续初始化 CallStage，否则按 10 秒呼叫建立超时结束且不创建通话记录。
+
+**状态**：切换意图已消费且旧 ChatStage 已回收，但后续 CallStage 或实时语音会话初始化失败，或者用户在接通前挂断。  
+**输入**：客户端返回聊天页并重新连接 `chat_ws`。  
+**输出**：不得恢复已经终止的 ChatStage；StageManager 创建新的 ChatStage 与新的 InteractionContext，并从正式持久化事实恢复聊天上下文。
+
+**状态**：`call.start` 没有匹配的切换意图，但同用户、同角色仍有 ChatStage，包括普通网络断线后保留 60 秒的 `OFFLINE` Stage。  
+**输入**：其他设备或未完成准备流程的客户端尝试发起通话。  
+**输出**：拒绝 `call.start`，不得回收或抢占旧 ChatStage。普通意外断线仍沿用现有 60 秒离线保留和重连行为，只有经过 `call.switch_prepare` 的主动切换才立即回收。
 
 **状态**：用户拒绝麦克风权限。  
 **输入**：普通拒绝或永久拒绝。  
@@ -54,7 +74,7 @@
 
 **状态**：服务端收到重复的同用户、同角色、同 `client_request_id` 的 `call.start`。  
 **输入**：客户端因超时重试发起相同请求。  
-**输出**：返回相同 `call_id`，不新建第二个 CallStage、呼叫账本或 Conversation 条目。
+**输出**：服务端先按 `client_request_id` 查询既有呼叫账本；命中且用户、角色一致时返回相同 `call_id`，不要求切换意图仍然存在，也不新建第二个 CallStage、呼叫账本或 Conversation 条目。未命中账本时才进入切换意图校验。
 
 ### AC-03 接通前体验
 
@@ -88,7 +108,25 @@
 **输入**：CallStage 向 Agent 提交 `CallStarted`。  
 **输出**：Agent 产生简短开场语并经 CALL 音频通道播放；不在聊天界面显示文字气泡。
 
-### AC-05 实时理解与轮次
+### AC-05 通话上下文、实时理解与轮次
+
+**状态**：CallStage 为新呼叫创建 `InteractionContext`。
+
+**输入**：同一用户、同一角色在服务端 `requested_at` 之前的最新 Conversation 记录时间。
+
+**输出**：仅当最新记录位于 `[requested_at - 3 分钟, requested_at]` 内时，才把现有 ConversationSummary 和最新最多 30 条 Conversation 记录作为只读 `base_snapshot` 纳入本次通话上下文，记录按时间正序提供给 Agent；若最近 3 分钟没有新增记录，则通话对话上下文从空 `ConversationSnapshot` 开始。用户画像和按需记忆召回不受该条件影响。该读取不得修改 Conversation 表或其持久化摘要。
+
+**状态**：通话使用 `InteractionContext.conversation` 追加用户轮次或正式 Agent 回复。
+
+**输入**：通话逐字转写、声音描述、情绪及 Agent 回复文本。
+
+**输出**：ContextFactory 为通话选择 `EphemeralCallConversationStore`；`ConversationContext.append()` 只更新本次呼叫的内存工作快照，不调用 ConversationService，不新增逐轮 Conversation 记录，也不写入 Redis、呼叫账本或媒体库。通话本地条目标识只用于本次呼叫内的排序、打断和维护幂等，不代表数据库行。
+
+**状态**：通话工作上下文达到压缩阈值。
+
+**输入**：`ConversationCompaction`。
+
+**输出**：`ConversationContext.compact()` 只替换 `EphemeralCallConversationStore` 内的工作摘要和近期轮次，不调用 ConversationService，不覆盖全局 ConversationSummary；统一认知维护仍可把成功提取的长期记忆、用户画像和 `maintenance_turn_seq` 分别写入其正式存储。
 
 **状态**：通话为 `ACTIVE` 且用户说话。  
 **输入**：客户端持续发送 PCM16、16 kHz、单声道音频。  
@@ -137,14 +175,20 @@
 **输出**：输出必须带 `audio_route=CALL`、`display_in_chat=false`、`is_ephemeral=true`；客户端只播放音频并驱动口型，不显示文字、不落客户端媒体缓存、不写普通聊天气泡。
 
 **状态**：客户端收到服务端音频。  
-**输入**：包含 `audio_route`、`stream_id`、`response_id`、`audio_id`、`seq`、编码、采样率、声道数和结束标记的消息。  
+**输入**：包含 `audio_route`、`stream_id`、`response_id`、`seq`、编码、采样率、声道数和结束标记的消息。
 **输出**：`CHAT` 进入现有聊天音频处理器，`CALL` 进入独立通话音频处理器；两个处理器不共享队列和取消状态。旧 `agent_message` 缺少路由时仅可兼容为 `CHAT`，绝不得猜测为 `CALL`。
+
+**状态**：客户端已收到某个 `stream_id` 的 final 音频帧。
+
+**输入**：该话语的最后一个 PCM 采样已经被 Android 播放管线实际消费，而不只是完成下载、解码或进入播放队列。
+
+**输出**：客户端发送一次有序、可重试的 `playback.completed(response_id, stream_id)`；服务端只有在 WebSocket Adapter 校验消息且 CallStage 幂等接纳播放结算后，才通过普通传输 ACK 覆盖该消息的客户端序号。ACK 丢失时客户端以相同 `seq` 和内容重发，重复接纳不得重复移除待播放项或重置沉默时钟。该消息是 Stage 协调输入，不转换为 Agent Stimulus。
 
 ### AC-08 用户打断
 
 **状态**：天依音频正在合成或播放。  
 **输入**：实时语音供应商确认 `speech_started`。  
-**输出**：服务端立即发送 `playback.stop(response_id)`，取消当前 Agent 处理与 TTS 请求，丢弃迟到音频，并记录 `UserInterrupted` 交互事实；客户端立即停止当前播放源并清空所有尚未播放的该回复音频。
+**输出**：服务端立即发送带 `response_id`、`stream_id` 和该回复已分配服务端序号范围的 `playback.stop`，取消当前 Agent 处理与 TTS 请求，丢弃迟到音频，并记录 `UserInterrupted` 交互事实；客户端不等待更早序号缺口补齐就处理该停止帧，立即停止当前播放源、清空所有尚未播放的该回复音频，并把声明范围结算为不再需要接收。
 
 **状态**：TTS 已在生成一个尚未完成的音频块。  
 **输入**：收到取消。  
@@ -152,13 +196,21 @@
 
 ### AC-09 沉默、角色挂断与通话上限
 
-**状态**：天依回复播放完毕后连续 5 秒没有有效用户声音。  
+**状态**：CallStage 已为一个或多个服务端话语登记待播放项。
+**输入**：客户端依次提交 `playback.completed`，或被打断的话语通过 `playback.stopped` 完成取消结算。
+**输出**：CallStage 按 `(response_id, stream_id)` 幂等移除对应待播放项。只要仍有未结算话语、待发送话语、正在生成的 Agent/TTS 回复、有效用户语音或尚未完成的用户轮次，就不得启动沉默时钟。TTS 生成完成、final 音频发送完成和客户端收到 final 帧都不能替代实际播放完成。
+
+**状态**：最后一个未取消话语的 `playback.completed` 已被 CallStage 接纳，且不存在其他待播放、待发送、生成中或用户发言状态。
+**输入**：CallStage 记录该播放完成消息的首次接纳时间。
+**输出**：从该服务端时间点启动 5 秒沉默时钟；后续重复完成消息不重置时钟。新的用户 `speech_started`、新回复生成或新 `audio.stream_started` 立即取消当前时钟；`RECONNECTING` 期间不运行沉默时钟。
+
+**状态**：上述沉默时钟连续达到 5 秒。
 **输入**：CallStage 生成 `CallSilenceElapsed`。  
 **输出**：Agent 或快速判断返回 `SPEAK`、`WAIT` 或 `END_CALL`；不得使用固定沉默次数直接挂断。
 
 **状态**：Agent 决定挂断。  
 **输入**：`EndCall` 动作。  
-**输出**：Agent 先自然告别，待告别音频播放完成后由 CallStage 结束通话。
+**输出**：Agent 先自然告别；CallStage 必须收到最后一个告别话语的 `playback.completed`，确认客户端已经实际播放完成后再结束通话，而不能以 TTS 生成完成或 final 帧发出作为结束依据。
 
 **状态**：已接通时长达到可配置上限，默认 30 分钟。  
 **输入**：距上限 30 秒或达到上限。  
@@ -186,7 +238,7 @@
 
 **状态**：恢复期间服务端仍在生成 TTS。  
 **输入**：未发送或未确认的服务端音频。  
-**输出**：每个回复最多保留 30 秒音频，全通话最多保留 4 MiB；达到上限时暂停消费 TTS，不淘汰最旧未确认包。恢复后先重放缺失包，再发送新包。
+**输出**：每个回复最多保留 30 秒音频，全通话最多保留 4 MiB；达到上限时暂停消费 TTS，不淘汰最旧未确认包。恢复后先按统一连续结算游标重放未取消的缺失帧和必要的取消结算控制，再发送新帧；已由 `playback.stop` 废弃的音频 payload 不得重放。
 
 **状态**：恢复期间用户仍在说话。  
 **输入**：客户端最多缓存 3 秒尚未确认的麦克风 PCM。  
@@ -257,7 +309,7 @@ class CallContent:
 | `maintenance_turn_seq` | 已完成认知维护的最后通话轮次 |
 | `created_at`、`updated_at` | 审计时间 |
 
-账本不保存原始音频和完整逐字转录。
+账本不保存原始音频、逐轮文本、完整逐字转录或通话工作摘要；`maintenance_turn_seq` 只是整数进度。
 
 **状态**：服务端启动时发现陈旧呼叫账本。  
 **输入**：账本状态为 `PREPARING`、`RINGING`、`ACTIVE`、`RECONNECTING` 或 `ENDING`。  
@@ -286,11 +338,17 @@ async def maintain(
 
 **状态**：达到压缩阈值。  
 **输入**：上下文中待压缩前缀以及持久化认知维护进度。  
-**输出**：被覆盖前缀全部参与摘要，但仅把进度之后的新记录用于提取向量记忆和更新用户画像；所有写入成功后，在同一数据库事务中应用压缩并把持久化维护进度推进至该批最后一条被覆盖记录。
+**输出**：被覆盖前缀全部参与工作摘要，但仅把进度之后的新记录用于提取向量记忆和更新用户画像。聊天上下文通过 `DatabaseConversationStore` 持久化压缩；通话上下文通过 `EphemeralCallConversationStore` 只应用内存压缩。长期记忆和画像全部写入成功后，CognitiveMaintenanceSkill 才分别把聊天认知维护进度推进至该批最后一条被覆盖 Conversation 记录，或把呼叫账本的 `maintenance_turn_seq` 推进至该批最后一个已维护轮次；通话路径不得持久化逐轮内容或通话工作摘要。
 
 **状态**：Stage 即将销毁。  
 **输入**：`InteractionEnding` 刺激。  
 **输出**：Agent 产生认知维护动作并调用 `maintain`，即使短对话未达到压缩阈值也处理进度之后的全部新内容；Stage 不得直接调用 Skill。
+
+**状态**：主动切换通话导致旧 ChatStage 以 `SWITCH_TO_CALL` 终止。
+
+**输入**：旧 ChatStage 的最终持久化聊天上下文与 `READY` pending 对应的已落库 Conversation 事实。
+
+**输出**：Agent 先执行旧聊天的结束认知维护，不产生用户可见输出；无论维护成功、失败还是超时，旧 InteractionContext 都必须关闭后才创建通话 InteractionContext，因此两个上下文不得同时存活。维护失败或超时时不推进认知维护进度，后续聊天上下文可以根据持久化进度重试；通话 `base_snapshot` 只用于回答，不得把旧聊天事实再次作为本次通话的新维护内容。
 
 **状态**：向量记忆或画像写入失败。  
 **输入**：维护批次。  
@@ -311,6 +369,8 @@ async def maintain(
 | 主回复失败一次 | 播放预录歉意语，保持通话 |
 | 单次 TTS 失败 | 重试一次；仍失败则客户端播放内置错误音，保持通话 |
 | 主回复或 TTS 连续失败两轮 | 结束通话 |
+| `playback.completed` ACK 丢失 | 客户端以相同 `seq` 和内容重发；CallStage 幂等接纳且不重置沉默时钟 |
+| 客户端未提交播放完成 | 不得按 TTS 时长或服务端超时推断用户已经听完；保持沉默时钟关闭，直到完成回执、取消结算或其他既有结束条件发生 |
 | 概要失败 | 重试一次，再使用固定失败概要 |
 | 认知维护失败 | 不阻塞 Conversation 记录，按 AC-15 重试与清理 |
 
@@ -319,6 +379,12 @@ async def maintain(
 **状态**：实时通话进行或结算。  
 **输入**：PCM、转录、上下文、概要。  
 **输出**：原始 PCM、Base64、完整转录和完整上下文不得写入普通日志；日志仅记录尺寸、序号、时长、状态、稳定错误码和关联 ID。阿里云实时语音服务会接收用户音频，隐私说明必须披露该事实。
+
+**状态**：通话轮次被追加、压缩或执行认知维护。
+
+**输入**：用户逐字转写、声音描述、情绪、Agent 逐轮回复和通话工作摘要。
+
+**输出**：上述逐轮内容只存在于 `EphemeralCallConversationStore` 内存中，不得写入 Conversation 表、ConversationContext 持久化摘要、Redis、`call_sessions` 或任何新建转录表。允许长期保存的通话内容只有最终单条 `CallContent` 概要、成功提取的向量记忆和用户画像；不得以调试、恢复或统一接口为由绕过该约束。
 
 **状态**：通话结束并完成或超时结算。  
 **输入**：CallStage 临时数据。  
@@ -330,14 +396,18 @@ async def maintain(
 
 ### AC-18 可观测性
 
-必须按 `call_id` 关联并采集以下无内容指标：状态耗时、供应商端点判断耗时与错误、首个有效音频延迟、正式回复延迟、TTS 耗时、打断次数、停止确认耗时、重连次数与结果、缓冲字节、概要和认知维护结果、供应商用量与成本。指标与日志不得包含音频、逐字转录、完整概要或完整上下文。
+必须按 `call_id` 关联并采集以下无内容指标：状态耗时、供应商端点判断耗时与错误、首个有效音频延迟、正式回复延迟、TTS 耗时、final 帧发出到客户端实际播放完成的积压时长、播放完成 ACK 重试、打断次数、停止确认耗时、重连次数与结果、缓冲字节、概要和认知维护结果、供应商用量与成本。指标与日志不得包含音频、逐字转录、完整概要或完整上下文。
 
 ### AC-19 测试
 
-- 单元测试：状态机、快速决策、记忆池近似 LRU、`CallContent` 渲染、UUIDv5 身份、概要约束、认知维护进度和幂等。
-- 服务端集成测试：鉴权、进程内交互租约、混合帧协议、ACK/NACK、重传、3 秒恢复、打断、异步结算、账户重置。
+- 单元测试：状态机、快速决策、记忆池近似 LRU、`CallContent` 渲染、UUIDv5 身份、概要约束、认知维护进度和幂等；分别验证 Database 与 Ephemeral Store 的 `append/compact` 可观察语义。
+- 服务端集成测试：鉴权、进程内交互租约、混合帧协议、统一连续结算游标、ACK/NACK、重传、3 秒恢复、打断、异步结算、账户重置；覆盖控制/音频交错时的缺口恢复、取消范围越过音频缺口立即停止、推进游标并释放 payload，以及 TTS 快于播放、多话语排队、完成 ACK 丢失和重复完成时只在最后实际播放完成后启动一次沉默时钟；通话中及结算后断言 Conversation、ConversationContext、Redis、呼叫账本和媒体库均不存在逐轮转录或工作摘要。
+- 上下文初始化测试：最新 Conversation 记录在 3 分钟边界内时按时间正序加载最新最多 30 条及现有摘要；超过边界、属于其他用户或角色时不加载；初始化读取不产生任何写操作。
+- ChatStage 切换测试：只有当前已绑定聊天客户端登记的 `CallTransitionIntent` 能触发 `SWITCH_TO_CALL`；其他设备、错误角色、重复或缺失意图均不能抢占现有 ChatStage。
+- ChatStage 回收测试：匹配的 `call.start` 立即取消旧 Stage 的处理、期限、计划和输出，`READY` pending 不再回复但已落库事实参与结束维护；旧 InteractionContext 关闭后才创建 CallStage。维护失败或超时时进度不推进，且任何时刻不得同时存在聊天与通话两个 InteractionContext。
+- 普通断线回归测试：没有 `call.switch_prepare` 的 `chat_ws` 意外断开仍保留 ChatStage 60 秒并支持原有重连，不得被误判为主动切换。
 - Agent 集成测试：`DIRECT`、`RECALL`、回忆过渡语、沉默决策、结束维护动作。
-- Android 自动化测试：权限、入口、系统音频路由、打断停止、返回键确认、重连覆盖层、历史右对齐记录。
+- Android 自动化测试：权限、入口、系统音频路由、打断停止、仅在最后一个 PCM 采样被播放管线消费后发送 `playback.completed`、完成 ACK 丢失重试、返回键确认、重连覆盖层、历史右对齐记录。
 - 端到端测试：使用假的实时语音适配器、Agent 和 TTS，覆盖完整呼叫；允许提供仅测试用途的 `call_ws` 驱动器，不提供面向用户的 CLI 通话功能。
 - 真实阿里云、真实设备 AEC、蓝牙路由和 2 秒延迟目标通过独立 smoke/performance 测试验证，不作为普通 CI 的稳定前提。
 
@@ -346,6 +416,7 @@ async def maintain(
 ### 当前基线
 
 - 服务端目前只有 `/chat_ws`，Stage 以 ChatStage 为主，没有 CallStage 与 `call.v1`。
+- 现有 `adapter.websocket.WebSocketAdapter` 已经承担聊天信道的协议转换、逻辑交互绑定和异步输出投递；通话应扩展这一既有 Adapter 模块，而不是让 Web 绕过 Adapter 直连 CallStage。
 - Android 聊天页目前没有电话入口；现有 WebView 音频链路面向普通聊天播放。
 - 现有 Conversation 内容类型没有通话内容。
 - 现有反思流程会在普通聊天回复后频繁执行记忆、压缩和画像更新，本功能要求迁移为统一认知维护边界。
@@ -356,30 +427,39 @@ async def maintain(
 ```mermaid
 flowchart LR
     Android["Android Call UI"]
-    Web["web auth and call_ws"]
+    Web["web auth and physical call_ws"]
+    Adapter["WebSocket Adapter"]
+    Manager["StageManager and interaction ownership"]
     Stage["CallStage"]
     Speech["RealtimeSpeechSession"]
     Agent["Agent"]
-    TTS["TTS capability"]
-    Conversation["Conversation service"]
-    Ledger["Call session ledger"]
+    TTS["Speaking Skill and TTS backend"]
+    Conversation["Infrastructure ConversationService"]
+    History["Application history use case"]
+    Ledger["Infrastructure call session repository"]
     Memory["Memory and profile stores"]
 
     Android -->|"JSON control and PCM"| Web
-    Web -->|"authenticated call events"| Stage
+    Web -->|"authenticated wire frames"| Adapter
+    Adapter -->|"switch intent and binding"| Manager
+    Manager -->|"lifecycle ownership"| Stage
+    Adapter -->|"domain input and binding"| Stage
     Stage -->|"normalized audio stream"| Speech
     Speech -->|"speech and turn events"| Stage
     Stage -->|"formal stimuli"| Agent
-    Agent -->|"Say and EndCall"| Stage
-    Agent -->|"CALL audio request"| TTS
-    TTS -->|"routed PCM chunks"| Stage
-    Stage -->|"CALL audio and control"| Web
+    Agent -->|"Say realization"| TTS
+    TTS -->|"AudioChunkOutput"| Stage
+    Agent -->|"EndCall action"| Stage
+    Stage -->|"StageOutput"| Adapter
+    Adapter -->|"call.v1 delivery"| Web
     Stage --> Ledger
     Agent -->|"conversation action"| Conversation
     Agent -->|"maintenance action"| Memory
+    Web -->|"authenticated history request"| History
+    History -->|"history query"| Conversation
 ```
 
-图中 `web` 负责鉴权和连接边界，CallStage 负责实时生命周期，Agent 负责理解后的认知决策；`RealtimeSpeechSession` 只做语音感知，不产生可见回答。
+图中 `web` 只负责鉴权、物理连接和帧收发；既有 WebSocket Adapter 负责 `call.v1` wire 消息与领域输入/输出之间的转换、`call_id` 到逻辑交互的绑定，以及有序、带背压的输出投递。StageManager 负责切换意图、唯一交互所有权与 Stage 生命周期，CallStage 负责实时通话生命周期，Agent 负责理解后的认知决策；`RealtimeSpeechSession` 只做语音感知，不产生可见回答。历史查询由 Application 用例编排，底层 Conversation 持久化仍属于 Infrastructure。
 
 ### 生命周期
 
@@ -408,29 +488,41 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | Android Call UI | `app` | 状态页面、权限、采集、系统音频模式、计时、挂断与重连提示 | Agent 决策、概要、长期保存音频 |
 | ChatAudioProcessor | `app` | 普通聊天 TTS、气泡、历史重放和现有缓存 | 播放 CALL 音频 |
-| CallAudioProcessor | `app` | CALL PCM 播放、口型、取消 tombstone、ACK 与恢复 | 聊天气泡、媒体落盘 |
-| call_ws endpoint | `web` | HTTP/WS 鉴权、协议协商、帧收发、稳定错误映射 | 业务接听、语音理解、Agent 决策 |
-| InteractionLeaseRegistry | 应用服务 | 单进程内原子保证同用户同角色 chat/call 严格互斥 | 分布式协调 |
-| CallStage | Stage | 状态机、PCM 顺序与背压、轮次、沉默、打断、恢复、播放结算、资源关闭 | 直接访问阿里 SDK、直接调用 Skill |
+| CallAudioProcessor | `app` | CALL PCM 播放、口型、实际播放完成检测、`playback.completed` 重试、取消 tombstone、ACK 与恢复 | 聊天气泡、媒体落盘、用下载或入队完成冒充实际播放完成 |
+| call_ws endpoint | `web` | HTTP/WS 鉴权、物理连接生命周期、原始 JSON/二进制帧收发 | 把 wire 消息转成 Stimulus、绑定 CallStage、投递业务输出 |
+| WebSocket Adapter | `adapter/websocket` | 扩展现有 Adapter 以解析和校验 `call.v1`，把已鉴权 wire 输入转换为 CallStage 可接收的领域输入，维护连接与 `call_id`/逻辑交互的绑定，并把 StageOutput 转成有序信道消息完成 ACK、NACK、重传和背压投递 | 拥有物理连接、执行鉴权、判断角色回复、维护回复批次 |
+| InteractionLeaseRegistry | `stage` | 由 StageManager 一侧持有，按同用户、同角色原子授予唯一交互所有权；主动切换期间以 `CallTransitionIntent` 保留过渡占用，旧 ChatStage 终止且 Context 关闭后才把所有权交给 CallStage | 分布式协调、接受未经当前绑定验证的客户端切换声明 |
+| CallStage | Stage | 状态机、PCM 顺序与背压、轮次、待播放项、沉默时钟、打断、恢复、播放结算、资源关闭 | 直接访问阿里 SDK、直接调用 Skill、用 TTS 生成进度推测客户端播放完成 |
 | RealtimeSpeechSession | `infrastructure/models/realtime_speech` | 把供应商实时 ASR/VAD 事件归一化为稳定领域事件 | 生成天依回复、写 Conversation |
 | CallRecallDecisionSkill | Agent Skill | 判定 `DIRECT/RECALL`，生成检索条件与过渡语类别 | 正式回答、写记忆、改变 Stage |
 | Agent | Agent | 接听、回复、沉默行动、挂断、概要和认知维护行动计划 | 处理 PCM 包序与 WS 帧 |
-| TTS capability | Agent/infrastructure | 合成 24 kHz 单声道 PCM，支持请求级取消 | 聊天与通话路由猜测 |
+| Speaking Skill 与 TTS backend | `agent/skills/expression/speaking` | 作为角色说话能力合成 24 kHz 单声道 PCM，管理后端与进程并支持请求级取消 | 归入通用 Infrastructure、猜测聊天与通话路由 |
 | CognitiveMaintenanceSkill | Agent Skill | 压缩、记忆提取、画像更新、维护批次幂等 | 每轮无条件写长期记忆 |
-| Call session repository | 数据层 | 呼叫账本、启动幂等、恢复与结算进度 | 保存音频或完整转录 |
-| Conversation service | 应用服务 | 稳定 UUID 身份、CallContent 入库、历史投影 | 返回通话概要给客户端 |
+| ConversationContext 与 Store | `agent/context` | 向 Agent 和认知维护提供统一的 `read/append/compact` 行为；由 ContextFactory 按交互类型注入 Database 或 Ephemeral Store | 让调用方在每次追加时决定是否持久化、把通话转录写入数据库 |
+| Call session repository | `infrastructure/persistence` | 呼叫账本、启动幂等、恢复与结算进度 | 保存音频或完整转录、编排呼叫用例 |
+| ConversationService | `infrastructure/persistence/database/services` | Conversation 与上下文的底层持久化、稳定 UUID 写入和查询事实 | 历史 HTTP 用例编排、决定客户端展示字段 |
+| UserConversationHelper | `application/user` | 编排用户历史查询，把底层 Conversation 事实投影为客户端可见记录并隐藏通话概要 | 承担数据库实现、向 Agent 提供认知上下文 |
 
-第一版仅支持单一 ServerRuntime。若配置为多 worker，启动检查必须禁用通话或拒绝启动通话能力，不能静默依赖进程内互斥。分布式租约属于极远期且低概率需求。
+`ConversationContext` 保持同一接口并通过组合选择两个内部 Store：聊天使用 `DatabaseConversationStore`，延续当前追加和压缩落库行为；通话使用 `EphemeralCallConversationStore`，只把满足最近 3 分钟条件的持久化快照作为初始化种子，此后的追加和压缩全部留在内存。`InteractionContext` 继续作为用户、对话和召回上下文的聚合模块，不作为基类，也不在 `append()` 或 `compact()` 上增加容易误用的 `persist` 参数。
+
+### ChatStage 到 CallStage 的原子切换
+
+主动切换不是普通 WebSocket 断线。当前已鉴权并绑定 ChatStage 的 `chat_ws` 必须先提交 `call.switch_prepare`；StageManager 据此创建一次性、短期 `CallTransitionIntent`，并把同用户、同角色的交互所有权标记为正在切换。收到 `call.switch_ready` 后，该聊天绑定不再接受新的业务输入，只允许完成断连或等待意图过期。意图只能由同一用户、同一角色、同一 `client_request_id` 的 `call.start` 消费，不能作为恢复令牌，也不能被其他设备用于抢占。
+
+匹配的 `call.start` 必须先把旧 ChatStage 从可复用集合移除，以 `SWITCH_TO_CALL` 执行终止和结束认知维护，并关闭旧 InteractionContext；只有这些步骤完成或达到本次切换期限后，StageManager 才能把交互所有权交给新的 CallStage。该终止不得沿用 ChatStage 默认 30 秒终止等待，而必须受 `call.start` 起算的 10 秒呼叫建立总期限约束；超时即取消维护、保持维护进度不变并关闭旧 Context。聊天 Context 与通话 Context 不得同时存活。旧 Stage 一旦进入该终止路径便不可恢复；通话初始化失败或接通前取消后，重新连接聊天必须创建新 ChatStage。
+
+未经过 `call.switch_prepare` 的 `chat_ws` 意外断开不属于主动切换，继续沿用现有 60 秒离线保留和重连行为。有效意图过期且原聊天连接仍在时，Adapter 解除切换状态并恢复接收聊天输入；原连接已经断开时，StageManager 按普通离线行为处理。第一版仅支持单一 ServerRuntime；若配置为多 worker，启动检查必须禁用通话或拒绝启动通话能力，不能静默依赖进程内互斥。分布式协调属于极远期且低概率需求。
 
 ### 呼叫建立顺序
 
 1. 用户从菜单进入通话页，客户端申请麦克风权限。
-2. 权限允许后断开 `chat_ws`，再连接 `call_ws`。
-3. `web` 模块完成正常鉴权，客户端发送带 `client_request_id` 的 `call.start`。
-4. 服务端先幂等建立呼叫身份，再原子获取同用户、同角色的交互租约。
-5. CallStage 初始化上下文、预热近期 Conversation 与基础画像，并创建实时语音会话。
-6. 系统能力准备完成后，才请求 Agent 的接听决策；第一版固定接受，但保留拒接动作。
-7. Agent 接受后进入 `ACTIVE` 并发送开场语；任一接通前终止路径都关闭 `call_ws` 并恢复 `chat_ws`。
+2. 权限允许后，客户端生成 `client_request_id`，通过仍已鉴权且绑定的 `chat_ws` 发送 `call.switch_prepare`；Adapter 校验当前逻辑绑定，StageManager 创建 `CallTransitionIntent` 并返回 `call.switch_ready`。不存在 ChatStage 时跳过本步。
+3. 客户端收到 `call.switch_ready` 后断开 `chat_ws`，连接 `call_ws`；`web` 模块完成正常鉴权，并把带同一 `client_request_id` 的 `call.start` 原始帧交给既有 WebSocket Adapter。
+4. Adapter 先查询既有呼叫账本；首次请求由 StageManager 原子消费切换意图、建立 `PREPARING` 呼叫账本并生成稳定 `call_id`，再把旧 ChatStage 从可复用集合移除，以 `SWITCH_TO_CALL` 终止它，取消未完成工作并执行无用户可见输出的结束认知维护，最后关闭旧 InteractionContext。重复请求返回账本中的同一身份和当前状态。
+5. 旧 Context 关闭后，StageManager 原子地把同用户、同角色的交互所有权交给 CallStage；Adapter 完成 `call_id` 与 CallStage 的逻辑绑定。账本继续处于 `PREPARING`，直到系统能力准备完成并进入 `RINGING` 或终止。
+6. CallStage 通过 ContextFactory 创建使用 `EphemeralCallConversationStore` 的 InteractionContext；仅当同用户、同角色的最新 Conversation 记录位于最近 3 分钟时，加载现有摘要与最新最多 30 条记录作为只读初始化种子，同时预热基础画像并创建实时语音会话。
+7. 系统能力准备完成后，才请求 Agent 的接听决策；第一版固定接受，但保留拒接动作。
+8. Agent 接受后进入 `ACTIVE` 并发送开场语；任一接通前终止路径都关闭 `call_ws`、释放通话所有权并返回聊天页。旧 ChatStage 不得复用，后续 `chat_ws` 连接创建新 ChatStage。
 
 ### Agent 与 Stage 职能边界
 
@@ -445,6 +537,8 @@ InteractionEnding(interaction_id, reason)
 ```
 
 `speech_started` 和原始 PCM 不进入 Agent。Agent 第一版允许产生 `Say`、`ChangeExpression`、`EndCall` 以及不向聊天 UI 显示的常规长期业务动作；`Sing`、预制长音频和聊天气泡不允许在通话中执行。
+
+`InteractionEndingReason` 新增 `SWITCH_TO_CALL`，专门表示经有效切换意图触发的主动交接；普通聊天离线超时继续使用既有 `USER_LEFT`，服务停止继续使用既有关闭原因。这里复用 `InteractionEnding`，不新增只为切换服务的 Stimulus 类型。
 
 Stage 销毁链路必须为：
 
@@ -499,7 +593,25 @@ class CallRecallDecision:
 
 ### 接口规范
 
-#### 1. call.start
+以下 `call.v1` wire 格式由现有 `adapter.websocket` 模块负责解释和生成。`web` 只向 Adapter 提供已鉴权连接和原始帧，并发送 Adapter 产出的信道消息。第一版允许在现有 Adapter 内增加通话专用解析与投递实现，但不新增只做参数转发的 `CallAdapterPort`；只有出现第二种真实信道实现时，才重新评估是否需要新的稳定 seam。
+
+#### 1. call.switch_prepare
+
+该消息通过当前已鉴权并绑定 ChatStage 的 `chat_ws` 发送：
+
+```json
+{
+  "protocol": "call.v1",
+  "type": "call.switch_prepare",
+  "seq": 37,
+  "client_request_id": "018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a",
+  "character_id": "luotianyi"
+}
+```
+
+成功响应为 `call.switch_ready`，必须回显 `client_request_id`。服务端创建的 `CallTransitionIntent` 仅存在于内存，只能使用一次，绑定已鉴权用户、角色、当前 ChatStage `interaction_id` 与该请求 ID，并在从 `call.switch_ready` 开始的 10 秒呼叫建立期限内有效。它不是 `call.resume` 的恢复令牌；缺失、过期、重复消费或绑定不匹配时，`call.start` 必须以稳定错误码失败，且不得终止现有 ChatStage。
+
+#### 2. call.start
 
 ```json
 {
@@ -508,10 +620,6 @@ class CallRecallDecision:
   "seq": 1,
   "client_request_id": "018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a",
   "character_id": "luotianyi",
-  "client": {
-    "platform": "android",
-    "app_version": "0.5.0"
-  },
   "audio": {
     "encoding": "pcm_s16le",
     "sample_rate": 16000,
@@ -520,28 +628,34 @@ class CallRecallDecision:
 }
 ```
 
-成功响应必须包含服务端生成的 `call_id`。未知协议版本使用稳定错误码拒绝，不进行猜测兼容。
+处理 `call.start` 时，服务端先按 `client_request_id` 查询呼叫账本：若已存在且用户、角色一致，返回原 `call_id` 与当前建立状态；若同用户、同角色存在 ChatStage，则尚无账本的首次请求必须消费匹配的 `CallTransitionIntent`，并在终止 ChatStage 前建立 `PREPARING` 账本；若不存在任何 ChatStage 且交互所有权空闲，则可以不带切换意图直接建立账本。成功响应必须包含服务端生成的 `call_id`。未知协议版本使用稳定错误码拒绝，不进行猜测兼容。
 
-#### 2. call.resume
+#### 3. call.resume
 
 ```json
 {
   "protocol": "call.v1",
   "type": "call.resume",
-  "seq": 18,
   "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
   "character_id": "luotianyi",
-  "last_received": {
-    "server_control_seq": 42,
-    "server_audio_seq": 317
-  },
-  "last_acked_client_seq": 96
+  "last_contiguous_server_seq": 60
 }
 ```
 
-恢复授权依赖新连接的正常鉴权，以及同一 `call_id`、同一用户、同一角色三项同时匹配。第一版不使用恢复令牌。
+恢复成功响应：
 
-#### 3. 服务端音频流开始
+```json
+{
+  "protocol": "call.v1",
+  "type": "call.resumed",
+  "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+  "last_contiguous_client_seq": 96
+}
+```
+
+恢复授权依赖新连接的正常鉴权，以及同一 `call_id`、同一用户、同一角色三项同时匹配。第一版不使用恢复令牌。`call.resume` 与 `call.resumed` 是重新绑定传输的握手，不占用通话会话任一方向的 `seq`。客户端使用 `last_contiguous_server_seq` 声明已经连续结算的服务端帧；服务端使用 `last_contiguous_client_seq` 返回已经连续结算的客户端帧。握手完成后，双方先重放对端游标之后仍需交付的原序号帧，再发送新帧。
+
+#### 4. 服务端音频流开始
 
 ```json
 {
@@ -551,14 +665,15 @@ class CallRecallDecision:
   "audio_route": "CALL",
   "stream_id": 12,
   "response_id": "resp_01k",
-  "audio_id": "audio_01k",
   "encoding": "pcm_s16le",
   "sample_rate": 24000,
   "channels": 1
 }
 ```
 
-#### 4. 二进制帧头
+一个 `stream_id` 表示客户端可以独立播放完成并确认的一句话或一个连续话语；同一 Agent `response_id` 可以按 TTS 分句产生多个依次播放的 `stream_id`。CallStage 在发送各自的 `audio.stream_started` 前登记待播放项，并在该流最后一个二进制音频帧上设置 `final`。登记发生在投递之前，因此即使 TTS 预先生成后续话语，CallStage 也知道仍有多少话语尚未被客户端实际播完。
+
+#### 5. 二进制帧头
 
 二进制帧由固定长度帧头和 PCM payload 组成。具体字节布局在实现 ADR 中冻结，但第一版必须包含：
 
@@ -566,15 +681,37 @@ class CallRecallDecision:
 | --- | --- |
 | protocol version | 可拒绝未知版本 |
 | audio route | `CHAT` 或 `CALL`，通话帧必须为 `CALL` |
-| direction | `CLIENT_TO_SERVER` 或 `SERVER_TO_CLIENT` |
 | stream id | 与 `audio.stream_started` 绑定的短整数 |
 | seq | 该方向跨控制帧和音频帧单调递增 |
-| flags | 至少包含 final 与 retransmit |
+| flags | 仅包含当前确有消费者的 `final` |
 | payload length | 与实际 payload 严格一致 |
 
-每个方向的控制帧和二进制帧共享一条单调序列。重复帧幂等忽略；发现缺口时发送 NACK 请求重传；ACK 表示已连续接收的最高序号并允许批量确认。
+帧的方向由发送它的 WebSocket 端天然确定，不在帧头中重复编码。每个方向的会话业务控制帧和二进制音频帧共享一条从 1 开始严格递增的序列，并且只维护一个 `last_contiguous_seq`：小于等于该值的每个序号都必须已经收到并通过校验，或者已经由发送方的取消控制明确结算为不再交付。ACK 只携带这一连续结算游标，不分别确认业务控制帧和音频帧。
 
-#### 5. 播放停止
+收到高于 `last_contiguous_seq + 1` 的普通帧时可以暂存，但必须对首个缺口发送 NACK，且不能越过缺口推进 ACK。发送方以原 `seq` 和原始帧内容重发，不设置额外重传标记。相同 `seq` 且内容相同的重复帧幂等忽略；相同 `seq` 但帧头或 payload 不同视为协议冲突，拒绝该帧并终止连接。恢复时使用的 `last_contiguous_server_seq` 和 `last_contiguous_client_seq` 与正常 ACK 的游标定义完全相同。
+
+`ACK`、`NACK`、`call.resume` 和 `call.resumed` 是传输反馈或重新绑定握手，不分配 `seq`、不进入重放缓冲，也不触发对自身的确认。`ACK` 只携带 `ack_seq=<last_contiguous_seq>`；`NACK` 只携带当前首个 `missing_seq`。因此确认消息不会形成相互确认循环，恢复游标也不会因新连接的握手消息发生偏移。
+
+例如服务端控制帧 42 已收到、音频帧 43 丢失、普通控制帧 44 已收到时，客户端只能确认 42、请求重传 43；若此时断线，`call.resume.last_contiguous_server_seq` 必须为 42。若 44 本身是合法的 `playback.stop` 且明确结算包含 43 的取消范围，则客户端立即执行停止并可把连续游标推进到 44。
+
+#### 6. 播放完成
+
+```json
+{
+  "protocol": "call.v1",
+  "type": "playback.completed",
+  "seq": 97,
+  "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
+  "response_id": "resp_01k",
+  "stream_id": 12
+}
+```
+
+客户端只能在对应流已经收到 `final`，并且最后一个 PCM 采样已被 Android 播放管线消费后发送该消息。下载完成、解码完成、写入播放器缓冲或服务端 TTS 完成均不满足条件。消息使用客户端到服务端的正常会话序号；Adapter 必须在 CallStage 接纳结算后才让普通 ACK 覆盖该 `seq`。ACK 丢失时客户端使用相同序号和内容重发；同一 `(response_id, stream_id)` 只允许首次接纳改变 CallStage 状态，重复消息只重放 ACK。
+
+CallStage 只接纳已经登记、已经发送 final 且未取消的流。未知流或 final 尚未发送时返回稳定协议错误；已经完成的流幂等成功；已经由 `playback.stop` 取消结算的流不再要求播放完成，并对竞态到达的 `playback.completed` 幂等返回成功但不得启动或重置沉默时钟。
+
+#### 7. 播放停止
 
 ```json
 {
@@ -583,13 +720,22 @@ class CallRecallDecision:
   "seq": 61,
   "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
   "response_id": "resp_01k",
+  "stream_id": 12,
+  "retire_server_seq": {
+    "from": 43,
+    "through": 60
+  },
   "reason": "user_interrupted"
 }
 ```
 
-客户端回传停止确认；确认耗时纳入指标。取消 tombstone 的生命周期至少覆盖整个呼叫会话。
+服务端为一个回复分配的服务端序号范围必须连续，且范围内不得夹入属于其他回复或通话控制的帧；`retire_server_seq` 从该回复的 `audio.stream_started` 序号开始，到发送停止前最后一个已经分配的序号结束，`through` 必须小于 `playback.stop.seq`。未实际分配序号的半成品或尚未发送音频不产生缺口，也不进入该范围。
 
-#### 6. 结束事件
+`playback.stop` 是允许越过更早缺口立即处理的取消控制。客户端确认范围内已经收到的帧均属于对应 `response_id` 和 `stream_id`；范围内尚未收到的帧以已鉴权服务端的取消声明为准。验证通过后，客户端立即建立 tombstone、停止播放、清空队列，并把范围内尚未收到的序号标记为已结算；随后把停止帧本身标记为已收到，重新计算统一连续游标并发送普通 ACK。若范围非法、与已经收到的其他回复或通话控制冲突，或者包含停止帧及其后序号，则视为协议冲突并终止连接。更早且不在取消范围内的缺口仍须重传，但不阻塞停止动作。
+
+客户端另行回传包含 `response_id` 与 `stop_seq` 的 `playback.stopped` 作为正常的、有 `seq` 的会话业务控制帧；它确认停止动作已经执行，但不代替统一 ACK 游标。服务端发出停止帧后，立即把取消范围内的音频 payload 从重传缓冲替换为轻量的范围结算记录，只保留 `playback.stop` 及其范围元数据，直到普通 ACK 覆盖停止帧或呼叫结束。断线恢复或收到针对已取消范围的 NACK 时，只重放对应的 `playback.stop`，不得重放已取消音频。停止确认耗时纳入指标；取消 tombstone 的生命周期至少覆盖整个呼叫会话。
+
+#### 8. 结束事件
 
 ```json
 {
@@ -605,12 +751,13 @@ class CallRecallDecision:
 
 ### 数据一致性与结算顺序
 
-1. `call.start` 先用 `client_request_id` 建立或读取呼叫账本，再获取交互租约。
-2. 获取租约后创建 CallStage、InteractionContext 和实时语音会话。
-3. 进入 `ACTIVE` 时持久化 `connected_at`；所有终止路径先冻结不可变终态快照。
-4. 实时媒体资源关闭且终态快照冻结后释放交互租约；客户端立即收到结束事件、返回聊天页并可重新连接 `chat_ws`，服务端在后台并行执行概要和认知维护。
-5. 概要或固定回退文本准备好后，以稳定 UUID 写 Conversation，并关联 `conversation_id`。
-6. 两条结算任务完成或达到 15 秒期限后清除临时转录与记忆池；后台结算不得继续占用实时交互租约。
+1. 当前聊天绑定提交 `call.switch_prepare` 后，StageManager 建立一次性 `CallTransitionIntent` 并保留同用户、同角色的过渡所有权；此时不创建呼叫账本，也不释放所有权给其他设备。
+2. `call.start` 先按 `client_request_id` 读取既有呼叫账本；命中且身份一致时返回原 `call_id` 与当前建立状态。未命中且存在 ChatStage 时，必须原子消费匹配意图、建立 `PREPARING` 呼叫账本，再把旧 ChatStage 从可复用集合移除并以 `SWITCH_TO_CALL` 终止；结束认知维护完成或耗尽 10 秒呼叫建立期限时关闭旧 InteractionContext。未匹配的 `call.start` 不能改变旧 Stage。不存在 ChatStage 且所有权空闲时可直接幂等建立 `PREPARING` 账本。
+3. 旧 Context 关闭后，StageManager 才把交互所有权交给 CallStage；随后创建使用 `EphemeralCallConversationStore` 的 InteractionContext 和实时语音会话。账本继续处于 `PREPARING`，最近 3 分钟上下文检查只读取 ConversationService，不写入任何对话数据。
+4. 进入 `ACTIVE` 时持久化 `connected_at`；所有终止路径先冻结不可变终态快照。
+5. 实时媒体资源关闭且终态快照冻结后释放通话所有权；客户端立即收到结束事件、返回聊天页并可重新连接 `chat_ws`，服务端为其创建新的 ChatStage，且在后台并行执行概要和认知维护。
+6. 概要或固定回退文本准备好后，以稳定 UUID 写 Conversation，并关联 `conversation_id`。
+7. 两条结算任务完成或达到 15 秒期限后清除临时转录与记忆池；后台结算不得继续占用实时交互租约。
 
 ## 备注
 
@@ -618,9 +765,11 @@ class CallRecallDecision:
 
 - Android 原生通信音频模式、AEC 与噪声抑制；16 kHz 单声道上行、24 kHz 单声道下行。
 - 独立 `call_ws` 与 `call.v1` 混合 JSON/二进制协议；`chat_ws` 与 `call_ws` 严格互斥。
+- 使用一次性 `CallTransitionIntent` 证明切换来自当前聊天绑定；`call.start` 消费意图后立即终止并回收 ChatStage，旧 InteractionContext 关闭后才创建通话 Context。普通意外断线仍沿用既有 60 秒 ChatStage 恢复窗口。
 - 阿里云实时语音能力作为首个 `RealtimeSpeechSession` 实现，但领域接口不绑定具体模型。
 - Agent 主导回复、记忆、主动说话和挂断；实时语音供应商只负责语音感知。
 - 延续现有 TTS 能力，新增请求级取消、CALL 路由、序号和未完成块丢弃。
+- ConversationContext 通过两个 Store 复用同一认知接口：`DatabaseConversationStore` 服务聊天并持久化追加与压缩，`EphemeralCallConversationStore` 服务通话且只在内存追加、压缩逐轮内容；ContextFactory 在创建交互时完成选择，调用方不传逐次持久化开关。
 - 通过呼叫账本与稳定 Conversation UUID 实现启动、恢复和结算幂等，不保存音频或完整逐字转录。
 - Reflection 重命名并深化为 Cognitive Maintenance，只在压缩点和 Stage 销毁时提取记忆、更新画像。
 

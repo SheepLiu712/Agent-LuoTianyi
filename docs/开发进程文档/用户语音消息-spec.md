@@ -367,7 +367,6 @@ sequenceDiagram
     "container": "m4a",
     "codec": "aac_lc",
     "byte_length": 345678,
-    "duration_ms": 15320,
     "total_chunks": 8
   }
 }
@@ -432,7 +431,7 @@ sequenceDiagram
 | 未完成上传 TTL | 10 分钟 |
 | 客户端自动上传预算 | 从 `begin` 首次发送起总计 15 秒 |
 
-服务器先验证信封和字段边界，再解码单片 Base64；finalize 时验证索引完整覆盖 `0..total_chunks-1`、每片大小、拼接字节数与 `byte_length` 一致、文件签名、容器、编码和实际时长，随后由服务端计算完整内容 SHA-256 并原子持久化。客户端不提交内容摘要。不得依靠 Uvicorn 默认帧上限代替业务限制。M4A 元数据解析必须使用进程内纯 Python 能力，不把系统 `ffmpeg` 作为部署前提。
+服务器先验证信封和字段边界，再解码单片 Base64；`begin` 不接收客户端声明时长。客户端测得的时长只用于录音交互与发送前判断，不参与服务端预检或一致性校验。`finalize` 时验证索引完整覆盖 `0..total_chunks-1`、每片大小、拼接字节数与 `byte_length` 一致、文件签名、容器、编码和服务端解析的实际时长，随后由服务端计算完整内容 SHA-256 并原子持久化。客户端不提交内容摘要。不得依靠 Uvicorn 默认帧上限代替业务限制。M4A 元数据解析必须使用进程内纯 Python 能力，不把系统 `ffmpeg` 作为部署前提。
 
 客户端正常按索引顺序发送，服务端允许乱序保存。相同用户、`upload_id`、索引和相同字节的重复 chunk 返回成功；字节不同则返回永久 `UPLOAD_CONFLICT`。不同用户使用相同 `upload_id` 必须完全隔离。
 
@@ -768,11 +767,13 @@ GET /media/audio/{message_uuid}
 Authorization: Bearer <message_token>
 ```
 
-成功响应为 `200`、`Content-Type: audio/mp4`、正确 `Content-Length` 和二进制流，可带私有缓存校验头但不得返回公共永久 URL。鉴权顺序为：验证 token → 按当前用户和 message UUID 查询 `type=audio` 对话行 → 取内部 media ID → 按 owner 和 audio kind 解析。越权、未知和已删除统一使用不泄露跨用户存在性的响应。接口不接受客户端直接提供 media ID。
+成功响应为 `200`、`Content-Type: audio/mp4`、正确 `Content-Length` 和二进制流，不返回公共永久 URL。鉴权顺序为：验证 token → 按当前用户和 message UUID 查询 `type=audio` 对话行 → 取内部 media ID → 按 owner 和 audio kind 解析。越权、未知和已删除统一使用不泄露跨用户存在性的响应。接口不接受客户端直接提供 media ID。
 
 #### 12. 客户端播放缓存接口约束
 
-缓存键使用 `message_uuid + 服务端媒体版本/摘要`；下载先写临时文件，完整响应成功后原子替换正式缓存。同一 key 维护单个 in-flight Promise。淘汰器不得删除当前播放或正在下载的文件。退出登录和完全重置本地用户时清除该用户语音缓存；普通 App 重启不要求保留未完成上传状态。
+缓存身份只使用不可变的 `message_uuid`；历史响应和 `finalize` ACK 已提供该字段，不要求额外的媒体版本、摘要或下载校验头。一个 `message_uuid` 对应的媒体内容一旦 finalize 就不得被原位替换；相同逻辑身份上传不同字节必须返回冲突。若未来需要替换媒体内容，必须生成新的消息身份或另行设计显式缓存失效协议。
+
+下载先写临时文件，收到完整成功响应后原子替换以 `message_uuid` 命名的正式缓存。同一 `message_uuid` 维护单个 in-flight Promise。淘汰器不得删除当前播放或正在下载的文件。退出登录和完全重置本地用户时清除该用户语音缓存；普通 App 重启不要求保留未完成上传状态。
 
 #### 13. 配置默认值
 
@@ -839,7 +840,7 @@ stateDiagram-v2
 
 实现 PR 至少提供以下证据；“相关通过”不能写成“全量回归通过”。
 
-1. **App 逻辑测试**：权限各状态、草稿保留、80 dp 双向阈值、单次触觉、0.5 秒、30 秒两区域、约 80 ms metering 平滑、后台/导航/异常清理、音频优先级、乐观气泡、按需下载、并发下载合并、单播放和 100 MiB LRU。
+1. **App 逻辑测试**：权限各状态、草稿保留、80 dp 双向阈值、单次触觉、0.5 秒、30 秒两区域、约 80 ms metering 平滑、后台/导航/异常清理、音频优先级、乐观气泡、以 `message_uuid` 为唯一缓存身份的按需下载、并发下载合并、单播放和 100 MiB LRU。
 2. **WebSocket/Assembler 集成测试**：成功、乱序、缺片、重复同字节、同索引冲突、非法 Base64、MIME/容器/编码错误、大小/分片限制、拼接总长度、实际时长、服务端摘要生成、TTL、跨用户隔离、全局过载、断线续传、ACK 丢失、手工重试仍只有一个 `VoiceMessage`。
 3. **Stage 测试**：语音开始 40 秒、提交 15 秒、取消/失败/理解完成 1 秒、图片打开 60 秒；可打断和不可打断；恢复旧 pending；预处理阻塞；旧输入与语音合批；降级结果不丢失。
 4. **Agent 测试**：清晰语音、明确情绪、纯声音、混合声音、缺键、错误类型、空白结构、超时、一次重试、最终降级；覆盖 `AudioUnderstandingStatus` 两个枚举值和非法字段组合，逐项断言 `render_audio_context` 的拼接结果、`AudioContent.text` 与 `PreprocessedInput.text`，不要求供应商自由文本逐字固定。
