@@ -152,5 +152,20 @@ export class NetworkClient {
     return this.transport.submitUserImageSelectingCancel(5000, clientMsgId);
   }
 
+  sendVoiceRecordingStarted(recordingId: string, clientMsgId?: string) {
+    if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
+    return this.transport.submitVoiceRecordingStarted(recordingId, 5000, clientMsgId);
+  }
+
+  sendVoiceRecordingCancelled(recordingId: string, clientMsgId?: string) {
+    if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
+    return this.transport.submitVoiceRecordingCancelled(recordingId, 5000, clientMsgId);
+  }
+
+  sendVoicePhase(payload: Record<string, unknown>, clientMsgId?: string) {
+    if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
+    return this.transport.submitVoicePhase(payload, 5000, clientMsgId);
+  }
+
 
 }
