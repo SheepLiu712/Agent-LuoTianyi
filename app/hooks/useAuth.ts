@@ -6,6 +6,7 @@ import { loadSavedServerUrl, server_config } from '../config/index';
 import { encryptPassword, getPublicKey, type PublicKeyFailureReason } from '../utils/crypto';
 import { addDebugTrace } from '../utils/debug_trace';
 import { classifyAutoLoginStatus, runAutoLoginWithRetry } from '../utils/auto_login';
+import { voicePlaybackManager } from '../utils/voice_playback_manager';
 
 const AUTO_LOGIN_KEY = 'auto_login';
 const USERNAME_KEY = 'saved_username';
@@ -256,6 +257,7 @@ export function useAuth() {
       await AsyncStorage.removeItem(USERNAME_KEY);
       await SecureStore.deleteItemAsync(AUTOLOGIN_TOKEN_KEY);
       await AsyncStorage.removeItem(AUTOLOGIN_TOKEN_KEY);
+      await voicePlaybackManager.clear();
       auth.username = '';
       auth.message_token = '';
       setAuthState(prev => ({ ...prev, isLoggedIn: false }));

@@ -36,6 +36,23 @@ describe('voice components', () => {
     expect(collect(playing, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain('■');
   });
 
+  it('renders loading, retryable failure, and unavailable failure states', () => {
+    const loading = VoiceBubble({ message: { ...message, sendStatus: 'submitted', audioDownloadState: 'loading' } }) as any;
+    expect(collect(loading, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain('…');
+
+    const failed = VoiceBubble({ message: { ...message, sendStatus: 'submitted', audioDownloadState: 'failed' } }) as any;
+    const failedControls = collect(failed, 'TouchableOpacity');
+    expect(collect(failed, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain('!');
+    expect(failedControls[1].props.accessibilityLabel).toBe('语音加载失败，点击重试');
+
+    const unavailable = VoiceBubble({ message: { ...message, sendStatus: 'submitted', audioAvailable: false } }) as any;
+    const unavailableControls = collect(unavailable, 'TouchableOpacity');
+    expect(collect(unavailable, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain('!');
+    expect(unavailableControls[1].props.disabled).toBe(false);
+    expect(unavailableControls[1].props.accessibilityLabel).toBe('语音不可用，无法重试');
+    expect(unavailable.props.accessibilityLabel).toContain('语音不可用，无法重试');
+  });
+
   it('switches between text and voice controls and hides text send in voice mode', () => {
     const text = VoiceInputBar({ mode: 'text', inputText: 'hi', canSend: true, canSendImage: true, captureState: 'TextMode', onToggleMode: jest.fn(), onSendText: jest.fn(), onSendImage: jest.fn() }) as any;
     expect(collect(text, 'TextInput')).toHaveLength(1);

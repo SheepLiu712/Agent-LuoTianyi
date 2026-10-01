@@ -8,6 +8,8 @@ interface SendResult {
   request_id: string;
   error?: string;
   drop?: boolean;
+  message_uuid?: string;
+  duration_ms?: number;
 }
 
 interface ConnectCallbacks {

@@ -87,6 +87,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     handleSendImage,
     handleWebViewMessage,
     handleToggleAgentAudio,
+    toggleVoicePlayback,
     voiceInput,
   } = useChatLogic(webviewRef, username, message_token);
 
@@ -405,7 +406,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             ref={flatListRef}
             data={messages}
             inverted={true}
-            renderItem={({ item }) => <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} theme={theme} />}
+            renderItem={({ item }) => <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} onToggleVoicePlayback={toggleVoicePlayback} theme={theme} />}
             keyExtractor={(item) => item.uuid}
             onEndReached={() => {
               if (username && message_token && !historyLoading) {
