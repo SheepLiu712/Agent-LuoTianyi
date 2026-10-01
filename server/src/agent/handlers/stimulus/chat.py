@@ -1,7 +1,7 @@
 """聊天处理：单条文本预处理与落库，以及批次回复、反思入口。"""
 
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Final
 from uuid import uuid4
 
@@ -16,6 +16,7 @@ from src.agent.context.models import (
     TextContent,
 )
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
+from src.agent.processing.reply_delivery import build_reply_delivery, render_conversation_history
 from src.agent.skills.cognitive import (
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
@@ -129,100 +130,6 @@ def _recent_sung_segments(snapshot) -> set[tuple[str, str]]:
         if isinstance(content, SongContent) and content.segment:
             sung.add((content.song, content.segment))
     return sung
-
-
-def _render_history(snapshot) -> str:
-    """把已压缩总结与近期对话渲染成生成提示使用的历史文本。"""
-    lines = []
-    if snapshot.summary.text:
-        lines.append(snapshot.summary.text)
-    lines.extend(f"{entry.source}: {entry.content.text}" for entry in snapshot.entries)
-    return "\n".join(lines)
-
-
-def _reply_actions(
-    request: d.HandleStimulusRequest,
-    drafts,
-    message_ids: tuple[str, ...],
-    *,
-    prefix: str = "r",
-) -> tuple[d.Action, ...]:
-    """把回复草稿按序转成 Say/Sing 行动；空白且演唱的草稿被丢弃。
-
-    prefix 区分同一请求内不同阶段的计划，避免临时与正式行动标识冲突。
-    """
-    actions: list[d.Action] = []
-    if len(drafts) != len(message_ids):
-        raise ValueError("reply drafts and message ids must stay aligned")
-    for index, (draft, message_id) in enumerate(zip(drafts, message_ids)):
-        action_id = f"{request.request_id}-{prefix}{index}"
-        expression = d.ChangeExpression(expression_id=draft.expression) if draft.expression else None
-        if draft.sing is not None:
-            actions.append(
-                d.Sing(
-                    action_id=action_id,
-                    song_id=draft.sing[0],
-                    segment_id=draft.sing[1],
-                    expression=expression,
-                    content=_reply_text(draft),
-                    message_id=message_id,
-                )
-            )
-        elif draft.content.strip():
-            actions.append(
-                d.Say(
-                    action_id=action_id,
-                    content=draft.content,
-                    sound_content=draft.sound_content or None,
-                    prepared_audio_ref=None,
-                    tone=d.Tone(value=draft.tone or "normal"),
-                    expression=expression,
-                    delivery=d.OutputDelivery.CONVERSATION,
-                    message_id=message_id,
-                )
-            )
-    return tuple(actions)
-
-
-def _deliverable_drafts(drafts):
-    """只保留能够由 Say/Sing 处理器执行的草稿。"""
-    return tuple(
-        draft
-        for draft in drafts
-        if (draft.sing is not None and draft.sing[0].strip() and draft.sing[1].strip())
-        or (draft.sing is None and draft.content.strip() and draft.sound_content.strip())
-    )
-
-
-def _reply_text(draft) -> str:
-    """返回实时呈现与历史记录共用的回复正文。"""
-    return f"{draft.content}\n{draft.lyrics}".strip() if draft.lyrics else draft.content
-
-
-def _reply_entries(drafts) -> tuple[ConversationEntry, ...]:
-    """把回复草稿转成 agent 侧正式对话记录。"""
-    entries: list[ConversationEntry] = []
-    for draft in drafts:
-        if draft.sing is not None:
-            song, segment = draft.sing
-            entries.append(
-                ConversationEntry(
-                    entry_id=str(uuid4()),
-                    timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
-                    source=ConversationSource.AGENT.value,
-                    content=SongContent(_reply_text(draft), song, segment),
-                )
-            )
-        elif draft.content.strip():
-            entries.append(
-                ConversationEntry(
-                    entry_id=str(uuid4()),
-                    timestamp=datetime.now(timezone.utc).astimezone().replace(tzinfo=None),
-                    source=ConversationSource.AGENT.value,
-                    content=TextContent(draft.content),
-                )
-            )
-    return tuple(entries)
 
 
 def _attach_recall(plans: PlanEmitter, request: d.HandleStimulusRequest, hits) -> None:
@@ -348,7 +255,7 @@ class ChatReplyHandler:
             handling_invocation(request, plans.context),
             user_context=plans.context.user.read(),
             reply_topic=reply_topic,
-            conversation_history=_render_history(plans.context.conversation.read()),
+            conversation_history=render_conversation_history(plans.context.conversation.read()),
             memory_queries=(),
             sing_attempts=(),
             excluded_segments=set(),
@@ -379,7 +286,7 @@ class ChatReplyHandler:
             handling_invocation(request, plans.context),
             user_context=plans.context.user.read(),
             reply_topic=reply_topic,
-            conversation_history=_render_history(snapshot),
+            conversation_history=render_conversation_history(snapshot),
             memory_queries=(reply_topic,),
             sing_attempts=self._understanding.extract_terms(reply_topic),
             excluded_segments=_recent_sung_segments(snapshot),
@@ -398,9 +305,7 @@ class ChatReplyHandler:
         plans: PlanEmitter, request: d.HandleStimulusRequest, pending: tuple[str, ...], drafts, *, prefix: str
     ) -> None:
         """把一组草稿落库并作为一份独立完整计划交付；无可交付行动时不产生计划。"""
-        deliverable = _deliverable_drafts(drafts)
-        entries = _reply_entries(deliverable)
-        actions = _reply_actions(request, deliverable, tuple(entry.entry_id for entry in entries), prefix=prefix)
+        entries, actions = build_reply_delivery(request, tuple(drafts), prefix=prefix)
         if not actions:
             return
         plans.set_interruptible(False)

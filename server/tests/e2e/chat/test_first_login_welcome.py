@@ -90,6 +90,7 @@ async def test_first_login_waits_for_ready_then_emits_two_persistent_final_packa
     handler = FirstLoginHandler(
         prepared_names=("welcome_1", "welcome_2"),
         prepared_speech=resources,
+        composition=SimpleNamespace(),
     )
     agent = Agent(
         character_id="luotianyi",

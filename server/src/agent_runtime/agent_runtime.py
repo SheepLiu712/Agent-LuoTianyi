@@ -189,6 +189,7 @@ class AgentRuntime:
                 FirstLoginHandler(
                     prepared_names=first_login_names,
                     prepared_speech=self.skills.prepared_speech,
+                    composition=self.skills.response_composition,
                 ),
             ),
             (
