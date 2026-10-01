@@ -9,6 +9,7 @@ from typing_extensions import assert_never
 
 import src.domain.agent as d
 from src.agent.context.models import (
+    AudioContent,
     ConversationEntry,
     ImageContent,
     RecallEntry,
@@ -18,6 +19,7 @@ from src.agent.context.models import (
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
 from src.agent.processing.reply_delivery import build_reply_delivery, render_conversation_history
 from src.agent.skills.cognitive import (
+    AudioUnderstandingSkill,
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
     ResponseCompositionSkill,
@@ -56,10 +58,12 @@ class ChatPreprocessingHandler:
         self,
         text_understanding: TextPreprocessingSkill,
         image_understanding: ImageUnderstandingSkill | None = None,
+        audio_understanding: AudioUnderstandingSkill | None = None,
     ) -> None:
         """注入文本线索提取与可选的受控图片理解技能。"""
         self._text_understanding = text_understanding
         self._image_understanding = image_understanding
+        self._audio_understanding = audio_understanding
 
     async def handle(self, request: d.HandleStimulusRequest, plans: PlanEmitter) -> d.HandlingReport:
         """文本先理解并落库，再返回 READY 结果；不交付计划，不消费本批输入。"""
@@ -114,7 +118,38 @@ class ChatPreprocessingHandler:
                     conversation_entry_ids=(media_entry.entry_id,),
                 )
             case d.VoiceMessage():
-                prepared = d.PreprocessedInput(stimulus_id=stimulus.stimulus_id, text=None)
+                if self._audio_understanding is None:
+                    raise RuntimeError("Audio understanding skill is not configured")
+                if stimulus.media_ref is None:
+                    raise RuntimeError("Voice stimulus requires persisted audio media")
+                owner_user_id = request.interaction.user_id
+                if owner_user_id is None:
+                    raise RuntimeError("Voice stimulus requires an authenticated user")
+                media, status, result = await self._audio_understanding.understand(
+                    stimulus.media_ref,
+                    owner_user_id=owner_user_id,
+                )
+                audio = AudioContent(
+                    media_id=stimulus.media_ref.media_id,
+                    mime_type=media.mime_type,
+                    duration_ms=stimulus.duration_ms,
+                    understanding_status=status,
+                    transcript=result.transcript,
+                    emotion=result.emotion,
+                    sound_description=result.sound_description,
+                )
+                entry = ConversationEntry(
+                    entry_id=stimulus.message_uuid,
+                    timestamp=fact_time,
+                    source=ConversationSource.USER.value,
+                    content=audio,
+                )
+                await plans.context.conversation.append((entry,))
+                prepared = d.PreprocessedInput(
+                    stimulus_id=stimulus.stimulus_id,
+                    text=audio.text,
+                    conversation_entry_ids=(entry.entry_id,),
+                )
             case d.UserTyping() | d.ImageSelectionOpened() | d.ImageSelectionClosed() | d.TouchInteraction():
                 prepared = None
             case unreachable:
