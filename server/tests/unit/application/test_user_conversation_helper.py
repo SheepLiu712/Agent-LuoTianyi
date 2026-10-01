@@ -43,3 +43,36 @@ async def test_image_history_hides_agent_description_and_keeps_one_image_item():
         ],
         "start_index": 0,
     }
+
+
+@pytest.mark.asyncio
+async def test_audio_history_hides_understanding_metadata_and_reports_availability():
+    item = ConversationItem(
+        uuid="audio-entry",
+        timestamp="2026-09-20 12:00:00",
+        source="user",
+        type="audio",
+        content="[音频]用户说：不应公开",
+        data={"media_id": "media", "duration_ms": 15320, "transcript": "不应公开"},
+    )
+    service = SimpleNamespace(
+        get_total_conversation_count=lambda _user_id: 1,
+        get_history_from_db=lambda *_args: [item],
+    )
+    resolver = SimpleNamespace(resolve=lambda *_args, **_kwargs: SimpleNamespace(data=b"audio"))
+
+    result = await UserConversationHelper(
+        SimpleNamespace(conversation_service=service), resolver
+    ).handle_history_request("user", 10, -1)
+
+    assert result["history"] == [
+        {
+            "uuid": "audio-entry",
+            "content": "[语音消息]",
+            "source": "user",
+            "timestamp": "2026-09-20 12:00:00",
+            "type": "audio",
+            "duration_ms": 15320,
+            "audio_available": True,
+        }
+    ]
