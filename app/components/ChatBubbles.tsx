@@ -8,6 +8,7 @@ import { VoiceBubble } from './VoiceBubble';
 interface MessageItemProps {
   message: ChatMessage;
   onToggleAgentAudio?: (uuid: string) => void;
+  onToggleVoicePlayback?: (uuid: string) => void;
   theme?: AppTheme;
 }
 
@@ -97,14 +98,14 @@ export const SystemMessage: React.FC<MessageItemProps> = ({ message, theme = THE
 );
 
 // 统一的消息渲染组件
-export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio, theme = THEMES.light }) => {
+export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio, onToggleVoicePlayback, theme = THEMES.light }) => {
   if (message.type === 'system') {
     return <SystemMessage message={message} theme={theme} />;
   }
   if (message.type === 'image') {
     return <ChatImageBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
   }
-  if (message.type === 'audio') return <VoiceBubble message={message} theme={theme} />;
+  if (message.type === 'audio') return <VoiceBubble message={message} theme={theme} onPlay={() => onToggleVoicePlayback?.(message.uuid)} onRetry={() => onToggleVoicePlayback?.(message.uuid)} />;
   return <ChatBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
 };
 

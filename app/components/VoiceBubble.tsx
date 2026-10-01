@@ -7,10 +7,14 @@ import { AppTheme, THEMES } from '../utils/theme';
 export function VoiceBubble({ message, theme = THEMES.light, onPlay, onRetry }: { message: ChatMessage; theme?: AppTheme; onPlay?: () => void; onRetry?: () => void }) {
   const playing = message.audioPlayState === 'playing';
   const waiting = message.sendStatus === 'waiting';
+  const loading = message.audioDownloadState === 'loading';
+  const failed = message.audioDownloadState === 'failed';
+  const unavailable = message.audioAvailable === false;
   const status = message.sendStatus === 'failed' ? require('../assets/images/failed_msg.png') : waiting ? require('../assets/images/waiting_msg.png') : null;
-  return <View style={styles.row} accessible accessibilityLabel={`用户语音消息，${formatVoiceDuration(message.durationMs || 0)}，${playing ? '停止' : '播放'}`}>
+  const unavailableLabel = unavailable ? '语音不可用，无法重试' : undefined;
+  return <View style={styles.row} accessible accessibilityLabel={`用户语音消息，${formatVoiceDuration(message.durationMs || 0)}，${unavailable ? unavailableLabel : playing ? '停止' : '播放'}`}>
     <TouchableOpacity disabled={message.sendStatus !== 'failed'} onPress={onRetry} style={styles.slot}>{status ? <Image source={status} style={styles.icon} /> : null}</TouchableOpacity>
-    <TouchableOpacity disabled={waiting} onPress={onPlay} style={styles.slot}><Text style={[styles.control, { color: theme.userBubbleText }]}>{playing ? '■' : '▶'}</Text></TouchableOpacity>
+    <TouchableOpacity disabled={waiting || loading} onPress={onPlay} style={styles.slot} accessibilityLabel={unavailable ? unavailableLabel : failed ? '语音加载失败，点击重试' : playing ? '停止播放' : loading ? '正在加载语音' : '播放语音'}><Text style={[styles.control, { color: theme.userBubbleText }]}>{playing ? '■' : loading ? '…' : unavailable || failed ? '!' : '▶'}</Text></TouchableOpacity>
     <View style={[styles.bubble, { width: voiceBubbleWidth(message.durationMs || 0), backgroundColor: theme.userBubble }]}><Text style={{ color: theme.userBubbleText }}>{formatVoiceDuration(message.durationMs || 0)}</Text><View style={styles.audioIcon}><View style={[styles.dot, { backgroundColor: theme.userBubbleText }]} /><View style={[styles.arc, { borderColor: theme.userBubbleText }]} /><View style={[styles.arc, styles.arc2, { borderColor: theme.userBubbleText }]} /></View></View>
   </View>;
 }
