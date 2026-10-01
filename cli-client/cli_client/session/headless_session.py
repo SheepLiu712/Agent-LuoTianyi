@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import math
 import re
 import threading
 import time
@@ -73,6 +75,10 @@ class SessionImageError(SessionError):
     pass
 
 
+class SessionVoiceError(SessionError):
+    pass
+
+
 @dataclass
 class _ReplyBuffer:
     uuid: str
@@ -102,6 +108,10 @@ class _ReplyBuffer:
 
 
 class HeadlessSession:
+    VOICE_CHUNK_BYTES = 48 * 1024
+    VOICE_MAX_BYTES = 1024 * 1024
+    VOICE_MAX_CHUNKS = 32
+
     def __init__(
         self,
         base_url: str,
@@ -271,6 +281,154 @@ class HeadlessSession:
             ack_timeout=ack_timeout,
             client_msg_id=client_msg_id,
         )
+
+    def send_voice(
+        self,
+        audio_path: str | Path,
+        *,
+        upload_id: str,
+        ack_timeout: float = 10.0,
+        retry_budget: float = 15.0,
+    ) -> dict:
+        """Upload an M4A file through begin/chunk/finalize and return server metadata."""
+        if self.state != SessionState.READY:
+            raise SessionNotReadyError("session is not ready")
+        path = Path(audio_path)
+        if path.suffix.lower() != ".m4a":
+            raise SessionVoiceError("voice input must be an M4A file")
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise SessionVoiceError(f"voice input could not be read: {exc}") from exc
+        if not data or len(data) > self.VOICE_MAX_BYTES:
+            raise SessionVoiceError("voice input size must be between 1 byte and 1 MiB")
+        total_chunks = math.ceil(len(data) / self.VOICE_CHUNK_BYTES)
+        if total_chunks > self.VOICE_MAX_CHUNKS:
+            raise SessionVoiceError("voice input exceeds the 32 chunk limit")
+        chunks = [
+            data[offset : offset + self.VOICE_CHUNK_BYTES]
+            for offset in range(0, len(data), self.VOICE_CHUNK_BYTES)
+        ]
+        deadline = time.monotonic() + max(0.0, retry_budget)
+
+        recording_ack = self._transport.submit_voice_recording_started(upload_id, ack_timeout=min(5.0, ack_timeout))
+        if not recording_ack.get("ok"):
+            raise SessionVoiceError(recording_ack.get("error") or "voice recording start rejected")
+
+        begin = self._submit_voice_phase(
+            "begin",
+            upload_id,
+            ack_timeout,
+            deadline,
+            byte_length=len(data),
+            total_chunks=total_chunks,
+        )
+        if not begin.get("ok"):
+            raise SessionVoiceError(begin.get("error") or "voice begin rejected")
+        self._upload_voice_chunks(chunks, upload_id, ack_timeout, deadline, abort_on_failure=True)
+        final = self._finalize_voice_upload(chunks, upload_id, ack_timeout, deadline)
+        if not final.get("ok"):
+            self._abort_voice_upload(upload_id, ack_timeout)
+            raise SessionVoiceError(final.get("error") or "voice finalize rejected")
+        message_uuid = final.get("message_uuid")
+        duration_ms = final.get("duration_ms")
+        if not isinstance(message_uuid, str) or type(duration_ms) is not int:
+            raise SessionVoiceError("voice finalize ACK omitted message metadata")
+        return {"message_uuid": message_uuid, "duration_ms": duration_ms}
+
+    def _submit_voice_phase(
+        self,
+        phase: str,
+        upload_id: str,
+        ack_timeout: float,
+        deadline: float,
+        **kwargs,
+    ) -> dict:
+        while True:
+            result = self._transport.submit_user_voice(
+                phase,
+                upload_id,
+                ack_timeout=min(ack_timeout, max(0.1, deadline - time.monotonic())),
+                **kwargs,
+            )
+            if phase == "finalize" and result.get("code") == "VOICE_MISSING_CHUNKS":
+                return result
+            retryable = result.get("retryable", not result.get("drop", False))
+            if result.get("ok") or not retryable or time.monotonic() >= deadline:
+                return result
+            time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+
+    def _upload_voice_chunks(
+        self,
+        chunks: list[bytes],
+        upload_id: str,
+        ack_timeout: float,
+        deadline: float,
+        *,
+        abort_on_failure: bool,
+    ) -> None:
+        for index, chunk in enumerate(chunks):
+            ack = self._submit_voice_phase(
+                "chunk",
+                upload_id,
+                ack_timeout,
+                deadline,
+                chunk_index=index,
+                audio_chunk=chunk,
+            )
+            if ack.get("ok"):
+                continue
+            if abort_on_failure:
+                self._abort_voice_upload(upload_id, ack_timeout)
+            suffix = "" if abort_on_failure else " retry"
+            raise SessionVoiceError(ack.get("error") or f"voice chunk {index}{suffix} rejected")
+
+    def _finalize_voice_upload(
+        self,
+        chunks: list[bytes],
+        upload_id: str,
+        ack_timeout: float,
+        deadline: float,
+    ) -> dict:
+        final = self._submit_voice_phase("finalize", upload_id, ack_timeout, deadline)
+        missing_chunks = not final.get("ok") and final.get("code") == "VOICE_MISSING_CHUNKS"
+        if not missing_chunks or time.monotonic() >= deadline:
+            return final
+        self._upload_voice_chunks(chunks, upload_id, ack_timeout, deadline, abort_on_failure=False)
+        return self._submit_voice_phase("finalize", upload_id, ack_timeout, deadline)
+
+    def _abort_voice_upload(self, upload_id: str, ack_timeout: float) -> None:
+        try:
+            self._transport.submit_user_voice("abort", upload_id, ack_timeout=ack_timeout)
+        except Exception:
+            pass
+
+    def assert_voice_in_history(
+        self,
+        message_uuid: str,
+        duration_ms: int | None = None,
+        *,
+        count: int = 100,
+    ):
+        """Return the matching sanitized audio history item or fail the driver."""
+        history, _ = self.get_history(count=count, end_index=-1)
+        matches = [item for item in history if item.uuid == message_uuid and item.type == "audio"]
+        if len(matches) != 1:
+            raise AssertionError(f"expected exactly one audio history item for {message_uuid}, got {len(matches)}")
+        item = matches[0]
+        if item.content != "[语音消息]" or item.audio_available is not True:
+            raise AssertionError("audio history metadata is missing or not sanitized")
+        if duration_ms is not None and item.duration_ms != duration_ms:
+            raise AssertionError(f"audio duration mismatch: expected {duration_ms}, got {item.duration_ms}")
+        return item
+
+    def assert_download_sha256(self, message_uuid: str, source_path: str | Path) -> str:
+        """Download an owned voice and assert its bytes equal the source digest."""
+        expected = hashlib.sha256(Path(source_path).read_bytes()).hexdigest()
+        actual = hashlib.sha256(self._network_client.download_audio(message_uuid)).hexdigest()
+        if actual != expected:
+            raise AssertionError(f"audio SHA-256 mismatch: expected {expected}, got {actual}")
+        return actual
 
     def send_touch(
         self,
