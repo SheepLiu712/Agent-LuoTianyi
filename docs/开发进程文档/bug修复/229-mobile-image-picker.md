@@ -6,7 +6,7 @@
 | Issue | [#229](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/229) |
 | 来源 | 《AgentLuo bug收集》（腾讯文档） |
 | 流程 | 普通修复：dev → fix/ → PR → dev |
-| 状态 | 计划（首提交占位），实现与验证待进行 |
+| 状态 | 实现完成，待验证 |
 
 ## 触发条件
 部分机型点击「选择图片」：接口不弹出、界面无响应（原生抛错被静默忽略 / 权限路径失败）。
