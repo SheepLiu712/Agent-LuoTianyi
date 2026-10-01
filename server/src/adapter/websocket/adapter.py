@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import src.domain.agent as d
 from src.domain.stage import AgentPresentationChanged, CancelDelivery, StageOutput
-from src.infrastructure.media import MediaResolutionError, PermanentMediaStore
+from src.infrastructure.media import MediaResolutionError, MediaResolutionErrorCode, PermanentMediaStore
 from src.utils.owned_operation import complete_owned
 from src.web.websocket import WSMessage
 
@@ -39,6 +39,22 @@ class ChatEventAcceptance(str, Enum):
     BAD_MESSAGE = "bad_message"
     UNSUPPORTED = "unsupported"
     OVERLOADED = "overloaded"
+
+
+@dataclass(frozen=True)
+class EventRejection:
+    """Stable negative acknowledgement details for a rejected event."""
+
+    code: str
+    message: str
+    retryable: bool = False
+
+
+_MEDIA_REJECTION_MESSAGES = {
+    MediaResolutionErrorCode.TOO_LARGE.value: "图片过大（上限约 6 MB），请选择更小的图片",
+    MediaResolutionErrorCode.UNSUPPORTED_TYPE.value: "不支持的图片格式",
+    MediaResolutionErrorCode.NOT_CONFIGURED.value: "服务端未配置媒体存储",
+}
 
 
 class WebSocketAdapter:
@@ -68,7 +84,7 @@ class WebSocketAdapter:
         self,
         connection: WebSocketConnection,
         event: WSMessage,
-    ) -> ChatEventAcceptance:
+    ) -> ChatEventAcceptance | EventRejection:
         """Validate, deduplicate, translate, and submit one authenticated channel event."""
         if not self.supports_input(event):
             return ChatEventAcceptance.UNSUPPORTED
@@ -78,7 +94,13 @@ class WebSocketAdapter:
             if self.is_duplicate_client_message(connection, event):
                 return ChatEventAcceptance.DUPLICATE
             accepted = await self.receive_event(connection, event)
-        except (KeyError, MediaResolutionError, TypeError, ValueError):
+        except MediaResolutionError as error:
+            code = error.code.value if isinstance(error.code, MediaResolutionErrorCode) else str(error.code)
+            return EventRejection(
+                code=code,
+                message=_MEDIA_REJECTION_MESSAGES.get(code, "图片无法读取或已损坏"),
+            )
+        except (KeyError, TypeError, ValueError):
             return ChatEventAcceptance.BAD_MESSAGE
         if not accepted:
             return ChatEventAcceptance.OVERLOADED
