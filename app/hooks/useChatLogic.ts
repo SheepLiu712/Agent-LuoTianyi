@@ -8,6 +8,7 @@ import { MessageProcessor } from '../utils/message_processor';
 import { NetworkClient } from '../utils/network_client';
 import { AgentMessagePayload, ChatMessage, createSystemChatMessage } from '../types/chat';
 import { addDebugTrace } from '../utils/debug_trace';
+import { useVoiceInput } from './useVoiceInput';
 
 function createUuid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -28,6 +29,7 @@ export const useChatLogic = (
   const binderRef = useRef<AgentBinder | null>(null);
   const messageProcessorRef = useRef<MessageProcessor | null>(null);
   const clickTimestampsRef = useRef<number[]>([]);
+  const voiceFilesRef = useRef(new Map<string, { localUri: string; durationMs: number }>());
 
   const updateMessageByUuid = useCallback((uuid: string, updater: (msg: ChatMessage) => ChatMessage) => {
     setMessages((prev) => prev.map((msg) => (msg.uuid === uuid ? updater(msg) : msg)));
@@ -124,6 +126,10 @@ export const useChatLogic = (
         sendImageSelectingCancel: async () => {
           await messageProcessorRef.current?.sendImageSelectingCancel();
         },
+        sendVoiceRecordingStarted: async (recordingId) => { await networkClientRef.current?.sendVoiceRecordingStarted(recordingId); },
+        sendVoiceRecordingCancelled: async (recordingId) => { await networkClientRef.current?.sendVoiceRecordingCancelled(recordingId); },
+        sendVoice: async (uuid, localUri, durationMs) => { await messageProcessorRef.current?.sendVoice(uuid, localUri, durationMs); },
+        retryVoice: async (uuid) => { const file = voiceFilesRef.current.get(uuid); if (file) await messageProcessorRef.current?.sendVoice(uuid, file.localUri, file.durationMs); },
         playLocalTts: async (convUuid) => {
           addDebugTrace('audio-ui', 'binder playLocalTts called', { convUuid });
           return (await messageProcessorRef.current?.playLocalTtsByUuid(convUuid)) || false;
@@ -197,6 +203,18 @@ export const useChatLogic = (
 
   const canSend = useMemo(() => inputText.trim().length > 0, [inputText]);
   const canSendImage = true;
+
+  const voiceInput = useVoiceInput({
+    onRecordingStarted: (recordingId) => { void binderRef.current?.sendVoiceRecordingStarted(recordingId); },
+    onRecordingCancelled: (recordingId) => { void binderRef.current?.sendVoiceRecordingCancelled(recordingId); },
+    onRecordingCommitted: ({ uploadId, localUri, durationMs }) => {
+      voiceFilesRef.current.set(uploadId, { localUri, durationMs });
+      setMessages((prev) => [{ uuid: uploadId, type: 'audio', content: '[语音消息]', isUser: true, timestamp: Date.now(), durationMs, audioLocalUri: localUri, sendStatus: 'waiting' }, ...prev]);
+      void binderRef.current?.sendVoice(uploadId, localUri, durationMs);
+    },
+    onStopAllAudio: async () => { await binderRef.current?.stopLocalTts(); webviewRef.current?.injectJavaScript('window.stopServerAudio(); true;'); },
+    onNotice: appendSystemMessage,
+  });
 
   const handleWebViewMessage = useCallback((event: any) => {
     try {
@@ -403,5 +421,6 @@ export const useChatLogic = (
     handleSendImage,
     handleWebViewMessage,
     handleToggleAgentAudio,
+    voiceInput,
   };
 };

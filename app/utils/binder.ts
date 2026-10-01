@@ -8,6 +8,10 @@ export interface BinderSendCallbacks {
   sendTyping: (textLength: number) => Promise<void>;
   sendImageSelecting: () => Promise<void>;
   sendImageSelectingCancel: () => Promise<void>;
+  sendVoiceRecordingStarted?: (recordingId: string) => Promise<void>;
+  sendVoiceRecordingCancelled?: (recordingId: string) => Promise<void>;
+  sendVoice?: (uuid: string, localUri: string, durationMs: number) => Promise<void>;
+  retryVoice?: (uuid: string) => Promise<void>;
   playLocalTts: (convUuid: string) => Promise<boolean>;
   stopLocalTts: () => Promise<void>;
 }
@@ -48,6 +52,10 @@ export class AgentBinder {
   sendImageSelectingCancel() {
     return this.sendCallbacks.sendImageSelectingCancel();
   }
+  sendVoiceRecordingStarted(id: string) { return this.sendCallbacks.sendVoiceRecordingStarted?.(id) || Promise.resolve(); }
+  sendVoiceRecordingCancelled(id: string) { return this.sendCallbacks.sendVoiceRecordingCancelled?.(id) || Promise.resolve(); }
+  sendVoice(uuid: string, uri: string, durationMs: number) { return this.sendCallbacks.sendVoice?.(uuid, uri, durationMs) || Promise.resolve(); }
+  retryVoice(uuid: string) { return this.sendCallbacks.retryVoice?.(uuid) || Promise.resolve(); }
 
   playLocalTts(convUuid: string) {
     return this.sendCallbacks.playLocalTts(convUuid);

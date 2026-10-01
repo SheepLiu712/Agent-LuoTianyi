@@ -24,6 +24,9 @@ export const WSEventType = {
   USER_TOUCH: "user_touch",
   USER_IMAGE_SELECTING: "user_image_selecting",
   USER_IMAGE_SELECTING_CANCEL: "user_image_selecting_cancel",
+  USER_VOICE_RECORDING_STARTED: "user_voice_recording_started",
+  USER_VOICE_RECORDING_CANCELLED: "user_voice_recording_cancelled",
+  USER_VOICE: "user_voice",
   // 心跳
   HB_PING: "hb_ping",
   HB_PONG: "hb_pong",

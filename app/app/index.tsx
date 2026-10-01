@@ -24,6 +24,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
+import { VoiceInputBar } from '../components/VoiceInputBar';
+import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from '../hooks/useHistoryLogic';
 import { getDynamicUnreadStatus } from '../utils/dynamics';
@@ -85,6 +87,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     handleSendImage,
     handleWebViewMessage,
     handleToggleAgentAudio,
+    voiceInput,
   } = useChatLogic(webviewRef, username, message_token);
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
@@ -435,7 +438,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: theme.inputBar, borderTopColor: theme.inputBorder },
           ]}
         >
-          <TextInput
+           {voiceInput.mode === 'text' ? <TextInput
             style={[
               styles.inputField,
               {
@@ -450,25 +453,43 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             onChangeText={setInputText}
             multiline={true}
             onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
-          />
+           /> : <View style={{ flex: 1 }} />}
 
-          <TouchableOpacity style={styles.iconButton} onPress={handleSendImage} disabled={!canSendImage}>
+          {voiceInput.mode === 'voice' ? <VoiceInputBar
+            mode={voiceInput.mode}
+            inputText={inputText}
+            onInputChange={setInputText}
+            onToggleMode={voiceInput.toggleMode}
+            onSendText={handleSendText}
+            onSendImage={handleSendImage}
+            canSend={canSend}
+            canSendImage={canSendImage}
+            captureState={voiceInput.captureState}
+            pressIn={voiceInput.pressIn}
+            pressMove={voiceInput.pressMove}
+            pressOut={voiceInput.pressOut}
+            theme={theme}
+          /> : null}
+
+           {voiceInput.mode === 'text' ? <TouchableOpacity style={styles.iconButton} onPress={handleSendImage} disabled={!canSendImage}>
             <Image
               source={
                 canSendImage ? require('../assets/images/image_button_activate.png') : require('../assets/images/image_button_un.png')
               }
               style={styles.iconImage}
             />
-          </TouchableOpacity>
+           </TouchableOpacity> : null}
 
-          <TouchableOpacity style={styles.iconButton} onPress={handleSendText} disabled={!canSend}>
+           {voiceInput.mode === 'text' ? <TouchableOpacity style={styles.iconButton} onPress={handleSendText} disabled={!canSend}>
             <Image
               source={canSend ? require('../assets/images/send_button_activate.png') : require('../assets/images/send_button_un.png')}
               style={styles.iconImage}
             />
-          </TouchableOpacity>
+           </TouchableOpacity> : null}
         </View>
       </View>
+
+      {voiceInput.captureState === 'Recording' || voiceInput.captureState === 'CancelZone' ? <VoiceRecordingOverlay elapsedMs={voiceInput.elapsedMs} cancelZone={voiceInput.isCancelZone} meter={voiceInput.smoothedMeter} theme={theme} /> : null}
 
       <Animated.View
         pointerEvents={drawerOpen ? 'auto' : 'none'}

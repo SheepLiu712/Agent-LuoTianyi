@@ -208,6 +208,18 @@ export class WebSocketTransport {
     return this.sendWithAck(WSEventType.USER_IMAGE_SELECTING_CANCEL, {}, ackTimeout, clientMsgId);
   }
 
+  async submitVoiceRecordingStarted(recordingId: string, ackTimeout = 5000, clientMsgId?: string) {
+    return this.sendWithAck(WSEventType.USER_VOICE_RECORDING_STARTED, { recording_id: recordingId }, ackTimeout, clientMsgId);
+  }
+
+  async submitVoiceRecordingCancelled(recordingId: string, ackTimeout = 5000, clientMsgId?: string) {
+    return this.sendWithAck(WSEventType.USER_VOICE_RECORDING_CANCELLED, { recording_id: recordingId }, ackTimeout, clientMsgId);
+  }
+
+  async submitVoicePhase(payload: Record<string, unknown>, ackTimeout = 5000, clientMsgId?: string) {
+    return this.sendWithAck(WSEventType.USER_VOICE, payload, ackTimeout, clientMsgId);
+  }
+
   private connect() {
     if (this.isStopped) {
       return;

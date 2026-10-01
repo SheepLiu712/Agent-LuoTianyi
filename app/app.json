@@ -27,7 +27,8 @@
       "versionCode": 6,
       "permissions": [
         "INTERNET",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "RECORD_AUDIO"
       ]
     },
     "web": {
