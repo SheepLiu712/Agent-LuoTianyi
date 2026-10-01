@@ -45,3 +45,36 @@ async def test_get_image_resolves_permanent_media_from_single_conversation_entry
 
     assert response.media_type == "image/png"
     assert b"".join([chunk async for chunk in response.body_iterator]) == b"image"
+
+
+@pytest.mark.asyncio
+async def test_get_audio_authenticates_owner_and_streams_mp4():
+    credential = SimpleNamespace(authenticate_message_token=lambda token: "user" if token == "token" else None)
+    conversation = SimpleNamespace(get_audio_media_id=lambda user_id, entry_id: "media")
+
+    def resolve(media_ref, *, owner_user_id, expected_kind):
+        assert (media_ref.media_id, owner_user_id, expected_kind) == ("media", "user", "audio")
+        return ResolvedMedia(data=b"audio", mime_type="audio/mp4")
+
+    database = SimpleNamespace(credential_service=credential, conversation_service=conversation)
+    runtime = SimpleNamespace(database_manager=database, media_resolver=SimpleNamespace(resolve=resolve))
+
+    response = await UserInterface(database).get_audio("token", "entry", runtime)
+
+    assert response.media_type == "audio/mp4"
+    assert response.headers["content-length"] == "5"
+    assert b"".join([chunk async for chunk in response.body_iterator]) == b"audio"
+
+
+@pytest.mark.asyncio
+async def test_get_audio_unknown_or_other_owner_is_not_disclosed():
+    database = SimpleNamespace(
+        credential_service=SimpleNamespace(authenticate_message_token=lambda _token: "user"),
+        conversation_service=SimpleNamespace(get_audio_media_id=lambda *_args: None),
+    )
+    runtime = SimpleNamespace(database_manager=database, media_resolver=SimpleNamespace())
+
+    with pytest.raises(Exception) as error:
+        await UserInterface(database).get_audio("token", "entry", runtime)
+
+    assert error.value.status_code == 404

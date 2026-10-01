@@ -127,6 +127,16 @@ async def get_history(
     )
 
 
+@router.get("/media/audio/{message_uuid}")
+async def get_audio(
+    message_uuid: str,
+    authorization: str | None = Header(default=None),
+    server_runtime: "ServerRuntime" = Depends(get_runtime),
+):
+    token = require_bearer_token(authorization)
+    return await server_runtime.user_interface.get_audio(token, message_uuid, server_runtime)
+
+
 @router.get("/dynamics")
 async def list_dynamics(
     request: DynamicListQuery = Depends(),
