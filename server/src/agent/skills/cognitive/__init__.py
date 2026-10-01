@@ -2,6 +2,7 @@
 
 from src.agent.skills.contracts import ComposedReply, ComposedResponse, ReplyDraft
 
+from .audio_understanding import AudioUnderstandingResult, AudioUnderstandingSkill
 from .image_understanding import ImageUnderstandingSkill
 from .intentional_memory import ExplicitMemoryIntentSkill
 from .response_composition import ResponseCompositionSkill
@@ -11,6 +12,8 @@ from .text_preprocessing import TextPreprocessingSkill
 
 __all__ = [
     "CharacterReplyGenerator",
+    "AudioUnderstandingResult",
+    "AudioUnderstandingSkill",
     "ComposedReply",
     "ComposedResponse",
     "ExplicitMemoryIntentSkill",

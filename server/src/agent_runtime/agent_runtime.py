@@ -180,6 +180,7 @@ class AgentRuntime:
         preprocessing = ChatPreprocessingHandler(
             self.skills.text_preprocessing,
             self.skills.image_understanding,
+            self.skills.audio_understanding,
         )
         registrations = [
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.agent.skills.adapters.memory import AgentMemory
 from src.agent.skills.cognitive import (
+    AudioUnderstandingSkill,
     CharacterReplyGenerator,
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
@@ -89,6 +90,11 @@ class SharedSkills:
         self.image_understanding = (
             ImageUnderstandingSkill(config.get("image_understanding", {}), media_resolver, llm_service)
             if media_resolver is not None
+            else None
+        )
+        self.audio_understanding = (
+            AudioUnderstandingSkill(config.get("audio_understanding", {}), media_resolver, llm_service)
+            if media_resolver is not None and hasattr(llm_service, "register_audio_model_module")
             else None
         )
 

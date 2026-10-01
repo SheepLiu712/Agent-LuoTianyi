@@ -8,9 +8,11 @@ from support.routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.context import AudioUnderstandingStatus
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import ImageUnderstandingSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive.audio_understanding import AudioUnderstandingResult
 from src.agent.skills.cognitive.song_entity_linker import SongEntityLinker
 from src.infrastructure.media import MediaResolutionError, ResolvedMedia
 
@@ -54,6 +56,16 @@ class _Conversation:
 
     async def append(self, entries):
         self.entries.extend(entries)
+
+
+class _AudioUnderstanding:
+    async def understand(self, media_ref, *, owner_user_id):
+        assert owner_user_id == "u"
+        return (
+            ResolvedMedia(data=b"audio", mime_type="audio/mp4"),
+            AudioUnderstandingStatus.UNDERSTOOD,
+            AudioUnderstandingResult("你好", "开心", "随后响起掌声。"),
+        )
 
 
 def context(interaction_id="i", user_id="u", character_id="luotianyi"):
@@ -105,6 +117,30 @@ def replace_pending(interaction, stimulus):
         supported_outputs=interaction.supported_outputs,
         response_deadline=interaction.response_deadline,
         connection_state=interaction.connection_state,
+    )
+
+
+def voice_request():
+    voice = d.VoiceMessage(
+        stimulus_id="voice-stimulus",
+        schema_version=1,
+        occurred_at=request().stimulus.occurred_at,
+        source=d.StimulusSource.USER,
+        target_character_ids=("luotianyi",),
+        user_id="u",
+        ephemeral=False,
+        message_uuid="6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+        media_ref=d.MediaRef(media_id="audio-id"),
+        transcript=None,
+        client_msg_id="voice-client",
+        duration_ms=1234,
+    )
+    base = request()
+    return d.HandleStimulusRequest(
+        request_id="voice-request",
+        stimulus=voice,
+        interaction=replace_pending(base.interaction, voice),
+        cancellation=d.CancellationToken(),
     )
 
 
@@ -199,6 +235,29 @@ async def test_illegal_media_stops_before_image_understanding(error):
     assert report.preprocessed_input is None
     assert understanding.calls == []
     assert ctx.conversation.entries == []
+
+
+@pytest.mark.asyncio
+async def test_voice_builds_audio_entry_and_nonempty_preprocessed_text():
+    handler = ChatPreprocessingHandler(_Understanding(), None, _AudioUnderstanding())
+    runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.VOICE_MESSAGE, handler)]))
+    ctx = context()
+
+    report = await runtime.handle_stimulus(voice_request(), Sink(), context=ctx)
+
+    assert len(ctx.conversation.entries) == 1
+    entry = ctx.conversation.entries[0]
+    assert entry.entry_id == "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    assert entry.content.media_id == "audio-id"
+    assert entry.content.mime_type == "audio/mp4"
+    assert entry.content.duration_ms == 1234
+    assert entry.content.understanding_status is AudioUnderstandingStatus.UNDERSTOOD
+    assert entry.content.transcript == "你好"
+    assert entry.content.emotion == "开心"
+    assert entry.content.sound_description == "随后响起掌声。"
+    assert entry.content.text == "[音频]用户带着开心的情绪说：“你好”；随后响起掌声。"
+    assert report.preprocessed_input.text == entry.content.text
+    assert report.preprocessed_input.conversation_entry_ids == (entry.entry_id,)
 
 
 def test_text_preprocessing_skill_returns_terms(monkeypatch):
