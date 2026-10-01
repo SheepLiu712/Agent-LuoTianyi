@@ -311,11 +311,7 @@ class ChatStage:
         """接收原始刺激，更新等待策略并启动独立预处理。"""
         self._revision += 1
         self._last_activity_at = datetime.now(timezone.utc)
-        if isinstance(
-            stimulus,
-            (d.VoiceRecordingStarted, d.VoiceRecordingCancelled, d.VoiceRecordingCommitted, d.VoiceUploadFailed),
-        ):
-            # VM-4 将实现协调时间线；当前只保证这些瞬时事实可被 Stage 安全接纳。
+        if self._apply_voice_coordination(stimulus):
             self._refresh_deadline()
             return
         if isinstance(stimulus, _CONTENT):
@@ -325,6 +321,8 @@ class ChatStage:
             self._scheduling = True
             self._invalidate_deadline()
         elif isinstance(stimulus, (d.UserTyping, d.ImageSelectionOpened, d.ImageSelectionClosed)):
+            if isinstance(stimulus, d.ImageSelectionOpened):
+                self._cancel_reply_attempts()
             if self._pending:
                 delay = self._config.response_wait
                 if isinstance(stimulus, d.UserTyping):
@@ -338,6 +336,30 @@ class ChatStage:
         request = self._make_request(stimulus, (stimulus,) if not isinstance(stimulus, _COORDINATION) else ())
         self._launch_handle(request, self._on_preprocessing_finished)
         self._refresh_deadline()
+
+    def _apply_voice_coordination(self, stimulus: d.Stimulus) -> bool:
+        if isinstance(stimulus, d.VoiceRecordingStarted):
+            self._cancel_reply_attempts()
+            self._wait_for_pending(self._config.voice_recording_wait)
+            return True
+        if isinstance(stimulus, d.VoiceRecordingCancelled):
+            self._wait_for_pending(self._config.response_wait)
+            return True
+        if isinstance(stimulus, d.VoiceRecordingCommitted):
+            self._wait_for_pending(self._config.voice_commit_wait)
+            return True
+        if isinstance(stimulus, d.VoiceUploadFailed):
+            self._wait_for_pending(self._config.response_wait)
+            return True
+        return False
+
+    def _wait_for_pending(self, delay: float) -> None:
+        if not self._pending:
+            return
+        self._wait_immediate = False
+        self._wait_until = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        self._scheduling = True
+        self._invalidate_deadline()
 
     def _make_request(
         self,
