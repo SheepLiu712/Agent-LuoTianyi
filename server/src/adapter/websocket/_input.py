@@ -50,6 +50,8 @@ def prepare_input(
         "user_touch",
         "user_image_selecting",
         "user_image_selecting_cancel",
+        "user_voice_recording_started",
+        "user_voice_recording_cancelled",
     }
     values = _stimulus_values(event, user_id, targets, ephemeral=ephemeral)
     if event.event_type == "user_typing":
@@ -62,6 +64,10 @@ def prepare_input(
         return PreparedInput(d.ImageSelectionOpened(**values))
     if event.event_type == "user_image_selecting_cancel":
         return PreparedInput(d.ImageSelectionClosed(**values))
+    if event.event_type == "user_voice_recording_started":
+        return PreparedInput(d.VoiceRecordingStarted(**values, recording_id=_recording_id(payload)))
+    if event.event_type == "user_voice_recording_cancelled":
+        return PreparedInput(d.VoiceRecordingCancelled(**values, recording_id=_recording_id(payload)))
     if event.event_type == "user_voice":
         raise ValueError("user_voice protocol is not implemented")
     return _prepare_text(event, payload, values)
@@ -118,6 +124,13 @@ def _prepare_typing(payload: dict, values: dict) -> PreparedInput:
     if type(length) is not int or not 0 <= length <= 100_000:
         raise ValueError("invalid text_length")
     return PreparedInput(d.UserTyping(**values, text_length=length))
+
+
+def _recording_id(payload: dict) -> str:
+    recording_id = payload.get("recording_id")
+    if not isinstance(recording_id, str) or not recording_id.strip() or len(recording_id) > 128:
+        raise ValueError("invalid recording_id")
+    return recording_id
 
 
 def _prepare_touch(payload: dict, values: dict) -> PreparedInput:
