@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from src.infrastructure.config.validation import RuntimeConfigValidator
 from src.infrastructure.config.model_editor import apply_llm_config_draft
 from src.infrastructure.config.secrets import SecretStore
+from src.infrastructure.config.validation import RuntimeConfigValidator
 from src.utils.helpers import load_config
 
 server_root = str(Path(__file__).resolve().parents[3])
@@ -27,6 +27,7 @@ def server_cwd():
 def _validator(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET", "jwt")
     monkeypatch.setenv("AMAP_KEY", "amap")
+    monkeypatch.setenv("QWEN_API_KEY", "qwen")
     return RuntimeConfigValidator(
         root_dir=tmp_path,
         secret_store=SecretStore(tmp_path / "secrets.local.env"),
@@ -90,10 +91,10 @@ def test_empty_and_duplicate_type_id_are_errors(tmp_path, monkeypatch):
 def test_empty_display_name_and_invalid_kind_are_errors(tmp_path, monkeypatch):
     config = _base_config()
     config["llm_service"]["client_model_types"][0]["name"] = ""
-    config["llm_service"]["client_model_types"][1]["model_kind"] = "audio"
+    config["llm_service"]["client_model_types"][1]["model_kind"] = "unknown"
     messages = _type_errors(_validator(tmp_path, monkeypatch).validate(config)).values()
     assert any("显示名称不能为空" in message for message in messages)
-    assert any("llm 或 vlm" in message for message in messages)
+    assert any("llm、vlm 或 audio" in message for message in messages)
 
 
 def test_binding_referencing_missing_type_is_error(tmp_path, monkeypatch):
