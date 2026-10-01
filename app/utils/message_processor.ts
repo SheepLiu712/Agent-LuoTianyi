@@ -17,7 +17,9 @@ type SendKind =
   | 'typing'
   | 'touch'
   | 'image_selecting'
-  | 'image_selecting_cancel';
+  | 'image_selecting_cancel'
+  | 'voice';
+  
 
 type SendItem = { clientMsgId: string; retryAttempt: number; enqueuedAtMs: number } & (
   | { kind: 'text'; uuid: string; text: string }
@@ -27,13 +29,14 @@ type SendItem = { clientMsgId: string; retryAttempt: number; enqueuedAtMs: numbe
   | { kind: 'touch'; touchArea: string | string[]; clickFrequency?: Record<string, number>; touchMeta?: Record<string, unknown> }
   | { kind: 'image_selecting' }
   | { kind: 'image_selecting_cancel' }
+  | { kind: 'voice'; uuid: string; localUri: string; durationMs: number }
 );
 
 export const MAX_DURABLE_RETRY_ATTEMPTS = 8;
 export const MAX_DURABLE_MESSAGE_AGE_MS = 4 * 60 * 1000;
 
 export function isDurableSendKind(kind: SendKind) {
-  return kind === 'text' || kind === 'image' || kind === 'proactive';
+  return kind === 'text' || kind === 'image' || kind === 'proactive' || kind === 'voice';
 }
 
 export function canRetryDurableMessage(
@@ -188,6 +191,11 @@ export class MessageProcessor {
     addDebugTrace('send', 'enqueue image', { uuid, queueLength: this.sendQueue.length, mimeType });
     this.binder.emitMessageStatus(uuid, 'waiting');
     this.startSendLoop();
+  }
+
+  async sendVoice(uuid: string, localUri: string, durationMs: number) {
+    const item: SendItem = { kind: 'voice', uuid, localUri, durationMs, clientMsgId: uuid, retryAttempt: 0, enqueuedAtMs: Date.now() };
+    this.sendQueue.push(item); this.audioPathByUuid.set(uuid, localUri); this.binder.emitMessageStatus(uuid, 'waiting'); this.startSendLoop();
   }
 
   async sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) {
@@ -815,6 +823,7 @@ export class MessageProcessor {
     if (item.kind === 'image') {
       return this.networkClient.sendImage(item.imageUri, item.mimeType, item.clientMsgId);
     }
+    if (item.kind === 'voice') return this.sendVoiceItem(item);
     if (item.kind === 'touch') {
       return this.networkClient.sendTouch(item.touchArea, item.clickFrequency, item.touchMeta, item.clientMsgId);
     }
@@ -825,6 +834,29 @@ export class MessageProcessor {
       return this.networkClient.sendImageSelectingCancel(item.clientMsgId);
     }
     return this.networkClient.sendTypingEvent(item.textLength, item.clientMsgId);
+  }
+
+  private async sendVoiceItem(item: Extract<SendItem, { kind: 'voice' }>): Promise<SendResult> {
+    const info = await FileSystem.getInfoAsync(item.localUri);
+    const size = typeof (info as { size?: number }).size === 'number' ? (info as { size: number }).size : 0;
+    if (!info.exists || size <= 0 || size > 1024 * 1024) return { ok: false, error: 'voice file unavailable or too large', drop: true };
+    const base64 = await FileSystem.readAsStringAsync(item.localUri, { encoding: FileSystem.EncodingType.Base64 });
+    const raw = base64.replace(/^data:[^,]+,/, '').replace(/\s+/g, '');
+    const chunkSize = 48 * 1024;
+    const chunks: string[] = [];
+    for (let offset = 0; offset < raw.length; offset += chunkSize * 4 / 3) chunks.push(raw.slice(offset, offset + chunkSize * 4 / 3));
+    if (chunks.length < 1 || chunks.length > 32) return { ok: false, error: 'invalid voice chunk count', drop: true };
+    const startedAt = Date.now();
+    const send = (payload: Record<string, unknown>, suffix: string) => this.networkClient.sendVoicePhase(payload, `${item.uuid}:${suffix}`);
+    let result = await send({ phase: 'begin', upload_id: item.uuid, mime_type: 'audio/mp4', container: 'm4a', codec: 'aac_lc', byte_length: size, total_chunks: chunks.length }, 'begin');
+    if (!result.ok) return result;
+    for (let i = 0; i < chunks.length; i += 1) {
+      if (Date.now() - startedAt >= 15000) return { ok: false, error: 'voice upload budget exceeded', drop: true };
+      result = await send({ phase: 'chunk', upload_id: item.uuid, chunk_index: i, audio_base64: chunks[i] }, `chunk:${i}`);
+      if (!result.ok) return result;
+    }
+    if (Date.now() - startedAt >= 15000) return { ok: false, error: 'voice upload budget exceeded', drop: true };
+    return send({ phase: 'finalize', upload_id: item.uuid }, 'finalize');
   }
 
   private async saveAudioToLocal(convUuid: string, chunks: string[]): Promise<string | null> {
