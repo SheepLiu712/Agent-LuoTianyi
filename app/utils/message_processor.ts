@@ -55,6 +55,8 @@ interface SendResult {
   ok: boolean;
   error?: string;
   drop?: boolean;
+  message_uuid?: string;
+  duration_ms?: number;
 }
 
 function isTerminalSendError(errorText?: string) {
@@ -122,6 +124,7 @@ export class MessageProcessor {
   private readonly binder: AgentBinder;
   private readonly feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void;
   private readonly stopServerAudio: () => void;
+  private readonly onVoiceFinalized?: (uploadId: string, messageUuid: string, durationMs?: number) => void;
   private sendQueue: SendItem[] = [];
   private sendLoopRunning = false;
   private stopRequested = false;
@@ -145,11 +148,13 @@ export class MessageProcessor {
     binder: AgentBinder,
     feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void,
     stopServerAudio?: () => void,
+    onVoiceFinalized?: (uploadId: string, messageUuid: string, durationMs?: number) => void,
   ) {
     this.networkClient = networkClient;
     this.binder = binder;
     this.feedServerAudioChunk = feedServerAudioChunk;
     this.stopServerAudio = stopServerAudio || (() => {});
+    this.onVoiceFinalized = onVoiceFinalized;
   }
 
   stop() {
@@ -856,7 +861,11 @@ export class MessageProcessor {
       if (!result.ok) return result;
     }
     if (Date.now() - startedAt >= 15000) return { ok: false, error: 'voice upload budget exceeded', drop: true };
-    return send({ phase: 'finalize', upload_id: item.uuid }, 'finalize');
+    const finalized = await send({ phase: 'finalize', upload_id: item.uuid }, 'finalize') as SendResult;
+    if (finalized.ok && finalized.message_uuid) {
+      this.onVoiceFinalized?.(item.uuid, finalized.message_uuid, finalized.duration_ms);
+    }
+    return finalized;
   }
 
   private async saveAudioToLocal(convUuid: string, chunks: string[]): Promise<string | null> {
