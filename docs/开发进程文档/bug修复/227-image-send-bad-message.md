@@ -6,7 +6,7 @@
 | Issue | [#227](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/227) |
 | 来源 | 《AgentLuo bug收集》（腾讯文档） |
 | 流程 | 普通修复：dev → fix/ → PR → dev |
-| 状态 | 计划（首提交占位），实现与验证待进行 |
+| 状态 | 实现完成，待验证 |
 
 ## 触发条件
 PC 端发送的图片在服务端校验失败（格式 / 大小 / 配置缺失）时，仅得到笼统 `[BAD_MESSAGE] chat event payload is invalid`，无法定位原因。
@@ -21,7 +21,7 @@ PC 端发送的图片在服务端校验失败（格式 / 大小 / 配置缺失�
 - `media_store` 缺失（旧 config）时全拒且无告警。
 
 ## 修复点
-1. 结构化错误透传：校验失败携带错误码 + 简述，ack 附 detail（保留 BAD_MESSAGE 类型，兼容既有客户端）；
+1. 结构化错误透传：沿用 ack 的 `code` / `message` / `retryable` 字段返回媒体错误码，保持旧客户端兼容；
 2. 客户端发送前启用 `image_rules` 预检；对话框过滤器与服务端白名单对齐；
 3. `media_store` 缺省时启动告警，杜绝「静默全拒」。
 
