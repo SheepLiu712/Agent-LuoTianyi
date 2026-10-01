@@ -3,6 +3,7 @@ import { Image, ImageSourcePropType, StyleSheet, Text, TouchableOpacity, View } 
 import { CachedImage } from './CachedImage';
 import { ChatMessage } from '../types/chat';
 import { AppTheme, THEMES } from '../utils/theme';
+import { VoiceBubble } from './VoiceBubble';
 
 interface MessageItemProps {
   message: ChatMessage;
@@ -103,6 +104,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgent
   if (message.type === 'image') {
     return <ChatImageBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
   }
+  if (message.type === 'audio') return <VoiceBubble message={message} theme={theme} />;
   return <ChatBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
 };
 
