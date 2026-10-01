@@ -47,3 +47,13 @@ def test_detect_image_mime_maps_known_extensions_case_insensitively():
 def test_detect_image_mime_rejects_unknown_extensions():
     assert image_rules.detect_image_mime("a.txt") is None
     assert image_rules.detect_image_mime("noext") is None
+
+
+def test_validate_image_file_rejects_unknown_extension(tmp_path):
+    image_path = tmp_path / "a.svg"
+    image_path.write_text("<svg/>", encoding="utf-8")
+
+    mime_type, error = image_rules.validate_image_file(str(image_path))
+
+    assert mime_type is None
+    assert error == "不支持的图片格式，请选择 JPG、PNG、GIF、BMP 或 WebP 图片"
