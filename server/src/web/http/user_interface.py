@@ -35,9 +35,10 @@ if TYPE_CHECKING:
 
 
 class UserInterface:
-    def __init__(self, database_manager: "DatabaseManager"):
+    def __init__(self, database_manager: "DatabaseManager", media_resolver=None):
         self.database_manager: "DatabaseManager" = database_manager
-        self.user_conversation_helper = UserConversationHelper(database_manager)
+        self.media_resolver = media_resolver
+        self.user_conversation_helper = UserConversationHelper(database_manager, media_resolver)
         self._auth_work_slots = asyncio.Semaphore(4)
         self._auth_work_admission_timeout = 1.0
 
@@ -56,10 +57,12 @@ class UserInterface:
 
     def bind_database_manager(self, database_manager: "DatabaseManager"):
         self.database_manager = database_manager
-        self.user_conversation_helper = UserConversationHelper(database_manager)
+        self.user_conversation_helper = UserConversationHelper(database_manager, self.media_resolver)
 
-    def wire_dependencies(self, *, database_manager: "DatabaseManager") -> None:
+    def wire_dependencies(self, *, database_manager: "DatabaseManager", media_resolver=None) -> None:
         """注入用户接口层所需依赖。"""
+        if media_resolver is not None:
+            self.media_resolver = media_resolver
         self.bind_database_manager(database_manager)
         self.ensure_dependencies()
 
@@ -271,7 +274,31 @@ class UserInterface:
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
         capped_count = min(max(1, count), 200)
+        self.user_conversation_helper.media_resolver = server_runtime.media_resolver
         return await self.user_conversation_helper.handle_history_request(user_uuid, capped_count, end_index)
+
+    async def get_audio(self, token: str, message_uuid: str, server_runtime: ServerRuntime):
+        """Stream one authenticated user's audio conversation media."""
+        user_uuid = server_runtime.database_manager.credential_service.authenticate_message_token(token)
+        if user_uuid is None:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        media_id = server_runtime.database_manager.conversation_service.get_audio_media_id(user_uuid, message_uuid)
+        if media_id is None:
+            raise HTTPException(status_code=404, detail="音频不存在或无权限访问")
+        try:
+            media = await asyncio.to_thread(
+                server_runtime.media_resolver.resolve,
+                MediaRef(media_id=media_id),
+                owner_user_id=user_uuid,
+                expected_kind="audio",
+            )
+        except MediaResolutionError as error:
+            raise HTTPException(status_code=404, detail="音频不存在或无权限访问") from error
+        return StreamingResponse(
+            iter((media.data,)),
+            media_type="audio/mp4",
+            headers={"Content-Length": str(len(media.data))},
+        )
 
     async def get_image(
         self,
