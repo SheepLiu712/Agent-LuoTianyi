@@ -104,6 +104,10 @@ from .stimulus import (
     ToyVibration,
     UserTyping,
     VoiceMessage,
+    VoiceRecordingCancelled,
+    VoiceRecordingCommitted,
+    VoiceRecordingStarted,
+    VoiceUploadFailed,
     WorldObservation,
 )
 from .stimulus_values import (
@@ -224,6 +228,10 @@ __all__ = (
     "TouchInteraction",
     "ToyVibration",
     "UserTyping",
+    "VoiceRecordingCancelled",
+    "VoiceRecordingCommitted",
+    "VoiceRecordingStarted",
+    "VoiceUploadFailed",
     "VoiceMessage",
     "WorldFact",
     "WorldObservation",

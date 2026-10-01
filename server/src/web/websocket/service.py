@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -16,8 +17,11 @@ NEGATIVE_ACK_CAPABILITY = "negative_ack_v1"
 
 
 class WebSocketService:
-    def __init__(self):
+    def __init__(self, *, max_inbound_frame_bytes: int = 128 * 1024):
+        if type(max_inbound_frame_bytes) is not int or max_inbound_frame_bytes <= 0:
+            raise ValueError("max_inbound_frame_bytes must be a positive integer")
         self.logger = get_logger(__name__)
+        self.max_inbound_frame_bytes = max_inbound_frame_bytes
 
     async def try_recv_client_msg(self, websocket_connection: "WebSocketConnection") -> WSMessage | None:
         """
@@ -46,6 +50,13 @@ class WebSocketService:
                     "code": "BAD_MESSAGE",
                     "message": "message must be a JSON object",
                 },
+            )
+            return None
+        encoded_size = len(json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        if encoded_size > self.max_inbound_frame_bytes:
+            await self.send_error_event(
+                websocket=websocket,
+                payload={"code": "BAD_MESSAGE", "message": "message exceeds the inbound frame limit"},
             )
             return None
 
@@ -171,16 +182,28 @@ class WebSocketService:
         )
         await websocket.send_json(event)
 
-    async def send_ack_event(self, websocket_connection: "WebSocketConnection", event: WSMessage) -> None:
+    async def send_ack_event(
+        self,
+        websocket_connection: "WebSocketConnection",
+        event: WSMessage,
+        *,
+        payload: dict[str, object] | None = None,
+        duplicate: bool = False,
+    ) -> None:
         if event.client_msg_id is None:
             self.logger.warning("Received event without client_msg_id, cannot send ACK")
             return
+        ack_payload = {
+            "ok": True,
+            "received_event_type": event.event_type,
+        }
+        if payload:
+            ack_payload.update(payload)
+        if duplicate:
+            ack_payload["duplicate"] = True
         ack_event = self._make_event(
             WSEventType.SERVER_ACK,
-            {
-                "ok": True,
-                "received_event_type": event.event_type,
-            },
+            ack_payload,
             reply_to=event.client_msg_id,
         )
         await websocket_connection.websocket.send_json(ack_event)

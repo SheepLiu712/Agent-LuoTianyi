@@ -41,6 +41,10 @@ _COORDINATION = (
     d.UserTyping,
     d.ImageSelectionOpened,
     d.ImageSelectionClosed,
+    d.VoiceRecordingStarted,
+    d.VoiceRecordingCancelled,
+    d.VoiceRecordingCommitted,
+    d.VoiceUploadFailed,
     d.InteractionDeadline,
     d.InteractionEnding,
 )
@@ -307,6 +311,13 @@ class ChatStage:
         """接收原始刺激，更新等待策略并启动独立预处理。"""
         self._revision += 1
         self._last_activity_at = datetime.now(timezone.utc)
+        if isinstance(
+            stimulus,
+            (d.VoiceRecordingStarted, d.VoiceRecordingCancelled, d.VoiceRecordingCommitted, d.VoiceUploadFailed),
+        ):
+            # VM-4 将实现协调时间线；当前只保证这些瞬时事实可被 Stage 安全接纳。
+            self._refresh_deadline()
+            return
         if isinstance(stimulus, _CONTENT):
             self._cancel_reply_attempts()
             self._pending[stimulus.stimulus_id] = _PendingInput(stimulus, self._revision)
