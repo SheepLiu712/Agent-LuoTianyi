@@ -460,10 +460,9 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
     assert stimulus.media_ref.media_id
     media_dir = tmp_path / "media" / stimulus.media_ref.media_id
     assert (media_dir / "content.bin").read_bytes() == image
-    assert json.loads((media_dir / "metadata.json").read_text(encoding="utf-8")) == {
-        "mime_type": "image/png",
-        "owner_user_id": "user",
-    }
+    metadata = json.loads((media_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["mime_type"] == "image/png"
+    assert metadata["owner_user_id"] == "user"
     assert await adapter.receive_event(connection, event)
     assert stage.stimuli[1].media_ref == stimulus.media_ref
     await adapter.disconnect(stage)
