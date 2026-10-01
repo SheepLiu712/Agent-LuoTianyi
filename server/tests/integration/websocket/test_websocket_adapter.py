@@ -652,6 +652,14 @@ async def test_adapter_dedup_overload_typing_and_maintenance_bypass():
     await adapter.disconnect(stage)
 
 
+def test_adapter_warns_when_media_store_is_not_configured(caplog, capture_project_log):
+    capture_project_log("src.adapter.websocket.adapter")
+
+    WebSocketAdapter()
+
+    assert "媒体存储未配置，图片发送将被拒绝" in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_touch_and_image_selection_business_events_become_typed_stimuli():
     _, connection, adapter, stage = await setup_output()

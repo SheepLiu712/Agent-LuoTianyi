@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import src.domain.agent as d
 from src.domain.stage import AgentPresentationChanged, CancelDelivery, StageOutput
 from src.infrastructure.media import MediaResolutionError, MediaResolutionErrorCode, PermanentMediaStore
+from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 from src.web.websocket import WSMessage
 
@@ -22,6 +23,8 @@ from ._input import _INPUT_EVENTS, materialize_image, prepare_input
 if TYPE_CHECKING:
     from src.stage.chat_stage import ChatStage
     from src.web.websocket import WebSocketConnection
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -67,6 +70,8 @@ class WebSocketAdapter:
         self._media_store = (
             PermanentMediaStore(media_config) if isinstance(media_config, dict) and media_config.get("root") else None
         )
+        if self._media_store is None:
+            logger.warning("媒体存储未配置，图片发送将被拒绝")
         self._default_character_id = default_character_id
         self._routes: dict[str, _Binding] = {}
         self._connections: dict[WebSocketConnection, _ConnectionDelivery] = {}
