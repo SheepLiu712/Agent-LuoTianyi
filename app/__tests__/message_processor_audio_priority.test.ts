@@ -77,6 +77,35 @@ describe('MessageProcessor online audio priority', () => {
     expect(mockSoundConstructor).not.toHaveBeenCalled();
   });
 
+  it('defensively stops server audio before starting a replay', async () => {
+    const events: string[] = [];
+    const stopServerAudio = jest.fn(() => { events.push('server-stopped'); });
+    mockSoundConstructor.mockImplementationOnce(() => {
+      const sound = {
+        loadAsync: jest.fn().mockResolvedValue(undefined),
+        playAsync: jest.fn(async () => { events.push('local-playing'); }),
+        stopAsync: jest.fn().mockResolvedValue(undefined),
+        unloadAsync: jest.fn().mockResolvedValue(undefined),
+        setOnPlaybackStatusUpdate: jest.fn(),
+      };
+      mockSoundInstances.push(sound);
+      return sound;
+    });
+    const processor = new MessageProcessor(
+      {} as NetworkClient,
+      fakeBinder(),
+      jest.fn(),
+      stopServerAudio,
+    );
+    processor.setLocalAudioPath('saved-message', 'file://saved.wav');
+
+    expect(await processor.playLocalTtsByUuid('saved-message')).toBe(true);
+
+    expect(stopServerAudio).toHaveBeenCalledTimes(1);
+    expect(mockSoundConstructor).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(['server-stopped', 'local-playing']);
+  });
+
   it('stops an active replay before feeding server audio and blocks further replay', async () => {
     const events: string[] = [];
     mockSoundConstructor.mockImplementationOnce(() => {

@@ -6,7 +6,7 @@
 | Issue | [#225](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/225) |
 | 来源 | 《AgentLuo bug收集》（腾讯文档） |
 | 流程 | 普通修复：dev → fix/ → PR → dev |
-| 状态 | 计划（首提交占位），实现与验证待进行 |
+| 状态 | 实现完成，待验证 |
 
 ## 触发条件
 重放本地唱歌音频（`type='sing'` 历史消息）时，WebView 仍在线播放 TTS/其它音频，出现重叠播放。
