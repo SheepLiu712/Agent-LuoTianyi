@@ -1,9 +1,9 @@
 import json
 import time
 import uuid
-from typing import Any, Dict
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
+from typing import Any, Dict
 
 
 class WSEventType(str, Enum):
@@ -23,6 +23,9 @@ class WSEventType(str, Enum):
 
     USER_MESSAGE = "user_message"
     USER_IMAGE = "user_image"
+    USER_VOICE = "user_voice"
+    USER_VOICE_RECORDING_STARTED = "user_voice_recording_started"
+    USER_VOICE_RECORDING_CANCELLED = "user_voice_recording_cancelled"
     USER_TEXT = "user_text"
     USER_TYPING = "user_typing"
     USER_IMAGE_SELECTING = "user_image_selecting"

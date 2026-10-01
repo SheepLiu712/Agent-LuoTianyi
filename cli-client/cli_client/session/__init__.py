@@ -9,6 +9,7 @@ from .headless_session import (
     SessionNotReadyError,
     SessionReadyTimeout,
     SessionState,
+    SessionVoiceError,
 )
 
 __all__ = [
@@ -19,6 +20,7 @@ __all__ = [
     "SessionConnectionError",
     "SessionEvent",
     "SessionImageError",
+    "SessionVoiceError",
     "SessionNotReadyError",
     "SessionReadyTimeout",
     "SessionState",
