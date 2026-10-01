@@ -11,6 +11,7 @@ from src.agent.skills.cognitive import (
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
     ResponseCompositionSkill,
+    SingingIntentSkill,
     TextPreprocessingSkill,
 )
 from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
@@ -58,6 +59,7 @@ class SharedSkills:
         preprocessing_config: dict[str, Any] | None,
         explicit_memory_config: dict[str, Any] | None,
         reply_composition_config: dict[str, Any],
+        singing_intent_config: dict[str, Any],
         reflection_config: dict[str, Any],
         song_knowledge_config: dict[str, Any],
         database_manager: DatabaseManager,
@@ -98,6 +100,7 @@ class SharedSkills:
             singing=self.singing.backend,
             generators=reply_generators,
         )
+        self.singing_intent = SingingIntentSkill(singing_intent_config, llm_service)
         self.reflection = ReflectionSkill(reflection_config, memories)
         self.intentional_memory = IntentionalMemoryCommit(lambda character_id: memories[character_id])
         self.dynamic_topic_memory = DynamicTopicMemorySkill(memories)

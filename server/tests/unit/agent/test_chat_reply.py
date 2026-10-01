@@ -54,6 +54,16 @@ class _Understanding:
         return self.terms
 
 
+class _SingingIntent:
+    def __init__(self, attempts=()):
+        self.attempts = tuple(attempts)
+        self.calls = []
+
+    async def decide(self, message, *, terms=(), conversation_history=""):
+        self.calls.append((message, terms, conversation_history))
+        return self.attempts
+
+
 class Composer:
     def __init__(self, drafts, provisional=None):
         self.drafts = drafts
@@ -75,11 +85,20 @@ class Composer:
         return ComposedResponse(provisional=self.provisional, pending=formal)
 
 
-def agent(composer, understanding=None):
+def agent(composer, understanding=None, singing_intent=None):
     return Agent(
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
-            [(d.StimulusKind.TEXT_MESSAGE, ChatReplyHandler(composer, understanding or _Understanding()))]
+            [
+                (
+                    d.StimulusKind.TEXT_MESSAGE,
+                    ChatReplyHandler(
+                        composer,
+                        understanding or _Understanding(),
+                        singing_intent=singing_intent,
+                    ),
+                )
+            ]
         ),
     )
 
@@ -116,9 +135,7 @@ async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
     assert ctx.conversation.entries[0].content.text == "你好呀"
     assert isinstance(ctx.conversation.entries[1].content, SongContent)
     assert ctx.conversation.entries[1].content.song == "歌"
-    assert [action.message_id for action in plan.actions] == [
-        entry.entry_id for entry in ctx.conversation.entries
-    ]
+    assert [action.message_id for action in plan.actions] == [entry.entry_id for entry in ctx.conversation.entries]
     assert report.consumed_pending_stimulus_ids == ("m2", "m1")
     assert report.retained_pending_stimulus_ids == ()
     assert composer.calls[0]["reply_topic"] == "你好"
@@ -190,8 +207,11 @@ class _Singing:
         self.calls = []
         self.plan_calls = []
 
-    async def build_sing_plan(self, character_id, attempts, *, excluded_segments=None, emotion_context=""):
+    async def build_sing_plan(
+        self, character_id, attempts, *, excluded_segments=None, emotion_context="", confirmed_intent=False
+    ):
         self.plan_calls.append((character_id, tuple(attempts), excluded_segments))
+        assert confirmed_intent is True
         return ("歌", "副歌")
 
     def get_segment_lyrics(self, character_id, song, segment):
@@ -241,6 +261,10 @@ async def test_reply_passes_sing_attempts_and_recent_exclusion():
             content=SongContent("唱了《歌》", "歌", "副歌"),
         )
     )
-    await agent(composer, _Understanding(("《歌》",))).handle_stimulus(deadline_request(), Sink(), context=ctx)
+    intent = _SingingIntent(("《歌》",))
+    await agent(composer, _Understanding(("《歌》是一首歌",)), intent).handle_stimulus(
+        deadline_request(), Sink(), context=ctx
+    )
     assert composer.calls[0]["sing_attempts"] == ("《歌》",)
     assert composer.calls[0]["excluded_segments"] == {("歌", "副歌")}
+    assert intent.calls[0][0:2] == ("你好", ("《歌》是一首歌",))

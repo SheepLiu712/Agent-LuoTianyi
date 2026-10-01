@@ -21,6 +21,7 @@ from src.agent.skills.cognitive import (
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
     ResponseCompositionSkill,
+    SingingIntentSkill,
     TextPreprocessingSkill,
 )
 from src.agent.skills.invocation import handling_invocation
@@ -165,10 +166,12 @@ class ChatReplyHandler:
         understanding: TextPreprocessingSkill,
         memory_intent: ExplicitMemoryIntentSkill | None = None,
         memory_commit: IntentionalMemoryCommit | None = None,
+        singing_intent: SingingIntentSkill | None = None,
     ) -> None:
         """注入回复生成、文本预处理以及可选的明确记忆识别与提交技能。"""
         self._composition = composition
         self._understanding = understanding
+        self._singing_intent = singing_intent
         self._memory_intent = memory_intent
         self._memory_commit = memory_commit
 
@@ -282,13 +285,23 @@ class ChatReplyHandler:
         )
         snapshot = plans.context.conversation.read()
         basis = request.interaction.interaction_revision
+        terms = self._understanding.extract_terms(reply_topic)
+        sing_attempts = (
+            await self._singing_intent.decide(
+                reply_topic,
+                terms=terms,
+                conversation_history=render_conversation_history(snapshot),
+            )
+            if self._singing_intent is not None
+            else ()
+        )
         staged = await self._composition.compose_staged(
             handling_invocation(request, plans.context),
             user_context=plans.context.user.read(),
             reply_topic=reply_topic,
             conversation_history=render_conversation_history(snapshot),
             memory_queries=(reply_topic,),
-            sing_attempts=self._understanding.extract_terms(reply_topic),
+            sing_attempts=sing_attempts,
             excluded_segments=_recent_sung_segments(snapshot),
         )
         if not staged.awaits_formal:

@@ -23,6 +23,7 @@ class _Singing(Protocol):
         *,
         excluded_segments: set[tuple[str, str]] | None = None,
         emotion_context: str = "",
+        confirmed_intent: bool = False,
     ): ...
 
     def get_segment_lyrics(self, character_id: str, song: str, segment: str) -> str: ...
@@ -158,6 +159,7 @@ class ResponseCompositionSkill:
                 invocation.character_id,
                 list(sing_attempts),
                 excluded_segments=excluded_segments,
+                confirmed_intent=True,
             )
             if candidate and candidate[1]:
                 sing_plan = candidate
