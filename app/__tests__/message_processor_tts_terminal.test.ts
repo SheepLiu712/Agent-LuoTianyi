@@ -337,4 +337,47 @@ describe('MessageProcessor bounded delivery queue', () => {
     expect(binder.emitErrorText).toHaveBeenCalledWith(expect.stringContaining('DELIVERY_UNCERTAIN'));
     expect(processor.queueLength()).toBe(0);
   });
+
+  it('emits a visible image-too-large message for a terminal server rejection', async () => {
+    const network = {
+      sendImage: jest.fn().mockResolvedValue({
+        ok: false,
+        error: '[MEDIA_TOO_LARGE] encoded image exceeds limit',
+        drop: true,
+      }),
+    } as unknown as NetworkClient;
+    const binder = fakeBinder();
+    const processor = new MessageProcessor(network, binder, jest.fn());
+    (processor as any).sendQueue = [queueItem({
+      kind: 'image',
+      uuid: 'image-1',
+      imageUri: 'file://large.jpg',
+      mimeType: 'image/jpeg',
+    })];
+
+    await (processor as any).runSendLoop();
+
+    expect(binder.emitMessageStatus).toHaveBeenCalledWith('image-1', 'failed');
+    expect(binder.emitErrorText).toHaveBeenCalledWith('图片过大（上限约 6 MB），请选择更小的图片');
+    expect(processor.queueLength()).toBe(0);
+  });
+
+  it('includes the reason for another terminal image failure', async () => {
+    const network = {
+      sendImage: jest.fn().mockResolvedValue({ ok: false, error: 'failed to read image file', drop: true }),
+    } as unknown as NetworkClient;
+    const binder = fakeBinder();
+    const processor = new MessageProcessor(network, binder, jest.fn());
+    (processor as any).sendQueue = [queueItem({
+      kind: 'image',
+      uuid: 'image-2',
+      imageUri: 'file://missing.jpg',
+      mimeType: 'image/jpeg',
+    })];
+
+    await (processor as any).runSendLoop();
+
+    expect(binder.emitErrorText).toHaveBeenCalledWith('图片发送失败：failed to read image file');
+    expect(processor.queueLength()).toBe(0);
+  });
 });
