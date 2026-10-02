@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
 import { addDebugTrace } from './debug_trace';
+import { compressImageForUpload, MAX_IMAGE_FILE_SIZE_BYTES } from './image_compression';
 import { WebSocketTransport } from './ws_transport';
 
 interface SendResult {
@@ -23,9 +24,6 @@ function sanitizeBase64(input: string) {
   const idx = input.indexOf(',');
   return idx >= 0 ? input.slice(idx + 1) : input;
 }
-
-const MAX_IMAGE_FILE_SIZE_BYTES = 6 * 1024 * 1024;
-const IMAGE_TOO_LARGE_ERROR = '图片过大（上限约 6 MB），请选择更小的图片';
 
 export class NetworkClient {
   private transport: WebSocketTransport | null = null;
@@ -71,34 +69,56 @@ export class NetworkClient {
     }
 
     try {
+      let uploadUri = imageUri;
+      let uploadMimeType = mimeType;
+      let originalSize: number | undefined;
       try {
-        const fileInfo = await FileSystem.getInfoAsync(imageUri);
-        if (fileInfo.exists && typeof fileInfo.size === 'number' && fileInfo.size > MAX_IMAGE_FILE_SIZE_BYTES) {
-          addDebugTrace('network', 'sendImage blocked: file too large', {
+        const imageInfo = await FileSystem.getInfoAsync(imageUri);
+        originalSize = imageInfo.exists && typeof imageInfo.size === 'number' ? imageInfo.size : undefined;
+      } catch {
+        // Metadata can be unavailable even when the URI remains readable.
+        addDebugTrace('network', 'sendImage file size unavailable', { imageUri });
+      }
+
+      if (originalSize !== undefined && originalSize > MAX_IMAGE_FILE_SIZE_BYTES) {
+        addDebugTrace('network', 'sendImage compression started', { imageUri, mimeType, originalSize });
+        const compressedImage = await compressImageForUpload(imageUri, mimeType);
+        if (!compressedImage.ok || compressedImage.size === undefined || compressedImage.size > MAX_IMAGE_FILE_SIZE_BYTES) {
+          addDebugTrace('network', 'sendImage compression failed', {
             imageUri,
-            fileSize: fileInfo.size,
-            maxFileSize: MAX_IMAGE_FILE_SIZE_BYTES,
+            originalSize,
+            reason: compressedImage.ok ? 'compressed size unavailable or over limit' : compressedImage.reason,
           });
           return {
             ok: false,
             request_id: clientMsgId || `local-${Date.now()}`,
-            error: IMAGE_TOO_LARGE_ERROR,
+            error: '图片过大（上限约 6 MB），请选择更小的图片',
             drop: true,
           };
         }
-      } catch {
-        addDebugTrace('network', 'sendImage file size unavailable', { imageUri });
+        uploadUri = compressedImage.uri;
+        uploadMimeType = compressedImage.mimeType;
+        addDebugTrace('network', 'sendImage compression completed', {
+          originalSize,
+          compressedSize: compressedImage.size,
+          uploadUri,
+          uploadMimeType,
+        });
       }
 
-      addDebugTrace('network', 'sendImage read file', { imageUri, mimeType });
-      const imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
+      addDebugTrace('network', 'sendImage read file', {
+        imageUri: uploadUri,
+        mimeType: uploadMimeType,
+        originalSize,
+      });
+      const imageBase64 = await FileSystem.readAsStringAsync(uploadUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
       return this.transport.submitUserImage(
         sanitizeBase64(imageBase64),
-        mimeType,
-        imageUri,
+        uploadMimeType,
+        uploadUri,
         10000,
         clientMsgId,
       );

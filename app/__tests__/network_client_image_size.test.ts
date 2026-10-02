@@ -7,7 +7,12 @@ jest.mock('expo-file-system/legacy', () => ({
   readAsStringAsync: mockReadAsStringAsync,
 }));
 jest.mock('../utils/ws_transport', () => ({ WebSocketTransport: jest.fn() }));
+jest.mock('../utils/image_compression', () => ({
+  MAX_IMAGE_FILE_SIZE_BYTES: 6 * 1024 * 1024,
+  compressImageForUpload: jest.fn().mockResolvedValue({ ok: false, reason: 'still too large' }),
+}));
 
+import { compressImageForUpload } from '../utils/image_compression';
 import { NetworkClient } from '../utils/network_client';
 
 const MAX_IMAGE_FILE_SIZE_BYTES = 6 * 1024 * 1024;
@@ -27,7 +32,7 @@ describe('NetworkClient image size preflight', () => {
     mockReadAsStringAsync.mockResolvedValue('aW1hZ2U=');
   });
 
-  it('rejects an oversized image before reading or sending it', async () => {
+  it('rejects an oversized image when compression cannot bring it under the limit', async () => {
     mockGetInfoAsync.mockResolvedValue({ exists: true, size: MAX_IMAGE_FILE_SIZE_BYTES + 1 });
     const { client, transport } = createConnectedClient();
 
@@ -41,6 +46,7 @@ describe('NetworkClient image size preflight', () => {
     });
     expect(mockReadAsStringAsync).not.toHaveBeenCalled();
     expect(transport.submitUserImage).not.toHaveBeenCalled();
+    expect(compressImageForUpload).toHaveBeenCalledWith('file://large.jpg', 'image/jpeg');
   });
 
   it('allows an image at the size boundary', async () => {
@@ -67,7 +73,25 @@ describe('NetworkClient image size preflight', () => {
     const result = await client.sendImage('content://unknown.jpg', 'image/jpeg', 'client-3');
 
     expect(result.ok).toBe(true);
+    expect(compressImageForUpload).not.toHaveBeenCalled();
+    expect(mockReadAsStringAsync).toHaveBeenCalledWith('content://unknown.jpg', { encoding: 'base64' });
+    expect(transport.submitUserImage).toHaveBeenCalledWith(
+      'aW1hZ2U=', 'image/jpeg', 'content://unknown.jpg', 10000, 'client-3',
+    );
+  });
+
+  it('returns a terminal read error when both metadata and content are unavailable', async () => {
+    mockGetInfoAsync.mockRejectedValue(new Error('unsupported URI'));
+    mockReadAsStringAsync.mockRejectedValue(new Error('file missing'));
+    const { client, transport } = createConnectedClient();
+
+    await expect(client.sendImage('content://missing.jpg', 'image/jpeg', 'client-4')).resolves.toEqual({
+      ok: false,
+      request_id: 'client-4',
+      error: 'failed to read image file',
+      drop: true,
+    });
     expect(mockReadAsStringAsync).toHaveBeenCalled();
-    expect(transport.submitUserImage).toHaveBeenCalled();
+    expect(transport.submitUserImage).not.toHaveBeenCalled();
   });
 });
