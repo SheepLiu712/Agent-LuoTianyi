@@ -157,7 +157,10 @@ def _prepare_image(
     media_store: PermanentMediaStore | None,
 ) -> PreparedInput:
     if media_store is None:
-        raise ValueError("media store is not configured")
+        raise MediaResolutionError(
+            code=MediaResolutionErrorCode.NOT_CONFIGURED,
+            media_id=event.client_msg_id or "unassigned",
+        )
     image_base64 = payload.get("image_base64")
     mime_type = payload.get("mime_type")
     if not isinstance(image_base64, str) or not image_base64.strip():
