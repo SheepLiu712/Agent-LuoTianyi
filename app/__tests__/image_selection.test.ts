@@ -1,108 +1,120 @@
-import type { ImagePickerResult, MediaLibraryPermissionResponse } from 'expo-image-picker';
-import type { PermissionStatus } from 'expo-modules-core';
+import type { ImagePickerAsset, ImagePickerResult } from 'expo-image-picker';
+import { clearDebugTrace, getDebugTraceSnapshot } from '../utils/debug_trace';
 import {
   IMAGE_PICKER_ERROR_MESSAGE,
-  IMAGE_PICKER_PERMISSION_DENIED_MESSAGE,
+  IMAGE_SELECTION_ERROR_MESSAGE,
+  IMAGE_SELECTION_RESET_ERROR_MESSAGE,
   runImageSelection,
 } from '../utils/image_selection';
 
+const asset: ImagePickerAsset = { uri: 'file://image.jpg', width: 100, height: 100 };
 const canceledResult: ImagePickerResult = { canceled: true, assets: null };
 
-function grantedPermission(): MediaLibraryPermissionResponse {
+function createOptions() {
   return {
-    status: 'granted' as PermissionStatus,
-    granted: true,
-    expires: 'never',
-    canAskAgain: true,
-    accessPrivileges: 'all',
+    sendSelecting: jest.fn(async () => undefined),
+    cancelSelecting: jest.fn(async () => undefined),
+    launchPicker: jest.fn(async (): Promise<ImagePickerResult> => ({ canceled: false, assets: [asset] })),
+    onSelected: jest.fn(async (_asset: ImagePickerAsset) => undefined),
+    emitError: jest.fn(),
   };
 }
 
+function failures() {
+  return getDebugTraceSnapshot().filter((entry) => entry.message === 'failed')
+    .map((entry) => JSON.parse(entry.detail!));
+}
+
 describe('runImageSelection', () => {
-  it('shows a visible error and resets selection state when Android permission is denied', async () => {
-    const emitError = jest.fn();
-    const cancelSelecting = jest.fn(async () => undefined);
+  beforeEach(clearDebugTrace);
 
-    await expect(
-      runImageSelection({
-        isAndroid: true,
-        sendSelecting: jest.fn(async () => undefined),
-        cancelSelecting,
-        launchPicker: jest.fn(async () => {
-          throw new Error('permission failure');
-        }),
-        requestMediaLibraryPermission: jest.fn(async (): Promise<MediaLibraryPermissionResponse> => ({
-          ...grantedPermission(),
-          status: 'denied' as PermissionStatus,
-          granted: false,
-          canAskAgain: false,
-          accessPrivileges: 'none',
-        })),
-        onSelected: jest.fn(async () => undefined),
-        emitError,
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(emitError).toHaveBeenCalledWith(IMAGE_PICKER_PERMISSION_DENIED_MESSAGE);
-    expect(cancelSelecting).toHaveBeenCalledTimes(1);
+  it('hands a selected asset to the sender once and records progress in release mode', async () => {
+    const options = createOptions();
+    await runImageSelection(options);
+    expect(__DEV__).toBe(false);
+    expect(options.launchPicker).toHaveBeenCalledTimes(1);
+    expect(options.onSelected).toHaveBeenCalledWith(asset);
+    expect(options.cancelSelecting).not.toHaveBeenCalled();
+    expect(options.emitError).not.toHaveBeenCalled();
+    expect(getDebugTraceSnapshot().map((entry) => entry.message)).toEqual([
+      'started', 'launching picker', 'asset selected', 'selection handed to sender',
+    ]);
   });
 
-  it('requests permission only after an Android launch failure and retries once', async () => {
-    const launchPicker = jest
-      .fn<Promise<ImagePickerResult>, []>()
-      .mockRejectedValueOnce(new Error('picker unavailable'))
-      .mockResolvedValueOnce(canceledResult);
-    const requestMediaLibraryPermission = jest.fn(async () => grantedPermission());
-    const cancelSelecting = jest.fn(async () => undefined);
-
-    await runImageSelection({
-      isAndroid: true,
-      sendSelecting: jest.fn(async () => undefined),
-      cancelSelecting,
-      launchPicker,
-      requestMediaLibraryPermission,
-      onSelected: jest.fn(async () => undefined),
-      emitError: jest.fn(),
-    });
-
-    expect(launchPicker).toHaveBeenCalledTimes(2);
-    expect(requestMediaLibraryPermission).toHaveBeenCalledTimes(1);
-    expect(cancelSelecting).toHaveBeenCalledTimes(1);
+  it.each([
+    canceledResult,
+    { canceled: false, assets: [] } as ImagePickerResult,
+  ])('resets after cancellation or an empty selection without showing an error', async (result) => {
+    const options = createOptions();
+    options.launchPicker.mockResolvedValue(result);
+    await runImageSelection(options);
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+    expect(options.onSelected).not.toHaveBeenCalled();
+    expect(options.emitError).not.toHaveBeenCalled();
+    expect(getDebugTraceSnapshot().map((entry) => entry.message)).toContain('reset completed');
   });
 
-  it('does not request permission before a successful picker launch', async () => {
-    const requestMediaLibraryPermission = jest.fn(async () => grantedPermission());
-
-    await runImageSelection({
-      isAndroid: true,
-      sendSelecting: jest.fn(async () => undefined),
-      cancelSelecting: jest.fn(async () => undefined),
-      launchPicker: jest.fn(async () => canceledResult),
-      requestMediaLibraryPermission,
-      onSelected: jest.fn(async () => undefined),
-      emitError: jest.fn(),
-    });
-
-    expect(requestMediaLibraryPermission).not.toHaveBeenCalled();
+  it('catches native launch failure, logs diagnostic fields and resets without retrying the picker', async () => {
+    const options = createOptions();
+    const error = Object.assign(new Error('native launch failed'), { code: 'E_PICKER' });
+    options.launchPicker.mockRejectedValue(error);
+    await expect(runImageSelection(options)).resolves.toBeUndefined();
+    expect(options.launchPicker).toHaveBeenCalledTimes(1);
+    expect(options.emitError).toHaveBeenCalledWith(IMAGE_PICKER_ERROR_MESSAGE);
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+    expect(options.onSelected).not.toHaveBeenCalled();
+    expect(failures()).toEqual([{
+      stage: 'launch_picker', name: 'Error', code: 'E_PICKER',
+      message: error.message, stack: error.stack,
+    }]);
   });
 
-  it('catches non-Android picker errors without an unhandled rejection', async () => {
-    const emitError = jest.fn();
+  it('records non-Error native rejection details', async () => {
+    const options = createOptions();
+    options.launchPicker.mockRejectedValue({ code: 'E_ACTIVITY', message: 'no activity' });
+    await runImageSelection(options);
+    expect(failures()).toEqual([{ stage: 'launch_picker', code: 'E_ACTIVITY', message: 'no activity' }]);
+  });
 
-    await expect(
-      runImageSelection({
-        isAndroid: false,
-        sendSelecting: jest.fn(async () => undefined),
-        cancelSelecting: jest.fn(async () => undefined),
-        launchPicker: jest.fn(async () => {
-          throw new Error('native picker failure');
-        }),
-        requestMediaLibraryPermission: jest.fn(async () => grantedPermission()),
-        onSelected: jest.fn(async () => undefined),
-        emitError,
-      }),
-    ).resolves.toBeUndefined();
+  it('handles a selecting notification failure before launching the picker', async () => {
+    const options = createOptions();
+    options.sendSelecting.mockRejectedValue('notification failed');
+    await runImageSelection(options);
+    expect(options.launchPicker).not.toHaveBeenCalled();
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+    expect(options.emitError).toHaveBeenCalledWith(IMAGE_SELECTION_ERROR_MESSAGE);
+    expect(failures()).toEqual([{ stage: 'notify_selecting', message: 'notification failed' }]);
+  });
 
-    expect(emitError).toHaveBeenCalledWith(IMAGE_PICKER_ERROR_MESSAGE);
+  it('does not mislabel a selected-image callback failure as a picker launch failure', async () => {
+    const options = createOptions();
+    options.onSelected.mockRejectedValue(new Error('enqueue failed'));
+    await runImageSelection(options);
+    expect(options.emitError).toHaveBeenCalledWith(IMAGE_SELECTION_ERROR_MESSAGE);
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+    expect(failures()[0]).toMatchObject({ stage: 'send_selected', message: 'enqueue failed' });
+  });
+
+  it('preserves the original error when recovery also fails', async () => {
+    const options = createOptions();
+    options.launchPicker.mockRejectedValue(new Error('launch failed'));
+    options.cancelSelecting.mockRejectedValue(new Error('reset failed'));
+    await expect(runImageSelection(options)).resolves.toBeUndefined();
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+    expect(options.emitError.mock.calls).toEqual([
+      [IMAGE_PICKER_ERROR_MESSAGE], [IMAGE_SELECTION_RESET_ERROR_MESSAGE],
+    ]);
+    expect(failures().map((error) => error.stage)).toEqual(['launch_picker', 'cancel_selecting']);
+  });
+
+  it('catches a reset failure after user cancellation without retrying reset', async () => {
+    const options = createOptions();
+    options.launchPicker.mockResolvedValue(canceledResult);
+    options.cancelSelecting.mockRejectedValue(new Error('reset failed'));
+    await expect(runImageSelection(options)).resolves.toBeUndefined();
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+    expect(options.emitError).toHaveBeenCalledTimes(1);
+    expect(options.emitError).toHaveBeenCalledWith(IMAGE_SELECTION_RESET_ERROR_MESSAGE);
+    expect(failures()[0]).toMatchObject({ stage: 'cancel_selecting', message: 'reset failed' });
   });
 });

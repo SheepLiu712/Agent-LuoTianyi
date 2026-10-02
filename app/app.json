@@ -27,9 +27,7 @@
       "versionCode": 6,
       "permissions": [
         "INTERNET",
-        "ACCESS_NETWORK_STATE",
-        "READ_MEDIA_IMAGES",
-        "READ_EXTERNAL_STORAGE"
+        "ACCESS_NETWORK_STATE"
       ]
     },
     "web": {
@@ -52,14 +50,6 @@
       ],
       "expo-web-browser",
       "expo-secure-store",
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "允许 ai小洛访问您的照片，以便选择并发送图片",
-          "cameraPermission": false,
-          "microphonePermission": false
-        }
-      ],
       "./plugins/withLive2DAndroidAssets",
       "./plugins/withAndroidReleaseSigning"
     ],

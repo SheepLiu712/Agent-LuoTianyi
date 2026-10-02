@@ -1,6 +1,6 @@
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { FlatList, Platform } from 'react-native';
+import { FlatList } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { setExpression } from '../utils/live2d_helper';
 import { AgentBinder } from '../utils/binder';
@@ -273,7 +273,6 @@ export const useChatLogic = (
 
   const handleSendImage = useCallback(async () => {
     await runImageSelection({
-      isAndroid: Platform.OS === 'android',
       sendSelecting: async () => {
         await binderRef.current?.sendImageSelecting();
       },
@@ -286,9 +285,7 @@ export const useChatLogic = (
           allowsEditing: false,
           quality: 1,
         }),
-      requestMediaLibraryPermission: () => ImagePicker.requestMediaLibraryPermissionsAsync(),
       emitError: (message) => binderRef.current?.emitErrorText(message),
-      logError: (error) => addDebugTrace('ui', 'image selection failed', { error: String(error) }),
       onSelected: async (asset) => {
         const imageUri = asset.uri;
         const mimeType = asset.mimeType || 'image/jpeg';

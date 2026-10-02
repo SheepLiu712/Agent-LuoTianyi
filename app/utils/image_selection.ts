@@ -1,67 +1,63 @@
-import type { ImagePickerAsset, ImagePickerResult, MediaLibraryPermissionResponse } from 'expo-image-picker';
+import type { ImagePickerAsset, ImagePickerResult } from 'expo-image-picker';
+import { addDebugTrace } from './debug_trace';
 
-export const IMAGE_PICKER_ERROR_MESSAGE =
-  '无法打开图片选择器，请重试；若被系统拦截，请在设置中授予相册权限';
-export const IMAGE_PICKER_PERMISSION_DENIED_MESSAGE = '相册权限未授予，请在系统设置中允许访问照片后重试';
+export const IMAGE_PICKER_ERROR_MESSAGE = '无法打开图片选择器，请重试；可在调试日志中查看详情';
+export const IMAGE_SELECTION_ERROR_MESSAGE = '图片选择或发送失败，请重试；可在调试日志中查看详情';
+export const IMAGE_SELECTION_RESET_ERROR_MESSAGE = '选图状态复位失败，请重试；可在调试日志中查看详情';
 
 interface ImageSelectionOptions {
-  isAndroid: boolean;
   sendSelecting: () => Promise<void>;
   cancelSelecting: () => Promise<void>;
   launchPicker: () => Promise<ImagePickerResult>;
-  requestMediaLibraryPermission: () => Promise<MediaLibraryPermissionResponse>;
   onSelected: (asset: ImagePickerAsset) => Promise<void>;
   emitError: (message: string) => void;
-  logError?: (error: unknown) => void;
 }
 
-class MediaLibraryPermissionDeniedError extends Error {}
+type SelectionStage = 'notify_selecting' | 'launch_picker' | 'send_selected' | 'cancel_selecting';
 
-async function launchPickerWithPermissionFallback(
-  options: Pick<
-    ImageSelectionOptions,
-    'isAndroid' | 'launchPicker' | 'requestMediaLibraryPermission'
-  >,
-): Promise<ImagePickerResult> {
+function logSelectionError(stage: SelectionStage, error: unknown) {
+  const detail = error !== null && typeof error === 'object' ? error : undefined;
+  addDebugTrace('image-selection', 'failed', {
+    stage,
+    name: detail && 'name' in detail ? String(detail.name) : undefined,
+    code: detail && 'code' in detail ? String(detail.code) : undefined,
+    message: detail && 'message' in detail ? String(detail.message) : String(error),
+    stack: detail && 'stack' in detail ? String(detail.stack) : undefined,
+  });
+}
+
+async function cancelSelection(options: ImageSelectionOptions) {
   try {
-    return await options.launchPicker();
+    await options.cancelSelecting();
+    addDebugTrace('image-selection', 'reset completed');
   } catch (error) {
-    if (!options.isAndroid) {
-      throw error;
-    }
-
-    const permission = await options.requestMediaLibraryPermission();
-    if (!permission.granted) {
-      throw new MediaLibraryPermissionDeniedError();
-    }
-
-    return await options.launchPicker();
+    logSelectionError('cancel_selecting', error);
+    options.emitError(IMAGE_SELECTION_RESET_ERROR_MESSAGE);
   }
 }
 
 export async function runImageSelection(options: ImageSelectionOptions): Promise<void> {
+  let stage: SelectionStage = 'notify_selecting';
+  addDebugTrace('image-selection', 'started');
   try {
     await options.sendSelecting();
-    const result = await launchPickerWithPermissionFallback(options);
+    stage = 'launch_picker';
+    addDebugTrace('image-selection', 'launching picker');
+    const result = await options.launchPicker();
 
     if (result.canceled || !result.assets || result.assets.length === 0) {
-      await options.cancelSelecting();
+      addDebugTrace('image-selection', 'canceled');
+      await cancelSelection(options);
       return;
     }
 
+    stage = 'send_selected';
+    addDebugTrace('image-selection', 'asset selected');
     await options.onSelected(result.assets[0]);
+    addDebugTrace('image-selection', 'selection handed to sender');
   } catch (error) {
-    options.logError?.(error);
-    options.emitError(
-      error instanceof MediaLibraryPermissionDeniedError
-        ? IMAGE_PICKER_PERMISSION_DENIED_MESSAGE
-        : IMAGE_PICKER_ERROR_MESSAGE,
-    );
-
-    try {
-      await options.cancelSelecting();
-    } catch (cancelError) {
-      options.logError?.(cancelError);
-    }
+    logSelectionError(stage, error);
+    options.emitError(stage === 'launch_picker' ? IMAGE_PICKER_ERROR_MESSAGE : IMAGE_SELECTION_ERROR_MESSAGE);
+    await cancelSelection(options);
   }
 }
