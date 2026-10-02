@@ -71,8 +71,14 @@ export class NetworkClient {
     try {
       let uploadUri = imageUri;
       let uploadMimeType = mimeType;
-      const imageInfo = await FileSystem.getInfoAsync(imageUri);
-      const originalSize = imageInfo.exists && typeof imageInfo.size === 'number' ? imageInfo.size : undefined;
+      let originalSize: number | undefined;
+      try {
+        const imageInfo = await FileSystem.getInfoAsync(imageUri);
+        originalSize = imageInfo.exists && typeof imageInfo.size === 'number' ? imageInfo.size : undefined;
+      } catch {
+        // Metadata can be unavailable even when the URI remains readable.
+        addDebugTrace('network', 'sendImage file size unavailable', { imageUri });
+      }
 
       if (originalSize !== undefined && originalSize > MAX_IMAGE_FILE_SIZE_BYTES) {
         addDebugTrace('network', 'sendImage compression started', { imageUri, mimeType, originalSize });

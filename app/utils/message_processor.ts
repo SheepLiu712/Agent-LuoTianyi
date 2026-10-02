@@ -59,6 +59,14 @@ function isTerminalSendError(errorText?: string) {
   return text.includes('failed to read image file');
 }
 
+function getTerminalImageErrorText(errorText?: string) {
+  const error = errorText?.trim();
+  if (error?.toUpperCase().includes('MEDIA_TOO_LARGE') || error?.includes('图片过大')) {
+    return '图片过大（上限约 6 MB），请选择更小的图片';
+  }
+  return `图片发送失败：${error || '未知错误'}`;
+}
+
 export function getSendRetryDelayMs(retryAttempt: number) {
   return Math.min(2 ** Math.max(0, retryAttempt), 30) * 1000;
 }
@@ -763,6 +771,9 @@ export class MessageProcessor {
         });
         if (tracksMessageStatus) {
           this.binder.emitMessageStatus(item.uuid, 'failed');
+        }
+        if (item.kind === 'image') {
+          this.binder.emitErrorText(getTerminalImageErrorText(result.error));
         }
         this.sendQueue.shift();
         continue;
