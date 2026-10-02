@@ -122,7 +122,7 @@ class AgentRuntime:
                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
                 reply_composition_config=self.config.get("reply_composition", {}),
-                singing_intent_config=self.config.get("agent", {}).get("topic_extractor", {}),
+                topic_extraction_config=self.config.get("agent", {}).get("topic_extractor", {}),
                 reflection_config=self.config.get("reflection", {}),
                 song_knowledge_config=self.config.get("agent", {}).get("song_knowledge", {}),
                 database_manager=database_manager,
@@ -197,10 +197,8 @@ class AgentRuntime:
                 StimulusKind.INTERACTION_DEADLINE,
                 ChatReplyHandler(
                     self.skills.response_composition,
-                    self.skills.text_preprocessing,
                     self.skills.explicit_memory_intent,
                     self.skills.intentional_memory,
-                    self.skills.singing_intent,
                 ),
             ),
             (

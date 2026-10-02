@@ -58,6 +58,14 @@ class CharacterNarrative:
 
 
 @dataclass(frozen=True)
+class TopicExtraction:
+    """同一次 topic_extract 决策产生的记忆检索 key 与演唱尝试。"""
+
+    memory_queries: tuple[str, ...] = ()
+    sing_attempts: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ReplyDraft:
     """一条已生成的回复草稿；sing 非空表示演唱，否则为说话。"""
 

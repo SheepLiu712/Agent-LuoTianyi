@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from support.routing_support import Sink, request
@@ -19,6 +20,7 @@ from src.agent.skills.cognitive import (
     ReplyDraft,
     ResponseCompositionSkill,
 )
+from src.agent.skills.contracts import TopicExtraction
 
 
 class _Conversation:
@@ -46,24 +48,6 @@ def deadline_request():
     return replace(request(), prepared_inputs=(prepared,))
 
 
-class _Understanding:
-    def __init__(self, terms=()):
-        self.terms = tuple(terms)
-
-    def extract_terms(self, text):
-        return self.terms
-
-
-class _SingingIntent:
-    def __init__(self, attempts=()):
-        self.attempts = tuple(attempts)
-        self.calls = []
-
-    async def decide(self, message, *, terms=(), conversation_history=""):
-        self.calls.append((message, terms, conversation_history))
-        return self.attempts
-
-
 class Composer:
     def __init__(self, drafts, provisional=None):
         self.drafts = drafts
@@ -85,18 +69,14 @@ class Composer:
         return ComposedResponse(provisional=self.provisional, pending=formal)
 
 
-def agent(composer, understanding=None, singing_intent=None):
+def agent(composer):
     return Agent(
         character_id="luotianyi",
         stimulus_router=StimulusRouter(
             [
                 (
                     d.StimulusKind.TEXT_MESSAGE,
-                    ChatReplyHandler(
-                        composer,
-                        understanding or _Understanding(),
-                        singing_intent=singing_intent,
-                    ),
+                    ChatReplyHandler(composer),
                 )
             ]
         ),
@@ -225,15 +205,19 @@ async def test_response_composition_skill_recalls_and_maps_drafts():
     singing = _Singing()
     generator = _Generator()
     skill = ResponseCompositionSkill(
-        {}, memories={"luotianyi": memory}, singing=singing, generators={"luotianyi": generator}
+        {},
+        topic_extraction=SimpleNamespace(
+            extract=AsyncMock(return_value=TopicExtraction(memory_queries=("你好",), sing_attempts=("《歌》",)))
+        ),
+        memories={"luotianyi": memory},
+        singing=singing,
+        generators={"luotianyi": generator},
     )
     drafts = await skill.compose(
         invocation(),
         user_context=UserContextSnapshot(),
         reply_topic="你好",
         conversation_history="历史",
-        memory_queries=("你好",),
-        sing_attempts=("《歌》",),
     )
     assert [draft.sing for draft in drafts] == [None, ("歌", "副歌")]
     assert drafts[0].content == "你好"
@@ -250,7 +234,7 @@ async def test_response_composition_skill_recalls_and_maps_drafts():
 
 
 @pytest.mark.asyncio
-async def test_reply_passes_sing_attempts_and_recent_exclusion():
+async def test_reply_passes_recent_exclusion_without_bypassing_topic_extraction():
     composer = Composer(())
     ctx = context()
     ctx.conversation.entries.append(
@@ -261,10 +245,7 @@ async def test_reply_passes_sing_attempts_and_recent_exclusion():
             content=SongContent("唱了《歌》", "歌", "副歌"),
         )
     )
-    intent = _SingingIntent(("《歌》",))
-    await agent(composer, _Understanding(("《歌》是一首歌",)), intent).handle_stimulus(
-        deadline_request(), Sink(), context=ctx
-    )
-    assert composer.calls[0]["sing_attempts"] == ("《歌》",)
+    await agent(composer).handle_stimulus(deadline_request(), Sink(), context=ctx)
+    assert "sing_attempts" not in composer.calls[0]
+    assert "memory_queries" not in composer.calls[0]
     assert composer.calls[0]["excluded_segments"] == {("歌", "副歌")}
-    assert intent.calls[0][0:2] == ("你好", ("《歌》是一首歌",))

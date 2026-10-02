@@ -6,9 +6,9 @@ from .image_understanding import ImageUnderstandingSkill
 from .intentional_memory import ExplicitMemoryIntentSkill
 from .response_composition import ResponseCompositionSkill
 from .response_generation import CharacterReplyGenerator
-from .singing_intent import SingingIntentSkill
 from .song_entity_linker import SongEntityLinker
 from .text_preprocessing import TextPreprocessingSkill
+from .topic_extraction import TopicExtractionSkill
 
 __all__ = [
     "CharacterReplyGenerator",
@@ -18,7 +18,7 @@ __all__ = [
     "ImageUnderstandingSkill",
     "ReplyDraft",
     "ResponseCompositionSkill",
-    "SingingIntentSkill",
+    "TopicExtractionSkill",
     "SongEntityLinker",
     "TextPreprocessingSkill",
 ]
