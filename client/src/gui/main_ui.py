@@ -19,6 +19,7 @@ from typing import Dict, Any, List
 from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
+from ..utils.image_rules import validate_image_file
 from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, SystemMessage, BubblePlaybackManager
 from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
@@ -861,9 +862,14 @@ class ChatWidget(QWidget):
             self, 
             "Select Image", 
             "", 
-            "Images (*.png *.xpm *.jpg *.jpeg *.bmp *.svg)"
+            "Images (*.jpg *.jpeg *.png *.gif *.bmp *.webp)"
         )
         if file_path:
+            _, validation_error = validate_image_file(file_path)
+            if validation_error is not None:
+                QMessageBox.warning(self, "图片无法发送", validation_error)
+                self.agent.on_image_selecting_cancel()
+                return
             self.can_send_pic = False
             bubble = self.add_message("image", file_path, is_user=True)
             self.agent.on_send_image(file_path, bubble)

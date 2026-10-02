@@ -1,9 +1,12 @@
 """The authenticated WebSocket ingress acknowledges the three CLI signals."""
 
+import base64
+from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
 from fastapi import WebSocketDisconnect
+from PIL import Image
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
@@ -49,12 +52,12 @@ def event(event_type, payload, client_msg_id="chat-1"):
     return {"type": event_type, "client_msg_id": client_msg_id, "payload": payload}
 
 
-async def run_ingress(events, *, negative_ack=True):
+async def run_ingress(events, *, negative_ack=True, adapter_config=None):
     socket = Socket(events)
     connection = WebSocketConnection(socket, "user-1", "alice")
     if negative_ack:
         connection.capabilities.add("negative_ack_v1")
-    adapter = WebSocketAdapter()
+    adapter = WebSocketAdapter(adapter_config)
     stage = Stage()
     await adapter.bind(stage, connection)
     runtime = SimpleNamespace(
@@ -121,3 +124,52 @@ async def test_unknown_event_does_not_enter_chat_ingress():
     sent, stimuli = await run_ingress([event("client_diagnostic", {"value": 1})])
     assert sent == []
     assert stimuli == []
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_image_store_reports_stable_media_code():
+    sent, stimuli = await run_ingress(
+        [event("user_image", {"image_base64": "eA==", "mime_type": "image/png"})]
+    )
+
+    assert stimuli == []
+    assert sent[0]["payload"] == {
+        "ok": False,
+        "received_event_type": "user_image",
+        "code": "MEDIA_RESOLVER_NOT_CONFIGURED",
+        "message": "服务端未配置媒体存储",
+        "retryable": False,
+    }
+
+
+@pytest.mark.asyncio
+async def test_oversized_image_reports_stable_media_code(tmp_path):
+    sent, stimuli = await run_ingress(
+        [event("user_image", {"image_base64": "eHh4eA==", "mime_type": "image/png"})],
+        adapter_config={"media_store": {"root": str(tmp_path / "media"), "max_bytes": 2}},
+    )
+
+    assert stimuli == []
+    assert sent[0]["payload"]["code"] == "MEDIA_TOO_LARGE"
+    assert sent[0]["payload"]["message"] == "图片过大（上限约 6 MB），请选择更小的图片"
+    assert sent[0]["payload"]["retryable"] is False
+
+
+@pytest.mark.asyncio
+async def test_non_image_content_reports_unsupported_type(tmp_path):
+    image = BytesIO()
+    Image.new("RGB", (1, 1)).save(image, format="PNG")
+    sent, stimuli = await run_ingress(
+        [
+            event(
+                "user_image",
+                {"image_base64": base64.b64encode(image.getvalue()).decode("ascii"), "mime_type": "image/jpeg"},
+            )
+        ],
+        adapter_config={"media_store": {"root": str(tmp_path / "media")}},
+    )
+
+    assert stimuli == []
+    assert sent[0]["payload"]["code"] == "MEDIA_UNSUPPORTED_TYPE"
+    assert sent[0]["payload"]["message"] == "不支持的图片格式"
+    assert sent[0]["payload"]["retryable"] is False
