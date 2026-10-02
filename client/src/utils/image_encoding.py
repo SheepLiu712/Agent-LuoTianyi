@@ -6,7 +6,7 @@ import base64
 import datetime
 import os
 
-from .image_rules import detect_image_mime
+from .image_rules import validate_image_file
 
 
 def save_image_to_temp(image_data: bytes, postfix: str, *, base_dir: str | None = None) -> str:
@@ -26,6 +26,9 @@ def save_image_to_temp(image_data: bytes, postfix: str, *, base_dir: str | None 
 
 def prepare_image_payload(image_path: str) -> dict:
     """读取图片并产出发送载荷（读文件 → 临时副本 → Base64 → MIME）。"""
+    mime_type, validation_error = validate_image_file(image_path)
+    if validation_error is not None:
+        return {"ok": False, "error": validation_error, "drop": True}
     try:
         with open(image_path, "rb") as f:
             image_data = f.read()
@@ -33,8 +36,6 @@ def prepare_image_payload(image_path: str) -> dict:
         new_file_path = save_image_to_temp(image_data, postfix)
     except Exception as exc:
         return {"ok": False, "error": f"Failed to read image file: {exc}", "drop": True}
-
-    mime_type = detect_image_mime(image_path) or "image/png"
 
     return {
         "ok": True,
