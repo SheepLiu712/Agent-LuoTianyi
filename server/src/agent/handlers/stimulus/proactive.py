@@ -45,8 +45,6 @@ class FirstLoginHandler:
                 user_context=context.user.read(),
                 reply_topic=self._reminder_topic(stimulus),
                 conversation_history=render_conversation_history(context.conversation.read()),
-                memory_queries=(),
-                sing_attempts=(),
                 excluded_segments=set(),
             )
             if request.cancellation.is_cancelled:

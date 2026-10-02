@@ -8,6 +8,7 @@ from .response_composition import ResponseCompositionSkill
 from .response_generation import CharacterReplyGenerator
 from .song_entity_linker import SongEntityLinker
 from .text_preprocessing import TextPreprocessingSkill
+from .topic_extraction import TopicExtractionSkill
 
 __all__ = [
     "CharacterReplyGenerator",
@@ -17,6 +18,7 @@ __all__ = [
     "ImageUnderstandingSkill",
     "ReplyDraft",
     "ResponseCompositionSkill",
+    "TopicExtractionSkill",
     "SongEntityLinker",
     "TextPreprocessingSkill",
 ]
