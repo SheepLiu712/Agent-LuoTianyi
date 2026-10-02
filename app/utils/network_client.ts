@@ -24,6 +24,9 @@ function sanitizeBase64(input: string) {
   return idx >= 0 ? input.slice(idx + 1) : input;
 }
 
+const MAX_IMAGE_FILE_SIZE_BYTES = 6 * 1024 * 1024;
+const IMAGE_TOO_LARGE_ERROR = '图片过大（上限约 6 MB），请选择更小的图片';
+
 export class NetworkClient {
   private transport: WebSocketTransport | null = null;
 
@@ -68,6 +71,25 @@ export class NetworkClient {
     }
 
     try {
+      try {
+        const fileInfo = await FileSystem.getInfoAsync(imageUri);
+        if (fileInfo.exists && typeof fileInfo.size === 'number' && fileInfo.size > MAX_IMAGE_FILE_SIZE_BYTES) {
+          addDebugTrace('network', 'sendImage blocked: file too large', {
+            imageUri,
+            fileSize: fileInfo.size,
+            maxFileSize: MAX_IMAGE_FILE_SIZE_BYTES,
+          });
+          return {
+            ok: false,
+            request_id: clientMsgId || `local-${Date.now()}`,
+            error: IMAGE_TOO_LARGE_ERROR,
+            drop: true,
+          };
+        }
+      } catch {
+        addDebugTrace('network', 'sendImage file size unavailable', { imageUri });
+      }
+
       addDebugTrace('network', 'sendImage read file', { imageUri, mimeType });
       const imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
         encoding: FileSystem.EncodingType.Base64,
