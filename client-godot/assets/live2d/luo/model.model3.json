@@ -1,0 +1,98 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "Moc.moc3",
+		"Textures": [
+			"Textures_.png"
+		],
+		"Physics": "Physics.json",
+		"Expressions": [
+			{
+				"Name": "fear",
+				"File": "expressions/fear.exp3.json"
+			},
+			{
+				"Name": "angry",
+				"File": "expressions/angry.exp3.json"
+			},
+			{
+				"Name": "moemoe",
+				"File": "expressions/moemoe.exp3.json"
+			},
+			{
+				"Name": "dumb",
+				"File": "expressions/dumb.exp3.json"
+			},
+			{
+				"Name": "normal",
+				"File": "expressions/normal.exp3.json"
+			},
+			{
+				"Name": "like",
+				"File": "expressions/like.exp3.json"
+			},
+			{
+				"Name": "ease",
+				"File": "expressions/ease.exp3.json"
+			},
+			{
+				"Name": "resonate",
+				"File": "expressions/resonate.exp3.json"
+			},
+			{
+				"Name": "sleepy",
+				"File": "expressions/sleepy.exp3.json"
+			},
+			{
+				"Name": "sad",
+				"File": "expressions/sad.exp3.json"
+			},
+			{
+				"Name": "sing",
+				"File": "expressions/sing.exp3.json"
+			},
+			{
+				"Name": "yanndere",
+				"File": "expressions/yanndere.exp3.json"
+			}
+		],
+		"Motions": {
+			"Tap辫子": [
+				{
+					"File": "motions/Motions_Tap辫子_0.json"
+				}
+			],
+			"Tap左腿": [
+				{
+					"File": "motions/Motions_Tap左腿_0.json"
+				}
+			],
+			"Tap袖": [
+				{
+					"File": "motions/Motions_Tap袖_0.json"
+				}
+			],
+			"Tap耳机": [
+				{
+					"File": "motions/Motions_Tap耳机_0.json"
+				}
+			],
+			"Tap8": [
+				{
+					"File": "motions/Motions_Tap8_0.json"
+				}
+			],
+			"Tap头": [
+				{
+					"File": "motions/Motions_Tap头_0.json"
+				}
+			],
+			"倾听点头": [
+				{
+					"File": "motions/Motions_倾听点头.json"
+				}
+			]
+		}
+	},
+	"HitAreas": []
+}

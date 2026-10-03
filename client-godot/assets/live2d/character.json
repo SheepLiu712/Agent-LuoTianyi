@@ -1,0 +1,6 @@
+{
+  "character_id": "luotianyi",
+  "resource_id": "original",
+  "model_path": "res://assets/live2d/luo/model.model3.json",
+  "mapping_path": "res://assets/live2d/live2d_interface_config.json"
+}

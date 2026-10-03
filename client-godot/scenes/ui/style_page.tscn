@@ -1,0 +1,91 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/ui/style_page.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="PackedScene" path="res://scenes/ui/unified_dropdown.tscn" id="3_dropdown"]
+[ext_resource type="Texture2D" path="res://assets/ui/login_chevron.svg" id="chevron"]
+
+[node name="StylePage" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_bottom = 22
+
+[node name="Scroll" type="ScrollContainer" parent="Margin"]
+layout_mode = 2
+horizontal_scroll_mode = 0
+follow_focus = true
+
+[node name="Column" type="VBoxContainer" parent="Margin/Scroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 16
+
+[node name="Title" type="Label" parent="Margin/Scroll/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 22
+text = "外观与风格"
+
+[node name="UiStyleLabel" type="Label" parent="Margin/Scroll/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "界面风格"
+
+[node name="UiStyleRow" type="HBoxContainer" parent="Margin/Scroll/Column"]
+layout_mode = 2
+
+[node name="UiStyleField" type="LineEdit" parent="Margin/Scroll/Column/UiStyleRow"]
+unique_name_in_owner = true
+theme_type_variation = &"PreferenceLineEdit"
+size_flags_horizontal = 3
+placeholder_text = "请选择界面风格"
+editable = false
+
+[node name="UiStylePresets" parent="Margin/Scroll/Column/UiStyleRow" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+theme_type_variation = &"PreferenceButton"
+custom_minimum_size = Vector2(40, 40)
+show_selected_label = false
+icon = ExtResource("chevron")
+icon_alignment = 1
+tooltip_text = "选择界面风格"
+
+[node name="IconStyleLabel" type="Label" parent="Margin/Scroll/Column"]
+theme_override_colors/font_color = Color(0.20392157, 0.29803923, 0.34901962, 1)
+theme_override_font_sizes/font_size = 14
+text = "图标风格"
+
+[node name="IconStyleRow" type="HBoxContainer" parent="Margin/Scroll/Column"]
+layout_mode = 2
+
+[node name="IconStyleField" type="LineEdit" parent="Margin/Scroll/Column/IconStyleRow"]
+unique_name_in_owner = true
+theme_type_variation = &"PreferenceLineEdit"
+size_flags_horizontal = 3
+placeholder_text = "请选择图标风格"
+editable = false
+
+[node name="IconStylePresets" parent="Margin/Scroll/Column/IconStyleRow" instance=ExtResource("3_dropdown")]
+unique_name_in_owner = true
+theme_type_variation = &"PreferenceButton"
+custom_minimum_size = Vector2(40, 40)
+show_selected_label = false
+icon = ExtResource("chevron")
+icon_alignment = 1
+tooltip_text = "选择图标风格"

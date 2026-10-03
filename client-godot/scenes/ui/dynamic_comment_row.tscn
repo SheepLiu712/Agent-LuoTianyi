@@ -1,0 +1,50 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://src/ui/dynamic_comment_row.gd" id="1_script"]
+[ext_resource type="Theme" path="res://theme/app_theme.tres" id="2_theme"]
+[ext_resource type="Shader" path="res://assets/ui/round_avatar.gdshader" id="3_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_avatar"]
+shader = ExtResource("3_shader")
+
+[node name="DynamicCommentRow" type="VBoxContainer"]
+theme = ExtResource("2_theme")
+script = ExtResource("1_script")
+
+[node name="Line" type="HBoxContainer" parent="."]
+
+[node name="Avatar" type="TextureRect" parent="Line"]
+unique_name_in_owner = true
+custom_minimum_size = Vector2(34, 34)
+size_flags_vertical = 0
+expand_mode = 1
+stretch_mode = 5
+material = SubResource("ShaderMaterial_avatar")
+
+[node name="Content" type="VBoxContainer" parent="Line"]
+size_flags_horizontal = 3
+
+[node name="Author" type="Label" parent="Line/Content"]
+unique_name_in_owner = true
+theme_override_colors/font_color = Color(0.396078438, 0.443137258, 0.490196079, 1)
+theme_override_font_sizes/font_size = 14
+
+[node name="Body" type="RichTextLabel" parent="Line/Content"]
+unique_name_in_owner = true
+fit_content = true
+selection_enabled = true
+scroll_active = false
+
+[node name="Footer" type="HBoxContainer" parent="Line/Content"]
+
+[node name="Time" type="Label" parent="Line/Content/Footer"]
+unique_name_in_owner = true
+theme_override_colors/font_color = Color(0.580392182, 0.600000024, 0.623529434, 1)
+theme_override_font_sizes/font_size = 12
+
+[node name="Reply" type="Button" parent="Line/Content/Footer"]
+unique_name_in_owner = true
+flat = true
+text = "回复"
+
+[node name="Sep" type="HSeparator" parent="."]
