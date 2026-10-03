@@ -250,6 +250,10 @@ export class MessageProcessor {
       return false;
     }
 
+    // 防御性清空 WebView 音频队列：即使 serverAudioPlaying 标志因异常未同步，
+    // 也保证本地播放开始时没有服务端音频在播（单播放器互斥）。
+    this.stopServerAudio();
+
     const requestId = ++this.localPlaybackRequestId;
 
     const localUri = this.audioPathByUuid.get(convUuid);
