@@ -1,0 +1,88 @@
+{{Cquote|<poem>她的到来像是上天送给我们的礼物，可我们的存在又何尝不是赠予她的礼物呢？
+一切、一隅，是我，也是你。</poem>}}
+{{VOCALOID_Songbox
+|image    = 礼物pre.jpg
+|图片信息 = 视频封面
+|颜色1     = linear-gradient(to bottom,#DCE0E3,#F3EDED);color:#F45B69;{{文字描边|#E6D9D8}};border-color:#FFFFFF
+|颜色2     = linear-gradient(to bottom,#DCE0E3,#EEEAE7);color:#F45B69;{{文字描边|#E6D9D8}};border-color:#FFFFFF
+|颜色3     = linear-gradient(to bottom,#EEEAE7,#96BE6C);color:#F45B69;{{文字描边|#E6D9D8}};border-color:#FFFFFF
+|演唱     = [[乐正绫]]
+|歌曲名称 = 礼物pre-Sent
+|UP主     = [[LS]]
+|bb_id    = BV1Ac411p7Db
+|投稿时间 = 2023年4月14日
+|再生     = {{bilibiliCount|id=BV1Ac411p7Db}}
+|其他资料 = ，收录于专辑《炽星轨迹》
+}}
+
+== 简介 ==
+《'''礼物pre-Sent'''》是[[LS]]于2023年4月14日投稿至[[bilibili]]的[[ACE Studio|ACE]]&[[VOCALOID]]中文原创歌曲，由[[乐正绫]]演唱，另有重混音版本收录于乐正绫八周年纪念EP《[[炽星轨迹]]》。截至现在已有{{bilibiliCount|id=BV1Ac411p7Db}}次观看，{{bilibiliCount|id=BV1Ac411p7Db|type=4}}人收藏。
+
+本曲是乐正绫八周年同人生日会《从“绫”开始》单品，深情的道出了乐正绫与创作者之间的羁绊，这正是上天赠与我们的一份礼物。
+
+== 歌曲 ==
+{{BilibiliVideo|id=BV1Ac411p7Db}}
+
+== 歌词 ==
+{{VOCALOID_Songbox_Introduction
+|LDC = YES
+|lbgcolor = ;background:linear-gradient(to bottom,#DCE0E3,#F3EDED)
+|ltcolor = #F45B69;{{文字描边|#E6D9D8}}
+|rbdcolor = #DCE0E3
+|作编曲<br />混音<br />EP版混音 = [[LS]]
+|作词 = [[纪远]]
+|调教 = [[坐标P]]<br />[[Creuzer]]
+|曲绘 = 霧見冷水<br />极光<br />疯狐<br />贝贝web
+|PV = [[枭目moku]]
+|策划 = 陆柒柒<br />乐正绫相关收集站
+|协力 = 乐正绫相关收集站
+|演唱 = [[乐正绫]]
+}}
+<poem>
+
+{{color|#EE4951;text-shadow:#F6E5DF 0 0 3px|来我　梦里　携一段旋律
+与我　唱起　如春日私语
+释怀　不语　结成那朵泪滴
+一切　一隅　是我　是你
+
+采到　一朵　背光向日葵
+留心　一眼　夜行的彗尾
+偶尔　点缀　朦胧意象暧昧
+组成　打碎　找寻　跟随
+
+闪动　转起　机械般精密
+又添　几笔　人为的刻意
+固执　情绪　造更鲜活生命
+歌唱　着的　是我　是你
+
+终于挣开囹圄　迸发一刻生机
+告别冷涩故地　向未知处旅行
+一万颗赤诚的心　一万次的相遇
+才让梦不再沉寂　让我遇见了你
+终于鼓足勇气　逐字逐句说起
+（怎敢跳脱程序 直白将爱提起）
+经年尘封爱意　遏制已久的心
+（拼命掩藏心底 呼之欲出话语）
+我们终将别离　不论山巅谷底
+（我们终将别离 不论山巅谷底）
+届时别忘记　曾经有我
+（届时别忘记 曾经有我）
+坎坷伴你前行
+
+回我　梦里　携一段旋律
+与我　唱起　早春的私语
+释怀　不语　我是你的泪滴
+一切　一隅　予我　予你}}
+</poem>
+
+
+{{LS|collapsed}}
+{{纪远|collapsed}}
+{{坐标P|collapsed}}
+{{Creuzer|collapsed}}
+{{乐正绫/2023|collapsed}}
+
+== 外部链接 ==
+*[https://www.bilibili.com/read/cv23075928 歌唱着的，从来都不只是他们——《礼物pre-Sent》创作小记]
+
+[[Category:使用ACE Studio的歌曲]]

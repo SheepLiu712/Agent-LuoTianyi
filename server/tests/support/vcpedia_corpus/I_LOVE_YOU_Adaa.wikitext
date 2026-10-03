@@ -1,0 +1,158 @@
+{{标题替换|../.-../---/...-/./-.--/---/..-}}
+{{About|[[Adaa]]创作，由[[洛天依]]演唱的[[VOCALOID]]中文原创歌曲|消歧义页=我爱你}}
+{{Cquote|{{TextHover|1=../.-../---/...-/./-.--/---/..-|2=I LOVE YOU|3=before|4=center}}}}
+{{VOCALOID_Songbox
+|image = ..／.-..／---／...-／.／-.--／---／..-.png
+|图片信息 = 视频封面
+|颜色 = #0493B3;color:#FFDBC6;border-color:#FFF
+|演唱 = [[洛天依]]
+|歌曲名称 = ../.-../---/...-/./-.--/---/..-
+|UP主 = [[Adaa]]
+|bb_id = BV16741167n8
+|投稿时间 = 2020年1月27日
+|再生 = {{BilibiliCount|id=BV16741167n8}}
+}}
+
+== 简介 ==
+《'''../.-../---/...-/./-.--/---/..-'''》是[[Adaa]]于2020年1月27日投稿至[[bilibili]]的[[VOCALOID]]中文原创歌曲，由[[洛天依]]演唱。截至现在已有{{bilibiliCount|id=BV16741167n8}}次观看，{{bilibiliCount|id=BV16741167n8|type=4}}人收藏。
+
+本曲为“[[少年少女Pillow症候群]] Project”第六作，从少年“玖”的视角讲述了故事经过，也描述了玖对柒未说出口的爱恋（具体剧情参见系列条目）。
+
+== 歌曲 ==
+{{BilibiliVideo|id=BV16741167n8}}
+
+== 同系列其他作品 ==
+{{虚拟歌手系列作品/少年少女Pillow症候群系列|6}}
+
+== 歌词 ==
+{{tabs|DefaultTab=1
+|color = transparent
+|AutoWidth=yes
+|LabelBorderColor=#fff
+|LabelColor=#0493B3
+|TextBorderColor=white
+|TextPadding=10px 0px
+|bt1 = 正常版　
+|tab1 = {{LDC|段落=1|类型=歌词}}
+*为便于阅读，PV中的文案不在此列出。
+*鼠标指针移至莫尔斯电码上可查看解码。
+<poem style="color:#0493B3">
+{{Photrans/button}}
+定理一　无论奇迹魔法
+都需要付出相应的代价
+定理二　世上并不存在
+能够将过去改写的魔法
+
+于是我们如此地相信着
+今日吞食昨日　明日吞食今日
+道路的尽头　总有光照亮
+将红线剪断的世界终结
+下一次一定　握住你的手
+绝不会松手　亲口对你说
+{{TextHover|../.-../---/...-/./-.--/---/..-|I LOVE YOU|left|left|tag=span}}
+{{TextHover|../.-../---/...-/./-.--/---/..-|I LOVE YOU|left|left|tag=span}}
+ 
+定理一　无论奇迹魔法
+都需要付出相应的代价
+定理二　世上并不存在
+能够将过去改写的魔法
+
+那一天　那一天我们却
+自诩神明一般　许下任性的愿望
+从此乘上　背道而驰的列车
+被红色路标指引着迷失方向
+</poem>
+{{LyricsKai
+|lstyle=color:#0493B3
+|rstyle=color:#0493B3
+|width=80%
+|original=
+<br />
+Darling,please
+どうか、そのまま
+{{Photrans|優|やさ}}しいく
+{{Photrans|明|あか}}るく
+{{Photrans|輝|かがや}}き
+{{Photrans|続|つず}}けて
+|translated=
+<br />
+亲爱的，请你
+就那样
+温柔地
+明亮地
+继续闪耀
+}}
+<poem style="color:#0493B3">
+
+若能够在未来某个站台相见
+这一次一定　握住你的手
+绝不会松手　亲口对你说：
+{{TextHover|../.-../---/...-/./-.--/---/..-|I LOVE YOU|left|left|tag=span}}
+{{TextHover|../.-../---/...-/./-.--/---/..-|I LOVE YOU|left|left|tag=span}}
+
+</poem>
+
+|bt2 = 还原PV版　
+|tab2 = {{LDC|段落=1|类型=歌词}}
+*为还原PV效果保留了繁体字与简体字。
+*鼠标指针移至莫尔斯电码上可查看解码。
+*<span style="font-size:70%">小字</span>为PV文案。
+<div style="max-width:600px;">
+<poem style="text-align:center; background: #0493B3; color:#FFDBC6; font-size:115%; font-family:宋体">
+-{
+定理①
+無論奇跡魔法
+都需要付出相應的
+代價
+定理②
+世上並不存在
+能夠將過去
+改寫的魔法
+
+<div style="background: #FFF;color:#0493B3">於是</div>我們
+如此地相信著<br/><div style="text-align:center;background: #FFF;color:#0493B3; font-size:70%">【於是我們如此地自我欺騙著】</div>今日吞食昨日
+明日吞食今日
+道路的盡頭
+總有{{font|color=#0493B3|bgcolor=#FFF|光}}照亮<br/><div style="text-align:center;background: #FFF;color:#0493B3; font-size:70%">【其實早已知道這裡沒有光存在】</div>將紅線剪斷的世界<br/><div style="text-align:left;background: #0493B3;color:#FFDBC6; font-size:70%">•<br/>終於迎來了入夏第壹場雨，高溫天氣有望得到緩解。<br/>•<br/>上午八點五十分，本市環狀線內環列車於塔橋站高架突發事故，列車失控脫軌，與高架橋下化工廠氣罐相撞導致連環爆炸。事故起因不明，疑似恐怖分子所為。救援工作仍在展開中。<br/>•<br/>毒氣洩漏再加上繼發的火災導致救援難上加難。據目前救援人員透露，從現場發現的五十壹名列車乘客中尚未發現生還者。同時，考慮到有毒化工氣體的擴散，有關部門建議事發點附近的民眾迅速前往指定地點避難。<br/>•<br/>事故的原因被鑒定為鐵軌急轉彎處的自製炸彈，經由人為操控，在列車經過該處時引爆，導致急轉彎的列車失控墜橋，引發了後面的悲劇。這場恐怖襲擊設計者的身份尚未有任何線索。</div>{{font|color=#0493B3|bgcolor=#FFF|終結}}
+<div style="text-align:left;background: #0493B3;color:#FFDBC6; font-size:70%">•<br/>據本市公安局稱，事發之前多次接到壹位年輕男子的報警電話。該男子準確‘預知’了事故發生的時間地點，要求中止環狀線地鐵運輸，疏散乘客。警方不知該男子是如何得到這壹消息，將該男子列入嫌疑人範疇。<br/>•<br/>**高中三年A班的二十多名畢業生乘坐事發列車集體出行，到現在為止僅有三人尚有生命體征，現已送往醫院搶救。</div>下一次<div style="background: #FFF;color:#0493B3">一定</div>握住妳的手
+絕不會鬆手
+親口對妳說
+{{TextHover|../.-../---/...-/./-.--/---/..-|I LOVE YOU|center|center|tag=span}}
+{{TextHover|../.-../---/...-/./-.--/---/..-|I LOVE YOU|center|center|tag=span}}
+ 
+定理①
+無論奇跡魔法
+都需要付出相應的
+{{font|color=#000|bgcolor=#FFF|代價}}
+定理②
+世上並不存在
+能夠將過去
+改寫的魔法
+
+那一天
+那一天我們卻
+自詡神明一般
+許下任性的願望<br/><div style="background: #0493B3;color:#FFDBC6; font-size:70%">【所以，就算是奇迹和魔法降临，也不可能改变过去。】</div>從此乘上
+背道而馳的列車
+被紅色路標指引著<br/><div style="background: #0493B3;color:#FFDBC6; font-size:70%">被{{font|color=#0493B3|bgcolor=#FFF|青}}色路標指引著</div>迷失方向<br/><div style="background: #0493B3;color:#FFDBC6; font-size:70%">【所以，被困在徒劳的红色（Crimson）与青色（Cyan）的轮回中，分别乘上背道而驰的内环与外环的列车，再也无法相见，就是许下“改变过去”这一愿望的少年和少女所付出的代价。】</div>
+Darling,please
+どうか、そのまま
+優しいく
+明るく
+輝き
+続けて
+
+若能夠在未來某個站台相見
+這一次一定
+握住妳的手
+絕不會鬆手
+親口對妳說：
+{{TextHover|../.-../---/...-/./-.--/---/..-|I LOVE YOU|center|center|tag=span}}
+{{TextHover|../.-../---/...-/./-.--/---/..-|I LOVE YOU|center|center|tag=span}}
+
+}-</poem>
+</div>
+}}
+
+
+{{洛天依/2020|collapsed}}

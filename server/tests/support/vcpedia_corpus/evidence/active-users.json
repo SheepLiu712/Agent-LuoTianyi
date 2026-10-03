@@ -1,0 +1,331 @@
+{
+  "capture": {
+    "final_url": "https://vcpedia.cn/Special:%E6%B4%BB%E8%B7%83%E7%94%A8%E6%88%B7",
+    "http_status": 200,
+    "retrieved_at": "2026-10-01T16:09:46.054364+00:00",
+    "url": "https://vcpedia.cn/Special:%E6%B4%BB%E8%B7%83%E7%94%A8%E6%88%B7",
+    "user_count": 40
+  },
+  "semantics": "Complete official list; outside = inactive in the last 30 days. Counts are operations, not edits. Snapshot time is separate from revision/capture.",
+  "snapshot": {
+    "path": "evidence/active-users.html",
+    "sha256": "dceaadde145435ba6c420da6b13c8c0fc941b742e00bd6efde701310732a12a8"
+  },
+  "users": {
+    "0wzyt1": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 406
+    },
+    "503305": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 18
+    },
+    "AKQ-bot": {
+      "bot": true,
+      "groups": [
+        "机器人",
+        "正式编辑者",
+        "管理员"
+      ],
+      "operations_30d": 30
+    },
+    "ChenItse": {
+      "bot": false,
+      "groups": [
+        "行政员",
+        "正式编辑者",
+        "优质编辑者",
+        "界面管理员",
+        "管理员"
+      ],
+      "operations_30d": 135
+    },
+    "CreeperCHEN2": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 404
+    },
+    "DEATH酱-殷酱": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 59
+    },
+    "Fiction Blue": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 77
+    },
+    "Grassleaf": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 327
+    },
+    "Hash Jihong": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 1
+    },
+    "JackBlock": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者",
+        "管理员"
+      ],
+      "operations_30d": 249
+    },
+    "JinyiDog": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 263
+    },
+    "Kim8394": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 1
+    },
+    "LFTW": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 2
+    },
+    "Meng-LX": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 328
+    },
+    "Openwld": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "技术编辑者"
+      ],
+      "operations_30d": 22
+    },
+    "Qx969": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 16
+    },
+    "Wecury": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 4
+    },
+    "不可逆": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者",
+        "管理员"
+      ],
+      "operations_30d": 357
+    },
+    "你们和他一起学": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 30
+    },
+    "依V为耶": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 2898
+    },
+    "商火": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "荣誉编辑者"
+      ],
+      "operations_30d": 2
+    },
+    "喵萝酱": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 3
+    },
+    "天崎默": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 10
+    },
+    "失落的分别": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 8
+    },
+    "姜太公田所": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 15
+    },
+    "学生bot": {
+      "bot": true,
+      "groups": [
+        "机器人",
+        "正式编辑者",
+        "界面管理员",
+        "技术编辑者"
+      ],
+      "operations_30d": 486
+    },
+    "小祺": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者",
+        "管理员"
+      ],
+      "operations_30d": 53
+    },
+    "放克麦子": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 1
+    },
+    "氢化脱氰氰酸": {
+      "bot": false,
+      "groups": [
+        "行政员",
+        "正式编辑者",
+        "优质编辑者",
+        "界面管理员",
+        "管理员"
+      ],
+      "operations_30d": 482
+    },
+    "洛予峖": {
+      "bot": false,
+      "groups": [],
+      "operations_30d": 11
+    },
+    "洛水魂": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 1
+    },
+    "疏影": {
+      "bot": false,
+      "groups": [],
+      "operations_30d": 15
+    },
+    "空翊": {
+      "bot": false,
+      "groups": [
+        "行政员",
+        "正式编辑者",
+        "优质编辑者",
+        "界面管理员",
+        "管理员"
+      ],
+      "operations_30d": 22
+    },
+    "维克劳德": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者"
+      ],
+      "operations_30d": 429
+    },
+    "老天爷P": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 1
+    },
+    "语星308": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 132
+    },
+    "这只阿皮有点皮": {
+      "bot": false,
+      "groups": [
+        "正式编辑者",
+        "优质编辑者",
+        "管理员"
+      ],
+      "operations_30d": 268
+    },
+    "阿皮bot": {
+      "bot": true,
+      "groups": [
+        "机器人",
+        "正式编辑者",
+        "管理员"
+      ],
+      "operations_30d": 30
+    },
+    "雷欧妮": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 127
+    },
+    "黑猫不是白猫": {
+      "bot": false,
+      "groups": [
+        "正式编辑者"
+      ],
+      "operations_30d": 18
+    }
+  }
+}

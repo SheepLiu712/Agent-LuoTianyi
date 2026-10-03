@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "previous_head": "3280fef22d6378dd6cd550d0961cb6831678e3e1",
+  "scope": [
+    "N6",
+    "N8",
+    "N9",
+    "N10",
+    "N11",
+    "N12",
+    "N13",
+    "N14",
+    "N15"
+  ],
+  "not_changed": [
+    "parse_details behavior",
+    "staff collection policy",
+    "actual benchmark sample configuration",
+    "reviewed content oracle",
+    "historical result JSON",
+    "production configuration"
+  ],
+  "source_identity": "LF-normalized source file hashes; result commit identity supplied by Git containing this report",
+  "python_source_sha256_lf": {
+    "server/scripts/check_pr_python.py": "2cd1b891a6946f3ab4861f2f86e5918fb1bf6db677c66a2c89202fc64a24acd2",
+    "server/scripts/vcpedia_freeze_corpus.py": "4b24e558115bd5260495d41110f755342a8a2a05f068c8cb9ddf6efaa3568a4f",
+    "server/scripts/vcpedia_perf_baseline.py": "3917838876c6332a92fedbdad363fc12256a994287eab342d5dce8e59d63f0dc",
+    "server/scripts/vcpedia_prompt_lab.py": "2426e9190474803b7972e42460bf3207090607f0423024860165d25cb9eeda19",
+    "server/src/world/get_new_songs/daily_new_song_fetcher.py": "13794c92b377b3b1c144f6a06f110f6cfaf4a37b9cc98c89c03a97bb8529c08c",
+    "server/src/world/get_new_songs/source_extraction.py": "0c97f46402b0025e39993601a43f10b0b9627be07d5722506d90659c387adedc",
+    "server/src/world/get_new_songs/task.py": "17faff7fbd0829d9ad08e1c3ff243b3e5a85c80e4c5f874c31846107babf8b0a",
+    "server/src/world/get_new_songs/template_rules.py": "f862d4ceb956d369c1c7261f7bddfc66c933847ef3f3ab5e75e0b78bd0a48117",
+    "server/src/world/get_new_songs/text_conversion.py": "3b8a1ff42932e596b6632d05454b31c220eb26513443355f0a7823ee41e75780",
+    "server/src/world/get_new_songs/vcpedia_fetcher.py": "a3f16f3bdd8ec88c7e281305dffc827e3d94b43c206f271c5b0f5a24bb28174e",
+    "server/src/world/get_new_songs/wiki_api.py": "4e4f4023bfc7a7f5715c2bfc4e2d3bcf3d8afcaabb162d322774f5c5bffe83a1",
+    "server/src/world/get_new_songs/wikitext_parser.py": "32ce22475bc1cd5c266ea6817ec758f38a1898bc5d7e7546528dfdad506eb724",
+    "server/tests/integration/packaging/test_pyproject_installation.py": "111ce3cc471df6a996cee16f45b69728403d1407ac75ede8b9ae9d42947a2359",
+    "server/tests/support/vcpedia_corpus/oracle_support.py": "6a969a9ae7922ac9b4be9dc7d9d55f5f8aa0f8f674e1b570ea570c2c967879f7",
+    "server/tests/support/vcpedia_legacy_html.py": "8b6d09f06aba557a8043f70792a46b9330a40de1cd3bf2f4c3e9d5c0b6b2ec53",
+    "server/tests/unit/world/test_check_pr_python.py": "bf82733ac1703c0e9517901c48dd9b0b7f329a5ccb1b9474a6eb90b1653a1114",
+    "server/tests/unit/world/test_vcpedia_corpus_baseline.py": "16a8b65729007383fca601f73a0eeb061fc023dc70c57aefcba86c7c11a249b4",
+    "server/tests/unit/world/test_vcpedia_corpus_tools.py": "c94d66351ca5da00e31e35237785e6a4c17c3432506bcfef61e2c5e9babe92e5",
+    "server/tests/unit/world/test_vcpedia_document_contract.py": "36c4e09e93fb235ecd229f7c7ab5608c2bcc576b059c0f4acc9c15123f973a64",
+    "server/tests/unit/world/test_vcpedia_infobox_staff_scope.py": "17af23ecf096f3e5bd658af52270c2ee7f579f6d4e72b2557ff46071ab6d3366",
+    "server/tests/unit/world/test_vcpedia_information_counts.py": "f4c8b33f33cc8c5a8e22956efd60eab312e6791b42d165ddcd3b6074f61a0611",
+    "server/tests/unit/world/test_vcpedia_keyword_contract.py": "71e82fc27cc7afa4ad5180b6139874f5a37b9f30bd1a003426fad1ca01419ac9",
+    "server/tests/unit/world/test_vcpedia_lyrics_recovery.py": "c293e1fe4adb50d6cef443f98bf5e132bc0e9477d2dfb94fb9fa8b1a8598335d",
+    "server/tests/unit/world/test_vcpedia_material_counts.py": "90a927df6e0c33657a8a2edf8f954ceb7bab50a2fa04a03ffa421437c212e76d",
+    "server/tests/unit/world/test_vcpedia_perf_baseline.py": "4825438d9cd23b1d1401a83d1d3d2316fa27fa72c3832db1e522efc45ddb9f92",
+    "server/tests/unit/world/test_vcpedia_prompt_lab.py": "dd2abcd3f5fe09108fad563617900de28021cf3d6ca735395ada5a2186826fa0",
+    "server/tests/unit/world/test_vcpedia_rules_packaging.py": "df1ff0e021b460ff896c615fe4ecdda09ba406da62d41c456c46b14b48924fff",
+    "server/tests/unit/world/test_vcpedia_supplement_switches.py": "c817592e854071e688a1435a8627be629ec88792dbfcd12ece867143132eeb7d",
+    "server/tests/unit/world/test_vcpedia_transport_contract.py": "f6881fb6f4e642ff7542f723be5306366fc6b8e2c2df94d9dbcfb331d2e0d370",
+    "server/tests/unit/world/test_vcpedia_wikitext_equivalence.py": "cdf3780cb64857a04d74bb8fc382ffcb0980fdf5a28f35e6f1ea365632cb906a",
+    "server/tests/unit/world/test_world_task_vcpedia_new_songs.py": "bd700f3aba59524b6038c0d20abf49a9e8db9b00d4b777edf5b6f21a204b5e4a"
+  },
+  "lint": {
+    "version": "0.14.10",
+    "python_files": 31,
+    "actual_show_files_equals_selected": true,
+    "candidate_exit_code": 0,
+    "candidate_result_is_not_commit_proof": true,
+    "fixed_commit_validation": "Performed again after commit in an independent local clone; its exact SHA and result recorded in PR/Issue update."
+  },
+  "related_tests": [
+    {
+      "python_utf8_mode": 0,
+      "file_encoding": "cp936",
+      "exit_code": 0,
+      "summary": "615 passed, 1 warning in 78.36s (0:01:18)"
+    },
+    {
+      "python_utf8_mode": 1,
+      "file_encoding": "UTF-8",
+      "exit_code": 0,
+      "summary": "615 passed, 1 warning in 82.74s (0:01:22)"
+    }
+  ],
+  "full_unit_gbk": {
+    "passed": 1360,
+    "failed": 1,
+    "exit_code": 1,
+    "failure": "tests/unit/utils/test_llm_service.py::TestLLMService::test_register_llm_module",
+    "reason": "Existing real-provider call receives HTTP401 invalid_api_key; not altered or skipped."
+  },
+  "independent_reviews": {
+    "gate": "22 temporary-repository/real-Ruff probes matched expected status, including CRLF/cp936 and missing gitlink; no confirmed P1/P2 in fixed scope",
+    "p3": "Only requested wording/schema/provenance and two explicit UTF-8 reads changed; source/oracle/sample expectations preserved; no confirmed P1/P2"
+  },
+  "performance": {
+    "file": "performance-n6-n15.json",
+    "check_exit_code": 0,
+    "hash_file_count": 9,
+    "sample_count_this_run": 8,
+    "hardcoded_sample_count_requirement": false,
+    "minimum_margin": null,
+    "statistical_significance_claim": false
+  },
+  "effect": {
+    "file": "effect-n6-n15.json",
+    "check_exit_code": 0,
+    "meaning": "correlated boolean check slots; not independent defects or accuracy",
+    "rows_changed_from_reviewed_outcomes": false
+  },
+  "limits": [
+    "N7 redistribution rights remain for maintainer decision.",
+    "Original 24-song and historical Shana Fanghua comparison not revalidated.",
+    "No successful live supplement model test; full-unit test attempted a provider and received401.",
+    "Fixed lint scope is selected Python, gate and ancestor Ruff configs, not full-repository content isolation."
+  ]
+}
