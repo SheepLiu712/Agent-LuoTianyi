@@ -153,8 +153,9 @@ class MessageProcessor:
             self._send_cond.notify()
         return local_id
 
-    def send_image(self, image_path: str):
-        prepared = self._prepare_image_payload(image_path)
+    def send_image(self, image_path: str, *, prepared: dict | None = None):
+        if prepared is None:
+            prepared = self._prepare_image_payload(image_path)
         if not prepared.get("ok", False):
             return
 

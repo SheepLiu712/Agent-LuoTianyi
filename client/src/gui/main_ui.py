@@ -19,7 +19,7 @@ from typing import Dict, Any, List
 from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
-from ..utils.image_rules import validate_image_file
+from ..utils.image_encoding import prepare_image_payload
 from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, SystemMessage, BubblePlaybackManager
 from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
@@ -865,14 +865,15 @@ class ChatWidget(QWidget):
             "Images (*.jpg *.jpeg *.png *.gif *.bmp *.webp)"
         )
         if file_path:
-            _, validation_error = validate_image_file(file_path)
-            if validation_error is not None:
-                QMessageBox.warning(self, "图片无法发送", validation_error)
+            prepared = prepare_image_payload(file_path)
+            if not prepared["ok"]:
+                QMessageBox.warning(self, "图片无法发送", prepared["error"])
                 self.agent.on_image_selecting_cancel()
                 return
             self.can_send_pic = False
-            bubble = self.add_message("image", file_path, is_user=True)
-            self.agent.on_send_image(file_path, bubble)
+            upload_path = prepared["image_client_path"]
+            bubble = self.add_message("image", upload_path, is_user=True)
+            self.agent.on_send_image(upload_path, bubble, prepared=prepared)
         else:
             # 用户取消了选择：通知服务端重置等待时间
             self.agent.on_image_selecting_cancel()

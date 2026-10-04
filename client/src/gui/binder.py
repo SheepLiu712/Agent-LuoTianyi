@@ -146,8 +146,8 @@ class AgentBinder(QObject):
         msg_id = self.send_text_callback(text)
         self.msg_to_bubble[msg_id] = bubble
 
-    def on_send_image(self, image_path: str, bubble):
-        msg_id = self.send_image_callback(image_path)
+    def on_send_image(self, image_path: str, bubble, *, prepared: dict | None = None):
+        msg_id = self.send_image_callback(image_path, prepared=prepared)
         self.msg_to_bubble[msg_id] = bubble
 
     def on_send_typing(self, text_length: int):
