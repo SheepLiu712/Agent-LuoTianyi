@@ -12,6 +12,7 @@ from src.agent.skills.cognitive import (
     ImageUnderstandingSkill,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
+    TopicExtractionSkill,
 )
 from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
 from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
@@ -58,6 +59,7 @@ class SharedSkills:
         preprocessing_config: dict[str, Any] | None,
         explicit_memory_config: dict[str, Any] | None,
         reply_composition_config: dict[str, Any],
+        topic_extraction_config: dict[str, Any],
         reflection_config: dict[str, Any],
         song_knowledge_config: dict[str, Any],
         database_manager: DatabaseManager,
@@ -97,6 +99,9 @@ class SharedSkills:
             memories=memories,
             singing=self.singing.backend,
             generators=reply_generators,
+            topic_extraction=TopicExtractionSkill(
+                topic_extraction_config, llm_service, understanding=self.text_preprocessing
+            ),
         )
         self.reflection = ReflectionSkill(reflection_config, memories)
         self.intentional_memory = IntentionalMemoryCommit(lambda character_id: memories[character_id])

@@ -1,12 +1,14 @@
 """所有 Agent 共用 Skill 实例，同时按调用身份隔离角色和用户。"""
 
 import asyncio
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 import src.domain.agent as d
 from src.agent.skills.cognitive import ReplyDraft, ResponseCompositionSkill
-from src.agent.skills.contracts import SkillInvocation
+from src.agent.skills.contracts import SkillInvocation, TopicExtraction
 from src.agent_runtime.agent_runtime import AgentRuntime
 
 
@@ -79,6 +81,14 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
     singing = Singing()
     skill = ResponseCompositionSkill(
         {},
+        topic_extraction=SimpleNamespace(
+            extract=AsyncMock(
+                side_effect=[
+                    TopicExtraction(memory_queries=("query-a",), sing_attempts=("song-a",)),
+                    TopicExtraction(memory_queries=("query-b",), sing_attempts=("song-b",)),
+                ]
+            )
+        ),
         memories=memories,
         singing=singing,
         generators=generators,
@@ -91,8 +101,6 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
                 user_context=type("User", (), {})(),
                 reply_topic="topic-a",
                 conversation_history="",
-                memory_queries=("query-a",),
-                sing_attempts=("song-a",),
             )
         ),
         asyncio.create_task(
@@ -101,8 +109,6 @@ async def test_shared_composition_keeps_two_agents_and_users_isolated():
                 user_context=type("User", (), {})(),
                 reply_topic="topic-b",
                 conversation_history="",
-                memory_queries=("query-b",),
-                sing_attempts=("song-b",),
             )
         ),
     )
