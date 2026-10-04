@@ -94,5 +94,14 @@
 			]
 		}
 	},
-	"HitAreas": []
+	"HitAreas": [],
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen", "ParamEyeROpen"
+			]
+		}
+	]
 }
