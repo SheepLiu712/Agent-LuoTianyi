@@ -97,6 +97,7 @@
     const { Live2DModel } = PIXI.live2d;
 
     let model;
+    let autoEyeBlink;
     let app;
 
     // 加载mouth_value_projection.json中预设的嘴部张开程度，供后续 setMouthOpenY 调用
@@ -138,6 +139,7 @@
             onError: (err) => { console.error('Model load internal error:', err); }
         });
         
+        autoEyeBlink = model.internalModel.eyeBlink;
         app.stage.addChild(model);
 
         // 响应式缩放与居中
@@ -207,6 +209,8 @@
 
     window.setExpression = (expressionId) => {
       if (model) {
+        // Pause automatic blinking for the alternate eyes used by dumb.
+        model.internalModel.eyeBlink = expressionId === 'dumb' ? undefined : autoEyeBlink;
         model.expression(expressionId);
         window.setMouthOpenY(mouthValueProjection[expressionId] || -1); // 根据预设值调整嘴部张开程度
       }
