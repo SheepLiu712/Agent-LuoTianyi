@@ -57,6 +57,8 @@ describe('MessageProcessor TTS terminal contract', () => {
     }
     processor.onAgentMessage({ uuid: 'same-audio', audio: '', packet_sequence: 2,
       is_final_package: true, audio_error: true, error_code: 'TTS_CANCELLED' });
+    await flushAsyncWork();
+    processor.onServerAudioFinished();
     await drainIncoming(processor);
     expect(feed.mock.calls).toEqual([['YXVkaW8=', false], ['YXVkaW8=', false], ['', true]]);
     expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
@@ -170,10 +172,13 @@ describe('MessageProcessor TTS terminal contract', () => {
       audio: 'YXVkaW8=',
       is_final_package: true,
     });
-    await drainIncoming(processor);
+    await flushAsyncWork();
 
     expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1);
-    expect((processor as any).serverAudioPlaying).toBe(false);
+    expect(processor.isServerAudioActive()).toBe(true);
+    processor.onServerAudioFinished();
+    await drainIncoming(processor);
+    expect(processor.isServerAudioActive()).toBe(false);
   });
 
   it('plays ephemeral touch audio without persisting it', async () => {
@@ -193,6 +198,9 @@ describe('MessageProcessor TTS terminal contract', () => {
       display_in_chat: false,
       is_ephemeral: true,
     });
+    await flushAsyncWork();
+    expect(processor.isServerAudioActive()).toBe(true);
+    processor.onServerAudioFinished();
     await drainIncoming(processor);
 
     expect(feedServerAudioChunk).toHaveBeenCalledWith('dG91Y2gtYXVkaW8=', false);
