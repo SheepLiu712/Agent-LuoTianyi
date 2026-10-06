@@ -14,6 +14,11 @@ sys.path.insert(0, str(CLI_ROOT))
 
 from cli_client.session import HeadlessSession  # noqa: E402
 
+# 服务端 AgentPresentationState 的实际取值（真源 server/src/domain/stage/output.py）。
+# N6 的历史缺陷是驱动等待服务端从不发射的 "listening"；这里只做取值合法性校验，不把它当硬性前置条件，
+# 因为服务端仅在计划以 StartThinking 打头时才发 thinking（记忆确认等路径不发）。
+ALLOWED_AGENT_STATES = {"thinking", "waiting"}
+
 
 def required(name: str) -> str:
     value = os.environ.get(name)
@@ -30,11 +35,14 @@ session = HeadlessSession(base_url)
 
 try:
     session.connect(username, password, timeout=15)
-    before_seq = session.read_events()[-1]["seq"] if session.read_events() else 0
+    events = session.read_events()
+    before_seq = events[-1]["seq"] if events else 0
     result = session.send_voice(voice_path, upload_id=str(uuid.uuid4()), ack_timeout=15)
-    session.wait_for_event("agent_state", after_seq=before_seq, value="listening", timeout=30)
-    session.wait_for_event("agent_state", after_seq=before_seq, value="thinking", timeout=90)
     completed = session.wait_for_event("reply_completed", after_seq=before_seq, timeout=150)
+    observed_states = {event["value"] for event in session.read_events(after_seq=before_seq, kind="agent_state")}
+    unexpected = observed_states - ALLOWED_AGENT_STATES
+    if unexpected:
+        raise AssertionError(f"unexpected agent_state values: {sorted(unexpected)}")
     reply = session.get_reply(completed["data"]["reply_uuid"])
     if reply is None:
         raise AssertionError("completed reply is unavailable")

@@ -36,8 +36,11 @@ python tests/manual_e2e/08-reply-read-audio-replay.driver.py
 语音 AC-27 使用内部 `HeadlessSession` 驱动，不增加用户可见 slash 命令。准备合法的 M4A/AAC-LC 文件及离线假音频模型服务端后运行：
 
 ```powershell
+$env:CLI_E2E_BASE_URL = 'https://your-test-server.example'
+$env:CLI_E2E_USER = 'your-test-user'
+$env:CLI_E2E_PASSWORD = '<your-password>'
 $env:CLI_E2E_VOICE = 'C:\path\to\voice.m4a'
 python tests/manual_e2e/22-voice-message.driver.py
 ```
 
-驱动会校验分阶段 ACK、`listening`/`thinking`、完整回复、唯一历史语音元数据，以及 Bearer 下载内容的 SHA-256。
+驱动会校验分阶段 ACK、观测到的 `agent_state` 取值合法（`thinking` 只在 `StartThinking` 计划上发射，不作为硬性前置条件）、完整回复、唯一历史语音元数据，以及 Bearer 下载内容的 SHA-256。
