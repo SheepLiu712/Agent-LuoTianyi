@@ -18,7 +18,7 @@ from src.web.websocket import WSMessage
 
 from ._delivery import _ConnectionDelivery, _DeliveryConfig, completion
 from ._input import _INPUT_EVENTS, materialize_image, prepare_input
-from .voice_upload import VoiceUploadAck, VoiceUploadAssembler
+from .voice_upload import MAX_COMPLETED_PER_USER, MAX_COMPLETED_UPLOADS, VoiceUploadAck, VoiceUploadAssembler
 
 if TYPE_CHECKING:
     from src.stage.chat_stage import ChatStage
@@ -60,6 +60,8 @@ class WebSocketAdapter:
             self._media_store,
             max_incomplete=voice_config.get("max_incomplete", 128),
             ttl_seconds=voice_config.get("ttl_seconds", 600.0),
+            max_completed=voice_config.get("max_completed", MAX_COMPLETED_UPLOADS),
+            max_completed_per_user=voice_config.get("max_completed_per_user", MAX_COMPLETED_PER_USER),
         )
         self._routes: dict[str, _Binding] = {}
         self._connections: dict[WebSocketConnection, _ConnectionDelivery] = {}

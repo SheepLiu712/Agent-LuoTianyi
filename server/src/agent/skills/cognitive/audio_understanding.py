@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from src.agent.context import AudioUnderstandingStatus
 from src.domain.agent import MediaRef
 from src.infrastructure.media import MediaResolver, ResolvedMedia
+from src.utils.logger import get_logger
 
 if TYPE_CHECKING:
     from src.infrastructure.models.audio.module import AudioModelModule
@@ -51,6 +52,7 @@ class AudioUnderstandingSkill:
         self._audio_module = audio_module
         self._timeout_seconds = timeout_seconds
         self._retry_delay_seconds = retry_delay_seconds
+        self._logger = get_logger(__name__)
 
     async def understand(
         self,
@@ -76,9 +78,17 @@ class AudioUnderstandingSkill:
                 return media, AudioUnderstandingStatus.UNDERSTOOD, self._parse(response)
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as error:
+                # 只记录失败事实与异常类型；禁止记录音频、Base64、转写或描述内容。
+                self._logger.warning(
+                    "audio understanding attempt failed media_id=%s attempt=%s error=%s",
+                    media_ref.media_id,
+                    attempt + 1,
+                    type(error).__name__,
+                )
                 if attempt == 0:
                     await asyncio.sleep(self._retry_delay_seconds)
+        self._logger.warning("audio understanding degraded to NOT_UNDERSTOOD media_id=%s", media_ref.media_id)
         return media, AudioUnderstandingStatus.NOT_UNDERSTOOD, AudioUnderstandingResult(None, None, None)
 
     @staticmethod

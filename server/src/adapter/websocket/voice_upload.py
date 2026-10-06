@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import hashlib
 import json
 import time
 from dataclasses import dataclass, field
@@ -19,11 +20,17 @@ from src.infrastructure.media import (
     PermanentMediaStore,
     parse_m4a_audio,
 )
+from src.utils.logger import get_logger
 from src.web.websocket import WSMessage
 
 MAX_CHUNK_BYTES = 48 * 1024
 MAX_TOTAL_BYTES = 1024 * 1024
 MAX_CHUNKS = 32
+
+# finalize 幂等缓存必须同时受全局与每用户条数约束：缓存保存分片摘要（sha256，32 字节/片），
+# 而不是原始分片字节，否则单个认证账号就能用 begin/chunk/finalize 循环耗尽服务端内存。
+MAX_COMPLETED_UPLOADS = 256
+MAX_COMPLETED_PER_USER = 16
 
 
 class StimulusSink(Protocol):
@@ -69,6 +76,10 @@ class _Completed:
     completed_at: float
 
 
+def _digest(data: bytes) -> bytes:
+    return hashlib.sha256(data).digest()
+
+
 class VoiceUploadAssembler:
     """隐藏语音上传状态机，并只在 finalize 完成后暴露领域消息。"""
 
@@ -78,17 +89,36 @@ class VoiceUploadAssembler:
         *,
         max_incomplete: int = 128,
         ttl_seconds: float = 600.0,
+        max_completed: int = MAX_COMPLETED_UPLOADS,
+        max_completed_per_user: int = MAX_COMPLETED_PER_USER,
     ) -> None:
         if type(max_incomplete) is not int or max_incomplete <= 0:
             raise ValueError("voice upload max_incomplete must be a positive integer")
         if not isinstance(ttl_seconds, (int, float)) or ttl_seconds <= 0:
             raise ValueError("voice upload ttl_seconds must be positive")
+        if type(max_completed) is not int or max_completed <= 0:
+            raise ValueError("voice upload max_completed must be a positive integer")
+        if type(max_completed_per_user) is not int or max_completed_per_user <= 0:
+            raise ValueError("voice upload max_completed_per_user must be a positive integer")
         self._media_store = media_store
         self._max_incomplete = max_incomplete
         self._ttl_seconds = float(ttl_seconds)
+        self._max_completed = max_completed
+        self._max_completed_per_user = max_completed_per_user
         self._uploads: dict[tuple[str, str], _Upload] = {}
         self._completed: dict[tuple[str, str], _Completed] = {}
         self._lock = asyncio.Lock()
+        self._logger = get_logger(__name__)
+
+    @property
+    def retained_completed_count(self) -> int:
+        """当前保留的 finalize 幂等缓存条数（容量回归观测点）。"""
+        return len(self._completed)
+
+    @property
+    def retained_completed_bytes(self) -> int:
+        """当前幂等缓存持有的分片摘要字节数，用于确认缓存的是摘要而非原始分片。"""
+        return sum(len(digest) for completed in self._completed.values() for digest in completed.chunk_digests)
 
     async def process(
         self,
@@ -214,7 +244,11 @@ class VoiceUploadAssembler:
             decoded = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as error:
             raise VoiceUploadError("BAD_MESSAGE", "voice chunk is not valid base64") from error
-        if completed.chunk_digests[chunk_index] != decoded:
+        # 与在线分片路径同口径：重放路径也必须先做尺寸检查，否则放大后的帧会在这里白白解码 +
+        # 计算 sha256，并在全局锁内阻塞其他用户的 begin/chunk/finalize。
+        if len(decoded) > MAX_CHUNK_BYTES:
+            raise VoiceUploadError("VOICE_TOO_LARGE", "voice chunk exceeds the size limit")
+        if completed.chunk_digests[chunk_index] != _digest(decoded):
             raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice chunk content changed")
         return VoiceUploadAck(duplicate=True)
 
@@ -264,13 +298,28 @@ class VoiceUploadAssembler:
         )
         self._completed[key] = _Completed(
             parameters=parameters,
-            chunk_digests=tuple(upload.chunks[index] for index in range(upload.total_chunks)),
+            chunk_digests=tuple(_digest(upload.chunks[index]) for index in range(upload.total_chunks)),
             message_uuid=message_uuid,
             duration_ms=duration_ms,
             completed_at=time.monotonic(),
         )
+        self._evict_completed(user_id)
         del self._uploads[key]
         return VoiceUploadAck({"message_uuid": message_uuid, "duration_ms": duration_ms})
+
+    def _evict_completed(self, user_id: str) -> None:
+        """把完成态幂等缓存压回全局与每用户条数上限，先淘汰最旧条目。"""
+        user_keys = [key for key in self._completed if key[0] == user_id]
+        excess = len(user_keys) - self._max_completed_per_user
+        if excess > 0:
+            user_keys.sort(key=lambda key: self._completed[key].completed_at)
+            for key in user_keys[:excess]:
+                del self._completed[key]
+        overflow = len(self._completed) - self._max_completed
+        if overflow > 0:
+            ordered = sorted(self._completed, key=lambda key: self._completed[key].completed_at)
+            for key in ordered[:overflow]:
+                del self._completed[key]
 
     async def _validate_and_persist(
         self,
@@ -329,10 +378,15 @@ class VoiceUploadAssembler:
             upload_id=upload.upload_id,
             reason=reason,
         )
-        if upload.sink.can_accept(stimulus):
-            upload.sink.submit(stimulus)
+        if not upload.sink.can_accept(stimulus) or not upload.sink.submit(stimulus):
+            self._logger.warning(
+                "voice upload failure signal was dropped upload_id=%s reason=%s",
+                upload.upload_id,
+                reason,
+            )
 
     def _cleanup_expired(self, now: float) -> None:
+        # 两个状态表都已受条数上限约束，全量扫描代价有界；清理与状态机共用同一把锁，避免与 finalize 的 await 交错。
         expired = [key for key, upload in self._uploads.items() if now - upload.created_at >= self._ttl_seconds]
         for key in expired:
             upload = self._uploads.pop(key)
@@ -342,8 +396,11 @@ class VoiceUploadAssembler:
                 upload_id=upload.upload_id,
                 reason="expired",
             )
-            if upload.sink.can_accept(stimulus):
-                upload.sink.submit(stimulus)
+            if not upload.sink.can_accept(stimulus) or not upload.sink.submit(stimulus):
+                self._logger.warning(
+                    "voice upload expiry signal was dropped upload_id=%s",
+                    upload.upload_id,
+                )
         completed_expired = [
             key for key, completed in self._completed.items() if now - completed.completed_at >= self._ttl_seconds
         ]

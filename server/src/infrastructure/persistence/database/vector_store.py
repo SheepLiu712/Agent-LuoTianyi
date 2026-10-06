@@ -18,6 +18,9 @@ from chromadb.config import Settings
 from src.infrastructure.models.llm.embedding import SiliconFlowEmbeddings
 from src.utils.logger import get_logger
 
+# 单用户记录删除的分页大小：避免 n_results 上限造成的静默截断。
+_USER_RECORD_PAGE_SIZE = 1000
+
 
 class BaseDocument(ABC):
     """文档基类"""
@@ -248,30 +251,30 @@ class ChromaVectorStore(VectorStore):
             return False
 
     def delete_user_records(self, user_id: str) -> int:
-        """删除指定用户的所有记录，返回删除的记录数"""
-        try:
-            # 先查询出该用户的所有文档ID
-            results = self.collection.query(
-                query_texts=[" "],  # 空查询，获取所有文档
-                where={"user_id": user_id},
-                n_results=10000,  # 假设单用户不会超过1万条记录
-            )
-            if results["ids"]:
-                doc_ids = results["ids"][0]
-                if len(doc_ids) > 0:
-                    self.collection.delete(ids=doc_ids)
-                deleted_count = len(doc_ids)
-                self.logger.info(f"成功删除用户 {user_id} 的 {deleted_count} 条记录")
-                return deleted_count
-            else:
-                self.logger.info(f"用户 {user_id} 没有记录需要删除")
-                return 0
-        except Exception as e:
-            import traceback
+        """删除指定用户的所有记录并返回条数。
 
-            print(traceback.format_exc())
-            self.logger.error(f"删除用户记录失败: {e}")
-            return 0
+        分页删除以避免单用户超过单次查询上限时静默截断；任何失败都必须抛出，
+        不能返回 0 伪装成功——重置编排器把异常视为该步骤失败（AC-25）。
+        """
+        deleted_count = 0
+        previous_page: tuple[str, ...] | None = None
+        while True:
+            # include=[] 只取 id：删除路径不需要 document/metadata/embedding，避免整页载荷进入内存。
+            results = self.collection.get(where={"user_id": user_id}, limit=_USER_RECORD_PAGE_SIZE, include=[])
+            doc_ids = results.get("ids") or []
+            if not doc_ids:
+                break
+            page = tuple(doc_ids)
+            if page == previous_page:
+                # 后端没有真正删掉记录（例如软删/最终一致）时必须有界退出，不能无限循环。
+                raise RuntimeError(f"vector delete made no progress for user {user_id}")
+            previous_page = page
+            self.collection.delete(ids=list(doc_ids))
+            deleted_count += len(doc_ids)
+            if len(doc_ids) < _USER_RECORD_PAGE_SIZE:
+                break
+        self.logger.info(f"成功删除用户 {user_id} 的 {deleted_count} 条记录")
+        return deleted_count
 
     def update_document(self, doc_id: str, document: Document) -> bool:
         """更新文档

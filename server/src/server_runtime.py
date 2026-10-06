@@ -22,6 +22,7 @@ from src.utils.logger import (
 )
 from src.web.http import UserInterface
 from src.web.websocket import WebSocketService
+from src.web.websocket.service import resolve_max_inbound_frame_bytes
 from src.world import WorldRuntime
 
 logger = get_logger(__name__)
@@ -109,7 +110,9 @@ class ServerRuntime:
             # 7. 组装系统运行时
             runtime = cls(
                 user_interface=UserInterface(database_manager),
-                websocket_service=WebSocketService(),
+                websocket_service=WebSocketService(
+                    max_inbound_frame_bytes=resolve_max_inbound_frame_bytes(media_config)
+                ),
                 world=world,
                 database_manager=database_manager,
                 agent_runtime=agent_runtime,
@@ -166,7 +169,10 @@ class ServerRuntime:
             media_resolver=self.media_resolver,
         )
         self.world.wire_dependencies(server_runtime=self)
-        self.user_interface.wire_dependencies(database_manager=self.database_manager)
+        self.user_interface.wire_dependencies(
+            database_manager=self.database_manager,
+            media_resolver=self.media_resolver,
+        )
         self.ensure_dependencies()
 
     def _start_background_services(self) -> None:

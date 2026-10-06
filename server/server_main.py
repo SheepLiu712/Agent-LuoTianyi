@@ -13,6 +13,10 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 os.chdir(current_dir)
 logger = get_logger("server_main")
 config = load_config("config/config.json")
+# 不设置 uvicorn ws_max_size：传输层上限必须严格大于应用层入站帧上限，否则超限帧会在传输层被
+# 1009 断连，service.py 的结构化 BAD_MESSAGE NACK 永远不可达；而 ws_max_size 只能在 Config 构造时
+# 确定（server_main 导入时），无法跟随管理端热改的 max_encoded_bytes，会造成上限漂移。
+# uvicorn 默认 16 MiB 已覆盖默认 8 MiB 媒体限额，应用层负责给出可读错误。
 server_lifecycle = ServerLifecycle(root_dir=current_dir)
 app = FastAPI()
 bind_web_interfaces(app, current_dir)

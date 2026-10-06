@@ -274,7 +274,6 @@ class UserInterface:
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
         capped_count = min(max(1, count), 200)
-        self.user_conversation_helper.media_resolver = server_runtime.media_resolver
         return await self.user_conversation_helper.handle_history_request(user_uuid, capped_count, end_index)
 
     async def get_audio(self, token: str, message_uuid: str, server_runtime: ServerRuntime):

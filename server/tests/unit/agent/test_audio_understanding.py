@@ -189,3 +189,29 @@ def test_audio_storage_round_trip_and_rejects_mismatched_rendered_text():
             emotion=None,
             sound_description=None,
         )
+
+
+def test_audio_understanding_budget_matches_spec():
+    """AC-23：每次调用最多 20 秒、失败后等待 1 秒重试一次——规格常量必须被锁定。"""
+    import inspect
+
+    params = inspect.signature(AudioUnderstandingSkill.__init__).parameters
+    assert params["timeout_seconds"].default == 20.0
+    assert params["retry_delay_seconds"].default == 1.0
+
+
+@pytest.mark.asyncio
+async def test_degradation_is_logged_without_leaking_audio_content(capture_project_log, caplog):
+    """降级必须留下可诊断日志，但不得记录音频/Base64/转写内容。"""
+    capture_project_log("src.agent.skills.cognitive.audio_understanding")
+    secret = "TRANSCRIPT-SHOULD-NOT-BE-LOGGED"
+    skill, _, _ = _skill([RuntimeError(f"provider rejected {secret}"), RuntimeError(secret)])
+    media_ref = d.MediaRef(media_id="11111111-1111-4111-8111-111111111111")
+
+    _, status, result = await skill.understand(media_ref, owner_user_id="user-1")
+
+    assert status is AudioUnderstandingStatus.NOT_UNDERSTOOD
+    assert result.transcript is None
+    assert "11111111-1111-4111-8111-111111111111" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert secret not in caplog.text

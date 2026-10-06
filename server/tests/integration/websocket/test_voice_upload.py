@@ -10,6 +10,8 @@ from fastapi import WebSocketDisconnect
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.voice_upload import VoiceUploadAssembler
+from src.web.websocket import WSMessage
 from src.web.websocket.endpoint import _receive_events
 from src.web.websocket.service import WebSocketConnection, WebSocketService
 
@@ -291,7 +293,7 @@ async def test_per_user_limit_chunk_size_and_ttl_cleanup(tmp_path):
     adapter = WebSocketAdapter(
         {
             "media_store": {"root": str(tmp_path / "media")},
-            "voice_upload": {"ttl_seconds": 0.001},
+            "voice_upload": {"ttl_seconds": 0.2},
         }
     )
     first = str(uuid4())
@@ -309,7 +311,7 @@ async def test_per_user_limit_chunk_size_and_ttl_cleanup(tmp_path):
         adapter=adapter,
     )
     assert sent[1]["payload"]["code"] == "VOICE_UPLOAD_CONFLICT"
-    await asyncio.sleep(0.01)
+    await asyncio.sleep(0.3)
     oversized_chunk = event(
         "chunk",
         second,
@@ -347,3 +349,210 @@ async def test_same_upload_id_is_isolated_between_users(tmp_path):
     assert sent_a[-1]["payload"]["message_uuid"] != sent_b[-1]["payload"]["message_uuid"]
     assert isinstance(stage_a.stimuli[-1], d.VoiceMessage)
     assert isinstance(stage_b.stimuli[-1], d.VoiceMessage)
+
+
+@pytest.mark.asyncio
+async def test_completed_chunk_replay_matches_original_bytes_and_still_detects_conflict(tmp_path):
+    data = m4a_bytes()
+    upload_id, events = upload_events(data)
+    adapter = WebSocketAdapter({"media_store": {"root": str(tmp_path / "media")}})
+    await run_events(tmp_path, events, adapter=adapter)
+    replay_chunk, conflict_chunk = events[1], event(
+        "chunk",
+        upload_id,
+        {"chunk_index": 0, "audio_base64": base64.b64encode(b"different").decode("ascii")},
+    )
+
+    sent, _, _ = await run_events(tmp_path, [replay_chunk, conflict_chunk], adapter=adapter)
+
+    assert sent[0]["payload"]["duplicate"] is True
+    assert sent[1]["payload"]["code"] == "VOICE_UPLOAD_CONFLICT"
+    # 重放比较与容量都基于 sha256 摘要：2 片 × 32 字节，而不是 2 片原始字节。
+    assert adapter._voice_uploads.retained_completed_bytes == 2 * 32
+
+
+@pytest.mark.asyncio
+async def test_completed_cache_is_bounded_and_stores_digests_only(tmp_path):
+    adapter = WebSocketAdapter(
+        {
+            "media_store": {"root": str(tmp_path / "media")},
+            "voice_upload": {"max_completed": 2, "max_completed_per_user": 2},
+        }
+    )
+    for _ in range(3):
+        _, events = upload_events(m4a_bytes())
+        await run_events(tmp_path, events, adapter=adapter)
+
+    assembler = adapter._voice_uploads
+    assert assembler.retained_completed_count == 2
+    # 每条 2 片、每片 sha256 摘要 32 字节：证明缓存保存的是摘要而不是原始分片字节。
+    assert assembler.retained_completed_bytes == 2 * 2 * 32
+
+
+@pytest.mark.asyncio
+async def test_completed_cache_enforces_per_user_cap(tmp_path):
+    adapter = WebSocketAdapter(
+        {
+            "media_store": {"root": str(tmp_path / "media")},
+            "voice_upload": {"max_completed": 10, "max_completed_per_user": 1},
+        }
+    )
+    for _ in range(2):
+        _, events = upload_events(m4a_bytes())
+        await run_events(tmp_path, events, adapter=adapter, user_id="user-a")
+    _, events = upload_events(m4a_bytes())
+    await run_events(tmp_path, events, adapter=adapter, user_id="user-b")
+
+    assert adapter._voice_uploads.retained_completed_count == 2
+
+
+@pytest.mark.asyncio
+async def test_finalize_replay_after_eviction_is_retryable_not_a_second_voice_message(tmp_path):
+    """幂等缓存淘汰后，重放 finalize 必须得到可重试的 NOT_FOUND，而不是再投递一条 VoiceMessage。"""
+    data = m4a_bytes()
+    adapter = WebSocketAdapter(
+        {
+            "media_store": {"root": str(tmp_path / "media")},
+            "voice_upload": {"max_completed": 1, "max_completed_per_user": 1},
+        }
+    )
+    first_id, first_events = upload_events(data)
+    _, first_stage, _ = await run_events(tmp_path, first_events, adapter=adapter)
+    assert isinstance(first_stage.stimuli[-1], d.VoiceMessage)
+
+    _, second_events = upload_events(data)
+    _, second_stage, _ = await run_events(tmp_path, second_events, adapter=adapter)
+    assert isinstance(second_stage.stimuli[-1], d.VoiceMessage)
+    assert adapter._voice_uploads.retained_completed_count == 1
+
+    sent, replay_stage, _ = await run_events(tmp_path, [event("finalize", first_id)], adapter=adapter)
+
+    assert sent[-1]["payload"]["code"] == "VOICE_UPLOAD_NOT_FOUND"
+    assert sent[-1]["payload"]["retryable"] is True
+    assert not any(isinstance(item, d.VoiceMessage) for item in replay_stage.stimuli)
+
+
+@pytest.mark.asyncio
+async def test_completed_replay_rejects_oversized_chunk(tmp_path):
+    """重放路径必须与在线分片路径同口径地做尺寸检查，否则放大帧会在全局锁内白白解码。"""
+    data = m4a_bytes()
+    upload_id, events = upload_events(data)
+    adapter = WebSocketAdapter({"media_store": {"root": str(tmp_path / "media")}})
+    await run_events(tmp_path, events, adapter=adapter)
+
+    oversized = event(
+        "chunk",
+        upload_id,
+        {"chunk_index": 0, "audio_base64": base64.b64encode(b"x" * (48 * 1024 + 1)).decode("ascii")},
+    )
+    sent, _, _ = await run_events(tmp_path, [oversized], adapter=adapter)
+
+    assert sent[-1]["payload"]["code"] == "VOICE_TOO_LARGE"
+
+
+class _MutableSink:
+    """可切换接包容量的 sink，用于验证失败/过期信号被丢弃时会留下日志。"""
+
+    def __init__(self, *, accept: bool = True):
+        self.accept = accept
+        self.stimuli = []
+
+    def can_accept(self, stimulus) -> bool:
+        return self.accept
+
+    def submit(self, stimulus) -> bool:
+        if not self.accept:
+            return False
+        self.stimuli.append(stimulus)
+        return True
+
+
+def _voice_event(phase: str, upload_id: str, payload=None) -> WSMessage:
+    return WSMessage(
+        event_type="user_voice",
+        payload={"phase": phase, "upload_id": upload_id, **(payload or {})},
+        client_msg_id=f"{upload_id}:{phase}",
+    )
+
+
+async def _begin_upload(assembler: VoiceUploadAssembler, sink: _MutableSink, upload_id: str) -> None:
+    await assembler.process(
+        event=_voice_event(
+            "begin",
+            upload_id,
+            {"mime_type": "audio/mp4", "container": "m4a", "codec": "aac_lc", "byte_length": 1, "total_chunks": 1},
+        ),
+        user_id="user-1",
+        character_id="luotianyi",
+        sink=sink,
+    )
+
+
+@pytest.mark.asyncio
+async def test_dropped_upload_failure_signal_is_logged(capture_project_log, caplog):
+    """handles 满 / OFFLINE 时失败信号投不出去，必须有 warning，不能静默丢失。"""
+    capture_project_log("src.adapter.websocket.voice_upload")
+    sink = _MutableSink()
+    assembler = VoiceUploadAssembler(None)
+    upload_id = str(uuid4())
+    await _begin_upload(assembler, sink, upload_id)
+    sink.accept = False
+
+    await assembler.process(
+        event=_voice_event("abort", upload_id),
+        user_id="user-1",
+        character_id="luotianyi",
+        sink=sink,
+    )
+
+    assert "voice upload failure signal was dropped" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_dropped_upload_expiry_signal_is_logged(capture_project_log, caplog):
+    capture_project_log("src.adapter.websocket.voice_upload")
+    sink = _MutableSink()
+    assembler = VoiceUploadAssembler(None, ttl_seconds=0.001)
+    expired_id, other_id = str(uuid4()), str(uuid4())
+    await _begin_upload(assembler, sink, expired_id)
+    sink.accept = False
+    await asyncio.sleep(0.01)
+
+    await assembler.process(
+        event=_voice_event("abort", other_id),
+        user_id="user-1",
+        character_id="luotianyi",
+        sink=sink,
+    )
+
+    assert "voice upload expiry signal was dropped" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_declared_byte_length_mismatch_reports_size_mismatch_step(tmp_path):
+    """拼接总长 ≠ 声明长度必须失败并给出 size_mismatch，而不是静默落盘截断内容。"""
+    data = m4a_bytes()
+    upload_id = str(uuid4())
+    split = max(1, len(data) // 2)
+    chunks = [data[:split], data[split:]]
+    events = [
+        event(
+            "begin",
+            upload_id,
+            {
+                "mime_type": "audio/mp4",
+                "container": "m4a",
+                "codec": "aac_lc",
+                "byte_length": len(data) + 1,
+                "total_chunks": 2,
+            },
+        ),
+        event("chunk", upload_id, {"chunk_index": 0, "audio_base64": base64.b64encode(chunks[0]).decode("ascii")}),
+        event("chunk", upload_id, {"chunk_index": 1, "audio_base64": base64.b64encode(chunks[1]).decode("ascii")}),
+        event("finalize", upload_id),
+    ]
+
+    sent, stage, _ = await run_events(tmp_path, events)
+
+    assert sent[-1]["payload"]["code"] == "VOICE_UPLOAD_CONFLICT"
+    assert any(isinstance(item, d.VoiceUploadFailed) and item.reason == "size_mismatch" for item in stage.stimuli)

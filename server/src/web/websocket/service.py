@@ -15,9 +15,26 @@ if TYPE_CHECKING:
 
 NEGATIVE_ACK_CAPABILITY = "negative_ack_v1"
 
+# 图片以 base64 整帧上行，入站帧上限必须覆盖媒体库允许的最大编码字节，
+# 否则真实手机照片会在传输层被 BAD_MESSAGE 拒收（历史上限 128 KiB）。
+DEFAULT_MEDIA_MAX_ENCODED_BYTES = 8 * 1024 * 1024
+INBOUND_FRAME_ENVELOPE_BYTES = 256 * 1024
+
+
+def resolve_max_inbound_frame_bytes(media_config: Dict[str, Any] | None = None) -> int:
+    """按媒体限额推导入站帧上限：媒体库最大编码字节 + JSON 信封余量。"""
+    encoded = DEFAULT_MEDIA_MAX_ENCODED_BYTES
+    if isinstance(media_config, dict):
+        configured = media_config.get("max_encoded_bytes")
+        if type(configured) is int and configured > 0:
+            encoded = configured
+    return encoded + INBOUND_FRAME_ENVELOPE_BYTES
+
 
 class WebSocketService:
-    def __init__(self, *, max_inbound_frame_bytes: int = 128 * 1024):
+    def __init__(self, *, max_inbound_frame_bytes: int | None = None):
+        if max_inbound_frame_bytes is None:
+            max_inbound_frame_bytes = resolve_max_inbound_frame_bytes()
         if type(max_inbound_frame_bytes) is not int or max_inbound_frame_bytes <= 0:
             raise ValueError("max_inbound_frame_bytes must be a positive integer")
         self.logger = get_logger(__name__)

@@ -35,7 +35,7 @@ class ValidationItem:
 class RuntimeConfigValidator:
     """Validate core runtime config and report optional world disablements."""
 
-    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY", "QWEN_API_KEY"]
+    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
 
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",
@@ -167,16 +167,22 @@ class RuntimeConfigValidator:
             ("audio", "available_audio_models"),
         ):
             interfaces = llm_service.get(key, {})
-            if kind == "audio" and not interfaces:
-                interfaces = {
-                    "qwen3.8-omni-flash": {
-                        "api_type": "openai",
-                        "model": "qwen3.8-omni-flash",
-                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                        "api_key": os.environ.get("QWEN_API_KEY", ""),
-                    }
-                }
             if not interfaces:
+                if kind == "audio":
+                    # 音频理解是可选能力：未在本节配置接口时不阻断核心运行时（与 world 功能“缺失即禁用”一致）。
+                    # 注意措辞必须与运行期一致：LLMService 仍内置一份默认音频接口，因此这里是“回退 + 不可用时降级”，
+                    # 而不是“禁用”；已显式配置但密钥未解析/字段缺失仍按下面的逻辑报 error（AC-24）。
+                    result.append(
+                        ValidationItem(
+                            "core",
+                            f"{kind}.interfaces",
+                            "warning",
+                            "未在 llm_service.available_audio_models 配置音频模型接口，"
+                            "语音理解将回退到内置默认接口，接口不可用时按 AC-23 降级",
+                            severity="warning",
+                        )
+                    )
+                    continue
                 result.append(
                     ValidationItem("core", f"{kind}.interfaces", "error", f"未配置任何 {kind.upper()} interface")
                 )
