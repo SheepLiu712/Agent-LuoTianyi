@@ -122,4 +122,118 @@ describe('VoicePlaybackManager cache/download seam', () => {
     expect(FileSystem.deleteAsync).toHaveBeenCalledWith(expect.stringContaining('/old.m4a'), { idempotent: true });
     expect((manager as any).entries.has('protected')).toBe(true);
   });
+
+  it('migrates the cache key from upload_id to message_uuid after the finalize ACK', async () => {
+    const manager = new VoicePlaybackManager({ download: jest.fn() });
+    (FileSystem.getInfoAsync as jest.Mock).mockImplementation(async (uri: string) => ({
+      exists: !uri.includes('message-uuid'),
+      size: 42,
+    }));
+
+    await manager.migrateCacheKey('upload-id', 'message-uuid');
+
+    expect(FileSystem.moveAsync).toHaveBeenCalledWith({
+      from: 'file://documents/voice_cache/upload-id.m4a',
+      to: 'file://documents/voice_cache/message-uuid.m4a',
+    });
+    expect((manager as any).entries.has('upload-id')).toBe(false);
+    expect((manager as any).entries.get('message-uuid')).toMatchObject({
+      uri: 'file://documents/voice_cache/message-uuid.m4a',
+      size: 42,
+    });
+  });
+
+  it('drops the orphan upload_id file when the message_uuid cache already exists', async () => {
+    const manager = new VoicePlaybackManager({ download: jest.fn() });
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 42 });
+
+    await manager.migrateCacheKey('upload-id', 'message-uuid');
+
+    expect(FileSystem.moveAsync).not.toHaveBeenCalled();
+    expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file://documents/voice_cache/upload-id.m4a', { idempotent: true });
+  });
+
+  it('does nothing when there is no cached upload_id file', async () => {
+    const manager = new VoicePlaybackManager({ download: jest.fn() });
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: false });
+
+    await manager.migrateCacheKey('upload-id', 'message-uuid');
+    await manager.migrateCacheKey('same', 'same');
+
+    expect(FileSystem.moveAsync).not.toHaveBeenCalled();
+    expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+  });
+
+  it('notifies idle when playback finishes so the bubble leaves the stop icon', async () => {
+    const sounds: any[] = [];
+    (require('expo-av').Audio.Sound as jest.Mock).mockImplementation(() => {
+      const sound = {
+        loadAsync: jest.fn().mockResolvedValue(undefined),
+        playAsync: jest.fn().mockResolvedValue(undefined),
+        stopAsync: jest.fn().mockResolvedValue(undefined),
+        unloadAsync: jest.fn().mockResolvedValue(undefined),
+        setOnPlaybackStatusUpdate: jest.fn((callback) => { sound.callback = callback; }),
+        callback: undefined as ((status: any) => void) | undefined,
+      };
+      sounds.push(sound);
+      return sound;
+    });
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 1 });
+    const manager = new VoicePlaybackManager({ download: jest.fn() });
+    const states: string[] = [];
+
+    await manager.play('x', 'token', (state) => states.push(state));
+    sounds[0].callback?.({ isLoaded: true, didJustFinish: true });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(states).toEqual(['loading', 'playing', 'idle']);
+    expect(sounds[0].stopAsync).toHaveBeenCalled();
+  });
+
+  it('notifies idle for the preempted uuid but not for the new one', async () => {
+    const sounds: any[] = [];
+    (require('expo-av').Audio.Sound as jest.Mock).mockImplementation(() => {
+      const sound = {
+        loadAsync: jest.fn().mockResolvedValue(undefined),
+        playAsync: jest.fn().mockResolvedValue(undefined),
+        stopAsync: jest.fn().mockResolvedValue(undefined),
+        unloadAsync: jest.fn().mockResolvedValue(undefined),
+        setOnPlaybackStatusUpdate: jest.fn(),
+      };
+      sounds.push(sound);
+      return sound;
+    });
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 1 });
+    const manager = new VoicePlaybackManager({ download: jest.fn() });
+    const first: string[] = [];
+    const second: string[] = [];
+
+    await manager.play('a', 'token', (state) => first.push(state));
+    await manager.play('b', 'token', (state) => second.push(state));
+
+    expect(first).toEqual(['loading', 'playing', 'idle']);
+    expect(second).toEqual(['loading', 'playing']);
+  });
+
+  it('accounts the target file size when the destination already exists', async () => {
+    const manager = new VoicePlaybackManager({ download: jest.fn() });
+    (FileSystem.getInfoAsync as jest.Mock).mockImplementation(async (uri: string) => ({
+      exists: true,
+      size: uri.includes('message-uuid') ? 3000 : 1000,
+    }));
+
+    const uri = await manager.migrateCacheKey('upload-id', 'message-uuid');
+
+    expect(uri).toBe('file://documents/voice_cache/message-uuid.m4a');
+    // 目标已存在时沿用源文件大小会让 LRU 少算 2000B。
+    expect((manager as any).entries.get('message-uuid').size).toBe(3000);
+  });
+
+  it('returns null when there is nothing to migrate', async () => {
+    const manager = new VoicePlaybackManager({ download: jest.fn() });
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: false });
+
+    await expect(manager.migrateCacheKey('upload-id', 'message-uuid')).resolves.toBeNull();
+    await expect(manager.migrateCacheKey('same', 'same')).resolves.toBeNull();
+  });
 });

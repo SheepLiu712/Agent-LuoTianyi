@@ -32,6 +32,7 @@ export const useChatLogic = (
   const clickTimestampsRef = useRef<number[]>([]);
   const voiceFilesRef = useRef(new Map<string, { localUri: string; durationMs: number }>());
   const voiceAckMapRef = useRef(new Map<string, string>());
+  const recordingRef = useRef(false);
 
   const updateMessageByUuid = useCallback((uuid: string, updater: (msg: ChatMessage) => ChatMessage) => {
     setMessages((prev) => prev.map((msg) => (msg.uuid === uuid ? updater(msg) : msg)));
@@ -178,12 +179,23 @@ export const useChatLogic = (
       },
       (uploadId, messageUuid, durationMs) => {
         voiceAckMapRef.current.set(uploadId, messageUuid);
+        // ACK 之后播放/历史都以 message_uuid 为缓存身份；不迁移会重复下载并留下孤儿缓存文件。
+        // 乐观气泡的 uuid 仍是 upload_id（播放时经 voiceAckMapRef 解析），因此这里必须把
+        // audioLocalUri 同步指到迁移后的文件，否则点播放会缓存未命中并去下载不存在的 upload_id。
+        void voicePlaybackManager
+          .migrateCacheKey(uploadId, messageUuid)
+          .then((uri) => {
+            if (uri) updateMessageByUuid(uploadId, (msg) => ({ ...msg, audioLocalUri: uri }));
+          })
+          .catch(() => undefined);
         updateMessageByUuid(uploadId, (msg) => ({
           ...msg,
           durationMs: durationMs ?? msg.durationMs,
           sendStatus: 'submitted',
         }));
       },
+      // AC-15：录音期间不播放服务端音频，避免被麦克风收进去。
+      () => recordingRef.current,
     );
 
     messageProcessorRef.current = processor;
@@ -215,15 +227,23 @@ export const useChatLogic = (
   const canSendImage = true;
 
   const voiceInput = useVoiceInput({
-    onRecordingStarted: (recordingId) => { void binderRef.current?.sendVoiceRecordingStarted(recordingId); },
-    onRecordingCancelled: (recordingId) => { void binderRef.current?.sendVoiceRecordingCancelled(recordingId); },
+    onRecordingStarted: (recordingId) => { recordingRef.current = true; void binderRef.current?.sendVoiceRecordingStarted(recordingId); },
+    onRecordingCancelled: (recordingId) => { recordingRef.current = false; void binderRef.current?.sendVoiceRecordingCancelled(recordingId); },
     onRecordingCommitted: ({ uploadId, localUri, durationMs }) => {
+      recordingRef.current = false;
       voiceFilesRef.current.set(uploadId, { localUri, durationMs });
       void voicePlaybackManager.cacheLocal(uploadId, localUri).then((cachedUri) => updateMessageByUuid(uploadId, (msg) => ({ ...msg, audioLocalUri: cachedUri, audioAvailable: true })));
       setMessages((prev) => [{ uuid: uploadId, type: 'audio', content: '[语音消息]', isUser: true, timestamp: Date.now(), durationMs, audioLocalUri: localUri, audioAvailable: true, sendStatus: 'waiting' }, ...prev]);
       void binderRef.current?.sendVoice(uploadId, localUri, durationMs);
     },
-    onStopAllAudio: async () => { await binderRef.current?.stopLocalTts(); webviewRef.current?.injectJavaScript('window.stopServerAudio(); true;'); },
+    onStopAllAudio: async () => {
+      await binderRef.current?.stopLocalTts();
+      webviewRef.current?.injectJavaScript('window.stopServerAudio(); true;');
+      // AC-04：开始录音必须同时停掉正在播放的语音条，否则会被麦克风收进去。
+      await voicePlaybackManager.stop();
+      setMessages((prev) => prev.some((msg) => msg.audioPlayState === 'playing') ? prev.map((msg) => msg.audioPlayState === 'playing' ? { ...msg, audioPlayState: 'idle' } : msg) : prev);
+      setCurrentPlayingUuid(null);
+    },
     onNotice: appendSystemMessage,
   });
 
@@ -427,6 +447,17 @@ export const useChatLogic = (
     });
   }, []);
 
+  /** AC-12：失败语音按同一 upload_id 手工重传（失败图标入口）。 */
+  const retryVoice = useCallback(async (uuid: string) => {
+    const file = voiceFilesRef.current.get(uuid);
+    if (!file) {
+      appendSystemMessage('这条语音无法重试，请重新录制');
+      return;
+    }
+    updateMessageByUuid(uuid, (msg) => ({ ...msg, sendStatus: 'waiting' }));
+    await binderRef.current?.retryVoice(uuid);
+  }, [appendSystemMessage, updateMessageByUuid]);
+
   const toggleVoicePlayback = useCallback(async (uuid: string) => {
     const target = messages.find((msg) => msg.uuid === uuid && msg.type === 'audio');
     if (!target || target.audioAvailable === false) {
@@ -440,9 +471,11 @@ export const useChatLogic = (
       return;
     }
     updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: 'loading' }));
+    // 乐观气泡的 uuid 是协议 upload_id；ACK 后缓存已迁移到 message_uuid，播放必须用后者。
+    const playbackKey = voiceAckMapRef.current.get(uuid) ?? uuid;
     try {
-      if (target.audioLocalUri) await voicePlaybackManager.cacheLocal(uuid, target.audioLocalUri);
-      await voicePlaybackManager.play(uuid, messageToken, (state) => {
+      if (target.audioLocalUri) await voicePlaybackManager.cacheLocal(playbackKey, target.audioLocalUri);
+      await voicePlaybackManager.play(playbackKey, messageToken, (state) => {
         updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: state === 'loading' ? 'loading' : state === 'failed' ? 'failed' : 'ready', audioPlayState: state === 'playing' ? 'playing' : 'idle' }));
         if (state === 'playing') setCurrentPlayingUuid(uuid);
         if (state === 'failed') appendSystemMessage('语音加载失败，请稍后重试');
@@ -468,6 +501,7 @@ export const useChatLogic = (
     handleWebViewMessage,
     handleToggleAgentAudio,
     toggleVoicePlayback,
+    retryVoice,
     voiceInput,
   };
 };

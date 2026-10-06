@@ -29,11 +29,13 @@ type SendItem = { clientMsgId: string; retryAttempt: number; enqueuedAtMs: numbe
   | { kind: 'touch'; touchArea: string | string[]; clickFrequency?: Record<string, number>; touchMeta?: Record<string, unknown> }
   | { kind: 'image_selecting' }
   | { kind: 'image_selecting_cancel' }
-  | { kind: 'voice'; uuid: string; localUri: string; durationMs: number }
+  | { kind: 'voice'; uuid: string; localUri: string; durationMs: number; voiceStartedAtMs?: number }
 );
 
 export const MAX_DURABLE_RETRY_ATTEMPTS = 8;
 export const MAX_DURABLE_MESSAGE_AGE_MS = 4 * 60 * 1000;
+/** AC-12：一条语音从首次尝试开始的 15 秒上传总预算（跨自动重试累计，不重置）。 */
+export const VOICE_UPLOAD_BUDGET_MS = 15000;
 
 export function isDurableSendKind(kind: SendKind) {
   return kind === 'text' || kind === 'image' || kind === 'proactive' || kind === 'voice';
@@ -125,6 +127,7 @@ export class MessageProcessor {
   private readonly feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void;
   private readonly stopServerAudio: () => void;
   private readonly onVoiceFinalized?: (uploadId: string, messageUuid: string, durationMs?: number) => void;
+  private readonly isVoiceRecording?: () => boolean;
   private sendQueue: SendItem[] = [];
   private sendLoopRunning = false;
   private stopRequested = false;
@@ -149,16 +152,27 @@ export class MessageProcessor {
     feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void,
     stopServerAudio?: () => void,
     onVoiceFinalized?: (uploadId: string, messageUuid: string, durationMs?: number) => void,
+    isVoiceRecording?: () => boolean,
   ) {
     this.networkClient = networkClient;
     this.binder = binder;
     this.feedServerAudioChunk = feedServerAudioChunk;
     this.stopServerAudio = stopServerAudio || (() => {});
     this.onVoiceFinalized = onVoiceFinalized;
+    this.isVoiceRecording = isVoiceRecording;
+  }
+
+  /** AC-15：录音期间服务端音频不播放，避免被麦克风收进去。 */
+  private voiceRecordingActive(): boolean {
+    return this.isVoiceRecording ? this.isVoiceRecording() : false;
   }
 
   stop() {
     this.stopRequested = true;
+    // 停止/登出会清空发送队列：其中的语音项同样要释放服务端未完成上传槽位。
+    for (const item of this.sendQueue) {
+      this.releaseAbandonedVoice(item);
+    }
     this.sendQueue = [];
     this.stopServerAudio();
     void this.stopLocalTts();
@@ -438,7 +452,8 @@ export class MessageProcessor {
       return;
     }
     let serverAudioPreemption = Promise.resolve();
-    if (payload.audio) {
+    const suppressAudio = this.voiceRecordingActive();
+    if (payload.audio && !suppressAudio) {
       // 在异步消息链开始处理前先占用在线音频优先权，关闭点击回放及其加载竞态。
       this.pendingServerAudioChunks += 1;
       this.localPlaybackRequestId += 1;
@@ -452,7 +467,7 @@ export class MessageProcessor {
     this.incomingMessageChain = this.incomingMessageChain
       .then(async () => {
         this.handleAgentMessageDisplay(payload);
-        await this.handleAgentMessageAudio(payload, serverAudioPreemption, audioPersistence);
+        await this.handleAgentMessageAudio(payload, serverAudioPreemption, audioPersistence, suppressAudio);
       })
       .catch((error) => {
         addDebugTrace('agent', 'handleAgentMessage failed', {
@@ -609,28 +624,35 @@ export class MessageProcessor {
     payload: AgentMessagePayload,
     serverAudioPreemption: Promise<void>,
     audioPersistence: Promise<string | null>,
+    suppressAudio = false,
   ) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
     const audioChunk = payload.audio || '';
 
-    if (audioChunk) {
+    if (audioChunk && suppressAudio) {
+      addDebugTrace('audio', 'server audio suppressed while recording', { convUuid });
+    }
+
+    if (audioChunk && !suppressAudio) {
       this.serverAudioPlaying = true;
       this.pendingServerAudioChunks = Math.max(0, this.pendingServerAudioChunks - 1);
       // onAgentMessage 已经立即发起停止；这里等待同一次停止完成，之后才能投喂在线音频。
       await serverAudioPreemption;
     }
 
-    if (audioChunk && (this.localPlayingUuid || this.localSound)) {
+    if (audioChunk && !suppressAudio && (this.localPlayingUuid || this.localSound)) {
       // 必须等消息回放真正停止后，才把在线音频交给 WebView 播放器。
       await this.stopLocalTtsNow();
     }
 
-    if (audioChunk) {
+    if (audioChunk && !suppressAudio) {
       this.feedServerAudioChunk(audioChunk, false);
     }
 
     if (payload.is_final_package) {
-      this.feedServerAudioChunk('', true);
+      if (!suppressAudio) {
+        this.feedServerAudioChunk('', true);
+      }
       const isTransient = this.transientMessageUuids.has(convUuid);
       if (payload.audio_error) {
         addDebugTrace('audio', 'server audio stream ended with error', {
@@ -649,9 +671,10 @@ export class MessageProcessor {
       }
       // 落盘可能早于该句展示，临时消息状态由展示阶段在尾包处统一清理。
       this.transientMessageUuids.delete(convUuid);
-      if (AppState.currentState === 'active') {
+      if (!suppressAudio && AppState.currentState === 'active') {
         await this.waitForServerAudioFinished();
       } else {
+        // 录音期间（或后台）没有投喂音频，不存在 WebView 播放完成回调。
         this.onServerAudioFinished();
       }
     }
@@ -742,6 +765,7 @@ export class MessageProcessor {
       const item = this.sendQueue[0];
       const durable = isDurableSendKind(item.kind);
       if (durable && Date.now() - item.enqueuedAtMs >= MAX_DURABLE_MESSAGE_AGE_MS) {
+        this.releaseAbandonedVoice(item);
         this.failDeliveryUncertain(item, 'message exceeded the automatic delivery window');
         this.sendQueue.shift();
         continue;
@@ -774,6 +798,7 @@ export class MessageProcessor {
           error: result.error,
           drop: result.drop,
         });
+        this.releaseAbandonedVoice(item);
         if (tracksMessageStatus) {
           this.binder.emitMessageStatus(item.uuid, 'failed');
         }
@@ -783,6 +808,7 @@ export class MessageProcessor {
 
       const retryDelayMs = getSendRetryDelayMs(item.retryAttempt);
       if (!canRetryDurableMessage(item.retryAttempt, item.enqueuedAtMs, retryDelayMs)) {
+        this.releaseAbandonedVoice(item);
         this.failDeliveryUncertain(item, result.error || 'delivery acknowledgement was not received');
         this.sendQueue.shift();
         continue;
@@ -851,21 +877,59 @@ export class MessageProcessor {
     const chunks: string[] = [];
     for (let offset = 0; offset < raw.length; offset += chunkSize * 4 / 3) chunks.push(raw.slice(offset, offset + chunkSize * 4 / 3));
     if (chunks.length < 1 || chunks.length > 32) return { ok: false, error: 'invalid voice chunk count', drop: true };
-    const startedAt = Date.now();
+    // AC-12：15 秒是整条语音上传的总预算，重试不得重新计时。
+    const startedAt = item.voiceStartedAtMs ?? Date.now();
+    item.voiceStartedAtMs = startedAt;
+    const overBudget = () => Date.now() - startedAt >= VOICE_UPLOAD_BUDGET_MS;
     const send = (payload: Record<string, unknown>, suffix: string) => this.networkClient.sendVoicePhase(payload, `${item.uuid}:${suffix}`);
+    const giveUp = (error: string) => {
+      this.abortVoiceUpload(item.uuid);
+      return { ok: false, error, drop: true };
+    };
+    // begin 本身也可能长时间失败（离线时 ACK 超时）；预算必须在这里先判一次，
+    // 否则只会在 chunk/finalize 前生效，气泡要等到 4 分钟 age 上限才变成失败。
+    if (overBudget()) return giveUp('voice upload budget exceeded');
     let result = await send({ phase: 'begin', upload_id: item.uuid, mime_type: 'audio/mp4', container: 'm4a', codec: 'aac_lc', byte_length: size, total_chunks: chunks.length }, 'begin');
-    if (!result.ok) return result;
-    for (let i = 0; i < chunks.length; i += 1) {
-      if (Date.now() - startedAt >= 15000) return { ok: false, error: 'voice upload budget exceeded', drop: true };
-      result = await send({ phase: 'chunk', upload_id: item.uuid, chunk_index: i, audio_base64: chunks[i] }, `chunk:${i}`);
-      if (!result.ok) return result;
+    if (!result.ok) {
+      return result.drop || overBudget() ? giveUp(result.error || 'voice upload rejected') : result;
     }
-    if (Date.now() - startedAt >= 15000) return { ok: false, error: 'voice upload budget exceeded', drop: true };
+    for (let i = 0; i < chunks.length; i += 1) {
+      if (overBudget()) return giveUp('voice upload budget exceeded');
+      result = await send({ phase: 'chunk', upload_id: item.uuid, chunk_index: i, audio_base64: chunks[i] }, `chunk:${i}`);
+      if (!result.ok) {
+        return result.drop || overBudget() ? giveUp(result.error || 'voice upload rejected') : result;
+      }
+    }
+    if (overBudget()) return giveUp('voice upload budget exceeded');
     const finalized = await send({ phase: 'finalize', upload_id: item.uuid }, 'finalize') as SendResult;
     if (finalized.ok && finalized.message_uuid) {
       this.onVoiceFinalized?.(item.uuid, finalized.message_uuid, finalized.duration_ms);
+    } else if (finalized.drop) {
+      // finalize 被服务端永久拒绝：尽力补发 abort，避免占用该用户唯一的未完成上传槽位。
+      this.abortVoiceUpload(item.uuid);
     }
     return finalized;
+  }
+
+  /** 上传放弃时尽力补发 abort，释放服务端每用户唯一的未完成上传窗口（失败不影响气泡状态）。 */
+  private abortVoiceUpload(uploadId: string): void {
+    try {
+      void this.networkClient.sendVoicePhase({ phase: 'abort', upload_id: uploadId }, `${uploadId}:abort`).catch(() => undefined);
+    } catch {
+      // abort 是尽力而为的收尾，不改变发送结果。
+    }
+  }
+
+  /**
+   * durable 队列丢弃语音项时释放服务端槽位。
+   *
+   * 只有 drop 路径曾补发 abort；超龄（4 分钟）与重试耗尽的丢弃同样必须补发，
+   * 否则服务端每用户唯一的未完成上传槽位会被占满 TTL（最长 600s 内录音一律 VOICE_UPLOAD_CONFLICT）。
+   */
+  private releaseAbandonedVoice(item: SendItem): void {
+    if (item.kind === 'voice') {
+      this.abortVoiceUpload(item.uuid);
+    }
   }
 
   private async saveAudioToLocal(convUuid: string, chunks: string[]): Promise<string | null> {

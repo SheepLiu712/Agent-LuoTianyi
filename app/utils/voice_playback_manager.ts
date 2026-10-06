@@ -32,6 +32,7 @@ export class VoicePlaybackManager {
   private readonly downloads = new Map<string, Promise<string>>();
   private sound: Audio.Sound | null = null;
   private playingUuid: string | null = null;
+  private playingOnState: ((state: VoicePlaybackState) => void) | undefined;
   private requestId = 0;
 
   constructor(private readonly network: VoicePlaybackNetwork = {
@@ -64,6 +65,35 @@ export class VoicePlaybackManager {
     this.entries.set(uuid, { uri, size: typeof (info as { size?: number }).size === 'number' ? (info as { size: number }).size : 0, touched: Date.now(), playing: false, downloading: false });
     await this.evictIfNeeded();
     return uri;
+  }
+
+  /**
+   * finalize ACK 后把缓存从协议 upload_id 迁移到服务端 message_uuid，返回迁移后应使用的 URI。
+   *
+   * 返回 null 表示没有可迁移的文件。调用方（乐观气泡）必须把 audioLocalUri 指到新 URI，
+   * 否则气泡 uuid 仍是 upload_id、播放时会缓存未命中并去下载不存在的 /media/audio/<upload_id>。
+   */
+  async migrateCacheKey(fromUuid: string, toUuid: string): Promise<string | null> {
+    if (!fromUuid || !toUuid || fromUuid === toUuid) return null;
+    const fromUri = VoicePlaybackManager.cacheUri(fromUuid);
+    const source = await FileSystem.getInfoAsync(fromUri);
+    if (!source.exists) return null;
+    const toUri = VoicePlaybackManager.cacheUri(toUuid);
+    const target = await FileSystem.getInfoAsync(toUri);
+    await FileSystem.makeDirectoryAsync(cacheDir(), { intermediates: true });
+    let size: number;
+    if (target.exists) {
+      // 目标已存在：丢弃源文件，容量按目标文件真实大小记账（沿用源大小会少算 LRU 占用）。
+      size = typeof (target as { size?: number }).size === 'number' ? (target as { size: number }).size : 0;
+      await FileSystem.deleteAsync(fromUri, { idempotent: true });
+    } else {
+      await FileSystem.moveAsync({ from: fromUri, to: toUri });
+      size = typeof (source as { size?: number }).size === 'number' ? (source as { size: number }).size : 0;
+    }
+    this.entries.delete(fromUuid);
+    this.entries.set(toUuid, { uri: toUri, size, touched: Date.now(), playing: false, downloading: false });
+    await this.evictIfNeeded();
+    return toUri;
   }
 
   async ensureCached(uuid: string, token: string): Promise<string> {
@@ -113,6 +143,7 @@ export class VoicePlaybackManager {
       });
       await sound.loadAsync({ uri }, {}, false);
       await sound.playAsync();
+      this.playingOnState = onState;
       onState?.('playing');
     } catch (error) {
       await this.stop();
@@ -125,9 +156,12 @@ export class VoicePlaybackManager {
     ++this.requestId;
     const sound = this.sound;
     const uuid = this.playingUuid;
-    this.sound = null; this.playingUuid = null;
+    const notify = this.playingOnState;
+    this.sound = null; this.playingUuid = null; this.playingOnState = undefined;
     if (uuid) { const entry = this.entries.get(uuid); if (entry) entry.playing = false; }
     if (sound) { await sound.stopAsync().catch(() => undefined); await sound.unloadAsync().catch(() => undefined); }
+    // 播放自然结束或被顶替时同步气泡 UI，否则按钮会永久停在停止图标。
+    if (uuid && notify) notify('idle');
   }
 
   async clear(): Promise<void> {

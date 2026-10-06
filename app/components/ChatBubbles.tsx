@@ -9,6 +9,7 @@ interface MessageItemProps {
   message: ChatMessage;
   onToggleAgentAudio?: (uuid: string) => void;
   onToggleVoicePlayback?: (uuid: string) => void;
+  onRetryVoice?: (uuid: string) => void;
   theme?: AppTheme;
 }
 
@@ -98,14 +99,15 @@ export const SystemMessage: React.FC<MessageItemProps> = ({ message, theme = THE
 );
 
 // 统一的消息渲染组件
-export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio, onToggleVoicePlayback, theme = THEMES.light }) => {
+export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgentAudio, onToggleVoicePlayback, onRetryVoice, theme = THEMES.light }) => {
   if (message.type === 'system') {
     return <SystemMessage message={message} theme={theme} />;
   }
   if (message.type === 'image') {
     return <ChatImageBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
   }
-  if (message.type === 'audio') return <VoiceBubble message={message} theme={theme} onPlay={() => onToggleVoicePlayback?.(message.uuid)} onRetry={() => onToggleVoicePlayback?.(message.uuid)} />;
+  // 失败图标必须重传同一条语音（复用同一 upload_id），不能接播放。
+  if (message.type === 'audio') return <VoiceBubble message={message} theme={theme} onPlay={() => onToggleVoicePlayback?.(message.uuid)} onRetry={() => onRetryVoice?.(message.uuid)} />;
   return <ChatBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
 };
 
