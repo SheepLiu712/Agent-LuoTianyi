@@ -16,7 +16,7 @@ jest.mock('expo-file-system/legacy', () => ({
   readAsStringAsync: jest.fn().mockResolvedValue('AAAA'),
 }));
 jest.mock('../utils/live2d_helper', () => ({ setExpression: jest.fn() }));
-jest.mock('../utils/voice_playback_manager', () => ({ voicePlaybackManager: { cacheLocal: jest.fn().mockResolvedValue('file://cached.m4a') } }));
+jest.mock('../utils/voice_playback_manager', () => ({ voicePlaybackManager: { stop: jest.fn().mockResolvedValue(undefined), cacheLocal: jest.fn().mockResolvedValue('file://cached.m4a') } }));
 jest.mock('../utils/network_client', () => ({ NetworkClient: jest.fn() }));
 jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: {
   getPermission: jest.fn().mockResolvedValue('granted'), start: jest.fn(),

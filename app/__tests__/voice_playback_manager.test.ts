@@ -91,6 +91,33 @@ describe('VoicePlaybackManager cache/download seam', () => {
     await manager.stop();
   });
 
+  it.each(['download', 'load'])('invalidates pending %s and resets the button when stopped', async (stage) => {
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const sound = {
+      loadAsync: jest.fn().mockImplementation(() => stage === 'load' ? pending : Promise.resolve()),
+      playAsync: jest.fn().mockResolvedValue(undefined), stopAsync: jest.fn().mockResolvedValue(undefined),
+      unloadAsync: jest.fn().mockResolvedValue(undefined), setOnPlaybackStatusUpdate: jest.fn(),
+    };
+    const constructor = require('expo-av').Audio.Sound as jest.Mock;
+    constructor.mockReturnValue(sound);
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: stage !== 'download', size: 1 });
+    const manager = new VoicePlaybackManager({ download: jest.fn(() => pending) });
+    const state = jest.fn();
+    const playing = manager.play('pending', 'token', state);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(state).toHaveBeenLastCalledWith('loading');
+    await manager.stop();
+    expect(state).toHaveBeenLastCalledWith('idle');
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 1 });
+    release();
+    await playing;
+    expect(sound.playAsync).not.toHaveBeenCalled();
+    expect(state).not.toHaveBeenCalledWith('playing');
+    if (stage === 'load') expect(sound.unloadAsync).toHaveBeenCalled();
+    else expect(constructor).not.toHaveBeenCalled();
+  });
+
   it('clear stops playback and deletes the cache directory', async () => {
     const sound = {
       loadAsync: jest.fn().mockResolvedValue(undefined), playAsync: jest.fn().mockResolvedValue(undefined),

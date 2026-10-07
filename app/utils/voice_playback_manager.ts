@@ -33,6 +33,7 @@ export class VoicePlaybackManager {
   private sound: Audio.Sound | null = null;
   private playingUuid: string | null = null;
   private requestId = 0;
+  private onState?: (state: VoicePlaybackState) => void;
 
   constructor(private readonly network: VoicePlaybackNetwork = {
     download: async (uuid, destination, token) => {
@@ -97,12 +98,19 @@ export class VoicePlaybackManager {
 
   async play(uuid: string, token: string, onState?: (state: VoicePlaybackState) => void): Promise<void> {
     if (this.playingUuid === uuid) { await this.stop(); return; }
+    const stopped = this.stop();
+    const id = this.requestId;
+    this.onState = onState;
     onState?.('loading');
+    let sound: Audio.Sound | null = null;
     try {
+      await stopped;
+      if (id !== this.requestId) return;
       const uri = await this.ensureCached(uuid, token);
-      await this.stop();
-      const id = ++this.requestId;
-      const sound = new Audio.Sound();
+      if (id !== this.requestId) return;
+      sound = new Audio.Sound();
+      await sound.loadAsync({ uri }, { shouldPlay: false }, false);
+      if (id !== this.requestId) { await sound.unloadAsync(); return; }
       this.sound = sound;
       this.playingUuid = uuid;
       const entry = this.entries.get(uuid);
@@ -111,11 +119,15 @@ export class VoicePlaybackManager {
         if (id !== this.requestId || !status.isLoaded) return;
         if (status.didJustFinish) void this.stop();
       });
-      await sound.loadAsync({ uri }, {}, false);
       await sound.playAsync();
-      onState?.('playing');
+      if (id === this.requestId) onState?.('playing');
     } catch (error) {
+      if (id !== this.requestId) {
+        await sound?.unloadAsync().catch(() => undefined);
+        return;
+      }
       await this.stop();
+      await sound?.unloadAsync().catch(() => undefined);
       onState?.('failed');
       throw error;
     }
@@ -125,8 +137,11 @@ export class VoicePlaybackManager {
     ++this.requestId;
     const sound = this.sound;
     const uuid = this.playingUuid;
+    const notify = this.onState;
+    this.onState = undefined;
     this.sound = null; this.playingUuid = null;
     if (uuid) { const entry = this.entries.get(uuid); if (entry) entry.playing = false; }
+    notify?.('idle');
     if (sound) { await sound.stopAsync().catch(() => undefined); await sound.unloadAsync().catch(() => undefined); }
   }
 
