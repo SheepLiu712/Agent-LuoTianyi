@@ -9,8 +9,10 @@ from mwparserfromhell.nodes import Comment, ExternalLink, Heading, Tag, Template
 from .template_rules import (
     descriptor,
     field_key,
+    heading_section,
     is_excluded_field,
     is_presentation_key,
+    is_song_list_noise,
     role_priority,
     structure,
     template_name,
@@ -141,7 +143,9 @@ def _inline_text(node, lyrics, gaps):
 
 
 def _ruby_template_text(node, lyrics, gaps):
-    return _ruby_text(_value(node, "1"), _value(node, "2"), lyrics, gaps)
+    rule = descriptor(_name(node))
+    return _ruby_text(_preferred_value(node, rule["base_params"]),
+                     _preferred_value(node, rule["annotation_params"]), lyrics, gaps)
 
 
 def _numbered_values(node, lyrics, gaps):
@@ -210,10 +214,12 @@ def _template_text(node, lyrics, gaps):
 
 def _unread_content(template):
     # A name or administrative identifier alone is not missing prose evidence.
-    return any(str(p.value).strip() for p in template.params
-               if structure(p.name).strip().casefold() in
-               {"original", "歌词", "简介", "body", "text", "content", "内容"}
-               or str(p.name).strip().isdigit())
+    return any(str(p.value).strip() for p in template.params if _content_parameter(p))
+
+
+def _content_parameter(param):
+    key = structure(param.name).strip().casefold()
+    return key.isdigit() or key in {"original", "歌词", "简介", "body", "text", "content", "内容"}
 
 
 def _clean(code):
@@ -224,15 +230,7 @@ def parse_song_titles(source: str) -> List[str]:
     return [display for display, _ in parse_song_candidates(source)]
 
 
-# Keep HEAD's display-text filters and their order, not title namespaces.
-_NON_SONG_TITLES = {
-    "原创曲", "非原创曲", "传说曲", "殿堂曲", "部分", "25万以上", "25万以下",
-    "模板文档", "查看", "编辑", "历史", "刷新", "简体", "繁體", "大陆简体",
-    "香港繁體", "臺灣正體", "不转换", "跳转到导航", "跳转到搜索", "洛天依",
-    "bilibili", "ACE Studio", "X studio", "VOCALOID中文殿堂曲", "ACE殿堂曲", "文档", "嵌入",
-}
-_NON_SONG_TITLE_PARTS = ("Template:", "模板:", "分类:", "Category:", "帮助", "首页",
-                         "随机页面", "最近更改", "殿堂曲", "传说曲")
+_NON_SONG_TITLE_NAMESPACES = ("Template:", "模板:", "分类:", "Category:")
 _NON_SONG_TARGETS = ("Template:", "Category:", "分类:")
 
 
@@ -241,8 +239,8 @@ def _song_entry(raw, target):
     pair is navigation noise: banners, site chrome, namespaces, anchors."""
     title = _joined_text(raw)
     href = str(target).strip()
-    if not title or title in _NON_SONG_TITLES or title.isdigit() \
-            or any(word in title for word in _NON_SONG_TITLE_PARTS):
+    if not title or title.isdigit() or is_song_list_noise(title) \
+            or any(word in title for word in _NON_SONG_TITLE_NAMESPACES):
         return None
     if not href or href.startswith("#") or "action=" in href \
             or any(word in href for word in _NON_SONG_TARGETS):
@@ -268,8 +266,9 @@ def _link_candidates(code):
         elif isinstance(node, ExternalLink):
             yield node.title or "", node.url
         elif isinstance(node, Template):
-            if _name(node) == "lj":
-                yield _value(node, "2", _value(node, "1")), _value(node, "1")
+            rule = descriptor(_name(node))
+            if rule.get("target_params"):
+                yield _preferred_value(node, rule["text_params"]), _preferred_value(node, rule["target_params"])
             else:
                 for _, _, value in _contents(node):
                     yield from _link_candidates(value)
@@ -293,14 +292,6 @@ def _heading_level(node):
     if isinstance(node, Tag) and re.fullmatch(r"h[1-6]", str(node.tag).lower()):
         return int(str(node.tag)[1])
     return None
-
-
-def heading_section(heading):
-    """Which business section a heading names: 简介 or 歌词, else none."""
-    heading = structure(heading)
-    if "简介" in heading or "VOCALOID原创作者" in heading:
-        return "简介"
-    return "歌词" if "歌词" in heading else ""
 
 
 def _joined_text(code, gaps=None):

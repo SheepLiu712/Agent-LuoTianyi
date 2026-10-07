@@ -10,6 +10,7 @@ import requests
 
 from src.infrastructure.persistence import Song, get_song_session, init_song_db
 from src.utils.logger import get_logger
+from src.world.get_new_songs.template_rules import song_field_value
 from src.world.get_new_songs.vcpedia_fetcher import VCPediaFetcher
 from src.world.get_new_songs.wiki_api import fetch_wikitext
 from src.world.get_new_songs.wikitext_parser import parse_song_titles
@@ -41,8 +42,8 @@ def _song_exists(db, song_name: str) -> bool:
 
 def _extract_song_fields(data: Dict[str, Any]) -> Dict[str, str]:
     infobox = data.get("infobox") or {}
-    uploader = infobox.get("UP主") or infobox.get("投稿者") or infobox.get("发布者") or ""
-    singers = infobox.get("演唱") or infobox.get("歌手") or infobox.get("演唱者") or ""
+    uploader = song_field_value(infobox, "uploader")
+    singers = song_field_value(infobox, "singers")
 
     short_summary = data.get("short_summary") or ""
     if isinstance(short_summary, list):

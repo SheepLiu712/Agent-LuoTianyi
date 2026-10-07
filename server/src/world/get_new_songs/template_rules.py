@@ -7,18 +7,20 @@ from zhconv import convert
 
 _RULE_LISTS = ("known_fields", "presentation_params", "presentation_contains",
                "field_exclude_params", "role_priority")
-_TOP_LEVEL_KEYS = frozenset(_RULE_LISTS) | {"description", "templates", "field_aliases"}
+_TOP_LEVEL_KEYS = frozenset(_RULE_LISTS) | {
+    "description", "templates", "field_aliases", "section_aliases", "song_list_filters", "song_field_sources",
+}
 
 # Fixed kinds describe existing algorithms, not an executable schema/DSL.
 _KIND_FIELDS = {
-    "inline": {"text_params"}, "ruby": set(), "utawari": set(),
+    "inline": {"text_params"}, "ruby": {"base_params", "annotation_params"}, "utawari": set(),
     "multiline": set(), "break": set(), "embed": set(),
     "staff": {"group_prefix", "list_prefix", "exclude_params"},
     "songbox": {"body_params"}, "wrapper": {"body_params"},
     "tabs": {"body_prefixes", "label_prefixes"},
     "lyrics": {"original_params", "translated_params", "original_prefix", "translated_prefix"},
 }
-_KIND_OPTIONAL = {"songbox": {"contains"}, "inline": {"skip_if"}}
+_KIND_OPTIONAL = {"songbox": {"contains"}, "inline": {"skip_if", "target_params"}}
 
 
 def structure(text):
@@ -66,7 +68,7 @@ def _read_document(path):
     except (OSError, ValueError) as exc:
         fail("resource", str(exc))
     if not isinstance(data, dict) or set(data) != _TOP_LEVEL_KEYS:
-        fail("resource", "expected description, templates, field_aliases and field lists")
+        fail("resource", "expected template, field, section and song-list rules")
     if not isinstance(data["description"], str):
         fail("description", "expected string")
     for key in _RULE_LISTS:
@@ -76,7 +78,24 @@ def _read_document(path):
             isinstance(key, str) and key.strip() and isinstance(value, str) and value.strip()
             for key, value in aliases.items()):
         fail("field_aliases", "expected nonempty string map")
+    _validate_site_rules(data, fail)
     return data
+
+
+def _validate_site_rules(data, fail):
+    fields = {
+        "section_aliases": {"简介", "歌词"},
+        "song_list_filters": {"exact", "contains"},
+        "song_field_sources": {"uploader", "singers"},
+    }
+    for group, keys in fields.items():
+        mapping = data[group]
+        if not isinstance(mapping, dict) or set(mapping) != keys:
+            fail(group, f"expected keys {sorted(keys)}")
+        for key, values in mapping.items():
+            _string_list(values, f"{group}.{key}", fail)
+            if group != "song_list_filters" and not values:
+                fail(f"{group}.{key}", "expected nonempty values")
 
 
 def _normalize_field_lookups(data, path):
@@ -141,12 +160,14 @@ def _validate_descriptor_field(rule, key, location, fail):
         if not isinstance(rule[key], str) or not rule[key].strip():
             fail(location, "expected nonempty prefix string")
     else:
-        _string_list(rule[key], location, fail)
+        _string_list(rule[key], location, fail, nonempty=key in {"target_params", "base_params", "annotation_params"})
 
 
-def _string_list(value, location, fail):
+def _string_list(value, location, fail, *, nonempty=False):
     if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
         fail(location, "expected list of nonempty strings")
+    if nonempty and not value:
+        fail(location, "expected nonempty values")
     return value
 
 
@@ -162,6 +183,22 @@ def descriptor(name):
         if rule["kind"] == "songbox" and any(word in name for word in rule.get("contains", ())):
             return rule
     return exact or {}
+
+
+def heading_section(heading):
+    """Map configured heading words to fixed business sections; intro wins ties."""
+    heading = structure(heading)
+    return next((section for section in ("简介", "歌词")
+                 if any(structure(word) in heading for word in _RULES["section_aliases"][section])), "")
+
+
+def is_song_list_noise(title):
+    filters = _RULES["song_list_filters"]
+    return title in filters["exact"] or any(word in title for word in filters["contains"])
+
+
+def song_field_value(infobox, field):
+    return next((infobox[key] for key in _RULES["song_field_sources"][field] if infobox.get(key)), "")
 
 
 def field_key(label):
