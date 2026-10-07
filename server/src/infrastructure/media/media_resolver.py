@@ -135,7 +135,7 @@ class FilesystemMediaResolver:
             )
         from .image_validation import validate_image_content
 
-        validate_image_content(data, mime_type, media_ref.media_id)
+        mime_type = validate_image_content(data, mime_type, media_ref.media_id)
         return ResolvedMedia(data=data, mime_type=mime_type)
 
     def ensure_dependencies(self) -> None:

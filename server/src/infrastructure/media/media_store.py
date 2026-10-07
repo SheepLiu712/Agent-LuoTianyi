@@ -51,7 +51,7 @@ class PermanentMediaStore:
         media_ref: MediaRef,
         owner_user_id: str,
         data: bytes,
-        mime_type: str,
+        mime_type: str | None = None,
     ) -> None:
         """校验后以完整目录原子发布；重放只接受相同所有者与内容。"""
         if len(data) > self.max_bytes:
@@ -59,7 +59,7 @@ class PermanentMediaStore:
                 code=MediaResolutionErrorCode.TOO_LARGE,
                 media_id=media_ref.media_id,
             )
-        validate_image_content(data, mime_type, media_ref.media_id)
+        mime_type = validate_image_content(data, mime_type, media_ref.media_id)
         expected_metadata = {
             "mime_type": mime_type,
             "owner_user_id": owner_user_id,
