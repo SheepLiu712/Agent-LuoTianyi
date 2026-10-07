@@ -111,9 +111,7 @@ async def test_invalid_cli_signal_reports_bad_message(event_type, payload, negat
 
     assert stimuli == []
     assert len(sent) == 1
-    assert sent[0]["type"] == (
-        WSEventType.SERVER_ACK.value if negative_ack else WSEventType.SERVER_ERROR.value
-    )
+    assert sent[0]["type"] == (WSEventType.SERVER_ACK.value if negative_ack else WSEventType.SERVER_ERROR.value)
     assert sent[0]["reply_to"] == "chat-1"
     assert sent[0]["payload"]["code"] == "BAD_MESSAGE"
     assert sent[0]["payload"]["received_event_type"] == event_type
@@ -128,9 +126,7 @@ async def test_unknown_event_does_not_enter_chat_ingress():
 
 @pytest.mark.asyncio
 async def test_unconfigured_image_store_reports_stable_media_code():
-    sent, stimuli = await run_ingress(
-        [event("user_image", {"image_base64": "eA==", "mime_type": "image/png"})]
-    )
+    sent, stimuli = await run_ingress([event("user_image", {"image_base64": "eA==", "mime_type": "image/png"})])
 
     assert stimuli == []
     assert sent[0]["payload"] == {
@@ -156,20 +152,44 @@ async def test_oversized_image_reports_stable_media_code(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_non_image_content_reports_unsupported_type(tmp_path):
+@pytest.mark.parametrize("negative_ack", [True, False])
+@pytest.mark.parametrize(
+    ("image_format", "mime_type", "code", "message"),
+    [
+        ("TIFF", "image/tiff", "MEDIA_UNSUPPORTED_TYPE", "不支持的图片格式"),
+    ],
+)
+async def test_unsupported_image_format_is_rejected(tmp_path, negative_ack, image_format, mime_type, code, message):
     image = BytesIO()
-    Image.new("RGB", (1, 1)).save(image, format="PNG")
+    Image.new("RGB", (1, 1)).save(image, format=image_format)
     sent, stimuli = await run_ingress(
         [
             event(
                 "user_image",
-                {"image_base64": base64.b64encode(image.getvalue()).decode("ascii"), "mime_type": "image/jpeg"},
+                {"image_base64": base64.b64encode(image.getvalue()).decode("ascii"), "mime_type": mime_type},
             )
         ],
         adapter_config={"media_store": {"root": str(tmp_path / "media")}},
+        negative_ack=negative_ack,
     )
 
     assert stimuli == []
-    assert sent[0]["payload"]["code"] == "MEDIA_UNSUPPORTED_TYPE"
-    assert sent[0]["payload"]["message"] == "不支持的图片格式"
+    assert len(sent) == 1
+    assert sent[0]["type"] == (WSEventType.SERVER_ACK.value if negative_ack else WSEventType.SERVER_ERROR.value)
+    assert sent[0]["payload"]["code"] == code
+    assert sent[0]["payload"]["message"] == message
     assert sent[0]["payload"]["retryable"] is False
+    assert not list((tmp_path / "media").iterdir())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("declaration", [{}, {"mime_type": None}, {"mime_type": ""}, {"mime_type": "image/jpeg"}])
+async def test_valid_image_is_acknowledged_regardless_of_mime_declaration(tmp_path, declaration):
+    image = BytesIO()
+    Image.new("RGB", (1, 1)).save(image, format="PNG")
+    sent, stimuli = await run_ingress(
+        [event("user_image", {"image_base64": base64.b64encode(image.getvalue()).decode("ascii"), **declaration})],
+        adapter_config={"media_store": {"root": str(tmp_path / "media")}},
+    )
+    assert len(stimuli) == 1
+    assert sent[0]["payload"]["ok"] is True
