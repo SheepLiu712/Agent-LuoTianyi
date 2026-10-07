@@ -315,14 +315,14 @@ class ChatStage:
             self._refresh_deadline()
             return
         if isinstance(stimulus, _CONTENT):
-            self._cancel_reply_attempts()
+            self._cancel_interruptible_reply_handles()
             self._pending[stimulus.stimulus_id] = _PendingInput(stimulus, self._revision)
             self._wait_until, self._wait_immediate = None, False
             self._scheduling = True
             self._invalidate_deadline()
         elif isinstance(stimulus, (d.UserTyping, d.ImageSelectionOpened, d.ImageSelectionClosed)):
             if isinstance(stimulus, d.ImageSelectionOpened):
-                self._cancel_reply_attempts()
+                self._cancel_interruptible_reply_handles()
             if self._pending:
                 delay = self._config.response_wait
                 if isinstance(stimulus, d.UserTyping):
@@ -339,7 +339,7 @@ class ChatStage:
 
     def _apply_voice_coordination(self, stimulus: d.Stimulus) -> bool:
         if isinstance(stimulus, d.VoiceRecordingStarted):
-            self._cancel_reply_attempts()
+            self._cancel_interruptible_reply_handles()
             self._wait_for_pending(self._config.voice_recording_wait)
             return True
         if isinstance(stimulus, d.VoiceRecordingCancelled):
@@ -454,42 +454,24 @@ class ChatStage:
             self._schedule_revision += 1
             self._schedule(deadline)
 
-    def _cancel_reply_attempts(self) -> None:
+    def _cancel_interruptible_reply_handles(self) -> None:
+        """普通刺激只取消正式回复形成前的在途 chat handle，不撤销计划或执行。"""
         for attempt in tuple(self._attempts.values()):
             task = self._handles.get(attempt.request.request_id)
             if (
-                task is not None
-                and not task.done()
-                and not self._agent.is_handle_interruptible(
-                    self.interaction_id,
-                    attempt.request.request_id,
-                )
+                task is None
+                or task.done()
+                or attempt.has_committed_plan
+                or not self._agent.is_handle_interruptible(self.interaction_id, attempt.request.request_id)
             ):
                 continue
             attempt.interrupted = True
             attempt.request.cancellation.cancel(d.CancellationReason.SUPERSEDED)
-            if task is not None and not task.done():
-                task.cancel()
+            task.cancel()
             for sid in attempt.input_ids:
                 if sid in self._pending and self._pending[sid].status is _InputStatus.REPLYING:
                     self._pending[sid].status = _InputStatus.READY
-            self._plans = deque(
-                (plan, token) for plan, token in self._plans if plan.origin_request_id != attempt.request.request_id
-            )
-            attempt.remaining_plans.intersection_update(
-                {self._executing_plan.plan_id} if self._executing_plan is not None else set()
-            )
-            if (
-                self._executing_plan is not None
-                and self._executing_plan.origin_request_id == attempt.request.request_id
-            ):
-                self._execution.cancellation.cancel(d.CancellationReason.SUPERSEDED)
-                self._send_control(
-                    CancelDelivery(interaction_id=self.interaction_id, execution_id=self._execution.execution_id)
-                )
-                self._realizing.cancel()
-            if not attempt.remaining_plans:
-                self._attempts.pop(attempt.request.request_id, None)
+            self._attempts.pop(attempt.request.request_id, None)
 
     def _on_deadline(self, revision: int) -> None:
         """验证计时修订，冻结已准备输入并启动整批回复。"""
@@ -621,6 +603,9 @@ class ChatStage:
         self._plans.append((plan, token))
         attempt = self._attempts.get(plan.origin_request_id)
         if attempt is not None:
+            # StartThinking is handled by _PlanSink and never reaches this queue.
+            # Keep this boundary even after every accepted plan has finished executing.
+            attempt.has_committed_plan = True
             attempt.remaining_plans.add(plan.plan_id)
         if self._realizing is None or self._realizing.done():
             self._realizing = asyncio.create_task(self._realize_plans(), name="stage-realize")

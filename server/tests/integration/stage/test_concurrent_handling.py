@@ -329,8 +329,8 @@ async def test_new_content_does_not_cancel_non_interruptible_reply_handle():
 
 
 @pytest.mark.asyncio
-async def test_new_content_cancels_active_and_queued_reply_plans_and_waits_cleanup():
-    execution_cleanup, release = asyncio.Event(), asyncio.Event()
+async def test_new_content_preserves_active_and_queued_reply_plans():
+    release = asyncio.Event()
     calls, ends = [], []
 
     async def handle(req, sink):
@@ -344,11 +344,7 @@ async def test_new_content_cancels_active_and_queued_reply_plans_and_waits_clean
     async def realize(value, context, sink):
         calls.append((value, context))
         if len(calls) == 1:
-            try:
-                await asyncio.Event().wait()
-            finally:
-                execution_cleanup.set()
-                await release.wait()
+            await release.wait()
         ends.append(value.plan_id)
         return SimpleNamespace(status=d.ExecutionStatus.COMPLETED, error_code=None)
 
@@ -358,14 +354,14 @@ async def test_new_content_cancels_active_and_queued_reply_plans_and_waits_clean
         await until(lambda: len(calls) == 1 and len(stage._plans) == 1)
         old_origin = calls[0][0].origin_request_id
         stage.stimulus_input_sink.submit(stimulus())
-        await execution_cleanup.wait()
-        assert calls[0][1].cancellation.is_cancelled
-        await until(lambda: bool(stage._plans))
-        assert all(p.origin_request_id != old_origin for p, _ in stage._plans)
+        await until(lambda: len(stage._plans) == 3)
+        assert not calls[0][1].cancellation.is_cancelled
+        assert stage._plans[0][0].origin_request_id == old_origin
         assert len(calls) == 1
         release.set()
-        await until(lambda: len(calls) == 3)
-        assert all(p.origin_request_id != old_origin for p, _ in calls[1:])
+        await until(lambda: len(ends) == 4)
+        assert calls[1][0].origin_request_id == old_origin
+        assert all(p.origin_request_id != old_origin for p, _ in calls[2:])
     finally:
         release.set()
         await cleanup(stage, adapter)
