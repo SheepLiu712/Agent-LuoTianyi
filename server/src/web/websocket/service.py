@@ -17,9 +17,17 @@ NEGATIVE_ACK_CAPABILITY = "negative_ack_v1"
 
 
 class WebSocketService:
-    def __init__(self, *, max_inbound_frame_bytes: int = 128 * 1024):
+    def __init__(
+        self,
+        *,
+        max_inbound_frame_bytes: int = 128 * 1024,
+        max_image_frame_bytes: int = 8 * 1024 * 1024 + 128 * 1024,
+    ):
         if type(max_inbound_frame_bytes) is not int or max_inbound_frame_bytes <= 0:
             raise ValueError("max_inbound_frame_bytes must be a positive integer")
+        if type(max_image_frame_bytes) is not int or max_image_frame_bytes <= 0:
+            raise ValueError("max_image_frame_bytes must be a positive integer")
+        self.max_image_frame_bytes = max_image_frame_bytes
         self.logger = get_logger(__name__)
         self.max_inbound_frame_bytes = max_inbound_frame_bytes
 
@@ -53,11 +61,9 @@ class WebSocketService:
             )
             return None
         encoded_size = len(json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-        if encoded_size > self.max_inbound_frame_bytes:
-            await self.send_error_event(
-                websocket=websocket,
-                payload={"code": "BAD_MESSAGE", "message": "message exceeds the inbound frame limit"},
-            )
+        limit = self.max_image_frame_bytes if event.get("type") == "user_image" else self.max_inbound_frame_bytes
+        if encoded_size > limit:
+            await self._reject_oversized_frame(websocket_connection, event)
             return None
 
         if "type" not in event:
@@ -75,6 +81,22 @@ class WebSocketService:
             client_msg_id=event.get("client_msg_id"),
             ts=event.get("ts"),
         )
+
+    async def _reject_oversized_frame(self, connection: "WebSocketConnection", event: dict) -> None:
+        client_msg_id = event.get("client_msg_id")
+        if isinstance(client_msg_id, str) and 0 < len(client_msg_id) <= 128:
+            await self.send_nack_event(
+                connection,
+                WSMessage(event_type=str(event.get("type", ""))[:128], payload={}, client_msg_id=client_msg_id),
+                code="BAD_MESSAGE",
+                message="message exceeds the inbound frame limit",
+                retryable=False,
+            )
+        else:
+            await self.send_error_event(
+                websocket=connection.websocket,
+                payload={"code": "BAD_MESSAGE", "message": "message exceeds the inbound frame limit"},
+            )
 
     async def handle_auth_event(
         self,

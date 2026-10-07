@@ -1,12 +1,15 @@
 import asyncio
 import base64
 import json
+import random
 import struct
+from io import BytesIO
 from types import SimpleNamespace
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from fastapi import WebSocketDisconnect
+from PIL import Image
 from support.audio_samples import recorded_aac_bytes
 
 import src.domain.agent as d
@@ -554,3 +557,44 @@ async def test_real_aac_brands_finalize_once_and_preserve_media(tmp_path, brand)
     assert voices[0].duration_ms == 1064
     assert sent[-1]["payload"]["duplicate"] is True
     assert (tmp_path / "media" / voices[0].media_ref.media_id / "content.bin").read_bytes() == data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", [1, 256])
+async def test_image_frame_reaches_adapter_with_original_image_budget(tmp_path, side):
+    output = BytesIO()
+    Image.frombytes("RGB", (side, side), random.Random(255).randbytes(side * side * 3)).save(output, format="PNG")
+    data = output.getvalue()
+    frame = {
+        "type": "user_image",
+        "client_msg_id": "image-255",
+        "payload": {
+            "image_base64": base64.b64encode(data).decode("ascii"),
+            "mime_type": "image/png",
+        },
+    }
+    if side == 256:
+        assert len(json.dumps(frame)) > 128 * 1024
+    sent, stage, _ = await run_events(tmp_path, [frame])
+    assert sent[-1]["type"] == "server_ack" and sent[-1]["payload"]["ok"]
+    images = [item for item in stage.stimuli if isinstance(item, d.ImageMessage)]
+    assert len(images) == 1
+    assert (tmp_path / "media" / images[0].media_ref.media_id / "content.bin").read_bytes() == data
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind,limit", [("user_image", 8 * 1024 * 1024 + 128 * 1024), ("user_voice", 128 * 1024)])
+@pytest.mark.parametrize("negative_ack", [False, True])
+async def test_oversized_frames_report_correlated_permanent_failure(kind, limit, negative_ack):
+    frame = {"type": kind, "client_msg_id": "oversized", "payload": {"data": "x" * limit}}
+    socket = Socket([frame])
+    connection = WebSocketConnection(socket, "user-1", "user-1")
+    if negative_ack:
+        connection.capabilities.add("negative_ack_v1")
+    assert await WebSocketService().try_recv_client_msg(connection) is None
+    reply = socket.sent[-1]
+    assert reply["reply_to"] == "oversized"
+    assert reply["type"] == ("server_ack" if negative_ack else "error")
+    assert reply["payload"]["retryable"] is False
+    if negative_ack:
+        assert reply["payload"]["ok"] is False
