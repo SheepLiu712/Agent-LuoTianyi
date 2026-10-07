@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
   },
   botBubble: {
     alignSelf: 'flex-start',
-    backgroundColor: '#88EDFF', // 天依蓝，对应 Python 版本的机器人气泡
+    backgroundColor: '#66CCFF', // 天依蓝，对应 Python 版本的机器人气泡
     borderBottomLeftRadius: 2,
   },
   bubbleText: {

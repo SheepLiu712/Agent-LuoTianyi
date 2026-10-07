@@ -1,10 +1,12 @@
 import { Buffer } from 'buffer';
-import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
 import { AgentBinder } from './binder';
 import { addDebugTrace } from './debug_trace';
+import { buildChatCompletionsPayload, callLlmProvider } from './llm_client';
+import { getLlmModulesConfig, getModuleConfig } from './llm_key_storage';
+import { validateClientModelRequirements, validateJsonResponse } from './llm_requirements';
 import { NetworkClient } from './network_client';
 
 type SendKind =
@@ -54,6 +56,14 @@ interface SendResult {
 function isTerminalSendError(errorText?: string) {
   const text = (errorText || '').toLowerCase();
   return text.includes('failed to read image file');
+}
+
+function getTerminalImageErrorText(errorText?: string) {
+  const error = errorText?.trim();
+  if (error?.toUpperCase().includes('MEDIA_TOO_LARGE') || error?.includes('图片过大')) {
+    return '图片过大（上限约 6 MB），请选择更小的图片';
+  }
+  return `图片发送失败：${error || '未知错误'}`;
 }
 
 export function getSendRetryDelayMs(retryAttempt: number) {
@@ -445,15 +455,97 @@ export class MessageProcessor {
       });
   }
 
+  async processLlmRequest(payload: Record<string, unknown>) {
+    const requestId = String(payload.request_id || '');
+    if (!requestId) {
+      return null;
+    }
+
+    try {
+      const modelType = String(payload.type || '').trim();
+      if (!modelType) {
+        return { request_id: requestId, error: 'missing model type' };
+      }
+      const cfg = await getModuleConfig(modelType);
+      if (!cfg || !cfg.enabled || !cfg.apiKey) {
+        return { request_id: requestId, error: 'no api key configured on client' };
+      }
+      if (!cfg.baseUrl) {
+        return { request_id: requestId, error: 'LLM 配置不完整，请在 LLM 模型设置中重新保存' };
+      }
+      if (!cfg.model) {
+        return { request_id: requestId, error: 'missing provider info' };
+      }
+
+      let cachedParams: Record<string, unknown> = {};
+      if (cfg.paramsText) {
+        try {
+          const parsed = JSON.parse(cfg.paramsText);
+          if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+            cachedParams = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // 损坏的参数缓存不应阻断请求。
+        }
+      }
+      const caps = cfg.modelCapabilities ?? {};
+      const requiredKind = String(payload.model_kind || 'llm').trim().toLowerCase();
+      const useJson = Boolean(payload.use_json);
+      const enableThinking = Boolean(payload.enable_thinking);
+      const requirementError = validateClientModelRequirements({
+        requiredKind,
+        configuredKind: cfg.modelKind,
+        requiresJson: useJson,
+        requiresThinking: enableThinking,
+        canUseJson: Boolean(caps.can_use_json),
+        canEnableThinking: Boolean(caps.can_enable_thinking),
+      });
+      if (requirementError) {
+        return { request_id: requestId, error: requirementError };
+      }
+      const body = buildChatCompletionsPayload({
+        prompt: String(payload.prompt || ''),
+        model: cfg.model,
+        params: { ...((payload.params || {}) as Record<string, unknown>), ...cachedParams },
+        enableThinking,
+        useJson,
+        imageBase64: typeof payload.image_base64 === 'string' ? payload.image_base64 : undefined,
+      });
+      const result = await callLlmProvider({
+        url: `${cfg.baseUrl.replace(/\/+$/, '')}/chat/completions`,
+        apiKey: cfg.apiKey,
+        body,
+      });
+      const jsonError = validateJsonResponse(result.content, useJson);
+      if (jsonError) {
+        return { request_id: requestId, error: jsonError };
+      }
+      return { request_id: requestId, content: result.content, usage: result.usage ?? null };
+    } catch (error) {
+      return { request_id: requestId, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  async getLlmMode() {
+    const cfg = await getLlmModulesConfig();
+    return {
+      types: Object.entries(cfg)
+        .filter(([, entry]) => entry.enabled)
+        .map(([key]) => key),
+    };
+  }
+
   private isDuplicatePacket(convUuid: string, payload: AgentMessagePayload): boolean {
-    // 签名覆盖 text/audio/expression/is_final_package：同一 uuid 的合法分片内容互不相同，
-    // 只有服务端 at-least-once 重发的完全相同的分片才会命中同一签名。
-    const signature = [
+    // 新包用消息内序号区分内容相同的合法音频块；旧服务端没有序号时保留原判断。
+    const signature = typeof payload.packet_sequence === 'number'
+      && Number.isSafeInteger(payload.packet_sequence) && payload.packet_sequence >= 0
+      ? `sequence:${payload.packet_sequence}`
+      : `content:${[
       payload.text || '',
       payload.audio || '',
       payload.expression || '',
       payload.is_final_package ? 'F' : '',
-    ].join('|');
+    ].join('|')}`;
 
     let seen = this.seenPacketsByUuid.get(convUuid);
     if (!seen) {
@@ -551,11 +643,9 @@ export class MessageProcessor {
       }
       // 落盘可能早于该句展示，临时消息状态由展示阶段在尾包处统一清理。
       this.transientMessageUuids.delete(convUuid);
-      if (AppState.currentState === 'active') {
-        await this.waitForServerAudioFinished();
-      } else {
-        this.onServerAudioFinished();
-      }
+      // 尾包仅表示数据收齐；前后台都须等本地播放结束，才能释放回放权限。
+      // 结束回执丢失时沿用超时兜底，回放入口不通过强制停播掩盖状态失步。
+      await this.waitForServerAudioFinished();
     }
   }
 
@@ -678,6 +768,9 @@ export class MessageProcessor {
         });
         if (tracksMessageStatus) {
           this.binder.emitMessageStatus(item.uuid, 'failed');
+        }
+        if (item.kind === 'image') {
+          this.binder.emitErrorText(getTerminalImageErrorText(result.error));
         }
         this.sendQueue.shift();
         continue;

@@ -1,116 +1,76 @@
 #!/bin/bash
 
-# Set the log file
+# Resolve every path relative to this script, not the caller's working directory.
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")" || exit 1
+mkdir -p logs || exit 1
 LOG_FILE="logs/build_log.txt"
-exec > >(tee -a "$LOG_FILE") 2>&1  # Redirect both stdout and stderr to log.txt
+exec > >(tee -a "$LOG_FILE") 2>&1
 
-# Log start time
-echo "==============================="
-echo "Script started at: $(date)"
-echo "==============================="
+APP_NAME="AgentLuoChat"
 
-# Activate the Conda environment
-echo "Activating Conda environment 'lty_c'..."
-source D:/Anaconda/etc/profile.d/conda.sh  # Adjust the path if necessary
-conda activate lty_c
 
-if [ $? -ne 0 ]; then
-    echo "Failed to activate Conda environment. Exiting."
+while true; do
+    read -r -p "Build type (Release/Debug): " BUILD_TYPE || exit 1
+    case "${BUILD_TYPE,,}" in
+        release) BUILD_TYPE="Release"; break ;;
+        debug) BUILD_TYPE="Debug"; break ;;
+        *) echo "Please enter Release or Debug." ;;
+    esac
+done
+
+while true; do
+    read -r -p "Version (e.g. 0.4.0): " VERSION || exit 1
+    if [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+        break
+    fi
+    echo "Invalid version. Use three numbers separated by dots, e.g. 0.4.0."
+done
+
+# PyInstaller appends the app name to --distpath, so the onedir bundle lands one level below BUILD_ROOT.
+BUILD_ROOT="bin/$APP_NAME-$BUILD_TYPE-$VERSION"
+BUILD_FOLDER="$BUILD_ROOT/$APP_NAME"
+WORK_FOLDER="build/$APP_NAME-$BUILD_TYPE-$VERSION"
+TARGET_FOLDER="dist/$APP_NAME-$BUILD_TYPE-$VERSION"
+if [ -e "$TARGET_FOLDER" ]; then
+    echo "Error: '$TARGET_FOLDER' already exists. Move it away before rebuilding this version."
     exit 1
 fi
+for folder in config res; do
+    if [ ! -d "$folder" ]; then
+        echo "Error: Required folder '$folder' does not exist."
+        exit 1
+    fi
+done
 
-# Empty the target folder in the parent directory
-TARGET_FOLDER="./bin"
-echo "Clearing contents of '$TARGET_FOLDER'..."
+echo "Building $APP_NAME ($BUILD_TYPE $VERSION) at $(date)"
+echo "Activating Conda environment 'lty_c'..."
+source D:/Anaconda/etc/profile.d/conda.sh || exit 1
+conda activate lty_c || exit 1
 
-if [ -d "$TARGET_FOLDER" ]; then
-    rm -rf "$TARGET_FOLDER"/*
-    echo "Contents of '$TARGET_FOLDER' have been removed."
-else
-    echo "Error: Folder '$TARGET_FOLDER' does not exist. Creating it..."
-    mkdir -p "$TARGET_FOLDER"
+BUILD_OPTIONS=()
+if [ "$BUILD_TYPE" = "Debug" ]; then
+    BUILD_OPTIONS+=(--debug=all)
 fi
 
-# Run the PyInstaller command with the -y option to force output directory removal
-echo "Running PyInstaller..."
-# pyinstaller -i res/app_icon.ico -n "Tac3D Desktop" -D -y Tac3D_Desktop.py
-pyinstaller -i res/gui/icon.ico -n "Chat with Luotianyi" -D -y main.py --add-data="D:\Anaconda\envs\lty_c\lib\site-packages\live2d;live2d"
-
-# Check if the PyInstaller command was successful
+pyinstaller -i res/gui/icon.ico -n "$APP_NAME" -D -y main.py \
+    --distpath "$BUILD_ROOT" \
+    --workpath "$WORK_FOLDER" \
+    --add-data="D:\Anaconda\envs\lty_c\lib\site-packages\live2d;live2d" \
+    "${BUILD_OPTIONS[@]}"
 if [ $? -ne 0 ]; then
     echo "PyInstaller command failed. Exiting."
     exit 1
 fi
 
-# Define the source folder
-DIST_FOLDER="dist/Chat with Luotianyi"
-
-# Verify that the source folder exists
-if [ ! -d "$DIST_FOLDER" ]; then
-    echo "Error: '$DIST_FOLDER' does not exist. Exiting."
+if [ ! -d "$BUILD_FOLDER/_internal" ] || [ ! -f "$BUILD_FOLDER/$APP_NAME.exe" ]; then
+    echo "Error: PyInstaller output in '$BUILD_FOLDER' is incomplete."
     exit 1
 fi
 
-# Copy required files and folders to the target folder
-echo "Copying files and folders to '$TARGET_FOLDER'..."
+mkdir -p "$TARGET_FOLDER" || exit 1
+cp -r "$BUILD_FOLDER/_internal" "$TARGET_FOLDER/" || exit 1
+cp "$BUILD_FOLDER/$APP_NAME.exe" "$TARGET_FOLDER/" || exit 1
+cp -r config res "$TARGET_FOLDER/" || exit 1
 
-echo "  Copying _internal folder..."
-cp -r "$DIST_FOLDER/_internal" "$TARGET_FOLDER/"
-if [ $? -eq 0 ]; then
-    echo "  ✓ _internal copied successfully"
-else
-    echo "  ✗ Failed to copy _internal"
-fi
-
-echo "  Copying executable..."
-cp "$DIST_FOLDER/Chat with Luotianyi.exe" "$TARGET_FOLDER/"
-if [ $? -eq 0 ]; then
-    echo "  ✓ Executable copied successfully"
-else
-    echo "  ✗ Failed to copy executable"
-fi
-
-# Copy config and res folders if they exist
-echo "  Checking for config folder..."
-if [ -d "config" ]; then
-    echo "  Found config folder, copying..."
-    cp -r "config" "$DIST_FOLDER/"
-    if [ $? -eq 0 ]; then
-        echo "  ✓ config folder copied successfully"
-    else
-        echo "  ✗ Failed to copy config folder"
-    fi
-else
-    echo "  ✗ config folder not found in current directory"
-fi
-
-echo "  Checking for res folder..."
-if [ -d "res" ]; then
-    echo "  Found res folder, copying..."
-    cp -r "res" "$DIST_FOLDER/"
-    if [ $? -eq 0 ]; then
-        echo "  ✓ res folder copied successfully"
-    else
-        echo "  ✗ Failed to copy res folder"
-    fi
-else
-    echo "  ✗ res folder not found in current directory"
-fi
-
-# echo "  Checking for temp folder..."
-# if [ id "temp"]; then
-#     echo "  Found temp folder, copying..."
-#     cp -r "temp" "$DIST_FOLDER/"
-#     if [ $? -eq 0 ]; then
-#         echo "  ✓ temp folder copied successfully"
-#     else
-#         echo "  ✗ Failed to copy temp folder"
-#     fi
-# fi
-
-echo "Copy operations completed."
-
-# Log completion time
-echo "==============================="
+echo "Build completed: $TARGET_FOLDER/$APP_NAME.exe"
 echo "Script finished at: $(date)"
-echo "==============================="

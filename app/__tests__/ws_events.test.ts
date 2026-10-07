@@ -17,6 +17,8 @@ describe('WSEventType constants', () => {
       'AUTH_OK',
       'AGENT_STATE_CHANGED',
       'AGENT_MESSAGE',
+      'LLM_REQUEST',
+      'LLM_RESPONSE',
       'USER_MESSAGE',
       'USER_IMAGE',
       'USER_TEXT',
@@ -41,6 +43,8 @@ describe('WSEventType constants', () => {
     expect(WSEventType.SERVER_ERROR).toBe('error');
     expect(WSEventType.AGENT_STATE_CHANGED).toBe('agent_state_changed');
     expect(WSEventType.AGENT_MESSAGE).toBe('agent_message');
+    expect(WSEventType.LLM_REQUEST).toBe('llm_request');
+    expect(WSEventType.LLM_RESPONSE).toBe('llm_response');
     expect(WSEventType.USER_TEXT).toBe('user_text');
     expect(WSEventType.USER_IMAGE).toBe('user_image');
     expect(WSEventType.USER_TYPING).toBe('user_typing');

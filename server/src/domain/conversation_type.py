@@ -1,12 +1,20 @@
-from datetime import datetime
 from dataclasses import dataclass
-from typing import Dict, Any
+from datetime import datetime
+from typing import Any, Dict, List
+
+
+@dataclass
+class ContextInfo:
+    """Conversation buffer state persisted by the database service."""
+
+    summary: str
+    conversations: List
+    context_count: int
 
 
 def timestamp_to_elapsed_time(timestamp: str) -> str:
     try:
-        time_format = "%Y-%m-%d %H:%M:%S"
-        past_time = datetime.strptime(timestamp, time_format)
+        past_time = datetime.fromisoformat(timestamp)
         now = datetime.now()
         delta = now - past_time
 
@@ -27,15 +35,14 @@ def timestamp_to_elapsed_time(timestamp: str) -> str:
             return f"{days}天前"
         else:
             return past_time.strftime("%Y-%m-%d")
-    except:
+    except (TypeError, ValueError):
         return timestamp
     
 def timestamp_to_date(timestamp: str) -> str:
     try:
-        time_format = "%Y-%m-%d %H:%M:%S"
-        past_time = datetime.strptime(timestamp, time_format)
+        past_time = datetime.fromisoformat(timestamp)
         return past_time.strftime("%Y-%m-%d")
-    except:
+    except (TypeError, ValueError):
         return timestamp
 
 @dataclass

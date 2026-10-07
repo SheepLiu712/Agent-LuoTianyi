@@ -1,10 +1,11 @@
 import argparse
 import sys
-import os
 import pathlib
 import json
-cwd = os.getcwd()
-sys.path.insert(0, str(cwd))
+from contextlib import ExitStack
+
+server_root = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(server_root))
 
 try:
     from src.domain.music_type import SongSegment, OneLyricLine
@@ -23,8 +24,8 @@ except ImportError:
         end_time: float
         lyrics: List[OneLyricLine]
 
-work_dir = "res/music/songs"  # 歌曲所在的文件夹
-song_dir_name = "ILoveU" # 歌曲文件夹的名称，不一定是歌曲标题
+work_dir = server_root / "res/sing_song/luotianyi/songs"  # 当前角色歌曲库
+song_dir_name = "ILOVEU" # 歌曲文件夹的名称，不一定是歌曲标题
 title = "I Love U" # 歌曲标题
 description = "" # 歌曲描述，留空即可
 lrc_offset = -0.5 # 歌词时间偏移，单位秒
@@ -163,13 +164,15 @@ if __name__ == "__main__":
         pass
 
     if args.listen:
-        # --- 新增功能：截取并播放片段 ---
-        # Reuse previous logic but use parsed seconds
-        import winsound
         try:
             from pydub import AudioSegment
         except ImportError:
             print("请先安装 pydub: pip install pydub")
+            exit(1)
+        try:
+            import pyaudio
+        except ImportError:
+            print("请先安装 PyAudio: pip install pyaudio")
             exit(1)
             
         if not song_path.exists():
@@ -181,11 +184,27 @@ if __name__ == "__main__":
             end_ms = int(end_time * 1000)
             segment = song[start_ms:end_ms]
             
-            temp_wav = "temp_segment_preview.wav"
-            segment.export(temp_wav, format="wav")
             print("正在播放...")
-            winsound.PlaySound(temp_wav, winsound.SND_FILENAME)
-            os.remove(temp_wav)
+            with ExitStack() as resources:
+                player = pyaudio.PyAudio()
+                resources.callback(player.terminate)
+                # pydub stores signed PCM; PyAudio maps width=4 to FLOAT by default.
+                audio_format = (
+                    pyaudio.paInt32 if segment.sample_width == 4
+                    else player.get_format_from_width(segment.sample_width, unsigned=False)
+                )
+                stream = player.open(
+                    format=audio_format,
+                    channels=segment.channels,
+                    rate=segment.frame_rate,
+                    output=True,
+                )
+                # LIFO: stop, close, terminate; cleanup continues if a step fails.
+                resources.callback(stream.close)
+                resources.callback(stream.stop_stream)
+                chunk_bytes = 1024 * segment.frame_width
+                for offset in range(0, len(segment.raw_data), chunk_bytes):
+                    stream.write(segment.raw_data[offset:offset + chunk_bytes])
             print("播放完毕")
 
     if args.save:

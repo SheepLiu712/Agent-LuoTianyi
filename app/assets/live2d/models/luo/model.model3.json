@@ -135,5 +135,10 @@
 			"Name": "右手",
 			"Id": "ArtMesh127"
 		}
-	]
+	],
+	"Groups": [{
+		"Target": "Parameter",
+		"Name": "EyeBlink",
+		"Ids": ["ParamEyeLOpen", "ParamEyeROpen"]
+	}]
 }

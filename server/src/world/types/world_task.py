@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.system.system_runtime import SystemRuntime
+    from src.server_runtime import ServerRuntime
 
 class WorldTask(ABC):
 
@@ -13,7 +13,7 @@ class WorldTask(ABC):
         self.clock_config = self.config.get("clock_config", {})
 
     @abstractmethod
-    def initialize(self, system_runtime: 'SystemRuntime') -> None:
+    def initialize(self, server_runtime: 'ServerRuntime') -> None:
         pass
 
     @abstractmethod

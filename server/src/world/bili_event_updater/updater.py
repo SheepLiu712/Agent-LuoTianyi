@@ -1,15 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
-from src.system.database.event_models import UnifiedEventType
+from src.infrastructure.persistence.database.event_models import UnifiedEventType
 from src.utils.logger import get_logger
 from src.world.bili_event_updater.event_parser import EventParser
 from src.world.bili_event_updater.official_feed_fetcher import OfficialFeedFetcher
 
-
 if TYPE_CHECKING:
-    from src.system.database.services.event_store import EventStore
+    from src.infrastructure.persistence.database.services.event_store import EventStore
+
 
 class BiliEventUpdater:
     """Fetch Bilibili dynamics, parse them, and upsert schedule events."""
@@ -45,35 +46,33 @@ class BiliEventUpdater:
         """
         if self.event_store is None:
             raise RuntimeError("BiliEventUpdater requires an event_store before updating events.")
-        
+
         if not await self.fetcher.check_and_update_cookie_validity():
-            raise RuntimeError("Bilibili cookie is invalid or missing; dynamics cannot be fetched. Please provide a valid cookie.")
+            raise RuntimeError(
+                "Bilibili cookie is invalid or missing; dynamics cannot be fetched. Please provide a valid cookie."
+            )
 
         self.logger.info("BiliEventUpdater: fetching new dynamics...")
-        try:
-            raw_items = self.fetcher.fetch_all_new()
-            if not raw_items:
-                self.logger.info("No new Bilibili dynamics fetched")
-                return {"raw": 0, "parsed": 0, "updated": 0}
-
-            self.logger.info(f"Fetched {len(raw_items)} new dynamics, parsing...")
-            parsed_events = await self.parser.parse_dynamics(raw_items)
-
-            updated = 0
-            for event in parsed_events:
-                event["event_type"] = self._map_old_event_type(event.get("event_type", "general"))
-                event.setdefault("source", "bilibili")
-                event.setdefault("is_recurring", False)
-                event.setdefault("is_personal", False)
-                if await self.event_store.add_event(event) is not None:
-                    updated += 1
-
-            self.logger.info(f"Updated {updated} event(s) from {len(parsed_events)} parsed dynamic event(s)")
-            return {"raw": len(raw_items), "parsed": len(parsed_events), "updated": updated}
-        except Exception as e:
-            self.logger.error(f"Error in fetch_and_update_events: {e}")
+        raw_items = await asyncio.to_thread(self.fetcher.fetch_all_new)
+        if not raw_items:
+            self.logger.info("No new Bilibili dynamics fetched")
             return {"raw": 0, "parsed": 0, "updated": 0}
 
+        self.logger.info(f"Fetched {len(raw_items)} new dynamics, parsing...")
+        parsed_events = await self.parser.parse_dynamics(raw_items)
+
+        updated = 0
+        for event in parsed_events:
+            event["event_type"] = self._map_old_event_type(event.get("event_type", "general"))
+            event.setdefault("source", "bilibili")
+            event.setdefault("is_recurring", False)
+            event.setdefault("is_personal", False)
+            if await self.event_store.add_event(event) is not None:
+                updated += 1
+
+        self.fetcher.mark_processed(raw_items)
+        self.logger.info(f"Updated {updated} event(s) from {len(parsed_events)} parsed dynamic event(s)")
+        return {"raw": len(raw_items), "parsed": len(parsed_events), "updated": updated}
 
     @staticmethod
     def _map_old_event_type(old_type: str) -> str:

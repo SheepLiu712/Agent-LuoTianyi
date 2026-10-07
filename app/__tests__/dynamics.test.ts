@@ -2,6 +2,7 @@ import {
   createDynamic,
   createDynamicComment,
   getDynamicComments,
+  getDynamicSourceLabel,
   getDynamics,
   getDynamicUnreadStatus,
   markDynamicsRead,
@@ -23,6 +24,12 @@ describe('dynamics api helpers', () => {
   beforeEach(() => {
     mockFetch.mockReset();
     global.fetch = mockFetch as unknown as typeof fetch;
+  });
+
+  it('labels diary dynamics without changing unknown source types', () => {
+    expect(getDynamicSourceLabel('diary')).toBe('天依日记');
+    expect(getDynamicSourceLabel('custom_source')).toBe('custom_source');
+    expect(getDynamicSourceLabel('')).toBe('动态');
   });
 
   it('getDynamics should send auth header and paging query', async () => {

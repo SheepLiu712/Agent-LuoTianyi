@@ -8,6 +8,7 @@ import { MessageProcessor } from '../utils/message_processor';
 import { NetworkClient } from '../utils/network_client';
 import { AgentMessagePayload, ChatMessage, createSystemChatMessage } from '../types/chat';
 import { addDebugTrace } from '../utils/debug_trace';
+import { runImageSelection } from '../utils/image_selection';
 
 function createUuid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -182,6 +183,8 @@ export const useChatLogic = (
       onError: (errorText) => {
         binder.emitErrorText(errorText);
       },
+      onLlmRequest: (payload) => processor.processLlmRequest(payload),
+      getLlmMode: () => processor.getLlmMode(),
     });
 
     return () => {
@@ -269,40 +272,41 @@ export const useChatLogic = (
   }, [canSend, inputText]);
 
   const handleSendImage = useCallback(async () => {
-    // 通知服务端用户开始选择图片，延长等待时间
-    await binderRef.current?.sendImageSelecting();
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: false,
-      quality: 1,
-    });
-
-    if (result.canceled || !result.assets || result.assets.length === 0) {
-      // 用户取消选择：通知服务端重置等待时间
-      await binderRef.current?.sendImageSelectingCancel();
-      return;
-    }
-
-    const asset = result.assets[0];
-    const imageUri = asset.uri;
-    const mimeType = asset.mimeType || 'image/jpeg';
-    const uuid = createUuid('user-img');
-    addDebugTrace('ui', 'send image selected', { uuid, imageUri, mimeType });
-
-    setMessages((prev) => [
-      {
-        uuid,
-        type: 'image',
-        content: imageUri,
-        isUser: true,
-        timestamp: Date.now(),
-        sendStatus: 'waiting',
+    await runImageSelection({
+      sendSelecting: async () => {
+        await binderRef.current?.sendImageSelecting();
       },
-      ...prev,
-    ]);
+      cancelSelecting: async () => {
+        await binderRef.current?.sendImageSelectingCancel();
+      },
+      launchPicker: () =>
+        ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsEditing: false,
+          quality: 1,
+        }),
+      emitError: (message) => binderRef.current?.emitErrorText(message),
+      onSelected: async (asset) => {
+        const imageUri = asset.uri;
+        const mimeType = asset.mimeType || 'image/jpeg';
+        const uuid = createUuid('user-img');
+        addDebugTrace('ui', 'send image selected', { uuid, imageUri, mimeType });
 
-    await binderRef.current?.sendImage(uuid, imageUri, mimeType);
+        setMessages((prev) => [
+          {
+            uuid,
+            type: 'image',
+            content: imageUri,
+            isUser: true,
+            timestamp: Date.now(),
+            sendStatus: 'waiting',
+          },
+          ...prev,
+        ]);
+
+        await binderRef.current?.sendImage(uuid, imageUri, mimeType);
+      },
+    });
   }, []);
 
   const handleToggleAgentAudio = useCallback(

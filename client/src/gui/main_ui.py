@@ -11,7 +11,7 @@ from PySide6.QtGui import QMouseEvent, QPainter, QPen, QColor, QImage, QResizeEv
 from PySide6.QtWidgets import (QApplication, QWidget, QHBoxLayout, QVBoxLayout,
                                QTextEdit, QScrollArea, QLabel,
                                 QFrame, QPushButton, QFileDialog, QSlider,
-                                QMessageBox)
+                                QMessageBox, QMenu)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 from OpenGL.GL import *
 from typing import Dict, Any, List
@@ -19,9 +19,11 @@ from typing import Dict, Any, List
 from ..live2d import Live2dModel
 from .binder import AgentBinder
 from ..types import ConversationItem
+from ..utils.image_encoding import prepare_image_payload
 from .chat_bubble import ChatBubble, ChatTextBubble, ChatImageBubble, SystemMessage, BubblePlaybackManager
 from .preferences_dialog import PreferencesDialog
 from .dynamics_dialog import DynamicsDialog
+from .llm_settings_dialog import LLMSettingsDialog
 
 DYNAMIC_ICON_PATH = "res/gui/dynamic.png"
 DYNAMIC_HAS_NEW_ICON_PATH = "res/gui/dynamic_has_new.png"
@@ -498,7 +500,7 @@ class ChatWidget(QWidget):
                 background-color: #DDDDDD;
             }
             QToolTip {
-                background-color: #66ccff;
+                background-color: #66CCFF;
                 color: #000000;
                 border: 1px solid #76797C;
                 padding: 1px;
@@ -607,7 +609,7 @@ class ChatWidget(QWidget):
                 border-radius: 4px;
             }
             QSlider::add-page:vertical {
-                background: #66ccff;
+                background: #66CCFF;
                 border-radius: 4px;
             }
             QSlider::handle:vertical {
@@ -625,7 +627,7 @@ class ChatWidget(QWidget):
         self.toolbar_layout.addWidget(self.volume_btn)
         
         # Settings Button
-        self.settings_btn = HoverButton(tooltip_text="偏好设置")
+        self.settings_btn = HoverButton(tooltip_text="设置")
         icon_path = os.path.join("res", "gui", "setting.png")
         self.settings_btn.setIcon(QIcon(icon_path))
         self.settings_btn.setFixedSize(24, 24)
@@ -704,12 +706,19 @@ class ChatWidget(QWidget):
         self.temp_is_user = True
 
     def open_settings(self):
-        print("Opening preferences dialog...")
-        if self.network_client:
-            dialog = PreferencesDialog(self.network_client, self)
-            dialog.exec()
-        else:
-            QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开偏好设置")
+        if not self.network_client:
+            QMessageBox.warning(self, "提示", "网络客户端未就绪，无法打开设置")
+            return
+        menu = QMenu(self)
+        prefs_action = menu.addAction("相处模式设置")
+        llm_action = menu.addAction("LLM 模型设置")
+        chosen = menu.exec(
+            self.settings_btn.mapToGlobal(self.settings_btn.rect().bottomLeft())
+        )
+        if chosen == prefs_action:
+            PreferencesDialog(self.network_client, self).exec()
+        elif chosen == llm_action:
+            LLMSettingsDialog(self.network_client, self).exec()
 
     def open_dynamics(self):
         if self.network_client:
@@ -853,12 +862,18 @@ class ChatWidget(QWidget):
             self, 
             "Select Image", 
             "", 
-            "Images (*.png *.xpm *.jpg *.jpeg *.bmp *.svg)"
+            "Images (*.jpg *.jpeg *.png *.gif *.bmp *.webp)"
         )
         if file_path:
+            prepared = prepare_image_payload(file_path)
+            if not prepared["ok"]:
+                QMessageBox.warning(self, "图片无法发送", prepared["error"])
+                self.agent.on_image_selecting_cancel()
+                return
             self.can_send_pic = False
-            bubble = self.add_message("image", file_path, is_user=True)
-            self.agent.on_send_image(file_path, bubble)
+            upload_path = prepared["image_client_path"]
+            bubble = self.add_message("image", upload_path, is_user=True)
+            self.agent.on_send_image(upload_path, bubble, prepared=prepared)
         else:
             # 用户取消了选择：通知服务端重置等待时间
             self.agent.on_image_selecting_cancel()

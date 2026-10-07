@@ -6,7 +6,7 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.append(cwd)
 
-from src.system.database.sql_database import get_sql_session, InviteCode
+from src.infrastructure.persistence.database.sql_database import get_sql_session, InviteCode
 
 session = get_sql_session()
 

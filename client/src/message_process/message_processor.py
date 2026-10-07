@@ -1,18 +1,16 @@
-import queue
-from .multi_media_stream import MultiMediaStream
-import threading
-from ..live2d import Live2dModel
-import time
-import os
-import re
 import base64
 import datetime
+import json
+import os
+import queue
+import re
+import threading
+import time
 import uuid
-from dataclasses import dataclass, field
 from collections import deque
+from dataclasses import dataclass, field
 from typing import Callable, TYPE_CHECKING
-from ..network.event_types import AgentMessage, is_audio_terminal
-from ..utils.logger import get_logger
+
 from ..delivery_policy import (
     MAX_DURABLE_MESSAGE_AGE_SECONDS,
     can_retry_durable_message,
@@ -20,6 +18,16 @@ from ..delivery_policy import (
     get_send_retry_delay_seconds,
     is_durable_send_kind,
 )
+from ..live2d import Live2dModel
+from ..network.event_types import AgentMessage, is_audio_terminal
+from ..utils.image_encoding import prepare_image_payload
+from ..utils import llm_key_storage
+from ..utils.llm_client import (
+    build_chat_completions_payload,
+    call_llm_api_async,
+)
+from ..utils.logger import get_logger
+from .multi_media_stream import MultiMediaStream
 
 if TYPE_CHECKING:
     from ..network.network_client import NetworkClient
@@ -76,6 +84,8 @@ class MessageProcessor:
             self.feed_agent_msg,
             self.change_agent_state,
             self.feed_system_message,
+            self.process_llm_request,
+            self.get_llm_mode,
         )
         self.send_text_func:Callable[..., dict] = network_client.send_chat
         self.send_image_func:Callable[..., dict] = network_client.send_image
@@ -143,8 +153,9 @@ class MessageProcessor:
             self._send_cond.notify()
         return local_id
 
-    def send_image(self, image_path: str):
-        prepared = self._prepare_image_payload(image_path)
+    def send_image(self, image_path: str, *, prepared: dict | None = None):
+        if prepared is None:
+            prepared = self._prepare_image_payload(image_path)
         if not prepared.get("ok", False):
             return
 
@@ -360,6 +371,75 @@ class MessageProcessor:
         if text and self.system_message_signal:
             self.system_message_signal(text)
 
+    async def process_llm_request(self, payload: dict) -> dict | None:
+        request_id = payload.get("request_id")
+        if not request_id:
+            return None
+
+        model_type = str(payload.get("type") or "").strip()
+        if not model_type:
+            return {"request_id": request_id, "error": "missing model type"}
+        config = llm_key_storage.get_module_config(model_type) or {}
+        api_key = config.get("api_key") or ""
+        # 对齐 APP 端：未启用的模块也拒绝请求，避免连接级 client_mode.types 与本地配置不同步时桌面端仍携旧 Key 执行
+        if not config.get("enabled") or not api_key:
+            return {"request_id": request_id, "error": "no api key configured on client"}
+        base_url = config.get("base_url") or ""
+        if not base_url:
+            return {"request_id": request_id, "error": "LLM 配置不完整，请在 LLM 模型设置中重新保存"}
+        model = config.get("model") or ""
+        if not model:
+            return {"request_id": request_id, "error": "missing provider info"}
+
+        capabilities = config.get("model_capabilities") or {}
+        required_kind = str(payload.get("model_kind") or "llm").strip().lower()
+        configured_kind = str(config.get("model_kind") or "").strip().lower()
+        if required_kind not in {"llm", "vlm"}:
+            return {"request_id": request_id, "error": f"服务端下发了未知模型类型：{required_kind}"}
+        if configured_kind != required_kind:
+            return {
+                "request_id": request_id,
+                "error": f"本地配置是 {configured_kind or '未知'} 模型，当前调用要求 {required_kind.upper()} 模型",
+            }
+        use_json = bool(payload.get("use_json"))
+        enable_thinking = bool(payload.get("enable_thinking"))
+        if use_json and not bool(capabilities.get("can_use_json")):
+            return {"request_id": request_id, "error": "当前客户端模型未声明 JSON 输出能力"}
+        if enable_thinking and not bool(capabilities.get("can_enable_thinking")):
+            return {"request_id": request_id, "error": "当前客户端模型未声明 thinking 能力"}
+        body = build_chat_completions_payload(
+            prompt=payload.get("prompt", ""),
+            model=model,
+            params={**(payload.get("params") or {}), **(config.get("params") or {})},
+            enable_thinking=enable_thinking,
+            use_json=use_json,
+            image_base64=payload.get("image_base64"),
+        )
+        try:
+            result = await call_llm_api_async(
+                url=f"{base_url.rstrip('/')}/chat/completions",
+                api_key=api_key,
+                payload=body,
+            )
+            if use_json:
+                try:
+                    json.loads(result["content"])
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    return {"request_id": request_id, "error": "客户端模型未返回有效 JSON"}
+            return {"request_id": request_id, "content": result["content"], "usage": result["usage"]}
+        except Exception as exc:
+            return {"request_id": request_id, "error": str(exc)}
+
+    def get_llm_mode(self) -> dict[str, list[str]]:
+        modules = llm_key_storage.get_llm_modules_config()
+        return {
+            "types": [
+                str(type_id)
+                for type_id, entry in modules.items()
+                if isinstance(entry, dict) and entry.get("enabled")
+            ]
+        }
+
     def set_signals(
         self,
         response_signal: Callable[[str, str], None],
@@ -446,26 +526,7 @@ class MessageProcessor:
         return {"ok": False, "request_id": None, "error": f"Unknown outgoing kind: {item.kind}", "drop": True}
 
     def _prepare_image_payload(self, image_path: str) -> dict:
-        try:
-            with open(image_path, "rb") as f:
-                image_data = f.read()
-            postfix = os.path.splitext(image_path)[1]
-            new_file_path = self._save_image_to_temp(image_data, postfix)
-        except Exception as exc:
-            return {"ok": False, "error": f"Failed to read image file: {exc}", "drop": True}
-
-        mime_type = "image/png"
-        if postfix.lower() in [".jpg", ".jpeg"]:
-            mime_type = "image/jpeg"
-        elif postfix.lower() == ".gif":
-            mime_type = "image/gif"
-
-        return {
-            "ok": True,
-            "image_base64": base64.b64encode(image_data).decode("utf-8"),
-            "mime_type": mime_type,
-            "image_client_path": new_file_path,
-        }
+        return prepare_image_payload(image_path)
     
     def _save_audio_to_temp(self, audio_data: bytes, uuid: str | None, postfix: str) -> str:
         try:
@@ -487,20 +548,6 @@ class MessageProcessor:
         except Exception as exc:
             self.logger.error(f"Failed to save audio to temp: {exc}")
             return ""
-
-    @staticmethod
-    def _save_image_to_temp(image_data: bytes, postfix: str) -> str:
-        cwd = os.getcwd()
-        new_file_path = os.path.join(
-            cwd,
-            "temp",
-            "images",
-            datetime.datetime.now().strftime("%Y%m%d%H%M%S") + postfix,
-        )
-        os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
-        with open(new_file_path, "wb") as f:
-            f.write(image_data)
-        return new_file_path
 
     @staticmethod
     def _is_terminal_send_error(error_text: str) -> bool:

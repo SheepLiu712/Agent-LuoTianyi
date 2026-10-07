@@ -9,7 +9,7 @@ cwd = os.getcwd()
 if cwd not in sys.path:
     sys.path.append(cwd)
 
-from src.subconscious.music_knowledge.song_database import get_song_session, Song, init_song_db
+from src.infrastructure.persistence.song_knowledge import Song, get_song_session, init_song_db
 
 
 def clean_lyrics(lyrics_text: str) -> str:
@@ -133,6 +133,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Initialize DB specifically with args
-    init_song_db(args.db_dir, args.db_name)
+    init_song_db({"db_folder": args.db_dir, "db_file": args.db_name})
     
     populate_database(args.dir)

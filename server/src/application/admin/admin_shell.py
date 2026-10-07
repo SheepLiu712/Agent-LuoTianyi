@@ -1,0 +1,96 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
+from src.infrastructure.config.secrets import SecretStore
+from src.infrastructure.config.store import ConfigStore
+from src.infrastructure.config.validation import RuntimeConfigValidator
+from src.infrastructure.observability import ObservabilityService, set_observability_service
+from src.utils.logger import install_observability_log_handler, uninstall_observability_log_handler
+
+from .auth import AdminAuthService
+from .qq_music_credential_refresh import QQMusicCredentialRefreshService
+from .runtime_supervisor import RuntimeSupervisor
+
+
+@dataclass
+class AdminShell:
+    root_dir: Path
+    config_store: ConfigStore
+    secret_store: SecretStore
+    auth: AdminAuthService
+    validator: RuntimeConfigValidator
+    runtime_supervisor: RuntimeSupervisor
+    qq_music_credential_refresh: QQMusicCredentialRefreshService
+    observability: ObservabilityService
+
+    @classmethod
+    async def initialize(cls, *, root_dir: str | Path, config_path: str | Path = "config/config.json") -> "AdminShell":
+        root = Path(root_dir)
+        config_store = ConfigStore(root / config_path, root_dir=root)
+        secret_store = SecretStore(root / "config" / "secrets.local.env")
+        secret_store.load_into_environment()
+        try:
+            raw_config = config_store.read_raw()
+        except (json.JSONDecodeError, OSError):
+            raw_config = {}
+        observability = ObservabilityService(raw_config.get("observability", {}), base_dir=root)
+        set_observability_service(observability)
+        install_observability_log_handler(observability)
+        auth = AdminAuthService(root / "config" / "admin_auth.json", root / "config" / "admin_setup_token.txt")
+        validator = RuntimeConfigValidator(root_dir=root, secret_store=secret_store)
+        runtime_supervisor = RuntimeSupervisor(
+            config_store=config_store,
+            secret_store=secret_store,
+            validator=validator,
+            observability=observability,
+        )
+        qq_music_credential_refresh = QQMusicCredentialRefreshService(
+            root_dir=root,
+            config_store=config_store,
+            runtime_getter=lambda: runtime_supervisor.runtime,
+        )
+        return cls(
+            root_dir=root,
+            config_store=config_store,
+            secret_store=secret_store,
+            auth=auth,
+            validator=validator,
+            runtime_supervisor=runtime_supervisor,
+            qq_music_credential_refresh=qq_music_credential_refresh,
+            observability=observability,
+        )
+
+    async def shutdown(self) -> None:
+        status = await self.runtime_supervisor.stop()
+        if status.get("state") != "stopped" or self.runtime_supervisor.has_runtime:
+            error = status.get("last_error") or "runtime cleanup is incomplete"
+            raise RuntimeError(f"Cannot close AdminShell while ServerRuntime is still active: {error}")
+        self.observability.close()
+        set_observability_service(None)
+        uninstall_observability_log_handler()
+
+
+_admin_shell: AdminShell | None = None
+
+
+async def init_admin_shell(*, root_dir: str | Path, config_path: str | Path = "config/config.json") -> AdminShell:
+    global _admin_shell
+    _admin_shell = await AdminShell.initialize(root_dir=root_dir, config_path=config_path)
+    return _admin_shell
+
+
+def get_admin_shell() -> AdminShell:
+    if _admin_shell is None:
+        raise RuntimeError("AdminShell has not been initialized.")
+    return _admin_shell
+
+
+async def shutdown_admin_shell() -> None:
+    global _admin_shell
+    if _admin_shell is None:
+        return
+    await _admin_shell.shutdown()
+    _admin_shell = None

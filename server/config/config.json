@@ -1,6 +1,7 @@
 {
     "is_debug": true,
     "llm_service": {
+        "client_llm_timeout_seconds": 120,
         "prompt_manager": {
             "template_dir": "res/agent/prompts"
         },
@@ -33,9 +34,9 @@
             },
             "dsv4-flash": {
                 "api_type": "openai",
-                "model": "deepseek-v4-flash",
+                "model": "deepseek-v4-flash-0731",
                 "api_key": "$QWEN_API_KEY",
-                "base_url": "https://ws-lbtuwahfzgpelt4a.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 "can_enable_thinking": true,
                 "can_use_json": true,
                 "default_params": {
@@ -59,7 +60,41 @@
                     "top_p": 0.9
                 }
             }
-        }
+        },
+        "client_model_types": [
+            {
+                "id": "main_chat",
+                "name": "主对话模型",
+                "description": "填写你自己的 API Key；开启后主对话相关调用将使用该模型与服务商。",
+                "model_kind": "llm",
+                "requires_json": false,
+                "requires_thinking": false
+            },
+            {
+                "id": "topic_extraction",
+                "name": "主题提取模型",
+                "description": "填写你自己的 API Key；开启后主题提取相关调用将使用该模型与服务商。",
+                "model_kind": "llm",
+                "requires_json": true,
+                "requires_thinking": false
+            },
+            {
+                "id": "image_understanding",
+                "name": "图片理解模型",
+                "description": "填写你自己的 API Key；开启后图片理解相关调用将使用该模型与服务商。",
+                "model_kind": "vlm",
+                "requires_json": false,
+                "requires_thinking": false
+            },
+            {
+                "id": "assistance",
+                "name": "辅助模型",
+                "description": "填写你自己的 API Key；开启后记忆等功能的相关调用将使用该模型与服务商。",
+                "model_kind": "llm",
+                "requires_json": true,
+                "requires_thinking": false
+            }
+        ]
     },
     "database": {
         "sql_db_folder": "data/database",
@@ -68,105 +103,36 @@
         "redis": {},
         "event_store": {
             "llm_module": {
+                "label": "事件匹配",
                 "llm": {
                     "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": "assistance"
                 },
                 "prompt_name": "event_store_prompt"
             }
         },
         "memory_store": {
             "llm_module": {
+                "label": "记忆存储",
                 "llm": {
                     "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": "assistance"
                 },
                 "prompt_name": "memory_store_prompt"
             }
         }
     },
-    "capabilities": {
-        "tts": {
-            "luotianyi": {
-                "character_name": "luotianyi",
-                "language": "zh",
-                "onnx_model_dir": "res/tts/lty_custom_onnx_model",
-                "reference_audio_dir": "res/tts/luotianyi/reference_audio",
-                "reference_audio_lyrics": "res/tts/luotianyi/reference_audio/lrc.json",
-                "server_config_path": "res/tts/luotianyi/tts_infer.yaml",
-                "interface_config_path": "res/tts/luotianyi/tts_interface_config.json",
-                "suppress_worker_output": true,
-                "trim_startup_memory": true
-            }
-        },
-        "sing": {
-            "song_emotion_tagger": {
-                "llm": {
-                    "name": "dsv4-flash",
-                    "enable_thinking": false,
-                    "use_json": true,
-                    "params": {}
-                },
-                "prompt_name": "song_emotion_prompt"
-            },
-            "characters": {
-                "luotianyi": {
-                    "character_name": "洛天依",
-                    "resource_path": "res/sing_song/luotianyi"
-                }
-            }
-        },
-        "image_understanding": {
-            "vlm_module": {
-                "vlm": {
-                    "name": "qwen3-vl-plus"
-                },
-                "prompt_name": "vision_interaction_prompt",
-                "enable_thinking": false,
-                "use_json": false,
-                "params": {}
-            }
-        },
-        "dynamic": {
-            "dynamic_composer": {
-                "llm_module": {
-                    "llm": {
-                        "name": "dsv4-flash",
-                        "enable_thinking": false,
-                        "use_json": false,
-                        "params": {}
-                    },
-                    "prompt_name": "dynamic_post_prompt"
-                }
-            },
-            "dynamic_replier": {
-                "llm_module": {
-                    "llm": {
-                        "name": "dsv4-flash",
-                        "enable_thinking": false,
-                        "use_json": true,
-                        "params": {}
-                    },
-                    "prompt_name": "dynamic_reply_prompt"
-                }
-            }
-        },
-        "diary": {
-            "diary_llm": {
-                "llm_module": {
-                    "llm": {
-                        "name": "dsv4-flash",
-                        "enable_thinking": false,
-                        "use_json": false,
-                        "params": {}
-                    },
-                    "prompt_name": "diary_prompt"
-                }
-            }
+    "infrastructure": {
+        "media_resolution": {
+            "root": "data/media",
+            "max_bytes": 6291456,
+            "max_encoded_bytes": 8388608
         }
     },
     "chat_session_manager": {
@@ -207,7 +173,8 @@
                     "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": false,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": "assistance"
                 },
                 "prompt_name": "summary_prompt"
             },
@@ -225,13 +192,10 @@
             "silence_trigger_cooldown_seconds": 180,
             "activity_res": {
                 "first_login": {
-                    "text": [
-                        "你好呀，我是洛天依！",
-                        "欢迎来到这里，今天想聊点什么呢？"
-                    ],
-                    "audio_path": [
-                        "res/tts/luotianyi/static_audio/first_greet_1.wav",
-                        "res/tts/luotianyi/static_audio/first_greet_2.wav"
+                    "manifest": "res/agent/prepared_speech/luotianyi/manifest.json",
+                    "resource_names": [
+                        "first_greet_1",
+                        "first_greet_2"
                     ]
                 }
             },
@@ -256,7 +220,127 @@
             }
         }
     },
+    "stage_manager": {
+        "offline_timeout": 60,
+        "return_user_threshold_seconds": 432000,
+        "stage": {
+            "proactive_idle_seconds": 30,
+            "login_reminder_wait": 1
+        }
+    },
     "agent_runtime": {
+        "skills": {
+            "speaking": {
+                "characters": {
+                    "luotianyi": {
+                        "character_name": "luotianyi",
+                        "language": "zh",
+                        "onnx_model_dir": "res/tts/lty_custom_onnx_model",
+                        "reference_audio_dir": "res/tts/luotianyi/reference_audio",
+                        "reference_audio_lyrics": "res/tts/luotianyi/reference_audio/lrc.json",
+                        "server_config_path": "res/tts/luotianyi/tts_infer.yaml",
+                        "interface_config_path": "res/tts/luotianyi/tts_interface_config.json",
+                        "suppress_worker_output": true,
+                        "trim_startup_memory": true
+                    }
+                }
+            },
+            "singing": {
+                "song_emotion_tagger": {
+                    "llm": {
+                        "name": "dsv4-flash",
+                        "enable_thinking": false,
+                        "use_json": true,
+                        "params": {},
+                        "client_model_type": "assistance"
+                    },
+                    "prompt_name": "song_emotion_prompt"
+                },
+                "characters": {
+                    "luotianyi": {
+                        "character_name": "洛天依",
+                        "resource_path": "res/sing_song/luotianyi"
+                    }
+                }
+            },
+            "image_understanding": {
+                "vlm_module": {
+                    "vlm": {
+                        "name": "qwen3-vl-plus",
+                        "client_model_type": "image_understanding"
+                    },
+                    "prompt_name": "vision_interaction_prompt",
+                    "enable_thinking": false,
+                    "use_json": false,
+                    "params": {}
+                }
+            },
+            "dynamic": {
+                "dynamic_composer": {
+                    "llm_module": {
+                        "llm": {
+                            "name": "dsv4-flash",
+                            "enable_thinking": false,
+                            "use_json": false,
+                            "params": {},
+                            "client_model_type": ""
+                        },
+                        "prompt_name": "dynamic_post_prompt"
+                    }
+                },
+                "dynamic_replier": {
+                    "llm_module": {
+                        "label": "动态回复",
+                        "llm": {
+                            "name": "dsv4-flash",
+                            "enable_thinking": false,
+                            "use_json": true,
+                            "params": {},
+                            "client_model_type": "assistance"
+                        },
+                        "prompt_name": "dynamic_reply_prompt"
+                    }
+                }
+            },
+            "diary": {
+                "diary_llm": {
+                    "llm_module": {
+                        "llm": {
+                            "name": "dsv4-flash",
+                            "enable_thinking": false,
+                            "use_json": false,
+                            "params": {},
+                            "client_model_type": "assistance"
+                        },
+                        "prompt_name": "diary_prompt"
+                    }
+                }
+            }
+        },
+        "prepared_speech": {
+            "characters": {
+                "luotianyi": {
+                    "manifest": "res/agent/prepared_speech/luotianyi/manifest.json"
+                }
+            }
+        },
+        "proactive": {
+            "first_login": {
+                "prepared_names": [
+                    "first_greet_1",
+                    "first_greet_2"
+                ]
+            }
+        },
+        "reply_composition": {
+            "slow_recall": {
+                "provisional_after_seconds": 3.5,
+                "provisional_text": "让我想想之前聊过的事情，稍等我一下下～",
+                "provisional_sound_content": "让我想想之前聊过的事情，稍等我一下下",
+                "provisional_tone": "tender",
+                "provisional_expression": "温柔脸"
+            }
+        },
         "character_registry": {
             "characters": {
                 "luotianyi": {
@@ -271,7 +355,7 @@
                     "reflex": {
                         "touch": {
                             "fast_reply": {
-                                "touch_voice_dir": "res/agent/touch_voice",
+                                "resource_names": ["touch_voice1", "touch_voice2", "touch_voice3", "touch_voice4", "touch_voice5", "touch_voice6", "touch_voice7", "touch_voice8"],
                                 "probability": 1.0
                             }
                         }
@@ -288,6 +372,14 @@
                 }
             },
             "memory": {
+                "explicit_intent": {
+                    "enabled": true,
+                    "phrases": [
+                        "请记住",
+                        "记住",
+                        "记一下"
+                    ]
+                },
                 "vector_store": {
                     "store_type": "chroma",
                     "embedding_model": {
@@ -299,12 +391,6 @@
                     "vector_store_path": "data/database/vector_store",
                     "collection_name": "luotianyi_memory"
                 },
-                "knowledge_graph": {
-                    "retriever_type": "memory",
-                    "graph_data_dir": "res/knowledge",
-                    "graph_data_path": "knowledge_graph.json",
-                    "graph_alias_path": "alias.json"
-                },
                 "graph_retriever": {
                     "retriever_type": "memory"
                 },
@@ -314,7 +400,8 @@
                             "name": "dsv4-flash",
                             "enable_thinking": false,
                             "use_json": false,
-                            "params": {}
+                            "params": {},
+                            "client_model_type": "assistance"
                         },
                         "prompt_name": "user_profile_update_prompt"
                     }
@@ -322,13 +409,15 @@
                 "memory_writer": {
                     "recent_update_path": "data/memory/context/recent_update.json",
                     "llm_module": {
+                        "label": "记忆写入",
                         "llm": {
                             "name": "qwen3.5-plus",
                             "enable_thinking": false,
                             "use_json": true,
                             "params": {
                                 "max_tokens": 800
-                            }
+                            },
+                            "client_model_type": "assistance"
                         },
                         "prompt_name": "memory_write_prompt"
                     }
@@ -336,22 +425,26 @@
             },
             "date_detector": {
                 "llm_module": {
+                    "label": "日期检测",
                     "llm": {
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": true,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": "assistance"
                     },
                     "prompt_name": "date_detection_prompt"
                 }
             },
             "topic_extractor": {
                 "llm_module": {
+                    "label": "话题抽取",
                     "llm": {
                         "name": "qwen3.6-flash",
                         "enable_thinking": false,
                         "use_json": true,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": "topic_extraction"
                     },
                     "prompt_name": "topic_extraction_prompt"
                 }
@@ -368,7 +461,8 @@
                         "name": "qwen3.5-plus",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": "main_chat"
                     },
                     "prompt_name": "topic_reply_prompt"
                 }
@@ -435,16 +529,19 @@
                     "name": "dsv4-flash",
                     "enable_thinking": true,
                     "use_json": false,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": ""
                 }
             },
             "llm_modules": {
                 "json": {
+                    "label": "城市漫步决策",
                     "llm": {
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": true,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_llm_prompt"
                 },
@@ -453,13 +550,15 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_llm_prompt"
                 },
                 "vlm": {
                     "vlm": {
-                        "name": "qwen3-vl-plus"
+                        "name": "qwen3-vl-plus",
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_vlm_prompt",
                     "enable_thinking": false,
@@ -475,13 +574,15 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_llm_prompt"
                 },
                 "vlm_module": {
                     "vlm": {
-                        "name": "qwen3-vl-plus"
+                        "name": "qwen3-vl-plus",
+                        "client_model_type": ""
                     },
                     "prompt_name": "citywalk_vlm_prompt",
                     "enable_thinking": false,
@@ -520,7 +621,8 @@
                         "name": "dsv4-flash",
                         "enable_thinking": false,
                         "use_json": false,
-                        "params": {}
+                        "params": {},
+                        "client_model_type": ""
                     },
                     "prompt_name": "song_knowledge_crawler_prompt"
                 }
@@ -564,18 +666,22 @@
             },
             "bili_cookie_file": "config/bili_cookie.txt",
             "llm_module": {
+                "label": "B站动态解析",
                 "llm": {
                     "name": "dsv4-flash",
                     "enable_thinking": false,
                     "use_json": true,
-                    "params": {}
+                    "params": {},
+                    "client_model_type": ""
                 },
                 "prompt_name": "bili_dynamic_fetcher_prompt"
             },
             "vlm_module": {
+                "label": "B站动态解析",
                 "vlm": {
                     "name": "qwen3-vl-plus",
-                    "use_json": true
+                    "use_json": true,
+                    "client_model_type": ""
                 },
                 "prompt_name": "bili_dynamic_fetcher_prompt",
                 "enable_thinking": false,
@@ -596,7 +702,7 @@
             "clock_config": {
                 "type": "interval",
                 "params": {
-                    "interval_seconds": 600,
+                    "interval_seconds": 240,
                     "run_immediately": false
                 }
             },

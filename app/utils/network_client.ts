@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
 import { addDebugTrace } from './debug_trace';
+import { compressImageForUpload, MAX_IMAGE_FILE_SIZE_BYTES } from './image_compression';
 import { WebSocketTransport } from './ws_transport';
 
 interface SendResult {
@@ -14,6 +15,9 @@ interface ConnectCallbacks {
   onAgentMessage: (payload: AgentMessagePayload) => void;
   onAgentStateChanged: (state: string) => void;
   onError: (errorText: string) => void;
+
+  onLlmRequest?: (payload: Record<string, unknown>) => Promise<Record<string, unknown> | null>;
+  getLlmMode?: () => Promise<{ types: string[] }>;
 }
 
 function sanitizeBase64(input: string) {
@@ -65,15 +69,56 @@ export class NetworkClient {
     }
 
     try {
-      addDebugTrace('network', 'sendImage read file', { imageUri, mimeType });
-      const imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
+      let uploadUri = imageUri;
+      let uploadMimeType = mimeType;
+      let originalSize: number | undefined;
+      try {
+        const imageInfo = await FileSystem.getInfoAsync(imageUri);
+        originalSize = imageInfo.exists && typeof imageInfo.size === 'number' ? imageInfo.size : undefined;
+      } catch {
+        // Metadata can be unavailable even when the URI remains readable.
+        addDebugTrace('network', 'sendImage file size unavailable', { imageUri });
+      }
+
+      if (originalSize !== undefined && originalSize > MAX_IMAGE_FILE_SIZE_BYTES) {
+        addDebugTrace('network', 'sendImage compression started', { imageUri, mimeType, originalSize });
+        const compressedImage = await compressImageForUpload(imageUri, mimeType);
+        if (!compressedImage.ok || compressedImage.size === undefined || compressedImage.size > MAX_IMAGE_FILE_SIZE_BYTES) {
+          addDebugTrace('network', 'sendImage compression failed', {
+            imageUri,
+            originalSize,
+            reason: compressedImage.ok ? 'compressed size unavailable or over limit' : compressedImage.reason,
+          });
+          return {
+            ok: false,
+            request_id: clientMsgId || `local-${Date.now()}`,
+            error: '图片过大（上限约 6 MB），请选择更小的图片',
+            drop: true,
+          };
+        }
+        uploadUri = compressedImage.uri;
+        uploadMimeType = compressedImage.mimeType;
+        addDebugTrace('network', 'sendImage compression completed', {
+          originalSize,
+          compressedSize: compressedImage.size,
+          uploadUri,
+          uploadMimeType,
+        });
+      }
+
+      addDebugTrace('network', 'sendImage read file', {
+        imageUri: uploadUri,
+        mimeType: uploadMimeType,
+        originalSize,
+      });
+      const imageBase64 = await FileSystem.readAsStringAsync(uploadUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
       return this.transport.submitUserImage(
         sanitizeBase64(imageBase64),
-        mimeType,
-        imageUri,
+        uploadMimeType,
+        uploadUri,
         10000,
         clientMsgId,
       );

@@ -23,6 +23,7 @@ import {
   DynamicCommentListResponse,
   DynamicPost,
   getDynamicComments,
+  getDynamicSourceLabel,
   getDynamics,
   markDynamicsRead,
 } from '../utils/dynamics';
@@ -77,21 +78,6 @@ function getAuthorAvatarSource(authorType: string) {
     return USER_ICON;
   }
   return null;
-}
-
-function getSourceLabel(sourceType: string) {
-  switch (sourceType) {
-    case 'citywalk':
-      return '城市漫步';
-    case 'song_learned':
-      return '学会新歌';
-    case 'system_notice':
-      return '系统通知';
-    case 'user_post':
-      return '生活动态';
-    default:
-      return sourceType || '动态';
-  }
 }
 
 function getReplyStatusText(post: DynamicPost) {
@@ -508,7 +494,7 @@ export default function DynamicsScreen({
             )}
             <View style={styles.authorMeta}>
               <Text style={[styles.authorNameText, { color: theme.text }]}>{item.author_name}</Text>
-              <Text style={[styles.sourceText, { color: theme.textMuted }]}>{getSourceLabel(item.source_type)}</Text>
+              <Text style={[styles.sourceText, { color: theme.textMuted }]}>{getDynamicSourceLabel(item.source_type)}</Text>
             </View>
           </View>
           <Text style={[styles.timeText, { color: theme.textMuted }]}>{item.created_at || ''}</Text>

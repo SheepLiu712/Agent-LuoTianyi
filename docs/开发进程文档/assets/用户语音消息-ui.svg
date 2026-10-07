@@ -1,0 +1,152 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="930" viewBox="0 0 1500 930" role="img" aria-labelledby="title desc">
+  <title id="title">用户语音消息手机客户端交互状态图</title>
+  <desc id="desc">依次展示文字输入、语音待录、录音发送、上滑取消四种状态，并标注语音条尺寸规则。</desc>
+  <defs>
+    <style>
+      .canvas { fill: #f5f6f8; }
+      .phone { fill: #ffffff; stroke: #1f2937; stroke-width: 3; }
+      .screen { fill: #f8fafc; }
+      .toolbar { fill: #20242b; }
+      .field { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.5; }
+      .bubble-user { fill: #d8eafd; }
+      .bubble-agent { fill: #ffffff; stroke: #dbe2ea; stroke-width: 1; }
+      .voice-ready { fill: #e7e9ed; }
+      .voice-pressed { fill: #d8dce2; }
+      .voice-cancel { fill: #cdd2d9; }
+      .primary { fill: #2f6feb; }
+      .muted { fill: #667085; }
+      .ink { fill: #101828; }
+      .inverse { fill: #ffffff; }
+      .label { font: 500 20px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+      .body { font: 400 16px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+      .small { font: 400 14px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+      .caption { font: 400 13px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; }
+      .round { stroke-linecap: round; stroke-linejoin: round; }
+    </style>
+    <clipPath id="screen-a"><rect x="50" y="92" width="310" height="620" rx="28"/></clipPath>
+    <clipPath id="screen-b"><rect x="410" y="92" width="310" height="620" rx="28"/></clipPath>
+    <clipPath id="screen-c"><rect x="770" y="92" width="310" height="620" rx="28"/></clipPath>
+    <clipPath id="screen-d"><rect x="1130" y="92" width="310" height="620" rx="28"/></clipPath>
+  </defs>
+
+  <rect class="canvas" width="1500" height="930"/>
+  <text x="40" y="44" class="label ink">手机客户端语音消息：关键交互状态</text>
+  <text x="40" y="70" class="body muted">底部输入栏始终可见；录音时仅 Live2D 与历史区域覆盖约 55% 黑色遮罩。</text>
+
+  <!-- State A: text mode -->
+  <text x="205" y="112" text-anchor="middle" class="label ink">A · 文字模式</text>
+  <rect x="50" y="122" width="310" height="620" rx="28" class="phone"/>
+  <g clip-path="url(#screen-a)" transform="translate(0 30)">
+    <rect x="50" y="92" width="310" height="620" class="screen"/>
+    <rect x="50" y="92" width="310" height="46" class="toolbar"/>
+    <text x="205" y="122" text-anchor="middle" class="body inverse">洛天依</text>
+    <circle cx="205" cy="235" r="72" fill="#e6e9ee"/>
+    <path d="M178 252 Q205 270 232 252" fill="none" stroke="#8a94a4" stroke-width="4" class="round"/>
+    <circle cx="184" cy="225" r="4" fill="#8a94a4"/><circle cx="226" cy="225" r="4" fill="#8a94a4"/>
+    <rect x="72" y="343" width="158" height="46" rx="16" class="bubble-agent"/>
+    <text x="88" y="372" class="small ink">今天想聊些什么？</text>
+    <circle cx="150" cy="444" r="8" fill="#ffffff" stroke="#98a2b3"/>
+    <path d="M146 444 L149 447 L155 440" fill="none" stroke="#667085" stroke-width="1.6" class="round"/>
+    <circle cx="178" cy="444" r="18" fill="#ffffff" stroke="#ccd5df"/>
+    <polygon points="173,435 173,453 187,444" fill="#1f2937"/>
+    <rect x="204" y="423" width="136" height="42" rx="18" class="bubble-user"/>
+    <text x="222" y="450" class="body ink">15''</text>
+    <circle cx="300" cy="444" r="3" fill="#1f2937"/>
+    <path d="M306 438 A8 8 0 0 1 306 450 M311 433 A14 14 0 0 1 311 455 M316 428 A20 20 0 0 1 316 460" fill="none" stroke="#1f2937" stroke-width="2" class="round"/>
+    <rect x="50" y="624" width="310" height="88" fill="#eef1f5"/>
+    <circle cx="78" cy="666" r="20" fill="#ffffff"/>
+    <path d="M73 655 Q78 650 83 655 L83 668 Q78 676 73 668 Z M69 666 Q69 678 78 678 Q87 678 87 666 M78 678 L78 684" fill="none" stroke="#20242b" stroke-width="2.3" class="round"/>
+    <rect x="106" y="644" width="170" height="44" rx="18" class="field"/>
+    <text x="124" y="672" class="small muted">输入消息</text>
+    <rect x="286" y="648" width="34" height="34" rx="9" fill="#ffffff"/>
+    <circle cx="303" cy="665" r="8" fill="none" stroke="#20242b" stroke-width="2"/>
+    <path d="M296 672 L310 658" stroke="#20242b" stroke-width="2"/>
+    <circle cx="338" cy="666" r="20" class="primary"/>
+    <path d="M330 666 H346 M340 660 L346 666 L340 672" fill="none" stroke="#ffffff" stroke-width="2" class="round"/>
+  </g>
+
+  <!-- State B: voice ready -->
+  <text x="565" y="112" text-anchor="middle" class="label ink">B · 语音待录</text>
+  <rect x="410" y="122" width="310" height="620" rx="28" class="phone"/>
+  <g clip-path="url(#screen-b)" transform="translate(0 30)">
+    <rect x="410" y="92" width="310" height="620" class="screen"/>
+    <rect x="410" y="92" width="310" height="46" class="toolbar"/>
+    <text x="565" y="122" text-anchor="middle" class="body inverse">洛天依</text>
+    <circle cx="565" cy="235" r="72" fill="#e6e9ee"/>
+    <path d="M538 252 Q565 270 592 252" fill="none" stroke="#8a94a4" stroke-width="4" class="round"/>
+    <circle cx="544" cy="225" r="4" fill="#8a94a4"/><circle cx="586" cy="225" r="4" fill="#8a94a4"/>
+    <rect x="432" y="343" width="158" height="46" rx="16" class="bubble-agent"/>
+    <text x="448" y="372" class="small ink">今天想聊些什么？</text>
+    <rect x="410" y="624" width="310" height="88" fill="#eef1f5"/>
+    <circle cx="438" cy="666" r="20" fill="#ffffff"/>
+    <rect x="429" y="658" width="18" height="14" rx="2" fill="none" stroke="#20242b" stroke-width="2"/>
+    <path d="M433 662 V666 M438 662 V666 M443 662 V666 M433 670 H443" stroke="#20242b" stroke-width="1.6" class="round"/>
+    <rect x="466" y="644" width="202" height="44" rx="18" class="voice-ready"/>
+    <text x="567" y="672" text-anchor="middle" class="body ink">按住说话</text>
+    <rect x="678" y="648" width="34" height="34" rx="9" fill="#ffffff"/>
+    <circle cx="695" cy="665" r="8" fill="none" stroke="#20242b" stroke-width="2"/>
+    <path d="M688 672 L702 658" stroke="#20242b" stroke-width="2"/>
+  </g>
+  <text x="565" y="770" text-anchor="middle" class="caption muted">保留文字草稿 · 隐藏发送按钮 · 图片按钮保留</text>
+
+  <!-- State C: recording -->
+  <text x="925" y="112" text-anchor="middle" class="label ink">C · 录音并准备发送</text>
+  <rect x="770" y="122" width="310" height="620" rx="28" class="phone"/>
+  <g clip-path="url(#screen-c)" transform="translate(0 30)">
+    <rect x="770" y="92" width="310" height="620" class="screen"/>
+    <rect x="770" y="92" width="310" height="46" class="toolbar"/>
+    <text x="925" y="122" text-anchor="middle" class="body inverse">洛天依</text>
+    <circle cx="925" cy="235" r="72" fill="#e6e9ee"/>
+    <rect x="792" y="343" width="158" height="46" rx="16" class="bubble-agent"/>
+    <rect x="770" y="138" width="310" height="486" fill="#000000" opacity="0.55"/>
+    <text x="925" y="438" text-anchor="middle" class="body inverse">上滑取消发送</text>
+    <text x="925" y="468" text-anchor="middle" class="small inverse">12'' / 30''</text>
+    <circle cx="925" cy="554" r="28" fill="none" stroke="#6ea8ff" stroke-width="5" opacity="0.9"/>
+    <circle cx="925" cy="554" r="45" fill="none" stroke="#6ea8ff" stroke-width="4" opacity="0.58"/>
+    <circle cx="925" cy="554" r="62" fill="none" stroke="#6ea8ff" stroke-width="3" opacity="0.32"/>
+    <rect x="770" y="624" width="310" height="88" fill="#eef1f5"/>
+    <circle cx="798" cy="666" r="20" fill="#ffffff"/>
+    <rect x="789" y="658" width="18" height="14" rx="2" fill="none" stroke="#20242b" stroke-width="2"/>
+    <rect x="826" y="644" width="202" height="44" rx="18" class="voice-pressed"/>
+    <text x="927" y="672" text-anchor="middle" class="body ink">松开发送</text>
+    <rect x="1038" y="648" width="34" height="34" rx="9" fill="#ffffff"/>
+  </g>
+  <text x="925" y="770" text-anchor="middle" class="caption muted">音量每约 80 ms 平滑更新三层波纹</text>
+
+  <!-- State D: cancel zone -->
+  <text x="1285" y="112" text-anchor="middle" class="label ink">D · 上滑取消区</text>
+  <rect x="1130" y="122" width="310" height="620" rx="28" class="phone"/>
+  <g clip-path="url(#screen-d)" transform="translate(0 30)">
+    <rect x="1130" y="92" width="310" height="620" class="screen"/>
+    <rect x="1130" y="92" width="310" height="46" class="toolbar"/>
+    <text x="1285" y="122" text-anchor="middle" class="body inverse">洛天依</text>
+    <circle cx="1285" cy="235" r="72" fill="#e6e9ee"/>
+    <rect x="1152" y="343" width="158" height="46" rx="16" class="bubble-agent"/>
+    <rect x="1130" y="138" width="310" height="486" fill="#000000" opacity="0.55"/>
+    <text x="1285" y="438" text-anchor="middle" class="body inverse">松开取消发送</text>
+    <text x="1285" y="468" text-anchor="middle" class="small inverse">12'' / 30''</text>
+    <path d="M1285 575 V505 M1274 516 L1285 505 L1296 516" fill="none" stroke="#f4f5f7" stroke-width="5" class="round"/>
+    <line x1="1218" y1="506" x2="1352" y2="506" stroke="#f4f5f7" stroke-width="2" stroke-dasharray="7 7"/>
+    <rect x="1130" y="624" width="310" height="88" fill="#eef1f5"/>
+    <circle cx="1158" cy="666" r="20" fill="#ffffff"/>
+    <rect x="1149" y="658" width="18" height="14" rx="2" fill="none" stroke="#20242b" stroke-width="2"/>
+    <rect x="1186" y="644" width="202" height="44" rx="18" class="voice-cancel"/>
+    <text x="1287" y="672" text-anchor="middle" class="body ink">松开取消</text>
+    <rect x="1398" y="648" width="34" height="34" rx="9" fill="#ffffff"/>
+  </g>
+  <text x="1285" y="770" text-anchor="middle" class="caption muted">上滑 ≥ 80 dp 进入；仅用文案与中性灰区分</text>
+
+  <!-- Component dimensions -->
+  <rect x="40" y="805" width="1420" height="112" rx="18" fill="#ffffff" stroke="#d9e0e8"/>
+  <text x="66" y="838" class="body ink">语音条规格</text>
+  <circle cx="88" cy="872" r="19" fill="#ffffff" stroke="#cbd5e1"/>
+  <polygon points="83,863 83,881 97,872" fill="#20242b"/>
+  <rect x="120" y="850" width="153" height="44" rx="18" class="bubble-user"/>
+  <text x="138" y="878" class="body ink">15''</text>
+  <circle cx="220" cy="872" r="3" fill="#1f2937"/>
+  <path d="M226 866 A8 8 0 0 1 226 878 M231 861 A14 14 0 0 1 231 883 M236 856 A20 20 0 0 1 236 888" fill="none" stroke="#1f2937" stroke-width="2" class="round"/>
+  <text x="304" y="867" class="small ink">顺序：发送状态 → 播放/停止 → 语音气泡</text>
+  <text x="304" y="891" class="small muted">气泡内时长在左、音频图标在右；宽度 1 秒 76 dp，30 秒 200 dp</text>
+  <text x="930" y="867" class="small ink">时长显示：0.5–1.0 秒记 1''；其余向上取整，最大 30''</text>
+  <text x="930" y="891" class="small muted">仅点击播放才下载；同一时刻只播放一条；播放中图标变为停止方块</text>
+</svg>

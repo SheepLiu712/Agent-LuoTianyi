@@ -86,7 +86,7 @@ class LoginDialog(QDialog):
         self.l_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 5px;"
             " background-color: #44BBEE; color: white; border-radius: 5px; }"
-            " QPushButton:hover { background-color: #66ccff; }"
+            " QPushButton:hover { background-color: #66CCFF; }"
         )
 
         self.reset_btn = QPushButton("重置账号")
@@ -147,7 +147,7 @@ class LoginDialog(QDialog):
         self.r_btn.setStyleSheet(
             "QPushButton { font-size: 16px; padding: 5px;"
             " background-color: #44BBEE; color: white; border-radius: 5px; }"
-            " QPushButton:hover { background-color: #66ccff; }"
+            " QPushButton:hover { background-color: #66CCFF; }"
         )
 
         layout.addWidget(self.r_username)

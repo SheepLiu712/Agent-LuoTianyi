@@ -101,15 +101,80 @@ type ModuleBinding = {
   prompt_name?: string;
   enable_thinking?: boolean;
   use_json?: boolean;
+  client_model_type?: string;
   params?: Record<string, unknown>;
   params_text?: string;
+};
+
+type ClientModelType = {
+  id: string;
+  name: string;
+  description: string;
+  model_kind: 'llm' | 'vlm';
+  requires_json: boolean;
+  requires_thinking: boolean;
 };
 
 type LlmConfigInfo = {
   available_llms: Record<string, LlmInterfaceConfig>;
   available_vlms: Record<string, LlmInterfaceConfig>;
+  client_model_types: ClientModelType[];
   module_bindings: ModuleBinding[];
 };
+
+function validateClientModelTypes(
+  types: ClientModelType[],
+  bindings: ModuleBinding[],
+): string[] {
+  const errors: string[] = [];
+  const safeTypes = types || [];
+  if (safeTypes.length === 0) {
+    errors.push('客户端模型需求至少需要一个类型');
+  }
+  const typeIds = new Set<string>();
+  const requirements = new Map<string, ClientModelType>();
+  safeTypes.forEach((typeItem, tIndex) => {
+    const typeId = (typeItem.id || '').trim();
+    const name = (typeItem.name || '').trim();
+    if (!typeId) {
+      errors.push(`第 ${tIndex + 1} 个类型：稳定 ID 必须填写`);
+      return;
+    }
+    if (typeIds.has(typeId)) {
+      errors.push(`类型 ID「${typeId}」重复`);
+      return;
+    }
+    typeIds.add(typeId);
+    requirements.set(typeId, typeItem);
+    if (!name) {
+      errors.push(`类型「${typeId}」缺少显示名称`);
+    }
+    if (typeItem.model_kind !== 'llm' && typeItem.model_kind !== 'vlm') {
+      errors.push(`类型「${typeId}」的模型类型必须是 LLM 或 VLM`);
+    }
+  });
+  (bindings || []).forEach((binding) => {
+    const boundType = (binding.client_model_type || '').trim();
+    const requirement = requirements.get(boundType);
+    if (boundType && !requirement) {
+      errors.push(
+        `模块绑定 ${binding.kind.toUpperCase()} ${binding.path} 引用了不存在的客户端类型：${boundType}`,
+      );
+      return;
+    }
+    if (!requirement) return;
+    if (requirement.model_kind !== binding.kind) {
+      errors.push(`模块绑定 ${binding.path} 与客户端类型 ${boundType} 的 LLM/VLM 类型不一致`);
+    }
+    if (binding.use_json && !requirement.requires_json) {
+      errors.push(`模块绑定 ${binding.path} 要求 JSON，但客户端类型 ${boundType} 未声明`);
+    }
+    if (binding.enable_thinking && !requirement.requires_thinking) {
+      errors.push(`模块绑定 ${binding.path} 要求 thinking，但客户端类型 ${boundType} 未声明`);
+    }
+  });
+  return errors;
+}
 
 type LlmCall = {
   id: number;
@@ -174,32 +239,6 @@ type TraceDetail = {
   llm_calls: LlmCall[];
 };
 
-type MemoryTraceSummary = {
-  window_days: number;
-  totals: Record<string, number>;
-  by_type: Array<Record<string, string | number | null>>;
-};
-
-type MemoryTraceEvent = {
-  id: number;
-  ts: string;
-  trace_id?: string;
-  user_id?: string;
-  topic_id?: string;
-  event_type: string;
-  item_type: string;
-  command_text?: string;
-  content_text?: string;
-  source_context?: string;
-  result?: Record<string, unknown>;
-  duration_ms: number;
-  annotation_required: boolean;
-  annotation_label?: string;
-  annotation_notes?: string;
-  annotation_updated_at?: string;
-  metadata?: Record<string, unknown>;
-};
-
 type DynamicAdminPost = {
   id: string;
   author_type: string;
@@ -244,19 +283,7 @@ type DynamicAdminComment = {
   cursor?: string;
 };
 
-type MemoryTraceTab = {
-  id: string;
-  label: string;
-  eventTypes: string[];
-  description: string;
-  contextLabel: string;
-  commandLabel: string;
-  contentLabel: string;
-  resultLabel: string;
-  labels: Array<{ label: string; text: string }>;
-};
-
-type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'memory' | 'dynamics' | 'invite_codes' | 'config' | 'logs';
+type Page = 'dashboard' | 'llm' | 'pipeline' | 'traces' | 'dynamics' | 'invite_codes' | 'config' | 'logs';
 
 type LlmStatsTab = {
   id: 'seven_days' | 'one_day' | 'recent';
@@ -318,105 +345,6 @@ const llmChartMetrics: LlmChartMetric[] = [
   { id: 'avg_completion_tokens', label: '平均 Completion', field: 'avg_completion_tokens', format: 'number' },
   { id: 'avg_latency_ms', label: '平均耗时', field: 'avg_latency_ms', format: 'ms' },
   { id: 'failed_calls', label: '失败次数', field: 'failed_calls', format: 'number' },
-];
-
-const memoryTraceTabs: MemoryTraceTab[] = [
-  {
-    id: 'memory_command',
-    label: '记忆检索命令',
-    eventTypes: ['memory_command'],
-    description: '查看 TopicExtractor 在什么上下文下生成了哪些记忆检索 query。重点判断 query 是否覆盖当前会话需要的长期信息。',
-    contextLabel: '输入上下文',
-    commandLabel: '检索 query',
-    contentLabel: '话题摘要',
-    resultLabel: '调试信息',
-    labels: [
-      { label: 'good_query', text: '好查询' },
-      { label: 'too_broad', text: '过宽' },
-      { label: 'too_narrow', text: '过窄' },
-      { label: 'missing_query', text: '漏查' },
-    ],
-  },
-  {
-    id: 'memory_recall',
-    label: '记忆召回',
-    eventTypes: ['memory_recall'],
-    description: '查看每条 query 召回了哪条记忆、相似度和来源。重点判断这条记忆对本轮回复是否有帮助。',
-    contextLabel: '话题上下文',
-    commandLabel: '检索 query',
-    contentLabel: '召回记忆',
-    resultLabel: '召回元数据',
-    labels: [
-      { label: 'useful', text: '有用' },
-      { label: 'not_useful', text: '无用' },
-      { label: 'wrong_memory', text: '错召回' },
-      { label: 'no_hit_should_hit', text: '应召未召' },
-    ],
-  },
-  {
-    id: 'memory_write',
-    label: '记忆写入',
-    eventTypes: ['memory_write', 'memory_write_extraction'],
-    description: '查看当前对话被抽取成了哪些候选记忆，以及最终写入/跳过状态。重点判断新记忆是否值得长期保存。',
-    contextLabel: '写入依据',
-    commandLabel: '抽取命令',
-    contentLabel: '候选/写入记忆',
-    resultLabel: '写入状态',
-    labels: [
-      { label: 'reasonable', text: '合理' },
-      { label: 'unreasonable', text: '不合理' },
-      { label: 'too_trivial', text: '太琐碎' },
-      { label: 'should_merge', text: '应合并' },
-    ],
-  },
-  {
-    id: 'user_profile_update',
-    label: '用户画像',
-    eventTypes: ['user_profile_update'],
-    description: '查看长期上下文如何更新用户画像。重点判断画像是否准确、稳定，是否把短期状态误写成长期特征。',
-    contextLabel: '画像依据',
-    commandLabel: '更新意图',
-    contentLabel: '新用户画像',
-    resultLabel: '旧/新画像',
-    labels: [
-      { label: 'accurate', text: '准确' },
-      { label: 'inaccurate', text: '不准确' },
-      { label: 'overfit', text: '过拟合' },
-      { label: 'missed_update', text: '漏更新' },
-    ],
-  },
-  {
-    id: 'fact_command',
-    label: '事实命令',
-    eventTypes: ['fact_command', 'fact_result'],
-    description: '查看模型生成的事实检索命令和确定性事实结果。事实结果本身不要求标注，重点标注命令是否应该检索。',
-    contextLabel: '输入上下文',
-    commandLabel: '事实命令',
-    contentLabel: '事实结果/话题',
-    resultLabel: '结果元数据',
-    labels: [
-      { label: 'needed', text: '需要' },
-      { label: 'unneeded', text: '多余' },
-      { label: 'wrong_target', text: '目标错误' },
-      { label: 'missing_fact', text: '漏事实' },
-    ],
-  },
-  {
-    id: 'sing_command',
-    label: '唱歌尝试',
-    eventTypes: ['sing_command', 'sing_result'],
-    description: '查看模型识别出的唱歌尝试和确定性选段结果。选段不要求标注，重点判断唱歌意图识别是否正确。',
-    contextLabel: '输入上下文',
-    commandLabel: '唱歌尝试',
-    contentLabel: '选歌/选段结果',
-    resultLabel: '规划元数据',
-    labels: [
-      { label: 'correct_intent', text: '意图正确' },
-      { label: 'wrong_intent', text: '意图错误' },
-      { label: 'wrong_song', text: '歌名错误' },
-      { label: 'missed_sing', text: '漏识别' },
-    ],
-  },
 ];
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -643,7 +571,6 @@ function App({ onLogout }: { onLogout: () => void }) {
           <button className={page === 'llm' ? 'active' : ''} onClick={() => setPage('llm')}>LLM 统计</button>
           <button className={page === 'pipeline' ? 'active' : ''} onClick={() => setPage('pipeline')}>链路耗时</button>
           <button className={page === 'traces' ? 'active' : ''} onClick={() => setPage('traces')}>链路追踪</button>
-          <button className={page === 'memory' ? 'active' : ''} onClick={() => setPage('memory')}>记忆追踪</button>
           <button className={page === 'dynamics' ? 'active' : ''} onClick={() => setPage('dynamics')}>动态管理</button>
           <button className={page === 'config' ? 'active' : ''} onClick={() => setPage('config')}>服务配置</button>
           <button className={page === 'invite_codes' ? 'active' : ''} onClick={() => setPage('invite_codes')}>邀请码管理</button>
@@ -656,7 +583,6 @@ function App({ onLogout }: { onLogout: () => void }) {
         {page === 'llm' && <LlmPage />}
         {page === 'pipeline' && <PipelinePage />}
         {page === 'traces' && <TracePage />}
-        {page === 'memory' && <MemoryTracePage />}
         {page === 'dynamics' && <DynamicsPage />}
         {page === 'invite_codes' && <InviteCodesPage />}
         {page === 'config' && <ConfigPage />}
@@ -1094,116 +1020,6 @@ function TracePage() {
   );
 }
 
-function MemoryTracePage() {
-  const [traceQuery, setTraceQuery] = useState('');
-  const [activeTabId, setActiveTabId] = useState(memoryTraceTabs[0].id);
-  const [annotationState, setAnnotationState] = useState('');
-  const [refreshNonce, setRefreshNonce] = useState(0);
-  const activeTab = memoryTraceTabs.find((tab) => tab.id === activeTabId) || memoryTraceTabs[0];
-  const query = new URLSearchParams({
-    days: '7',
-    limit: '200',
-    ...(traceQuery.trim() ? { trace_id: traceQuery.trim() } : {}),
-    event_type: activeTab.eventTypes.join(','),
-    ...(annotationState ? { annotation_state: annotationState } : {}),
-    r: String(refreshNonce),
-  });
-  const { data: summary, error: summaryError, loading: summaryLoading } = usePolling<MemoryTraceSummary>('/admin/api/memory/summary?days=7');
-  const { data, error, loading } = usePolling<MemoryTraceEvent[]>(`/admin/api/memory/events?${query.toString()}`);
-  const visibleEvents = useMemo(() => {
-    return (data || []).filter((event) => activeTab.eventTypes.includes(event.event_type));
-  }, [activeTab, data]);
-  const totals = summary?.totals || {};
-  const typeRows = useMemo(() => {
-    return (summary?.by_type || []).filter((row) => activeTab.eventTypes.includes(String(row.event_type || '')));
-  }, [activeTab, summary]);
-
-  async function annotate(eventId: number, label: string, notes?: string) {
-    await postJson(`/admin/api/memory/events/${eventId}/annotation`, {
-      label,
-      notes,
-      annotator: 'console',
-    });
-    setRefreshNonce((value) => value + 1);
-  }
-
-  return (
-    <>
-      <PageHeader title="记忆追踪" subtitle="查看记忆召回、记忆写入、用户画像更新、事实命令和唱歌尝试，并进行人工标注" />
-      <StatusBar loading={summaryLoading || loading} error={summaryError || error} />
-      <section className="metric-grid">
-        <MetricCard title="事件总数" value={formatNumber(totals.event_count)} detail="最近 7 日" />
-        <MetricCard title="需要标注" value={formatNumber(totals.annotation_required_count)} detail="召回、写入、画像、命令" />
-        <MetricCard title="待标注" value={formatNumber(totals.pending_annotation_count)} detail="当前筛查重点" tone={totals.pending_annotation_count ? 'warning' : undefined} />
-        <MetricCard title="已标注" value={formatNumber(totals.annotated_count)} detail="人工反馈样本" />
-      </section>
-      <Panel title="筛选">
-        <div className="memory-tabs">
-          {memoryTraceTabs.map((tab) => (
-            <button
-              key={tab.id}
-              className={tab.id === activeTab.id ? 'active' : ''}
-              onClick={() => setActiveTabId(tab.id)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div className="filter-row memory-filter-row">
-          <input value={traceQuery} onChange={(event) => setTraceQuery(event.target.value)} placeholder="trace_id" />
-          <select value={annotationState} onChange={(event) => setAnnotationState(event.target.value)}>
-            <option value="">全部标注状态</option>
-            <option value="pending">待标注</option>
-            <option value="annotated">已标注</option>
-          </select>
-        </div>
-      </Panel>
-      <section className="two-column">
-        <Panel title={activeTab.label}>
-          <div className="behavior-note">{activeTab.description}</div>
-          <table>
-            <thead>
-              <tr>
-                <th>Event</th>
-                <th>Item</th>
-                <th>Count</th>
-                <th>Pending</th>
-                <th>Avg</th>
-                <th>Max</th>
-              </tr>
-            </thead>
-            <tbody>
-              {typeRows.map((row, index) => (
-                <tr key={index}>
-                  <td>{String(row.event_type || '-')}</td>
-                  <td>{String(row.item_type || '-')}</td>
-                  <td>{formatNumber(Number(row.event_count || 0))}</td>
-                  <td>{formatNumber(Number(row.pending_annotation_count || 0))}</td>
-                  <td>{formatMs(Number(row.avg_duration_ms || 0))}</td>
-                  <td>{formatMs(Number(row.max_duration_ms || 0))}</td>
-                </tr>
-              ))}
-              {typeRows.length === 0 && (
-                <tr>
-                  <td colSpan={6}>暂无该行为的统计</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </Panel>
-        <Panel title={`${activeTab.label}事件`} className="scroll-panel memory-event-panel">
-          <div className="memory-event-list">
-            {visibleEvents.map((event) => (
-              <MemoryEventCard key={event.id} event={event} tab={activeTab} onAnnotate={annotate} />
-            ))}
-            {visibleEvents.length === 0 && <div className="empty-state">没有匹配的{activeTab.label}事件</div>}
-          </div>
-        </Panel>
-      </section>
-    </>
-  );
-}
-
 function DynamicsPage() {
   const [ownerQuery, setOwnerQuery] = useState('');
   const [authorType, setAuthorType] = useState('');
@@ -1386,6 +1202,7 @@ function DynamicsPage() {
             <option value="">全部来源</option>
             <option value="user_post">用户动态</option>
             <option value="citywalk">城市漫步</option>
+            <option value="diary">天依日记</option>
             <option value="song_learned">学歌完成</option>
             <option value="system_notice">系统通知</option>
           </select>
@@ -1622,9 +1439,9 @@ function InviteCodesPage() {
       <section className="metric-grid">
         <MetricCard title="当前列表" value={formatNumber(rows.length)} detail={data?.total !== undefined ? `共 ${formatNumber(data.total)} 条` : '当前页'} />
         <MetricCard title="未使用" value={formatNumber(unusedCount)} detail="尚未绑定用户" />
-        <MetricCard title="可使用" value={formatNumber(availableCount)} detail="可用于注册" />
+        <MetricCard title="可注册" value={formatNumber(availableCount)} detail="未使用且未禁用" />
         <MetricCard title="已使用" value={formatNumber(usedCount)} detail="已绑定用户" />
-        <MetricCard title="已禁用" value={formatNumber(disabledCount)} detail="不可注册" tone={disabledCount ? 'warning' : undefined} />
+        <MetricCard title="已禁用" value={formatNumber(disabledCount)} detail="不可注册或重置" tone={disabledCount ? 'warning' : undefined} />
       </section>
 
       <Panel title="生成邀请码">
@@ -1663,7 +1480,7 @@ function InviteCodesPage() {
         <div className="filter-row">
           <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="">全部状态</option>
-            <option value="unused">可使用</option>
+            <option value="unused">可注册</option>
             <option value="used">已使用</option>
             <option value="disabled">已禁用</option>
           </select>
@@ -1678,7 +1495,7 @@ function InviteCodesPage() {
               <tr>
                 <th>邀请码</th>
                 <th>使用状态</th>
-                <th>可使用</th>
+                <th>可注册</th>
                 <th>创建时间</th>
                 <th>使用时间</th>
                 <th>使用者</th>
@@ -1921,6 +1738,17 @@ function ConfigPage() {
     if (!llmDraft) {
       return;
     }
+    const clientModelErrors = validateClientModelTypes(
+      llmDraft.client_model_types || [],
+      llmDraft.module_bindings || [],
+    );
+    if (clientModelErrors.length > 0) {
+      const message = `配置未写入：${clientModelErrors[0]}`;
+      setActionError(message);
+      setLlmApplyStatus({ tone: 'error', message });
+      setActionMessage(null);
+      return;
+    }
     setLlmApplying(true);
     setLlmApplyStatus({ tone: 'info', message: '正在写入配置并校验，必要时会重启 runtime...' });
     try {
@@ -2018,6 +1846,9 @@ function ConfigPage() {
       <Panel title="LLM Interfaces">
         <LlmInterfacesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
       </Panel>
+      <Panel title="客户端模型需求">
+        <ClientModelTypesDraftEditor draft={llmDraft} onChange={setLlmDraft} />
+      </Panel>
       <Panel title="LLMModule / VLMModule 绑定">
         <LlmModuleBindingDraftEditor
           draft={llmDraft}
@@ -2059,6 +1890,116 @@ function LlmInterfacesDraftEditor({
   );
 }
 
+function ClientModelTypesDraftEditor({
+  draft,
+  onChange,
+}: {
+  draft: LlmConfigInfo | null;
+  onChange: (draft: LlmConfigInfo) => void;
+}) {
+  if (!draft) {
+    return <div className="empty-state">暂无客户端模型配置</div>;
+  }
+  const currentDraft = draft;
+  const types = currentDraft.client_model_types || [];
+
+  function updateTypes(next: ClientModelType[]) {
+    onChange({ ...currentDraft, client_model_types: next });
+  }
+
+  function updateType(index: number, patch: Partial<ClientModelType>) {
+    updateTypes(types.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  }
+
+  function addType() {
+    updateTypes([
+      ...types,
+      {
+        id: '',
+        name: '',
+        description: '',
+        model_kind: 'llm',
+        requires_json: false,
+        requires_thinking: false,
+      },
+    ]);
+  }
+
+  function removeType(index: number) {
+    updateTypes(types.filter((_, i) => i !== index));
+  }
+
+  return (
+    <div className="interface-editor">
+      <div className="editor-head">
+        <h3>客户端模型需求</h3>
+        <button onClick={addType}>新增类型</button>
+      </div>
+      {types.map((typeItem, tIndex) => (
+        <div className="interface-card" key={`type-${tIndex}`}>
+          <div className="client-type-row">
+            <input
+              value={typeItem.id}
+              onChange={(event) => updateType(tIndex, { id: event.target.value })}
+              placeholder="稳定 ID，例如 main_chat"
+            />
+            <input
+              value={typeItem.name}
+              onChange={(event) => updateType(tIndex, { name: event.target.value })}
+              placeholder="客户端显示名称"
+            />
+            <input
+              value={typeItem.description || ''}
+              onChange={(event) =>
+                updateType(tIndex, { description: event.target.value })
+              }
+              placeholder="填写说明（可选）"
+            />
+            <button className="danger-button" onClick={() => removeType(tIndex)}>
+              删除类型
+            </button>
+          </div>
+          <div className="interface-flags">
+            <label>
+              模型类型
+              <select
+                value={typeItem.model_kind}
+                onChange={(event) =>
+                  updateType(tIndex, { model_kind: event.target.value as 'llm' | 'vlm' })
+                }
+              >
+                <option value="llm">LLM</option>
+                <option value="vlm">VLM</option>
+              </select>
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={Boolean(typeItem.requires_json)}
+                onChange={(event) => updateType(tIndex, { requires_json: event.target.checked })}
+              />
+              要求 JSON 输出
+            </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={Boolean(typeItem.requires_thinking)}
+                onChange={(event) => updateType(tIndex, { requires_thinking: event.target.checked })}
+              />
+              要求 thinking
+            </label>
+          </div>
+        </div>
+      ))}
+      {types.length === 0 && (
+        <div className="empty-state">
+          暂无客户端模型需求，请新增至少一个类型
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LlmModuleBindingDraftEditor({
   draft,
   onChange,
@@ -2080,6 +2021,9 @@ function LlmModuleBindingDraftEditor({
   const currentDraft = draft;
   const llmNames = Object.keys(currentDraft.available_llms);
   const vlmNames = Object.keys(currentDraft.available_vlms);
+  const clientTypeNames = (currentDraft.client_model_types || []).map(
+    (item) => item.id,
+  );
 
   function updateBindings(next: ModuleBinding[]) {
     onChange({ ...currentDraft, module_bindings: next });
@@ -2087,7 +2031,13 @@ function LlmModuleBindingDraftEditor({
 
   return (
     <div className="llm-config-editor">
-      <ModuleBindingEditor bindings={currentDraft.module_bindings} llmNames={llmNames} vlmNames={vlmNames} onChange={updateBindings} />
+      <ModuleBindingEditor
+        bindings={currentDraft.module_bindings}
+        llmNames={llmNames}
+        vlmNames={vlmNames}
+        clientTypeNames={clientTypeNames}
+        onChange={updateBindings}
+      />
       <div className="action-row">
         <button disabled={applying} onClick={onApply}>{applying ? '修改中...' : '修改'}</button>
         <button className="secondary-button" disabled={applying} onClick={onReload}>放弃草稿</button>
@@ -2192,11 +2142,13 @@ function ModuleBindingEditor({
   bindings,
   llmNames,
   vlmNames,
+  clientTypeNames,
   onChange,
 }: {
   bindings: ModuleBinding[];
   llmNames: string[];
   vlmNames: string[];
+  clientTypeNames: string[];
   onChange: (bindings: ModuleBinding[]) => void;
 }) {
   function updateBinding(index: number, patch: Partial<ModuleBinding>) {
@@ -2224,6 +2176,7 @@ function ModuleBindingEditor({
             <th>Interface</th>
             <th>Thinking</th>
             <th>JSON</th>
+            <th>客户端委托（按类型）</th>
             <th>Params</th>
           </tr>
         </thead>
@@ -2255,6 +2208,21 @@ function ModuleBindingEditor({
                     onChange={(event) => updateBinding(index, { use_json: event.target.checked })}
                   />
                 </td>
+                <td>
+                  <select
+                    value={binding.client_model_type || ''}
+                    onChange={(event) =>
+                      updateBinding(index, { client_model_type: event.target.value })
+                    }
+                  >
+                    <option value="">不委托</option>
+                    {clientTypeNames.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
                 <td className="module-params-cell">
                   <textarea
                     className={binding.params_text !== undefined ? 'json-invalid' : undefined}
@@ -2268,7 +2236,7 @@ function ModuleBindingEditor({
           })}
           {bindings.length === 0 && (
             <tr>
-              <td colSpan={7} className="empty-state">暂无模块绑定</td>
+              <td colSpan={8} className="empty-state">暂无模块绑定</td>
             </tr>
           )}
         </tbody>
@@ -2407,63 +2375,6 @@ function LlmCallTable({ rows }: { rows: LlmCall[] }) {
         ))}
       </tbody>
     </table>
-  );
-}
-
-function MemoryEventCard({
-  event,
-  tab,
-  onAnnotate,
-}: {
-  event: MemoryTraceEvent;
-  tab: MemoryTraceTab;
-  onAnnotate: (eventId: number, label: string, notes?: string) => Promise<void>;
-}) {
-  const [notes, setNotes] = useState(event.annotation_notes || '');
-  const [saving, setSaving] = useState(false);
-  const resultText = event.result ? JSON.stringify(event.result, null, 2) : '';
-
-  async function submit(label: string) {
-    setSaving(true);
-    try {
-      await onAnnotate(event.id, label, notes);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <article className="memory-event-card">
-      <div className="memory-event-head">
-        <div>
-          <span className="mono">#{event.id}</span>
-          <span className="pill">{event.event_type}</span>
-          <span className="pill">{event.item_type}</span>
-          {event.annotation_required && !event.annotation_label && <span className="pill warning">pending</span>}
-          {event.annotation_label && <span className="pill success">{event.annotation_label}</span>}
-        </div>
-        <div className="mono">{event.trace_id || '-'}</div>
-      </div>
-      <div className="memory-event-grid">
-        <ReadBlock title={tab.contextLabel} value={event.source_context} />
-        <ReadBlock title={tab.commandLabel} value={event.command_text} />
-        <ReadBlock title={tab.contentLabel} value={event.content_text} />
-        <ReadBlock title={tab.resultLabel} value={resultText} />
-      </div>
-      {event.annotation_required ? (
-        <div className="annotation-row">
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="标注意见" />
-          {tab.labels.map((label) => (
-            <button key={label.label} disabled={saving} onClick={() => submit(label.label)}>{label.text}</button>
-          ))}
-        </div>
-      ) : (
-        <div className="memory-event-meta">该事件是确定性结果，仅记录，不要求标注。</div>
-      )}
-      <div className="memory-event-meta">
-        {formatShanghaiTime(event.ts)} · {formatMs(event.duration_ms)} · topic {event.topic_id || '-'}
-      </div>
-    </article>
   );
 }
 

@@ -122,4 +122,21 @@ describe('WebSocketTransport readiness failures', () => {
     expect((ws as any).canReconnectAfterClose()).toBe(true);
     expect((ws as any).reconnectAttempts).toBe(0);
   });
+
+  it('sends an error response when the LLM handler throws', async () => {
+    const send = jest.fn();
+    const ws = transport();
+    (ws as any).ws = { readyState: 1, send };
+    (ws as any).callbacks.onLlmRequest = jest.fn().mockRejectedValue(new Error('SecureStore failed'));
+
+    await (ws as any).handleLlmRequest({ request_id: 'llm-1' });
+
+    expect(JSON.parse(send.mock.calls[0][0])).toMatchObject({
+      type: 'llm_response',
+      payload: {
+        request_id: 'llm-1',
+        error: 'Error: SecureStore failed',
+      },
+    });
+  });
 });

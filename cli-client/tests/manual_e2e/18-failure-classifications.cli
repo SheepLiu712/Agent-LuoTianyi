@@ -1,0 +1,13 @@
+# 使用 --continue-on-failure 运行以收集各独立失败分类。
+# 设置 CLI_E2E_BASE_URL、CLI_E2E_USER、CLI_E2E_PASSWORD 后运行。
+/text "未登录测试"
+/login --timeout 15
+/reply 00000000-0000-4000-8000-000000000000 --timeout 1
+/read-reply 00000000-0000-4000-8000-000000000000
+/audio 00000000-0000-4000-8000-000000000000
+/more 5
+/touch "   "
+/select-image "${CLI_E2E_MISSING_IMAGE}"
+/image "${CLI_E2E_INVALID_IMAGE}"
+/touch 头 --client-msg-id xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+/touch 头 头 头 头 头 头 头 头 头 头 头 头 头 头 头 头 头
