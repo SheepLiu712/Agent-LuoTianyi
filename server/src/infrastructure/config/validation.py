@@ -169,11 +169,9 @@ class RuntimeConfigValidator:
             interfaces = llm_service.get(key, {})
             if not interfaces:
                 if kind == "audio":
-                    # 音频理解是可选能力：未配置接口时不阻断核心校验（与 world 功能「缺失即禁用」一致），
-                    # 但措辞必须与运行期一致——LLMService 不再提供内置默认音频接口（供应商身份必须显式，
-                    # #251），而 AudioUnderstandingSkill 在拿到 media_resolver 时就会构造并调用
-                    # register_audio_model_module：未声明接口即抛错，业务运行时装配失败（管理 Web 仍可用）。
-                    # 因此这里如实说明后果，不承诺「降级」，也不在验证器内合成任何默认供应商。
+                    # 音频理解未配置时不阻断核心校验，但提示必须与运行期一致：LLMService 已无内置默认
+                    # 音频接口（#251），而技能会在拿到 media_resolver 时构造并注册模块，未声明接口即抛错
+                    # → 业务运行时装配失败。因此这里说明该后果，不写「降级」，也不凭空合成供应商。
                     result.append(
                         ValidationItem(
                             "core",

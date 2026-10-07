@@ -195,9 +195,7 @@ def test_network_audio_download_uses_bearer_token():
 def test_protocol_docs_and_driver_match_the_server_agent_states():
     """`agent_state` 取值必须以服务端枚举为真源，两份协议文档与驱动都不得漂移。
 
-    服务端曾有一段时间只发射 `thinking`/`waiting`，而驱动硬等 `listening`（必然超时）；
-    #252 起服务端开始发射 `listening`。状态的**发射时机**属于实现细节，这里断言的是三处
-    **取值集合一致**：
+    状态的**发射时机**属于实现细节，这里断言的是三处**取值集合一致**：
 
     1. 服务端 `AgentPresentationState`（真源）；
     2. `server/docs` 与 `client/docs` 两份协议副本的 §5.5「当前可能值」；

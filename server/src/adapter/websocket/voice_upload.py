@@ -168,11 +168,7 @@ class VoiceUploadAssembler:
             raise VoiceUploadError("OVERLOADED", "voice completion receipt unavailable", retryable=True) from error
 
     def _remember_completion(self, key: tuple[str, str], completed: _Completed) -> None:
-        """登记幂等完成记录。
-
-        写入与淘汰必须成对出现：任何新增的写入路径都必须走这里，否则条数会无界
-        （单个认证账号可用大量 upload_id 撑大内存）。
-        """
+        """登记完成记录并在同一入口淘汰：写入路径都走这里，条数才不会无界。"""
         self._completed[key] = completed
         self._evict_completed()
 
