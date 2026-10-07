@@ -177,15 +177,21 @@ class RuntimeConfigValidator:
             if not interfaces:
                 if kind == "audio":
                     # 音频理解是可选能力：未在本节配置接口时不阻断核心运行时（与 world 功能“缺失即禁用”一致）。
-                    # 注意措辞必须与运行期一致：LLMService 仍内置一份默认音频接口，因此这里是“回退 + 不可用时降级”，
-                    # 而不是“禁用”；已显式配置但密钥未解析/字段缺失仍按下面的逻辑报 error（AC-24）。
+                    # 与 base `8a1ab2d`（#251）的裁定对齐：供应商身份必须显式，LLMService 不再提供内置默认接口。
+                    # 注意两层语义不同，措辞不得含糊：
+                    #   - 配置校验层：本项只 warning、不阻断 core（core_ok 保持 True，与 test_admin_runtime 既有断言一致）；
+                    #   - 技能装配层：facade 只要拿到 media_resolver 就构造 AudioUnderstandingSkill，
+                    #     而它会调用 register_audio_model_module，未声明接口即抛错 → 业务运行时无法启动（管理 Web 仍可用）。
+                    # 因此这里如实说明"装配会显式失败、运行时无法启动"，而不是承诺"降级/不阻断"；
+                    # 已显式配置但密钥占位符未解析仍按下面的逻辑报 error（AC-24）。
                     result.append(
                         ValidationItem(
                             "core",
                             f"{kind}.interfaces",
                             "warning",
-                            "未在 llm_service.available_audio_models 配置音频模型接口，"
-                            "语音理解将回退到内置默认接口，接口不可用时按 AC-23 降级",
+                            "未配置 llm_service.available_audio_models：配置校验不阻断，"
+                            "但语音理解技能装配会显式失败、业务运行时无法启动（管理 Web 仍可用）；"
+                            "请显式声明音频模型接口（供应商身份必须显式）",
                             severity="warning",
                         )
                     )

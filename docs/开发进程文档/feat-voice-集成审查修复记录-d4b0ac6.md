@@ -32,13 +32,20 @@
 | N1 | 新增 128 KiB 全局入站帧上限未与图片路径（8 MiB base64）协同 | 帧上限改为按 `infrastructure.media_resolution.max_encoded_bytes` + 信封余量推导；`WebSocketService` 默认与 `server_runtime` 注入同源 |
 | N2 | `useVoiceInput` 提交后 `setCaptureState('Uploading')` 无复位；无 try/finally；`stop()` 抛错后 `finishing` 永久为真 | 重写状态机：提交后落 `Sent`/`Failed`（均可再次录音/切模式）；`cancel`/`pressOut` 全 try-finally；补快速点按、系统中断、卸载通知、启动窗口后台收尾 |
 | N3 | 失败气泡的失败槽接的是播放 | `onRetry` 改接 `retryVoice`（index → MessageItem → VoiceBubble），按同一 `upload_id` 重发 |
-| N4 | 验证器内硬编码 qwen 音频接口并把 `QWEN_API_KEY` 追加为核心必需密钥 | 撤销该回归；音频接口缺失只警告（回退内置默认接口、不可用时按 AC-23 降级），已显式配置但密钥未解析仍报错 |
+| N4 | 验证器内硬编码 qwen 音频接口并把 `QWEN_API_KEY` 追加为核心必需密钥 | 撤销该回归（`REQUIRED_SECRET_KEYS` 回二键、删除验证器内硬编码接口）。音频接口缺失**只警告、不阻断 core**（与 `test_admin_runtime` 既有 `core_ok is True` 断言一致）；已显式配置但密钥占位符未解析仍报 error。**注意 base 两层语义不同**：校验层不阻断，但 `AudioUnderstandingSkill` 装配层会因 `register_audio_model_module` 显式失败而让业务运行时起不来（管理 Web 仍可用）——warning 文案如实说明这一点，不承诺「降级」 |
 | N5 | 向量删除失败返回 `0` 伪装成功，且单次查询有上限 | 分页删除（`include=[]`）+ 无进展护栏；失败抛出；完全重置口径在 spec 中如实声明（仅本地脚本可达） |
 | N6 | 驱动等待服务端从不发射的 `listening`；协议文档取值错误 | 驱动不再硬等状态，改为校验观测到的取值合法；两侧协议文档与 spec AC-27 以服务端枚举为真源更正 |
 | N7 | `recordingId` 形如 `recording-<ts>-<rand>`，服务端强制 UUID 校验 | 新增 `randomUuid()`（RFC 4122 v4），录音 id 即协议 id |
 | N8 | `_completed` 保存原始分片且无全局/每用户上限 | 改存 sha256 摘要（32 B/片）+ 全局 ≤256、每用户 ≤16 按最旧淘汰；失败信号投递失败记日志 |
 | AC-26 | CLI 历史项对未知字段严格构造（桌面端已过滤），服务端新增字段会让整页历史静默清空 | `cli_client/network/network_client.py` 按 dataclass 字段过滤构造；补调用点级未知字段测试 |
 | 体验类 | 预算在 begin 失败路径不生效、放弃路径不补 abort、ACK 后缓存键错位、录音期播服务端音频、Android 中断不可感知、`start()` 失败泄漏 expo-av 句柄 | 见下方"验证结果"对应回归测试 |
+
+### 对齐补充（base 前进）
+
+- **`cb4c247`（media_resolver 改构造期注入）**：接线方式以 base 为准（`UserInterface(database_manager, media_resolver)`）；本分支保留 `server_runtime.build_websocket_service(config)`（base 那侧为 `WebSocketService()`，会丢掉按配置推导的入站帧上限），并同步把两条接线测试改为断言"构造期注入"。
+- **`8a1ab2d`（音频供应商身份显式化，Refs #251）**：`LLMService` 不再提供内置默认音频接口（`available_audio_models` 为空即无接口，`register_audio_model_module` 对未注册接口/缺失 prompt 直接 raise），随附 `config.json`/模板显式声明接口与音频 prompt 模板。
+  - 维护者按 AC-24 字面语义把 N4 的张力**裁定为「显式失败」**（而非审查报告建议的「降级」）：提示词与供应商身份归还给认知技能/配置，缺失即报错。
+  - 由于 `facade` 只要拿到 `media_resolver` 就构造 `AudioUnderstandingSkill`，「无音频配置」在**装配期**必然失败；而**校验层**仍不阻断（`test_admin_runtime` 多处 `core_ok is True`）。两层语义不同，本 PR 的 warning 文案据此改为如实描述「装配会显式失败、业务运行时无法启动」，不再使用「降级/不阻断」这类含糊表述；`test_admin_runtime` 的 AC-24 用例断言同步锁定（含「运行时无法启动」、不含「回退/降级」）。
 
 ### 复审补充（独立评审后）
 

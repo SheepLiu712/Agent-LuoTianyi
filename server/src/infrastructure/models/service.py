@@ -21,14 +21,7 @@ class LLMService:
         # 创建LLM和VLM接口
         self.llms_config = config.get("available_llms", {})
         self.vlms_config = config.get("available_vlms", {})
-        self.audio_models_config = config.get("available_audio_models") or {
-            "qwen3.8-omni-flash": {
-                "api_type": "openai",
-                "model": "qwen3.8-omni-flash",
-                "api_key": "$QWEN_API_KEY",
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            }
-        }
+        self.audio_models_config = config.get("available_audio_models", {})
         self.llm_interfaces: Dict[str, LLMAPIInterface] = self._create_llm_interfaces()
         self.vlm_interfaces: Dict[str, VLMAPIInterface] = self._create_vlm_interfaces()
         self.audio_model_interfaces: Dict[str, AudioModelAPIInterface] = self._create_audio_model_interfaces()
@@ -101,16 +94,16 @@ class LLMService:
         return module
 
     def register_audio_model_module(self, module_name: str, module_config: Dict) -> AudioModelModule:
-        """注册固定默认值、可配置覆盖的音频模型模块。"""
+        """按显式模型与模板配置注册通用音频模型模块。"""
         audio_config = module_config.get("audio", {})
-        interface_name = audio_config.get("name", "qwen3.8-omni-flash")
+        interface_name = audio_config.get("name", "")
         interface = self.audio_model_interfaces.get(interface_name)
         if interface is None:
             raise ValueError(f"音频模型接口未找到: {interface_name}, 无法注册模块: {module_name}")
         prompt_name = module_config.get("prompt_name")
         prompt_template = self.prompt_manager.get_template(prompt_name) if prompt_name else None
         if prompt_template is None:
-            prompt_template = self._default_audio_prompt()
+            raise ValueError(f"Prompt模板未找到: {prompt_name}, 无法注册音频模块: {module_name}")
         module = AudioModelModule(
             module_name,
             module_config,
@@ -128,6 +121,10 @@ class LLMService:
     def get_vlm_interface_info(self) -> Dict[str, Dict]:
         """获取所有已注册的VLM接口信息"""
         return {name: interface.get_interface_info() for name, interface in self.vlm_interfaces.items()}
+
+    def get_audio_model_interface_info(self) -> Dict[str, Dict]:
+        """获取所有已注册的音频模型接口信息，不包含密钥。"""
+        return {name: interface.get_interface_info() for name, interface in self.audio_model_interfaces.items()}
 
     def get_client_model_types(self) -> list:
         """返回客户端委托需求；不包含服务商、地址、模型或密钥。"""
@@ -179,23 +176,8 @@ class LLMService:
     def _create_audio_model_interfaces(self) -> Dict[str, AudioModelAPIInterface]:
         interfaces = {}
         for name, config in self.audio_models_config.items():
-            resolved = dict(config)
-            if resolved.get("api_key") == "$QWEN_API_KEY":
-                import os
-
-                resolved["api_key"] = os.environ.get("QWEN_API_KEY", "")
             try:
-                interfaces[name] = AudioModelAPIFactory.create_interface(resolved)
+                interfaces[name] = AudioModelAPIFactory.create_interface(config)
             except Exception as exc:
                 self.logger.error(f"创建音频模型接口失败: {name}, 错误: {exc}")
         return interfaces
-
-    @staticmethod
-    def _default_audio_prompt():
-        from src.infrastructure.models.llm.prompts import PromptTemplate
-
-        return PromptTemplate(
-            "请分析音频，仅返回 JSON 对象，必须完整包含 transcript、emotion、sound_description 三个键。"
-            "值只能是字符串或 null。transcript 尽量逐字转写；emotion 仅写明确的说话情绪；"
-            "sound_description 仅写有意义的非语言声音，不要重复转写。"
-        )

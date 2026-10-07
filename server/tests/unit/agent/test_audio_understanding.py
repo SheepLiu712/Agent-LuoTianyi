@@ -215,3 +215,11 @@ async def test_degradation_is_logged_without_leaking_audio_content(capture_proje
     assert "11111111-1111-4111-8111-111111111111" in caplog.text
     assert "RuntimeError" in caplog.text
     assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_audio_understanding_cancellation_propagates_without_retry():
+    skill, _, module = _skill([asyncio.CancelledError()])
+    with pytest.raises(asyncio.CancelledError):
+        await skill.understand(d.MediaRef(media_id="audio-id"), owner_user_id="owner")
+    assert len(module.calls) == 1

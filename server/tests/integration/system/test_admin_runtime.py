@@ -625,6 +625,11 @@ def test_audio_interfaces_are_optional_and_degrade_without_blocking_core(tmp_pat
     item = next(item for item in result["items"] if item["name"] == "audio.interfaces")
     assert item["status"] == "warning"
     assert item["severity"] == "warning"
+    # 措辞必须与运行期一致（base `8a1ab2d` / #251）：LLMService 不再提供内置默认音频接口，
+    # 且技能装配在未声明接口时显式失败 —— 不得声称"回退到默认接口"，也不得含糊成"降级/不阻断"。
+    assert "运行时无法启动" in item["message"]
+    assert "回退" not in item["message"]
+    assert "降级" not in item["message"]
     secret_names = {item["name"] for item in result["items"] if item["name"].startswith("secret.")}
     assert secret_names == {"secret.JWT_SECRET", "secret.AMAP_KEY"}
 
