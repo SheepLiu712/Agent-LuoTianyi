@@ -572,29 +572,35 @@ async def test_oversize_and_invalid_image_are_rejected_without_persistence(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_mime_mismatch_is_rejected_before_persistence(tmp_path):
+@pytest.mark.parametrize(
+    "declaration",
+    [{}, {"mime_type": None}, {"mime_type": ""}, {"mime_type": "image/jpeg"}, {"mime_type": "text/plain"}],
+)
+@pytest.mark.parametrize("prefix", ["", "data:image/webp;base64,"])
+async def test_image_mime_is_detected_persisted_and_resolved(tmp_path, declaration, prefix):
+    from src.infrastructure.media import FilesystemMediaResolver
+
     root = tmp_path / "media"
     _, connection, adapter, stage = await setup_output(
-        WebSocketAdapter(
-            {
-                "media_store": {"root": str(root), "max_bytes": 1024},
-            }
-        )
+        WebSocketAdapter({"media_store": {"root": str(root), "max_bytes": 1024}})
     )
+    image = png_bytes()
     event = WSMessage(
         event_type="user_image",
-        client_msg_id="mismatch",
-        payload={
-            "image_base64": base64.b64encode(png_bytes()).decode("ascii"),
-            "mime_type": "image/jpeg",
-        },
+        client_msg_id="detected",
+        payload={"image_base64": prefix + base64.b64encode(image).decode("ascii"), **declaration},
     )
-
-    with pytest.raises(MediaResolutionError) as mismatch:
-        await adapter.receive_event(connection, event)
-    assert mismatch.value.code is MediaResolutionErrorCode.UNSUPPORTED_TYPE
-
-    assert not list(root.iterdir())
+    assert await adapter.receive_event(connection, event)
+    media_ref = stage.stimuli[0].media_ref
+    metadata = json.loads((root / media_ref.media_id / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["mime_type"] == "image/png"
+    resolved = FilesystemMediaResolver({"root": str(root)}).resolve(media_ref, owner_user_id="user")
+    assert resolved.mime_type == "image/png"
+    assert resolved.data == image
+    # Changing only the declaration must not create a replay content conflict.
+    event.payload["mime_type"] = "image/gif"
+    assert await adapter.receive_event(connection, event)
+    assert stage.stimuli[1].media_ref == media_ref
     await adapter.disconnect(stage)
 
 
