@@ -14,7 +14,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from src.domain.agent import MediaRef
 
 from .audio_validation import parse_m4a_audio
-from .image_validation import validate_image_content
+from .image_validation import prepare_image_content
 from .media_resolver import MediaResolutionError, MediaResolutionErrorCode
 
 
@@ -74,7 +74,12 @@ class PermanentMediaStore:
                 code=MediaResolutionErrorCode.TOO_LARGE,
                 media_id=media_ref.media_id,
             )
-        mime_type = validate_image_content(data, mime_type, media_ref.media_id)
+        data, mime_type = prepare_image_content(data, mime_type, media_ref.media_id)
+        if len(data) > self.max_bytes:
+            raise MediaResolutionError(
+                code=MediaResolutionErrorCode.TOO_LARGE,
+                media_id=media_ref.media_id,
+            )
         expected_metadata: dict[str, object] = {
             "media_kind": "image",
             "mime_type": mime_type,
