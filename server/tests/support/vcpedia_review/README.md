@@ -2,7 +2,26 @@
 
 关联 [PR #195](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/195) / [Issue #196](https://github.com/SheepLiu712/Agent-LuoTianyi/issues/196)。产品约束只维护[进行中 spec](../../../../docs/开发进程文档/vcpedia-wikitext-migration.md)；操作见[World 测试说明](../../unit/world/README.md)和[语料说明](../vcpedia_corpus/README.md)。
 
-## 本次减法
+## 2026-10-07 单版本歌词修复
+
+按[维护者最新评论](https://github.com/SheepLiu712/Agent-LuoTianyi/pull/195#issuecomment-6029627171)隔离歌词候选及缺口：先完成所有规则候选，再在需要时分别渲染，仍无完整结果才选一个候选最多补提一次。模型材料不含其他版本或译文；最终关键词从采用的歌词派生。简介总结保持独立，不增加完整性认证或多版本入库。
+
+旧歌曲缓存无法证明单版本来源，重新抓取且不删除、不写回；最终仍缺歌词的 Song 不进入 Agent。歌曲入口也拒绝空歌词的 Person 结果，沿原 `fetch_failed` 处理，不改变 Agent 接纳/持久化接口。原版“添加第二个有缺口 poem 使首版 `needed.lyrics` 由 false 变 true”的复现已由候选隔离回归覆盖。
+
+本轮工作区验证（非提交或合并证明）：
+
+- Python 3.10.20、pytest **9.0.3**、Ruff **0.14.10**。pytest 使用独立临时目录的锁定版本，未修改共享环境。
+- `tests/unit/world`、`tests/integration/world`、`tests/integration/packaging`、`tests/integration/agent/test_song_knowledge_acceptance.py` 在 `-X utf8=0`（实际 cp936/GBK）与 `-X utf8=1`（UTF-8）下均 **644 passed**。两次仅有既有 zhconv `pkg_resources` 弃用警告。
+- Ruff 在 `server` 工作目录、使用项目配置，对完整 PR 与本次改动的 **30 个现存 Python 文件**逐个显式检查通过；不以目录发现代替变更文件集合。
+- 保留的真实性能比较 `--check` 三组通过；默认提示词实验离线成功，无站点 POST 或真实模型调用。
+- 内容 `--check` **仍返回 1**：新侧 78 个检查槽中 67 个满足、11 个未满足，歌词全文为 9/12。未改写语料或 oracle，不把已知缺口改成通过。
+- 独立代码审查发现的渲染标点/关键词边界、制作信息过滤、明确多版渲染及无歌词 Person 入口问题均修复并补回归；这不代替维护者审核。
+
+复跑相关测试可从 `server` 使用 `python -X utf8=0 -m pytest tests/unit/world tests/integration/world tests/integration/packaging tests/integration/agent/test_song_knowledge_acceptance.py -q -p no:cacheprovider --basetemp=<新的临时目录>`，再以 `-X utf8=1` 和另一临时目录重跑。性能、内容及提示词命令沿用[样本说明](../vcpedia_corpus/README.md)与[World 测试说明](../../unit/world/README.md)，输出到新目录，不覆盖历史报告。
+
+未运行全量 unit、真实站点、真实模型或生产数据重验；下列历史内容验收和材料权利事项仍开放。本轮未提交、推送或关闭 #196。
+
+## 2026-10-02 减法
 
 - 保留单一输入 manifest、独立内容 oracle、已有真实原件、旧 HTML 对照、提示词实验、性能与内容报告。fixture 读取只用小模块，不另设 CLI 或认证框架；不扩大第三方素材、不重新生成预期。
 - 删除重复元数据、选材/历史文档台账及专属脚本、测试；一次选材调查留作静态记录。官方活跃页记录仅为 manifest 的背景信息，不是普通测试前置条件；不再自动选材、审计提交数量或测试历史文档条款。
