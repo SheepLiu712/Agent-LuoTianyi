@@ -7,8 +7,9 @@ import base64
 import binascii
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from hashlib import sha256
 from typing import Protocol
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -19,6 +20,7 @@ from src.infrastructure.media import (
     PermanentMediaStore,
     parse_m4a_audio,
 )
+from src.utils.logger import get_logger
 from src.web.websocket import WSMessage
 
 MAX_CHUNK_BYTES = 48 * 1024
@@ -67,6 +69,7 @@ class _Completed:
     message_uuid: str
     duration_ms: int
     completed_at: float
+    persisted: bool = False
 
 
 class VoiceUploadAssembler:
@@ -104,6 +107,7 @@ class VoiceUploadAssembler:
             payload = _payload(event)
             phase = payload.get("phase")
             upload_id = _uuid_field(payload, "upload_id")
+            await self._restore_completion(user_id, character_id, upload_id)
             if phase == "begin":
                 return self._begin(event, payload, user_id, character_id, upload_id, sink)
             if phase == "chunk":
@@ -113,6 +117,74 @@ class VoiceUploadAssembler:
             if phase == "abort":
                 return self._abort(event, payload, user_id, upload_id)
             raise VoiceUploadError("BAD_MESSAGE", "invalid voice upload phase")
+
+    async def _restore_completion(self, user_id: str, character_id: str, upload_id: str) -> None:
+        key = (user_id, upload_id)
+        existing = self._completed.get(key)
+        if existing is not None:
+            if existing.parameters[0] != character_id:
+                raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice upload target changed")
+            if not existing.persisted:
+                await self._persist_completion(key)
+            return
+        if self._media_store is None:
+            return
+        message_uuid = _message_uuid(user_id, character_id, upload_id)
+        media_ref = self._media_store.mint_ref(user_id=user_id, client_msg_id=message_uuid)
+        try:
+            receipt = await asyncio.to_thread(
+                self._media_store.read_audio_receipt,
+                media_ref=media_ref,
+                owner_user_id=user_id,
+            )
+            if receipt is None:
+                return
+            parameters = tuple(receipt["parameters"])
+            digests = tuple(bytes.fromhex(value) for value in receipt["chunk_digests"])
+            duration = receipt["duration_ms"]
+            if (
+                receipt["version"] != 1
+                or receipt["message_uuid"] != message_uuid
+                or len(parameters) != 6
+                or parameters[0] != character_id
+                or parameters[1:4] != ("audio/mp4", "m4a", "aac_lc")
+                or type(parameters[4]) is not int
+                or not 0 < parameters[4] <= MAX_TOTAL_BYTES
+                or parameters[5] != len(digests)
+                or not 0 < len(digests) <= MAX_CHUNKS
+                or any(len(value) != 32 for value in digests)
+                or type(duration) is not int
+                or not 500 <= duration <= 30_500
+            ):
+                raise ValueError("invalid voice receipt")
+            self._completed[key] = _Completed(parameters, digests, message_uuid, duration, time.monotonic(), True)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise VoiceUploadError("OVERLOADED", "voice completion receipt unavailable", retryable=True) from error
+
+    async def _persist_completion(self, key: tuple[str, str]) -> None:
+        completed = self._completed[key]
+        media_ref = self._media_store.mint_ref(user_id=key[0], client_msg_id=completed.message_uuid)
+        receipt = {
+            "version": 1,
+            "parameters": completed.parameters,
+            "chunk_digests": [value.hex() for value in completed.chunk_digests],
+            "message_uuid": completed.message_uuid,
+            "duration_ms": completed.duration_ms,
+        }
+        try:
+            await asyncio.to_thread(
+                self._media_store.write_audio_receipt,
+                media_ref=media_ref,
+                owner_user_id=key[0],
+                receipt=receipt,
+            )
+        except (OSError, ValueError):
+            # Admission already happened: retain the small in-memory receipt beyond TTL and retry its write.
+            get_logger(__name__).exception(
+                "Voice admission receipt persistence failed message=%s", completed.message_uuid
+            )
+            return
+        self._completed[key] = replace(completed, persisted=True)
 
     def _begin(
         self,
@@ -154,7 +226,10 @@ class VoiceUploadAssembler:
             return VoiceUploadAck(duplicate=True)
         if any(upload.user_id == user_id for upload in self._uploads.values()):
             raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "user already has an incomplete voice upload")
-        if len(self._uploads) >= self._max_incomplete:
+        if (
+            len(self._uploads) >= self._max_incomplete
+            or sum(not item.persisted for item in self._completed.values()) >= self._max_incomplete
+        ):
             raise VoiceUploadError("OVERLOADED", "voice upload capacity is full", retryable=True)
         stimulus = d.VoiceRecordingCommitted(
             **_stimulus_fields(event, user_id, character_id, ephemeral=True),
@@ -214,7 +289,9 @@ class VoiceUploadAssembler:
             decoded = base64.b64decode(encoded, validate=True)
         except (binascii.Error, ValueError) as error:
             raise VoiceUploadError("BAD_MESSAGE", "voice chunk is not valid base64") from error
-        if completed.chunk_digests[chunk_index] != decoded:
+        if len(decoded) > MAX_CHUNK_BYTES:
+            raise VoiceUploadError("VOICE_TOO_LARGE", "voice chunk exceeds the size limit")
+        if completed.chunk_digests[chunk_index] != sha256(decoded).digest():
             raise VoiceUploadError("VOICE_UPLOAD_CONFLICT", "voice chunk content changed")
         return VoiceUploadAck(duplicate=True)
 
@@ -264,12 +341,13 @@ class VoiceUploadAssembler:
         )
         self._completed[key] = _Completed(
             parameters=parameters,
-            chunk_digests=tuple(upload.chunks[index] for index in range(upload.total_chunks)),
+            chunk_digests=tuple(sha256(upload.chunks[index]).digest() for index in range(upload.total_chunks)),
             message_uuid=message_uuid,
             duration_ms=duration_ms,
             completed_at=time.monotonic(),
         )
         del self._uploads[key]
+        await self._persist_completion(key)
         return VoiceUploadAck({"message_uuid": message_uuid, "duration_ms": duration_ms})
 
     async def _validate_and_persist(
@@ -345,7 +423,9 @@ class VoiceUploadAssembler:
             if upload.sink.can_accept(stimulus):
                 upload.sink.submit(stimulus)
         completed_expired = [
-            key for key, completed in self._completed.items() if now - completed.completed_at >= self._ttl_seconds
+            key
+            for key, completed in self._completed.items()
+            if completed.persisted and now - completed.completed_at >= self._ttl_seconds
         ]
         for key in completed_expired:
             del self._completed[key]

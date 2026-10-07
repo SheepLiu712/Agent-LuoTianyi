@@ -232,3 +232,29 @@ def test_delete_owned_by_reports_unreadable_media_metadata(tmp_path):
     assert report.deleted_count == 0
     assert report.failures[0].media_id == media_id
     assert report.failures[0].reason == "JSONDecodeError"
+
+
+def test_audio_receipt_owner_atomic_write_and_media_deletion(tmp_path, monkeypatch):
+    store = PermanentMediaStore({"root": str(tmp_path)})
+    media_ref = d.MediaRef(media_id=str(uuid4()))
+    store.persist_audio(
+        media_ref=media_ref, owner_user_id="owner", data=m4a_bytes(), mime_type="audio/mp4", duration_ms=1234
+    )
+    assert store.read_audio_receipt(media_ref=media_ref, owner_user_id="owner") is None
+    receipt = {"version": 1, "result": "accepted"}
+    store.write_audio_receipt(media_ref=media_ref, owner_user_id="owner", receipt=receipt)
+    with pytest.raises(ValueError):
+        store.read_audio_receipt(media_ref=media_ref, owner_user_id="other")
+    with pytest.raises(ValueError):
+        store.write_audio_receipt(media_ref=media_ref, owner_user_id="other", receipt={})
+
+    def failed_replace(*args):
+        raise OSError("failed atomic publication")
+
+    monkeypatch.setattr("src.infrastructure.media.media_store.os.replace", failed_replace)
+    with pytest.raises(OSError):
+        store.write_audio_receipt(media_ref=media_ref, owner_user_id="owner", receipt={"new": "value"})
+    assert store.read_audio_receipt(media_ref=media_ref, owner_user_id="owner") == receipt
+    assert not list((tmp_path / media_ref.media_id).glob(".receipt-*"))
+    store.delete_owned_by(owner_user_id="owner")
+    assert store.read_audio_receipt(media_ref=media_ref, owner_user_id="owner") is None

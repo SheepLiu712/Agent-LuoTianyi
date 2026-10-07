@@ -287,7 +287,9 @@ async def test_global_limit_and_user_isolation(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_per_user_limit_chunk_size_and_ttl_cleanup(tmp_path):
+async def test_per_user_limit_chunk_size_and_ttl_cleanup(tmp_path, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr("src.adapter.websocket.voice_upload.time", SimpleNamespace(monotonic=lambda: clock[0]))
     adapter = WebSocketAdapter(
         {
             "media_store": {"root": str(tmp_path / "media")},
@@ -309,7 +311,7 @@ async def test_per_user_limit_chunk_size_and_ttl_cleanup(tmp_path):
         adapter=adapter,
     )
     assert sent[1]["payload"]["code"] == "VOICE_UPLOAD_CONFLICT"
-    await asyncio.sleep(0.01)
+    clock[0] += 1
     oversized_chunk = event(
         "chunk",
         second,
@@ -347,3 +349,187 @@ async def test_same_upload_id_is_isolated_between_users(tmp_path):
     assert sent_a[-1]["payload"]["message_uuid"] != sent_b[-1]["payload"]["message_uuid"]
     assert isinstance(stage_a.stimuli[-1], d.VoiceMessage)
     assert isinstance(stage_b.stimuli[-1], d.VoiceMessage)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restart", [False, True])
+async def test_completed_receipt_survives_ttl_and_runtime_recreation(tmp_path, monkeypatch, restart):
+    clock = [100.0]
+    monkeypatch.setattr("src.adapter.websocket.voice_upload.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    _, events = upload_events(m4a_bytes())
+    first, stage, adapter = await run_events(tmp_path, events)
+    receipt_paths = list((tmp_path / "media").glob("*/ingress_receipt.json"))
+    assert len(receipt_paths) == 1
+    receipt = json.loads(receipt_paths[0].read_text())
+    assert all(len(value) == 64 for value in receipt["chunk_digests"])
+    assert len(receipt_paths[0].read_bytes()) < 2048
+    clock[0] += 601
+    second, next_stage, _ = await run_events(tmp_path, events, adapter=None if restart else adapter)
+    assert all(item["type"] == "server_ack" and item["payload"]["duplicate"] for item in second)
+    assert second[-1]["payload"]["message_uuid"] == first[-1]["payload"]["message_uuid"]
+    assert sum(isinstance(item, d.VoiceMessage) for item in stage.stimuli + next_stage.stimuli) == 1
+    assert not next_stage.stimuli  # Also no duplicate VoiceRecordingCommitted coordination.
+    assert len(list((tmp_path / "media").glob("*/content.bin"))) == 1
+    # A direct finalize retry must also work without another begin/chunk sequence.
+    final, _, _ = await run_events(tmp_path, [events[-1]])
+    assert final[0]["payload"]["message_uuid"] == first[-1]["payload"]["message_uuid"]
+
+
+@pytest.mark.asyncio
+async def test_rebuilt_receipt_rejects_changed_chunk(tmp_path):
+    upload_id, events = upload_events(m4a_bytes())
+    await run_events(tmp_path, events)
+    changed = event("chunk", upload_id, {"chunk_index": 0, "audio_base64": base64.b64encode(b"changed").decode()})
+    sent, stage, _ = await run_events(tmp_path, [events[0], changed])
+    assert sent[-1]["payload"]["code"] == "VOICE_UPLOAD_CONFLICT"
+    assert not stage.stimuli
+
+
+@pytest.mark.asyncio
+async def test_saved_media_without_stage_admission_is_not_completed(tmp_path):
+    from src.adapter.websocket.voice_upload import VoiceUploadAssembler, VoiceUploadError
+    from src.infrastructure.media import PermanentMediaStore
+    from src.web.websocket import WSMessage
+
+    store = PermanentMediaStore({"root": str(tmp_path / "media")})
+    assembler = VoiceUploadAssembler(store)
+    sink = Stage()
+    _, events = upload_events(m4a_bytes())
+
+    async def send(assembler, value):
+        return await assembler.process(
+            event=WSMessage(event_type=value["type"], payload=value["payload"], client_msg_id=value["client_msg_id"]),
+            user_id=sink.user_id,
+            character_id=sink.character_id,
+            sink=sink,
+        )
+
+    for value in events[:-1]:
+        await send(assembler, value)
+    sink.available = False
+    with pytest.raises(VoiceUploadError) as error:
+        await send(assembler, events[-1])
+    assert error.value.code == "OVERLOADED"
+    assert len(list((tmp_path / "media").glob("*/content.bin"))) == 1
+    assert not list((tmp_path / "media").glob("*/ingress_receipt.json"))
+    sink.available = True
+    rebuilt = VoiceUploadAssembler(store)
+    for value in events:
+        await send(rebuilt, value)
+    assert sum(isinstance(item, d.VoiceMessage) for item in sink.stimuli) == 1
+    assert len(list((tmp_path / "media").glob("*/ingress_receipt.json"))) == 1
+
+
+@pytest.mark.asyncio
+async def test_receipt_write_failure_keeps_live_deduplication_past_ttl(tmp_path, monkeypatch):
+    from src.infrastructure.media import PermanentMediaStore
+
+    clock = [100.0]
+    monkeypatch.setattr("src.adapter.websocket.voice_upload.time", SimpleNamespace(monotonic=lambda: clock[0]))
+    original = PermanentMediaStore.write_audio_receipt
+
+    def unavailable(*args, **kwargs):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(PermanentMediaStore, "write_audio_receipt", unavailable)
+    _, events = upload_events(m4a_bytes())
+    first, stage, adapter = await run_events(tmp_path, events)
+    assert first[-1]["type"] == "server_ack"
+    clock[0] += 601
+    second, next_stage, adapter = await run_events(tmp_path, events, adapter=adapter)
+    assert all(item["type"] == "server_ack" for item in second)
+    assert not next_stage.stimuli
+    assert not list((tmp_path / "media").glob("*/ingress_receipt.json"))
+    monkeypatch.setattr(PermanentMediaStore, "write_audio_receipt", original)
+    await run_events(tmp_path, [events[-1]], adapter=adapter)
+    assert len(list((tmp_path / "media").glob("*/ingress_receipt.json"))) == 1
+    third, next_stage, _ = await run_events(tmp_path, events)
+    assert third[-1]["payload"]["message_uuid"] == first[-1]["payload"]["message_uuid"]
+    assert not next_stage.stimuli
+    assert sum(isinstance(item, d.VoiceMessage) for item in stage.stimuli) == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_and_rebuilt_upload_does_not_repeat_chat_preprocessing_or_reply(tmp_path, monkeypatch):
+    from support.stage_support import RecordingAgent, cleanup, report, setup
+
+    from src.adapter.websocket.voice_upload import VoiceUploadAssembler
+    from src.infrastructure.media import PermanentMediaStore
+    from src.web.websocket import WSMessage
+
+    calls = {"preprocess": 0, "reply": 0}
+    clock = [100.0]
+    monkeypatch.setattr("src.adapter.websocket.voice_upload.time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def handle(request, sink):
+        if isinstance(request.stimulus, d.VoiceMessage):
+            calls["preprocess"] += 1
+        if isinstance(request.stimulus, d.InteractionDeadline):
+            calls["reply"] += 1
+            return report(request, consumed=tuple(s.stimulus_id for s in request.interaction.pending_stimuli))
+        return report(request)
+
+    stage, _, adapter, _, _ = await setup(RecordingAgent(handle))
+    store = PermanentMediaStore({"root": str(tmp_path / "media")})
+    assembler = VoiceUploadAssembler(store)
+    _, events = upload_events(m4a_bytes())
+
+    async def send_batch(target):
+        for value in events:
+            await target.process(
+                event=WSMessage(
+                    event_type=value["type"], payload=value["payload"], client_msg_id=value["client_msg_id"]
+                ),
+                user_id=stage.user_id,
+                character_id=stage.character_id,
+                sink=stage.stimulus_input_sink,
+            )
+
+    async def settled():
+        while stage._pending or stage._handles:
+            await asyncio.sleep(0)
+
+    try:
+        await send_batch(assembler)
+        await asyncio.wait_for(settled(), 2)
+        assert calls == {"preprocess": 1, "reply": 1}
+        clock[0] += 601
+        await send_batch(assembler)
+        await send_batch(VoiceUploadAssembler(store))
+        assert not stage._pending and not stage._handles
+        assert calls == {"preprocess": 1, "reply": 1}
+    finally:
+        await cleanup(stage, adapter)
+
+
+@pytest.mark.asyncio
+async def test_corrupt_receipt_fails_closed_without_new_admission(tmp_path):
+    _, events = upload_events(m4a_bytes())
+    await run_events(tmp_path, events)
+    receipt = next((tmp_path / "media").glob("*/ingress_receipt.json"))
+    receipt.write_text("{broken", encoding="utf-8")
+    sent, stage, _ = await run_events(tmp_path, events)
+    assert all(item["payload"]["code"] == "OVERLOADED" for item in sent)
+    assert not stage.stimuli
+
+
+@pytest.mark.asyncio
+async def test_unpersisted_receipts_apply_backpressure_without_losing_deduplication(tmp_path, monkeypatch):
+    from src.infrastructure.media import PermanentMediaStore
+
+    def unavailable(*args, **kwargs):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(PermanentMediaStore, "write_audio_receipt", unavailable)
+    adapter = WebSocketAdapter(
+        {"media_store": {"root": str(tmp_path / "media")}, "voice_upload": {"max_incomplete": 1}}
+    )
+    _, first_events = upload_events(m4a_bytes())
+    await run_events(tmp_path, first_events, adapter=adapter)
+    _, new_events = upload_events(m4a_bytes())
+    sent, stage, _ = await run_events(tmp_path, new_events[:1], adapter=adapter)
+    assert sent[0]["payload"]["code"] == "OVERLOADED"
+    assert not stage.stimuli
+    replay, stage, _ = await run_events(tmp_path, first_events, adapter=adapter)
+    assert replay[-1]["payload"]["duplicate"]
+    assert not stage.stimuli
