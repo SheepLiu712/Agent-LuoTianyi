@@ -5,3 +5,4 @@ colorlog
 soundfile
 numpy
 PyAudio
+Pillow>=9.1

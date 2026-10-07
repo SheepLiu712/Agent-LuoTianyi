@@ -106,5 +106,10 @@
             "Name": "头",
             "Id": "ArtMesh35"
         }
-    ]
+    ],
+	"Groups": [{
+		"Target": "Parameter",
+		"Name": "EyeBlink",
+		"Ids": ["ParamEyeLOpen", "ParamEyeROpen"]
+	}]
 }

@@ -46,6 +46,7 @@
     });
 
     let model;
+    let autoEyeBlink;
     let app;
     const MODEL_SCALE_MULTIPLIER = 1.2;
     const FOCUS_Y_OFFSET_RATIO = 0.0;
@@ -145,6 +146,7 @@
             onError: (err) => { console.error('Model load internal error:', err); }
         });
         
+        autoEyeBlink = model.internalModel.eyeBlink;
         app.stage.addChild(model);
         model.eventMode = 'none';
         model.interactive = false;
@@ -318,6 +320,8 @@
 
     window.setExpression = (expressionId) => {
       if (model) {
+        // Pause automatic blinking for the alternate eyes used by dumb.
+        model.internalModel.eyeBlink = expressionId === 'dumb' ? undefined : autoEyeBlink;
         model.expression(expressionId);
         window.setMouthOpenY(mouthValueProjection[expressionId] || -1); // 根据预设值调整嘴部张开程度
       }

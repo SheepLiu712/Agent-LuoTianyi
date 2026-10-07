@@ -126,7 +126,7 @@ class FilesystemMediaResolver:
         if media_kind == "image":
             from .image_validation import validate_image_content
 
-            validate_image_content(data, mime_type, media_ref.media_id)
+            mime_type = validate_image_content(data, mime_type, media_ref.media_id)
         else:
             from .audio_validation import parse_m4a_audio
 

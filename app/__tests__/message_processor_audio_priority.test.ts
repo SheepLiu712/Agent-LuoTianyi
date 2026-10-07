@@ -136,3 +136,53 @@ describe('MessageProcessor online audio priority', () => {
     expect((networkClient as any).sendTouch).not.toHaveBeenCalled();
   });
 });
+
+
+describe('replay permission follows local server-audio completion', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockSoundInstances.length = 0;
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true });
+    jest.useFakeTimers();
+  });
+  afterEach(() => { jest.useRealTimers(); });
+
+  it.each(['active', 'background', 'inactive'])(
+    'blocks replay after a final packet in %s until playback finishes', async (state) => {
+      mockAppState.currentState = state;
+      const stopServerAudio = jest.fn();
+      const binder = fakeBinder();
+      const feed = jest.fn();
+      const processor = new MessageProcessor({} as NetworkClient, binder, feed, stopServerAudio);
+      processor.setLocalAudioPath('saved', 'file://saved.wav');
+      processor.onAgentMessage({ uuid: 'online', audio: 'YXVkaW8=', is_final_package: true });
+      await jest.advanceTimersByTimeAsync(0);
+      expect(feed).toHaveBeenCalledWith('', true);
+      expect(processor.isServerAudioActive()).toBe(true);
+      mockAppState.currentState = 'active';
+      for (let click = 0; click < 3; click += 1) {
+        expect(await processor.playLocalTtsByUuid('saved')).toBe(false);
+      }
+      expect(mockSoundConstructor).not.toHaveBeenCalled();
+      expect(binder.emitLocalTtsState).not.toHaveBeenCalled();
+      expect(stopServerAudio).not.toHaveBeenCalled();
+      processor.onServerAudioFinished();
+      await drainIncoming(processor);
+      expect(await processor.playLocalTtsByUuid('saved')).toBe(true);
+      expect(stopServerAudio).not.toHaveBeenCalled();
+    },
+  );
+  it('allows replay after the accepted timeout without forcing server playback to stop', async () => {
+    mockAppState.currentState = 'background';
+    const stopServerAudio = jest.fn();
+    const processor = new MessageProcessor({} as NetworkClient, fakeBinder(), jest.fn(), stopServerAudio);
+    processor.setLocalAudioPath('saved', 'file://saved.wav');
+    processor.onAgentMessage({ uuid: 'online', audio: 'YXVkaW8=', is_final_package: true });
+    await jest.advanceTimersByTimeAsync(89999);
+    expect(await processor.playLocalTtsByUuid('saved')).toBe(false);
+    await jest.advanceTimersByTimeAsync(1);
+    await drainIncoming(processor);
+    expect(await processor.playLocalTtsByUuid('saved')).toBe(true);
+    expect(stopServerAudio).not.toHaveBeenCalled();
+  });
+});

@@ -3,6 +3,7 @@
 import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from support.routing_support import Sink, request
@@ -20,6 +21,7 @@ from src.agent.skills.cognitive import (
     ReplyDraft,
     ResponseCompositionSkill,
 )
+from src.agent.skills.contracts import TopicExtraction
 from src.domain.memory_context import MemoryContext, MemoryHit
 
 
@@ -83,7 +85,7 @@ class _StagedComposer:
 def agent(composer):
     return Agent(
         character_id="luotianyi",
-        stimulus_router=StimulusRouter([(d.StimulusKind.TEXT_MESSAGE, ChatReplyHandler(composer, _Understanding()))]),
+        stimulus_router=StimulusRouter([(d.StimulusKind.TEXT_MESSAGE, ChatReplyHandler(composer))]),
     )
 
 
@@ -251,7 +253,7 @@ async def test_slow_recall_never_reenters_the_public_stimulus_interface():
             handled.append(value.stimulus.stimulus_id)
             return await super().handle(value, plans)
 
-    handler = _Observed(_StagedComposer(), _Understanding())
+    handler = _Observed(_StagedComposer())
     facade = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.TEXT_MESSAGE, handler)]))
 
     await facade.handle_stimulus(deadline_request(), sink, context=context())
@@ -289,6 +291,7 @@ class _Singing:
 def _composition(config, delay):
     return ResponseCompositionSkill(
         config,
+        topic_extraction=SimpleNamespace(extract=AsyncMock(return_value=TopicExtraction(memory_queries=("你好",)))),
         memories={"luotianyi": _Memory(delay)},
         singing=_Singing(),
         generators={"luotianyi": _Generator()},
@@ -315,7 +318,6 @@ async def test_skill_emits_configured_provisional_draft_only_when_recall_is_slow
         user_context=UserContextSnapshot(),
         reply_topic="你好",
         conversation_history="",
-        memory_queries=("你好",),
     )
 
     assert staged.provisional is not None
@@ -337,14 +339,12 @@ async def test_fast_recall_and_missing_config_produce_no_provisional_draft():
         user_context=UserContextSnapshot(),
         reply_topic="你好",
         conversation_history="",
-        memory_queries=("你好",),
     )
     unconfigured = await _composition({}, 0.2).compose_staged(
         invocation(),
         user_context=UserContextSnapshot(),
         reply_topic="你好",
         conversation_history="",
-        memory_queries=("你好",),
     )
 
     assert fast.provisional is None
