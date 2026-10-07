@@ -1,3 +1,4 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import React from 'react';
 import { act, create, ReactTestRenderer } from 'react-test-renderer';
 import { GestureResponderEvent } from 'react-native';
@@ -6,7 +7,7 @@ import { NetworkClient } from '../utils/network_client';
 import { voiceRecorder } from '../utils/voice_recorder';
 
 jest.mock('react-native', () => ({ AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
-jest.mock('expo-haptics', () => ({ impactAsync: jest.fn(), ImpactFeedbackStyle: { Medium: 'medium' } }));
+jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
 jest.mock('expo-image-picker', () => ({}));
 jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));
 jest.mock('expo-file-system/legacy', () => ({
@@ -33,12 +34,13 @@ describe('voice upload result restores capture through chat, binder and send que
 
   beforeEach(() => {
     jest.clearAllMocks();
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 3 });
     now = jest.spyOn(Date, 'now').mockReturnValue(1000);
-    (voiceRecorder.start as jest.Mock)
+    (voiceRecorder.start as jest.Mock).mockReset()
       .mockResolvedValueOnce({ recordingId: 'first', localUri: 'file://recording.m4a' })
       .mockResolvedValueOnce({ recordingId: 'second', localUri: 'file://recording.m4a' });
   });
-  afterEach(async () => { if (root) await act(async () => root.unmount()); now.mockRestore(); });
+  afterEach(async () => { if (root) await act(async () => root.unmount()); now.mockRestore(); jest.useRealTimers(); });
 
   it.each(['submitted', 'failed'] as const)('restores after %s, allows switching and a second recording', async (status) => {
     let finish!: (value: object) => void;
@@ -83,7 +85,7 @@ describe('voice upload result restores capture through chat, binder and send que
         await act(async () => { await state.retryVoice('first'); });
         expect(state.messages.find((message) => message.uuid === 'first')?.sendStatus).toBe('waiting');
         expect(state.voiceInput.captureState).toBe('Uploading');
-        expect(sendVoicePhase.mock.calls.slice(callsBeforeRetry).map(([payload]) => payload.phase)).toEqual(['begin', 'chunk', 'finalize']);
+        expect(sendVoicePhase.mock.calls.slice(callsBeforeRetry).filter(([payload]) => payload.phase !== 'abort').map(([payload]) => payload.phase)).toEqual(['begin', 'chunk', 'finalize']);
         expect(sendVoicePhase.mock.calls.every(([payload]) => payload.upload_id === 'first')).toBe(true);
         await act(async () => { finish(retryStatus === 'submitted'
           ? { ok: true, message_uuid: 'server-first' }
@@ -102,4 +104,66 @@ describe('voice upload result restores capture through chat, binder and send que
     await act(async () => { state.voiceInput.onUploadStatus('first', 'failed'); });
     expect(state.voiceInput.captureState).toBe('Recording');
   });
+  it('restores input and fails the bubble at 15s through the real queue after chunk ACK loss', async () => {
+    now.mockRestore();
+    jest.useFakeTimers({ now: 1000 });
+    const sendVoicePhase = jest.fn((payload, _id, budgetMs) => payload.phase === 'chunk'
+      ? new Promise((resolve) => setTimeout(() => resolve({ ok: false, error: 'disconnected' }), budgetMs))
+      : Promise.resolve({ ok: true }));
+    (NetworkClient as jest.Mock).mockImplementation(() => ({
+      connectWs: jest.fn(), disconnectWs: jest.fn(), sendVoicePhase,
+      sendVoiceRecordingStarted: jest.fn(), sendVoiceRecordingCancelled: jest.fn(),
+    }));
+    await act(async () => { root = create(<Harness />); });
+    await act(async () => { state.voiceInput.toggleMode(); });
+    await act(async () => { await state.voiceInput.pressIn(event); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(1000); });
+    await act(async () => { await state.voiceInput.pressOut(); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(14999); });
+    expect(state.voiceInput.captureState).toBe('Uploading');
+    await act(async () => { await jest.advanceTimersByTimeAsync(1); });
+    expect(state.voiceInput.captureState).toBe('VoiceReady');
+    expect(state.messages.find((message) => message.uuid === 'first')?.sendStatus).toBe('failed');
+    expect(sendVoicePhase.mock.calls.map((call) => call[1])).toEqual(['first:begin', 'first:chunk:0', 'first:chunk:0', 'first:chunk:0', 'first:abort']);
+    await act(async () => { state.voiceInput.toggleMode(); });
+    expect(state.voiceInput.mode).toBe('text');
+  });
+
+  it('reports a missing local file on manual retry and releases the input lock', async () => {
+    const sendVoicePhase = jest.fn().mockResolvedValue({ ok: false, drop: true, error: 'rejected' });
+    (NetworkClient as jest.Mock).mockImplementation(() => ({
+      connectWs: jest.fn(), disconnectWs: jest.fn(), sendVoicePhase,
+      sendVoiceRecordingStarted: jest.fn(), sendVoiceRecordingCancelled: jest.fn(),
+    }));
+    await act(async () => { root = create(<Harness />); });
+    await act(async () => { state.voiceInput.toggleMode(); });
+    await act(async () => { await state.voiceInput.pressIn(event); });
+    now.mockReturnValue(2000);
+    await act(async () => { await state.voiceInput.pressOut(); });
+    const sent = sendVoicePhase.mock.calls.length;
+    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: false });
+    await act(async () => { await state.retryVoice('first'); });
+    expect(sendVoicePhase).toHaveBeenCalledTimes(sent);
+    expect(state.voiceInput.captureState).toBe('VoiceReady');
+    expect(state.messages.some((message) => message.content === '本地语音文件已不存在，无法重试')).toBe(true);
+  });
+
+  it('does not enqueue cancelled recordings', async () => {
+    const sendVoicePhase = jest.fn();
+    const cancelled = jest.fn();
+    (NetworkClient as jest.Mock).mockImplementation(() => ({
+      connectWs: jest.fn(), disconnectWs: jest.fn(), sendVoicePhase,
+      sendVoiceRecordingStarted: jest.fn(), sendVoiceRecordingCancelled: cancelled,
+    }));
+    await act(async () => { root = create(<Harness />); });
+    await act(async () => { state.voiceInput.toggleMode(); });
+    await act(async () => { await state.voiceInput.pressIn(event); });
+    now.mockReturnValue(2000);
+    await act(async () => { state.voiceInput.pressMove({ nativeEvent: { pageY: 100 } } as GestureResponderEvent); });
+    await act(async () => { await state.voiceInput.pressOut(); });
+    expect(cancelled).toHaveBeenCalledWith('first');
+    expect(sendVoicePhase).not.toHaveBeenCalled();
+    expect(state.messages.filter((message) => message.type === 'audio')).toHaveLength(0);
+  });
+
 });

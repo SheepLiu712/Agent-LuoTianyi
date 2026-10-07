@@ -1,66 +1,113 @@
-jest.mock('react-native', () => ({ AppState: { currentState: 'active' } }));
-jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));
-jest.mock('expo-file-system/legacy', () => ({
-  EncodingType: { Base64: 'base64' },
-  getInfoAsync: jest.fn().mockResolvedValue({ exists: true, size: 49152 }),
-  readAsStringAsync: jest.fn(),
-}));
-
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentBinder } from '../utils/binder';
 import { MessageProcessor } from '../utils/message_processor';
 import { NetworkClient } from '../utils/network_client';
 
-function binder() {
-  return { emitMessageStatus: jest.fn(), emitErrorText: jest.fn(), emitAgentMessage: jest.fn(), emitLocalTtsState: jest.fn() } as unknown as jest.Mocked<AgentBinder>;
+jest.mock('react-native', () => ({ AppState: { currentState: 'active' } }));
+jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));
+jest.mock('expo-file-system/legacy', () => ({
+  EncodingType: { Base64: 'base64' },
+  getInfoAsync: jest.fn(), readAsStringAsync: jest.fn(),
+}));
+
+function setup(sendVoicePhase: jest.Mock) {
+  const binder = { emitMessageStatus: jest.fn(), emitErrorText: jest.fn() };
+  const network = { sendVoicePhase, sendVoiceRecordingCancelled: jest.fn().mockResolvedValue({ ok: true }), sendChat: jest.fn().mockResolvedValue({ ok: true }) };
+  const processor = new MessageProcessor(network as unknown as NetworkClient, binder as unknown as AgentBinder, jest.fn());
+  return { processor, binder, network };
 }
 
-function processor(networkClient: NetworkClient, messageBinder = binder()) {
-  return { processor: new MessageProcessor(networkClient, messageBinder, jest.fn()), binder: messageBinder };
-}
+beforeEach(() => {
+  jest.useFakeTimers();
+  jest.clearAllMocks();
+  (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 49158 });
+  (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue('A'.repeat(65536 + 8));
+});
+afterEach(() => jest.useRealTimers());
 
-describe('voice upload phases', () => {
-  beforeEach(() => jest.clearAllMocks());
+it('sends stable phase IDs, waits for finalize and does not interleave queued text', async () => {
+  let finish!: (result: object) => void;
+  const send = jest.fn(async (payload, _id?: string) => payload.phase === 'finalize' ? new Promise((resolve) => { finish = resolve; }) : { ok: true });
+  const { processor, binder, network } = setup(send);
+  await processor.sendVoice('voice', 'file://voice.m4a', 1000);
+  await processor.sendText('text', 'hello');
+  await jest.advanceTimersByTimeAsync(0);
+  expect(send.mock.calls.map((call) => call[1])).toEqual(['voice:begin', 'voice:chunk:0', 'voice:chunk:1', 'voice:finalize']);
+  expect(network.sendChat).not.toHaveBeenCalled();
+  expect(binder.emitMessageStatus).not.toHaveBeenCalledWith('voice', 'submitted');
+  finish({ ok: true });
+  await jest.advanceTimersByTimeAsync(0);
+  expect(binder.emitMessageStatus).toHaveBeenCalledWith('voice', 'submitted');
+  expect(network.sendChat).toHaveBeenCalledTimes(1);
+});
 
-  it('sends begin, chunks, and finalize with stable upload and client IDs', async () => {
-    const raw = 'A'.repeat(65536 + 8);
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue(raw);
-    const phases: Array<{ payload: Record<string, unknown>; id?: string }> = [];
-    const network = { sendVoicePhase: jest.fn(async (payload, id) => { phases.push({ payload, id }); return { ok: true }; }) } as unknown as NetworkClient;
-    const { processor: subject, binder: messageBinder } = processor(network);
-
-    await subject.sendVoice('voice-1', 'file://voice.m4a', 15000);
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(phases.map((entry) => entry.payload.phase)).toEqual(['begin', 'chunk', 'chunk', 'finalize']);
-    expect(phases.map((entry) => entry.id)).toEqual(['voice-1:begin', 'voice-1:chunk:0', 'voice-1:chunk:1', 'voice-1:finalize']);
-    expect(phases.every(({ payload }) => payload.upload_id === 'voice-1')).toBe(true);
-    expect((phases[1].payload.audio_base64 as string).length).toBeLessThanOrEqual(65536);
-    expect(messageBinder.emitMessageStatus).toHaveBeenLastCalledWith('voice-1', 'submitted');
+it.each(['begin', 'chunk:1', 'finalize'])('retries only the failed %s operation with the same ID', async (failedPhase) => {
+  let failed = false;
+  const send = jest.fn(async (_payload, id) => {
+    if (id === `voice:${failedPhase}` && !failed) { failed = true; return { ok: false, error: 'disconnected', drop: false }; }
+    return { ok: true };
   });
+  const { processor, binder } = setup(send);
+  await processor.sendVoice('voice', 'file://voice.m4a', 1000);
+  await jest.advanceTimersByTimeAsync(1000);
+  const expected = ['begin', 'chunk:0', 'chunk:1', 'finalize'].flatMap((phase) => phase === failedPhase ? [phase, phase] : [phase]);
+  expect(send.mock.calls.map((call) => call[1])).toEqual(expected.map((phase) => `voice:${phase}`));
+  expect(binder.emitMessageStatus).toHaveBeenLastCalledWith('voice', 'submitted');
+});
 
-  it('drops when the 15 second budget is exceeded', async () => {
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue('AAAA');
-    const network = { sendVoicePhase: jest.fn(async () => ({ ok: true })) } as unknown as NetworkClient;
-    const { processor: subject, binder: messageBinder } = processor(network);
-    const now = jest.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(15000);
-    const result = await (subject as any).sendVoiceItem({ kind: 'voice', uuid: 'late', localUri: 'file://voice.m4a', durationMs: 1000, clientMsgId: 'late', retryAttempt: 0, enqueuedAtMs: 0 });
-    expect(result).toMatchObject({ ok: false, drop: true });
-    expect((network.sendVoicePhase as jest.Mock).mock.calls.map((call) => call[1])).toEqual(['late:begin']);
-    now.mockRestore();
-    expect(messageBinder.emitMessageStatus).not.toHaveBeenCalled();
-  });
+it('fails at the shared 15s deadline, caps the final ACK wait and aborts once without more retries', async () => {
+  const send = jest.fn((payload, _id, budgetMs) => payload.phase === 'abort'
+    ? Promise.resolve({ ok: true })
+    : new Promise((resolve) => setTimeout(() => resolve({ ok: false, error: 'ack lost' }), budgetMs)));
+  const { processor, binder } = setup(send);
+  await processor.sendVoice('voice', 'file://voice.m4a', 1000);
+  await jest.advanceTimersByTimeAsync(14999);
+  expect(binder.emitMessageStatus).not.toHaveBeenCalledWith('voice', 'failed');
+  await jest.advanceTimersByTimeAsync(1);
+  expect(binder.emitMessageStatus).toHaveBeenLastCalledWith('voice', 'failed');
+  expect(send.mock.calls.map((call) => [call[1], call[2]])).toEqual([
+    ['voice:begin', 5000], ['voice:begin', 5000], ['voice:begin', 2000], ['voice:abort', 1000],
+  ]);
+  await jest.advanceTimersByTimeAsync(60000);
+  expect(send).toHaveBeenCalledTimes(4);
+  expect(processor.queueLength()).toBe(0);
+  // 手工重试得到新预算，但逻辑消息和阶段 ID 不变。
+  send.mockImplementation(async () => ({ ok: true }));
+  await processor.sendVoice('voice', 'file://voice.m4a', 1000);
+  await jest.advanceTimersByTimeAsync(0);
+  expect(send.mock.calls[4][1]).toBe('voice:begin');
+  expect(send.mock.calls[4][2]).toBe(5000);
+  expect(binder.emitMessageStatus).toHaveBeenLastCalledWith('voice', 'submitted');
+});
 
-  it('retries a failed upload with the same phase IDs', async () => {
-    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue('AAAA');
-    const ids: string[] = [];
-    let attempt = 0;
-    const network = { sendVoicePhase: jest.fn(async (_payload, id) => { ids.push(id); attempt += 1; return attempt === 1 ? { ok: false, error: 'temporary' } : { ok: true }; }) } as unknown as NetworkClient;
-    const { processor: subject } = processor(network);
-    const item = { kind: 'voice', uuid: 'retry', localUri: 'file://voice.m4a', durationMs: 1000, clientMsgId: 'retry', retryAttempt: 0, enqueuedAtMs: Date.now() };
-    await expect((subject as any).sendVoiceItem(item)).resolves.toMatchObject({ ok: false });
-    await expect((subject as any).sendVoiceItem(item)).resolves.toMatchObject({ ok: true });
-    expect(ids).toEqual(['retry:begin', 'retry:begin', 'retry:chunk:0', 'retry:finalize']);
-  });
+it('caps backoff at the deadline rather than waiting for the next retry window', async () => {
+  const send = jest.fn(async (payload, _id?: string) => payload.phase === 'abort' ? { ok: true } : { ok: false, error: 'offline' });
+  const { processor, binder } = setup(send);
+  await processor.sendVoice('voice', 'file://voice.m4a', 1000);
+  await jest.advanceTimersByTimeAsync(15000);
+  expect(binder.emitMessageStatus).toHaveBeenLastCalledWith('voice', 'failed');
+  expect(send.mock.calls.map((call) => call[1])).toEqual(['voice:begin', 'voice:begin', 'voice:begin', 'voice:begin', 'voice:abort']);
+});
+
+it('permanent rejection aborts immediately and allows the next queued message', async () => {
+  const send = jest.fn(async (payload, _id?: string) => payload.phase === 'abort' ? { ok: true } : { ok: false, drop: true, error: 'BAD_MESSAGE' });
+  const { processor, binder, network } = setup(send);
+  await processor.sendVoice('voice', 'file://voice.m4a', 1000);
+  await processor.sendText('text', 'hello');
+  await jest.advanceTimersByTimeAsync(0);
+  expect(send.mock.calls.map((call) => call[1])).toEqual(['voice:begin', 'voice:abort']);
+  expect(binder.emitMessageStatus).toHaveBeenCalledWith('voice', 'failed');
+  expect(network.sendChat).toHaveBeenCalledTimes(1);
+});
+
+it('file read errors settle as failed rather than leaving the queue and UI locked', async () => {
+  (FileSystem.readAsStringAsync as jest.Mock).mockRejectedValue(new Error('file unreadable'));
+  const send = jest.fn().mockResolvedValue({ ok: true });
+  const { processor, binder, network } = setup(send);
+  await processor.sendVoice('voice', 'file://voice.m4a', 1000);
+  await jest.advanceTimersByTimeAsync(0);
+  expect(binder.emitMessageStatus).toHaveBeenLastCalledWith('voice', 'failed');
+  expect(processor.queueLength()).toBe(0);
+  expect(send).not.toHaveBeenCalled();
+  expect(network.sendVoiceRecordingCancelled).toHaveBeenCalledWith('voice');
 });

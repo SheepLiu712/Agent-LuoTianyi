@@ -31,6 +31,8 @@ type SendItem = { clientMsgId: string; retryAttempt: number; enqueuedAtMs: numbe
   | { kind: 'voice'; uuid: string; localUri: string; durationMs: number }
 );
 
+export const VOICE_UPLOAD_BUDGET_MS = 15000;
+
 export const MAX_DURABLE_RETRY_ATTEMPTS = 8;
 export const MAX_DURABLE_MESSAGE_AGE_MS = 4 * 60 * 1000;
 
@@ -746,7 +748,7 @@ export class MessageProcessor {
 
       const item = this.sendQueue[0];
       const durable = isDurableSendKind(item.kind);
-      if (durable && Date.now() - item.enqueuedAtMs >= MAX_DURABLE_MESSAGE_AGE_MS) {
+      if (durable && item.kind !== 'voice' && Date.now() - item.enqueuedAtMs >= MAX_DURABLE_MESSAGE_AGE_MS) {
         this.failDeliveryUncertain(item, 'message exceeded the automatic delivery window');
         this.sendQueue.shift();
         continue;
@@ -850,30 +852,64 @@ export class MessageProcessor {
   }
 
   private async sendVoiceItem(item: Extract<SendItem, { kind: 'voice' }>): Promise<SendResult> {
-    const info = await FileSystem.getInfoAsync(item.localUri);
-    const size = typeof (info as { size?: number }).size === 'number' ? (info as { size: number }).size : 0;
-    if (!info.exists || size <= 0 || size > 1024 * 1024) return { ok: false, error: 'voice file unavailable or too large', drop: true };
-    const base64 = await FileSystem.readAsStringAsync(item.localUri, { encoding: FileSystem.EncodingType.Base64 });
-    const raw = base64.replace(/^data:[^,]+,/, '').replace(/\s+/g, '');
-    const chunkSize = 48 * 1024;
-    const chunks: string[] = [];
-    for (let offset = 0; offset < raw.length; offset += chunkSize * 4 / 3) chunks.push(raw.slice(offset, offset + chunkSize * 4 / 3));
-    if (chunks.length < 1 || chunks.length > 32) return { ok: false, error: 'invalid voice chunk count', drop: true };
-    const startedAt = Date.now();
-    const send = (payload: Record<string, unknown>, suffix: string) => this.networkClient.sendVoicePhase(payload, `${item.uuid}:${suffix}`);
-    let result = await send({ phase: 'begin', upload_id: item.uuid, mime_type: 'audio/mp4', container: 'm4a', codec: 'aac_lc', byte_length: size, total_chunks: chunks.length }, 'begin');
-    if (!result.ok) return result;
-    for (let i = 0; i < chunks.length; i += 1) {
-      if (Date.now() - startedAt >= 15000) return { ok: false, error: 'voice upload budget exceeded', drop: true };
-      result = await send({ phase: 'chunk', upload_id: item.uuid, chunk_index: i, audio_base64: chunks[i] }, `chunk:${i}`);
-      if (!result.ok) return result;
+    let began = false;
+    try {
+      const info = await FileSystem.getInfoAsync(item.localUri);
+      const size = info.exists && 'size' in info ? info.size : 0;
+      if (!size || size > 1024 * 1024) throw new Error('voice file unavailable or too large');
+      const base64 = await FileSystem.readAsStringAsync(item.localUri, { encoding: FileSystem.EncodingType.Base64 });
+      const raw = base64.replace(/^data:[^,]+,/, '').replace(/\s+/g, '');
+      const chunks: string[] = [];
+      for (let offset = 0; offset < raw.length; offset += 65536) chunks.push(raw.slice(offset, offset + 65536));
+      if (chunks.length < 1 || chunks.length > 32) throw new Error('invalid voice chunk count');
+      const operations: { payload: Record<string, unknown>; suffix: string }[] = [
+        { payload: { phase: 'begin', upload_id: item.uuid, mime_type: 'audio/mp4', container: 'm4a', codec: 'aac_lc', byte_length: size, total_chunks: chunks.length }, suffix: 'begin' },
+        ...chunks.map((audio, index) => ({ payload: { phase: 'chunk', upload_id: item.uuid, chunk_index: index, audio_base64: audio }, suffix: `chunk:${index}` })),
+        { payload: { phase: 'finalize', upload_id: item.uuid }, suffix: 'finalize' },
+      ];
+      // 一次队列项持有整条语音。自动重试仅重放当前阶段，并共享首次 begin 的截止时刻。
+      const deadline = Date.now() + VOICE_UPLOAD_BUDGET_MS;
+      began = true;
+      let retries = 0;
+      for (const operation of operations) {
+        while (!this.stopRequested) {
+          const remainingMs = deadline - Date.now();
+          if (remainingMs <= 0) return this.failVoiceUpload(item, 'voice upload budget exceeded');
+          let result: SendResult;
+          try {
+            result = await this.networkClient.sendVoicePhase(operation.payload, `${item.uuid}:${operation.suffix}`, Math.min(5000, remainingMs));
+          } catch (error) {
+            result = { ok: false, error: getErrorMessage(error) };
+          }
+          if (this.stopRequested) return { ok: false, drop: true, error: 'stopped' };
+          if (Date.now() >= deadline) return this.failVoiceUpload(item, 'voice upload budget exceeded');
+          if (result.ok) {
+            if (operation.suffix === 'finalize') {
+              if (result.message_uuid) this.onVoiceFinalized?.(item.uuid, result.message_uuid, result.duration_ms);
+              return result;
+            }
+            break;
+          }
+          if (result.drop) return this.failVoiceUpload(item, result.error || 'voice upload rejected');
+          const delayMs = Math.min(getSendRetryDelayMs(retries++), Math.max(0, deadline - Date.now()));
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+        if (this.stopRequested) return { ok: false, drop: true, error: 'stopped' };
+      }
+      return this.failVoiceUpload(item, 'voice upload incomplete');
+    } catch (error) {
+      return this.failVoiceUpload(item, getErrorMessage(error), began);
     }
-    if (Date.now() - startedAt >= 15000) return { ok: false, error: 'voice upload budget exceeded', drop: true };
-    const finalized = await send({ phase: 'finalize', upload_id: item.uuid }, 'finalize') as SendResult;
-    if (finalized.ok && finalized.message_uuid) {
-      this.onVoiceFinalized?.(item.uuid, finalized.message_uuid, finalized.duration_ms);
-    }
-    return finalized;
+  }
+
+  private failVoiceUpload(item: Extract<SendItem, { kind: 'voice' }>, error: string, began = true): SendResult {
+    // 不延长 UI 的 15 秒预算；断线时清理由服务端 TTL 兜底，不排队补发 abort。
+    const cleanup = began
+      ? this.networkClient.sendVoicePhase({ phase: 'abort', upload_id: item.uuid }, `${item.uuid}:abort`, 1000)
+      : this.networkClient.sendVoiceRecordingCancelled(item.uuid);
+    void cleanup.catch(() => undefined);
+    this.binder.emitErrorText(`语音发送失败：${error}`);
+    return { ok: false, error, drop: true };
   }
 
   private async saveAudioToLocal(convUuid: string, chunks: string[]): Promise<string | null> {
