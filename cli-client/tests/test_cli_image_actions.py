@@ -1,12 +1,14 @@
 import base64
 import threading
+from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from cli_client.cli.actions import ActionExecutor, ExitCode
 from cli_client.cli.output import serialize_record
 from cli_client.session import HeadlessSession, SessionImageError, SessionNotReadyError, SessionState
-from cli_client.utils import image_rules
+from cli_client.utils import image_compression, image_rules
 
 
 class FakeSession:
@@ -103,7 +105,7 @@ def test_image_select_rejects_unsupported_type_and_clears_selection(tmp_path):
     assert send_record["error"]["code"] == "IMAGE_NOT_SELECTED"
 
 
-def test_image_select_rejects_oversized_file(tmp_path, monkeypatch):
+def test_image_select_allows_oversized_file(tmp_path, monkeypatch):
     image = tmp_path / "big.png"
     image.write_bytes(_png_bytes(b"\x00" * 64))
     monkeypatch.setattr(image_rules, "MAX_IMAGE_BYTES", 16)
@@ -111,8 +113,60 @@ def test_image_select_rejects_oversized_file(tmp_path, monkeypatch):
 
     record, exit_code = _select(executor, image)
 
+    assert exit_code == ExitCode.SUCCESS
+    assert record["data"]["selected"] is True
+    assert record["data"]["byte_count"] == image.stat().st_size
+
+
+def test_send_image_maps_oversized_pipeline_error_to_stable_code(tmp_path):
+    image = tmp_path / "big.png"
+    image.write_bytes(_png_bytes(b"\x00" * 16))
+
+    class OversizedSession(FakeSession):
+        def send_image(self, image_path, *, client_msg_id, ack_timeout=10.0):
+            raise SessionImageError("图片过大（上限约 6 MB），请选择更小的图片")
+
+    record, exit_code = _send(_executor(OversizedSession()), image)
+
     assert exit_code == ExitCode.INPUT_ERROR
     assert record["error"]["code"] == "IMAGE_TOO_LARGE"
+    assert "图片过大" in record["error"]["message"]
+
+
+def test_send_image_maps_unreadable_pipeline_error(tmp_path):
+    image = tmp_path / "gone.png"
+    image.write_bytes(_png_bytes())
+
+    class UnreadableSession(FakeSession):
+        def send_image(self, image_path, *, client_msg_id, ack_timeout=10.0):
+            raise SessionImageError("图片无法读取，请确认文件仍然存在且可访问")
+
+    record, exit_code = _send(_executor(UnreadableSession()), image)
+
+    assert exit_code == ExitCode.INPUT_ERROR
+    assert record["error"]["code"] == "IMAGE_FILE_UNREADABLE"
+    assert "图片无法读取" in record["error"]["message"]
+
+
+def test_send_image_compresses_oversized_file_end_to_end(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    network = FakeNetworkClient(ready=True)
+    session = HeadlessSession(base_url="http://test", network_client=network)
+    session.connect("user", "pass")
+    executor = _executor(session)
+    image = tmp_path / "large.bmp"
+    Image.new("RGB", (3000, 1000), "red").save(image)
+    assert image.stat().st_size > image_rules.MAX_IMAGE_BYTES
+
+    record, exit_code = _send(executor, image)
+
+    assert exit_code == ExitCode.SUCCESS
+    assert record["data"]["ack"] is True
+    call = network.image_calls[0]
+    decoded = base64.b64decode(call["image_base64"])
+    assert call["mime_type"] == "image/jpeg"
+    assert len(decoded) <= image_compression.IMAGE_COMPRESSION_TARGET_BYTES
+    assert Path(call["image_client_path"]).read_bytes() == decoded
 
 
 def test_image_select_empty_file_is_rejected(tmp_path):
