@@ -1,4 +1,5 @@
 """歌曲知识接纳：幂等写入、已有项跳过、失败不留半份与处理器结算。"""
+
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -11,6 +12,8 @@ from src.agent.skills.knowledge.song_acceptance import (
     SongKnowledgeAcceptanceSkill,
 )
 from src.infrastructure.persistence import Song, get_song_session
+from src.world.get_new_songs.daily_new_song_fetcher import _fetch_candidate
+from src.world.get_new_songs.vcpedia_fetcher import VCPediaFetcher
 
 SONG_NAME = "新歌"
 LYRIC_KEYWORDS = ("一句歌词", "两句歌词")
@@ -26,8 +29,12 @@ def skill_config(tmp_path):
 
 def candidate(song_name=SONG_NAME, introduction="一首歌的介绍"):
     return d.SongKnowledgeCandidate(
-        song_name=song_name, uploader="UP主", singers=("歌手A", "歌手B"),
-        introduction=introduction, lyrics="歌词正文", lyric_keywords=LYRIC_KEYWORDS,
+        song_name=song_name,
+        uploader="UP主",
+        singers=("歌手A", "歌手B"),
+        introduction=introduction,
+        lyrics="歌词正文",
+        lyric_keywords=LYRIC_KEYWORDS,
     )
 
 
@@ -37,7 +44,9 @@ def source_ref():
 
 async def accept(skill, *, song_name=SONG_NAME, revision=7):
     return await skill.accept(
-        source_ref=source_ref(), external_song_id=song_name, revision=revision,
+        source_ref=source_ref(),
+        external_song_id=song_name,
+        revision=revision,
         candidate=candidate(song_name=song_name),
     )
 
@@ -88,6 +97,53 @@ async def test_accept_writes_knowledge_and_keywords(tmp_path):
     ]
 
 
+async def test_fetcher_single_version_and_keywords_reach_agent_storage(monkeypatch, tmp_path):
+    import src.world.get_new_songs.vcpedia_fetcher as fetcher_module
+
+    source = (
+        "{{VOCALOID Songbox|演唱=洛天依}}\n== 简介 ==\n独立的歌曲简介。\n== 歌词 ==\n"
+        "<poem>第一版部分{{未知|未提取内容}}</poem>"
+        "<poem>第二版的完整歌词\n第二版的重复副歌\n第二版的重复副歌</poem>"
+    )
+    monkeypatch.setattr(fetcher_module, "fetch_wikitext", lambda *args: source)
+    fetcher = VCPediaFetcher(
+        {
+            "activated": True,
+            "use_llm": False,
+            "merge_rendered_fragments": False,
+            "data_dir": str(tmp_path / "cache"),
+        }
+    )
+    fetched = _fetch_candidate(fetcher, SONG_NAME)
+    assert fetched is not None
+    skill = SongKnowledgeAcceptanceSkill(skill_config(tmp_path))
+
+    result = await skill.accept(
+        source_ref=source_ref(),
+        external_song_id=SONG_NAME,
+        revision=1,
+        candidate=d.SongKnowledgeCandidate(
+            song_name=fetched.song_name,
+            uploader=fetched.uploader or None,
+            singers=fetched.singers,
+            introduction=fetched.introduction,
+            lyrics=fetched.lyrics,
+            lyric_keywords=fetched.lyric_keywords,
+        ),
+    )
+
+    assert result.status is SongAcceptanceStatus.ACCEPTED
+    session = get_song_session()
+    try:
+        stored = session.query(Song).filter(Song.name == SONG_NAME).one()
+        assert stored.lyrics == "第二版的完整歌词\n第二版的重复副歌\n第二版的重复副歌"
+    finally:
+        session.close()
+    keywords = (tmp_path / "knowledge" / "song_lyric_keywords.txt").read_text(encoding="utf-8")
+    assert "第一版" not in keywords
+    assert all(keyword in keywords for keyword in fetched.lyric_keywords)
+
+
 async def test_second_accept_skips_existing_without_duplicate_keywords(tmp_path):
     skill = SongKnowledgeAcceptanceSkill(skill_config(tmp_path))
     await accept(skill)
@@ -134,23 +190,43 @@ async def test_keyword_failure_rolls_back_knowledge(tmp_path):
 def world_request(fact):
     now = datetime(2026, 9, 15, tzinfo=timezone.utc)
     snapshot = d.WorldInteractionSnapshot(
-        interaction_id="wi", interaction_revision=1, user_id=None, pending_stimuli=(fact,),
-        now=now, timezone=ZoneInfo("UTC"), supported_outputs=frozenset(), world_id="default",
-        world_revision=0, activity_id=None, activity_revision=None,
-        planning_cycle_id=None, schedule_revision=0,
+        interaction_id="wi",
+        interaction_revision=1,
+        user_id=None,
+        pending_stimuli=(fact,),
+        now=now,
+        timezone=ZoneInfo("UTC"),
+        supported_outputs=frozenset(),
+        world_id="default",
+        world_revision=0,
+        activity_id=None,
+        activity_revision=None,
+        planning_cycle_id=None,
+        schedule_revision=0,
     )
     return d.HandleStimulusRequest(
-        request_id="wr", stimulus=fact, interaction=snapshot, cancellation=d.CancellationToken(),
+        request_id="wr",
+        stimulus=fact,
+        interaction=snapshot,
+        cancellation=d.CancellationToken(),
     )
 
 
 def discovered(song_name=SONG_NAME):
     now = datetime(2026, 9, 15, tzinfo=timezone.utc)
     return d.SongKnowledgeDiscovered(
-        stimulus_id="sk1", schema_version=1, occurred_at=now, source=d.StimulusSource.WORLD,
-        target_character_ids=("luotianyi",), user_id=None, ephemeral=False,
-        source_ref=source_ref(), external_song_id=song_name, revision=7,
-        candidate=candidate(song_name=song_name), fetched_at=now,
+        stimulus_id="sk1",
+        schema_version=1,
+        occurred_at=now,
+        source=d.StimulusSource.WORLD,
+        target_character_ids=("luotianyi",),
+        user_id=None,
+        ephemeral=False,
+        source_ref=source_ref(),
+        external_song_id=song_name,
+        revision=7,
+        candidate=candidate(song_name=song_name),
+        fetched_at=now,
     )
 
 
@@ -197,10 +273,17 @@ async def test_handler_rejects_other_stimulus_kinds(tmp_path):
     handler = SongKnowledgeHandler(SongKnowledgeAcceptanceSkill(skill_config(tmp_path)))
     now = datetime(2026, 9, 15, tzinfo=timezone.utc)
     foreign = d.WorldObservation(
-        stimulus_id="wo1", schema_version=1, occurred_at=now, source=d.StimulusSource.WORLD,
-        target_character_ids=("luotianyi",), user_id=None, ephemeral=False,
-        observation_kind=d.WorldObservationKind(value="citywalk"), fact=d.WorldFact(fact_id="f", summary="散步"),
-        evidence_refs=(), world_revision=1,
+        stimulus_id="wo1",
+        schema_version=1,
+        occurred_at=now,
+        source=d.StimulusSource.WORLD,
+        target_character_ids=("luotianyi",),
+        user_id=None,
+        ephemeral=False,
+        observation_kind=d.WorldObservationKind(value="citywalk"),
+        fact=d.WorldFact(fact_id="f", summary="散步"),
+        evidence_refs=(),
+        world_revision=1,
     )
 
     try:

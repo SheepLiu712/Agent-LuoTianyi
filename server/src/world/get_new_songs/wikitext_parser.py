@@ -1,6 +1,8 @@
 """Internal source-node parsing; no HTML fetching or remote template expansion."""
 import re
 from copy import deepcopy
+from dataclasses import dataclass, field
+from html import unescape
 from typing import Dict, List
 
 import mwparserfromhell as mw
@@ -20,7 +22,39 @@ from .template_rules import (
 from .text_conversion import TextConversion, spaced_from
 
 # Tags whose contents never carry business text; structural walks skip them whole.
-NON_CONTENT_TAGS = {"ref", "references", "includeonly", "script", "style", "nowiki"}
+NON_CONTENT_TAGS = {"ref", "references", "includeonly", "script", "style", "nowiki", "nav"}
+
+
+@dataclass
+class LyricCandidate:
+    """One original-language lyric body, with its own unresolved source calls."""
+
+    source: str
+    text: str
+    spaced_lyrics: str
+    gaps: set[str]
+    rendered: list[dict] = field(default_factory=list)
+
+    @property
+    def complete(self):
+        return bool(self.text.strip()) and not self.gaps
+
+    @property
+    def rank(self):
+        # This parameter-body coverage estimate is a selection heuristic, not a
+        # proof of full-song completeness. Recompute after rendering changes gaps.
+        extracted = _body_size(self.text)
+        missing = sum(_gap_size(call) for call in self.gaps)
+        coverage = extracted / (extracted + missing) if extracted else 0.0
+        return coverage, -len(self.gaps)
+
+
+def select_lyrics(candidates):
+    """Prefer the first complete candidate; max() preserves source order on ties."""
+    candidates = list(candidates)
+    candidates = [candidate for candidate in candidates if candidate.text.strip() or candidate.gaps] or candidates
+    complete = next((candidate for candidate in candidates if candidate.complete), None)
+    return complete if complete is not None else max(candidates, key=lambda candidate: candidate.rank, default=None)
 
 
 def _name(template):
@@ -84,7 +118,7 @@ def _tag_text(node, lyrics, gaps):
     """Text a tag renders: hidden markup vanishes, ruby resolves to base or
     annotation, block tags close their line."""
     tag = str(node.tag).strip().lower()
-    if tag in {"ref", "references", "gallery", "noinclude", "style", "script"}:
+    if tag in {"ref", "references", "gallery", "noinclude", "style", "script", "nav"} or "navbox" in _classes(node):
         return ""
     if tag == "rp" or "template-ruby-hidden" in _classes(node):
         return ""
@@ -164,6 +198,12 @@ def _multiline_text(node, lyrics, gaps):
 
 
 def _body_slots_text(node, lyrics, gaps):
+    if lyrics:
+        # A structural container hidden inside one poem is not one original text.
+        # Leave the whole call unresolved rather than concatenate its versions.
+        if gaps is not None:
+            gaps.add(str(node))
+        return ""
     return "\n".join(_text(value, lyrics, gaps) for _, _, value in _contents(node))
 
 
@@ -171,8 +211,16 @@ def _break_text(node, lyrics, gaps):
     return "\n"
 
 
+def _original_values(node):
+    rule = descriptor(_name(node))
+    prefix = rule["original_prefix"]
+    values = [(int(str(p.name).strip()[len(prefix):]), p.value) for p in node.params
+              if re.fullmatch(re.escape(prefix) + r"\d+", str(p.name).strip(), re.I)]
+    return [value for _, value in sorted(values)] if values else [_preferred_value(node, rule["original_params"])]
+
+
 def _lyrics_template_text(node, lyrics, gaps):
-    return _lyric_pair(mw.wikicode.Wikicode([node]), gaps)[0]
+    return "\n\n".join(_lyric_text(value, gaps) for value in _original_values(node))
 
 
 _TEXT_KINDS = {
@@ -210,7 +258,7 @@ def _template_text(node, lyrics, gaps):
         return _TEXT_KINDS[kind](node, lyrics, gaps)
     if kind in {"songbox", "staff"} or counter:
         return ""
-    if gaps is not None and _unread_content(node):
+    if gaps is not None and (_unread_content(node) or lyrics):
         gaps.add(str(node))
     return ""
 
@@ -408,6 +456,91 @@ def _lyric_text(code, gaps=None):
     return "\n".join(line.rstrip() for line in _text(code, lyrics=True, gaps=gaps).splitlines()).strip()
 
 
+def rendered_lyrics_text(html):
+    """Read cleaned site HTML without converting already-rendered protected glyphs."""
+    return unescape(_lyric_text(mw.parse(html)))
+
+
+def _body_size(source):
+    text = mw.parse(source).strip_code(keep_template_params=True)
+    return len(re.sub(r"\s+|-\{|\}-", "", text))
+
+
+def _gap_size(call):
+    code = mw.parse(call)
+    values = [p.value for node in code.filter_templates(recursive=False) for p in node.params
+              if _content_parameter(p)]
+    # A no-argument embed still has unknown content; it must not appear covered.
+    return max(1, sum(_body_size(str(value)) for value in values))
+
+
+def _candidate_from_code(code, conversion):
+    """Reuse parsed candidate nodes; never copy or reparse the enclosing page."""
+    gaps = set()
+    original = _lyric_text(code, gaps)
+    return LyricCandidate(
+        source=conversion.restore_source(str(code)),
+        text=conversion.finish(original),
+        spaced_lyrics=conversion.finish(spaced_from(original)),
+        gaps={conversion.restore_source(call) for call in gaps},
+    )
+
+
+def _nested_lyric_container(code):
+    """Find a version container in the original branch, never the translation."""
+    for node in _code(code).nodes:
+        if isinstance(node, Template):
+            kind = _kind(node)
+            if kind in {"tabs", "wrapper"}:
+                return node
+            children = _original_values(node) if kind == "lyrics" else [p.value for p in node.params]
+        elif isinstance(node, Tag) and str(node.tag).lower() not in NON_CONTENT_TAGS:
+            children = [node.contents]
+        else:
+            continue
+        for child in children:
+            found = _nested_lyric_container(child)
+            if found is not None:
+                return found
+    return None
+
+
+def _candidate_variants(code, conversion):
+    container = _nested_lyric_container(code)
+    slots = list(_contents(container)) if container is not None else []
+    if not slots:
+        yield _candidate_from_code(code, conversion)
+        return
+    # Only the small candidate subtree is copied, and only when a real nested
+    # version container exists. Its other slots never enter this candidate source.
+    for _, _, value in slots:
+        variant = deepcopy(code)
+        variant.replace(_nested_lyric_container(variant), str(value), recursive=True)
+        yield from _candidate_variants(variant, conversion)
+
+
+def parse_lyric_candidate(source: str) -> LyricCandidate:
+    """Parse one poem/template/body; isolate nested versions before selection."""
+    conversion = TextConversion(source)
+    candidates = list(_candidate_variants(mw.parse(conversion.protect(source)), conversion))
+    return select_lyrics(candidates)
+
+
+def original_lyrics_source(source: str) -> str:
+    """Keep original source markup, but omit configured translation-only parameters."""
+    conversion = TextConversion(source)
+    code = mw.parse(conversion.protect(source))
+    for node in code.filter_templates():
+        rule = descriptor(_name(node))
+        if rule.get("kind") != "lyrics":
+            continue
+        for param in list(node.params):
+            key = str(param.name).strip().casefold()
+            if key in rule["translated_params"] or re.fullmatch(re.escape(rule["translated_prefix"]) + r"\d+", key):
+                node.remove(param)
+    return conversion.restore_source(str(code))
+
+
 def _classes(tag):
     try:
         return str(tag.get("class").value).split()
@@ -476,31 +609,6 @@ def _preferred_value(template, keys):
     for key in reversed(keys):
         value = _value(template, key, value)
     return value
-
-
-def _lyric_pair(code, gaps=None):
-    """Read documented content parameters, never translated/control values as original."""
-    for node in _code(code).nodes:
-        if isinstance(node, Template) and _kind(node) == "lyrics":
-            rule = descriptor(_name(node))
-            def column(prefix, record_gaps=None):
-                values = [(int(str(p.name).strip()[len(prefix):]), p.value) for p in node.params
-                          if re.fullmatch(re.escape(prefix) + r"\d+", str(p.name).strip(), re.I)]
-                return "\n\n".join(_lyric_text(v, record_gaps) for _, v in sorted(values))
-            original = column(rule["original_prefix"], gaps)
-            translated = column(rule["translated_prefix"])
-            if original or translated:
-                return original, translated
-            original = _preferred_value(node, rule["original_params"])
-            return _lyric_text(original, gaps), _lyric_text(_preferred_value(node, rule["translated_params"]))
-        if isinstance(node, Tag):
-            if str(node.tag).lower() == "poem" or "poem" in _classes(node):
-                return _lyric_text(node.contents, gaps), ""
-            if node.contents and str(node.tag).lower() not in {"ref", "script", "style"}:
-                pair = _lyric_pair(node.contents, gaps)
-                if any(pair):
-                    return pair
-    return "", ""
 
 
 def _kind(template):
@@ -601,13 +709,10 @@ class _Frame:
 
 
 class _DetailExtraction:
-    """One page's traversal collecting infobox, first summary and first lyrics.
+    """Collect infobox, first summary and independent lyric candidates.
 
-    Headings name the sections (简介/歌词) and route every node into one of the
-    collectors. Staff after the first outer songbox and before the second only
-    fill missing infobox fields; lyrics come from the first candidate in source
-    order. Gaps record why a field stayed empty so the caller can request
-    supplements.
+    Staff in the first songbox's scope fill missing fields. Candidate-local gaps
+    are resolved before selecting lyrics, never combined across page versions.
     """
 
     def __init__(self, conversion):
@@ -616,7 +721,7 @@ class _DetailExtraction:
         self.summaries = []
         self.lyric_candidates = []
         self.missing = set()
-        self.gaps = {"summary": set(), "lyrics": set()}
+        self.gaps = {"summary": set()}
         self.boxes = 0
         self.has_heading = False
         self.has_lyrics = False
@@ -638,20 +743,20 @@ class _DetailExtraction:
         """Finish prose; infobox values were already finished before precedence selection."""
         conversion = self.conversion
         summary = self.summaries[:1] or ([""] if self.has_heading else [])
-        lyrics = next(iter(self.lyric_candidates), "")
+        selected = select_lyrics(self.lyric_candidates)
         self.missing.difference_update(key for key, value in self.infobox.items() if value.strip())
         needed = {
             "infobox": sorted(self.missing),
             "summary": bool(self.gaps["summary"]) or bool(self.boxes) and not any(summary),
-            "lyrics": bool(self.gaps["lyrics"]) or bool(self.boxes or self.has_lyrics) and not lyrics,
+            "lyrics": not selected.complete if selected is not None else bool(self.boxes or self.has_lyrics),
         }
         return {
             "name": title,
             "type": "Song" if self.has_lyrics else "Person",
             "infobox": dict(self.infobox),
             "summary": [conversion.finish(value) for value in summary],
-            "lyrics": conversion.finish(lyrics),
-            "spaced_lyrics": conversion.finish(spaced_from(lyrics)),
+            "lyrics": selected.text if selected is not None else "",
+            "spaced_lyrics": selected.spaced_lyrics if selected is not None else "",
         }, needed
 
     def _collect_by_section(self, node, frame):
@@ -667,6 +772,9 @@ class _DetailExtraction:
         if frame.section == "简介" and level > frame.level and target != "歌词":
             frame.intro.append(node)
             return
+        if frame.section == "歌词" and level > frame.level and not target:
+            self._flush(frame)
+            return
         self._flush(frame)
         frame.section, frame.level = target, level
         self.has_lyrics |= frame.section == "歌词"
@@ -680,10 +788,18 @@ class _DetailExtraction:
             self._collect_staff(node)
         elif kind == "lyrics":
             self._collect_lyrics_template(node, frame)
+        elif frame.section == "歌词" and frame.direct:
+            # Inline/unknown/embed calls stay with this body. Nested version
+            # containers are split together with its common prefix and suffix.
+            frame.lyric_nodes.append(node)
+        elif kind in {"tabs", "wrapper"}:
+            self._on_other_template(node, frame, kind)
+        elif frame.section == "歌词" and (kind == "embed" or _has_lyric_parameter(node)):
+            self._flush(frame)
+            self._add_candidate(node)
+            self._search_template(node, frame)
         elif descriptor(_name(node)).get("kind") == "inline":
             self._collect_by_section(node, frame)
-        elif frame.direct and _text(node, lyrics=True):
-            frame.lyric_nodes.append(node)
         else:
             self._on_other_template(node, frame, kind)
 
@@ -706,22 +822,37 @@ class _DetailExtraction:
             self._flush(frame)
             slot = slots.get(id(param.value), "")
             self.has_lyrics |= slot == "歌词"
-            self.walk(param.value, slot, direct=slot == "歌词", nested=True)
+            if slot == "歌词":
+                self._walk_lyric_slot(param.value, nested=True)
+            else:
+                self.walk(param.value, slot, nested=True)
+
+    def _walk_lyric_slot(self, value, level=0, nested=False):
+        # A documented slot with explicit poem/lyrics structures may also contain
+        # credits or navigation. Only plain slots establish direct lyric bodies.
+        start = len(self.lyric_candidates)
+        self.walk(value, "歌词", level, direct=not _has_lyric_structure(value), nested=nested)
+        if len(self.lyric_candidates) == start:
+            self._add_candidate(value)
 
     def _collect_lyrics_template(self, node, frame):
         if frame.section != "歌词":
             return
         self._flush(frame)
+        self._add_candidate(node)
+
+    def _add_candidate(self, value):
         self.has_lyrics = True
-        original, _ = _lyric_pair(node, self.gaps["lyrics"])
-        if original:
-            self.lyric_candidates.append(original)
+        self.lyric_candidates.extend(_candidate_variants(_code(value), self.conversion))
+
+    def _search_template(self, node, frame):
+        # Unknown parameters are structural search roots, not direct lyric text.
+        for param in node.params:
+            self.walk(param.value, "歌词" if frame.section == "歌词" else "", nested=frame.nested)
 
     def _on_other_template(self, node, frame, kind):
         if frame.section != "简介":
             self._flush(frame)
-        if frame.section == "歌词" and not descriptor(_name(node)):
-            self._mark_catalog_gap(node, frame)
         start = len(self.summaries)
         slots = ({id(content) for _, _, content in _contents(node)}
                  if kind in {"tabs", "wrapper"} else set())
@@ -729,7 +860,10 @@ class _DetailExtraction:
             # Only documented content slots inherit surrounding prose. All other
             # values are independent structural search roots.
             if id(param.value) in slots:
-                self.walk(param.value, frame.section, frame.level, frame.direct, nested=frame.nested)
+                if frame.section == "歌词":
+                    self._walk_lyric_slot(param.value, frame.level, nested=frame.nested)
+                else:
+                    self.walk(param.value, frame.section, frame.level, nested=frame.nested)
             else:
                 self.walk(param.value, "歌词" if frame.section == "歌词" else "", nested=frame.nested)
         if frame.section == "简介":
@@ -739,17 +873,9 @@ class _DetailExtraction:
             else:
                 frame.intro.append(node)
 
-    def _mark_catalog_gap(self, node, frame):
-        # A 歌词 section also contains catalogs/navigation. Only direct body slots
-        # or explicit lyric parameters establish prose.
-        has_lyric_param = any(structure(p.name).strip().casefold() in {"original", "歌词"}
-                              and str(p.value).strip() for p in node.params)
-        if (frame.direct and _unread_content(node)) or has_lyric_param:
-            self.gaps["lyrics"].add(str(node))
-
     def _on_tag(self, node, frame):
         tag = str(node.tag).lower()
-        if tag in NON_CONTENT_TAGS:
+        if tag in NON_CONTENT_TAGS or "navbox" in _classes(node):
             return
         if frame.section == "歌词" and (tag == "poem" or "poem" in _classes(node)):
             self._collect_poem(node, frame)
@@ -765,10 +891,7 @@ class _DetailExtraction:
 
     def _collect_poem(self, node, frame):
         self._flush(frame)
-        self.has_lyrics = True
-        original = _lyric_text(node.contents, self.gaps["lyrics"])
-        if original:
-            self.lyric_candidates.append(original)
+        self._add_candidate(node)
 
     def _read_infobox_table(self, node, tag, table, frame):
         classes = _classes(table)
@@ -793,6 +916,8 @@ class _DetailExtraction:
         """Walk a container's contents; return False when the enclosing intro keeps
         collecting the container itself."""
         content = mw.parse(str(node.contents)) if tag == "section" else node.contents
+        if frame.section == "歌词" and frame.direct and not _has_lyric_structure(content, containers=True):
+            return False
         # Inline prose templates do not start a new introduction. Only headings or
         # structural content need a separate walk.
         if (frame.section != "简介" or any(_heading_level(n) for n in content.nodes)
@@ -818,18 +943,44 @@ class _DetailExtraction:
         frame.nested_summaries.clear()
         if frame.lyric_nodes:
             content = mw.wikicode.Wikicode(frame.lyric_nodes)
-            original, _ = _lyric_pair(content, self.gaps["lyrics"])
-            if not original and frame.direct:
-                original = _lyric_text(content, self.gaps["lyrics"])
-            if original:
-                self.lyric_candidates.append(original)
+            if frame.direct and str(content).strip():
+                self._add_candidate(content)
             frame.lyric_nodes.clear()
 
 
-def parse_details(source: str, title: str, *, with_missing=False) -> Dict:
-    """Read fields, first introduction and first lyrics independently."""
+def _has_lyric_parameter(node):
+    return any(structure(p.name).strip().casefold() in {"original", "歌词"} for p in node.params)
+
+
+def _has_lyric_structure(value, containers=False):
+    """Inspect existing nodes, without reparsing a slot or copying its page."""
+    for node in _code(value).nodes:
+        if isinstance(node, Tag):
+            tag = str(node.tag).lower()
+            if tag in NON_CONTENT_TAGS or "navbox" in _classes(node):
+                continue
+            if tag == "poem" or "poem" in _classes(node) or _has_lyric_structure(node.contents, containers):
+                return True
+        elif isinstance(node, Template):
+            if _kind(node) == "lyrics" or containers and _kind(node) in {"tabs", "wrapper", "songbox"}:
+                return True
+            if any(_has_lyric_structure(p.value, containers) for p in node.params):
+                return True
+        elif containers and _heading_level(node):
+            return True
+    return False
+
+
+def parse_extraction(source: str, title: str):
+    """Return selected business fields, their missing flags, and all lyric candidates."""
     conversion = TextConversion(source)
     extraction = _DetailExtraction(conversion)
     extraction.walk(mw.parse(conversion.protect(source)))
     result, needed = extraction.result(title)
+    return result, needed, extraction.lyric_candidates
+
+
+def parse_details(source: str, title: str, *, with_missing=False) -> Dict:
+    """Compatibility business API; expose only the chosen candidate's lyric state."""
+    result, needed, _ = parse_extraction(source, title)
     return (result, needed) if with_missing else result

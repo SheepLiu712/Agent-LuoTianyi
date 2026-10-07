@@ -218,8 +218,7 @@ def test_public_fetch_flow_orders_independent_stages(monkeypatch, tmp_path, merg
         assert set(summarizer.calls[0]) == {"song_data"}
         assert data["short_summary"] == "最终短介绍"
     else:
-        assert data["lyrics"] == ""
-        assert data["short_summary"] == ("站点简介" if merge_fragments is not False else "")
+        assert data is None, "未得到完整单版歌词时，不将歌曲提交给 Agent"
 
 
 def test_missing_extractor_does_not_borrow_summary_model(monkeypatch, tmp_path):

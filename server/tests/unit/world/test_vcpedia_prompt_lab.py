@@ -110,7 +110,9 @@ def test_default_and_dry_run_are_offline_with_production_material(monkeypatch, t
     source, title = lab.load_material("title:Foxy")
     data, needed = parse_details(source, title, with_missing=True)
     expected = collect_materials(data, needed, source, "https://vcpedia.cn", title, merge_fragments=False)
-    assert result["materials"] == expected == {"text": material_text(source)}
+    assert result["materials"] == expected
+    assert result["materials"]["lyrics"]["source"] in material_text(source)
+    assert "<poem" not in result["materials"]["text"]
     assert "raw" not in result["materials"]
     assert result["mode"] == "offline"
     assert result["fragment_post_attempts"] == 0
@@ -209,7 +211,14 @@ def test_module_variables_match_production_text_and_real_prompt_rendering(monkey
         == 0
     )
     variables = modules[0].calls[0]
-    assert json.loads(variables["materials"]) == {"text": material_text(source.read_text(encoding="utf-8"))}
+    materials = json.loads(variables["materials"])
+    assert materials["lyrics"] == {
+        "source": "{{embed|test}}",
+        "rule_result": "",
+        "rendered": [],
+        "gaps": ["{{embed|test}}"],
+    }
+    assert "embed" not in materials["text"]
     assert "bilibiliCount" not in variables["materials"]
     assert (out / "prompt-A.txt").read_text(encoding="utf-8") == "|".join(variables.values())
     assert report(out)["runs"]["A"]["declared"] == ["materials", "needed", "song_data"]

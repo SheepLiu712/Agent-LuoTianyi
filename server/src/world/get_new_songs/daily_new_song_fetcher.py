@@ -102,12 +102,12 @@ def _split_singers(raw: str) -> tuple[str, ...]:
 
 
 def _fetch_candidate(fetcher: VCPediaFetcher, song_name: str) -> Optional[NewSongCandidate]:
-    """抓取并规范化单首歌；缺介绍视为不可接纳的候选。"""
+    """抓取并规范化单首歌；缺介绍或歌词不作为歌曲候选提交。"""
     data = fetcher.fetch_entity_description(song_name)
     if not data:
         return None
     fields = _extract_song_fields(data)
-    if not fields["introduction"]:
+    if not fields["introduction"] or not fields["lyrics"]:
         return None
     return NewSongCandidate(
         song_name=song_name,

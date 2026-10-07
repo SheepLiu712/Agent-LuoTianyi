@@ -18,15 +18,23 @@ class TextConversion:
         while self._prefix in source:
             self._prefix += "\ue000"
         self._saved = {}
+        self._source = {}
 
     def protect(self, text):
         def save(match):
             token = self._prefix + str(len(self._saved)) + "\ue001"
             self._saved[token] = match[1]
+            self._source[token] = match[0]
             return token
         # Hide nowiki before parsing: the structural walk drops nowiki tag nodes,
         # so only a plain token lets the inner text survive to finish() literally.
         return re.sub(r"<nowiki\s*>(.*?)</nowiki\s*>", save, text, flags=re.I | re.S)
+
+    def restore_source(self, text):
+        """Restore exact nowiki calls for a candidate that may be parsed again."""
+        for token, original in self._source.items():
+            text = text.replace(token, original)
+        return text
 
     def finish(self, text):
         # Ordinary LC stays in place through node extraction so inline markup is
