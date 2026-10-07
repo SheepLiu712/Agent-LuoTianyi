@@ -56,6 +56,10 @@ _COORDINATION_KINDS = frozenset(
         StimulusKind.USER_TYPING,
         StimulusKind.IMAGE_SELECTION_OPENED,
         StimulusKind.IMAGE_SELECTION_CLOSED,
+        StimulusKind.VOICE_RECORDING_STARTED,
+        StimulusKind.VOICE_RECORDING_CANCELLED,
+        StimulusKind.VOICE_RECORDING_COMMITTED,
+        StimulusKind.VOICE_UPLOAD_FAILED,
         StimulusKind.INTERACTION_DEADLINE,
         StimulusKind.INTERACTION_ENDING,
     }

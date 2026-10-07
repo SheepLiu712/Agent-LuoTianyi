@@ -140,3 +140,23 @@ def test_runtime_agents_reference_the_same_skill_instances(runtime_dependencies)
         assert second_reply._composition is runtime.skills.response_composition
     finally:
         asyncio.run(runtime.shutdown())
+
+
+@pytest.mark.asyncio
+async def test_audio_registration_failure_does_not_silently_disable_skill(runtime_dependencies):
+    kwargs, _ = runtime_dependencies
+
+    def reject_registration(*_args):
+        raise ValueError("audio model configuration missing")
+
+    kwargs["llm_service"].register_audio_model_module = reject_registration
+    with pytest.raises(ValueError, match="audio model configuration missing"):
+        AgentRuntime(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_missing_audio_registration_capability_is_not_silently_ignored(runtime_dependencies):
+    kwargs, _ = runtime_dependencies
+    del kwargs["llm_service"].register_audio_model_module
+    with pytest.raises(AttributeError, match="register_audio_model_module"):
+        AgentRuntime(**kwargs)

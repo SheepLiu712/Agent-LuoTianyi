@@ -2,10 +2,10 @@ import os
 import re
 from typing import Callable, List, Tuple
 
-from . import AuthApi, WsTransport
 from ..types import ConversationItem
-from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
+from ..utils.logger import get_logger
+from . import AuthApi, WsTransport
 
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -123,6 +123,22 @@ class NetworkClient:
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
+
+    def download_audio(self, message_uuid: str) -> bytes:
+        """Download an owned voice message using the message Bearer token."""
+        if not self.user_id or not self.message_token:
+            raise RuntimeError("Not logged in")
+        if not _is_safe_uuid(message_uuid):
+            raise ValueError("unsafe audio message uuid")
+        resp = self.session.get(
+            f"{self.base_url}/media/audio/{message_uuid}",
+            headers={"Authorization": f"Bearer {self.message_token}"},
+            verify=self.verify_ssl,
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"audio download failed: HTTP {resp.status_code}")
+        return bytes(resp.content)
 
     def send_typing(self, text_length: int, ack_timeout: float = 10.0, client_msg_id: str | None = None):
         if not self.user_id or not self.message_token:

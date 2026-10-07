@@ -49,7 +49,9 @@ describe('MessageProcessor TTS terminal contract', () => {
 
   it('keeps equal audio chunks with different packet sequences and drops a repeated sequence', async () => {
     mockAppState.currentState = 'background';
-    const feed = jest.fn();
+    const feed = jest.fn((_audio: string, final: boolean) => {
+      if (final) processor.onServerAudioFinished();
+    });
     const processor = new MessageProcessor({} as NetworkClient, fakeBinder(), feed);
     for (const sequence of [0, 1, 1]) {
       processor.onAgentMessage({ uuid: 'same-audio', audio: 'YXVkaW8=',

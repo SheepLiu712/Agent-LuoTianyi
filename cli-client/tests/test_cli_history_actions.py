@@ -40,6 +40,40 @@ def test_initial_and_explicit_history_are_observable_cli_actions():
     assert loaded["data"]["items"][0]["source"] == "agent"
 
 
+def test_audio_history_keeps_placeholder_without_media_actions():
+    session = Session()
+    session.initial_history = (
+        [
+            SimpleNamespace(
+                timestamp="2026-09-26",
+                source="user",
+                type="audio",
+                content="[语音消息]",
+                uuid="audio-one",
+                duration_ms=900,
+                audio_available=True,
+            )
+        ],
+        0,
+        1,
+    )
+    executor = ActionExecutor(session_factory=lambda **_: session)
+    executor._session = session
+
+    result, code = executor.execute({"action": "history.initial"})
+
+    assert code == ExitCode.SUCCESS
+    assert result["data"]["items"] == [
+        {
+            "timestamp": "2026-09-26",
+            "source": "user",
+            "type": "audio",
+            "content": "[语音消息]",
+            "uuid": "audio-one",
+        }
+    ]
+
+
 def test_cli_exposes_event_stream_and_waits_for_matching_state():
     executor = ActionExecutor(session_factory=lambda **_: Session())
     executor._session = Session()

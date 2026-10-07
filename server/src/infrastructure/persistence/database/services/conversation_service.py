@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 logger = get_logger("database.conversation")
 
 
+class ConversationIdentityConflict(RuntimeError):
+    """A conversation UUID was reused for a different logical message."""
+
+
 class ConversationService:
     """对话记录、上下文、用户画像/偏好和图片管理。由 DatabaseManager 组合。"""
 
@@ -331,11 +335,14 @@ class ConversationService:
         redis = self._ensure_redis()
         db = self._new_session()
         try:
-            new_convs = run_sql_write(
+            result_rows, new_rows = run_sql_write(
                 lambda: self._persist_conversations(db, user_id, character_id, conversation_data, commit)
             )
-            self._append_conversations_to_cache(redis, user_id, character_id, new_convs)
-            return [conv["uuid"] for conv in new_convs]
+            self._append_conversations_to_cache(redis, user_id, character_id, new_rows)
+            return [conv["uuid"] for conv in result_rows]
+        except ConversationIdentityConflict:
+            db.rollback()
+            raise
         except Exception as e:
             logger.error(f"add_conversations error: {e}")
             db.rollback()
@@ -386,19 +393,36 @@ class ConversationService:
     def _persist_conversations(self, db, user_id, character_id, conversation_data, commit):
         user = db.query(User).filter(User.uuid == user_id).first()
         if not user:
-            return []
+            return [], []
         context = self._get_or_create_conversation_context(db, user, character_id)
-        rows = [self._conversation_row(db, user_id, character_id, item) for item in conversation_data]
-        user.all_memory_count = (user.all_memory_count or 0) + len(rows)
-        context.context_memory_count = (context.context_memory_count or 0) + len(rows)
+        result_rows = []
+        new_rows = []
+        pending_by_uuid = {}
+        requested_uuids = [item.uuid for item in conversation_data if item.uuid]
+        existing_by_uuid = {
+            row.uuid: row for row in db.query(Conversation).filter(Conversation.uuid.in_(requested_uuids)).all()
+        }
+        for item in conversation_data:
+            item_uuid = item.uuid or str(uuid.uuid4())
+            existing = existing_by_uuid.get(item_uuid) or pending_by_uuid.get(item_uuid)
+            if existing is not None:
+                self._validate_conversation_identity(existing, user_id, character_id, item)
+                result_rows.append(self._conversation_dict(existing))
+                continue
+            conversation, row = self._conversation_row(db, user_id, character_id, item, item_uuid)
+            pending_by_uuid[item_uuid] = conversation
+            result_rows.append(row)
+            new_rows.append(row)
+        user.all_memory_count = (user.all_memory_count or 0) + len(new_rows)
+        context.context_memory_count = (context.context_memory_count or 0) + len(new_rows)
         if character_id == "luotianyi":
             user.context_memory_count = context.context_memory_count
         if commit:
             db.commit()
-        return rows
+        return result_rows, new_rows
 
     @staticmethod
-    def _conversation_row(db, user_id, character_id, item):
+    def _conversation_row(db, user_id, character_id, item, item_uuid):
         try:
             timestamp = datetime.fromisoformat(item.timestamp)
         except ValueError:
@@ -417,10 +441,10 @@ class ConversationService:
             content=item.content,
             type=item.type,
             meta_data=meta_data,
-            uuid=item.uuid or str(uuid.uuid4()),
+            uuid=item_uuid,
         )
         db.add(conversation)
-        return {
+        return conversation, {
             "uuid": conversation.uuid,
             "timestamp": item.timestamp,
             "source": item.source,
@@ -428,6 +452,87 @@ class ConversationService:
             "type": item.type,
             "meta_data": meta_data,
         }
+
+    @staticmethod
+    def _conversation_dict(conversation):
+        return {
+            "uuid": conversation.uuid,
+            "timestamp": conversation.timestamp.isoformat(sep=" ", timespec="microseconds"),
+            "source": conversation.source,
+            "content": conversation.content,
+            "type": conversation.type,
+            "meta_data": conversation.meta_data,
+        }
+
+    @staticmethod
+    def _validate_conversation_identity(existing, user_id, character_id, item):
+        matches = existing.user_id == user_id and existing.character_id == character_id and existing.type == item.type
+        if matches and item.type == "audio":
+            try:
+                existing_media_id = json.loads(existing.meta_data or "{}").get("media_id")
+            except (json.JSONDecodeError, TypeError):
+                existing_media_id = None
+            incoming_media_id = (item.data or {}).get("media_id")
+            matches = existing_media_id == incoming_media_id and isinstance(incoming_media_id, str)
+        if not matches:
+            raise ConversationIdentityConflict(f"CONVERSATION_IDENTITY_CONFLICT: {existing.uuid}")
+
+    def get_audio_media_id(self, user_id: str, conv_uuid: str) -> Optional[str]:
+        """Return an owner-scoped audio media ID without exposing other rows."""
+        db = self._new_session()
+        try:
+            conv = (
+                db.query(Conversation)
+                .filter(
+                    Conversation.user_id == user_id,
+                    Conversation.uuid == conv_uuid,
+                    Conversation.type == "audio",
+                )
+                .first()
+            )
+            if not conv or not conv.meta_data:
+                return None
+            try:
+                media_id = json.loads(conv.meta_data).get("media_id")
+            except (json.JSONDecodeError, TypeError):
+                return None
+            return media_id if isinstance(media_id, str) and media_id.strip() else None
+        finally:
+            db.close()
+
+    def reset_user_conversations(self, user_id: str) -> int:
+        """Idempotently delete conversation rows and reset their SQL/cache state."""
+        redis = self._ensure_redis()
+        db = self._new_session()
+        try:
+            user = db.query(User).filter(User.uuid == user_id).first()
+            if user is None:
+                return 0
+            character_ids = [
+                value
+                for (value,) in db.query(ConversationContext.character_id)
+                .filter(ConversationContext.user_id == user_id)
+                .all()
+            ]
+            deleted = db.query(Conversation).filter(Conversation.user_id == user_id).delete(synchronize_session=False)
+            (
+                db.query(ConversationContext)
+                .filter(ConversationContext.user_id == user_id)
+                .delete(synchronize_session=False)
+            )
+            user.context_memory_count = 0
+            user.all_memory_count = 0
+            user.context_summary = ""
+            db.commit()
+            redis.delete(f"user_context:{user_id}")
+            for character_id in character_ids:
+                redis.delete(self._context_redis_key(user_id, character_id))
+            return deleted
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def _append_conversations_to_cache(self, redis, user_id, character_id, rows):
         redis_key = self._context_redis_key(user_id, character_id)

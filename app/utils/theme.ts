@@ -38,6 +38,11 @@ export interface AppTheme {
   shadow: string;
   dim: string;
   live2dOverlay: string;
+  voiceSurface: string;
+  voicePressed: string;
+  voiceCancel: string;
+  voiceOverlay: string;
+  voiceRipple: string;
 }
 
 export const COLOR_MODE_LABELS: Record<ColorMode, string> = {
@@ -86,6 +91,8 @@ export const THEMES: Record<ResolvedThemeName, AppTheme> = {
     shadow: '#000000',
     dim: '#000000',
     live2dOverlay: 'rgba(0, 0, 0, 0)',
+    voiceSurface: '#e7e9ed', voicePressed: '#d9dde2', voiceCancel: '#c9ced4',
+    voiceOverlay: 'rgba(0, 0, 0, 0.55)', voiceRipple: '#66CCFF',
   },
   dark: {
     name: 'dark',
@@ -124,6 +131,8 @@ export const THEMES: Record<ResolvedThemeName, AppTheme> = {
     shadow: '#000000',
     dim: '#000000',
     live2dOverlay: 'rgba(19, 24, 30, 0.42)',
+    voiceSurface: '#202A34', voicePressed: '#2c3642', voiceCancel: '#39434e',
+    voiceOverlay: 'rgba(0, 0, 0, 0.55)', voiceRipple: '#66CCFF',
   },
 };
 

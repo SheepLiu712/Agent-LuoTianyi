@@ -5,6 +5,7 @@ from .conversation_context import ConversationContext
 from .interaction_context import InteractionContext
 from .models import (
     AudioContent,
+    AudioUnderstandingStatus,
     ContextIdentity,
     ConversationCompaction,
     ConversationEntry,
@@ -18,6 +19,7 @@ from .models import (
     UserContextSnapshot,
     UserPreferences,
     UserProfile,
+    render_audio_context,
 )
 from .recalled_memory_context import RecalledMemoryContext
 from .user_context import UserContext
@@ -39,6 +41,8 @@ __all__ = [
     "TextContent",
     "ImageContent",
     "AudioContent",
+    "AudioUnderstandingStatus",
+    "render_audio_context",
     "SongContent",
     "RecallEntry",
     "JargonExplanation",

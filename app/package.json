@@ -1,7 +1,7 @@
 {
   "name": "agent-luotianyi-app",
   "main": "expo-router/entry",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
@@ -24,6 +24,7 @@
     "expo-av": "~16.0.8",
     "expo-clipboard": "~8.0.8",
     "expo-constants": "~18.0.13",
+    "expo-crypto": "~15.0.9",
     "expo-font": "~14.0.11",
     "expo-haptics": "~15.0.8",
     "expo-image": "~3.0.11",
