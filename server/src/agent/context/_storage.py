@@ -9,6 +9,7 @@ from src.domain.conversation_type import ConversationItem
 
 from .models import (
     AudioContent,
+    AudioUnderstandingStatus,
     ContextIdentity,
     ConversationEntry,
     ConversationSnapshot,
@@ -121,7 +122,17 @@ def _decode_entry(item: dict) -> ConversationEntry:
             data.get("media_id"),
         )
     elif kind == "audio":
-        content = AudioContent(text)
+        content = AudioContent(
+            media_id=data["media_id"],
+            mime_type=data["mime_type"],
+            duration_ms=data["duration_ms"],
+            understanding_status=AudioUnderstandingStatus(data["understanding_status"]),
+            transcript=data.get("transcript"),
+            emotion=data.get("emotion"),
+            sound_description=data.get("sound_description"),
+        )
+        if content.text != text:
+            raise ValueError("音频历史内容与结构化元数据不一致")
     elif kind == "sing":
         content = SongContent(text, data["song"], data.get("segment"))
     else:
@@ -134,6 +145,8 @@ def _encode_entry(entry: ConversationEntry) -> ConversationItem:
     kinds = {TextContent: "text", ImageContent: "image", AudioContent: "audio", SongContent: "sing"}
     data = asdict(content)
     text = data.pop("text")
+    if isinstance(content, AudioContent):
+        data["understanding_status"] = content.understanding_status.value
     return ConversationItem(
         entry.entry_id,
         entry.timestamp.isoformat(sep=" ", timespec="microseconds"),

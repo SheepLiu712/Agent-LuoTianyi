@@ -11,3 +11,6 @@ jest.mock('expo-secure-store', () => ({
   setItemAsync: jest.fn(async () => {}),
   deleteItemAsync: jest.fn(async () => {}),
 }));
+
+// Substitute only the native entropy source; callers still receive real UUIDs.
+jest.mock('expo-crypto', () => ({ randomUUID: () => jest.requireActual('node:crypto').randomUUID() }));

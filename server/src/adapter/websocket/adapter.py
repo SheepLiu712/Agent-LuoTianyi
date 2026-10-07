@@ -19,6 +19,7 @@ from src.web.websocket import WSMessage
 
 from ._delivery import _ConnectionDelivery, _DeliveryConfig, completion
 from ._input import _INPUT_EVENTS, materialize_image, prepare_input
+from .voice_upload import VoiceUploadAck, VoiceUploadAssembler
 
 if TYPE_CHECKING:
     from src.stage.chat_stage import ChatStage
@@ -73,6 +74,14 @@ class WebSocketAdapter:
         if self._media_store is None:
             logger.warning("媒体存储未配置，图片发送将被拒绝")
         self._default_character_id = default_character_id
+        voice_config = (config or {}).get("voice_upload", {})
+        if not isinstance(voice_config, dict):
+            raise TypeError("voice_upload config must be a dictionary")
+        self._voice_uploads = VoiceUploadAssembler(
+            self._media_store,
+            max_incomplete=voice_config.get("max_incomplete", 128),
+            ttl_seconds=voice_config.get("ttl_seconds", 600.0),
+        )
         self._routes: dict[str, _Binding] = {}
         self._connections: dict[WebSocketConnection, _ConnectionDelivery] = {}
         self._binding_lock = asyncio.Lock()
@@ -112,6 +121,36 @@ class WebSocketAdapter:
         self.mark_client_message_accepted(connection, event)
         return ChatEventAcceptance.ACCEPTED
 
+    async def process_voice_event(self, connection: WebSocketConnection, event: WSMessage) -> VoiceUploadAck:
+        """把一个语音上传阶段交给 assembler；阶段幂等不经过普通消息去重表。"""
+        if connection.is_closed or not connection.user_uuid:
+            raise ValueError("authenticated live connection required")
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        character_id = payload.get("target_character_id", payload.get("character_id", self._default_character_id))
+        raw_targets = payload.get("target_character_ids")
+        if raw_targets is not None:
+            if not isinstance(raw_targets, list) or len(raw_targets) != 1:
+                raise ValueError("voice upload requires exactly one target character")
+            character_id = raw_targets[0]
+        if not isinstance(character_id, str) or not character_id.strip():
+            raise ValueError("invalid target character")
+        stage = next(
+            (
+                binding.stage
+                for binding in self._routes.values()
+                if binding.connection is connection and binding.stage.character_id == character_id
+            ),
+            None,
+        )
+        if stage is None:
+            raise ValueError("target character is not bound to connection")
+        return await self._voice_uploads.process(
+            event=event,
+            user_id=connection.user_uuid,
+            character_id=character_id,
+            sink=stage.stimulus_input_sink,
+        )
+
     def is_duplicate_client_message(self, connection: WebSocketConnection, event: WSMessage) -> bool:
         """Check accepted messages without marking a new event as accepted."""
         key = self._client_message_key(connection, event)
@@ -142,6 +181,11 @@ class WebSocketAdapter:
         if not self.has_valid_client_message_id(event):
             return None
         owner = connection.user_uuid or connection.user_name or "anonymous"
+        if event.event_type in {"user_voice_recording_started", "user_voice_recording_cancelled"}:
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            recording_id = payload.get("recording_id")
+            if isinstance(recording_id, str) and recording_id.strip():
+                return f"{owner}:{event.event_type}:{recording_id}"
         return f"{owner}:{event.client_msg_id}"
 
     def _prune_recent_client_messages(self, now: float) -> None:

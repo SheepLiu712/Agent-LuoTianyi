@@ -44,6 +44,7 @@ class ClientModelExecutor(Protocol):
         enable_thinking: bool = False,
         use_json: bool = False,
         image_base64: Optional[str] = None,
+        audio_base64: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """把一次模型调用委托给用户客户端；不可用时返回 ``None``。"""
 

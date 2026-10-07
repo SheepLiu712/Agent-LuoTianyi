@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 from uuid import UUID
 
 from src.domain.agent import MediaRef
@@ -21,6 +21,7 @@ class MediaResolutionErrorCode(str, Enum):
     EMPTY = "MEDIA_EMPTY"
     UNSUPPORTED_TYPE = "MEDIA_UNSUPPORTED_TYPE"
     TOO_LARGE = "MEDIA_TOO_LARGE"
+    INVALID_DURATION = "MEDIA_INVALID_DURATION"
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,13 @@ class MediaResolutionError(Exception):
 class MediaResolver(Protocol):
     """只读、幂等地解析受控媒体引用。"""
 
-    def resolve(self, media_ref: MediaRef, *, owner_user_id: str) -> ResolvedMedia: ...
+    def resolve(
+        self,
+        media_ref: MediaRef,
+        *,
+        owner_user_id: str,
+        expected_kind: Literal["image", "audio"] | None = None,
+    ) -> ResolvedMedia: ...
 
     def ensure_dependencies(self) -> None: ...
 
@@ -62,7 +69,13 @@ class UnconfiguredMediaResolver:
     def __init__(self, config: dict | None = None) -> None:
         self._config = dict(config or {})
 
-    def resolve(self, media_ref: MediaRef, *, owner_user_id: str) -> ResolvedMedia:
+    def resolve(
+        self,
+        media_ref: MediaRef,
+        *,
+        owner_user_id: str,
+        expected_kind: Literal["image", "audio"] | None = None,
+    ) -> ResolvedMedia:
         """拒绝解析，避免把缺省能力伪装成空媒体成功。"""
         raise MediaResolutionError(
             code=MediaResolutionErrorCode.NOT_CONFIGURED,
@@ -74,7 +87,7 @@ class UnconfiguredMediaResolver:
 
 
 class FilesystemMediaResolver:
-    """从永久文件媒体库按 UUID media_id 读取图片。"""
+    """从永久文件媒体库按 UUID media_id 读取图片或音频。"""
 
     def __init__(self, config: dict) -> None:
         root = config.get("root")
@@ -82,61 +95,67 @@ class FilesystemMediaResolver:
             raise ValueError("media_resolution.root must be a non-empty path")
         self._root = Path(root).resolve()
 
-    def resolve(self, media_ref: MediaRef, *, owner_user_id: str) -> ResolvedMedia:
-        """读取完整媒体；未知、空内容、非图片或非法 ID 均稳定失败。"""
+    def resolve(
+        self,
+        media_ref: MediaRef,
+        *,
+        owner_user_id: str,
+        expected_kind: Literal["image", "audio"] | None = None,
+    ) -> ResolvedMedia:
+        """读取完整媒体并校验所有者、媒体类型和实际内容。"""
         media_dir = self._media_dir(media_ref)
         metadata_path = media_dir / "metadata.json"
         content_path = media_dir / "content.bin"
         if not metadata_path.is_file() or not content_path.is_file():
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.UNKNOWN,
-                media_id=media_ref.media_id,
-            )
-        try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.UNKNOWN,
-                media_id=media_ref.media_id,
-            ) from None
-        if not isinstance(metadata, dict):
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.UNKNOWN,
-                media_id=media_ref.media_id,
-            )
+            self._raise(MediaResolutionErrorCode.UNKNOWN, media_ref)
+        metadata = self._read_metadata(metadata_path, media_ref)
         stored_owner = metadata.get("owner_user_id")
         if not isinstance(stored_owner, str) or not stored_owner.strip():
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.UNKNOWN,
-                media_id=media_ref.media_id,
-            )
+            self._raise(MediaResolutionErrorCode.UNKNOWN, media_ref)
         if stored_owner != owner_user_id:
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.UNAUTHORIZED,
-                media_id=media_ref.media_id,
-            )
-        mime_type = metadata.get("mime_type")
-        if not isinstance(mime_type, str) or not mime_type.startswith("image/"):
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.UNSUPPORTED_TYPE,
-                media_id=media_ref.media_id,
-            )
+            self._raise(MediaResolutionErrorCode.UNAUTHORIZED, media_ref)
+        media_kind, mime_type = self._media_type(metadata, media_ref)
+        if expected_kind is not None and media_kind != expected_kind:
+            self._raise(MediaResolutionErrorCode.UNSUPPORTED_TYPE, media_ref)
         try:
             data = content_path.read_bytes()
         except OSError:
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.UNKNOWN,
-                media_id=media_ref.media_id,
-            ) from None
+            self._raise(MediaResolutionErrorCode.UNKNOWN, media_ref)
         if not data:
-            raise MediaResolutionError(
-                code=MediaResolutionErrorCode.EMPTY,
-                media_id=media_ref.media_id,
-            )
-        from .image_validation import validate_image_content
+            self._raise(MediaResolutionErrorCode.EMPTY, media_ref)
+        if media_kind == "image":
+            from .image_validation import validate_image_content
 
-        mime_type = validate_image_content(data, mime_type, media_ref.media_id)
+            mime_type = validate_image_content(data, mime_type, media_ref.media_id)
+        else:
+            from .audio_validation import parse_m4a_audio
+
+            parse_m4a_audio(data, mime_type, media_ref.media_id)
         return ResolvedMedia(data=data, mime_type=mime_type)
+
+    @classmethod
+    def _read_metadata(cls, metadata_path: Path, media_ref: MediaRef) -> dict:
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            cls._raise(MediaResolutionErrorCode.UNKNOWN, media_ref)
+        if not isinstance(metadata, dict):
+            cls._raise(MediaResolutionErrorCode.UNKNOWN, media_ref)
+        return metadata
+
+    @classmethod
+    def _media_type(cls, metadata: dict, media_ref: MediaRef) -> tuple[Literal["image", "audio"], str]:
+        mime_type = metadata.get("mime_type")
+        media_kind = metadata.get("media_kind")
+        if media_kind is None and isinstance(mime_type, str):
+            media_kind = "image" if mime_type.startswith("image/") else "audio" if mime_type == "audio/mp4" else None
+        if media_kind not in {"image", "audio"} or not isinstance(mime_type, str):
+            cls._raise(MediaResolutionErrorCode.UNSUPPORTED_TYPE, media_ref)
+        return media_kind, mime_type
+
+    @staticmethod
+    def _raise(code: MediaResolutionErrorCode, media_ref: MediaRef) -> None:
+        raise MediaResolutionError(code=code, media_id=media_ref.media_id)
 
     def ensure_dependencies(self) -> None:
         """建立永久媒体根目录并确认它是目录。"""

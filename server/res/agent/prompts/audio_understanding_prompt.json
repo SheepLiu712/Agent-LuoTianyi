@@ -1,0 +1,12 @@
+{
+    "name": "audio_understanding_prompt",
+    "description": "AudioUnderstandingSkill 专属音频理解契约",
+    "template": [
+        "请分析用户提供的音频，仅返回 JSON 对象，且恰好包含 transcript、emotion、sound_description 三个键。",
+        "所有字段值只能是字符串或 null，不得添加其他字段。",
+        "如果能听清人声，transcript 尽量逐字转写，不添加音频中没有的话；不能听清时填 null。",
+        "emotion 仅填写明确的说话情绪，没有明确情绪时填 null；transcript 为 null 时 emotion 必须为 null。",
+        "sound_description 仅描述有意义的非语言声音，不要重复转写；没有此类声音时填 null。",
+        "无法理解音频时返回三个 null，不要猜测。"
+    ]
+}

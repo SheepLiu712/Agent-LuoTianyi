@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { server_config } from '../config';
 import { addDebugTrace } from '../utils/debug_trace';
 import { COLOR_MODE_STORAGE_KEY, ColorMode, resolveTheme } from '../utils/theme';
+import { voicePlaybackManager } from '../utils/voice_playback_manager';
 
 interface LoginScreenProps {
   onLogin: (username: string, password: string, autoLogin: boolean) => Promise<{ success: boolean; message: string }>;
@@ -154,6 +155,7 @@ export default function LoginScreen({ onLogin, onRegister }: LoginScreenProps) {
       });
       const result = await response.json();
       if (response.ok) {
+        await voicePlaybackManager.clear();
         Alert.alert('成功', '账号重置成功，请使用新账号登录');
         setShowReset(false);
         setLoginUsername(resetUsername);

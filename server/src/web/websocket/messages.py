@@ -16,6 +16,8 @@ BUSINESS_INPUT_EVENTS = frozenset(
         "user_typing",
         "user_image",
         "user_voice",
+        "user_voice_recording_started",
+        "user_voice_recording_cancelled",
         "user_touch",
         "user_image_selecting",
         "user_image_selecting_cancel",
@@ -54,6 +56,8 @@ class WSEventType(str, Enum):
     USER_MESSAGE = "user_message"
     USER_IMAGE = "user_image"
     USER_VOICE = "user_voice"
+    USER_VOICE_RECORDING_STARTED = "user_voice_recording_started"
+    USER_VOICE_RECORDING_CANCELLED = "user_voice_recording_cancelled"
     USER_TEXT = "user_text"
     USER_TYPING = "user_typing"
     USER_IMAGE_SELECTING = "user_image_selecting"

@@ -71,10 +71,13 @@ export async function getHistory(username: string, token: string, count: number,
         const messages: ChatMessage[] = await Promise.all(data.history.map(async (msg: any) => {
             const baseMessage: ChatMessage = {
                 uuid: msg.uuid || "unknown_id",
-                content: msg.content,
+                content: msg.content || (msg.type === 'audio' ? '[语音消息]' : ''),
                 isUser: msg.source === 'user',
                 type: msg.type,
                 timestamp: msg.timestamp,
+                durationMs: msg.duration_ms ?? msg.durationMs,
+                audioAvailable: msg.type === 'audio' ? msg.audio_available !== false : undefined,
+                audioPlayState: msg.type === 'audio' ? 'idle' : undefined,
             };
 
             return attachLocalAudioIfExists(msg, baseMessage);
