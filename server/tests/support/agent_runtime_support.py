@@ -88,6 +88,7 @@ def runtime_dependencies(monkeypatch, tmp_path):
                 prompt_template=SimpleNamespace(get_variables=list),
             ),
             register_vlm_module=lambda *args: SimpleNamespace(generate_response=None),
+            register_audio_model_module=lambda *args: SimpleNamespace(generate_response=None),
         ),
         "media_resolver": SimpleNamespace(
             resolve=lambda media_ref, **kwargs: None,

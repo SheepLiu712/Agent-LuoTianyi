@@ -96,7 +96,7 @@ class SharedSkills:
         )
         self.audio_understanding = (
             AudioUnderstandingSkill(config.get("audio_understanding", {}), media_resolver, llm_service)
-            if media_resolver is not None and hasattr(llm_service, "register_audio_model_module")
+            if media_resolver is not None
             else None
         )
 

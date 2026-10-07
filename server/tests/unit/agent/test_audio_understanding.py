@@ -189,3 +189,11 @@ def test_audio_storage_round_trip_and_rejects_mismatched_rendered_text():
             emotion=None,
             sound_description=None,
         )
+
+
+@pytest.mark.asyncio
+async def test_audio_understanding_cancellation_propagates_without_retry():
+    skill, _, module = _skill([asyncio.CancelledError()])
+    with pytest.raises(asyncio.CancelledError):
+        await skill.understand(d.MediaRef(media_id="audio-id"), owner_user_id="owner")
+    assert len(module.calls) == 1

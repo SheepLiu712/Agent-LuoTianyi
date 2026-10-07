@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from abc import ABC, abstractmethod
 from typing import Any
@@ -25,22 +24,29 @@ class AudioModelAPIInterface(ABC):
 
 
 class OpenAIAudioModelAPIInterface(AudioModelAPIInterface):
-    """通过 DashScope OpenAI 兼容接口调用 Qwen Omni。"""
+    """通过显式配置的 OpenAI 兼容接口调用音频模型。"""
 
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self.logger = get_logger(__name__)
-        self.base_url = config.get("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        self.api_key = config.get("api_key") or os.environ.get("QWEN_API_KEY") or ""
-        self.model = config.get("model", "qwen3.8-omni-flash")
+        self.base_url = self._required_config(config, "base_url")
+        self.api_key = config.get("api_key") or ""
+        self.model = self._required_config(config, "model")
         self.max_tokens = config.get("max_tokens", 2048)
         self.temperature = config.get("temperature", 0.1)
         self.client: OpenAI | None = None
 
+    @staticmethod
+    def _required_config(config: dict[str, Any], name: str) -> str:
+        value = config.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"音频模型配置缺少必需字段: {name}")
+        return value.strip()
+
     def _ensure_client(self) -> OpenAI:
         if self.client is not None:
             return self.client
-        if not self.api_key:
+        if not isinstance(self.api_key, str) or not self.api_key.strip() or self.api_key.startswith("$"):
             raise RuntimeError("服务端未配置音频模型 API Key")
         self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
         return self.client
