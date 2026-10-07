@@ -7,12 +7,15 @@
 import pytest
 from fastapi import WebSocketDisconnect
 
+from src.infrastructure.config.frame_limits import (
+    INBOUND_FRAME_ENVELOPE_BYTES,
+    TRANSPORT_FRAME_LIMIT_BYTES,
+    resolve_max_inbound_frame_bytes,
+)
 from src.infrastructure.media import PermanentMediaStore
 from src.web.websocket.service import (
-    INBOUND_FRAME_ENVELOPE_BYTES,
     WebSocketConnection,
     WebSocketService,
-    resolve_max_inbound_frame_bytes,
 )
 
 
@@ -59,6 +62,16 @@ def test_configured_media_limit_drives_the_frame_limit(tmp_path):
     assert resolve_max_inbound_frame_bytes({"max_encoded_bytes": media_limit}) == (
         image_limit + INBOUND_FRAME_ENVELOPE_BYTES
     )
+
+
+def test_frame_limit_is_clamped_to_the_transport_limit():
+    """媒体限额超过传输层时，应用层上限必须夹到传输层（否则超限帧回到 1009 断连）。"""
+    huge = 64 * 1024 * 1024
+
+    limit = resolve_max_inbound_frame_bytes({"max_encoded_bytes": huge})
+
+    assert limit == TRANSPORT_FRAME_LIMIT_BYTES
+    assert limit < huge
 
 
 @pytest.mark.asyncio

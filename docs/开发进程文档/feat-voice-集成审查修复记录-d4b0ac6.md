@@ -37,7 +37,13 @@
 | N6 | 驱动等待服务端从不发射的 `listening`；协议文档取值错误 | 驱动不再硬等状态，改为校验观测到的取值合法；两侧协议文档与 spec AC-27 以服务端枚举为真源更正 |
 | N7 | `recordingId` 形如 `recording-<ts>-<rand>`，服务端强制 UUID 校验 | 新增 `randomUuid()`（RFC 4122 v4），录音 id 即协议 id |
 | N8 | `_completed` 保存原始分片且无全局/每用户上限 | 改存 sha256 摘要（32 B/片）+ 全局 ≤256、每用户 ≤16 按最旧淘汰；失败信号投递失败记日志 |
+| AC-26 | CLI 历史项对未知字段严格构造（桌面端已过滤），服务端新增字段会让整页历史静默清空 | `cli_client/network/network_client.py` 按 dataclass 字段过滤构造；补调用点级未知字段测试 |
 | 体验类 | 预算在 begin 失败路径不生效、放弃路径不补 abort、ACK 后缓存键错位、录音期播服务端音频、Android 中断不可感知、`start()` 失败泄漏 expo-av 句柄 | 见下方"验证结果"对应回归测试 |
+
+### 复审补充（独立评审后）
+
+- **帧上限需夹在传输层范围内**：`server_main` 不设置 uvicorn `ws_max_size`（只能在进程启动时确定），若媒体限额配到超过 uvicorn 默认 16 MiB，应用层上限会越过传输层，超限帧又回到 1009 断连。现已把上限口径统一到 `infrastructure/config/frame_limits.py`：推导结果夹紧到 `TRANSPORT_FRAME_LIMIT_BYTES`，配置校验在"媒体限额 + 信封 > 传输层上限"时给出 warning（不阻断启动），并补夹紧与告警测试。
+- **N1 接线补回归测试**：`server_runtime.build_websocket_service` 抽出为独立构造点，用**非默认**媒体限额断言"配置 → 上限"未断（漏传 kwarg 会静默回落默认值，只有非默认配置能暴露）。
 
 ## 验证结果
 

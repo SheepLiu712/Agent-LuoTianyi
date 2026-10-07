@@ -6,6 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.infrastructure.config.frame_limits import (
+    INBOUND_FRAME_ENVELOPE_BYTES,
+    TRANSPORT_FRAME_LIMIT_BYTES,
+    exceeds_transport_limit,
+    resolve_media_max_encoded_bytes,
+)
 from src.infrastructure.config.secrets import SecretStore
 from src.infrastructure.persistence.database.utils import (
     DEFAULT_MESSAGE_TOKEN_TTL_SECONDS,
@@ -79,6 +85,7 @@ class RuntimeConfigValidator:
         items.extend(self._validate_client_model_types(config))
         items.extend(self._validate_core_modules(config))
         items.extend(self._validate_core_resources(config))
+        items.extend(self._validate_media_transport_alignment(config))
         items.extend(self._validate_world_optionals(config))
         has_core_error = any(item.scope != "world" and item.status == "error" for item in items)
         return {
@@ -398,6 +405,33 @@ class RuntimeConfigValidator:
                     )
                 )
         return result
+
+    def _validate_media_transport_alignment(self, config: dict[str, Any]) -> list[ValidationItem]:
+        """媒体限额推出的入站帧上限，不得超出传输层可放行范围。
+
+        `server_main` 不设置 uvicorn `ws_max_size`（只能在进程启动时确定，无法跟随
+        管理端热改的媒体限额），所以传输层上限固定为 uvicorn 默认值。若媒体限额更大，
+        应用层上限会被夹到传输层上限，而超过该上限的图片会在传输层被 1009 断连、
+        拿不到结构化 BAD_MESSAGE；这属于配置与部署不匹配，必须在控制台可见。
+        """
+        media_config = self._get(config, "infrastructure.media_resolution") or {}
+        if not exceeds_transport_limit(media_config):
+            return []
+        encoded_mib = resolve_media_max_encoded_bytes(media_config) // (1024 * 1024)
+        envelope_kib = INBOUND_FRAME_ENVELOPE_BYTES // 1024
+        transport_mib = TRANSPORT_FRAME_LIMIT_BYTES // (1024 * 1024)
+        return [
+            ValidationItem(
+                "core",
+                "media_resolution.max_encoded_bytes",
+                "warning",
+                f"媒体库最大编码字节 {encoded_mib} MiB + 信封 {envelope_kib} KiB 超过传输层上限 "
+                f"{transport_mib} MiB（uvicorn 默认 ws_max_size）：应用层入站帧上限会被夹到传输层上限，"
+                "超过该上限的图片会在传输层被断开而拿不到可读错误；如需支持更大图片，"
+                "请在 server_main 显式提高 ws_max_size 并同步 TRANSPORT_FRAME_LIMIT_BYTES",
+                severity="warning",
+            )
+        ]
 
     def _validate_song_knowledge_resources(self, config: dict[str, Any]) -> list[ValidationItem]:
         linker_cfg = self._get(config, "agent_runtime.agent.preprocessing.song_entity_linker") or {}

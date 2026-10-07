@@ -9,6 +9,7 @@ from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
 from src.domain.stage import StageState
+from src.infrastructure.config.frame_limits import resolve_max_inbound_frame_bytes
 from src.infrastructure.media import MediaResolver, create_media_resolver
 from src.infrastructure.models.service import LLMService
 from src.infrastructure.observability import ObservabilityService, set_observability_service
@@ -22,11 +23,21 @@ from src.utils.logger import (
 )
 from src.web.http import UserInterface
 from src.web.websocket import WebSocketService
-from src.web.websocket.service import resolve_max_inbound_frame_bytes
 from src.world import WorldRuntime
 
 logger = get_logger(__name__)
 DEFAULT_WORLD_ID: Final = "default"
+
+
+def build_websocket_service(config: dict) -> WebSocketService:
+    """按生产配置构造 WebSocketService。
+
+    N1 的核心接线点：入站帧上限必须由同一份媒体限额推导，否则真实图片会被拒收
+    （历史上限 128 KiB）。抽成独立函数以便测试能证明"配置 → 上限"这条线没断：
+    漏传该 kwarg 会静默回落到默认值，只有非默认媒体限额的配置才能暴露。
+    """
+    media_config = config.get("infrastructure", {}).get("media_resolution", {})
+    return WebSocketService(max_inbound_frame_bytes=resolve_max_inbound_frame_bytes(media_config))
 
 
 @dataclass
@@ -110,9 +121,7 @@ class ServerRuntime:
             # 7. 组装系统运行时
             runtime = cls(
                 user_interface=UserInterface(database_manager),
-                websocket_service=WebSocketService(
-                    max_inbound_frame_bytes=resolve_max_inbound_frame_bytes(media_config)
-                ),
+                websocket_service=build_websocket_service(config),
                 world=world,
                 database_manager=database_manager,
                 agent_runtime=agent_runtime,

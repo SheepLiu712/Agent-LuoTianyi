@@ -5,6 +5,14 @@ from typing import TYPE_CHECKING, Any, Dict
 
 from fastapi import WebSocket, WebSocketDisconnect
 
+# 入站帧上限的口径统一放在 infrastructure（应用层 ≤ 传输层）；这里重新导出，
+# 保持既有导入路径（server_runtime、测试）不变。
+from src.infrastructure.config.frame_limits import (  # noqa: F401
+    DEFAULT_MEDIA_MAX_ENCODED_BYTES,
+    INBOUND_FRAME_ENVELOPE_BYTES,
+    TRANSPORT_FRAME_LIMIT_BYTES,
+    resolve_max_inbound_frame_bytes,
+)
 from src.utils.logger import get_logger
 
 from .messages import WSEventType, WSMessage
@@ -14,21 +22,6 @@ if TYPE_CHECKING:
 
 
 NEGATIVE_ACK_CAPABILITY = "negative_ack_v1"
-
-# 图片以 base64 整帧上行，入站帧上限必须覆盖媒体库允许的最大编码字节，
-# 否则真实手机照片会在传输层被 BAD_MESSAGE 拒收（历史上限 128 KiB）。
-DEFAULT_MEDIA_MAX_ENCODED_BYTES = 8 * 1024 * 1024
-INBOUND_FRAME_ENVELOPE_BYTES = 256 * 1024
-
-
-def resolve_max_inbound_frame_bytes(media_config: Dict[str, Any] | None = None) -> int:
-    """按媒体限额推导入站帧上限：媒体库最大编码字节 + JSON 信封余量。"""
-    encoded = DEFAULT_MEDIA_MAX_ENCODED_BYTES
-    if isinstance(media_config, dict):
-        configured = media_config.get("max_encoded_bytes")
-        if type(configured) is int and configured > 0:
-            encoded = configured
-    return encoded + INBOUND_FRAME_ENVELOPE_BYTES
 
 
 class WebSocketService:
