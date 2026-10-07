@@ -1,19 +1,59 @@
 import asyncio
-import sys
 import threading
-from pathlib import Path
 
 import pytest
-
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
 
 import src.server_runtime as runtime_module
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
 from src.infrastructure.persistence.database import vector_store as vector_store_module
 from src.infrastructure.persistence.database.vector_store import ChromaVectorStore
+
+
+class FakeLLM:
+    def __init__(self, _config, client_llm_executor):
+        pass
+
+    def ensure_dependencies(self):
+        pass
+
+
+class FakeMediaResolver:
+    def ensure_dependencies(self):
+        pass
+
+
+class FakeWorld:
+    def __init__(self, _config, *, calls, **_kwargs):
+        self.calls = calls
+
+    def wire_dependencies(self, **_kwargs):
+        pass
+
+    def ensure_dependencies(self):
+        pass
+
+    def start_background_services(self):
+        self.calls.append("world_started")
+
+    async def stop_background_services(self):
+        self.calls.append("world_stopped")
+
+
+class FakeAgentRuntime:
+    def __init__(self, *_args, **_kwargs):
+        self.default_character_id = "luotianyi"
+        self.context_factories = {"luotianyi": object()}
+        self.singing_backend = object()
+
+    def get_agent(self, _character_id=None):
+        return object()
+
+    def wire_dependencies(self, **_kwargs):
+        pass
+
+    def ensure_dependencies(self):
+        pass
 
 
 @pytest.mark.asyncio
@@ -29,13 +69,6 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
         def close(self):
             calls.append("observability_closed")
 
-    class FakeLLM:
-        def __init__(self, _config, client_llm_executor):
-            pass
-
-        def ensure_dependencies(self):
-            pass
-
     class FakeDatabase:
         def __init__(self, _config):
             calls.append("database_created")
@@ -49,41 +82,6 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
 
         async def shutdown(self):
             calls.append("database_stopped")
-
-    class FakeMediaResolver:
-        def ensure_dependencies(self):
-            pass
-
-    class FakeWorld:
-        def __init__(self, _config, **_kwargs):
-            pass
-
-        def wire_dependencies(self, **_kwargs):
-            pass
-
-        def ensure_dependencies(self):
-            pass
-
-        def start_background_services(self):
-            calls.append("world_started")
-
-        async def stop_background_services(self):
-            calls.append("world_stopped")
-
-    class FakeAgentRuntime:
-        def __init__(self, *_args, **_kwargs):
-            self.default_character_id = "luotianyi"
-            self.context_factories = {"luotianyi": object()}
-            self.singing_backend = object()
-
-        def get_agent(self, _character_id=None):
-            return object()
-
-        def wire_dependencies(self, **_kwargs):
-            pass
-
-        def ensure_dependencies(self):
-            pass
 
     class FailingUserInterface(runtime_module.UserInterface):
         def generate_rsa_keys(self):
@@ -107,7 +105,9 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
     monkeypatch.setattr(runtime_module, "LLMService", FakeLLM)
     monkeypatch.setattr(runtime_module, "DatabaseManager", FakeDatabase)
     monkeypatch.setattr(runtime_module, "create_media_resolver", lambda _config: FakeMediaResolver())
-    monkeypatch.setattr(runtime_module, "WorldRuntime", FakeWorld)
+    monkeypatch.setattr(
+        runtime_module, "WorldRuntime", lambda config, **kwargs: FakeWorld(config, calls=calls, **kwargs)
+    )
     monkeypatch.setattr(runtime_module, "AgentRuntime", FakeAgentRuntime)
     monkeypatch.setattr(runtime_module, "UserInterface", FailingUserInterface)
     monkeypatch.setattr(runtime_module, "set_default_database_manager", set_database)
