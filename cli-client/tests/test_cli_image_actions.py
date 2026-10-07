@@ -3,12 +3,11 @@ import threading
 from pathlib import Path
 
 import pytest
-from PIL import Image
-
 from cli_client.cli.actions import ActionExecutor, ExitCode
 from cli_client.cli.output import serialize_record
 from cli_client.session import HeadlessSession, SessionImageError, SessionNotReadyError, SessionState
 from cli_client.utils import image_compression, image_rules
+from PIL import Image
 
 
 class FakeSession:
