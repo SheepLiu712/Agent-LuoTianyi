@@ -1,7 +1,8 @@
 """录音与图片选择协调信号的 Stage 时间线。"""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
@@ -229,4 +230,34 @@ async def test_voice_preprocessing_blocks_reply_then_batches_restored_input():
         assert tuple(item.stimulus_id for item in new_reply.prepared_inputs) == pending_ids(new_reply)
     finally:
         voice_gate.set()
+        await cleanup(stage, adapter)
+
+
+@pytest.mark.asyncio
+async def test_nonempty_typing_resets_wait_on_each_event_and_empty_typing_releases_wait():
+    stage, agent, adapter, _, _ = await setup(config={"response_wait": 1, "typing_wait": 10})
+    try:
+        # Typing alone must not create a reply or deadline.
+        stage.stimulus_input_sink.submit(stimulus(d.UserTyping, text_length=1))
+        assert stage._deadline is None and stage._wait_until is None
+        original = stimulus()
+        stage.stimulus_input_sink.submit(original)
+        await until(lambda: stage._deadline is not None)
+        first = datetime.now(timezone.utc)
+        with patch("src.stage.chat_stage.datetime") as clock:
+            clock.now.return_value = first
+            stage.stimulus_input_sink.submit(stimulus(d.UserTyping, text_length=2))
+            assert stage._deadline == first + timedelta(seconds=10)
+            clock.now.return_value = first + timedelta(seconds=3)
+            stage.stimulus_input_sink.submit(stimulus(d.UserTyping, text_length=3))
+            assert stage._deadline == first + timedelta(seconds=13)
+        stage.stimulus_input_sink.submit(stimulus(d.UserTyping, text_length=0))
+        await until(lambda: not stage._pending)
+        requests = []
+        while not agent.requests.empty():
+            requests.append(agent.requests.get_nowait())
+        replies = [r for r in requests if isinstance(r.stimulus, d.InteractionDeadline)]
+        assert len(replies) == 1
+        assert pending_ids(replies[0]) == (original.stimulus_id,)
+    finally:
         await cleanup(stage, adapter)

@@ -1,16 +1,10 @@
 import asyncio
 import os
-import sys
 from datetime import datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
 
 from src.agent.skills.expression._dynamic_operations import DynamicOperations
 from src.infrastructure.media import create_media_resolver

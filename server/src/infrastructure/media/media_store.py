@@ -111,6 +111,47 @@ class PermanentMediaStore:
         }
         self._persist(media_ref=media_ref, data=data, metadata=metadata)
 
+    def read_audio_receipt(self, *, media_ref: MediaRef, owner_user_id: str) -> dict | None:
+        """读取音频附属凭据；仅校验媒体所有权，凭据的业务含义由调用者解释。"""
+        directory = self._owned_audio_directory(media_ref, owner_user_id)
+        if directory is None:
+            return None
+        path = directory / "ingress_receipt.json"
+        try:
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        if not isinstance(receipt, dict):
+            raise ValueError("invalid audio receipt")
+        return receipt
+
+    def write_audio_receipt(self, *, media_ref: MediaRef, owner_user_id: str, receipt: dict) -> None:
+        """原子写入已存在音频的附属凭据；随媒体目录一同删除。"""
+        directory = self._owned_audio_directory(media_ref, owner_user_id)
+        if directory is None:
+            raise ValueError("audio media is missing")
+        fd, temporary = tempfile.mkstemp(prefix=".receipt-", dir=directory)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(receipt, stream, ensure_ascii=False)
+            os.replace(temporary, directory / "ingress_receipt.json")
+        finally:
+            Path(temporary).unlink(missing_ok=True)
+
+    def _owned_audio_directory(self, media_ref: MediaRef, owner_user_id: str) -> Path | None:
+        directory = self._root / str(UUID(media_ref.media_id))
+        try:
+            metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("owner_user_id") != owner_user_id
+            or metadata.get("media_kind") != "audio"
+        ):
+            raise ValueError("audio media identity mismatch")
+        return directory if (directory / "content.bin").is_file() else None
+
     def delete_owned_by(self, *, owner_user_id: str) -> MediaDeletionReport:
         """幂等删除所有属于指定用户的完整媒体目录。"""
         deleted_count = 0
