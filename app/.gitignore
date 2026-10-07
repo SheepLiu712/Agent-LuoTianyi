@@ -1,7 +1,9 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
 # dependencies
+# 不带斜杠：符号链接形式的 node_modules 不被 "node_modules/" 匹配，会被 add -A 误提交。
 node_modules/
+node_modules
 
 # Expo
 .expo/
