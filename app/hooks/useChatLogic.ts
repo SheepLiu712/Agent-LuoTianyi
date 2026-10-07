@@ -98,6 +98,21 @@ export const useChatLogic = (
     setMessages((prev) => [message, ...prev]);
   }, []);
 
+  const voiceInput = useVoiceInput({
+    onRecordingStarted: (recordingId) => { void binderRef.current?.sendVoiceRecordingStarted(recordingId); },
+    onRecordingCancelled: (recordingId) => { void binderRef.current?.sendVoiceRecordingCancelled(recordingId); },
+    onRecordingCommitted: ({ uploadId, localUri, durationMs }) => {
+      voiceFilesRef.current.set(uploadId, { localUri, durationMs });
+      void voicePlaybackManager.cacheLocal(uploadId, localUri).then((cachedUri) => updateMessageByUuid(uploadId, (msg) => ({ ...msg, audioLocalUri: cachedUri, audioAvailable: true })));
+      setMessages((prev) => [{ uuid: uploadId, type: 'audio', content: '[语音消息]', isUser: true, timestamp: Date.now(), durationMs, audioLocalUri: localUri, audioAvailable: true, sendStatus: 'waiting' }, ...prev]);
+      void binderRef.current?.sendVoice(uploadId, localUri, durationMs);
+    },
+    onStopAllAudio: async () => { await binderRef.current?.stopLocalTts(); webviewRef.current?.injectJavaScript('window.stopServerAudio(); true;'); },
+    onNotice: appendSystemMessage,
+  });
+
+  const onVoiceUploadStatus = voiceInput.onUploadStatus;
+
   useEffect(() => {
     if (!username || !messageToken) {
       return;
@@ -149,6 +164,7 @@ export const useChatLogic = (
         onMessageStatus: (uuid, status) => {
           addDebugTrace('ui', 'message status update', { uuid, status });
           updateMessageByUuid(uuid, (msg) => ({ ...msg, sendStatus: status }));
+          onVoiceUploadStatus(uuid, status);
         },
         onAgentThinking: (isThinking) => {
           setThinking(isThinking);
@@ -210,23 +226,10 @@ export const useChatLogic = (
       binderRef.current = null;
       networkClientRef.current = null;
     };
-  }, [appendOrMergeAgentMessage, appendSystemMessage, messageToken, updateMessageByUuid, username, webviewRef]);
+  }, [appendOrMergeAgentMessage, appendSystemMessage, messageToken, onVoiceUploadStatus, updateMessageByUuid, username, webviewRef]);
 
   const canSend = useMemo(() => inputText.trim().length > 0, [inputText]);
   const canSendImage = true;
-
-  const voiceInput = useVoiceInput({
-    onRecordingStarted: (recordingId) => { void binderRef.current?.sendVoiceRecordingStarted(recordingId); },
-    onRecordingCancelled: (recordingId) => { void binderRef.current?.sendVoiceRecordingCancelled(recordingId); },
-    onRecordingCommitted: ({ uploadId, localUri, durationMs }) => {
-      voiceFilesRef.current.set(uploadId, { localUri, durationMs });
-      void voicePlaybackManager.cacheLocal(uploadId, localUri).then((cachedUri) => updateMessageByUuid(uploadId, (msg) => ({ ...msg, audioLocalUri: cachedUri, audioAvailable: true })));
-      setMessages((prev) => [{ uuid: uploadId, type: 'audio', content: '[语音消息]', isUser: true, timestamp: Date.now(), durationMs, audioLocalUri: localUri, audioAvailable: true, sendStatus: 'waiting' }, ...prev]);
-      void binderRef.current?.sendVoice(uploadId, localUri, durationMs);
-    },
-    onStopAllAudio: async () => { await binderRef.current?.stopLocalTts(); webviewRef.current?.injectJavaScript('window.stopServerAudio(); true;'); },
-    onNotice: appendSystemMessage,
-  });
 
   const handleWebViewMessage = useCallback((event: any) => {
     try {
