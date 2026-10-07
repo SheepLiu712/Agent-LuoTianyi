@@ -1,5 +1,6 @@
 import os
 import re
+from dataclasses import fields
 from typing import Callable, List, Tuple
 
 from ..types import ConversationItem
@@ -8,10 +9,16 @@ from ..utils.logger import get_logger
 from . import AuthApi, WsTransport
 
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_CONVERSATION_ITEM_FIELDS = {field.name for field in fields(ConversationItem)}
 
 
 def _is_safe_uuid(value: str | None) -> bool:
     return bool(value and _SAFE_UUID_RE.fullmatch(value))
+
+
+def _conversation_item_from_dict(item: dict) -> ConversationItem:
+    """忽略未知字段构造历史项：服务端新增字段时，历史页不能因此整页变空。"""
+    return ConversationItem(**{key: value for key, value in item.items() if key in _CONVERSATION_ITEM_FIELDS})
 
 
 class NetworkClient:
@@ -272,7 +279,7 @@ class NetworkClient:
             if "history" not in data:
                 return [], -1
 
-            history_items = [ConversationItem(**item) for item in data.get("history", [])]
+            history_items = [_conversation_item_from_dict(item) for item in data.get("history", [])]
             history_items = self._clean_history(history_items)
             return history_items, data.get("start_index", 0)
         except Exception as exc:

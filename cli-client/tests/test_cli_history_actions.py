@@ -100,3 +100,67 @@ def test_cli_sends_zero_length_typing_signal_with_ack():
     )
     assert code == ExitCode.SUCCESS
     assert record["data"]["ack"] is True
+
+
+def test_history_items_ignore_unknown_server_fields():
+    """服务端向历史项新增字段时，CLI 必须忽略未知字段，而不是让整页历史静默清空。"""
+    from cli_client.network.network_client import _conversation_item_from_dict
+
+    item = _conversation_item_from_dict(
+        {
+            "timestamp": "2026-09-26",
+            "source": "user",
+            "type": "audio",
+            "content": "[语音消息]",
+            "uuid": "audio-one",
+            "duration_ms": 900,
+            "audio_available": True,
+            "transcript": "未公开字段",
+            "future_field": {"nested": True},
+        }
+    )
+
+    assert item.uuid == "audio-one"
+    assert item.duration_ms == 900
+    assert item.audio_available is True
+    assert not hasattr(item, "transcript")
+
+
+def test_network_client_get_history_ignores_unknown_server_fields():
+    """调用点级回归：服务端新增历史字段时 NetworkClient.get_history 必须忽略而不是整页返回空。"""
+    from cli_client.network.network_client import NetworkClient
+
+    class _Response:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "history": [
+                    {
+                        "timestamp": "2026-09-26",
+                        "source": "user",
+                        "type": "audio",
+                        "content": "[语音消息]",
+                        "uuid": "audio-one",
+                        "duration_ms": 900,
+                        "audio_available": True,
+                        "transcript": "未公开字段",
+                        "future_field": {"nested": True},
+                    }
+                ],
+                "start_index": 0,
+            }
+
+    client = NetworkClient("http://localhost:60030")
+    client.user_id = "user"
+    client.message_token = "token"
+    client.session = SimpleNamespace(get=lambda *args, **kwargs: _Response())
+
+    items, start_index = client.get_history(20, -1)
+
+    assert start_index == 0
+    assert len(items) == 1
+    assert items[0].uuid == "audio-one"
+    assert items[0].duration_ms == 900
+    assert not hasattr(items[0], "transcript")
