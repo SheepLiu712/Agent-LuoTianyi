@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -136,10 +135,3 @@ def test_new_site_rules_are_frozen_with_resource(rules_config):
     with pytest.raises(TypeError):
         template_rules._RULES["section_aliases"]["歌词"] = ("changed",)
     assert isinstance(template_rules._RULES["song_list_filters"]["exact"], tuple)
-
-
-def test_packaged_resource_has_same_site_rules():
-    packaged = Path(template_rules.__file__).with_name("vcpedia_templates.json")
-    assert json.loads(packaged.read_text(encoding="utf-8")) == json.loads(
-        template_rules._rules_path().read_text(encoding="utf-8")
-    )

@@ -19,7 +19,6 @@ IMPLEMENTATION_FILES = {
     "new_parser": "src/world/get_new_songs/wikitext_parser.py",
     "template_rules": "src/world/get_new_songs/template_rules.py",
     "text_conversion": "src/world/get_new_songs/text_conversion.py",
-    "config_rules": "config/vcpedia_templates.json",
     "packaged_rules": "src/world/get_new_songs/vcpedia_templates.json",
 }
 

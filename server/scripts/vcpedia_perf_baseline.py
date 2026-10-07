@@ -75,7 +75,6 @@ def environment(manifest_path):
         "new_parser": SERVER / "src/world/get_new_songs/wikitext_parser.py",
         "template_rules": SERVER / "src/world/get_new_songs/template_rules.py",
         "text_conversion": SERVER / "src/world/get_new_songs/text_conversion.py",
-        "config_rules": SERVER / "config/vcpedia_templates.json",
         "packaged_rules": SERVER / "src/world/get_new_songs/vcpedia_templates.json",
         "manifest": Path(manifest_path),
     }
