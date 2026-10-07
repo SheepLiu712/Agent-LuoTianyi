@@ -7,6 +7,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from fastapi import WebSocketDisconnect
+from support.audio_samples import recorded_aac_bytes
 
 import src.domain.agent as d
 from src.adapter.websocket import WebSocketAdapter
@@ -203,6 +204,10 @@ async def test_begin_limits_and_media_declarations(tmp_path, changes, code):
     ("data", "code"),
     [
         (m4a_bytes(codec_config=b"\x0a\x10"), "VOICE_UNSUPPORTED_MEDIA"),
+        (recorded_aac_bytes().replace(b"soun", b"vide", 1), "VOICE_UNSUPPORTED_MEDIA"),
+        (recorded_aac_bytes().replace(b"mp4a", b"enca", 1), "VOICE_UNSUPPORTED_MEDIA"),
+        (recorded_aac_bytes(b"M4P "), "VOICE_UNSUPPORTED_MEDIA"),
+        (recorded_aac_bytes()[:-1], "VOICE_UNSUPPORTED_MEDIA"),
         (m4a_bytes(duration_ms=499), "VOICE_INVALID_DURATION"),
         (m4a_bytes(duration_ms=30_501), "VOICE_INVALID_DURATION"),
     ],
@@ -533,3 +538,19 @@ async def test_unpersisted_receipts_apply_backpressure_without_losing_deduplicat
     replay, stage, _ = await run_events(tmp_path, first_events, adapter=adapter)
     assert replay[-1]["payload"]["duplicate"]
     assert not stage.stimuli
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("brand", [b"mp42", b"isom", b"M4A "])
+async def test_real_aac_brands_finalize_once_and_preserve_media(tmp_path, brand):
+    data = recorded_aac_bytes(brand)
+    _, events = upload_events(data)
+    events.append(events[-1])
+    sent, stage, _ = await run_events(tmp_path, events)
+    assert len(sent) == len(events)
+    assert all(item["type"] == "server_ack" and item["payload"]["ok"] for item in sent)
+    voices = [item for item in stage.stimuli if isinstance(item, d.VoiceMessage)]
+    assert len(voices) == 1
+    assert voices[0].duration_ms == 1064
+    assert sent[-1]["payload"]["duplicate"] is True
+    assert (tmp_path / "media" / voices[0].media_ref.media_id / "content.bin").read_bytes() == data

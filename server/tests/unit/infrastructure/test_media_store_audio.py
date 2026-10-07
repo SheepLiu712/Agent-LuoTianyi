@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 from PIL import Image
+from support.audio_samples import recorded_aac_bytes
 
 import src.domain.agent as d
 from src.infrastructure.media import (
@@ -27,7 +28,15 @@ def _descriptor(tag: int, payload: bytes) -> bytes:
     return bytes((tag, len(payload))) + payload
 
 
-def m4a_bytes(*, duration_ms: int = 1234, codec_config: bytes = b"\x12\x10") -> bytes:
+def m4a_bytes(
+    *,
+    duration_ms: int = 1234,
+    codec_config: bytes = b"\x12\x10",
+    handler: bytes = b"soun",
+    entry_type: bytes = b"mp4a",
+    protected: bool = False,
+    extra_video: bool = False,
+) -> bytes:
     """构造 Mutagen 可解析的最小 M4A/AAC-LC 容器。"""
     decoder_specific = _descriptor(5, codec_config)
     decoder_config = _descriptor(
@@ -37,13 +46,21 @@ def m4a_bytes(*, duration_ms: int = 1234, codec_config: bytes = b"\x12\x10") -> 
     es_descriptor = _descriptor(3, struct.pack(">HB", 1, 0) + decoder_config)
     esds = _atom(b"esds", b"\0\0\0\0" + es_descriptor)
     sample_entry = _atom(
-        b"mp4a",
-        b"\0" * 6 + struct.pack(">H", 1) + b"\0" * 8 + struct.pack(">HHHHI", 2, 16, 0, 0, 44_100 << 16) + esds,
+        entry_type,
+        b"\0" * 6
+        + struct.pack(">H", 1)
+        + b"\0" * 8
+        + struct.pack(">HHHHI", 2, 16, 0, 0, 44_100 << 16)
+        + esds
+        + (_atom(b"sinf") if protected else b""),
     )
     stsd = _atom(b"stsd", b"\0\0\0\0" + struct.pack(">I", 1) + sample_entry)
     mdhd = _atom(b"mdhd", b"\0\0\0\0" + struct.pack(">IIIIHH", 0, 0, 1000, duration_ms, 0, 0))
-    hdlr = _atom(b"hdlr", b"\0" * 8 + b"soun" + b"\0" * 12)
+    hdlr = _atom(b"hdlr", b"\0" * 8 + handler + b"\0" * 12)
     moov = _atom(b"moov", _atom(b"trak", _atom(b"mdia", mdhd + hdlr + _atom(b"minf", _atom(b"stbl", stsd)))))
+    if extra_video:
+        video = _atom(b"trak", _atom(b"mdia", _atom(b"hdlr", b"\0" * 8 + b"vide" + b"\0" * 12)))
+        moov = _atom(b"moov", moov[8:] + video)
     return _atom(b"ftyp", b"M4A " + struct.pack(">I", 0) + b"isomM4A ") + moov
 
 
@@ -258,3 +275,40 @@ def test_audio_receipt_owner_atomic_write_and_media_deletion(tmp_path, monkeypat
     assert not list((tmp_path / media_ref.media_id).glob(".receipt-*"))
     store.delete_owned_by(owner_user_id="owner")
     assert store.read_audio_receipt(media_ref=media_ref, owner_user_id="owner") is None
+
+
+@pytest.mark.parametrize("brand", [b"mp42", b"isom", b"mp41", b"M4A ", b"M4B "])
+def test_real_aac_accepts_mp4_brands_without_reencoding(brand):
+    parsed = parse_m4a_audio(recorded_aac_bytes(brand))
+    assert (parsed.duration_ms, parsed.container, parsed.codec) == (1064, "m4a", "aac_lc")
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        m4a_bytes(handler=b"vide"),
+        m4a_bytes(extra_video=True),
+        m4a_bytes(entry_type=b"enca"),
+        m4a_bytes(entry_type=b"drms"),
+        m4a_bytes(protected=True),
+        recorded_aac_bytes(b"M4P "),
+    ],
+)
+def test_brand_does_not_authorize_video_or_protected_audio(data):
+    with pytest.raises(MediaResolutionError) as caught:
+        parse_m4a_audio(data)
+    assert caught.value.code is MediaResolutionErrorCode.UNSUPPORTED_TYPE
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        recorded_aac_bytes()[:-1],
+        recorded_aac_bytes() + b"truncated",
+        _atom(b"ftyp", b"mp42" + b"\0" * 4 + b"isom") + struct.pack(">I4s", 1000, b"moov"),
+        _atom(b"ftyp", b"mp42" + b"\0" * 4 + b"isom") + _atom(b"moov", struct.pack(">I4s", 1000, b"trak")),
+    ],
+)
+def test_rejects_truncated_or_out_of_bounds_mp4_boxes(data):
+    with pytest.raises(MediaResolutionError):
+        parse_m4a_audio(data)
