@@ -35,7 +35,7 @@ class ValidationItem:
 class RuntimeConfigValidator:
     """Validate core runtime config and report optional world disablements."""
 
-    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY", "QWEN_API_KEY"]
+    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
 
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",
@@ -167,16 +167,25 @@ class RuntimeConfigValidator:
             ("audio", "available_audio_models"),
         ):
             interfaces = llm_service.get(key, {})
-            if kind == "audio" and not interfaces:
-                interfaces = {
-                    "qwen3.8-omni-flash": {
-                        "api_type": "openai",
-                        "model": "qwen3.8-omni-flash",
-                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                        "api_key": os.environ.get("QWEN_API_KEY", ""),
-                    }
-                }
             if not interfaces:
+                if kind == "audio":
+                    # 音频理解是可选能力：未配置接口时不阻断核心校验（与 world 功能「缺失即禁用」一致），
+                    # 但措辞必须与运行期一致——LLMService 不再提供内置默认音频接口（供应商身份必须显式，
+                    # #251），而 AudioUnderstandingSkill 在拿到 media_resolver 时就会构造并调用
+                    # register_audio_model_module：未声明接口即抛错，业务运行时装配失败（管理 Web 仍可用）。
+                    # 因此这里如实说明后果，不承诺「降级」，也不在验证器内合成任何默认供应商。
+                    result.append(
+                        ValidationItem(
+                            "core",
+                            f"{kind}.interfaces",
+                            "warning",
+                            "未配置 llm_service.available_audio_models：配置校验不阻断，"
+                            "但语音理解技能装配会显式失败、业务运行时无法启动（管理 Web 仍可用）；"
+                            "请显式声明音频模型接口（供应商身份必须显式）",
+                            severity="warning",
+                        )
+                    )
+                    continue
                 result.append(
                     ValidationItem("core", f"{kind}.interfaces", "error", f"未配置任何 {kind.upper()} interface")
                 )

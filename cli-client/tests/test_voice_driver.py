@@ -190,3 +190,45 @@ def test_network_audio_download_uses_bearer_token():
     assert client.download_audio("message-1") == b"downloaded"
     assert calls[0][0].endswith("/media/audio/message-1")
     assert calls[0][1]["headers"] == {"Authorization": "Bearer secret-token"}
+
+
+def test_protocol_docs_and_driver_match_the_server_agent_states():
+    """`agent_state` 取值必须以服务端枚举为真源，两份协议文档与驱动都不得漂移。
+
+    N6 的事实基线在本 PR 期间变化过：早期服务端只发射 `thinking`/`waiting`（驱动硬等
+    `listening` 必然超时），随后 #252 起服务端真的开始发射 `listening`。因此这条契约测试
+    不再断言"哪些状态会被发射"（那是实现细节），而是断言三处**取值集合一致**：
+
+    1. 服务端 `AgentPresentationState`（真源）；
+    2. `server/docs` 与 `client/docs` 两份协议副本的 §5.5「当前可能值」；
+    3. 驱动 `wait_for_event(..., value=...)` 里等待的取值 ⊆ 真源（不得等待服务端无法发射的状态）。
+    """
+    import re
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    enum_path = repo_root / "server" / "src" / "domain" / "stage" / "output.py"
+    docs = (
+        repo_root / "server" / "docs" / "dev" / "统一事件协议.md",
+        repo_root / "client" / "docs" / "dev" / "统一事件协议.md",
+    )
+    driver_path = repo_root / "cli-client" / "tests" / "manual_e2e" / "22-voice-message.driver.py"
+    if not enum_path.exists() or not docs[0].exists():
+        pytest.skip("server sources are not available alongside cli-client")
+
+    enum_source = enum_path.read_text(encoding="utf-8")
+    server_states = set(re.findall(r'^\s+[A-Z_]+ = "([a-z_]+)"$', enum_source, flags=re.MULTILINE))
+    assert server_states, "AgentPresentationState must declare its values"
+
+    for doc in docs:
+        section = doc.read_text(encoding="utf-8").split("### 5.5 agent_state_changed", 1)[1].split("### 5.6", 1)[0]
+        assert "当前可能值" in section, f"{doc.name} §5.5 must list the current agent_state values"
+        possible = section.split("当前可能值", 1)[1]
+        doc_states = set(re.findall(r"^\d+\.\s*`([a-z_]+)`", possible, flags=re.MULTILINE))
+        assert doc_states == server_states, (
+            f"{doc.name} drifted from AgentPresentationState: {doc_states ^ server_states}"
+        )
+
+    driver_source = driver_path.read_text(encoding="utf-8")
+    gated = set(re.findall(r'wait_for_event\(\s*"agent_state"[^)]*?value="([^"]+)"', driver_source))
+    assert gated <= server_states, f"driver gates on states the server cannot emit: {gated - server_states}"
