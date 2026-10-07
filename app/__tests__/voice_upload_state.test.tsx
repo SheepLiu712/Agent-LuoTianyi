@@ -42,7 +42,7 @@ describe('voice upload result restores capture through chat, binder and send que
 
   it.each(['submitted', 'failed'] as const)('restores after %s, allows switching and a second recording', async (status) => {
     let finish!: (value: object) => void;
-    const terminal = new Promise((resolve) => { finish = resolve; });
+    let terminal = new Promise((resolve) => { finish = resolve; });
     const sendVoicePhase = jest.fn(async (payload) => payload.phase === 'finalize' ? terminal : { ok: true });
     (NetworkClient as jest.Mock).mockImplementation(() => ({
       connectWs: jest.fn(), disconnectWs: jest.fn(), sendVoicePhase,
@@ -72,6 +72,29 @@ describe('voice upload result restores capture through chat, binder and send que
     expect(state.voiceInput.elapsedMs).toBe(0);
     await act(async () => { state.voiceInput.toggleMode(); });
     expect(state.voiceInput.mode).toBe('text');
+    if (status === 'failed') {
+      for (const retryStatus of ['failed', 'submitted']) {
+        terminal = new Promise((resolve) => { finish = resolve; });
+        const callsBeforeRetry = sendVoicePhase.mock.calls.length;
+        await act(async () => {
+          // 同一渲染帧内连点，再到等待 ACK 时点击，都不得重复入队。
+          await Promise.all([state.retryVoice('first'), state.retryVoice('first')]);
+        });
+        await act(async () => { await state.retryVoice('first'); });
+        expect(state.messages.find((message) => message.uuid === 'first')?.sendStatus).toBe('waiting');
+        expect(state.voiceInput.captureState).toBe('Uploading');
+        expect(sendVoicePhase.mock.calls.slice(callsBeforeRetry).map(([payload]) => payload.phase)).toEqual(['begin', 'chunk', 'finalize']);
+        expect(sendVoicePhase.mock.calls.every(([payload]) => payload.upload_id === 'first')).toBe(true);
+        await act(async () => { finish(retryStatus === 'submitted'
+          ? { ok: true, message_uuid: 'server-first' }
+          : { ok: false, drop: true, error: 'invalid voice' }); });
+        expect(state.messages.find((message) => message.uuid === 'first')?.sendStatus).toBe(retryStatus);
+        expect(state.voiceInput.captureState).toBe('TextMode');
+      }
+      const callsAfterSuccess = sendVoicePhase.mock.calls.length;
+      await act(async () => { await state.retryVoice('first'); });
+      expect(sendVoicePhase).toHaveBeenCalledTimes(callsAfterSuccess);
+    }
     await act(async () => { state.voiceInput.toggleMode(); });
     await act(async () => { await state.voiceInput.pressIn(event); });
     expect(voiceRecorder.start).toHaveBeenCalledTimes(2);

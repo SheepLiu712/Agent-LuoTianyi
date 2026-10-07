@@ -87,6 +87,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     handleWebViewMessage,
     handleToggleAgentAudio,
     toggleVoicePlayback,
+    retryVoice,
     voiceInput,
   } = useChatLogic(webviewRef, username, message_token);
 
@@ -405,7 +406,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             ref={flatListRef}
             data={messages}
             inverted={true}
-            renderItem={({ item }) => <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} onToggleVoicePlayback={toggleVoicePlayback} theme={theme} />}
+            renderItem={({ item }) => <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} onToggleVoicePlayback={toggleVoicePlayback} onRetryVoice={retryVoice} theme={theme} />}
             keyExtractor={(item) => item.uuid}
             onEndReached={() => {
               if (username && message_token && !historyLoading) {

@@ -1,3 +1,4 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlatList } from 'react-native';
@@ -147,7 +148,13 @@ export const useChatLogic = (
         sendVoiceRecordingStarted: async (recordingId) => { await networkClientRef.current?.sendVoiceRecordingStarted(recordingId); },
         sendVoiceRecordingCancelled: async (recordingId) => { await networkClientRef.current?.sendVoiceRecordingCancelled(recordingId); },
         sendVoice: async (uuid, localUri, durationMs) => { await messageProcessorRef.current?.sendVoice(uuid, localUri, durationMs); },
-        retryVoice: async (uuid) => { const file = voiceFilesRef.current.get(uuid); if (file) await messageProcessorRef.current?.sendVoice(uuid, file.localUri, file.durationMs); },
+        retryVoice: async (uuid) => {
+          const file = voiceFilesRef.current.get(uuid);
+          const processor = messageProcessorRef.current;
+          if (!file || !(await FileSystem.getInfoAsync(file.localUri)).exists) throw new Error('本地语音文件已不存在，无法重试');
+          if (!processor) throw new Error('发送服务不可用，请稍后重试');
+          await processor.sendVoice(uuid, file.localUri, file.durationMs);
+        },
         playLocalTts: async (convUuid) => {
           addDebugTrace('audio-ui', 'binder playLocalTts called', { convUuid });
           return (await messageProcessorRef.current?.playLocalTtsByUuid(convUuid)) || false;
@@ -459,6 +466,23 @@ export const useChatLogic = (
     }
   }, [appendSystemMessage, currentPlayingUuid, messageToken, messages, updateMessageByUuid]);
 
+  const retryVoice = async (uuid: string) => {
+    const target = messages.find((message) => message.uuid === uuid);
+    if (!target?.isUser || target.type !== 'audio' || target.sendStatus !== 'failed') return;
+    if (!voiceInput.beginRetryUpload(uuid)) return;
+    updateMessageByUuid(uuid, (message) => ({ ...message, sendStatus: 'waiting' }));
+    try {
+      const binder = binderRef.current;
+      if (!binder) throw new Error('发送服务不可用，请稍后重试');
+      await binder.retryVoice(uuid);
+      // 入队并非发送完成；由发送队列的终态通知解除重试锁定。
+    } catch (error) {
+      updateMessageByUuid(uuid, (message) => ({ ...message, sendStatus: 'failed' }));
+      voiceInput.onUploadStatus(uuid, 'failed');
+      appendSystemMessage(error instanceof Error ? error.message : '语音重试失败，请稍后重试');
+    }
+  };
+
   return {
     inputText,
     messages,
@@ -473,6 +497,7 @@ export const useChatLogic = (
     handleWebViewMessage,
     handleToggleAgentAudio,
     toggleVoicePlayback,
+    retryVoice,
     voiceInput,
   };
 };

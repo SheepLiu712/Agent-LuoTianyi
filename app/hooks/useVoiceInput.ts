@@ -14,13 +14,21 @@ export function useVoiceInput(options: Options) {
   const [smoothedMeter, setSmoothedMeter] = useState(0);
   const initialY = useRef(0); const id = useRef<string | null>(null); const startedAt = useRef(0); const cancelZone = useRef(false); const finishing = useRef(false);
   const pendingUploadId = useRef<string | null>(null);
+  const uploadReturnState = useRef<VoiceCaptureState>('VoiceReady');
+  const beginRetryUpload = useCallback((uploadId: string) => {
+    if (pendingUploadId.current || finishing.current || (captureState !== 'TextMode' && captureState !== 'VoiceReady')) return false;
+    uploadReturnState.current = captureState;
+    pendingUploadId.current = uploadId;
+    setCaptureState('Uploading');
+    return true;
+  }, [captureState]);
   const onUploadStatus = useCallback((uploadId: string, status: SendStatus) => {
     if (pendingUploadId.current !== uploadId || (status !== 'submitted' && status !== 'failed')) return;
     pendingUploadId.current = null;
     id.current = null;
     setElapsedMs(0);
     setSmoothedMeter(0);
-    setCaptureState('VoiceReady');
+    setCaptureState(uploadReturnState.current);
   }, []);
   const toggleMode = useCallback(() => { if (captureState === 'TextMode') { setMode('voice'); setCaptureState('VoiceReady'); } else if (captureState === 'VoiceReady') { setMode('text'); setCaptureState('TextMode'); } }, [captureState]);
   const cancel = useCallback(async (reason: string) => { if (finishing.current) return; finishing.current = true; const current = id.current; await recorder.cancel(); if (current) options.onRecordingCancelled(current, reason); id.current = null; setElapsedMs(0); setSmoothedMeter(0); setCaptureState('VoiceReady'); finishing.current = false; }, [options, recorder]);
@@ -34,9 +42,9 @@ export function useVoiceInput(options: Options) {
     id.current = started.recordingId; startedAt.current = Date.now(); cancelZone.current = false; setElapsedMs(0); setCaptureState('Recording'); options.onRecordingStarted(started.recordingId);
   }, [captureState, options, recorder]);
   const pressMove = useCallback((event: GestureResponderEvent) => { const next = voiceStateForMove(captureState, initialY.current, event.nativeEvent.pageY); if (next === 'CancelZone' && !cancelZone.current) { cancelZone.current = true; void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined); } if (next === 'Recording') cancelZone.current = false; setCaptureState(next); }, [captureState]);
-  const pressOut = useCallback(async () => { if (captureState !== 'Recording' && captureState !== 'CancelZone') return; const elapsed = Math.min(MAX_VOICE_DURATION_MS, Date.now() - startedAt.current); if (captureState === 'CancelZone' || elapsed < MIN_VOICE_DURATION_MS) { await cancel(elapsed < MIN_VOICE_DURATION_MS ? 'too_short' : 'gesture_cancel'); if (elapsed < MIN_VOICE_DURATION_MS) options.onNotice('说话时间太短'); return; } if (finishing.current) return; finishing.current = true; const current = id.current; const result = await recorder.stop(); if (current && result) { pendingUploadId.current = current; setCaptureState('Uploading'); options.onRecordingCommitted({ uploadId: current, localUri: result.localUri, durationMs: Math.min(MAX_VOICE_DURATION_MS, result.durationMs || elapsed) }); } finishing.current = false; }, [cancel, captureState, options, recorder]);
+  const pressOut = useCallback(async () => { if (captureState !== 'Recording' && captureState !== 'CancelZone') return; const elapsed = Math.min(MAX_VOICE_DURATION_MS, Date.now() - startedAt.current); if (captureState === 'CancelZone' || elapsed < MIN_VOICE_DURATION_MS) { await cancel(elapsed < MIN_VOICE_DURATION_MS ? 'too_short' : 'gesture_cancel'); if (elapsed < MIN_VOICE_DURATION_MS) options.onNotice('说话时间太短'); return; } if (finishing.current) return; finishing.current = true; const current = id.current; const result = await recorder.stop(); if (current && result) { uploadReturnState.current = 'VoiceReady'; pendingUploadId.current = current; setCaptureState('Uploading'); options.onRecordingCommitted({ uploadId: current, localUri: result.localUri, durationMs: Math.min(MAX_VOICE_DURATION_MS, result.durationMs || elapsed) }); } finishing.current = false; }, [cancel, captureState, options, recorder]);
   useEffect(() => { if (captureState !== 'Recording' && captureState !== 'CancelZone') return; const timer = setInterval(() => { const elapsed = Math.min(MAX_VOICE_DURATION_MS, Date.now() - startedAt.current); setElapsedMs(elapsed); if (elapsed >= MAX_VOICE_DURATION_MS) void pressOut(); }, 100); return () => clearInterval(timer); }, [captureState, pressOut]);
   useEffect(() => { const sub = AppState.addEventListener('change', (state) => { if (state !== 'active' && (captureState === 'Recording' || captureState === 'CancelZone')) void cancel('background'); }); return () => sub.remove(); }, [cancel, captureState]);
   useEffect(() => () => { void recorder.dispose(); }, [recorder]);
-  return { mode, captureState, elapsedMs, smoothedMeter, isCancelZone: captureState === 'CancelZone', toggleMode, onUploadStatus, pressIn, pressMove, pressOut, cancelBySystem: cancel };
+  return { mode, captureState, elapsedMs, smoothedMeter, isCancelZone: captureState === 'CancelZone', toggleMode, beginRetryUpload, onUploadStatus, pressIn, pressMove, pressOut, cancelBySystem: cancel };
 }
