@@ -35,7 +35,7 @@ class ValidationItem:
 class RuntimeConfigValidator:
     """Validate core runtime config and report optional world disablements."""
 
-    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY", "QWEN_API_KEY"]
+    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
 
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",
@@ -167,16 +167,23 @@ class RuntimeConfigValidator:
             ("audio", "available_audio_models"),
         ):
             interfaces = llm_service.get(key, {})
-            if kind == "audio" and not interfaces:
-                interfaces = {
-                    "qwen3.8-omni-flash": {
-                        "api_type": "openai",
-                        "model": "qwen3.8-omni-flash",
-                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                        "api_key": os.environ.get("QWEN_API_KEY", ""),
-                    }
-                }
             if not interfaces:
+                if kind == "audio":
+                    # 音频理解未配置时不阻断核心校验，但提示必须与运行期一致：LLMService 已无内置默认
+                    # 音频接口（#251），而技能会在拿到 media_resolver 时构造并注册模块，未声明接口即抛错
+                    # → 业务运行时装配失败。因此这里说明该后果，不写「降级」，也不凭空合成供应商。
+                    result.append(
+                        ValidationItem(
+                            "core",
+                            f"{kind}.interfaces",
+                            "warning",
+                            "未配置 llm_service.available_audio_models：配置校验不阻断，"
+                            "但语音理解技能装配会显式失败、业务运行时无法启动（管理 Web 仍可用）；"
+                            "请显式声明音频模型接口（供应商身份必须显式）",
+                            severity="warning",
+                        )
+                    )
+                    continue
                 result.append(
                     ValidationItem("core", f"{kind}.interfaces", "error", f"未配置任何 {kind.upper()} interface")
                 )

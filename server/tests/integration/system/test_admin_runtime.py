@@ -607,3 +607,53 @@ def test_qq_music_credential_refresh_runs_in_background(tmp_path, monkeypatch):
     assert credential_file.exists()
     assert legacy_file.exists()
     assert learner.qq_credential_valid is True
+
+
+def test_audio_interfaces_are_optional_and_degrade_without_blocking_core(tmp_path, monkeypatch):
+    """音频模型未配置时只提示、不阻断核心配置校验。"""
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    for key in ["QWEN_API_KEY", "SILICONFLOW_API_KEY", "DEEPSEEK_API_KEY"]:
+        monkeypatch.delenv(key, raising=False)
+    secret_store = SecretStore(tmp_path / "secrets.local.env")
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secret_store)
+    config = minimal_config(tmp_path)
+
+    result = validator.validate(apply_env_variables(copy.deepcopy(config)))
+
+    assert result["core_ok"] is True
+    item = next(item for item in result["items"] if item["name"] == "audio.interfaces")
+    assert item["status"] == "warning"
+    assert item["severity"] == "warning"
+    # 措辞必须与运行期一致（#251）：LLMService 不再提供内置默认音频接口，
+    # 且技能装配在未声明接口时显式失败 —— 不得声称"回退到默认接口"，也不得含糊成"降级/不阻断"。
+    assert "运行时无法启动" in item["message"]
+    assert "回退" not in item["message"]
+    assert "降级" not in item["message"]
+    secret_names = {item["name"] for item in result["items"] if item["name"].startswith("secret.")}
+    assert secret_names == {"secret.JWT_SECRET", "secret.AMAP_KEY"}
+
+
+def test_explicitly_configured_unresolved_audio_interface_is_a_core_error(tmp_path, monkeypatch):
+    """已显式配置音频接口但密钥占位符未解析时，核心配置校验必须报错。"""
+    monkeypatch.setenv("JWT_SECRET", "jwt")
+    monkeypatch.setenv("AMAP_KEY", "amap")
+    monkeypatch.delenv("QWEN_API_KEY", raising=False)
+    secret_store = SecretStore(tmp_path / "secrets.local.env")
+    validator = RuntimeConfigValidator(root_dir=tmp_path, secret_store=secret_store)
+    config = minimal_config(tmp_path)
+    config["llm_service"]["available_audio_models"] = {
+        "omni": {
+            "api_type": "openai",
+            "model": "qwen3.8-omni-flash",
+            "base_url": "https://example.invalid/v1",
+            "api_key": "$QWEN_API_KEY",
+        }
+    }
+
+    result = validator.validate(apply_env_variables(copy.deepcopy(config)))
+
+    item = next(item for item in result["items"] if item["name"] == "audio.omni")
+    assert item["status"] == "error"
+    assert "环境变量未解析" in item["message"]
+    assert result["core_ok"] is False
