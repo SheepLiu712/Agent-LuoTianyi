@@ -505,10 +505,13 @@ class ActionExecutor:
                 ack_timeout=_number(params, "ack_timeout", 10.0),
             )
         except SessionImageError as exc:
+            # 图片过大消息来自与桌面端镜像的编码管道；压缩后仍超限时保留稳定错误码。
+            message = str(exc)
+            code = "IMAGE_TOO_LARGE" if "图片过大" in message else "IMAGE_FILE_UNREADABLE"
             raise _ActionFailure(
                 ExitCode.INPUT_ERROR,
-                "IMAGE_FILE_UNREADABLE",
-                str(exc),
+                code,
+                message,
                 "input",
             ) from exc
         self._ensure_positive_ack(ack, correlation_id=request_id)
@@ -547,13 +550,6 @@ class ActionExecutor:
                 ExitCode.INPUT_ERROR,
                 "IMAGE_TYPE_UNSUPPORTED",
                 f"unsupported image type: {path.name}",
-                "input",
-            )
-        if path.stat().st_size > image_rules.MAX_IMAGE_BYTES:
-            raise _ActionFailure(
-                ExitCode.INPUT_ERROR,
-                "IMAGE_TOO_LARGE",
-                f"image file too large: {path.name}",
                 "input",
             )
         return path
