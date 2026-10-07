@@ -2,7 +2,7 @@ export type MessageType = 'text' | 'image' | 'audio' | 'sing' | 'system';
 export type SendStatus = 'waiting' | 'submitted' | 'failed';
 export type AudioPlayState = 'idle' | 'playing';
 export type AudioDownloadState = 'idle' | 'loading' | 'ready' | 'failed';
-export type VoiceCaptureState = 'TextMode' | 'VoiceReady' | 'PermissionPrompt' | 'Recording' | 'CancelZone' | 'Uploading' | 'Sent' | 'Failed';
+export type VoiceCaptureState = 'TextMode' | 'VoiceReady' | 'PermissionPrompt' | 'Starting' | 'Recording' | 'CancelZone' | 'Uploading' | 'Sent' | 'Failed';
 
 export interface ChatMessage {
   uuid: string;

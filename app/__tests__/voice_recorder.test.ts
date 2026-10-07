@@ -1,3 +1,6 @@
+import * as FileSystem from 'expo-file-system/legacy';
+import { VoiceRecorder } from '../utils/voice_recorder';
+
 const mockRecording = {
   setOnRecordingStatusUpdate: jest.fn(),
   prepareToRecordAsync: jest.fn().mockResolvedValue(undefined),
@@ -18,13 +21,11 @@ const mockAudio = {
   setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
 };
 
-jest.mock('expo-av', () => ({ Audio: mockAudio }));
+jest.mock('expo-av', () => ({ get Audio() { return mockAudio; } }));
 jest.mock('expo-file-system/legacy', () => ({
   deleteAsync: jest.fn().mockResolvedValue(undefined),
 }));
 
-import * as FileSystem from 'expo-file-system/legacy';
-import { VoiceRecorder } from '../utils/voice_recorder';
 
 describe('VoiceRecorder', () => {
   beforeEach(() => {
@@ -73,3 +74,48 @@ describe('VoiceRecorder', () => {
     await expect(recorder.cancel()).resolves.toBeUndefined();
   });
 });
+
+it('reports unexpected native stop once but not prepare or explicit stop/cancel', async () => {
+  const recorder = new VoiceRecorder();
+  const interrupted = jest.fn();
+  await recorder.start({ onMetering: jest.fn(), onInterrupted: interrupted });
+  const callback = mockRecording.setOnRecordingStatusUpdate.mock.calls.at(-1)![0];
+  callback({ isRecording: false }); callback({ isRecording: false });
+  expect(interrupted).toHaveBeenCalledTimes(1);
+  await recorder.cancel();
+  callback({ isRecording: false });
+  expect(interrupted).toHaveBeenCalledTimes(1);
+  interrupted.mockClear();
+  await recorder.start({ onMetering: jest.fn(), onInterrupted: interrupted });
+  const normalCallback = mockRecording.setOnRecordingStatusUpdate.mock.calls.at(-1)![0];
+  mockRecording.stopAndUnloadAsync.mockImplementationOnce(async () => normalCallback({ isRecording: false }));
+  await recorder.stop();
+  expect(interrupted).not.toHaveBeenCalled();
+});
+
+it.each(['prepare', 'start'])('cancellation while native %s waits cleans the late recorder', async (phase) => {
+  let finish!: () => void;
+  const gate = new Promise<void>((resolve) => { finish = resolve; });
+  const method = phase === 'prepare' ? mockRecording.prepareToRecordAsync : mockRecording.startAsync;
+  method.mockReturnValueOnce(gate);
+  const recorder = new VoiceRecorder();
+  const pending = recorder.start({ onMetering: jest.fn() });
+  const rejected = expect(pending).rejects.toThrow('cancelled');
+  await Promise.resolve(); await Promise.resolve();
+  const cleanup = recorder.cancel();
+  finish();
+  await rejected; await cleanup;
+  expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file://voice.m4a', { idempotent: true });
+  await expect(recorder.stop()).resolves.toBeNull();
+  await recorder.start({ onMetering: jest.fn() });
+  await recorder.cancel();
+});
+
+it('cleans prepared media when native start fails', async () => {
+  const recorder = new VoiceRecorder();
+  mockRecording.startAsync.mockRejectedValueOnce(new Error('microphone lost'));
+  await expect(recorder.start({ onMetering: jest.fn() })).rejects.toThrow('microphone lost');
+  expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file://voice.m4a', { idempotent: true });
+  await expect(recorder.stop()).resolves.toBeNull();
+});
+

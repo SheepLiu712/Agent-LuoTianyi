@@ -19,18 +19,19 @@ interface Props {
   pressIn: (event: GestureResponderEvent) => void;
   pressMove: (event: GestureResponderEvent) => void;
   pressOut: () => void;
+  cancelBySystem?: (reason: string) => Promise<void>;
   theme?: AppTheme;
 }
 
 export function VoiceInputBar({
   mode, inputText, inputHeight, onInputHeightChange, onInputChange, onToggleMode,
   onSendText, onSendImage, canSend, canSendImage, captureState,
-  pressIn, pressMove, pressOut, theme = THEMES.light,
+  pressIn, pressMove, pressOut, cancelBySystem, theme = THEMES.light,
 }: Props) {
   const voice = mode === 'voice';
   const recording = captureState === 'Recording' || captureState === 'CancelZone';
   const canToggle = captureState === 'TextMode' || captureState === 'VoiceReady';
-  const imageEnabled = canSendImage && !recording;
+  const imageEnabled = canSendImage && (captureState === 'TextMode' || captureState === 'VoiceReady');
   const toggleMode = () => {
     if (!canToggle) return;
     if (!voice) Keyboard.dismiss();
@@ -57,10 +58,12 @@ export function VoiceInputBar({
           onResponderGrant={pressIn}
           onResponderMove={pressMove}
           onResponderRelease={pressOut}
+          onResponderTerminationRequest={() => false}
+          onResponderTerminate={() => { void cancelBySystem?.('gesture_interrupted'); }}
           style={[styles.hold, { backgroundColor: captureState === 'CancelZone' ? theme.voiceCancel : recording ? theme.voicePressed : theme.voiceSurface }]}
         >
           <Text style={[styles.holdText, { color: theme.text }]}>
-            {captureState === 'CancelZone' ? '松开取消' : recording ? '松开发送' : '按住说话'}
+            {captureState === 'Starting' ? '正在启动...' : captureState === 'CancelZone' ? '松开取消' : recording ? '松开发送' : '按住说话'}
           </Text>
         </View>
       ) : (

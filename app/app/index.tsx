@@ -89,7 +89,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     toggleVoicePlayback,
     retryVoice,
     voiceInput,
-  } = useChatLogic(webviewRef, username, message_token);
+  } = useChatLogic(webviewRef, username, message_token, !showPreferences && !showLlmSettings && !showDynamics);
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
 
@@ -454,6 +454,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             pressIn={voiceInput.pressIn}
             pressMove={voiceInput.pressMove}
             pressOut={voiceInput.pressOut}
+            cancelBySystem={voiceInput.cancelBySystem}
             theme={theme}
           />
         </View>

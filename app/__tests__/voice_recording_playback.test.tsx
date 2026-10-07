@@ -54,6 +54,17 @@ describe('recording and playback through chat, processor and native voice manage
   });
   afterEach(async () => { await act(async () => root.unmount()); now.mockRestore(); });
 
+  it('sends recording cancellation before disconnecting on chat unmount', async () => {
+    await act(async () => { state.voiceInput.toggleMode(); });
+    await act(async () => { await state.voiceInput.pressIn(event); });
+    const network = (NetworkClient as jest.Mock).mock.results[0].value;
+    await act(async () => { root.unmount(); });
+    expect(network.sendVoiceRecordingCancelled).toHaveBeenCalledWith('recording');
+    expect(network.sendVoiceRecordingCancelled.mock.invocationCallOrder[0])
+      .toBeLessThan(network.disconnectWs.mock.invocationCallOrder[0]);
+    expect(network.sendVoicePhase).not.toHaveBeenCalled();
+  });
+
   it('reuses the recorded bytes after finalize ACK, history refresh and manager restart', async () => {
     const fs = FileSystem as unknown as VoiceFileSystem;
     await act(async () => { state.voiceInput.toggleMode(); });
