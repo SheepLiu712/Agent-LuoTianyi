@@ -28,8 +28,8 @@ def parse_m4a_audio(data: bytes, mime_type: str = "audio/mp4", media_id: str = "
     if mime_type != "audio/mp4":
         _raise(MediaResolutionErrorCode.UNSUPPORTED_TYPE, media_id)
     try:
-        _validate_audio_tracks(data, media_id)
-        audio = MP4(BytesIO(data))
+        metadata = _validate_audio_tracks(data, media_id)
+        audio = MP4(BytesIO(metadata))
         length = audio.info.length
         codec = audio.info.codec
     except (MutagenError, OSError, OverflowError, struct.error, ValueError):
@@ -68,7 +68,7 @@ def _one(boxes: list[tuple[bytes, memoryview]], kind: bytes) -> memoryview:
     return matches[0]
 
 
-def _validate_audio_tracks(data: bytes, media_id: str) -> None:
+def _validate_audio_tracks(data: bytes, media_id: str) -> bytes:
     boxes = _boxes(memoryview(data))
     ftyp = _one(boxes, b"ftyp")
     if len(ftyp) < 8 or len(ftyp) % 4:
@@ -86,7 +86,23 @@ def _validate_audio_tracks(data: bytes, media_id: str) -> None:
     if len(handler) < 12 or bytes(handler[8:12]) != b"soun":
         _raise(MediaResolutionErrorCode.UNSUPPORTED_TYPE, media_id)
     stbl = _boxes(_one(_boxes(_one(mdia, b"minf")), b"stbl"))
-    _validate_sample_entry(_one(stbl, b"stsd"), media_id)
+    stsd = _one(stbl, b"stsd")
+    _validate_sample_entry(stsd, media_id)
+    # Mutagen assumes every meta box is a FullBox. Android also emits the
+    # QuickTime layout without version/flags; traversing that unrelated metadata
+    # can swallow the following trak and return an empty codec. Give the codec
+    # parser only the already bounded, selected audio metadata. This transient
+    # view never replaces uploaded/stored bytes or changes media sample offsets.
+    audio_metadata = (
+        _metadata_box(b"mdhd", _one(mdia, b"mdhd"))
+        + _metadata_box(b"hdlr", handler)
+        + _metadata_box(b"minf", _metadata_box(b"stbl", _metadata_box(b"stsd", stsd)))
+    )
+    return _metadata_box(b"moov", _metadata_box(b"trak", _metadata_box(b"mdia", audio_metadata)))
+
+
+def _metadata_box(kind: bytes, payload: bytes | memoryview) -> bytes:
+    return struct.pack(">I4s", len(payload) + 8, kind) + bytes(payload)
 
 
 def _validate_sample_entry(stsd: memoryview, media_id: str) -> None:

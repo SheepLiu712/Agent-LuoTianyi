@@ -1,4 +1,5 @@
 import React from 'react';
+import { act, create, ReactTestRenderer } from 'react-test-renderer';
 
 import { MessageItem } from '../components/ChatBubbles';
 import { VoiceBubble } from '../components/VoiceBubble';
@@ -43,10 +44,10 @@ describe('voice components', () => {
       expect(collect(tree, 'TouchableOpacity').filter((node) => node.props.accessibilityLabel === '重试发送语音')).toHaveLength(0);
     }
   });
-  it('renders a right-aligned waiting voice bubble with status, playback, and bubble order', () => {
+  it('renders a right-aligned waiting voice bubble with a disabled playback bubble', () => {
     const tree = VoiceBubble({ message, onPlay: jest.fn(), onRetry: jest.fn() }) as any;
     expect(tree.props.style).toEqual(expect.objectContaining({ justifyContent: 'flex-end' }));
-    expect(tree.props.accessibilityLabel).toBe(`用户语音消息，15''，播放`);
+    expect(tree.props.accessibilityLabel).toBe(`用户语音消息，15''，发送中`);
     expect(collect(tree, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain(`15''`);
     expect(collect(tree, 'TouchableOpacity')).toHaveLength(1);
   });
@@ -56,25 +57,17 @@ describe('voice components', () => {
     expect(collect(failed, 'Image')).toHaveLength(0);
     expect(collect(failed, 'MaterialIcons')[0].props).toMatchObject({ name: 'refresh', color: '#ffffff' });
     expect(collect(failed, 'TouchableOpacity')[0].props.style).toMatchObject({ borderRadius: 14, backgroundColor: '#D9363E' });
-    const playing = VoiceBubble({ message: { ...message, sendStatus: 'submitted', audioPlayState: 'playing' } }) as any;
-    expect(collect(playing, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain('■');
   });
 
-  it('renders loading, retryable failure, and unavailable failure states', () => {
-    const loading = VoiceBubble({ message: { ...message, sendStatus: 'submitted', audioDownloadState: 'loading' } }) as any;
-    expect(collect(loading, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain('…');
-
-    const failed = VoiceBubble({ message: { ...message, sendStatus: 'submitted', audioDownloadState: 'failed' } }) as any;
-    const failedControls = collect(failed, 'TouchableOpacity');
-    expect(collect(failed, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain('!');
-    expect(failedControls[0].props.accessibilityLabel).toBe('语音加载失败，点击重试');
-
-    const unavailable = VoiceBubble({ message: { ...message, sendStatus: 'submitted', audioAvailable: false } }) as any;
-    const unavailableControls = collect(unavailable, 'TouchableOpacity');
-    expect(collect(unavailable, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain('!');
-    expect(unavailableControls[0].props.disabled).toBe(false);
-    expect(unavailableControls[0].props.accessibilityLabel).toBe('语音不可用，无法重试');
-    expect(unavailable.props.accessibilityLabel).toContain('语音不可用，无法重试');
+  it.each(['idle', 'playing', 'loading', 'failed', 'unavailable'] as const)('uses the bubble itself for playback in %s state', (state) => {
+    const play = jest.fn();
+    const tree = VoiceBubble({ message: { ...message, sendStatus: 'submitted', audioPlayState: state === 'playing' ? 'playing' : 'idle', audioDownloadState: state === 'loading' ? 'loading' : state === 'failed' ? 'failed' : 'ready', audioAvailable: state !== 'unavailable' }, onPlay: play }) as any;
+    const buttons = collect(tree, 'TouchableOpacity');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].props.disabled).toBe(state === 'unavailable');
+    expect(collect(buttons[0], 'Text')).toHaveLength(1);
+    if (state !== 'unavailable') { buttons[0].props.onPress(); expect(play).toHaveBeenCalledTimes(1); }
+    if (state === 'playing') expect(buttons[0].props.accessibilityLabel).toBe('停止播放语音');
   });
 
   it('switches between text and voice controls and hides text send in voice mode', () => {
@@ -84,4 +77,36 @@ describe('voice components', () => {
     expect(collect(voice, 'TextInput')).toHaveLength(0);
     expect(collect(voice, 'Text').map((node) => React.Children.toArray(node.props.children).join(''))).toContain('按住说话');
   });
+});
+
+
+it('cycles the playback icon every 300ms, resets on stop and cleans up its timer', () => {
+  jest.useFakeTimers();
+  let root!: ReactTestRenderer;
+  const render = (playing: boolean) => <VoiceBubble message={{ ...message, sendStatus: 'submitted', audioPlayState: playing ? 'playing' : 'idle' }} onPlay={jest.fn()} />;
+  try {
+    act(() => { root = create(render(false)); });
+    const parts = () => root.root.findByProps({ testID: 'voice-audio-icon' }).children.length;
+    expect(parts()).toBe(3);
+    expect(jest.getTimerCount()).toBe(0);
+    act(() => { root.update(render(true)); });
+    expect(parts()).toBe(1);
+    act(() => jest.advanceTimersByTime(299));
+    expect(parts()).toBe(1);
+    act(() => jest.advanceTimersByTime(1));
+    expect(parts()).toBe(2);
+    act(() => jest.advanceTimersByTime(300));
+    expect(parts()).toBe(3);
+    act(() => jest.advanceTimersByTime(300));
+    expect(parts()).toBe(1);
+    act(() => { root.update(render(false)); });
+    expect(parts()).toBe(3);
+    expect(jest.getTimerCount()).toBe(0);
+    act(() => { root.update(render(true)); });
+    expect(parts()).toBe(1);
+  } finally {
+    act(() => root?.unmount());
+    expect(jest.getTimerCount()).toBe(0);
+    jest.useRealTimers();
+  }
 });

@@ -123,6 +123,43 @@ describe('recording and playback through chat, processor and native voice manage
     expect(sound.playAsync).toHaveBeenCalledTimes(3);
   });
 
+  it.each(['user', 'agent'])('toggles %s replay off and resets after natural completion', async (kind) => {
+    await act(async () => { state.addHistoryMessage([{ uuid: 'history', type: kind === 'user' ? 'audio' : 'text', content: 'history', isUser: kind === 'user', timestamp: 1, audioAvailable: true, audioLocalUri: 'file://history.m4a' }]); });
+    const toggle = () => kind === 'user' ? state.toggleVoicePlayback('history') : state.handleToggleAgentAudio('history');
+    await act(async () => { await toggle(); });
+    await act(async () => { await toggle(); });
+    expect(sound.playAsync).toHaveBeenCalledTimes(1);
+    expect(sound.stopAsync).toHaveBeenCalled();
+    expect(state.messages.find((m) => m.uuid === 'history')?.audioPlayState).toBe('idle');
+    await act(async () => { await toggle(); });
+    await act(async () => { sound.setOnPlaybackStatusUpdate.mock.calls.at(-1)![0]({ isLoaded: true, didJustFinish: true }); });
+    expect(state.messages.find((m) => m.uuid === 'history')?.audioPlayState).toBe('idle');
+    await act(async () => { await toggle(); });
+    expect(sound.playAsync).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['same', 'other', 'server', 'recording'])('cancels a pending user replay when interrupted by %s', async (interrupt) => {
+    await act(async () => { state.addHistoryMessage([
+      { uuid: 'user', type: 'audio', content: 'voice', isUser: true, timestamp: 1, audioAvailable: true, audioLocalUri: 'file://user.m4a' },
+      { uuid: 'agent', type: 'text', content: 'tts', isUser: false, timestamp: 2, audioAvailable: true, audioLocalUri: 'file://agent.wav' },
+    ]); });
+    let release!: () => void;
+    sound.loadAsync.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    let pending!: Promise<void>;
+    await act(async () => { pending = state.toggleVoicePlayback('user'); await flush(); });
+    expect(release).toBeDefined();
+    await act(async () => {
+      if (interrupt === 'same') await state.toggleVoicePlayback('user');
+      else if (interrupt === 'other') await state.handleToggleAgentAudio('agent');
+      else if (interrupt === 'server') { incoming({ uuid: 'online', audio: 'YXVkaW8=', is_final_package: false }); await flush(); }
+      else { state.voiceInput.toggleMode(); }
+    });
+    if (interrupt === 'recording') await act(async () => { await state.voiceInput.pressIn(event); });
+    await act(async () => { release(); await pending; });
+    expect(sound.playAsync).toHaveBeenCalledTimes(interrupt === 'other' ? 1 : 0);
+    expect(state.messages.find((m) => m.uuid === 'user')?.audioPlayState).toBe('idle');
+  });
+
   it.each(['cancel', 'submit', 'background'])('saves incoming audio without replay after %s, including late tail packets', async (end) => {
     await act(async () => { incoming({ uuid: 'old', audio: 'YXVkaW8=', is_final_package: false }); await flush(); });
     expect(injectJavaScript.mock.calls.some(([code]) => code.includes('feedAudioChunk'))).toBe(true);

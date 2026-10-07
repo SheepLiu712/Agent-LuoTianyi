@@ -2,9 +2,21 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { AgentBinder } from '../utils/binder';
 import { MessageProcessor } from '../utils/message_processor';
 import { NetworkClient } from '../utils/network_client';
+import { VoiceRecorder } from '../utils/voice_recorder';
 
 jest.mock('react-native', () => ({ AppState: { currentState: 'active' } }));
-jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));
+jest.mock('expo-av', () => ({ Audio: {
+  Sound: jest.fn(),
+  Recording: jest.fn(() => ({
+    setProgressUpdateInterval: jest.fn(), setOnRecordingStatusUpdate: jest.fn(),
+    prepareToRecordAsync: jest.fn().mockResolvedValue(undefined), startAsync: jest.fn().mockResolvedValue(undefined),
+    stopAndUnloadAsync: jest.fn().mockResolvedValue(undefined),
+    getStatusAsync: jest.fn().mockResolvedValue({ durationMillis: 1000 }), getURI: () => 'file://voice.m4a',
+  })),
+  setAudioModeAsync: jest.fn().mockResolvedValue(undefined),
+  AndroidOutputFormat: { MPEG_4: 'mpeg4' }, AndroidAudioEncoder: { AAC: 'aac' },
+  IOSOutputFormat: { MPEG4AAC: 'mpeg4aac' }, IOSAudioQuality: { HIGH: 'high' },
+} }));
 jest.mock('expo-file-system/legacy', () => ({
   EncodingType: { Base64: 'base64' },
   getInfoAsync: jest.fn(), readAsStringAsync: jest.fn(),
@@ -110,4 +122,23 @@ it('file read errors settle as failed rather than leaving the queue and UI locke
   expect(processor.queueLength()).toBe(0);
   expect(send).not.toHaveBeenCalled();
   expect(network.sendVoiceRecordingCancelled).toHaveBeenCalledWith('voice');
+});
+
+
+it('sends the actual recorder UUID unchanged across phases and a manual retry', async () => {
+  const recorder = new VoiceRecorder();
+  const { recordingId } = await recorder.start({ onMetering: jest.fn() });
+  const media = await recorder.stop();
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const send = jest.fn(async (payload) => {
+    expect(payload.upload_id).toMatch(uuidPattern);
+    expect(payload.upload_id).toBe(recordingId);
+    return { ok: true };
+  });
+  const { processor } = setup(send);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await processor.sendVoice(recordingId, media!.localUri, media!.durationMs);
+    await jest.advanceTimersByTimeAsync(0);
+  }
+  expect(send.mock.calls.map(([payload]) => payload.phase)).toEqual(['begin', 'chunk', 'chunk', 'finalize', 'begin', 'chunk', 'chunk', 'finalize']);
 });

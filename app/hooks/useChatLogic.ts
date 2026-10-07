@@ -26,7 +26,6 @@ export const useChatLogic = (
   const [inputText, setInputText] = useState('');
   const [thinking, setThinking] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [currentPlayingUuid, setCurrentPlayingUuid] = useState<string | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
   const networkClientRef = useRef<NetworkClient | null>(null);
@@ -34,6 +33,7 @@ export const useChatLogic = (
   const messageProcessorRef = useRef<MessageProcessor | null>(null);
   const recordingAudioRef = useRef(false);
   const playbackGeneration = useRef(0);
+  const playbackTarget = useRef<string | null>(null);
   const clickTimestampsRef = useRef<number[]>([]);
   const voiceFilesRef = useRef(new Map<string, { localUri: string; durationMs: number }>());
   const voiceAckMapRef = useRef(new Map<string, string>());
@@ -104,7 +104,7 @@ export const useChatLogic = (
 
   const stopUserVoicePlayback = useCallback(async () => {
     playbackGeneration.current += 1;
-    setCurrentPlayingUuid(null);
+    playbackTarget.current = null;
     setMessages((prev) => prev.map((message) => ({ ...message, audioPlayState: 'idle',
       audioDownloadState: message.audioDownloadState === 'loading' ? undefined : message.audioDownloadState })));
     await voicePlaybackManager.stop();
@@ -198,8 +198,8 @@ export const useChatLogic = (
           setThinking(isThinking);
         },
         onLocalTtsState: (_event, convUuid) => {
+          if (playbackTarget.current === convUuid) playbackTarget.current = null;
           updateMessageByUuid(convUuid, (msg) => ({ ...msg, audioPlayState: 'idle' }));
-          setCurrentPlayingUuid((prev) => (prev === convUuid ? null : prev));
         },
         onErrorText: (text) => {
           addDebugTrace('ui', 'error text', { text });
@@ -378,53 +378,58 @@ export const useChatLogic = (
     });
   }, []);
 
-  const handleToggleAgentAudio = useCallback(
-    async (uuid: string) => {
-      if (recordingAudioRef.current || messageProcessorRef.current?.isServerAudioActive()) return;
-      const generation = ++playbackGeneration.current;
-      addDebugTrace('audio-ui', 'tap audio button', { uuid, currentPlayingUuid });
-      const target = messages.find((msg) => msg.uuid === uuid && !msg.isUser);
-      if (!target || !target.audioAvailable) {
-        addDebugTrace('audio-ui', 'tap ignored: target missing or audio unavailable', {
-          uuid,
-          found: !!target,
-          audioAvailable: target?.audioAvailable,
+  // Both history controls share one toggle/preemption gate. The existing players
+  // retain their own storage and native-load cancellation responsibilities.
+  const toggleHistoryAudio = useCallback(async (uuid: string) => {
+    if (recordingAudioRef.current || messageProcessorRef.current?.isServerAudioActive()) return;
+    const target = messages.find((msg) => msg.uuid === uuid);
+    if (!target || target.audioAvailable === false || (target.isUser && target.sendStatus === 'waiting')) return;
+    const generation = ++playbackGeneration.current;
+    const stopping = playbackTarget.current === uuid;
+    playbackTarget.current = stopping ? null : uuid;
+    setMessages((prev) => prev.map((msg) => ({ ...msg, audioPlayState: 'idle',
+      audioDownloadState: msg.audioDownloadState === 'loading' ? 'idle' : msg.audioDownloadState })));
+    await Promise.all([voicePlaybackManager.stop(), binderRef.current?.stopLocalTts()]);
+    const valid = () => generation === playbackGeneration.current && !recordingAudioRef.current
+      && !messageProcessorRef.current?.isServerAudioActive();
+    if (stopping || !valid()) return;
+    // Stopped-player callbacks may have cleared its old identity.
+    playbackTarget.current = uuid;
+    try {
+      if (target.isUser) {
+        updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: 'loading' }));
+        const playbackUuid = voiceAckMapRef.current.get(uuid) || uuid;
+        if (target.audioLocalUri && (await FileSystem.getInfoAsync(target.audioLocalUri)).exists) {
+          await voicePlaybackManager.cacheLocal(playbackUuid, target.audioLocalUri);
+        }
+        if (!valid()) return;
+        await voicePlaybackManager.play(playbackUuid, messageToken, (state) => {
+          if (!valid()) return;
+          updateMessageByUuid(uuid, (msg) => ({ ...msg,
+            audioDownloadState: state === 'loading' ? 'loading' : state === 'failed' ? 'failed' : 'ready',
+            audioPlayState: state === 'playing' ? 'playing' : 'idle' }));
+          if (state !== 'playing' && state !== 'loading') {
+            playbackTarget.current = null;
+          }
         });
-        return;
+      } else {
+        if (target.audioLocalUri) messageProcessorRef.current?.setLocalAudioPath(uuid, target.audioLocalUri);
+        const ok = await binderRef.current?.playLocalTts(uuid);
+        if (!valid()) return;
+        if (ok) {
+          updateMessageByUuid(uuid, (msg) => ({ ...msg, audioPlayState: 'playing' }));
+        } else playbackTarget.current = null;
       }
+    } catch {
+      if (!valid()) return;
+      playbackTarget.current = null;
+      updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: 'failed', audioPlayState: 'idle' }));
+      appendSystemMessage('语音加载失败，请稍后重试');
+    }
+  }, [appendSystemMessage, messageToken, messages, updateMessageByUuid]);
 
-      addDebugTrace('audio-ui', 'audio target resolved', {
-        uuid,
-        audioLocalUri: target.audioLocalUri,
-        audioAvailable: target.audioAvailable,
-      });
-
-      if (target.audioLocalUri) {
-        messageProcessorRef.current?.setLocalAudioPath(uuid, target.audioLocalUri);
-      }
-
-      if (currentPlayingUuid === uuid) {
-        await binderRef.current?.stopLocalTts();
-        return;
-      }
-
-      await voicePlaybackManager.stop();
-      if (generation !== playbackGeneration.current || recordingAudioRef.current) return;
-      const ok = await binderRef.current?.playLocalTts(uuid);
-      if (!ok || generation !== playbackGeneration.current || recordingAudioRef.current) {
-        addDebugTrace('audio-ui', 'playLocalTts returned false', { uuid });
-        return;
-      }
-
-      if (currentPlayingUuid) {
-        updateMessageByUuid(currentPlayingUuid, (msg) => ({ ...msg, audioPlayState: 'idle' }));
-      }
-
-      updateMessageByUuid(uuid, (msg) => ({ ...msg, audioPlayState: 'playing' }));
-      setCurrentPlayingUuid(uuid);
-    },
-    [currentPlayingUuid, messages, updateMessageByUuid],
-  );
+  const handleToggleAgentAudio = toggleHistoryAudio;
+  const toggleVoicePlayback = toggleHistoryAudio;
 
   const addHistoryMessage = useCallback((newMessages: ChatMessage[]) => {
     for (const msg of newMessages) {
@@ -472,43 +477,6 @@ export const useChatLogic = (
       return next;
     });
   }, []);
-
-  const toggleVoicePlayback = useCallback(async (uuid: string) => {
-    if (recordingAudioRef.current || messageProcessorRef.current?.isServerAudioActive()) return;
-    const generation = ++playbackGeneration.current;
-    const target = messages.find((msg) => msg.uuid === uuid && msg.type === 'audio');
-    if (!target || target.audioAvailable === false) {
-      appendSystemMessage('这条语音暂时无法播放');
-      return;
-    }
-    if (currentPlayingUuid === uuid) {
-      await voicePlaybackManager.stop();
-      updateMessageByUuid(uuid, (msg) => ({ ...msg, audioPlayState: 'idle' }));
-      setCurrentPlayingUuid(null);
-      return;
-    }
-    updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: 'loading' }));
-    try {
-      await binderRef.current?.stopLocalTts();
-      const playbackUuid = voiceAckMapRef.current.get(uuid) || uuid;
-      if (target.audioLocalUri && (await FileSystem.getInfoAsync(target.audioLocalUri)).exists) {
-        await voicePlaybackManager.cacheLocal(playbackUuid, target.audioLocalUri);
-      }
-      if (generation !== playbackGeneration.current || recordingAudioRef.current) return;
-      await voicePlaybackManager.play(playbackUuid, messageToken, (state) => {
-        if (generation !== playbackGeneration.current) return;
-        updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: state === 'loading' ? 'loading' : state === 'failed' ? 'failed' : 'ready', audioPlayState: state === 'playing' ? 'playing' : 'idle' }));
-        if (state === 'playing') setCurrentPlayingUuid(uuid);
-        else setCurrentPlayingUuid((prev) => prev === uuid ? null : prev);
-        if (state === 'failed') appendSystemMessage('语音加载失败，请稍后重试');
-      });
-      if (currentPlayingUuid && currentPlayingUuid !== uuid) updateMessageByUuid(currentPlayingUuid, (msg) => ({ ...msg, audioPlayState: 'idle' }));
-    } catch {
-      if (generation !== playbackGeneration.current) return;
-      updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: 'failed', audioPlayState: 'idle' }));
-      appendSystemMessage('语音加载失败，请稍后重试');
-    }
-  }, [appendSystemMessage, currentPlayingUuid, messageToken, messages, updateMessageByUuid]);
 
   const retryVoice = async (uuid: string) => {
     const target = messages.find((message) => message.uuid === uuid);

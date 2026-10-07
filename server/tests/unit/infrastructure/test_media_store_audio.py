@@ -312,3 +312,24 @@ def test_brand_does_not_authorize_video_or_protected_audio(data):
 def test_rejects_truncated_or_out_of_bounds_mp4_boxes(data):
     with pytest.raises(MediaResolutionError):
         parse_m4a_audio(data)
+
+
+@pytest.mark.parametrize("android_metadata", [False, True])
+def test_android_metadata_does_not_hide_audio_track(tmp_path, android_metadata):
+    data = recorded_aac_bytes(android_metadata=android_metadata)
+    parsed = parse_m4a_audio(data)
+    assert (parsed.codec, parsed.duration_ms) == ("aac_lc", 1064)
+    store = PermanentMediaStore({"root": str(tmp_path)})
+    ref = store.mint_ref(user_id="owner", client_msg_id=str(uuid4()))
+    store.persist_audio(media_ref=ref, owner_user_id="owner", data=data, mime_type="audio/mp4", duration_ms=1064)
+    resolved = FilesystemMediaResolver({"root": str(tmp_path)}).resolve(
+        ref, owner_user_id="owner", expected_kind="audio"
+    )
+    assert resolved.data == data
+
+
+@pytest.mark.parametrize("original,replacement", [(b"soun", b"vide"), (b"mp4a", b"enca")])
+def test_android_metadata_does_not_bypass_track_validation(original, replacement):
+    data = recorded_aac_bytes(android_metadata=True).replace(original, replacement, 1)
+    with pytest.raises(MediaResolutionError):
+        parse_m4a_audio(data)

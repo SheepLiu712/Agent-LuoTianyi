@@ -77,7 +77,7 @@ def test_voice_cli_real_ws_reply_history_and_authenticated_download(offline_voic
     source = tmp_path / "android.m4a"
     # Force multiple real chunks without changing media offsets or duration.
     padding = b"\0" * 100_000
-    data = recorded_aac_bytes() + (len(padding) + 8).to_bytes(4, "big") + b"free" + padding
+    data = recorded_aac_bytes(android_metadata=True) + (len(padding) + 8).to_bytes(4, "big") + b"free" + padding
     source.write_bytes(data)
     network = NetworkClient(url)
     network.session.trust_env = False

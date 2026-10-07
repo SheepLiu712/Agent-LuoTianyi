@@ -1,4 +1,5 @@
 import { Audio } from 'expo-av';
+import { randomUUID } from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 
 export type VoicePermission = 'granted' | 'denied' | 'blocked';
@@ -46,7 +47,7 @@ export class VoiceRecorder implements VoiceRecorderApi {
     generation: number,
   ) {
     const recording = new Audio.Recording();
-    const recordingId = `recording-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const recordingId = randomUUID();
     const check = () => { if (generation !== this.generation) throw new Error('voice recording cancelled'); };
     this.recording = recording;
     this.hasStarted = false;

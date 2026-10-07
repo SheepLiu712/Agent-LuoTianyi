@@ -545,8 +545,9 @@ async def test_unpersisted_receipts_apply_backpressure_without_losing_deduplicat
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("brand", [b"mp42", b"isom", b"M4A "])
-async def test_real_aac_brands_finalize_once_and_preserve_media(tmp_path, brand):
-    data = recorded_aac_bytes(brand)
+@pytest.mark.parametrize("android_metadata", [False, True])
+async def test_real_aac_brands_finalize_once_and_preserve_media(tmp_path, brand, android_metadata):
+    data = recorded_aac_bytes(brand, android_metadata=android_metadata)
     _, events = upload_events(data)
     events.append(events[-1])
     sent, stage, _ = await run_events(tmp_path, events)

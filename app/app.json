@@ -2,7 +2,7 @@
   "expo": {
     "name": "ai小洛",
     "slug": "ChatwithAILuo",
-    "version": "0.4.0",
+    "version": "0.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon_whitebg.png",
     "scheme": "ailuotianyi",
@@ -24,7 +24,7 @@
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.sheepliu712.agentluochat",
-      "versionCode": 7,
+      "versionCode": 8,
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE",

@@ -121,3 +121,16 @@ it('cleans prepared media when native start fails', async () => {
   await expect(recorder.stop()).resolves.toBeNull();
 });
 
+
+
+it('creates a distinct UUID for each recording that can be used as upload_id', async () => {
+  const recorder = new VoiceRecorder();
+  const first = await recorder.start({ onMetering: jest.fn() });
+  await recorder.stop();
+  const second = await recorder.start({ onMetering: jest.fn() });
+  await recorder.cancel();
+  for (const result of [first, second]) {
+    expect(result.recordingId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  }
+  expect(second.recordingId).not.toBe(first.recordingId);
+});
