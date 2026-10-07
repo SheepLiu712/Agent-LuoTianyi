@@ -18,11 +18,10 @@ jest.mock('expo-file-system/legacy', () => ({
 jest.mock('../utils/live2d_helper', () => ({ setExpression: jest.fn() }));
 jest.mock('../utils/voice_playback_manager', () => ({
   voicePlaybackManager: {
-    cacheLocal: jest.fn().mockResolvedValue('file://cached.m4a'),
-    // AC-04：开始录音前会停掉语音条回放。
     stop: jest.fn().mockResolvedValue(undefined),
-    // A1：finalize ACK 后会把缓存键从 upload_id 迁移到 message_uuid。
-    migrateCacheKey: jest.fn().mockResolvedValue('file://cached-migrated.m4a'),
+    cacheLocal: jest.fn().mockResolvedValue('file://cached.m4a'),
+    // A1：finalize ACK 后会把缓存键从 upload_id 迁移到 message_uuid（真实 manager 具备该方法）。
+    migrateCacheKey: jest.fn().mockResolvedValue('file://cache/message.m4a'),
   },
 }));
 jest.mock('../utils/network_client', () => ({ NetworkClient: jest.fn() }));

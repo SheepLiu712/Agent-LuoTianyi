@@ -134,8 +134,6 @@ export class MessageProcessor {
   private readonly feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void;
   private readonly stopServerAudio: () => void;
   private readonly onVoiceFinalized?: (uploadId: string, messageUuid: string, durationMs?: number) => void;
-  /** AC-15：用户正在录音时不得投喂服务端音频（否则会被麦克风收录）。 */
-  private readonly isVoiceRecording?: () => boolean;
   private sendQueue: SendItem[] = [];
   private sendLoopRunning = false;
   private stopRequested = false;
@@ -143,6 +141,9 @@ export class MessageProcessor {
   private localPlayingUuid: string | null = null;
   private localPlaybackRequestId = 0;
   private serverAudioPlaying = false;
+  private recordingActive = false;
+  private readonly openServerMessages = new Set<string>();
+  private readonly mutedServerMessages = new Set<string>();
   private pendingServerAudioChunks = 0;
   private readonly audioChunksByUuid = new Map<string, string[]>();
   private readonly audioPathByUuid = new Map<string, string>();
@@ -160,18 +161,13 @@ export class MessageProcessor {
     feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void,
     stopServerAudio?: () => void,
     onVoiceFinalized?: (uploadId: string, messageUuid: string, durationMs?: number) => void,
-    isVoiceRecording?: () => boolean,
+    private readonly stopUserVoicePlayback: () => Promise<void> = async () => {},
   ) {
     this.networkClient = networkClient;
     this.binder = binder;
     this.feedServerAudioChunk = feedServerAudioChunk;
     this.stopServerAudio = stopServerAudio || (() => {});
     this.onVoiceFinalized = onVoiceFinalized;
-    this.isVoiceRecording = isVoiceRecording;
-  }
-
-  private voiceRecordingActive(): boolean {
-    return this.isVoiceRecording?.() ?? false;
   }
 
   stop() {
@@ -267,7 +263,7 @@ export class MessageProcessor {
   }
 
   async playLocalTtsByUuid(convUuid: string) {
-    if (this.hasServerAudioPriority()) {
+    if (this.recordingActive || this.hasServerAudioPriority()) {
       addDebugTrace('audio', 'play blocked by server audio playing', { convUuid });
       return false;
     }
@@ -430,6 +426,15 @@ export class MessageProcessor {
     }
   }
 
+  async setRecordingActive(active: boolean): Promise<void> {
+    this.recordingActive = active;
+    if (!active) return;
+    for (const uuid of this.openServerMessages) this.mutedServerMessages.add(uuid);
+    this.stopServerAudio();
+    this.onServerAudioFinished();
+    await this.stopLocalTts();
+  }
+
   private hasServerAudioPriority() {
     return this.serverAudioPlaying || this.pendingServerAudioChunks > 0;
   }
@@ -441,7 +446,8 @@ export class MessageProcessor {
   private canStartLocalPlayback(requestId: number) {
     return requestId === this.localPlaybackRequestId
       && !this.hasServerAudioPriority()
-      && !this.stopRequested;
+      && !this.stopRequested
+      && !this.recordingActive;
   }
 
   onAgentStateChanged(state: string) {
@@ -454,15 +460,17 @@ export class MessageProcessor {
     if (this.isDuplicatePacket(payload.uuid || `agent-${Date.now()}`, payload)) {
       return;
     }
-    // AC-15：在本轮异步链开始前取一次录音状态；录音期间不占用在线音频优先权、不投喂音频。
-    const suppressAudio = this.voiceRecordingActive();
+    const uuid = payload.uuid || '';
+    this.openServerMessages.add(uuid);
+    if (this.recordingActive) this.mutedServerMessages.add(uuid);
     let serverAudioPreemption = Promise.resolve();
-    if (payload.audio && !suppressAudio) {
+    const claimsPlayback = !!payload.audio && !this.recordingActive && !this.mutedServerMessages.has(uuid);
+    if (claimsPlayback) {
       // 在异步消息链开始处理前先占用在线音频优先权，关闭点击回放及其加载竞态。
       this.pendingServerAudioChunks += 1;
       this.localPlaybackRequestId += 1;
       // 调用时会同步摘除当前回放状态，异步部分负责真正 stop/unload。
-      serverAudioPreemption = this.stopLocalTtsNow();
+      serverAudioPreemption = Promise.all([this.stopLocalTtsNow(), this.stopUserVoicePlayback()]).then(() => undefined);
     }
     // 音频聚合与尾包落盘不进入展示/播放串行链，后续句子即使尚未展示也能立即保存。
     const audioPersistence = this.persistAgentAudioOnArrival(payload);
@@ -471,7 +479,7 @@ export class MessageProcessor {
     this.incomingMessageChain = this.incomingMessageChain
       .then(async () => {
         this.handleAgentMessageDisplay(payload);
-        await this.handleAgentMessageAudio(payload, serverAudioPreemption, audioPersistence, suppressAudio);
+        await this.handleAgentMessageAudio(payload, serverAudioPreemption, audioPersistence, claimsPlayback);
       })
       .catch((error) => {
         addDebugTrace('agent', 'handleAgentMessage failed', {
@@ -628,35 +636,24 @@ export class MessageProcessor {
     payload: AgentMessagePayload,
     serverAudioPreemption: Promise<void>,
     audioPersistence: Promise<string | null>,
-    suppressAudio = false,
+    claimsPlayback: boolean,
   ) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
     const audioChunk = payload.audio || '';
 
-    if (audioChunk && suppressAudio) {
-      addDebugTrace('audio', 'server audio suppressed while recording', { convUuid });
-    }
-
-    if (audioChunk && !suppressAudio) {
-      this.serverAudioPlaying = true;
-      this.pendingServerAudioChunks = Math.max(0, this.pendingServerAudioChunks - 1);
-      // onAgentMessage 已经立即发起停止；这里等待同一次停止完成，之后才能投喂在线音频。
-      await serverAudioPreemption;
-    }
-
-    if (audioChunk && !suppressAudio && (this.localPlayingUuid || this.localSound)) {
-      // 必须等消息回放真正停止后，才把在线音频交给 WebView 播放器。
+    await serverAudioPreemption;
+    const mayPlay = () => !this.recordingActive && !this.mutedServerMessages.has(payload.uuid || '') && !this.stopRequested;
+    if (audioChunk && mayPlay() && (this.localPlayingUuid || this.localSound)) {
       await this.stopLocalTtsNow();
     }
-
-    if (audioChunk && !suppressAudio) {
+    if (claimsPlayback) this.pendingServerAudioChunks = Math.max(0, this.pendingServerAudioChunks - 1);
+    if (audioChunk && mayPlay()) {
+      this.serverAudioPlaying = true;
       this.feedServerAudioChunk(audioChunk, false);
     }
 
     if (payload.is_final_package) {
-      if (!suppressAudio) {
-        this.feedServerAudioChunk('', true);
-      }
+      if (mayPlay()) this.feedServerAudioChunk('', true);
       const isTransient = this.transientMessageUuids.has(convUuid);
       if (payload.audio_error) {
         addDebugTrace('audio', 'server audio stream ended with error', {
@@ -675,15 +672,11 @@ export class MessageProcessor {
       }
       // 落盘可能早于该句展示，临时消息状态由展示阶段在尾包处统一清理。
       this.transientMessageUuids.delete(convUuid);
-      if (suppressAudio) {
-        // 录音期间没有投喂音频，不存在 WebView 播放完成回调，直接释放回放权，
-        // 避免占用 90 秒超时窗口。
-        this.onServerAudioFinished();
-      } else {
-        // 尾包仅表示数据收齐；前后台都须等本地播放结束，才能释放回放权限。
-        // 结束回执丢失时沿用超时兜底，回放入口不通过强制停播掩盖状态失步。
-        await this.waitForServerAudioFinished();
-      }
+      // 尾包仅表示数据收齐；前后台都须等本地播放结束，才能释放回放权限。
+      // 结束回执丢失时沿用超时兜底，回放入口不通过强制停播掩盖状态失步。
+      if (mayPlay()) await this.waitForServerAudioFinished();
+      this.openServerMessages.delete(payload.uuid || '');
+      this.mutedServerMessages.delete(payload.uuid || '');
     }
   }
 

@@ -31,11 +31,11 @@ export const useChatLogic = (
   const networkClientRef = useRef<NetworkClient | null>(null);
   const binderRef = useRef<AgentBinder | null>(null);
   const messageProcessorRef = useRef<MessageProcessor | null>(null);
+  const recordingAudioRef = useRef(false);
+  const playbackGeneration = useRef(0);
   const clickTimestampsRef = useRef<number[]>([]);
   const voiceFilesRef = useRef(new Map<string, { localUri: string; durationMs: number }>());
   const voiceAckMapRef = useRef(new Map<string, string>());
-  // AC-15：录音期间不得把服务端音频投喂给 WebView（否则会被麦克风收录）。
-  const recordingRef = useRef(false);
 
   const updateMessageByUuid = useCallback((uuid: string, updater: (msg: ChatMessage) => ChatMessage) => {
     setMessages((prev) => prev.map((msg) => (msg.uuid === uuid ? updater(msg) : msg)));
@@ -101,30 +101,30 @@ export const useChatLogic = (
     setMessages((prev) => [message, ...prev]);
   }, []);
 
+  const stopUserVoicePlayback = useCallback(async () => {
+    playbackGeneration.current += 1;
+    setCurrentPlayingUuid(null);
+    setMessages((prev) => prev.map((message) => ({ ...message, audioPlayState: 'idle',
+      audioDownloadState: message.audioDownloadState === 'loading' ? undefined : message.audioDownloadState })));
+    await voicePlaybackManager.stop();
+  }, []);
+
   const voiceInput = useVoiceInput({
-    onRecordingStarted: (recordingId) => {
-      recordingRef.current = true;
-      void binderRef.current?.sendVoiceRecordingStarted(recordingId);
-    },
-    onRecordingCancelled: (recordingId) => {
-      recordingRef.current = false;
-      void binderRef.current?.sendVoiceRecordingCancelled(recordingId);
-    },
+    onRecordingStarted: (recordingId) => { void binderRef.current?.sendVoiceRecordingStarted(recordingId); },
+    onRecordingCancelled: (recordingId) => { void binderRef.current?.sendVoiceRecordingCancelled(recordingId); },
     onRecordingCommitted: ({ uploadId, localUri, durationMs }) => {
-      recordingRef.current = false;
       voiceFilesRef.current.set(uploadId, { localUri, durationMs });
       void voicePlaybackManager.cacheLocal(uploadId, localUri).then((cachedUri) => updateMessageByUuid(uploadId, (msg) => ({ ...msg, audioLocalUri: cachedUri, audioAvailable: true })));
       setMessages((prev) => [{ uuid: uploadId, type: 'audio', content: '[语音消息]', isUser: true, timestamp: Date.now(), durationMs, audioLocalUri: localUri, audioAvailable: true, sendStatus: 'waiting' }, ...prev]);
       void binderRef.current?.sendVoice(uploadId, localUri, durationMs);
     },
     onStopAllAudio: async () => {
-      await binderRef.current?.stopLocalTts();
-      webviewRef.current?.injectJavaScript('window.stopServerAudio(); true;');
-      // AC-04：开始录音前停掉语音条回放（否则会被麦克风收录），并把气泡从播放态复位。
-      const playingUuid = currentPlayingUuid;
-      await voicePlaybackManager.stop();
-      if (playingUuid) updateMessageByUuid(playingUuid, (msg) => ({ ...msg, audioPlayState: 'idle' }));
-      setCurrentPlayingUuid(null);
+      recordingAudioRef.current = true;
+      await Promise.all([messageProcessorRef.current?.setRecordingActive(true), stopUserVoicePlayback()]);
+    },
+    onRecordingEnded: () => {
+      recordingAudioRef.current = false;
+      void messageProcessorRef.current?.setRecordingActive(false);
     },
     onNotice: appendSystemMessage,
   });
@@ -224,14 +224,14 @@ export const useChatLogic = (
           durationMs: durationMs ?? msg.durationMs,
           sendStatus: 'submitted',
         }));
-        // 缓存按 upload_id 落盘，但服务端鉴权下载只认 message_uuid：迁移缓存键并把气泡
-        // 指向迁移后的文件，避免缓存被淘汰后回放请求打到不存在的 upload_id 上（404）。
+        // 缓存按 upload_id 落盘，但鉴权下载只认 message_uuid：迁移缓存键并回指气泡，
+        // 避免缓存被 LRU 淘汰后回放请求打到不存在的 upload_id 上（404）。
         void voicePlaybackManager.migrateCacheKey(uploadId, messageUuid).then((migratedUri) => {
           if (!migratedUri) return;
           updateMessageByUuid(uploadId, (msg) => ({ ...msg, audioLocalUri: migratedUri }));
         });
       },
-      () => recordingRef.current,
+      stopUserVoicePlayback,
     );
 
     messageProcessorRef.current = processor;
@@ -252,12 +252,13 @@ export const useChatLogic = (
 
     return () => {
       processor.stop();
+      void stopUserVoicePlayback();
       networkClient.disconnectWs();
       messageProcessorRef.current = null;
       binderRef.current = null;
       networkClientRef.current = null;
     };
-  }, [appendOrMergeAgentMessage, appendSystemMessage, messageToken, onVoiceUploadStatus, updateMessageByUuid, username, webviewRef]);
+  }, [appendOrMergeAgentMessage, appendSystemMessage, messageToken, onVoiceUploadStatus, stopUserVoicePlayback, updateMessageByUuid, username, webviewRef]);
 
   const canSend = useMemo(() => inputText.trim().length > 0, [inputText]);
   const canSendImage = true;
@@ -374,6 +375,8 @@ export const useChatLogic = (
 
   const handleToggleAgentAudio = useCallback(
     async (uuid: string) => {
+      if (recordingAudioRef.current || messageProcessorRef.current?.isServerAudioActive()) return;
+      const generation = ++playbackGeneration.current;
       addDebugTrace('audio-ui', 'tap audio button', { uuid, currentPlayingUuid });
       const target = messages.find((msg) => msg.uuid === uuid && !msg.isUser);
       if (!target || !target.audioAvailable) {
@@ -400,8 +403,10 @@ export const useChatLogic = (
         return;
       }
 
+      await voicePlaybackManager.stop();
+      if (generation !== playbackGeneration.current || recordingAudioRef.current) return;
       const ok = await binderRef.current?.playLocalTts(uuid);
-      if (!ok) {
+      if (!ok || generation !== playbackGeneration.current || recordingAudioRef.current) {
         addDebugTrace('audio-ui', 'playLocalTts returned false', { uuid });
         return;
       }
@@ -464,6 +469,8 @@ export const useChatLogic = (
   }, []);
 
   const toggleVoicePlayback = useCallback(async (uuid: string) => {
+    if (recordingAudioRef.current || messageProcessorRef.current?.isServerAudioActive()) return;
+    const generation = ++playbackGeneration.current;
     const target = messages.find((msg) => msg.uuid === uuid && msg.type === 'audio');
     if (!target || target.audioAvailable === false) {
       appendSystemMessage('这条语音暂时无法播放');
@@ -476,18 +483,23 @@ export const useChatLogic = (
       return;
     }
     updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: 'loading' }));
-    // 播放/下载统一使用 ACK 解析出的 message_uuid（协议下载端点只认它），
-    // 界面状态仍按 upload_id 回写。无 ACK 时回退到气泡自身 uuid。
-    const playbackKey = voiceAckMapRef.current.get(uuid) ?? uuid;
     try {
+      await binderRef.current?.stopLocalTts();
+      // 播放/下载统一使用 ACK 解析出的 message_uuid（协议下载端点只认它），
+      // 界面状态仍按 upload_id 回写；无 ACK 时回退到气泡自身 uuid。
+      const playbackKey = voiceAckMapRef.current.get(uuid) ?? uuid;
       if (target.audioLocalUri) await voicePlaybackManager.cacheLocal(playbackKey, target.audioLocalUri);
+      if (generation !== playbackGeneration.current || recordingAudioRef.current) return;
       await voicePlaybackManager.play(playbackKey, messageToken, (state) => {
+        if (generation !== playbackGeneration.current) return;
         updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: state === 'loading' ? 'loading' : state === 'failed' ? 'failed' : 'ready', audioPlayState: state === 'playing' ? 'playing' : 'idle' }));
         if (state === 'playing') setCurrentPlayingUuid(uuid);
+        else setCurrentPlayingUuid((prev) => prev === uuid ? null : prev);
         if (state === 'failed') appendSystemMessage('语音加载失败，请稍后重试');
       });
       if (currentPlayingUuid && currentPlayingUuid !== uuid) updateMessageByUuid(currentPlayingUuid, (msg) => ({ ...msg, audioPlayState: 'idle' }));
     } catch {
+      if (generation !== playbackGeneration.current) return;
       updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: 'failed', audioPlayState: 'idle' }));
       appendSystemMessage('语音加载失败，请稍后重试');
     }
