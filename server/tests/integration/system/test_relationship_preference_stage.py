@@ -13,6 +13,7 @@ from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.relationship import NewRelationshipProposeHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive.response_generation import CharacterReplyGenerator
+from src.infrastructure.media import create_media_resolver
 from src.stage import StageManager
 from src.web.http import UserInterface
 from src.web.http.types import PreferenceOverwriteRequest
@@ -85,7 +86,7 @@ def make_runtime():
 @pytest.mark.asyncio
 async def test_overwrite_updates_online_and_retained_stage_before_returning() -> None:
     runtime = make_runtime()
-    user_interface = UserInterface(runtime.database_manager)
+    user_interface = UserInterface(runtime.database_manager, create_media_resolver())
     first_connection = Connection()
     stage = await runtime.stage_manager.connect(first_connection, "luotianyi")
     other_stage = await runtime.stage_manager.connect(Connection(), "miku")
@@ -127,7 +128,7 @@ async def test_overwrite_updates_online_and_retained_stage_before_returning() ->
 @pytest.mark.asyncio
 async def test_overwrite_without_stage_is_loaded_by_next_interaction() -> None:
     runtime = make_runtime()
-    user_interface = UserInterface(runtime.database_manager)
+    user_interface = UserInterface(runtime.database_manager, create_media_resolver())
     try:
         await user_interface.overwrite_preference(
             PreferenceOverwriteRequest(username="user", token="token", preferences={"relationship": "朋友"}),
@@ -164,7 +165,7 @@ async def test_failed_preference_save_does_not_dispatch_proposal(monkeypatch) ->
     monkeypatch.setattr(conversation, "save_user_preferences", lambda *args: False)
     try:
         with pytest.raises(HTTPException) as error:
-            await UserInterface(runtime.database_manager).overwrite_preference(
+            await UserInterface(runtime.database_manager, create_media_resolver()).overwrite_preference(
                 PreferenceOverwriteRequest(username="user", token="token", preferences={"relationship": "新关系"}),
                 runtime,
             )
@@ -179,7 +180,7 @@ async def test_invalid_relationship_is_rejected_before_persistence() -> None:
     runtime = make_runtime()
     try:
         with pytest.raises(HTTPException) as error:
-            await UserInterface(runtime.database_manager).overwrite_preference(
+            await UserInterface(runtime.database_manager, create_media_resolver()).overwrite_preference(
                 PreferenceOverwriteRequest(username="user", token="token", preferences={"relationship": None}),
                 runtime,
             )

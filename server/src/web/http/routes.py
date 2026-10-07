@@ -123,7 +123,6 @@ async def get_history(
         token,
         request.count,
         request.end_index,
-        server_runtime,
     )
 
 
@@ -134,7 +133,7 @@ async def get_audio(
     server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
     token = require_bearer_token(authorization)
-    return await server_runtime.user_interface.get_audio(token, message_uuid, server_runtime)
+    return await server_runtime.user_interface.get_audio(token, message_uuid)
 
 
 @router.get("/dynamics")
@@ -212,7 +211,7 @@ async def get_image(
     server_runtime: "ServerRuntime" = Depends(get_runtime),
 ):
     logger.info("Get image request from %s for %s", request.username, request.uuid)
-    return await server_runtime.user_interface.get_image(request, server_runtime)
+    return await server_runtime.user_interface.get_image(request)
 
 
 @router.post("/update_image_client_path")

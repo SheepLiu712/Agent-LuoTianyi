@@ -5,14 +5,13 @@ from pathlib import Path
 
 import pytest
 
-
 server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
+import src.server_runtime as runtime_module
 from src.agent_runtime import agent_runtime as agent_runtime_module
 from src.agent_runtime.agent_runtime import AgentRuntime
-import src.server_runtime as runtime_module
 from src.infrastructure.persistence.database import vector_store as vector_store_module
 from src.infrastructure.persistence.database.vector_store import ChromaVectorStore
 
@@ -86,17 +85,13 @@ async def test_late_initialization_failure_rolls_back_resources_and_globals(monk
         def ensure_dependencies(self):
             pass
 
-    class FailingUserInterface:
-        def __init__(self, _database):
-            pass
-
-        def wire_dependencies(self, **_kwargs):
-            pass
-
-        def ensure_dependencies(self):
-            pass
-
+    class FailingUserInterface(runtime_module.UserInterface):
         def generate_rsa_keys(self):
+            # Exercise production constructor/validation and verify the shared injected resolver.
+            assert self.database_manager is database_ref["value"]
+            assert self.user_conversation_helper.database_manager is self.database_manager
+            assert self.user_conversation_helper.media_resolver is self.media_resolver
+            assert isinstance(self.media_resolver, FakeMediaResolver)
             calls.append("rsa_generation_failed")
             raise RuntimeError("late initialization failure")
 
