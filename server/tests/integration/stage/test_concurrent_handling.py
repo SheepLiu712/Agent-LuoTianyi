@@ -368,7 +368,7 @@ async def test_new_content_preserves_active_and_queued_reply_plans():
 
 
 @pytest.mark.asyncio
-async def test_touch_is_immediate_and_typing_does_not_cancel_reply():
+async def test_touch_is_immediate_and_empty_typing_does_not_cancel_reply():
     gate, touch_done = asyncio.Event(), asyncio.Event()
     replies = asyncio.Queue()
 
@@ -391,7 +391,7 @@ async def test_touch_is_immediate_and_typing_does_not_cancel_reply():
     try:
         stage.stimulus_input_sink.submit(stimulus())
         current = await take(replies)
-        stage.stimulus_input_sink.submit(stimulus(d.UserTyping, text_length=3))
+        stage.stimulus_input_sink.submit(stimulus(d.UserTyping, text_length=0))
         stage.stimulus_input_sink.submit(touch())
         await asyncio.wait_for(touch_done.wait(), 1)
         assert not current.cancellation.is_cancelled

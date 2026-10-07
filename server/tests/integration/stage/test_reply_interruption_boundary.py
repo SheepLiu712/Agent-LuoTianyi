@@ -21,6 +21,8 @@ async def until(predicate):
 
 
 def trigger(kind):
+    if kind == "typing":
+        return stimulus(d.UserTyping, text_length=3)
     if kind == "voice_start":
         return stimulus(d.VoiceRecordingStarted, recording_id="recording")
     if kind == "image_open":
@@ -39,7 +41,7 @@ def trigger(kind):
     return stimulus()
 
 
-TRIGGERS = ["voice_start", "image_open", "text", "image", "voice"]
+TRIGGERS = ["typing", "voice_start", "image_open", "text", "image", "voice"]
 
 
 @pytest.mark.asyncio
@@ -152,7 +154,7 @@ async def test_thinking_notification_does_not_prevent_cancelling_chat_handle(kin
                 cancelled.set()
         return report(request)
 
-    stage, agent, adapter, _, _ = await setup(RecordingAgent(handle), {"response_wait": 60})
+    stage, agent, adapter, _, socket = await setup(RecordingAgent(handle), {"response_wait": 60})
     original = stimulus()
     try:
         stage.stimulus_input_sink.submit(original)
@@ -165,13 +167,17 @@ async def test_thinking_notification_does_not_prevent_cancelling_chat_handle(kin
             assert replies[0].cancellation.reason is d.CancellationReason.SUPERSEDED
             assert stage._pending[original.stimulus_id].status.value == "ready"
             assert agent.executions.empty()
+            await until(lambda: any(event.get("payload", {}).get("state") == "waiting" for event in socket.events))
+            states = [event["payload"]["state"] for event in socket.events if event["type"] == "agent_state_changed"]
+            assert states == ["thinking", "waiting"]
+            assert not stage._thinking
             assert not any(isinstance(call.args[0], CancelDelivery) for call in submit.call_args_list)
     finally:
         await cleanup(stage, adapter)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("kind", ["voice_start", "image_open"])
+@pytest.mark.parametrize("kind", ["typing", "voice_start", "image_open"])
 @pytest.mark.parametrize("input_kind", ["text", "image", "voice", "touch"])
 async def test_other_handles_are_not_candidates_even_if_their_permission_is_true(kind, input_kind):
     gate = asyncio.Event()

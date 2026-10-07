@@ -321,7 +321,9 @@ class ChatStage:
             self._scheduling = True
             self._invalidate_deadline()
         elif isinstance(stimulus, (d.UserTyping, d.ImageSelectionOpened, d.ImageSelectionClosed)):
-            if isinstance(stimulus, d.ImageSelectionOpened):
+            if isinstance(stimulus, d.ImageSelectionOpened) or (
+                isinstance(stimulus, d.UserTyping) and stimulus.text_length > 0
+            ):
                 self._cancel_interruptible_reply_handles()
             if self._pending:
                 delay = self._config.response_wait
