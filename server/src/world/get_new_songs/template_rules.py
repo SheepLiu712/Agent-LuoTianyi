@@ -111,7 +111,7 @@ def _normalize_field_lookups(data, path):
 
 
 def _validate_templates(data, path):
-    """Check every template descriptor against its fixed kind; return the name index."""
+    """Check descriptor fields and optional rendering kinds; return the name index."""
     def fail(location, reason):
         raise ValueError(f"{path}: {location}: {reason}")
 
@@ -120,7 +120,8 @@ def _validate_templates(data, path):
     names = {}
     for index, rule in enumerate(data["templates"]):
         location = f"templates[{index}]"
-        if not isinstance(rule, dict) or not isinstance(rule.get("kind"), str) or rule["kind"] not in _KIND_FIELDS:
+        if not isinstance(rule, dict) or ("kind" in rule and (
+                not isinstance(rule["kind"], str) or rule["kind"] not in _KIND_FIELDS)):
             fail(location, "unknown fixed kind")
         if not _descriptor_shape_ok(rule):
             fail(location, "missing or unsupported descriptor fields")
@@ -137,13 +138,18 @@ def _validate_templates(data, path):
 
 
 def _descriptor_shape_ok(rule):
+    if "kind" not in rule:
+        return set(rule) == {"names", "non_lyric"}
     required = _KIND_FIELDS[rule["kind"]] | {"kind", "names"}
-    optional = _KIND_OPTIONAL.get(rule["kind"], set())
+    optional = _KIND_OPTIONAL.get(rule["kind"], set()) | {"non_lyric"}
     return required <= set(rule) and not set(rule) - required - optional
 
 
 def _validate_descriptor_field(rule, key, location, fail):
-    if key == "skip_if":
+    if key == "non_lyric":
+        if not isinstance(rule[key], bool):
+            fail(location, "expected boolean")
+    elif key == "skip_if":
         conditions = rule[key]
         if not isinstance(conditions, dict) or not conditions:
             fail(location, "expected nonempty parameter map")
@@ -174,10 +180,10 @@ _RULES, _BY_NAME = _load_rules()
 def descriptor(name):
     exact = _BY_NAME.get(name)
     # Historical precedence: staff, then songbox substring, then other names.
-    if exact and exact["kind"] == "staff":
+    if exact and exact.get("kind") == "staff":
         return exact
     for rule in _RULES["templates"]:
-        if rule["kind"] == "songbox" and any(word in name for word in rule.get("contains", ())):
+        if rule.get("kind") == "songbox" and any(word in name for word in rule.get("contains", ())):
             return rule
     return exact or {}
 

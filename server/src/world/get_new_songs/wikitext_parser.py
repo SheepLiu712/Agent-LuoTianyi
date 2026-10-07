@@ -194,7 +194,10 @@ def _template_text(node, lyrics, gaps):
     template without a rendering kind only reports its unread content.
     """
     name = _name(node)
-    kind = descriptor(name).get("kind")
+    rule = descriptor(name)
+    kind = rule.get("kind")
+    if lyrics and rule.get("non_lyric", False):
+        return ""
     counter = name.endswith("count")
     if counter and kind not in {"inline", "ruby", "utawari", "tabs", "break", "wrapper"}:
         return ""

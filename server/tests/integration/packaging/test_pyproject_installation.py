@@ -95,6 +95,11 @@ assert data["infobox"] == {"演唱": "洛天依"}, data
 assert data["summary"] == ["简介正文"], data
 assert data["lyrics"] == "最小歌词", data
 assert data["type"] == "Song", data
+assert template_rules.descriptor("refn")["non_lyric"] is True
+source_text = "== 简介 ==\n简介{{refn|说明}}\n== 歌词 ==\n<poem>歌词{{refn|说明}}{{Photrans/button}}{{LDC}}</poem>"
+data, needed = wikitext_parser.parse_details(source_text, "wheel scope", with_missing=True)
+assert data["lyrics"] == "歌词" and not needed["lyrics"], (data, needed)
+assert data["summary"] == ["简介"] and needed["summary"], (data, needed)
 print("WHEEL_IMPORT_PARSE_OK")
 """
     result = subprocess.run(

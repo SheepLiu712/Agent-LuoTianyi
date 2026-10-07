@@ -1,6 +1,7 @@
 {
-  "description": "既有模板描述；参数列表按优先级，源码参数仍按原顺序消费。新增 kind 需代码支持。",
+  "description": "既有模板描述；参数列表按优先级，源码参数仍按原顺序消费。non_lyric 仅在歌词中忽略模板正文及缺口，缺省 false；可独立声明或附于 kind，不影响简介。新增 kind 需代码支持。",
   "templates": [
+    {"names": ["refn", "Photrans/button", "LDC"], "non_lyric": true},
     {"kind": "inline", "names": ["lj"], "text_params": ["2", "1"], "target_params": ["1"]},
     {"kind": "inline", "names": ["color", "colored", "颜色", "fontcolor"], "text_params": ["2"]},
     {"kind": "inline", "names": ["黑幕", "胡话", "cquote", "center", "nowrap", "dead"], "text_params": ["1"]},
