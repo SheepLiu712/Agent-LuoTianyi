@@ -8,8 +8,8 @@ import { VoiceBubble } from './VoiceBubble';
 interface MessageItemProps {
   message: ChatMessage;
   onToggleAgentAudio?: (uuid: string) => void;
-  onToggleVoicePlayback?: (uuid: string) => void;
   onRetryVoice?: (uuid: string) => void;
+  onToggleVoicePlayback?: (uuid: string) => void;
   theme?: AppTheme;
 }
 
@@ -106,8 +106,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({ message, onToggleAgent
   if (message.type === 'image') {
     return <ChatImageBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
   }
-  // 失败图标必须重传同一条语音（复用同一 upload_id），不能接播放。
-  if (message.type === 'audio') return <VoiceBubble message={message} theme={theme} onPlay={() => onToggleVoicePlayback?.(message.uuid)} onRetry={() => onRetryVoice?.(message.uuid)} />;
+  if (message.type === 'audio') return <VoiceBubble message={message} theme={theme} onPlay={() => onToggleVoicePlayback?.(message.uuid)} onRetry={onRetryVoice ? () => onRetryVoice(message.uuid) : undefined} />;
   return <ChatBubble message={message} onToggleAgentAudio={onToggleAgentAudio} theme={theme} />;
 };
 

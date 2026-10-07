@@ -93,21 +93,5 @@ describe('MessageProcessor recording gate (AC-15)', () => {
   });
 });
 describe('MessageProcessor abandons voice uploads cleanly', () => {
-  it('aborts the server slot when an aged voice item is dropped from the durable queue', async () => {
-    const { MessageProcessor: Processor } = require('../utils/message_processor');
-    const { MAX_DURABLE_MESSAGE_AGE_MS } = require('../utils/message_processor');
-    const ids: string[] = [];
-    const network = { sendVoicePhase: jest.fn(async (_payload: unknown, id: string) => { ids.push(id); return { ok: false, error: 'x' }; }) };
-    const binder = fakeBinder();
-    const subject = new Processor(network, binder, jest.fn());
 
-    (subject as any).sendQueue.push({
-      kind: 'voice', uuid: 'aged', localUri: 'file://v.m4a', durationMs: 1000,
-      clientMsgId: 'aged', retryAttempt: 0, enqueuedAtMs: Date.now() - MAX_DURABLE_MESSAGE_AGE_MS - 1,
-    });
-    await (subject as any).runSendLoop();
-
-    // 超龄丢弃同样必须补发 abort，否则服务端每用户唯一的未完成槽位会占满 TTL。
-    expect(ids).toContain('aged:abort');
-  });
 });

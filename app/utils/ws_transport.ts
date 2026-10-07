@@ -217,7 +217,11 @@ export class WebSocketTransport {
   }
 
   async submitVoicePhase(payload: Record<string, unknown>, ackTimeout = 5000, clientMsgId?: string) {
-    return this.sendWithAck(WSEventType.USER_VOICE, payload, ackTimeout, clientMsgId);
+    // 清理仅在当前已认证连接上尝试，避免重连后迟到的 abort 删除手工重试的新会话。
+    if (payload.phase === 'abort' && (!this.isConnected || !this.isAuthed || this.isStopped)) {
+      return { ok: false, request_id: clientMsgId || '', error: 'websocket not ready', drop: true };
+    }
+    return this.sendWithAck(WSEventType.USER_VOICE, payload, ackTimeout, clientMsgId, ackTimeout);
   }
 
   private connect() {
@@ -414,7 +418,7 @@ export class WebSocketTransport {
       if (this.authRejected) {
         return 'auth_rejected';
       }
-      if (Date.now() - start > timeoutMs) {
+      if (Date.now() - start >= timeoutMs) {
         addDebugTrace('ws', 'waitUntilReady timeout', {
           waitedMs: Date.now() - start,
           isConnected: this.isConnected,
@@ -422,7 +426,7 @@ export class WebSocketTransport {
         });
         return 'timeout';
       }
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(80, Math.max(0, timeoutMs - (Date.now() - start)))));
     }
     if (this.authRejected) {
       return 'auth_rejected';
@@ -442,10 +446,16 @@ export class WebSocketTransport {
     payload: Record<string, unknown>,
     timeoutMs: number,
     clientMsgId?: string,
+    totalBudgetMs?: number,
   ): Promise<AckResult> {
     const requestId = clientMsgId || `c-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    const readiness = await this.waitUntilReady();
+    const deadline = totalBudgetMs === undefined ? undefined : Date.now() + Math.max(0, totalBudgetMs);
+    const readiness = await this.waitUntilReady(totalBudgetMs === undefined ? undefined : Math.min(10000, totalBudgetMs));
+    if (deadline !== undefined) {
+      timeoutMs = Math.min(timeoutMs, deadline - Date.now());
+      if (timeoutMs <= 0) return { ok: false, request_id: requestId, error: 'voice operation budget exceeded', retryable: true, drop: false };
+    }
     if (readiness !== 'ready') {
       const permanent = readiness === 'auth_rejected' || readiness === 'stopped';
       addDebugTrace('ack', 'sendWithAck blocked: websocket not ready', { eventType, requestId });

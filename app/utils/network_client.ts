@@ -206,9 +206,9 @@ export class NetworkClient {
     return this.transport.submitVoiceRecordingCancelled(recordingId, 5000, clientMsgId);
   }
 
-  sendVoicePhase(payload: Record<string, unknown>, clientMsgId?: string) {
+  sendVoicePhase(payload: Record<string, unknown>, clientMsgId?: string, budgetMs = 5000) {
     if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
-    return this.transport.submitVoicePhase(payload, 5000, clientMsgId);
+    return this.transport.submitVoicePhase(payload, budgetMs, clientMsgId);
   }
 
 

@@ -14,7 +14,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   useColorScheme,
   useWindowDimensions,
@@ -440,26 +439,11 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: theme.inputBar, borderTopColor: theme.inputBorder },
           ]}
         >
-           {voiceInput.mode === 'text' ? <TextInput
-            style={[
-              styles.inputField,
-              {
-                backgroundColor: theme.inputBackground,
-                color: theme.inputText,
-                height: Math.min(Math.max(40, inputHeight), 120),
-              },
-            ]}
-            placeholder="给天依发消息..."
-            placeholderTextColor={theme.placeholder}
-            value={inputText}
-            onChangeText={setInputText}
-            multiline={true}
-            onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
-           /> : <View style={{ flex: 1 }} />}
-
-          {voiceInput.mode === 'voice' ? <VoiceInputBar
+          <VoiceInputBar
             mode={voiceInput.mode}
             inputText={inputText}
+            inputHeight={inputHeight}
+            onInputHeightChange={setInputHeight}
             onInputChange={setInputText}
             onToggleMode={voiceInput.toggleMode}
             onSendText={handleSendText}
@@ -471,23 +455,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             pressMove={voiceInput.pressMove}
             pressOut={voiceInput.pressOut}
             theme={theme}
-          /> : null}
-
-           {voiceInput.mode === 'text' ? <TouchableOpacity style={styles.iconButton} onPress={handleSendImage} disabled={!canSendImage}>
-            <Image
-              source={
-                canSendImage ? require('../assets/images/image_button_activate.png') : require('../assets/images/image_button_un.png')
-              }
-              style={styles.iconImage}
-            />
-           </TouchableOpacity> : null}
-
-           {voiceInput.mode === 'text' ? <TouchableOpacity style={styles.iconButton} onPress={handleSendText} disabled={!canSend}>
-            <Image
-              source={canSend ? require('../assets/images/send_button_activate.png') : require('../assets/images/send_button_un.png')}
-              style={styles.iconImage}
-            />
-           </TouchableOpacity> : null}
+          />
         </View>
       </View>
 
@@ -655,26 +623,6 @@ const styles = StyleSheet.create({
     padding: 10,
     borderTopWidth: 1,
     borderTopColor: '#ddd',
-  },
-  inputField: {
-    flex: 1,
-    minHeight: 40,
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    marginRight: 10,
-    paddingTop: 10,
-    paddingBottom: 10,
-    textAlignVertical: 'top',
-  },
-  iconButton: {
-    padding: 5,
-    marginLeft: 5,
-  },
-  iconImage: {
-    width: 30,
-    height: 30,
-    resizeMode: 'stretch',
   },
   debugPanel: {
     position: 'absolute',
