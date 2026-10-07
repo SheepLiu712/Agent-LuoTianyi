@@ -3,6 +3,7 @@ import { VoiceRecorder } from '../utils/voice_recorder';
 
 const mockRecording = {
   setOnRecordingStatusUpdate: jest.fn(),
+  setProgressUpdateInterval: jest.fn(),
   prepareToRecordAsync: jest.fn().mockResolvedValue(undefined),
   startAsync: jest.fn().mockResolvedValue(undefined),
   stopAndUnloadAsync: jest.fn().mockResolvedValue(undefined),
@@ -53,6 +54,7 @@ describe('VoiceRecorder', () => {
     const recorder = new VoiceRecorder();
     const result = await recorder.start({ onMetering: jest.fn() });
     expect(result.localUri).toBe('file://voice.m4a');
+    expect(mockRecording.setProgressUpdateInterval).toHaveBeenCalledWith(80);
     await expect(recorder.stop()).resolves.toEqual({ localUri: 'file://voice.m4a', durationMs: 1234 });
     await expect(recorder.stop()).resolves.toBeNull();
   });

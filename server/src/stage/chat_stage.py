@@ -563,6 +563,10 @@ class ChatStage:
         # 每次调用只提交报告；状态结算由相应的完成事件处理方法执行。
         sink = _PlanSink(self, request)
         try:
+            if isinstance(request.stimulus, d.VoiceMessage) and not self._thinking:
+                self._send_control(
+                    AgentPresentationChanged(interaction_id=self.interaction_id, state=AgentPresentationState.LISTENING)
+                )
             report = await self._agent.handle_stimulus(request, sink, context=self.context)
             pending_ids = tuple(item.stimulus_id for item in request.interaction.pending_stimuli)
             if (

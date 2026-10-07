@@ -77,3 +77,50 @@ it.each(['blocked', 'denied'])('handles %s permission without starting, and rech
   expect(options.recorder.getPermission).toHaveBeenCalledTimes(2);
   expect(state.captureState).toBe('Recording');
 });
+
+it.each([499, 500])('applies the minimum duration boundary at %ims', async (duration) => {
+  jest.useFakeTimers({ now: 1000 });
+  try {
+    await mount(); await act(async () => { await state.pressIn(event); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(duration); await state.pressOut(); });
+    if (duration < 500) {
+      expect(options.onRecordingCancelled).toHaveBeenCalledWith('one', 'too_short');
+      expect(options.onRecordingCommitted).not.toHaveBeenCalled();
+      expect(options.onNotice).toHaveBeenCalledWith('说话时间太短');
+    } else {
+      expect(options.onRecordingCommitted).toHaveBeenCalledTimes(1);
+      expect(options.onRecordingCancelled).not.toHaveBeenCalled();
+    }
+  } finally { jest.useRealTimers(); }
+});
+
+it.each([false, true])('30s forces a single end with cancel zone=%s', async (cancelZone) => {
+  jest.useFakeTimers({ now: 1000 });
+  options.recorder.stop.mockResolvedValue({ localUri: 'file://one.m4a', durationMs: 30100 });
+  try {
+    await mount(); await act(async () => { await state.pressIn(event); });
+    if (cancelZone) await act(async () => { state.pressMove({ nativeEvent: { pageY: 100 } } as GestureResponderEvent); });
+    await act(async () => { await jest.advanceTimersByTimeAsync(30100); await state.pressOut(); });
+    expect(state.elapsedMs).toBeLessThanOrEqual(30000);
+    if (cancelZone) {
+      expect(options.onRecordingCancelled).toHaveBeenCalledTimes(1);
+      expect(options.onRecordingCommitted).not.toHaveBeenCalled();
+    } else {
+      expect(options.onRecordingCommitted).toHaveBeenCalledWith({ uploadId: 'one', localUri: 'file://one.m4a', durationMs: 30000 });
+      expect(options.recorder.stop).toHaveBeenCalledTimes(1);
+    }
+  } finally { jest.useRealTimers(); }
+});
+
+it('smooths/clamps metering and restores send after moving back from cancel zone', async () => {
+  await mount(); await act(async () => { await state.pressIn(event); });
+  const onMetering = options.recorder.start.mock.calls[0][0].onMetering;
+  await act(async () => { onMetering(20); });
+  expect(state.smoothedMeter).toBeCloseTo(0.3);
+  await act(async () => { onMetering(-100); });
+  expect(state.smoothedMeter).toBeCloseTo(0.21);
+  await act(async () => { state.pressMove({ nativeEvent: { pageY: 120 } } as GestureResponderEvent); });
+  expect(state.captureState).toBe('CancelZone');
+  await act(async () => { state.pressMove({ nativeEvent: { pageY: 121 } } as GestureResponderEvent); });
+  expect(state.captureState).toBe('Recording');
+});

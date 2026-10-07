@@ -51,6 +51,7 @@ export class VoiceRecorder implements VoiceRecorderApi {
     this.recording = recording;
     this.hasStarted = false;
     let interrupted = false;
+    recording.setProgressUpdateInterval(80);
     recording.setOnRecordingStatusUpdate((status) => {
       if (this.recording !== recording || generation !== this.generation) return;
       if (status.isRecording) {
