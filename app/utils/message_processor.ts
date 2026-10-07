@@ -1,5 +1,4 @@
 import { Buffer } from 'buffer';
-import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
@@ -62,6 +61,14 @@ interface SendResult {
 function isTerminalSendError(errorText?: string) {
   const text = (errorText || '').toLowerCase();
   return text.includes('failed to read image file');
+}
+
+function getTerminalImageErrorText(errorText?: string) {
+  const error = errorText?.trim();
+  if (error?.toUpperCase().includes('MEDIA_TOO_LARGE') || error?.includes('图片过大')) {
+    return '图片过大（上限约 6 MB），请选择更小的图片';
+  }
+  return `图片发送失败：${error || '未知错误'}`;
 }
 
 export function getSendRetryDelayMs(retryAttempt: number) {
@@ -649,11 +656,9 @@ export class MessageProcessor {
       }
       // 落盘可能早于该句展示，临时消息状态由展示阶段在尾包处统一清理。
       this.transientMessageUuids.delete(convUuid);
-      if (AppState.currentState === 'active') {
-        await this.waitForServerAudioFinished();
-      } else {
-        this.onServerAudioFinished();
-      }
+      // 尾包仅表示数据收齐；前后台都须等本地播放结束，才能释放回放权限。
+      // 结束回执丢失时沿用超时兜底，回放入口不通过强制停播掩盖状态失步。
+      await this.waitForServerAudioFinished();
     }
   }
 
@@ -776,6 +781,9 @@ export class MessageProcessor {
         });
         if (tracksMessageStatus) {
           this.binder.emitMessageStatus(item.uuid, 'failed');
+        }
+        if (item.kind === 'image') {
+          this.binder.emitErrorText(getTerminalImageErrorText(result.error));
         }
         this.sendQueue.shift();
         continue;

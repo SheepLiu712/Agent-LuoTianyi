@@ -110,7 +110,8 @@ async def test_singing_unknown_song_interfaces_return_empty_results_without_erro
     monkeypatch,
 ):
     manager = singing_capability.singing_manager[CHARACTER_ID]
-    monkeypatch.setattr(manager, "add_wished_song", lambda song_name: True)
+    wished_songs = []
+    monkeypatch.setattr(manager, "add_wished_song", wished_songs.append)
 
     correct_song, segments = singing_capability.can_i_sing_song(CHARACTER_ID, UNKNOWN_SONG)
     assert correct_song == ""
@@ -119,6 +120,10 @@ async def test_singing_unknown_song_interfaces_return_empty_results_without_erro
     planned_song, planned_segment = await singing_capability.build_sing_plan(CHARACTER_ID, [UNKNOWN_SONG])
     assert planned_song == UNKNOWN_SONG
     assert planned_segment is None
+    assert wished_songs == []
+
+    await singing_capability.build_sing_plan(CHARACTER_ID, [UNKNOWN_SONG], confirmed_intent=True)
+    assert wished_songs == [UNKNOWN_SONG]
 
     assert singing_capability.sing(CHARACTER_ID, UNKNOWN_SONG, "不存在的段落") is None
     assert singing_capability.get_segment_lyrics(CHARACTER_ID, UNKNOWN_SONG, "不存在的段落") == ""

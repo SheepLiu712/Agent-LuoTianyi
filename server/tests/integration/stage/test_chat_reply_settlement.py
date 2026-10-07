@@ -1,4 +1,5 @@
 """真实聊天链路的结算与取消验收（Issue #69）。"""
+
 import asyncio
 
 import pytest
@@ -21,6 +22,7 @@ async def until(predicate):
     async def wait():
         while not predicate():
             await asyncio.sleep(0)
+
     await asyncio.wait_for(wait(), 2)
 
 
@@ -69,17 +71,28 @@ class _Execute:
         self.actions.append(action.action_id)
         if self.gate is not None:
             await self.gate.wait()
-        return d.ActionResult(action_id=action.action_id, status=d.ActionExecutionStatus.COMPLETED,
-                              error_code=None, irreversible_effect_committed=False, effect_ref=None)
+        return d.ActionResult(
+            action_id=action.action_id,
+            status=d.ActionExecutionStatus.COMPLETED,
+            error_code=None,
+            irreversible_effect_committed=False,
+            effect_ref=None,
+        )
 
 
 def build_agent(composer, execute):
     reflection = ReflectionActionHandler("luotianyi", _NoReflection(), _NoCompaction())
-    return Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding())),
-        (d.StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(composer, _Understanding())),
-        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())]),
-        action_router=ActionRouter([(d.ActionKind.SAY, execute), (d.ActionKind.REFLECTION, reflection)]))
+    return Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(
+            [
+                (d.StimulusKind.TEXT_MESSAGE, ChatPreprocessingHandler(_Understanding())),
+                (d.StimulusKind.INTERACTION_DEADLINE, ChatReplyHandler(composer)),
+                (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+            ]
+        ),
+        action_router=ActionRouter([(d.ActionKind.SAY, execute), (d.ActionKind.REFLECTION, reflection)]),
+    )
 
 
 def drafts():

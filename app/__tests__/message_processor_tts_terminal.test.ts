@@ -57,6 +57,8 @@ describe('MessageProcessor TTS terminal contract', () => {
     }
     processor.onAgentMessage({ uuid: 'same-audio', audio: '', packet_sequence: 2,
       is_final_package: true, audio_error: true, error_code: 'TTS_CANCELLED' });
+    await flushAsyncWork();
+    processor.onServerAudioFinished();
     await drainIncoming(processor);
     expect(feed.mock.calls).toEqual([['YXVkaW8=', false], ['YXVkaW8=', false], ['', true]]);
     expect(FileSystem.writeAsStringAsync).not.toHaveBeenCalled();
@@ -170,10 +172,13 @@ describe('MessageProcessor TTS terminal contract', () => {
       audio: 'YXVkaW8=',
       is_final_package: true,
     });
-    await drainIncoming(processor);
+    await flushAsyncWork();
 
     expect(FileSystem.writeAsStringAsync).toHaveBeenCalledTimes(1);
-    expect((processor as any).serverAudioPlaying).toBe(false);
+    expect(processor.isServerAudioActive()).toBe(true);
+    processor.onServerAudioFinished();
+    await drainIncoming(processor);
+    expect(processor.isServerAudioActive()).toBe(false);
   });
 
   it('plays ephemeral touch audio without persisting it', async () => {
@@ -193,6 +198,9 @@ describe('MessageProcessor TTS terminal contract', () => {
       display_in_chat: false,
       is_ephemeral: true,
     });
+    await flushAsyncWork();
+    expect(processor.isServerAudioActive()).toBe(true);
+    processor.onServerAudioFinished();
     await drainIncoming(processor);
 
     expect(feedServerAudioChunk).toHaveBeenCalledWith('dG91Y2gtYXVkaW8=', false);
@@ -335,6 +343,49 @@ describe('MessageProcessor bounded delivery queue', () => {
 
     expect(binder.emitMessageStatus).toHaveBeenCalledWith('user-2', 'failed');
     expect(binder.emitErrorText).toHaveBeenCalledWith(expect.stringContaining('DELIVERY_UNCERTAIN'));
+    expect(processor.queueLength()).toBe(0);
+  });
+
+  it('emits a visible image-too-large message for a terminal server rejection', async () => {
+    const network = {
+      sendImage: jest.fn().mockResolvedValue({
+        ok: false,
+        error: '[MEDIA_TOO_LARGE] encoded image exceeds limit',
+        drop: true,
+      }),
+    } as unknown as NetworkClient;
+    const binder = fakeBinder();
+    const processor = new MessageProcessor(network, binder, jest.fn());
+    (processor as any).sendQueue = [queueItem({
+      kind: 'image',
+      uuid: 'image-1',
+      imageUri: 'file://large.jpg',
+      mimeType: 'image/jpeg',
+    })];
+
+    await (processor as any).runSendLoop();
+
+    expect(binder.emitMessageStatus).toHaveBeenCalledWith('image-1', 'failed');
+    expect(binder.emitErrorText).toHaveBeenCalledWith('图片过大（上限约 6 MB），请选择更小的图片');
+    expect(processor.queueLength()).toBe(0);
+  });
+
+  it('includes the reason for another terminal image failure', async () => {
+    const network = {
+      sendImage: jest.fn().mockResolvedValue({ ok: false, error: 'failed to read image file', drop: true }),
+    } as unknown as NetworkClient;
+    const binder = fakeBinder();
+    const processor = new MessageProcessor(network, binder, jest.fn());
+    (processor as any).sendQueue = [queueItem({
+      kind: 'image',
+      uuid: 'image-2',
+      imageUri: 'file://missing.jpg',
+      mimeType: 'image/jpeg',
+    })];
+
+    await (processor as any).runSendLoop();
+
+    expect(binder.emitErrorText).toHaveBeenCalledWith('图片发送失败：failed to read image file');
     expect(processor.queueLength()).toBe(0);
   });
 });

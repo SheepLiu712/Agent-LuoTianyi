@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING
 
 import src.domain.agent as d
 from src.domain.stage import AgentPresentationChanged, CancelDelivery, StageOutput
-from src.infrastructure.media import MediaResolutionError, PermanentMediaStore
+from src.infrastructure.media import MediaResolutionError, MediaResolutionErrorCode, PermanentMediaStore
+from src.utils.logger import get_logger
 from src.utils.owned_operation import complete_owned
 from src.web.websocket import WSMessage
 
@@ -23,6 +24,8 @@ from .voice_upload import VoiceUploadAck, VoiceUploadAssembler
 if TYPE_CHECKING:
     from src.stage.chat_stage import ChatStage
     from src.web.websocket import WebSocketConnection
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -42,6 +45,22 @@ class ChatEventAcceptance(str, Enum):
     OVERLOADED = "overloaded"
 
 
+@dataclass(frozen=True)
+class EventRejection:
+    """Stable negative acknowledgement details for a rejected event."""
+
+    code: str
+    message: str
+    retryable: bool = False
+
+
+_MEDIA_REJECTION_MESSAGES = {
+    MediaResolutionErrorCode.TOO_LARGE.value: "图片过大（上限约 6 MB），请选择更小的图片",
+    MediaResolutionErrorCode.UNSUPPORTED_TYPE.value: "不支持的图片格式",
+    MediaResolutionErrorCode.NOT_CONFIGURED.value: "服务端未配置媒体存储",
+}
+
+
 class WebSocketAdapter:
     """共享协议桥接层；每个交互绑定一个连接，同一连接按完整消息顺序发送。"""
 
@@ -52,6 +71,8 @@ class WebSocketAdapter:
         self._media_store = (
             PermanentMediaStore(media_config) if isinstance(media_config, dict) and media_config.get("root") else None
         )
+        if self._media_store is None:
+            logger.warning("媒体存储未配置，图片发送将被拒绝")
         self._default_character_id = default_character_id
         voice_config = (config or {}).get("voice_upload", {})
         if not isinstance(voice_config, dict):
@@ -77,7 +98,7 @@ class WebSocketAdapter:
         self,
         connection: WebSocketConnection,
         event: WSMessage,
-    ) -> ChatEventAcceptance:
+    ) -> ChatEventAcceptance | EventRejection:
         """Validate, deduplicate, translate, and submit one authenticated channel event."""
         if not self.supports_input(event):
             return ChatEventAcceptance.UNSUPPORTED
@@ -87,7 +108,13 @@ class WebSocketAdapter:
             if self.is_duplicate_client_message(connection, event):
                 return ChatEventAcceptance.DUPLICATE
             accepted = await self.receive_event(connection, event)
-        except (KeyError, MediaResolutionError, TypeError, ValueError):
+        except MediaResolutionError as error:
+            code = error.code.value if isinstance(error.code, MediaResolutionErrorCode) else str(error.code)
+            return EventRejection(
+                code=code,
+                message=_MEDIA_REJECTION_MESSAGES.get(code, "图片无法读取或已损坏"),
+            )
+        except (KeyError, TypeError, ValueError):
             return ChatEventAcceptance.BAD_MESSAGE
         if not accepted:
             return ChatEventAcceptance.OVERLOADED
