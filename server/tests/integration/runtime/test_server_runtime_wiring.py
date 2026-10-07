@@ -27,7 +27,7 @@ def _runtime(media_resolver) -> ServerRuntime:
         ensure_dependencies=_noop,
     )
     return ServerRuntime(
-        user_interface=UserInterface(database),
+        user_interface=UserInterface(database, media_resolver),
         websocket_service=SimpleNamespace(),
         world=SimpleNamespace(wire_dependencies=_noop, ensure_dependencies=_noop),
         database_manager=database,
@@ -40,7 +40,12 @@ def _runtime(media_resolver) -> ServerRuntime:
     )
 
 
-def test_wire_dependencies_injects_media_resolver_into_user_interface():
+def test_media_resolver_reaches_user_interface_at_construction():
+    """生产接线必须把 media_resolver 交给 UserInterface（base 已改为构造期注入，cb4c247）。
+
+    漏传会让历史中所有音频的 `audio_available` 静默变 False；这里同时确认
+    `_wire_dependencies()` 不会破坏构造期注入的引用。
+    """
     resolver = SimpleNamespace(ensure_dependencies=_noop)
     runtime = _runtime(resolver)
 

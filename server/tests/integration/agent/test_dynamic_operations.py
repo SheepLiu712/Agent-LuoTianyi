@@ -13,8 +13,10 @@ if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
 from src.agent.skills.expression._dynamic_operations import DynamicOperations
+from src.infrastructure.media import create_media_resolver
 from src.infrastructure.persistence.database.database_service import DatabaseManager
 from src.infrastructure.persistence.database.sql_database import InviteCode
+from src.web.http import UserInterface
 from src.web.http.types import (
     DynamicCommentCreateRequest,
     DynamicCommentListRequest,
@@ -23,7 +25,6 @@ from src.web.http.types import (
     DynamicReadMarkRequest,
     DynamicUnreadRequest,
 )
-from src.web.http import UserInterface
 
 
 def test_dynamic_operations_accept_nested_module_config_and_degrade_on_invalid_llm():
@@ -434,7 +435,7 @@ def test_admin_dynamic_list_filters_diary_source_type(db_manager: DatabaseManage
 def test_user_interface_dynamic_flow(db_manager: DatabaseManager):
     _add_invite_code(db_manager, "INVITE4")
     auth = _register_and_login(db_manager, "uiuser", "INVITE4")
-    ui = UserInterface(db_manager)
+    ui = UserInterface(db_manager, create_media_resolver())
     runtime = SimpleNamespace(database_manager=db_manager)
 
     created = asyncio.run(
@@ -507,7 +508,7 @@ def test_user_interface_dynamic_flow(db_manager: DatabaseManager):
 def test_user_interface_dynamic_rejects_bad_token(db_manager: DatabaseManager):
     _add_invite_code(db_manager, "INVITE_BAD_TOKEN")
     _register_and_login(db_manager, "badtokenuser", "INVITE_BAD_TOKEN")
-    ui = UserInterface(db_manager)
+    ui = UserInterface(db_manager, create_media_resolver())
     runtime = SimpleNamespace(database_manager=db_manager)
 
     with pytest.raises(HTTPException) as exc_info:
