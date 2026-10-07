@@ -4,6 +4,9 @@
 .vscode
 settings.json
 
+# scratch
+.scratch/
+
 # Agent / tooling state
 .omo/
 

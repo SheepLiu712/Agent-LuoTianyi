@@ -9,6 +9,8 @@ interface SendResult {
   request_id: string;
   error?: string;
   drop?: boolean;
+  message_uuid?: string;
+  duration_ms?: number;
 }
 
 interface ConnectCallbacks {
@@ -192,6 +194,21 @@ export class NetworkClient {
     }
     addDebugTrace('network', 'sendImageSelectingCancel');
     return this.transport.submitUserImageSelectingCancel(5000, clientMsgId);
+  }
+
+  sendVoiceRecordingStarted(recordingId: string, clientMsgId?: string) {
+    if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
+    return this.transport.submitVoiceRecordingStarted(recordingId, 5000, clientMsgId);
+  }
+
+  sendVoiceRecordingCancelled(recordingId: string, clientMsgId?: string) {
+    if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
+    return this.transport.submitVoiceRecordingCancelled(recordingId, 5000, clientMsgId);
+  }
+
+  sendVoicePhase(payload: Record<string, unknown>, clientMsgId?: string, budgetMs = 5000) {
+    if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
+    return this.transport.submitVoicePhase(payload, budgetMs, clientMsgId);
   }
 
 

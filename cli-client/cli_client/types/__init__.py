@@ -9,6 +9,8 @@ class ConversationItem:
     type: str
     content: str
     uuid: str = None
+    duration_ms: int | None = None
+    audio_available: bool | None = None
 
     def __repr__(self) -> str:
         elapsed_time: str = self._timestamp_to_elapsed_time()

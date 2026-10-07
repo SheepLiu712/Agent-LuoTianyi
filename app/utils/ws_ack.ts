@@ -5,12 +5,19 @@ export interface AckResult {
   drop?: boolean;
   code?: string;
   retryable?: boolean;
+  message_uuid?: string;
+  duration_ms?: number;
 }
 
 export function normalizeServerAck(payload: Record<string, unknown>, requestId: string): AckResult {
   // Older servers did not send `ok`; preserve their positive-ACK behavior.
   if (payload.ok !== false) {
-    return { ok: true, request_id: requestId };
+    return {
+      ok: true,
+      request_id: requestId,
+      ...(typeof payload.message_uuid === 'string' ? { message_uuid: payload.message_uuid } : {}),
+      ...(typeof payload.duration_ms === 'number' ? { duration_ms: payload.duration_ms } : {}),
+    };
   }
 
   const code = typeof payload.code === 'string' ? payload.code : 'REJECTED';
@@ -23,5 +30,7 @@ export function normalizeServerAck(payload: Record<string, unknown>, requestId: 
     code,
     retryable,
     drop: !retryable,
+    ...(typeof payload.message_uuid === 'string' ? { message_uuid: payload.message_uuid } : {}),
+    ...(typeof payload.duration_ms === 'number' ? { duration_ms: payload.duration_ms } : {}),
   };
 }

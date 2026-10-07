@@ -9,6 +9,7 @@ def test_model_modules_are_owned_by_infrastructure_and_websocket_adapter() -> No
     assert find_spec("src.infrastructure.models.service") is not None
     assert find_spec("src.infrastructure.models.llm.module") is not None
     assert find_spec("src.infrastructure.models.vlm.module") is not None
+    assert find_spec("src.infrastructure.models.audio.module") is not None
     assert find_spec("src.adapter.websocket.client_model_executor") is not None
 
     server_root = Path(__file__).resolve().parents[4]

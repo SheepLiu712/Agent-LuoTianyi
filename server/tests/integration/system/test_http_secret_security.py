@@ -3,10 +3,10 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
+from src.infrastructure.config.secrets import SecretStore
 from src.web.admin import admin_interface
 from src.web.http import routes
 from src.web.http.runtime_access import require_bearer_token
-from src.infrastructure.config.secrets import SecretStore
 from src.web.http.types import (
     DynamicCommentListQuery,
     DynamicListQuery,
@@ -21,7 +21,7 @@ class RecordingUserInterface:
     def __init__(self):
         self.calls = []
 
-    async def get_history(self, username, token, count, end_index, runtime):
+    async def get_history(self, username, token, count, end_index):
         self.calls.append(("history", token))
         return {}
 

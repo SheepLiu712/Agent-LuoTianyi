@@ -108,7 +108,7 @@ class ServerRuntime:
 
             # 7. 组装系统运行时
             runtime = cls(
-                user_interface=UserInterface(database_manager),
+                user_interface=UserInterface(database_manager, media_resolver),
                 websocket_service=WebSocketService(),
                 world=world,
                 database_manager=database_manager,
@@ -166,7 +166,6 @@ class ServerRuntime:
             media_resolver=self.media_resolver,
         )
         self.world.wire_dependencies(server_runtime=self)
-        self.user_interface.wire_dependencies(database_manager=self.database_manager)
         self.ensure_dependencies()
 
     def _start_background_services(self) -> None:

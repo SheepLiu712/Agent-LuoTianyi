@@ -28,6 +28,26 @@ class RaisingSession:
         raise self.error
 
 
+class HistorySession:
+    def __init__(self, history):
+        self.history = history
+        self.post_calls = []
+
+    def get(self, *args, **kwargs):
+        return type(
+            "Response",
+            (),
+            {
+                "status_code": 200,
+                "json": lambda _: {"history": self.history, "start_index": 0},
+            },
+        )()
+
+    def post(self, *args, **kwargs):
+        self.post_calls.append((args, kwargs))
+        raise AssertionError("audio history must not trigger a media download")
+
+
 class FatalImageDownload(BaseException):
     pass
 
@@ -69,3 +89,34 @@ def test_image_download_does_not_swallow_base_exception():
 
     with pytest.raises(FatalImageDownload, match="stop now"):
         client._get_image_from_server(make_item())
+
+
+def test_audio_history_ignores_new_fields_without_downloading():
+    client = NetworkClient.__new__(NetworkClient)
+    client.base_url = "https://example.invalid"
+    client.verify_ssl = True
+    client.user_id = "user-1"
+    client.message_token = "token"
+    client.logger = RecordingLogger()
+    client.session = HistorySession(
+        [
+            {
+                "timestamp": "2026-08-01 00:00:00",
+                "source": "user",
+                "type": "audio",
+                "content": "[语音消息]",
+                "uuid": "audio-1",
+                "duration_ms": 900,
+                "audio_available": True,
+                "future_server_field": "ignored",
+            }
+        ]
+    )
+
+    history, start_index = client.get_history(20, -1)
+
+    assert start_index == 0
+    assert len(history) == 1
+    assert history[0].type == "audio"
+    assert history[0].content == "[语音消息]"
+    assert client.session.post_calls == []
