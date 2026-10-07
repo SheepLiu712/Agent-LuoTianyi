@@ -1,266 +1,216 @@
-jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));
-jest.mock('expo-file-system/legacy', () => ({
-  EncodingType: { Base64: 'base64' },
-  documentDirectory: 'file://documents/',
-  makeDirectoryAsync: jest.fn(),
-  getInfoAsync: jest.fn(),
-  writeAsStringAsync: jest.fn(),
-  moveAsync: jest.fn(),
-  copyAsync: jest.fn(),
-  deleteAsync: jest.fn().mockResolvedValue(undefined),
-}));
-
+import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import { VoicePlaybackManager } from '../utils/voice_playback_manager';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { VoicePlaybackManager, VOICE_CACHE_LIMIT_BYTES } from '../utils/voice_playback_manager';
+import { VoiceFileSystem } from './helpers/voice_filesystem';
 
-describe('VoicePlaybackManager cache/download seam', () => {
-  beforeEach(() => jest.clearAllMocks());
+jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));
+jest.mock('expo-file-system/legacy', () => jest.requireActual('./helpers/voice_filesystem').createVoiceFileSystem());
+const fs = FileSystem as unknown as VoiceFileSystem;
+const uri = VoicePlaybackManager.cacheUri;
+const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+function deferred() {
+  let resolve!: () => void;
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+const sample = readFileSync(join(__dirname, 'fixtures/voice-cache.m4a'));
+// ISO BMFF permits a trailing free box: keep valid AAC media while padding to exactly 1 MiB.
+const padding = Buffer.alloc(1024 * 1024 - sample.length);
+padding.writeUInt32BE(padding.length); padding.write('free', 4);
+const oneMiB = Buffer.concat([sample, padding]);
+const totalAudio = () => [...fs.files].filter(([path]) => path.endsWith('.m4a') && path.includes('/voice_cache/'))
+  .reduce((sum, [, file]) => sum + file.data.length, 0);
 
-  it('uses message_uuid cache paths and injectable authenticated download with atomic move', async () => {
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValueOnce({ exists: false })
-      .mockResolvedValueOnce({ exists: true, size: 12 });
-    const download = jest.fn().mockResolvedValue(undefined);
-    const manager = new VoicePlaybackManager({ download });
+function setup() {
+  const download = jest.fn(async (_uuid: string, destination: string, _token: string, _signal?: AbortSignal) => { fs.put(destination, sample); });
+  return { download, manager: new VoicePlaybackManager({ download }) };
+}
 
-    await expect(manager.ensureCached('message_uuid', 'token')).resolves.toBe('file://documents/voice_cache/message_uuid.m4a');
-    expect(download).toHaveBeenCalledWith(
-      'message_uuid',
-      expect.stringMatching(/message_uuid\.m4a\.tmp-/),
-      'token',
-    );
-    expect(FileSystem.moveAsync).toHaveBeenCalledWith({
-      from: expect.stringMatching(/message_uuid\.m4a\.tmp-/),
-      to: 'file://documents/voice_cache/message_uuid.m4a',
-    });
+describe('persistent voice cache and playback', () => {
+  let sound: Record<string, jest.Mock>;
+  beforeEach(() => {
+    fs.files.clear(); jest.clearAllMocks();
+    sound = Object.fromEntries(['loadAsync', 'playAsync', 'stopAsync', 'unloadAsync', 'setOnPlaybackStatusUpdate']
+      .map((key) => [key, jest.fn().mockResolvedValue(undefined)]));
+    (Audio.Sound as unknown as jest.Mock).mockImplementation(() => sound);
   });
 
-  it('coalesces concurrent downloads and allows retry after failure', async () => {
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: false });
-    let rejectDownload: ((error: Error) => void) | undefined;
-    const download = jest.fn().mockImplementation(() => new Promise<void>((_, reject) => { rejectDownload = reject; }));
-    const manager = new VoicePlaybackManager({ download });
-    const first = manager.ensureCached('same', 'token');
-    const second = manager.ensureCached('same', 'token');
-    await new Promise((resolve) => setImmediate(resolve));
+  it('downloads only on cache miss, passes credentials, and atomically publishes one shared download', async () => {
+    const { manager, download } = setup();
+    await manager.initialize();
+    expect(download).not.toHaveBeenCalled();
+    const result = await Promise.all([manager.ensureCached('message', 'token'), manager.ensureCached('message', 'token')]);
+    expect(result).toEqual([uri('message'), uri('message')]);
     expect(download).toHaveBeenCalledTimes(1);
-    rejectDownload?.(new Error('network'));
-    await expect(first).rejects.toThrow('network');
-    await expect(second).rejects.toThrow('network');
-    download.mockResolvedValue(undefined);
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValueOnce({ exists: false }).mockResolvedValueOnce({ exists: true, size: 1 });
-    await expect(manager.ensureCached('same', 'token')).resolves.toContain('/same.m4a');
+    expect(download).toHaveBeenCalledWith('message', expect.stringContaining('message.m4a.tmp-'), 'token', expect.any(AbortSignal));
+    expect(FileSystem.moveAsync).toHaveBeenCalledWith({ from: expect.stringContaining('message.m4a.tmp-'), to: uri('message') });
+    expect(fs.files.get(uri('message'))?.data).toEqual(sample);
+    await manager.ensureCached('message', 'token');
+    expect(download).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses Bearer authentication in the production download adapter', async () => {
+    const originalFetch = globalThis.fetch;
+    const originalReader = globalThis.FileReader;
+    const fetchMock = jest.fn().mockResolvedValue({ ok: true, blob: async () => ({}) });
+    globalThis.fetch = fetchMock;
+    globalThis.FileReader = class {
+      result = `data:audio/mp4;base64,${sample.toString('base64')}`;
+      onloadend?: () => void;
+      readAsDataURL() { this.onloadend?.(); }
+    } as unknown as typeof FileReader;
+    try {
+      const manager = new VoicePlaybackManager();
+      await manager.initialize();
+      expect(fetchMock).not.toHaveBeenCalled();
+      await manager.ensureCached('message', 'secret-token');
+      expect(fetchMock).toHaveBeenCalledWith(expect.stringMatching(/\/media\/audio\/message$/), {
+        headers: { Authorization: 'Bearer secret-token' }, signal: expect.any(AbortSignal),
+      });
+      expect(fs.files.get(uri('message'))?.data).toEqual(sample);
+    } finally { globalThis.fetch = originalFetch; globalThis.FileReader = originalReader; }
+  });
+
+  it('cleans partial failures and retries', async () => {
+    const { manager, download } = setup();
+    download.mockImplementationOnce(async (_uuid, temp) => { fs.put(temp, sample); throw new Error('network'); });
+    await expect(manager.ensureCached('retry', 'token')).rejects.toThrow('network');
+    expect([...fs.files.keys()].some((path) => path.includes('.tmp-'))).toBe(false);
+    expect(await manager.ensureCached('retry', 'token')).toBe(uri('retry'));
     expect(download).toHaveBeenCalledTimes(2);
   });
 
-  it('reports cache hit and miss', async () => {
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValueOnce({ exists: true, size: 2 }).mockResolvedValueOnce({ exists: false });
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    await expect(manager.getCachedUri('hit')).resolves.toContain('/hit.m4a');
-    await expect(manager.getCachedUri('miss')).resolves.toBeNull();
+  it('counts 120 valid 1 MiB files across restarts and preserves last access order', async () => {
+    fs.put('file://source', oneMiB);
+    const first = setup().manager;
+    for (let i = 0; i < 60; i++) await first.cacheLocal(`old-${i}`, 'file://source');
+    const second = setup().manager;
+    for (let i = 0; i < 60; i++) await second.cacheLocal(`new-${i}`, 'file://source');
+    expect(totalAudio()).toBe(VOICE_CACHE_LIMIT_BYTES);
+    for (let i = 0; i < 20; i++) expect(fs.files.has(uri(`old-${i}`))).toBe(false);
+    await second.getCachedUri('old-20');
+    const third = setup().manager;
+    await third.cacheLocal('next', 'file://source');
+    expect(totalAudio()).toBe(VOICE_CACHE_LIMIT_BYTES);
+    expect(fs.files.has(uri('old-20'))).toBe(true);
+    expect(fs.files.has(uri('old-21'))).toBe(false);
   });
 
-  it('keeps one active sound, toggles the same uuid, and resets on finish', async () => {
-    const sounds: any[] = [];
-    (require('expo-av').Audio.Sound as jest.Mock).mockImplementation(() => {
-      const sound = {
-        loadAsync: jest.fn().mockResolvedValue(undefined),
-        playAsync: jest.fn().mockResolvedValue(undefined),
-        stopAsync: jest.fn().mockResolvedValue(undefined),
-        unloadAsync: jest.fn().mockResolvedValue(undefined),
-        setOnPlaybackStatusUpdate: jest.fn((callback) => { sound.callback = callback; }),
-        callback: undefined as ((status: any) => void) | undefined,
-      };
-      sounds.push(sound);
-      return sound;
-    });
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 1 });
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
+  it('recovers old files with missing or corrupt index and deletes orphan temporary files', async () => {
+    for (let i = 0; i < 120; i++) { fs.put(uri(`legacy-${i}`), oneMiB); fs.files.get(uri(`legacy-${i}`))!.modified = i; }
+    fs.put('file://documents/voice_cache/index.json', '{broken');
+    fs.put(`${uri('interrupted')}.tmp-1`, oneMiB);
+    const { manager, download } = setup();
+    await manager.initialize();
+    expect(totalAudio()).toBe(VOICE_CACHE_LIMIT_BYTES);
+    expect(fs.files.has(uri('legacy-0'))).toBe(false);
+    expect([...fs.files.keys()].some((path) => path.includes('.tmp'))).toBe(false);
+    expect(await manager.ensureCached('legacy-119', 'token')).toBe(uri('legacy-119'));
+    expect(download).not.toHaveBeenCalled();
+  });
+
+  it('serializes an early finalize ACK behind the local copy and uses only the permanent identity after restart', async () => {
+    fs.put('file://recording', sample);
+    const { manager } = setup();
+    const copying = manager.cacheLocal('upload', 'file://recording');
+    const finalized = manager.finalizeUpload('upload', 'message');
+    await Promise.all([copying, finalized]);
+    expect(fs.files.has(uri('upload'))).toBe(false);
+    expect(fs.files.get(uri('message'))?.data).toEqual(sample);
+    // A late callback with the obsolete upload path must not recreate the old file.
+    await manager.cacheLocal('upload', uri('upload'));
+    expect(fs.files.has(uri('upload'))).toBe(false);
+    const next = setup();
+    await next.manager.ensureCached('message', 'token');
+    expect(next.download).not.toHaveBeenCalled();
+    expect(totalAudio()).toBe(sample.length);
+  });
+
+  it('keeps the already published message file and removes a duplicate upload file', async () => {
+    fs.put(uri('upload'), sample); fs.put(uri('message'), sample);
+    const { manager } = setup();
+    await manager.finalizeUpload('upload', 'message');
+    expect(totalAudio()).toBe(sample.length);
+    expect(fs.files.has(uri('upload'))).toBe(false);
+  });
+
+  it('protects playing audio during eviction and toggles/reset states', async () => {
+    fs.put('file://source', oneMiB);
+    const { manager } = setup();
+    await manager.cacheLocal('playing', 'file://source');
+    const state = jest.fn();
+    await manager.play('playing', 'token', state);
+    for (let i = 0; i < 100; i++) await manager.cacheLocal(`other-${i}`, 'file://source');
+    expect(fs.files.has(uri('playing'))).toBe(true);
+    expect(totalAudio()).toBe(VOICE_CACHE_LIMIT_BYTES);
+    await manager.play('playing', 'token');
+    expect(sound.stopAsync).toHaveBeenCalled();
+    expect(sound.unloadAsync).toHaveBeenCalled();
+    expect(state).toHaveBeenLastCalledWith('idle');
+  });
+
+  it('stops the previous sound on switching and resets on natural completion', async () => {
+    fs.put(uri('a'), sample); fs.put(uri('b'), sample);
+    const { manager } = setup();
     const state = jest.fn();
     await manager.play('a', 'token', state);
     await manager.play('b', 'token');
-    expect(sounds[0].stopAsync).toHaveBeenCalled();
-    expect(sounds[0].unloadAsync).toHaveBeenCalled();
-    await manager.play('b', 'token');
-    expect(sounds[1].stopAsync).toHaveBeenCalled();
-    expect(sounds[1].unloadAsync).toHaveBeenCalled();
-    await manager.play('c', 'token');
-    sounds[2].callback?.({ isLoaded: true, didJustFinish: true });
-    await Promise.resolve();
-    expect(sounds[2].stopAsync).toHaveBeenCalled();
-    await manager.stop();
-    await manager.stop();
+    expect(state).toHaveBeenLastCalledWith('idle');
+    expect(sound.stopAsync).toHaveBeenCalledTimes(1);
+    sound.setOnPlaybackStatusUpdate.mock.calls.at(-1)[0]({ isLoaded: true, didJustFinish: true });
+    await tick();
+    expect(sound.stopAsync).toHaveBeenCalledTimes(2);
   });
 
-  it.each(['download', 'load'])('invalidates pending %s and resets the button when stopped', async (stage) => {
-    let release!: () => void;
-    const pending = new Promise<void>((resolve) => { release = resolve; });
-    const sound = {
-      loadAsync: jest.fn().mockImplementation(() => stage === 'load' ? pending : Promise.resolve()),
-      playAsync: jest.fn().mockResolvedValue(undefined), stopAsync: jest.fn().mockResolvedValue(undefined),
-      unloadAsync: jest.fn().mockResolvedValue(undefined), setOnPlaybackStatusUpdate: jest.fn(),
-    };
-    const constructor = require('expo-av').Audio.Sound as jest.Mock;
-    constructor.mockReturnValue(sound);
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: stage !== 'download', size: 1 });
-    const manager = new VoicePlaybackManager({ download: jest.fn(() => pending) });
+  it('does not delete a downloading file during eviction', async () => {
+    const gate = deferred();
+    const { manager, download } = setup();
+    let temporary = '';
+    download.mockImplementationOnce(async (_uuid, temp) => { temporary = temp; fs.put(temp, oneMiB); await gate.promise; });
+    const pending = manager.ensureCached('downloading', 'token');
+    await tick();
+    fs.put('file://source', oneMiB);
+    for (let i = 0; i < 101; i++) await manager.cacheLocal(`idle-${i}`, 'file://source');
+    expect(fs.files.has(temporary)).toBe(true);
+    gate.resolve(); await pending;
+    expect(fs.files.has(uri('downloading'))).toBe(true);
+    expect(totalAudio()).toBe(VOICE_CACHE_LIMIT_BYTES);
+  });
+
+  it.each(['download', 'load'])('invalidates pending %s when stopped', async (stage) => {
+    const gate = deferred();
+    const { manager, download } = setup();
+    if (stage === 'load') { fs.put(uri('pending'), sample); sound.loadAsync.mockReturnValue(gate.promise); }
+    else download.mockImplementationOnce(async (_uuid, temp) => { await gate.promise; fs.put(temp, sample); });
     const state = jest.fn();
     const playing = manager.play('pending', 'token', state);
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(state).toHaveBeenLastCalledWith('loading');
+    await tick();
     await manager.stop();
-    expect(state).toHaveBeenLastCalledWith('idle');
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 1 });
-    release();
-    await playing;
+    gate.resolve(); await playing;
     expect(sound.playAsync).not.toHaveBeenCalled();
-    expect(state).not.toHaveBeenCalledWith('playing');
+    expect(state).toHaveBeenLastCalledWith('idle');
     if (stage === 'load') expect(sound.unloadAsync).toHaveBeenCalled();
-    else expect(constructor).not.toHaveBeenCalled();
   });
 
-  it('clear stops playback and deletes the cache directory', async () => {
-    const sound = {
-      loadAsync: jest.fn().mockResolvedValue(undefined), playAsync: jest.fn().mockResolvedValue(undefined),
-      stopAsync: jest.fn().mockResolvedValue(undefined), unloadAsync: jest.fn().mockResolvedValue(undefined),
-      setOnPlaybackStatusUpdate: jest.fn(),
-    };
-    (require('expo-av').Audio.Sound as jest.Mock).mockReturnValue(sound);
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 1 });
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    await manager.play('clear-me', 'token');
-    await manager.clear();
-    expect(sound.stopAsync).toHaveBeenCalled();
-    expect(sound.unloadAsync).toHaveBeenCalled();
-    expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file://documents/voice_cache', { idempotent: true });
+  it('aborts and drains downloads before logout cleanup, without resurrecting old audio', async () => {
+    const gate = deferred();
+    const { manager, download } = setup();
+    // Deliberately ignore abort: clear must still wait for a late writer before deleting the directory.
+    download.mockImplementationOnce(async (_uuid, temp) => { await gate.promise; fs.put(temp, sample); });
+    const pending = manager.ensureCached('old', 'old-token');
+    const rejected = expect(pending).rejects.toThrow('voice cache was cleared');
+    await tick();
+    const clearing = manager.clear();
+    expect(download.mock.calls[0][3]?.aborted).toBe(true);
+    await expect(manager.cacheLocal('late', 'file://source')).rejects.toThrow('voice cache was cleared');
+    await expect(manager.ensureCached('late', 'token')).rejects.toThrow('voice cache was cleared');
+    gate.resolve(); await clearing; await rejected;
+    expect([...fs.files.keys()].filter((path) => path.includes('/voice_cache/'))).toEqual([]);
+    expect(await manager.ensureCached('new', 'new-token')).toBe(uri('new'));
+    expect(fs.files.has(uri('old'))).toBe(false);
   });
 
-  it('evicts the oldest idle entry but protects playing and downloading entries', async () => {
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    (FileSystem.getInfoAsync as jest.Mock).mockImplementation(async (uri: string) => ({
-      exists: true,
-      size: uri.includes('/new.m4a') ? 60 * 1024 * 1024 : 40 * 1024 * 1024,
-    }));
-    await manager.cacheLocal('old', 'file://old');
-    await manager.cacheLocal('protected', 'file://protected');
-    (manager as any).entries.get('old').touched = 1;
-    (manager as any).entries.get('protected').touched = 2;
-    (manager as any).entries.get('protected').playing = true;
-    await manager.cacheLocal('new', 'file://new');
-    expect(FileSystem.deleteAsync).toHaveBeenCalledWith(expect.stringContaining('/old.m4a'), { idempotent: true });
-    expect((manager as any).entries.has('protected')).toBe(true);
-  });
-
-  it('migrates the cache key from upload_id to message_uuid after the finalize ACK', async () => {
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    (FileSystem.getInfoAsync as jest.Mock).mockImplementation(async (uri: string) => ({
-      exists: !uri.includes('message-uuid'),
-      size: 42,
-    }));
-
-    await manager.migrateCacheKey('upload-id', 'message-uuid');
-
-    expect(FileSystem.moveAsync).toHaveBeenCalledWith({
-      from: 'file://documents/voice_cache/upload-id.m4a',
-      to: 'file://documents/voice_cache/message-uuid.m4a',
-    });
-    expect((manager as any).entries.has('upload-id')).toBe(false);
-    expect((manager as any).entries.get('message-uuid')).toMatchObject({
-      uri: 'file://documents/voice_cache/message-uuid.m4a',
-      size: 42,
-    });
-  });
-
-  it('drops the orphan upload_id file when the message_uuid cache already exists', async () => {
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 42 });
-
-    await manager.migrateCacheKey('upload-id', 'message-uuid');
-
-    expect(FileSystem.moveAsync).not.toHaveBeenCalled();
-    expect(FileSystem.deleteAsync).toHaveBeenCalledWith('file://documents/voice_cache/upload-id.m4a', { idempotent: true });
-  });
-
-  it('does nothing when there is no cached upload_id file', async () => {
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: false });
-
-    await manager.migrateCacheKey('upload-id', 'message-uuid');
-    await manager.migrateCacheKey('same', 'same');
-
-    expect(FileSystem.moveAsync).not.toHaveBeenCalled();
-    expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
-  });
-
-  it('notifies idle when playback finishes so the bubble leaves the stop icon', async () => {
-    const sounds: any[] = [];
-    (require('expo-av').Audio.Sound as jest.Mock).mockImplementation(() => {
-      const sound = {
-        loadAsync: jest.fn().mockResolvedValue(undefined),
-        playAsync: jest.fn().mockResolvedValue(undefined),
-        stopAsync: jest.fn().mockResolvedValue(undefined),
-        unloadAsync: jest.fn().mockResolvedValue(undefined),
-        setOnPlaybackStatusUpdate: jest.fn((callback) => { sound.callback = callback; }),
-        callback: undefined as ((status: any) => void) | undefined,
-      };
-      sounds.push(sound);
-      return sound;
-    });
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 1 });
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    const states: string[] = [];
-
-    await manager.play('x', 'token', (state) => states.push(state));
-    sounds[0].callback?.({ isLoaded: true, didJustFinish: true });
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(states).toEqual(['loading', 'playing', 'idle']);
-    expect(sounds[0].stopAsync).toHaveBeenCalled();
-  });
-
-  it('notifies idle for the preempted uuid but not for the new one', async () => {
-    const sounds: any[] = [];
-    (require('expo-av').Audio.Sound as jest.Mock).mockImplementation(() => {
-      const sound = {
-        loadAsync: jest.fn().mockResolvedValue(undefined),
-        playAsync: jest.fn().mockResolvedValue(undefined),
-        stopAsync: jest.fn().mockResolvedValue(undefined),
-        unloadAsync: jest.fn().mockResolvedValue(undefined),
-        setOnPlaybackStatusUpdate: jest.fn(),
-      };
-      sounds.push(sound);
-      return sound;
-    });
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: true, size: 1 });
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    const first: string[] = [];
-    const second: string[] = [];
-
-    await manager.play('a', 'token', (state) => first.push(state));
-    await manager.play('b', 'token', (state) => second.push(state));
-
-    expect(first).toEqual(['loading', 'playing', 'idle']);
-    expect(second).toEqual(['loading', 'playing']);
-  });
-
-  it('accounts the target file size when the destination already exists', async () => {
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    (FileSystem.getInfoAsync as jest.Mock).mockImplementation(async (uri: string) => ({
-      exists: true,
-      size: uri.includes('message-uuid') ? 3000 : 1000,
-    }));
-
-    const uri = await manager.migrateCacheKey('upload-id', 'message-uuid');
-
-    expect(uri).toBe('file://documents/voice_cache/message-uuid.m4a');
-    // 目标已存在时沿用源文件大小会让 LRU 少算 2000B。
-    expect((manager as any).entries.get('message-uuid').size).toBe(3000);
-  });
-
-  it('returns null when there is nothing to migrate', async () => {
-    const manager = new VoicePlaybackManager({ download: jest.fn() });
-    (FileSystem.getInfoAsync as jest.Mock).mockResolvedValue({ exists: false });
-
-    await expect(manager.migrateCacheKey('upload-id', 'message-uuid')).resolves.toBeNull();
-    await expect(manager.migrateCacheKey('same', 'same')).resolves.toBeNull();
-  });
 });

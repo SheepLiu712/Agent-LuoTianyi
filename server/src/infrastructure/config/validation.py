@@ -179,9 +179,11 @@ class RuntimeConfigValidator:
                     # 音频理解是可选能力：未在本节配置接口时不阻断核心运行时（与 world 功能“缺失即禁用”一致）。
                     # 与 base `8a1ab2d`（#251）的裁定对齐：供应商身份必须显式，LLMService 不再提供内置默认接口。
                     # 注意两层语义不同，措辞不得含糊：
-                    #   - 配置校验层：本项只 warning、不阻断 core（core_ok 保持 True，与 test_admin_runtime 既有断言一致）；
+                    #   - 配置校验层：本项只 warning、不阻断 core（core_ok 保持 True，
+                    #     与 test_admin_runtime 既有断言一致）；
                     #   - 技能装配层：facade 只要拿到 media_resolver 就构造 AudioUnderstandingSkill，
-                    #     而它会调用 register_audio_model_module，未声明接口即抛错 → 业务运行时无法启动（管理 Web 仍可用）。
+                    #     而它会调用 register_audio_model_module，未声明接口即抛错
+                    #     → 业务运行时无法启动（管理 Web 仍可用）。
                     # 因此这里如实说明"装配会显式失败、运行时无法启动"，而不是承诺"降级/不阻断"；
                     # 已显式配置但密钥占位符未解析仍按下面的逻辑报 error（AC-24）。
                     result.append(

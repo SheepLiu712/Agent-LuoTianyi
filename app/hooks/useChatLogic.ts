@@ -114,7 +114,9 @@ export const useChatLogic = (
     onRecordingCancelled: (recordingId) => { void binderRef.current?.sendVoiceRecordingCancelled(recordingId); },
     onRecordingCommitted: ({ uploadId, localUri, durationMs }) => {
       voiceFilesRef.current.set(uploadId, { localUri, durationMs });
-      void voicePlaybackManager.cacheLocal(uploadId, localUri).then((cachedUri) => updateMessageByUuid(uploadId, (msg) => ({ ...msg, audioLocalUri: cachedUri, audioAvailable: true })));
+      void voicePlaybackManager.cacheLocal(uploadId, localUri)
+        .then((cachedUri) => updateMessageByUuid(uploadId, (msg) => ({ ...msg, audioLocalUri: cachedUri, audioAvailable: true })))
+        .catch((error) => addDebugTrace('audio', 'cache recording failed', { error: String(error) }));
       setMessages((prev) => [{ uuid: uploadId, type: 'audio', content: '[语音消息]', isUser: true, timestamp: Date.now(), durationMs, audioLocalUri: localUri, audioAvailable: true, sendStatus: 'waiting' }, ...prev]);
       void binderRef.current?.sendVoice(uploadId, localUri, durationMs);
     },
@@ -219,22 +221,23 @@ export const useChatLogic = (
       },
       (uploadId, messageUuid, durationMs) => {
         voiceAckMapRef.current.set(uploadId, messageUuid);
+        void voicePlaybackManager.finalizeUpload(uploadId, messageUuid).then((uri) => {
+          for (const uuid of [uploadId, messageUuid]) updateMessageByUuid(uuid, (msg) => ({
+            ...msg, audioLocalUri: uri || undefined,
+          }));
+        }).catch((error) => addDebugTrace('audio', 'finalize recording cache failed', { error: String(error) }));
         updateMessageByUuid(uploadId, (msg) => ({
           ...msg,
           durationMs: durationMs ?? msg.durationMs,
           sendStatus: 'submitted',
         }));
-        // 缓存按 upload_id 落盘，但鉴权下载只认 message_uuid：迁移缓存键并回指气泡，
-        // 避免缓存被 LRU 淘汰后回放请求打到不存在的 upload_id 上（404）。
-        void voicePlaybackManager.migrateCacheKey(uploadId, messageUuid).then((migratedUri) => {
-          if (!migratedUri) return;
-          updateMessageByUuid(uploadId, (msg) => ({ ...msg, audioLocalUri: migratedUri }));
-        });
       },
       stopUserVoicePlayback,
     );
 
     messageProcessorRef.current = processor;
+    void voicePlaybackManager.initialize().catch((error) =>
+      addDebugTrace('audio', 'initialize voice cache failed', { error: String(error) }));
 
     networkClient.connectWs(username, messageToken, {
       onAgentMessage: (payload) => {
@@ -485,12 +488,12 @@ export const useChatLogic = (
     updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: 'loading' }));
     try {
       await binderRef.current?.stopLocalTts();
-      // 播放/下载统一使用 ACK 解析出的 message_uuid（协议下载端点只认它），
-      // 界面状态仍按 upload_id 回写；无 ACK 时回退到气泡自身 uuid。
-      const playbackKey = voiceAckMapRef.current.get(uuid) ?? uuid;
-      if (target.audioLocalUri) await voicePlaybackManager.cacheLocal(playbackKey, target.audioLocalUri);
+      const playbackUuid = voiceAckMapRef.current.get(uuid) || uuid;
+      if (target.audioLocalUri && (await FileSystem.getInfoAsync(target.audioLocalUri)).exists) {
+        await voicePlaybackManager.cacheLocal(playbackUuid, target.audioLocalUri);
+      }
       if (generation !== playbackGeneration.current || recordingAudioRef.current) return;
-      await voicePlaybackManager.play(playbackKey, messageToken, (state) => {
+      await voicePlaybackManager.play(playbackUuid, messageToken, (state) => {
         if (generation !== playbackGeneration.current) return;
         updateMessageByUuid(uuid, (msg) => ({ ...msg, audioDownloadState: state === 'loading' ? 'loading' : state === 'failed' ? 'failed' : 'ready', audioPlayState: state === 'playing' ? 'playing' : 'idle' }));
         if (state === 'playing') setCurrentPlayingUuid(uuid);

@@ -5,21 +5,15 @@ import { Audio } from 'expo-av';
 import { AppState, GestureResponderEvent } from 'react-native';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { NetworkClient } from '../utils/network_client';
+import { VoiceFileSystem } from './helpers/voice_filesystem';
+import { VoicePlaybackManager, voicePlaybackManager } from '../utils/voice_playback_manager';
 import { voiceRecorder } from '../utils/voice_recorder';
 
 jest.mock('react-native', () => ({ AppState: { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) } }));
 jest.mock('expo-haptics', () => ({ impactAsync: jest.fn().mockResolvedValue(undefined), ImpactFeedbackStyle: { Medium: 'medium' } }));
 jest.mock('expo-image-picker', () => ({}));
 jest.mock('expo-av', () => ({ Audio: { Sound: jest.fn() } }));
-jest.mock('expo-file-system/legacy', () => ({
-  documentDirectory: 'file://documents/',
-  makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
-  writeAsStringAsync: jest.fn().mockResolvedValue(undefined),
-  copyAsync: jest.fn().mockResolvedValue(undefined),
-  EncodingType: { Base64: 'base64' },
-  getInfoAsync: jest.fn().mockResolvedValue({ exists: true, size: 3 }),
-  readAsStringAsync: jest.fn().mockResolvedValue('AAAA'),
-}));
+jest.mock('expo-file-system/legacy', () => jest.requireActual('./helpers/voice_filesystem').createVoiceFileSystem());
 jest.mock('../utils/live2d_helper', () => ({ setExpression: jest.fn() }));
 jest.mock('../utils/network_client', () => ({ NetworkClient: jest.fn() }));
 jest.mock('../utils/voice_recorder', () => ({ voiceRecorder: {
@@ -42,6 +36,9 @@ describe('recording and playback through chat, processor and native voice manage
   function Harness() { state = useChatLogic(webview, 'user', 'token'); return null; }
   const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
   beforeEach(async () => {
+    await voicePlaybackManager.clear();
+    const fs = FileSystem as unknown as VoiceFileSystem;
+    for (const file of ['history.m4a', 'user.m4a', 'agent.wav', 'recording.m4a']) fs.put(`file://${file}`, 'audio');
     jest.clearAllMocks();
     now = jest.spyOn(Date, 'now').mockReturnValue(1000);
     sound = Object.fromEntries(['loadAsync', 'playAsync', 'stopAsync', 'unloadAsync', 'setOnPlaybackStatusUpdate']
@@ -50,12 +47,34 @@ describe('recording and playback through chat, processor and native voice manage
     (voiceRecorder.start as jest.Mock).mockResolvedValue({ recordingId: 'recording', localUri: 'file://recording.m4a' });
     (NetworkClient as jest.Mock).mockImplementation(() => ({
       connectWs: jest.fn((_user, _token, callbacks) => { incoming = callbacks.onAgentMessage; }),
-      disconnectWs: jest.fn(), sendVoicePhase: jest.fn().mockResolvedValue({ ok: true }),
+      disconnectWs: jest.fn(), sendVoicePhase: jest.fn().mockResolvedValue({ ok: true, message_uuid: 'server-recording' }),
       sendVoiceRecordingStarted: jest.fn(), sendVoiceRecordingCancelled: jest.fn(),
     }));
     await act(async () => { root = create(<Harness />); });
   });
   afterEach(async () => { await act(async () => root.unmount()); now.mockRestore(); });
+
+  it('reuses the recorded bytes after finalize ACK, history refresh and manager restart', async () => {
+    const fs = FileSystem as unknown as VoiceFileSystem;
+    await act(async () => { state.voiceInput.toggleMode(); });
+    await act(async () => { await state.voiceInput.pressIn(event); });
+    now.mockReturnValue(2000);
+    await act(async () => { await state.voiceInput.pressOut(); await flush(); });
+    expect(state.messages.find((m) => m.uuid === 'recording')?.sendStatus).toBe('submitted');
+    expect(fs.files.has(VoicePlaybackManager.cacheUri('recording'))).toBe(false);
+    expect(fs.files.get(VoicePlaybackManager.cacheUri('server-recording'))?.data.toString()).toBe('audio');
+    await act(async () => { state.addHistoryMessage([{ uuid: 'server-recording', type: 'audio',
+      content: '[voice]', isUser: true, timestamp: 2000, audioAvailable: true }]); });
+    expect(state.messages.some((m) => m.uuid === 'recording')).toBe(false);
+    await act(async () => { await state.toggleVoicePlayback('server-recording'); });
+    expect(sound.playAsync).toHaveBeenCalledTimes(1);
+    await act(async () => { await voicePlaybackManager.stop(); });
+    const download = jest.fn();
+    const restarted = new VoicePlaybackManager({ download });
+    await restarted.play('server-recording', 'token');
+    expect(download).not.toHaveBeenCalled();
+    await restarted.stop();
+  });
 
   it.each(['user', 'agent'])('stops %s history playback and resets the button before recording', async (kind) => {
     await act(async () => { state.addHistoryMessage([{ uuid: 'history', type: kind === 'user' ? 'audio' : 'text',
