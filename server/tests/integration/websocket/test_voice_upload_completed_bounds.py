@@ -1,4 +1,4 @@
-"""幂等完成记录（`_completed`）必须有界（N8）。
+"""幂等完成记录（`_completed`）必须有界。
 
 条目本身只保存参数与 sha256 摘要，但**条数**必须有界：否则单个认证账号可以用大量
 upload_id 反复 finalize，把服务端的完成记录字典无限撑大（内存放大）。
@@ -73,6 +73,15 @@ def test_per_user_cap_does_not_touch_other_users():
 
     assert len([key for key in assembler._completed if key[0] == "user-a"]) == MAX_COMPLETED_UPLOADS_PER_USER
     assert len([key for key in assembler._completed if key[0] == "user-b"]) == MAX_COMPLETED_UPLOADS_PER_USER
+
+
+def test_production_insert_path_keeps_the_cache_bounded():
+    """生产写入路径（`_remember_completion`）必须自带淘汰——只测算法会漏掉"忘了调用"。"""
+    assembler = _assembler()
+    for index in range(MAX_COMPLETED_UPLOADS_PER_USER + 5):
+        assembler._remember_completion(("greedy-user", f"u{index}"), _entry(float(index)))
+
+    assert len(assembler._completed) == MAX_COMPLETED_UPLOADS_PER_USER
 
 
 def test_under_the_caps_nothing_is_evicted():

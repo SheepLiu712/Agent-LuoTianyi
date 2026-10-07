@@ -254,7 +254,7 @@ class ChromaVectorStore(VectorStore):
         """删除指定用户的所有记录并返回条数。
 
         分页删除以避免单用户超过单次查询上限时静默截断；任何失败都必须抛出，
-        不能返回 0 伪装成功——重置编排器把异常视为该步骤失败（AC-25）。
+        不能返回 0 伪装成功——上层的用户数据重置把异常视为该步骤失败并如实上报。
         """
         deleted_count = 0
         previous_page: tuple[str, ...] | None = None

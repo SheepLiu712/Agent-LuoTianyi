@@ -195,9 +195,9 @@ def test_network_audio_download_uses_bearer_token():
 def test_protocol_docs_and_driver_match_the_server_agent_states():
     """`agent_state` 取值必须以服务端枚举为真源，两份协议文档与驱动都不得漂移。
 
-    N6 的事实基线在本 PR 期间变化过：早期服务端只发射 `thinking`/`waiting`（驱动硬等
-    `listening` 必然超时），随后 #252 起服务端真的开始发射 `listening`。因此这条契约测试
-    不再断言"哪些状态会被发射"（那是实现细节），而是断言三处**取值集合一致**：
+    服务端曾有一段时间只发射 `thinking`/`waiting`，而驱动硬等 `listening`（必然超时）；
+    #252 起服务端开始发射 `listening`。状态的**发射时机**属于实现细节，这里断言的是三处
+    **取值集合一致**：
 
     1. 服务端 `AgentPresentationState`（真源）；
     2. `server/docs` 与 `client/docs` 两份协议副本的 §5.5「当前可能值」；
@@ -221,7 +221,20 @@ def test_protocol_docs_and_driver_match_the_server_agent_states():
     assert server_states, "AgentPresentationState must declare its values"
 
     for doc in docs:
-        section = doc.read_text(encoding="utf-8").split("### 5.5 agent_state_changed", 1)[1].split("### 5.6", 1)[0]
+        source = doc.read_text(encoding="utf-8")
+        # ① 序列图里的简写：不带省略号时必须列出**全部**取值（带省略号时只能是子集）。
+        shorthand = re.search(r"agent_state_changed \(([^)]*)\)", source)
+        assert shorthand, f"{doc.name} must summarize agent_state_changed values"
+        listed = {value.strip().strip("`") for value in shorthand.group(1).split("/") if value.strip("` ")}
+        has_ellipsis = "..." in shorthand.group(1)
+        assert listed <= server_states or has_ellipsis, (
+            f"{doc.name} lists states the server cannot emit: {listed - server_states}"
+        )
+        if not has_ellipsis:
+            assert listed == server_states, f"{doc.name} shorthand drifted from the enum: {listed ^ server_states}"
+
+        # ② §5.5「当前可能值」必须与枚举完全一致。
+        section = source.split("### 5.5 agent_state_changed", 1)[1].split("### 5.6", 1)[0]
         assert "当前可能值" in section, f"{doc.name} §5.5 must list the current agent_state values"
         possible = section.split("当前可能值", 1)[1]
         doc_states = set(re.findall(r"^\d+\.\s*`([a-z_]+)`", possible, flags=re.MULTILINE))

@@ -24,7 +24,7 @@ from src.utils.logger import get_logger
 from src.web.websocket import WSMessage
 
 # 幂等完成记录的上限：条目只保存摘要（每条约几十~百字节），但条数必须有界，
-# 否则单个认证账号可以用大量 upload_id 把服务端内存拉爆（N8）。
+# 否则单个认证账号可以用大量 upload_id 把服务端内存拉爆。
 MAX_COMPLETED_UPLOADS = 256
 MAX_COMPLETED_UPLOADS_PER_USER = 16
 MAX_CHUNK_BYTES = 48 * 1024
@@ -161,13 +161,23 @@ class VoiceUploadAssembler:
                 or not 500 <= duration <= 30_500
             ):
                 raise ValueError("invalid voice receipt")
-            self._completed[key] = _Completed(parameters, digests, message_uuid, duration, time.monotonic(), True)
-            self._evict_completed()
+            self._remember_completion(
+                key, _Completed(parameters, digests, message_uuid, duration, time.monotonic(), True)
+            )
         except (OSError, ValueError, KeyError, TypeError) as error:
             raise VoiceUploadError("OVERLOADED", "voice completion receipt unavailable", retryable=True) from error
 
+    def _remember_completion(self, key: tuple[str, str], completed: _Completed) -> None:
+        """登记幂等完成记录。
+
+        写入与淘汰必须成对出现：任何新增的写入路径都必须走这里，否则条数会无界
+        （单个认证账号可用大量 upload_id 撑大内存）。
+        """
+        self._completed[key] = completed
+        self._evict_completed()
+
     def _evict_completed(self) -> None:
-        """按最旧淘汰，保证幂等记录的全局与每用户条数都有界（N8 内存放大防护）。"""
+        """按最旧淘汰，保证幂等记录的全局与每用户条数都有界（内存放大防护）。"""
         while len(self._completed) > MAX_COMPLETED_UPLOADS:
             oldest = min(self._completed.items(), key=lambda item: item[1].completed_at)[0]
             del self._completed[oldest]
@@ -359,14 +369,16 @@ class VoiceUploadAssembler:
             upload.byte_length,
             upload.total_chunks,
         )
-        self._completed[key] = _Completed(
-            parameters=parameters,
-            chunk_digests=tuple(sha256(upload.chunks[index]).digest() for index in range(upload.total_chunks)),
-            message_uuid=message_uuid,
-            duration_ms=duration_ms,
-            completed_at=time.monotonic(),
+        self._remember_completion(
+            key,
+            _Completed(
+                parameters=parameters,
+                chunk_digests=tuple(sha256(upload.chunks[index]).digest() for index in range(upload.total_chunks)),
+                message_uuid=message_uuid,
+                duration_ms=duration_ms,
+                completed_at=time.monotonic(),
+            ),
         )
-        self._evict_completed()
         del self._uploads[key]
         await self._persist_completion(key)
         return VoiceUploadAck({"message_uuid": message_uuid, "duration_ms": duration_ms})

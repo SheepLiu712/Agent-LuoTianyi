@@ -103,7 +103,7 @@ def test_cli_sends_zero_length_typing_signal_with_ack():
 
 
 def test_history_items_ignore_unknown_server_fields():
-    """服务端向历史项新增字段时，CLI 必须忽略而不是让整页历史静默清空（AC-26）。"""
+    """服务端向历史项新增字段时，CLI 必须忽略未知字段，而不是让整页历史静默清空。"""
     from cli_client.network.network_client import _conversation_item_from_dict
 
     item = _conversation_item_from_dict(

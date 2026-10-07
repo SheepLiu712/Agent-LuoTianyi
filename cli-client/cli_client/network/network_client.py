@@ -17,7 +17,7 @@ def _is_safe_uuid(value: str | None) -> bool:
 
 
 def _conversation_item_from_dict(item: dict) -> ConversationItem:
-    """忽略未知字段构造历史项：服务端新增字段不得让整页历史静默清空（AC-26）。"""
+    """忽略未知字段构造历史项：服务端新增字段时，历史页不能因此整页变空。"""
     return ConversationItem(**{key: value for key, value in item.items() if key in _CONVERSATION_ITEM_FIELDS})
 
 
