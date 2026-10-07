@@ -24,7 +24,7 @@
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
       "package": "com.sheepliu712.agentluochat",
-      "versionCode": 6,
+      "versionCode": 7,
       "permissions": [
         "INTERNET",
         "ACCESS_NETWORK_STATE"
