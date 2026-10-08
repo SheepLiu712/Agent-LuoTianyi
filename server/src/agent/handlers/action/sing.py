@@ -1,7 +1,7 @@
 """SING 行动：渲染已确定的歌曲片段并输出音频与结束标志。"""
 
 import src.domain.agent as d
-from src.agent.processing.output_drafts import AudioChunkDraft, ExpressionDraft, MessageEndDraft
+from src.agent.processing.output_drafts import AudioChunkDraft, ExpressionDraft, MessageEndDraft, TextFinalDraft
 from src.agent.processing.output_emitter import OutputEmitter
 from src.agent.skills.expression.singing import EmptySongAudioError, SingingSkill
 from src.agent.skills.invocation import execution_invocation
@@ -19,12 +19,14 @@ class SingHandler:
     async def realize(
         self, action: d.Action, execution_context: d.ExecutionContext, outputs: OutputEmitter
     ) -> d.ActionResult:
-        """渲染既定片段并按 [表情] → 音频 → 结束 输出；不可用或失败时以终止包说明原因。"""
+        """渲染既定片段并按 [文字] → [表情] → 音频 → 结束 输出；失败时以终止包说明原因。"""
         if not isinstance(action, d.Sing):
             raise TypeError("SingHandler 只处理 Sing")
         if execution_context.cancellation.is_cancelled:
             return self._result(action, d.ExecutionErrorCode.CANCELLED)
         delivery = d.OutputDelivery.CONVERSATION
+        if action.content.strip():
+            await outputs.emit(TextFinalDraft(delivery=delivery, text=action.content))
         if action.expression is not None:
             await outputs.emit(ExpressionDraft(delivery=delivery, expression=action.expression))
         try:

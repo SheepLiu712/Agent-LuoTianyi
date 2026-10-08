@@ -4,14 +4,14 @@ import threading
 from dataclasses import replace
 
 import pytest
+from support.routing_support import Sink, plan_and_context
+from support.skill_support import invocation
 
 import src.domain.agent as d
 from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.sing import SingHandler
 from src.agent.skills.expression.singing import EmptySongAudioError, SingingSkill
-from support.routing_support import Sink, plan_and_context
-from support.skill_support import invocation
 
 
 class Singing:
@@ -29,10 +29,11 @@ class Singing:
         return self.audio
 
 
-def sing_plan(expression=True):
+def sing_plan(expression=True, *, content="", message_id=None):
     plan, context = plan_and_context()
     sing = d.Sing(action_id="a1", song_id="歌曲", segment_id="副歌",
-                  expression=d.ChangeExpression(expression_id="唱歌") if expression else None)
+                  expression=d.ChangeExpression(expression_id="唱歌") if expression else None,
+                  content=content, message_id=message_id)
     return replace(plan, actions=(sing,)), context
 
 
@@ -44,19 +45,22 @@ def agent(singing):
 @pytest.mark.asyncio
 async def test_sing_route_outputs_expression_audio_and_end():
     singing = Singing()
-    plan, context = sing_plan()
+    plan, context = sing_plan(content="唱了《歌曲》\n歌词一行", message_id="history-entry")
     sink = Sink()
     report = await agent(singing).realize_action_plan(plan, context, sink)
     assert report.status is d.ExecutionStatus.COMPLETED
     assert [o.kind for o in sink.values] == [
-        d.AgentOutputKind.EXPRESSION, d.AgentOutputKind.AUDIO_CHUNK, d.AgentOutputKind.MESSAGE_END]
-    assert sink.values[0].expression.expression_id == "唱歌"
-    assert sink.values[1].data == b"\x00\x01wav"
-    assert sink.values[1].framing is d.AudioFraming.COMPLETE_FILE
-    assert sink.values[1].delivery is d.OutputDelivery.CONVERSATION
+        d.AgentOutputKind.TEXT_FINAL, d.AgentOutputKind.EXPRESSION,
+        d.AgentOutputKind.AUDIO_CHUNK, d.AgentOutputKind.MESSAGE_END]
+    assert sink.values[0].text == "唱了《歌曲》\n歌词一行"
+    assert sink.values[1].expression.expression_id == "唱歌"
+    assert sink.values[2].data == b"\x00\x01wav"
+    assert sink.values[2].framing is d.AudioFraming.COMPLETE_FILE
+    assert sink.values[2].delivery is d.OutputDelivery.CONVERSATION
     assert sink.values[-1].status is d.MessageEndStatus.COMPLETED
-    assert [o.sequence_no for o in sink.values] == [0, 1, 2]
+    assert [o.sequence_no for o in sink.values] == [0, 1, 2, 3]
     assert all(o.action_id == "a1" for o in sink.values)
+    assert all(o.message_id == "history-entry" for o in sink.values)
     assert singing.calls[0][:3] == ("luotianyi", "歌曲", "副歌")
     assert singing.calls[0][3] != threading.get_ident()
 

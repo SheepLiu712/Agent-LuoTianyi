@@ -1,0 +1,6 @@
+# 设置 CLI_E2E_BASE_URL、CLI_E2E_USER、CLI_E2E_PASSWORD 后运行
+# 图片样例由 07-image-generate.py 生成；设置 CLI_E2E_IMAGE 为该路径
+/login --timeout "15"
+/select-image "${CLI_E2E_IMAGE}" --ack-timeout "15"
+/image --ack-timeout "20"
+/reply --timeout "180" --non-empty

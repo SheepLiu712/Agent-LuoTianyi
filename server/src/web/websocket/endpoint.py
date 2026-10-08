@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from src.adapter.websocket import ChatEventAcceptance
+from src.adapter.websocket import ChatEventAcceptance, EventRejection, VoiceUploadError
 from src.application.admin import get_admin_shell
 from src.utils.logger import get_logger
 from src.web.http import runtime_not_ready_detail
@@ -86,6 +86,33 @@ async def _receive_events(server_runtime: "ServerRuntime", connection: WebSocket
             continue
         if await _handle_transport_event(server_runtime, connection, event):
             continue
+        if event.event_type == WSEventType.USER_VOICE.value:
+            try:
+                result = await server_runtime.chat_adapter.process_voice_event(connection, event)
+            except VoiceUploadError as error:
+                await websocket_service.send_nack_event(
+                    connection,
+                    event,
+                    code=error.code,
+                    message=error.message,
+                    retryable=error.retryable,
+                )
+            except (TypeError, ValueError):
+                await websocket_service.send_nack_event(
+                    connection,
+                    event,
+                    code="BAD_MESSAGE",
+                    message="chat event payload is invalid",
+                    retryable=False,
+                )
+            else:
+                await websocket_service.send_ack_event(
+                    connection,
+                    event,
+                    payload=result.payload,
+                    duplicate=result.duplicate,
+                )
+            continue
         if server_runtime.chat_adapter.supports_input(event):
             acceptance = await server_runtime.chat_adapter.try_accept_event(connection, event)
             if await _handle_rejected_event(websocket_service, connection, event, acceptance):
@@ -132,8 +159,17 @@ async def _handle_rejected_event(
     websocket_service: WebSocketService,
     connection: WebSocketConnection,
     event: WSMessage,
-    acceptance: ChatEventAcceptance,
+    acceptance: ChatEventAcceptance | EventRejection,
 ) -> bool:
+    if isinstance(acceptance, EventRejection):
+        await websocket_service.send_nack_event(
+            connection,
+            event,
+            code=acceptance.code,
+            message=acceptance.message,
+            retryable=acceptance.retryable,
+        )
+        return True
     rejections: dict[ChatEventAcceptance, tuple[str, str, bool] | None] = {
         ChatEventAcceptance.DUPLICATE: None,
         ChatEventAcceptance.BAD_MESSAGE: ("BAD_MESSAGE", "chat event payload is invalid", False),

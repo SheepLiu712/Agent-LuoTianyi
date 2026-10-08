@@ -50,6 +50,8 @@ def prepare_input(
         "user_touch",
         "user_image_selecting",
         "user_image_selecting_cancel",
+        "user_voice_recording_started",
+        "user_voice_recording_cancelled",
     }
     values = _stimulus_values(event, user_id, targets, ephemeral=ephemeral)
     if event.event_type == "user_typing":
@@ -62,6 +64,10 @@ def prepare_input(
         return PreparedInput(d.ImageSelectionOpened(**values))
     if event.event_type == "user_image_selecting_cancel":
         return PreparedInput(d.ImageSelectionClosed(**values))
+    if event.event_type == "user_voice_recording_started":
+        return PreparedInput(d.VoiceRecordingStarted(**values, recording_id=_recording_id(payload)))
+    if event.event_type == "user_voice_recording_cancelled":
+        return PreparedInput(d.VoiceRecordingCancelled(**values, recording_id=_recording_id(payload)))
     if event.event_type == "user_voice":
         raise ValueError("user_voice protocol is not implemented")
     return _prepare_text(event, payload, values)
@@ -120,6 +126,13 @@ def _prepare_typing(payload: dict, values: dict) -> PreparedInput:
     return PreparedInput(d.UserTyping(**values, text_length=length))
 
 
+def _recording_id(payload: dict) -> str:
+    recording_id = payload.get("recording_id")
+    if not isinstance(recording_id, str) or not recording_id.strip() or len(recording_id) > 128:
+        raise ValueError("invalid recording_id")
+    return recording_id
+
+
 def _prepare_touch(payload: dict, values: dict) -> PreparedInput:
     raw_regions = payload.get("touch_area", payload.get("touchArea"))
     if isinstance(raw_regions, str):
@@ -157,12 +170,15 @@ def _prepare_image(
     media_store: PermanentMediaStore | None,
 ) -> PreparedInput:
     if media_store is None:
-        raise ValueError("media store is not configured")
+        raise MediaResolutionError(
+            code=MediaResolutionErrorCode.NOT_CONFIGURED,
+            media_id=event.client_msg_id or "unassigned",
+        )
     image_base64 = payload.get("image_base64")
     mime_type = payload.get("mime_type")
     if not isinstance(image_base64, str) or not image_base64.strip():
         raise ValueError("invalid image_base64")
-    if not isinstance(mime_type, str) or not mime_type.startswith("image/"):
+    if mime_type is not None and not isinstance(mime_type, str):
         raise ValueError("invalid image mime_type")
     media_ref = media_store.mint_ref(user_id=user_id, client_msg_id=event.client_msg_id)
     if len(image_base64.encode("utf-8")) > media_store.max_encoded_bytes:
@@ -175,7 +191,7 @@ def _prepare_image(
         media_ref=media_ref,
         client_msg_id=event.client_msg_id,
     )
-    return PreparedInput(stimulus, image_base64.strip(), mime_type.lower())
+    return PreparedInput(stimulus, image_base64.strip(), mime_type.strip().lower() if mime_type else None)
 
 
 def _prepare_text(event: WSMessage, payload: dict, values: dict) -> PreparedInput:
@@ -202,13 +218,13 @@ def _prepare_text(event: WSMessage, payload: dict, values: dict) -> PreparedInpu
 
 def materialize_image(candidate: PreparedInput, media_store: PermanentMediaStore) -> None:
     """解码、校验并永久写入已通过 Stage 准入的图片。"""
-    if candidate.image_base64 is None or candidate.mime_type is None:
+    if candidate.image_base64 is None:
         return
     encoded = candidate.image_base64
     if encoded.startswith("data:"):
         match = re.fullmatch(r"data:([^;,]+);base64,(.*)", encoded, flags=re.DOTALL)
-        if match is None or match.group(1).lower() != candidate.mime_type:
-            raise ValueError("image data URI does not match mime_type")
+        if match is None:
+            raise ValueError("invalid image data URI")
         encoded = match.group(2)
     encoded = "".join(encoded.split())
     encoded += "=" * (-len(encoded) % 4)

@@ -8,9 +8,12 @@ from support.routing_support import Sink, request
 
 import src.domain.agent as d
 from src.agent import Agent
+from src.agent.context import AudioUnderstandingStatus
 from src.agent.handlers.stimulus.chat import ChatPreprocessingHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.skills.cognitive import ImageUnderstandingSkill, TextPreprocessingSkill
+from src.agent.skills.cognitive.audio_understanding import AudioUnderstandingResult
+from src.agent.skills.cognitive.song_entity_linker import SongEntityLinker
 from src.infrastructure.media import MediaResolutionError, ResolvedMedia
 
 
@@ -53,6 +56,16 @@ class _Conversation:
 
     async def append(self, entries):
         self.entries.extend(entries)
+
+
+class _AudioUnderstanding:
+    async def understand(self, media_ref, *, owner_user_id):
+        assert owner_user_id == "u"
+        return (
+            ResolvedMedia(data=b"audio", mime_type="audio/mp4"),
+            AudioUnderstandingStatus.UNDERSTOOD,
+            AudioUnderstandingResult("你好", "开心", "随后响起掌声。"),
+        )
 
 
 def context(interaction_id="i", user_id="u", character_id="luotianyi"):
@@ -107,6 +120,30 @@ def replace_pending(interaction, stimulus):
     )
 
 
+def voice_request():
+    voice = d.VoiceMessage(
+        stimulus_id="voice-stimulus",
+        schema_version=1,
+        occurred_at=request().stimulus.occurred_at,
+        source=d.StimulusSource.USER,
+        target_character_ids=("luotianyi",),
+        user_id="u",
+        ephemeral=False,
+        message_uuid="6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+        media_ref=d.MediaRef(media_id="audio-id"),
+        transcript=None,
+        client_msg_id="voice-client",
+        duration_ms=1234,
+    )
+    base = request()
+    return d.HandleStimulusRequest(
+        request_id="voice-request",
+        stimulus=voice,
+        interaction=replace_pending(base.interaction, voice),
+        cancellation=d.CancellationToken(),
+    )
+
+
 @pytest.mark.asyncio
 async def test_text_message_is_persisted_before_ready_and_not_consumed():
     ctx = context()
@@ -118,7 +155,7 @@ async def test_text_message_is_persisted_before_ready_and_not_consumed():
     assert entry.content.terms == ("《歌》是一首歌",)
     assert isinstance(entry.timestamp, datetime) and entry.timestamp.tzinfo is None
     assert entry.timestamp == (
-        request().interaction.now.replace(tzinfo=None)
+        request().interaction.now.astimezone().replace(tzinfo=None)
         + timedelta(microseconds=request().interaction.interaction_revision * 10)
     )
     assert report.preprocessed_input.stimulus_id == "m2"
@@ -161,6 +198,10 @@ async def test_image_is_one_user_conversation_with_agent_only_description_text()
     assert media_entry.content.media_id == "image"
     assert media_entry.content.mime_type == "image/png"
     assert media_entry.content.terms == ("白猫",)
+    assert media_entry.timestamp == (
+        image_request().interaction.now.astimezone().replace(tzinfo=None)
+        + timedelta(microseconds=image_request().interaction.interaction_revision * 10)
+    )
     assert report.preprocessed_input.text == "[图片理解]: [一张图片]:一只白猫"
     assert report.preprocessed_input.conversation_entry_ids == (media_entry.entry_id,)
     assert report.consumed_pending_stimulus_ids == ()
@@ -196,10 +237,34 @@ async def test_illegal_media_stops_before_image_understanding(error):
     assert ctx.conversation.entries == []
 
 
+@pytest.mark.asyncio
+async def test_voice_builds_audio_entry_and_nonempty_preprocessed_text():
+    handler = ChatPreprocessingHandler(_Understanding(), None, _AudioUnderstanding())
+    runtime = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([(d.StimulusKind.VOICE_MESSAGE, handler)]))
+    ctx = context()
+
+    report = await runtime.handle_stimulus(voice_request(), Sink(), context=ctx)
+
+    assert len(ctx.conversation.entries) == 1
+    entry = ctx.conversation.entries[0]
+    assert entry.entry_id == "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+    assert entry.content.media_id == "audio-id"
+    assert entry.content.mime_type == "audio/mp4"
+    assert entry.content.duration_ms == 1234
+    assert entry.content.understanding_status is AudioUnderstandingStatus.UNDERSTOOD
+    assert entry.content.transcript == "你好"
+    assert entry.content.emotion == "开心"
+    assert entry.content.sound_description == "随后响起掌声。"
+    assert entry.content.text == "[音频]用户带着开心的情绪说：“你好”；随后响起掌声。"
+    assert report.preprocessed_input.text == entry.content.text
+    assert report.preprocessed_input.conversation_entry_ids == (entry.entry_id,)
+
+
 def test_text_preprocessing_skill_returns_terms(monkeypatch):
     class _Linker:
-        def __init__(self, config):
+        def __init__(self, config, *, song_names=()):
             self.config = config
+            self.song_names = tuple(song_names)
 
         def extract_and_verify(self, text):
             return ["《歌》是一首歌"] if "歌" in text else []
@@ -210,3 +275,23 @@ def test_text_preprocessing_skill_returns_terms(monkeypatch):
     assert skill.extract_terms("随便聊聊") == ()
     with pytest.raises(TypeError):
         skill.extract_terms(None)
+
+
+def test_song_entity_linker_prefers_complete_quoted_title_over_keyword_substring(tmp_path):
+    song_names = tmp_path / "song_names.txt"
+    lyrics = tmp_path / "lyrics.txt"
+    song_names.write_text("别\n", encoding="utf-8")
+    lyrics.write_text("", encoding="utf-8")
+    linker = SongEntityLinker({}, str(song_names), str(lyrics))
+
+    assert linker.extract_and_verify("请你现在唱《死别》给我听") == ["《死别》是一首歌"]
+
+
+def test_song_entity_linker_uses_singing_catalog_for_unquoted_song_title(tmp_path):
+    song_names = tmp_path / "song_names.txt"
+    lyrics = tmp_path / "lyrics.txt"
+    song_names.write_text("别\n", encoding="utf-8")
+    lyrics.write_text("", encoding="utf-8")
+    linker = SongEntityLinker({}, str(song_names), str(lyrics), song_names=("死别",))
+
+    assert linker.extract_and_verify("请唱死别") == ["《死别》是一首歌"]

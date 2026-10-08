@@ -4,6 +4,15 @@
 .vscode
 settings.json
 
+# scratch
+.scratch/
+
+# Agent / tooling state
+.omo/
+
+# Node dependencies
+node_modules/
+
 # Python
 __pycache__/
 *.pyc

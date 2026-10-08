@@ -1,7 +1,8 @@
 """交互上下文使用的数据类型。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 
 from src.domain.memory_context import MemoryHit
 
@@ -103,11 +104,84 @@ class ImageContent:
         _check_terms(self.terms)
 
 
-@dataclass(frozen=True)
-class AudioContent:
-    """音频对话在历史记录中保存的文字内容。"""
+class AudioUnderstandingStatus(str, Enum):
+    """音频是否得到可用理解。"""
 
-    text: str
+    UNDERSTOOD = "understood"
+    NOT_UNDERSTOOD = "not_understood"
+
+
+def render_audio_context(
+    *,
+    status: AudioUnderstandingStatus,
+    transcript: str | None,
+    emotion: str | None,
+    sound_description: str | None,
+) -> str:
+    """唯一的音频上下文规范文本拼接入口。"""
+    if status is AudioUnderstandingStatus.NOT_UNDERSTOOD:
+        return "[音频]听不清"
+    clauses: list[str] = []
+    if transcript:
+        if emotion:
+            clauses.append(f"用户带着{emotion}的情绪说：“{transcript}”")
+        else:
+            clauses.append(f"用户说：“{transcript}”")
+    if sound_description:
+        clauses.append(sound_description)
+    return "[音频]" + "；".join(clauses)
+
+
+@dataclass(frozen=True, kw_only=True)
+class AudioContent:
+    """结构化音频理解及其确定性上下文文本。"""
+
+    media_id: str
+    mime_type: str
+    duration_ms: int
+    understanding_status: AudioUnderstandingStatus
+    transcript: str | None
+    emotion: str | None
+    sound_description: str | None
+    text: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._validate_media()
+        self._validate_understanding()
+        object.__setattr__(
+            self,
+            "text",
+            render_audio_context(
+                status=self.understanding_status,
+                transcript=self.transcript,
+                emotion=self.emotion,
+                sound_description=self.sound_description,
+            ),
+        )
+
+    def _validate_media(self) -> None:
+        if not isinstance(self.understanding_status, AudioUnderstandingStatus):
+            raise TypeError("understanding_status 应为 AudioUnderstandingStatus")
+        if not isinstance(self.media_id, str) or not self.media_id.strip():
+            raise ValueError("media_id 不能为空")
+        if not isinstance(self.mime_type, str) or not self.mime_type.startswith("audio/"):
+            raise ValueError("mime_type 应为音频类型")
+        if type(self.duration_ms) is not int or self.duration_ms <= 0:
+            raise ValueError("duration_ms 应为正整数")
+
+    def _validate_understanding(self) -> None:
+        fields = (self.transcript, self.emotion, self.sound_description)
+        if any(value is not None and not isinstance(value, str) for value in fields):
+            raise TypeError("音频理解字段应为字符串或 None")
+        if any(value is not None and not value.strip() for value in fields):
+            raise ValueError("音频理解字段不能是空白字符串")
+        if self.understanding_status is AudioUnderstandingStatus.NOT_UNDERSTOOD:
+            if any(value is not None for value in fields):
+                raise ValueError("未理解音频不能包含理解字段")
+        elif self.transcript is None and self.sound_description is None:
+            raise ValueError("已理解音频必须包含转写或声音描述")
+        if self.emotion is not None and self.transcript is None:
+            raise ValueError("没有转写时不能包含情绪")
 
 
 @dataclass(frozen=True)

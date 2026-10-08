@@ -29,7 +29,7 @@ class ExecutionContext(_Value):
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class AgentOutput(_Value):
-    """输出抽象基类，包含路由身份、执行内序号及呈现方式。"""
+    """输出抽象基类，包含路由身份、稳定消息身份、执行内序号及呈现方式。"""
 
     _code = _Code.CONTRACT_INVALID_OUTPUT
     interaction_id: str
@@ -37,6 +37,7 @@ class AgentOutput(_Value):
     action_id: str
     sequence_no: int
     delivery: OutputDelivery
+    message_id: str | None = None
 
     @property
     @abstractmethod

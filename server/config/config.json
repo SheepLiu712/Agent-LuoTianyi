@@ -46,6 +46,14 @@
                 }
             }
         },
+        "available_audio_models": {
+            "qwen3.8-omni-flash": {
+                "api_type": "openai",
+                "model": "qwen3.8-omni-flash",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            }
+        },
         "available_vlms": {
             "qwen3-vl-plus": {
                 "api_type": "openai",
@@ -263,6 +271,15 @@
                     }
                 }
             },
+            "audio_understanding": {
+                "audio_model_module": {
+                    "audio": {
+                        "name": "qwen3.8-omni-flash"
+                    },
+                    "prompt_name": "audio_understanding_prompt",
+                    "use_json": true
+                }
+            },
             "image_understanding": {
                 "vlm_module": {
                     "vlm": {
@@ -334,7 +351,7 @@
         },
         "reply_composition": {
             "slow_recall": {
-                "provisional_after_seconds": 1.5,
+                "provisional_after_seconds": 3.5,
                 "provisional_text": "让我想想之前聊过的事情，稍等我一下下～",
                 "provisional_sound_content": "让我想想之前聊过的事情，稍等我一下下",
                 "provisional_tone": "tender",
@@ -702,7 +719,7 @@
             "clock_config": {
                 "type": "interval",
                 "params": {
-                    "interval_seconds": 600,
+                    "interval_seconds": 240,
                     "run_immediately": false
                 }
             },

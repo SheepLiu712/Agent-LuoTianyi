@@ -6,7 +6,10 @@ from uuid import uuid4
 import src.domain.agent as d
 from src.agent.context import ConversationEntry, TextContent
 from src.agent.processing.plan_emitter import ActionPlanDraft, PlanEmitter
+from src.agent.processing.reply_delivery import build_reply_delivery, render_conversation_history
+from src.agent.skills.cognitive import ResponseCompositionSkill
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
+from src.agent.skills.invocation import handling_invocation
 from src.utils.logger import get_logger
 
 
@@ -18,9 +21,11 @@ class FirstLoginHandler:
         *,
         prepared_names: tuple[str, ...],
         prepared_speech: PreparedSpeechCatalog,
+        composition: ResponseCompositionSkill,
     ) -> None:
         self._prepared_names = prepared_names
         self._prepared_speech = prepared_speech
+        self._composition = composition
         self._logger = get_logger(__name__)
 
     async def handle(
@@ -33,31 +38,26 @@ class FirstLoginHandler:
         if not isinstance(stimulus, d.ProactivePromptDue):
             raise TypeError("FirstLoginHandler requires ProactivePromptDue")
         if stimulus.reason.value != "first_login":
-            content = self._reminder_content(stimulus)
-            await plans.context.conversation.append(
-                (
-                    ConversationEntry(
-                        entry_id=str(uuid4()),
-                        timestamp=datetime.now(),  # noqa: DTZ005 - conversation storage uses local naive timestamps
-                        source="agent",
-                        content=TextContent(content),
-                    ),
-                )
+            context = plans.context
+            plans.set_interruptible(True)
+            drafts = await self._composition.compose(
+                handling_invocation(request, context),
+                user_context=context.user.read(),
+                reply_topic=self._reminder_topic(stimulus),
+                conversation_history=render_conversation_history(context.conversation.read()),
+                excluded_segments=set(),
             )
+            if request.cancellation.is_cancelled:
+                return self._report(request, plans, status=d.HandlingRequestStatus.CANCELLED)
+            entries, actions = build_reply_delivery(request, tuple(drafts), prefix="reminder")
+            if not actions:
+                return self._report(request, plans)
+            plans.set_interruptible(False)
+            await context.conversation.append(entries)
             await plans.emit(
                 ActionPlanDraft(
                     source_stimulus_ids=(stimulus.stimulus_id,),
-                    actions=(
-                        d.Say(
-                            action_id=str(uuid4()),
-                            content=content,
-                            sound_content=None,
-                            prepared_audio_ref=None,
-                            tone=d.Tone(value="normal"),
-                            expression=d.ChangeExpression(expression_id="normal"),
-                            delivery=d.OutputDelivery.CONVERSATION,
-                        ),
-                    ),
+                    actions=actions,
                 )
             )
             return self._report(request, plans)
@@ -108,8 +108,8 @@ class FirstLoginHandler:
         return self._report(request, plans)
 
     @staticmethod
-    def _reminder_content(stimulus: d.ProactivePromptDue) -> str:
-        """从 Stage 提供的提醒事实生成不依赖维护包的可表达内容。"""
+    def _reminder_topic(stimulus: d.ProactivePromptDue) -> str:
+        """从 Stage 提供的提醒事实生成只供角色回复生成器使用的内部话题。"""
         reasons = stimulus.reason.value.split("+")
         labels = {
             "holiday": "节日",

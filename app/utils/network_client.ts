@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
 import { addDebugTrace } from './debug_trace';
+import { compressImageForUpload, MAX_IMAGE_FILE_SIZE_BYTES } from './image_compression';
 import { WebSocketTransport } from './ws_transport';
 
 interface SendResult {
@@ -8,6 +9,8 @@ interface SendResult {
   request_id: string;
   error?: string;
   drop?: boolean;
+  message_uuid?: string;
+  duration_ms?: number;
 }
 
 interface ConnectCallbacks {
@@ -68,15 +71,58 @@ export class NetworkClient {
     }
 
     try {
-      addDebugTrace('network', 'sendImage read file', { imageUri, mimeType });
-      const imageBase64 = await FileSystem.readAsStringAsync(imageUri, {
+      let uploadUri = imageUri;
+      let uploadMimeType = mimeType;
+      let originalSize: number | undefined;
+      try {
+        const imageInfo = await FileSystem.getInfoAsync(imageUri);
+        originalSize = imageInfo.exists && typeof imageInfo.size === 'number' ? imageInfo.size : undefined;
+      } catch {
+        // Metadata can be unavailable even when the URI remains readable.
+        addDebugTrace('network', 'sendImage file size unavailable', { imageUri });
+      }
+
+      {
+        addDebugTrace('network', 'sendImage compression started', { imageUri, mimeType, originalSize });
+        const compressedImage = await compressImageForUpload(imageUri, mimeType);
+        if (!compressedImage.ok || compressedImage.size === undefined || compressedImage.size > MAX_IMAGE_FILE_SIZE_BYTES) {
+          addDebugTrace('network', 'sendImage compression failed', {
+            imageUri,
+            originalSize,
+            reason: compressedImage.ok ? 'compressed size unavailable or over limit' : compressedImage.reason,
+          });
+          return {
+            ok: false,
+            request_id: clientMsgId || `local-${Date.now()}`,
+            error: compressedImage.ok || compressedImage.reason === 'compressed image remains too large'
+              ? '图片过大（上限约 6 MB），请选择更小的图片'
+              : '无法处理图片，请转换为普通 JPEG 或 PNG 后重试',
+            drop: true,
+          };
+        }
+        uploadUri = compressedImage.uri;
+        uploadMimeType = compressedImage.mimeType;
+        addDebugTrace('network', 'sendImage compression completed', {
+          originalSize,
+          compressedSize: compressedImage.size,
+          uploadUri,
+          uploadMimeType,
+        });
+      }
+
+      addDebugTrace('network', 'sendImage read file', {
+        imageUri: uploadUri,
+        mimeType: uploadMimeType,
+        originalSize,
+      });
+      const imageBase64 = await FileSystem.readAsStringAsync(uploadUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
       return this.transport.submitUserImage(
         sanitizeBase64(imageBase64),
-        mimeType,
-        imageUri,
+        uploadMimeType,
+        uploadUri,
         10000,
         clientMsgId,
       );
@@ -150,6 +196,21 @@ export class NetworkClient {
     }
     addDebugTrace('network', 'sendImageSelectingCancel');
     return this.transport.submitUserImageSelectingCancel(5000, clientMsgId);
+  }
+
+  sendVoiceRecordingStarted(recordingId: string, clientMsgId?: string) {
+    if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
+    return this.transport.submitVoiceRecordingStarted(recordingId, 5000, clientMsgId);
+  }
+
+  sendVoiceRecordingCancelled(recordingId: string, clientMsgId?: string) {
+    if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
+    return this.transport.submitVoiceRecordingCancelled(recordingId, 5000, clientMsgId);
+  }
+
+  sendVoicePhase(payload: Record<string, unknown>, clientMsgId?: string, budgetMs = 5000) {
+    if (!this.transport) return Promise.resolve({ ok: false, request_id: clientMsgId || `local-${Date.now()}`, error: 'not logged in', drop: true });
+    return this.transport.submitVoicePhase(payload, budgetMs, clientMsgId);
   }
 
 

@@ -26,6 +26,7 @@ from src.agent.handlers.stimulus.diary_due import DiaryPlanningDueHandler
 from src.agent.handlers.stimulus.dynamic_observed import DynamicObservedHandler
 from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
+from src.agent.handlers.stimulus.relationship import NewRelationshipProposeHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
 from src.agent.handlers.stimulus.song_knowledge import SongKnowledgeHandler
 from src.agent.handlers.stimulus.song_learned import SongLearnedHandler
@@ -121,6 +122,7 @@ class AgentRuntime:
                 preprocessing_config=self.config.get("agent", {}).get("preprocessing", {}),
                 explicit_memory_config=self.config.get("agent", {}).get("memory", {}).get("explicit_intent", {}),
                 reply_composition_config=self.config.get("reply_composition", {}),
+                topic_extraction_config=self.config.get("agent", {}).get("topic_extractor", {}),
                 reflection_config=self.config.get("reflection", {}),
                 song_knowledge_config=self.config.get("agent", {}).get("song_knowledge", {}),
                 database_manager=database_manager,
@@ -179,21 +181,23 @@ class AgentRuntime:
         preprocessing = ChatPreprocessingHandler(
             self.skills.text_preprocessing,
             self.skills.image_understanding,
+            self.skills.audio_understanding,
         )
         registrations = [
             (StimulusKind.INTERACTION_ENDING, InteractionEndingHandler()),
+            (StimulusKind.NEW_RELATIONSHIP_PROPOSE, NewRelationshipProposeHandler()),
             (
                 StimulusKind.PROACTIVE_PROMPT_DUE,
                 FirstLoginHandler(
                     prepared_names=first_login_names,
                     prepared_speech=self.skills.prepared_speech,
+                    composition=self.skills.response_composition,
                 ),
             ),
             (
                 StimulusKind.INTERACTION_DEADLINE,
                 ChatReplyHandler(
                     self.skills.response_composition,
-                    self.skills.text_preprocessing,
                     self.skills.explicit_memory_intent,
                     self.skills.intentional_memory,
                 ),

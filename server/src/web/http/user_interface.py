@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from src.application.user.account import PasswordDecryptionError, decrypt_password, generate_keys, get_public_key_pem
 from src.application.user.user_conversation_helper import UserConversationHelper
 from src.domain.agent import MediaRef
-from src.infrastructure.media import MediaResolutionError
+from src.infrastructure.media import MediaResolutionError, MediaResolver
 from src.web.http.rate_limits import enforce_rate_limit
 from src.web.http.types import (
     AutoLoginRequest,
@@ -35,11 +35,13 @@ if TYPE_CHECKING:
 
 
 class UserInterface:
-    def __init__(self, database_manager: "DatabaseManager"):
+    def __init__(self, database_manager: "DatabaseManager", media_resolver: MediaResolver):
         self.database_manager: "DatabaseManager" = database_manager
-        self.user_conversation_helper = UserConversationHelper(database_manager)
+        self.media_resolver = media_resolver
+        self.user_conversation_helper = UserConversationHelper(database_manager, media_resolver)
         self._auth_work_slots = asyncio.Semaphore(4)
         self._auth_work_admission_timeout = 1.0
+        self.ensure_dependencies()
 
     async def _run_auth_work(self, func, *args):
         try:
@@ -54,19 +56,11 @@ class UserInterface:
         finally:
             self._auth_work_slots.release()
 
-    def bind_database_manager(self, database_manager: "DatabaseManager"):
-        self.database_manager = database_manager
-        self.user_conversation_helper = UserConversationHelper(database_manager)
-
-    def wire_dependencies(self, *, database_manager: "DatabaseManager") -> None:
-        """注入用户接口层所需依赖。"""
-        self.bind_database_manager(database_manager)
-        self.ensure_dependencies()
-
     def ensure_dependencies(self) -> None:
         """检查用户接口层依赖已经初始化。"""
         required = {
             "database_manager": self.database_manager,
+            "media_resolver": self.media_resolver,
             "user_conversation_helper": self.user_conversation_helper,
         }
         missing = [name for name, value in required.items() if value is None]
@@ -244,8 +238,16 @@ class UserInterface:
         )
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        relationship = req.preferences.get("relationship", "")
+        if not isinstance(relationship, str):
+            raise HTTPException(status_code=422, detail="relationship 必须是字符串")
         if not server_runtime.database_manager.conversation_service.save_user_preferences(user_uuid, req.preferences):
             raise HTTPException(status_code=404, detail="未找到该用户")
+        if server_runtime.stage_manager is not None:
+            await server_runtime.stage_manager.propose_relationship(
+                user_uuid,
+                relationship,
+            )
         return {"status": "success", "message": "Preferences overwritten successfully"}
 
     async def get_history(
@@ -254,33 +256,52 @@ class UserInterface:
         token: str,
         count: int,
         end_index: int,
-        server_runtime: ServerRuntime,
     ):
         """获取聊天历史"""
-        message_token_valid, user_uuid = server_runtime.database_manager.credential_service.check_message_token(
-            username, token
-        )
+        message_token_valid, user_uuid = self.database_manager.credential_service.check_message_token(username, token)
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
         capped_count = min(max(1, count), 200)
         return await self.user_conversation_helper.handle_history_request(user_uuid, capped_count, end_index)
 
+    async def get_audio(self, token: str, message_uuid: str):
+        """Stream one authenticated user's audio conversation media."""
+        user_uuid = self.database_manager.credential_service.authenticate_message_token(token)
+        if user_uuid is None:
+            raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
+        media_id = self.database_manager.conversation_service.get_audio_media_id(user_uuid, message_uuid)
+        if media_id is None:
+            raise HTTPException(status_code=404, detail="音频不存在或无权限访问")
+        try:
+            media = await asyncio.to_thread(
+                self.media_resolver.resolve,
+                MediaRef(media_id=media_id),
+                owner_user_id=user_uuid,
+                expected_kind="audio",
+            )
+        except MediaResolutionError as error:
+            raise HTTPException(status_code=404, detail="音频不存在或无权限访问") from error
+        return StreamingResponse(
+            iter((media.data,)),
+            media_type="audio/mp4",
+            headers={"Content-Length": str(len(media.data))},
+        )
+
     async def get_image(
         self,
         req: ImageRequest,
-        server_runtime: ServerRuntime,
     ):
         """获取图片"""
-        message_token_valid, user_uuid = server_runtime.database_manager.credential_service.check_message_token(
+        message_token_valid, user_uuid = self.database_manager.credential_service.check_message_token(
             req.username, req.token
         )
         if not message_token_valid:
             raise HTTPException(status_code=401, detail="消息令牌无效或已过期")
-        media_id = server_runtime.database_manager.conversation_service.get_image_media_id(user_uuid, req.uuid)
+        media_id = self.database_manager.conversation_service.get_image_media_id(user_uuid, req.uuid)
         if media_id is not None:
             try:
                 media = await asyncio.to_thread(
-                    server_runtime.media_resolver.resolve,
+                    self.media_resolver.resolve,
                     MediaRef(media_id=media_id),
                     owner_user_id=user_uuid,
                 )
@@ -289,9 +310,7 @@ class UserInterface:
             return StreamingResponse(iter((media.data,)), media_type=media.mime_type)
 
         # 兼容迁移前只保存服务器文件路径的图片记录。
-        image_server_path = server_runtime.database_manager.conversation_service.get_image_server_path(
-            user_uuid, req.uuid
-        )
+        image_server_path = self.database_manager.conversation_service.get_image_server_path(user_uuid, req.uuid)
         if not image_server_path:
             raise HTTPException(status_code=400, detail="获取图片失败，图片不存在或无权限访问")
         if not os.path.isfile(image_server_path):

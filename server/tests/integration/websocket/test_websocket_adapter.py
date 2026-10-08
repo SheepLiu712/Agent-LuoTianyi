@@ -19,7 +19,9 @@ from src.adapter.websocket import ChatEventAcceptance, WebSocketAdapter
 from src.agent import Agent
 from src.agent.handlers.action.router import ActionRouter
 from src.agent.handlers.action.say import SayHandler
+from src.agent.handlers.action.sing import SingHandler
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
+from src.agent.skills.expression.singing import SingingSkill
 from src.agent.skills.expression.speaking import SpeakingSkill
 from src.agent.skills.expression.speaking.streaming import AsyncTTS
 from src.domain.stage import (
@@ -202,6 +204,72 @@ async def test_real_say_protocol(tmp_path, prepared, delivery):
         assert all(p["is_ephemeral"] is ephemeral and p["display_in_chat"] is not ephemeral for p in packets)
         assert [p["text"] for p in packets if p["text"]] == ([] if ephemeral else ["你好"])
         assert calls == ([] if prepared else ["你好"])
+    finally:
+        await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_persisted_message_id_is_used_as_websocket_uuid():
+    socket, connection, adapter, stage = await setup_output()
+    try:
+        first = adapter.submit_output(output(message_id="history-entry"))
+        tail = adapter.submit_output(end(sequence_no=1, message_id="history-entry"))
+        await asyncio.gather(first, tail)
+
+        packets = [event["payload"] for event in socket.events]
+        assert [packet["uuid"] for packet in packets] == ["history-entry", "history-entry"]
+    finally:
+        await adapter.disconnect(stage)
+
+
+@pytest.mark.asyncio
+async def test_real_sing_protocol_delivers_lyrics_audio_and_history_identity():
+    expected = wav_bytes()
+
+    class Singing:
+        def sing(self, character_id, song_name, segment):
+            assert (character_id, song_name, segment) == ("luotianyi", "死别", "段落4")
+            return expected
+
+    handler = SingHandler("luotianyi", SingingSkill({}, backend=Singing()))
+    singing_agent = Agent(character_id="luotianyi", action_router=ActionRouter([(d.ActionKind.SING, handler)]))
+    action = d.Sing(
+        action_id="sing",
+        song_id="死别",
+        segment_id="段落4",
+        expression=d.ChangeExpression(expression_id="sing"),
+        content="唱了《死别》\n歌词一行",
+        message_id="history-entry",
+    )
+    plan = d.ActionPlan(
+        plan_id="sing-plan",
+        origin_request_id="request",
+        plan_ordinal=0,
+        target_character_id="luotianyi",
+        interaction_id="interaction",
+        basis_interaction_revision=1,
+        source_stimulus_ids=("stimulus",),
+        actions=(action,),
+    )
+    socket, connection, adapter, stage = await setup_output()
+    port = OutputPort(adapter)
+    context = d.ExecutionContext(
+        execution_id="execution",
+        interaction_id="interaction",
+        current_interaction_revision=1,
+        cancellation=d.CancellationToken(),
+    )
+    try:
+        report = await singing_agent.realize_action_plan(plan, context, port)
+        assert report.status is d.ExecutionStatus.COMPLETED
+        await asyncio.gather(*port.futures)
+
+        packets = [event["payload"] for event in socket.events]
+        assert packets[0]["text"] == "唱了《死别》\n歌词一行"
+        assert [packet["expression"] for packet in packets if packet["expression"]] == ["sing"]
+        assert all(packet["uuid"] == "history-entry" for packet in packets)
+        assert b"".join(base64.b64decode(packet["audio"]) for packet in packets) == expected
+        assert packets[-1]["is_final_package"] is True
     finally:
         await adapter.disconnect(stage)
 
@@ -392,10 +460,9 @@ async def test_image_input_is_persisted_and_minted_as_permanent_media_ref(tmp_pa
     assert stimulus.media_ref.media_id
     media_dir = tmp_path / "media" / stimulus.media_ref.media_id
     assert (media_dir / "content.bin").read_bytes() == image
-    assert json.loads((media_dir / "metadata.json").read_text(encoding="utf-8")) == {
-        "mime_type": "image/png",
-        "owner_user_id": "user",
-    }
+    metadata = json.loads((media_dir / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["mime_type"] == "image/png"
+    assert metadata["owner_user_id"] == "user"
     assert await adapter.receive_event(connection, event)
     assert stage.stimuli[1].media_ref == stimulus.media_ref
     await adapter.disconnect(stage)
@@ -505,29 +572,35 @@ async def test_oversize_and_invalid_image_are_rejected_without_persistence(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_mime_mismatch_is_rejected_before_persistence(tmp_path):
+@pytest.mark.parametrize(
+    "declaration",
+    [{}, {"mime_type": None}, {"mime_type": ""}, {"mime_type": "image/jpeg"}, {"mime_type": "text/plain"}],
+)
+@pytest.mark.parametrize("prefix", ["", "data:image/webp;base64,"])
+async def test_image_mime_is_detected_persisted_and_resolved(tmp_path, declaration, prefix):
+    from src.infrastructure.media import FilesystemMediaResolver
+
     root = tmp_path / "media"
     _, connection, adapter, stage = await setup_output(
-        WebSocketAdapter(
-            {
-                "media_store": {"root": str(root), "max_bytes": 1024},
-            }
-        )
+        WebSocketAdapter({"media_store": {"root": str(root), "max_bytes": 1024}})
     )
+    image = png_bytes()
     event = WSMessage(
         event_type="user_image",
-        client_msg_id="mismatch",
-        payload={
-            "image_base64": base64.b64encode(png_bytes()).decode("ascii"),
-            "mime_type": "image/jpeg",
-        },
+        client_msg_id="detected",
+        payload={"image_base64": prefix + base64.b64encode(image).decode("ascii"), **declaration},
     )
-
-    with pytest.raises(MediaResolutionError) as mismatch:
-        await adapter.receive_event(connection, event)
-    assert mismatch.value.code is MediaResolutionErrorCode.UNSUPPORTED_TYPE
-
-    assert not list(root.iterdir())
+    assert await adapter.receive_event(connection, event)
+    media_ref = stage.stimuli[0].media_ref
+    metadata = json.loads((root / media_ref.media_id / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["mime_type"] == "image/png"
+    resolved = FilesystemMediaResolver({"root": str(root)}).resolve(media_ref, owner_user_id="user")
+    assert resolved.mime_type == "image/png"
+    assert resolved.data == image
+    # Changing only the declaration must not create a replay content conflict.
+    event.payload["mime_type"] = "image/gif"
+    assert await adapter.receive_event(connection, event)
+    assert stage.stimuli[1].media_ref == media_ref
     await adapter.disconnect(stage)
 
 
@@ -582,6 +655,14 @@ async def test_adapter_dedup_overload_typing_and_maintenance_bypass():
         is ChatEventAcceptance.UNSUPPORTED
     )
     await adapter.disconnect(stage)
+
+
+def test_adapter_warns_when_media_store_is_not_configured(caplog, capture_project_log):
+    capture_project_log("src.adapter.websocket.adapter")
+
+    WebSocketAdapter()
+
+    assert "媒体存储未配置，图片发送将被拒绝" in caplog.text
 
 
 @pytest.mark.asyncio

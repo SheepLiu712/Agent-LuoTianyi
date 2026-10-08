@@ -220,7 +220,6 @@ class ChromaVectorStore(VectorStore):
 
                     search_results.append((doc, score))
 
-            self.logger.info(f"搜索到 {len(search_results)} 个相关文档")
             return search_results
 
         except Exception as e:

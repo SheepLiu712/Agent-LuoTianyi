@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import Any, Protocol
 
 from src.agent.context.models import UserContextSnapshot
+from src.agent.skills.cognitive.topic_extraction import TopicExtractionSkill
 from src.agent.skills.contracts import ComposedReply, ComposedResponse, ReplyDraft, SkillInvocation
 
 
@@ -23,6 +24,7 @@ class _Singing(Protocol):
         *,
         excluded_segments: set[tuple[str, str]] | None = None,
         emotion_context: str = "",
+        confirmed_intent: bool = False,
     ): ...
 
     def get_segment_lyrics(self, character_id: str, song: str, segment: str) -> str: ...
@@ -51,6 +53,7 @@ class ResponseCompositionSkill:
         memories: Mapping[str, _Memory],
         singing: _Singing,
         generators: Mapping[str, _ReplyGenerator],
+        topic_extraction: TopicExtractionSkill,
     ) -> None:
         if not isinstance(config, dict):
             raise TypeError("reply_composition 必须是字典")
@@ -66,6 +69,7 @@ class ResponseCompositionSkill:
             tone=str(slow.get("provisional_tone", "") or "").strip(),
             expression=(str(slow.get("provisional_expression", "") or "").strip() or None),
         )
+        self._topic_extraction = topic_extraction
         self._memories = dict(memories)
         self._singing = singing
         self._generators = dict(generators)
@@ -77,23 +81,17 @@ class ResponseCompositionSkill:
         user_context: UserContextSnapshot,
         reply_topic: str,
         conversation_history: str,
-        memory_queries: tuple[str, ...] = (),
-        sing_attempts: tuple[str, ...] = (),
         excluded_segments: set[tuple[str, str]] | None = None,
     ) -> tuple[ReplyDraft, ...]:
-        """按话题召回记忆、选择演唱片段，并生成有序回复草稿。"""
-        user_id = invocation.require_user_id()
-        reply = await self._compose_reply(
-            invocation=invocation,
-            user_id=user_id,
+        """所有生成回复统一经过提取、召回/选歌、replier。"""
+        staged = await self.compose_staged(
+            invocation,
             user_context=user_context,
             reply_topic=reply_topic,
             conversation_history=conversation_history,
-            sing_attempts=sing_attempts,
             excluded_segments=excluded_segments,
-            recall=self._recall(invocation.character_id, user_id, memory_queries),
         )
-        return reply.drafts
+        return (await staged.formal()).drafts
 
     async def compose_staged(
         self,
@@ -102,22 +100,25 @@ class ResponseCompositionSkill:
         user_context: UserContextSnapshot,
         reply_topic: str,
         conversation_history: str,
-        memory_queries: tuple[str, ...] = (),
-        sing_attempts: tuple[str, ...] = (),
         excluded_segments: set[tuple[str, str]] | None = None,
     ) -> ComposedResponse:
         """召回超时则先给出配置的临时草稿，正式草稿留待调用方继续 await。"""
         user_id = invocation.require_user_id()
+        if invocation.cancellation.is_cancelled:
+            return ComposedResponse()
+        decision = await self._topic_extraction.extract(reply_topic, conversation_history=conversation_history)
+        if invocation.cancellation.is_cancelled:
+            return ComposedResponse()
+        memory_queries = decision.memory_queries
         recall = asyncio.ensure_future(self._recall(invocation.character_id, user_id, memory_queries))
 
         async def formal() -> ComposedReply:
             return await self._compose_reply(
                 invocation=invocation,
-                user_id=user_id,
                 user_context=user_context,
                 reply_topic=reply_topic,
                 conversation_history=conversation_history,
-                sing_attempts=sing_attempts,
+                sing_attempts=decision.sing_attempts,
                 excluded_segments=excluded_segments,
                 recall=recall,
             )
@@ -141,7 +142,6 @@ class ResponseCompositionSkill:
         self,
         *,
         invocation: SkillInvocation,
-        user_id: str,
         user_context: UserContextSnapshot,
         reply_topic: str,
         conversation_history: str,
@@ -150,6 +150,8 @@ class ResponseCompositionSkill:
         recall: Awaitable,
     ) -> ComposedReply:
         context = await recall
+        if invocation.cancellation.is_cancelled:
+            return ComposedReply()
         memory_hits = context.render_for_prompt() if context is not None else []
         hits = tuple(getattr(context, "hits", ()) or ()) if context is not None else ()
         sing_plan = None
@@ -158,9 +160,12 @@ class ResponseCompositionSkill:
                 invocation.character_id,
                 list(sing_attempts),
                 excluded_segments=excluded_segments,
+                confirmed_intent=True,
             )
-            if candidate and candidate[1]:
+            if candidate and candidate[0] and candidate[1]:
                 sing_plan = candidate
+        if invocation.cancellation.is_cancelled:
+            return ComposedReply()
         drafts = await self._generator_for(invocation.character_id).generate(
             reply_topic=reply_topic,
             user_context=user_context,
@@ -172,6 +177,8 @@ class ResponseCompositionSkill:
         enriched: list[ReplyDraft] = []
         for draft in drafts:
             if draft.sing is not None:
+                if sing_plan is None or not draft.sing[1]:
+                    continue
                 song, segment = draft.sing
                 lyrics = self._singing.get_segment_lyrics(invocation.character_id, song, segment)
                 draft = replace(draft, lyrics=lyrics or "")

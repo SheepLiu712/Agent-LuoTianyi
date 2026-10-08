@@ -1,5 +1,4 @@
 import { Buffer } from 'buffer';
-import { AppState } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { AgentMessagePayload } from '../types/chat';
@@ -17,7 +16,9 @@ type SendKind =
   | 'typing'
   | 'touch'
   | 'image_selecting'
-  | 'image_selecting_cancel';
+  | 'image_selecting_cancel'
+  | 'voice';
+  
 
 type SendItem = { clientMsgId: string; retryAttempt: number; enqueuedAtMs: number } & (
   | { kind: 'text'; uuid: string; text: string }
@@ -27,13 +28,16 @@ type SendItem = { clientMsgId: string; retryAttempt: number; enqueuedAtMs: numbe
   | { kind: 'touch'; touchArea: string | string[]; clickFrequency?: Record<string, number>; touchMeta?: Record<string, unknown> }
   | { kind: 'image_selecting' }
   | { kind: 'image_selecting_cancel' }
+  | { kind: 'voice'; uuid: string; localUri: string; durationMs: number }
 );
+
+export const VOICE_UPLOAD_BUDGET_MS = 15000;
 
 export const MAX_DURABLE_RETRY_ATTEMPTS = 8;
 export const MAX_DURABLE_MESSAGE_AGE_MS = 4 * 60 * 1000;
 
 export function isDurableSendKind(kind: SendKind) {
-  return kind === 'text' || kind === 'image' || kind === 'proactive';
+  return kind === 'text' || kind === 'image' || kind === 'proactive' || kind === 'voice';
 }
 
 export function canRetryDurableMessage(
@@ -52,11 +56,21 @@ interface SendResult {
   ok: boolean;
   error?: string;
   drop?: boolean;
+  message_uuid?: string;
+  duration_ms?: number;
 }
 
 function isTerminalSendError(errorText?: string) {
   const text = (errorText || '').toLowerCase();
   return text.includes('failed to read image file');
+}
+
+function getTerminalImageErrorText(errorText?: string) {
+  const error = errorText?.trim();
+  if (error?.toUpperCase().includes('MEDIA_TOO_LARGE') || error?.includes('图片过大')) {
+    return '图片过大（上限约 6 MB），请选择更小的图片';
+  }
+  return `图片发送失败：${error || '未知错误'}`;
 }
 
 export function getSendRetryDelayMs(retryAttempt: number) {
@@ -119,6 +133,7 @@ export class MessageProcessor {
   private readonly binder: AgentBinder;
   private readonly feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void;
   private readonly stopServerAudio: () => void;
+  private readonly onVoiceFinalized?: (uploadId: string, messageUuid: string, durationMs?: number) => void;
   private sendQueue: SendItem[] = [];
   private sendLoopRunning = false;
   private stopRequested = false;
@@ -126,6 +141,9 @@ export class MessageProcessor {
   private localPlayingUuid: string | null = null;
   private localPlaybackRequestId = 0;
   private serverAudioPlaying = false;
+  private recordingActive = false;
+  private readonly openServerMessages = new Set<string>();
+  private readonly mutedServerMessages = new Set<string>();
   private pendingServerAudioChunks = 0;
   private readonly audioChunksByUuid = new Map<string, string[]>();
   private readonly audioPathByUuid = new Map<string, string>();
@@ -142,11 +160,14 @@ export class MessageProcessor {
     binder: AgentBinder,
     feedServerAudioChunk: (base64Audio: string, isFinal: boolean) => void,
     stopServerAudio?: () => void,
+    onVoiceFinalized?: (uploadId: string, messageUuid: string, durationMs?: number) => void,
+    private readonly stopUserVoicePlayback: () => Promise<void> = async () => {},
   ) {
     this.networkClient = networkClient;
     this.binder = binder;
     this.feedServerAudioChunk = feedServerAudioChunk;
     this.stopServerAudio = stopServerAudio || (() => {});
+    this.onVoiceFinalized = onVoiceFinalized;
   }
 
   stop() {
@@ -188,6 +209,11 @@ export class MessageProcessor {
     addDebugTrace('send', 'enqueue image', { uuid, queueLength: this.sendQueue.length, mimeType });
     this.binder.emitMessageStatus(uuid, 'waiting');
     this.startSendLoop();
+  }
+
+  async sendVoice(uuid: string, localUri: string, durationMs: number) {
+    const item: SendItem = { kind: 'voice', uuid, localUri, durationMs, clientMsgId: uuid, retryAttempt: 0, enqueuedAtMs: Date.now() };
+    this.sendQueue.push(item); this.audioPathByUuid.set(uuid, localUri); this.binder.emitMessageStatus(uuid, 'waiting'); this.startSendLoop();
   }
 
   async sendTouch(touchArea: string | string[], clickFrequency?: Record<string, number>, touchMeta?: Record<string, unknown>) {
@@ -237,7 +263,7 @@ export class MessageProcessor {
   }
 
   async playLocalTtsByUuid(convUuid: string) {
-    if (this.hasServerAudioPriority()) {
+    if (this.recordingActive || this.hasServerAudioPriority()) {
       addDebugTrace('audio', 'play blocked by server audio playing', { convUuid });
       return false;
     }
@@ -400,6 +426,15 @@ export class MessageProcessor {
     }
   }
 
+  async setRecordingActive(active: boolean): Promise<void> {
+    this.recordingActive = active;
+    if (!active) return;
+    for (const uuid of this.openServerMessages) this.mutedServerMessages.add(uuid);
+    this.stopServerAudio();
+    this.onServerAudioFinished();
+    await this.stopLocalTts();
+  }
+
   private hasServerAudioPriority() {
     return this.serverAudioPlaying || this.pendingServerAudioChunks > 0;
   }
@@ -411,7 +446,8 @@ export class MessageProcessor {
   private canStartLocalPlayback(requestId: number) {
     return requestId === this.localPlaybackRequestId
       && !this.hasServerAudioPriority()
-      && !this.stopRequested;
+      && !this.stopRequested
+      && !this.recordingActive;
   }
 
   onAgentStateChanged(state: string) {
@@ -424,13 +460,17 @@ export class MessageProcessor {
     if (this.isDuplicatePacket(payload.uuid || `agent-${Date.now()}`, payload)) {
       return;
     }
+    const uuid = payload.uuid || '';
+    this.openServerMessages.add(uuid);
+    if (this.recordingActive) this.mutedServerMessages.add(uuid);
     let serverAudioPreemption = Promise.resolve();
-    if (payload.audio) {
+    const claimsPlayback = !!payload.audio && !this.recordingActive && !this.mutedServerMessages.has(uuid);
+    if (claimsPlayback) {
       // 在异步消息链开始处理前先占用在线音频优先权，关闭点击回放及其加载竞态。
       this.pendingServerAudioChunks += 1;
       this.localPlaybackRequestId += 1;
       // 调用时会同步摘除当前回放状态，异步部分负责真正 stop/unload。
-      serverAudioPreemption = this.stopLocalTtsNow();
+      serverAudioPreemption = Promise.all([this.stopLocalTtsNow(), this.stopUserVoicePlayback()]).then(() => undefined);
     }
     // 音频聚合与尾包落盘不进入展示/播放串行链，后续句子即使尚未展示也能立即保存。
     const audioPersistence = this.persistAgentAudioOnArrival(payload);
@@ -439,7 +479,7 @@ export class MessageProcessor {
     this.incomingMessageChain = this.incomingMessageChain
       .then(async () => {
         this.handleAgentMessageDisplay(payload);
-        await this.handleAgentMessageAudio(payload, serverAudioPreemption, audioPersistence);
+        await this.handleAgentMessageAudio(payload, serverAudioPreemption, audioPersistence, claimsPlayback);
       })
       .catch((error) => {
         addDebugTrace('agent', 'handleAgentMessage failed', {
@@ -596,28 +636,24 @@ export class MessageProcessor {
     payload: AgentMessagePayload,
     serverAudioPreemption: Promise<void>,
     audioPersistence: Promise<string | null>,
+    claimsPlayback: boolean,
   ) {
     const convUuid = payload.uuid || `agent-${Date.now()}`;
     const audioChunk = payload.audio || '';
 
-    if (audioChunk) {
-      this.serverAudioPlaying = true;
-      this.pendingServerAudioChunks = Math.max(0, this.pendingServerAudioChunks - 1);
-      // onAgentMessage 已经立即发起停止；这里等待同一次停止完成，之后才能投喂在线音频。
-      await serverAudioPreemption;
-    }
-
-    if (audioChunk && (this.localPlayingUuid || this.localSound)) {
-      // 必须等消息回放真正停止后，才把在线音频交给 WebView 播放器。
+    await serverAudioPreemption;
+    const mayPlay = () => !this.recordingActive && !this.mutedServerMessages.has(payload.uuid || '') && !this.stopRequested;
+    if (audioChunk && mayPlay() && (this.localPlayingUuid || this.localSound)) {
       await this.stopLocalTtsNow();
     }
-
-    if (audioChunk) {
+    if (claimsPlayback) this.pendingServerAudioChunks = Math.max(0, this.pendingServerAudioChunks - 1);
+    if (audioChunk && mayPlay()) {
+      this.serverAudioPlaying = true;
       this.feedServerAudioChunk(audioChunk, false);
     }
 
     if (payload.is_final_package) {
-      this.feedServerAudioChunk('', true);
+      if (mayPlay()) this.feedServerAudioChunk('', true);
       const isTransient = this.transientMessageUuids.has(convUuid);
       if (payload.audio_error) {
         addDebugTrace('audio', 'server audio stream ended with error', {
@@ -636,11 +672,11 @@ export class MessageProcessor {
       }
       // 落盘可能早于该句展示，临时消息状态由展示阶段在尾包处统一清理。
       this.transientMessageUuids.delete(convUuid);
-      if (AppState.currentState === 'active') {
-        await this.waitForServerAudioFinished();
-      } else {
-        this.onServerAudioFinished();
-      }
+      // 尾包仅表示数据收齐；前后台都须等本地播放结束，才能释放回放权限。
+      // 结束回执丢失时沿用超时兜底，回放入口不通过强制停播掩盖状态失步。
+      if (mayPlay()) await this.waitForServerAudioFinished();
+      this.openServerMessages.delete(payload.uuid || '');
+      this.mutedServerMessages.delete(payload.uuid || '');
     }
   }
 
@@ -728,7 +764,7 @@ export class MessageProcessor {
 
       const item = this.sendQueue[0];
       const durable = isDurableSendKind(item.kind);
-      if (durable && Date.now() - item.enqueuedAtMs >= MAX_DURABLE_MESSAGE_AGE_MS) {
+      if (durable && item.kind !== 'voice' && Date.now() - item.enqueuedAtMs >= MAX_DURABLE_MESSAGE_AGE_MS) {
         this.failDeliveryUncertain(item, 'message exceeded the automatic delivery window');
         this.sendQueue.shift();
         continue;
@@ -763,6 +799,9 @@ export class MessageProcessor {
         });
         if (tracksMessageStatus) {
           this.binder.emitMessageStatus(item.uuid, 'failed');
+        }
+        if (item.kind === 'image') {
+          this.binder.emitErrorText(getTerminalImageErrorText(result.error));
         }
         this.sendQueue.shift();
         continue;
@@ -815,6 +854,7 @@ export class MessageProcessor {
     if (item.kind === 'image') {
       return this.networkClient.sendImage(item.imageUri, item.mimeType, item.clientMsgId);
     }
+    if (item.kind === 'voice') return this.sendVoiceItem(item);
     if (item.kind === 'touch') {
       return this.networkClient.sendTouch(item.touchArea, item.clickFrequency, item.touchMeta, item.clientMsgId);
     }
@@ -825,6 +865,67 @@ export class MessageProcessor {
       return this.networkClient.sendImageSelectingCancel(item.clientMsgId);
     }
     return this.networkClient.sendTypingEvent(item.textLength, item.clientMsgId);
+  }
+
+  private async sendVoiceItem(item: Extract<SendItem, { kind: 'voice' }>): Promise<SendResult> {
+    let began = false;
+    try {
+      const info = await FileSystem.getInfoAsync(item.localUri);
+      const size = info.exists && 'size' in info ? info.size : 0;
+      if (!size || size > 1024 * 1024) throw new Error('voice file unavailable or too large');
+      const base64 = await FileSystem.readAsStringAsync(item.localUri, { encoding: FileSystem.EncodingType.Base64 });
+      const raw = base64.replace(/^data:[^,]+,/, '').replace(/\s+/g, '');
+      const chunks: string[] = [];
+      for (let offset = 0; offset < raw.length; offset += 65536) chunks.push(raw.slice(offset, offset + 65536));
+      if (chunks.length < 1 || chunks.length > 32) throw new Error('invalid voice chunk count');
+      const operations: { payload: Record<string, unknown>; suffix: string }[] = [
+        { payload: { phase: 'begin', upload_id: item.uuid, mime_type: 'audio/mp4', container: 'm4a', codec: 'aac_lc', byte_length: size, total_chunks: chunks.length }, suffix: 'begin' },
+        ...chunks.map((audio, index) => ({ payload: { phase: 'chunk', upload_id: item.uuid, chunk_index: index, audio_base64: audio }, suffix: `chunk:${index}` })),
+        { payload: { phase: 'finalize', upload_id: item.uuid }, suffix: 'finalize' },
+      ];
+      // 一次队列项持有整条语音。自动重试仅重放当前阶段，并共享首次 begin 的截止时刻。
+      const deadline = Date.now() + VOICE_UPLOAD_BUDGET_MS;
+      began = true;
+      let retries = 0;
+      for (const operation of operations) {
+        while (!this.stopRequested) {
+          const remainingMs = deadline - Date.now();
+          if (remainingMs <= 0) return this.failVoiceUpload(item, 'voice upload budget exceeded');
+          let result: SendResult;
+          try {
+            result = await this.networkClient.sendVoicePhase(operation.payload, `${item.uuid}:${operation.suffix}`, Math.min(5000, remainingMs));
+          } catch (error) {
+            result = { ok: false, error: getErrorMessage(error) };
+          }
+          if (this.stopRequested) return { ok: false, drop: true, error: 'stopped' };
+          if (Date.now() >= deadline) return this.failVoiceUpload(item, 'voice upload budget exceeded');
+          if (result.ok) {
+            if (operation.suffix === 'finalize') {
+              if (result.message_uuid) this.onVoiceFinalized?.(item.uuid, result.message_uuid, result.duration_ms);
+              return result;
+            }
+            break;
+          }
+          if (result.drop) return this.failVoiceUpload(item, result.error || 'voice upload rejected');
+          const delayMs = Math.min(getSendRetryDelayMs(retries++), Math.max(0, deadline - Date.now()));
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+        if (this.stopRequested) return { ok: false, drop: true, error: 'stopped' };
+      }
+      return this.failVoiceUpload(item, 'voice upload incomplete');
+    } catch (error) {
+      return this.failVoiceUpload(item, getErrorMessage(error), began);
+    }
+  }
+
+  private failVoiceUpload(item: Extract<SendItem, { kind: 'voice' }>, error: string, began = true): SendResult {
+    // 不延长 UI 的 15 秒预算；断线时清理由服务端 TTL 兜底，不排队补发 abort。
+    const cleanup = began
+      ? this.networkClient.sendVoicePhase({ phase: 'abort', upload_id: item.uuid }, `${item.uuid}:abort`, 1000)
+      : this.networkClient.sendVoiceRecordingCancelled(item.uuid);
+    void cleanup.catch(() => undefined);
+    this.binder.emitErrorText(`语音发送失败：${error}`);
+    return { ok: false, error, drop: true };
   }
 
   private async saveAudioToLocal(convUuid: string, chunks: string[]): Promise<string | null> {

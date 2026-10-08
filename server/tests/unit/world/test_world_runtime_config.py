@@ -1,13 +1,19 @@
-import sys
+import json
 from pathlib import Path
 
 import pytest
 
-server_root = str(Path(__file__).resolve().parents[3])
-if server_root not in sys.path:
-    sys.path.insert(0, server_root)
-
 from src.agent_runtime.character_registry import CharacterRegistry
+from src.world.dynamic_interaction.task import DynamicInteractionTask
+
+
+def test_dynamic_reply_polling_interval_allows_five_minute_reply_target():
+    server_root = Path(__file__).resolve().parents[3]
+    shipped_config = json.loads((server_root / "config" / "config.json").read_text(encoding="utf-8"))
+    configured = shipped_config["world"]["dynamic_interaction"]["clock_config"]["params"]["interval_seconds"]
+    default = DynamicInteractionTask().config["clock_config"]["params"]["interval_seconds"]
+    assert 0 < configured <= 240
+    assert 0 < default <= 240
 
 
 def test_character_registry_rejects_missing_default_character():

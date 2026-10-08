@@ -14,7 +14,6 @@ import importlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -23,9 +22,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
 from src.domain.music_type import WishEntry
-from src.utils.logger import get_logger
+from src.infrastructure.media.song_asset_validation import playable_segments
 from src.utils.helpers import get_unified_song_name
-
+from src.utils.logger import get_logger
 
 _SONGLEARNER_PATH_ADDED = False
 
@@ -42,8 +41,6 @@ class SongLearningQueue(Protocol):
     def mark_redirected(self, requested_name: str, redirected_to: str, **kwargs) -> None: ...
 
     def update_redirect_status(self, requested_name: str, redirected_status: str, reason: str = "") -> None: ...
-
-    def get_recently_learned(self) -> list[str]: ...
 
     def _save(self) -> None: ...
 
@@ -65,6 +62,7 @@ def _add_songlearner_to_path() -> None:
 @dataclass
 class LearnResult:
     """Result from one learning pass."""
+
     learned: List[str] = field(default_factory=list)
     already_learned: List[str] = field(default_factory=list)
     abandoned: List[str] = field(default_factory=list)
@@ -108,10 +106,7 @@ class AutoSongLearner:
         if self.songlearner_available:
             self.logger.info("Songlearner 模型已就绪，将使用完整学歌流水线（QQ音乐下载->清洗->MSAF->LLM分段）")
         else:
-            self.logger.error(
-                "Songlearner 模型未就绪（需下载 MSST 预训练权重），"
-                "无法执行自动学歌"
-            )
+            self.logger.error("Songlearner 模型未就绪（需下载 MSST 预训练权重），" "无法执行自动学歌")
             raise RuntimeError("Songlearner 模型未就绪，无法执行自动学歌")
 
         # QQ 音乐凭证检测（启动时）
@@ -124,13 +119,9 @@ class AutoSongLearner:
         self._migrate_legacy_qq_credential()
         self.qq_credential_valid = self._validate_qq_credential()
         if not self.qq_credential_valid:
-            self.logger.warning(
-                "QQ 音乐凭证无效或不存在，正在生成登录二维码..."
-            )
+            self.logger.warning("QQ 音乐凭证无效或不存在，正在生成登录二维码...")
             self._generate_login_qr()
-            self.logger.warning(
-                f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}"
-            )
+            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}")
 
     # -- directory setup -----------------------------------------------------
 
@@ -192,9 +183,7 @@ class AutoSongLearner:
             _add_songlearner_to_path()
             download_qq_song = importlib.import_module("pipeline.download_qq_song")
             qr_path = self._credential_file.parent / "qq_login_qr.png"
-            success = download_qq_song._run_async_from_sync(
-                download_qq_song.generate_qr_only(qr_path)
-            )
+            success = download_qq_song._run_async_from_sync(download_qq_song.generate_qr_only(qr_path))
             if success:
                 self.logger.info(f"QQ 登录二维码已生成: {qr_path}")
             else:
@@ -212,13 +201,9 @@ class AutoSongLearner:
         valid = self._ensure_qq_credential_fresh()
         self.qq_credential_valid = valid
         if not valid:
-            self.logger.warning(
-                "QQ 音乐凭证仍然无效，重新生成登录二维码..."
-            )
+            self.logger.warning("QQ 音乐凭证仍然无效，重新生成登录二维码...")
             self._generate_login_qr()
-            self.logger.warning(
-                f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}"
-            )
+            self.logger.warning(f"请用 QQ 扫描二维码完成登录: {self.songlearner_resource_dir / 'qq_login_qr.png'}")
         return valid
 
     # -- main entry ----------------------------------------------------------
@@ -247,48 +232,48 @@ class AutoSongLearner:
 
                 learned_name = self._try_learn_one(safe_name)
                 if learned_name:
-                    learned_unified = get_unified_song_name(learned_name)
-                    if learned_unified in known_song_names:
-                        if learned_name not in result.already_learned:
-                            result.already_learned.append(learned_name)
-                        self.logger.info(
-                            f"  ↷ Redirected to already learned song, no notification: "
-                            f"{safe_name} -> {learned_name}"
-                        )
-                        continue
-
-                    result.learned.append(learned_name)
-                    if learned_unified:
-                        known_song_names.add(learned_unified)
-                    if get_unified_song_name(learned_name) != get_unified_song_name(safe_name):
-                        self.logger.info(f"  ✓ Learned via redirect: {safe_name} -> {learned_name}")
-                    else:
-                        self.logger.info(f"  ✓ Learned: {safe_name}")
+                    self._record_learned_attempt(safe_name, learned_name, known_song_names, result)
                 else:
-                    unified_name = get_unified_song_name(safe_name)
-                    entry_after = self.wishlist.wished_songs.get(unified_name)
-                    if entry_after and entry_after.status == "redirected":
-                        redirected_name = entry_after.redirected_to or safe_name
-                        if entry_after.redirected_status == "abandoned":
-                            result.abandoned.append(redirected_name)
-                            self.logger.info(f"  ✗ Redirected target abandoned: {safe_name} -> {redirected_name}")
-                        else:
-                            result.awaiting.append(redirected_name)
-                            self.logger.info(f"  ... Redirected target awaiting: {safe_name} -> {redirected_name}")
-                    elif entry_after and entry_after.status == "abandoned":
-                        result.abandoned.append(safe_name)
-                        self.logger.info(f"  ✗ Abandoned: {safe_name}")
-                    else:
-                        result.awaiting.append(safe_name)
-                        self.logger.info(f"  ... Still awaiting: {safe_name}")
+                    self._record_unsuccessful_attempt(safe_name, result)
             except Exception as exc:
                 self.logger.error(f"  ! Error learning {safe_name}: {exc}")
                 result.awaiting.append(safe_name)
 
-        if result.learned:
-            self._notify_new_songs(result.learned)
-
         return result
+
+    def _record_learned_attempt(
+        self, safe_name: str, learned_name: str, known_song_names: set[str], result: LearnResult
+    ) -> None:
+        learned_unified = get_unified_song_name(learned_name)
+        if learned_unified in known_song_names:
+            if learned_name not in result.already_learned:
+                result.already_learned.append(learned_name)
+            self.logger.info(f"  ↷ Redirected to already learned song: {safe_name} -> {learned_name}")
+            return
+        result.learned.append(learned_name)
+        if learned_unified:
+            known_song_names.add(learned_unified)
+        if learned_unified != get_unified_song_name(safe_name):
+            self.logger.info(f"  ✓ Learned via redirect: {safe_name} -> {learned_name}")
+        else:
+            self.logger.info(f"  ✓ Learned: {safe_name}")
+
+    def _record_unsuccessful_attempt(self, safe_name: str, result: LearnResult) -> None:
+        entry_after = self.wishlist.wished_songs.get(get_unified_song_name(safe_name))
+        if entry_after and entry_after.status == "redirected":
+            redirected_name = entry_after.redirected_to or safe_name
+            if entry_after.redirected_status == "abandoned":
+                result.abandoned.append(redirected_name)
+                self.logger.info(f"  ✗ Redirected target abandoned: {safe_name} -> {redirected_name}")
+            else:
+                result.awaiting.append(redirected_name)
+                self.logger.info(f"  ... Redirected target awaiting: {safe_name} -> {redirected_name}")
+        elif entry_after and entry_after.status == "abandoned":
+            result.abandoned.append(safe_name)
+            self.logger.info(f"  ✗ Abandoned: {safe_name}")
+        else:
+            result.awaiting.append(safe_name)
+            self.logger.info(f"  ... Still awaiting: {safe_name}")
 
     def _get_existing_song_names(self) -> set[str]:
         """Collect valid songs already present in the character's singing library."""
@@ -300,22 +285,24 @@ class AutoSongLearner:
             if not song_dir.is_dir():
                 continue
             song_name = song_dir.name
-            has_audio = (
-                (song_dir / f"{song_name}.cleaned.mp3").is_file()
-                or (song_dir / f"{song_name}.mp3").is_file()
-            )
+            has_audio = (song_dir / f"{song_name}.cleaned.mp3").is_file() or (song_dir / f"{song_name}.mp3").is_file()
             lrc_path = song_dir / f"{song_name}.lrc"
             json_path = song_dir / f"{song_name}.json"
             if not has_audio or not lrc_path.is_file() or not json_path.is_file():
                 continue
-
+            try:
+                song_data = json.loads(json_path.read_text("utf-8"))
+                audio_path = song_dir / f"{song_name}.cleaned.mp3"
+                if not audio_path.is_file():
+                    audio_path = song_dir / f"{song_name}.mp3"
+                if not playable_segments(song_data.get("segments"), audio_path):
+                    continue
+                title = str(song_data.get("title") or "")
+            except Exception:
+                continue
             unified_dir_name = get_unified_song_name(song_name)
             if unified_dir_name:
                 existing.add(unified_dir_name)
-            try:
-                title = str(json.loads(json_path.read_text("utf-8")).get("title") or "")
-            except Exception:
-                title = ""
             unified_title = get_unified_song_name(title)
             if unified_title:
                 existing.add(unified_title)
@@ -363,7 +350,10 @@ class AutoSongLearner:
                     self.character_name,
                 ],
                 cwd=str(self.songlearner_dir),
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=self.SONGELEARNER_TIMEOUT,
                 env=env,
             )
@@ -419,10 +409,7 @@ class AutoSongLearner:
         stderr = proc.stderr or ""
         parsed = self._parse_songlearner_error(stderr)
         if parsed:
-            return (
-                f"{parsed['code']} {parsed['step']}: {parsed['message']} "
-                f"(exit_code={parsed['exit_code']})"
-            )
+            return f"{parsed['code']} {parsed['step']}: {parsed['message']} " f"(exit_code={parsed['exit_code']})"
 
         stderr_tail = self._last_nonempty_line(stderr) or "无 stderr"
         return f"SL099 unexpected: Songlearner 流水线执行失败，退出码 {proc.returncode}: {stderr_tail}"
@@ -508,20 +495,23 @@ class AutoSongLearner:
                 # Ensure title field is set
                 if not data.get("title"):
                     data["title"] = learned_name
-                json_path.write_text(
-                    json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
+                json_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
             except Exception as e:
-                self.logger.error(f"JSON 后处理失败: {e}")
+                self._handle_failure(requested_name, f"SL094 finalize: JSON 后处理失败: {e}")
+                return None
 
         # Validate
-        has_audio = cleaned_target.exists()
-        has_json = json_path.exists()
-        if not has_audio or not has_json:
+        has_audio = cleaned_target.is_file()
+        has_json = json_path.is_file()
+        has_lyrics = (target_dir / f"{learned_name}.lrc").is_file()
+        if not has_audio or not has_json or not has_lyrics:
             self._handle_failure(
                 requested_name,
-                f"SL093 finalize: 关键文件缺失: audio={has_audio}, json={has_json}",
+                f"SL093 finalize: 关键文件缺失: audio={has_audio}, json={has_json}, lyrics={has_lyrics}",
             )
+            return None
+        if not playable_segments(data.get("segments"), cleaned_target):
+            self._handle_failure(requested_name, "SL094 finalize: 没有可演唱的有效唱段")
             return None
 
         if get_unified_song_name(requested_name) != get_unified_song_name(learned_name):
@@ -559,33 +549,13 @@ class AutoSongLearner:
             self.logger.warning(f"Abandoned learning {safe_name} after {self.MAX_ATTEMPTS} attempts: {reason}")
         else:
             entry.status = "awaiting_audio"
-            self.logger.info(f"Learning {safe_name} awaits audio (attempt {entry.attempt_count}/{self.MAX_ATTEMPTS}): {reason}")
+            self.logger.info(
+                f"Learning {safe_name} awaits audio (attempt {entry.attempt_count}/{self.MAX_ATTEMPTS}): {reason}"
+            )
         self.wishlist._save()
         return entry.status
 
-    # -- notification --------------------------------------------------------
-
-    def _notify_new_songs(self, learned: List[str]) -> None:
-        """Write learned songs so the Stage reminder path can announce them."""
-        notify_dir = Path("data/plugin_scheduler")
-        notify_dir.mkdir(parents=True, exist_ok=True)
-        notify_path = notify_dir / "newly_learned_songs.json"
-        existing: List[str] = []
-        if notify_path.exists():
-            try:
-                existing = json.loads(notify_path.read_text("utf-8"))
-            except Exception:
-                pass
-        notify_path.write_text(
-            json.dumps(existing + learned, ensure_ascii=False), encoding="utf-8"
-        )
-        self.logger.info(f"Notification written: {learned}")
-
-    @property
-    def recently_learned(self) -> List[str]:
-        return self.wishlist.get_recently_learned()
-
-        # -- model check ---------------------------------------------------------
+    # -- model check ---------------------------------------------------------
 
     def _check_songlearner_models(self) -> bool:
         """Check if Songlearner resources are downloaded under res/song_learner/."""

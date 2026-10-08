@@ -105,6 +105,13 @@ class WsTransport:
             except Exception:
                 pass
 
+    def wait_until_ready(self, timeout: float) -> bool:
+        """Wait for the existing transport thread to complete WebSocket auth."""
+        return self._ready_event.wait(timeout=max(0.0, timeout))
+
+    def is_ready(self) -> bool:
+        return self._ready_event.is_set()
+
     def set_agent_message_listener(
         self,
         agent_message_listener: Callable[[AgentMessage], None] | None,

@@ -9,6 +9,8 @@ class _StageConfig:
     response_wait: float = 1.0
     typing_wait: float = 10.0
     image_selection_wait: float = 60.0
+    voice_recording_wait: float = 40.0
+    voice_commit_wait: float = 15.0
     first_login_wait: float = 1.0
     login_reminder_wait: float = 1.0
     proactive_idle_seconds: float = 30.0
@@ -29,6 +31,8 @@ class _StageConfig:
                 ("response_wait", 1.0),
                 ("typing_wait", 10.0),
                 ("image_selection_wait", 60.0),
+                ("voice_recording_wait", 40.0),
+                ("voice_commit_wait", 15.0),
                 ("first_login_wait", 1.0),
                 ("login_reminder_wait", 1.0),
                 ("proactive_idle_seconds", 30.0),
@@ -42,6 +46,8 @@ class _StageConfig:
             "response_wait",
             "typing_wait",
             "image_selection_wait",
+            "voice_recording_wait",
+            "voice_commit_wait",
             "first_login_wait",
             "login_reminder_wait",
             "proactive_idle_seconds",

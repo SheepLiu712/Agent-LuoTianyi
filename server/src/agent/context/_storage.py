@@ -9,6 +9,7 @@ from src.domain.conversation_type import ConversationItem
 
 from .models import (
     AudioContent,
+    AudioUnderstandingStatus,
     ContextIdentity,
     ConversationEntry,
     ConversationSnapshot,
@@ -42,16 +43,17 @@ class _Storage:
         description = self.database.get_user_description(user_id)
         if description is None:
             raise LookupError("上下文所属用户不存在")
-        data = dict(self.database.get_user_preferences(user_id) or {})
-        return UserContextSnapshot(
-            UserProfile(description),
-            UserPreferences(
-                relationship=data.get("relationship", ""),
-                speaking_style=data.get("speaking_style", ""),
-                personality_traits=tuple(data.get("personality_traits") or ()),
-                custom_context=data.get("custom_context", ""),
-                personality_text=data.get("#sym:personality_text", ""),
-            ),
+        return UserContextSnapshot(UserProfile(description), self.load_preferences())
+
+    def load_preferences(self) -> UserPreferences:
+        """读取数据库中的最新偏好，不修改其它用户资料。"""
+        data = dict(self.database.get_user_preferences(self.require_user()) or {})
+        return UserPreferences(
+            relationship=data.get("relationship", ""),
+            speaking_style=data.get("speaking_style", ""),
+            personality_traits=tuple(data.get("personality_traits") or ()),
+            custom_context=data.get("custom_context", ""),
+            personality_text=data.get("#sym:personality_text", ""),
         )
 
     def save_profile(self, profile: UserProfile) -> None:
@@ -120,7 +122,17 @@ def _decode_entry(item: dict) -> ConversationEntry:
             data.get("media_id"),
         )
     elif kind == "audio":
-        content = AudioContent(text)
+        content = AudioContent(
+            media_id=data["media_id"],
+            mime_type=data["mime_type"],
+            duration_ms=data["duration_ms"],
+            understanding_status=AudioUnderstandingStatus(data["understanding_status"]),
+            transcript=data.get("transcript"),
+            emotion=data.get("emotion"),
+            sound_description=data.get("sound_description"),
+        )
+        if content.text != text:
+            raise ValueError("音频历史内容与结构化元数据不一致")
     elif kind == "sing":
         content = SongContent(text, data["song"], data.get("segment"))
     else:
@@ -133,6 +145,8 @@ def _encode_entry(entry: ConversationEntry) -> ConversationItem:
     kinds = {TextContent: "text", ImageContent: "image", AudioContent: "audio", SongContent: "sing"}
     data = asdict(content)
     text = data.pop("text")
+    if isinstance(content, AudioContent):
+        data["understanding_status"] = content.understanding_status.value
     return ConversationItem(
         entry.entry_id,
         entry.timestamp.isoformat(sep=" ", timespec="microseconds"),

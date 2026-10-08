@@ -33,6 +33,14 @@
                 }
             }
         },
+        "available_audio_models": {
+            "qwen3.8-omni-flash": {
+                "api_type": "openai",
+                "model": "qwen3.8-omni-flash",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+            }
+        },
         "available_vlms": {
             "qwen3-vl-plus": {
                 "api_type": "openai",
@@ -231,6 +239,15 @@
                         "character_name": "洛天依",
                         "resource_path": "res/sing_song/luotianyi"
                     }
+                }
+            },
+            "audio_understanding": {
+                "audio_model_module": {
+                    "audio": {
+                        "name": "qwen3.8-omni-flash"
+                    },
+                    "prompt_name": "audio_understanding_prompt",
+                    "use_json": true
                 }
             },
             "image_understanding": {

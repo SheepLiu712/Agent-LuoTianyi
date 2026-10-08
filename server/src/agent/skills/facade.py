@@ -7,11 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 from src.agent.skills.adapters.memory import AgentMemory
 from src.agent.skills.cognitive import (
+    AudioUnderstandingSkill,
     CharacterReplyGenerator,
     ExplicitMemoryIntentSkill,
     ImageUnderstandingSkill,
     ResponseCompositionSkill,
     TextPreprocessingSkill,
+    TopicExtractionSkill,
 )
 from src.agent.skills.cognitive.dynamic_topic_memory import DynamicTopicMemorySkill
 from src.agent.skills.cognitive.learned_song_experience import LearnedSongExperienceSkill
@@ -58,6 +60,7 @@ class SharedSkills:
         preprocessing_config: dict[str, Any] | None,
         explicit_memory_config: dict[str, Any] | None,
         reply_composition_config: dict[str, Any],
+        topic_extraction_config: dict[str, Any],
         reflection_config: dict[str, Any],
         song_knowledge_config: dict[str, Any],
         database_manager: DatabaseManager,
@@ -81,10 +84,18 @@ class SharedSkills:
             config.get("conversation_compaction", {}),
             llm_service,
         )
-        self.text_preprocessing = TextPreprocessingSkill(preprocessing_config)
+        self.text_preprocessing = TextPreprocessingSkill(
+            preprocessing_config,
+            song_names=self.singing.song_names(),
+        )
         self.explicit_memory_intent = ExplicitMemoryIntentSkill(explicit_memory_config)
         self.image_understanding = (
             ImageUnderstandingSkill(config.get("image_understanding", {}), media_resolver, llm_service)
+            if media_resolver is not None
+            else None
+        )
+        self.audio_understanding = (
+            AudioUnderstandingSkill(config.get("audio_understanding", {}), media_resolver, llm_service)
             if media_resolver is not None
             else None
         )
@@ -94,6 +105,9 @@ class SharedSkills:
             memories=memories,
             singing=self.singing.backend,
             generators=reply_generators,
+            topic_extraction=TopicExtractionSkill(
+                topic_extraction_config, llm_service, understanding=self.text_preprocessing
+            ),
         )
         self.reflection = ReflectionSkill(reflection_config, memories)
         self.intentional_memory = IntentionalMemoryCommit(lambda character_id: memories[character_id])

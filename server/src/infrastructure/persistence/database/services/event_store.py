@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import threading
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy.exc import IntegrityError
@@ -158,6 +158,15 @@ class EventStore:
 
     # ── 去重匹配（精确 + LLM 双路径）────────────────────────
 
+    @staticmethod
+    def _local_naive_datetime(value: Optional[datetime]) -> Optional[datetime]:
+        """Store event wall times as naive Beijing time, as expected by SQL DateTime."""
+        if value is None:
+            return None
+        if value.tzinfo is not None and value.utcoffset() is not None:
+            value = value.astimezone(timezone(timedelta(hours=8)))
+        return value.replace(tzinfo=None)
+
     def _find_matching_event_exact(
         self,
         title: str,
@@ -180,7 +189,9 @@ class EventStore:
             )
             for row in rows:
                 if start_datetime and row.start_datetime:
-                    diff = abs((row.start_datetime - start_datetime).days)
+                    row_date = self._local_naive_datetime(row.start_datetime).date()
+                    candidate_date = self._local_naive_datetime(start_datetime).date()
+                    diff = abs((row_date - candidate_date).days)
                     if diff <= threshold_days:
                         return db_event_to_dict(row)
                 if date_mmdd and row.date_mmdd == date_mmdd:
@@ -442,6 +453,9 @@ class EventStore:
 
     async def add_event(self, event_data: Dict[str, Any]) -> Optional[str]:
         """添加新事件到数据库。如果已存在匹配事件则更新。"""
+        event_data = dict(event_data)
+        for key in ("start_datetime", "end_datetime"):
+            event_data[key] = self._local_naive_datetime(event_data.get(key))
         title = event_data.get("title", "")
         start_datetime = event_data.get("start_datetime")
         date_mmdd = event_data.get("date_mmdd")
@@ -511,7 +525,7 @@ class EventStore:
         except Exception as e:
             db.rollback()
             self.logger.error(f"Failed to add event: {e}")
-            return None
+            raise
         finally:
             db.close()
 
@@ -553,6 +567,7 @@ class EventStore:
         except Exception as e:
             db.rollback()
             self.logger.error(f"Failed to update event {event_id}: {e}")
+            raise
         finally:
             db.close()
 

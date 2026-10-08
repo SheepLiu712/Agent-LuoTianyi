@@ -1,28 +1,35 @@
 """DatabaseManager 单元测试(不包含Event Store和Memory Store)"""
-import sys
+
 import os
-from pathlib import Path
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # 添加项目根目录
 server_root = str(Path(__file__).resolve().parents[3])
 if server_root not in sys.path:
     sys.path.insert(0, server_root)
 
-import pytest
+import pytest  # noqa: E402
 
-from src.infrastructure.persistence.database.sql_database import (
-    init_sql_db, Base, User, InviteCode
+from src.domain import ConversationItem  # noqa: E402
+from src.infrastructure.persistence.database.database_service import DatabaseManager  # noqa: E402
+from src.infrastructure.persistence.database.services.conversation_service import (  # noqa: E402
+    ConversationIdentityConflict,
 )
-from src.infrastructure.persistence.database.redis_buffer import init_redis_buffer
-from src.infrastructure.persistence.database.database_service import DatabaseManager
-from src.infrastructure.persistence.database.services.credential_service import _hash_password
-from src.domain import ConversationItem
-
+from src.infrastructure.persistence.database.services.credential_service import (  # noqa: E402
+    _hash_password,
+)
+from src.infrastructure.persistence.database.sql_database import (  # noqa: E402
+    Conversation,
+    InviteCode,
+    User,
+)
 
 # ═══════════════════════════════════════════════════════════════
 # Fixtures
 # ═══════════════════════════════════════════════════════════════
+
 
 @pytest.fixture(scope="function")
 def db_manager(tmp_path):
@@ -30,12 +37,13 @@ def db_manager(tmp_path):
     # 1. 设置 JWT_SECRET（message token 需要）
     os.environ["JWT_SECRET"] = "test-secret"
 
-
     # 2. 创建 DatabaseManager 实例
-    manager = DatabaseManager({
-        "sql_db_folder": str(tmp_path / "db"),
-        "sql_db_file": "test.db",
-    })
+    manager = DatabaseManager(
+        {
+            "sql_db_folder": str(tmp_path / "db"),
+            "sql_db_file": "test.db",
+        }
+    )
     yield manager
 
     # teardown：清理环境变量
@@ -49,12 +57,13 @@ def sample_user(db_manager: "DatabaseManager") -> str:
     user = User(
         uuid="test-uuid-001",
         username="testuser",
-        password=_hash_password("password123")  # 需要暴露或直接调模块函数
+        password=_hash_password("password123"),  # 需要暴露或直接调模块函数
     )
     session.add(user)
     session.commit()
     session.close()
     return "testuser"
+
 
 @pytest.fixture
 def sample_invite_code(db_manager: "DatabaseManager") -> str:
@@ -65,6 +74,7 @@ def sample_invite_code(db_manager: "DatabaseManager") -> str:
     session.commit()
     session.close()
     return "TESTCODE123"
+
 
 @pytest.fixture
 def sample_invite_code_2(db_manager: "DatabaseManager") -> str:
@@ -81,6 +91,7 @@ def sample_invite_code_2(db_manager: "DatabaseManager") -> str:
 # 测试注册 & 登录
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestRegistration:
     def test_register_success(self, db_manager: "DatabaseManager", sample_invite_code: str):
         """正常注册"""
@@ -88,7 +99,9 @@ class TestRegistration:
         assert ok is True
         assert msg == "注册成功"
 
-    def test_register_duplicate_username(self, db_manager: "DatabaseManager", sample_invite_code: str, sample_invite_code_2: str):
+    def test_register_duplicate_username(
+        self, db_manager: "DatabaseManager", sample_invite_code: str, sample_invite_code_2: str
+    ):
         """重复用户名"""
 
         ok1, _ = db_manager.credential_service.register_user("dupe", "pass1", sample_invite_code)
@@ -165,7 +178,9 @@ class TestAuthentication:
         auth_result = db_manager.credential_service.authenticate_password_login("resetuser", "pass123")
         assert auth_result is not None
 
-        reset_result, result_str = db_manager.credential_service.reset_account(sample_invite_code, "resetuser", "newpass456")
+        reset_result, result_str = db_manager.credential_service.reset_account(
+            sample_invite_code, "resetuser", "newpass456"
+        )
         assert reset_result is True
         assert result_str == "重置成功"
 
@@ -189,9 +204,10 @@ class TestAuthentication:
         auth_result = db_manager.credential_service.authenticate_password_login("timeuser", "pass123")
         assert auth_result is not None
         login_time = auth_result["elapsed_from_last_login"]
-        assert login_time is None # 首次登录，应该为 None
+        assert login_time is None  # 首次登录，应该为 None
 
         import time
+
         time.sleep(1)  # 等待一秒钟
         auth_result2 = db_manager.credential_service.authenticate_password_login("timeuser", "pass123")
         assert auth_result2 is not None
@@ -203,7 +219,46 @@ class TestAuthentication:
 # 测试对话
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestConversations:
+    def test_add_conversations_is_idempotent_and_rejects_identity_conflict(
+        self, db_manager: "DatabaseManager", sample_user: str
+    ):
+        user_uuid = db_manager.credential_service.get_user_uuid_by_username(sample_user)
+        item = ConversationItem(
+            timestamp="2026-06-22 10:00:00",
+            source="user",
+            content="[音频]用户说：测试",
+            type="audio",
+            uuid="audio-idempotent",
+            data={"media_id": "media-1", "duration_ms": 1000},
+        )
+
+        assert db_manager.conversation_service.add_conversations(user_uuid, [item]) == ["audio-idempotent"]
+        assert db_manager.conversation_service.add_conversations(user_uuid, [item]) == ["audio-idempotent"]
+
+        session = db_manager.open_sql_session()
+        try:
+            user = session.query(User).filter(User.uuid == user_uuid).one()
+            assert session.query(Conversation).filter(Conversation.uuid == "audio-idempotent").count() == 1
+            assert user.all_memory_count == 1
+        finally:
+            session.close()
+
+        conflict = ConversationItem(
+            timestamp=item.timestamp,
+            source=item.source,
+            content=item.content,
+            type="audio",
+            uuid=item.uuid,
+            data={"media_id": "media-2", "duration_ms": 1000},
+        )
+        with pytest.raises(ConversationIdentityConflict, match="CONVERSATION_IDENTITY_CONFLICT"):
+            db_manager.conversation_service.add_conversations(user_uuid, [conflict])
+
+        restored = db_manager.conversation_service.get_history_from_db(user_uuid, 0, 10)[0]
+        assert restored.data == {"media_id": "media-1", "duration_ms": 1000}
+
     def test_add_and_retrieve(self, db_manager: "DatabaseManager", sample_user: str):
         """添加对话并检索"""
         user_uuid = db_manager.credential_service.get_user_uuid_by_username(sample_user)
@@ -291,7 +346,9 @@ class TestConversations:
         history = db_manager.conversation_service.get_history_from_db(user_uuid, 0, 10)
         assert history[2].data == {"song": "测试歌", "segment": "hook"}
 
-    def test_context_compaction_preserves_concurrent_new_messages(self, db_manager: "DatabaseManager", sample_user: str):
+    def test_context_compaction_preserves_concurrent_new_messages(
+        self, db_manager: "DatabaseManager", sample_user: str
+    ):
         """压缩期间新写入的对话应保留在未压缩窗口中。"""
         user_uuid = db_manager.credential_service.get_user_uuid_by_username(sample_user)
         db_manager.conversation_service.add_conversations(
@@ -379,7 +436,9 @@ class TestConversations:
         )
 
         lty_state = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="luotianyi")
-        other_state = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="other_character")
+        other_state = db_manager.conversation_service.get_conversation_context_state(
+            user_uuid, character_id="other_character"
+        )
 
         assert lty_state["context_count"] == 1
         assert other_state["context_count"] == 1
@@ -395,8 +454,12 @@ class TestConversations:
         )
         assert ok is True
 
-        lty_state_after = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="luotianyi")
-        other_state_after = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="other_character")
+        lty_state_after = db_manager.conversation_service.get_conversation_context_state(
+            user_uuid, character_id="luotianyi"
+        )
+        other_state_after = db_manager.conversation_service.get_conversation_context_state(
+            user_uuid, character_id="other_character"
+        )
 
         assert lty_state_after["summary"] == ""
         assert lty_state_after["context_count"] == 1
@@ -421,7 +484,9 @@ class TestConversations:
             character_id="luotianyi",
         )
 
-        fresh_without_threshold = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        fresh_without_threshold = db_manager.conversation_service.get_conversation_context_state(
+            user_uuid, character_id="luotianyi"
+        )
         assert fresh_without_threshold["context_count"] == 1
         assert fresh_without_threshold["conversations"][0]["content"] == "六天前的对话"
 
@@ -432,7 +497,9 @@ class TestConversations:
         )
         assert cleared is True
 
-        stale_state = db_manager.conversation_service.get_conversation_context_state(user_uuid, character_id="luotianyi")
+        stale_state = db_manager.conversation_service.get_conversation_context_state(
+            user_uuid, character_id="luotianyi"
+        )
         assert stale_state["summary"] == ""
         assert stale_state["context_count"] == 0
         assert stale_state["conversations"] == []

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum
 from typing import ClassVar
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from ._stimulus_contract import (
@@ -43,6 +44,10 @@ class StimulusKind(str, Enum):
     TEXT_MESSAGE = "text_message"
     IMAGE_MESSAGE = "image_message"
     VOICE_MESSAGE = "voice_message"
+    VOICE_RECORDING_STARTED = "voice_recording_started"
+    VOICE_RECORDING_CANCELLED = "voice_recording_cancelled"
+    VOICE_RECORDING_COMMITTED = "voice_recording_committed"
+    VOICE_UPLOAD_FAILED = "voice_upload_failed"
     USER_TYPING = "user_typing"
     IMAGE_SELECTION_OPENED = "image_selection_opened"
     IMAGE_SELECTION_CLOSED = "image_selection_closed"
@@ -63,6 +68,7 @@ class StimulusKind(str, Enum):
     ACTIVITY_ENDED = "activity_ended"
     SONG_KNOWLEDGE_DISCOVERED = "song_knowledge_discovered"
     SONG_LEARNED = "song_learned"
+    NEW_RELATIONSHIP_PROPOSE = "new_relationship_propose"
 
 
 class StimulusSource(str, Enum):
@@ -154,17 +160,76 @@ class VoiceMessage(Stimulus):
 
     kind: ClassVar[StimulusKind] = StimulusKind.VOICE_MESSAGE
 
+    message_uuid: str
     media_ref: MediaRef | None
     transcript: str | None
     client_msg_id: str
+    duration_ms: int
 
     def __post_init__(self) -> None:
         Stimulus.__post_init__(self)
+        _require_nonblank_string(self.message_uuid)
+        try:
+            UUID(self.message_uuid)
+        except (ValueError, TypeError, AttributeError):
+            _raise_invalid()
         _require_optional_instance(self.media_ref, MediaRef)
         _require_optional_nonblank_string(self.transcript)
         _require_nonblank_string(self.client_msg_id)
+        if type(self.duration_ms) is not int or self.duration_ms <= 0:
+            _raise_invalid()
         if self.media_ref is None and self.transcript is None:
             _raise_invalid()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class VoiceRecordingStarted(Stimulus):
+    """用户开始录音的瞬时协调事实。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.VOICE_RECORDING_STARTED
+    recording_id: str
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_nonblank_string(self.recording_id)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class VoiceRecordingCancelled(Stimulus):
+    """用户取消录音的瞬时协调事实。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.VOICE_RECORDING_CANCELLED
+    recording_id: str
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_nonblank_string(self.recording_id)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class VoiceRecordingCommitted(Stimulus):
+    """用户已提交录音并开始上传的协调事实。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.VOICE_RECORDING_COMMITTED
+    upload_id: str
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_nonblank_string(self.upload_id)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class VoiceUploadFailed(Stimulus):
+    """语音上传终止的协调事实，只携带稳定失败类别。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.VOICE_UPLOAD_FAILED
+    upload_id: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_nonblank_string(self.upload_id)
+        _require_nonblank_string(self.reason)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -178,6 +243,19 @@ class UserTyping(Stimulus):
     def __post_init__(self) -> None:
         Stimulus.__post_init__(self)
         _require_nonnegative_int(self.text_length)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NewRelationshipPropose(Stimulus):
+    """用户提出新的关系；当前版本默认接受，空字符串表示清除关系。"""
+
+    kind: ClassVar[StimulusKind] = StimulusKind.NEW_RELATIONSHIP_PROPOSE
+
+    relationship: str
+
+    def __post_init__(self) -> None:
+        Stimulus.__post_init__(self)
+        _require_instance(self.relationship, str)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

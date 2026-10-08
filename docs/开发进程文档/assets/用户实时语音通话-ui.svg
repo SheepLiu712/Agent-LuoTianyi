@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1220" height="1610" viewBox="0 0 1220 1610" role="img" aria-labelledby="title desc">
+  <title id="title">Android 用户实时语音通话 UI 草图</title>
+  <desc id="desc">四个手机界面分别展示呼叫中、已接通、重连中和聊天历史中的通话记录。</desc>
+  <defs>
+    <linearGradient id="pageBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f5f7fb"/>
+      <stop offset="1" stop-color="#e7ebf2"/>
+    </linearGradient>
+    <linearGradient id="activeBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7ebbd0"/>
+      <stop offset="0.54" stop-color="#b8d9df"/>
+      <stop offset="1" stop-color="#586d70"/>
+    </linearGradient>
+    <linearGradient id="chatBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b8dce8"/>
+      <stop offset="0.42" stop-color="#d8e8e7"/>
+      <stop offset="0.421" stop-color="#f4f5f7"/>
+      <stop offset="1" stop-color="#edf0f4"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#18202a" flood-opacity="0.18"/>
+    </filter>
+    <clipPath id="avatarClip1"><circle cx="308" cy="340" r="76"/></clipPath>
+    <clipPath id="avatarClip2"><circle cx="912" cy="340" r="76"/></clipPath>
+    <clipPath id="liveClip"><rect x="667" y="118" width="490" height="650" rx="38"/></clipPath>
+    <style>
+      .title { font: 700 30px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #18202a; }
+      .panel-label { font: 700 23px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #26313d; }
+      .caption { font: 400 16px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #66717e; }
+      .phone-text { font: 500 20px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #fff; }
+      .phone-small { font: 400 15px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #d8d8d8; }
+      .chat-text { font: 500 17px "Microsoft YaHei", "Noto Sans CJK SC", sans-serif; fill: #25313c; }
+      .statusbar { font: 600 13px "Microsoft YaHei", sans-serif; fill: #fff; }
+    </style>
+  </defs>
+
+  <rect width="1220" height="1610" fill="url(#pageBg)"/>
+  <text x="70" y="62" class="title">Android 实时语音通话 · UI/UX 状态草图</text>
+  <text x="70" y="94" class="caption">布局用于约束信息层级与状态切换；Live2D、背景和头像沿用项目现有资产。</text>
+
+  <!-- PREPARING / RINGING -->
+  <text x="64" y="142" class="panel-label">01  呼叫中</text>
+  <text x="64" y="171" class="caption">PREPARING / RINGING</text>
+  <g filter="url(#shadow)">
+    <rect x="63" y="188" width="490" height="650" rx="38" fill="#2B2B2B"/>
+  </g>
+  <rect x="238" y="204" width="140" height="25" rx="13" fill="#171717"/>
+  <text x="88" y="226" class="statusbar">09:41</text>
+  <g fill="none" stroke="#fff" stroke-width="2">
+    <path d="M500 216h17"/>
+    <path d="M505 211v10M511 208v13M517 205v16"/>
+  </g>
+  <circle cx="308" cy="340" r="82" fill="#dceef2" stroke="#f3f7f8" stroke-width="4"/>
+  <image x="232" y="264" width="152" height="152" preserveAspectRatio="xMidYMid slice" clip-path="url(#avatarClip1)" xlink:href="../../../app/assets/images/tianyi_icon.png" href="../../../app/assets/images/tianyi_icon.png"/>
+  <text x="308" y="457" text-anchor="middle" class="phone-text">正在呼叫天依…</text>
+  <g fill="#b9b9b9">
+    <circle cx="291" cy="489" r="4"/>
+    <circle cx="308" cy="489" r="4" opacity="0.7"/>
+    <circle cx="325" cy="489" r="4" opacity="0.4"/>
+  </g>
+  <text x="308" y="529" text-anchor="middle" class="phone-small">正在建立安全连接与语音会话</text>
+  <g transform="translate(308 734)">
+    <circle r="40" fill="#df3e45"/>
+    <path d="M-19 4c9 12 29 12 38 0l-9-10-8 7c-2 2-4 2-6 0l-7-7z" fill="#fff" transform="rotate(135)"/>
+  </g>
+  <text x="308" y="795" text-anchor="middle" class="phone-small">挂断</text>
+
+  <!-- ACTIVE -->
+  <text x="666" y="142" class="panel-label">02  已接通</text>
+  <text x="666" y="171" class="caption">ACTIVE · 全屏 Live2D</text>
+  <g filter="url(#shadow)">
+    <rect x="665" y="188" width="490" height="650" rx="38" fill="url(#activeBg)"/>
+  </g>
+  <g clip-path="url(#liveClip)">
+    <circle cx="925" cy="456" r="155" fill="#d9f3f2" opacity="0.45"/>
+    <path d="M752 680c26-129 102-194 174-194s152 66 177 194v165H752z" fill="#e8f2f2" opacity="0.95"/>
+    <path d="M826 443c0-80 43-132 101-132s104 52 104 132c0 64-44 111-104 111s-101-47-101-111z" fill="#f7e1d4"/>
+    <path d="M808 432c10-92 55-145 120-145 66 0 113 55 121 146-24-29-52-45-82-49-39-6-72 7-102 36-14 13-33 17-57 12z" fill="#65c8d2"/>
+    <path d="M837 349c-47 51-66 138-43 231M1019 349c46 51 65 138 43 231" fill="none" stroke="#59bdc8" stroke-width="28" stroke-linecap="round"/>
+    <circle cx="892" cy="445" r="6" fill="#35515d"/>
+    <circle cx="962" cy="445" r="6" fill="#35515d"/>
+    <path d="M908 486q19 13 38 0" fill="none" stroke="#b56d74" stroke-width="4" stroke-linecap="round"/>
+    <text x="925" y="640" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="18" fill="#42606a">Live2D 模型区域</text>
+  </g>
+  <rect x="840" y="204" width="140" height="25" rx="13" fill="#36515b" opacity="0.75"/>
+  <text x="690" y="226" class="statusbar">09:43</text>
+  <rect x="864" y="246" width="92" height="40" rx="20" fill="#1b262a" opacity="0.66"/>
+  <text x="910" y="272" text-anchor="middle" class="phone-text" font-size="18">05:23</text>
+  <g transform="translate(910 754)">
+    <circle r="40" fill="#df3e45"/>
+    <path d="M-19 4c9 12 29 12 38 0l-9-10-8 7c-2 2-4 2-6 0l-7-7z" fill="#fff" transform="rotate(135)"/>
+  </g>
+  <text x="910" y="815" text-anchor="middle" class="phone-small">挂断</text>
+
+  <!-- RECONNECTING -->
+  <text x="64" y="918" class="panel-label">03  短暂重连</text>
+  <text x="64" y="947" class="caption">RECONNECTING · 3 秒宽限</text>
+  <g filter="url(#shadow)">
+    <rect x="63" y="964" width="490" height="570" rx="38" fill="url(#activeBg)"/>
+  </g>
+  <path d="M137 1432c26-150 96-235 171-235 76 0 151 86 178 235v102H137z" fill="#e7f1f2"/>
+  <circle cx="308" cy="1175" r="105" fill="#f6ded1"/>
+  <path d="M199 1161c13-90 54-137 109-137 59 0 102 48 113 139-27-29-68-43-112-43-43 0-80 14-110 41z" fill="#62c4cf"/>
+  <rect x="63" y="964" width="490" height="570" rx="38" fill="#101518" opacity="0.70"/>
+  <rect x="142" y="1142" width="332" height="168" rx="24" fill="#20292d" opacity="0.94"/>
+  <g transform="translate(308 1197)" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round">
+    <path d="M-18 4a22 22 0 0 1 34-18"/>
+    <path d="M18-4a22 22 0 0 1-34 18"/>
+    <path d="M13-20l4 7-8 1M-13 20l-4-7 8-1"/>
+  </g>
+  <text x="308" y="1252" text-anchor="middle" class="phone-text">网络波动，正在恢复通话</text>
+  <text x="308" y="1283" text-anchor="middle" class="phone-small">保留计时、上下文和未播放音频</text>
+  <g transform="translate(308 1451)">
+    <circle r="40" fill="#df3e45"/>
+    <path d="M-19 4c9 12 29 12 38 0l-9-10-8 7c-2 2-4 2-6 0l-7-7z" fill="#fff" transform="rotate(135)"/>
+  </g>
+
+  <!-- HISTORY -->
+  <text x="666" y="918" class="panel-label">04  聊天历史</text>
+  <text x="666" y="947" class="caption">用户记录向右对齐 · 不可播放</text>
+  <g filter="url(#shadow)">
+    <rect x="665" y="964" width="490" height="570" rx="38" fill="url(#chatBg)"/>
+  </g>
+  <rect x="665" y="964" width="490" height="55" rx="38" fill="#24333b"/>
+  <rect x="665" y="997" width="490" height="22" fill="#24333b"/>
+  <text x="690" y="999" class="statusbar">09:50</text>
+  <text x="910" y="1000" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="18" font-weight="600" fill="#fff">天依</text>
+  <path d="M710 1044c46-35 99-44 150-18 42 21 80 22 120-1 48-28 98-19 150 18v155H710z" fill="#8bcad5" opacity="0.45"/>
+  <text x="910" y="1093" text-anchor="middle" font-family="Microsoft YaHei, sans-serif" font-size="15" fill="#42636d">Live2D 区域</text>
+  <line x1="665" y1="1198" x2="1155" y2="1198" stroke="#d7dce1"/>
+  <rect x="864" y="1230" width="253" height="54" rx="18" fill="#c6e8ed"/>
+  <text x="888" y="1263" class="chat-text">[语音通话] 05:23</text>
+  <rect x="919" y="1303" width="198" height="50" rx="18" fill="#c6e8ed"/>
+  <text x="943" y="1334" class="chat-text">[语音通话] 已取消</text>
+  <rect x="919" y="1372" width="198" height="50" rx="18" fill="#c6e8ed"/>
+  <text x="943" y="1403" class="chat-text">[语音通话] 未接听</text>
+  <rect x="692" y="1466" width="410" height="48" rx="22" fill="#fff" stroke="#d2d8dd"/>
+  <text x="718" y="1496" font-family="Microsoft YaHei, sans-serif" font-size="15" fill="#9aa3aa">输入消息…</text>
+
+  <text x="610" y="1580" text-anchor="middle" class="caption">红色仅用于“挂断”这一破坏性动作；重连、取消记录与状态提示均使用中性色。</text>
+</svg>

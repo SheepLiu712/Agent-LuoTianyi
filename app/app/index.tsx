@@ -14,7 +14,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   useColorScheme,
   useWindowDimensions,
@@ -24,6 +23,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { auth } from '../components/auth';
 import { MessageItem } from '../components/ChatBubbles';
+import { VoiceInputBar } from '../components/VoiceInputBar';
+import { VoiceRecordingOverlay } from '../components/VoiceRecordingOverlay';
 import { useChatLogic } from '../hooks/useChatLogic';
 import { useHistoryLogic } from '../hooks/useHistoryLogic';
 import { getDynamicUnreadStatus } from '../utils/dynamics';
@@ -85,7 +86,10 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
     handleSendImage,
     handleWebViewMessage,
     handleToggleAgentAudio,
-  } = useChatLogic(webviewRef, username, message_token);
+    toggleVoicePlayback,
+    retryVoice,
+    voiceInput,
+  } = useChatLogic(webviewRef, username, message_token, !showPreferences && !showLlmSettings && !showDynamics);
 
   const { loadHistory, historyLoading } = useHistoryLogic(addHistoryMessage);
 
@@ -402,7 +406,7 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             ref={flatListRef}
             data={messages}
             inverted={true}
-            renderItem={({ item }) => <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} theme={theme} />}
+            renderItem={({ item }) => <MessageItem message={item} onToggleAgentAudio={handleToggleAgentAudio} onToggleVoicePlayback={toggleVoicePlayback} onRetryVoice={retryVoice} theme={theme} />}
             keyExtractor={(item) => item.uuid}
             onEndReached={() => {
               if (username && message_token && !historyLoading) {
@@ -435,40 +439,28 @@ export default function Index({ onLogout }: { onLogout?: () => void }) {
             { paddingBottom: Math.max(insets.bottom, 10), backgroundColor: theme.inputBar, borderTopColor: theme.inputBorder },
           ]}
         >
-          <TextInput
-            style={[
-              styles.inputField,
-              {
-                backgroundColor: theme.inputBackground,
-                color: theme.inputText,
-                height: Math.min(Math.max(40, inputHeight), 120),
-              },
-            ]}
-            placeholder="给天依发消息..."
-            placeholderTextColor={theme.placeholder}
-            value={inputText}
-            onChangeText={setInputText}
-            multiline={true}
-            onContentSizeChange={(e) => setInputHeight(e.nativeEvent.contentSize.height)}
+          <VoiceInputBar
+            mode={voiceInput.mode}
+            inputText={inputText}
+            inputHeight={inputHeight}
+            onInputHeightChange={setInputHeight}
+            onInputChange={setInputText}
+            onToggleMode={voiceInput.toggleMode}
+            onSendText={handleSendText}
+            onSendImage={handleSendImage}
+            canSend={canSend}
+            canSendImage={canSendImage}
+            captureState={voiceInput.captureState}
+            pressIn={voiceInput.pressIn}
+            pressMove={voiceInput.pressMove}
+            pressOut={voiceInput.pressOut}
+            cancelBySystem={voiceInput.cancelBySystem}
+            theme={theme}
           />
-
-          <TouchableOpacity style={styles.iconButton} onPress={handleSendImage} disabled={!canSendImage}>
-            <Image
-              source={
-                canSendImage ? require('../assets/images/image_button_activate.png') : require('../assets/images/image_button_un.png')
-              }
-              style={styles.iconImage}
-            />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.iconButton} onPress={handleSendText} disabled={!canSend}>
-            <Image
-              source={canSend ? require('../assets/images/send_button_activate.png') : require('../assets/images/send_button_un.png')}
-              style={styles.iconImage}
-            />
-          </TouchableOpacity>
         </View>
       </View>
+
+      {voiceInput.captureState === 'Recording' || voiceInput.captureState === 'CancelZone' ? <VoiceRecordingOverlay elapsedMs={voiceInput.elapsedMs} cancelZone={voiceInput.isCancelZone} meter={voiceInput.smoothedMeter} theme={theme} /> : null}
 
       <Animated.View
         pointerEvents={drawerOpen ? 'auto' : 'none'}
@@ -632,26 +624,6 @@ const styles = StyleSheet.create({
     padding: 10,
     borderTopWidth: 1,
     borderTopColor: '#ddd',
-  },
-  inputField: {
-    flex: 1,
-    minHeight: 40,
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    paddingHorizontal: 15,
-    marginRight: 10,
-    paddingTop: 10,
-    paddingBottom: 10,
-    textAlignVertical: 'top',
-  },
-  iconButton: {
-    padding: 5,
-    marginLeft: 5,
-  },
-  iconImage: {
-    width: 30,
-    height: 30,
-    resizeMode: 'stretch',
   },
   debugPanel: {
     position: 'absolute',

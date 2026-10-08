@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import wave
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -35,6 +36,74 @@ class FakeEventStore:
     async def add_event(self, event):
         self.events.append(event)
         return "event-id"
+
+
+def _write_playable_song_output(song_dir: Path, song_name: str) -> None:
+    song_dir.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(song_dir / f"{song_name}.mp3"), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(8000)
+        audio.writeframes(b"\x01\x00" * 16000)
+    (song_dir / f"{song_name}.lrc").write_text("[00:00.00]歌词", encoding="utf-8")
+    (song_dir / f"{song_name}.json").write_text(
+        json.dumps(
+            {
+                "title": song_name,
+                "segments": [{"description": "唱段", "start_time": 0, "end_time": 1, "lyrics": []}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_auto_song_learner_does_not_mark_invalid_segments_as_learned(monkeypatch, tmp_path):
+    monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
+    monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
+    monkeypatch.chdir(tmp_path)
+    wishlist = WishlistManager(
+        str(tmp_path / "music" / "metadata.json"),
+        SimpleNamespace(info=lambda *_: None, warning=lambda *_: None),
+    )
+    wishlist.add("坏歌")
+    learner = AutoSongLearner({}, "洛天依", wishlist, resource_path=tmp_path / "music")
+    song_dir = learner.songs_dir / "坏歌"
+    _write_playable_song_output(song_dir, "坏歌")
+    config_path = song_dir / "坏歌.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["segments"][0]["end_time"] = 3
+    config_path.write_text(json.dumps(config, ensure_ascii=False), encoding="utf-8")
+
+    assert learner._get_existing_song_names() == set()
+    assert learner._finalize_song("坏歌", "坏歌", song_dir) is None
+    assert wishlist.wished_songs["坏歌"].status == "awaiting_audio"
+    assert wishlist.recently_learned == []
+    assert not (tmp_path / "data" / "plugin_scheduler" / "newly_learned_songs.json").exists()
+
+
+def test_auto_song_learner_returns_new_song_without_unused_notification_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(AutoSongLearner, "_check_songlearner_models", lambda self: True)
+    monkeypatch.setattr(AutoSongLearner, "_validate_qq_credential", lambda self: True)
+    monkeypatch.chdir(tmp_path)
+    wishlist = WishlistManager(
+        str(tmp_path / "music" / "metadata.json"),
+        SimpleNamespace(info=lambda *_: None, warning=lambda *_: None),
+    )
+    wishlist.add("新歌")
+    learner = AutoSongLearner({}, "洛天依", wishlist, resource_path=tmp_path / "music")
+
+    def learn_one(name):
+        song_dir = learner.songs_dir / name
+        _write_playable_song_output(song_dir, name)
+        return learner._finalize_song(name, name, song_dir)
+
+    monkeypatch.setattr(learner, "_try_learn_one", learn_one)
+
+    result = learner.try_learn_pending()
+
+    assert result.learned == ["新歌"]
+    assert not (tmp_path / "data" / "plugin_scheduler" / "newly_learned_songs.json").exists()
 
 
 def test_qq_song_singer_validation_accepts_only_luo_tianyi():
@@ -717,10 +786,7 @@ def test_auto_song_learner_passes_singer_name_to_workflow(monkeypatch, tmp_path)
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     sl_output = learner.songs_dir / "Song A"
-    sl_output.mkdir(parents=True)
-    (sl_output / "Song A.mp3").write_bytes(b"mp3")
-    (sl_output / "Song A.lrc").write_text("[00:00.00]x", encoding="utf-8")
-    (sl_output / "Song A.json").write_text('{"title": "Song A"}', encoding="utf-8")
+    _write_playable_song_output(sl_output, "Song A")
 
     assert learner._learn_via_songlearner("Song A") == "Song A"
     assert "--singer_name" in captured["args"]
@@ -772,13 +838,7 @@ def test_auto_song_learner_records_redirected_wish_and_learned_target(monkeypatc
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     sl_output = learner.songs_dir / redirected_name
-    sl_output.mkdir(parents=True)
-    (sl_output / f"{redirected_name}.mp3").write_bytes(b"mp3")
-    (sl_output / f"{redirected_name}.lrc").write_text("[00:00.00]x", encoding="utf-8")
-    (sl_output / f"{redirected_name}.json").write_text(
-        json.dumps({"title": redirected_name}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_playable_song_output(sl_output, redirected_name)
 
     assert learner._learn_via_songlearner("海") == redirected_name
 
@@ -1148,19 +1208,10 @@ def test_auto_song_learner_does_not_report_redirect_to_existing_song_as_new(
     )
     existing_name = "星光入梦"
     existing_dir = learner.songs_dir / existing_name
-    existing_dir.mkdir(parents=True)
-    (existing_dir / f"{existing_name}.mp3").write_bytes(b"mp3")
-    (existing_dir / f"{existing_name}.lrc").write_text("[00:00.00]歌词", encoding="utf-8")
-    (existing_dir / f"{existing_name}.json").write_text(
-        json.dumps({"title": existing_name}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _write_playable_song_output(existing_dir, existing_name)
     monkeypatch.setattr(learner, "_try_learn_one", lambda _name: existing_name)
-    notifications = []
-    monkeypatch.setattr(learner, "_notify_new_songs", notifications.append)
 
     result = learner.try_learn_pending()
 
     assert result.learned == []
     assert result.already_learned == [existing_name]
-    assert notifications == []

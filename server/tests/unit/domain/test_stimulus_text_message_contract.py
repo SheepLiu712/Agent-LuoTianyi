@@ -64,6 +64,10 @@ def test_agent_domain_exports_registered_contract_without_persistence_policy() -
         "TEXT_MESSAGE": "text_message",
         "IMAGE_MESSAGE": "image_message",
         "VOICE_MESSAGE": "voice_message",
+        "VOICE_RECORDING_STARTED": "voice_recording_started",
+        "VOICE_RECORDING_CANCELLED": "voice_recording_cancelled",
+        "VOICE_RECORDING_COMMITTED": "voice_recording_committed",
+        "VOICE_UPLOAD_FAILED": "voice_upload_failed",
         "USER_TYPING": "user_typing",
         "IMAGE_SELECTION_OPENED": "image_selection_opened",
         "IMAGE_SELECTION_CLOSED": "image_selection_closed",
@@ -84,6 +88,7 @@ def test_agent_domain_exports_registered_contract_without_persistence_policy() -
         "ACTIVITY_ENDED": "activity_ended",
         "SONG_KNOWLEDGE_DISCOVERED": "song_knowledge_discovered",
         "SONG_LEARNED": "song_learned",
+        "NEW_RELATIONSHIP_PROPOSE": "new_relationship_propose",
     }
     assert {item.name: item.value for item in agent_domain.StimulusSource} == {
         "USER": "user",

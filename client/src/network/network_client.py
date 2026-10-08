@@ -1,5 +1,6 @@
 import os
 import re
+from dataclasses import fields
 from typing import Callable, List, Tuple
 
 from . import AuthApi, WsTransport
@@ -8,12 +9,16 @@ from ..utils.logger import get_logger
 from ..utils.http_client import HttpClientFactory
 from ..safety import credential
 
-
 _SAFE_UUID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_CONVERSATION_ITEM_FIELDS = {field.name for field in fields(ConversationItem)}
 
 
 def _is_safe_uuid(value: str | None) -> bool:
     return bool(value and _SAFE_UUID_RE.fullmatch(value))
+
+
+def _conversation_item_from_dict(item: dict) -> ConversationItem:
+    return ConversationItem(**{key: value for key, value in item.items() if key in _CONVERSATION_ITEM_FIELDS})
 
 
 class NetworkClient:
@@ -96,8 +101,9 @@ class NetworkClient:
         except Exception as exc:
             return False, str(exc)
 
-
-    def send_chat(self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0, client_msg_id: str | None = None):
+    def send_chat(
+        self, text: str, is_proactive: bool = False, ack_timeout: float = 10.0, client_msg_id: str | None = None
+    ):
         if not self.user_id or not self.message_token:
             return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
 
@@ -130,7 +136,7 @@ class NetworkClient:
         except Exception as exc:
             self.logger.error(f"Connection Error: {exc}")
             return {"ok": False, "request_id": client_msg_id, "error": f"Connection Error: {exc}"}
-        
+
     def send_typing(self, text_length: int, ack_timeout: float = 10.0, client_msg_id: str | None = None):
         if not self.user_id or not self.message_token:
             return {"ok": False, "request_id": client_msg_id, "error": "Not logged in", "drop": True}
@@ -263,7 +269,7 @@ class NetworkClient:
             if "history" not in data:
                 return [], -1
 
-            history_items = [ConversationItem(**item) for item in data.get("history", [])]
+            history_items = [_conversation_item_from_dict(item) for item in data.get("history", [])]
             history_items = self._clean_history(history_items)
             return history_items, data.get("start_index", 0)
         except Exception as exc:
@@ -479,7 +485,6 @@ class NetworkClient:
             self.logger.error(f"标记动态已读失败: {exc}")
             return {"ok": False, "message": str(exc)}
 
-
     def network_set_message_listener(
         self,
         listener: Callable[[dict], None] | None,
@@ -513,7 +518,7 @@ class NetworkClient:
             modified_history.append(item)
 
         return modified_history
-    
+
     def _get_image_from_server(self, item: ConversationItem) -> ConversationItem:
         try:
             if not _is_safe_uuid(item.uuid):
@@ -547,7 +552,6 @@ class NetworkClient:
                 f.write(resp.content)
 
             item.content = new_file_path
-            
 
             payload.update({"image_client_path": item.content})
             update_resp = self.session.post(

@@ -51,4 +51,7 @@ if __name__ == "__main__":
     admin_url = f"http://{display_host}:{port}/admin"
     logger.info("控制台地址: %s", admin_url)
     print(f"\nAgentLuo 控制台: {admin_url}\n", flush=True)
-    asyncio.run(run_server(host, port))
+    try:
+        asyncio.run(run_server(host, port))
+    except KeyboardInterrupt:
+        pass

@@ -72,7 +72,7 @@ class StructuredResponseParser:
             planned_song = self._clean_song_token(sing_plan[0])
             if get_unified_song_name(song) == get_unified_song_name(planned_song):
                 segment = sing_plan[1] or ""
-        return ReplyDraft(content=f"唱了《{song}》", sound_content="", tone="", expression=None, sing=(song, segment))
+        return ReplyDraft(content=f"唱了《{song}》", sound_content="", tone="", expression="sing", sing=(song, segment))
 
     @staticmethod
     def _clean_song_token(value: str) -> str:

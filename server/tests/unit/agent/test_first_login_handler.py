@@ -11,8 +11,9 @@ from src.agent import Agent
 from src.agent.handlers.stimulus import proactive as proactive_module
 from src.agent.handlers.stimulus.proactive import FirstLoginHandler
 from src.agent.handlers.stimulus.router import StimulusRouter
-from src.agent_runtime import agent_runtime as runtime_module
+from src.agent.skills.cognitive import ReplyDraft
 from src.agent.skills.expression.prepared_speech import PreparedSpeechCatalog
+from src.agent_runtime import agent_runtime as runtime_module
 
 
 class PlanSink:
@@ -25,6 +26,34 @@ class PlanSink:
             plan_id=plan.plan_id,
             status=d.PlanAcceptanceStatus.ACCEPTED,
         )
+
+
+class Composer:
+    def __init__(self, drafts=()):
+        self.drafts = tuple(drafts)
+        self.calls = []
+
+    async def compose(self, invocation, **kwargs):
+        self.calls.append({"invocation": invocation, **kwargs})
+        return self.drafts
+
+
+class CancellingComposer(Composer):
+    async def compose(self, invocation, **kwargs):
+        result = await super().compose(invocation, **kwargs)
+        invocation.cancellation.cancel(d.CancellationReason.SUPERSEDED)
+        return result
+
+
+class Conversation:
+    def __init__(self):
+        self.entries = []
+
+    async def append(self, values) -> None:
+        self.entries.extend(values)
+
+    def read(self):
+        return SimpleNamespace(summary=SimpleNamespace(text="已有总结"), entries=tuple(self.entries))
 
 
 def first_login_request(reason: str = "first_login") -> d.HandleStimulusRequest:
@@ -77,6 +106,7 @@ async def test_missing_prepared_name_fails_without_silent_skip(monkeypatch):
     handler = FirstLoginHandler(
         prepared_names=("missing",),
         prepared_speech=PreparedSpeechCatalog({}),
+        composition=Composer(),
     )
     agent = Agent(
         character_id="luotianyi",
@@ -120,34 +150,43 @@ async def test_runtime_injects_configured_names_into_real_handler(runtime_depend
         # Then: the placeholder is replaced and configured order is retained.
         assert isinstance(handler, FirstLoginHandler)
         assert handler._prepared_names == ("welcome_1", "welcome_2")
+        assert handler._composition is runtime.skills.response_composition
     finally:
         await runtime.shutdown()
 
 
 @pytest.mark.asyncio
-async def test_due_reminder_enters_conversation_and_emits_say_plan():
+async def test_due_reminder_generates_then_persists_and_emits_formal_reply():
     # Given: a non-first-login due fact reaches the real proactive handler.
+    composer = Composer(
+        (
+            ReplyDraft(
+                content="今天好像有个特别的日子，你有什么安排吗？",
+                sound_content="今天好像有个特别的日子，你有什么安排吗？",
+                tone="happy",
+                expression="smile",
+            ),
+        )
+    )
     handler = FirstLoginHandler(
         prepared_names=(),
         prepared_speech=PreparedSpeechCatalog({}),
+        composition=composer,
     )
     agent = Agent(
         character_id="luotianyi",
         stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),)),
     )
     sink = PlanSink()
-    entries = []
-
-    async def append(values) -> None:
-        entries.extend(values)
-
+    conversation = Conversation()
     context = SimpleNamespace(
         identity=SimpleNamespace(
             interaction_id="interaction",
             character_id="luotianyi",
             user_id="user",
         ),
-        conversation=SimpleNamespace(append=append),
+        conversation=conversation,
+        user=SimpleNamespace(read=lambda: SimpleNamespace()),
     )
 
     # When: Agent handles the reminder through its public handle entrypoint.
@@ -157,9 +196,75 @@ async def test_due_reminder_enters_conversation_and_emits_say_plan():
         context=context,
     )
 
-    # Then: cognition persists one agent turn and emits a normal Say plan for realization.
+    # Then: the prompt stays internal; only the generated reply is persisted and realized.
     assert report.request_status is d.HandlingRequestStatus.COMPLETED
-    assert len(entries) == 1
+    assert composer.calls[0]["reply_topic"] == "有一项到期提醒（节日），请自然地告诉用户并关心用户的安排。"
+    assert composer.calls[0]["conversation_history"] == "已有总结"
+    assert composer.calls[0]["invocation"].user_id == "user"
+    assert [entry.content.text for entry in conversation.entries] == ["今天好像有个特别的日子，你有什么安排吗？"]
     assert len(sink.values) == 1
     assert len(sink.values[0].actions) == 1
-    assert isinstance(sink.values[0].actions[0], d.Say)
+    action = sink.values[0].actions[0]
+    assert isinstance(action, d.Say)
+    assert action.content == "今天好像有个特别的日子，你有什么安排吗？"
+    assert action.sound_content == action.content
+    assert action.tone.value == "happy"
+    assert action.expression.expression_id == "smile"
+    assert action.message_id == conversation.entries[0].entry_id
+
+
+@pytest.mark.asyncio
+async def test_due_reminder_with_no_deliverable_generation_does_not_persist_prompt_or_emit_plan():
+    composer = Composer((ReplyDraft(content="", sound_content="", tone="normal", expression=None),))
+    handler = FirstLoginHandler(
+        prepared_names=(),
+        prepared_speech=PreparedSpeechCatalog({}),
+        composition=composer,
+    )
+    agent = Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),)),
+    )
+    sink = PlanSink()
+    conversation = Conversation()
+    context = SimpleNamespace(
+        identity=SimpleNamespace(interaction_id="interaction", character_id="luotianyi", user_id="user"),
+        conversation=conversation,
+        user=SimpleNamespace(read=lambda: SimpleNamespace()),
+    )
+
+    report = await agent.handle_stimulus(first_login_request("holiday"), sink, context=context)
+
+    assert report.request_status is d.HandlingRequestStatus.COMPLETED
+    assert report.emitted_plan_ids == ()
+    assert conversation.entries == []
+    assert sink.values == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_due_reminder_does_not_persist_or_emit_late_generation():
+    composer = CancellingComposer(
+        (ReplyDraft(content="过期回复", sound_content="过期回复", tone="normal", expression=None),)
+    )
+    handler = FirstLoginHandler(
+        prepared_names=(),
+        prepared_speech=PreparedSpeechCatalog({}),
+        composition=composer,
+    )
+    agent = Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter(((d.StimulusKind.PROACTIVE_PROMPT_DUE, handler),)),
+    )
+    sink = PlanSink()
+    conversation = Conversation()
+    context = SimpleNamespace(
+        identity=SimpleNamespace(interaction_id="interaction", character_id="luotianyi", user_id="user"),
+        conversation=conversation,
+        user=SimpleNamespace(read=lambda: SimpleNamespace()),
+    )
+
+    report = await agent.handle_stimulus(first_login_request("holiday"), sink, context=context)
+
+    assert report.request_status is d.HandlingRequestStatus.CANCELLED
+    assert conversation.entries == []
+    assert sink.values == []

@@ -1,13 +1,14 @@
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
 
-
 import src.world.bili_event_updater.task as task_module
 from src.infrastructure.persistence.database.event_models import UnifiedEventType
-from src.world.bili_event_updater.task import BiliEventUpdateTask
 from src.world.bili_event_updater.official_feed_fetcher import OfficialFeedFetcher
+from src.world.bili_event_updater.task import BiliEventUpdateTask
+from src.world.bili_event_updater.types import OfficialDynamic
 from src.world.bili_event_updater.updater import BiliEventUpdater
 
 
@@ -66,6 +67,42 @@ def test_official_feed_fetcher_save_cache_merges_existing_character_cache(tmp_pa
     assert saved["miku"] == ["new-1"]
 
 
+def test_official_feed_fetcher_marks_ids_only_after_processing(tmp_path, monkeypatch):
+    cache_file = tmp_path / "feed_cache.json"
+    fetcher = OfficialFeedFetcher({"data_file": str(cache_file), "bilibili_uids": {"luotianyi": "36081646"}})
+    item = OfficialDynamic(
+        uid="36081646",
+        account_name="洛天依",
+        character="luotianyi",
+        platform="bilibili",
+        dynamic_id="new-1",
+        dynamic_type="DYNAMIC_TYPE_WORD",
+        content="hello",
+        raw_content="hello",
+        pics=[],
+        publish_time="2026-09-26T18:00:00",
+        source_url="https://www.bilibili.com/opus/new-1",
+    )
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"code": 0, "data": {"items": [{"id_str": "new-1"}], "offset": ""}}
+
+    monkeypatch.setattr(fetcher.session, "get", lambda *args, **kwargs: Response())
+    monkeypatch.setattr(fetcher, "_parse_bili_item", lambda *args, **kwargs: item)
+    monkeypatch.setattr("src.world.bili_event_updater.official_feed_fetcher.time.sleep", lambda _: None)
+
+    assert fetcher.fetch_all_new() == [item]
+    assert fetcher.seen_ids == {}
+    assert not cache_file.exists()
+    fetcher.mark_processed([item])
+
+    assert json.loads(cache_file.read_text(encoding="utf-8"))["36081646"] == ["new-1"]
+    assert fetcher.fetch_all_new() == []
+
+
 @pytest.mark.asyncio
 async def test_bili_event_update_run_once_skips_without_updater():
     task = BiliEventUpdateTask({})
@@ -95,12 +132,16 @@ class _Fetcher:
     def __init__(self, cookie_ok=True, items=()):
         self.cookie_ok = cookie_ok
         self.items = list(items)
+        self.processed = []
 
     async def check_and_update_cookie_validity(self):
         return self.cookie_ok
 
     def fetch_all_new(self):
         return list(self.items)
+
+    def mark_processed(self, items):
+        self.processed.extend(items)
 
 
 class _Parser:
@@ -153,6 +194,21 @@ async def test_bili_updater_returns_zero_counts_without_new_dynamics():
 
 
 @pytest.mark.asyncio
+async def test_bili_fetch_runs_off_event_loop():
+    class ThreadRecordingFetcher(_Fetcher):
+        def fetch_all_new(self):
+            self.worker_thread_id = threading.get_ident()
+            return []
+
+    fetcher = ThreadRecordingFetcher()
+    updater = _updater(fetcher=fetcher)
+
+    await updater.fetch_and_update_events()
+
+    assert fetcher.worker_thread_id != threading.get_ident()
+
+
+@pytest.mark.asyncio
 async def test_bili_updater_normalizes_events_and_counts_created_only():
     store = _EventStore(results=["e1", None])
     updater = _updater(
@@ -168,16 +224,34 @@ async def test_bili_updater_normalizes_events_and_counts_created_only():
     assert first["is_recurring"] is False
     assert first["is_personal"] is False
     assert second["event_type"] == UnifiedEventType.GENERAL.value
+    assert updater.fetcher.processed == [{"id": 1}]
 
 
 @pytest.mark.asyncio
-async def test_bili_updater_treats_parse_failure_as_zero_counts():
-    # 记录当前行为：cookie 通过后的抓取/解析异常被吞掉并返回零计数（任务据此报告成功）。
+async def test_bili_updater_reports_parse_failure_and_does_not_acknowledge():
     updater = _updater(
         fetcher=_Fetcher(items=[{"id": 1}]),
         parser=_Parser(error=RuntimeError("parse boom")),
     )
-    assert await updater.fetch_and_update_events() == {"raw": 0, "parsed": 0, "updated": 0}
+    with pytest.raises(RuntimeError, match="parse boom"):
+        await updater.fetch_and_update_events()
+    assert updater.fetcher.processed == []
+
+
+@pytest.mark.asyncio
+async def test_bili_updater_reports_store_failure_and_does_not_acknowledge():
+    class BrokenStore:
+        async def add_event(self, event):
+            raise RuntimeError("store boom")
+
+    updater = _updater(
+        fetcher=_Fetcher(items=[{"id": 1}]),
+        parser=_Parser(events=[{"event_type": "concert"}]),
+        event_store=BrokenStore(),
+    )
+    with pytest.raises(RuntimeError, match="store boom"):
+        await updater.fetch_and_update_events()
+    assert updater.fetcher.processed == []
 
 
 def test_bili_event_type_mapping_is_normalized():

@@ -29,3 +29,4 @@ class _ReplyAttempt:
     remaining_plans: set[str] = field(default_factory=set)
     report: d.HandlingReport | None = None
     interrupted: bool = False
+    has_committed_plan: bool = False

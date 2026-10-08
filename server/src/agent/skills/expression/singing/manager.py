@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.domain.music_type import OneLyricLine, SongMetadata, SongSegment, WishEntry
 from src.domain.tool_type import MyTool
+from src.infrastructure.media.song_asset_validation import playable_segments
 from src.utils.helpers import get_unified_song_name
 from src.utils.logger import get_logger
 
@@ -88,15 +89,13 @@ class SingingManager:
             emotion_tags = [emotion_tags]
         if not isinstance(emotion_tags, list):
             emotion_tags = []
-        segments = [
-            SongSegment(
-                description=item.get("description", ""),
-                start_time=item.get("start_time", 0),
-                end_time=item.get("end_time", 0),
-                lyrics=item.get("lyrics", ""),
-            )
-            for item in song_config.get("segments", [])
-        ]
+        raw_segments = song_config.get("segments", [])
+        segments = playable_segments(raw_segments, audio_file)
+        if not segments:
+            self.logger.warning(f"No playable segments for song {song}")
+            return None
+        if len(segments) != len(raw_segments):
+            self.logger.warning(f"Ignored {len(raw_segments) - len(segments)} invalid segment(s) in song {song}")
         metadata = SongMetadata(
             song_name=song,
             title=title,
@@ -201,16 +200,20 @@ class SingingManager:
         song_metadata = self.get_song_metadata(safe_song_name)
         if not song_metadata:
             return "", []
-        if not song_metadata.segments:
+        segments = playable_segments(song_metadata.segments, song_metadata.song_path)
+        if not segments:
             self.add_wished_song(safe_song_name)
             return "", []
-        return song_metadata.song_name, [segment.description for segment in song_metadata.segments]
+        return song_metadata.song_name, [segment.description for segment in segments]
 
     def get_songs_can_sing(self, max_song_num: int = 5) -> Dict[str, Any]:
         song_and_desc = {}
         # shuffle and get max_song_num songs
-        selected_songs = random.sample(list(self.all_songs.items()), min(max_song_num, len(self.all_songs)))
-        for song_name, metadata in selected_songs:
+        singable = [
+            metadata for metadata in self.all_songs.values() if playable_segments(metadata.segments, metadata.song_path)
+        ]
+        selected_songs = random.sample(singable, min(max_song_num, len(singable)))
+        for metadata in selected_songs:
             song_and_desc[metadata.song_name] = metadata.description
 
         # to json string
@@ -306,7 +309,11 @@ class SingingManager:
     @staticmethod
     def _find_segment(song_metadata: SongMetadata, description: str) -> SongSegment | None:
         return next(
-            (segment for segment in song_metadata.segments if segment.description == description),
+            (
+                segment
+                for segment in playable_segments(song_metadata.segments, song_metadata.song_path)
+                if segment.description == description
+            ),
             None,
         )
 

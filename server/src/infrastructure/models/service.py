@@ -1,5 +1,7 @@
 from typing import Dict, Optional
 
+from src.infrastructure.models.audio.interface import AudioModelAPIFactory, AudioModelAPIInterface
+from src.infrastructure.models.audio.module import AudioModelModule
 from src.infrastructure.models.client_execution import ClientModelExecutor
 from src.infrastructure.models.llm.interface import LLMAPIFactory, LLMAPIInterface
 from src.infrastructure.models.llm.module import LLMModule
@@ -19,11 +21,14 @@ class LLMService:
         # 创建LLM和VLM接口
         self.llms_config = config.get("available_llms", {})
         self.vlms_config = config.get("available_vlms", {})
+        self.audio_models_config = config.get("available_audio_models", {})
         self.llm_interfaces: Dict[str, LLMAPIInterface] = self._create_llm_interfaces()
         self.vlm_interfaces: Dict[str, VLMAPIInterface] = self._create_vlm_interfaces()
+        self.audio_model_interfaces: Dict[str, AudioModelAPIInterface] = self._create_audio_model_interfaces()
 
         self.llm_modules: Dict[str, LLMModule] = {}
         self.vlm_modules: Dict[str, VLMModule] = {}
+        self.audio_model_modules: Dict[str, AudioModelModule] = {}
 
     def ensure_dependencies(self) -> None:
         """检查 LLM 服务的基础依赖已经初始化。"""
@@ -33,6 +38,8 @@ class LLMService:
             "vlm_interfaces": self.vlm_interfaces,
             "llm_modules": self.llm_modules,
             "vlm_modules": self.vlm_modules,
+            "audio_model_interfaces": self.audio_model_interfaces,
+            "audio_model_modules": self.audio_model_modules,
         }
         missing = [name for name, value in required.items() if value is None]
         if missing:
@@ -86,6 +93,27 @@ class LLMService:
         self.vlm_modules[module_name] = module
         return module
 
+    def register_audio_model_module(self, module_name: str, module_config: Dict) -> AudioModelModule:
+        """按显式模型与模板配置注册通用音频模型模块。"""
+        audio_config = module_config.get("audio", {})
+        interface_name = audio_config.get("name", "")
+        interface = self.audio_model_interfaces.get(interface_name)
+        if interface is None:
+            raise ValueError(f"音频模型接口未找到: {interface_name}, 无法注册模块: {module_name}")
+        prompt_name = module_config.get("prompt_name")
+        prompt_template = self.prompt_manager.get_template(prompt_name) if prompt_name else None
+        if prompt_template is None:
+            raise ValueError(f"Prompt模板未找到: {prompt_name}, 无法注册音频模块: {module_name}")
+        module = AudioModelModule(
+            module_name,
+            module_config,
+            prompt_template,
+            interface,
+            client_llm_executor=self.client_llm_executor,
+        )
+        self.audio_model_modules[module_name] = module
+        return module
+
     def get_llm_interface_info(self) -> Dict[str, Dict]:
         """获取所有已注册的LLM接口信息"""
         return {name: interface.get_interface_info() for name, interface in self.llm_interfaces.items()}
@@ -93,6 +121,10 @@ class LLMService:
     def get_vlm_interface_info(self) -> Dict[str, Dict]:
         """获取所有已注册的VLM接口信息"""
         return {name: interface.get_interface_info() for name, interface in self.vlm_interfaces.items()}
+
+    def get_audio_model_interface_info(self) -> Dict[str, Dict]:
+        """获取所有已注册的音频模型接口信息，不包含密钥。"""
+        return {name: interface.get_interface_info() for name, interface in self.audio_model_interfaces.items()}
 
     def get_client_model_types(self) -> list:
         """返回客户端委托需求；不包含服务商、地址、模型或密钥。"""
@@ -104,7 +136,7 @@ class LLMService:
             type_id = str(item.get("id") or "").strip()
             name = str(item.get("name") or "").strip()
             model_kind = str(item.get("model_kind") or "").strip().lower()
-            if not type_id or not name or model_kind not in {"llm", "vlm"}:
+            if not type_id or not name or model_kind not in {"llm", "vlm", "audio"}:
                 continue
             types.append(
                 {
@@ -140,3 +172,12 @@ class LLMService:
             except Exception as e:
                 self.logger.error(f"创建VLM接口失败: {vlm_name}, 错误: {e}")
         return vlm_interfaces
+
+    def _create_audio_model_interfaces(self) -> Dict[str, AudioModelAPIInterface]:
+        interfaces = {}
+        for name, config in self.audio_models_config.items():
+            try:
+                interfaces[name] = AudioModelAPIFactory.create_interface(config)
+            except Exception as exc:
+                self.logger.error(f"创建音频模型接口失败: {name}, 错误: {exc}")
+        return interfaces

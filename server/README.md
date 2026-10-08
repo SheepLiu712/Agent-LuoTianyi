@@ -59,13 +59,13 @@ AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天
     python -m pip install -e ".[dev]"
     ```
 
-    当前安装形态是**从仓库 checkout 进行 editable install**。`config/`、`res/` 和 `data/` 是部署资源或运行数据，不打进 Python wheel；因此安装完成后仍应从 `server` 目录启动。VCPedia 默认模板规则另有一份包内资源随 wheel 分发，用于源码配置不存在时的加载；这不代表 wheel 已包含整个服务所需的部署资源。
+    当前安装形态是**从仓库 checkout 进行 editable install**。`config/`、`res/` 和 `data/` 是部署资源或运行数据，不打进 Python wheel；因此安装完成后仍应从 `server` 目录启动。VCPedia 模板规则统一从 `src/world/get_new_songs/vcpedia_templates.json` 包内资源加载，源码运行与 wheel 安装使用同一份规则；这不代表 wheel 已包含整个服务所需的部署资源。
 
     VCPedia 升级注意：
     - 安装项目依赖（包括 `mwparserfromhell`、`zhconv`），不要只复制采集模块；模块级依赖缺失会影响 `src.world` 导入。
     - `crawler.merge_rendered_fragments` 与 `crawler.use_llm` 缺省均开启；原配置显式 `false` 不会被改成开启。关闭前者禁止可选片段 POST，关闭后者禁止总结与补提模型注册/调用；正常页面 GET 不受这两个可选功能开关禁止。
     - 总结使用 `llm_module`；补提使用独立 `extraction_llm_module`，模板选择 `dsv4-flash`（DeepSeek）并在 `available_llms` 定义对应接口。需按配置准备环境变量和提示词资源；不要将 API Key 写进仓库。启用且明确引用无效接口的配置会在初始化报错，未配置模块不借用另一个模型替代。
-    - 默认规则同时位于 `config/vcpedia_templates.json` 与 `src/world/get_new_songs/vcpedia_templates.json`，发布默认规则时两份同步。源码文件存在但损坏会明确失败，不隐式回退。
+    - 默认规则仅位于 `src/world/get_new_songs/vcpedia_templates.json`，随代码审查和发布，不读取 `config/` 中的覆盖文件。包内规则缺失或损坏会明确失败，不隐式回退。
     - 测试与工具入口见 [World 测试说明](tests/unit/world/README.md)；未完成项和历史报告见 [VCPedia 审查记录](tests/support/vcpedia_review/README.md)。
 
 3. 设置环境变量：
@@ -88,6 +88,22 @@ AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天
   python server_main.py
   ```
 - 打开sakurafrp的隧道接入公网（如果需要公网访问的话）
+
+### 四、迁移到 `E:\server`
+
+从当前 `server` 目录迁移运行文件和数据时，先预览复制范围：
+
+```powershell
+./scripts/deploy_to_e_server.ps1 -PlanOnly
+```
+
+停止所有正在运行的 `server_main.py` 进程后执行：
+
+```powershell
+./scripts/deploy_to_e_server.ps1
+```
+
+脚本复制 `src/`、`config/`、运行资源 `res/`、持久数据 `data/`、管理后台构建产物和安装入口。它不会复制 `__pycache__`、虚拟环境、Node 依赖、测试输出或日志，也不会删除目标目录里的文件。默认要求 `E:\server` 不存在或为空；复制中断后可用 `-Resume` 续传。迁移包含数据库与 WAL 文件，因此复制期间必须保持服务停止。Conda/Python 依赖、FFmpeg、Playwright Chromium 及系统环境变量需在目标运行环境中单独配置。
 
 ## 📜 许可证和版权
 

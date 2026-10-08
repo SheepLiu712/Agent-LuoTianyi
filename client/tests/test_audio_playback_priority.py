@@ -1,5 +1,8 @@
 import threading
 import queue
+from unittest.mock import Mock
+
+import pytest
 
 from src.message_process import multi_media_stream as stream_module
 from src.message_process.message_processor import MessageProcessor
@@ -107,3 +110,32 @@ def test_touch_is_not_enqueued_while_server_audio_is_active():
 
     assert result is None
     assert processor._send_queue == []
+
+
+@pytest.mark.parametrize("timed_out", [False, True])
+def test_replay_stays_blocked_until_finish_ack_or_90_second_timeout(monkeypatch, timed_out):
+    stream = _bare_stream()
+    stream.logger = Mock()
+    stream._server_audio_active = True
+    stream._stop_mouth_event = None
+    stream.local_audio_properties = None
+    stream.audio_queue_in = queue.Queue()
+    stream.audio_queue_out = Mock()
+    stream.audio_queue_out.empty.return_value = True
+    monkeypatch.setattr(stream_module.os.path, "exists", lambda _path: True)
+
+    def wait_for_finished(*, timeout):
+        assert timeout == 90
+        assert stream.is_server_audio_active() is True
+        assert stream.feed_local_wav("saved.wav", conv_uuid="sentence-1") is False
+        if timed_out:
+            raise queue.Empty
+        return "finished"
+
+    stream.audio_queue_out.get.side_effect = wait_for_finished
+    stream.finish_one_sentense()
+
+    assert stream.is_server_audio_active() is False
+    assert stream.audio_queue_in.get_nowait() == {"cmd": "wait_finish"}
+    assert stream.audio_queue_in.empty()
+    assert stream.logger.warning.call_count == int(timed_out)

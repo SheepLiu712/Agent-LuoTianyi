@@ -35,7 +35,7 @@ class ValidationItem:
 class RuntimeConfigValidator:
     """Validate core runtime config and report optional world disablements."""
 
-    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY"]
+    REQUIRED_SECRET_KEYS = ["JWT_SECRET", "AMAP_KEY", "QWEN_API_KEY"]
 
     CORE_LLM_MODULE_PATHS = {
         "database.event_store": "database.event_store.llm_module",
@@ -129,7 +129,7 @@ class RuntimeConfigValidator:
                     "core",
                     name,
                     "warning",
-                    ("未配置 message_token_ttl_seconds，使用安全默认值 " f"{DEFAULT_MESSAGE_TOKEN_TTL_SECONDS} 秒"),
+                    (f"未配置 message_token_ttl_seconds，使用安全默认值 {DEFAULT_MESSAGE_TOKEN_TTL_SECONDS} 秒"),
                     severity="warning",
                 )
             ]
@@ -161,8 +161,21 @@ class RuntimeConfigValidator:
     def _validate_llm_interfaces(self, config: dict[str, Any]) -> list[ValidationItem]:
         result: list[ValidationItem] = []
         llm_service = config.get("llm_service", {})
-        for kind, key in (("llm", "available_llms"), ("vlm", "available_vlms")):
+        for kind, key in (
+            ("llm", "available_llms"),
+            ("vlm", "available_vlms"),
+            ("audio", "available_audio_models"),
+        ):
             interfaces = llm_service.get(key, {})
+            if kind == "audio" and not interfaces:
+                interfaces = {
+                    "qwen3.8-omni-flash": {
+                        "api_type": "openai",
+                        "model": "qwen3.8-omni-flash",
+                        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                        "api_key": os.environ.get("QWEN_API_KEY", ""),
+                    }
+                }
             if not interfaces:
                 result.append(
                     ValidationItem("core", f"{kind}.interfaces", "error", f"未配置任何 {kind.upper()} interface")
@@ -239,8 +252,8 @@ class RuntimeConfigValidator:
             if not name:
                 result.append(ValidationItem("core", label, "error", "显示名称不能为空"))
                 continue
-            if model_kind not in {"llm", "vlm"}:
-                result.append(ValidationItem("core", label, "error", "模型类型必须是 llm 或 vlm"))
+            if model_kind not in {"llm", "vlm", "audio"}:
+                result.append(ValidationItem("core", label, "error", "模型类型必须是 llm、vlm 或 audio"))
                 continue
             type_requirements[type_id] = {
                 "model_kind": model_kind,
@@ -312,7 +325,7 @@ class RuntimeConfigValidator:
 
         def walk(value: Any, path: str) -> None:
             if isinstance(value, dict):
-                for kind in ("llm", "vlm"):
+                for kind in ("llm", "vlm", "audio"):
                     cfg = value.get(kind)
                     if isinstance(cfg, dict):
                         model_type = str(cfg.get("client_model_type") or "").strip()

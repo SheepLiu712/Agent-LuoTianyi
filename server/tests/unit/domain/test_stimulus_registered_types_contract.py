@@ -15,7 +15,12 @@ CONSTRUCTIBLE_STIMULI = (
     ("TextMessage", "TEXT_MESSAGE"),
     ("ImageMessage", "IMAGE_MESSAGE"),
     ("VoiceMessage", "VOICE_MESSAGE"),
+    ("VoiceRecordingStarted", "VOICE_RECORDING_STARTED"),
+    ("VoiceRecordingCancelled", "VOICE_RECORDING_CANCELLED"),
+    ("VoiceRecordingCommitted", "VOICE_RECORDING_COMMITTED"),
+    ("VoiceUploadFailed", "VOICE_UPLOAD_FAILED"),
     ("UserTyping", "USER_TYPING"),
+    ("NewRelationshipPropose", "NEW_RELATIONSHIP_PROPOSE"),
     ("ImageSelectionOpened", "IMAGE_SELECTION_OPENED"),
     ("ImageSelectionClosed", "IMAGE_SELECTION_CLOSED"),
     ("TouchInteraction", "TOUCH_INTERACTION"),
@@ -114,11 +119,18 @@ def _valid_stimulus_kwargs(type_name: str) -> dict[str, object]:
             "client_msg_id": "client-image-1",
         },
         "VoiceMessage": lambda: {
+            "message_uuid": "92b6558b-83e7-54bb-b02a-609481b07406",
             "media_ref": agent_domain.MediaRef(media_id="media-audio-1"),
             "transcript": None,
             "client_msg_id": "client-voice-1",
+            "duration_ms": 1234,
         },
+        "VoiceRecordingStarted": lambda: {"recording_id": "recording-1"},
+        "VoiceRecordingCancelled": lambda: {"recording_id": "recording-1"},
+        "VoiceRecordingCommitted": lambda: {"upload_id": "upload-1"},
+        "VoiceUploadFailed": lambda: {"upload_id": "upload-1", "reason": "aborted"},
         "UserTyping": lambda: {"text_length": 12},
+        "NewRelationshipPropose": lambda: {"relationship": "朋友"},
         "ImageSelectionOpened": lambda: {},
         "ImageSelectionClosed": lambda: {},
         "TouchInteraction": lambda: {
@@ -217,6 +229,10 @@ def test_agent_domain_exports_the_registered_stimulus_contract() -> None:
         "TEXT_MESSAGE": "text_message",
         "IMAGE_MESSAGE": "image_message",
         "VOICE_MESSAGE": "voice_message",
+        "VOICE_RECORDING_STARTED": "voice_recording_started",
+        "VOICE_RECORDING_CANCELLED": "voice_recording_cancelled",
+        "VOICE_RECORDING_COMMITTED": "voice_recording_committed",
+        "VOICE_UPLOAD_FAILED": "voice_upload_failed",
         "USER_TYPING": "user_typing",
         "IMAGE_SELECTION_OPENED": "image_selection_opened",
         "IMAGE_SELECTION_CLOSED": "image_selection_closed",
@@ -237,6 +253,7 @@ def test_agent_domain_exports_the_registered_stimulus_contract() -> None:
         "ACTIVITY_ENDED": "activity_ended",
         "SONG_KNOWLEDGE_DISCOVERED": "song_knowledge_discovered",
         "SONG_LEARNED": "song_learned",
+        "NEW_RELATIONSHIP_PROPOSE": "new_relationship_propose",
     }
     assert {item.name: item.value for item in agent_domain.DynamicTargetKind} == {
         "POST": "post",
@@ -276,6 +293,12 @@ def test_constructible_stimulus_constructor_is_keyword_only(
     assert "kind" not in parameters
     assert "payload" not in parameters
     assert "persist_policy" not in parameters
+
+
+def test_relationship_proposal_can_clear_the_saved_relationship() -> None:
+    values = _valid_stimulus_kwargs("NewRelationshipPropose")
+    values["relationship"] = ""
+    assert agent_domain.NewRelationshipPropose(**values).relationship == ""
 
 
 @pytest.mark.parametrize(("type_name", "kind_name"), UNAVAILABLE_STIMULI)
@@ -372,8 +395,13 @@ def test_dynamic_observed_rejects_an_invalid_thread_structure(
     ("type_name", "updates"),
     [
         ("VoiceMessage", {"media_ref": None, "transcript": None}),
+        ("VoiceMessage", {"message_uuid": "not-a-uuid"}),
+        ("VoiceMessage", {"duration_ms": 0}),
+        ("VoiceRecordingStarted", {"recording_id": " "}),
+        ("VoiceUploadFailed", {"reason": " "}),
         ("UserTyping", {"text_length": -1}),
         ("UserTyping", {"text_length": True}),
+        ("NewRelationshipPropose", {"relationship": None}),
         ("TouchInteraction", {"body_regions": ()}),
         ("DiaryPlanningDue", {"local_date": OCCURRED_AT}),
         ("DiaryPlanningDue", {"timezone": timezone.utc}),
@@ -417,7 +445,14 @@ def test_current_interface_rejects_fields_owned_by_other_or_future_modules(
     [
         ("ImageMessage", "media_ref"),
         ("VoiceMessage", "client_msg_id"),
+        ("VoiceMessage", "message_uuid"),
+        ("VoiceMessage", "duration_ms"),
+        ("VoiceRecordingStarted", "recording_id"),
+        ("VoiceRecordingCancelled", "recording_id"),
+        ("VoiceRecordingCommitted", "upload_id"),
+        ("VoiceUploadFailed", "reason"),
         ("UserTyping", "text_length"),
+        ("NewRelationshipPropose", "relationship"),
         ("TouchInteraction", "body_regions"),
         ("ProactivePromptDue", "reason"),
         ("DynamicObserved", "messages"),

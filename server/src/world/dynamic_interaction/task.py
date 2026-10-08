@@ -1,6 +1,6 @@
 """动态互动：选择待处理的动态目标并投递观察事实，由 Agent 决定回复与记忆。
 
-world 只保留选择与业务状态：600s 调度、待回复/待记忆目标的批量上限、`dynamic_store`
+world 只保留选择与业务状态：240s 调度、待回复/待记忆目标的批量上限、`dynamic_store`
 的 reply/memory 状态列、来源唯一性防重复。是否回复、回复什么、是否写入记忆全部交给 Agent；
 「回复被拒绝」或「决定不回复」经结算端口回写，世界侧不再读取 Agent 的内部返回值。
 """
@@ -22,9 +22,9 @@ from src.world.world_settlements import (
 )
 
 if TYPE_CHECKING:
-    from src.stage.world_stage import WorldStage
     from src.infrastructure.persistence.database import DatabaseManager
     from src.server_runtime import ServerRuntime
+    from src.stage.world_stage import WorldStage
 
 REPLY_ASPECT = "reply"
 MEMORY_ASPECT = "memory"
@@ -55,9 +55,7 @@ class _TargetSettlement:
 
     def on_fact_handled(self, outcome: FactHandlingOutcome) -> None:
         """处理结算：失败即两个方面都失败；被消费即记忆方面已完成处理。"""
-        failed = outcome.error_code is not None or (
-            outcome.request_status is d.HandlingRequestStatus.FAILED
-        )
+        failed = outcome.error_code is not None or (outcome.request_status is d.HandlingRequestStatus.FAILED)
         if failed:
             self._write("failed", error=str(outcome.error_code or ""))
             return
@@ -74,11 +72,14 @@ class _TargetSettlement:
         if committed is not None:
             self._write_reply("replied", force=True)
             return
-        self._write_reply("failed", force=True, error="；".join(
-            str(item.error_code or item.status)
-            for item in outcome.report.action_results
-            if item.effect_ref is None
-        ) or "计划未提交评论效果")
+        self._write_reply(
+            "failed",
+            force=True,
+            error="；".join(
+                str(item.error_code or item.status) for item in outcome.report.action_results if item.effect_ref is None
+            )
+            or "计划未提交评论效果",
+        )
 
     def _write_reply(self, status: str, *, error: str | None = None, force: bool = False) -> None:
         if not force and REPLY_ASPECT not in self.aspects:
@@ -88,11 +89,15 @@ class _TargetSettlement:
             error = None
         if self._target_kind is d.DynamicTargetKind.POST:
             self._task.database_manager.dynamic_store.update_dynamic_post_reply_state(
-                self._target_id, status=status, error=error,
+                self._target_id,
+                status=status,
+                error=error,
             )
         else:
             self._task.database_manager.dynamic_store.update_dynamic_comment_reply_state(
-                self._target_id, status=status, error=error,
+                self._target_id,
+                status=status,
+                error=error,
             )
 
     def _write_memory(self, status: str, *, error: str | None = None) -> None:
@@ -103,11 +108,15 @@ class _TargetSettlement:
             error = None
         if self._target_kind is d.DynamicTargetKind.POST:
             self._task.database_manager.dynamic_store.update_dynamic_post_memory_state(
-                self._target_id, status=status, error=error,
+                self._target_id,
+                status=status,
+                error=error,
             )
         else:
             self._task.database_manager.dynamic_store.update_dynamic_comment_memory_state(
-                self._target_id, status=status, error=error,
+                self._target_id,
+                status=status,
+                error=error,
             )
 
     def _write(self, status: str, *, error: str | None = None) -> None:
@@ -131,7 +140,7 @@ class DynamicInteractionTask(WorldTask):
         merged_config = dict(config or {})
         merged_config.setdefault(
             "clock_config",
-            {"type": "interval", "params": {"interval_seconds": 1800, "run_immediately": False}},
+            {"type": "interval", "params": {"interval_seconds": 240, "run_immediately": False}},
         )
         super().__init__(self.task_name, merged_config)
         self.logger = get_logger(__name__)
@@ -161,7 +170,8 @@ class DynamicInteractionTask(WorldTask):
         self.ensure_dependencies()
         if self.database_manager is None:
             return WorldTaskResult.skipped_result(
-                self.task_name, "dynamic interaction dependencies are unavailable",
+                self.task_name,
+                "dynamic interaction dependencies are unavailable",
             )
         self._outcomes.clear()
         self._submitted.clear()
@@ -222,9 +232,7 @@ class DynamicInteractionTask(WorldTask):
                     submitted += 1
                 else:
                     rejected += 1
-        covered = sum(
-            1 for aspects in self._submitted.values() if aspect in aspects
-        )
+        covered = sum(1 for aspects in self._submitted.values() if aspect in aspects)
         counts = {
             "processed": covered,
             "replied": 0,
@@ -269,7 +277,9 @@ class DynamicInteractionTask(WorldTask):
             self.logger.warning("WorldStage 不可用，动态事实未投递：%s", target_id)
             return False
         subscriber = _TargetSettlement(
-            self, stimulus_id=fact.stimulus_id, target_id=target_id,
+            self,
+            stimulus_id=fact.stimulus_id,
+            target_id=target_id,
             target_kind=target_kind,
         )
         if self.settlements is not None:
@@ -293,20 +303,27 @@ class DynamicInteractionTask(WorldTask):
         return await get_world_stage(character_id)
 
     def record_outcome(
-        self, target_id: str, aspects: tuple[str, ...], aspect: str, status: str,
+        self,
+        target_id: str,
+        aspects: tuple[str, ...],
+        aspect: str,
+        status: str,
     ) -> None:
         """记录某目标某方面的结算结果，供本轮统计使用。"""
         if aspect in aspects:
             self._outcomes[(target_id, aspect)] = status
 
     def _build_observation(
-        self, item: dict[str, Any], target_kind: d.DynamicTargetKind,
+        self,
+        item: dict[str, Any],
+        target_kind: d.DynamicTargetKind,
     ) -> d.DynamicObserved | None:
         """把待处理条目规范化为一次动态观察；素材不足时返回 None。"""
         messages = self._build_messages(item, target_kind)
         if not messages:
             self.logger.warning(
-                "动态目标缺少可投递正文，本轮跳过：%s", item.get("id"),
+                "动态目标缺少可投递正文，本轮跳过：%s",
+                item.get("id"),
             )
             return None
         now = datetime.now(timezone.utc)
@@ -326,7 +343,9 @@ class DynamicInteractionTask(WorldTask):
         )
 
     def _build_messages(
-        self, item: dict[str, Any], target_kind: d.DynamicTargetKind,
+        self,
+        item: dict[str, Any],
+        target_kind: d.DynamicTargetKind,
     ) -> list[d.DynamicMessage]:
         """按「原帖在前、评论随后」的顺序构造结构化线程。"""
         dynamic = item.get("dynamic") if target_kind is d.DynamicTargetKind.COMMENT else item
@@ -335,16 +354,18 @@ class DynamicInteractionTask(WorldTask):
         post_text = str(post.get("content") or "").strip()
         if not dynamic_id or not post_text:
             return []
-        messages = [d.DynamicMessage(
-            message_id=dynamic_id,
-            parent_message_id=None,
-            author_ref=d.ActorRef(
-                actor_id=str(post.get("author_id") or ""),
-                display_name=str(post.get("author_name") or "") or None,
-            ),
-            text=post_text,
-            media_refs=(),
-        )]
+        messages = [
+            d.DynamicMessage(
+                message_id=dynamic_id,
+                parent_message_id=None,
+                author_ref=d.ActorRef(
+                    actor_id=str(post.get("author_id") or ""),
+                    display_name=str(post.get("author_name") or "") or None,
+                ),
+                text=post_text,
+                media_refs=(),
+            )
+        ]
         for comment in item.get("thread_comments") or []:
             if not isinstance(comment, dict):
                 continue
@@ -354,16 +375,18 @@ class DynamicInteractionTask(WorldTask):
                 continue
             parent_id = str(comment.get("parent_comment_id") or dynamic_id)
             known = {message.message_id for message in messages}
-            messages.append(d.DynamicMessage(
-                message_id=comment_id,
-                parent_message_id=parent_id if parent_id in known else dynamic_id,
-                author_ref=d.ActorRef(
-                    actor_id=str(comment.get("author_id") or ""),
-                    display_name=str(comment.get("author_name") or "") or None,
-                ),
-                text=text,
-                media_refs=(),
-            ))
+            messages.append(
+                d.DynamicMessage(
+                    message_id=comment_id,
+                    parent_message_id=parent_id if parent_id in known else dynamic_id,
+                    author_ref=d.ActorRef(
+                        actor_id=str(comment.get("author_id") or ""),
+                        display_name=str(comment.get("author_name") or "") or None,
+                    ),
+                    text=text,
+                    media_refs=(),
+                )
+            )
         if target_kind is d.DynamicTargetKind.COMMENT:
             target_id = str(item.get("id") or "")
             if target_id not in {message.message_id for message in messages}:

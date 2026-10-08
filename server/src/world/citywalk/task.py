@@ -9,16 +9,17 @@ from uuid import uuid4
 
 import src.domain.agent as d
 from src.infrastructure.persistence.database.event_models import UnifiedEventType
+from src.utils.asyncio_helpers import run_sync_owned
 from src.utils.logger import get_logger
 from src.world.citywalk.errors import CitywalkError
 from src.world.types.task_result import WorldTaskResult
 from src.world.types.world_task import WorldTask
 
 if TYPE_CHECKING:
-    from src.stage.world_stage import WorldStage
     from src.infrastructure.persistence.database import DatabaseManager
     from src.infrastructure.persistence.database.services.event_store import EventStore
     from src.server_runtime import ServerRuntime
+    from src.stage.world_stage import WorldStage
     from src.world.world_settlements import (
         FactHandlingOutcome,
         FactPlanOutcome,
@@ -42,19 +43,23 @@ class CitywalkReportWriteBack:
         """处理结算：只记录失败，不修改报告。"""
         if outcome.request_status is d.HandlingRequestStatus.FAILED:
             self._logger.warning(
-                "citywalk 事实处理失败 fact=%s code=%s", outcome.stimulus_id, outcome.error_code,
+                "citywalk 事实处理失败 fact=%s code=%s",
+                outcome.stimulus_id,
+                outcome.error_code,
             )
 
     def on_fact_plan_executed(self, outcome: FactPlanOutcome) -> None:
         """执行结算：按已提交的动态效果回写正文与动态 ID。"""
         effect = next(
-            (item for item in outcome.effect_refs if item.kind is d.EffectKind.DYNAMIC_POST), None,
+            (item for item in outcome.effect_refs if item.kind is d.EffectKind.DYNAMIC_POST),
+            None,
         )
         if effect is None:
             self._logger.warning("citywalk 计划未提交动态效果 fact=%s", outcome.stimulus_id)
             return
         body = next(
-            (action.body for action in outcome.plan.actions if isinstance(action, d.PublishDynamic)), "",
+            (action.body for action in outcome.plan.actions if isinstance(action, d.PublishDynamic)),
+            "",
         )
         CitywalkTask._write_dynamic_content_to_report(self._path, body, effect.effect_id)
 
@@ -63,7 +68,9 @@ class CitywalkTask(WorldTask):
     base_task_name = "try_citywalk"
 
     def __init__(
-        self, config: dict[str, Any] | None = None, character_id: str = "luotianyi",
+        self,
+        config: dict[str, Any] | None = None,
+        character_id: str = "luotianyi",
         settlements: WorldSettlementRouter | None = None,
     ) -> None:
         self.character_id = character_id
@@ -114,7 +121,7 @@ class CitywalkTask(WorldTask):
             )
 
         try:
-            output_path = self.citywalk_service.run_once()
+            output_path = await run_sync_owned(self.citywalk_service.run_once)
         except CitywalkError as exc:
             self.logger.warning(f"Citywalk skipped due to runtime error: {exc}")
             return WorldTaskResult.skipped_result(

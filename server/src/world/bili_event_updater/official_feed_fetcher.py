@@ -2,6 +2,7 @@
 官方动态抓取器：从 B 站、微博等平台拉取洛天依官方账号的最新动态。
 支持多账号配置，并持久化最近处理过的动态 ID 用于去重。
 """
+
 from __future__ import annotations
 
 import json
@@ -69,7 +70,6 @@ class OfficialFeedFetcher:
 
         self.bili_cookie = ""
 
-
         self._update_cookie_to_headers()
         self.seen_ids: Dict[str, List[str]] = self._load_cache()
 
@@ -104,9 +104,7 @@ class OfficialFeedFetcher:
                     raw_cache = json.loads(self.data_file.read_text(encoding="utf-8"))
                     if isinstance(raw_cache, dict):
                         merged = {
-                            str(key): list(value)[-200:]
-                            for key, value in raw_cache.items()
-                            if isinstance(value, list)
+                            str(key): list(value)[-200:] for key, value in raw_cache.items() if isinstance(value, list)
                         }
                 except Exception as e:
                     self.logger.warning(f"Failed to merge existing feed cache: {e}")
@@ -118,7 +116,20 @@ class OfficialFeedFetcher:
                 encoding="utf-8",
             )
         except Exception as e:
-            self.logger.warning(f"Failed to save feed cache: {e}")
+            raise RuntimeError(f"Failed to save feed cache: {e}") from e
+
+    def mark_processed(self, items: List[OfficialDynamic]) -> None:
+        """Acknowledge dynamics only after their events have been stored."""
+        previous = {uid: list(ids) for uid, ids in self.seen_ids.items()}
+        try:
+            for item in items:
+                ids = self.seen_ids.setdefault(item.uid, [])
+                if item.dynamic_id not in ids:
+                    ids.append(item.dynamic_id)
+            self._save_cache()
+        except Exception:
+            self.seen_ids = previous
+            raise
 
     async def check_and_update_cookie_validity(self) -> bool:
         """
@@ -129,8 +140,8 @@ class OfficialFeedFetcher:
             return False
 
         from .cookie_manager import check_and_refresh_cookie_async
+
         return await check_and_refresh_cookie_async(cookie_file=self.cookie_file, force=False)
-        
 
     def fetch_all_new(self) -> List[OfficialDynamic]:
         """
@@ -140,14 +151,9 @@ class OfficialFeedFetcher:
         self._update_cookie_to_headers()
         all_items: List[OfficialDynamic] = []
         for character, uid in self.bili_accounts.items():
-            try:
-                items = self._fetch_bili_space(uid, character)
-                all_items.extend(items)
-                time.sleep(0.5)
-            except Exception as e:
-                self.logger.error(f"Error fetching B站 UID={uid}: {e}")
-
-        self._save_cache()
+            items = self._fetch_bili_space(uid, character)
+            all_items.extend(items)
+            time.sleep(0.5)
         return all_items
 
     def _build_bili_space_url(self, uid: str, offset: Optional[str] = None) -> str:
@@ -177,13 +183,11 @@ class OfficialFeedFetcher:
             try:
                 resp = self.session.get(url, timeout=15)
                 if resp.status_code != 200:
-                    self.logger.warning(f"B站 API returned {resp.status_code} for UID={uid}")
-                    break
+                    raise RuntimeError(f"B站 API returned {resp.status_code} for UID={uid}")
 
                 data = resp.json()
                 if data.get("code", 0) != 0:
-                    self.logger.warning(f"B站 API error: {data.get('message')} for UID={uid}")
-                    break
+                    raise RuntimeError(f"B站 API error: {data.get('message')} for UID={uid}")
 
                 items = data.get("data", {}).get("items", [])
                 if not items:
@@ -206,10 +210,8 @@ class OfficialFeedFetcher:
                     break
 
             except Exception as e:
-                self.logger.error(f"Error fetching page {page} for UID={uid}: {e}")
-                break
+                raise RuntimeError(f"Error fetching page {page} for UID={uid}: {e}") from e
 
-        self.seen_ids[uid] = list(seen)
         self.logger.info(f"Fetched {len(results)} new dynamics from B站 UID={uid}")
         return results
 

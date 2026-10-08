@@ -61,7 +61,8 @@ class Execution:
             self.interruption.allowed = False
             if self.context.cancellation.is_cancelled:
                 return self.report(d.ExecutionErrorCode.CANCELLED)
-            outputs = OutputEmitter(self, action.action_id)
+            message_id = action.message_id if isinstance(action, (d.Say, d.Sing)) else None
+            outputs = OutputEmitter(self, action.action_id, message_id=message_id)
             result = None
             try:
                 result = await call_handler(
