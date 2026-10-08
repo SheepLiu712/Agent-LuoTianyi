@@ -102,7 +102,13 @@ def _delete_all_vector_records(vector_store: VectorStore, user: User) -> None:
         print("已取消删除。")
         return
 
-    deleted_count = vector_store.delete_user_records(user.uuid)
+    try:
+        deleted_count = vector_store.delete_user_records(user.uuid)
+    except Exception as error:
+        # delete_user_records 失败时抛出（不再返回 0 伪装成功），交互脚本必须给出可读结论而不是 traceback。
+        print(f"删除向量数据库记录失败：{type(error).__name__}: {error}")
+        print("可安全重试；若持续失败请检查向量库是否可访问。")
+        return
     print(f"已删除 {deleted_count} 条向量数据库记录。")
 
 
