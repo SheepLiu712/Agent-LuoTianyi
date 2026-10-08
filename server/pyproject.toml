@@ -21,6 +21,7 @@ dependencies = [
     "librosa>=0.9.2,<0.10",
     "lunardate",
     "mutagen==1.48.1",
+    "mwparserfromhell",
     "networkx",
     "numpy>=1.24,<2",
     "openai",
@@ -36,6 +37,7 @@ dependencies = [
     "typing-extensions",
     "tzdata; platform_system == 'Windows'",
     "uvicorn[standard]>=0.30",
+    "zhconv",
 ]
 
 [project.optional-dependencies]
@@ -105,6 +107,9 @@ Repository = "https://github.com/SheepLiu712/Agent-LuoTianyi"
 [tool.setuptools]
 include-package-data = false
 py-modules = ["server_main"]
+
+[tool.setuptools.package-data]
+"src.world.get_new_songs" = ["vcpedia_templates.json"]
 
 [tool.setuptools.packages.find]
 where = ["."]

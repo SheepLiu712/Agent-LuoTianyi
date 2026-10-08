@@ -6,6 +6,19 @@
             "template_dir": "res/agent/prompts"
         },
         "available_llms": {
+            "dsv4-flash": {
+                "api_type": "openai",
+                "model": "deepseek-v4-flash-0731",
+                "api_key": "$QWEN_API_KEY",
+                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "can_enable_thinking": true,
+                "can_use_json": true,
+                "default_params": {
+                    "temperature": 0.7,
+                    "max_tokens": 8192,
+                    "top_p": 0.9
+                }
+            },
             "qwen3.5-plus": {
                 "api_type": "openai",
                 "model": "qwen3.5-plus",
@@ -535,13 +548,22 @@
                     "output_dir": "data/crawled_data",
                     "max_pages": 1000
                 },
-                "use_llm": false,
+                "merge_rendered_fragments": true,
+                "use_llm": true,
                 "llm_module": {
                     "llm": {
                         "name": "qwen3.5-plus",
                         "enable_thinking": false
                     },
                     "prompt_name": "song_knowledge_crawler_prompt"
+                },
+                "extraction_llm_module": {
+                    "llm": {
+                        "name": "dsv4-flash",
+                        "enable_thinking": false,
+                        "use_json": true
+                    },
+                    "prompt_name": "song_knowledge_extraction_prompt"
                 }
             }
         },

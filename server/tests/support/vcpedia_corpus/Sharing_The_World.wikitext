@@ -1,0 +1,497 @@
+{{tabs/core
+|style=max-width:100%;
+|LabelBorderColor= #88e8e7
+|LabelColor= #19a5bc
+|TextBorderColor = transparent
+|TextBackgroundColor = transparent
+|DefaultTab=1
+|TextPadding=1px
+|label1=英文版　
+|text1=
+{{虚拟歌手歌曲荣誉题头|VOCALOID|yrank=2}}
+{{VOCALOID_Songbox
+|image = Sharing The World.jpg
+|图片信息 = Illustration by apapico
+|颜色 = #88e8e7;color:#19a5bc
+|演唱 = [[初音未來]]
+|歌曲名称 = Sharing The World
+|P主 = [[BIGHEAD]]
+|nnd_id = sm26284496
+|yt_id = GRc_Vz6kEjc
+|bb_id = BV1Vs411B7hk
+|其他资料 = 於2014年8月24日投稿至YouTube，再生數為{{YoutubeCount|id=GRc_Vz6kEjc}}<br>于2015年5月18日投稿至niconico，再生數為 {{NiconicoCount|id=sm26284496}}<br>于2016年5月10日投稿至bilibili，再生數為 {{BilibiliCount|id=BV1Vs411B7hk}}
+}}
+|label2=日文版　
+|text2=
+{{VOCALOID_Songbox
+|image = Sharing The World日文版.jpg
+|图片信息 = Illustration by apapico
+|颜色 = #88e8e7; color:#19a5bc;
+|演唱 = [[初音未來]]
+|歌曲名称 = Sharing The World
+|P主 = [[BIGHEAD]]
+|nnd_id = sm26899153
+|yt_id = GsMqQqb4AvI
+|bb_id = BV13s411i7dS
+|其他资料 = 於2015年8月10日投稿至YouTube，再生數為{{YoutubeCount|id=GsMqQqb4AvI}}<br>同日投稿至niconico，再生數為 {{NiconicoCount|id=sm26899153}}<br>于2016年5月23日投稿至bilibili，再生數為 {{BilibiliCount|id=BV13s411i7dS}}
+}}
+|label3=中文版　
+|text3=
+{{VOCALOID_Songbox
+|image = Sharing The World中文版.jpg
+|图片信息 = 视频封面
+|颜色 = #88e8e7; color:#19a5bc;
+|演唱 = [[初音未來]]
+|歌曲名称 = Sharing The World
+|P主 = [[BIGHEAD]]
+|yt_id = -CPf-kK8Ma0
+|bb_id = BV1QW411Y7XL
+|其他资料 = 于2018年1月24日投稿至bilibili，再生數為 {{BilibiliCount|id=BV1QW411Y7XL}}<br>于2018年2月13日投稿至YouTube，再生數為{{YoutubeCount|id=-CPf-kK8Ma0}}
+}}
+|label4=PV重制版　
+|text4=
+{{VOCALOID_Songbox
+|image = Sharing The World重制版.jpg
+|图片信息 = 视频封面
+|颜色 = #88e8e7; color:#19a5bc;
+|演唱 = [[初音未來]]
+|歌曲名称 = Sharing The World
+|P主 = [[BIGHEAD]]
+|nnd_id = sm35445852
+|yt_id = 9HARbA0M24E
+|bb_id = BV1Pt411j7D6
+|投稿时间 = 2019年7月25日
+|再生 = {{YoutubeCount|id=9HARbA0M24E}}(YouTube)、{{NiconicoCount|id=sm35445852}}(niconico)、{{BilibiliCount|id=BV1Pt411j7D6}}(bilibili)
+}}
+}}
+== 簡介 ==
+《'''Sharing The World'''》是由[[BIGHEAD]]創作的英文[[VOCALOID]]原创歌曲，由[[初音未来]]演唱，是「MIKU EXPO 2014 in LOS ANGELES」和「MIKU EXPO 2014 IN NEW YORK」的主題曲。作品在2014年8月24日由[[初音未来]]官方作為[[VJP:MIKU EXPO 2014|MIKU EXPO 2014]]的宣傳曲在YouTube上發佈，当前已达成[[VOCALOID传说曲|传说]]。
+
+歌曲由SYNC LIVE JAPAN的{{lj|鈴木啟}}作为Sound Engineer，并且使用了正在开发中的初音未来英文音源（后来作为初音未来V3 English声音库推出），所以给人带来的效果也比以往不同。
+
+2014年10月8日，初音未来在《大衛深夜秀》（Late Show with David Letterman）上登場，演唱了該曲<ref>[http://www.vice.cn/read/is-hatsune-miku-the-perfect-pop-star 正在美国办展览的初音未来参加了大卫深夜秀]</ref>。
+
+2014年8月31日，本曲開始在iTunes上配信。
+
+2015年5月18日，BIGHEAD在niconico投稿了本曲。
+
+2015年6月27-28日，[[MIKU EXPO 2015 in Shanghai]]上表演了该曲，其地位视同主题曲。
+
+2015年8月10日，BIGHEAD在YouTube和niconico投稿了本曲的日文版。
+
+哔哩哔哩2016拜年祭中，本曲的旋律和部分歌词被引用。
+
+2016年5月10日，BIGHEAD将本曲投稿至[[bilibili]]，截至现在已有{{bilibiliCount|id=BV1Vs411B7hk}}次观看，{{bilibiliCount|id=BV1Vs411B7hk|type=4}}人收藏。
+
+2016年5月23日，BIGHEAD将本曲日文版投稿至[[bilibili]]，截至现在已有{{bilibiliCount|id=BV13s411i7dS}}次观看，{{bilibiliCount|id=BV13s411i7dS|type=4}}人收藏。
+
+2016年8月26日，本曲作为DLC歌曲收录于初音未來 -歌姬計劃- X当中。
+
+2018年1月24日，BIGHEAD将本曲中文版投稿至[[bilibili]]，截至现在已有{{bilibiliCount|id=BV1QW411Y7XL}}次观看，{{bilibiliCount|id=BV1QW411Y7XL|type=4}}人收藏。
+
+2018年2月9日，BIGHEAD在其专辑World Is Wide (feat. Hatsune Miku)<ref>[https://music.163.com/#/album?id=83880148 World Is Wide feat.Hatsune Miku - BIGHEAD - 专辑 - 网易云音乐]</ref>中发布了西班牙语和中文版{{黑幕|不过一些平台上的歌名的“Chinese”写成了“Chaines”}}。
+
+2018年2月13日，BIGHEAD在YouTube投稿了本曲中文版。
+
+2019年7月25日，BIGHEAD在YouTube、niconico和[[bilibili]]投稿了本曲PV重制版，截至现在于bilibili已有{{bilibiliCount|id=BV1Pt411j7D6}}次观看，{{bilibiliCount|id=BV1Pt411j7D6|type=4}}人收藏。
+
+== 歌曲 ==
+;英文版
+{{BilibiliVideo|id=BV1Vs411B7hk}}
+;日文版
+{{BilibiliVideo|id=BV13s411i7dS}}
+;中文版
+{{BilibiliVideo|id=BV1QW411Y7XL}}
+;PV重制版
+{{BilibiliVideo|id=BV1Pt411j7D6}}
+
+== 歌词 ==
+{{tabs/core
+|style=max-width:100%;
+|LabelBorderColor= #88e8e7
+|LabelColor= #19a5bc
+|TextBorderColor = transparent
+|TextBackgroundColor = transparent
+|DefaultTab=1
+|TextPadding=1px
+|label1=英文版　
+|text1=
+{{LyricsKai/hover
+|lstyle=color:red
+|rstyle=color:green
+|llang=en
+|original=Sharing our world
+Sharing our world
+I can see this future is right now
+Cause my voice is always going around
+#NoHover
+Tell me how you feel like these days
+Tell me why you don't wanna say it
+Tell me now what is on your mind
+I'm still gonna listen to you
+#NoHover
+If there is something
+on your mind that makes you stay
+I will free your soul
+I will free your soul
+#NoHover
+Sharing your sound
+We're sharing an endless love
+Can't you see this future is right now
+Cause my voice is always going around
+#NoHover
+Sharing your sound
+Connecting our feelings
+Everyone has found that we've owned this hymn
+Now we have found that's all
+So we join in
+#NoHover
+Tell me how you felt when you saw it
+Tell me why it made you so happy
+Tell me now what is on your mind
+I'm still gonna listen to you
+#NoHover
+If there is something
+on your mind you want to say
+Just now free your soul
+Just now free your soul
+#NoHover
+Sharing your sound
+We're sharing an endless love
+Can't you see this future is right now
+Cause my voice is always going around
+#NoHover
+Sharing your sound
+Connecting our feelings
+Everyone has found that we've owned this hymn
+Now we have found that's all
+So we join in
+#NoHover
+You'll get it step by step
+When we keep up to our sound
+Anyway dance in my steps
+#NoHover
+Everyday
+I will be everywhere
+Anytime...
+#NoHover
+Sharing our world
+Sharing our world
+I can see this future is right now
+Cause my voice is always going around
+#NoHover
+Sharing our world
+Can't you see this future is right now
+Cause my voice is always going around
+|translated=
+分享我們的世界
+分享我們的世界
+我現在可以可以看到未來
+總是圍繞著我的聲音
+
+告訴我你這幾天感覺如何
+告訴我你為什麼不想說
+告訴我你有什麼心事
+我依舊會傾聽你的訴說
+
+如果這裡還有什麼
+值得讓你眷戀
+我會讓你解放
+我會讓你解放
+
+分享你的聲音
+我們在分享一份無止盡的愛
+你現在可以看到未來嗎？
+總是圍繞著我的聲音
+
+分享你的聲音
+維繫我們的感情
+每個人都發現我們擁有了聖歌
+我們已經發現了這一切
+所以讓我們一起加入
+
+告訴我當你發現它時你感覺如何
+告訴我為什麼它讓你那麼開心
+告訴我你的心事
+我依舊會傾聽的你訴說
+
+如果這裡還有什麼
+值得讓你眷戀
+儘管釋放你的靈魂
+儘管釋放你的靈魂
+
+分享你的聲音
+我們在分享一份無止盡的愛
+你現在可以看到未來嗎？
+總是圍繞著我的聲音
+
+分享你的聲音
+維繫我們的感情
+每個人都發現我們擁有了聖歌
+現在我們已經發現了一切
+所以讓我們一起加入
+
+你會一步一步的擁有它
+當你擁護我們的聲音之時
+還有我的舞蹈步驟
+
+每一天
+我會在任何地方
+每個時刻...
+
+分享我們的世界
+分享我們的世界
+我現在可以看見未來
+總是圍繞著我的聲音
+
+分享我們的世界
+我現在可以看見未來
+總是圍繞著我的聲音
+}}
+|label2=日文版　
+|text2={{需要翻译}}
+{{LyricsKai
+|lstyle=color:red
+|rstyle=color:green
+|original=
+Sharing The World
+過去から現在・未来へ we all
+かけがえのない全ての灯と
+
+tell me now
+飲み込んだwords
+君が言いかけた
+アーギュメント
+
+自我が消えないように
+らららら歌えたら
+we 少し耳を澄ましたら
+同じよう　な　声が
+鼓動が共鳴だしだした
+
+Sharing The Sound
+Sharing The Endless Love
+過去から現在・未来へ we all
+かけがえのない全ての灯と
+
+Sharing your Sound
+Connecting our feelings
+いつまでも孤独じゃない
+we find
+何処にいてもアクセス
+ほらwe ハブ
+
+everytime
+今　浮かんだイメージ
+いつも　聞かして
+your story
+僕が　僕らになって
+未来が続くように
+
+we 　関係無い　孤独が気楽で
+気がつけば solo
+ここからは no wall
+
+Sharing The Sound
+Sharing The Endless Love
+消えかけた未来
+照らす火を
+燃やさずに
+かざせ胸の希望
+
+Sharing your Sound
+Connecting our feelings
+輝くさ
+緑
+雨の日も
+枯れ無い種撒け
+肥立つ
+フューチャー
+
+今はstep by step
+ただ　視　聴いて
+いわばレア体験
+チャージして
+
+いつか
+
+きっといつか
+
+そう
+
+ここで
+
+会える
+
+|translated=
+
+}}
+|label3=中文版　
+|text3=
+{{LyricsKai/hover
+|lstyle=color:red
+|llang=zh
+|rstyle=color:green
+|original=Sharing the world
+Sharing the world
+过去现在未来我们一起走
+我歌声将陪你度过每个春秋
+#NoHover
+Any where...
+#NoHover
+请与我分享你所感受
+想知道为何你说不出口
+究竟是何事让你心忧
+请让我陪你一起难过
+#NoHover
+如果有借口
+让你一直想退缩
+我来让你自由
+赶走你心中的烦忧
+#NoHover
+Sharing your sound
+We're sharing an endless love
+过去现在未来与每个白昼
+我歌声会永远陪伴在你左右
+#NoHover
+Sharing your sound
+Connecting our feelings
+每个人都拥有新的生活
+只要跳出那个角落
+跟着节奏
+#NoHover
+请与我分享你所感受
+如何能绽放你心中花朵
+现在就努力抛开忧愁
+请让我陪你一起遨游
+#NoHover
+如果有借口
+让你一直想退缩
+我来让你自由
+赶走你心中的烦忧
+#NoHover
+Sharing your sound
+We're sharing an endless love
+过去现在未来我们一起走
+我歌声将陪你度过每个春秋
+#NoHover
+Sharing your sound
+Connecting our feelings
+每个人都有专属的星宿
+在这硕大的宇宙
+不停闪烁
+#NoHover
+Any where...
+#NoHover
+你可以一步又一步地
+随节奏向前走
+与你手牵着手
+#NoHover
+别后退 我随你到尽头
+永不朽...
+永不朽...
+#NoHover
+Sharing the world
+Sharing the world
+过去现在未来我们一起走
+我歌声将陪你度过每个春秋
+#NoHover
+Sharing the world
+过去现在未来与每个白昼
+我歌声会永远陪伴在你左右
+#NoHover
+Any where...
+|translated=
+分享世界
+分享世界
+
+
+
+任何地方…
+
+
+
+
+
+
+
+
+
+
+
+分享你的聲音
+我們在分享一份無止盡的愛
+
+
+
+分享你的聲音
+維繫我們的感情
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+分享你的聲音
+我們在分享一份無止盡的愛
+
+
+
+分享你的聲音
+維繫我們的感情
+
+
+
+
+任何地方…
+
+
+
+
+
+
+
+
+
+分享世界
+分享世界
+
+
+
+分享世界
+
+
+
+任何地方…
+}}
+}}
+
+
+
+{{初音未来/2016及以前|collapsed}}
+{{初音未来/2018|collapsed}}
+{{初音未来/2019|collapsed}}
+== 注释 ==
+<references/>
+
+[[Category:2014年投稿的音乐作品]]
+[[Category:8月24日投稿的音乐作品]]
+[[Category:2015年投稿的音乐作品]]
+[[Category:5月18日投稿的音乐作品]]
+[[Category:8月10日投稿的音乐作品]]
+[[Category:2016年投稿的音乐作品]]
+[[Category:5月10日投稿的音乐作品]]
+[[Category:5月23日投稿的音乐作品]]
+[[Category:2018年投稿的音乐作品]]
+[[Category:1月24日投稿的音乐作品]]
+[[Category:2月13日投稿的音乐作品]]
+[[Category:2019年投稿的音乐作品]]
+[[Category:7月25日投稿的音乐作品]]

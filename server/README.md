@@ -59,7 +59,14 @@ AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天
     python -m pip install -e ".[dev]"
     ```
 
-    当前安装形态是**从仓库 checkout 进行 editable install**。`config/`、`res/` 和 `data/` 是部署资源或运行数据，不打进 Python wheel；因此安装完成后仍应从 `server` 目录启动。
+    当前安装形态是**从仓库 checkout 进行 editable install**。`config/`、`res/` 和 `data/` 是部署资源或运行数据，不打进 Python wheel；因此安装完成后仍应从 `server` 目录启动。VCPedia 模板规则统一从 `src/world/get_new_songs/vcpedia_templates.json` 包内资源加载，源码运行与 wheel 安装使用同一份规则；这不代表 wheel 已包含整个服务所需的部署资源。
+
+    VCPedia 升级注意：
+    - 安装项目依赖（包括 `mwparserfromhell`、`zhconv`），不要只复制采集模块；模块级依赖缺失会影响 `src.world` 导入。
+    - `crawler.merge_rendered_fragments` 与 `crawler.use_llm` 缺省均开启；原配置显式 `false` 不会被改成开启。关闭前者禁止可选片段 POST，关闭后者禁止总结与补提模型注册/调用；正常页面 GET 不受这两个可选功能开关禁止。
+    - 总结使用 `llm_module`；补提使用独立 `extraction_llm_module`，模板选择 `dsv4-flash`（DeepSeek）并在 `available_llms` 定义对应接口。需按配置准备环境变量和提示词资源；不要将 API Key 写进仓库。启用且明确引用无效接口的配置会在初始化报错，未配置模块不借用另一个模型替代。
+    - 默认规则仅位于 `src/world/get_new_songs/vcpedia_templates.json`，随代码审查和发布，不读取 `config/` 中的覆盖文件。包内规则缺失或损坏会明确失败，不隐式回退。
+    - 测试与工具入口见 [World 测试说明](tests/unit/world/README.md)；未完成项和历史报告见 [VCPedia 审查记录](tests/support/vcpedia_review/README.md)。
 
 3. 设置环境变量：
     - 根据config中所需要的api_key，配置对应的api密钥为环境变量。
@@ -100,10 +107,11 @@ AgentLuo旨在设计并实现一个具备角色扮演能力的虚拟歌手洛天
 
 ## 📜 许可证和版权
 
-本项目基于 [MIT 许可证](LICENSE) 开源。
+本项目代码基于 [MIT 许可证](../LICENSE) 开源。
 
-本项目的知识库内容来源于 VCPedia，遵循其版权声明和使用条款。该站全部内容禁止商业使用。文本内容除另有声明外，均在[知识共享 署名-非商业性使用-相同方式共享 3.0中国大陆 (CC BY-NC-SA 3.0 CN) 许可协议](https://creativecommons.org/licenses/by-nc-sa/3.0/cn/)下提供。其余开发者确保在使用和分发时遵守相关规定。
-> 根据规定，本项目需要标明是否（对原始作品）作了修改。本项目在使用VCPedia内容时，大部分为直接引用，对歌曲的爬取使用了自动化脚本，并使用LLM进行了结构化，因此绝大部分均为原文引用。在此基础上
+本项目使用的 VCPedia 内容不因进入本仓库而自动获得 MIT 授权。适用条款见站点[浏览前必读](https://vcpedia.cn/VCPedia:浏览前必读)：2026-09-16 后站点编辑团队的授权文本使用 CC BY-NC-SA 4.0；更早的部分历史版本仍适用 CC BY-NC-SA 3.0 中国大陆。歌词、引文、媒体及另有声明的内容不包含在站点整体 CC 授权中，权利仍归各自权利人。
+
+测试材料按页保留来源、捕获/版本证据、版权提示和修改说明，参见 [VCPedia 语料说明](tests/support/vcpedia_corpus/README.md)。自动解析和可选模型补提会转换、清理或重组文本，不能将所有产出称为未经修改的原文；分发和再使用须分别核对站点编辑文本及第三方作品的授权，不以测试用途或仓库许可证替代该核对。
 
 ## 🧠 关于AI生成内容的声明
 关于AI生成内容。我们认识到VC社区对AI生成内容的关注和担忧。为了透明起见，我们在此声明：

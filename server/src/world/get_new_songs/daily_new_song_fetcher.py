@@ -1,168 +1,33 @@
 import datetime
 import re
-import shutil
-import subprocess
 import time
 import zlib
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import requests
-from bs4 import BeautifulSoup
 
 from src.infrastructure.persistence import Song, get_song_session, init_song_db
 from src.utils.logger import get_logger
+from src.world.get_new_songs.template_rules import song_field_value
 from src.world.get_new_songs.vcpedia_fetcher import VCPediaFetcher
+from src.world.get_new_songs.wiki_api import fetch_wikitext
+from src.world.get_new_songs.wikitext_parser import parse_song_titles
 
-logger = get_logger("DailyNewSongFetcher")
 CURRENT_YEAR = datetime.datetime.now().year
 TEMPLATE_URL = f"https://vcpedia.cn/Template:%E6%B4%9B%E5%A4%A9%E4%BE%9D/{CURRENT_YEAR}"
-
-
-def _is_bot_challenge(status_code: int, html: str) -> bool:
-    if status_code == 403:
-        return True
-    text = (html or "").lower()
-    markers = [
-        "making sure you're not a bot",
-        "正在确认你是不是机器",
-        "within.website",
-        "xess.min.css",
-        "anubis",
-        "techaro",
-    ]
-    return any(m in text for m in markers)
-
-
-def _fetch_html(url: str, headers: Dict[str, str], timeout: int) -> str:
-    r = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-    if not _is_bot_challenge(r.status_code, r.text):
-        r.raise_for_status()
-        return r.text
-
-    curl_path = shutil.which("curl") or shutil.which("curl.exe")
-    if not curl_path:
-        r.raise_for_status()
-
-    logger.warning("requests 命中站点反爬挑战，改用 curl 兜底抓取。")
-    result = subprocess.run(
-        [curl_path, "-sS", "-L", "--max-time", str(timeout), url],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"curl fallback failed: {result.stderr.strip()}")
-    html = result.stdout or ""
-    if not html.strip():
-        raise RuntimeError("curl fallback returned empty response")
-    if _is_bot_challenge(200, html):
-        raise RuntimeError("curl fallback still got anti-bot challenge page")
-    return html
+logger = get_logger("DailyNewSongFetcher")
 
 
 def fetch_song_list_from_template(url: str, timeout: int = 20) -> List[str]:
-    """
-    从模板页提取歌曲名（按页面出现顺序）。
-    逻辑：抓取 mw-content-text 区域内所有链接文本，过滤掉分类/模板/分组标题等。
-    """
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/122.0 Safari/537.36"
-        )
-    }
-    html = _fetch_html(url, headers=headers, timeout=timeout)
-
-    soup = BeautifulSoup(html, "html.parser")
-    content = soup.find("div", id="mw-content-text") or soup
-
-    # 过滤关键词（模板结构词，不是歌曲）
-    bad_exact: Set[str] = {
-        "原创曲",
-        "非原创曲",
-        "传说曲",
-        "殿堂曲",
-        "部分",
-        "25万以上",
-        "25万以下",
-        "模板文档",
-        "查看",
-        "编辑",
-        "历史",
-        "刷新",
-        "简体",
-        "繁體",
-        "大陆简体",
-        "香港繁體",
-        "臺灣正體",
-        "不转换",
-        "跳转到导航",
-        "跳转到搜索",
-        "洛天依",
-        "2012",
-        "2013",
-        "2014",
-        "2015",
-        "2016",
-        "2017",
-        "2018",
-        "2019",
-        "2020",
-        "2021",
-        "2022",
-        "2023",
-        "2024",
-        "2025",
-        "2026",
-        "bilibili",
-        "ACE Studio",
-        "X studio",
-        "VOCALOID中文殿堂曲",
-        "ACE殿堂曲",
-        "文档",
-        "嵌入",
-    }
-    bad_contains = [
-        "Template:",
-        "模板:",
-        "分类:",
-        "Category:",
-        "帮助",
-        "首页",
-        "随机页面",
-        "最近更改",
-        "殿堂曲",
-        "传说曲",
-    ]
-
-    # 只取内容区里的链接文本
-    seen: Set[str] = set()
-    songs: List[str] = []
-
-    for anchor in content.find_all("a"):
-        text = _song_text_from_link(anchor, bad_exact, bad_contains)
-        if text and text not in seen:
-            seen.add(text)
-            songs.append(text)
-
-    logger.info(f"从模板页提取到 {len(songs)} 个条目（含歌曲/可能少量非歌曲，后续抓取失败会记录）。")
-    return songs
-
-
-def _song_text_from_link(anchor: Any, bad_exact: Set[str], bad_contains: List[str]) -> str:
-    """Return a normalized song candidate, or an empty string for navigation links."""
-    text = anchor.get_text(strip=True)
-    if not text or text in bad_exact or any(marker in text for marker in bad_contains) or text.isdigit():
-        return ""
-    href = anchor.get("href", "") or ""
-    blocked_href_markers = ("action=", "Template:", "Category:", "分类:")
-    if not href or href.startswith("#") or any(marker in href for marker in blocked_href_markers):
-        return ""
-    return text.rstrip("*").strip()
+    """取模板页 wikitext 并按页面顺序返回歌曲显示名；API 失败向上抛出。"""
+    parsed = urlsplit(url)
+    title = parse_qs(parsed.query).get("title", [unquote(parsed.path.lstrip("/"))])[0]
+    source = fetch_wikitext(f"{parsed.scheme}://{parsed.netloc}", title, requests.get, timeout)
+    titles = parse_song_titles(source)
+    logger.info(f"从模板页提取到 {len(titles)} 个条目（含歌曲/可能少量非歌曲，后续抓取失败会记录）。")
+    return titles
 
 
 def _safe_song_name(name: str) -> str:
@@ -177,8 +42,8 @@ def _song_exists(db, song_name: str) -> bool:
 
 def _extract_song_fields(data: Dict[str, Any]) -> Dict[str, str]:
     infobox = data.get("infobox") or {}
-    uploader = infobox.get("UP主") or infobox.get("投稿者") or infobox.get("发布者") or ""
-    singers = infobox.get("演唱") or infobox.get("歌手") or infobox.get("演唱者") or ""
+    uploader = song_field_value(infobox, "uploader")
+    singers = song_field_value(infobox, "singers")
 
     short_summary = data.get("short_summary") or ""
     if isinstance(short_summary, list):
@@ -209,6 +74,9 @@ def _split_spaced_lyrics(spaced_lyrics: str) -> List[str]:
     ret = []
     for part in parts:
         cleaned = part.strip()
+        # 含 "=>" 的片段会破坏 keyword=>value 索引行的格式。
+        if "=>" in cleaned:
+            continue
         if len(cleaned) >= 6 and len(cleaned) <= 50:
             ret.append(cleaned)
     return ret
@@ -234,12 +102,12 @@ def _split_singers(raw: str) -> tuple[str, ...]:
 
 
 def _fetch_candidate(fetcher: VCPediaFetcher, song_name: str) -> Optional[NewSongCandidate]:
-    """抓取并规范化单首歌；缺介绍视为不可接纳的候选。"""
+    """抓取并规范化单首歌；缺介绍或歌词不作为歌曲候选提交。"""
     data = fetcher.fetch_entity_description(song_name)
     if not data:
         return None
     fields = _extract_song_fields(data)
-    if not fields["introduction"]:
+    if not fields["introduction"] or not fields["lyrics"]:
         return None
     return NewSongCandidate(
         song_name=song_name,
@@ -270,6 +138,8 @@ def content_revision(candidate: NewSongCandidate) -> int:
 def collect_new_song_candidates(
     song_knowledge_config: Dict[str, Any],
     llm_module: Any | None = None,
+    *,
+    extraction_llm_module: Any | None = None,
 ) -> Dict[str, Any]:
     """抓取、规范化并做来源检查；本函数不写入任何知识。
 
@@ -278,11 +148,11 @@ def collect_new_song_candidates(
     """
     song_db_cfg = song_knowledge_config.get("song_database", {})
     if not song_db_cfg:
-        raise ValueError("缺少 knowledge.song_database 配置")
+        raise ValueError("缺少 world.song_knowledge.song_database 配置")
 
     crawler_cfg = song_knowledge_config.get("crawler", {})
     if not crawler_cfg:
-        raise ValueError("缺少 knowledge.crawler 配置")
+        raise ValueError("缺少 world.song_knowledge.crawler 配置")
 
     init_song_db(song_db_cfg)
     db = get_song_session()
@@ -292,7 +162,8 @@ def collect_new_song_candidates(
     fetch_failed: List[str] = []
     try:
         songs = fetch_song_list_from_template(TEMPLATE_URL)
-        fetcher = VCPediaFetcher(crawler_cfg, llm_module=llm_module)
+        fetcher = VCPediaFetcher(crawler_cfg, llm_module=llm_module,
+                                 extraction_llm_module=extraction_llm_module)
 
         for song_name in songs:
             if _song_exists(db, song_name):

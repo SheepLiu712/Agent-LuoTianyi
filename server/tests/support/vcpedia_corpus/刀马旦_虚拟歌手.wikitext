@@ -1,0 +1,78 @@
+{{标题格式化}}
+{{VOCALOID中文殿堂曲题头}}
+
+{{VOCALOID_Songbox
+|image    = 刀马旦V家(new).jpg
+|图片信息 = 曲绘 by Aya
+|颜色1    = linear-gradient(to right,#2e221e,#7f051e,#7f051e 25%,transparent 25%,transparent 70%,#7f051e 70%,#7f051e,#2e221e),linear-gradient(#7f051e 60%,transparent 60%),#edd272;color:#d9fdfd;border-color:#FFF
+|颜色2    = linear-gradient(to right,#2e221e,#7f051e,#7f051e 25%,transparent 25%,transparent 70%,#7f051e 70%,#7f051e,#2e221e),#edd272;color:#d9fdfd;border-color:#FFF
+|颜色3    = linear-gradient(to right,#2e221e,#7f051e,#7f051e 25%,transparent 25%,transparent 70%,#7f051e 70%,#7f051e,#2e221e),linear-gradient(transparent 60%,#7f051e 60%),#edd272;color:#d9fdfd;border-color:#FFF
+|演唱     = [[言和]]、[[乐正龙牙]]
+|歌曲名称 = 刀马旦
+|UP主     = [[纳兰寻风]]
+|bb_id    = av84828784
+|投稿时间 = 2020年1月24日
+|再生     = {{bilibiliCount|id=84828784}}
+}}
+
+== 简介 ==
+《'''刀马旦'''》是[[纳兰寻风]]于2020年1月24日投稿至[[bilibili]]的[[VOCALOID]]中文'''翻唱'''歌曲，由[[言和]]、[[乐正龙牙]]演唱。截至现在已有{{bilibiliCount|id=84828784}}次观看，{{bilibiliCount|id=84828784|type=4}}人收藏。
+
+原曲为方文山作词，周杰伦作曲，{{Dead|李玟}}、周杰伦演唱的同名歌曲。
+
+本曲以優秀的戲腔及RAP調教獲得聽眾一致好評，搭配精緻的PV，實屬佳作。
+
+== 歌曲 ==
+{{BilibiliVideo|id=84828784}}
+
+== 歌词 ==
+{{LDC|段落=1|类型=歌词}}
+{{CharaBlock|#c2081c;text-shadow:0 0 3px #f6eeef;text-shadow:0 0 3px #f6eeef，言和|#a67a00;text-shadow:0 0 3px #f2f0ea;text-shadow:0 0 3px #f2f0ea，乐正龙牙|#000，，合唱|#000，，''RAP演唱''}}
+<poem>
+
+{{color|#c2081c;text-shadow:0 0 3px #f6eeef|明明早上人还在香港　还在九龙茶馆喝煲<ref>PV字幕为「褒」，疑似使用了网易云中错误的歌词版本。</ref>汤
+怎么场景一下跳西安　我在护城河的堤岸
+站在古老神秘的城墙　月光摇又晃
+我用英语跟小贩交谈　突然画面一下就全暗}}
+
+{{color|#a67a00;text-shadow:0 0 3px #f2f0ea|我}}{{color|#c2081c;text-shadow:0 0 3px #f6eeef|还在想到底身在何方}}
+{{color|#a67a00;text-shadow:0 0 3px #f2f0ea|我}}{{color|#c2081c;text-shadow:0 0 3px #f6eeef|变模样是个华裔姑娘}}
+{{color|#a67a00;text-shadow:0 0 3px #f2f0ea|我}}{{color|#c2081c;text-shadow:0 0 3px #f6eeef|开始想认真细心装扮}}
+{{color|#a67a00;text-shadow:0 0 3px #f2f0ea|我}}{{color|#c2081c;text-shadow:0 0 3px #f6eeef|回台上终于轮我上场}}
+
+耍花枪一个后空翻　腰身跟着转马步扎的稳当
+耍花枪比谁都漂亮　接着唱一段虞姬和霸王
+耍花枪舞台的戏班　二胡拉的响观众用力鼓掌
+耍花枪比谁都漂亮　刀马旦身段演出风靡全场
+
+{{color|#a67a00;text-shadow:0 0 3px #f2f0ea|''一口粮一张床一面墙一扇窗　我洒下一地月光''
+''一次种下一亩高粱　一个人在北大荒
+''一碗热汤啊温暖了我一个晚上''
+''一匹苍狼一身风霜走过丝路回家乡''}}
+
+{{color|#c2081c;text-shadow:0 0 3px #f6eeef|站在古老神秘的城墙　月光摇又晃
+我用英语跟小贩交谈　突然画面一下就全暗}}
+
+{{color|#a67a00;text-shadow:0 0 3px #f2f0ea|我}}{{color|#c2081c;text-shadow:0 0 3px #f6eeef|还在想到底身在何方}}
+{{color|#a67a00;text-shadow:0 0 3px #f2f0ea|我}}{{color|#c2081c;text-shadow:0 0 3px #f6eeef|变模样是个华裔姑娘}}
+{{color|#a67a00;text-shadow:0 0 3px #f2f0ea|我}}{{color|#c2081c;text-shadow:0 0 3px #f6eeef|开始想认真细心装扮}}
+{{color|#a67a00;text-shadow:0 0 3px #f2f0ea|我}}{{color|#c2081c;text-shadow:0 0 3px #f6eeef|回台上终于轮我上场}}
+
+{{color|#c2081c;text-shadow:0 0 3px #f6eeef|耍花枪一个后空翻　腰身跟着转马步扎的稳当
+耍花枪比谁都漂亮　接着唱一段虞姬和霸王
+耍花枪舞台的戏班　二胡拉的响观众用力鼓掌
+耍花枪比谁都漂亮　刀马旦身段演出风靡全场}}
+
+耍花枪一个后空翻　腰身跟着转马步扎的稳当
+耍花枪比谁都漂亮　接着唱一段虞姬和霸王
+</poem>
+
+
+{{纳兰寻风|collapsed}}
+{{言和/2020|collapsed}}
+{{乐正龙牙/2020|collapsed}}
+
+== 注释与外部链接 ==
+<references/>
+
+[[Category:翻唱歌曲]]

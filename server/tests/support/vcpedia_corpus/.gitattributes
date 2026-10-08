@@ -1,0 +1,7 @@
+*.wikitext text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.txt text eol=lf
+*.md text eol=lf
+*.gz binary
+.gitattributes text eol=lf
