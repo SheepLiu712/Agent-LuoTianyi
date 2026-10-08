@@ -22,14 +22,20 @@ _FORMAT_MIME = {
 
 
 def prepare_image_content(data: bytes, mime_type: str | None, media_id: str) -> tuple[bytes, str]:
-    """入库前将 MPO 主图规范化为 JPEG，其他格式保持原始字节。"""
+    """入库前提取多图主图；照片转 JPEG，动图取第一帧并保留透明度。"""
     try:
         with Image.open(BytesIO(data)) as image:
-            if image.format == "MPO":
+            if image.format in {"MPO", "TIFF"} or (
+                image.format in {"GIF", "PNG", "WEBP"} and getattr(image, "n_frames", 1) > 1
+            ):
                 image.seek(0)
-                primary = ImageOps.exif_transpose(image).convert("RGB")
+                transparent = image.mode in {"RGBA", "LA"} or "transparency" in image.info
+                primary = ImageOps.exif_transpose(image).convert("RGBA" if transparent else "RGB")
                 output = BytesIO()
-                primary.save(output, format="JPEG", quality=95)
+                if transparent:
+                    primary.save(output, format="PNG")
+                else:
+                    primary.save(output, format="JPEG", quality=95)
                 data = output.getvalue()
     except (OSError, ValueError, SyntaxError):
         raise MediaResolutionError(

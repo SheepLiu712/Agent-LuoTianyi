@@ -45,13 +45,22 @@ export async function compressImageForUpload(
   mimeType: string,
 ): Promise<ImageCompressionResult> {
   try {
-    const originalSize = await getFileSize(uri);
-    if (originalSize === undefined || originalSize <= MAX_IMAGE_FILE_SIZE_BYTES) {
-      return { ok: true, uri, mimeType, size: originalSize };
-    }
-
+    // Decode every upload: even a small image/jpeg may contain MPO secondary images.
+    // The native renderer exposes one primary bitmap; saving discards extra frames.
     const sourceImage = await ImageManipulator.manipulate(uri).renderAsync();
-    const isPng = mimeType.toLowerCase() === 'image/png';
+    const isPng = ['image/png', 'image/apng', 'image/gif', 'image/webp'].includes(mimeType.toLowerCase());
+
+    const primary = await sourceImage.saveAsync({
+      format: isPng ? SaveFormat.PNG : SaveFormat.JPEG,
+      ...(isPng ? {} : { compress: 1 }),
+    });
+    const primarySize = await getFileSize(primary.uri);
+    if (primarySize === undefined) {
+      return { ok: false, reason: 'primary image size unavailable' };
+    }
+    if (primarySize <= MAX_IMAGE_FILE_SIZE_BYTES) {
+      return { ok: true, uri: primary.uri, mimeType: isPng ? 'image/png' : 'image/jpeg', size: primarySize };
+    }
 
     for (const stage of COMPRESSION_STAGES) {
       const context = ImageManipulator.manipulate(sourceImage);

@@ -348,11 +348,12 @@ export const useChatLogic = (
       cancelSelecting: async () => {
         await binderRef.current?.sendImageSelectingCancel();
       },
-      launchPicker: () =>
+      launchPicker: (legacy = false) =>
         ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           allowsEditing: false,
           quality: 1,
+          legacy,
         }),
       emitError: (message) => binderRef.current?.emitErrorText(message),
       onSelected: async (asset) => {

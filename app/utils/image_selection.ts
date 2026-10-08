@@ -2,18 +2,36 @@ import type { ImagePickerAsset, ImagePickerResult } from 'expo-image-picker';
 import { addDebugTrace } from './debug_trace';
 
 export const IMAGE_PICKER_ERROR_MESSAGE = '无法打开图片选择器，请重试；可在调试日志中查看详情';
+export const IMAGE_PICKER_UNAVAILABLE_MESSAGE = '系统缺少可用的图片选择应用，请在设置中启用“文档”或安装支持选图的文件管理器后再试';
 export const IMAGE_SELECTION_ERROR_MESSAGE = '图片选择或发送失败，请重试；可在调试日志中查看详情';
 export const IMAGE_SELECTION_RESET_ERROR_MESSAGE = '选图状态复位失败，请重试；可在调试日志中查看详情';
 
 interface ImageSelectionOptions {
   sendSelecting: () => Promise<void>;
   cancelSelecting: () => Promise<void>;
-  launchPicker: () => Promise<ImagePickerResult>;
+  launchPicker: (legacy?: boolean) => Promise<ImagePickerResult>;
   onSelected: (asset: ImagePickerAsset) => Promise<void>;
   emitError: (message: string) => void;
 }
 
 type SelectionStage = 'notify_selecting' | 'launch_picker' | 'send_selected' | 'cancel_selecting';
+
+function isPickerUnavailable(error: unknown): boolean {
+  const message = error !== null && typeof error === 'object' && 'message' in error
+    ? String(error.message) : String(error);
+  return /ActivityNotFoundException|No Activity found to handle Intent/i.test(message);
+}
+
+async function launchPicker(options: ImageSelectionOptions): Promise<ImagePickerResult> {
+  try {
+    return await options.launchPicker();
+  } catch (error) {
+    if (!isPickerUnavailable(error)) throw error;
+    logSelectionError('launch_picker', error);
+    addDebugTrace('image-selection', 'retrying legacy picker');
+    return options.launchPicker(true);
+  }
+}
 
 function logSelectionError(stage: SelectionStage, error: unknown) {
   const detail = error !== null && typeof error === 'object' ? error : undefined;
@@ -43,7 +61,7 @@ export async function runImageSelection(options: ImageSelectionOptions): Promise
     await options.sendSelecting();
     stage = 'launch_picker';
     addDebugTrace('image-selection', 'launching picker');
-    const result = await options.launchPicker();
+    const result = await launchPicker(options);
 
     if (result.canceled || !result.assets || result.assets.length === 0) {
       addDebugTrace('image-selection', 'canceled');
@@ -57,7 +75,9 @@ export async function runImageSelection(options: ImageSelectionOptions): Promise
     addDebugTrace('image-selection', 'selection handed to sender');
   } catch (error) {
     logSelectionError(stage, error);
-    options.emitError(stage === 'launch_picker' ? IMAGE_PICKER_ERROR_MESSAGE : IMAGE_SELECTION_ERROR_MESSAGE);
+    options.emitError(stage === 'launch_picker'
+      ? (isPickerUnavailable(error) ? IMAGE_PICKER_UNAVAILABLE_MESSAGE : IMAGE_PICKER_ERROR_MESSAGE)
+      : IMAGE_SELECTION_ERROR_MESSAGE);
     await cancelSelection(options);
   }
 }
