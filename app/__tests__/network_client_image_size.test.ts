@@ -1,19 +1,21 @@
-const mockGetInfoAsync = jest.fn();
-const mockReadAsStringAsync = jest.fn();
+import { compressImageForUpload } from '../utils/image_compression';
+import { NetworkClient } from '../utils/network_client';
+
+import * as FileSystem from 'expo-file-system/legacy';
+
+const mockGetInfoAsync = FileSystem.getInfoAsync as jest.Mock;
+const mockReadAsStringAsync = FileSystem.readAsStringAsync as jest.Mock;
 
 jest.mock('expo-file-system/legacy', () => ({
   EncodingType: { Base64: 'base64' },
-  getInfoAsync: mockGetInfoAsync,
-  readAsStringAsync: mockReadAsStringAsync,
+  getInfoAsync: jest.fn(),
+  readAsStringAsync: jest.fn(),
 }));
 jest.mock('../utils/ws_transport', () => ({ WebSocketTransport: jest.fn() }));
 jest.mock('../utils/image_compression', () => ({
   MAX_IMAGE_FILE_SIZE_BYTES: 6 * 1024 * 1024,
-  compressImageForUpload: jest.fn().mockResolvedValue({ ok: false, reason: 'still too large' }),
+  compressImageForUpload: jest.fn().mockResolvedValue({ ok: false, reason: 'compressed image remains too large' }),
 }));
-
-import { compressImageForUpload } from '../utils/image_compression';
-import { NetworkClient } from '../utils/network_client';
 
 const MAX_IMAGE_FILE_SIZE_BYTES = 6 * 1024 * 1024;
 
@@ -30,9 +32,11 @@ describe('NetworkClient image size preflight', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockReadAsStringAsync.mockResolvedValue('aW1hZ2U=');
+    (compressImageForUpload as jest.Mock).mockImplementation(async (uri, mimeType) => ({ ok: true, uri, mimeType, size: 1024 }));
   });
 
   it('rejects an oversized image when compression cannot bring it under the limit', async () => {
+    (compressImageForUpload as jest.Mock).mockResolvedValue({ ok: false, reason: 'compressed image remains too large' });
     mockGetInfoAsync.mockResolvedValue({ exists: true, size: MAX_IMAGE_FILE_SIZE_BYTES + 1 });
     const { client, transport } = createConnectedClient();
 
@@ -73,7 +77,7 @@ describe('NetworkClient image size preflight', () => {
     const result = await client.sendImage('content://unknown.jpg', 'image/jpeg', 'client-3');
 
     expect(result.ok).toBe(true);
-    expect(compressImageForUpload).not.toHaveBeenCalled();
+    expect(compressImageForUpload).toHaveBeenCalledTimes(1);
     expect(mockReadAsStringAsync).toHaveBeenCalledWith('content://unknown.jpg', { encoding: 'base64' });
     expect(transport.submitUserImage).toHaveBeenCalledWith(
       'aW1hZ2U=', 'image/jpeg', 'content://unknown.jpg', 10000, 'client-3',

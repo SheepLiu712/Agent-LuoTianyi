@@ -82,7 +82,7 @@ export class NetworkClient {
         addDebugTrace('network', 'sendImage file size unavailable', { imageUri });
       }
 
-      if (originalSize !== undefined && originalSize > MAX_IMAGE_FILE_SIZE_BYTES) {
+      {
         addDebugTrace('network', 'sendImage compression started', { imageUri, mimeType, originalSize });
         const compressedImage = await compressImageForUpload(imageUri, mimeType);
         if (!compressedImage.ok || compressedImage.size === undefined || compressedImage.size > MAX_IMAGE_FILE_SIZE_BYTES) {
@@ -94,7 +94,9 @@ export class NetworkClient {
           return {
             ok: false,
             request_id: clientMsgId || `local-${Date.now()}`,
-            error: '图片过大（上限约 6 MB），请选择更小的图片',
+            error: compressedImage.ok || compressedImage.reason === 'compressed image remains too large'
+              ? '图片过大（上限约 6 MB），请选择更小的图片'
+              : '无法处理图片，请转换为普通 JPEG 或 PNG 后重试',
             drop: true,
           };
         }

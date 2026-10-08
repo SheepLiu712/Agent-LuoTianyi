@@ -2,6 +2,7 @@ import type { ImagePickerAsset, ImagePickerResult } from 'expo-image-picker';
 import { clearDebugTrace, getDebugTraceSnapshot } from '../utils/debug_trace';
 import {
   IMAGE_PICKER_ERROR_MESSAGE,
+  IMAGE_PICKER_UNAVAILABLE_MESSAGE,
   IMAGE_SELECTION_ERROR_MESSAGE,
   IMAGE_SELECTION_RESET_ERROR_MESSAGE,
   runImageSelection,
@@ -14,7 +15,7 @@ function createOptions() {
   return {
     sendSelecting: jest.fn(async () => undefined),
     cancelSelecting: jest.fn(async () => undefined),
-    launchPicker: jest.fn(async (): Promise<ImagePickerResult> => ({ canceled: false, assets: [asset] })),
+    launchPicker: jest.fn(async (_legacy?: boolean): Promise<ImagePickerResult> => ({ canceled: false, assets: [asset] })),
     onSelected: jest.fn(async (_asset: ImagePickerAsset) => undefined),
     emitError: jest.fn(),
   };
@@ -27,6 +28,59 @@ function failures() {
 
 describe('runImageSelection', () => {
   beforeEach(clearDebugTrace);
+
+  it.each(['ActivityNotFoundException', 'No Activity found to handle Intent'])('retries only a missing handler: %s', async (message) => {
+    const options = createOptions();
+    options.launchPicker.mockRejectedValueOnce({ code: 'ERR_UNEXPECTED', message });
+    await runImageSelection(options);
+    expect(options.launchPicker.mock.calls).toEqual([[], [true]]);
+    expect(options.sendSelecting).toHaveBeenCalledTimes(1);
+    expect(options.onSelected).toHaveBeenCalledTimes(1);
+    expect(options.cancelSelecting).not.toHaveBeenCalled();
+    expect(options.emitError).not.toHaveBeenCalled();
+  });
+
+  it('ends fallback cancellation with exactly one reset', async () => {
+    const options = createOptions();
+    options.launchPicker.mockRejectedValueOnce(new Error('ActivityNotFoundException'))
+      .mockResolvedValueOnce(canceledResult);
+    await runImageSelection(options);
+    expect(options.launchPicker).toHaveBeenCalledTimes(2);
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+    expect(options.emitError).not.toHaveBeenCalled();
+    expect(options.onSelected).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['ActivityNotFoundException', IMAGE_PICKER_UNAVAILABLE_MESSAGE],
+    ['permission denied', IMAGE_PICKER_ERROR_MESSAGE],
+  ])('ends fallback failure without a third attempt: %s', async (message, expected) => {
+    const options = createOptions();
+    options.launchPicker.mockRejectedValueOnce(new Error('ActivityNotFoundException'))
+      .mockRejectedValueOnce(new Error(message));
+    await runImageSelection(options);
+    expect(options.launchPicker).toHaveBeenCalledTimes(2);
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+    expect(options.sendSelecting).toHaveBeenCalledTimes(1);
+    expect(options.emitError).toHaveBeenCalledWith(expected);
+  });
+
+  it.each(['permission denied', 'unknown native failure'])('does not retry ERR_UNEXPECTED: %s', async (message) => {
+    const options = createOptions();
+    options.launchPicker.mockRejectedValue({ code: 'ERR_UNEXPECTED', message });
+    await runImageSelection(options);
+    expect(options.launchPicker).toHaveBeenCalledTimes(1);
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a missing-handler error after selection', async () => {
+    const options = createOptions();
+    options.onSelected.mockRejectedValue(new Error('ActivityNotFoundException'));
+    await runImageSelection(options);
+    expect(options.launchPicker).toHaveBeenCalledTimes(1);
+    expect(options.cancelSelecting).toHaveBeenCalledTimes(1);
+    expect(options.emitError).toHaveBeenCalledWith(IMAGE_SELECTION_ERROR_MESSAGE);
+  });
 
   it('hands a selected asset to the sender once and records progress in release mode', async () => {
     const options = createOptions();
