@@ -9,9 +9,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from src.agent.context import (
-    ContextFactory, ConversationCompaction, ConversationEntry, ConversationSummary,
-    ImageContent, JargonExplanation, RecallEntry, RecalledMemoryContext,
-    SongContent, TextContent, UserPreferences, UserProfile,
+    ContextFactory,
+    ConversationCompaction,
+    ConversationEntry,
+    ConversationSummary,
+    ImageContent,
+    JargonExplanation,
+    RecalledMemoryContext,
+    RecallEntry,
+    SongContent,
+    TextContent,
+    UserPreferences,
+    UserProfile,
 )
 from src.infrastructure.persistence.database.redis_buffer import RedisBuffer
 from src.infrastructure.persistence.database.services.conversation_service import ConversationService
@@ -39,8 +48,12 @@ def factory(database, **kwargs):
 
 
 def entry(number, content=None):
-    return ConversationEntry(str(number), datetime(2026, 9, 7) + timedelta(seconds=number),
-                             "user", content or TextContent(f"消息{number}", ("关键词",)))
+    return ConversationEntry(
+        str(number),
+        datetime(2026, 9, 7) + timedelta(seconds=number),
+        "user",
+        content or TextContent(f"消息{number}", ("关键词",)),
+    )
 
 
 @pytest.mark.asyncio
@@ -60,8 +73,10 @@ async def test_factory_creates_independent_contexts_without_registry(database):
 async def test_failed_initialization_does_not_cache_partial_context(database, monkeypatch):
     contexts = factory(database)
     original = database.get_conversation_context_state
+
     def fail(*args, **kwargs):
         raise RuntimeError("load failed")
+
     monkeypatch.setattr(database, "get_conversation_context_state", fail)
     with pytest.raises(RuntimeError):
         await contexts.create("i", user_id="u")
@@ -74,6 +89,7 @@ async def test_failed_initialization_does_not_cache_partial_context(database, mo
 async def test_userless_context_never_accesses_database(database, monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("world interaction accessed user database")
+
     monkeypatch.setattr(database, "get_user_description", forbidden)
     monkeypatch.setattr(database, "get_conversation_context_state", forbidden)
     context = await factory(database).create("world", user_id=None)
@@ -118,8 +134,11 @@ async def test_profile_write_failure_keeps_memory(database, monkeypatch):
 async def test_history_round_trip_and_character_isolation(database):
     contexts = factory(database)
     context = await contexts.create("i", user_id="u")
-    entries = (entry(1), entry(2, ImageContent("图片", "client", "server", "image/png", ("树",))),
-               entry(3, SongContent("唱歌", "歌曲", "副歌")))
+    entries = (
+        entry(1),
+        entry(2, ImageContent("图片", "client", "server", "image/png", ("树",))),
+        entry(3, SongContent("唱歌", "歌曲", "副歌")),
+    )
     await context.conversation.append(entries)
     assert context.conversation.read().entries == entries
     await context.close()
@@ -143,16 +162,18 @@ async def test_conversation_read_orders_parallel_appends_by_fact_time(database):
 
     assert context.conversation.read().entries == (earlier, later)
     assert [item.content for item in database.get_history_from_db("u", 0, 2)] == [
-        earlier.content.text, later.content.text]
+        earlier.content.text,
+        later.content.text,
+    ]
     database._redis.delete("user_context:u:luotianyi")
     restored = await contexts.create("restored", user_id="u")
     assert restored.conversation.read().entries == (earlier, later)
 
 
 def compaction_for(snapshot, covered=1, text="新的总结"):
-    return ConversationCompaction(snapshot.summary,
-                                 tuple(e.entry_id for e in snapshot.entries[:covered]),
-                                 ConversationSummary(text))
+    return ConversationCompaction(
+        snapshot.summary, tuple(e.entry_id for e in snapshot.entries[:covered]), ConversationSummary(text)
+    )
 
 
 @pytest.mark.asyncio
@@ -265,10 +286,12 @@ async def test_cancellation_waits_for_write_and_memory_sync(database, monkeypatc
     context = await contexts.create("i", user_id="u")
     started, proceed = threading.Event(), threading.Event()
     original = database.update_user_description
+
     def write(*args):
         started.set()
         assert proceed.wait(5)
         return original(*args)
+
     monkeypatch.setattr(database, "update_user_description", write)
     task = asyncio.create_task(context.user.update_profile(UserProfile("完成写入")))
     assert await asyncio.to_thread(started.wait, 5)
@@ -290,17 +313,21 @@ def test_database_profile_update_reports_missing_user(database):
 @pytest.mark.asyncio
 async def test_cancelled_creation_waits_and_closes_unclaimed_context(database, monkeypatch):
     from src.agent.context import InteractionContext
+
     started, proceed = threading.Event(), threading.Event()
     original = database.get_user_description
     closed = []
     close = InteractionContext.close
+
     async def record_close(self):
         closed.append(self)
         await close(self)
+
     def load(*args):
         started.set()
         assert proceed.wait(5)
         return original(*args)
+
     monkeypatch.setattr(database, "get_user_description", load)
     monkeypatch.setattr(InteractionContext, "close", record_close)
     task = asyncio.create_task(factory(database).create("i", user_id="u"))
@@ -344,15 +371,35 @@ def test_recall_duplicate_batch_is_rejected_without_partial_append():
 @pytest.mark.asyncio
 async def test_real_stage_owns_and_closes_loaded_context(database):
     import src.domain.agent as d
-    from src.agent import Agent
-    from src.stage import ChatStage
     from src.adapter.websocket import WebSocketAdapter
-    from src.agent.handlers.stimulus.router import StimulusRouter
+    from src.agent import Agent
+    from src.agent.handlers.action.router import ActionRouter
     from src.agent.handlers.stimulus.interaction import InteractionEndingHandler
-    agent = Agent(character_id="luotianyi", stimulus_router=StimulusRouter([
-        (d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())]))
-    stage = await ChatStage.create(user_id="u", character_id="luotianyi", agent=agent,
-        adapter=WebSocketAdapter(), context_factory=factory(database))
+    from src.agent.handlers.stimulus.router import StimulusRouter
+    from src.stage import ChatStage
+
+    class Maintenance:
+        async def realize(self, action, execution_context, outputs):
+            return d.ActionResult(
+                action_id=action.action_id,
+                status=d.ActionExecutionStatus.COMPLETED,
+                error_code=None,
+                irreversible_effect_committed=False,
+                effect_ref=None,
+            )
+
+    agent = Agent(
+        character_id="luotianyi",
+        stimulus_router=StimulusRouter([(d.StimulusKind.INTERACTION_ENDING, InteractionEndingHandler())]),
+        action_router=ActionRouter([(d.ActionKind.COGNITIVE_MAINTENANCE, Maintenance())]),
+    )
+    stage = await ChatStage.create(
+        user_id="u",
+        character_id="luotianyi",
+        agent=agent,
+        adapter=WebSocketAdapter(),
+        context_factory=factory(database),
+    )
     context = stage.context
     assert context.identity.interaction_id == stage.interaction_id
     assert context.user.read().profile == UserProfile("画像")
