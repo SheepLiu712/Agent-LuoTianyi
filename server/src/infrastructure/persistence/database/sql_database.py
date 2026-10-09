@@ -95,11 +95,42 @@ class ConversationContext(Base):
     character_id = Column(String, nullable=False, default="luotianyi", server_default="luotianyi")
     context_summary = Column(Text, default="")
     context_memory_count = Column(Integer, default=0)
+    maintenance_entry_id = Column(String, nullable=True)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     user = relationship("User", back_populates="conversation_contexts")
 
     __table_args__ = (UniqueConstraint("user_id", "character_id", name="uq_conversation_context_user_character"),)
+
+
+class CognitiveMaintenanceBatch(Base):
+    __tablename__ = "cognitive_maintenance_batches"
+
+    maintenance_id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.uuid"), nullable=False)
+    character_id = Column(String, nullable=False)
+    previous_progress_key = Column(String, nullable=False)
+    previous_entry_id = Column(String, nullable=True)
+    target_entry_id = Column(String, nullable=False)
+    covered_entry_ids = Column(Text, nullable=False)
+    maintained_entry_ids = Column(Text, nullable=False)
+    candidates = Column(Text, nullable=False)
+    proposed_profile = Column(Text, nullable=True)
+    input_digest = Column(String, nullable=False)
+    compaction_previous_summary = Column(Text, nullable=True)
+    compaction_covered_entry_ids = Column(Text, nullable=False, default="[]")
+    compaction_summary = Column(Text, nullable=True)
+    compaction_expected_count = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "character_id",
+            "previous_progress_key",
+            name="uq_cognitive_maintenance_batch_predecessor",
+        ),
+    )
 
 
 # ————————————
@@ -193,6 +224,8 @@ class MemoryChunkRecord(Base):
     meta_data = Column(Text, nullable=True)
 
     memory = relationship("AgentMemoryRecord", back_populates="chunks")
+
+    __table_args__ = (UniqueConstraint("embedding_id", name="uq_memory_chunk_embedding_id"),)
 
 
 class MemoryEdgeRecord(Base):
@@ -425,10 +458,34 @@ def _migrate_sqlite_schema(db_engine: Engine) -> None:
         _migrate_notification_schema(connection)
         _migrate_dynamic_schema(connection)
         _migrate_invite_schema(connection)
+        _migrate_memory_chunk_schema(connection)
 
 
 def _table_columns(connection, table_name: str) -> set[str]:
     return {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def _migrate_memory_chunk_schema(connection) -> None:
+    """Add the partial unique embedding index without rewriting historic chunks."""
+    columns = _table_columns(connection, "memory_chunks")
+    if not columns or "embedding_id" not in columns:
+        return
+    duplicates = connection.exec_driver_sql("""
+        SELECT embedding_id, COUNT(*) AS occurrences
+        FROM memory_chunks
+        WHERE embedding_id IS NOT NULL
+        GROUP BY embedding_id
+        HAVING COUNT(*) > 1
+        LIMIT 10
+        """).fetchall()
+    if duplicates:
+        identities = ", ".join(f"{row[0]!r} ({row[1]})" for row in duplicates)
+        raise RuntimeError(f"memory_chunks contains duplicate non-null embedding_id values: {identities}")
+    connection.exec_driver_sql("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_memory_chunk_embedding_id
+        ON memory_chunks(embedding_id)
+        WHERE embedding_id IS NOT NULL
+        """)
 
 
 def _migrate_conversation_schema(connection) -> None:
@@ -439,6 +496,9 @@ def _migrate_conversation_schema(connection) -> None:
     connection.exec_driver_sql(
         "CREATE INDEX IF NOT EXISTS ix_conversations_character_id ON conversations (character_id)"
     )
+    context_columns = _table_columns(connection, "conversation_contexts")
+    if context_columns and "maintenance_entry_id" not in context_columns:
+        connection.exec_driver_sql("ALTER TABLE conversation_contexts ADD COLUMN maintenance_entry_id VARCHAR")
 
 
 def _migrate_event_schema(connection) -> None:
