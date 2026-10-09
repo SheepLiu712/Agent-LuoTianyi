@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from sqlalchemy import text
@@ -1133,6 +1133,163 @@ class ConversationService:
             "context_count": context_count,
             "version": f"{context_count}:{len(conversations)}:{last_uuid}",
         }
+
+    def get_call_conversation_seed_state(
+        self,
+        user_id: str,
+        *,
+        character_id: str,
+        requested_at: datetime,
+    ) -> Dict[str, Any]:
+        """读取通话开始时的只读对话种子，不接触 Redis 或持久化状态。"""
+        if not isinstance(requested_at, datetime) or (
+            requested_at.tzinfo is not None or requested_at.utcoffset() is not None
+        ):
+            raise ValueError("requested_at must be a naive server-local datetime")
+
+        empty_state = {
+            "summary": "",
+            "conversations": [],
+            "context_count": 0,
+            "version": "0:0:",
+        }
+        lower_bound = requested_at - timedelta(minutes=3)
+        db = self._new_session()
+        try:
+            rows = (
+                db.execute(
+                    text("""
+                    WITH scoped_conversations AS (
+                        SELECT uuid, timestamp, source, content, type, meta_data
+                        FROM conversations
+                        WHERE user_id = :user_id AND character_id = :character_id
+                    ),
+                    metadata AS (
+                        SELECT
+                            (SELECT context_summary FROM conversation_contexts
+                             WHERE user_id = :user_id AND character_id = :character_id) AS context_summary,
+                            (SELECT context_memory_count FROM conversation_contexts
+                             WHERE user_id = :user_id AND character_id = :character_id) AS context_memory_count,
+                            (SELECT COUNT(*) FROM scoped_conversations) AS total_count,
+                            (SELECT COUNT(*) FROM scoped_conversations WHERE timestamp > :requested_at) AS future_count,
+                            (SELECT MAX(timestamp) FROM scoped_conversations WHERE timestamp <= :requested_at)
+                                AS latest_timestamp,
+                            (SELECT COUNT(*) FROM scoped_conversations WHERE timestamp <= :requested_at)
+                                AS eligible_count
+                    ),
+                    ranked_eligible AS (
+                        SELECT
+                            uuid,
+                            timestamp,
+                            source,
+                            content,
+                            type,
+                            meta_data,
+                            ROW_NUMBER() OVER (ORDER BY timestamp DESC, uuid DESC) AS recency_rank
+                        FROM scoped_conversations
+                        WHERE timestamp <= :requested_at
+                    )
+                    SELECT
+                        metadata.context_summary,
+                        metadata.context_memory_count,
+                        metadata.total_count,
+                        metadata.future_count,
+                        metadata.latest_timestamp,
+                        metadata.eligible_count,
+                        ranked_eligible.uuid,
+                        ranked_eligible.timestamp,
+                        ranked_eligible.source,
+                        ranked_eligible.content,
+                        ranked_eligible.type,
+                        ranked_eligible.meta_data,
+                        ranked_eligible.recency_rank
+                    FROM metadata
+                    LEFT JOIN ranked_eligible ON ranked_eligible.recency_rank <= 30
+                    ORDER BY ranked_eligible.timestamp ASC, ranked_eligible.uuid ASC
+                    """),
+                    {
+                        "user_id": user_id,
+                        "character_id": character_id,
+                        "requested_at": requested_at.isoformat(sep=" ", timespec="microseconds"),
+                    },
+                )
+                .mappings()
+                .all()
+            )
+        finally:
+            db.close()
+
+        metadata = rows[0]
+        raw_latest_timestamp = metadata["latest_timestamp"]
+        if raw_latest_timestamp is None:
+            return empty_state
+        latest_timestamp = self._as_naive_datetime(raw_latest_timestamp)
+        if latest_timestamp is None:
+            return empty_state
+        if not lower_bound <= latest_timestamp <= requested_at:
+            return empty_state
+
+        summary = metadata["context_summary"] or ""
+        context_count = metadata["context_memory_count"]
+        total_count = metadata["total_count"]
+        if summary:
+            # The schema has no summary coverage boundary. It is safe only when the
+            # complete owner history predates the request and the retained suffix
+            # count can still describe a continuous suffix of that history.
+            if (
+                metadata["future_count"]
+                or not isinstance(context_count, int)
+                or context_count < 0
+                or context_count > total_count
+            ):
+                return empty_state
+            context_count = min(30, context_count)
+            conversation_limit = context_count
+        else:
+            context_count = min(30, metadata["eligible_count"])
+            conversation_limit = context_count
+
+        conversations = []
+        for row in rows:
+            if row["uuid"] is None or row["recency_rank"] > conversation_limit:
+                continue
+            timestamp = self._as_naive_datetime(row["timestamp"])
+            if timestamp is None:
+                return empty_state
+            conversations.append(
+                {
+                    "uuid": row["uuid"],
+                    "timestamp": timestamp.isoformat(sep=" ", timespec="microseconds"),
+                    "source": row["source"],
+                    "content": row["content"],
+                    "type": row["type"],
+                    "meta_data": json.loads(row["meta_data"]) if row["meta_data"] else None,
+                }
+            )
+        context_count = len(conversations)
+        last_uuid = conversations[-1]["uuid"] if conversations else ""
+        return {
+            "summary": summary,
+            "conversations": conversations,
+            "context_count": context_count,
+            "version": f"{context_count}:{len(conversations)}:{last_uuid}",
+        }
+
+    @staticmethod
+    def _as_naive_datetime(value: Any) -> datetime | None:
+        """Accept only real naive datetime values or ISO datetime strings from SQL."""
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value)
+            except ValueError:
+                return None
+        else:
+            return None
+        if parsed.tzinfo is not None or parsed.utcoffset() is not None:
+            return None
+        return parsed
 
     def get_history_from_db(
         self,
