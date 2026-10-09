@@ -1,5 +1,6 @@
 """正式对话窗口的存储边界。"""
 
+from copy import deepcopy
 from typing import TYPE_CHECKING, Protocol
 
 from src.infrastructure.persistence.cognitive_maintenance import (
@@ -131,9 +132,9 @@ class EphemeralCallConversationStore:
     """只保存一次呼叫工作窗口的内存 Store，不持有数据库引用。"""
 
     def __init__(self, seed: ConversationSnapshot | None = None) -> None:
-        seed = seed or ConversationSnapshot()
-        entries = tuple(sorted(seed.entries, key=lambda entry: (entry.timestamp, entry.entry_id)))
-        self._snapshot = ConversationSnapshot(seed.summary, entries)
+        source = deepcopy(seed or ConversationSnapshot())
+        entries = tuple(sorted(source.entries, key=lambda entry: (entry.timestamp, entry.entry_id)))
+        self._snapshot = ConversationSnapshot(source.summary, entries)
 
     def load(self) -> tuple[ConversationSnapshot, int]:
         return self._snapshot, len(self._snapshot.entries)
