@@ -4,10 +4,15 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
+from uuid import UUID
+
+from src.domain.call.contracts import CallAnswerDecision, CallSpeechDelivery
+from src.domain.call.types import CallEndReason
 
 from ._realization_contract import RealizationContractErrorCode as _Code
 from ._realization_contract import _Value
 from .handle_input import PreprocessedInput
+from .maintenance import MaintenanceReason
 from .realization_enums import ActionKind, OutputDelivery, Visibility
 from .stimulus_values import MediaRef
 
@@ -78,6 +83,7 @@ class Say(Action):
     expression: ChangeExpression | None
     delivery: OutputDelivery
     message_id: str | None = None
+    call_delivery: CallSpeechDelivery = CallSpeechDelivery()
 
     def __post_init__(self):
         _Value.__post_init__(self)
@@ -156,14 +162,36 @@ class RequestSongLearning(Action):
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class CognitiveMaintenance(Action):
+    """在压缩点或交互结束时执行统一认知维护。"""
+
+    kind: ClassVar[ActionKind] = ActionKind.COGNITIVE_MAINTENANCE
+    reason: MaintenanceReason
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EndCall(Action):
+    """Request that CallStage ends the active call after required playback settlement."""
+
+    kind: ClassVar[ActionKind] = ActionKind.END_CALL
+    reason: CallEndReason
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AnswerCall(Action):
+    """Accept or decline a specific call answer request."""
+
+    kind: ClassVar[ActionKind] = ActionKind.ANSWER_CALL
+    call_id: UUID
+    decision: CallAnswerDecision
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Reflection(Action):
-    """完成一次 InteractionDeadline 后的认知维护行动。"""
+    """旧计划兼容类型；生产路由不再注册。"""
 
     kind: ClassVar[ActionKind] = ActionKind.REFLECTION
     prepared_inputs: tuple[PreprocessedInput, ...]
-
-    def __post_init__(self):
-        _Value.__post_init__(self)
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

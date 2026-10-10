@@ -108,8 +108,8 @@ async def test_batch_reply_emits_ordered_actions_persists_and_consumes():
     assert plan.actions[1].content == "唱了《歌》"
     assert plan.source_stimulus_ids == ("m2", "m1")
     assert reflection.plan_ordinal == 2
-    assert isinstance(reflection.actions[0], d.Reflection)
-    assert reflection.actions[0].prepared_inputs == deadline_request().prepared_inputs
+    assert isinstance(reflection.actions[0], d.CognitiveMaintenance)
+    assert reflection.actions[0].reason is d.MaintenanceReason.COMPACTION_THRESHOLD
     assert [entry.source for entry in ctx.conversation.entries] == ["agent", "agent"]
     assert isinstance(ctx.conversation.entries[0].content, TextContent)
     assert ctx.conversation.entries[0].content.text == "你好呀"
@@ -148,7 +148,7 @@ async def test_empty_batch_consumes_without_plan_or_persistence():
     sink = Sink()
     report = await agent(composer).handle_stimulus(replace(request(), prepared_inputs=()), sink, context=ctx)
     assert len(sink.values) == 1
-    assert isinstance(sink.values[0].actions[0], d.Reflection)
+    assert isinstance(sink.values[0].actions[0], d.CognitiveMaintenance)
     assert ctx.conversation.entries == []
     assert report.consumed_pending_stimulus_ids == ("m2", "m1")
     assert composer.calls == []

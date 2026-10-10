@@ -73,6 +73,8 @@ class AsyncTTS:
                         raise TTSStreamCancelled()
                 chunk = pending.result()
                 pending = None
+                if cancellation.is_cancelled:
+                    raise TTSStreamCancelled()
                 if chunk is _END:
                     return
                 if not isinstance(chunk, bytes):
