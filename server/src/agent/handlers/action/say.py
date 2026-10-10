@@ -111,7 +111,11 @@ class SayHandler:
                         )
                     )
                     return self._result(action, code)
+                if execution_context.cancellation.is_cancelled:
+                    return self._result(action, d.ExecutionErrorCode.CANCELLED)
                 await outputs.emit(AudioChunkDraft(delivery=action.delivery, data=chunk.data, framing=chunk.framing))
+        if execution_context.cancellation.is_cancelled:
+            return self._result(action, d.ExecutionErrorCode.CANCELLED)
         await outputs.emit(
             MessageEndDraft(delivery=action.delivery, status=d.MessageEndStatus.COMPLETED, error_code=None)
         )
