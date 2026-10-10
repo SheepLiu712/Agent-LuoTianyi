@@ -4,13 +4,12 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from ._lifecycle import _complete, _Lifecycle
-from ._storage import _Storage
+from .conversation_store import ConversationStore, DatabaseConversationStore
 from .models import (
     ContextIdentity,
     ConversationCompaction,
     ConversationEntry,
     ConversationSnapshot,
-    ConversationSummary,
 )
 
 if TYPE_CHECKING:
@@ -24,13 +23,18 @@ class ConversationContext:
         self,
         *,
         identity: ContextIdentity,
-        database: "ConversationService",
+        database: "ConversationService | None" = None,
+        store: ConversationStore | None = None,
         snapshot: ConversationSnapshot | None = None,
     ) -> None:
-        """绑定 identity、database；省略 snapshot 时同步加载数据库窗口。"""
+        """绑定 identity 和 Store；默认使用数据库 Store。"""
         self._state = _Lifecycle()
-        self._storage = _Storage(database, identity)
-        self._snapshot = snapshot if snapshot is not None else self._storage.load_conversation()[0]
+        if store is None:
+            if database is None:
+                raise TypeError("database 或 store 必须提供")
+            store = DatabaseConversationStore(database, identity)
+        self._store = store
+        self._snapshot = snapshot if snapshot is not None else self._store.load()[0]
 
     def read(self) -> ConversationSnapshot:
         """返回旧总结和按时间排列的近期对话。"""
@@ -38,11 +42,11 @@ class ConversationContext:
         return self._snapshot
 
     async def append(self, entries: tuple[ConversationEntry, ...]) -> None:
-        """持久化 entries 后刷新窗口；与同一用户、角色的压缩操作顺序执行。"""
+        """追加 entries 后刷新窗口；与同一用户、角色的压缩操作顺序执行。"""
         if not isinstance(entries, tuple) or any(not isinstance(e, ConversationEntry) for e in entries):
             raise TypeError("entries 应为 ConversationEntry 元组")
         async with self._state.lock:
-            self._require_storage()
+            self._require_store()
             await _complete(self._append(entries))
 
     async def compact(self, compaction: ConversationCompaction) -> None:
@@ -54,27 +58,24 @@ class ConversationContext:
         if not isinstance(compaction, ConversationCompaction):
             raise TypeError("compaction 应为 ConversationCompaction")
         async with self._state.lock:
-            storage = self._require_storage()
-            snapshot, count = await _complete(asyncio.to_thread(storage.load_conversation))
-            covered = compaction.covered_entry_ids
-            prefix = tuple(entry.entry_id for entry in snapshot.entries[: len(covered)])
-            if snapshot.summary != compaction.previous_summary or prefix != covered:
-                raise ValueError("压缩依据与当前对话上下文不匹配")
-            keep = count - len(covered)
-            if keep < 0:
-                raise ValueError("被覆盖的对话数超过当前窗口条数")
-            await _complete(self._save_summary(compaction.summary, keep, count))
+            self._require_store()
+            await _complete(self._compact(compaction))
 
-    def _require_storage(self) -> _Storage:
+    def _require_store(self) -> ConversationStore:
         self._state.check()
-        self._storage.require_user()
-        return self._storage
+        require_user = getattr(self._store, "require_user", None)
+        if require_user is not None:
+            require_user()
+        return self._store
+
+    def _close_store(self) -> None:
+        self._store.close()
 
     async def _append(self, entries: tuple[ConversationEntry, ...]) -> None:
         if entries:
-            await asyncio.to_thread(self._storage.append, entries)
-            self._snapshot, _ = await asyncio.to_thread(self._storage.load_conversation)
+            await asyncio.to_thread(self._store.append, entries)
+            self._snapshot, _ = await asyncio.to_thread(self._store.load)
 
-    async def _save_summary(self, summary: ConversationSummary, keep: int, count: int) -> None:
-        await asyncio.to_thread(self._storage.compact, summary, keep, count)
-        self._snapshot, _ = await asyncio.to_thread(self._storage.load_conversation)
+    async def _compact(self, compaction: ConversationCompaction) -> None:
+        await asyncio.to_thread(self._store.compact, compaction)
+        self._snapshot, _ = await asyncio.to_thread(self._store.load)
