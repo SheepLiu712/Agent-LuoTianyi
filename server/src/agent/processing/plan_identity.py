@@ -5,6 +5,7 @@ from dataclasses import fields, is_dataclass
 from datetime import date
 from enum import Enum
 from hashlib import sha256
+from uuid import UUID
 
 import src.domain.agent as d
 import src.domain.call as c
@@ -37,6 +38,7 @@ _types = {
         c.CallSpeechDelivery,
         c.CallAudioRoute,
         c.CallAnswerDecision,
+        c.CallEndReason,
     )
 }
 
@@ -60,6 +62,8 @@ def _encode(value):
         return [type(value).__name__, payload]
     if type(value) is date:
         return ["date", value.isoformat()]
+    if type(value) is UUID:
+        return ["UUID", str(value)]
     if type(value) is tuple:
         return ["tuple", [_encode(item) for item in value]]
     if value is None or type(value) in (str, int, bool):
@@ -75,6 +79,8 @@ def _decode(value):
     name, payload = value
     if name == "date":
         return date.fromisoformat(payload)
+    if name == "UUID":
+        return UUID(payload)
     if name == "tuple":
         return tuple(_decode(item) for item in payload)
     cls = _types[name]
