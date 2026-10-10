@@ -7,7 +7,7 @@
 
 ## 背景
 
-实时通话需要独立 `call_ws`、JSON 控制消息与二进制音频帧。Web 只处理鉴权、连接和原始帧收发；`adapter.websocket` 解释 wire 协议并持有 `WireAudioFrame`。本 ADR 记录阶段 A 的候选协议，供 Python 与 TypeScript 纯 codec 依据同一夹具实现；状态仍为 Proposed，不表示已经完成人工验收或生产接线。
+实时通话需要独立 `call_ws`、JSON 控制消息与二进制音频帧。Web 只处理鉴权、连接和原始帧收发；`adapter.websocket` 解释 wire 协议并持有 `WireAudioFrame`。本 ADR 记录阶段 A 的候选协议，供 Python 与 TypeScript 纯 codec / parser 依据同一夹具实现；状态仍为 Proposed，不表示已经完成人工验收或生产接线。
 
 ## 阶段 A 候选决策
 
@@ -73,15 +73,35 @@ decode(bytes | Uint8Array) -> WireAudioFrame
 
 `contracts/call_v1/fixtures/audio_frames.json` 是字段常量、有效 golden 与错误映射的唯一共享来源；实现测试不得复制一套会漂移的 fixture 常量。
 
+### JSON 控制消息
+
+- 控制帧是最大 16384 UTF-8 字节的 JSON 文本对象。UTF-8 必须严格解码；非法字节序列归一化为 `BAD_JSON`，不得替换为 U+FFFD。顶层及嵌套对象都拒绝重复字段和未知字段。
+- `contracts/call_v1/control.schema.json` 是 Draft 2020-12 结构契约；`contracts/call_v1/fixtures/control_messages.json` 是原始文本、方向、传输、稳定错误和路径的共享事实来源。JSON Schema 不能检测重复字段、整数词法、原始 UTF-8 字节数或 lone surrogate，这些由后续双端 raw-text parser 在 schema 校验前后补足。
+- 普通会话业务消息与二进制音频共享每方向一条 `1..UINT32_MAX` 序列。会话首个有序帧声明为 1，但这是 Adapter 会话状态规则，不是纯 parser 限制；纯 parser 必须接纳范围内任意 `seq`，包括上界。
+- `call.switch_prepare` / `call.switch_ready` 走 `chat_ws` 且不占通话序号；`call.resume` / `call.resumed`、`ack`、`nack` 是 `call_ws` 握手或反馈，也不占序号、不进入重放缓冲。
+- `call.resume` 携带客户端已连续结算的服务端游标；`call.resumed` 同时回传服务端已连续结算的客户端游标和客户端声明的服务端游标。游标与 `ack_seq` 可为 0，`missing_seq` 从 1 开始。
+- `playback.stop` 是服务端有序取消消息；`retire_server_seq.from <= through < playback.stop.seq`。`playback.stopped` 只回传 `response_id` 与 `stop_seq`，不重复 `stream_id`。
+- `connected_at_ms` 与 `active_duration_ms` 使用 `0..9007199254740991`，避免把 Unix epoch 毫秒错误限制为 UINT32，同时保证 Python 与 JavaScript 精确互操作。
+- 所有整数只接受十进制规范词法 `0|[1-9][0-9]*`；拒绝布尔值、负数、`-0`、小数、指数、字符串及 NaN/Infinity。Schema 的 `integer` 不能区分 `1` 与 `1.0`，因此词法限制仍由 raw-text parser 承担。
+- 字符串按 Unicode 标量值处理，拒绝 NUL、U+FFFD 与 lone surrogate。非法 UTF-8 或不能形成合法 JSON 字符串的 surrogate 归 `BAD_JSON`；成功解码后字段内出现 NUL 或 U+FFFD 归 `INVALID_FIELD_VALUE`。
+
+控制消息稳定错误码为 `BAD_JSON`、`CONTROL_TOO_LARGE`、`TOP_LEVEL_NOT_OBJECT`、`DUPLICATE_FIELD`、`MISSING_FIELD`、`UNKNOWN_FIELD`、`UNKNOWN_TYPE`、`UNSUPPORTED_PROTOCOL`、`INVALID_TRANSPORT`、`INVALID_DIRECTION`、`INVALID_FIELD_TYPE`、`FIELD_OUT_OF_RANGE`、`INVALID_FIELD_VALUE`、`INVALID_ENUM`。若同一输入有多个问题，按 UTF-8/尺寸 → JSON 语法/重复字段 → 顶层对象 → protocol → type → transport/direction → required → unknown → field type → range → enum → cross-field 的顺序报告首个错误。字段路径使用 JSONPath 风格（如 `$.audio.sample_rate`），消息级错误使用 `$`。
+
+JSON 编码器输出无空白 UTF-8，字段顺序按共享 fixture 的 `field_order` 固定，且不得输出 NUL、U+FFFD、lone surrogate、NaN 或 Infinity。双方不依赖对象运行时的默认枚举顺序；跨端 decoder 比较结构值，golden 编码比较各自按该顺序产生的规范文本。
+
+控制可靠性机制只借鉴官方文档中已经公开的机制事实：Socket.IO connection-state recovery 保存会话与 offset 并在有限窗口内重放遗漏 packet；ASP.NET Core 9 SignalR stateful reconnect 需要两端启用，并通过 buffer、ACK 与 replay 恢复消息。`call.v1` 的字段、序号和取消范围均为本项目自研契约，不宣称是上述框架的行业标准实现。
+
+- Socket.IO: <https://socket.io/docs/v4/connection-state-recovery>
+- SignalR: <https://learn.microsoft.com/aspnet/core/signalr/configuration#configure-stateful-reconnect>
+
 ## 尚未冻结
 
-- JSON 控制消息的完整 schema、必填字段和 parser/endpoint 均不在阶段 A 实现。
-- 控制消息如何占用统一 `seq`、ACK/NACK、resume、重放缓冲与取消范围仍待审；F2 spec 中的 envelope 仅是候选草案。
-- `call.switch_prepare` 的聊天方向序号与后续 `call_ws` 双向序号边界尚待非作者审核，不能提前冻结 ACK/NACK 或切换 envelope。
+- JSON 控制 schema、统一 `seq`、ACK/NACK、resume 与取消范围已形成阶段 A 工程候选，但 ADR 仍为 Proposed，须经非作者开发者审核后才能作为生产实现依据。
+- Python 与 TypeScript 无状态 parser/encoder 已实现；endpoint、重放缓冲、会话状态校验和 WebSocket close code 未实现，纯 parser 不能冒充这些生产能力。
 - 连接方向与流登记违规对应的稳定 Adapter 错误、WebSocket close code、版本协商、供应商接入和 Android 音频实现另行决定。
 
 ## 后果
 
-- 阶段 A 可以交付共享 fixture 和两端纯 codec 的精确任务规范，但不得宣称 `call_ws` 已具备生产兼容性。
-- 在本 ADR 经非作者开发者审核并改为 Accepted 前，不实现 parser、endpoint、ACK/NACK、resume 或生产发送链路。
+- 阶段 A 可以交付共享 schema/fixture 和两端纯 codec/parser 的精确任务规范，但不得宣称 `call_ws` 已具备生产兼容性。
+- 在本 ADR 经非作者开发者审核并改为 Accepted 前，不把候选 parser 接入生产 endpoint，也不实现生产 ACK/NACK、resume 或发送链路。
 - 后续若修改任一 header 常量或错误语义，必须先修改 ADR 与共享 fixture，再同步两端实现和互操作测试。
