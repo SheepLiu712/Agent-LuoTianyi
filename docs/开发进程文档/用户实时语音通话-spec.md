@@ -603,7 +603,6 @@ class CallRecallDecision:
 {
   "protocol": "call.v1",
   "type": "call.switch_prepare",
-  "seq": 37,
   "client_request_id": "018f4ca2-4c9d-7ad8-8f2f-941f73d6d82a",
   "character_id": "luotianyi"
 }
@@ -649,11 +648,13 @@ class CallRecallDecision:
   "protocol": "call.v1",
   "type": "call.resumed",
   "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
-  "last_contiguous_client_seq": 96
+  "character_id": "luotianyi",
+  "last_contiguous_client_seq": 96,
+  "last_contiguous_server_seq": 60
 }
 ```
 
-恢复授权依赖新连接的正常鉴权，以及同一 `call_id`、同一用户、同一角色三项同时匹配。第一版不使用恢复令牌。`call.resume` 与 `call.resumed` 是重新绑定传输的握手，不占用通话会话任一方向的 `seq`。客户端使用 `last_contiguous_server_seq` 声明已经连续结算的服务端帧；服务端使用 `last_contiguous_client_seq` 返回已经连续结算的客户端帧。握手完成后，双方先重放对端游标之后仍需交付的原序号帧，再发送新帧。
+恢复授权依赖新连接的正常鉴权，以及同一 `call_id`、同一用户、同一角色三项同时匹配。第一版不使用恢复令牌。`call.resume` 与 `call.resumed` 是重新绑定传输的握手，不占用通话会话任一方向的 `seq`。客户端使用 `last_contiguous_server_seq` 声明已经连续结算的服务端帧；服务端在 `call.resumed` 中回传已经连续结算的客户端帧游标，并回显其接纳的服务端游标。握手完成后，双方先重放对端游标之后仍需交付的原序号帧，再发送新帧。
 
 #### 4. 服务端音频流开始
 
@@ -662,6 +663,7 @@ class CallRecallDecision:
   "protocol": "call.v1",
   "type": "audio.stream_started",
   "seq": 43,
+  "call_id": "606ec5e6-a330-4e6c-b07a-8432a5716c8f",
   "audio_route": "CALL",
   "stream_id": 12,
   "response_id": "resp_01k",
@@ -733,9 +735,13 @@ CallStage 只接纳已经登记、已经发送 final 且未取消的流。未知
 
 `playback.stop` 是允许越过更早缺口立即处理的取消控制。客户端确认范围内已经收到的帧均属于对应 `response_id` 和 `stream_id`；范围内尚未收到的帧以已鉴权服务端的取消声明为准。验证通过后，客户端立即建立 tombstone、停止播放、清空队列，并把范围内尚未收到的序号标记为已结算；随后把停止帧本身标记为已收到，重新计算统一连续游标并发送普通 ACK。若范围非法、与已经收到的其他回复或通话控制冲突，或者包含停止帧及其后序号，则视为协议冲突并终止连接。更早且不在取消范围内的缺口仍须重传，但不阻塞停止动作。
 
-客户端另行回传包含 `response_id` 与 `stop_seq` 的 `playback.stopped` 作为正常的、有 `seq` 的会话业务控制帧；它确认停止动作已经执行，但不代替统一 ACK 游标。服务端发出停止帧后，立即把取消范围内的音频 payload 从重传缓冲替换为轻量的范围结算记录，只保留 `playback.stop` 及其范围元数据，直到普通 ACK 覆盖停止帧或呼叫结束。断线恢复或收到针对已取消范围的 NACK 时，只重放对应的 `playback.stop`，不得重放已取消音频。停止确认耗时纳入指标；取消 tombstone 的生命周期至少覆盖整个呼叫会话。
+客户端另行回传包含 `call_id`、`response_id` 与 `stop_seq` 的 `playback.stopped` 作为正常的、有 `seq` 的会话业务控制帧；它不重复 `stream_id`，确认停止动作已经执行，但不代替统一 ACK 游标。服务端发出停止帧后，立即把取消范围内的音频 payload 从重传缓冲替换为轻量的范围结算记录，只保留 `playback.stop` 及其范围元数据，直到普通 ACK 覆盖停止帧或呼叫结束。断线恢复或收到针对已取消范围的 NACK 时，只重放对应的 `playback.stop`，不得重放已取消音频。停止确认耗时纳入指标；取消 tombstone 的生命周期至少覆盖整个呼叫会话。
 
-#### 8. 结束事件
+#### 8. 共享控制契约
+
+控制消息的完整字段、方向、传输、整数范围、稳定 parser 错误与规范编码顺序见 [`contracts/call_v1/control.schema.json`](../../contracts/call_v1/control.schema.json) 和 [`contracts/call_v1/fixtures/control_messages.json`](../../contracts/call_v1/fixtures/control_messages.json)。该契约仍随 ADR-0001 保持 Proposed；纯 parser 不承担序号单调性、首帧、重放或 Stage 状态校验。
+
+#### 9. 结束事件
 
 ```json
 {

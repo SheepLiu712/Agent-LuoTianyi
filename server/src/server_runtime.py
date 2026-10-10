@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Final
 
 from src.adapter.websocket import WebSocketAdapter
+from src.adapter.websocket.call_v1 import CallTransportHub, parse_call_transport_enabled
 from src.adapter.websocket.client_model_executor import ClientLLMExecutor
 from src.agent_runtime import AgentRuntime
 from src.agent_runtime.agent_runtime import clear_agent_runtime
@@ -44,6 +45,8 @@ class ServerRuntime:
     owns_observability: bool = field(default=True)
     chat_adapter: WebSocketAdapter = field(default_factory=WebSocketAdapter)
     stage_manager: StageManager | None = None
+    call_transport_hub: CallTransportHub | None = None
+    _call_transport_requested: bool = field(default=False, repr=False)
     default_world_id: str = DEFAULT_WORLD_ID
     world_stage_config: dict = field(default_factory=dict, repr=False)
     _world_stages: dict[tuple[str, str], WorldStage] = field(default_factory=dict, init=False, repr=False)
@@ -127,6 +130,8 @@ class ServerRuntime:
                 ),
                 default_world_id=str(config.get("world", {}).get("world_id", DEFAULT_WORLD_ID)),
                 world_stage_config=config.get("world_stage", {}),
+                call_transport_hub=CallTransportHub(),
+                _call_transport_requested=parse_call_transport_enabled(config),
             )
 
             event_store = database_manager.event_store
@@ -155,6 +160,11 @@ class ServerRuntime:
                 owns_observability=owns_observability,
             )
             raise
+
+    @property
+    def call_transport_available(self) -> bool:
+        """Calls stay unavailable until later CLs bind lifecycle, ledger and provider dependencies."""
+        return False
 
     def _wire_dependencies(self) -> None:
         """把顶层模块依赖分发给各运行时模块。"""
