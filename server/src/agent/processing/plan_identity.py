@@ -7,6 +7,7 @@ from enum import Enum
 from hashlib import sha256
 
 import src.domain.agent as d
+import src.domain.call as c
 
 _types = {
     cls.__name__: cls
@@ -22,6 +23,8 @@ _types = {
         d.RequestSongLearning,
         d.CognitiveMaintenance,
         d.Reflection,
+        d.EndCall,
+        d.AnswerCall,
         d.MaintenanceReason,
         d.PreprocessedInput,
         d.MediaRef,
@@ -31,6 +34,9 @@ _types = {
         d.DynamicReplyTarget,
         d.OutputDelivery,
         d.Visibility,
+        c.CallSpeechDelivery,
+        c.CallAudioRoute,
+        c.CallAnswerDecision,
     )
 }
 

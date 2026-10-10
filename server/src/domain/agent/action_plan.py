@@ -4,6 +4,10 @@ from abc import abstractmethod
 from dataclasses import dataclass
 from datetime import date
 from typing import ClassVar
+from uuid import UUID
+
+from src.domain.call.contracts import CallAnswerDecision, CallSpeechDelivery
+from src.domain.call.types import CallEndReason
 
 from ._realization_contract import RealizationContractErrorCode as _Code
 from ._realization_contract import _Value
@@ -79,6 +83,7 @@ class Say(Action):
     expression: ChangeExpression | None
     delivery: OutputDelivery
     message_id: str | None = None
+    call_delivery: CallSpeechDelivery = CallSpeechDelivery()
 
     def __post_init__(self):
         _Value.__post_init__(self)
@@ -162,6 +167,23 @@ class CognitiveMaintenance(Action):
 
     kind: ClassVar[ActionKind] = ActionKind.COGNITIVE_MAINTENANCE
     reason: MaintenanceReason
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EndCall(Action):
+    """Request that CallStage ends the active call after required playback settlement."""
+
+    kind: ClassVar[ActionKind] = ActionKind.END_CALL
+    reason: CallEndReason
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AnswerCall(Action):
+    """Accept or decline a specific call answer request."""
+
+    kind: ClassVar[ActionKind] = ActionKind.ANSWER_CALL
+    call_id: UUID
+    decision: CallAnswerDecision
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

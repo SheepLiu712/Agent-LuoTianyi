@@ -12,7 +12,7 @@ import src.domain.agent as domain
 ENUMS = {
     "ActionKind": (
         "start_thinking say sing restore_expression write_diary publish_dynamic reply_dynamic request_song_learning "
-        "cognitive_maintenance reflection"
+        "cognitive_maintenance reflection end_call answer_call"
     ),
     "OutputDelivery": "conversation ephemeral_reaction",
     "Visibility": "global private",

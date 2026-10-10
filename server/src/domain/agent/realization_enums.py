@@ -16,6 +16,8 @@ class ActionKind(str, Enum):
     REQUEST_SONG_LEARNING = "request_song_learning"
     COGNITIVE_MAINTENANCE = "cognitive_maintenance"
     REFLECTION = "reflection"
+    END_CALL = "end_call"
+    ANSWER_CALL = "answer_call"
 
 
 class OutputDelivery(str, Enum):

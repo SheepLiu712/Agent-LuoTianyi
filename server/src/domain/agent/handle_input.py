@@ -87,6 +87,7 @@ class PreprocessedInput(metaclass=_HandleInputMeta):
     conversation_entry_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
+
         _require(_nonblank(self.stimulus_id), "stimulus_id", self._error_code)
         _require(self.text is None or isinstance(self.text, str), "text", self._error_code)
         ids = self.conversation_entry_ids
@@ -116,10 +117,12 @@ class HandleStimulusRequest(metaclass=_HandleInputMeta):
     prepared_inputs: tuple[PreprocessedInput, ...] = ()
 
     def __post_init__(self) -> None:
+        from .call_contracts import CallInteractionSnapshot
+
         code = self._error_code
         _require(_nonblank(self.request_id), "request_id", code)
         _require(isinstance(self.stimulus, Stimulus), "stimulus", code)
-        _require(isinstance(self.interaction, InteractionSnapshot), "interaction", code)
+        _require(isinstance(self.interaction, (InteractionSnapshot, CallInteractionSnapshot)), "interaction", code)
         _require(isinstance(self.cancellation, CancellationToken), "cancellation", code)
         _require(isinstance(self.purpose, HandlePurpose), "purpose", code)
         _require(
